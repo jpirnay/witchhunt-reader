@@ -879,6 +879,28 @@
       ]
     },
     {
+      "name": "NotoSansMyanmar",
+      "description": "Burmese, Mon, Shan, Karen, sans serif",
+      "format": "ttf",
+      "inDownloadAll": false,
+      "styles": [
+        "bold",
+        "regular"
+      ],
+      "files": [
+        {
+          "name": "NotoSansMyanmar/NotoSansMyanmar-Bold.ttf",
+          "size": 235856,
+          "crc32": 89567689
+        },
+        {
+          "name": "NotoSansMyanmar/NotoSansMyanmar-Regular.ttf",
+          "size": 240256,
+          "crc32": 4280863031
+        }
+      ]
+    },
+    {
       "name": "NotoSansOriya",
       "description": "Odia, sans serif",
       "format": "ttf",
@@ -1219,6 +1241,28 @@
           "name": "NotoSerifMalayalam/NotoSerifMalayalam-Regular.ttf",
           "size": 162284,
           "crc32": 756564102
+        }
+      ]
+    },
+    {
+      "name": "NotoSerifMyanmar",
+      "description": "Burmese, Mon, Shan, Karen, serif",
+      "format": "ttf",
+      "inDownloadAll": false,
+      "styles": [
+        "bold",
+        "regular"
+      ],
+      "files": [
+        {
+          "name": "NotoSerifMyanmar/NotoSerifMyanmar-Bold.ttf",
+          "size": 312344,
+          "crc32": 1625925376
+        },
+        {
+          "name": "NotoSerifMyanmar/NotoSerifMyanmar-Regular.ttf",
+          "size": 310460,
+          "crc32": 210671806
         }
       ]
     },

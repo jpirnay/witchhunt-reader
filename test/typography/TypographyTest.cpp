@@ -136,6 +136,26 @@ TEST(LanguageTag, IsHebrewScriptCoversHebrewYiddishLadinoAndAHebrScriptSubtag) {
   }
 }
 
+TEST(LanguageTag, IsMyanmarScriptCoversBurmeseItsNeighboursAndAMymrScriptSubtag) {
+  using language_tag::isMyanmarScript;
+  for (const char* tag : {"my",  "my-MM", "MY_mm",   "mya",     "bur",      "mnw",          "shn",      "ksw", "kjp",
+                          "pwo", "blk",   "kht",     "aio",     "phk",      "pll",          "rbb",      "pce", "rki",
+                          "tvn", "int",   "my-Mymr", "pi-Mymr", "kyu-Mymr", "my-u-nu-latn", "my-x-latn"}) {
+    EXPECT_TRUE(isMyanmarScript(tag)) << tag;
+  }
+  // Pali is written in many scripts, Kayah in Kayah Li; a script subtag of another script says no.
+  for (const char* tag :
+       {"pi", "pi-Thai", "kyu", "my-Latn", "shn-Latn", "ksw-Thai", "en", "th", "", "myv", "mni", "en-x-mymr"}) {
+    EXPECT_FALSE(isMyanmarScript(tag)) << tag;
+  }
+  // S'gaw Karen is Myanmar under every check, and nothing else.
+  EXPECT_TRUE(isMyanmarScript("ksw"));
+  EXPECT_EQ(language_tag::indicScriptOf("ksw"), nullptr);
+  EXPECT_FALSE(language_tag::isArabicScript("ksw"));
+  EXPECT_FALSE(language_tag::isHebrewScript("ksw"));
+  EXPECT_EQ(language_tag::cjkRegionOf("ksw"), language_tag::CjkRegion::None);
+}
+
 TEST(LanguageTag, AForeignScriptSubtagIsNotIndic) {
   using language_tag::indicScriptOf;
   for (const char* tag : {"sa-Latn", "pa-Arab", "hi-Latn", "mni-Mtei", "hi-Latn-x-deva"})
@@ -172,6 +192,20 @@ TEST(Typography, AnArabicScriptLanguageIsRtlAndShaped) {
     EXPECT_EQ(TypographyProfile::Direction::LeftToRight, TypographyProfile::forLanguage(tag).direction) << tag;
     EXPECT_FALSE(TypographyProfile::forLanguage(tag).shapedScript) << tag;
   }
+}
+
+// A Myanmar-script book is shaped, left to right, and breaks as a Latin book does: at spaces, with no hyphenation.
+TEST(Typography, AMyanmarScriptLanguageIsShapedLeftToRight) {
+  for (const char* tag : {"my", "mnw", "shn", "ksw", "bur", "pi-Mymr"}) {
+    const TypographyProfile p = TypographyProfile::forLanguage(tag);
+    EXPECT_TRUE(p.shapedScript) << tag;
+    EXPECT_EQ(TypographyProfile::Direction::LeftToRight, p.direction) << tag;
+    EXPECT_EQ(TypographyProfile::Breaking::AtSpaces, p.breaking) << tag;
+    EXPECT_EQ(nullptr, p.hyphenator) << tag;
+    EXPECT_FALSE(p.cjkRepertoire) << tag;
+  }
+  EXPECT_EQ(TypographyProfile::forLanguage("mnw").shapingLanguage, ot::languageTagsFor("mnw"));
+  for (const char* tag : {"pi", "my-Latn"}) EXPECT_FALSE(TypographyProfile::forLanguage(tag).shapedScript) << tag;
 }
 
 TEST(TypographyProfile, KoreanKeepsWholeWordsWithoutGridOrGap) {

@@ -112,7 +112,7 @@ TEST(FontDownloadRulesTest, EveryShippedTtfFamilyPasses) {
       ++checked;
     }
   }
-  EXPECT_EQ(checked, 48);
+  EXPECT_EQ(checked, 52);
 }
 
 TEST(FontDownloadRulesTest, TheCardMustHoldTheDownloadAndAMargin) {

@@ -1,9 +1,10 @@
 // The outline families the font manager hosts (assets/sd-fonts), as a reader installs them. The eight .otf CJK
 // families: each file probed as discovery probes it, its family installed into a glyph store with the X3's font area
-// and mapping budget, and a sample of its characters drawn at 12 pt (spec 9). The twenty .ttf Indic families, the two
-// Arabic ones and the two Hebrew ones: each file loaded, its style and weight read, and the family fitted into the X3's
-// font area; each Indic family's Regular file and each Arabic file shaped alike through the CPac the install writes and
-// through filters it computes (Hebrew is drawn by the reader's own Hebrew module, not the OpenType shaper).
+// and mapping budget, and a sample of its characters drawn at 12 pt (spec 9). The twenty .ttf Indic families and the
+// two Arabic, two Hebrew and two Myanmar ones: each file loaded, its style and weight read, and the family fitted into
+// the X3's font area; each Indic family's Regular file and each Arabic and Myanmar file shaped alike through the CPac
+// the install writes and through filters it computes (Hebrew is drawn by the reader's own Hebrew module, not the
+// OpenType shaper).
 #include <IndicScripts.h>
 #include <OtFilterWriter.h>
 #include <OtShaper.h>
@@ -125,7 +126,7 @@ TEST(ShippedOtfFamilies, SerifTcDrawsTheOneOversizeGlyphAsMissing) {
 
 TEST(ShippedTtfFamilies, EachFileLoadsAndEachFamilyFitsTheX3Store) {
   const std::vector<std::filesystem::path> files = shippedOutlineFiles(".ttf");
-  EXPECT_EQ(files.size(), 48u);
+  EXPECT_EQ(files.size(), 52u);
   std::map<std::string, std::vector<uint32_t>> flashBytes;  // by family directory
   std::map<std::string, std::vector<uint32_t>> sdBytes;
   for (const auto& path : files) {
@@ -151,7 +152,7 @@ TEST(ShippedTtfFamilies, EachFileLoadsAndEachFamilyFitsTheX3Store) {
     flashBytes[path.parent_path().filename().generic_string()].push_back(probe.flashBytes);
     sdBytes[path.parent_path().filename().generic_string()].push_back(probe.sdBytes);
   }
-  EXPECT_EQ(flashBytes.size(), 24u);
+  EXPECT_EQ(flashBytes.size(), 26u);
   for (const auto& [family, flashSizes] : flashBytes) {
     SCOPED_TRACE(family);
     ASSERT_EQ(flashSizes.size(), 2u);
@@ -169,7 +170,7 @@ TEST(ShippedTtfFamilies, EachFileMapsTheIastLetters) {
                                 0x1E62, 0x1E63, 0x1E6C, 0x1E6D, 0x0301, 0x0303, 0x0304, 0x0307, 0x0310, 0x0323};
   static_assert(sizeof(kIast) / sizeof(kIast[0]) == 30);
   const std::vector<std::filesystem::path> files = shippedOutlineFiles(".ttf");
-  EXPECT_EQ(files.size(), 48u);
+  EXPECT_EQ(files.size(), 52u);
   for (const auto& path : files) {
     SCOPED_TRACE(path.filename().generic_string());
     const std::vector<uint8_t> bytes = readAll(path);
@@ -305,10 +306,12 @@ TEST(ShippedFamilies, EachIndicFamilyShapesAlikeThroughItsCpac) {
   EXPECT_EQ(20u, families);
 }
 
-// The Arabic families, Regular and Bold: 200 lines spread through generate_corpus_arabic.py's output (cut by
-// make_corpus_sample.py; Cf code points are a backslash, u and four hex digits), shaped as an Arabic plan alike through
-// the CPac the install writes and through filters the face computes. HarfBuzz equality is oracle_arabic.py's job.
-TEST(ShippedFamilies, EachArabicFamilyShapesAlikeThroughItsCpac) {
+namespace {
+
+// Each Regular and Bold file of `families` shapes `lines` as a `script` plan alike through the CPac the install writes
+// and through filters the face computes, at two sizes. Returns the files checked.
+size_t expectShapesAlikeThroughCpac(const std::vector<const char*>& families, const ot::Script script,
+                                    const std::vector<std::vector<uint32_t>>& lines) {
   static uint8_t storage[ot::Buffer::bytesFor(4096)];
   ot::Buffer buffer;
   buffer.setStorage(storage, sizeof(storage));
@@ -317,24 +320,24 @@ TEST(ShippedFamilies, EachArabicFamilyShapesAlikeThroughItsCpac) {
     unsigned ppem;
   };
   const Size sizes[] = {{2133, 33}, {1195, 19}};
-  const std::vector<std::vector<uint32_t>> lines = corpusSampleFile("arabic_corpus.txt");
-  ASSERT_EQ(200u, lines.size());
   size_t files = 0;
-  for (const char* family : {"NotoNaskhArabic", "NotoSansArabic"}) {
+  for (const char* family : families) {
     for (const char* style : {"Regular", "Bold"}) {
       const std::string name = std::string(family) + "-" + style;
       SCOPED_TRACE(name);
       const std::filesystem::path path = std::filesystem::path(SD_FONTS_DIR) / family / (name + ".ttf");
-      ASSERT_TRUE(std::filesystem::exists(path));
+      EXPECT_TRUE(std::filesystem::exists(path));
       ShapedFace computed;
       ShapedFace written;
-      ASSERT_TRUE(computed.open(path, false));
-      ASSERT_TRUE(written.open(path, true));
       ot::Plan computedPlan;
       ot::Plan writtenPlan;
       const uint32_t* languages = ot::languageTagsFor("");
-      ASSERT_TRUE(computedPlan.build(computed.face, ot::Script::Arabic, languages));
-      ASSERT_TRUE(writtenPlan.build(written.face, ot::Script::Arabic, languages));
+      if (!computed.open(path, false) || !written.open(path, true) ||
+          !computedPlan.build(computed.face, script, languages) ||
+          !writtenPlan.build(written.face, script, languages)) {
+        ADD_FAILURE() << "the face or its plan did not open";
+        continue;
+      }
       for (const Size& size : sizes) {
         uint32_t different = 0;
         uint32_t glyphs = 0;
@@ -352,5 +355,24 @@ TEST(ShippedFamilies, EachArabicFamilyShapesAlikeThroughItsCpac) {
       ++files;
     }
   }
-  EXPECT_EQ(4u, files);
+  return files;
+}
+
+}  // namespace
+
+// The Arabic families, Regular and Bold: 200 lines spread through generate_corpus_arabic.py's output (cut by
+// make_corpus_sample.py; Cf code points are a backslash, u and four hex digits), shaped as an Arabic plan alike through
+// the CPac the install writes and through filters the face computes. HarfBuzz equality is oracle_arabic.py's job.
+TEST(ShippedFamilies, EachArabicFamilyShapesAlikeThroughItsCpac) {
+  const std::vector<std::vector<uint32_t>> lines = corpusSampleFile("arabic_corpus.txt");
+  ASSERT_EQ(200u, lines.size());
+  EXPECT_EQ(4u, expectShapesAlikeThroughCpac({"NotoNaskhArabic", "NotoSansArabic"}, ot::Script::Arabic, lines));
+}
+
+// The Myanmar families, the same way: 200 lines spread through generate_corpus_myanmar.py's output, shaped as a
+// Myanmar plan. HarfBuzz equality is oracle_myanmar.py's job, and the merge check's.
+TEST(ShippedFamilies, EachMyanmarFamilyShapesAlikeThroughItsCpac) {
+  const std::vector<std::vector<uint32_t>> lines = corpusSampleFile("myanmar_corpus.txt");
+  ASSERT_EQ(200u, lines.size());
+  EXPECT_EQ(4u, expectShapesAlikeThroughCpac({"NotoSansMyanmar", "NotoSerifMyanmar"}, ot::Script::Myanmar, lines));
 }

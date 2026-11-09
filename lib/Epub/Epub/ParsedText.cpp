@@ -8,6 +8,7 @@
 #include <IndicShaper.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <MyanmarScript.h>
 #include <TextShaping.h>
 #include <Utf8.h>
 
@@ -918,23 +919,30 @@ void ParsedText::decideShaping(const GfxRenderer& renderer, const int fontId) {
   // comma shape nowhere), where a token of it has a face that draws Arabic (maps beh), the first one found deciding (my
   // call 5): in a bitmap or built-in font, or a TrueType face without Arabic (whose every run would be Text), an Arabic
   // paragraph makes no ShapingState and merges nothing, so its lines are byte for byte those of the line pass alone.
-  // Consecutive tokens in one font and style that has no such face ask it once.
-  shapes_ = std::any_of(words.begin(), words.end(), [](const std::string& w) { return IndicShaper::holdsIndic(w); });
-  int askedFont = 0;
-  int askedStyle = -1;
-  for (size_t i = 0; bidi_ && i < words.size() && !shapes_; ++i) {
-    // A run member, not any code point of the blocks: a Hebrew paragraph with Arabic-Indic digits has no Arabic run,
-    // and shaping it would cost a call per digit token and merge its glued groups for nothing.
-    if (!arabic::holdsRunMember(words[i].data(), words[i].size())) continue;
-    const int font = wordFontId(i, fontId);
-    const int style = wordStyles[i] & EpdFontFamily::BOLD_ITALIC;
-    if (font == askedFont && style == askedStyle) continue;
-    uint32_t ppem = 0;
-    ShapingFace* const face = shapingFaceFor(renderer, fontId, i, &ppem);
-    shapes_ = face != nullptr && IndicShaper::drawsArabic(*face);
-    askedFont = font;
-    askedStyle = style;
-  }
+  // Myanmar text likewise, in any paragraph, where a token of it has a face that draws Myanmar (maps ka). Consecutive
+  // tokens in one font and style that has no such face ask it once.
+  const auto faceDraws = [&](bool (*holds)(const std::string&), const uint32_t probe) {
+    int askedFont = 0;
+    int askedStyle = -1;
+    for (size_t i = 0; i < words.size(); ++i) {
+      if (!holds(words[i])) continue;
+      const int font = wordFontId(i, fontId);
+      const int style = wordStyles[i] & EpdFontFamily::BOLD_ITALIC;
+      if (font == askedFont && style == askedStyle) continue;
+      uint32_t ppem = 0;
+      ShapingFace* const face = shapingFaceFor(renderer, fontId, i, &ppem);
+      if (face != nullptr && IndicShaper::draws(*face, probe)) return true;
+      askedFont = font;
+      askedStyle = style;
+    }
+    return false;
+  };
+  // A run member, not any code point of the blocks: a Hebrew paragraph with Arabic-Indic digits has no Arabic run,
+  // and shaping it would cost a call per digit token and merge its glued groups for nothing.
+  const auto holdsArabicRun = [](const std::string& w) { return arabic::holdsRunMember(w.data(), w.size()); };
+  const auto holdsMyanmar = [](const std::string& w) { return myanmar::holdsMyanmar(w.data(), w.size()); };
+  shapes_ = std::any_of(words.begin(), words.end(), [](const std::string& w) { return IndicShaper::holdsIndic(w); }) ||
+            (bidi_ && faceDraws(holdsArabicRun, arabic::kProbe)) || faceDraws(holdsMyanmar, myanmar::kProbe);
   if (!shapes_) {
     // The store is in step with the passes that shape: a later one starts it again.
     if (shapingState_) shapingState_->store.reset();
@@ -991,12 +999,8 @@ void ParsedText::mergeGluedGroups(const int fontId) {
     return k < unmergedFrom_ && words[k] != " " && TokenBoundary::rubyRole(b) == TokenBoundary::RubyRole::None &&
            !TokenBoundary::combineRequested(b);
   };
-  // Glue inside a syllable (indic::syllableBreakAllowed false across it), read as mergesWithPrevious reads it.
-  const auto insideSyllable = [&](const size_t j) {
-    if (words[j - 1].empty() || words[j].empty()) return false;
-    size_t pos = 0;
-    return !indic::syllableBreakAllowed(lastCodepoint(words[j - 1]), TextShaping::decodeAt(words[j], pos));
-  };
+  // Glue inside a syllable, read as mergesWithPrevious reads it.
+  const auto insideSyllable = [&](const size_t j) { return TextShaping::glueInsideSyllable(words[j - 1], words[j]); };
   // Each maximal run of glued tokens, [start, end).
   for (size_t start = 0; start < words.size();) {
     size_t end = start + 1;
@@ -1050,12 +1054,12 @@ void ParsedText::mergeGluedGroups(const int fontId) {
 bool ParsedText::readyShapedStore() {
   ShapedStore& store = shapingState_->store;
   // The estimate, for the tokens this pass adds to the store: an entry each, and 2 B of records a byte of their Indic
-  // text, 3 a byte of their Arabic text (2 B a letter; the kept tokens' records are in the chunks already). Refused,
-  // the chunks are still asked for one at a time.
+  // or Myanmar text (Myanmar takes about 1.4, the Myanmar design measured), 3 a byte of their Arabic text (2 B a
+  // letter; the kept tokens' records are in the chunks already). Refused, the chunks are still asked for one at a time.
   const size_t added = words.size() > store.size() ? words.size() - store.size() : 0;
   size_t bytes = 0;
   for (size_t i = store.size(); i < words.size(); ++i) {
-    if (IndicShaper::holdsIndic(words[i])) {
+    if (IndicShaper::holdsIndic(words[i]) || myanmar::holdsMyanmar(words[i].data(), words[i].size())) {
       bytes += 2 * words[i].size();
     } else if (shapedText(words[i])) {
       bytes += 3 * words[i].size();
@@ -1235,7 +1239,8 @@ bool ParsedText::shapeToken(const GfxRenderer& renderer, const int fontId, const
 }
 
 bool ParsedText::shapedText(const std::string_view text) const {
-  return IndicShaper::holdsIndic(text) || (bidi_ && arabic::holdsArabic(text.data(), text.size()));
+  return IndicShaper::holdsIndic(text) || (bidi_ && arabic::holdsArabic(text.data(), text.size())) ||
+         myanmar::holdsMyanmar(text.data(), text.size());
 }
 
 bool ParsedText::storedWidth(const GfxRenderer& renderer, const int fontId, const size_t i,
@@ -2412,7 +2417,8 @@ void ParsedText::applyBionicReadingTransform() {
     // Complex-script words never take a focus split: each half would shape on its own.
     // Ported from crosspoint-reader PR #3787 ("feat: add Indic language support without HarfBuzz", SSafayet /
     // @SSafayet).
-    if (indic::containsIndic(source.c_str()) || arabic::holdsArabic(source.c_str(), source.size())) {
+    if (indic::containsIndic(source.c_str()) || arabic::holdsArabic(source.c_str(), source.size()) ||
+        myanmar::holdsMyanmar(source.c_str(), source.size())) {
       transformedSuffix.push_back(std::move(source));
       transformedSuffixStyles.push_back(originalStyle);
       transformedSuffixBoundaries.push_back(originalBoundary);

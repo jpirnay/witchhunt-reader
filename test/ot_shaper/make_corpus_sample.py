@@ -3,12 +3,14 @@ r"""Cut the committed corpus sample from generate_corpus.py's output.
 
 The first 200 lines of each Indic script's file go to <out dir>/indic_corpus_<script>.txt, and 200 lines of
 generate_corpus_arabic.py's arabic.txt, evenly spaced through the sorted file (its first lines are single code points),
-to <out dir>/arabic_corpus.txt; every code point of Unicode category Cf
+to <out dir>/arabic_corpus.txt, and 200 lines of generate_corpus_myanmar.py's myanmar.txt the same way to
+<out dir>/myanmar_corpus.txt; every code point of Unicode category Cf
 (ZWJ, ZWNJ, ...) written as a literal XXXX escape, so no joiner sits in the repo; the test decodes them.
 The full corpus depends on the Python's unicodedata version, which is why CI reads this sample instead.
 
     python3 test/ot_shaper/generate_corpus.py <corpus dir>
     python3 test/ot_shaper/generate_corpus_arabic.py <corpus dir>
+    python3 test/ot_shaper/generate_corpus_myanmar.py <corpus dir>
     python3 test/ot_shaper/make_corpus_sample.py <corpus dir> test/ttf_font/data
 """
 
@@ -34,9 +36,10 @@ def evenly(lines, count):
 def main():
     src, dst = Path(sys.argv[1]), Path(sys.argv[2])
     dst.mkdir(parents=True, exist_ok=True)
-    arabic = (src / "arabic.txt").read_text(encoding="utf-8").splitlines()
-    text = "\n".join(escape(l) for l in evenly(arabic, LINES)) + "\n"
-    (dst / "arabic_corpus.txt").write_text(text, encoding="utf-8", newline="\n")
+    for name in ("arabic", "myanmar"):
+        lines = (src / f"{name}.txt").read_text(encoding="utf-8").splitlines()
+        text = "\n".join(escape(l) for l in evenly(lines, LINES)) + "\n"
+        (dst / f"{name}_corpus.txt").write_text(text, encoding="utf-8", newline="\n")
     for name in SCRIPTS:
         lines = (src / f"{name}.txt").read_text(encoding="utf-8").splitlines()[:LINES]
         (dst / f"indic_corpus_{name}.txt").write_text("\n".join(escape(l) for l in lines) + "\n", encoding="utf-8",

@@ -2,6 +2,7 @@
 
 #include <ArabicScripts.h>
 #include <IndicScripts.h>
+#include <MyanmarScript.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -87,16 +88,25 @@ bool arabicBreakAllowed(const std::vector<CodepointInfo>& cps, const size_t idx)
   return true;
 }
 
+// The Myanmar part of the fallback rule (myanmar::cutAllowed): a Myanmar word is cut between syllables only, and its
+// joiners stay with the letter before them. The rule reads the code point after cps[idx] past any dot below.
+bool myanmarBreakAllowed(const std::vector<CodepointInfo>& cps, const size_t idx) {
+  size_t next = idx + 1;
+  while (next < cps.size() && cps[next].value == myanmar::DOT_BELOW) ++next;
+  return myanmar::cutAllowed(cps[idx - 1].value, cps[idx].value, next < cps.size() ? cps[next].value : 0);
+}
+
 // Fallback break indexes for a word the language patterns could not split:
 // every index leaving minPrefix/minSuffix codepoints on each side, except
-// inside an Indic syllable, whose halves would each shape on their own, and inside an Arabic cluster (before a mark
-// or a joiner, after a ZWJ), which would start the next line with a mark.
+// inside an Indic syllable, whose halves would each shape on their own, inside an Arabic cluster (before a mark
+// or a joiner, after a ZWJ), which would start the next line with a mark, and inside a Myanmar syllable.
 // Ported from crosspoint-reader PR #3787 ("feat: add Indic language support without HarfBuzz", SSafayet /
 // @SSafayet).
 void appendFallbackIndexes(const std::vector<CodepointInfo>& cps, const size_t minPrefix, const size_t minSuffix,
                            std::vector<size_t>& out) {
   for (size_t idx = minPrefix; idx + minSuffix <= cps.size(); ++idx) {
-    if (idx == 0 || (indic::syllableBreakAllowed(cps[idx - 1].value, cps[idx].value) && arabicBreakAllowed(cps, idx))) {
+    if (idx == 0 || (indic::syllableBreakAllowed(cps[idx - 1].value, cps[idx].value) && arabicBreakAllowed(cps, idx) &&
+                     myanmarBreakAllowed(cps, idx))) {
       out.push_back(idx);
     }
   }
@@ -274,10 +284,12 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
   breaks.reserve(indexes.size());
   for (const size_t idx : indexes) {
     // CJK scripts are not hyphenated: a break next to a CJK character draws no hyphen. Ported from
-    // crosspoint-reader PR #2288 (Justin Mitchell).
-    const bool cjkSide =
-        (idx < cps.size() && utf8IsCjkBreakable(cps[idx].value)) || (idx > 0 && utf8IsCjkBreakable(cps[idx - 1].value));
-    breaks.push_back({byteOffsetForIndex(cps, idx), !cjkSide});
+    // crosspoint-reader PR #2288 (Justin Mitchell). Nor is Myanmar: a line ends between its syllables as it ends
+    // between its phrases.
+    const auto unhyphenated = [](const uint32_t cp) { return utf8IsCjkBreakable(cp) || myanmar::isRunMember(cp); };
+    const bool noHyphen =
+        (idx < cps.size() && unhyphenated(cps[idx].value)) || (idx > 0 && unhyphenated(cps[idx - 1].value));
+    breaks.push_back({byteOffsetForIndex(cps, idx), !noHyphen});
   }
 
   return breaks;

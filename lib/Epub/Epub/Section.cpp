@@ -36,7 +36,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 115;  // v115 (PR 4b): Arabic is shaped, and Indic words in bidi
+constexpr uint8_t SECTION_FILE_VERSION = 116;  // v116 (Myanmar PR 2): Myanmar is shaped, and a Myanmar phrase
+                                               // wider than the line is cut between syllables, unhyphenated
+                                               // v115 (PR 4b): Arabic is shaped, and Indic words in bidi
                                                // paragraphs: glyph forms on bidi lines, run-cut pieces in the
                                                // line pass
                                                // v114: an <hr> the book's CSS leaves nothing to draw of is not drawn

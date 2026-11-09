@@ -1,8 +1,8 @@
 NotoSansJP, NotoSansSC, NotoSansTC, NotoSansKR, NotoSerifJP, NotoSerifSC, NotoSerifTC and NotoSerifKR are subsets
 of Noto Sans CJK and Noto Serif CJK (releases Sans2.004 and Serif2.003, https://github.com/notofonts/noto-cjk),
 made by lib/EpdFont/scripts/cjk_subset.py, with U+FFFD from Noto Sans. The twenty Noto Sans and Noto Serif families
-of the ten Indic scripts, NotoNaskhArabic and NotoSansArabic, and NotoSansHebrew and NotoSerifHebrew are the script's
-Noto font merged with Noto's Latin by lib/EpdFont/scripts/merge_noto_latin.py.
+of the ten Indic scripts, NotoNaskhArabic and NotoSansArabic, NotoSansHebrew and NotoSerifHebrew, and NotoSansMyanmar
+and NotoSerifMyanmar are the script's Noto font merged with Noto's Latin by lib/EpdFont/scripts/merge_noto_latin.py.
 The fonts carry these copyrights:
 
 Noto Sans CJK: Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
@@ -21,6 +21,7 @@ Noto Sans and Noto Serif Sinhala: Copyright 2022 The Noto Project Authors (https
 Noto Naskh Arabic and Noto Sans Arabic: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic).
 Noto Sans Hebrew: Copyright 2024 The Noto Project Authors (https://github.com/notofonts/hebrew).
 Noto Serif Hebrew: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew).
+Noto Sans and Noto Serif Myanmar: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/myanmar).
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

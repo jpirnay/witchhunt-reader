@@ -11,6 +11,7 @@
 #include <IndicScripts.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <MyanmarScript.h>
 #include <SdCardFont.h>
 #include <ttf/TtfFace.h>
 #include <ttf/TtfFamily.h>
@@ -391,12 +392,14 @@ void SdCardFontSystem::setReaderLanguage(const std::string& language) {
   readerIndicScript_ = nullptr;
   readerArabicScript_ = false;
   readerHebrewScript_ = false;
+  readerMyanmarScript_ = false;
   switch (language_tag::cjkRegionOf(language)) {
     case CjkRegion::None:
       readerCjkRegion_ = ReaderCjkRegion::None;
       readerIndicScript_ = language_tag::indicScriptOf(language);
       readerArabicScript_ = language_tag::isArabicScript(language);
       readerHebrewScript_ = language_tag::isHebrewScript(language);
+      readerMyanmarScript_ = language_tag::isMyanmarScript(language);
       return;
     case CjkRegion::Japanese:
       readerCjkRegion_ = ReaderCjkRegion::Japanese;
@@ -421,6 +424,7 @@ void SdCardFontSystem::clearReaderLanguage() {
   readerIndicScript_ = nullptr;
   readerArabicScript_ = false;
   readerHebrewScript_ = false;
+  readerMyanmarScript_ = false;
   languageFamily_.clear();
   languageFamilyKey_ = 0;
 }
@@ -430,6 +434,7 @@ void SdCardFontSystem::setReaderLanguagePending() {
   readerIndicScript_ = nullptr;
   readerArabicScript_ = false;
   readerHebrewScript_ = false;
+  readerMyanmarScript_ = false;
 }
 
 bool SdCardFontSystem::waitsForReaderLanguage() const {
@@ -439,7 +444,8 @@ bool SdCardFontSystem::waitsForReaderLanguage() const {
   std::string stem;
   for (const auto& installed : registry_.getFamilies()) {
     if (familyRegion(installed.name, stem) != ReaderCjkRegion::None) return true;
-    if (isIndicFamily(installed.name) || isArabicFamily(installed.name) || isHebrewFamily(installed.name)) {
+    if (isIndicFamily(installed.name) || isArabicFamily(installed.name) || isHebrewFamily(installed.name) ||
+        isMyanmarFamily(installed.name)) {
       return true;
     }
   }
@@ -491,10 +497,11 @@ void SdCardFontSystem::selectLanguageFamily(const char* family) {
   const std::string name = family ? family : "";
   const auto region = static_cast<uint8_t>(readerCjkRegion_);
   const uint8_t own = family ? 0 : 1;
-  const char* scriptName = readerIndicScript_    ? readerIndicScript_->name
-                           : readerArabicScript_ ? "Arabic"
-                           : readerHebrewScript_ ? "Hebrew"
-                                                 : "";
+  const char* scriptName = readerIndicScript_     ? readerIndicScript_->name
+                           : readerArabicScript_  ? "Arabic"
+                           : readerHebrewScript_  ? "Hebrew"
+                           : readerMyanmarScript_ ? "Myanmar"
+                                                  : "";
   const uint32_t key = glyphstore::fnv1a(
       name.data(), name.size(),
       glyphstore::fnv1a(&region, 1, glyphstore::fnv1a(scriptName, strlen(scriptName), glyphstore::fnv1a(&own, 1))));
@@ -533,6 +540,9 @@ void SdCardFontSystem::selectLanguageFamily(const char* family) {
       } else if (readerHebrewScript_) {
         probe = 0x05D0;  // alef
         suffix = "Hebrew";
+      } else if (readerMyanmarScript_) {
+        probe = myanmar::kProbe;
+        suffix = "Myanmar";
       } else {
         return;
       }
@@ -542,8 +552,8 @@ void SdCardFontSystem::selectLanguageFamily(const char* family) {
   }
   if (!family) return;  // the book's own font
   std::string stem;
-  // A CJK book in a Noto CJK family is effectiveReaderFamily()'s; an Indic, Arabic or Hebrew book in one still needs
-  // its own family.
+  // A CJK book in a Noto CJK family is effectiveReaderFamily()'s; an Indic, Arabic, Hebrew or Myanmar book in one still
+  // needs its own family.
   if (readerCjkRegion_ != ReaderCjkRegion::None && familyRegion(name, stem) != ReaderCjkRegion::None) return;
   // A built-in reader face has no CJK: fontconvert.py's default intervals leave it out.
   if (const SdCardFontFamilyInfo* info = name.empty() ? nullptr : findFamily(name.c_str())) {
@@ -551,7 +561,8 @@ void SdCardFontSystem::selectLanguageFamily(const char* family) {
   }
 
   const bool sansFirst = name.find("Sans") != std::string::npos;
-  // Noto's Arabic serif is Naskh: there is no NotoSerifArabic family. Hebrew is named as the Indic scripts are.
+  // Noto's Arabic serif is Naskh: there is no NotoSerifArabic family. Hebrew and Myanmar are named as the Indic
+  // scripts are.
   const bool arabic = readerCjkRegion_ == ReaderCjkRegion::None && readerArabicScript_;
   const char* const sans = arabic ? "NotoSansArabic" : "NotoSans";
   const char* const serif = arabic ? "NotoNaskhArabic" : "NotoSerif";
@@ -588,6 +599,10 @@ bool SdCardFontSystem::isArabicFamily(const std::string& family) {
 
 bool SdCardFontSystem::isHebrewFamily(const std::string& family) {
   return family == "NotoSansHebrew" || family == "NotoSerifHebrew";
+}
+
+bool SdCardFontSystem::isMyanmarFamily(const std::string& family) {
+  return family == "NotoSansMyanmar" || family == "NotoSerifMyanmar";
 }
 
 SdCardFontSystem::ReaderCjkRegion SdCardFontSystem::familyRegion(const std::string& family, std::string& stem) {

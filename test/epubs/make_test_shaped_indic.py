@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Build the four shaped-Indic books: test_shaped_devanagari.epub (hi), test_shaped_bengali.epub (bn),
-test_shaped_tamil.epub (ta) and test_shaped_malayalam.epub (ml). ShapingRulesTest checks its rules on every page of
-each, laid out with its font (test/fixtures/fonts/NotoSans<Script>-Book-Regular.ttf, made from the books by
+"""Build the four shaped-Indic books, test_shaped_devanagari.epub (hi), test_shaped_bengali.epub (bn),
+test_shaped_tamil.epub (ta) and test_shaped_malayalam.epub (ml), and the Myanmar one, test_shaped_myanmar.epub (my, with
+a Mon and a Shan page). ShapingRulesTest checks its rules on every page of each, laid out with its font
+(test/fixtures/fonts/NotoSans<Script>-Book-Regular.ttf, made from the books by
 lib/EpdFont/scripts/make_shaped_book_fonts.py), and each has a golden shaped with that font; the Devanagari book also
 has an _unshaped golden, laid out with no face (IndicReorder's forms).
 
@@ -11,6 +12,9 @@ UDHR in XML project keeps it, at eric-muller/udhr commit 588b3f4b2d0467aff54842a
   - Bengali:   https://raw.githubusercontent.com/eric-muller/udhr/588b3f4b2d0467aff54842a4b926551b69d5a66a/data/udhr/udhr_ben.xml
   - Tamil:     https://raw.githubusercontent.com/eric-muller/udhr/588b3f4b2d0467aff54842a4b926551b69d5a66a/data/udhr/udhr_tam.xml
   - Malayalam: https://raw.githubusercontent.com/eric-muller/udhr/588b3f4b2d0467aff54842a4b926551b69d5a66a/data/udhr/udhr_mal.xml
+  - Burmese:   https://raw.githubusercontent.com/eric-muller/udhr/588b3f4b2d0467aff54842a4b926551b69d5a66a/data/udhr/udhr_mya.xml
+  - Mon:       https://raw.githubusercontent.com/eric-muller/udhr/588b3f4b2d0467aff54842a4b926551b69d5a66a/data/udhr/udhr_mnw.xml
+  - Shan:      https://raw.githubusercontent.com/eric-muller/udhr/588b3f4b2d0467aff54842a4b926551b69d5a66a/data/udhr/udhr_shn.xml
   - English (the Latin sentence and the --long English book):
                https://raw.githubusercontent.com/eric-muller/udhr/588b3f4b2d0467aff54842a4b926551b69d5a66a/data/udhr/udhr_eng.xml
 The texts are the files' paragraphs with their whitespace collapsed, in NFC (the Hindi and Bengali files spell a few
@@ -35,6 +39,13 @@ and the UDHR in XML project, which carries them, calls them "part of our commons
     book ends with a 2-column table whose second cell holds a compound wider than the cell, split between syllables.
   - The punctuation, brackets and dandas are the translations' own. Tamil and Malayalam end their sentences with a full
     stop, not a danda, so their books hold none.
+  - The Myanmar book's cases are Myanmar's own: a converter's split (<span>မြန်</span><span>မာ</span>), a bold e
+    (က<b>ေ</b>ာ) and a bold killed consonant (မြ<b>န်</b>မာ), each one word; a bold syllable (မြန်<b>မာ</b>,
+    မင်္ဂ<b>လာ</b>ပါ, kinzi before it), kept apart and shaped with its neighbours; a superscript digit; a ZWJ the parser
+    keeps (က\u200dျ); a number. Then a paragraph of one phrase, the title twice without its spaces, wider than the
+    line, which the line pass cuts between syllables without a hyphen, and a table whose cell holds four words of
+    Article 2 without their spaces, cut the same way. Then a chapter each of Mon and Shan: the declaration's title,
+    Article 1's title and its paragraph.
 
 With --long <dir>, writes instead the two timing books of the device runs into <dir> (never committed):
 test_shaped_long_hi.epub and test_shaped_long_en.epub, each a short first chapter and a second of the declaration's
@@ -170,6 +181,44 @@ MALAYALAM = {
     "table": ("വകുപ്പ്\u200c 1.", "മനുഷ്യാവകാശങ്ങളെക്കുറിക്കുന്നപൊതുപ്രഖ്യാപനം"),
 }
 
+MYANMAR = {
+    "title": "အပြည်ပြည်ဆိုင်ရာ လူ့အခွင့်အရေး ကြေညာစာတမ်း",
+    "preamble_title": "စကားချီး . . .",
+    "preamble": [
+        "လူခပ်သိမ်း၏ မျိုးရိုးဂုဏ်သိက္ခာနှင့်တကွ လူတိုင်းအညီအမျှခံစားခွင့်ရှိသည့် အခွင့်အရေးများကို အသိအမှတ်ပြုခြင်းသည် လူခပ်သိမ်း၏လွတ်လပ်မှု၊ တရားမျှတမှု၊ ငြိမ်းချမ်းမှုတို့၏ အခြေခံအုတ်မြစ်ဖြစ်သောကြောင့်လည်းကောင်း၊",
+        "လူ့အခွင့်ရေးများကို အရေးမထား မထီလေးစားပြုခြင်းသည် လူခပ်သိမ်း၏ အကျင့်သိက္ခာကို ချိုးဖောက် ဖျက်ဆီးတတ်သည့် ရက်စက်ကြမ်းကြုတ်သော အပြုအမှုများကို ဖြစ်ပေါ်စေခဲ့သောကြောင့်လည်းကောင်း၊ လွတ်လပ်စွာ ဖွင့်ဟပြောဆိုနိုင်မှု လွတ်လပ်စွာ သက်ဝင် ယုံကြည်နိုင်မှု၊ ကြောက်ရွံ့ခြင်း၊ ချို့ငဲ့ခြင်းတို့မှ ကင်းလွတ်စွာ အသက်မွေးနိုင်မှုတို့ကို ခံစားရယူနိုင်စေမည့် လောကတစ်ခု ပေါ်ပေါက်လာရန်အရေးကို လူခပ်သိမ်းတို့က မိမိတို့၏ အထက်သန်ဆုံးသော လိုလားချက်ဆန္ဒကြီးအဖြစ်ဖြင့် ကြွေးကြော်ကြေညာပြီး ဖြစ်သောကြောင့် လည်းကောင်း၊",
+    ],
+    "articles": [
+        ("အပိုဒ် ၁", [
+            "လူတိုင်းသည် တူညီ လွတ်လပ်သော ဂုဏ်သိက္ခာဖြင့် လည်းကောင်း၊ တူညီလွတ်လပ်သော အခွင့်အရေးများဖြင့် လည်းကောင်း၊ မွေးဖွားလာသူများ ဖြစ်သည်။ ထိုသူတို့၌ ပိုင်းခြား ဝေဖန်တတ်သော ဉာဏ်နှင့် ကျင့်ဝတ် သိတတ်သော စိတ်တို့ရှိကြ၍ ထိုသူတို့သည် အချင်းချင်း မေတ္တာထား၍ ဆက်ဆံကျင့်သုံးသင့်၏။",
+        ]),
+        ("အပိုဒ် ၂", [
+            "လူတိုင်းသည် လူ့အခွင့် အရေး ကြေညာစာတမ်းတွင် ဖော်ပြထားသည့် အခွင့်အရေး အားလုံး၊ လွတ်လပ်ခွင့် အားလုံးတို့ကို ပိုင်ဆိုင် ခံစားခွင့်ရှိသည်။ လူမျိုးနွယ်အားဖြင့် ဖြစ်စေ၊ အသားအရောင်အားဖြင့် ဖြစ်စေ၊ ကျား၊ မ၊ သဘာဝအားဖြင့် ဖြစ်စေ၊ ဘာသာစကားအားဖြင့် ဖြစ်စေ၊ ကိုးကွယ်သည့် ဘာသာအားဖြင့် ဖြစ်စေ၊ နိုင်ငံရေးယူဆချက်၊ သို့တည်းမဟုတ် အခြားယူဆချက်အားဖြင့် ဖြစ်စေ၊ နိုင်ငံနှင့် ဆိုင်သော၊ သို့တည်းမဟုတ် လူမှုအဆင့်အတန်းနှင့် ဆိုင်သော ဇစ်မြစ် အားဖြင့်ဖြစ်စေ၊ ပစ္စည်း ဥစ္စာ ဂုဏ်အားဖြင့် ဖြစ်စေ၊ မျိုးရိုးဇာတိအားဖြင့် ဖြစ်စေ၊ အခြား အဆင့်အတန်း အားဖြင့် ဖြစ်စေ ခွဲခြားခြင်းမရှိစေရ။",
+            "ထို့ပြင် လူတစ်ဦး တစ်ယောက် နေထိုင်ရာ နိုင်ငံ၏ သို့တည်းမဟုတ် နယ်မြေဒေသ၏ နိုင်ငံရေးဆိုင်ရာ ဖြစ်စေ စီရင် ပိုင်ခွင့်ဆိုင်ရာ ဖြစ်စေ တိုင်းပြည် အချင်းချင်း ဆိုင်ရာဖြစ်စေ၊ အဆင့်အတန်း တစ်ခုခုကို အခြေပြု၍ သော်လည်းကောင်း၊ ဒေသနယ်မြေတစ်ခုသည် အချုပ်အခြာ အာဏာပိုင် လွတ်လပ်သည့် နယ်မြေ၊ သို့တည်းမဟုတ် ကုလသမဂ္ဂ ထိန်းသိမ်း စောင့်ရှောက် ထားရသည့် နယ်မြေ၊ သို့တည်းမဟုတ် ကိုယ်ပိုင် အုပ်ချုပ်ခွင့် အာဏာတို့ တစိတ်တဒေသလောက်သာ ရရှိသည့် နယ်မြေ စသဖြင့် ယင်းသို့ သော နယ်မြေများ ဖြစ်သည်၊ ဖြစ်သည် ဟူသော အကြောင်းကို အထောက်အထား ပြု၍ သော်လည်းကောင်း ခွဲခြားခြင်း လုံးဝ မရှိစေရ။",
+        ]),
+        ("အပိုဒ် ၃", [
+            "လူတိုင်း၌ အသက်ရှင်ရန် လွတ်လပ်ခွင့်နှင့် လုံခြုံစိတ်ချခွင့် ရှိသည်။",
+        ]),
+    ],
+}
+MON = ("လိက်လလောၚ် အခေါၚ်အရာမၞိဟ် အလုံလိုက်မွဲ", "ပိုဒ် ၁", "မၞိဟ်ဂမၠိုၚ် အိုဿီုတအ်ဝွံ စနူသၠးတိတ် နူဂဝ်ဂၞဴ ဒှ်မၞိဟ်သၠးပွးအိုတ်တုဲ အခေါၚ်အရာ ကေုာံ သိက္ခာမၞိဟ်တအ် တုပ် သၟဟ်ရ။ မၞိဟ်တအ်ဂှ် နွံကဵုဓရ်စၚ်ခြၚ်ကေုာံ သမ္တီညာဏ် ဓဝ်ပါ်ပဲါ ခိုဟ်ပရေံနွံတုဲ ညးမွဲ ကေုာံ ညးမွဲ ထေက်ကဵု သ္ဒးဒ္ဂေတ်ဗက် ဆက်ဆောံညးသ္ကအ် နစိုတ်ဓာတ်ကောံဒေံအရေ။")
+SHAN = ("လိၵ်ႈပိုၼ်ၽၢဝ်ႇ လွင်ႈသုၼ်ႇလႆႈၵူၼ်း ဢၼ်ၵဵဝ်ႇတင်းလုမ်ႈ", "တွၼ်ႈ 1", "ၵူၼ်းၵူႊၵေႃႉၼႆႉ ပဵၼ်ဢၼ်ၵိူတ်ႇမႃးလူၺ်ႈၵုင်ႇမုၼ်ဢၼ်လွတ်ႈလႅဝ်းၽဵင်ႇပဵင်းၵၼ် လႄႈ သုၼ်ႇလႆႈဢၼ် လွတ်ႈလႅဝ်းၽဵင်ႇ ပဵင်းၵၼ်။ ၶဝ်ၼႆႉ မီးၺၢၼ်ႇဢၼ်မေႃထတ်းသၢင် လႄႈ ၸႂ်ဢၼ်ႁူႉၸၵ်းၾိင်ႈတိုဝ်းၵမ် ၼၼ်ႉလႄႈ ထုၵ်ႇဝႆႉၸႂ်ပီႈဢွၵ်ႇ ၼွင်ႉၶႆႇၵၼ်သေ တိတ်းတေႃႇၵၼ်။")
+MYANMAR.update({
+    "bold": "လူတိုင်းသည်",
+    "italic": "ဂုဏ်သိက္ခာဖြင့်",
+    "small": "လွတ်လပ်သော",
+    "cases": (
+        "(<span>မြန်</span><span>မာ</span>)၊ က<b>ေ</b>ာ၊ မြ<b>န်</b>မာ၊ မြန်<b>မာ</b>၊ မင်္ဂ<b>လာ</b>ပါ၊"
+        " မြန်မာ<sup>၁</sup>၊ က\u200dျ၊ ၂၀၂၆ ။"
+    ),
+    # One phrase wider than the line: the title twice, its spaces taken out.
+    "long": "အပြည်ပြည်ဆိုင်ရာလူ့အခွင့်အရေးကြေညာစာတမ်း" * 2 + "။",
+    # The table's cell: four words of Article 2 without their spaces, wider than the cell.
+    "table": ("အပိုဒ် ၂", "ကုလသမဂ္ဂထိန်းသိမ်းစောင့်ရှောက်ထားရသည့်နယ်မြေ"),
+    # The Mon and Shan pages: (lang, the declaration's title, Article 1's title, its paragraph).
+    "pages": [("mnw", *MON), ("shn", *SHAN)],
+})
+
 ENGLISH = {
     "title": "Universal Declaration of Human Rights",
     "preamble_title": "Preamble",
@@ -199,6 +248,7 @@ BOOKS = [
     ("test_shaped_bengali.epub", "bn", BENGALI),
     ("test_shaped_tamil.epub", "ta", TAMIL),
     ("test_shaped_malayalam.epub", "ml", MALAYALAM),
+    ("test_shaped_myanmar.epub", "my", MYANMAR),
 ]
 
 LONG_WORDS = 2500
@@ -280,12 +330,21 @@ def book_chapters(text, lang):
                 p = wrap(p, text["small"], '<span style="font-size: 80%">', "</span>")
             second += f"<p>{p}</p>\n"
     second += f"<p>{text['cases']}</p>\n"
+    if "long" in text:
+        check_text(text["long"])
+        second += f"<p>{text['long']}</p>\n"
     second += f'<p lang="en" xml:lang="en">{LATIN_SENTENCE}</p>\n'
     if "table" in text:
         label, compound = text["table"]
         check_text(label + compound)
         second += f"<table>\n<tr><td>{label}</td><td>{compound}</td></tr>\n</table>\n"
-    return [chapter(text["title"], first, lang), chapter(text["articles"][0][0], second, lang)]
+    chapters = [chapter(text["title"], first, lang), chapter(text["articles"][0][0], second, lang)]
+    for page_lang, title, article, paragraph in text.get("pages", []):
+        for value in (title, article, paragraph):
+            check_text(value)
+        body = f"<h2>{title}</h2>\n<h3>{article}</h3>\n<p>{paragraph}</p>\n"
+        chapters.append(chapter(title, body, page_lang))
+    return chapters
 
 
 def long_chapters(text, lang, paragraph_words=None):
@@ -339,7 +398,7 @@ def epub_files(title, identifier, lang, chapters):
 
 def main():
     # The module's docstring holds Indic text, which a console's code page may not print: --help keeps to ASCII.
-    parser = argparse.ArgumentParser(description="Build the four shaped-Indic fixture books (see the script's header).")
+    parser = argparse.ArgumentParser(description="Build the shaped Indic and Myanmar fixture books (see the script's header).")
     parser.add_argument("--long", metavar="DIR", help="write the two timing books into DIR instead")
     args = parser.parse_args()
 

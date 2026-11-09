@@ -116,10 +116,20 @@ TEST(InPlaceBuildGate, AShapedScriptBookInABitmapFontKeepsTheFloors) {
 
 }  // namespace
 
-// EpubReaderActivity sets `shaped` from TypographyProfile::shapedScript, which every Arabic-script language has.
+// EpubReaderActivity sets `shaped` from TypographyProfile::shapedScript, which every Arabic-script and every
+// Myanmar-script language has.
 TEST(InPlaceBuildGate, AnArabicScriptBookInATrueTypeSetNeverBuildsInPlace) {
   for (const char* tag : {"ar", "ur", "fa", "ps", "ckb"}) {
     const bool shaped = language_tag::isArabicScript(tag);
+    const Admission a = admitsResident(request(false, 9602, UINT32_MAX, UINT32_MAX, false, /*trueType=*/true, shaped));
+    EXPECT_FALSE(a.resident) << tag;
+    EXPECT_TRUE(a.shapedTrueType) << tag;
+  }
+}
+
+TEST(InPlaceBuildGate, AMyanmarScriptBookInATrueTypeSetNeverBuildsInPlace) {
+  for (const char* tag : {"my", "mnw", "shn", "ksw", "pi-Mymr"}) {
+    const bool shaped = language_tag::isMyanmarScript(tag);
     const Admission a = admitsResident(request(false, 9602, UINT32_MAX, UINT32_MAX, false, /*trueType=*/true, shaped));
     EXPECT_FALSE(a.resident) << tag;
     EXPECT_TRUE(a.shapedTrueType) << tag;

@@ -262,7 +262,7 @@ TEST(ArabicRuns, BracketsAndCommaStayOutside) {
   ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
   EXPECT_EQ(runs[0].begin, 1);
   EXPECT_EQ(runs[0].end, 9);
-  EXPECT_TRUE(runs[0].arabic);
+  EXPECT_EQ(runs[0].kind, IndicShaper::RunKind::Arabic);
   EXPECT_EQ(runs[0].script, nullptr);
   EXPECT_TRUE(IndicShaper::holdsShaped(s));
 }
@@ -285,7 +285,7 @@ TEST(ArabicRuns, AZwnjStaysInside) {
   ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
   EXPECT_EQ(runs[0].begin, 0);
   EXPECT_EQ(runs[0].end, s.size());
-  EXPECT_TRUE(runs[0].arabic);
+  EXPECT_EQ(runs[0].kind, IndicShaper::RunKind::Arabic);
 }
 
 TEST(ArabicRuns, ALeadingMarkStartsNoRun) {
@@ -316,25 +316,25 @@ TEST(ArabicRuns, ARunEndsAtADanda) {
   IndicShaper::Run runs[16];
   const std::string s = utf8({AR_KAF, AR_TEH, DANDA, AR_ALEF});
   ASSERT_EQ(IndicShaper::scanRuns(s, runs), 3u);
-  EXPECT_TRUE(runs[0].arabic);
+  EXPECT_EQ(runs[0].kind, IndicShaper::RunKind::Arabic);
   EXPECT_EQ(runs[0].end, 4);
-  EXPECT_FALSE(runs[1].arabic);  // the danda alone: shared
+  EXPECT_EQ(runs[1].kind, IndicShaper::RunKind::Indic);  // the danda alone: shared
   EXPECT_EQ(runs[1].script, nullptr);
   EXPECT_EQ(runs[1].begin, 4);
   EXPECT_EQ(runs[1].end, 7);
-  EXPECT_TRUE(runs[2].arabic);
+  EXPECT_EQ(runs[2].kind, IndicShaper::RunKind::Arabic);
 }
 
 TEST(ArabicRuns, AnArabicLetterEndsAnIndicRunAndTheReverse) {
   IndicShaper::Run runs[16];
   const std::string s = utf8({DEVA_KA, DEVA_I, AR_BEH, DEVA_KA});
   ASSERT_EQ(IndicShaper::scanRuns(s, runs), 3u);
-  EXPECT_FALSE(runs[0].arabic);
+  EXPECT_EQ(runs[0].kind, IndicShaper::RunKind::Indic);
   EXPECT_NE(runs[0].script, nullptr);
-  EXPECT_TRUE(runs[1].arabic);
+  EXPECT_EQ(runs[1].kind, IndicShaper::RunKind::Arabic);
   EXPECT_EQ(runs[1].begin, 6);
   EXPECT_EQ(runs[1].end, 8);
-  EXPECT_FALSE(runs[2].arabic);
+  EXPECT_EQ(runs[2].kind, IndicShaper::RunKind::Indic);
 }
 
 TEST(ArabicRuns, MaxRunsHoldsAlternatingScripts) {
@@ -370,4 +370,94 @@ TEST(TextShapingMerge, AMarkAfterALatinOrHebrewWordDoesNot) {
 TEST(TextShapingMerge, NothingMergesOutsideAShapedGroup) {
   EXPECT_FALSE(merges(utf8({AR_BEH}), 1, utf8({AR_FATHA}), 2, false));
   EXPECT_FALSE(merges(utf8({AR_BEH}), 1, utf8({AR_FATHA}), 1, false));
+}
+
+// Myanmar runs and merges (the Myanmar design's PR 2).
+namespace {
+
+constexpr uint32_t MY_KA = 0x1000, MY_NGA = 0x1004, MY_NA = 0x1014, MY_MA = 0x1019, MY_GA = 0x1002, MY_AA = 0x102C,
+                   MY_I = 0x102D, MY_E = 0x1031, MY_DOT_BELOW = 0x1037, MY_STACKER = 0x1039, MY_ASAT = 0x103A,
+                   MY_MEDIAL_RA = 0x103C, MY_ONE = 0x1041, MY_SECTION = 0x104B, ZWNJ_ = 0x200C, DOTTED_CIRCLE = 0x25CC;
+// မြန်မာ
+const std::vector<uint32_t> kMyanmar = {MY_MA, MY_MEDIAL_RA, MY_NA, MY_ASAT, MY_MA, MY_AA};
+
+}  // namespace
+
+TEST(MyanmarRuns, BracketsAndLatinStayOutside) {
+  IndicShaper::Run runs[16];
+  std::vector<uint32_t> cps = {'('};
+  cps.insert(cps.end(), kMyanmar.begin(), kMyanmar.end());
+  cps.push_back(')');
+  const std::string s = utf8(cps);
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
+  EXPECT_EQ(runs[0].begin, 1);
+  EXPECT_EQ(runs[0].end, 19);
+  EXPECT_EQ(runs[0].kind, IndicShaper::RunKind::Myanmar);
+  EXPECT_EQ(runs[0].script, nullptr);
+  EXPECT_TRUE(IndicShaper::holdsShaped(s));
+  EXPECT_FALSE(IndicShaper::holdsIndic(s));
+}
+
+TEST(MyanmarRuns, DigitsSectionMarksAndSignsAreInside) {
+  IndicShaper::Run runs[16];
+  // A leading sign starts the run (the shaper draws its dotted circle); digits and the section mark are members.
+  const std::string s = utf8({MY_E, MY_KA, MY_ONE, MY_SECTION});
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
+  EXPECT_EQ(runs[0].begin, 0);
+  EXPECT_EQ(runs[0].end, s.size());
+}
+
+TEST(MyanmarRuns, JoinersAndTheDottedCircleAroundMembersAreInside) {
+  IndicShaper::Run runs[16];
+  const std::string s = utf8({ZWJ, MY_KA, ZWNJ_, MY_E, DOTTED_CIRCLE, MY_I, ZWJ});
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
+  EXPECT_EQ(runs[0].begin, 0);
+  EXPECT_EQ(runs[0].end, s.size());
+  EXPECT_EQ(runs[0].kind, IndicShaper::RunKind::Myanmar);
+  // Joiners with no Myanmar member after them are not a Myanmar run.
+  const std::string latin = utf8({'a', ZWJ, 'b'});
+  EXPECT_EQ(IndicShaper::scanRuns(latin, runs), 1u);  // the joiner alone: Indic shared, Text
+  EXPECT_EQ(runs[0].kind, IndicShaper::RunKind::Indic);
+  EXPECT_EQ(runs[0].script, nullptr);
+}
+
+TEST(MyanmarRuns, AMyanmarLetterEndsAnIndicOrArabicRunAndTheReverse) {
+  IndicShaper::Run runs[16];
+  const std::string s = utf8({DEVA_KA, DEVA_I, MY_KA, AR_BEH, MY_MA});
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 4u);
+  EXPECT_EQ(runs[0].kind, IndicShaper::RunKind::Indic);
+  EXPECT_EQ(runs[0].end, 6);
+  EXPECT_EQ(runs[1].kind, IndicShaper::RunKind::Myanmar);
+  EXPECT_EQ(runs[1].begin, 6);
+  EXPECT_EQ(runs[1].end, 9);
+  EXPECT_EQ(runs[2].kind, IndicShaper::RunKind::Arabic);
+  EXPECT_EQ(runs[3].kind, IndicShaper::RunKind::Myanmar);
+  // A joiner after an Indic letter stays in the Indic run, though a Myanmar letter follows.
+  const std::string t = utf8({DEVA_KA, ZWJ, MY_KA});
+  ASSERT_EQ(IndicShaper::scanRuns(t, runs), 2u);
+  EXPECT_EQ(runs[0].end, 6);
+  EXPECT_EQ(runs[1].kind, IndicShaper::RunKind::Myanmar);
+}
+
+// A style change inside a Myanmar syllable merges the two tokens: before a vowel sign, a medial or asat, after the
+// stacker, before a consonant that asat follows (the dot below skipped), and before a joiner.
+TEST(TextShapingMerge, InsideAMyanmarSyllableAnotherStyleMerges) {
+  EXPECT_TRUE(merges(utf8({MY_KA}), 1, utf8({MY_E}), 2));
+  EXPECT_TRUE(merges(utf8({MY_MA}), 1, utf8({MY_MEDIAL_RA, MY_NA, MY_ASAT}), 2));
+  EXPECT_TRUE(merges(utf8({MY_MA, MY_MEDIAL_RA, MY_NA}), 1, utf8({MY_ASAT}), 2));
+  EXPECT_TRUE(merges(utf8({MY_KA, MY_STACKER}), 1, utf8({MY_KA}), 2));
+  EXPECT_TRUE(merges(utf8({MY_MA, MY_MEDIAL_RA}), 1, utf8({MY_NA, MY_ASAT}), 2));          // မြ + န်
+  EXPECT_TRUE(merges(utf8({MY_KA, MY_AA}), 1, utf8({MY_NGA, MY_DOT_BELOW, MY_ASAT}), 2));  // ကာ + င့်
+  EXPECT_TRUE(merges(utf8({MY_MA}), 1, utf8({MY_NGA, MY_ASAT, MY_STACKER, MY_GA}), 2));    // kinzi
+  EXPECT_TRUE(merges(utf8({MY_KA}), 1, utf8({ZWJ}), 2));
+  EXPECT_TRUE(merges(utf8({MY_ONE}), 1, utf8({MY_ONE}), 2));  // a number
+}
+
+TEST(TextShapingMerge, BetweenMyanmarSyllablesAnotherStyleStaysApart) {
+  EXPECT_FALSE(merges(utf8({MY_MA, MY_MEDIAL_RA, MY_NA, MY_ASAT}), 1, utf8({MY_MA, MY_AA}), 2));
+  EXPECT_FALSE(merges(utf8({MY_KA}), 1, utf8({MY_NA}), 2));
+  EXPECT_FALSE(merges(utf8({MY_KA}), 1, utf8({MY_NGA}), 2));  // a nga that no asat follows starts a syllable
+  EXPECT_FALSE(merges("abc", 1, utf8({MY_KA}), 2));
+  EXPECT_FALSE(merges(utf8({MY_KA}), 1, "abc", 2));
+  EXPECT_TRUE(merges(utf8({MY_KA}), 1, utf8({MY_NA}), 1));  // one style: a span split
 }

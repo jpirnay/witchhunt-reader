@@ -104,12 +104,13 @@ def ttf_entries():
 
 
 class TtfFamilies(unittest.TestCase):
-    def test_the_ttf_families_are_the_twenty_indic_ones_the_two_arabic_ones_and_the_two_hebrew_ones(self):
+    def test_the_ttf_families_are_the_twenty_indic_ones_and_two_each_of_arabic_hebrew_and_myanmar(self):
         entries = ttf_entries()
         self.assertEqual(sorted(f["name"] for f in entries),
                          sorted([f"Noto{kind}{x}" for kind in ("Sans", "Serif") for x in TTF_SCRIPTS]
-                                + ["NotoNaskhArabic", "NotoSansArabic", "NotoSansHebrew", "NotoSerifHebrew"]))
-        self.assertEqual(len(entries), 24)
+                                + ["NotoNaskhArabic", "NotoSansArabic", "NotoSansHebrew", "NotoSerifHebrew",
+                                   "NotoSansMyanmar", "NotoSerifMyanmar"]))
+        self.assertEqual(len(entries), 26)
         for f in entries:
             self.assertIs(f["inDownloadAll"], False, f["name"])
             self.assertTrue(f["description"], f["name"])
@@ -236,6 +237,38 @@ class HebrewMergeCheck(unittest.TestCase):
         self.assertIn(chr(0x05D9) + chr(0x05D4) + chr(0x05D5) + chr(0x05D4), lines)  # the divine name
 
 
+class MyanmarMergeCheck(unittest.TestCase):
+    def test_the_myanmar_families_are_checked_as_myanmar_left_to_right(self):
+        import merge_noto_latin
+
+        self.assertEqual(merge_noto_latin.LANGS["myanmar"], ["my", "mnw", "ksw", "shn"])
+        self.assertEqual(merge_noto_latin.script_of(chr(0x1019) + chr(0x103C) + chr(0x1014) + chr(0x103A)), "Mymr")
+        self.assertEqual(merge_noto_latin.script_of(chr(0xA9E0)), "Mymr")  # Myanmar Extended-B
+        self.assertEqual(merge_noto_latin.script_of(chr(0xAA60)), "Mymr")  # Myanmar Extended-A
+        self.assertEqual(merge_noto_latin.script_of(chr(0x200C) + chr(0x1000)), "Mymr")
+        self.assertEqual(merge_noto_latin.direction_of("Mymr"), "ltr")
+
+    def test_each_myanmar_family_finds_the_myanmar_corpus(self):
+        key = build_sd_fonts.corpus_key
+        self.assertEqual({key("NotoSansMyanmar"), key("NotoSerifMyanmar")}, {"myanmar"})
+
+    def test_the_myanmar_corpus_names_every_assigned_code_point_kinzi_and_a_stack(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_corpus_myanmar", REPO / "test" / "ot_shaper" / "generate_corpus_myanmar.py")
+        gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gen)
+        with tempfile.TemporaryDirectory() as tmp:
+            sys.argv = ["generate_corpus_myanmar.py", tmp]
+            gen.main()
+            lines = set((Path(tmp) / "myanmar.txt").read_text(encoding="utf-8").splitlines())
+        for c in gen.assigned():
+            self.assertIn(c, lines)
+        ka, ga, kinzi, stacker = chr(0x1000), chr(0x1002), chr(0x1004) + chr(0x103A) + chr(0x1039), chr(0x1039)
+        self.assertIn(kinzi + ka, lines)
+        self.assertIn(ka + stacker + ga, lines)
+        self.assertIn(ka + chr(0x103C) + chr(0x1031), lines)  # medial ra and e, both drawn before ka
+
+
 class HostedFontsLicense(unittest.TestCase):
     def test_the_ofl_names_every_copyright_the_hosted_fonts_carry(self):
         fonts = REPO / "assets" / "sd-fonts"
@@ -254,7 +287,7 @@ class HostedFontsLicense(unittest.TestCase):
         fonts = REPO / "assets" / "sd-fonts"
         ofl = (fonts / "OFL.txt").read_text(encoding="utf-8")
         files = sorted(fonts.glob("*/*.ttf"))
-        self.assertEqual(len(files), 48)
+        self.assertEqual(len(files), 52)
         for path in files:
             notice = TTFont(str(path))["name"].getDebugName(0)
             self.assertIn(notice.removesuffix("."), ofl, path.name)

@@ -4,7 +4,7 @@
     python lib/EpdFont/scripts/make_shaped_book_fonts.py --source-dir <dir with the pinned Noto TTFs> \
         --books test/epubs --fonts-out test/fixtures/fonts
 
-It writes five fonts, each a subset holding the code points of its books' XHTML plus U+0020, U+200C, U+200D and
+It writes six fonts, each a subset holding the code points of its books' XHTML plus U+0020, U+200C, U+200D and
 U+25CC, subset as make_shaping_fixtures.py subsets its fonts (every layout feature, GDEF, GSUB and GPOS kept whole, no
 hinting). EpubPipelineTest lays each book out with its font as the shaping face of every font and style, and
 ShapingRulesTest checks the pages.
@@ -16,6 +16,9 @@ ShapingRulesTest checks the pages.
   - NotoNaskhArabic-Book-Regular.ttf: Noto Naskh Arabic Regular merged with Noto Serif's Latin by
     merge_noto_latin.py, as the Font Manager's NotoNaskhArabic family is, over test_shaped_arabic.epub,
     test_shaped_persian.epub and test_shaped_urdu.epub (make_test_shaped_arabic.py), plus U+0640 (tatweel).
+  - NotoSansMyanmar-Book-Regular.ttf: Noto Sans Myanmar Regular merged with Noto Sans's Latin, as the Font Manager's
+    NotoSansMyanmar family is, over test_shaped_myanmar.epub (make_test_shaped_indic.py): Noto Sans Myanmar maps only
+    the space and the question mark of ASCII.
 
 The script does not download: --source-dir holds the TTFs, each checked against the sha256 pinned below. A font of
 131,072 bytes or more fails it. The output is byte-identical on every run, and the script writes nothing else.
@@ -54,6 +57,8 @@ SOURCES = {
     "NotoSansMalayalam": "cc39bb1f7d63b582a2aec1abf2469a43b805a3523a27e0a0eee8cd32702541d5",
     "NotoNaskhArabic": "c34fdbd98af4dbc45ca192a23d2eeb77032add83086f5fe32957d23b3f36b221",
     "NotoSerif": "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1",
+    "NotoSansMyanmar": "f4be6ef43871516d8347c5217a2033991b8ecda2dd1200007c2fb431a66d64db",
+    "NotoSans": "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8",
 }
 
 DEVANAGARI = [(0x0900, 0x097F), (0x1CD0, 0x1CFF), (0xA8E0, 0xA8FF)]
@@ -72,6 +77,7 @@ FONTS = [
     ("NotoNaskhArabic-Book-Regular.ttf", "NotoNaskhArabic", "NotoSerif",
      [("test_shaped_arabic.epub", None), ("test_shaped_persian.epub", None), ("test_shaped_urdu.epub", None)],
      [0x0640]),
+    ("NotoSansMyanmar-Book-Regular.ttf", "NotoSansMyanmar", "NotoSans", [("test_shaped_myanmar.epub", None)], []),
 ]
 
 MAX_FONT_BYTES = 131072

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Generate Myanmar test strings (Burmese, Mon, Shan, Karen and the rest of the script) for oracle_myanmar.py.
+"""Generate Myanmar test strings (Burmese, Mon, Shan, Karen and the rest of the script) for oracle_myanmar.py and for
+the merge check of the Myanmar TrueType families (merge_noto_latin.py, through build-sd-fonts.py).
 
 Writes <out dir>/myanmar.txt, one string per line, deterministic (random.Random(1757)):
 

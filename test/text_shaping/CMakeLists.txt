@@ -1,6 +1,7 @@
 add_executable(TextShapingTest
   TextShapingTest.cpp
   IndicShaperTest.cpp
+  MyanmarScriptTest.cpp
   ${REPO_ROOT}/lib/TextShaping/TextShaping.cpp
   ${REPO_ROOT}/lib/TextShaping/HebrewShaper.cpp
   ${REPO_ROOT}/lib/TextShaping/IndicShaper.cpp
