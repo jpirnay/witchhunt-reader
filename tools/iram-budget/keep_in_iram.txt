@@ -1,0 +1,48 @@
+# FreeRTOS functions FREERTOS_PLACE_FUNCTIONS_INTO_FLASH would move but this firmware calls on every SD access
+# (HalSpiBus::Lock), render (RenderLock, the render task's notifications) and loop turn: their (default) entries are
+# dropped from the fragment, so they keep libfreertos.a's FREERTOS_IN_IRAM placement. X3 bench of the first budget
+# (all of them in flash): every chapter build 2.4-4% slower.
+#
+# <fragment, under components/> <object>:<function>
+
+# queue.c: send, receive, peek, semaphore take, recursive mutex give/take, and their helpers.
+freertos/linker.lf queue:xQueueGenericSend
+freertos/linker.lf queue:xQueueSemaphoreTake
+freertos/linker.lf queue:xQueueReceive
+freertos/linker.lf queue:xQueuePeek
+freertos/linker.lf queue:prvUnlockQueue
+freertos/linker.lf queue:prvIsQueueEmpty
+freertos/linker.lf queue:xQueueGiveMutexRecursive
+freertos/linker.lf queue:xQueueTakeMutexRecursive
+freertos/linker.lf queue:uxQueueMessagesWaiting
+freertos/linker.lf queue:uxQueueSpacesAvailable
+
+# tasks.c: what blocking and mutex priority inheritance call on those paths.
+freertos/linker.lf tasks:vTaskPlaceOnEventList
+freertos/linker.lf tasks:prvAddCurrentTaskToDelayedList
+freertos/linker.lf tasks:xTaskCheckForTimeOut
+freertos/linker.lf tasks:vTaskInternalSetTimeOutState
+freertos/linker.lf tasks:vTaskMissedYield
+freertos/linker.lf tasks:xTaskPriorityInherit
+freertos/linker.lf tasks:xTaskPriorityDisinherit
+freertos/linker.lf tasks:pvTaskIncrementMutexHeldCount
+freertos/linker.lf tasks:xTaskGetCurrentTaskHandle
+freertos/linker.lf tasks:uxTaskGetNumberOfTasks
+freertos/linker.lf list:vListInsert
+
+# tasks.c: notifications.
+freertos/linker.lf tasks:xTaskGenericNotify
+freertos/linker.lf tasks:ulTaskGenericNotifyTake
+freertos/linker.lf tasks:ulTaskGenericNotifyValueClear
+
+# port.c: the yield the blocking calls above end in.
+freertos/linker.lf port:vPortYield
+
+# tasks.c: scheduler suspend and resume, delay.
+freertos/linker.lf tasks:vTaskSuspendAll
+freertos/linker.lf tasks:xTaskResumeAll
+freertos/linker.lf tasks:vTaskDelay
+
+# linker_common.lf: newlib's reentrancy hook and the current-task lookup.
+freertos/linker_common.lf tasks:__getreent
+freertos/linker_common.lf tasks:xTaskGetCurrentTaskHandleForCore

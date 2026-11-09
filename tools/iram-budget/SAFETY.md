@@ -6,11 +6,15 @@ interrupt registered with `ESP_INTR_FLAG_IRAM`, with everything it calls. Every 
 (`esp_intr_noniram_disable`) and the scheduler is suspended (`vTaskSuspendAll`) before the cache goes off.
 
 `options.txt` flips three option groups, each of which changes ESP-IDF v5.5.5's linker fragments only (no compiled
-source reads the symbols). IDF itself keeps in IRAM what its own cache-disabled paths and ISRs need:
+source reads the symbols). IDF itself keeps in IRAM what its own cache-disabled paths and ISRs need, and
+`keep_in_iram.txt` keeps the FreeRTOS calls this firmware makes on every SD access, render and loop turn (queue
+send/receive/peek, semaphore and recursive mutex take/give, notifications, scheduler suspend/resume, `vTaskDelay`,
+`vPortYield`, and what they call): with all of FreeRTOS's non-ISR functions in flash, every X3 chapter build ran
+2.4-4% slower.
 
 | Option | Moved to flash (map) | Kept in IRAM |
 |---|---|---|
-| `FREERTOS_PLACE_FUNCTIONS_INTO_FLASH` | 91 sections, 11,008 B (tasks, queues, timers, event groups) | FromISR functions, tick and context switch, critical sections, lists, `xTaskGetSchedulerState` (3,308 B) |
+| `FREERTOS_PLACE_FUNCTIONS_INTO_FLASH`, less `keep_in_iram.txt` | 61 sections, 6,798 B (task create/delete, timers, event groups, queue create/delete, the scheduler's start) | FromISR functions, tick and context switch, critical sections, lists, `xTaskGetSchedulerState`, and the keep list (7,504 B in all; the keep list 4,154 B) |
 | `RINGBUF_PLACE_FUNCTIONS_INTO_FLASH` | 15 sections, 1,758 B (create, send, receive, delete) | every FromISR function and its helpers (3,026 B) |
 | `RMT_{TX,RX}_ISR_HANDLER_IN_IRAM` unset | 10 sections, 2,338 B | `rmt_encoder_copy` (its attribute is compiled in) |
 
@@ -34,17 +38,13 @@ IRAM-flagged are IDF's own: the FreeRTOS tick (`SysTickIsrHandler`, `xPortSysTic
 
 ## IRAM code that now calls into flash
 
-A disassembly of the new `.iram0.text` lists every call from IRAM to a function that left it (11 targets):
+A disassembly of the new `.iram0.text` lists every call from IRAM to a function that left it (6 targets; the keep
+list brought back `uxTaskGetNumberOfTasks`, `xTaskPriorityDisinherit`, `vTaskDelay`, `vTaskSuspendAll`,
+`xTaskResumeAll`, `xQueueSemaphoreTake` and `xQueueTakeMutexRecursive`, which the first budget had moved):
 
-- `uxTaskGetNumberOfTasks` from `xQueueGenericSendFromISR`, `xQueueGiveFromISR`, `xQueueReceiveFromISR` and
-  `prvNotifyQueueSetContainer`: only through `prvIncrementQueueTxLock`/`RxLock`, when a task holds the queue locked
-  inside a queue call. With one core and the scheduler suspended for a flash operation, no task is inside one.
-- `xTaskPriorityDisinherit` from `prvCopyDataToQueue`: mutexes only, which no ISR may give.
-- `vTaskDelay` from `spi_flash_os_yield`: called by the erase loop before it takes the bus again (cache on).
-  `vTaskSuspendAll` and `xTaskResumeAll` (now in flash too) are called by the flash driver before it disables the
-  cache and after it enables it again.
-- `vQueueDelete`, `xQueueGetMutexHolder`, `xQueueCreateMutex`, `xQueueSemaphoreTake`, `xQueueTakeMutexRecursive`
-  from newlib's and esp_log's locks, `vRingbufferDelete` from `vRingbufferDeleteWithCaps`: task context.
+- `vTaskPriorityDisinheritAfterTimeout` from `xQueueSemaphoreTake`: a mutex take that timed out, task context.
+- `vQueueDelete`, `xQueueGetMutexHolder`, `xQueueCreateMutex` from newlib's and esp_log's locks, `vRingbufferDelete`
+  from `vRingbufferDeleteWithCaps`: task context.
 - `xTaskGetCurrentTaskHandleForCore` from `esp_backtrace_print`, `xPortCheckValidTCBMem` from `vTaskGetSnapshot`:
   the panic and core dump paths. Residual risk: a panic raised while the cache is off loses its backtrace or core
   dump, not more.
