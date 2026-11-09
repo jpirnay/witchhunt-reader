@@ -32,7 +32,7 @@ Already shipped, so nobody redoes it: the built-in glyph record went from 16 to 
 
 ## Compressing the Inter and Noto Sans 8 UI faces
 
-**Open.** The six Inter UI faces and Noto Sans 8 still ship flat: 226,405 B of bitmaps and offsets. Measured (2026-10-19) with the CJK faces' encoding, 1-bit rows byte-aligned in DEFLATE groups:
+**Open.** The six Inter UI faces and Noto Sans 8 still ship flat: 226,405 B of bitmaps and offsets. That holds for every build but the Murphy M3's, which adds Inter 8 regular and bold and Noto Sans 6 (#605). Measured (2026-10-19) with the CJK faces' encoding, 1-bit rows byte-aligned in DEFLATE groups:
 
 | cap | Inter (6 faces) | Noto Sans 8 |
 | --- | ---: | ---: |
@@ -51,7 +51,7 @@ Already shipped, so nobody redoes it: the built-in glyph record went from 16 to 
 
 **Open.** Brotli at quality 11 with a 64 KB window (`lgwin=16`) is the only bitmap recompression that beat zopfli DEFLATE: −95 KB gross. The decoder costs ~25–40 KB of flash, so the net gain is −55 to −70 KB, for a second decoder on the font path and more CPU per cold glyph.
 
-**Why it matters.** Flash headroom; the image was at 94.8 % of the app partition after `7779e1936` (2026-09-20).
+**Why it matters.** Flash headroom; the image was at 94.8 % of the app partition after `7779e1936` (2026-09-20). On 2026-11-09 the `default` build for the X3 and X4 is at 96.6 %, about 224 KB free.
 
 **Ruled out.** Porting crosspoint-reader PR #3083's GlyphStream codec (per-glyph range coding, ~−650 KB on our bitmaps): it was still a draft, its render cost was +107 % before caching, and the Home screen regressed from 14 to 70 ms because its cache was reader-scoped. It would need the global glyph cache first.
 
