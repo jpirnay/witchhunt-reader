@@ -43,11 +43,11 @@ the observed symptom, so none has device evidence yet.
 **Lesson.** The first fix was chosen from a story, not from a test that separates causes, and it
 changed nothing. Re-audit each defect against its own trigger before re-landing it.
 
-**Where the written fixes are.** Only as unreachable commits: firmware `c17d939ab` (a docs commit;
-the fixes are its ancestors `a6276195f` D2, `1989118a6` D5, `195bcd5d4` D3 and `d2ddab827` D4), SDK
-`96f031d` (D1) and `08222e1` (D5). No branch holds them, so `git gc` will eventually drop them.
+**Where the written fixes are.** Nowhere any more. They were unreachable commits: firmware `c17d939ab` (a docs
+commit; the fixes were its ancestors `a6276195f` D2, `1989118a6` D5, `195bcd5d4` D3 and `d2ddab827` D4), SDK
+`96f031d` (D1) and `08222e1` (D5). None of them exists now, locally, in the SDK or on GitHub (checked 2026-11-09).
 
-**Next.** Tag the commits if the code is wanted; otherwise rewrite from the descriptions below.
+**Next.** Rewrite each fix from its description below, after the re-audit.
 
 ## D2: the reader's exit hook repairs only the pre-render case
 
@@ -109,6 +109,9 @@ the next full-frame refresh composites onto that frame.
 
 **Tried.** `_displayedFrameValid`, set only by `swapBuffers()` and exposed as `hasDisplayedFrame()`,
 with `syncWriteBufferFromActive()` returning whether it copied. Host-tested, reverted (SDK `08222e1`).
+Since then the SDK keeps a private `_activeMatchesGlass` (`FreeInkDisplay.h:505`), set only where a display
+leaves on the glass the frame it showed: roughly what D5 wanted, read only by the one-pass path
+(`beginOnePassMask()`).
 
 **Next.** List the consumers that can run between a return or realloc and the next full-frame refresh.
 Re-land only if one exists.
@@ -118,10 +121,10 @@ Re-land only if one exists.
 **Open.** The rule "before drawing on top of the panel, the write buffer must hold what the panel
 shows" lives at each call site, and each does it differently:
 - `ActivityManager::dispatchLightPanelGesture()` runs `syncWriteBufferFromDisplayed()` and then
-  `prepareFramebufferForCapture()`. Its comment says the screenshot path does the same; it does not.
-- The POWER+DOWN screenshot path in `main.cpp` runs only `prepareFramebufferForCapture()`, so
-  outside the reader's pre-render case it saves whatever the write buffer holds (see D2). The serial
-  `CMD:SCREENSHOT` path runs neither.
+  `prepareFramebufferForCapture()`.
+- The POWER+DOWN screenshot and the serial `CMD:SCREENSHOT` both go through `ScreenshotUtil::service`,
+  which does the same, sync then prepare (`ScreenshotUtil.cpp:50-51`; `d36e0f382`, #479, 2026-10-16,
+  refined in `ba4fefaa7`).
 - The `overlayDisplayedFrame` popups (`BaseTheme::drawPopup()`, `drawBusyIndicator()`,
   `LyraTheme::drawPopup()`) run only the sync, as do the screens that call
   `syncWriteBufferFromDisplayed()` themselves (Home, the file browser, book info, the sleep cover,
@@ -181,7 +184,7 @@ use it in `showBusyIndicator()`. Design state 3 when a second consumer needs it.
 
 **Open.** `FreeInkDisplay::PanelSel` (`X4`, `X3`, `M5`; default `X4`) picks the driver and also stands
 for "this controller keeps a host-managed previous frame", which is true of the SSD1677 only. Every
-board that is not an X3 reads as `X4`: X4 and X4 Pro units on UC8179 or UC8279, and the T5S3.
+board that is not an X3 reads as `X4`: X4 and X4 Pro units on UC8179 or UC8279, the T5S3, and the Murphy M3.
 - `resolveReleasedMode()` turns FAST into HALF while the secondary is away (unless
   `setSingleBufferFastDiff(true)`), also on drivers that ignore `prev` and keep their own baseline.
 - `isRedRamSynced()` reports a RED plane that UC8179, UC8279 X4 and LGFX do not have.
@@ -194,7 +197,9 @@ board that is not an X3 reads as `X4`: X4 and X4 Pro units on UC8179 or UC8279, 
 
 The SDK's `displayCommitted()` and `abortPostRefresh()` / `postRefreshAborted()` are still unused: the
 reader hand-rolls `aaPreemptedByNavigation()`, and the refresh cadence assumes every submit commits.
-Also open: whether the PSRAM boards (X4 Pro, T5S3) need to borrow or release the secondary at all.
+Whether the PSRAM boards need to release the secondary at all is settled by #614: no S3 board does
+(`HalCapabilities::keepsSecondaryBuffer()`, `HalCapabilities.h:221`). So the FAST-to-HALF downgrade during a
+borrow now matters only on C3 X4 units with a UC8179 or UC8279.
 
 **Why it matters.** A downgraded FAST costs a HALF waveform: on an X4, ~1755 ms instead of ~476 ms
 (2026-08-19, during a Background-B borrow).
@@ -328,7 +333,8 @@ pre-rendered page.
 
 **Status.** The T5S3 now sends AA as a single push in normal reading, so the measured case no longer
 happens there. The X3 is the board left on the deferred path, and A runs there again as of
-2026-10-08 (item above). That log shows the order on every page: the deferred AA (planes ~296 +
+2026-10-08 (item above). On the X3, the opt-in One-Pass Anti-Aliasing (#648, 2026-11-07) sends a text page
+with its gray in one refresh and no deferred pass; the default and image pages are unchanged. That log shows the order on every page: the deferred AA (planes ~296 +
 gray ~357 + restore ~50 ms), then the pre-render (~70 ms).
 
 **Next.** Measure how often a quick turn on the X3 lands inside the AA window. Reordering needs a C3
