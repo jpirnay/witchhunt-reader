@@ -463,7 +463,7 @@ under 1 KB more heap shaped than unshaped there. The room the arena has for the 
   pass's arena workspace, and a paragraph's end releases line buffers over 2 KB and a store over 8 KB. The host
   inventory's peak for that chapter fell from +73.2 to +62.6 KB above the build's base, with layout unchanged, and
   on the X3 the build's heap minimum rose from 5.8 KB to about 19.8 KB (read with 8 KB of ballast held, since the
-  build no longer reaches the boot's own minimum; the writing-modes handover, item 1).
+  build no longer reaches the boot's own minimum; [text-shaping.md](text-shaping.md#the-shaped-stores-heap)).
 
 ### 8.4 Where contiguity is lost
 
