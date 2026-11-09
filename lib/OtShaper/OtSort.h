@@ -1,5 +1,7 @@
 #pragma once
 
+#include "OtHot.h"  // exp/shaper-iram
+
 namespace ot {
 
 // Stable insertion sort. Everything the shaper sorts is short (a syllable,
@@ -7,7 +9,7 @@ namespace ot {
 // costs a few dozen bytes per element type where std::stable_sort's merge
 // machinery costs over a kilobyte.
 template <typename T, typename Less>
-void stableSort(T* first, T* last, Less less) {
+OT_WARM void stableSort(T* first, T* last, Less less) {
   if (last - first < 2) return;
   for (T* i = first + 1; i != last; ++i) {
     const T value = *i;

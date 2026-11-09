@@ -12,16 +12,16 @@ namespace {
 
 // HarfBuzz's roundf(): floor(x + 0.5), so halves round up (-12.5 -> -12),
 // unlike the C library's away-from-zero rounding.
-int32_t hbRound(const float x) { return static_cast<int32_t>(floorf(x + 0.5f)); }
+OT_HOT int32_t hbRound(const float x) { return static_cast<int32_t>(floorf(x + 0.5f)); }
 
 constexpr uint16_t VF_X_PLACEMENT = 0x0001, VF_Y_PLACEMENT = 0x0002, VF_X_ADVANCE = 0x0004, VF_Y_ADVANCE = 0x0008,
                    VF_X_PLA_DEVICE = 0x0010, VF_Y_PLA_DEVICE = 0x0020, VF_X_ADV_DEVICE = 0x0040, VF_DEVICES = 0x00F0;
 
-unsigned valueLength(const uint16_t format) { return static_cast<unsigned>(__builtin_popcount(format)); }
+OT_HOT unsigned valueLength(const uint16_t format) { return static_cast<unsigned>(__builtin_popcount(format)); }
 
 // Device table correction in scaled units (hinting deltas only: variation
 // indices contribute nothing without variation coordinates).
-int32_t deviceDelta(const Table& device, const unsigned ppem, const int32_t scale) {
+OT_HOT int32_t deviceDelta(const Table& device, const unsigned ppem, const int32_t scale) {
   if (!ppem) return 0;
   const uint16_t f = device.u16(4);
   if (f < 1 || f > 3) return 0;
@@ -40,8 +40,8 @@ int32_t deviceDelta(const Table& device, const unsigned ppem, const int32_t scal
 
 // ValueFormat::apply_value() for horizontal text. `base` is the table value
 // record device offsets are relative to.
-void applyValue(const ApplyContext* c, const uint16_t format, const Table& base, const Table& values, uint32_t o,
-                GlyphPosition& pos) {
+OT_HOT void applyValue(const ApplyContext* c, const uint16_t format, const Table& base, const Table& values, uint32_t o,
+                       GlyphPosition& pos) {
   const Scale& s = c->scale;
   if (!format) return;
   if (format & VF_X_PLACEMENT) {
@@ -75,7 +75,7 @@ void applyValue(const ApplyContext* c, const uint16_t format, const Table& base,
   }
 }
 
-void anchorPoint(const ApplyContext* c, const Table& anchor, float* x, float* y) {
+OT_HOT void anchorPoint(const ApplyContext* c, const Table& anchor, float* x, float* y) {
   const Scale& s = c->scale;
   *x = *y = 0;
   switch (anchor.u16(0)) {
@@ -95,7 +95,7 @@ void anchorPoint(const ApplyContext* c, const Table& anchor, float* x, float* y)
   }
 }
 
-bool applySinglePos(ApplyContext* c, const Table& st) {
+OT_HOT bool applySinglePos(ApplyContext* c, const Table& st) {
   Buffer& buffer = c->buffer;
   const int index = coverageIndex(st.offset16(2), buffer.cur().codepoint);
   if (index == NOT_COVERED) return false;
@@ -115,7 +115,7 @@ bool applySinglePos(ApplyContext* c, const Table& st) {
   return true;
 }
 
-bool applyPairPos(ApplyContext* c, const Table& st) {
+OT_HOT bool applyPairPos(ApplyContext* c, const Table& st) {
   Buffer& buffer = c->buffer;
   const int index = coverageIndex(st.offset16(2), buffer.cur().codepoint);
   if (index == NOT_COVERED) return false;
@@ -175,7 +175,8 @@ bool applyPairPos(ApplyContext* c, const Table& st) {
 // reverse_cursive_minor_offset(): the old cursive chain of `child` now
 // hangs off it, so reverse every link along that chain (stopping at
 // `newParent`), innermost first.
-void reverseCursiveMinorOffset(GlyphPosition* pos, const unsigned len, const unsigned child, const unsigned newParent) {
+OT_HOT void reverseCursiveMinorOffset(GlyphPosition* pos, const unsigned len, const unsigned child,
+                                      const unsigned newParent) {
   uint16_t chainNodes[MAX_ATTACH_DEPTH + 2];
   unsigned n = 0;
   unsigned node = child;
@@ -200,7 +201,7 @@ void reverseCursiveMinorOffset(GlyphPosition* pos, const unsigned len, const uns
   }
 }
 
-bool applyCursivePos(ApplyContext* c, const Table& st) {
+OT_HOT bool applyCursivePos(ApplyContext* c, const Table& st) {
   if (st.u16(0) != 1) return false;
   Buffer& buffer = c->buffer;
   const Table coverage = st.offset16(2);
@@ -268,7 +269,7 @@ bool applyCursivePos(ApplyContext* c, const Table& st) {
 }
 
 // resolve_cross_offset().
-int32_t crossOffset(const GlyphPosition* pos, const unsigned len, unsigned glyphPos) {
+OT_HOT int32_t crossOffset(const GlyphPosition* pos, const unsigned len, unsigned glyphPos) {
   int32_t offset = pos[glyphPos].yOffset;
   for (unsigned steps = 0; steps < len && (pos[glyphPos].attachType & ATTACH_TYPE_CURSIVE); steps++) {
     const int chain = pos[glyphPos].attachChain;
@@ -283,8 +284,8 @@ int32_t crossOffset(const GlyphPosition* pos, const unsigned len, unsigned glyph
 
 // MarkArray::apply(): attaches the current mark to the glyph at `glyphPos`.
 // `anchors` is the AnchorMatrix (base, ligature component or mark2 array).
-bool applyMarkArray(ApplyContext* c, const Table& markArray, const unsigned markIndex, const unsigned row,
-                    const Table& anchors, const unsigned classCount, const unsigned glyphPos) {
+OT_HOT bool applyMarkArray(ApplyContext* c, const Table& markArray, const unsigned markIndex, const unsigned row,
+                           const Table& anchors, const unsigned classCount, const unsigned glyphPos) {
   Buffer& buffer = c->buffer;
   // A mark index past the array reads as a Null record: class 0, no anchor.
   const bool inRange = markIndex < markArray.u16(0);
@@ -318,21 +319,21 @@ bool applyMarkArray(ApplyContext* c, const Table& markArray, const unsigned mark
 }
 
 // MarkBasePosFormat1::accept().
-bool acceptBase(const Buffer& buffer, const unsigned idx) {
+OT_HOT bool acceptBase(const Buffer& buffer, const unsigned idx) {
   const GlyphInfo& g = buffer.info[idx];
   if (!g.multiplied() || g.ligComp() == 0 || idx == 0) return true;
   const GlyphInfo& p = buffer.info[idx - 1];
   return p.isMark() || !p.multiplied() || g.ligId() != p.ligId() || g.ligComp() != p.ligComp() + 1;
 }
 
-bool acceptLigature(const Buffer& buffer, const unsigned idx) {
+OT_HOT bool acceptLigature(const Buffer& buffer, const unsigned idx) {
   const GlyphInfo& g = buffer.info[idx];
   return !g.multiplied() || g.ligComp() == 0;
 }
 
 // The last non-mark glyph before the current one that `accept` takes, with
 // the per-lookup memo HarfBuzz keeps (last_base / last_base_until).
-int findBase(ApplyContext* c, const Table& baseCoverage, bool (*accept)(const Buffer&, unsigned)) {
+OT_HOT int findBase(ApplyContext* c, const Table& baseCoverage, bool (*accept)(const Buffer&, unsigned)) {
   Buffer& buffer = c->buffer;
   SkippyIter& it = c->iterInput;
   it.lookupProps = lookupflag::IGNORE_MARKS;
@@ -355,7 +356,7 @@ int findBase(ApplyContext* c, const Table& baseCoverage, bool (*accept)(const Bu
   return c->lastBase;
 }
 
-bool applyMarkBasePos(ApplyContext* c, const Table& st) {
+OT_HOT bool applyMarkBasePos(ApplyContext* c, const Table& st) {
   if (st.u16(0) != 1) return false;
   Buffer& buffer = c->buffer;
   const int markIndex = coverageIndex(st.offset16(2), buffer.cur().codepoint);
@@ -369,7 +370,7 @@ bool applyMarkBasePos(ApplyContext* c, const Table& st) {
                         st.offset16(10), st.u16(6), static_cast<unsigned>(base));
 }
 
-bool applyMarkLigPos(ApplyContext* c, const Table& st) {
+OT_HOT bool applyMarkLigPos(ApplyContext* c, const Table& st) {
   if (st.u16(0) != 1) return false;
   Buffer& buffer = c->buffer;
   const int markIndex = coverageIndex(st.offset16(2), buffer.cur().codepoint);
@@ -397,7 +398,7 @@ bool applyMarkLigPos(ApplyContext* c, const Table& st) {
                         static_cast<unsigned>(base));
 }
 
-bool applyMarkMarkPos(ApplyContext* c, const Table& st) {
+OT_HOT bool applyMarkMarkPos(ApplyContext* c, const Table& st) {
   if (st.u16(0) != 1) return false;
   Buffer& buffer = c->buffer;
   const int mark1Index = coverageIndex(st.offset16(2), buffer.cur().codepoint);
@@ -427,7 +428,7 @@ bool applyMarkMarkPos(ApplyContext* c, const Table& st) {
 
 }  // namespace
 
-bool applyGposSubtable(ApplyContext* c, const uint16_t type, const Table& st) {
+OT_HOT bool applyGposSubtable(ApplyContext* c, const uint16_t type, const Table& st) {
   switch (type) {
     case gpos::SINGLE:
       return applySinglePos(c, st);
@@ -459,7 +460,7 @@ namespace ot {
 // marks cancel the advances between them and their base.
 // witchhunt: deviation 11 - a backward buffer is walked from its last glyph
 // (HarfBuzz #5514), and its marks take the backward branches.
-void propagateAttachmentOffsets(Buffer& buffer) {
+OT_HOT void propagateAttachmentOffsets(Buffer& buffer) {
   using layout::satAdd;
   using layout::satSub;
   if (!buffer.hasGposAttachment) return;

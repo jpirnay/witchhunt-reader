@@ -11,6 +11,8 @@
 #include <type_traits>
 #include <utility>
 
+#include "OtHot.h"  // exp/shaper-iram
+
 namespace ot {
 
 // The calls lib/OtShaper makes of std::vector, over memory its owner binds;
@@ -54,21 +56,21 @@ class FixedVector {
 
   void clear() { size_ = 0; }
 
-  bool push_back(const T& value) {
+  OT_HOT bool push_back(const T& value) {
     if (size_ >= capacity_) return refuse();
     data_[size_++] = value;
     return true;
   }
 
   // New elements are value-initialised.
-  bool resize(const size_t n) {
+  OT_HOT bool resize(const size_t n) {
     if (n > capacity_) return refuse();
     for (size_t i = size_; i < n; i++) data_[i] = T{};
     size_ = n;
     return true;
   }
 
-  bool assign(const size_t n, const T& value) {
+  OT_HOT bool assign(const size_t n, const T& value) {
     if (n > capacity_) return refuse();
     const T copy = value;  // `value` may be one of the elements
     for (size_t i = 0; i < n; i++) data_[i] = copy;
@@ -76,7 +78,7 @@ class FixedVector {
     return true;
   }
 
-  T* insert(T* const at, const T& value) {
+  OT_HOT T* insert(T* const at, const T& value) {
     if (size_ >= capacity_) {
       refuse();
       return nullptr;
@@ -89,7 +91,7 @@ class FixedVector {
     return data_ + i;
   }
 
-  T* erase(T* const at) {
+  OT_HOT T* erase(T* const at) {
     const size_t i = static_cast<size_t>(at - data_);
     std::memmove(data_ + i, data_ + i + 1, (size_ - i - 1) * sizeof(T));
     size_--;
@@ -97,7 +99,7 @@ class FixedVector {
   }
 
   // Exchanges the bindings: data, size, capacity and flag.
-  void swap(FixedVector& other) {
+  OT_HOT void swap(FixedVector& other) {
     std::swap(data_, other.data_);
     std::swap(size_, other.size_);
     std::swap(capacity_, other.capacity_);
@@ -105,7 +107,7 @@ class FixedVector {
   }
 
  private:
-  bool refuse() {
+  OT_HOT bool refuse() {
     if (fits_) *fits_ = false;
     return false;
   }

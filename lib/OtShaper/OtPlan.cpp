@@ -307,7 +307,7 @@ bool Plan::copyLookupDigests(const Face& face) {
 }
 
 // witchhunt: deviation 13 - planned lookup `i` of `table`'s record in lookupDigests_.
-const uint8_t* Plan::digestRecord(const int table, const size_t i) const {
+OT_HOT const uint8_t* Plan::digestRecord(const int table, const size_t i) const {
   return lookupDigests_.data() + DIGEST_BYTES * (table == GSUB ? i : lookups[GSUB].size() + i);
 }
 
@@ -403,7 +403,7 @@ bool Plan::allocateFilters(const int table, const size_t lookupCount, const size
   return true;
 }
 
-LookupSettings Plan::settings(const int table, const size_t i, const bool resolve) const {
+OT_HOT LookupSettings Plan::settings(const int table, const size_t i, const bool resolve) const {
   const PlannedLookup& lookup = lookups[table][i];
   LookupSettings out;
   out.mask = lookup.mask;
@@ -439,14 +439,14 @@ LookupSettings Plan::settings(const int table, const size_t i, const bool resolv
 
 // witchhunt: deviation 13 - applyTable()'s digest test, on the plan's copy of
 // the digest, so it comes before settings() reads anything of the font.
-bool Plan::mayApply(const int table, const size_t i, const Digest& buffer) const {
+OT_HOT bool Plan::mayApply(const int table, const size_t i, const Digest& buffer) const {
   return testBypassCaches || readDigest(digestRecord(table, i)).mayIntersect(buffer);
 }
 
 // witchhunt: deviation 16 - applyLookup() starts only at a glyph its digest may hold, of its mask, that its flags do
 // not ignore. A lookup no glyph of the buffer passes the first two for starts nowhere: applyLookup() would only walk
 // the buffer to its end, and no pass reads the index it leaves.
-bool Plan::mayStart(const int table, const size_t i, const Buffer& buffer) const {
+OT_HOT bool Plan::mayStart(const int table, const size_t i, const Buffer& buffer) const {
   if (testBypassCaches) return true;
   const Digest digest = readDigest(digestRecord(table, i));
   const uint32_t mask = lookups[table][i].mask;
@@ -458,7 +458,7 @@ bool Plan::mayStart(const int table, const size_t i, const Buffer& buffer) const
 
 // witchhunt: deviation 13 - see positions_. A glyph past 16 bits (no font has
 // one) walks every time.
-uint8_t Plan::consonantPosition(const Face& face, const uint32_t consonant, const uint32_t virama) const {
+OT_WARM uint8_t Plan::consonantPosition(const Face& face, const uint32_t consonant, const uint32_t virama) const {
   if (testBypassCaches || consonant > UINT16_MAX || virama > UINT16_MAX) {
     return consonantPositionFromFace(face, *this, consonant, virama);
   }
@@ -499,8 +499,8 @@ void Plan::collectWould(const WouldFeature feature) {
 // every plan holds: HarfBuzz always has it (format-3 contexts leave their
 // first glyph to it), where the port fell back to "any first glyph" when a
 // plan had no filters.
-bool Plan::wouldSubstitute(const Face& face, const WouldFeature feature, const uint32_t* glyphs,
-                           const unsigned count) const {
+OT_WARM bool Plan::wouldSubstitute(const Face& face, const WouldFeature feature, const uint32_t* glyphs,
+                                   const unsigned count) const {
   const WouldSubstituteLookups& w = would_[feature];
   for (size_t i = w.start; i < w.end; i++) {
     if (ot::wouldSubstitute(face, lookups[GSUB][i].index, readDigest(digestRecord(GSUB, i)), glyphs, count,

@@ -42,7 +42,7 @@ void normalize(const Face& face, const Plan& plan, Buffer& buffer);
 
 // Calls `f(start, end)` for each syllable (a run of equal syllable bytes).
 template <typename F>
-void forEachSyllable(const Buffer& buffer, F f) {
+OT_WARM void forEachSyllable(const Buffer& buffer, F f) {
   const unsigned len = buffer.len();
   unsigned start = 0;
   while (start < len) {
@@ -74,8 +74,8 @@ void findSyllables(Buffer& buffer, const uint8_t* classes, uint8_t classCount, c
 // pattern matches (every scanner has a one-character catch-all, so only
 // for an empty sequence), and the syllable type.
 template <typename Category>
-unsigned scanSyllable(const uint8_t* classes, const uint8_t classCount, const uint8_t* transitions,
-                      const uint8_t* accept, const unsigned available, Category category, uint8_t* type) {
+OT_WARM unsigned scanSyllable(const uint8_t* classes, const uint8_t classCount, const uint8_t* transitions,
+                              const uint8_t* accept, const unsigned available, Category category, uint8_t* type) {
   unsigned state = 0;
   unsigned best = 0;
   for (unsigned i = 0; i < available; i++) {

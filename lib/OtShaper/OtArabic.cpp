@@ -45,7 +45,7 @@ constexpr uint32_t MODIFIER_COMBINING_MARKS[] = {
     0x0654, 0x0655, 0x0658, 0x06DC, 0x06E3, 0x06E7, 0x06E8, 0x08CA, 0x08CB, 0x08CD, 0x08CE, 0x08CF, 0x08D3, 0x08F3,
 };
 
-bool isModifierCombiningMark(const uint32_t cp) {
+OT_WARM bool isModifierCombiningMark(const uint32_t cp) {
   return std::find(std::begin(MODIFIER_COMBINING_MARKS), std::end(MODIFIER_COMBINING_MARKS), cp) !=
          std::end(MODIFIER_COMBINING_MARKS);
 }
@@ -60,7 +60,7 @@ constexpr uint8_t MODIFIED_CCC26 = 26;
 // arabic_joining(). The context code points are in the buffer (CONTEXT_MASK), so they run through the machine
 // like the rest: HarfBuzz seeds the state from the nearest non-transparent context character instead, which
 // leaves the same actions for the run's own glyphs.
-void arabicSetupMasks(const Plan& plan, Buffer& buffer) {
+OT_WARM void arabicSetupMasks(const Plan& plan, Buffer& buffer) {
   const unsigned count = buffer.len();
   constexpr unsigned NO_PREV = ~0u;
   unsigned prev = NO_PREV, state = 0;
@@ -83,7 +83,7 @@ void arabicSetupMasks(const Plan& plan, Buffer& buffer) {
 }
 
 // reorder_marks_arabic(). There are no clusters to merge.
-void reorderMarksArabic(Buffer& buffer, unsigned start, const unsigned end) {
+OT_WARM void reorderMarksArabic(Buffer& buffer, unsigned start, const unsigned end) {
   GlyphInfo* const info = buffer.info.data();
   unsigned i = start;
   for (unsigned cc = 220; cc <= 230; cc += 10) {

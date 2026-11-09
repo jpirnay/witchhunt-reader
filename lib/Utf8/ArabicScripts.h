@@ -1,5 +1,13 @@
 #pragma once
 
+// exp/shaper-iram: the shaper's large IRAM tier (lib/OtShaper/OtHot.h).
+#if defined(ESP_PLATFORM) && defined(OT_IRAM) && OT_IRAM >= 2
+#include <esp_attr.h>
+#define OT_WARM IRAM_ATTR
+#else
+#define OT_WARM
+#endif
+
 #include <cstddef>
 #include <cstdint>
 
@@ -24,7 +32,7 @@ constexpr bool inBlocks(const uint32_t cp) {
 }
 
 // The marks (bidi class NSM) among the members.
-constexpr bool isMark(const uint32_t cp) {
+OT_WARM constexpr bool isMark(const uint32_t cp) {
   return (cp >= 0x0610 && cp <= 0x061A) || (cp >= 0x064B && cp <= 0x065F) || cp == 0x0670 ||
          (cp >= 0x06D6 && cp <= 0x06DC) || (cp >= 0x06DF && cp <= 0x06E4) || cp == 0x06E7 || cp == 0x06E8 ||
          (cp >= 0x06EA && cp <= 0x06ED) || (cp >= 0x0897 && cp <= 0x089F) || (cp >= 0x08CA && cp <= 0x08E1) ||
@@ -32,7 +40,7 @@ constexpr bool isMark(const uint32_t cp) {
 }
 
 // True for a code point that can be part of a run (never ZWJ or ZWNJ, which the scan takes inside a run).
-constexpr bool isRunMember(const uint32_t cp) {
+OT_WARM constexpr bool isRunMember(const uint32_t cp) {
   if (!inBlocks(cp)) return false;
   if (cp < 0x0700) {
     return cp == 0x0608 || cp == 0x060B || cp == 0x060D || (cp >= 0x0610 && cp <= 0x061B) ||
@@ -57,7 +65,7 @@ constexpr bool isPunctuationMember(const uint32_t cp) {
 constexpr bool takesJoiner(const uint32_t cp) { return isRunMember(cp) && !isPunctuationMember(cp); }
 
 // True when `cp` starts a new cluster after `prev`: a mark, a joiner, or anything after a ZWJ stays in the cluster.
-constexpr bool isClusterBreak(const uint32_t prev, const uint32_t cp) {
+OT_WARM constexpr bool isClusterBreak(const uint32_t prev, const uint32_t cp) {
   return !isMark(cp) && cp != ZWJ && cp != ZWNJ && prev != ZWJ;
 }
 

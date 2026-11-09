@@ -1,5 +1,13 @@
 #include "GfxRenderer.h"
 
+// exp/shaper-iram: the shaper's large IRAM tier (lib/OtShaper/OtHot.h) takes the glyph prefetch too.
+#if defined(ESP_PLATFORM) && defined(OT_IRAM) && OT_IRAM >= 2
+#include <esp_attr.h>
+#define GFX_SHAPER_WARM IRAM_ATTR
+#else
+#define GFX_SHAPER_WARM
+#endif
+
 #include <BidiUtils.h>
 #include <BoardConfig.h>
 #include <FontCacheManager.h>
@@ -1750,14 +1758,15 @@ int GfxRenderer::glyphRunWidth(const int fontId, const GlyphRun& run, const floa
   return glyphRunAdvance(run, !drawsUnscaled(glyphRunScale(scale, fontBaseScale(fontId))));
 }
 
-void GfxRenderer::prefetchGlyphRun(const int fontId, const GlyphRun& run, const EpdFontFamily::Style style) const {
+GFX_SHAPER_WARM void GfxRenderer::prefetchGlyphRun(const int fontId, const GlyphRun& run,
+                                                   const EpdFontFamily::Style style) const {
   const EpdFontFamily* const family = findFontFamily(fontId);
   if (!family || !family->drawsGlyphKeys(style)) return;
   constexpr size_t kBatch = 64;
   // 128 B on the stack: a run of any length is handed over a batch at a time, with nothing allocated.
   uint16_t glyphs[kBatch];
   size_t count = 0;
-  forEachGlyph(run, 0, false, [&](const GlyphRecord& record, int) {
+  forEachGlyph(run, 0, false, [&](const GlyphRecord& record, int) GFX_SHAPER_WARM {
     glyphs[count++] = record.glyph;
     if (count == kBatch) {
       family->prefetchGlyphs(glyphs, count, style);

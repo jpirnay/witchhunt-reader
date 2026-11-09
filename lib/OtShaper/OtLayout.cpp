@@ -11,7 +11,7 @@ namespace ot {
 
 namespace layout {
 
-void resolveExtension(const int table, uint16_t& type, Table& subtable) {
+OT_HOT void resolveExtension(const int table, uint16_t& type, Table& subtable) {
   const uint16_t extension = table == GSUB ? gsub::EXTENSION : gpos::EXTENSION;
   if (type != extension) return;
   if (subtable.u16(0) != 1) {
@@ -54,7 +54,7 @@ void collectCoverage(const Table& coverage, Digest& digest) {
   }
 }
 
-bool isReverseLookup(const Table& lookup) {
+OT_HOT bool isReverseLookup(const Table& lookup) {
   uint16_t type = lookup.u16(0);
   if (type == gsub::EXTENSION) {
     Table st = lookup.offset16(6);
@@ -67,7 +67,7 @@ bool isReverseLookup(const Table& lookup) {
 
 // --- Skipping iterator ----------------------------------------------------------
 
-void SkippyIter::init(ApplyContext* ctx, const bool contextMatch) {
+OT_HOT void SkippyIter::init(ApplyContext* ctx, const bool contextMatch) {
   c = ctx;
   end = c->buffer.len();
   hasValues = false;
@@ -81,13 +81,13 @@ void SkippyIter::init(ApplyContext* ctx, const bool contextMatch) {
   syllable = 0;
 }
 
-void SkippyIter::reset(const unsigned start) {
+OT_HOT void SkippyIter::reset(const unsigned start) {
   idx = start;
   end = c->buffer.len();
   syllable = c->buffer.idx < c->buffer.len() ? c->buffer.cur().syllable : 0;
 }
 
-SkippyIter::MaySkip SkippyIter::maySkip(const GlyphInfo& info) const {
+OT_HOT SkippyIter::MaySkip SkippyIter::maySkip(const GlyphInfo& info) const {
   if (!c->checkGlyphProperty(info, lookupProps)) return SKIP_YES;
   if (info.isDefaultIgnorable() && (ignoreZwnj || !info.isZwnj()) && (ignoreZwj || !info.isZwj()) &&
       (ignoreHidden || !info.isHidden())) {
@@ -96,7 +96,7 @@ SkippyIter::MaySkip SkippyIter::maySkip(const GlyphInfo& info) const {
   return SKIP_NO;
 }
 
-SkippyIter::MayMatch SkippyIter::mayMatch(const GlyphInfo& info) const {
+OT_HOT SkippyIter::MayMatch SkippyIter::mayMatch(const GlyphInfo& info) const {
   if (!(info.mask & mask) || (perSyllable && syllable && syllable != info.syllable)) return MATCH_NO;
   const uint32_t value = hasValues ? values.t.u16(values.offset) : 0;
   switch (func) {
@@ -114,7 +114,7 @@ SkippyIter::MayMatch SkippyIter::mayMatch(const GlyphInfo& info) const {
   return MATCH_NO;
 }
 
-SkippyIter::Result SkippyIter::match(const GlyphInfo& info) const {
+OT_HOT SkippyIter::Result SkippyIter::match(const GlyphInfo& info) const {
   const MaySkip skip = maySkip(info);
   if (skip == SKIP_YES) return SKIP;
   const MayMatch m = mayMatch(info);
@@ -123,7 +123,7 @@ SkippyIter::Result SkippyIter::match(const GlyphInfo& info) const {
   return SKIP;
 }
 
-bool SkippyIter::next() {
+OT_HOT bool SkippyIter::next() {
   const auto& info = c->buffer.info;
   while (static_cast<int>(idx) < static_cast<int>(end) - 1) {
     idx++;
@@ -140,7 +140,7 @@ bool SkippyIter::next() {
   return false;
 }
 
-bool SkippyIter::prev() {
+OT_HOT bool SkippyIter::prev() {
   const auto& info = c->buffer.info;
   while (idx > 0) {
     idx--;
@@ -159,7 +159,7 @@ bool SkippyIter::prev() {
 
 // --- Apply context --------------------------------------------------------------
 
-bool ApplyContext::checkGlyphProperty(const GlyphInfo& info, const uint32_t matchProps) const {
+OT_HOT bool ApplyContext::checkGlyphProperty(const GlyphInfo& info, const uint32_t matchProps) const {
   const uint16_t glyphProps = info.glyphProps;
   if (glyphProps & matchProps & lookupflag::IGNORE_FLAGS) return false;
   if (!(glyphProps & props::MARK)) return true;
@@ -171,8 +171,8 @@ bool ApplyContext::checkGlyphProperty(const GlyphInfo& info, const uint32_t matc
   return true;
 }
 
-void ApplyContext::setGlyphClass(GlyphInfo& info, const uint32_t glyph, const uint16_t classGuess, const bool ligature,
-                                 const bool component) const {
+OT_HOT void ApplyContext::setGlyphClass(GlyphInfo& info, const uint32_t glyph, const uint16_t classGuess,
+                                        const bool ligature, const bool component) const {
   buffer.digest.add(glyph);
   uint16_t p = info.glyphProps | props::SUBSTITUTED;
   if (ligature) {
@@ -190,18 +190,18 @@ void ApplyContext::setGlyphClass(GlyphInfo& info, const uint32_t glyph, const ui
   }
 }
 
-void ApplyContext::replaceGlyph(const uint32_t glyph) {
+OT_HOT void ApplyContext::replaceGlyph(const uint32_t glyph) {
   replaceGlyphInplace(glyph);
   buffer.idx++;
 }
 
-void ApplyContext::replaceGlyphInplace(const uint32_t glyph) {
+OT_HOT void ApplyContext::replaceGlyphInplace(const uint32_t glyph) {
   GlyphInfo& cur = buffer.cur();
   setGlyphClass(cur, glyph);
   cur.codepoint = glyph;
 }
 
-bool ApplyContext::applySubtable(uint16_t type, Table st) {
+OT_HOT bool ApplyContext::applySubtable(uint16_t type, Table st) {
   resolveExtension(table, type, st);
   if (st.empty()) return false;
   return table == GSUB ? applyGsubSubtable(this, type, st) : applyGposSubtable(this, type, st);
@@ -211,7 +211,7 @@ bool ApplyContext::applySubtable(uint16_t type, Table st) {
 // with the context iterator (match_always), may not be skipped (SKIP_NO). The input iterator, which skips no more than
 // it, then meets that glyph first as every ligature's second component, so a ligature of two or more matches only when
 // that is its glyph. HarfBuzz tests a subtable's seconds digest there; this tests the lookup's, before any read.
-bool ApplyContext::nextMayBeSecond(const uint64_t secondMask) {
+OT_HOT bool ApplyContext::nextMayBeSecond(const uint64_t secondMask) {
   SkippyIter& it = iterContext;
   it.reset(buffer.idx);
   it.func = MatchFunc::Always;
@@ -220,8 +220,8 @@ bool ApplyContext::nextMayBeSecond(const uint64_t secondMask) {
   return lowMaskMayHave(secondMask, buffer.info[it.idx].codepoint);
 }
 
-bool ApplyContext::applyLookupSubtables(const Table& lookup, const uint8_t* digests, const uint8_t* groups,
-                                        const uint64_t secondMask) {
+OT_HOT bool ApplyContext::applyLookupSubtables(const Table& lookup, const uint8_t* digests, const uint8_t* groups,
+                                               const uint64_t secondMask) {
   if (secondMask != ~0ull && !nextMayBeSecond(secondMask)) return false;  // witchhunt: deviation 19
   const uint16_t type = lookup.u16(0);
   const unsigned count = Face::subtableCount(lookup);
@@ -241,7 +241,7 @@ bool ApplyContext::applyLookupSubtables(const Table& lookup, const uint8_t* dige
 // dispatch_recurse_func(): a nested lookup applies once at buffer.idx, with
 // its own flags and its own row of match positions, and without the mask
 // and glyph-property check the top-level loop makes.
-bool ApplyContext::recurse(const uint32_t subLookupIndex) {
+OT_HOT bool ApplyContext::recurse(const uint32_t subLookupIndex) {
   if (nestingLeft == 0 || --buffer.maxOps < 0) {
     buffer.successful = false;
     return false;
@@ -326,8 +326,8 @@ bool isLigatureLookup(const Face& face, const uint32_t lookupIndex) {  // witchh
   return type == layout::gsub::LIGATURE;
 }
 
-void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int table, const uint32_t lookupIndex,
-                 const LookupSettings& settings) {
+OT_HOT void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int table,
+                        const uint32_t lookupIndex, const LookupSettings& settings) {
   if (!buffer.len() || !settings.mask) return;
   // witchhunt: deviation 20 - Face::lookup()'s answer, from the offset the plan read once.
   const Table lookup = settings.lookupOffset == LookupSettings::NO_LOOKUP_OFFSET
@@ -357,7 +357,7 @@ void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int
   // Glyphs the lookup may start at: in its digest, selected by its mask, and
   // not ignored by its flags.
   // witchhunt: deviation 13 - the digest is always there (no hasDigest).
-  const auto startsAt = [&](const GlyphInfo& g) {
+  const auto startsAt = [&](const GlyphInfo& g) OT_HOT {
     return settings.digest.mayHave(g.codepoint) && (g.mask & c.lookupMask) && c.checkGlyphProperty(g, c.lookupProps);
   };
 
@@ -383,8 +383,8 @@ void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int
   }
 }
 
-bool wouldSubstitute(const Face& face, const uint32_t lookupIndex, const Digest& digest, const uint32_t* glyphs,
-                     const unsigned count, const bool zeroContext) {
+OT_WARM bool wouldSubstitute(const Face& face, const uint32_t lookupIndex, const Digest& digest, const uint32_t* glyphs,
+                             const unsigned count, const bool zeroContext) {
   if (!count || lookupIndex >= face.lookupCount(GSUB)) return false;
   if (!digest.mayHave(glyphs[0])) return false;
   const Table lookup = face.lookup(GSUB, lookupIndex);

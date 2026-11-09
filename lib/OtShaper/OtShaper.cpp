@@ -24,7 +24,7 @@ constexpr unsigned MAX_LENGTH_EXTRA = 16;
 constexpr int MAX_OPS_FACTOR = 64;
 constexpr int MAX_OPS_MIN = 1024;
 
-void runPause(const Pause pause, const Face& face, const Plan& plan, Buffer& buffer) {
+OT_HOT void runPause(const Pause pause, const Face& face, const Plan& plan, Buffer& buffer) {
   switch (pause) {
     case Pause::None:
       break;
@@ -62,7 +62,7 @@ void runPause(const Pause pause, const Face& face, const Plan& plan, Buffer& buf
 }
 
 // hb_ot_map_t::apply(): every stage's lookups, then its pause.
-void applyTable(const Face& face, const Scale& scale, const Plan& plan, Buffer& buffer, const int table) {
+OT_HOT void applyTable(const Face& face, const Scale& scale, const Plan& plan, Buffer& buffer, const int table) {
   size_t i = 0;
   for (const Stage& stage : plan.stages[table]) {
     for (; i < stage.lastLookup; i++) {
@@ -82,7 +82,7 @@ void applyTable(const Face& face, const Scale& scale, const Plan& plan, Buffer& 
   }
 }
 
-void zeroMarkWidths(Buffer& buffer, const bool adjustOffsets) {
+OT_HOT void zeroMarkWidths(Buffer& buffer, const bool adjustOffsets) {
   for (unsigned i = 0; i < buffer.len(); i++) {
     if (!buffer.info[i].isMark()) continue;
     GlyphPosition& p = buffer.pos[i];
@@ -97,7 +97,7 @@ void zeroMarkWidths(Buffer& buffer, const bool adjustOffsets) {
 
 // hb_ot_position(): hb_ot_position_default and hb_ot_position_plan, then a
 // backward run reversed into visual order.
-void position(const Face& face, const Scale& scale, const Plan& plan, Buffer& buffer) {
+OT_HOT void position(const Face& face, const Scale& scale, const Plan& plan, Buffer& buffer) {
   const unsigned len = buffer.len();
   buffer.pos.assign(len, GlyphPosition{});
   for (unsigned i = 0; i < len; i++) buffer.pos[i].xAdvance = scale.emScaleX(face.advance(buffer.info[i].codepoint));
@@ -131,14 +131,14 @@ void position(const Face& face, const Scale& scale, const Plan& plan, Buffer& bu
 // (ucd::RANGES, ZWNJ, ZWJ, U+25CC) is Bidi_Mirrored, and a run holds no
 // other (deviation 6 leaves brackets and punctuation to bidi, which mirrors
 // them): no character is swapped, every one takes the mask.
-void rotateChars(const Plan& plan, Buffer& buffer) {
+OT_HOT void rotateChars(const Plan& plan, Buffer& buffer) {
   if (!buffer.backward) return;
   for (GlyphInfo& g : buffer.info) g.mask |= plan.rtlmMask;
 }
 
 // hb_ot_hide_default_ignorables(): joiners become an invisible space (or go,
 // in a font without one).
-void hideDefaultIgnorables(const Face& face, Buffer& buffer) {
+OT_HOT void hideDefaultIgnorables(const Face& face, Buffer& buffer) {
   if (!buffer.hasDefaultIgnorables) return;
   uint32_t space;
   if (face.nominalGlyph(' ', &space)) {
@@ -160,8 +160,9 @@ void hideDefaultIgnorables(const Face& face, Buffer& buffer) {
 
 }  // namespace
 
-void insertDottedCircles(const Face& face, Buffer& buffer, const uint8_t brokenSyllableType, const uint8_t category,
-                         const uint8_t rephaCategory, const bool setPosition, const uint8_t position) {
+OT_WARM void insertDottedCircles(const Face& face, Buffer& buffer, const uint8_t brokenSyllableType,
+                                 const uint8_t category, const uint8_t rephaCategory, const bool setPosition,
+                                 const uint8_t position) {
   if (!buffer.hasBrokenSyllable) return;
   uint32_t glyph;
   if (!face.nominalGlyph(DOTTED_CIRCLE, &glyph)) return;
@@ -169,7 +170,7 @@ void insertDottedCircles(const Face& face, Buffer& buffer, const uint8_t brokenS
   unsigned i = 0;
   unsigned lastSyllable = 0;
   const unsigned len = buffer.len();
-  const auto push = [&buffer](const GlyphInfo& g) {
+  const auto push = [&buffer](const GlyphInfo& g) OT_WARM {
     if (buffer.scratch.size() >= buffer.maxLength) {
       buffer.successful = false;
       return;
@@ -198,8 +199,8 @@ void insertDottedCircles(const Face& face, Buffer& buffer, const uint8_t brokenS
   if (buffer.successful) buffer.info.swap(buffer.scratch);
 }
 
-void findSyllables(Buffer& buffer, const uint8_t* classes, const uint8_t classCount, const uint8_t* transitions,
-                   const uint8_t* accept, const uint8_t otherType, const uint8_t brokenType) {
+OT_WARM void findSyllables(Buffer& buffer, const uint8_t* classes, const uint8_t classCount, const uint8_t* transitions,
+                           const uint8_t* accept, const uint8_t otherType, const uint8_t brokenType) {
   const unsigned len = buffer.len();
   unsigned serial = 1;
   unsigned p = 0;
@@ -207,7 +208,7 @@ void findSyllables(Buffer& buffer, const uint8_t* classes, const uint8_t classCo
     uint8_t found = otherType;
     unsigned length = scanSyllable(
         classes, classCount, transitions, accept, len - p,
-        [&](const unsigned i) { return buffer.info[p + i].category; }, &found);
+        [&](const unsigned i) OT_WARM { return buffer.info[p + i].category; }, &found);
     if (length == 0) length = 1;
     const uint8_t type = found;
     if (type == brokenType) buffer.hasBrokenSyllable = true;
@@ -218,8 +219,8 @@ void findSyllables(Buffer& buffer, const uint8_t* classes, const uint8_t classCo
   }
 }
 
-bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_t* codepoints, const unsigned count,
-           Buffer& buffer, const RunContext& context) {
+OT_HOT bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_t* codepoints,
+                  const unsigned count, Buffer& buffer, const RunContext& context) {
   if (!buffer.prepare(count * MAX_LENGTH_FACTOR + MAX_LENGTH_EXTRA)) return false;
   buffer.partialContext = context.partial;
   buffer.backward = plan.backward;  // witchhunt: deviation 11
@@ -287,7 +288,7 @@ bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_
   return buffer.successful;
 }
 
-unsigned maxRunLength(const Buffer& buffer) {
+OT_WARM unsigned maxRunLength(const Buffer& buffer) {
   const size_t capacity = buffer.info.capacity();
   return capacity < MAX_LENGTH_EXTRA ? 0 : static_cast<unsigned>((capacity - MAX_LENGTH_EXTRA) / MAX_LENGTH_FACTOR);
 }

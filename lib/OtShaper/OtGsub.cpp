@@ -8,7 +8,7 @@ namespace ot::layout {
 
 namespace {
 
-bool applySingleSubst(ApplyContext* c, const Table& st) {
+OT_HOT bool applySingleSubst(ApplyContext* c, const Table& st) {
   const uint32_t glyph = c->buffer.cur().codepoint;
   const int index = coverageIndex(st.offset16(2), glyph);
   if (index == NOT_COVERED) return false;
@@ -25,7 +25,7 @@ bool applySingleSubst(ApplyContext* c, const Table& st) {
   }
 }
 
-bool applyMultipleSubst(ApplyContext* c, const Table& st) {
+OT_HOT bool applyMultipleSubst(ApplyContext* c, const Table& st) {
   if (st.u16(0) != 1) return false;
   Buffer& buffer = c->buffer;
   const int index = coverageIndex(st.offset16(2), buffer.cur().codepoint);
@@ -62,7 +62,7 @@ bool applyMultipleSubst(ApplyContext* c, const Table& st) {
   return true;
 }
 
-bool applyAlternateSubst(ApplyContext* c, const Table& st) {
+OT_HOT bool applyAlternateSubst(ApplyContext* c, const Table& st) {
   if (st.u16(0) != 1) return false;
   Buffer& buffer = c->buffer;
   const int index = coverageIndex(st.offset16(2), buffer.cur().codepoint);
@@ -79,7 +79,7 @@ bool applyAlternateSubst(ApplyContext* c, const Table& st) {
   return true;
 }
 
-bool applyLigatureSubst(ApplyContext* c, const Table& st) {
+OT_HOT bool applyLigatureSubst(ApplyContext* c, const Table& st) {
   if (st.u16(0) != 1) return false;
   Buffer& buffer = c->buffer;
   const int index = coverageIndex(st.offset16(2), buffer.cur().codepoint);
@@ -105,7 +105,7 @@ bool applyLigatureSubst(ApplyContext* c, const Table& st) {
   return false;
 }
 
-bool applyReverseChainSingleSubst(ApplyContext* c, const Table& st) {
+OT_HOT bool applyReverseChainSingleSubst(ApplyContext* c, const Table& st) {
   if (st.u16(0) != 1) return false;
   if (c->nestingLeft != MAX_NESTING_LEVEL) return false;  // no chaining to this type
   const int index = coverageIndex(st.offset16(2), c->buffer.cur().codepoint);
@@ -131,7 +131,7 @@ struct WouldApply {
   bool zeroContext;
 };
 
-bool wouldMatchValue(const MatchFunc func, const Table& data, const uint32_t glyph, const uint32_t value) {
+OT_WARM bool wouldMatchValue(const MatchFunc func, const Table& data, const uint32_t glyph, const uint32_t value) {
   switch (func) {
     case MatchFunc::Glyph:
       return glyph == value;
@@ -144,8 +144,8 @@ bool wouldMatchValue(const MatchFunc func, const Table& data, const uint32_t gly
   }
 }
 
-bool wouldMatchInput(const WouldApply& w, const unsigned count, const Values input, const MatchFunc func,
-                     const Table& data) {
+OT_WARM bool wouldMatchInput(const WouldApply& w, const unsigned count, const Values input, const MatchFunc func,
+                             const Table& data) {
   if (count != w.len) return false;
   for (unsigned i = 1; i < count; i++) {
     if (!wouldMatchValue(func, data, w.glyphs[i], input.t.u16(input.offset + 2 * (i - 1)))) return false;
@@ -153,8 +153,8 @@ bool wouldMatchInput(const WouldApply& w, const unsigned count, const Values inp
   return true;
 }
 
-bool wouldApplyRuleSet(const WouldApply& w, const Table& ruleSet, const MatchFunc func, const Table& data,
-                       const bool chain) {
+OT_WARM bool wouldApplyRuleSet(const WouldApply& w, const Table& ruleSet, const MatchFunc func, const Table& data,
+                               const bool chain) {
   const uint16_t count = ruleSet.u16(0);
   for (uint16_t i = 0; i < count; i++) {
     const Table rule = ruleSet.offset16(2 + 2 * i);
@@ -175,7 +175,7 @@ bool wouldApplyRuleSet(const WouldApply& w, const Table& ruleSet, const MatchFun
   return false;
 }
 
-bool wouldApplySubtable(const WouldApply& w, uint16_t type, Table st) {
+OT_WARM bool wouldApplySubtable(const WouldApply& w, uint16_t type, Table st) {
   resolveExtension(0, type, st);
   if (st.empty()) return false;
   const uint32_t first = w.glyphs[0];
@@ -250,7 +250,7 @@ bool wouldApplySubtable(const WouldApply& w, uint16_t type, Table st) {
 
 }  // namespace
 
-bool applyGsubSubtable(ApplyContext* c, const uint16_t type, const Table& st) {
+OT_HOT bool applyGsubSubtable(ApplyContext* c, const uint16_t type, const Table& st) {
   switch (type) {
     case gsub::SINGLE:
       return applySingleSubst(c, st);
@@ -271,8 +271,8 @@ bool applyGsubSubtable(ApplyContext* c, const uint16_t type, const Table& st) {
   }
 }
 
-bool wouldApplyGsubSubtable(const uint32_t* glyphs, const unsigned count, const bool zeroContext, const uint16_t type,
-                            const Table st) {
+OT_WARM bool wouldApplyGsubSubtable(const uint32_t* glyphs, const unsigned count, const bool zeroContext,
+                                    const uint16_t type, const Table st) {
   return wouldApplySubtable(WouldApply{glyphs, count, zeroContext}, type, st);
 }
 

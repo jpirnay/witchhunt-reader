@@ -1,5 +1,13 @@
 #include "TextShaping.h"
 
+// exp/shaper-iram: the shaper's large IRAM tier (lib/OtShaper/OtHot.h).
+#if defined(ESP_PLATFORM) && defined(OT_IRAM) && OT_IRAM >= 2
+#include <esp_attr.h>
+#define OT_WARM IRAM_ATTR
+#else
+#define OT_WARM
+#endif
+
 #include <Logging.h>
 #include <Memory.h>
 
@@ -16,7 +24,7 @@
 
 namespace TextShaping {
 
-uint32_t decodeAt(std::string_view text, size_t& pos) {
+OT_WARM uint32_t decodeAt(std::string_view text, size_t& pos) {
   // utf8NextCodepoint reads up to four bytes and stops at a NUL, so it decodes a NUL-padded copy of what the view
   // holds.
   unsigned char padded[5] = {};

@@ -2,7 +2,7 @@
 
 #include <Memory.h>
 
-const ot::Face* ShapingFace::current() {
+OT_WARM const ot::Face* ShapingFace::current() {
   if (state_ == State::Refused) return nullptr;
   repointed_ = false;
   const uint8_t* const base = map();
@@ -22,7 +22,7 @@ const ot::Face* ShapingFace::current() {
   return &face_;
 }
 
-const ot::Plan* ShapingFace::plan(const ot::Script script, const uint32_t* languageTags) {
+OT_WARM const ot::Plan* ShapingFace::plan(const ot::Script script, const uint32_t* languageTags) {
   const ot::Face* const face = current();
   if (!face) return nullptr;
   ++asks_;
