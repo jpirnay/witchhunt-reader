@@ -946,15 +946,16 @@ TEST(TtfFamily, AFontWhoseLayoutNamesNoShapedScriptReservesNoCpac) {
 }
 
 TEST(TtfFamily, OnlyAScriptTheShaperHandlesOrArabicReservesARoom) {
-  // The engine's own tags (old and new, and Sinhala's) and Arabic's, which the joining shaper will read.
-  for (const char* script : {"deva", "dev2", "dev3", "beng", "bng2", "bng3", "guru", "gur2", "gur3", "gujr",
-                             "gjr2", "gjr3", "orya", "ory2", "ory3", "taml", "tml2", "tml3", "telu", "tel2",
-                             "tel3", "knda", "knd2", "knd3", "mlym", "mlm2", "mlm3", "sinh", "arab"}) {
+  // The engine's own tags (old and new, and Sinhala's), Arabic's, which the joining shaper will read, and Myanmar's
+  // two (deviation 14: a mymr font takes the default shaper, but the plan tries the tag).
+  for (const char* script : {"deva", "dev2", "dev3", "beng", "bng2", "bng3", "guru", "gur2", "gur3", "gujr", "gjr2",
+                             "gjr3", "orya", "ory2", "ory3", "taml", "tml2", "tml3", "telu", "tel2", "tel3", "knda",
+                             "knd2", "knd3", "mlym", "mlm2", "mlm3", "sinh", "arab", "mym2", "mymr"}) {
     EXPECT_EQ(16u + 28u + 24u, roomForScript(script)) << script;
   }
   // Whatever else: Latin and the defaults, Hebrew, CJK, and scripts the shaper does not handle.
   for (const char* script : {"DFLT", "dflt", "latn", "cyrl", "grek", "hebr", "hani", "kana", "hang", "thai", "khmr",
-                             "mymr", "tibt", "syrc", "thaa", "nko "}) {
+                             "tibt", "syrc", "thaa", "nko "}) {
     EXPECT_EQ(0u, roomForScript(script)) << script;
   }
   // The Indic tags are the engine's own list, not a copy of it.

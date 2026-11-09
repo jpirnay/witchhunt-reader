@@ -14,6 +14,7 @@ constexpr unsigned NOT_FOUND = 0xFFFF;
 
 // OpenType script tags tried in order: Indic v3 (shaped by USE), v2, v1.
 // Sinhala has one, and (witchhunt: deviation 11) Arabic: HarfBuzz tries only arab, then DFLT, dflt, latn.
+// witchhunt: deviation 14 - Myanmar has no mym3 (hb_ot_all_tags_from_script): mym2, then mymr.
 constexpr uint32_t SCRIPT_TAGS[][3] = {
     {tag("dev3"), tag("dev2"), tag("deva")},
     {tag("bng3"), tag("bng2"), tag("beng")},
@@ -26,6 +27,7 @@ constexpr uint32_t SCRIPT_TAGS[][3] = {
     {tag("mlm3"), tag("mlm2"), tag("mlym")},
     {tag("sinh"), 0, 0},
     {tag("arab"), 0, 0},
+    {tag("mym2"), tag("mymr"), 0},  // witchhunt: deviation 14
 };
 
 // Binary search in a RecordList (count, then tag + offset records), as
@@ -93,6 +95,8 @@ constexpr uint8_t MAX_PAUSE = static_cast<uint8_t>(Pause::UseReorder);
 // Whether a stage may run `pause`: as the planner emits them, Indic pauses
 // only in Indic plans and USE pauses only in USE plans, both after GSUB
 // stages. Other pauses would run a shaper's code without its data.
+// witchhunt: deviation 14 - the Myanmar pauses lie above MAX_PAUSE: no CPpl
+// names the Myanmar shaper (read() rejects every shaper above Use).
 bool pauseAllowed(const ShaperKind shaper, const int table, const uint8_t pause) {
   if (pause == static_cast<uint8_t>(Pause::None)) return true;
   if (table != GSUB || pause > MAX_PAUSE) return false;

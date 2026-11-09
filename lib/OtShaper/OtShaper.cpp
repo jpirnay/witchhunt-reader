@@ -52,6 +52,12 @@ void runPause(const Pause pause, const Face& face, const Plan& plan, Buffer& buf
     case Pause::UseReorder:
       useReorder(face, buffer);
       break;
+    case Pause::MyanmarSetupSyllables:  // witchhunt: deviation 14
+      myanmarSetupSyllables(buffer);
+      break;
+    case Pause::MyanmarReorder:  // witchhunt: deviation 14
+      myanmarReorder(face, buffer);
+      break;
   }
 }
 
@@ -96,8 +102,11 @@ void position(const Face& face, const Scale& scale, const Plan& plan, Buffer& bu
   // USE zeroes mark advances before GPOS, the default and Arabic shapers after it.
   // witchhunt: deviation 11 - marks keep their place over the glyph before only in a forward run (a backward run's
   // hang over the next one once reversed), and the Arabic shaper zeroes late (BY_GDEF_LATE).
+  // witchhunt: deviation 14 - the Myanmar shaper zeroes early (BY_GDEF_EARLY), as USE does.
   const bool adjustOffsets = plan.adjustMarkPositioningWhenZeroing && !buffer.backward;
-  if (plan.zeroMarks && plan.shaper == ShaperKind::Use) zeroMarkWidths(buffer, adjustOffsets);
+  if (plan.zeroMarks && (plan.shaper == ShaperKind::Use || plan.shaper == ShaperKind::Myanmar)) {
+    zeroMarkWidths(buffer, adjustOffsets);
+  }
   if (plan.applyGpos) applyTable(face, scale, plan, buffer, GPOS);
   if (plan.zeroMarks && (plan.shaper == ShaperKind::Default || plan.shaper == ShaperKind::Arabic)) {
     zeroMarkWidths(buffer, adjustOffsets);
@@ -226,7 +235,7 @@ bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_
     buffer.info.push_back(g);
   }
 
-  // witchhunt: deviation 11 - the Arabic shaper has no preprocess_text.
+  // witchhunt: deviation 11 - the Arabic shaper has no preprocess_text. witchhunt: deviation 14 - nor has Myanmar's.
   if (plan.shaper == ShaperKind::Indic || plan.shaper == ShaperKind::Use) {
     preprocessVowelConstraints(plan.script, buffer);
   }
@@ -240,6 +249,8 @@ bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_
     useSetupMasks(buffer);
   } else if (plan.shaper == ShaperKind::Arabic) {
     arabicSetupMasks(plan, buffer);  // witchhunt: deviation 11
+  } else if (plan.shaper == ShaperKind::Myanmar) {
+    myanmarSetupMasks(buffer);  // witchhunt: deviation 14
   }
 
   // Map to glyphs and set their properties (hb_ot_layout_substitute_start).

@@ -3,8 +3,9 @@
 #include <cstdint>
 
 // Character categories, visual positions, syllable types and per-script
-// settings of the Indic shaper and the Universal Shaping Engine, with
-// HarfBuzz's names and values (hb-ot-shaper-indic*.hh, hb-ot-shaper-use*.hh),
+// settings of the Indic shaper, the Universal Shaping Engine and the Myanmar
+// shaper, with HarfBuzz's names and values (hb-ot-shaper-indic*.hh,
+// hb-ot-shaper-use*.hh, hb-ot-shaper-myanmar-machine.hh),
 // which OtUnicodeData.h and OtSyllableMachines.h are generated with. The
 // category names keep HarfBuzz's mixed case (MPst, Repha, ...) so they read
 // the same as the grammars they come from.
@@ -28,6 +29,23 @@ constexpr uint8_t START = 0, RA_TO_BECOME_REPH = 1, PRE_M = 2, PRE_C = 3, BASE_C
 // Indic syllable types (indic_syllable_type_t).
 namespace isyl {
 constexpr uint8_t CONSONANT = 0, VOWEL = 1, STANDALONE = 2, SYMBOL = 3, BROKEN = 4, NON_INDIC = 5;
+}
+
+// Myanmar character categories beyond the Indic ones they share
+// (myanmar_syllable_machine_ex_*): consonants are icat::C, Ra and CS,
+// H is the virama, and so on. HarfBuzz's MR is MedialRa here (MR is an
+// Xtensa register macro). VS is the variation selectors' (U+FE00-FE0F),
+// which the tables do not cover.
+// Ported from Somnius/CrossInk-Indic (commits dbfb96a24 and 7d0c7c87 by Lef, MIT).
+// witchhunt: deviation 14
+namespace mcat {
+constexpr uint8_t IV = 2, DB = 3, GB = 10, VAbv = 20, VBlw = 21, VPre = 22, VPst = 23, As = 32, MH = 35, MedialRa = 36,
+                  MW = 37, MY = 38, PT = 39, VS = 40, ML = 41;
+}
+
+// Myanmar syllable types (myanmar_syllable_type_t). witchhunt: deviation 14
+namespace msyl {
+constexpr uint8_t CONSONANT = 0, BROKEN = 1, NON_MYANMAR = 2;
 }
 
 // USE categories (use_syllable_machine_ex_*).

@@ -1,7 +1,8 @@
 #pragma once
 
 // Shared by the shaping pipeline (OtShaper.cpp, OtNormalize.cpp) and the
-// Indic and USE shapers (OtIndic.cpp, OtUse.cpp). Not part of the public API.
+// shapers (OtIndic.cpp, OtUse.cpp, OtArabic.cpp, OtMyanmar.cpp). Not part of
+// the public API.
 
 #include <cstdint>
 
@@ -110,6 +111,12 @@ constexpr uint8_t ISOL = 0, FINA = 1, FIN2 = 2, FIN3 = 3, MEDI = 4, MED2 = 5, IN
 void arabicSetupMasks(const Plan& plan, Buffer& buffer);
 // reorder_marks_arabic(): moves the modifier combining marks of one sorted mark run [start, end) to its front.
 void reorderMarksArabic(Buffer& buffer, unsigned start, unsigned end);
+
+// witchhunt: deviation 14 - the Myanmar shaper (hb-ot-shaper-myanmar.cc): each character's category, the syllables,
+// and the dotted circles and initial reordering (a GSUB pause each).
+void myanmarSetupMasks(Buffer& buffer);
+void myanmarSetupSyllables(Buffer& buffer);
+void myanmarReorder(const Face& face, Buffer& buffer);
 
 // The Universal Shaping Engine (hb-ot-shaper-use.cc).
 void useSetupMasks(Buffer& buffer);

@@ -326,6 +326,23 @@ void collectUseFeatures(FeatureBuilder& b) {
   }
 }
 
+// witchhunt: deviation 14 - collect_features_myanmar() (hb-ot-shaper-myanmar.cc, HarfBuzz 14.5.0; MIT, see COPYING):
+// the basic features rphf, pref, blwf and pstf, each global with manual ZWJ in a stage of its own, constrained to the
+// syllable; after a pause where HarfBuzz frees the syllable data (hb_syllabic_clear_var, nothing to free here), the
+// other features all at once.
+void collectMyanmarFeatures(FeatureBuilder& b) {
+  b.pause(GSUB, Pause::MyanmarSetupSyllables);
+  b.enable(tag("locl"), ff::PER_SYLLABLE);
+  b.enable(tag("ccmp"), ff::PER_SYLLABLE);
+  b.pause(GSUB, Pause::MyanmarReorder);
+  for (const uint32_t t : {tag("rphf"), tag("pref"), tag("blwf"), tag("pstf")}) {
+    b.enable(t, ff::MANUAL_ZWJ | ff::PER_SYLLABLE);
+    b.pause(GSUB, Pause::None);
+  }
+  b.pause(GSUB, Pause::None);  // hb_syllabic_clear_var
+  for (const uint32_t t : {tag("pres"), tag("abvs"), tag("blws"), tag("psts")}) b.enable(t, ff::MANUAL_ZWJ);
+}
+
 }  // namespace
 
 // hb_ot_map_builder_t::compile() for one script and language: which
@@ -359,6 +376,9 @@ class PlanBuilder {
     } else if (plan_.shaper == ShaperKind::Arabic) {  // witchhunt: deviation 11
       b.isSimple = false;
       collectArabicFeatures(b, hasFeature(tag("rclt")));
+    } else if (plan_.shaper == ShaperKind::Myanmar) {  // witchhunt: deviation 14
+      b.isSimple = false;
+      collectMyanmarFeatures(b);
     }
     collectCommonFeatures(b);
     if (plan_.shaper == ShaperKind::Indic) overrideIndicFeatures(b);
@@ -414,6 +434,10 @@ class PlanBuilder {
       plan_.shaper = ShaperKind::Arabic;
     } else if (chosen == tag("DFLT") || chosen == tag("latn")) {
       plan_.shaper = ShaperKind::Default;
+    } else if (plan_.script == Script::Myanmar) {
+      // witchhunt: deviation 14 - fonts made for the pre-spec 'mymr' tag get the default shaper; any other choice the
+      // Myanmar shaper (dflt, and a font with no GSUB script: no tag at all). As Somnius/CrossInk-Indic dbfb96a24.
+      plan_.shaper = chosen == tag("mymr") ? ShaperKind::Default : ShaperKind::Myanmar;
     } else if (plan_.script == Script::Sinhala || (chosen & 0xFF) == '3') {
       plan_.shaper = ShaperKind::Use;
     } else {
