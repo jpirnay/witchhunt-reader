@@ -3278,17 +3278,29 @@ int GfxRenderer::getSpaceWidth(const int fontId, const EpdFontFamily::Style styl
   return applyBase(fp4::toPixel(spaceGlyph.advanceX), fontBaseScale(fontId));  // 12.4 -> nearest px
 }
 
-int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
-                                 const EpdFontFamily::Style style) const {
+int32_t GfxRenderer::spaceGlyphAdvanceFP(const int fontId, const EpdFontFamily::Style style) const {
   const EpdFontFamily* const family = findFontFamily(fontId);
   if (!family) return 0;
-  const auto& font = *family;
-  const EpdGlyphRef spaceGlyph = font.getGlyph(' ', style);
-  const int32_t spaceAdvanceFP = spaceGlyph ? static_cast<int32_t>(spaceGlyph.advanceX) : 0;
+  const EpdGlyphRef spaceGlyph = family->getGlyph(' ', style);
+  return spaceGlyph ? static_cast<int32_t>(spaceGlyph.advanceX) : 0;
+}
+
+int32_t GfxRenderer::kerningFP(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
+                               const EpdFontFamily::Style style) const {
+  const EpdFontFamily* const family = findFontFamily(fontId);
+  return family ? static_cast<int32_t>(family->getKerning(leftCp, rightCp, style)) : 0;
+}
+
+int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
+                                 const EpdFontFamily::Style style) const {
+  if (!findFontFamily(fontId)) return 0;
   // Combine space advance + flanking kern into one fixed-point sum before snapping.
   // Snapping the combined value avoids the +/-1 px error from snapping each component separately.
-  const int32_t kernFP = static_cast<int32_t>(font.getKerning(leftCp, ' ', style)) +
-                         static_cast<int32_t>(font.getKerning(' ', rightCp, style));
+  return snapSpaceAdvance(fontId, spaceGlyphAdvanceFP(fontId, style) + kerningFP(fontId, leftCp, ' ', style) +
+                                      kerningFP(fontId, ' ', rightCp, style));
+}
+
+int GfxRenderer::snapSpaceAdvance(const int fontId, const int32_t totalFP) const {
   // Scaled in FIXED POINT, before the snap. This is the inter-word advance ParsedText uses for
   // line breaking and justification, so it has to grow with the glyphs or a synthesised size
   // measures words at its own scale and the gaps between them at its master's -- 83% of the right
@@ -3297,7 +3309,6 @@ int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const 
   // Scaling the combined fixed-point sum rather than the snapped pixel keeps the property the
   // comment above is about: one rounding step, not two.
   const float base = fontBaseScale(fontId);
-  const int32_t totalFP = spaceAdvanceFP + kernFP;
   return fp4::toPixel(base == 1.0f ? totalFP : static_cast<int32_t>(totalFP * base + (totalFP < 0 ? -0.5f : 0.5f)));
 }
 

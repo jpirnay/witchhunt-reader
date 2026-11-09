@@ -635,6 +635,9 @@ class ParsedText {
   // force-splits any word too wide for the line (inserting a hyphen), and applies the paragraph
   // indent and bionic transform in place. It costs one copy of the word vectors for the duration
   // of the call, so it is opt-in and only the table grid path uses it.
+  // Test seam: false lays out every gap with GfxRenderer::getSpaceAdvance(), without the pass's memory of its parts.
+  inline static bool rememberSpaceParts = true;
+
   void layoutAndExtractLines(
       const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
       const std::function<LineProcessResult(std::unique_ptr<TextBlock>, bool, bool)>& processLine,

@@ -161,9 +161,25 @@ class GfxRenderer {
     if (scanning) hasGlyphQueries.emplace_back(cp, style);  // only a scan test pays for the allocation
     return fontId != LATIN_FONT || cp < 0x2E80;
   }
-  int getSpaceAdvance(const int fontId, uint32_t /*leftCp*/, uint32_t /*rightCp*/, EpdFontFamily::Style style) const {
-    return getSpaceWidth(fontId, style);
+  // The space's advance and its kerning with both neighbours, summed and snapped once, as GfxRenderer's is. The shim's
+  // space kerns with nothing unless a test sets spaceKernFP.
+  int getSpaceAdvance(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
+                      const EpdFontFamily::Style style) const {
+    return snapSpaceAdvance(fontId, spaceGlyphAdvanceFP(fontId, style) + kerningFP(fontId, leftCp, ' ', style) +
+                                        kerningFP(fontId, ' ', rightCp, style));
   }
+  int32_t spaceGlyphAdvanceFP(const int fontId, const EpdFontFamily::Style style) const {
+    return static_cast<int32_t>(getSpaceWidth(fontId, style)) << 4;
+  }
+  // Test seam: a pair's kerning with the space, 4.4 fixed point. Null: none.
+  inline static int32_t (*spaceKernFP)(int fontId, uint32_t leftCp, uint32_t rightCp,
+                                       EpdFontFamily::Style style) = nullptr;
+  int32_t kerningFP(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
+                    const EpdFontFamily::Style style) const {
+    return spaceKernFP != nullptr && (leftCp == ' ' || rightCp == ' ') ? spaceKernFP(fontId, leftCp, rightCp, style)
+                                                                       : 0;
+  }
+  int snapSpaceAdvance(int /*fontId*/, const int32_t totalFP) const { return (totalFP + 8) >> 4; }
   // The kerning of every code point pair, in pixels: a test of the gaps that take none sets it.
   int kerningPx = 0;
   int getKerning(int /*fontId*/, uint32_t /*leftCp*/, uint32_t /*rightCp*/, EpdFontFamily::Style /*style*/) const {
