@@ -393,3 +393,15 @@ TEST(ArabicUiForms, OffsetsInMixedText) {
   EXPECT_EQ(BidiUtils::arabicUiFormsOffset("Pride", 3), 3u);
   EXPECT_EQ(BidiUtils::arabicUiFormsSource("Pride", 3), 3u);
 }
+
+// Hamza joins neither side, so it has one form, the isolated one: the only glyph the UI pack holds for it. The
+// keyboard's Hamza key drew nothing while the mapper left the letter as it is.
+TEST(ArabicUiForms, HamzaTakesItsIsolatedForm) {
+  EXPECT_EQ(decode(BidiUtils::arabicUiForms(encode({0x0621}))), (CP{0xFE80}));
+  // سماء: Seen initial, Meem medial, Alef final, Hamza isolated (nothing joins it).
+  EXPECT_EQ(decode(BidiUtils::arabicUiForms(encode({0x0633, 0x0645, 0x0627, 0x0621}))),
+            (CP{0xFEB3, 0xFEE4, 0xFE8E, 0xFE80}));
+  const std::string once = BidiUtils::arabicUiForms(encode({0x0621, ' ', 'a'}));
+  EXPECT_EQ(BidiUtils::arabicUiForms(once), once);
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset(encode({0x0621, 'a'}), 2), 3u);
+}
