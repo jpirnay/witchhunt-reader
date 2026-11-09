@@ -46,13 +46,12 @@ right-to-left case to them.
   `pageProgressionRtl` (`Section::flowContext()`). The reader's `pageProgressionRtl_` follows it: the tap zones, the page
   swipes, the progress bars and the percent picker mirror when it is set, and the Left and Right buttons too under
   Page Turn Buttons = Follow Book (`mirrorsLeftRight`).
-- **What stops a horizontal right-to-left book today.** `FlowContext::requestFor` returns Off for a language that
-  is never set vertically (`TypographyProfile::verticalAllowed`: Chinese, Japanese and Korean), and
-  `pageProgressionRtlFor` returns false for Off. A Hebrew or Arabic book with OPF
-  `page-progression-direction="rtl"` therefore turns its pages left to right. Step 1 must give
-  `pageProgressionRtlFor` the ppd and the base direction, not only the request. The request is also in the
-  section's property hash and header (Off adds nothing), so a Latin book's cache key stays off the vertical
-  setting; step 1 must not change that for a book that is not set vertically.
+- **A horizontal right-to-left book (done 2026-11-08).** `FlowContext::requestFor` returns Off for a language that
+  is never set vertically, so `pageProgressionRtlFor` now takes the book's direction too (`FlowContext::bookIsRtl`:
+  its language runs right to left, or its OPF says rtl and its language is never set vertically). Such a book turns
+  right to left unless its OPF says ltr; a book under Off that is not right to left still turns left to right
+  whatever its ppd (a CJK book read horizontally). The request stays out of the cache key: page progression is the
+  reader's alone, read from `Section::flowContext()` at a section's load.
 - **A left-to-right ppd** is ignored for a section set vertically (spec 5.5): its pages turn right to left.
 
 ## Complex shaping: Arabic and the Indic scripts

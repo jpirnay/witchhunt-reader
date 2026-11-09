@@ -458,13 +458,6 @@ a line's tokens by the bidi levels. PR 4b teaches it to carry shaped pieces.
   before it takes its final form and the letter after it its initial form (HarfBuzz joins across it, as joining type T).
   No letter is lost; the soft hyphen is a Text piece and is not drawn. Arabic text is not hyphenated, so only a book
   that carries its own soft hyphens shows it.
-- **A bidi paragraph whose only Arabic code points are digits or punctuation** (a Hebrew paragraph with Arabic-Indic
-  digits, U+0660-0669), in a TrueType face that maps Arabic (beh), turns shaping on: each such token takes a shaping
-  call (a call block and a run scan) that keeps it plain. In a face without Arabic the paragraph does not shape. The
-  output is near-identical, not the same: a glued group holding such a token is a shaped group, so `mergeGluedGroups`
-  merges its same-style glued tokens (a span split of one style) into one token. That changes the line's pieces (one
-  token's where there were two tokens') and the kerning at the former glue (measured inside one text, not across two
-  glued pieces).
 - **A consumed letter is missing from the dictionary lookup text across a style glue** (a letter its glued neighbour's
   ligature took), on the device only.
 - **A no-face Reordered Indic segment split by levels draws unreordered** (the guard, not latched).

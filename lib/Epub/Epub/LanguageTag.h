@@ -113,4 +113,22 @@ inline bool isArabicScript(const std::string& rawTag) {
   return known;
 }
 
+// Whether a tag is written in the Hebrew script: Hebrew ("he", and the withdrawn "iw" that older books carry), Yiddish
+// and Ladino ("yi", "lad"), and Judeo-Arabic ("jrb"), unless a script subtag names another ("lad-Latn"); any other
+// language that a script subtag of Hebr puts there. The same scan as isArabicScript.
+inline bool isHebrewScript(const std::string& rawTag) {
+  static constexpr const char* kLanguages[] = {"he", "iw", "yi", "lad", "jrb"};
+  const std::string tag = normalised(rawTag);
+  bool known = false;
+  for (const char* language : kLanguages) known = known || hasPrimary(tag, language);
+  for (size_t at = tag.find('-'); at != std::string::npos; at = tag.find('-', at + 1)) {
+    const size_t end = tag.find('-', at + 1);
+    const size_t len = (end == std::string::npos ? tag.size() : end) - at - 1;
+    if (len == 1) break;
+    if (len != 4 || tag[at + 1] < 'a' || tag[at + 1] > 'z') continue;
+    return tag.compare(at + 1, 4, "hebr") == 0;
+  }
+  return known;
+}
+
 }  // namespace language_tag

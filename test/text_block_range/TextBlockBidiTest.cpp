@@ -312,3 +312,67 @@ TEST(TextBlockBidi, AWordBoxMeasuresTheForm) {
   ASSERT_TRUE(block->hasDisplayForm(0));
   EXPECT_EQ(3 * GfxRenderer::GLYPH_W, block->wordBox(r, 0, kFontId, 0, 0).width);
 }
+
+// A line as `line` makes it, with each word's continues bit (glued to the word stored before it) given too.
+std::unique_ptr<TextBlock> gluedLine(const std::vector<std::string_view>& words, const std::vector<uint8_t>& order,
+                                     const std::vector<bool>& continues) {
+  const std::vector<EpdFontFamily::Style> styles(words.size(), EpdFontFamily::REGULAR);
+  std::vector<TokenBoundary::Boundary> boundaries(words.size());
+  for (size_t i = 0; i < words.size() && i < continues.size(); i++) boundaries[i].continues = continues[i];
+  std::vector<int16_t> xpos;
+  for (size_t i = 0; i < words.size(); i++) xpos.push_back(static_cast<int16_t>(i * 50));
+  TextBlock::WordRange range;
+  range.wordViews = words.data();
+  range.styles = &styles;
+  range.boundaries = &boundaries;
+  range.logicalOrder = order.empty() ? nullptr : order.data();
+  range.first = 0;
+  range.count = words.size();
+  return makeUniqueNoThrow<TextBlock>(range, xpos, BlockStyle());
+}
+
+// A right-to-left line stores its words left to right; the order a consumer reads them in is the logical one.
+TEST(TextBlockBidi, TheReadingOrderIsTheLogicalOneAndTheStoredOneWithout) {
+  // "שלום עולם abc" laid out right to left: stored [abc, עולם, שלום], read שלום first.
+  const auto rtl = line({"abc", "עולם", "שלום"}, {}, {2, 1, 0});
+  ASSERT_TRUE(rtl->valid());
+  uint16_t order[3] = {};
+  rtl->readingOrder(order);
+  EXPECT_EQ(2, order[0]);
+  EXPECT_EQ(1, order[1]);
+  EXPECT_EQ(0, order[2]);
+
+  const auto ltr = line({"abc", "def"});
+  uint16_t plain[2] = {9, 9};
+  ltr->readingOrder(plain);
+  EXPECT_EQ(0, plain[0]);
+  EXPECT_EQ(1, plain[1]);
+}
+
+TEST(TextBlockBidi, TheReadingTextIsInReadingOrderWithSpacesBetweenWords) {
+  std::string text;
+  line({"abc", "עולם", "שלום"}, {}, {2, 1, 0})->appendReadingText(text);
+  EXPECT_EQ("שלום עולם abc", text);
+  // A second line joins the text already there with a space.
+  line({"def"})->appendReadingText(text);
+  EXPECT_EQ("שלום עולם abc def", text);
+}
+
+TEST(TextBlockBidi, AGluedTokenAndCjkTextReadWithoutSpaces) {
+  // The token "abc." split into glued pieces on a right-to-left line: stored [".", "abc"] with the period glued to
+  // the word stored before it, read "abc" then ".".
+  std::string token;
+  gluedLine({".", "abc", "שלום"}, {2, 1, 0}, {false, true, false})->appendReadingText(token);
+  EXPECT_EQ("שלום abc.", token);
+  // Glued halves on a left-to-right line (a styled run that changes mid-word).
+  std::string halves;
+  gluedLine({"Wor", "d", "next"}, {}, {false, true, false})->appendReadingText(halves);
+  EXPECT_EQ("Word next", halves);
+  // CJK text, one page word per character, has no spaces, nor where it meets other text; Korean keeps its spaces.
+  std::string cjk;
+  line({"第", "一", "章", "abc"})->appendReadingText(cjk);
+  EXPECT_EQ("第一章abc", cjk);
+  std::string korean;
+  line({"한국어", "책"})->appendReadingText(korean);
+  EXPECT_EQ("한국어 책", korean);
+}

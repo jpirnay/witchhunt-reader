@@ -923,7 +923,9 @@ void ParsedText::decideShaping(const GfxRenderer& renderer, const int fontId) {
   int askedFont = 0;
   int askedStyle = -1;
   for (size_t i = 0; bidi_ && i < words.size() && !shapes_; ++i) {
-    if (!arabic::holdsArabic(words[i].data(), words[i].size())) continue;
+    // A run member, not any code point of the blocks: a Hebrew paragraph with Arabic-Indic digits has no Arabic run,
+    // and shaping it would cost a call per digit token and merge its glued groups for nothing.
+    if (!arabic::holdsRunMember(words[i].data(), words[i].size())) continue;
     const int font = wordFontId(i, fontId);
     const int style = wordStyles[i] & EpdFontFamily::BOLD_ITALIC;
     if (font == askedFont && style == askedStyle) continue;

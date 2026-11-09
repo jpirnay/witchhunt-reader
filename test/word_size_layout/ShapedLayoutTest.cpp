@@ -1825,6 +1825,49 @@ TEST_F(ShapedLine, AShapedTokenTheLineCannotBeCutForIsItsCodePoints) {
   EXPECT_TRUE(latch);
 }
 
+TEST_F(ShapedLayout, AHebrewParagraphWithArabicDigitsInATtfShapesNothing) {
+  // A Hebrew paragraph needs bidi, and its Arabic-Indic digits hold bytes of the Arabic blocks; in a face that maps beh
+  // the pass used to turn shaping on, take a shaping call per digit token and merge its glued groups. No Arabic run
+  // can start there (the digits, the number signs and the Arabic comma are no run members), so it is laid out as
+  // without a face: no ShapingState, nothing shaped, the span split of a word and its digits still two words.
+  const std::string digits = "\xD9\xA1\xD9\xA9\xD9\xA4\xD9\xA8";  // U+0661 0669 0664 0668: 1948
+  const std::vector<Word> hebrew = {{"שלום"}, {"ab"}, {digits, EpdFontFamily::REGULAR, true}, {kArabicComma}, {"עולם"}};
+  Seam::face = nullptr;
+  ParsedText plain(false, false, noIndentStyle());
+  add(plain, hebrew);
+  const std::vector<std::string> expected = bytesOfLines(layOut(plain, renderer, 400));
+  ASSERT_EQ(1u, expected.size());
+
+  useFont(kNaskh);
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, hebrew);
+  const Lines lines = layOut(text, renderer, 400);
+  EXPECT_EQ(expected, bytesOfLines(lines));
+  EXPECT_FALSE(text.shapingStateHeld());
+  EXPECT_EQ(0u, text.tokensShaped());
+  EXPECT_FALSE(latch);
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_GE(wordWithText(*lines[0], "ab"), 0);
+  EXPECT_GE(wordWithText(*lines[0], digits), 0);
+
+  // A letter of the blocks still turns it on.
+  ParsedText arabic(false, false, noIndentStyle());
+  add(arabic, {{"שלום"}, {kKitab}, {digits}});
+  layOut(arabic, renderer, 400);
+  EXPECT_TRUE(arabic.shapingStateHeld());
+}
+
+TEST(ArabicScripts, ARunMemberIsALetterAMarkOrArabicPunctuationNotADigit) {
+  EXPECT_FALSE(arabic::holdsRunMember("\xD9\xA1\xD9\xA9", 4));  // U+0661 0669: digits
+  EXPECT_FALSE(arabic::holdsRunMember("\xD8\x8C", 2));          // U+060C: the Arabic comma
+  EXPECT_FALSE(arabic::holdsRunMember("abc", 3));
+  EXPECT_TRUE(arabic::holdsRunMember("1\xD8\xA8", 3));  // U+0628 beh after a digit
+  EXPECT_TRUE(arabic::holdsRunMember("\xD8\x9F", 2));   // U+061F: the Arabic question mark (AL)
+  EXPECT_TRUE(arabic::holdsRunMember("\xD9\x8E", 2));   // U+064E fatha alone
+  EXPECT_FALSE(arabic::holdsRunMember("\xD8", 1));      // a cut sequence
+}
+
 TEST_F(ShapedLayout, ALatinParagraphWithArabicDigitsInATtfIsUnchanged) {
   // Review fix 1: arabic::holdsArabic passes the Arabic-Indic digits and the Arabic comma, which no Arabic run takes
   // and which make no paragraph need bidi (AN, CS). In a TrueType face that holds them, a Latin paragraph with them is

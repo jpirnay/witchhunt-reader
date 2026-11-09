@@ -104,12 +104,12 @@ def ttf_entries():
 
 
 class TtfFamilies(unittest.TestCase):
-    def test_the_ttf_families_are_the_twenty_indic_ones_and_the_two_arabic_ones(self):
+    def test_the_ttf_families_are_the_twenty_indic_ones_the_two_arabic_ones_and_the_two_hebrew_ones(self):
         entries = ttf_entries()
         self.assertEqual(sorted(f["name"] for f in entries),
                          sorted([f"Noto{kind}{x}" for kind in ("Sans", "Serif") for x in TTF_SCRIPTS]
-                                + ["NotoNaskhArabic", "NotoSansArabic"]))
-        self.assertEqual(len(entries), 22)
+                                + ["NotoNaskhArabic", "NotoSansArabic", "NotoSansHebrew", "NotoSerifHebrew"]))
+        self.assertEqual(len(entries), 24)
         for f in entries:
             self.assertIs(f["inDownloadAll"], False, f["name"])
             self.assertTrue(f["description"], f["name"])
@@ -206,6 +206,36 @@ class ArabicMergeCheck(unittest.TestCase):
             self.assertIn(beh + v + shadda, lines)
 
 
+class HebrewMergeCheck(unittest.TestCase):
+    def test_the_hebrew_families_are_checked_as_hebrew_right_to_left(self):
+        import merge_noto_latin
+
+        self.assertEqual(merge_noto_latin.LANGS["hebrew"], ["he", "yi"])
+        self.assertEqual(merge_noto_latin.script_of(chr(0x05E9) + chr(0x05DC) + chr(0x05D5) + chr(0x05DD)), "Hebr")
+        self.assertEqual(merge_noto_latin.script_of(chr(0xFB2A)), "Hebr")  # a presentation form
+        self.assertEqual(merge_noto_latin.direction_of("Hebr"), "rtl")
+
+    def test_each_hebrew_family_finds_the_hebrew_corpus(self):
+        key = build_sd_fonts.corpus_key
+        self.assertEqual({key("NotoSansHebrew"), key("NotoSerifHebrew")}, {"hebrew"})
+
+    def test_the_hebrew_corpus_names_every_assigned_code_point_and_the_pointed_shin(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_corpus_hebrew", REPO / "test" / "ot_shaper" / "generate_corpus_hebrew.py")
+        gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gen)
+        with tempfile.TemporaryDirectory() as tmp:
+            sys.argv = ["generate_corpus_hebrew.py", tmp]
+            gen.main()
+            lines = set((Path(tmp) / "hebrew.txt").read_text(encoding="utf-8").splitlines())
+        for c in gen.assigned():
+            self.assertIn(c, lines)
+        shin, shin_dot, qamats = chr(0x05E9), chr(0x05C1), chr(0x05B8)
+        self.assertIn(shin + shin_dot + qamats, lines)
+        self.assertIn(shin + qamats + shin_dot, lines)
+        self.assertIn(chr(0x05D9) + chr(0x05D4) + chr(0x05D5) + chr(0x05D4), lines)  # the divine name
+
+
 class HostedFontsLicense(unittest.TestCase):
     def test_the_ofl_names_every_copyright_the_hosted_fonts_carry(self):
         fonts = REPO / "assets" / "sd-fonts"
@@ -224,7 +254,7 @@ class HostedFontsLicense(unittest.TestCase):
         fonts = REPO / "assets" / "sd-fonts"
         ofl = (fonts / "OFL.txt").read_text(encoding="utf-8")
         files = sorted(fonts.glob("*/*.ttf"))
-        self.assertEqual(len(files), 44)
+        self.assertEqual(len(files), 48)
         for path in files:
             notice = TTFont(str(path))["name"].getDebugName(0)
             self.assertIn(notice.removesuffix("."), ofl, path.name)

@@ -668,3 +668,29 @@ families:
       latin:
         Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
         Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
+
+  # ── Hebrew script (format: ttf), merged the same way ───────────────────────────────────────────
+
+  - name: NotoSansHebrew
+    description: "Hebrew, Yiddish, sans serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansHebrew/unhinted/ttf/NotoSansHebrew-Regular.ttf", sha256: "04272f5600d0ec816d31d0df73b23aa8d3501ea359ebe820da31c11ffcf00853"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansHebrew/unhinted/ttf/NotoSansHebrew-Bold.ttf", sha256: "dfdb3056de1f4542b888c77a1a8a750548a802e271479f56e52152423b64dde8"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
+
+  - name: NotoSerifHebrew
+    description: "Hebrew, Yiddish, serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifHebrew/unhinted/ttf/NotoSerifHebrew-Regular.ttf", sha256: "193c639291b424c66c9074d2dfa21c985b5fbceda545603f8745ca1a9f8951cc"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifHebrew/unhinted/ttf/NotoSerifHebrew-Bold.ttf", sha256: "17d5d36e529ff991b99a90439b0d6b2e1a24ad3b125393063265f4acd5b545e7"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}

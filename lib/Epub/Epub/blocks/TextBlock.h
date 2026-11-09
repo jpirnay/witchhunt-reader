@@ -334,6 +334,14 @@ class TextBlock final : public Block {
   GlyphRun glyphForm(uint16_t i) const;  // count 0 when word i has none
   // Word i's place in reading order; i when the line has no logical order (it reads in stored order).
   uint8_t logicalPosition(uint16_t i) const;
+  // The line's words in reading order: order[k] is the index of the word read k-th, for every k < wordCount(); `order`
+  // holds at least that many. A right-to-left line stores its words in visual order, so a consumer that reads (a link
+  // matched against its text, the page's text for a QR code) walks this instead of the stored order.
+  void readingOrder(uint16_t* order) const;
+  // The line's text in reading order, appended to `out`: each word's logical text, with a space between two words
+  // unless they read as one: the halves of a token (stored side by side, the right one with the continues bit), or
+  // two CJK characters, which the parser splits without a space (utf8IsUnspacedCjk on either side of the seam).
+  void appendReadingText(std::string& out) const;
   bool hasLogicalOrder() const { return bidiBytes_ != 0 && (bidiRegion()[0] & kBidiLogicalOrder) != 0; }
   int16_t wordXpos(const uint16_t i) const { return xposArr[i]; }
   EpdFontFamily::Style wordStyle(const uint16_t i) const {

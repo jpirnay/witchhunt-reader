@@ -270,14 +270,16 @@ cache at 67%.
 
 **The pass line** (design): 2x the Latin twin.
 
-### 4. Step 1 PR 3: reading a Hebrew book (never started)
+### 4. Step 1 PR 3: reading a Hebrew book (page progression and reading order done)
 
 The scope is the step 1 design (`docs/superpowers/specs/2026-11-02-writing-modes-step1-design.md`, section "The
 reader"):
-- **Page progression:** `FlowContext::pageProgressionRtlFor` must take the book's direction. Today Hebrew AND Arabic
-  books turn left to right: `CMD:STATE` shows `progression=ltr` for them.
-- **Reading order** in the consumers: the QR page text and the footnote-link overlay. The dictionary's reading-order
-  join is done (#656).
+- **Page progression (done, `feat/rtl-page-progression`):** `FlowContext::pageProgressionRtlFor` takes the book's
+  direction (`bookIsRtl`). X3: a Hebrew book shows `progression=rtl` and Left turns to the next page; Murphy: the
+  left tap zone shows the next page.
+- **Reading order in the consumers (done, same branch):** the link-target walk and the QR page text read each line in
+  its logical order (`TextBlock::readingOrder`, `appendReadingText`). Murphy: of two note markers on one Hebrew line,
+  master gave only the first a target; both are tappable now. The dictionary's reading-order join was done in #656.
 - **The reader's titles (done, `feat/rtl-ui-titles`, not as the design said):** "once, when set" does not survive the
   themes, which truncate and wrap a title to fit (45 calls), and a reversed string truncated at its end loses the
   title's start. So UI text stays in reading order through measuring and fitting, and `GfxRenderer::drawText` and
@@ -285,9 +287,11 @@ reader"):
   a page's words, formed at section build, go through `drawFormedText` instead. Every UI string is covered at once:
   the status bar, Home, the lists, the TOC, centred text, alt text. X3: a Hebrew chapter title in the status bar
   read mirrored on master and reads right now. Where the UI face has no Hebrew (the list rows), nothing shows yet.
-- **Fonts:** two Font Manager families, Noto Sans Hebrew and Noto Serif Hebrew, merged with Noto Sans/Serif Latin, as
-  `lib/EpdFont/scripts/merge_noto_latin.py` does for Indic and Arabic. New family names, never a re-cut: the flash
-  font cache is keyed on family and size.
+- **Fonts (done, `feat/hebrew-font-families`):** NotoSansHebrew and NotoSerifHebrew in the Font Manager, merged with
+  Noto Sans/Serif Latin by `merge_noto_latin.py` (checked against a Hebrew corpus, `generate_corpus_hebrew.py`), and a
+  Hebrew-script book picks an installed one by itself when the reader font has no alef
+  (`SdCardFontSystem::selectLanguageFamily`). X3: under BookerlyTTF the Bialik chapter switches to NotoSerifHebrew
+  and builds in 3,752 ms against master's 4,550 with the fallback face.
 - **Upstream:** crosspoint-reader#4295 (minibidi L4 mirroring order) was open.
 
 ### 5. Smaller Arabic gaps (each documented in `docs/text-shaping.md`, "What is not shaped yet")
@@ -297,8 +301,11 @@ reader"):
   break paths.
 - **A word past 32 code points split by a style span** can lose or double a long ligature (the piecewise loop
   reaches 2 clusters). The fix: size the buffer for run + 2 x 16 for Arabic calls.
-- **A bidi paragraph whose only Arabic code points are digits**, in a face that maps Arabic, pays a shaping call per
-  token. The output is near-identical: glued groups merge.
+- **A bidi paragraph whose only Arabic code points are digits (done, `fix/arabic-digit-paragraph`):** the pass now
+  shapes only for a token with an Arabic run member (`arabic::holdsRunMember`), so such a paragraph is laid out as
+  without a face: no shaping calls (240 lookups for a ten-paragraph Hebrew test chapter before), no merged groups.
+- **The soft hyphen and the long split word above** sit in the shaper's run scan and its buffer: left for the code
+  audit that also takes item 3 (2026-11-08).
 - **Ayah and number signs** (U+06DD and the others) do not enclose their digits.
 - **Fonts without GPOS:** HarfBuzz's fallback mark placement and legacy `kern` are not ported.
 - **The line breaker** measures a consumed letter at width 0 when its partner degraded: a known parity gap, rare.

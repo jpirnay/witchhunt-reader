@@ -610,6 +610,55 @@ uint8_t TextBlock::logicalPosition(const uint16_t i) const {
   return bidiRegion()[bidiBytes_ - numWords + i];  // the order is the region's last part
 }
 
+void TextBlock::readingOrder(uint16_t* const order) const {
+  for (uint16_t k = 0; k < numWords; ++k) order[k] = k;
+  if (!hasLogicalOrder()) return;
+  // A valid block's order is a permutation of [0, numWords) on at most kMaxOrderedWords words (bidiValid).
+  for (uint16_t i = 0; i < numWords; ++i) {
+    const uint8_t at = logicalPosition(i);
+    if (at < numWords) order[at] = i;
+  }
+}
+
+namespace {
+// The code point that ends text[0..len); 0 for an empty text.
+uint32_t lastCodepointOf(const char* text, size_t len) {
+  if (len == 0) return 0;
+  do --len;
+  while (len > 0 && (static_cast<unsigned char>(text[len]) & 0xC0) == 0x80);
+  const auto* p = reinterpret_cast<const unsigned char*>(text + len);
+  return utf8NextCodepoint(&p);
+}
+}  // namespace
+
+void TextBlock::appendReadingText(std::string& out) const {
+  // Only a line with a logical order needs the index, and it has at most kMaxOrderedWords words (bidiValid).
+  uint16_t order[kMaxOrderedWords];
+  const bool ordered = hasLogicalOrder() && numWords <= kMaxOrderedWords;
+  if (ordered) readingOrder(order);
+  const auto wordAt = [&](const uint16_t k) { return ordered ? order[k] : k; };
+  // Two words read one after the other are one token's halves when they are stored side by side and the right one
+  // continues the left (in a right-to-left run the earlier half is the right one).
+  const auto glued = [&](const uint16_t a, const uint16_t b) {
+    if (a + 1 == b) return wordContinues(b);
+    if (b + 1 == a) return wordContinues(a);
+    return false;
+  };
+  for (uint16_t k = 0; k < numWords; ++k) {
+    const uint16_t i = wordAt(k);
+    const char* text = wordText(i);
+    if (!out.empty()) {
+      // Against the word read before it, on this line or, for the line's first word, the text already there.
+      const uint32_t before = lastCodepointOf(out.data(), out.size());
+      const auto* p = reinterpret_cast<const unsigned char*>(text);
+      const uint32_t after = utf8NextCodepoint(&p);
+      const bool unspaced = (k > 0 && glued(wordAt(k - 1), i)) || utf8IsUnspacedCjk(before) || utf8IsUnspacedCjk(after);
+      if (!unspaced && out.back() != ' ') out.push_back(' ');
+    }
+    out.append(text, wordTextLen(i));
+  }
+}
+
 bool TextBlock::bidiValid() const {
   if (bidiBytes_ == 0 || numWords == 0) return false;
   const uint8_t* region = bidiRegion();

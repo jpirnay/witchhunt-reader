@@ -21,12 +21,20 @@ bool FlowContext::verticalFor(const VerticalText request, const CssWritingMode r
   return rootMode == CssWritingMode::VerticalRl;
 }
 
-bool FlowContext::pageProgressionRtlFor(const VerticalText request, const bool vertical, const PageProgression ppd) {
+bool FlowContext::pageProgressionRtlFor(const VerticalText request, const bool vertical, const PageProgression ppd,
+                                        const bool bookRtl) {
+  if (vertical) return true;  // columns advance right to left
+  if (bookRtl) return ppd != PageProgression::Ltr;
   if (request == VerticalText::Off) return false;
-  // A horizontal colophon in a vertical book keeps the book's direction, and columns advance right to left.
-  return vertical || ppd == PageProgression::Rtl;
+  // A horizontal colophon in a vertical book keeps the book's direction.
+  return ppd == PageProgression::Rtl;
 }
 
-FlowContext FlowContext::of(const VerticalText request, const bool vertical, const PageProgression ppd) {
-  return FlowContext{vertical, pageProgressionRtlFor(request, vertical, ppd)};
+FlowContext FlowContext::of(const VerticalText request, const bool vertical, const PageProgression ppd,
+                            const bool bookRtl) {
+  return FlowContext{vertical, pageProgressionRtlFor(request, vertical, ppd, bookRtl)};
+}
+
+bool FlowContext::bookIsRtl(const bool languageRtl, const bool verticalAllowed, const PageProgression ppd) {
+  return languageRtl || (!verticalAllowed && ppd == PageProgression::Rtl);
 }
