@@ -1,7 +1,8 @@
 // The Hyphenator's fallback breaks (a word the language patterns could not split) fall only between the syllables of
-// an Indic word, never inside one. With no language patterns installed every break is a fallback break.
+// an Indic or Myanmar word, never inside one. With no language patterns installed every break is a fallback break.
 #include <ArabicScripts.h>
 #include <IndicScripts.h>
+#include <MyanmarScript.h>
 #include <Utf8.h>
 #include <gtest/gtest.h>
 
@@ -94,4 +95,60 @@ TEST(IndicFallback, AnArabicJoinerBlocksItsBreaks) {
     EXPECT_NE(arabic::ZWJ, after);
     EXPECT_NE(arabic::ZWJ, before);
   }
+}
+
+namespace {
+
+// The breaks of a Myanmar phrase the fallback cuts, as the code points before each: every one a syllable's start by
+// myanmar::breakAllowed (reading past the dot below), and none drawing a hyphen.
+std::vector<size_t> myanmarBreakIndexes(const std::string& word) {
+  const std::vector<uint32_t> cps = codepointsOf(word);
+  std::vector<size_t> indexes;
+  for (const auto& b : Hyphenator::breakOffsets(word, true)) {
+    EXPECT_FALSE(b.requiresInsertedHyphen) << word << " at byte " << b.byteOffset;
+    const size_t idx = codepointsOf(word.substr(0, b.byteOffset)).size();
+    size_t next = idx + 1;
+    while (next < cps.size() && cps[next] == myanmar::DOT_BELOW) ++next;
+    EXPECT_TRUE(myanmar::breakAllowed(cps[idx - 1], cps[idx], next < cps.size() ? cps[next] : 0))
+        << word << " at code point " << idx;
+    indexes.push_back(idx);
+  }
+  return indexes;
+}
+
+}  // namespace
+
+// A Myanmar phrase wider than the line is cut between syllables only: never after the stacker, never before a killed
+// final consonant or kinzi (the dot below skipped), never inside a number, and never with a hyphen.
+TEST(IndicFallback, AMyanmarPhraseIsCutBetweenSyllablesWithoutAHyphen) {
+  Hyphenator::setLanguageHyphenator(nullptr);
+  // မင်္ဂလာပါ: kinzi and the stacked ga stay with ma, so the cuts are before la and pa.
+  EXPECT_EQ(myanmarBreakIndexes("မင်္ဂလာပါ"), (std::vector<size_t>{5, 7}));
+  // ကျောင်းသား: the killed nga stays in ကျောင်း; the one cut is before sa.
+  EXPECT_EQ(myanmarBreakIndexes("ကျောင်းသား"), (std::vector<size_t>{7}));
+  // ကြောင့်မြန်မာ: the nga with the dot below before asat stays; then မြန် | မာ.
+  EXPECT_EQ(myanmarBreakIndexes("ကြောင့်မြန်မာ"), (std::vector<size_t>{7, 11}));
+  // ၁၂၃၄ကျပ်: never inside the number; the cut is before ka.
+  EXPECT_EQ(myanmarBreakIndexes("၁၂၃၄ကျပ်"), (std::vector<size_t>{4}));
+  // A stack: ကမ္ဘာ is not cut at all, its first consonant held by the stacker after it.
+  EXPECT_TRUE(myanmarBreakIndexes("ကမ္ဘာ").empty());
+  // A ZWJ binds the consonant after it.
+  EXPECT_EQ(myanmarBreakIndexes("ကာ‍ကာကာ"), (std::vector<size_t>{5}));
+}
+
+// Beside a Myanmar letter no hyphen is drawn; inside the Latin part of the same word it still is.
+TEST(IndicFallback, AHyphenIsDrawnOnlyAwayFromMyanmar) {
+  Hyphenator::setLanguageHyphenator(nullptr);
+  const std::string word = "Rangoonရန်ကုန်မြို့";
+  const size_t latin = std::string("Rangoon").size();
+  size_t myanmarBreaks = 0;
+  for (const auto& b : Hyphenator::breakOffsets(word, true)) {
+    if (b.byteOffset < latin) {
+      EXPECT_TRUE(b.requiresInsertedHyphen) << "at byte " << b.byteOffset;
+    } else {
+      EXPECT_FALSE(b.requiresInsertedHyphen) << "at byte " << b.byteOffset;
+      ++myanmarBreaks;
+    }
+  }
+  EXPECT_EQ(myanmarBreaks, 3u);  // before ra, ka (ကုန်) and ma (မြို့)
 }
