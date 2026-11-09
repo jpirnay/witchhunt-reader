@@ -520,6 +520,63 @@ uint32_t utf8UpperCodepoint(const uint32_t cp) {
   return cp;
 }
 
+namespace {
+
+// A lowercase Greek vowel without its tonos or dialytika, and σ for final ς.
+uint32_t greekSearchBase(const uint32_t cp) {
+  switch (cp) {
+    case 0x03AC:      // ά
+      return 0x03B1;  // α
+    case 0x03AD:      // έ
+      return 0x03B5;  // ε
+    case 0x03AE:      // ή
+      return 0x03B7;  // η
+    case 0x03AF:      // ί
+    case 0x03CA:      // ϊ
+    case 0x0390:      // ΐ
+      return 0x03B9;  // ι
+    case 0x03CC:      // ό
+      return 0x03BF;  // ο
+    case 0x03CD:      // ύ
+    case 0x03CB:      // ϋ
+    case 0x03B0:      // ΰ
+      return 0x03C5;  // υ
+    case 0x03CE:      // ώ
+      return 0x03C9;  // ω
+    case 0x03C2:      // ς
+      return 0x03C3;  // σ
+    default:
+      return cp;
+  }
+}
+
+}  // namespace
+
+void utf8SearchFold(std::string& s) {
+  size_t out = 0;
+  size_t in = 0;
+  while (in < s.size()) {
+    const auto* p = reinterpret_cast<const unsigned char*>(s.c_str()) + in;
+    const auto* const start = p;
+    const uint32_t cp = utf8NextCodepoint(&p);
+    // An embedded NUL ends no string here: step over it as one byte.
+    const size_t length = cp == 0 ? 1 : static_cast<size_t>(p - start);
+    const uint32_t folded = cp == 0 ? 0 : greekSearchBase(utf8LowerCodepoint(cp));
+    if (folded == cp) {
+      // Copied as bytes, so a sequence that did not decode passes through as it was.
+      for (size_t i = 0; i < length; ++i) s[out + i] = s[in + i];
+      out += length;
+    } else {
+      // Never longer than what it replaces, so it never overtakes what is still to be read.
+      std::string encoded;
+      utf8AppendCodepoint(encoded, folded);
+      for (const char c : encoded) s[out++] = c;
+    }
+    in += length;
+  }
+  s.resize(out);
+}
+
 std::string utf8ToLower(const std::string& s) {
   std::string out;
   out.reserve(s.size());  // no mapping lengthens its codepoint's encoding

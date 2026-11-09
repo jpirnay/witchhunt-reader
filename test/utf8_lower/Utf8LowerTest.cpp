@@ -183,4 +183,39 @@ TEST(Utf8Upper, NeverLengthensTheEncoding) {
   }
 }
 
+std::string searchKey(std::string s) {
+  utf8SearchFold(s);
+  return s;
+}
+
+// The Library's search key: either case matches, and a Greek query need not carry the accents.
+TEST(Utf8SearchFold, GreekLosesCaseAccentsAndFinalSigma) {
+  EXPECT_EQ(searchKey("ΟΔΥΣΣΕΑΣ"), "οδυσσεασ");
+  EXPECT_EQ(searchKey("Οδυσσέας"), "οδυσσεασ");
+  EXPECT_EQ(searchKey("Ευρωπαϊκή Ένωση"), "ευρωπαικη ενωση");
+  EXPECT_EQ(searchKey("ά έ ή ί ό ύ ώ ϊ ϋ ΐ ΰ"), "α ε η ι ο υ ω ι υ ι υ");
+  EXPECT_EQ(searchKey("Ά Έ Ή Ί Ό Ύ Ώ Ϊ Ϋ"), "α ε η ι ο υ ω ι υ");
+}
+
+TEST(Utf8SearchFold, CyrillicLosesCase) {
+  EXPECT_EQ(searchKey("ВОЙНА И МИР"), "война и мир");
+  EXPECT_EQ(searchKey("Їжак Ґудзик Ўсё"), "їжак ґудзик ўсё");
+  EXPECT_EQ(searchKey("ё"), "ё");  // no accent folding outside Greek
+}
+
+TEST(Utf8SearchFold, AsciiAsBefore) {
+  EXPECT_EQ(searchKey("The Hobbit, 2nd ED."), "the hobbit, 2nd ed.");
+  EXPECT_EQ(searchKey("already lower 123 -_"), "already lower 123 -_");
+  EXPECT_EQ(searchKey(""), "");
+}
+
+// Shorter where the lowercase is: İ is two bytes, i one. Nothing is ever longer.
+TEST(Utf8SearchFold, NeverLongerAndKeepsWhatDoesNotDecode) {
+  EXPECT_EQ(searchKey("İSTANBUL"), "istanbul");
+  EXPECT_EQ(searchKey("STRAẞE"), "straße");
+  EXPECT_EQ(searchKey("A\xFF\xC3B"), "a\xFF\xC3b");
+  const std::string mixed = "Ẁ İ ẞ Ä Ж Ω ΐ \xE2\x82";
+  EXPECT_LE(searchKey(mixed).size(), mixed.size());
+}
+
 }  // namespace

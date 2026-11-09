@@ -7,6 +7,7 @@ add_executable(FileBrowserModelTest
   ${REPO_ROOT}/lib/FsHelpers/NaturalSort.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryBlob.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryIndexReader.cpp
+  ${REPO_ROOT}/lib/Utf8/Utf8.cpp
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
 )
 
@@ -25,6 +26,7 @@ target_include_directories(FileBrowserModelTest PRIVATE
   ${REPO_ROOT}/lib/LibraryIndex
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/Memory
+  ${REPO_ROOT}/lib/Utf8
 )
 
 target_link_libraries(FileBrowserModelTest PRIVATE

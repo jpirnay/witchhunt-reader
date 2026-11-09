@@ -42,6 +42,12 @@ uint32_t utf8UpperCodepoint(uint32_t cp);
 // form ς, the spelling Greek text and dictionaries use. Never longer than the input.
 std::string utf8ToLower(const std::string& s);
 
+// `s` made a search key, in place: utf8LowerCodepoint() over it, and a Greek vowel's tonos and
+// dialytika taken off (ά -> α, ΐ -> ι) and final ς made σ, so a query of either case, typed with
+// or without its accents, finds a name written with them. Never longer than the input, so no
+// allocation; bytes that do not decode are kept as they are. The Library's search.
+void utf8SearchFold(std::string& s);
+
 // Truncate a raw char buffer to the last complete UTF-8 codepoint boundary.
 // Returns the new length (<= len). If the buffer ends mid-sequence, the
 // incomplete trailing bytes are excluded.
