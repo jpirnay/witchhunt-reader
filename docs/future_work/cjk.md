@@ -37,132 +37,28 @@ behind CFF.
 Synthetic bold comes before the font manager because the CJK families ship in their Regular weight only (spec
 section 4). Step 6 is what makes a CJK library navigable once a font is installed.
 
-## Already shipped
+## Follow-ups of the layout work
 
-Listed here so nobody redoes it.
+**Open.** What shipped, and how it is built, is in `docs/design/cjk-typography.md`, section 11: token boundaries
+(#481), line breaking (#497), punctuation widths and the grid (A3a, #520), push-in and the CJK–Latin gap (A3b, #575),
+ruby (B1, #554, review fixes #556) and emphasis dots (B2, #566). The page glyph arena (#500) is under its follow-ups
+below, and the dictionary on CJK pages (step 9) under its own section.
 
-**#481 (A1): token boundaries.** Every word carries a boundary record (`TokenBoundary::Boundary`: continues, no space before), so a break can be a zero-width CJK gap.
+**Ruby (B1)**, known limits from its final review:
+- A reading is measured with kerning (`getTextAdvanceX`) but drawn one character at a time without it, so a Latin gloss with kern pairs can sit 1-2 px past the margin. Fix: measure the unkerned sum, or draw the reading in one call and spread per character only for 1:2:1.
+- A reading over a word in another font family (publisher fonts on) is placed by that word's ascender, but the band is half the block font's ascender: with a taller family it can rise above the band into the line above. Fix: clamp `rubyY` to the line's top.
+- `room()` takes Latin curly quotes (U+2018, U+2019, U+201C, U+201D) as punctuation a reading may overhang, though `applyPunctuationWidths` leaves them out as narrow Latin glyphs: a pixel or two over an apostrophe. Fix: ask `markClass_` instead of `CjkPunctuation::classOf`.
 
-**#497 (A2): CJK line breaking.**
-- **Tokens and kinsoku.**
-  - A CJK word becomes one token per allowed break (`ParsedText::addWord`, `CjkLineBreak::breakByteOffsets`).
-  - Kinsoku works by gluing tokens. The sets are upstream's plus crengine's defaults, plus the straight quotes (never broken next to CJK, UAX #14 LB19), U+00B7 and U+3000 (`CjkLineBreak::isNoLineStart` / `isNoLineEnd`).
-- **Hyphens and kerning.** No hyphen and no kerning next to CJK (`Hyphenator`, `EpdFont::getKerning`).
-- **Korean.** Words stay whole, and split between syllables only at a line end with hyphenation on (`CjkLineBreak::hangulLineEndBreaks`).
-- **The parser** (`ChapterHtmlSlimParser`):
-  - a 32-token run flush;
-  - a per-token table budget charge with an early degrade for long CJK cells;
-  - the CSS Text 3 segment-break rule. A source newline between CJK characters, or next to a quote in CJK text, vanishes. It is decided when the word is flushed, and only inside inline formatting.
-- **Section version** 92.
-- **The dictionary** releases the font caches when a CJK page leaves no room (`DictionaryWordSelectActivity`).
+**Emphasis dots (B2):**
+- `<em class="sesame_dot">` with `font-style: normal`, Aozora Bunko's own markup, stays italic: the `<i>`/`<em>` tag path sets italic whatever the CSS says (`ChapterHtmlSlimParser::startElement`). Honouring a CSS `font-style: normal` there is a maintainer policy call, since `<b>` deliberately lets the tag decide its weight. Span-based markup (AozoraEpub3's `em-sesame`) is unaffected.
+- Fullwidth ＃％＆＊／＠＼＿ (U+FF03, FF05, FF06, FF0A, FF0F, FF20, FF3C, FF3F), the CJK Compatibility Forms U+FE30-FE4F and ～ U+FF5E still take a mark, while their ASCII forms and 〜 do not (`TextEmphasis::takesMark`). ＊ in a "＊　＊　＊" break inside a marked span is the likeliest to show.
 
-**#500: page glyph arena.**
-- An SD font's per-page glyph arena (25-31 KB on a dense CJK page) is freed once the page is on the panel.
-- The pre-render of the next page prewarms 1-bit ink masks instead of 2-bit glyphs: half the bytes, the same black-and-white pixels.
-- **Effect on the X3:** a dense Chinese page turns in ~503 ms instead of ~678 ms, and reading leaves ~53 KB free instead of 15-21 KB.
-
-**#520 (A3a): punctuation widths, flush justification, the whole-em grid.**
-- **A profile per book language** (`TypographyProfile::forLanguage`, from the OPF `dc:language`): how lines break and justify, the punctuation table, the grid, the inline direction and the hyphenator. It travels `Section` → `ChapterHtmlSlimParser` → every `ParsedText`.
-  - Traditional Chinese is `zh-Hant`, `-TW`, `-HK`, `-MO` and `lzh`; an explicit `-Hans` wins.
-  - The direction is data only: every book is laid out left to right, horizontally (spec section 4).
-- **Punctuation widths** (`CjkPunctuation`), written from W3C JLREQ and CLREQ; crengine's tables were a cross-check, not the source.
-  - Every adjustable mark is a token of its own, glued where kinsoku holds it (`ParsedText::addWord`).
-  - Mid-line widths are set before line breaking (`applyPunctuationWidths`). The line-edge widths are applied by all four breakers and `extractLine` (`markClass_`, `edgeTrim_`: two bytes a token).
-  - A narrowed mark is drawn where its ink sits (`GfxRenderer::getGlyphInk`).
-  - A mark is narrowed only when its font draws it full-width, at least 4/5 of the em of 一, so a Latin reader font changes nothing.
-  - Simplified Chinese and Japanese narrow most marks next to other punctuation and at line edges; traditional Chinese keeps its centred marks full width.
-- **Flush justification.** A justified line with CJK gaps spreads its remainder over the gaps and ends at the margin. Latin lines keep their rounding.
-- **The whole-em grid** in Chinese and Japanese books.
-  - A block's width rounds down to whole ems at the block's own font size, with half the cut on each side.
-  - A first-line indent rounds down to whole ems, at least 1.
-  - A block beside a float gets no grid.
-- **Section version** 96.
-- **Tests and books.**
-  - `test/cjk_layout/CjkTypographyTest.cpp` and `test/typography/`.
-  - The rule checker places every unspaced CJK character where the widths before it put it, and checks that justified lines with CJK gaps end flush on a whole-em grid (`CjkJustifiedRules`).
-  - `test_cjk_zh_punctuation.epub`, generated by `make_test_cjk_zh_punctuation.py`: simplified-Chinese punctuation in runs and at line edges.
-- **The design:** `docs/design/cjk-typography.md`.
-
-**#554 (B1): ruby (furigana).**
-- **Parser** (`ChapterHtmlSlimParser`): `<ruby>` flushes and continues glued, `<rt>` collects the reading for the base tokens since the group start, `<rp>` is skipped in layout. A reading is capped at 255 bytes. No token-run split inside a group. `<rt>` and `<rp>` text still count toward visible offsets, so KOSync is unchanged.
-- **Tokens and groups.** A group is `{firstWord, wordCount, text}` on token boundaries (`ParsedText`, `TextBlock`). `TextBlock`'s `hasSizes` byte is a flags byte (bit 1 = ruby); groups are stored only on lines that have ruby, so books without it cost nothing.
-- **Widths.**
-  - Ruby is drawn at half the base size (`getTextWidthScaled` / `drawTextScaled`).
-  - A reading wider than its base overhangs, centred, over neighbouring kana and punctuation only, never over kanji.
-  - JLREQ 1:2:1 spreading applies only when both the reading and the base are all CJK; any other pair is centred.
-  - The margins (line-edge protection) are applied by all four breakers and `extractLine`.
-- **Taller lines.** A line with ruby is taller by half an ascender: in `addLineToPage`, in table rows and cells, in `TextBlock::wordBox` (the dictionary boxes the base, not the ruby) and in link areas. Other lines keep their height.
-- **Section version** 99.
-- **Tests.** `dumpPage` prints the ruby groups, so the goldens see them; the rule checker checks ruby spacing and margins; stray ruby readings keep their spacing, pinned by x positions.
-- **Ruby: known limits** (from the final review).
-  - A reading is measured with kerning (`getTextAdvanceX`) but drawn one character at a time without it, so a Latin gloss with kern pairs can sit 1-2 px past the margin. Fix: measure the unkerned sum, or draw the reading in one call and spread per character only for 1:2:1.
-  - A reading over a word in another font family (publisher fonts on) is placed by that word's ascender, but the band is half the block font's ascender: with a taller family it can rise above the band into the line above. Fix: clamp `rubyY` to the line's top.
-  - `room()` takes Latin curly quotes (U+2018, U+2019, U+201C, U+201D) as punctuation a reading may overhang, though `applyPunctuationWidths` leaves them out as narrow Latin glyphs: a pixel or two over an apostrophe. Fix: ask `markClass_` instead of `CjkPunctuation::classOf`.
-
-**#566 (B2): emphasis dots (傍点).**
-- **CSS** (`CssParser`): `text-emphasis-style` and its `-epub-` and `-webkit-` forms, and the `text-emphasis` shorthand. The style is a mark: dot, circle, double circle, triangle or sesame, filled or open; `none` clears it. `CSS_CACHE_VERSION` 31.
-- **Parser to page.** The mark travels as bits of the token boundary (`TokenBoundary::withEmphasis`), through splits and erases, and the parser marks every token of a span, links and a multi-word ruby base's kept space included. A run of tokens with one mark becomes one `Emphasis` annotation on its line, outside ruby groups (ruby wins over a mark on the same base).
-- **Drawing** (`TextBlock`): one mark above each character that takes one (`TextEmphasis::takesMark`: not punctuation, not spaces, not a soft hyphen), centred, at half size, through the ruby box path, with no allocation. A run with no such character gets no record and no band. A wrapped span is marked on both lines.
-- **Taller lines.** A line with a mark gets ruby's band, so marks never touch the line above.
-- **Section version** 102.
-- **Tests.** `test/cjk_layout/CjkEmphasisTest.cpp`, `RubyTextBlock.DrawingMarksAllocatesNothing`, the emphasis cases of `RubyLayoutTest`, the CSS tests, and case 16 of `test_cjk_line_breaking.epub` (the golden shows the `E` records).
-- **Follow-up:** `<em class="sesame_dot">` with `font-style: normal`, Aozora Bunko's own markup, stays italic: the `<i>`/`<em>` tag path sets italic whatever the CSS says (`ChapterHtmlSlimParser::startElement`). Honouring a CSS `font-style: normal` there is a maintainer policy call, since `<b>` deliberately lets the tag decide its weight. Span-based markup (AozoraEpub3's `em-sesame`) is unaffected.
-- **Follow-up:** fullwidth ＃％＆＊／＠＼＿ (U+FF03, FF05, FF06, FF0A, FF0F, FF20, FF3C, FF3F), the CJK Compatibility Forms U+FE30-FE4F and ～ U+FF5E still take a mark, while their ASCII forms and 〜 do not (`TextEmphasis::takesMark`). ＊ in a "＊　＊　＊" break inside a marked span is the likeliest to show.
-
-**#570, #569, #574 (step 9): the dictionary on CJK pages.**
-- **The run** (`CjkLookupRun`). From the cursor's character: up to 12 code points across words and line ends, stopping at the first one that is not unspaced CJK or that `cleanWord` strips as punctuation; 々, 〆, ー and kana kept. On Hangul, the token itself. Each code point remembers its word, so a match length maps back to a span of words.
-- **The search** (`Dictionary::resolvePrefixes`).
-  - Up to three headwords that are prefixes of the run, longest first, from the `.idx` and the `.syn` (a tie goes to the `.idx`), each with its run of same-headword entries (at most 8). None of `resolve()`'s fallbacks. It gives up between probes when a button press is waiting (speculation only).
-  - One descent per index file; a later, shorter target steps back from the window it left (`gallopSamples`). Sidecar samples are read in 512-byte blocks through whichever scan buffer is idle. A probe reads its window's first headword from its own scan, no `.syn` probe runs whose every hit the merge would drop, and a followed synonym finds its run in its own window (`followSynonym`).
-- **Definitions** (`readPrefixDefinitions`). Every entry of the longest match, then the shorter matches, in one buffer sized once within `MAX_DEFINITION_BYTES`. Drawn in the reader's font (`definitionFontId()`), each entry under its headword; the header keeps the dictionary name and page counter. Latin lookups are unchanged.
-- **The word screen.** The highlight grows over the match with no extra press (speculation), Confirm looks it up, and the span is drawn on the differential path (2 runs, 2,048 bytes) or by the full repaint. A tap inside the span looks it up.
-- **#569 (H1):** the word arrays and the snapshot are freed while a definition is open and rebuilt on return (8 ms for 232 words), +9.2 KB free heap at the definition's entry on the X4 with 12 KB of ballast. **#570 (L1):** the prewarm arena retry logs no error when it recovers.
-- `CMD:ACT:DICT` reports the run, the hits, their entries, probes, reads and both timings (`docs/serial-test-api.md`).
-- **No version changes.** `gh_release` flash +9,044 B, static RAM +0 B (`firmware_size_history.py`, against master).
-- **Tests.** `test/dictionary/DictionaryTest.cpp` (the prefix search and its read counts, the definitions), `test/dictionary/CjkLookupRunTest.cpp`.
-- **The user's side** is in `docs/dictionary.md` ("Chinese, Japanese and Korean"): how it works, its limits, the PyGlossary conversions, sizes and first-open times. The design spec was deleted once its lasting parts were there; the plan stays (`docs/superpowers/plans/2026-10-23-cjk-dictionary.md`).
-
-**#575 (A3b): push-in and the CJK–Latin gap.**
-- **Push-in** (spec 5.3). A line one token too long first shrinks, in this order: the marks at its two edges, each all or nothing (spec 5.2: "half or full"), then every other mark down to its minimum width, then the CJK–Latin gaps. Only if that is not enough does it break earlier and stretch. Western word spaces do not shrink, so Latin lines do not move.
-  - All four breakers test a line at its pushed-in width (`pushedInWidth`): the DP breaker (`computeLineBreaks`) and the three greedy ones, with the quantities `extractLine` uses, so a line a breaker accepts pushed in is one `extractLine` pushes in. `extractLine` takes the need tier by tier, shares each tier in line order, and aligns and justifies the line by its pushed-in width.
-  - **The DP cost.** A line that fits only pushed in, the last line too, costs (1 + badness of its overrun)² + 1 (`kPushInPenalty`). An exact line costs 1, a pushed-in one at least 2, a stretched one with any badness at least 4: push-in wins against a loose line (about 1.3 em of slack on 28) and loses to a near-exact one. A paragraph with nothing that can give way breaks as before.
-  - What each mark may give, mid-line and at a line edge, is layout scratch, two bytes a token (`shrink_`, `edgeShrink_`, set by `applyPunctuationWidths`). Nothing new in the section file.
-- **The CJK–Latin gap** (spec 5.4). A quarter of the CJK side's em, `(em × 2 + 4) / 8` px, between Han or kana and a Latin letter or digit with no source space between them (`CjkPunctuation::takesCjkLatinGap`, `ParsedText::cjkLatinGapBefore`), in Chinese and Japanese books only (`TypographyProfile::cjkLatinGap`).
-  - None next to punctuation, full-width letters, half-width katakana or Hangul, and none in a font without CJK glyphs.
-  - It stretches with justification, keeps half of itself under push-in, and is dropped at a line break. It is not a break opportunity of its own.
-- **The Japanese minimums** (JLREQ). 。 and ！？ keep their full width mid-line under push-in; 、 may halve; at a line end 。、 and a closing bracket are half or full.
-- **Ruby gives nothing to push-in.** A ruby's overhangs and line-edge reserves stay as they are, a mark inside a ruby group does not shrink, and a mark a ruby overhangs shrinks only as far as the overhangs leave it room (`applyRubyWidths`).
-- **Section version** 103.
-- **Measured cost.** Cold section build on the X4 against master: total 0..+2 %, layout (`parse`) +2..+8 %; page turns unchanged.
-- **Tests and books.**
-  - `CjkPushIn` and `CjkLatinGap` in `test/cjk_layout/CjkTypographyTest.cpp`, both breakers; the minimums in `test/typography/`.
-  - The rule checker lays every line out again from its dump, push-in included (`CjkRulesTest`, `LineLayout`): no line is wider than its text width, a line that shrank could not have kept its natural widths, and a line that was not pushed in holds the CJK–Latin gap exactly.
-  - Cases 17 (CJK–Latin boundaries) and 18 (a line that fits only pushed in) of `test_cjk_line_breaking.epub`.
-- **Follow-up:** guide dots are drawn at Han–Latin gaps. `TextBlock::render` dots every gap of at least the dot size + 2 px, and the CJK–Latin gap is 4-5 px at reading sizes, so a reader with guide dots on sees a dot between 漢字 and iPhone. Guide dots mark word spaces; the gaps between CJK characters are too narrow for one. Next step: dot only the gaps that were a source space.
-- **Follow-up:** a re-flowed line can end with ！ or ？ followed by an ideographic space U+3000 (case 1 of the fixture, "！　"). Typesetting practice sets no space there, and no section-5 rule covers it: a line-end U+3000 after ！？ could be dropped or hung.
-- **Follow-up:** the rule checker's justified line-end check stays either-way (pushed in or not) on lines with ruby, word spaces or glued Latin, about a quarter of the corpus's justified lines. Restating those lines' widths exactly would let the check be strict on every line (`CjkRulesTest`).
-- **Follow-up, Latin scratch:** the four mark vectors (`markClass_`, `edgeTrim_`, `shrink_`, `edgeShrink_`) are allocated for Latin paragraphs too: +524 B on test_table_streaming's peak, from table cells keeping their scratch. The fix: gate all four together on "the block holds a CJK mark", or `releaseLayoutScratch()` after each cell's layout.
-- **Follow-up, the gap's lookups:** `cjkLatinGapBefore` decodes two codepoints at every breakable CJK boundary and calls `cjkEm` per gap. A per-block "has a Han/kana-Latin boundary" flag or a per-(font, style, scale) em cache would remove them.
-
-**Tests and books.**
-- `test/epub_pipeline/CjkRulesTest.cpp`, the rule checker, lays out every line and asserts kinsoku, no hyphen, and no stray space between CJK characters.
-- The books it runs on are in `test/epubs/`:
-  - `test_cjk_line_breaking.epub`, the fixture, generated by `make_test_cjk_line_breaking.py`;
-  - `test_cjk_ja_soseki`, `test_cjk_zh_honglou` and `test_cjk_ko_hyeon`, public-domain excerpts generated by `make_test_cjk_excerpts.py`;
-  - `test_cjk_block_seams`, list items and `dl` after CJK text.
-- Unit tests are in `test/cjk_line_break/` and `test/cjk_layout/`.
-
-**The design.** The full design for everything below is `docs/superpowers/specs/2026-10-16-cjk-layout-design.md` on branch `docs/cjk-layout-design` (commit `7e1136008`). It is working material, not on master.
-- Section 7 is B, Appendix A the character sets. Section 6, the first A3 design, is replaced by the A3 design record (`docs/design/cjk-typography.md`).
-- Section 3 explains each upstream-versus-KOReader choice.
-- Upstream is crosspoint-reader `upstream/develop`. Port by hand: the histories are unrelated.
-
-## A CJK font readers can install
-
-**Shipped** (#550). The font manager installs eight CJK families as `.otf`: NotoSans and NotoSerif in JP, SC, TC and KR,
-1.9 to 7.0 MB each (9.7 MB sans, 17.3 MB serif), drawn by the TTF engine. They are cut by
-`lib/EpdFont/scripts/cjk_subset.py`, listed in `sd-fonts.yaml` and `assets/sd-fonts/fonts-v3.json` (manifest version 3).
-"Download all" leaves them out. The design is `docs/design/cjk-ttf-fonts.md`, sections 4-6.
+**Push-in and the CJK–Latin gap (A3b):**
+- Guide dots are drawn at Han–Latin gaps. `TextBlock::render` dots every gap of at least the dot size + 2 px, and the CJK–Latin gap is 4-5 px at reading sizes, so a reader with guide dots on sees a dot between 漢字 and iPhone. Guide dots mark word spaces; the gaps between CJK characters are too narrow for one. Next step: dot only the gaps that were a source space.
+- A re-flowed line can end with ！ or ？ followed by an ideographic space U+3000 (case 1 of the fixture, "！　"). Typesetting practice sets no space there, and no section-5 rule covers it: a line-end U+3000 after ！？ could be dropped or hung.
+- The rule checker's justified line-end check stays either-way (pushed in or not) on lines with ruby, word spaces or glued Latin, about a quarter of the corpus's justified lines. Restating those lines' widths exactly would let the check be strict on every line (`CjkRulesTest`).
+- **Latin scratch:** the four mark vectors (`markClass_`, `edgeTrim_`, `shrink_`, `edgeShrink_`) are allocated for Latin paragraphs too: +524 B on test_table_streaming's peak, from table cells keeping their scratch. The fix: gate all four together on "the block holds a CJK mark", or `releaseLayoutScratch()` after each cell's layout.
+- **The gap's lookups:** `cjkLatinGapBefore` decodes two codepoints at every breakable CJK boundary and calls `cjkEm` per gap. A per-block "has a Han/kana-Latin boundary" flag or a per-(font, style, scale) em cache would remove them.
 
 ## CJK `.cpfont` fonts converted by hand
 
@@ -320,8 +216,22 @@ still draws as the CJK faces' stand-in square (□). Before the CJK faces these 
 
 ## Dictionary on CJK pages
 
-Shipped in step 9 ([above](#already-shipped)). What remains, measured on the X4 with CC-CEDICT, JMdict_e and
-CC-KEDICT (`docs/dictionary.md` has the conversions):
+Shipped in step 9.
+
+**What step 9 built** (#570, #569, #574).
+- **The run** (`CjkLookupRun`). From the cursor's character: up to 12 code points across words and line ends, stopping at the first one that is not unspaced CJK or that `cleanWord` strips as punctuation; 々, 〆, ー and kana kept. On Hangul, the token itself. Each code point remembers its word, so a match length maps back to a span of words.
+- **The search** (`Dictionary::resolvePrefixes`).
+  - Up to three headwords that are prefixes of the run, longest first, from the `.idx` and the `.syn` (a tie goes to the `.idx`), each with its run of same-headword entries (at most 8). None of `resolve()`'s fallbacks. It gives up between probes when a button press is waiting (speculation only).
+  - One descent per index file; a later, shorter target steps back from the window it left (`gallopSamples`). Sidecar samples are read in 512-byte blocks through whichever scan buffer is idle. A probe reads its window's first headword from its own scan, no `.syn` probe runs whose every hit the merge would drop, and a followed synonym finds its run in its own window (`followSynonym`).
+- **Definitions** (`readPrefixDefinitions`). Every entry of the longest match, then the shorter matches, in one buffer sized once within `MAX_DEFINITION_BYTES`. Drawn in the reader's font (`definitionFontId()`), each entry under its headword; the header keeps the dictionary name and page counter. Latin lookups are unchanged.
+- **The word screen.** The highlight grows over the match with no extra press (speculation), Confirm looks it up, and the span is drawn on the differential path (2 runs, 2,048 bytes) or by the full repaint. A tap inside the span looks it up.
+- **#569 (H1):** the word arrays and the snapshot are freed while a definition is open and rebuilt on return (8 ms for 232 words), +9.2 KB free heap at the definition's entry on the X4 with 12 KB of ballast. **#570 (L1):** the prewarm arena retry logs no error when it recovers.
+- `CMD:ACT:DICT` reports the run, the hits, their entries, probes, reads and both timings (`docs/serial-test-api.md`).
+- **No version changes.** `gh_release` flash +9,044 B, static RAM +0 B (`firmware_size_history.py`, against master).
+- **Tests.** `test/dictionary/DictionaryTest.cpp` (the prefix search and its read counts, the definitions), `test/dictionary/CjkLookupRunTest.cpp`.
+- **The user's side** is in `docs/dictionary.md` ("Chinese, Japanese and Korean"): how it works, its limits, the PyGlossary conversions, sizes and first-open times. The design spec was deleted once its lasting parts were there; the plan stays (`docs/superpowers/plans/2026-10-23-cjk-dictionary.md`).
+
+What remains, measured on the X4 with CC-CEDICT, JMdict_e and CC-KEDICT (`docs/dictionary.md` has the conversions):
 
 - **Search time on dictionaries with a large `.syn` (follow-up: a JMdict speed-up).** The maintainer's gate is the
   median of `ms / exact_ms` over 50 words per book (`CMD:ACT:DICT`), at most 1.5. Hong Lou Meng with CC-CEDICT: 1.46
@@ -389,6 +299,11 @@ at 1.5, 1.7 and 2.0 em against the old Normal and Wide.
   font size.
 
 ## Page glyph arena follow-ups (after #500)
+
+**What #500 built.**
+- An SD font's per-page glyph arena (25-31 KB on a dense CJK page) is freed once the page is on the panel.
+- The pre-render of the next page prewarms 1-bit ink masks instead of 2-bit glyphs: half the bytes, the same black-and-white pixels.
+- **Effect on the X3:** a dense Chinese page turns in ~503 ms instead of ~678 ms, and reading leaves ~53 KB free instead of 15-21 KB.
 
 **Open.**
 - **The pre-render floor can underestimate once.** It is keyed on the last page's arena, so a sparse-to-dense page transition underestimates the next pre-render (the safe failure is a skipped pre-render). A running maximum of the arena per font would be conservative.

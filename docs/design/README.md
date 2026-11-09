@@ -8,7 +8,8 @@ Code in `lib/EpdFont/ttf/` cites `cjk-ttf-fonts.md` as "spec N.N"; older comment
 
 The CJK layout code in `lib/Epub/Epub/` (`CjkPunctuation`, `TypographyProfile`, `ParsedText`) and its tests
 (`test/cjk_layout/`, `test/typography/`, `test/epub_pipeline/CjkRulesTest.cpp`) cite `cjk-typography.md` as
-"spec 5.N" (punctuation widths, push-in, the CJK–Latin gap, the grid). Their ruby comments ("spec 7.N") and the rule
+"spec 5.N" (punctuation widths, push-in, the CJK–Latin gap, the grid); its section 11 records what was built, from the
+line breaking underneath to ruby and emphasis dots. Their ruby comments ("spec 7.N") and the rule
 checker's "spec section 9.1" cite the earlier CJK layout spec, `docs/superpowers/specs/2026-10-16-cjk-layout-design.md`
 on branch `docs/cjk-layout-design` (commit `7e1136008`).
 

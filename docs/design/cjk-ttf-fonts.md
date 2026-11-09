@@ -794,7 +794,10 @@ Each is its own plan and PR; the device runs use the serial test API. State on 2
 4. **CFF outlines** (section 9). **Shipped: #542; byte-exact speed-ups #544** (a cold CJK chapter in SD mode: 1,159 ms
    as CFF against 1,114 ms as TrueType on the X4).
 5. **The CJK fonts as `.otf` in the font manager** (sections 4–6), once CFF has merged: the hosted fonts are only
-   useful to firmware that draws them, and `fonts-v3.json` goes live with this.
+   useful to firmware that draws them, and `fonts-v3.json` goes live with this. **Shipped: #550**: eight families,
+   NotoSans and NotoSerif in JP, SC, TC and KR, 1.9 to 7.0 MB each (9.7 MB sans, 17.3 MB serif), cut by
+   `lib/EpdFont/scripts/cjk_subset.py` and listed in `sd-fonts.yaml` and `assets/sd-fonts/fonts-v3.json` (manifest
+   version 3); "Download all" leaves them out.
 6. **Synthetic italic** (section 7.4), after 5: step 5b of the roadmap. **Shipped: #551.**
 
 ## Appendix A. Spike measurements (X4, 2026-10-19/20)
