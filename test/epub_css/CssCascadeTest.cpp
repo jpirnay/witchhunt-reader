@@ -300,11 +300,12 @@ TEST(CssCascade, ElementCompoundNeedsTheElement) {
 
 // p#x.a (one id, one class, one element) beats #x; without the class only #x applies.
 TEST(CssCascade, IdAndClassCompound) {
-  const std::vector<std::string> css = {"p#x.a { text-align: right; }\n#x { text-align: center; }\n"};
+  const std::vector<std::string> css = {
+      "p#x.a { text-align: right; }\n#x { text-align: center; }\n#X { text-align: left; }\n"};
   expectAlign(css, {"p", "a", "x"}, CssTextAlign::Right);
   expectAlign(css, {"p", "", "x"}, CssTextAlign::Center);
   expectAlign(css, {"div", "a", "x"}, CssTextAlign::Center);
-  expectAlign(css, {"p", "a", "X"}, CssTextAlign::Right);  // ids match case-insensitively, as #id rules do
+  expectAlign(css, {"p", "a", "X"}, CssTextAlign::Left);  // ids match as written, as #id rules do: #X, not p#x.a
 }
 
 // `*` matches every element at the lowest specificity; `*.a` is `.a`.
@@ -377,6 +378,15 @@ TEST(CssCascade, ChildNeedsTheParent) {
   expectIndent(css, {"p", "", "", {{"body"}, {"div", "poem"}}}, true);
   expectIndent(css, {"p", "", "", {{"div", "poem"}, {"span"}}}, false);
   expectIndent(css, {"p", "", "", {{"body"}, {"div", "verse"}}}, false);
+}
+
+// Class and id names match as written in a compound selector too; element names fold, after a combinator as well.
+TEST(CssCascade, CompoundClassAndIdNamesKeepTheirCaseAndElementNamesFold) {
+  const std::vector<std::string> css = {"DIV.Poem > P#Verse SPAN.Line { margin-left: 2em; }\n"};
+  expectIndent(css, {"span", "Line", "", {{"div", "Poem"}, {"p", "", "Verse"}}}, true);
+  expectIndent(css, {"span", "line", "", {{"div", "Poem"}, {"p", "", "Verse"}}}, false);
+  expectIndent(css, {"span", "Line", "", {{"div", "poem"}, {"p", "", "Verse"}}}, false);
+  expectIndent(css, {"span", "Line", "", {{"div", "Poem"}, {"p", "", "verse"}}}, false);
 }
 
 // `div.a > p span`: the span anywhere under a p whose parent is div.a.

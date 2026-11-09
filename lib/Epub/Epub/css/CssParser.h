@@ -123,7 +123,9 @@ class CssParser {
   //      in bits 3-6 of the smallCaps byte, defined in bit 2; in the resident pool, extra bit 5 and a mark byte.
   // v32: what an <hr> leaves to draw (CssStyle::ruleBorder), from the border and background properties: bits 6-7 of the
   //      visibility flags byte; in the resident pool, bits 6-7 of the extra byte.
-  static constexpr uint8_t CSS_CACHE_VERSION = 32;
+  // v33: class and id names in selectors keep their case (only element names fold). A v32 cache stores them
+  //      lowercased, so a mixed-case class would no longer match its own rule.
+  static constexpr uint8_t CSS_CACHE_VERSION = 33;
   // Bytes before the complex-rule table and the sorted offset index: version(1) + ruleCount(2) +
   // totalSelectorCandidates(4) + unsupportedSelectorSkips(4) + flags(1) + complexTableBytes(2).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 14;
@@ -567,8 +569,8 @@ class CssParser {
   //   compoundCount(1) ruleCount(1) compoundBytes(2)
   //   compounds: the distinct compounds, each flags(1) [tag(4)] [id(4)] class(4)...
   //              (flags 0x80 element name, 0x40 id, low 3 bits the class count; names are
-  //              selectorHash of the lowercase name, classes sorted so equal compounds are equal
-  //              bytes). An element matches a compound when it has every part; bit i of an
+  //              selectorHash of the element name lowercased, of class and id names as written, classes sorted so equal
+  //              compounds are equal bytes). An element matches a compound when it has every part; bit i of an
   //              element's compound mask says it matches compound i.
   //   rules:     order(2) specificity(2) steps(1) styleLen(1) step(steps) compressed style(styleLen)
   //              (v25) the steps are the selector's compounds right to left, the subject first:
@@ -585,7 +587,7 @@ class CssParser {
   bool addComplexRule(std::string_view selector, const CssStyle& style, uint16_t order);
   bool growComplexTable(size_t needed);
   // The element's compound mask from its names, hashed like the table's (selectorHash of the
-  // lowercase name); idHash is nullptr without an id.
+  // element name lowercased, of class and id names as written); idHash is nullptr without an id.
   uint64_t matchCompounds(uint32_t tagHash, const uint32_t* idHash, const uint32_t* classHashes,
                           size_t classCount) const;
   // Merges the complex rules that match the element (its compound mask `self`, its ancestors in

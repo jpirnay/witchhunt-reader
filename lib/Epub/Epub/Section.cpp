@@ -36,7 +36,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 117;  // v117 (Myanmar PR 3): a line with Myanmar text may end between
+constexpr uint8_t SECTION_FILE_VERSION = 118;  // v118: class and id selectors match case-sensitively; a chapter laid
+                                               // out with folded matching kept the wrong rule
+                                               // v117 (Myanmar PR 3): a line with Myanmar text may end between
                                                // syllables inside a phrase, unhyphenated, at any hyphenation setting
                                                // v116 (Myanmar PR 2): Myanmar is shaped, and a Myanmar phrase
                                                // wider than the line is cut between syllables, unhyphenated
