@@ -257,9 +257,11 @@ def _read_corpus(path: Path) -> list[str]:
 
 def write_corpus(out_dir: Path) -> None:
     """The checks' corpus, one <script>.txt per script (test/ot_shaper/generate_corpus.py for the Indic scripts,
-    generate_corpus_arabic.py for arabic.txt, generate_corpus_hebrew.py for hebrew.txt)."""
+    generate_corpus_arabic.py for arabic.txt, generate_corpus_hebrew.py for hebrew.txt, generate_corpus_myanmar.py for
+    myanmar.txt)."""
     shaper_dir = SCRIPT_DIR.parent.parent.parent / "test" / "ot_shaper"
-    for generator in ("generate_corpus.py", "generate_corpus_arabic.py", "generate_corpus_hebrew.py"):
+    for generator in ("generate_corpus.py", "generate_corpus_arabic.py", "generate_corpus_hebrew.py",
+                      "generate_corpus_myanmar.py"):
         subprocess.run([sys.executable, str(shaper_dir / generator), str(out_dir)], check=True, capture_output=True)
 
 

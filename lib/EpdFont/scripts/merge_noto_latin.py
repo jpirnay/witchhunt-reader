@@ -1,5 +1,5 @@
-"""Merge Noto's Latin into a Noto script font (the Indic, Arabic and Hebrew TrueType families of sd-fonts.yaml) and check
-the merge.
+"""Merge Noto's Latin into a Noto script font (the Indic, Arabic, Hebrew and Myanmar TrueType families of sd-fonts.yaml)
+and check the merge.
 
 The merge, for one style:
 - the script font with the Latin letters A-Z and a-z taken out of its cmap (its glyphs stay, so its glyph IDs and its
@@ -12,7 +12,8 @@ The merge, for one style:
   upem when they differ;
 - fontTools.merge.Merger with vhea and vmtx dropped, the script font first.
 The checks (HarfBuzz, scale 2133, ppem 33; an Indic line is shaped left to right under its script's tag, a line with
-an Arabic-block letter right to left under Arab, a line with a Hebrew-block letter right to left under Hebr):
+an Arabic-block letter right to left under Arab, a line with a Hebrew-block letter right to left under Hebr, a line with
+a Myanmar-block letter left to right under Mymr):
 - equal against the script's own font: every corpus line, glyph IDs, advances and offsets, with no language and each
   of the script's languages;
 - Latin kept whole: each Latin line restricted to the code points the merged font takes from the Latin font (A-Z, a-z
@@ -41,10 +42,14 @@ LANGS = {"devanagari": ["hi", "mr", "ne", "sa"], "bengali": ["bn", "as"], "gurmu
          # Arabic: the set of test/ot_shaper/oracle_arabic.py
          "arabic": ["ar", "fa", "ur", "ps", "sd", "ug", "ku", "ckb", "ks"],
          # Hebrew: the languages the reader sets right to left in the Hebrew script (TypographyProfile)
-         "hebrew": ["he", "yi"]}
+         "hebrew": ["he", "yi"],
+         # Myanmar: the set of test/ot_shaper/oracle_myanmar.py (Noto's language systems are MON and KSW)
+         "myanmar": ["my", "mnw", "ksw", "shn"]}
 ISO = ["Deva", "Beng", "Guru", "Gujr", "Orya", "Taml", "Telu", "Knda", "Mlym", "Sinh"]
 ARABIC_BLOCKS = [(0x0600, 0x06FF), (0x0750, 0x077F), (0x0870, 0x089F), (0x08A0, 0x08FF)]
 HEBREW_BLOCKS = [(0x0590, 0x05FF), (0xFB1D, 0xFB4F)]
+# Myanmar, Myanmar Extended-B and Myanmar Extended-A: the blocks the shaper's Myanmar tables cover.
+MYANMAR_BLOCKS = [(0x1000, 0x109F), (0xA9E0, 0xA9FF), (0xAA60, 0xAA7F)]
 LATIN_RANGES = [(0x0020, 0x007E), (0x00A0, 0x024F), (0x2000, 0x206F), (0x20A0, 0x20CF), (0x2122, 0x2122),
                 (0xFFFD, 0xFFFD)]
 # The letters of IAST beyond Latin-1 (a, i, u, s, n, e, o with macron, acute or tilde are in U+00A0-024F): the 24
@@ -66,21 +71,24 @@ SCALE, PPEM = 2133, 33
 
 
 def script_of(text):
-    """The ISO 15924 tag of the first Arabic, Hebrew or Indic character of a corpus line (an Indic block has 128 code
-    points)."""
+    """The ISO 15924 tag of the first Arabic, Hebrew, Myanmar or Indic character of a corpus line (an Indic block has 128
+    code points)."""
     for ch in text:
         cp = ord(ch)
         if any(lo <= cp <= hi for lo, hi in ARABIC_BLOCKS):
             return "Arab"
         if any(lo <= cp <= hi for lo, hi in HEBREW_BLOCKS):
             return "Hebr"
+        if any(lo <= cp <= hi for lo, hi in MYANMAR_BLOCKS):
+            return "Mymr"
         if 0x0900 <= cp <= 0x0DFF and not (0x0951 <= cp <= 0x0954 or cp in (0x0964, 0x0965)):
             return ISO[(cp - 0x0900) >> 7]
     return "Deva"
 
 
 def direction_of(script_tag):
-    """The direction the check shapes a script in: Arabic and Hebrew right to left, every other script left to right."""
+    """The direction the check shapes a script in: Arabic and Hebrew right to left, every other script (Myanmar too) left
+    to right."""
     return "rtl" if script_tag in ("Arab", "Hebr") else "ltr"
 
 
