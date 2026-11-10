@@ -112,7 +112,7 @@ HarfBuzz 14.5. The Indic row counts book words drawn the same as the reference.
 | File actions on the device | ✅ move, new folder, mark read, info, set as sleep image | ✅ delete several at once, rename, move |
 | Book info screen for books on the card | ✅ cover, metadata, paged description | ⚠️ for OPDS catalog entries only |
 | Bookmarks across all books | ✅ | ❌ per book |
-| Highlights and clippings | ❌ | ✅ saved to a Kindle-style `My Clippings.txt`, synced |
+| Highlights and clippings | ❌ | ✅ saved to a Kindle-style `My Clippings.txt`, synced; 256 per book on the X3/X4 |
 | Reading statistics | ✅ streaks, time, pages per minute, per-book estimate | ❌ |
 | Finished-book screen | ✅ next in the series, mark read, move, more by the author | ✅ up to 3 books from the same folder |
 | Go to printed page | ✅ | ❌ |
@@ -131,7 +131,7 @@ and TXT books, a configurable status bar, a Quick Resume sleep screen.
 | --- | :---: | :---: |
 | Button actions | ✅ short, double and long press on every button, from one list of actions | ⚠️ front-button remap, a few long-press and Power choices |
 | Touch on the reading page | ✅ every zone and gesture assignable; pinch, rotate, corner holds | ✅ tap or swipe page turns, tap links, hold to select text |
-| Bluetooth page-turn remotes | ❌ | ✅ |
+| Bluetooth page-turn remotes | ❌ | ✅ on the X3/X4 only inside a book |
 | Night mode (white on black) | ❌ | ✅ |
 | Clock on boards without a clock chip (X4) | ✅ software clock | ❌ boards with a clock chip only |
 | Time zone | ✅ list of 86, or detected from the IP address | ⚠️ list with automatic daylight saving, no detection |
@@ -145,11 +145,11 @@ and TXT books, a configurable status bar, a Quick Resume sleep screen.
 | Library loans (Readium LCP) from OPDS | ❌ | ✅ official builds |
 | Edit a book's title, author and cover in the web interface | ✅ | ❌ |
 | Plugins | ⚠️ in the web interface only | ✅ on the device and in the web interface |
-| USB transfer over the serial cable | ✅ MicroReader-compatible, with its Calibre plugin | ❌ |
-| USB file manager plugin ([x4-filemanager-plugin](https://github.com/jpirnay/x4-filemanager-plugin)) | ✅ | ❌ |
+| USB transfer over the serial cable (X3, X4) | ✅ MicroReader-compatible, with its Calibre plugin | ❌ |
+| USB file manager plugin ([x4-filemanager-plugin](https://github.com/jpirnay/x4-filemanager-plugin)), X3 and X4 | ✅ | ❌ |
 
 **Both have:** web upload, WebDAV, Calibre wireless, an EPUB optimizer, settings in the web interface,
-OTA and SD-card firmware updates, USB drive mode on ESP32-S3 boards, reading-light control, a system
+OTA and SD-card firmware updates, USB drive mode on ESP32-S3 boards (on CrossPoint, all but the Sticky), reading-light control, a system
 information screen, settings grouped in categories.
 
 ## Memory
@@ -177,6 +177,52 @@ information screen, settings grouped in categories.
 | Touch screen | ✅ X4 Pro, T5 S3 Pro, Murphy M3 | ✅ X4 Pro, Sticky, PaperMono and others |
 
 Want your device supported? Consider donating one: support for a board needs the board on the desk. [Open an issue](https://github.com/jpirnay/witchhunt-reader/issues) to arrange it.
+
+## ESP32-C3 boards (X3, X4)
+
+The Xteink X3 and X4 run on an ESP32-C3 with about 380 KB of RAM and no PSRAM; the X4 Pro, T5 S3 Pro and Murphy M3
+have an ESP32-S3 with PSRAM. In Witch Reader the reading features are the same code on both chips: TrueType fonts,
+Publisher Fonts, every script with its shaping and bidi, vertical CJK and all 32 hyphenation languages work on the X3
+and X4, and the screenshots in the README come from an X3. What the C3 boards miss is mostly hardware: no touch
+screen, no reading light, no USB drive (the C3 has no USB OTG) and, on the X4, no clock chip. One feature is left out
+for memory: KOReader sync in the background. CrossPoint keeps TrueType fonts, its Cover Grid home theme and part of
+its clippings and Bluetooth support for boards with PSRAM. The X3 and X4 also have things the S3 boards lack: tilt
+page turns (X3), the Sunlight Fading Fix, and USB Transfer over the serial cable.
+
+### The same on the X3 and X4
+
+| Feature | Witch Reader C3 | Witch Reader S3 | CrossPoint C3 | CrossPoint S3 |
+| --- | :---: | :---: | :---: | :---: |
+| TrueType and OpenType fonts | ✅ glyph store in flash | ✅ | ❌ `.cpfont` only | ✅ |
+| Publisher Fonts (the book's own fonts) | ✅ | ✅ | ❌ | ❌ |
+| Shaping: Arabic script, 10 Indic scripts, Burmese | ✅ | ✅ | ⚠️ Arabic presentation forms only | ⚠️ Arabic presentation forms only |
+| Bidi (Hebrew, Arabic, mixed lines) | ✅ | ✅ | ⚠️ as on S3 | ⚠️ 52.6% of book lines right |
+| Vertical CJK columns | ✅ | ✅ | ❌ | ❌ |
+| Ruby, emphasis dots, tate-chu-yoko in columns | ✅ | ✅ | ❌ | ❌ |
+| Dictionary in vertical text | ✅ | ✅ | ❌ | ❌ |
+| CJK reading fonts | ✅ TrueType Noto CJK | ✅ | ⚠️ `.cpfont` only | ✅ TTF, OTF, TTC or `.cpfont` |
+| CJK book titles in menus | ✅ interface packs | ✅ | ⚠️ only with a CJK reader font | ⚠️ only with a CJK reader font |
+| Hyphenation | ✅ 32 languages, a pack copied to flash once | ✅ 32 languages, read at book open | ✅ 11 built in | ✅ 11 built in |
+| Next chapter laid out in reading pauses | ✅ up to about 50 pages ahead | ✅ | ❌ | ❌ |
+
+### What the X3 and X4 do not get
+
+| Feature | Witch Reader C3 | Witch Reader S3 | CrossPoint C3 | CrossPoint S3 |
+| --- | :---: | :---: | :---: | :---: |
+| Touch screen | ❌ no digitiser | ✅ two fingers on the X4 Pro and T5 S3 | ❌ | ✅ X4 Pro, PaperMono and others |
+| Reading light | ❌ none fitted | ✅ warmth on the X4 Pro | ❌ | ✅ warmth on the X4 Pro |
+| USB Drive | ❌ the C3 has no USB OTG | ✅ | ❌ | ✅ all but the Sticky |
+| USB Transfer over the serial cable | ✅ | ❌ USB Drive instead | ❌ | ❌ |
+| Clock | ⚠️ X3 chip; X4 software clock, uses more battery | ✅ chip on all three | ⚠️ X3 only | ✅ boards with a clock chip |
+| KOReader sync in the background | ⚠️ on closing a book only | ✅ also on wake, sleep, while reading | ❌ manual | ❌ manual |
+| Bluetooth page-turn remotes | ❌ | ❌ | ⚠️ in a book only, paused while a chapter indexes | ✅ |
+| Highlights and clippings | ❌ | ❌ | ⚠️ 256 per book | ✅ 1,024 per book |
+| Cover Grid home theme | ✅ cover themes on both | ✅ | ❌ needs PSRAM | ✅ |
+| Font area in flash | ⚠️ 3.0 MB (384 KB hold hyphenation) | ✅ 3.4 MB | — | — |
+| Pages with large pictures when memory is short | ⚠️ coarser picture, fewer book fonts, a box or a restart as a last resort | ✅ PSRAM | not checked | not checked |
+
+Checked in the code of both firmwares (Witch Reader 2820c9562, CrossPoint develop 7f04359f6); the effect of the
+smaller font area on large CJK books was not measured.
 
 ## Rendering comparisons
 
@@ -235,7 +281,7 @@ sections.
   progressive JPEG row.
 - Custom fonts, sizes per font family and SD font rendering: replaced by the Fonts section; the
   rendering difference was never measured.
-- Cover carousel home view (CrossPoint now has a cover-grid Home screen) and cover-grid Recent Books
+- Cover carousel home view (CrossPoint now has a cover-grid Home screen on its PSRAM boards) and cover-grid Recent Books
   view (replaced by "Cover grid in the Library").
 - Browser breadcrumb footer: both name the current folder at the top of the file list.
 - Time sync (NTP): merged into the clock row.

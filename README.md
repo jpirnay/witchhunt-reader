@@ -15,14 +15,16 @@ included.
 | Device | Chip | Touch | Notes |
 | --- | --- | --- | --- |
 | Xteink X4 | ESP32-C3 | no | software clock |
-| Xteink X3 | ESP32-C3 | no | hardware clock |
-| Xteink X4 Pro | ESP32-S3 | yes | PSRAM |
-| LilyGo T5S3 Pro | ESP32-S3 | yes | PSRAM |
-| Murphy M3 | ESP32-S3 | yes | PSRAM, hardware clock |
+| Xteink X3 | ESP32-C3 | no | clock chip, tilt sensor |
+| Xteink X4 Pro | ESP32-S3 | yes | PSRAM, clock chip, reading light |
+| LilyGo T5S3 Pro | ESP32-S3 | yes | PSRAM, clock chip, reading light |
+| Murphy M3 | ESP32-S3 | yes | PSRAM, clock chip, reading light |
 
 **Everything runs on the X3 and X4 as well.** The two ESP32-C3 boards have no PSRAM, and still get the whole reader:
 TrueType and OpenType fonts, every script below with OpenType shaping and bidi, vertical Chinese, Japanese and Korean,
-the hyphenation packs and Publisher Fonts. The ESP32-S3 boards add a touch screen and PSRAM.
+the hyphenation packs and Publisher Fonts. What they lack is mostly hardware: touch, a reading light, USB drive mode
+(USB Transfer over the cable takes its place) and, on the X4, a clock chip; KOReader sync runs when a book closes
+rather than in the background. The full list: [ESP32-C3 boards](docs/feature-comparison.md#esp32-c3-boards-x3-x4).
 
 Want your device supported? Consider donating one: support for a board needs the board on the desk. [Open an issue](https://github.com/jpirnay/witchhunt-reader/issues) to arrange it.
 
@@ -64,8 +66,8 @@ Hebrew, Arabic and Greek layouts. StarDict dictionaries look words up in horizon
 - **Layout:** floating figures with text wrapped around them, real tables (colspan, images inside), small caps,
   strikethrough, superscript and subscript, `line-height` and `font-size` from the book, drop caps, GIF, PNG and JPEG
   images, large-image placeholders, Markdown with headings, tables and code.
-- **Memory:** where others run out, Witch Reader still works: a chapter is laid out in an arena lent from the second
-  framebuffer, and hyphenation patterns come from packs on the SD card instead of the firmware image.
+- **Memory:** where others run out, Witch Reader still works: on the X3 and X4 a chapter is laid out in an arena lent
+  from the second framebuffer (on the S3 boards, in PSRAM), and hyphenation patterns come from packs on the SD card instead of the firmware image.
 - **Fonts:** the Font Manager downloads TrueType, OpenType and `.cpfont` families over Wi-Fi; a book's own fonts can be
   used (Publisher Fonts); large-print sizes up to 26 pt.
 - **Library:** Books, Recent, New and Authors tabs, as file names, details or a cover grid; a cover carousel on Home;
