@@ -51,7 +51,8 @@ enum class RubyRole : uint8_t { None = 0, Leader = 1, Follower = 2 };
 struct Boundary {
   bool continues = false;      // glued to the previous token: no space, and no break
   bool noSpaceBefore = false;  // no space either; with continues=false, a breakable CJK gap
-  // Bits 0-1 RubyRole; bits 2-5 the emphasis mark (TextEmphasis); bit 6 the combine request (text-combine-upright).
+  // Bits 0-1 RubyRole; bits 2-5 the emphasis mark (TextEmphasis); bit 6 the combine request (text-combine-upright);
+  // bit 7 an inline object (isObject).
   uint8_t annotation = 0;
   // The tokens ParsedText merged into this one (deviation 7). A line counts them, so its token count is the parser's,
   // by which a footnote finds the line that holds its anchor. Kept here, so it travels with the token.
@@ -90,6 +91,15 @@ constexpr Boundary withCombineRequested(Boundary b, const bool requested) {
 // b with what every token of a word carries from it, `word`'s emphasis mark and combine request; b keeps its ruby role.
 constexpr Boundary withWordMarks(Boundary b, const Boundary word) {
   b.annotation = static_cast<uint8_t>((b.annotation & ~0x7C) | (word.annotation & 0x7C));
+  return b;
+}
+
+// Whether the token stands for an object set in the line (an inline image, ParsedText::addInlineObject) rather than
+// text. Its text is U+FFFC, so the line pass orders it as the neutral it is; its width is the object's.
+constexpr bool isObject(const Boundary b) { return (b.annotation & 0x80) != 0; }
+
+constexpr Boundary withObject(Boundary b) {
+  b.annotation = static_cast<uint8_t>(b.annotation | 0x80);
   return b;
 }
 
