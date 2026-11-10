@@ -22,7 +22,8 @@ namespace BodySize {
 constexpr uint8_t kVersion = 1;
 /// A measurement that failed is tried again at the next open, this many times in all; then the book keeps its sizes.
 constexpr uint8_t kMaxAttempts = 3;
-/// At most this much of the item is read: the head of a long one stands for it. An X3 styles about 100 KB a second.
+/// At most this much of the item is read: the head of a long one stands for it, and the open's extra work stays
+/// bounded (the census logs its time).
 constexpr size_t kMaxReadBytes = 96 * 1024;
 /// Less running text than this decides nothing: the book keeps its sizes.
 constexpr uint32_t kMinChars = 256;
