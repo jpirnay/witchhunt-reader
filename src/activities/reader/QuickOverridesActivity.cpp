@@ -97,7 +97,7 @@ void QuickOverridesActivity::buildMenuItems(const bool verticalAllowed) {
   // Font family: built-in only — preserves any SD-family override unless the user
   // explicitly picks a built-in (which clears it, matching the storage semantics).
   menuItems.push_back(SettingInfo::DynamicEnumCtx(
-      StrId::STR_FONT_FAMILY, {StrId::STR_DEFAULT_VALUE, StrId::STR_BOOKERLY, StrId::STR_NOTO_SANS}, self,
+      StrId::STR_FONT_FAMILY, {StrId::STR_DEFAULT_VALUE, StrId::STR_SERIF, StrId::STR_NOTO_SANS}, self,
       [](const void* ctx) -> uint8_t {
         const auto* s = static_cast<const QuickOverridesActivity*>(ctx);
         return (s->pendingFontFamilyOverride < 0) ? 0 : static_cast<uint8_t>(s->pendingFontFamilyOverride + 1);
