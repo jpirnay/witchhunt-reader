@@ -5,7 +5,11 @@ Generate I18n C++ files from per-language YAML translations.
 Reads YAML files from a translations directory (one file per language) and generates:
 - I18nKeys.h:     Language enum, StrId enum, helper functions
 - I18nStrings.h:  String array declarations
-- I18nStrings.cpp: String array definitions with all translations
+- I18nStrings.cpp: English, the language names, the key hashes the card packs are read by, and the slot layouts of
+                   past releases (lib/I18n/legacy/)
+
+With --packs DIR it writes every other language's pack for the SD card instead (DIR/Language-<Name>/<code>.cplang):
+the image carries English alone.
 
 Each YAML file must contain:
   _language_name: "Native Name"     (e.g. "Español")
@@ -27,6 +31,7 @@ Examples:
     python gen_i18n.py lib/I18n/translations lib/I18n/
     python gen_i18n.py --strip-unused
     python gen_i18n.py --strip-unused --src-dirs src lib/EpdFont
+    python gen_i18n.py --packs assets/sd-fonts
 """
 
 import sys
@@ -42,97 +47,19 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple
 # Language packs
 # ---------------------------------------------------------------------------
 
-# Deflate window for the compressed language packs. FlashLangPartition sizes its
+# Deflate window of the language packs on the card. FlashLangPartition sizes its
 # inflate ring from this number, so the two MUST agree — a longer back-reference
 # than the ring can serve decodes to garbage rather than failing.
 #
-# 12 (4 KB) rather than 15 (32 KB): measured across all 23 packs, the larger
-# window saves only ~7.5 KB of flash while octupling the transient RAM the
-# device needs to unpack one. See docs/i18n.md.
+# 12 (4 KB) rather than 15 (32 KB): measured across the packs, the larger window
+# saves only ~7.5 KB while octupling the transient RAM the device needs to unpack
+# one. See docs/i18n.md.
 DEFLATE_WINDOW_BITS = 12
 
-# A blob offset has to fit in the low 15 bits of a uint16_t, because bit 15 is
-# the "fall back to English" flag. Same limit the in-image tables have always
-# had; it bounds one language's translated text, not the total.
+# A string's offset in the flash slot has to fit in the low 15 bits of a
+# uint16_t, because bit 15 is FlashLangPartition::FALLBACK ("read English"). It
+# bounds one language's translated text, not the total.
 MAX_BLOB_BYTES = 0x8000
-
-
-def build_langpack(
-    lang_strings: List[str], en_strings: List[str]
-) -> Tuple[bytes, bytes]:
-    """Build one non-English language's self-describing blob and its deflate stream.
-
-    The blob is one NUL-terminated entry per StrId, in order. An EMPTY entry
-    means "this language does not override English for this key": the device
-    writes the English offset into the table it derives, so the empty byte is
-    never read. Encoding the fallback in the blob this way is what lets us stop
-    shipping a 1,774 B offset table per language — the table is reconstructed by
-    walking the blob once, which the device has to do anyway while streaming it
-    into flash.
-
-    Returns (uncompressed_blob, compressed_blob).
-    """
-    blob = bytearray()
-    for s, en_s in zip(lang_strings, en_strings):
-        if s != en_s:
-            blob += s.encode("utf-8")
-        blob += b"\x00"
-
-    compressor = zlib.compressobj(9, zlib.DEFLATED, -DEFLATE_WINDOW_BITS)
-    packed = compressor.compress(bytes(blob)) + compressor.flush()
-    return bytes(blob), packed
-
-
-def verify_langpack(
-    code: str,
-    packed: bytes,
-    lang_strings: List[str],
-    en_strings: List[str],
-    en_offsets: List[int],
-    en_blob: bytes,
-) -> None:
-    """Replay the device's decode path and check every string comes back.
-
-    Runs at generation time rather than as a separate test so it cannot drift
-    out of step with the emitter, and so a format mistake fails the build
-    instead of shipping as a screen full of wrong text. It mirrors three pieces
-    of device code: the inflate window (FlashLangPartition::INFLATE_RING_BYTES),
-    the table walk (TableBuilder::feed) and the lookup (I18n::get).
-
-    Raises ValueError on any mismatch.
-    """
-    decompressor = zlib.decompressobj(-DEFLATE_WINDOW_BITS)
-    blob = decompressor.decompress(packed) + decompressor.flush()
-
-    # TableBuilder::feed
-    table: List[int] = [0] * len(lang_strings)
-    pos = 0
-    entry = 0
-    at_entry_start = True
-    for byte in blob:
-        if at_entry_start and entry < len(table):
-            table[entry] = (0x8000 | en_offsets[entry]) if byte == 0 else pos
-            at_entry_start = False
-        if byte == 0:
-            entry += 1
-            at_entry_start = True
-        pos += 1
-
-    if entry != len(table):
-        raise ValueError(
-            f"Language {code}: blob holds {entry} entries, expected {len(table)}"
-        )
-
-    # I18n::get
-    for i, expected in enumerate(lang_strings):
-        off = table[i]
-        source = en_blob if (off & 0x8000) else blob
-        start = off & 0x7FFF if (off & 0x8000) else off
-        got = source[start : source.index(b"\x00", start)].decode("utf-8")
-        if got != expected:
-            raise ValueError(
-                f"Language {code}: entry {i} decoded as {got!r}, expected {expected!r}"
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -907,7 +834,7 @@ def generate_keys_header(
         "",
         "// English is carried uncompressed: it is the fallback for every other",
         "// language, so it must be readable without touching flash storage.",
-        "// Every other language ships as a deflate-compressed pack that",
+        "// Every other language is a pack on the SD card (LangPack.h) that",
         "// FlashLangPartition materialises into the spiffs tail on demand.",
         "namespace i18n_strings {",
     ]
@@ -935,16 +862,6 @@ def generate_keys_header(
     lines.append("};")
     lines.append("extern const LegacyLayout LEGACY_LAYOUTS[];")
     lines.append(f"constexpr uint8_t LEGACY_LAYOUT_COUNT = {len(legacy_layouts)};")
-    lines.append("")
-    lines.append("// One entry per Language, indexed by its enum value. The English slot is")
-    lines.append("// zeroed — there is nothing to decompress.")
-    lines.append("struct LangPack {")
-    lines.append("  const uint8_t* data;      // raw deflate, 4 KB window")
-    lines.append("  uint32_t compressedLen;")
-    lines.append("  uint32_t uncompressedLen;")
-    lines.append("  uint32_t stamp;           // CRC32 of data; identifies this build's pack")
-    lines.append("};")
-    lines.append("extern const LangPack LANGPACKS[];")
     lines.append("}  // namespace i18n_strings")
     lines.append("")
 
@@ -1074,7 +991,6 @@ def generate_strings_header(
     en_code = languages[0]
     lines.append(f"extern const char STRINGS_{en_code}_DATA[];")
     lines.append(f"extern const uint16_t OFFSETS_{en_code}[];")
-    lines.append("extern const LangPack LANGPACKS[];")
 
     lines.append("")
     lines.append("}  // namespace i18n_strings")
@@ -1134,13 +1050,11 @@ def generate_strings_cpp(
     en_strings = [translations[key][0] for key in string_keys]
     en_code = languages[0]
 
-    # --- English: uncompressed blob + offset table, as before -----------------
+    # --- English: uncompressed blob + offset table, the one language in the image
     en_offsets: List[int] = []
-    en_blob = bytearray()
     current_offset = 0
     for s in en_strings:
         en_offsets.append(current_offset)
-        en_blob += s.encode("utf-8") + b"\x00"
         current_offset += len(s.encode("utf-8")) + 1
     if current_offset > 0x7FFF:
         raise ValueError(
@@ -1198,45 +1112,6 @@ def generate_strings_cpp(
     lines.append("};")
     lines.append("")
 
-    # --- Every other language: one compressed pack ----------------------------
-    packs: List[Tuple[str, int, int, int]] = [(en_code, 0, 0, 0)]
-    for lang_idx, code in enumerate(languages):
-        if lang_idx == 0:
-            continue
-        lang_strings = [translations[key][lang_idx] for key in string_keys]
-        blob, packed = build_langpack(lang_strings, en_strings)
-        if len(blob) > MAX_BLOB_BYTES:
-            raise ValueError(
-                f"Language {code}: blob size ({len(blob)} bytes) exceeds the "
-                f"15-bit offset limit ({MAX_BLOB_BYTES})"
-            )
-        verify_langpack(code, packed, lang_strings, en_strings, en_offsets, bytes(en_blob))
-        stamp = zlib.crc32(packed) & 0xFFFFFFFF
-        packs.append((code, len(packed), len(blob), stamp))
-
-        lines.append(
-            f"// {code}: {len(blob):,} B of strings -> {len(packed):,} B compressed"
-        )
-        lines.append(f"const uint8_t LANGPACK_{code}[] = {{")
-        per_line = 16
-        for i in range(0, len(packed), per_line):
-            row = packed[i : i + per_line]
-            lines.append("    " + ", ".join(f"0x{b:02x}" for b in row) + ",")
-        lines.append("};")
-        lines.append("")
-
-    lines.append("// Indexed by Language. English is zeroed: it is already resident.")
-    lines.append("const LangPack LANGPACKS[] = {")
-    for code, clen, ulen, stamp in packs:
-        if clen == 0:
-            lines.append(f"    {{nullptr, 0, 0, 0}},  // {code}")
-        else:
-            lines.append(
-                f"    {{LANGPACK_{code}, {clen}, {ulen}, 0x{stamp:08x}}},  // {code}"
-            )
-    lines.append("};")
-    lines.append("")
-
     lines.append("}  // namespace i18n_strings")
     lines.append("")
 
@@ -1258,11 +1133,6 @@ def generate_strings_cpp(
         " static_cast<size_t>(StrId::_COUNT),"
     )
     lines.append('              "KEYS_BY_HASH size mismatch");')
-    lines.append(
-        "static_assert(sizeof(i18n_strings::LANGPACKS) / sizeof(i18n_strings::LANGPACKS[0]) =="
-    )
-    lines.append("                  static_cast<size_t>(Language::_COUNT),")
-    lines.append('              "LANGPACKS must have one entry per Language");')
 
     _write_file(output_path, lines, verbose)
 
@@ -1317,18 +1187,16 @@ def _print_language_table(
     for row in rows:
         _safe_print(fmt.format(*row))
     used = total - len(unused_keys)
-    dedup_size = sum(data_sizes)
     n_keys = len(string_keys)
-    # Only English ships an offset table now; every other language's is derived
-    # on the device while its pack is unpacked into flash.
-    offset_table_size = n_keys * 2
-    current_total = dedup_size + offset_table_size
+    # The image carries English alone, with its offset table and the key hashes a
+    # card pack is read by; every other language is its pack on the card.
+    image_size = data_sizes[0] + n_keys * 2 + n_keys * 6
     print(
         f"\n  Total: {total}  |  Used in code: {used}  |  Never used: {len(unused_keys)}"
     )
     print(
-        f"  Flash: {dedup_size:>7,} B strings (EN raw + packs)  +  {offset_table_size:>6,} B EN offset table"
-        f"  =  {current_total:>7,} B"
+        f"  Image: {data_sizes[0]:>7,} B English  +  {n_keys * 2:>6,} B offsets  +  {n_keys * 6:>6,} B key hashes"
+        f"  =  {image_size:>7,} B  |  Card: {sum(data_sizes[1:]):>7,} B of packs"
     )
 
 
@@ -1475,21 +1343,11 @@ def main(
             print()
             sys.exit(1)
 
-        # Per-language flash cost AS SHIPPED: English is the raw blob, every
-        # other language is its compressed pack. Reporting the uncompressed size
-        # here would overstate the image by ~230 KB.
-        en_strings_report = [translations[k][0] for k in string_keys]
-        data_sizes = []
-        for i in range(len(languages)):
-            if i == 0:
-                data_sizes.append(
-                    sum(len(s.encode("utf-8")) + 1 for s in en_strings_report)
-                )
-            else:
-                _, packed = build_langpack(
-                    [translations[k][i] for k in string_keys], en_strings_report
-                )
-                data_sizes.append(len(packed))
+        # What each language costs AS SHIPPED: English its raw blob in the image,
+        # every other language its pack file on the card.
+        pack_sizes = {name.split(".")[0]: len(data) for _, name, data in language_packs(translations_dir)}
+        data_sizes = [sum(len(translations[k][0].encode("utf-8")) + 1 for k in string_keys)]
+        data_sizes += [pack_sizes[code.lower()] for code in languages[1:]]
 
         _print_language_table(
             languages,
