@@ -23,6 +23,8 @@
 class ShapingHeapCheck {
  public:
   ShapingHeapCheck() {
+    // cppcheck-suppress knownConditionTrueFalse ; live_ counts the builds in flight, cppcheck takes its initial 0 as
+    // known
     if (live_++ == 0) ot::setHeapCheck(&heap_growth::shapedHeapAllows);
   }
   ~ShapingHeapCheck() {
