@@ -11,6 +11,7 @@ emitted interval table says what the device can draw.
 """
 
 import re
+import unicodedata
 from pathlib import Path
 
 # The faces the three UI slots and the three FIT_* slots are bound to, at either step of the
@@ -103,7 +104,36 @@ def ui_face_coverage(fonts_dir: Path) -> set:
     return covered
 
 
+def _arabic_forms() -> dict:
+    """Each Arabic letter's presentation forms (U+FB50-FEFC), from their compatibility decompositions:
+    the renderer draws a letter as one of these (BidiUtils::arabicUiForms), never as the letter itself."""
+    # The letters of U+0621-064A take their forms from Forms-B (U+FE70-FEFC), the only forms minibidi's
+    # shapetypes[] table writes for them; Forms-A holds forms of the same letters for other orthographies
+    # (U+FBE8/FBE9: alef maksura initial and medial, Uighur, Kazakh, Kirghiz) that it never writes. Letters
+    # outside that range (Persian, Urdu, ...: lib/MiniBidi's extension table) take theirs from Forms-A.
+    forms = {}
+    for cp in range(0xFB50, 0xFEFD):
+        decomposition = unicodedata.decomposition(chr(cp)).split()
+        if len(decomposition) != 2 or decomposition[0] not in ("<isolated>", "<initial>", "<medial>", "<final>"):
+            continue
+        letter = int(decomposition[1], 16)
+        if (0x0621 <= letter <= 0x064A) != (cp >= 0xFE70):
+            continue
+        forms.setdefault(letter, set()).add(cp)
+    return forms
+
+
+ARABIC_FORMS = _arabic_forms()
+
+
 def drawable(text: str) -> set:
-    """The codepoints of `text` that need a glyph: everything but control characters. A space needs
-    one too, for its advance."""
-    return set(ord(ch) for ch in text if ord(ch) >= 0x20)
+    """The codepoints of `text` that need a glyph: everything but control and format characters (a
+    zero-width non-joiner or a direction mark draws nothing). A space needs one too, for its advance. An
+    Arabic letter needs its presentation forms instead of itself, since that is what the renderer draws."""
+    needed = set()
+    for ch in text:
+        cp = ord(ch)
+        if cp < 0x20 or unicodedata.category(ch) == "Cf":
+            continue
+        needed |= ARABIC_FORMS.get(cp, {cp})
+    return needed

@@ -11,11 +11,14 @@
 // the screen, and one reading Russian books under an English interface switches
 // ЙЦУКЕН on there.
 //
-// Hebrew, Arabic and Greek are scripts the interface is not translated into:
-// they have no UI language, so only that screen switches them on, and a
-// keyboard never opens on one. Their keys and the text typed with them are
-// drawn through the UI text path, which orders right-to-left text, from the
-// UI faces: Arabic joined, in the presentation forms the faces carry.
+// Hebrew and Arabic are UI languages too, so a Hebrew or Arabic interface opens
+// its keyboard on its own layout. Greek is a script the interface is not
+// translated into: only that screen switches it on, and a keyboard never opens
+// on it. Persian has no layout of its own (the Arabic one lacks its four extra
+// letters), so a Persian interface opens on English. Right-to-left keys and the
+// text typed with them are drawn through the UI text path, which orders
+// right-to-left text, from the UI faces: Arabic joined, in the presentation
+// forms the faces carry.
 
 #include <I18n.h>
 #include <components/keyboard/keyboard.h>
@@ -46,8 +49,8 @@ inline constexpr LayoutInfo ALL[] = {
     {freeink::ui::KeyboardLayoutId::CyrillicUk, Language::UK, nullptr},
     {freeink::ui::KeyboardLayoutId::CyrillicBe, Language::BE, nullptr},
     {freeink::ui::KeyboardLayoutId::CyrillicKk, Language::KK, nullptr},
-    {freeink::ui::KeyboardLayoutId::HebrewIl, NO_UI_LANGUAGE, "עברית"},
-    {freeink::ui::KeyboardLayoutId::ArabicAr, NO_UI_LANGUAGE, "العربية"},
+    {freeink::ui::KeyboardLayoutId::HebrewIl, Language::HE, nullptr},
+    {freeink::ui::KeyboardLayoutId::ArabicAr, Language::AR, nullptr},
     {freeink::ui::KeyboardLayoutId::GreekEl, NO_UI_LANGUAGE, "Ελληνικά"},
 };
 inline constexpr uint8_t COUNT = sizeof(ALL) / sizeof(ALL[0]);

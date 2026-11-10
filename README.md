@@ -56,7 +56,7 @@ CrossPoint, feature by feature: **[Feature comparison](docs/feature-comparison.m
 Shaping is OpenType, done once when a chapter is laid out and identical to HarfBuzz on the shipped fonts; bidi follows
 the Unicode algorithm, with the book's `dir`, `<bdi>`, `<bdo>`, `unicode-bidi` and page direction honoured. A book that
 needs a font or a hyphenation pack it does not have offers to download it when it opens. The interface is translated
-into 27 languages, and the keyboard has English, French, German, Spanish, Russian, Ukrainian, Belarusian, Kazakh,
+into 30 languages, among them Hebrew, Arabic and Persian, and the keyboard has English, French, German, Spanish, Russian, Ukrainian, Belarusian, Kazakh,
 Hebrew, Arabic and Greek layouts. StarDict dictionaries look words up in horizontal and vertical text.
 
 ## What this reader does differently

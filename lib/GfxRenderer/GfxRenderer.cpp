@@ -3601,6 +3601,16 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
     return;
   }
 
+  // As drawText: Arabic in the forms the UI faces carry, then a right-to-left label in visual order, so a
+  // Hebrew, Arabic or Persian side-button label reads as the horizontal one does.
+  std::string formed;
+  text = arabicUiForms(*family, text, style, formed);
+  std::string visual;
+  if (BidiUtils::hasRtlClass(text, strlen(text))) {
+    visual = BidiUtils::visualUiLine(text);
+    text = visual.c_str();
+  }
+
   if (fontCacheManager_ && fontCacheManager_->isScanning()) {
     fontCacheManager_->recordText(text, fontId, style);
     return;

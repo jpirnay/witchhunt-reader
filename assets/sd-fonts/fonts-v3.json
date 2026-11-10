@@ -1721,6 +1721,20 @@
       ]
     },
     {
+      "name": "Language-Arabic",
+      "description": "Menus and messages in Arabic",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Arabic/ar.cplang",
+          "size": 12700,
+          "crc32": 1019711665
+        }
+      ]
+    },
+    {
       "name": "Language-Belarusian",
       "description": "Menus and messages in Belarusian",
       "format": "language",
@@ -1847,6 +1861,20 @@
       ]
     },
     {
+      "name": "Language-Hebrew",
+      "description": "Menus and messages in Hebrew",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Hebrew/he.cplang",
+          "size": 11915,
+          "crc32": 1869293673
+        }
+      ]
+    },
+    {
       "name": "Language-Hungarian",
       "description": "Menus and messages in Hungarian",
       "format": "language",
@@ -1927,6 +1955,20 @@
           "name": "Language-Lithuanian/lt.cplang",
           "size": 11896,
           "crc32": 472360263
+        }
+      ]
+    },
+    {
+      "name": "Language-Persian",
+      "description": "Menus and messages in Persian",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Persian/fa.cplang",
+          "size": 12770,
+          "crc32": 2332060539
         }
       ]
     },
