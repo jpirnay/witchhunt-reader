@@ -18,11 +18,13 @@ class FontDownloadActivity final : public UiListActivity {
  public:
   // What an offer wants downloaded as soon as the list is loaded: a UI language pack by its code ("de"), a family by
   // its name (a CJK interface pack, "ChineseUI"; a book's reading font, "NotoSerifDevanagari"), a hyphenation pack by
-  // its language ("de"), or more than one, in that order. Empty for the plain Font Manager.
+  // its language ("de"), or more than one, in that order. Or, for Check for updates, every installed language and
+  // hyphenation pack with an update (`packUpdates`), as Update all takes them. Empty for the plain Font Manager.
   struct Wanted {
     char language[4] = {};
     char pack[3] = {};
     char family[FontInstaller::MAX_FAMILY_NAME_LEN + 1] = {};
+    bool packUpdates = false;
   };
   // Where leaving restarts: Home; the open book (APP_STATE.openEpubPath), for a book's offer; Settings, for the offer
   // a picked interface language makes.
@@ -30,6 +32,12 @@ class FontDownloadActivity final : public UiListActivity {
   FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const Wanted& wanted, ReturnTo returnTo);
   explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : FontDownloadActivity(renderer, mappedInput, Wanted{}, ReturnTo::Home) {}
+
+  // The online manifest, read into `out` with each family marked as the card holds it: installed, with an update
+  // (FontInstaller::hasUpdate), or with an interrupted download to resume. The Font Manager's list, and what Check for
+  // updates counts the pack updates in (FontDownloadRules::packUpdates). Its one verified TLS session is closed before
+  // the manifest is read. False, `out` empty, with `error` saying why.
+  static bool loadCatalog(const FontInstaller& installer, FontCatalog& out, std::string& baseUrl, const char*& error);
 
   void onEnter() override;
   bool usesWifi() const override { return true; }
@@ -91,8 +99,9 @@ class FontDownloadActivity final : public UiListActivity {
   // it takes no heap. Set by an install, cleared when the next one starts (activateIndex, Retry), so a batch keeps
   // any family's note.
   const char* completeNote_ = nullptr;
-  // What the last install was, for its screen: "Font installed!", "Hyphenation installed!", "Language installed!".
-  enum class Completed : uint8_t { Font, Hyphenation, Language };
+  // What the last install was, for its screen: "Font installed!", "Hyphenation installed!", "Language installed!", or
+  // "Update complete" for an Update all of more than one kind.
+  enum class Completed : uint8_t { Font, Hyphenation, Language, Update };
   Completed completed_ = Completed::Font;
   bool cancelRequested_ = false;
   // In downloadAll() or updateAll(): an install leaves the registry's discovery, and the note it decides, to the end
@@ -127,7 +136,7 @@ class FontDownloadActivity final : public UiListActivity {
 
   void onWifiSelectionComplete(bool success);
   // Selects the rows of wanted_ and downloads what is not installed: the language pack, the family, then the
-  // hyphenation pack, each once the one before is in place. Once.
+  // hyphenation pack, each once the one before is in place; or updates the packs, for Check for updates. Once.
   void downloadWanted();
   // Selects row i and downloads it when it is not installed. True when it is installed after.
   bool downloadRow(size_t i);
@@ -142,7 +151,8 @@ class FontDownloadActivity final : public UiListActivity {
   // like familyIdx; never touches families_ (which is empty during this call).
   void downloadFamilyImpl(FontCatalog& family, int familyIdx);
   void downloadAll();
-  void updateAll();
+  // Every family FontDownloadRules::updateAllTakes() takes: the Update all row's, or `packsOnly` for Check for updates.
+  void updateAll(bool packsOnly);
   // A batch's end, however it ended: the registry discovered once when it installed a font family, and the note of
   // one it does not list.
   void finishBatch(const std::vector<int>& targets);

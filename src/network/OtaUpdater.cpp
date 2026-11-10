@@ -225,6 +225,14 @@ bool OtaUpdater::isUpdateNewer() const {
 
 const std::string& OtaUpdater::getLatestVersion() const { return latestVersion; }
 
+void OtaUpdater::releaseCheckDetails() {
+  // Swapped with empty ones: clear() keeps the capacity.
+  std::string().swap(releaseName);
+  std::string().swap(releaseNotes);
+  std::string().swap(otaUrl);
+  updateAvailable = false;
+}
+
 void OtaUpdater::cleanupUpdate() {
   if (otaWriteHandle) {
     const esp_err_t err = esp_ota_abort(reinterpret_cast<esp_ota_handle_t>(otaWriteHandle));

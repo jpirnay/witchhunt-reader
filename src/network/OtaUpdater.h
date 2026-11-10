@@ -70,6 +70,10 @@ class OtaUpdater {
   const std::string& getReleaseName() const { return releaseName; }
   const std::string& getReleaseNotes() const { return releaseNotes; }
   OtaUpdaterError checkForUpdate();
+  // Once nothing will be installed (no newer release, or its update declined): frees what only the update question and
+  // the install read, the release's title and notes and the asset's URL, for the heap of the session that follows. The
+  // latest version stays, for the screen. isUpdateNewer() is false from now on, so no install can begin.
+  void releaseCheckDetails();
   OtaUpdaterError beginInstallUpdate();
   OtaUpdaterError performInstallUpdateStep();
   void cancelUpdate();

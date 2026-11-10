@@ -80,8 +80,9 @@ constexpr bool fits(const uint64_t freeBytes, const uint64_t downloadBytes) {
 }
 
 // Whether downloading a family is an update of what the card holds, from the counts of the manifest's files: `same`
-// are on the card at their manifest size, `changed` at another size, `absent` missing. A folder holding none of them
-// is someone else's family of that name, not an update.
+// are on the card at their manifest size, `changed` at another size (a pack's also at its size with another CRC:
+// FontInstaller::countFiles), `absent` missing. A folder holding none of them is someone else's family of that name,
+// not an update.
 // Two accepted limits: a reader's own file with a manifest file name but other bytes counts as an update and is
 // replaced; a hosted family whose files are all renamed is never offered an update (never rename hosted files: ship a
 // renamed set as a new family).
@@ -93,6 +94,21 @@ constexpr bool isUpdate(const size_t same, const size_t changed, const size_t ab
 // belongs. An update to an installed family is the caller's `|| catalog.hasUpdate(family)`.
 inline bool downloadAllTakes(const FontCatalog& catalog, const size_t family) {
   return !catalog.installed(family) && catalog.inDownloadAll(family);
+}
+
+// "Update all" on the device: an installed family with an update. With `packsOnly`, the language and hyphenation packs
+// among them alone, which Check for updates counts (packUpdates()) and has the Font Manager update.
+inline bool updateAllTakes(const FontCatalog& catalog, const size_t family, const bool packsOnly) {
+  return catalog.installed(family) && catalog.hasUpdate(family) && (!packsOnly || catalog.pack(family));
+}
+
+// The packs updateAllTakes() takes with `packsOnly`: how many updates Check for updates offers.
+inline size_t packUpdates(const FontCatalog& catalog) {
+  size_t count = 0;
+  for (size_t family = 0; family < catalog.count(); ++family) {
+    if (updateAllTakes(catalog, family, /*packsOnly=*/true)) ++count;
+  }
+  return count;
 }
 
 }  // namespace FontDownloadRules

@@ -118,6 +118,11 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
 void FontDownloadActivity::downloadWanted() {
   const Wanted wanted = wanted_;
   wanted_ = Wanted{};
+  if (wanted.packUpdates) {
+    updateAll(/*packsOnly=*/true);
+    requestUpdateAndWait();
+    return;
+  }
   char language[16] = {};
   if (wanted.language[0] != '\0') snprintf(language, sizeof(language), "%s.cplang", wanted.language);
   char hyphenation[16] = {};
@@ -152,8 +157,10 @@ bool FontDownloadActivity::downloadRow(const size_t i) {
 
 // --- Manifest fetching ---
 
-bool FontDownloadActivity::fetchAndParseManifest() {
+bool FontDownloadActivity::loadCatalog(const FontInstaller& installer, FontCatalog& out, std::string& baseUrl,
+                                       const char*& error) {
   static constexpr const char* MANIFEST_TMP = "/fonts_manifest.tmp";
+  out.clear();
 
   // Standalone manifest fetch: closes the TLS connection before the manifest
   // is read, so the reader has full heap headroom. The Session is opened later
@@ -164,7 +171,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
                                                HttpDownloader::TlsPolicy::Verified);
   if (result != HttpDownloader::OK) {
     LOG_ERR("FONT", "Failed to fetch manifest from %s", FONT_MANIFEST_URL);
-    errorMessage_ = "Failed to fetch font list";
+    error = "Failed to fetch font list";
     Storage.remove(MANIFEST_TMP);
     return false;
   }
@@ -173,50 +180,59 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   if (!Storage.openFileForRead("FONT", MANIFEST_TMP, manifestFile)) {
     LOG_ERR("FONT", "Failed to open temp manifest");
     Storage.remove(MANIFEST_TMP);
-    errorMessage_ = "Failed to read font list";
+    error = "Failed to read font list";
     return false;
   }
 
   // Streamed off the card a block at a time: a whole-document parse of the
   // 24 KB manifest ran the X3 out of heap and aborted. styles[] in the JSON
-  // is skipped -- see families_. Read aside and swapped in under the lock
-  // below: the render task reads families_.
-  FontCatalog parsed;
+  // is skipped -- see families_.
   FontManifestReader reader("FONT", FontInstaller::isValidFamilyName, FontInstaller::isValidFontFileName,
                             /*takesPacks=*/true);
-  const FontManifestStatus status = reader.read(manifestFile, parsed, baseUrl_);
+  const FontManifestStatus status = reader.read(manifestFile, out, baseUrl);
   manifestFile.close();
   Storage.remove(MANIFEST_TMP);
 
   if (status == FontManifestStatus::Invalid) {
     LOG_ERR("FONT", "Manifest parse error: %s", reader.failure());
-    errorMessage_ = "Invalid font manifest";
+    error = "Invalid font manifest";
     return false;
   }
   if (status == FontManifestStatus::UnsupportedVersion) {
     LOG_ERR("FONT", "Unsupported manifest version: %d", reader.version());
-    errorMessage_ = "Unsupported manifest version";
+    error = "Unsupported manifest version";
     return false;
   }
   if (status == FontManifestStatus::OutOfMemory) {
     LOG_ERR("FONT", "Manifest parse error: %s", reader.failure());
-    errorMessage_ = "Failed to read font list";
+    error = "Failed to read font list";
     return false;
   }
 
-  for (size_t i = 0; i < parsed.count(); i++) {
-    const char* familyName = parsed.name(i);
-    parsed.setInstalled(i, fontInstaller_.isOnCard(parsed, i));
+  for (size_t i = 0; i < out.count(); i++) {
+    const char* familyName = out.name(i);
+    out.setInstalled(i, installer.isOnCard(out, i));
 
-    if (parsed.installed(i)) {
-      parsed.setHasUpdate(i, FontInstaller::hasUpdate(parsed, i));
+    if (out.installed(i)) {
+      out.setHasUpdate(i, FontInstaller::hasUpdate(out, i));
     } else {
       // Surface leftover staging from a previously interrupted download so the
       // UI can offer "Resume" instead of restarting from scratch.
       char stagingDir[128];
       FontInstaller::buildStagingDirPath(familyName, stagingDir, sizeof(stagingDir));
-      parsed.setHasResumableDownload(i, Storage.exists(stagingDir));
+      out.setHasResumableDownload(i, Storage.exists(stagingDir));
     }
+  }
+  return true;
+}
+
+bool FontDownloadActivity::fetchAndParseManifest() {
+  // Read aside and swapped in under the lock below: the render task reads families_.
+  FontCatalog parsed;
+  const char* error = nullptr;
+  if (!loadCatalog(fontInstaller_, parsed, baseUrl_, error)) {
+    errorMessage_ = error;
+    return false;
   }
 
   {
@@ -315,19 +331,25 @@ void FontDownloadActivity::downloadAll() {
   state_ = COMPLETE;
 }
 
-void FontDownloadActivity::updateAll() {
+void FontDownloadActivity::updateAll(const bool packsOnly) {
   cancelRequested_ = false;
   std::vector<int> targetIndices;
   targetIndices.reserve(families_.count());
   bool onlyHyphenation = true;
   bool onlyLanguages = true;
+  bool onlyFonts = true;
   for (size_t i = 0; i < families_.count(); i++) {
-    if (families_.installed(i) && families_.hasUpdate(i)) {
+    if (FontDownloadRules::updateAllTakes(families_, i, packsOnly)) {
       targetIndices.push_back(static_cast<int>(i));
       onlyHyphenation = onlyHyphenation && families_.hyphenation(i);
       onlyLanguages = onlyLanguages && families_.languagePack(i);
+      onlyFonts = onlyFonts && !families_.pack(i);
     }
   }
+  // Nothing to update: the packs Check for updates counted are current by now (the Update all row is not offered
+  // then). The list stays.
+  if (targetIndices.empty()) return;
+  LOG_INF("FONT", "Updating %zu %s", targetIndices.size(), packsOnly ? "packs" : "families");
   inBatch_ = true;
   for (int idx : targetIndices) {
     downloadFamily(idx);
@@ -337,11 +359,12 @@ void FontDownloadActivity::updateAll() {
   if (state_ == ERROR || cancelRequested_) return;
 
   RenderLock lock(*this);
-  // The batch's screen says what it installed: hyphenation or a language only when every update was such a pack.
-  completed_ = targetIndices.empty() ? Completed::Font
-               : onlyHyphenation     ? Completed::Hyphenation
-               : onlyLanguages       ? Completed::Language
-                                     : Completed::Font;
+  // The batch's screen says what it installed: hyphenation, a language or a font when every update was of that kind,
+  // "Update complete" for a mix (a language pack and a hyphenation pack, from Check for updates).
+  completed_ = onlyHyphenation ? Completed::Hyphenation
+               : onlyLanguages ? Completed::Language
+               : onlyFonts     ? Completed::Font
+                               : Completed::Update;
   state_ = COMPLETE;
 }
 
@@ -854,7 +877,7 @@ void FontDownloadActivity::activateIndex(const int index) {
   if (isDownloadAllRow(index)) {
     downloadAll();
   } else if (isUpdateAllRow(index)) {
-    updateAll();
+    updateAll(/*packsOnly=*/false);
   } else {
     const int familyIndex = familyIndexFromList(index);
     if (familyIndex < 0) return;
@@ -1022,6 +1045,7 @@ void FontDownloadActivity::drawChrome() {
     renderer.drawCenteredText(UI_10_FONT_ID, centerY,
                               completed_ == Completed::Hyphenation ? tr(STR_HYPHENATION_INSTALLED)
                               : completed_ == Completed::Language  ? tr(STR_LANGUAGE_INSTALLED)
+                              : completed_ == Completed::Update    ? tr(STR_UPDATE_COMPLETE)
                                                                    : tr(STR_FONT_INSTALLED),
                               true, EpdFontFamily::BOLD);
     if (completeNote_ != nullptr) {
