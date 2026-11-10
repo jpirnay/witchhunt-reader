@@ -93,10 +93,50 @@ UI_SCRIPT_INTERVALS=(
   "0x05D0,0x05EA"  # Hebrew letters, final forms included
   "0x05F3,0x05F4"  # geresh, gershayim
 )
+# Arabic in every UI face too, from Noto Sans Arabic UI behind Hebrew (source/NotoSansArabicUI, notofonts.github.io at
+# 5c82cef0a8f08806f932062e18c02be62be278f0, fonts/NotoSansArabicUI/unhinted/ttf; sha256 Regular
+# f4fe1866a64cba1e8b8d08a67cd29070f919edf778ca5de983c1f2a690fc953b, Bold
+# efb903b545a00a557c9d2dd739725157c04bf44215ba31b8ca3a805f099fdc33). The UI draws Arabic in its contextual presentation
+# forms (BidiUtils::arabicUiForms), so the faces carry what that mapper writes rather than the letters: every form
+# shape_logical() can give (Presentation Forms-B U+FE80-FEFC and the Forms-A forms of lib/MiniBidi/minibidi.c's
+# xshapeforms table), the harakat and superscript alef, Arabic punctuation and tatweel, and the Arabic-Indic and
+# Persian digits; the host test ui_face_scripts checks that every form the mapper writes is there. The UI cut of Noto
+# Sans Arabic, because its ink stays on the faces' line: at 12 pt no glyph reaches more than 1 px below the descender,
+# where Noto Sans Arabic draws meem and yeh 4 px below it and Pashto's e 7 px, and it costs no more. The subset holds
+# these characters alone and none of the layout tables: the UI kerns a pair in the order it draws it, left to right,
+# and an Arabic pair is kerned in reading order, so its 120 pairs would land on the wrong letters. Measured on
+# fd48c5b79: default env +84,448 B, Murphy +104,080 B. inter_ui_14_bold, the largest face, then holds 64,937 B of
+# bitmap, 598 B short of the 64 KB an uncompressed face's uint16 offsets reach: the next script it takes needs that
+# face compressed or its offsets widened.
+UI_ARABIC_INTERVALS=(
+  "0x060C,0x060C"  # Arabic comma
+  "0x061B,0x061B"  # Arabic semicolon
+  "0x061F,0x061F"  # Arabic question mark
+  "0x0640,0x0640"  # tatweel
+  "0x064B,0x0652"  # harakat, fathatan to sukun
+  "0x0660,0x066C"  # Arabic-Indic digits, percent sign, decimal and thousands separators
+  "0x0670,0x0670"  # superscript alef
+  "0x06D4,0x06D4"  # Urdu full stop
+  "0x06F0,0x06F9"  # Persian and Urdu digits
+  "0xFB50,0xFBB1"  # Forms-A: alef wasla to yeh barree with hamza above
+  "0xFBD3,0xFBDC"  # Forms-A: ng, u, oe, yu
+  "0xFBDE,0xFBE7"  # Forms-A: ve, Kirghiz oe and yu, Pashto e
+  "0xFBFC,0xFBFF"  # Forms-A: Farsi yeh
+  "0xFE80,0xFEFC"  # Forms-B: every form of U+0621-064A, and the Lam-Alef ligatures
+)
+UI_SCRIPT_INTERVALS+=("${UI_ARABIC_INTERVALS[@]}")
+arabic_unicodes=""
+for interval in "${UI_ARABIC_INTERVALS[@]}"; do
+  first="${interval%,*}"
+  last="${interval#*,}"
+  arabic_unicodes+="${arabic_unicodes:+,}U+${first#0x}-${last#0x}"
+done
 UI_SCRIPT_DIR="$(mktemp -d)"
 for style in ${UI_FONT_STYLES[@]}; do
   python -m fontTools.subset "../../../assets/sd-fonts/NotoSansHebrew/NotoSansHebrew-${style}.ttf" \
     --unicodes="U+0591-05F4" --layout-features='*' --output-file="$UI_SCRIPT_DIR/Hebrew-${style}.ttf"
+  python -m fontTools.subset "../builtinFonts/source/NotoSansArabicUI/NotoSansArabicUI-${style}.ttf" \
+    --unicodes="$arabic_unicodes" --drop-tables+=GSUB,GPOS,GDEF --output-file="$UI_SCRIPT_DIR/Arabic-${style}.ttf"
 done
 
 for size in ${UI_FONT_SIZES[@]}; do
@@ -105,7 +145,8 @@ for size in ${UI_FONT_SIZES[@]}; do
     inter_path="../builtinFonts/source/Inter/Inter-${style}.ttf"
     output_path="../builtinFonts/${font_name}.h"
 
-    cmd=(python fontconvert.py "$font_name" "$size" "$inter_path" "$UI_SCRIPT_DIR/Hebrew-${style}.ttf")
+    cmd=(python fontconvert.py "$font_name" "$size" "$inter_path" "$UI_SCRIPT_DIR/Hebrew-${style}.ttf"
+      "$UI_SCRIPT_DIR/Arabic-${style}.ttf")
     for interval in "${UI_LANG_INTERVALS[@]}" "${UI_SCRIPT_INTERVALS[@]}"; do
       cmd+=(--additional-intervals "$interval")
     done
@@ -120,10 +161,12 @@ for interval in "${UI_SCRIPT_INTERVALS[@]}"; do
   ui_script_args+=(--additional-intervals "$interval")
 done
 python fontconvert.py notosans_8_regular 8 ../builtinFonts/source/NotoSans/NotoSans-Regular.ttf \
-  "$UI_SCRIPT_DIR/Hebrew-Regular.ttf" "${ui_script_args[@]}" > ../builtinFonts/notosans_8_regular.h
+  "$UI_SCRIPT_DIR/Hebrew-Regular.ttf" "$UI_SCRIPT_DIR/Arabic-Regular.ttf" "${ui_script_args[@]}" \
+  > ../builtinFonts/notosans_8_regular.h
 # Murphy uses a dedicated 6 pt face for the Small UI role at its Normal size setting.
 python fontconvert.py notosans_6_regular 6 ../builtinFonts/source/NotoSans/NotoSans-Regular.ttf \
-  "$UI_SCRIPT_DIR/Hebrew-Regular.ttf" "${ui_script_args[@]}" > ../builtinFonts/notosans_6_regular.h
+  "$UI_SCRIPT_DIR/Hebrew-Regular.ttf" "$UI_SCRIPT_DIR/Arabic-Regular.ttf" "${ui_script_args[@]}" \
+  > ../builtinFonts/notosans_6_regular.h
 rm -rf "$UI_SCRIPT_DIR"
 
 # The CJK UI faces hold each CJK translation's characters that the UI faces above lack, so they
