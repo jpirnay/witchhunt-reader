@@ -57,7 +57,8 @@ TEST_F(KeyboardLayoutSetTest, EachLanguageWithALayoutOpensOnItAndReachesEnglish)
       {Language::FR, KeyboardLayoutId::AzertyFr},   {Language::DE, KeyboardLayoutId::QwertzDe},
       {Language::ES, KeyboardLayoutId::SpanishEs},  {Language::RU, KeyboardLayoutId::CyrillicRu},
       {Language::UK, KeyboardLayoutId::CyrillicUk}, {Language::BE, KeyboardLayoutId::CyrillicBe},
-      {Language::KK, KeyboardLayoutId::CyrillicKk},
+      {Language::KK, KeyboardLayoutId::CyrillicKk}, {Language::HE, KeyboardLayoutId::HebrewIl},
+      {Language::AR, KeyboardLayoutId::ArabicAr},
   };
   for (const auto& c : cases) {
     I18N.setLanguage(c.language);
@@ -70,8 +71,8 @@ TEST_F(KeyboardLayoutSetTest, EachLanguageWithALayoutOpensOnItAndReachesEnglish)
 }
 
 TEST_F(KeyboardLayoutSetTest, LanguageWithoutALayoutFallsBackToQwerty) {
-  // Polish, Czech, Italian... have no layout of their own: QWERTY alone.
-  for (const Language language : {Language::PL, Language::CS, Language::IT, Language::VI}) {
+  // Polish, Czech, Italian, Persian... have no layout of their own: QWERTY alone.
+  for (const Language language : {Language::PL, Language::CS, Language::IT, Language::VI, Language::FA}) {
     I18N.setLanguage(language);
     EXPECT_EQ(keyboard_layouts::startingLayout(), KeyboardLayoutId::QwertyEn) << static_cast<int>(language);
     EXPECT_EQ(enabledCount(), 1) << static_cast<int>(language);
@@ -99,9 +100,9 @@ TEST_F(KeyboardLayoutSetTest, EveryLayoutKeepsItsBit) {
   EXPECT_EQ(keyboard_layouts::LATIN_BITS, 0x000F);
 }
 
-// ---------------------------------------------------------------- scripts with no UI language
+// ---------------------------------------------------------------- right-to-left UI languages, and Greek
 
-TEST_F(KeyboardLayoutSetTest, HebrewArabicAndGreekAreNamedInTheirOwnLanguage) {
+TEST_F(KeyboardLayoutSetTest, EveryLayoutIsNamedInItsOwnLanguage) {
   const struct {
     KeyboardLayoutId id;
     const char* name;
@@ -114,10 +115,12 @@ TEST_F(KeyboardLayoutSetTest, HebrewArabicAndGreekAreNamedInTheirOwnLanguage) {
     uint8_t i = 0;
     while (i < keyboard_layouts::COUNT && keyboard_layouts::ALL[i].id != script.id) ++i;
     ASSERT_LT(i, keyboard_layouts::COUNT);
-    EXPECT_EQ(keyboard_layouts::ALL[i].language, keyboard_layouts::NO_UI_LANGUAGE);
     EXPECT_STREQ(keyboard_layouts::name(i), script.name);
   }
-  // The others go by their UI language's name, in that language; every row has one name or the other.
+  // Hebrew and Arabic are UI languages and go by its name; Greek has none and names itself.
+  EXPECT_EQ(keyboard_layouts::ALL[8].language, Language::HE);
+  EXPECT_EQ(keyboard_layouts::ALL[9].language, Language::AR);
+  EXPECT_EQ(keyboard_layouts::ALL[10].language, keyboard_layouts::NO_UI_LANGUAGE);
   EXPECT_STREQ(keyboard_layouts::name(4), LANGUAGE_NAMES[static_cast<size_t>(Language::RU)]);
   for (uint8_t i = 0; i < keyboard_layouts::COUNT; ++i) {
     const auto& info = keyboard_layouts::ALL[i];
@@ -126,15 +129,20 @@ TEST_F(KeyboardLayoutSetTest, HebrewArabicAndGreekAreNamedInTheirOwnLanguage) {
   }
 }
 
-TEST_F(KeyboardLayoutSetTest, AScriptWithNoUiLanguageIsNeverOnUntilSwitchedOn) {
-  // Unconfigured, whatever the UI language: none of the three is enabled, and none is opened on.
+TEST_F(KeyboardLayoutSetTest, GreekIsNeverOnUntilSwitchedOn) {
+  // Unconfigured, whatever the UI language: Greek is not enabled and not opened on.
   for (int l = 0; l < static_cast<int>(Language::_COUNT); ++l) {
     I18N.setLanguage(static_cast<Language>(l));
-    for (const KeyboardLayoutId id :
-         {KeyboardLayoutId::HebrewIl, KeyboardLayoutId::ArabicAr, KeyboardLayoutId::GreekEl}) {
-      EXPECT_FALSE(keyboard_layouts::enabled() & bitOf(id)) << l;
-      EXPECT_NE(keyboard_layouts::startingLayout(), id) << l;
-    }
+    EXPECT_FALSE(keyboard_layouts::enabled() & bitOf(KeyboardLayoutId::GreekEl)) << l;
+    EXPECT_NE(keyboard_layouts::startingLayout(), KeyboardLayoutId::GreekEl) << l;
+  }
+}
+
+TEST_F(KeyboardLayoutSetTest, HebrewAndArabicAreOffUnderAnotherInterfaceUntilSwitchedOn) {
+  for (const Language language : {Language::EN, Language::DE, Language::FA}) {
+    I18N.setLanguage(language);
+    EXPECT_FALSE(keyboard_layouts::enabled() & (bitOf(KeyboardLayoutId::HebrewIl) | bitOf(KeyboardLayoutId::ArabicAr)))
+        << static_cast<int>(language);
   }
 }
 

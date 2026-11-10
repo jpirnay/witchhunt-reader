@@ -527,7 +527,7 @@ TEST(FontManifestReaderTest, TheShippedManifestListsTheLanguageAndHyphenationPac
     EXPECT_EQ(local.size(), 14u);
     EXPECT_EQ(local.rfind("hyph-", 0), 0u);
   }
-  EXPECT_EQ(languages, 26u);
+  EXPECT_EQ(languages, 29u);
   EXPECT_EQ(hyphenation, 31u);
   EXPECT_EQ(web.catalog.count(), all.count() - languages - hyphenation);
   for (size_t i = 0; i < web.catalog.count(); ++i) EXPECT_FALSE(web.catalog.pack(i));
