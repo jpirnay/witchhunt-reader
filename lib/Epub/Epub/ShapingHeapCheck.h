@@ -27,6 +27,7 @@ class ShapingHeapCheck {
     if (live_++ == 0) ot::setHeapCheck(&heap_growth::shapedHeapAllows);
   }
   ~ShapingHeapCheck() {
+    // cppcheck-suppress knownConditionTrueFalse ; the last build out removes the check
     if (--live_ == 0) ot::setHeapCheck(nullptr);
   }
   ShapingHeapCheck(const ShapingHeapCheck&) = delete;
