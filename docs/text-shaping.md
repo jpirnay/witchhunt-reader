@@ -44,9 +44,11 @@ ZWNJ (U+200C): Hindi steers half forms with them, and a Malayalam chillu ends in
   puts it last in the word, or onto the last token when an inline end sent that word out already.
 - A second joiner drops both and the rest of the run (`droppingJoinerRun_`), and a joiner after any other code point
   is dropped as before. Runs of hundreds of joiners between words, a watermark, are still dropped whole.
-- The look-behind (`joinerLookBehind_`) crosses SAX chunks and inline element edges. `characterData` holds a 3-byte
-  sequence a chunk ended inside (`splitTail_`) and completes it from the next chunk, so a letter or a joiner is never
-  read in halves; `deliverSplitTail` hands on a tail that never got its rest.
+- The look-behind (`joinerLookBehind_`) crosses SAX chunks and inline element edges. `characterData` holds any UTF-8
+  sequence a chunk ended inside (`splitTail_`, `cutSequenceTail`: an Arabic letter's 2 bytes, an Indic or Myanmar
+  letter's or a joiner's 3, a 4-byte one) and completes it from the next chunk, so a letter or a joiner is never read
+  in halves, and a word's first letter cut so still sets the look-behind and still stops a drop cap;
+  `deliverSplitTail` hands on a tail that never got its rest.
 - A kept joiner counts in no visible offset inside a word: the offsets KOSync and the paragraph LUT read stay what
   they are without it.
 

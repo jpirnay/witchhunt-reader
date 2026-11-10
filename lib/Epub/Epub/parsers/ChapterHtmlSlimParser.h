@@ -185,9 +185,9 @@ class ChapterHtmlSlimParser final : public Print {
     joinerLookBehind_ = 0;
     droppingJoinerRun_ = false;
   }
-  // The start of a 3-byte sequence (E0 or E2 lead) a SAX chunk ended inside, with the visible offset of its first byte;
+  // The start of a UTF-8 sequence a SAX chunk ended inside (1 to 3 bytes), with the visible offset of its first byte;
   // characterData completes it from the next chunk, so a letter or joiner is never read in halves.
-  char splitTail_[2] = {};
+  char splitTail_[3] = {};
   uint8_t splitTailLen_ = 0;
   uint32_t splitTailOffset_ = 0;
   // A whitespace run with a line break in it followed unspaced CJK text or a quotation mark

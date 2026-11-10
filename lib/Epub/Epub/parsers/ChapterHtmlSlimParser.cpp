@@ -341,15 +341,26 @@ bool isWhitespace(const char c) { return c == ' ' || c == '\r' || c == '\n' || c
 // 256 entries, a 6 KB block.
 constexpr int kCjkRunCodepoints = 32;
 
-// The codepoint whose first byte is s[0], or 0 when its sequence runs past the `avail` bytes in hand
-// (it continues in the next SAX chunk). Such a character is not counted toward kCjkRunCodepoints, so
-// a run can reach 33 codepoints before it is flushed.
+// The codepoint whose first byte is s[0], or 0 when its sequence runs past the `avail` bytes in hand. characterData
+// hands consumeText whole sequences (cutSequenceTail), so that is malformed text: a lead byte with its sequence
+// missing.
 static uint32_t codepointAt(const char* s, const int avail) {
   const auto lead = static_cast<uint8_t>(s[0]);
   const int length = lead < 0x80 ? 1 : lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2;
   if (length > avail) return 0;
   const auto* p = reinterpret_cast<const unsigned char*>(s);
   return utf8NextCodepoint(&p);
+}
+
+// The bytes at the end of the `len` bytes at s that start a UTF-8 sequence cut off there (1 to 3), or 0 when the last
+// sequence is whole, or when no lead byte starts it (malformed text goes on as it came).
+static int cutSequenceTail(const char* s, const int len) {
+  for (int back = 1; back <= 3 && back <= len; ++back) {
+    const auto byte = static_cast<uint8_t>(s[len - back]);
+    if ((byte & 0xC0) == 0x80) continue;  // a continuation byte: its lead is further back
+    return byte >= 0xC0 && utf8CodepointLen(byte) > back ? back : 0;
+  }
+  return 0;
 }
 
 // The first and the last codepoint of the `len` bytes at s, which end on a sequence boundary, past the controls that
@@ -413,10 +424,10 @@ static bool isQuotationMark(const uint32_t cp) {
 // isn't one. Every BMP default-ignorable encodes as 2 bytes (U+034F, U+061C) or 3 bytes, so
 // only those two forms are decoded.
 //
-// A sequence that runs past `len` returns 0 rather than matching on a prefix: the text handler
-// is fed in chunks and may split a codepoint at the boundary. Answering "not ignorable" there
-// is the safe direction — the bytes stay in the word buffer and the next chunk completes them,
-// which is exactly what the U+00A0 / U+202F checks further down already do.
+// A sequence that runs past `len` returns 0 rather than matching on a prefix. characterData hands
+// consumeText whole sequences, so such a sequence is malformed text, and answering "not ignorable"
+// is the safe direction: the bytes stay in the word buffer, as the U+00A0 / U+202F checks further
+// down leave them too.
 int defaultIgnorableLen(const char* s, const int i, const int len) {
   const auto b0 = static_cast<uint8_t>(s[i]);
   // All default-ignorables are >= U+034F, whose lead byte is 0xCD. Anything below that (ASCII,
@@ -3875,11 +3886,11 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, int len
     self->visibleTextOffset_ += static_cast<uint32_t>(VisibleText::visibleBytes(s, len));
   }
 
-  // A 3-byte sequence the last chunk ended inside is completed from this one and read whole, so a letter or a joiner
+  // A sequence the last chunk ended inside is completed from this one and read whole, so a letter or a joiner
   // (deviation 8) is never read in halves. Bytes that do not complete it (malformed text) go on as they came.
   if (self->splitTailLen_ > 0) {
     const int have = self->splitTailLen_;
-    const int need = 3 - have;
+    const int need = utf8CodepointLen(static_cast<uint8_t>(self->splitTail_[0])) - have;
     int take = 0;
     while (take < need && take < len && (static_cast<uint8_t>(s[take]) & 0xC0) == 0x80) ++take;
     if (take == len && take < need) {  // the chunk ends inside it again
@@ -3887,7 +3898,7 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, int len
       self->splitTailLen_ = static_cast<uint8_t>(have + take);
       return;
     }
-    char whole[3];
+    char whole[4];
     memcpy(whole, self->splitTail_, static_cast<size_t>(have));
     memcpy(whole + have, s, static_cast<size_t>(take));
     self->splitTailLen_ = 0;
@@ -3897,15 +3908,9 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, int len
     if (source) base += static_cast<uint32_t>(take);
   }
 
-  // The chunk's own end: a lead byte of a 3-byte sequence (E0: the Indic blocks; E2: the joiners) with its sequence cut
-  // off waits for the next chunk.
-  int tail = 0;
-  if (len >= 1 && (static_cast<uint8_t>(s[len - 1]) == 0xE0 || static_cast<uint8_t>(s[len - 1]) == 0xE2)) {
-    tail = 1;
-  } else if (len >= 2 && (static_cast<uint8_t>(s[len - 2]) == 0xE0 || static_cast<uint8_t>(s[len - 2]) == 0xE2) &&
-             (static_cast<uint8_t>(s[len - 1]) & 0xC0) == 0x80) {
-    tail = 2;
-  }
+  // The chunk's own end: the start of a sequence cut off there (an Arabic letter's 2 bytes, an Indic or Myanmar
+  // letter's or a joiner's 3, a 4-byte one) waits for the next chunk.
+  const int tail = cutSequenceTail(s, len);
   if (tail > 0) {
     len -= tail;
     memcpy(self->splitTail_, s + len, static_cast<size_t>(tail));
@@ -4209,8 +4214,8 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
       }
     }
 
-    // A codepoint starts here: count it toward the CJK run (kCjkRunCodepoints). A character split
-    // across SAX chunks (cp 0) is not counted.
+    // A codepoint starts here: count it toward the CJK run (kCjkRunCodepoints). A lead byte with its sequence missing
+    // (cp 0, malformed text) is not counted.
     if (c >= 0xC0) {
       const uint32_t cp = codepointAt(s + i, len - i);
       if (self->heldJoiner_ != 0 && !self->releaseHeldJoiner(byteOff, c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2)) return;

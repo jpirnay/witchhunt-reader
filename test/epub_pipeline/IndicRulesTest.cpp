@@ -197,3 +197,26 @@ TEST_F(IndicRules, ADropCapOverAMyanmarLetterIsAbandoned) {
   ASSERT_FALSE(myanmar.words.empty());
   EXPECT_EQ("ကောင်း", myanmar.words[0].text);
 }
+
+// The SAX parser flushes its text every 256 bytes. A letter cut there is read whole, so no drop cap is captured from
+// its first bytes: the leading line breaks, which a drop cap skips, move the cut through the Arabic letter's 2 bytes
+// and the Myanmar one's 3.
+TEST_F(IndicRules, NoDropCapIsCapturedFromALetterCutByAChunkBoundary) {
+  const struct {
+    std::string cap;
+    std::string rest;
+  } words[] = {{"\u0643", "\u062A\u0627\u0628"}, {"က", "ောင်း"}};
+  for (const auto& word : words) {
+    for (int n = 253; n <= 256; ++n) {
+      const std::string breaks(static_cast<size_t>(n), '\n');
+      const FirstPage page = firstPage("<p><span style=\"float: left; font-size: 3em\">" + breaks + word.cap +
+                                           "</span>" + word.rest + kFiller + "</p>",
+                                       false);
+      EXPECT_EQ(0, page.dropCaps) << word.cap << " n=" << n;
+      ASSERT_FALSE(page.words.empty());
+      EXPECT_EQ(word.cap + word.rest, page.words[0].text) << word.cap << " n=" << n;
+      fs::remove_all(work);
+      fs::create_directories(work);
+    }
+  }
+}

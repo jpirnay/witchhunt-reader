@@ -153,6 +153,26 @@ TEST_F(Joiners, AJoinerSplitFromItsLetterByAChunkBoundaryIsKept) {
   }
 }
 
+// A word's first letter cut by the same flush, after whitespace, where the look-behind starts empty: an Arabic letter
+// is 2 bytes, a Myanmar one 3 with no E0 or E2 lead. The leading spaces move the cut through every byte of the word.
+TEST_F(Joiners, AJoinerAfterAWordsFirstLetterCutByAChunkBoundaryIsKept) {
+  const std::string halfSpace = "\u06A9" + kZwnj + "\u0647";  // keh, ZWNJ, heh: Persian's half-space
+  const std::string medial = "\u1000" + kZwj + "\u103B";      // ka, ZWJ, medial ya
+  for (int n = 248; n <= 258; ++n) {
+    const std::string spaces(static_cast<size_t>(n), ' ');
+    EXPECT_EQ(textOf("<p>" + spaces + halfSpace + "</p>"), halfSpace) << "n=" << n;
+    EXPECT_EQ(textOf("<p>" + spaces + medial + "</p>"), medial) << "n=" << n;
+  }
+}
+
+// The same hold reads a no-break space the flush cuts as one: a token of its own, not two bytes inside a word.
+TEST_F(Joiners, ANoBreakSpaceCutByAChunkBoundaryIsOne) {
+  for (int n = 250; n <= 258; ++n) {
+    const std::string spaces(static_cast<size_t>(n), ' ');
+    EXPECT_EQ(wordsOf("<p>" + spaces + "x\u00A0y</p>"), (Words{"x", " ", "y"})) << "n=" << n;
+  }
+}
+
 TEST_F(Joiners, AJoinerAtAnInlineElementsEdgeIsKept) {
   // The joiner waits across the edge and opens the next token, ahead of the letter it precedes. The parser's tokens
   // show in a ruby base (inRuby).
