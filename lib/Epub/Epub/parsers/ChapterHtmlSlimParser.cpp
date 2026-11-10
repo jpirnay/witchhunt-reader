@@ -3236,84 +3236,9 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   const BlockStyle parentBlockStyle = self->currentTextBlock->getBlockStyle();
                   self->startNewTextBlock(parentBlockStyle);
                 }
-                self->applyPendingPageBreak();
-
-                // If the current text block is still empty, it may carry accumulated parent
-                // block spacing (e.g. div/figure/h1 wrappers). Apply that spacing around the
-                // image itself so it doesn't leak into the next text paragraph.
-                BlockStyle pendingImageBlockStyle;
-                if (self->currentTextBlock && self->currentTextBlock->isEmpty()) {
-                  pendingImageBlockStyle = self->currentTextBlock->getBlockStyle();
-                }
-
-                const int imageSpacingTop = std::max(0, static_cast<int>(pendingImageBlockStyle.marginTop)) +
-                                            std::max(0, static_cast<int>(pendingImageBlockStyle.paddingTop));
-                const int imageSpacingBottom = std::max(0, static_cast<int>(pendingImageBlockStyle.marginBottom)) +
-                                               std::max(0, static_cast<int>(pendingImageBlockStyle.paddingBottom));
-                const int totalImageHeightWithSpacing = imageSpacingTop + displayHeight + imageSpacingBottom;
-
-                LOG_DBG("EHP",
-                        "Image layout prep: src=%s dims=%dx%d display=%dx%d y=%d spacing(top=%d,bottom=%d,total=%d)",
-                        src.c_str(), dims.width, dims.height, displayWidth, displayHeight, self->currentPageNextY,
-                        imageSpacingTop, imageSpacingBottom, totalImageHeightWithSpacing);
-
-                // Create page for image - only break if image won't fit remaining space
-                if (self->currentPage && !self->currentPage->elements.empty() &&
-                    (self->currentPageNextY + totalImageHeightWithSpacing > self->viewportHeight)) {
-                  LOG_TRC("EHP", "Image page break: currentY=%d needed=%d viewportH=%d", self->currentPageNextY,
-                          totalImageHeightWithSpacing, self->viewportHeight);
-                  self->emitPage();
-                  if (!self->currentPage) {
-                    LOG_ERR("EHP", "Failed to create new page");
-                    return;
-                  }
-                } else if (!self->currentPage) {
-                  self->currentPage.reset(new Page());
-                  if (!self->currentPage) {
-                    LOG_ERR("EHP", "Failed to create initial page");
-                    return;
-                  }
-                  self->currentPageNextY = 0;
-                }
-
-                self->currentPageNextY += imageSpacingTop;
-
-                // Create ImageBlock with lazy-extraction source info.
-                // The SD file at cachedImagePath does not exist yet — it will be extracted
-                // from the EPUB at first render time by ImageBlock::ensureExtracted().
-                auto imageBlock = makeUniqueNoThrow<ImageBlock>(cachedImagePath, displayWidth, displayHeight, alt,
-                                                                self->epub->getPath(), resolvedPath);
-                if (!imageBlock) {
-                  LOG_ERR("EHP", "Failed to create ImageBlock");
+                if (!self->placeImageWithBlockSpacing(cachedImagePath, resolvedPath, alt, displayWidth, displayHeight,
+                                                      self->visibleTextOffset_)) {
                   return;
-                }
-                self->turnIfVertical(imageBlock.get());
-                int xPos = (self->viewportWidth - displayWidth) / 2;
-                auto pageImage = makeUniqueNoThrow<PageImage>(std::move(imageBlock), xPos, self->currentPageNextY);
-                if (!pageImage) {
-                  LOG_ERR("EHP", "Failed to create PageImage");
-                  return;
-                }
-                self->noteElementOnPage(self->visibleTextOffset_);
-                self->currentPage->elements.push_back(std::move(pageImage));
-                self->currentPageNextY += displayHeight;
-                self->currentPageNextY += imageSpacingBottom;
-
-                LOG_TRC("EHP", "Image placed: x=%d y=%d w=%d h=%d nextY=%d", xPos, pageImage->yPos, displayWidth,
-                        displayHeight, self->currentPageNextY);
-
-                // Reset empty pending block style after consuming spacing around the image.
-                // This prevents figure/header wrapper margins from being applied again to the
-                // next paragraph block.
-                if (self->currentTextBlock && self->currentTextBlock->isEmpty()) {
-                  BlockStyle resetStyle;
-                  resetStyle.textAlignDefined = true;
-                  const auto align = (self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
-                                         ? CssTextAlign::Justify
-                                         : static_cast<CssTextAlign>(self->paragraphAlignment);
-                  resetStyle.alignment = align;
-                  self->currentTextBlock->setBlockStyle(resetStyle);
-                  LOG_TRC("EHP", "Image spacing consumed; pending empty block style reset for following text");
                 }
 
                 self->depth += 1;
@@ -5781,6 +5706,91 @@ void ChapterHtmlSlimParser::placeBackgroundImage(const std::string& resolvedPath
   LOG_DBG("EHP", "Background picture placed after its block: %s (%ux%u)", resolvedPath.c_str(), nativeWidth,
           nativeHeight);
   placeImageBlockAsBlock(std::move(image));
+}
+
+bool ChapterHtmlSlimParser::placeImageWithBlockSpacing(const std::string& cachedImagePath, const std::string& entryPath,
+                                                       const std::string& alt, const int displayWidth,
+                                                       const int displayHeight, const uint32_t visibleOffset) {
+  applyPendingPageBreak();
+
+  // If the current text block is still empty, it may carry accumulated parent
+  // block spacing (e.g. div/figure/h1 wrappers). Apply that spacing around the
+  // image itself so it doesn't leak into the next text paragraph.
+  BlockStyle pendingImageBlockStyle;
+  if (currentTextBlock && currentTextBlock->isEmpty()) {
+    pendingImageBlockStyle = currentTextBlock->getBlockStyle();
+  }
+
+  const int imageSpacingTop = std::max(0, static_cast<int>(pendingImageBlockStyle.marginTop)) +
+                              std::max(0, static_cast<int>(pendingImageBlockStyle.paddingTop));
+  const int imageSpacingBottom = std::max(0, static_cast<int>(pendingImageBlockStyle.marginBottom)) +
+                                 std::max(0, static_cast<int>(pendingImageBlockStyle.paddingBottom));
+  const int totalImageHeightWithSpacing = imageSpacingTop + displayHeight + imageSpacingBottom;
+
+  LOG_DBG("EHP", "Image layout prep: src=%s display=%dx%d y=%d spacing(top=%d,bottom=%d,total=%d)", entryPath.c_str(),
+          displayWidth, displayHeight, currentPageNextY, imageSpacingTop, imageSpacingBottom,
+          totalImageHeightWithSpacing);
+
+  // Create page for image - only break if image won't fit remaining space
+  if (currentPage && !currentPage->elements.empty() &&
+      (currentPageNextY + totalImageHeightWithSpacing > viewportHeight)) {
+    LOG_TRC("EHP", "Image page break: currentY=%d needed=%d viewportH=%d", currentPageNextY,
+            totalImageHeightWithSpacing, viewportHeight);
+    emitPage();
+    if (!currentPage) {
+      LOG_ERR("EHP", "Failed to create new page");
+      return false;
+    }
+  } else if (!currentPage) {
+    currentPage.reset(new Page());
+    if (!currentPage) {
+      LOG_ERR("EHP", "Failed to create initial page");
+      return false;
+    }
+    currentPageNextY = 0;
+  }
+
+  currentPageNextY += imageSpacingTop;
+
+  // Create ImageBlock with lazy-extraction source info.
+  // The SD file at cachedImagePath does not exist yet — it will be extracted
+  // from the EPUB at first render time by ImageBlock::ensureExtracted().
+  auto imageBlock =
+      makeUniqueNoThrow<ImageBlock>(cachedImagePath, displayWidth, displayHeight, alt, epub->getPath(), entryPath);
+  if (!imageBlock) {
+    LOG_ERR("EHP", "Failed to create ImageBlock");
+    return false;
+  }
+  turnIfVertical(imageBlock.get());
+  const int xPos = (viewportWidth - displayWidth) / 2;
+  const int yPos = currentPageNextY;
+  auto pageImage = makeUniqueNoThrow<PageImage>(std::move(imageBlock), xPos, yPos);
+  if (!pageImage) {
+    LOG_ERR("EHP", "Failed to create PageImage");
+    return false;
+  }
+  noteElementOnPage(visibleOffset);
+  currentPage->elements.push_back(std::move(pageImage));
+  currentPageNextY += displayHeight;
+  currentPageNextY += imageSpacingBottom;
+
+  LOG_TRC("EHP", "Image placed: x=%d y=%d w=%d h=%d nextY=%d", xPos, yPos, displayWidth, displayHeight,
+          currentPageNextY);
+
+  // Reset empty pending block style after consuming spacing around the image.
+  // This prevents figure/header wrapper margins from being applied again to the
+  // next paragraph block.
+  if (currentTextBlock && currentTextBlock->isEmpty()) {
+    BlockStyle resetStyle;
+    resetStyle.textAlignDefined = true;
+    const auto align = (paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
+                           ? CssTextAlign::Justify
+                           : static_cast<CssTextAlign>(paragraphAlignment);
+    resetStyle.alignment = align;
+    currentTextBlock->setBlockStyle(resetStyle);
+    LOG_TRC("EHP", "Image spacing consumed; pending empty block style reset for following text");
+  }
+  return true;
 }
 
 void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> image) {

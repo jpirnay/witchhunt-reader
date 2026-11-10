@@ -1055,6 +1055,11 @@ class ChapterHtmlSlimParser final : public Print {
   void placeBackgroundImage(const std::string& resolvedPath, int elementDepth);
   // Place an already-built ImageBlock as a centered, full-width block element, page-breaking if needed.
   void placeImageBlockAsBlock(std::unique_ptr<ImageBlock> image);
+  // An image of the flow on a line of its own, centred, with the spacing of the empty block it stands in (a figure's or
+  // a paragraph's margins), which it uses up: the block's style is reset for the text after it. A page break pending
+  // goes first, and a page that has no room for it ends. False when no page or image could be had.
+  bool placeImageWithBlockSpacing(const std::string& cachedImagePath, const std::string& entryPath,
+                                  const std::string& alt, int displayWidth, int displayHeight, uint32_t visibleOffset);
   // In a vertical section an image is sized in the content frame as its turned self: native width and height swap
   // before sizing, and the block it becomes is turned (drawn upright in the reader's frame).
   void turnIfVertical(ImageDimensions& dims) const;
