@@ -426,6 +426,7 @@ void SdCardFontSystem::clearReaderLanguage() {
   readerHebrewScript_ = false;
   readerMyanmarScript_ = false;
   languageFamily_.clear();
+  missingLanguageFamily_.clear();
   languageFamilyKey_ = 0;
 }
 
@@ -508,6 +509,7 @@ void SdCardFontSystem::selectLanguageFamily(const char* family) {
   if (key == languageFamilyKey_) return;
   languageFamilyKey_ = key;
   languageFamily_.clear();
+  missingLanguageFamily_.clear();
 
   // A character every font of the region's script has.
   uint32_t probe = 0;
@@ -576,6 +578,19 @@ void SdCardFontSystem::selectLanguageFamily(const char* family) {
       return;
     }
   }
+  // Neither is installed: the book draws its script as boxes, and its open offers the first.
+  missingLanguageFamily_ =
+      arabic ? std::string(sansFirst ? sans : serif) : std::string(sansFirst ? sans : serif) + suffix;
+  missingLanguageProbe_ = probe;
+  LOG_INF("SDFS", "Book language needs %s: '%s' has no U+%04lX and no family of it is installed",
+          missingLanguageFamily_.c_str(), name.c_str(), static_cast<unsigned long>(probe));
+}
+
+const char* SdCardFontSystem::missingLanguageFamily() const {
+  if (missingLanguageFamily_.empty()) return "";
+  // A book with fonts of its own in its script draws it in them (Publisher Fonts).
+  if (!bookBody_.name.empty() && familyMapsCodepoint(bookBody_, missingLanguageProbe_)) return "";
+  return missingLanguageFamily_.c_str();
 }
 
 bool SdCardFontSystem::isIndicFamily(const std::string& family) {
