@@ -686,6 +686,7 @@ STR_GO_TO_PRINTED_PAGE_HINT: "Arriba/Abajo: ±1 (x2: ±10)  Izquierda/Derecha: d
 STR_GO_TO_PRINTED_PAGE_RANGE: "Rango: %u - %u"
 STR_LOADING_FONT: "Cargando fuente..."
 STR_PREPARING_HYPHENATION: "Preparando la división de palabras..."
+STR_HYPHENATION_PACK_OFFER: "La división de palabras para %s es ahora una descarga aparte. ¿Descargarla ahora por Wi-Fi? El Administrador de fuentes también la ofrece más tarde."
 STR_NETWORK_OPTIONS: "Opciones de red"
 STR_OPTIONS_BUTTON: "Opciones"
 STR_QUICK_OVERRIDES: "Ajustes rápidos"

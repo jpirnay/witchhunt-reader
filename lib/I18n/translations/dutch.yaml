@@ -682,6 +682,7 @@ STR_GO_TO_PRINTED_PAGE_HINT: "Omhoog/Omlaag: ±1 (x2: ±10)  Links/Rechts: cijfe
 STR_GO_TO_PRINTED_PAGE_RANGE: "Bereik: %u - %u"
 STR_LOADING_FONT: "Lettertype laden..."
 STR_PREPARING_HYPHENATION: "Woordafbreking voorbereiden..."
+STR_HYPHENATION_PACK_OFFER: "Woordafbreking voor %s is nu een aparte download. Nu downloaden via wifi? Lettertypebeheer biedt hem ook later aan."
 STR_NETWORK_OPTIONS: "Netwerkopties"
 STR_OPTIONS_BUTTON: "Opties"
 STR_QUICK_OVERRIDES: "Snelle aanpassingen"

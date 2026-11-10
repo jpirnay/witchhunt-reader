@@ -682,6 +682,7 @@ STR_GO_TO_PRINTED_PAGE_HINT: "Cima/Baixo: ±1 (x2: ±10)  Esquerda/Direita: díg
 STR_GO_TO_PRINTED_PAGE_RANGE: "Intervalo: %u - %u"
 STR_LOADING_FONT: "A carregar tipo de letra..."
 STR_PREPARING_HYPHENATION: "A preparar a hifenização..."
+STR_HYPHENATION_PACK_OFFER: "A hifenização para %s é agora uma transferência à parte. Transferir agora por Wi-Fi? O Gestor de tipos de letra também a oferece mais tarde."
 STR_NETWORK_OPTIONS: "Opções de rede"
 STR_OPTIONS_BUTTON: "Opções"
 STR_QUICK_OVERRIDES: "Ajustes rápidos"

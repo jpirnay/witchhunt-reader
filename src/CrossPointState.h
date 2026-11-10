@@ -162,6 +162,9 @@ class CrossPointState {
   // When false, setup() skips the boot screen on wake and instead restores the
   // saved framebuffer overlaid with a loading icon (Quick Resume).
   bool showBootScreen = true;
+  // The language whose hyphenation pack the reader offered at boot and was told no (HyphenationPacks::takeOffer): two
+  // letters, "" when none. It is not offered again; the Font Manager still has it.
+  char hyphenationOfferDeclined[3] = {};
   KOReaderSyncSessionState koReaderSyncSession;
   PendingBookmarkJumpState pendingBookmarkJump;
 #if SERIAL_TEST_API

@@ -6,6 +6,7 @@
 #include <Epub/hyphenation/Hyphenator.h>
 #include <Epub/hyphenation/LanguageRegistry.h>
 #include <HalStorage.h>
+#include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <esp_rom_crc.h>
@@ -15,6 +16,8 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+
+#include "CrossPointState.h"
 
 #if CONFIG_SPIRAM
 #include <esp_heap_caps.h>
@@ -292,6 +295,50 @@ void packInstalled(const char* code) {
 #else
   if (mounted) ensureStored(code, /*mayDrop=*/false, nullptr);
 #endif
+}
+
+bool packOnCard(const char* code) {
+  char path[48];
+  return code && findPack(code, path);
+}
+
+namespace {
+
+// The hyphenation language of each interface language whose patterns come from a pack. Hungarian has no pack yet;
+// Romanian and Kazakh have no patterns, and English, Chinese, Japanese, Korean and Vietnamese no hyphenation.
+struct UiPack {
+  const char* uiCode;  // the translation's _language_code
+  const char* code;
+};
+constexpr UiPack kUiPacks[] = {{"DE", "de"}, {"FR", "fr"}, {"ES", "es"}, {"IT", "it"}, {"PT", "pt"},
+                               {"PO", "pt"}, {"PL", "pl"}, {"RU", "ru"}, {"UK", "uk"}, {"SV", "sv"},
+                               {"NL", "nl"}, {"CS", "cs"}, {"DA", "da"}, {"SI", "sl"}, {"LT", "lt"},
+                               {"CA", "ca"}, {"BE", "be"}, {"FI", "fi"}, {"TR", "tr"}};
+
+bool offerTaken = false;
+
+}  // namespace
+
+bool takeOffer(char (&code)[3]) {
+  if (offerTaken) return false;
+  offerTaken = true;
+  const char* uiCode = I18N.getLanguageCode(I18N.getLanguage());
+  const char* pack = nullptr;
+  for (const auto& entry : kUiPacks) {
+    if (uiCode && std::strcmp(uiCode, entry.uiCode) == 0) pack = entry.code;
+  }
+  const LanguageEntry* entry = pack ? findLanguageEntry(pack) : nullptr;
+  if (!entry || entry->builtIn || std::strcmp(APP_STATE.hyphenationOfferDeclined, pack) == 0 || packOnCard(pack)) {
+    return false;
+  }
+  snprintf(code, sizeof(code), "%s", pack);
+  LOG_INF("HYP", "%s: no hyphenation pack on the card for the interface language, offering it", pack);
+  return true;
+}
+
+void declineOffer(const char* code) {
+  snprintf(APP_STATE.hyphenationOfferDeclined, sizeof(APP_STATE.hyphenationOfferDeclined), "%s", code ? code : "");
+  APP_STATE.saveToFile();
 }
 
 void packRemoved(const char* code) {

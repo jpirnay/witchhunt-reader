@@ -41,4 +41,16 @@ void packInstalled(const char* code);
 // After the Font Manager deleted the pack of `code`: its books are laid out without its patterns from now on.
 void packRemoved(const char* code);
 
+// Whether the card holds the pack of `code`, in our folder or CrossInk's.
+bool packOnCard(const char* code);
+
+// The pack the reader offers to download, once a boot: that of the interface language, when it is not English, the
+// firmware hyphenates it from a pack, the card has none, and the offer was not declined for it before. True with its
+// code in `code` the first time a boot asks and the offer is due; false after that, and when it is not. A reader
+// upgraded from a firmware that had its language's patterns built in is asked at its first boot.
+bool takeOffer(char (&code)[3]);
+
+// The offer of `code` was declined: it is not made again (CrossPointState::hyphenationOfferDeclined).
+void declineOffer(const char* code);
+
 }  // namespace HyphenationPacks

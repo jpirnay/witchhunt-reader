@@ -682,6 +682,7 @@ STR_GO_TO_PRINTED_PAGE_HINT: "Cima/Baixo: ±1 (x2: ±10)  Esquerda/Direita: díg
 STR_GO_TO_PRINTED_PAGE_RANGE: "Intervalo: %u - %u"
 STR_LOADING_FONT: "Carregando fonte..."
 STR_PREPARING_HYPHENATION: "Preparando a hifenização..."
+STR_HYPHENATION_PACK_OFFER: "A hifenização para %s agora é um download separado. Baixar agora por Wi-Fi? O Gerenciador de fontes também a oferece depois."
 STR_NETWORK_OPTIONS: "Opções de rede"
 STR_OPTIONS_BUTTON: "Opções"
 STR_QUICK_OVERRIDES: "Ajustes rápidos"

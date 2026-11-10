@@ -682,6 +682,7 @@ STR_GO_TO_PRINTED_PAGE_HINT: "Вверх/Вниз: ±1 (x2: ±10)  Влево/В
 STR_GO_TO_PRINTED_PAGE_RANGE: "Диапазон: %u - %u"
 STR_LOADING_FONT: "Загрузка шрифта..."
 STR_PREPARING_HYPHENATION: "Подготовка переноса слов..."
+STR_HYPHENATION_PACK_OFFER: "Перенос слов для языка %s теперь загружается отдельно. Загрузить его сейчас по Wi-Fi? Менеджер шрифтов предложит его и позже."
 STR_NETWORK_OPTIONS: "Параметры сети"
 STR_OPTIONS_BUTTON: "Параметры"
 STR_QUICK_OVERRIDES: "Быстрые настройки"

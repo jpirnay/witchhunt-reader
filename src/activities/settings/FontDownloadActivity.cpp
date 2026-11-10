@@ -25,8 +25,11 @@
 
 namespace fui = freeink::ui;
 
-FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : UiListActivity("FontDownload", renderer, mappedInput), fontInstaller_(sdFontSystem.registry()) {}
+FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                           const char* wantedPack)
+    : UiListActivity("FontDownload", renderer, mappedInput), fontInstaller_(sdFontSystem.registry()) {
+  if (wantedPack) snprintf(wantedPack_, sizeof(wantedPack_), "%s", wantedPack);
+}
 
 // --- Lifecycle ---
 
@@ -104,6 +107,26 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
     state_ = FAMILY_LIST;
   }
   requestUpdate();
+  downloadWantedPack();
+}
+
+void FontDownloadActivity::downloadWantedPack() {
+  if (wantedPack_[0] == '\0') return;
+  char file[16];
+  snprintf(file, sizeof(file), "hyph-%s.cphyph", wantedPack_);
+  wantedPack_[0] = '\0';
+  for (size_t i = 0; i < families_.count(); ++i) {
+    if (!families_.hyphenation(i) || families_.fileCount(i) == 0 || strcmp(families_.fileLocalName(i, 0), file) != 0) {
+      continue;
+    }
+    activeNav().requestSelection(actionCount() + static_cast<int>(i));
+    if (!families_.installed(i)) {
+      downloadFamily(static_cast<int>(i));
+      requestUpdateAndWait();
+    }
+    return;
+  }
+  LOG_ERR("FONT", "The font list holds no %s", file);
 }
 
 // --- Manifest fetching ---

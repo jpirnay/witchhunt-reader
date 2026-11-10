@@ -683,6 +683,7 @@ STR_GO_TO_PRINTED_PAGE_HINT: "Уверх/Уніз: ±1 (x2: ±10)  Улева/У
 STR_GO_TO_PRINTED_PAGE_RANGE: "Дыяпазон: %u - %u"
 STR_LOADING_FONT: "Загрузка шрыфта..."
 STR_PREPARING_HYPHENATION: "Падрыхтоўка пераносу слоў..."
+STR_HYPHENATION_PACK_OFFER: "Перанос слоў для мовы %s цяпер загружаецца асобна. Загрузіць яго зараз праз Wi-Fi? Менеджэр шрыфтоў прапануе яго і пазней."
 STR_NETWORK_OPTIONS: "Параметры сеткі"
 STR_OPTIONS_BUTTON: "Параметры"
 STR_QUICK_OVERRIDES: "Хуткія налады"

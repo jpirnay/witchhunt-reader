@@ -27,6 +27,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "GlobalBookmarkIndex.h"
+#include "HyphenationPacks.h"
 #include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
@@ -34,6 +35,8 @@
 #include "RecentBooksStore.h"
 #include "TouchUi.h"
 #include "activities/reader/ReaderActivity.h"
+#include "activities/settings/FontDownloadActivity.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/TapTargets.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
@@ -614,10 +617,38 @@ void HomeActivity::freeCoverBuffer() {
   coverBufferStored = false;
 }
 
+bool HomeActivity::offerHyphenationPack() {
+  char code[3];
+  if (!HyphenationPacks::takeOffer(code)) return false;
+  ConfirmationActivity::Question question;
+  question.headline = tr(STR_HYPHENATION);
+  char message[320];
+  snprintf(message, sizeof(message), tr(STR_HYPHENATION_PACK_OFFER), I18N.getLanguageName(I18N.getLanguage()));
+  question.message = message;
+  question.messageMaxLines = 6;
+  question.cancelLabel = StrId::STR_NO;
+  question.acceptLabel = StrId::STR_DOWNLOAD;
+  const std::string pack(code);
+  startActivityForResult(
+      std::make_unique<ConfirmationActivity>(renderer, mappedInput, std::move(question)),
+      [this, pack](const ActivityResult& result) {
+        if (result.isCancelled) {
+          HyphenationPacks::declineOffer(pack.c_str());
+          return;
+        }
+        // In Home's place, not over it: the download's TLS session needs the heap Home holds.
+        activityManager.replaceActivity(std::make_unique<FontDownloadActivity>(renderer, mappedInput, pack.c_str()));
+      });
+  return true;
+}
+
 void HomeActivity::loop() {
   // Ahead of the button handling: a tap that opens a book or a menu entry replaces or stacks on
   // this activity, and running the rest against a screen that is going away serves nobody.
   if (handleHomeTouch()) return;
+
+  // An upgraded reader whose interface language is hyphenated from a pack it lacks is offered it, once a boot.
+  if (firstRenderDone && offerHyphenationPack()) return;
 
   const bool isCarousel = (GUI.getHomeNavigation() == HomeNavigation::Carousel);
 
