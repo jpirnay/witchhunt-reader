@@ -1,0 +1,1240 @@
+BOOK title=Boxes Test lang=en spine=5 toc=5 reliableToc=1
+SPINE 0 href=OEBPS/ch1.xhtml pages=3 truncated=0 cssFallback=0
+ PAGE 0 elements=26 footnotes=0
+  LINE y=14 x=0 align=2 mult=1.400 hfid=0 words=2
+   W x=167 s=1 z=100 t=1.
+   W x=200 s=1 z=100 t=Shapes
+  LINE y=55 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=A
+   W x=14 s=0 z=100 t=paragraph
+   W x=107 s=0 z=100 t=before
+   W x=167 s=0 z=100 t=the
+   W x=204 s=0 z=100 t=sidebar,
+   W x=276 s=0 z=100 t=set
+   W x=310 s=0 z=100 t=as
+   W x=337 s=0 z=100 t=running
+   W x=412 s=0 z=100 t=text.
+  BOX y=97 x=0 w=460 h=188 edges=1/2,1/2,1/2,1/2 shaded=0
+  LINE y=107 x=10 align=2 mult=1.200 hfid=0 words=1
+   W x=179 s=1 z=100 t=Sidebar
+  LINE y=141 x=10 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=A
+   W x=27 s=0 z=100 t=sidebar
+   W x=104 s=0 z=100 t=frames
+   W x=181 s=0 z=100 t=its
+   W x=225 s=0 z=100 t=own
+   W x=273 s=0 z=100 t=heading
+   W x=361 s=0 z=100 t=and
+   W x=411 s=0 z=100 t=two
+  LINE y=165 x=10 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=paragraphs.
+   W x=119 s=0 z=100 t=The
+   W x=159 s=0 z=100 t=lighthouse
+   W x=273 s=0 z=100 t=keeper
+   W x=335 s=0 z=100 t=wrote
+   W x=393 s=0 z=100 t=every
+  LINE y=189 x=10 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=evening,
+   W x=83 s=0 z=100 t=a
+   W x=101 s=0 z=100 t=page
+   W x=145 s=0 z=100 t=or
+   W x=171 s=0 z=100 t=two,
+   W x=213 s=0 z=100 t=of
+   W x=241 s=0 z=100 t=what
+   W x=287 s=0 z=100 t=the
+   W x=324 s=0 z=100 t=sea
+   W x=360 s=0 z=100 t=had
+   W x=398 s=0 z=100 t=done
+  LINE y=213 x=10 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=that
+   W x=50 s=0 z=100 t=day
+   W x=84 s=0 z=100 t=and
+   W x=121 s=0 z=100 t=of
+   W x=149 s=0 z=100 t=the
+   W x=186 s=0 z=100 t=ships
+   W x=234 s=0 z=100 t=that
+   W x=284 s=0 z=100 t=passed.
+  LINE y=244 x=10 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=Its
+   W x=34 s=0 z=100 t=second
+   W x=96 s=0 z=100 t=paragraph
+   W x=189 s=0 z=100 t=stays
+   W x=243 s=0 z=100 t=inside
+   W x=298 s=0 z=100 t=the
+   W x=335 s=0 z=100 t=same
+   W x=381 s=0 z=100 t=frame.
+  BOX y=303 x=0 w=460 h=62 edges=0/0,0/0,0/0,0/0 shaded=1
+  LINE y=310 x=7 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=A
+   W x=16 s=0 z=100 t=shaded
+   W x=82 s=0 z=100 t=note:
+   W x=140 s=0 z=100 t=the
+   W x=179 s=0 z=100 t=background
+   W x=281 s=0 z=100 t=colour
+   W x=348 s=0 z=100 t=drawn
+   W x=401 s=0 z=100 t=as
+   W x=430 s=0 z=100 t=a
+  LINE y=334 x=7 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=light
+   W x=54 s=0 z=100 t=gray,
+   W x=107 s=0 z=100 t=the
+   W x=144 s=0 z=100 t=text
+   W x=186 s=0 z=100 t=black
+   W x=234 s=0 z=100 t=on
+   W x=263 s=0 z=100 t=it.
+  BOX y=383 x=36 w=388 h=231 edges=3/3,3/3,3/3,3/3 shaded=0
+  LINE y=404 x=57 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Dear
+   W x=46 s=0 z=100 t=reader,
+  LINE y=435 x=57 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=a
+   W x=18 s=0 z=100 t=letter
+   W x=79 s=0 z=100 t=in
+   W x=102 s=0 z=100 t=a
+   W x=120 s=0 z=100 t=double
+   W x=181 s=0 z=100 t=frame,
+   W x=244 s=0 z=100 t=indented
+   W x=322 s=0 z=100 t=on
+  LINE y=459 x=57 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=both
+   W x=46 s=0 z=100 t=sides.
+   W x=103 s=0 z=100 t=The
+   W x=136 s=0 z=100 t=lighthouse
+   W x=243 s=0 z=100 t=keeper
+   W x=298 s=0 z=100 t=wrote
+  LINE y=483 x=57 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=every
+   W x=53 s=0 z=100 t=evening,
+   W x=137 s=0 z=100 t=a
+   W x=156 s=0 z=100 t=page
+   W x=201 s=0 z=100 t=or
+   W x=228 s=0 z=100 t=two,
+   W x=271 s=0 z=100 t=of
+   W x=300 s=0 z=100 t=what
+  LINE y=507 x=57 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=38 s=0 z=100 t=sea
+   W x=75 s=0 z=100 t=had
+   W x=114 s=0 z=100 t=done
+   W x=161 s=0 z=100 t=that
+   W x=212 s=0 z=100 t=day
+   W x=247 s=0 z=100 t=and
+   W x=285 s=0 z=100 t=of
+   W x=314 s=0 z=100 t=the
+  LINE y=531 x=57 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=ships
+   W x=48 s=0 z=100 t=that
+   W x=98 s=0 z=100 t=passed.
+  LINE y=562 x=57 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Yours,
+   W x=65 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=keeper
+  BOX y=632 x=36 w=424 h=55 edges=0/0,0/0,0/0,3/2 shaded=0
+  LINE y=632 x=52 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=2 z=100 t=An
+   W x=25 s=2 z=100 t=epigraph
+   W x=101 s=2 z=100 t=with
+   W x=141 s=2 z=100 t=a
+   W x=159 s=2 z=100 t=bar
+   W x=191 s=2 z=100 t=on
+   W x=220 s=2 z=100 t=its
+   W x=251 s=2 z=100 t=start
+   W x=306 s=2 z=100 t=side
+   W x=344 s=2 z=100 t=and
+   W x=381 s=2 z=100 t=no
+  LINE y=656 x=52 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=2 z=100 t=other
+   W x=57 s=2 z=100 t=edge.
+  BOX y=705 x=0 w=460 h=55 edges=1/2,0/0,1/2,0/0 shaded=0
+  LINE y=711 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=A
+   W x=16 s=0 z=100 t=chapter
+   W x=88 s=0 z=100 t=summary
+   W x=164 s=0 z=100 t=between
+   W x=232 s=0 z=100 t=a
+   W x=252 s=0 z=100 t=rule
+   W x=297 s=0 z=100 t=above
+   W x=356 s=0 z=100 t=and
+   W x=395 s=0 z=100 t=a
+   W x=415 s=0 z=100 t=rule
+  LINE y=735 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=below.
+ PAGE 1 elements=33 footnotes=0
+  BOX y=0 x=0 w=460 h=88 edges=1/5,1/5,1/5,1/5 shaded=1
+  LINE y=8 x=8 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=int
+   W x=51 s=0 z=100 t=keeper(void)
+   W x=167 s=0 z=100 t={
+  LINE y=32 x=8 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=0 z=100 t=return
+   W x=81 s=0 z=100 t=lamp_on();
+  LINE y=56 x=8 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=}
+  BOX y=98 x=0 w=460 h=24 edges=0/0,0/0,0/0,3/2 shaded=0
+  LINE y=98 x=12 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=A
+   W x=14 s=0 z=100 t=callout
+   W x=90 s=0 z=100 t=bar
+   W x=122 s=0 z=100 t=declared
+   W x=198 s=0 z=100 t=six
+   W x=226 s=0 z=100 t=pixels
+   W x=278 s=0 z=100 t=wide,
+   W x=321 s=0 z=100 t=drawn
+   W x=372 s=0 z=100 t=three.
+  BOX y=129 x=0 w=460 h=66 edges=0/0,0/0,0/0,0/0 shaded=1
+  LINE y=133 x=7 align=2 mult=1.200 hfid=0 words=8
+   W x=4 s=1 z=100 t=A
+   W x=22 s=1 z=100 t=dark
+   W x=77 s=1 z=100 t=heading
+   W x=175 s=1 z=100 t=bar,
+   W x=228 s=1 z=100 t=drawn
+   W x=295 s=1 z=100 t=as
+   W x=330 s=1 z=100 t=the
+   W x=378 s=1 z=100 t=light
+  LINE y=162 x=7 align=2 mult=1.200 hfid=0 words=1
+   W x=190 s=1 z=100 t=shade
+  LINE y=200 x=5 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=A
+   W x=14 s=0 z=100 t=white
+   W x=63 s=0 z=100 t=border:
+   W x=128 s=0 z=100 t=no
+   W x=157 s=0 z=100 t=frame,
+   W x=220 s=0 z=100 t=the
+   W x=257 s=0 z=100 t=padding
+   W x=325 s=0 z=100 t=kept.
+  BOX y=239 x=0 w=460 h=210 edges=2/2,2/2,2/2,2/2 shaded=0
+  LINE y=248 x=9 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=An
+   W x=25 s=0 z=100 t=outer
+   W x=81 s=0 z=100 t=box.
+  BOX y=279 x=27 w=406 h=67 edges=1/4,1/4,1/4,1/4 shaded=1
+  LINE y=285 x=33 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=An
+   W x=29 s=0 z=100 t=inner
+   W x=84 s=0 z=100 t=box,
+   W x=127 s=0 z=100 t=dotted
+   W x=194 s=0 z=100 t=and
+   W x=235 s=0 z=100 t=shaded,
+   W x=311 s=0 z=100 t=nested
+   W x=377 s=0 z=100 t=in
+  LINE y=309 x=33 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=it.
+  LINE y=353 x=9 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=The
+   W x=33 s=0 z=100 t=outer
+   W x=89 s=0 z=100 t=box
+   W x=120 s=0 z=100 t=again.
+  HR y=396 x=119
+  LINE y=409 x=9 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=A
+   W x=14 s=0 z=100 t=rule
+   W x=57 s=0 z=100 t=above,
+   W x=122 s=0 z=100 t=centred
+   W x=190 s=0 z=100 t=in
+   W x=213 s=0 z=100 t=the
+   W x=250 s=0 z=100 t=box.
+  BOX y=459 x=54 w=352 h=5 edges=1/2,0/0,0/0,0/0 shaded=0
+  BOX y=474 x=0 w=460 h=34 edges=1/2,1/2,1/2,1/2 shaded=0
+  LINE y=479 x=5 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=thin
+   W x=45 s=0 z=100 t=solid
+  BOX y=513 x=0 w=460 h=36 edges=2/3,2/3,2/3,2/3 shaded=0
+  LINE y=519 x=6 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=medium
+   W x=60 s=0 z=100 t=double
+  BOX y=554 x=0 w=460 h=38 edges=3/4,3/4,3/4,3/4 shaded=0
+  LINE y=561 x=7 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=thick
+   W x=49 s=0 z=100 t=dotted
+  BOX y=597 x=0 w=460 h=38 edges=3/5,3/5,3/5,3/5 shaded=0
+  LINE y=604 x=7 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=0.2em
+   W x=54 s=0 z=100 t=dashed
+  BOX y=640 x=0 w=460 h=38 edges=3/2,3/2,3/2,3/2 shaded=0
+  LINE y=647 x=7 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=2pt
+   W x=29 s=0 z=100 t=groove,
+   W x=107 s=0 z=100 t=drawn
+   W x=158 s=0 z=100 t=solid
+  BOX y=683 x=0 w=460 h=34 edges=1/2,0/1,1/2,0/1 shaded=0
+  LINE y=688 x=3 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=solid
+   W x=50 s=0 z=100 t=above
+   W x=107 s=0 z=100 t=and
+   W x=144 s=0 z=100 t=below
+   W x=192 s=0 z=100 t=only
+  BOX y=722 x=2 w=456 h=31 edges=1/2,1/2,0/2,1/2 shaded=0
+  LINE y=729 x=16 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=Fieldset
+ PAGE 2 elements=2 footnotes=0
+  BOX y=0 x=2 w=456 h=43 edges=0/2,1/2,1/2,1/2 shaded=0
+  LINE y=0 x=16 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=A
+   W x=14 s=0 z=100 t=fieldset
+   W x=90 s=0 z=100 t=is
+   W x=111 s=0 z=100 t=outlined
+   W x=193 s=0 z=100 t=by
+   W x=213 s=0 z=100 t=default.
+SPINE 1 href=OEBPS/ch2.xhtml pages=2 truncated=0 cssFallback=0
+ PAGE 0 elements=24 footnotes=0
+  LINE y=14 x=0 align=2 mult=1.400 hfid=0 words=2
+   W x=149 s=1 z=100 t=2.
+   W x=184 s=1 z=100 t=Contents
+  BOX y=58 x=0 w=460 h=215 edges=1/2,1/2,1/2,1/2 shaded=0
+  IMG y=66 x=8 w=80 h=60 src=<cache>/epub_<hash>/img_1d4d5ffb3eb10210.png
+  LINE y=66 x=92 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=A
+   W x=17 s=0 z=100 t=floated
+   W x=96 s=0 z=100 t=picture
+   W x=162 s=0 z=100 t=inside
+   W x=220 s=0 z=100 t=a
+   W x=241 s=0 z=100 t=box:
+   W x=283 s=0 z=100 t=the
+   W x=323 s=0 z=100 t=text
+  LINE y=90 x=92 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=wraps
+   W x=54 s=0 z=100 t=beside
+   W x=114 s=0 z=100 t=it,
+   W x=151 s=0 z=100 t=inside
+   W x=213 s=0 z=100 t=the
+   W x=257 s=0 z=100 t=frame.
+   W x=329 s=0 z=100 t=The
+  LINE y=114 x=92 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=lighthouse
+   W x=107 s=0 z=100 t=keeper
+   W x=162 s=0 z=100 t=wrote
+   W x=213 s=0 z=100 t=every
+   W x=265 s=0 z=100 t=evening,
+   W x=348 s=0 z=100 t=a
+  LINE y=138 x=8 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=page
+   W x=46 s=0 z=100 t=or
+   W x=74 s=0 z=100 t=two,
+   W x=118 s=0 z=100 t=of
+   W x=148 s=0 z=100 t=what
+   W x=196 s=0 z=100 t=the
+   W x=235 s=0 z=100 t=sea
+   W x=273 s=0 z=100 t=had
+   W x=313 s=0 z=100 t=done
+   W x=361 s=0 z=100 t=that
+   W x=413 s=0 z=100 t=day
+  LINE y=162 x=8 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=and
+   W x=42 s=0 z=100 t=of
+   W x=75 s=0 z=100 t=the
+   W x=117 s=0 z=100 t=ships
+   W x=170 s=0 z=100 t=that
+   W x=225 s=0 z=100 t=passed.
+   W x=299 s=0 z=100 t=The
+   W x=337 s=0 z=100 t=lighthouse
+  LINE y=186 x=8 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=keeper
+   W x=55 s=0 z=100 t=wrote
+   W x=106 s=0 z=100 t=every
+   W x=158 s=0 z=100 t=evening,
+   W x=241 s=0 z=100 t=a
+   W x=259 s=0 z=100 t=page
+   W x=303 s=0 z=100 t=or
+   W x=329 s=0 z=100 t=two,
+   W x=371 s=0 z=100 t=of
+   W x=399 s=0 z=100 t=what
+  LINE y=210 x=8 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=the
+   W x=37 s=0 z=100 t=sea
+   W x=73 s=0 z=100 t=had
+   W x=111 s=0 z=100 t=done
+   W x=157 s=0 z=100 t=that
+   W x=207 s=0 z=100 t=day
+   W x=241 s=0 z=100 t=and
+   W x=278 s=0 z=100 t=of
+   W x=306 s=0 z=100 t=the
+   W x=343 s=0 z=100 t=ships
+   W x=391 s=0 z=100 t=that
+  LINE y=234 x=8 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=passed.
+  BOX y=283 x=54 w=352 h=103 edges=2/2,2/2,2/2,2/2 shaded=0
+  LINE y=289 x=60 align=2 mult=1.000 hfid=0 words=7
+   W x=26 s=0 z=100 t=A
+   W x=40 s=0 z=100 t=block
+   W x=88 s=0 z=100 t=picture,
+   W x=159 s=0 z=100 t=centred
+   W x=227 s=0 z=100 t=in
+   W x=250 s=0 z=100 t=its
+   W x=281 s=0 z=100 t=box:
+  IMG y=320 x=190 w=80 h=60 src=<cache>/epub_<hash>/img_1d4d5ffb3eb10210.png
+  BOX y=396 x=0 w=460 h=84 edges=1/2,1/2,1/2,1/2 shaded=0
+  LINE y=402 x=37 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=•
+   W x=31 s=0 z=100 t=A
+   W x=45 s=0 z=100 t=list
+   W x=85 s=0 z=100 t=in
+   W x=108 s=0 z=100 t=a
+   W x=126 s=0 z=100 t=box,
+  LINE y=426 x=37 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=•
+   W x=31 s=0 z=100 t=its
+   W x=62 s=0 z=100 t=markers
+   W x=132 s=0 z=100 t=inside
+   W x=187 s=0 z=100 t=the
+   W x=224 s=0 z=100 t=frame,
+  LINE y=450 x=37 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=•
+   W x=31 s=0 z=100 t=three
+   W x=85 s=0 z=100 t=items.
+  BOX y=490 x=0 w=460 h=87 edges=1/5,1/5,1/5,1/5 shaded=0
+  TABLE y=498 x=8 w=444 h=71 cols=2 border=1 rows=2
+   ROW h=34 hdr=1 cells=2
+    CELL 0 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left
+    CELL 1 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=2
+      W x=18 s=0 z=100 t=a
+      W x=36 s=0 z=100 t=table
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=3
+      W x=18 s=0 z=100 t=in
+      W x=41 s=0 z=100 t=a
+      W x=59 s=0 z=100 t=box
+  TABLE y=577 x=0 w=460 h=60 cols=2 border=1 rows=1
+   ROW h=58 hdr=0 cells=2
+    CELL 0 hdr=0 span=1 lines=2
+     LN words=6
+      W x=18 s=0 z=100 t=a
+      W x=42 s=0 z=100 t=box
+      W x=79 s=0 z=100 t=in
+      W x=108 s=0 z=100 t=a
+      W x=132 s=0 z=100 t=cell,
+      W x=186 s=0 z=100 t=not
+     LN words=1
+      W x=0 s=0 z=100 t=drawn
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=2
+      W x=18 s=0 z=100 t=its
+      W x=49 s=0 z=100 t=neighbour
+  BOX y=651 x=0 w=460 h=40 edges=0/0,0/0,2/2,0/0 shaded=0
+  LINE y=651 x=0 align=2 mult=1.400 hfid=0 words=6
+   W x=53 s=1 z=100 t=A
+   W x=74 s=1 z=100 t=heading
+   W x=188 s=1 z=100 t=with
+   W x=249 s=1 z=100 t=a
+   W x=275 s=1 z=100 t=rule
+   W x=340 s=1 z=100 t=below
+  LINE y=698 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Text
+   W x=38 s=0 z=100 t=under
+   W x=91 s=0 z=100 t=the
+   W x=128 s=0 z=100 t=ruled
+   W x=179 s=0 z=100 t=heading.
+ PAGE 1 elements=3 footnotes=0
+  BOX y=0 x=0 w=460 h=39 edges=1/2,1/2,1/2,1/2 shaded=0
+  LINE y=5 x=5 align=2 mult=1.200 hfid=0 words=3
+   W x=129 s=1 z=100 t=A
+   W x=147 s=1 z=100 t=framed
+   W x=230 s=1 z=100 t=heading
+  LINE y=39 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Text
+   W x=38 s=0 z=100 t=under
+   W x=91 s=0 z=100 t=the
+   W x=128 s=0 z=100 t=framed
+   W x=191 s=0 z=100 t=heading.
+SPINE 2 href=OEBPS/ch3.xhtml pages=4 truncated=0 cssFallback=0
+ PAGE 0 elements=27 footnotes=0
+  LINE y=14 x=0 align=2 mult=1.400 hfid=0 words=3
+   W x=153 s=1 z=100 t=3.
+   W x=189 s=1 z=100 t=Long
+   W x=267 s=1 z=100 t=box
+  BOX y=55 x=0 w=460 h=652 edges=1/2,1/2,0/2,1/2 shaded=1
+  LINE y=65 x=10 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=Long
+   W x=52 s=0 z=100 t=box
+   W x=83 s=0 z=100 t=paragraph
+   W x=176 s=0 z=100 t=1.
+   W x=198 s=0 z=100 t=The
+   W x=231 s=0 z=100 t=lighthouse
+   W x=338 s=0 z=100 t=keeper
+   W x=393 s=0 z=100 t=wrote
+  LINE y=89 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=every
+   W x=55 s=0 z=100 t=evening,
+   W x=141 s=0 z=100 t=a
+   W x=162 s=0 z=100 t=page
+   W x=209 s=0 z=100 t=or
+   W x=238 s=0 z=100 t=two,
+   W x=283 s=0 z=100 t=of
+   W x=314 s=0 z=100 t=what
+   W x=363 s=0 z=100 t=the
+   W x=403 s=0 z=100 t=sea
+  LINE y=113 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=had
+   W x=38 s=0 z=100 t=done
+   W x=84 s=0 z=100 t=that
+   W x=134 s=0 z=100 t=day
+   W x=168 s=0 z=100 t=and
+   W x=205 s=0 z=100 t=of
+   W x=233 s=0 z=100 t=the
+   W x=270 s=0 z=100 t=ships
+   W x=318 s=0 z=100 t=that
+   W x=368 s=0 z=100 t=passed.
+  LINE y=144 x=10 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=Long
+   W x=52 s=0 z=100 t=box
+   W x=83 s=0 z=100 t=paragraph
+   W x=176 s=0 z=100 t=2.
+   W x=199 s=0 z=100 t=The
+   W x=232 s=0 z=100 t=lighthouse
+   W x=339 s=0 z=100 t=keeper
+   W x=394 s=0 z=100 t=wrote
+  LINE y=168 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=every
+   W x=55 s=0 z=100 t=evening,
+   W x=141 s=0 z=100 t=a
+   W x=162 s=0 z=100 t=page
+   W x=209 s=0 z=100 t=or
+   W x=238 s=0 z=100 t=two,
+   W x=283 s=0 z=100 t=of
+   W x=314 s=0 z=100 t=what
+   W x=363 s=0 z=100 t=the
+   W x=403 s=0 z=100 t=sea
+  LINE y=192 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=had
+   W x=38 s=0 z=100 t=done
+   W x=84 s=0 z=100 t=that
+   W x=134 s=0 z=100 t=day
+   W x=168 s=0 z=100 t=and
+   W x=205 s=0 z=100 t=of
+   W x=233 s=0 z=100 t=the
+   W x=270 s=0 z=100 t=ships
+   W x=318 s=0 z=100 t=that
+   W x=368 s=0 z=100 t=passed.
+  LINE y=223 x=10 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=Long
+   W x=52 s=0 z=100 t=box
+   W x=83 s=0 z=100 t=paragraph
+   W x=176 s=0 z=100 t=3.
+   W x=200 s=0 z=100 t=The
+   W x=233 s=0 z=100 t=lighthouse
+   W x=340 s=0 z=100 t=keeper
+   W x=395 s=0 z=100 t=wrote
+  LINE y=247 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=every
+   W x=55 s=0 z=100 t=evening,
+   W x=141 s=0 z=100 t=a
+   W x=162 s=0 z=100 t=page
+   W x=209 s=0 z=100 t=or
+   W x=238 s=0 z=100 t=two,
+   W x=283 s=0 z=100 t=of
+   W x=314 s=0 z=100 t=what
+   W x=363 s=0 z=100 t=the
+   W x=403 s=0 z=100 t=sea
+  LINE y=271 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=had
+   W x=38 s=0 z=100 t=done
+   W x=84 s=0 z=100 t=that
+   W x=134 s=0 z=100 t=day
+   W x=168 s=0 z=100 t=and
+   W x=205 s=0 z=100 t=of
+   W x=233 s=0 z=100 t=the
+   W x=270 s=0 z=100 t=ships
+   W x=318 s=0 z=100 t=that
+   W x=368 s=0 z=100 t=passed.
+  LINE y=302 x=10 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=Long
+   W x=60 s=0 z=100 t=box
+   W x=99 s=0 z=100 t=paragraph
+   W x=200 s=0 z=100 t=4.
+   W x=233 s=0 z=100 t=The
+   W x=274 s=0 z=100 t=lighthouse
+   W x=389 s=0 z=100 t=keeper
+  LINE y=326 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=wrote
+   W x=53 s=0 z=100 t=every
+   W x=107 s=0 z=100 t=evening,
+   W x=192 s=0 z=100 t=a
+   W x=212 s=0 z=100 t=page
+   W x=258 s=0 z=100 t=or
+   W x=286 s=0 z=100 t=two,
+   W x=330 s=0 z=100 t=of
+   W x=360 s=0 z=100 t=what
+   W x=408 s=0 z=100 t=the
+  LINE y=350 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=sea
+   W x=40 s=0 z=100 t=had
+   W x=82 s=0 z=100 t=done
+   W x=132 s=0 z=100 t=that
+   W x=186 s=0 z=100 t=day
+   W x=224 s=0 z=100 t=and
+   W x=265 s=0 z=100 t=of
+   W x=297 s=0 z=100 t=the
+   W x=338 s=0 z=100 t=ships
+   W x=390 s=0 z=100 t=that
+  LINE y=374 x=10 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=passed.
+  LINE y=405 x=10 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=Long
+   W x=60 s=0 z=100 t=box
+   W x=99 s=0 z=100 t=paragraph
+   W x=200 s=0 z=100 t=5.
+   W x=234 s=0 z=100 t=The
+   W x=275 s=0 z=100 t=lighthouse
+   W x=390 s=0 z=100 t=keeper
+  LINE y=429 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=wrote
+   W x=53 s=0 z=100 t=every
+   W x=107 s=0 z=100 t=evening,
+   W x=192 s=0 z=100 t=a
+   W x=212 s=0 z=100 t=page
+   W x=258 s=0 z=100 t=or
+   W x=286 s=0 z=100 t=two,
+   W x=330 s=0 z=100 t=of
+   W x=360 s=0 z=100 t=what
+   W x=408 s=0 z=100 t=the
+  LINE y=453 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=sea
+   W x=40 s=0 z=100 t=had
+   W x=82 s=0 z=100 t=done
+   W x=132 s=0 z=100 t=that
+   W x=186 s=0 z=100 t=day
+   W x=224 s=0 z=100 t=and
+   W x=265 s=0 z=100 t=of
+   W x=297 s=0 z=100 t=the
+   W x=338 s=0 z=100 t=ships
+   W x=390 s=0 z=100 t=that
+  LINE y=477 x=10 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=passed.
+  LINE y=508 x=10 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=Long
+   W x=60 s=0 z=100 t=box
+   W x=99 s=0 z=100 t=paragraph
+   W x=200 s=0 z=100 t=6.
+   W x=235 s=0 z=100 t=The
+   W x=276 s=0 z=100 t=lighthouse
+   W x=391 s=0 z=100 t=keeper
+  LINE y=532 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=wrote
+   W x=53 s=0 z=100 t=every
+   W x=107 s=0 z=100 t=evening,
+   W x=192 s=0 z=100 t=a
+   W x=212 s=0 z=100 t=page
+   W x=258 s=0 z=100 t=or
+   W x=286 s=0 z=100 t=two,
+   W x=330 s=0 z=100 t=of
+   W x=360 s=0 z=100 t=what
+   W x=408 s=0 z=100 t=the
+  LINE y=556 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=sea
+   W x=40 s=0 z=100 t=had
+   W x=82 s=0 z=100 t=done
+   W x=132 s=0 z=100 t=that
+   W x=186 s=0 z=100 t=day
+   W x=224 s=0 z=100 t=and
+   W x=265 s=0 z=100 t=of
+   W x=297 s=0 z=100 t=the
+   W x=338 s=0 z=100 t=ships
+   W x=390 s=0 z=100 t=that
+  LINE y=580 x=10 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=passed.
+  LINE y=611 x=10 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=Long
+   W x=59 s=0 z=100 t=box
+   W x=97 s=0 z=100 t=paragraph
+   W x=197 s=0 z=100 t=7.
+   W x=232 s=0 z=100 t=The
+   W x=272 s=0 z=100 t=lighthouse
+   W x=386 s=0 z=100 t=keeper
+  LINE y=635 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=wrote
+   W x=53 s=0 z=100 t=every
+   W x=107 s=0 z=100 t=evening,
+   W x=192 s=0 z=100 t=a
+   W x=212 s=0 z=100 t=page
+   W x=258 s=0 z=100 t=or
+   W x=286 s=0 z=100 t=two,
+   W x=330 s=0 z=100 t=of
+   W x=360 s=0 z=100 t=what
+   W x=408 s=0 z=100 t=the
+  LINE y=659 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=sea
+   W x=40 s=0 z=100 t=had
+   W x=82 s=0 z=100 t=done
+   W x=132 s=0 z=100 t=that
+   W x=186 s=0 z=100 t=day
+   W x=224 s=0 z=100 t=and
+   W x=265 s=0 z=100 t=of
+   W x=297 s=0 z=100 t=the
+   W x=338 s=0 z=100 t=ships
+   W x=390 s=0 z=100 t=that
+  LINE y=683 x=10 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=passed.
+ PAGE 1 elements=30 footnotes=0
+  BOX y=0 x=0 w=460 h=683 edges=0/2,1/2,1/2,1/2 shaded=1
+  LINE y=0 x=10 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=Long
+   W x=52 s=0 z=100 t=box
+   W x=83 s=0 z=100 t=paragraph
+   W x=176 s=0 z=100 t=8.
+   W x=198 s=0 z=100 t=The
+   W x=231 s=0 z=100 t=lighthouse
+   W x=338 s=0 z=100 t=keeper
+   W x=393 s=0 z=100 t=wrote
+  LINE y=24 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=every
+   W x=55 s=0 z=100 t=evening,
+   W x=141 s=0 z=100 t=a
+   W x=162 s=0 z=100 t=page
+   W x=209 s=0 z=100 t=or
+   W x=238 s=0 z=100 t=two,
+   W x=283 s=0 z=100 t=of
+   W x=314 s=0 z=100 t=what
+   W x=363 s=0 z=100 t=the
+   W x=403 s=0 z=100 t=sea
+  LINE y=48 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=had
+   W x=38 s=0 z=100 t=done
+   W x=84 s=0 z=100 t=that
+   W x=134 s=0 z=100 t=day
+   W x=168 s=0 z=100 t=and
+   W x=205 s=0 z=100 t=of
+   W x=233 s=0 z=100 t=the
+   W x=270 s=0 z=100 t=ships
+   W x=318 s=0 z=100 t=that
+   W x=368 s=0 z=100 t=passed.
+  LINE y=79 x=10 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=Long
+   W x=52 s=0 z=100 t=box
+   W x=83 s=0 z=100 t=paragraph
+   W x=176 s=0 z=100 t=9.
+   W x=199 s=0 z=100 t=The
+   W x=232 s=0 z=100 t=lighthouse
+   W x=339 s=0 z=100 t=keeper
+   W x=394 s=0 z=100 t=wrote
+  LINE y=103 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=every
+   W x=55 s=0 z=100 t=evening,
+   W x=141 s=0 z=100 t=a
+   W x=162 s=0 z=100 t=page
+   W x=209 s=0 z=100 t=or
+   W x=238 s=0 z=100 t=two,
+   W x=283 s=0 z=100 t=of
+   W x=314 s=0 z=100 t=what
+   W x=363 s=0 z=100 t=the
+   W x=403 s=0 z=100 t=sea
+  LINE y=127 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=had
+   W x=38 s=0 z=100 t=done
+   W x=84 s=0 z=100 t=that
+   W x=134 s=0 z=100 t=day
+   W x=168 s=0 z=100 t=and
+   W x=205 s=0 z=100 t=of
+   W x=233 s=0 z=100 t=the
+   W x=270 s=0 z=100 t=ships
+   W x=318 s=0 z=100 t=that
+   W x=368 s=0 z=100 t=passed.
+  LINE y=158 x=10 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=Long
+   W x=58 s=0 z=100 t=box
+   W x=95 s=0 z=100 t=paragraph
+   W x=194 s=0 z=100 t=10.
+   W x=234 s=0 z=100 t=The
+   W x=273 s=0 z=100 t=lighthouse
+   W x=386 s=0 z=100 t=keeper
+  LINE y=182 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=wrote
+   W x=53 s=0 z=100 t=every
+   W x=107 s=0 z=100 t=evening,
+   W x=192 s=0 z=100 t=a
+   W x=212 s=0 z=100 t=page
+   W x=258 s=0 z=100 t=or
+   W x=286 s=0 z=100 t=two,
+   W x=330 s=0 z=100 t=of
+   W x=360 s=0 z=100 t=what
+   W x=408 s=0 z=100 t=the
+  LINE y=206 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=sea
+   W x=40 s=0 z=100 t=had
+   W x=82 s=0 z=100 t=done
+   W x=132 s=0 z=100 t=that
+   W x=186 s=0 z=100 t=day
+   W x=224 s=0 z=100 t=and
+   W x=265 s=0 z=100 t=of
+   W x=297 s=0 z=100 t=the
+   W x=338 s=0 z=100 t=ships
+   W x=390 s=0 z=100 t=that
+  LINE y=230 x=10 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=passed.
+  LINE y=261 x=10 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=Long
+   W x=59 s=0 z=100 t=box
+   W x=97 s=0 z=100 t=paragraph
+   W x=197 s=0 z=100 t=11.
+   W x=232 s=0 z=100 t=The
+   W x=272 s=0 z=100 t=lighthouse
+   W x=386 s=0 z=100 t=keeper
+  LINE y=285 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=wrote
+   W x=53 s=0 z=100 t=every
+   W x=107 s=0 z=100 t=evening,
+   W x=192 s=0 z=100 t=a
+   W x=212 s=0 z=100 t=page
+   W x=258 s=0 z=100 t=or
+   W x=286 s=0 z=100 t=two,
+   W x=330 s=0 z=100 t=of
+   W x=360 s=0 z=100 t=what
+   W x=408 s=0 z=100 t=the
+  LINE y=309 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=sea
+   W x=40 s=0 z=100 t=had
+   W x=82 s=0 z=100 t=done
+   W x=132 s=0 z=100 t=that
+   W x=186 s=0 z=100 t=day
+   W x=224 s=0 z=100 t=and
+   W x=265 s=0 z=100 t=of
+   W x=297 s=0 z=100 t=the
+   W x=338 s=0 z=100 t=ships
+   W x=390 s=0 z=100 t=that
+  LINE y=333 x=10 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=passed.
+  LINE y=364 x=10 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=Long
+   W x=59 s=0 z=100 t=box
+   W x=97 s=0 z=100 t=paragraph
+   W x=197 s=0 z=100 t=12.
+   W x=233 s=0 z=100 t=The
+   W x=273 s=0 z=100 t=lighthouse
+   W x=387 s=0 z=100 t=keeper
+  LINE y=388 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=wrote
+   W x=53 s=0 z=100 t=every
+   W x=107 s=0 z=100 t=evening,
+   W x=192 s=0 z=100 t=a
+   W x=212 s=0 z=100 t=page
+   W x=258 s=0 z=100 t=or
+   W x=286 s=0 z=100 t=two,
+   W x=330 s=0 z=100 t=of
+   W x=360 s=0 z=100 t=what
+   W x=408 s=0 z=100 t=the
+  LINE y=412 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=sea
+   W x=40 s=0 z=100 t=had
+   W x=82 s=0 z=100 t=done
+   W x=132 s=0 z=100 t=that
+   W x=186 s=0 z=100 t=day
+   W x=224 s=0 z=100 t=and
+   W x=265 s=0 z=100 t=of
+   W x=297 s=0 z=100 t=the
+   W x=338 s=0 z=100 t=ships
+   W x=390 s=0 z=100 t=that
+  LINE y=436 x=10 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=passed.
+  LINE y=467 x=10 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=Long
+   W x=59 s=0 z=100 t=box
+   W x=97 s=0 z=100 t=paragraph
+   W x=197 s=0 z=100 t=13.
+   W x=234 s=0 z=100 t=The
+   W x=274 s=0 z=100 t=lighthouse
+   W x=388 s=0 z=100 t=keeper
+  LINE y=491 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=wrote
+   W x=53 s=0 z=100 t=every
+   W x=107 s=0 z=100 t=evening,
+   W x=192 s=0 z=100 t=a
+   W x=212 s=0 z=100 t=page
+   W x=258 s=0 z=100 t=or
+   W x=286 s=0 z=100 t=two,
+   W x=330 s=0 z=100 t=of
+   W x=360 s=0 z=100 t=what
+   W x=408 s=0 z=100 t=the
+  LINE y=515 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=sea
+   W x=40 s=0 z=100 t=had
+   W x=82 s=0 z=100 t=done
+   W x=132 s=0 z=100 t=that
+   W x=186 s=0 z=100 t=day
+   W x=224 s=0 z=100 t=and
+   W x=265 s=0 z=100 t=of
+   W x=297 s=0 z=100 t=the
+   W x=338 s=0 z=100 t=ships
+   W x=390 s=0 z=100 t=that
+  LINE y=539 x=10 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=passed.
+  LINE y=570 x=10 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=Long
+   W x=59 s=0 z=100 t=box
+   W x=97 s=0 z=100 t=paragraph
+   W x=197 s=0 z=100 t=14.
+   W x=235 s=0 z=100 t=The
+   W x=275 s=0 z=100 t=lighthouse
+   W x=389 s=0 z=100 t=keeper
+  LINE y=594 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=wrote
+   W x=53 s=0 z=100 t=every
+   W x=107 s=0 z=100 t=evening,
+   W x=192 s=0 z=100 t=a
+   W x=212 s=0 z=100 t=page
+   W x=258 s=0 z=100 t=or
+   W x=286 s=0 z=100 t=two,
+   W x=330 s=0 z=100 t=of
+   W x=360 s=0 z=100 t=what
+   W x=408 s=0 z=100 t=the
+  LINE y=618 x=10 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=sea
+   W x=40 s=0 z=100 t=had
+   W x=82 s=0 z=100 t=done
+   W x=132 s=0 z=100 t=that
+   W x=186 s=0 z=100 t=day
+   W x=224 s=0 z=100 t=and
+   W x=265 s=0 z=100 t=of
+   W x=297 s=0 z=100 t=the
+   W x=338 s=0 z=100 t=ships
+   W x=390 s=0 z=100 t=that
+  LINE y=642 x=10 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=passed.
+  LINE y=683 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=Filler
+   W x=54 s=0 z=100 t=1.
+   W x=77 s=0 z=100 t=The
+   W x=111 s=0 z=100 t=lighthouse
+   W x=219 s=0 z=100 t=keeper
+   W x=275 s=0 z=100 t=wrote
+   W x=327 s=0 z=100 t=every
+   W x=380 s=0 z=100 t=evening,
+  LINE y=707 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=a
+   W x=19 s=0 z=100 t=page
+   W x=64 s=0 z=100 t=or
+   W x=91 s=0 z=100 t=two,
+   W x=134 s=0 z=100 t=of
+   W x=163 s=0 z=100 t=what
+   W x=210 s=0 z=100 t=the
+   W x=248 s=0 z=100 t=sea
+   W x=285 s=0 z=100 t=had
+   W x=324 s=0 z=100 t=done
+   W x=371 s=0 z=100 t=that
+   W x=422 s=0 z=100 t=day
+  LINE y=731 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=and
+   W x=37 s=0 z=100 t=of
+   W x=65 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=ships
+   W x=150 s=0 z=100 t=that
+   W x=200 s=0 z=100 t=passed.
+ PAGE 2 elements=20 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=Filler
+   W x=54 s=0 z=100 t=2.
+   W x=78 s=0 z=100 t=The
+   W x=112 s=0 z=100 t=lighthouse
+   W x=220 s=0 z=100 t=keeper
+   W x=276 s=0 z=100 t=wrote
+   W x=328 s=0 z=100 t=every
+   W x=381 s=0 z=100 t=evening,
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=a
+   W x=19 s=0 z=100 t=page
+   W x=64 s=0 z=100 t=or
+   W x=91 s=0 z=100 t=two,
+   W x=134 s=0 z=100 t=of
+   W x=163 s=0 z=100 t=what
+   W x=210 s=0 z=100 t=the
+   W x=248 s=0 z=100 t=sea
+   W x=285 s=0 z=100 t=had
+   W x=324 s=0 z=100 t=done
+   W x=371 s=0 z=100 t=that
+   W x=422 s=0 z=100 t=day
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=and
+   W x=37 s=0 z=100 t=of
+   W x=65 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=ships
+   W x=150 s=0 z=100 t=that
+   W x=200 s=0 z=100 t=passed.
+  LINE y=79 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=Filler
+   W x=54 s=0 z=100 t=3.
+   W x=79 s=0 z=100 t=The
+   W x=113 s=0 z=100 t=lighthouse
+   W x=221 s=0 z=100 t=keeper
+   W x=277 s=0 z=100 t=wrote
+   W x=329 s=0 z=100 t=every
+   W x=382 s=0 z=100 t=evening,
+  LINE y=103 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=a
+   W x=19 s=0 z=100 t=page
+   W x=64 s=0 z=100 t=or
+   W x=91 s=0 z=100 t=two,
+   W x=134 s=0 z=100 t=of
+   W x=163 s=0 z=100 t=what
+   W x=210 s=0 z=100 t=the
+   W x=248 s=0 z=100 t=sea
+   W x=285 s=0 z=100 t=had
+   W x=324 s=0 z=100 t=done
+   W x=371 s=0 z=100 t=that
+   W x=422 s=0 z=100 t=day
+  LINE y=127 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=and
+   W x=37 s=0 z=100 t=of
+   W x=65 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=ships
+   W x=150 s=0 z=100 t=that
+   W x=200 s=0 z=100 t=passed.
+  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=Filler
+   W x=54 s=0 z=100 t=4.
+   W x=80 s=0 z=100 t=The
+   W x=114 s=0 z=100 t=lighthouse
+   W x=222 s=0 z=100 t=keeper
+   W x=278 s=0 z=100 t=wrote
+   W x=330 s=0 z=100 t=every
+   W x=383 s=0 z=100 t=evening,
+  LINE y=182 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=a
+   W x=19 s=0 z=100 t=page
+   W x=64 s=0 z=100 t=or
+   W x=91 s=0 z=100 t=two,
+   W x=134 s=0 z=100 t=of
+   W x=163 s=0 z=100 t=what
+   W x=210 s=0 z=100 t=the
+   W x=248 s=0 z=100 t=sea
+   W x=285 s=0 z=100 t=had
+   W x=324 s=0 z=100 t=done
+   W x=371 s=0 z=100 t=that
+   W x=422 s=0 z=100 t=day
+  LINE y=206 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=and
+   W x=37 s=0 z=100 t=of
+   W x=65 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=ships
+   W x=150 s=0 z=100 t=that
+   W x=200 s=0 z=100 t=passed.
+  LINE y=237 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=Filler
+   W x=53 s=0 z=100 t=5.
+   W x=79 s=0 z=100 t=The
+   W x=112 s=0 z=100 t=lighthouse
+   W x=219 s=0 z=100 t=keeper
+   W x=274 s=0 z=100 t=wrote
+   W x=325 s=0 z=100 t=every
+   W x=377 s=0 z=100 t=evening,
+  LINE y=261 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=a
+   W x=19 s=0 z=100 t=page
+   W x=64 s=0 z=100 t=or
+   W x=91 s=0 z=100 t=two,
+   W x=134 s=0 z=100 t=of
+   W x=163 s=0 z=100 t=what
+   W x=210 s=0 z=100 t=the
+   W x=248 s=0 z=100 t=sea
+   W x=285 s=0 z=100 t=had
+   W x=324 s=0 z=100 t=done
+   W x=371 s=0 z=100 t=that
+   W x=422 s=0 z=100 t=day
+  LINE y=285 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=and
+   W x=37 s=0 z=100 t=of
+   W x=65 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=ships
+   W x=150 s=0 z=100 t=that
+   W x=200 s=0 z=100 t=passed.
+  LINE y=316 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=Filler
+   W x=53 s=0 z=100 t=6.
+   W x=80 s=0 z=100 t=The
+   W x=113 s=0 z=100 t=lighthouse
+   W x=220 s=0 z=100 t=keeper
+   W x=275 s=0 z=100 t=wrote
+   W x=326 s=0 z=100 t=every
+   W x=378 s=0 z=100 t=evening,
+  LINE y=340 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=a
+   W x=19 s=0 z=100 t=page
+   W x=64 s=0 z=100 t=or
+   W x=91 s=0 z=100 t=two,
+   W x=134 s=0 z=100 t=of
+   W x=163 s=0 z=100 t=what
+   W x=210 s=0 z=100 t=the
+   W x=248 s=0 z=100 t=sea
+   W x=285 s=0 z=100 t=had
+   W x=324 s=0 z=100 t=done
+   W x=371 s=0 z=100 t=that
+   W x=422 s=0 z=100 t=day
+  LINE y=364 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=and
+   W x=37 s=0 z=100 t=of
+   W x=65 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=ships
+   W x=150 s=0 z=100 t=that
+   W x=200 s=0 z=100 t=passed.
+  BOX y=395 x=0 w=460 h=125 edges=2/2,2/2,2/2,2/2 shaded=0
+  LINE y=406 x=11 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=A
+   W x=15 s=0 z=100 t=box
+   W x=47 s=0 z=100 t=that
+   W x=98 s=0 z=100 t=starts
+   W x=163 s=0 z=100 t=near
+   W x=210 s=0 z=100 t=the
+   W x=248 s=0 z=100 t=foot
+   W x=299 s=0 z=100 t=of
+   W x=328 s=0 z=100 t=a
+   W x=347 s=0 z=100 t=page.
+   W x=402 s=0 z=100 t=The
+  LINE y=430 x=11 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=lighthouse
+   W x=108 s=0 z=100 t=keeper
+   W x=164 s=0 z=100 t=wrote
+   W x=216 s=0 z=100 t=every
+   W x=269 s=0 z=100 t=evening,
+   W x=353 s=0 z=100 t=a
+   W x=372 s=0 z=100 t=page
+   W x=417 s=0 z=100 t=or
+  LINE y=454 x=11 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=two,
+   W x=44 s=0 z=100 t=of
+   W x=74 s=0 z=100 t=what
+   W x=122 s=0 z=100 t=the
+   W x=161 s=0 z=100 t=sea
+   W x=199 s=0 z=100 t=had
+   W x=239 s=0 z=100 t=done
+   W x=287 s=0 z=100 t=that
+   W x=339 s=0 z=100 t=day
+   W x=375 s=0 z=100 t=and
+   W x=414 s=0 z=100 t=of
+  LINE y=478 x=11 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=the
+   W x=37 s=0 z=100 t=ships
+   W x=85 s=0 z=100 t=that
+   W x=135 s=0 z=100 t=passed.
+ PAGE 3 elements=2 footnotes=0
+  BOX y=0 x=0 w=460 h=47 edges=1/2,1/2,1/2,1/2 shaded=0
+  LINE y=8 x=8 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=A
+   W x=14 s=0 z=100 t=box
+   W x=45 s=0 z=100 t=that
+   W x=95 s=0 z=100 t=breaks
+   W x=153 s=0 z=100 t=the
+   W x=190 s=0 z=100 t=page
+   W x=234 s=0 z=100 t=before
+   W x=294 s=0 z=100 t=itself.
+SPINE 3 href=OEBPS/ch4.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=7 footnotes=0
+  LINE y=14 x=0 align=2 mult=1.400 hfid=0 words=4
+   W x=118 s=1 z=100 t=4.
+   W x=155 s=1 z=100 t=Right
+   W x=240 s=1 z=100 t=to
+   W x=282 s=1 z=100 t=left
+  BOX y=58 x=18 w=424 h=106 edges=1/2,1/2,1/2,1/2 shaded=0
+  LINE y=68 x=28 align=0 mult=1.000 hfid=0 words=12
+   W x=1 s=0 z=100 t=באותו
+    WD t=ותואב
+   W x=52 s=0 z=100 t=הים
+    WD t=םיה
+   W x=86 s=0 z=100 t=שעשה
+    WD t=השעש
+   W x=120 s=0 z=100 t=מה
+    WD t=המ
+   W x=143 s=0 z=100 t=על
+    WD t=לע
+   W x=164 s=0 z=100 t=שניים
+    WD t=םיינש
+   W x=222 s=0 z=100 t=או
+    WD t=וא
+   W x=246 s=0 z=100 t=עמוד
+    WD t=דומע
+   W x=283 s=0 z=100 t=ערב
+    WD t=ברע
+   W x=313 s=0 z=100 t=כל
+    WD t=לכ
+   W x=334 s=0 z=100 t=כתב
+    WD t=בתכ
+   W x=366 s=0 z=100 t=השומר
+    WD t=רמושה
+   O order=11,10,9,8,7,6,5,4,3,2,1,0
+  LINE y=92 x=28 align=0 mult=1.000 hfid=0 words=1
+   W x=365 s=0 z=100 t=יום.
+    WD t=.םוי
+  BOX y=123 x=28 w=404 h=24 edges=0/0,3/2,0/0,0/0 shaded=0
+  LINE y=123 x=28 align=0 mult=1.000 hfid=0 words=5
+   W x=215 s=0 z=100 t=ימין.
+    WD t=.ןימי
+   W x=276 s=0 z=100 t=בצד
+    WD t=דצב
+   W x=310 s=0 z=100 t=קו
+    WD t=וק
+   W x=336 s=0 z=100 t=עם
+    WD t=םע
+   W x=358 s=0 z=100 t=פסקה
+    WD t=הקספ
+   O order=4,3,2,1,0
+  LINE y=174 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=Back
+   W x=42 s=0 z=100 t=to
+   W x=70 s=0 z=100 t=left-
+   W x=117 s=0 z=100 t=to-
+   W x=148 s=0 z=100 t=right
+   W x=201 s=0 z=100 t=text
+   W x=243 s=0 z=100 t=after
+   W x=298 s=0 z=100 t=the
+   W x=335 s=0 z=100 t=box.
+SPINE 4 href=OEBPS/ch5.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=6 footnotes=0
+  BOX y=0 x=0 w=460 h=60 edges=3/2,0/0,0/0,0/0 shaded=0
+  LINE y=12 x=0 align=0 mult=1.000 hfid=0 words=19
+   W x=0 s=0 z=100 t=灯
+   W x=16 s=0 z=100 t=台
+   W x=32 s=0 z=100 t=守
+   W x=48 s=0 z=100 t=は
+   W x=64 s=0 z=100 t=毎
+   W x=80 s=0 z=100 t=晩
+   W x=96 s=0 z=100 t=、
+   W x=112 s=0 z=100 t=一
+   W x=128 s=0 z=100 t=、
+   W x=144 s=0 z=100 t=二
+   W x=160 s=0 z=100 t=頁
+   W x=176 s=0 z=100 t=の
+   W x=192 s=0 z=100 t=日
+   W x=208 s=0 z=100 t=記
+   W x=224 s=0 z=100 t=を
+   W x=240 s=0 z=100 t=書
+   W x=256 s=0 z=100 t=い
+   W x=272 s=0 z=100 t=た
+   W x=288 s=0 z=100 t=。
+  LINE y=36 x=0 align=0 mult=1.000 hfid=0 words=21
+   W x=0 s=0 z=100 t=海
+   W x=16 s=0 z=100 t=が
+   W x=32 s=0 z=100 t=そ
+   W x=48 s=0 z=100 t=の
+   W x=64 s=0 z=100 t=日
+   W x=80 s=0 z=100 t=に
+   W x=96 s=0 z=100 t=し
+   W x=112 s=0 z=100 t=た
+   W x=128 s=0 z=100 t=こ
+   W x=144 s=0 z=100 t=と
+   W x=160 s=0 z=100 t=、
+   W x=176 s=0 z=100 t=通
+   W x=192 s=0 z=100 t=り
+   W x=208 s=0 z=100 t=過
+   W x=224 s=0 z=100 t=ぎ
+   W x=240 s=0 z=100 t=た
+   W x=256 s=0 z=100 t=船
+   W x=272 s=0 z=100 t=の
+   W x=288 s=0 z=100 t=こ
+   W x=304 s=0 z=100 t=と
+   W x=320 s=0 z=100 t=。
+  BOX y=60 x=0 w=453 h=34 edges=0/0,0/0,0/0,0/0 shaded=1
+  LINE y=65 x=5 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=影
+   W x=16 s=0 z=100 t=の
+   W x=32 s=0 z=100 t=あ
+   W x=48 s=0 z=100 t=る
+   W x=64 s=0 z=100 t=段
+   W x=80 s=0 z=100 t=落
+   W x=96 s=0 z=100 t=。
+  LINE y=94 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=終
+   W x=16 s=0 z=100 t=わ
+   W x=32 s=0 z=100 t=り
+   W x=48 s=0 z=100 t=。
