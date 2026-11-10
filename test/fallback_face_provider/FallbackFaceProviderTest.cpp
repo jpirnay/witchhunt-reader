@@ -408,16 +408,13 @@ BuildArena* countingLender(const size_t bytes) {
   return kRegion;
 }
 
-// --- Arabic UI text: formed only for a face that draws the forms (GfxRenderer asks formsArabic()) ---
+// --- Arabic UI text: the UI faces carry the presentation forms, so it is formed (GfxRenderer, formsArabic()) ---
 
 namespace {
 
 constexpr uint32_t BEH = 0x0628;
 constexpr uint32_t BEH_INITIAL = 0xFE91;
 constexpr uint32_t LAM_ALEF_FINAL = 0xFEFC;
-
-bool formsYes(void* /*ctx*/) { return true; }
-bool formsNo(void* /*ctx*/) { return false; }
 
 std::vector<uint32_t> codepointsOf(const std::string& utf8) {
   std::vector<uint32_t> cps;
@@ -428,31 +425,32 @@ std::vector<uint32_t> codepointsOf(const std::string& utf8) {
 
 }  // namespace
 
-TEST_F(FallbackFaceProviderTest, ArabicIsFormedOnlyWhenTheReaderFaceDrawsTheForms) {
-  EXPECT_FALSE(provider.formsArabic());  // no hook: the letters as they are
-  provider.setFormsArabic(&formsNo, nullptr);
-  EXPECT_FALSE(provider.formsArabic());
-  provider.setFormsArabic(&formsYes, nullptr);
+TEST_F(FallbackFaceProviderTest, TheUiFacesFormArabicWithoutAnyFontOnTheCard) {
+  EXPECT_TRUE(provider.formsArabic());
+  provider.setReaderFace(&noFace, nullptr);
   EXPECT_TRUE(provider.formsArabic());
 }
 
-TEST_F(FallbackFaceProviderTest, WithoutAnArabicFaceArabicDrawsAsBeforeTheForms) {
-  // No book font with Arabic: nothing forms the text, and its letters miss the UI face and every fallback, as on a
-  // firmware without the forms (Inter has no U+FFFD, so they draw nothing). A form would miss alike.
-  provider.setReaderFace(&noFace, nullptr);
-  EXPECT_FALSE(provider.formsArabic());
-  EXPECT_FALSE(EpdFont(&ui).getGlyph(BEH));
-  EXPECT_FALSE(EpdFont(&ui).getGlyph(BEH_INITIAL));
-}
-
-TEST_F(FallbackFaceProviderTest, AReaderFaceThatMapsTheFormsDrawsAFormedTitleJoined) {
-  // بلا formed: Beh initial, then the final Lam-Alef in the Lam's place.
+TEST_F(FallbackFaceProviderTest, AFormedTitleDrawsFromTheUiFaceItself) {
+  // بلا formed: Beh initial, then the final Lam-Alef in the Lam's place. A reader face that maps the forms too is not
+  // asked: the UI face's own table answers first.
   const std::vector<uint32_t> formed = codepointsOf(BidiUtils::arabicUiForms("\xD8\xA8\xD9\x84\xD8\xA7"));
   ASSERT_EQ(formed, (std::vector<uint32_t>{BEH_INITIAL, LAM_ALEF_FINAL}));
   ReaderFace reader({BEH_INITIAL, LAM_ALEF_FINAL}, 11, 14);
   provider.setReaderFace(&ReaderFace::source, &reader);
-  provider.setFormsArabic(&formsYes, nullptr);
-  for (const uint32_t cp : formed) EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(cp)), reader.ink());
+  for (const uint32_t cp : formed) {
+    const EpdGlyphRef glyph = EpdFont(&ui).getGlyph(cp);
+    ASSERT_TRUE(glyph) << std::hex << cp;
+    EXPECT_EQ(glyph.sdRecord, nullptr) << std::hex << cp;  // not a provider's record
+    EXPECT_EQ(drawn(ui, glyph), drawn(inter_ui_10_regular, EpdFont(&inter_ui_10_regular).getGlyph(cp)));
+  }
+  EXPECT_EQ(reader.asked, 0);
+}
+
+TEST_F(FallbackFaceProviderTest, AnArabicLetterLeftUnformedIsNotDrawn) {
+  // The faces hold the forms, not the letters: text that is not formed draws nothing of its Arabic, as before.
+  provider.setReaderFace(&noFace, nullptr);
+  EXPECT_FALSE(EpdFont(&ui).getGlyph(BEH));
 }
 
 TEST(GlyphMissLend, TheFirstMissLendsAndTheReturnEndsItForTheRestOfThePass) {

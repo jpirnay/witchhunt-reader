@@ -4,7 +4,7 @@ A feature-by-feature comparison of **Witch Reader** against its ancestor,
 **[CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)**, focused on what a reader
 sees and does on the device.
 
-> **Snapshot of 2026-11-10;** verified against witchhunt-reader `f9d14bb81` (master) and
+> **Snapshot of 2026-11-10;** verified against witchhunt-reader `2462c6cdd` (master) and
 > crosspoint-reader develop `7f04359f6`. Each row was checked against the source code of both projects.
 > The CrossPoint column describes its develop branch, which can be ahead of its latest release. Both
 > projects change quickly, so treat this as a picture of one day, not a guarantee.
@@ -26,8 +26,7 @@ LilyGo T5 S3 Pro and the Murphy M3.
 **CrossPoint is ahead on** highlights and clippings, Bluetooth page-turn remotes, night mode, library
 loans (LCP) and OPDS 2 catalogs, plugins on the device, indexed title and author search, boxed text with
 borders and shading, file rename and multi-delete on the device, 34 interface languages with a
-right-to-left interface in Arabic, Hebrew and Persian, and Arabic titles in its built-in menu fonts
-(pending in Witch Reader). It runs on six boards Witch Reader does not support: the Xteink X4 Classic,
+right-to-left interface in Arabic, Hebrew and Persian. It runs on six boards Witch Reader does not support: the Xteink X4 Classic,
 Seeed reTerminal Sticky, M5Stack PaperMono, Metalio E-Ink 4, EEGOREAD A4 and Onyx BOOX Picco.
 
 **Since June, CrossPoint has caught up on** small caps, strikethrough, CSS font sizes and headings, drop
@@ -89,20 +88,15 @@ OpenType files on ESP32-S3 boards. On the X3 and X4, see [Memory](#memory).
 | Hyphenation languages | ✅ 32: English built in, 31 as downloadable packs | ✅ 11, built in |
 | Interface languages | ✅ 27, including Chinese, Japanese and Korean | ✅ 34, including Arabic, Hebrew and Persian |
 | Right-to-left interface | ❌ | ✅ Arabic, Hebrew, Persian |
-| Arabic book titles in menus | ⚠️ pending (see note) | ✅ built into the menu fonts |
 | CJK book titles in menus | ✅ interface packs (1.5–3.3 MB downloads) | ⚠️ only when the reader font covers CJK |
 | Indic and Burmese book titles in menus | ⚠️ shaped in the last book's font, when it has the script | ❌ not shaped |
 | On-screen keyboard layouts | ✅ 11, including Hebrew, Arabic and Greek | ✅ 10, including Hebrew and Arabic |
 
-**Both have:** CJK line breaking and ruby, Hebrew titles in the menus, Latin and Cyrillic in the
-built-in fonts, other scripts through SD-card fonts.
+**Both have:** CJK line breaking and ruby, Hebrew and Arabic titles in the menus (built into the menu
+fonts), Latin and Cyrillic in the built-in fonts, other scripts through SD-card fonts.
 
 The bidi and shaping rows were measured 2026-11-10 against the Unicode 17 BidiCharacterTest and
 HarfBuzz 14.5. The Indic row counts book words drawn the same as the reference.
-
-**Arabic titles (pending):** Witch Reader joins Arabic, Persian and Urdu titles outside a book once the
-ArabicUI interface pack (120 KB) is installed from the Font Manager. Building Arabic into the menu fonts,
-so it works without a download as CrossPoint's does, is in progress.
 
 ## Reading, library and navigation
 
@@ -222,7 +216,7 @@ Rendering examples from [Alice in Wonderland](https://www.gutenberg.org/ebooks/2
 reader fonts, publisher fonts, script font picked by the book, the measured bidi and Arabic rows,
 right-to-left page turning, Indic scripts, Indic hyphenation, Indic inside right-to-left text, Burmese,
 vertical CJK, CJK emphasis dots, hyphenation languages (moved from Rendering, with counts), interface
-languages, right-to-left interface, titles in menus (Arabic, CJK, Indic and Burmese), keyboard layouts,
+languages, right-to-left interface, titles in menus (CJK, Indic and Burmese; Arabic moved to "Both have"), keyboard layouts,
 next page drawn ahead, next chapter laid out ahead (reworded from background indexing), library index,
 search, cover grid in the Library, highlights and clippings, dictionary, automatic sync, touch on the
 reading page, Bluetooth remotes, night mode, library loans (LCP), editing book details in the web

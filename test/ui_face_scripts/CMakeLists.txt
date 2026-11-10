@@ -1,4 +1,4 @@
-# Which Greek and Hebrew characters the built-in UI faces hold (convert-builtin-fonts.sh UI_SCRIPT_INTERVALS).
+# Which Greek, Hebrew and Arabic characters the built-in UI faces hold (convert-builtin-fonts.sh UI_SCRIPT_INTERVALS).
 add_executable(UiFaceScriptsTest
   UiFaceScriptsTest.cpp
   ${REPO_ROOT}/lib/EpdFont/EpdFont.cpp

@@ -1,7 +1,7 @@
 enable_language(C)
 
-# UI text with its Indic and Myanmar runs shaped (lib/GfxRenderer/UiShapedText): a built-in UI face behind
-# UiFaceProvider and the shared FallbackFaceProvider, the reader's face a test double over the shaping fixtures
+# UI text with its Indic and Myanmar runs shaped (lib/GfxRenderer/UiShapedText): a built-in UI face behind the shared
+# FallbackFaceProvider, the reader's face a test double over the shaping fixtures
 # (test/fixtures/fonts), shaped through IndicShaper and the OpenType engine. FontDecompressor for the provider's
 # compressed faces (none here, but linked), with font_group_stream's uzlib_font_ring and Arduino.h.
 add_executable(UiShapedTextTest
@@ -11,7 +11,6 @@ add_executable(UiShapedTextTest
   ${REPO_ROOT}/lib/EpdFont/EpdFontFamily.cpp
   ${REPO_ROOT}/lib/EpdFont/GlyphFallback.cpp
   ${REPO_ROOT}/lib/EpdFont/FallbackFaceProvider.cpp
-  ${REPO_ROOT}/lib/EpdFont/UiFaceProvider.cpp
   ${REPO_ROOT}/lib/EpdFont/FontDecompressor.cpp
   ${REPO_ROOT}/lib/EpdFont/ShapingFace.cpp
   ${REPO_ROOT}/lib/InflateReader/InflateReader.cpp

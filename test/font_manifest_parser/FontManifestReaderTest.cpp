@@ -442,19 +442,18 @@ TEST(FontManifestReaderTest, ReadsTheShippedV3Manifest) {
       EXPECT_EQ(files[1], name + "/" + name + "-Regular.ttf");
       EXPECT_TRUE(catalog.fileHasCrc32(i, 0)) << name;
       EXPECT_TRUE(catalog.fileHasCrc32(i, 1)) << name;
-    } else if (name == "ArabicUI" || name == "ChineseUI" || name == "ChineseTradUI" || name == "JapaneseUI" ||
-               name == "KoreanUI") {
-      // The UI packs (format "uipack"): .cpfont files the interface draws from, not one of "Download all".
+    } else if (name == "ChineseUI" || name == "ChineseTradUI" || name == "JapaneseUI" || name == "KoreanUI") {
+      // The CJK UI packs (format "uipack"): .cpfont files the interface draws from, not one of "Download all".
       ++uiPacks;
       EXPECT_FALSE(catalog.outline(i)) << name;
       EXPECT_FALSE(catalog.inDownloadAll(i)) << name;
-      EXPECT_EQ(catalog.fileCount(i), name == "ArabicUI" ? 5u : 1u) << name;  // a CJK pack: both sizes, one file
+      EXPECT_EQ(catalog.fileCount(i), 1u) << name;  // both sizes, one file
     } else {
       EXPECT_FALSE(catalog.outline(i)) << name;
       EXPECT_TRUE(catalog.inDownloadAll(i)) << name;
     }
   }
-  EXPECT_EQ(uiPacks, 5u);
+  EXPECT_EQ(uiPacks, 4u);
   EXPECT_EQ(outlines, 34u);
   EXPECT_EQ(trueType, 26u);
   EXPECT_LE(catalog.blockBytes(), 16u * 1024u);
@@ -482,8 +481,8 @@ TEST(FontManifestReaderTest, TheShippedVersion2ManifestListsCpfontFamiliesOnly) 
   }
   const Outcome v3 = read(slurp(FONT_MANIFEST_V3_PATH));
   ASSERT_EQ(v3.status, FontManifestStatus::Ok) << v3.failure;
-  // The 34 outline families and the five UI packs are v3's alone.
-  EXPECT_EQ(v2.catalog.count(), v3.catalog.count() - 34 - 5);
+  // The 34 outline families and the four UI packs are v3's alone.
+  EXPECT_EQ(v2.catalog.count(), v3.catalog.count() - 34 - 4);
 }
 
 TEST(FontManifestReaderTest, TheManifestUrlIsTheV3ManifestOnMaster) {

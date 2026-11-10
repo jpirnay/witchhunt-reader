@@ -1,25 +1,22 @@
 // Every key of every keyboard layout, every layer, drawn by the SDK's keyboard() as KeyboardEntryActivity sets it up
-// at an X3's and an X4's keyboard width, measured in the UI faces the device draws it in: the built-in faces with the
-// Arabic UI pack behind them, the label formed as drawText forms it (BidiUtils::arabicUiForms).
+// at an X3's and an X4's keyboard width, measured in the UI faces the device draws it in: the built-in faces, which
+// carry the Arabic presentation forms, the label formed as drawText forms it (BidiUtils::arabicUiForms).
 //
 // What it holds: a key's character is drawn whole -- in the body face if it fits the key, else in the small face,
 // within the key's outline -- never as the ellipsis the target cuts a too-wide string to; and every character a key or
-// a layout's name draws, formed, is in the UI face or the pack. The X3 showed the first going wrong for the wide Arabic
-// isolated forms, and the second for Hamza, which the mapper left unformed while the pack holds only forms.
+// a layout's name draws, formed, is in the UI face. The X3 showed the first going wrong for the wide Arabic isolated
+// forms, and the second for Hamza, which the mapper left unformed while the faces hold only forms.
 #include <Utf8.h>
 #include <components/keyboard/keyboard.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "ArabicUiPack.h"
 #include "BidiUtils.h"
 #include "EpdFont.h"
-#include "FallbackFaceProvider.h"
-#include "SdCardFont.h"
-#include "UiFaceProvider.h"
 #include "activities/util/KeyboardLayoutSet.h"
 #include "builtinFonts/inter_ui_10_regular.h"
 #include "builtinFonts/inter_ui_12_regular.h"
@@ -30,27 +27,10 @@ namespace fui = freeink::ui;
 
 namespace {
 
-std::string packPath(const unsigned points) {
-  return std::string(ARABIC_UI_DIR) + "/ArabicUI_" + std::to_string(points) + ".cpfont";
-}
-
-// A built-in UI face with the pack's file of its size behind it, as CjkUiFonts::attach() binds it.
+// A built-in UI face, its own table alone: it holds the Arabic forms itself.
 class UiFace {
  public:
-  UiFace(const EpdFontData& face, const unsigned points) {
-    loaded = pack.load(packPath(points).c_str());
-    UiFaceProvider::Pack hooks;
-    hooks.face = [](void* ctx) -> const EpdFontData* { return static_cast<SdCardFont*>(ctx)->getEpdFont(0)->data; };
-    hooks.covers = &arabic_ui_pack::covers;
-    hooks.installed = [](void*) { return true; };
-    hooks.prepare = [](void*, const char*) {};
-    hooks.ctx = &pack;
-    provider.bind(&shared, hooks);
-    data = face;
-    data.provider = &provider;
-  }
-  UiFace(const UiFace&) = delete;
-  UiFace& operator=(const UiFace&) = delete;
+  explicit UiFace(const EpdFontData& face) : data(face) {}
 
   // What GfxRenderer::getTextWidth gives: the formed string's extent.
   int width(const char* text) const {
@@ -62,13 +42,8 @@ class UiFace {
   bool holds(const uint32_t cp) const { return static_cast<bool>(EpdFont(&data).findGlyph(cp)); }
   int16_t lineHeight() const { return static_cast<int16_t>(data.advanceY); }
 
-  bool loaded = false;
-
  private:
-  SdCardFont pack;
-  FallbackFaceProvider shared;
-  UiFaceProvider provider;
-  EpdFontData data{};
+  const EpdFontData& data;
 };
 
 // A DrawTarget measuring in two faces, the body and the small slot, that records what is drawn as text.
@@ -130,12 +105,10 @@ constexpr Board BOARDS[] = {{"X3", 528 - 2 * 30}, {"X4", 480 - 30}};
 struct UiSize {
   const char* name;
   const EpdFontData& body;
-  unsigned bodyPoints;
   const EpdFontData& small;
-  unsigned smallPoints;
 };
-const UiSize SIZES[] = {{"Normal", inter_ui_12_regular, 12, notosans_8_regular, 8},
-                        {"Large", inter_ui_14_regular, 14, inter_ui_10_regular, 10}};
+const UiSize SIZES[] = {{"Normal", inter_ui_12_regular, notosans_8_regular},
+                        {"Large", inter_ui_14_regular, inter_ui_10_regular}};
 
 }  // namespace
 
@@ -143,9 +116,8 @@ TEST(KeyboardLabels, EveryCharacterIsDrawnWholeWithinItsKey) {
   size_t characters = 0;
   size_t inTheSmallFace = 0;
   for (const UiSize& size : SIZES) {
-    const UiFace body(size.body, size.bodyPoints);
-    const UiFace small(size.small, size.smallPoints);
-    ASSERT_TRUE(body.loaded && small.loaded) << size.name;
+    const UiFace body(size.body);
+    const UiFace small(size.small);
     for (const Board& board : BOARDS) {
       for (uint8_t raw = 0; raw <= static_cast<uint8_t>(LAST_LAYOUT); ++raw) {
         for (uint8_t flags = 0; flags < 16; ++flags) {
@@ -200,8 +172,8 @@ TEST(KeyboardLabels, EveryCharacterIsDrawnWholeWithinItsKey) {
                 if (character != key.label) continue;
                 ++characters;
                 // Within the key: in the body face inside its padding, or, when that is too wide, in the small one
-                // inside its outline. At the Large UI size the small face is Inter 10 with the pack's 10 pt, whose
-                // widest isolated forms (ض, 27 px) take up to 5 px of a 12-key row's padding.
+                // inside its outline. At the Large UI size the small face is Inter 10, whose widest Arabic isolated
+                // forms take part of a 12-key row's padding.
                 if (text->font == fui::FONT_SLOT_SMALL) {
                   ++inTheSmallFace;
                   EXPECT_GT(body.width(character), contentWidth) << where;
@@ -220,12 +192,11 @@ TEST(KeyboardLabels, EveryCharacterIsDrawnWholeWithinItsKey) {
   EXPECT_GT(inTheSmallFace, 0u);  // the Arabic isolated forms the X3 cut to "…"
 }
 
-TEST(KeyboardLabels, EveryCharacterAndLayoutNameIsInAUiFaceOrThePack) {
+TEST(KeyboardLabels, EveryCharacterAndLayoutNameIsInTheUiFace) {
   for (const UiSize& size : SIZES) {
-    for (const auto& [faceData, points] : {std::pair<const EpdFontData&, unsigned>{size.body, size.bodyPoints},
-                                           std::pair<const EpdFontData&, unsigned>{size.small, size.smallPoints}}) {
-      const UiFace face(faceData, points);
-      ASSERT_TRUE(face.loaded);
+    for (const auto& [faceData, slot] : {std::pair<const EpdFontData&, const char*>{size.body, "body"},
+                                         std::pair<const EpdFontData&, const char*>{size.small, "small"}}) {
+      const UiFace face(faceData);
       for (uint8_t raw = 0; raw <= static_cast<uint8_t>(LAST_LAYOUT); ++raw) {
         for (uint8_t flags = 0; flags < 16; ++flags) {
           fui::KeyboardLayoutBuffer buffer;
@@ -238,8 +209,7 @@ TEST(KeyboardLabels, EveryCharacterAndLayoutNameIsInAUiFaceOrThePack) {
               for (const char* text : {key.label, key.alt}) {
                 if (!text) continue;
                 for (const uint32_t cp : formedCodepoints(text))
-                  EXPECT_TRUE(face.holds(cp))
-                      << size.name << " " << points << " pt: " << text << " U+" << std::hex << cp;
+                  EXPECT_TRUE(face.holds(cp)) << size.name << " " << slot << ": " << text << " U+" << std::hex << cp;
               }
             }
           }
@@ -248,17 +218,17 @@ TEST(KeyboardLabels, EveryCharacterAndLayoutNameIsInAUiFaceOrThePack) {
       for (const auto& info : keyboard_layouts::ALL) {
         if (!info.nativeName) continue;
         for (const uint32_t cp : formedCodepoints(info.nativeName)) {
-          EXPECT_TRUE(face.holds(cp)) << points << " pt: " << info.nativeName << " U+" << std::hex << cp;
+          EXPECT_TRUE(face.holds(cp)) << size.name << " " << slot << ": " << info.nativeName << " U+" << std::hex << cp;
         }
       }
     }
   }
 }
 
-// The Hamza key: the letter the mapper used to leave as it is, which no UI face nor the pack draws.
+// The Hamza key: the letter the mapper used to leave as it is, which no UI face draws.
 TEST(KeyboardLabels, TheHamzaKeyDrawsItsIsolatedForm) {
   EXPECT_EQ(formedCodepoints("\xD8\xA1"), (std::vector<uint32_t>{0xFE80}));
-  const UiFace face(inter_ui_12_regular, 12);
+  const UiFace face(inter_ui_12_regular);
   EXPECT_TRUE(face.holds(0xFE80));
   EXPECT_FALSE(face.holds(0x0621));
 }
