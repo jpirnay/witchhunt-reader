@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "../book_metadata_cache/AllocationRefusal.h"
+#include "ArabicNumberExpected.h"
 #include "Epub/HeapGrowth.h"
 #include "Epub/ParsedText.h"
 #include "Epub/ShapedStore.h"
@@ -1454,6 +1455,40 @@ TEST_F(ShapedLayout, AnArabicWordOnAnRtlLineIsOneGlyphWord) {
     EXPECT_EQ(400, line->wordXpos(0) + advancePx(expected));  // the line starts at the right
   }
   EXPECT_EQ(1u, text.tokensShaped());
+  EXPECT_FALSE(latch);
+}
+
+TEST_F(ShapedLayout, AnAyahSignIsDrawnAroundItsNumberLeftOfTheWord) {
+  // Beh, then the end of ayah with the verse number 12, in a paragraph that runs right to left. The sign and its digits
+  // are numbers, on a level above the letters, so their word reads left of beh, and it is one glyph word: the sign
+  // drawn around the digits, through the section file too. The glyphs are HarfBuzz's (ArabicNumberExpected.h, at
+  // another size); at this size the engine's run is the record (two digits make one unit, so its order stands).
+  FixtureShapingFace& numbers = useFont(kFontNotoNaskhArabicNumbersRegular);
+  const std::string ayah12 = "\xDB\x9D\xD9\xA1\xD9\xA2";  // U+06DD U+0661 U+0662
+  std::vector<uint16_t> harfbuzzGlyphs;
+  for (const ArabicShapingExpectation& word : kArabicNumberShaping) {
+    if (ayah12 != word.utf8) continue;
+    for (unsigned i = 0; i < word.count; ++i) harfbuzzGlyphs.push_back(word.glyphs[i].gid);
+  }
+  ASSERT_EQ(3u, harfbuzzGlyphs.size());  // the sign and the two digits inside it
+  const std::vector<StoredGlyph> expected = oracleOn(numbers, ot::Script::Arabic, ayah12);
+  ASSERT_EQ(3u, expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) EXPECT_EQ(harfbuzzGlyphs[i], expected[i].gid);
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{kBeh}, {ayah12}});
+  const Lines lines = layOut(text, renderer, 400);
+  ASSERT_EQ(1u, lines.size());
+  const std::unique_ptr<TextBlock> restored = readBack(bytesOf(*lines[0]));
+  for (const TextBlock* line : {lines[0].get(), restored.get()}) {
+    ASSERT_NE(nullptr, line);
+    ASSERT_EQ(2u, line->wordCount());
+    EXPECT_EQ(ayah12, line->wordText(0));
+    ASSERT_TRUE(line->hasGlyphForm(0));
+    EXPECT_EQ(expected, recordsOf(line->glyphForm(0)));
+    EXPECT_EQ(kBeh, line->wordText(1));
+    EXPECT_LT(line->wordXpos(0), line->wordXpos(1));
+  }
   EXPECT_FALSE(latch);
 }
 

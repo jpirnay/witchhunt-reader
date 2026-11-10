@@ -11,6 +11,10 @@
 // cannot straddle a level, and joining gives them no joining. Digits (AN, EN), the number signs, ET, the Arabic comma,
 // the neutral symbols and the presentation forms are not: bidi orders them, or the code points are already drawn.
 // Brackets and every other mirrored code point are outside by construction.
+//
+// A number sign (the end-of-ayah sign U+06DD and the others Unicode calls Prepended_Concatenation_Mark) with the digits
+// after it is a run of its own (isNumberSign, numberSignRunEnd): the font draws the sign around them. Sign and digits
+// are all number classes, so that run too lies on one level.
 namespace arabic {
 
 constexpr uint32_t kProbe = 0x0628;  // beh: a font that maps it draws Arabic
@@ -56,9 +60,27 @@ constexpr bool isPunctuationMember(const uint32_t cp) {
 // ZWJ or ZWNJ can follow.
 constexpr bool takesJoiner(const uint32_t cp) { return isRunMember(cp) && !isPunctuationMember(cp); }
 
-// True when `cp` starts a new cluster after `prev`: a mark, a joiner, or anything after a ZWJ stays in the cluster.
+// The number signs of the blocks, which span the digits after them (Unicode's Prepended_Concatenation_Mark): the
+// Arabic number sign, sanah, footnote marker, safha, samvat and number mark above (U+0600-0605), the end of ayah
+// (U+06DD), the pound and piastre marks above (U+0890-0891) and the disputed end of ayah (U+08E2). Bidi class AN.
+constexpr bool isNumberSign(const uint32_t cp) {
+  return (cp >= 0x0600 && cp <= 0x0605) || cp == 0x06DD || cp == 0x0890 || cp == 0x0891 || cp == 0x08E2;
+}
+
+// The digits a number sign spans: European (EN), Arabic-Indic (U+0660-0669, AN) and Extended Arabic-Indic (U+06F0-06F9,
+// EN; after Arabic letters bidi makes them AN, as it does the European ones).
+constexpr bool isNumberSignDigit(const uint32_t cp) {
+  return (cp >= '0' && cp <= '9') || (cp >= 0x0660 && cp <= 0x0669) || (cp >= 0x06F0 && cp <= 0x06F9);
+}
+
+// The most digits a number sign's run takes. The shipped fonts enclose three; a digit past them is drawn plain, as
+// HarfBuzz draws it, and one past this cap is left out of the run.
+constexpr unsigned kNumberSignDigits = 8;
+
+// True when `cp` starts a new cluster after `prev`: a mark, a joiner, or anything after a ZWJ stays in the cluster, and
+// a digit after a number sign stays with the sign it is drawn in.
 constexpr bool isClusterBreak(const uint32_t prev, const uint32_t cp) {
-  return !isMark(cp) && cp != ZWJ && cp != ZWNJ && prev != ZWJ;
+  return !isMark(cp) && cp != ZWJ && cp != ZWNJ && prev != ZWJ && !(isNumberSign(prev) && isNumberSignDigit(cp));
 }
 
 // A byte pre-test: true when the UTF-8 holds a code point of the blocks (U+0600-06FF: D8-DB; 0750-077F: DD 90-BF,
@@ -97,6 +119,42 @@ inline bool holdsRunMember(const char* utf8, const size_t len) {
   }
   return false;
 }
+// Decodes the code point at `p` (UTF-8, `len` bytes from it), its byte count in `bytes`; 0 bytes for a lead byte that
+// does not start a sequence that fits.
+inline uint32_t decodeAt(const unsigned char* p, const size_t len, size_t* bytes) {
+  const unsigned char b = p[0];
+  const size_t n = b < 0x80 ? 1 : (b >> 5) == 0x6 ? 2 : (b >> 4) == 0xE ? 3 : (b >> 3) == 0x1E ? 4 : 0;
+  if (n == 0 || n > len) {
+    *bytes = 0;
+    return 0;
+  }
+  uint32_t cp = n == 1 ? b : b & (0x7F >> n);
+  for (size_t k = 1; k < n; k++) cp = (cp << 6) | (p[k] & 0x3F);
+  *bytes = n;
+  return cp;
+}
+
+// True when the UTF-8 holds a number sign followed by a digit it spans (isNumberSign, isNumberSignDigit): text the
+// shaper draws the sign of around its digits.
+inline bool holdsNumberSignWithDigit(const char* utf8, const size_t len) {
+  if (!holdsArabic(utf8, len)) return false;
+  const auto* p = reinterpret_cast<const unsigned char*>(utf8);
+  bool afterSign = false;
+  for (size_t i = 0; i < len;) {
+    size_t n = 0;
+    const uint32_t cp = decodeAt(p + i, len - i, &n);
+    if (n == 0) {
+      afterSign = false;
+      i++;
+      continue;
+    }
+    if (afterSign && isNumberSignDigit(cp)) return true;
+    afterSign = isNumberSign(cp);
+    i += n;
+  }
+  return false;
+}
+
 // True when the last code point that is not a mark is a run letter, not AL punctuation (tatweel included): the word
 // ends joined-ready.
 inline bool endsWithLetter(const char* utf8, const size_t len) {

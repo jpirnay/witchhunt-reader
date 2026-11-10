@@ -36,7 +36,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 118;  // v118: class and id selectors match case-sensitively; a chapter laid
+constexpr uint8_t SECTION_FILE_VERSION = 119;  // v119: an Arabic number sign (the end of ayah) is shaped with the
+                                               // digits after it, drawn around them
+                                               // v118: class and id selectors match case-sensitively; a chapter laid
                                                // out with folded matching kept the wrong rule
                                                // v117 (Myanmar PR 3): a line with Myanmar text may end between
                                                // syllables inside a phrase, unhyphenated, at any hyphenation setting

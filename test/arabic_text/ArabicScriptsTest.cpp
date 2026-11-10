@@ -186,3 +186,49 @@ TEST(ArabicScripts, EndsWithLetterIsFalseForPunctuation) {
   EXPECT_FALSE(ends(encode(0x0628) + encode(0x061F) + encode(0x064E)));  // a mark is skipped, the punctuation is not
   EXPECT_TRUE(ends(encode(0x061F) + encode(0x0628)));
 }
+
+// The number signs are Unicode's Prepended_Concatenation_Mark of the three blocks (PropList.txt: U+0600-0605, 06DD,
+// 0890-0891, 08E2; U+070F is Syriac and U+110BD, 110CD Kaithi), none of them a run member: a sign is a number, and its
+// run is a number run (IndicShaper's ArabicNumber).
+TEST(ArabicScripts, NumberSignsAreThePrependedConcatenationMarksOfTheBlocks) {
+  const std::vector<uint32_t> expected = {0x0600, 0x0601, 0x0602, 0x0603, 0x0604,
+                                          0x0605, 0x06DD, 0x0890, 0x0891, 0x08E2};
+  std::vector<uint32_t> found;
+  for (uint32_t cp = 0x0600; cp <= 0x08FF; ++cp) {
+    if (arabic::isNumberSign(cp)) found.push_back(cp);
+  }
+  EXPECT_EQ(expected, found);
+  for (const uint32_t cp : expected) EXPECT_FALSE(arabic::isRunMember(cp)) << std::hex << cp;
+}
+
+TEST(ArabicScripts, NumberSignDigitsAreTheThreeDigitSets) {
+  size_t digits = 0;
+  for (uint32_t cp = 0; cp <= 0x08FF; ++cp) {
+    if (!arabic::isNumberSignDigit(cp)) continue;
+    ++digits;
+    EXPECT_TRUE((cp >= '0' && cp <= '9') || (cp >= 0x0660 && cp <= 0x0669) || (cp >= 0x06F0 && cp <= 0x06F9))
+        << std::hex << cp;
+  }
+  EXPECT_EQ(30u, digits);
+}
+
+TEST(ArabicScripts, ADigitStaysWithTheSignBeforeIt) {
+  EXPECT_FALSE(arabic::isClusterBreak(0x06DD, 0x0661));
+  EXPECT_FALSE(arabic::isClusterBreak(0x0601, '1'));
+  EXPECT_TRUE(arabic::isClusterBreak(0x06DD, 0x0628));  // a letter after it is a cluster of its own
+  EXPECT_TRUE(arabic::isClusterBreak(0x0628, 0x06DD));
+  EXPECT_TRUE(arabic::isClusterBreak(0x0661, 0x0662));
+}
+
+TEST(ArabicScripts, HoldsNumberSignWithDigit) {
+  const auto holds = [](const std::string& s) { return arabic::holdsNumberSignWithDigit(s.data(), s.size()); };
+  EXPECT_TRUE(holds("\xDB\x9D\xD9\xA1"));  // U+06DD U+0661
+  EXPECT_TRUE(
+      holds("\xD8\xA8 \xD8\x80"
+            "12"));                          // beh, space, U+0600, 1, 2
+  EXPECT_FALSE(holds("\xDB\x9D"));           // the sign alone
+  EXPECT_FALSE(holds("\xDB\x9D \xD9\xA1"));  // a space between
+  EXPECT_FALSE(holds("\xD9\xA1\xDB\x9D"));   // the digit first
+  EXPECT_FALSE(holds("12"));
+  EXPECT_FALSE(arabic::holdsRunMember("\xDB\x9D\xD9\xA1", 4));  // no run member: the paragraph gate asks both
+}
