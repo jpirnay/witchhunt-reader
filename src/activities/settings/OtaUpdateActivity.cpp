@@ -2,9 +2,16 @@
 
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <WiFi.h>
 
+#include <algorithm>
+#include <cstdio>
+
+#include "FontDownloadActivity.h"
+#include "FontInstaller.h"
 #include "MappedInputManager.h"
+#include "SdCardFontGlobals.h"
 #include "SilentRestart.h"
 #include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -12,6 +19,8 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/OtaUpdater.h"
+#include "util/FontCatalog.h"
+#include "util/FontDownloadRules.h"
 
 void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
   if (!success) {
@@ -46,10 +55,7 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
   if (!updater.isUpdateNewer()) {
     LOG_DBG("OTA", "No new update available (latest=%s, current=%s)", updater.getLatestVersion().c_str(),
             CROSSPOINT_VERSION);
-    {
-      RenderLock lock(*this);
-      state = NO_UPDATE;
-    }
+    checkPacks();
     return;
   }
 
@@ -87,11 +93,106 @@ void OtaUpdateActivity::askToUpdate() {
   startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, std::move(question)),
                          [this](const ActivityResult& result) {
                            if (result.isCancelled) {
-                             finish();
+                             firmwareDeclined = true;
+                             checkPacks();
                              return;
                            }
                            startUpdate();
                          });
+}
+
+void OtaUpdateActivity::checkPacks() {
+  {
+    RenderLock lock(*this);
+    state = NO_UPDATE;
+    packCheck = PackCheck::Checking;
+  }
+  requestUpdateAndWait();
+
+  // One TLS session at a time, and the heap for this one: the release check's session closed with its call, and what
+  // only an install would have read goes now. The screens drew since the last trim.
+  updater.releaseCheckDetails();
+  releaseMemoryForDownload(renderer, "OTA");
+
+  // The Font Manager's manifest load and comparison. The catalog lives for the count only: it is freed before anything
+  // is drawn or asked, and before the Font Manager loads its own.
+  size_t updates = 0;
+  const char* error = nullptr;
+  bool loaded = false;
+  {
+    FontCatalog catalog;
+    std::string baseUrl;
+    const FontInstaller installer(sdFontSystem.registry());
+    loaded = FontDownloadActivity::loadCatalog(installer, catalog, baseUrl, error);
+    if (loaded) updates = FontDownloadRules::packUpdates(catalog);
+  }
+  if (loaded) {
+    LOG_INF("OTA", "Language and hyphenation packs: %u with an update", static_cast<unsigned>(updates));
+  } else {
+    LOG_ERR("OTA", "Pack check failed: %s", error);
+  }
+
+  {
+    RenderLock lock(*this);
+    packUpdates = static_cast<uint16_t>(std::min<size_t>(updates, UINT16_MAX));
+    packCheck = !loaded ? PackCheck::Failed : updates == 0 ? PackCheck::UpToDate : PackCheck::Updates;
+  }
+  if (packCheck == PackCheck::Updates) {
+    askToUpdatePacks();
+    return;
+  }
+  requestUpdate();
+}
+
+void OtaUpdateActivity::askToUpdatePacks() {
+  ConfirmationActivity::Question question;
+  char line[128];
+  question.headline = packLine(line, sizeof(line));
+  question.acceptLabel = StrId::STR_UPDATE;
+  auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, std::move(question));
+  if (!confirmation) {
+    // The line under the versions gives the count; Back leaves.
+    LOG_ERR("OTA", "OOM: pack update question (%zu bytes)", sizeof(ConfirmationActivity));
+    requestUpdate();
+    return;
+  }
+  // Cancel: the line keeps the count, and Back leaves.
+  startActivityForResult(std::move(confirmation), [this](const ActivityResult& result) {
+    if (!result.isCancelled) updatePacks();
+  });
+}
+
+void OtaUpdateActivity::updatePacks() {
+  FontDownloadActivity::Wanted wanted;
+  wanted.packUpdates = true;
+  // In this screen's place, as a pack offer opens it (PackOffer::ask): the downloads' TLS session needs the heap. Left,
+  // the Font Manager restarts into Settings, where Check for updates was.
+  auto download =
+      makeUniqueNoThrow<FontDownloadActivity>(renderer, mappedInput, wanted, FontDownloadActivity::ReturnTo::Settings);
+  if (!download) {
+    LOG_ERR("OTA", "OOM: Font Manager for the pack updates");
+    return;
+  }
+  LOG_INF("OTA", "Updating %u packs in the Font Manager", static_cast<unsigned>(packUpdates));
+  handingOver = true;
+  activityManager.replaceActivity(std::move(download));
+}
+
+const char* OtaUpdateActivity::packLine(char* buf, const size_t size) const {
+  switch (packCheck) {
+    case PackCheck::NotRun:
+      return nullptr;
+    case PackCheck::Checking:
+      return tr(STR_CHECKING_UPDATE);
+    case PackCheck::UpToDate:
+      return tr(STR_PACKS_UP_TO_DATE);
+    case PackCheck::Updates:
+      snprintf(buf, size, tr(STR_PACK_UPDATES), static_cast<int>(packUpdates));
+      return buf;
+    case PackCheck::Failed:
+      return tr(STR_PACK_CHECK_FAILED);
+  }
+  return nullptr;
 }
 
 void OtaUpdateActivity::onEnter() {
@@ -118,6 +219,8 @@ void OtaUpdateActivity::onEnter() {
 void OtaUpdateActivity::onExit() {
   Activity::onExit();
 
+  // Handed over to the Font Manager: the radio is its now, and it restarts when left.
+  if (handingOver) return;
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
     delay(30);
@@ -165,7 +268,8 @@ void OtaUpdateActivity::render(RenderLock&&) {
         UI_10_FONT_ID, y,
         (std::to_string(updater.getProcessedSize()) + " / " + std::to_string(updater.getTotalSize())).c_str());
   } else if (state == NO_UPDATE) {
-    renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_NO_UPDATE), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, top, firmwareDeclined ? tr(STR_NEW_UPDATE) : tr(STR_NO_UPDATE), true,
+                              EpdFontFamily::BOLD);
     const int textWidth = contentRect.width - metrics.contentSidePadding * 2;
     const std::string current = std::string(tr(STR_CURRENT_VERSION)) + CROSSPOINT_VERSION;
     const std::string latest = std::string(tr(STR_NEW_VERSION)) + updater.getLatestVersion();
@@ -174,8 +278,20 @@ void OtaUpdateActivity::render(RenderLock&&) {
     renderer.drawText(UI_10_FONT_ID, contentRect.x + metrics.contentSidePadding,
                       top + height * 2 + metrics.verticalSpacing * 2,
                       renderer.truncatedText(UI_10_FONT_ID, latest.c_str(), textWidth).c_str());
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    // The packs' line, below a gap; a translation may take two lines.
+    char line[128];
+    if (const char* packs = packLine(line, sizeof(line))) {
+      int y = top + height * 3 + metrics.verticalSpacing * 4;
+      for (const auto& wrapped : renderer.wrappedText(UI_10_FONT_ID, packs, textWidth, 2)) {
+        renderer.drawText(UI_10_FONT_ID, contentRect.x + metrics.contentSidePadding, y, wrapped.c_str());
+        y += height;
+      }
+    }
+    // Nothing to press while the packs are checked: the check holds the loop.
+    if (packCheck != PackCheck::Checking) {
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    }
   } else if (state == FAILED) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATE_FAILED), true, EpdFontFamily::BOLD);
     const char* reason = "";
