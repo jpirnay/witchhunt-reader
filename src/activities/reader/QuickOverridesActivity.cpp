@@ -1,5 +1,6 @@
 #include "QuickOverridesActivity.h"
 
+#include <Epub/LineSpacing.h>
 #include <GfxRenderer.h>
 #include <HalCapabilities.h>
 #include <HalDisplay.h>
@@ -197,20 +198,20 @@ void QuickOverridesActivity::buildMenuItems(const bool verticalAllowed) {
         s->pendingParagraphAlignmentOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
       }));
 
-  // Line spacing: default(-1) + the 6 global options
+  // Line spacing: default(-1) + the global options, the percentages then Book's Style
   menuItems.push_back(SettingInfo::DynamicEnumCtx(
-      StrId::STR_LINE_SPACING,
-      {StrId::STR_DEFAULT_VALUE, StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE,
-       StrId::STR_WIDEST, StrId::STR_BOOK_S_STYLE},
-      self,
-      [](const void* ctx) -> uint8_t {
-        const auto* s = static_cast<const QuickOverridesActivity*>(ctx);
-        return (s->pendingLineSpacingOverride < 0) ? 0 : static_cast<uint8_t>(s->pendingLineSpacingOverride + 1);
-      },
-      [](void* ctx, uint8_t v) {
-        auto* s = static_cast<QuickOverridesActivity*>(ctx);
-        s->pendingLineSpacingOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
-      }));
+                          StrId::STR_LINE_SPACING, {StrId::STR_DEFAULT_VALUE, StrId::STR_BOOK_S_STYLE}, self,
+                          [](const void* ctx) -> uint8_t {
+                            const auto* s = static_cast<const QuickOverridesActivity*>(ctx);
+                            return (s->pendingLineSpacingOverride < 0)
+                                       ? 0
+                                       : static_cast<uint8_t>(s->pendingLineSpacingOverride + 1);
+                          },
+                          [](void* ctx, uint8_t v) {
+                            auto* s = static_cast<QuickOverridesActivity*>(ctx);
+                            s->pendingLineSpacingOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
+                          })
+                          .withLiteralOptions(lineSpacingStepLabel, kLineSpacingPercentSteps, 1));
 
   // Vertical text: default / automatic / on / off, for a book whose language is ever set vertically
   if (verticalAllowed) {

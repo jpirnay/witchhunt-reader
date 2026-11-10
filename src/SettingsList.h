@@ -1,6 +1,7 @@
 #pragma once
 
 #include <BoardConfig.h>
+#include <Epub/LineSpacing.h>
 #include <HalCapabilities.h>
 #include <HalDisplay.h>
 #include <HalFrontlight.h>
@@ -407,11 +408,12 @@ inline void buildSettings(const RowSink& emit) {
   emit(SettingInfo::Value(StrId::STR_SCREEN_MARGIN, &CrossPointSettings::screenMargin, {5, 40, 5}, "screenMargin",
                           StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_MENU_READER_SPACING));
-  emit(SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing,
-                         {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE,
-                          StrId::STR_WIDEST, StrId::STR_BOOK_S_STYLE},
+  // Each step's percentage of Normal, then Book's Style: nine numbers and one translated label.
+  emit(SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing, {StrId::STR_BOOK_S_STYLE},
                          "lineSpacing", StrId::STR_CAT_READER)
-           .withSubmenu(StrId::STR_MENU_READER_SPACING));
+           .withLiteralOptions(lineSpacingStepLabel, kLineSpacingPercentSteps, 0)
+           .withSubmenu(StrId::STR_MENU_READER_SPACING)
+           .withSelectorActivity());
   emit(SettingInfo::Toggle(StrId::STR_EXTRA_SPACING, &CrossPointSettings::extraParagraphSpacing,
                            "extraParagraphSpacing", StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_MENU_READER_SPACING));

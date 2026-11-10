@@ -456,7 +456,7 @@ GET_ERROR / SET_ERROR:font families not loaded on this screen <key>   (boot stra
 
 - Numbers: an on/off setting is `0` or `1` (any non-zero sets it on); a choice is its option
   index, with the option's text as `label`; a slider (`sleepTimeoutMinutes`, ...) is its number.
-- A choice can also be set by its label, exactly as `GET` shows it (`CMD:SET:lineSpacing=Normal`).
+- A choice can also be set by its label, exactly as `GET` shows it (`CMD:SET:lineSpacing=110%`).
   Labels are in the UI language, so scripts should prefer numbers.
 - Text settings are written as they are. Passwords are never sent back: `GET` shows `(hidden)`.
 - `SET` does what the web page does after a change: it settles the settings that depend on others,

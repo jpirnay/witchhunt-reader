@@ -241,11 +241,15 @@ bool CrossPointSettings::loadFromFile() {
   return false;
 }
 
-static_assert(CrossPointSettings::TIGHT == static_cast<uint8_t>(LineSpacingStep::Tight) &&
-                  CrossPointSettings::NORMAL == static_cast<uint8_t>(LineSpacingStep::Normal) &&
-                  CrossPointSettings::WIDE == static_cast<uint8_t>(LineSpacingStep::Wide) &&
-                  CrossPointSettings::EXTRA_WIDE == static_cast<uint8_t>(LineSpacingStep::ExtraWide) &&
-                  CrossPointSettings::WIDEST == static_cast<uint8_t>(LineSpacingStep::Widest) &&
+static_assert(CrossPointSettings::LINE_SPACING_90 == static_cast<uint8_t>(LineSpacingStep::Pct90) &&
+                  CrossPointSettings::LINE_SPACING_95 == static_cast<uint8_t>(LineSpacingStep::Pct95) &&
+                  CrossPointSettings::LINE_SPACING_100 == static_cast<uint8_t>(LineSpacingStep::Pct100) &&
+                  CrossPointSettings::LINE_SPACING_110 == static_cast<uint8_t>(LineSpacingStep::Pct110) &&
+                  CrossPointSettings::LINE_SPACING_120 == static_cast<uint8_t>(LineSpacingStep::Pct120) &&
+                  CrossPointSettings::LINE_SPACING_130 == static_cast<uint8_t>(LineSpacingStep::Pct130) &&
+                  CrossPointSettings::LINE_SPACING_145 == static_cast<uint8_t>(LineSpacingStep::Pct145) &&
+                  CrossPointSettings::LINE_SPACING_160 == static_cast<uint8_t>(LineSpacingStep::Pct160) &&
+                  CrossPointSettings::LINE_SPACING_175 == static_cast<uint8_t>(LineSpacingStep::Pct175) &&
                   CrossPointSettings::FROM_BOOK == static_cast<uint8_t>(LineSpacingStep::FromBook),
               "the stored line-spacing steps are LineSpacingStep's");
 

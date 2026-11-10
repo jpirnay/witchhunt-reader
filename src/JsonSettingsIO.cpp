@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <BoardConfig.h>
+#include <Epub/LineSpacing.h>
 #include <HalStorage.h>
 #include <HeapFit.h>
 #include <Logging.h>
@@ -280,6 +281,8 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   // Which meaning the fontSize / txtFontSize values below carry (point sizes since version 2).
   // See CrossPointSettings::FONT_SIZE_ORDER_VERSION.
   doc["fontSizeOrderV"] = CrossPointSettings::FONT_SIZE_ORDER_VERSION;
+  // Which numbering lineSpacing is in. See LINE_SPACING_ORDER_VERSION (Epub/LineSpacing.h).
+  doc["lineSpacingOrderV"] = LINE_SPACING_ORDER_VERSION;
   // Same for the frontlight switch, which is a DynamicToggle because the live
   // hardware rather than this field is the authority for "is the light on".
   // Saved unconditionally, not behind the board's capability: a settings file
@@ -511,6 +514,18 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
     s.fontPointSize = loadPointSize("fontSize");
     s.txtFontPointSize = loadPointSize("txtFontSize");
     if (fileVersion < CrossPointSettings::FONT_SIZE_ORDER_VERSION && needsResave) *needsResave = true;
+  }
+
+  // The line-spacing steps were renumbered at LINE_SPACING_ORDER_VERSION 1 (90% below the old Tight, 145% to 175% above
+  // its Widest). Read from the document, as the sizes above are: the loop above bounds an old value by the new list and
+  // keeps its number, which now names another step. An old Book's Style stays Book's Style.
+  {
+    const auto fileVersion = static_cast<uint8_t>(doc["lineSpacingOrderV"].as<int>());
+    if (fileVersion < LINE_SPACING_ORDER_VERSION) {
+      const uint8_t step = lineSpacingStepFromStored(doc["lineSpacing"] | -1, fileVersion);
+      s.lineSpacing = step != kNoLineSpacingStep ? step : static_cast<uint8_t>(CrossPointSettings::LINE_SPACING_100);
+      if (needsResave) *needsResave = true;
+    }
   }
 
   // The retired TIMEZONE enum, read straight out of the document because it is no longer a row
@@ -812,6 +827,8 @@ bool JsonSettingsIO::saveRecentBooks(const RecentBooksStore& store, const char* 
   // file's: the two files are written independently, so one can be migrated while the other is
   // still on the old numbering. See CrossPointSettings::FONT_SIZE_ORDER_VERSION.
   doc["fontSizeOrderV"] = CrossPointSettings::FONT_SIZE_ORDER_VERSION;
+  // The same for each book's lineSpacingOverride. See LINE_SPACING_ORDER_VERSION (Epub/LineSpacing.h).
+  doc["lineSpacingOrderV"] = LINE_SPACING_ORDER_VERSION;
   JsonArray arr = doc["books"].to<JsonArray>();
   for (const auto& book : store.getBooks()) {
     JsonObject obj = arr.add<JsonObject>();
@@ -874,6 +891,8 @@ RecentBooksLoad JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const c
   // Which meaning the per-book size overrides in this file carry (point sizes since version 2).
   // Absent (0) is every file written before the sizes were put in pixel order.
   const auto fontSizeOrderV = static_cast<uint8_t>(doc["fontSizeOrderV"].as<int>());
+  // And which numbering the per-book line-spacing overrides are in: absent (0) before 90% and 145% to 175% existed.
+  const auto lineSpacingOrderV = static_cast<uint8_t>(doc["lineSpacingOrderV"].as<int>());
   auto clampInt8 = [](int value, int minValue, int maxValue, int8_t fallback) -> int8_t {
     if (value < minValue || value > maxValue) {
       return fallback;
@@ -916,8 +935,8 @@ RecentBooksLoad JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const c
     book.fontSizeNormalizationOverride = clampInt8(obj["fontSizeNormalizationOverride"] | -1, -1, 1, -1);
     book.guideDotsOverride = clampInt8(obj["guideDotsOverride"] | -1, -1, 1, -1);
     book.inlineFootnotePreviewsOverride = clampInt8(obj["inlineFootnotePreviewsOverride"] | -1, -1, 1, -1);
-    book.lineSpacingOverride =
-        clampInt8(obj["lineSpacingOverride"] | -1, -1, CrossPointSettings::LINE_COMPRESSION_COUNT - 1, -1);
+    const uint8_t lineSpacingStep = lineSpacingStepFromStored(obj["lineSpacingOverride"] | -1, lineSpacingOrderV);
+    book.lineSpacingOverride = lineSpacingStep != kNoLineSpacingStep ? static_cast<int8_t>(lineSpacingStep) : -1;
     book.verticalTextOverride =
         clampInt8(obj["verticalTextOverride"] | -1, -1, CrossPointSettings::VERTICAL_TEXT_COUNT - 1, -1);
     book.publisherFontsOverride =

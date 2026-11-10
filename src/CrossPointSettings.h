@@ -274,14 +274,19 @@ class CrossPointSettings {
     return best;
   }
 
-  // Stored by number, in LineSpacingStep's order (Epub/LineSpacing.h). FROM_BOOK is Book's style.
+  // Stored by number, in LineSpacingStep's order (Epub/LineSpacing.h): a percentage of Normal, then FROM_BOOK, Book's
+  // style. Renumbered at LINE_SPACING_ORDER_VERSION 1; older files are converted as they load.
   enum LINE_COMPRESSION {
-    TIGHT = 0,
-    NORMAL = 1,
-    WIDE = 2,
-    EXTRA_WIDE = 3,
-    WIDEST = 4,
-    FROM_BOOK = 5,
+    LINE_SPACING_90 = 0,
+    LINE_SPACING_95 = 1,
+    LINE_SPACING_100 = 2,
+    LINE_SPACING_110 = 3,
+    LINE_SPACING_120 = 4,
+    LINE_SPACING_130 = 5,
+    LINE_SPACING_145 = 6,
+    LINE_SPACING_160 = 7,
+    LINE_SPACING_175 = 8,
+    FROM_BOOK = 9,
     LINE_COMPRESSION_COUNT
   };
   // Stored by number, in VerticalText's order (Epub/FlowContext.h).
@@ -477,7 +482,7 @@ class CrossPointSettings {
   uint8_t txtFontFamily = NOTOSANS;
   char txtSdFontFamilyName[32] = "";
   uint8_t txtFontPointSize = DEFAULT_FONT_POINT_SIZE;  // persisted as "txtFontSize"
-  uint8_t lineSpacing = NORMAL;
+  uint8_t lineSpacing = LINE_SPACING_100;
   uint8_t verticalText = VERTICAL_TEXT_AUTOMATIC;
   uint8_t pageTurnButtons = PAGE_TURN_FOLLOW_BOOK;
   uint8_t paragraphAlignment = JUSTIFIED;

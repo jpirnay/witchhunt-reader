@@ -1,5 +1,6 @@
 #include "EpubReaderMenuActivity.h"
 
+#include <Epub/LineSpacing.h>
 #include <GfxRenderer.h>
 #include <HalCapabilities.h>
 #include <I18n.h>
@@ -362,12 +363,9 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
                               })
                               .withSelectorActivity());
 
-  // Line spacing: default(-1) + the 6 global options
+  // Line spacing: default(-1) + the global options, the percentages then Book's Style
   settingsItems.push_back(SettingInfo::DynamicEnumCtx(
-                              StrId::STR_LINE_SPACING,
-                              {StrId::STR_DEFAULT_VALUE, StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE,
-                               StrId::STR_EXTRA_WIDE, StrId::STR_WIDEST, StrId::STR_BOOK_S_STYLE},
-                              self,
+                              StrId::STR_LINE_SPACING, {StrId::STR_DEFAULT_VALUE, StrId::STR_BOOK_S_STYLE}, self,
                               [](const void* ctx) -> uint8_t {
                                 const auto* s = static_cast<const EpubReaderMenuActivity*>(ctx);
                                 return (s->pendingLineSpacingOverride < 0)
@@ -378,6 +376,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
                                 auto* s = static_cast<EpubReaderMenuActivity*>(ctx);
                                 s->pendingLineSpacingOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
                               })
+                              .withLiteralOptions(lineSpacingStepLabel, kLineSpacingPercentSteps, 1)
                               .withSelectorActivity());
 
   // Vertical text: default / automatic / on / off, for a book whose language is ever set vertically

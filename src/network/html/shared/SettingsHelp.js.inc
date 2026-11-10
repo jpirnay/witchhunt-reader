@@ -72,7 +72,7 @@ const SETTINGS_HELP = {
     "imageRendering": "Show pictures in books, draw a box in their place (Placeholder), or leave them out (Suppress).",
     "largeImagePlaceholder": "Shows a placeholder in place of images too large to show in the page.",
     "screenMargin": "Space between the text and the left and right edges of the page, 5 to 40 px.",
-    "lineSpacing": "Distance between lines of text; Tight fits more on a page.",
+    "lineSpacing": "Distance between lines of text, in percent of Normal (100%); lower fits more on a page. Book's Style follows the book's own line height.",
     "extraParagraphSpacing": "On adds space between paragraphs; off indents each paragraph's first line instead.",
     "syntheticTocFallback": "Builds a table of contents from the headings when a book's own is missing or broken.",
     "bionicReading": "Bolds the first half of each word to guide the eye.",
