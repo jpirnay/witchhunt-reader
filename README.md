@@ -77,11 +77,11 @@ Legend: ✅ supported · ⚠️ partial / basic · ❌ not supported.
 | Grayscale image caches | ✅ | ⚠️ minimal |
 | Heading fonts (h1–h3) | ✅ crisp taller real fonts | ⚠️ single font size per block |
 | Horizontal rules | ✅ | ✅ |
-| Hyphenation (9 languages) | ✅ | ✅ |
+| Hyphenation | ✅ 31 languages: English built in, 30 as downloadable packs | ✅ |
 | Bionic / focus reading | ✅ | ✅ |
 | Anti-aliasing toggle | ✅ (+ fast AA, max-darkness mode) | ✅ |
 | Markdown (`.md`) rendering | ✅ headings, tables, HR, code, lists, TOC | ❌ shown as raw plain text |
-| **Right-to-left / BiDi (Hebrew, Arabic)** | ❌ **not supported** | ✅ full BiDi + Hebrew font + CSS `direction` |
+| Right-to-left / BiDi (Hebrew, Arabic, Persian, Urdu) | ✅ BiDi, Arabic joining, right-to-left page turns | ✅ full BiDi + Hebrew font + CSS `direction` |
 | Drop caps | ✅ float-zone initials, top-aligned | ❌ |
 
 ## Reading Experience, Library & Navigation
