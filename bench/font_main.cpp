@@ -404,8 +404,8 @@ static void benchReaderPrewarm(const char* label, const EpdFontData* data) {
 // it. fontconvert.py refuses to generate a font that would overflow the constant, but that check
 // only fires at generation time and has been wrong twice by being guessed rather than measured.
 //
-// U+01C4 (DZ digraph) in serif_18_bolditalic at 54x38 packs to 513 B and is the glyph that
-// sets the constant. If this prints FAIL, HOT_GLYPH_BUF_SIZE is too small.
+// U+01C4 (DZ digraph) in serif_18_bolditalic at 49x36 packs to 441 B, the largest glyph in the
+// built-in set with U+0489 in notosans_18_italic. If this prints FAIL, HOT_GLYPH_BUF_SIZE is too small.
 // ---------------------------------------------------------------------------
 
 static void checkWidestGlyph(const char* label, const EpdFontData* data, const uint32_t cp) {

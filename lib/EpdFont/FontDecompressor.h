@@ -32,6 +32,10 @@ class FontDecompressor {
   // binding glyph is that digraph in bookerly_18_bolditalic again, 54x38 -> 513 bytes (measured
   // over every shipped glyph, 2026-10-18), and 576 is the next multiple of 64 above it. Synthesised
   // sizes do not move it: they fetch the 18 pt master's glyph and resample after the fetch.
+  // Since the built-in serif is Source Serif 4 Caption at 95 % (serif_*, Noto Sans behind it), the
+  // largest is 441 bytes, a tie: the digraph in serif_18_bolditalic, drawn from Noto Sans (49x36),
+  // and U+0489 in notosans_18_italic and _bolditalic (42x42), measured over every shipped glyph,
+  // 2026-11-10. 576 stays, with room to spare.
   //
   // The cap is set by the widest glyph in the whole coverage, not by anything a reader meets --
   // that digraph appears in Serbo-Croatian and essentially nowhere else.

@@ -30,8 +30,8 @@
 // finished DEFLATE streams by fontconvert.py.
 #include "notosans_14_regular.h"
 
-// The font with the largest glyph in the built-in set (54x38, 513 packed bytes), which used to
-// overflow HOT_GLYPH_BUF_SIZE by one byte.
+// A font with the largest glyph in the built-in set (U+01C4, 49x36, 441 packed bytes). Its Bookerly
+// predecessor's (54x38, 513 bytes) once overflowed HOT_GLYPH_BUF_SIZE by one byte.
 #include "serif_18_bolditalic.h"
 
 namespace {
