@@ -624,6 +624,10 @@ bool HomeActivity::offerLanguagePack() {
       [this, offer](const ActivityResult& result) {
         if (result.isCancelled) {
           UiLanguagePacks::decline(offer);
+          // A fresh Home, not this one: opening the question took back the framebuffer this visit had lent to the
+          // carousel's frame cache (startActivityForResult), and the next carousel render here would build that
+          // 49 KB frame on the heap instead, leaving Home ~20 KB free (X3). A new Home lends it again.
+          activityManager.goHome();
           return;
         }
         // In Home's place, not over it: the download's TLS session needs the heap Home holds.
