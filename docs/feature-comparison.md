@@ -92,8 +92,9 @@ OpenType files on ESP32-S3 boards. On the X3 and X4, see [Memory](#memory).
 | Indic and Burmese book titles in menus | ⚠️ shaped in the last book's font, when it has the script | ❌ not shaped |
 | On-screen keyboard layouts | ✅ 11, including Hebrew, Arabic and Greek | ✅ 10, including Hebrew and Arabic |
 
-**Both have:** CJK line breaking and ruby, Hebrew and Arabic titles in the menus (built into the menu
-fonts), Latin and Cyrillic in the built-in fonts, other scripts through SD-card fonts.
+**Both have:** CJK line breaking and ruby in horizontal text (in vertical text, only Witch Reader sets
+CJK at all), Hebrew and Arabic titles in the menus (built into the menu fonts), Latin and Cyrillic in the
+built-in fonts, other scripts through SD-card fonts.
 
 The bidi and shaping rows were measured 2026-11-10 against the Unicode 17 BidiCharacterTest and
 HarfBuzz 14.5. The Indic row counts book words drawn the same as the reference.
@@ -174,6 +175,8 @@ information screen, settings grouped in categories.
 | EEGOREAD A4 (ESP32-S3) | ❌ | ✅ |
 | Onyx BOOX Picco (ESP32-S3) | ❌ | ✅ |
 | Touch screen | ✅ X4 Pro, T5 S3 Pro, Murphy M3 | ✅ X4 Pro, Sticky, PaperMono and others |
+
+Want your device supported? Consider donating one: support for a board needs the board on the desk. [Open an issue](https://github.com/jpirnay/witchhunt-reader/issues) to arrange it.
 
 ## Rendering comparisons
 

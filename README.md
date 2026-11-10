@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/logo.png" width="160" alt="Witch Reader logo: a smiling witch in a pointed hat with a star"></p>
+
 # Witch(hunt) Reader
 
 E-reader firmware for the Xteink X3, X4 and X4 Pro, the LilyGo T5S3 Pro and the Murphy M3, based on
@@ -14,9 +16,15 @@ included.
 | --- | --- | --- | --- |
 | Xteink X4 | ESP32-C3 | no | software clock |
 | Xteink X3 | ESP32-C3 | no | hardware clock |
-| Xteink X4 Pro | ESP32-S3 | no | PSRAM |
+| Xteink X4 Pro | ESP32-S3 | yes | PSRAM |
 | LilyGo T5S3 Pro | ESP32-S3 | yes | PSRAM |
 | Murphy M3 | ESP32-S3 | yes | PSRAM, hardware clock |
+
+**Everything runs on the X3 and X4 as well.** The two ESP32-C3 boards have no PSRAM, and still get the whole reader:
+TrueType and OpenType fonts, every script below with OpenType shaping and bidi, vertical Chinese, Japanese and Korean,
+the hyphenation packs and Publisher Fonts. The ESP32-S3 boards add a touch screen and PSRAM.
+
+Want your device supported? Consider donating one: support for a board needs the board on the desk. [Open an issue](https://github.com/jpirnay/witchhunt-reader/issues) to arrange it.
 
 ## Installation
 
@@ -65,7 +73,7 @@ Hebrew, Arabic and Greek layouts. StarDict dictionaries look words up in horizon
 - **Sync and network:** KOReader sync that lands on the exact page in both directions, OPDS catalogs, Calibre, a web
   interface with file manager and settings, WebDAV, captive-portal login, weather.
 - **Device:** a clock on every board, sleep screens with an information overlay or a transparent picture over the page,
-  user-defined actions for each button's single, double and long press, touch gestures on the T5S3 and Murphy.
+  user-defined actions for each button's single, double and long press, touch gestures on the X4 Pro, T5S3 and Murphy.
 
 ## What this reader doesn't
 
@@ -80,18 +88,5 @@ All of them have their strengths and constraints (as has Witch reader), so they 
 ## Credits
 
 This firmware stands on the work of others, crosspoint-reader above all; **[CREDITS.md](CREDITS.md)** lists the
-projects, the people whose code is ported here, the vendored libraries and the fonts.
-
-# Why this name
-Originally this fork was called CrossPoint++ - it had a small userbase and then I made an honest mistake by reusing the crosspoint fork, providing ample reference in the PRs and the release notes of code origin and authorship but was losing the github commit author information in the progress when I copied code over instead of taking the tedious (and correct) way of cherrypicking the original commit and post-cleanup effort.
-
-Another crosspoint developer approached me pointing this flaw out and I agreed to change the future integration work. What I did not care for was that persons attitude and way of communicating, and I told him so.
-
-Then all hell broke lose, ending up in insults, harassment and plain lies in other forums without even caring for feedback (a good cause for any lawsuit for slander). So I took the repo down and just continued the development for my own benefit.
-
-Still I wanted others to benefit from my progress, so here we are again:
-
-Witch(hunt) Reader (name for obvious reasons) 
-
-- So if you are one of those who felt poorly appreciated: please accept my apologies, that was never my intent, and I have taken a lot of effort to replace code / to properly attribute the origin of code or ideas
-- If you are one of those who felt the need to raise a witchhunt, to lie, to libel: just go away - trolls aren't welcome here or more clearly: F*** OFF
+projects, the people whose code is ported here, the vendored libraries and the fonts. How the fork came to its name:
+**[Project history](docs/project-history.md)**.
