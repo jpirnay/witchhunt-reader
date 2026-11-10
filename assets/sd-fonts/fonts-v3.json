@@ -1729,8 +1729,8 @@
       "files": [
         {
           "name": "Language-Arabic/ar.cplang",
-          "size": 12700,
-          "crc32": 1019711665
+          "size": 12769,
+          "crc32": 952614844
         }
       ]
     },
@@ -1743,8 +1743,8 @@
       "files": [
         {
           "name": "Language-Belarusian/be.cplang",
-          "size": 14137,
-          "crc32": 3836275213
+          "size": 14231,
+          "crc32": 3763718557
         }
       ]
     },
@@ -1757,8 +1757,8 @@
       "files": [
         {
           "name": "Language-Catalan/ca.cplang",
-          "size": 12023,
-          "crc32": 1005001544
+          "size": 12102,
+          "crc32": 3959971478
         }
       ]
     },
@@ -1771,8 +1771,8 @@
       "files": [
         {
           "name": "Language-ChineseSimplified/zh.cplang",
-          "size": 10831,
-          "crc32": 2735416806
+          "size": 10890,
+          "crc32": 3575555774
         }
       ]
     },
@@ -1785,8 +1785,8 @@
       "files": [
         {
           "name": "Language-Czech/cs.cplang",
-          "size": 12521,
-          "crc32": 1762126209
+          "size": 12609,
+          "crc32": 3552393617
         }
       ]
     },
@@ -1799,8 +1799,8 @@
       "files": [
         {
           "name": "Language-Danish/da.cplang",
-          "size": 11220,
-          "crc32": 2056829934
+          "size": 11294,
+          "crc32": 3774062724
         }
       ]
     },
@@ -1813,8 +1813,8 @@
       "files": [
         {
           "name": "Language-Dutch/nl.cplang",
-          "size": 11474,
-          "crc32": 41063849
+          "size": 11552,
+          "crc32": 151882644
         }
       ]
     },
@@ -1827,8 +1827,8 @@
       "files": [
         {
           "name": "Language-Finnish/fi.cplang",
-          "size": 11915,
-          "crc32": 1730977572
+          "size": 11986,
+          "crc32": 1468043132
         }
       ]
     },
@@ -1841,8 +1841,8 @@
       "files": [
         {
           "name": "Language-French/fr.cplang",
-          "size": 11820,
-          "crc32": 2334984426
+          "size": 11887,
+          "crc32": 1778452281
         }
       ]
     },
@@ -1855,8 +1855,8 @@
       "files": [
         {
           "name": "Language-German/de.cplang",
-          "size": 11530,
-          "crc32": 3956164417
+          "size": 11613,
+          "crc32": 1777291364
         }
       ]
     },
@@ -1869,8 +1869,8 @@
       "files": [
         {
           "name": "Language-Hebrew/he.cplang",
-          "size": 11915,
-          "crc32": 1869293673
+          "size": 11992,
+          "crc32": 2886199967
         }
       ]
     },
@@ -1883,8 +1883,8 @@
       "files": [
         {
           "name": "Language-Hungarian/hu.cplang",
-          "size": 12377,
-          "crc32": 2251672135
+          "size": 12453,
+          "crc32": 62021393
         }
       ]
     },
@@ -1897,8 +1897,8 @@
       "files": [
         {
           "name": "Language-Italian/it.cplang",
-          "size": 11660,
-          "crc32": 2292960272
+          "size": 11724,
+          "crc32": 1513531647
         }
       ]
     },
@@ -1911,8 +1911,8 @@
       "files": [
         {
           "name": "Language-Japanese/ja.cplang",
-          "size": 11813,
-          "crc32": 1791436595
+          "size": 11893,
+          "crc32": 2339318894
         }
       ]
     },
@@ -1925,8 +1925,8 @@
       "files": [
         {
           "name": "Language-Kazakh/kk.cplang",
-          "size": 13858,
-          "crc32": 3320092692
+          "size": 13956,
+          "crc32": 1245126878
         }
       ]
     },
@@ -1939,8 +1939,8 @@
       "files": [
         {
           "name": "Language-Korean/ko.cplang",
-          "size": 11333,
-          "crc32": 543838874
+          "size": 11409,
+          "crc32": 2566847090
         }
       ]
     },
@@ -1953,8 +1953,8 @@
       "files": [
         {
           "name": "Language-Lithuanian/lt.cplang",
-          "size": 11896,
-          "crc32": 472360263
+          "size": 11972,
+          "crc32": 264172928
         }
       ]
     },
@@ -1967,8 +1967,8 @@
       "files": [
         {
           "name": "Language-Persian/fa.cplang",
-          "size": 12770,
-          "crc32": 2332060539
+          "size": 12851,
+          "crc32": 946083028
         }
       ]
     },
@@ -1981,8 +1981,8 @@
       "files": [
         {
           "name": "Language-Polish/pl.cplang",
-          "size": 12341,
-          "crc32": 304909593
+          "size": 12424,
+          "crc32": 2704350885
         }
       ]
     },
@@ -1995,8 +1995,8 @@
       "files": [
         {
           "name": "Language-PortugueseBR/po.cplang",
-          "size": 11881,
-          "crc32": 3435192470
+          "size": 11968,
+          "crc32": 474712090
         }
       ]
     },
@@ -2009,8 +2009,8 @@
       "files": [
         {
           "name": "Language-PortuguesePT/pt.cplang",
-          "size": 12142,
-          "crc32": 3088032202
+          "size": 12223,
+          "crc32": 2936189874
         }
       ]
     },
@@ -2023,8 +2023,8 @@
       "files": [
         {
           "name": "Language-Romanian/ro.cplang",
-          "size": 12036,
-          "crc32": 504742073
+          "size": 12109,
+          "crc32": 3774964883
         }
       ]
     },
@@ -2037,8 +2037,8 @@
       "files": [
         {
           "name": "Language-Russian/ru.cplang",
-          "size": 14051,
-          "crc32": 922825654
+          "size": 14140,
+          "crc32": 1052460931
         }
       ]
     },
@@ -2051,8 +2051,8 @@
       "files": [
         {
           "name": "Language-Slovenian/si.cplang",
-          "size": 11829,
-          "crc32": 798091951
+          "size": 11903,
+          "crc32": 3765785663
         }
       ]
     },
@@ -2065,8 +2065,8 @@
       "files": [
         {
           "name": "Language-Spanish/es.cplang",
-          "size": 11967,
-          "crc32": 2290458560
+          "size": 12050,
+          "crc32": 1821238334
         }
       ]
     },
@@ -2079,8 +2079,8 @@
       "files": [
         {
           "name": "Language-Swedish/sv.cplang",
-          "size": 11593,
-          "crc32": 134679118
+          "size": 11661,
+          "crc32": 335548383
         }
       ]
     },
@@ -2093,8 +2093,8 @@
       "files": [
         {
           "name": "Language-Turkish/tr.cplang",
-          "size": 11929,
-          "crc32": 2772577087
+          "size": 11990,
+          "crc32": 3194568364
         }
       ]
     },
@@ -2107,8 +2107,8 @@
       "files": [
         {
           "name": "Language-Ukrainian/uk.cplang",
-          "size": 14223,
-          "crc32": 1955765677
+          "size": 14312,
+          "crc32": 424963204
         }
       ]
     },
@@ -2121,8 +2121,8 @@
       "files": [
         {
           "name": "Language-Vietnamese/vi.cplang",
-          "size": 11888,
-          "crc32": 4235857763
+          "size": 11964,
+          "crc32": 1758760664
         }
       ]
     },
