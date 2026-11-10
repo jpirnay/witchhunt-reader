@@ -19,7 +19,6 @@ target_include_directories(CjkUiPackTest PRIVATE
   ${BIDI_MARK_INCLUDES}
   ${REPO_ROOT}/test/zip_entry_reader  # stdio-backed HalStorage.h; shadows test/shims stub
   ${REPO_ROOT}/test/font_group_stream
-  ${REPO_ROOT}/test/ui_script_pack  # CpfontFile.h
   ${REPO_ROOT}/lib/EpdFont
   ${REPO_ROOT}/lib/InflateReader
   ${REPO_ROOT}/lib/Memory

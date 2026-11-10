@@ -1,6 +1,6 @@
 // Ours (writing modes step 5): UI text with its Indic and Myanmar runs shaped over the face behind the UI face
-// (lib/GfxRenderer/UiShapedText). The UI face is the built-in Inter 12 behind UiFaceProvider and the shared
-// FallbackFaceProvider, as CjkUiFonts attaches it; the reader's face is a test double over the shaping fixtures
+// (lib/GfxRenderer/UiShapedText). The UI face is the built-in Inter 12 behind the shared FallbackFaceProvider, as
+// CjkUiFonts attaches it; the reader's face is a test double over the shaping fixtures
 // (test/fixtures/fonts), which draws glyph keys as TtfFont's faces do.
 #include <BidiUtils.h>
 #include <GlyphKey.h>
@@ -24,7 +24,6 @@
 #include "EpdFontFamily.h"
 #include "FallbackFaceProvider.h"
 #include "FixtureShapingFace.h"
-#include "UiFaceProvider.h"
 #include "UiShapedText.h"
 #include "builtinFonts/inter_ui_12_regular.h"
 
@@ -186,8 +185,7 @@ class UiShapedTextTest : public ::testing::Test {
  protected:
   void SetUp() override {
     ui = inter_ui_12_regular;
-    ui.provider = &uiProvider;
-    uiProvider.bind(&shared, UiFaceProvider::Pack{});
+    ui.provider = &shared;
     shared.setPrimaryFace(&inter_ui_12_regular);
   }
   void TearDown() override {
@@ -220,7 +218,6 @@ class UiShapedTextTest : public ::testing::Test {
   }
 
   FallbackFaceProvider shared;
-  UiFaceProvider uiProvider;
   EpdFontData ui{};
   EpdFont font{&ui};
   EpdFontFamily family{&font};

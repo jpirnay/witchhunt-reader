@@ -68,10 +68,8 @@ class FallbackFaceProvider final : public GlyphProvider {
     readerMaps_ = maps;
     readerMapsCtx_ = ctx;
   }
-  /// In the reader, whether the book's face maps `codepoint`: what goes to it before any pack (UiFaceProvider's too).
+  /// In the reader, whether the book's face maps `codepoint`: what goes to it before any pack.
   bool readerMaps(const uint32_t codepoint) const { return readerMaps_ && readerMaps_(readerMapsCtx_, codepoint); }
-  /// A reader is on the stack (setReaderMaps set).
-  bool inReader() const { return readerMaps_ != nullptr; }
   /// The UI face this provider serves, whose own table beginText() reads to tell which of a string's characters it
   /// lacks: the regular face of the provider's size. Its siblings (bold, other sizes) cover the same characters.
   void setPrimaryFace(const EpdFontData* primary) { primary_ = primary; }
@@ -95,18 +93,10 @@ class FallbackFaceProvider final : public GlyphProvider {
   /// (the build gives every translation's characters a face), so it is book text, and the reader's font goes first
   /// for all of it, before the active language's face too, so a title draws in one font. Its characters the reader's
   /// face is asked for are rendered in one batch (the face's prefetch()).
-  void beginText(const char* utf8Text) override { beginText(utf8Text, nullptr, nullptr); }
-  /// The same, with the characters `alsoCovered(ctx, cp)` answers for taken as the UI face's own: a script pack's,
-  /// which UiFaceProvider serves before this provider is asked.
-  void beginText(const char* utf8Text, bool (*alsoCovered)(void* ctx, uint32_t codepoint), void* ctx);
-  /// Whether the reader's face draws Arabic in its presentation forms (`forms(ctx)`, CjkUiFonts): GfxRenderer then
-  /// forms Arabic UI text, which that face serves joined. False without the hook, so Arabic UI text is left as its
-  /// letters, as before the forms.
-  void setFormsArabic(bool (*forms)(void* ctx), void* ctx) {
-    formsArabic_ = forms;
-    formsCtx_ = ctx;
-  }
-  bool formsArabic() const override { return formsArabic_ && formsArabic_(formsCtx_); }
+  void beginText(const char* utf8Text) override;
+  /// True: the UI faces this provider serves carry the Arabic presentation forms (convert-builtin-fonts.sh), so
+  /// GfxRenderer forms their Arabic UI text and they draw it from their own tables, whatever book was read last.
+  bool formsArabic() const override { return true; }
   /// The reader's face, when serve() would lend it `probe` for the string begun last (no face before it holds the
   /// probe) and it draws glyph keys; its glyphs then come by key through missGlyph(), from it alone.
   const EpdFontData* shapingSource(uint32_t probe) override;
@@ -150,8 +140,6 @@ class FallbackFaceProvider final : public GlyphProvider {
   bool (*readerMaps_)(void* ctx, uint32_t codepoint) = nullptr;
   void* readerMapsCtx_ = nullptr;
   const EpdFontData* servedPack_ = nullptr;  // the pack face the last pack glyph came from
-  bool (*formsArabic_)(void* ctx) = nullptr;
-  void* formsCtx_ = nullptr;
 
   uint8_t facesBeforeReader() const;  // serve()'s built-in faces ahead of the reader's: 0 or 1
   const EpdGlyph* serve(uint32_t codepoint);

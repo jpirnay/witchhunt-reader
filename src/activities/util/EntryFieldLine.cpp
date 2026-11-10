@@ -89,7 +89,7 @@ bool EntryFieldLine::build(const char* line, const size_t len, const int paragra
 
   // Where each drawn character starts: the advance of the line up to it, in drawn order. Zero-width joiners are left
   // out, as visualUiLine leaves them out. The whole line is measured first: a font that reads a string's glyphs from
-  // the card when it is measured (the Arabic UI pack) then has them all, and each shorter measure reads none.
+  // the card when it is measured (a CJK UI pack) then has them all, and each shorter measure reads none.
   size_t bytes = 0;
   for (size_t v = 0; v < n; ++v) {
     if (drawn[v] != 0x200C && drawn[v] != 0x200D) bytes += putUtf8(&form[bytes], drawn[v]);

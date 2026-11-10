@@ -131,9 +131,8 @@ class GlyphProvider {
   /// Anything else must not be asked for one.
   virtual bool drawsGlyphKeys() const { return false; }
 
-  /// True when the font draws Arabic UI text in its contextual presentation forms (BidiUtils::arabicUiForms): a UI
-  /// face whose fallbacks hold them (the Arabic UI pack, UiFaceProvider; or the last book's font,
-  /// FallbackFaceProvider::setFormsArabic). GfxRenderer then forms a string before it
+  /// True when the font draws Arabic UI text in its contextual presentation forms (BidiUtils::arabicUiForms): the
+  /// built-in UI faces, which carry the forms (FallbackFaceProvider). GfxRenderer then forms a string before it
   /// measures, fits or draws it; any other font is given the letters as they are.
   virtual bool formsArabic() const { return false; }
 
