@@ -105,6 +105,7 @@ STR_QUICK_RESUME_TIMEOUT: "ادامه‌ی سریع پس از خواب خودک�
 STR_SLEEP_COVER_MODE: "نمایش جلد در صفحه‌ی خواب"
 STR_HIDE_BATTERY: "مخفی کردن درصد باتری"
 STR_EXTRA_SPACING: "فاصله‌ی بیشتر بین پاراگراف‌ها"
+STR_PARAGRAPH_INDENT: "تورفتگی پاراگراف"
 STR_TEXT_AA: "نرم‌تر کردن متن"
 STR_ONE_PASS_AA: "نرم‌سازی متن در یک مرحله"
 STR_TEXT_DARKNESS: "تیرگی متن"

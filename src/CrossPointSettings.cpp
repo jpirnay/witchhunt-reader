@@ -2,6 +2,7 @@
 
 #include <BoardConfig.h>
 #include <Epub/LineSpacing.h>
+#include <Epub/ParagraphIndent.h>
 #include <HalStorage.h>
 #include <JsonSettingsIO.h>
 #include <Logging.h>
@@ -252,6 +253,14 @@ static_assert(CrossPointSettings::LINE_SPACING_90 == static_cast<uint8_t>(LineSp
                   CrossPointSettings::LINE_SPACING_175 == static_cast<uint8_t>(LineSpacingStep::Pct175) &&
                   CrossPointSettings::FROM_BOOK == static_cast<uint8_t>(LineSpacingStep::FromBook),
               "the stored line-spacing steps are LineSpacingStep's");
+static_assert(CrossPointSettings::PARAGRAPH_INDENT_NONE == static_cast<uint8_t>(ParagraphIndent::None) &&
+                  CrossPointSettings::PARAGRAPH_INDENT_HALF_EM == static_cast<uint8_t>(ParagraphIndent::HalfEm) &&
+                  CrossPointSettings::PARAGRAPH_INDENT_ONE_EM == static_cast<uint8_t>(ParagraphIndent::OneEm) &&
+                  CrossPointSettings::PARAGRAPH_INDENT_ONE_AND_HALF_EM ==
+                      static_cast<uint8_t>(ParagraphIndent::OneAndHalfEm) &&
+                  CrossPointSettings::PARAGRAPH_INDENT_TWO_EM == static_cast<uint8_t>(ParagraphIndent::TwoEm) &&
+                  CrossPointSettings::PARAGRAPH_INDENT_FROM_BOOK == static_cast<uint8_t>(ParagraphIndent::FromBook),
+              "the stored paragraph indents are ParagraphIndent's");
 
 float CrossPointSettings::getReaderLineCompression() const {
   // Without a book (the dictionary's pages): no CJK pitch, and Book's style reads as Normal.

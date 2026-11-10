@@ -2,6 +2,7 @@
 
 #include <BoardConfig.h>
 #include <Epub/LineSpacing.h>
+#include <Epub/ParagraphIndent.h>
 #include <HalCapabilities.h>
 #include <HalDisplay.h>
 #include <HalFrontlight.h>
@@ -417,6 +418,12 @@ inline void buildSettings(const RowSink& emit) {
   emit(SettingInfo::Toggle(StrId::STR_EXTRA_SPACING, &CrossPointSettings::extraParagraphSpacing,
                            "extraParagraphSpacing", StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_MENU_READER_SPACING));
+  // None, the sizes in ems (literals: "em" is the unit, not a word), then Book's Style.
+  emit(SettingInfo::Enum(StrId::STR_PARAGRAPH_INDENT, &CrossPointSettings::paragraphIndent,
+                         {StrId::STR_NONE_OPT, StrId::STR_BOOK_S_STYLE}, "paragraphIndent", StrId::STR_CAT_READER)
+           .withLiteralOptions(paragraphIndentSizeLabel, kParagraphIndentFixedSteps - 1, 1)
+           .withSubmenu(StrId::STR_MENU_READER_SPACING)
+           .withSelectorActivity());
 
   // Generic reader settings
   emit(SettingInfo::Toggle(StrId::STR_CREATE_FALLBACK_FOR_INVALID_TOC, &CrossPointSettings::syntheticTocFallback,

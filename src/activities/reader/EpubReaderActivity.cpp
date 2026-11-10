@@ -1489,6 +1489,7 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.bookLineHeightFloor = lineSpacing.bookFloor;
   p.lineHeightEmPx = lineSpacing.emPx;
   p.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
+  p.paragraphIndent = SETTINGS.paragraphIndent;
   p.paragraphAlignment = getEffectiveParagraphAlignment();
   p.viewportWidth = layout.viewportWidth;
   p.viewportHeight = layout.viewportHeight;
@@ -7659,6 +7660,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   p.bookLineHeightFloor = lineSpacing.bookFloor;
   p.lineHeightEmPx = lineSpacing.emPx;
   p.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
+  p.paragraphIndent = SETTINGS.paragraphIndent;
   p.paragraphAlignment = effectiveParagraphAlignment;
   p.viewportWidth = viewportWidth;
   p.viewportHeight = viewportHeight;

@@ -289,6 +289,16 @@ class CrossPointSettings {
     FROM_BOOK = 9,
     LINE_COMPRESSION_COUNT
   };
+  // Stored by number, in ParagraphIndent's order (Epub/ParagraphIndent.h): none, four sizes in ems, then Book's style.
+  enum PARAGRAPH_INDENT {
+    PARAGRAPH_INDENT_NONE = 0,
+    PARAGRAPH_INDENT_HALF_EM = 1,
+    PARAGRAPH_INDENT_ONE_EM = 2,
+    PARAGRAPH_INDENT_ONE_AND_HALF_EM = 3,
+    PARAGRAPH_INDENT_TWO_EM = 4,
+    PARAGRAPH_INDENT_FROM_BOOK = 5,
+    PARAGRAPH_INDENT_COUNT
+  };
   // Stored by number, in VerticalText's order (Epub/FlowContext.h).
   enum VERTICAL_TEXT { VERTICAL_TEXT_AUTOMATIC = 0, VERTICAL_TEXT_ON = 1, VERTICAL_TEXT_OFF = 2, VERTICAL_TEXT_COUNT };
   // Whether a vertical book's page-turn buttons follow its page progression or keep their usual sides.
@@ -444,6 +454,9 @@ class CrossPointSettings {
   uint8_t statusBarBattery = 1;
   // Text rendering settings
   uint8_t extraParagraphSpacing = 1;
+  // A body paragraph's first-line indent: Book's Style (the book's, one em where it sets none and extra paragraph
+  // spacing is off), or a size the reader chose. See ParagraphIndent.h.
+  uint8_t paragraphIndent = PARAGRAPH_INDENT_FROM_BOOK;
   // The interval Auto Turn last ran at, in seconds: where its picker opens. The reader starts it from the menu.
   uint8_t autoTurnSeconds = 30;
 #if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY && !FREEINK_MURPHY_GRAY
