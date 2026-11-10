@@ -110,19 +110,23 @@ TEST(CssParserDeclarations, ImportantStrippedForEveryProperty) {
 }
 
 // Font-size absolute units and keywords resolve to body-relative multipliers:
-// pt normalises against 12 pt, px against 16 px, keywords use fixed steps.
+// pt normalises against 12 pt, px against 16 px, the keywords take the CSS Fonts 4 scale
+// (section 2.5's table of absolute-size keywords), smaller and larger one step of 1.2.
 TEST(CssParserUnits, FontSizeKeywordsAndAbsoluteUnits) {
   struct Case {
     const char* decl;
     float expected;
   };
   const Case cases[] = {
-      {"font-size: 9pt", 0.75f},     {"font-size: 12pt", 1.0f},     {"font-size: 24pt", 2.0f},
-      {"font-size: 8px", 0.5f},      {"font-size: 16px", 1.0f},     {"font-size: 32px", 2.0f},
-      {"font-size: xx-small", 0.6f}, {"font-size: x-small", 0.75f}, {"font-size: small", 0.8f},
-      {"font-size: smaller", 0.8f},  {"font-size: medium", 1.0f},   {"font-size: large", 1.2f},
-      {"font-size: larger", 1.2f},   {"font-size: x-large", 1.4f},  {"font-size: xx-large", 1.6f},
-      {"font-size: 160%", 1.6f},     {"font-size: 1.4em", 1.4f},
+      {"font-size: 9pt", 0.75f},         {"font-size: 12pt", 1.0f},
+      {"font-size: 24pt", 2.0f},         {"font-size: 8px", 0.5f},
+      {"font-size: 16px", 1.0f},         {"font-size: 32px", 2.0f},
+      {"font-size: xx-small", 3.0f / 5}, {"font-size: x-small", 3.0f / 4},
+      {"font-size: small", 8.0f / 9},    {"font-size: smaller", 1.0f / 1.2f},
+      {"font-size: medium", 1.0f},       {"font-size: large", 6.0f / 5},
+      {"font-size: larger", 1.2f},       {"font-size: x-large", 3.0f / 2},
+      {"font-size: xx-large", 2.0f},     {"font-size: xxx-large", 3.0f},
+      {"font-size: 160%", 1.6f},         {"font-size: 1.4em", 1.4f},
   };
   for (const auto& c : cases) {
     const CssStyle st = CssParser::parseInlineStyle(c.decl);

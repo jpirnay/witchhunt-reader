@@ -1237,22 +1237,29 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
           ok = true;
         }
       } else {
-        // CSS absolute-size / relative-size keywords, mapped to the same multiplier
-        // steps microreader uses (smaller/larger fold onto small/large).
+        // CSS absolute-size keywords on the scale of CSS Fonts Level 4 (section 2.5, the table of
+        // absolute-size keywords), as factors of medium; smaller and larger are relative-size
+        // keywords, one step of 1.2 down or up from the parent's size.
         if (val == "xx-small") {
-          parsed = 0.6f;
+          parsed = 3.0f / 5.0f;
         } else if (val == "x-small") {
-          parsed = 0.75f;
-        } else if (val == "small" || val == "smaller") {
-          parsed = 0.8f;
+          parsed = 3.0f / 4.0f;
+        } else if (val == "small") {
+          parsed = 8.0f / 9.0f;
         } else if (val == "medium") {
           parsed = 1.0f;
-        } else if (val == "large" || val == "larger") {
-          parsed = 1.2f;
+        } else if (val == "large") {
+          parsed = 6.0f / 5.0f;
         } else if (val == "x-large") {
-          parsed = 1.4f;
+          parsed = 3.0f / 2.0f;
         } else if (val == "xx-large") {
-          parsed = 1.6f;
+          parsed = 2.0f;
+        } else if (val == "xxx-large") {
+          parsed = 3.0f;
+        } else if (val == "smaller") {
+          parsed = 1.0f / 1.2f;
+        } else if (val == "larger") {
+          parsed = 1.2f;
         }
         ok = parsed > 0.0f;
         fromRoot = val != "smaller" && val != "larger";
