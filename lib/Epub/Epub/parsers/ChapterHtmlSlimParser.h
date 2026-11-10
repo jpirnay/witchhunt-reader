@@ -297,12 +297,23 @@ class ChapterHtmlSlimParser final : public Print {
   // while the span is open, then rendered as its own top-aligned PageLine with a
   // FloatZone so the paragraph's first lines wrap beside it — the same mechanism
   // used for left-floated inline images.
+  // CSS initial-letter asks for one in so many lines, on such a span (float and size or not) or on the paragraph's
+  // ::first-letter: the letter is then as tall as the lines it spans, whatever font-size the book gives it.
   static constexpr float kDropCapMinMultiplier = 1.95f;  // spans below this render inline
   static constexpr float kDropCapMaxMultiplier = 4.0f;   // ≈3 text lines tall
   static constexpr int16_t kDropCapGapPx = 6;            // horizontal gap between cap and text
+  // The most lines an initial-letter cap spans (crosspoint-reader's MAX_INITIAL_LETTER too), and fewer where the cap
+  // would take more than half the column's width.
+  static constexpr uint8_t kMaxInitialLetterLines = 6;
   struct PendingDropCap {
-    bool active = false;      // true while capturing the span's text
-    int depth = 0;            // parser depth of the drop-cap span (pre-increment)
+    bool active = false;  // true while capturing the span's text
+    int depth = 0;        // parser depth of the drop-cap span (pre-increment)
+    // initial-letter: the lines the cap spans (2 and up; 0 for a cap sized by its font-size) and the lines it sinks,
+    // fewer for a raised cap, more for a sunken one.
+    uint8_t lines = 0;
+    uint8_t sink = 0;
+    // Captured from a ::first-letter rule: the capture ends after the first letter, and the punctuation before it.
+    bool firstLetter = false;
     float multiplier = 1.0f;  // composed font-size multiplier relative to the body font
     EpdFontFamily::Style style = EpdFontFamily::REGULAR;
     uint32_t family = 0;  // CssStyle::fontFamily of the cap, while the book has other families (fontFamilies_)
@@ -1067,10 +1078,23 @@ class ChapterHtmlSlimParser final : public Print {
   // Attach the pending inline float image to `bs` and place it on the current page.
   // Clears pendingInlineImage_ on return.  No-op if pendingInlineImage_ is not active.
   void attachPendingFloatImage(BlockStyle& bs);
-  // Begin drop-cap capture when a left-floated large-font inline element opens at the
+  // Begin drop-cap capture when a left-floated large-font inline element, or one with an initial-letter, opens at the
   // start of an empty paragraph. Returns true when capture started (the element must
   // then not push an inline style entry).
   bool tryStartDropCapCapture(const CssStyle& cssStyle);
+  // Where a drop cap may start: at the start of an empty paragraph, horizontal and left to right, with no float, table
+  // or census in the way.
+  bool dropCapPositionAllows() const;
+  // Whether a style asks for a drop cap: an initial-letter of two lines or more, or a left float at a cap's size.
+  static bool dropCapStyleAsks(const CssStyle& cssStyle);
+  // Starts capturing the cap `cssStyle` describes; `firstLetter`: a ::first-letter's, which takes one letter.
+  void startDropCap(const CssStyle& cssStyle, bool firstLetter);
+  // A block element opening: its ::first-letter style, when that asks for a drop cap, waits for the block's first text
+  // (firstLetterDepth_).
+  void armFirstLetter(const char* name, const std::string& classAttr, const std::string& idAttr);
+  // The element whose ::first-letter style (firstLetterStyle_) waits for its first text; -1 when none waits.
+  int firstLetterDepth_ = -1;
+  CssStyle firstLetterStyle_;
   // Place the captured drop cap: one-word PageLine on the current page plus a FloatZone
   // on the paragraph's block style. Falls back to an inline word when the cap is unusable.
   void finalizePendingDropCap();
