@@ -49,6 +49,10 @@ void PageImage::renderWithForceLoad(GfxRenderer& renderer, const int xOffset, co
 bool PageImage::serialize(FsFile& file) {
   serialization::writePod(file, xPos);
   serialization::writePod(file, yPos);
+  // A flags byte, and the link's hash after it when it has one: a block image costs one byte.
+  const uint8_t flags = static_cast<uint8_t>((inLine_ ? kInLine : 0) | (linkHash_ != 0 ? kLinked : 0));
+  serialization::writePod(file, flags);
+  if (linkHash_ != 0) serialization::writePod(file, linkHash_);
 
   // serialize ImageBlock
   return imageBlock->serialize(file);
@@ -59,13 +63,21 @@ std::unique_ptr<PageImage> PageImage::deserialize(FsFile& file) {
   int16_t yPos;
   serialization::readPod(file, xPos);
   serialization::readPod(file, yPos);
+  uint8_t flags = 0;
+  serialization::readPod(file, flags);
+  if ((flags & ~(kInLine | kLinked)) != 0) {
+    LOG_ERR("PGE", "PageImage: unknown flags 0x%02X", flags);
+    return nullptr;
+  }
+  uint32_t linkHash = 0;
+  if ((flags & kLinked) != 0) serialization::readPod(file, linkHash);
 
   auto ib = ImageBlock::deserialize(file);
   if (!ib) {
     LOG_ERR("PGE", "PageImage: ImageBlock deserialize failed");
     return nullptr;
   }
-  return std::unique_ptr<PageImage>(new PageImage(std::move(ib), xPos, yPos));
+  return std::unique_ptr<PageImage>(new PageImage(std::move(ib), xPos, yPos, (flags & kInLine) != 0, linkHash));
 }
 
 void PageHR::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {

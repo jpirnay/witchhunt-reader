@@ -3382,6 +3382,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       }
       self->currentFootnote.number[0] = '\0';
       self->currentFootnoteLinkTextLen = 0;
+      self->currentFootnoteHoldsImage_ = false;
 
       // Apply underline style to visually indicate the link
       self->underlineUntilDepth = std::min(self->underlineUntilDepth, self->depth);
@@ -4461,7 +4462,9 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
 
   // Closing a footnote link — create entry from collected text and href
   if (self->insideFootnoteLink && self->depth == self->footnoteLinkDepth) {
-    if (self->currentFootnote.number[0] != '\0' && self->currentFootnote.href[0] != '\0') {
+    // A link around an image alone has no text: it is kept all the same, for its image to be tapped and listed.
+    if ((self->currentFootnote.number[0] != '\0' || self->currentFootnoteHoldsImage_) &&
+        self->currentFootnote.href[0] != '\0') {
       FootnoteEntry entry = self->currentFootnote;
       // In the parser's tokens, as each line counts them: a token layout merged counts as its parts.
       int wordIndex = self->wordsExtractedInBlock +
@@ -5747,7 +5750,8 @@ void ChapterHtmlSlimParser::placeBackgroundImage(const std::string& resolvedPath
 
 bool ChapterHtmlSlimParser::placeImageWithBlockSpacing(const std::string& cachedImagePath, const std::string& entryPath,
                                                        const std::string& alt, const int displayWidth,
-                                                       const int displayHeight, const uint32_t visibleOffset) {
+                                                       const int displayHeight, const uint32_t visibleOffset,
+                                                       const uint32_t linkHash) {
   applyPendingPageBreak();
 
   // If the current text block is still empty, it may carry accumulated parent
@@ -5801,7 +5805,7 @@ bool ChapterHtmlSlimParser::placeImageWithBlockSpacing(const std::string& cached
   turnIfVertical(imageBlock.get());
   const int xPos = (viewportWidth - displayWidth) / 2;
   const int yPos = currentPageNextY;
-  auto pageImage = makeUniqueNoThrow<PageImage>(std::move(imageBlock), xPos, yPos);
+  auto pageImage = makeUniqueNoThrow<PageImage>(std::move(imageBlock), xPos, yPos, /*inLine=*/false, linkHash);
   if (!pageImage) {
     LOG_ERR("EHP", "Failed to create PageImage");
     return false;
@@ -5873,6 +5877,10 @@ bool ChapterHtmlSlimParser::addLineImage(const std::string& entryPath, std::stri
   image.height = static_cast<int16_t>(displayHeight);
   image.align = align;
   image.visibleOffset = visibleTextOffset_;
+  if (insideFootnoteLink && currentFootnote.href[0] != '\0') {
+    image.linkHash = linkHrefHash(currentFootnote.href);
+    currentFootnoteHoldsImage_ = true;
+  }
   image.entryPath = entryPath;
   image.alt = std::move(alt);
   LOG_TRC("EHP", "Line image %u: %dx%d %s", id, displayWidth, displayHeight, entryPath.c_str());
@@ -5960,7 +5968,10 @@ void ChapterHtmlSlimParser::placeLineImages(const std::span<const ParsedText::Li
     auto imageBlock = makeUniqueNoThrow<ImageBlock>(imageCachePathFor(imageBasePath, it->entryPath), it->width,
                                                     it->height, std::move(it->alt), epub->getPath(), it->entryPath);
     std::unique_ptr<PageImage> pageImage;
-    if (imageBlock) pageImage = makeUniqueNoThrow<PageImage>(std::move(imageBlock), xOffset + object.x, y);
+    if (imageBlock) {
+      pageImage =
+          makeUniqueNoThrow<PageImage>(std::move(imageBlock), xOffset + object.x, y, /*inLine=*/true, it->linkHash);
+    }
     if (pageImage) {
       currentPage->elements.push_back(std::move(pageImage));
       ++lineImagesOnPage_;
@@ -5981,7 +5992,7 @@ bool ChapterHtmlSlimParser::placeImageOnlyParagraph() {
   currentTextBlock->reset(currentTextBlock->getBlockStyle());
   for (const PendingLineImage& image : pendingLineImages_) {
     if (!placeImageWithBlockSpacing(imageCachePathFor(imageBasePath, image.entryPath), image.entryPath, image.alt,
-                                    image.width, image.height, image.visibleOffset)) {
+                                    image.width, image.height, image.visibleOffset, image.linkHash)) {
       break;
     }
   }

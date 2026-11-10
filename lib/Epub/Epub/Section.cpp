@@ -38,7 +38,8 @@
 
 namespace {
 constexpr uint8_t SECTION_FILE_VERSION = 122;  // v122: an image a line or two tall in a run of text is set in its
-                                               // line, as a word is
+                                               // line, as a word is; a page image says whether it is in a line,
+                                               // and the link it is inside
                                                // v121: the font-size keywords take the CSS Fonts 4 scale (small 8/9,
                                                // x-large 3/2, xx-large 2, xxx-large 3, smaller 1/1.2)
                                                // v120: a character the parser's 256-byte text chunks cut is read

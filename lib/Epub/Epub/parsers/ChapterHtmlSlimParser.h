@@ -304,6 +304,7 @@ class ChapterHtmlSlimParser final : public Print {
     int16_t height = 0;
     CssVerticalAlign align = CssVerticalAlign::Baseline;
     uint32_t visibleOffset = 0;
+    uint32_t linkHash = 0;  // the internal link it is inside (linkHrefHash), 0: none
     std::string entryPath;
     std::string alt;  // capped as ImageBlock caps it
   };
@@ -763,6 +764,9 @@ class ChapterHtmlSlimParser final : public Print {
   int footnoteLinkDepth = -1;
   FootnoteEntry currentFootnote = {};
   size_t currentFootnoteLinkTextLen = 0;
+  // The link holds a line image: it is kept without text of its own (its image is what a reader taps), and listed
+  // with the footnote list's link label (STR_LINK).
+  bool currentFootnoteHoldsImage_ = false;
   // Non-owning; the Section's BuildState keeps the lookup alive across build slices.
   // Membership in the book's preview store is the sole expansion gate: it already encodes
   // "this link points at a real note", so no epub:type/same-file checks here. The store is
@@ -1092,8 +1096,10 @@ class ChapterHtmlSlimParser final : public Print {
   // An image of the flow on a line of its own, centred, with the spacing of the empty block it stands in (a figure's or
   // a paragraph's margins), which it uses up: the block's style is reset for the text after it. A page break pending
   // goes first, and a page that has no room for it ends. False when no page or image could be had.
+  // linkHash: the link a line image of an image-only paragraph is inside (PageImage::linkHash).
   bool placeImageWithBlockSpacing(const std::string& cachedImagePath, const std::string& entryPath,
-                                  const std::string& alt, int displayWidth, int displayHeight, uint32_t visibleOffset);
+                                  const std::string& alt, int displayWidth, int displayHeight, uint32_t visibleOffset,
+                                  uint32_t linkHash = 0);
   // Whether an <img> of this style and display size is set in its line (PendingLineImage): at most kLineImageMaxLines
   // of the paragraph's lines tall, not floated or made a block by the book, and not in a float, a table cell, a ruby or
   // a vertical section, which keep their own paths.
