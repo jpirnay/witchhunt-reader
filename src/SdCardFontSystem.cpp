@@ -78,6 +78,9 @@ void ttfReleaseShapingFaces() {
 }
 
 void ttfPassEnded() {
+  // What shaped UI text kept for the pass first: the string it shaped last, and a shaping face it made (with its
+  // plans).
+  GfxRenderer::endUiTextPass();
   if (ttfSystem) ttfSystem->releaseTtfMissMemory();
   returnGlyphLend();
 }

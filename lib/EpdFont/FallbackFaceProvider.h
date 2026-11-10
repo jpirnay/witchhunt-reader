@@ -24,7 +24,9 @@ class FontDecompressor;
 /// One more face may come from the reader's font (setReaderFace): a 2-bit TrueType face at this size, whose glyphs
 /// are drawn as the ink of their black-and-white pass (packInkMask), so a book title in a script the built-in faces
 /// lack draws in the font the book is read in. It lends real characters only, never its replacement glyph (U+FFFD)
-/// or the stand-in: a character it lacks is the UI faces' to draw or leave out.
+/// or the stand-in: a character it lacks is the UI faces' to draw or leave out. When that face draws glyph keys, an
+/// Indic or Myanmar title is shaped over it (shapingSource(), GfxRenderer's UI text) and its glyphs are served by key,
+/// as the same ink.
 class FallbackFaceProvider final : public GlyphProvider {
  public:
   static constexpr uint8_t MAX_FACES = 4;
@@ -105,6 +107,9 @@ class FallbackFaceProvider final : public GlyphProvider {
     formsCtx_ = ctx;
   }
   bool formsArabic() const override { return formsArabic_ && formsArabic_(formsCtx_); }
+  /// The reader's face, when serve() would lend it `probe` for the string begun last (no face before it holds the
+  /// probe) and it draws glyph keys; its glyphs then come by key through missGlyph(), from it alone.
+  const EpdFontData* shapingSource(uint32_t probe) override;
 
  private:
   // A served glyph as GlyphProvider hands it out: a full EpdGlyph record (the faces store the 6-byte
@@ -146,6 +151,7 @@ class FallbackFaceProvider final : public GlyphProvider {
   bool (*formsArabic_)(void* ctx) = nullptr;
   void* formsCtx_ = nullptr;
 
+  uint8_t facesBeforeReader() const;  // serve()'s built-in faces ahead of the reader's: 0 or 1
   const EpdGlyph* serve(uint32_t codepoint);
   const EpdGlyph* servePack(uint32_t codepoint);
   const EpdGlyph* serveFrom(const EpdFontData* face, uint32_t codepoint, bool reader);

@@ -643,19 +643,38 @@ bool holdsShaped(std::string_view text) {
          myanmar::holdsMyanmar(text.data(), text.size());
 }
 
+namespace {
+
+// A piece's bytes are uint16_t, and ot::Buffer numbers at most 65536 slots.
+bool callFits(const size_t tokenBytes, const unsigned runCodepoints) {
+  return tokenBytes <= UINT16_MAX && runCodepoints <= (UINT16_MAX - kGrowthExtra) / kGrowthFactor;
+}
+
+// A call without a face writes IndicReorder's form and nothing else, so it takes the form's room alone: a book in such
+// a font holds a heap block of the longest token's form (in 512 B steps), not the 6.5 KB a shaping call takes on the
+// C3. The code points: a run's (at most tokenBytes / kRunCodepointBytes) and the context on either side (an Arabic
+// run's joiners before it count in its context).
+Sizes callSizes(const size_t tokenBytes, const CallKind kind, const unsigned runCodepoints) {
+  const bool shapes = kind == CallKind::Shape;
+  return Sizes{shapes, shapes ? ot::Buffer::bytesFor(kGrowthFactor * runCodepoints + kGrowthExtra) : 0,
+               shapes ? maxRuns(tokenBytes) : 0,
+               shapes ? tokenBytes / kRunCodepointBytes + 2 * kMaxContextCodepoints : 0, 3 * tokenBytes + 1};
+}
+
+}  // namespace
+
+size_t CallMemory::bytesFor(const size_t tokenBytes, const CallKind kind, const unsigned runCodepoints) {
+  if (!callFits(tokenBytes, runCodepoints)) return 0;
+  Carver measure;
+  layOut(measure, callSizes(tokenBytes, kind, runCodepoints));
+  return measure.bytes();
+}
+
 CallMemory::CallMemory(BuildArena* const arena, const size_t tokenBytes, const CallKind kind,
                        const unsigned runCodepoints) {
-  // A piece's bytes are uint16_t, and ot::Buffer numbers at most 65536 slots.
-  if (tokenBytes > UINT16_MAX || runCodepoints > (UINT16_MAX - kGrowthExtra) / kGrowthFactor) return;
-  // A call without a face writes IndicReorder's form and nothing else, so it takes the form's room alone: a book in
-  // such a font holds a heap block of the longest token's form (in 512 B steps), not the 6.5 KB a shaping call takes
-  // on the C3.
-  // The code points: a run's (at most tokenBytes / kRunCodepointBytes) and the context on either side (an Arabic
-  // run's joiners before it count in its context).
+  if (!callFits(tokenBytes, runCodepoints)) return;
   const bool shapes = kind == CallKind::Shape;
-  const Sizes sizes{shapes, shapes ? ot::Buffer::bytesFor(kGrowthFactor * runCodepoints + kGrowthExtra) : 0,
-                    shapes ? maxRuns(tokenBytes) : 0,
-                    shapes ? tokenBytes / kRunCodepointBytes + 2 * kMaxContextCodepoints : 0, 3 * tokenBytes + 1};
+  const Sizes sizes = callSizes(tokenBytes, kind, runCodepoints);
   Carver measure;
   layOut(measure, sizes);
 

@@ -154,4 +154,18 @@ class GlyphProvider {
     (void)refused;
     return nullptr;
   }
+
+  /// Whether this provider's shaping face is made now (shapingFace() would hand out one it holds): asked without
+  /// making it, so a caller can tell a face it made from one a section build holds.
+  virtual bool holdsShapingFace() const { return false; }
+
+  /// The TrueType face behind this provider that draws `probe` (a script's probe letter: indic::ScriptInfo::probe,
+  /// myanmar::kProbe) in the string begun last (beginText()), when its provider draws glyph keys: the face UI text in
+  /// that script can be shaped over (its provider's shapingFace()). This provider then serves that face's glyphs by
+  /// key (glyph_key) through missGlyph(), as it serves its characters. nullptr when no such face would draw `probe`:
+  /// the script is drawn as its characters. Renders nothing; the face's cmap is the caller's to ask.
+  virtual const EpdFontData* shapingSource(uint32_t probe) {
+    (void)probe;
+    return nullptr;
+  }
 };
