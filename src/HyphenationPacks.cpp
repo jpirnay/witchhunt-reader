@@ -282,7 +282,10 @@ void bookClosed() {
   // The loaded trie stays: it lies in PSRAM, which is mapped whole at boot, so it holds no MMU page and no internal
   // RAM, and the next book in its language opens without reading the pack again (load()).
 #else
+  const uint32_t before = flash.freeMapPages();
   unmapAll();
+  LOG_DBG("HYP", "book closed: tries unmapped, MMU pages free %u -> %u", static_cast<unsigned>(before),
+          static_cast<unsigned>(flash.freeMapPages()));
 #endif
 }
 
