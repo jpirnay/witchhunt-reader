@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <Epub/BidiLine.h>
+#include <Epub/ShapingHeapCheck.h>
 #include <Epub/hyphenation/Hyphenator.h>
 #include <Epub/parsers/ChapterHtmlSlimParser.h>
 #include <GfxRenderer.h>
@@ -82,6 +83,9 @@ bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definiti
   const char* limitReason = nullptr;
   size_t retainedElements = 0;
   bool parsed = false;
+  // The shaping plans the layout makes leave the shaped floor free, as a section build's do. Declared first, so it is
+  // taken away last, after the faces and their plans are released below.
+  const ShapingHeapCheck shapingHeapCheck;
   // No Section build ends here, so nothing else frees the line pass's heap memory (a right-to-left article made it)
   // or the shaping pass's and its faces (an Indic one did). Declared before the parser's block: it runs on every
   // exit, after the parser is gone.

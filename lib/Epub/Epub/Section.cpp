@@ -30,13 +30,19 @@
 #include "Epub/css/CssParser.h"
 #include "FootnotePreviews.h"
 #include "Page.h"
+#include "ShapingHeapCheck.h"
 #include "TypographyProfile.h"
 #include "blocks/ImageBlock.h"  // image_scratch: pass-wide decode arena
 #include "hyphenation/Hyphenator.h"
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 119;  // v119: an Arabic number sign (the end of ayah) is shaped with the
+constexpr uint8_t SECTION_FILE_VERSION = 120;  // v120: a character the parser's 256-byte text chunks cut is read
+                                               // whole: a joiner after a word's first Arabic or Myanmar letter is
+                                               // kept, such a letter takes no drop cap, a cut no-break space is one,
+                                               // and a cut CJK character counts toward its run's flush; a chillu's
+                                               // joiner ending a word at the word buffer's limit is kept
+                                               // v119: an Arabic number sign (the end of ayah) is shaped with the
                                                // digits after it, drawn around them
                                                // v118: class and id selectors match case-sensitively; a chapter laid
                                                // out with folded matching kept the wrong rule
@@ -916,6 +922,9 @@ bool Section::clearCache() {
 // unique_ptr so its address (and thus visitor's completePageFn lut capture) is stable
 // across phase calls and, later, across loop ticks.
 struct Section::BuildState {
+  // The shaping plans the build makes leave the shaped floor free. First, so it is taken away last: after the
+  // destructor has released the faces and their plans.
+  ShapingHeapCheck shapingHeapCheck;
   BuildParams params;
   std::function<void(int)> progressFn;
   uint32_t propertyHash = 0;

@@ -32,9 +32,12 @@ constexpr uint8_t NON_SPACING_MARK = 12;
 constexpr bool isMark(const uint8_t cat) { return cat >= SPACING_MARK && cat <= NON_SPACING_MARK; }
 }  // namespace gc
 
-// Asked before the shaper takes heap memory that depends on the font or the
-// text (plan lists and filters): whether `bytes` more may be allocated.  // witchhunt: deviation 1
-// The default allows any size. Global; set it once, before shaping.
+// Asked before the shaper takes heap memory for a plan (its lists, its lookups'
+// digests and filters, the builder's scratch): whether `bytes` more may be
+// allocated.  // witchhunt: deviation 1
+// The default allows any size. Global, and changed only between shapings: the
+// firmware installs a free-heap floor for the span of a layout build
+// (ShapingHeapCheck in lib/Epub) and removes it after.
 using HeapCheck = bool (*)(size_t bytes);
 void setHeapCheck(HeapCheck check);
 bool heapAvailable(size_t bytes);

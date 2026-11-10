@@ -118,7 +118,6 @@ class ShapedStore final : public IndicShaper::PieceSink {
   bool oversize(size_t chunk) const { return chunks_[chunk].size > kChunkBytes; }
   template <typename T>
   static bool grow(std::vector<T>& v, size_t extra, bool exact);
-  static bool heapAllows(size_t bytes);
 
   std::vector<Piece> pieces_;
   std::vector<Entry> entries_;

@@ -174,8 +174,9 @@ class ChapterHtmlSlimParser final : public Print {
   // the word's offset if the joiner opens it. A word with no room for the joiner and that code point is flushed first,
   // so the two stay together. False when the stream failed.
   bool releaseHeldJoiner(uint32_t offset, int nextLen);
-  // Ends the held joiner's wait at a word's end: it goes last in the word in the buffer; when an inline end sent that
-  // word out already and no space came since, onto its last token; else it goes.
+  // Ends the held joiner's wait at a word's end: it goes last in the word in the buffer (a buffer with no room for it
+  // sends the word out first); when the word went out (that flush, or an inline end with no space since), onto its
+  // last token; else it goes.
   void settleHeldJoiner();
   // Hands on, as text, a split-sequence tail that never got its rest (malformed text), at an element's edge.
   void deliverSplitTail();
@@ -185,9 +186,9 @@ class ChapterHtmlSlimParser final : public Print {
     joinerLookBehind_ = 0;
     droppingJoinerRun_ = false;
   }
-  // The start of a 3-byte sequence (E0 or E2 lead) a SAX chunk ended inside, with the visible offset of its first byte;
+  // The start of a UTF-8 sequence a SAX chunk ended inside (1 to 3 bytes), with the visible offset of its first byte;
   // characterData completes it from the next chunk, so a letter or joiner is never read in halves.
-  char splitTail_[2] = {};
+  char splitTail_[3] = {};
   uint8_t splitTailLen_ = 0;
   uint32_t splitTailOffset_ = 0;
   // A whitespace run with a line break in it followed unspaced CJK text or a quotation mark

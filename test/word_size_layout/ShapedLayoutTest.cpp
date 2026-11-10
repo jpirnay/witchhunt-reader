@@ -21,6 +21,7 @@
 #include "Epub/HeapGrowth.h"
 #include "Epub/ParsedText.h"
 #include "Epub/ShapedStore.h"
+#include "Epub/ShapingHeapCheck.h"
 #include "Epub/WordShapeCache.h"
 #include "Epub/blocks/TextBlock.h"
 #include "Epub/hyphenation/Hyphenator.h"
@@ -373,6 +374,43 @@ TEST_F(ShapedLayout, AtTheFreeHeapFloorAParagraphShapesNothingAndLatches) {
   ASSERT_EQ(1u, lines.size());
   EXPECT_TRUE(lines[0]->hasGlyphForm(0));
   EXPECT_FALSE(latch);
+}
+
+TEST_F(ShapedLayout, APlanTheBuildsFloorRefusesLaysTheTokensOutAsCodePointsAndLatches) {
+  // A build's ShapingHeapCheck puts the plan behind the same floor: with 2 KB free above it, the store's growths (a
+  // 1 KB chunk the most) fit and the plan (the builder's 3.1 KB scratch) does not. No plan is built, every token is
+  // laid out as its code points, and the paragraph latches. The largest block is ample throughout.
+  const uint32_t savedFree = ESP.getFreeHeap();
+  const auto aboveTheFloor = [] { ESP.setFreeHeap(static_cast<uint32_t>(heap_growth::kShapedFreeFloor + 2048)); };
+  Lines lines;
+  {
+    const ShapingHeapCheck build;
+    ParsedText text(false, false, noIndentStyle());
+    text.setShapingLatch(&latch);
+    add(text, {{kHindi}, {kPatrika}});
+    aboveTheFloor();
+    lines = layOut(text, renderer, 400);
+    ESP.setFreeHeap(savedFree);
+  }
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_FALSE(lines[0]->hasGlyphForm(0));
+  EXPECT_FALSE(lines[0]->hasGlyphForm(1));
+  EXPECT_EQ(kHindi, lines[0]->wordText(0));
+  EXPECT_TRUE(latch);
+  EXPECT_EQ(0, face->planBuilds());
+
+  // Outside a build (UI text) no check is installed: the same heap builds the plan, and the paragraph shapes.
+  latch = false;
+  ParsedText again(false, false, noIndentStyle());
+  again.setShapingLatch(&latch);
+  add(again, {{kHindi}, {kPatrika}});
+  aboveTheFloor();
+  lines = layOut(again, renderer, 400);
+  ESP.setFreeHeap(savedFree);
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_TRUE(lines[0]->hasGlyphForm(0));
+  EXPECT_FALSE(latch);
+  EXPECT_EQ(1, face->planBuilds());
 }
 
 TEST_F(ShapedLayout, ANoBreakSpaceIsNeverMerged) {

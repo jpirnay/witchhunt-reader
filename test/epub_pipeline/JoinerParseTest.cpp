@@ -120,6 +120,22 @@ TEST_F(Joiners, AJoinerStaysWithTheLetterAfterItAtTheBufferLimit) {
   EXPECT_EQ(wordsOf("<p>" + word + kZwj + "ष</p>"), Words{word + kZwj + "ष"});
 }
 
+// A chillu's joiner ending a word that leaves the word buffer (limit 200 bytes) less than its 3 bytes: the word goes
+// out first, and the joiner ends its last token, so ന് stays a chillu rather than na with a visible virama.
+TEST_F(Joiners, AChilluJoinerAtTheBufferLimitIsKept) {
+  // 198, 199 and 200 bytes in the buffer when the joiner comes: the prefix, 64 times വ and ന്, 3 bytes each.
+  for (const std::string prefix : {"", "a", "ab"}) {
+    std::string word = prefix;
+    for (int i = 0; i < 64; ++i) word += "വ";
+    word += "ന്";
+    EXPECT_EQ(wordsOf("<p>" + word + kZwj + " വന്നു</p>"), (Words{word + kZwj, "വന്നു"})) << word.size();
+    EXPECT_EQ(wordsOf("<p>" + word + kZwj + "</p>"), Words{word + kZwj}) << word.size();
+    // It is in its virama's token, not a token of its own: the parser's tokens show in a ruby base (inRuby), which
+    // keeps its space as a token too.
+    EXPECT_EQ(wordsOf(inRuby(word + kZwj + " x")), (Words{word + kZwj, " ", "x"})) << word.size();
+  }
+}
+
 // A guard, not a RED test: this pins that a joiner after anything but a letter of the shaped blocks is dropped.
 TEST_F(Joiners, AJoinerAfterAnythingElseIsDropped) {
   EXPECT_EQ(wordsOf("<p>a" + kZwj + "b</p>"), Words{"ab"});
@@ -150,6 +166,26 @@ TEST_F(Joiners, AJoinerSplitFromItsLetterByAChunkBoundaryIsKept) {
       EXPECT_EQ(textOf("<p>" + filler + "्" + kZwj + kZwj + "ष</p>"), filler + "्ष")
           << "prefix=" << prefixLen << " n=" << n;
     }
+  }
+}
+
+// A word's first letter cut by the same flush, after whitespace, where the look-behind starts empty: an Arabic letter
+// is 2 bytes, a Myanmar one 3 with no E0 or E2 lead. The leading spaces move the cut through every byte of the word.
+TEST_F(Joiners, AJoinerAfterAWordsFirstLetterCutByAChunkBoundaryIsKept) {
+  const std::string halfSpace = "\u06A9" + kZwnj + "\u0647";  // keh, ZWNJ, heh: Persian's half-space
+  const std::string medial = "\u1000" + kZwj + "\u103B";      // ka, ZWJ, medial ya
+  for (int n = 248; n <= 258; ++n) {
+    const std::string spaces(static_cast<size_t>(n), ' ');
+    EXPECT_EQ(textOf("<p>" + spaces + halfSpace + "</p>"), halfSpace) << "n=" << n;
+    EXPECT_EQ(textOf("<p>" + spaces + medial + "</p>"), medial) << "n=" << n;
+  }
+}
+
+// The same hold reads a no-break space the flush cuts as one: a token of its own, not two bytes inside a word.
+TEST_F(Joiners, ANoBreakSpaceCutByAChunkBoundaryIsOne) {
+  for (int n = 250; n <= 258; ++n) {
+    const std::string spaces(static_cast<size_t>(n), ' ');
+    EXPECT_EQ(wordsOf("<p>" + spaces + "x\u00A0y</p>"), (Words{"x", " ", "y"})) << "n=" << n;
   }
 }
 

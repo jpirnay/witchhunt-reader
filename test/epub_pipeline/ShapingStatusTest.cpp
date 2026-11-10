@@ -1,8 +1,9 @@
 // A shaped-script run laid out unshaped is latched into the section file (kStatusShapingDegraded) so the reader can
 // rebuild once; a clean build lays its words out shaped (glyph forms) and a refused one does not; a clean rebuild on
-// the same Section clears the bit and records the page count; and a build's end frees the shaping pass's memory and
-// faces. Each case builds a one-chapter Hindi book through the host pipeline, with the Devanagari subset as the face
-// of every font.
+// the same Section clears the bit and records the page count; a build's end frees the shaping pass's memory and
+// faces; and while a build runs its plans keep the shaped free-heap floor. Each case builds a one-chapter Hindi book
+// through the host pipeline, with the Devanagari subset as the face of every font.
+#include <OtBuffer.h>
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -224,4 +225,35 @@ TEST_F(ShapingStatus, TheBuildsEndFreesTheShapingMemory) {
     EXPECT_EQ(GfxRenderer::shapingReleases, releasesBefore + 1) << build;
     section.clearCache();
   }
+}
+
+namespace {
+
+// The face source of ABuildsPlansKeepTheShapedFloor: it gives no face (the words are reordered) and records whether
+// the shaping engine's heap check refused a block larger than any heap, as it does only while a check is installed.
+int probes = 0;
+bool checkInstalled = false;
+ShapingFace* probeHeapCheck(int, EpdFontFamily::Style, uint32_t*, bool*) {
+  ++probes;
+  checkInstalled = !ot::heapAvailable(size_t{1} << 30);
+  return nullptr;
+}
+
+}  // namespace
+
+TEST_F(ShapingStatus, ABuildsPlansKeepTheShapedFloor) {
+  // The engine's check is installed for the build's span alone (ShapingHeapCheck in BuildState): a plan asked for
+  // during the build must leave the shaped store's free-heap floor; before and after it, nothing is checked.
+  const std::shared_ptr<Epub> epub = syntheticBook(work, 0, hindiBody());
+  EXPECT_TRUE(ot::heapAvailable(size_t{1} << 30));
+  GfxRenderer::shapingFaceSource = &probeHeapCheck;
+  probes = 0;
+  {
+    GfxRenderer renderer;
+    Section section(epub, 0, renderer);
+    ASSERT_TRUE(section.createSectionFile(params(), {}, /*skipEviction=*/true));
+  }
+  EXPECT_GT(probes, 0);
+  EXPECT_TRUE(checkInstalled);
+  EXPECT_TRUE(ot::heapAvailable(size_t{1} << 30));
 }
