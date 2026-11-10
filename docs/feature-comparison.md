@@ -25,9 +25,9 @@ LilyGo T5 S3 Pro and the Murphy M3.
 
 **CrossPoint is ahead on** highlights and clippings, Bluetooth page-turn remotes, night mode, library
 loans (LCP) and OPDS 2 catalogs, plugins on the device, indexed title and author search, boxed text with
-borders and shading, file rename and multi-delete on the device, 34 interface languages with a
-right-to-left interface in Arabic, Hebrew and Persian. It runs on six boards Witch Reader does not support: the Xteink X4 Classic,
-Seeed reTerminal Sticky, M5Stack PaperMono, Metalio E-Ink 4, EEGOREAD A4 and Onyx BOOX Picco.
+borders and shading, file rename and multi-delete on the device, 34 interface languages. It runs on six
+boards Witch Reader does not support: the Xteink X4 Classic, Seeed reTerminal Sticky, M5Stack PaperMono,
+Metalio E-Ink 4, EEGOREAD A4 and Onyx BOOX Picco.
 
 **Since June, CrossPoint has caught up on** small caps, strikethrough, CSS font sizes and headings, drop
 caps, grid tables, GIF images, transparent sleep overlays, named bookmarks, KOReader sign-up on the
@@ -86,15 +86,15 @@ OpenType files on ESP32-S3 boards. On the X3 and X4, see [Memory](#memory).
 | Vertical Chinese, Japanese and Korean | ✅ columns right to left, with ruby, emphasis dots and tate-chu-yoko | ❌ |
 | CJK emphasis dots (`text-emphasis`) | ✅ | ❌ |
 | Hyphenation languages | ✅ 32: English built in, 31 as downloadable packs | ✅ 11, built in |
-| Interface languages | ✅ 27, including Chinese, Japanese and Korean | ✅ 34, including Arabic, Hebrew and Persian |
-| Right-to-left interface | ❌ | ✅ Arabic, Hebrew, Persian |
+| Interface languages | ✅ 30, including Chinese, Japanese, Korean, Hebrew, Arabic and Persian | ✅ 34, including Arabic, Hebrew and Persian |
 | CJK book titles in menus | ✅ interface packs (1.5–3.3 MB downloads) | ⚠️ only when the reader font covers CJK |
 | Indic and Burmese book titles in menus | ⚠️ shaped in the last book's font, when it has the script | ❌ not shaped |
 | On-screen keyboard layouts | ✅ 11, including Hebrew, Arabic and Greek | ✅ 10, including Hebrew and Arabic |
 
-**Both have:** CJK line breaking and ruby in horizontal text (in vertical text, only Witch Reader sets
-CJK at all), Hebrew and Arabic titles in the menus (built into the menu fonts), Latin and Cyrillic in the
-built-in fonts, other scripts through SD-card fonts.
+**Both have:** a Hebrew, Arabic and Persian interface (text right to left, menus laid out left to right
+in both), CJK line breaking and ruby in horizontal text (in vertical text, only Witch Reader sets CJK at
+all), Hebrew and Arabic titles in the menus (built into the menu fonts), Latin and Cyrillic in the built-
+in fonts, other scripts through SD-card fonts.
 
 The bidi and shaping rows were measured 2026-11-10 against the Unicode 17 BidiCharacterTest and
 HarfBuzz 14.5. The Indic row counts book words drawn the same as the reference.
