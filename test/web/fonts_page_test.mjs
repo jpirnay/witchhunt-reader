@@ -139,5 +139,26 @@ for (const agree of [false, true]) {
   dom.window.close();
 }
 
+console.log('- the hyphenation packs, after the fonts');
+{
+  const { w, dom } = loadPage((u) => {
+    if (u === '/api/fonts') return response(200, { families: [] });
+    if (u === '/api/fonts/manifest') return response(200, { ...REMOTE, families: [
+      REMOTE.families[0],
+      { name: 'Hyphenation-Dutch', description: 'Hyphenation for books in Dutch', hyphenation: true, installed: false, hasUpdate: false, totalSize: 64313, fileCount: 1 },
+      { name: 'Hyphenation-German', description: 'Hyphenation for books in German', hyphenation: true, installed: true, hasUpdate: false, totalSize: 206283, fileCount: 1 },
+    ] });
+  });
+  await until(() => w.document.querySelectorAll('#remoteFamilies button[data-family]').length === 3);
+  const list = w.document.getElementById('remoteFamilies');
+  const heads = [...list.querySelectorAll('.family-group')];
+  same(heads.length, 1, 'one heading for the packs');
+  const order = [...list.children].map((e) => e.className === 'family-group' ? 'HEAD' : (e.querySelector('h3') || {}).textContent || e.className);
+  same(order.join(','), 'NotoSerifKR,HEAD,family-note,Hyphenation-Dutch,Hyphenation-German', 'it stands between the fonts and the packs');
+  const buttons = [...list.querySelectorAll('button[data-family]')].map((b) => b.textContent);
+  same(buttons.join(','), 'Download,Download,Reinstall', 'a pack is downloaded like a font');
+  dom.window.close();
+}
+
 console.log(failures ? `${failures} check(s) FAILED` : 'all passed');
 process.exit(failures ? 1 : 0);

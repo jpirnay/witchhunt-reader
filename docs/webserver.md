@@ -290,6 +290,12 @@ serif): install your language's with its own **Download**. The reader checks the
 A family too large for the reader's font area is installed but not listed, and the page says so. The
 reader downloads the files itself, so it must be online.
 
+Below the fonts, **Hyphenation packs** lists one pack per language: every language but English hyphenates
+with its pack (see [Hyphenation packs](../USER_GUIDE.md#hyphenation-packs)). **Download** installs one into
+the reader's `/.crosspoint/hyphenation/` folder, and on the X3 and X4 copies it into the reader's flash as
+well. **Download all updates** updates the packs you have, but fetches no missing one: install the languages
+of your books. A pack is deleted in the Font Manager on the reader.
+
 ![Downloading fonts](images/web/fonts-download.png)
 
 **Convert a font** makes a family from your own TrueType or OpenType files (`.ttf`, `.otf`, `.woff`),
