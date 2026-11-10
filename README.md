@@ -1,12 +1,24 @@
 # Witch(hunt) Reader
 
-This firmware is based on the [crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader), a great piece of software by Dave Allie and others.
+E-reader firmware for the Xteink X3, X4 and X4 Pro, the LilyGo T5S3 Pro and the Murphy M3, based on
+[crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader), a great piece of software by Dave Allie and
+others. It reads EPUB, TXT, Markdown and XTC books, lays out their CSS properly, and sets text in Latin, Cyrillic,
+Greek, Hebrew, Arabic, ten Indic scripts, Burmese, Chinese, Japanese and Korean, right to left and top to bottom
+included.
 
-It supports the following devices:
-- ESP32C3-based Xteink X4 and X3.
-- ESP32S3-based Xteink X4Pro, LilyGo T5S3 Pro, Murphy M3
+![Book pages on an Xteink X3 in English, Hebrew, Arabic, Hindi, Bengali, Tamil, Burmese, vertical Japanese, Chinese and Korean](docs/images/languages/gallery.png)
 
-# Installation
+*Screenshots from an Xteink X3. Every script but Latin is set in a Noto font from the Font Manager.*
+
+| Device | Chip | Touch | Notes |
+| --- | --- | --- | --- |
+| Xteink X4 | ESP32-C3 | no | software clock |
+| Xteink X3 | ESP32-C3 | no | hardware clock |
+| Xteink X4 Pro | ESP32-S3 | no | PSRAM |
+| LilyGo T5S3 Pro | ESP32-S3 | yes | PSRAM |
+| Murphy M3 | ESP32-S3 | yes | PSRAM, hardware clock |
+
+## Installation
 
 Flashing is done from the browser — no toolchain or driver install needed. Use a Chromium-based browser (Chrome, Edge, Opera) or a recent Firefox version (>151); older versions of Firefox and Safari do not support WebSerial.
 
@@ -16,192 +28,59 @@ Flashing is done from the browser — no toolchain or driver install needed. Use
 4. Choose **Custom .bin** and upload the `firmware.bin` you downloaded in step 1.
 5. Connect the device via USB and start the flash — pick the device's serial port when the browser asks.
 
-# What this reader does differently
-- Speed - rendering should be *fast*
-- CSS layout - a lot of effort have gone into rendering 
-- Memory - where others fail Witch Reader still works
-- Proper KOReader Synchronisation - a synced position lands on the exact page, in both directions
-- A Library with Books, Recent, New and Authors tabs, each shown as filenames, details (title, author, series, progress) or a grid of covers
-- SD-card fonts in every size they were built at, plus enlarged large-print sizes up to 26 pt
-- Additional sleep screens support (information overlay, transparent pictures over current reader screen)
-- Clock-Support for all supported devices
-- Weather information panel
-- Multiple under-the-hood performance improvements
-- Book information screen
-- Markdown-support
-- WiFi captive portal support
-- Supporting ~~strikethrough~~, superscript / subscript and tables
-- Chinese, Japanese and Korean books (horizontal text): CJK line breaking and punctuation rules, ruby and emphasis dots, CJK fonts from the font manager, CJK titles in the library, dictionary lookups on CJK text
-- Support for used defined actions on double-click / long-click per button 
-- Background preprocessing of sections, so hopefully you will see fewer of the infamous "Indexing" messages
-- A lot of smaller quality of life improvements 
+For everything the reader does and how to use it, see the **[User Guide](USER_GUIDE.md)**. How it compares with
+CrossPoint, feature by feature: **[Feature comparison](docs/feature-comparison.md)**.
 
-# What this reader doesn't
+## Languages and scripts
+
+| Script | Languages (examples) | Layout | Fonts (Font Manager) | Hyphenation |
+| --- | --- | --- | --- | --- |
+| Latin, Cyrillic | English, German, French, Spanish, Vietnamese, Russian, Ukrainian, ... | full CSS layout | built in, or any TrueType, OpenType or `.cpfont` | 20 languages; English built in, the others as downloadable packs |
+| Greek | Greek | full CSS layout | any TrueType or OpenType font with Greek letters; the built-in reading fonts have none | none yet |
+| Hebrew | Hebrew, Yiddish, Ladino | right to left, niqqud, right-to-left page turns | Noto Sans and Serif Hebrew | none |
+| Arabic script | Arabic, Persian, Urdu, Pashto, Sindhi, Kurdish | right to left, OpenType joining and marks, the end-of-ayah sign around its number | Noto Naskh Arabic, Noto Sans Arabic | none |
+| Indic, ten scripts | Hindi, Marathi, Nepali, Sanskrit, Bengali, Assamese, Punjabi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam, Sinhala | OpenType shaping: conjuncts, reph, vowel signs | Noto Sans and Serif per script | 12 languages, between syllables |
+| Myanmar | Burmese, Mon, Shan, S'gaw Karen | OpenType shaping, line breaks between syllables | Noto Sans and Serif Myanmar | syllable breaks |
+| Chinese, Japanese, Korean | | CJK line breaking and punctuation, ruby, emphasis dots, vertical text with tate-chu-yoko | Noto Sans and Serif CJK, per region | not needed |
+
+Shaping is OpenType, done once when a chapter is laid out and identical to HarfBuzz on the shipped fonts; bidi follows
+the Unicode algorithm, with the book's `dir`, `<bdi>`, `<bdo>`, `unicode-bidi` and page direction honoured. A book that
+needs a font or a hyphenation pack it does not have offers to download it when it opens. The interface is translated
+into 27 languages, and the keyboard has English, French, German, Spanish, Russian, Ukrainian, Belarusian, Kazakh,
+Hebrew, Arabic and Greek layouts. StarDict dictionaries look words up in horizontal and vertical text.
+
+## What this reader does differently
+
+- **Speed:** pages render fast, the next ones are prepared in the background, and chapters are indexed during reading
+  pauses, so the "Indexing" message shows up less often.
+- **Layout:** floating figures with text wrapped around them, real tables (colspan, images inside), small caps,
+  strikethrough, superscript and subscript, `line-height` and `font-size` from the book, drop caps, GIF, PNG and JPEG
+  images, large-image placeholders, Markdown with headings, tables and code.
+- **Memory:** where others run out, Witch Reader still works: a chapter is laid out in an arena lent from the second
+  framebuffer, and hyphenation patterns come from packs on the SD card instead of the firmware image.
+- **Fonts:** the Font Manager downloads TrueType, OpenType and `.cpfont` families over Wi-Fi; a book's own fonts can be
+  used (Publisher Fonts); large-print sizes up to 26 pt.
+- **Library:** Books, Recent, New and Authors tabs, as file names, details or a cover grid; a cover carousel on Home;
+  a book information screen; global bookmarks and named starred pages; reading statistics.
+- **Sync and network:** KOReader sync that lands on the exact page in both directions, OPDS catalogs, Calibre, a web
+  interface with file manager and settings, WebDAV, captive-portal login, weather.
+- **Device:** a clock on every board, sleep screens with an information overlay or a transparent picture over the page,
+  user-defined actions for each button's single, double and long press, touch gestures on the T5S3 and Murphy.
+
+## What this reader doesn't
+
 * Great UI design is not necessarily/obviously not a forte of mine, so if you look for a polished look and feel, I would recommend going e.g. to [CrossInk](https://github.com/uxjulia/crossink), a great piece of work by uxJulia
-* Right-to-left rendering support (Hebrew, Arabic) - choose the original [CrossPoint](https://github.com/crosspoint-reader/crosspoint-reader) firmware
 * The most memory efficient reader might still be [MicroReader](https://github.com/CidVonHighwind/microreader) by CidVonHighwind
+* PDF and MOBI books; Thai, Lao, Khmer and Tibetan; Nastaliq for Urdu and kashida justification for Arabic.
+* Indic and Burmese book titles outside the reader draw in the font of the last book read, and are left out when it lacks
+  their script; hyphenation for Greek, Romanian and Kazakh. The full list: **[Current Limitations](USER_GUIDE.md#7-current-limitations--roadmap)**.
 
 All of them have their strengths and constraints (as has Witch reader), so they deserve a testrun before you decide which one is right for you
 
+## Credits
 
-# Feature comparison with CrossPoint
-
-A feature-by-feature comparison of **Witch Reader** against its ancestor,
-**[CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)**, focused on what
-a user actually sees and does on the device.
-
-> **Snapshot of 2026-06-19.** Both projects are under active and dynamic development, so individual
-> rows may change quickly — treat this as a point-in-time picture rather than a guarantee. The
-> entries were verified against the current source of both projects rather than commit history,
-> since the two have effectively diverged.
-
-Legend: ✅ supported · ⚠️ partial / basic · ❌ not supported.
-
-## Rendering & Typography
-
-| Feature | Witch Reader | CrossPoint |
-| --- | :---: | :---: |
-| Floating images / text wrap around figures | ✅ left/right float, text wraps beside figure | ❌ falls back to block placement |
-| Tables | ✅ real grid (colspan, header cells, multi-column) | ⚠️ flattened to text ("Row X, Cell Y:") |
-| Images inside tables | ✅ | ❌ |
-| Small-caps (`font-variant`) | ✅ | ❌ |
-| Strikethrough (`line-through`) | ✅ rendered | ❌ parsed but never drawn |
-| Superscript / subscript | ✅ | ✅ |
-| Underline | ✅ | ✅ |
-| CSS `line-height` | ✅ | ❌ |
-| CSS `font-size` scaling (em/rem/%) | ✅ | ❌ |
-| CSS margin collapsing | ✅ proper collapsing | ✅ proper collapsing |
-| GIF images | ✅ custom decoder | ❌ JPEG + PNG only |
-| JPEG / PNG decode | ✅ TJpgDec (IRAM) + uzlib PNG | ✅ JPEGDEC + PNGdec |
-| Large-image placeholders & tall-image cropping | ✅ | ❌ |
-| Grayscale image caches | ✅ | ⚠️ minimal |
-| Heading fonts (h1–h3) | ✅ crisp taller real fonts | ⚠️ single font size per block |
-| Horizontal rules | ✅ | ✅ |
-| Hyphenation | ✅ 32 languages: English built in, 31 as downloadable packs | ✅ |
-| Bionic / focus reading | ✅ | ✅ |
-| Anti-aliasing toggle | ✅ (+ fast AA, max-darkness mode) | ✅ |
-| Markdown (`.md`) rendering | ✅ headings, tables, HR, code, lists, TOC | ❌ shown as raw plain text |
-| Right-to-left / BiDi (Hebrew, Arabic, Persian, Urdu) | ✅ BiDi, Arabic joining, right-to-left page turns | ✅ full BiDi + Hebrew font + CSS `direction` |
-| Drop caps | ✅ float-zone initials, top-aligned | ❌ |
-
-## Reading Experience, Library & Navigation
-
-| Feature | Witch Reader | CrossPoint |
-| --- | :---: | :---: |
-| Background prerendering | ✅  | ❌ |
-| Background indexing | ✅ (up to 3 sections ahead during reading pauses, not obstructing the reading experience) | ⚠️ (next section during the last 5 pages, partially blocking the reader) |
-| Custom fonts | ✅  | ✅ |
-| Sizes per font family | 4 | 3 |
-| SD font rendering | ✅ on-demand glyph from memory | ⚠️ on demand-glyph from SD-card |  
-| File browser sorting (name / date / size / type, asc/desc) | ✅ | ❌ name-only, fixed |
-| File context menu (open, mark-read, info, set sleep screen, flash `.bin`…) | ✅ | ❌ open / delete only |
-| Large-folder handling (SD-backed index, bounded RAM) | ✅ | ❌ all in RAM |
-| Cover carousel home view | ✅ | ❌ |
-| Cover-grid Recent Books view | ✅ | ❌ plain text list |
-| Book Info screen (metadata, cover, paged description) | ✅ | ❌ |
-| Global (cross-book) bookmarks | ✅ jump into any book at a page | ❌ |
-| Named starred pages | ✅ custom names | ⚠️ unnamed progress snapshots |
-| Reading statistics (streaks, time, pages/min, per-book ETA, sparkline) | ✅ | ❌ |
-| Interactive "finished book" flow (open next, series detection, move folder) | ✅ | ⚠️ passive screen |
-| Jump to printed page | ✅ | ❌ |
-| Jump to percent | ✅ | ✅ |
-| Quick per-book overrides while reading (font, images, hyphenation, bionic…) | ✅ | ❌ |
-| Footnotes | ✅ richer navigation, inline expansion | ✅ |
-| TOC / chapter selection | ✅ | ✅ |
-| Browser breadcrumb footer + continuous page-jump | ❌ dropped | ✅ |
-
-## System, Settings, Network & Input
-
-| Feature | Witch Reader | CrossPoint |
-| --- | :---: | :---: |
-| Clock on X4 | ✅ software clock (X3 **and** X4) | ❌ X3 only (DS3231 hardware RTC) |
-| Weather panel (Open-Meteo, forecast, 48h graph) | ✅ from Home menu | ❌ |
-| Timezone auto-detect (IP geolocation + DST) | ✅ | ⚠️ l offset picker |
-| Time sync (NTP) | ✅ | ✅ (X3) |
-| Sleep screens: transparent overlay over reader page | ✅ | ❌ |
-| Sleep screens: PNG with alpha | ✅ | ❌ BMP only |
-| Sleep screens: info overlay (title/chapter/page/percent) | ✅ | ❌ |
-| Sleep screens: sequential image pick | ✅ | ⚠️ random only |
-| KOReader sync | ✅ auto bidirectional, on-device settings, differential refresh | ⚠️ proper sync + automatic resolution, no on-device registration |
-| Per-button custom actions (23 actions × short/double/long) | ✅ + overview screen | ❌ physical remap + a few toggles |
-| Captive-portal login (client detect + QR to authorize) | ✅ | ❌ AP-side only |
-| System information screen | ✅ | ❌ |
-| OTA / SD firmware update | ✅ | ✅ |
-| Categorized settings submenus | ✅ | ⚠️ flat list |
-| OPDS / Calibre / web upload | ✅ (+ format badges, signal widget, streaming) | ✅ |
-| USB file transfer (serial protocol, Calibre plugin, `serial_cmd.py`) | ✅ wire-compatible with MicroReader | ❌ |
-| USB file manager plugin (Total/Double Commander WFX, [x4-filemanager-plugin](https://github.com/jpirnay/x4-filemanager-plugin)) | ✅ | ❌ |
-| Memory management | ✅ lean libraries, more on demand memory | ⚠️ limited memory management |
-
-## At a glance
-
-**Choose Witch Reader for:** speed, richer CSS and typography (floats, real tables, small-caps,
-strikethrough, line-height), GIF and better image handling, Markdown, a weather panel, a clock on
-the X4, reading statistics, global bookmarks, a cover carousel, fully customizable per-button
-gestures, automatic KOReader sync, and a deeper settings/system surface.
-
-**Choose CrossPoint for:** right-to-left languages (Hebrew / Arabic) — the one user-facing
-capability Witch Reader genuinely lacks — plus  a
-couple of small browser-navigation conveniences. It is also the leaner, simpler codebase.
-
-# Rendering comparisons
-Rendering examples from [Alice in Wonderland](https://www.gutenberg.org/ebooks/28885)
-| Item 	|Witch Reader |	Micro Reader 1) 2) | CrossPoint |	
-| --- | --- | --- | --- | 
-| Floating images 1 | <img src="docs/images/comparison/01_leftfig.png">  | <img src="docs/images/comparison/01_leftfig_mr.png"> | <img src="docs/images/comparison/01_leftfig_cpr.png">   |    
-| Floating images 2 | <img src="docs/images/comparison/02_rightfig.png">  | <img src="docs/images/comparison/02_rightfig_mr.png">   | <img src="docs/images/comparison/02_rightfig_cpr.png">   |    
-| CSS Rendering | <img src="docs/images/comparison/03_render.png"> <br> <img width="480" height="800" alt="screen" src="https://github.com/user-attachments/assets/ee11c062-b3cf-4543-8954-7e45f77ba772" /> | <img src="docs/images/comparison/03_render_mr.png">  | <img src="docs/images/comparison/03_render_cpr.png"> |    
-| Graphics | <img src="docs/images/comparison/04_graphic.png">  | <img src="docs/images/comparison/04_graphic_mr.png">  | <img src="docs/images/comparison/04_graphic_cpr.png">  |    
-| Images in tables | <img src="docs/images/comparison/05_tablegraphic.png">  | <img src="docs/images/comparison/05_tablegraphic_mr.png">  | <img src="docs/images/comparison/05_tablegraphic_cpr.png">  |    
-
-1) Apologies for the poor image quality of the microreader screenshots, i needed to make photos with my mobile, as I couldn't figure out how to create screenshots from within the reader
-   
-2) The Rendering of the Mouse poem in MicroReader is even more refined, it manages to deal with different font sizes, too
-
-# Attributions
-If in doubt consider all the work being done here based on the work of others - especially crosspoint reader (as the ancestor of this version) and microreader have been a great source of inspiration.
-
-## Project ancestry & inspiration
-- **crosspoint-reader** by Dave Allie and others — the direct ancestor this firmware is forked from. https://github.com/crosspoint-reader/crosspoint-reader (MIT).
-- **MicroReader** by CidVonHighwind — a source of inspiration, and still the most memory-efficient reader for the X4. https://github.com/CidVonHighwind/microreader
-  - The **USB serial file transfer** feature ([`lib/SerialTransfer`](lib/SerialTransfer), `SerialTransferActivity`) is a clean-room, wire-compatible reimplementation of MicroReader's serial protocol — independently written from its `tools/serial_cmd.py`, with no firmware code copied — so MicroReader's host tools (its Calibre device plugin and `serial_cmd.py`) work against this firmware too. Full credit to CidVonHighwind for the original protocol and host tooling.
-- **FreeInk SDK** - the shared X3/X4 hardware/display/utility libraries, included as a submodule. https://github.com/Free-Ink/freeink-sdk (to which we contributed our buffer memory management, the split display update cycle and some other goodies we previously had in our own sdk, see below)
-- **CrossPoint XDK** (No longer used, but ancestry) — the shared X3/X4 hardware/display/utility libraries, included as a submodule. https://github.com/jpirnay/crosspoint-xdk (modified fork of https://github.com/crosspoint-reader/community-sdk ).
-
-## Vendored third-party components (`lib/`)
-These are bundled directly in the repository. Each retains its upstream copyright header in source.
-
-- **TJpgDec — Tiny JPEG Decompressor** by ChaN (R0.03) — baseline-JPEG decode engine for the EPUB image path. http://elm-chan.org/fsw/tjpgd/ — Copyright (C) 2021 ChaN, BSD-1-Clause. Vendored under [`lib/TJpgDec`](lib/TJpgDec); modified from upstream in `tjpgdcnf.h` (config + the `JD_FASTPATH` IRAM macro) and `tjpgd.c` (the `JD_FASTPATH` annotations on the hot decode functions, plus a `BYTECLIP` clamp on the grayscale output path fixing an upstream wrap-around bug — black speckle in high-contrast covers when `JD_FASTDECODE≥1`); `tjpgd.h` is verbatim.
-- **minibidi** by Ahmad Khalifa and Thomas Wolff (from mintty) — the Unicode bidirectional algorithm, for right-to-left text. https://github.com/mintty/mintty — MIT. Vendored under [`lib/MiniBidi`](lib/MiniBidi) by way of crosspoint-reader's copy (MIT, @ e8299b5f); modified: no Arabic shaping in `applyBidiVisual` (`applyBidiVisualShaped` keeps it), the divine-name match moved to [`lib/TextShaping`](lib/TextShaping), a releasable workspace, bracket mirroring done before reordering (UAX #9 L4), and a second class table (`bidiclasses_ext.t`) generated by `scripts/gen_bidi_classes_ext.py` from Unicode 17.0.0.
-- **OtShaper** by SSafayet (crosspoint-reader #3787, MIT) — a port of HarfBuzz 14.5.0's Indic and Universal Shaping Engine shapers and of its GSUB/GPOS engine; it does the OpenType shaping of the ten Indic scripts and, with the Arabic shaper ported from HarfBuzz 14.5.0's `hb-ot-shaper-arabic.cc` (also "Old MIT"), of Arabic, Persian and Urdu. https://github.com/crosspoint-reader/crosspoint-reader/pull/3787 — HarfBuzz's licence is "Old MIT", [`lib/OtShaper/COPYING`](lib/OtShaper/COPYING). Vendored under [`lib/OtShaper`](lib/OtShaper) at `dd45ba61` (the shaper's files as at `0fbd1575`), with `lib/Utf8/IndicScripts.h` and `IndicReorder`; modified: nothrow fixed-capacity storage (`OtFixedVector.h`) in place of `std::vector`, the design's deviation 1; a bounded `indicReorderForDisplay` that allocates nothing (deviation 9); and a plan that keeps its planned lookups' digests and remembers consonant positions (`Plan::mayApply`, `Plan::consonantPosition`, deviation 13). The test fonts are Noto Sans layout subsets (OFL, [`test/complex_shaper/data/OFL.txt`](test/complex_shaper/data/OFL.txt)), subsets of Noto Sans Devanagari, and the shaped-book subsets of Noto Sans Devanagari, Bengali, Tamil and Malayalam (OFL, [`test/fixtures/fonts/README.md`](test/fixtures/fonts/README.md)). From writing modes step 2 PR 2 on, the firmware links the engine's face, table and coverage code for the install's `CPac` (`OtFilterWriter`, ours, a port of #3787's `lookup_filters()`). From PR 3 on, it shapes a book's Indic words at section build ([`docs/text-shaping.md`](docs/text-shaping.md)): the glue, [`lib/TextShaping/IndicShaper.cpp`](lib/TextShaping/IndicShaper.cpp) (ours), ports #3787's `scanRun`, the piecewise loop of `appendShapedRun` and the glyph rounding of `appendGlyphs` (`lib/EpdFont/ComplexShaper.cpp` at `0fbd1575`), and three of #3787's rules are ported lines: the Hyphenator's fallback breaks only between syllables (`appendFallbackIndexes`), no focus-reading split of an Indic word (`ParsedText::applyBionicReadingTransform`), and no drop cap captured from an Indic letter (`ChapterHtmlSlimParser::consumeText`, from `f0757278`).
-- **yxml** by Yoran Heling — the XML/HTML SAX parser backend (`SaxParser`), used by the EPUB and OPDS parsers. https://dev.yorhel.nl/yxml — Copyright (c) 2013-2014 Yoran Heling, MIT. Vendored under [`lib/SaxParser`](lib/SaxParser).
-- **uzlib** by Joergen Ibsen and Paul Sokolovsky — tiny DEFLATE/inflate, used for ZIP/EPUB extraction and PNG inflate. https://github.com/pfalcon/uzlib — Copyright (c) 2003 Joergen Ibsen, (c) 2014-2018 Paul Sokolovsky, zlib license. Vendored under [`lib/uzlib`](lib/uzlib).
-- **QR-Code-generator (qrcodegen)** by Project Nayuki — QR code generation. https://github.com/nayuki/QR-Code-generator — Copyright (c) Project Nayuki, MIT. Vendored under [`lib/QRCode`](lib/QRCode).
-- **FreeType's anti-aliasing rasterizer (`ftgrays.c`, FreeType 2.13.3)** by David Turner, Robert Wilhelm and Werner Lemberg — draws the glyph outlines of TrueType and CFF (`.ttf`, `.otf`) fonts on the device. https://freetype.org — Portions of this software are copyright © 2024 The FreeType Project (www.freetype.org). All rights reserved. FreeType License (FTL, [`FTL.TXT`](lib/EpdFont/ttf/third_party/freetype/FTL.TXT)). Vendored under [`lib/EpdFont/ttf/third_party/freetype`](lib/EpdFont/ttf/third_party/freetype) with six patches listed in its `PATCHES.md`, regenerated by `scripts/vendor_ftgrays.py`. Only the rasterizer is used; the TrueType and CFF loaders around it are this project's own.
-
-## External libraries (PlatformIO `lib_deps`)
-Pulled from the PlatformIO registry at build time.
-
-- **ArduinoJson** by Benoît Blanchon — JSON parsing/serialization. https://github.com/bblanchon/ArduinoJson — MIT.
-- **arduinoWebSockets** by Markus Sattler — WebSocket client (KOReader sync). https://github.com/Links2004/arduinoWebSockets — LGPL-2.1.
-
-## Fonts in the built-in UI faces (lib/EpdFont/builtinFonts)
-
-- **Noto Sans Arabic UI** (the Noto Project) — its Arabic presentation forms, vowel marks, digits and punctuation, cut into every built-in UI face by `lib/EpdFont/scripts/convert-builtin-fonts.sh` from the files in [`lib/EpdFont/builtinFonts/source/NotoSansArabicUI`](lib/EpdFont/builtinFonts/source/NotoSansArabicUI). https://github.com/notofonts/arabic — SIL Open Font License 1.1, [`OFL.txt`](lib/EpdFont/builtinFonts/source/NotoSansArabicUI/OFL.txt).
-- **Noto Sans Hebrew** (the Noto Project) — its letters and points, cut into every built-in UI face from the Font Manager's NotoSansHebrew family below.
-
-## Fonts the Font Manager downloads (assets/sd-fonts)
-
-- **Noto Sans CJK and Noto Serif CJK** (Adobe) — subset per language into NotoSansJP … NotoSerifKR by `lib/EpdFont/scripts/cjk_subset.py`, with U+FFFD from Noto Sans. https://github.com/notofonts/noto-cjk — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).
-- **Noto Sans and Noto Serif of the ten Indic scripts** (Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam, Sinhala; the Noto Project) — each merged with Noto Sans or Noto Serif's Latin by `lib/EpdFont/scripts/merge_noto_latin.py` into NotoSansDevanagari … NotoSerifSinhala, the Font Manager's Indic families. https://github.com/notofonts — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).
-- **Noto Naskh Arabic and Noto Sans Arabic** (the Noto Project) — merged with Noto Serif's or Noto Sans's Latin by `lib/EpdFont/scripts/merge_noto_latin.py` into NotoNaskhArabic and NotoSansArabic, the Font Manager's Arabic families. https://github.com/notofonts/arabic — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).
-- **Noto Sans Hebrew and Noto Serif Hebrew** (the Noto Project) — merged with Noto Sans's or Noto Serif's Latin by `lib/EpdFont/scripts/merge_noto_latin.py` into NotoSansHebrew and NotoSerifHebrew, the Font Manager's Hebrew families. https://github.com/notofonts/hebrew — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).
-- **Noto Sans Myanmar and Noto Serif Myanmar** (the Noto Project) — merged with Noto Sans's or Noto Serif's Latin by `lib/EpdFont/scripts/merge_noto_latin.py` into NotoSansMyanmar and NotoSerifMyanmar, the Font Manager's Myanmar families. https://github.com/notofonts/myanmar — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).
-
-## Hyphenation patterns the Font Manager downloads (assets/sd-fonts/Hyphenation-*)
-
-- **Typst hypher** by Laurenz Mädje and contributors — the tries of every pack but Hungarian's, compiled by hypher (at `d81cc50`) from the [hyph-utf8](https://github.com/hyphenation/tex-hyphen) TeX patterns, each pattern set under its own licence as hyph-utf8 lists it. https://github.com/typst/hypher — MIT OR Apache-2.0. [`scripts/hyphenation_trie.py`](scripts/hyphenation_trie.py) is a port of hypher's trie builder (`tests/generate.rs`), which rebuilds hypher's tries byte for byte.
-- **Huhyphn v20031107** by NAGY Bence — the Hungarian patterns, from CTAN, kept as published in [`assets/hyphenation-patterns/hu`](assets/hyphenation-patterns/hu/README.md) and built into `Hyphenation-Hungarian/hyph-hu.cphyph` by `scripts/build_hyphenation_packs.py`. Copyright (C) 2003 NAGY Bence, GNU GPL version 2 ([`COPYING`](assets/hyphenation-patterns/hu/COPYING)); the pack, built from them, is under the same licence. Neither is compiled into the firmware.
+This firmware stands on the work of others, crosspoint-reader above all; **[CREDITS.md](CREDITS.md)** lists the
+projects, the people whose code is ported here, the vendored libraries and the fonts.
 
 # Why this name
 Originally this fork was called CrossPoint++ - it had a small userbase and then I made an honest mistake by reusing the crosspoint fork, providing ample reference in the PRs and the release notes of code origin and authorship but was losing the github commit author information in the progress when I copied code over instead of taking the tedious (and correct) way of cherrypicking the original commit and post-cleanup effort.
