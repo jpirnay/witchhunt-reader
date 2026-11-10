@@ -58,7 +58,6 @@
 #include "SerialTestApi.h"
 #include "SilentRestart.h"
 #include "UiFontScale.h"
-#include "UiScriptPack.h"
 #include "WeatherSettingsStore.h"
 #include "WifiCredentialStore.h"
 #include "activities/Activity.h"
@@ -779,18 +778,18 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   }
   // CJK glyphs behind every UI face, so a Chinese, Japanese or Korean UI draws, and the language
   // picker draws those languages' names whatever the UI language is. See CjkUiFonts.h.
-  CjkUiFonts::attach(smallFont, 8, false);
+  CjkUiFonts::attach(smallFont, 8);
 #if FREEINK_DEVICE_MURPHY
-  CjkUiFonts::attach(murphySmall6Font, 6, false);
-  CjkUiFonts::attach(ui8RegularFont, 8, false);
-  CjkUiFonts::attach(ui8BoldFont, 8, true);
+  CjkUiFonts::attach(murphySmall6Font, 6);
+  CjkUiFonts::attach(ui8RegularFont, 8);
+  CjkUiFonts::attach(ui8BoldFont, 8);
 #endif
-  CjkUiFonts::attach(ui10RegularFont, 10, false);
-  CjkUiFonts::attach(ui10BoldFont, 10, true);
-  CjkUiFonts::attach(ui12RegularFont, 12, false);
-  CjkUiFonts::attach(ui12BoldFont, 12, true);
-  CjkUiFonts::attach(ui14RegularFont, 14, false);
-  CjkUiFonts::attach(ui14BoldFont, 14, true);
+  CjkUiFonts::attach(ui10RegularFont, 10);
+  CjkUiFonts::attach(ui10BoldFont, 10);
+  CjkUiFonts::attach(ui12RegularFont, 12);
+  CjkUiFonts::attach(ui12BoldFont, 12);
+  CjkUiFonts::attach(ui14RegularFont, 14);
+  CjkUiFonts::attach(ui14BoldFont, 14);
   CjkUiFonts::setReaderFontOpener(&openUiBookFonts);
   // The faces ship compressed; those the language pack does not hold decode through the same
   // decompressor as the reader faces, glyph by glyph.
@@ -961,9 +960,6 @@ void syncUiBookFonts(const bool bookText, const bool reader) {
   if (!bookText || reader) uiBookFontsOpen = false;
   uiBookFontsWanted = bookText && !reader;
   uiBookFontsTried = false;  // each screen tries once
-  // The Arabic UI pack's open sizes go with the screen; the next one opens what it draws, and asks the card again
-  // whether the pack is there (the Font Manager may have installed or removed it).
-  UiScriptPack::release();
   CjkUiPack::release();
   CjkUiFonts::setInReader(reader);
 }

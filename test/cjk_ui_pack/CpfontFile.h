@@ -1,6 +1,6 @@
 #pragma once
-// A v4 .cpfont read straight from its file, as the generators wrote it: for the UI pack tests, which check the shipped
-// files against what the UI looks up there and what it draws from them.
+// A v4 .cpfont read straight from its file, as the generators wrote it: for the CJK UI pack test, which checks the
+// shipped files against what the UI looks up there and what it draws from them.
 
 #include <EpdFontData.h>
 

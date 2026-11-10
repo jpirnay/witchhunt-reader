@@ -4,8 +4,8 @@
 #include "EpdFontData.h"
 #include "GlyphProvider.h"
 
-/// A glyph of an SD (.cpfont) face that a UI face's provider serves as its own fallback: a script pack's
-/// (UiFaceProvider, FallbackFaceProvider). An SD face hands out its own records, from the table its prewarm built or
+/// A glyph of an SD (.cpfont) face that a UI face's provider serves as its own fallback: a CJK UI pack's
+/// (FallbackFaceProvider). An SD face hands out its own records, from the table its prewarm built or
 /// from its miss ring, so the provider returns that record and later finds the bitmap where GfxRenderer finds an SD
 /// glyph's. A record lives until the face's next prewarm, and the renderer draws a glyph before it resolves another.
 namespace sd_face {

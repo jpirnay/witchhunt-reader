@@ -114,18 +114,18 @@ class Manifests(unittest.TestCase):
         self.assertEqual(list(jp), ["name", "description", "format", "inDownloadAll", "styles", "files"])
 
     def test_a_ui_pack_is_listed_in_version_3_alone_under_its_own_format(self):
-        cpfont(self.fonts / "ArabicUI" / "ArabicUI_10.cpfont", styles=(0, 1))
-        self.config.write_text(CONFIG + """  - name: ArabicUI
-    description: "Arabic in the interface"
+        cpfont(self.fonts / "KoreanUI" / "KoreanUI_10.cpfont", styles=(0, 1))
+        self.config.write_text(CONFIG + """  - name: KoreanUI
+    description: "Korean in the interface"
     format: uipack
-    source: NotoSansArabic
+    source: NotoSansKR
     inDownloadAll: false
 """, encoding="utf-8")
         self.assertEqual(self.run_generator().returncode, 0)
         self.assertEqual([f["name"] for f in self.manifest("fonts.json")["families"]], ["Alpha"])
-        pack = {f["name"]: f for f in self.manifest("fonts-v3.json")["families"]}["ArabicUI"]
+        pack = {f["name"]: f for f in self.manifest("fonts-v3.json")["families"]}["KoreanUI"]
         self.assertEqual((pack["format"], pack["inDownloadAll"], pack["styles"]), ("uipack", False, ["regular", "bold"]))
-        self.assertEqual([f["name"] for f in pack["files"]], ["ArabicUI/ArabicUI_10.cpfont"])
+        self.assertEqual([f["name"] for f in pack["files"]], ["KoreanUI/KoreanUI_10.cpfont"])
 
     def test_a_hyphenation_pack_is_listed_in_version_3_alone_after_the_fonts(self):
         pack = self.fonts / "Hyphenation-German" / "hyph-de.cphyph"

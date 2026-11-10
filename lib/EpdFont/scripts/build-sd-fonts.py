@@ -6,8 +6,8 @@ fontconvert_sdcard.py in parallel for each family, and optionally
 generates the fonts.json manifest. A family with `format: otf` is a CFF
 subset instead (cjk_subset.py): one <name>-Regular.otf, drawn at every size. A family with `format: ttf` is a
 script font merged with Noto's Latin (merge_noto_latin.py): <name>-Regular.ttf and <name>-Bold.ttf. A family with
-`format: uipack` is a UI script pack (build_ui_script_pack.py): 1-bit .cpfont files the interface draws from, built
-last, from the family its `source` names. A family with `format: hyphenation` is a hyphenation pack, built by
+`format: uipack` is a CJK UI pack (build_ui_script_pack.py): 1-bit .cpfont files the interface draws from, built
+last, from the Noto CJK OTF the family its `source` names pins. A family with `format: hyphenation` is a hyphenation pack, built by
 scripts/build_hyphenation_packs.py: the pack the repository holds is copied.
 
 Usage:
@@ -268,14 +268,11 @@ def write_corpus(out_dir: Path) -> None:
         subprocess.run([sys.executable, str(shaper_dir / generator), str(out_dir)], check=True, capture_output=True)
 
 
-def build_ui_pack_family(family: dict, output_base: Path, output_dir: Path) -> tuple[str, bool, str]:
-    """A `format: uipack` entry: a UI script pack (build_ui_script_pack.py), cut from its `source` family's files as
-    this run built them, or as the repository holds them (ArabicUI), or from the Noto CJK OTF it pins (CJK packs)."""
-    source = output_base / family["source"]
-    if not source.is_dir():
-        source = SCRIPT_DIR.resolve().parents[2] / "assets" / "sd-fonts" / family["source"]
+def build_ui_pack_family(family: dict, output_dir: Path) -> tuple[str, bool, str]:
+    """A `format: uipack` entry: a CJK UI pack (build_ui_script_pack.py), cut from the Noto CJK OTF its `source`
+    family pins."""
     result = subprocess.run([sys.executable, str(SCRIPT_DIR / "build_ui_script_pack.py"), "--pack", family["name"],
-                             "--output-dir", str(output_dir), "--source-dir", str(source)],
+                             "--output-dir", str(output_dir)],
                             capture_output=True, text=True)
     if result.returncode != 0:
         return family["name"], False, result.stderr.strip()[-2000:]
@@ -307,7 +304,7 @@ def build_family(
     if family.get("format") == "ttf":
         return build_ttf_family(family, output_dir, corpus_dir, fonttools_pin)
     if family.get("format") == "uipack":
-        return build_ui_pack_family(family, output_base, output_dir)
+        return build_ui_pack_family(family, output_dir)
     if family.get("format") == "hyphenation":
         return copy_hyphenation_pack(family, output_dir)
 
@@ -530,7 +527,7 @@ def main():
         except (OSError, subprocess.CalledProcessError) as e:
             print(f"ERROR: the checks' corpus: {e}", file=sys.stderr)
             sys.exit(1)
-    # A UI pack is cut from a family this run may build: it goes after them all.
+    # The UI packs go after the families, one at a time: each renders over a thread pool of its own.
     packs = [f for f in families if f.get("format") == "uipack"]
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {

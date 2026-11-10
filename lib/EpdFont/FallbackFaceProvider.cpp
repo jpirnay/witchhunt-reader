@@ -132,8 +132,7 @@ const EpdGlyph* FallbackFaceProvider::serveFrom(const EpdFontData* face, const u
   return &slot.record;
 }
 
-void FallbackFaceProvider::beginText(const char* utf8Text, bool (*alsoCovered)(void* ctx, uint32_t codepoint),
-                                     void* ctx) {
+void FallbackFaceProvider::beginText(const char* utf8Text) {
   bookText_ = false;
   servedPack_ = nullptr;
   if (!utf8Text || (!readerFace_ && !packs_.prepare)) return;
@@ -149,7 +148,7 @@ void FallbackFaceProvider::beginText(const char* utf8Text, bool (*alsoCovered)(v
   while (*p != 0) {
     const uint8_t* const start = p;
     const uint32_t cp = utf8NextCodepoint(&p);
-    if (cp < 0x80 || inTable(primary_, cp) || (alsoCovered && alsoCovered(ctx, cp))) continue;
+    if (cp < 0x80 || inTable(primary_, cp)) continue;
     if (!readerAfterFirst_ || faceCount_ == 0 || !inTable(faces_[0], cp)) bookText_ = true;
     const size_t bytes = static_cast<size_t>(p - start);
     // A pack draws it before the reader's face would: the reader's font is not opened or prepared for it. In the

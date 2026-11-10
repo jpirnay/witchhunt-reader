@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
-"""Generate the UI script packs: what the built-in UI faces lack of a script, as .cpfont files the Font Manager offers.
+"""Generate the CJK UI packs: what the built-in UI faces lack of a script, as .cpfont files the Font Manager offers.
 
 A pack is a 1-bit .cpfont family on the card that the UI faces draw from and the reader never does (the registry leaves
 it out). The glyphs are rendered exactly as the UI faces' own are, by fontconvert.py, 1-bit, autohinted, so they stand
 beside the faces' Latin at matching metrics; fontconvert.py writes a C header, which this reads back and writes as a
-1-bit v4 .cpfont (fontconvert_sdcard.write_cpfont), one file per size holding that size's weights. No kerning and no
-ligatures.
+1-bit v4 .cpfont (fontconvert_sdcard.write_cpfont). No kerning and no ligatures.
 
-ArabicUI: the Arabic presentation forms, at every UI face's size and weight (6 to 14 pt, regular and bold): the UI draws
-  Arabic formed (BidiUtils::arabicUiForms), and flash has no room for the ~60 KB the forms cost. Every form the mapper
-  can emit (shape_logical in lib/MiniBidi/minibidi.c: all of Presentation Forms-B U+FE80-FEFC and the Forms-A forms of
-  its extended table), the harakat and superscript alef, and the Arabic and Persian digits and punctuation, from Noto
-  Sans Arabic cut to its own blocks. src/UiScriptPack.cpp opens it; each UI face's UiFaceProvider serves from it.
 ChineseUI, ChineseTradUI, JapaneseUI, KoreanUI: the CJK characters a book title may hold, at the CJK UI faces' sizes
   (10 and 12 pt, regular: font-sizes.sh CJK_UI_FONT_SIZES), from the Noto Sans CJK region the forms belong to, the
   sources sd-fonts.yaml pins for NotoSansSC/TC/JP/KR. The Han packs hold the whole CJK Unified Ideographs block as
@@ -22,11 +16,11 @@ ChineseUI, ChineseTradUI, JapaneseUI, KoreanUI: the CJK characters a book title 
   SdCardFont serves both, where a file per size cost the heap two (2.5 KB each, the X3 measured about 6 KB a pack).
   src/CjkUiPack.cpp opens them; the CJK fallback (FallbackFaceProvider) serves from them.
 
-Usage:  python build_ui_script_pack.py [--pack NAME] [--output-dir DIR] [--source-dir DIR]
-        --output-dir is the pack's own folder (default assets/sd-fonts/<NAME>); --source-dir the NotoSansArabic
-        family's files, for ArabicUI. build-sd-fonts.py runs it for sd-fonts.yaml's `format: uipack` families.
-Needs:  the fontconvert.py requirements (fontTools for the subset, PyYAML for the CJK sources, which it downloads
-        into downloaded_fonts/NotoSansCJK/ on first use, as build_cjk_ui_fonts.py does, checked against the pins).
+Usage:  python build_ui_script_pack.py [--pack NAME] [--output-dir DIR]
+        --output-dir is the pack's own folder (default assets/sd-fonts/<NAME>). build-sd-fonts.py runs it for
+        sd-fonts.yaml's `format: uipack` families.
+Needs:  the fontconvert.py requirements (PyYAML for the CJK sources, which it downloads into
+        downloaded_fonts/NotoSansCJK/ on first use, as build_cjk_ui_fonts.py does, checked against the pins).
 """
 
 import argparse
@@ -44,18 +38,11 @@ REPO_ROOT = SCRIPT_DIR.parents[2]
 sys.path.insert(0, str(SCRIPT_DIR))
 from fontconvert_sdcard import GlyphProps, StyleRasterData, write_cpfont  # noqa: E402
 
-SOURCE_DIR = REPO_ROOT / "assets" / "sd-fonts" / "NotoSansArabic"
-MINIBIDI = REPO_ROOT / "lib" / "MiniBidi" / "minibidi.c"
 SD_FONTS_YAML = SCRIPT_DIR / "sd-fonts.yaml"
 CJK_DOWNLOAD_DIR = SCRIPT_DIR / "downloaded_fonts" / "NotoSansCJK"
 
-# The UI faces' sizes (font-sizes.sh UI_FONT_SIZES, and Noto Sans 6 and 8) and the weights each is drawn in: 6 pt is
-# Murphy's small face, regular only.
-ARABIC_SIZES = {6: ("Regular",), 8: ("Regular", "Bold"), 10: ("Regular", "Bold"), 12: ("Regular", "Bold"),
-                14: ("Regular", "Bold")}
 # The CJK UI faces' sizes (font-sizes.sh CJK_UI_FONT_SIZES): every UI face draws CJK at one of them, regular.
 CJK_SIZES = {10: ("Regular",), 12: ("Regular",)}
-STYLE_IDS = {"Regular": 0, "Bold": 1}
 
 # fontconvert.py caps an uncompressed face at 64 KB of bitmap (uint16 offsets), which a CJK pack passes many times
 # over: it renders a pack in runs of this many characters, each glyph exactly as it would alone, and the runs are
@@ -69,50 +56,14 @@ FULL_WIDTH = [(0xFF01, 0xFF60)]               # full-width ASCII and brackets
 KANA = [(0x3041, 0x3096), (0x3099, 0x30FF), (0x31F0, 0x31FF), (0xFF61, 0xFF9F)]  # and the half-width forms
 HANGUL = [(0x3131, 0x318E), (0xAC00, 0xD7A3)]  # compatibility jamo, every syllable
 
-# Each pack: its sizes and weights, its code points' ranges (None: the Arabic set), and its source (the sd-fonts.yaml
-# family whose pinned Noto Sans CJK region OTF it is cut from; None: Noto Sans Arabic).
+# Each pack: its sizes and weights, its code points' ranges, and its source (the sd-fonts.yaml family whose pinned Noto
+# Sans CJK region OTF it is cut from).
 PACKS = {
-    "ArabicUI": (ARABIC_SIZES, None, None),
     "ChineseUI": (CJK_SIZES, CJK_PUNCTUATION + URO + FULL_WIDTH, "NotoSansSC"),
     "ChineseTradUI": (CJK_SIZES, CJK_PUNCTUATION + URO + FULL_WIDTH, "NotoSansTC"),
     "JapaneseUI": (CJK_SIZES, CJK_PUNCTUATION + KANA + URO + FULL_WIDTH, "NotoSansJP"),
     "KoreanUI": (CJK_SIZES, CJK_PUNCTUATION + HANGUL + FULL_WIDTH, "NotoSansKR"),
 }
-
-# What the pack holds besides the presentation forms: marks drawn over their letter, and characters with no forms.
-UNFORMED = [
-    (0x060C, 0x060C),  # Arabic comma
-    (0x061B, 0x061B),  # Arabic semicolon
-    (0x061F, 0x061F),  # Arabic question mark
-    (0x0640, 0x0640),  # tatweel
-    (0x064B, 0x0652),  # harakat
-    (0x0660, 0x066C),  # Arabic-Indic digits, percent, decimal and thousands separators
-    (0x0670, 0x0670),  # superscript alef
-    (0x06D4, 0x06D4),  # Urdu full stop
-    (0x06F0, 0x06F9),  # Persian and Urdu digits
-]
-FORMS_B = (0xFE80, 0xFEFC)  # every form of U+0621-064A, and the Lam-Alef ligatures
-
-
-def forms_a():
-    """The Forms-A code points shape_logical() can emit: each letter of minibidi.c's xshapeforms table, from its
-    isolated form on, as many forms as the table gives it."""
-    text = MINIBIDI.read_text(encoding="utf-8")
-    table = text[text.index("xshapeforms[] = {"):]
-    table = table[:table.index("};")]
-    cps = []
-    for _, isolated, forms in re.findall(r"\{0x([0-9A-F]+), 0x([0-9A-F]+), (\d)\}", table):
-        cps += range(int(isolated, 16), int(isolated, 16) + int(forms))
-    if not cps:
-        raise SystemExit(f"no forms found in {MINIBIDI}")
-    return cps
-
-
-def arabic_codepoints():
-    cps = set(forms_a()) | set(range(FORMS_B[0], FORMS_B[1] + 1))
-    for first, last in UNFORMED:
-        cps |= set(range(first, last + 1))
-    return sorted(cps)
 
 
 def range_codepoints(ranges):
@@ -137,15 +88,6 @@ def cjk_source(family):
     if digest != spec["sha256"]:
         raise SystemExit(f"{dest} is not the source sd-fonts.yaml pins for {family} (sha256 {digest})")
     return dest
-
-
-def subset_source(source_dir, style, out_dir):
-    """Noto Sans Arabic cut to its own blocks, and '|', which fontconvert.py measures the line metrics by."""
-    out = out_dir / f"Arabic-{style}.ttf"
-    subprocess.run([sys.executable, "-m", "fontTools.subset", str(source_dir / f"NotoSansArabic-{style}.ttf"),
-                    "--unicodes=U+007C,U+0600-06FF,U+FB50-FDFF,U+FE70-FEFF", "--layout-features=*",
-                    f"--output-file={out}"], check=True)
-    return out
 
 
 def array_body(header, name):
@@ -234,35 +176,22 @@ def render(name, size, source, cps, tmp):
                            ligature_pairs=[])
 
 
-def build(name, out_dir, source_dir):
+def build(name, out_dir):
     sizes, ranges, cjk_family = PACKS[name]
-    cps = arabic_codepoints() if ranges is None else range_codepoints(ranges)
+    cps = range_codepoints(ranges)
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        if cjk_family is None:
-            sources = {style: subset_source(source_dir, style, tmp) for style in ("Regular", "Bold")}
-        else:
-            sources = {"Regular": cjk_source(cjk_family)}
-        if cjk_family is not None:
-            # One file for both sizes, each a style: style i is the i-th size of CJK_SIZES. The UI then holds one
-            # SdCardFont per pack rather than one per size, which is most of what an open pack costs on the heap.
-            raster = {}
-            for index, size in enumerate(sizes):
-                face = render(f"{name.lower()}_{size}_regular", size, sources["Regular"], cps, tmp)
-                raster[index] = face._replace(style_id=index)
-            path = out_dir / f"{name}_{min(sizes)}.cpfont"
-            write_cpfont(raster, str(path), two_bit=False)
-            print(f"Generated {path} ({len(cps)} characters at {sorted(sizes)} pt, {path.stat().st_size} B)")
-            return
-        for size, styles in sizes.items():
-            raster = {}
-            for style in styles:
-                face = render(f"{name.lower()}_{size}_{style.lower()}", size, sources[style], cps, tmp)
-                raster[STYLE_IDS[style]] = face._replace(style_id=STYLE_IDS[style])
-            path = out_dir / f"{name}_{size}.cpfont"
-            write_cpfont(raster, str(path), two_bit=False)
-            print(f"Generated {path} ({len(cps)} characters, {path.stat().st_size} B)")
+        source = cjk_source(cjk_family)
+        # One file for both sizes, each a style: style i is the i-th size of CJK_SIZES. The UI then holds one
+        # SdCardFont per pack rather than one per size, which is most of what an open pack costs on the heap.
+        raster = {}
+        for index, size in enumerate(sizes):
+            face = render(f"{name.lower()}_{size}_regular", size, source, cps, tmp)
+            raster[index] = face._replace(style_id=index)
+        path = out_dir / f"{name}_{min(sizes)}.cpfont"
+        write_cpfont(raster, str(path), two_bit=False)
+        print(f"Generated {path} ({len(cps)} characters at {sorted(sizes)} pt, {path.stat().st_size} B)")
 
 
 def main():
@@ -270,15 +199,13 @@ def main():
     parser.add_argument("--pack", choices=sorted(PACKS), action="append",
                         help="the pack to build (repeatable; default: every pack)")
     parser.add_argument("--output-dir", help="the pack's folder (default: assets/sd-fonts/<pack>); one pack only")
-    parser.add_argument("--source-dir", default=str(SOURCE_DIR),
-                        help="the NotoSansArabic family's files, for ArabicUI (its Arabic is Noto's own)")
     args = parser.parse_args()
     packs = args.pack or sorted(PACKS)
     if args.output_dir and len(packs) != 1:
         parser.error("--output-dir takes one --pack")
     for name in packs:
         out_dir = Path(args.output_dir) if args.output_dir else REPO_ROOT / "assets" / "sd-fonts" / name
-        build(name, out_dir, Path(args.source_dir))
+        build(name, out_dir)
 
 
 if __name__ == "__main__":

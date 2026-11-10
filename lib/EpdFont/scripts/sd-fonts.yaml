@@ -15,9 +15,9 @@
 #                  url:  download URL (for fonts not in the repo)
 #
 # UI script packs (format: uipack):
-#   .cpfont files the interface draws a script from (src/UiScriptPack.cpp, src/CjkUiPack.cpp), never a reading font;
+#   .cpfont files the interface draws a script from (src/CjkUiPack.cpp), never a reading font;
 #   build_ui_script_pack.py writes them. They take in place of intervals, sizes and styles:
-#   source:        the family in this file they are cut from: its files (ArabicUI), or the Noto CJK OTF it pins
+#   source:        the family in this file whose Noto CJK OTF they are cut from
 #   fonts-v3.json lists them with format "uipack", which a firmware that does not know it skips; fonts.json leaves
 #   them out.
 #
@@ -682,15 +682,6 @@ families:
       latin:
         Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
         Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
-
-  # The interface's Arabic (format: uipack): the presentation forms the UI draws Arabic in, 1-bit at the built-in UI
-  # faces' sizes, cut from the NotoSansArabic family above (build_ui_script_pack.py; build-sd-fonts.py builds it after
-  # the other families). No reading font: the reader never lists it, and a firmware from before the format skips it.
-  - name: ArabicUI
-    description: "Arabic, Persian and Urdu in the interface: book titles, the keyboard. Not a reading font"
-    format: uipack
-    source: NotoSansArabic
-    inDownloadAll: false
 
   # The interface's CJK (format: uipack): book titles in the CJK UI faces' sizes, one pack per region in its own forms,
   # from the Noto Sans CJK region OTF the family named in `source` pins (build_ui_script_pack.py).

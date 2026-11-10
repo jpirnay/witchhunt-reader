@@ -19,7 +19,7 @@ struct Range {
   uint32_t last;
 };
 
-// What each pack holds, exactly (the host test ui_script_pack checks the files against these): the CJK punctuation and
+// What each pack holds, exactly (the host test cjk_ui_pack checks the files against these): the CJK punctuation and
 // the full-width forms, and the Han packs the CJK Unified Ideographs Noto draws (U+4E00-9FEF), Japanese with the kana
 // and half-width forms, Korean every Hangul syllable and the compatibility jamo instead of Han.
 constexpr Range HAN[] = {{0x3000, 0x303F}, {0x4E00, 0x9FEF}, {0xFF01, 0xFF60}};

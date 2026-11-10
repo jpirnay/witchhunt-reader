@@ -185,6 +185,11 @@ Pulled from the PlatformIO registry at build time.
 - **ArduinoJson** by Benoît Blanchon — JSON parsing/serialization. https://github.com/bblanchon/ArduinoJson — MIT.
 - **arduinoWebSockets** by Markus Sattler — WebSocket client (KOReader sync). https://github.com/Links2004/arduinoWebSockets — LGPL-2.1.
 
+## Fonts in the built-in UI faces (lib/EpdFont/builtinFonts)
+
+- **Noto Sans Arabic UI** (the Noto Project) — its Arabic presentation forms, vowel marks, digits and punctuation, cut into every built-in UI face by `lib/EpdFont/scripts/convert-builtin-fonts.sh` from the files in [`lib/EpdFont/builtinFonts/source/NotoSansArabicUI`](lib/EpdFont/builtinFonts/source/NotoSansArabicUI). https://github.com/notofonts/arabic — SIL Open Font License 1.1, [`OFL.txt`](lib/EpdFont/builtinFonts/source/NotoSansArabicUI/OFL.txt).
+- **Noto Sans Hebrew** (the Noto Project) — its letters and points, cut into every built-in UI face from the Font Manager's NotoSansHebrew family below.
+
 ## Fonts the Font Manager downloads (assets/sd-fonts)
 
 - **Noto Sans CJK and Noto Serif CJK** (Adobe) — subset per language into NotoSansJP … NotoSerifKR by `lib/EpdFont/scripts/cjk_subset.py`, with U+FFFD from Noto Sans. https://github.com/notofonts/noto-cjk — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).

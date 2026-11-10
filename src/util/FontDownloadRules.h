@@ -33,8 +33,8 @@ inline FileKind kindOf(const char* name) {
   return FileKind::Unknown;
 }
 
-// By a manifest's `format` value: "cpfont", "ttf" or "otf", exactly, or "uipack": a UI script pack
-// (ArabicUiPack.h), .cpfont files the interface draws from and no reading font, or "hyphenation": one language's
+// By a manifest's `format` value: "cpfont", "ttf" or "otf", exactly, or "uipack": a CJK UI pack
+// (CjkUiPacks.h), .cpfont files the interface draws from and no reading font, or "hyphenation": one language's
 // hyphenation pack (HyphenationPack.h), installed beside the fonts in /.crosspoint/hyphenation/. A firmware from before
 // either skips the family, as any reader skips a format it does not know.
 inline FileKind kindOfFormat(const char* value, const size_t len) {
