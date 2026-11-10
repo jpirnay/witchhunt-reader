@@ -34,7 +34,11 @@ class SdPackSource final : public HyphenationPackSource {
     size_ = static_cast<uint32_t>(file_.fileSize());
     return true;
   }
-  ~SdPackSource() { file_.close(); }
+  // Only a file it opened: a language whose pack neither folder holds never opens one, and HalFile::close() asserts
+  // on a file that was never opened.
+  ~SdPackSource() {
+    if (file_.isOpen()) file_.close();
+  }
   uint32_t size() const override { return size_; }
   bool read(const uint32_t offset, void* dst, const uint32_t len) override {
     return file_.seekSet(offset) && file_.read(dst, len) == static_cast<int>(len);
