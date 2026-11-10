@@ -4166,10 +4166,8 @@ EpubReaderActivity::RenderLayout EpubReaderActivity::computeRenderLayout() const
   const int screenHeight = renderer.getScreenHeight(held);
 
   const int bezelLeft = orientedMarginLeft, bezelRight = orientedMarginRight;
-  orientedMarginTop += std::max(static_cast<int>(SETTINGS.screenMargin), statusBarTopHeight);
-  orientedMarginLeft += SETTINGS.screenMargin;
-  orientedMarginRight += SETTINGS.screenMargin;
-  orientedMarginBottom += std::max(static_cast<int>(SETTINGS.screenMargin), statusBarBottomHeight);
+  ReaderUtils::addReaderMargins(orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft,
+                                statusBarTopHeight, statusBarBottomHeight);
 
   // One-shot per distinct result. The bezel inset is only one of two terms here:
   // SETTINGS.screenMargin is added on top, so a few pixels of inset change can be
@@ -6900,12 +6898,9 @@ void EpubReaderActivity::restoreCurrentPageToBufferIfPreRendered() {
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
                                    &orientedMarginLeft);
-  const int statusBarTopHeight = UITheme::getStatusBarTopHeight(automaticPageTurnActive);
-  const int statusBarBottomHeight = UITheme::getStatusBarBottomHeight(automaticPageTurnActive);
-  orientedMarginTop += std::max(static_cast<int>(SETTINGS.screenMargin), statusBarTopHeight);
-  orientedMarginLeft += SETTINGS.screenMargin;
-  orientedMarginRight += SETTINGS.screenMargin;
-  orientedMarginBottom += std::max(static_cast<int>(SETTINGS.screenMargin), statusBarBottomHeight);
+  ReaderUtils::addReaderMargins(orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft,
+                                UITheme::getStatusBarTopHeight(automaticPageTurnActive),
+                                UITheme::getStatusBarBottomHeight(automaticPageTurnActive));
 
   auto p = section->loadPageFromSectionFile();
   if (!p) {
@@ -7612,10 +7607,8 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   // Compute margins exactly as render() does
   int marginTop, marginRight, marginBottom, marginLeft;
   renderer.getOrientedViewableTRBL(&marginTop, &marginRight, &marginBottom, &marginLeft);
-  marginTop += std::max(static_cast<int>(SETTINGS.screenMargin), UITheme::getStatusBarTopHeight());
-  marginLeft += SETTINGS.screenMargin;
-  marginRight += SETTINGS.screenMargin;
-  marginBottom += std::max(static_cast<int>(SETTINGS.screenMargin), UITheme::getStatusBarBottomHeight());
+  ReaderUtils::addReaderMargins(marginTop, marginRight, marginBottom, marginLeft, UITheme::getStatusBarTopHeight(),
+                                UITheme::getStatusBarBottomHeight());
 
   const uint16_t viewportWidth = renderer.getScreenWidth() - marginLeft - marginRight;
   const uint16_t viewportHeight = renderer.getScreenHeight() - marginTop - marginBottom;

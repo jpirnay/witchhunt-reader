@@ -100,7 +100,7 @@ class LineReaderActivity : public Activity {
     int viewportHeight = 0;
     int linesPerPage = 1;
   };
-  static TextLayout computeTextLayout(const GfxRenderer& renderer, int fontId, uint8_t screenMargin);
+  static TextLayout computeTextLayout(const GfxRenderer& renderer, int fontId);
 
   void onEnter() override;
   void onExit() override;

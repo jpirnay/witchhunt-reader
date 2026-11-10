@@ -508,7 +508,7 @@ bool TxtReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gfx
   const uint8_t screenMargin = SETTINGS.screenMargin;
   const uint8_t paragraphAlignment = SETTINGS.paragraphAlignment;
 
-  const TextLayout layout = computeTextLayout(renderer, fontId, screenMargin);
+  const TextLayout layout = computeTextLayout(renderer, fontId);
   const int vw = layout.viewportWidth;
   const int lineHeight = renderer.getLineHeight(fontId);
   const int linesPerPage = layout.linesPerPage;

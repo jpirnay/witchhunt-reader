@@ -256,14 +256,11 @@ void LineReaderActivity::launchFinishedBookFlow() {
                                        std::string(), std::string());
 }
 
-LineReaderActivity::TextLayout LineReaderActivity::computeTextLayout(const GfxRenderer& renderer, const int fontId,
-                                                                     const uint8_t screenMargin) {
+LineReaderActivity::TextLayout LineReaderActivity::computeTextLayout(const GfxRenderer& renderer, const int fontId) {
   TextLayout layout;
   renderer.getOrientedViewableTRBL(&layout.marginTop, &layout.marginRight, &layout.marginBottom, &layout.marginLeft);
-  layout.marginTop += std::max(static_cast<int>(screenMargin), UITheme::getStatusBarTopHeight());
-  layout.marginLeft += screenMargin;
-  layout.marginRight += screenMargin;
-  layout.marginBottom += std::max(static_cast<int>(screenMargin), UITheme::getStatusBarBottomHeight());
+  ReaderUtils::addReaderMargins(layout.marginTop, layout.marginRight, layout.marginBottom, layout.marginLeft,
+                                UITheme::getStatusBarTopHeight(), UITheme::getStatusBarBottomHeight());
   layout.viewportWidth = renderer.getScreenWidth() - layout.marginLeft - layout.marginRight;
   layout.viewportHeight = renderer.getScreenHeight() - layout.marginTop - layout.marginBottom;
   layout.linesPerPage = std::max(1, layout.viewportHeight / renderer.getLineHeight(fontId));
@@ -276,7 +273,7 @@ void LineReaderActivity::computeViewportLayout() {
   cachedScreenMargin = SETTINGS.screenMargin;
   cachedParagraphAlignment = SETTINGS.paragraphAlignment;
 
-  const TextLayout layout = computeTextLayout(renderer, cachedFontId, cachedScreenMargin);
+  const TextLayout layout = computeTextLayout(renderer, cachedFontId);
   cachedOrientedMarginTop = layout.marginTop;
   cachedOrientedMarginRight = layout.marginRight;
   cachedOrientedMarginBottom = layout.marginBottom;
