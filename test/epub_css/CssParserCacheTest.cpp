@@ -491,7 +491,8 @@ bool stylesEqual(const CssStyle& a, const CssStyle& b) {
          a.fontFamily == b.fontFamily && a.colorTransparent == b.colorTransparent && a.opacityZero == b.opacityZero &&
          a.visibilityHidden == b.visibilityHidden && a.writingMode == b.writingMode &&
          a.textOrientation == b.textOrientation && a.textCombine == b.textCombine && a.direction == b.direction &&
-         a.unicodeBidi == b.unicodeBidi && a.textEmphasis == b.textEmphasis && definedEqual(a.defined, b.defined);
+         a.unicodeBidi == b.unicodeBidi && a.textEmphasis == b.textEmphasis && definedEqual(a.defined, b.defined) &&
+         std::memcmp(a.box.bytes(), b.box.bytes(), CssBox::kBytes) == 0;
 }
 }  // namespace
 
@@ -709,7 +710,9 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       "direction: rtl; unicode-bidi: isolate-override; text-align: end; }\n"
       ".g { writing-mode: vertical-rl; }\n"  // a rule with nothing else is kept
       ".h { text-emphasis-style: none; }\n"
-      ".i { writing-mode: vertical-rl; text-emphasis: filled triangle; }\n";  // the flow word and a mark in one record
+      ".i { writing-mode: vertical-rl; text-emphasis: filled triangle; }\n"  // the flow word and a mark in one record
+      ".j { border: 2px double; border-left: 3px solid #ccc; background-color: #eee; }\n"
+      ".k { border: none; background: transparent; }\n";  // the <hr> facts and explicit nones
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
   std::string cssPath;
@@ -719,8 +722,8 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   ASSERT_TRUE(compileCache(parser, cssPath));
 
   const std::vector<std::pair<std::string, std::string>> probes = {
-      {"p", "a"},    {"p", "b"},   {"div", "c"},  {"span", "a"}, {"p", "none"}, {"span", "d"},
-      {"span", "e"}, {"div", "f"}, {"html", "g"}, {"span", "h"}, {"span", "i"}};
+      {"p", "a"},   {"p", "b"},    {"div", "c"},  {"span", "a"}, {"p", "none"}, {"span", "d"}, {"span", "e"},
+      {"div", "f"}, {"html", "g"}, {"span", "h"}, {"span", "i"}, {"div", "j"},  {"hr", "k"}};
   auto resolveAll = [&](CssParser& p) {
     std::vector<CssStyle> out;
     for (const auto& pr : probes) out.push_back(p.resolveStyle(pr.first, pr.second));
@@ -753,6 +756,14 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       << "an explicit text-emphasis-style: none did not survive the disk cache";
   EXPECT_EQ(CssWritingMode::VerticalRl, heapStyles[10].writingMode);
   EXPECT_EQ(heapStyles[10].textEmphasis, TextEmphasis::Triangle) << "a mark beside the flow word did not survive";
+  const CssBox& box = heapStyles[11].box;
+  EXPECT_EQ(2, box.drawnWidth(CssBox::Top)) << "the box did not survive the disk cache";
+  EXPECT_EQ(CssBorderStyle::Double, box.style(CssBox::Bottom));
+  EXPECT_EQ(3, box.drawnWidth(CssBox::Left));
+  EXPECT_EQ(CssBorderStyle::Solid, box.style(CssBox::Left));
+  EXPECT_TRUE(box.shaded());
+  EXPECT_TRUE(heapStyles[12].hidesRule()) << "the <hr> facts did not survive the disk cache";
+  EXPECT_TRUE(heapStyles[12].box.hasStyle(CssBox::Top) && !heapStyles[12].box.drawn());
 
   BuildArena arena(64 * 1024);
   ASSERT_TRUE(arena.valid());
