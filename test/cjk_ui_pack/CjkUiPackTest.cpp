@@ -18,6 +18,7 @@
 #include "FallbackFaceProvider.h"
 #include "FontDecompressor.h"
 #include "SdCardFont.h"
+#include "ShortCardFile.h"
 #include "builtinFonts/cjk_ui_ja_10.h"
 #include "builtinFonts/cjk_ui_ja_12.h"
 #include "builtinFonts/cjk_ui_ko_10.h"
@@ -68,6 +69,8 @@ Bytes drawn(const EpdFontData& font, const EpdGlyphRef& glyph) {
 
 // src/CjkUiPack.cpp's hooks over packs loaded at 10 pt: the order rule of cjk_ui_pack, the installed packs in it.
 struct Packs {
+  // Each installed pack's file, at a short path (ShortCardFile.h); before the fonts, so it outlives them.
+  ShortCardFile files[cjk_ui_pack::REGION_COUNT];
   std::unique_ptr<SdCardFont> fonts[cjk_ui_pack::REGION_COUNT];
   size_t uiRegion = cjk_ui_pack::REGION_COUNT;
   Region order[cjk_ui_pack::REGION_COUNT] = {};
@@ -78,7 +81,9 @@ struct Packs {
   void install(const Region region) {
     auto& font = fonts[static_cast<size_t>(region)];
     font = std::make_unique<SdCardFont>();
-    ASSERT_TRUE(font->load(packPath(region).c_str()));
+    auto& file = files[static_cast<size_t>(region)];
+    file = ShortCardFile::copyOf(packPath(region));
+    ASSERT_TRUE(font->load(file.c_str()));
   }
   bool installed(const Region region) const { return fonts[static_cast<size_t>(region)] != nullptr; }
 
