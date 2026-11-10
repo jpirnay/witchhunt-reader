@@ -9,6 +9,7 @@
 
 #include "BuildArena.h"
 #include "Epub.h"
+#include "Epub/BodySize.h"
 #include "Epub/FootnotePreviews.h"
 #include "Epub/Page.h"
 #include "Epub/Section.h"
@@ -164,8 +165,19 @@ void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, con
   }
 }
 
-// The section-cache variant `profile` names.
-Section::BuildParams buildParams(const Profile& profile) {
+// The size of the book's running text, measured as the reader does at the open that compiled its CSS
+// (ReaderActivity), in the region lent to the builds when there is one, as the reader lends the framebuffer there, and
+// taken into account as it does (EpubReaderActivity::makeSectionBuildParams): with font-size normalization and the
+// book's style on.
+uint8_t bodySizeFor(const Epub& epub, const Profile& profile, GfxRenderer& renderer, BuildArena* lent) {
+  if (!profile.fontSizeNormalization || !profile.embeddedStyle) return 100;
+  uint8_t pct = BodySize::read(epub.getCachePath());
+  if (pct == 0) pct = BodySize::prepare(epub, renderer, profile.fontId, lent);
+  return pct != 0 ? pct : 100;
+}
+
+// The section-cache variant `profile` names, for a book whose running text is at `bodySizePct`.
+Section::BuildParams buildParams(const Profile& profile, const uint8_t bodySizePct) {
   Section::BuildParams p;
   p.fontId = profile.fontId;
   p.lineCompression = profile.lineCompression;
@@ -178,6 +190,7 @@ Section::BuildParams buildParams(const Profile& profile) {
   p.hyphenationEnabled = profile.hyphenationEnabled;
   p.fontSizeNormalization = profile.fontSizeNormalization;
   p.embeddedStyle = profile.embeddedStyle;
+  p.bodySizePct = bodySizePct;
   p.bionicReadingEnabled = profile.bionicReadingEnabled;
   p.inlineFootnotePreviews = profile.inlineFootnotePreviews;
   p.imageRendering = profile.imageRendering;
@@ -234,6 +247,17 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
   if (epub->pageProgression() == PageProgression::Ltr) out << " ppd=ltr";
   out << "\n";
 
+  const uint8_t bodySizePct = bodySizeFor(*epub, profile, renderer, lentArena.get());
+  if (lentArena) {
+    // A fresh region for the builds, freed first so the heap never holds two: the open's census is no build, and its
+    // high water must not stand in the first spine's arena figure.
+    lentArena.reset();
+    lentArena = std::make_unique<BuildArena>(profile.lentArenaBytes);
+    if (!lentArena->valid()) {
+      out << "ERROR lent arena allocation failed\n";
+      return false;
+    }
+  }
   for (int i = 0; i < epub->getSpineItemsCount(); ++i) {
     const auto spineStart = std::chrono::steady_clock::now();
     Section section(epub, i, renderer);
@@ -241,7 +265,7 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
       lentArena->reset();
       section.setExternalBuildScratch(lentArena.get());
     }
-    const Section::BuildParams p = buildParams(profile);
+    const Section::BuildParams p = buildParams(profile, bodySizePct);
     if (g_buildBracket) g_buildBracket(i, true, lentArena.get());
     const bool built = section.createSectionFile(p, {}, /*skipEviction=*/true);
     if (g_buildBracket) g_buildBracket(i, false, lentArena.get());
@@ -306,7 +330,7 @@ bool forEachPage(const std::string& epubPath, const std::string& cacheDir, const
   auto epub = std::make_shared<Epub>(epubPath, cacheDir);
   if (!epub->load(true)) return false;
   epub->loadImageManifest();
-  const Section::BuildParams p = buildParams(profile);
+  const Section::BuildParams p = buildParams(profile, bodySizeFor(*epub, profile, renderer, nullptr));
   for (int i = 0; i < epub->getSpineItemsCount(); ++i) {
     Section section(epub, i, renderer);
     if (!section.createSectionFile(p, {}, /*skipEviction=*/true)) return false;

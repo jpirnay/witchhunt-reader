@@ -422,9 +422,9 @@ uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   uint8_t buffer[104];
   static_assert(sizeof(buffer) >= 23 + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) +
                                       BlockFontFamilies::kMaxFamilies * 3 * sizeof(int32_t) + sizeof(uint8_t) +
-                                      sizeof(uint32_t),
-                "the settings (23 B), Book's style line spacing, every family, the vertical request and the "
-                "hyphenation patterns fit");
+                                      sizeof(uint32_t) + sizeof(uint8_t),
+                "the settings (23 B), Book's style line spacing, every family, the vertical request, the "
+                "hyphenation patterns and the body size fit");
   size_t offset = 0;
 
   auto append = [&](const void* ptr, size_t size) {
@@ -473,6 +473,11 @@ uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   // Only when the patterns are not the image's own of before packs: those layouts keep their key.
   if (p.hyphenationLayoutKey != 0) {
     append(&p.hyphenationLayoutKey, sizeof(p.hyphenationLayoutKey));
+  }
+  // Only when the book's sizes are taken relative to it: a book whose running text is at the reader's size keeps its
+  // key, and so does every book with normalization or its style off.
+  if (p.fontSizeNormalization && p.embeddedStyle && p.bodySizePct != 100) {
+    append(&p.bodySizePct, sizeof(p.bodySizePct));
   }
 
   return fnv1a(buffer, offset);
@@ -1350,6 +1355,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   st.visitor->setFontSizeLadder(p.fontSizeLadder);
   st.visitor->setBookLineHeight(p.bookLineHeightFloor, p.lineHeightEmPx);
   st.visitor->setWidowOrphanControl(p.widowOrphanControl);
+  if (p.embeddedStyle) st.visitor->setBodySizePct(p.bodySizePct);
   if (p.embeddedStyle && p.fontFamilies) st.visitor->setFontFamilies(*p.fontFamilies);
   // Anchors stream to SD as they are found rather than accumulating in the parser; the
   // finalizer below copies the spill into the section file's anchor map. Set before setup(),

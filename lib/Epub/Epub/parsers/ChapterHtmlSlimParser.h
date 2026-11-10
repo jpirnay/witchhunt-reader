@@ -379,6 +379,9 @@ class ChapterHtmlSlimParser final : public Print {
   // Body size census (setSizeCensus): the running text's characters are counted here by their size, and nothing is
   // laid out. Null for a build.
   BodySize::Census* census_ = nullptr;
+  // The book's body size as a factor (setBodySizePct): the sizes on the text's scale are taken relative to it
+  // (normalizeFontSizeForElement). 1 when it is the reader's size, or normalization is off.
+  float bodyScale_ = 1.0f;
   const CssParser* cssParser;
   EpubImageManifest* imageManifest;
   bool embeddedStyle;
@@ -1245,6 +1248,10 @@ class ChapterHtmlSlimParser final : public Print {
   // countCensusWord), and lays nothing out: no line, no page, no image, no table. A block keeps its first word only,
   // so it is empty or not as in a build, which is what the next block's style depends on (startNewTextBlock's merge).
   void setSizeCensus(BodySize::Census* census) { census_ = census; }
+  // The size of the book's running text in percent of the reader's (BodySize::read), set before setup(). With
+  // font-size normalization on, the book's sizes are taken relative to it, so that text reads at the reader's size;
+  // off, or 100, nothing changes. Only the book's own CSS has sizes to take it out of.
+  void setBodySizePct(uint8_t pct);
   // The book's typography (TypographyProfile.h), handed to every block the parser lays out; Latin rules by default.
   void setTypography(const TypographyProfile& typography) { typography_ = typography; }
   // The reader's vertical-text request for the book and its page progression, from which the section decides its

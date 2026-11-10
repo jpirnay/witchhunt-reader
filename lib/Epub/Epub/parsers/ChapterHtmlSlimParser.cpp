@@ -921,8 +921,26 @@ CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName,
   const bool blockLevel = isHeaderOrBlock(tagName) && strcmp(tagName, "br") != 0;
   // A body-relative size on an inline element is on the blocks' scale too (a 1rem span is the
   // prose size), so it takes the same main-text normalisation.
-  if (hasMainTextFontSizeBaseline_ && (blockLevel || cssStyle.fontSizeRootRelative)) {
+  const bool onTextScale = blockLevel || cssStyle.fontSizeRootRelative;
+  if (hasMainTextFontSizeBaseline_ && onTextScale) {
     normalized.fontSizeMultiplier /= mainTextFontSizeBaseline_;
+  }
+  const bool bodyBlock = blockLevel && !matches(tagName, HEADER_TAGS, NUM_HEADER_TAGS);
+  // A size that undoes the dropped root size is the book's body text: Calibre sets <body> to its base size and
+  // sizes every paragraph back down by a class (1.125em x 0.88889em = 1). Dropping only the root's factor left
+  // such paragraphs at 0.889 of the reader's size, drawn as the body face shrunk. Only an exact undo, within 1%:
+  // a size its designer chose below the body text's (0.85em under a 1.2em body, 1.02) is kept. Told by the size as
+  // the book states it, before its body size is taken out below.
+  const float fromRoot = normalized.fontSizeMultiplier * rootFontSizeBaseline_;
+  if (bodyBlock && hasRootFontSizeBaseline_ && fromRoot > 0.99f && fromRoot < 1.01f) {
+    normalized.fontSizeMultiplier = 1.0f;
+  }
+  // The size of the book's running text (setBodySizePct) is the reader's size: a book that sets all its text smaller
+  // or larger is read at the size chosen, its headings and small print in proportion. Every size on the text's scale,
+  // a block's or a body-relative one, is taken relative to it, before the band below; an em or % size of an inline
+  // element is relative to its parent, which already is. Not html's or body's: theirs is the context, made 1 above.
+  if (bodyScale_ != 1.0f && onTextScale && !isRootFontSizeElement(tagName)) {
+    normalized.fontSizeMultiplier /= bodyScale_;
   }
   // Block twin of the per-word near-body snap in updateEffectiveInlineStyle. The same
   // publisher sizing arrives either as a <span style="font-size:1.1em"> wrapping the
@@ -934,8 +952,8 @@ CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName,
   // 0.88. Headings are exempt: a heading is meant to stand apart from the prose, so the
   // size its author gave it is kept even when the margin is slim — the point of the band
   // is to spare BODY text a scale nobody asked for, not to flatten the page's hierarchy.
-  // (The main-text baseline division above still applies to them, as it always has.)
-  if (blockLevel && !matches(tagName, HEADER_TAGS, NUM_HEADER_TAGS)) {
+  // (The main-text baseline division and the body size above still apply to them, as the former always has.)
+  if (bodyBlock) {
     const int deadZone = nearBodyDeadZonePct(fontSizeNormalization);
     // Rounded to integer percent like the per-word channel (applyCssFontSizeToEntry), so the
     // same declared size lands the same side of the band edge on either channel — a float
@@ -944,17 +962,17 @@ CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName,
     if (pct >= 100 - deadZone && pct <= 100 + deadZone) {
       normalized.fontSizeMultiplier = 1.0f;
     }
-    // A size that undoes the dropped root size is the book's body text: Calibre sets <body> to its base size and
-    // sizes every paragraph back down by a class (1.125em x 0.88889em = 1). Dropping only the root's factor left
-    // such paragraphs at 0.889 of the reader's size, drawn as the body face shrunk. Only an exact undo, within 1%:
-    // a size its designer chose below the body text's (0.85em under a 1.2em body, 1.02) is kept.
-    const float fromRoot = normalized.fontSizeMultiplier * rootFontSizeBaseline_;
-    if (hasRootFontSizeBaseline_ && fromRoot > 0.99f && fromRoot < 1.01f) {
-      normalized.fontSizeMultiplier = 1.0f;
-    }
   }
   return normalized;
 }
+
+void ChapterHtmlSlimParser::setBodySizePct(const uint8_t pct) {
+  // Only with the wide band: off, the book's sizes stay as it states them. A size no word can take is no body size.
+  const bool usable = fontSizeNormalization && pct >= ParsedText::MIN_WORD_SIZE_PCT &&
+                      pct <= ParsedText::MAX_WORD_SIZE_PCT && pct != 100;
+  bodyScale_ = usable ? pct / 100.0f : 1.0f;
+}
+
 CssStyle ChapterHtmlSlimParser::inlineStyleFor(const std::string& styleAttr) {
   const auto it = inlineStyleCache_.find(styleAttr);
   if (it != inlineStyleCache_.end()) return it->second;

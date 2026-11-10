@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -14,8 +15,12 @@
 #include "BuildArena.h"
 #include "Epub.h"
 #include "Epub/BodySize.h"
+#include "Epub/Page.h"
+#include "Epub/Section.h"
+#include "Epub/blocks/TextBlock.h"
 #include "Epub/css/CssParser.h"
 #include "GfxRenderer.h"
+#include "PipelineRunner.h"
 #include "StoredZipWriter.h"
 
 namespace fs = std::filesystem;
@@ -262,6 +267,74 @@ TEST_F(BodySizeTest, NothingWithoutTheCompiledCss) {
   ASSERT_TRUE(unstyled.load(true, /*skipLoadingCss=*/true));
   EXPECT_EQ(0, BodySize::prepare(unstyled, renderer, kFontId, nullptr));
   EXPECT_FALSE(fs::exists(cache + "/bodysize.bin"));
+}
+
+// ---- Laid out relative to it (Normalize Font Size) ---------------------------------------------------------------
+
+// The size each line of `epubPath`'s spine `spine` is set at, by the line's first word, laid out into `cache` as the
+// reader does (the harness measures the body size as the reader's open does): the line's block size (no size ladder
+// in the harness, so the multiplier is the whole size) times its first word's.
+std::map<std::string, float> lineSizes(const std::string& epubPath, const fs::path& cache, const bool normalization,
+                                       const int spine) {
+  pipeline_harness::Profile profile;
+  profile.fontSizeNormalization = normalization;
+  std::map<std::string, float> sizes;
+  EXPECT_TRUE(pipeline_harness::forEachPage(
+      epubPath, cache.string(), profile, [&sizes, spine](const int at, const Section&, const Page& page, GfxRenderer&) {
+        if (at != spine) return;
+        for (const auto& element : page.elements) {
+          if (element->getTag() != TAG_PageLine) continue;
+          const TextBlock& line = *static_cast<const PageLine&>(*element).getBlock();
+          if (line.wordCount() == 0) continue;
+          sizes.emplace(line.wordText(0), line.getRenderStyle().fontSizeMultiplier * line.wordSizePct(0) / 100.0f);
+        }
+      }));
+  return sizes;
+}
+
+const std::string kCorpusBook = CORPUS_DIR "/test_body_size.epub";
+
+// Normalization on: the running text (small, 8/9) is the reader's size, and the title (large, 6/5), the subtitle
+// (medium) and the small print (x-small, 3/4) keep their proportion to it: the CSS Fonts 4 scale over 89 %.
+TEST_F(BodySizeTest, OnTheRunningTextIsTheReadersSize) {
+  const auto sizes = lineSizes(kCorpusBook, work / "on", true, 1);
+  EXPECT_EQ(89, BodySize::read(Epub::cachePathFor(kCorpusBook, (work / "on").string())));
+  ASSERT_EQ(1u, sizes.count("Chapter"));
+  EXPECT_NEAR(1.2f / 0.89f, sizes.at("Chapter"), 0.002f);  // 135 %
+  EXPECT_NEAR(1.0f / 0.89f, sizes.at("In"), 0.002f);       // 112 %: outside the band, kept
+  EXPECT_NEAR(0.75f / 0.89f, sizes.at("Small"), 0.002f);   // 84 %
+  EXPECT_FLOAT_EQ(1.0f, sizes.at("It"));                   // the first paragraph's first line
+  for (const auto& [word, size] : sizes) {
+    if (word != "Chapter" && word != "In" && word != "Small") {
+      EXPECT_FLOAT_EQ(1.0f, size) << word;
+    }
+  }
+}
+
+// Normalization off: the sizes as the book's CSS states them.
+TEST_F(BodySizeTest, OffTheBooksSizesStand) {
+  const auto sizes = lineSizes(kCorpusBook, work / "off", false, 1);
+  ASSERT_EQ(1u, sizes.count("Chapter"));
+  EXPECT_NEAR(1.2f, sizes.at("Chapter"), 0.001f);
+  EXPECT_FLOAT_EQ(1.0f, sizes.at("In"));
+  EXPECT_NEAR(0.75f, sizes.at("Small"), 0.001f);
+  EXPECT_NEAR(8.0f / 9, sizes.at("It"), 0.001f);
+}
+
+// A book whose running text is the reader's size already is laid out as before: its body size is 100.
+TEST_F(BodySizeTest, PlainBodyTextIsUnchanged) {
+  auto epub = book(".note { font-size: x-small } h1 { font-size: large }",
+                   {"<h1>Title</h1>" + paragraphs("x", kProse, 6) + paragraphs("note", "A note.", 2)});
+  const auto sizes = lineSizes(epub->getPath(), work / "plain", true, 0);
+  EXPECT_EQ(100, BodySize::read(Epub::cachePathFor(epub->getPath(), (work / "plain").string())));
+  ASSERT_EQ(1u, sizes.count("Title"));
+  EXPECT_NEAR(1.2f, sizes.at("Title"), 0.001f);
+  EXPECT_NEAR(0.75f, sizes.at("A"), 0.001f);
+  for (const auto& [word, size] : sizes) {
+    if (word != "Title" && word != "A") {
+      EXPECT_FLOAT_EQ(1.0f, size) << word;
+    }
+  }
 }
 
 }  // namespace
