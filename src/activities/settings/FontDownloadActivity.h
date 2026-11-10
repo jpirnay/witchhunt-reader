@@ -15,10 +15,11 @@
 // mandatory CRC and delete-on-abort are not taken.
 class FontDownloadActivity final : public UiListActivity {
  public:
-  // `wantedPack`: the language of a hyphenation pack to download as soon as the list is loaded ("de"), as Home's offer
-  // asks (HyphenationPacks::takeOffer); null for the plain Font Manager.
+  // `wantedPack`: the language of a hyphenation pack to download as soon as the list is loaded ("de"), as the offers of
+  // Home and of a book open ask (HyphenationPacks); null for the plain Font Manager. `returnToBook`: leaving restarts
+  // into the open book (APP_STATE.openEpubPath) rather than Home, for the offer a book open made.
   explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                const char* wantedPack = nullptr);
+                                const char* wantedPack = nullptr, bool returnToBook = false);
 
   void onEnter() override;
   bool usesWifi() const override { return true; }
@@ -39,6 +40,7 @@ class FontDownloadActivity final : public UiListActivity {
   State state_ = WIFI_SELECTION;
   // The hyphenation pack to download once the list is loaded, "" for none (consumed by its first use).
   char wantedPack_[3] = {};
+  bool returnToBook_ = false;
   FontInstaller fontInstaller_;
 
   // HTTP/TLS session shared across all files of a single downloadFamily()

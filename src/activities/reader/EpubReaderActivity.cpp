@@ -81,6 +81,7 @@
 #include "activities/home/BookInfoActivity.h"
 #include "activities/settings/ClearCacheActivity.h"
 #include "activities/settings/DictionarySelectionActivity.h"
+#include "activities/settings/FontDownloadActivity.h"
 #include "activities/settings/ReadingStatsBookDetailActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/LinkMarkerMatch.h"
@@ -822,6 +823,15 @@ void EpubReaderActivity::onEnter() {
   }
 #endif  // CROSSPOINT_KOREADER_AUTOSYNC
 
+  // A book whose language hyphenates from a pack the card lacks asks once whether to download it, before its first page
+  // is laid out: the answer renders it (offerHyphenationPack(), from the first loop()). Not a device test's book, which
+  // runs unattended.
+  if (getEffectiveHyphenation() && !SerialTestApi::isTestBook(epub->getPath()) &&
+      HyphenationPacks::bookOfferDue(epub->getLanguage(), pendingHyphenationOffer_)) {
+    logReaderMemSnapshot("onEnter_ready_offer");
+    return;
+  }
+
   // Trigger first update
   logReaderMemSnapshot("onEnter_before_request_update");
   requestUpdate();
@@ -966,10 +976,48 @@ void EpubReaderActivity::onExit() {
   BookRelocation::bookClosed();
 }
 
+void EpubReaderActivity::offerHyphenationPack() {
+  const std::string code(pendingHyphenationOffer_);
+  pendingHyphenationOffer_[0] = '\0';
+  ConfirmationActivity::Question question;
+  question.headline = tr(STR_HYPHENATION);
+  char message[320];
+  snprintf(message, sizeof(message), tr(STR_HYPHENATION_PACK_OFFER), HyphenationPacks::languageName(code.c_str()));
+  question.message = message;
+  question.messageMaxLines = 6;
+  question.cancelLabel = StrId::STR_NO;
+  question.acceptLabel = StrId::STR_DOWNLOAD;
+  auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, std::move(question));
+  if (!confirmation) {
+    LOG_ERR("ERS", "OOM: hyphenation pack offer (%zu bytes)", sizeof(ConfirmationActivity));
+    requestUpdate();
+    return;
+  }
+  startActivityForResult(std::move(confirmation), [this, code](const ActivityResult& res) {
+    if (res.isCancelled) {
+      HyphenationPacks::declineOffer(code.c_str());
+      // The book's first page, after a full-screen prompt.
+      ReaderUtils::enforceExitFullRefresh(renderer);
+      requestUpdate();
+      return;
+    }
+    // In the reader's place: the download's TLS session needs the heap the reader holds. Leaving the Font Manager
+    // restarts into this book, hyphenated by the pack.
+    activityManager.replaceActivity(
+        std::make_unique<FontDownloadActivity>(renderer, mappedInput, code.c_str(), /*returnToBook=*/true));
+  });
+}
+
 void EpubReaderActivity::loop() {
   if (!epub) {
     // Should never happen
     finish();
+    return;
+  }
+
+  // The book's hyphenation pack offer goes first: the book is not laid out until it is answered.
+  if (pendingHyphenationOffer_[0] != '\0') {
+    offerHyphenationPack();
     return;
   }
 
