@@ -1,9 +1,12 @@
 // Where the dots of a reader image land in the B/W pass.
 //
 // The B/W pass draws every reader image from its 1-bit pixel cache, an Atkinson dither of the decoded grays made at
-// the size the image is drawn (ImageBlock::render, monochromeOutput). These tests pin that it is shown as it was
-// dithered: at the drawn size, one cached pixel to one screen pixel, never rescaled after the dither; and a tall image
-// cut across pages draws each piece's own rows of the one dither.
+// the size the image is drawn (ImageBlock::render, monochromeOutput). Under Images: Display the gray pass then replays
+// the 4-level cache over it; under Black & White (ReaderImageMode.h) it does not, so the panel shows the 1-bit cache
+// alone. These tests pin that it is shown as it was dithered: at the drawn size, one cached pixel to one screen pixel,
+// never rescaled after the dither; a tall image cut across pages draws each piece's own rows of the one dither; and the
+// gray planes leave such an image as drawn (an image in a table cell is drawn from the same 1-bit cache by the text
+// pass of the AA planes, and must add no gray).
 #include <gtest/gtest.h>
 #include <unistd.h>
 
@@ -53,13 +56,21 @@ struct ImageDitherPlacementFixture : testing::Test {
     fs::create_directories(work);
     renderer.setOrientation(GfxRenderer::LandscapeCounterClockwise);
   }
-  void TearDown() override { fs::remove_all(work); }
+  void TearDown() override {
+    renderer.setRenderMode(GfxRenderer::BW);
+    fs::remove_all(work);
+  }
 
   ImageBlock block() const { return ImageBlock((work / "img.png").string(), kWidth, kHeight, "", kBook, kEntry); }
 
   void fill(const uint8_t byte) const { std::memset(renderer.getWriteTarget(), byte, kStride * kRows); }
   bool black(const int x, const int y) const {
     return (renderer.getWriteTarget()[y * kStride + (x >> 3)] & (1 << (7 - (x & 7)))) == 0;
+  }
+  int bitsSet() const {
+    int n = 0;
+    for (int i = 0; i < kStride * kRows; ++i) n += __builtin_popcount(renderer.getWriteTarget()[i]);
+    return n;
   }
 
   static CachedImage read(const fs::path& path) {
@@ -147,6 +158,29 @@ TEST_F(ImageDitherPlacementFixture, ASplitImageContinuesTheSameDither) {
   for (int col = 0; col < kWidth; ++col) {
     EXPECT_FALSE(black(kX + col, kY + kRowsDrawn)) << "drawn past the piece at column " << col;
   }
+}
+
+// A gray plane starts clear and a pixel is set where it takes that gray. The 1-bit cache has no gray to give, so an
+// image drawn from it, as a table cell's is by the text pass, leaves both planes clear: the image stays as the B/W
+// pass drew it. The 4-level replay Display adds is what sets them, and what Black & White leaves out.
+TEST_F(ImageDitherPlacementFixture, TheGrayPlanesLeaveTheOneBitImageAsDrawn) {
+  ImageBlock image = block();
+  decodeBoth(image);
+  ASSERT_TRUE(image.hasPixelCache());
+  ASSERT_TRUE(image.hasGrayscaleCache());
+
+  int grayFromDisplay = 0;
+  for (const auto mode : {GfxRenderer::GRAYSCALE_MSB, GfxRenderer::GRAYSCALE_LSB}) {
+    renderer.setRenderMode(mode);
+    fill(0x00);
+    image.render(renderer, kX, kY, /*forceLoad=*/true, /*monochromeOutput=*/true);
+    EXPECT_EQ(bitsSet(), 0) << "plane " << mode;
+
+    fill(0x00);
+    image.renderGrayscaleFromCache(renderer, kX, kY);
+    grayFromDisplay += bitsSet();
+  }
+  EXPECT_GT(grayFromDisplay, 0) << "the test image has grays for Display's replay to draw";
 }
 
 }  // namespace
