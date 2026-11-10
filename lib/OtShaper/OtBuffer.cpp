@@ -13,8 +13,8 @@ constexpr unsigned DIGEST_SHIFTS[3] = {4, 0, 6};  // hb_set_digest_shifts
 void setHeapCheck(const HeapCheck check) { gHeapCheck = check; }
 bool heapAvailable(const size_t bytes) { return gHeapCheck == nullptr || gHeapCheck(bytes); }
 
-void Digest::add(const uint32_t g) {
-  for (int i = 0; i < 3; i++) masks[i] |= 1ull << ((g >> DIGEST_SHIFTS[i]) & 63);
+OT_HOT void Digest::add(const uint32_t g) {
+  for (int i = 0; i < 3; i++) masks[i] |= bit64((g >> DIGEST_SHIFTS[i]) & 63);
 }
 
 void Digest::addRange(const uint32_t a, const uint32_t b) {
@@ -31,31 +31,35 @@ void Digest::addRange(const uint32_t a, const uint32_t b) {
   }
 }
 
-bool Digest::mayHave(const uint32_t g) const {
+OT_HOT bool Digest::mayHave(const uint32_t g) const {
   for (int i = 0; i < 3; i++) {
-    if (!(masks[i] & (1ull << ((g >> DIGEST_SHIFTS[i]) & 63)))) return false;
+    if (!hasBit64(masks[i], (g >> DIGEST_SHIFTS[i]) & 63)) return false;
   }
   return true;
 }
 
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "digest records are little-endian in memory");
 
-Digest readDigest(const uint8_t* record) {
-  Digest d;
-  memcpy(d.masks, record, sizeof(d.masks));
-  return d;
-}
-
 void writeDigest(const Digest& digest, uint8_t* record) { memcpy(record, digest.masks, sizeof(digest.masks)); }
 
-bool digestRecordMayHave(const uint8_t* record, const uint32_t glyph) {
+// Only the 32-bit half of each mask that holds the glyph's bit is read.
+OT_HOT bool digestRecordMayHave(const uint8_t* record, const uint32_t glyph) {
   for (int i = 0; i < 3; i++) {
-    uint64_t mask;
-    memcpy(&mask, record + 8 * i, sizeof(mask));
-    if (!(mask & (1ull << ((glyph >> DIGEST_SHIFTS[i]) & 63)))) return false;
+    const unsigned bit = (glyph >> DIGEST_SHIFTS[i]) & 63;
+    if (!(le32(record + 8 * i + 4 * (bit >> 5)) & (1u << (bit & 31)))) return false;
   }
   return true;
 }
+
+// witchhunt: deviation 18 - the second mask is the one of shift 0.
+uint64_t digestRecordLowMask(const uint8_t* record) {
+  static_assert(DIGEST_SHIFTS[1] == 0, "the low mask is the second");
+  return le64(record + 8);
+}
+
+OT_HOT uint64_t readLowMask(const uint8_t* stored) { return le64(stored); }
+
+void writeLowMask(const uint64_t mask, uint8_t* stored) { memcpy(stored, &mask, sizeof(mask)); }
 
 bool Buffer::prepare(const unsigned maxGlyphs) {
   info.clear();
@@ -141,7 +145,7 @@ void Buffer::reverse() {
   }
 }
 
-void Buffer::refreshDigest() {
+OT_HOT void Buffer::refreshDigest() {
   digest = Digest();
   for (const GlyphInfo& g : info) digest.add(g.codepoint);
 }

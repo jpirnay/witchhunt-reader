@@ -11,6 +11,8 @@
 #include <type_traits>
 #include <utility>
 
+#include "OtHot.h"  // witchhunt: deviation 21
+
 namespace ot {
 
 // The calls lib/OtShaper makes of std::vector, over memory its owner binds;
@@ -54,7 +56,7 @@ class FixedVector {
 
   void clear() { size_ = 0; }
 
-  bool push_back(const T& value) {
+  OT_HOT bool push_back(const T& value) {
     if (size_ >= capacity_) return refuse();
     data_[size_++] = value;
     return true;

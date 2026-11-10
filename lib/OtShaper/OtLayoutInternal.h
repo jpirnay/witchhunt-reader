@@ -36,7 +36,7 @@ inline int32_t saturate(const int64_t v) {
   if (v < INT32_MIN) return INT32_MIN;
   return static_cast<int32_t>(v);
 }
-inline int32_t satAdd(const int32_t a, const int32_t b) { return saturate(static_cast<int64_t>(a) + b); }
+OT_HOT inline int32_t satAdd(const int32_t a, const int32_t b) { return saturate(static_cast<int64_t>(a) + b); }
 inline int32_t satSub(const int32_t a, const int32_t b) { return saturate(static_cast<int64_t>(a) - b); }
 
 // Resolves an Extension subtable to the one it wraps (type and table).
@@ -81,7 +81,8 @@ struct SkippyIter {
   void setMatch(MatchFunc f, const Table& data, const Values& v) {
     func = f;
     matchData = data;
-    values = v;
+    values.t = v.t;  // member by member: a whole Values (12 B) is a memcpy call at -Os
+    values.offset = v.offset;
     hasValues = true;
   }
   void reset(unsigned start);
@@ -116,6 +117,8 @@ struct ApplyContext {
 
   // Subtable digests of the top-level lookup (not of nested ones).
   const uint8_t* subtableDigests = nullptr;
+  const uint8_t* subtableGroups = nullptr;  // witchhunt: deviation 18 - their group masks (LookupSettings)
+  uint64_t secondMask = ~0ull;              // witchhunt: deviation 19 - of the top-level lookup (LookupSettings)
 
   // Match positions of the rule being applied: this nesting level's row of
   // buffer.matchStack, so nested lookups keep their own.
@@ -131,7 +134,7 @@ struct ApplyContext {
     iterInput.init(this, false);
     iterContext.init(this, true);
   }
-  void setLookupProps(const uint32_t props) {
+  OT_HOT void setLookupProps(const uint32_t props) {
     lookupProps = face.sanitizeLookupProps(props);
     initIters();
   }
@@ -150,8 +153,12 @@ struct ApplyContext {
 
   bool applySubtable(uint16_t type, Table st);
   // Tries each subtable at buffer.idx; `digests` (optional) skips the ones
-  // that cannot start there.
-  bool applyLookupSubtables(const Table& lookup, const uint8_t* digests = nullptr);
+  // that cannot start there, and `groups` (optional, with `digests`; deviation 18) whole groups of them.
+  bool applyLookupSubtables(const Table& lookup, const uint8_t* digests = nullptr, const uint8_t* groups = nullptr,
+                            uint64_t secondMask = ~0ull);
+  // witchhunt: deviation 19 - whether the glyph after buffer.idx may be a ligature's second component: false only
+  // when the context iterator finds one it may not skip, outside `secondMask`.
+  bool nextMayBeSecond(uint64_t secondMask);
   bool recurse(uint32_t subLookupIndex);
 };
 

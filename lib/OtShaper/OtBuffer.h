@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include "OtFace.h"
 #include "OtFixedVector.h"  // witchhunt: deviation 1 - in place of <vector>
@@ -38,6 +39,16 @@ using HeapCheck = bool (*)(size_t bytes);
 void setHeapCheck(HeapCheck check);
 bool heapAvailable(size_t bytes);
 
+// Bit `n` (< 64) of a 64-bit mask, and a mask of that bit alone, in 32-bit halves: on RV32 a variable shift of a
+// 64-bit value is a call to a ROM helper (__lshrdi3, __ashldi3), and the digest tests and the shapers' category tests
+// make one per glyph.
+constexpr bool hasBit64(const uint64_t mask, const unsigned n) {
+  return ((n < 32 ? static_cast<uint32_t>(mask) : static_cast<uint32_t>(mask >> 32)) >> (n & 31)) & 1;
+}
+constexpr uint64_t bit64(const unsigned n) {
+  return n < 32 ? uint64_t{1u << n} : static_cast<uint64_t>(1u << (n & 31)) << 32;
+}
+
 // HarfBuzz's set digest: a three-mask Bloom filter over glyph IDs. Whether a
 // lookup "would substitute" depends on it for some subtable formats, so it is
 // reproduced exactly; it also lets lookup application skip glyphs and lookups
@@ -56,11 +67,41 @@ struct Digest {
 // Digests as stored in memory and in the CPac table: the three masks as
 // little-endian 64-bit words. Records need not be aligned.
 constexpr unsigned DIGEST_BYTES = 24;
-Digest readDigest(const uint8_t* record);
+// The little-endian 32-bit word at `p`, any alignment: one load when `p` is 4-aligned (the plan's records always are,
+// CPac's when the font block is), else four. The record reads below are built of these: on the C3 at -Os a memcpy of
+// a record or a mask is a call, and these reads run for every lookup and start glyph; and -Os would not inline them.
+static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "digest records are little-endian in memory");
+__attribute__((always_inline)) inline uint32_t le32(const uint8_t* p) {
+  if ((reinterpret_cast<uintptr_t>(p) & 3) == 0) {
+    uint32_t v;
+    std::memcpy(&v, __builtin_assume_aligned(p, 4), sizeof(v));
+    return v;
+  }
+  return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) | (static_cast<uint32_t>(p[2]) << 16) |
+         (static_cast<uint32_t>(p[3]) << 24);
+}
+// The mask at `p` (8 bytes, little-endian, any alignment).
+__attribute__((always_inline)) inline uint64_t le64(const uint8_t* p) {
+  return (static_cast<uint64_t>(le32(p + 4)) << 32) | le32(p);
+}
+// Built in place (a returned or assigned Digest, 24 B, is a memcpy call at -Os).
+__attribute__((always_inline)) inline Digest readDigest(const uint8_t* record) {
+  return Digest{{le64(record), le64(record + 8), le64(record + 16)}};
+}
+__attribute__((always_inline)) inline void readDigest(const uint8_t* record, Digest& out) {
+  for (int i = 0; i < 3; i++) out.masks[i] = le64(record + 8 * i);
+}
 void writeDigest(const Digest& digest, uint8_t* record);
 // Whether the digest record may hold `glyph`, reading only as many masks as
 // it takes to rule the glyph out.
 bool digestRecordMayHave(const uint8_t* record, uint32_t glyph);
+// witchhunt: deviation 18 - a digest record's mask of the glyphs' low six bits; whether such a mask (or several ORed)
+// may hold `glyph`, so that when it may not, neither may the record; and such a mask stored alone (8 bytes,
+// little-endian, unaligned).
+uint64_t digestRecordLowMask(const uint8_t* record);
+inline bool lowMaskMayHave(const uint64_t mask, const uint32_t glyph) { return hasBit64(mask, glyph & 63); }
+uint64_t readLowMask(const uint8_t* stored);
+void writeLowMask(uint64_t mask, uint8_t* stored);
 
 // Mask bit of context codepoints (see shape()), below the feature bits.
 constexpr uint32_t CONTEXT_MASK = 1u << 0;
@@ -114,7 +155,7 @@ struct GlyphInfo {
   static constexpr uint8_t IS_LIG_BASE = 0x10;
   unsigned ligId() const { return ligProps >> 5; }
   bool ligatedInternal() const { return ligProps & IS_LIG_BASE; }
-  unsigned ligComp() const { return ligatedInternal() ? 0 : ligProps & 0x0F; }
+  OT_HOT unsigned ligComp() const { return ligatedInternal() ? 0 : ligProps & 0x0F; }
   unsigned ligNumComps() const { return (isLigature() && ligatedInternal()) ? ligProps & 0x0F : 1; }
   // Components this glyph contributes when ligated again: the later pieces
   // of a MultipleSubst belong to the first piece's component.

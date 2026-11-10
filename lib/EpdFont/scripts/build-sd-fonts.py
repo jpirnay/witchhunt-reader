@@ -268,13 +268,14 @@ def write_corpus(out_dir: Path) -> None:
 
 
 def build_ui_pack_family(family: dict, output_base: Path, output_dir: Path) -> tuple[str, bool, str]:
-    """A `format: uipack` entry: the Arabic UI pack (build_ui_script_pack.py), cut from its `source` family's files as
-    this run built them, or as the repository holds them."""
+    """A `format: uipack` entry: a UI script pack (build_ui_script_pack.py), cut from its `source` family's files as
+    this run built them, or as the repository holds them (ArabicUI), or from the Noto CJK OTF it pins (CJK packs)."""
     source = output_base / family["source"]
     if not source.is_dir():
         source = SCRIPT_DIR.resolve().parents[2] / "assets" / "sd-fonts" / family["source"]
-    result = subprocess.run([sys.executable, str(SCRIPT_DIR / "build_ui_script_pack.py"), "--output-dir",
-                             str(output_dir), "--source-dir", str(source)], capture_output=True, text=True)
+    result = subprocess.run([sys.executable, str(SCRIPT_DIR / "build_ui_script_pack.py"), "--pack", family["name"],
+                             "--output-dir", str(output_dir), "--source-dir", str(source)],
+                            capture_output=True, text=True)
     if result.returncode != 0:
         return family["name"], False, result.stderr.strip()[-2000:]
     return family["name"], True, ""

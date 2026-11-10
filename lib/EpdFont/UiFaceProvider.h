@@ -10,6 +10,7 @@ class FallbackFaceProvider;
 /// The provider of one built-in UI face (CjkUiFonts::attach): a script pack's glyph for this face's own size and
 /// weight first, then whatever the FallbackFaceProvider its size shares serves (the CJK UI faces, the last book's
 /// font).
+/// In the reader, the book's face goes before the pack for what it maps (FallbackFaceProvider::readerMaps).
 ///
 /// A script pack is a 1-bit .cpfont family on the card holding what the UI faces leave out for flash, rendered as they
 /// are (lib/EpdFont/scripts/build_ui_script_pack.py): the Arabic presentation forms today (src/UiScriptPack.cpp). Its
