@@ -19,6 +19,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "Epub.h"
+#include "Epub/BodySize.h"
 #include "Epub/BookFonts.h"
 #include "Epub/CoverThumbSession.h"
 #include "EpubReaderActivity.h"
@@ -957,8 +958,13 @@ void ReaderActivity::onEnter() {
     // Publisher Fonts: the book's embedded fonts are examined once, here, with the same popup and lent buffer.
     // onEnter() left the loaded font alone until then (ensureSdFontLoadedForPath).
     const bool bookFontsPending = bookFontsPendingForPath(initialBookPath.c_str());
+    // Normalize Font Size: the size of the book's running text is measured once its CSS is compiled (BodySize), with
+    // the same popup and lent buffer. A book indexed by an older firmware is measured at this open.
+    const bool bodySizePending =
+        SETTINGS.embeddedStyle != 0 && BodySize::read(Epub::cachePathFor(initialBookPath, "/.crosspoint")) == 0;
+    const bool indexing = firstOpenIndexing || bookFontsPending || bodySizePending;
     Rect indexingPopup;
-    if (firstOpenIndexing || bookFontsPending) {
+    if (indexing) {
       RenderLock lock;
       // drawPopup() overlays the indexing box on the displayed frame (it resyncs the write buffer
       // from the screen first), so the box lands on the launcher screen — e.g. the recent-books grid
@@ -1004,7 +1010,7 @@ void ReaderActivity::onEnter() {
     // performs no rendering.
     uint8_t* lentForIndexing = nullptr;
     size_t lentSize = 0;
-    if ((firstOpenIndexing || bookFontsPending) && renderer.hasSecondaryBuffer()) {
+    if (indexing && renderer.hasSecondaryBuffer()) {
       RenderLock lock;
       // The popup's swap left the write buffer holding the pre-popup frame; the return below seeds
       // the secondary from it. Make that the frame on the panel, so the reader's own overlays
@@ -1029,6 +1035,11 @@ void ReaderActivity::onEnter() {
     if (epub && bookFontsPending) {
       // load() left nothing in the region: its rings were scoped to each read.
       BookFonts::prepare(*epub, indexingScratch.valid() ? &indexingScratch : nullptr);
+    }
+    // After load(): a CSS compiled again there forgot the book's body size. Neither leaves anything in the region. The
+    // UI font only serves the parser's metrics, which no size depends on.
+    if (epub && SETTINGS.embeddedStyle != 0 && BodySize::read(epub->getCachePath()) == 0) {
+      BodySize::prepare(*epub, renderer, UI_10_FONT_ID, indexingScratch.valid() ? &indexingScratch : nullptr);
     }
     if (lentForIndexing) {
       RenderLock lock;

@@ -394,6 +394,8 @@ class Epub {
   void setSyntheticTocFallbackEnabled(bool enabled) { syntheticTocFallbackEnabled = enabled; }
   size_t getCumulativeSpineItemSize(int spineIndex) const;
   int getSpineIndexForTextReference() const;
+  // The spine item with the most inflated bytes, the book's likeliest running text (BodySize); -1 for none.
+  int getLargestSpineIndex() const;
 
   size_t getBookSize() const;
   float calculateProgress(int currentSpineIndex, float currentSpineRead) const;

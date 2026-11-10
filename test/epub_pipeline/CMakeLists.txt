@@ -17,6 +17,7 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/Epub/Epub/ParsedText.cpp
   ${REPO_ROOT}/lib/Epub/Epub/TypographyProfile.cpp
   ${REPO_ROOT}/lib/Epub/Epub/BookMetadataCache.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/BodySize.cpp
   ${REPO_ROOT}/lib/Epub/Epub/MetadataSidecar.cpp
   ${REPO_ROOT}/lib/Epub/Epub/FootnotePreviews.cpp
   ${REPO_ROOT}/lib/Epub/Epub/FootnoteShape.cpp
@@ -172,6 +173,7 @@ add_executable(EpubPipelineTest
   VisibleTextOffsetLutTest.cpp
   TextNodeRulesTest.cpp
   BookFontsTest.cpp
+  BodySizeTest.cpp
   FirstOpenIndexingTest.cpp
   FirstChapterTest.cpp
   TocPassTest.cpp

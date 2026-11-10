@@ -66,6 +66,7 @@ directory whole.
 | `cover.img` | EPUB | none | The cover image's bytes, extracted once (or copied from a cover sidecar) |
 | `linkstack.bin` | EPUB | `EpubLinkBackStack::kVersion` (1) | The link Back stack: [below](#linkstackbin) |
 | `fonts.bin`, `fonts/<style>.ttf`, `fonts/accent<n>/<style>.ttf` | EPUB | `BookFonts::kVersion` (7) | The book's embedded body and accent fonts (Publisher Fonts): [below](#fontsbin) |
+| `bodysize.bin` | EPUB | `BodySize::kVersion` (1) | The size of the book's running text, for Normalize Font Size (`lib/Epub/Epub/BodySize.h`): `u8` version, `u8` body size in percent of the reader's size (0: the last measurement failed), `u8` failed attempts. Measured after the CSS is compiled, removed when it is compiled again |
 | `kosync_push.bin` | EPUB | `LastPush::kVersion` (1) | Our last KOReader push: [below](#kosync_pushbin) |
 | `koreader_docid.txt`, `koreader_syncmethod.txt` | EPUB | none | The KOReader document id, after the file size and fingerprint it was computed for, and the match method learned for the book |
 | `index.bin` | TXT, Markdown | `CACHE_VERSION`: TXT 2 (magic `TXTI`), Markdown 11 (`MKDI`) | Page offsets under the current layout. `SleepActivity` checks the TXT magic and version too |

@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "../BlockFontFamilies.h"
+#include "../BodySize.h"
 #include "../EpubImageManifest.h"
 #include "../FlowContext.h"
 #include "../FontSizeLadder.h"
@@ -375,6 +376,9 @@ class ChapterHtmlSlimParser final : public Print {
   // When true, widen the per-word font-size dead zone (±10% snaps publisher <span font-size:0.92em>
   // body wrappers back to native size); when false, only a tight ±3% dead zone is applied.
   bool fontSizeNormalization;
+  // Body size census (setSizeCensus): the running text's characters are counted here by their size, and nothing is
+  // laid out. Null for a build.
+  BodySize::Census* census_ = nullptr;
   const CssParser* cssParser;
   EpubImageManifest* imageManifest;
   bool embeddedStyle;
@@ -425,6 +429,13 @@ class ChapterHtmlSlimParser final : public Print {
   // words currently being flushed. 100 outside sized spans; clamped to the
   // ParsedText per-word range so it always fits the uint8_t word-size channel.
   uint8_t effectiveSizePct = 100;
+  // effectiveSizePct starts over from a body-relative size (rem, px, pt, a keyword) other than the body's own: one the
+  // book's body size is taken out of (normalizeFontSizeForElement), as an em or % size is not. For the census.
+  bool effectiveSizeFromRoot_ = false;
+  // The current block's font size in percent of the body's, resolved or not; 100 without a block.
+  int currentBlockSizePct() const;
+  // Census mode: counts the word in partWordBuffer at its size (see setSizeCensus).
+  void countCensusWord();
   // Streaming table model. A row is buffered only until its </tr>, where it is laid out, packed
   // into the pending fragment and freed. The whole table was buffered until </table> once, because
   // grid layout needs the column count before the first row can be placed -- but our columns are
@@ -1229,6 +1240,11 @@ class ChapterHtmlSlimParser final : public Print {
   void setFontSizeLadder(const FontSizeLadder& ladder) { fontSizeLadder_ = ladder; }
   // Supplies the book's other font families (see BlockFontFamilies); none by default.
   void setFontFamilies(const BlockFontFamilies& families) { fontFamilies_ = families; }
+  // Census mode (BodySize::detect), set before setup(): the parse styles the chapter as a build does and counts its
+  // running text into `census` by the size each word would be set at (block size times word size, see
+  // countCensusWord), and lays nothing out: no line, no page, no image, no table. A block keeps its first word only,
+  // so it is empty or not as in a build, which is what the next block's style depends on (startNewTextBlock's merge).
+  void setSizeCensus(BodySize::Census* census) { census_ = census; }
   // The book's typography (TypographyProfile.h), handed to every block the parser lays out; Latin rules by default.
   void setTypography(const TypographyProfile& typography) { typography_ = typography; }
   // The reader's vertical-text request for the book and its page progression, from which the section decides its

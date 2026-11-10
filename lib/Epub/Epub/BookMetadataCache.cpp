@@ -828,6 +828,32 @@ int BookMetadataCache::findSpineIndexByHref(const std::string_view target, const
   return -1;
 }
 
+int BookMetadataCache::largestSpineIndex() {
+  if (!loaded || spineCount == 0) return -1;
+  // In one pass through a window, as findSpineIndexByHref reads them.
+  bookFile.seek(lutOffset);
+  uint32_t firstRecord = 0;
+  if (bookFile.read(&firstRecord, sizeof(firstRecord)) != static_cast<int>(sizeof(firstRecord))) return -1;
+  bookFile.seek(firstRecord);
+  serialization::BufferedFileReader in(bookFile, SPINE_SCAN_WINDOW_BYTES);
+  std::string href;
+  int largest = -1;
+  uint32_t largestSize = 0;
+  uint32_t before = 0;
+  for (int i = 0; i < static_cast<int>(spineCount); i++) {
+    uint32_t cumulative = 0;
+    if (!in.readString(href) || !in.read(&cumulative, sizeof(cumulative))) break;
+    in.seek(in.position() + BOOK_SPINE_FIXED_BYTES - sizeof(cumulative));
+    const uint32_t size = cumulative > before ? cumulative - before : 0;
+    before = cumulative;
+    if (size > largestSize) {
+      largest = i;
+      largestSize = size;
+    }
+  }
+  return largest;
+}
+
 BookMetadataCache::TocEntry BookMetadataCache::getTocEntry(const int index) {
   if (!loaded) {
     LOG_ERR("BMC", "getTocEntry called but cache not loaded");
