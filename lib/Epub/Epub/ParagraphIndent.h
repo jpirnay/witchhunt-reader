@@ -4,8 +4,8 @@
 
 // The reader's Paragraph Indent, in the order the setting stores it (CrossPointSettings::PARAGRAPH_INDENT asserts it
 // matches). FromBook, Book's Style, is the default: the book's text-indent, and one em where the book sets none and
-// Extra Paragraph Spacing is off. The others are a first-line indent the reader chose for body paragraphs, in ems of
-// the paragraph's font.
+// Extra Paragraph Spacing is off (not on <pre>). The others are a first-line indent the reader chose for body
+// paragraphs, in ems of the paragraph's font.
 enum class ParagraphIndent : uint8_t { None = 0, HalfEm, OneEm, OneAndHalfEm, TwoEm, FromBook };
 
 // The fixed steps, None to TwoEm: every option but Book's Style.
@@ -36,6 +36,8 @@ struct IndentInputs {
   bool startAligned = false;
   // A body paragraph: not a heading, a list item, a table cell or <pre>, nor a block inside one.
   bool bodyParagraph = false;
+  // <pre> or a block inside one: laid out line by line as the book wrote it, so no indent but the book's own.
+  bool preformatted = false;
   // A float or a drop cap sits beside the first lines.
   bool besideFloat = false;
   bool extraParagraphSpacing = false;
@@ -50,15 +52,17 @@ struct ResolvedIndent {
 //
 // Book's Style is the book's indent, else one em on a justified or start-aligned block that does not go on after a
 // <br>, as long as Extra Paragraph Spacing is off and no float sits beside it: the rule from before the setting, list
-// items included. A fixed step replaces the book's indent, positive or zero, on a body paragraph that is
-// justified or start-aligned, whether Extra Paragraph Spacing is on or not: the reader chose it. Everything else keeps
-// Book's Style: a hanging (negative) indent, a poem line's span indent, a <br> continuation, a heading, list item,
-// table cell or <pre>, a block beside a float or a drop cap, and a centred or end-aligned one.
+// items included, but not on <pre>, where it shifted a code block's or a verse's first line against the rest. A fixed
+// step replaces the book's indent, positive or zero, on a body paragraph that is justified or start-aligned, whether
+// Extra Paragraph Spacing is on or not: the reader chose it. Everything else keeps Book's Style: a hanging (negative)
+// indent, a poem line's span indent, a <br> continuation, a heading, list item, table cell or <pre>, a block beside a
+// float or a drop cap, and a centred or end-aligned one.
 constexpr ResolvedIndent resolveParagraphIndent(const uint8_t setting, const IndentInputs& in, const int emPx) {
   ResolvedIndent bookStyle;
   if (in.bookDefined) {
     bookStyle = {in.bookPx, true};
-  } else if (!in.brContinuation && !in.extraParagraphSpacing && !in.besideFloat && in.startAligned) {
+  } else if (!in.brContinuation && !in.extraParagraphSpacing && !in.besideFloat && in.startAligned &&
+             !in.preformatted) {
     bookStyle = {static_cast<int16_t>(emPx), true};
   }
   if (setting >= kParagraphIndentFixedSteps) return bookStyle;

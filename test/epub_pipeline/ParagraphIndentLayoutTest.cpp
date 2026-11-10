@@ -252,10 +252,23 @@ TEST_F(ParagraphIndentLayout, AListItemAndAParagraphInsideOneKeepTheBooksFirstLi
   EXPECT_EQ(underEverySetting(path, "Echo."), (std::vector<int>{0, 9, 18, 27, 36, 18}));
 }
 
-TEST_F(ParagraphIndentLayout, PreformattedTextKeepsTheBooksFirstLine) {
-  const std::string path = writeBook("", "<pre>Alpha bravo</pre>");
-  const auto xs = underEverySetting(path, "Alpha");
-  for (size_t i = 0; i < xs.size(); ++i) EXPECT_EQ(xs[i], xs.back()) << "setting " << int{kAllSettings[i]};
+// A code block or a verse set in <pre>: no line of it is indented under any setting, Book's Style included, with
+// Extra Paragraph Spacing on or off.
+TEST_F(ParagraphIndentLayout, PreformattedTextTakesNoIndent) {
+  const std::string path = writeBook("", "<pre>Alpha bravo\nCharlie delta</pre><p>Echo.</p>");
+  for (const bool extraSpacing : {false, true}) {
+    pipeline_harness::Profile base;
+    base.extraParagraphSpacing = extraSpacing;
+    EXPECT_EQ(underEverySetting(path, "Alpha", base), (std::vector<int>{0, 0, 0, 0, 0, 0})) << extraSpacing;
+    EXPECT_EQ(underEverySetting(path, "Charlie", base), (std::vector<int>{0, 0, 0, 0, 0, 0})) << extraSpacing;
+  }
+  // The paragraph after it is running text again.
+  EXPECT_EQ(underEverySetting(path, "Echo."), (std::vector<int>{0, 9, 18, 27, 36, 18}));
+}
+
+TEST_F(ParagraphIndentLayout, APreKeepsTheIndentItsBookSets) {
+  const std::string path = writeBook("pre { text-indent: 2em }", "<pre>Alpha bravo</pre>");
+  EXPECT_EQ(underEverySetting(path, "Alpha"), (std::vector<int>{36, 36, 36, 36, 36, 36}));
 }
 
 TEST_F(ParagraphIndentLayout, ATableCellKeepsTheBooksFirstLine) {

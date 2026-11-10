@@ -38,10 +38,11 @@ IndentInputs bodyParagraph(const Book& book) {
 }
 
 // What the layout did before the setting existed (ParsedText::applyParagraphIndent): the book's indent when it sets
-// one, else one em on a start-aligned block that is not a <br> continuation, with extra spacing off and no float.
+// one, else one em on a start-aligned block that is not a <br> continuation, with extra spacing off and no float. Only
+// <pre> has changed: it no longer takes that em.
 ResolvedIndent booksStyle(const IndentInputs& in) {
   if (in.bookDefined) return {in.bookPx, true};
-  if (!in.brContinuation && !in.extraParagraphSpacing && !in.besideFloat && in.startAligned) {
+  if (!in.brContinuation && !in.extraParagraphSpacing && !in.besideFloat && in.startAligned && !in.preformatted) {
     return {static_cast<int16_t>(kEm), true};
   }
   return {0, false};
@@ -55,7 +56,7 @@ void expectIndent(const ResolvedIndent got, const ResolvedIndent want, const std
 // Every combination of the block's state, under Book's Style: today's rule, whatever kind of block it is.
 TEST(ParagraphIndent, BooksStyleIsTheRuleBeforeTheSetting) {
   for (const Book& book : kBooks) {
-    for (int mask = 0; mask < 64; ++mask) {
+    for (int mask = 0; mask < 128; ++mask) {
       IndentInputs in = bodyParagraph(book);
       in.startAligned = (mask & 1) != 0;
       in.brContinuation = (mask & 2) != 0;
@@ -63,6 +64,7 @@ TEST(ParagraphIndent, BooksStyleIsTheRuleBeforeTheSetting) {
       in.besideFloat = (mask & 8) != 0;
       in.bodyParagraph = (mask & 16) != 0;
       in.spanIndent = (mask & 32) != 0 && book.defined;
+      in.preformatted = (mask & 64) != 0;
       expectIndent(resolveParagraphIndent(kFromBook, in, kEm), booksStyle(in),
                    std::string(book.name) + " mask " + std::to_string(mask));
     }
@@ -105,7 +107,12 @@ struct Exemption {
 constexpr Exemption kExemptions[] = {
     {"centred or end-aligned", [](IndentInputs& in) { in.startAligned = false; }},
     {"<br> continuation", [](IndentInputs& in) { in.brContinuation = true; }},
-    {"heading, list item or <pre>", [](IndentInputs& in) { in.bodyParagraph = false; }},
+    {"heading or list item", [](IndentInputs& in) { in.bodyParagraph = false; }},
+    {"<pre>",
+     [](IndentInputs& in) {
+       in.bodyParagraph = false;
+       in.preformatted = true;
+     }},
     {"beside a float or drop cap", [](IndentInputs& in) { in.besideFloat = true; }},
 };
 
@@ -123,6 +130,34 @@ TEST(ParagraphIndent, WhatAFixedStepLeavesAloneKeepsBooksStyle) {
         }
       }
     }
+  }
+}
+
+// A <pre>'s lines are the book's: no indent under any setting, Book's Style included, unless its CSS sets one, which
+// stands, hanging or not.
+TEST(ParagraphIndent, PreformattedTextTakesOnlyTheBooksIndent) {
+  for (const Book& book : kBooks) {
+    for (const bool extraSpacing : {false, true}) {
+      IndentInputs in = bodyParagraph(book);
+      in.bodyParagraph = false;
+      in.preformatted = true;
+      in.extraParagraphSpacing = extraSpacing;
+      const ResolvedIndent want = book.defined ? ResolvedIndent{book.px, true} : ResolvedIndent{0, false};
+      for (const uint8_t step : {kFixed[0], kFixed[1], kFixed[2], kFixed[3], kFixed[4], kFromBook}) {
+        expectIndent(resolveParagraphIndent(step, in, kEm), want,
+                     std::string(book.name) + ", step " + std::to_string(step) + (extraSpacing ? " spaced" : ""));
+      }
+    }
+  }
+}
+
+// A list item keeps Book's Style's one em where its book sets none, under every setting.
+TEST(ParagraphIndent, AListItemKeepsBooksStylesEm) {
+  IndentInputs in = bodyParagraph(kBooks[0]);
+  in.bodyParagraph = false;
+  for (const uint8_t step : {kFixed[0], kFixed[1], kFixed[2], kFixed[3], kFixed[4], kFromBook}) {
+    expectIndent(resolveParagraphIndent(step, in, kEm), {static_cast<int16_t>(kEm), true},
+                 "step " + std::to_string(step));
   }
 }
 

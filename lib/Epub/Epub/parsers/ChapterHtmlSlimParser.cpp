@@ -3675,11 +3675,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         blockStyle.textAlignDefined = true;
       }
       if (self->depth > self->headingDepth_) self->applyHeadingScope(blockStyle, cssStyle);
-      // A list's items and the blocks inside them, and <pre>: the reader's Paragraph Indent is for running text.
-      if (strcmp(name, "li") == 0 || strcmp(name, "pre") == 0 || !self->listStack.empty() ||
-          self->preUntilDepth < self->depth) {
-        blockStyle.keepsBookIndent = true;
-      }
+      // A list's items and the blocks inside them, and <pre>: the reader's Paragraph Indent is for running text. A
+      // <pre> takes no indent its CSS does not set at all (BlockStyle::preformatted).
+      const bool preformatted = strcmp(name, "pre") == 0 || self->preUntilDepth < self->depth;
+      if (preformatted) blockStyle.preformatted = true;
+      if (preformatted || strcmp(name, "li") == 0 || !self->listStack.empty()) blockStyle.keepsBookIndent = true;
       self->holdBottomSpacing(blockStyle, isFloated);
       self->startNewTextBlock(blockStyle);
       self->currentBlockOwnerDepth_ = self->depth;
