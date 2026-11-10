@@ -11,6 +11,7 @@ Writes <out dir>/arabic.txt, one string per line, deterministic (random.Random(1
 - lam with each alef (U+0622 0623 0625 0627 0671 0672 0673 0675), alone, after beh, with a harakat or tatweel between;
 - the joiner variants (ZWNJ and ZWJ beside letters and in lam-alef);
 - Persian and Urdu letters inside words;
+- each number sign (U+0600-0605, 06DD, 0890-0891, 08E2) with one to four digits of each digit set;
 - 2,000 random sequences of 2-8 code points from the letters, marks, joiners and tatweel.
 
     python3 test/ot_shaper/generate_corpus_arabic.py <out dir>
@@ -38,6 +39,8 @@ MODIFIER_MARKS = [chr(c) for c in (0x0654, 0x0655, 0x0658, 0x06DC, 0x06E3, 0x06E
 # Assigned in the Unicode version after the one Python's unicodedata carries (3.14: 16.0.0): U+088F ARABIC LETTER NOON
 # WITH RING ABOVE (Unicode 17.0, a letter). Listed so that the corpus does not depend on the Python that generates it.
 NEWER_THAN_PYTHON = [0x088F]
+NUMBER_SIGNS = [chr(c) for c in (0x0600, 0x0601, 0x0602, 0x0603, 0x0604, 0x0605, 0x06DD, 0x0890, 0x0891, 0x08E2)]
+DIGIT_SETS = ["0123456789", word(*range(0x0660, 0x066A)), word(*range(0x06F0, 0x06FA))]
 ALEFS = [chr(c) for c in (0x0622, 0x0623, 0x0625, 0x0627, 0x0671, 0x0672, 0x0673, 0x0675)]
 PERSIAN = word(0x067E, 0x0686, 0x0698, 0x06AF, 0x06A9, 0x06CC)
 URDU = word(0x067E, 0x0679, 0x0688, 0x0691, 0x06BA, 0x06BE, 0x06C1, 0x06D2, 0x06C3, 0x06CC)
@@ -89,6 +92,14 @@ def main():
     urdu_sentence = word(0x0628, 0x0691, 0x06D2, 0x20, 0x0679, 0x06BE, 0x06CC, 0x06A9, 0x20, 0x0645, 0x06CC, 0x06BA,
                          0x20, 0x06C1, 0x06D2, 0x20, 0x0688, 0x06BE, 0x0648, 0x0644)
     lines.update([mikhwaham, PERSIAN, URDU, PERSIAN + SPACE + URDU, urdu_sentence])
+
+    # The number signs (Unicode's Prepended_Concatenation_Mark of the Arabic blocks) with the digits they span: one to
+    # four of each digit set, alone and after a word; a space before the digits spans none.
+    for sign in NUMBER_SIGNS:
+        for digits in DIGIT_SETS:
+            for n in range(1, 5):
+                lines.update([sign + digits[1:n + 1], BEH + SPACE + sign + digits[1:n + 1], BEH + sign + digits[1:n + 1]])
+        lines.add(sign + SPACE + DIGIT_SETS[1][1])
 
     pool = letters + marks + [ZWNJ, ZWJ, TATWEEL]
     for _ in range(2000):

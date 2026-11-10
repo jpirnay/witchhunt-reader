@@ -22,6 +22,7 @@
 
 #include "../book_metadata_cache/AllocationRefusal.h"
 #include "ArabicExpected.h"
+#include "ArabicNumberExpected.h"
 #include "ArabicScripts.h"
 #include "ExpectedGlyphRuns.h"
 #include "ExpectedShaping.h"
@@ -930,6 +931,94 @@ TEST(IndicShaper, MatchesHarfBuzzOnTheRecordedArabicWords) {
   EXPECT_EQ(1808u, words);
   EXPECT_EQ(oneRun, onePiece);
   EXPECT_EQ(1774u, oneRun);
+}
+
+// A number sign (the end of ayah and the others, Unicode's Prepended_Concatenation_Mark) with one to four digits of
+// each digit set is one number run, one Glyphs piece, drawn as HarfBuzz draws the sign around its digits when it shapes
+// the run left to right (ArabicNumberExpected.h: make_arabic_number_fixtures.py checks the units written last first
+// against that run).
+TEST(IndicShaper, ShapesANumberSignAroundItsDigits) {
+  FixtureShapingFace face(arabicFont(kFontNotoNaskhArabicNumbersRegular));
+  size_t words = 0;
+  for (const ArabicShapingExpectation& word : kArabicNumberShaping) {
+    ++words;
+    const std::string text = word.utf8;
+    const auto size = static_cast<uint16_t>(text.size());
+    std::vector<IndicShaper::Run> runs(IndicShaper::maxRuns(text.size()));
+    ASSERT_EQ(1u, IndicShaper::scanRuns(text, runs.data())) << codepointsOf(text);
+    EXPECT_EQ(IndicShaper::RunKind::ArabicNumber, runs[0].kind);
+    EXPECT_EQ(0, runs[0].begin);
+    EXPECT_EQ(size, runs[0].end);
+    const Shaped shaped = shape(text, on(&face));
+    ASSERT_EQ(Outcome::Formed, shaped.outcome) << codepointsOf(text);
+    ASSERT_EQ(1u, shaped.pieces.size()) << codepointsOf(text);
+    EXPECT_EQ(PieceKind::Glyphs, shaped.pieces[0].kind);
+    EXPECT_EQ(0, shaped.pieces[0].begin);
+    EXPECT_EQ(size, shaped.pieces[0].end);
+    EXPECT_EQ(storedOf(word), shaped.pieces[0].glyphs)
+        << codepointsOf(text) << "\n  shaped   " << glyphText(shaped.pieces[0].glyphs) << "\n  recorded "
+        << glyphText(storedOf(word));
+  }
+  EXPECT_EQ(120u, words);
+}
+
+TEST(IndicShaper, ANumberRunIsTheSignAndTheDigitsAfterIt) {
+  const auto runsOf = [](const std::string& text) {
+    std::vector<IndicShaper::Run> runs(IndicShaper::maxRuns(text.size()));
+    runs.resize(IndicShaper::scanRuns(text, runs.data()));
+    return runs;
+  };
+  const std::string ayah = "\xDB\x9D";                   // U+06DD
+  const std::string one = "\xD9\xA1", two = "\xD9\xA2";  // U+0661, U+0662
+  const std::string beh = "\xD8\xA8";
+  {
+    // A word glued before the sign is an Arabic run of its own: the sign is a number, on another level.
+    const std::vector<IndicShaper::Run> runs = runsOf(beh + ayah + one + two);
+    ASSERT_EQ(2u, runs.size());
+    EXPECT_EQ(IndicShaper::RunKind::Arabic, runs[0].kind);
+    EXPECT_EQ(0, runs[0].begin);
+    EXPECT_EQ(2, runs[0].end);
+    EXPECT_EQ(IndicShaper::RunKind::ArabicNumber, runs[1].kind);
+    EXPECT_EQ(2, runs[1].begin);
+    EXPECT_EQ(8, runs[1].end);
+  }
+  // No digit right after the sign: no run, as before.
+  EXPECT_TRUE(runsOf(ayah).empty());
+  EXPECT_TRUE(runsOf(ayah + " " + one).empty());
+  EXPECT_TRUE(runsOf(one + ayah).empty());
+  // At most kNumberSignDigits digits; the rest is left out.
+  std::string many = ayah;
+  for (int i = 0; i < 10; ++i) many += one;
+  const std::vector<IndicShaper::Run> capped = runsOf(many);
+  ASSERT_EQ(1u, capped.size());
+  EXPECT_EQ(2 + 2 * static_cast<int>(arabic::kNumberSignDigits), capped[0].end);
+  // European digits too: 0x31 0x32.
+  const std::vector<IndicShaper::Run> european = runsOf(ayah + "12");
+  ASSERT_EQ(1u, european.size());
+  EXPECT_EQ(IndicShaper::RunKind::ArabicNumber, european[0].kind);
+  EXPECT_EQ(4, european[0].end);
+}
+
+TEST(IndicShaper, ANumberSignAFaceLacksIsLeftAsText) {
+  // The Naskh shaping fixture maps beh but no number sign: the run is Text, drawn as its code points as before, and a
+  // word glued to it still shapes.
+  FixtureShapingFace face(arabicFont(kFontNotoNaskhArabicShapingRegular));
+  uint32_t glyph = 0;
+  ASSERT_TRUE(face.current()->nominalGlyph(arabic::kProbe, &glyph));
+  ASSERT_FALSE(face.current()->nominalGlyph(0x06DD, &glyph));
+  const std::string number = "\xDB\x9D\xD9\xA1\xD9\xA2";  // U+06DD U+0661 U+0662
+  EXPECT_EQ(Outcome::Plain, shape(number, on(&face)).outcome);
+  const Shaped glued = shape(std::string(kKitab) + number, on(&face));
+  ASSERT_EQ(Outcome::Formed, glued.outcome);
+  ASSERT_EQ(2u, glued.pieces.size());
+  EXPECT_EQ(PieceKind::Glyphs, glued.pieces[0].kind);
+  EXPECT_EQ(PieceKind::Text, glued.pieces[1].kind);
+  EXPECT_EQ(8, glued.pieces[1].begin);
+  // Without a face a number run is never reordered or formed.
+  RecordingSink sink;
+  CallMemory memory(nullptr, number.size());
+  EXPECT_EQ(Outcome::Plain, IndicShaper::shapeToken(number, on(nullptr), memory, sink));
+  EXPECT_EQ(0, sink.calls);
 }
 
 TEST(IndicShaper, CutsArabicPiecesAtRunEdges) {

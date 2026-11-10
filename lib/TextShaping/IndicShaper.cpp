@@ -94,8 +94,9 @@ constexpr int64_t roundPixels(const int64_t v) { return v >= 0 ? (v + 32) / 64 :
 // The glyphs `buffer` holds into `sink` as records, rounded as upstream's appendGlyphs rounds them: the advance from
 // 26.6 to 12.4 pixels, the offsets to whole pixels with y down, in visual order. False when a record falls outside its
 // fields (refused, never clamped) or the sink has no room.
-bool appendGlyphs(const ot::Buffer& buffer, PieceSink& sink) {
-  for (unsigned i = 0; i < buffer.len(); i++) {
+// The records of buffer glyphs [from, to), in buffer order, into `sink`.
+bool appendRecords(const ot::Buffer& buffer, const unsigned from, const unsigned to, PieceSink& sink) {
+  for (unsigned i = from; i < to; i++) {
     const ot::GlyphPosition& pos = buffer.pos[i];
     const uint32_t glyph = buffer.info[i].codepoint;
     const int64_t advance = (static_cast<int64_t>(pos.xAdvance) + 2) >> 2;
@@ -111,6 +112,32 @@ bool appendGlyphs(const ot::Buffer& buffer, PieceSink& sink) {
     record.dx = static_cast<int8_t>(dx);
     record.dy = static_cast<int8_t>(dy);
     if (!sink.addGlyph(record)) return false;
+  }
+  return true;
+}
+
+bool appendGlyphs(const ot::Buffer& buffer, PieceSink& sink) { return appendRecords(buffer, 0, buffer.len(), sink); }
+
+// A number run's glyphs, written left to right. Its sign and digits are numbers, on an even level, so a digit the font
+// does not draw inside the sign follows it, as HarfBuzz places it when it shapes the run left to right; the engine
+// shapes Arabic right to left (deviation 11), which puts that digit before the sign. Its output keeps each zero-advance
+// glyph at the pen of the advancing glyph after it (the digits drawn inside the sign come before the sign), so the
+// units -- the zero-advance glyphs and the advancing glyph after them -- are written last first, each as it came: every
+// glyph keeps its place against its unit, and the units read left to right. make_arabic_number_fixtures.py checks
+// that this draws each glyph where HarfBuzz's left-to-right run does.
+bool appendGlyphsLeftToRight(const ot::Buffer& buffer, PieceSink& sink) {
+  const unsigned count = buffer.len();
+  unsigned starts[2 * arabic::kNumberSignDigits + 2];  // a sign and its digits make few glyphs
+  unsigned units = 0;
+  unsigned start = 0;
+  for (unsigned i = 0; i < count; i++) {
+    if (buffer.pos[i].xAdvance == 0 && i + 1 < count) continue;  // the last glyph closes a unit whatever it is
+    if (units == sizeof(starts) / sizeof(starts[0])) return false;
+    starts[units++] = start;
+    start = i + 1;
+  }
+  for (unsigned u = units; u-- > 0;) {
+    if (!appendRecords(buffer, starts[u], u + 1 < units ? starts[u + 1] : count, sink)) return false;
   }
   return true;
 }
@@ -151,6 +178,9 @@ bool arabicBreak(const uint32_t* cps, unsigned /*count*/, const unsigned i) {
   return arabic::isClusterBreak(cps[i - 1], cps[i]);
 }
 
+// A number run is drawn as one: the sign is shaped around all its digits.
+bool numberBreak(const uint32_t* /*cps*/, unsigned /*count*/, unsigned /*i*/) { return false; }
+
 // The break rule reads the code point after cps[i] past any dot below.
 bool myanmarBreak(const uint32_t* cps, const unsigned count, const unsigned i) {
   unsigned next = i + 1;
@@ -169,6 +199,17 @@ ScriptPolicy policyOf(const Run& run) {
               .clusterBreak = arabicBreak,
               .contextClusters = kArabicContextClusters,
               .contextCodepoints = kArabicContextCodepoints};
+    case RunKind::ArabicNumber:
+      // Shaped as Arabic, with no context: a sign joins nothing, and its run is a number, on a level of its own. The
+      // face is asked for the sign itself (shapeToken), which it may lack while it maps beh.
+      return {.kind = RunKind::ArabicNumber,
+              .script = ot::Script::Arabic,
+              .backward = true,
+              .probe = 0x06DD,
+              .indic = nullptr,
+              .clusterBreak = numberBreak,
+              .contextClusters = 0,
+              .contextCodepoints = 0};
     case RunKind::Myanmar:
       return {.kind = RunKind::Myanmar,
               .script = ot::Script::Myanmar,
@@ -376,7 +417,9 @@ bool shapeRun(ShapingFace& face, const Request& request, const ScriptPolicy& pol
   const bool withContext = before.count != 0 || after.count != 0;
   const Attempt whole = attempt(0, count, ot::RunContext{before.count, after.count, before.cut || after.cut});
   if (whole != Attempt::TooLong) {
-    return whole == Attempt::Shaped && (buffer.len() != 0 || withContext) && appendGlyphs(buffer, sink);
+    const bool leftToRight = policy.kind == RunKind::ArabicNumber;
+    return whole == Attempt::Shaped && (buffer.len() != 0 || withContext) &&
+           (leftToRight ? appendGlyphsLeftToRight(buffer, sink) : appendGlyphs(buffer, sink));
   }
 
   // Upstream's piecewise loop: as many clusters as the buffer holds, or one when it holds fewer. Each piece shapes
@@ -492,7 +535,7 @@ bool shapeGlyphs(const std::string_view text, const Run& run, const ScriptPolicy
   const size_t lead = arabicRun ? joinersBefore(text, run.begin, room) : run.begin;
   const auto joiners = static_cast<unsigned>((run.begin - lead) / kJoinerBytes);  // at most `room`
   Context before;
-  if (lead == 0 && !request.before.empty()) {
+  if (lead == 0 && !request.before.empty() && run.kind != RunKind::ArabicNumber) {
     before =
         arabicRun ? lastArabicClusters(request.before, room - joiners, cps) : lastSyllable(request.before, policy, cps);
   }
@@ -503,11 +546,26 @@ bool shapeGlyphs(const std::string_view text, const Run& run, const ScriptPolicy
     cps[count++] = TextShaping::decodeAt(text, pos);
   }
   Context after;
-  if (run.end == text.size() && !request.after.empty()) {
+  if (run.end == text.size() && !request.after.empty() && run.kind != RunKind::ArabicNumber) {
     after = arabicRun ? firstArabicClusters(request.after, room, cps + count)
                       : firstSyllable(request.after, policy, cps + count);
   }
   return shapeRun(*request.face, request, policy, cps, count + after.count, before, after, memory.buffer, sink);
+}
+
+// The number run starting at `begin`, at a number sign: the sign and the digits after it, at most
+// arabic::kNumberSignDigits. Returns its end; `begin` when no digit follows the sign: then there is no run.
+size_t numberRunEnd(const std::string_view text, const size_t begin) {
+  size_t pos = begin;
+  if (!arabic::isNumberSign(TextShaping::decodeAt(text, pos))) return begin;
+  unsigned digits = 0;
+  while (pos < text.size() && digits < arabic::kNumberSignDigits) {
+    size_t next = pos;
+    if (!arabic::isNumberSignDigit(TextShaping::decodeAt(text, next))) break;
+    pos = next;
+    digits++;
+  }
+  return digits > 0 ? pos : begin;
 }
 
 // The Arabic run starting at `begin`: members and, after one, ZWJ and ZWNJ. Returns its end.
@@ -599,6 +657,11 @@ size_t scanRuns(std::string_view text, Run* out) {
     const uint32_t first = TextShaping::decodeAt(text, next);
     if (const size_t end = myanmarRunEnd(text, pos); end > pos) {
       out[count++] = Run{static_cast<uint16_t>(pos), static_cast<uint16_t>(end), nullptr, RunKind::Myanmar};
+      pos = end;
+      continue;
+    }
+    if (const size_t end = numberRunEnd(text, pos); end > pos) {
+      out[count++] = Run{static_cast<uint16_t>(pos), static_cast<uint16_t>(end), nullptr, RunKind::ArabicNumber};
       pos = end;
       continue;
     }
@@ -727,7 +790,10 @@ Outcome shapeToken(const std::string_view text, const Request& request, CallMemo
     const ot::Face* const shaping = request.face->current();
     if (shaping == nullptr) return Outcome::Degraded;
     uint32_t probe = 0;
-    const bool mapped = shaping->nominalGlyph(policy.probe, &probe);  // upstream's coverage
+    size_t signEnd = run.begin;
+    // A number run asks for its sign, which a face may lack while it maps beh.
+    const uint32_t probeCp = run.kind == RunKind::ArabicNumber ? TextShaping::decodeAt(text, signEnd) : policy.probe;
+    const bool mapped = shaping->nominalGlyph(probeCp, &probe);  // upstream's coverage
     // A script the face does not draw: an Arabic run is Text, unjoined as step 1 draws it (decision 5), and so is a
     // Myanmar run, as its code points; an Indic run is Reordered where IndicReorder changes it, else Text.
     if (!mapped && (run.kind != RunKind::Indic || !indicReorderForDisplay(text.data() + run.begin, run.end - run.begin,

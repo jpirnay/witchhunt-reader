@@ -61,7 +61,8 @@ cluster or draw an Arabic letter isolated.
 1. **Whether the pass shapes** (`decideShaping`, after `decideBidi`): it does when a token holds a byte sequence of
    U+0900-0DFF (`IndicShaper::holdsIndic`), in a paragraph that needs bidi or not; or when the paragraph needs bidi, a
    token holds an Arabic run member (`arabic::holdsRunMember`: a byte sequence of the Arabic blocks that is a letter, a
-   mark or AL punctuation, not a digit or a number sign; #667) and that token has a shaping face that
+   mark or AL punctuation, not a digit or a number sign alone; #667) or a number sign with a digit after it
+   (`arabic::holdsNumberSignWithDigit`), and that token has a shaping face that
    maps beh (`IndicShaper::drawsArabic`, the coverage test `shapeToken` makes of each Arabic run; the first such token
    decides, and a face not mapped at that moment counts as one). The book's language does not decide it; its text
    does. An Arabic run starts at an AL letter, which makes the paragraph need bidi, so a Latin paragraph with
@@ -444,9 +445,23 @@ HarfBuzz 14.5, not by this shaper.
 - **AL punctuation and symbols are members** (the Arabic semicolon, question mark and full stop, the percent-like signs:
   U+0608, 060B, 060D, 061B, 061D-061F, 066D, 06D4, 06FD, 06FE, 0888): they are strong right to left, so a run cannot
   straddle a level, and joining gives them no joining. A joiner follows only a letter or a mark (`takesJoiner`).
-- **Not members**: the digits (AN, EN), the number signs (U+0600-0605, U+06DD, U+08E2), the Arabic comma, the neutral
-  symbols and the presentation forms (U+FB50-FDFF, FE70-FEFF), which bidi orders or which are formed already. They are
-  drawn as plain text in the book's font. Brackets and every other mirrored code point are outside by construction.
+- **Not members**: the digits (AN, EN), the number signs (U+0600-0605, U+06DD, U+0890-0891, U+08E2), the Arabic comma,
+  the neutral symbols and the presentation forms (U+FB50-FDFF, FE70-FEFF), which bidi orders or which are formed
+  already. They are drawn as plain text in the book's font, but for a number sign with digits after it (next item).
+  Brackets and every other mirrored code point are outside by construction.
+- **Number runs** (`RunKind::ArabicNumber`): a number sign (Unicode's Prepended_Concatenation_Mark of the blocks:
+  `arabic::isNumberSign`; the end of ayah U+06DD among them) followed by a digit starts a run of the sign and the
+  digits after it (European, Arabic-Indic or Extended Arabic-Indic; at most `arabic::kNumberSignDigits`, 8), which the
+  font draws as the sign around its digits: the shipped Naskh and Sans Arabic families take one to three digits in
+  most signs and four in the year and samvat signs (U+0601, U+0604), and a digit past those is drawn plain beside it.
+  Sign and digits are all number classes, so the run lies on one level, an even one: a letter glued before the sign
+  ends its own run there. It is shaped as Arabic with no context (a sign joins nothing), asked of the face by the sign
+  itself (a face that maps beh may lack it: the run is then Text, as before), never split, and its glyphs are written
+  left to right (`appendGlyphsLeftToRight`): the engine shapes Arabic right to left, which puts a digit the sign does
+  not take before the sign, so the run's units (zero-advance glyphs and the advancing glyph after them) are written
+  last first, each as it came. `make_arabic_number_fixtures.py` checks for each sign and digit set that this draws
+  every glyph where HarfBuzz's left-to-right run of the same text draws it, and records the runs
+  (`ArabicNumberExpected.h`, over a subset of the shipped Naskh font). Section file version 119.
 - **Cheap tests**: `arabic::holdsArabic` is a byte pre-test over the UTF-8 (digit-only text passes it and its scan
   finds no run); `holdsShaped` is Indic or Arabic. `maxRuns` is `bytes / 2 + 1`, since an Arabic run takes 2 bytes.
 - **Context**: an Arabic run is shaped with its glued neighbours' whole clusters nearest the token (a letter with the
@@ -487,9 +502,11 @@ a line's tokens by the bidi levels. PR 4b teaches it to carry shaped pieces.
 
 ## What is not shaped yet
 
-- **Presentation forms and ayah signs**: the code points of U+FB50-FDFF and FE70-FEFF are no run members (they are formed
-  already) and draw as plain text; the end-of-ayah sign (U+06DD) and the other number signs are no run members, so they are drawn as the
-  font's glyph for them, not enclosing the digits that follow; a Quran or tajweed book will show it.
+- **Presentation forms**: the code points of U+FB50-FDFF and FE70-FEFF are no run members (they are formed already) and
+  draw as plain text.
+- **A number sign in a left-to-right paragraph with European digits**: the sign is AN and the digits EN, two levels
+  there, so the run spans two bidi segments and is drawn as its code points; with Arabic-Indic digits, or in a
+  right-to-left paragraph (where the European digits become AN), it is shaped.
 - **Fonts without GPOS**: the engine runs the font's own lookups only. The fallback mark placement and legacy `kern`
   HarfBuzz gives a font without GPOS is not ported, so such a font draws its marks where its advances put them.
 - **A long split word can still lose or double a ligature.** The buffer takes 32 code points of context, run and
