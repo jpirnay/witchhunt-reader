@@ -34,7 +34,7 @@ ConfirmationActivity::Question question(const Offer& offer);
 void decline(const Offer& offer);
 
 // Yes to `offer`: the Font Manager, downloading it as soon as its list is loaded. Leaving it restarts into the book
-// (APP_STATE.openEpubPath).
+// (APP_STATE.openEpubPath). Null when the heap has no room for it.
 std::unique_ptr<Activity> download(GfxRenderer& renderer, MappedInputManager& mappedInput, const Offer& offer);
 
 }  // namespace BookPackOffer

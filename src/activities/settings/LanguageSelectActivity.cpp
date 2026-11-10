@@ -2,6 +2,8 @@
 
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <iterator>
@@ -48,17 +50,27 @@ void LanguageSelectActivity::activateIndex(const int index) {
     finish();
     return;
   }
-  startActivityForResult(
-      std::make_unique<ConfirmationActivity>(renderer, mappedInput, UiLanguagePacks::question(offer)),
-      [this, offer](const ActivityResult& result) {
-        if (result.isCancelled) {
-          UiLanguagePacks::decline(offer);
-          finish();
-          return;
-        }
-        // In Settings' place: leaving the Font Manager restarts into Settings.
-        activityManager.replaceActivity(UiLanguagePacks::download(renderer, mappedInput, offer, /*toSettings=*/true));
-      });
+  auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, UiLanguagePacks::question(offer));
+  if (!confirmation) {
+    LOG_ERR("LNG", "OOM: language pack offer (%zu bytes)", sizeof(ConfirmationActivity));
+    finish();
+    return;
+  }
+  startActivityForResult(std::move(confirmation), [this, offer](const ActivityResult& result) {
+    if (result.isCancelled) {
+      UiLanguagePacks::decline(offer);
+      finish();
+      return;
+    }
+    // In Settings' place: leaving the Font Manager restarts into Settings.
+    auto download = UiLanguagePacks::download(renderer, mappedInput, offer, /*toSettings=*/true);
+    if (!download) {
+      LOG_ERR("LNG", "OOM: Font Manager for the language pack offer");
+      finish();
+      return;
+    }
+    activityManager.replaceActivity(std::move(download));
+  });
 }
 
 void LanguageSelectActivity::buildScreen(UiScreen& screen) {

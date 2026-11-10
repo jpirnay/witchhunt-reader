@@ -999,7 +999,14 @@ void EpubReaderActivity::offerBookPacks() {
     }
     // In the reader's place: the download's TLS session needs the heap the reader holds. Leaving the Font Manager
     // restarts into this book, drawn in the font and hyphenated by the pack.
-    activityManager.replaceActivity(BookPackOffer::download(renderer, mappedInput, offer));
+    auto download = BookPackOffer::download(renderer, mappedInput, offer);
+    if (!download) {
+      LOG_ERR("ERS", "OOM: Font Manager for the book pack offer");
+      ReaderUtils::enforceExitFullRefresh(renderer);
+      requestUpdate();
+      return;
+    }
+    activityManager.replaceActivity(std::move(download));
   });
 }
 

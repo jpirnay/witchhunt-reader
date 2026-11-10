@@ -2,6 +2,7 @@
 
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 
 #include <cstdio>
 
@@ -58,7 +59,7 @@ std::unique_ptr<Activity> download(GfxRenderer& renderer, MappedInputManager& ma
   FontDownloadActivity::Wanted wanted;
   snprintf(wanted.pack, sizeof(wanted.pack), "%s", offer.hyphenation);
   snprintf(wanted.family, sizeof(wanted.family), "%s", offer.family);
-  return std::make_unique<FontDownloadActivity>(renderer, mappedInput, wanted, FontDownloadActivity::ReturnTo::Book);
+  return makeUniqueNoThrow<FontDownloadActivity>(renderer, mappedInput, wanted, FontDownloadActivity::ReturnTo::Book);
 }
 
 }  // namespace BookPackOffer

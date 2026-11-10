@@ -3,6 +3,7 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <SdCardFontRegistry.h>
 
 #include <cstdio>
@@ -101,7 +102,7 @@ std::unique_ptr<Activity> download(GfxRenderer& renderer, MappedInputManager& ma
   } else {
     snprintf(wanted.family, sizeof(wanted.family), "%s", offer.interfaceFamily);
   }
-  return std::make_unique<FontDownloadActivity>(
+  return makeUniqueNoThrow<FontDownloadActivity>(
       renderer, mappedInput, wanted,
       toSettings ? FontDownloadActivity::ReturnTo::Settings : FontDownloadActivity::ReturnTo::Home);
 }
