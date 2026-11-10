@@ -104,7 +104,7 @@ TEST_F(NativeSizeLayoutFixture, EachHeadingSizeHasAFaceOfItsOwn) {
 }
 
 TEST_F(NativeSizeLayoutFixture, ABuiltInLadderStillHasOneAuxiliaryFace) {
-  FontSizeLadder rungs;  // Bookerly at 14 pt: 16 and 20 pt rungs
+  FontSizeLadder rungs;  // Serif at 14 pt: 16 and 20 pt rungs
   rungs.addRung(104, 114);
   rungs.addRung(106, 142);
   const auto lines = layout("<h1>Alpha</h1><h3>Charlie</h3><p>Body text.</p>", rungs);

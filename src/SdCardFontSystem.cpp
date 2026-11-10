@@ -147,8 +147,7 @@ uint8_t fontFamilyDynamicGetter(const void* /*ctx*/) {
     }
     // SD family no longer present (card removed?); fall through to built-in.
   }
-  return SETTINGS.fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? SETTINGS.fontFamily
-                                                                      : CrossPointSettings::BOOKERLY;
+  return SETTINGS.fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? SETTINGS.fontFamily : CrossPointSettings::SERIF;
 }
 
 void fontFamilyDynamicSetter(void* /*ctx*/, uint8_t value) {

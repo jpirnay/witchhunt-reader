@@ -101,7 +101,7 @@ class CrossPointSettings {
   };
 
   // Font family options (built-in fonts only; SD card fonts use sdFontFamilyName)
-  enum FONT_FAMILY { BOOKERLY = 0, NOTOSANS = 1, FONT_FAMILY_COUNT };
+  enum FONT_FAMILY { SERIF = 0, NOTOSANS = 1, FONT_FAMILY_COUNT };
   static constexpr uint8_t BUILTIN_FONT_COUNT = FONT_FAMILY_COUNT;
   // Publisher Fonts: what of a book's embedded fonts the reader uses. Off and Body Text keep Stage A's stored 0/1;
   // the mode names follow crosspoint-reader PR #3934 (Justin Mitchell).
@@ -462,7 +462,7 @@ class CrossPointSettings {
   uint8_t frontButtonLeft = FRONT_HW_LEFT;
   uint8_t frontButtonRight = FRONT_HW_RIGHT;
   // Reader font settings (EPUB)
-  uint8_t fontFamily = BOOKERLY;
+  uint8_t fontFamily = SERIF;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";
   // Folder name under /dictionaries (or /.dictionaries) of the StarDict

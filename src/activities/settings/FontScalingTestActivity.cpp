@@ -28,18 +28,18 @@ struct LadderRow {
 // The reader's ladder, exactly as CrossPointSettings::FONT_SIZE_RUNGS defines it. Which rows are
 // real and which are scaled is NOT recorded here -- it is asked of the renderer per row, so this
 // table cannot disagree with what ships.
-constexpr LadderRow kLadderBookerly[] = {
-    {10, BOOKERLY_10_FONT_ID}, {12, BOOKERLY_12_FONT_ID}, {14, BOOKERLY_14_FONT_ID},
-    {16, BOOKERLY_16_FONT_ID}, {18, BOOKERLY_18_FONT_ID}, {20, BOOKERLY_20_FONT_ID},
-    {22, BOOKERLY_22_FONT_ID}, {24, BOOKERLY_24_FONT_ID}, {26, BOOKERLY_26_FONT_ID},
+constexpr LadderRow kLadderSerif[] = {
+    {10, SERIF_10_FONT_ID}, {12, SERIF_12_FONT_ID}, {14, SERIF_14_FONT_ID},
+    {16, SERIF_16_FONT_ID}, {18, SERIF_18_FONT_ID}, {20, SERIF_20_FONT_ID},
+    {22, SERIF_22_FONT_ID}, {24, SERIF_24_FONT_ID}, {26, SERIF_26_FONT_ID},
 };
 constexpr LadderRow kLadderNotoSans[] = {
     {10, NOTOSANS_10_FONT_ID}, {12, NOTOSANS_12_FONT_ID}, {14, NOTOSANS_14_FONT_ID},
     {16, NOTOSANS_16_FONT_ID}, {18, NOTOSANS_18_FONT_ID}, {20, NOTOSANS_20_FONT_ID},
     {22, NOTOSANS_22_FONT_ID}, {24, NOTOSANS_24_FONT_ID}, {26, NOTOSANS_26_FONT_ID},
 };
-constexpr int kLadderCount = sizeof(kLadderBookerly) / sizeof(kLadderBookerly[0]);
-static_assert(sizeof(kLadderNotoSans) == sizeof(kLadderBookerly),
+constexpr int kLadderCount = sizeof(kLadderSerif) / sizeof(kLadderSerif[0]);
+static_assert(sizeof(kLadderNotoSans) == sizeof(kLadderSerif),
               "the two ladders must cover the same sizes or the comparison is not one");
 static_assert(kLadderCount == static_cast<int>(CrossPointSettings::FONT_SIZE_COUNT),
               "this screen must show every size the reader offers; a missing row reads as though "
@@ -72,7 +72,7 @@ void FontScalingTestActivity::renderContent() const {
 
   GUI.drawHeader(renderer,
                  Rect{contentRect.x, contentRect.y + metrics.topPadding, contentRect.width, metrics.headerHeight},
-                 notoSans_ ? "Noto Sans 10-26pt (R real / S scaled)" : "Bookerly 10-26pt (R real / S scaled)", nullptr);
+                 notoSans_ ? "Noto Sans 10-26pt (R real / S scaled)" : "Serif 10-26pt (R real / S scaled)", nullptr);
 
   const int leftX = contentRect.x + metrics.verticalSpacing * 2;
   const int bottom = contentRect.y + contentRect.height;
@@ -81,7 +81,7 @@ void FontScalingTestActivity::renderContent() const {
   const int textX = leftX + contentRect.width * 15 / 100;
   int y = contentRect.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing * 2;
 
-  const LadderRow* const ladder = notoSans_ ? kLadderNotoSans : kLadderBookerly;
+  const LadderRow* const ladder = notoSans_ ? kLadderNotoSans : kLadderSerif;
   for (int i = 0; i < kLadderCount; ++i) {
     const LadderRow& r = ladder[i];
     // Asked of the renderer, not assumed: a synthesised size carries its scale on its font ID, so

@@ -473,8 +473,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
 
   // Font family uses a DynamicEnumCtx in SettingsList (no valuePtr) so the generic
   // loop above skips it. Load manually.
-  s.fontFamily = clamp(doc["fontFamily"] | (uint8_t)CrossPointSettings::BOOKERLY,
-                       CrossPointSettings::BUILTIN_FONT_COUNT, CrossPointSettings::BOOKERLY);
+  s.fontFamily = clamp(doc["fontFamily"] | (uint8_t)CrossPointSettings::SERIF, CrossPointSettings::BUILTIN_FONT_COUNT,
+                       CrossPointSettings::SERIF);
   // Frontlight switch: dynamic in SettingsList, so it needs loading manually too.
   s.frontlightOn = doc["frontlightOn"].as<int>() != 0 ? 1 : 0;
   const char* dictName = doc["dictionaryName"] | "";

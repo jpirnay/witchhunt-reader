@@ -32,7 +32,7 @@
 
 // The font with the largest glyph in the built-in set (54x38, 513 packed bytes), which used to
 // overflow HOT_GLYPH_BUF_SIZE by one byte.
-#include "bookerly_18_bolditalic.h"
+#include "serif_18_bolditalic.h"
 
 namespace {
 
@@ -121,8 +121,8 @@ TEST(FontGroupStream, EveryGlyphFitsTheFallbackSlot) {
     size_t count;
   };
   const FontUnderTest fonts[] = {
-      {"bookerly_18_bolditalic", bookerly_18_bolditalicGlyphs,
-       sizeof(bookerly_18_bolditalicGlyphs) / sizeof(bookerly_18_bolditalicGlyphs[0])},
+      {"serif_18_bolditalic", serif_18_bolditalicGlyphs,
+       sizeof(serif_18_bolditalicGlyphs) / sizeof(serif_18_bolditalicGlyphs[0])},
       {"notosans_14_regular", notosans_14_regularGlyphs,
        sizeof(notosans_14_regularGlyphs) / sizeof(notosans_14_regularGlyphs[0])},
   };

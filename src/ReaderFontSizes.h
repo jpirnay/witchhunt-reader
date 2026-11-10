@@ -25,7 +25,7 @@ struct ReaderSizeList {
   uint8_t points[kCapacity] = {};
   uint8_t count = 0;
 
-  /// What Bookerly and Noto Sans offer: the reader ladder, CrossPointSettings::FONT_SIZE_RUNGS.
+  /// What Serif and Noto Sans offer: the reader ladder, CrossPointSettings::FONT_SIZE_RUNGS.
   static ReaderSizeList builtin() {
     static_assert(CrossPointSettings::FONT_SIZE_RUNG_COUNT <= kCapacity, "the ladder must fit the list");
     ReaderSizeList list;

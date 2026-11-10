@@ -24,10 +24,10 @@
 #include "Utf8.h"
 
 // Reading fonts (the ones that render book text, where the bug was visible) plus one UI font.
-#include "bookerly_14_regular.h"
-#include "bookerly_18_bolditalic.h"
 #include "inter_ui_12_regular.h"
 #include "notosans_14_regular.h"
+#include "serif_14_regular.h"
+#include "serif_18_bolditalic.h"
 
 namespace {
 
@@ -43,8 +43,8 @@ std::vector<NamedFont> shippedFonts() {
   // 16-byte .cpfont form, which is NULL for built-in fonts — they carry `glyphPacked`. The
   // resolver is the one accessor that does not care which.
   return {
-      {"bookerly_14_regular", &bookerly_14_regular},
-      {"bookerly_18_bolditalic", &bookerly_18_bolditalic},
+      {"serif_14_regular", &serif_14_regular},
+      {"serif_18_bolditalic", &serif_18_bolditalic},
       {"notosans_14_regular", &notosans_14_regular},
       {"inter_ui_12_regular", &inter_ui_12_regular},
   };

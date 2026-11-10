@@ -20,7 +20,7 @@ TEST(ReaderSizeList, AnOfferedSizeSnapsToItself) {
   for (const auto& rung : S::FONT_SIZE_RUNGS) EXPECT_EQ(int{rung.points}, int{list.snap(rung.points)});
 }
 
-// A size chosen under an SD family (8 pt, say) read while Bookerly is selected.
+// A size chosen under an SD family (8 pt, say) read while Serif is selected.
 TEST(ReaderSizeList, AnUnofferedSizeSnapsToTheNearest) {
   const auto list = ReaderSizeList::builtin();
   const int smallest = list.points[0];

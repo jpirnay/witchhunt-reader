@@ -99,36 +99,31 @@ SdCardFontSystem sdFontSystem;
 FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts(), renderer.getSdCardFontAliases());
 
 // Fonts
-EpdFont bookerly14RegularFont(&bookerly_14_regular);
-EpdFont bookerly14BoldFont(&bookerly_14_bold);
-EpdFont bookerly14ItalicFont(&bookerly_14_italic);
-EpdFont bookerly14BoldItalicFont(&bookerly_14_bolditalic);
-EpdFontFamily bookerly14FontFamily(&bookerly14RegularFont, &bookerly14BoldFont, &bookerly14ItalicFont,
-                                   &bookerly14BoldItalicFont);
-EpdFont bookerly10RegularFont(&bookerly_10_regular);
-EpdFont bookerly10BoldFont(&bookerly_10_bold);
-EpdFont bookerly10ItalicFont(&bookerly_10_italic);
-EpdFont bookerly10BoldItalicFont(&bookerly_10_bolditalic);
-EpdFontFamily bookerly10FontFamily(&bookerly10RegularFont, &bookerly10BoldFont, &bookerly10ItalicFont,
-                                   &bookerly10BoldItalicFont);
-EpdFont bookerly12RegularFont(&bookerly_12_regular);
-EpdFont bookerly12BoldFont(&bookerly_12_bold);
-EpdFont bookerly12ItalicFont(&bookerly_12_italic);
-EpdFont bookerly12BoldItalicFont(&bookerly_12_bolditalic);
-EpdFontFamily bookerly12FontFamily(&bookerly12RegularFont, &bookerly12BoldFont, &bookerly12ItalicFont,
-                                   &bookerly12BoldItalicFont);
-EpdFont bookerly16RegularFont(&bookerly_16_regular);
-EpdFont bookerly16BoldFont(&bookerly_16_bold);
-EpdFont bookerly16ItalicFont(&bookerly_16_italic);
-EpdFont bookerly16BoldItalicFont(&bookerly_16_bolditalic);
-EpdFontFamily bookerly16FontFamily(&bookerly16RegularFont, &bookerly16BoldFont, &bookerly16ItalicFont,
-                                   &bookerly16BoldItalicFont);
-EpdFont bookerly18RegularFont(&bookerly_18_regular);
-EpdFont bookerly18BoldFont(&bookerly_18_bold);
-EpdFont bookerly18ItalicFont(&bookerly_18_italic);
-EpdFont bookerly18BoldItalicFont(&bookerly_18_bolditalic);
-EpdFontFamily bookerly18FontFamily(&bookerly18RegularFont, &bookerly18BoldFont, &bookerly18ItalicFont,
-                                   &bookerly18BoldItalicFont);
+EpdFont serif14RegularFont(&serif_14_regular);
+EpdFont serif14BoldFont(&serif_14_bold);
+EpdFont serif14ItalicFont(&serif_14_italic);
+EpdFont serif14BoldItalicFont(&serif_14_bolditalic);
+EpdFontFamily serif14FontFamily(&serif14RegularFont, &serif14BoldFont, &serif14ItalicFont, &serif14BoldItalicFont);
+EpdFont serif10RegularFont(&serif_10_regular);
+EpdFont serif10BoldFont(&serif_10_bold);
+EpdFont serif10ItalicFont(&serif_10_italic);
+EpdFont serif10BoldItalicFont(&serif_10_bolditalic);
+EpdFontFamily serif10FontFamily(&serif10RegularFont, &serif10BoldFont, &serif10ItalicFont, &serif10BoldItalicFont);
+EpdFont serif12RegularFont(&serif_12_regular);
+EpdFont serif12BoldFont(&serif_12_bold);
+EpdFont serif12ItalicFont(&serif_12_italic);
+EpdFont serif12BoldItalicFont(&serif_12_bolditalic);
+EpdFontFamily serif12FontFamily(&serif12RegularFont, &serif12BoldFont, &serif12ItalicFont, &serif12BoldItalicFont);
+EpdFont serif16RegularFont(&serif_16_regular);
+EpdFont serif16BoldFont(&serif_16_bold);
+EpdFont serif16ItalicFont(&serif_16_italic);
+EpdFont serif16BoldItalicFont(&serif_16_bolditalic);
+EpdFontFamily serif16FontFamily(&serif16RegularFont, &serif16BoldFont, &serif16ItalicFont, &serif16BoldItalicFont);
+EpdFont serif18RegularFont(&serif_18_regular);
+EpdFont serif18BoldFont(&serif_18_bold);
+EpdFont serif18ItalicFont(&serif_18_italic);
+EpdFont serif18BoldItalicFont(&serif_18_bolditalic);
+EpdFontFamily serif18FontFamily(&serif18RegularFont, &serif18BoldFont, &serif18ItalicFont, &serif18BoldItalicFont);
 
 EpdFont notosans10RegularFont(&notosans_10_regular);
 EpdFont notosans10BoldFont(&notosans_10_bold);
@@ -751,11 +746,11 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   renderer.insertFont(FIT_BODY_FONT_ID, ui10FontFamily);
   renderer.insertFont(FIT_TITLE_FONT_ID, ui12FontFamily);
 #endif
-  renderer.insertFont(BOOKERLY_14_FONT_ID, bookerly14FontFamily);
-  renderer.insertFont(BOOKERLY_10_FONT_ID, bookerly10FontFamily);
-  renderer.insertFont(BOOKERLY_12_FONT_ID, bookerly12FontFamily);
-  renderer.insertFont(BOOKERLY_16_FONT_ID, bookerly16FontFamily);
-  renderer.insertFont(BOOKERLY_18_FONT_ID, bookerly18FontFamily);
+  renderer.insertFont(SERIF_14_FONT_ID, serif14FontFamily);
+  renderer.insertFont(SERIF_10_FONT_ID, serif10FontFamily);
+  renderer.insertFont(SERIF_12_FONT_ID, serif12FontFamily);
+  renderer.insertFont(SERIF_16_FONT_ID, serif16FontFamily);
+  renderer.insertFont(SERIF_18_FONT_ID, serif18FontFamily);
 
   renderer.insertFont(NOTOSANS_10_FONT_ID, notosans10FontFamily);
   renderer.insertFont(NOTOSANS_12_FONT_ID, notosans12FontFamily);
@@ -771,8 +766,8 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   for (const auto& rung : CrossPointSettings::FONT_SIZE_RUNGS) {
     if (rung.points <= CrossPointSettings::BUILTIN_FACE_MAX_POINTS) continue;
     const float scale = CrossPointSettings::builtinFaceScale(rung.points);
-    renderer.insertScaledFont(CrossPointSettings::getBuiltinReaderFontId(CrossPointSettings::BOOKERLY, rung.size),
-                              bookerly18FontFamily, scale);
+    renderer.insertScaledFont(CrossPointSettings::getBuiltinReaderFontId(CrossPointSettings::SERIF, rung.size),
+                              serif18FontFamily, scale);
     renderer.insertScaledFont(CrossPointSettings::getBuiltinReaderFontId(CrossPointSettings::NOTOSANS, rung.size),
                               notosans18FontFamily, scale);
   }

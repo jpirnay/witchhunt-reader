@@ -24,7 +24,6 @@
 #include <Arduino.h>
 #include <EpdFont.h>
 #include <FontDecompressor.h>
-#include <builtinFonts/bookerly_18_bolditalic.h>
 #include <builtinFonts/cjk_ui_zh_10.h>
 #include <builtinFonts/cjk_ui_zh_12.h>
 #include <builtinFonts/inter_ui_12_regular.h>
@@ -34,6 +33,7 @@
 #include <builtinFonts/notosans_14_regular.h>
 #include <builtinFonts/notosans_16_regular.h>
 #include <builtinFonts/notosans_18_regular.h>
+#include <builtinFonts/serif_18_bolditalic.h>
 #include <esp_heap_caps.h>
 #include <esp_rom_crc.h>
 #include <esp_timer.h>
@@ -334,10 +334,10 @@ static void benchSlotCrc() {
   constexpr uint32_t CHINESE_SLOT_BYTES = 88264;
   timerStart();
   uint32_t crc = esp_rom_crc32_le(0, notosans_18_regularBitmaps, sizeof(notosans_18_regularBitmaps));
-  crc = esp_rom_crc32_le(crc, bookerly_18_bolditalicBitmaps, sizeof(bookerly_18_bolditalicBitmaps));
+  crc = esp_rom_crc32_le(crc, serif_18_bolditalicBitmaps, sizeof(serif_18_bolditalicBitmaps));
   const int64_t us = timerElapsedUs();
   sink += crc;
-  const uint32_t bytes = sizeof(notosans_18_regularBitmaps) + sizeof(bookerly_18_bolditalicBitmaps);
+  const uint32_t bytes = sizeof(notosans_18_regularBitmaps) + sizeof(serif_18_bolditalicBitmaps);
   Serial.printf("BENCH slot_crc          %-18s total=%6lldus  bytes=%lu  per_byte=%lldns  chinese_slot~%lldus\n",
                 "rom crc32_le", us, (unsigned long)bytes, (us * 1000) / bytes, us * CHINESE_SLOT_BYTES / bytes);
 }
@@ -404,7 +404,7 @@ static void benchReaderPrewarm(const char* label, const EpdFontData* data) {
 // it. fontconvert.py refuses to generate a font that would overflow the constant, but that check
 // only fires at generation time and has been wrong twice by being guessed rather than measured.
 //
-// U+01C4 (DZ digraph) in bookerly_18_bolditalic at 54x38 packs to 513 B and is the glyph that
+// U+01C4 (DZ digraph) in serif_18_bolditalic at 54x38 packs to 513 B and is the glyph that
 // sets the constant. If this prints FAIL, HOT_GLYPH_BUF_SIZE is too small.
 // ---------------------------------------------------------------------------
 
@@ -971,7 +971,7 @@ void setup() {
   benchSlotCrc();
 
   Serial.println("\n-- Fallback-slot sizing (correctness, not timing) --");
-  checkWidestGlyph("bookerly_18_bi", &bookerly_18_bolditalic, 0x01C4);
+  checkWidestGlyph("serif_18_bi", &serif_18_bolditalic, 0x01C4);
   checkWidestGlyph("notosans_18", &notosans_18_regular, 0x0489);
 
   // What a synthesised size costs per glyph, at the ratios the ladder actually uses: 18 pt is the
