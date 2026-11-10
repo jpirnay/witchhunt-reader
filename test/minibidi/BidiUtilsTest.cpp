@@ -329,6 +329,21 @@ TEST(BidiUtils, ArabicSupplementAndExtendedAreStrongRtl) {
   EXPECT_EQ(bidi_class(0xFDFA), AL);
 }
 
+// A Burmese word in a Hebrew line keeps its letters left to right, its stacker (U+1039) and asat (U+103A) with them:
+// Myanmar is strong left to right, its marks read as L as the Indic ones do. Its code points were ON once, and an ON
+// run between two Hebrew words is reversed with them.
+TEST(BidiUtils, ABurmeseWordInAHebrewLineKeepsItsOrder) {
+  // Shin lamed, a space, Burmese "myanma" (U+1019 U+103C U+1014 U+103A U+1019 U+102C), a space, alef bet.
+  const CP burmese = {0x1019, 0x103C, 0x1014, 0x103A, 0x1019, 0x102C};
+  CP logical = {0x05E9, 0x05DC, 0x20};
+  logical.insert(logical.end(), burmese.begin(), burmese.end());
+  logical.insert(logical.end(), {0x20, 0x05D0, 0x05D1});
+  CP expected = {0x05D1, 0x05D0, 0x20};
+  expected.insert(expected.end(), burmese.begin(), burmese.end());
+  expected.insert(expected.end(), {0x20, 0x05DC, 0x05E9});
+  EXPECT_EQ(visual(logical, 1), expected);
+}
+
 // A line of UI text as it is drawn: a title with a right-to-left character in visual order, at its own direction, the
 // rest as it is; a heap workspace it had to make is gone again.
 TEST(BidiUtils, AUiLineIsDrawnInVisualOrderAtItsOwnDirection) {
