@@ -33,9 +33,11 @@ class BuildArena;  // lib/Memory — optional backing store for the disk index (
  *
  * Not supported (silently ignored):
  *   - Sibling combinators (+, ~) and attribute selectors
- *   - Pseudo-classes and pseudo-elements
+ *   - Pseudo-classes and pseudo-elements, but ::first-letter (and :first-letter) after a selector of one tag, class
+ *     or id, kept apart for the paragraph's drop cap (resolveFirstLetterStyle)
  *   - Media queries (content is skipped)
- *   - @import and the other at-rules
+ *   - @import and the other at-rules; an @supports block is skipped too, unless all it tests is initial-letter
+ *     (supportsInitialLetter): its rules are read as if it were not there
  *
  * @font-face rules are not styles: they are collected into a side file next to the rule cache
  * (fontFaces / loadFontFaces), for the book's embedded fonts.
@@ -127,7 +129,10 @@ class CssParser {
   //      lowercased, so a mixed-case class would no longer match its own rule.
   // v34: the font-size keywords take the CSS Fonts 4 scale (small 8/9, x-large 3/2, xx-large 2, xxx-large 3, smaller
   //      1/1.2); a v33 cache stores small and smaller as 0.8, x-large as 1.4 and xx-large as 1.6.
-  static constexpr uint8_t CSS_CACHE_VERSION = 34;
+  // v35: `initial-letter` (and -webkit-initial-letter) is persisted (a byte after the flow word; in the resident pool,
+  //      flow-word bit 15 and a byte after it); ::first-letter rules are kept (flags bit 2), and an @supports block
+  //      that tests initial-letter is read. A v34 compile dropped all three.
+  static constexpr uint8_t CSS_CACHE_VERSION = 35;
   // Bytes before the complex-rule table and the sorted offset index: version(1) + ruleCount(2) +
   // totalSelectorCandidates(4) + unsupportedSelectorSkips(4) + flags(1) + complexTableBytes(2).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 14;
@@ -201,6 +206,20 @@ class CssParser {
   [[nodiscard]] CssStyle resolveStyle(const std::string& tagName, const std::string& classAttr,
                                       const std::string& idAttr = {}, const Ancestry* ancestry = nullptr,
                                       bool* dependsOnAncestors = nullptr) const;
+
+  // ::first-letter rules (`p.first::first-letter`, `.chapter:first-letter`): kept under their selector with the
+  // pseudo-element, for a selector of one tag, class, tag.class, id or tag#id; one with a combinator, a compound or
+  // another pseudo part is unsupported. True when the sheet has one (persisted, cache flags bit 2).
+  [[nodiscard]] bool hasFirstLetterRules() const { return hasFirstLetterRules_; }
+  // The style the sheet gives the element's first letter: its ::first-letter rules, by the cascade resolveStyle
+  // applies. Empty when the sheet has none.
+  [[nodiscard]] CssStyle resolveFirstLetterStyle(const std::string& tagName, const std::string& classAttr,
+                                                 const std::string& idAttr = {}) const;
+  // Whether an @supports block's prelude ("supports (initial-letter: 3)") holds for this parser: true when the
+  // condition is one or more initial-letter (or -webkit-initial-letter) tests of values it reads, joined by `and` or
+  // `or`. Any other condition, `not` included, is taken to fail, so the block is skipped as every @supports block was
+  // before.
+  [[nodiscard]] static bool supportsInitialLetter(std::string_view prelude);
 
   /**
    * Parse an inline style attribute string.
@@ -477,8 +496,13 @@ class CssParser {
   mutable ResolveStats resolveStats_;
   // Set while parsing when a selector matches on an id, and restored from the cache header
   // otherwise. Conservative default: assume ids matter until something says they do not.
-  mutable bool hasIdSelectors_ = true;   // mutable: restored by the const cache-index load
-  mutable bool rulesTruncated_ = false;  // see rulesTruncated(); restored by the cache load
+  mutable bool hasIdSelectors_ = true;        // mutable: restored by the const cache-index load
+  mutable bool rulesTruncated_ = false;       // see rulesTruncated(); restored by the cache load
+  mutable bool hasFirstLetterRules_ = false;  // see hasFirstLetterRules(); restored by the cache load
+  // resolveStyle's lookups, for the element itself (`pseudo` empty) or its ::first-letter (each key with it appended;
+  // no complex rule then).
+  CssStyle resolve(const std::string& tagName, const std::string& classAttr, const std::string& idAttr,
+                   const Ancestry* ancestry, bool* dependsOnAncestors, std::string_view pseudo) const;
 
   bool compileModeActive_ = false;
   bool compileModeFailed_ = false;
@@ -530,6 +554,9 @@ class CssParser {
   static bool interpretTextCombine(std::string_view val, CssTextCombine& out);
   static bool interpretDirection(std::string_view val, CssDirection& out);
   static bool interpretUnicodeBidi(std::string_view val, CssUnicodeBidi& out);
+  // initial-letter: normal | <size> [<sink> | drop | raise], into a CssInitialLetter byte. False for inherit, unset and
+  // what it does not read. Not inherited: unset is `normal`.
+  static bool interpretInitialLetter(std::string_view val, uint8_t& out);
 
   // String utilities
   static std::string normalized(const std::string& s);

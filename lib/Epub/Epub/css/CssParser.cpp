@@ -106,11 +106,12 @@ constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
 //         + line-height in ems (float; defined is bit 3 of the font-size flags byte; v30)
 //         + the flow word (uint16: writing-mode, direction, text-combine-upright, text-orientation,
 //           unicode-bidi; packFlow; v30)
-constexpr size_t CSS_FIXED_STYLE_BYTES = 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
-                                         sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t) +
-                                         sizeof(uint8_t) + sizeof(float) + sizeof(uint8_t) + sizeof(uint8_t) +
-                                         sizeof(uint8_t) + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t);
-static_assert(CSS_FIXED_STYLE_BYTES == 83,
+//         + the initial-letter byte (CssStyle::initialLetter; v35)
+constexpr size_t CSS_FIXED_STYLE_BYTES =
+    4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) + sizeof(uint8_t) + sizeof(uint16_t) +
+    2 * sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint8_t) + sizeof(float) + sizeof(uint8_t) + sizeof(uint8_t) +
+    sizeof(uint8_t) + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) + sizeof(uint8_t);
+static_assert(CSS_FIXED_STYLE_BYTES == 84,
               "style payload layout changed — update read/writeCssStylePayload and bump CSS_CACHE_VERSION");
 // A rule record is selectorLen(2) selector order(2) payload; the order sits between selector and
 // payload so a reader that has matched the selector reads the rest in one go (v22).
@@ -127,6 +128,8 @@ constexpr uint32_t SPECIFICITY_ID = 1u << 10;
 
 // Cache file name (version is CssParser::CSS_CACHE_VERSION)
 constexpr char rulesCache[] = "/css_rules.cache";
+// What a ::first-letter rule's key ends with: its selector, normalized, and this (CssParser::resolveFirstLetterStyle).
+constexpr std::string_view kFirstLetterPseudo = "::first-letter";
 // Background pictures (CssParser::backgroundImageFor), when the book has any:
 // version(1) + count(2) + count x {selectorLen(2) selector pathLen(2) path}.
 constexpr char backgroundImagesFile[] = "/css_bg.bin";
@@ -178,6 +181,16 @@ bool isSelectorUsableByResolver(std::string_view selector) {
 
   // tag.class only, no additional dots
   return dotPos + 1 < selector.size() && selector.find('.', dotPos + 1) == std::string_view::npos;
+}
+
+// Where a normalized selector's ::first-letter (or CSS 2's :first-letter) begins when it ends with one, else npos.
+size_t firstLetterPseudoAt(const std::string_view selector) {
+  for (const std::string_view pseudo : {std::string_view("::first-letter"), std::string_view(":first-letter")}) {
+    if (selector.size() > pseudo.size() && selector.substr(selector.size() - pseudo.size()) == pseudo) {
+      return selector.size() - pseudo.size();
+    }
+  }
+  return std::string_view::npos;
 }
 
 // FNV-1a 32-bit (CssParser::selectorHash, and the names of complex-rule compounds).
@@ -824,6 +837,44 @@ bool CssParser::interpretUnicodeBidi(std::string_view v, CssUnicodeBidi& out) {
   return true;
 }
 
+bool CssParser::interpretInitialLetter(const std::string_view v, uint8_t& out) {
+  if (v == "normal" || v == "initial") {
+    out = CssInitialLetter::kNormal;
+    return true;
+  }
+  // The size, a number of lines, and the sink: an integer, `drop` (as deep as the letter is tall) or `raise` (one
+  // line); the keyword may come first.
+  std::string_view size = v;
+  std::string_view sink;
+  if (const size_t space = v.find(' '); space != std::string_view::npos) {
+    size = v.substr(0, space);
+    sink = trimCss(v.substr(space + 1));
+    if (size == "drop" || size == "raise") std::swap(size, sink);
+  }
+  const auto number = [](const std::string_view text, float& value) {
+    char buf[16];
+    if (text.empty() || text.size() >= sizeof(buf)) return false;
+    memcpy(buf, text.data(), text.size());
+    buf[text.size()] = '\0';
+    char* end = nullptr;
+    value = std::strtof(buf, &end);
+    return end == buf + text.size();
+  };
+  float lines = 0.0f;
+  if (!number(size, lines) || lines < 1.0f) return false;
+  uint8_t sinkLines = 0;  // as deep as the letter is tall
+  if (sink == "raise") {
+    sinkLines = 1;
+  } else if (!sink.empty() && sink != "drop") {
+    float k = 0.0f;
+    if (!number(sink, k) || k < 1.0f || k != static_cast<float>(static_cast<int>(k))) return false;
+    sinkLines = static_cast<uint8_t>(std::min<float>(k, CssInitialLetter::kMaxLines));
+  }
+  out = CssInitialLetter::pack(static_cast<uint8_t>(std::min<float>(lines + 0.5f, CssInitialLetter::kMaxLines)),
+                               sinkLines);
+  return true;
+}
+
 bool CssParser::interpretLineHeight(const std::string_view v, float& em) {
   // A multiple of the element's font size, as CSS has it. px and pt are taken at CSS's 16 px medium, so a book written
   // in pixels keeps its ratio to the text. Clamped to what a page can sensibly show; zero and below are not a value.
@@ -972,6 +1023,8 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
     interpretDirection(propValueBuf, style.direction);
   } else if (propNameBuf == "unicode-bidi") {
     interpretUnicodeBidi(propValueBuf, style.unicodeBidi);
+  } else if (propNameBuf == "initial-letter" || propNameBuf == "-webkit-initial-letter") {
+    interpretInitialLetter(propValueBuf, style.initialLetter);
   } else if (propNameBuf == "text-align") {
     style.textAlign = interpretAlignment(propValueBuf);
     style.defined.textAlign = 1;
@@ -1363,7 +1416,17 @@ void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, 
     // Already normalized into selectorKeyBuf_ above — no second pass, no second allocation.
     const std::string& key = selectorKeyBuf_;
 
-    if (!isSelectorUsableByResolver(key)) {
+    // A ::first-letter rule is kept under its selector with the pseudo-element, as resolveFirstLetterStyle looks it up,
+    // when the selector before it is one the hashed index keys. With anything else (a combinator, a compound, a
+    // pseudo-class) it is unsupported: read without its pseudo parts it would style elements it does not match.
+    if (const size_t pseudoAt = firstLetterPseudoAt(key); pseudoAt != std::string::npos) {
+      if (!isSelectorUsableByResolver(std::string_view(key).substr(0, pseudoAt))) {
+        unsupportedSelectorSkips_++;
+        continue;
+      }
+      selectorKeyBuf_.replace(pseudoAt, std::string::npos, kFirstLetterPseudo);
+      hasFirstLetterRules_ = true;
+    } else if (!isSelectorUsableByResolver(key)) {
       if (addComplexRule(key, style, order)) {
         stored = true;
       } else {
@@ -1459,6 +1522,56 @@ void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, 
   if (stored && nextRuleOrder_ < UINT16_MAX) ++nextRuleOrder_;
 }
 
+bool CssParser::supportsInitialLetter(std::string_view prelude) {
+  prelude = trimCss(prelude);
+  constexpr std::string_view kSupports = "supports";
+  if (prelude.size() <= kSupports.size() || !equalsIgnoreCase(prelude.substr(0, kSupports.size()), kSupports)) {
+    return false;
+  }
+  // Every innermost parenthesised test is an initial-letter declaration we read, and what is left between them is
+  // parentheses, spaces, `and` and `or`: anything else (`not`, selector(), another property) and the block is skipped.
+  bool tested = false;
+  std::string name;
+  std::string value;
+  std::string_view rest = prelude.substr(kSupports.size());
+  while (!rest.empty()) {
+    const char c = rest.front();
+    if (c == '(' || c == ')' || isCssWhitespace(c)) {
+      rest.remove_prefix(1);
+      continue;
+    }
+    const auto nameChar = [](const char ch) { return std::isalnum(static_cast<unsigned char>(ch)) || ch == '-'; };
+    if (nameChar(c)) {
+      size_t n = 0;
+      while (n < rest.size() && nameChar(rest[n])) ++n;
+      const std::string_view word = rest.substr(0, n);
+      if (!equalsIgnoreCase(word, "and") && !equalsIgnoreCase(word, "or")) {
+        // Not a keyword: the start of a declaration, which only the test below may read.
+        const size_t open = prelude.rfind('(', static_cast<size_t>(rest.data() - prelude.data()));
+        if (open == std::string_view::npos) return false;
+        const size_t close = prelude.find(')', open);
+        if (close == std::string_view::npos) return false;
+        const std::string_view decl = prelude.substr(open + 1, close - open - 1);
+        const size_t colon = decl.find(':');
+        if (colon == std::string_view::npos) return false;
+        normalizedInto(decl.substr(0, colon), name);
+        normalizedInto(decl.substr(colon + 1), value);
+        uint8_t letter = 0;
+        if ((name != "initial-letter" && name != "-webkit-initial-letter") || !interpretInitialLetter(value, letter)) {
+          return false;
+        }
+        tested = true;
+        rest = prelude.substr(close + 1);
+        continue;
+      }
+      rest.remove_prefix(n);
+      continue;
+    }
+    return false;  // a test that does not open with a name
+  }
+  return tested;
+}
+
 // Main parsing entry point
 
 bool CssParser::loadFromStream(FsFile& source) {
@@ -1486,6 +1599,9 @@ bool CssParser::loadFromStream(FsFile& source) {
   // "font-face" or "media screen", was before the brace). Ported from crosspoint-reader PR #3934
   // (Justin Mitchell, @itsthisjustin).
   bool inFontFace = false;
+  // The @supports blocks open whose rules are read as if the block were not there (supportsInitialLetter); the brace
+  // that closes one comes where a selector would start.
+  int supportsDepth = 0;
 
   int bodyDepth = 0;
   bool skippingRule = false;
@@ -1511,6 +1627,13 @@ bool CssParser::loadFromStream(FsFile& source) {
     if (inAtRule) {
       if (c == '{') {
         if (++atDepth == 1) {
+          if (supportsInitialLetter(declBuffer.view())) {
+            declBuffer.clear();
+            inAtRule = false;
+            atDepth = 0;
+            ++supportsDepth;
+            return;
+          }
           inFontFace = equalsIgnoreCase(trimCss(declBuffer.view()), "font-face");
           declBuffer.clear();
         }
@@ -1539,6 +1662,10 @@ bool CssParser::loadFromStream(FsFile& source) {
         inAtRule = true;
         atDepth = 0;
         declBuffer.clear();  // the prelude gathers here
+        return;
+      }
+      if (c == '}' && selector.empty() && supportsDepth > 0) {
+        --supportsDepth;
         return;
       }
       if (c == '{') {
@@ -1798,7 +1925,8 @@ bool CssParser::writeCompiledCache(FsFile& outFile, FsFile& tempFile, BuildArena
   out.writePod(ruleCount);
   out.writePod(totalSelectorCandidates_);
   out.writePod(unsupportedSelectorSkips_);
-  out.writePod(static_cast<uint8_t>((hasIdSelectors_ ? 1 : 0) | (rulesTruncated_ ? 2 : 0)));  // v17 flags byte
+  out.writePod(static_cast<uint8_t>((hasIdSelectors_ ? 1 : 0) | (rulesTruncated_ ? 2 : 0) |
+                                    (hasFirstLetterRules_ ? 4 : 0)));  // v17 flags byte
   out.writePod(complexBytes_);
   if (complexBytes_ > 0) out.write(complexTable(), complexBytes_);
   // v10: index immediately after the header — write zeroed placeholder, patch below.
@@ -1917,6 +2045,7 @@ void CssParser::clear() {
   // Cleared to FALSE, unlike its conservative default: what follows is either a parse, which
   // sets it from the selectors it sees, or a cache load, which restores it from the header.
   hasIdSelectors_ = false;
+  hasFirstLetterRules_ = false;
   // Reset Phase-2 arena config: clear() ends a build, so the shared per-epub parser must not
   // carry the lean flag or a now-dangling arena pointer into the next (possibly heap-backed) one.
   indexArena_ = nullptr;
@@ -2102,7 +2231,7 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   float lineHeightEm = 0.0f;
   uint16_t flow = 0;
   if (!get(&style.fontFamily, sizeof(style.fontFamily)) || !get(&lineHeightEm, sizeof(lineHeightEm)) ||
-      !get(&flow, sizeof(flow))) {
+      !get(&flow, sizeof(flow)) || !get(&style.initialLetter, sizeof(style.initialLetter))) {
     return false;
   }
   unpackFlow(flow, style);
@@ -2200,6 +2329,7 @@ size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const pa
   put(&style.lineHeightEm, sizeof(style.lineHeightEm));
   const uint16_t flow = packFlow(style);
   put(&flow, sizeof(flow));
+  put8(style.initialLetter);
   return at;
 }
 
@@ -2437,6 +2567,7 @@ bool CssParser::ensureCacheIndexLoaded() const {
   }
   hasIdSelectors_ = (flags & 0x01) != 0;
   rulesTruncated_ = (flags & 0x02) != 0;
+  hasFirstLetterRules_ = (flags & 0x04) != 0;
   if (rulesTruncated_) {
     LOG_ERR("CSS", "This book's stylesheets exceed %zu rules; the rules past the cap are not applied", MAX_RULES);
   }
@@ -2526,9 +2657,9 @@ bool CssParser::ensureCacheIndexLoaded() const {
 // decompresses back to a full CssStyle. Values are copied with memcpy so the byte-packed
 // (unaligned) records are safe to read on the C3.
 
-// Worst case: 4 (mask) + 2 (packed enums) + 1 (extra values) + 2 (the flow word) + 11 lengths * 5 + 2 multipliers * 4
-// + the font-family hash (4) + the text-emphasis mark (1) = 77 bytes.
-constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 2 + 11 * 5 + 2 * 4 + 4 + 1;
+// Worst case: 4 (mask) + 2 (packed enums) + 1 (extra values) + 2 (the flow word) + the initial-letter (1) + 11 lengths
+// * 5 + 2 multipliers * 4 + the font-family hash (4) + the text-emphasis mark (1) = 78 bytes.
+constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 2 + 1 + 11 * 5 + 2 * 4 + 4 + 1;
 
 // Canonical "which properties are set" mask: the defined bits of the first 27 properties (0-26; the extra byte below
 // flags font-family, text-emphasis and the flow properties, which have no defined bit), then the three boolean
@@ -2560,12 +2691,14 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   // explicit `inherit` of font-weight (bit 0) and of font-style (bit 1), a font-size relative to
   // the body (bit 2), a font-family (bit 3: its hash follows the multipliers), a flow property (bit 4: the flow word,
   // packFlow, follows this byte), a text-emphasis (bit 5: its mark byte follows the hash), and in bits 6-7 ruleBorder.
+  // An initial-letter is bit 15 of the flow word, which packFlow leaves free: its byte follows the word.
   uint8_t extra = 0;
   if (s.defined.fontWeight && s.fontWeight == CssFontWeight::Inherit) extra |= 0x01;
   if (s.defined.fontStyle && s.fontStyle == CssFontStyle::Inherit) extra |= 0x02;
   if (s.defined.fontSizeMultiplier && s.fontSizeRootRelative) extra |= 0x04;
   if (s.defined.fontFamily) extra |= 0x08;
-  const uint16_t flow = packFlow(s);
+  constexpr uint16_t kInitialLetterFollows = 0x8000;
+  const uint16_t flow = static_cast<uint16_t>(packFlow(s) | (s.hasInitialLetter() ? kInitialLetterFollows : 0));
   if (flow != 0) extra |= 0x10;
   if (s.defined.textEmphasis) extra |= 0x20;
   extra |= static_cast<uint8_t>(s.ruleBorder << 6);
@@ -2591,6 +2724,7 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   if (flow != 0) {
     std::memcpy(p, &flow, 2);
     p += 2;
+    if ((flow & kInitialLetterFollows) != 0) *p++ = s.initialLetter;
   }
   const auto putLen = [&](bool def, const CssLength& l) {
     if (def) {
@@ -2643,6 +2777,7 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
     std::memcpy(&flow, p, 2);
     p += 2;
     unpackFlow(flow, out);
+    if ((flow & 0x8000) != 0) out.initialLetter = *p++;  // compressStyle's kInitialLetterFollows
   }
   const auto isDefined = [&](int index) { return (mask >> index) & 1u; };
   CssPropertyFlags& d = out.defined;
@@ -3029,6 +3164,17 @@ void CssParser::applyComplexRules(const uint64_t self, const Ancestry* ancestry,
 
 CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& classAttr, const std::string& idAttr,
                                  const Ancestry* ancestry, bool* dependsOnAncestors) const {
+  return resolve(tagName, classAttr, idAttr, ancestry, dependsOnAncestors, {});
+}
+
+CssStyle CssParser::resolveFirstLetterStyle(const std::string& tagName, const std::string& classAttr,
+                                            const std::string& idAttr) const {
+  if (!hasFirstLetterRules_) return CssStyle{};
+  return resolve(tagName, classAttr, idAttr, nullptr, nullptr, kFirstLetterPseudo);
+}
+
+CssStyle CssParser::resolve(const std::string& tagName, const std::string& classAttr, const std::string& idAttr,
+                            const Ancestry* ancestry, bool* dependsOnAncestors, const std::string_view pseudo) const {
   if (dependsOnAncestors != nullptr) *dependsOnAncestors = false;
   static bool lowHeapWarningLogged = false;
   resolveStats_.resolveCalls++;
@@ -3060,8 +3206,15 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
   // by specificity and source order; reworked to rank each property instead, so no match list
   // (and no style per match) has to be held while the index is read from disk.
   Cascade cascade;
+  std::string pseudoKey;  // the key with the pseudo-element, only for a ::first-letter lookup
   const auto lookup = [&](const std::string& selector, const uint32_t specificity) {
-    if (lookupRules(selector, specificity, cascade, !lowHeapMode) && lowHeapMode) {
+    const std::string* key = &selector;
+    if (!pseudo.empty()) {
+      pseudoKey.assign(selector);
+      pseudoKey.append(pseudo);
+      key = &pseudoKey;
+    }
+    if (lookupRules(*key, specificity, cascade, !lowHeapMode) && lowHeapMode) {
       resolveStats_.lowHeapRescuedHits++;
     }
   };
@@ -3070,8 +3223,8 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
   lookup(tag, SPECIFICITY_TAG);
 
   // The element's class names, hashed for the complex rules when the sheet has any and the caller
-  // has not matched the element against them already (Ancestry::self).
-  const bool complexRules = complexBytes_ > 0;
+  // has not matched the element against them already (Ancestry::self). A ::first-letter rule is never a complex one.
+  const bool complexRules = complexBytes_ > 0 && pseudo.empty();
   const bool hashClasses = complexRules && ancestry == nullptr;
   uint32_t classHashes[MAX_ELEMENT_CLASSES];
   size_t classCount = 0;
@@ -3467,7 +3620,8 @@ bool CssParser::saveToCache() const {
   file.write(reinterpret_cast<const uint8_t*>(&ruleCount), sizeof(ruleCount));
   file.write(reinterpret_cast<const uint8_t*>(&totalSelectorCandidates_), sizeof(totalSelectorCandidates_));
   file.write(reinterpret_cast<const uint8_t*>(&unsupportedSelectorSkips_), sizeof(unsupportedSelectorSkips_));
-  file.write(static_cast<uint8_t>((hasIdSelectors_ ? 1 : 0) | (rulesTruncated_ ? 2 : 0)));  // v17 flags byte
+  file.write(static_cast<uint8_t>((hasIdSelectors_ ? 1 : 0) | (rulesTruncated_ ? 2 : 0) |
+                                  (hasFirstLetterRules_ ? 4 : 0)));  // v17 flags byte
   writeComplexTable(file);
   // v10: index lives immediately after the header (before rule payloads).
   // Write zeroed placeholder entries now; patch with sorted data below.
