@@ -72,8 +72,9 @@ class FontInstaller {
   /// cannot hold is installed but not listed; the Font Manager must not offer it again.
   bool isFamilyOnCard(const char* familyName) const;
 
-  /// The family of `families` is on the card: a font family as isFamilyOnCard() says, a hyphenation pack when each of
-  /// its files is in /.crosspoint/hyphenation/.
+  /// The family of `families` is on the card: a font family as isFamilyOnCard() says, a hyphenation pack when the
+  /// reader finds each of its files, in /.crosspoint/hyphenation/ or CrossInk's /.crossink/hyphenation/
+  /// (HyphenationPacks::packOnCard()).
   bool isOnCard(const FontCatalog& families, size_t family) const;
 
   /// Where a hyphenation pack's file lives: "/.crosspoint/hyphenation/<file name>".

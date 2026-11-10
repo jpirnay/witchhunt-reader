@@ -212,8 +212,16 @@ bool FontInstaller::isOnCard(const FontCatalog& families, const size_t family) c
   if (!families.hyphenation(family)) return isFamilyOnCard(families.name(family));
   if (families.fileCount(family) == 0) return false;
   for (size_t j = 0; j < families.fileCount(family); j++) {
+    // Where the reader finds a language's pack: our folder or CrossInk's. A file that names no language is looked for
+    // where the install puts it.
+    const char* localName = families.fileLocalName(family, j);
+    char code[3];
+    if (HyphenationPacks::codeOfPackFile(localName, code)) {
+      if (!HyphenationPacks::packOnCard(code)) return false;
+      continue;
+    }
     char path[128];
-    buildPackPath(families.fileLocalName(family, j), path, sizeof(path));
+    buildPackPath(localName, path, sizeof(path));
     if (!Storage.exists(path)) return false;
   }
   return true;
