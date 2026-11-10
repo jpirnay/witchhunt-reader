@@ -1429,87 +1429,88 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     // line of kSplitRegrowth tokens or fewer leaves the threshold at 96, as before.
     const size_t threshold = splitThreshold();
     if (currentTextBlock->size() > threshold &&
-        !(rubyDepth_ >= 0 && currentTextBlock->size() <= threshold + kRubyGroupSlack)) {
-      // The bases waiting for their reading are the block's last tokens, and the layout keeps the last line: a base
-      // that is still there after the split stays the start of its group.
-      size_t pendingBases = kNoRubyGroup;
-      if (rubyDepth_ >= 0 && rubyGroupStart_ <= currentTextBlock->size()) {
-        pendingBases = currentTextBlock->size() - rubyGroupStart_;
-      }
-      if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;
-      if (!ensureHeapForTextLayout("long-block split", currentTextBlock.get())) {
-        partWordBufferIndex = 0;
-        nextWordContinues = false;
-        return false;
-      }
-      LOG_DBG("EHP", "Text block too long, splitting into multiple pages");
-      auto& splitBlockStyle = currentTextBlock->getBlockStyle();
-      // First layout of this block happens here, so resolve its font now; the later
-      // makePages() call for the remainder is a no-op via fontResolved. Per-word sizes
-      // are NOT folded mid-block: more words with the same span size may still stream
-      // in after this flush, and folding now would double-scale them.
-      resolveBlockFont(splitBlockStyle);
-      // Before the float code below reads currentPageNextY: the first line starts under the spacing.
-      if (!applyBlockTopSpacing()) {
-        currentTextBlock.reset();
-        partWordBufferIndex = 0;
-        nextWordContinues = false;
-        return false;
-      }
-
-      // A long paragraph (>96 words) beside a tall float lays out here, bypassing
-      // makePages(). Inject the active float so it keeps wrapping in this mid-block
-      // flush too — otherwise its first chunk renders full-width over the image.
-      const bool splitIsOriginating = static_cast<bool>(deferredPageImage_) || static_cast<bool>(deferredDropCapLine_);
-      if (!splitIsOriginating && activeFloatBottom_ > 0 && currentPageNextY < activeFloatBottom_ &&
-          splitBlockStyle.floatZoneCount == 0) {
-        auto& z = splitBlockStyle.floatZones[splitBlockStyle.floatZoneCount++];
-        z.top = activeFloatTop_;  // absolute image coordinates (no re-anchor below)
-        z.bottom = activeFloatBottom_;
-        z.width = activeFloatWidth_;
-        z.isRight = activeFloatIsRight_;
-      }
-
-      const int horizontalInset = splitBlockStyle.totalHorizontalInset();
-      const uint16_t effectiveWidth =
-          (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
-      const int splitLineHeight = (splitBlockStyle.floatZoneCount > 0) ? effectiveLineHeight(splitBlockStyle) : 0;
-      // Re-anchor only the originating block's zone to the first line; injected
-      // zones already carry absolute image coordinates and must not be moved.
-      if (splitIsOriginating && splitBlockStyle.floatZoneCount > 0) {
-        for (int zi = 0; zi < splitBlockStyle.floatZoneCount; ++zi) {
-          const int imgH = splitBlockStyle.floatZones[zi].bottom - splitBlockStyle.floatZones[zi].top;
-          splitBlockStyle.floatZones[zi].top = static_cast<int16_t>(currentPageNextY);
-          splitBlockStyle.floatZones[zi].bottom = static_cast<int16_t>(currentPageNextY + imgH);
-        }
-        // As in makePages(): the top spacing moved the float below where it was attached, and the
-        // blocks after this one wrap against the active-float extent, so it must move too.
-        activeFloatTop_ = static_cast<int16_t>(currentPageNextY);
-        activeFloatBottom_ = static_cast<int16_t>(
-            currentPageNextY + (splitBlockStyle.floatZones[0].bottom - splitBlockStyle.floatZones[0].top));
-      }
-      // The bases are counted from the end below: the pass must not merge them (deviation 7) before their reading
-      // makes them a group.
-      if (pendingBases != kNoRubyGroup) currentTextBlock->keepUnmergedFrom(currentTextBlock->size() - pendingBases);
-      currentTextBlock->layoutAndExtractLines(
-          renderer, fontId, effectiveWidth,
-          [this](std::unique_ptr<TextBlock> textBlock, const bool lineEndsWithHyphenatedWord,
-                 const bool suppressHyphenationRetry) {
-            return addLineToPage(std::move(textBlock), lineEndsWithHyphenatedWord, suppressHyphenationRetry,
-                                 currentTextBlock->lastLineVisibleOffset(), currentTextBlock->lastLineTokenCount());
-          },
-          false, static_cast<int16_t>(currentPageNextY), splitLineHeight);
-      if (pendingBases <= currentTextBlock->size()) rubyGroupStart_ = currentTextBlock->size() - pendingBases;
-      splitKeptTokens_ = currentTextBlock->size();
-      applySplitCapacity();
-      // emitPage() clears floatZoneCount mid-layout when the page overflows — that's
-      // intentional: lines on the continuation page should not be narrowed for an
-      // image that lives on the previous page.
+        !(rubyDepth_ >= 0 && currentTextBlock->size() <= threshold + kRubyGroupSlack) && !splitLongBlock()) {
+      partWordBufferIndex = 0;
+      nextWordContinues = false;
+      return false;
     }
   }
   partWordBufferIndex = 0;
   nextWordContinues = false;
   flushedWordTarget_ = wordTarget();
+  return true;
+}
+
+bool ChapterHtmlSlimParser::splitLongBlock() {
+  // The bases waiting for their reading are the block's last tokens, and the layout keeps the last line: a base
+  // that is still there after the split stays the start of its group.
+  size_t pendingBases = kNoRubyGroup;
+  if (rubyDepth_ >= 0 && rubyGroupStart_ <= currentTextBlock->size()) {
+    pendingBases = currentTextBlock->size() - rubyGroupStart_;
+  }
+  if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;
+  if (!ensureHeapForTextLayout("long-block split", currentTextBlock.get())) return false;
+  LOG_DBG("EHP", "Text block too long, splitting into multiple pages");
+  auto& splitBlockStyle = currentTextBlock->getBlockStyle();
+  // First layout of this block happens here, so resolve its font now; the later
+  // makePages() call for the remainder is a no-op via fontResolved. Per-word sizes
+  // are NOT folded mid-block: more words with the same span size may still stream
+  // in after this flush, and folding now would double-scale them.
+  resolveBlockFont(splitBlockStyle);
+  // Before the float code below reads currentPageNextY: the first line starts under the spacing.
+  if (!applyBlockTopSpacing()) {
+    currentTextBlock.reset();
+    return false;
+  }
+
+  // A long paragraph (>96 words) beside a tall float lays out here, bypassing
+  // makePages(). Inject the active float so it keeps wrapping in this mid-block
+  // flush too — otherwise its first chunk renders full-width over the image.
+  const bool splitIsOriginating = static_cast<bool>(deferredPageImage_) || static_cast<bool>(deferredDropCapLine_);
+  if (!splitIsOriginating && activeFloatBottom_ > 0 && currentPageNextY < activeFloatBottom_ &&
+      splitBlockStyle.floatZoneCount == 0) {
+    auto& z = splitBlockStyle.floatZones[splitBlockStyle.floatZoneCount++];
+    z.top = activeFloatTop_;  // absolute image coordinates (no re-anchor below)
+    z.bottom = activeFloatBottom_;
+    z.width = activeFloatWidth_;
+    z.isRight = activeFloatIsRight_;
+  }
+
+  const int horizontalInset = splitBlockStyle.totalHorizontalInset();
+  const uint16_t effectiveWidth =
+      (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
+  const int splitLineHeight = (splitBlockStyle.floatZoneCount > 0) ? effectiveLineHeight(splitBlockStyle) : 0;
+  // Re-anchor only the originating block's zone to the first line; injected
+  // zones already carry absolute image coordinates and must not be moved.
+  if (splitIsOriginating && splitBlockStyle.floatZoneCount > 0) {
+    for (int zi = 0; zi < splitBlockStyle.floatZoneCount; ++zi) {
+      const int imgH = splitBlockStyle.floatZones[zi].bottom - splitBlockStyle.floatZones[zi].top;
+      splitBlockStyle.floatZones[zi].top = static_cast<int16_t>(currentPageNextY);
+      splitBlockStyle.floatZones[zi].bottom = static_cast<int16_t>(currentPageNextY + imgH);
+    }
+    // As in makePages(): the top spacing moved the float below where it was attached, and the
+    // blocks after this one wrap against the active-float extent, so it must move too.
+    activeFloatTop_ = static_cast<int16_t>(currentPageNextY);
+    activeFloatBottom_ = static_cast<int16_t>(
+        currentPageNextY + (splitBlockStyle.floatZones[0].bottom - splitBlockStyle.floatZones[0].top));
+  }
+  // The bases are counted from the end below: the pass must not merge them (deviation 7) before their reading
+  // makes them a group.
+  if (pendingBases != kNoRubyGroup) currentTextBlock->keepUnmergedFrom(currentTextBlock->size() - pendingBases);
+  currentTextBlock->layoutAndExtractLines(
+      renderer, fontId, effectiveWidth,
+      [this](std::unique_ptr<TextBlock> textBlock, const bool lineEndsWithHyphenatedWord,
+             const bool suppressHyphenationRetry) {
+        return addLineToPage(std::move(textBlock), lineEndsWithHyphenatedWord, suppressHyphenationRetry,
+                             currentTextBlock->lastLineVisibleOffset(), currentTextBlock->lastLineTokenCount());
+      },
+      false, static_cast<int16_t>(currentPageNextY), splitLineHeight);
+  if (pendingBases <= currentTextBlock->size()) rubyGroupStart_ = currentTextBlock->size() - pendingBases;
+  splitKeptTokens_ = currentTextBlock->size();
+  applySplitCapacity();
+  // emitPage() clears floatZoneCount mid-layout when the page overflows — that's
+  // intentional: lines on the continuation page should not be narrowed for an
+  // image that lives on the previous page.
   return true;
 }
 

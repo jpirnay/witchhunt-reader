@@ -992,6 +992,9 @@ class ChapterHtmlSlimParser final : public Print {
   bool heapAllowsTableRowLayout() const;
   bool flushPartWordBuffer();
   bool flushPartWordGlued();
+  // Lays out currentTextBlock's lines but its last, which stays for the words still to come: the long-block split that
+  // keeps a paragraph's word arrays bounded. False when the layout could not run (no heap, no page).
+  bool splitLongBlock();
   void makePages();
   // Puts currentTextBlock's top spacing on the current page, once per logical paragraph. Both
   // places that lay the block out call it first: makePages() and the long-block split in
