@@ -623,7 +623,7 @@ bool HomeActivity::offerHyphenationPack() {
   ConfirmationActivity::Question question;
   question.headline = tr(STR_HYPHENATION);
   char message[320];
-  snprintf(message, sizeof(message), tr(STR_HYPHENATION_PACK_OFFER), I18N.getLanguageName(I18N.getLanguage()));
+  snprintf(message, sizeof(message), tr(STR_HYPHENATION_PACK_OFFER), HyphenationPacks::languageName(code));
   question.message = message;
   question.messageMaxLines = 6;
   question.cancelLabel = StrId::STR_NO;

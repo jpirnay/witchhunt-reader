@@ -17,6 +17,7 @@
 #include <cstring>
 #include <functional>
 
+#include "CrossPointSettings.h"
 #include "CrossPointState.h"
 
 #if CONFIG_SPIRAM
@@ -315,30 +316,72 @@ constexpr UiPack kUiPacks[] = {{"DE", "de"}, {"FR", "fr"}, {"ES", "es"}, {"IT", 
                                {"NL", "nl"}, {"CS", "cs"}, {"DA", "da"}, {"SI", "sl"}, {"LT", "lt"},
                                {"CA", "ca"}, {"BE", "be"}, {"FI", "fi"}, {"TR", "tr"}};
 
+// Each pack language's name for the offer. The interface fonts draw Latin and Cyrillic, not the Indic scripts.
+struct Name {
+  const char* code;
+  const char* name;
+};
+constexpr Name kNames[] = {
+    {"de", "Deutsch"},    {"fr", "Français"}, {"es", "Español"},     {"it", "Italiano"},  {"pt", "Português"},
+    {"pl", "Polski"},     {"ru", "Русский"},  {"uk", "Українська"},  {"sv", "Svenska"},   {"nl", "Nederlands"},
+    {"cs", "Čeština"},    {"da", "Dansk"},    {"sl", "Slovenščina"}, {"lt", "Lietuvių"},  {"ca", "Català"},
+    {"be", "Беларуская"}, {"fi", "Suomi"},    {"tr", "Türkçe"},      {"as", "Assamese"},  {"bn", "Bengali"},
+    {"gu", "Gujarati"},   {"hi", "Hindi"},    {"kn", "Kannada"},     {"ml", "Malayalam"}, {"mr", "Marathi"},
+    {"or", "Odia"},       {"pa", "Punjabi"},  {"sa", "Sanskrit"},    {"ta", "Tamil"},     {"te", "Telugu"}};
+
 bool offerTaken = false;
+
+bool declined(const char* code) {
+  const std::string& list = APP_STATE.hyphenationOffersDeclined;
+  for (size_t i = 0; i + 1 < list.size(); i += 2) {
+    if (list[i] == code[0] && list[i + 1] == code[1]) return true;
+  }
+  return false;
+}
+
+// Whether a pack of `code` is worth offering: the firmware hyphenates the language from a pack, the card has none,
+// and the offer was not declined.
+bool offerable(const char* code) {
+  const LanguageEntry* entry = code ? findLanguageEntry(code) : nullptr;
+  return entry && !entry->builtIn && !declined(code) && !packOnCard(code);
+}
 
 }  // namespace
 
 bool takeOffer(char (&code)[3]) {
   if (offerTaken) return false;
   offerTaken = true;
+  if (!SETTINGS.hyphenationEnabled) return false;
   const char* uiCode = I18N.getLanguageCode(I18N.getLanguage());
   const char* pack = nullptr;
   for (const auto& entry : kUiPacks) {
     if (uiCode && std::strcmp(uiCode, entry.uiCode) == 0) pack = entry.code;
   }
-  const LanguageEntry* entry = pack ? findLanguageEntry(pack) : nullptr;
-  if (!entry || entry->builtIn || std::strcmp(APP_STATE.hyphenationOfferDeclined, pack) == 0 || packOnCard(pack)) {
-    return false;
-  }
+  if (!offerable(pack)) return false;
   snprintf(code, sizeof(code), "%s", pack);
   LOG_INF("HYP", "%s: no hyphenation pack on the card for the interface language, offering it", pack);
   return true;
 }
 
+bool bookOfferDue(const std::string& languageTag, char (&code)[3]) {
+  const char* pack = Hyphenator::languageCode(languageTag);
+  if (!offerable(pack)) return false;
+  snprintf(code, sizeof(code), "%s", pack);
+  LOG_INF("HYP", "%s: no hyphenation pack on the card for the book's language, offering it", pack);
+  return true;
+}
+
 void declineOffer(const char* code) {
-  snprintf(APP_STATE.hyphenationOfferDeclined, sizeof(APP_STATE.hyphenationOfferDeclined), "%s", code ? code : "");
+  if (!code || std::strlen(code) != 2 || declined(code)) return;
+  APP_STATE.hyphenationOffersDeclined.append(code, 2);
   APP_STATE.saveToFile();
+}
+
+const char* languageName(const char* code) {
+  for (const auto& entry : kNames) {
+    if (code && std::strcmp(code, entry.code) == 0) return entry.name;
+  }
+  return code ? code : "";
 }
 
 void packRemoved(const char* code) {

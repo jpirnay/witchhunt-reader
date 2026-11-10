@@ -10,6 +10,7 @@
 #include <cstring>
 #include <vector>
 
+#include "CrossPointState.h"
 #include "MappedInputManager.h"
 #include "SdCardFontGlobals.h"
 #include "SerialTestApi.h"
@@ -26,8 +27,10 @@
 namespace fui = freeink::ui;
 
 FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                           const char* wantedPack)
-    : UiListActivity("FontDownload", renderer, mappedInput), fontInstaller_(sdFontSystem.registry()) {
+                                           const char* wantedPack, const bool returnToBook)
+    : UiListActivity("FontDownload", renderer, mappedInput),
+      returnToBook_(returnToBook),
+      fontInstaller_(sdFontSystem.registry()) {
   if (wantedPack) snprintf(wantedPack_, sizeof(wantedPack_), "%s", wantedPack);
 }
 
@@ -69,6 +72,8 @@ void FontDownloadActivity::onExit() {
     WiFi.disconnect(false);
     delay(30);
   }
+  // Opened by a book's offer: back into that book, now hyphenated by the pack.
+  if (returnToBook_ && !APP_STATE.openEpubPath.empty()) silentRestartToReader();
   silentRestart();
 }
 

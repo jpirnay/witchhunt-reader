@@ -45,12 +45,21 @@ void packRemoved(const char* code);
 bool packOnCard(const char* code);
 
 // The pack the reader offers to download, once a boot: that of the interface language, when it is not English, the
-// firmware hyphenates it from a pack, the card has none, and the offer was not declined for it before. True with its
-// code in `code` the first time a boot asks and the offer is due; false after that, and when it is not. A reader
-// upgraded from a firmware that had its language's patterns built in is asked at its first boot.
+// firmware hyphenates it from a pack, the card has none, hyphenation is on, and the offer was not declined for it
+// before. True with its code in `code` the first time a boot asks and the offer is due; false after that, and when it
+// is not. A reader upgraded from a firmware that had its language's patterns built in is asked at its first boot.
 bool takeOffer(char (&code)[3]);
 
-// The offer of `code` was declined: it is not made again (CrossPointState::hyphenationOfferDeclined).
+// The pack a book in `languageTag` would hyphenate by, when the card has none and the offer was not declined for its
+// language: true with its code in `code`. The reader asks at book open (with hyphenation on for the book).
+bool bookOfferDue(const std::string& languageTag, char (&code)[3]);
+
+// The offer of `code` was declined: neither Home nor a book open makes it again
+// (CrossPointState::hyphenationOffersDeclined).
 void declineOffer(const char* code);
+
+// The language's name for the offer: its own name where the interface fonts draw its script ("Deutsch", "Русский"),
+// its English one otherwise ("Hindi").
+const char* languageName(const char* code);
 
 }  // namespace HyphenationPacks
