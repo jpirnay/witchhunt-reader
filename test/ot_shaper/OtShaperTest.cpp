@@ -952,4 +952,132 @@ TEST(OtShaper, ABengaliPlanWithoutFiltersPlacesConsonantsAsWithThem) {
   }
 }
 
+// Deviation 18: each planned lookup of more than SUBTABLE_GROUP subtables has a group mask per SUBTABLE_GROUP of them,
+// the low masks of their records ORed, on both routes (the font's CPac and the computed records); a lookup of fewer has
+// none. TheTwoMemosLeaveEveryGlyphAlone shapes with and without them.
+TEST(OtShaper, SubtableGroupsHoldTheirRecordsLowMasks) {
+  unsigned grouped = 0;
+  for (const Book& book : BOOKS) {
+    for (const bool withCpac : {true, false}) {
+      SCOPED_TRACE(std::string(book.font) + (withCpac ? " with CPac" : " without CPac"));
+      BookPlan bp;
+      ASSERT_TRUE(bp.open(book, withCpac));
+      for (const int t : {ot::GSUB, ot::GPOS}) {
+        for (size_t i = 0; i < bp.plan.lookups[t].size(); i++) {
+          const ot::LookupSettings s = bp.plan.settings(t, i);
+          const unsigned subtables = ot::Face::subtableCount(bp.font.face.lookup(t, bp.plan.lookups[t][i].index));
+          ASSERT_NE(s.subtableDigests, nullptr);
+          if (subtables <= ot::SUBTABLE_GROUP) {
+            EXPECT_EQ(s.subtableGroups, nullptr) << "table " << t << " lookup " << i;
+            continue;
+          }
+          ASSERT_NE(s.subtableGroups, nullptr) << "table " << t << " lookup " << i;
+          grouped++;
+          for (unsigned g = 0; g * ot::SUBTABLE_GROUP < subtables; g++) {
+            uint64_t expected = 0;
+            for (unsigned k = g * ot::SUBTABLE_GROUP; k < subtables && k < (g + 1) * ot::SUBTABLE_GROUP; k++) {
+              expected |= ot::digestRecordLowMask(s.subtableDigests + ot::DIGEST_BYTES * k);
+            }
+            EXPECT_EQ(ot::readLowMask(s.subtableGroups + 8 * g), expected) << "table " << t << " lookup " << i;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_GT(grouped, 0u);
+}
+
+// Deviation 19: a planned LigatureSubst lookup's second mask holds the low bits of every ligature's second component,
+// and is full when a ligature has fewer than two; every other lookup's is full. TheTwoMemosLeaveEveryGlyphAlone shapes
+// with and without the masks.
+TEST(OtShaper, LigatureSecondMasksHoldEverySecondComponent) {
+  unsigned filtered = 0;
+  for (const Book& book : BOOKS) {
+    SCOPED_TRACE(book.font);
+    BookPlan bp;
+    ASSERT_TRUE(bp.open(book));
+    for (size_t i = 0; i < bp.plan.lookups[ot::GSUB].size(); i++) {
+      const uint64_t mask = bp.plan.settings(ot::GSUB, i).secondMask;
+      const ot::Table lookup = bp.font.face.lookup(ot::GSUB, bp.plan.lookups[ot::GSUB][i].index);
+      if (lookup.u16(0) != 4) {  // no fixture font has Extension lookups
+        EXPECT_EQ(mask, ~0ull) << "lookup " << i;
+        continue;
+      }
+      bool single = false;
+      uint64_t expected = 0;
+      for (uint16_t s = 0; s < ot::Face::subtableCount(lookup); s++) {
+        const ot::Table st = lookup.offset16(6 + 2 * s);
+        for (uint16_t k = 0; k < st.u16(4); k++) {
+          const ot::Table set = st.offset16(6 + 2 * k);
+          for (uint16_t l = 0; l < set.u16(0); l++) {
+            const ot::Table lig = set.offset16(2 + 2 * l);
+            if (lig.u16(2) < 2) single = true;
+            expected |= 1ull << (lig.u16(4) & 63);
+          }
+        }
+      }
+      EXPECT_EQ(mask, single ? ~0ull : expected) << "lookup " << i;
+      filtered += mask != ~0ull;
+    }
+  }
+  EXPECT_GT(filtered, 0u);
+}
+
+// Deviation 20: a planned lookup's kept offset finds the table Face::lookup() finds.
+TEST(OtShaper, PlannedLookupOffsetsFindTheLookups) {
+  for (const Book& book : BOOKS) {
+    SCOPED_TRACE(book.font);
+    BookPlan bp;
+    ASSERT_TRUE(bp.open(book));
+    for (const int t : {ot::GSUB, ot::GPOS}) {
+      for (size_t i = 0; i < bp.plan.lookups[t].size(); i++) {
+        const uint32_t offset = bp.plan.settings(t, i).lookupOffset;
+        ASSERT_NE(offset, ot::LookupSettings::NO_LOOKUP_OFFSET);
+        const ot::Table found = bp.font.face.lookup(t, bp.plan.lookups[t][i].index);
+        const ot::Table kept = bp.font.face.layout(t).offset16(8).at(offset);
+        EXPECT_EQ(kept.data(), found.data()) << "table " << t << " lookup " << i;
+        EXPECT_EQ(kept.length(), found.length()) << "table " << t << " lookup " << i;
+      }
+    }
+  }
+}
+
+// Deviation 17: the cmap cache answers as the cmap does. Two fonts asked in turn empty the cache at every ask, so each
+// answer is the subtable's own; the same code points asked of one font after the other then come from the cache, a
+// slot held by the other font's answers first, every slot reused across script blocks.
+TEST(OtShaper, TheCmapCacheAnswersAsTheCmap) {
+  TtfFace a, b;
+  ASSERT_TRUE(a.open(fixtureFont(BOOKS[0]), false));
+  ASSERT_TRUE(b.open(fixtureFont(BOOKS[1]), false));
+  std::vector<uint32_t> cps;
+  for (uint32_t cp = 0; cp < 0x3000; cp++) cps.push_back(cp);
+  for (const uint32_t cp : {0x25CCu, 0x10FFFFu, 0x110000u, 0xFFFFFFFFu}) cps.push_back(cp);
+  std::vector<uint32_t> expectedA, expectedB;
+  std::vector<bool> foundA, foundB;
+  unsigned mapped = 0;
+  for (const uint32_t cp : cps) {
+    uint32_t glyph;
+    foundA.push_back(a.face.nominalGlyph(cp, &glyph));
+    expectedA.push_back(glyph);
+    foundB.push_back(b.face.nominalGlyph(cp, &glyph));
+    expectedB.push_back(glyph);
+    mapped += foundA.back() + foundB.back();
+  }
+  EXPECT_GT(mapped, 100u);
+  for (int round = 0; round < 2; round++) {
+    for (const ot::Face* face : {&b.face, &a.face}) {
+      const std::vector<uint32_t>& expected = face == &a.face ? expectedA : expectedB;
+      const std::vector<bool>& found = face == &a.face ? foundA : foundB;
+      for (int pass = 0; pass < 2; pass++) {
+        for (size_t i = 0; i < cps.size(); i++) {
+          uint32_t glyph = 12345;
+          EXPECT_EQ(face->nominalGlyph(cps[i], &glyph), found[i]) << std::hex << "U+" << cps[i];
+          EXPECT_EQ(glyph, expected[i]) << std::hex << "U+" << cps[i];
+          EXPECT_EQ(found[i], expected[i] != 0) << std::hex << "U+" << cps[i];
+        }
+      }
+    }
+  }
+}
+
 }  // namespace

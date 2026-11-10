@@ -32,7 +32,7 @@ void reorderSyllable(Buffer& buffer, const unsigned start, const unsigned end) {
   // A repha moves towards the end, before the first post-base glyph.
   if (info[start].category == ucat::R && end - start > 1) {
     for (unsigned i = start + 1; i < end; i++) {
-      const bool isPostBase = ((POST_BASE_FLAGS >> info[i].category) & 1) || isHalantUse(info[i]);
+      const bool isPostBase = hasBit64(POST_BASE_FLAGS, info[i].category) || isHalantUse(info[i]);
       if (isPostBase || i == end - 1) {
         if (isPostBase) i--;
         buffer.moveGlyph(start, i);

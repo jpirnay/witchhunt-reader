@@ -103,13 +103,45 @@ constexpr uint16_t VOWEL_CONSTRAINTS[][2] = {
     {0x0D91, 0x0DDE},
 };
 
+// The vowels VOWEL_CONSTRAINTS starts a pair with, one bit per code point of U+0900-0DFF: a character outside it
+// needs no walk of the pairs.
+struct VowelBits {
+  uint8_t bits[(0x0E00 - 0x0900) / 8] = {};
+  constexpr VowelBits() {
+    for (const auto& pair : VOWEL_CONSTRAINTS) bits[(pair[0] - 0x0900) / 8] |= 1 << ((pair[0] - 0x0900) % 8);
+  }
+  constexpr bool has(const uint32_t cp) const {
+    return cp >= 0x0900 && cp < 0x0E00 && (bits[(cp - 0x0900) / 8] & (1 << ((cp - 0x0900) % 8)));
+  }
+};
+constexpr VowelBits VOWEL_FIRSTS;
+
+// The generator writes decompositions in code point order and compositions in (a, b) order; a binary search finds
+// the entry a walk would.
+constexpr bool decompositionsSorted() {
+  for (size_t i = 1; i < sizeof(ucd::DECOMPOSITIONS) / sizeof(ucd::DECOMPOSITIONS[0]); i++) {
+    if (ucd::DECOMPOSITIONS[i - 1].ab >= ucd::DECOMPOSITIONS[i].ab) return false;
+  }
+  return true;
+}
+constexpr bool compositionsSorted() {
+  for (size_t i = 1; i < sizeof(ucd::COMPOSITIONS) / sizeof(ucd::COMPOSITIONS[0]); i++) {
+    const auto& p = ucd::COMPOSITIONS[i - 1];
+    const auto& c = ucd::COMPOSITIONS[i];
+    if (p.a > c.a || (p.a == c.a && p.b >= c.b)) return false;
+  }
+  return true;
+}
+static_assert(decompositionsSorted(), "ucd::DECOMPOSITIONS must be sorted by the composed code point");
+static_assert(compositionsSorted(), "ucd::COMPOSITIONS must be sorted by (a, b)");
+
 bool inScriptBlock(const uint32_t cp, const Script script) {
   const uint32_t first = 0x0900 + 0x80 * static_cast<uint32_t>(script);
   return cp >= first && cp < first + 0x80;
 }
 
 // Appends to the scratch string within the run's reservation.
-bool pushScratch(Buffer& buffer, const GlyphInfo& g) {
+OT_HOT bool pushScratch(Buffer& buffer, const GlyphInfo& g) {
   if (buffer.scratch.size() >= buffer.maxLength) {
     buffer.successful = false;
     return false;
@@ -144,14 +176,13 @@ class Normalizer {
     if (plan_.shaper == ShaperKind::Indic && (ab == 0x0931 || ab == 0x09DC || ab == 0x09DD || ab == 0x0B94)) {
       return false;
     }
-    for (const auto& d : ucd::DECOMPOSITIONS) {
-      if (d.ab == ab) {
-        *a = d.a;
-        *b = d.b;
-        return true;
-      }
-    }
-    return false;
+    const auto* const end = std::end(ucd::DECOMPOSITIONS);
+    const auto* const d = std::lower_bound(std::begin(ucd::DECOMPOSITIONS), end, ab,
+                                           [](const ucd::Decomposition& e, const uint32_t v) { return e.ab < v; });
+    if (d == end || d->ab != ab) return false;
+    *a = d->a;
+    *b = d->b;
+    return true;
   }
 
   bool compose1(const uint32_t a, const uint32_t b, uint32_t* ab) const {
@@ -163,13 +194,13 @@ class Normalizer {
       *ab = 0x09DF;
       return true;
     }
-    for (const auto& c : ucd::COMPOSITIONS) {
-      if (c.a == a && c.b == b) {
-        *ab = c.ab;
-        return true;
-      }
-    }
-    return false;
+    const auto* const end = std::end(ucd::COMPOSITIONS);
+    const auto* const c =
+        std::lower_bound(std::begin(ucd::COMPOSITIONS), end, a,
+                         [b](const ucd::Composition& e, const uint32_t v) { return e.a < v || (e.a == v && e.b < b); });
+    if (c == end || c->a != a || c->b != b) return false;
+    *ab = c->ab;
+    return true;
   }
 
   bool outputChar(const GlyphInfo& from, const uint32_t unichar, const uint32_t glyph) {
@@ -200,13 +231,13 @@ class Normalizer {
     return ret;
   }
 
-  void nextChar(const uint32_t glyph) {
+  OT_HOT void nextChar(const uint32_t glyph) {
     GlyphInfo g = buffer_.info[buffer_.idx++];
     g.glyphIndex = static_cast<uint16_t>(glyph);
     pushScratch(buffer_, g);
   }
 
-  void decomposeCurrentCharacter(const bool shortest) {
+  OT_HOT void decomposeCurrentCharacter(const bool shortest) {
     const GlyphInfo cur = buffer_.info[buffer_.idx];
     uint32_t glyph = 0;
     if (shortest && face_.nominalGlyph(cur.codepoint, &glyph)) {
@@ -311,7 +342,7 @@ static int rangeIndex(const ucd::Range (&ranges)[N], const uint32_t cp) {
   return -1;
 }
 
-CharData charData(const uint32_t cp) {
+OT_HOT CharData charData(const uint32_t cp) {
   uint32_t packed;
   if (const int i = rangeIndex(ucd::RANGES, cp); i >= 0) {
     packed = ucd::PROPS[ucd::PROPS_INDEX[i]];
@@ -332,7 +363,7 @@ CharData charData(const uint32_t cp) {
                   field(ucd::USE_CAT_SHIFT, ucd::USE_CAT_BITS),     ((packed >> ucd::IGNORABLE_SHIFT) & 1) != 0};
 }
 
-void setUnicodeProps(GlyphInfo& info, Buffer& buffer) {
+OT_HOT void setUnicodeProps(GlyphInfo& info, Buffer& buffer) {
   const uint32_t u = info.codepoint;
   const CharData d = charData(u);
   uint16_t p = d.genCat;
@@ -363,8 +394,8 @@ void preprocessVowelConstraints(const Script script, Buffer& buffer) {
     const uint32_t next = buffer.info[i + 1].codepoint;
     bool matched = false;
     if (inScriptBlock(cur, script)) {
-      for (const auto& pair : VOWEL_CONSTRAINTS) {
-        if (pair[0] == cur && pair[1] == next) {
+      for (size_t k = 0; VOWEL_FIRSTS.has(cur) && k < sizeof(VOWEL_CONSTRAINTS) / sizeof(VOWEL_CONSTRAINTS[0]); k++) {
+        if (VOWEL_CONSTRAINTS[k][0] == cur && VOWEL_CONSTRAINTS[k][1] == next) {
           matched = true;
           break;
         }
@@ -395,7 +426,7 @@ void preprocessVowelConstraints(const Script script, Buffer& buffer) {
 void normalize(const Face& face, const Plan& plan, Buffer& buffer) { Normalizer(face, plan, buffer).run(); }
 
 // witchhunt: deviation 11. HarfBuzz's get_joining_type, resolved when the table is generated.
-JoiningType joiningType(const uint32_t cp) {
+OT_HOT JoiningType joiningType(const uint32_t cp) {
   if (const int i = rangeIndex(ucd::JOINING_RANGES, cp); i >= 0)
     return static_cast<JoiningType>((ucd::JOINING[i >> 1] >> ((i & 1) << 2)) & 15);
   if (cp == 0x200C) return static_cast<JoiningType>(ucd::ZWNJ_JOINING);

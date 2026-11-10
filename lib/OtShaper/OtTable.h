@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "OtHot.h"  // witchhunt: deviation 21
+
 // Bounds-checked big-endian views over OpenType table bytes.
 //
 // Fonts come from users, so every read is checked: a read past the end yields
@@ -27,7 +29,7 @@ class Table {
 
   bool has(const uint32_t offset, const uint32_t count) const { return offset <= length_ && count <= length_ - offset; }
   uint8_t u8(const uint32_t offset) const { return has(offset, 1) ? data_[offset] : 0; }
-  uint16_t u16(const uint32_t offset) const {
+  OT_HOT uint16_t u16(const uint32_t offset) const {
     return has(offset, 2) ? static_cast<uint16_t>((data_[offset] << 8) | data_[offset + 1]) : 0;
   }
   int16_t s16(const uint32_t offset) const { return static_cast<int16_t>(u16(offset)); }
@@ -35,7 +37,7 @@ class Table {
     return has(offset, 3) ? (static_cast<uint32_t>(data_[offset]) << 16) | (data_[offset + 1] << 8) | data_[offset + 2]
                           : 0;
   }
-  uint32_t u32(const uint32_t offset) const {
+  OT_HOT uint32_t u32(const uint32_t offset) const {
     return has(offset, 4)
                ? (static_cast<uint32_t>(data_[offset]) << 24) | (static_cast<uint32_t>(data_[offset + 1]) << 16) |
                      (static_cast<uint32_t>(data_[offset + 2]) << 8) | data_[offset + 3]
@@ -51,12 +53,12 @@ class Table {
   }
 
   // The subtable `offset` bytes in; empty for a null (zero) or out-of-range offset.
-  Table at(const uint32_t offset) const {
+  OT_HOT Table at(const uint32_t offset) const {
     if (offset == 0 || offset >= length_) return Table();
     return Table(data_ + offset, length_ - offset);
   }
   // The subtable whose 16-bit (or 32-bit) offset is stored at `field`.
-  Table offset16(const uint32_t field) const { return at(u16(field)); }
+  OT_HOT Table offset16(const uint32_t field) const { return at(u16(field)); }
   Table offset32(const uint32_t field) const { return at(u32(field)); }
 
  private:

@@ -60,7 +60,7 @@ constexpr uint8_t MODIFIED_CCC26 = 26;
 // arabic_joining(). The context code points are in the buffer (CONTEXT_MASK), so they run through the machine
 // like the rest: HarfBuzz seeds the state from the nearest non-transparent context character instead, which
 // leaves the same actions for the run's own glyphs.
-void arabicSetupMasks(const Plan& plan, Buffer& buffer) {
+OT_HOT void arabicSetupMasks(const Plan& plan, Buffer& buffer) {
   const unsigned count = buffer.len();
   constexpr unsigned NO_PREV = ~0u;
   unsigned prev = NO_PREV, state = 0;

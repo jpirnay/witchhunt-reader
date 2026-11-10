@@ -118,12 +118,18 @@ class Plan {
   bool load(const Face& face, Script script, const uint32_t* languageTags);
 
   // Lookup settings (flags, mask, filters) of planned lookup `i` of `table`.
-  LookupSettings settings(int table, size_t i) const;
+  // witchhunt: deviation 4 - `resolve` false leaves the CPac route's subtableDigests to applyLookup() (fontRecords).
+  LookupSettings settings(int table, size_t i, bool resolve = true) const;
   // witchhunt: deviation 13 - whether planned lookup `i` of `table` may start
   // at a glyph the buffer holds (`buffer` is its digest): the digest test of
   // HarfBuzz's apply loop, on the plan's own copy of the lookup's digest, so
   // a lookup it rejects costs no read of the font.
   bool mayApply(int table, size_t i, const Digest& buffer) const;
+  // witchhunt: deviation 16 - whether a glyph of `buffer` passes planned
+  // lookup `i` of `table`'s digest and carries its mask, both the plan's: the
+  // first two of applyLookup()'s tests of a start glyph, so a lookup no glyph
+  // passes them is skipped before anything of the font is read for it.
+  bool mayStart(int table, size_t i, const Buffer& buffer) const;
   // witchhunt: deviation 13 - consonantPositionFromFace() of the glyphs
   // `consonant` and `virama`, remembered: the walk runs on a miss only.
   uint8_t consonantPosition(const Face& face, uint32_t consonant, uint32_t virama) const;
@@ -169,6 +175,10 @@ class Plan {
   // the consonant memo (consonantPosition() walks on every call) and the
   // digest pre-filter (mayApply() lets every lookup through), so a test can
   // shape with and without them. False in every plan the firmware makes.
+  // witchhunt: deviation 16 - and the start-glyph pre-filter (mayStart()).
+  // witchhunt: deviation 18 - and the subtable groups (settings() gives none).
+  // witchhunt: deviation 19 - and the ligatures' second masks (settings() gives all bits).
+  // witchhunt: deviation 20 - and the lookup offsets (settings() gives none: Face::lookup() reads the list).
   bool testBypassCaches = false;
 
  private:
@@ -190,6 +200,7 @@ class Plan {
   bool finish(const Face& face);
   bool copyLookupDigests(const Face& face);  // witchhunt: deviation 13
   void buildFilters(const Face& face);
+  void fillSubtableGroups(const Face& face);  // witchhunt: deviation 18
   void collectWould(WouldFeature feature);
   const uint8_t* digestRecord(int table, size_t i) const;  // witchhunt: deviation 13 - in lookupDigests_
 
@@ -207,6 +218,21 @@ class Plan {
   // fails), so a would-substitute probe always has the digest HarfBuzz tests
   // its first glyph against.
   FixedVector<uint8_t> lookupDigests_;
+  // witchhunt: deviation 18 - the subtable groups (LookupSettings::subtableGroups) of every planned lookup of more than
+  // SUBTABLE_GROUP subtables, in the digest block after the digests: their masks, 8 B a group, and per planned lookup
+  // (GSUB's then GPOS's) the index of its first group, NO_GROUPS for a lookup without. Filled from the subtable
+  // records once buildFilters() has them; a table without records has no groups.
+  static constexpr uint16_t NO_GROUPS = 0xFFFF;
+  FixedVector<uint8_t> groupMasks_;
+  FixedVector<uint16_t> groupStarts_;
+  // witchhunt: deviation 19 - the ligatureSeconds() of each planned LigatureSubst lookup (8 B, little-endian), and per
+  // planned GSUB lookup its slot among them, 1-based (0: none), in the digest block: the masks between the digests and
+  // the groups, the slots last. At most 255 lookups have one.
+  FixedVector<uint8_t> secondMasks_;
+  FixedVector<uint8_t> secondSlots_;
+  // witchhunt: deviation 20 - per planned lookup (GSUB's then GPOS's) its offset in the LookupList, 0 for one
+  // Face::lookup() drops; in the digest block after the digests.
+  FixedVector<uint16_t> lookupOffsets_;
 
   // witchhunt: deviation 13 - consonantPosition()'s memo, direct-mapped: one
   // slot per (consonant ^ virama) % POSITION_SLOTS, keyed by the two glyph IDs
