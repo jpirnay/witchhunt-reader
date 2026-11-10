@@ -21,8 +21,9 @@ class FontDecompressor;
 /// which only the language picker's names and CJK book titles ever ask for. If the slot cannot
 /// hold the faces, the active language decodes on demand too: slower, never wrong.
 ///
-/// They cover the translations and nothing else. A book title, an author or a chapter name in a
-/// script they lack takes its glyphs from the reader's TrueType font while one is loaded (it stays
+/// They cover the translations and nothing else. A book title, an author or a chapter name with CJK
+/// they lack takes its glyphs from the CJK UI packs on the card (CjkUiPack: a download in the Font
+/// Manager, one per region), then from the reader's TrueType font while one is loaded (it stays
 /// loaded past the reader, for Home and the Library), at the CJK UI faces' em; a CJK character
 /// nothing covers draws as a box.
 class TtfFont;
@@ -54,6 +55,9 @@ void setLanguage(Language language);
 /// time UI text needs one. SdCardFontManager calls it when a set loads and before its native sizes go.
 void setReaderFont(TtfFont* font);
 bool hasReaderFont();
+/// A reader is on the activity stack (syncUiBookFonts): its book's face goes before the CJK UI packs for what it maps,
+/// so reading a CJK book never opens a pack. Outside the reader the packs go first, whatever book was read last.
+void setInReader(bool inReader);
 /// Called when UI text needs the reader's font and none is lent: it may load one (syncUiBookFonts' book-text fonts),
 /// which then arrives through setReaderFont() before the lookup goes on.
 void setReaderFontOpener(void (*open)());

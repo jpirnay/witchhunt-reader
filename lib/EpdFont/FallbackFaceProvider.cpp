@@ -7,6 +7,7 @@
 
 #include "EpdFont.h"
 #include "FontDecompressor.h"
+#include "SdFaceGlyph.h"
 
 uint8_t FallbackFaceProvider::ink_[FallbackFaceProvider::kInkBytes] = {};
 
@@ -33,16 +34,33 @@ const EpdGlyph* FallbackFaceProvider::serve(const uint32_t codepoint) {
   for (uint8_t i = 0; i < before; ++i) {
     if (const EpdGlyph* glyph = serveFrom(faces_[i], codepoint, false)) return glyph;
   }
+  // The packs on the card, before the reader's face: a title draws alike whatever book was read last. In the reader,
+  // where the book's own face is open, that face goes first for what it maps, so a book never opens a pack.
+  const bool readerFirst = readerMaps(codepoint);
+  if (!readerFirst) {
+    if (const EpdGlyph* glyph = servePack(codepoint)) return glyph;
+  }
   // The reader's face lends real characters only. Its replacement glyph (asked for once a character is in no face) or
   // its own copy of the stand-in would draw over what the UI faces leave blank or draw as their stand-in, and a book's
   // font is opened for any script (openUiBookFonts), so it often has nothing else for a title.
   if (readerFace_ && codepoint != REPLACEMENT_GLYPH && codepoint != standIn_) {
     if (const EpdGlyph* glyph = serveFrom(readerFace_(readerCtx_), codepoint, true)) return glyph;
   }
+  if (readerFirst) {
+    if (const EpdGlyph* glyph = servePack(codepoint)) return glyph;
+  }
   for (uint8_t i = before; i < faceCount_; ++i) {
     if (const EpdGlyph* glyph = serveFrom(faces_[i], codepoint, false)) return glyph;
   }
   return nullptr;
+}
+
+const EpdGlyph* FallbackFaceProvider::servePack(const uint32_t codepoint) {
+  if (!packs_.face) return nullptr;
+  const EpdFontData* pack = packs_.face(packs_.ctx, codepoint);
+  const EpdGlyph* glyph = sd_face::glyph(pack, codepoint);
+  if (glyph) servedPack_ = pack;
+  return glyph;
 }
 
 const EpdGlyph* FallbackFaceProvider::serveFrom(const EpdFontData* face, const uint32_t codepoint, const bool reader) {
@@ -90,11 +108,16 @@ bool inTable(const EpdFontData* face, const uint32_t cp) {
 void FallbackFaceProvider::beginText(const char* utf8Text, bool (*alsoCovered)(void* ctx, uint32_t codepoint),
                                      void* ctx) {
   bookText_ = false;
-  if (!utf8Text || !readerFace_) return;
-  // The characters the UI face lacks, up to a batch, as UTF-8: what the reader's face is asked for when the string is
-  // book text. It is when one of them is not the active language's either (for any other UI language, any of them).
+  servedPack_ = nullptr;
+  if (!utf8Text || (!readerFace_ && !packs_.prepare)) return;
+  // The characters the UI face lacks, up to a batch each, as UTF-8: those a pack holds, which the packs read for the
+  // string, and the rest, which the reader's face is asked for. Both only for book text: a string is when one of them
+  // is not the active language's either (for any other UI language, any of them), and a translation draws from its
+  // language's own face.
   char lacking[96];
   size_t used = 0;
+  char packed[96];
+  size_t packedUsed = 0;
   const auto* p = reinterpret_cast<const uint8_t*>(utf8Text);
   while (*p != 0) {
     const uint8_t* const start = p;
@@ -102,12 +125,22 @@ void FallbackFaceProvider::beginText(const char* utf8Text, bool (*alsoCovered)(v
     if (cp < 0x80 || inTable(primary_, cp) || (alsoCovered && alsoCovered(ctx, cp))) continue;
     if (!readerAfterFirst_ || faceCount_ == 0 || !inTable(faces_[0], cp)) bookText_ = true;
     const size_t bytes = static_cast<size_t>(p - start);
-    if (used + bytes < sizeof(lacking)) {
-      std::memcpy(lacking + used, start, bytes);
-      used += bytes;
+    // A pack draws it before the reader's face would: the reader's font is not opened or prepared for it. In the
+    // reader, what the book's face maps is that face's, and the packs are not asked for it.
+    const bool inPack = packs_.covers && packs_.covers(packs_.ctx, cp) && !readerMaps(cp);
+    char* const batch = inPack ? packed : lacking;
+    size_t& batchUsed = inPack ? packedUsed : used;
+    if (batchUsed + bytes < sizeof(lacking)) {
+      std::memcpy(batch + batchUsed, start, bytes);
+      batchUsed += bytes;
     }
   }
-  if (!bookText_ || used == 0) return;
+  if (!bookText_) return;
+  if (packedUsed > 0 && packs_.prepare) {
+    packed[packedUsed] = '\0';
+    packs_.prepare(packs_.ctx, packed);
+  }
+  if (used == 0 || !readerFace_) return;
   const EpdFontData* const reader = readerFace_(readerCtx_);
   if (!reader || !reader->provider) return;
   lacking[used] = '\0';
@@ -115,6 +148,7 @@ void FallbackFaceProvider::beginText(const char* utf8Text, bool (*alsoCovered)(v
 }
 
 bool FallbackFaceProvider::ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bitmap) const {
+  if (servedPack_ && sd_face::owns(servedPack_, glyph, bitmap)) return true;
   for (const Served& slot : ring_) {
     if (&slot.record != glyph) continue;
     const EpdGlyph& r = slot.record;

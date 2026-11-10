@@ -15,9 +15,9 @@
 #                  url:  download URL (for fonts not in the repo)
 #
 # UI script packs (format: uipack):
-#   .cpfont files the interface draws a script from (src/UiScriptPack.cpp), never a reading font; build_ui_script_pack.py
-#   writes them. They take in place of intervals, sizes and styles:
-#   source:        the family in this file whose files they are cut from
+#   .cpfont files the interface draws a script from (src/UiScriptPack.cpp, src/CjkUiPack.cpp), never a reading font;
+#   build_ui_script_pack.py writes them. They take in place of intervals, sizes and styles:
+#   source:        the family in this file they are cut from: its files (ArabicUI), or the Noto CJK OTF it pins
 #   fonts-v3.json lists them with format "uipack", which a firmware that does not know it skips; fonts.json leaves
 #   them out.
 #
@@ -683,6 +683,32 @@ families:
     description: "Arabic, Persian and Urdu in the interface: book titles, the keyboard. Not a reading font"
     format: uipack
     source: NotoSansArabic
+    inDownloadAll: false
+
+  # The interface's CJK (format: uipack): book titles in the CJK UI faces' sizes, one pack per region in its own forms,
+  # from the Noto Sans CJK region OTF the family named in `source` pins (build_ui_script_pack.py).
+  - name: ChineseUI
+    description: "Simplified Chinese in the interface: book titles. Not a reading font"
+    format: uipack
+    source: NotoSansSC
+    inDownloadAll: false
+
+  - name: ChineseTradUI
+    description: "Traditional Chinese in the interface: book titles. Not a reading font"
+    format: uipack
+    source: NotoSansTC
+    inDownloadAll: false
+
+  - name: JapaneseUI
+    description: "Japanese in the interface: book titles. Not a reading font"
+    format: uipack
+    source: NotoSansJP
+    inDownloadAll: false
+
+  - name: KoreanUI
+    description: "Korean in the interface: book titles. Not a reading font"
+    format: uipack
+    source: NotoSansKR
     inDownloadAll: false
 
   # ── Hebrew script (format: ttf), merged the same way ───────────────────────────────────────────

@@ -14,6 +14,7 @@
 
 #include "ArabicUiPack.h"
 #include "BidiUtils.h"
+#include "CpfontFile.h"
 #include "EpdFont.h"
 #include "FallbackFaceProvider.h"
 #include "SdCardFont.h"
@@ -23,82 +24,13 @@
 
 namespace {
 
-using Bytes = std::vector<uint8_t>;
+using cpfont_file::Bytes;
+using cpfont_file::FileFont;
+using cpfont_file::FileStyle;
+using cpfont_file::readCpfont;
 
 std::string packPath(const unsigned points) {
   return std::string(ARABIC_UI_DIR) + "/ArabicUI_" + std::to_string(points) + ".cpfont";
-}
-
-Bytes readFile(const std::string& path) {
-  Bytes bytes;
-  if (FILE* f = std::fopen(path.c_str(), "rb")) {
-    uint8_t buffer[4096];
-    size_t n;
-    while ((n = std::fread(buffer, 1, sizeof(buffer), f)) > 0) bytes.insert(bytes.end(), buffer, buffer + n);
-    std::fclose(f);
-  }
-  return bytes;
-}
-
-uint32_t u32(const Bytes& b, const size_t at) {
-  return b[at] | b[at + 1] << 8 | b[at + 2] << 16 | uint32_t{b[at + 3]} << 24;
-}
-uint16_t u16(const Bytes& b, const size_t at) { return static_cast<uint16_t>(b[at] | b[at + 1] << 8); }
-
-// One style of a v4 .cpfont, read straight from the file: what the generator wrote.
-struct FileStyle {
-  std::vector<uint32_t> codepoints;  // in glyph order
-  std::vector<EpdGlyph> glyphs;
-  Bytes bitmaps;
-
-  Bytes bitmapOf(const uint32_t cp, EpdGlyph* record = nullptr) const {
-    for (size_t i = 0; i < codepoints.size(); ++i) {
-      if (codepoints[i] != cp) continue;
-      if (record) *record = glyphs[i];
-      return Bytes(bitmaps.begin() + glyphs[i].dataOffset,
-                   bitmaps.begin() + glyphs[i].dataOffset + glyphs[i].dataLength);
-    }
-    return {};
-  }
-};
-
-struct FileFont {
-  uint16_t flags = 0;
-  std::vector<uint8_t> styleIds;
-  std::vector<FileStyle> styles;
-};
-
-FileFont readCpfont(const std::string& path) {
-  const Bytes b = readFile(path);
-  FileFont font;
-  if (b.size() < 32) return font;
-  font.flags = u16(b, 10);
-  const uint8_t count = b[12];
-  for (uint8_t s = 0; s < count; ++s) {
-    const size_t toc = 32 + s * 32;
-    const uint32_t intervals = u32(b, toc + 4);
-    const uint32_t glyphs = u32(b, toc + 8);
-    const uint16_t kernLeft = u16(b, toc + 17), kernRight = u16(b, toc + 19);
-    const uint8_t leftClasses = b[toc + 21], rightClasses = b[toc + 22], ligatures = b[toc + 23];
-    const uint32_t data = u32(b, toc + 24);
-    FileStyle style;
-    for (uint32_t i = 0; i < intervals; ++i) {
-      const uint32_t first = u32(b, data + i * 12), last = u32(b, data + i * 12 + 4);
-      for (uint32_t cp = first; cp <= last; ++cp) style.codepoints.push_back(cp);
-    }
-    const size_t glyphAt = data + intervals * 12;
-    for (uint32_t i = 0; i < glyphs; ++i) {
-      EpdGlyph g{};
-      std::memcpy(&g, &b[glyphAt + i * 16], sizeof(EpdGlyph));
-      style.glyphs.push_back(g);
-    }
-    const size_t bitmapAt =
-        glyphAt + glyphs * 16 + (kernLeft + kernRight) * 3 + leftClasses * rightClasses + ligatures * 8;
-    style.bitmaps.assign(b.begin() + bitmapAt, b.end());
-    font.styleIds.push_back(b[toc]);
-    font.styles.push_back(std::move(style));
-  }
-  return font;
 }
 
 std::vector<uint32_t> codepointsOf(const std::string& utf8) {
@@ -277,4 +209,17 @@ TEST_F(UiScriptPackTest, WithoutThePackArabicFallsToWhatServedItBefore) {
   EXPECT_EQ(regularHooks.prepared, 0);
   EXPECT_FALSE(EpdFont(&ui).getGlyph(0x0644));  // no book font: nothing draws it (Inter has no U+FFFD)
   EXPECT_FALSE(EpdFont(&ui).getGlyph(0xFEFB));
+}
+
+namespace {
+bool bookMapsEverything(void* /*ctx*/, uint32_t /*codepoint*/) { return true; }
+}  // namespace
+
+TEST_F(UiScriptPackTest, InTheReaderTheBooksFaceGoesFirstAndThePackIsNotRead) {
+  // A reader on the stack whose book's font maps the forms: the pack is neither read nor asked for them.
+  shared.setReaderMaps(&bookMapsEverything, nullptr);
+  const std::string formed = BidiUtils::arabicUiForms(TITLE);
+  ui.provider->beginText(formed.c_str());
+  EXPECT_EQ(regularHooks.prepared, 0);
+  EXPECT_FALSE(EpdFont(&ui).getGlyph(0xFEFB));  // no book face lent here: nothing draws it, and no pack glyph
 }

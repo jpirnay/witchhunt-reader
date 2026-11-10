@@ -41,6 +41,7 @@
 #include "BootDiagnostics.h"
 #include "ButtonEventManager.h"
 #include "CjkUiFonts.h"
+#include "CjkUiPack.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "GestureEventManager.h"
@@ -962,6 +963,8 @@ void syncUiBookFonts(const bool bookText, const bool reader) {
   // The Arabic UI pack's open sizes go with the screen; the next one opens what it draws, and asks the card again
   // whether the pack is there (the Font Manager may have installed or removed it).
   UiScriptPack::release();
+  CjkUiPack::release();
+  CjkUiFonts::setInReader(reader);
 }
 
 // --- Temporary boot-phase heap-corruption bisect probes -------------------------------
