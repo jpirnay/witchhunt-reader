@@ -38,10 +38,11 @@ class FontManifestReader {
   // A family name this long or longer is rejected without asking the check. FontInstaller allows 31.
   static constexpr size_t FAMILY_NAME_BUF_SIZE = 64;
 
-  // `takesHyphenation`: the hyphenation packs (format "hyphenation") are read too. The Font Manager installs them; the
-  // web font API, which installs fonts alone, leaves them out as a format it does not know.
-  FontManifestReader(const char* logTag, NameCheck familyNameOk, NameCheck fileNameOk, bool takesHyphenation = false)
-      : logTag(logTag), familyNameOk(familyNameOk), fileNameOk(fileNameOk), takesHyphenation(takesHyphenation) {}
+  // `takesPacks`: the hyphenation packs (format "hyphenation") and the UI language packs (format "language") are read
+  // too. The Font Manager and the web font API install them; a reader that installs fonts alone leaves them out as
+  // formats it does not know.
+  FontManifestReader(const char* logTag, NameCheck familyNameOk, NameCheck fileNameOk, bool takesPacks = false)
+      : logTag(logTag), familyNameOk(familyNameOk), fileNameOk(fileNameOk), takesPacks(takesPacks) {}
 
   FontManifestReader(const FontManifestReader&) = delete;
   FontManifestReader& operator=(const FontManifestReader&) = delete;
@@ -76,7 +77,7 @@ class FontManifestReader {
   const char* logTag;
   NameCheck familyNameOk;
   NameCheck fileNameOk;
-  bool takesHyphenation;
+  bool takesPacks;
 
   // Both live only inside read().
   Work* work = nullptr;

@@ -5,6 +5,7 @@
 #include <Logging.h>
 #include <SdCardFontRegistry.h>
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -43,9 +44,29 @@ Language homeAsked = Language::_COUNT;
 
 }  // namespace
 
-PackOffer::Offer due() {
+const char* languageDeclineKey(const char* code, char (&key)[3]) {
+  key[0] = static_cast<char>(code && code[0] ? std::toupper(static_cast<unsigned char>(code[0])) : 0);
+  key[1] = static_cast<char>(key[0] && code[1] ? std::tolower(static_cast<unsigned char>(code[1])) : 0);
+  key[2] = '\0';
+  return key;
+}
+
+PackOffer::Offer due(const bool chosen) {
   PackOffer::Offer offer;
   const char* ui = uiCode();
+  // The language's own strings: without them the rest of the interface is English.
+  char path[48];
+  const Language language = I18N.getLanguage();
+  if (I18n::packPath(language, path, sizeof(path)) && !I18n::packOnCard(language)) {
+    // "/.crosspoint/lang/de.cplang" -> "de"
+    const char* file = path + strlen(I18n::PACK_DIR) + 1;
+    const size_t len = strcspn(file, ".");
+    char key[3];
+    if (len < sizeof(offer.language) && (chosen || !HyphenationPacks::declined(languageDeclineKey(file, key)))) {
+      memcpy(offer.language, file, len);
+      offer.language[len] = '\0';
+    }
+  }
   for (const auto& pack : kPacks) {
     if (!ui || std::strcmp(ui, pack.uiCode) != 0) continue;
     if (pack.hyphenation && SETTINGS.hyphenationEnabled && HyphenationPacks::offerDue(pack.hyphenation)) {
@@ -59,7 +80,8 @@ PackOffer::Offer due() {
     }
   }
   if (offer) {
-    LOG_INF("LNG", "%s: offering %s", ui, offer.family[0] != '\0' ? offer.family : offer.hyphenation);
+    LOG_INF("LNG", "%s: offering language pack '%s', family '%s', hyphenation '%s'", ui, offer.language, offer.family,
+            offer.hyphenation);
   }
   return offer;
 }

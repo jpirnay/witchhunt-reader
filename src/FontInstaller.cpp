@@ -1,6 +1,7 @@
 #include "FontInstaller.h"
 
 #include <HalStorage.h>
+#include <I18n.h>
 #include <Logging.h>
 #include <esp_rom_crc.h>
 
@@ -109,9 +110,11 @@ bool FontInstaller::validateFontFile(const char* path) {
   }
 
   if (!FontDownloadRules::headOk(kind, head, sizeof head)) {
-    const char* kindName = kind == FontDownloadRules::FileKind::Cpfont     ? ".cpfont"
-                           : kind == FontDownloadRules::FileKind::TrueType ? "TrueType"
-                                                                           : "OpenType CFF";
+    const char* kindName = kind == FontDownloadRules::FileKind::Cpfont            ? ".cpfont"
+                           : kind == FontDownloadRules::FileKind::TrueType        ? "TrueType"
+                           : kind == FontDownloadRules::FileKind::OpenTypeCff     ? "OpenType CFF"
+                           : kind == FontDownloadRules::FileKind::HyphenationPack ? "hyphenation pack"
+                                                                                  : "language pack";
     LOG_ERR("FONT", "Not a %s file: %s", kindName, path);
     return false;
   }
@@ -209,32 +212,43 @@ bool FontInstaller::isFamilyOnCard(const char* familyName) const {
 }
 
 bool FontInstaller::isOnCard(const FontCatalog& families, const size_t family) const {
-  if (!families.hyphenation(family)) return isFamilyOnCard(families.name(family));
+  if (!families.pack(family)) return isFamilyOnCard(families.name(family));
   if (families.fileCount(family) == 0) return false;
   for (size_t j = 0; j < families.fileCount(family); j++) {
-    // Where the reader finds a language's pack: our folder or CrossInk's. A file that names no language is looked for
+    // Where the reader finds a language's hyphenation pack: our folder or CrossInk's. Any other file is looked for
     // where the install puts it.
     const char* localName = families.fileLocalName(family, j);
     char code[3];
-    if (HyphenationPacks::codeOfPackFile(localName, code)) {
+    if (families.hyphenation(family) && HyphenationPacks::codeOfPackFile(localName, code)) {
       if (!HyphenationPacks::packOnCard(code)) return false;
       continue;
     }
     char path[128];
-    buildPackPath(localName, path, sizeof(path));
+    buildPackPath(families, family, localName, path, sizeof(path));
     if (!Storage.exists(path)) return false;
   }
   return true;
 }
 
-void FontInstaller::buildPackPath(const char* localName, char* outBuf, const size_t outBufSize) {
-  snprintf(outBuf, outBufSize, "%s/%s", HyphenationPacks::DIR, localName);
+namespace {
+
+const char* packDir(const FontCatalog& families, const size_t family) {
+  return families.languagePack(family) ? I18n::PACK_DIR : HyphenationPacks::DIR;
+}
+
+}  // namespace
+
+void FontInstaller::buildPackPath(const FontCatalog& families, const size_t family, const char* localName, char* outBuf,
+                                  const size_t outBufSize) {
+  snprintf(outBuf, outBufSize, "%s/%s", packDir(families, family), localName);
 }
 
 namespace {
 
-// Tells HyphenationPacks that the pack files of `family` were installed, or removed.
+// Tells HyphenationPacks that the pack files of `family` were installed, or removed. A UI language pack is read at
+// the next start.
 void tellPacks(const FontCatalog& families, const size_t family, const bool installed) {
+  if (!families.hyphenation(family)) return;
   for (size_t j = 0; j < families.fileCount(family); j++) {
     char code[3];
     if (!HyphenationPacks::codeOfPackFile(families.fileLocalName(family, j), code)) continue;
@@ -249,8 +263,9 @@ void tellPacks(const FontCatalog& families, const size_t family, const bool inst
 }  // namespace
 
 bool FontInstaller::installStagedPack(const FontCatalog& families, const size_t family, const char* stagingDir) {
-  if (!Storage.exists(HyphenationPacks::DIR) && !Storage.mkdir(HyphenationPacks::DIR)) {
-    LOG_ERR("FONT", "Failed to create %s", HyphenationPacks::DIR);
+  const char* dir = packDir(families, family);
+  if (!Storage.exists(dir) && !Storage.mkdir(dir)) {
+    LOG_ERR("FONT", "Failed to create %s", dir);
     return false;
   }
   for (size_t j = 0; j < families.fileCount(family); j++) {
@@ -259,7 +274,7 @@ bool FontInstaller::installStagedPack(const FontCatalog& families, const size_t 
     char live[128];
     char backup[136];
     snprintf(staged, sizeof(staged), "%s/%s", stagingDir, localName);
-    buildPackPath(localName, live, sizeof(live));
+    buildPackPath(families, family, localName, live, sizeof(live));
     snprintf(backup, sizeof(backup), "%s.old", live);
     if (Storage.exists(backup)) Storage.remove(backup);
     const bool hadLive = Storage.exists(live);
@@ -283,7 +298,7 @@ FontInstaller::Error FontInstaller::deletePack(const FontCatalog& families, cons
   Error result = Error::OK;
   for (size_t j = 0; j < families.fileCount(family); j++) {
     char path[128];
-    buildPackPath(families.fileLocalName(family, j), path, sizeof(path));
+    buildPackPath(families, family, families.fileLocalName(family, j), path, sizeof(path));
     if (Storage.exists(path) && !Storage.remove(path)) {
       LOG_ERR("FONT", "Failed to remove %s", path);
       result = Error::SD_WRITE_ERROR;
@@ -298,8 +313,8 @@ FontInstaller::FileCounts FontInstaller::countFiles(const FontCatalog& families,
   const char* familyName = families.name(family);
   for (size_t j = 0; j < families.fileCount(family); j++) {
     char path[128];
-    if (families.hyphenation(family)) {
-      buildPackPath(families.fileLocalName(family, j), path, sizeof(path));
+    if (families.pack(family)) {
+      buildPackPath(families, family, families.fileLocalName(family, j), path, sizeof(path));
     } else {
       buildFontPath(familyName, families.fileLocalName(family, j), path, sizeof(path));
     }

@@ -11,7 +11,7 @@
 // the download, and whether a family already on the card is being updated.
 namespace FontDownloadRules {
 
-enum class FileKind : uint8_t { Unknown, Cpfont, TrueType, OpenTypeCff, HyphenationPack };
+enum class FileKind : uint8_t { Unknown, Cpfont, TrueType, OpenTypeCff, HyphenationPack, LanguagePack };
 
 // By the name's extension, in any case.
 inline FileKind kindOf(const char* name) {
@@ -30,13 +30,15 @@ inline FileKind kindOf(const char* name) {
   if (endsWith(".ttf")) return FileKind::TrueType;
   if (endsWith(".otf")) return FileKind::OpenTypeCff;
   if (endsWith(".cphyph")) return FileKind::HyphenationPack;
+  if (endsWith(".cplang")) return FileKind::LanguagePack;
   return FileKind::Unknown;
 }
 
 // By a manifest's `format` value: "cpfont", "ttf" or "otf", exactly, or "uipack": a CJK UI pack
-// (CjkUiPacks.h), .cpfont files the interface draws from and no reading font, or "hyphenation": one language's
-// hyphenation pack (HyphenationPack.h), installed beside the fonts in /.crosspoint/hyphenation/. A firmware from before
-// either skips the family, as any reader skips a format it does not know.
+// (CjkUiPacks.h), .cpfont files the interface draws from and no reading font, "hyphenation": one language's
+// hyphenation pack (HyphenationPack.h), installed beside the fonts in /.crosspoint/hyphenation/, or "language": one UI
+// language's strings (LangPack.h), installed into /.crosspoint/lang/. A firmware from before any of them skips the
+// family, as any reader skips a format it does not know.
 inline FileKind kindOfFormat(const char* value, const size_t len) {
   if (!value) return FileKind::Unknown;
   const auto is = [&](const char* word) { return strlen(word) == len && memcmp(value, word, len) == 0; };
@@ -44,6 +46,7 @@ inline FileKind kindOfFormat(const char* value, const size_t len) {
   if (is("ttf")) return FileKind::TrueType;
   if (is("otf")) return FileKind::OpenTypeCff;
   if (is("hyphenation")) return FileKind::HyphenationPack;
+  if (is("language")) return FileKind::LanguagePack;
   return FileKind::Unknown;
 }
 
@@ -51,7 +54,8 @@ inline FileKind kindOfFormat(const char* value, const size_t len) {
 constexpr size_t kHeadBytes = 8;
 
 // Whether a file of `kind` starts as it must: a .cpfont with its magic, a .ttf with TrueType outlines (sfnt version
-// 0x00010000 or 'true'), an .otf with CFF outlines ('OTTO'), a .cphyph with a CPHY version 1 header. A collection
+// 0x00010000 or 'true'), an .otf with CFF outlines ('OTTO'), a .cphyph with a CPHY version 1 header, a .cplang with a
+// CPLG version 1 one. A collection
 // ('ttcf') and WOFF are files of no kind the reader draws.
 inline bool headOk(const FileKind kind, const uint8_t* head, const size_t len) {
   if (len < kHeadBytes) return false;
@@ -61,6 +65,7 @@ inline bool headOk(const FileKind kind, const uint8_t* head, const size_t len) {
   }
   if (kind == FileKind::OpenTypeCff) return memcmp(head, "OTTO", 4) == 0;
   if (kind == FileKind::HyphenationPack) return memcmp(head, "CPHY", 4) == 0 && head[4] == 1;
+  if (kind == FileKind::LanguagePack) return memcmp(head, "CPLG", 4) == 0 && head[4] == 1;
   return false;
 }
 

@@ -49,6 +49,7 @@ TEST(FontDownloadRulesTest, AManifestFormatNamesAKindExactly) {
   EXPECT_EQ(kindOfFormat("ttf"), FileKind::TrueType);
   EXPECT_EQ(kindOfFormat("otf"), FileKind::OpenTypeCff);
   EXPECT_EQ(kindOfFormat("hyphenation"), FileKind::HyphenationPack);
+  EXPECT_EQ(kindOfFormat("language"), FileKind::LanguagePack);
   EXPECT_EQ(kindOfFormat("OTF"), FileKind::Unknown);
   EXPECT_EQ(kindOfFormat("woff2"), FileKind::Unknown);
   EXPECT_EQ(kindOfFormat(""), FileKind::Unknown);
@@ -71,6 +72,18 @@ TEST(FontDownloadRulesTest, AHyphenationPackIsACphyphWithACphyV1Header) {
   EXPECT_FALSE(head(FileKind::Cpfont, std::string("CPHY\x01"
                                                   "de\x02rest",
                                                   12)));
+}
+
+// A UI language pack (LangPack.h): .cplang, starting with a CPLG version 1 header.
+TEST(FontDownloadRulesTest, ALanguagePackIsACplangWithACplgV1Header) {
+  EXPECT_EQ(FontDownloadRules::kindOf("Language-German/de.cplang"), FileKind::LanguagePack);
+  EXPECT_EQ(FontDownloadRules::kindOf("DE.CPLANG"), FileKind::LanguagePack);
+  EXPECT_TRUE(head(FileKind::LanguagePack, std::string("CPLG\x01\0\x51\x03rest", 12)));
+  EXPECT_FALSE(head(FileKind::LanguagePack, std::string("CPLG\x02\0\x51\x03rest", 12)));  // another version
+  EXPECT_FALSE(head(FileKind::LanguagePack, std::string("CPHY\x01"
+                                                        "de\x02rest",
+                                                        12)));
+  EXPECT_FALSE(head(FileKind::HyphenationPack, std::string("CPLG\x01\0\x51\x03rest", 12)));
 }
 
 TEST(FontDownloadRulesTest, ACpfontStartsWithItsMagic) {

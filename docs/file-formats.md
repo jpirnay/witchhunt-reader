@@ -16,7 +16,7 @@ truncates the file in place.
 | File | Written by | Version | Contents |
 |---|---|---|---|
 | `settings.json` | `JsonSettingsIO::saveSettings` | `fontSizeOrderV`: `CrossPointSettings::FONT_SIZE_ORDER_VERSION` (2); `gestureDefaultsV`: `GESTURE_DEFAULTS_VERSION` (3) | The settings. From `fontSizeOrderV` 2, `fontSize` and `txtFontSize` are point sizes; an older file is converted as it loads and saved again |
-| `state.json` | `JsonSettingsIO::saveState` | none | The open book, the sleep image, a pending KOReader sync or bookmark jump, the languages whose hyphenation pack offer was declined (`hyphenationOffersDeclined`, two-letter codes back to back), the Library tab last left (`libraryTab`) and the views of its lists (`recentBooksView`, `addedBooksView`, `authorsView`; an old `recentBooksGridView` is read to migrate) |
+| `state.json` | `JsonSettingsIO::saveState` | none | The open book, the sleep image, a pending KOReader sync or bookmark jump, the pack offers declined (`hyphenationOffersDeclined`, two-letter keys back to back: a hyphenation pack's language in lower case, `de`; a CJK interface pack's UI language in upper case, `ZH`; a UI language pack's capitalised, `De`), the Library tab last left (`libraryTab`) and the views of its lists (`recentBooksView`, `addedBooksView`, `authorsView`; an old `recentBooksGridView` is read to migrate) |
 | `recent.json` | `JsonSettingsIO::saveRecentBooks` | `fontSizeOrderV` (2), stamped separately from `settings.json` | Recently opened books and their per-book overrides; `fontSizeOverride` is a point size from version 2 |
 | `wifi.json`, `opds.json`, `koreader.json` | `JsonSettingsIO::saveWifi`, `saveOpds`, `saveKOReader` | none | Credentials, obfuscated with the key of the reader that saved them, which `wifi.json` names in `lastKnownMacAddress` and the other two in `keyId`, so a card moved to another reader still decodes; `wifi.json` also keeps `arrivedFrom`, the reader it was re-keyed from when the card moved. A file without `keyId` (older firmware) gets one the first time it loads if its passwords decode to plausible text with this reader's key and `wifi.json` does not say the card came from another reader; otherwise it is left as it is, and no later save records a `keyId` until those passwords are entered again. The web file endpoints refuse them (`lib/FsHelpers/ProtectedPaths.h`) |
 | `weather_settings.json`, `weather_cache.json` | `WeatherSettingsStore`, `WeatherClient::saveCache` | none | Weather settings, and the last forecast (dropped when its `requestSignature` no longer matches the settings) |
@@ -31,6 +31,7 @@ truncates the file in place.
 | `fileindex/<hash>.idx` | `FileIndex` | `INDEX_VERSION` (2) | A large folder's sorted listing, magic `CPFI`; `<hash>` is FNV-1a 64 of the folder's path |
 | `fonts/<Family>/<Family>_<size>.cpfont` | Font Manager, web upload | `CPFONT_VERSION` (4) in `lib/EpdFont/SdCardFont.cpp` | SD fonts; one of another version is refused. Downloads are staged in `<Family>__staging/` and swapped in. See [contributing/font-cache-structures.md](contributing/font-cache-structures.md) |
 | `hyphenation/hyph-<code>.cphyph` | Font Manager | `hyphpack::kVersion` (1) | One language's hyphenation pack, magic `CPHY`: [below](#hyphenation-packs-cphy-and-the-store-whhs). The same file in CrossInk's `/.crossink/hyphenation/` is read when this folder lacks it |
+| `lang/<code>.cplang` | Font Manager, web font page, copied by hand, or the conversion of a 2.40 or 2.41RC slot | `langpack::FORMAT_VERSION` (1) | One UI language's strings, magic `CPLG`, `<code>` the language's code in lower case (`de`). Strings by the FNV-1a of their key's name, so one file serves every firmware from 2.41 on. See [i18n.md](i18n.md#how-the-strings-reach-the-screen) |
 | `fontprev/*.fpv` | `FontPreviewCache::store` | `FORMAT_VERSION` (2) | Rendered font previews, magic `CPFP` |
 | `opds_<hash>_disc.json` | `saveOpdsDiscovery` | `"v"` (`OPDS_DISCOVERY_VERSION`, 2) | An OPDS server's navigation entries and search template; `<hash>` is FNV-1a of the server's URL. Version 2: a template from an OpenSearch description is its Atom one |
 | `epub_<hash>/`, `xtc_<hash>/`, `txt_<hash>/` | | | One per book: next table |
@@ -527,10 +528,12 @@ Version 3 (`fonts-v3.json`) adds two keys to a family:
   `ttf` or `otf` family has one file per style, and the reader draws every size from it.
 - `inDownloadAll`: a boolean, `true` when left out. The CJK families say `false`: "Download all" does not take them.
 
-A family of format `uipack` is a UI script pack (`.cpfont` files the interface draws from), and one of format
-`hyphenation` a hyphenation pack: a folder `Hyphenation-<Language>/` holding one `hyph-<code>.cphyph`, which the Font
-Manager installs into `/.crosspoint/hyphenation/` rather than a family folder. The packs come after the fonts, with
-`"styles": []` and `"inDownloadAll": false`. The web font API reads the manifest without them.
+A family of format `uipack` is a UI script pack (`.cpfont` files the interface draws from), one of format `language`
+a UI language pack: a folder `Language-<Language>/` holding one `<code>.cplang`, which the Font Manager installs into
+`/.crosspoint/lang/`, and one of format `hyphenation` a hyphenation pack: a folder `Hyphenation-<Language>/` holding one
+`hyph-<code>.cphyph`, installed into `/.crosspoint/hyphenation/`. The packs come after the fonts, the language packs
+first, with `"styles": []` and `"inDownloadAll": false`. Firmware from before 2.41 leaves the language packs out as a
+format it does not know.
 
 Who reads which: `fonts.json` lists the `.cpfont` families alone, for firmware from before version 3, which rejects a
 manifest of a version it does not know. Firmware with this format reads `fonts-v3.json`, and versions 1 to 3 alike.
@@ -548,8 +551,8 @@ device's byte order:
 
 | Part | Layout |
 |---|---|
-| Header, 16 B | `u32` magic `CPFC`; `u16` version (3); `u16` families, files, stringBytes; `u32` blockBytes, the whole block |
-| Families | 12 B each: `u32` totalSize; `u16` name, description, firstFile; `u8` flags (bit 0 installed, bit 1 update available, bit 2 resumable download, bit 3 an outline family, bit 4 not in "Download all", bit 5 a hyphenation pack); `u8` 0 |
+| Header, 16 B | `u32` magic `CPFC`; `u16` version (4); `u16` families, files, stringBytes; `u32` blockBytes, the whole block |
+| Families | 12 B each: `u32` totalSize; `u16` name, description, firstFile; `u8` flags (bit 0 installed, bit 1 update available, bit 2 resumable download, bit 3 an outline family, bit 4 not in "Download all", bit 5 a hyphenation pack, bit 6 a UI language pack); `u8` 0 |
 | Files | 12 B each: `u32` size, crc32; `u16` name; `u8` hasCrc32; `u8` 0 |
 | Strings | NUL-terminated; `name` and `description` are offsets into them |
 

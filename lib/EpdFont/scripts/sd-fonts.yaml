@@ -51,6 +51,13 @@
 #   the file into /.crosspoint/hyphenation/. They take no fields but name, description and inDownloadAll (false: a
 #   reader picks the languages of their books).
 #
+# UI language packs (format: language):
+#   One interface language's strings, <code>.cplang in a folder of the family's name, for every language but English,
+#   which is in the image. scripts/gen_i18n.py --packs writes them into assets/sd-fonts/ (this build copies them).
+#   fonts-v3.json lists them after the fonts with format "language", which a firmware that does not know it skips;
+#   fonts.json leaves them out. The Font Manager installs the file into /.crosspoint/lang/. They take no fields but
+#   name, description and inDownloadAll (false: a reader wants one language, not all of them).
+#
 # Variable fonts:
 #   Some fonts (Bitter, Inter, Alegreya) are distributed as variable fonts.
 #   freetype-py can't set variable font axis values, so the build script
@@ -761,6 +768,137 @@ families:
         Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
         Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
 
+  # ── UI language packs (format: language), one per language but English: gen_i18n.py --packs ──────────────
+
+  - name: Language-Belarusian
+    description: "Menus and messages in Belarusian"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Catalan
+    description: "Menus and messages in Catalan"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-ChineseSimplified
+    description: "Menus and messages in Simplified Chinese"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Czech
+    description: "Menus and messages in Czech"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Danish
+    description: "Menus and messages in Danish"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Dutch
+    description: "Menus and messages in Dutch"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Finnish
+    description: "Menus and messages in Finnish"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-French
+    description: "Menus and messages in French"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-German
+    description: "Menus and messages in German"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Hungarian
+    description: "Menus and messages in Hungarian"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Italian
+    description: "Menus and messages in Italian"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Japanese
+    description: "Menus and messages in Japanese"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Kazakh
+    description: "Menus and messages in Kazakh"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Korean
+    description: "Menus and messages in Korean"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Lithuanian
+    description: "Menus and messages in Lithuanian"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Polish
+    description: "Menus and messages in Polish"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-PortugueseBR
+    description: "Menus and messages in Brazilian Portuguese"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-PortuguesePT
+    description: "Menus and messages in European Portuguese"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Romanian
+    description: "Menus and messages in Romanian"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Russian
+    description: "Menus and messages in Russian"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Slovenian
+    description: "Menus and messages in Slovenian"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Spanish
+    description: "Menus and messages in Spanish"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Swedish
+    description: "Menus and messages in Swedish"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Turkish
+    description: "Menus and messages in Turkish"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Ukrainian
+    description: "Menus and messages in Ukrainian"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Vietnamese
+    description: "Menus and messages in Vietnamese"
+    format: language
+    inDownloadAll: false
   # ── Hyphenation packs (format: hyphenation), one per language: scripts/build_hyphenation_packs.py ──────────
 
   - name: Hyphenation-Assamese

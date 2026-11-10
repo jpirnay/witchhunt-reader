@@ -32,41 +32,33 @@ constexpr uint32_t STAMP = 0x5EED1234u;
 // What the Chinese pack carries after its strings: its two CJK UI faces, 73,172 B.
 constexpr uint32_t EXT_BYTES = 73172;
 
-// A raw DEFLATE stream of stored blocks: what the device inflates, without needing a compressor here.
-std::vector<uint8_t> storedDeflate(const std::vector<uint8_t>& data) {
-  std::vector<uint8_t> out;
-  size_t at = 0;
-  do {
-    const size_t n = std::min<size_t>(65535, data.size() - at);
-    const bool last = at + n == data.size();
-    out.push_back(last ? 1 : 0);
-    out.push_back(static_cast<uint8_t>(n));
-    out.push_back(static_cast<uint8_t>(n >> 8));
-    out.push_back(static_cast<uint8_t>(~n));
-    out.push_back(static_cast<uint8_t>(~n >> 8));
-    out.insert(out.end(), data.begin() + at, data.begin() + at + n);
-    at += n;
-  } while (at < data.size());
-  return out;
-}
-
 // A pack shaped like the Chinese one: 875 keys, ~13 KB of strings, every seventh left to English.
 struct Pack {
   std::vector<std::string> strings;
-  std::vector<uint8_t> blob;
-  std::vector<uint8_t> compressed;
-  std::vector<uint16_t> enOffsets;
+  std::vector<uint8_t> blob;  // every string NUL-terminated, the empty ones too: an older firmware's slot data
   uint16_t keyCount = 875;
+  int calls = 0;
 
   Pack() {
     for (uint16_t i = 0; i < keyCount; ++i) {
       strings.push_back(i % 7 == 3 ? std::string() : "key " + std::to_string(i) + " translated");
       blob.insert(blob.end(), strings.back().begin(), strings.back().end());
       blob.push_back(0);
-      enOffsets.push_back(static_cast<uint16_t>(i * 3));
     }
-    compressed = storedDeflate(blob);
   }
+
+  // FlashLangPartition::Strings::produce: each string the pack has, by key, as I18n writes a card pack's.
+  static bool produce(void* ctx, flp::StringsWriter& out) {
+    auto* self = static_cast<Pack*>(ctx);
+    ++self->calls;
+    for (uint16_t i = 0; i < self->keyCount; ++i) {
+      const std::string& s = self->strings[i];
+      if (s.empty()) continue;
+      if (!out.beginKey(i) || !out.write(s.c_str(), s.size() + 1)) return false;
+    }
+    return true;
+  }
+  flp::Strings source() { return flp::Strings{static_cast<uint32_t>(blob.size()), &Pack::produce, this}; }
 };
 
 uint8_t extByte(const uint32_t i) { return static_cast<uint8_t>(i * 131u + 7u + (i >> 9)); }
@@ -102,14 +94,12 @@ class FlashLangPartitionTest : public ::testing::Test {
 
   bool build() {
     const flp::Extension ext = extension();
-    return flp::build(LANG, STAMP, pack.compressed.data(), pack.compressed.size(), pack.blob.size(), pack.keyCount,
-                      pack.enOffsets.data(), &ext);
+    return flp::build(LANG, STAMP, pack.keyCount, pack.source(), &ext);
   }
 
   bool acquire(flp::Mapped& out) {
     const flp::Extension ext = extension();
-    return flp::acquire(LANG, STAMP, pack.compressed.data(), pack.compressed.size(), pack.blob.size(), pack.keyCount,
-                        pack.enOffsets.data(), &ext, &out);
+    return flp::acquire(LANG, STAMP, pack.keyCount, pack.source(), &ext, &out);
   }
 
   // Every string as I18n::get() reads it, and the extension byte for byte.
@@ -117,9 +107,9 @@ class FlashLangPartitionTest : public ::testing::Test {
     for (uint16_t i = 0; i < pack.keyCount; ++i) {
       const uint16_t off = m.offsets[i];
       if (pack.strings[i].empty()) {
-        ASSERT_EQ(off, 0x8000u | pack.enOffsets[i]) << "key " << i;
+        ASSERT_EQ(off, flp::FALLBACK) << "key " << i;
       } else {
-        ASSERT_EQ(off & 0x8000u, 0u) << "key " << i;
+        ASSERT_EQ(off & flp::FALLBACK, 0u) << "key " << i;
         ASSERT_STREQ(m.data + off, pack.strings[i].c_str()) << "key " << i;
       }
     }
@@ -237,16 +227,38 @@ TEST_F(FlashLangPartitionTest, AnOlderFirmwaresPackInTheUpperHalfIsFoundAndRebui
   expectIntact(m);
 }
 
-TEST_F(FlashLangPartitionTest, ASlotOfTheFirstFormatIsRebuilt) {
-  // An earlier build of this branch wrote format 1 at the 128 KB position: no CRCs to check it by.
+TEST_F(FlashLangPartitionTest, ASlotOfAnEarlierFormatIsRebuilt) {
+  // Format 2 held one string per StrId of the firmware that wrote it and named English by an offset:
+  // read as this format, its table would send keys to the wrong strings.
   ASSERT_TRUE(build());
   fake_flash::Chip& chip = fake_flash::chip();
-  chip.bytes[SLOT + 4] = 1;  // clearing bit 1 of the version, as a format-1 header holds it
+  chip.bytes[SLOT + 4] = 2;  // clearing bit 0 of the version, as a format-2 header holds it
   EXPECT_FALSE(flp::holds(LANG, STAMP, EXT_BYTES));
   flp::Mapped m{};
   ASSERT_TRUE(acquire(m));
   EXPECT_EQ(producer.calls, 2);
+  EXPECT_EQ(pack.calls, 2);
   expectIntact(m);
+}
+
+TEST_F(FlashLangPartitionTest, StringsPastTheOffsetLimitOrAnUnknownKeyFailTheBuild) {
+  // Bit 15 is FALLBACK: a string may not start at 32 KB or later, and a key past the count has no entry.
+  struct Long {
+    uint16_t key;
+    static bool produce(void* ctx, flp::StringsWriter& out) {
+      const auto* self = static_cast<const Long*>(ctx);
+      std::string s(1000, 'x');
+      for (int i = 0; i < 40; ++i) {
+        if (!out.beginKey(self->key) || !out.write(s.c_str(), s.size() + 1)) return false;
+      }
+      return true;
+    }
+  };
+  Long tooLong{1};
+  EXPECT_FALSE(flp::build(LANG, STAMP, pack.keyCount, flp::Strings{40 * 1001, &Long::produce, &tooLong}));
+  Long unknown{pack.keyCount};
+  EXPECT_FALSE(flp::build(LANG, STAMP, pack.keyCount, flp::Strings{40 * 1001, &Long::produce, &unknown}));
+  EXPECT_FALSE(flp::holds(LANG, STAMP, 0)) << "a failed build leaves no header";
 }
 
 TEST_F(FlashLangPartitionTest, StringsThatNeverWriteRightFailOnceWithoutALoop) {
@@ -287,8 +299,7 @@ TEST_F(FlashLangPartitionTest, AnExtensionTheMmuCannotMapIsNotRebuiltFor) {
 TEST_F(FlashLangPartitionTest, APackWithoutAnExtensionStillMapsOnePage) {
   fake_flash::chip().mapLimit = 64 * 1024;
   flp::Mapped m{};
-  ASSERT_TRUE(flp::acquire(LANG, STAMP, pack.compressed.data(), pack.compressed.size(), pack.blob.size(), pack.keyCount,
-                           pack.enOffsets.data(), nullptr, &m));
+  ASSERT_TRUE(flp::acquire(LANG, STAMP, pack.keyCount, pack.source(), nullptr, &m));
   expectIntact(m, /*withExt=*/false);
 }
 

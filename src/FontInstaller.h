@@ -72,20 +72,23 @@ class FontInstaller {
   /// cannot hold is installed but not listed; the Font Manager must not offer it again.
   bool isFamilyOnCard(const char* familyName) const;
 
-  /// The family of `families` is on the card: a font family as isFamilyOnCard() says, a hyphenation pack when the
-  /// reader finds each of its files, in /.crosspoint/hyphenation/ or CrossInk's /.crossink/hyphenation/
-  /// (HyphenationPacks::packOnCard()).
+  /// The family of `families` is on the card: a font family as isFamilyOnCard() says, a pack when the reader finds
+  /// each of its files: a hyphenation pack's in /.crosspoint/hyphenation/ or CrossInk's /.crossink/hyphenation/
+  /// (HyphenationPacks::packOnCard()), a UI language pack's in /.crosspoint/lang/.
   bool isOnCard(const FontCatalog& families, size_t family) const;
 
-  /// Where a hyphenation pack's file lives: "/.crosspoint/hyphenation/<file name>".
-  static void buildPackPath(const char* localName, char* outBuf, size_t outBufSize);
+  /// Where a file of the pack `family` lives: "/.crosspoint/hyphenation/<file name>" for a hyphenation pack,
+  /// "/.crosspoint/lang/<file name>" for a UI language pack (I18n::PACK_DIR).
+  static void buildPackPath(const FontCatalog& families, size_t family, const char* localName, char* outBuf,
+                            size_t outBufSize);
 
-  /// Moves the downloaded files of the hyphenation pack `family` from `stagingDir` into /.crosspoint/hyphenation/, each
-  /// replacing the file there, then removes `stagingDir` and tells HyphenationPacks. False when a file could not be
-  /// moved: the file it would have replaced is put back.
+  /// Moves the downloaded files of the pack `family` from `stagingDir` into its folder, each replacing the file there,
+  /// then removes `stagingDir` and tells HyphenationPacks of a hyphenation pack. False when a file could not be moved:
+  /// the file it would have replaced is put back. A UI language pack is read at the next start (the Font Manager
+  /// restarts on exit).
   static bool installStagedPack(const FontCatalog& families, size_t family, const char* stagingDir);
 
-  /// Deletes the files of the hyphenation pack `family` and tells HyphenationPacks.
+  /// Deletes the files of the pack `family` and tells HyphenationPacks of a hyphenation pack.
   static Error deletePack(const FontCatalog& families, size_t family);
 
   /// Whether downloading `family` of `families` would update what the card holds: counts its files that are there at
