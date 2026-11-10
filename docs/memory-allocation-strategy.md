@@ -10,7 +10,7 @@ number ("rule 4"). Keep those numbers when editing; add new sections at the end.
 logs these conclusions came from (this file before October 2026, `docs/memory-audit-2026-09.md`,
 `docs/heap-work-handover-2026-08-10.md`) are in git history.
 
-Scope: the ESP32-C3 boards (X3, X4), which have no PSRAM. The ESP32-S3 boards (X4 Pro, T5S3) have
+Scope: the ESP32-C3 boards (X3, X4), which have no PSRAM. The ESP32-S3 boards (X4 Pro, T5S3, Murphy M3) have
 8 MB of PSRAM with `CONFIG_SPIRAM_USE_MALLOC` and a 4 KB `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL`
 threshold, so large allocations land in PSRAM there and the budget below does not bind. The code
 and the rules are shared, so new code must still follow them.

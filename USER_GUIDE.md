@@ -443,7 +443,7 @@ Choose **File Transfer → USB Drive**, then connect the cable. The screen says 
 
 While the drive is connected the reader is a disk and nothing else — buttons, sleep and the page you were reading are all suspended until you eject.
 
-> These two boards can do this because their USB-C port is wired straight to the processor's own USB hardware. The X3 and X4 cannot: their ESP32-C3 has no USB device controller for it.
+> These three boards can do this because their USB-C port is wired straight to the processor's own USB hardware. The X3 and X4 cannot: their ESP32-C3 has no USB device controller for it.
 
 ### 3.6.4 OPDS Catalogs
 
