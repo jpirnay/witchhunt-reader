@@ -5,15 +5,23 @@
 #include <Logging.h>
 #include <Serialization.h>
 
+#include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "I18nStrings.h"
+#include "LangPack.h"
 
 using namespace i18n_strings;
 
 // Settings file path
 static constexpr const char* SETTINGS_FILE = "/.crosspoint/language.bin";
 static constexpr uint8_t SETTINGS_VERSION = 2;
+
+static constexpr auto KEY_COUNT = static_cast<uint16_t>(StrId::_COUNT);
+static_assert(langpack::WINDOW_BYTES == FlashLangPartition::INFLATE_RING_BYTES, "the packs' window is the slot's ring");
+static_assert(langpack::WINDOW_BYTES + langpack::IO_BYTES <= FlashLangPartition::SCRATCH_BYTES,
+              "a pack inflates in the scratch the slot builder lends");
 
 I18n& I18n::getInstance() {
   static I18n instance;
@@ -26,13 +34,110 @@ const char* I18n::get(StrId id) const {
     return "???";
   }
 
-  // If bit 15 of the offset is set, apply the offset to the English lookup
-  // table. That rule is identical whether _active came from rodata or from the
-  // mmap'd language pack — FlashLangPartition writes English offsets into the
-  // table it derives for exactly that reason.
+  // FALLBACK: the language pack has no string for this key, so it reads as English. English itself
+  // never carries the flag.
   const uint16_t off = _active.offsets[index];
-  if (off & 0x8000) return STRINGS_EN_DATA + (off & 0x7FFF);
+  if (off & FlashLangPartition::FALLBACK) return STRINGS_EN_DATA + OFFSETS_EN[index];
   return _active.data + off;
+}
+
+namespace {
+
+// The pack file on the card: its header read, the file left open for the build.
+struct CardPack {
+  HalFile file;
+  langpack::Header header;
+};
+
+bool openCardPack(const char* path, const char* code, CardPack& pack) {
+  if (!Storage.exists(path) || !Storage.openFileForRead("I18N", path, pack.file)) return false;
+  uint8_t bytes[langpack::HEADER_BYTES];
+  if (pack.file.read(bytes, sizeof(bytes)) != static_cast<int>(sizeof(bytes)) ||
+      !langpack::parseHeader(bytes, sizeof(bytes), pack.header)) {
+    LOG_ERR("I18N", "%s is not a language pack this firmware reads", path);
+    return false;
+  }
+  // The file's name says which language it is for; its header must say the same.
+  if (strcmp(pack.header.code, code) != 0) {
+    LOG_ERR("I18N", "%s holds language %s", path, pack.header.code);
+    return false;
+  }
+  if (pack.file.fileSize() != pack.header.extOffset() + pack.header.extLen) {
+    LOG_ERR("I18N", "%s is %u B, its header says %u B", path, static_cast<unsigned>(pack.file.fileSize()),
+            static_cast<unsigned>(pack.header.extOffset() + pack.header.extLen));
+    return false;
+  }
+  return true;
+}
+
+// The entries of a pack, into the slot: those of keys this firmware has, by StrId.
+class SlotStrings final : public langpack::EntrySink {
+ public:
+  explicit SlotStrings(FlashLangPartition::StringsWriter& out) : out_(out) {}
+  bool begin(const uint32_t hash) override {
+    const uint16_t id = langpack::findKey(hash, KEY_HASHES, KEYS_BY_HASH, KEY_COUNT);
+    skip_ = id == langpack::NO_KEY;
+    if (skip_) {
+      ++unknown_;
+      return true;
+    }
+    ++known_;
+    return out_.beginKey(id);
+  }
+  bool bytes(const char* data, const size_t len) override { return skip_ || out_.write(data, len); }
+  bool end() override { return skip_ || out_.write("", 1); }
+  uint32_t known() const { return known_; }
+  uint32_t unknown() const { return unknown_; }
+
+ private:
+  FlashLangPartition::StringsWriter& out_;
+  bool skip_ = false;
+  uint32_t known_ = 0;
+  uint32_t unknown_ = 0;
+};
+
+int readCard(void* ctx, uint8_t* buf, const size_t len) { return static_cast<HalFile*>(ctx)->read(buf, len); }
+
+bool feedParser(void* ctx, const uint8_t* data, const size_t len) {
+  return static_cast<langpack::EntryParser*>(ctx)->feed(data, len);
+}
+
+// FlashLangPartition::Strings::produce: the pack's payload, inflated through the slot builder's scratch.
+bool producePackStrings(void* ctx, FlashLangPartition::StringsWriter& out) {
+  auto& pack = *static_cast<CardPack*>(ctx);
+  const langpack::Header& h = pack.header;
+  if (!pack.file.seekSet(h.payloadOffset())) return false;
+  SlotStrings strings(out);
+  langpack::EntryParser parser(strings);
+  uint8_t* scratch = out.scratch();
+  if (!langpack::inflateSection({&readCard, &pack.file}, h.payloadLen, h.rawLen, h.payloadCrc, scratch,
+                                scratch + langpack::WINDOW_BYTES, {&feedParser, &parser}) ||
+      !parser.atBoundary()) {
+    LOG_ERR("I18N", "language pack %s does not inflate to what its header says", h.code);
+    return false;
+  }
+  LOG_INF("I18N", "language pack %s: %u strings, %u of keys this firmware does not have", h.code,
+          static_cast<unsigned>(strings.known()), static_cast<unsigned>(strings.unknown()));
+  return true;
+}
+
+}  // namespace
+
+bool I18n::packPath(const Language lang, char* out, const size_t outSize) {
+  const auto index = static_cast<size_t>(lang);
+  if (index == 0 || index >= static_cast<size_t>(Language::_COUNT)) return false;
+  char code[8];
+  size_t n = 0;
+  for (const char* c = LANGUAGE_CODES[index]; *c && n + 1 < sizeof(code); ++c) {
+    code[n++] = (*c >= 'A' && *c <= 'Z') ? static_cast<char>(*c - 'A' + 'a') : *c;
+  }
+  code[n] = '\0';
+  return snprintf(out, outSize, "%s/%s.cplang", PACK_DIR, code) < static_cast<int>(outSize);
+}
+
+bool I18n::packOnCard(const Language lang) {
+  char path[48];
+  return !packPath(lang, path, sizeof(path)) || Storage.exists(path);
 }
 
 void I18n::refreshActiveStrings() {
@@ -42,24 +147,32 @@ void I18n::refreshActiveStrings() {
   _active = englishStrings();
   if (_ext) _ext->attach(_language, nullptr, 0);
 
-  const auto index = static_cast<size_t>(_language);
-  if (index == 0 || index >= static_cast<size_t>(Language::_COUNT)) return;
+  char path[48];
+  if (!packPath(_language, path, sizeof(path))) return;  // English
+  const auto langIndex = static_cast<uint8_t>(_language);
+  // The code as the pack's file name and header spell it: "de".
+  const char* code = path + strlen(PACK_DIR) + 1;
+  char codeBuf[langpack::CODE_BYTES + 1] = {};
+  for (size_t i = 0; i < langpack::CODE_BYTES && code[i] != '.'; ++i) codeBuf[i] = code[i];
 
-  const i18n_strings::LangPack& pack = i18n_strings::LANGPACKS[index];
-  if (!pack.data || pack.compressedLen == 0) return;
+  CardPack pack;
+  if (!openCardPack(path, codeBuf, pack)) {
+    LOG_INF("I18N", "language %s: no pack on the card (%s) - English until one is installed", codeBuf, path);
+    return;
+  }
 
-  const auto langIndex = static_cast<uint8_t>(index);
-  const auto keyCount = static_cast<uint16_t>(StrId::_COUNT);
-
-  // What the slot must hold for this language: its strings, and whatever the extension adds. The
-  // extension's stamp is folded in so new font data rebuilds the slot as new strings do.
+  // What the slot must hold for this language: the pack's strings for this firmware's keys, and
+  // whatever the extension adds. The extension's stamp is folded in so new font data rebuilds the
+  // slot as new strings do.
   const uint32_t extBytes = _ext ? _ext->bytes(_language) : 0;
-  const uint32_t stamp = extBytes ? pack.stamp ^ _ext->stamp(_language) : pack.stamp;
+  uint32_t stamp = langpack::slotStamp(pack.header, KEY_LAYOUT_STAMP);
+  if (extBytes) stamp ^= _ext->stamp(_language);
 
-  // Built when the slot does not hold this pack -- a different language, the same one from a
-  // different firmware build (the stamp covers both), or bytes that changed behind its header since,
-  // which acquire() finds by the slot's CRCs and rebuilds at once, in this boot. Rebuilding costs an
-  // erase plus ~30 KB of inflate; a CJK language adds its UI faces, ~45-73 KB of inflate more.
+  // Built when the slot does not hold this pack -- a different language, another pack of the same
+  // one, a firmware with other keys (the stamp covers all three), or bytes that changed behind its
+  // header since, which acquire() finds by the slot's CRCs and rebuilds at once, in this boot.
+  // Otherwise the pack's header is all that was read of the card. Rebuilding costs an erase plus
+  // ~30 KB of inflate; a CJK language adds its UI faces, ~45-73 KB of inflate more.
   struct Producer {
     LanguagePackExtension* ext;
     Language lang;
@@ -70,15 +183,19 @@ void I18n::refreshActiveStrings() {
                                                   return p->ext->produce(p->lang, out);
                                                 },
                                                 &producer};
+  // The strings never outgrow the payload they come from: its hashes are dropped on the way.
+  const FlashLangPartition::Strings strings{pack.header.rawLen, &producePackStrings, &pack};
   FlashLangPartition::Mapped mapped;
-  if (!FlashLangPartition::acquire(langIndex, stamp, pack.data, pack.compressedLen, pack.uncompressedLen, keyCount,
-                                   OFFSETS_EN, extBytes ? &extension : nullptr, &mapped)) {
-    LOG_ERR("I18N", "language pack %u could not be built or mapped - staying on English", langIndex);
+  const bool ok =
+      FlashLangPartition::acquire(langIndex, stamp, KEY_COUNT, strings, extBytes ? &extension : nullptr, &mapped);
+  pack.file.close();
+  if (!ok) {
+    LOG_ERR("I18N", "language pack %s could not be built or mapped - staying on English", codeBuf);
     return;
   }
 
   _active = {mapped.data, mapped.offsets};
-  LOG_INF("I18N", "language pack %u active", langIndex);
+  LOG_INF("I18N", "language pack %s active", codeBuf);
 
   // An extension that failed to build, to map or to verify is simply not attached; its reader works
   // without it. One that failed to build or to verify is built again by the next refresh; one the
