@@ -1,0 +1,15 @@
+# Kconfig options gen_sections_ld.py flips against the prebuilt sdkconfig. Each changes the ESP-IDF linker fragments
+# only (grep of IDF v5.5.5: the symbol appears in .lf files and test apps, in no compiled source), so the prebuilt
+# libraries stay valid.
+#
+# FreeRTOS: the kernel functions IDF's freertos/linker.lf allows in flash; the ISR-callable ones (FromISR, the tick,
+# the context switch, critical sections) and those spi_flash's cache-disabled path calls stay in IRAM.
+CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y
+# Ring buffers: everything but the ISR functions (RINGBUF_PLACE_ISR_FUNCTIONS_INTO_FLASH stays unset), so
+# xRingbufferSendFromISR and the other FromISR calls of the USB-CDC interrupt stay in IRAM.
+CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH=y
+# RMT: no code of this firmware creates an RMT channel, and RMT_ISR_IRAM_SAFE is unset, so an RMT interrupt would be
+# registered without ESP_INTR_FLAG_IRAM (masked while the cache is off) anyway. RMT_ENCODER_FUNC_IN_IRAM stays: it is
+# also read by rmt_encoder.h (compiled code).
+# CONFIG_RMT_TX_ISR_HANDLER_IN_IRAM is not set
+# CONFIG_RMT_RX_ISR_HANDLER_IN_IRAM is not set
