@@ -23,6 +23,7 @@
 #include "../epub_pipeline/LogObserver.h"
 #include "EpdFontData.h"
 #include "SdCardFont.h"
+#include "ShortCardFile.h"
 
 namespace {
 
@@ -757,7 +758,8 @@ TEST(SdFontCorruptGlyph, AGoodFontLoadsAsBefore) {
 }
 
 // The rule against every font the app offers, from the file and mapped: a record it refused would be a character gone
-// from a good font. Each runs from a temporary copy, as a font's path has a length limit a checkout's may pass.
+// from a good font. Each runs from a copy at a short path (ShortCardFile.h), as a font's path has a length limit a
+// checkout's may pass.
 TEST(SdFontCorruptGlyph, NoShippedFontHoldsACorruptRecord) {
   constexpr const char* kSample =
       " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
@@ -772,7 +774,8 @@ TEST(SdFontCorruptGlyph, NoShippedFontHoldsACorruptRecord) {
       if (entry.path().extension() != ".cpfont") continue;
       std::ifstream in(entry.path(), std::ios::binary);
       const std::vector<uint8_t> file((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-      const std::string path = writeTemp(file);
+      const ShortCardFile copy = ShortCardFile::copyOf(entry.path().string());
+      const std::string& path = copy.path();
       SdCardFont fromCard;
       ASSERT_TRUE(fromCard.load(path.c_str())) << entry.path();
       fromCard.prewarm(kSample, 0x0F);

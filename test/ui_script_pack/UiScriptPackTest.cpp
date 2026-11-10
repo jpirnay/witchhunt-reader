@@ -18,6 +18,7 @@
 #include "EpdFont.h"
 #include "FallbackFaceProvider.h"
 #include "SdCardFont.h"
+#include "ShortCardFile.h"
 #include "UiFaceProvider.h"
 #include "builtinFonts/inter_ui_10_bold.h"
 #include "builtinFonts/inter_ui_10_regular.h"
@@ -99,7 +100,8 @@ const std::string TITLE = "\xD8\xA7\xD9\x84\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85 \xD8
 class UiScriptPackTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    ASSERT_TRUE(pack.load(packPath(10).c_str()));
+    packFile = ShortCardFile::copyOf(packPath(10));
+    ASSERT_TRUE(pack.load(packFile.c_str()));
     file = readCpfont(packPath(10));
     ASSERT_EQ(file.styles.size(), 2u);
     regularHooks = PackHooks{&pack, 0};
@@ -127,6 +129,7 @@ class UiScriptPackTest : public ::testing::Test {
     }
   }
 
+  ShortCardFile packFile;  // the pack at a short path (ShortCardFile.h); before `pack`, so it outlives it
   SdCardFont pack;
   FileFont file;
   FallbackFaceProvider shared;
