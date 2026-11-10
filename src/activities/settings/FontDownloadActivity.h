@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "FontInstaller.h"
 #include "activities/UiListActivity.h"
@@ -92,6 +93,9 @@ class FontDownloadActivity final : public UiListActivity {
   // The last install was a hyphenation pack: "Hyphenation installed!" rather than "Font installed!".
   bool completedPack_ = false;
   bool cancelRequested_ = false;
+  // In downloadAll() or updateAll(): an install leaves the registry's discovery, and the note it decides, to the end
+  // of the batch (finishBatch()), rather than scanning every font folder again per family while TLS holds the heap.
+  bool inBatch_ = false;
   int previousActionCount_ = 0;
   // What the two action rows offer, counted by refreshRowTotals() so that listCount() and the row
   // provider never walk families_, and the rows' labels ("Download all (12.3 MB)") they point at.
@@ -137,6 +141,9 @@ class FontDownloadActivity final : public UiListActivity {
   void downloadFamilyImpl(FontCatalog& family, int familyIdx);
   void downloadAll();
   void updateAll();
+  // A batch's end, however it ended: the registry discovered once when it installed a font family, and the note of
+  // one it does not list.
+  void finishBatch(const std::vector<int>& targets);
   // The transfer's input pump: true once Back has been pressed, read as an event.
   bool backPressedDuringTransfer();
 

@@ -298,10 +298,13 @@ void FontDownloadActivity::downloadAll() {
     // Not the CJK families, many MB each: their rows install them one at a time.
     if (FontDownloadRules::downloadAllTakes(families_, i)) targetIndices.push_back(static_cast<int>(i));
   }
+  inBatch_ = true;
   for (int idx : targetIndices) {
     downloadFamily(idx);
-    if (state_ == ERROR || cancelRequested_) return;
+    if (state_ == ERROR || cancelRequested_) break;
   }
+  finishBatch(targetIndices);
+  if (state_ == ERROR || cancelRequested_) return;
 
   RenderLock lock(*this);
   completedPack_ = false;  // "Download all" takes no pack (the manifest keeps them out of it)
@@ -319,15 +322,40 @@ void FontDownloadActivity::updateAll() {
       onlyPacks = onlyPacks && families_.hyphenation(i);
     }
   }
+  inBatch_ = true;
   for (int idx : targetIndices) {
     downloadFamily(idx);
-    if (state_ == ERROR || cancelRequested_) return;
+    if (state_ == ERROR || cancelRequested_) break;
   }
+  finishBatch(targetIndices);
+  if (state_ == ERROR || cancelRequested_) return;
 
   RenderLock lock(*this);
   // The batch's screen says what it installed: hyphenation only when every update was a pack.
   completedPack_ = onlyPacks && !targetIndices.empty();
   state_ = COMPLETE;
+}
+
+void FontDownloadActivity::finishBatch(const std::vector<int>& targets) {
+  inBatch_ = false;
+  // Only the families now on the card (a failed or cancelled one is not), and no pack: the registry lists fonts. A
+  // failed restore of the list leaves it empty, and nothing to look at.
+  const auto installedFont = [this](const int idx) {
+    return idx >= 0 && static_cast<size_t>(idx) < families_.count() && families_.installed(idx) &&
+           !families_.hyphenation(idx);
+  };
+  if (std::none_of(targets.begin(), targets.end(), installedFont)) return;
+  fontInstaller_.refreshRegistry();
+  bool notListed = false;
+  for (const int idx : targets) {
+    if (!installedFont(idx) || !fontInstaller_.installedButNotListed(families_, idx)) continue;
+    LOG_INF("FONT", "%s installed but not listed: the glyph store cannot hold it", families_.name(idx));
+    notListed = true;
+  }
+  if (notListed) {
+    RenderLock lock(*this);
+    completeNote_ = tr(STR_FONT_NOT_LISTED);
+  }
 }
 
 void FontDownloadActivity::refreshRowTotals() {
@@ -713,7 +741,8 @@ void FontDownloadActivity::downloadFamilyImpl(FontCatalog& family, int familyIdx
     LOG_INF("FONT", "Failed to remove backup dir after successful install: %s", backupDir);
   }
 
-  fontInstaller_.refreshRegistry();
+  // A batch discovers once, at its end (finishBatch()), and nothing in it reads the registry before then.
+  if (!inBatch_) fontInstaller_.refreshRegistry();
   family.setInstalled(0, true);
   family.setHasUpdate(0, false);
   family.setHasResumableDownload(0, false);
@@ -721,7 +750,7 @@ void FontDownloadActivity::downloadFamilyImpl(FontCatalog& family, int familyIdx
   // it needs families_ which is empty during this impl.
 
   RenderLock lock(*this);
-  if (fontInstaller_.installedButNotListed(family, 0)) {
+  if (!inBatch_ && fontInstaller_.installedButNotListed(family, 0)) {
     // On the card, but the registry does not list it: an outline family the glyph store cannot hold. The list shows
     // it installed, so it is not offered again; the note says why it is not in the font choices.
     LOG_INF("FONT", "%s installed but not listed: the glyph store cannot hold it", familyName);
