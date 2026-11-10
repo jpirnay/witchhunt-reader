@@ -1721,6 +1721,370 @@
       ]
     },
     {
+      "name": "Language-Belarusian",
+      "description": "Menus and messages in Belarusian",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Belarusian/be.cplang",
+          "size": 14137,
+          "crc32": 3836275213
+        }
+      ]
+    },
+    {
+      "name": "Language-Catalan",
+      "description": "Menus and messages in Catalan",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Catalan/ca.cplang",
+          "size": 12023,
+          "crc32": 1005001544
+        }
+      ]
+    },
+    {
+      "name": "Language-ChineseSimplified",
+      "description": "Menus and messages in Simplified Chinese",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-ChineseSimplified/zh.cplang",
+          "size": 10831,
+          "crc32": 2735416806
+        }
+      ]
+    },
+    {
+      "name": "Language-Czech",
+      "description": "Menus and messages in Czech",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Czech/cs.cplang",
+          "size": 12521,
+          "crc32": 1762126209
+        }
+      ]
+    },
+    {
+      "name": "Language-Danish",
+      "description": "Menus and messages in Danish",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Danish/da.cplang",
+          "size": 11220,
+          "crc32": 2056829934
+        }
+      ]
+    },
+    {
+      "name": "Language-Dutch",
+      "description": "Menus and messages in Dutch",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Dutch/nl.cplang",
+          "size": 11474,
+          "crc32": 41063849
+        }
+      ]
+    },
+    {
+      "name": "Language-Finnish",
+      "description": "Menus and messages in Finnish",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Finnish/fi.cplang",
+          "size": 11915,
+          "crc32": 1730977572
+        }
+      ]
+    },
+    {
+      "name": "Language-French",
+      "description": "Menus and messages in French",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-French/fr.cplang",
+          "size": 11820,
+          "crc32": 2334984426
+        }
+      ]
+    },
+    {
+      "name": "Language-German",
+      "description": "Menus and messages in German",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-German/de.cplang",
+          "size": 11530,
+          "crc32": 3956164417
+        }
+      ]
+    },
+    {
+      "name": "Language-Hungarian",
+      "description": "Menus and messages in Hungarian",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Hungarian/hu.cplang",
+          "size": 12377,
+          "crc32": 2251672135
+        }
+      ]
+    },
+    {
+      "name": "Language-Italian",
+      "description": "Menus and messages in Italian",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Italian/it.cplang",
+          "size": 11660,
+          "crc32": 2292960272
+        }
+      ]
+    },
+    {
+      "name": "Language-Japanese",
+      "description": "Menus and messages in Japanese",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Japanese/ja.cplang",
+          "size": 11813,
+          "crc32": 1791436595
+        }
+      ]
+    },
+    {
+      "name": "Language-Kazakh",
+      "description": "Menus and messages in Kazakh",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Kazakh/kk.cplang",
+          "size": 13858,
+          "crc32": 3320092692
+        }
+      ]
+    },
+    {
+      "name": "Language-Korean",
+      "description": "Menus and messages in Korean",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Korean/ko.cplang",
+          "size": 11333,
+          "crc32": 543838874
+        }
+      ]
+    },
+    {
+      "name": "Language-Lithuanian",
+      "description": "Menus and messages in Lithuanian",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Lithuanian/lt.cplang",
+          "size": 11896,
+          "crc32": 472360263
+        }
+      ]
+    },
+    {
+      "name": "Language-Polish",
+      "description": "Menus and messages in Polish",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Polish/pl.cplang",
+          "size": 12341,
+          "crc32": 304909593
+        }
+      ]
+    },
+    {
+      "name": "Language-PortugueseBR",
+      "description": "Menus and messages in Brazilian Portuguese",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-PortugueseBR/po.cplang",
+          "size": 11881,
+          "crc32": 3435192470
+        }
+      ]
+    },
+    {
+      "name": "Language-PortuguesePT",
+      "description": "Menus and messages in European Portuguese",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-PortuguesePT/pt.cplang",
+          "size": 12142,
+          "crc32": 3088032202
+        }
+      ]
+    },
+    {
+      "name": "Language-Romanian",
+      "description": "Menus and messages in Romanian",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Romanian/ro.cplang",
+          "size": 12036,
+          "crc32": 504742073
+        }
+      ]
+    },
+    {
+      "name": "Language-Russian",
+      "description": "Menus and messages in Russian",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Russian/ru.cplang",
+          "size": 14051,
+          "crc32": 922825654
+        }
+      ]
+    },
+    {
+      "name": "Language-Slovenian",
+      "description": "Menus and messages in Slovenian",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Slovenian/si.cplang",
+          "size": 11829,
+          "crc32": 798091951
+        }
+      ]
+    },
+    {
+      "name": "Language-Spanish",
+      "description": "Menus and messages in Spanish",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Spanish/es.cplang",
+          "size": 11967,
+          "crc32": 2290458560
+        }
+      ]
+    },
+    {
+      "name": "Language-Swedish",
+      "description": "Menus and messages in Swedish",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Swedish/sv.cplang",
+          "size": 11593,
+          "crc32": 134679118
+        }
+      ]
+    },
+    {
+      "name": "Language-Turkish",
+      "description": "Menus and messages in Turkish",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Turkish/tr.cplang",
+          "size": 11929,
+          "crc32": 2772577087
+        }
+      ]
+    },
+    {
+      "name": "Language-Ukrainian",
+      "description": "Menus and messages in Ukrainian",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Ukrainian/uk.cplang",
+          "size": 14223,
+          "crc32": 1955765677
+        }
+      ]
+    },
+    {
+      "name": "Language-Vietnamese",
+      "description": "Menus and messages in Vietnamese",
+      "format": "language",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Language-Vietnamese/vi.cplang",
+          "size": 11888,
+          "crc32": 4235857763
+        }
+      ]
+    },
+    {
       "name": "Hyphenation-Assamese",
       "description": "Hyphenation for books in Assamese: lines break between syllables, without a hyphen",
       "format": "hyphenation",

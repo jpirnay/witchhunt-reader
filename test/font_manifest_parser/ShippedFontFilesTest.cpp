@@ -89,3 +89,29 @@ TEST(ShippedFontFilesTest, EveryHyphenationPackIsTheSizeAndCrcTheManifestNames) 
   }
   EXPECT_EQ(checked, 31);
 }
+
+// The UI language packs too: each one the manifest lists (scripts/gen_i18n.py --packs) is there, at its size and
+// CRC32, and starts with a CPLG header naming the language its file name does.
+TEST(ShippedFontFilesTest, EveryLanguagePackIsTheSizeAndCrcTheManifestNames) {
+  int checked = 0;
+  for (const ManifestFile& entry : manifestFiles()) {
+    if (FontDownloadRules::kindOf(entry.name.c_str()) != FontDownloadRules::FileKind::LanguagePack) continue;
+    const std::filesystem::path path = std::filesystem::path(SD_FONTS_DIR) / entry.name;
+    std::ifstream in(path, std::ios::binary);
+    ASSERT_TRUE(in.good()) << entry.name << " is in the manifest but not under assets/sd-fonts";
+    const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(bytes.size(), entry.size) << entry.name;
+    ASSERT_TRUE(entry.hasCrc32) << entry.name;
+    EXPECT_EQ(serialtransfer::crc32Update(0, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()), entry.crc32)
+        << entry.name << " changed without scripts/generate-font-manifest.py";
+    ASSERT_GE(bytes.size(), 64u);
+    EXPECT_TRUE(FontDownloadRules::headOk(FontDownloadRules::FileKind::LanguagePack,
+                                          reinterpret_cast<const uint8_t*>(bytes.data()),
+                                          FontDownloadRules::kHeadBytes))
+        << entry.name;
+    const std::string file = path.filename().string();  // <code>.cplang
+    EXPECT_EQ(bytes.substr(8, 2), file.substr(0, 2)) << entry.name;
+    ++checked;
+  }
+  EXPECT_EQ(checked, 26);
+}
