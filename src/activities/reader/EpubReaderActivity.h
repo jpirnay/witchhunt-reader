@@ -982,7 +982,7 @@ class EpubReaderActivity final : public Activity {
   // Debug overlay: draws the background-work indicators (A: '.'/'x', B: section build %)
   // in a status-bar corner. Compiled to a no-op unless DEBUG_BACKGROUND_WORK is set.
   void renderBackgroundDebugOverlay() const;
-  // Snapshot of the three status-bar signals that can change while a page is otherwise idle.
+  // Snapshot of the status-bar signals that can change while a page is otherwise idle.
   // Compared in shouldSkipPeriodicUpdate() to suppress no-op minute-tick re-renders that on
   // X3 panels accumulate visible speckle via repeated no-diff FAST refreshes.
   mutable int lastStatusBarPage = -1;
@@ -990,10 +990,13 @@ class EpubReaderActivity final : public Activity {
   mutable int lastStatusBarSpine_ = -1;
   mutable int lastStatusBarBattery = -1;
   mutable int lastStatusBarClockMinute = -1;
-  // A minute tick that came while the page on screen was still being finished -- a pass in flight
-  // (a turn's display, its AA replay, a pre-render) or its deferred AA still to run. Its refresh is
-  // asked for once all of that is done (serviceOwedPeriodicRefresh), not queued behind it.
-  // Loop task only: set by shouldSkipPeriodicUpdate() (ActivityManager::loop), read in loop().
+  // The auto-sync indicator the status bar drew (refreshAutoSyncIndicator() asks for a redraw when it flips).
+  mutable SyncIndicator lastStatusBarSyncIndicator_ = SyncIndicator::None;
+  // A minute tick or an auto-sync indicator flip that came while the page on screen was still being
+  // finished -- a pass in flight (a turn's display, its AA replay, a pre-render) or its deferred AA
+  // still to run. Its refresh is asked for once all of that is done (serviceOwedPeriodicRefresh),
+  // not queued behind it. Loop task only: set by shouldSkipPeriodicUpdate() (ActivityManager::loop,
+  // refreshAutoSyncIndicator()), read in loop().
   mutable bool periodicRefreshOwed_ = false;
   // loop()'s idle branch: asks again for an owed minute-tick refresh once the reader has settled.
   void serviceOwedPeriodicRefresh();

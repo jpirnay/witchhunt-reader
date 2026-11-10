@@ -6979,6 +6979,7 @@ void EpubReaderActivity::renderStatusBar() const {
 
   lastStatusBarPage = currentPage;
   lastStatusBarSpine_ = currentSpineIndex;
+  lastStatusBarSyncIndicator_ = syncIndicator;
   lastStatusBarBattery = SETTINGS.statusBarBattery ? static_cast<int>(powerManager.getBatteryPercentage()) : -1;
   if (SETTINGS.useClock && SETTINGS.statusBarClock && HalClock::isSynced()) {
     const time_t now = HalClock::now();
@@ -7218,6 +7219,9 @@ bool EpubReaderActivity::shouldSkipPeriodicUpdate() const {
     const int minute = now > 0 ? static_cast<int>(now / 60) : -1;
     if (minute != lastStatusBarClockMinute) return false;
   }
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  if (autoSyncIndicator != lastStatusBarSyncIndicator_) return false;
+#endif
   return true;
 }
 
