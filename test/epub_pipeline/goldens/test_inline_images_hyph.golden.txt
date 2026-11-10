@@ -1,0 +1,427 @@
+BOOK title=Inline Images Test lang=en spine=4 toc=4 reliableToc=1
+SPINE 0 href=OEBPS/text/chapter1.xhtml pages=5 truncated=0 cssFallback=0
+ PAGE 0 elements=23 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=CASE1
+   W x=55 s=0 z=100 t=BASELINE
+   W x=143 s=0 z=100 t=Press
+   W x=194 s=0 z=100 t=the
+   W x=261 s=0 z=100 t=key
+   W x=293 s=0 z=100 t=to
+   W x=322 s=0 z=100 t=open
+   W x=367 s=0 z=100 t=the
+   W x=405 s=0 z=100 t=door,
+  IMG y=2 x=232 w=22 h=16 src=<cache>/epub_<hash>/img_faf80d6d323af4da.png inline=1
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=then
+   W x=48 s=0 z=100 t=turn
+   W x=94 s=0 z=100 t=left.
+  LINE y=57 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=CASE2
+   W x=55 s=0 z=100 t=EM
+   W x=79 s=0 z=100 t=An
+   W x=104 s=0 z=100 t=icon
+   W x=146 s=0 z=100 t=one
+   W x=184 s=0 z=100 t=em
+   W x=209 s=0 z=100 t=tall
+   W x=279 s=0 z=100 t=sits
+   W x=319 s=0 z=100 t=on
+   W x=348 s=0 z=100 t=the
+   W x=385 s=0 z=100 t=line
+   W x=426 s=0 z=100 t=like
+  IMG y=57 x=255 w=18 h=18 src=<cache>/epub_<hash>/img_ab3709d6089f64e1.png inline=1
+  LINE y=81 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=a
+   W x=18 s=0 z=100 t=letter
+   W x=79 s=0 z=100 t=does.
+  LINE y=140 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=CASE3
+   W x=57 s=0 z=100 t=TALL
+   W x=102 s=0 z=100 t=This
+   W x=142 s=0 z=100 t=line
+   W x=184 s=0 z=100 t=holds
+   W x=241 s=0 z=100 t=a
+   W x=260 s=0 z=100 t=taller
+   W x=324 s=0 z=100 t=image
+   W x=416 s=0 z=100 t=that
+  IMG y=114 x=379 w=30 h=44 src=<cache>/epub_<hash>/img_077f2dab89ad506a.png inline=1
+  LINE y=164 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=lowers
+   W x=59 s=0 z=100 t=its
+   W x=90 s=0 z=100 t=text,
+   W x=140 s=0 z=100 t=and
+   W x=177 s=0 z=100 t=the
+   W x=214 s=0 z=100 t=line
+   W x=255 s=0 z=100 t=before
+   W x=315 s=0 z=100 t=it
+   W x=337 s=0 z=100 t=keeps
+   W x=384 s=0 z=100 t=its
+   W x=415 s=0 z=100 t=place
+  LINE y=188 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=above;
+   W x=66 s=0 z=100 t=the
+   W x=103 s=0 z=100 t=next
+   W x=146 s=0 z=100 t=line
+   W x=187 s=0 z=100 t=follows
+   W x=260 s=0 z=100 t=below
+   W x=308 s=0 z=100 t=the
+   W x=345 s=0 z=100 t=taller
+   W x=408 s=0 z=100 t=line.
+  LINE y=222 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=CASE4
+   W x=59 s=0 z=100 t=VALIGN
+   W x=118 s=0 z=100 t=mid
+   W x=170 s=0 z=100 t=ttop
+   W x=236 s=0 z=100 t=tbot
+   W x=302 s=0 z=100 t=top
+   W x=358 s=0 z=100 t=bot
+   W x=414 s=0 z=100 t=sup
+  IMG y=228 x=150 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=222 x=216 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=234 x=282 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=222 x=338 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=234 x=394 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=221 x=448 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  LINE y=246 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=sub
+   W x=50 s=0 z=100 t=end.
+  IMG y=256 x=32 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  LINE y=279 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=CASE5
+   W x=58 s=0 z=100 t=GLYPH
+   W x=111 s=0 z=100 t=The
+   W x=144 s=0 z=100 t=sea
+   W x=180 s=0 z=100 t=god
+   W x=233 s=0 z=100 t=gir
+   W x=264 s=0 z=100 t=and
+   W x=301 s=0 z=100 t=the
+   W x=338 s=0 z=100 t=hall
+   W x=386 s=0 z=100 t=of
+   W x=430 s=0 z=100 t=sir
+  IMG y=279 x=217 w=16 h=18 src=<cache>/epub_<hash>/img_6c697ad10612878f.png inline=1
+  IMG y=279 x=414 w=16 h=18 src=<cache>/epub_<hash>/img_6c697ad10612878f.png inline=1
+  LINE y=303 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=stand
+   W x=56 s=0 z=100 t=whole.
+ PAGE 1 elements=21 footnotes=2
+  LINE y=2 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=CASE6
+   W x=61 s=0 z=100 t=EMOJI
+   W x=429 s=0 z=100 t=the
+  IMG y=0 x=114 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=136 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=158 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=180 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=202 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=224 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=246 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=268 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=290 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=312 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=334 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=356 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=378 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  IMG y=0 x=400 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  LINE y=26 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=run
+   W x=36 s=0 z=100 t=wraps
+   W x=83 s=0 z=100 t=between
+   W x=149 s=0 z=100 t=its
+   W x=180 s=0 z=100 t=images.
+  LINE y=59 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=CASE7
+   W x=61 s=0 z=100 t=LINK
+   W x=107 s=0 z=100 t=See
+   W x=144 s=0 z=100 t=the
+   W x=182 s=0 z=100 t=note
+   W x=256 s=0 z=100 t=here,
+   W x=309 s=0 z=100 t=and
+   W x=376 s=4 z=100 t=the
+   W x=414 s=4 z=100 t=keyed
+  IMG y=59 x=231 w=18 h=18 src=<cache>/epub_<hash>/img_ab3709d6089f64e1.png inline=1 linked=1
+  IMG y=61 x=347 w=22 h=16 src=<cache>/epub_<hash>/img_faf80d6d323af4da.png inline=1 linked=1
+  LINE y=83 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=4 z=100 t=note
+   W x=48 s=0 z=100 t=there.
+  LINE y=116 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=CASE8
+   W x=59 s=0 z=100 t=JUSTIFY
+   W x=131 s=0 z=100 t=Notwithstanding
+   W x=283 s=0 z=100 t=the
+   W x=325 s=0 z=100 t=extraordinarily
+  FN n= href=#note1
+  FN n=the keyed note href=#note1
+ PAGE 2 elements=23 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=28 s=0 z=100 t=uncharacteristic
+   W x=183 s=0 z=100 t=circumstances,
+   W x=317 s=0 z=100 t=the
+   W x=358 s=0 z=100 t=representa-
+  IMG y=0 x=0 w=18 h=18 src=<cache>/epub_<hash>/img_ab3709d6089f64e1.png inline=1
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=tives
+   W x=80 s=0 z=100 t=acknowledged
+   W x=196 s=0 z=100 t=the
+   W x=233 s=0 z=100 t=incomprehensibilities
+   W x=434 s=0 z=100 t=of
+  IMG y=26 x=52 w=22 h=16 src=<cache>/epub_<hash>/img_faf80d6d323af4da.png inline=1
+  IMG y=30 x=416 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=the
+   W x=41 s=0 z=100 t=counterrevolutionary
+   W x=247 s=0 z=100 t=proposals,
+   W x=348 s=0 z=100 t=establishing
+  LINE y=74 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=30 s=0 z=100 t=unquestionably
+   W x=172 s=0 z=100 t=the
+   W x=213 s=0 z=100 t=interdisciplinary
+   W x=363 s=0 z=100 t=collabora-
+  IMG y=72 x=0 w=20 h=20 src=<cache>/epub_<hash>/img_58c80aaafbca211a.png inline=1
+  LINE y=98 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=tion.
+  LINE y=131 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=CASE9
+   W x=110 s=0 z=100 t=FORMULA
+   W x=229 s=0 z=100 t=The
+   W x=317 s=0 z=100 t=roots
+   W x=429 s=0 z=100 t=are
+  LINE y=157 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=301 s=0 z=100 t=for
+   W x=352 s=0 z=100 t=every
+   W x=419 s=0 z=100 t=qua-
+  IMG y=155 x=0 w=280 h=28 src=<cache>/epub_<hash>/img_c1bf25826fd3494f.png inline=1
+  LINE y=183 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=dratic.
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=CASE10
+   W x=66 s=0 z=100 t=MANY
+   W x=122 s=0 z=100 t=w0
+   W x=164 s=0 z=100 t=w1
+   W x=200 s=0 z=100 t=w2
+   W x=237 s=0 z=100 t=w3
+   W x=275 s=0 z=100 t=w4
+   W x=314 s=0 z=100 t=w5
+   W x=354 s=0 z=100 t=w6
+   W x=395 s=0 z=100 t=w7
+   W x=437 s=0 z=100 t=w8
+  IMG y=222 x=104 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=222 x=146 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=222 x=182 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=222 x=219 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=222 x=257 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=222 x=296 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=222 x=336 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=222 x=377 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=222 x=419 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+ PAGE 3 elements=12 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=w9
+   W x=55 s=0 z=100 t=w10
+   W x=103 s=0 z=100 t=w11
+   W x=145 s=0 z=100 t=w12
+   W x=188 s=0 z=100 t=w13
+   W x=232 s=0 z=100 t=w14
+   W x=277 s=0 z=100 t=w15
+   W x=323 s=0 z=100 t=w16
+   W x=370 s=0 z=100 t=w17
+   W x=418 s=0 z=100 t=w18
+  IMG y=6 x=0 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=37 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=85 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=127 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=170 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=214 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=259 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=305 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=352 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=400 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=442 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+ PAGE 4 elements=26 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w19
+   W x=43 s=0 z=100 t=w20
+   W x=92 s=0 z=100 t=w21
+   W x=135 s=0 z=100 t=w22
+   W x=179 s=0 z=100 t=w23
+   W x=224 s=0 z=100 t=w24
+   W x=270 s=0 z=100 t=w25
+   W x=317 s=0 z=100 t=w26
+   W x=365 s=0 z=100 t=w27
+   W x=414 s=0 z=100 t=w28
+  IMG y=6 x=25 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=74 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=117 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=161 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=206 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=252 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=299 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=347 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=396 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=6 x=439 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=w29
+   W x=26 s=0 z=100 t=end.
+  IMG y=57 x=190 w=80 h=20 src=<cache>/epub_<hash>/img_48bc4bba7c7abbcd.png
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=CASE11
+   W x=66 s=0 z=100 t=ORNAMENT
+   W x=143 s=0 z=100 t=above:
+   W x=214 s=0 z=100 t=a
+   W x=238 s=0 z=100 t=paragraph
+   W x=337 s=0 z=100 t=of
+   W x=371 s=0 z=100 t=an
+   W x=406 s=0 z=100 t=image
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=alone
+   W x=59 s=0 z=100 t=stays
+   W x=113 s=0 z=100 t=a
+   W x=131 s=0 z=100 t=centred
+   W x=199 s=0 z=100 t=block.
+  LINE y=143 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=CASE12
+   W x=61 s=0 z=100 t=PICTURE
+   W x=131 s=0 z=100 t=before
+  IMG y=167 x=110 w=240 h=180 src=<cache>/epub_<hash>/img_01e57cf3b2c550d7.png
+  LINE y=347 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=after:
+   W x=81 s=0 z=100 t=a
+   W x=99 s=0 z=100 t=picture
+   W x=162 s=0 z=100 t=keeps
+   W x=209 s=0 z=100 t=its
+   W x=240 s=0 z=100 t=block.
+  LINE y=380 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=CASE13
+   W x=62 s=0 z=100 t=BLOCK
+   W x=118 s=0 z=100 t=before
+  IMG y=404 x=221 w=18 h=18 src=<cache>/epub_<hash>/img_ab3709d6089f64e1.png
+  LINE y=422 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=after:
+   W x=81 s=0 z=100 t=the
+   W x=118 s=0 z=100 t=book
+   W x=162 s=0 z=100 t=made
+   W x=207 s=0 z=100 t=it
+   W x=229 s=0 z=100 t=a
+   W x=247 s=0 z=100 t=block.
+  LINE y=455 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=CASE14
+   W x=63 s=0 z=100 t=FLOAT
+  IMG y=479 x=221 w=18 h=18 src=<cache>/epub_<hash>/img_ab3709d6089f64e1.png
+  LINE y=497 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=a
+   W x=37 s=0 z=100 t=floated
+   W x=114 s=0 z=100 t=image
+   W x=169 s=0 z=100 t=keeps
+   W x=217 s=0 z=100 t=the
+   W x=255 s=0 z=100 t=float
+   W x=315 s=0 z=100 t=path
+   W x=362 s=0 z=100 t=beside
+   W x=416 s=0 z=100 t=this
+  LINE y=521 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=text.
+  LINE y=554 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=NOTE1
+   W x=45 s=0 z=100 t=The
+   W x=78 s=0 z=100 t=note
+   W x=126 s=0 z=100 t=the
+   W x=163 s=0 z=100 t=linked
+   W x=220 s=0 z=100 t=images
+   W x=283 s=0 z=100 t=lead
+   W x=327 s=0 z=100 t=to.
+SPINE 1 href=OEBPS/text/chapter2.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=3 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=158 s=0 z=100 t=המשך.
+    WD t=.ךשמה
+   W x=228 s=0 z=100 t=וגם
+    WD t=םגו
+   W x=263 s=0 z=100 t=עולם
+    WD t=םלוע
+   W x=329 s=0 z=100 t=שלום
+    WD t=םולש
+   W x=367 s=0 z=100 t=CASE15
+   W x=431 s=0 z=100 t=RTL
+   O order=5,4,3,2,0,1
+  IMG y=0 x=204 w=18 h=18 src=<cache>/epub_<hash>/img_ab3709d6089f64e1.png inline=1
+  IMG y=2 x=301 w=22 h=16 src=<cache>/epub_<hash>/img_faf80d6d323af4da.png inline=1
+SPINE 2 href=OEBPS/text/chapter3.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=9 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=24
+   W x=0 s=0 z=100 t=CASE16
+   W x=65 s=0 z=100 t=CJK
+   W x=102 s=0 z=100 t=吾
+   W x=118 s=0 z=100 t=輩
+   W x=134 s=0 z=100 t=は
+   W x=150 s=0 z=100 t=猫
+   W x=178 s=0 z=100 t=で
+   W x=194 s=0 z=100 t=あ
+   W x=210 s=0 z=100 t=る
+   W x=226 s=0 z=100 t=。
+   W x=239 s=0 z=100 t=名
+   W x=255 s=0 z=100 t=前
+   W x=271 s=0 z=100 t=は
+   W x=287 s=0 z=100 t=ま
+   W x=303 s=0 z=100 t=だ
+   W x=319 s=0 z=100 t=無
+   W x=335 s=0 z=100 t=い
+   W x=351 s=0 z=100 t=。
+   W x=364 s=0 z=100 t=ど
+   W x=380 s=0 z=100 t=こ
+   W x=396 s=0 z=100 t=で
+   W x=412 s=0 z=100 t=生
+   W x=428 s=0 z=100 t=れ
+   W x=444 s=0 z=100 t=た
+  IMG y=6 x=166 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=か
+   W x=34 s=0 z=100 t=と
+   W x=50 s=0 z=100 t=ん
+   W x=66 s=0 z=100 t=と
+   W x=82 s=0 z=100 t=見
+   W x=98 s=0 z=100 t=当
+   W x=114 s=0 z=100 t=が
+   W x=130 s=0 z=100 t=つ
+   W x=146 s=0 z=100 t=か
+   W x=162 s=0 z=100 t=ぬ
+   W x=178 s=0 z=100 t=。
+  IMG y=24 x=16 w=18 h=18 src=<cache>/epub_<hash>/img_ab3709d6089f64e1.png inline=1
+  LINE y=57 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=CASE17
+   W x=66 s=0 z=100 t=RUBY
+   W x=122 s=0 z=100 t=漢
+   W x=138 s=0 z=100 t=字
+   W x=154 s=0 z=100 t=の
+   W x=170 s=0 z=100 t=前
+   W x=186 s=0 z=100 t=に
+   W x=202 s=0 z=100 t=画
+   W x=218 s=0 z=100 t=像
+   W x=234 s=0 z=100 t=。
+   R first=2 count=2 x=122 w=32 t=かんじ
+  IMG y=72 x=110 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  LINE y=99 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=CASE18
+   W x=60 s=0 z=100 t=INRUBY
+   W x=120 s=0 z=100 t=前
+   W x=136 s=0 z=100 t=漢
+  IMG y=123 x=224 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png
+  LINE y=135 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=か
+   W x=34 s=0 z=100 t=ん
+   W x=50 s=0 z=100 t=後
+   W x=66 s=0 z=100 t=。
+SPINE 3 href=OEBPS/text/chapter4.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=2 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=CASE19
+   W x=61 s=0 z=100 t=VERTICAL
+   W x=143 s=0 z=100 t=縦
+   W x=159 s=0 z=100 t=書
+   W x=175 s=0 z=100 t=き
+   W x=191 s=0 z=100 t=の
+   W x=207 s=0 z=100 t=文
+   W x=235 s=0 z=100 t=の
+   W x=251 s=0 z=100 t=中
+   W x=267 s=0 z=100 t=の
+   W x=283 s=0 z=100 t=画
+   W x=299 s=0 z=100 t=像
+   W x=315 s=0 z=100 t=。
+  IMG y=6 x=223 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
