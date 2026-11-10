@@ -68,6 +68,25 @@ struct Face {
 /// 0x00010000), the CFF table for CFF ones ('OTTO'). Read errors set the FontBytes flags as well.
 FaceStatus parseFace(FontBytes& bytes, Face* face);
 
+/// A font file on the card as the engine reads it, through a page cache of its own: about 4 KB, held on the heap only
+/// while a CFF table's block is planned or a DICT INDEX made again (CffBlock), or a file is probed (probeFile()).
+/// Never moved: the FontBytes points at the range.
+struct CardFile {
+  explicit CardFile(const FileSource& file) : range{file, 0, 0, file.size, &cache}, bytes(nullptr, 0, &range) {}
+  CardFile(const CardFile&) = delete;
+  CardFile& operator=(const CardFile&) = delete;
+  SdPageCache cache;
+  SdRange range;
+  FontBytes bytes;
+};
+
+/// A file on the card and the face parseFace() reads from it.
+struct CardFace {
+  explicit CardFace(const FileSource& file) : file(file) {}
+  CardFile file;
+  Face face;
+};
+
 /// The glyph for `codepoint`, or 0 (the font has none, or the cmap is broken: see bytes.outOfRange()).
 uint16_t glyphIndex(FontBytes& bytes, const Face& face, uint32_t codepoint);
 

@@ -1,5 +1,6 @@
 #include "TtfFamily.h"
 
+#include <Logging.h>
 #include <Memory.h>
 #include <OtPlan.h>
 
@@ -392,6 +393,23 @@ bool fitsStore(const uint32_t* fileBytes, const uint32_t* sdBytes, const uint8_t
   return false;
 }
 
+namespace {
+
+// Whether parseFace() reads `file` as the load reads a style, through a page cache on the heap for the call (CardFace,
+// about 4.5 KB). True without that memory: the file stays listed and its load decides, as before the probe asked. A
+// read that fails is as any other of the probe's: not a font for now.
+bool faceParses(const FileSource& file) {
+  const auto work = makeUniqueNoThrow<CardFace>(file);
+  if (!work) {
+    LOG_ERR("TTF", "probe: no %u B to read the face with; listed for its load to decide",
+            static_cast<unsigned>(sizeof(CardFace)));
+    return true;
+  }
+  return parseFace(work->file.bytes, &work->face) == FaceStatus::Ok;
+}
+
+}  // namespace
+
 FileProbe probeFile(const FileSource& file) {
   struct Scan {
     const FileSource& file;
@@ -464,13 +482,18 @@ FileProbe probeFile(const FileSource& file) {
       be16(weight) != 0) {
     probe.weight = be16(weight);
   }
+  bool parsed = false;
   if (cff) {
     // The rebuilt CFF table's size takes reading the table: the block planned as an install plans it. Without the
     // memory, or with a read failing, its size is not known for now (fitsStore() then lists the family).
     const auto block = makeUniqueNoThrow<SdBlock>();
     const SdPlan planned = block ? block->plan(file, &probe.cpacBytes) : SdPlan::Transient;
     probe.sdBytes = planned == SdPlan::Ok ? block->bytes() : planned == SdPlan::NoBlock ? UINT32_MAX : kSdBytesUnknown;
+    parsed = planned == SdPlan::Ok;  // CffBlock::plan() read the face with parseFace()
   }
+  // The load reads every style with parseFace() and leaves out one it refuses: a family of such files was installed
+  // at every pick, then fell back. Listed only what parseFace() reads.
+  if (!parsed && !faceParses(file)) return {};
   return probe;
 }
 

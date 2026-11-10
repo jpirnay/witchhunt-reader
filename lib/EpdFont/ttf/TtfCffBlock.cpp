@@ -12,22 +12,6 @@ namespace ttf {
 
 namespace {
 
-// The file as the parser reads it, through a page cache of its own: while a block is planned, and while a read makes
-// a DICT INDEX again. About 4 KB, on the heap for that time only. Never moved: the FontBytes points at the range.
-struct FileParse {
-  explicit FileParse(const FileSource& file) : range{file, 0, 0, file.size, &cache}, bytes(nullptr, 0, &range) {}
-  SdPageCache cache;
-  SdRange range;
-  FontBytes bytes;
-};
-
-// What a plan reads: the file, and its face.
-struct PlanWork {
-  explicit PlanWork(const FileSource& file) : parse(file) {}
-  FileParse parse;
-  Face face;
-};
-
 // The offset size an INDEX needs for offsets up to `last`.
 uint8_t offSizeFor(const uint32_t last) { return last <= 0xFF ? 1 : last <= 0xFFFF ? 2 : last <= 0xFFFFFF ? 3 : 4; }
 
@@ -59,17 +43,17 @@ struct CffBlock::Window {
   }
 };
 
-uint32_t CffBlock::planBytes() { return sizeof(PlanWork); }
-uint32_t CffBlock::readBytes() { return sizeof(FileParse); }
+uint32_t CffBlock::planBytes() { return sizeof(CardFace); }
+uint32_t CffBlock::readBytes() { return sizeof(CardFile); }
 
 SdPlan CffBlock::plan(const FileSource& file) {
   *this = CffBlock{};
-  const auto work = makeUniqueNoThrow<PlanWork>(file);
+  const auto work = makeUniqueNoThrow<CardFace>(file);
   if (!work) {
-    LOG_ERR("TTF", "SD mode: no %u B to read a CFF table with", static_cast<unsigned>(sizeof(PlanWork)));
+    LOG_ERR("TTF", "SD mode: no %u B to read a CFF table with", static_cast<unsigned>(sizeof(CardFace)));
     return SdPlan::Transient;
   }
-  FontBytes& bytes = work->parse.bytes;
+  FontBytes& bytes = work->file.bytes;
   // Whatever stops the plan: a read that failed is for now only; anything else is the font's.
   const auto stopped = [&bytes]() { return bytes.ioError() ? SdPlan::Transient : SdPlan::NoBlock; };
   const CffFace& cff = work->face.cff;
@@ -131,7 +115,7 @@ SdPlan CffBlock::plan(const FileSource& file) {
 bool CffBlock::read(const FileSource& file, const uint32_t offset, uint8_t* dst, const uint32_t len) const {
   if (offset > bytes_ || len > bytes_ - offset) return false;
   Window window{offset, offset + len, dst, 0};
-  std::unique_ptr<FileParse> parse;  // for the first DICT INDEX the read reaches
+  std::unique_ptr<CardFile> parse;  // for the first DICT INDEX the read reaches
   for (uint8_t i = 0; i < pieceCount_; ++i) {
     const Piece& piece = pieces_[i];
     const uint32_t lo = std::max(offset, piece.at);
@@ -141,9 +125,9 @@ bool CffBlock::read(const FileSource& file, const uint32_t offset, uint8_t* dst,
       if (!file.read(file.ctx, piece.from + (lo - piece.at), dst + (lo - offset), hi - lo)) return false;
       continue;
     }
-    if (!parse) parse = makeUniqueNoThrow<FileParse>(file);
+    if (!parse) parse = makeUniqueNoThrow<CardFile>(file);
     if (!parse) {
-      LOG_ERR("TTF", "SD mode: no %u B to make a CFF DICT INDEX with", static_cast<unsigned>(sizeof(FileParse)));
+      LOG_ERR("TTF", "SD mode: no %u B to make a CFF DICT INDEX with", static_cast<unsigned>(sizeof(CardFile)));
       return false;
     }
     if (!writeIndex(parse->bytes, piece, window)) return false;
