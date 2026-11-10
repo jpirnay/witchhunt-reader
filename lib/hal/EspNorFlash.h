@@ -22,6 +22,9 @@ class EspNorFlash final : public NorFlash {
 
   /// Finds the partition. False when it is missing or not larger than the language slot.
   bool begin();
+  /// Over `size` bytes of the partition from `base` instead of the font area: the hyphenation region. No .cpfont is
+  /// ever written there, so its writes are not refused while one is mapped. `base` must be 64 KB aligned.
+  bool beginRegion(uint32_t base, uint32_t size);
 
   uint32_t size() const override { return size_; }
   bool read(uint32_t offset, void* dst, uint32_t len) const override;
@@ -49,7 +52,9 @@ class EspNorFlash final : public NorFlash {
   bool write(uint32_t offset, const void* src, uint32_t len);
 
   const esp_partition_t* part_ = nullptr;
+  uint32_t base_ = 0;  // the region's start in the partition: 0 for the font area
   uint32_t size_ = 0;
+  bool fontArea_ = true;
   Mapping maps_[kMaxMaps];
 #if CONFIG_SPIRAM
   // ESP-IDF writes from external RAM 32 bytes at a time, each a whole flash operation; such sources are

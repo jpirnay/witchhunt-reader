@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -47,6 +48,12 @@ class Hyphenator {
   // The patterns for a language tag ("en", "en-US", "eng"), null when the language has none. The book's
   // TypographyProfile holds this, and the section build installs it with setLanguageHyphenator().
   static const LanguageHyphenator* forLanguage(const std::string& lang);
+  // The code of the language a tag hyphenates by ("de" for "de-AT" or "ger"), whether or not its patterns are
+  // available; null when the firmware does not hyphenate the language. Names its pack (hyph-<code>.cphyph).
+  static const char* languageCode(const std::string& lang);
+  // The patterns' part of a section's cache key for a book in this language (hyphenationLayoutKey in
+  // LanguageRegistry.h): 0 for the patterns the image carried before packs.
+  static uint32_t layoutKey(const std::string& lang);
   static void setLanguageHyphenator(const LanguageHyphenator* hyphenator) { cachedHyphenator_ = hyphenator; }
   // The patterns breakOffsets() uses now: the last installed, null when none is.
   static const LanguageHyphenator* languageHyphenator() { return cachedHyphenator_; }

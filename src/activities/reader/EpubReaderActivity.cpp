@@ -27,6 +27,7 @@
 #include <Epub/TypographyProfile.h>
 #include <Epub/blocks/ImageBlock.h>
 #include <Epub/blocks/TextBlock.h>
+#include <Epub/hyphenation/Hyphenator.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
 #include <FsHelpers.h>
@@ -59,6 +60,7 @@
 #include "EpubReaderPrintedPageInputActivity.h"
 #include "FinishedBookActivity.h"
 #include "GlobalBookmarkIndex.h"
+#include "HyphenationPacks.h"
 #include "ImageOnlyPage.h"
 #include "InPlaceBuildGate.h"
 #include "KOReaderCredentialStore.h"
@@ -772,6 +774,17 @@ void EpubReaderActivity::onEnter() {
   bookLineSpacingOverride = currentBook.lineSpacingOverride;
   bookVerticalTextOverride = currentBook.verticalTextOverride;
   bookPublisherFontsOverride = currentBook.publisherFontsOverride;
+  // The book's hyphenation patterns, from its language's pack, before the first lookup of them below and before any
+  // build. A pack not yet in the flash store is copied in here, once (German: about a second), under a popup. Its
+  // displayBuffer() consumes any pending HALF override, so on a panel that diffs against a host frame the first page
+  // is forced to HALF, as after the font-room popup in buildSection().
+  bool hyphenationPopupDrawn = false;
+  HyphenationPacks::prepareForBook(epub->getLanguage(), [this, &hyphenationPopupDrawn] {
+    RenderLock lock(*this);
+    GUI.drawPopup(renderer, tr(STR_PREPARING_HYPHENATION));
+    hyphenationPopupDrawn = true;
+  });
+  if (hyphenationPopupDrawn && renderer.fastRefreshNeedsHostFrame()) forceHalfRefreshAfterPopup_ = true;
   bookVerticalAllowed_ = TypographyProfile::forLanguage(epub->getLanguage()).verticalAllowed;
   logReaderMemSnapshot("onEnter_after_recent_books");
 
@@ -1439,6 +1452,7 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.viewportWidth = layout.viewportWidth;
   p.viewportHeight = layout.viewportHeight;
   p.hyphenationEnabled = getEffectiveHyphenation();
+  if (epub) p.hyphenationLayoutKey = Hyphenator::layoutKey(epub->getLanguage());
   p.widowOrphanControl = SETTINGS.widowOrphanControl != 0;
   p.fontSizeNormalization = getEffectiveFontSizeNormalization();
   p.embeddedStyle = lastRenderStats.embeddedStyle;
@@ -7584,6 +7598,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   p.viewportWidth = viewportWidth;
   p.viewportHeight = viewportHeight;
   p.hyphenationEnabled = effectiveHyphenation;
+  p.hyphenationLayoutKey = Hyphenator::layoutKey(epub->getLanguage());
   p.widowOrphanControl = SETTINGS.widowOrphanControl != 0;
   p.fontSizeNormalization = effectiveFontSizeNormalization;
   p.embeddedStyle = effectiveEmbeddedStyle;

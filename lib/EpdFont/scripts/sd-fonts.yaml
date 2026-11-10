@@ -44,6 +44,13 @@
 #   other bytes):
 #     pip install fonttools==4.63.0 uharfbuzz==0.56.2
 #
+# Hyphenation packs (format: hyphenation):
+#   One language's hyphenation pack, hyph-<code>.cphyph in a folder of the family's name. scripts/build_hyphenation_packs.py
+#   writes them into assets/sd-fonts/ (this build copies them). fonts-v3.json lists them after the fonts with format
+#   "hyphenation", which a firmware that does not know it skips; fonts.json leaves them out. The Font Manager installs
+#   the file into /.crosspoint/hyphenation/. They take no fields but name, description and inDownloadAll (false: a
+#   reader picks the languages of their books).
+#
 # Variable fonts:
 #   Some fonts (Bitter, Inter, Alegreya) are distributed as variable fonts.
 #   freetype-py can't set variable font axis values, so the build script
@@ -762,3 +769,155 @@ families:
       latin:
         Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
         Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
+
+  # ── Hyphenation packs (format: hyphenation), one per language: scripts/build_hyphenation_packs.py ──────────
+
+  - name: Hyphenation-Assamese
+    description: "Hyphenation for books in Assamese: lines break between syllables, without a hyphen"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Belarusian
+    description: "Hyphenation for books in Belarusian"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Bengali
+    description: "Hyphenation for books in Bengali: lines break between syllables, without a hyphen"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Catalan
+    description: "Hyphenation for books in Catalan"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Czech
+    description: "Hyphenation for books in Czech"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Danish
+    description: "Hyphenation for books in Danish"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Dutch
+    description: "Hyphenation for books in Dutch"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Finnish
+    description: "Hyphenation for books in Finnish"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-French
+    description: "Hyphenation for books in French"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-German
+    description: "Hyphenation for books in German"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Gujarati
+    description: "Hyphenation for books in Gujarati: lines break between syllables, without a hyphen"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Hindi
+    description: "Hyphenation for books in Hindi: lines break between syllables, without a hyphen"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Italian
+    description: "Hyphenation for books in Italian"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Kannada
+    description: "Hyphenation for books in Kannada: lines break between syllables, without a hyphen"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Lithuanian
+    description: "Hyphenation for books in Lithuanian"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Malayalam
+    description: "Hyphenation for books in Malayalam: lines break between syllables, without a hyphen"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Marathi
+    description: "Hyphenation for books in Marathi: lines break between syllables, without a hyphen"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Odia
+    description: "Hyphenation for books in Odia: lines break between syllables, without a hyphen"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Polish
+    description: "Hyphenation for books in Polish"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Portuguese
+    description: "Hyphenation for books in Portuguese"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Punjabi
+    description: "Hyphenation for books in Punjabi: lines break between syllables, without a hyphen"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Russian
+    description: "Hyphenation for books in Russian"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Sanskrit
+    description: "Hyphenation for books in Sanskrit: lines break between syllables, without a hyphen"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Slovenian
+    description: "Hyphenation for books in Slovenian"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Spanish
+    description: "Hyphenation for books in Spanish"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Swedish
+    description: "Hyphenation for books in Swedish"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Tamil
+    description: "Hyphenation for books in Tamil: lines break between syllables, without a hyphen"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Telugu
+    description: "Hyphenation for books in Telugu: lines break between syllables, without a hyphen"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Turkish
+    description: "Hyphenation for books in Turkish"
+    format: hyphenation
+    inDownloadAll: false
+
+  - name: Hyphenation-Ukrainian
+    description: "Hyphenation for books in Ukrainian"
+    format: hyphenation
+    inDownloadAll: false

@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "CrossPointSettings.h"
+#include "HyphenationPacks.h"
 #include "util/FontDownloadRules.h"
 
 FontInstaller::FontInstaller(SdCardFontRegistry& registry) : registry_(registry) {}
@@ -207,12 +208,93 @@ bool FontInstaller::isFamilyOnCard(const char* familyName) const {
   return Storage.exists(dirPath);
 }
 
+bool FontInstaller::isOnCard(const FontCatalog& families, const size_t family) const {
+  if (!families.hyphenation(family)) return isFamilyOnCard(families.name(family));
+  if (families.fileCount(family) == 0) return false;
+  for (size_t j = 0; j < families.fileCount(family); j++) {
+    char path[128];
+    buildPackPath(families.fileLocalName(family, j), path, sizeof(path));
+    if (!Storage.exists(path)) return false;
+  }
+  return true;
+}
+
+void FontInstaller::buildPackPath(const char* localName, char* outBuf, const size_t outBufSize) {
+  snprintf(outBuf, outBufSize, "%s/%s", HyphenationPacks::DIR, localName);
+}
+
+namespace {
+
+// Tells HyphenationPacks that the pack files of `family` were installed, or removed.
+void tellPacks(const FontCatalog& families, const size_t family, const bool installed) {
+  for (size_t j = 0; j < families.fileCount(family); j++) {
+    char code[3];
+    if (!HyphenationPacks::codeOfPackFile(families.fileLocalName(family, j), code)) continue;
+    if (installed) {
+      HyphenationPacks::packInstalled(code);
+    } else {
+      HyphenationPacks::packRemoved(code);
+    }
+  }
+}
+
+}  // namespace
+
+bool FontInstaller::installStagedPack(const FontCatalog& families, const size_t family, const char* stagingDir) {
+  if (!Storage.exists(HyphenationPacks::DIR) && !Storage.mkdir(HyphenationPacks::DIR)) {
+    LOG_ERR("FONT", "Failed to create %s", HyphenationPacks::DIR);
+    return false;
+  }
+  for (size_t j = 0; j < families.fileCount(family); j++) {
+    const char* localName = families.fileLocalName(family, j);
+    char staged[128];
+    char live[128];
+    char backup[136];
+    snprintf(staged, sizeof(staged), "%s/%s", stagingDir, localName);
+    buildPackPath(localName, live, sizeof(live));
+    snprintf(backup, sizeof(backup), "%s.old", live);
+    if (Storage.exists(backup)) Storage.remove(backup);
+    const bool hadLive = Storage.exists(live);
+    if (hadLive && !Storage.rename(live, backup)) {
+      LOG_ERR("FONT", "Failed to move %s aside", live);
+      return false;
+    }
+    if (!Storage.rename(staged, live)) {
+      LOG_ERR("FONT", "Failed to move %s into place", staged);
+      if (hadLive) Storage.rename(backup, live);
+      return false;
+    }
+    if (hadLive) Storage.remove(backup);
+  }
+  Storage.removeDir(stagingDir);
+  tellPacks(families, family, true);
+  return true;
+}
+
+FontInstaller::Error FontInstaller::deletePack(const FontCatalog& families, const size_t family) {
+  Error result = Error::OK;
+  for (size_t j = 0; j < families.fileCount(family); j++) {
+    char path[128];
+    buildPackPath(families.fileLocalName(family, j), path, sizeof(path));
+    if (Storage.exists(path) && !Storage.remove(path)) {
+      LOG_ERR("FONT", "Failed to remove %s", path);
+      result = Error::SD_WRITE_ERROR;
+    }
+  }
+  tellPacks(families, family, false);
+  return result;
+}
+
 FontInstaller::FileCounts FontInstaller::countFiles(const FontCatalog& families, const size_t family) {
   FileCounts counts;
   const char* familyName = families.name(family);
   for (size_t j = 0; j < families.fileCount(family); j++) {
     char path[128];
-    buildFontPath(familyName, families.fileLocalName(family, j), path, sizeof(path));
+    if (families.hyphenation(family)) {
+      buildPackPath(families.fileLocalName(family, j), path, sizeof(path));
+    } else {
+      buildFontPath(familyName, families.fileLocalName(family, j), path, sizeof(path));
+    }
     FsFile f;
     if (!Storage.openFileForRead("FONT", path, f)) {
       ++counts.absent;

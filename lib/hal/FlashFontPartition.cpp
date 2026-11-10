@@ -42,13 +42,15 @@ static const esp_partition_t* findPartition() {
   return part;
 }
 
-// Ceiling for font data: the partition minus the language slot at its tail.
+// Ceiling for font data: the partition minus the hyphenation region and the language slot at its tail.
 static size_t usableSizeOf(const esp_partition_t* part) {
-  if (!part || part->size <= LANG_RESERVED_BYTES) return 0;
-  return static_cast<size_t>(part->size) - LANG_RESERVED_BYTES;
+  if (!part || part->size <= LANG_RESERVED_BYTES + HYPH_RESERVED_BYTES) return 0;
+  return static_cast<size_t>(part->size) - LANG_RESERVED_BYTES - HYPH_RESERVED_BYTES;
 }
 
 size_t fontUsableSize() { return usableSizeOf(findPartition()); }
+
+size_t hyphRegionOffset() { return HYPH_RESERVED_BYTES == 0 ? 0 : usableSizeOf(findPartition()); }
 
 // Read the raw index from flash into a caller-supplied buffer.
 // Returns true and fills `count` with the number of valid entries.

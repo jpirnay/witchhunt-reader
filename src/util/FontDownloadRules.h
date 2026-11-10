@@ -11,7 +11,7 @@
 // the download, and whether a family already on the card is being updated.
 namespace FontDownloadRules {
 
-enum class FileKind : uint8_t { Unknown, Cpfont, TrueType, OpenTypeCff };
+enum class FileKind : uint8_t { Unknown, Cpfont, TrueType, OpenTypeCff, HyphenationPack };
 
 // By the name's extension, in any case.
 inline FileKind kindOf(const char* name) {
@@ -29,18 +29,21 @@ inline FileKind kindOf(const char* name) {
   if (endsWith(".cpfont")) return FileKind::Cpfont;
   if (endsWith(".ttf")) return FileKind::TrueType;
   if (endsWith(".otf")) return FileKind::OpenTypeCff;
+  if (endsWith(".cphyph")) return FileKind::HyphenationPack;
   return FileKind::Unknown;
 }
 
 // By a manifest's `format` value: "cpfont", "ttf" or "otf", exactly, or "uipack": a UI script pack
-// (ArabicUiPack.h), .cpfont files the interface draws from and no reading font. A firmware from before it skips the
-// family, as any reader skips a format it does not know.
+// (ArabicUiPack.h), .cpfont files the interface draws from and no reading font, or "hyphenation": one language's
+// hyphenation pack (HyphenationPack.h), installed beside the fonts in /.crosspoint/hyphenation/. A firmware from before
+// either skips the family, as any reader skips a format it does not know.
 inline FileKind kindOfFormat(const char* value, const size_t len) {
   if (!value) return FileKind::Unknown;
   const auto is = [&](const char* word) { return strlen(word) == len && memcmp(value, word, len) == 0; };
   if (is("cpfont") || is("uipack")) return FileKind::Cpfont;
   if (is("ttf")) return FileKind::TrueType;
   if (is("otf")) return FileKind::OpenTypeCff;
+  if (is("hyphenation")) return FileKind::HyphenationPack;
   return FileKind::Unknown;
 }
 
@@ -48,8 +51,8 @@ inline FileKind kindOfFormat(const char* value, const size_t len) {
 constexpr size_t kHeadBytes = 8;
 
 // Whether a file of `kind` starts as it must: a .cpfont with its magic, a .ttf with TrueType outlines (sfnt version
-// 0x00010000 or 'true'), an .otf with CFF outlines ('OTTO'). A collection ('ttcf') and WOFF are files of no kind the
-// reader draws.
+// 0x00010000 or 'true'), an .otf with CFF outlines ('OTTO'), a .cphyph with a CPHY version 1 header. A collection
+// ('ttcf') and WOFF are files of no kind the reader draws.
 inline bool headOk(const FileKind kind, const uint8_t* head, const size_t len) {
   if (len < kHeadBytes) return false;
   if (kind == FileKind::Cpfont) return memcmp(head, "CPFONT\0\0", kHeadBytes) == 0;
@@ -57,6 +60,7 @@ inline bool headOk(const FileKind kind, const uint8_t* head, const size_t len) {
     return memcmp(head, "\x00\x01\x00\x00", 4) == 0 || memcmp(head, "true", 4) == 0;
   }
   if (kind == FileKind::OpenTypeCff) return memcmp(head, "OTTO", 4) == 0;
+  if (kind == FileKind::HyphenationPack) return memcmp(head, "CPHY", 4) == 0 && head[4] == 1;
   return false;
 }
 

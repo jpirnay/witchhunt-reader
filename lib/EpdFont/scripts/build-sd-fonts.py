@@ -7,7 +7,8 @@ generates the fonts.json manifest. A family with `format: otf` is a CFF
 subset instead (cjk_subset.py): one <name>-Regular.otf, drawn at every size. A family with `format: ttf` is a
 script font merged with Noto's Latin (merge_noto_latin.py): <name>-Regular.ttf and <name>-Bold.ttf. A family with
 `format: uipack` is a UI script pack (build_ui_script_pack.py): 1-bit .cpfont files the interface draws from, built
-last, from the family its `source` names.
+last, from the family its `source` names. A family with `format: hyphenation` is a hyphenation pack, built by
+scripts/build_hyphenation_packs.py: the pack the repository holds is copied.
 
 Usage:
     # Generate fonts (output in ./output/)
@@ -281,6 +282,18 @@ def build_ui_pack_family(family: dict, output_base: Path, output_dir: Path) -> t
     return family["name"], True, ""
 
 
+def copy_hyphenation_pack(family: dict, output_dir: Path) -> tuple[str, bool, str]:
+    """A `format: hyphenation` entry: the pack scripts/build_hyphenation_packs.py wrote into the repository."""
+    source = SCRIPT_DIR.resolve().parents[2] / "assets" / "sd-fonts" / family["name"]
+    packs = sorted(source.glob("hyph-*.cphyph"))
+    if not packs:
+        return family["name"], False, f"no pack in {source}: run scripts/build_hyphenation_packs.py"
+    for pack in packs:
+        if pack.resolve() != (output_dir / pack.name).resolve():
+            shutil.copyfile(pack, output_dir / pack.name)
+    return family["name"], True, ""
+
+
 def build_family(
     family: dict, output_base: Path, verbose: bool = False, timeout: int = 600,
     unihan: Path | None = None, fonttools_pin: str | None = None, corpus_dir: Path | None = None
@@ -295,6 +308,8 @@ def build_family(
         return build_ttf_family(family, output_dir, corpus_dir, fonttools_pin)
     if family.get("format") == "uipack":
         return build_ui_pack_family(family, output_base, output_dir)
+    if family.get("format") == "hyphenation":
+        return copy_hyphenation_pack(family, output_dir)
 
     styles = family.get("styles", {})
     intervals = family["intervals"]
@@ -528,7 +543,7 @@ def main():
             if success:
                 # Count output files
                 family_dir = output_base / name
-                files = list(family_dir.glob("*.cpfont")) + list(family_dir.glob("*.otf")) + list(family_dir.glob("*.ttf"))
+                files = [f for ext in ("*.cpfont", "*.otf", "*.ttf", "*.cphyph") for f in family_dir.glob(ext)]
                 size = sum(f.stat().st_size for f in files)
                 print(f"  OK: {name} ({len(files)} files, {size / 1024 / 1024:.1f} MB) {message}")
             else:

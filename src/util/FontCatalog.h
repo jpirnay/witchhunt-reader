@@ -18,7 +18,8 @@
 //   header   16 bytes   u32 magic 'CPFC', u16 version, u16 families, u16 files, u16 stringBytes,
 //                       u32 blockBytes (the whole block, header included)
 //   families 12 bytes   u32 totalSize, u16 name, u16 description, u16 firstFile, u8 flags, u8 0
-//                       flags: installed, update, resumable (set after the build); outline, not in "Download all"
+//                       flags: installed, update, resumable (set after the build); outline, not in "Download all",
+//                       hyphenation pack
 //   files    12 bytes   u32 size, u32 crc32, u16 name, u8 hasCrc32, u8 0
 //   strings             every string NUL-terminated; name and description fields are offsets here
 //
@@ -86,6 +87,9 @@ class FontCatalog {
   bool outline(size_t family) const;
   // "Download all" takes it (the manifest's inDownloadAll; the CJK families say no). False out of range.
   bool inDownloadAll(size_t family) const;
+  // A hyphenation pack (the manifest's format "hyphenation"): its file goes to /.crosspoint/hyphenation/, not into a
+  // family folder (FontInstaller).
+  bool hyphenation(size_t family) const;
 
   bool installed(size_t family) const;
   bool hasUpdate(size_t family) const;
@@ -153,6 +157,7 @@ class FontCatalog::Builder {
   // The open family's kind and its place in "Download all"; .cpfont and in it until said otherwise.
   void outline(bool value);
   void inDownloadAll(bool value);
+  void hyphenation(bool value);
   void addFile(const char* name, size_t nameLen, uint32_t size, uint32_t crc32, bool hasCrc32);
   void keepFamily(const char* name, size_t nameLen);
   void dropFamily();

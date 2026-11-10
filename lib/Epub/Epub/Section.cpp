@@ -409,10 +409,12 @@ uint32_t fnv1a(const uint8_t* data, size_t length) {
 }  // namespace
 
 uint32_t Section::calculatePropertyHash(const BuildParams& p) {
-  uint8_t buffer[96];
+  uint8_t buffer[104];
   static_assert(sizeof(buffer) >= 23 + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) +
-                                      BlockFontFamilies::kMaxFamilies * 3 * sizeof(int32_t),
-                "the settings (23 B), Book's style line spacing and every family fit");
+                                      BlockFontFamilies::kMaxFamilies * 3 * sizeof(int32_t) + sizeof(uint8_t) +
+                                      sizeof(uint32_t),
+                "the settings (23 B), Book's style line spacing, every family, the vertical request and the "
+                "hyphenation patterns fit");
   size_t offset = 0;
 
   auto append = [&](const void* ptr, size_t size) {
@@ -457,6 +459,10 @@ uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   if (p.verticalText != VerticalText::Off) {
     const auto request = static_cast<uint8_t>(p.verticalText);
     append(&request, sizeof(request));
+  }
+  // Only when the patterns are not the image's own of before packs: those layouts keep their key.
+  if (p.hyphenationLayoutKey != 0) {
+    append(&p.hyphenationLayoutKey, sizeof(p.hyphenationLayoutKey));
   }
 
   return fnv1a(buffer, offset);

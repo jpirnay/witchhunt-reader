@@ -15,7 +15,10 @@
 // mandatory CRC and delete-on-abort are not taken.
 class FontDownloadActivity final : public UiListActivity {
  public:
-  explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
+  // `wantedPack`: the language of a hyphenation pack to download as soon as the list is loaded ("de"), as Home's offer
+  // asks (HyphenationPacks::takeOffer); null for the plain Font Manager.
+  explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                const char* wantedPack = nullptr);
 
   void onEnter() override;
   bool usesWifi() const override { return true; }
@@ -34,6 +37,8 @@ class FontDownloadActivity final : public UiListActivity {
   };
 
   State state_ = WIFI_SELECTION;
+  // The hyphenation pack to download once the list is loaded, "" for none (consumed by its first use).
+  char wantedPack_[3] = {};
   FontInstaller fontInstaller_;
 
   // HTTP/TLS session shared across all files of a single downloadFamily()
@@ -75,6 +80,8 @@ class FontDownloadActivity final : public UiListActivity {
   // it takes no heap. Set by an install, cleared when the next one starts (activateIndex, Retry), so a batch keeps
   // any family's note.
   const char* completeNote_ = nullptr;
+  // The last install was a hyphenation pack: "Hyphenation installed!" rather than "Font installed!".
+  bool completedPack_ = false;
   bool cancelRequested_ = false;
   int previousActionCount_ = 0;
   // What the two action rows offer, counted by refreshRowTotals() so that listCount() and the row
@@ -104,6 +111,8 @@ class FontDownloadActivity final : public UiListActivity {
   static void provideRow(void* ctx, uint16_t index, freeink::ui::ListItem& item);
 
   void onWifiSelectionComplete(bool success);
+  // Selects the row of wantedPack_ and downloads it when it is not installed. Once.
+  void downloadWantedPack();
   bool fetchAndParseManifest();
   // Download a single family by its index into families_. Internally stashes
   // families_ to SD so the TLS handshake runs on a defragmented heap; the

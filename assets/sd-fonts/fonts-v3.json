@@ -1756,6 +1756,426 @@
           "crc32": 1804074567
         }
       ]
+    },
+    {
+      "name": "Hyphenation-Assamese",
+      "description": "Hyphenation for books in Assamese: lines break between syllables, without a hyphen",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Assamese/hyph-as.cphyph",
+          "size": 229,
+          "crc32": 2464085817
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Belarusian",
+      "description": "Hyphenation for books in Belarusian",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Belarusian/hyph-be.cphyph",
+          "size": 4004,
+          "crc32": 1682448728
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Bengali",
+      "description": "Hyphenation for books in Bengali: lines break between syllables, without a hyphen",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Bengali/hyph-bn.cphyph",
+          "size": 229,
+          "crc32": 1967140775
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Catalan",
+      "description": "Hyphenation for books in Catalan",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Catalan/hyph-ca.cphyph",
+          "size": 1747,
+          "crc32": 606093459
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Czech",
+      "description": "Hyphenation for books in Czech",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Czech/hyph-cs.cphyph",
+          "size": 40746,
+          "crc32": 663858068
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Danish",
+      "description": "Hyphenation for books in Danish",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Danish/hyph-da.cphyph",
+          "size": 5779,
+          "crc32": 3503624801
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Dutch",
+      "description": "Hyphenation for books in Dutch",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Dutch/hyph-nl.cphyph",
+          "size": 64313,
+          "crc32": 322218881
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Finnish",
+      "description": "Hyphenation for books in Finnish",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Finnish/hyph-fi.cphyph",
+          "size": 656,
+          "crc32": 1613988716
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-French",
+      "description": "Hyphenation for books in French",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-French/hyph-fr.cphyph",
+          "size": 7008,
+          "crc32": 769992031
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-German",
+      "description": "Hyphenation for books in German",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-German/hyph-de.cphyph",
+          "size": 206283,
+          "crc32": 585266307
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Gujarati",
+      "description": "Hyphenation for books in Gujarati: lines break between syllables, without a hyphen",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Gujarati/hyph-gu.cphyph",
+          "size": 211,
+          "crc32": 3614705971
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Hindi",
+      "description": "Hyphenation for books in Hindi: lines break between syllables, without a hyphen",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Hindi/hyph-hi.cphyph",
+          "size": 222,
+          "crc32": 3769770484
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Italian",
+      "description": "Hyphenation for books in Italian",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Italian/hyph-it.cphyph",
+          "size": 1575,
+          "crc32": 3906603904
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Kannada",
+      "description": "Hyphenation for books in Kannada: lines break between syllables, without a hyphen",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Kannada/hyph-kn.cphyph",
+          "size": 229,
+          "crc32": 2268390087
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Lithuanian",
+      "description": "Hyphenation for books in Lithuanian",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Lithuanian/hyph-lt.cphyph",
+          "size": 6585,
+          "crc32": 1758312547
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Malayalam",
+      "description": "Hyphenation for books in Malayalam: lines break between syllables, without a hyphen",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Malayalam/hyph-ml.cphyph",
+          "size": 264,
+          "crc32": 2009544935
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Marathi",
+      "description": "Hyphenation for books in Marathi: lines break between syllables, without a hyphen",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Marathi/hyph-mr.cphyph",
+          "size": 222,
+          "crc32": 1165924518
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Odia",
+      "description": "Hyphenation for books in Odia: lines break between syllables, without a hyphen",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Odia/hyph-or.cphyph",
+          "size": 208,
+          "crc32": 1251733782
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Polish",
+      "description": "Hyphenation for books in Polish",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Polish/hyph-pl.cphyph",
+          "size": 15550,
+          "crc32": 2671765413
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Portuguese",
+      "description": "Hyphenation for books in Portuguese",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Portuguese/hyph-pt.cphyph",
+          "size": 1085,
+          "crc32": 2708082822
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Punjabi",
+      "description": "Hyphenation for books in Punjabi: lines break between syllables, without a hyphen",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Punjabi/hyph-pa.cphyph",
+          "size": 196,
+          "crc32": 57303723
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Russian",
+      "description": "Hyphenation for books in Russian",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Russian/hyph-ru.cphyph",
+          "size": 33364,
+          "crc32": 2209460654
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Sanskrit",
+      "description": "Hyphenation for books in Sanskrit: lines break between syllables, without a hyphen",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Sanskrit/hyph-sa.cphyph",
+          "size": 2054,
+          "crc32": 1032375139
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Slovenian",
+      "description": "Hyphenation for books in Slovenian",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Slovenian/hyph-sl.cphyph",
+          "size": 5618,
+          "crc32": 2714772227
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Spanish",
+      "description": "Hyphenation for books in Spanish",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Spanish/hyph-es.cphyph",
+          "size": 13669,
+          "crc32": 1534005717
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Swedish",
+      "description": "Hyphenation for books in Swedish",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Swedish/hyph-sv.cphyph",
+          "size": 23615,
+          "crc32": 1061563072
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Tamil",
+      "description": "Hyphenation for books in Tamil: lines break between syllables, without a hyphen",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Tamil/hyph-ta.cphyph",
+          "size": 198,
+          "crc32": 3141926399
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Telugu",
+      "description": "Hyphenation for books in Telugu: lines break between syllables, without a hyphen",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Telugu/hyph-te.cphyph",
+          "size": 226,
+          "crc32": 1947098189
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Turkish",
+      "description": "Hyphenation for books in Turkish",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Turkish/hyph-tr.cphyph",
+          "size": 546,
+          "crc32": 3386858849
+        }
+      ]
+    },
+    {
+      "name": "Hyphenation-Ukrainian",
+      "description": "Hyphenation for books in Ukrainian",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Ukrainian/hyph-uk.cphyph",
+          "size": 21332,
+          "crc32": 287786338
+        }
+      ]
     }
   ]
 }

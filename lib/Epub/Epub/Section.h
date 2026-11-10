@@ -207,6 +207,11 @@ class Section {
     uint16_t viewportWidth = 0;
     uint16_t viewportHeight = 0;
     bool hyphenationEnabled = false;
+    // The book's hyphenation patterns (Hyphenator::layoutKey): 0 for those the image carried before hyphenation
+    // packs, else the pack's CRC, or a key for none. Hashed only when not 0, so the layouts made with the image's
+    // patterns keep their key; a pack installed, changed or missing gets a layout of its own. Hashed whatever
+    // hyphenationEnabled says: an overlong word breaks by the patterns either way.
+    uint32_t hyphenationLayoutKey = 0;
     // Widow and orphan control (ChapterHtmlSlimParser::keepTogetherBreak), the reader's "Avoid Widows & Orphans".
     // Hashed only when off, so the variants laid out with it keep their key. A vertical section ignores it.
     bool widowOrphanControl = true;

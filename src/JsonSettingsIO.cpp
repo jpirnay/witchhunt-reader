@@ -114,6 +114,7 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   doc["addedBooksView"] = s.addedBooksView;
   doc["authorsView"] = s.authorsView;
   doc["showBootScreen"] = s.showBootScreen;
+  doc["hyphenationOfferDeclined"] = s.hyphenationOfferDeclined;
   // Information about a pending KOReader sync session
   JsonObject sync = doc["koReaderSyncSession"].to<JsonObject>();
   sync["active"] = s.koReaderSyncSession.active;
@@ -196,6 +197,10 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
     s.authorsView = CrossPointSettings::BROWSER_VIEW_DETAILS;
   }
   s.showBootScreen = doc["showBootScreen"] | true;
+  {
+    const char* declined = doc["hyphenationOfferDeclined"] | "";
+    snprintf(s.hyphenationOfferDeclined, sizeof(s.hyphenationOfferDeclined), "%s", declined);
+  }
   JsonObject sync = doc["koReaderSyncSession"].as<JsonObject>();
   s.koReaderSyncSession.active = sync["active"].as<bool>();
   s.koReaderSyncSession.epubPath = sync["epubPath"] | std::string("");

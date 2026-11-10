@@ -29,13 +29,28 @@ bool EspNorFlash::begin() {
     LOG_ERR("ENF", "spiffs partition not found");
     return false;
   }
+  base_ = 0;
   size_ = static_cast<uint32_t>(FlashFontPartition::fontUsableSize());
+  fontArea_ = true;
+  return size_ > 0;
+}
+
+bool EspNorFlash::beginRegion(const uint32_t base, const uint32_t size) {
+  part_ = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
+  if (!part_ || base % kMapPageBytes != 0 || base > part_->size || size > part_->size - base) {
+    LOG_ERR("ENF", "no region of %u B at %u", static_cast<unsigned>(size), static_cast<unsigned>(base));
+    part_ = nullptr;
+    return false;
+  }
+  base_ = base;
+  size_ = size;
+  fontArea_ = false;
   return size_ > 0;
 }
 
 bool EspNorFlash::read(const uint32_t offset, void* dst, const uint32_t len) const {
   if (!inRange(offset, len)) return false;
-  return esp_partition_read(part_, offset, dst, len) == ESP_OK;
+  return esp_partition_read(part_, base_ + offset, dst, len) == ESP_OK;
 }
 
 bool EspNorFlash::writable(const char* what, const uint32_t offset, const uint32_t len) const {
@@ -44,7 +59,7 @@ bool EspNorFlash::writable(const char* what, const uint32_t offset, const uint32
             static_cast<unsigned>(offset), static_cast<unsigned>(size_));
     return false;
   }
-  if (FlashFontPartition::isMapped() || FlashFontPartition::isWriting()) {
+  if (fontArea_ && (FlashFontPartition::isMapped() || FlashFontPartition::isWriting())) {
     LOG_ERR("ENF", "%s refused: a .cpfont is mapped from, or being written to, this partition", what);
     return false;
   }
@@ -52,7 +67,7 @@ bool EspNorFlash::writable(const char* what, const uint32_t offset, const uint32
 }
 
 bool EspNorFlash::write(const uint32_t offset, const void* src, const uint32_t len) {
-  const esp_err_t err = esp_partition_write(part_, offset, src, len);
+  const esp_err_t err = esp_partition_write(part_, base_ + offset, src, len);
   if (err != ESP_OK) {
     LOG_ERR("ENF", "program of %u B at %u failed: %d", static_cast<unsigned>(len), static_cast<unsigned>(offset), err);
     return false;
@@ -84,7 +99,7 @@ bool EspNorFlash::erase(const uint32_t offset, const uint32_t len) {
             static_cast<unsigned>(offset));
     return false;
   }
-  const esp_err_t err = esp_partition_erase_range(part_, offset, len);
+  const esp_err_t err = esp_partition_erase_range(part_, base_ + offset, len);
   if (err != ESP_OK) {
     LOG_ERR("ENF", "erase of %u B at %u failed: %d", static_cast<unsigned>(len), static_cast<unsigned>(offset), err);
     return false;
@@ -97,7 +112,7 @@ const uint8_t* EspNorFlash::map(const uint32_t offset, const uint32_t len) {
   for (Mapping& m : maps_) {
     if (m.ptr != nullptr) continue;
     const void* ptr = nullptr;
-    const esp_err_t err = esp_partition_mmap(part_, offset, len, ESP_PARTITION_MMAP_DATA, &ptr, &m.handle);
+    const esp_err_t err = esp_partition_mmap(part_, base_ + offset, len, ESP_PARTITION_MMAP_DATA, &ptr, &m.handle);
     if (err != ESP_OK) {
       LOG_ERR("ENF", "map of %u B at %u failed: %d (%u pages free)", static_cast<unsigned>(len),
               static_cast<unsigned>(offset), err, static_cast<unsigned>(freeMapPages()));

@@ -25,8 +25,11 @@
 
 namespace fui = freeink::ui;
 
-FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : UiListActivity("FontDownload", renderer, mappedInput), fontInstaller_(sdFontSystem.registry()) {}
+FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                           const char* wantedPack)
+    : UiListActivity("FontDownload", renderer, mappedInput), fontInstaller_(sdFontSystem.registry()) {
+  if (wantedPack) snprintf(wantedPack_, sizeof(wantedPack_), "%s", wantedPack);
+}
 
 // --- Lifecycle ---
 
@@ -104,6 +107,26 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
     state_ = FAMILY_LIST;
   }
   requestUpdate();
+  downloadWantedPack();
+}
+
+void FontDownloadActivity::downloadWantedPack() {
+  if (wantedPack_[0] == '\0') return;
+  char file[16];
+  snprintf(file, sizeof(file), "hyph-%s.cphyph", wantedPack_);
+  wantedPack_[0] = '\0';
+  for (size_t i = 0; i < families_.count(); ++i) {
+    if (!families_.hyphenation(i) || families_.fileCount(i) == 0 || strcmp(families_.fileLocalName(i, 0), file) != 0) {
+      continue;
+    }
+    activeNav().requestSelection(actionCount() + static_cast<int>(i));
+    if (!families_.installed(i)) {
+      downloadFamily(static_cast<int>(i));
+      requestUpdateAndWait();
+    }
+    return;
+  }
+  LOG_ERR("FONT", "The font list holds no %s", file);
 }
 
 // --- Manifest fetching ---
@@ -138,7 +161,8 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   // is skipped -- see families_. Read aside and swapped in under the lock
   // below: the render task reads families_.
   FontCatalog parsed;
-  FontManifestReader reader("FONT", FontInstaller::isValidFamilyName, FontInstaller::isValidFontFileName);
+  FontManifestReader reader("FONT", FontInstaller::isValidFamilyName, FontInstaller::isValidFontFileName,
+                            /*takesHyphenation=*/true);
   const FontManifestStatus status = reader.read(manifestFile, parsed, baseUrl_);
   manifestFile.close();
   Storage.remove(MANIFEST_TMP);
@@ -161,7 +185,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
 
   for (size_t i = 0; i < parsed.count(); i++) {
     const char* familyName = parsed.name(i);
-    parsed.setInstalled(i, fontInstaller_.isFamilyOnCard(familyName));
+    parsed.setInstalled(i, fontInstaller_.isOnCard(parsed, i));
 
     if (parsed.installed(i)) {
       parsed.setHasUpdate(i, FontInstaller::hasUpdate(parsed, i));
@@ -263,6 +287,7 @@ void FontDownloadActivity::downloadAll() {
   }
 
   RenderLock lock(*this);
+  completedPack_ = false;  // "Download all" takes no pack (the manifest keeps them out of it)
   state_ = COMPLETE;
 }
 
@@ -270,8 +295,12 @@ void FontDownloadActivity::updateAll() {
   cancelRequested_ = false;
   std::vector<int> targetIndices;
   targetIndices.reserve(families_.count());
+  bool onlyPacks = true;
   for (size_t i = 0; i < families_.count(); i++) {
-    if (families_.installed(i) && families_.hasUpdate(i)) targetIndices.push_back(static_cast<int>(i));
+    if (families_.installed(i) && families_.hasUpdate(i)) {
+      targetIndices.push_back(static_cast<int>(i));
+      onlyPacks = onlyPacks && families_.hyphenation(i);
+    }
   }
   for (int idx : targetIndices) {
     downloadFamily(idx);
@@ -279,6 +308,8 @@ void FontDownloadActivity::updateAll() {
   }
 
   RenderLock lock(*this);
+  // The batch's screen says what it installed: hyphenation only when every update was a pack.
+  completedPack_ = onlyPacks && !targetIndices.empty();
   state_ = COMPLETE;
 }
 
@@ -603,6 +634,26 @@ void FontDownloadActivity::downloadFamilyImpl(FontCatalog& family, int familyIdx
     }
   }
 
+  if (family.hyphenation(0)) {
+    // A hyphenation pack's file goes to /.crosspoint/hyphenation/, not into a family folder, and is copied into the
+    // flash store there and then (HyphenationPacks::packInstalled).
+    if (!FontInstaller::installStagedPack(family, 0, stagingDir)) {
+      RenderLock lock(*this);
+      state_ = ERROR;
+      pendingErrorAction_ = PendingFontAction::Download;
+      downloadingFamilyIndex_ = familyIdx;
+      errorMessage_ = "Failed to finalize the hyphenation pack";
+      return;
+    }
+    family.setInstalled(0, true);
+    family.setHasUpdate(0, false);
+    family.setHasResumableDownload(0, false);
+    RenderLock lock(*this);
+    completedPack_ = true;
+    state_ = COMPLETE;
+    return;
+  }
+
   const bool hadLiveDir = Storage.exists(liveDir);
 
   if (Storage.exists(backupDir) && !Storage.removeDir(backupDir)) {
@@ -690,9 +741,11 @@ void FontDownloadActivity::promptDeleteFamily(int familyIndex) {
 void FontDownloadActivity::deleteFamilyAtIndex(int familyIndex) {
   if (familyIndex < 0 || familyIndex >= static_cast<int>(families_.count())) return;
 
-  const auto result = fontInstaller_.deleteFamily(families_.name(familyIndex));
+  const bool pack = families_.hyphenation(familyIndex);
+  const auto result = pack ? FontInstaller::deletePack(families_, static_cast<size_t>(familyIndex))
+                           : fontInstaller_.deleteFamily(families_.name(familyIndex));
   if (result == FontInstaller::Error::OK) {
-    fontInstaller_.refreshRegistry();
+    if (!pack) fontInstaller_.refreshRegistry();
     {
       RenderLock lock(*this);
       families_.setInstalled(familyIndex, false);
@@ -742,6 +795,7 @@ void FontDownloadActivity::activateIndex(const int index) {
   // unrelated row once the list comes back.
   app.clearTapFlash();
   completeNote_ = nullptr;
+  completedPack_ = false;
   if (isDownloadAllRow(index)) {
     downloadAll();
   } else if (isUpdateAllRow(index)) {
@@ -782,6 +836,7 @@ bool FontDownloadActivity::handleCustomInput() {
           buttonEvents.drain();
         } else {
           completeNote_ = nullptr;
+          completedPack_ = false;
           downloadFamily(downloadingFamilyIndex_);
         }
         requestUpdateAndWait();
@@ -909,7 +964,9 @@ void FontDownloadActivity::drawChrome() {
         Rect{metrics.contentSidePadding, barY, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
         static_cast<int>(progress * 100), 100);
   } else if (state_ == COMPLETE) {
-    renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_FONT_INSTALLED), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, centerY,
+                              completedPack_ ? tr(STR_HYPHENATION_INSTALLED) : tr(STR_FONT_INSTALLED), true,
+                              EpdFontFamily::BOLD);
     if (completeNote_ != nullptr) {
       drawWrappedCentered(centerY + lineHeight + metrics.verticalSpacing, completeNote_, 2);
     }
