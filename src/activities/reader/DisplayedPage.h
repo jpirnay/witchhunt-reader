@@ -47,4 +47,19 @@ constexpr Settlement settle(const Identity& drawn, const LivePosition& live, con
   return s;
 }
 
+// The page the status bar on the panel was drawn for (renderStatusBar()), by every pass that shows one: a fresh render,
+// a pre-rendered page, a page shown mid-build.
+struct StatusBarPage {
+  int spine = -1;
+  int page = -1;  // 1-based, as the status bar counts; -1 before the first status bar
+};
+
+// A render of the page the status bar already shows is a clock or battery tick, not a page turn: it refreshes FAST and
+// spends nothing from the refresh budget, which counts pages. Page k of one spine and page k of the next are two
+// pages; told apart by the number alone, a turn between them was billed as a tick, and a run of one-page spines
+// never reached the periodic HALF.
+constexpr bool redrawsStatusBarPage(const StatusBarPage& shown, const int spine, const int page) {
+  return shown.page >= 0 && shown.spine == spine && shown.page == page;
+}
+
 }  // namespace DisplayedPage

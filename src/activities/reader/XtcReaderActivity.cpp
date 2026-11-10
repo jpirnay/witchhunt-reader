@@ -298,48 +298,30 @@ void XtcReaderActivity::renderPage() {
     // Display BW with conditional refresh based on pagesUntilFullRefresh
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
-    // Pass 2: LSB buffer - mark DARK gray only (XTH value 1)
-    // In LUT: 0 bit = apply gray effect, 1 bit = untouched
-    renderer.clearScreen(0x00);
-    for (uint16_t y = 0; y < maxSrcY; y++) {
-      if (!pageStream.readGrayMaskRow(y, xtc::XtcPageRowStream::GrayMask::DarkOnly, row, rowBytes, maxSrcX)) {
-        free(row);
-        return;
-      }
-      renderer.writePhysicalPortraitPackedRow(y, row, maxSrcX);
-    }
-    renderer.copyGrayscaleLsbBuffers();
-
-    // Pass 3: MSB buffer - mark LIGHT AND DARK gray (XTH value 1 or 2)
-    // In LUT: 0 bit = apply gray effect, 1 bit = untouched
-    renderer.clearScreen(0x00);
-    for (uint16_t y = 0; y < maxSrcY; y++) {
-      if (!pageStream.readGrayMaskRow(y, xtc::XtcPageRowStream::GrayMask::LightOrDark, row, rowBytes, maxSrcX)) {
-        free(row);
-        return;
-      }
-      renderer.writePhysicalPortraitPackedRow(y, row, maxSrcX);
-    }
-    renderer.copyGrayscaleMsbBuffers();
-
-    // Display grayscale overlay
-    renderer.displayGrayBuffer();
-
-    // Pass 4: Re-render BW to framebuffer (restore for next frame, instead of restoreBwBuffer)
-    renderer.clearScreen();
-    for (uint16_t y = 0; y < maxSrcY; y++) {
-      bool invertBits = false;
-      if (!pageStream.readBwRow(y, row, rowBytes, &invertBits)) {
-        free(row);
-        return;
-      }
-      renderer.writePhysicalPortraitPackedRow(y, row, maxSrcX, invertBits);
-    }
-
-    // Cleanup grayscale buffers with current frame buffer
-    renderer.cleanupGrayscaleWithFrameBuffer();
-
+    // Passes 2 and 3 through the readers' shared plane sequence: LSB marks DARK gray only (XTH value 1), MSB LIGHT
+    // and DARK gray (value 1 or 2); in the LUT a 0 bit applies the gray, a 1 bit leaves the pixel. A row the stream
+    // cannot read aborts the pass before its plane reaches the controller, and the abort, like the completed pass,
+    // restores the write buffer and the driver's baseline from the BW page on screen. Hand-rolled, a failed row
+    // returned with the LSB plane uploaded and a plane in the write buffer, and the next FAST diffed against it.
+    bool rowFailed = false;
+    const auto gt = renderer.renderGrayscalePlanesSequential(
+        [&](const GfxRenderer::RenderMode mode) {
+          const auto mask = mode == GfxRenderer::GRAYSCALE_LSB ? xtc::XtcPageRowStream::GrayMask::DarkOnly
+                                                               : xtc::XtcPageRowStream::GrayMask::LightOrDark;
+          for (uint16_t y = 0; y < maxSrcY; y++) {
+            if (!pageStream.readGrayMaskRow(y, mask, row, rowBytes, maxSrcX)) {
+              rowFailed = true;
+              return;
+            }
+            renderer.writePhysicalPortraitPackedRow(y, row, maxSrcX);
+          }
+        },
+        [&] { return rowFailed; });
     free(row);
+    if (gt.aborted) {
+      LOG_ERR("XTR", "Page %lu: a gray row could not be read; shown without its gray", currentPage + 1);
+      return;
+    }
     LOG_DBG("XTR", "Rendered page %lu/%lu (2-bit grayscale)", currentPage + 1, xtc->getPageCount());
     return;
   } else {

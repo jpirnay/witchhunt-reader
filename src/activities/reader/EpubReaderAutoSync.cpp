@@ -359,7 +359,14 @@ void EpubReaderActivity::refreshAutoSyncIndicator() {
     return;
   }
   autoSyncIndicator = indicator;
-  requestUpdate();
+  // Asked for the way a clock tick is. An interval push starts on the turn that completes the interval, so the
+  // indicator flips while that page is still being finished: a request then was shelved by the "AA owed" guard, or
+  // drew the unchanged page again FAST and owed its AA once more (deferred AA: the T5S3, the Murphy), or landed in the
+  // inline AA's settle and dropped the gray (the X4 Pro without one-pass). shouldSkipPeriodicUpdate() makes it owed
+  // instead while a pass is in flight or a deferred AA is still to run (serviceOwedPeriodicRefresh() asks once the
+  // reader has settled), leaves Background-B's build alone, and skips the redraw when the status bar already shows
+  // this indicator (it flipped back meanwhile).
+  if (!shouldSkipPeriodicUpdate()) requestUpdate();
 }
 
 void EpubReaderActivity::serviceAutoSync() {

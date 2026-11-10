@@ -801,10 +801,14 @@ void HomeActivity::render(RenderLock&&) {
   coverRectW = contentRect.width;
   coverRectH = layout.recentTileHeight;
 
+  // The carousel stores nothing: this draw is its fallback for a render its frame cache could not serve, and every
+  // carousel render is either served by that cache or clears coverRendered (above) before it could restore, so the
+  // copy was never read. It was a malloc of the tile region with no heap floor, which the X3 logged as "OOM: cover
+  // buffer (20592 bytes)".
   GUI.drawRecentBookCover(renderer,
                           Rect{contentRect.x, metrics.homeTopPadding, contentRect.width, layout.recentTileHeight},
                           recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
-                          std::bind(&HomeActivity::storeCoverBuffer, this));
+                          [this, isCarousel] { return !isCarousel && storeCoverBuffer(); });
 
   GUI.drawButtonMenu(
       renderer,
@@ -927,6 +931,12 @@ void HomeActivity::onSelectBook(const std::string& path) {
 }
 
 void HomeActivity::dispatchMenuAction(HomeMenuAction action) {
+  // Every entry replaces Home, so the buffer lent for the cover pass or kept as the carousel's frame cache
+  // (keepRegionAsFrameCache) goes back now, as startActivityForResult() does, not at onExit(): the busy indicator
+  // ActivityManager paints first skips while the secondary is out (showBusyIndicator()), so the carousel never showed
+  // it, nor any theme during the cover pass. The return seeds the buffer from the write buffer, which holds Home's
+  // frame in single-buffer mode, and arms the one-shot RED baseline, so the indicator's FAST diffs against the glass.
+  restoreSecondaryBuffer(/*callerHoldsRenderLock=*/false);
   // Record where the menu entry was focused so that when the launched activity exits
   // (via returnFromChild() or an empty-stack finish()), we come back to the same row.
   // Also carries through More, whose goTo*() leaves the hint in place for what it opens.
