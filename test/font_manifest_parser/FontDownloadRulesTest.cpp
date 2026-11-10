@@ -48,12 +48,29 @@ TEST(FontDownloadRulesTest, AManifestFormatNamesAKindExactly) {
   EXPECT_EQ(kindOfFormat("uipack"), FileKind::Cpfont);  // a UI script pack: .cpfont files
   EXPECT_EQ(kindOfFormat("ttf"), FileKind::TrueType);
   EXPECT_EQ(kindOfFormat("otf"), FileKind::OpenTypeCff);
+  EXPECT_EQ(kindOfFormat("hyphenation"), FileKind::HyphenationPack);
   EXPECT_EQ(kindOfFormat("OTF"), FileKind::Unknown);
   EXPECT_EQ(kindOfFormat("woff2"), FileKind::Unknown);
   EXPECT_EQ(kindOfFormat(""), FileKind::Unknown);
   EXPECT_EQ(FontDownloadRules::kindOfFormat("otfx", 3), FileKind::OpenTypeCff);  // the length bounds it
   EXPECT_EQ(FontDownloadRules::kindOfFormat("otf", 2), FileKind::Unknown);
   EXPECT_EQ(FontDownloadRules::kindOfFormat(nullptr, 0), FileKind::Unknown);
+}
+
+// A hyphenation pack (HyphenationPack.h): .cphyph, starting with a CPHY version 1 header.
+TEST(FontDownloadRulesTest, AHyphenationPackIsACphyphWithACphyV1Header) {
+  EXPECT_EQ(FontDownloadRules::kindOf("Hyphenation-German/hyph-de.cphyph"), FileKind::HyphenationPack);
+  EXPECT_EQ(FontDownloadRules::kindOf("HYPH-DE.CPHYPH"), FileKind::HyphenationPack);
+  EXPECT_TRUE(head(FileKind::HyphenationPack, std::string("CPHY\x01"
+                                                          "de\x02rest",
+                                                          12)));
+  EXPECT_FALSE(head(FileKind::HyphenationPack, std::string("CPHY\x02"
+                                                           "de\x02rest",
+                                                           12)));  // another version
+  EXPECT_FALSE(head(FileKind::HyphenationPack, std::string("CPFONT\0\0rest", 12)));
+  EXPECT_FALSE(head(FileKind::Cpfont, std::string("CPHY\x01"
+                                                  "de\x02rest",
+                                                  12)));
 }
 
 TEST(FontDownloadRulesTest, ACpfontStartsWithItsMagic) {
