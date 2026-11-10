@@ -22,6 +22,14 @@ TEST(BidiClassTest, LeftToRightScriptsReadAsL) {
   EXPECT_EQ(bidi_class(0x1200), L);   // Ethiopic ha
   EXPECT_EQ(bidi_class(0xFF21), L);   // fullwidth A
   EXPECT_EQ(bidi_class(0x20000), L);  // CJK extension B
+  EXPECT_EQ(bidi_class(0x1000), L);   // Myanmar ka
+  EXPECT_EQ(bidi_class(0x1031), L);   // Myanmar vowel sign e, a spacing mark
+  EXPECT_EQ(bidi_class(0x1039), L);   // Myanmar virama (stacker), NSM in the UCD
+  EXPECT_EQ(bidi_class(0x103A), L);   // Myanmar asat, NSM in the UCD
+  EXPECT_EQ(bidi_class(0x1041), L);   // Myanmar digit one
+  EXPECT_EQ(bidi_class(0xAA60), L);   // Myanmar Extended-A khamti ga
+  EXPECT_EQ(bidi_class(0xA9E0), L);   // Myanmar Extended-B shan gha
+  EXPECT_EQ(bidi_class(0x104A), L);   // Myanmar little section (U+104A, L in the UCD)
 }
 
 TEST(BidiClassTest, PunctuationSpacesAndNumbers) {
