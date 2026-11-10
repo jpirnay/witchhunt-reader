@@ -822,6 +822,10 @@ class ChapterHtmlSlimParser final : public Print {
   // elements' markup goes on, outermost first, at the new block's start. An edge whose openers the held run has no room
   // for is spent, and every edge inside it with it.
   void startNewTextBlockWithinElements(const BlockStyle& blockStyle);
+  // The style of the block a <pre> line feed starts: the next line of the paragraph it splits. It keeps that block's
+  // style but for what CSS gives a block once: its top and bottom spacing (the bottom is held for the end tag) and its
+  // first-line indent. A float stays with the block it was attached to.
+  BlockStyle lineFeedBlockStyle() const;
   // Puts the controls the element opening now asks for (CSS Writing Modes 3, 2.4.2: its unicode-bidi and computed
   // direction, elementFlow_) at the start of its text, and pushes the edge with their closers. An inline element takes
   // them all; one laid out as its own block (`inlineElement` false) only an override, as its other values set its

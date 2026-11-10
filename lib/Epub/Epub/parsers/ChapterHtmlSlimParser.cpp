@@ -2302,6 +2302,22 @@ void ChapterHtmlSlimParser::startNewTextBlockWithinElements(const BlockStyle& bl
   }
 }
 
+BlockStyle ChapterHtmlSlimParser::lineFeedBlockStyle() const {
+  BlockStyle style = currentTextBlock->getBlockStyle();
+  style.marginTop = 0;
+  style.paddingTop = 0;
+  style.marginBottom = 0;
+  style.paddingBottom = 0;
+  style.textIndent = 0;
+  style.textIndentDefined = false;
+  style.textIndentYields = false;
+  style.firstLineExtraIndent = 0;
+  style.fromBrElement = false;
+  style.fromLineFeed = true;
+  style.floatZoneCount = 0;
+  return style;
+}
+
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   endJoinerContext();            // a joiner still held ends the paragraph before: its word is flushed already
@@ -4159,7 +4175,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
         }
         // A float the new block takes stands before the next byte of this chunk.
         const PinnedPlacement atNextByte(*self, off);
-        self->startNewTextBlockWithinElements(self->currentTextBlock->getBlockStyle());
+        self->startNewTextBlockWithinElements(self->lineFeedBlockStyle());
         self->nextWordContinues = false;
         continue;
       }

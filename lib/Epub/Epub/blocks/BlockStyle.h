@@ -53,6 +53,9 @@ struct BlockStyle {
   // a full line-height gap when the <br> block stays empty (section-break use case).
   // NOT propagated through getCombinedBlockStyle so it can't leak into sibling blocks.
   bool fromBrElement = false;
+  // Set when a line feed the text keeps (<pre>) started this block: it is the next line of the paragraph before it, so
+  // it takes no first-line indent from the reader. Like fromBrElement, NOT propagated through getCombinedBlockStyle.
+  bool fromLineFeed = false;
   // Parse-time guard: true once resolveBlockFont() has snapped this block to the size
   // ladder, so a second layout pass (long-block split, continuations) can't re-resolve the
   // residual multiplier. NOT serialised and NOT propagated through getCombinedBlockStyle
@@ -145,6 +148,7 @@ struct BlockStyle {
     // fromBrElement is never propagated — it is consumed by startNewTextBlock
     // when the empty <br> block is merged with the following paragraph.
     combinedBlockStyle.fromBrElement = false;
+    combinedBlockStyle.fromLineFeed = false;
     combinedBlockStyle.keepWithNext = child.keepWithNext;
     combinedBlockStyle.lineHeightEm = child.lineHeightEm;
     combinedBlockStyle.direction = child.direction != CssDirection::Unset ? child.direction : direction;

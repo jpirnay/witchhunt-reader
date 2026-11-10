@@ -142,6 +142,7 @@ add_executable(EpubPipelineTest
   PrefixedPackageTest.cpp
   BlockElementsTest.cpp
   DashBreakTest.cpp
+  WhiteSpaceLayoutTest.cpp
   FontFamilyLayoutTest.cpp
   SpineCacheLayoutTest.cpp
   SaxStateInArenaTest.cpp
