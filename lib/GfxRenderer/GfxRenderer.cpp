@@ -7,6 +7,8 @@
 #include <GlyphKey.h>
 #include <GlyphProvider.h>
 #include <HalGPIO.h>
+#include <IndicReorder.h>
+#include <IndicScripts.h>
 #include <Logging.h>
 #include <MarkOverlay.h>
 #include <Memory.h>
@@ -1405,6 +1407,16 @@ static const char* arabicUiForms(const EpdFontFamily& family, const char* text, 
   return holder.c_str();
 }
 
+// UI text's Indic syllables in the order the UI draws them (indicReorderForDisplay): a pre-base vowel sign in front of
+// its consonant, a two-part vowel split around it, a nukta letter precomposed. The UI does not shape, so a conjunct
+// keeps its visible virama, as a book in a bitmap font does. The order is not idempotent -- "किकि" ordered twice moves
+// the second sign in front again -- so it is applied only where text is measured or drawn, and never to a string handed
+// back (truncatedText, wrappedText), which its caller draws later.
+static const char* indicUiOrder(const char* text, std::string& holder) {
+  if (!text || !indic::containsIndic(text)) return text;
+  return indicReorderForDisplay(text, holder) ? holder.c_str() : text;
+}
+
 bool GfxRenderer::formsArabicUi(const int fontId, const EpdFontFamily::Style style) const {
   const EpdFontFamily* const family = findFontFamily(fontId);
   return family && family->formsArabic(style);
@@ -1418,6 +1430,8 @@ int GfxRenderer::rawTextWidth(const int fontId, const char* text, const EpdFontF
   }
   std::string formed;
   text = arabicUiForms(*family, text, style, formed);
+  std::string ordered;
+  text = indicUiOrder(text, ordered);
 
   if (fontCacheManager_ && fontCacheManager_->isScanning()) {
     fontCacheManager_->recordText(text, fontId, style);
@@ -1442,7 +1456,9 @@ bool GfxRenderer::getTextInkMetrics(const int fontId, const char* text, const Ep
   if (text == nullptr || *text == '\0') return false;
   const EpdFontFamily* const family = findFontFamily(fontId);
   if (!family) return false;
-  family->beginText(text, style);  // the string decides its glyphs' source (GlyphProvider::beginText)
+  std::string ordered;
+  text = indicUiOrder(text, ordered);  // a two-part vowel's halves are drawn, not the vowel
+  family->beginText(text, style);      // the string decides its glyphs' source (GlyphProvider::beginText)
 
   bool any = false;
   uint32_t cp;
@@ -1482,6 +1498,8 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
                            const EpdFontFamily::Style style) const {
   std::string formed;
   if (const EpdFontFamily* const family = findFontFamily(fontId)) text = arabicUiForms(*family, text, style, formed);
+  std::string ordered;
+  text = indicUiOrder(text, ordered);
   if (text && BidiUtils::hasRtlClass(text, strlen(text))) {
     drawFormedText(fontId, x, y, BidiUtils::visualUiLine(text).c_str(), black, style);
     return;
@@ -1623,6 +1641,8 @@ void GfxRenderer::drawTextScaled(const int fontId, const int x, const int y, con
                                  const EpdFontFamily::Style style, const float scale) const {
   std::string formed;
   if (const EpdFontFamily* const family = findFontFamily(fontId)) text = arabicUiForms(*family, text, style, formed);
+  std::string ordered;
+  text = indicUiOrder(text, ordered);
   if (text && BidiUtils::hasRtlClass(text, strlen(text))) {
     drawFormedTextScaled(fontId, x, y, BidiUtils::visualUiLine(text).c_str(), black, style, scale);
     return;
@@ -3123,13 +3143,17 @@ std::string GfxRenderer::truncatedText(const int fontId, const char* text, const
   }
   std::string formed;
   text = arabicUiForms(*family, text, style, formed);
+  // Indic text is fitted in its own order and handed back so, for the draw to order it once (indicUiOrder); each
+  // candidate is measured ordered (getTextWidth), by the loop below rather than textTruncation's walk.
+  const bool indic = indic::containsIndic(text);
 
   // Scan pass: record the text and hand back the whole string. The scan has to see every glyph
   // the real pass will draw, and prewarming a truncated string would leave the remainder to the
   // per-glyph fallback. This used to fall out of getTextWidth() returning 0 while scanning, which
   // read as "fits"; now that the measurement happens inside textTruncation, say it explicitly.
   if (fontCacheManager_ && fontCacheManager_->isScanning()) {
-    fontCacheManager_->recordText(text, fontId, style);
+    std::string ordered;
+    fontCacheManager_->recordText(indicUiOrder(text, ordered), fontId, style);
     return text;
   }
 
@@ -3137,7 +3161,7 @@ std::string GfxRenderer::truncatedText(const int fontId, const char* text, const
 
   // SMALL_CAPS scales every metric, which the single-pass walk does not model; a font with no
   // U+2026 has nothing to truncate with. Neither case occurs today, so both take the old loop.
-  if (!(style & EpdFontFamily::SMALL_CAPS) && textTruncation::canTruncate(*family, style)) {
+  if (!(style & EpdFontFamily::SMALL_CAPS) && !indic && textTruncation::canTruncate(*family, style)) {
     return textTruncation::truncateToWidth(*family, text, maxWidth, style);
   }
 
