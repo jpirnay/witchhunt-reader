@@ -52,8 +52,9 @@ class Hyphenator {
   // available; null when the firmware does not hyphenate the language. Names its pack (hyph-<code>.cphyph).
   static const char* languageCode(const std::string& lang);
   // The patterns' part of a section's cache key for a book in this language (hyphenationLayoutKey in
-  // LanguageRegistry.h): 0 for the patterns the image carried before packs.
-  static uint32_t layoutKey(const std::string& lang);
+  // LanguageRegistry.h): 0 for the patterns the image carried before packs. 0 with hyphenation off, without asking
+  // the pack provider (which maps the trie on the X3 and X4): such a layout keeps its key whatever pack is installed.
+  static uint32_t layoutKey(const std::string& lang, bool hyphenationEnabled);
   static void setLanguageHyphenator(const LanguageHyphenator* hyphenator) { cachedHyphenator_ = hyphenator; }
   // The patterns breakOffsets() uses now: the last installed, null when none is.
   static const LanguageHyphenator* languageHyphenator() { return cachedHyphenator_; }

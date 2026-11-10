@@ -92,7 +92,7 @@ TEST(IndicPackHyphenation, AHindiBookBreaksBetweenSyllablesWithoutAHyphen) {
   p.viewportHeight = 760;
   p.inlineFootnotePreviews = false;
   p.hyphenationEnabled = true;
-  p.hyphenationLayoutKey = Hyphenator::layoutKey("hi");
+  p.hyphenationLayoutKey = Hyphenator::layoutKey("hi", true);
   EXPECT_NE(p.hyphenationLayoutKey, kNoPatternsLayoutKey);
   Section section(epub, 0, renderer);
   ASSERT_TRUE(section.createSectionFile(p, {}, /*skipEviction=*/true));

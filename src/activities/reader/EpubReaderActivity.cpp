@@ -1495,7 +1495,7 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.viewportWidth = layout.viewportWidth;
   p.viewportHeight = layout.viewportHeight;
   p.hyphenationEnabled = getEffectiveHyphenation();
-  if (epub) p.hyphenationLayoutKey = Hyphenator::layoutKey(epub->getLanguage());
+  if (epub) p.hyphenationLayoutKey = Hyphenator::layoutKey(epub->getLanguage(), p.hyphenationEnabled);
   p.widowOrphanControl = SETTINGS.widowOrphanControl != 0;
   p.fontSizeNormalization = getEffectiveFontSizeNormalization();
   p.embeddedStyle = lastRenderStats.embeddedStyle;
@@ -7641,7 +7641,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   p.viewportWidth = viewportWidth;
   p.viewportHeight = viewportHeight;
   p.hyphenationEnabled = effectiveHyphenation;
-  p.hyphenationLayoutKey = Hyphenator::layoutKey(epub->getLanguage());
+  p.hyphenationLayoutKey = Hyphenator::layoutKey(epub->getLanguage(), p.hyphenationEnabled);
   p.widowOrphanControl = SETTINGS.widowOrphanControl != 0;
   p.fontSizeNormalization = effectiveFontSizeNormalization;
   p.embeddedStyle = effectiveEmbeddedStyle;

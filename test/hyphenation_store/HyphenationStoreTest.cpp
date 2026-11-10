@@ -479,12 +479,41 @@ TEST(HyphenationStore, LayoutKeyKeepsTheImagesLayoutsAndSeparatesOthers) {
   ASSERT_EQ(fillFrom(store, packOf("de", de_patterns)), HyphenationStore::Fill::Stored);
   ASSERT_EQ(fillFrom(store, packOf("it", pt_patterns)), HyphenationStore::Fill::Stored);  // not Italian's bytes
   ProviderScope scope(store);
-  EXPECT_EQ(Hyphenator::layoutKey("de-DE"), 0u);  // the bytes the image carried
-  EXPECT_EQ(Hyphenator::layoutKey("en"), 0u);
-  EXPECT_EQ(Hyphenator::layoutKey("ja"), 0u);  // not a language the firmware hyphenates: as before
-  EXPECT_EQ(Hyphenator::layoutKey("fr"), kNoPatternsLayoutKey);
-  EXPECT_EQ(Hyphenator::layoutKey("it"),
+  EXPECT_EQ(Hyphenator::layoutKey("de-DE", true), 0u);  // the bytes the image carried
+  EXPECT_EQ(Hyphenator::layoutKey("en", true), 0u);
+  EXPECT_EQ(Hyphenator::layoutKey("ja", true), 0u);  // not a language the firmware hyphenates: as before
+  EXPECT_EQ(Hyphenator::layoutKey("fr", true), kNoPatternsLayoutKey);
+  EXPECT_EQ(Hyphenator::layoutKey("it", true),
             esp_rom_crc32_le(0, pt_patterns.data, static_cast<uint32_t>(pt_patterns.size)));
+}
+
+namespace {
+
+int gProviderAsks = 0;
+bool countingProvider(const char* code, SerializedHyphenationPatterns& out, uint32_t& crc32) {
+  ++gProviderAsks;
+  return storeProvider(code, out, crc32);
+}
+
+}  // namespace
+
+// With hyphenation off a section's key leaves the patterns out, and the provider is not asked for them (on the X3 and
+// X4 the ask maps the trie): a pack installed, changed or removed keeps the layouts of a reader who does not
+// hyphenate.
+TEST(HyphenationStore, LayoutKeyWithHyphenationOffLeavesThePatternsOutUnasked) {
+  SimNorFlash flash(kRegionBytes);
+  HyphenationStore store(flash);
+  ASSERT_TRUE(store.mount());
+  ASSERT_EQ(fillFrom(store, packOf("it", pt_patterns)), HyphenationStore::Fill::Stored);  // not Italian's bytes
+  ProviderScope scope(store);
+  setHyphenationPatternProvider(countingProvider);
+  gProviderAsks = 0;
+  EXPECT_EQ(Hyphenator::layoutKey("it", false), 0u);
+  EXPECT_EQ(Hyphenator::layoutKey("fr", false), 0u);  // no pack: kNoPatternsLayoutKey with hyphenation on
+  EXPECT_EQ(0, gProviderAsks);
+  EXPECT_EQ(Hyphenator::layoutKey("it", true),
+            esp_rom_crc32_le(0, pt_patterns.data, static_cast<uint32_t>(pt_patterns.size)));
+  EXPECT_EQ(1, gProviderAsks);
 }
 
 // Each language added with packs, from the pack the repo hosts, breaks words exactly as Liang's algorithm over its
