@@ -812,10 +812,14 @@ void HomeActivity::render(RenderLock&&) {
   coverRectW = contentRect.width;
   coverRectH = layout.recentTileHeight;
 
+  // The carousel stores nothing: this draw is its fallback for a render its frame cache could not serve, and every
+  // carousel render is either served by that cache or clears coverRendered (above) before it could restore, so the
+  // copy was never read. It was a malloc of the tile region with no heap floor, which the X3 logged as "OOM: cover
+  // buffer (20592 bytes)".
   GUI.drawRecentBookCover(renderer,
                           Rect{contentRect.x, metrics.homeTopPadding, contentRect.width, layout.recentTileHeight},
                           recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
-                          std::bind(&HomeActivity::storeCoverBuffer, this));
+                          [this, isCarousel] { return !isCarousel && storeCoverBuffer(); });
 
   GUI.drawButtonMenu(
       renderer,
