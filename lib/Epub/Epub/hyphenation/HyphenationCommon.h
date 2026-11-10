@@ -12,9 +12,14 @@ struct CodepointInfo {
 
 uint32_t toLowerLatin(uint32_t cp);
 uint32_t toLowerCyrillic(uint32_t cp);
+// The Indic scripts have no case: the code point itself.
+uint32_t toLowerIndic(uint32_t cp);
 
 bool isLatinLetter(uint32_t cp);
 bool isCyrillicLetter(uint32_t cp);
+// A letter, vowel sign, virama, nukta or other mark of an Indic script (IndicScripts.h), or a joiner (ZWJ, ZWNJ): what
+// the Indic tries' patterns are made of. Not a digit, danda or Vedic sign.
+bool isIndicLetter(uint32_t cp);
 
 bool isAlphabetic(uint32_t cp);
 bool isPunctuation(uint32_t cp);

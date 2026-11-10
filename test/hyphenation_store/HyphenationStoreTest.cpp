@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <sstream>
@@ -70,6 +71,19 @@ std::vector<uint8_t> packOf(const char* code, const SerializedHyphenationPattern
 std::vector<uint8_t> readFile(const std::string& path) {
   std::ifstream in(path, std::ios::binary);
   return std::vector<uint8_t>((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+// The pack of `code` the repo offers for download: assets/sd-fonts/Hyphenation-<Language>/hyph-<code>.cphyph.
+std::vector<uint8_t> hostedPack(const char* code) {
+  const std::string name = std::string("hyph-") + code + ".cphyph";
+  for (const auto& dir : std::filesystem::directory_iterator(HYPHENATION_PACK_DIR)) {
+    if (dir.is_directory() && dir.path().filename().string().rfind("Hyphenation-", 0) == 0 &&
+        std::filesystem::exists(dir.path() / name)) {
+      return readFile((dir.path() / name).string());
+    }
+  }
+  ADD_FAILURE() << "no hosted pack " << name;
+  return {};
 }
 
 class BufferSource final : public HyphenationPackSource {
@@ -179,11 +193,11 @@ TEST(HyphenationPack, HeaderRoundTripsAndRefusesWhatItDoesNotRead) {
 }
 
 // The packs scripts/build_hyphenation_packs.py writes hold exactly the tries that were compiled in.
-TEST(HyphenationPack, ScriptPacksHoldTheBuiltInTries) {
+// The packs the repo hosts, as scripts/build_hyphenation_packs.py wrote them: exactly the tries once compiled in.
+TEST(HyphenationPack, HostedPacksHoldTheBuiltInTries) {
   for (const auto& b : kBuiltins) {
     SCOPED_TRACE(b.code);
-    const auto file = readFile(std::string(HYPHENATION_PACK_DIR) + "/hyph-" + b.code + ".cphyph");
-    EXPECT_EQ(file, packOf(b.code, *b.patterns));
+    EXPECT_EQ(hostedPack(b.code), packOf(b.code, *b.patterns));
   }
 }
 
@@ -447,4 +461,80 @@ TEST(HyphenationStore, LayoutKeyKeepsTheImagesLayoutsAndSeparatesOthers) {
   EXPECT_EQ(Hyphenator::layoutKey("fr"), kNoPatternsLayoutKey);
   EXPECT_EQ(Hyphenator::layoutKey("it"),
             esp_rom_crc32_le(0, pt_patterns.data, static_cast<uint32_t>(pt_patterns.size)));
+}
+
+// Each language added with packs, from the pack the repo hosts, breaks words exactly as Liang's algorithm over its
+// hyph-utf8 patterns does (resources/generate_pack_reference.py): the hypher trie, the CPHY pack and the firmware's
+// walk all agree with the patterns. The Indic languages break without a hyphen.
+TEST(HyphenationStore, AddedLanguagesHyphenateAsTheirPatterns) {
+  const char* const kAdded[] = {"nl", "cs", "da", "sl", "lt", "ca", "be", "fi", "tr", "as", "bn",
+                                "gu", "hi", "kn", "ml", "mr", "or", "pa", "sa", "ta", "te"};
+  SimNorFlash flash(kRegionBytes);
+  HyphenationStore store(flash);
+  ASSERT_TRUE(store.mount());
+  ProviderScope scope(store);
+  size_t checked = 0;
+  for (const char* code : kAdded) {
+    SCOPED_TRACE(code);
+    const LanguageEntry* entry = findLanguageEntry(code);
+    ASSERT_NE(entry, nullptr);
+    ASSERT_EQ(fillFrom(store, hostedPack(code)), HyphenationStore::Fill::Stored);
+    forgetPackPatterns();
+    store.unmapAll();
+    const LanguageHyphenator* hyphenator = Hyphenator::forLanguage(code);
+    ASSERT_NE(hyphenator, nullptr);
+    EXPECT_EQ(hyphenator->insertsHyphen(), entry->insertsHyphen);
+    Hyphenator::setLanguageHyphenator(hyphenator);
+
+    std::ifstream in(std::string(HYPHENATION_PACK_REFERENCE_DIR) + "/" + code + "_reference.txt");
+    ASSERT_TRUE(in.good());
+    std::string line;
+    size_t words = 0;
+    size_t breaks = 0;
+    while (std::getline(in, line)) {
+      if (line.empty() || line[0] == '#') continue;
+      const size_t bar = line.find('|');
+      ASSERT_NE(bar, std::string::npos) << line;
+      const std::string word = line.substr(0, bar);
+      const std::vector<CodepointInfo> cps = collectCodepoints(word);
+      std::ostringstream expected;
+      std::stringstream indexes(line.substr(bar + 1));
+      for (std::string index; std::getline(indexes, index, ',');) {
+        const size_t i = std::stoul(index);
+        ASSERT_LT(i, cps.size()) << word;
+        expected << cps[i].byteOffset << (entry->insertsHyphen ? "+ " : " ");
+        ++breaks;
+      }
+      ASSERT_EQ(describe(Hyphenator::breakOffsets(word, false)), expected.str()) << word;
+      ++words;
+    }
+    EXPECT_GE(words, 150u);
+    checked += breaks;
+  }
+  EXPECT_GT(checked, 20000u);
+}
+
+// Two pack languages are hyphenated at once (the open book's and one more). A third waits for the next book open,
+// rather than taking a slot from a language whose hyphenator a caller may hold.
+TEST(HyphenationStore, TwoPackLanguagesAtOnceAndAThirdAfterTheNextBookOpen) {
+  SimNorFlash flash(kRegionBytes);
+  HyphenationStore store(flash);
+  ASSERT_TRUE(store.mount());
+  for (const char* code : {"it", "pt", "fr"})
+    ASSERT_EQ(fillFrom(store, hostedPack(code)), HyphenationStore::Fill::Stored);
+  ProviderScope scope(store);
+  const LanguageHyphenator* it = Hyphenator::forLanguage("it");
+  const LanguageHyphenator* pt = Hyphenator::forLanguage("pt");
+  ASSERT_NE(it, nullptr);
+  ASSERT_NE(pt, nullptr);
+  EXPECT_NE(it, pt);
+  EXPECT_EQ(Hyphenator::forLanguage("it-IT"), it);  // asked again, the same slot
+  EXPECT_EQ(Hyphenator::forLanguage("fr"), nullptr);
+  EXPECT_EQ(it->patterns().size, it_patterns.size);  // still Italian's
+  forgetPackPatterns();
+  store.unmapAll();
+  EXPECT_FALSE(it->hasPatterns());
+  const LanguageHyphenator* fr = Hyphenator::forLanguage("fr");
+  ASSERT_NE(fr, nullptr);
+  EXPECT_EQ(fr->patterns().size, fr_patterns.size);
 }

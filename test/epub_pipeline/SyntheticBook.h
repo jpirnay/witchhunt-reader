@@ -23,7 +23,8 @@ struct SyntheticFile {
 
 inline std::shared_ptr<Epub> syntheticBookFromDocument(const std::filesystem::path& work, const int index,
                                                        const std::string& xhtml,
-                                                       const std::vector<SyntheticFile>& extra = {}) {
+                                                       const std::vector<SyntheticFile>& extra = {},
+                                                       const std::string& language = "en") {
   test_zip::StoredZipWriter zip;
   zip.add("mimetype", "application/epub+zip");
   zip.add("META-INF/container.xml",
@@ -39,8 +40,9 @@ inline std::shared_ptr<Epub> syntheticBookFromDocument(const std::filesystem::pa
           "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
           "version=\"3.0\" unique-identifier=\"id\">\n<metadata "
           "xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"id\">lut</dc:identifier>"
-          "<dc:title>LUT</dc:title><dc:language>en</dc:language></metadata>\n<manifest>\n" +
-              manifest + "</manifest>\n<spine><itemref idref=\"c\"/></spine>\n</package>\n");
+          "<dc:title>LUT</dc:title><dc:language>" +
+              language + "</dc:language></metadata>\n<manifest>\n" + manifest +
+              "</manifest>\n<spine><itemref idref=\"c\"/></spine>\n</package>\n");
   zip.add("chapter.xhtml", xhtml);
   for (const auto& file : extra) zip.add(file.href, file.bytes);
   // One file per book: the cache directory is keyed on the path, so two books at one path would
@@ -54,12 +56,13 @@ inline std::shared_ptr<Epub> syntheticBookFromDocument(const std::filesystem::pa
 }
 
 inline std::shared_ptr<Epub> syntheticBook(const std::filesystem::path& work, const int index, const std::string& body,
-                                           const std::vector<SyntheticFile>& extra = {}) {
+                                           const std::vector<SyntheticFile>& extra = {},
+                                           const std::string& language = "en") {
   return syntheticBookFromDocument(work, index,
                                    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html "
                                    "xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>C</title></head><body>\n" +
                                        body + "\n</body></html>\n",
-                                   extra);
+                                   extra, language);
 }
 
 // A PNG's signature and IHDR, all the layout's dimension probe reads (the image is never decoded

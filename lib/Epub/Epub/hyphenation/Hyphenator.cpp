@@ -17,9 +17,13 @@ struct Iso639Mapping {
   const char* iso639_2;
   const char* iso639_1;
 };
-static constexpr Iso639Mapping kIso639Mappings[] = {{"eng", "en"}, {"fra", "fr"}, {"fre", "fr"}, {"deu", "de"},
-                                                    {"ger", "de"}, {"rus", "ru"}, {"spa", "es"}, {"ita", "it"},
-                                                    {"ukr", "uk"}, {"swe", "sv"}, {"pol", "pl"}, {"por", "pt"}};
+static constexpr Iso639Mapping kIso639Mappings[] = {
+    {"eng", "en"}, {"fra", "fr"}, {"fre", "fr"}, {"deu", "de"}, {"ger", "de"}, {"rus", "ru"},
+    {"spa", "es"}, {"ita", "it"}, {"ukr", "uk"}, {"swe", "sv"}, {"pol", "pl"}, {"por", "pt"},
+    {"nld", "nl"}, {"dut", "nl"}, {"ces", "cs"}, {"cze", "cs"}, {"dan", "da"}, {"slv", "sl"},
+    {"lit", "lt"}, {"cat", "ca"}, {"bel", "be"}, {"fin", "fi"}, {"tur", "tr"}, {"asm", "as"},
+    {"ben", "bn"}, {"guj", "gu"}, {"hin", "hi"}, {"kan", "kn"}, {"mal", "ml"}, {"mar", "mr"},
+    {"ori", "or"}, {"ory", "or"}, {"pan", "pa"}, {"san", "sa"}, {"tam", "ta"}, {"tel", "te"}};
 
 const LanguageHyphenator* Hyphenator::cachedHyphenator_ = nullptr;
 
@@ -120,6 +124,13 @@ void appendFallbackIndexes(const std::vector<CodepointInfo>& cps, const size_t m
 
 bool isSegmentSeparator(const uint32_t cp) { return isExplicitHyphen(cp) || isApostrophe(cp); }
 
+// Whether a break before cps[idx] shows a hyphen: not between two letters of a language whose lines break without one
+// (the Indic scripts). A Latin word in such a book keeps its hyphen.
+bool showsHyphen(const LanguageHyphenator* hyphenator, const std::vector<CodepointInfo>& cps, const size_t idx) {
+  if (!hyphenator || hyphenator->insertsHyphen() || idx == 0 || idx >= cps.size()) return true;
+  return !(hyphenator->isLetter(cps[idx - 1].value) && hyphenator->isLetter(cps[idx].value));
+}
+
 void appendSegmentPatternBreaks(const std::vector<CodepointInfo>& cps, const LanguageHyphenator& hyphenator,
                                 const bool includeFallback, std::vector<Hyphenator::BreakInfo>& outBreaks) {
   size_t segStart = 0;
@@ -146,7 +157,7 @@ void appendSegmentPatternBreaks(const std::vector<CodepointInfo>& cps, const Lan
         if (idx == 0 || idx >= segment.size()) continue;
         const size_t cpIdx = segStart + idx;
         if (cpIdx < cps.size()) {
-          outBreaks.push_back({cps[cpIdx].byteOffset, true});
+          outBreaks.push_back({cps[cpIdx].byteOffset, showsHyphen(&hyphenator, cps, cpIdx)});
         }
       }
     }
@@ -295,7 +306,7 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
     const auto unhyphenated = [](const uint32_t cp) { return utf8IsCjkBreakable(cp) || myanmar::isRunMember(cp); };
     const bool noHyphen =
         (idx < cps.size() && unhyphenated(cps[idx].value)) || (idx > 0 && unhyphenated(cps[idx - 1].value));
-    breaks.push_back({byteOffsetForIndex(cps, idx), !noHyphen});
+    breaks.push_back({byteOffsetForIndex(cps, idx), !noHyphen && showsHyphen(hyphenator, cps, idx)});
   }
 
   return breaks;

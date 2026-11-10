@@ -1,5 +1,6 @@
 #include "HyphenationCommon.h"
 
+#include <IndicScripts.h>
 #include <Utf8.h>
 
 // Both scripts share the one mapping in lib/Utf8. Each hyphenator feeds it only
@@ -7,6 +8,8 @@
 uint32_t toLowerLatin(const uint32_t cp) { return utf8LowerCodepoint(cp); }
 
 uint32_t toLowerCyrillic(const uint32_t cp) { return utf8LowerCodepoint(cp); }
+
+uint32_t toLowerIndic(const uint32_t cp) { return cp; }
 
 bool isLatinLetter(const uint32_t cp) {
   if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z')) {
@@ -35,6 +38,13 @@ bool isLatinLetter(const uint32_t cp) {
 }
 
 bool isCyrillicLetter(const uint32_t cp) { return (cp >= 0x0400 && cp <= 0x052F); }
+
+bool isIndicLetter(const uint32_t cp) {
+  if (cp == indic::ZWJ || cp == indic::ZWNJ) return true;
+  if (!indic::scriptOf(cp)) return false;
+  const uint32_t inBlock = cp & 0x7F;
+  return inBlock < 0x66 || inBlock > 0x6F;  // each block's digits sit at 0x66-0x6F
+}
 
 bool isAlphabetic(const uint32_t cp) { return isLatinLetter(cp) || isCyrillicLetter(cp); }
 

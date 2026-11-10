@@ -59,8 +59,8 @@ bool openPack(const char* code, SdPackSource& src, hyphpack::Header& header) {
   // The pack names its language and the minima it was made for; the registry's table decides how the language is
   // hyphenated, and a pack that disagrees with it is not used.
   const LanguageEntry* entry = findLanguageEntry(code);
-  if (!entry || header.code[0] != code[0] || header.code[1] != code[1] ||
-      header.minPrefix != entry->hyphenator->minPrefix() || header.minSuffix != entry->hyphenator->minSuffix()) {
+  if (!entry || header.code[0] != code[0] || header.code[1] != code[1] || header.minPrefix != entry->minPrefix ||
+      header.minSuffix != entry->minSuffix) {
     LOG_ERR("HYP", "%s: language %s, minima %u/%u do not match the firmware's", path, header.code, header.minPrefix,
             header.minSuffix);
     return false;
