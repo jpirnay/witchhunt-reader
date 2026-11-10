@@ -1,0 +1,254 @@
+BOOK title=Body Size Test lang=en spine=2 toc=2 reliableToc=1
+SPINE 0 href=OEBPS/titlepage.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=2 footnotes=0
+  LINE y=0 x=0 align=2 mult=2.247 hfid=0 words=3
+   W x=97 s=0 z=100 t=Body
+   W x=193 s=0 z=100 t=Size
+   W x=287 s=0 z=100 t=Test
+  LINE y=54 x=0 align=2 mult=1.124 hfid=0 words=6
+   W x=115 s=0 z=100 t=A
+   W x=131 s=0 z=100 t=book
+   W x=181 s=0 z=100 t=set
+   W x=219 s=0 z=100 t=in
+   W x=245 s=0 z=100 t=small
+   W x=307 s=0 z=100 t=type
+SPINE 1 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=27 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.348 hfid=0 words=2
+   W x=155 s=1 z=100 t=Chapter
+   W x=263 s=1 z=100 t=One
+  LINE y=32 x=0 align=2 mult=1.124 hfid=0 words=6
+   W x=105 s=0 z=100 t=In
+   W x=134 s=0 z=100 t=which
+   W x=189 s=0 z=100 t=the
+   W x=231 s=0 z=100 t=type
+   W x=275 s=0 z=100 t=is
+   W x=299 s=0 z=100 t=small
+  LINE y=59 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=18 s=0 z=100 t=It
+   W x=45 s=0 z=100 t=was
+   W x=80 s=0 z=100 t=a
+   W x=100 s=0 z=100 t=small
+   W x=157 s=0 z=100 t=book
+   W x=203 s=0 z=100 t=in
+   W x=228 s=0 z=100 t=every
+   W x=282 s=0 z=100 t=sense:
+   W x=345 s=0 z=100 t=small
+   W x=402 s=0 z=100 t=in
+   W x=427 s=0 z=100 t=its
+  LINE y=83 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=pages,
+   W x=61 s=0 z=100 t=small
+   W x=116 s=0 z=100 t=in
+   W x=139 s=0 z=100 t=its
+   W x=170 s=0 z=100 t=margins,
+   W x=251 s=0 z=100 t=and
+   W x=288 s=0 z=100 t=smallest
+   W x=371 s=0 z=100 t=of
+   W x=399 s=0 z=100 t=all
+   W x=435 s=0 z=100 t=in
+  LINE y=107 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=its
+   W x=31 s=0 z=100 t=type,
+   W x=78 s=0 z=100 t=which
+   W x=127 s=0 z=100 t=the
+   W x=164 s=0 z=100 t=publisher
+   W x=246 s=0 z=100 t=had
+   W x=284 s=0 z=100 t=set
+   W x=318 s=0 z=100 t=a
+   W x=336 s=0 z=100 t=step
+   W x=376 s=0 z=100 t=below
+   W x=424 s=0 z=100 t=the
+  LINE y=131 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=reader's
+   W x=79 s=0 z=100 t=own
+   W x=114 s=0 z=100 t=size
+   W x=153 s=0 z=100 t=on
+   W x=182 s=0 z=100 t=every
+   W x=234 s=0 z=100 t=paragraph.
+  LINE y=155 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=Nobody
+   W x=77 s=0 z=100 t=had
+   W x=115 s=0 z=100 t=asked
+   W x=167 s=0 z=100 t=for
+   W x=203 s=0 z=100 t=that.
+   W x=263 s=0 z=100 t=The
+   W x=296 s=0 z=100 t=reader
+   W x=356 s=0 z=100 t=had
+   W x=394 s=0 z=100 t=chosen
+  LINE y=179 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=fourteen
+   W x=91 s=0 z=100 t=points,
+   W x=164 s=0 z=100 t=and
+   W x=206 s=0 z=100 t=the
+   W x=248 s=0 z=100 t=book
+   W x=297 s=0 z=100 t=quietly
+   W x=368 s=0 z=100 t=made
+   W x=418 s=0 z=100 t=them
+  LINE y=203 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=twelve
+   W x=61 s=0 z=100 t=and
+   W x=98 s=0 z=100 t=a
+   W x=116 s=0 z=100 t=half,
+   W x=173 s=0 z=100 t=so
+   W x=200 s=0 z=100 t=that
+   W x=250 s=0 z=100 t=the
+   W x=287 s=0 z=100 t=lines
+   W x=337 s=0 z=100 t=ran
+   W x=374 s=0 z=100 t=long
+   W x=423 s=0 z=100 t=and
+  LINE y=227 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=the
+   W x=37 s=0 z=100 t=letters
+   W x=107 s=0 z=100 t=looked
+   W x=171 s=0 z=100 t=thin
+   W x=216 s=0 z=100 t=and
+   W x=253 s=0 z=100 t=far
+   W x=289 s=0 z=100 t=apart.
+  LINE y=251 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=Normalize
+   W x=112 s=0 z=100 t=Font
+   W x=163 s=0 z=100 t=Size
+   W x=211 s=0 z=100 t=used
+   W x=260 s=0 z=100 t=to
+   W x=294 s=0 z=100 t=forgive
+   W x=374 s=0 z=100 t=only
+   W x=426 s=0 z=100 t=the
+  LINE y=275 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=small
+   W x=60 s=0 z=100 t=differences,
+   W x=175 s=0 z=100 t=a
+   W x=198 s=0 z=100 t=few
+   W x=234 s=0 z=100 t=percent
+   W x=305 s=0 z=100 t=either
+   W x=370 s=0 z=100 t=way,
+   W x=415 s=0 z=100 t=which
+  LINE y=299 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=publishers
+   W x=106 s=0 z=100 t=scatter
+   W x=192 s=0 z=100 t=through
+   W x=289 s=0 z=100 t=their
+   W x=355 s=0 z=100 t=stylesheets
+  LINE y=323 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=without
+   W x=73 s=0 z=100 t=meaning
+   W x=149 s=0 z=100 t=anything
+   W x=236 s=0 z=100 t=by
+   W x=256 s=0 z=100 t=them.
+  LINE y=347 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=A
+   W x=41 s=0 z=100 t=whole
+   W x=104 s=0 z=100 t=book
+   W x=157 s=0 z=100 t=set
+   W x=200 s=0 z=100 t=in
+   W x=232 s=2 z=100 t=small
+   W x=296 s=0 z=100 t=type
+   W x=344 s=0 z=100 t=was
+   W x=386 s=0 z=100 t=another
+  LINE y=371 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=matter.
+   W x=80 s=0 z=100 t=Its
+   W x=119 s=0 z=100 t=body
+   W x=164 s=0 z=100 t=sat
+   W x=206 s=0 z=100 t=just
+   W x=254 s=0 z=100 t=outside
+   W x=330 s=0 z=100 t=the
+   W x=372 s=0 z=100 t=band,
+   W x=428 s=0 z=100 t=and
+  LINE y=395 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=every
+   W x=54 s=0 z=100 t=page
+   W x=100 s=0 z=100 t=of
+   W x=130 s=0 z=100 t=it
+   W x=154 s=0 z=100 t=was
+   W x=189 s=0 z=100 t=drawn
+   W x=242 s=0 z=100 t=from
+   W x=290 s=0 z=100 t=glyphs
+   W x=353 s=0 z=100 t=scaled
+   W x=415 s=0 z=100 t=down
+  LINE y=419 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=from
+   W x=46 s=0 z=100 t=the
+   W x=83 s=0 z=100 t=size
+   W x=122 s=0 z=100 t=the
+   W x=159 s=0 z=100 t=reader
+   W x=219 s=0 z=100 t=had
+   W x=257 s=0 z=100 t=picked.
+  LINE y=443 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=Measured
+   W x=98 s=0 z=100 t=once,
+   W x=153 s=0 z=100 t=when
+   W x=199 s=0 z=100 t=the
+   W x=238 s=0 z=100 t=book
+   W x=284 s=0 z=100 t=is
+   W x=307 s=0 z=100 t=first
+   W x=358 s=0 z=100 t=opened,
+   W x=429 s=0 z=100 t=the
+  LINE y=467 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=size
+   W x=40 s=0 z=100 t=of
+   W x=69 s=0 z=100 t=the
+   W x=107 s=0 z=100 t=running
+   W x=183 s=0 z=100 t=text
+   W x=226 s=0 z=100 t=becomes
+   W x=295 s=0 z=100 t=the
+   W x=333 s=0 z=100 t=reader's
+   W x=413 s=0 z=100 t=size,
+  LINE y=491 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=and
+   W x=43 s=0 z=100 t=everything
+   W x=151 s=0 z=100 t=else
+   W x=199 s=0 z=100 t=in
+   W x=228 s=0 z=100 t=the
+   W x=271 s=0 z=100 t=book
+   W x=321 s=0 z=100 t=keeps
+   W x=374 s=0 z=100 t=its
+   W x=411 s=0 z=100 t=place
+  LINE y=515 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=relative
+   W x=81 s=0 z=100 t=to
+   W x=109 s=0 z=100 t=it.
+  LINE y=539 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=The
+   W x=61 s=0 z=100 t=titles
+   W x=130 s=0 z=100 t=stay
+   W x=185 s=0 z=100 t=larger
+   W x=258 s=0 z=100 t=than
+   W x=319 s=0 z=100 t=the
+   W x=366 s=0 z=100 t=text,
+   W x=426 s=0 z=100 t=the
+  LINE y=563 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=subtitles
+   W x=87 s=0 z=100 t=a
+   W x=107 s=0 z=100 t=little
+   W x=168 s=0 z=100 t=larger,
+   W x=241 s=0 z=100 t=the
+   W x=280 s=0 z=100 t=small
+   W x=337 s=0 z=100 t=print
+   W x=386 s=0 z=100 t=smaller:
+  LINE y=587 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=42 s=0 z=100 t=hierarchy
+   W x=135 s=0 z=100 t=the
+   W x=177 s=0 z=100 t=publisher
+   W x=264 s=0 z=100 t=drew
+   W x=306 s=0 z=100 t=is
+   W x=332 s=0 z=100 t=kept,
+   W x=384 s=0 z=100 t=only
+   W x=435 s=0 z=100 t=its
+  LINE y=611 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=scale
+   W x=52 s=0 z=100 t=is
+   W x=73 s=0 z=100 t=the
+   W x=110 s=0 z=100 t=reader's.
+  LINE y=635 x=0 align=0 mult=0.843 hfid=0 words=10
+   W x=15 s=0 z=100 t=Small
+   W x=64 s=0 z=100 t=print:
+   W x=110 s=0 z=100 t=set
+   W x=139 s=0 z=100 t=in
+   W x=158 s=0 z=100 t=x-
+   W x=171 s=0 z=100 t=small,
+   W x=224 s=0 z=100 t=three
+   W x=269 s=0 z=100 t=quarters
+   W x=336 s=0 z=100 t=of
+   W x=360 s=0 z=100 t=medium.

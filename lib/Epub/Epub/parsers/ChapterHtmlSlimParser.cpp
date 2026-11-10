@@ -636,18 +636,11 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
   // the parent element); the block's own font-size lives in BlockStyle, so 100 here
   // means "the block size". Tracked in integer percent to match the per-word channel.
   int sizePct = 100;
+  effectiveSizeFromRoot_ = false;
   // A body-relative size (rem, px, pt) starts over from the body: it is put relative to the
-  // block's own size rather than multiplied in, so nested rem or px spans do not compound. A
-  // resolved block keeps only its residual over a ladder font; scaleOf gives the full size back. (Not over a face
-  // of the book's other families: a block is resolved before its words are laid out, so only a block long enough
-  // to be laid out in parts sees one, and a rem span in it is sized as in a body-size block.)
+  // block's own size rather than multiplied in, so nested rem or px spans do not compound.
   // A block whose own size is body-relative ignores the sizes of the elements it sits in, too.
-  int blockPct = 100;
-  if (currentTextBlock) {
-    const BlockStyle& bs = currentTextBlock->getBlockStyle();
-    blockPct = std::max(
-        1, static_cast<int>(fontSizeLadder_.scaleOf(bs.headingFontId) * bs.fontSizeMultiplier * 100.0f + 0.5f));
-  }
+  const int blockPct = currentBlockSizePct();
   const int blockSizeFromDepth = currentBlockSizeFromRoot_ ? currentBlockOwnerDepth_ : -1;
 
   // Apply inline style stack in order
@@ -688,6 +681,7 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
     if (entry.hasFontSize && entry.depth >= blockSizeFromDepth) {
       sizePct = entry.fontSizeFromRoot ? (entry.fontSizePct * 100 + blockPct / 2) / blockPct
                                        : sizePct * entry.fontSizePct / 100;
+      if (entry.fontSizeFromRoot) effectiveSizeFromRoot_ = entry.fontSizePct != 100;
     }
   }
   // Snap composed word sizes near body to plain body text. When font-size normalization is
@@ -706,6 +700,34 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
   }
   effectiveSizePct = static_cast<uint8_t>(
       std::min<int>(std::max<int>(sizePct, ParsedText::MIN_WORD_SIZE_PCT), ParsedText::MAX_WORD_SIZE_PCT));
+}
+
+int ChapterHtmlSlimParser::currentBlockSizePct() const {
+  if (!currentTextBlock) return 100;
+  // A resolved block keeps only its residual over a ladder font; scaleOf gives the full size back. (Not over a face
+  // of the book's other families: a block is resolved before its words are laid out, so only a block long enough
+  // to be laid out in parts sees one, and a rem span in it is sized as in a body-size block.)
+  const BlockStyle& bs = currentTextBlock->getBlockStyle();
+  return std::max(1,
+                  static_cast<int>(fontSizeLadder_.scaleOf(bs.headingFontId) * bs.fontSizeMultiplier * 100.0f + 0.5f));
+}
+
+void ChapterHtmlSlimParser::countCensusWord() {
+  // Running text only: a heading is set apart from it, and a short chapter's titles could outweigh its prose.
+  if (depth > headingDepth_) return;
+  uint32_t chars = 0;
+  const int end = partWordTextEnd();
+  for (int i = partWordTextBegin_; i < end; ++i) {
+    if ((static_cast<uint8_t>(partWordBuffer[i]) & 0xC0) != 0x80) ++chars;  // a UTF-8 lead byte: one character
+  }
+  if (chars == 0) return;
+  // The size the word is set at, the block's times its own. Text whose size Normalize Font Size cannot reach counts as
+  // body text: a block without a size of its own, its words at most scaled by em or % spans (a book wrapping every
+  // paragraph's text in <span style="font-size: 0.8em">). The body size is taken out of block sizes and body-relative
+  // sizes only (normalizeFontSizeForElement), so such text would stay as it is while the headings around it grew.
+  const int blockPct = currentBlockSizePct();
+  const int pct = blockPct != 100 || effectiveSizeFromRoot_ ? (blockPct * effectiveSizePct + 50) / 100 : 100;
+  census_->add(pct, chars);
 }
 
 void ChapterHtmlSlimParser::applyCssFontSizeToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) {
@@ -899,8 +921,26 @@ CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName,
   const bool blockLevel = isHeaderOrBlock(tagName) && strcmp(tagName, "br") != 0;
   // A body-relative size on an inline element is on the blocks' scale too (a 1rem span is the
   // prose size), so it takes the same main-text normalisation.
-  if (hasMainTextFontSizeBaseline_ && (blockLevel || cssStyle.fontSizeRootRelative)) {
+  const bool onTextScale = blockLevel || cssStyle.fontSizeRootRelative;
+  if (hasMainTextFontSizeBaseline_ && onTextScale) {
     normalized.fontSizeMultiplier /= mainTextFontSizeBaseline_;
+  }
+  const bool bodyBlock = blockLevel && !matches(tagName, HEADER_TAGS, NUM_HEADER_TAGS);
+  // A size that undoes the dropped root size is the book's body text: Calibre sets <body> to its base size and
+  // sizes every paragraph back down by a class (1.125em x 0.88889em = 1). Dropping only the root's factor left
+  // such paragraphs at 0.889 of the reader's size, drawn as the body face shrunk. Only an exact undo, within 1%:
+  // a size its designer chose below the body text's (0.85em under a 1.2em body, 1.02) is kept. Told by the size as
+  // the book states it, before its body size is taken out below.
+  const float fromRoot = normalized.fontSizeMultiplier * rootFontSizeBaseline_;
+  if (bodyBlock && hasRootFontSizeBaseline_ && fromRoot > 0.99f && fromRoot < 1.01f) {
+    normalized.fontSizeMultiplier = 1.0f;
+  }
+  // The size of the book's running text (setBodySizePct) is the reader's size: a book that sets all its text smaller
+  // or larger is read at the size chosen, its headings and small print in proportion. Every size on the text's scale,
+  // a block's or a body-relative one, is taken relative to it, before the band below; an em or % size of an inline
+  // element is relative to its parent, which already is. Not html's or body's: theirs is the context, made 1 above.
+  if (bodyScale_ != 1.0f && onTextScale && !isRootFontSizeElement(tagName)) {
+    normalized.fontSizeMultiplier /= bodyScale_;
   }
   // Block twin of the per-word near-body snap in updateEffectiveInlineStyle. The same
   // publisher sizing arrives either as a <span style="font-size:1.1em"> wrapping the
@@ -912,8 +952,8 @@ CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName,
   // 0.88. Headings are exempt: a heading is meant to stand apart from the prose, so the
   // size its author gave it is kept even when the margin is slim — the point of the band
   // is to spare BODY text a scale nobody asked for, not to flatten the page's hierarchy.
-  // (The main-text baseline division above still applies to them, as it always has.)
-  if (blockLevel && !matches(tagName, HEADER_TAGS, NUM_HEADER_TAGS)) {
+  // (The main-text baseline division and the body size above still apply to them, as the former always has.)
+  if (bodyBlock) {
     const int deadZone = nearBodyDeadZonePct(fontSizeNormalization);
     // Rounded to integer percent like the per-word channel (applyCssFontSizeToEntry), so the
     // same declared size lands the same side of the band edge on either channel — a float
@@ -922,17 +962,17 @@ CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName,
     if (pct >= 100 - deadZone && pct <= 100 + deadZone) {
       normalized.fontSizeMultiplier = 1.0f;
     }
-    // A size that undoes the dropped root size is the book's body text: Calibre sets <body> to its base size and
-    // sizes every paragraph back down by a class (1.125em x 0.88889em = 1). Dropping only the root's factor left
-    // such paragraphs at 0.889 of the reader's size, drawn as the body face shrunk. Only an exact undo, within 1%:
-    // a size its designer chose below the body text's (0.85em under a 1.2em body, 1.02) is kept.
-    const float fromRoot = normalized.fontSizeMultiplier * rootFontSizeBaseline_;
-    if (hasRootFontSizeBaseline_ && fromRoot > 0.99f && fromRoot < 1.01f) {
-      normalized.fontSizeMultiplier = 1.0f;
-    }
   }
   return normalized;
 }
+
+void ChapterHtmlSlimParser::setBodySizePct(const uint8_t pct) {
+  // Only with the wide band: off, the book's sizes stay as it states them. A size no word can take is no body size.
+  const bool usable = fontSizeNormalization && pct >= ParsedText::MIN_WORD_SIZE_PCT &&
+                      pct <= ParsedText::MAX_WORD_SIZE_PCT && pct != 100;
+  bodyScale_ = usable ? pct / 100.0f : 1.0f;
+}
+
 CssStyle ChapterHtmlSlimParser::inlineStyleFor(const std::string& styleAttr) {
   const auto it = inlineStyleCache_.find(styleAttr);
   if (it != inlineStyleCache_.end()) return it->second;
@@ -1186,6 +1226,8 @@ void ChapterHtmlSlimParser::closeRt() {
   // consumeText collapsed the whitespace runs; the ends are trimmed here.
   std::string text = std::move(rubyText_);
   rubyText_.clear();
+  // The census keeps a block's first word only, so a reading would find no bases to go over and be counted as text.
+  if (census_) return;
   // A character cut by the byte cap is dropped whole, then the end is trimmed.
   text.resize(static_cast<size_t>(utf8SafeTruncateBuffer(text.data(), static_cast<int>(text.size()))));
   if (!text.empty() && text.back() == ' ') text.pop_back();
@@ -1342,6 +1384,14 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
           return false;
         }
       }
+    }
+  } else if (currentTextBlock && census_) {
+    // Counted, and kept only as the block's first word: what follows depends on whether the block is empty, never on
+    // its words, and a block that is never laid out must not grow with its paragraph.
+    countCensusWord();
+    if (currentTextBlock->isEmpty()) {
+      currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct,
+                                partWordVisibleOffset_);
     }
   } else if (currentTextBlock) {
     // If a float image is pending and the block is still empty, attach it now so the
@@ -1993,6 +2043,7 @@ bool ChapterHtmlSlimParser::tryStartDropCapCapture(const CssStyle& cssStyle) {
   // reaches the style checks below.
   if (pendingDropCap_.active || deferredDropCapLine_) return false;
   if (currentTable || currentTableCell) return false;
+  if (census_) return false;  // a cap is a line of its own; the census counts its letter as a word
   // A cap is placed by its horizontal ink metrics, which a column does not have: it stays in its line.
   if (vertical_) return false;
   // A float: left cap would cut the paragraph's first letter, the rightmost one, and float it on the left.
@@ -2584,6 +2635,13 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // included -- is invisible, and an invisible block that still took its space would be a
   // blank page on an e-reader, not fidelity.
   if ((cssStyle.hasDisplay() && cssStyle.display == CssDisplay::None) || cssStyle.isElementHidden()) {
+    self->skipUntilDepth = self->depth;
+    self->depth += 1;
+    return;
+  }
+  // The census leaves tables out, as it does images (it parses with them suppressed): a grid's rows are laid out as
+  // they close, and a table is no running text.
+  if (self->census_ && strcmp(name, "table") == 0) {
     self->skipUntilDepth = self->depth;
     self->depth += 1;
     return;
@@ -4639,7 +4697,7 @@ void ChapterHtmlSlimParser::flushAnchorsAwaitingLine() {
 }
 
 void ChapterHtmlSlimParser::queueAnchorForNextLine(std::string id) {
-  if (id.empty()) return;
+  if (id.empty() || census_) return;  // the census places no line for an anchor to wait for
   // Bounded: an id'd element that never produces a line leaves its entry queued, so a run of them
   // would grow this. Past the cap they are recorded at the current page instead -- the behaviour
   // this replaced, applied only where holding on would cost memory.
@@ -4719,7 +4777,7 @@ void ChapterHtmlSlimParser::recordAnchor(std::string id, const uint16_t page) {
   // The on-disk anchor map counts with a uint16_t, so that is the hard ceiling whatever
   // MAX_ANCHORS_PER_CHAPTER says. Silently dropping past it is the same degradation as the cap:
   // the anchor is not navigable, the chapter still reads.
-  if (anchorCount == UINT16_MAX) {
+  if (anchorCount == UINT16_MAX || census_) {
     return;
   }
   if (anchorSpillWriter.has_value()) {
@@ -5253,6 +5311,15 @@ void ChapterHtmlSlimParser::makePages() {
 
   if (!currentTextBlock) {
     LOG_ERR("EHP", "!! No text block to make pages for !!");
+    return;
+  }
+
+  if (census_) {
+    // Nothing is laid out: the words were counted as they came. The block is left empty, as a layout leaves it, with
+    // its style for a following block to merge into.
+    const BlockStyle style = currentTextBlock->getBlockStyle();
+    currentTextBlock->reset(style);
+    pendingFootnotes.clear();
     return;
   }
 

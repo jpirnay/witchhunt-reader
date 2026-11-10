@@ -227,6 +227,9 @@ class BookMetadataCache {
   // same file: spine_href::match); -1 if none. The spine records are read in order through a
   // window: getSpineEntry() for each was half a dozen card calls a spine item. Read mode only.
   int findSpineIndexByHref(std::string_view target, bool byFilename);
+  // The spine item with the most inflated bytes (the first of equals), from the cumulative sizes, in one pass through a
+  // window; -1 when there is none or every size is 0. Read mode only.
+  int largestSpineIndex();
   TocEntry getTocEntry(int index);
   int getSpineCount() const { return spineCount; }
   int getTocCount() const { return tocCount; }

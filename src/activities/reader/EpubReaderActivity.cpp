@@ -18,6 +18,7 @@
 #include "EpubReaderActivity.h"
 
 #include <CooperativeAbort.h>
+#include <Epub/BodySize.h>
 #include <Epub/FlowContext.h>
 #include <Epub/FootnotePreviews.h>
 #include <Epub/FootnoteShape.h>
@@ -775,6 +776,10 @@ void EpubReaderActivity::onEnter() {
   bookLineSpacingOverride = currentBook.lineSpacingOverride;
   bookVerticalTextOverride = currentBook.verticalTextOverride;
   bookPublisherFontsOverride = currentBook.publisherFontsOverride;
+  // Measured at the open that compiled the book's CSS (ReaderActivity); taken into account with Normalize Font Size and
+  // the book's style on (makeSectionBuildParams).
+  if (const uint8_t bodySize = BodySize::read(epub->getCachePath()); bodySize != 0) bookBodySizePct_ = bodySize;
+  LOG_INF("ERS", "Body size %u%%", static_cast<unsigned>(bookBodySizePct_));
   // The book's hyphenation patterns, from its language's pack, before the first lookup of them below and before any
   // build. A pack not yet in the flash store is copied in here, once (German: about a second), under a popup. Its
   // displayBuffer() consumes any pending HALF override, so on a panel that diffs against a host frame the first page
@@ -1492,6 +1497,7 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.widowOrphanControl = SETTINGS.widowOrphanControl != 0;
   p.fontSizeNormalization = getEffectiveFontSizeNormalization();
   p.embeddedStyle = lastRenderStats.embeddedStyle;
+  if (p.fontSizeNormalization && p.embeddedStyle) p.bodySizePct = bookBodySizePct_;
   p.bionicReadingEnabled = getEffectiveBionicReading();
   // The SETTING, nothing else. Availability is guaranteed by construction: a preview-enabled
   // build resolves the note text its own spine needs before it lays out a single line (see

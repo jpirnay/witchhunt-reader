@@ -896,6 +896,8 @@ class EpubReaderActivity final : public Activity {
   // The book's other font families, which makeSectionBuildParams() fills and points the params at: a build keeps
   // its params across slices, so the table lives as long as the reader.
   mutable BlockFontFamilies bookFontFamilies_;
+  // The size of the book's running text (BodySize), read once at open: 100 until it has been measured.
+  uint8_t bookBodySizePct_ = 100;
   // Drop all Background-B state (aborting a partial build and deleting its partial cache
   // file via ~Section). Resets the overlay percent.
   void resetBackgroundBuild();

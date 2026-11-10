@@ -218,6 +218,10 @@ class Section {
     // Hashed only when off, so the variants laid out with it keep their key. A vertical section ignores it.
     bool widowOrphanControl = true;
     bool fontSizeNormalization = true;
+    // The size of the book's running text in percent of the reader's (BodySize::read): with fontSizeNormalization
+    // and embeddedStyle on, the book's sizes are taken relative to it (ChapterHtmlSlimParser::setBodySizePct).
+    // Hashed only when it does that, so a book whose text is at the reader's size keeps its key.
+    uint8_t bodySizePct = 100;
     bool embeddedStyle = false;
     bool bionicReadingEnabled = false;
     bool inlineFootnotePreviews = false;

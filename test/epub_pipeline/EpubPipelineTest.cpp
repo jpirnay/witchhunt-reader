@@ -111,7 +111,7 @@ std::string stem(const std::string& path) { return fs::path(path).stem().string(
 
 // The corpus books whose layout normalization changes. For every other book the ON dump is
 // byte-identical to OFF, so an ON case would only re-assert the OFF golden under a second name.
-const char* const kNormalizationSensitiveBooks[] = {"test_font_normalization", "test_font_sizes"};
+const char* const kNormalizationSensitiveBooks[] = {"test_body_size", "test_font_normalization", "test_font_sizes"};
 
 // Books with enough running text that hyphenation splits words, and a hyphenated line lands at
 // the bottom of a page (the retry).
