@@ -281,6 +281,26 @@ TEST_F(WhiteSpaceFixture, PreLinesTakeNoFirstLineIndentButTheBooks) {
   EXPECT_GT(lines[4].words[0].x, 0) << dump(lines);  // and the reader's on the paragraph after it
 }
 
+// CSS indents a block's first line only, not a line after a forced break: any element that keeps its line feeds, not
+// only <pre>, indents its first line alone, under the book's indent and under the reader's.
+TEST_F(WhiteSpaceFixture, AKeptLineFeedIsNoNewFirstLine) {
+  for (const char* value : {"pre-line", "pre-wrap", "break-spaces"}) {
+    SCOPED_TRACE(value);
+    const auto lines =
+        layout(std::string("p.v { text-indent: 30px; white-space: ") + value + " }", "<p class=\"v\">a\nb\nc</p>");
+    ASSERT_EQ(lines.size(), 3u) << dump(lines);
+    EXPECT_EQ(lines[0].words[0].x, 30) << dump(lines);
+    EXPECT_EQ(lines[1].words[0].x, 0) << dump(lines);
+    EXPECT_EQ(lines[2].words[0].x, 0) << dump(lines);
+  }
+  Options noSpacing;
+  noSpacing.extraParagraphSpacing = false;  // the reader's paragraph indent is on
+  const auto lines = layout("p.v { white-space: pre-line }", "<p class=\"v\">a\nb</p>", noSpacing);
+  ASSERT_EQ(lines.size(), 2u) << dump(lines);
+  EXPECT_GT(lines[0].words[0].x, 0) << dump(lines);  // pre-line collapses its spaces: its first line is prose's
+  EXPECT_EQ(lines[1].words[0].x, 0) << dump(lines);
+}
+
 TEST_F(WhiteSpaceFixture, AnyKeptLineFeedPartsLinesWithoutParagraphSpacing) {
   const auto lines =
       layout("p.v { white-space: pre-line; margin: 20px 0 }", "<p class=\"v\">a\nb\n\nc</p><p>After</p>");
