@@ -488,11 +488,12 @@ TEST(HyphenationStore, LayoutKeyKeepsTheImagesLayoutsAndSeparatesOthers) {
 }
 
 // Each language added with packs, from the pack the repo hosts, breaks words exactly as Liang's algorithm over its
-// hyph-utf8 patterns does (resources/generate_pack_reference.py): the hypher trie, the CPHY pack and the firmware's
-// walk all agree with the patterns. The Indic languages break without a hyphen.
+// patterns (hyph-utf8's; Hungarian's in assets/hyphenation-patterns/hu/) does (resources/generate_pack_reference.py):
+// the hypher trie, the CPHY pack and the firmware's walk all agree with the patterns. The Indic languages break without
+// a hyphen.
 TEST(HyphenationStore, AddedLanguagesHyphenateAsTheirPatterns) {
-  const char* const kAdded[] = {"nl", "cs", "da", "sl", "lt", "ca", "be", "fi", "tr", "as", "bn",
-                                "gu", "hi", "kn", "ml", "mr", "or", "pa", "sa", "ta", "te"};
+  const char* const kAdded[] = {"nl", "cs", "da", "sl", "lt", "ca", "be", "fi", "tr", "hu", "as",
+                                "bn", "gu", "hi", "kn", "ml", "mr", "or", "pa", "sa", "ta", "te"};
   SimNorFlash flash(kRegionBytes);
   HyphenationStore store(flash);
   ASSERT_TRUE(store.mount());

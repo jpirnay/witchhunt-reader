@@ -308,13 +308,14 @@ struct Name {
   const char* code;
   const char* name;
 };
-constexpr Name kNames[] = {
-    {"de", "Deutsch"},    {"fr", "Français"}, {"es", "Español"},     {"it", "Italiano"},  {"pt", "Português"},
-    {"pl", "Polski"},     {"ru", "Русский"},  {"uk", "Українська"},  {"sv", "Svenska"},   {"nl", "Nederlands"},
-    {"cs", "Čeština"},    {"da", "Dansk"},    {"sl", "Slovenščina"}, {"lt", "Lietuvių"},  {"ca", "Català"},
-    {"be", "Беларуская"}, {"fi", "Suomi"},    {"tr", "Türkçe"},      {"as", "Assamese"},  {"bn", "Bengali"},
-    {"gu", "Gujarati"},   {"hi", "Hindi"},    {"kn", "Kannada"},     {"ml", "Malayalam"}, {"mr", "Marathi"},
-    {"or", "Odia"},       {"pa", "Punjabi"},  {"sa", "Sanskrit"},    {"ta", "Tamil"},     {"te", "Telugu"}};
+constexpr Name kNames[] = {{"de", "Deutsch"},     {"fr", "Français"},   {"es", "Español"},  {"it", "Italiano"},
+                           {"pt", "Português"},   {"pl", "Polski"},     {"ru", "Русский"},  {"uk", "Українська"},
+                           {"sv", "Svenska"},     {"nl", "Nederlands"}, {"cs", "Čeština"},  {"da", "Dansk"},
+                           {"sl", "Slovenščina"}, {"lt", "Lietuvių"},   {"ca", "Català"},   {"be", "Беларуская"},
+                           {"fi", "Suomi"},       {"tr", "Türkçe"},     {"as", "Assamese"}, {"bn", "Bengali"},
+                           {"gu", "Gujarati"},    {"hi", "Hindi"},      {"kn", "Kannada"},  {"ml", "Malayalam"},
+                           {"mr", "Marathi"},     {"or", "Odia"},       {"pa", "Punjabi"},  {"sa", "Sanskrit"},
+                           {"ta", "Tamil"},       {"te", "Telugu"},     {"hu", "Magyar"}};
 
 }  // namespace
 

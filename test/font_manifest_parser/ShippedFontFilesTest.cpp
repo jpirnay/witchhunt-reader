@@ -87,5 +87,5 @@ TEST(ShippedFontFilesTest, EveryHyphenationPackIsTheSizeAndCrcTheManifestNames) 
     EXPECT_EQ(bytes.substr(5, 2), file.substr(5, 2)) << entry.name;
     ++checked;
   }
-  EXPECT_EQ(checked, 30);
+  EXPECT_EQ(checked, 31);
 }

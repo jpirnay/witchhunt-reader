@@ -58,15 +58,22 @@ Only English's trie is compiled into the firmware. Every other language's ships 
 card, `hyph-<code>.cphyph` ([file-formats.md](file-formats.md#hyphenation-packs-cphy-and-the-store-whhs)), which the
 Font Manager downloads from `assets/sd-fonts/Hyphenation-<Language>/`. `scripts/build_hyphenation_packs.py` writes
 them: the nine languages that used to be compiled in from their generated headers here (the host tests compile them
-in again with `HYPHENATION_ALL_BUILTIN` and check the packs hold the same bytes), the others straight from hypher's
+in again with `HYPHENATION_ALL_BUILTIN` and check the packs hold the same bytes), most others straight from hypher's
 `tries/<code>.bin`:
 
 ```sh
 python3 scripts/build_hyphenation_packs.py --hypher-tries <hypher checkout>/tries
 ```
 
+A language whose patterns hypher does not carry is built from a TeX pattern file in `assets/hyphenation-patterns/`
+by `scripts/hyphenation_trie.py`, a port of hypher's trie builder that rebuilds all 48 of hypher's tries byte for
+byte (`python3 scripts/hyphenation_trie.py --check <hypher checkout>`). Hungarian is one: hyph-utf8's patterns make a
+354 KB trie, so its pack is built from the older, smaller Huhyphn v20031107 (78 KB, GPL-2;
+[its README](../assets/hyphenation-patterns/hu/README.md)).
+
 A new language needs its entry in `LanguageRegistry.cpp` (letters, case, minima, whether its breaks show a hyphen),
 its code in `build_hyphenation_packs.py` and in `sd-fonts.yaml`, and its expected breaks for
 `test/hyphenation_store`: `test/hyphenation_store/resources/generate_pack_reference.py` runs Liang's algorithm over
-the language's hyph-utf8 patterns themselves.
+the language's patterns themselves. The language table holds 32 languages now, as many as `packMissing` has bits:
+the next one widens it.
 

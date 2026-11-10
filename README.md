@@ -77,7 +77,7 @@ Legend: ✅ supported · ⚠️ partial / basic · ❌ not supported.
 | Grayscale image caches | ✅ | ⚠️ minimal |
 | Heading fonts (h1–h3) | ✅ crisp taller real fonts | ⚠️ single font size per block |
 | Horizontal rules | ✅ | ✅ |
-| Hyphenation | ✅ 31 languages: English built in, 30 as downloadable packs | ✅ |
+| Hyphenation | ✅ 32 languages: English built in, 31 as downloadable packs | ✅ |
 | Bionic / focus reading | ✅ | ✅ |
 | Anti-aliasing toggle | ✅ (+ fast AA, max-darkness mode) | ✅ |
 | Markdown (`.md`) rendering | ✅ headings, tables, HR, code, lists, TOC | ❌ shown as raw plain text |
@@ -192,6 +192,11 @@ Pulled from the PlatformIO registry at build time.
 - **Noto Naskh Arabic and Noto Sans Arabic** (the Noto Project) — merged with Noto Serif's or Noto Sans's Latin by `lib/EpdFont/scripts/merge_noto_latin.py` into NotoNaskhArabic and NotoSansArabic, the Font Manager's Arabic families. https://github.com/notofonts/arabic — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).
 - **Noto Sans Hebrew and Noto Serif Hebrew** (the Noto Project) — merged with Noto Sans's or Noto Serif's Latin by `lib/EpdFont/scripts/merge_noto_latin.py` into NotoSansHebrew and NotoSerifHebrew, the Font Manager's Hebrew families. https://github.com/notofonts/hebrew — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).
 - **Noto Sans Myanmar and Noto Serif Myanmar** (the Noto Project) — merged with Noto Sans's or Noto Serif's Latin by `lib/EpdFont/scripts/merge_noto_latin.py` into NotoSansMyanmar and NotoSerifMyanmar, the Font Manager's Myanmar families. https://github.com/notofonts/myanmar — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).
+
+## Hyphenation patterns the Font Manager downloads (assets/sd-fonts/Hyphenation-*)
+
+- **Typst hypher** by Laurenz Mädje and contributors — the tries of every pack but Hungarian's, compiled by hypher (at `d81cc50`) from the [hyph-utf8](https://github.com/hyphenation/tex-hyphen) TeX patterns, each pattern set under its own licence as hyph-utf8 lists it. https://github.com/typst/hypher — MIT OR Apache-2.0. [`scripts/hyphenation_trie.py`](scripts/hyphenation_trie.py) is a port of hypher's trie builder (`tests/generate.rs`), which rebuilds hypher's tries byte for byte.
+- **Huhyphn v20031107** by NAGY Bence — the Hungarian patterns, from CTAN, kept as published in [`assets/hyphenation-patterns/hu`](assets/hyphenation-patterns/hu/README.md) and built into `Hyphenation-Hungarian/hyph-hu.cphyph` by `scripts/build_hyphenation_packs.py`. Copyright (C) 2003 NAGY Bence, GNU GPL version 2 ([`COPYING`](assets/hyphenation-patterns/hu/COPYING)); the pack, built from them, is under the same licence. Neither is compiled into the firmware.
 
 # Why this name
 Originally this fork was called CrossPoint++ - it had a small userbase and then I made an honest mistake by reusing the crosspoint fork, providing ample reference in the PRs and the release notes of code origin and authorship but was losing the github commit author information in the progress when I copied code over instead of taking the tedious (and correct) way of cherrypicking the original commit and post-cleanup effort.

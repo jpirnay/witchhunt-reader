@@ -1926,6 +1926,20 @@
       ]
     },
     {
+      "name": "Hyphenation-Hungarian",
+      "description": "Hyphenation for books in Hungarian",
+      "format": "hyphenation",
+      "inDownloadAll": false,
+      "styles": [],
+      "files": [
+        {
+          "name": "Hyphenation-Hungarian/hyph-hu.cphyph",
+          "size": 77823,
+          "crc32": 4178120900
+        }
+      ]
+    },
+    {
       "name": "Hyphenation-Italian",
       "description": "Hyphenation for books in Italian",
       "format": "hyphenation",

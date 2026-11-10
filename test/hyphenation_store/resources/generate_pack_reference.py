@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """The expected breaks of the languages added with hyphenation packs, for HyphenationStoreTest.
 
-Their tries come from Typst hypher (scripts/build_hyphenation_packs.py), compiled from hyph-utf8's TeX patterns. This
-script runs Liang's algorithm straight over those patterns -- not over a trie -- so the test checks the packs, and the
+Their tries come from Typst hypher (scripts/build_hyphenation_packs.py), compiled from hyph-utf8's TeX patterns, or,
+for Hungarian, from the pattern file in assets/hyphenation-patterns/hu/ (scripts/hyphenation_trie.py). This script
+runs Liang's algorithm straight over those patterns -- not over a trie -- so the test checks the packs, and the
 firmware's walk of them, against the patterns themselves.
 
   python3 test/hyphenation_store/resources/generate_pack_reference.py <hypher checkout> <udhr2 dir> [--out <dir>]
@@ -46,7 +47,14 @@ LANGUAGES = {
     "sa": ("hyph-sa.tex", "san", "indic", (2, 2)),
     "ta": ("hyph-ta.tex", "tam", "indic", (2, 2)),
     "te": ("hyph-te.tex", None, "indic", (2, 2)),
+    "hu": ("huhyphen.tex", "hun", "latin", (2, 2)),
 }
+# The languages whose patterns are in the repo rather than in hypher: (file, whether it is 8-bit Cork).
+REPO = pathlib.Path(__file__).resolve().parents[3]
+REPO_PATTERNS = {"hu": (REPO / "assets/hyphenation-patterns/hu/huhyphen.tex", True)}
+sys.path.insert(0, str(REPO / "scripts"))
+import hyphenation_trie  # noqa: E402  (its Cork decoding)
+
 MAX_WORDS = 400
 RANDOM_STRINGS = 150
 MAX_CHARS = 60  # under LiangHyphenation.cpp's MAX_WORD_CHARS (70, sentinels included)
@@ -132,7 +140,14 @@ def main(argv=None):
     parser.add_argument("--out", type=pathlib.Path, default=pathlib.Path(__file__).resolve().parent)
     args = parser.parse_args(argv)
     for code, (tex, udhr, script, minima) in LANGUAGES.items():
-        pats = patterns((args.hypher / "patterns" / tex).read_text(encoding="utf-8"))
+        if code in REPO_PATTERNS:
+            path, cork = REPO_PATTERNS[code]
+            raw = path.read_bytes()
+            pats = patterns(hyphenation_trie.cork_text(raw) if cork else raw.decode("utf-8"))
+            source = "assets/hyphenation-patterns/" + code
+        else:
+            pats = patterns((args.hypher / "patterns" / tex).read_text(encoding="utf-8"))
+            source = "hypher"
         letter = LETTER[script]
         words = udhr_words(args.udhr2 / f"{udhr}.txt", letter) if udhr else []
         alphabet = sorted({c for p in pats for c in p if c != "." and letter(c)})
@@ -145,7 +160,7 @@ def main(argv=None):
                 seen.add(w)
                 randoms.append(w)
         words += randoms
-        lines = [f"# {code}: {tex} from hypher; minima {minima[0]}/{minima[1]}; word|code point indexes of its breaks"]
+        lines = [f"# {code}: {tex} from {source}; minima {minima[0]}/{minima[1]}; word|code point indexes of its breaks"]
         total = 0
         for w in words:
             b = breaks(w, pats, minima)
