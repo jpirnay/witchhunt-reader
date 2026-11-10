@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Whole-file parity: fontconvert_sdcard.py CLI vs cpfont-writer.mjs, byte for byte.
 //
-//   node test/file_parity.mjs [--cases Literata,Bookerly,...] [--regen] [--dist <dir>] [--script <fontconvert_sdcard.py>]
+//   node test/file_parity.mjs [--cases Literata,Serif,...] [--regen] [--dist <dir>] [--script <fontconvert_sdcard.py>]
 //
 // The Python side is invoked exactly like build-sd-fonts.py does it (multi-style
 // flags, or positional font + --style for a single style; --intervals --sizes
@@ -25,10 +25,12 @@ const CASES = [
     sizes: '10,12,14,16,18', styles: {
       regular: `${D}/Literata/Literata-Regular.ttf`, bold: `${D}/Literata/Literata-Bold.ttf`,
       italic: `${D}/Literata/Literata-Italic.ttf`, bolditalic: `${D}/Literata/Literata-BoldItalic.ttf` } },
-  { id: 'Bookerly', what: 'GPOS + GSUB extension lookups (ligatures via type 7), as generate-sd-fonts.sh',
-    name: 'Bookerly-SD', intervals: 'builtin', sizes: '12,14,16,18', styles: {
-      regular: `${B}/Bookerly/Bookerly-Regular.ttf`, bold: `${B}/Bookerly/Bookerly-Bold.ttf`,
-      italic: `${B}/Bookerly/Bookerly-Italic.ttf`, bolditalic: `${B}/Bookerly/Bookerly-BoldItalic.ttf` } },
+  { id: 'Serif', what: 'GPOS extension lookups (kerning via type 9), ligatures, as generate-sd-fonts.sh',
+    name: 'Serif-SD', intervals: 'builtin', sizes: '12,14,16,18', styles: {
+      regular: `${B}/SourceSerif4Caption/SourceSerif4Caption-Regular.ttf`,
+      bold: `${B}/SourceSerif4Caption/SourceSerif4Caption-Bold.ttf`,
+      italic: `${B}/SourceSerif4Caption/SourceSerif4Caption-It.ttf`,
+      bolditalic: `${B}/SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf` } },
   { id: 'OpenDyslexic', what: 'CFF outlines (repo)', name: 'OpenDyslexic', intervals: LGC, sizes: '12,16', styles: {
       regular: `${B}/OpenDyslexic/OpenDyslexic-Regular.otf`, bold: `${B}/OpenDyslexic/OpenDyslexic-Bold.otf`,
       italic: `${B}/OpenDyslexic/OpenDyslexic-Italic.otf`, bolditalic: `${B}/OpenDyslexic/OpenDyslexic-BoldItalic.otf` } },

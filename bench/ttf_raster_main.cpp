@@ -1,7 +1,7 @@
-// Device bench for the TTF rasterizer (Stage 2b): every glyph of Bookerly Regular at 14 pt (the body size) and
-// at 40 pt (a large heading). The font is embedded in the image (board_build.embed_files), so it is read
-// through the flash cache, as the glyph store's mapped styles will be. Prints timings, the scratch block, the
-// heap and the loop task's stack, and a hash of the output that must equal the host's
+// Device bench for the TTF rasterizer (Stage 2b): every glyph of Source Serif 4 Caption Regular (the built-in Serif's
+// source, unscaled) at 14 pt (the body size) and at 40 pt (a large heading). The font is embedded in the image
+// (board_build.embed_files), so it is read through the flash cache, as the glyph store's mapped styles will be. Prints
+// timings, the scratch block, the heap and the loop task's stack, and a hash of the output that must equal the host's
 // (bench/ttf_raster_golden.h). Then every glyph emboldened (synthetic bold, bold_14pt_pool4k and bold_40pt_pool4k),
 // and the same for the kanji at 12 pt (<name>_kanji_12pt_pool8k_bold). Then every glyph slanted (synthetic italic,
 // italic_14pt_pool4k and italic_40pt_pool4k), emboldened then slanted (bolditalic_14pt_pool4k), and the kanji slanted
@@ -18,8 +18,10 @@
 
 #include "ttf_raster_golden.h"
 
-extern const uint8_t kFontStart[] asm("_binary_lib_EpdFont_builtinFonts_source_Bookerly_Bookerly_Regular_ttf_start");
-extern const uint8_t kFontEnd[] asm("_binary_lib_EpdFont_builtinFonts_source_Bookerly_Bookerly_Regular_ttf_end");
+extern const uint8_t kFontStart[] asm(
+    "_binary_lib_EpdFont_builtinFonts_source_SourceSerif4Caption_SourceSerif4Caption_Regular_ttf_start");
+extern const uint8_t kFontEnd[] asm(
+    "_binary_lib_EpdFont_builtinFonts_source_SourceSerif4Caption_SourceSerif4Caption_Regular_ttf_end");
 extern const uint8_t kCffStart[] asm("_binary_test_fixtures_fonts_NotoSansJP_Cff_otf_start");
 extern const uint8_t kCffEnd[] asm("_binary_test_fixtures_fonts_NotoSansJP_Cff_otf_end");
 extern const uint8_t kCffFlatStart[] asm("_binary_test_fixtures_fonts_NotoSansJP_CffFlat_otf_start");
@@ -112,7 +114,7 @@ Run renderWarm(Rasterizer& rasterizer, FontBytes& bytes, const Face& face, const
 }
 
 // What another component does to the flash cache between two glyphs (the layout, the store, SdFat): `bytes` of flash
-// read, a line at a time. Bookerly's file is flash the Japanese runs never read.
+// read, a line at a time. The Caption file is flash the Japanese runs never read.
 volatile uint32_t gPolluteSink = 0;
 void polluteCache(const uint32_t bytes) {
   uint32_t sum = 0;
@@ -279,8 +281,8 @@ void setup() {
   const Run text = renderAll(rasterizer, bytes, face, body);
   report("render_14pt_pool4k", text);
   Serial.printf("output hash %08x: %s the host's %08x\n", static_cast<unsigned>(text.hash),
-                text.hash == ttf_golden::kBookerlyRegular14pt ? "MATCHES" : "DIFFERS FROM",
-                static_cast<unsigned>(ttf_golden::kBookerlyRegular14pt));
+                text.hash == ttf_golden::kSerifRegular14pt ? "MATCHES" : "DIFFERS FROM",
+                static_cast<unsigned>(ttf_golden::kSerifRegular14pt));
   report("render_40pt_pool4k", renderAll(rasterizer, bytes, face, heading));
   report("bold_14pt_pool4k", renderAll(rasterizer, bytes, face, body, true));
   report("bold_40pt_pool4k", renderAll(rasterizer, bytes, face, heading, true));

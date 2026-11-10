@@ -201,7 +201,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
 
   // Reader font family: default + built-ins + discovered SD families.
   {
-    std::vector<StrId> values = {StrId::STR_DEFAULT_VALUE, StrId::STR_BOOKERLY, StrId::STR_NOTO_SANS};
+    std::vector<StrId> values = {StrId::STR_DEFAULT_VALUE, StrId::STR_SERIF, StrId::STR_NOTO_SANS};
     const auto& families = sdFontSystem.registry().getFamilies();
     values.insert(values.end(), families.size(), StrId::STR_NONE_OPT);
 
@@ -248,7 +248,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
                              })
                              .withSelectorActivity();
 
-    familySetting.enumLabels = {tr(STR_DEFAULT_VALUE), tr(STR_BOOKERLY), tr(STR_NOTO_SANS)};
+    familySetting.enumLabels = {tr(STR_DEFAULT_VALUE), tr(STR_SERIF), tr(STR_NOTO_SANS)};
     for (const auto& fam : families) {
       familySetting.enumLabels.push_back(fam.name);
     }

@@ -400,8 +400,8 @@ TEST(TtfFace, ItalicIsMacStyleFsSelectionOrItalicAngleInEitherOutlineFormat) {
   }
   EXPECT_TRUE(fileIsItalic("OpenDyslexic/OpenDyslexic-Italic.otf"));  // by its angle alone
   EXPECT_FALSE(fileIsItalic("OpenDyslexic/OpenDyslexic-Regular.otf"));
-  EXPECT_TRUE(fileIsItalic("Bookerly/Bookerly-Italic.ttf"));
-  EXPECT_FALSE(fileIsItalic("Bookerly/Bookerly-Regular.ttf"));
+  EXPECT_TRUE(fileIsItalic("SourceSerif4Caption/SourceSerif4Caption-It.ttf"));
+  EXPECT_FALSE(fileIsItalic("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf"));
 }
 
 TEST(TtfFace, HugeAdvancesNeitherOverflowNorWrap) {

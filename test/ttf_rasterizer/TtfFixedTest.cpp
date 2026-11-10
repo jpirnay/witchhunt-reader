@@ -1,5 +1,5 @@
 // FreeType's fixed-point helpers, to the bit. The expected scales are what FreeType 2.13 itself reports for
-// the bundled fonts at 150 dpi (14 pt Bookerly: x_scale 122356; 14 pt Inter: 59744).
+// the bundled fonts at 150 dpi (14 pt Source Serif 4 Caption: x_scale 122356; 14 pt Inter: 59744).
 #include <gtest/gtest.h>
 
 #include <cstdint>

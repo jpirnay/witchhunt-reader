@@ -412,15 +412,15 @@ TEST_F(TtfShapingInstall, TheInstallWritesEachBlocksCpacAfterItsFile) {
 }
 
 TEST_F(TtfShapingInstall, ALatinFamilyInstallsWithoutACpac) {
-  // Bookerly has lookups, but its layout names no script the shaper handles: each flash-mode block is its file alone,
-  // as before CPac, and nothing is written past it.
-  MemoryFile bookerly[4];
-  bookerly[0].bytes = readFont("Bookerly/Bookerly-Regular.ttf");
-  bookerly[1].bytes = readFont("Bookerly/Bookerly-Bold.ttf");
-  bookerly[2].bytes = readFont("Bookerly/Bookerly-Italic.ttf");
-  bookerly[3].bytes = readFont("Bookerly/Bookerly-BoldItalic.ttf");
+  // Source Serif 4 Caption has lookups, but its layout names no script the shaper handles: each flash-mode block is
+  // its file alone, as before CPac, and nothing is written past it.
+  MemoryFile serif[4];
+  serif[0].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
+  serif[1].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-Bold.ttf");
+  serif[2].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-It.ttf");
+  serif[3].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf");
   SimNorFlash chip{kFlashBytes};
-  const auto set = load(chip, {bookerly}, kIdentityA, busy);
+  const auto set = load(chip, {serif}, kIdentityA, busy);
   ASSERT_NE(nullptr, set);
   ASSERT_FALSE(set->font(0)->readsCard());
   const glyphstore::Header header = headerOf(chip);
@@ -428,36 +428,36 @@ TEST_F(TtfShapingInstall, ALatinFamilyInstallsWithoutACpac) {
   for (uint8_t s = 0; s < 4; ++s) {
     const glyphstore::StyleInfo& block = header.styles[s];
     EXPECT_EQ(glyphstore::kModeFlash, block.mode) << int{s};
-    EXPECT_EQ(bookerly[s].bytes.size(), block.fileSize) << int{s};
+    EXPECT_EQ(serif[s].bytes.size(), block.fileSize) << int{s};
     EXPECT_EQ(block.fileSize, block.size) << int{s};
-    EXPECT_EQ(bookerly[s].bytes, chipBytes(chip, block.offset, block.size)) << int{s};
+    EXPECT_EQ(serif[s].bytes, chipBytes(chip, block.offset, block.size)) << int{s};
     const uint32_t end = block.offset + block.size;
     EXPECT_TRUE(erased(chipBytes(chip, end, glyphstore::alignUp(end, kSector) - end))) << int{s};
-    EXPECT_GT(writerTable(bookerly[s].bytes).size(), 0u) << int{s};  // a table it would take, never reserved
+    EXPECT_GT(writerTable(serif[s].bytes).size(), 0u) << int{s};  // a table it would take, never reserved
   }
-  expectDrawnAs(reference(bookerly[0].bytes, 'g', 14), *set->font(0), kRegular, set->font(0)->glyph(kRegular, 'g'));
+  expectDrawnAs(reference(serif[0].bytes, 'g', 14), *set->font(0), kRegular, set->font(0)->glyph(kRegular, 'g'));
   EXPECT_EQ(0u, chip.violations());
   EXPECT_EQ(0u, chip.reprograms());
 }
 
 TEST_F(TtfShapingInstall, AnSdModeBlocksCpacIsATableOfItsDirectory) {
-  // Bookerly as the body on 26 pages: whole it does not fit, so every family's tables go to the card, the subset's
-  // with them (TtfFontSetTest.ABodyTooLargeForFlashModeTakesTheAccentFamiliesToTheCardWithIt).
-  MemoryFile bookerly[4];
-  bookerly[0].bytes = readFont("Bookerly/Bookerly-Regular.ttf");
-  bookerly[1].bytes = readFont("Bookerly/Bookerly-Bold.ttf");
-  bookerly[2].bytes = readFont("Bookerly/Bookerly-Italic.ttf");
-  bookerly[3].bytes = readFont("Bookerly/Bookerly-BoldItalic.ttf");
+  // Source Serif 4 Caption as the body on 20 pages: whole it does not fit, so every family's tables go to the card,
+  // the subset's with them (TtfFontSetTest.ABodyTooLargeForFlashModeTakesTheAccentFamiliesToTheCardWithIt).
+  MemoryFile serif[4];
+  serif[0].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
+  serif[1].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-Bold.ttf");
+  serif[2].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-It.ttf");
+  serif[3].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf");
   MemoryFile accent[4];
   accent[kRegular].bytes = subset[kRegular].bytes;
-  SimNorFlash chip{26 * kPage};
-  const auto set = load(chip, {bookerly, accent}, kIdentityA, busy);
+  SimNorFlash chip{20 * kPage};
+  const auto set = load(chip, {serif, accent}, kIdentityA, busy);
   ASSERT_NE(nullptr, set);
   EXPECT_TRUE(set->font(0)->readsCard());
   ASSERT_TRUE(set->font(1)->readsCard());
   const glyphstore::Header header = headerOf(chip);
   ASSERT_EQ(5, header.geometry.styleCount);
-  for (uint8_t s = 0; s < 4; ++s) {  // Bookerly's blocks: its tables, no CPac record
+  for (uint8_t s = 0; s < 4; ++s) {  // Caption's blocks: its tables, no CPac record
     const glyphstore::StyleInfo& latin = header.styles[s];
     ASSERT_EQ(glyphstore::kModeSd, latin.mode) << int{s};
     EXPECT_FALSE(recordOf(chipBytes(chip, latin.offset, latin.size), "CPac").found) << int{s};
@@ -929,16 +929,16 @@ class TtfShapingFace : public ::testing::Test {
     }
   }
 
-  // The Bookerly body on 26 pages, whole it does not fit: every family's tables go to the card, the subset's with
-  // them (AnSdModeBlocksCpacIsATableOfItsDirectory).
+  // The Source Serif 4 Caption body on 20 pages, whole it does not fit: every family's tables go to the card, the
+  // subset's with them (AnSdModeBlocksCpacIsATableOfItsDirectory).
   std::unique_ptr<TtfFontSet> loadSdMode(SimNorFlash& chip) {
-    bookerly[0].bytes = readFont("Bookerly/Bookerly-Regular.ttf");
-    bookerly[1].bytes = readFont("Bookerly/Bookerly-Bold.ttf");
-    bookerly[2].bytes = readFont("Bookerly/Bookerly-Italic.ttf");
-    bookerly[3].bytes = readFont("Bookerly/Bookerly-BoldItalic.ttf");
+    serif[0].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
+    serif[1].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-Bold.ttf");
+    serif[2].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-It.ttf");
+    serif[3].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf");
     accent[kRegular].bytes = subset[kRegular].bytes;
     accent[kBold].bytes = subset[kBold].bytes;
-    return load(chip, {bookerly, accent}, kIdentityA, busy);
+    return load(chip, {serif, accent}, kIdentityA, busy);
   }
 
   // `set`'s family 1 of loadSdMode(): the blocks of the subset's two styles.
@@ -975,7 +975,7 @@ class TtfShapingFace : public ::testing::Test {
   }
 
   MemoryFile subset[4];
-  MemoryFile bookerly[4];
+  MemoryFile serif[4];
   MemoryFile accent[4];
   int busy = 0;
 };
@@ -992,7 +992,7 @@ TEST_F(TtfShapingFace, ShapesAsHarfBuzzInFlashMode) {
 }
 
 TEST_F(TtfShapingFace, ShapesAsHarfBuzzInSdMode) {
-  SimNorFlash chip{26 * kPage};
+  SimNorFlash chip{20 * kPage};
   const auto set = loadSdMode(chip);
   ASSERT_NE(nullptr, set);
   ASSERT_TRUE(set->font(1)->readsCard());
@@ -1017,7 +1017,7 @@ TEST_F(TtfShapingFace, TheFaceWithAndWithoutCpacShapesAlikeInFlashMode) {
 }
 
 TEST_F(TtfShapingFace, TheFaceWithAndWithoutCpacShapesAlikeInSdMode) {
-  SimNorFlash chip{26 * kPage};
+  SimNorFlash chip{20 * kPage};
   const auto set = loadSdMode(chip);
   ASSERT_NE(nullptr, set);
   const glyphstore::Header header = headerOf(chip);
@@ -1088,7 +1088,7 @@ TEST_F(TtfShapingFace, TheFacesCpacIsTheWritersTableInFlashMode) {
 }
 
 TEST_F(TtfShapingFace, TheFacesCpacIsTheWritersTableInSdMode) {
-  SimNorFlash chip{26 * kPage};
+  SimNorFlash chip{20 * kPage};
   const auto set = loadSdMode(chip);
   ASSERT_NE(nullptr, set);
   const glyphstore::StyleInfo& info = headerOf(chip).styles[kAccentFirstBlock + kRegular];
@@ -1555,7 +1555,7 @@ TEST_F(ShapingFacePlans, TheFixtureFaceDropsWhatItsOptionsSay) {
 
 TEST_F(ShapingFacePlans, TheFixtureFaceDropsTheCpacOnRequest) {
   // An SD-mode block of the install: the subset's file with its CPac record.
-  SimNorFlash chip{26 * kPage};
+  SimNorFlash chip{20 * kPage};
   const auto set = loadSdMode(chip);
   ASSERT_NE(nullptr, set);
   const glyphstore::StyleInfo& info = headerOf(chip).styles[kAccentFirstBlock + kRegular];

@@ -3594,7 +3594,7 @@ static FontSizeLadder builtinFontSizeLadder(const uint8_t family, const uint8_t 
 static FontSizeLadder buildReaderFontSizeLadder(const int bodyFontId) {
   // Sizes and their point values come from CrossPointSettings::FONT_SIZE_RUNGS, the one table
   // that defines the ladder; this used to keep its own pair of arrays and went stale.
-  static constexpr uint8_t kFamilies[] = {CrossPointSettings::BOOKERLY, CrossPointSettings::NOTOSANS};
+  static constexpr uint8_t kFamilies[] = {CrossPointSettings::SERIF, CrossPointSettings::NOTOSANS};
   const auto& rungs = CrossPointSettings::FONT_SIZE_RUNGS;
   constexpr int rungCount = CrossPointSettings::FONT_SIZE_RUNG_COUNT;
   // FontSizeLadder is fixed-capacity and drops extra rungs without a word, so the size that
@@ -3632,8 +3632,8 @@ static void buildBookFontFamilies(BlockFontFamilies& families, const std::string
   const BookFonts::Families* book = sdFontSystem.bookFontFamiliesFor(cachePath);
   if (!book) return;
   families.body = book->body;
-  // The built-in families in CssFontFamily's order: kSerif (1) is Bookerly, kSansSerif (2) Noto Sans.
-  static_assert(CrossPointSettings::BOOKERLY + 1 == CssFontFamily::kSerif &&
+  // The built-in families in CssFontFamily's order: kSerif (1) is Serif, kSansSerif (2) Noto Sans.
+  static_assert(CrossPointSettings::SERIF + 1 == CssFontFamily::kSerif &&
                     CrossPointSettings::NOTOSANS + 1 == CssFontFamily::kSansSerif,
                 "the generic families index the built-in ones");
   // A built-in body is drawn at the rung a stored size snaps to; another family's sizes are relative to its own.

@@ -255,7 +255,7 @@ class Camera(unittest.TestCase):
 
 
 class TextPage(unittest.TestCase):
-    FONT = HERE.parents[2] / "lib/EpdFont/builtinFonts/source/Bookerly/Bookerly-Regular.ttf"
+    FONT = HERE.parents[2] / "lib/EpdFont/builtinFonts/source/SourceSerif4Caption/SourceSerif4Caption-Regular.ttf"
 
     def test_split_has_grays_in_one_half_only(self):
         levels = lab.text_levels(str(self.FONT), 16, split=True)

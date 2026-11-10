@@ -63,7 +63,7 @@ heading sizes, drop caps, horizontal rules, page breaks, avoiding widows and orp
 
 | Feature | Witch Reader | CrossPoint |
 | --- | :---: | :---: |
-| Built-in reader fonts | ✅ Bookerly and Noto Sans, 10–26 pt (20–26 pt enlarged from 18 pt) | ⚠️ Noto Sans, 12–18 pt; Noto Serif and OpenDyslexic as downloads |
+| Built-in reader fonts | ✅ Serif (made from Source Serif 4 Caption) and Noto Sans, 10–26 pt (20–26 pt enlarged from 18 pt) | ⚠️ Noto Sans, 12–18 pt; Noto Serif and OpenDyslexic as downloads |
 | Publisher fonts (the book's embedded fonts) | ✅ body text, accents or both | ❌ |
 | A book in another script picks a font of that script | ✅ uses an installed family, or offers to download one | ❌ choose the font by hand |
 

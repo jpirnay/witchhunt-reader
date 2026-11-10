@@ -147,8 +147,7 @@ uint8_t fontFamilyDynamicGetter(const void* /*ctx*/) {
     }
     // SD family no longer present (card removed?); fall through to built-in.
   }
-  return SETTINGS.fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? SETTINGS.fontFamily
-                                                                      : CrossPointSettings::BOOKERLY;
+  return SETTINGS.fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? SETTINGS.fontFamily : CrossPointSettings::SERIF;
 }
 
 void fontFamilyDynamicSetter(void* /*ctx*/, uint8_t value) {
@@ -200,7 +199,7 @@ bool fontFamilyOptionsKnown() { return sdFontSystem.discovered(); }
 
 std::string fontFamilyOptionLabel(uint8_t i) {
   if (i < CrossPointSettings::BUILTIN_FONT_COUNT) {
-    static const StrId BUILTIN_LABELS[] = {StrId::STR_BOOKERLY, StrId::STR_NOTO_SANS};
+    static const StrId BUILTIN_LABELS[] = {StrId::STR_SERIF, StrId::STR_NOTO_SANS};
     return I18N.get(BUILTIN_LABELS[i]);
   }
   const auto& families = sdFontSystem.registry().getFamilies();

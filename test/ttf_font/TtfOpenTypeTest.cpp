@@ -1,6 +1,6 @@
 // Kerning and ligatures for the TTF engine (TtfOpenType): the glue over the SDK's FreeInkFont layout readers, which
 // test the OpenType rules themselves (libs/font/FreeInkFont/test/host). Here: that a style finds and resolves its
-// tables, which table it kerns from, and the ligatures EpdFont applies, on built fonts and on Bookerly.
+// tables, which table it kerns from, and the ligatures EpdFont applies, on built fonts and on Source Serif 4 Caption.
 #include <Gpos.h>
 #include <Gsub.h>
 #include <gtest/gtest.h>
@@ -112,11 +112,12 @@ TEST(TtfKerning, ABrokenGposKernsNothing) {
   EXPECT_EQ(0, kerning.pair(p.bytes, p.face, 1, 2));
 }
 
-TEST(TtfKerning, BookerlyResolvedAgreesWithTheStatelessReader) {
+TEST(TtfKerning, SerifResolvedAgreesWithTheStatelessReader) {
   // The resolved subtables must give what the SDK's per-call walk gives: every pair of printable ASCII in each of
   // the four styles.
-  for (const char* name : {"Bookerly/Bookerly-Regular.ttf", "Bookerly/Bookerly-Bold.ttf",
-                           "Bookerly/Bookerly-Italic.ttf", "Bookerly/Bookerly-BoldItalic.ttf"}) {
+  for (const char* name :
+       {"SourceSerif4Caption/SourceSerif4Caption-Regular.ttf", "SourceSerif4Caption/SourceSerif4Caption-Bold.ttf",
+        "SourceSerif4Caption/SourceSerif4Caption-It.ttf", "SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf"}) {
     const std::vector<uint8_t> file = readFont(name);
     FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
     ttf::Face face;
@@ -229,9 +230,10 @@ TEST(TtfLigatures, AFontWithoutGsubHasNone) {
   EXPECT_EQ(0, ligatures.count);
 }
 
-TEST(TtfLigatures, BookerlyHasTheFiAndFlLigatures) {
-  for (const char* name : {"Bookerly/Bookerly-Regular.ttf", "Bookerly/Bookerly-Bold.ttf",
-                           "Bookerly/Bookerly-Italic.ttf", "Bookerly/Bookerly-BoldItalic.ttf"}) {
+TEST(TtfLigatures, SerifHasTheFiAndFlLigatures) {
+  for (const char* name :
+       {"SourceSerif4Caption/SourceSerif4Caption-Regular.ttf", "SourceSerif4Caption/SourceSerif4Caption-Bold.ttf",
+        "SourceSerif4Caption/SourceSerif4Caption-It.ttf", "SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf"}) {
     const std::vector<uint8_t> file = readFont(name);
     FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
     ttf::Face face;

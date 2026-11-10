@@ -276,7 +276,7 @@ INSTANTIATE_TEST_SUITE_P(OverlapFonts, TtfVsFreeTypeOverlap,
 
 TEST(TtfPoolSize, ThePoolNeverChangesTheOutput) {
   // Spec 2: the pool size is a speed dial only. Every glyph of a text face, with three pools.
-  const std::vector<uint8_t> data = readFont("Bookerly/Bookerly-Regular.ttf");
+  const std::vector<uint8_t> data = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
   FontBytes bytes(data.data(), static_cast<uint32_t>(data.size()));
   Face face;
   ASSERT_EQ(FaceStatus::Ok, parseFace(bytes, &face));
@@ -479,9 +479,10 @@ TEST(TtfVsFreeTypeCffSynthetic, FontMatricesAndFontDictScalesMatchFreeType) {
 
 namespace {
 
-// The golden hash of Bookerly Regular at 14 pt as `rasterizer` draws it, calling `between` before each glyph.
+// The golden hash of Source Serif 4 Caption Regular at 14 pt as `rasterizer` draws it, calling `between` before each
+// glyph.
 template <typename Between>
-uint32_t bookerlyHash(Rasterizer& rasterizer, FontBytes& bytes, const Face& face, Between between) {
+uint32_t serifHash(Rasterizer& rasterizer, FontBytes& bytes, const Face& face, Between between) {
   uint32_t hash = ttf_golden::kSeed;
   for (uint16_t g = 0; g < face.numGlyphs; ++g) {
     between();
@@ -496,24 +497,24 @@ uint32_t bookerlyHash(Rasterizer& rasterizer, FontBytes& bytes, const Face& face
 
 TEST(TtfGolden, TheDeviceBenchExpectsThisOutput) {
   // bench/ttf_raster_main.cpp computes the same hash on the device, over the same glyphs.
-  const std::vector<uint8_t> data = readFont("Bookerly/Bookerly-Regular.ttf");
+  const std::vector<uint8_t> data = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
   FontBytes bytes(data.data(), static_cast<uint32_t>(data.size()));
   Face face;
   ASSERT_EQ(FaceStatus::Ok, parseFace(bytes, &face));
   Rasterizer rasterizer;
   ASSERT_TRUE(rasterizer.allocate(planScratch(face, ppemFromPoints(40), kPoolBytesFlash)));
-  const uint32_t hash = bookerlyHash(rasterizer, bytes, face, [] {});
-  EXPECT_EQ(ttf_golden::kBookerlyRegular14pt, hash) << std::hex << hash;
+  const uint32_t hash = serifHash(rasterizer, bytes, face, [] {});
+  EXPECT_EQ(ttf_golden::kSerifRegular14pt, hash) << std::hex << hash;
 }
 
 TEST(TtfCffGolden, TrueTypeOutputIsUnchanged) {
-  // One block for a CFF face and Bookerly, as a family of both plans it (the interpreter's region moves the output
-  // region), and a CFF glyph drawn before each TrueType one: Bookerly comes out as the device bench expects.
+  // One block for a CFF face and Source Serif 4 Caption, as a family of both plans it (the interpreter's region moves
+  // the output region), and a CFF glyph drawn before each TrueType one: Caption comes out as the device bench expects.
   const std::vector<uint8_t> otf = readCffTestFont("NotoSansJP-Cff.otf");
   FontBytes otfBytes(otf.data(), static_cast<uint32_t>(otf.size()));
   Face cff;
   ASSERT_EQ(FaceStatus::Ok, parseFace(otfBytes, &cff));
-  const std::vector<uint8_t> data = readFont("Bookerly/Bookerly-Regular.ttf");
+  const std::vector<uint8_t> data = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
   FontBytes bytes(data.data(), static_cast<uint32_t>(data.size()));
   Face face;
   ASSERT_EQ(FaceStatus::Ok, parseFace(bytes, &face));
@@ -524,12 +525,12 @@ TEST(TtfCffGolden, TrueTypeOutputIsUnchanged) {
   EXPECT_EQ(kCffDecoderBytes, rasterizer.plan().decoderBytes);
   uint16_t cffGlyph = 0;
   uint32_t cffDrawn = 0;
-  const uint32_t hash = bookerlyHash(rasterizer, bytes, face, [&] {
+  const uint32_t hash = serifHash(rasterizer, bytes, face, [&] {
     EpdGlyph metrics{};
     cffDrawn += rasterizer.render(otfBytes, cff, cffGlyph, ppemFromPoints(kPoints), &metrics) == Status::Ok;
     cffGlyph = static_cast<uint16_t>((cffGlyph + 1) % cff.numGlyphs);
   });
-  EXPECT_EQ(ttf_golden::kBookerlyRegular14pt, hash) << std::hex << hash;
+  EXPECT_EQ(ttf_golden::kSerifRegular14pt, hash) << std::hex << hash;
   EXPECT_EQ(face.numGlyphs, cffDrawn);
 }
 

@@ -6,15 +6,137 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/font-sizes.sh"
 cd "$SCRIPT_DIR"
 
-for size in ${BOOKERLY_FONT_SIZES[@]}; do
+# The built-in Serif: Source Serif 4 by Adobe (SIL OFL 1.1), its Caption optical size, from Adobe's static release
+# 4.005 (github.com/adobe-fonts/source-serif/releases), the four files unmodified in source/SourceSerif4Caption beside
+# the licence. sha256 Regular fc964ede48743f21da94fb3a80253d30dd4e4752fb416a09fd64cb17fae89cd2, It
+# 8c705747dbfe5736cf947aff520b822dc4c3ca301f35bfea473c37d17e93e1f7, Bold
+# 92b317ac248565b5be9c3086a7e7743f44c9db35d49d5adeca67f3391c3a4cf2, BoldIt
+# 7af31fb47abe9b4318238fc8c24130953baf70fd36e53eae867bb642f268d022.
+#
+# The faces are serif_* and the reader shows the family as "Serif": the licence reserves the font name "Source", and
+# a face converted and scaled here is a Modified Version of the font, which may not carry a reserved name. CREDITS.md
+# says where it comes from.
+#
+# Scaled to 95 %. At the same nominal size the Caption cut holds about 82 pages of a chapter where Bookerly, the
+# built-in serif before it, held 74 (measured on an X3). What a page holds goes with the square of the type size, so
+# 0.95 ~= sqrt(74 / 82) gives a chapter Bookerly's page count back at every size of the reader's ladder. The scale
+# is the font's own: unitsPerEm is set to round(1000 / 0.95) = 1053 in a temporary copy (the committed files stay
+# Adobe's), and FreeType scales the outlines, the advances and the line metrics by it, as fontconvert.py scales the
+# kerning by the same head table.
+SERIF_UNITS_PER_EM=1053
+declare -A SERIF_SOURCE_STYLE=([Regular]=Regular [Italic]=It [Bold]=Bold [BoldItalic]=BoldIt)
+# Behind it in fontconvert.py's font stack, Noto Sans of the same style draws what Bookerly drew within
+# fontconvert.py's intervals and Caption has no glyph for, and U+FFFD, the glyph the renderer draws for a character no
+# face has. It is subset to exactly those characters, as the UI faces' Hebrew is below: whole, Noto Sans would fill
+# every other gap of the intervals too, 177 more characters (combining marks, historic Cyrillic, rare punctuation,
+# super- and subscripts, currency signs) that no built-in serif has drawn. Noto Sans has no glyph for 55 of the
+# characters it is cut to: the arrows and the mathematical operators (U+2194-22EF below). The subset leaves them out,
+# and they draw through lib/EpdFont/GlyphFallback.h, U+FFFD failing that, as they do in the built-in Noto Sans. The C0
+# controls Bookerly mapped (U+0000, U+0008, tab, CR, U+001D) are not carried.
+SERIF_FALLBACK_INTERVALS=(
+  "0x012C,0x012D"  # I with breve
+  "0x0132,0x0133"  # ligature IJ
+  "0x0166,0x0167"  # T with stroke
+  "0x01C4,0x01CC"  # the digraphs DZ with caron, LJ and NJ
+  "0x01DD,0x01E5"  # turned e; A with diaeresis and macron to G with stroke
+  "0x01E8,0x01F5"  # K with caron to G with acute: O with ogonek, ezh with caron, J with caron, DZ
+  "0x01FA,0x0217"  # A with ring and acute to U with inverted breve: the double grave and inverted breve letters
+  "0x021C,0x021F"  # yogh, H with caron
+  "0x030F,0x030F"  # combining double grave
+  "0x0311,0x0315"  # combining inverted breve, turned comma, comma, reversed comma, comma above right
+  "0x0325,0x0325"  # combining ring below
+  "0x032D,0x032D"  # combining circumflex below
+  "0x0330,0x0330"  # combining tilde below
+  "0x0342,0x0342"  # combining Greek perispomeni
+  "0x0344,0x0345"  # combining Greek dialytika tonos, ypogegrammeni
+  "0x048A,0x048F"  # Cyrillic: short I with tail, semisoft sign, er with tick
+  "0x0494,0x0495"  # Cyrillic: ghe with middle hook
+  "0x049C,0x049F"  # Cyrillic: ka with vertical stroke, ka with stroke
+  "0x04A4,0x04A9"  # Cyrillic: ligature en ghe, pe with middle hook, Abkhasian ha
+  "0x04AC,0x04AD"  # Cyrillic: te with descender
+  "0x04B4,0x04B5"  # Cyrillic: ligature te tse
+  "0x04B8,0x04B9"  # Cyrillic: che with vertical stroke
+  "0x04BC,0x04BF"  # Cyrillic: Abkhasian che, with descender
+  "0x04C3,0x04CE"  # Cyrillic: ka with hook to em with tail, palochka
+  "0x04D2,0x04D3"  # Cyrillic: a with diaeresis
+  "0x04DA,0x04E1"  # Cyrillic: schwa with diaeresis to Abkhasian dze
+  "0x04E4,0x04E5"  # Cyrillic: i with diaeresis
+  "0x04EA,0x04ED"  # Cyrillic: barred o with diaeresis, e with diaeresis
+  "0x04F0,0x04F1"  # Cyrillic: u with diaeresis
+  "0x04F4,0x04FF"  # Cyrillic: che with diaeresis to ha with stroke
+  "0x2000,0x2001"  # en quad, em quad
+  "0x2008,0x2008"  # punctuation space
+  "0x200C,0x200F"  # ZWNJ, ZWJ, LRM, RLM (fontconvert.py writes them empty whatever the font has)
+  "0x2016,0x2017"  # double vertical line, double low line
+  "0x201B,0x201B"  # single high-reversed-9 quotation mark
+  "0x201F,0x201F"  # double high-reversed-9 quotation mark
+  "0x2023,0x2024"  # triangular bullet, one dot leader
+  "0x2027,0x202E"  # hyphenation point, line and paragraph separators, the bidi embeddings and overrides
+  "0x2034,0x2038"  # triple prime, the reversed primes, caret
+  "0x203B,0x203B"  # reference mark
+  "0x203E,0x203E"  # overline
+  "0x2043,0x2043"  # hyphen bullet
+  "0x2053,0x2053"  # swung dash
+  "0x2057,0x2057"  # quadruple prime
+  "0x205F,0x2064"  # medium mathematical space, word joiner, the invisible operators
+  "0x20A3,0x20A3"  # French franc sign
+  "0x2194,0x2195"  # left right arrow, up down arrow
+  "0x21A8,0x21A8"  # up down arrow with base
+  "0x21B2,0x21B3"  # downwards arrows with tip left and right
+  "0x21B5,0x21B5"  # downwards arrow with corner leftwards
+  "0x21D0,0x21D4"  # the double arrows
+  "0x2200,0x2200"  # for all
+  "0x2203,0x2203"  # there exists
+  "0x2205,0x2205"  # empty set
+  "0x2207,0x220D"  # nabla, element of and its variants
+  "0x2216,0x2218"  # set minus, asterisk operator, ring operator
+  "0x221D,0x221D"  # proportional to
+  "0x221F,0x2220"  # right angle, angle
+  "0x2223,0x2223"  # divides
+  "0x2225,0x2225"  # parallel to
+  "0x2227,0x222A"  # logical and, or; intersection, union
+  "0x2234,0x2237"  # therefore, because, ratio, proportion
+  "0x223C,0x223C"  # tilde operator
+  "0x2245,0x2245"  # approximately equal to
+  "0x224D,0x224D"  # equivalent to
+  "0x2261,0x2261"  # identical to
+  "0x226A,0x226B"  # much less-than, much greater-than
+  "0x2283,0x2287"  # superset of and its variants
+  "0x2295,0x2298"  # circled plus, minus, times, division slash
+  "0x22A5,0x22A5"  # up tack
+  "0x22C5,0x22C5"  # dot operator
+  "0x22EF,0x22EF"  # midline horizontal ellipsis
+  "0xFB05,0xFB06"  # ligatures long s t, s t
+  "0xFFFD,0xFFFD"  # replacement character
+)
+serif_fallback_unicodes=""
+for interval in "${SERIF_FALLBACK_INTERVALS[@]}"; do
+  first="${interval%,*}"
+  last="${interval#*,}"
+  serif_fallback_unicodes+="${serif_fallback_unicodes:+,}U+${first#0x}-${last#0x}"
+done
+SERIF_SOURCE_DIR="$(mktemp -d)"
+for style in ${READER_FONT_STYLES[@]}; do
+  python -c 'import sys
+from fontTools.ttLib import TTFont
+font = TTFont(sys.argv[1])
+font["head"].unitsPerEm = int(sys.argv[3])
+font.save(sys.argv[2])' "../builtinFonts/source/SourceSerif4Caption/SourceSerif4Caption-${SERIF_SOURCE_STYLE[$style]}.ttf" \
+    "$SERIF_SOURCE_DIR/Serif-${style}.ttf" "$SERIF_UNITS_PER_EM"
+  python -m fontTools.subset "../builtinFonts/source/NotoSans/NotoSans-${style}.ttf" \
+    --unicodes="$serif_fallback_unicodes" --output-file="$SERIF_SOURCE_DIR/NotoSans-${style}.ttf"
+done
+
+for size in ${SERIF_FONT_SIZES[@]}; do
   for style in ${READER_FONT_STYLES[@]}; do
-    font_name="bookerly_${size}_$(echo $style | tr '[:upper:]' '[:lower:]')"
-    font_path="../builtinFonts/source/Bookerly/Bookerly-${style}.ttf"
+    font_name="serif_${size}_$(echo $style | tr '[:upper:]' '[:lower:]')"
     output_path="../builtinFonts/${font_name}.h"
-    python fontconvert.py $font_name $size $font_path --2bit --compress --zopfli > $output_path
+    python fontconvert.py $font_name $size "$SERIF_SOURCE_DIR/Serif-${style}.ttf" \
+      "$SERIF_SOURCE_DIR/NotoSans-${style}.ttf" --2bit --compress --zopfli > $output_path
     echo "Generated $output_path"
   done
 done
+rm -rf "$SERIF_SOURCE_DIR"
 
 # The phonetic alphabet a dictionary needs: IPA Extensions, the stress and
 # length marks from Spacing Modifier Letters, and the three Greek letters IPA
@@ -25,9 +147,10 @@ done
 # src/activities/reader/DictionaryDefinitionActivity.h) and a definition is the
 # only text that needs the range. Giving it to all twenty Noto faces cost 124 KB
 # of flash; one size costs 26 KB. Noto Sans is also the only built-in reader
-# family whose source actually HAS the glyphs -- Bookerly is missing 9 of the 20
-# codepoints a real dictionary uses, which is why every other font relies on the
-# lookalike substitution in lib/EpdFont/GlyphFallback.h instead.
+# family whose source actually HAS the glyphs -- Source Serif 4 Caption, the
+# Serif's, lacks 102 of the 119 codepoints below (Bookerly, the serif before it,
+# lacked 9 of the 20 a real dictionary uses), which is why every other font
+# relies on the lookalike substitution in lib/EpdFont/GlyphFallback.h instead.
 # The whole IPA Extensions block, but only the handful of Spacing Modifier
 # Letters a transcription actually uses: taking that block whole cost 31 KB more
 # across the family for ~60 codepoints no dictionary writes.

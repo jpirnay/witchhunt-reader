@@ -607,7 +607,7 @@ curl http://crosspoint.local/api/settings
 ```json
 [
   {"key": "fontFamily", "name": "EPUB Font Family", "category": "Reader", "subcategory": "Reader Font",
-   "submenu": "Reader Font", "type": "enum", "value": 0, "options": ["Bookerly", "Noto Sans"]},
+   "submenu": "Reader Font", "type": "enum", "value": 0, "options": ["Serif", "Noto Sans"]},
   {"key": "fontSize", "name": "EPUB Font Size", "category": "Reader", "subcategory": "",
    "submenu": "Reader Font", "type": "enum", "value": 1,
    "options": ["10pt", "12pt", "14pt", "16pt", "18pt", "20pt", "22pt", "24pt", "26pt"]},

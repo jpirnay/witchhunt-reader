@@ -49,15 +49,15 @@ except ImportError:
 
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_BOOKERLY_FONT = os.path.join(
+_SERIF_FONT = os.path.join(
     _PROJECT_ROOT, "lib", "EpdFont", "builtinFonts", "source",
-    "Bookerly", "Bookerly-Regular.ttf",
+    "SourceSerif4Caption", "SourceSerif4Caption-Regular.ttf",
 )
 
 
 def _get_font(size=20):
-    """Get the Bookerly font at the requested size, with system fallbacks."""
-    for path in [_BOOKERLY_FONT]:
+    """Get Source Serif 4 Caption (the built-in Serif's source) at the requested size, with system fallbacks."""
+    for path in [_SERIF_FONT]:
         try:
             return ImageFont.truetype(path, size)
         except (OSError, IOError):
@@ -1895,7 +1895,7 @@ file. The Author&#x2019;s Note above occupies the first portion of the
 file but is invisible to the TOC, testing the case where a navigation
 target lands in the middle of a document.</p>
 
-<p>The cover image was generated programmatically using the Bookerly
+<p>The cover image was generated programmatically using the Source Serif 4 Caption
 typeface at 536&#x00D7;800 pixels, rendered on a deep teal background
 (RGB 15, 55, 65) with light beige text (RGB 225, 220, 205).</p>
 

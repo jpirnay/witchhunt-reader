@@ -65,11 +65,11 @@ std::array<uint8_t, glyphstore::kIdentityBytes> identityAt(const ttf::FileStamp 
 
 }  // namespace
 
-TEST(TtfFamily, TheBundledBookerlyFilesDeclareTheirStyles) {
-  EXPECT_EQ(0, probe(readFont("Bookerly/Bookerly-Regular.ttf")));
-  EXPECT_EQ(1, probe(readFont("Bookerly/Bookerly-Bold.ttf")));
-  EXPECT_EQ(2, probe(readFont("Bookerly/Bookerly-Italic.ttf")));
-  EXPECT_EQ(3, probe(readFont("Bookerly/Bookerly-BoldItalic.ttf")));
+TEST(TtfFamily, TheBundledSerifFilesDeclareTheirStyles) {
+  EXPECT_EQ(0, probe(readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf")));
+  EXPECT_EQ(1, probe(readFont("SourceSerif4Caption/SourceSerif4Caption-Bold.ttf")));
+  EXPECT_EQ(2, probe(readFont("SourceSerif4Caption/SourceSerif4Caption-It.ttf")));
+  EXPECT_EQ(3, probe(readFont("SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf")));
 }
 
 TEST(TtfFamily, TheStyleIsTheLowTwoBitsOfMacStyle) {
@@ -329,7 +329,7 @@ TEST(TtfFamily, AStyleTheFaceRefusesLeavesItsPlaceToTheOthers) {
 }
 
 TEST(TtfFamily, AReadErrorIsRefused) {
-  MemoryFile file{readFont("Bookerly/Bookerly-Bold.ttf")};
+  MemoryFile file{readFont("SourceSerif4Caption/SourceSerif4Caption-Bold.ttf")};
   file.failReads = true;
   EXPECT_EQ(-1, ttf::probeFile(file.source()).style);
 }
@@ -361,16 +361,16 @@ TEST(TtfFamily, TheProbeCountsLookupsInCoalescedReads) {
 }
 
 TEST(TtfFamily, ALatinFontsProbeReadsItsScriptListsAndNoLookups) {
-  // Bookerly's GSUB and GPOS name DFLT, cyrl, grek and latn only: no script the shaper handles, so it reserves no CPac
-  // and its lookups are never counted. The header, the directory 8 records at a time (21 tables: 3 reads), head and
-  // OS/2, which is what the probe read before the CPac (6); then the first 128 bytes of each layout table, its header
-  // and its script list (2); last parseFace()'s reading of the face, the 512-byte pages that hold the directory and
-  // the tables it reads (4).
-  MemoryFile file{readFont("Bookerly/Bookerly-Regular.ttf")};
+  // Source Serif 4 Caption's GSUB and GPOS name DFLT, cyrl, grek and latn only: no script the shaper handles, so it
+  // reserves no CPac and its lookups are never counted. The header, the directory 8 records at a time (15 tables: 2
+  // reads), head and OS/2, which is what the probe read before the CPac (5); then the first 128 bytes of each layout
+  // table, its header and its script list (2); last parseFace()'s reading of the face, the 512-byte pages that hold
+  // the directory and the tables it reads (4).
+  MemoryFile file{readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf")};
   const ttf::FileProbe probed = ttf::probeFile(file.source());
   ASSERT_EQ(0, probed.style);
   EXPECT_EQ(0u, probed.cpacBytes);
-  EXPECT_EQ(12u, file.reads);
+  EXPECT_EQ(11u, file.reads);
   // One read in each layout table, at its start.
   for (const char* table : {"GSUB", "GPOS"}) {
     const size_t at = findRecord(file.bytes, table);
@@ -402,7 +402,7 @@ TEST(TtfFamily, AFileSourceReadsThroughSeekAndRead) {
       return static_cast<int>(n);
     }
   };
-  SeekReadFile file{readFont("Bookerly/Bookerly-Italic.ttf")};
+  SeekReadFile file{readFont("SourceSerif4Caption/SourceSerif4Caption-It.ttf")};
   EXPECT_EQ(2, ttf::probeFile(ttf::fileSource(file, static_cast<uint32_t>(file.bytes.size()))).style);
   const auto size = static_cast<uint32_t>(file.bytes.size());
   file.bytes.resize(100);  // the file shrank under the source: short reads fail
@@ -641,9 +641,10 @@ TEST(TtfFamily, TheBundledFilesCarryTheirWeights) {
 
 TEST(TtfFamily, AFamilyFitsTheStoreInFlashModeElseInSdMode) {
   constexpr uint32_t kX3FontArea = 3538944 - 65536;
-  const uint32_t bookerly[4] = {450048, 452000, 460000, 455000};
-  const uint32_t bookerlyTables[4] = {176356, 178372, 170664, 184176};
-  EXPECT_TRUE(ttf::fitsStore(bookerly, bookerlyTables, 4, kX3FontArea, 32));
+  // Four styles of about 450 KB with about 175 KB of tables each, a large Latin family.
+  const uint32_t family[4] = {450048, 452000, 460000, 455000};
+  const uint32_t familyTables[4] = {176356, 178372, 170664, 184176};
+  EXPECT_TRUE(ttf::fitsStore(family, familyTables, 4, kX3FontArea, 32));
   // One CJK style is larger than the partition; its tables are not (DroidSansFallbackFull: 4 MB, 357 KB of tables).
   const uint32_t cjk[1] = {10u * 1024 * 1024};
   const uint32_t cjkTables[1] = {356752};
@@ -655,8 +656,8 @@ TEST(TtfFamily, AFamilyFitsTheStoreInFlashModeElseInSdMode) {
   const uint32_t wide[4] = {1000000, 1000000, 1000000, 1000000};
   const uint32_t wideTables[4] = {450000, 450000, 450000, 450000};
   EXPECT_FALSE(ttf::fitsStore(wide, wideTables, 4, kX3FontArea, 32));
-  EXPECT_FALSE(ttf::fitsStore(bookerly, bookerlyTables, 4, kX3FontArea, 12));  // too few mapping pages either way
-  EXPECT_FALSE(ttf::fitsStore(bookerly, bookerlyTables, 0, kX3FontArea, 32));
+  EXPECT_FALSE(ttf::fitsStore(family, familyTables, 4, kX3FontArea, 12));  // too few mapping pages either way
+  EXPECT_FALSE(ttf::fitsStore(family, familyTables, 0, kX3FontArea, 32));
 }
 
 TEST(TtfFamily, AStyleWithoutAnSdBlockFitsOnlyInFlashMode) {
@@ -674,8 +675,8 @@ TEST(TtfFamily, AStyleWithoutAnSdBlockFitsOnlyInFlashMode) {
 }
 
 TEST(TtfFamily, TheProbeSaysWhatTheSdModeBlockTakes) {
-  for (const char* name : {"Bookerly/Bookerly-Regular.ttf", "Inter/Inter-Bold.ttf", "NotoSans/NotoSans-Italic.ttf",
-                           "Ubuntu/Ubuntu-Regular.ttf"}) {
+  for (const char* name : {"SourceSerif4Caption/SourceSerif4Caption-Regular.ttf", "Inter/Inter-Bold.ttf",
+                           "NotoSans/NotoSans-Italic.ttf", "Ubuntu/Ubuntu-Regular.ttf"}) {
     MemoryFile file{readFont(name)};
     ttf::SdBlock block;
     ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source())) << name;
@@ -698,18 +699,18 @@ std::vector<uint8_t> blockImage(ttf::SdBlock& block) {
 }  // namespace
 
 TEST(TtfSdBlock, IsTheFontButForItsOutlines) {
-  MemoryFile file{readFont("Bookerly/Bookerly-Regular.ttf")};
+  MemoryFile file{readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf")};
   ttf::SdBlock block;
   ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
-  // Its eleven tables the engine reads, post's header among them, and GDEF, 4-byte aligned behind a 13-record
-  // directory (no CPac: Bookerly's layout names no script the shaper handles); glyf is 208,484 bytes at 58,840 in the
-  // file.
-  EXPECT_EQ(177004u, block.bytes());
+  // The ten tables the engine reads, post's header among them, and GDEF, 4-byte aligned behind a 12-record directory
+  // that names glyf too (no CPac: Source Serif 4 Caption's layout names no script the shaper handles); glyf is 108,448
+  // bytes at 19,724 in the file.
+  EXPECT_EQ(122924u, block.bytes());
   EXPECT_EQ(0u, block.cpacBytes());
   const glyphstore::SdOutlines outlines = block.outlines();
   EXPECT_EQ(block.bytes(), outlines.fontOffset);
-  EXPECT_EQ(58840u, outlines.fileOffset);
-  EXPECT_EQ(208484u, outlines.length);
+  EXPECT_EQ(19724u, outlines.fileOffset);
+  EXPECT_EQ(108448u, outlines.length);
 
   const std::vector<uint8_t> image = blockImage(block);
   ttf::SdPageCache cache;
@@ -749,8 +750,8 @@ TEST(TtfSdBlock, IsTheFontButForItsOutlines) {
 TEST(TtfSdBlock, KeepsThePostHeaderSoTheFaceReadsItalicAsTheFileDoes) {
   // Spec 7.4: a style block keeps post's first 32 bytes, italicAngle among them. A TrueType file's glyph names after
   // them (NotoSans-Italic: 52,692 bytes of post) stay out.
-  for (const char* name :
-       {"NotoSans/NotoSans-Italic.ttf", "OpenDyslexic/OpenDyslexic-Italic.otf", "Bookerly/Bookerly-Regular.ttf"}) {
+  for (const char* name : {"NotoSans/NotoSans-Italic.ttf", "OpenDyslexic/OpenDyslexic-Italic.otf",
+                           "SourceSerif4Caption/SourceSerif4Caption-Regular.ttf"}) {
     MemoryFile file{readFont(name)};
     ttf::SdBlock block;
     ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source())) << name;
@@ -765,7 +766,7 @@ TEST(TtfSdBlock, KeepsThePostHeaderSoTheFaceReadsItalicAsTheFileDoes) {
     ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(card, &face)) << name;
     ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(whole, &wholeFace)) << name;
     EXPECT_EQ(wholeFace.italic, face.italic) << name;
-    EXPECT_EQ(std::string(name) != "Bookerly/Bookerly-Regular.ttf", face.italic) << name;
+    EXPECT_EQ(std::string(name) != "SourceSerif4Caption/SourceSerif4Caption-Regular.ttf", face.italic) << name;
     const size_t record = findRecord(image, "post");
     ASSERT_NE(0u, record) << name;
     const uint32_t length = static_cast<uint32_t>(image[record + 12] << 24 | image[record + 13] << 16 |
@@ -1010,9 +1011,12 @@ TEST(TtfFamily, AFontWithoutLookupsReservesNoCpac) {
 TEST(TtfFamily, AFontWhoseLayoutNamesNoShapedScriptReservesNoCpac) {
   // Latin and CJK faces with lookups (ligatures, kerning) the writer would write a table for: none shapes, so none
   // reserves a room. The flash-mode block is the file alone and the SD-mode block has no CPac record.
-  const char* const latin[] = {"Bookerly/Bookerly-Regular.ttf", "Bookerly/Bookerly-Bold.ttf",
-                               "Bookerly/Bookerly-Italic.ttf",  "Bookerly/Bookerly-BoldItalic.ttf",
-                               "Inter/Inter-Regular.ttf",       "Ubuntu/Ubuntu-Regular.ttf"};
+  const char* const latin[] = {"SourceSerif4Caption/SourceSerif4Caption-Regular.ttf",
+                               "SourceSerif4Caption/SourceSerif4Caption-Bold.ttf",
+                               "SourceSerif4Caption/SourceSerif4Caption-It.ttf",
+                               "SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf",
+                               "Inter/Inter-Regular.ttf",
+                               "Ubuntu/Ubuntu-Regular.ttf"};
   std::vector<Bytes> fonts;
   for (const char* name : latin) fonts.push_back(readFont(name));
   fonts.push_back(readFixture("NotoSansJP-TrueType.ttf"));

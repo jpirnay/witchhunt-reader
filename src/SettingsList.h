@@ -315,7 +315,7 @@ inline void buildSettings(const RowSink& emit) {
   // side (SettingsActivity / CrossPointWebServer enrich enumLabels before
   // iterating). The built-in StrIds are kept as a fallback for code paths that
   // don't enrich enumLabels.
-  emit(SettingInfo::DynamicEnum(StrId::STR_FONT_FAMILY, {StrId::STR_BOOKERLY, StrId::STR_NOTO_SANS},
+  emit(SettingInfo::DynamicEnum(StrId::STR_FONT_FAMILY, {StrId::STR_SERIF, StrId::STR_NOTO_SANS},
                                 fontFamilyDynamicGetter, fontFamilyDynamicSetter, "fontFamily", StrId::STR_CAT_READER)
            .withSubcategory(StrId::STR_MENU_READER_FONT)
            .withSubmenu(StrId::STR_MENU_READER_FONT)
@@ -350,7 +350,7 @@ inline void buildSettings(const RowSink& emit) {
            .withSubmenu(StrId::STR_MENU_READER_FONT)
            .withSelectorActivity());
   // TXT/MD font submenu — same dynamic structure as EPUB, includes SD card fonts.
-  emit(SettingInfo::DynamicEnum(StrId::STR_TXT_FONT_FAMILY, {StrId::STR_BOOKERLY, StrId::STR_NOTO_SANS},
+  emit(SettingInfo::DynamicEnum(StrId::STR_TXT_FONT_FAMILY, {StrId::STR_SERIF, StrId::STR_NOTO_SANS},
                                 txtFontFamilyDynamicGetter, txtFontFamilyDynamicSetter, "txtFontFamily",
                                 StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_MENU_TXT_FONT)

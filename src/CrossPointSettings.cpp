@@ -16,15 +16,15 @@
 // Font ID 0 is reserved as the SD card font "not found" sentinel
 // (SdCardFontManager::computeFontId() never returns 0). Guard against any
 // hash accidentally producing 0 — would cause silent fallback to built-in.
-static_assert(BOOKERLY_12_FONT_ID != 0, "Font ID collision with sentinel");
-static_assert(BOOKERLY_14_FONT_ID != 0, "Font ID collision with sentinel");
-static_assert(BOOKERLY_16_FONT_ID != 0, "Font ID collision with sentinel");
-static_assert(BOOKERLY_18_FONT_ID != 0, "Font ID collision with sentinel");
-static_assert(BOOKERLY_20_FONT_ID != 0, "Font ID collision with sentinel");
-static_assert(BOOKERLY_22_FONT_ID != 0, "Font ID collision with sentinel");
-static_assert(BOOKERLY_24_FONT_ID != 0, "Font ID collision with sentinel");
-static_assert(BOOKERLY_26_FONT_ID != 0, "Font ID collision with sentinel");
-static_assert(BOOKERLY_10_FONT_ID != 0, "Font ID collision with sentinel");
+static_assert(SERIF_12_FONT_ID != 0, "Font ID collision with sentinel");
+static_assert(SERIF_14_FONT_ID != 0, "Font ID collision with sentinel");
+static_assert(SERIF_16_FONT_ID != 0, "Font ID collision with sentinel");
+static_assert(SERIF_18_FONT_ID != 0, "Font ID collision with sentinel");
+static_assert(SERIF_20_FONT_ID != 0, "Font ID collision with sentinel");
+static_assert(SERIF_22_FONT_ID != 0, "Font ID collision with sentinel");
+static_assert(SERIF_24_FONT_ID != 0, "Font ID collision with sentinel");
+static_assert(SERIF_26_FONT_ID != 0, "Font ID collision with sentinel");
+static_assert(SERIF_10_FONT_ID != 0, "Font ID collision with sentinel");
 static_assert(NOTOSANS_12_FONT_ID != 0, "Font ID collision with sentinel");
 static_assert(NOTOSANS_14_FONT_ID != 0, "Font ID collision with sentinel");
 static_assert(NOTOSANS_16_FONT_ID != 0, "Font ID collision with sentinel");
@@ -266,29 +266,29 @@ int CrossPointSettings::getRefreshFrequency() const { return static_cast<int>(re
 
 int CrossPointSettings::getBuiltinReaderFontId(uint8_t family, FONT_SIZE size) {
   switch (family) {
-    case BOOKERLY:
+    case SERIF:
     default:
       switch (size) {
         case PT_10:
-          return BOOKERLY_10_FONT_ID;
+          return SERIF_10_FONT_ID;
         case PT_12:
-          return BOOKERLY_12_FONT_ID;
+          return SERIF_12_FONT_ID;
         case PT_14:
         default:
-          return BOOKERLY_14_FONT_ID;
+          return SERIF_14_FONT_ID;
         case PT_16:
-          return BOOKERLY_16_FONT_ID;
+          return SERIF_16_FONT_ID;
         case PT_18:
-          return BOOKERLY_18_FONT_ID;
+          return SERIF_18_FONT_ID;
         // Synthesised from the 18 pt master; the scale lives on the ID (see main.cpp).
         case PT_20:
-          return BOOKERLY_20_FONT_ID;
+          return SERIF_20_FONT_ID;
         case PT_22:
-          return BOOKERLY_22_FONT_ID;
+          return SERIF_22_FONT_ID;
         case PT_24:
-          return BOOKERLY_24_FONT_ID;
+          return SERIF_24_FONT_ID;
         case PT_26:
-          return BOOKERLY_26_FONT_ID;
+          return SERIF_26_FONT_ID;
       }
     case NOTOSANS:
       switch (size) {

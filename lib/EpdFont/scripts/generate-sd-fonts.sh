@@ -5,7 +5,7 @@
 #   pip install freetype-py fonttools
 #
 # Source fonts are in ../builtinFonts/source/:
-#   Bookerly/, NotoSans/, OpenDyslexic/, Ubuntu/ — committed to git
+#   SourceSerif4Caption/, NotoSans/, OpenDyslexic/, Ubuntu/ — committed to git
 #
 # Output goes to ./output/ (copy to SD card at /.crosspoint/fonts/)
 
@@ -20,7 +20,7 @@ SIZES="12,14,16,18"
 
 # Clean output directories to ensure a fresh build
 echo "Cleaning output directories..."
-rm -rf "$OUTPUT_BASE/NotoSansExtended/" "$OUTPUT_BASE/Bookerly-SD/"
+rm -rf "$OUTPUT_BASE/NotoSansExtended/" "$OUTPUT_BASE/Serif-SD/"
 
 # Run both font families in parallel
 echo "=== Starting parallel font generation ==="
@@ -34,22 +34,24 @@ python3 "$SCRIPT" \
   --output-dir "$OUTPUT_BASE/NotoSansExtended/" &
 PID_NOTO=$!
 
-echo "[2/2] Bookerly-SD (multi-style)"
+# The built-in Serif's source, Source Serif 4 Caption, at its own size (the built-in faces are it at 95 %). Named
+# Serif-SD: its licence reserves the font name "Source", and a converted font is a Modified Version.
+echo "[2/2] Serif-SD (multi-style)"
 python3 "$SCRIPT" \
-  --regular "$FONT_DIR/Bookerly/Bookerly-Regular.ttf" \
-  --bold "$FONT_DIR/Bookerly/Bookerly-Bold.ttf" \
-  --italic "$FONT_DIR/Bookerly/Bookerly-Italic.ttf" \
-  --bolditalic "$FONT_DIR/Bookerly/Bookerly-BoldItalic.ttf" \
+  --regular "$FONT_DIR/SourceSerif4Caption/SourceSerif4Caption-Regular.ttf" \
+  --bold "$FONT_DIR/SourceSerif4Caption/SourceSerif4Caption-Bold.ttf" \
+  --italic "$FONT_DIR/SourceSerif4Caption/SourceSerif4Caption-It.ttf" \
+  --bolditalic "$FONT_DIR/SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf" \
   --intervals builtin \
   --sizes "$SIZES" \
-  --name Bookerly-SD \
-  --output-dir "$OUTPUT_BASE/Bookerly-SD/" &
-PID_BOOKERLY=$!
+  --name Serif-SD \
+  --output-dir "$OUTPUT_BASE/Serif-SD/" &
+PID_SERIF=$!
 
 # Wait for all and track failures
 FAILED=0
 wait $PID_NOTO || { echo "ERROR: NotoSansExtended generation failed"; FAILED=1; }
-wait $PID_BOOKERLY || { echo "ERROR: Bookerly-SD generation failed"; FAILED=1; }
+wait $PID_SERIF || { echo "ERROR: Serif-SD generation failed"; FAILED=1; }
 
 if [ $FAILED -ne 0 ]; then
   echo "=== Some font generations failed ==="

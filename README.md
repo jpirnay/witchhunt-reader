@@ -45,7 +45,7 @@ CrossPoint, feature by feature: **[Feature comparison](docs/feature-comparison.m
 
 | Script | Languages (examples) | Layout | Fonts (Font Manager) | Hyphenation |
 | --- | --- | --- | --- | --- |
-| Latin, Cyrillic | English, German, French, Spanish, Vietnamese, Russian, Ukrainian, ... | full CSS layout | built in, or any TrueType, OpenType or `.cpfont` | 20 languages; English built in, the others as downloadable packs |
+| Latin, Cyrillic | English, German, French, Spanish, Vietnamese, Russian, Ukrainian, ... | full CSS layout | built in (Serif, Noto Sans), or any TrueType, OpenType or `.cpfont` | 20 languages; English built in, the others as downloadable packs |
 | Greek | Greek | full CSS layout | any TrueType or OpenType font with Greek letters; the built-in reading fonts have none | none yet |
 | Hebrew | Hebrew, Yiddish, Ladino | right to left, niqqud, right-to-left page turns | Noto Sans and Serif Hebrew | none |
 | Arabic script | Arabic, Persian, Urdu, Pashto, Sindhi, Kurdish | right to left, OpenType joining and marks, the end-of-ayah sign around its number | Noto Naskh Arabic, Noto Sans Arabic | none |

@@ -7,7 +7,7 @@
 
 #include "EpdFont.h"
 #include "UnicodeSpace.h"
-#include "bookerly_14_regular.h"
+#include "serif_14_regular.h"
 
 namespace {
 
@@ -15,7 +15,7 @@ constexpr uint32_t kIdeographicSpace = 0x3000;
 constexpr uint32_t kOghamSpace = 0x1680;
 constexpr uint32_t kReplacement = 0xFFFD;
 
-const EpdFontData* face() { return &bookerly_14_regular; }
+const EpdFontData* face() { return &serif_14_regular; }
 
 int pixels(const uint16_t advanceFp) { return (advanceFp + 8) >> 4; }
 

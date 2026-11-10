@@ -58,7 +58,7 @@ const SETTINGS_HELP = {
     "frontlightOn": "Switches the reading light on or off; brightness and warmth are set on the device.",
     "frontlightRestoreOnWake": "Whether waking turns the light back on; brightness and warmth are always remembered.",
     "orientation": "Which way round the page is shown: portrait, landscape either way, or upside down (Inverted).",
-    "fontFamily": "Font for EPUB books: Bookerly, Noto Sans or a font installed on the SD card.",
+    "fontFamily": "Font for EPUB books: Serif, Noto Sans or a font installed on the SD card.",
     "fontSize": "Text size for EPUB books; the sizes offered depend on the font family chosen.",
     "textAntiAliasing": "Smooths the edges of text with grey; page turns get slightly slower.",
     "textDarkness": "How dark text is drawn, from Lighter through Normal up to Maximum.",
