@@ -246,7 +246,8 @@ class GfxRenderer {
   // phyY: physical row; phyX_start/phyX_end: inclusive physical column range.
   // patternByte is repeated across the span; partial edge bytes are blended with existing content.
   // Bit layout: MSB-first (bit 7 = phyX=0); 0 bits = dark pixel, 1 bits = white pixel.
-  void fillPhysicalHSpanByte(int phyY, int phyX_start, int phyX_end, uint8_t patternByte) const;
+  // keepInk: only the pattern's dark bits are written; the white ones leave the pixel as it is.
+  void fillPhysicalHSpanByte(int phyY, int phyX_start, int phyX_end, uint8_t patternByte, bool keepInk = false) const;
   // Write a solid horizontal span directly to the physical framebuffer using byte-level operations.
   // Thin wrapper around fillPhysicalHSpanByte: state=true → 0x00 (dark), false → 0xFF (white).
   void fillPhysicalHSpan(int phyY, int phyX_start, int phyX_end, bool state) const;
@@ -644,7 +645,8 @@ class GfxRenderer {
   void drawRoundedRect(int x, int y, int width, int height, int lineWidth, int cornerRadius, bool roundTopLeft,
                        bool roundTopRight, bool roundBottomLeft, bool roundBottomRight, bool state) const;
   void fillRect(int x, int y, int width, int height, bool state = true) const;
-  void fillRectDither(int x, int y, int width, int height, Color color) const;
+  // keepInk: the dither only adds ink, so what is drawn there already stays (a shade under text drawn first).
+  void fillRectDither(int x, int y, int width, int height, Color color, bool keepInk = false) const;
   void fillRoundedRect(int x, int y, int width, int height, int cornerRadius, Color color) const;
   void fillRoundedRect(int x, int y, int width, int height, int cornerRadius, bool roundTopLeft, bool roundTopRight,
                        bool roundBottomLeft, bool roundBottomRight, Color color) const;
