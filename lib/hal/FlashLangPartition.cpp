@@ -58,6 +58,10 @@ static const esp_partition_t* findPartition() {
 // Byte offset of the language slot within the partition. Equal to
 // FlashFontPartition's ceiling, and 64 KB aligned because the partition both
 // starts on and is a multiple of 64 KB — esp_partition_mmap requires that.
+// Format 1 (2.40) kept a 64 KB slot at the partition's end, behind a 32 B header: this slot's upper half.
+static constexpr size_t FORMAT1_SLOT_BYTES = 64 * 1024;
+static constexpr size_t FORMAT1_HEADER_BYTES = 32;
+
 static size_t slotOffset(const esp_partition_t* part) {
   if (!part || part->size <= FlashFontPartition::LANG_RESERVED_BYTES) return 0;
   return static_cast<size_t>(part->size) - FlashFontPartition::LANG_RESERVED_BYTES;
@@ -290,6 +294,17 @@ bool build(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCoun
 
   LOG_INF("FLP", "language %u built: %u B of strings for %u keys, %u B extension", langIndex,
           static_cast<unsigned>(written), keyCount, static_cast<unsigned>(extLen));
+
+  // A format-1 slot (2.40) in the upper half is read once, to convert it (mapLegacy); with this slot
+  // built it has served. Retired, so a pack removed from the card later reads as missing rather than
+  // as that firmware's strings again. Format 2 lay where this slot does and is gone already, as is a
+  // format-1 slot this build's erase reached.
+  const size_t format1 = static_cast<size_t>(part->size) - FORMAT1_SLOT_BYTES;
+  uint8_t old[5];
+  if (format1 >= slot + roundUp(used, SECTOR_BYTES) && esp_partition_read(part, format1, old, sizeof(old)) == ESP_OK &&
+      memcmp(old, MAGIC, 4) == 0 && old[4] == 1 && esp_partition_erase_range(part, format1, SECTOR_BYTES) == ESP_OK) {
+    LOG_INF("FLP", "an older firmware's format 1 slot retired");
+  }
   return true;
 }
 
@@ -392,8 +407,6 @@ bool mapLegacy(const uint8_t format, LegacySlot* out) {
   const esp_partition_t* part = findPartition();
   if (!part) return false;
   // Format 1 kept a 64 KB slot at the partition's end, format 2 this one.
-  static constexpr size_t FORMAT1_SLOT_BYTES = 64 * 1024;
-  static constexpr size_t FORMAT1_HEADER_BYTES = 32;
   const size_t slotBytes = format == 1 ? FORMAT1_SLOT_BYTES : FlashFontPartition::LANG_RESERVED_BYTES;
   if (part->size <= slotBytes) return false;
   const size_t slot = static_cast<size_t>(part->size) - slotBytes;

@@ -221,6 +221,11 @@ TEST_P(LangPackConvertTest, ConvertedItReadsAsGermanAgain) {
     ++german;
   }
   EXPECT_EQ(german, expected.size());
+
+  // Converted once: with this slot built, the old one is gone, so a pack removed from the card later reads as
+  // missing rather than as the old firmware's strings again.
+  flp::LegacySlot again{};
+  EXPECT_FALSE(flp::mapLegacy(GetParam().format, &again));
 }
 
 TEST_P(LangPackConvertTest, ASlotThatDoesNotHoldTogetherIsNotConverted) {
