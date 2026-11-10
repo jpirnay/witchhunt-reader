@@ -16,10 +16,11 @@
 // mandatory CRC and delete-on-abort are not taken.
 class FontDownloadActivity final : public UiListActivity {
  public:
-  // What an offer wants downloaded as soon as the list is loaded: a family by its name (a CJK interface pack,
-  // "ChineseUI"; a book's reading font, "NotoSerifDevanagari"), a hyphenation pack by its language ("de"), or both,
-  // the family first. Empty for the plain Font Manager.
+  // What an offer wants downloaded as soon as the list is loaded: a UI language pack by its code ("de"), a family by
+  // its name (a CJK interface pack, "ChineseUI"; a book's reading font, "NotoSerifDevanagari"), a hyphenation pack by
+  // its language ("de"), or more than one, in that order. Empty for the plain Font Manager.
   struct Wanted {
+    char language[4] = {};
     char pack[3] = {};
     char family[FontInstaller::MAX_FAMILY_NAME_LEN + 1] = {};
   };
@@ -90,8 +91,9 @@ class FontDownloadActivity final : public UiListActivity {
   // it takes no heap. Set by an install, cleared when the next one starts (activateIndex, Retry), so a batch keeps
   // any family's note.
   const char* completeNote_ = nullptr;
-  // The last install was a hyphenation pack: "Hyphenation installed!" rather than "Font installed!".
-  bool completedPack_ = false;
+  // What the last install was, for its screen: "Font installed!", "Hyphenation installed!", "Language installed!".
+  enum class Completed : uint8_t { Font, Hyphenation, Language };
+  Completed completed_ = Completed::Font;
   bool cancelRequested_ = false;
   // In downloadAll() or updateAll(): an install leaves the registry's discovery, and the note it decides, to the end
   // of the batch (finishBatch()), rather than scanning every font folder again per family while TLS holds the heap.
@@ -124,8 +126,8 @@ class FontDownloadActivity final : public UiListActivity {
   static void provideRow(void* ctx, uint16_t index, freeink::ui::ListItem& item);
 
   void onWifiSelectionComplete(bool success);
-  // Selects the rows of wanted_ and downloads what is not installed: the family, then the pack once the family is in
-  // place. Once.
+  // Selects the rows of wanted_ and downloads what is not installed: the language pack, the family, then the
+  // hyphenation pack, each once the one before is in place. Once.
   void downloadWanted();
   // Selects row i and downloads it when it is not installed. True when it is installed after.
   bool downloadRow(size_t i);

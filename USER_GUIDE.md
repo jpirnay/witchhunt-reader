@@ -41,6 +41,7 @@ Welcome to **Witch Reader** firmware. This guide outlines the hardware controls,
     - [System Navigation](#system-navigation)
     - [Supported Languages](#supported-languages)
     - [Language packs](#language-packs)
+      - [Interface languages](#interface-languages)
       - [Hyphenation packs](#hyphenation-packs)
       - [Interface packs](#interface-packs)
   - [5. Touch Controls](#5-touch-controls)
@@ -515,7 +516,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 - **Font Family**: Font used for EPUB reading. Includes built-in fonts (Serif, made from Adobe's Source Serif 4, and Noto Sans) plus any TrueType (`.ttf`) or OpenType (`.otf`) fonts and `.cpfont` fonts installed on the SD card. A TrueType or OpenType font without a bold file draws bold text emboldened, and without an italic file draws italic text slanted.
 - **Font Size**: For Serif and Noto Sans, 10pt to 26pt: 10pt to 18pt are typefaces designed at that size; 20, 22, 24 and 26pt are the 18pt face enlarged. For a font on the SD card, the sizes its files were built at (the number in each file name: `MyFont_8.cpfont` is 8pt), then the standard sizes above its largest file, drawn from that file enlarged. A size the selected font does not offer, such as 8pt after switching from an SD font to Serif, is shown and drawn as the nearest size it does offer, and comes back when you switch back.
 - **Normalize Font Size**: Shows text the book sets only slightly larger or smaller than its body text (within 10%) at your font size. "ON" (default) / "OFF"
-- **Font Manager**: downloads font families over Wi-Fi and deletes the ones you no longer use. Each row shows the family, what it is for, and, until it is installed, its download size. **Download All** installs every missing family but the eight CJK ones (Japanese, Simplified Chinese, Traditional Chinese and Korean, each sans serif and serif, 1.6–7.0 MB), the twenty Indic ones (Noto Sans and Noto Serif for each of the ten scripts below), the two Arabic ones (NotoNaskhArabic and NotoSansArabic), the two Hebrew ones (NotoSansHebrew and NotoSerifHebrew) and the two Myanmar ones (NotoSansMyanmar and NotoSerifMyanmar), 34 families in all: install your language's from its own row. Download All leaves out the **[language packs](#language-packs)** too: the interface packs (ChineseUI, ChineseTradUI, JapaneseUI, KoreanUI), which draw book titles in those scripts outside a book, and the **Hyphenation-** rows at the end of the list, one per language (0.2–206 KB): install the ones for your books from their rows. Deleting a hyphenation pack stops hyphenating that language's books. A CJK family is one file (Regular only) and an Indic, Arabic, Hebrew or Myanmar family a Regular and a Bold file, each drawn at every size. The reader restarts when you leave the Font Manager.
+- **Font Manager**: downloads font families over Wi-Fi and deletes the ones you no longer use. Each row shows the family, what it is for, and, until it is installed, its download size. **Download All** installs every missing family but the eight CJK ones (Japanese, Simplified Chinese, Traditional Chinese and Korean, each sans serif and serif, 1.6–7.0 MB), the twenty Indic ones (Noto Sans and Noto Serif for each of the ten scripts below), the two Arabic ones (NotoNaskhArabic and NotoSansArabic), the two Hebrew ones (NotoSansHebrew and NotoSerifHebrew) and the two Myanmar ones (NotoSansMyanmar and NotoSerifMyanmar), 34 families in all: install your language's from its own row. Download All leaves out the **[language packs](#language-packs)** too: the interface packs (ChineseUI, ChineseTradUI, JapaneseUI, KoreanUI), which draw book titles in those scripts outside a book, the **Language-** rows after the fonts, one per interface language (10–15 KB), and the **Hyphenation-** rows at the end of the list, one per language (0.2–206 KB): install your interface language's and the ones for your books from their rows. Deleting a hyphenation pack stops hyphenating that language's books. A CJK family is one file (Regular only) and an Indic, Arabic, Hebrew or Myanmar family a Regular and a Bold file, each drawn at every size. The reader restarts when you leave the Font Manager.
 - **Text Anti-Aliasing**: Smooth grey edges on text. They appear just after a page does, and are skipped while you flip through pages quickly. "ON" / "OFF"
 - **One-Pass Anti-Aliasing** *(X3, X4 with an SSD1677 panel, X4 Pro with a UC8179 panel, Murphy M3)*: Draws a text page and its grey edges in one refresh, so there is no second flicker when the grey arrives, and the edges stay on while you flip through pages quickly. The edges use one grey level instead of two, and pages with images keep the usual two steps. It is one setting for the whole device, with no per-book override. "ON" / "OFF" (default).
 - **Text Darkness**: Ink density for rendered text: "Normal" (default), "Dark", "Extra Dark", "Max Dark"
@@ -571,7 +572,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 
 #### 3.7.4 System
 
-- **Language**: Set the system language (see **[Supported Languages](#supported-languages)**).
+- **Language**: Set the system language (see **[Supported Languages](#supported-languages)**). Every language but English reads its pack from the card: picking one whose pack is missing offers to download it (see **[Interface languages](#interface-languages)**), and until it is there the interface stays in English.
 - **Keyboard Layouts**: Which layouts the on-screen keyboard offers, each named in its own language: English (QWERTY), Français (AZERTY), Deutsch (QWERTZ, with ä, ö, ü and ß), Español (with ñ), ЙЦУКЕН for Русский, Українська, Беларуская and Қазақша, and עברית (Hebrew), العربية (Arabic) and Ελληνικά (Greek). Press **Confirm** on a row to switch it on or off. Until you change anything here, the keyboard offers your system language's layout plus English; Hebrew, Arabic and Greek, which are not system languages, are offered once switched on here.
   - Once two or more layouts are on, the keyboard shows a globe key that switches to the next one.
   - One Latin layout always stays on, because web addresses and passwords need one; its row then reads "Default" and cannot be switched off.
@@ -828,6 +829,25 @@ Witch Reader renders text using the following Unicode character blocks, enabling
 
 Some language support is not built into the firmware but downloaded from the **Font Manager** (Settings → Reader), so
 the firmware keeps its room for everything else. A pack you do not install costs nothing.
+
+#### Interface languages
+
+* **English** is built in. Every other interface language is a pack of its own, its menus and messages
+  (**Language-German** and so on in the Font Manager, 10–15 KB each).
+* **Getting a pack.** Picking a language under **Language** (Settings → System) whose pack is not on the card asks
+  whether to download it, in one question with the language's hyphenation pack (or, for Chinese, Japanese and Korean, its
+  interface pack) when that is missing too. **Download** connects to Wi-Fi and installs it in the Font Manager; leaving
+  the Font Manager restarts the reader in the new language. Until the pack is there, the interface stays in English.
+  The Home screen asks once after a start when the card lacks the pack of the language you set; **No** is remembered
+  there, and picking the language again asks again.
+* **Without Wi-Fi**, copy the pack to `/.crosspoint/lang/` on the card and restart: `de.cplang` for German, as named in
+  the `Language-<Name>` folders of the firmware's repository (`assets/sd-fonts/Language-German/de.cplang`).
+* A pack serves every firmware from 2.41 on. After an update the reader rebuilds the language from the pack on the card
+  once, about a second, without a download.
+* **Updating from 2.40 or 2.41RC** keeps your interface language without a download: on the first start the reader writes
+  the language it kept in its memory to the card as its pack. Chinese, Japanese and Korean, which only 2.41RC had, are
+  downloaded once.
+* **Removing a pack** in the Font Manager makes the interface English from the next start.
 
 #### Hyphenation packs
 
@@ -1191,6 +1211,8 @@ pio device monitor
 ```
 
 If the device is stuck in a bootloop, press and release the Reset button. Then, press and hold on to the configured Back button and the Power Button to boot to the Home Screen.
+
+**The interface is in English after an update or on another card:** every interface language but English reads its pack from the card (`/.crosspoint/lang/`). Pick your language again under **Language** (Settings → System) to download it, or copy it there by hand (see **[Interface languages](#interface-languages)**).
 
 **Books are no longer hyphenated after an update:** every language but English now hyphenates with a downloadable pack. With **Hyphenation** on, opening such a book offers its pack; if you answered **No**, install it from its row in the Font Manager (**Hyphenation-German** and so on) (see **[Hyphenation packs](#hyphenation-packs)**).
 

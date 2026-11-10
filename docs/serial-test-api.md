@@ -488,7 +488,14 @@ SET_ERROR:bad value <value>
   language picker shows it (`Deutsch`, `简体中文`), or its index in the build's language list
   (English is 0).
 - `SET` makes the switch the language picker makes, saves it, and redraws the screen on display.
-  A screen that built its rows when it opened keeps them until it is opened again.
+  A screen that built its rows when it opened keeps them until it is opened again. It asks no
+  download offer: every language but English reads its pack from `/.crosspoint/lang/<code>.cplang`
+  ([i18n.md](i18n.md#how-the-strings-reach-the-screen)), and without one the reply names the
+  language while the strings stay English. The log says which: `I18N: language pack de active`,
+  with `FLP: language 3 built: ...` when the slot was built from the card or `FLP: language 3: the
+  slot holds this pack, nothing built` when it was not, and `I18N: language de: no pack on the card`
+  otherwise. `FS:PUT` a pack there, then `SET` the language again, to try one without the Font
+  Manager.
 - Change it back afterwards: the setting persists, and the next session reads it.
 
 ```

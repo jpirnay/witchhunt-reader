@@ -7,6 +7,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 | File | Topic |
 |---|---|
 | [alternative-sync-providers.md](alternative-sync-providers.md) | OPDS progression sync (Kavita, Audiobookshelf) and BookOrbit, offered in the reader itself |
+| [cjk-ui-faces-on-card.md](cjk-ui-faces-on-card.md) | The CJK UI faces into the CJK languages' card packs: why they stayed in the image in 2.41, and what moving them takes |
 | [cjk.md](cjk.md) | CJK: the follow-ups of what shipped (justification, squeeze and grid (A3), ruby and emphasis dots (B), TTF SD mode), CJK `.cpfont` bugs, 龘, the Font Manager follow-ups, the glyph store's index rebuild, UI text, the dictionary, line spacing, arena follow-ups, edge cases from the reviews |
 | [book-cache.md](book-cache.md) | Book replacement and deletion that still wipe reading state, TXT/MD caches, cache-clear inconsistencies |
 | [boards-and-touch.md](boards-and-touch.md) | Light sleep with the frontlight, the T5S3 SD clock, trace scaffolding, the X4 Pro fast-DU shortcut, device validation, touch follow-ups |

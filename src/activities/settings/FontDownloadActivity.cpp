@@ -118,16 +118,20 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
 void FontDownloadActivity::downloadWanted() {
   const Wanted wanted = wanted_;
   wanted_ = Wanted{};
-  char file[16] = {};
-  if (wanted.pack[0] != '\0') snprintf(file, sizeof(file), "hyph-%s.cphyph", wanted.pack);
-  // The family first: a book's script needs it to be drawn at all, its hyphenation only to break lines.
-  for (const char* name : {wanted.family, static_cast<const char*>(file)}) {
+  char language[16] = {};
+  if (wanted.language[0] != '\0') snprintf(language, sizeof(language), "%s.cplang", wanted.language);
+  char hyphenation[16] = {};
+  if (wanted.pack[0] != '\0') snprintf(hyphenation, sizeof(hyphenation), "hyph-%s.cphyph", wanted.pack);
+  // The interface's language first, then the family: a book's script needs it to be drawn at all, its hyphenation
+  // only to break lines.
+  for (const char* name : {static_cast<const char*>(language), static_cast<const char*>(wanted.family),
+                           static_cast<const char*>(hyphenation)}) {
     if (name[0] == '\0') continue;
-    const bool pack = name == file;
+    const bool pack = name != wanted.family;
     size_t i = 0;
-    while (i < families_.count() && !(pack ? families_.hyphenation(i) && families_.fileCount(i) > 0 &&
-                                                 strcmp(families_.fileLocalName(i, 0), name) == 0
-                                           : strcmp(families_.name(i), name) == 0)) {
+    while (i < families_.count() &&
+           !(pack ? families_.pack(i) && families_.fileCount(i) > 0 && strcmp(families_.fileLocalName(i, 0), name) == 0
+                  : strcmp(families_.name(i), name) == 0)) {
       ++i;
     }
     if (i == families_.count()) {
@@ -179,7 +183,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   // below: the render task reads families_.
   FontCatalog parsed;
   FontManifestReader reader("FONT", FontInstaller::isValidFamilyName, FontInstaller::isValidFontFileName,
-                            /*takesHyphenation=*/true);
+                            /*takesPacks=*/true);
   const FontManifestStatus status = reader.read(manifestFile, parsed, baseUrl_);
   manifestFile.close();
   Storage.remove(MANIFEST_TMP);
@@ -307,7 +311,7 @@ void FontDownloadActivity::downloadAll() {
   if (state_ == ERROR || cancelRequested_) return;
 
   RenderLock lock(*this);
-  completedPack_ = false;  // "Download all" takes no pack (the manifest keeps them out of it)
+  completed_ = Completed::Font;  // "Download all" takes no pack (the manifest keeps them out of it)
   state_ = COMPLETE;
 }
 
@@ -315,11 +319,13 @@ void FontDownloadActivity::updateAll() {
   cancelRequested_ = false;
   std::vector<int> targetIndices;
   targetIndices.reserve(families_.count());
-  bool onlyPacks = true;
+  bool onlyHyphenation = true;
+  bool onlyLanguages = true;
   for (size_t i = 0; i < families_.count(); i++) {
     if (families_.installed(i) && families_.hasUpdate(i)) {
       targetIndices.push_back(static_cast<int>(i));
-      onlyPacks = onlyPacks && families_.hyphenation(i);
+      onlyHyphenation = onlyHyphenation && families_.hyphenation(i);
+      onlyLanguages = onlyLanguages && families_.languagePack(i);
     }
   }
   inBatch_ = true;
@@ -331,8 +337,11 @@ void FontDownloadActivity::updateAll() {
   if (state_ == ERROR || cancelRequested_) return;
 
   RenderLock lock(*this);
-  // The batch's screen says what it installed: hyphenation only when every update was a pack.
-  completedPack_ = onlyPacks && !targetIndices.empty();
+  // The batch's screen says what it installed: hyphenation or a language only when every update was such a pack.
+  completed_ = targetIndices.empty() ? Completed::Font
+               : onlyHyphenation     ? Completed::Hyphenation
+               : onlyLanguages       ? Completed::Language
+                                     : Completed::Font;
   state_ = COMPLETE;
 }
 
@@ -341,8 +350,7 @@ void FontDownloadActivity::finishBatch(const std::vector<int>& targets) {
   // Only the families now on the card (a failed or cancelled one is not), and no pack: the registry lists fonts. A
   // failed restore of the list leaves it empty, and nothing to look at.
   const auto installedFont = [this](const int idx) {
-    return idx >= 0 && static_cast<size_t>(idx) < families_.count() && families_.installed(idx) &&
-           !families_.hyphenation(idx);
+    return idx >= 0 && static_cast<size_t>(idx) < families_.count() && families_.installed(idx) && !families_.pack(idx);
   };
   if (std::none_of(targets.begin(), targets.end(), installedFont)) return;
   fontInstaller_.refreshRegistry();
@@ -679,22 +687,23 @@ void FontDownloadActivity::downloadFamilyImpl(FontCatalog& family, int familyIdx
     }
   }
 
-  if (family.hyphenation(0)) {
-    // A hyphenation pack's file goes to /.crosspoint/hyphenation/, not into a family folder, and is copied into the
-    // flash store there and then (HyphenationPacks::packInstalled).
+  if (family.pack(0)) {
+    // A pack's file goes to its folder, not into a family folder: a hyphenation pack's to /.crosspoint/hyphenation/,
+    // copied into the flash store there and then (HyphenationPacks::packInstalled), a UI language pack's to
+    // /.crosspoint/lang/, read at the next start, which leaving the Font Manager makes.
     if (!FontInstaller::installStagedPack(family, 0, stagingDir)) {
       RenderLock lock(*this);
       state_ = ERROR;
       pendingErrorAction_ = PendingFontAction::Download;
       downloadingFamilyIndex_ = familyIdx;
-      errorMessage_ = "Failed to finalize the hyphenation pack";
+      errorMessage_ = "Failed to finalize the pack";
       return;
     }
     family.setInstalled(0, true);
     family.setHasUpdate(0, false);
     family.setHasResumableDownload(0, false);
     RenderLock lock(*this);
-    completedPack_ = true;
+    completed_ = family.languagePack(0) ? Completed::Language : Completed::Hyphenation;
     state_ = COMPLETE;
     return;
   }
@@ -787,7 +796,7 @@ void FontDownloadActivity::promptDeleteFamily(int familyIndex) {
 void FontDownloadActivity::deleteFamilyAtIndex(int familyIndex) {
   if (familyIndex < 0 || familyIndex >= static_cast<int>(families_.count())) return;
 
-  const bool pack = families_.hyphenation(familyIndex);
+  const bool pack = families_.pack(familyIndex);
   const auto result = pack ? FontInstaller::deletePack(families_, static_cast<size_t>(familyIndex))
                            : fontInstaller_.deleteFamily(families_.name(familyIndex));
   if (result == FontInstaller::Error::OK) {
@@ -841,7 +850,7 @@ void FontDownloadActivity::activateIndex(const int index) {
   // unrelated row once the list comes back.
   app.clearTapFlash();
   completeNote_ = nullptr;
-  completedPack_ = false;
+  completed_ = Completed::Font;
   if (isDownloadAllRow(index)) {
     downloadAll();
   } else if (isUpdateAllRow(index)) {
@@ -882,7 +891,7 @@ bool FontDownloadActivity::handleCustomInput() {
           buttonEvents.drain();
         } else {
           completeNote_ = nullptr;
-          completedPack_ = false;
+          completed_ = Completed::Font;
           downloadFamily(downloadingFamilyIndex_);
         }
         requestUpdateAndWait();
@@ -1011,8 +1020,10 @@ void FontDownloadActivity::drawChrome() {
         static_cast<int>(progress * 100), 100);
   } else if (state_ == COMPLETE) {
     renderer.drawCenteredText(UI_10_FONT_ID, centerY,
-                              completedPack_ ? tr(STR_HYPHENATION_INSTALLED) : tr(STR_FONT_INSTALLED), true,
-                              EpdFontFamily::BOLD);
+                              completed_ == Completed::Hyphenation ? tr(STR_HYPHENATION_INSTALLED)
+                              : completed_ == Completed::Language  ? tr(STR_LANGUAGE_INSTALLED)
+                                                                   : tr(STR_FONT_INSTALLED),
+                              true, EpdFontFamily::BOLD);
     if (completeNote_ != nullptr) {
       drawWrappedCentered(centerY + lineHeight + metrics.verticalSpacing, completeNote_, 2);
     }

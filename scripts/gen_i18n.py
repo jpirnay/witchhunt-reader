@@ -5,7 +5,11 @@ Generate I18n C++ files from per-language YAML translations.
 Reads YAML files from a translations directory (one file per language) and generates:
 - I18nKeys.h:     Language enum, StrId enum, helper functions
 - I18nStrings.h:  String array declarations
-- I18nStrings.cpp: String array definitions with all translations
+- I18nStrings.cpp: English, the language names, the key hashes the card packs are read by, and the slot layouts of
+                   past releases (lib/I18n/legacy/)
+
+With --packs DIR it writes every other language's pack for the SD card instead (DIR/Language-<Name>/<code>.cplang):
+the image carries English alone.
 
 Each YAML file must contain:
   _language_name: "Native Name"     (e.g. "Español")
@@ -27,111 +31,291 @@ Examples:
     python gen_i18n.py lib/I18n/translations lib/I18n/
     python gen_i18n.py --strip-unused
     python gen_i18n.py --strip-unused --src-dirs src lib/EpdFont
+    python gen_i18n.py --packs assets/sd-fonts
 """
 
 import sys
 import os
 import re
+import struct
 import zlib
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 
 # ---------------------------------------------------------------------------
 # Language packs
 # ---------------------------------------------------------------------------
 
-# Deflate window for the compressed language packs. FlashLangPartition sizes its
+# Deflate window of the language packs on the card. FlashLangPartition sizes its
 # inflate ring from this number, so the two MUST agree — a longer back-reference
 # than the ring can serve decodes to garbage rather than failing.
 #
-# 12 (4 KB) rather than 15 (32 KB): measured across all 23 packs, the larger
-# window saves only ~7.5 KB of flash while octupling the transient RAM the
-# device needs to unpack one. See docs/i18n.md.
+# 12 (4 KB) rather than 15 (32 KB): measured across the packs, the larger window
+# saves only ~7.5 KB while octupling the transient RAM the device needs to unpack
+# one. See docs/i18n.md.
 DEFLATE_WINDOW_BITS = 12
 
-# A blob offset has to fit in the low 15 bits of a uint16_t, because bit 15 is
-# the "fall back to English" flag. Same limit the in-image tables have always
-# had; it bounds one language's translated text, not the total.
+# A string's offset in the flash slot has to fit in the low 15 bits of a
+# uint16_t, because bit 15 is FlashLangPartition::FALLBACK ("read English"). It
+# bounds one language's translated text, not the total.
 MAX_BLOB_BYTES = 0x8000
 
 
-def build_langpack(
-    lang_strings: List[str], en_strings: List[str]
-) -> Tuple[bytes, bytes]:
-    """Build one non-English language's self-describing blob and its deflate stream.
+# ---------------------------------------------------------------------------
+# Language packs on the SD card (.cplang)
+# ---------------------------------------------------------------------------
+#
+# One file per language, /.crosspoint/lang/<code>.cplang on the card, read by lib/I18n/LangPack.cpp. It
+# names each string by a hash of its key's NAME, never by a StrId, so the pack of master serves every
+# firmware from 2.41 on: a key a firmware does not know is skipped, a key the pack lacks is English.
+#
+#   header, 64 B, little-endian:
+#     [4]  magic "CPLG"
+#     [1]  format version (PACK_FORMAT_VERSION)
+#     [1]  0
+#     [2]  entries in the payload
+#     [4]  language code, ASCII lower case, NUL-padded ("de")
+#     [4]  CRC32 of the payload as stored
+#     [4]  payload length as stored
+#     [4]  payload length inflated
+#     [4]  extension length as stored (0: none), after the payload
+#     [4]  extension length inflated
+#     [4]  CRC32 of the extension as stored
+#     [28] native name, UTF-8, NUL-padded
+#   payload: raw deflate, 4 KB window, of entries [u32 key hash][UTF-8 value, NUL]
+#   extension: raw deflate, 4 KB window: bytes the slot carries after the strings (the CJK UI faces)
+#
+# A value equal to English is left out, and so is an empty one: both read as English.
 
-    The blob is one NUL-terminated entry per StrId, in order. An EMPTY entry
-    means "this language does not override English for this key": the device
-    writes the English offset into the table it derives, so the empty byte is
-    never read. Encoding the fallback in the blob this way is what lets us stop
-    shipping a 1,774 B offset table per language — the table is reconstructed by
-    walking the blob once, which the device has to do anyway while streaming it
-    into flash.
+PACK_MAGIC = b"CPLG"
+PACK_FORMAT_VERSION = 1
+PACK_HEADER = struct.Struct("<4sBBH4sIIIIII28s")
+PACK_NAME_BYTES = 28
+PACK_SUFFIX = ".cplang"
+assert PACK_HEADER.size == 64
 
-    Returns (uncompressed_blob, compressed_blob).
-    """
-    blob = bytearray()
-    for s, en_s in zip(lang_strings, en_strings):
-        if s != en_s:
-            blob += s.encode("utf-8")
-        blob += b"\x00"
+FNV_OFFSET = 0x811C9DC5
+FNV_PRIME = 0x01000193
 
+
+def key_hash(key: str) -> int:
+    """FNV-1a of the key's name: what a pack names a string by (langpack::keyHash on the device)."""
+    h = FNV_OFFSET
+    for byte in key.encode("ascii"):
+        h ^= byte
+        h = (h * FNV_PRIME) & 0xFFFFFFFF
+    return h
+
+
+def check_key_hashes(keys: Iterable[str]) -> None:
+    """Fail on two key names with one hash: a pack could not tell their strings apart. Rename one key."""
+    seen: Dict[int, str] = {}
+    clashes: List[str] = []
+    for key in sorted(set(keys)):
+        h = key_hash(key)
+        if h in seen:
+            clashes.append(f"{seen[h]} and {key} (0x{h:08x})")
+        else:
+            seen[h] = key
+    if clashes:
+        raise ValueError("Key names with the same hash, rename one of each pair:\n  " + "\n  ".join(clashes))
+
+
+def key_layout_stamp(string_keys: List[str]) -> int:
+    """Identifies this firmware's StrId order: CRC32 of the key hashes by StrId. A slot built for another order
+    holds its strings under other StrIds, so the stamp is mixed into the slot's own."""
+    return zlib.crc32(b"".join(struct.pack("<I", key_hash(k)) for k in string_keys)) & 0xFFFFFFFF
+
+
+def deflate_pack_section(data: bytes) -> bytes:
     compressor = zlib.compressobj(9, zlib.DEFLATED, -DEFLATE_WINDOW_BITS)
-    packed = compressor.compress(bytes(blob)) + compressor.flush()
-    return bytes(blob), packed
+    return compressor.compress(data) + compressor.flush()
 
 
-def verify_langpack(
-    code: str,
-    packed: bytes,
-    lang_strings: List[str],
-    en_strings: List[str],
-    en_offsets: List[int],
-    en_blob: bytes,
-) -> None:
-    """Replay the device's decode path and check every string comes back.
+def pack_payload(string_keys: List[str], values: List[str], en_values: List[str]) -> Tuple[bytes, int]:
+    """The entries of one language, in key order: (raw payload, entry count). A value equal to English or empty is
+    left out."""
+    out = bytearray()
+    count = 0
+    for key, value, en in zip(string_keys, values, en_values):
+        if not value or value == en:
+            continue
+        out += struct.pack("<I", key_hash(key)) + value.encode("utf-8") + b"\x00"
+        count += 1
+    return bytes(out), count
 
-    Runs at generation time rather than as a separate test so it cannot drift
-    out of step with the emitter, and so a format mistake fails the build
-    instead of shipping as a screen full of wrong text. It mirrors three pieces
-    of device code: the inflate window (FlashLangPartition::INFLATE_RING_BYTES),
-    the table walk (TableBuilder::feed) and the lookup (I18n::get).
 
-    Raises ValueError on any mismatch.
-    """
-    decompressor = zlib.decompressobj(-DEFLATE_WINDOW_BITS)
-    blob = decompressor.decompress(packed) + decompressor.flush()
+def build_pack_file(code: str, native_name: str, payload: bytes, entries: int, extension: bytes = b"") -> bytes:
+    """One language's .cplang file."""
+    code_bytes = code.lower().encode("ascii")
+    name_bytes = native_name.encode("utf-8")
+    if not 2 <= len(code_bytes) <= 3:
+        raise ValueError(f"Language code {code!r} is not two or three letters")
+    if len(name_bytes) >= PACK_NAME_BYTES:
+        raise ValueError(f"Language {code}: native name {native_name!r} is {len(name_bytes)} B, the pack holds 27")
+    packed = deflate_pack_section(payload)
+    ext_packed = deflate_pack_section(extension) if extension else b""
+    header = PACK_HEADER.pack(
+        PACK_MAGIC, PACK_FORMAT_VERSION, 0, entries, code_bytes.ljust(4, b"\x00"),
+        zlib.crc32(packed) & 0xFFFFFFFF, len(packed), len(payload),
+        len(ext_packed), len(extension), zlib.crc32(ext_packed) & 0xFFFFFFFF if ext_packed else 0,
+        name_bytes.ljust(PACK_NAME_BYTES, b"\x00"),
+    )
+    return header + packed + ext_packed
 
-    # TableBuilder::feed
-    table: List[int] = [0] * len(lang_strings)
-    pos = 0
-    entry = 0
-    at_entry_start = True
-    for byte in blob:
-        if at_entry_start and entry < len(table):
-            table[entry] = (0x8000 | en_offsets[entry]) if byte == 0 else pos
-            at_entry_start = False
-        if byte == 0:
-            entry += 1
-            at_entry_start = True
-        pos += 1
 
-    if entry != len(table):
-        raise ValueError(
-            f"Language {code}: blob holds {entry} entries, expected {len(table)}"
-        )
+def read_pack_file(data: bytes) -> Tuple[Dict[str, object], Dict[int, str], bytes]:
+    """The inverse of build_pack_file, checking what the device checks: (header fields, {hash: value}, extension).
+    Raises ValueError on anything the device would refuse."""
+    if len(data) < PACK_HEADER.size:
+        raise ValueError("shorter than a pack header")
+    (magic, version, _, entries, code, crc, plen, rawlen, elen, erawlen, ecrc, name) = PACK_HEADER.unpack_from(data)
+    if magic != PACK_MAGIC or version != PACK_FORMAT_VERSION:
+        raise ValueError("not a language pack of this format")
+    packed = data[PACK_HEADER.size : PACK_HEADER.size + plen]
+    ext_packed = data[PACK_HEADER.size + plen : PACK_HEADER.size + plen + elen]
+    if len(packed) != plen or len(ext_packed) != elen or PACK_HEADER.size + plen + elen != len(data):
+        raise ValueError("lengths do not add up to the file")
+    if zlib.crc32(packed) & 0xFFFFFFFF != crc or (elen and zlib.crc32(ext_packed) & 0xFFFFFFFF != ecrc):
+        raise ValueError("CRC mismatch")
+    payload = zlib.decompressobj(-DEFLATE_WINDOW_BITS).decompress(packed)
+    extension = zlib.decompressobj(-DEFLATE_WINDOW_BITS).decompress(ext_packed) if elen else b""
+    if len(payload) != rawlen or len(extension) != erawlen:
+        raise ValueError("inflated lengths differ from the header")
+    values: Dict[int, str] = {}
+    at = 0
+    while at < len(payload):
+        if at + 4 > len(payload):
+            raise ValueError("payload ends inside a key hash")
+        (h,) = struct.unpack_from("<I", payload, at)
+        end = payload.index(b"\x00", at + 4)
+        values[h] = payload[at + 4 : end].decode("utf-8")
+        at = end + 1
+    if len(values) != entries:
+        raise ValueError(f"{len(values)} entries, header says {entries}")
+    header = {
+        "code": code.rstrip(b"\x00").decode("ascii"),
+        "name": name.rstrip(b"\x00").decode("utf-8"),
+        "entries": entries,
+        "payload_crc": crc,
+    }
+    return header, values, extension
 
-    # I18n::get
-    for i, expected in enumerate(lang_strings):
-        off = table[i]
-        source = en_blob if (off & 0x8000) else blob
-        start = off & 0x7FFF if (off & 0x8000) else off
-        got = source[start : source.index(b"\x00", start)].decode("utf-8")
-        if got != expected:
-            raise ValueError(
-                f"Language {code}: entry {i} decoded as {got!r}, expected {expected!r}"
-            )
+
+def load_legacy_layouts(legacy_dir: Path) -> List[Dict[str, object]]:
+    """The slot layouts of named past releases (lib/I18n/legacy/<tag>.keys, written by i18n_legacy_layout.py): each
+    {release, slot_format, languages, keys}. A slot names no key, only an index, so converting one after an update
+    needs the order its release wrote. Two releases whose slots look alike -- one format, one key count -- but hold
+    other orders cannot be told apart by the firmware: both are left out, and their readers get English and the
+    download offer rather than another release's strings."""
+    layouts: List[Dict[str, object]] = []
+    for path in sorted(Path(legacy_dir).glob("*.keys")):
+        fields: Dict[str, str] = {}
+        keys: List[str] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("STR_"):
+                keys.append(line)
+            else:
+                name, _, value = line.partition(" ")
+                fields[name] = value
+        if int(fields["keys"]) != len(keys):
+            raise ValueError(f"{path}: says {fields['keys']} keys, lists {len(keys)}")
+        if any(len(code) != 2 for code in fields["languages"].split()):
+            raise ValueError(f"{path}: the firmware reads two-letter language codes only")
+        layouts.append({
+            "release": fields["release"],
+            "slot_format": int(fields["slot_format"]),
+            "languages": fields["languages"].split(),
+            "keys": keys,
+        })
+    by_shape: Dict[Tuple[int, int], List[Dict[str, object]]] = {}
+    for layout in layouts:
+        by_shape.setdefault((layout["slot_format"], len(layout["keys"])), []).append(layout)
+    kept = []
+    for shape, group in by_shape.items():
+        if any(other["keys"] != group[0]["keys"] or other["languages"] != group[0]["languages"] for other in group):
+            names = ", ".join(str(g["release"]) for g in group)
+            print(f"  WARNING: releases {names} wrote format-{shape[0]} slots of {shape[1]} keys in other orders;"
+                  " none of them is converted")
+            continue
+        kept.append(group[0])
+    return sorted(kept, key=lambda layout: str(layout["release"]))
+
+
+def pack_family_name(yaml_stem: str) -> str:
+    """The Font Manager's name for a language's pack: Language-<English name>, from the YAML file's name
+    (german -> Language-German, portuguese_br -> Language-PortugueseBR)."""
+    parts = [p.upper() if len(p) <= 2 else p.capitalize() for p in yaml_stem.split("_")]
+    return "Language-" + "".join(parts)
+
+
+def pack_file_name(code: str) -> str:
+    return code.lower() + PACK_SUFFIX
+
+
+def language_packs(translations_dir: str) -> List[Tuple[str, str, bytes]]:
+    """Every language's pack but English's, from the YAML files with every key (packs serve firmware that use keys
+    this tree's code no longer does): (family folder, file name, file bytes)."""
+    languages, names, keys, translations, _ = load_translations(translations_dir)
+    check_key_hashes(keys)
+    stems = {}
+    for path in sorted(Path(translations_dir).glob("*.yaml")):
+        stems[parse_yaml_file(str(path))["_language_code"]] = path.stem
+    en_values = [translations[k][0] for k in keys]
+    packs = []
+    for idx, code in enumerate(languages):
+        if idx == 0:
+            continue
+        values = [translations[k][idx] for k in keys]
+        payload, entries = pack_payload(keys, values, en_values)
+        # The slot addresses a string with 15 bits, and holds no more than the pack's strings.
+        string_bytes = len(payload) - 4 * entries
+        if string_bytes >= MAX_BLOB_BYTES:
+            raise ValueError(f"Language {code}: {string_bytes} B of strings, past the 15-bit offset limit")
+        data = build_pack_file(code, names[idx], payload, entries)
+        # What the device will read back, checked here so a format mistake fails the build.
+        header, decoded, _ = read_pack_file(data)
+        expected = {key_hash(k): v for k, v, en in zip(keys, values, en_values) if v and v != en}
+        if decoded != expected or header["code"] != code.lower() or header["name"] != names[idx]:
+            raise ValueError(f"Language {code}: the pack does not read back as written")
+        packs.append((pack_family_name(stems[code]), pack_file_name(code), data))
+    return packs
+
+
+def _same_pack(path: Path, data: bytes) -> bool:
+    """The file holds what `data` holds. Compared by content, not bytes: another zlib compresses alike data to other
+    bytes, and that is no reason to churn a committed pack."""
+    if not path.exists():
+        return False
+    try:
+        return read_pack_file(path.read_bytes()) == read_pack_file(data)
+    except ValueError:
+        return False
+
+
+def write_language_packs(translations_dir: str, out_root: str) -> List[Path]:
+    """Writes each pack whose content changed into out_root/<family>/<file>; returns those written."""
+    written = []
+    for family, name, data in language_packs(translations_dir):
+        path = Path(out_root) / family / name
+        if _same_pack(path, data):
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        written.append(path)
+    return written
+
+
+def stale_language_packs(translations_dir: str, out_root: str) -> List[str]:
+    """The packs under out_root that do not hold what the YAML files say: '<family>/<file>' each."""
+    return [
+        f"{family}/{name}"
+        for family, name, data in language_packs(translations_dir)
+        if not _same_pack(Path(out_root) / family / name, data)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -637,8 +821,10 @@ def generate_keys_header(
     string_keys: List[str],
     output_path: str,
     verbose: bool = False,
+    legacy_layouts: Optional[List[Dict[str, object]]] = None,
 ) -> None:
     """Generate I18nKeys.h."""
+    legacy_layouts = legacy_layouts or []
     lines: List[str] = [
         "#pragma once",
         "#include <cstdint>",
@@ -648,7 +834,7 @@ def generate_keys_header(
         "",
         "// English is carried uncompressed: it is the fallback for every other",
         "// language, so it must be readable without touching flash storage.",
-        "// Every other language ships as a deflate-compressed pack that",
+        "// Every other language is a pack on the SD card (LangPack.h) that",
         "// FlashLangPartition materialises into the spiffs tail on demand.",
         "namespace i18n_strings {",
     ]
@@ -657,15 +843,25 @@ def generate_keys_header(
     lines.append(f"extern const char STRINGS_{en_code}_DATA[];")
     lines.append(f"extern const uint16_t OFFSETS_{en_code}[];")
     lines.append("")
-    lines.append("// One entry per Language, indexed by its enum value. The English slot is")
-    lines.append("// zeroed — there is nothing to decompress.")
-    lines.append("struct LangPack {")
-    lines.append("  const uint8_t* data;      // raw deflate, 4 KB window")
-    lines.append("  uint32_t compressedLen;")
-    lines.append("  uint32_t uncompressedLen;")
-    lines.append("  uint32_t stamp;           // CRC32 of data; identifies this build's pack")
+    lines.append("// What a language pack on the card names its strings by: FNV-1a of each key's name, by StrId")
+    lines.append("// (langpack::keyHash), and every StrId in ascending order of its hash, to find one by its hash.")
+    lines.append("extern const uint32_t KEY_HASHES[];")
+    lines.append("extern const uint16_t KEYS_BY_HASH[];")
+    lines.append("// Identifies this build's StrId order: CRC32 of KEY_HASHES. A language slot built for another")
+    lines.append("// order holds its strings under other StrIds, so this is mixed into its stamp.")
+    lines.append(f"constexpr uint32_t KEY_LAYOUT_STAMP = 0x{key_layout_stamp(string_keys):08x};")
+    lines.append("")
+    lines.append("// The slot a named past release wrote, which held one string per StrId of that release: what")
+    lines.append("// the conversion after an update reads it by (I18n, LangPackConvert.h). lib/I18n/legacy/.")
+    lines.append("struct LegacyLayout {")
+    lines.append("  const char* release;")
+    lines.append("  uint8_t slotFormat;      // the FlashLangPartition format it wrote")
+    lines.append("  uint16_t keyCount;")
+    lines.append("  const uint16_t* ids;     // by the release's index: this build's StrId, 0xFFFF for a key it has not")
+    lines.append("  const char* languages;   // the release's Language order, two upper-case letters each")
     lines.append("};")
-    lines.append("extern const LangPack LANGPACKS[];")
+    lines.append("extern const LegacyLayout LEGACY_LAYOUTS[];")
+    lines.append(f"constexpr uint8_t LEGACY_LAYOUT_COUNT = {len(legacy_layouts)};")
     lines.append("}  // namespace i18n_strings")
     lines.append("")
 
@@ -795,7 +991,6 @@ def generate_strings_header(
     en_code = languages[0]
     lines.append(f"extern const char STRINGS_{en_code}_DATA[];")
     lines.append(f"extern const uint16_t OFFSETS_{en_code}[];")
-    lines.append("extern const LangPack LANGPACKS[];")
 
     lines.append("")
     lines.append("}  // namespace i18n_strings")
@@ -809,6 +1004,7 @@ def generate_strings_cpp(
     translations: Dict[str, List[str]],
     output_path: str,
     verbose: bool = False,
+    legacy_layouts: Optional[List[Dict[str, object]]] = None,
 ) -> None:
     """Generate I18nStrings.cpp."""
     lines: List[str] = [
@@ -854,13 +1050,11 @@ def generate_strings_cpp(
     en_strings = [translations[key][0] for key in string_keys]
     en_code = languages[0]
 
-    # --- English: uncompressed blob + offset table, as before -----------------
+    # --- English: uncompressed blob + offset table, the one language in the image
     en_offsets: List[int] = []
-    en_blob = bytearray()
     current_offset = 0
     for s in en_strings:
         en_offsets.append(current_offset)
-        en_blob += s.encode("utf-8") + b"\x00"
         current_offset += len(s.encode("utf-8")) + 1
     if current_offset > 0x7FFF:
         raise ValueError(
@@ -883,42 +1077,38 @@ def generate_strings_cpp(
     lines.append("};")
     lines.append("")
 
-    # --- Every other language: one compressed pack ----------------------------
-    packs: List[Tuple[str, int, int, int]] = [(en_code, 0, 0, 0)]
-    for lang_idx, code in enumerate(languages):
-        if lang_idx == 0:
-            continue
-        lang_strings = [translations[key][lang_idx] for key in string_keys]
-        blob, packed = build_langpack(lang_strings, en_strings)
-        if len(blob) > MAX_BLOB_BYTES:
-            raise ValueError(
-                f"Language {code}: blob size ({len(blob)} bytes) exceeds the "
-                f"15-bit offset limit ({MAX_BLOB_BYTES})"
-            )
-        verify_langpack(code, packed, lang_strings, en_strings, en_offsets, bytes(en_blob))
-        stamp = zlib.crc32(packed) & 0xFFFFFFFF
-        packs.append((code, len(packed), len(blob), stamp))
+    # --- The key hashes a card pack names its strings by ----------------------
+    hashes = [key_hash(k) for k in string_keys]
+    lines.append("const uint32_t KEY_HASHES[] = {")
+    for i in range(0, len(hashes), 8):
+        lines.append("    " + ", ".join(f"0x{h:08x}" for h in hashes[i : i + 8]) + ",")
+    lines.append("};")
+    lines.append("")
+    by_hash = sorted(range(len(hashes)), key=lambda i: hashes[i])
+    lines.append("const uint16_t KEYS_BY_HASH[] = {")
+    for i in range(0, len(by_hash), 12):
+        lines.append("    " + ", ".join(str(s) for s in by_hash[i : i + 12]) + ",")
+    lines.append("};")
+    lines.append("")
 
-        lines.append(
-            f"// {code}: {len(blob):,} B of strings -> {len(packed):,} B compressed"
-        )
-        lines.append(f"const uint8_t LANGPACK_{code}[] = {{")
-        per_line = 16
-        for i in range(0, len(packed), per_line):
-            row = packed[i : i + per_line]
-            lines.append("    " + ", ".join(f"0x{b:02x}" for b in row) + ",")
+    # --- The slots past releases wrote, for the conversion after an update -----
+    id_of = {key: i for i, key in enumerate(string_keys)}
+    for n, layout in enumerate(legacy_layouts or []):
+        ids = [id_of.get(key, 0xFFFF) for key in layout["keys"]]
+        lines.append(f"// {layout['release']}: {len(ids)} keys, {sum(i != 0xFFFF for i in ids)} of them this build's")
+        lines.append(f"static const uint16_t LEGACY_IDS_{n}[] = {{")
+        for i in range(0, len(ids), 12):
+            lines.append("    " + ", ".join(str(v) for v in ids[i : i + 12]) + ",")
         lines.append("};")
         lines.append("")
-
-    lines.append("// Indexed by Language. English is zeroed: it is already resident.")
-    lines.append("const LangPack LANGPACKS[] = {")
-    for code, clen, ulen, stamp in packs:
-        if clen == 0:
-            lines.append(f"    {{nullptr, 0, 0, 0}},  // {code}")
-        else:
-            lines.append(
-                f"    {{LANGPACK_{code}, {clen}, {ulen}, 0x{stamp:08x}}},  // {code}"
-            )
+    lines.append("const LegacyLayout LEGACY_LAYOUTS[] = {")
+    for n, layout in enumerate(legacy_layouts or []):
+        langs = "".join(layout["languages"])
+        lines.append(
+            f'    {{"{layout["release"]}", {layout["slot_format"]}, {len(layout["keys"])}, LEGACY_IDS_{n}, "{langs}"}},'
+        )
+    if not legacy_layouts:
+        lines.append("    {nullptr, 0, 0, nullptr, nullptr},  // none: a zero-length array is not C++")
     lines.append("};")
     lines.append("")
 
@@ -934,10 +1124,15 @@ def generate_strings_cpp(
     lines.append("                  static_cast<size_t>(StrId::_COUNT),")
     lines.append(f'              "OFFSETS_{en_code} size mismatch");')
     lines.append(
-        "static_assert(sizeof(i18n_strings::LANGPACKS) / sizeof(i18n_strings::LANGPACKS[0]) =="
+        "static_assert(sizeof(i18n_strings::KEY_HASHES) / sizeof(i18n_strings::KEY_HASHES[0]) =="
+        " static_cast<size_t>(StrId::_COUNT),"
     )
-    lines.append("                  static_cast<size_t>(Language::_COUNT),")
-    lines.append('              "LANGPACKS must have one entry per Language");')
+    lines.append('              "KEY_HASHES size mismatch");')
+    lines.append(
+        "static_assert(sizeof(i18n_strings::KEYS_BY_HASH) / sizeof(i18n_strings::KEYS_BY_HASH[0]) =="
+        " static_cast<size_t>(StrId::_COUNT),"
+    )
+    lines.append('              "KEYS_BY_HASH size mismatch");')
 
     _write_file(output_path, lines, verbose)
 
@@ -992,18 +1187,16 @@ def _print_language_table(
     for row in rows:
         _safe_print(fmt.format(*row))
     used = total - len(unused_keys)
-    dedup_size = sum(data_sizes)
     n_keys = len(string_keys)
-    # Only English ships an offset table now; every other language's is derived
-    # on the device while its pack is unpacked into flash.
-    offset_table_size = n_keys * 2
-    current_total = dedup_size + offset_table_size
+    # The image carries English alone, with its offset table and the key hashes a
+    # card pack is read by; every other language is its pack on the card.
+    image_size = data_sizes[0] + n_keys * 2 + n_keys * 6
     print(
         f"\n  Total: {total}  |  Used in code: {used}  |  Never used: {len(unused_keys)}"
     )
     print(
-        f"  Flash: {dedup_size:>7,} B strings (EN raw + packs)  +  {offset_table_size:>6,} B EN offset table"
-        f"  =  {current_total:>7,} B"
+        f"  Image: {data_sizes[0]:>7,} B English  +  {n_keys * 2:>6,} B offsets  +  {n_keys * 6:>6,} B key hashes"
+        f"  =  {image_size:>7,} B  |  Card: {sum(data_sizes[1:]):>7,} B of packs"
     )
 
 
@@ -1080,6 +1273,10 @@ def main(
     font_root = Path(translations_dir).resolve().parents[2] / "lib" / "EpdFont"
     sources += list((font_root / "builtinFonts").glob("*.h"))
     sources.append(font_root / "scripts" / "ui_font_coverage.py")
+    # This script itself: a change to what it emits regenerates. Found from the tree, since PlatformIO runs it
+    # without __file__.
+    sources.append(font_root.parents[1] / "scripts" / "gen_i18n.py")
+    sources += list((Path(translations_dir).parent / "legacy").glob("*.keys"))
     if not force and all(t.exists() for t in targets):
         oldest_target = min(t.stat().st_mtime for t in targets)
         newest_source = max(s.stat().st_mtime for s in sources)
@@ -1096,6 +1293,20 @@ def main(
         languages, language_names, string_keys, translations, inherited_sets = (
             load_translations(translations_dir, verbose)
         )
+        # Over every key, used or not, and every key of a past release whose slot this firmware converts: the
+        # packs on the card carry them all.
+        legacy_layouts = load_legacy_layouts(Path(translations_dir).resolve().parent / "legacy")
+        check_key_hashes(set(string_keys).union(*(set(layout["keys"]) for layout in legacy_layouts)))
+
+        # The packs in the repo are written by `--packs`, never by the build; say so when they lag the YAML files.
+        packs_root = Path(translations_dir).resolve().parents[2] / "assets" / "sd-fonts"
+        if packs_root.is_dir():
+            stale = stale_language_packs(translations_dir, str(packs_root))
+            if stale:
+                print(f"  WARNING: {len(stale)} language pack(s) in assets/sd-fonts differ from the YAML files:")
+                for name in stale:
+                    print(f"    - {name}")
+                print("  Run: python3 scripts/gen_i18n.py --packs assets/sd-fonts")
 
         # --- Unused-string detection ---
         scan_dirs = [d for d in src_dirs if os.path.isdir(d)]
@@ -1132,21 +1343,11 @@ def main(
             print()
             sys.exit(1)
 
-        # Per-language flash cost AS SHIPPED: English is the raw blob, every
-        # other language is its compressed pack. Reporting the uncompressed size
-        # here would overstate the image by ~230 KB.
-        en_strings_report = [translations[k][0] for k in string_keys]
-        data_sizes = []
-        for i in range(len(languages)):
-            if i == 0:
-                data_sizes.append(
-                    sum(len(s.encode("utf-8")) + 1 for s in en_strings_report)
-                )
-            else:
-                _, packed = build_langpack(
-                    [translations[k][i] for k in string_keys], en_strings_report
-                )
-                data_sizes.append(len(packed))
+        # What each language costs AS SHIPPED: English its raw blob in the image,
+        # every other language its pack file on the card.
+        pack_sizes = {name.split(".")[0]: len(data) for _, name, data in language_packs(translations_dir)}
+        data_sizes = [sum(len(translations[k][0].encode("utf-8")) + 1 for k in string_keys)]
+        data_sizes += [pack_sizes[code.lower()] for code in languages[1:]]
 
         _print_language_table(
             languages,
@@ -1173,7 +1374,7 @@ def main(
             print(f"  Stripping {len(unused_set)} unused string(s) from output.")
 
         generate_keys_header(
-            languages, language_names, string_keys, str(out / "I18nKeys.h"), verbose
+            languages, language_names, string_keys, str(out / "I18nKeys.h"), verbose, legacy_layouts
         )
         generate_strings_header(
             languages, language_names, str(out / "I18nStrings.h"), verbose
@@ -1185,6 +1386,7 @@ def main(
             translations,
             str(out / "I18nStrings.cpp"),
             verbose,
+            legacy_layouts,
         )
 
         print()
@@ -1243,7 +1445,23 @@ if __name__ == "__main__":
         action="store_true",
         help="Force regeneration of I18n files",
     )
+    parser.add_argument(
+        "--packs",
+        metavar="DIR",
+        default=None,
+        help="Write the language packs (.cplang) into DIR/Language-<Name>/ instead (assets/sd-fonts)",
+    )
     args = parser.parse_args()
+    if args.packs:
+        try:
+            written = write_language_packs(args.translations_dir or "lib/I18n/translations", args.packs)
+        except ValueError as e:
+            print(f"\nError: {e}")
+            sys.exit(1)
+        for path in written:
+            print(f"Wrote {path}")
+        print(f"{len(written)} language pack(s) written, the rest unchanged.")
+        sys.exit(0)
     main(
         args.translations_dir,
         args.output_dir,

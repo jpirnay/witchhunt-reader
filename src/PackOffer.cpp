@@ -10,6 +10,7 @@
 #include "CrossPointState.h"
 #include "HyphenationPacks.h"
 #include "ReadingFontScript.h"
+#include "UiLanguagePacks.h"
 #include "activities/Activity.h"
 #include "activities/util/ConfirmationActivity.h"
 
@@ -20,7 +21,15 @@ namespace {
 ConfirmationActivity::Question question(const Offer& offer) {
   ConfirmationActivity::Question question;
   char message[400];
-  if (offer.interfaceLanguage[0] != '\0') {
+  if (offer.language[0] != '\0') {
+    // The interface language's own pack, and what else it needs in the same question.
+    const char* name = I18N.getLanguageName(I18N.getLanguage());
+    question.headline = name;
+    const StrId text = offer.family[0] != '\0'        ? StrId::STR_LANGUAGE_INTERFACE_PACK_OFFER
+                       : offer.hyphenation[0] != '\0' ? StrId::STR_LANGUAGE_HYPHENATION_OFFER
+                                                      : StrId::STR_LANGUAGE_PACK_OFFER;
+    snprintf(message, sizeof(message), I18N.get(text), name);
+  } else if (offer.interfaceLanguage[0] != '\0') {
     // A CJK interface pack, offered alone: its languages hyphenate nothing.
     const char* name = I18N.getLanguageName(I18N.getLanguage());
     question.headline = name;
@@ -45,6 +54,10 @@ ConfirmationActivity::Question question(const Offer& offer) {
 }
 
 void decline(const Offer& offer) {
+  if (offer.language[0] != '\0') {
+    char key[3];
+    HyphenationPacks::declineOffer(UiLanguagePacks::languageDeclineKey(offer.language, key));
+  }
   if (offer.hyphenation[0] != '\0') HyphenationPacks::declineOffer(offer.hyphenation);
   if (offer.family[0] == '\0') return;
   if (offer.interfaceLanguage[0] != '\0') {
@@ -74,6 +87,7 @@ bool ask(Activity& host, GfxRenderer& renderer, MappedInputManager& mappedInput,
       return;
     }
     FontDownloadActivity::Wanted wanted;
+    snprintf(wanted.language, sizeof(wanted.language), "%s", offer.language);
     snprintf(wanted.pack, sizeof(wanted.pack), "%s", offer.hyphenation);
     snprintf(wanted.family, sizeof(wanted.family), "%s", offer.family);
     // In the asking screen's place, not over it: the download's TLS session needs the heap that screen holds.

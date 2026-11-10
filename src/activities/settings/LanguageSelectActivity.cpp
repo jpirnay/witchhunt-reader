@@ -41,9 +41,11 @@ void LanguageSelectActivity::activateIndex(const int index) {
   app.clearTapFlash();
   nav.selected = index;
   UiLanguage::apply(static_cast<Language>(SORTED_LANGUAGE_INDICES[index]));
-  // The new language's pack, when the card lacks it: its hyphenation, or its CJK interface pack (UiLanguagePacks).
-  // Yes opens the Font Manager in Settings' place, and leaving it restarts into Settings.
-  const PackOffer::Offer offer = UiLanguagePacks::due();
+  // The new language's packs, when the card lacks them: its own strings (the interface stays English without them,
+  // and they are offered even if declined before: the reader just chose the language), with its hyphenation or its
+  // CJK interface pack (UiLanguagePacks). Yes opens the Font Manager in Settings' place, and leaving it restarts into
+  // Settings, which reads the new pack.
+  const PackOffer::Offer offer = UiLanguagePacks::due(/*chosen=*/true);
   if (!offer || !PackOffer::ask(*this, renderer, mappedInput, offer, FontDownloadActivity::ReturnTo::Settings,
                                 [](Activity& host) { host.finish(); })) {
     finish();

@@ -19,7 +19,7 @@
 //                       u32 blockBytes (the whole block, header included)
 //   families 12 bytes   u32 totalSize, u16 name, u16 description, u16 firstFile, u8 flags, u8 0
 //                       flags: installed, update, resumable (set after the build); outline, not in "Download all",
-//                       hyphenation pack
+//                       hyphenation pack, UI language pack
 //   files    12 bytes   u32 size, u32 crc32, u16 name, u8 hasCrc32, u8 0
 //   strings             every string NUL-terminated; name and description fields are offsets here
 //
@@ -90,6 +90,10 @@ class FontCatalog {
   // A hyphenation pack (the manifest's format "hyphenation"): its file goes to /.crosspoint/hyphenation/, not into a
   // family folder (FontInstaller).
   bool hyphenation(size_t family) const;
+  // A UI language pack (the manifest's format "language"): its file goes to /.crosspoint/lang/ (FontInstaller).
+  bool languagePack(size_t family) const;
+  // Either pack: no font family, and nothing the font registry lists.
+  bool pack(size_t family) const { return hyphenation(family) || languagePack(family); }
 
   bool installed(size_t family) const;
   bool hasUpdate(size_t family) const;
@@ -158,6 +162,7 @@ class FontCatalog::Builder {
   void outline(bool value);
   void inDownloadAll(bool value);
   void hyphenation(bool value);
+  void languagePack(bool value);
   void addFile(const char* name, size_t nameLen, uint32_t size, uint32_t crc32, bool hasCrc32);
   void keepFamily(const char* name, size_t nameLen);
   void dropFamily();
