@@ -31,7 +31,7 @@ bool mapsOnCard(ttf_test::MemoryFile& file, const uint32_t codepoint, bool* ioEr
 }
 
 TEST(TtfMapsCodepoint, ALatinFontHasNoCjk) {
-  ttf_test::MemoryFile file{readFile(TTF_FONT_DIR "/Bookerly/Bookerly-Regular.ttf")};
+  ttf_test::MemoryFile file{readFile(TTF_FONT_DIR "/SourceSerif4Caption/SourceSerif4Caption-Regular.ttf")};
   ASSERT_FALSE(file.bytes.empty());
   EXPECT_TRUE(mapsOnCard(file, 'A'));
   EXPECT_FALSE(mapsOnCard(file, 0x3042));  // あ
@@ -67,7 +67,7 @@ TEST(TtfMapsCodepoint, AFileThatIsNoFontMapsNothing) {
 }
 
 TEST(TtfMapsCodepoint, AFailedCardReadIsAnIoError) {
-  ttf_test::MemoryFile file{readFile(TTF_FONT_DIR "/Bookerly/Bookerly-Regular.ttf")};
+  ttf_test::MemoryFile file{readFile(TTF_FONT_DIR "/SourceSerif4Caption/SourceSerif4Caption-Regular.ttf")};
   file.failReads = true;
   bool ioError = false;
   EXPECT_FALSE(mapsOnCard(file, 'A', &ioError));

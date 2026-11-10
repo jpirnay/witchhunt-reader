@@ -105,7 +105,7 @@ TEST(GlyphStoreFormat, ARecordIsItsHeaderAndBitmapRoundedToFourBytes) {
 }
 
 TEST(GlyphStorePlan, LatinFlashModeFillsThePartition) {
-  // Bookerly-sized: four styles of 450 KB, 8 pages each.
+  // A large Latin family: four styles of 450 KB, 8 pages each.
   Layout layout{};
   ASSERT_TRUE(planLayout(input(kModeFlash, 4, 460800), layout));
   const Geometry& g = layout.geometry;
@@ -167,7 +167,7 @@ TEST(GlyphStorePlan, LargeStylesShrinkTheLog) {
 }
 
 TEST(GlyphStorePlan, AFamilySetMapsItsLargestStyleNotTheirSum) {
-  // A Bookerly-sized body (four styles of 7 pages) and an Inter-sized accent family (two of 6 pages), in the set's
+  // A large Latin body (four styles of 7 pages) and an Inter-sized accent family (two of 6 pages), in the set's
   // order. Flash mode maps one style block at a time, so the budget counts 7 pages, not 40.
   PlanInput in = input(kModeFlash, 6, 450048, 24);
   in.styleBytes[4] = in.styleBytes[5] = 342000;
@@ -181,7 +181,7 @@ TEST(GlyphStorePlan, AFamilySetMapsItsLargestStyleNotTheirSum) {
 }
 
 TEST(GlyphStorePlan, AMixedSetMapsItsLargestFlashStyleAndEverySdModeBlock) {
-  // A Bookerly-sized body in flash mode (four styles of 7 pages) and three accent families in SD mode (tables of
+  // A large Latin body in flash mode (four styles of 7 pages) and three accent families in SD mode (tables of
   // 3, 3 and 2 pages): the flash-mode styles map one at a time, the SD-mode blocks together.
   PlanInput in = input(kModeFlash, 7, 450048, 32);
   for (const uint8_t s : {4, 5, 6}) in.styleMode[s] = kModeSd;

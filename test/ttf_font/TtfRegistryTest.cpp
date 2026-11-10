@@ -79,7 +79,7 @@ ttf::FileProbe probeOf(const std::vector<uint8_t>& bytes) {
 TEST(TtfRegistry, AFolderOfTtfAndOtfFilesIsOneFamily) {
   // Sorted by name: OpenDyslexic-Bold.otf, then a TrueType regular.
   const ttf::FileProbe files[] = {probeOf(ttf_test::readFont("OpenDyslexic/OpenDyslexic-Bold.otf")),
-                                  probeOf(ttf_test::readFont("Bookerly/Bookerly-Regular.ttf"))};
+                                  probeOf(ttf_test::readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf"))};
   ASSERT_EQ(1, files[0].style);
   ASSERT_EQ(0, files[1].style);
   int chosen[4];

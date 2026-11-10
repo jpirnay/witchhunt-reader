@@ -169,10 +169,10 @@ struct Loaded {
 class TtfFontTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    files[0].bytes = readFont("Bookerly/Bookerly-Regular.ttf");
-    files[1].bytes = readFont("Bookerly/Bookerly-Bold.ttf");
-    files[2].bytes = readFont("Bookerly/Bookerly-Italic.ttf");
-    files[3].bytes = readFont("Bookerly/Bookerly-BoldItalic.ttf");
+    files[0].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
+    files[1].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-Bold.ttf");
+    files[2].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-It.ttf");
+    files[3].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf");
     yields = lockChecks = 0;
   }
   void TearDown() override {
@@ -265,7 +265,8 @@ TEST_F(TtfFontTest, AFamilyWithoutARegularStyleIsRefused) {
 }
 
 TEST_F(TtfFontTest, AFamilyTooLargeForThePartitionIsRefusedBeforeAnyErase) {
-  SimNorFlash small{1024 * 1024};
+  // 12 pages: the family's tables alone take 9 of them, and a header, an index, a pair page and a 4-page log 7 more.
+  SimNorFlash small{768 * 1024};
   TtfFontSet set(small);
   ttf::FileSource sources[4];
   for (int s = 0; s < 4; ++s) sources[s] = files[s].source();
@@ -320,7 +321,7 @@ TEST_F(TtfFontTest, StoredGlyphsSurviveTheNextBoot) {
 TEST_F(TtfFontTest, ACodepointTheFontLacksIsAskedOnlyOnce) {
   const auto font = open();
   ASSERT_NE(nullptr, font);
-  EXPECT_EQ(nullptr, font->glyph(kRegular, 0x4E2D));  // Bookerly has no CJK
+  EXPECT_EQ(nullptr, font->glyph(kRegular, 0x4E2D));  // Source Serif 4 Caption has no CJK
   const uint32_t writes = flash.programCalls();
   EXPECT_EQ(nullptr, font->glyph(kRegular, 0x4E2D));
   EXPECT_EQ(writes, flash.programCalls());  // the "missing" slot answered
@@ -466,7 +467,7 @@ TEST_F(TtfFontTest, AWipeAtTheNextBookOpenEndsTheRing) {
 TEST_F(TtfFontTest, AStoreMarkedFullActsAsAFullOneAndIsCounted) {
   // CMD:TTF:FULL: what a filled store does, at any size, without filling it. It stops writes and asks for room; nothing
   // is wiped.
-  flash.setFreePages(16);  // the smallest log the planner makes: 4 pages
+  flash.setFreePages(12);  // the smallest log the planner makes, 4 pages, beside the regular style's 4
   const TtfFontSet::StoreEvents before = TtfFontSet::storeEvents();
   const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
   ASSERT_NE(nullptr, font);
@@ -495,7 +496,7 @@ TEST_F(TtfFontTest, AStoreMarkedFullActsAsAFullOneAndIsCounted) {
 }
 
 TEST_F(TtfFontTest, AFullStoreSwitchesToTheRingAndMakingRoomEndsIt) {
-  flash.setFreePages(16);  // the smallest log the planner makes: 4 pages
+  flash.setFreePages(12);  // the smallest log the planner makes, 4 pages, beside the regular style's 4
   const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
   ASSERT_NE(nullptr, font);
   uint32_t cp = 0x21;
@@ -555,7 +556,7 @@ TEST_F(TtfFontTest, AWipeWaitsForRenderLock) {
 }
 
 TEST_F(TtfFontTest, MakingRoomWaitsForRenderLock) {
-  flash.setFreePages(16);
+  flash.setFreePages(13);  // a five-page log
   const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
   ASSERT_NE(nullptr, font);
   uint32_t cp = 0x21;
@@ -631,7 +632,7 @@ TEST_F(TtfFontTest, ADrawnStoredGlyphIsCounted) {
 
 TEST_F(TtfFontTest, UseCountsAreTakenAtTheNextMakeRoomNotInTheDraw) {
   // A five-segment log: with two live, the free ones are within one of the target, so counts are wanted.
-  flash.setFreePages(16);
+  flash.setFreePages(13);
   const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
   ASSERT_NE(nullptr, font);
   uint32_t cp = 0x21;
@@ -654,7 +655,7 @@ TEST_F(TtfFontTest, UseCountsAreTakenAtTheNextMakeRoomNotInTheDraw) {
 }
 
 TEST_F(TtfFontTest, ASetLoadedOverAStoreNearFullCountsItsFirstDraws) {
-  flash.setFreePages(16);
+  flash.setFreePages(13);
   {
     const auto first = open(kIdentityA, TtfFont::kMaxPointSize);
     ASSERT_NE(nullptr, first);
@@ -675,7 +676,7 @@ TEST_F(TtfFontTest, ASetLoadedOverAStoreNearFullCountsItsFirstDraws) {
 }
 
 TEST_F(TtfFontTest, TheStatsShowTheRing) {
-  flash.setFreePages(16);
+  flash.setFreePages(13);  // a five-page log
   const TtfFontSet::StoreEvents before = TtfFontSet::storeEvents();
   const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
   ASSERT_NE(nullptr, font);
@@ -956,7 +957,7 @@ TEST_F(TtfFontTest, TheLargestNativeSizeDrawsEveryGlyphOfTheFamily) {
   // Planned for: the output region holds each glyph, and its top fits EpdGlyphRef.
   const auto font = open();
   ASSERT_NE(nullptr, font);
-  EXPECT_EQ(119, font->maxNativePx());  // Bookerly: 120 px less the pixel kept in hand for rounding
+  EXPECT_EQ(120, font->maxNativePx());  // all of kMaxNativePx: the tallest glyph tops 127 px only above 122 px
   const EpdFont* fonts[4] = {};
   ASSERT_TRUE(font->nativeFonts(font->maxNativePx(), fonts));
   for (const uint32_t cp : {uint32_t{'W'}, uint32_t{'@'}, uint32_t{'Q'}, uint32_t{0xC5}}) {
@@ -1139,7 +1140,7 @@ TEST_F(TtfFontTest, OnlyPairsWhoseLeftGlyphKernsAreStored) {
 }
 
 TEST_F(TtfFontTest, ALeftGlyphThatKernsWithNothingIsLookedUpOnce) {
-  // Such pairs are not stored, yet every word gap asks for one (the space kerns with nothing in Bookerly).
+  // Such pairs are not stored, yet every word gap asks for one (in a font whose space kerns with nothing).
   useBuiltFont(kernedBoxes());
   const auto font = open();
   EXPECT_EQ(0, font->kerning(kRegular, 'C', 'A'));
@@ -1310,8 +1311,8 @@ namespace {
 
 constexpr uint8_t kIdentitySet[glyphstore::kIdentityBytes] = {'s', 'e', 't'};
 
-// A body family (Bookerly, four styles) and an accent family (Inter, two), as Publisher Fonts loads a reader font
-// and a book's accent family.
+// A body family (Source Serif 4 Caption, four styles) and an accent family (Inter, two), as Publisher Fonts loads a
+// reader font and a book's accent family.
 class TtfFontSetTest : public TtfFontTest {
  protected:
   void SetUp() override {
@@ -1384,14 +1385,19 @@ TEST_F(TtfFontSetTest, EachFamilyDrawsItsOwnGlyphsAndFindsThemTheNextBoot) {
 TEST_F(TtfFontSetTest, TheFamiliesShareOneScratchBlock) {
   SimNorFlash alone{kFlashBytes};
   uint32_t largest = 0;
+  uint32_t both = 0;
   for (const bool accentFirst : {false, true}) {
     const auto one = openSet(accentFirst ? kIdentityB : kIdentityA, 1, accentFirst, &alone);
     ASSERT_NE(nullptr, one);
     largest = std::max(largest, one->scratchBytes());
+    both += one->scratchBytes();
   }
   const auto set = openSet();
   ASSERT_NE(nullptr, set);
-  EXPECT_EQ(largest, set->scratchBytes());  // sized for the larger family, not for the two
+  // Sized for the larger of each part (mergePlans), not for the two families. Neither family needs the more of every
+  // part here, so the block is a little over the larger family's own (10 bytes, measured).
+  EXPECT_LE(largest, set->scratchBytes());
+  EXPECT_LT(set->scratchBytes(), both);
 }
 
 TEST_F(TtfFontSetTest, ASetChangedSinceTheInstallIsInstalledAgain) {
@@ -1532,15 +1538,15 @@ TEST_F(TtfFontSetTest, ABodyAndThreeAccentFamiliesAreDrawnFromOneStore) {
   // Inter as the body (two styles), and three one-style accent families: the four of TtfFontSet::kMaxFamilies.
   MemoryFile ubuntu[4];
   MemoryFile ubuntuBold[4];
-  MemoryFile bookerly[4];
+  MemoryFile serif[4];
   ubuntu[kRegular].bytes = readFont("Ubuntu/Ubuntu-Regular.ttf");
   ubuntuBold[kRegular].bytes = readFont("Ubuntu/Ubuntu-Bold.ttf");
-  bookerly[kRegular].bytes = files[kRegular].bytes;
-  const auto set = openFamilies(flash, {accent, ubuntu, ubuntuBold, bookerly}, busy);
+  serif[kRegular].bytes = files[kRegular].bytes;
+  const auto set = openFamilies(flash, {accent, ubuntu, ubuntuBold, serif}, busy);
   ASSERT_NE(nullptr, set);
   EXPECT_EQ(TtfFontSet::kMaxFamilies, set->familyCount());
   EXPECT_EQ(1, busy);
-  const MemoryFile* const sources[] = {accent, ubuntu, ubuntuBold, bookerly};
+  const MemoryFile* const sources[] = {accent, ubuntu, ubuntuBold, serif};
   for (uint8_t f = 0; f < 4; ++f) {
     expectDrawnAs(reference(sources[f][kRegular].bytes, 'g', 14), *set->font(f), kRegular,
                   set->font(f)->glyph(kRegular, 'g'));
@@ -1573,7 +1579,7 @@ TEST_F(TtfFontSetTest, AnotherSetWithTheSameLeadingFamilyKeepsItsStyleBlocks) {
   const auto set = openFamilies(flash, {files, ubuntu}, busy, kIdentityB);
   ASSERT_NE(nullptr, set);
   EXPECT_EQ(2, busy);                               // installed again: another set
-  EXPECT_EQ(before, erasesOver(flash, bodyBytes));  // Bookerly Regular's block kept
+  EXPECT_EQ(before, erasesOver(flash, bodyBytes));  // the body Regular's block kept
   EXPECT_EQ(0u, flash.reprograms());                // and nothing written over it
   expectDrawnAs(reference(files[kBold].bytes, 'W', 14), *set->font(0), kBold, set->font(0)->glyph(kBold, 'W'));
   expectDrawnAs(reference(ubuntu[kRegular].bytes, 'W', 14), *set->font(1), kRegular,
@@ -1584,7 +1590,7 @@ TEST_F(TtfFontSetTest, ABlockHoldingAnotherFileIsWrittenAgain) {
   ASSERT_NE(nullptr, openSet());
   const uint32_t interBytes = static_cast<uint32_t>(accent[kRegular].bytes.size());
   const uint32_t before = erasesOver(flash, interBytes);
-  // Inter first: its block starts where Bookerly Regular's did, which holds Bookerly.
+  // Inter first: its block starts where the body Regular's did, which holds that file.
   const auto swapped = openSet(kIdentityB, 2, /*accentFirst=*/true);
   ASSERT_NE(nullptr, swapped);
   EXPECT_LT(before, erasesOver(flash, interBytes));
@@ -1593,7 +1599,7 @@ TEST_F(TtfFontSetTest, ABlockHoldingAnotherFileIsWrittenAgain) {
 }
 
 TEST_F(TtfFontSetTest, MoreStylesThanTheStoreHoldsAreRefusedBeforeAnyErase) {
-  // Bookerly's four, Inter's two, Bookerly's four again: ten style blocks for the store's eight.
+  // The body's four, Inter's two, the body's four again: ten style blocks for the store's eight.
   EXPECT_EQ(nullptr, openFamilies(flash, {files, accent, files}, busy));
   EXPECT_EQ(0, busy);
   EXPECT_EQ(0u, flash.totalSectorErases());
@@ -1604,9 +1610,10 @@ TEST_F(TtfFontSetTest, MoreStylesThanTheStoreHoldsAreRefusedBeforeAnyErase) {
 namespace {
 
 constexpr uint32_t kPage = glyphstore::kPageBytes;
-// Bookerly's four styles take 35 of a font area's pages in flash mode (the whole files), 19 in SD mode (their tables,
-// 3 pages each): on 24 pages only SD mode fits.
-constexpr uint32_t kSdOnlyBytes = 24 * kPage;
+// Source Serif 4 Caption's four styles take 21 of a font area's pages in flash mode (the whole files, 14 pages, and a
+// header, an index, a pair page and a 4-page log), 16 in SD mode (their tables, 9 pages): on 20 pages only SD mode
+// fits.
+constexpr uint32_t kSdOnlyBytes = 20 * kPage;
 
 void expectWrittenOnce(const SimNorFlash& chip) {
   EXPECT_EQ(0u, chip.violations());
@@ -1724,7 +1731,7 @@ TEST_F(TtfFontSetTest, AFileOnTheCardThatChangedInstallsTheSetAgain) {
   expectDrawnAs(reference(files[kItalic].bytes, 'g', 14), *set->font(0), kItalic, set->font(0)->glyph(kItalic, 'g'));
   set.reset();
   // Another file of another size under the same identity: installed again too, its own outlines drawn.
-  files[kItalic].bytes = readFont("Bookerly/Bookerly-BoldItalic.ttf");
+  files[kItalic].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf");
   set = openFamilies(chip, {files}, busy);
   ASSERT_NE(nullptr, set);
   EXPECT_EQ(3, busy);
@@ -1749,10 +1756,10 @@ TEST_F(TtfFontSetTest, AFileRewrittenInPlaceAtTheSameSizeAndTimeInstallsTheSetAg
 }
 
 TEST_F(TtfFontSetTest, AnAccentStaysWholeWhenNothingWithMoreOnTheCardFits) {
-  // 47 pages and 17 free mapping pages: both families whole fit with a 4-page log, which the 8-page rule would
-  // refuse; but Inter's tables, mapped beside Bookerly's largest style, pass the mapping budget. Whole beats left
-  // out.
-  SimNorFlash tight{47 * kPage, 17};
+  // 47 pages and 14 free mapping pages: both families whole fit with a 4-page log, which the 8-page rule would
+  // refuse; but Inter's tables, mapped beside Source Serif 4 Caption's largest style, pass the mapping budget. Whole
+  // beats left out.
+  SimNorFlash tight{47 * kPage, 14};
   const auto set = openFamilies(tight, {files, accent}, busy);
   ASSERT_NE(nullptr, set);
   EXPECT_EQ(2, set->familyCount());
@@ -1772,9 +1779,9 @@ TEST_F(TtfFontSetTest, ACardReadErrorDrawsTheGlyphAsMissingAndAsksAgain) {
 }
 
 TEST_F(TtfFontSetTest, TheBodyStaysInFlashModeWhileTheAccentFamilyGoesToTheCard) {
-  // 42 pages: Bookerly's and Inter's whole files (40 pages and a header) leave no room for a log; Bookerly whole
-  // and Inter's tables (6 pages) leave 7.
-  SimNorFlash chip{42 * kPage};
+  // 32 pages: Source Serif 4 Caption's and Inter's whole files (26 pages and a header) leave no room for an index, a
+  // pair page and a 4-page log; Caption whole and Inter's tables (6 pages) leave a log of 8.
+  SimNorFlash chip{32 * kPage};
   {
     const auto set = openFamilies(chip, {files, accent}, busy);
     ASSERT_NE(nullptr, set);
@@ -1799,14 +1806,15 @@ TEST_F(TtfFontSetTest, TheBodyStaysInFlashModeWhileTheAccentFamilyGoesToTheCard)
 }
 
 TEST_F(TtfFontSetTest, AnAccentFamilyKeepsFlashModeOnlyWhileTheLogKeepsEightPages) {
-  // 47 pages: both families whole leave a log of 4 pages (the least the planner allows), Inter on the card one of
-  // 10. The accent goes to the card; the body stays whole.
-  SimNorFlash tight{47 * kPage};
+  // 33 pages: both families whole leave a log of 4 pages (the least the planner allows), Inter on the card one of
+  // 9. The accent goes to the card; the body stays whole.
+  SimNorFlash tight{33 * kPage};
   const auto set = openFamilies(tight, {files, accent}, busy);
   ASSERT_NE(nullptr, set);
   EXPECT_FALSE(set->font(0)->readsCard());
   EXPECT_TRUE(set->font(1)->readsCard());
-  // The test's 53 pages leave both whole a log of 9: both stay in flash mode, as before SD mode.
+  // The test's 53 pages leave both whole a log of 20 (the 32 mapping pages bound it): both stay in flash mode, as
+  // before SD mode.
   const auto roomy = openFamilies(flash, {files, accent}, busy);
   ASSERT_NE(nullptr, roomy);
   EXPECT_FALSE(roomy->font(0)->readsCard());
@@ -1814,7 +1822,8 @@ TEST_F(TtfFontSetTest, AnAccentFamilyKeepsFlashModeOnlyWhileTheLogKeepsEightPage
 }
 
 TEST_F(TtfFontSetTest, ABodyTooLargeForFlashModeTakesTheAccentFamiliesToTheCardWithIt) {
-  // 26 pages: Bookerly whole does not fit; every style's tables do (12 + 6 pages, a header and a log of 5).
+  // 26 pages: Source Serif 4 Caption whole does not fit beside Inter's tables (27 pages at the least); every style's
+  // tables do (9 + 6 pages, a header, an index, a pair page and a log of 8).
   SimNorFlash chip{26 * kPage};
   const auto set = openFamilies(chip, {files, accent}, busy);
   ASSERT_NE(nullptr, set);
@@ -1827,11 +1836,12 @@ TEST_F(TtfFontSetTest, ABodyTooLargeForFlashModeTakesTheAccentFamiliesToTheCardW
 }
 
 TEST_F(TtfFontSetTest, AnSdModeBlockThatHoldsItsTablesIsKept) {
-  // Bookerly whole beside Inter's tables, then beside Inter's and Ubuntu's: the first six blocks hold what the new
-  // layout puts there, the SD-mode ones included, and only Ubuntu's tables are written.
-  SimNorFlash chip{46 * kPage};
+  // Source Serif 4 Caption whole beside Inter's tables, then beside Inter's and Ubuntu's (33 pages, as in
+  // AnAccentFamilyKeepsFlashModeOnlyWhileTheLogKeepsEightPages): the first six blocks hold what the new layout puts
+  // there, the SD-mode ones included, and only Ubuntu's tables are written.
+  SimNorFlash chip{33 * kPage};
   ASSERT_NE(nullptr, openFamilies(chip, {files, accent}, busy));
-  const uint32_t interAt = glyphstore::kHeaderRegionBytes + 4 * 7 * kPage;
+  const uint32_t interAt = glyphstore::kHeaderRegionBytes + (4 + 3 + 4 + 3) * kPage;  // Caption's four whole files
   const uint32_t before = erasesBetween(chip, glyphstore::kHeaderRegionBytes, interAt + 6 * kPage);
   MemoryFile ubuntu[4];
   ubuntu[kRegular].bytes = readFont("Ubuntu/Ubuntu-Regular.ttf");
@@ -1876,15 +1886,17 @@ TEST_F(TtfFontSetTest, APowerCutInAnSdModeInstallIsInstalledWholeAtTheNextLoad) 
 }
 
 TEST_F(TtfFontSetTest, AWholeReaderFontAndThreeAccentFamiliesOnTheCardFitTogether) {
-  // The X4 case of phase 3: Bookerly whole as the reader's font, and a book's three accent families (Inter in two
-  // styles, Noto Sans Italic, Ubuntu Bold). Whole, they need 57 of the font area's 53 pages (Noto Sans Italic's block
-  // with its CPac, as it shapes Devanagari), and phase 3 left two of them out; with their tables on the card all four
-  // load, eight style blocks.
+  // Phase 3's case: a TrueType reader font whole (Source Serif 4 Caption), and a book's three accent families (Inter
+  // in two styles, Noto Sans Italic, Ubuntu Bold), here on 40 pages. Whole, they need 49 (Noto Sans Italic's block
+  // with its CPac, as it shapes Devanagari), and phase 3 left some out; with only Noto Sans Italic and Ubuntu Bold on
+  // the card the log keeps 4 pages, under the 8 an accent in flash mode needs; with all three accents' tables on the
+  // card all four load, eight style blocks.
   MemoryFile script[4];
   MemoryFile code[4];
   script[kRegular].bytes = readFont("NotoSans/NotoSans-Italic.ttf");
   code[kRegular].bytes = readFont("Ubuntu/Ubuntu-Bold.ttf");
-  const auto set = openFamilies(flash, {files, accent, script, code}, busy);
+  SimNorFlash chip{40 * kPage};
+  const auto set = openFamilies(chip, {files, accent, script, code}, busy);
   ASSERT_NE(nullptr, set);
   EXPECT_EQ(4, set->familyCount());
   EXPECT_FALSE(set->font(0)->readsCard());
@@ -1897,7 +1909,8 @@ TEST_F(TtfFontSetTest, AWholeReaderFontAndThreeAccentFamiliesOnTheCardFitTogethe
 }
 
 TEST_F(TtfFontSetTest, AFamilyTooLargeEvenForSdModeIsRefusedBeforeAnyErase) {
-  SimNorFlash chip{16 * kPage};  // Bookerly's tables alone take 12 pages and a header
+  // Source Serif 4 Caption's tables alone take 9 pages, and a header, an index, a pair page and a 4-page log 7 more.
+  SimNorFlash chip{15 * kPage};
   EXPECT_EQ(nullptr, openFamilies(chip, {files}, busy));
   EXPECT_EQ(0, busy);
   EXPECT_EQ(0u, chip.totalSectorErases());
@@ -2321,7 +2334,7 @@ TEST_F(TtfFontSetTest, AChangedOtfFileIsInstalledOver) {
 
 TEST_F(TtfFontSetTest, AFamilyOfTrueTypeAndCffStylesDrawsEachFromItsOwnOutlines) {
   MemoryFile mixed[4];
-  mixed[kRegular].bytes = readFont("Bookerly/Bookerly-Regular.ttf");
+  mixed[kRegular].bytes = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
   mixed[kBold].bytes = readFont("OpenDyslexic/OpenDyslexic-Bold.otf");
   const auto expectEachStylesOwn = [&](TtfFontSet& set) {
     TtfFont& font = *set.font(0);
@@ -2492,8 +2505,8 @@ TEST_F(TtfFontTest, ACffFileWithoutMemoryToPlanStaysListedAndOneWhoseLayoutCanno
 }
 
 TEST_F(TtfFontSetTest, AnInstallWithoutMemoryForItsHeaderErasesNothingAndAsksForNoFewerFamilies) {
-  // The set is installed; another set (Bookerly alone) is to be installed over it. The store's header, made as the
-  // install begins, finds no memory this once: armed by onBusy, after the plan and before the install begins, so no
+  // The set is installed; another set (the body family alone) is to be installed over it. The store's header, made as
+  // the install begins, finds no memory this once: armed by onBusy, after the plan and before the install begins, so no
   // other header (the open's, of the same size) takes the refusal. Nothing is erased yet, so the load fails for now.
   ASSERT_NE(nullptr, openSet());
   const uint32_t erases = flash.totalSectorErases();
@@ -2644,8 +2657,9 @@ TEST_F(TtfFontTest, AFamilyWithABoldFileIsNeverEmboldened) {
 
 TEST_F(TtfFontTest, ABoldFileServingAsTheRegularIsNotEmboldenedAgain) {
   // Spec 7.1's second row: a family of one bold file, which assignStyles moves to the regular slot. Its face says bold.
-  const std::pair<const char*, const uint8_t*> families[] = {{"Bookerly/Bookerly-Bold.ttf", kIdentityA},
-                                                             {"OpenDyslexic/OpenDyslexic-Bold.otf", kIdentityB}};
+  const std::pair<const char*, const uint8_t*> families[] = {
+      {"SourceSerif4Caption/SourceSerif4Caption-Bold.ttf", kIdentityA},
+      {"OpenDyslexic/OpenDyslexic-Bold.otf", kIdentityB}};
   for (const auto& [name, identity] : families) {
     files[kRegular].bytes = readFont(name);
     for (int s = 1; s < 4; ++s) files[s].bytes.clear();
@@ -2753,7 +2767,7 @@ TEST_F(TtfFontTest, SyntheticBoldDrawsEveryGlyphAtTheLargestNativeSize) {
       }
     }
   };
-  expectEveryGlyph(readFont("Bookerly/Bookerly-Regular.ttf"), kIdentityA, 0x21, 0x24F, 300);
+  expectEveryGlyph(readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf"), kIdentityA, 0x21, 0x24F, 300);
   if (HasFailure()) return;
   expectEveryGlyph(readFixture("NotoSansJP-CffFlat.otf"), kIdentityB, 0x20, 0xFFFF, 250);
 }
@@ -2761,7 +2775,10 @@ TEST_F(TtfFontTest, SyntheticBoldDrawsEveryGlyphAtTheLargestNativeSize) {
 TEST_F(TtfFontTest, SyntheticBoldDrawsAGlyphTooLargeToEmboldenUnemboldened) {
   // At the largest native size the 4 KB output region decides: a glyph that fits as the regular does not once
   // emboldened. It is drawn unemboldened, as before synthetic bold, never marked missing (spec 7.2).
-  for (int s = 1; s < 4; ++s) files[s].bytes.clear();  // Bookerly Regular: its largest native size is 119 px
+  // Ubuntu Regular alone: at its largest native size, 120 px, the DZ with caron (U+01C4) fits as the regular does and
+  // not emboldened. Source Serif 4 Caption has no such glyph.
+  files[kRegular].bytes = readFont("Ubuntu/Ubuntu-Regular.ttf");
+  for (int s = 1; s < 4; ++s) files[s].bytes.clear();
   const auto font = open();
   ASSERT_NE(nullptr, font);
   ASSERT_TRUE(font->synthetic(kBold));
@@ -2881,7 +2898,7 @@ TEST_F(TtfFontTest, ARegularAndBoldFamilyDrawsItalicAndBoldItalicSlanted) {
 }
 
 TEST_F(TtfFontTest, AnItalicFileServingAsTheRegularIsNotSlantedAgain) {
-  const char* const names[] = {"Bookerly/Bookerly-Italic.ttf", "NotoSans/NotoSans-Italic.ttf"};
+  const char* const names[] = {"SourceSerif4Caption/SourceSerif4Caption-It.ttf", "NotoSans/NotoSans-Italic.ttf"};
   const uint8_t* const identities[] = {kIdentityA, kIdentityB};
   for (int i = 0; i < 2; ++i) {
     files[kRegular].bytes = readFont(names[i]);
@@ -3007,7 +3024,8 @@ TEST_F(TtfFontTest, SyntheticItalicAtTheLargestNativeSizeIsSlantedWhereItFitsAnd
       EXPECT_GT(uprightItalic, 0u);  // the 4 KB cap decides
     }
   };
-  expectEveryGlyph(readFont("Bookerly/Bookerly-Regular.ttf"), kIdentityA, 0x21, 0x24F, 300, true);
+  // Ubuntu Regular: one of its Latin glyphs does not fit slanted at 120 px. Every one of Source Serif 4 Caption's does.
+  expectEveryGlyph(readFont("Ubuntu/Ubuntu-Regular.ttf"), kIdentityA, 0x21, 0x24F, 300, true);
   if (HasFailure()) return;
   expectEveryGlyph(readFixture("NotoSansJP-CffFlat.otf"), kIdentityB, 0x20, 0xFFFF, 250, false);
 }
@@ -3147,7 +3165,7 @@ TEST_F(TtfFontNotdefTest, ALookalikeComesBeforeTheNotdef) {
 
 // A font with a U+FFFD of its own keeps drawing it.
 TEST_F(TtfFontNotdefTest, AFontsOwnReplacementGlyphIsDrawnNotItsNotdef) {
-  const auto font = open();  // Bookerly maps U+FFFD
+  const auto font = openOnly("NotoSans/NotoSans-Regular.ttf");  // maps U+FFFD; Source Serif 4 Caption does not
   ASSERT_NE(nullptr, font);
   const std::vector<uint8_t>& file = files[kRegular].bytes;
   FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
@@ -3198,7 +3216,7 @@ TEST_F(TtfFontNotdefTest, AnOlderStoresMarkDoesNotHideTheNotdefAndCostsNoWrites)
 // In SD mode the .notdef's outline is read from the card like any other. A failed read is transient: U+FFFD must not be
 // marked as not in the font, or the box would be gone until the store is wiped.
 TEST_F(TtfFontSetTest, ACardReadErrorDrawingTheNotdefIsAskedAgain) {
-  SimNorFlash chip{42 * kPage};  // as in TheBodyStaysInFlashModeWhileTheAccentFamilyGoesToTheCard
+  SimNorFlash chip{32 * kPage};  // as in TheBodyStaysInFlashModeWhileTheAccentFamilyGoesToTheCard
   const auto set = openFamilies(chip, {files, accent}, busy);
   ASSERT_NE(nullptr, set);
   TtfFont& inter = *set->font(1);  // does not map U+FFFD

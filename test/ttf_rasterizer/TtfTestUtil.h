@@ -55,10 +55,18 @@ inline std::vector<uint8_t> readCffTestFont(const std::string& name) {
 /// Every TrueType source the reader bundles (the OpenDyslexic sources are CFF).
 inline const std::vector<std::string>& bundledTtfs() {
   static const std::vector<std::string> fonts = {
-      "Bookerly/Bookerly-Regular.ttf",    "Bookerly/Bookerly-Bold.ttf", "Bookerly/Bookerly-Italic.ttf",
-      "Bookerly/Bookerly-BoldItalic.ttf", "Inter/Inter-Regular.ttf",    "Inter/Inter-Bold.ttf",
-      "NotoSans/NotoSans-Regular.ttf",    "NotoSans/NotoSans-Bold.ttf", "NotoSans/NotoSans-Italic.ttf",
-      "NotoSans/NotoSans-BoldItalic.ttf", "Ubuntu/Ubuntu-Regular.ttf",  "Ubuntu/Ubuntu-Bold.ttf",
+      "SourceSerif4Caption/SourceSerif4Caption-Regular.ttf",
+      "SourceSerif4Caption/SourceSerif4Caption-Bold.ttf",
+      "SourceSerif4Caption/SourceSerif4Caption-It.ttf",
+      "SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf",
+      "Inter/Inter-Regular.ttf",
+      "Inter/Inter-Bold.ttf",
+      "NotoSans/NotoSans-Regular.ttf",
+      "NotoSans/NotoSans-Bold.ttf",
+      "NotoSans/NotoSans-Italic.ttf",
+      "NotoSans/NotoSans-BoldItalic.ttf",
+      "Ubuntu/Ubuntu-Regular.ttf",
+      "Ubuntu/Ubuntu-Bold.ttf",
   };
   return fonts;
 }

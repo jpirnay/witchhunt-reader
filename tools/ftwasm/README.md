@@ -292,14 +292,17 @@ first differing byte's section, for example "style 2 kern matrix [37]".
 | case | what it covers | sizes | files identical | JS | Python |
 |---|---|---|---:|---:|---:|
 | Literata (4 styles) | the sd-fonts.yaml family; GPOS extension lookups | 10–18 | 5/5 | 0.84 s | 247 s |
-| Bookerly-SD (4 styles, `builtin`) | GPOS **and GSUB** extension lookups (ligatures via type 7), as `generate-sd-fonts.sh` | 12–18 | 4/4 | 0.62 s | 263 s |
+| Serif-SD (4 styles, `builtin`) | Source Serif 4 Caption: GPOS extension lookups (kerning via type 9) and ligatures, as `generate-sd-fonts.sh` | 12–18 | 4/4 | 1.17 s | 165 s |
 | OpenDyslexic (4 styles) | **CFF** outlines (in the repo) | 12, 16 | 2/2 | 0.14 s | 243 s |
 | SourceSerif4 OTF (2 styles) | CFF, Adobe release | 14 | 1/1 | 0.15 s | 14 s |
 | Inter (2 styles) | 2048 upem: 129 kerning values in Inter Bold 12 pt are exact .5 ties where `Math.round` would differ | 12, 14 | 2/2 | 0.44 s | 43 s |
 | KernTest (3 styles, generated) | legacy `kern`: one subtable + GPOS (the table ignored), two format-0 subtables + a format-2 stub, Apple version 1 | 12, 14 | 2/2 | 0.32 s | 59 s |
 | SynthBold | `--synthetic-bold`, with bold = regular file (dilation verified as applied) | 14 | 1/1 | 0.18 s | 27 s |
 | Charis | single-style mode (positional font + `--style`) | 14 | 1/1 | 0.07 s | 11 s |
-| **total** | | | **18/18** (8.8 MiB) | | |
+| **total** | | | **18/18** | | |
+
+No case covers GSUB extension lookups (ligatures via type 7) since the Bookerly-SD case left with
+Bookerly: Source Serif 4 Caption's GSUB has none.
 
 A Bitter variable font is refused with: `Bitter[wght].ttf: variable fonts are not supported (it
 has an 'fvar' table). Use the static .ttf/.otf files of the family, or make a static instance
@@ -312,7 +315,7 @@ deriving classes.
 
 ```sh
 node test/file_parity.mjs                                  # all cases; Python output cached in out/cli/
-node test/file_parity.mjs --cases Literata,Bookerly --regen
+node test/file_parity.mjs --cases Literata,Serif --regen
 node test/bench_writer.mjs
 ```
 

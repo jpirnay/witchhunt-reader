@@ -1,9 +1,9 @@
 #pragma once
 
-// What the TTF engine draws for every glyph of Bookerly Regular at 14 pt, as one FNV-1a hash. The host test
-// (test/ttf_rasterizer/TtfVsFreeTypeTest.cpp) computes it from the source font, and so does the device bench
+// What the TTF engine draws for every glyph of Source Serif 4 Caption Regular at 14 pt, as one FNV-1a hash. The host
+// test (test/ttf_rasterizer/TtfVsFreeTypeTest.cpp) computes it from the source font, and so does the device bench
 // (bench/ttf_raster_main.cpp): equal hashes mean the device draws exactly what the host checked against
-// FreeType. A change to the engine's output changes it; update kBookerlyRegular14pt from the host test.
+// FreeType. A change to the engine's output changes it; update kSerifRegular14pt from the host test.
 
 #include <cstdint>
 
@@ -12,7 +12,7 @@
 namespace ttf_golden {
 
 constexpr uint32_t kSeed = 2166136261u;
-constexpr uint32_t kBookerlyRegular14pt = 0xDE1AEEA7u;
+constexpr uint32_t kSerifRegular14pt = 0x239DD1BBu;
 
 inline uint32_t mix(const uint32_t hash, const uint8_t byte) { return (hash ^ byte) * 16777619u; }
 

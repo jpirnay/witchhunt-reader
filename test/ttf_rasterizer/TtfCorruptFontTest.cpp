@@ -89,11 +89,11 @@ Rasterizer& sharedRasterizer() {
 }  // namespace
 
 TEST(TtfCorruptFont, TheIntactFontRenders) {
-  EXPECT_GT(exercise(readFont("Bookerly/Bookerly-Regular.ttf"), sharedRasterizer()), 100);
+  EXPECT_GT(exercise(readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf"), sharedRasterizer()), 100);
 }
 
 TEST(TtfCorruptFont, AFontCutShortAnywhereIsSafe) {
-  const std::vector<uint8_t> font = readFont("Bookerly/Bookerly-Regular.ttf");
+  const std::vector<uint8_t> font = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
   std::vector<uint32_t> cuts = {0, 1, 4, 11, 12, 13, 100, 200};
   for (const TableSpan& t : tables(font)) {
     for (const uint32_t at : {t.offset, t.offset + 1, t.offset + t.length / 2, t.offset + t.length - 1}) {
@@ -109,8 +109,8 @@ TEST(TtfCorruptFont, AFontCutShortAnywhereIsSafe) {
 }
 
 TEST(TtfCorruptFont, RandomBytesInAnyTableAreSafe) {
-  const std::vector<std::string> sources = {"Bookerly/Bookerly-Regular.ttf", "NotoSans/NotoSans-Italic.ttf",
-                                            "Inter/Inter-Bold.ttf"};
+  const std::vector<std::string> sources = {"SourceSerif4Caption/SourceSerif4Caption-Regular.ttf",
+                                            "NotoSans/NotoSans-Italic.ttf", "Inter/Inter-Bold.ttf"};
   Random random{20261014};
   for (const std::string& source : sources) {
     const std::vector<uint8_t> original = readFont(source);
@@ -128,7 +128,7 @@ TEST(TtfCorruptFont, RandomBytesInAnyTableAreSafe) {
 }
 
 TEST(TtfCorruptFont, RandomBytesInTheDirectoryAreSafe) {
-  const std::vector<uint8_t> original = readFont("Bookerly/Bookerly-Regular.ttf");
+  const std::vector<uint8_t> original = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
   Random random{7};
   const uint32_t directoryEnd = 12 + 16 * static_cast<uint32_t>(original[4] << 8 | original[5]);
   for (int round = 0; round < 300; ++round) {
@@ -161,8 +161,8 @@ TEST(TtfCorruptFont, DamagedGlyphsFailTheGlyphNotTheDevice) {
   // Aimed at what a render reads: the glyph's own record, its loca and hmtx entries, maxp's limits (which size
   // the scratch block) and head. The block is planned from the damaged face, at three pool sizes, and the
   // glyph and its neighbours are drawn at three sizes. The tail asserts the damage reached the loader.
-  const std::vector<std::string> sources = {"Bookerly/Bookerly-Regular.ttf", "NotoSans/NotoSans-Italic.ttf",
-                                            "Inter/Inter-Bold.ttf"};
+  const std::vector<std::string> sources = {"SourceSerif4Caption/SourceSerif4Caption-Regular.ttf",
+                                            "NotoSans/NotoSans-Italic.ttf", "Inter/Inter-Bold.ttf"};
   const uint32_t pools[] = {2048, kPoolBytesFlash, kPoolBytesSd};
   const uint32_t sizes[] = {ppemFromPoints(8), ppemFromPoints(14), ppemFromPoints(40)};
   Random random{20261015};

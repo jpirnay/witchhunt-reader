@@ -149,15 +149,15 @@ except ImportError:
 
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_BOOKERLY_FONT = os.path.join(
+_SERIF_FONT = os.path.join(
     _PROJECT_ROOT, "lib", "EpdFont", "builtinFonts", "source",
-    "Bookerly", "Bookerly-Regular.ttf",
+    "SourceSerif4Caption", "SourceSerif4Caption-Regular.ttf",
 )
 
 
 def _get_font(size=20):
-    """Get the Bookerly font at the requested size, with system fallbacks."""
-    paths = [_BOOKERLY_FONT]
+    """Get Source Serif 4 Caption (the built-in Serif's source) at the requested size, with system fallbacks."""
+    paths = [_SERIF_FONT]
     for path in paths:
         try:
             return ImageFont.truetype(path, size)
