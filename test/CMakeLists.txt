@@ -150,6 +150,8 @@ set(I18N_GENERATED_KEYS "${I18N_GENERATED_DIR}/I18nKeys.h")
 set(I18N_GENERATED_STRINGS "${I18N_GENERATED_DIR}/I18nStrings.cpp")
 
 file(GLOB I18N_TRANSLATION_FILES "${REPO_ROOT}/lib/I18n/translations/*.yaml")
+# ...and the past releases' slot layouts it emits the conversion tables from.
+file(GLOB I18N_LEGACY_LAYOUTS "${REPO_ROOT}/lib/I18n/legacy/*.keys")
 # gen_i18n.py also checks every translation against the UI font headers.
 file(GLOB I18N_UI_FONT_HEADERS "${REPO_ROOT}/lib/EpdFont/builtinFonts/*.h")
 
@@ -158,7 +160,7 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E make_directory ${I18N_GENERATED_DIR}
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/gen_i18n.py
           ${REPO_ROOT}/lib/I18n/translations ${I18N_GENERATED_DIR}
-  DEPENDS ${REPO_ROOT}/scripts/gen_i18n.py ${I18N_TRANSLATION_FILES}
+  DEPENDS ${REPO_ROOT}/scripts/gen_i18n.py ${I18N_TRANSLATION_FILES} ${I18N_LEGACY_LAYOUTS}
           ${REPO_ROOT}/lib/EpdFont/scripts/ui_font_coverage.py ${I18N_UI_FONT_HEADERS}
   COMMENT "Generating I18n headers for host tests"
   VERBATIM

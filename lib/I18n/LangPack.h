@@ -1,5 +1,7 @@
 #pragma once
 
+#include <FlashLangPartition.h>
+
 #include <cstddef>
 #include <cstdint>
 
@@ -55,6 +57,11 @@ struct Header {
   uint32_t payloadOffset() const { return HEADER_BYTES; }
   uint32_t extOffset() const { return HEADER_BYTES + payloadLen; }
 };
+
+// CRC-32 as zlib computes it, chained from 0: what gen_i18n.py writes. ROM code on the device.
+uint32_t crc32(uint32_t crc, const void* data, size_t len);
+// `v` little-endian into p[0..3], as the pack stores its numbers.
+void put32(uint8_t* p, uint32_t v);
 
 // FNV-1a of a key's name ("STR_SETTINGS_TITLE"). gen_i18n.py fails the build on two keys with one hash.
 constexpr uint32_t keyHash(const char* name) {
@@ -126,5 +133,23 @@ class EntryParser {
   uint8_t hashBytes_ = 0;
   uint32_t entries_ = 0;
 };
+
+// The firmware's keys, as findKey() searches them.
+struct KeyTable {
+  const uint32_t* hashes;
+  const uint16_t* byHash;
+  uint16_t count;
+};
+
+struct StringCounts {
+  uint32_t known = 0;    // written into the slot
+  uint32_t unknown = 0;  // of keys this firmware does not have: skipped
+};
+
+// The payload of the pack `h` describes, from `src` (positioned at its start), into the slot: the string
+// of every key `keys` knows, under its StrId; the rest are skipped. Inflates through out.scratch(). False
+// when the payload is not what the header says or the slot refuses a string.
+bool inflateStrings(const ByteSource& src, const Header& h, const KeyTable& keys,
+                    FlashLangPartition::StringsWriter& out, StringCounts* counts = nullptr);
 
 }  // namespace langpack

@@ -165,6 +165,26 @@ MapResult map(uint8_t langIndex, uint32_t stamp, uint16_t keyCount, Mapped* out)
 bool acquire(uint8_t langIndex, uint32_t stamp, uint16_t keyCount, const Strings& strings, const Extension* ext,
              Mapped* out);
 
+// A slot an earlier firmware wrote, which held one NUL-terminated string per StrId of THAT firmware,
+// in its order, empty where the language left the key to English; a table entry with bit 15 set named
+// that English string by its offset. Format 1 (2.40) has a 32 B header in the last 64 KB of the
+// partition, format 2 (2.41RC) the 40 B header of this slot at this slot's place.
+struct LegacySlot {
+  uint8_t format;
+  uint8_t langIndex;  // in that firmware's Language order
+  uint16_t keyCount;
+  const uint16_t* table;
+  const char* data;
+  uint32_t dataLen;
+  bool hasExtension;  // format 2 with bytes after its strings: a CJK language's UI faces
+};
+
+// Maps the slot of `format` (1 or 2) for the conversion after an update, when a header of that format
+// is there, its table and strings lie inside it and, for format 2, the strings pass their CRC. What it
+// holds is only as sound as a format-1 slot can be proved: the caller checks it entry by entry
+// (langpack::oldSlotSound). unmap() releases it; nothing else may be mapped meanwhile.
+bool mapLegacy(uint8_t format, LegacySlot* out);
+
 // Release the mapping. No-op if not mapped.
 void unmap();
 

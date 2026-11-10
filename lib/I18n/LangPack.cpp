@@ -10,16 +10,19 @@
 
 namespace langpack {
 
+uint32_t crc32(const uint32_t crc, const void* data, const size_t len) {
+  return esp_rom_crc32_le(crc, static_cast<const uint8_t*>(data), static_cast<uint32_t>(len));
+}
+
+void put32(uint8_t* p, const uint32_t v) {
+  for (int i = 0; i < 4; ++i) p[i] = static_cast<uint8_t>(v >> (8 * i));
+}
+
 namespace {
 
 constexpr char MAGIC[4] = {'C', 'P', 'L', 'G'};
 // No pack comes near it (Russian, the largest, inflates to ~31 KB); a header that says more is not one.
 constexpr uint32_t MAX_SECTION_BYTES = 1024 * 1024;
-
-// CRC-32 as zlib computes it, chained from 0: what gen_i18n.py writes. ROM code on the device.
-uint32_t crc32(const uint32_t crc, const void* data, const size_t len) {
-  return esp_rom_crc32_le(crc, static_cast<const uint8_t*>(data), static_cast<uint32_t>(len));
-}
 
 uint16_t get16(const uint8_t* p) { return static_cast<uint16_t>(p[0] | (p[1] << 8)); }
 uint32_t get32(const uint8_t* p) {
@@ -29,9 +32,6 @@ uint32_t get32(const uint8_t* p) {
 void put16(uint8_t* p, const uint16_t v) {
   p[0] = static_cast<uint8_t>(v);
   p[1] = static_cast<uint8_t>(v >> 8);
-}
-void put32(uint8_t* p, const uint32_t v) {
-  for (int i = 0; i < 4; ++i) p[i] = static_cast<uint8_t>(v >> (8 * i));
 }
 
 // The inflate's state and where its input comes from. The reader comes first: the uzlib callback gets
@@ -167,6 +167,52 @@ bool inflateSection(const ByteSource& src, const uint32_t len, const uint32_t ra
     ctx->crc = crc32(ctx->crc, io, static_cast<size_t>(got));
   }
   return produced == rawLen && ctx->crc == crc;
+}
+
+namespace {
+
+// The entries of a pack, into the slot: those of keys the firmware has, by StrId.
+class SlotStrings final : public EntrySink {
+ public:
+  SlotStrings(const KeyTable& keys, FlashLangPartition::StringsWriter& out) : keys_(keys), out_(out) {}
+  bool begin(const uint32_t hash) override {
+    const uint16_t id = findKey(hash, keys_.hashes, keys_.byHash, keys_.count);
+    skip_ = id == NO_KEY;
+    if (skip_) {
+      ++counts.unknown;
+      return true;
+    }
+    ++counts.known;
+    return out_.beginKey(id);
+  }
+  bool bytes(const char* data, const size_t len) override { return skip_ || out_.write(data, len); }
+  bool end() override { return skip_ || out_.write("", 1); }
+
+  StringCounts counts;
+
+ private:
+  const KeyTable& keys_;
+  FlashLangPartition::StringsWriter& out_;
+  bool skip_ = false;
+};
+
+bool feedParser(void* ctx, const uint8_t* data, const size_t len) {
+  return static_cast<EntryParser*>(ctx)->feed(data, len);
+}
+
+}  // namespace
+
+bool inflateStrings(const ByteSource& src, const Header& h, const KeyTable& keys,
+                    FlashLangPartition::StringsWriter& out, StringCounts* counts) {
+  if (out.scratchBytes() < WINDOW_BYTES + IO_BYTES) return false;
+  SlotStrings strings(keys, out);
+  EntryParser parser(strings);
+  uint8_t* scratch = out.scratch();
+  const bool ok = inflateSection(src, h.payloadLen, h.rawLen, h.payloadCrc, scratch, scratch + WINDOW_BYTES,
+                                 {&feedParser, &parser}) &&
+                  parser.atBoundary();
+  if (counts) *counts = strings.counts;
+  return ok;
 }
 
 bool EntryParser::feed(const uint8_t* data, const size_t len) {

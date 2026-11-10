@@ -7,10 +7,13 @@
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <new>
 #include <string>
 
 #include "I18nStrings.h"
 #include "LangPack.h"
+#include "LangPackConvert.h"
 
 using namespace i18n_strings;
 
@@ -70,58 +73,98 @@ bool openCardPack(const char* path, const char* code, CardPack& pack) {
   return true;
 }
 
-// The entries of a pack, into the slot: those of keys this firmware has, by StrId.
-class SlotStrings final : public langpack::EntrySink {
- public:
-  explicit SlotStrings(FlashLangPartition::StringsWriter& out) : out_(out) {}
-  bool begin(const uint32_t hash) override {
-    const uint16_t id = langpack::findKey(hash, KEY_HASHES, KEYS_BY_HASH, KEY_COUNT);
-    skip_ = id == langpack::NO_KEY;
-    if (skip_) {
-      ++unknown_;
-      return true;
-    }
-    ++known_;
-    return out_.beginKey(id);
-  }
-  bool bytes(const char* data, const size_t len) override { return skip_ || out_.write(data, len); }
-  bool end() override { return skip_ || out_.write("", 1); }
-  uint32_t known() const { return known_; }
-  uint32_t unknown() const { return unknown_; }
-
- private:
-  FlashLangPartition::StringsWriter& out_;
-  bool skip_ = false;
-  uint32_t known_ = 0;
-  uint32_t unknown_ = 0;
-};
-
 int readCard(void* ctx, uint8_t* buf, const size_t len) { return static_cast<HalFile*>(ctx)->read(buf, len); }
-
-bool feedParser(void* ctx, const uint8_t* data, const size_t len) {
-  return static_cast<langpack::EntryParser*>(ctx)->feed(data, len);
-}
 
 // FlashLangPartition::Strings::produce: the pack's payload, inflated through the slot builder's scratch.
 bool producePackStrings(void* ctx, FlashLangPartition::StringsWriter& out) {
   auto& pack = *static_cast<CardPack*>(ctx);
   const langpack::Header& h = pack.header;
   if (!pack.file.seekSet(h.payloadOffset())) return false;
-  SlotStrings strings(out);
-  langpack::EntryParser parser(strings);
-  uint8_t* scratch = out.scratch();
-  if (!langpack::inflateSection({&readCard, &pack.file}, h.payloadLen, h.rawLen, h.payloadCrc, scratch,
-                                scratch + langpack::WINDOW_BYTES, {&feedParser, &parser}) ||
-      !parser.atBoundary()) {
+  langpack::StringCounts counts;
+  if (!langpack::inflateStrings({&readCard, &pack.file}, h, {KEY_HASHES, KEYS_BY_HASH, KEY_COUNT}, out, &counts)) {
     LOG_ERR("I18N", "language pack %s does not inflate to what its header says", h.code);
     return false;
   }
   LOG_INF("I18N", "language pack %s: %u strings, %u of keys this firmware does not have", h.code,
-          static_cast<unsigned>(strings.known()), static_cast<unsigned>(strings.unknown()));
+          static_cast<unsigned>(counts.known), static_cast<unsigned>(counts.unknown));
+  return true;
+}
+
+// The release whose slot looks like `old`: its format and key count. gen_i18n.py leaves out releases
+// that cannot be told apart that way.
+const LegacyLayout* layoutOf(const FlashLangPartition::LegacySlot& old) {
+  for (uint8_t i = 0; i < LEGACY_LAYOUT_COUNT; ++i) {
+    const LegacyLayout& layout = LEGACY_LAYOUTS[i];
+    if (layout.ids && layout.slotFormat == old.format && layout.keyCount == old.keyCount) return &layout;
+  }
+  return nullptr;
+}
+
+bool writeToCard(void* ctx, const void* data, const size_t len) {
+  return static_cast<HalFile*>(ctx)->write(data, len) == len;
+}
+bool rewindCard(void* ctx) { return static_cast<HalFile*>(ctx)->seekSet(0); }
+
+// The strings of `old`, a slot of `layout`'s release holding `lang`, as the pack `path` on the card.
+// Written beside it and renamed into place, so a cut-off write leaves no pack that looks whole.
+bool writeConvertedPack(const FlashLangPartition::LegacySlot& old, const LegacyLayout& layout, const Language lang,
+                        const char* code, const char* path) {
+  const langpack::OldSlot slot{old.table, old.data, old.dataLen, old.keyCount};
+  if (!langpack::oldSlotSound(slot)) {
+    LOG_ERR("I18N", "the %s slot does not hold together as one - not converted", layout.release);
+    return false;
+  }
+  char tmp[56];
+  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+  Storage.mkdir(I18n::PACK_DIR);
+  HalFile file;
+  if (!Storage.openFileForWrite("I18N", tmp, file)) return false;
+  // One stored block's worth: the pack is written in pieces of this, and is ~4% larger than a block of
+  // 64 KB would make it. Transient.
+  static constexpr size_t BLOCK_BYTES = 1024;
+  const std::unique_ptr<uint8_t[]> block(new (std::nothrow) uint8_t[BLOCK_BYTES]);
+  langpack::PackWriter writer({&writeToCard, &rewindCard, &file}, block.get(), BLOCK_BYTES);
+  const bool written = block && writer.begin(code, LANGUAGE_NAMES[static_cast<size_t>(lang)]) &&
+                       langpack::convertOldSlot(slot, layout.ids, KEY_HASHES, KEY_COUNT, writer) && writer.finish();
+  file.close();
+  if (!written || !Storage.rename(tmp, path)) {
+    LOG_ERR("I18N", "could not write %s", path);
+    Storage.remove(tmp);
+    return false;
+  }
+  LOG_INF("I18N", "language %s: the %s slot converted into %s, %u strings", code, layout.release, path,
+          static_cast<unsigned>(writer.header().entries));
   return true;
 }
 
 }  // namespace
+
+bool I18n::convertLegacySlot(const char* code, const char* path) {
+  const char* upper = LANGUAGE_CODES[static_cast<size_t>(_language)];
+  // Format 2 first: a reader who came through 2.41RC may still have 2.40's older slot in the
+  // partition's last 64 KB. A constexpr array: a braced list here costs a copy in .data.
+  static constexpr uint8_t FORMATS[] = {2, 1};
+  for (const uint8_t format : FORMATS) {
+    FlashLangPartition::LegacySlot old{};
+    if (!FlashLangPartition::mapLegacy(format, &old)) continue;
+    const LegacyLayout* layout = layoutOf(old);
+    bool converted = false;
+    if (!layout) {
+      LOG_INF("I18N", "a format %u slot of %u keys: no release this firmware reads it by", format, old.keyCount);
+    } else if (old.langIndex >= strlen(layout->languages) / 2 || strlen(upper) != 2 ||
+               strncmp(layout->languages + 2 * old.langIndex, upper, 2) != 0) {
+      LOG_INF("I18N", "the %s slot holds another language than %s", layout->release, upper);
+    } else if (old.hasExtension) {
+      // A CJK language's slot also carries its UI faces, drawn from what that firmware's image held.
+      LOG_INF("I18N", "the %s slot of %s carries CJK UI faces - not converted", layout->release, upper);
+    } else {
+      converted = writeConvertedPack(old, *layout, _language, code, path);
+    }
+    FlashLangPartition::unmap();
+    if (converted) return true;
+  }
+  return false;
+}
 
 bool I18n::packPath(const Language lang, char* out, const size_t outSize) {
   const auto index = static_cast<size_t>(lang);
@@ -157,8 +200,12 @@ void I18n::refreshActiveStrings() {
 
   CardPack pack;
   if (!openCardPack(path, codeBuf, pack)) {
-    LOG_INF("I18N", "language %s: no pack on the card (%s) - English until one is installed", codeBuf, path);
-    return;
+    // An update from a firmware that kept its languages in the image leaves the reader's language in
+    // the slot and none on the card. Written out as a pack, it is read like any other.
+    if (Storage.exists(path) || !convertLegacySlot(codeBuf, path) || !openCardPack(path, codeBuf, pack)) {
+      LOG_INF("I18N", "language %s: no pack on the card (%s) - English until one is installed", codeBuf, path);
+      return;
+    }
   }
 
   // What the slot must hold for this language: the pack's strings for this firmware's keys, and

@@ -84,6 +84,13 @@ class I18n {
   // card included, so the reader degrades to readable English rather than to blank rows.
   void refreshActiveStrings();
 
+  // After an update from a firmware that kept its languages in the image (2.40, 2.41RC): when the
+  // flash slot that firmware left holds _language in the layout of a release the generator knows
+  // (LEGACY_LAYOUTS), writes its strings to the card as the pack `path` (LangPackConvert.h). False when
+  // there is no such slot, it holds another language or a CJK language's faces, or the card refused
+  // the file.
+  bool convertLegacySlot(const char* code, const char* path);
+
   Language _language;
 
   // The resolved (data, offsets) pair for _language.

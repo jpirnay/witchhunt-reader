@@ -387,6 +387,61 @@ bool acquire(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCo
   return built == MapResult::Ok || built == MapResult::WithoutExtension || built == MapResult::ExtensionCorrupt;
 }
 
+bool mapLegacy(const uint8_t format, LegacySlot* out) {
+  if (!out || (format != 1 && format != 2)) return false;
+  const esp_partition_t* part = findPartition();
+  if (!part) return false;
+  // Format 1 kept a 64 KB slot at the partition's end, format 2 this one.
+  static constexpr size_t FORMAT1_SLOT_BYTES = 64 * 1024;
+  static constexpr size_t FORMAT1_HEADER_BYTES = 32;
+  const size_t slotBytes = format == 1 ? FORMAT1_SLOT_BYTES : FlashFontPartition::LANG_RESERVED_BYTES;
+  if (part->size <= slotBytes) return false;
+  const size_t slot = static_cast<size_t>(part->size) - slotBytes;
+
+  // Both formats start alike: magic, version, language, key count, stamp, table, data, data length;
+  // format 2 goes on with the extension and the CRCs.
+  Header h = {};
+  const size_t headerBytes = format == 1 ? FORMAT1_HEADER_BYTES : HEADER_BYTES;
+  if (esp_partition_read(part, slot, &h, headerBytes) != ESP_OK) return false;
+  if (memcmp(h.magic, MAGIC, 4) != 0 || h.version != format || h.keyCount == 0) return false;
+  if (h.tableOff != headerBytes || h.dataOff < h.tableOff + static_cast<uint32_t>(h.keyCount) * 2u ||
+      static_cast<size_t>(h.dataOff) + h.dataLen > slotBytes || h.dataLen == 0) {
+    LOG_ERR("FLP", "format %u slot: a header with its strings outside it", format);
+    return false;
+  }
+
+  unmap();
+  const void* raw = nullptr;
+  const size_t need = roundUp(static_cast<size_t>(h.dataOff) + h.dataLen, MAP_PAGE_BYTES);
+  if (esp_partition_mmap(part, slot, need, ESP_PARTITION_MMAP_DATA, &raw, &s_mmapHandle) != ESP_OK) {
+    LOG_ERR("FLP", "format %u slot: mmap failed", format);
+    return false;
+  }
+  s_mmapPtr = static_cast<const uint8_t*>(raw);
+  s_mapBytes = need;
+
+  const bool hasExt = format == 2 && h.extLen != 0;
+  if (format == 2) {
+    const uint32_t crc =
+        crc32(crc32(0, s_mmapPtr + h.dataOff, h.dataLen), s_mmapPtr + h.tableOff, h.dataOff - h.tableOff);
+    if (crc != h.stringsCrc) {
+      LOG_ERR("FLP", "format 2 slot: its strings fail their CRC");
+      unmap();
+      return false;
+    }
+  }
+  out->format = format;
+  out->langIndex = h.langIndex;
+  out->keyCount = h.keyCount;
+  out->table = reinterpret_cast<const uint16_t*>(s_mmapPtr + h.tableOff);
+  out->data = reinterpret_cast<const char*>(s_mmapPtr + h.dataOff);
+  out->dataLen = h.dataLen;
+  out->hasExtension = hasExt;
+  LOG_INF("FLP", "format %u slot found: language %u, %u keys, %u B of strings%s", format, h.langIndex, h.keyCount,
+          static_cast<unsigned>(h.dataLen), hasExt ? ", an extension" : "");
+  return true;
+}
+
 void unmap() {
   if (!s_mmapPtr) return;
   esp_partition_munmap(s_mmapHandle);

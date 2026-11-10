@@ -276,6 +276,48 @@ def read_pack_file(data: bytes) -> Tuple[Dict[str, object], Dict[int, str], byte
     return header, values, extension
 
 
+def load_legacy_layouts(legacy_dir: Path) -> List[Dict[str, object]]:
+    """The slot layouts of named past releases (lib/I18n/legacy/<tag>.keys, written by i18n_legacy_layout.py): each
+    {release, slot_format, languages, keys}. A slot names no key, only an index, so converting one after an update
+    needs the order its release wrote. Two releases whose slots look alike -- one format, one key count -- but hold
+    other orders cannot be told apart by the firmware: both are left out, and their readers get English and the
+    download offer rather than another release's strings."""
+    layouts: List[Dict[str, object]] = []
+    for path in sorted(Path(legacy_dir).glob("*.keys")):
+        fields: Dict[str, str] = {}
+        keys: List[str] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("STR_"):
+                keys.append(line)
+            else:
+                name, _, value = line.partition(" ")
+                fields[name] = value
+        if int(fields["keys"]) != len(keys):
+            raise ValueError(f"{path}: says {fields['keys']} keys, lists {len(keys)}")
+        if any(len(code) != 2 for code in fields["languages"].split()):
+            raise ValueError(f"{path}: the firmware reads two-letter language codes only")
+        layouts.append({
+            "release": fields["release"],
+            "slot_format": int(fields["slot_format"]),
+            "languages": fields["languages"].split(),
+            "keys": keys,
+        })
+    by_shape: Dict[Tuple[int, int], List[Dict[str, object]]] = {}
+    for layout in layouts:
+        by_shape.setdefault((layout["slot_format"], len(layout["keys"])), []).append(layout)
+    kept = []
+    for shape, group in by_shape.items():
+        if any(other["keys"] != group[0]["keys"] or other["languages"] != group[0]["languages"] for other in group):
+            names = ", ".join(str(g["release"]) for g in group)
+            print(f"  WARNING: releases {names} wrote format-{shape[0]} slots of {shape[1]} keys in other orders;"
+                  " none of them is converted")
+            continue
+        kept.append(group[0])
+    return sorted(kept, key=lambda layout: str(layout["release"]))
+
+
 def pack_family_name(yaml_stem: str) -> str:
     """The Font Manager's name for a language's pack: Language-<English name>, from the YAML file's name
     (german -> Language-German, portuguese_br -> Language-PortugueseBR)."""
@@ -852,8 +894,10 @@ def generate_keys_header(
     string_keys: List[str],
     output_path: str,
     verbose: bool = False,
+    legacy_layouts: Optional[List[Dict[str, object]]] = None,
 ) -> None:
     """Generate I18nKeys.h."""
+    legacy_layouts = legacy_layouts or []
     lines: List[str] = [
         "#pragma once",
         "#include <cstdint>",
@@ -879,6 +923,18 @@ def generate_keys_header(
     lines.append("// Identifies this build's StrId order: CRC32 of KEY_HASHES. A language slot built for another")
     lines.append("// order holds its strings under other StrIds, so this is mixed into its stamp.")
     lines.append(f"constexpr uint32_t KEY_LAYOUT_STAMP = 0x{key_layout_stamp(string_keys):08x};")
+    lines.append("")
+    lines.append("// The slot a named past release wrote, which held one string per StrId of that release: what")
+    lines.append("// the conversion after an update reads it by (I18n, LangPackConvert.h). lib/I18n/legacy/.")
+    lines.append("struct LegacyLayout {")
+    lines.append("  const char* release;")
+    lines.append("  uint8_t slotFormat;      // the FlashLangPartition format it wrote")
+    lines.append("  uint16_t keyCount;")
+    lines.append("  const uint16_t* ids;     // by the release's index: this build's StrId, 0xFFFF for a key it has not")
+    lines.append("  const char* languages;   // the release's Language order, two upper-case letters each")
+    lines.append("};")
+    lines.append("extern const LegacyLayout LEGACY_LAYOUTS[];")
+    lines.append(f"constexpr uint8_t LEGACY_LAYOUT_COUNT = {len(legacy_layouts)};")
     lines.append("")
     lines.append("// One entry per Language, indexed by its enum value. The English slot is")
     lines.append("// zeroed — there is nothing to decompress.")
@@ -1032,6 +1088,7 @@ def generate_strings_cpp(
     translations: Dict[str, List[str]],
     output_path: str,
     verbose: bool = False,
+    legacy_layouts: Optional[List[Dict[str, object]]] = None,
 ) -> None:
     """Generate I18nStrings.cpp."""
     lines: List[str] = [
@@ -1117,6 +1174,27 @@ def generate_strings_cpp(
     lines.append("const uint16_t KEYS_BY_HASH[] = {")
     for i in range(0, len(by_hash), 12):
         lines.append("    " + ", ".join(str(s) for s in by_hash[i : i + 12]) + ",")
+    lines.append("};")
+    lines.append("")
+
+    # --- The slots past releases wrote, for the conversion after an update -----
+    id_of = {key: i for i, key in enumerate(string_keys)}
+    for n, layout in enumerate(legacy_layouts or []):
+        ids = [id_of.get(key, 0xFFFF) for key in layout["keys"]]
+        lines.append(f"// {layout['release']}: {len(ids)} keys, {sum(i != 0xFFFF for i in ids)} of them this build's")
+        lines.append(f"static const uint16_t LEGACY_IDS_{n}[] = {{")
+        for i in range(0, len(ids), 12):
+            lines.append("    " + ", ".join(str(v) for v in ids[i : i + 12]) + ",")
+        lines.append("};")
+        lines.append("")
+    lines.append("const LegacyLayout LEGACY_LAYOUTS[] = {")
+    for n, layout in enumerate(legacy_layouts or []):
+        langs = "".join(layout["languages"])
+        lines.append(
+            f'    {{"{layout["release"]}", {layout["slot_format"]}, {len(layout["keys"])}, LEGACY_IDS_{n}, "{langs}"}},'
+        )
+    if not legacy_layouts:
+        lines.append("    {nullptr, 0, 0, nullptr, nullptr},  // none: a zero-length array is not C++")
     lines.append("};")
     lines.append("")
 
@@ -1330,6 +1408,7 @@ def main(
     # This script itself: a change to what it emits regenerates. Found from the tree, since PlatformIO runs it
     # without __file__.
     sources.append(font_root.parents[1] / "scripts" / "gen_i18n.py")
+    sources += list((Path(translations_dir).parent / "legacy").glob("*.keys"))
     if not force and all(t.exists() for t in targets):
         oldest_target = min(t.stat().st_mtime for t in targets)
         newest_source = max(s.stat().st_mtime for s in sources)
@@ -1346,8 +1425,10 @@ def main(
         languages, language_names, string_keys, translations, inherited_sets = (
             load_translations(translations_dir, verbose)
         )
-        # Over every key, used or not: the packs on the card carry them all.
-        check_key_hashes(string_keys)
+        # Over every key, used or not, and every key of a past release whose slot this firmware converts: the
+        # packs on the card carry them all.
+        legacy_layouts = load_legacy_layouts(Path(translations_dir).resolve().parent / "legacy")
+        check_key_hashes(set(string_keys).union(*(set(layout["keys"]) for layout in legacy_layouts)))
 
         # The packs in the repo are written by `--packs`, never by the build; say so when they lag the YAML files.
         packs_root = Path(translations_dir).resolve().parents[2] / "assets" / "sd-fonts"
@@ -1435,7 +1516,7 @@ def main(
             print(f"  Stripping {len(unused_set)} unused string(s) from output.")
 
         generate_keys_header(
-            languages, language_names, string_keys, str(out / "I18nKeys.h"), verbose
+            languages, language_names, string_keys, str(out / "I18nKeys.h"), verbose, legacy_layouts
         )
         generate_strings_header(
             languages, language_names, str(out / "I18nStrings.h"), verbose
@@ -1447,6 +1528,7 @@ def main(
             translations,
             str(out / "I18nStrings.cpp"),
             verbose,
+            legacy_layouts,
         )
 
         print()
