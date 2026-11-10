@@ -913,6 +913,14 @@ size_t ParsedText::objectsBefore(const size_t tokenIndex) const {
   return objects;
 }
 
+bool ParsedText::holdsObjectsOnly() const {
+  if (objects_.empty()) return false;
+  for (size_t i = 0; i < words.size(); ++i) {
+    if (!TokenBoundary::isObject(wordBoundaries[i]) && words[i] != " ") return false;
+  }
+  return true;
+}
+
 bool ParsedText::foldUniformWordSizes() {
   if (words.empty() || wordSizes.empty()) return false;
   const uint8_t first = wordSizes[0].pct;

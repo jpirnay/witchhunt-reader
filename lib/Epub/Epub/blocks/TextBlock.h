@@ -380,6 +380,9 @@ class TextBlock final : public Block {
   int annotationBand(const GfxRenderer& renderer, int fontId) const;
   // The same band from what a layout knows before the line exists.
   static int annotationBandFor(const GfxRenderer& renderer, int effFontId, float blockScale, uint8_t maxSizePct);
+  // How far below the band the line's baseline sits: the ascender of its tallest word size, which render() draws every
+  // word's baseline at. From what a layout knows before the line exists, as annotationBandFor is.
+  static int lineAscenderFor(const GfxRenderer& renderer, int effFontId, float blockScale, uint8_t maxSizePct);
   // No word draws scaled: block multiplier 1, no heading font, no word sizes, no SUP/SUB/SMALL_CAPS, no annotations,
   // not vertical.
   bool drawsUnscaled() const;

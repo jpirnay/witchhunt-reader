@@ -599,6 +599,8 @@ class ParsedText {
   std::span<const LineObject> lineObjects() const {
     return objectLine_ ? std::span<const LineObject>(objectLine_->objects) : std::span<const LineObject>();
   }
+  // Whether the block holds objects and nothing else to read: no token but objects and no-break spaces.
+  bool holdsObjectsOnly() const;
   // Tokens [firstToken, firstToken + tokenCount) become one ruby group: the first keeps its boundary (a break may
   // come before the group), the rest are glued to it. False when the range is empty, runs past size(), or a token
   // in it already has a role.
