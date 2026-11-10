@@ -235,7 +235,8 @@ none, and a call holds at most 32 code points. uharfbuzz 0.56.4 bundles HarfBuzz
   reaches 2 clusters). The fix: size the buffer for run + 2 x 16 for Arabic calls.
 - **The soft hyphen and the long split word above** sit in the shaper's run scan and its buffer: left for the code
   audit that also takes item 3 (2026-11-08).
-- **Ayah and number signs** (U+06DD and the others) do not enclose their digits.
+- **Ayah and number signs**: done; a number sign with its digits is a run of its own, drawn around them
+  ([text-shaping.md](../text-shaping.md#the-run-scan), "Number runs").
 - **Fonts without GPOS:** HarfBuzz's fallback mark placement and legacy `kern` are not ported.
 - **The line breaker** measures a consumed letter at width 0 when its partner degraded: a known parity gap, rare.
 - **Optional:** Noto Nastaliq Urdu, the style Urdu readers expect. A heavy font with complex cursive positioning;

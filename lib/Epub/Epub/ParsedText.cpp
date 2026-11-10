@@ -1027,8 +1027,11 @@ void ParsedText::decideShaping(const GfxRenderer& renderer, const int fontId) {
     return false;
   };
   // A run member, not any code point of the blocks: a Hebrew paragraph with Arabic-Indic digits has no Arabic run,
-  // and shaping it would cost a call per digit token and merge its glued groups for nothing.
-  const auto holdsArabicRun = [](const std::string& w) { return arabic::holdsRunMember(w.data(), w.size()); };
+  // and shaping it would cost a call per digit token and merge its glued groups for nothing. A number sign with its
+  // digits is a run (the end of ayah drawn around the verse number).
+  const auto holdsArabicRun = [](const std::string& w) {
+    return arabic::holdsRunMember(w.data(), w.size()) || arabic::holdsNumberSignWithDigit(w.data(), w.size());
+  };
   const auto holdsMyanmar = [](const std::string& w) { return myanmar::holdsMyanmar(w.data(), w.size()); };
   shapes_ = std::any_of(words.begin(), words.end(), [](const std::string& w) { return IndicShaper::holdsIndic(w); }) ||
             (bidi_ && faceDraws(holdsArabicRun, arabic::kProbe)) || faceDraws(holdsMyanmar, myanmar::kProbe);

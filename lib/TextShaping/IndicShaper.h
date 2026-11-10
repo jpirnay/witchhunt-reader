@@ -23,14 +23,15 @@ struct Buffer;
 // #3787 ("feat: add Indic language support without HarfBuzz", SSafayet / @SSafayet).
 namespace IndicShaper {
 
-// What a run is written in.
-enum class RunKind : uint8_t { Indic, Arabic, Myanmar };
+// What a run is written in. ArabicNumber is an Arabic number sign with the digits after it (arabic::isNumberSign).
+enum class RunKind : uint8_t { Indic, Arabic, Myanmar, ArabicNumber };
 
 // One run of a token, bytes [begin, end): upstream's scanRun for Indic text, one script's letters with the shared code
 // points around them (dandas, Vedic signs, joiners, the dotted circle), an Arabic run (arabic::isRunMember code
 // points with ZWJ and ZWNJ inside), or a Myanmar run (myanmar::isRunMember code points with the joiners and the dotted
-// circle among them). An Arabic or Myanmar run's `script` is null; an Indic run's is null for shared code points
-// alone.
+// circle among them), or an Arabic number sign with the digits after it, at most arabic::kNumberSignDigits (a digit
+// alone, or a sign with none after it, is no run). An Arabic, Myanmar or number run's `script` is null; an Indic run's
+// is null for shared code points alone.
 struct Run {
   uint16_t begin;
   uint16_t end;
@@ -42,8 +43,9 @@ struct Run {
 // abut with no byte between them.
 constexpr size_t maxRuns(size_t bytes) { return bytes / 2 + 1; }
 
-// The token's runs, in order, into `out` (room for maxRuns(text.size())); text outside them is not listed. An Arabic
-// run starts at a run member that is not a mark; an Arabic letter ends an Indic run, and an Indic code point (shared
+// The token's runs, in order, into `out` (room for maxRuns(text.size())); text outside them is not listed. A number
+// sign followed by a digit starts a number run, which ends after its digits; an Arabic run starts at a run member that
+// is not a mark; an Arabic letter ends an Indic run, and an Indic code point (shared
 // ones included) ends an Arabic run, except that a ZWJ or ZWNJ after an Arabic member stays in its run. A Myanmar run
 // starts at a member, or at the joiners and dotted circles just before one, and ends at the first code point that is
 // neither a member nor one of those; a Myanmar member ends an Indic or an Arabic run. A token of more than UINT16_MAX
@@ -140,13 +142,13 @@ enum class Outcome : uint8_t { Plain, Formed, Degraded };
 // A token's pieces into `sink`, each run under its own script, in one call. With a face, per run: Indic shared code
 // points alone are Text; an Indic script the face does not map (its probe letter) is Reordered when IndicReorder
 // changes it, else Text; Arabic the face does not map (beh) is Text, never reordered, and so is Myanmar the face does
-// not map (ka); any other run is Glyphs, shaped in the book's language with context from the glued neighbours: an
-// Indic or Myanmar neighbour's nearest syllable, an Arabic neighbour's nearest whole clusters (and an Arabic run's
-// joiners just before it). A Glyphs piece is the run's records
-// in visual order (an Arabic run's last code point first); a run whose glyphs its context took (a lam-alef across a
-// glue) is a Glyphs piece of no record. Text between runs is Text. Without a face, IndicReorder's form of the text
-// between the Arabic runs, a Reordered piece where it changes it: over the whole token when it holds no Arabic run.
-// Under RenderLock (the face maps the glyph store).
+// not map (ka) and a number run whose sign it does not map; any other run is Glyphs (a number run with no context),
+// shaped in the book's language with context from the glued neighbours: an Indic or Myanmar neighbour's nearest
+// syllable, an Arabic neighbour's nearest whole clusters (and an Arabic run's joiners just before it). A Glyphs piece
+// is the run's records in visual order (an Arabic run's last code point first); a run whose glyphs its context took (a
+// lam-alef across a glue) is a Glyphs piece of no record. Text between runs is Text. Without a face, IndicReorder's
+// form of the text between the Arabic runs, a Reordered piece where it changes it: over the whole token when it holds
+// no Arabic run. Under RenderLock (the face maps the glyph store).
 Outcome shapeToken(std::string_view text, const Request& request, CallMemory& memory, PieceSink& sink);
 
 // Whether `face` draws the script whose probe letter is `probe` (arabic::kProbe, beh; myanmar::kProbe, ka): it maps it,
