@@ -51,3 +51,22 @@ To use it, run:
 ```sh
 ./scripts/update_hyphenation.sh
 ```
+
+## Hyphenation packs
+
+Only English's trie is compiled into the firmware. Every other language's ships as a hyphenation pack on the SD
+card, `hyph-<code>.cphyph` ([file-formats.md](file-formats.md#hyphenation-packs-cphy-and-the-store-whhs)), which the
+Font Manager downloads from `assets/sd-fonts/Hyphenation-<Language>/`. `scripts/build_hyphenation_packs.py` writes
+them: the nine languages that used to be compiled in from their generated headers here (the host tests compile them
+in again with `HYPHENATION_ALL_BUILTIN` and check the packs hold the same bytes), the others straight from hypher's
+`tries/<code>.bin`:
+
+```sh
+python3 scripts/build_hyphenation_packs.py --hypher-tries <hypher checkout>/tries
+```
+
+A new language needs its entry in `LanguageRegistry.cpp` (letters, case, minima, whether its breaks show a hyphen),
+its code in `build_hyphenation_packs.py` and in `sd-fonts.yaml`, and its expected breaks for
+`test/hyphenation_store`: `test/hyphenation_store/resources/generate_pack_reference.py` runs Liang's algorithm over
+the language's hyph-utf8 patterns themselves.
+

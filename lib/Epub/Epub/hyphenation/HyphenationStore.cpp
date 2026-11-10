@@ -186,7 +186,7 @@ bool HyphenationStore::commit(const uint16_t keep, const Entry* added) {
 }
 
 HyphenationStore::Fill HyphenationStore::fill(HyphenationPackSource& src, const hyphpack::Header& header,
-                                              uint8_t* scratch, const uint32_t scratchBytes) {
+                                              uint8_t* scratch, const uint32_t scratchBytes, const bool mayDrop) {
   if (!scratch || scratchBytes == 0) return Fill::BadSource;
   const uint32_t totalSectors = payloadEnd() / kSectorBytes;
   const uint32_t need = sectorsFor(header.payloadSize);
@@ -246,6 +246,7 @@ HyphenationStore::Fill HyphenationStore::fill(HyphenationPackSource& src, const 
       }
     }
     if (found) break;
+    if (!mayDrop) return Fill::WouldDrop;
     int8_t oldest = -1;
     for (uint8_t i = 0; i < count_; ++i) {
       if (runs[i].kept && (oldest < 0 || runs[i].sequence < runs[oldest].sequence)) oldest = static_cast<int8_t>(i);

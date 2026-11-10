@@ -77,6 +77,7 @@ class HyphenationStore {
     NoSpace,      // the payload is larger than the whole region
     BadSource,    // the source could not be read, or its bytes do not match the header's CRC
     FlashFailed,  // an erase, program or read-back failed; the header still names what it named before
+    WouldDrop,    // asked not to drop another language, and there is no room without dropping one
   };
 
   explicit HyphenationStore(NorFlash& flash) : flash_(flash) {}
@@ -97,7 +98,10 @@ class HyphenationStore {
   // Copies the pack `header` describes (from readPackHeader) out of `src` into the store, dropping the oldest
   // entries while there is no room, and replacing this language's entry if it holds other bytes. `scratch` is the
   // copy buffer (1 KB is plenty: a program call costs ~0.1 ms on top of its bytes on the X3). Unmaps everything first.
-  Fill fill(HyphenationPackSource& src, const hyphpack::Header& header, uint8_t* scratch, uint32_t scratchBytes);
+  // With `mayDrop` false no other language is dropped: WouldDrop, and nothing written, when the pack does not fit
+  // beside them (a pack copied at its download, which a book open copies later if it must).
+  Fill fill(HyphenationPackSource& src, const hyphpack::Header& header, uint8_t* scratch, uint32_t scratchBytes,
+            bool mayDrop = true);
 
   // The patterns of `code`, mapped, and on their first mapping checked against their CRC (one read of the trie).
   // False when the store has no entry for it, the mapping budget is spent, kMaxMapped languages are mapped

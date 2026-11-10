@@ -101,12 +101,12 @@ class BufferSource final : public HyphenationPackSource {
   std::vector<uint8_t> bytes_;
 };
 
-HyphenationStore::Fill fillFrom(HyphenationStore& store, std::vector<uint8_t> pack) {
+HyphenationStore::Fill fillFrom(HyphenationStore& store, std::vector<uint8_t> pack, const bool mayDrop = true) {
   BufferSource src(std::move(pack));
   hyphpack::Header h;
   if (!readPackHeader(src, h)) return HyphenationStore::Fill::BadSource;
   uint8_t scratch[1024];
-  return store.fill(src, h, scratch, sizeof(scratch));
+  return store.fill(src, h, scratch, sizeof(scratch), mayDrop);
 }
 
 const Builtin& builtin(const char* code) {
@@ -276,6 +276,30 @@ TEST(HyphenationStore, DropsTheOldestWhenThereIsNoRoom) {
   EXPECT_EQ(std::memcmp(mapped.data, ru_patterns.data, mapped.size), 0);
   EXPECT_EQ(flash.violations(), 0u);
   EXPECT_EQ(flash.reprograms(), 0u);
+}
+
+// A pack copied at its download drops no other language: without room beside them it is left for a book open.
+TEST(HyphenationStore, ACopyThatMayNotDropLeavesTheStoreAsItWas) {
+  SimNorFlash flash(256 * 1024);
+  HyphenationStore store(flash);
+  ASSERT_TRUE(store.mount());
+  ASSERT_EQ(fillFrom(store, packOf("de", de_patterns)), HyphenationStore::Fill::Stored);
+  ASSERT_EQ(fillFrom(store, packOf("ru", ru_patterns)), HyphenationStore::Fill::Stored);
+  const uint32_t erasesBefore = flash.eraseCalls();
+  const uint32_t programsBefore = flash.programCalls();
+  EXPECT_EQ(fillFrom(store, packOf("sv", sv_patterns), /*mayDrop=*/false), HyphenationStore::Fill::WouldDrop);
+  EXPECT_EQ(flash.eraseCalls(), erasesBefore);
+  EXPECT_EQ(flash.programCalls(), programsBefore);
+  HyphenationStore::Entry e;
+  EXPECT_TRUE(store.find("de", e));
+  EXPECT_TRUE(store.find("ru", e));
+  EXPECT_FALSE(store.find("sv", e));
+  // Room beside them is taken, and a language's own entry is replaced, without leave to drop.
+  EXPECT_EQ(fillFrom(store, packOf("it", it_patterns), false), HyphenationStore::Fill::Stored);
+  EXPECT_EQ(fillFrom(store, packOf("ru", uk_patterns), false), HyphenationStore::Fill::Stored);
+  EXPECT_TRUE(store.find("de", e));
+  EXPECT_TRUE(store.find("it", e));
+  EXPECT_EQ(flash.violations(), 0u);
 }
 
 TEST(HyphenationStore, ReplacesALanguageWithNewBytes) {

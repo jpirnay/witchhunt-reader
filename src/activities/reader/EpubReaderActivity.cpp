@@ -775,8 +775,16 @@ void EpubReaderActivity::onEnter() {
   bookVerticalTextOverride = currentBook.verticalTextOverride;
   bookPublisherFontsOverride = currentBook.publisherFontsOverride;
   // The book's hyphenation patterns, from its language's pack, before the first lookup of them below and before any
-  // build: a pack not yet in the flash store is copied in here, once.
-  HyphenationPacks::prepareForBook(epub->getLanguage());
+  // build. A pack not yet in the flash store is copied in here, once (German: about a second), under a popup. Its
+  // displayBuffer() consumes any pending HALF override, so on a panel that diffs against a host frame the first page
+  // is forced to HALF, as after the font-room popup in buildSection().
+  bool hyphenationPopupDrawn = false;
+  HyphenationPacks::prepareForBook(epub->getLanguage(), [this, &hyphenationPopupDrawn] {
+    RenderLock lock(*this);
+    GUI.drawPopup(renderer, tr(STR_PREPARING_HYPHENATION));
+    hyphenationPopupDrawn = true;
+  });
+  if (hyphenationPopupDrawn && renderer.fastRefreshNeedsHostFrame()) forceHalfRefreshAfterPopup_ = true;
   bookVerticalAllowed_ = TypographyProfile::forLanguage(epub->getLanguage()).verticalAllowed;
   logReaderMemSnapshot("onEnter_after_recent_books");
 

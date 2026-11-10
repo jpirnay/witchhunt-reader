@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 
 #if CONFIG_SPIRAM
 #include <esp_heap_caps.h>
@@ -44,13 +45,37 @@ class SdPackSource final : public HyphenationPackSource {
   uint32_t size_ = 0;
 };
 
-void packPath(const char* code, char (&out)[48]) { snprintf(out, sizeof(out), "%s/hyph-%s.cphyph", DIR, code); }
+// Where the card holds the pack of `code`: our folder first, then CrossInk's. False when neither has it.
+bool findPack(const char* code, char (&out)[48]) {
+  for (const char* dir : {DIR, CROSSINK_DIR}) {
+    snprintf(out, sizeof(out), "%s/hyph-%s.cphyph", dir, code);
+    if (Storage.exists(out)) return true;
+  }
+  return false;
+}
+
+// The languages whose pack the card was last seen without (a bit per registry entry): the provider hands out none of
+// their patterns, so a deleted pack stops hyphenating its books even while the flash store still holds the trie.
+uint32_t missingOnCard = 0;
+static_assert(sizeof(missingOnCard) * 8 >= 32, "a bit per language");
+
+uint32_t bitOf(const LanguageEntry* entry) {
+  const LanguageEntryView all = getLanguageEntries();
+  const auto index = static_cast<size_t>(entry - all.data);
+  return index < all.size && index < 32 ? (1u << index) : 0;
+}
+
+void markOnCard(const char* code, const bool onCard) {
+  const uint32_t bit = bitOf(findLanguageEntry(code));
+  missingOnCard = onCard ? (missingOnCard & ~bit) : (missingOnCard | bit);
+}
+
+[[maybe_unused]] bool knownMissing(const char* code) { return (missingOnCard & bitOf(findLanguageEntry(code))) != 0; }
 
 // Opens the card's pack of `code` and reads its header. False, quietly, when the card has none.
 bool openPack(const char* code, SdPackSource& src, hyphpack::Header& header) {
   char path[48];
-  packPath(code, path);
-  if (!Storage.exists(path)) return false;
+  if (!findPack(code, path)) return false;
   if (!src.open(path)) return false;
   if (!readPackHeader(src, header)) {
     LOG_ERR("HYP", "%s is not a hyphenation pack this firmware reads", path);
@@ -81,8 +106,10 @@ struct Loaded {
 Loaded loaded;
 constexpr uint32_t kBounceBytes = 4096;
 
+bool isLoaded(const char* code) { return loaded.data && loaded.code[0] == code[0] && loaded.code[1] == code[1]; }
+
 bool provide(const char* code, SerializedHyphenationPatterns& out, uint32_t& crc32) {
-  if (!loaded.data || loaded.code[0] != code[0] || loaded.code[1] != code[1]) return false;
+  if (!isLoaded(code)) return false;
   out = {loaded.rootOffset, loaded.data, loaded.size};
   crc32 = loaded.crc32;
   return true;
@@ -95,14 +122,21 @@ void release() {
 }
 
 void load(const char* code) {
-  if (loaded.data && loaded.code[0] == code[0] && loaded.code[1] == code[1]) return;
-  release();
   SdPackSource src;
   hyphpack::Header header;
-  if (!openPack(code, src, header)) {
+  const bool onCard = openPack(code, src, header);
+  markOnCard(code, onCard);
+  if (!onCard) {
+    release();
     LOG_INF("HYP", "%s: no hyphenation pack on the card", code);
     return;
   }
+  // The trie loaded for the previous book in this language stays, unless the card's pack changed since.
+  if (isLoaded(code) && loaded.crc32 == header.crc32 && loaded.size == header.payloadSize &&
+      loaded.rootOffset == header.rootOffset) {
+    return;
+  }
+  release();
   const uint32_t start = millis();
   auto* data = static_cast<uint8_t*>(heap_caps_malloc(header.payloadSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   // The card is read into internal RAM and copied on, whatever its driver does with a buffer in external RAM.
@@ -147,20 +181,38 @@ bool mounted = false;
 constexpr uint32_t kScratchBytes = 1024;
 
 bool provide(const char* code, SerializedHyphenationPatterns& out, uint32_t& crc32) {
-  return mounted && store.map(code, out, &crc32);
+  return mounted && !knownMissing(code) && store.map(code, out, &crc32);
 }
 
-// Copies the card's pack into the store when the store lacks it or holds other bytes for the language.
-void ensureStored(const char* code) {
-  HyphenationStore::Entry stored;
-  const bool has = store.find(code, stored);
+const char* fillName(const HyphenationStore::Fill result) {
+  switch (result) {
+    case HyphenationStore::Fill::Stored:
+      return "stored";
+    case HyphenationStore::Fill::Unchanged:
+      return "unchanged";
+    case HyphenationStore::Fill::WouldDrop:
+      return "no room beside the others, left for its first book";
+    case HyphenationStore::Fill::NoSpace:
+    case HyphenationStore::Fill::BadSource:
+    case HyphenationStore::Fill::FlashFailed:
+      break;
+  }
+  return "FAILED";
+}
+
+// Copies the card's pack into the store when the store lacks it or holds other bytes for the language; `beforeCopy`,
+// when given, runs before the copy starts. With `mayDrop` false no other language leaves the store for it.
+void ensureStored(const char* code, const bool mayDrop, const std::function<void()>& beforeCopy) {
   SdPackSource src;
   hyphpack::Header header;
-  if (!openPack(code, src, header)) {
-    if (!has) LOG_INF("HYP", "%s: no hyphenation pack on the card", code);
+  const bool onCard = openPack(code, src, header);
+  markOnCard(code, onCard);
+  if (!onCard) {
+    LOG_INF("HYP", "%s: no hyphenation pack on the card", code);
     return;
   }
-  if (has && stored.crc32 == header.crc32 && stored.size == header.payloadSize &&
+  HyphenationStore::Entry stored;
+  if (store.find(code, stored) && stored.crc32 == header.crc32 && stored.size == header.payloadSize &&
       stored.rootOffset == header.rootOffset) {
     return;
   }
@@ -169,10 +221,13 @@ void ensureStored(const char* code) {
     LOG_ERR("HYP", "%s: no %u B for the copy", code, static_cast<unsigned>(kScratchBytes));
     return;
   }
+  if (beforeCopy) beforeCopy();
+  // fill() unmaps whatever the store handed out: no hyphenator may still point into it.
+  forgetPackPatterns();
   const uint32_t start = millis();
-  const HyphenationStore::Fill result = store.fill(src, header, scratch.get(), kScratchBytes);
+  const HyphenationStore::Fill result = store.fill(src, header, scratch.get(), kScratchBytes, mayDrop);
   LOG_INF("HYP", "%s: %u B into the flash store: %s in %lu ms", code, static_cast<unsigned>(header.payloadSize),
-          result == HyphenationStore::Fill::Stored ? "stored" : "FAILED", static_cast<unsigned long>(millis() - start));
+          fillName(result), static_cast<unsigned long>(millis() - start));
 }
 
 #endif
@@ -189,14 +244,17 @@ void begin() {
   setHyphenationPatternProvider(provide);
 }
 
-void prepareForBook(const std::string& languageTag) {
+void prepareForBook(const std::string& languageTag, const std::function<void()>& beforeCopy) {
   const char* code = Hyphenator::languageCode(languageTag);
   const LanguageEntry* entry = code ? findLanguageEntry(code) : nullptr;
 #if CONFIG_SPIRAM
+  (void)beforeCopy;  // a load from the card into PSRAM takes no copy worth a word
   if (!entry || entry->builtIn) {
     release();
     return;
   }
+  // The registry asks again for every language: one whose pack was missing for the last book may be there now.
+  forgetPackPatterns();
   load(code);
 #else
   // Every language's mapping goes, while no build holds its patterns: only the open book's is mapped again (on its
@@ -204,7 +262,42 @@ void prepareForBook(const std::string& languageTag) {
   forgetPackPatterns();
   store.unmapAll();
   if (!mounted || !entry || entry->builtIn) return;
-  ensureStored(code);
+  ensureStored(code, /*mayDrop=*/true, beforeCopy);
+#endif
+}
+
+bool codeOfPackFile(const char* fileName, char (&code)[3]) {
+  // "hyph-" + two lowercase letters + ".cphyph"
+  if (!fileName || strlen(fileName) != 14 || strncmp(fileName, "hyph-", 5) != 0 || strcmp(fileName + 7, ".cphyph") != 0)
+    return false;
+  if (fileName[5] < 'a' || fileName[5] > 'z' || fileName[6] < 'a' || fileName[6] > 'z') return false;
+  code[0] = fileName[5];
+  code[1] = fileName[6];
+  code[2] = '\0';
+  return true;
+}
+
+void packInstalled(const char* code) {
+  const LanguageEntry* entry = findLanguageEntry(code);
+  if (!entry || entry->builtIn) return;
+  markOnCard(code, true);
+  forgetPackPatterns();
+#if CONFIG_SPIRAM
+  // The next book in this language reads the new pack.
+  if (isLoaded(code)) release();
+#else
+  if (mounted) ensureStored(code, /*mayDrop=*/false, nullptr);
+#endif
+}
+
+void packRemoved(const char* code) {
+  const LanguageEntry* entry = findLanguageEntry(code);
+  if (!entry || entry->builtIn) return;
+  // Another copy may still be in CrossInk's folder: the next book open looks.
+  markOnCard(code, false);
+  forgetPackPatterns();
+#if CONFIG_SPIRAM
+  if (isLoaded(code)) release();
 #endif
 }
 

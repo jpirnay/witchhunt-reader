@@ -127,6 +127,31 @@ class Manifests(unittest.TestCase):
         self.assertEqual((pack["format"], pack["inDownloadAll"], pack["styles"]), ("uipack", False, ["regular", "bold"]))
         self.assertEqual([f["name"] for f in pack["files"]], ["ArabicUI/ArabicUI_10.cpfont"])
 
+    def test_a_hyphenation_pack_is_listed_in_version_3_alone_after_the_fonts(self):
+        pack = self.fonts / "Hyphenation-German" / "hyph-de.cphyph"
+        pack.parent.mkdir(parents=True)
+        pack.write_bytes(b"CPHY\x01de\x02\x02" + bytes(15) + b"trie")
+        self.config.write_text(CONFIG + """  - name: Hyphenation-German
+    description: "Hyphenation for books in German"
+    format: hyphenation
+    inDownloadAll: false
+""", encoding="utf-8")
+        self.assertEqual(self.run_generator().returncode, 0)
+        self.assertEqual([f["name"] for f in self.manifest("fonts.json")["families"]], ["Alpha"])
+        v3 = self.manifest("fonts-v3.json")["families"]
+        self.assertEqual([f["name"] for f in v3], ["Alpha", "NotoSansJP", "Hyphenation-German"])
+        de = v3[-1]
+        self.assertEqual((de["format"], de["inDownloadAll"], de["styles"]), ("hyphenation", False, []))
+        self.assertEqual(de["files"], [{"name": "Hyphenation-German/hyph-de.cphyph", "size": pack.stat().st_size,
+                                        "crc32": zlib.crc32(pack.read_bytes())}])
+
+    def test_a_hyphenation_pack_outside_a_folder_is_left_out(self):
+        (self.fonts / "hyph-de.cphyph").write_bytes(b"CPHY")
+        run = self.run_generator(config=False)
+        self.assertEqual(run.returncode, 0)
+        self.assertIn("hyph-de.cphyph", run.stderr)
+        self.assertNotIn("hyph-de", (self.root / "fonts-v3.json").read_text(encoding="utf-8"))
+
     def test_a_folder_the_config_does_not_list_is_reported_and_left_out(self):
         cpfont(self.fonts / "NotoSansCJK" / "NotoSansCJK_12.cpfont")
         run = self.run_generator()

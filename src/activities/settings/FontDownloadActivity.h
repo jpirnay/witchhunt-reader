@@ -75,6 +75,8 @@ class FontDownloadActivity final : public UiListActivity {
   // it takes no heap. Set by an install, cleared when the next one starts (activateIndex, Retry), so a batch keeps
   // any family's note.
   const char* completeNote_ = nullptr;
+  // The last install was a hyphenation pack: "Hyphenation installed!" rather than "Font installed!".
+  bool completedPack_ = false;
   bool cancelRequested_ = false;
   int previousActionCount_ = 0;
   // What the two action rows offer, counted by refreshRowTotals() so that listCount() and the row

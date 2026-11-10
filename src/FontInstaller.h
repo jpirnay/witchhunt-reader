@@ -72,6 +72,21 @@ class FontInstaller {
   /// cannot hold is installed but not listed; the Font Manager must not offer it again.
   bool isFamilyOnCard(const char* familyName) const;
 
+  /// The family of `families` is on the card: a font family as isFamilyOnCard() says, a hyphenation pack when each of
+  /// its files is in /.crosspoint/hyphenation/.
+  bool isOnCard(const FontCatalog& families, size_t family) const;
+
+  /// Where a hyphenation pack's file lives: "/.crosspoint/hyphenation/<file name>".
+  static void buildPackPath(const char* localName, char* outBuf, size_t outBufSize);
+
+  /// Moves the downloaded files of the hyphenation pack `family` from `stagingDir` into /.crosspoint/hyphenation/, each
+  /// replacing the file there, then removes `stagingDir` and tells HyphenationPacks. False when a file could not be
+  /// moved: the file it would have replaced is put back.
+  static bool installStagedPack(const FontCatalog& families, size_t family, const char* stagingDir);
+
+  /// Deletes the files of the hyphenation pack `family` and tells HyphenationPacks.
+  static Error deletePack(const FontCatalog& families, size_t family);
+
   /// Whether downloading `family` of `families` would update what the card holds: counts its files that are there at
   /// the manifest's size, at another size, or missing, and asks FontDownloadRules::isUpdate.
   static bool hasUpdate(const FontCatalog& families, size_t family);

@@ -11,7 +11,10 @@ reader downloads fonts from:
   download an outline one it cannot install.
 - --output-v3 (fonts-v3.json): version 3, every family, each with its
   "format" ("cpfont", "ttf" or "otf") and, where the config says so,
-  "inDownloadAll": false.
+  "inDownloadAll": false. It lists the hyphenation packs too (format
+  "hyphenation"): a folder <Name>/ holding hyph-<code>.cphyph, which the
+  Font Manager installs into /.crosspoint/hyphenation/. They come after
+  the fonts.
 
 Usage:
     python3 scripts/generate-font-manifest.py \
@@ -22,7 +25,8 @@ Usage:
 
 The input directory may be flat (all files in one dir) or nested (family
 subdirectories). Family names are derived from filenames using the
-conventions <FamilyName>_<size>.cpfont and <FamilyName>-<Style>.ttf/.otf.
+conventions <FamilyName>_<size>.cpfont and <FamilyName>-<Style>.ttf/.otf;
+a hyphenation pack's family is its folder.
 With --config, only the families sd-fonts.yaml lists are written, with its
 descriptions; a folder it does not list is reported and left out.
 """
@@ -51,6 +55,7 @@ CPFONT_VERSION = 4
 STYLE_NAMES = {0: "regular", 1: "bold", 2: "italic", 3: "bolditalic"}
 
 OUTLINE_SUFFIXES = {".ttf": "ttf", ".otf": "otf"}
+PACK_SUFFIX = ".cphyph"
 
 
 def load_config(yaml_path: Path) -> dict[str, dict]:
@@ -168,6 +173,15 @@ def scan_font_files(input_dir: Path) -> dict[str, list[Path]]:
             # <Family>-<Style>.otf: the family is the name before the last "-".
             families.setdefault(path.stem.rsplit("-", 1)[0], []).append(path)
 
+    for path in sorted(input_dir.rglob(f"*{PACK_SUFFIX}")):
+        if not path.is_file():
+            continue
+        # A hyphenation pack's family is its folder: the file keeps the name the firmware looks for.
+        if path.parent == input_dir:
+            print(f"  WARNING: skipping {path.name} (a hyphenation pack sits in a folder of its family)", file=sys.stderr)
+            continue
+        families.setdefault(path.parent.name, []).append(path)
+
     for family_name, files in families.items():
         if len({p.suffix for p in files}) > 1:
             suffixes = ", ".join(sorted({p.suffix for p in files}))
@@ -177,7 +191,9 @@ def scan_font_files(input_dir: Path) -> dict[str, list[Path]]:
 
 
 def family_format(files: list[Path]) -> str:
-    """"cpfont", "ttf" or "otf": the format of a family's files."""
+    """"cpfont", "ttf", "otf" or "hyphenation": the format of a family's files."""
+    if files and files[0].suffix == PACK_SUFFIX:
+        return "hyphenation"
     return OUTLINE_SUFFIXES.get(files[0].suffix, "cpfont") if files else "cpfont"
 
 
@@ -189,7 +205,8 @@ def build_manifest(
     every family with its format."""
     manifest_families = []
 
-    for family_name in sorted(families.keys()):
+    # The fonts by name, then the hyphenation packs by name.
+    for family_name in sorted(families.keys(), key=lambda n: (family_format(families[n]) == "hyphenation", n)):
         files = families[family_name]
         entry = (config or {}).get(family_name, {})
         # A UI script pack is .cpfont files under its own format, which older firmware skips: version 3 only.
@@ -201,6 +218,8 @@ def build_manifest(
             # Read styles from the first file (all files in a family have the
             # same styles since they're generated from the same source fonts).
             styles = read_cpfont_styles(files[0]) if files else []
+        elif fmt == "hyphenation":
+            styles = []
         else:
             styles = [read_outline_style(f) for f in sorted(files, key=lambda p: p.name)]
 
