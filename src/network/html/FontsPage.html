@@ -26,6 +26,8 @@
       .family-info { flex: 1 1 260px; min-width: 0; }
       .family-info h3 { margin: 0 0 2px; font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
       .family-meta { color: var(--text-muted); font-size: 0.875rem; overflow-wrap: anywhere; }
+      .family-group { margin: 18px 0 4px; font-size: 1rem; }
+      .family-group + .family-note { margin: 0 0 6px; color: var(--text-muted); font-size: 0.875rem; }
 
       .toolbar {
         display: flex;
@@ -343,7 +345,21 @@
         }
         showUpdateCount(data.families.filter((f) => f.installed && f.hasUpdate).length);
 
+        let packsHeaded = false;
         data.families.forEach(f => {
+          // The hyphenation packs come after the fonts: one per language, for the books in it.
+          if (f.hyphenation && !packsHeaded) {
+            packsHeaded = true;
+            const head = document.createElement('h3');
+            head.className = 'family-group';
+            head.textContent = 'Hyphenation packs';
+            const note = document.createElement('p');
+            note.className = 'family-note';
+            note.textContent = 'English is built in; every other language hyphenates with its pack. ' +
+                'Install the languages of your books. Delete a pack in the Font Manager on the reader.';
+            el.appendChild(head);
+            el.appendChild(note);
+          }
           const row = document.createElement('div');
           row.className = 'family';
 

@@ -2277,7 +2277,7 @@ bool fetchRemoteFontManifest(HttpDownloader::Session& session, FontInstaller& in
   // runs while Wi-Fi is up, and a whole-document parse of the 24 KB manifest
   // ran the X3 out of heap. The list is one block, which the install frees
   // whole before its downloads -- see handleFontDownload().
-  FontManifestReader reader("WEB", FontInstaller::isValidFamilyName, isValidFontFileName);
+  FontManifestReader reader("WEB", FontInstaller::isValidFamilyName, isValidFontFileName, /*takesHyphenation=*/true);
   const FontManifestStatus status = reader.read(manifestFile, outFamilies, outBaseUrl);
   manifestFile.close();
   Storage.remove(MANIFEST_TMP);
@@ -2296,9 +2296,9 @@ bool fetchRemoteFontManifest(HttpDownloader::Session& session, FontInstaller& in
   }
 
   for (size_t i = 0; i < outFamilies.count(); i++) {
-    const char* familyName = outFamilies.name(i);
-    // On the card, listed or not: a family too large for the glyph store is installed, and is not offered again.
-    outFamilies.setInstalled(i, installer.isFamilyOnCard(familyName));
+    // On the card, listed or not: a family too large for the glyph store is installed, and is not offered again. A
+    // hyphenation pack is on the card when its file is in /.crosspoint/hyphenation/.
+    outFamilies.setInstalled(i, installer.isOnCard(outFamilies, i));
     outFamilies.setHasUpdate(i, outFamilies.installed(i) && FontInstaller::hasUpdate(outFamilies, i));
   }
 
@@ -2437,6 +2437,16 @@ bool installRemoteFamily(HttpDownloader::Session& session, const FontCatalog& fa
     }
   }
 
+  // A hyphenation pack's file goes to /.crosspoint/hyphenation/, not into a family folder, and on the X3 and X4 into
+  // the flash store there and then, as the Font Manager installs it.
+  if (families.hyphenation(familyIndex)) {
+    if (!FontInstaller::installStagedPack(families, familyIndex, stagingDir)) {
+      outError = "Failed to finalize the hyphenation pack";
+      return false;
+    }
+    return true;
+  }
+
   const bool hadLiveDir = Storage.exists(liveDir);
   if (Storage.exists(backupDir) && !Storage.removeDir(backupDir)) {
     Storage.removeDir(stagingDir);
@@ -2544,6 +2554,7 @@ void CrossPointWebServer::handleFontManifest() {
     obj["hasUpdate"] = families.hasUpdate(i);
     // The folder is the reader's own family under this name: installing would replace its files.
     obj["ownFiles"] = families.installed(i) && !families.hasUpdate(i) && FontInstaller::holdsOwnFiles(families, i);
+    obj["hyphenation"] = families.hyphenation(i);
     obj["totalSize"] = static_cast<unsigned long>(families.totalSize(i));
     obj["fileCount"] = static_cast<unsigned>(families.fileCount(i));
   }
