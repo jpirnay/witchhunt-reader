@@ -190,15 +190,12 @@ int gCachedFrameRegionH = 0;   // region height (logical)
 bool gFrameCacheDirty = false;
 int gCachedFrameCount = 0;
 std::string gCacheKey;
-// Book set whose region allocation already failed. The cached region is ~48 KB, the
-// same order as the secondary framebuffer, and Home's steady-state free heap is
-// smaller than either (measured on X3: 39,276 free vs 49,104 needed) — so while the
-// secondary buffer is resident this malloc CANNOT succeed, and freeFrameCache()
-// clearing gCacheKey made every subsequent render attempt it again. Remember the key
-// that failed and skip the retry until something actually changes: a new book set, an
-// explicit invalidate, or a cover landing on disk (markFrameCacheDirty). That keeps the
-// cold-cache path intact — covers arriving there re-arm this on every decode — while a
-// warm boot stops paying a doomed 48 KB allocation attempt per render.
+// Book set whose region allocation already failed (allocFrame refused it): freeFrameCache()
+// clearing gCacheKey made every subsequent render attempt it again. Remember the key that
+// failed and skip the retry until something actually changes: a new book set, an explicit
+// invalidate, or a cover landing on disk (markFrameCacheDirty). That keeps the cold-cache
+// path intact — covers arriving there re-arm this on every decode — while a warm boot stops
+// paying a doomed 48 KB allocation attempt per render.
 std::string gAllocFailedKey;
 // A lent region (HomeActivity's secondary framebuffer, after its cover pass) the one cached frame
 // lives in instead of the heap. Null: frames come from malloc, as before.
@@ -206,8 +203,16 @@ uint8_t* gFrameRegion = nullptr;
 size_t gFrameRegionBytes = 0;
 static_assert(kFrameCount == 1, "the lent region holds exactly one frame");
 
+// The free heap a frame taken from the heap must leave. The frame is ~48 KB (49,104 B on the X3), most of Home's free
+// heap on the C3 (about 62-69 KB): its place there is the region Home lends (setFrameCacheRegion). It once could not
+// fit beside the resident secondary framebuffer at all (39,276 B free); since the heap grew it can whenever the largest
+// block reaches 48 KB, and on Home's first frame after the reader, before the lend, it took Home to 14 KB free, where a
+// title's shaping block and anything else was refused (X3, 2026-11-10). A board with PSRAM takes it from there.
+constexpr size_t kFrameHeapFloor = 32 * 1024;
+
 uint8_t* allocFrame(const size_t bytes) {
   if (gFrameRegion != nullptr && gFrameRegionBytes >= bytes) return gFrameRegion;
+  if (esp_get_free_heap_size() < bytes + kFrameHeapFloor) return nullptr;
   return static_cast<uint8_t*>(malloc(bytes));
 }
 
@@ -387,7 +392,7 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
       gCachedFrames[i] = allocFrame(regionBytes);
       if (!gCachedFrames[i]) {
         LOG_DBG("CAROUSEL",
-                "tryFastHomeRender: malloc failed for cover region %d (%u bytes, %u free) — skipping until the book "
+                "tryFastHomeRender: no heap for cover region %d (%u bytes, %u free) — skipping until the book "
                 "set changes or a cover lands",
                 i, static_cast<unsigned>(regionBytes), static_cast<unsigned>(esp_get_free_heap_size()));
         freeFrameCache();  // clears gCacheKey, so latch AFTER it
