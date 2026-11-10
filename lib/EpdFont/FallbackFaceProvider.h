@@ -123,8 +123,10 @@ class FallbackFaceProvider final : public GlyphProvider {
     const EpdGlyph* source;  // the reader face's own record, whose 2-bit bitmap ownsBitmap() packs; null otherwise
     uint16_t index;
   };
-  // A reader glyph's 1-bit ink: a 12 pt CJK glyph is about 25 x 26 px, 82 B. Larger glyphs are left to the next face.
-  static constexpr uint16_t kInkBytes = 128;
+  // A reader glyph's 1-bit ink: a 12 pt CJK glyph is about 25 x 26 px, 82 B. At the 12 pt UI em (25 px) 39 of Noto Sans
+  // Myanmar's 452 glyphs need more than 128 B, up to 200 B (its stacked and medial forms, which a shaped title draws),
+  // as do 4 of Noto Sans Tamil's; none passes 256 B. Larger glyphs are left to the next face.
+  static constexpr uint16_t kInkBytes = 256;
   static uint8_t ink_[kInkBytes];
   // EpdFont copies the metrics out at once and the renderer asks for the bitmap before it resolves
   // the next glyph, so one slot would do for that caller. The few more cost 24 B each and keep a

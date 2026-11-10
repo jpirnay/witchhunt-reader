@@ -335,7 +335,7 @@ TEST_F(FallbackFaceProviderTest, AClaimedCharacterNoFaceHasDrawsAsTheCjkFacesSta
 }
 
 TEST_F(FallbackFaceProviderTest, AReaderGlyphTooLargeToPackIsLeftToTheNextFace) {
-  ReaderFace reader({ZH_ONLY}, 40, 40);  // 200 B of ink
+  ReaderFace reader({ZH_ONLY}, 48, 48);  // 288 B of ink
   provider.setReaderFace(&ReaderFace::source, &reader);
   EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(ZH_ONLY)), faceBytes(cjk_ui_zh_10, ZH_ONLY));
 }
