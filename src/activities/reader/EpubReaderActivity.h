@@ -19,6 +19,7 @@
 #include <atomic>
 #include <optional>
 
+#include "BookPackOffer.h"
 #include "BookmarkStore.h"
 #include "ChapterPageSpan.h"
 #include "CrossPointState.h"
@@ -222,10 +223,10 @@ class EpubReaderActivity final : public Activity {
   // displayBuildPage() for a multi-slice build, or renderContents() directly when the build finishes
   // in a single slice (e.g. a one-page cover) and never goes through displayBuildPage at all.
   bool forceHalfRefreshAfterPopup_ = false;
-  // The language of a hyphenation pack to offer before the book's first page ("" for none): set at book open when the
-  // card lacks the pack of the book's language, asked from the first loop() (offerHyphenationPack()).
-  char pendingHyphenationOffer_[3] = {};
-  void offerHyphenationPack();
+  // What to offer before the book's first page (none: nothing): set at book open when the card lacks the hyphenation
+  // pack of the book's language or a reading font of its script, asked from the first loop() (offerBookPacks()).
+  BookPackOffer::Offer pendingBookOffer_;
+  void offerBookPacks();
   // When true, large images on the current page are decoded instead of shown as placeholders.
   // Reset to false on every page turn so the next image page starts with a placeholder again.
   bool forceLoadLargeImages = false;

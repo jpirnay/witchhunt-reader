@@ -15,11 +15,12 @@
 // mandatory CRC and delete-on-abort are not taken.
 class FontDownloadActivity final : public UiListActivity {
  public:
-  // What an offer wants downloaded as soon as the list is loaded: a hyphenation pack by its language ("de"), or a
-  // family by its name (a CJK interface pack, "ChineseUI"). Empty for the plain Font Manager.
+  // What an offer wants downloaded as soon as the list is loaded: a family by its name (a CJK interface pack,
+  // "ChineseUI"; a book's reading font, "NotoSerifDevanagari"), a hyphenation pack by its language ("de"), or both,
+  // the family first. Empty for the plain Font Manager.
   struct Wanted {
     char pack[3] = {};
-    const char* family = nullptr;
+    char family[FontInstaller::MAX_FAMILY_NAME_LEN + 1] = {};
   };
   // Where leaving restarts: Home; the open book (APP_STATE.openEpubPath), for a book's offer; Settings, for the offer
   // a picked interface language makes.
@@ -45,8 +46,7 @@ class FontDownloadActivity final : public UiListActivity {
   };
 
   State state_ = WIFI_SELECTION;
-  // The hyphenation pack to download once the list is loaded, "" for none (consumed by its first use).
-  Wanted wanted_;  // consumed by its first use
+  Wanted wanted_;  // downloaded once the list is loaded; consumed by its first use
   ReturnTo returnTo_ = ReturnTo::Home;
   FontInstaller fontInstaller_;
 
@@ -120,8 +120,11 @@ class FontDownloadActivity final : public UiListActivity {
   static void provideRow(void* ctx, uint16_t index, freeink::ui::ListItem& item);
 
   void onWifiSelectionComplete(bool success);
-  // Selects the row of wanted_ and downloads it when it is not installed. Once.
+  // Selects the rows of wanted_ and downloads what is not installed: the family, then the pack once the family is in
+  // place. Once.
   void downloadWanted();
+  // Selects row i and downloads it when it is not installed. True when it is installed after.
+  bool downloadRow(size_t i);
   bool fetchAndParseManifest();
   // Download a single family by its index into families_. Internally stashes
   // families_ to SD so the TLS handshake runs on a defragmented heap; the

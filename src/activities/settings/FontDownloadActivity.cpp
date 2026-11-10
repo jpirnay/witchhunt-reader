@@ -116,24 +116,34 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
 }
 
 void FontDownloadActivity::downloadWanted() {
-  if (wanted_.pack[0] == '\0' && !wanted_.family) return;
-  char file[16] = {};
-  if (wanted_.pack[0] != '\0') snprintf(file, sizeof(file), "hyph-%s.cphyph", wanted_.pack);
-  const char* family = wanted_.family;
+  const Wanted wanted = wanted_;
   wanted_ = Wanted{};
-  for (size_t i = 0; i < families_.count(); ++i) {
-    const bool match = file[0] != '\0' ? families_.hyphenation(i) && families_.fileCount(i) > 0 &&
-                                             strcmp(families_.fileLocalName(i, 0), file) == 0
-                                       : strcmp(families_.name(i), family) == 0;
-    if (!match) continue;
-    activeNav().requestSelection(actionCount() + static_cast<int>(i));
-    if (!families_.installed(i)) {
-      downloadFamily(static_cast<int>(i));
-      requestUpdateAndWait();
+  char file[16] = {};
+  if (wanted.pack[0] != '\0') snprintf(file, sizeof(file), "hyph-%s.cphyph", wanted.pack);
+  // The family first: a book's script needs it to be drawn at all, its hyphenation only to break lines.
+  for (const char* name : {wanted.family, static_cast<const char*>(file)}) {
+    if (name[0] == '\0') continue;
+    const bool pack = name == file;
+    size_t i = 0;
+    while (i < families_.count() && !(pack ? families_.hyphenation(i) && families_.fileCount(i) > 0 &&
+                                                 strcmp(families_.fileLocalName(i, 0), name) == 0
+                                           : strcmp(families_.name(i), name) == 0)) {
+      ++i;
     }
-    return;
+    if (i == families_.count()) {
+      LOG_ERR("FONT", "The font list holds no %s", name);
+      return;
+    }
+    if (!downloadRow(i)) return;  // failed or cancelled: the rest waits for the list
   }
-  LOG_ERR("FONT", "The font list holds no %s", file[0] != '\0' ? file : family);
+}
+
+bool FontDownloadActivity::downloadRow(const size_t i) {
+  activeNav().requestSelection(actionCount() + static_cast<int>(i));
+  if (families_.installed(i)) return true;
+  downloadFamily(static_cast<int>(i));
+  requestUpdateAndWait();
+  return state_ == COMPLETE;
 }
 
 // --- Manifest fetching ---
