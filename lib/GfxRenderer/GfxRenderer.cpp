@@ -1735,9 +1735,10 @@ void GfxRenderer::drawFormedTextScaled(const int fontId, const int x, const int 
   // caller passing 0 to mean unscaled.
   const float total = (scale <= 0.0f ? 1.0f : scale) * fontBaseScale(fontId);
   if (drawsUnscaled(total)) {
-    // Exactly 1 after compounding: the unscaled blitter is both faster and sharper. Only reachable
-    // when the font's base is 1, so drawText() cannot bounce back here.
-    drawText(fontId, x, y, text, black, style);
+    // Exactly 1 after compounding: the unscaled blitter is both faster and sharper. The text is formed already (a
+    // page's word or piece), so it is drawn as given: drawText would form, shape or order it again, and the order is
+    // not idempotent.
+    drawFormedText(fontId, x, y, text, black, style);
     return;
   }
   drawTextAtScale(fontId, x, y, text, black, style, total);
