@@ -832,6 +832,11 @@ families:
     format: hyphenation
     inDownloadAll: false
 
+  - name: Hyphenation-Hungarian
+    description: "Hyphenation for books in Hungarian"
+    format: hyphenation
+    inDownloadAll: false
+
   - name: Hyphenation-Italian
     description: "Hyphenation for books in Italian"
     format: hyphenation

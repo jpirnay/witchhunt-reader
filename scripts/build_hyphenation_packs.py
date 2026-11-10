@@ -9,13 +9,15 @@ generate-font-manifest.py lists it in fonts-v3.json with format "hyphenation"; s
 - The languages added with packs: straight from Typst hypher's tries/<code>.bin (their 4-byte big-endian root
   prefix stripped, as generate_hyphenation_trie.py does for the headers), with --hypher-tries. The packs in the repo
   were built from hypher at commit d81cc50.
+- The languages whose patterns hypher does not carry: from a TeX pattern file in assets/hyphenation-patterns/, built
+  into a hypher trie by hyphenation_trie.py (Hungarian: Huhyphn v20031107, GPL-2, see its README.md).
 
 The file layout is CPHY v1 from crosspoint-reader PR #3706 ("feat: hyphenation manager", Uri Tauber), kept byte
 compatible so packs move between CrossPoint, CrossInk and this firmware. See HyphenationPack.h for the layout.
 
   python3 scripts/build_hyphenation_packs.py [--out <dir>] [--hypher-tries <hypher>/tries]
 
-Without --hypher-tries only the nine header languages are built.
+Without --hypher-tries only the nine header languages and the "tex" ones are built.
 """
 
 import argparse
@@ -24,6 +26,9 @@ import re
 import struct
 import sys
 import zlib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import hyphenation_trie  # noqa: E402  (beside this script)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 GENERATED = ROOT / "lib/Epub/Epub/hyphenation/generated"
@@ -61,6 +66,11 @@ LANGUAGES = {
     "sa": ("Sanskrit", "hypher", (2, 2)),
     "ta": ("Tamil", "hypher", (2, 2)),
     "te": ("Telugu", "hypher", (2, 2)),
+    "hu": ("Hungarian", "tex", (2, 2)),
+}
+# The "tex" languages' pattern files, and whether each is 8-bit Cork (T1) rather than UTF-8.
+PATTERN_FILES = {
+    "hu": (ROOT / "assets/hyphenation-patterns/hu/huhyphen.tex", True),
 }
 # The languages whose tries the image used to carry.
 CODES = tuple(code for code, (_, source, _) in LANGUAGES.items() if source == "header")
@@ -98,6 +108,15 @@ def trie_from_hypher(path: pathlib.Path):
     return blob[4:], root - 4
 
 
+def trie_from_patterns(code: str):
+    """(payload, root offset) of a "tex" language's pattern file, as hypher would build it."""
+    path, cork = PATTERN_FILES[code]
+    raw = path.read_bytes()
+    blob = hyphenation_trie.build(hyphenation_trie.parse(hyphenation_trie.cork_text(raw) if cork else raw.decode()))
+    root = int.from_bytes(blob[:4], "big")
+    return blob[4:], root - 4
+
+
 def pack(code: str, payload: bytes, root_offset: int, minima=(2, 2)) -> bytes:
     if not re.fullmatch(r"[a-z]{2}", code):
         raise ValueError(f"not a two-letter code: {code!r}")
@@ -118,6 +137,8 @@ def main(argv=None) -> int:
     for code, (_, source, minima) in LANGUAGES.items():
         if source == "header":
             payload, root = trie_from_header(code)
+        elif source == "tex":
+            payload, root = trie_from_patterns(code)
         elif args.hypher_tries:
             payload, root = trie_from_hypher(args.hypher_tries / f"{code}.bin")
         else:

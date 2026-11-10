@@ -16,21 +16,21 @@ namespace UiLanguagePacks {
 
 namespace {
 
-// Each interface language's pack. The hyphenation pack of the languages whose patterns come from one (Hungarian has
-// none yet; Romanian and Kazakh have no patterns; English is built in; Vietnamese is not hyphenated), the CJK
-// interface pack of Chinese, Japanese and Korean, which hyphenate none.
+// Each interface language's pack. The hyphenation pack of the languages whose patterns come from one (Romanian and
+// Kazakh have no patterns; English is built in; Vietnamese is not hyphenated), the CJK interface pack of Chinese,
+// Japanese and Korean, which hyphenate none.
 struct LanguagePack {
   const char* uiCode;  // the translation's _language_code
   const char* hyphenation;
   const char* interfaceFamily;
 };
 constexpr LanguagePack kPacks[] = {
-    {"DE", "de", nullptr},         {"FR", "fr", nullptr},      {"ES", "es", nullptr}, {"IT", "it", nullptr},
-    {"PT", "pt", nullptr},         {"PO", "pt", nullptr},      {"PL", "pl", nullptr}, {"RU", "ru", nullptr},
-    {"UK", "uk", nullptr},         {"SV", "sv", nullptr},      {"NL", "nl", nullptr}, {"CS", "cs", nullptr},
-    {"DA", "da", nullptr},         {"SI", "sl", nullptr},      {"LT", "lt", nullptr}, {"CA", "ca", nullptr},
-    {"BE", "be", nullptr},         {"FI", "fi", nullptr},      {"TR", "tr", nullptr}, {"ZH", nullptr, "ChineseUI"},
-    {"JA", nullptr, "JapaneseUI"}, {"KO", nullptr, "KoreanUI"}};
+    {"DE", "de", nullptr},        {"FR", "fr", nullptr},         {"ES", "es", nullptr},      {"IT", "it", nullptr},
+    {"PT", "pt", nullptr},        {"PO", "pt", nullptr},         {"PL", "pl", nullptr},      {"RU", "ru", nullptr},
+    {"UK", "uk", nullptr},        {"SV", "sv", nullptr},         {"NL", "nl", nullptr},      {"CS", "cs", nullptr},
+    {"DA", "da", nullptr},        {"SI", "sl", nullptr},         {"LT", "lt", nullptr},      {"CA", "ca", nullptr},
+    {"BE", "be", nullptr},        {"FI", "fi", nullptr},         {"TR", "tr", nullptr},      {"HU", "hu", nullptr},
+    {"ZH", nullptr, "ChineseUI"}, {"JA", nullptr, "JapaneseUI"}, {"KO", nullptr, "KoreanUI"}};
 
 const char* uiCode() { return I18N.getLanguageCode(I18N.getLanguage()); }
 

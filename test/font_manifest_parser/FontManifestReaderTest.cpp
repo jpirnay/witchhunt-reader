@@ -519,7 +519,7 @@ TEST(FontManifestReaderTest, TheShippedManifestListsTheHyphenationPacksForTheFon
     EXPECT_EQ(local.size(), 14u);
     EXPECT_EQ(local.rfind("hyph-", 0), 0u);
   }
-  EXPECT_EQ(packs, 30u);
+  EXPECT_EQ(packs, 31u);
   EXPECT_EQ(web.catalog.count(), all.count() - packs);
   for (size_t i = 0; i < web.catalog.count(); ++i) EXPECT_FALSE(web.catalog.hyphenation(i));
   // What the list costs the Font Manager in its one block, against the fonts alone.

@@ -42,7 +42,8 @@ LanguageHyphenator portugueseHyphenator(pt_patterns, LATIN);
 LanguageHyphenator englishHyphenator(en_patterns, LATIN, 3, 3);
 
 // The CRCs are scripts/build_hyphenation_packs.py's of the generated headers: the packs it builds carry them. The
-// languages after Portuguese never had a trie in the image. Their minima are hypher's (Lang::bounds).
+// languages after Portuguese never had a trie in the image. Their minima are hypher's (Lang::bounds); Hungarian's, from
+// patterns hypher does not carry, are hyph-utf8's for the language.
 const LanguageEntry kEntries[] = {
     {"english", "en", LATIN, 3, 3, true, &englishHyphenator, 0},
     {"french", "fr", LATIN, 2, 2, true, BUILT_IN_OR_PACK(frenchHyphenator), 0x00caa580u},
@@ -63,6 +64,7 @@ const LanguageEntry kEntries[] = {
     {"belarusian", "be", CYRILLIC, 2, 2, true, nullptr, 0},
     {"finnish", "fi", LATIN, 2, 2, true, nullptr, 0},
     {"turkish", "tr", LATIN, 2, 2, true, nullptr, 0},
+    {"hungarian", "hu", LATIN, 2, 2, true, nullptr, 0},
     {"assamese", "as", INDIC, 2, 2, false, nullptr, 0},
     {"bengali", "bn", INDIC, 2, 2, false, nullptr, 0},
     {"gujarati", "gu", INDIC, 2, 2, false, nullptr, 0},
@@ -94,7 +96,7 @@ HyphenationPatternProvider packProvider = nullptr;
 // The pack languages the provider had nothing for since the last forgetPackPatterns(): asked once rather than on
 // every lookup, as a miss reads the store's header from flash. A bit per kEntries index.
 uint32_t packMissing = 0;
-static_assert(kEntryCount <= 32, "a bit per language");
+static_assert(kEntryCount <= 32, "a bit per language");  // 32 now: the next language widens packMissing
 
 // A pack language's patterns and their CRC, from the provider. False when its pack is not available.
 bool askProvider(const LanguageEntry& entry, SerializedHyphenationPatterns& out, uint32_t& crc) {
