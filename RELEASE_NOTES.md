@@ -4,7 +4,29 @@ User-facing changes only. Full commit history is in git log.
 
 ## 2.50 — 2026-11-10
 
-Everything since 2.40, including the 2.41 release candidate. The reader now sets books in many more scripts: Chinese, Japanese and Korean (in vertical columns too), Hebrew, Arabic, Persian and Urdu, ten Indic scripts and Burmese. It reads TrueType and OpenType fonts on every device, the X3 and X4 included, and can read a book in the fonts it brings. The interface comes in 30 languages. Every interface language but English, and hyphenation for every language but English, now come as small packs on the SD card, which the reader offers to download when it needs one. The Murphy M3 is a new supported device, and the built-in serif reading font is now **Serif**, made from Source Serif 4. Read the upgrade notes at the end of this section before you update.
+**Faster. More fonts. More layouts. More languages.** Everything since 2.40, including the 2.41 release candidate, and the X3 and X4 get all of it.
+
+- **Faster:**
+  - **One-Pass Anti-Aliasing** puts a page and its grey edges up in one refresh.
+  - Flipping no longer waits for the grey.
+  - Very large books open in seconds instead of minutes.
+- **More fonts:**
+  - TrueType and OpenType fonts on every device.
+  - **Publisher Fonts** reads a book in the fonts it brings.
+  - **Serif**, made from Source Serif 4, replaces Bookerly.
+- **More layouts:**
+  - Vertical Chinese, Japanese and Korean.
+  - Right-to-left Hebrew, Arabic, Persian and Urdu.
+  - Ten shaped Indic scripts, and Burmese.
+  - Closer support for the book's CSS.
+  - **Avoid Widows & Orphans**.
+  - **Normalize Font Size** for books that shrink all their text.
+- **More languages:**
+  - The interface in 30 languages, and hyphenation in 32.
+  - Every language but English comes as a small pack on the SD card, offered when needed.
+- **One more device:** the Murphy M3.
+
+Read the upgrade notes at the end of this section before you update.
 
 ### Languages and scripts
 
@@ -127,6 +149,7 @@ Everything since 2.40, including the 2.41 release candidate. The reader now sets
 
 - **The Murphy M3 is supported**: an ESP32-S3 board with a 240 × 416 panel, three keys and touch, built on the hardware notes of mr-tbot's Crosspoint-Murphy-M3.
   - text, sleep covers and pictures in four levels of grey;
+  - its reading light;
   - its clock chip is used, so a file written before the first time sync is no longer dated 1980;
   - USB Drive at 712 KB/s;
   - short taps register, and a tap on a hint box is a tap, not a long press;
