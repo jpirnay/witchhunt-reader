@@ -19,8 +19,8 @@ constexpr unsigned MAX_BITS = 8;  // HB_OT_MAP_MAX_BITS
 constexpr unsigned FIRST_FEATURE_BIT = 4;
 // witchhunt: deviation 1 - the builder's scratch (PlanBuilder::bindScratch):
 // the most features a shaper requests (USE asks for 47) and stages a table
-// takes (Indic's GSUB has 17). Fixed and independent of the font, so the
-// block asks no heap check.
+// takes (Indic's GSUB has 17). Fixed and independent of the font, but asked of
+// the heap check all the same (about 3.1 KB): a check may keep a floor free.
 constexpr size_t MAX_FEATURES = 64;
 constexpr size_t MAX_STAGES = 32;
 
@@ -585,10 +585,12 @@ class PlanBuilder {
 
   // witchhunt: deviation 1 - the scratch, one block for the build, freed with
   // the builder: `b`'s infos and pauses and features_, bound empty with
-  // scratchFits_ as their flag. False when the block is refused.
+  // scratchFits_ as their flag. False when the heap check or the heap refuses
+  // the block.
   bool bindScratch(FeatureBuilder& b) {
     static_assert(alignof(FeatureMap) <= alignof(FeatureBuilder::Info));
     static_assert(sizeof(FeatureBuilder::Info) % alignof(FeatureMap) == 0);
+    if (!heapAvailable(SCRATCH_BYTES)) return false;
     scratch_ = makeUniqueNoThrow<uint8_t[]>(SCRATCH_BYTES);
     if (!scratch_) return false;
     b.infos.bind(reinterpret_cast<FeatureBuilder::Info*>(scratch_.get()), MAX_FEATURES, &scratchFits_);

@@ -106,9 +106,12 @@ class Plan {
   // (zero-terminated, up to three). False when the font has more lookups
   // than a plan takes or the heap check refuses the plan's memory; a plan
   // that failed to build or load is empty, and shapes nothing.
-  // witchhunt: deviation 1 - also false when the builder's scratch or a list
-  // block is refused, and (deviation 13) when the lookup digests' block is; a
-  // refused filter block leaves only its table's subtables unfiltered.
+  // witchhunt: deviation 1 - the heap check (setHeapCheck) or the heap
+  // refusing the builder's scratch or a list block makes it false, and
+  // (deviation 13) so does the lookup digests' block; a refused filter block
+  // leaves only its table's subtables unfiltered (slower, the same glyphs).
+  // The firmware's check is a free-heap floor while a layout build runs, and
+  // none outside one.
   bool build(const Face& face, Script script, const uint32_t* languageTags);
   // The same plan, read from the font's CPpl table, where the .cpfont
   // converter stored it. False when the font has none for this script and

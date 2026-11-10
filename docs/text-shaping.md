@@ -214,7 +214,13 @@ shaped-script book for the X4's in-place gate.
   style is mapped, and the face is then re-pointed (`Face::rebase`, deviation 12). Under RenderLock only.
 - **`ShapingFace::plan(script, languageTags)`** builds an `ot::Plan` on first ask and keeps it in the face, by
   `unique_ptr`, never moved, so no plan outlives the face it points into. A face keeps `kMaxPlans` (2); a third key
-  frees the one asked for least recently.
+  frees the one asked for least recently. Its memory is asked of the engine's heap check (`ot::setHeapCheck`): the
+  `Plan` itself, the builder's 3.1 KB scratch, its lists and its lookups' digests (a refusal fails the plan), and its
+  filters for a font without `CPac` (a refusal leaves its subtables unfiltered: slower, the same glyphs). While a
+  layout build runs (`Section::BuildState`, `buildDictionaryHtmlPages`), `ShapingHeapCheck` installs
+  `heap_growth::shapedHeapAllows` there, so a plan leaves the shaped store's free-heap floor
+  (`heap_growth::kShapedFreeFloor`, 12 KB) free; outside every build none is installed, and UI text
+  (`UiShapedText`) takes plans behind nothrow alone (see "What fails how").
 - **The plan's memos** (deviation 13): both leave the output as it is, by construction.
   - Each planned lookup's digest is copied into the plan when it is built, GSUB's then GPOS's (24 B a lookup, from
     `CPac`, else computed). The apply loop tests that copy before it reads the lookup's settings from the font
@@ -359,14 +365,23 @@ heap block they take is the longest token's form, in 512 B steps.
 
 **Degraded.** A run that cannot be shaped is laid out as its code points, and the parse is latched:
 - `IndicShaper::Outcome::Degraded`: no block for the call (no arena room and the heap block refused); the face not
-  mapped now, or its plan refused or failed to build; the font's lookups failing the run (growing it past 2n + 16
-  glyphs, nesting too deep, or running past the op budget); a run whose every glyph the font's GSUB deletes; a record
-  outside its fields; the store refusing a piece;
+  mapped now, or its plan refused (by the heap, or by the build's free-heap floor, below) or failed to build; the
+  font's lookups failing the run (growing it past 2n + 16 glyphs, nesting too deep, or running past the op budget); a
+  run whose every glyph the font's GSUB deletes; a record outside its fields; the store refusing a piece;
 - `ParsedText` without room for its `ShapingState`, its store's entries, or a forced split's entry.
 
+**A plan behind the floor.** During a build every plan block (see "The face and its plans") must leave
+`heap_growth::kShapedFreeFloor` free, as the store's growths must (`ShapingHeapCheck`, `heap_growth::shapedHeapAllows`).
+A plan refused so is not built and nothing of it is kept: each run that asks for it is `Degraded` and laid out as its
+code points, the paragraph latches, and the next token asks again. Before the check, nothing but nothrow stood in
+front of a plan's 1-4 KB and the builder's 3.1 KB scratch, so a plan made late in a heavy paragraph could take the
+heap under the store's floor and the parse's hard floor. UI text shapes outside any build: there a plan the heap
+refuses leaves the title reordered, and the plans go at the end of the UI pass.
+
 The shaped layout's own containers grow behind a heap check too (`heapAllows` in `ParsedText.cpp`, the largest free
-block against what the growth asks for, as `ShapedStore::heapAllows` checks its own), since a growth the heap refuses
-aborts under `-fno-exceptions`. Each refusal latches, and takes the unshaped way for what it refused:
+block against what the growth asks for, as the store checks its own with `heap_growth::shapedHeapAllows`), since a
+growth the heap refuses aborts under `-fno-exceptions`. Each refusal latches, and takes the unshaped way for what it
+refused:
 - a merge's text (`mergeGluedGroups`, up to 1 KB): the tokens stay apart, as past the cap;
 - the copy a token's pieces are measured from (`ShapingState::measureScratch`): the token is laid out as its code
   points; a candidate's, in a forced split: the candidate is measured as code points;
@@ -658,10 +673,11 @@ no longer reaches the boot's own minimum of 15.4 KB: 11,824 B with the ballast, 
 book index included (19.5 KB). Layout is unchanged on the host (goldens) and the device (4 pages, the table on the
 last).
 
-**The free-heap floor (decided 2026-11-09, #672).** `ShapedStore::heapAllows` also keeps
+**The free-heap floor (decided 2026-11-09, #672).** The store's check (`heap_growth::shapedHeapAllows`) also keeps
 `heap_growth::kShapedFreeFloor` (12 KB) free, 3 KB above the parse's hard floor, so a store that would take the heap
 that low refuses: the token is laid out as its code points and the section latches shaping degraded (rebuilt once),
-instead of the parse aborting into a truncated section. X4 figures that informed it (master 74b8fc803, Landscape CW, cold): the stress chapter built by
+instead of the parse aborting into a truncated section. The build's shaping plans keep the same floor
+(`ShapingHeapCheck`, "What fails how"). X4 figures that informed it (master 74b8fc803, Landscape CW, cold): the stress chapter built by
 Background-C with no gate reached, lowest free heap 32.9 KB with the book index and 33.2 KB section only (X3: about
 19.8 KB); Zaydan's chapter, Background-B's lowest 47.0 KB landscape, 46.7 KB portrait (X3: 29.2 KB); the in-place
 gate keeps a shaped Arabic book out of an in-place build on the X4 too

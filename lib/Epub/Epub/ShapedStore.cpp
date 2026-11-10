@@ -12,11 +12,6 @@
 #include "HashUtils.h"
 #include "HeapGrowth.h"
 
-bool ShapedStore::heapAllows(const size_t bytes) {
-  const size_t asked = bytes + heap_growth::kAllocSlack;
-  return heap_growth::heapAllows(asked) && heap_growth::heapLeaves(asked, heap_growth::kShapedFreeFloor);
-}
-
 uint32_t ShapedStore::hashOf(const std::string_view text) {
   const uint64_t hash = HashUtils::fnvHash64(text.data(), text.size());
   return static_cast<uint32_t>(hash ^ (hash >> 32));
@@ -31,14 +26,15 @@ bool ShapedStore::grow(std::vector<T>& v, const size_t extra, const bool exact) 
   const size_t wanted = exact ? needed : std::max<size_t>({16, v.capacity() + v.capacity() / 2, needed});
   // reserve() aborts under -fno-exceptions when the heap refuses; the new block lives beside the old one while it
   // moves, so both are asked for.
-  if (!heapAllows(wanted * sizeof(T) + v.capacity() * sizeof(T))) return false;
+  if (!heap_growth::shapedHeapAllows(wanted * sizeof(T) + v.capacity() * sizeof(T))) return false;
   v.reserve(wanted);
   return true;
 }
 
 bool ShapedStore::allocChunk(Chunk& into, const size_t size) {
   std::unique_ptr<uint8_t[]> data;
-  if (heapAllows(size)) data = makeUniqueNoThrow<uint8_t[]>(size);  // `size` bytes: one chunk, or one big piece's own
+  // `size` bytes: one chunk, or one big piece's own.
+  if (heap_growth::shapedHeapAllows(size)) data = makeUniqueNoThrow<uint8_t[]>(size);
   if (!data) {
     if (!refusalLogged_) {
       refusalLogged_ = true;

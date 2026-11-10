@@ -30,6 +30,7 @@
 #include "Epub/css/CssParser.h"
 #include "FootnotePreviews.h"
 #include "Page.h"
+#include "ShapingHeapCheck.h"
 #include "TypographyProfile.h"
 #include "blocks/ImageBlock.h"  // image_scratch: pass-wide decode arena
 #include "hyphenation/Hyphenator.h"
@@ -921,6 +922,9 @@ bool Section::clearCache() {
 // unique_ptr so its address (and thus visitor's completePageFn lut capture) is stable
 // across phase calls and, later, across loop ticks.
 struct Section::BuildState {
+  // The shaping plans the build makes leave the shaped floor free. First, so it is taken away last: after the
+  // destructor has released the faces and their plans.
+  ShapingHeapCheck shapingHeapCheck;
   BuildParams params;
   std::function<void(int)> progressFn;
   uint32_t propertyHash = 0;
