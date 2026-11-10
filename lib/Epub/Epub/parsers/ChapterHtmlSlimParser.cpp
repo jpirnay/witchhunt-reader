@@ -4772,7 +4772,8 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
     }
     // The word cache takes the arena's free tail, now that what the parse keeps resident is in: from here the cursor
     // only moves with the parse lane's page, call and walk blocks, which may reach the tail (the cache then empties).
-    if (wordCache_.arm(*buildArena_, WordShapeCache::kWordCacheBytes)) {
+    // An S3 board's PSRAM arena gives it a larger tail (WordShapeCache::bytesFor).
+    if (wordCache_.armForBuild(*buildArena_)) {
       LOG_DBG("EHP", "Word cache (%u bytes) in the build arena's tail", static_cast<unsigned>(wordCache_.bytes()));
     }
   }

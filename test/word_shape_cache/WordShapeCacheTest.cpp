@@ -601,4 +601,72 @@ TEST(WordShapeCache, ACorruptEntryIsAMiss) {
   EXPECT_EQ(0, longSet[WordShapeCache::kFlagsAt] & WordShapeCache::kDoubleHead);
 }
 
+// The C3 boards' lent arenas, and an owned one, get S as before; the S3 boards' 256 KB PSRAM arena the large tail.
+static_assert(WordShapeCache::bytesFor(52272) == WordShapeCache::kWordCacheBytes, "X3 framebuffer: S");
+static_assert(WordShapeCache::bytesFor(48000) == WordShapeCache::kWordCacheBytes, "X4 framebuffer: S");
+static_assert(WordShapeCache::bytesFor(10240) == WordShapeCache::kWordCacheBytes, "owned arena: S");
+static_assert(WordShapeCache::bytesFor(256 * 1024) == WordShapeCache::kLargeWordCacheBytes, "S3 PSRAM arena");
+
+constexpr size_t kPsramCap = 256 * 1024;  // HalDisplay's PSRAM_ARENA_BYTES
+constexpr size_t kLarge = WordShapeCache::kLargeWordCacheBytes;
+
+TEST(WordShapeCache, AParseArmsTheLargeTailOnlyOnThePsramArena) {
+  {
+    BuildArena arena(kPsramCap);
+    WordShapeCache cache;
+    ASSERT_TRUE(cache.armForBuild(arena));
+    EXPECT_EQ(kLarge, cache.bytes());
+  }
+  {
+    // A byte short of the large tail and the room below it: S, as on a C3 arena.
+    BuildArena arena(kPsramCap);
+    ASSERT_NE(arena.alloc(kPsramCap - (kLarge + WordShapeCache::kRoomBelow) + 1, 1), nullptr);
+    WordShapeCache cache;
+    ASSERT_TRUE(cache.armForBuild(arena));
+    EXPECT_EQ(kS, cache.bytes());
+  }
+  {
+    // Short of S as well: no cache.
+    BuildArena arena(kPsramCap);
+    ASSERT_NE(arena.alloc(kPsramCap - (kS + WordShapeCache::kRoomBelow) + 1, 1), nullptr);
+    WordShapeCache cache;
+    EXPECT_FALSE(cache.armForBuild(arena));
+    EXPECT_EQ(0u, cache.bytes());
+  }
+  for (const size_t cap : {static_cast<size_t>(52272), static_cast<size_t>(48000)}) {
+    BuildArena arena(cap);
+    WordShapeCache cache;
+    ASSERT_TRUE(cache.armForBuild(arena));
+    EXPECT_EQ(kS, cache.bytes()) << cap;
+  }
+  BuildArena owned(10240);
+  WordShapeCache cache;
+  EXPECT_FALSE(cache.armForBuild(owned));
+}
+
+// Distinct words, more than S holds, inserted once and looked up once each: S replays at most its 256 entries, the
+// large tail nearly all of them (2-way sets lose a word wherever three fall into one).
+TEST(WordShapeCache, TheLargeTailKeepsAChaptersWords) {
+  constexpr uint32_t kWords = 1500;
+  ShapedStore made;
+  writeToken(made, 0, kWord, kKey, kWordPieces);
+  const auto run = [&](const size_t cap) {
+    BuildArena arena(cap);
+    WordShapeCache cache;
+    EXPECT_TRUE(cache.armForBuild(arena));
+    for (uint32_t n = 0; n < kWords; ++n) cache.insert(hashOf(kWord) + n, lengthOf(kWord), kKey, made, 0);
+    uint32_t hits = 0;
+    for (uint32_t n = 0; n < kWords; ++n) {
+      bool hit = false;
+      replayedAs(cache, Identity{hashOf(kWord) + n, kKey}, &hit);
+      hits += hit ? 1 : 0;
+    }
+    EXPECT_EQ(kWords, cache.stats().inserts);
+    EXPECT_EQ(0u, cache.stats().clears);
+    return hits;
+  };
+  EXPECT_LE(run(kCap), 2 * kS / WordShapeCache::kSetBytes);
+  EXPECT_GE(run(kPsramCap), kWords * 3 / 4);
+}
+
 }  // namespace

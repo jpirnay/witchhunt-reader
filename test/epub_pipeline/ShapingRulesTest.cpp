@@ -1286,6 +1286,20 @@ TEST_P(ShapingRules, TheWordCacheChangesNoLine) {
   EXPECT_EQ(0u, disarmed.oversize);  // never armed: nothing was offered
   EXPECT_GT(disarmed.bypassed, 0u);
   EXPECT_EQ(without, with);
+
+  // The S3 boards' 256 KB PSRAM arena: the large tail, never reached by the parse lane, changes no line either, and
+  // replays at least what S did.
+  std::vector<std::string> largeLines;
+  const std::string large = run("large", 256 * 1024, &largeLines);
+  WordCacheLine psram;
+  ASSERT_TRUE(parseWordCacheLine(lineWith(largeLines, "word cache: "), &psram)) << lineWith(largeLines, "word cache: ");
+  std::printf("[ ShapingRules ] %s: PSRAM arena: word cache hits=%u misses=%u inserts=%u clears=%u\n", book.label,
+              psram.hits, psram.misses, psram.inserts, psram.clears);
+  EXPECT_EQ(WordShapeCache::kLargeWordCacheBytes, psram.bytes);
+  EXPECT_EQ(0u, psram.clears);
+  EXPECT_EQ(0u, psram.bypassed);
+  EXPECT_GE(psram.hits, on.hits);
+  EXPECT_EQ(without, large);
 }
 
 namespace {
