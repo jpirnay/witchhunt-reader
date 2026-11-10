@@ -191,3 +191,49 @@ TEST(FontDownloadRulesTest, DownloadAllTakesOnlyMissingFamiliesThatJoinIt) {
   catalog.setHasUpdate(2, true);
   EXPECT_FALSE(FontDownloadRules::downloadAllTakes(catalog, 2));
 }
+
+// "Update all" takes an installed family with an update; packs only, the language and hyphenation packs among them,
+// which are what Check for updates counts.
+TEST(FontDownloadRulesTest, UpdateAllTakesInstalledFamiliesWithAnUpdateAndPacksOnlyThePacks) {
+  const auto feedFamilies = [](FontCatalog::Builder& builder) {
+    builder.beginFamily();
+    builder.keepFamily("Font", 4);  // 0
+    builder.beginFamily();
+    builder.hyphenation(true);
+    builder.keepFamily("Hyphenation-German", 18);  // 1
+    builder.beginFamily();
+    builder.languagePack(true);
+    builder.keepFamily("Language-German", 15);  // 2
+    builder.beginFamily();
+    builder.languagePack(true);
+    builder.keepFamily("Language-French", 15);  // 3: installed, current
+    builder.beginFamily();
+    builder.hyphenation(true);
+    builder.keepFamily("Hyphenation-French", 18);  // 4: not installed
+  };
+  FontCatalog::Builder counter;
+  feedFamilies(counter);
+  FontCatalog catalog;
+  ASSERT_TRUE(catalog.allocate(counter.size()));
+  FontCatalog::Builder filler(catalog);
+  feedFamilies(filler);
+  for (const size_t family : {0u, 1u, 2u, 3u}) catalog.setInstalled(family, true);
+  for (const size_t family : {0u, 1u, 2u, 4u}) catalog.setHasUpdate(family, true);
+
+  EXPECT_TRUE(FontDownloadRules::updateAllTakes(catalog, 0, false));
+  EXPECT_TRUE(FontDownloadRules::updateAllTakes(catalog, 1, false));
+  EXPECT_TRUE(FontDownloadRules::updateAllTakes(catalog, 2, false));
+  EXPECT_FALSE(FontDownloadRules::updateAllTakes(catalog, 3, false));
+  EXPECT_FALSE(FontDownloadRules::updateAllTakes(catalog, 4, false));
+
+  EXPECT_FALSE(FontDownloadRules::updateAllTakes(catalog, 0, true));
+  EXPECT_TRUE(FontDownloadRules::updateAllTakes(catalog, 1, true));
+  EXPECT_TRUE(FontDownloadRules::updateAllTakes(catalog, 2, true));
+  EXPECT_FALSE(FontDownloadRules::updateAllTakes(catalog, 3, true));
+  EXPECT_FALSE(FontDownloadRules::updateAllTakes(catalog, 4, true));
+  EXPECT_EQ(FontDownloadRules::packUpdates(catalog), 2u);
+
+  catalog.setHasUpdate(1, false);
+  catalog.setHasUpdate(2, false);
+  EXPECT_EQ(FontDownloadRules::packUpdates(catalog), 0u);
+}

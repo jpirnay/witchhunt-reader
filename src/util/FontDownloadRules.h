@@ -96,4 +96,19 @@ inline bool downloadAllTakes(const FontCatalog& catalog, const size_t family) {
   return !catalog.installed(family) && catalog.inDownloadAll(family);
 }
 
+// "Update all" on the device: an installed family with an update. With `packsOnly`, the language and hyphenation packs
+// among them alone, which Check for updates counts (packUpdates()) and has the Font Manager update.
+inline bool updateAllTakes(const FontCatalog& catalog, const size_t family, const bool packsOnly) {
+  return catalog.installed(family) && catalog.hasUpdate(family) && (!packsOnly || catalog.pack(family));
+}
+
+// The packs updateAllTakes() takes with `packsOnly`: how many updates Check for updates offers.
+inline size_t packUpdates(const FontCatalog& catalog) {
+  size_t count = 0;
+  for (size_t family = 0; family < catalog.count(); ++family) {
+    if (updateAllTakes(catalog, family, /*packsOnly=*/true)) ++count;
+  }
+  return count;
+}
+
 }  // namespace FontDownloadRules
