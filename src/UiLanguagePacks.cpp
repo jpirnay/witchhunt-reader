@@ -99,7 +99,7 @@ std::unique_ptr<Activity> download(GfxRenderer& renderer, MappedInputManager& ma
   if (offer.hyphenation[0] != '\0') {
     snprintf(wanted.pack, sizeof(wanted.pack), "%s", offer.hyphenation);
   } else {
-    wanted.family = offer.interfaceFamily;
+    snprintf(wanted.family, sizeof(wanted.family), "%s", offer.interfaceFamily);
   }
   return std::make_unique<FontDownloadActivity>(
       renderer, mappedInput, wanted,

@@ -57,6 +57,11 @@ class SdCardFontSystem {
   /// none of these scripts, or no such family is installed.
   void selectLanguageFamily(const char* family);
   const char* languageFamily() const { return languageFamily_.c_str(); }
+  // The family selectLanguageFamily() would have taken for the open book's script and found no install of: the one it
+  // tries first ("NotoSansDevanagari", "NotoNaskhArabic", "NotoSerifSC"); "" when the book needs none, the reader's
+  // font draws its script, a family of it is installed, or the book's own body family (selectBookFamilies) draws it.
+  // What the book's open offers to download (BookPackOffer). Reads that body family's character map: once a book open.
+  const char* missingLanguageFamily() const;
 
   /// The families of a book, loaded read-only for UI screens: only when the glyph store holds them as a set already
   /// (SdCardFontManager::openTtfFamiliesReadOnly). False, nothing loaded, otherwise or when the first is no TrueType.
@@ -209,6 +214,8 @@ class SdCardFontSystem {
   bool readerHebrewScript_ = false;                       // the open book is in a Hebrew-script language
   bool readerMyanmarScript_ = false;                      // the open book is in a Myanmar-script language
   std::string languageFamily_;                            // selectLanguageFamily()
+  std::string missingLanguageFamily_;                     // selectLanguageFamily(): none installed
+  uint32_t missingLanguageProbe_ = 0;                     // a character of its script
   uint32_t languageFamilyKey_ = 0;  // what it was decided for: the reader's font and the region; 0: nothing
   SdCardFontRegistry registry_;
   SdCardFontManager manager_;

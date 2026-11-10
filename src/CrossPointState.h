@@ -166,6 +166,9 @@ class CrossPointState {
   // empty -- no heap -- when none: a hyphenation pack by its language, lower case ("de"), a CJK interface pack by its
   // interface language, upper case ("ZH"). They are not offered again; the Font Manager still has them.
   std::string hyphenationOffersDeclined;
+  // The reading fonts a book's open offered and was told no (BookPackOffer), by their script, comma-separated, empty
+  // when none: "Devanagari,JP". A book in the script is not asked again; the Font Manager still has them.
+  std::string fontOffersDeclined;
   KOReaderSyncSessionState koReaderSyncSession;
   PendingBookmarkJumpState pendingBookmarkJump;
 #if SERIAL_TEST_API
