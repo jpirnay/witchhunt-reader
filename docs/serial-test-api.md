@@ -702,6 +702,7 @@ shaper itself is linked into every build.
 ```
 CMD:FS:LS:<folder>
 CMD:FS:RM:<path>
+CMD:FS:RMF:<path>
 CMD:FS:PUT:<path>:<size>:<crc32hex>
 CMD:FS:GET:<path>
 CMD:FS:HASH:<path>
@@ -711,7 +712,7 @@ CMD:FS:MV:<from>:<to>
 
 Every path is a path on the card and starts with `/`. A FAT name cannot hold `:`, so the fields
 around one are never in doubt. An unknown verb, or a path that does not start with `/`, gets
-`FS_ERROR:expected LS, RM, PUT, GET, HASH, MKDIR or MV, then :/<path>`; a verb with the wrong
+`FS_ERROR:expected LS, RM, RMF, PUT, GET, HASH, MKDIR or MV, then :/<path>`; a verb with the wrong
 arguments gets `FS_ERROR:expected <its form>`.
 
 `LS` lists a folder, one line an entry, then the count:
@@ -724,6 +725,11 @@ FS_END:2
 
 `RM` removes a file, or a folder with everything in it: `FS_OK:removed <path>`. Errors: `FS_ERROR:protected
 <path>`, `FS_ERROR:not found <path>`, `FS_ERROR:not a folder <path>`, `FS_ERROR:could not remove <path>`.
+
+`RMF` is `RM` without the protection below: it also removes a dot-named item (`/.crossink`, even `/.crosspoint` with
+the settings and the credential stores in it), a system folder and a credential store, for a test that must clean up
+what it made there. It still refuses the root, and any path with a segment spelled like an 8.3 alias (`FS_ERROR:protected
+<path>`), which might remove another entry than the one it names. Nothing asks twice: name the path exactly.
 
 `PUT` uploads a file, from any screen:
 
@@ -841,7 +847,7 @@ deleting a book's section cache (`/.crosspoint/epub_<hash>/spines/...`) forces a
 folder under `/.crosspoint/fonts` can be looked at or removed between runs, and the web bundle, test fonts and
 dictionaries go onto the card with `PUT`. Hidden folders can be reached; the credential stores (`wifi.json`,
 `opds.json`, `koreader.json`), a dot-named item itself (`/.crosspoint` cannot be removed or moved) and any path
-spelled with an 8.3 alias are refused (`lib/FsHelpers/ProtectedPaths.h`). Removing, replacing or moving what an
+spelled with an 8.3 alias are refused (`lib/FsHelpers/ProtectedPaths.h`), but for `RMF`'s removal. Removing, replacing or moving what an
 open book is using is not guarded: do it from Home. On the USB Transfer screen a command line is at most 127 bytes.
 Development builds only.
 

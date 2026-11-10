@@ -1363,6 +1363,21 @@ bool refusedItem(const std::string& path) {
   return path == "/" || ProtectedPaths::isProtectedPath(path, ProtectedPaths::Target::Item, true, refuseAlias);
 }
 
+// FS:RMF's one refusal besides the root: a segment spelled like a generated 8.3 alias, which may open another entry
+// than the one it names (ProtectedPaths::looksLikeShortAlias). Not resolved on the card: a forced removal takes no
+// chance.
+bool spelledLikeAlias(const std::string& path) {
+  size_t pos = 0;
+  while (pos < path.size()) {
+    size_t end = path.find('/', pos);
+    if (end == std::string::npos) end = path.size();
+    const std::string_view name = ProtectedPaths::effectiveName(std::string_view(path).substr(pos, end - pos));
+    if (ProtectedPaths::looksLikeShortAlias(name)) return true;
+    pos = end + 1;
+  }
+  return false;
+}
+
 bool isFolder(const std::string& path) {
   const HalFile item = Storage.open(path.c_str());
   return item && item.isDirectory();
@@ -1739,15 +1754,20 @@ void cmdFs(const std::string_view arg) {
       return;
     }
   }
-  if ((verb != "LS" && verb != "RM") || rest.empty() || rest.front() != '/') {
-    reply("FS_ERROR:expected LS, RM, PUT, GET, HASH, MKDIR or MV, then :/<path>");
+  // RMF: RM without the protection, for a test's own leftovers (a dot folder it made, a credential store it planted).
+  const bool forced = verb == "RMF";
+  if ((verb != "LS" && verb != "RM" && !forced) || rest.empty() || rest.front() != '/') {
+    reply("FS_ERROR:expected LS, RM, RMF, PUT, GET, HASH, MKDIR or MV, then :/<path>");
     return;
   }
   // normalisePath drops the leading slash (the root becomes ""); the replies and the root check want it back.
   const std::string path = "/" + FsHelpers::normalisePath(std::string(rest));
   const auto refuseAlias = [](std::string_view, std::string_view) { return true; };
   const ProtectedPaths::Target target = verb == "LS" ? ProtectedPaths::Target::Directory : ProtectedPaths::Target::Item;
-  if (path == "/" ? verb == "RM" : ProtectedPaths::isProtectedPath(path, target, true, refuseAlias)) {
+  const bool refused = path == "/" ? verb != "LS"
+                       : forced    ? spelledLikeAlias(path)
+                                   : ProtectedPaths::isProtectedPath(path, target, true, refuseAlias);
+  if (refused) {
     reply("FS_ERROR:protected ", path);
     return;
   }
@@ -1756,7 +1776,7 @@ void cmdFs(const std::string_view arg) {
     reply("FS_ERROR:not found ", path);
     return;
   }
-  if (verb == "RM") {
+  if (verb == "RM" || forced) {
     const bool folder = item.isDirectory();
     item = HalFile();  // closed before it goes
     if (!(folder ? Storage.removeDir(path.c_str()) : Storage.remove(path.c_str()))) {
