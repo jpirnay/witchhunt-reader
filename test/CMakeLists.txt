@@ -303,6 +303,7 @@ add_subdirectory(ui_script_pack)  # likewise
 add_subdirectory(keyboard_labels)  # likewise
 add_subdirectory(cjk_ui_pack)  # likewise
 add_subdirectory(ui_face_scripts)
+add_subdirectory(ui_shaped_text)  # after font_group_stream: links its uzlib_font_ring
 add_subdirectory(ui_font_compression)  # likewise
 add_subdirectory(flash_lang_partition)  # likewise
 add_subdirectory(glyph_store)

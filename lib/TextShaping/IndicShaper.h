@@ -106,6 +106,10 @@ class CallMemory {
   CallMemory(const CallMemory&) = delete;
   CallMemory& operator=(const CallMemory&) = delete;
   bool valid() const;
+  // The bytes such a call's block takes, at the worst alignment: the room an arena needs to lend it (0 for a call no
+  // block can serve).
+  static size_t bytesFor(size_t tokenBytes, CallKind kind = CallKind::Shape,
+                         unsigned runCodepoints = kMaxRunCodepoints);
 
   // IndicReorder's bounded form of the token: 3 * tokenBytes + 1 bytes; null and 0 when !valid().
   char* reorderBuffer() const { return reorder_; }

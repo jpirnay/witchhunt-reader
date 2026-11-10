@@ -6,6 +6,9 @@
 class FontCacheManager;
 class SdCardFont;
 struct GlyphRun;
+namespace ui_shaping {
+class Shaped;
+}
 
 #include <atomic>
 #include <cstring>
@@ -223,6 +226,17 @@ class GfxRenderer {
 
   void renderChar(const EpdFontFamily& fontFamily, uint32_t cp, int* x, int* y, bool pixelState,
                   EpdFontFamily::Style style) const;
+  // drawFormedText's walk over `text`'s code points with the pen at x and the baseline at yPos, after the string's
+  // beginText(): the unscaled blitter, which the shaped UI path also draws its text segments with.
+  void drawCodepoints(const EpdFontFamily& font, int x, int yPos, const char* text, bool black,
+                      EpdFontFamily::Style style) const;
+  // Whether UI text in `fontId`'s `style` may be shaped (ui_shaping): drawn at the font's own size, not in small caps,
+  // and not while a page is scanned (which records the text as it is drawn unshaped).
+  bool shapesUiText(int fontId, EpdFontFamily::Style style) const;
+  // A shaped UI string (ui_shaping::shape) at (x, y), y the line's top: its text segments through drawCodepoints, its
+  // runs by glyph key through the UI face's own provider chain, which serves them as the ink of the face behind it.
+  void drawShapedUiText(int fontId, const EpdFontFamily& font, int x, int y, const ui_shaping::Shaped& shaped,
+                        bool black, EpdFontFamily::Style style) const;
   void freeBwBufferChunks();
   template <Color color>
   void drawPixelDither(int x, int y) const;
@@ -449,6 +463,10 @@ class GfxRenderer {
   /// without the hook. A section build's end and the dictionary's pages call it, under RenderLock.
   static void setShapingFaceRelease(void (*release)()) { shapingFaceRelease_ = release; }
   static void releaseShapingFaces();
+  /// A render pass ends (the RenderLock's release, SdCardFontSystem): what shaped UI text kept for the pass goes back
+  /// to the heap, the string it shaped last and a shaping face it made (ui_shaping::endPass), a section build's faces
+  /// left alone. Under RenderLock.
+  static void endUiTextPass();
   void setNextDisplayRefreshMode(HalDisplay::RefreshMode refreshMode) const;
   // True if a setNextDisplayRefreshMode() override is armed but not yet consumed. Peek only —
   // does NOT consume it (unlike consumeRefreshOverride). Lets a caller that is about to issue an

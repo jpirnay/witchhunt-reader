@@ -45,6 +45,8 @@ class UiFaceProvider final : public GlyphProvider {
   /// With the pack installed the face draws the forms; without it, when the last book's font does (the shared
   /// provider).
   bool formsArabic() const override;
+  /// What the shared provider shapes a script over, unless the pack draws `probe` first (missGlyph()'s order).
+  const EpdFontData* shapingSource(uint32_t probe) override;
 
   /// Whether the pack covers `codepoint` for the face behind `ctx` (a UiFaceProvider): FallbackFaceProvider's
   /// beginText() hook.

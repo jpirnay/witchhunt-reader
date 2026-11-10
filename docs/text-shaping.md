@@ -539,8 +539,13 @@ a line's tokens by the bidi levels. PR 4b teaches it to carry shaped pieces.
   boards' arenas, and the free tail is for data that may be lost (memory strategy §8.5, rows 17 and 18; the
   measurements are under [The shaped store's heap](#the-shaped-stores-heap)).
 - **Titles, chapter names and the TOC**, on Home, in the Library, in the status bar and the chapter list: the UI
-  faces are bitmap and cannot shape, so these draw unshaped in the face that draws them today. They wait for step 5's
-  visual strings.
+  faces are bitmap and cannot shape. Their Indic and Myanmar runs are shaped over the TrueType face behind the UI face
+  that draws them (`lib/GfxRenderer/UiShapedText`): the book's font in the reader, outside it the last book's family
+  opened read-only, at the UI size, and drawn as that face's 1-bit ink, as its unshaped characters are. A title is fitted
+  from one shaping and cut only between syllables. A face is there only when the last book's family maps the script:
+  with another script's font, before any book is read, or with a bitmap (`.cpfont`) font, a title is reordered only,
+  as in a bitmap font. A line with a right-to-left character keeps its visual order unshaped, Arabic titles their
+  presentation forms, and a string past 255 bytes is shaped only once it is cut to fit.
 - **Bitmap fonts** (`.cpfont`, built-in) and a TrueType family that does not map the script: Indic text is reordered
   only (the vowel signs are placed; conjuncts are not formed, and the virama stays visible), and Arabic letters are
   drawn unjoined, each in its isolated form, as before shaping.

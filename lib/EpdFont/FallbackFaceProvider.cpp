@@ -7,9 +7,24 @@
 
 #include "EpdFont.h"
 #include "FontDecompressor.h"
+#include "GlyphKey.h"
 #include "SdFaceGlyph.h"
 
 uint8_t FallbackFaceProvider::ink_[FallbackFaceProvider::kInkBytes] = {};
+
+namespace {
+
+// Whether `face`'s own interval table holds `cp`: no provider, no fallbacks.
+bool inTable(const EpdFontData* face, const uint32_t cp) {
+  if (!face || !face->intervals || face->intervalCount == 0) return false;
+  const EpdUnicodeInterval* const end = face->intervals + face->intervalCount;
+  const EpdUnicodeInterval* const after =
+      std::upper_bound(face->intervals, end, cp,
+                       [](const uint32_t value, const EpdUnicodeInterval& interval) { return value < interval.first; });
+  return after != face->intervals && cp <= (after - 1)->last;
+}
+
+}  // namespace
 
 bool FallbackFaceProvider::setFaces(const EpdFontData* const* faces, const uint8_t count) {
   faceCount_ = 0;
@@ -23,14 +38,24 @@ bool FallbackFaceProvider::setFaces(const EpdFontData* const* faces, const uint8
 }
 
 const EpdGlyph* FallbackFaceProvider::missGlyph(const uint32_t codepoint) {
+  // A glyph key names a glyph of the reader's face by its ID (shapingSource()): that face alone is asked for it, and
+  // never for glyph 0, its .notdef, which is no real character either.
+  if (glyph_key::is(codepoint)) {
+    if (!readerFace_ || codepoint == glyph_key::of(0)) return nullptr;
+    return serveFrom(readerFace_(readerCtx_), codepoint, true);
+  }
   if (const EpdGlyph* glyph = serve(codepoint)) return glyph;
   if (claims_ && codepoint != standIn_ && claims_(codepoint)) return serve(standIn_);
   return nullptr;
 }
 
+uint8_t FallbackFaceProvider::facesBeforeReader() const {
+  return readerAfterFirst_ && !bookText_ && faceCount_ > 0 ? 1 : 0;
+}
+
 const EpdGlyph* FallbackFaceProvider::serve(const uint32_t codepoint) {
   // The built-in faces before the reader's: none, or the active UI language's own, but for book text.
-  const uint8_t before = readerAfterFirst_ && !bookText_ && faceCount_ > 0 ? 1 : 0;
+  const uint8_t before = facesBeforeReader();
   for (uint8_t i = 0; i < before; ++i) {
     if (const EpdGlyph* glyph = serveFrom(faces_[i], codepoint, false)) return glyph;
   }
@@ -53,6 +78,22 @@ const EpdGlyph* FallbackFaceProvider::serve(const uint32_t codepoint) {
     if (const EpdGlyph* glyph = serveFrom(faces_[i], codepoint, false)) return glyph;
   }
   return nullptr;
+}
+
+const EpdFontData* FallbackFaceProvider::shapingSource(const uint32_t probe) {
+  // serve()'s order up to the reader's face, asked of the tables alone: the UI face itself (beginText()'s test), the
+  // active UI language's own face but for book text, and the packs but for what the book's face maps in the reader. A
+  // face before the reader's that holds the probe draws the script as its characters; so does the reader's face where
+  // serve() would not lend it.
+  if (!readerFace_ || probe == REPLACEMENT_GLYPH || probe == standIn_ || inTable(primary_, probe)) return nullptr;
+  for (uint8_t i = 0; i < facesBeforeReader(); ++i) {
+    if (inTable(faces_[i], probe)) return nullptr;
+  }
+  if (!readerMaps(probe) && packs_.covers && packs_.covers(packs_.ctx, probe)) return nullptr;
+  const EpdFontData* const face = readerFace_(readerCtx_);
+  // The faces serveFrom() lends a glyph from, drawn as their ink: 2-bit, behind a provider; here one that draws keys.
+  if (!face || !face->is2Bit || !face->provider || !face->provider->drawsGlyphKeys()) return nullptr;
+  return face;
 }
 
 const EpdGlyph* FallbackFaceProvider::servePack(const uint32_t codepoint) {
@@ -90,20 +131,6 @@ const EpdGlyph* FallbackFaceProvider::serveFrom(const EpdFontData* face, const u
   slot.index = glyph.index;
   return &slot.record;
 }
-
-namespace {
-
-// Whether `face`'s own interval table holds `cp`: no provider, no fallbacks.
-bool inTable(const EpdFontData* face, const uint32_t cp) {
-  if (!face || !face->intervals || face->intervalCount == 0) return false;
-  const EpdUnicodeInterval* const end = face->intervals + face->intervalCount;
-  const EpdUnicodeInterval* const after =
-      std::upper_bound(face->intervals, end, cp,
-                       [](const uint32_t value, const EpdUnicodeInterval& interval) { return value < interval.first; });
-  return after != face->intervals && cp <= (after - 1)->last;
-}
-
-}  // namespace
 
 void FallbackFaceProvider::beginText(const char* utf8Text, bool (*alsoCovered)(void* ctx, uint32_t codepoint),
                                      void* ctx) {

@@ -24,7 +24,9 @@ class FontDecompressor;
 /// One more face may come from the reader's font (setReaderFace): a 2-bit TrueType face at this size, whose glyphs
 /// are drawn as the ink of their black-and-white pass (packInkMask), so a book title in a script the built-in faces
 /// lack draws in the font the book is read in. It lends real characters only, never its replacement glyph (U+FFFD)
-/// or the stand-in: a character it lacks is the UI faces' to draw or leave out.
+/// or the stand-in: a character it lacks is the UI faces' to draw or leave out. When that face draws glyph keys, an
+/// Indic or Myanmar title is shaped over it (shapingSource(), GfxRenderer's UI text) and its glyphs are served by key,
+/// as the same ink.
 class FallbackFaceProvider final : public GlyphProvider {
  public:
   static constexpr uint8_t MAX_FACES = 4;
@@ -105,6 +107,9 @@ class FallbackFaceProvider final : public GlyphProvider {
     formsCtx_ = ctx;
   }
   bool formsArabic() const override { return formsArabic_ && formsArabic_(formsCtx_); }
+  /// The reader's face, when serve() would lend it `probe` for the string begun last (no face before it holds the
+  /// probe) and it draws glyph keys; its glyphs then come by key through missGlyph(), from it alone.
+  const EpdFontData* shapingSource(uint32_t probe) override;
 
  private:
   // A served glyph as GlyphProvider hands it out: a full EpdGlyph record (the faces store the 6-byte
@@ -118,8 +123,10 @@ class FallbackFaceProvider final : public GlyphProvider {
     const EpdGlyph* source;  // the reader face's own record, whose 2-bit bitmap ownsBitmap() packs; null otherwise
     uint16_t index;
   };
-  // A reader glyph's 1-bit ink: a 12 pt CJK glyph is about 25 x 26 px, 82 B. Larger glyphs are left to the next face.
-  static constexpr uint16_t kInkBytes = 128;
+  // A reader glyph's 1-bit ink: a 12 pt CJK glyph is about 25 x 26 px, 82 B. At the 12 pt UI em (25 px) 39 of Noto Sans
+  // Myanmar's 452 glyphs need more than 128 B, up to 200 B (its stacked and medial forms, which a shaped title draws),
+  // as do 4 of Noto Sans Tamil's; none passes 256 B. Larger glyphs are left to the next face.
+  static constexpr uint16_t kInkBytes = 256;
   static uint8_t ink_[kInkBytes];
   // EpdFont copies the metrics out at once and the renderer asks for the bitmap before it resolves
   // the next glyph, so one slot would do for that caller. The few more cost 24 B each and keep a
@@ -146,6 +153,7 @@ class FallbackFaceProvider final : public GlyphProvider {
   bool (*formsArabic_)(void* ctx) = nullptr;
   void* formsCtx_ = nullptr;
 
+  uint8_t facesBeforeReader() const;  // serve()'s built-in faces ahead of the reader's: 0 or 1
   const EpdGlyph* serve(uint32_t codepoint);
   const EpdGlyph* servePack(uint32_t codepoint);
   const EpdGlyph* serveFrom(const EpdFontData* face, uint32_t codepoint, bool reader);

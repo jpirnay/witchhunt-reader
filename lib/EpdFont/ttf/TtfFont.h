@@ -122,6 +122,11 @@ class TtfFont {
   /// load; nullptr for a style the family does not draw, or without the memory: then `*refused` is set too (when
   /// `refused` is not null; it is left as it is otherwise). Under RenderLock.
   ShapingFace* shapingFace(uint8_t style, bool* refused = nullptr);
+  /// Whether the shaping face of the file that draws `style` is made now: shapingFace() would hand it out, not make it.
+  bool holdsShapingFace(uint8_t style) const {
+    const Style* const file = styleAt(style);
+    return file && file->shaping;
+  }
 
  private:
   friend class TtfFontSet;
@@ -150,6 +155,7 @@ class TtfFont {
       *ppem26_6 = size->ppem;
       return owner->shapingFace(style, refused);
     }
+    bool holdsShapingFace() const override { return owner->holdsShapingFace(style); }
   };
 
   /// One pixel size: its index in the store's face table and the fonts of the family's styles. Never copied or moved:

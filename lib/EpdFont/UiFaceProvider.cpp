@@ -38,3 +38,8 @@ void UiFaceProvider::beginText(const char* utf8Text) {
 bool UiFaceProvider::formsArabic() const {
   return (pack_.installed && pack_.installed(pack_.ctx)) || (shared_ && shared_->formsArabic());
 }
+
+const EpdFontData* UiFaceProvider::shapingSource(const uint32_t probe) {
+  if (packCovers(this, probe)) return nullptr;
+  return shared_ ? shared_->shapingSource(probe) : nullptr;
+}
