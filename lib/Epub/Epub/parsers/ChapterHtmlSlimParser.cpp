@@ -1002,11 +1002,15 @@ ChapterHtmlSlimParser::FlowEntry ChapterHtmlSlimParser::enterFlow(const CssStyle
   if (style.hasWritingMode()) element.writingMode = style.writingMode;
   if (style.hasDirection()) element.direction = style.direction;
   if (style.hasLineHeight()) element.lineHeightEm = style.lineHeightEm;
+  if (style.hasWhiteSpace()) element.whiteSpace = style.whiteSpace;
   const bool flowChanges = element.writingMode != inherited.writingMode || element.direction != inherited.direction;
-  if (!flowChanges && element.lineHeightEm == inherited.lineHeightEm) return element;
+  if (!flowChanges && element.lineHeightEm == inherited.lineHeightEm && element.whiteSpace == inherited.whiteSpace) {
+    return element;
+  }
   if (flowCount_ == kMaxFlowEntries) {
     if (!flowOverflowLogged_)
-      LOG_ERR("EHP", "More than %u nested writing-mode, direction or line-height changes; deeper ones dropped",
+      LOG_ERR("EHP",
+              "More than %u nested writing-mode, direction, line-height or white-space changes; deeper ones dropped",
               kMaxFlowEntries);
     flowOverflowLogged_ = true;
     return inherited;
@@ -1024,6 +1028,13 @@ ChapterHtmlSlimParser::FlowEntry ChapterHtmlSlimParser::enterFlow(const CssStyle
     flowLogged_ = true;
   }
   return element;
+}
+
+CssWhiteSpace ChapterHtmlSlimParser::openWhiteSpace() const {
+  for (int i = flowCount_ - 1; i >= 0; --i) {
+    if (flows_[i].depth < depth) return flows_[i].whiteSpace;
+  }
+  return CssWhiteSpace::Unset;
 }
 
 void ChapterHtmlSlimParser::decideFrame(const CssWritingMode rootMode) {
@@ -1341,6 +1352,12 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     }
     lastTextCodepoint_ = lastCodepointOf(partWordBuffer, partWordTextEnd());
   }
+  const bool keptSpaces = CssWhiteSpaces::keepsSpaces(whiteSpace_);
+  if (keptSpaces) {
+    for (int k = partWordTextBegin_; k < partWordTextEnd(); ++k) {
+      if ((static_cast<uint8_t>(partWordBuffer[k]) & 0xC0) != 0x80) ++lineColumn_;
+    }
+  }
   // A word with CJK characters becomes up to one token per character, reserved at once. Charged only
   // after addWord, a run that takes the row past its budget would first double the cell's word lists
   // (256 to 512 entries, ~16 KB). Degrade the row before adding it instead; the word then goes into
@@ -1367,7 +1384,8 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     // cleared alongside that, so this is belt-and-braces against a future reordering.
     const size_t tokensBefore = currentTableCell->text->size();
     currentTableCell->text->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct,
-                                    partWordVisibleOffset_, 0, effectiveTextEmphasis_, effectiveTextCombine_);
+                                    partWordVisibleOffset_, 0, effectiveTextEmphasis_, effectiveTextCombine_,
+                                    keptSpaces);
     // Charge every token the word became against the row budget (a CJK word is one per character).
     // Only a row still headed for the grid accumulates — a degraded cell is drained and freed at </td>.
     if (currentTable && !currentTable->degraded && !currentTable->rowDegraded) {
@@ -1387,8 +1405,9 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     }
   } else if (currentTextBlock && census_) {
     // Counted, and kept only as the block's first word: what follows depends on whether the block is empty, never on
-    // its words, and a block that is never laid out must not grow with its paragraph.
-    countCensusWord();
+    // its words, and a block that is never laid out must not grow with its paragraph. A run of kept spaces is no text:
+    // a book's code would weigh its spaces into the body size.
+    if (!keptSpaces || partWordBuffer[partWordTextBegin_] != ' ') countCensusWord();
     if (currentTextBlock->isEmpty()) {
       currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct,
                                 partWordVisibleOffset_);
@@ -1408,7 +1427,8 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     }
     const bool newFontSlot = (currentTextBlock->fontSlotsUsed() & (1u << fontSlot)) == 0;
     currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct,
-                              partWordVisibleOffset_, fontSlot, effectiveTextEmphasis_, effectiveTextCombine_);
+                              partWordVisibleOffset_, fontSlot, effectiveTextEmphasis_, effectiveTextCombine_,
+                              keptSpaces);
     // A block laid out in parts has its font already: a family its later words bring in gets its face now.
     if (newFontSlot && wordFontsSize_ != 0) resolveWordFont(fontSlot);
 
@@ -1681,6 +1701,43 @@ bool ChapterHtmlSlimParser::addNoBreakSpace(const uint32_t offset) {
   nextWordContinues = true;  // Attach space to previous word (no break).
   if (!flushPartWordBuffer()) return false;
   nextWordContinues = true;  // Next real word attaches to this space (no break).
+  if (heldBytes > 0) {
+    memcpy(partWordBuffer, held, static_cast<size_t>(heldBytes));
+    partWordBufferIndex = heldBytes;
+    partWordControlsOnly_ = true;
+  }
+  return true;
+}
+
+bool ChapterHtmlSlimParser::addKeptSpaces(const char* const run, const int length, const uint32_t offset) {
+  // As at a no-break space: controls held for the next word wait out the run.
+  constexpr int kMaxHeldBytes = kMaxHeldControlBytes + 2 * 3 * kMaxFlowEntries;
+  char held[kMaxHeldBytes];
+  const int heldBytes = partWordControlsOnly_ ? std::min(partWordBufferIndex, kMaxHeldBytes) : 0;
+  if (heldBytes > 0) {
+    memcpy(held, partWordBuffer, static_cast<size_t>(heldBytes));
+    partWordBufferIndex = 0;
+    partWordControlsOnly_ = false;
+  } else if (partWordBufferIndex > 0 && !flushPartWordBuffer()) {
+    return false;
+  }
+  // The run's columns, counted once the word before it is: a tab runs to the next stop. CSS treats a carriage return as
+  // a space.
+  int columns = 0;
+  for (int i = 0; i < length; ++i) {
+    columns += run[i] == '\t' ? kTabColumns - (lineColumn_ + columns) % kTabColumns : 1;
+  }
+  while (columns > 0) {
+    const int n = std::min(columns, MAX_WORD_SIZE);
+    memset(partWordBuffer, ' ', static_cast<size_t>(n));
+    partWordBuffer[n] = '\0';
+    partWordBufferIndex = n;
+    partWordTextBegin_ = 0;
+    partWordTextEnd_ = n;
+    partWordVisibleOffset_ = offset;
+    if (!flushPartWordBuffer()) return false;
+    columns -= n;
+  }
   if (heldBytes > 0) {
     memcpy(partWordBuffer, held, static_cast<size_t>(heldBytes));
     partWordBufferIndex = heldBytes;
@@ -2324,6 +2381,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   dropHeldBidiControls();        // they end with the paragraph they were held in
   flushedWordTarget_ = nullptr;  // and no closer ends a word of that paragraph
   nextWordContinues = false;     // New block = new paragraph, no continuation
+  lineColumn_ = 0;               // and a new line
   if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the open ruby's bases are in the block left behind
   endCjkSegment();
   // Base style for the new block — normally the incoming blockStyle, but when falling
@@ -2622,7 +2680,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // book's CSS off), then its computed writing mode and direction, along which its box and start/end are read from here
   // on.
   applyHtmlDirectionality(cssStyle, name, dirAttr);
+  // HTML's own style for <pre>, under the author's: the book's CSS may set any other white-space on it.
+  if (strcmp(name, "pre") == 0 && !cssStyle.hasWhiteSpace()) cssStyle.whiteSpace = CssWhiteSpace::Pre;
   self->elementFlow_ = self->enterFlow(cssStyle);
+  self->whiteSpace_ = self->elementFlow_.whiteSpace;
   cssStyle.resolveLogical(self->elementFlow_.writingMode, self->elementFlow_.direction);
   // The section's mode, at its first element outside <html>'s tag and any <head>, before anything is laid out. A
   // lower-case head's children never get here (the skip above takes them); an upper-case one's do, deeper than it.
@@ -2633,9 +2694,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       self->decideFrame(self->elementFlow_.writingMode);
     }
   }
-  // line-height is inherited: the element's copy carries the computed value, for every block built from it.
+  // line-height and white-space are inherited: the element's copy carries the computed values, for every block built
+  // from it.
   cssStyle.lineHeightEm = self->elementFlow_.lineHeightEm;
   cssStyle.defined.lineHeight = self->elementFlow_.lineHeightEm > 0.0f;
+  cssStyle.whiteSpace = self->elementFlow_.whiteSpace;
 
   // The HTML `hidden` attribute means display:none, and outranks the CSS that got
   // us here -- it is applied after the cascade above for that reason. EPUBs use it
@@ -3713,10 +3776,6 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
             }
           }
         }
-      } else if (strcmp(name, "pre") == 0) {
-        // Record depth so characterData can treat \n as a hard line break inside <pre>.
-        // depth has not been incremented yet here; it will be after startElement returns.
-        self->preUntilDepth = std::min(self->preUntilDepth, self->depth);
       }
     }
   } else if (strcmp(name, "hr") == 0) {
@@ -4161,8 +4220,9 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
 
     if (isWhitespace(s[i])) {
       self->endJoinerContext();  // a chillu's joiner goes last in the word before the space
-      // Inside <pre>: treat \n as a hard line break.
-      if (s[i] == '\n' && self->preUntilDepth < self->depth) {
+      // A line feed the text keeps (CSS white-space pre, pre-wrap, pre-line, break-spaces; <pre>) breaks the line. A
+      // table cell is laid out as one paragraph, so there it is a word space.
+      if (s[i] == '\n' && CssWhiteSpaces::keepsLineFeeds(self->whiteSpace_) && !self->currentTableCell) {
         if (self->partWordBufferIndex > 0) {
           if (!self->flushPartWordBuffer()) return;
         }
@@ -4175,8 +4235,19 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
         }
         // A float the new block takes stands before the next byte of this chunk.
         const PinnedPlacement atNextByte(*self, off);
+        self->blockEndsAtLineFeed_ = true;
         self->startNewTextBlockWithinElements(self->lineFeedBlockStyle());
+        self->blockEndsAtLineFeed_ = false;
         self->nextWordContinues = false;
+        continue;
+      }
+      // Spaces and tabs the text keeps (pre, pre-wrap, break-spaces): the run up to the next other character is one
+      // token. A run a chunk boundary cuts is two, glued.
+      if (CssWhiteSpaces::keepsSpaces(self->whiteSpace_) && s[i] != '\n') {
+        int end = i + 1;
+        while (end < len && (s[end] == ' ' || s[end] == '\t' || s[end] == '\r')) ++end;
+        if (!self->addKeptSpaces(s + i, end - i, byteOff)) return;
+        i = end - 1;
         continue;
       }
       // Currently looking at whitespace, if there's anything in the partWordBuffer, flush it
@@ -4368,6 +4439,7 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
   self->deliverSplitTail();
   endElementBody(self, name);
+  self->whiteSpace_ = self->openWhiteSpace();
   // A background picture goes in once its element has closed: after the element's own text and,
   // for a table, after the grid </table> has just emitted. Out here because the body returns from
   // a dozen places.
@@ -4635,11 +4707,6 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
   // Leaving strikethrough tag
   if (self->strikethroughUntilDepth == self->depth) {
     self->strikethroughUntilDepth = INT_MAX;
-  }
-
-  // Leaving pre tag
-  if (self->preUntilDepth == self->depth) {
-    self->preUntilDepth = INT_MAX;
   }
 
   // Pop from inline style stack if we pushed an entry at this depth
@@ -5436,11 +5503,9 @@ void ChapterHtmlSlimParser::makePages() {
     currentPageNextY += blockStyle.paddingBottom;
   }
 
-  // Extra paragraph spacing if enabled (default behavior).
-  // Suppressed between lines within a <pre> block so code/preformatted text is not
-  // double-spaced; the last line of the block is flushed after </pre> is closed and
-  // preUntilDepth has already been reset, so it still receives normal paragraph spacing.
-  if (extraParagraphSpacing && preUntilDepth == INT_MAX) {
+  // Extra paragraph spacing if enabled (default behavior). Not between the lines a kept line feed parts (a <pre>'s):
+  // preformatted text is not double-spaced. Its last line, which no line feed ends, still takes it.
+  if (extraParagraphSpacing && !blockEndsAtLineFeed_) {
     currentPageNextY += lineHeight / 2;
   }
 }

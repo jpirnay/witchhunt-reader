@@ -37,8 +37,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 122;  // v122: a <pre> line feed starts the next line, not a block: the
-                                               // block's top spacing and first-line indent are not repeated per line
+constexpr uint8_t SECTION_FILE_VERSION = 122;  // v122: CSS white-space: pre, pre-wrap and break-spaces keep runs of
+                                               // spaces (a token each) and line feeds, pre-line keeps line feeds;
+                                               // a kept line feed starts the next line, not a block: the block's top
+                                               // spacing and first-line indent are not repeated per line
                                                // v121: the font-size keywords take the CSS Fonts 4 scale (small 8/9,
                                                // x-large 3/2, xx-large 2, xxx-large 3, smaller 1/1.2)
                                                // v120: a character the parser's 256-byte text chunks cut is read

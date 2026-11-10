@@ -102,14 +102,17 @@ SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
    W x=237 s=0 z=100 t=its
    W x=268 s=0 z=100 t=own
    W x=303 s=0 z=100 t=line:
-  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=18 s=0 z=100 t=Line
-   W x=62 s=0 z=100 t=one
-  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=86 x=0 align=1 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=Line
+   W x=38 s=0 z=100 t= 
+   W x=44 s=0 z=100 t=one
+  LINE y=110 x=0 align=1 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Line
+   W x=38 s=0 z=100 t= 
    W x=44 s=0 z=100 t=two
-  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=134 x=0 align=1 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=Line
+   W x=38 s=0 z=100 t= 
    W x=44 s=0 z=100 t=three
   LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=18 s=0 z=100 t=Normal
@@ -145,24 +148,33 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=50 s=0 z=100 t=between
    W x=116 s=0 z=100 t=code
    W x=158 s=0 z=100 t=lines:
-  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=18 s=0 z=100 t=First
-   W x=63 s=0 z=100 t=line
-  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=86 x=0 align=1 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=First
+   W x=39 s=0 z=100 t= 
+   W x=45 s=0 z=100 t=line
+  LINE y=110 x=0 align=1 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t= 
-  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=134 x=0 align=1 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=Third
+   W x=40 s=0 z=100 t= 
    W x=46 s=0 z=100 t=line
+   W x=81 s=0 z=100 t= 
    W x=87 s=0 z=100 t=(blank
+   W x=144 s=0 z=100 t= 
    W x=150 s=0 z=100 t=line
+   W x=185 s=0 z=100 t= 
    W x=191 s=0 z=100 t=above)
-  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=158 x=0 align=1 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t= 
-  LINE y=182 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=182 x=0 align=1 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=Fifth
+   W x=44 s=0 z=100 t= 
    W x=50 s=0 z=100 t=line
+   W x=85 s=0 z=100 t= 
    W x=91 s=0 z=100 t=(blank
+   W x=148 s=0 z=100 t= 
    W x=154 s=0 z=100 t=line
+   W x=189 s=0 z=100 t= 
    W x=195 s=0 z=100 t=above)
   LINE y=206 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=Each
@@ -201,21 +213,28 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=still
    W x=49 s=0 z=100 t=be
    W x=70 s=0 z=100 t=preserved:
-  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=0 z=100 t=function
-   W x=102 s=0 z=100 t=greet(name)
-   W x=220 s=0 z=100 t={
-  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=0 s=0 z=100 t=return
-   W x=63 s=0 z=100 t="Hello,
-   W x=136 s=0 z=100 t="
-   W x=154 s=0 z=100 t=+
-   W x=167 s=0 z=100 t=name;
-  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=110 x=0 align=1 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=function
+   W x=78 s=0 z=100 t= 
+   W x=84 s=0 z=100 t=greet(name)
+   W x=196 s=0 z=100 t= 
+   W x=202 s=0 z=100 t={
+  LINE y=134 x=0 align=1 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=    
+   W x=24 s=0 z=100 t=return
+   W x=81 s=0 z=100 t= 
+   W x=87 s=0 z=100 t="Hello,
+   W x=154 s=0 z=100 t= 
+   W x=160 s=0 z=100 t="
+   W x=172 s=0 z=100 t= 
+   W x=178 s=0 z=100 t=+
+   W x=185 s=0 z=100 t= 
+   W x=191 s=0 z=100 t=name;
+  LINE y=158 x=0 align=1 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=}
-  LINE y=182 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=182 x=0 align=1 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t= 
-  LINE y=206 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=206 x=0 align=1 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=greet("World");
   LINE y=230 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=18 s=0 z=100 t=Normal

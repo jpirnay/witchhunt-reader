@@ -101,8 +101,19 @@ class ChapterHtmlSlimParser final : public Print {
   int italicUntilDepth = INT_MAX;
   int underlineUntilDepth = INT_MAX;
   int strikethroughUntilDepth = INT_MAX;
-  int preUntilDepth = INT_MAX;  // set when inside a <pre> element; enables \n → line-break handling
-  int svgDepth = 0;             // nesting counter for <svg> elements; text inside SVG is skipped (path data etc.)
+  int svgDepth = 0;  // nesting counter for <svg> elements; text inside SVG is skipped (path data etc.)
+  // The computed CSS white-space of the text being read: the innermost flow entry's (FlowEntry) at the current depth,
+  // set where an element opens and again where one closes (endElement).
+  CssWhiteSpace whiteSpace_ = CssWhiteSpace::Unset;
+  // Where text that keeps its spaces stands in its line, in code points since the line began (the block's start, or a
+  // kept line feed): a tab runs to the next multiple of kTabColumns. Counted as the words are flushed.
+  uint16_t lineColumn_ = 0;
+  // Four, not CSS's tab-size of 8: code nests three or four levels deep, and on a 480 px column of about 48 characters
+  // (10 px each) eight a level would take half the line at the third level.
+  static constexpr uint16_t kTabColumns = 4;
+  // The block laid out next ends at a kept line feed: the line after it is the same paragraph's, so no paragraph
+  // spacing comes between them (makePages).
+  bool blockEndsAtLineFeed_ = false;
   // buffer for building up words from characters, will auto break if longer than this
   // leave one char at end for null pointer
   char partWordBuffer[MAX_WORD_SIZE + 1] = {};
@@ -156,6 +167,9 @@ class ChapterHtmlSlimParser final : public Print {
   // A no-break space (U+00A0 or U+202F) at `offset`, a token of its own glued to both neighbours (consumeText). False
   // when the stream failed.
   bool addNoBreakSpace(uint32_t offset);
+  // A run of spaces, tabs and carriage returns the text keeps (`length` bytes at `run`, at `offset`): one token of as
+  // many spaces as the run has columns, a tab running to the next tab stop (consumeText). False when the stream failed.
+  bool addKeptSpaces(const char* run, int length, uint32_t offset);
   // The tokens partWordBuffer's CJK run will become: its CJK codepoints, plus one for each run of
   // non-CJK characters after the first CJK codepoint. consumeText flushes the run at
   // kCjkRunCodepoints of them.
@@ -784,14 +798,16 @@ class ChapterHtmlSlimParser final : public Print {
   CssParser::Ancestry cssAncestry(const std::string& tagName, const std::string& classAttr,
                                   const std::string& idAttr) const;
 
-  // The inherited values layout reads (writing mode, direction, line-height), where an open element changes one: an
-  // element takes the innermost entry above it. Trimmed by depth at every start tag, so an element closed through a
-  // skip path leaves nothing behind. A book nests a change a few levels deep; an entry past the eighth is dropped.
+  // The inherited values layout reads (writing mode, direction, line-height, white-space), where an open element
+  // changes one: an element takes the innermost entry above it. Trimmed by depth at every start tag, so an element
+  // closed through a skip path leaves nothing behind. A book nests a change a few levels deep; an entry past the eighth
+  // is dropped.
   struct FlowEntry {
     int16_t depth = 0;
     CssWritingMode writingMode = CssWritingMode::Unset;
     CssDirection direction = CssDirection::Unset;
     float lineHeightEm = 0.0f;  // 0: no line-height set
+    CssWhiteSpace whiteSpace = CssWhiteSpace::Unset;
   };
   static constexpr uint8_t kMaxFlowEntries = 8;
   FlowEntry flows_[kMaxFlowEntries] = {};
@@ -799,10 +815,13 @@ class ChapterHtmlSlimParser final : public Print {
   FlowEntry elementFlow_;  // the element startElement is resolving, its values computed
   bool flowLogged_ = false;
   bool flowOverflowLogged_ = false;
-  // Trims the stack to the element's ancestors, pushes the element when it sets a writing mode, direction or
-  // line-height other than its parent's, and returns its computed values. `depth` is the element's own (startElement
+  // Trims the stack to the element's ancestors, pushes the element when it sets a writing mode, direction, line-height
+  // or white-space other than its parent's, and returns its computed values. `depth` is the element's own (startElement
   // increments it last).
   FlowEntry enterFlow(const CssStyle& style);
+  // The white-space of text at the current depth: the innermost entry of an element still open. The stack is trimmed
+  // only at start tags, so an element that has just closed may still be on it.
+  CssWhiteSpace openWhiteSpace() const;
 
   // The open elements whose bidi markup put controls in the text (design deviation 5), innermost last: what each puts
   // in at its end tag. An element nested past the eighth, or whose opener a run of held controls has no room for
@@ -822,9 +841,9 @@ class ChapterHtmlSlimParser final : public Print {
   // elements' markup goes on, outermost first, at the new block's start. An edge whose openers the held run has no room
   // for is spent, and every edge inside it with it.
   void startNewTextBlockWithinElements(const BlockStyle& blockStyle);
-  // The style of the block a <pre> line feed starts: the next line of the paragraph it splits. It keeps that block's
-  // style but for what CSS gives a block once: its top and bottom spacing (the bottom is held for the end tag) and its
-  // first-line indent. A float stays with the block it was attached to.
+  // The style of the block a kept line feed starts (a <pre>'s): the next line of the paragraph it splits. It keeps that
+  // block's style but for what CSS gives a block once: its top and bottom spacing (the bottom is held for the end tag)
+  // and its first-line indent. A float stays with the block it was attached to.
   BlockStyle lineFeedBlockStyle() const;
   // Puts the controls the element opening now asks for (CSS Writing Modes 3, 2.4.2: its unicode-bidi and computed
   // direction, elementFlow_) at the start of its text, and pushes the edge with their closers. An inline element takes

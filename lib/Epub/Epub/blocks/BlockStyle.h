@@ -53,9 +53,14 @@ struct BlockStyle {
   // a full line-height gap when the <br> block stays empty (section-break use case).
   // NOT propagated through getCombinedBlockStyle so it can't leak into sibling blocks.
   bool fromBrElement = false;
-  // Set when a line feed the text keeps (<pre>) started this block: it is the next line of the paragraph before it, so
-  // it takes no first-line indent from the reader. Like fromBrElement, NOT propagated through getCombinedBlockStyle.
+  // Set when a line feed the text keeps (CSS white-space; <pre>) started this block: it is the next line of the
+  // paragraph before it, so it takes no first-line indent from the reader. Like fromBrElement, NOT propagated through
+  // getCombinedBlockStyle.
   bool fromLineFeed = false;
+  // The block's text keeps its spaces (CSS white-space pre, pre-wrap, break-spaces; <pre>): its own leading spaces are
+  // its indent, so it takes no first-line indent from the reader, and it is not justified (alignKeptSpaces). Parse-time
+  // only, NOT serialised; a merge takes the child's.
+  bool keepsSpaces = false;
   // Parse-time guard: true once resolveBlockFont() has snapped this block to the size
   // ladder, so a second layout pass (long-block split, continuations) can't re-resolve the
   // residual multiplier. NOT serialised and NOT propagated through getCombinedBlockStyle
@@ -96,6 +101,12 @@ struct BlockStyle {
   // against the viewport, not against a parent box -- a negative inset has nothing to pull
   // back into, so it only pushes the first glyphs off the left edge of the panel.
   static int16_t clampInset(const int16_t px, const int16_t maxPx) { return px < 0 ? 0 : std::min(px, maxPx); }
+
+  // Kept spaces never stretch, so text that keeps them runs from its start side where it would be justified. An
+  // alignment it inherits through a merge (a centred wrapper's) stands.
+  void alignKeptSpaces() {
+    if (keepsSpaces && alignment == CssTextAlign::Justify) alignment = CssTextAlign::Start;
+  }
 
   // Combined horizontal insets (margin + padding)
   [[nodiscard]] int16_t leftInset() const { return marginLeft + paddingLeft; }
@@ -150,6 +161,8 @@ struct BlockStyle {
     combinedBlockStyle.fromBrElement = false;
     combinedBlockStyle.fromLineFeed = false;
     combinedBlockStyle.keepWithNext = child.keepWithNext;
+    combinedBlockStyle.keepsSpaces = child.keepsSpaces;
+    combinedBlockStyle.alignKeptSpaces();
     combinedBlockStyle.lineHeightEm = child.lineHeightEm;
     combinedBlockStyle.direction = child.direction != CssDirection::Unset ? child.direction : direction;
     // fontSizeMultiplier: use child's if != 1.0, else parent's
@@ -197,6 +210,8 @@ struct BlockStyle {
       blockStyle.fontSizeMultiplier = cssStyle.fontSizeMultiplier;
     }
     if (cssStyle.hasLineHeight()) blockStyle.lineHeightEm = cssStyle.lineHeightEm;
+    blockStyle.keepsSpaces = CssWhiteSpaces::keepsSpaces(cssStyle.whiteSpace);
+    blockStyle.alignKeptSpaces();
     return blockStyle;
   }
 };

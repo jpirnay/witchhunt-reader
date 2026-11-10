@@ -273,13 +273,20 @@ uint16_t scaledWidth(const int raw, const float scale) {
   return static_cast<uint16_t>(raw * scale + 0.5f);
 }
 
+// Whether `text` is one or more ASCII spaces and nothing else: a no-break space's token, or a run of kept spaces.
+bool isSpaceRun(const std::string_view text) {
+  return !text.empty() && text.find_first_not_of(' ') == std::string_view::npos;
+}
+
 // The advance width of `text`, which holds no soft hyphen (a drawn form, a literal), measured in place: nothing is
-// copied. A lone space is the font's space width.
+// copied. A lone space is the font's space width, and a run of kept spaces that many of them, so a run of four is
+// exactly four word spaces wide on every line.
 uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const char* text,
                           const EpdFontFamily::Style style, const float scale, const bool vertical) {
-  const bool space = text[0] == ' ' && text[1] == '\0';
-  return scaledWidth(
-      space ? renderer.getSpaceWidth(fontId, style) : textAdvance(renderer, fontId, text, style, vertical), scale);
+  if (text[0] == ' ' && isSpaceRun(text)) {
+    return scaledWidth(static_cast<int>(strlen(text)) * renderer.getSpaceWidth(fontId, style), scale);
+  }
+  return scaledWidth(textAdvance(renderer, fontId, text, style, vertical), scale);
 }
 
 // Returns the advance width for the first `bytes` of a word while ignoring soft hyphen glyphs and optionally appending
@@ -752,10 +759,27 @@ void ParsedText::pushToken(std::string token, const EpdFontFamily::Style style, 
 
 void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle, const bool underline,
                          const bool attachToPrevious, const uint8_t sizePct, const uint32_t visibleOffset,
-                         uint8_t fontSlot, const uint8_t textEmphasis, const uint8_t textCombine) {
+                         uint8_t fontSlot, const uint8_t textEmphasis, const uint8_t textCombine,
+                         const bool keptSpaces) {
   if (word.empty()) return;
   if (fontSlot >= TextBlock::kMaxWordFonts) fontSlot = 0;
   if (wordGrowthRefused_) return;  // the parse is being aborted; see wordGrowthRefused()
+
+  EpdFontFamily::Style combinedStyle = fontStyle;
+  if (underline) {
+    combinedStyle = static_cast<EpdFontFamily::Style>(combinedStyle | EpdFontFamily::UNDERLINE);
+  }
+  const uint8_t size = std::min(std::max(sizePct, MIN_WORD_SIZE_PCT), MAX_WORD_SIZE_PCT);
+
+  // A run of kept spaces: one token, glued to the token before it. The word after it starts at a breakable seam
+  // with no gap (below), so a line ends after the run and not before: the run stays with its line, where it hangs.
+  if (keptSpaces && isSpaceRun(word)) {
+    if (!reserveWords(1)) return;
+    const TokenBoundary::Boundary run =
+        TokenBoundary::withKeptSpaces(TokenBoundary::Boundary{!words.empty(), false}, true);
+    pushToken(std::move(word), combinedStyle, run, size, visibleOffset, fontSlot);
+    return;
+  }
 
   word = utf8NfcNorm(std::move(word));
 
@@ -814,12 +838,6 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
              cuts.end());
   if (!reserveWords(cuts.size() + 1)) return;
 
-  EpdFontFamily::Style combinedStyle = fontStyle;
-  if (underline) {
-    combinedStyle = static_cast<EpdFontFamily::Style>(combinedStyle | EpdFontFamily::UNDERLINE);
-  }
-  const uint8_t size = std::min(std::max(sizePct, MIN_WORD_SIZE_PCT), MAX_WORD_SIZE_PCT);
-
   // Glued to the previous token in the source (no whitespace between them): where the CJK rules
   // allow a break there, the two meet at a breakable zero-width gap. Where the source had
   // whitespace, the space is content and stays. From crosspoint-reader PR #2768 ("fix: restore
@@ -827,6 +845,8 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   // may end between them: ported from crosspoint-reader PR #3883 (Phạm Bình An) by way of CrossInk 59b53529 (Julia
   // Nguyen). The word after an inline tag used to get a real word gap here, for want of this state.
   TokenBoundary::Boundary boundary{attachToPrevious, false};
+  // After a run of kept spaces: no gap of its own (the run is the space), and a line may end there.
+  if (!attachToPrevious && !words.empty() && isKeptSpaceRun(words.size() - 1)) boundary.noSpaceBefore = true;
   // A glued " " is the parser's no-break space (U+00A0 / U+202F): no break on either side of it.
   if (attachToPrevious && !words.empty() && words.back() != " " && word != " ") {
     const uint32_t left = lastCodepointPastControls(words.back());
@@ -841,8 +861,10 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   // Every token of the word carries the mark, and the combine request where the word's mode asks for the token: both
   // travel with the token through splits and erases.
   const auto marked = [&](const TokenBoundary::Boundary b, const std::string_view token) {
-    return TokenBoundary::withCombineRequested(TokenBoundary::withEmphasis(b, textEmphasis),
-                                               combineRequestedFor(textCombine, token));
+    return TokenBoundary::withKeptSpaces(
+        TokenBoundary::withCombineRequested(TokenBoundary::withEmphasis(b, textEmphasis),
+                                            combineRequestedFor(textCombine, token)),
+        keptSpaces);
   };
   if (cuts.empty()) {
     const TokenBoundary::Boundary only = marked(boundary, word);
@@ -918,7 +940,13 @@ int ParsedText::naturalGapBefore(const GfxRenderer& renderer, const int fontId, 
   return spaceBefore(renderer, fontId, j);
 }
 
-bool ParsedText::stretchesGapBefore(const size_t j) const { return !isClosingPunctuation(firstCodepoint(words[j])); }
+bool ParsedText::stretchesGapBefore(const size_t j) const {
+  return !isClosingPunctuation(firstCodepoint(words[j])) && !(j > 0 && isKeptSpaceRun(j - 1));
+}
+
+bool ParsedText::isKeptSpaceRun(const size_t i) const {
+  return TokenBoundary::keepsSpaces(wordBoundaries[i]) && isSpaceRun(words[i]);
+}
 
 int ParsedText::cjkLatinGapBefore(const GfxRenderer& renderer, const int fontId, const size_t j) const {
   if (!typography_.cjkLatinGap) return 0;
@@ -1088,8 +1116,8 @@ size_t ParsedText::sourceTokenCount() const {
 void ParsedText::mergeGluedGroups(const int fontId) {
   const auto mergeable = [&](const size_t k) {
     const TokenBoundary::Boundary b = wordBoundaries[k];
-    return k < unmergedFrom_ && words[k] != " " && TokenBoundary::rubyRole(b) == TokenBoundary::RubyRole::None &&
-           !TokenBoundary::combineRequested(b);
+    return k < unmergedFrom_ && words[k] != " " && !isKeptSpaceRun(k) &&
+           TokenBoundary::rubyRole(b) == TokenBoundary::RubyRole::None && !TokenBoundary::combineRequested(b);
   };
   // Glue inside a syllable, read as mergesWithPrevious reads it.
   const auto insideSyllable = [&](const size_t j) { return TextShaping::glueInsideSyllable(words[j - 1], words[j]); };
@@ -1813,7 +1841,7 @@ bool ParsedText::addRubyGroup(const size_t firstToken, const size_t tokenCount, 
 }
 
 bool ParsedText::appendControlToLastToken(const std::string_view control) {
-  if (words.empty() || words.back() == " ") return false;
+  if (words.empty() || words.back() == " " || isKeptSpaceRun(words.size() - 1)) return false;
   words.back().append(control.data(), control.size());
   return true;
 }
@@ -2225,6 +2253,12 @@ void ParsedText::applyPunctuationWidths(const GfxRenderer& renderer, const int f
     shrink_[i] = static_cast<uint8_t>(std::clamp(mid - (full * midLine.minimum + 4) / 8, 0, 255));
     edgeShrink_[i] = static_cast<uint8_t>(std::clamp(edge - (full * lineEdge.minimum + 4) / 8, 0, 255));
   }
+  // A run of kept spaces that ends a line hangs past its end, as CSS hangs pre-wrap's: the run takes no room there, so
+  // it never sends the word before it to the next line, and an end-aligned line ends at its text. As far as a byte
+  // holds it: a run wider than 127 px keeps the rest of its width.
+  for (size_t i = 0; i < count; ++i) {
+    if (isKeptSpaceRun(i)) edgeTrim_[i] = static_cast<int8_t>(-std::min<int>(widths[i], 127));
+  }
 }
 
 void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId, const int pageWidth,
@@ -2455,10 +2489,11 @@ void ParsedText::applyParagraphIndent(const GfxRenderer& renderer, const int fon
 
   if (blockStyle.textIndentDefined) {
     // CSS text-indent is explicitly set (even if 0) — handled by extractLine() via firstLineIndent.
-  } else if (blockStyle.fromBrElement || blockStyle.fromLineFeed) {
+  } else if (blockStyle.fromBrElement || blockStyle.fromLineFeed || blockStyle.keepsSpaces) {
     // A block created by an inline <br> (or a kept line feed) is the next line of the SAME paragraph, so it gets no
     // first-line indent. (A <br> standing between two paragraphs leaves its block empty; that
-    // block is merged into the following one, which brings its own indent.)
+    // block is merged into the following one, which brings its own indent.) Text that keeps its spaces is indented by
+    // them.
   } else if (!extraParagraphSpacing && blockStyle.floatZoneCount == 0 &&
              (blockStyle.alignment == CssTextAlign::Justify ||
               blockStyle.alignment == (rtl() ? CssTextAlign::Right : CssTextAlign::Left))) {
@@ -2664,15 +2699,16 @@ void ParsedText::computeHyphenatedLineBreaks(
       const bool allowFallbackBreaks = isFirstWord;  // Only for first word on line
 
       bool insertedHyphen = false;
-      bool myanmarCut = false;
+      bool lineEndCut = false;
       if (availableWidth > 0 && hyphenateWordAtIndex(currentIndex, availableWidth, renderer, fontId, wordWidths,
-                                                     allowFallbackBreaks, &insertedHyphen, &myanmarCut)) {
+                                                     allowFallbackBreaks, &insertedHyphen, &lineEndCut)) {
         // Keep interWordGaps in sync: insert placeholder for the new remainder word.
         // The remainder is always the first word on the next line so this slot is never read.
         interWordGaps.insert(interWordGaps.begin() + currentIndex + 1, 0);
         // A cut between Myanmar syllables is how a Burmese line ends, not a hyphenation: the page-bottom retry, which
-        // would set the phrase whole and leave the page's last line a phrase short, leaves it.
-        lineEndedWithHyphenation = !myanmarCut;
+        // would set the phrase whole and leave the page's last line a phrase short, leaves it. So is a cut in kept
+        // text, which the retry would set whole, past the line's edge.
+        lineEndedWithHyphenation = !lineEndCut;
         splitPrefixIndex = static_cast<int>(currentIndex);
         splitNeedsInsertedHyphen = insertedHyphen;
         // Prefix now fits; append it to this line and move to next line
@@ -2768,11 +2804,11 @@ void ParsedText::computeHyphenatedLineBreaksFromIndex(
       const bool allowFallbackBreaks = isFirstWord;
 
       bool insertedHyphen = false;
-      bool myanmarCut = false;
+      bool lineEndCut = false;
       if (availableWidth > 0 && hyphenateWordAtIndex(currentIndex, availableWidth, renderer, fontId, wordWidths,
-                                                     allowFallbackBreaks, &insertedHyphen, &myanmarCut)) {
+                                                     allowFallbackBreaks, &insertedHyphen, &lineEndCut)) {
         interWordGaps.insert(interWordGaps.begin() + currentIndex + 1, 0);
-        lineEndedWithHyphenation = !myanmarCut;  // as in computeHyphenatedLineBreaks
+        lineEndedWithHyphenation = !lineEndCut;  // as in computeHyphenatedLineBreaks
         splitPrefixIndex = static_cast<int>(currentIndex);
         splitNeedsInsertedHyphen = insertedHyphen;
         lineWidth += spacing + wordWidths[currentIndex];
@@ -2813,7 +2849,7 @@ void ParsedText::computeHyphenatedLineBreaksFromIndex(
 // available width.
 bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availableWidth, const GfxRenderer& renderer,
                                       const int fontId, std::vector<uint16_t>& wordWidths,
-                                      const bool allowFallbackBreaks, bool* outInsertedHyphen, bool* outMyanmarCut) {
+                                      const bool allowFallbackBreaks, bool* outInsertedHyphen, bool* outLineEndCut) {
   // Guard against invalid indices or zero available width before attempting to split.
   if (availableWidth <= 0 || wordIndex >= words.size()) {
     return false;
@@ -2825,6 +2861,11 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
       (vertical_ && TokenBoundary::combineRequested(wordBoundaries[wordIndex]))) {
     return false;
   }
+
+  // Text that keeps its spaces is not hyphenated. A token of it wider than the line is cut at the line's edge, as CSS's
+  // overflow-wrap cuts: without a hyphen (Hyphenator::anywhereBreaks). A run of kept spaces is never cut: it hangs.
+  const bool kept = TokenBoundary::keepsSpaces(wordBoundaries[wordIndex]);
+  if (kept && (!allowFallbackBreaks || isSpaceRun(words[wordIndex]))) return false;
 
   const std::string& word = words[wordIndex];
   const auto style = wordStyles[wordIndex];
@@ -2844,7 +2885,11 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   const std::vector<Hyphenator::BreakInfo> hangulBreaks = CjkLineBreak::hangulLineEndBreaks(word);
   const std::vector<Hyphenator::BreakInfo> myanmarBreaks = Hyphenator::myanmarLineEndBreaks(word);
   std::vector<Hyphenator::BreakInfo> hyphenatorBreaks;
-  if (hyphenationEnabled || allowFallbackBreaks) hyphenatorBreaks = Hyphenator::breakOffsets(word, allowFallbackBreaks);
+  if (kept) {
+    hyphenatorBreaks = Hyphenator::anywhereBreaks(word);
+  } else if (hyphenationEnabled || allowFallbackBreaks) {
+    hyphenatorBreaks = Hyphenator::breakOffsets(word, allowFallbackBreaks);
+  }
   const auto byOffset = [](const Hyphenator::BreakInfo& a, const Hyphenator::BreakInfo& b) {
     return a.byteOffset < b.byteOffset;
   };
@@ -2970,9 +3015,10 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   // This lets the backtracking loop keep the entire prefix group ("200 Quadrat-") on one
   // line, while "kilometer" moves to the next line.
   // wordBoundaries[wordIndex] is intentionally left unchanged — the prefix keeps its original attachment.
-  // The remainder keeps the word's emphasis mark and combine request.
+  // The remainder keeps the word's emphasis mark, combine request and kept white space. A cut in kept text leaves no
+  // space between the parts, should they share a line on a later pass.
   wordBoundaries.insert(wordBoundaries.begin() + wordIndex + 1,
-                        TokenBoundary::withWordMarks(TokenBoundary::Boundary{}, wordBoundaries[wordIndex]));
+                        TokenBoundary::withWordMarks(TokenBoundary::Boundary{false, kept}, wordBoundaries[wordIndex]));
 
   // Update cached widths to reflect the new prefix/remainder pairing. A shaped word's parts are shaped again, as the
   // tokens they now are; a part that is not shaped is measured as its code points.
@@ -3004,8 +3050,8 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   if (outInsertedHyphen) {
     *outInsertedHyphen = chosenNeedsHyphen;
   }
-  if (outMyanmarCut) {
-    *outMyanmarCut = chosenFrom == &myanmarBreaks;
+  if (outLineEndCut) {
+    *outLineEndCut = chosenFrom == &myanmarBreaks || kept;
   }
   return true;
 }
@@ -3332,7 +3378,9 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
   const auto stretchesBefore = [&](const size_t v) {
     return pieces[v].gapBefore == BidiLine::Gap::Space && stretchesGapBefore(spaceToken(v));
   };
-  const auto stretchesAfter = [&](const size_t v) { return v > 0 && v + 1 < count && form(v) == " "; };
+  const auto stretchesAfter = [&](const size_t v) {
+    return v > 0 && v + 1 < count && form(v) == " " && !isKeptSpaceRun(first + pieces[v].token);
+  };
 
   std::vector<int16_t>& xs = lineXPosScratch_;
   int natural = 0;
@@ -3684,7 +3732,8 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   // from crosspoint-reader PR #4142 (Uri Tauber).
   const auto isStretchableSpace = [&](const size_t wordIdx) {
     const size_t i = lastBreakAt + wordIdx;
-    return words[i] == " " && boundaries[i].continues && wordIdx + 1 < lineWordCount && boundaries[i + 1].continues;
+    return words[i] == " " && boundaries[i].continues && wordIdx + 1 < lineWordCount && boundaries[i + 1].continues &&
+           !TokenBoundary::keepsSpaces(boundaries[i]);
   };
 
   int lineWordWidthSum = 0;
@@ -3712,7 +3761,8 @@ ParsedText::LineProcessResult ParsedText::extractLine(
       // A word gap or a CJK gap: both stretch when justified. A word gap is a space wide, a CJK gap has no width but
       // the CJK-Latin gap's.
       if (stretchesGapBefore(lastBreakAt + wordIdx)) actualGapCount++;
-      if (boundary.noSpaceBefore) cjkGapOnLine = true;
+      // The seam after a run of kept spaces is no CJK gap: a Latin line with one keeps the Latin rounding.
+      if (boundary.noSpaceBefore && !isKeptSpaceRun(lastBreakAt + wordIdx - 1)) cjkGapOnLine = true;
       if (TokenBoundary::hasSpace(boundary)) {
         // Inter-word gaps scale with the effective size of the word whose space it is (spaceSource).
         const size_t j = lastBreakAt + wordIdx;
