@@ -13,8 +13,9 @@ If in doubt consider all the work being done here based on the work of others - 
 
 Code ported or adapted from other projects keeps a provenance line in the file that holds it, and its commit names the authors.
 
-- **CrossInk** by Julia Nguyen ([uxjulia/CrossInk](https://github.com/uxjulia/CrossInk), MIT) — commits ported or adapted, each named in the source where it is used: 1d6b82f (batched web file lists), e092f81da (protected files on upload and WebDAV), 1d954ae34 (existing books kept during OPDS downloads), 234675e5c (first OPDS author), 56a29f618 (oversized KOReader authentication responses), 7d49b69fa (colours in extended BMP files), 61c8d78f (a table's own CSS box), 60cc4da5 (the icon-tab reader menu), 1babd9da (dictionary), 52e9fc49 (spine sizes), 902e6573 (battery percentage), 20d74368 (Unicode spaces), 8bd0001a (XML prefixes), 53aa4f39 (bookmark files), e7760b58 (reading sessions), and 59b53529 (a CJK line-break rule, by way of crosspoint-reader #3883).
-- **Somnius/CrossInk-Indic** by Lef (MIT) — the Myanmar shaper and its categories, commits dbfb96a24 and 7d0c7c87, reworked in [`lib/OtShaper`](lib/OtShaper).
+- **CrossInk** by Julia Nguyen ([uxjulia/CrossInk](https://github.com/uxjulia/CrossInk), MIT)
+- **Somnius/CrossInk-Indic** by Lef (MIT)
+- **Matcha-Reader** by Eszter007 ([eszter007/matcha-reader](https://github.com/eszter007/matcha-reader), MIT)
 
 ### crosspoint-reader pull requests
 
