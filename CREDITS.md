@@ -44,10 +44,11 @@ Pulled from the PlatformIO registry at build time.
 ## Fonts in the built-in faces (lib/EpdFont/builtinFonts)
 
 - **Inter** by Rasmus Andersson — the menu (UI) faces. https://rsms.me/inter — SIL Open Font License 1.1, [`OFL.txt`](lib/EpdFont/builtinFonts/source/Inter/OFL.txt).
-- **Noto Sans** (the Noto Project) — a built-in reading font and the small UI faces. SIL Open Font License 1.1, [`OFL.txt`](lib/EpdFont/builtinFonts/source/NotoSans/OFL.txt).
+- **Noto Sans** (the Noto Project) — a built-in reading font and the small UI faces; it also fills, in every Serif face, the characters Serif lacks (cut to exactly those by `lib/EpdFont/scripts/convert-builtin-fonts.sh`). SIL Open Font License 1.1, [`OFL.txt`](lib/EpdFont/builtinFonts/source/NotoSans/OFL.txt).
 - **Noto Sans CJK** (Adobe) — the characters of the Chinese, Japanese and Korean translations, as the CJK UI faces (`cjk_ui_*`, built by `lib/EpdFont/scripts/build_cjk_ui_fonts.py`). https://github.com/notofonts/noto-cjk — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).
 - **Noto Sans Arabic UI** (the Noto Project) — its Arabic presentation forms, vowel marks, digits and punctuation, cut into every built-in UI face by `lib/EpdFont/scripts/convert-builtin-fonts.sh` from the files in [`lib/EpdFont/builtinFonts/source/NotoSansArabicUI`](lib/EpdFont/builtinFonts/source/NotoSansArabicUI). https://github.com/notofonts/arabic — SIL Open Font License 1.1, [`OFL.txt`](lib/EpdFont/builtinFonts/source/NotoSansArabicUI/OFL.txt).
 - **Noto Sans Hebrew** (the Noto Project) — its letters and points, cut into every built-in UI face from the Font Manager's NotoSansHebrew family below.
+- **Source Serif 4** by Adobe — the built-in reading font shown as "Serif": its Caption optical size (release 4.005), scaled to 95 % by `lib/EpdFont/scripts/convert-builtin-fonts.sh` from the unmodified files in [`lib/EpdFont/builtinFonts/source/SourceSerif4Caption`](lib/EpdFont/builtinFonts/source/SourceSerif4Caption). It is shown as "Serif" because its licence reserves the font name "Source", and the converted, scaled faces are a Modified Version. https://github.com/adobe-fonts/source-serif — SIL Open Font License 1.1 with Reserved Font Name "Source", [`LICENSE.md`](lib/EpdFont/builtinFonts/source/SourceSerif4Caption/LICENSE.md).
 
 ## Fonts the Font Manager downloads (assets/sd-fonts)
 

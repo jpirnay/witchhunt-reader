@@ -190,7 +190,7 @@ Reply: `ACT_OK`, or `ACT_ERROR:<reason>` (`no such file <path>`, `bad position <
 > CMD:IDLE:60000:SCREEN
 < IDLE:2458
 > CMD:STATE
-< STATE:activity=EpubReader stack="" book="/test/The Anarchy - Dalrymple, William.epub" spine=20/40 page=5/40 font=Bookerly font_pt=14 chapter="1. THE BRITISH" chapter_page=5/40 percent=1 heap=64616 maxblock=57332
+< STATE:activity=EpubReader stack="" book="/test/The Anarchy - Dalrymple, William.epub" spine=20/40 page=5/40 font=Serif font_pt=14 chapter="1. THE BRITISH" chapter_page=5/40 percent=1 heap=64616 maxblock=57332
 ```
 
 ### What is on screen: `STATE`
