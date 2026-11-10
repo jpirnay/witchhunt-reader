@@ -107,7 +107,7 @@ struct SettingInfo {
   //
   // enumLabels is exclusive of enumValues: it wins whenever it is non-empty, so a row that sets it leaves
   // enumValues EMPTY rather than padding it to the same length. enumLiteralLabelFn is not -- it
-  // EXTENDS enumValues, so a row can carry translated options followed by literal ones.
+  // EXTENDS enumValues, so a row can carry translated options and literal ones side by side.
   //
   // Everything that displays, cycles or bounds options goes through getEnumOptionCount() /
   // getEnumOptionLabel(). Read a vector directly and a row using one of the other forms renders
@@ -117,7 +117,9 @@ struct SettingInfo {
 
   // A third form, for options that are not translatable text: the first enumValues.size()
   // options come from StrIds as usual, and the options at and after that index come from this
-  // callback, which returns a pointer into flash.
+  // callback, which returns a pointer into flash. enumLiteralAt can put them earlier: the StrIds
+  // before it come first, then the literals, then the rest of the StrIds (a line-spacing row is
+  // Default, then its percentages, then Book's Style).
   //
   // enumLabels would seem to fit, but it is a vector<std::string> -- and forEachSetting()
   // rebuilds every row on every settings save AND load, so the timezone row's 86 city names
@@ -134,11 +136,15 @@ struct SettingInfo {
   using LiteralLabelFn = const char* (*)(uint8_t literalIndex);
   LiteralLabelFn enumLiteralLabelFn = nullptr;
   uint8_t enumLiteralCount = 0;
+  // The option index the literals start at. Past enumValues (the default), they follow all of them.
+  uint8_t enumLiteralAt = UINT8_MAX;
 
-  // Appends flash-resident option labels after the translated ones. See enumLiteralLabelFn.
-  SettingInfo& withLiteralOptions(const LiteralLabelFn labelFn, const uint8_t count) {
+  // Adds flash-resident option labels, after the translated ones or from option `at` on. See
+  // enumLiteralLabelFn.
+  SettingInfo& withLiteralOptions(const LiteralLabelFn labelFn, const uint8_t count, const uint8_t at = UINT8_MAX) {
     enumLiteralLabelFn = labelFn;
     enumLiteralCount = count;
+    enumLiteralAt = at;
     return *this;
   }
 
@@ -490,9 +496,13 @@ struct SettingInfo {
   // getEnumOptionLabel() and not think about lifetimes.
   [[nodiscard]] const char* getEnumOptionFlashLabel(uint8_t index) const {
     if (type != SettingType::ENUM || !enumLabels.empty() || enumLabelFn) return nullptr;
-    if (index < enumValues.size()) return I18N.get(enumValues[index]);
-    const size_t literal = index - enumValues.size();
+    const size_t literalAt = std::min<size_t>(enumLiteralAt, enumValues.size());
+    if (index < literalAt) return I18N.get(enumValues[index]);
+    const size_t literal = index - literalAt;
     if (enumLiteralLabelFn && literal < enumLiteralCount) return enumLiteralLabelFn(static_cast<uint8_t>(literal));
+    if (literal < enumLiteralCount) return nullptr;
+    const size_t translated = index - enumLiteralCount;
+    if (translated < enumValues.size()) return I18N.get(enumValues[translated]);
     return nullptr;
   }
 
