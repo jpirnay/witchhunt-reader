@@ -3,7 +3,6 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
-#include <Memory.h>
 #include <SdCardFontRegistry.h>
 
 #include <cstdio>
@@ -11,7 +10,6 @@
 
 #include "CrossPointSettings.h"
 #include "HyphenationPacks.h"
-#include "activities/settings/FontDownloadActivity.h"
 
 namespace UiLanguagePacks {
 
@@ -45,8 +43,8 @@ Language homeAsked = Language::_COUNT;
 
 }  // namespace
 
-Offer due() {
-  Offer offer;
+PackOffer::Offer due() {
+  PackOffer::Offer offer;
   const char* ui = uiCode();
   for (const auto& pack : kPacks) {
     if (!ui || std::strcmp(ui, pack.uiCode) != 0) continue;
@@ -56,55 +54,20 @@ Offer due() {
     // An interface pack's offer is declined under the interface language's code, upper case: "ZH".
     if (pack.interfaceFamily && !HyphenationPacks::declined(pack.uiCode) &&
         !interfacePackOnCard(pack.interfaceFamily)) {
-      offer.interfaceFamily = pack.interfaceFamily;
+      snprintf(offer.family, sizeof(offer.family), "%s", pack.interfaceFamily);
+      snprintf(offer.interfaceLanguage, sizeof(offer.interfaceLanguage), "%s", pack.uiCode);
     }
   }
   if (offer) {
-    LOG_INF("LNG", "%s: offering %s", ui, offer.interfaceFamily ? offer.interfaceFamily : offer.hyphenation);
+    LOG_INF("LNG", "%s: offering %s", ui, offer.family[0] != '\0' ? offer.family : offer.hyphenation);
   }
   return offer;
 }
 
-Offer takeHomeOffer() {
+PackOffer::Offer takeHomeOffer() {
   if (I18N.getLanguage() == homeAsked) return {};
   homeAsked = I18N.getLanguage();
   return due();
-}
-
-ConfirmationActivity::Question question(const Offer& offer) {
-  ConfirmationActivity::Question question;
-  char message[320];
-  if (offer.hyphenation[0] != '\0') {
-    question.headline = tr(STR_HYPHENATION);
-    snprintf(message, sizeof(message), tr(STR_HYPHENATION_PACK_OFFER),
-             HyphenationPacks::languageName(offer.hyphenation));
-  } else {
-    question.headline = I18N.getLanguageName(I18N.getLanguage());
-    snprintf(message, sizeof(message), tr(STR_INTERFACE_PACK_OFFER), I18N.getLanguageName(I18N.getLanguage()));
-  }
-  question.message = message;
-  question.messageMaxLines = 6;
-  question.cancelLabel = StrId::STR_NO;
-  question.acceptLabel = StrId::STR_DOWNLOAD;
-  return question;
-}
-
-void decline(const Offer& offer) {
-  if (offer.hyphenation[0] != '\0') HyphenationPacks::declineOffer(offer.hyphenation);
-  if (offer.interfaceFamily) HyphenationPacks::declineOffer(uiCode());
-}
-
-std::unique_ptr<Activity> download(GfxRenderer& renderer, MappedInputManager& mappedInput, const Offer& offer,
-                                   const bool toSettings) {
-  FontDownloadActivity::Wanted wanted;
-  if (offer.hyphenation[0] != '\0') {
-    snprintf(wanted.pack, sizeof(wanted.pack), "%s", offer.hyphenation);
-  } else {
-    snprintf(wanted.family, sizeof(wanted.family), "%s", offer.interfaceFamily);
-  }
-  return makeUniqueNoThrow<FontDownloadActivity>(
-      renderer, mappedInput, wanted,
-      toSettings ? FontDownloadActivity::ReturnTo::Settings : FontDownloadActivity::ReturnTo::Home);
 }
 
 }  // namespace UiLanguagePacks

@@ -19,7 +19,6 @@
 #include <atomic>
 #include <optional>
 
-#include "BookPackOffer.h"
 #include "BookmarkStore.h"
 #include "ChapterPageSpan.h"
 #include "CrossPointState.h"
@@ -31,6 +30,7 @@
 #include "KOReaderAutoSync.h"
 #include "KOReaderSyncWorker.h"
 #include "LaneBeforeBuild.h"
+#include "PackOffer.h"
 #include "ProgressMapper.h"
 #include "ReaderUtils.h"
 #include "activities/Activity.h"
@@ -225,7 +225,7 @@ class EpubReaderActivity final : public Activity {
   bool forceHalfRefreshAfterPopup_ = false;
   // What to offer before the book's first page (none: nothing): set at book open when the card lacks the hyphenation
   // pack of the book's language or a reading font of its script, asked from the first loop() (offerBookPacks()).
-  BookPackOffer::Offer pendingBookOffer_;
+  PackOffer::Offer pendingBookOffer_;
   void offerBookPacks();
   // When true, large images on the current page are decoded instead of shown as placeholders.
   // Reset to false on every page turn so the next image page starts with a placeholder again.

@@ -49,6 +49,7 @@
 #include <memory>
 #include <optional>
 
+#include "BookPackOffer.h"
 #include "BookRelocation.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -981,33 +982,18 @@ void EpubReaderActivity::onExit() {
 }
 
 void EpubReaderActivity::offerBookPacks() {
-  const BookPackOffer::Offer offer = pendingBookOffer_;
+  const PackOffer::Offer offer = pendingBookOffer_;
   pendingBookOffer_ = {};
-  auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, BookPackOffer::question(offer));
-  if (!confirmation) {
-    LOG_ERR("ERS", "OOM: book pack offer (%zu bytes)", sizeof(ConfirmationActivity));
-    requestUpdate();
-    return;
+  // Yes opens the Font Manager in the reader's place, and leaving it restarts into this book, drawn in the font and
+  // hyphenated by the pack. Without it, the book's first page, after a full-screen prompt.
+  const auto drawBook = [](Activity& host) {
+    auto& reader = static_cast<EpubReaderActivity&>(host);
+    ReaderUtils::enforceExitFullRefresh(reader.renderer);
+    reader.requestUpdate();
+  };
+  if (!PackOffer::ask(*this, renderer, mappedInput, offer, FontDownloadActivity::ReturnTo::Book, drawBook)) {
+    requestUpdate();  // no prompt was drawn
   }
-  startActivityForResult(std::move(confirmation), [this, offer](const ActivityResult& res) {
-    if (res.isCancelled) {
-      BookPackOffer::decline(offer);
-      // The book's first page, after a full-screen prompt.
-      ReaderUtils::enforceExitFullRefresh(renderer);
-      requestUpdate();
-      return;
-    }
-    // In the reader's place: the download's TLS session needs the heap the reader holds. Leaving the Font Manager
-    // restarts into this book, drawn in the font and hyphenated by the pack.
-    auto download = BookPackOffer::download(renderer, mappedInput, offer);
-    if (!download) {
-      LOG_ERR("ERS", "OOM: Font Manager for the book pack offer");
-      ReaderUtils::enforceExitFullRefresh(renderer);
-      requestUpdate();
-      return;
-    }
-    activityManager.replaceActivity(std::move(download));
-  });
 }
 
 void EpubReaderActivity::loop() {

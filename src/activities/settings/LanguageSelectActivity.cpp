@@ -2,8 +2,6 @@
 
 #include <GfxRenderer.h>
 #include <I18n.h>
-#include <Logging.h>
-#include <Memory.h>
 
 #include <algorithm>
 #include <iterator>
@@ -12,7 +10,6 @@
 #include "MappedInputManager.h"
 #include "UiLanguage.h"
 #include "UiLanguagePacks.h"
-#include "activities/ActivityManager.h"
 
 namespace fui = freeink::ui;
 
@@ -45,32 +42,12 @@ void LanguageSelectActivity::activateIndex(const int index) {
   nav.selected = index;
   UiLanguage::apply(static_cast<Language>(SORTED_LANGUAGE_INDICES[index]));
   // The new language's pack, when the card lacks it: its hyphenation, or its CJK interface pack (UiLanguagePacks).
-  const UiLanguagePacks::Offer offer = UiLanguagePacks::due();
-  if (!offer) {
+  // Yes opens the Font Manager in Settings' place, and leaving it restarts into Settings.
+  const PackOffer::Offer offer = UiLanguagePacks::due();
+  if (!offer || !PackOffer::ask(*this, renderer, mappedInput, offer, FontDownloadActivity::ReturnTo::Settings,
+                                [](Activity& host) { host.finish(); })) {
     finish();
-    return;
   }
-  auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, UiLanguagePacks::question(offer));
-  if (!confirmation) {
-    LOG_ERR("LNG", "OOM: language pack offer (%zu bytes)", sizeof(ConfirmationActivity));
-    finish();
-    return;
-  }
-  startActivityForResult(std::move(confirmation), [this, offer](const ActivityResult& result) {
-    if (result.isCancelled) {
-      UiLanguagePacks::decline(offer);
-      finish();
-      return;
-    }
-    // In Settings' place: leaving the Font Manager restarts into Settings.
-    auto download = UiLanguagePacks::download(renderer, mappedInput, offer, /*toSettings=*/true);
-    if (!download) {
-      LOG_ERR("LNG", "OOM: Font Manager for the language pack offer");
-      finish();
-      return;
-    }
-    activityManager.replaceActivity(std::move(download));
-  });
 }
 
 void LanguageSelectActivity::buildScreen(UiScreen& screen) {
