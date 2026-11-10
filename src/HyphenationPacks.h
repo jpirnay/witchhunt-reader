@@ -44,17 +44,20 @@ void packRemoved(const char* code);
 // Whether the card holds the pack of `code`, in our folder or CrossInk's.
 bool packOnCard(const char* code);
 
-// The pack the reader offers to download, once a boot: that of the interface language, when it is not English, the
-// firmware hyphenates it from a pack, the card has none, hyphenation is on, and the offer was not declined for it
-// before. True with its code in `code` the first time a boot asks and the offer is due; false after that, and when it
-// is not. A reader upgraded from a firmware that had its language's patterns built in is asked at its first boot.
-bool takeOffer(char (&code)[3]);
+// Whether a pack of `code` is worth offering: the firmware hyphenates the language from a pack, the card has none, and
+// the offer was not declined. What the offers of a book (bookOfferDue) and of the interface language
+// (UiLanguagePacks) ask.
+bool offerDue(const char* code);
+
+// Whether the offer of `code` was declined: a hyphenation pack's language ("de"), or an interface language's code
+// ("ZH") for its interface pack (UiLanguagePacks).
+bool declined(const char* code);
 
 // The pack a book in `languageTag` would hyphenate by, when the card has none and the offer was not declined for its
 // language: true with its code in `code`. The reader asks at book open (with hyphenation on for the book).
 bool bookOfferDue(const std::string& languageTag, char (&code)[3]);
 
-// The offer of `code` was declined: neither Home nor a book open makes it again
+// The offer of `code` was declined (as declined() takes it): it is not made again
 // (CrossPointState::hyphenationOffersDeclined).
 void declineOffer(const char* code);
 

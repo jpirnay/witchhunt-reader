@@ -9,6 +9,8 @@
 #include "I18nKeys.h"
 #include "MappedInputManager.h"
 #include "UiLanguage.h"
+#include "UiLanguagePacks.h"
+#include "activities/ActivityManager.h"
 
 namespace fui = freeink::ui;
 
@@ -40,7 +42,23 @@ void LanguageSelectActivity::activateIndex(const int index) {
   app.clearTapFlash();
   nav.selected = index;
   UiLanguage::apply(static_cast<Language>(SORTED_LANGUAGE_INDICES[index]));
-  finish();
+  // The new language's pack, when the card lacks it: its hyphenation, or its CJK interface pack (UiLanguagePacks).
+  const UiLanguagePacks::Offer offer = UiLanguagePacks::due();
+  if (!offer) {
+    finish();
+    return;
+  }
+  startActivityForResult(
+      std::make_unique<ConfirmationActivity>(renderer, mappedInput, UiLanguagePacks::question(offer)),
+      [this, offer](const ActivityResult& result) {
+        if (result.isCancelled) {
+          UiLanguagePacks::decline(offer);
+          finish();
+          return;
+        }
+        // In Settings' place: leaving the Font Manager restarts into Settings.
+        activityManager.replaceActivity(UiLanguagePacks::download(renderer, mappedInput, offer, /*toSettings=*/true));
+      });
 }
 
 void LanguageSelectActivity::buildScreen(UiScreen& screen) {
