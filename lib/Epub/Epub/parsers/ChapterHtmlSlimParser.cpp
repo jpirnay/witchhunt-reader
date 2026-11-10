@@ -839,18 +839,29 @@ void ChapterHtmlSlimParser::applySupSubDefaultSize(StyleStackEntry& entry) {
 
 void ChapterHtmlSlimParser::applyVerticalAlignToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) {
   if (!cssStyle.hasVerticalAlign()) return;
-  if (cssStyle.verticalAlign == CssVerticalAlign::Super) {
-    entry.hasSup = true;
-    entry.sup = true;
-  } else if (cssStyle.verticalAlign == CssVerticalAlign::Sub) {
-    entry.hasSub = true;
-    entry.sub = true;
-  } else {
-    // baseline: explicitly cancel any inherited sup/sub
-    entry.hasSup = true;
-    entry.sup = false;
-    entry.hasSub = true;
-    entry.sub = false;
+  switch (cssStyle.verticalAlign) {
+    case CssVerticalAlign::Super:
+      entry.hasSup = true;
+      entry.sup = true;
+      break;
+    case CssVerticalAlign::Sub:
+      entry.hasSub = true;
+      entry.sub = true;
+      break;
+    case CssVerticalAlign::Baseline:
+      // baseline: explicitly cancel any inherited sup/sub
+      entry.hasSup = true;
+      entry.sup = false;
+      entry.hasSub = true;
+      entry.sub = false;
+      break;
+    case CssVerticalAlign::Middle:
+    case CssVerticalAlign::TextTop:
+    case CssVerticalAlign::TextBottom:
+    case CssVerticalAlign::Top:
+    case CssVerticalAlign::Bottom:
+      // These place an inline image in its line; on text they change nothing, as before they were read at all.
+      break;
   }
 }
 

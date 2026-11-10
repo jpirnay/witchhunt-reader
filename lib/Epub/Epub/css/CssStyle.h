@@ -78,8 +78,18 @@ enum class CssTextDecoration : uint8_t { None = 0, Underline = 1, LineThrough = 
 // <span> styled display:block is laid out as a block, one styled display:inline is not.
 enum class CssDisplay : uint8_t { Block = 0, None = 1, Inline = 2 };
 
-// Vertical align options relevant for inline text positioning
-enum class CssVerticalAlign : uint8_t { Baseline = 0, Super = 1, Sub = 2 };
+// Vertical align options. Text takes Baseline, Super and Sub; the rest place an inline image in its line (a span with
+// one is set as before). Three bits in the rule pool: the third rides in the flow word.
+enum class CssVerticalAlign : uint8_t {
+  Baseline = 0,
+  Super = 1,
+  Sub = 2,
+  Middle = 3,
+  TextTop = 4,
+  TextBottom = 5,
+  Top = 6,
+  Bottom = 7
+};
 
 // Float options — used to detect inline images beside paragraph text
 enum class CssFloat : uint8_t { None = 0, Left = 1, Right = 2 };

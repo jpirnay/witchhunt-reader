@@ -1137,6 +1137,21 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
     } else if (va == "baseline") {
       style.verticalAlign = CssVerticalAlign::Baseline;
       style.defined.verticalAlign = 1;
+    } else if (va == "middle") {
+      style.verticalAlign = CssVerticalAlign::Middle;
+      style.defined.verticalAlign = 1;
+    } else if (va == "text-top") {
+      style.verticalAlign = CssVerticalAlign::TextTop;
+      style.defined.verticalAlign = 1;
+    } else if (va == "text-bottom") {
+      style.verticalAlign = CssVerticalAlign::TextBottom;
+      style.defined.verticalAlign = 1;
+    } else if (va == "top") {
+      style.verticalAlign = CssVerticalAlign::Top;
+      style.defined.verticalAlign = 1;
+    } else if (va == "bottom") {
+      style.verticalAlign = CssVerticalAlign::Bottom;
+      style.defined.verticalAlign = 1;
     }
   } else if (propNameBuf == "font-variant" || propNameBuf == "font-variant-caps") {
     const std::string_view val = propValueBuf;
@@ -1952,6 +1967,10 @@ uint16_t packFlow(const CssStyle& s) {
       ((static_cast<unsigned>(s.unicodeBidi) & 7u) << 9));
 }
 
+// The rule pool's flow word only: vertical-align's third bit (compressStyle). The rule cache's payload stores
+// vertical-align as a byte of its own.
+constexpr uint16_t kFlowVerticalAlignBit = 1u << 12;
+
 void unpackFlow(const uint16_t flow, CssStyle& s) {
   s.writingMode = static_cast<CssWritingMode>(flow & 3u);
   s.direction = static_cast<CssDirection>((flow >> 2) & 3u);
@@ -2565,7 +2584,9 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   if (s.defined.fontStyle && s.fontStyle == CssFontStyle::Inherit) extra |= 0x02;
   if (s.defined.fontSizeMultiplier && s.fontSizeRootRelative) extra |= 0x04;
   if (s.defined.fontFamily) extra |= 0x08;
-  const uint16_t flow = packFlow(s);
+  // Bit 12 of the flow word, which packFlow leaves free, is vertical-align's third bit (the uint16 below holds two).
+  uint16_t flow = packFlow(s);
+  if (s.defined.verticalAlign && (static_cast<unsigned>(s.verticalAlign) & 4u)) flow |= kFlowVerticalAlignBit;
   if (flow != 0) extra |= 0x10;
   if (s.defined.textEmphasis) extra |= 0x20;
   extra |= static_cast<uint8_t>(s.ruleBorder << 6);
@@ -2638,8 +2659,8 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
   p += 2;
   const uint8_t extra = ((mask >> 31) & 1u) ? *p++ : 0;
   out.ruleBorder = static_cast<uint8_t>(extra >> 6);
+  uint16_t flow = 0;
   if ((extra & 0x10) != 0) {
-    uint16_t flow = 0;
     std::memcpy(&flow, p, 2);
     p += 2;
     unpackFlow(flow, out);
@@ -2687,7 +2708,10 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
   }
   if (d.textDecoration) out.textDecoration = static_cast<CssTextDecoration>((enums >> 5) & 3u);
   if (d.display) out.display = static_cast<CssDisplay>(((enums >> 7) & 1u) | (((mask >> 30) & 1u) << 1));
-  if (d.verticalAlign) out.verticalAlign = static_cast<CssVerticalAlign>((enums >> 8) & 3u);
+  if (d.verticalAlign) {
+    out.verticalAlign =
+        static_cast<CssVerticalAlign>(((enums >> 8) & 3u) | ((flow & kFlowVerticalAlignBit) != 0 ? 4u : 0u));
+  }
   if (d.listStyleNone) out.listStyleNone = ((enums >> 10) & 1u) != 0;
   if (d.pageBreakBefore) out.pageBreakBefore = ((enums >> 11) & 1u) != 0;
   if (d.pageBreakAfter) out.pageBreakAfter = ((enums >> 12) & 1u) != 0;

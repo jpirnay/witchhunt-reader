@@ -82,6 +82,31 @@ TEST(CssParserDeclarations, DisplayKeepsBlockAndInlineApart) {
   }
 }
 
+// vertical-align keeps the keywords that place an inline image in its line, beside super, sub and baseline. A length
+// or a percentage is not kept.
+TEST(CssParserDeclarations, VerticalAlignKeepsTheImageKeywords) {
+  const struct {
+    const char* declaration;
+    CssVerticalAlign want;
+  } cases[] = {
+      {"vertical-align: baseline", CssVerticalAlign::Baseline},
+      {"vertical-align: super", CssVerticalAlign::Super},
+      {"vertical-align: sub", CssVerticalAlign::Sub},
+      {"vertical-align: middle", CssVerticalAlign::Middle},
+      {"vertical-align: text-top", CssVerticalAlign::TextTop},
+      {"vertical-align: text-bottom", CssVerticalAlign::TextBottom},
+      {"vertical-align: top", CssVerticalAlign::Top},
+      {"VERTICAL-ALIGN: BOTTOM !important", CssVerticalAlign::Bottom},
+  };
+  for (const auto& c : cases) {
+    const CssStyle style = CssParser::parseInlineStyle(c.declaration);
+    ASSERT_TRUE(style.hasVerticalAlign()) << c.declaration;
+    EXPECT_EQ(static_cast<int>(style.verticalAlign), static_cast<int>(c.want)) << c.declaration;
+  }
+  EXPECT_FALSE(CssParser::parseInlineStyle("vertical-align: -0.2em").hasVerticalAlign());
+  EXPECT_FALSE(CssParser::parseInlineStyle("vertical-align: 30%").hasVerticalAlign());
+}
+
 // Regression: `!important` used to be stripped only by the dozen properties that called
 // stripTrailingImportant themselves. Everything else compared the marker as part of the value
 // and silently dropped the declaration. crosspoint-reader PR #3221.

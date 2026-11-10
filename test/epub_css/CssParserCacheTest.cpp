@@ -709,7 +709,10 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       "direction: rtl; unicode-bidi: isolate-override; text-align: end; }\n"
       ".g { writing-mode: vertical-rl; }\n"  // a rule with nothing else is kept
       ".h { text-emphasis-style: none; }\n"
-      ".i { writing-mode: vertical-rl; text-emphasis: filled triangle; }\n";  // the flow word and a mark in one record
+      ".i { writing-mode: vertical-rl; text-emphasis: filled triangle; }\n"  // the flow word and a mark in one record
+      ".j { vertical-align: text-bottom; }\n"  // vertical-align's third bit, in the flow word
+      ".k { vertical-align: bottom; direction: rtl; }\n"
+      ".l { vertical-align: middle; }\n";
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
   std::string cssPath;
@@ -719,8 +722,8 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   ASSERT_TRUE(compileCache(parser, cssPath));
 
   const std::vector<std::pair<std::string, std::string>> probes = {
-      {"p", "a"},    {"p", "b"},   {"div", "c"},  {"span", "a"}, {"p", "none"}, {"span", "d"},
-      {"span", "e"}, {"div", "f"}, {"html", "g"}, {"span", "h"}, {"span", "i"}};
+      {"p", "a"},   {"p", "b"},    {"div", "c"},  {"span", "a"}, {"p", "none"}, {"span", "d"}, {"span", "e"},
+      {"div", "f"}, {"html", "g"}, {"span", "h"}, {"span", "i"}, {"img", "j"},  {"img", "k"},  {"img", "l"}};
   auto resolveAll = [&](CssParser& p) {
     std::vector<CssStyle> out;
     for (const auto& pr : probes) out.push_back(p.resolveStyle(pr.first, pr.second));
@@ -753,6 +756,11 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       << "an explicit text-emphasis-style: none did not survive the disk cache";
   EXPECT_EQ(CssWritingMode::VerticalRl, heapStyles[10].writingMode);
   EXPECT_EQ(heapStyles[10].textEmphasis, TextEmphasis::Triangle) << "a mark beside the flow word did not survive";
+  EXPECT_EQ(CssVerticalAlign::TextBottom, heapStyles[11].verticalAlign)
+      << "vertical-align did not survive the disk cache";
+  EXPECT_EQ(CssVerticalAlign::Bottom, heapStyles[12].verticalAlign);
+  EXPECT_EQ(CssDirection::Rtl, heapStyles[12].direction);
+  EXPECT_EQ(CssVerticalAlign::Middle, heapStyles[13].verticalAlign);
 
   BuildArena arena(64 * 1024);
   ASSERT_TRUE(arena.valid());
