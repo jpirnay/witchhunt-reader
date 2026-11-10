@@ -4170,15 +4170,15 @@ EpubReaderActivity::RenderLayout EpubReaderActivity::computeRenderLayout() const
                                 statusBarTopHeight, statusBarBottomHeight);
 
   // One-shot per distinct result. The bezel inset is only one of two terms here:
-  // SETTINGS.screenMargin is added on top, so a few pixels of inset change can be
+  // the reader's Left & Right margin is added on top, so a few pixels of inset change can be
   // invisible next to a large user margin. Logging both terms and the total says
   // which one actually governs the edge the reader sees.
   static int lastMarginKey = -1;
-  const int marginKey = (orientedMarginLeft << 16) | (orientedMarginRight << 8) | SETTINGS.screenMargin;
+  const int marginKey = (orientedMarginLeft << 16) | (orientedMarginRight << 8) | SETTINGS.screenMarginHorizontal;
   if (marginKey != lastMarginKey) {
     lastMarginKey = marginKey;
-    LOG_INF("ERS", "Reader margins: bezel L%d R%d + screenMargin %d = L%d R%d (screen %dx%d)", bezelLeft, bezelRight,
-            static_cast<int>(SETTINGS.screenMargin), orientedMarginLeft, orientedMarginRight, screenWidth,
+    LOG_INF("ERS", "Reader margins: bezel L%d R%d + side margin %d = L%d R%d (screen %dx%d)", bezelLeft, bezelRight,
+            static_cast<int>(SETTINGS.screenMarginHorizontal), orientedMarginLeft, orientedMarginRight, screenWidth,
             screenHeight);
   }
 

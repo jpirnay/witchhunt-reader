@@ -406,8 +406,16 @@ inline void buildSettings(const RowSink& emit) {
   emit(SettingInfo::Toggle(StrId::STR_LARGE_IMAGE_PLACEHOLDER, &CrossPointSettings::largeImagePlaceholder,
                            "largeImagePlaceholder", StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_IMAGES));
-  emit(SettingInfo::Value(StrId::STR_SCREEN_MARGIN, &CrossPointSettings::screenMargin, {5, 40, 5}, "screenMargin",
-                          StrId::STR_CAT_READER)
+  // The margins above and below the text, and beside it. Each was "screenMargin", one value for all four sides, before.
+  emit(SettingInfo::Value(StrId::STR_MARGIN_TOP_BOTTOM, &CrossPointSettings::screenMarginVertical,
+                          {CrossPointSettings::SCREEN_MARGIN_MIN, CrossPointSettings::SCREEN_MARGIN_MAX,
+                           CrossPointSettings::SCREEN_MARGIN_STEP},
+                          "screenMarginVertical", StrId::STR_CAT_READER)
+           .withSubmenu(StrId::STR_MENU_READER_SPACING));
+  emit(SettingInfo::Value(StrId::STR_MARGIN_LEFT_RIGHT, &CrossPointSettings::screenMarginHorizontal,
+                          {CrossPointSettings::SCREEN_MARGIN_MIN, CrossPointSettings::SCREEN_MARGIN_MAX,
+                           CrossPointSettings::SCREEN_MARGIN_STEP},
+                          "screenMarginHorizontal", StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_MENU_READER_SPACING));
   // Each step's percentage of Normal, then Book's Style: nine numbers and one translated label.
   emit(SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing, {StrId::STR_BOOK_S_STYLE},

@@ -39,16 +39,18 @@ inline uint8_t fractionProgressPercentByte(float fraction) {
   return static_cast<uint8_t>(percent);
 }
 
-// The reader's margin, added to the panel's viewable insets (getOrientedViewableTRBL) in place. The top and bottom are
-// never less than the status bar's height on their side: the bar is drawn in the margin. One place for every reader
-// (EPUB, TXT, Markdown) and for the pages they draw for the sleep screen, so they all agree on the text area.
+// The reader's margins, Top & Bottom and Left & Right, added to the panel's viewable insets (getOrientedViewableTRBL)
+// in place. The top and bottom are never less than the status bar's height on their side: the bar is drawn in the
+// margin. One place for every reader (EPUB, TXT, Markdown) and for the pages they draw for the sleep screen, so they
+// all agree on the text area.
 inline void addReaderMargins(int& top, int& right, int& bottom, int& left, const int statusBarTop,
                              const int statusBarBottom) {
-  const int margin = SETTINGS.screenMargin;
-  top += std::max(margin, statusBarTop);
-  right += margin;
-  bottom += std::max(margin, statusBarBottom);
-  left += margin;
+  const int vertical = SETTINGS.screenMarginVertical;
+  const int horizontal = SETTINGS.screenMarginHorizontal;
+  top += std::max(vertical, statusBarTop);
+  right += horizontal;
+  bottom += std::max(vertical, statusBarBottom);
+  left += horizontal;
 }
 
 inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {

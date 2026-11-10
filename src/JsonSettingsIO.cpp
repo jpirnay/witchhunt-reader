@@ -528,6 +528,15 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
     }
   }
 
+  // One margin for all four sides before Top & Bottom and Left & Right: a file with "screenMargin" gives it to each of
+  // the two it has no key for (one written before them has neither). The old key goes with the save this asks for.
+  if (const int legacyMargin = doc["screenMargin"] | -1; legacyMargin >= 0) {
+    s.screenMarginVertical = CrossPointSettings::screenMarginFromStored(doc["screenMarginVertical"] | -1, legacyMargin);
+    s.screenMarginHorizontal =
+        CrossPointSettings::screenMarginFromStored(doc["screenMarginHorizontal"] | -1, legacyMargin);
+    if (needsResave) *needsResave = true;
+  }
+
   // The retired TIMEZONE enum, read straight out of the document because it is no longer a row
   // in the settings list -- it is migration input, not a setting anyone can still choose. It
   // feeds timezones::activeIndex(), which turns it into a clockTimezone index the first time

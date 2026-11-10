@@ -427,7 +427,7 @@ bool TxtReaderActivity::loadPageIndexCache() {
 
   int32_t margin;
   serialization::readPod(f, margin);
-  if (margin != cachedScreenMargin) {
+  if (margin != cachedSideMargin) {
     LOG_DBG("TRS", "Cache screen margin mismatch, rebuilding");
     f.close();
     return false;
@@ -480,7 +480,7 @@ void TxtReaderActivity::savePageIndexCache() const {
   serialization::writePod(f, static_cast<int32_t>(viewportWidth));
   serialization::writePod(f, static_cast<int32_t>(linesPerPage));
   serialization::writePod(f, static_cast<int32_t>(cachedFontId));
-  serialization::writePod(f, static_cast<int32_t>(cachedScreenMargin));
+  serialization::writePod(f, static_cast<int32_t>(cachedSideMargin));
   serialization::writePod(f, cachedParagraphAlignment);
   serialization::writePod(f, static_cast<uint32_t>(pageOffsets.size()));
 
@@ -505,7 +505,7 @@ bool TxtReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gfx
 
   // Compute layout values that match what computeViewportLayout() produces
   const int fontId = SETTINGS.getTxtReaderFontId();
-  const uint8_t screenMargin = SETTINGS.screenMargin;
+  const uint8_t sideMargin = SETTINGS.screenMarginHorizontal;  // the index cache's margin (cachedSideMargin)
   const uint8_t paragraphAlignment = SETTINGS.paragraphAlignment;
 
   const TextLayout layout = computeTextLayout(renderer, fontId);
@@ -562,7 +562,7 @@ bool TxtReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gfx
       serialization::readPod(cacheFile, numPages);
 
       if (magic == CACHE_MAGIC && version == CACHE_VERSION && cachedFileSize == txt.getFileSize() && cachedVw == vw &&
-          cachedLpp == linesPerPage && cachedFontId == fontId && cachedMargin == screenMargin &&
+          cachedLpp == linesPerPage && cachedFontId == fontId && cachedMargin == sideMargin &&
           cachedAlignment == paragraphAlignment && numPages > 0 && numPages <= MAX_CACHE_PAGES) {
         if (savedPage < 0 || savedPage >= static_cast<int>(numPages)) savedPage = 0;
         for (uint32_t i = 0; i < numPages; i++) {

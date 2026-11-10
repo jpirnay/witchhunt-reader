@@ -519,8 +519,24 @@ class CrossPointSettings {
   // paragraphs and a size stated on the block itself (p.body { font-size: 1.1em }). Default on.
   uint8_t fontSizeNormalization = 1;
 
-  // Reader screen margin settings
-  uint8_t screenMargin = 5;
+  // The reader's margins, in pixels on top of the panel's viewable insets (ReaderUtils::addReaderMargins): Top &
+  // Bottom, never less than the status bar there, and Left & Right. One "screenMargin" for all four sides before; a
+  // file with only that key gives it to both (screenMarginFromStored).
+  static constexpr uint8_t SCREEN_MARGIN_MIN = 5;
+  static constexpr uint8_t SCREEN_MARGIN_MAX = 40;
+  static constexpr uint8_t SCREEN_MARGIN_STEP = 5;
+  static constexpr uint8_t DEFAULT_SCREEN_MARGIN = 5;
+  uint8_t screenMarginVertical = DEFAULT_SCREEN_MARGIN;
+  uint8_t screenMarginHorizontal = DEFAULT_SCREEN_MARGIN;
+  /// A reader margin read from a settings file: its own key's value (`stored`, -1 when the file has none), else the one
+  /// margin of a file from before the two (`legacy`, -1 when absent), else the default. Clamped to the rows' range, as
+  /// the settings loop clamps a value row.
+  static constexpr uint8_t screenMarginFromStored(const int stored, const int legacy) {
+    const int value = stored >= 0 ? stored : legacy >= 0 ? legacy : DEFAULT_SCREEN_MARGIN;
+    return static_cast<uint8_t>(value < SCREEN_MARGIN_MIN   ? SCREEN_MARGIN_MIN
+                                : value > SCREEN_MARGIN_MAX ? SCREEN_MARGIN_MAX
+                                                            : value);
+  }
 
   // Extra clearance from the panel edge, on TOP of the board profile's own viewableInsets --
   // see GfxRenderer::setViewablePaddingProvider. The profile says where the case covers the

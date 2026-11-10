@@ -39,7 +39,9 @@ class LineReaderActivity : public Activity {
   // Cached settings for index-cache validation (font/margin/alignment changes
   // require re-indexing) and oriented layout for rendering.
   int cachedFontId = 0;
-  uint8_t cachedScreenMargin = 0;
+  // The Left & Right margin: the index cache's margin field, which held the one margin of all four sides before. The
+  // Top & Bottom margin reaches the pages only through linesPerPage, which the cache checks as well.
+  uint8_t cachedSideMargin = 0;
   uint8_t cachedParagraphAlignment = CrossPointSettings::LEFT_ALIGN;
   int cachedOrientedMarginTop = 0;
   int cachedOrientedMarginRight = 0;

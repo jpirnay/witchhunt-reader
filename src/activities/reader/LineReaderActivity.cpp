@@ -270,7 +270,7 @@ LineReaderActivity::TextLayout LineReaderActivity::computeTextLayout(const GfxRe
 void LineReaderActivity::computeViewportLayout() {
   // Store current settings for index-cache validation
   cachedFontId = SETTINGS.getTxtReaderFontId();
-  cachedScreenMargin = SETTINGS.screenMargin;
+  cachedSideMargin = SETTINGS.screenMarginHorizontal;
   cachedParagraphAlignment = SETTINGS.paragraphAlignment;
 
   const TextLayout layout = computeTextLayout(renderer, cachedFontId);
