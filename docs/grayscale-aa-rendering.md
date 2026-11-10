@@ -275,9 +275,12 @@ takes the two-pass path. `Uc8253X3Driver` runs one 24-frame bank: rest, FAST's 1
 to black, and gray VSL 9, VSH 12, VSL 3 (lab Test 9 on an X3, see `tools/murphy-gray-lab/README.md`).
 
 **Measured in the reader (X3, 2026-11-07):** 26 text pages one-pass, each one refresh of 445 ms (FAST
-alone is 382 ms) after a gray render of about 55 ms; heap flat; the setting holds over a reboot. Image
-pages, the periodic HALF and the page after a menu keep two passes, and so does fast flipping
-(`aaPreempted`), as today.
+alone is 382 ms) after a gray render of about 55 ms; heap flat; the setting holds over a reboot. Those were
+pre-rendered turns: until 2.41 a page rendered fresh (no pre-render to show) lent the secondary buffer to its font
+prewarm, which loses the frame on screen, so it always took two passes. Now a page bound for one-pass keeps the
+buffer and its prewarm uses the heap (`renderContents`). Two passes remain for image pages, a HALF (the periodic one,
+and the one after an image page, a popup or a book open), the page after a menu, a page after a Background-B borrow,
+a page redrawn because a glyph found no memory, and fast flipping (`aaPreempted`).
 
 **A pixel that stays black** is driven 18 frames every page: the composed planes have no memory to tell it from
 gray. Measured with the gray lab's Tests 10 and 11 (2026-11-07): held black for up to 500 pages, it comes back white

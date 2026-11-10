@@ -5995,6 +5995,96 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     return;
   }
 
+  // Single push beats both older strategies wherever the panel offers it: the
+  // page arrives complete in one waveform, with no intermediate B/W state and no
+  // second refresh. It also has to be chosen HERE rather than at display time,
+  // because it changes what happens before the page is even drawn.
+  //
+  // Nothing here is preemptible any more, and nothing needs to be: the planes
+  // are a by-product of the page render rather than ~1 s of extra work, so
+  // there is no pass for a page turn to abort.
+  const bool singlePushAaThisRender = aaEnabledForThisRender && renderer.supportsGrayFrame();
+
+  // The image-page half refresh is owed to the page AFTER an image page. A redraw of the image page
+  // itself must leave it pending: consuming it here flashed a HALF on every clock minute while an
+  // image page was on screen (X3, 2026-10-08), and the page re-armed it each time since it still has
+  // images. Keyed on the page last drawn, spine included, not on the status-bar tick test below: a
+  // one-page chapter followed by the next chapter's page 0 has the same page number, and that turn,
+  // from a full-page illustration, is the one this refresh exists for.
+  bool forceHalfRefreshThisPage =
+      !redrawOfPageOnScreen && pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
+  if (!redrawOfPageOnScreen) pendingHalfRefreshAfterImagePage = false;
+  lastRenderStats.imagePageWithAA = false;
+  lastRenderStats.forcedHalfRefresh = forceHalfRefreshThisPage;
+
+  // The page the status bar last reported, read before renderStatusBar() overwrites it: the only way left to tell a
+  // page turn from a clock or battery tick that redrew the page already on the panel.
+  const int statusBarPageBeforeRender = lastStatusBarPage;
+  // Resolve this page's refresh mode (consuming any force flags) before the prewarm: whether the page goes out composed
+  // one-pass decides whether the prewarm may borrow the secondary buffer (below). Fired after the BW render.
+  HalDisplay::RefreshMode pageRefreshMode;
+  // A buffer lent for a build-through is not a degraded one: the X3 diffs against its own copy of
+  // the frame on screen, so it keeps the normal cadence (see BG_BUILD_THROUGH_PAGES).
+  if (secondaryBufferDegraded_ && !backgroundBuildThrough_) {
+    // FULL_REFRESH already gives a clean baseline, same goal as forceHalfRefreshAfterPopup_;
+    // consume it here too so it doesn't carry over and force an unrelated later page to HALF.
+    forceHalfRefreshAfterPopup_ = false;
+    pageRefreshMode = HalDisplay::FULL_REFRESH;
+    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+  } else if (forceRefreshModeNextRender_ >= 0) {
+    // Manual force-refresh button: apply the requested mode for this one render. A manual refresh
+    // gives its own clean baseline, so consume any armed post-popup HALF too rather than letting it
+    // carry over and force an unrelated later page to HALF.
+    forceHalfRefreshAfterPopup_ = false;
+    pageRefreshMode = static_cast<HalDisplay::RefreshMode>(forceRefreshModeNextRender_);
+    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    forceRefreshModeNextRender_ = -1;
+  } else if (forceHalfRefreshAfterPopup_) {
+    // First real page after the indexing popup, shown directly here because the build finished
+    // in a single slice (e.g. a one-page cover) and never went through displayBuildPage(). See
+    // forceHalfRefreshAfterPopup_.
+    forceHalfRefreshAfterPopup_ = false;
+    pageRefreshMode = HalDisplay::HALF_REFRESH;
+    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+  } else if (forceHalfRefreshThisPage) {
+    pageRefreshMode = HalDisplay::HALF_REFRESH;
+    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+  } else if (statusBarPageBeforeRender >= 0 && section && section->currentPage + 1 == statusBarPageBeforeRender) {
+    // Same page as the one already on the panel: this render was a status-bar
+    // tick (clock minute or battery step), not a page turn.
+    //
+    // refreshFrequencyPages is a GHOSTING BUDGET DENOMINATED IN PAGES -- the
+    // setting, its label and the counter all say pages. Letting a tick spend
+    // from it drains the budget once a minute whether or not anyone is reading,
+    // so on an idle reader the ghost-clearing HALF fires on a schedule set by
+    // the clock rather than by page turns: ~2s of full-screen flash caused by a
+    // digit changing. Device-traced on an X4 2026-09-16, counter 10 -> 9 -> 8
+    // across three consecutive minutes with no page turns.
+    //
+    // The tick still costs a FAST refresh of the whole frame, which is not
+    // free -- a no-diff FAST accumulates speckle on X3 (see the
+    // lastStatusBar* field comment). What it must not do is bill that to the
+    // page budget.
+    pageRefreshMode = HalDisplay::FAST_REFRESH;
+  } else {
+    pageRefreshMode = ReaderUtils::nextRefreshCycleMode(pagesUntilFullRefresh);
+  }
+
+  // The composed one-pass turns the buffer holding the frame on screen into the page's old plane
+  // (displayComposedOnePass()). Lent to the prewarm, that buffer comes back seeded from the cleared write buffer and
+  // the SDK no longer counts it as the frame on screen (borrowSecondaryBuffer() and returnSecondaryBuffer() both clear
+  // it), so beginOnePassMask() refused and every freshly rendered page took the two passes; only a pre-rendered one,
+  // whose prewarm lends nothing, went one-pass. A page bound for it keeps the buffer, and its prewarm takes a TrueType
+  // miss's scratch and the built-in fonts' ring from the heap, freed again before the BW render (releaseTtfMissMemory()
+  // below). Not on a page that starved a glyph: its redraw needs the lent memory more than one refresh. The S3 lends a
+  // PSRAM arena, not the frame buffer, and keeps the frame either way. An armed override (a book open's HALF) makes the
+  // refresh something other than FAST, which the drivers show B/W without the gray, so that page is not bound for it.
+  const bool composedOnePassPlanned = aaEnabledForThisRender && !singlePushAaThisRender &&
+                                      pageRefreshMode == HalDisplay::FAST_REFRESH &&
+                                      !renderer.hasRefreshOverridePending() && onePassComposedFor(*page);
+  const bool prewarmKeepsFrameOnScreen = composedOnePassPlanned && !HalCapabilities::keepsSecondaryBuffer() &&
+                                         !(section && glyphStarvedPage(currentSpineIndex, section->currentPage));
+
   logReaderMemSnapshot("prewarm_begin");
 
   // Font prewarm: scan pass accumulates text, then prewarm, then real render
@@ -6012,7 +6102,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     // they return (glyph_miss, FontDecompressor's ringArena()). The page slots stay on the heap: the BW render and the
     // AA pass read them after the lend. Not when Background-B holds the buffer.
     std::optional<LentSecondary> prewarmLend;
-    if (renderer.hasSecondaryBuffer()) prewarmLend.emplace(renderer);
+    if (renderer.hasSecondaryBuffer() && !prewarmKeepsFrameOnScreen) prewarmLend.emplace(renderer);
     const glyph_miss::Scope misses(prewarmLend ? prewarmLend->arena() : nullptr);
     prewarmPageFonts(*page, orientedMarginLeft, contentTop);
   }
@@ -6031,30 +6121,8 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
           (int32_t)heapAfter - (int32_t)heapBefore);
   logReaderMemSnapshot("prewarm_end");
 
-  // Single push beats both older strategies wherever the panel offers it: the
-  // page arrives complete in one waveform, with no intermediate B/W state and no
-  // second refresh. It also has to be chosen HERE rather than at display time,
-  // because it changes what happens before the page is even drawn.
-  //
-  // Nothing here is preemptible any more, and nothing needs to be: the planes
-  // are a by-product of the page render rather than ~1 s of extra work, so
-  // there is no pass for a page turn to abort.
-  const bool singlePushAaThisRender = aaEnabledForThisRender && renderer.supportsGrayFrame();
-
   const bool effectiveForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
   pageHasPlaceholders = page->hasPlaceholderImages(effectiveForceLoad, imageMonochrome);
-
-  // The image-page half refresh is owed to the page AFTER an image page. A redraw of the image page
-  // itself must leave it pending: consuming it here flashed a HALF on every clock minute while an
-  // image page was on screen (X3, 2026-10-08), and the page re-armed it each time since it still has
-  // images. Keyed on the page last drawn, spine included, not on the status-bar tick test below: a
-  // one-page chapter followed by the next chapter's page 0 has the same page number, and that turn,
-  // from a full-page illustration, is the one this refresh exists for.
-  bool forceHalfRefreshThisPage =
-      !redrawOfPageOnScreen && pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
-  if (!redrawOfPageOnScreen) pendingHalfRefreshAfterImagePage = false;
-  lastRenderStats.imagePageWithAA = false;
-  lastRenderStats.forcedHalfRefresh = forceHalfRefreshThisPage;
 
   // Single-push AA: the planes are captured BY the page render below, not by two
   // extra renders of their own. Idea from jetaudio's crosspoint-aurora; see
@@ -6126,10 +6194,6 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   backgroundAGlyph_ = '-';
 #endif
   publishPageLinkTargets(*page, orientedMarginLeft, contentTop);
-  // Snapshot the page the status bar last reported BEFORE renderStatusBar()
-  // overwrites it: further down it is the only way left to tell a page turn from
-  // a clock or battery tick that redrew the page already on the panel.
-  const int statusBarPageBeforeRender = lastStatusBarPage;
   renderStatusBar();
   if (showTruncatedSectionHintThisRender) {
     const int hintX = orientedMarginLeft + 4;
@@ -6155,57 +6219,9 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
   logReaderMemSnapshot("after_bw_render");
-  // Resolve this page's refresh mode (consuming any force flags), then fire it.
-  // With AA enabled on X4 the refresh goes out async so the grayscale planes
-  // can render during the waveform (inline AA below); everywhere else the
-  // trigger blocks through the waveform exactly as before.
-  HalDisplay::RefreshMode pageRefreshMode;
-  // A buffer lent for a build-through is not a degraded one: the X3 diffs against its own copy of
-  // the frame on screen, so it keeps the normal cadence (see BG_BUILD_THROUGH_PAGES).
-  if (secondaryBufferDegraded_ && !backgroundBuildThrough_) {
-    // FULL_REFRESH already gives a clean baseline, same goal as forceHalfRefreshAfterPopup_;
-    // consume it here too so it doesn't carry over and force an unrelated later page to HALF.
-    forceHalfRefreshAfterPopup_ = false;
-    pageRefreshMode = HalDisplay::FULL_REFRESH;
-    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-  } else if (forceRefreshModeNextRender_ >= 0) {
-    // Manual force-refresh button: apply the requested mode for this one render. A manual refresh
-    // gives its own clean baseline, so consume any armed post-popup HALF too rather than letting it
-    // carry over and force an unrelated later page to HALF.
-    forceHalfRefreshAfterPopup_ = false;
-    pageRefreshMode = static_cast<HalDisplay::RefreshMode>(forceRefreshModeNextRender_);
-    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-    forceRefreshModeNextRender_ = -1;
-  } else if (forceHalfRefreshAfterPopup_) {
-    // First real page after the indexing popup, shown directly here because the build finished
-    // in a single slice (e.g. a one-page cover) and never went through displayBuildPage(). See
-    // forceHalfRefreshAfterPopup_.
-    forceHalfRefreshAfterPopup_ = false;
-    pageRefreshMode = HalDisplay::HALF_REFRESH;
-    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-  } else if (forceHalfRefreshThisPage) {
-    pageRefreshMode = HalDisplay::HALF_REFRESH;
-    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-  } else if (statusBarPageBeforeRender >= 0 && section && section->currentPage + 1 == statusBarPageBeforeRender) {
-    // Same page as the one already on the panel: this render was a status-bar
-    // tick (clock minute or battery step), not a page turn.
-    //
-    // refreshFrequencyPages is a GHOSTING BUDGET DENOMINATED IN PAGES -- the
-    // setting, its label and the counter all say pages. Letting a tick spend
-    // from it drains the budget once a minute whether or not anyone is reading,
-    // so on an idle reader the ghost-clearing HALF fires on a schedule set by
-    // the clock rather than by page turns: ~2s of full-screen flash caused by a
-    // digit changing. Device-traced on an X4 2026-09-16, counter 10 -> 9 -> 8
-    // across three consecutive minutes with no page turns.
-    //
-    // The tick still costs a FAST refresh of the whole frame, which is not
-    // free -- a no-diff FAST accumulates speckle on X3 (see the
-    // lastStatusBar* field comment). What it must not do is bill that to the
-    // page budget.
-    pageRefreshMode = HalDisplay::FAST_REFRESH;
-  } else {
-    pageRefreshMode = ReaderUtils::nextRefreshCycleMode(pagesUntilFullRefresh);
-  }
+  // Fire the refresh resolved above. With AA enabled on X4 the refresh goes out async so the grayscale planes can
+  // render during the waveform (inline AA below); everywhere else the trigger blocks through the waveform.
+  //
   // Inline AA is X4-only: X4 waits out the waveform inside the trigger, so the
   // async split hands that window to the plane renders. X3 returns pre-waveform
   // from its trigger already and keeps the deferred loop-task pass.
@@ -6242,8 +6258,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   }
   // One-pass where the planes are composed in the frame buffers (the X3, the X4). Not while the reader is
   // flipping: the gray render comes before the refresh, so it would hold the turn back.
-  const bool composedOnePassThisRender = aaEnabledForThisRender && !singlePushAaThisRender && !aaPreempted &&
-                                         pageRefreshMode == HalDisplay::FAST_REFRESH && onePassComposedFor(*page) &&
+  const bool composedOnePassThisRender = composedOnePassPlanned && !aaPreempted &&
                                          displayComposedOnePass(*page, orientedMarginLeft, contentTop, pageRefreshMode);
   const bool inlineAaThisRender = aaEnabledForThisRender && !singlePushAaThisRender && inlineAaAvailable &&
                                   !aaPreempted && !composedOnePassThisRender;
