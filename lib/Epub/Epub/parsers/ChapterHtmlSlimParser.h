@@ -97,6 +97,62 @@ class ChapterHtmlSlimParser final : public Print {
   };
   std::vector<BackgroundImageScope> backgroundImageScopes_;
   uint8_t brRunInBackground_ = 0;
+  // Open elements drawn as a CSS box (borders, a background shade: CssBox), outermost first. Each puts a PageBox under
+  // its content on every page it reaches. Its border and padding are inside the frame, so a box places its own
+  // vertical spacing (openBox, closeBox) rather than leaving it to the empty-block merge, and its horizontal ones join
+  // the insets its content is laid out in. A page break cuts the box open (sliceBoxesAtPageEnd): no bottom edge on the
+  // page before, no top edge or padding on the page after. Based on crosspoint-reader PR #3891 (Justin Mitchell,
+  // @itsthisjustin), its box scope; empty for a book without boxes, which then pays a vector's three words.
+  struct BoxScope {
+    int depth = 0;
+    int16_t left = 0;   // the frame's x
+    int16_t right = 0;  // the x just past it
+    // Frame to content: the border, then the padding, at least kBoxMinGap on a side that is drawn.
+    int16_t padTop = 0;
+    int16_t padRight = 0;
+    int16_t padBottom = 0;
+    int16_t padLeft = 0;
+    PageBox::Edge edges[4];
+    bool shaded = false;
+    bool continued = false;      // an earlier page drew part of it
+    int16_t top = 0;             // the frame's y on the current page
+    int16_t contentBottom = -1;  // the lowest content of the box on this page; -1: none yet
+    uint16_t firstElement = 0;   // where its PageBox goes in the page's elements: before what it frames
+  };
+  // What startElement decides for an element drawn as a box, before its block style is built (planBox).
+  struct BoxPlan {
+    bool boxed = false;
+    BoxScope scope;
+    int16_t extraLeft = 0;  // what the border and the gap add to the element's own padding
+    int16_t extraRight = 0;
+  };
+  static constexpr size_t kMaxBoxScopes = 8;  // deeper boxes are drawn without a frame
+  static constexpr int16_t kBoxMinGap = 4;    // text keeps this far from a drawn edge, whatever the padding
+  std::vector<BoxScope> boxScopes_;
+  // The glyphs of the last line placed on this page reach down to here: under a tight line spacing below the line's
+  // advance. A box opening under it starts its frame below them. 0 on a fresh page.
+  int16_t lastGlyphBottom_ = 0;
+  // The extra paragraph spacing (setting) the last laid-out block added, and where it ended: a box closing right there
+  // keeps it out of its frame, which its top does not have either.
+  int16_t extraGap_ = 0;
+  int16_t extraGapEnd_ = -1;
+  // Whether `name`, with this style, is drawn as a box, and its plan: the pads, and `style`'s padding with the border
+  // in it (its vertical padding goes to the frame, out of the block's style).
+  BoxPlan planBox(const char* name, const CssStyle& cssStyle, bool floated, BlockStyle& style) const;
+  // The element startElement is ending opens its box: its pending top spacing is placed, the frame starts there, and
+  // its border and top padding follow. The element's block (and its children's) has the box's insets already.
+  void openBox(BoxScope scope);
+  // The element of the innermost box has closed: its last block is laid out inside it, and its frame closes below.
+  void closeBox();
+  // Every open box's frame bottom is at least `bottom`: content of the box was placed down to it.
+  void noteBoxContent(int bottom);
+  // Puts the box's PageBox on the current page, from `top` to `bottom`, its bottom edge drawn when `closing`.
+  void placeBoxSegment(const BoxScope& box, int top, int bottom, bool closing);
+  // emitPage's two halves: the open boxes' frames on the page that ends, then their seats on the page that begins.
+  void sliceBoxesAtPageEnd();
+  void seatBoxesOnNewPage();
+  // The x of a picture placed as a block, `width` wide: centred on the page, or in the innermost open box.
+  [[nodiscard]] int16_t blockPictureX(int width) const;
   int boldUntilDepth = INT_MAX;
   int italicUntilDepth = INT_MAX;
   int underlineUntilDepth = INT_MAX;
@@ -566,8 +622,9 @@ class ChapterHtmlSlimParser final : public Print {
   std::vector<BlockInsetEntry> blockInsetStack_;
 
   // Fold the insets of every enclosing block-level element into `style`, capping each side at
-  // MAX_HORIZONTAL_INSET_EM so deep nesting cannot squeeze the text column away.
-  void addAncestorInsets(BlockStyle& style, float emSize) const;
+  // MAX_HORIZONTAL_INSET_EM so deep nesting cannot squeeze the text column away. Only those opened above `belowDepth`
+  // (the elements around the one at that depth), when given.
+  void addAncestorInsets(BlockStyle& style, float emSize, int belowDepth = INT_MAX) const;
 
   // Bottom spacing (margin-bottom, padding-bottom) of the block-level elements currently open. A
   // block element's style starts only its FIRST text block -- child blocks and <br> lines follow
