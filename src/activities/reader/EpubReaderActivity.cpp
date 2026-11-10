@@ -960,6 +960,9 @@ void EpubReaderActivity::onExit() {
   epub.reset();
   currentPageFootnotes.clear();
   currentPageFootnotes.shrink_to_fit();
+  // The book's hyphenation trie: every build has stopped and the section and book are gone, so nothing lays out its
+  // text from here on. On the X3 and X4 its MMU pages go back to the font cache (HyphenationPacks::bookClosed()).
+  HyphenationPacks::bookClosed();
 
   // The glyph caches go back before the stats flush below, which wants the heap, and so Home and
   // Settings do not run 7-12 KB short after every book. The next onEnter takes them again, still

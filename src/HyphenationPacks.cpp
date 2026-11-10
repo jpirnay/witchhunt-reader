@@ -190,6 +190,13 @@ bool provide(const char* code, SerializedHyphenationPatterns& out, uint32_t& crc
   return mounted && !knownMissing(code) && store.map(code, out, &crc32);
 }
 
+// Every language's patterns taken back and unmapped, while no build holds them: their MMU pages return to the font
+// cache, and the next lookup of a language maps it again.
+void unmapAll() {
+  forgetPackPatterns();
+  store.unmapAll();
+}
+
 const char* fillName(const HyphenationStore::Fill result) {
   switch (result) {
     case HyphenationStore::Fill::Stored:
@@ -263,12 +270,19 @@ void prepareForBook(const std::string& languageTag, const std::function<void()>&
   forgetPackPatterns();
   load(code);
 #else
-  // Every language's mapping goes, while no build holds its patterns: only the open book's is mapped again (on its
-  // first lookup), and the MMU pages of the others return to the font cache.
-  forgetPackPatterns();
-  store.unmapAll();
+  // Every language's mapping goes: only the open book's is mapped again (on its first lookup).
+  unmapAll();
   if (!mounted || !entry || entry->builtIn) return;
   ensureStored(code, /*mayDrop=*/true, beforeCopy);
+#endif
+}
+
+void bookClosed() {
+#if CONFIG_SPIRAM
+  // The loaded trie stays: it lies in PSRAM, which is mapped whole at boot, so it holds no MMU page and no internal
+  // RAM, and the next book in its language opens without reading the pack again (load()).
+#else
+  unmapAll();
 #endif
 }
 

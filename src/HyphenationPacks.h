@@ -29,6 +29,12 @@ void begin();
 // the flash store (it is new, or changed on the card), `beforeCopy` runs first, so the reader can say why it waits.
 void prepareForBook(const std::string& languageTag, const std::function<void()>& beforeCopy = nullptr);
 
+// After the book is closed, once nothing of it lays out text any more (EpubReaderActivity::onExit()): on a board with
+// the flash store every language's patterns are taken back and unmapped, so the trie's MMU pages (German: 4) return
+// to the font cache through Home, Settings and the Font Manager. A layout outside a book that asks for a language
+// later (the sleep screen's page, laid out from the book's progress) maps it again. With PSRAM the loaded trie stays.
+void bookClosed();
+
 // The pack file of `code` the Font Manager installs into DIR: "hyph-de.cphyph" (and a pack's language from it, false
 // for a name of another shape).
 bool codeOfPackFile(const char* fileName, char (&code)[3]);
