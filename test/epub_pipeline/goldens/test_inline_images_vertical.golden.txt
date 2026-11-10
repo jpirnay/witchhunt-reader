@@ -406,8 +406,8 @@ SPINE 2 href=OEBPS/text/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=50 s=0 z=100 t=後
    W x=66 s=0 z=100 t=。
 SPINE 3 href=OEBPS/text/chapter4.xhtml pages=1 truncated=0 cssFallback=0 vertical=1
- PAGE 0 elements=3 footnotes=0 turned=460
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=7
+ PAGE 0 elements=8 footnotes=0 turned=460
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=13
    W x=0 s=0 z=100 t=CASE19
    W x=61 s=0 z=100 t=VERTICAL
    W x=143 s=0 z=100 t=縦
@@ -415,11 +415,33 @@ SPINE 3 href=OEBPS/text/chapter4.xhtml pages=1 truncated=0 cssFallback=0 vertica
    W x=175 s=0 z=100 t=き
    W x=191 s=0 z=100 t=の
    W x=207 s=0 z=100 t=文
-  IMG y=24 x=374 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png turned=1
-  LINE y=36 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=0 z=100 t=の
-   W x=34 s=0 z=100 t=中
-   W x=50 s=0 z=100 t=の
-   W x=66 s=0 z=100 t=画
-   W x=82 s=0 z=100 t=像
-   W x=98 s=0 z=100 t=。
+   W x=235 s=0 z=100 t=の
+   W x=251 s=0 z=100 t=中
+   W x=267 s=0 z=100 t=の
+   W x=283 s=0 z=100 t=画
+   W x=299 s=0 z=100 t=像
+   W x=315 s=0 z=100 t=。
+  IMG y=6 x=223 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png turned=1 inline=1
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=CASE20
+   W x=67 s=0 z=100 t=GAIJI
+   W x=116 s=0 z=100 t=漢
+   W x=150 s=0 z=100 t=字
+   W x=166 s=0 z=100 t=の
+   W x=182 s=0 z=100 t=後
+   W x=198 s=0 z=100 t=、
+   W x=237 s=0 z=100 t=も
+   W x=253 s=0 z=100 t=一
+   W x=269 s=0 z=100 t=字
+   W x=285 s=0 z=100 t=。
+   R first=2 count=1 x=116 w=16 t=かん
+  IMG y=37 x=132 w=18 h=16 src=<cache>/epub_<hash>/img_6c697ad10612878f.png turned=1 inline=1
+  IMG y=37 x=214 w=23 h=16 src=<cache>/epub_<hash>/img_077f2dab89ad506a.png turned=1 inline=1
+  LINE y=57 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=CASE21
+   W x=61 s=0 z=100 t=PICTURE
+   W x=131 s=0 z=100 t=前
+  IMG y=81 x=290 w=180 h=240 src=<cache>/epub_<hash>/img_01e57cf3b2c550d7.png turned=1
+  LINE y=321 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=0 z=100 t=後
+   W x=34 s=0 z=100 t=。

@@ -27,7 +27,8 @@ Chapter 2, Hebrew (right to left): an icon between two words, ordered as a neutr
 Chapter 3, Japanese: an icon among CJK characters, one beside a ruby, one inside a ruby
 (the block path, as before).
 Chapter 4, Japanese set vertical-rl (in the _vertical golden; the reader's default sets it horizontal): an icon in a
-column takes the block path.
+column is an upright character (a gaiji), one em across at most and centred on the column; one beside a ruby; a
+taller one shrunk to the em; a picture keeps the block path.
 
 Regenerate with:  python test/epubs/make_test_inline_images.py
 then refresh goldens: UPDATE_GOLDENS=1 ctest -R EpubPipeline
@@ -278,7 +279,9 @@ CHAPTER3 = xhtml(
 
 CHAPTER4 = xhtml(
     "Vertical",
-    f"""<p>CASE19 VERTICAL 縦書きの文{img("dot.png")}の中の画像。</p>""",
+    f"""<p>CASE19 VERTICAL 縦書きの文{img("dot.png")}の中の画像。</p>
+<p>CASE20 GAIJI <ruby>漢<rt>かん</rt></ruby>{img("ae.png", "gaiji", "gaiji")}字の後、{img("tall.png", "gaiji")}も一字。</p>
+<p>CASE21 PICTURE 前{img("picture.png")}後。</p>""",
     lang="ja",
     body_attrs=' class="v"',
 )

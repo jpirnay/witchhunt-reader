@@ -1101,12 +1101,14 @@ class ChapterHtmlSlimParser final : public Print {
                                   const std::string& alt, int displayWidth, int displayHeight, uint32_t visibleOffset,
                                   uint32_t linkHash = 0);
   // Whether an <img> of this style and display size is set in its line (PendingLineImage): at most kLineImageMaxLines
-  // of the paragraph's lines tall, not floated or made a block by the book, and not in a float, a table cell, a ruby or
-  // a vertical section, which keep their own paths.
+  // of the paragraph's lines tall (across them: in a vertical section the size is the content frame's, the image
+  // turned), not floated or made a block by the book, and not in a float, a table cell or a ruby, which keep their own
+  // paths.
   bool takesLineImage(const CssStyle& imgStyle, int displayWidth, int displayHeight) const;
   // Sets an image in currentTextBlock's text: the word in progress ends at it, glued to it as the source has it, and
-  // the text after it is glued to it unless whitespace comes first. False, nothing added, when the heap holds no room
-  // for its record: the image is then placed as a block.
+  // the text after it is glued to it unless whitespace comes first. In a vertical section it is an upright character:
+  // one cell of the column, as far down it as it is tall, shrunk to the column's em when it is wider. False, nothing
+  // added, when the heap holds no room for its record: the image is then placed as a block.
   bool addLineImage(const std::string& entryPath, std::string alt, int displayWidth, int displayHeight,
                     CssVerticalAlign align);
   const PendingLineImage* pendingLineImage(uint16_t id) const;
@@ -1117,9 +1119,14 @@ class ChapterHtmlSlimParser final : public Print {
     int baseline = 0;
     int ascent = 0;
     int descent = 0;
+    // A column of a vertical section, and the column's centre line (columnAxis): an image there is an upright
+    // character, centred across the column whatever its vertical-align.
+    bool column = false;
+    int axis = 0;
   };
   LineText lineText(const BlockStyle& bs, int height, uint8_t maxSizePct, int band) const;
-  // Where an image's top goes, from its text's top, by its vertical-align: its bottom on the baseline by default.
+  // Where an image's top goes, from its text's top, by its vertical-align: its bottom on the baseline by default; in a
+  // column, centred on its axis.
   static int lineImageTop(const PendingLineImage& image, const LineText& text);
   // A line with images, as tall as its text and its images need: the text moves down by what they rise above it.
   struct LineImageBox {

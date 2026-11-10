@@ -409,7 +409,7 @@ SPINE 2 href=OEBPS/text/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=50 s=0 z=100 t=後
    W x=66 s=0 z=100 t=。
 SPINE 3 href=OEBPS/text/chapter4.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=2 footnotes=0
+ PAGE 0 elements=8 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=13
    W x=0 s=0 z=100 t=CASE19
    W x=61 s=0 z=100 t=VERTICAL
@@ -425,3 +425,26 @@ SPINE 3 href=OEBPS/text/chapter4.xhtml pages=1 truncated=0 cssFallback=0
    W x=299 s=0 z=100 t=像
    W x=315 s=0 z=100 t=。
   IMG y=6 x=223 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  LINE y=41 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=CASE20
+   W x=67 s=0 z=100 t=GAIJI
+   W x=116 s=0 z=100 t=漢
+   W x=148 s=0 z=100 t=字
+   W x=164 s=0 z=100 t=の
+   W x=180 s=0 z=100 t=後
+   W x=196 s=0 z=100 t=、
+   W x=242 s=0 z=100 t=も
+   W x=258 s=0 z=100 t=一
+   W x=274 s=0 z=100 t=字
+   W x=290 s=0 z=100 t=。
+   R first=2 count=1 x=116 w=16 t=かん
+  IMG y=50 x=132 w=16 h=18 src=<cache>/epub_<hash>/img_6c697ad10612878f.png inline=1
+  IMG y=24 x=212 w=30 h=44 src=<cache>/epub_<hash>/img_077f2dab89ad506a.png inline=1
+  LINE y=74 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=CASE21
+   W x=61 s=0 z=100 t=PICTURE
+   W x=131 s=0 z=100 t=前
+  IMG y=98 x=110 w=240 h=180 src=<cache>/epub_<hash>/img_01e57cf3b2c550d7.png
+  LINE y=278 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=0 z=100 t=後
+   W x=34 s=0 z=100 t=。

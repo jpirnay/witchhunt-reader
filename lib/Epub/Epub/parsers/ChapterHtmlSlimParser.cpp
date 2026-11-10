@@ -25,6 +25,7 @@
 #include "../HashUtils.h"
 #include "../HeapGrowth.h"
 #include "../Page.h"
+#include "../VerticalDraw.h"
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/ImageToFramebufferDecoder.h"
 #include "../htmlEntities.h"
@@ -5836,11 +5837,9 @@ bool ChapterHtmlSlimParser::placeImageWithBlockSpacing(const std::string& cached
 
 bool ChapterHtmlSlimParser::takesLineImage(const CssStyle& imgStyle, const int displayWidth,
                                            const int displayHeight) const {
-  // A float keeps pendingInlineImage_, a table cell its own image, a ruby its group whole. A vertical section's image
-  // stays a block of its own: an upright object in a column is not laid out. The census lays nothing out.
-  if (census_ || !currentTextBlock || currentTableCell != nullptr || floatDepth_ > 0 || rubyDepth_ >= 0 || vertical_) {
-    return false;
-  }
+  // A float keeps pendingInlineImage_, a table cell its own image, a ruby its group whole. The census lays nothing
+  // out.
+  if (census_ || !currentTextBlock || currentTableCell != nullptr || floatDepth_ > 0 || rubyDepth_ >= 0) return false;
   if (imgStyle.hasDisplay() && imgStyle.display == CssDisplay::Block) return false;
   if (imgStyle.hasCssFloat() && imgStyle.cssFloat != CssFloat::None) return false;
   if (displayWidth <= 0 || displayHeight <= 0) return false;
@@ -5849,8 +5848,8 @@ bool ChapterHtmlSlimParser::takesLineImage(const CssStyle& imgStyle, const int d
   return displayHeight <= kLineImageMaxLines * effectiveLineHeight(currentTextBlock->getBlockStyle());
 }
 
-bool ChapterHtmlSlimParser::addLineImage(const std::string& entryPath, std::string alt, const int displayWidth,
-                                         const int displayHeight, const CssVerticalAlign align) {
+bool ChapterHtmlSlimParser::addLineImage(const std::string& entryPath, std::string alt, int displayWidth,
+                                         int displayHeight, const CssVerticalAlign align) {
   if (!heapReserveFor(pendingLineImages_, 1)) {
     LOG_ERR("EHP", "No room for an inline image's record: placed as a block");
     return false;
@@ -5859,6 +5858,16 @@ bool ChapterHtmlSlimParser::addLineImage(const std::string& entryPath, std::stri
   if (partWordHasText() && !flushPartWordGlued()) return false;
   if (!currentTextBlock) return false;  // a split the flush ran could not lay the block out
   const bool attachToPrevious = nextWordContinues;
+  // Down a column the image is an upright character (a gaiji, a rare kanji drawn as an image): its size is the content
+  // frame's, turned, so its height runs along the column and its width across it, which is one em at most.
+  if (vertical_) {
+    const BlockStyle& bs = currentTextBlock->getBlockStyle();
+    const int em = columnEm(renderer, effectiveFontId(bs), EpdFontFamily::REGULAR, bs.fontSizeMultiplier);
+    if (em > 0 && displayHeight > em) {
+      displayWidth = std::max(1, static_cast<int>(static_cast<int64_t>(displayWidth) * em / displayHeight));
+      displayHeight = em;
+    }
+  }
   // What stands before a block's first word stands before its image: the item's marker, a float waiting for its text.
   emitPendingListMarker();
   if (pendingInlineImage_.active && currentTextBlock->isEmpty()) {
@@ -5913,11 +5922,17 @@ ChapterHtmlSlimParser::LineText ChapterHtmlSlimParser::lineText(const BlockStyle
   text.baseline = band + text.ascent;
   text.descent =
       std::max(0, renderer.getLineHeightScaled(font, bs.fontSizeMultiplier * maxSizePct / 100.0f) - text.ascent);
+  if (vertical_) {
+    // The centre line TextBlock::render draws a column's characters on: the block's em at its baseline.
+    text.column = true;
+    text.axis = columnAxis(text.baseline, columnEm(renderer, font, EpdFontFamily::REGULAR, bs.fontSizeMultiplier));
+  }
   return text;
 }
 
 int ChapterHtmlSlimParser::lineImageTop(const PendingLineImage& image, const LineText& text) {
   const int h = image.height;
+  if (text.column) return text.axis - h / 2;
   switch (image.align) {
     case CssVerticalAlign::Baseline:
       return text.baseline - h;
@@ -5967,6 +5982,7 @@ void ChapterHtmlSlimParser::placeLineImages(const std::span<const ParsedText::Li
     const int y = textTop + lineImageTop(*it, text);
     auto imageBlock = makeUniqueNoThrow<ImageBlock>(imageCachePathFor(imageBasePath, it->entryPath), it->width,
                                                     it->height, std::move(it->alt), epub->getPath(), it->entryPath);
+    turnIfVertical(imageBlock.get());  // drawn upright in the reader's frame, as a vertical page's block image is
     std::unique_ptr<PageImage> pageImage;
     if (imageBlock) {
       pageImage =

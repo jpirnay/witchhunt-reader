@@ -12,8 +12,9 @@
 //   5. A line taller than the room left goes to the next page whole; the page's image list counts the image.
 //   6. The line's text holds no U+FFFC: nothing to read, select or look up in place of the image.
 //   7. Many images in one paragraph are all placed (the parser lays them out a split at a time).
-//   8. In a right-to-left paragraph and in CJK text the image sits between its neighbours; a vertical section and a
-//      ruby keep the block path.
+//   8. In a right-to-left paragraph and in CJK text the image sits between its neighbours. Down a column it is an
+//      upright character (a gaiji), one em across at most and centred on the column; a picture there and an image in
+//      a ruby keep the block path.
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -53,6 +54,7 @@ struct PlacedImage {
   int height = 0;
   bool inLine = false;
   uint32_t linkHash = 0;
+  bool turned = false;
 };
 
 struct Laid {
@@ -122,8 +124,8 @@ struct InlineImageFixture : testing::Test {
         if (el->getTag() == TAG_PageImage) {
           const auto& pageImage = static_cast<const PageImage&>(*el);
           const auto& image = pageImage.getImageBlock();
-          laid.images.push_back(
-              {p, el->xPos, el->yPos, image.getWidth(), image.getHeight(), pageImage.isInLine(), pageImage.linkHash()});
+          laid.images.push_back({p, el->xPos, el->yPos, image.getWidth(), image.getHeight(), pageImage.isInLine(),
+                                 pageImage.linkHash(), image.isTurned()});
         } else if (el->getTag() == TAG_PageLine) {
           const TextBlock* block = static_cast<const PageLine&>(*el).getBlock();
           PlacedLine line{p, el->xPos, el->yPos, {}, {}, {}};
@@ -327,11 +329,81 @@ TEST_F(InlineImageFixture, CjkTextSetsTheImageAmongItsCharacters) {
   EXPECT_LE(laid.images[0].x + 16, line.x + line.xpos[2]);
 }
 
-TEST_F(InlineImageFixture, AVerticalSectionKeepsTheBlockPath) {
-  const Laid laid = build("<p>漢字<img src=\"icon.png\" alt=\"\"/>漢字</p>", "html { writing-mode: vertical-rl; }", 800,
+TEST_F(InlineImageFixture, AnImageInAColumnIsAnUprightCharacter) {
+  // A gaiji down a vertical column: a cell of its own between the characters, centred across the column on its axis
+  // (the host font's em is 16, its baseline 18 below the column's top: the axis is 6 above it), drawn upright.
+  const Laid laid = build("<p>漢字<img class=\"gaiji\" src=\"icon.png\" alt=\"\"/>漢字</p>",
+                          "html { writing-mode: vertical-rl; }", 800, "ja", VerticalText::Automatic);
+  ASSERT_EQ(1u, laid.images.size());
+  ASSERT_EQ(1u, laid.lines.size()) << "the column goes on past the image";
+  const PlacedLine& line = laid.lines[0];
+  const PlacedImage& image = laid.images[0];
+  ASSERT_EQ(4u, line.words.size());
+  EXPECT_TRUE(image.inLine);
+  EXPECT_TRUE(image.turned);
+  EXPECT_EQ(line.x + line.xpos[1] + 16, image.x) << "right after the second character";
+  EXPECT_EQ(image.x + 16, line.x + line.xpos[2]) << "the third character right after it";
+  EXPECT_EQ(line.y + kAscender - 6 - 8, image.y) << "centred on the column's axis";
+  EXPECT_EQ(std::string::npos, line.reading.find(kObject));
+}
+
+TEST_F(InlineImageFixture, AWideImageInAColumnIsShrunkToTheEm) {
+  // 40 px across the column, under two of its 24 px pitches: set in the column, at the em's 16 px.
+  const Laid laid = build("<p>漢字<img src=\"tall.png\" alt=\"\"/>漢字</p>", "html { writing-mode: vertical-rl; }", 800,
                           "ja", VerticalText::Automatic);
   ASSERT_EQ(1u, laid.images.size());
-  EXPECT_GE(laid.lines.size(), 2u) << "the paragraph splits around the image, as before";
+  EXPECT_TRUE(laid.images[0].inLine);
+  EXPECT_EQ(16, laid.images[0].width);
+  EXPECT_EQ(16, laid.images[0].height);
+}
+
+TEST_F(InlineImageFixture, APictureInAColumnKeepsTheBlockPath) {
+  const Laid laid = build("<p>漢字<img src=\"big.png\" alt=\"\"/>漢字</p>", "html { writing-mode: vertical-rl; }", 800,
+                          "ja", VerticalText::Automatic);
+  ASSERT_EQ(1u, laid.images.size());
+  EXPECT_FALSE(laid.images[0].inLine);
+  EXPECT_GE(laid.lines.size(), 2u) << "the paragraph splits around the picture, as before";
+}
+
+TEST_F(InlineImageFixture, AGaijiBesideARubyInAColumnKeepsTheRubyOverItsBase) {
+  const std::string body = "<p>前<ruby>漢<rt>かん</rt></ruby><img src=\"icon.png\" alt=\"\"/>字後</p>";
+  const std::string css = "html { writing-mode: vertical-rl; }";
+  GfxRenderer renderer;
+  const std::string doc =
+      "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>C</title>"
+      "<link rel=\"stylesheet\" type=\"text/css\" href=\"style.css\"/></head><body>\n" +
+      body + "\n</body></html>\n";
+  auto epub = syntheticBookFromDocument(work, bookIndex++, doc, images(css), "ja");
+  epub->loadImageManifest();
+  Section::BuildParams params;
+  params.viewportWidth = kViewportWidth;
+  params.viewportHeight = 800;
+  params.lineCompression = 1.0f;
+  params.embeddedStyle = true;
+  params.verticalText = VerticalText::Automatic;
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
+  ASSERT_TRUE(section.loadSectionFile(params));
+  section.currentPage = 0;
+  const auto page = section.loadPageFromSectionFile();
+  ASSERT_NE(nullptr, page);
+  ASSERT_TRUE(page->isVertical());
+  const TextBlock* line = nullptr;
+  const PageImage* image = nullptr;
+  for (const auto& el : page->elements) {
+    if (el->getTag() == TAG_PageLine) line = static_cast<const PageLine&>(*el).getBlock();
+    if (el->getTag() == TAG_PageImage) image = static_cast<const PageImage*>(el.get());
+  }
+  ASSERT_NE(nullptr, line);
+  ASSERT_NE(nullptr, image);
+  EXPECT_TRUE(image->isInLine());
+  ASSERT_EQ(4, line->wordCount());  // 前 漢 字 後
+  ASSERT_EQ(1, line->annotationCount());
+  const TextBlock::Annotation ruby = line->annotation(0);
+  EXPECT_EQ(1, ruby.firstWord) << "over 漢";
+  EXPECT_EQ(1, ruby.wordCount);
+  EXPECT_EQ("かん", std::string(ruby.text));
+  EXPECT_EQ(line->wordXpos(1) + 16, image->xPos) << "the gaiji right after its neighbour";
 }
 
 TEST_F(InlineImageFixture, AnImageInARubyKeepsTheBlockPath) {
