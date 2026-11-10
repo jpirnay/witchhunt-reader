@@ -1,6 +1,6 @@
 #pragma once
-// In-memory card for FileReplaceTest and BookmarksTest. Shadows test/shims/HalStorage.h, whose exists() is always
-// false. Names compare without regard to case, as on FAT, so one file can be named two ways; a
+// In-memory card for FileReplaceTest, BookmarksTest and FontInstallerTest. Shadows test/shims/HalStorage.h, whose
+// exists() is always false. Names compare without regard to case, as on FAT, so one file can be named two ways; a
 // rename onto a taken name fails, as SdFat's does (it creates the new entry with O_EXCL); and any
 // rename or remove can be made to fail.
 
@@ -25,6 +25,7 @@ class HalFile {
   operator bool() const { return open_; }
 
   int read(void* buffer, const size_t bytes) {
+    ++reads;
     if (data_ == nullptr) return -1;
     const size_t got = std::min(bytes, data_->size() - position_);
     memcpy(buffer, data_->data() + position_, got);
@@ -40,6 +41,15 @@ class HalFile {
     return put;
   }
   int available() const { return data_ == nullptr ? 0 : static_cast<int>(data_->size() - position_); }
+  size_t fileSize() const { return data_ == nullptr ? 0 : data_->size(); }
+  bool seekSet(const size_t position) {
+    if (data_ == nullptr || position > data_->size()) return false;
+    position_ = position;
+    return true;
+  }
+
+  // read() calls on every file, for a test that counts how a file is read.
+  static inline size_t reads = 0;
 
  private:
   bool open_ = false;
@@ -71,6 +81,7 @@ class HalStorage {
     failRenameFrom.clear();
     failRemove.clear();
     writeBudget = -1;
+    freeBytes = 0;
   }
   void put(const std::string& path, const std::string& content) { entries[key(path)] = {path, content, false}; }
   void putFolder(const std::string& path) { entries[key(path)] = {path, "", true}; }
@@ -123,6 +134,19 @@ class HalStorage {
     entries.erase(it);
     return true;
   }
+  // The folder and everything in it.
+  bool removeDir(const char* path) {
+    const std::string folder = key(path);
+    const auto it = entries.find(folder);
+    if (it == entries.end() || !it->second.folder) return false;
+    entries.erase(it);
+    const std::string prefix = folder + "/";
+    for (auto inside = entries.lower_bound(prefix); inside != entries.end() && inside->first.rfind(prefix, 0) == 0;) {
+      inside = entries.erase(inside);
+    }
+    return true;
+  }
+  uint64_t sdFreeBytes() const { return freeBytes; }
 
   static HalStorage& getInstance() {
     static HalStorage instance;
@@ -133,6 +157,7 @@ class HalStorage {
   std::set<std::string> failRenameFrom;  // key()s whose rename fails
   std::set<std::string> failRemove;      // key()s whose remove fails
   long writeBudget = -1;                 // what a file opened for write may take; -1: no limit
+  uint64_t freeBytes = 0;                // what sdFreeBytes() reports
 };
 
 #define Storage HalStorage::getInstance()

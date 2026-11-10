@@ -150,11 +150,13 @@ bool FontInstaller::computeFileCrc32(const char* path, uint32_t& outCrc) {
   if (!Storage.openFileForRead("FONT", path, f)) {
     return false;
   }
-  constexpr size_t BUF_SIZE = 128;
-  uint8_t buf[BUF_SIZE];
+  // 1 KB a read, eight times fewer card reads than the 128 bytes it took before: German's hyphenation pack (206 KB) is
+  // 202 of them. On the stack, not the heap: every caller (the Font Manager, the web font API) runs on the loop task,
+  // whose stack is 16 KB, and nothing below this call but the card read takes more of it.
+  uint8_t buf[1024];
   uint32_t crc = 0;
   while (f.available()) {
-    const int n = f.read(buf, BUF_SIZE);
+    const int n = f.read(buf, sizeof buf);
     if (n <= 0) break;
     crc = esp_rom_crc32_le(crc, buf, static_cast<uint32_t>(n));
   }
@@ -311,9 +313,10 @@ FontInstaller::Error FontInstaller::deletePack(const FontCatalog& families, cons
 FontInstaller::FileCounts FontInstaller::countFiles(const FontCatalog& families, const size_t family) {
   FileCounts counts;
   const char* familyName = families.name(family);
+  const bool pack = families.pack(family);
   for (size_t j = 0; j < families.fileCount(family); j++) {
     char path[128];
-    if (families.pack(family)) {
+    if (pack) {
       buildPackPath(families, family, families.fileLocalName(family, j), path, sizeof(path));
     } else {
       buildFontPath(familyName, families.fileLocalName(family, j), path, sizeof(path));
@@ -325,11 +328,28 @@ FontInstaller::FileCounts FontInstaller::countFiles(const FontCatalog& families,
     }
     const size_t actual = f.fileSize();
     f.close();
-    if (actual == families.fileSize(family, j)) {
-      ++counts.same;
-    } else {
+    const uint32_t listed = families.fileSize(family, j);
+    if (actual != listed) {
+      if (pack) {
+        LOG_DBG("FONT", "%s: %u B, the manifest lists %u B", path, unsigned(actual), unsigned(listed));
+      }
       ++counts.changed;
+      continue;
     }
+    // At the manifest's size a pack's file is read for its CRC too, when the manifest gives one: a pack rebuilt at the
+    // same size is an update all the same. Packs are small (German's hyphenation, the largest, is 206 KB). A font's
+    // file goes by its size alone: a family runs to megabytes, and its files would be read whole each time the Font
+    // Manager or the web font API loads the list.
+    if (pack && families.fileHasCrc32(family, j)) {
+      uint32_t crc = 0;
+      const uint32_t listedCrc = families.fileCrc32(family, j);
+      if (!computeFileCrc32(path, crc) || crc != listedCrc) {
+        LOG_DBG("FONT", "%s: CRC %08x, the manifest lists %08x", path, unsigned(crc), unsigned(listedCrc));
+        ++counts.changed;
+        continue;
+      }
+    }
+    ++counts.same;
   }
   return counts;
 }
