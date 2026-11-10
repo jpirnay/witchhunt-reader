@@ -57,9 +57,9 @@ struct Outcome {
 };
 
 Outcome read(const std::string& json, FontManifestReader::NameCheck familyCheck = familyNameOk,
-             FontManifestReader::NameCheck fileCheck = fileNameOk, const bool takesHyphenation = false) {
+             FontManifestReader::NameCheck fileCheck = fileNameOk, const bool takesPacks = false) {
   HalFile file = HalFile::fromString(json);
-  FontManifestReader reader("TEST", familyCheck, fileCheck, takesHyphenation);
+  FontManifestReader reader("TEST", familyCheck, fileCheck, takesPacks);
   Outcome out;
   fillStale(out.catalog);
   out.status = reader.read(file, out.catalog, out.baseUrl);
@@ -490,37 +490,47 @@ TEST(FontManifestReaderTest, TheManifestUrlIsTheV3ManifestOnMaster) {
                "https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/fonts-v3.json");
 }
 
-// The shipped fonts-v3.json as the Font Manager reads it: the 30 hyphenation packs after the fonts, each a family of
-// one hyph-<code>.cphyph, flagged, out of "Download all", no outline family. The web font API reads it without them.
-TEST(FontManifestReaderTest, TheShippedManifestListsTheHyphenationPacksForTheFontManagerAlone) {
+// The shipped fonts-v3.json as the Font Manager and the web font API read it: after the fonts the 26 UI language
+// packs, each a family of one <code>.cplang, then the 31 hyphenation packs, each of one hyph-<code>.cphyph; flagged,
+// out of "Download all", no outline family. A reader that takes no packs reads it without them.
+TEST(FontManifestReaderTest, TheShippedManifestListsTheLanguageAndHyphenationPacksAfterTheFonts) {
   std::ifstream in(FONT_MANIFEST_V3_PATH, std::ios::binary);
   const std::string json((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-  const Outcome fontManager = read(json, familyNameOk, fileNameOk, /*takesHyphenation=*/true);
+  const Outcome fontManager = read(json, familyNameOk, fileNameOk, /*takesPacks=*/true);
   const Outcome web = read(json);
   ASSERT_EQ(fontManager.status, FontManifestStatus::Ok);
   ASSERT_EQ(web.status, FontManifestStatus::Ok);
   const FontCatalog& all = fontManager.catalog;
-  size_t packs = 0;
-  bool packSeen = false;
+  size_t languages = 0;
+  size_t hyphenation = 0;
   for (size_t i = 0; i < all.count(); ++i) {
-    if (!all.hyphenation(i)) {
-      EXPECT_FALSE(packSeen) << "a font after the packs: " << all.name(i);
+    if (!all.pack(i)) {
+      EXPECT_EQ(languages + hyphenation, 0u) << "a font after the packs: " << all.name(i);
       continue;
     }
-    packSeen = true;
-    ++packs;
     SCOPED_TRACE(all.name(i));
-    EXPECT_EQ(std::string(all.name(i)).rfind("Hyphenation-", 0), 0u);
+    EXPECT_FALSE(all.hyphenation(i) && all.languagePack(i));
     EXPECT_FALSE(all.outline(i));
     EXPECT_FALSE(all.inDownloadAll(i));
     ASSERT_EQ(all.fileCount(i), 1u);
     const std::string local = all.fileLocalName(i, 0);
+    if (all.languagePack(i)) {
+      EXPECT_EQ(hyphenation, 0u) << "a language pack after the hyphenation packs";
+      ++languages;
+      EXPECT_EQ(std::string(all.name(i)).rfind("Language-", 0), 0u);
+      EXPECT_EQ(local.size(), 9u);  // de.cplang
+      EXPECT_EQ(local.substr(2), ".cplang");
+      continue;
+    }
+    ++hyphenation;
+    EXPECT_EQ(std::string(all.name(i)).rfind("Hyphenation-", 0), 0u);
     EXPECT_EQ(local.size(), 14u);
     EXPECT_EQ(local.rfind("hyph-", 0), 0u);
   }
-  EXPECT_EQ(packs, 31u);
-  EXPECT_EQ(web.catalog.count(), all.count() - packs);
-  for (size_t i = 0; i < web.catalog.count(); ++i) EXPECT_FALSE(web.catalog.hyphenation(i));
+  EXPECT_EQ(languages, 26u);
+  EXPECT_EQ(hyphenation, 31u);
+  EXPECT_EQ(web.catalog.count(), all.count() - languages - hyphenation);
+  for (size_t i = 0; i < web.catalog.count(); ++i) EXPECT_FALSE(web.catalog.pack(i));
   // What the list costs the Font Manager in its one block, against the fonts alone.
   std::printf("[ INFO ] catalog block: %zu B with the packs, %zu B without\n", all.blockBytes(),
               web.catalog.blockBytes());

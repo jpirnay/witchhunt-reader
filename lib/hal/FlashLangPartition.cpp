@@ -1,6 +1,5 @@
 #include "FlashLangPartition.h"
 
-#include <InflateReader.h>
 #include <Logging.h>
 #include <esp_partition.h>
 #include <esp_rom_crc.h>
@@ -59,6 +58,10 @@ static const esp_partition_t* findPartition() {
 // Byte offset of the language slot within the partition. Equal to
 // FlashFontPartition's ceiling, and 64 KB aligned because the partition both
 // starts on and is a multiple of 64 KB — esp_partition_mmap requires that.
+// Format 1 (2.40) kept a 64 KB slot at the partition's end, behind a 32 B header: this slot's upper half.
+static constexpr size_t FORMAT1_SLOT_BYTES = 64 * 1024;
+static constexpr size_t FORMAT1_HEADER_BYTES = 32;
+
 static size_t slotOffset(const esp_partition_t* part) {
   if (!part || part->size <= FlashFontPartition::LANG_RESERVED_BYTES) return 0;
   return static_cast<size_t>(part->size) - FlashFontPartition::LANG_RESERVED_BYTES;
@@ -96,12 +99,32 @@ bool holds(const uint8_t langIndex, const uint32_t stamp, const uint32_t extByte
   return h.langIndex == langIndex && h.stamp == stamp && ext == extBytes;
 }
 
-// Buffers an extension's bytes and programs them in WRITE_CHUNK pieces from `base` on.
-class ChunkedSlotWriter final : public SlotWriter {
+// Buffers a producer's bytes and programs them in WRITE_CHUNK pieces from `base` on. For the strings it
+// also keeps the table: beginKey() points the key's entry at the next byte written.
+class ChunkedSlotWriter final : public StringsWriter {
  public:
   ChunkedSlotWriter(const esp_partition_t* part, const size_t base, const size_t limit, uint8_t* chunk,
-                    uint8_t* scratch, const size_t scratchBytes)
-      : part_(part), base_(base), limit_(limit), chunk_(chunk), scratch_(scratch), scratchBytes_(scratchBytes) {}
+                    uint8_t* scratch, const size_t scratchBytes, uint16_t* table = nullptr, const uint16_t keyCount = 0)
+      : part_(part),
+        base_(base),
+        limit_(limit),
+        chunk_(chunk),
+        scratch_(scratch),
+        scratchBytes_(scratchBytes),
+        table_(table),
+        keyCount_(keyCount) {}
+
+  bool beginKey(const uint16_t id) override {
+    const size_t at = written_ + fill_;
+    // Bit 15 is FALLBACK, so a string must start below 32 KB. gen_i18n.py refuses a pack with that much.
+    if (failed_ || !table_ || id >= keyCount_ || at >= FALLBACK) {
+      LOG_ERR("FLP", "key %u refused at %u B", id, static_cast<unsigned>(at));
+      failed_ = true;
+      return false;
+    }
+    table_[id] = static_cast<uint16_t>(at);
+    return true;
+  }
 
   bool write(const void* data, size_t len) override {
     if (failed_ || written_ + fill_ + len > limit_) {
@@ -149,67 +172,17 @@ class ChunkedSlotWriter final : public SlotWriter {
   uint8_t* chunk_;
   uint8_t* scratch_;
   size_t scratchBytes_;
+  uint16_t* table_;
+  uint16_t keyCount_;
   size_t fill_ = 0;
   size_t written_ = 0;
   uint32_t crc_ = 0;
   bool failed_ = false;
 };
 
-// Walks the decompressed blob one byte at a time, filling the offset table.
-//
-// Kept as explicit state rather than scanning the finished blob because the
-// blob is streamed to flash in chunks and never exists in RAM as a whole. The
-// state lives in members, so an entry straddling a chunk boundary needs no
-// special case at all.
-class TableBuilder {
- public:
-  TableBuilder(uint16_t* table, uint16_t keyCount, const uint16_t* enOffsets)
-      : table_(table), keyCount_(keyCount), enOffsets_(enOffsets) {}
-
-  void feed(const uint8_t* bytes, const size_t len) {
-    for (size_t i = 0; i < len; i++) {
-      if (atEntryStart_ && entry_ < keyCount_) {
-        // An empty entry (immediate NUL) means "no override" — point the table
-        // at English instead, exactly as the generator does for in-image
-        // languages, so I18n::get() needs no second kind of fallback.
-        table_[entry_] =
-            (bytes[i] == 0) ? static_cast<uint16_t>(0x8000u | enOffsets_[entry_]) : static_cast<uint16_t>(pos_);
-        atEntryStart_ = false;
-      }
-      if (bytes[i] == 0) {
-        entry_++;
-        atEntryStart_ = true;
-      }
-      pos_++;
-    }
-  }
-
-  bool complete() const { return entry_ == keyCount_; }
-  uint16_t entriesSeen() const { return entry_; }
-
- private:
-  uint16_t* table_;
-  uint16_t keyCount_;
-  const uint16_t* enOffsets_;
-  uint32_t pos_ = 0;
-  uint16_t entry_ = 0;
-  bool atEntryStart_ = true;
-};
-
-bool build(const uint8_t langIndex, const uint32_t stamp, const uint8_t* compressed, const size_t compressedLen,
-           const size_t uncompressedLen, const uint16_t keyCount, const uint16_t* enOffsets, const Extension* ext) {
-  if (!compressed || compressedLen == 0 || keyCount == 0 || !enOffsets) return false;
-
-  // TableBuilder narrows blob positions to uint16_t, and bit 15 is the English
-  // fallback flag, so a blob at or past 32 KB would alias offsets onto that
-  // flag. gen_i18n.py refuses to emit one (MAX_BLOB_BYTES) — this is the
-  // matching check on the consuming side, so the two cannot drift apart
-  // silently if the generator is ever changed.
-  if (uncompressedLen >= 0x8000u) {
-    LOG_ERR("FLP", "language %u blob is %u B, past the 15-bit offset limit", langIndex,
-            static_cast<unsigned>(uncompressedLen));
-    return false;
-  }
+bool build(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCount, const Strings& strings,
+           const Extension* ext) {
+  if (keyCount == 0 || !strings.produce || strings.maxBytes == 0) return false;
 
   const esp_partition_t* part = findPartition();
   if (!part) return false;
@@ -229,100 +202,68 @@ bool build(const uint8_t langIndex, const uint32_t stamp, const uint8_t* compres
   const size_t tableBytes = (static_cast<size_t>(keyCount) * sizeof(uint16_t) + 3u) & ~static_cast<size_t>(3u);
   const size_t tableWords = tableBytes / sizeof(uint16_t);
   const size_t dataOff = tableOff + tableBytes;
-  if (dataOff + uncompressedLen > FlashFontPartition::LANG_RESERVED_BYTES) {
-    LOG_ERR("FLP", "language %u needs %u B, slot is %u B", langIndex, static_cast<unsigned>(dataOff + uncompressedLen),
+  const size_t maxBytes = strings.maxBytes;
+  if (dataOff + maxBytes > FlashFontPartition::LANG_RESERVED_BYTES) {
+    LOG_ERR("FLP", "language %u needs %u B, slot is %u B", langIndex, static_cast<unsigned>(dataOff + maxBytes),
             static_cast<unsigned>(FlashFontPartition::LANG_RESERVED_BYTES));
     return false;
   }
 
-  // The extension goes after the strings, 4-byte aligned for the tables in it. One that does not fit
-  // is dropped here rather than failing the strings.
-  const size_t extOff = (dataOff + uncompressedLen + 3u) & ~static_cast<size_t>(3u);
-  if (ext && ext->bytes > 0 && extOff + ext->bytes > FlashFontPartition::LANG_RESERVED_BYTES) {
+  // The extension goes after the strings, 4-byte aligned for the tables in it, so its room is judged
+  // by the strings' bound before they are written. One that does not fit is dropped here rather than
+  // failing the strings.
+  const size_t extBound = roundUp(dataOff + maxBytes, 4);
+  if (ext && ext->bytes > 0 && extBound + ext->bytes > FlashFontPartition::LANG_RESERVED_BYTES) {
     LOG_ERR("FLP", "language %u extension needs %u B past %u B, slot is %u B - building the strings alone", langIndex,
-            static_cast<unsigned>(ext->bytes), static_cast<unsigned>(extOff),
+            static_cast<unsigned>(ext->bytes), static_cast<unsigned>(extBound),
             static_cast<unsigned>(FlashFontPartition::LANG_RESERVED_BYTES));
     ext = nullptr;
   }
   if (ext && ext->bytes == 0) ext = nullptr;
 
-  // Only the sectors this build writes: the slot is twice what a pack without an extension needs.
+  // Only the sectors this build may write: the slot is twice what a pack without an extension needs.
   // Bytes past them may hold an earlier, longer build; the header bounds every read, so they are
   // never looked at.
-  const size_t used = ext ? extOff + ext->bytes : dataOff + uncompressedLen;
+  const size_t used = ext ? extBound + ext->bytes : dataOff + maxBytes;
   if (esp_partition_erase_range(part, slot, roundUp(used, SECTOR_BYTES)) != ESP_OK) {
     LOG_ERR("FLP", "erase failed");
     return false;
   }
 
   // All three buffers are transient — freed before this function returns.
-  auto ring = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[INFLATE_RING_BYTES]);
+  auto scratch = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[SCRATCH_BYTES]);
   auto chunk = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[WRITE_CHUNK]);
-  // Value-initialised: the alignment pad past keyCount must be written as a
-  // known value, not whatever the heap held.
-  auto table = std::unique_ptr<uint16_t[]>(new (std::nothrow) uint16_t[tableWords]());
-  if (!ring || !chunk || !table) {
+  auto table = std::unique_ptr<uint16_t[]>(new (std::nothrow) uint16_t[tableWords]);
+  if (!scratch || !chunk || !table) {
     LOG_ERR("FLP", "out of memory building language %u", langIndex);
     return false;
   }
+  // Every key English until the producer writes its string; the alignment pad past keyCount too, so it
+  // is written as a known value rather than whatever the heap held.
+  for (size_t i = 0; i < tableWords; ++i) table[i] = FALLBACK;
 
-  InflateReader inflate;
-  if (!inflate.initWithExternalRing(ring.get(), INFLATE_RING_BYTES)) {
-    LOG_ERR("FLP", "inflate init failed");
+  // The strings. The writer's CRC is over the bytes as they are written, from RAM: a byte that did not
+  // program, or that something else overwrites later, then fails map()'s check of what flash holds.
+  ChunkedSlotWriter strWriter(part, slot + dataOff, std::min<size_t>(maxBytes, FALLBACK), chunk.get(), scratch.get(),
+                              SCRATCH_BYTES, table.get(), keyCount);
+  if (!strings.produce(strings.ctx, strWriter) || !strWriter.finish()) {
+    LOG_ERR("FLP", "language %u strings failed after %u B", langIndex, static_cast<unsigned>(strWriter.written()));
     return false;
   }
-  inflate.setSource(compressed, compressedLen);
-
-  TableBuilder builder(table.get(), keyCount, enOffsets);
-  size_t written = 0;
-  // Over the bytes as they are written, from RAM: a byte that did not program, or that something else
-  // overwrites later, then fails map()'s check of what flash holds.
-  uint32_t stringsCrc = 0;
-  bool done = false;
-  while (!done) {
-    size_t produced = 0;
-    const InflateStatus st = inflate.readAtMost(chunk.get(), WRITE_CHUNK, &produced);
-    if (st == InflateStatus::Error) {
-      LOG_ERR("FLP", "inflate failed at %u B", static_cast<unsigned>(written));
-      return false;
-    }
-    if (produced > 0) {
-      if (written + produced > uncompressedLen) {
-        LOG_ERR("FLP", "stream longer than declared (%u B)", static_cast<unsigned>(uncompressedLen));
-        return false;
-      }
-      if (esp_partition_write(part, slot + dataOff + written, chunk.get(), produced) != ESP_OK) {
-        LOG_ERR("FLP", "write failed at %u B", static_cast<unsigned>(written));
-        return false;
-      }
-      builder.feed(chunk.get(), produced);
-      stringsCrc = crc32(stringsCrc, chunk.get(), produced);
-      written += produced;
-    }
-    done = (st == InflateStatus::Done);
-    if (!done && produced == 0) {
-      LOG_ERR("FLP", "inflate stalled at %u B", static_cast<unsigned>(written));
-      return false;
-    }
-  }
-
-  if (written != uncompressedLen || !builder.complete()) {
-    LOG_ERR("FLP", "blob mismatch: %u/%u B, %u/%u entries", static_cast<unsigned>(written),
-            static_cast<unsigned>(uncompressedLen), builder.entriesSeen(), keyCount);
-    return false;
-  }
+  const size_t written = strWriter.written();
 
   if (esp_partition_write(part, slot + tableOff, table.get(), tableBytes) != ESP_OK) {
     LOG_ERR("FLP", "table write failed");
     return false;
   }
-  stringsCrc = crc32(stringsCrc, table.get(), tableBytes);
+  const uint32_t stringsCrc = crc32(strWriter.crc(), table.get(), tableBytes);
 
-  // The extension, through the staging chunk; the inflate ring is free now and is its scratch.
+  // The extension, through the staging chunk; the strings' scratch is free now and is its own.
+  const size_t extOff = roundUp(dataOff + written, 4);
   uint32_t extLen = 0;
   uint32_t extCrc = 0;
   if (ext) {
-    ChunkedSlotWriter writer(part, slot + extOff, ext->bytes, chunk.get(), ring.get(), INFLATE_RING_BYTES);
+    ChunkedSlotWriter writer(part, slot + extOff, ext->bytes, chunk.get(), scratch.get(), SCRATCH_BYTES);
     if (ext->produce(ext->ctx, writer) && writer.finish() && writer.written() == ext->bytes) {
       extLen = ext->bytes;
       extCrc = writer.crc();
@@ -351,9 +292,19 @@ bool build(const uint8_t langIndex, const uint32_t stamp, const uint8_t* compres
     return false;
   }
 
-  LOG_INF("FLP", "language %u built: %u B compressed -> %u B, %u entries, %u B extension", langIndex,
-          static_cast<unsigned>(compressedLen), static_cast<unsigned>(written), keyCount,
-          static_cast<unsigned>(extLen));
+  LOG_INF("FLP", "language %u built: %u B of strings for %u keys, %u B extension", langIndex,
+          static_cast<unsigned>(written), keyCount, static_cast<unsigned>(extLen));
+
+  // A format-1 slot (2.40) in the upper half is read once, to convert it (mapLegacy); with this slot
+  // built it has served. Retired, so a pack removed from the card later reads as missing rather than
+  // as that firmware's strings again. Format 2 lay where this slot does and is gone already, as is a
+  // format-1 slot this build's erase reached.
+  const size_t format1 = static_cast<size_t>(part->size) - FORMAT1_SLOT_BYTES;
+  uint8_t old[5];
+  if (format1 >= slot + roundUp(used, SECTOR_BYTES) && esp_partition_read(part, format1, old, sizeof(old)) == ESP_OK &&
+      memcmp(old, MAGIC, 4) == 0 && old[4] == 1 && esp_partition_erase_range(part, format1, SECTOR_BYTES) == ESP_OK) {
+    LOG_INF("FLP", "an older firmware's format 1 slot retired");
+  }
   return true;
 }
 
@@ -429,24 +380,79 @@ MapResult map(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyC
   return result;
 }
 
-bool acquire(const uint8_t langIndex, const uint32_t stamp, const uint8_t* compressed, const size_t compressedLen,
-             const size_t uncompressedLen, const uint16_t keyCount, const uint16_t* enOffsets, const Extension* ext,
-             Mapped* out) {
+bool acquire(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCount, const Strings& strings,
+             const Extension* ext, Mapped* out) {
   const uint32_t extBytes = ext ? ext->bytes : 0;
   if (holds(langIndex, stamp, extBytes)) {
     const MapResult held = map(langIndex, stamp, keyCount, out);
-    if (held == MapResult::Ok || held == MapResult::WithoutExtension) return true;
+    if (held == MapResult::Ok || held == MapResult::WithoutExtension) {
+      LOG_INF("FLP", "language %u: the slot holds this pack, nothing built", langIndex);
+      return true;
+    }
     // A rebuild cannot give the strings a mapping the MMU has no page for.
     if (held == MapResult::MapFailed) return false;
     LOG_ERR("FLP", "language %u slot holds bytes it was not written with - rebuilding", langIndex);
   }
   // Either a different language, or the same one from a different firmware build — the stamp covers
   // both — or the bytes behind the header changed since. One build, whatever it leads to.
-  if (!build(langIndex, stamp, compressed, compressedLen, uncompressedLen, keyCount, enOffsets, ext)) return false;
+  if (!build(langIndex, stamp, keyCount, strings, ext)) return false;
   const MapResult built = map(langIndex, stamp, keyCount, out);
   // An extension that fails even when just written is left out: the strings are what matter, and the
   // extension's reader works without it (CjkUiFonts decodes per glyph instead).
   return built == MapResult::Ok || built == MapResult::WithoutExtension || built == MapResult::ExtensionCorrupt;
+}
+
+bool mapLegacy(const uint8_t format, LegacySlot* out) {
+  if (!out || (format != 1 && format != 2)) return false;
+  const esp_partition_t* part = findPartition();
+  if (!part) return false;
+  // Format 1 kept a 64 KB slot at the partition's end, format 2 this one.
+  const size_t slotBytes = format == 1 ? FORMAT1_SLOT_BYTES : FlashFontPartition::LANG_RESERVED_BYTES;
+  if (part->size <= slotBytes) return false;
+  const size_t slot = static_cast<size_t>(part->size) - slotBytes;
+
+  // Both formats start alike: magic, version, language, key count, stamp, table, data, data length;
+  // format 2 goes on with the extension and the CRCs.
+  Header h = {};
+  const size_t headerBytes = format == 1 ? FORMAT1_HEADER_BYTES : HEADER_BYTES;
+  if (esp_partition_read(part, slot, &h, headerBytes) != ESP_OK) return false;
+  if (memcmp(h.magic, MAGIC, 4) != 0 || h.version != format || h.keyCount == 0) return false;
+  if (h.tableOff != headerBytes || h.dataOff < h.tableOff + static_cast<uint32_t>(h.keyCount) * 2u ||
+      static_cast<size_t>(h.dataOff) + h.dataLen > slotBytes || h.dataLen == 0) {
+    LOG_ERR("FLP", "format %u slot: a header with its strings outside it", format);
+    return false;
+  }
+
+  unmap();
+  const void* raw = nullptr;
+  const size_t need = roundUp(static_cast<size_t>(h.dataOff) + h.dataLen, MAP_PAGE_BYTES);
+  if (esp_partition_mmap(part, slot, need, ESP_PARTITION_MMAP_DATA, &raw, &s_mmapHandle) != ESP_OK) {
+    LOG_ERR("FLP", "format %u slot: mmap failed", format);
+    return false;
+  }
+  s_mmapPtr = static_cast<const uint8_t*>(raw);
+  s_mapBytes = need;
+
+  const bool hasExt = format == 2 && h.extLen != 0;
+  if (format == 2) {
+    const uint32_t crc =
+        crc32(crc32(0, s_mmapPtr + h.dataOff, h.dataLen), s_mmapPtr + h.tableOff, h.dataOff - h.tableOff);
+    if (crc != h.stringsCrc) {
+      LOG_ERR("FLP", "format 2 slot: its strings fail their CRC");
+      unmap();
+      return false;
+    }
+  }
+  out->format = format;
+  out->langIndex = h.langIndex;
+  out->keyCount = h.keyCount;
+  out->table = reinterpret_cast<const uint16_t*>(s_mmapPtr + h.tableOff);
+  out->data = reinterpret_cast<const char*>(s_mmapPtr + h.dataOff);
+  out->dataLen = h.dataLen;
+  out->hasExtension = hasExt;
+  LOG_INF("FLP", "format %u slot found: language %u, %u keys, %u B of strings%s", format, h.langIndex, h.keyCount,
+          static_cast<unsigned>(h.dataLen), hasExt ? ", an extension" : "");
+  return true;
 }
 
 void unmap() {

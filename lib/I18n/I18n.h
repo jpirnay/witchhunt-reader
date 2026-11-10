@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "I18nKeys.h"
@@ -52,6 +53,13 @@ class I18n {
   const char* getLanguageCode(Language lang) const;
   const char* getLanguageName(Language lang) const;
 
+  /// Where the language packs live on the card (LangPack.h); the Font Manager installs them there.
+  static constexpr const char* PACK_DIR = "/.crosspoint/lang";
+  /// The pack file of `lang`: "/.crosspoint/lang/de.cplang". False for English, which has none.
+  static bool packPath(Language lang, char* out, size_t outSize);
+  /// Whether the card holds the pack of `lang`; English always counts as there.
+  static bool packOnCard(Language lang);
+
   void saveSettings();
   void loadSettings();
 
@@ -70,11 +78,18 @@ class I18n {
   void loadLanguageSetting();
 
   // Point _active at the strings for _language: English straight from rodata,
-  // anything else from the flash language pack — building that pack first if the
-  // slot does not already hold this language and firmware build. Falls back to
-  // English on any failure, so a missing or unwritable pack degrades to readable
-  // English rather than to blank rows.
+  // anything else from the flash language slot — built first from the language's
+  // pack on the card when the slot does not already hold that pack for this
+  // firmware's keys. Falls back to English on any failure, a pack missing from the
+  // card included, so the reader degrades to readable English rather than to blank rows.
   void refreshActiveStrings();
+
+  // After an update from a firmware that kept its languages in the image (2.40, 2.41RC): when the
+  // flash slot that firmware left holds _language in the layout of a release the generator knows
+  // (LEGACY_LAYOUTS), writes its strings to the card as the pack `path` (LangPackConvert.h). False when
+  // there is no such slot, it holds another language or a CJK language's faces, or the card refused
+  // the file.
+  bool convertLegacySlot(const char* code, const char* path);
 
   Language _language;
 

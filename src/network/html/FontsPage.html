@@ -345,9 +345,24 @@
         }
         showUpdateCount(data.families.filter((f) => f.installed && f.hasUpdate).length);
 
+        let languagesHeaded = false;
         let packsHeaded = false;
         data.families.forEach(f => {
-          // The hyphenation packs come after the fonts: one per language, for the books in it.
+          // The language packs come after the fonts: one per interface language.
+          if (f.language && !languagesHeaded) {
+            languagesHeaded = true;
+            const head = document.createElement('h3');
+            head.className = 'family-group';
+            head.textContent = 'Language packs';
+            const note = document.createElement('p');
+            note.className = 'family-note';
+            note.textContent = 'English is built in; every other interface language reads its pack. ' +
+                'Install the language you set in Settings; the reader uses it from its next start. ' +
+                'Delete a pack in the Font Manager on the reader.';
+            el.appendChild(head);
+            el.appendChild(note);
+          }
+          // The hyphenation packs come last: one per language, for the books in it.
           if (f.hyphenation && !packsHeaded) {
             packsHeaded = true;
             const head = document.createElement('h3');

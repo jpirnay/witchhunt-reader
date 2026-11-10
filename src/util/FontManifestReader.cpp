@@ -202,8 +202,9 @@ void FontManifestReader::familyEnd() {
     builder->dropFamily();
     return;
   }
-  if (w.format == FontDownloadRules::FileKind::Unknown ||
-      (w.format == FontDownloadRules::FileKind::HyphenationPack && !takesHyphenation)) {
+  const bool isPack =
+      w.format == FontDownloadRules::FileKind::HyphenationPack || w.format == FontDownloadRules::FileKind::LanguagePack;
+  if (w.format == FontDownloadRules::FileKind::Unknown || (isPack && !takesPacks)) {
     // A format newer than this reader: not an error, the family is for firmware that knows it.
     if (filling) LOG_INF(logTag, "Manifest entry %s left out: format %s", w.familyName, w.formatName);
     builder->dropFamily();
@@ -219,5 +220,6 @@ void FontManifestReader::familyEnd() {
   builder->outline(w.format == FontDownloadRules::FileKind::TrueType ||
                    w.format == FontDownloadRules::FileKind::OpenTypeCff);
   builder->hyphenation(w.format == FontDownloadRules::FileKind::HyphenationPack);
+  builder->languagePack(w.format == FontDownloadRules::FileKind::LanguagePack);
   builder->keepFamily(w.familyName, w.familyNameLen);
 }

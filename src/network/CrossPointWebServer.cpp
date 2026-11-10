@@ -2277,7 +2277,7 @@ bool fetchRemoteFontManifest(HttpDownloader::Session& session, FontInstaller& in
   // runs while Wi-Fi is up, and a whole-document parse of the 24 KB manifest
   // ran the X3 out of heap. The list is one block, which the install frees
   // whole before its downloads -- see handleFontDownload().
-  FontManifestReader reader("WEB", FontInstaller::isValidFamilyName, isValidFontFileName, /*takesHyphenation=*/true);
+  FontManifestReader reader("WEB", FontInstaller::isValidFamilyName, isValidFontFileName, /*takesPacks=*/true);
   const FontManifestStatus status = reader.read(manifestFile, outFamilies, outBaseUrl);
   manifestFile.close();
   Storage.remove(MANIFEST_TMP);
@@ -2437,11 +2437,12 @@ bool installRemoteFamily(HttpDownloader::Session& session, const FontCatalog& fa
     }
   }
 
-  // A hyphenation pack's file goes to /.crosspoint/hyphenation/, not into a family folder, and on the X3 and X4 into
-  // the flash store there and then, as the Font Manager installs it.
-  if (families.hyphenation(familyIndex)) {
+  // A pack's file goes to its folder, not into a family folder, as the Font Manager installs it: a hyphenation pack's
+  // to /.crosspoint/hyphenation/, and on the X3 and X4 into the flash store there and then; a UI language pack's to
+  // /.crosspoint/lang/, read at the next start.
+  if (families.pack(familyIndex)) {
     if (!FontInstaller::installStagedPack(families, familyIndex, stagingDir)) {
-      outError = "Failed to finalize the hyphenation pack";
+      outError = "Failed to finalize the pack";
       return false;
     }
     return true;
@@ -2555,6 +2556,7 @@ void CrossPointWebServer::handleFontManifest() {
     // The folder is the reader's own family under this name: installing would replace its files.
     obj["ownFiles"] = families.installed(i) && !families.hasUpdate(i) && FontInstaller::holdsOwnFiles(families, i);
     obj["hyphenation"] = families.hyphenation(i);
+    obj["language"] = families.languagePack(i);
     obj["totalSize"] = static_cast<unsigned long>(families.totalSize(i));
     obj["fileCount"] = static_cast<unsigned>(families.fileCount(i));
   }

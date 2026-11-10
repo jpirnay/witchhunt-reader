@@ -145,6 +145,31 @@ class Manifests(unittest.TestCase):
         self.assertEqual(de["files"], [{"name": "Hyphenation-German/hyph-de.cphyph", "size": pack.stat().st_size,
                                         "crc32": zlib.crc32(pack.read_bytes())}])
 
+    def test_a_language_pack_is_listed_in_version_3_after_the_fonts_before_hyphenation(self):
+        hyph = self.fonts / "Hyphenation-German" / "hyph-de.cphyph"
+        hyph.parent.mkdir(parents=True)
+        hyph.write_bytes(b"CPHY\x01de\x02\x02" + bytes(15) + b"trie")
+        pack = self.fonts / "Language-German" / "de.cplang"
+        pack.parent.mkdir(parents=True)
+        pack.write_bytes(b"CPLG\x01" + bytes(59) + b"payload")
+        self.config.write_text(CONFIG + """  - name: Hyphenation-German
+    description: "Hyphenation for books in German"
+    format: hyphenation
+    inDownloadAll: false
+  - name: Language-German
+    description: "Menus and messages in German"
+    format: language
+    inDownloadAll: false
+""", encoding="utf-8")
+        self.assertEqual(self.run_generator().returncode, 0)
+        self.assertEqual([f["name"] for f in self.manifest("fonts.json")["families"]], ["Alpha"])
+        v3 = self.manifest("fonts-v3.json")["families"]
+        self.assertEqual([f["name"] for f in v3], ["Alpha", "NotoSansJP", "Language-German", "Hyphenation-German"])
+        de = v3[2]
+        self.assertEqual((de["format"], de["inDownloadAll"], de["styles"]), ("language", False, []))
+        self.assertEqual(de["files"], [{"name": "Language-German/de.cplang", "size": pack.stat().st_size,
+                                        "crc32": zlib.crc32(pack.read_bytes())}])
+
     def test_a_hyphenation_pack_outside_a_folder_is_left_out(self):
         (self.fonts / "hyph-de.cphyph").write_bytes(b"CPHY")
         run = self.run_generator(config=False)
