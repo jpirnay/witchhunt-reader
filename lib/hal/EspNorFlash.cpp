@@ -12,8 +12,9 @@
 #endif
 
 namespace {
-uint32_t s_liveMappings = 0;
-}
+// The font area's mappings (begin()), not a region's (beginRegion()): see liveFontAreaMappings().
+uint32_t s_liveFontAreaMappings = 0;
+}  // namespace
 
 EspNorFlash::~EspNorFlash() {
   for (Mapping& m : maps_) {
@@ -21,7 +22,7 @@ EspNorFlash::~EspNorFlash() {
   }
 }
 
-uint32_t EspNorFlash::liveMappings() { return s_liveMappings; }
+uint32_t EspNorFlash::liveFontAreaMappings() { return s_liveFontAreaMappings; }
 
 bool EspNorFlash::begin() {
   part_ = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
@@ -120,7 +121,8 @@ const uint8_t* EspNorFlash::map(const uint32_t offset, const uint32_t len) {
       return nullptr;
     }
     m.ptr = static_cast<const uint8_t*>(ptr);
-    ++s_liveMappings;
+    m.fontArea = fontArea_;
+    if (m.fontArea) ++s_liveFontAreaMappings;
     return m.ptr;
   }
   LOG_ERR("ENF", "map refused: all %d mappings are in use", kMaxMaps);
@@ -132,8 +134,8 @@ void EspNorFlash::unmap(const uint8_t* mapped) {
   for (Mapping& m : maps_) {
     if (m.ptr == mapped) {
       esp_partition_munmap(m.handle);
+      if (m.fontArea) --s_liveFontAreaMappings;
       m = Mapping{};
-      --s_liveMappings;
       return;
     }
   }
