@@ -6017,9 +6017,12 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   lastRenderStats.imagePageWithAA = false;
   lastRenderStats.forcedHalfRefresh = forceHalfRefreshThisPage;
 
-  // The page the status bar last reported, read before renderStatusBar() overwrites it: the only way left to tell a
-  // page turn from a clock or battery tick that redrew the page already on the panel.
-  const int statusBarPageBeforeRender = lastStatusBarPage;
+  // Read before renderStatusBar() overwrites it: the only way left to tell a page turn from a clock or battery tick
+  // that redrew the page already on the panel, including one first shown mid-build (displayBuildPage(), which pins no
+  // lastRendered* identity).
+  const bool statusBarTick =
+      section && DisplayedPage::redrawsStatusBarPage({lastStatusBarSpine_, lastStatusBarPage}, currentSpineIndex,
+                                                     section->currentPage + 1);
   // Resolve this page's refresh mode (consuming any force flags) before the prewarm: whether the page goes out composed
   // one-pass decides whether the prewarm may borrow the secondary buffer (below). Fired after the BW render.
   HalDisplay::RefreshMode pageRefreshMode;
@@ -6049,8 +6052,8 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   } else if (forceHalfRefreshThisPage) {
     pageRefreshMode = HalDisplay::HALF_REFRESH;
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-  } else if (statusBarPageBeforeRender >= 0 && section && section->currentPage + 1 == statusBarPageBeforeRender) {
-    // Same page as the one already on the panel: this render was a status-bar
+  } else if (statusBarTick) {
+    // Same page as the one already on the panel, spine included: this render was a status-bar
     // tick (clock minute or battery step), not a page turn.
     //
     // refreshFrequencyPages is a GHOSTING BUDGET DENOMINATED IN PAGES -- the
@@ -6975,6 +6978,7 @@ void EpubReaderActivity::renderStatusBar() const {
 #endif
 
   lastStatusBarPage = currentPage;
+  lastStatusBarSpine_ = currentSpineIndex;
   lastStatusBarBattery = SETTINGS.statusBarBattery ? static_cast<int>(powerManager.getBatteryPercentage()) : -1;
   if (SETTINGS.useClock && SETTINGS.statusBarClock && HalClock::isSynced()) {
     const time_t now = HalClock::now();

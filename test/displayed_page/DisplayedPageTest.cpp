@@ -69,4 +69,40 @@ TEST(DisplayedPage, ATurnPastTheLastPageLeavesTheRecordToTheFinishedBookFlow) {
   expectRecords(settle(last, {true, kSpines - 1, 11}, kSpines), last);
 }
 
+using DisplayedPage::redrawsStatusBarPage;
+using DisplayedPage::StatusBarPage;
+
+TEST(DisplayedPage, AClockTickRedrawsThePageTheStatusBarShows) {
+  EXPECT_TRUE(redrawsStatusBarPage(StatusBarPage{9, 5}, 9, 5));
+}
+
+TEST(DisplayedPage, ATurnToTheSamePageNumberOfTheNextSpineIsATurn) {
+  // A one-page chapter, then the next one's first page: both are page 1. Counted as a tick, the turn refreshed FAST
+  // and spent nothing from the refresh budget.
+  EXPECT_FALSE(redrawsStatusBarPage(StatusBarPage{9, 1}, 10, 1));
+  EXPECT_FALSE(redrawsStatusBarPage(StatusBarPage{10, 1}, 9, 1));
+}
+
+TEST(DisplayedPage, AnyOtherPageIsATurn) {
+  EXPECT_FALSE(redrawsStatusBarPage(StatusBarPage{9, 5}, 9, 6));
+  EXPECT_FALSE(redrawsStatusBarPage(StatusBarPage{9, 5}, 9, 4));
+}
+
+TEST(DisplayedPage, NothingIsATickBeforeTheFirstStatusBar) {
+  EXPECT_FALSE(redrawsStatusBarPage(StatusBarPage{}, -1, -1));
+  EXPECT_FALSE(redrawsStatusBarPage(StatusBarPage{}, 0, 1));
+}
+
+TEST(DisplayedPage, ARunOfOnePageSpinesSpendsTheBudgetEveryTurn) {
+  // Twenty one-page chapters in a row, read through: every render is a turn and spends a page of the refresh budget,
+  // so the periodic HALF comes inside the run. It never came when each counted as a tick.
+  StatusBarPage shown;
+  int turns = 0;
+  for (int spine = 0; spine < 20; ++spine) {
+    if (!redrawsStatusBarPage(shown, spine, 1)) ++turns;
+    shown = {spine, 1};
+  }
+  EXPECT_EQ(20, turns);
+}
+
 }  // namespace

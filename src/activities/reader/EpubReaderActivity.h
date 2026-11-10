@@ -986,6 +986,8 @@ class EpubReaderActivity final : public Activity {
   // Compared in shouldSkipPeriodicUpdate() to suppress no-op minute-tick re-renders that on
   // X3 panels accumulate visible speckle via repeated no-diff FAST refreshes.
   mutable int lastStatusBarPage = -1;
+  // The spine lastStatusBarPage belongs to: renderContents() tells a tick from a turn by both (DisplayedPage).
+  mutable int lastStatusBarSpine_ = -1;
   mutable int lastStatusBarBattery = -1;
   mutable int lastStatusBarClockMinute = -1;
   // A minute tick that came while the page on screen was still being finished -- a pass in flight
