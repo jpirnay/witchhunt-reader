@@ -39,7 +39,8 @@ namespace {
 constexpr uint8_t SECTION_FILE_VERSION = 120;  // v120: a character the parser's 256-byte text chunks cut is read
                                                // whole: a joiner after a word's first Arabic or Myanmar letter is
                                                // kept, such a letter takes no drop cap, a cut no-break space is one,
-                                               // and a cut CJK character counts toward its run's flush
+                                               // and a cut CJK character counts toward its run's flush; a chillu's
+                                               // joiner ending a word at the word buffer's limit is kept
                                                // v119: an Arabic number sign (the end of ayah) is shaped with the
                                                // digits after it, drawn around them
                                                // v118: class and id selectors match case-sensitively; a chapter laid

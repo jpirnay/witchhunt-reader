@@ -41,7 +41,8 @@ ZWNJ (U+200C): Hindi steers half forms with them, and a Malayalam chillu ends in
   (`arabic::takesJoiner`: a run member that is no AL punctuation), whatever follows (`keepsJoinerAfter`). It is held
   (`heldJoiner_`) until the next code point says it is alone, then put into the word ahead of that code point
   (`releaseHeldJoiner`). At a word's end (whitespace, a no-break space, a block's or a cell's end) `settleHeldJoiner`
-  puts it last in the word, or onto the last token when an inline end sent that word out already.
+  puts it last in the word, or onto the last token when an inline end sent that word out already; a word that leaves
+  the buffer no room for it goes out first, and the joiner onto its last token.
 - A second joiner drops both and the rest of the run (`droppingJoinerRun_`), and a joiner after any other code point
   is dropped as before. Runs of hundreds of joiners between words, a watermark, are still dropped whole.
 - The look-behind (`joinerLookBehind_`) crosses SAX chunks and inline element edges. `characterData` holds any UTF-8

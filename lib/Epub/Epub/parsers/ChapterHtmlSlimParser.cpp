@@ -1584,9 +1584,13 @@ void ChapterHtmlSlimParser::settleHeldJoiner() {
   heldJoiner_ = 0;
   const char bytes[3] = {'\xE2', '\x80', joiner == 0x200D ? '\x8D' : '\x8C'};
   if (partWordHasText()) {
-    if (partWordBufferIndex + 3 > MAX_WORD_SIZE) return;
-    for (const char byte : bytes) appendPartWordText(byte, partWordVisibleOffset_);
-    return;
+    if (partWordBufferIndex + 3 <= MAX_WORD_SIZE) {
+      for (const char byte : bytes) appendPartWordText(byte, partWordVisibleOffset_);
+      return;
+    }
+    // No room left in the buffer: the word goes out now, and the joiner ends its last token below, as at an inline
+    // end. It stays in the token of the letter before it (a chillu's virama), and opens no token of its own.
+    if (!flushPartWordBuffer()) return;
   }
   // The word went out at an inline end (</b>) and only tags and controls came since: the joiner ends its last token,
   // ahead of any controls held after it. It counts nowhere, so the token's offset stays.

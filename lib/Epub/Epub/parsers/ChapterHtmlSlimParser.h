@@ -174,8 +174,9 @@ class ChapterHtmlSlimParser final : public Print {
   // the word's offset if the joiner opens it. A word with no room for the joiner and that code point is flushed first,
   // so the two stay together. False when the stream failed.
   bool releaseHeldJoiner(uint32_t offset, int nextLen);
-  // Ends the held joiner's wait at a word's end: it goes last in the word in the buffer; when an inline end sent that
-  // word out already and no space came since, onto its last token; else it goes.
+  // Ends the held joiner's wait at a word's end: it goes last in the word in the buffer (a buffer with no room for it
+  // sends the word out first); when the word went out (that flush, or an inline end with no space since), onto its
+  // last token; else it goes.
   void settleHeldJoiner();
   // Hands on, as text, a split-sequence tail that never got its rest (malformed text), at an element's edge.
   void deliverSplitTail();

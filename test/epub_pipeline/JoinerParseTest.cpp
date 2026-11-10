@@ -120,6 +120,22 @@ TEST_F(Joiners, AJoinerStaysWithTheLetterAfterItAtTheBufferLimit) {
   EXPECT_EQ(wordsOf("<p>" + word + kZwj + "ष</p>"), Words{word + kZwj + "ष"});
 }
 
+// A chillu's joiner ending a word that leaves the word buffer (limit 200 bytes) less than its 3 bytes: the word goes
+// out first, and the joiner ends its last token, so ന് stays a chillu rather than na with a visible virama.
+TEST_F(Joiners, AChilluJoinerAtTheBufferLimitIsKept) {
+  // 198, 199 and 200 bytes in the buffer when the joiner comes: the prefix, 64 times വ and ന്, 3 bytes each.
+  for (const std::string prefix : {"", "a", "ab"}) {
+    std::string word = prefix;
+    for (int i = 0; i < 64; ++i) word += "വ";
+    word += "ന്";
+    EXPECT_EQ(wordsOf("<p>" + word + kZwj + " വന്നു</p>"), (Words{word + kZwj, "വന്നു"})) << word.size();
+    EXPECT_EQ(wordsOf("<p>" + word + kZwj + "</p>"), Words{word + kZwj}) << word.size();
+    // It is in its virama's token, not a token of its own: the parser's tokens show in a ruby base (inRuby), which
+    // keeps its space as a token too.
+    EXPECT_EQ(wordsOf(inRuby(word + kZwj + " x")), (Words{word + kZwj, " ", "x"})) << word.size();
+  }
+}
+
 // A guard, not a RED test: this pins that a joiner after anything but a letter of the shaped blocks is dropped.
 TEST_F(Joiners, AJoinerAfterAnythingElseIsDropped) {
   EXPECT_EQ(wordsOf("<p>a" + kZwj + "b</p>"), Words{"ab"});
