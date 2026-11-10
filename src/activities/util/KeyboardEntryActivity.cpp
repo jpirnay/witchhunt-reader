@@ -1,10 +1,14 @@
 #include "KeyboardEntryActivity.h"
 
+#include <BidiUtils.h>
 #include <I18n.h>
+#include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <cstring>
 
+#include "EntryFieldLine.h"
 #include "KeyboardLayoutSet.h"
 #include "MappedInputManager.h"
 #include "PasswordMask.h"
@@ -38,6 +42,18 @@ int inputTop(const Rect& content, const ThemeMetrics& metrics) {
 int keyboardKeysHeight(const ThemeMetrics& metrics, const int rows, const bool hasTouch, const bool shortPanel) {
   const int keyHeight = shortPanel ? SHORT_PANEL_KEY_HEIGHT : hasTouch ? metrics.keyboardKeyHeight : BUTTON_KEY_HEIGHT;
   return rows * keyHeight + (rows > 1 ? (rows - 1) * keyboardGap(metrics) : 0) + KEYBOARD_PANEL_PADDING * 2;
+}
+
+// Where a line of the field starts: centred in the theme that centres it, else at the edge its text starts from -- the
+// right one when the field's text runs right to left.
+int lineLeft(const int fieldLeft, const int maxLineWidth, const int textWidth, const bool centered, const bool rtl) {
+  if (centered) return fieldLeft + (maxLineWidth - textWidth) / 2;
+  return rtl ? fieldLeft + maxLineWidth - textWidth : fieldLeft;
+}
+
+// EntryFieldLine measures a line as the field draws it.
+int measureFieldText(const void* renderer, const char* utf8) {
+  return static_cast<const GfxRenderer*>(renderer)->getTextAdvanceX(UI_12_FONT_ID, utf8, EpdFontFamily::REGULAR);
 }
 
 // The screen area outside the button hints. The hints move with the orientation
@@ -339,15 +355,53 @@ bool KeyboardEntryActivity::clearAllOrAltOnSelected() {
   return false;
 }
 
-std::string KeyboardEntryActivity::displayTextForCurrentState() const {
-  if (inputType != InputType::Password || passwordVisible) {
-    return text;
-  }
+bool KeyboardEntryActivity::masked() const { return inputType == InputType::Password && !passwordVisible; }
 
+size_t KeyboardEntryActivity::revealEnd() const {
   // Only what was just typed (typedEnd): never a character of the value the field opened with. In
   // cursor mode nothing shows here; the block draws the actual char.
-  const bool reveal = !cursorMode && cursorPos == typedEnd;
-  return maskPassword(text, reveal ? cursorPos : std::string::npos);
+  return !cursorMode && cursorPos == typedEnd ? cursorPos : std::string::npos;
+}
+
+bool KeyboardEntryActivity::formsArabic(const std::string& shown) const {
+  return BidiUtils::hasArabic(shown.data(), shown.size()) && renderer.formsArabicUi(UI_12_FONT_ID);
+}
+
+std::string KeyboardEntryActivity::displayTextForCurrentState() const {
+  std::string shown = masked() ? maskPassword(text, revealEnd()) : text;
+  // Formed in logical order before it is wrapped, measured and ordered, as drawText forms the rest of the UI's text.
+  return formsArabic(shown) ? BidiUtils::arabicUiForms(shown) : shown;
+}
+
+size_t KeyboardEntryActivity::displayOffset(const size_t textPos) const {
+  if (!masked()) return formsArabic(text) ? BidiUtils::arabicUiFormsOffset(text, textPos) : textPos;
+  const std::string shown = maskPassword(text, revealEnd());
+  const size_t pos = maskedOffset(text, revealEnd(), textPos);
+  return formsArabic(shown) ? BidiUtils::arabicUiFormsOffset(shown, pos) : pos;
+}
+
+size_t KeyboardEntryActivity::textOffset(const size_t displayPos) const {
+  if (!masked()) return formsArabic(text) ? BidiUtils::arabicUiFormsSource(text, displayPos) : displayPos;
+  const std::string shown = maskPassword(text, revealEnd());
+  const size_t pos = formsArabic(shown) ? BidiUtils::arabicUiFormsSource(shown, displayPos) : displayPos;
+  return unmaskedOffset(text, revealEnd(), pos);
+}
+
+int KeyboardEntryActivity::fieldLevel(const std::string& shown) const {
+  if (inputType == InputType::Password) return 0;
+  return BidiUtils::detectParagraphLevel(shown.c_str(), 0);
+}
+
+bool KeyboardEntryActivity::stepCursor(const bool right) {
+  const bool rtlField = BidiUtils::hasRtlClass(text.data(), text.size()) && fieldLevel(text) == 1;
+  if (right != rtlField) {
+    if (cursorPos >= text.length()) return false;
+    cursorPos = utf8Next(text, cursorPos);
+    return true;
+  }
+  if (cursorPos == 0) return false;
+  cursorPos = utf8Prev(text, cursorPos);
+  return true;
 }
 
 int KeyboardEntryActivity::measureRange(std::string& s, const int start, const int end) const {
@@ -408,6 +462,13 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
   const int maxLineWidth = content.width - 2 * effectiveMargin - toggleReserve;
   const bool centerText = metrics.keyboardCenteredText;
   std::string displayText = displayTextForCurrentState();
+  // Laid out as render() lays it out. Positions on it are the displayed text's; the caller gets the text's.
+  const auto found = [&](const size_t displayPos) {
+    position = textOffset(displayPos);
+    return true;
+  };
+  const bool bidi = BidiUtils::hasRtlClass(displayText.data(), displayText.size());
+  const int level = bidi ? fieldLevel(displayText) : 0;
 
   int lineStartIdx = 0;
   int lineY = inputStartY;
@@ -418,22 +479,30 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
 
   while (true) {
     const int lineEndIdx = lineBreakEnd(displayText, lineStartIdx, maxLineWidth);
-    const int textWidth = measureRange(displayText, lineStartIdx, lineEndIdx);
-    const int lineStartX =
-        content.x + (centerText ? effectiveMargin + (maxLineWidth - textWidth) / 2 : effectiveMargin);
+    const std::string lineText = bidi ? displayText.substr(lineStartIdx, lineEndIdx - lineStartIdx) : std::string();
+    const int textWidth =
+        bidi ? renderer.getTextAdvanceX(UI_12_FONT_ID, BidiUtils::visualUiLine(lineText, level).c_str(),
+                                        EpdFontFamily::REGULAR)
+             : measureRange(displayText, lineStartIdx, lineEndIdx);
+    const int lineStartX = lineLeft(content.x + effectiveMargin, maxLineWidth, textWidth, centerText, level == 1);
     lastLineStartIdx = lineStartIdx;
     lastLineEndIdx = lineEndIdx;
     lastLineStartX = lineStartX;
     lastLineWidth = textWidth;
 
     if (y >= lineY - metrics.verticalSpacing && y < lineY + lineHeight + metrics.verticalSpacing) {
+      if (bidi) {
+        // A tap lands before or after the character drawn under it, whichever half it hit.
+        const auto line = makeUniqueNoThrow<EntryFieldLine>();
+        if (line && line->build(lineText.data(), lineText.size(), level, measureFieldText, &renderer)) {
+          return found(static_cast<size_t>(lineStartIdx) + line->positionAt(x - lineStartX));
+        }
+      }
       if (x <= lineStartX) {
-        position = static_cast<size_t>(lineStartIdx);
-        return true;
+        return found(static_cast<size_t>(lineStartIdx));
       }
       if (x >= lineStartX + textWidth) {
-        position = static_cast<size_t>(lineEndIdx);
-        return true;
+        return found(static_cast<size_t>(lineEndIdx));
       }
 
       int previousWidth = 0;
@@ -442,14 +511,12 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
         const int nextWidth = measureRange(displayText, lineStartIdx, next);
         const int midpoint = lineStartX + previousWidth + (nextWidth - previousWidth) / 2;
         if (x < midpoint) {
-          position = static_cast<size_t>(i);
-          return true;
+          return found(static_cast<size_t>(i));
         }
         previousWidth = nextWidth;
         i = next;
       }
-      position = static_cast<size_t>(lineEndIdx);
-      return true;
+      return found(static_cast<size_t>(lineEndIdx));
     }
 
     if (lineEndIdx == static_cast<int>(displayText.length())) {
@@ -464,8 +531,10 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
   const int fieldLeft = content.x + effectiveMargin;
   if (y >= inputStartY - metrics.verticalSpacing && y < underlineBottom && x >= fieldLeft &&
       x < fieldLeft + maxLineWidth + toggleReserve) {
-    position = static_cast<size_t>(x < lastLineStartX + lastLineWidth ? lastLineStartIdx : lastLineEndIdx);
-    return true;
+    // Short of where the last line ends, its start; past it, the end of the text. A right-to-left line ends on its
+    // left.
+    const bool beforeEnd = level == 1 ? x > lastLineStartX : x < lastLineStartX + lastLineWidth;
+    return found(static_cast<size_t>(beforeEnd ? lastLineStartIdx : lastLineEndIdx));
   }
 
   return false;
@@ -490,8 +559,7 @@ void KeyboardEntryActivity::loop() {
   size_t touchedCursorPos = 0;
   if (mappedInput.wasScreenTapped(tx, ty) && cursorPositionFromPoint(tx, ty, touchedCursorPos)) {
     cursorPos = std::min(touchedCursorPos, text.length());
-    // The masked text field maps taps per byte; snap back to a boundary so
-    // the cursor never lands inside a multi-byte character.
+    // Never inside a multi-byte character, whatever the field mapped the tap to.
     while (cursorPos > 0 && cursorPos < text.length() && (static_cast<uint8_t>(text[cursorPos]) & 0xC0) == 0x80) {
       cursorPos--;
     }
@@ -589,8 +657,7 @@ void KeyboardEntryActivity::loop() {
         cursorPos = savedCursorPos;
         togglePos = false;
         requestUpdate();
-      } else if (cursorPos > 0) {
-        cursorPos = utf8Prev(text, cursorPos);
+      } else if (stepCursor(false)) {
         requestUpdate();
       }
     }
@@ -625,8 +692,7 @@ void KeyboardEntryActivity::loop() {
       rightHeld = false;
       rightLongHandled = false;
     }
-    if (cursorMode && !togglePos && cursorPos < text.length()) {
-      cursorPos = utf8Next(text, cursorPos);
+    if (cursorMode && !togglePos && stepCursor(true)) {
       requestUpdate();
     }
     if (cursorMode) return;
@@ -702,21 +768,37 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   const bool centerText = metrics.keyboardCenteredText;
 
   // The cursor spans a whole code point: a lone byte of it renders as a replacement glyph.
-  // Masking is per byte, so displayText keeps text's length and the same span applies to both.
+  // displayText is the text as shown: a password's stars, a star per character, and Arabic in its
+  // presentation forms where the font has them. displayCursor and displayCharBytes are the cursor
+  // and the character under it there.
   const size_t cursorCharBytes = (cursorPos < text.length()) ? utf8Next(text, cursorPos) - cursorPos : 0;
+  const size_t displayCursor = displayOffset(cursorPos);
+  const size_t displayCharBytes = cursorCharBytes > 0 ? displayOffset(cursorPos + cursorCharBytes) - displayCursor : 0;
   char cursorChar[8] = {};         // the character under the cursor
-  char displayCursorChar[8] = {};  // same span of displayText, masked for passwords
+  char displayCursorChar[8] = {};  // the same character in displayText: a star, an Arabic form
   if (cursorCharBytes > 0) {
-    const size_t n = std::min(cursorCharBytes, sizeof(cursorChar) - 1);
-    memcpy(cursorChar, text.data() + cursorPos, n);
-    memcpy(displayCursorChar, displayText.data() + cursorPos, n);
+    memcpy(cursorChar, text.data() + cursorPos, std::min(cursorCharBytes, sizeof(cursorChar) - 1));
+    memcpy(displayCursorChar, displayText.data() + displayCursor,
+           std::min(displayCharBytes, sizeof(displayCursorChar) - 1));
   }
 
+  // The block shows the character itself: in its form, or in the clear for a password. An Alef a
+  // Lam-Alef took is drawn in the ligature before it and has none of its own.
+  const char* blockChar = masked() ? cursorChar : displayCursorChar;
+  const bool blockHasChar = masked() ? cursorCharBytes > 0 : displayCharBytes > 0;
   int cursorCharWidth = 6;
-  if (cursorCharBytes > 0) {
-    int w = renderer.getTextWidth(UI_12_FONT_ID, cursorChar);
+  if (blockHasChar) {
+    int w = renderer.getTextWidth(UI_12_FONT_ID, blockChar);
     if (w > cursorCharWidth) cursorCharWidth = w;
   }
+
+  // Text with a right-to-left character in it is kept in the order it was typed and drawn in visual order, each line at
+  // the field's direction; the cursor is placed through its line's order (EntryFieldLine). Other text is laid out left
+  // to right, as it always was.
+  const bool bidi = BidiUtils::hasRtlClass(displayText.data(), displayText.size());
+  const int level = bidi ? fieldLevel(displayText) : 0;
+  // The cursor's line, ordered: about 2.8 KB while this render runs, and only for such text.
+  std::unique_ptr<EntryFieldLine> cursorLine;
 
   int lineStartIdx = 0;
   int textWidth = 0;
@@ -727,22 +809,48 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   while (true) {
     const int lineEndIdx = lineBreakEnd(displayText, lineStartIdx, maxLineWidth);
     const std::string lineText = displayText.substr(lineStartIdx, lineEndIdx - lineStartIdx);
-    textWidth = renderer.getTextAdvanceX(UI_12_FONT_ID, lineText.c_str(), EpdFontFamily::REGULAR);
-    const int lineStartX =
-        content.x + (centerText ? effectiveMargin + (maxLineWidth - textWidth) / 2 : effectiveMargin);
+    const std::string drawnLine = bidi ? BidiUtils::visualUiLine(lineText, level) : std::string();
+    textWidth = renderer.getTextAdvanceX(UI_12_FONT_ID, (bidi ? drawnLine : lineText).c_str(), EpdFontFamily::REGULAR);
+    const int lineStartX = lineLeft(content.x + effectiveMargin, maxLineWidth, textWidth, centerText, level == 1);
     const bool isLastLine = (lineEndIdx == static_cast<int>(displayText.length()));
     bool isCursorLine = false;
-    if (!cursorDrawn && cursorPos >= static_cast<size_t>(lineStartIdx) &&
-        (isLastLine ? cursorPos <= static_cast<size_t>(lineEndIdx) : cursorPos < static_cast<size_t>(lineEndIdx))) {
+    if (!cursorDrawn && displayCursor >= static_cast<size_t>(lineStartIdx) &&
+        (isLastLine ? displayCursor <= static_cast<size_t>(lineEndIdx)
+                    : displayCursor < static_cast<size_t>(lineEndIdx))) {
+      cursorLineY = inputStartY + inputHeight;
+      cursorDrawn = true;
+      isCursorLine = true;
+      if (bidi) {
+        cursorLine = makeUniqueNoThrow<EntryFieldLine>();
+        if (!cursorLine) LOG_ERR("KBD", "No memory to order the cursor's line");
+      }
+    }
+    if (isCursorLine && cursorLine &&
+        cursorLine->build(lineText.data(), lineText.size(), level, measureFieldText, &renderer)) {
+      // The caret goes with the character before it; the block covers the one after it, wherever that is drawn.
+      const size_t pos = displayCursor - lineStartIdx;
+      bool caretRtl = false;
+      const int caretX = lineStartX + cursorLine->caretX(pos, &caretRtl);
+      if (!cursorMode) {
+        cursorPixelX = caretX;
+      } else if (displayCharBytes > 0) {
+        int charX = 0;
+        int charAdvance = 0;
+        cursorLine->charSpan(pos, charX, charAdvance);
+        cursorPixelX = lineStartX + charX;
+      } else {
+        cursorPixelX = caretRtl ? caretX - cursorCharWidth : caretX;
+      }
+    } else if (isCursorLine) {
       std::string beforeCursor;
       if (isPassword && !passwordVisible && cursorMode) {
-        beforeCursor = std::string(cursorPos - lineStartIdx, '*');
+        beforeCursor = std::string(displayCursor - lineStartIdx, '*');
       } else {
-        beforeCursor = displayText.substr(lineStartIdx, cursorPos - lineStartIdx);
+        beforeCursor = displayText.substr(lineStartIdx, displayCursor - lineStartIdx);
       }
       const int beforeWidth = renderer.getTextAdvanceX(UI_12_FONT_ID, beforeCursor.c_str(), EpdFontFamily::REGULAR);
       int kernOffset = 0;
-      if (cursorCharBytes > 0) {
+      if (displayCharBytes > 0) {
         const std::string beforeAndCursor = beforeCursor + displayCursorChar;
         const int throughCursorWidth =
             renderer.getTextAdvanceX(UI_12_FONT_ID, beforeAndCursor.c_str(), EpdFontFamily::REGULAR);
@@ -750,25 +858,25 @@ void KeyboardEntryActivity::render(RenderLock&&) {
         kernOffset = throughCursorWidth - beforeWidth - charAdvance;
       }
       cursorPixelX = lineStartX + beforeWidth + kernOffset;
-      cursorLineY = inputStartY + inputHeight;
-      cursorDrawn = true;
-      isCursorLine = true;
     }
 
     if (isCursorLine && cursorMode && isPassword && !passwordVisible && !togglePos) {
       // Draw text in 3 parts to avoid block cursor overflowing onto next char.
       // displayText uses '*' for all chars; actual char may be wider than '*'.
       // Part 1: chars before cursor position
-      const std::string part1 = displayText.substr(lineStartIdx, cursorPos - lineStartIdx);
+      const std::string part1 = displayText.substr(lineStartIdx, displayCursor - lineStartIdx);
       renderer.drawText(UI_12_FONT_ID, lineStartX, inputStartY + inputHeight, part1.c_str());
       // Part 2: skip cursor slot (block + actual char drawn later)
       // Part 3: chars after cursor position (skip char under cursor), starting at cursorPixelX + cursorCharWidth
-      const int afterStart = static_cast<int>(cursorPos + cursorCharBytes);
+      const int afterStart = static_cast<int>(displayCursor + displayCharBytes);
       const int afterEnd = lineEndIdx;
       if (afterStart < afterEnd) {
         const std::string part3 = displayText.substr(afterStart, afterEnd - afterStart);
         renderer.drawText(UI_12_FONT_ID, cursorPixelX + cursorCharWidth, inputStartY + inputHeight, part3.c_str());
       }
+    } else if (bidi) {
+      // Through the UI text path's own ordering, at the field's direction rather than the line's.
+      renderer.drawFormedText(UI_12_FONT_ID, lineStartX, inputStartY + inputHeight, drawnLine.c_str());
     } else {
       renderer.drawText(UI_12_FONT_ID, lineStartX, inputStartY + inputHeight, lineText.c_str());
     }
@@ -779,18 +887,19 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     inputHeight += lineHeight;
     lineStartIdx = lineEndIdx;
   }
+  cursorLine.reset();
 
   const int fieldWidth = (inputHeight > 0) ? maxLineWidth : textWidth;
   GUI.drawTextField(renderer, Rect{content.x, inputStartY, content.width, inputHeight}, fieldWidth, cursorMode,
                     effectiveMargin, content.width - 2 * effectiveMargin);
 
-  if (cursorMode && !togglePos && cursorPos <= displayText.length()) {
+  if (cursorMode && !togglePos && displayCursor <= displayText.length()) {
     static constexpr int blockPadding = 1;
     renderer.fillRect(cursorPixelX - blockPadding, cursorLineY, cursorCharWidth + blockPadding * 2, lineHeight, true);
-    if (cursorCharBytes > 0) {
-      renderer.drawText(UI_12_FONT_ID, cursorPixelX, cursorLineY, cursorChar, false);
+    if (blockHasChar) {
+      renderer.drawText(UI_12_FONT_ID, cursorPixelX, cursorLineY, blockChar, false);
     }
-  } else if (cursorPos <= displayText.length()) {
+  } else if (displayCursor <= displayText.length()) {
     static constexpr int serifW = 3;
     const int cX = cursorPixelX;
     const int cY = cursorLineY;

@@ -493,6 +493,9 @@ int do_shape(bidi_char* line, bidi_char* to, int count) {
 ucschar shape_logical(ucschar prev, ucschar c, ucschar next, int* absorbs_next) {
   *absorbs_next = 0;
   const uchar type = stype(c);
+  /* A letter that joins neither side (Hamza) still has an isolated form: the one glyph the UI pack holds for it.
+   * do_shape leaves such a letter as it is. Anything without a form comes back unchanged. */
+  if (type == SU) return shape_form(c, SHAPE_ISOLATED);
   if (type != SR && type != SD) return c;
   const uchar before = prev ? stype(prev) : SU;
   const uchar after = next ? stype(next) : SU;

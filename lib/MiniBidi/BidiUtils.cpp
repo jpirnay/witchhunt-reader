@@ -245,24 +245,30 @@ bool hasArabic(const char* utf8, const size_t len) {
   return false;
 }
 
+namespace {
+
 // witchhunt: deviation 14
-std::string arabicUiForms(const std::string& logical) {
-  if (!hasArabic(logical.data(), logical.size())) return logical;
-  std::string out;
-  out.reserve(logical.size() + 8);  // a form takes 3 bytes where its letter takes 2
-  const auto* p = reinterpret_cast<const unsigned char*>(logical.c_str());
+// The walk arabicUiForms() makes: `emit(ctx, start, formed)` for each character of `logical` in order, `start` its
+// first byte and `formed` what the formed string has for it, 0 for the Alef a Lam-Alef took. `emit` returns false to
+// stop. A function pointer rather than a template: one copy of the walk serves the forms and both offsets.
+using FormEmit = bool (*)(void* ctx, size_t start, uint32_t formed);
+void walkArabicUiForms(const std::string& logical, const FormEmit emit, void* const ctx) {
+  const auto* const begin = reinterpret_cast<const unsigned char*>(logical.c_str());
+  const auto* p = begin;
   uint32_t prev = 0;                        // the last character that is not a mark, as written in the text
   const unsigned char* absorbed = nullptr;  // the Alef a Lam-Alef took: dropped where it stands
   while (*p) {
     const unsigned char* const at = p;
+    const auto start = static_cast<size_t>(at - begin);
     const uint32_t cp = utf8NextCodepoint(&p);
     if (!cp) break;
     if (bidi_class(cp) == NSM) {
-      utf8AppendCodepoint(cp, out);
+      if (!emit(ctx, start, cp)) return;
       continue;
     }
     if (at == absorbed) {
       prev = cp;
+      if (!emit(ctx, start, 0)) return;
       continue;
     }
     // The next character that is not a mark.
@@ -286,10 +292,71 @@ std::string arabicUiForms(const std::string& logical) {
       }
       absorbed = q;
     }
-    utf8AppendCodepoint(formed, out);
+    if (!emit(ctx, start, formed)) return;
     prev = cp;
   }
+}
+
+size_t utf8Bytes(const uint32_t cp) { return cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4; }
+
+}  // namespace
+
+// witchhunt: deviation 14
+std::string arabicUiForms(const std::string& logical) {
+  if (!hasArabic(logical.data(), logical.size())) return logical;
+  std::string out;
+  out.reserve(logical.size() + 8);  // a form takes 3 bytes where its letter takes 2
+  walkArabicUiForms(
+      logical,
+      [](void* ctx, size_t, const uint32_t formed) {
+        if (formed) utf8AppendCodepoint(formed, *static_cast<std::string*>(ctx));
+        return true;
+      },
+      &out);
   return out;
+}
+
+// witchhunt: deviation 14
+size_t arabicUiFormsOffset(const std::string& logical, const size_t pos) {
+  if (!hasArabic(logical.data(), logical.size())) return pos;
+  struct Walk {
+    size_t pos;
+    size_t formedPos;
+  } walk{pos, 0};
+  walkArabicUiForms(
+      logical,
+      [](void* ctx, const size_t start, const uint32_t formed) {
+        auto& w = *static_cast<Walk*>(ctx);
+        if (start >= w.pos) return false;
+        if (formed) w.formedPos += utf8Bytes(formed);
+        return true;
+      },
+      &walk);
+  return walk.formedPos;
+}
+
+// witchhunt: deviation 14
+size_t arabicUiFormsSource(const std::string& logical, const size_t formedPos) {
+  if (!hasArabic(logical.data(), logical.size())) return formedPos;
+  struct Walk {
+    size_t formedPos;
+    size_t formedAt;
+    size_t at;
+  } walk{formedPos, 0, logical.size()};
+  walkArabicUiForms(
+      logical,
+      [](void* ctx, const size_t start, const uint32_t formed) {
+        auto& w = *static_cast<Walk*>(ctx);
+        // An absorbed Alef is drawn in the Lam's ligature, so a position after the ligature is after it.
+        if (formed && w.formedAt >= w.formedPos) {
+          w.at = start;
+          return false;
+        }
+        if (formed) w.formedAt += utf8Bytes(formed);
+        return true;
+      },
+      &walk);
+  return walk.at;
 }
 
 // witchhunt: deviation 1 - release the workspace when a section build ends; getWorkspace() reallocates on demand.
@@ -323,17 +390,29 @@ int plainClass(const uint32_t cp) {
   }
 }
 
-std::string visualUiLine(const std::string& logical) {
-  if (!hasRtlClass(logical.data(), logical.size())) return logical;
+std::string visualUiLine(const std::string& logical, const int paragraphLevel) {
+  // At its own direction or left to right, a line with nothing right to left in it is drawn as it is. Set right to
+  // left, it is not: a full stop ending it stands on its left.
+  if (paragraphLevel != 1 && !hasRtlClass(logical.data(), logical.size())) return logical;
   const bool held = heapWorkspaceHeld();
   std::string out;
-  const bool formed = applyBidiVisual(logical.c_str(), out, -1);
+  const bool formed = applyBidiVisual(logical.c_str(), out, paragraphLevel < 0 ? -1 : (paragraphLevel & 1));
   if (!held) {
     // Only the heap workspace this call made: a bound one stays bound, and one a build made stays for it.
     const std::lock_guard<std::mutex> lock(bidiMutex);
     bidiWorkspace.reset();
   }
   return formed ? out : logical;
+}
+
+bool orderUiLine(const uint32_t* cps, const size_t count, const int paragraphLevel, uint16_t* visual, uint32_t* drawn) {
+  const bool held = heapWorkspaceHeld();
+  const bool ordered = orderLine(cps, count, paragraphLevel, visual, drawn);
+  if (!held) {
+    const std::lock_guard<std::mutex> lock(bidiMutex);
+    bidiWorkspace.reset();
+  }
+  return ordered;
 }
 
 bool workspaceAvailable() {

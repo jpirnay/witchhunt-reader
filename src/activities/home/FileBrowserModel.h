@@ -100,7 +100,8 @@ class FileBrowserModel {
   // Display index of `name` (canonical form), or entryCount() when it is not present.
   size_t findEntry(const std::string& name);
 
-  // Narrow the rows to those whose name contains `query`, case-insensitively. "" clears it.
+  // Narrow the rows to those whose name contains `query`, in either case and, in Greek, with or
+  // without its accents (utf8SearchFold). "" clears it.
   //
   // A filter belongs here rather than in the screen because this class already answers "what is
   // in this directory, in what order", and because doing it here means both backends get it: the

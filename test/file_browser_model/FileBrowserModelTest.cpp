@@ -325,6 +325,52 @@ TEST_F(FileBrowserModelTest, WithoutTheIndexAHeapBelowTheFloorListsNothing) {
   EXPECT_EQ(model.entryCount(), 0u);
 }
 
+// The filter matches either case in Greek and Cyrillic as in Latin, and a Greek query need not
+// carry the name's accents.
+TEST_F(FileBrowserModelTest, TheFilterIgnoresCaseInEveryScript) {
+  file("Οδύσσεια.epub");
+  file("ΙΛΙΑΔΑ.epub");
+  file("Война и мир.epub");
+  file("ПРЕСТУПЛЕНИЕ И НАКАЗАНИЕ.epub");
+  file("The Hobbit.epub");
+  FileBrowserModel model;
+  model.setPath(root);
+  model.load();
+  ASSERT_EQ(model.entryCount(), 5u);
+
+  const auto found = [&model](const std::string& query) {
+    model.setFilter(query);
+    std::vector<std::string> names;
+    for (size_t i = 0; i < model.entryCount(); ++i) names.push_back(model.entryName(i));
+    return names;
+  };
+  EXPECT_EQ(found("ΟΔΥΣΣ"), std::vector<std::string>{"Οδύσσεια.epub"});
+  EXPECT_EQ(found("οδυσσεια"), std::vector<std::string>{"Οδύσσεια.epub"});  // no tonos typed
+  EXPECT_EQ(found("ιλιάδα"), std::vector<std::string>{"ΙΛΙΑΔΑ.epub"});
+  EXPECT_EQ(found("ВОЙНА"), std::vector<std::string>{"Война и мир.epub"});
+  EXPECT_EQ(found("наказание"), std::vector<std::string>{"ПРЕСТУПЛЕНИЕ И НАКАЗАНИЕ.epub"});
+  // ASCII as it always was.
+  EXPECT_EQ(found("HOBBIT"), std::vector<std::string>{"The Hobbit.epub"});
+  EXPECT_EQ(found("hob"), std::vector<std::string>{"The Hobbit.epub"});
+  EXPECT_TRUE(found("hobbits").empty());
+}
+
+TEST_F(FileBrowserModelTest, SearchingEverywhereIgnoresCaseInEveryScript) {
+  file("Ομηρος/Οδύσσεια.epub");
+  file("Толстой/ВОЙНА И МИР.epub");
+  file("other.epub");
+  FileBrowserModel model;
+  model.setPath(root);
+
+  model.searchEverywhere("ΟΔΥΣΣΕΙΑ");
+  ASSERT_EQ(model.entryCount(), 1u);
+  EXPECT_EQ(model.entryName(0), "Ομηρος/Οδύσσεια.epub");
+
+  model.searchEverywhere("война");
+  ASSERT_EQ(model.entryCount(), 1u);
+  EXPECT_EQ(model.entryName(0), "Толстой/ВОЙНА И МИР.epub");
+}
+
 TEST_F(FileBrowserModelTest, SearchingEverywhereFindsBooksInFoldersBelow) {
   file("match one.epub");
   file("A/match two.epub");

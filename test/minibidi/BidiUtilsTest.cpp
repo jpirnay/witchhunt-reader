@@ -349,3 +349,42 @@ TEST(BidiUtils, AUiLineIsDrawnInVisualOrderAtItsOwnDirection) {
   const std::string mixed = "Harry " + encode({0x05E9, 0x05DC, 0x05D5, 0x05DD});
   EXPECT_EQ(BidiUtils::visualUiLine(mixed), "Harry " + encode({0x05DD, 0x05D5, 0x05DC, 0x05E9}));
 }
+
+// A wrapped paragraph's lines take the paragraph's direction: a line of Latin after a Hebrew first line keeps the
+// right-to-left order its words had in the paragraph.
+TEST(BidiUtils, AUiLineTakesTheDirectionItIsGiven) {
+  BidiUtils::releaseWorkspace();
+  const std::string line = "abc " + encode({0x05E9, 0x05DC});
+  EXPECT_EQ(BidiUtils::visualUiLine(line), "abc " + encode({0x05DC, 0x05E9}));
+  EXPECT_EQ(BidiUtils::visualUiLine(line, 1), encode({0x05DC, 0x05E9}) + " abc");
+  EXPECT_EQ(BidiUtils::visualUiLine(line, 0), "abc " + encode({0x05DC, 0x05E9}));
+  EXPECT_FALSE(BidiUtils::heapWorkspaceHeld());
+  // A line with nothing right to left is left as it is at its own direction or left to right; set right to left, the
+  // full stop that ends it stands on its left, as on the line of a right-to-left paragraph.
+  EXPECT_EQ(BidiUtils::visualUiLine("abc def."), "abc def.");
+  EXPECT_EQ(BidiUtils::visualUiLine("abc def.", 0), "abc def.");
+  EXPECT_EQ(BidiUtils::visualUiLine("abc def.", 1), ".abc def");
+  EXPECT_FALSE(BidiUtils::heapWorkspaceHeld());
+}
+
+// orderUiLine is orderLine, and like visualUiLine it leaves no heap workspace behind it.
+TEST(BidiUtils, OrderUiLineLeavesNoWorkspace) {
+  BidiUtils::releaseWorkspace();
+  const uint32_t cps[] = {'a', ' ', 0x05E9, 0x05DC};
+  uint16_t visual[4] = {};
+  uint32_t drawn[4] = {};
+  ASSERT_TRUE(BidiUtils::orderUiLine(cps, 4, 0, visual, drawn));
+  EXPECT_EQ(visual[0], 0);
+  EXPECT_EQ(visual[1], 1);
+  EXPECT_EQ(visual[2], 3);
+  EXPECT_EQ(visual[3], 2);
+  EXPECT_EQ(drawn[2], 0x05DCu);
+  EXPECT_FALSE(BidiUtils::heapWorkspaceHeld());
+
+  // One a section build made stays for it.
+  ASSERT_TRUE(BidiUtils::orderLine(cps, 4, 1, visual, drawn));
+  ASSERT_TRUE(BidiUtils::heapWorkspaceHeld());
+  ASSERT_TRUE(BidiUtils::orderUiLine(cps, 4, 1, visual, drawn));
+  EXPECT_TRUE(BidiUtils::heapWorkspaceHeld());
+  BidiUtils::releaseWorkspace();
+}

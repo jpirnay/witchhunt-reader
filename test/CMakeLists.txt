@@ -196,6 +196,7 @@ add_subdirectory(double_action_wait)
 add_subdirectory(inline_list_function_ref)
 add_subdirectory(keyboard_layouts)
 add_subdirectory(password_mask)
+add_subdirectory(entry_field_line)
 add_subdirectory(link_marker_match)
 add_subdirectory(differential_rounding)
 add_subdirectory(hyphenation_eval)
@@ -298,6 +299,7 @@ add_subdirectory(glyph_fallback)
 add_subdirectory(glyph_provider)
 add_subdirectory(fallback_face_provider)  # after font_group_stream: links its uzlib_font_ring
 add_subdirectory(ui_script_pack)  # likewise
+add_subdirectory(keyboard_labels)  # likewise
 add_subdirectory(cjk_ui_pack)  # likewise
 add_subdirectory(ui_face_scripts)
 add_subdirectory(ui_font_compression)  # likewise

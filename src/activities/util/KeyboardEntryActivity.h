@@ -60,8 +60,8 @@ class KeyboardEntryActivity : public Activity {
 
   // Which layer is showing. loop() changes these; render() reads them.
   freeink::ui::KeyboardLayoutId layoutId = freeink::ui::KeyboardLayoutId::QwertyEn;
-  // Puts the language key in the Latin layers' bottom row; the Cyrillic ones
-  // always carry it. Resolved once in onEnter(): the set cannot change while a
+  // Puts the language key in the Latin layers' bottom row; the other scripts'
+  // layers always carry it. Resolved once in onEnter(): the set cannot change while a
   // keyboard is on screen.
   bool showLangKey = false;
   bool shifted = false;
@@ -141,7 +141,23 @@ class KeyboardEntryActivity : public Activity {
   static size_t utf8Next(const std::string& s, size_t pos);
 
   bool cursorPositionFromPoint(int x, int y, size_t& position) const;
+  // A password field not shown in the clear: a star per character (maskPassword).
+  bool masked() const;
+  // Where the character a masked field shows ends (just typed), or npos.
+  size_t revealEnd() const;
+  // Whether `shown` has Arabic that UI_12 draws in its presentation forms (GfxRenderer::formsArabicUi).
+  bool formsArabic(const std::string& shown) const;
+  // The text as the field shows it: masked, and its Arabic formed (BidiUtils::arabicUiForms).
   std::string displayTextForCurrentState() const;
+  // A byte position in `text` carried to the displayed text, and back: the same unless masked or formed.
+  size_t displayOffset(size_t textPos) const;
+  size_t textOffset(size_t displayPos) const;
+  // The field's direction, for text with a right-to-left character in it: 1 when its first letter runs right to left,
+  // as the UI text path decides a title's. A password stays left to right: what it shows is stars.
+  int fieldLevel(const std::string& shown) const;
+  // Cursor mode's Left (false) or Right (true): a step the way the field's text runs, so Left goes on to the next
+  // character in a right-to-left field. False at the end it was going to.
+  bool stepCursor(bool right);
   // Advance of s[start, end), measured in place by temporarily NUL-terminating
   // at `end` -- no substr temporary per measurement.
   int measureRange(std::string& s, int start, int end) const;

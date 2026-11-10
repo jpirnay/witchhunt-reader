@@ -1405,6 +1405,11 @@ static const char* arabicUiForms(const EpdFontFamily& family, const char* text, 
   return holder.c_str();
 }
 
+bool GfxRenderer::formsArabicUi(const int fontId, const EpdFontFamily::Style style) const {
+  const EpdFontFamily* const family = findFontFamily(fontId);
+  return family && family->formsArabic(style);
+}
+
 int GfxRenderer::rawTextWidth(const int fontId, const char* text, const EpdFontFamily::Style style) const {
   const EpdFontFamily* const family = findFontFamily(fontId);
   if (!family) {

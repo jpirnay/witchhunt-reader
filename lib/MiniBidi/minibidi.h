@@ -148,7 +148,8 @@ int do_shape(bidi_char* line, bidi_char* to, int count);
  *   and `next` are the logically adjacent characters that are not marks
  *   (NSM), 0 at either end.  A Lam whose `next` is an Alef variant returns
  *   the Lam-Alef ligature and sets *absorbs_next: the caller drops that Alef.
- *   Any other character comes back unchanged.
+ *   A letter that joins neither side (Hamza) comes back as its isolated form,
+ *   which do_shape() leaves alone.  Any other character comes back unchanged.
  */
 ucschar shape_logical(ucschar prev, ucschar c, ucschar next, int* absorbs_next);
 

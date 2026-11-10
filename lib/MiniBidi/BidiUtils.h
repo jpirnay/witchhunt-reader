@@ -43,6 +43,17 @@ bool hasArabic(const char* utf8, size_t len);
 // so what is fitted is what is drawn. Idempotent: a formed string has no letter left to form.
 std::string arabicUiForms(const std::string& logical);
 
+// witchhunt: deviation 14
+// Where byte `pos` of `logical`, a character boundary, falls in arabicUiForms(logical): for a caller that keeps a
+// position in the text (the keyboard's cursor) and lays out the formed string. Inside a Lam-Alef, between the Lam and
+// the Alef, is after the ligature.
+size_t arabicUiFormsOffset(const std::string& logical, size_t pos);
+
+// witchhunt: deviation 14
+// The reverse: the byte of `logical` where the character drawn at `formedPos` of the formed string starts; after the
+// Alef for a position after a Lam-Alef, and the next character for one inside a form.
+size_t arabicUiFormsSource(const std::string& logical, size_t formedPos);
+
 // witchhunt: deviation 1 - frees the shared workspace; the next call allocates it again. Also unbinds a lent buffer.
 void releaseWorkspace();
 
@@ -91,7 +102,15 @@ int plainClass(uint32_t cp);
 // as applyBidiVisual detects it); any other comes back as it is, after one byte scan. A line is fitted first (truncated
 // or wrapped in logical order) and made visual last, so an ellipsis lands where the title ends. A heap workspace this
 // call had to make is freed again, so a screen of titles holds no 1.5 KB block after it is drawn.
-std::string visualUiLine(const std::string& logical);
+//
+// paragraphLevel 0 or 1 sets the direction instead: a wrapped paragraph's lines all take the paragraph's, which its
+// first line shows (the keyboard's entry field). At 1 a line is ordered even with nothing right to left in it, since
+// the punctuation that ends it then stands on its left.
+std::string visualUiLine(const std::string& logical, int paragraphLevel = -1);
+
+// witchhunt: orderLine for UI text, freeing a heap workspace this call had to make, as visualUiLine does: the order the
+// characters of a line visualUiLine draws stand in, for a caller that places a caret in it.
+bool orderUiLine(const uint32_t* cps, size_t count, int paragraphLevel, uint16_t* visual, uint32_t* drawn);
 
 // witchhunt: whether orderLine would have a workspace now: the bound one, or the heap one, made here if it can be.
 // A caller with a short path that needs none asks first, so that it takes the same path as the full one would

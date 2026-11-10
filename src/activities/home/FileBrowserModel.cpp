@@ -10,6 +10,7 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <ProtectedPaths.h>
+#include <Utf8.h>
 
 #include <algorithm>
 #include <cctype>
@@ -527,17 +528,18 @@ void FileBrowserModel::rebuildMatches() {
     matches.shrink_to_fit();  // an unfiltered browser should not keep the capacity around
     return;
   }
-  // ASCII-folded substring match. Deliberately not a full Unicode fold: filenames on these cards
-  // are overwhelmingly ASCII, and a UTF-8 case table costs more flash than the feature does.
+  // Substring match on search keys (utf8SearchFold): either case, in Latin, Greek and Cyrillic
+  // alike, and a Greek name's accents not needed in the query. The lowercase mapping is the one the
+  // hyphenators and the dictionary already use, so it costs no table of its own.
   std::string needle = filterQuery;
-  for (char& c : needle) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+  utf8SearchFold(needle);
 
   const size_t total = unfilteredEntryCount();
   for (size_t i = 0; i < total && matches.size() < MAX_MATCHES; i++) {
     std::string name = backendEntryName(i);
     if (name.empty()) continue;
     if (name.back() == '/') name.pop_back();  // match on the name, not the marker
-    for (char& c : name) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    utf8SearchFold(name);
     if (name.find(needle) != std::string::npos) matches.push_back(static_cast<uint32_t>(i));
   }
 }
@@ -582,7 +584,7 @@ void FileBrowserModel::searchEverywhere(const std::string& query) {
   if (query.empty()) return;
 
   std::string needle = query;
-  for (char& c : needle) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+  utf8SearchFold(needle);  // as rebuildMatches() matches
 
   deepRoot = basepath;
   deepSearch = true;
@@ -642,7 +644,7 @@ void FileBrowserModel::searchEverywhere(const std::string& query) {
     }
     if (!acceptEntry(name, false)) continue;
     std::string folded = name;
-    for (char& c : folded) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    utf8SearchFold(folded);
     if (folded.find(needle) == std::string::npos) continue;
     // Stored relative to the root, so the row shows which folder it came from.
     deepResults.push_back(child.substr(deepRoot.size() + (deepRoot.back() == '/' ? 0 : 1)));
