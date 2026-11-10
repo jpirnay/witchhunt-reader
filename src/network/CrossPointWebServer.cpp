@@ -2297,7 +2297,7 @@ bool fetchRemoteFontManifest(HttpDownloader::Session& session, FontInstaller& in
 
   for (size_t i = 0; i < outFamilies.count(); i++) {
     // On the card, listed or not: a family too large for the glyph store is installed, and is not offered again. A
-    // hyphenation pack is on the card when its file is in /.crosspoint/hyphenation/.
+    // hyphenation pack is on the card when the reader finds its file, in our folder or CrossInk's.
     outFamilies.setInstalled(i, installer.isOnCard(outFamilies, i));
     outFamilies.setHasUpdate(i, outFamilies.installed(i) && FontInstaller::hasUpdate(outFamilies, i));
   }

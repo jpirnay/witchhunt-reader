@@ -49,6 +49,7 @@
 #include <memory>
 #include <optional>
 
+#include "BookPackOffer.h"
 #include "BookRelocation.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -960,6 +961,9 @@ void EpubReaderActivity::onExit() {
   epub.reset();
   currentPageFootnotes.clear();
   currentPageFootnotes.shrink_to_fit();
+  // The book's hyphenation trie: every build has stopped and the section and book are gone, so nothing lays out its
+  // text from here on. On the X3 and X4 its MMU pages go back to the font cache (HyphenationPacks::bookClosed()).
+  HyphenationPacks::bookClosed();
 
   // The glyph caches go back before the stats flush below, which wants the heap, and so Home and
   // Settings do not run 7-12 KB short after every book. The next onEnter takes them again, still
@@ -978,26 +982,18 @@ void EpubReaderActivity::onExit() {
 }
 
 void EpubReaderActivity::offerBookPacks() {
-  const BookPackOffer::Offer offer = pendingBookOffer_;
+  const PackOffer::Offer offer = pendingBookOffer_;
   pendingBookOffer_ = {};
-  auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, BookPackOffer::question(offer));
-  if (!confirmation) {
-    LOG_ERR("ERS", "OOM: book pack offer (%zu bytes)", sizeof(ConfirmationActivity));
-    requestUpdate();
-    return;
+  // Yes opens the Font Manager in the reader's place, and leaving it restarts into this book, drawn in the font and
+  // hyphenated by the pack. Without it, the book's first page, after a full-screen prompt.
+  const auto drawBook = [](Activity& host) {
+    auto& reader = static_cast<EpubReaderActivity&>(host);
+    ReaderUtils::enforceExitFullRefresh(reader.renderer);
+    reader.requestUpdate();
+  };
+  if (!PackOffer::ask(*this, renderer, mappedInput, offer, FontDownloadActivity::ReturnTo::Book, drawBook)) {
+    requestUpdate();  // no prompt was drawn
   }
-  startActivityForResult(std::move(confirmation), [this, offer](const ActivityResult& res) {
-    if (res.isCancelled) {
-      BookPackOffer::decline(offer);
-      // The book's first page, after a full-screen prompt.
-      ReaderUtils::enforceExitFullRefresh(renderer);
-      requestUpdate();
-      return;
-    }
-    // In the reader's place: the download's TLS session needs the heap the reader holds. Leaving the Font Manager
-    // restarts into this book, drawn in the font and hyphenated by the pack.
-    activityManager.replaceActivity(BookPackOffer::download(renderer, mappedInput, offer));
-  });
 }
 
 void EpubReaderActivity::loop() {
@@ -1492,7 +1488,7 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.viewportWidth = layout.viewportWidth;
   p.viewportHeight = layout.viewportHeight;
   p.hyphenationEnabled = getEffectiveHyphenation();
-  if (epub) p.hyphenationLayoutKey = Hyphenator::layoutKey(epub->getLanguage());
+  if (epub) p.hyphenationLayoutKey = Hyphenator::layoutKey(epub->getLanguage(), p.hyphenationEnabled);
   p.widowOrphanControl = SETTINGS.widowOrphanControl != 0;
   p.fontSizeNormalization = getEffectiveFontSizeNormalization();
   p.embeddedStyle = lastRenderStats.embeddedStyle;
@@ -7638,7 +7634,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   p.viewportWidth = viewportWidth;
   p.viewportHeight = viewportHeight;
   p.hyphenationEnabled = effectiveHyphenation;
-  p.hyphenationLayoutKey = Hyphenator::layoutKey(epub->getLanguage());
+  p.hyphenationLayoutKey = Hyphenator::layoutKey(epub->getLanguage(), p.hyphenationEnabled);
   p.widowOrphanControl = SETTINGS.widowOrphanControl != 0;
   p.fontSizeNormalization = effectiveFontSizeNormalization;
   p.embeddedStyle = effectiveEmbeddedStyle;

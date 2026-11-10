@@ -701,7 +701,7 @@ TEST(TtfCff, SubroutineIndexesMustBePlain) {
 namespace {
 
 // A font file on a card that counts the bytes it is asked for, read as discovery reads it: through an SdRange over the
-// whole file with no tables in place (FileParse's way), so every read but those the page cache answers is counted.
+// whole file with no tables in place (CardFile's way), so every read but those the page cache answers is counted.
 struct CountingCard {
   explicit CountingCard(const std::vector<uint8_t>& font) : bytes(font) {}
   const std::vector<uint8_t>& bytes;

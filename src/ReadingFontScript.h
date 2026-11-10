@@ -3,9 +3,9 @@
 #include <cstring>
 #include <string>
 
-// The script a book's reading font is offered and declined by (BookPackOffer): the family without its Noto stem,
-// "Devanagari" of NotoSerifDevanagari, "JP" of NotoSansJP, "Arabic" of NotoNaskhArabic. Both styles of a script are
-// one offer: no to one is no to the other.
+// The script a book's reading font is offered and declined by (BookPackOffer, PackOffer): the family without its Noto
+// stem, "Devanagari" of NotoSerifDevanagari, "JP" of NotoSansJP, "Arabic" of NotoNaskhArabic. Both styles of a script
+// are one offer: no to one is no to the other.
 namespace ReadingFontScript {
 
 inline std::string of(const char* family) {

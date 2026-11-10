@@ -35,7 +35,6 @@
 #include "TouchUi.h"
 #include "UiLanguagePacks.h"
 #include "activities/reader/ReaderActivity.h"
-#include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/TapTargets.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
@@ -617,23 +616,13 @@ void HomeActivity::freeCoverBuffer() {
 }
 
 bool HomeActivity::offerLanguagePack() {
-  const UiLanguagePacks::Offer offer = UiLanguagePacks::takeHomeOffer();
+  const PackOffer::Offer offer = UiLanguagePacks::takeHomeOffer();
   if (!offer) return false;
-  startActivityForResult(
-      std::make_unique<ConfirmationActivity>(renderer, mappedInput, UiLanguagePacks::question(offer)),
-      [this, offer](const ActivityResult& result) {
-        if (result.isCancelled) {
-          UiLanguagePacks::decline(offer);
-          // A fresh Home, not this one: opening the question took back the framebuffer this visit had lent to the
-          // carousel's frame cache (startActivityForResult), and the next carousel render here would build that
-          // 49 KB frame on the heap instead, leaving Home ~20 KB free (X3). A new Home lends it again.
-          activityManager.goHome();
-          return;
-        }
-        // In Home's place, not over it: the download's TLS session needs the heap Home holds.
-        activityManager.replaceActivity(UiLanguagePacks::download(renderer, mappedInput, offer, /*toSettings=*/false));
-      });
-  return true;
+  // Without the Font Manager, a fresh Home, not this one: opening the question took back the framebuffer this visit
+  // had lent to the carousel's frame cache (startActivityForResult), and the next carousel render here would build
+  // that 49 KB frame on the heap instead, leaving Home ~20 KB free (X3). A new Home lends it again.
+  return PackOffer::ask(*this, renderer, mappedInput, offer, FontDownloadActivity::ReturnTo::Home,
+                        [](Activity&) { activityManager.goHome(); });
 }
 
 void HomeActivity::loop() {

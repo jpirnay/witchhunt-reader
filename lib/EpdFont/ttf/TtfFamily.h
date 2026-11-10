@@ -91,7 +91,8 @@ bool filterTableBytes(const FileSource& file, uint32_t* bytes);
 struct FileProbe {
   /// head.macStyle: bit 0 bold, bit 1 italic, as EpdFontFamily::Style. -1 when it is not a font the engine
   /// draws: not TrueType or OpenType CFF (a collection, variable CFF2), a table it needs missing or outside the file,
-  /// or a read error.
+  /// anything else parseFace() refuses (no Unicode cmap of format 4 or 12, unitsPerEm outside 16..16384, no
+  /// horizontal metrics, a maxp version or loca format it does not read), or a read error.
   int style = -1;
   /// OS/2 usWeightClass (400 regular, 700 bold). Without an OS/2 table, 700 for a bold style and 400 otherwise.
   uint16_t weight = 400;

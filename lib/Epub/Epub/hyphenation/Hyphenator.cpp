@@ -334,7 +334,8 @@ void Hyphenator::setPreferredLanguage(const std::string& lang) { cachedHyphenato
 
 const LanguageHyphenator* Hyphenator::forLanguage(const std::string& lang) { return hyphenatorForLanguage(lang); }
 
-uint32_t Hyphenator::layoutKey(const std::string& lang) {
+uint32_t Hyphenator::layoutKey(const std::string& lang, const bool hyphenationEnabled) {
+  if (!hyphenationEnabled) return 0;
   const LanguageEntry* entry = languageEntryFor(lang);
   return entry ? hyphenationLayoutKey(entry->primaryTag) : 0;
 }

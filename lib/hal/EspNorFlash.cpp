@@ -12,8 +12,9 @@
 #endif
 
 namespace {
-uint32_t s_liveMappings = 0;
-}
+// The font area's mappings (begin()), not a region's (beginRegion()): see liveFontAreaMappings().
+uint32_t s_liveFontAreaMappings = 0;
+}  // namespace
 
 EspNorFlash::~EspNorFlash() {
   for (Mapping& m : maps_) {
@@ -21,7 +22,7 @@ EspNorFlash::~EspNorFlash() {
   }
 }
 
-uint32_t EspNorFlash::liveMappings() { return s_liveMappings; }
+uint32_t EspNorFlash::liveFontAreaMappings() { return s_liveFontAreaMappings; }
 
 bool EspNorFlash::begin() {
   part_ = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
@@ -109,7 +110,8 @@ bool EspNorFlash::erase(const uint32_t offset, const uint32_t len) {
 
 const uint8_t* EspNorFlash::map(const uint32_t offset, const uint32_t len) {
   if (len == 0 || !inRange(offset, len)) return nullptr;
-  for (Mapping& m : maps_) {
+  for (int i = 0; i < kMaxMaps; ++i) {
+    Mapping& m = maps_[i];
     if (m.ptr != nullptr) continue;
     const void* ptr = nullptr;
     const esp_err_t err = esp_partition_mmap(part_, base_ + offset, len, ESP_PARTITION_MMAP_DATA, &ptr, &m.handle);
@@ -120,7 +122,10 @@ const uint8_t* EspNorFlash::map(const uint32_t offset, const uint32_t len) {
       return nullptr;
     }
     m.ptr = static_cast<const uint8_t*>(ptr);
-    ++s_liveMappings;
+    if (fontArea_) {
+      fontAreaMaps_ |= static_cast<uint8_t>(1u << i);
+      ++s_liveFontAreaMappings;
+    }
     return m.ptr;
   }
   LOG_ERR("ENF", "map refused: all %d mappings are in use", kMaxMaps);
@@ -129,13 +134,17 @@ const uint8_t* EspNorFlash::map(const uint32_t offset, const uint32_t len) {
 
 void EspNorFlash::unmap(const uint8_t* mapped) {
   if (mapped == nullptr) return;
-  for (Mapping& m : maps_) {
-    if (m.ptr == mapped) {
-      esp_partition_munmap(m.handle);
-      m = Mapping{};
-      --s_liveMappings;
-      return;
+  for (int i = 0; i < kMaxMaps; ++i) {
+    Mapping& m = maps_[i];
+    if (m.ptr != mapped) continue;
+    esp_partition_munmap(m.handle);
+    const auto bit = static_cast<uint8_t>(1u << i);
+    if (fontAreaMaps_ & bit) {
+      fontAreaMaps_ = static_cast<uint8_t>(fontAreaMaps_ & ~bit);
+      --s_liveFontAreaMappings;
     }
+    m = Mapping{};
+    return;
   }
 }
 
