@@ -32,9 +32,9 @@ class HomeActivity final : public Activity {
   bool recentsLoading = false;
   bool recentsLoaded = false;
   bool firstRenderDone = false;
-  // Asks, once a boot and once the screen is up, whether to download the interface language's hyphenation pack when
-  // the card has none (HyphenationPacks::takeOffer). True when it opened the question.
-  bool offerHyphenationPack();
+  // Asks, once the screen is up, whether to download the interface language's pack when the card lacks it: once a
+  // start and language (UiLanguagePacks::takeHomeOffer). True when it opened the question.
+  bool offerLanguagePack();
   bool coverRendered = false;
   bool coverBufferStored = false;
   // True while the ~52 KB secondary framebuffer is LENT to the cold-cache cover pipeline as

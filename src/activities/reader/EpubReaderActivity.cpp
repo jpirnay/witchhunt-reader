@@ -1003,8 +1003,10 @@ void EpubReaderActivity::offerHyphenationPack() {
     }
     // In the reader's place: the download's TLS session needs the heap the reader holds. Leaving the Font Manager
     // restarts into this book, hyphenated by the pack.
+    FontDownloadActivity::Wanted wanted;
+    snprintf(wanted.pack, sizeof(wanted.pack), "%s", code.c_str());
     activityManager.replaceActivity(
-        std::make_unique<FontDownloadActivity>(renderer, mappedInput, code.c_str(), /*returnToBook=*/true));
+        std::make_unique<FontDownloadActivity>(renderer, mappedInput, wanted, FontDownloadActivity::ReturnTo::Book));
   });
 }
 

@@ -27,15 +27,14 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "GlobalBookmarkIndex.h"
-#include "HyphenationPacks.h"
 #include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "ReadingStats.h"
 #include "RecentBooksStore.h"
 #include "TouchUi.h"
+#include "UiLanguagePacks.h"
 #include "activities/reader/ReaderActivity.h"
-#include "activities/settings/FontDownloadActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/TapTargets.h"
@@ -617,27 +616,18 @@ void HomeActivity::freeCoverBuffer() {
   coverBufferStored = false;
 }
 
-bool HomeActivity::offerHyphenationPack() {
-  char code[3];
-  if (!HyphenationPacks::takeOffer(code)) return false;
-  ConfirmationActivity::Question question;
-  question.headline = tr(STR_HYPHENATION);
-  char message[320];
-  snprintf(message, sizeof(message), tr(STR_HYPHENATION_PACK_OFFER), HyphenationPacks::languageName(code));
-  question.message = message;
-  question.messageMaxLines = 6;
-  question.cancelLabel = StrId::STR_NO;
-  question.acceptLabel = StrId::STR_DOWNLOAD;
-  const std::string pack(code);
+bool HomeActivity::offerLanguagePack() {
+  const UiLanguagePacks::Offer offer = UiLanguagePacks::takeHomeOffer();
+  if (!offer) return false;
   startActivityForResult(
-      std::make_unique<ConfirmationActivity>(renderer, mappedInput, std::move(question)),
-      [this, pack](const ActivityResult& result) {
+      std::make_unique<ConfirmationActivity>(renderer, mappedInput, UiLanguagePacks::question(offer)),
+      [this, offer](const ActivityResult& result) {
         if (result.isCancelled) {
-          HyphenationPacks::declineOffer(pack.c_str());
+          UiLanguagePacks::decline(offer);
           return;
         }
         // In Home's place, not over it: the download's TLS session needs the heap Home holds.
-        activityManager.replaceActivity(std::make_unique<FontDownloadActivity>(renderer, mappedInput, pack.c_str()));
+        activityManager.replaceActivity(UiLanguagePacks::download(renderer, mappedInput, offer, /*toSettings=*/false));
       });
   return true;
 }
@@ -647,8 +637,8 @@ void HomeActivity::loop() {
   // this activity, and running the rest against a screen that is going away serves nobody.
   if (handleHomeTouch()) return;
 
-  // An upgraded reader whose interface language is hyphenated from a pack it lacks is offered it, once a boot.
-  if (firstRenderDone && offerHyphenationPack()) return;
+  // The interface language's pack, when the card lacks it: once a start and language (UiLanguagePacks).
+  if (firstRenderDone && offerLanguagePack()) return;
 
   const bool isCarousel = (GUI.getHomeNavigation() == HomeNavigation::Carousel);
 

@@ -15,11 +15,18 @@
 // mandatory CRC and delete-on-abort are not taken.
 class FontDownloadActivity final : public UiListActivity {
  public:
-  // `wantedPack`: the language of a hyphenation pack to download as soon as the list is loaded ("de"), as the offers of
-  // Home and of a book open ask (HyphenationPacks); null for the plain Font Manager. `returnToBook`: leaving restarts
-  // into the open book (APP_STATE.openEpubPath) rather than Home, for the offer a book open made.
-  explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                const char* wantedPack = nullptr, bool returnToBook = false);
+  // What an offer wants downloaded as soon as the list is loaded: a hyphenation pack by its language ("de"), or a
+  // family by its name (a CJK interface pack, "ChineseUI"). Empty for the plain Font Manager.
+  struct Wanted {
+    char pack[3] = {};
+    const char* family = nullptr;
+  };
+  // Where leaving restarts: Home; the open book (APP_STATE.openEpubPath), for a book's offer; Settings, for the offer
+  // a picked interface language makes.
+  enum class ReturnTo : uint8_t { Home, Book, Settings };
+  FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const Wanted& wanted, ReturnTo returnTo);
+  explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
+      : FontDownloadActivity(renderer, mappedInput, Wanted{}, ReturnTo::Home) {}
 
   void onEnter() override;
   bool usesWifi() const override { return true; }
@@ -39,8 +46,8 @@ class FontDownloadActivity final : public UiListActivity {
 
   State state_ = WIFI_SELECTION;
   // The hyphenation pack to download once the list is loaded, "" for none (consumed by its first use).
-  char wantedPack_[3] = {};
-  bool returnToBook_ = false;
+  Wanted wanted_;  // consumed by its first use
+  ReturnTo returnTo_ = ReturnTo::Home;
   FontInstaller fontInstaller_;
 
   // HTTP/TLS session shared across all files of a single downloadFamily()
@@ -113,8 +120,8 @@ class FontDownloadActivity final : public UiListActivity {
   static void provideRow(void* ctx, uint16_t index, freeink::ui::ListItem& item);
 
   void onWifiSelectionComplete(bool success);
-  // Selects the row of wantedPack_ and downloads it when it is not installed. Once.
-  void downloadWantedPack();
+  // Selects the row of wanted_ and downloads it when it is not installed. Once.
+  void downloadWanted();
   bool fetchAndParseManifest();
   // Download a single family by its index into families_. Internally stashes
   // families_ to SD so the TLS handshake runs on a defragmented heap; the

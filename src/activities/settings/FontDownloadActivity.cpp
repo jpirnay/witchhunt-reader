@@ -26,13 +26,12 @@
 
 namespace fui = freeink::ui;
 
-FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                           const char* wantedPack, const bool returnToBook)
+FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const Wanted& wanted,
+                                           const ReturnTo returnTo)
     : UiListActivity("FontDownload", renderer, mappedInput),
-      returnToBook_(returnToBook),
-      fontInstaller_(sdFontSystem.registry()) {
-  if (wantedPack) snprintf(wantedPack_, sizeof(wantedPack_), "%s", wantedPack);
-}
+      wanted_(wanted),
+      returnTo_(returnTo),
+      fontInstaller_(sdFontSystem.registry()) {}
 
 // --- Lifecycle ---
 
@@ -72,8 +71,9 @@ void FontDownloadActivity::onExit() {
     WiFi.disconnect(false);
     delay(30);
   }
-  // Opened by a book's offer: back into that book, now hyphenated by the pack.
-  if (returnToBook_ && !APP_STATE.openEpubPath.empty()) silentRestartToReader();
+  // Opened by an offer: back where it was made. A book's opens hyphenated by the pack.
+  if (returnTo_ == ReturnTo::Book && !APP_STATE.openEpubPath.empty()) silentRestartToReader();
+  if (returnTo_ == ReturnTo::Settings) silentRestartToSettings();
   silentRestart();
 }
 
@@ -112,18 +112,20 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
     state_ = FAMILY_LIST;
   }
   requestUpdate();
-  downloadWantedPack();
+  downloadWanted();
 }
 
-void FontDownloadActivity::downloadWantedPack() {
-  if (wantedPack_[0] == '\0') return;
-  char file[16];
-  snprintf(file, sizeof(file), "hyph-%s.cphyph", wantedPack_);
-  wantedPack_[0] = '\0';
+void FontDownloadActivity::downloadWanted() {
+  if (wanted_.pack[0] == '\0' && !wanted_.family) return;
+  char file[16] = {};
+  if (wanted_.pack[0] != '\0') snprintf(file, sizeof(file), "hyph-%s.cphyph", wanted_.pack);
+  const char* family = wanted_.family;
+  wanted_ = Wanted{};
   for (size_t i = 0; i < families_.count(); ++i) {
-    if (!families_.hyphenation(i) || families_.fileCount(i) == 0 || strcmp(families_.fileLocalName(i, 0), file) != 0) {
-      continue;
-    }
+    const bool match = file[0] != '\0' ? families_.hyphenation(i) && families_.fileCount(i) > 0 &&
+                                             strcmp(families_.fileLocalName(i, 0), file) == 0
+                                       : strcmp(families_.name(i), family) == 0;
+    if (!match) continue;
     activeNav().requestSelection(actionCount() + static_cast<int>(i));
     if (!families_.installed(i)) {
       downloadFamily(static_cast<int>(i));
@@ -131,7 +133,7 @@ void FontDownloadActivity::downloadWantedPack() {
     }
     return;
   }
-  LOG_ERR("FONT", "The font list holds no %s", file);
+  LOG_ERR("FONT", "The font list holds no %s", file[0] != '\0' ? file : family);
 }
 
 // --- Manifest fetching ---

@@ -162,9 +162,9 @@ class CrossPointState {
   // When false, setup() skips the boot screen on wake and instead restores the
   // saved framebuffer overlaid with a loading icon (Quick Resume).
   bool showBootScreen = true;
-  // The languages whose hyphenation pack the reader offered and was told no (HyphenationPacks): their two-letter codes
-  // back to back ("denl"), empty -- no heap -- when none. Neither Home nor a book open offers them again; the Font
-  // Manager still has them.
+  // The packs the reader offered and was told no (HyphenationPacks, UiLanguagePacks), as two-letter codes back to back,
+  // empty -- no heap -- when none: a hyphenation pack by its language, lower case ("de"), a CJK interface pack by its
+  // interface language, upper case ("ZH"). They are not offered again; the Font Manager still has them.
   std::string hyphenationOffersDeclined;
   KOReaderSyncSessionState koReaderSyncSession;
   PendingBookmarkJumpState pendingBookmarkJump;
