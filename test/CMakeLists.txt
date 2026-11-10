@@ -305,6 +305,7 @@ add_subdirectory(ui_face_scripts)
 add_subdirectory(ui_shaped_text)  # after font_group_stream: links its uzlib_font_ring
 add_subdirectory(ui_font_compression)  # likewise
 add_subdirectory(flash_lang_partition)  # likewise
+add_subdirectory(i18n_lang_pack)  # likewise
 add_subdirectory(esp_nor_flash)
 add_subdirectory(glyph_store)
 add_subdirectory(ttf_rasterizer)

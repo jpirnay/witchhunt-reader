@@ -32,9 +32,10 @@ Examples:
 import sys
 import os
 import re
+import struct
 import zlib
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +133,220 @@ def verify_langpack(
             raise ValueError(
                 f"Language {code}: entry {i} decoded as {got!r}, expected {expected!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Language packs on the SD card (.cplang)
+# ---------------------------------------------------------------------------
+#
+# One file per language, /.crosspoint/lang/<code>.cplang on the card, read by lib/I18n/LangPack.cpp. It
+# names each string by a hash of its key's NAME, never by a StrId, so the pack of master serves every
+# firmware from 2.41 on: a key a firmware does not know is skipped, a key the pack lacks is English.
+#
+#   header, 64 B, little-endian:
+#     [4]  magic "CPLG"
+#     [1]  format version (PACK_FORMAT_VERSION)
+#     [1]  0
+#     [2]  entries in the payload
+#     [4]  language code, ASCII lower case, NUL-padded ("de")
+#     [4]  CRC32 of the payload as stored
+#     [4]  payload length as stored
+#     [4]  payload length inflated
+#     [4]  extension length as stored (0: none), after the payload
+#     [4]  extension length inflated
+#     [4]  CRC32 of the extension as stored
+#     [28] native name, UTF-8, NUL-padded
+#   payload: raw deflate, 4 KB window, of entries [u32 key hash][UTF-8 value, NUL]
+#   extension: raw deflate, 4 KB window: bytes the slot carries after the strings (the CJK UI faces)
+#
+# A value equal to English is left out, and so is an empty one: both read as English.
+
+PACK_MAGIC = b"CPLG"
+PACK_FORMAT_VERSION = 1
+PACK_HEADER = struct.Struct("<4sBBH4sIIIIII28s")
+PACK_NAME_BYTES = 28
+PACK_SUFFIX = ".cplang"
+assert PACK_HEADER.size == 64
+
+FNV_OFFSET = 0x811C9DC5
+FNV_PRIME = 0x01000193
+
+
+def key_hash(key: str) -> int:
+    """FNV-1a of the key's name: what a pack names a string by (langpack::keyHash on the device)."""
+    h = FNV_OFFSET
+    for byte in key.encode("ascii"):
+        h ^= byte
+        h = (h * FNV_PRIME) & 0xFFFFFFFF
+    return h
+
+
+def check_key_hashes(keys: Iterable[str]) -> None:
+    """Fail on two key names with one hash: a pack could not tell their strings apart. Rename one key."""
+    seen: Dict[int, str] = {}
+    clashes: List[str] = []
+    for key in sorted(set(keys)):
+        h = key_hash(key)
+        if h in seen:
+            clashes.append(f"{seen[h]} and {key} (0x{h:08x})")
+        else:
+            seen[h] = key
+    if clashes:
+        raise ValueError("Key names with the same hash, rename one of each pair:\n  " + "\n  ".join(clashes))
+
+
+def key_layout_stamp(string_keys: List[str]) -> int:
+    """Identifies this firmware's StrId order: CRC32 of the key hashes by StrId. A slot built for another order
+    holds its strings under other StrIds, so the stamp is mixed into the slot's own."""
+    return zlib.crc32(b"".join(struct.pack("<I", key_hash(k)) for k in string_keys)) & 0xFFFFFFFF
+
+
+def deflate_pack_section(data: bytes) -> bytes:
+    compressor = zlib.compressobj(9, zlib.DEFLATED, -DEFLATE_WINDOW_BITS)
+    return compressor.compress(data) + compressor.flush()
+
+
+def pack_payload(string_keys: List[str], values: List[str], en_values: List[str]) -> Tuple[bytes, int]:
+    """The entries of one language, in key order: (raw payload, entry count). A value equal to English or empty is
+    left out."""
+    out = bytearray()
+    count = 0
+    for key, value, en in zip(string_keys, values, en_values):
+        if not value or value == en:
+            continue
+        out += struct.pack("<I", key_hash(key)) + value.encode("utf-8") + b"\x00"
+        count += 1
+    return bytes(out), count
+
+
+def build_pack_file(code: str, native_name: str, payload: bytes, entries: int, extension: bytes = b"") -> bytes:
+    """One language's .cplang file."""
+    code_bytes = code.lower().encode("ascii")
+    name_bytes = native_name.encode("utf-8")
+    if not 2 <= len(code_bytes) <= 3:
+        raise ValueError(f"Language code {code!r} is not two or three letters")
+    if len(name_bytes) >= PACK_NAME_BYTES:
+        raise ValueError(f"Language {code}: native name {native_name!r} is {len(name_bytes)} B, the pack holds 27")
+    packed = deflate_pack_section(payload)
+    ext_packed = deflate_pack_section(extension) if extension else b""
+    header = PACK_HEADER.pack(
+        PACK_MAGIC, PACK_FORMAT_VERSION, 0, entries, code_bytes.ljust(4, b"\x00"),
+        zlib.crc32(packed) & 0xFFFFFFFF, len(packed), len(payload),
+        len(ext_packed), len(extension), zlib.crc32(ext_packed) & 0xFFFFFFFF if ext_packed else 0,
+        name_bytes.ljust(PACK_NAME_BYTES, b"\x00"),
+    )
+    return header + packed + ext_packed
+
+
+def read_pack_file(data: bytes) -> Tuple[Dict[str, object], Dict[int, str], bytes]:
+    """The inverse of build_pack_file, checking what the device checks: (header fields, {hash: value}, extension).
+    Raises ValueError on anything the device would refuse."""
+    if len(data) < PACK_HEADER.size:
+        raise ValueError("shorter than a pack header")
+    (magic, version, _, entries, code, crc, plen, rawlen, elen, erawlen, ecrc, name) = PACK_HEADER.unpack_from(data)
+    if magic != PACK_MAGIC or version != PACK_FORMAT_VERSION:
+        raise ValueError("not a language pack of this format")
+    packed = data[PACK_HEADER.size : PACK_HEADER.size + plen]
+    ext_packed = data[PACK_HEADER.size + plen : PACK_HEADER.size + plen + elen]
+    if len(packed) != plen or len(ext_packed) != elen or PACK_HEADER.size + plen + elen != len(data):
+        raise ValueError("lengths do not add up to the file")
+    if zlib.crc32(packed) & 0xFFFFFFFF != crc or (elen and zlib.crc32(ext_packed) & 0xFFFFFFFF != ecrc):
+        raise ValueError("CRC mismatch")
+    payload = zlib.decompressobj(-DEFLATE_WINDOW_BITS).decompress(packed)
+    extension = zlib.decompressobj(-DEFLATE_WINDOW_BITS).decompress(ext_packed) if elen else b""
+    if len(payload) != rawlen or len(extension) != erawlen:
+        raise ValueError("inflated lengths differ from the header")
+    values: Dict[int, str] = {}
+    at = 0
+    while at < len(payload):
+        if at + 4 > len(payload):
+            raise ValueError("payload ends inside a key hash")
+        (h,) = struct.unpack_from("<I", payload, at)
+        end = payload.index(b"\x00", at + 4)
+        values[h] = payload[at + 4 : end].decode("utf-8")
+        at = end + 1
+    if len(values) != entries:
+        raise ValueError(f"{len(values)} entries, header says {entries}")
+    header = {
+        "code": code.rstrip(b"\x00").decode("ascii"),
+        "name": name.rstrip(b"\x00").decode("utf-8"),
+        "entries": entries,
+        "payload_crc": crc,
+    }
+    return header, values, extension
+
+
+def pack_family_name(yaml_stem: str) -> str:
+    """The Font Manager's name for a language's pack: Language-<English name>, from the YAML file's name
+    (german -> Language-German, portuguese_br -> Language-PortugueseBR)."""
+    parts = [p.upper() if len(p) <= 2 else p.capitalize() for p in yaml_stem.split("_")]
+    return "Language-" + "".join(parts)
+
+
+def pack_file_name(code: str) -> str:
+    return code.lower() + PACK_SUFFIX
+
+
+def language_packs(translations_dir: str) -> List[Tuple[str, str, bytes]]:
+    """Every language's pack but English's, from the YAML files with every key (packs serve firmware that use keys
+    this tree's code no longer does): (family folder, file name, file bytes)."""
+    languages, names, keys, translations, _ = load_translations(translations_dir)
+    check_key_hashes(keys)
+    stems = {}
+    for path in sorted(Path(translations_dir).glob("*.yaml")):
+        stems[parse_yaml_file(str(path))["_language_code"]] = path.stem
+    en_values = [translations[k][0] for k in keys]
+    packs = []
+    for idx, code in enumerate(languages):
+        if idx == 0:
+            continue
+        values = [translations[k][idx] for k in keys]
+        payload, entries = pack_payload(keys, values, en_values)
+        # The slot addresses a string with 15 bits, and holds no more than the pack's strings.
+        string_bytes = len(payload) - 4 * entries
+        if string_bytes >= MAX_BLOB_BYTES:
+            raise ValueError(f"Language {code}: {string_bytes} B of strings, past the 15-bit offset limit")
+        data = build_pack_file(code, names[idx], payload, entries)
+        # What the device will read back, checked here so a format mistake fails the build.
+        header, decoded, _ = read_pack_file(data)
+        expected = {key_hash(k): v for k, v, en in zip(keys, values, en_values) if v and v != en}
+        if decoded != expected or header["code"] != code.lower() or header["name"] != names[idx]:
+            raise ValueError(f"Language {code}: the pack does not read back as written")
+        packs.append((pack_family_name(stems[code]), pack_file_name(code), data))
+    return packs
+
+
+def _same_pack(path: Path, data: bytes) -> bool:
+    """The file holds what `data` holds. Compared by content, not bytes: another zlib compresses alike data to other
+    bytes, and that is no reason to churn a committed pack."""
+    if not path.exists():
+        return False
+    try:
+        return read_pack_file(path.read_bytes()) == read_pack_file(data)
+    except ValueError:
+        return False
+
+
+def write_language_packs(translations_dir: str, out_root: str) -> List[Path]:
+    """Writes each pack whose content changed into out_root/<family>/<file>; returns those written."""
+    written = []
+    for family, name, data in language_packs(translations_dir):
+        path = Path(out_root) / family / name
+        if _same_pack(path, data):
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        written.append(path)
+    return written
+
+
+def stale_language_packs(translations_dir: str, out_root: str) -> List[str]:
+    """The packs under out_root that do not hold what the YAML files say: '<family>/<file>' each."""
+    return [
+        f"{family}/{name}"
+        for family, name, data in language_packs(translations_dir)
+        if not _same_pack(Path(out_root) / family / name, data)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -657,6 +872,14 @@ def generate_keys_header(
     lines.append(f"extern const char STRINGS_{en_code}_DATA[];")
     lines.append(f"extern const uint16_t OFFSETS_{en_code}[];")
     lines.append("")
+    lines.append("// What a language pack on the card names its strings by: FNV-1a of each key's name, by StrId")
+    lines.append("// (langpack::keyHash), and every StrId in ascending order of its hash, to find one by its hash.")
+    lines.append("extern const uint32_t KEY_HASHES[];")
+    lines.append("extern const uint16_t KEYS_BY_HASH[];")
+    lines.append("// Identifies this build's StrId order: CRC32 of KEY_HASHES. A language slot built for another")
+    lines.append("// order holds its strings under other StrIds, so this is mixed into its stamp.")
+    lines.append(f"constexpr uint32_t KEY_LAYOUT_STAMP = 0x{key_layout_stamp(string_keys):08x};")
+    lines.append("")
     lines.append("// One entry per Language, indexed by its enum value. The English slot is")
     lines.append("// zeroed — there is nothing to decompress.")
     lines.append("struct LangPack {")
@@ -883,6 +1106,20 @@ def generate_strings_cpp(
     lines.append("};")
     lines.append("")
 
+    # --- The key hashes a card pack names its strings by ----------------------
+    hashes = [key_hash(k) for k in string_keys]
+    lines.append("const uint32_t KEY_HASHES[] = {")
+    for i in range(0, len(hashes), 8):
+        lines.append("    " + ", ".join(f"0x{h:08x}" for h in hashes[i : i + 8]) + ",")
+    lines.append("};")
+    lines.append("")
+    by_hash = sorted(range(len(hashes)), key=lambda i: hashes[i])
+    lines.append("const uint16_t KEYS_BY_HASH[] = {")
+    for i in range(0, len(by_hash), 12):
+        lines.append("    " + ", ".join(str(s) for s in by_hash[i : i + 12]) + ",")
+    lines.append("};")
+    lines.append("")
+
     # --- Every other language: one compressed pack ----------------------------
     packs: List[Tuple[str, int, int, int]] = [(en_code, 0, 0, 0)]
     for lang_idx, code in enumerate(languages):
@@ -933,6 +1170,16 @@ def generate_strings_cpp(
     )
     lines.append("                  static_cast<size_t>(StrId::_COUNT),")
     lines.append(f'              "OFFSETS_{en_code} size mismatch");')
+    lines.append(
+        "static_assert(sizeof(i18n_strings::KEY_HASHES) / sizeof(i18n_strings::KEY_HASHES[0]) =="
+        " static_cast<size_t>(StrId::_COUNT),"
+    )
+    lines.append('              "KEY_HASHES size mismatch");')
+    lines.append(
+        "static_assert(sizeof(i18n_strings::KEYS_BY_HASH) / sizeof(i18n_strings::KEYS_BY_HASH[0]) =="
+        " static_cast<size_t>(StrId::_COUNT),"
+    )
+    lines.append('              "KEYS_BY_HASH size mismatch");')
     lines.append(
         "static_assert(sizeof(i18n_strings::LANGPACKS) / sizeof(i18n_strings::LANGPACKS[0]) =="
     )
@@ -1080,6 +1327,9 @@ def main(
     font_root = Path(translations_dir).resolve().parents[2] / "lib" / "EpdFont"
     sources += list((font_root / "builtinFonts").glob("*.h"))
     sources.append(font_root / "scripts" / "ui_font_coverage.py")
+    # This script itself: a change to what it emits regenerates. Found from the tree, since PlatformIO runs it
+    # without __file__.
+    sources.append(font_root.parents[1] / "scripts" / "gen_i18n.py")
     if not force and all(t.exists() for t in targets):
         oldest_target = min(t.stat().st_mtime for t in targets)
         newest_source = max(s.stat().st_mtime for s in sources)
@@ -1096,6 +1346,18 @@ def main(
         languages, language_names, string_keys, translations, inherited_sets = (
             load_translations(translations_dir, verbose)
         )
+        # Over every key, used or not: the packs on the card carry them all.
+        check_key_hashes(string_keys)
+
+        # The packs in the repo are written by `--packs`, never by the build; say so when they lag the YAML files.
+        packs_root = Path(translations_dir).resolve().parents[2] / "assets" / "sd-fonts"
+        if packs_root.is_dir():
+            stale = stale_language_packs(translations_dir, str(packs_root))
+            if stale:
+                print(f"  WARNING: {len(stale)} language pack(s) in assets/sd-fonts differ from the YAML files:")
+                for name in stale:
+                    print(f"    - {name}")
+                print("  Run: python3 scripts/gen_i18n.py --packs assets/sd-fonts")
 
         # --- Unused-string detection ---
         scan_dirs = [d for d in src_dirs if os.path.isdir(d)]
@@ -1243,7 +1505,23 @@ if __name__ == "__main__":
         action="store_true",
         help="Force regeneration of I18n files",
     )
+    parser.add_argument(
+        "--packs",
+        metavar="DIR",
+        default=None,
+        help="Write the language packs (.cplang) into DIR/Language-<Name>/ instead (assets/sd-fonts)",
+    )
     args = parser.parse_args()
+    if args.packs:
+        try:
+            written = write_language_packs(args.translations_dir or "lib/I18n/translations", args.packs)
+        except ValueError as e:
+            print(f"\nError: {e}")
+            sys.exit(1)
+        for path in written:
+            print(f"Wrote {path}")
+        print(f"{len(written)} language pack(s) written, the rest unchanged.")
+        sys.exit(0)
     main(
         args.translations_dir,
         args.output_dir,
