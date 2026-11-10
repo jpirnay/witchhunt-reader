@@ -895,7 +895,8 @@ RecentBooksLoad JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const c
     // a sidecar is refreshed once.
     book.metadataStamp = obj["metadataStamp"].as<unsigned>();
     book.embeddedStyleOverride = clampInt8(obj["embeddedStyleOverride"] | -1, -1, 1, -1);
-    book.imageRenderingOverride = clampInt8(obj["imageRenderingOverride"] | -1, -1, 2, -1);
+    book.imageRenderingOverride =
+        clampInt8(obj["imageRenderingOverride"] | -1, -1, CrossPointSettings::IMAGE_RENDERING_COUNT - 1, -1);
     book.fontFamilyOverride =
         clampInt8(obj["fontFamilyOverride"] | -1, -1, CrossPointSettings::FONT_FAMILY_COUNT - 1, -1);
     book.sdFontFamilyOverride = obj["sdFontFamilyOverride"] | std::string("");

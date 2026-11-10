@@ -397,8 +397,10 @@ inline void buildSettings(const RowSink& emit) {
   emit(SettingInfo::Action(StrId::STR_DICTIONARY, SettingAction::DictionarySelect)
            .withDisplayGetter(getDictionaryDisplay)
            .withCategory(StrId::STR_CAT_READER));
+  // Options in stored order (CrossPointSettings::IMAGE_RENDERING): Black & White came last, so it is listed last.
   emit(SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
-                         {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
+                         {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS,
+                          StrId::STR_IMAGES_DISPLAY_BW},
                          "imageRendering", StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_IMAGES));
   emit(SettingInfo::Toggle(StrId::STR_LARGE_IMAGE_PLACEHOLDER, &CrossPointSettings::largeImagePlaceholder,
