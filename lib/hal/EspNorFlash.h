@@ -45,7 +45,6 @@ class EspNorFlash final : public NorFlash {
   struct Mapping {
     const uint8_t* ptr = nullptr;
     esp_partition_mmap_handle_t handle = 0;
-    bool fontArea = false;  // counted in liveFontAreaMappings(): made while over the font area
   };
 
   bool inRange(const uint32_t offset, const uint32_t len) const {
@@ -58,6 +57,9 @@ class EspNorFlash final : public NorFlash {
   uint32_t base_ = 0;  // the region's start in the partition: 0 for the font area
   uint32_t size_ = 0;
   bool fontArea_ = true;
+  // Bit i: maps_[i] was made over the font area and is counted in liveFontAreaMappings(), so it is released as it was
+  // counted whichever area the instance is begun over by then. In fontArea_'s padding.
+  uint8_t fontAreaMaps_ = 0;
   Mapping maps_[kMaxMaps];
 #if CONFIG_SPIRAM
   // ESP-IDF writes from external RAM 32 bytes at a time, each a whole flash operation; such sources are
