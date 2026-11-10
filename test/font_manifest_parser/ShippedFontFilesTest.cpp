@@ -113,5 +113,5 @@ TEST(ShippedFontFilesTest, EveryLanguagePackIsTheSizeAndCrcTheManifestNames) {
     EXPECT_EQ(bytes.substr(8, 2), file.substr(0, 2)) << entry.name;
     ++checked;
   }
-  EXPECT_EQ(checked, 26);
+  EXPECT_EQ(checked, 29);
 }

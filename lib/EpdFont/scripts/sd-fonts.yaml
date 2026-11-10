@@ -770,6 +770,11 @@ families:
 
   # ── UI language packs (format: language), one per language but English: gen_i18n.py --packs ──────────────
 
+  - name: Language-Arabic
+    description: "Menus and messages in Arabic"
+    format: language
+    inDownloadAll: false
+
   - name: Language-Belarusian
     description: "Menus and messages in Belarusian"
     format: language
@@ -815,6 +820,11 @@ families:
     format: language
     inDownloadAll: false
 
+  - name: Language-Hebrew
+    description: "Menus and messages in Hebrew"
+    format: language
+    inDownloadAll: false
+
   - name: Language-Hungarian
     description: "Menus and messages in Hungarian"
     format: language
@@ -842,6 +852,11 @@ families:
 
   - name: Language-Lithuanian
     description: "Menus and messages in Lithuanian"
+    format: language
+    inDownloadAll: false
+
+  - name: Language-Persian
+    description: "Menus and messages in Persian"
     format: language
     inDownloadAll: false
 
