@@ -75,11 +75,63 @@ bool isValidBitDepth(const uint8_t colorType, const uint8_t bitDepth) {
   }
 }
 
+// Bytes per pixel (for the reverse filter; sub-byte depths use 1) and the raw row length, filter byte aside, by colour
+// type. False for a colour type the decoder does not know. begin() and scratchFor() size the scanline buffers by it.
+bool rowLayoutFor(const uint8_t colorType, const uint8_t bitDepth, const uint32_t width, uint8_t& bytesPerPixel,
+                  uint32_t& rawRowBytes) {
+  switch (colorType) {
+    case PNG_COLOR_GRAYSCALE:
+      bytesPerPixel = (bitDepth == 16) ? 2 : 1;
+      rawRowBytes = (bitDepth >= 8) ? width * bytesPerPixel : (width * bitDepth + 7) / 8;
+      return true;
+    case PNG_COLOR_RGB:
+      bytesPerPixel = (bitDepth == 16) ? 6 : 3;
+      rawRowBytes = width * bytesPerPixel;
+      return true;
+    case PNG_COLOR_PALETTE:
+      bytesPerPixel = 1;
+      rawRowBytes = (width * bitDepth + 7) / 8;
+      return true;
+    case PNG_COLOR_GRAYSCALE_ALPHA:
+      bytesPerPixel = (bitDepth == 16) ? 4 : 2;
+      rawRowBytes = width * bytesPerPixel;
+      return true;
+    case PNG_COLOR_RGBA:
+      bytesPerPixel = (bitDepth == 16) ? 8 : 4;
+      rawRowBytes = width * bytesPerPixel;
+      return true;
+    default:
+      return false;
+  }
+}
+
+// The image's whole inflated stream: a filter byte and the raw bytes of each row. A deflate back-reference never
+// reaches further back than what was produced, so the inflate ring is capped at it (InflateReader::ringSizeFor).
+// begin() and scratchFor() size the ring by this.
+size_t inflatedBytesFor(const uint32_t height, const uint32_t rawRowBytes) {
+  return static_cast<size_t>(height) * (rawRowBytes + 1);
+}
+
 constexpr int MAX_IMAGE_WIDTH = 2048;
 constexpr int MAX_IMAGE_HEIGHT = 3072;
 constexpr uint32_t MAX_RAW_ROW_BYTES = 16384;
 
 }  // namespace
+
+PngStreamDecoder::Scratch PngStreamDecoder::scratchFor(const Info& info) {
+  uint8_t bytesPerPixel = 0;
+  uint32_t rawRowBytes = 0;
+  if (info.width == 0 || info.height == 0 || info.width > MAX_IMAGE_WIDTH || info.height > MAX_IMAGE_HEIGHT ||
+      !rowLayoutFor(info.colorType, info.bitDepth, info.width, bytesPerPixel, rawRowBytes) ||
+      !isValidBitDepth(info.colorType, info.bitDepth) || rawRowBytes == 0 || rawRowBytes > MAX_RAW_ROW_BYTES) {
+    return {};
+  }
+  Scratch scratch;
+  scratch.rowBytes = rawRowBytes;
+  scratch.ringBytes = InflateReader::ringSizeFor(inflatedBytesFor(info.height, rawRowBytes));
+  scratch.wholeWindow = scratch.ringBytes == InflateReader::ringSizeFor(0);  // 0: the full window
+  return scratch;
+}
 
 PngStreamDecoder::~PngStreamDecoder() { end(); }
 
@@ -148,31 +200,9 @@ bool PngStreamDecoder::begin(FsFile& file, Info& info) {
     return false;
   }
 
-  // Bytes per pixel (for the reverse filter) and raw row length.
-  switch (colorType_) {
-    case PNG_COLOR_GRAYSCALE:
-      bytesPerPixel_ = (bitDepth_ == 16) ? 2 : 1;
-      rawRowBytes_ = (bitDepth_ >= 8) ? width_ * bytesPerPixel_ : (width_ * bitDepth_ + 7) / 8;
-      break;
-    case PNG_COLOR_RGB:
-      bytesPerPixel_ = (bitDepth_ == 16) ? 6 : 3;
-      rawRowBytes_ = width_ * bytesPerPixel_;
-      break;
-    case PNG_COLOR_PALETTE:
-      bytesPerPixel_ = 1;
-      rawRowBytes_ = (width_ * bitDepth_ + 7) / 8;
-      break;
-    case PNG_COLOR_GRAYSCALE_ALPHA:
-      bytesPerPixel_ = (bitDepth_ == 16) ? 4 : 2;
-      rawRowBytes_ = width_ * bytesPerPixel_;
-      break;
-    case PNG_COLOR_RGBA:
-      bytesPerPixel_ = (bitDepth_ == 16) ? 8 : 4;
-      rawRowBytes_ = width_ * bytesPerPixel_;
-      break;
-    default:
-      LOG_ERR("PNG", "Unsupported color type: %d", colorType_);
-      return false;
+  if (!rowLayoutFor(colorType_, bitDepth_, width_, bytesPerPixel_, rawRowBytes_)) {
+    LOG_ERR("PNG", "Unsupported color type: %d", colorType_);
+    return false;
   }
   if (!isValidBitDepth(colorType_, bitDepth_)) {
     LOG_ERR("PNG", "Invalid bit depth %d for color type %d", bitDepth_, colorType_);
@@ -273,7 +303,7 @@ bool PngStreamDecoder::begin(FsFile& file, Info& info) {
   // A deflate back-reference can never point further back than the bytes
   // produced so far, so cap the ring at the exact uncompressed size (filter
   // byte + raw bytes per row). Small images thus pay only a few KB.
-  const size_t uncompressed = static_cast<size_t>(height_) * (rawRowBytes_ + 1);
+  const size_t uncompressed = inflatedBytesFor(height_, rawRowBytes_);
   // The ring is the largest single block on this path (up to 32 KB). Take it from the same
   // arena scope as the scanline buffers when available — initWithExternalRing leaves ownership
   // with us, so deinit() will not free arena memory.

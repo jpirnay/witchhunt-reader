@@ -19,6 +19,12 @@ class PngToFramebufferConverter final : public ImageToFramebufferDecoder {
   // the whole call; this never closes it.
   static bool decodeOpenFile(FsFile& file, const std::string& label, GfxRenderer& renderer, const RenderConfig& config);
 
+  // The free heap a decode of the PNG at the file's read position must find before it starts (its memory gate), from
+  // the image's header, which is read and the position put back. An image whose inflated stream is shorter than the
+  // 32 KB DEFLATE window is charged what it takes, with headroom; any other, or a header that cannot be read, the
+  // worst-case floor. Never more than that floor. Depends on the installed image_scratch arena.
+  static size_t decodeHeapNeed(FsFile& file, const RenderConfig& config);
+
   // Builds a luminance histogram for adaptive tone mapping and returns the derived
   // black/white points, or an inactive result if the image does not need (or cannot
   // support) the correction.
