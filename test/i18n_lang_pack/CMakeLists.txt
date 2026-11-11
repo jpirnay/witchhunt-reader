@@ -72,6 +72,8 @@ add_executable(LangPackConvertTest
   LangPackConvertTest.cpp
   ${REPO_ROOT}/lib/I18n/LangPack.cpp
   ${REPO_ROOT}/lib/I18n/LangPackConvert.cpp
+  ${REPO_ROOT}/lib/hal/EspPartitionFlash.cpp
+  ${REPO_ROOT}/lib/hal/FlashArea.cpp
   ${REPO_ROOT}/lib/hal/FlashLangPartition.cpp
   ${REPO_ROOT}/lib/InflateReader/InflateReader.cpp
   ${REPO_ROOT}/test/uzlib_lzcopy/UzlibChksumStubs.cpp

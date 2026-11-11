@@ -214,7 +214,7 @@
   function describe(buffer) {
     const view = new DataView(buffer);
     const version = tag(view, 0);
-    if (version === 'ttcf') throw new Error('a font collection, which the converter cannot take');
+    if (version === 'ttcf') throw new Error('a font collection (.ttc), which neither the reader nor the converter takes');
     if (version !== 'OTTO' && version !== 'true' && view.getUint32(0) !== 0x00010000) {
       throw new Error('not a TrueType or OpenType font');
     }

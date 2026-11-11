@@ -21,7 +21,7 @@
 #if CONFIG_SPIRAM
 #include <esp_heap_caps.h>
 #else
-#include <EspNorFlash.h>
+#include <FlashAreaRegion.h>
 #include <FlashFontPartition.h>
 #endif
 
@@ -178,7 +178,7 @@ void load(const char* code) {
 
 #else
 
-EspNorFlash flash;
+FlashAreaRegion flash;
 HyphenationStore store(flash);
 bool mounted = false;
 

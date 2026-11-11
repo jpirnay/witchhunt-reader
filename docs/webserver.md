@@ -7,7 +7,7 @@ tablet on the same network can open its pages in a browser. From there you can:
 - prepare EPUBs for the reader: shrink their pictures and split overlong chapters;
 - correct a book's title, author, series and cover;
 - change every setting of the reader, and manage its saved Wi-Fi networks and OPDS catalogs;
-- install fonts from the catalog, or convert your own;
+- install fonts from the catalog, upload or convert your own, and install language packs;
 - install dictionaries for looking words up;
 - see your reading statistics;
 - add plugins, and download a report for a bug report.
@@ -277,29 +277,48 @@ password**.
 
 ## 7. Font Manager
 
-Fonts for reading live on the SD card. The menu on the left switches between four parts:
+Fonts for reading live on the SD card. The menu on the left switches between five parts: the fonts on
+the reader, three ways to add one, and the language packs, which are no fonts and have a group of
+their own.
 
 **Installed fonts** lists the font families on the card, with their sizes (a TrueType or OpenType
 family shows "all sizes"), and deletes the ones you no longer use.
 
-**Download fonts** lists the families in the online catalog. **Download** installs one, **Update**
+**Download fonts** lists the reading fonts in the online catalog. **Download** installs one, **Update**
 appears when a newer version is available (the number beside the menu entry counts them), and
-**Download all updates** fetches every missing family and every update, except the CJK families you
-have not installed (Japanese, Simplified Chinese, Traditional Chinese and Korean, sans serif and
-serif): install your language's with its own **Download**. The reader checks the card has room first.
+**Download all updates** fetches every missing family and every update, except the families for one
+script you have not installed (CJK, Indic, Arabic, Hebrew and Myanmar, each sans serif and serif):
+install your language's with its own **Download**. The reader checks the card has room first.
 A family too large for the reader's font area is installed but not listed, and the page says so. The
 reader downloads the files itself, so it must be online.
 
-Below the fonts, **Hyphenation packs** lists one pack per language: every language but English hyphenates
-with its pack (see [Hyphenation packs](../USER_GUIDE.md#hyphenation-packs)). **Download** installs one into
-the reader's `/.crosspoint/hyphenation/` folder, and on the X3 and X4 copies it into the reader's flash as
-well. **Download all updates** updates the packs you have, but fetches no missing one: install the languages
-of your books. A pack is deleted in the Font Manager on the reader.
-
 ![Downloading fonts](images/web/fonts-download.png)
 
-**Convert a font** makes a family from your own TrueType or OpenType files (`.ttf`, `.otf`, `.woff`),
-in your browser, without internet, so it also works in hotspot mode:
+**Upload a font** is the way to add a TrueType or OpenType font of your own (`.ttf`, `.otf`): the
+files go onto the card as they are, into the family's folder in `/.crosspoint/fonts/`, and the reader
+draws them at every size, like the catalog's TrueType families. A `.woff` file is unpacked in your
+browser first (WOFF2 is not). It works without internet, so also in hotspot mode:
+
+![Uploading a font](images/web/fonts-upload.png)
+
+1. Choose the family's files: up to four, for regular, bold, italic and bold italic. Each file's
+   style is read from the font itself. Without a bold or italic file the reader draws bold text
+   emboldened and italic text slanted. A variable font (one file for every weight) is drawn in its
+   default style.
+2. Check the **Family name** (letters, digits, `-` and `_`) and click **Upload**. Each style goes
+   onto the card as `<family>-Regular.ttf`, `<family>-Bold.ttf` and so on, so uploading a style again
+   replaces it.
+3. Choose the font on the reader as your reading font.
+
+The reader checks every file before it goes in: one it cannot draw (a variable CFF2 font, or one
+without a Unicode character map) is refused, and so is a font collection (`.ttc`). A family that is
+too large for the reader's font area is uploaded but not listed, and the page says so. When the
+reader already has a family of that name, the page asks first and adds the files to it; a family
+of `.cpfont` files cannot take TrueType files, nor the other way round, so choose another name or
+delete that family first. **Upload a font** also takes `.cpfont` files you already have.
+
+**Convert a font** makes `.cpfont` files at the sizes you choose from your own TrueType or OpenType
+files (`.ttf`, `.otf`, `.woff`), in your browser, without internet:
 
 ![Converting a font](images/web/fonts-convert.png)
 
@@ -310,13 +329,33 @@ in your browser, without internet, so it also works in hotspot mode:
    **Sizes**.
 3. Click **Convert and install**. Then choose the font on the reader as your reading font.
 
-The conversion is the same one the catalog's fonts are made with, so a converted font looks just as
-good. **The fonts of an EPUB** takes the fonts a book embeds instead: choose the book from your
-computer (or use **Convert its fonts** in the File Manager's Details). Fonts protected with DRM can't
-be converted. A font that came with a book is licensed with that book: convert it for reading on your
-own reader only.
+The conversion is the same one the catalog's `.cpfont` fonts are made with, so a converted font looks
+just as good. **The fonts of an EPUB** takes the fonts a book embeds instead: choose the book from
+your computer (or use **Convert its fonts** in the File Manager's Details). Fonts protected with DRM
+can't be converted. A font that came with a book is licensed with that book: convert it for reading on
+your own reader only.
 
-**Upload a font** installs `.cpfont` files you already have.
+**Language packs**, under **Languages** in the menu, lists what the reader needs for a language besides
+a font of its script, in three groups. English needs none of them.
+
+![Language packs](images/web/fonts-packs.png)
+
+- **Interface languages**: the menus and messages in one language, one pack each (see
+  [Language packs](../USER_GUIDE.md#language-packs)). Install the language you set in Settings; the
+  reader uses it from its next start.
+- **Book titles in Chinese, Japanese and Korean**: the interface packs (ChineseUI, ChineseTradUI,
+  JapaneseUI, KoreanUI) that draw such titles in the menus. They are not reading fonts: for a book,
+  download a font of its script under **Download fonts**.
+- **Hyphenation**: one pack per language; every language but English hyphenates with its pack (see
+  [Hyphenation packs](../USER_GUIDE.md#hyphenation-packs)). **Download** installs one into the reader's
+  `/.crosspoint/hyphenation/` folder, and on the X3 and X4 copies it into the reader's flash as well.
+
+**Download** installs a pack, and the number beside **Language packs** in the menu counts the packs with
+an update. **Update all packs** updates the packs you have, but fetches no missing one: install the
+languages you need from their rows. **Delete** removes an installed pack, as the Font Manager on the reader
+does; it first says what that changes. Without the interface language's own pack the menus are English from
+the reader's next start; without a hyphenation pack its language's books are no longer hyphenated; without a
+title pack, CJK book titles outside a book show boxes for the characters the menu fonts lack.
 
 ## 8. Dictionaries
 

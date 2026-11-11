@@ -72,6 +72,18 @@ class SdCardFontRegistry {
     return !family.files.empty();
   }
 
+  // What the family folder `dirPath` holds as discovery reads it: a .cpfont font (`cpfont`), a .ttf or .otf file
+  // (`outline`). The web upload asks before a file joins it (FontDownloadRules::joinsFolder()).
+  struct FolderFonts {
+    bool cpfont = false;
+    bool outline = false;
+  };
+  static FolderFonts folderFonts(const char* dirPath);
+
+  // Whether the .ttf or .otf file at `path` is one discovery lists: ttf::probeFile() reads it as a font the engine
+  // draws. The web upload asks before an uploaded file replaces one.
+  static bool drawsOutlineFile(const char* path);
+
   const std::vector<SdCardFontFamilyInfo>& getFamilies() const { return families_; }
   const SdCardFontFamilyInfo* findFamily(const std::string& name) const;
   int getFamilyIndex(const std::string& name) const;

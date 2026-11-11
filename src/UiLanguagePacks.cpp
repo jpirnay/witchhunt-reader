@@ -10,7 +10,9 @@
 #include <cstring>
 
 #include "CrossPointSettings.h"
+#include "FontInstaller.h"
 #include "HyphenationPacks.h"
+#include "util/FontCatalog.h"
 
 namespace UiLanguagePacks {
 
@@ -84,6 +86,36 @@ PackOffer::Offer due(const bool chosen) {
             offer.hyphenation);
   }
   return offer;
+}
+
+bool usedByInterface(const FontCatalog& families, const size_t family) {
+  const char* ui = uiCode();
+  if (!ui) return false;
+  if (families.languagePack(family)) {
+    // The language's strings: a file of the pack where I18n reads the language from.
+    char own[48];
+    if (!I18n::packPath(I18N.getLanguage(), own, sizeof(own))) return false;
+    for (size_t j = 0; j < families.fileCount(family); ++j) {
+      char path[128];
+      FontInstaller::buildPackPath(families, family, families.fileLocalName(family, j), path, sizeof(path));
+      if (strcasecmp(path, own) == 0) return true;
+    }
+    return false;
+  }
+  for (const auto& pack : kPacks) {
+    if (std::strcmp(ui, pack.uiCode) != 0) continue;
+    if (pack.interfaceFamily) return std::strcmp(families.name(family), pack.interfaceFamily) == 0;
+    if (!pack.hyphenation || !families.hyphenation(family)) return false;
+    for (size_t j = 0; j < families.fileCount(family); ++j) {
+      char code[3];
+      if (HyphenationPacks::codeOfPackFile(families.fileLocalName(family, j), code) &&
+          std::strcmp(code, pack.hyphenation) == 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return false;
 }
 
 PackOffer::Offer takeHomeOffer() {

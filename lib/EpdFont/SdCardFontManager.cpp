@@ -1,7 +1,7 @@
 #include "SdCardFontManager.h"
 
 #include <EpdFontFamily.h>
-#include <EspNorFlash.h>
+#include <FlashAreaRegion.h>
 #include <FlashFontPartition.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -212,7 +212,7 @@ bool SdCardFontManager::loadTtf(const SdCardFontFamilyInfo* const* families, uin
   if (FlashFontPartition::isMapped()) FlashFontPartition::unmap();
 
   // Held while the families are loaded: the font area (a few words), and the set with its one scratch block.
-  auto flash = makeUniqueNoThrow<EspNorFlash>();
+  auto flash = makeUniqueNoThrow<FlashAreaRegion>();
   auto opened = makeUniqueNoThrow<TtfSources>();
   if (!flash || !opened || !flash->begin()) {
     LOG_ERR("SDMGR", "No font partition, or no memory, for TTF family %s", families[0]->name.c_str());

@@ -12,6 +12,7 @@
 
 #include "UploadBuffer.h"
 #include "html/WebBundle.generated.h"
+#include "util/FontDownloadRules.h"
 
 // Structure to hold file information
 struct FileInfo {
@@ -163,6 +164,7 @@ class CrossPointWebServer {
   void handleFontUpload();
   void handleFontUploadData();
   void handleFontDelete();
+  void deletePack(const char* name);
 
   void handleDictionaryPage() const;
 
@@ -170,6 +172,10 @@ class CrossPointWebServer {
     FsFile file;
     std::string familyName;
     std::string filePath;
+    // Why the upload was refused, for the page: a fixed text; null while it goes well.
+    const char* error = nullptr;
+    // A .cpfont, or a .ttf or .otf the TrueType engine draws as it is (FontDownloadRules::uploadKindOf()).
+    FontDownloadRules::FileKind kind = FontDownloadRules::FileKind::Unknown;
     bool valid = false;
     bool magicChecked = false;
     uint8_t header[8] = {0};

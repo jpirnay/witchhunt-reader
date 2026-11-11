@@ -17,6 +17,7 @@
 #endif
 
 struct FontManifestFile;
+struct FontManifestCallbacks;
 
 enum class FontManifestStatus : uint8_t { Ok, Invalid, UnsupportedVersion, OutOfMemory };
 
@@ -52,6 +53,21 @@ class FontManifestReader {
   // one block.
   FontManifestStatus read(HalFile& file, FontCatalog& catalog, std::string& baseUrl);
 
+  // What forEachFamily() hands over, in order.
+  struct FamilyVisitor {
+    void* ctx = nullptr;
+    // The document passed the check read() makes: the families follow. Called once, before the first of them.
+    void (*checked)(void* ctx) = nullptr;
+    // One family the manifest keeps, alone in `family` (index 0), which holds it for the call only.
+    void (*family)(void* ctx, FontCatalog& family) = nullptr;
+  };
+
+  // read() a family at a time, for an answer written as the file is read: the list is never held whole. The first
+  // pass checks the document as read()'s does and notes the size each family takes (4 bytes a family); the second
+  // gives each family the manifest keeps a block of exactly that size and hands it over. Statuses as read(); a failure
+  // in the second pass comes after `checked` and some families.
+  FontManifestStatus forEachFamily(HalFile& file, const FamilyVisitor& visitor, std::string& baseUrl);
+
   // Why read() did not return Ok, for the log.
   const char* failure() const { return failureReason; }
   // The manifest's version, once read() has checked the document; 0 if it gives none.
@@ -65,6 +81,8 @@ class FontManifestReader {
     return false;
   }
   bool feedFile(HalFile& file);
+  FontManifestStatus firstPass(HalFile& file);
+  static FontManifestCallbacks parserCallbacks(FontManifestReader* reader);
 
   void familyBegin();
   void familyName(const char* value, size_t len);
@@ -73,16 +91,28 @@ class FontManifestReader {
   void familyInDownloadAll(bool value);
   void fileEntry(const FontManifestFile& f);
   void familyEnd();
+  bool keepOrDrop();
+  void visitingBegin();
+  void visitingEnd(bool kept);
 
   const char* logTag;
   NameCheck familyNameOk;
   NameCheck fileNameOk;
   bool takesPacks;
 
-  // Both live only inside read().
+  // Both live only inside read() or forEachFamily().
   Work* work = nullptr;
   FontCatalog::Builder* builder = nullptr;
   bool filling = false;
+
+  // forEachFamily() alone (`listing`): the next family's place in Work's size table, the visitor (set for the second
+  // pass), where the family started in the first pass's count, and whether a family went wrong.
+  static constexpr uint32_t kDropped = UINT32_MAX;
+  bool listing = false;
+  size_t nextFamily = 0;
+  const FamilyVisitor* visitor = nullptr;
+  FontCatalog::Size familyStart;
+  bool visitFailed = false;
 
   const char* failureReason = nullptr;
   int manifestVersion = 0;
