@@ -129,9 +129,8 @@ class CssParser {
   //      lowercased, so a mixed-case class would no longer match its own rule.
   // v34: the font-size keywords take the CSS Fonts 4 scale (small 8/9, x-large 3/2, xx-large 2, xxx-large 3, smaller
   //      1/1.2); a v33 cache stores small and smaller as 0.8, x-large as 1.4 and xx-large as 1.6.
-  // v35: `initial-letter` (and -webkit-initial-letter) is persisted (a byte after the flow word; in the resident pool,
-  //      flow-word bit 15 and a byte after it); ::first-letter rules are kept (flags bit 2; a complex one marked in its
-  //      steps byte), and an @supports block that tests initial-letter is read. A v34 compile dropped all three.
+  // v35: `white-space` is persisted, in bits 12-14 of the flow word (packFlow); a v34 cache never recorded it.
+  // v35 also: `initial-letter` (a byte after the flow word) and ::first-letter rules (flags bit 2) are persisted.
   static constexpr uint8_t CSS_CACHE_VERSION = 35;
   // Bytes before the complex-rule table and the sorted offset index: version(1) + ruleCount(2) +
   // totalSelectorCandidates(4) + unsupportedSelectorSkips(4) + flags(1) + complexTableBytes(2).
@@ -558,6 +557,7 @@ class CssParser {
   static bool interpretTextCombine(std::string_view val, CssTextCombine& out);
   static bool interpretDirection(std::string_view val, CssDirection& out);
   static bool interpretUnicodeBidi(std::string_view val, CssUnicodeBidi& out);
+  static bool interpretWhiteSpace(std::string_view val, CssWhiteSpace& out);
   // initial-letter: normal | <size> [<sink> | drop | raise], into a CssInitialLetter byte. False for inherit, unset and
   // what it does not read. Not inherited: unset is `normal`.
   static bool interpretInitialLetter(std::string_view val, uint8_t& out);

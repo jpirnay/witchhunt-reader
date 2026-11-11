@@ -12,6 +12,7 @@
 
 #include "BidiLine.h"
 #include "CjkPunctuation.h"
+#include "ParagraphIndent.h"
 #include "TokenBoundary.h"
 #include "TypographyProfile.h"
 #include "blocks/BlockStyle.h"
@@ -334,6 +335,8 @@ class ParsedText {
   // The book's typography (TypographyProfile.h): Latin rules until the parser sets the book's.
   TypographyProfile typography_;
   bool vertical_ = false;  // see setVertical
+  // The reader's Paragraph Indent (ParagraphIndent): see setParagraphIndent.
+  uint8_t paragraphIndent_ = static_cast<uint8_t>(ParagraphIndent::FromBook);
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
   bool bionicReadingEnabled;
@@ -387,8 +390,10 @@ class ParsedText {
   // Han or kana and a Latin letter or digit.
   int cjkLatinGapBefore(const GfxRenderer& renderer, int fontId, size_t j) const;
   // Whether justification stretches the gap before words[j]: not before closing punctuation (. , ) » and the like),
-  // which keeps its natural width. Both line paths ask it.
+  // which keeps its natural width, nor after a run of kept spaces. Both line paths ask it.
   bool stretchesGapBefore(size_t j) const;
+  // Whether words[i] is a run of kept spaces (see addWord).
+  bool isKeptSpaceRun(size_t i) const;
   // Room in all five per-word vectors for `additional` more tokens; false (and wordGrowthRefused_)
   // when the heap cannot hold the growth.
   bool reserveWords(size_t additional);
@@ -427,11 +432,13 @@ class ParsedText {
                                         const std::vector<uint16_t>& wordWidths,
                                         const std::vector<TokenBoundary::Boundary>& boundaries, size_t lineStartIndex,
                                         int firstLineIndent, int16_t blockStartY = 0, int lineHeight = 0) const;
-  // Splits words[wordIndex] at the widest legal break whose prefix fits `availableWidth`. *outMyanmarCut: the cut falls
-  // between Myanmar syllables, how a Burmese line ends rather than a hyphenation, which the page-bottom retry leaves.
+  // Splits words[wordIndex] at the widest legal break whose prefix fits `availableWidth`. *outLineEndCut: the cut is
+  // how such a line ends rather than a hyphenation, which the page-bottom retry leaves: between Myanmar syllables, or
+  // in text that keeps its spaces, which is never hyphenated and is cut, without a hyphen, only where a token is wider
+  // than the line (allowFallbackBreaks).
   bool hyphenateWordAtIndex(size_t wordIndex, int availableWidth, const GfxRenderer& renderer, int fontId,
                             std::vector<uint16_t>& wordWidths, bool allowFallbackBreaks,
-                            bool* outInsertedHyphen = nullptr, bool* outMyanmarCut = nullptr);
+                            bool* outInsertedHyphen = nullptr, bool* outLineEndCut = nullptr);
   LineProcessResult extractLine(
       size_t breakIndex, int pageWidth, const std::vector<uint16_t>& wordWidths,
       const std::vector<TokenBoundary::Boundary>& boundaries, const std::vector<size_t>& lineBreakIndices,
@@ -454,7 +461,7 @@ class ParsedText {
   // Whether token i, which asks to combine, may: see combines().
   bool fitsCombined(const GfxRenderer& renderer, int fontId, size_t i) const;
   // Narrows each CJK mark that is a token to its mid-line width and fills markClass_, edgeTrim_, shrink_ and
-  // edgeShrink_.
+  // edgeShrink_. A run of kept spaces hangs at a line's end: its edgeTrim_ takes its width off there.
   void applyPunctuationWidths(const GfxRenderer& renderer, int fontId, std::vector<uint16_t>& widths);
   // Widens the base of each ruby longer than what its neighbours let it overhang, and fills rubyEdge_; a mark in a
   // group, or between overhangs, gives push-in only what the rubies leave it (shrink_).
@@ -542,9 +549,13 @@ class ParsedText {
   // textEmphasis: the word's CSS text-emphasis mark (TextEmphasis), 0 for none; every token of the word carries it.
   // textCombine: the word's CSS text-combine-upright (a CssTextCombine). Under `all` every token of the word asks to
   // combine, under `digits N` a token of 1 to N ASCII digits and nothing else; see combines().
+  // keptSpaces: the word is text whose spaces the book keeps (CSS white-space pre, pre-wrap, break-spaces; <pre>). Its
+  // tokens are never hyphenated. A word of nothing but spaces is then a run of kept spaces: one token, as wide as its
+  // spaces, glued to the token before it, that a line may end after (where it hangs: it takes no room at the line's
+  // end) but not before. The word after a run starts at no gap of its own, and no gap a run makes is stretched.
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
                uint8_t sizePct = DEFAULT_WORD_SIZE_PCT, uint32_t visibleOffset = 0, uint8_t fontSlot = 0,
-               uint8_t textEmphasis = 0, uint8_t textCombine = 0);
+               uint8_t textEmphasis = 0, uint8_t textCombine = 0, bool keptSpaces = false);
   // Tokens [firstToken, firstToken + tokenCount) become one ruby group: the first keeps its boundary (a break may
   // come before the group), the rest are glued to it. False when the range is empty, runs past size(), or a token
   // in it already has a role.
@@ -578,6 +589,9 @@ class ParsedText {
   void setTypography(const TypographyProfile& typography) { typography_ = typography; }
   // Measure words as a column runs them (a vertical section's). Survives reset(): it is the section's.
   void setVertical(bool vertical) { vertical_ = vertical; }
+  // The reader's Paragraph Indent, a stored ParagraphIndent. Survives reset(): it is the section's. A table cell's
+  // text never takes it, so a cell keeps Book's Style.
+  void setParagraphIndent(const uint8_t indent) { paragraphIndent_ = indent; }
   // See lineArena_ / beforeLine_. Both survive reset().
   void setLineArena(BuildArena* arena) { lineArena_ = arena; }
   // A run laid out as its code points because it could not be shaped (no memory, or the font failed it) sets *latch

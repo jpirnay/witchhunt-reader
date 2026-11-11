@@ -261,7 +261,7 @@ class EpubReaderActivity final : public Activity {
     bool imagePageWithAA = false;
     bool forcedHalfRefresh = false;
     uint8_t orientation = 0;
-    uint8_t imageRendering = 0;
+    uint8_t imageRendering = 0;  // what the chapter is laid out with: Black & White as Display (ReaderImageMode)
     bool embeddedStyle = false;
     bool textAntiAliasing = false;
     int effectiveFontId = 0;
@@ -549,6 +549,7 @@ class EpubReaderActivity final : public Activity {
   struct PendingGrayscale {
     bool active = false;
     std::shared_ptr<Page> page;  // page whose text needs the AA pass
+    bool imagesGray = true;      // its images replay their gray cache in the pass (not in Black & White)
     int fontId = 0;
     int marginLeft = 0;
     int contentTop = 0;
@@ -1112,7 +1113,10 @@ class EpubReaderActivity final : public Activity {
   void openQuickOverrides();
   bool getEffectiveEmbeddedStyle() const;
   bool getEffectiveBionicReading() const;
+  // The Images setting for this book: its override, else the setting (CrossPointSettings::IMAGE_RENDERING).
   uint8_t getEffectiveImageRendering() const;
+  // Whether the page's images take part in its gray pass: not in Black & White (ReaderImageMode).
+  bool imagesTakeGrayPass(const Page& page) const;
   uint8_t getEffectiveParagraphAlignment() const;
   bool getEffectiveTextAntiAliasing() const;
   bool onePassTextFor(const Page& page) const;

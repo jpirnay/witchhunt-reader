@@ -1080,7 +1080,7 @@ bool MdReaderActivity::loadPageIndexCache() {
 
   int32_t margin;
   serialization::readPod(f, margin);
-  if (margin != cachedScreenMargin) {
+  if (margin != cachedSideMargin) {
     LOG_DBG("MDR", "Cache screen margin mismatch, rebuilding");
     return false;
   }
@@ -1139,7 +1139,7 @@ void MdReaderActivity::savePageIndexCache() const {
   serialization::writePod(f, static_cast<int32_t>(viewportWidth));
   serialization::writePod(f, static_cast<int32_t>(linesPerPage));
   serialization::writePod(f, static_cast<int32_t>(cachedFontId));
-  serialization::writePod(f, static_cast<int32_t>(cachedScreenMargin));
+  serialization::writePod(f, static_cast<int32_t>(cachedSideMargin));
   serialization::writePod(f, cachedParagraphAlignment);
   serialization::writePod(f, static_cast<uint32_t>(pageOffsets.size()));
 

@@ -42,9 +42,10 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=2 z=100 t=QUOTED
    W x=60 s=2 z=100 t=slanted.
-  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=18 s=1 z=100 t=PRECODE
-   W x=104 s=1 z=100 t=bold
+  LINE y=24 x=0 align=1 mult=1.000 hfid=0 words=3
+   W x=0 s=1 z=100 t=PRECODE
+   W x=80 s=1 z=100 t= 
+   W x=86 s=1 z=100 t=bold
   LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=AFTERPRE
    W x=81 s=0 z=100 t=upright.

@@ -105,7 +105,7 @@ constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
 //         + fontFamily hash (uint32; defined is bit 2 of the font-size flags byte; v28)
 //         + line-height in ems (float; defined is bit 3 of the font-size flags byte; v30)
 //         + the flow word (uint16: writing-mode, direction, text-combine-upright, text-orientation,
-//           unicode-bidi; packFlow; v30)
+//           unicode-bidi; packFlow; v30; white-space, v35)
 //         + the initial-letter byte (CssStyle::initialLetter; v35)
 constexpr size_t CSS_FIXED_STYLE_BYTES =
     4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) + sizeof(uint8_t) + sizeof(uint16_t) +
@@ -841,6 +841,26 @@ bool CssParser::interpretUnicodeBidi(std::string_view v, CssUnicodeBidi& out) {
   return true;
 }
 
+bool CssParser::interpretWhiteSpace(std::string_view v, CssWhiteSpace& out) {
+  if (v == "-moz-pre-wrap" || v == "-pre-wrap" || v == "-o-pre-wrap") v = "pre-wrap";  // the old prefixed spellings
+  if (v == "normal" || v == "initial") {
+    out = CssWhiteSpace::Normal;
+  } else if (v == "nowrap") {
+    out = CssWhiteSpace::Nowrap;
+  } else if (v == "pre") {
+    out = CssWhiteSpace::Pre;
+  } else if (v == "pre-wrap") {
+    out = CssWhiteSpace::PreWrap;
+  } else if (v == "pre-line") {
+    out = CssWhiteSpace::PreLine;
+  } else if (v == "break-spaces") {
+    out = CssWhiteSpace::BreakSpaces;
+  } else {
+    return false;
+  }
+  return true;
+}
+
 bool CssParser::interpretInitialLetter(const std::string_view v, uint8_t& out) {
   if (v == "normal" || v == "initial") {
     out = CssInitialLetter::kNormal;
@@ -1027,6 +1047,8 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
     interpretDirection(propValueBuf, style.direction);
   } else if (propNameBuf == "unicode-bidi") {
     interpretUnicodeBidi(propValueBuf, style.unicodeBidi);
+  } else if (propNameBuf == "white-space") {
+    interpretWhiteSpace(propValueBuf, style.whiteSpace);
   } else if (propNameBuf == "initial-letter" || propNameBuf == "-webkit-initial-letter") {
     interpretInitialLetter(propValueBuf, style.initialLetter);
   } else if (propNameBuf == "text-align") {
@@ -2083,13 +2105,14 @@ void CssParser::logResolveStats(const char* context) const {
 }
 
 namespace {
-// The flow properties (CssStyle's writingMode, direction, textCombine, textOrientation, unicodeBidi), packed the same
-// way in the rule cache's payload and in the arena's records: bits 0-1, 2-3, 4-6, 7-8 and 9-11, each 0 when unset.
+// The flow properties (CssStyle's writingMode, direction, textCombine, textOrientation, unicodeBidi) and whiteSpace,
+// packed the same way in the rule cache's payload and in the arena's records: bits 0-1, 2-3, 4-6, 7-8, 9-11 and 12-14,
+// each 0 when unset.
 uint16_t packFlow(const CssStyle& s) {
   return static_cast<uint16_t>(
       (static_cast<unsigned>(s.writingMode) & 3u) | ((static_cast<unsigned>(s.direction) & 3u) << 2) |
       ((static_cast<unsigned>(s.textCombine) & 7u) << 4) | ((static_cast<unsigned>(s.textOrientation) & 3u) << 7) |
-      ((static_cast<unsigned>(s.unicodeBidi) & 7u) << 9));
+      ((static_cast<unsigned>(s.unicodeBidi) & 7u) << 9) | ((static_cast<unsigned>(s.whiteSpace) & 7u) << 12));
 }
 
 void unpackFlow(const uint16_t flow, CssStyle& s) {
@@ -2098,6 +2121,7 @@ void unpackFlow(const uint16_t flow, CssStyle& s) {
   s.textCombine = static_cast<CssTextCombine>((flow >> 4) & 7u);
   s.textOrientation = static_cast<CssTextOrientation>((flow >> 7) & 3u);
   s.unicodeBidi = static_cast<CssUnicodeBidi>((flow >> 9) & 7u);
+  s.whiteSpace = static_cast<CssWhiteSpace>((flow >> 12) & 7u);
 }
 }  // namespace
 
@@ -2700,9 +2724,10 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   if (s.defined.display && (static_cast<unsigned>(s.display) & 2u)) mask |= 1u << 30;
   // Bit 31 announces a byte of values the uint16 below has no room for, written after it: an
   // explicit `inherit` of font-weight (bit 0) and of font-style (bit 1), a font-size relative to
-  // the body (bit 2), a font-family (bit 3: its hash follows the multipliers), a flow property (bit 4: the flow word,
-  // packFlow, follows this byte), a text-emphasis (bit 5: its mark byte follows the hash), and in bits 6-7 ruleBorder.
-  // An initial-letter is bit 15 of the flow word, which packFlow leaves free: its byte follows the word.
+  // the body (bit 2), a font-family (bit 3: its hash follows the multipliers), a flow property or white-space (bit 4:
+  // the flow word, packFlow, follows this byte), a text-emphasis (bit 5: its mark byte follows the hash), and in bits
+  // 6-7 ruleBorder. An initial-letter is bit 15 of the flow word, which packFlow leaves free: its byte follows the
+  // word.
   uint8_t extra = 0;
   if (s.defined.fontWeight && s.fontWeight == CssFontWeight::Inherit) extra |= 0x01;
   if (s.defined.fontStyle && s.fontStyle == CssFontStyle::Inherit) extra |= 0x02;

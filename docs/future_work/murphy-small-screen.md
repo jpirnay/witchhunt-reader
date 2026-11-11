@@ -125,7 +125,7 @@ Default menu on Murphy is 5 rows (Library, Stats, File Transfer, Weather, Settin
 | S2 | `BaseTheme.cpp:1282-1283` | `titleMargin* = cluster + 30` | P defaults: left cluster 53 + 30, right cluster 71 + 30, leaves 230-83-101 = 46 px, about 7 chars of chapter title. With a left clock (+40) about 6 px, so the title is reduced to an ellipsis. No overlap, it truncates cleanly. | Local: drop the 30 on compact |
 | S1 | `QrDisplayActivity.cpp:40-44`, `QrUtils.cpp:103-104` | `px = max(1, maxDim/size)` | L: bounds height 103. A payload above about version 21 (over 101 modules) is forced to 1 px and exceeds the bounds: it overlaps the header and is clipped at the bottom, so it will not scan. P: bounds 200, fits up to version 40 at 1 px; dense codes at 1 px are probably unscannable (S3). | Local: refuse or truncate payload so `size <= maxDim` |
 | S3 | `MdReaderActivity.h:27,69`, `.cpp:667,737` | `MIN_COL_INNER_WIDTH = 24`, `LIST_INDENT = 20` | Tables with 7+ columns flatten at 230 px, handled deliberately. Third-level list indent is 60 of 230. | Accept |
-| S3 | `SettingsList.h:407` | `screenMargin {5, 40, 5}` | At 40 the column is 160 px: 10 chars at 14 pt. | Murphy: cap at 20 |
+| S3 | `SettingsList.h:407` | `screenMargin {5, 40, 5}` (now `screenMarginHorizontal`) | At 40 the column is 160 px: 10 chars at 14 pt. | Murphy: cap at 20 |
 | S3 | `EpubReaderActivity.cpp:6053-6065` | hint box height 44, `hintY2 = +20` | Truncated-section hint fits on Murphy; numbers were tuned for a larger line height. | Accept |
 
 ## 8. Weather

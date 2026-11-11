@@ -92,6 +92,18 @@ enum class CssTextOrientation : uint8_t { Unset = 0, Mixed, Upright, Sideways };
 enum class CssTextCombine : uint8_t { Unset = 0, None, All, Digits2, Digits3, Digits4 };
 enum class CssDirection : uint8_t { Unset = 0, Ltr, Rtl, Auto };
 enum class CssUnicodeBidi : uint8_t { Unset = 0, Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext };
+// What the element's text keeps of its white space (CSS Text 3 white-space); inherited. Like the flow properties it has
+// no defined bit: 0 is Unset.
+enum class CssWhiteSpace : uint8_t { Unset = 0, Normal, Nowrap, Pre, PreWrap, PreLine, BreakSpaces };
+
+namespace CssWhiteSpaces {
+// Runs of spaces and tabs stay as they are written: pre, pre-wrap and break-spaces.
+constexpr bool keepsSpaces(const CssWhiteSpace w) {
+  return w == CssWhiteSpace::Pre || w == CssWhiteSpace::PreWrap || w == CssWhiteSpace::BreakSpaces;
+}
+// A line feed breaks the line: those three and pre-line.
+constexpr bool keepsLineFeeds(const CssWhiteSpace w) { return keepsSpaces(w) || w == CssWhiteSpace::PreLine; }
+}  // namespace CssWhiteSpaces
 
 // CSS initial-letter (and -webkit-initial-letter), packed in a byte: the letter's size in lines in the low nibble, how
 // many lines it sinks in the high one. 0 is unset (no defined bit, as for the flow properties); a size of 1 is
@@ -266,12 +278,13 @@ struct CssStyle {
   static constexpr uint8_t kRuleBorderNone = 0x01;  // border none or hidden, or no width
   static constexpr uint8_t kRulePainted = 0x02;     // a visible border, or a background
   uint8_t ruleBorder = 0;
+  CssWhiteSpace whiteSpace = CssWhiteSpace::Unset;
   uint8_t initialLetter = 0;  // CssInitialLetter; 0 unset
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
 
   // Number of properties applyOver() merges: the size of its `ranks` array.
-  static constexpr int kCascadeProperties = 35;
+  static constexpr int kCascadeProperties = 36;
 
   // Apply properties from another style, only overwriting if the other style
   // has that property explicitly defined.
@@ -415,7 +428,8 @@ struct CssStyle {
       textEmphasis = base.textEmphasis;
       defined.textEmphasis = 1;
     }
-    if (base.hasInitialLetter() && take(hasInitialLetter(), 34)) initialLetter = base.initialLetter;
+    if (base.hasWhiteSpace() && take(hasWhiteSpace(), 34)) whiteSpace = base.whiteSpace;
+    if (base.hasInitialLetter() && take(hasInitialLetter(), 35)) initialLetter = base.initialLetter;
   }
 
   // An explicit `inherit` is defined (it overrides lower rules in applyOver) but reports as unset:
@@ -475,6 +489,7 @@ struct CssStyle {
   [[nodiscard]] bool hasTextCombine() const { return textCombine != CssTextCombine::Unset; }
   [[nodiscard]] bool hasDirection() const { return direction != CssDirection::Unset; }
   [[nodiscard]] bool hasUnicodeBidi() const { return unicodeBidi != CssUnicodeBidi::Unset; }
+  [[nodiscard]] bool hasWhiteSpace() const { return whiteSpace != CssWhiteSpace::Unset; }
   [[nodiscard]] bool hasInitialLetter() const { return initialLetter != 0; }
   // The lines an initial-letter drop cap spans: 2 and up, else 0 (unset, or `normal`).
   [[nodiscard]] uint8_t initialLetterLines() const {
@@ -484,7 +499,7 @@ struct CssStyle {
   // Whether the style says anything at all: a defined bit, or one of the properties that have none.
   [[nodiscard]] bool anyDefined() const {
     return defined.anySet() || ruleBorder != 0 || hasWritingMode() || hasTextOrientation() || hasTextCombine() ||
-           hasDirection() || hasUnicodeBidi() || hasInitialLetter();
+           hasDirection() || hasUnicodeBidi() || hasWhiteSpace() || hasInitialLetter();
   }
   [[nodiscard]] bool hasFontSizeMultiplier() const { return defined.fontSizeMultiplier; }
 
@@ -574,13 +589,13 @@ struct CssStyle {
     direction = CssDirection::Unset;
     unicodeBidi = CssUnicodeBidi::Unset;
     textEmphasis = 0;
+    whiteSpace = CssWhiteSpace::Unset;
     initialLetter = 0;
     defined.clearAll();
   }
 };
 
 // The flow properties sit in padding (after pageBreakAfter and after visibilityHidden), so they cost a style nothing;
-// textEmphasis, after fontFamily, is the one field that takes a word of its own, shared with ruleBorder and
-// initialLetter (one byte of it spare). Every member is 4-byte aligned or smaller, so the C3 lays it out as the host
-// does.
+// textEmphasis, after fontFamily, is the one field that takes a word of its own, shared with ruleBorder, whiteSpace
+// and initialLetter. Every member is 4-byte aligned or smaller, so the C3 lays it out as the host does.
 static_assert(sizeof(CssStyle) == 128, "CssStyle grew: the flow properties or textEmphasis no longer fit its padding");

@@ -350,6 +350,51 @@ TEST(CssParserDeclarations, TheFlowPropertiesCascade) {
   EXPECT_EQ(CssTextCombine::All, merged.textCombine);
 }
 
+TEST(CssParserDeclarations, WhiteSpaceValues) {
+  const auto ws = [](const char* decl) { return CssParser::parseInlineStyle(decl).whiteSpace; };
+  EXPECT_EQ(CssWhiteSpace::Normal, ws("white-space: normal"));
+  EXPECT_EQ(CssWhiteSpace::Nowrap, ws("white-space: nowrap"));
+  EXPECT_EQ(CssWhiteSpace::Pre, ws("white-space: pre"));
+  EXPECT_EQ(CssWhiteSpace::PreWrap, ws("white-space: pre-wrap"));
+  EXPECT_EQ(CssWhiteSpace::PreLine, ws("white-space: pre-line"));
+  EXPECT_EQ(CssWhiteSpace::BreakSpaces, ws("white-space: break-spaces"));
+  EXPECT_EQ(CssWhiteSpace::PreWrap, ws("white-space: -moz-pre-wrap"));
+  EXPECT_EQ(CssWhiteSpace::PreWrap, ws("white-space: -pre-wrap"));
+  EXPECT_EQ(CssWhiteSpace::PreWrap, ws("white-space: -o-pre-wrap"));
+  EXPECT_EQ(CssWhiteSpace::Normal, ws("white-space: initial"));
+  EXPECT_EQ(CssWhiteSpace::Pre, ws("WHITE-SPACE : PRE !important"));
+  // Inherited: inherit, unset and what is not known leave it to the parent.
+  EXPECT_EQ(CssWhiteSpace::Unset, ws("white-space: inherit"));
+  EXPECT_EQ(CssWhiteSpace::Unset, ws("white-space: unset"));
+  EXPECT_EQ(CssWhiteSpace::Unset, ws("white-space: preserve-everything"));
+  EXPECT_EQ(CssWhiteSpace::Pre, ws("white-space: normal; white-space: pre"));
+}
+
+TEST(CssParserDeclarations, WhiteSpaceKeepsWhatItSays) {
+  using CssWhiteSpaces::keepsLineFeeds;
+  using CssWhiteSpaces::keepsSpaces;
+  EXPECT_FALSE(keepsSpaces(CssWhiteSpace::Unset) || keepsLineFeeds(CssWhiteSpace::Unset));
+  EXPECT_FALSE(keepsSpaces(CssWhiteSpace::Normal) || keepsLineFeeds(CssWhiteSpace::Normal));
+  EXPECT_FALSE(keepsSpaces(CssWhiteSpace::Nowrap) || keepsLineFeeds(CssWhiteSpace::Nowrap));
+  EXPECT_TRUE(keepsSpaces(CssWhiteSpace::Pre) && keepsLineFeeds(CssWhiteSpace::Pre));
+  EXPECT_TRUE(keepsSpaces(CssWhiteSpace::PreWrap) && keepsLineFeeds(CssWhiteSpace::PreWrap));
+  EXPECT_TRUE(keepsSpaces(CssWhiteSpace::BreakSpaces) && keepsLineFeeds(CssWhiteSpace::BreakSpaces));
+  EXPECT_FALSE(keepsSpaces(CssWhiteSpace::PreLine));
+  EXPECT_TRUE(keepsLineFeeds(CssWhiteSpace::PreLine));
+}
+
+TEST(CssParserDeclarations, WhiteSpaceCascades) {
+  CssStyle merged;
+  uint32_t ranks[CssStyle::kCascadeProperties] = {};
+  merged.applyOver(CssParser::parseInlineStyle("white-space: pre"), 2, ranks);
+  merged.applyOver(CssParser::parseInlineStyle("white-space: normal"), 1, ranks);
+  EXPECT_EQ(CssWhiteSpace::Pre, merged.whiteSpace);
+  merged.applyOver(CssParser::parseInlineStyle("white-space: pre-line"), 3, ranks);
+  EXPECT_EQ(CssWhiteSpace::PreLine, merged.whiteSpace);
+  merged.applyOver(CssParser::parseInlineStyle("white-space: inherit"), 4, ranks);
+  EXPECT_EQ(CssWhiteSpace::PreLine, merged.whiteSpace);
+}
+
 TEST(CssParserDeclarations, InitialLetterValues) {
   const auto letter = [](const char* decl) { return CssParser::parseInlineStyle(decl).initialLetter; };
   using CssInitialLetter::pack;
@@ -411,6 +456,7 @@ TEST(CssParserSupports, OnlyAnInitialLetterTestHolds) {
 }
 
 TEST(CssParserDeclarations, AStyleWithOnlyAFlowPropertySaysSomething) {
+  EXPECT_TRUE(CssParser::parseInlineStyle("white-space: pre").anyDefined());
   EXPECT_TRUE(CssParser::parseInlineStyle("initial-letter: 3").anyDefined());
   EXPECT_TRUE(CssParser::parseInlineStyle("writing-mode: vertical-rl").anyDefined());
   EXPECT_TRUE(CssParser::parseInlineStyle("unicode-bidi: isolate").anyDefined());

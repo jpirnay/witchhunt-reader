@@ -491,8 +491,8 @@ bool stylesEqual(const CssStyle& a, const CssStyle& b) {
          a.fontFamily == b.fontFamily && a.colorTransparent == b.colorTransparent && a.opacityZero == b.opacityZero &&
          a.visibilityHidden == b.visibilityHidden && a.writingMode == b.writingMode &&
          a.textOrientation == b.textOrientation && a.textCombine == b.textCombine && a.direction == b.direction &&
-         a.unicodeBidi == b.unicodeBidi && a.textEmphasis == b.textEmphasis && a.initialLetter == b.initialLetter &&
-         definedEqual(a.defined, b.defined);
+         a.unicodeBidi == b.unicodeBidi && a.textEmphasis == b.textEmphasis && a.whiteSpace == b.whiteSpace &&
+         a.initialLetter == b.initialLetter && definedEqual(a.defined, b.defined);
 }
 }  // namespace
 
@@ -711,8 +711,10 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       ".g { writing-mode: vertical-rl; }\n"  // a rule with nothing else is kept
       ".h { text-emphasis-style: none; }\n"
       ".i { writing-mode: vertical-rl; text-emphasis: filled triangle; }\n"  // the flow word and a mark in one record
-      ".j { initial-letter: 3 2; }\n"                                        // a rule with nothing else is kept
-      ".k { -webkit-initial-letter: 4; direction: rtl; text-emphasis: dot; }\n";
+      ".j { white-space: break-spaces; }\n"                                  // a rule with nothing else is kept
+      ".k { white-space: pre-line; unicode-bidi: plaintext; direction: rtl; }\n"
+      ".l { initial-letter: 3 2; }\n"  // a rule with nothing else is kept
+      ".m { -webkit-initial-letter: 4; direction: rtl; text-emphasis: dot; }\n";
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
   std::string cssPath;
@@ -722,8 +724,9 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   ASSERT_TRUE(compileCache(parser, cssPath));
 
   const std::vector<std::pair<std::string, std::string>> probes = {
-      {"p", "a"},   {"p", "b"},    {"div", "c"},  {"span", "a"}, {"p", "none"}, {"span", "d"}, {"span", "e"},
-      {"div", "f"}, {"html", "g"}, {"span", "h"}, {"span", "i"}, {"span", "j"}, {"span", "k"}};
+      {"p", "a"},    {"p", "b"},    {"div", "c"}, {"span", "a"}, {"p", "none"},
+      {"span", "d"}, {"span", "e"}, {"div", "f"}, {"html", "g"}, {"span", "h"},
+      {"span", "i"}, {"pre", "j"},  {"p", "k"},   {"span", "l"}, {"span", "m"}};
   auto resolveAll = [&](CssParser& p) {
     std::vector<CssStyle> out;
     for (const auto& pr : probes) out.push_back(p.resolveStyle(pr.first, pr.second));
@@ -756,9 +759,13 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       << "an explicit text-emphasis-style: none did not survive the disk cache";
   EXPECT_EQ(CssWritingMode::VerticalRl, heapStyles[10].writingMode);
   EXPECT_EQ(heapStyles[10].textEmphasis, TextEmphasis::Triangle) << "a mark beside the flow word did not survive";
-  EXPECT_EQ(CssInitialLetter::pack(3, 2), heapStyles[11].initialLetter)
+  EXPECT_EQ(CssWhiteSpace::BreakSpaces, heapStyles[11].whiteSpace) << "a rule with only white-space was dropped";
+  EXPECT_EQ(CssWhiteSpace::PreLine, heapStyles[12].whiteSpace) << "white-space did not survive beside the flow";
+  EXPECT_EQ(CssUnicodeBidi::Plaintext, heapStyles[12].unicodeBidi);
+  EXPECT_EQ(CssInitialLetter::pack(3, 2), heapStyles[13].initialLetter)
       << "a rule with only initial-letter was dropped";
-  EXPECT_EQ(CssInitialLetter::pack(4, 0), heapStyles[12].initialLetter) << "initial-letter beside the flow word";
+  EXPECT_EQ(CssInitialLetter::pack(4, 0), heapStyles[14].initialLetter) << "initial-letter beside the flow word";
+  EXPECT_EQ(CssDirection::Rtl, heapStyles[14].direction);
   EXPECT_EQ(CssDirection::Rtl, heapStyles[12].direction);
 
   BuildArena arena(64 * 1024);

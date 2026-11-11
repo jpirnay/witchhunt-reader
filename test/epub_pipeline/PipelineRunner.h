@@ -11,6 +11,7 @@
 #include <string>
 
 #include "Epub/FlowContext.h"
+#include "Epub/ParagraphIndent.h"
 
 class BuildArena;
 class GfxRenderer;
@@ -29,6 +30,8 @@ struct Profile {
   float bookLineHeightFloor = 0.0f;
   uint16_t lineHeightEmPx = 0;
   bool extraParagraphSpacing = false;
+  // The reader's Paragraph Indent (Section::BuildParams): Book's Style, which the goldens were laid out with.
+  uint8_t paragraphIndent = static_cast<uint8_t>(ParagraphIndent::FromBook);
   uint8_t paragraphAlignment = 0;
   uint16_t viewportWidth = 460;
   uint16_t viewportHeight = 760;
