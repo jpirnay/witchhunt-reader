@@ -66,6 +66,9 @@ struct BlockStyle {
   // A heading, a list item or <pre>, or a block inside one: the reader's Paragraph Indent leaves its first line as the
   // book sets it (ParagraphIndent.h). Parse-time only, NOT serialised; a merge takes the child's, as keepWithNext.
   bool keepsBookIndent = false;
+  // A list item or a block inside one: a fixed Paragraph Indent drops the one em Book's Style gives it where the book
+  // sets no indent (ParagraphIndent.h). Parse-time only, NOT serialised; a merge takes the child's.
+  bool listItem = false;
   // <pre>, or a block inside one: its lines are laid out as the book wrote them, so it takes no first-line indent the
   // book's CSS does not set, whatever the setting (ParagraphIndent.h). Parse-time only, NOT serialised; a merge takes
   // the child's. A <pre>'s next line starts a block in the same style, so every line carries it.
@@ -154,6 +157,7 @@ struct BlockStyle {
     combinedBlockStyle.fromBrElement = false;
     combinedBlockStyle.keepWithNext = child.keepWithNext;
     combinedBlockStyle.keepsBookIndent = child.keepsBookIndent;
+    combinedBlockStyle.listItem = child.listItem;
     combinedBlockStyle.preformatted = child.preformatted;
     combinedBlockStyle.lineHeightEm = child.lineHeightEm;
     combinedBlockStyle.direction = child.direction != CssDirection::Unset ? child.direction : direction;

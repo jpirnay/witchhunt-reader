@@ -38,6 +38,8 @@ struct IndentInputs {
   bool bodyParagraph = false;
   // <pre> or a block inside one: laid out line by line as the book wrote it, so no indent but the book's own.
   bool preformatted = false;
+  // A list item or a block inside one.
+  bool listItem = false;
   // A float or a drop cap sits beside the first lines.
   bool besideFloat = false;
   bool extraParagraphSpacing = false;
@@ -54,9 +56,10 @@ struct ResolvedIndent {
 // <br>, as long as Extra Paragraph Spacing is off and no float sits beside it: the rule from before the setting, list
 // items included, but not on <pre>, where it shifted a code block's or a verse's first line against the rest. A fixed
 // step replaces the book's indent, positive or zero, on a body paragraph that is justified or start-aligned, whether
-// Extra Paragraph Spacing is on or not: the reader chose it. Everything else keeps Book's Style: a hanging (negative)
-// indent, a poem line's span indent, a <br> continuation, a heading, list item, table cell or <pre>, a block beside a
-// float or a drop cap, and a centred or end-aligned one.
+// Extra Paragraph Spacing is on or not: the reader chose it. A list item under a fixed step keeps only the book's own
+// indent: the one em Book's Style adds goes, so its marker starts at the list's edge. Everything else keeps Book's
+// Style: a hanging (negative) indent, a poem line's span indent, a <br> continuation, a heading, table cell or <pre>,
+// a block beside a float or a drop cap, and a centred or end-aligned one.
 constexpr ResolvedIndent resolveParagraphIndent(const uint8_t setting, const IndentInputs& in, const int emPx) {
   ResolvedIndent bookStyle;
   if (in.bookDefined) {
@@ -66,6 +69,7 @@ constexpr ResolvedIndent resolveParagraphIndent(const uint8_t setting, const Ind
     bookStyle = {static_cast<int16_t>(emPx), true};
   }
   if (setting >= kParagraphIndentFixedSteps) return bookStyle;
+  if (in.listItem && !in.bookDefined) return {};
   const bool readersToSet = in.bodyParagraph && in.startAligned && !in.brContinuation && !in.besideFloat &&
                             !in.spanIndent && !(in.bookDefined && in.bookPx < 0);
   if (!readersToSet) return bookStyle;

@@ -3679,7 +3679,9 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       // <pre> takes no indent its CSS does not set at all (BlockStyle::preformatted).
       const bool preformatted = strcmp(name, "pre") == 0 || self->preUntilDepth < self->depth;
       if (preformatted) blockStyle.preformatted = true;
-      if (preformatted || strcmp(name, "li") == 0 || !self->listStack.empty()) blockStyle.keepsBookIndent = true;
+      const bool listItem = strcmp(name, "li") == 0 || !self->listStack.empty();
+      if (listItem) blockStyle.listItem = true;
+      if (preformatted || listItem) blockStyle.keepsBookIndent = true;
       self->holdBottomSpacing(blockStyle, isFloated);
       self->startNewTextBlock(blockStyle);
       self->currentBlockOwnerDepth_ = self->depth;

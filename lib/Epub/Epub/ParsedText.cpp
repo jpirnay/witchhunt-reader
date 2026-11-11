@@ -2466,6 +2466,7 @@ void ParsedText::applyParagraphIndent(const GfxRenderer& renderer, const int fon
                     blockStyle.alignment == (rtl() ? CssTextAlign::Right : CssTextAlign::Left);
   in.bodyParagraph = !blockStyle.keepsBookIndent;
   in.preformatted = blockStyle.preformatted;
+  in.listItem = blockStyle.listItem;
   // An image or a drop cap beside the text already sets the paragraph apart.
   in.besideFloat = blockStyle.floatZoneCount > 0;
   in.extraParagraphSpacing = extraParagraphSpacing;
