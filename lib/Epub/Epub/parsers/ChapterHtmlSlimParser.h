@@ -1280,7 +1280,9 @@ class ChapterHtmlSlimParser final : public Print {
   void armFirstLetter(const char* name, const std::string& classAttr, const std::string& idAttr);
   // The element whose ::first-letter style (firstLetterStyle_) waits for its first text; -1 when none waits.
   int firstLetterDepth_ = -1;
-  CssStyle firstLetterStyle_;
+  // Boxed, made by the first ::first-letter that asks for a drop cap and reused after it: a book without one carries a
+  // null pointer through its builds, not a 132 B CssStyle in the parser. Set whenever firstLetterDepth_ >= 0.
+  std::unique_ptr<CssStyle> firstLetterStyle_;
   // Place the captured drop cap: one-word PageLine on the current page plus a FloatZone
   // on the paragraph's block style. Falls back to an inline word when the cap is unusable.
   void finalizePendingDropCap();
