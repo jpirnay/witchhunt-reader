@@ -681,6 +681,7 @@ STR_QUICK_RESUME_TIMEOUT: "Хуткае узнаўленне пасля тайм
 STR_BTN_ACT_IGNORE: "Ігнараваць (нічога не рабіць)"
 STR_BTN_ACT_QUICK_OVERRIDES: "Хуткія налады"
 STR_FONT_CACHE: "Кэш шрыфтоў"
+STR_FLASH_AREA: "Вобласць флэш-памяці"
 STR_GO_TO_PRINTED_PAGE: "Перайсці да друкаванай старонкі"
 STR_GO_TO_PRINTED_PAGE_HINT: "Уверх/Уніз: ±1 (x2: ±10)  Улева/Управа: лічба"
 STR_GO_TO_PRINTED_PAGE_RANGE: "Дыяпазон: %u - %u"

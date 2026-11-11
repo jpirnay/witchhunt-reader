@@ -1,5 +1,6 @@
 #include "SystemInformationActivity.h"
 
+#include <FlashLangPartition.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 
@@ -47,6 +48,68 @@ static std::string formatBytes(uint64_t bytes) {
     snprintf(buf, sizeof(buf), "%.1f %s", bytes / div, unit);
   }
   return buf;
+}
+
+// The flash area, as technical values like the rest of this screen: "spiffs 3.4 MB" on the partition; otherwise where
+// it is instead ("PSRAM + card": the image in PSRAM, saved to /.crosspoint/flash-area.img; "-" for none), and on a
+// row of its own (spiffsValue()) what the partition table holds.
+static std::string flashAreaValue(const SystemStatus& status) {
+  switch (status.flashArea) {
+    case FlashArea::Backend::Partition:
+      return "spiffs " + formatBytes(status.flashPartitionBytes);
+    case FlashArea::Backend::PsramImage:
+      return "PSRAM + card";
+    case FlashArea::Backend::None:
+      return "-";
+  }
+  return "-";
+}
+
+// The partition table's `spiffs` partition when it is not the area: "spiffs 80.0 KB" (too small for the language
+// slot) or "spiffs -" (none at all).
+static std::string spiffsValue(const SystemStatus& status) {
+  return "spiffs " + (status.flashPartitionBytes > 0 ? formatBytes(status.flashPartitionBytes) : std::string("-"));
+}
+
+// The interface language's code, and when its pack is not in use, why: a code for a report rather than prose.
+static std::string languageValue() {
+  std::string value = I18N.getLanguageCode(I18N.getLanguage());
+  const char* why = nullptr;
+  switch (I18N.packState()) {
+    case I18n::PackState::English:
+    case I18n::PackState::Active:
+      break;
+    case I18n::PackState::NoPack:
+      why = "no pack";
+      break;
+    case I18n::PackState::BadPack:
+      why = "bad pack";
+      break;
+    case I18n::PackState::SlotFailed:
+      switch (FlashLangPartition::lastFailure()) {
+        case FlashLangPartition::Failure::NoArea:
+          why = "no flash area";
+          break;
+        case FlashLangPartition::Failure::SlotTooSmall:
+          why = "area too small";
+          break;
+        case FlashLangPartition::Failure::Build:
+          why = "build";
+          break;
+        case FlashLangPartition::Failure::Map:
+          why = "mmap";
+          break;
+        case FlashLangPartition::Failure::Corrupt:
+          why = "CRC";
+          break;
+        case FlashLangPartition::Failure::None:
+          why = "?";
+          break;
+      }
+      break;
+  }
+  if (why) value = value + ": " + why;
+  return value;
 }
 
 // Format three byte values on a single line sharing one trailing unit. The
@@ -211,15 +274,20 @@ void SystemInformationActivity::render(RenderLock&&) {
   drawRow(tr(STR_MEM_COMBINED),
           formatBytesTriple(status.freeHeapBytes, status.minFreeHeapBytes, status.maxAllocHeapBytes));
 
-  drawSection(tr(STR_SEC_FLASH), status.fontCacheTotalBytes > 0 ? 3 : 2);
+  const bool hasArea = status.flashArea != FlashArea::Backend::None;
+  const bool onPartition = status.flashArea == FlashArea::Backend::Partition;
+  drawSection(tr(STR_SEC_FLASH), 4 + (hasArea ? 1 : 0) + (onPartition ? 0 : 1));
   drawRow(tr(STR_APP_PARTITION), formatBytes(status.flashAppPartitionSize));
   drawRow(tr(STR_FLASH_TOTAL), formatBytes(status.flashBytes));
-  if (status.fontCacheTotalBytes > 0) {
-    const std::string fontCacheValue = status.fontCacheUsedBytes > 0 ? formatBytes(status.fontCacheUsedBytes) + " / " +
-                                                                           formatBytes(status.fontCacheTotalBytes)
-                                                                     : "- / " + formatBytes(status.fontCacheTotalBytes);
-    drawRow(tr(STR_FONT_CACHE), fontCacheValue);
+  // What a report of an English interface (with its pack on the card) or of TrueType fonts that do not load needs
+  // first: where the flash area is, the partition table's `spiffs` partition, and why the language pack is not in use.
+  drawRow(tr(STR_FLASH_AREA), flashAreaValue(status));
+  if (!onPartition) drawRow("", spiffsValue(status));  // a continuation row: the value column is half the screen
+  if (hasArea) {
+    drawRow(tr(STR_FONT_CACHE), (status.fontCacheUsedBytes > 0 ? formatBytes(status.fontCacheUsedBytes) : "-") +
+                                    std::string(" / ") + formatBytes(status.fontCacheTotalBytes));
   }
+  drawRow(tr(STR_LANGUAGE), languageValue());
 
   // Uptime, light sleep, battery, and deep sleep when known.
   drawSection(tr(STR_SEC_RUNTIME), status.deepSleepSeconds > 0 ? 4 : 3);

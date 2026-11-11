@@ -5,6 +5,7 @@
 #include <Logging.h>
 #include <esp_partition.h>
 
+#include "SilentRestart.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "network/OtaBootSwitch.h"
 
@@ -34,6 +35,6 @@ void SwitchToUsbDriveActivity::onEnter() {
                              finish();
                              return;
                            }
-                           ESP.restart();
+                           restartKeepingFlashArea();
                          });
 }

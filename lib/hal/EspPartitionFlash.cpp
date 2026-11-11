@@ -10,8 +10,8 @@
 #endif
 
 bool EspPartitionFlash::begin() {
+  // FlashArea says what a missing partition means for the board.
   part_ = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
-  if (!part_) LOG_ERR("FLA", "spiffs partition not found");
   return part_ != nullptr;
 }
 

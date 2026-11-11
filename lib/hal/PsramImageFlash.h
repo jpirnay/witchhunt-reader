@@ -32,10 +32,12 @@ class AreaImageFile {
 /// MMU page.
 ///
 /// The file is a header block (kHeaderBlockBytes) and then the image. A page (kMapPageBytes) is read from it the first
-/// time anything reads, programs or maps it. sync() writes the sectors changed since the last one, between a header
-/// that says dirty and one that says clean. A power cut loses what was not synced, and a cut inside sync() leaves the
-/// header dirty, so the next boot starts erased. Each is a state a power cut on NOR flash could have left (any instant
-/// between two calls is one), and every consumer is a cache of files on the card.
+/// time anything reads, programs or maps it, unless the header's bitmap says the page is all 0xFF: then it is filled
+/// in PSRAM and the card is not read (a glyph store maps its whole log region, mostly erased). sync() writes the
+/// sectors changed since the last one, between a header that says dirty and one that says clean; the bitmap goes with
+/// the clean header, recomputed for the pages that changed. A power cut loses what was not synced, and a cut inside
+/// sync() leaves the header dirty, so the next boot starts erased. Each is a state a power cut on NOR flash could have
+/// left (any instant between two calls is one), and every consumer is a cache of files on the card.
 ///
 /// Thread-safe, unlike flash needs to be: a lazy load or a dirty bit must not interleave with a sync.
 class PsramImageFlash final : public NorFlash {
@@ -78,6 +80,7 @@ class PsramImageFlash final : public NorFlash {
   uint32_t bytes_;
   AreaImageFile& file_;
   std::unique_ptr<uint32_t[]> loaded_;  // a bit per page: its bytes are in the image
+  std::unique_ptr<uint32_t[]> erased_;  // a bit per page: all 0xFF in the file, so its load reads nothing
   std::unique_ptr<uint32_t[]> dirty_;   // a bit per sector: changed since the last sync
   bool fileWhole_ = false;              // the file holds a whole image of this size, so sync() writes in place
   mutable std::mutex lock_;

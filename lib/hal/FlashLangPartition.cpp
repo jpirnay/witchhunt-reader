@@ -20,6 +20,7 @@ static constexpr size_t MAP_PAGE_BYTES = NorFlash::kMapPageBytes;
 
 static const uint8_t* s_mmapPtr = nullptr;
 static size_t s_mapBytes = 0;  // how much of the slot the live mapping covers
+static Failure s_lastFailure = Failure::None;
 
 static constexpr size_t roundUp(const size_t v, const size_t to) { return (v + to - 1) / to * to; }
 
@@ -379,8 +380,23 @@ MapResult map(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyC
   return result;
 }
 
+// acquire()'s way out with no strings: why, for lastFailure().
+static bool fail(const Failure why) {
+  s_lastFailure = why;
+  return false;
+}
+
 bool acquire(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCount, const Strings& strings,
              const Extension* ext, Mapped* out) {
+  s_lastFailure = Failure::None;
+  const NorFlash* const area = findArea();
+  if (!area) return fail(Failure::NoArea);
+  if (slotOffset(area) == 0) {
+    LOG_ERR("FLP", "the flash area (%u KB) has no room for the %u KB language slot",
+            static_cast<unsigned>(area->size() / 1024),
+            static_cast<unsigned>(FlashFontPartition::LANG_RESERVED_BYTES / 1024));
+    return fail(Failure::SlotTooSmall);
+  }
   const uint32_t extBytes = ext ? ext->bytes : 0;
   if (holds(langIndex, stamp, extBytes)) {
     const MapResult held = map(langIndex, stamp, keyCount, out);
@@ -389,17 +405,31 @@ bool acquire(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCo
       return true;
     }
     // A rebuild cannot give the strings a mapping the MMU has no page for.
-    if (held == MapResult::MapFailed) return false;
+    if (held == MapResult::MapFailed) return fail(Failure::Map);
     LOG_ERR("FLP", "language %u slot holds bytes it was not written with - rebuilding", langIndex);
   }
   // Either a different language, or the same one from a different firmware build — the stamp covers
   // both — or the bytes behind the header changed since. One build, whatever it leads to.
-  if (!build(langIndex, stamp, keyCount, strings, ext)) return false;
-  const MapResult built = map(langIndex, stamp, keyCount, out);
+  if (!build(langIndex, stamp, keyCount, strings, ext)) return fail(Failure::Build);
   // An extension that fails even when just written is left out: the strings are what matter, and the
   // extension's reader works without it (CjkUiFonts decodes per glyph instead).
-  return built == MapResult::Ok || built == MapResult::WithoutExtension || built == MapResult::ExtensionCorrupt;
+  switch (map(langIndex, stamp, keyCount, out)) {
+    case MapResult::Ok:
+    case MapResult::WithoutExtension:
+    case MapResult::ExtensionCorrupt:
+      return true;
+    case MapResult::MapFailed:
+      return fail(Failure::Map);
+    case MapResult::Corrupt:
+      return fail(Failure::Corrupt);
+    case MapResult::Absent:
+      // Just built, yet no header for it: what a program that did not land leaves.
+      return fail(Failure::Build);
+  }
+  return fail(Failure::Build);
 }
+
+Failure lastFailure() { return s_lastFailure; }
 
 bool mapLegacy(const uint8_t format, LegacySlot* out) {
   if (!out || (format != 1 && format != 2)) return false;

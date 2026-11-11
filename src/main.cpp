@@ -262,6 +262,16 @@ static void armSilentReboot(const uint32_t target) {
   silentRebootMagic = SILENT_REBOOT_MAGIC;
 }
 
+// The last step before every planned ESP.restart() whose card is still ours: a flash area held in PSRAM (a board
+// without a usable `spiffs` partition) writes what changed to its card file, as before deep sleep, so the language
+// slot, the font cache and the glyphs rendered so far outlive the restart. Nothing is written when nothing changed;
+// on the partition this does nothing.
+void restartKeepingFlashArea() {
+  FlashArea::sync();
+  delay(50);
+  ESP.restart();
+}
+
 void silentRestart() {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
   // ESP.restart() bypasses activity onExit(), so flush any in-flight reading
@@ -269,8 +279,7 @@ void silentRestart() {
   globalReadingSessionTracker().end();
   armSilentReboot(SILENT_REBOOT_TARGET_HOME);
   LOG_DBG("MAIN", "Silent restart (target=home)");
-  delay(50);
-  ESP.restart();
+  restartKeepingFlashArea();
 }
 
 void silentRestartToReader() {
@@ -278,8 +287,7 @@ void silentRestartToReader() {
   globalReadingSessionTracker().end();
   armSilentReboot(SILENT_REBOOT_TARGET_READER);
   LOG_DBG("MAIN", "Silent restart (target=reader)");
-  delay(50);
-  ESP.restart();
+  restartKeepingFlashArea();
 }
 
 void silentRestartToClockSettings() {
@@ -287,8 +295,7 @@ void silentRestartToClockSettings() {
   globalReadingSessionTracker().end();
   armSilentReboot(SILENT_REBOOT_TARGET_CLOCK_SETTINGS);
   LOG_DBG("MAIN", "Silent restart (target=clock-settings)");
-  delay(50);
-  ESP.restart();
+  restartKeepingFlashArea();
 }
 
 void silentRestartToKOReaderSettings() {
@@ -296,8 +303,7 @@ void silentRestartToKOReaderSettings() {
   globalReadingSessionTracker().end();
   armSilentReboot(SILENT_REBOOT_TARGET_KOREADER_SETTINGS);
   LOG_DBG("MAIN", "Silent restart (target=koreader-settings)");
-  delay(50);
-  ESP.restart();
+  restartKeepingFlashArea();
 }
 
 void silentRestartToSettings() {
@@ -305,8 +311,7 @@ void silentRestartToSettings() {
   globalReadingSessionTracker().end();
   armSilentReboot(SILENT_REBOOT_TARGET_SETTINGS);
   LOG_DBG("MAIN", "Silent restart (target=settings)");
-  delay(50);
-  ESP.restart();
+  restartKeepingFlashArea();
 }
 
 void silentRestartToFileTransferOpds() {
@@ -314,8 +319,7 @@ void silentRestartToFileTransferOpds() {
   globalReadingSessionTracker().end();
   armSilentReboot(SILENT_REBOOT_TARGET_FILE_TRANSFER_OPDS);
   LOG_DBG("MAIN", "Silent restart (target=file-transfer-opds)");
-  delay(50);
-  ESP.restart();
+  restartKeepingFlashArea();
 }
 
 bool heapRecoveryRestartAvailable() {
@@ -333,8 +337,7 @@ bool trySilentRestartToReaderForHeapRecovery() {
   globalReadingSessionTracker().end();
   armSilentReboot(SILENT_REBOOT_TARGET_READER);
   LOG_ERR("MAIN", "Silent restart (target=reader, heap recovery)");
-  delay(50);
-  ESP.restart();
+  restartKeepingFlashArea();
   return true;
 }
 
@@ -346,8 +349,7 @@ static void silentRestartToSleep(bool fromTimeout) {
   globalReadingSessionTracker().end();
   armSilentReboot(fromTimeout ? SILENT_REBOOT_TARGET_SLEEP_TIMEOUT : SILENT_REBOOT_TARGET_SLEEP);
   LOG_INF("MAIN", "Silent restart (target=sleep, framebuffers released, fromTimeout=%d)", fromTimeout ? 1 : 0);
-  delay(50);
-  ESP.restart();
+  restartKeepingFlashArea();
 }
 
 void restartToHomeAfterStorageHandoff() {
@@ -360,6 +362,8 @@ void restartToHomeAfterStorageHandoff() {
   // Give the shared USB PHY back to Serial/JTAG before resetting, or the host
   // is left enumerating an OTG device that the reboot destroys.
   handoffUsbOtgToSerialJtag();
+  // flash-area: no sync here. The card was the USB host's, and this mount's view of it is stale. The area was synced
+  // before the card went to the host (UsbDriveActivity), and nothing writes it in USB Drive.
   ESP.restart();
 }
 
@@ -661,7 +665,7 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
   BootDiag::markSleepStage(BootDiag::SleepStage::PanelAsleep);
   // A flash area held in RAM (a board without the flash partition) writes what changed since its last sync, the
   // glyphs rendered while reading among it; on the partition this does nothing.
-  if (NorFlash* const area = FlashArea::get()) area->sync();
+  FlashArea::sync();
   // Persist before the last two steps, which are the ones that can strand the device:
   // the release wait and the wake arming. Everything that could still touch the SD card
   // is done, so this is the last safe moment to write. The record is amended in place on
@@ -817,7 +821,12 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
 // activity-side callers out of SdCardFontSystem internals.
 void ensureSdFontLoaded() { sdFontSystem.ensureLoaded(renderer); }
 
-void unloadSdFontIfLoaded() { sdFontSystem.unload(renderer); }
+void unloadSdFontIfLoaded() {
+  sdFontSystem.unload(renderer);
+  // Book close: the glyph store wrote the glyphs this book rendered into the flash area. A PSRAM image keeps them on
+  // the card from here, not only from the next sleep; nothing is written when nothing changed.
+  FlashArea::sync();
+}
 
 namespace {
 // The Publisher Fonts the book is drawn with: its own choice, else the setting.
@@ -1198,6 +1207,7 @@ void setup() {
     const bool alreadyAttempted = (heapCorruptionBootLatch == HEAP_CORRUPTION_BOOT_MAGIC);
     if (!alreadyAttempted && !heap_caps_check_integrity_all(/*print_errors=*/true)) {
       heapCorruptionBootLatch = HEAP_CORRUPTION_BOOT_MAGIC;
+      // flash-area: not chosen yet this early in boot, so nothing in it to keep.
       esp_restart();  // clean DRAM reset — heap will be intact on next boot
     }
     heapCorruptionBootLatch = 0;  // clear latch on a clean-heap boot
@@ -1454,6 +1464,9 @@ void setup() {
   // a settings file existed, which the load path alone would not cover.
   SETTINGS.clockTimezone = timezones::activeIndex();
   timezones::applyToClock();
+  // The flash area before anything uses it, so every boot says in its log where the area is, or that it has none, and
+  // a board without the `spiffs` partition takes its PSRAM image while the PSRAM is still one block.
+  FlashArea::get();
   // A CJK language's pack carries its CJK UI faces, so the faces are read straight from flash
   // instead of decoded per glyph (CjkUiFonts.h). Registered before the first pack is resolved.
   I18N.setPackExtension(&CjkUiFonts::packExtension());

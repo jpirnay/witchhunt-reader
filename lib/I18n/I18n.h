@@ -67,6 +67,17 @@ class I18n {
   /// first pack resolved already includes it.
   void setPackExtension(LanguagePackExtension* ext) { _ext = ext; }
 
+  /// Where the strings of the chosen language come from, as the last refresh left it: what System
+  /// Information shows, so a report of an English interface says why.
+  enum class PackState : uint8_t {
+    English,     // English is chosen: the image's strings
+    Active,      // the language's pack, from the flash slot
+    NoPack,      // no pack on the card: English
+    BadPack,     // a pack that does not read as one: English
+    SlotFailed,  // the slot could not be had (FlashLangPartition::lastFailure() says why): English
+  };
+  PackState packState() const { return _packState; }
+
   // Get all unique characters used in a specific language
   // Returns a sorted string of unique characters
   static const char* getCharacterSet(Language lang);
@@ -102,6 +113,7 @@ class I18n {
   LangStrings _active;
 
   LanguagePackExtension* _ext = nullptr;
+  PackState _packState = PackState::English;
 };
 
 // Convenience macros

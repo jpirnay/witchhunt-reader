@@ -19,6 +19,7 @@
 #include "PsramImageFlash.h"
 #include "SimFlashArea.h"
 #include "SimImageFile.h"
+#include "esp_rom_crc.h"
 
 namespace {
 
@@ -26,6 +27,9 @@ constexpr uint32_t kPage = NorFlash::kMapPageBytes;
 constexpr uint32_t kSector = NorFlash::kSectorBytes;
 constexpr uint32_t kImageBytes = 4 * kPage;
 constexpr uint32_t kFileBytes = PsramImageFlash::kHeaderBlockBytes + kImageBytes;
+// What a commit writes besides its sectors: the header twice (dirty, then clean) and the erased-page bitmap, one word
+// for four pages.
+constexpr uint32_t kCommitExtraBytes = 2u * 16u + 4u;
 
 // A boot: fresh PSRAM (not zeroed: nothing may rely on what the allocator left) over the card as it is.
 struct Boot {
@@ -121,7 +125,7 @@ TEST(PsramImageFlash, ALaterSyncWritesOnlyTheSectorsThatChanged) {
   fill(boot.area, 2 * kPage + kSector - 4, 8, 0x41);  // across two
   ASSERT_TRUE(boot.area.sync());
   // Three sectors and the header twice (dirty, then clean).
-  EXPECT_EQ(3u * kSector + 2u * 16u, file.bytesWritten() - before);
+  EXPECT_EQ(3u * kSector + kCommitExtraBytes, file.bytesWritten() - before);
 }
 
 TEST(PsramImageFlash, ARebootReadsOnlyThePagesSomethingTouches) {
@@ -151,6 +155,199 @@ TEST(PsramImageFlash, ARebootReadsOnlyThePagesSomethingTouches) {
   EXPECT_EQ(afterHeader + 2, file.reads());
 }
 
+// Issue #733: the image is synced on every planned restart and before every sleep, so a sync with nothing changed must
+// cost the card nothing at all: no sector, and no header either. A boot that only reads and maps is such a run.
+TEST(PsramImageFlash, ASyncWithNothingChangedWritesNothingNotEvenTheHeader) {
+  SimImageFile file;
+  {
+    Boot boot(file);
+    ASSERT_TRUE(boot.area.begin());
+    fill(boot.area, kPage + 64, 128, 0x91);
+    ASSERT_TRUE(boot.area.sync());
+  }
+  file.powerCycle();
+  Boot again(file);
+  ASSERT_TRUE(again.area.begin());
+  uint8_t byte = 0;
+  ASSERT_TRUE(again.area.read(kPage + 64, &byte, 1));
+  ASSERT_NE(nullptr, again.area.map(2 * kPage, 64));
+  const uint64_t before = file.bytesWritten();
+  const std::vector<uint8_t> card = file.card();
+  ASSERT_TRUE(again.area.sync());
+  ASSERT_TRUE(again.area.sync());
+  EXPECT_EQ(before, file.bytesWritten()) << "a clean image writes nothing";
+  EXPECT_EQ(card, file.card());
+  // One changed byte: that sector, the two header writes and the bitmap, nothing else.
+  fill(again.area, 3 * kPage + 5, 1, 0x00);
+  ASSERT_TRUE(again.area.sync());
+  EXPECT_EQ(kSector + kCommitExtraBytes, file.bytesWritten() - before);
+}
+
+// A page that is all 0xFF in the file is filled in PSRAM, not read: a glyph store maps its whole log region, of which a
+// reader's store uses a page or two, and every page read costs the X4 Pro ~37 ms of card time.
+TEST(PsramImageFlash, AnErasedPageIsFilledInPsramNotReadFromTheCard) {
+  SimImageFile file;
+  {
+    Boot boot(file);
+    ASSERT_TRUE(boot.area.begin());
+    fill(boot.area, kPage + 100, 64, 0x15);  // page 1 holds data; pages 0, 2 and 3 are erased
+    ASSERT_TRUE(boot.area.sync());
+  }
+  file.powerCycle();
+  Boot again(file);
+  ASSERT_TRUE(again.area.begin());
+  const uint32_t afterHeader = file.reads();
+  const uint8_t* const whole = again.area.map(0, kImageBytes);
+  ASSERT_NE(nullptr, whole);
+  EXPECT_EQ(afterHeader + 1, file.reads()) << "only page 1 is read";
+  EXPECT_EQ(0xFF, whole[0]);
+  EXPECT_EQ(0xFF, whole[3 * kPage + kPage - 1]);
+  EXPECT_EQ(0x15, whole[kPage + 100]);
+  EXPECT_TRUE(allErased(std::vector<uint8_t>(whole + 2 * kPage, whole + 3 * kPage))) << "not what PSRAM held before";
+}
+
+// A page erased since the last commit is recorded as erased by the next one; one partly erased is not.
+TEST(PsramImageFlash, APageErasedSinceTheLastCommitIsRecordedSo) {
+  SimImageFile file;
+  {
+    Boot boot(file);
+    ASSERT_TRUE(boot.area.begin());
+    fill(boot.area, 2 * kPage + 10, 64, 0x25);
+    fill(boot.area, 3 * kPage + 10, 64, 0x26);
+    fill(boot.area, 3 * kPage + kSector + 10, 64, 0x27);
+    ASSERT_TRUE(boot.area.sync());
+  }
+  file.powerCycle();
+  {
+    Boot boot(file);
+    ASSERT_TRUE(boot.area.begin());
+    ASSERT_TRUE(boot.area.erase(2 * kPage, kPage));    // the whole page: not read either
+    ASSERT_TRUE(boot.area.erase(3 * kPage, kSector));  // a sector of a page that keeps data in the next one
+    ASSERT_TRUE(boot.area.sync());
+  }
+  file.powerCycle();
+  Boot again(file);
+  ASSERT_TRUE(again.area.begin());
+  const uint32_t afterHeader = file.reads();
+  uint8_t byte = 0;
+  ASSERT_TRUE(again.area.read(2 * kPage + 10, &byte, 1));
+  EXPECT_EQ(0xFF, byte);
+  EXPECT_EQ(afterHeader, file.reads()) << "the erased page is not read";
+  ASSERT_TRUE(again.area.read(3 * kPage + kSector + 10, &byte, 1));
+  EXPECT_EQ(0x27, byte);
+  EXPECT_EQ(afterHeader + 1, file.reads()) << "the page that still holds data is";
+  ASSERT_TRUE(again.area.read(3 * kPage + 10, &byte, 1));
+  EXPECT_EQ(0xFF, byte) << "its erased sector came with it";
+}
+
+// The bitmap is trusted only under a clean header whose CRC covers it: one flipped bit and the file is no image.
+TEST(PsramImageFlash, ABitmapThatFailsTheHeaderCrcIsNoImage) {
+  SimImageFile file;
+  {
+    Boot boot(file);
+    ASSERT_TRUE(boot.area.begin());
+    fill(boot.area, kPage, 64, 0x35);
+    ASSERT_TRUE(boot.area.sync());
+  }
+  file.powerCycle();
+  file.writeThrough(true);
+  const uint8_t flipped = static_cast<uint8_t>(file.card()[16] ^ 0x02);  // page 1's bit: "erased"
+  ASSERT_TRUE(file.write(16, &flipped, 1));
+  file.powerCycle();
+  Boot bad(file);
+  ASSERT_TRUE(bad.area.begin());
+  EXPECT_TRUE(allErased(contents(bad.area))) << "erased, so every consumer rebuilds";
+}
+
+// A file the image wrote before the bitmap (version 1) reads as no image: erased, and the next commit writes the file
+// whole in the current version. (No board shipped with the image before it.)
+TEST(PsramImageFlash, AFileOfTheFormerVersionIsNoImageAndIsWrittenAgainWhole) {
+  SimImageFile file;
+  file.writeThrough(true);
+  std::vector<uint8_t> v1(kFileBytes, 0xFF);
+  const uint8_t header[12] = {'W',
+                              'H',
+                              'F',
+                              'A',
+                              1,
+                              0xC1,
+                              0,
+                              0,
+                              static_cast<uint8_t>(kImageBytes & 0xFF),
+                              static_cast<uint8_t>((kImageBytes >> 8) & 0xFF),
+                              static_cast<uint8_t>((kImageBytes >> 16) & 0xFF),
+                              static_cast<uint8_t>(kImageBytes >> 24)};
+  std::memcpy(v1.data(), header, sizeof header);
+  const uint32_t crc = esp_rom_crc32_le(0, header, sizeof header);
+  std::memcpy(v1.data() + 12, &crc, sizeof crc);
+  v1[PsramImageFlash::kHeaderBlockBytes + kPage] = 0x45;  // page 1 holds data in the old file
+  ASSERT_TRUE(file.truncate());
+  ASSERT_TRUE(file.write(0, v1.data(), static_cast<uint32_t>(v1.size())));
+  file.writeThrough(false);
+  file.powerCycle();
+  {
+    Boot boot(file);
+    ASSERT_TRUE(boot.area.begin());
+    EXPECT_TRUE(allErased(contents(boot.area))) << "version 1: no image";
+    fill(boot.area, 0, 8, 0x46);
+    const uint64_t before = file.bytesWritten();
+    ASSERT_TRUE(boot.area.sync());
+    EXPECT_GE(file.bytesWritten() - before, kFileBytes) << "written whole";
+  }
+  file.powerCycle();
+  Boot again(file);
+  ASSERT_TRUE(again.area.begin());
+  uint8_t byte = 0;
+  ASSERT_TRUE(again.area.read(0, &byte, 1));
+  EXPECT_EQ(0x46, byte) << "the new file reads back";
+}
+
+// The case the bitmap is for: a reader's glyph store reopened after a restart maps its whole log region, of which a
+// short session filled one segment. Laid out as on the X4 Pro (a page each for the header, the style, the index and the
+// pairs, then 64 KB segments), opening it and finding the glyph reads only the pages with data: the header, the index
+// and the one segment. The pair page and the five empty segments are filled in PSRAM (the style is mapped later, when a
+// size is drawn).
+TEST(PsramImageFlash, AReopenedGlyphStoreReadsOnlyThePagesWithData) {
+  constexpr uint32_t kAreaBytes = 2 * 1024 * 1024;  // a font area of 1.5 MB below the hyphenation region and the slot
+  glyphstore::Layout layout = gst_test::smallLayout(/*indexSlots=*/8192, /*pairSlots=*/8192, /*logBytes=*/6 * kPage,
+                                                    /*segmentBytes=*/kPage);
+  layout.styleSize[0] = kPage;
+  layout.geometry.pairOffset = layout.geometry.indexOffset + kPage;
+  layout.geometry.logOffset = layout.geometry.pairOffset + kPage;
+  SimImageFile file;
+  {
+    Boot boot(file, kAreaBytes);
+    ASSERT_TRUE(boot.area.begin());
+    sim_area::use(&boot.area);
+    FlashAreaRegion window;
+    ASSERT_TRUE(window.begin());
+    FlashGlyphStore store(window);
+    ASSERT_TRUE(gst_test::installAndOpen(store, layout));
+    uint8_t buffer[1024];
+    GlyphBatch batch(buffer, sizeof buffer);
+    ASSERT_TRUE(gst_test::stage(batch, gst_test::ringKey(0), 10, 12));
+    ASSERT_EQ(gst_test::Commit::Stored, store.commit(batch));
+    store.close();
+    ASSERT_TRUE(window.sync());  // book close
+    sim_area::use(nullptr);
+  }
+  file.powerCycle();
+  Boot again(file, kAreaBytes);
+  ASSERT_TRUE(again.area.begin());
+  sim_area::use(&again.area);
+  {
+    FlashAreaRegion window;
+    ASSERT_TRUE(window.begin());
+    FlashGlyphStore store(window);
+    const uint32_t before = file.reads();
+    ASSERT_EQ(gst_test::OpenResult::Ready, store.open(gst_test::kIdentityA));
+    EXPECT_TRUE(gst_test::storedIntact(store, gst_test::ringKey(0), 10, 12));
+    // The header page, the index page and the live segment: 3 of the 9 pages it maps (all 9 without the bitmap).
+    EXPECT_EQ(before + 3, file.reads());
+  }
+  sim_area::use(nullptr);
+}
+
 TEST(PsramImageFlash, WhatWasNotSyncedIsLostToAPowerCut) {
   SimImageFile file;
   std::vector<uint8_t> synced;
@@ -172,7 +369,7 @@ TEST(PsramImageFlash, WhatWasNotSyncedIsLostToAPowerCut) {
 TEST(PsramImageFlash, ACutAnywhereInASyncLeavesTheOldImageTheNewOneOrAnErasedOne) {
   for (const bool writeThrough : {false, true}) {
     // The bytes a sync of these changes writes: two headers and three sectors.
-    const uint64_t syncBytes = 2 * 16 + 3 * kSector;
+    const uint64_t syncBytes = kCommitExtraBytes + 3 * kSector;
     int old = 0, fresh = 0, erased = 0;
     for (uint64_t cut = 0; cut <= syncBytes; cut += (cut < 40 || cut % kSector < 24 || cut > syncBytes - 40) ? 1 : 97) {
       SimImageFile file;

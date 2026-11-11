@@ -1,6 +1,7 @@
 #include "UsbDriveActivity.h"
 
 #include <Arduino.h>
+#include <FlashArea.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -29,6 +30,9 @@ void UsbDriveActivity::onEnter() {
   // is where they are read from after the exit reboot anyway.
   setSerialWireMuted(true);
 
+  // The host owns the card from here to the restart (restartToHomeAfterStorageHandoff()): a flash area held in PSRAM
+  // writes what changed to its card file while the card is still ours.
+  FlashArea::sync();
   if (!Storage.beginUsbDrive()) {
     LOG_ERR("USB", "Unable to start USB Drive");
     preparing = false;

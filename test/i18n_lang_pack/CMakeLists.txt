@@ -89,5 +89,39 @@ target_link_libraries(LangPackConvertTest PRIVATE
 )
 gtest_discover_tests(LangPackConvertTest)
 
+# Issue #733: the language slot from a card pack without a usable `spiffs` partition, in the PSRAM image the S3 boards
+# take then (FlashArea.cpp as they build it): with none, and with the 80 KB one of the X4 Pro's factory-compatible
+# table. Its card file goes to test/shims' HalStorage, which keeps nothing.
+foreach(case "LangSlotPsramImageTest;0" "LangSlotX4ProFactoryTableTest;0x14000")
+  list(GET case 0 target)
+  list(GET case 1 partitionBytes)
+  add_executable(${target}
+    LangSlotPsramImageTest.cpp
+    ${REPO_ROOT}/lib/I18n/LangPack.cpp
+    ${REPO_ROOT}/lib/hal/CardImageFile.cpp
+    ${REPO_ROOT}/lib/hal/EspPartitionFlash.cpp
+    ${REPO_ROOT}/lib/hal/FlashArea.cpp
+    ${REPO_ROOT}/lib/hal/FlashLangPartition.cpp
+    ${REPO_ROOT}/lib/hal/PsramImageFlash.cpp
+    ${REPO_ROOT}/lib/InflateReader/InflateReader.cpp
+    ${REPO_ROOT}/test/uzlib_lzcopy/UzlibChksumStubs.cpp
+    ${I18N_GENERATED_STRINGS}
+  )
+  target_include_directories(${target} PRIVATE
+    ${LANG_PACK_INCLUDES}
+    ${REPO_ROOT}/test/flash_area_select
+    ${REPO_ROOT}/lib/Memory
+  )
+  target_compile_definitions(${target} PRIVATE LANG_PACKS_DIR="${LANG_PACKS_DIR}" CONFIG_SPIRAM=1
+                                               TEST_PARTITION_BYTES=${partitionBytes}u)
+  add_dependencies(${target} i18n_generated i18n_lang_packs)
+  target_link_libraries(${target} PRIVATE
+    crosspoint_test_common
+    uzlib_font_ring
+    GTest::gtest_main
+  )
+  gtest_discover_tests(${target})
+endforeach()
+
 # The generator's side: the pack it writes reads back, and two key names with one hash fail the build.
 add_test(NAME GenI18nPacks COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/test_gen_i18n.py)

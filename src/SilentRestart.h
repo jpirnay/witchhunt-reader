@@ -6,6 +6,11 @@
 // teardown scatters long-lived allocations across the heap, leaving ~50KB of
 // contiguous space unrecoverable without a reboot.
 
+// A plain ESP.restart() for any planned restart whose card is still mounted (a firmware update, the USB-drive
+// switch): first FlashArea::sync(), so a flash area held in PSRAM keeps what changed on the card. The silentRestart*()
+// below end in it too. Nothing is written when nothing changed.
+void restartKeepingFlashArea();
+
 void silentRestart();                    // home screen
 void silentRestartToReader();            // currently-open EPUB (APP_STATE.openEpubPath)
 void silentRestartToClockSettings();     // clock / time settings screen

@@ -847,6 +847,15 @@ the firmware keeps its room for everything else. A pack you do not install costs
   the `Language-<Name>` folders of the firmware's repository (`assets/sd-fonts/Language-German/de.cplang`).
 * A pack serves every firmware from 2.41 on. After an update the reader rebuilds the language from the pack on the card
   once, about a second, without a download.
+* **X4 Pro installed over its stock firmware.** The reader keeps the interface language (and its font cache) in a
+  flash area, a `spiffs` partition of its partition table. An SD card, OTA or web-flasher install keeps the table the
+  device came with, whose `spiffs` partition is too small for it (80 KB on the X4 Pro's factory layout, against the
+  128 KB the language takes since 2.41) or missing. The X4 Pro, T5 S3 and Murphy M3 then keep the area in their PSRAM
+  and save it to the card as `/.crosspoint/flash-area.img` (3.4 MB) before sleeping or restarting, and when a book
+  closes. Everything works; the first start writes the file once (a few seconds), and the first book after a start
+  reads its TrueType font back from the card. Deleting the file only costs that rebuild. **System
+  Information** shows it in its Flash section: **Flash area** reads "PSRAM + card", with "spiffs 80.0 KB" (or
+  "spiffs -") below it.
 * **Updating from 2.40 or 2.41RC** keeps your interface language without a download: on the first start the reader writes
   the language it kept in its memory to the card as its pack. Chinese, Japanese and Korean, which only 2.41RC had, are
   downloaded once.
@@ -1216,7 +1225,7 @@ pio device monitor
 
 If the device is stuck in a bootloop, press and release the Reset button. Then, press and hold on to the configured Back button and the Power Button to boot to the Home Screen.
 
-**The interface is in English after an update or on another card:** every interface language but English reads its pack from the card (`/.crosspoint/lang/`). Pick your language again under **Language** (Settings → System) to download it, or copy it there by hand (see **[Interface languages](#interface-languages)**).
+**The interface is in English after an update or on another card:** every interface language but English reads its pack from the card (`/.crosspoint/lang/`). Pick your language again under **Language** (Settings → System) to download it, or copy it there by hand (see **[Interface languages](#interface-languages)**). If the pack is there and the interface stays English, look at **System Information**, in its Flash section: **Language** shows the language's code and, when its pack is not in use, why (`no pack`, `bad pack`, `no flash area`, `area too small`, `build`, `mmap`, `CRC`), and **Flash area** where the reader keeps it ("spiffs 3.4 MB" as flashed by us; "PSRAM + card" or "-" when the partition table has no room for it, with the table's `spiffs` partition on the line below; see the X4 Pro note under **[Interface languages](#interface-languages)**). Please quote both rows in a report; the serial log names the same in lines starting `[FLA]`, `[FLP]` and `[I18N]`.
 
 **Books are no longer hyphenated after an update:** every language but English now hyphenates with a downloadable pack. With **Hyphenation** on, opening such a book offers its pack; if you answered **No**, install it from its row in the Font Manager (**Hyphenation-German** and so on) (see **[Hyphenation packs](#hyphenation-packs)**).
 
