@@ -20,6 +20,11 @@ class LanguageHyphenator {
     if (!patterns_.data) return {};
     return liangBreakIndexes(cps, patterns_, config_);
   }
+  // The same into `out` (cleared first), whose capacity a caller keeps from word to word.
+  void breakIndexes(const std::vector<CodepointInfo>& cps, std::vector<size_t>& out) const {
+    out.clear();
+    if (patterns_.data) liangBreakIndexes(cps, patterns_, config_, out);
+  }
 
   size_t minPrefix() const { return config_.minPrefix; }
   size_t minSuffix() const { return config_.minSuffix; }

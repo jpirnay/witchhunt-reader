@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "HyphenationCommon.h"
+
 class LanguageHyphenator;
 
 class Hyphenator {
@@ -35,6 +37,28 @@ class Hyphenator {
   //      pattern breaks were found). Used as a last resort to prevent a single oversized
   //      word from overflowing the page width.
   static std::vector<BreakInfo> breakOffsets(const std::string& word, bool includeFallback);
+
+  // breakOffsets' working memory: the word's code points, the language's break indexes and the breaks found. A layout
+  // keeps one (ParsedText::LayoutScratch) and hands it to every word it hyphenates, so a word costs no allocations
+  // once these have grown to the longest word so far.
+  struct Scratch {
+    std::vector<CodepointInfo> cps;
+    std::vector<size_t> indexes;
+    std::vector<BreakInfo> breaks;
+    // Gives every buffer back (swap: shrink_to_fit frees nothing under -fno-exceptions).
+    void release();
+    // Keeps the buffers while they hold a word of up to kKeptCodepoints, and gives them back once a longer one grew
+    // them: a long token's buffers would otherwise stay for the rest of the pass, beside the lines it lays out.
+    static constexpr size_t kKeptCodepoints = 16;
+    void trim() {
+      if (cps.capacity() > kKeptCodepoints || indexes.capacity() > kKeptCodepoints ||
+          breaks.capacity() > kKeptCodepoints) {
+        release();
+      }
+    }
+  };
+  // The same, in `scratch`: the breaks are left in scratch.breaks (cleared first).
+  static void breakOffsets(const std::string& word, bool includeFallback, Scratch& scratch);
 
   // Where a line may end inside the Myanmar text of `word`, in ascending order, none drawing a hyphen: between two
   // syllables of a run, where the fallback's rule allows a cut (myanmar::breakAllowed), whatever the hyphenation

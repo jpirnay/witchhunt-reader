@@ -6888,10 +6888,13 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
           if (imagesGray) page.renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
         },
         [&] { return planeAborted || aaPreemptedByNavigation(); });
+    // A finished replay logs its timings too, as the inline pass does: without a line, a pre-rendered
+    // page's gray pass was invisible in the log and read as a page that had none (X4, 2026-11-11).
     if (gt.aborted) {
       LOG_DBG("ERS", "AA replay aborted mid-pass: page preempted by navigation");
+    } else {
+      LOG_DBG("ERS", "AA replay: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
     }
-    // timings not otherwise recorded for the pre-rendered path
     // The replay re-warmed the page's glyphs; the page is complete now, and the next pre-render
     // scheduled after this call rebuilds its own. Only here: a skipped replay warmed nothing, and a
     // release that frees nothing would reset the pre-render floor (preRenderMinFreeHeap) to its

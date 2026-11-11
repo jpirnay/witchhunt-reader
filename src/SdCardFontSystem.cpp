@@ -4,7 +4,7 @@
 #include <BuildArena.h>
 #include <Epub/BookFonts.h>
 #include <Epub/LanguageTag.h>
-#include <EspNorFlash.h>
+#include <FlashAreaRegion.h>
 #include <GfxRenderer.h>
 #include <GlyphProvider.h>
 #include <I18n.h>
@@ -88,8 +88,8 @@ void ttfPassEnded() {
 // Lists a TTF family only when the glyph store can install it, in flash mode or, larger, in SD mode.
 bool ttfFamilyFits(const uint32_t* fileBytes, const uint32_t* sdBytes, const uint8_t count) {
   // While the store is open its mappings hide the budget an install would get: the load decides then.
-  if (EspNorFlash::liveFontAreaMappings() != 0) return true;
-  EspNorFlash flash;
+  if (FlashAreaRegion::liveFontAreaMappings() != 0) return true;
+  FlashAreaRegion flash;
   return flash.begin() && ttf::fitsStore(fileBytes, sdBytes, count, flash.size(), flash.freeMapPages());
 }
 

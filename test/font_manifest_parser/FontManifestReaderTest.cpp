@@ -535,3 +535,120 @@ TEST(FontManifestReaderTest, TheShippedManifestListsTheLanguageAndHyphenationPac
   std::printf("[ INFO ] catalog block: %zu B with the packs, %zu B without\n", all.blockBytes(),
               web.catalog.blockBytes());
 }
+
+// --- forEachFamily(): the list a family at a time, for an answer streamed as the file is read ---
+
+namespace {
+
+struct Visited {
+  int checked = 0;
+  int checkedBeforeFirst = -1;  // families seen when `checked` came
+  std::vector<std::string> names;
+  std::vector<std::string> records;  // every field of each family, as text
+  std::vector<bool> exactBlock;      // its block held exactly the family
+};
+
+std::string record(const FontCatalog& c, const size_t i) {
+  std::string out = std::string(c.name(i)) + "|" + c.description(i) + "|" + std::to_string(c.totalSize(i)) + "|" +
+                    std::to_string(c.outline(i)) + std::to_string(c.inDownloadAll(i)) +
+                    std::to_string(c.hyphenation(i)) + std::to_string(c.languagePack(i));
+  for (size_t j = 0; j < c.fileCount(i); ++j) {
+    out += "|" + std::string(c.fileName(i, j)) + ":" + std::to_string(c.fileSize(i, j)) + ":" +
+           std::to_string(c.fileHasCrc32(i, j)) + ":" + std::to_string(c.fileCrc32(i, j));
+  }
+  return out;
+}
+
+FontManifestStatus visitAll(const std::string& json, Visited& seen, std::string& baseUrl, const bool takesPacks = false,
+                            FontManifestReader::NameCheck familyCheck = familyNameOk) {
+  HalFile file = HalFile::fromString(json);
+  FontManifestReader reader("TEST", familyCheck, fileNameOk, takesPacks);
+  FontManifestReader::FamilyVisitor visitor;
+  visitor.ctx = &seen;
+  visitor.checked = [](void* ctx) {
+    auto& v = *static_cast<Visited*>(ctx);
+    ++v.checked;
+    v.checkedBeforeFirst = static_cast<int>(v.names.size());
+  };
+  visitor.family = [](void* ctx, FontCatalog& one) {
+    auto& v = *static_cast<Visited*>(ctx);
+    v.names.push_back(one.count() == 1 ? one.name(0) : "<not one family>");
+    v.records.push_back(record(one, 0));
+    FontCatalog::Size exact{1, one.fileCount(0), stringBytes(one)};
+    v.exactBlock.push_back(one.blockBytes() == FontCatalog::blockBytesFor(exact));
+  };
+  return reader.forEachFamily(file, visitor, baseUrl);
+}
+
+}  // namespace
+
+// Over the shipped manifest, every family read() keeps comes out in order with every field read() gives it, each in a
+// block of exactly its own size, after one `checked`.
+TEST(FontManifestReaderTest, ForEachFamilyHandsOverWhatReadBuildsOneFamilyAtATime) {
+  const std::string json = slurp(FONT_MANIFEST_V3_PATH);
+  const Outcome whole = read(json, familyNameOk, fileNameOk, /*takesPacks=*/true);
+  ASSERT_EQ(whole.status, FontManifestStatus::Ok) << whole.failure;
+  ASSERT_GT(whole.catalog.count(), 100u);
+
+  Visited seen;
+  std::string baseUrl;
+  ASSERT_EQ(visitAll(json, seen, baseUrl, /*takesPacks=*/true), FontManifestStatus::Ok);
+  EXPECT_EQ(seen.checked, 1);
+  EXPECT_EQ(seen.checkedBeforeFirst, 0);
+  EXPECT_EQ(baseUrl, whole.baseUrl);
+  ASSERT_EQ(seen.records.size(), whole.catalog.count());
+  for (size_t i = 0; i < whole.catalog.count(); ++i) {
+    EXPECT_EQ(seen.records[i], record(whole.catalog, i)) << i;
+    EXPECT_TRUE(seen.exactBlock[i]) << seen.names[i];
+  }
+}
+
+// A family the checks leave out is left out here too, and takes no block.
+TEST(FontManifestReaderTest, ForEachFamilyLeavesOutWhatReadLeavesOut) {
+  const std::string json = R"({"version": 2, "baseUrl": "https://example.com/",
+    "families": [
+      {"name": "Alpha", "files": [{"name": "Alpha/Alpha_10.cpfont", "size": 1}]},
+      {"name": "Bad name", "files": [{"name": "x/x_10.cpfont", "size": 1}]},
+      {"name": "Gamma", "files": [{"name": "../evil.cpfont", "size": 1}]},
+      {"name": "Delta", "format": "woff3", "files": [{"name": "Delta/Delta.woff3", "size": 1}]},
+      {"name": "Hyph", "format": "hyphenation", "files": [{"name": "Hyph/hyph-de.cphyph", "size": 1}]},
+      {"name": "Beta", "files": [{"name": "Beta/Beta_10.cpfont", "size": 2}, {"name": "Beta/Beta_12.cpfont", "size": 3}]}
+    ]})";
+  Visited seen;
+  std::string baseUrl;
+  ASSERT_EQ(visitAll(json, seen, baseUrl), FontManifestStatus::Ok);
+  EXPECT_EQ(seen.names, (std::vector<std::string>{"Alpha", "Beta"}));
+  EXPECT_EQ(names(read(json).catalog), seen.names);
+
+  Visited withPacks;
+  ASSERT_EQ(visitAll(json, withPacks, baseUrl, /*takesPacks=*/true), FontManifestStatus::Ok);
+  EXPECT_EQ(withPacks.names, (std::vector<std::string>{"Alpha", "Hyph", "Beta"}));
+}
+
+// A document read() refuses is refused before `checked`: the caller can still answer with an error.
+TEST(FontManifestReaderTest, ForEachFamilyRefusesABadDocumentBeforeChecked) {
+  for (const std::string json : {std::string("{\"version\": 2, \"families\": ["), std::string("not json"),
+                                 std::string(R"({"version": 9, "baseUrl": "x", "families": []})")}) {
+    Visited seen;
+    std::string baseUrl = "untouched";
+    const FontManifestStatus status = visitAll(json, seen, baseUrl);
+    EXPECT_NE(status, FontManifestStatus::Ok) << json;
+    EXPECT_EQ(seen.checked, 0) << json;
+    EXPECT_TRUE(seen.names.empty()) << json;
+    EXPECT_TRUE(baseUrl.empty()) << json;
+  }
+}
+
+// No block for a family: the families after `checked` stop, and the call says so.
+TEST(FontManifestReaderTest, ForEachFamilyWithoutAFamilyBlockIsOutOfMemory) {
+  Visited seen;
+  std::string baseUrl;
+  FontManifestStatus status;
+  {
+    const FailingArrayNew failing(1);
+    status = visitAll(kManifest, seen, baseUrl);
+  }
+  EXPECT_EQ(status, FontManifestStatus::OutOfMemory);
+  EXPECT_EQ(seen.checked, 1);
+  EXPECT_TRUE(seen.names.empty());
+}

@@ -238,7 +238,12 @@ class SecureHttpClient {
   // or a negative SecureHttpError.
   int readBody(const BodySink& sink, const ProgressFn& progress, long contentLength, bool chunked, bool keepAlive);
 
-  bool readLine(std::string& line, uint32_t deadline);
+  // How a readLine() ended. Overlong: the line ended, but only its first MAX_LINE bytes are in `line`
+  // and the rest was read past. Kept apart from Complete so each caller decides whether a cut line
+  // matters: a header the client does not use is skipped, while a cut Location, framing header,
+  // status line or chunk size is refused.
+  enum class LineRead : uint8_t { Complete, Overlong, Failed };
+  LineRead readLine(std::string& line, uint32_t deadline);
 
   // Transport: one of these is active per connection depending on scheme.
   SecureClient _secure;
@@ -277,6 +282,8 @@ class SecureHttpClient {
   std::string _lastUrl;
   bool _lastInsecure = false;
 
+  // What a header or chunk-size line keeps (readLine()). A longer line is read past, not refused:
+  // GitHub's release-download 302 carries a 4174 B Content-Security-Policy line (2026-11-11).
   static constexpr size_t MAX_LINE = 4096;
   // Body read buffer. 2 KB (was 512) so we drain wolfSSL's decrypted TLS records
   // in far fewer read() calls — 512 throttled large downloads to ~30 KB/s and

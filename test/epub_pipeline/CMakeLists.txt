@@ -123,6 +123,7 @@ add_executable(EpubPipelineTest
   ParsedTextOffsetTest.cpp
   LowHeapLoadTest.cpp
   LongChapterPageTablesTest.cpp
+  TableCellTextHeapTest.cpp
   TableRowFallbackArenaTest.cpp
   AnchorMapTest.cpp
   AnchorPageAccuracyTest.cpp
@@ -220,6 +221,8 @@ target_compile_definitions(EpubPipelineTest PRIVATE
   # LongChapterPageTablesTest refuses build-table chunks on purpose (see ChunkedVector.h). The
   # hook is inert until a test arms it; firmware and the dump tools never define it.
   CHUNKED_VECTOR_FAULT_INJECTION
+  # TableCellTextHeapTest refuses table cells their text (ChapterHtmlSlimParser::makeCellText). Inert otherwise.
+  TABLE_CELL_FAULT_INJECTION
   # Central-directory walk counters (ZipFile.h), for the tests that bound them. Inert otherwise.
   ZIP_FILE_SCAN_STATS
 )

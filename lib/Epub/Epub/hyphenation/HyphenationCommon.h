@@ -29,3 +29,5 @@ bool isExplicitHyphen(uint32_t cp);
 bool isSoftHyphen(uint32_t cp);
 void trimSurroundingPunctuationAndFootnote(std::vector<CodepointInfo>& cps);
 std::vector<CodepointInfo> collectCodepoints(const std::string& word);
+// The same into `cps` (cleared first), whose capacity a caller keeps from word to word.
+void collectCodepoints(const std::string& word, std::vector<CodepointInfo>& cps);

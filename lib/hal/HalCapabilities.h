@@ -263,8 +263,8 @@ inline const char* boardDisplayName(BoardConfig::Board board) {
       return "Murphy M3";
     case BoardConfig::Board::MurphyM4:
       return "Murphy M4";
-    case BoardConfig::Board::DeLink:
-      return "de-link";
+    case BoardConfig::Board::Silkscreen:
+      return "Silkscreen";
     case BoardConfig::Board::LilyGoT5S3:
       return "T5 S3 Pro";
     case BoardConfig::Board::M5PaperV11:

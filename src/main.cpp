@@ -5,6 +5,7 @@
 #include <Epub/BookFonts.h>
 #include <Epub/BookMetadataCache.h>
 #include <Epub/CjkLineBreak.h>
+#include <FlashArea.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
 #include <FsHelpers.h>
@@ -658,6 +659,9 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
 
   display.deepSleep();
   BootDiag::markSleepStage(BootDiag::SleepStage::PanelAsleep);
+  // A flash area held in RAM (a board without the flash partition) writes what changed since its last sync, the
+  // glyphs rendered while reading among it; on the partition this does nothing.
+  if (NorFlash* const area = FlashArea::get()) area->sync();
   // Persist before the last two steps, which are the ones that can strand the device:
   // the release wait and the wake arming. Everything that could still touch the SD card
   // is done, so this is the last safe moment to write. The record is amended in place on

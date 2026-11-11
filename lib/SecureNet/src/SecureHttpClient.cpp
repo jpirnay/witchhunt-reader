@@ -21,6 +21,11 @@ std::string toLowerAscii(const std::string& s) {
   for (char& c : r) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
   return r;
 }
+// The response headers readHeaders() acts on, by lower-case name. Keep it in step with readHeaders().
+bool isUsedHeader(const std::string& name) {
+  return name == "content-length" || name == "transfer-encoding" || name == "connection" || name == "location" ||
+         name == "content-range";
+}
 bool equalsIgnoreCaseAscii(const std::string& a, const std::string& b) {
   if (a.size() != b.size()) return false;
   for (size_t i = 0; i < a.size(); ++i) {
@@ -296,8 +301,11 @@ int SecureHttpClient::transact(const char* method, const Url& u, const uint8_t* 
   return ERR_SEND;  // unreachable: the second attempt always returns above
 }
 
-bool SecureHttpClient::readLine(std::string& line, uint32_t deadline) {
+SecureHttpClient::LineRead SecureHttpClient::readLine(std::string& line, uint32_t deadline) {
   line.clear();
+  // Past MAX_LINE the bytes are read and dropped up to the line end, so the line costs no more memory
+  // and the response stays in step for the lines after it.
+  bool overlong = false;
   while (static_cast<int32_t>(millis() - deadline) < 0) {
     while (_client->available() > 0) {
       const int ch = _client->read();
@@ -309,17 +317,21 @@ bool SecureHttpClient::readLine(std::string& line, uint32_t deadline) {
       }
       ++_trace.headerBytes;
       if (ch == '\n') {
+        if (overlong) return LineRead::Overlong;
         if (!line.empty() && line.back() == '\r') line.pop_back();
-        return true;
+        return LineRead::Complete;
       }
-      if (line.size() >= MAX_LINE) return false;
+      if (line.size() >= MAX_LINE) {
+        overlong = true;
+        continue;
+      }
       line += static_cast<char>(ch);
     }
-    if (!_client->connected() && _client->available() == 0) return false;
+    if (!_client->connected() && _client->available() == 0) return LineRead::Failed;
     ++_trace.readPolls;
     delay(2);
   }
-  return false;
+  return LineRead::Failed;
 }
 
 bool SecureHttpClient::readHeaders(ResponseMeta& meta) {
@@ -332,7 +344,7 @@ bool SecureHttpClient::readHeaders(ResponseMeta& meta) {
 
   const uint32_t deadline = millis() + _timeoutMs;
   std::string line;
-  if (!readLine(line, deadline)) return false;
+  if (readLine(line, deadline) != LineRead::Complete) return false;
   // "HTTP/1.1 200 OK" -> code at offset 9
   status = line.size() >= 12 ? atoi(line.c_str() + 9) : 0;
   if (status == 0) return false;
@@ -340,11 +352,24 @@ bool SecureHttpClient::readHeaders(ResponseMeta& meta) {
   // Connection: keep-alive header (parsed below) overrides that.
   if (line.compare(0, 9, "HTTP/1.0 ") == 0) keepAlive = false;
 
-  while (readLine(line, deadline)) {
+  for (;;) {
+    const LineRead lineRead = readLine(line, deadline);
+    if (lineRead == LineRead::Failed) return false;
     if (line.empty()) return true;  // end of headers
     const size_t colon = line.find(':');
     if (colon == std::string::npos) continue;
     std::string name = toLowerAscii(line.substr(0, colon));
+    if (lineRead == LineRead::Overlong) {
+      // Only its first MAX_LINE bytes arrived. Harmless for a header this client ignores; one it acts
+      // on would be acted on cut short (a Location sending the request somewhere else), so the
+      // response is refused.
+      if (isUsedHeader(name)) {
+        LOG_ERR("HTTP", "%s header longer than %u B, response refused", name.c_str(), static_cast<unsigned>(MAX_LINE));
+        return false;
+      }
+      LOG_DBG("HTTP", "%s header longer than %u B, skipped", name.c_str(), static_cast<unsigned>(MAX_LINE));
+      continue;
+    }
     std::string value = line.substr(colon + 1);
     while (!value.empty() && value.front() == ' ') value.erase(value.begin());
     if (name == "content-length") {
@@ -359,7 +384,6 @@ bool SecureHttpClient::readHeaders(ResponseMeta& meta) {
       meta.hasContentRange = http_range::parseContentRange(value.c_str(), meta.contentRange);
     }
   }
-  return false;  // ran out before blank line
 }
 
 // Truncation-safe body reader. Completion is keyed on framing, NEVER on read()==0
@@ -381,7 +405,8 @@ int SecureHttpClient::readBody(const BodySink& sink, const ProgressFn& progress,
   if (chunked) {
     std::string line;
     for (;;) {
-      if (!readLine(line, millis() + _timeoutMs)) return ERR_TRUNCATED;
+      // A cut size line could read as another size, even as the last chunk's 0.
+      if (readLine(line, millis() + _timeoutMs) != LineRead::Complete) return ERR_TRUNCATED;
       const size_t semi = line.find(';');
       const std::string sizeText = semi == std::string::npos ? line : line.substr(0, semi);
       char* parseEnd = nullptr;
@@ -392,7 +417,7 @@ int SecureHttpClient::readBody(const BodySink& sink, const ProgressFn& progress,
       // the timeout).
       if (parseEnd == sizeText.c_str()) return ERR_TRUNCATED;
       if (sz == 0) {  // last chunk; drain trailers
-        while (readLine(line, millis() + _timeoutMs) && !line.empty()) {
+        while (readLine(line, millis() + _timeoutMs) != LineRead::Failed && !line.empty()) {
         }
         return 0;
       }

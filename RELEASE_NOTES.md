@@ -4,6 +4,13 @@ User-facing changes only. Full commit history is in git log.
 
 ## 2.50 — 2026-11-10
 
+> **Known issue: Check for updates cannot download firmware (2.38 to 2.50).** GitHub now answers a release download with
+> a header line longer than 4 KB, which these versions refuse, so the download fails after the update was found. To get
+> the next release, update once from the SD card: copy the release's `firmware.bin` (X3, X4) or `firmware-x4pro.bin`,
+> `firmware-lilygo.bin`, `firmware-murphy.bin` to the card and use **Settings > System > System Update > SD Card
+> Firmware Update**, or flash it over USB. The release after 2.50 fixes this, and updates over the air work again from
+> there.
+
 **Faster. More fonts. More layouts. More languages.** Everything since 2.40, including the 2.41 release candidate, and the X3 and X4 get all of it.
 
 - **Faster:**

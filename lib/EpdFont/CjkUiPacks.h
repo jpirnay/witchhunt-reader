@@ -21,11 +21,12 @@ struct Range {
 
 // What each pack holds, exactly (the host test cjk_ui_pack checks the files against these): the CJK punctuation and
 // the full-width forms, and the Han packs the CJK Unified Ideographs Noto draws (U+4E00-9FEF), Japanese with the kana
-// and half-width forms, Korean every Hangul syllable and the compatibility jamo instead of Han.
-constexpr Range HAN[] = {{0x3000, 0x303F}, {0x4E00, 0x9FEF}, {0xFF01, 0xFF60}};
-constexpr Range JAPANESE[] = {{0x3000, 0x303F}, {0x3041, 0x3096}, {0x3099, 0x30FF}, {0x31F0, 0x31FF},
-                              {0x4E00, 0x9FEF}, {0xFF01, 0xFF60}, {0xFF61, 0xFF9F}};
-constexpr Range KOREAN[] = {{0x3000, 0x303F}, {0x3131, 0x318E}, {0xAC00, 0xD7A3}, {0xFF01, 0xFF60}};
+// and half-width forms, Korean every Hangul syllable and the compatibility jamo instead of Han. Inline, so every file
+// that reads the tables shares one copy in flash.
+inline constexpr Range HAN[] = {{0x3000, 0x303F}, {0x4E00, 0x9FEF}, {0xFF01, 0xFF60}};
+inline constexpr Range JAPANESE[] = {{0x3000, 0x303F}, {0x3041, 0x3096}, {0x3099, 0x30FF}, {0x31F0, 0x31FF},
+                                     {0x4E00, 0x9FEF}, {0xFF01, 0xFF60}, {0xFF61, 0xFF9F}};
+inline constexpr Range KOREAN[] = {{0x3000, 0x303F}, {0x3131, 0x318E}, {0xAC00, 0xD7A3}, {0xFF01, 0xFF60}};
 
 struct Pack {
   const char* family;
@@ -34,7 +35,7 @@ struct Pack {
   size_t rangeCount;
 };
 
-constexpr Pack PACKS[REGION_COUNT] = {
+inline constexpr Pack PACKS[REGION_COUNT] = {
     {"ChineseUI", Region::SimplifiedChinese, HAN, sizeof(HAN) / sizeof(HAN[0])},
     {"ChineseTradUI", Region::TraditionalChinese, HAN, sizeof(HAN) / sizeof(HAN[0])},
     {"JapaneseUI", Region::Japanese, JAPANESE, sizeof(JAPANESE) / sizeof(JAPANESE[0])},

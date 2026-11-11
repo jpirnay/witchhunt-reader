@@ -2,26 +2,23 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
-#include <esp_partition.h>
 
 #include <algorithm>
 #include <cstring>
 
-#include "EspNorFlash.h"
+#include "FlashArea.h"
+#include "FlashAreaRegion.h"
 
 namespace FlashFontPartition {
 
 // Partition magic
 static constexpr char MAGIC[4] = {'C', 'P', 'F', 'C'};
 
-// Sector / chunk sizes
-static constexpr size_t SEC = 4096;    // flash erase granularity
 static constexpr size_t CHUNK = 4096;  // SD read / flash write chunk
 
 // --- Module state ---
 
-static esp_partition_mmap_handle_t s_mmapHandle = 0;
-static const uint8_t* s_mmapPtr = nullptr;  // base of mapped partition
+static const uint8_t* s_mmapPtr = nullptr;  // the mapped entry
 
 // Write-session state (valid between beginWrite and finaliseWrite)
 struct WriteSession {
@@ -35,38 +32,37 @@ static WriteSession s_ws;
 
 // --- Internal helpers ---
 
-static const esp_partition_t* findPartition() {
-  const esp_partition_t* part =
-      esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
-  if (!part) LOG_ERR("FFP", "spiffs partition not found");
-  return part;
+static NorFlash* findArea() {
+  NorFlash* const area = FlashArea::get();
+  if (!area) LOG_ERR("FFP", "no flash area");
+  return area;
 }
 
-// Ceiling for font data: the partition minus the hyphenation region and the language slot at its tail.
-static size_t usableSizeOf(const esp_partition_t* part) {
-  if (!part || part->size <= LANG_RESERVED_BYTES + HYPH_RESERVED_BYTES) return 0;
-  return static_cast<size_t>(part->size) - LANG_RESERVED_BYTES - HYPH_RESERVED_BYTES;
+// Ceiling for font data: the area minus the hyphenation region and the language slot at its tail.
+static size_t usableSizeOf(const NorFlash* area) {
+  if (!area || area->size() <= LANG_RESERVED_BYTES + HYPH_RESERVED_BYTES) return 0;
+  return static_cast<size_t>(area->size()) - LANG_RESERVED_BYTES - HYPH_RESERVED_BYTES;
 }
 
-size_t fontUsableSize() { return usableSizeOf(findPartition()); }
+size_t fontUsableSize() { return usableSizeOf(findArea()); }
 
-size_t hyphRegionOffset() { return HYPH_RESERVED_BYTES == 0 ? 0 : usableSizeOf(findPartition()); }
+size_t hyphRegionOffset() { return HYPH_RESERVED_BYTES == 0 ? 0 : usableSizeOf(findArea()); }
 
 // Read the raw index from flash into a caller-supplied buffer.
 // Returns true and fills `count` with the number of valid entries.
-static bool readIndex(const esp_partition_t* part, Entry* entries, uint8_t& count) {
+static bool readIndex(const NorFlash* area, Entry* entries, uint8_t& count) {
   uint8_t hdr[8];
-  if (esp_partition_read(part, 0, hdr, 8) != ESP_OK) return false;
+  if (!area->read(0, hdr, 8)) return false;
   if (memcmp(hdr, MAGIC, 4) != 0) return false;
   count = hdr[4];
   if (count == 0 || count > MAX_ENTRIES) return false;
 
-  if (esp_partition_read(part, 8, entries, count * ENTRY_SIZE) != ESP_OK) return false;
+  if (!area->read(8, entries, count * ENTRY_SIZE)) return false;
 
   // Reject an index that reaches into the language slot. This only fires on a
   // partition written before the reservation existed; the cache is rebuilt from
   // the .cpfont files on the SD card, so nothing the user installed is lost.
-  const size_t ceiling = usableSizeOf(part);
+  const size_t ceiling = usableSizeOf(area);
   for (uint8_t i = 0; i < count; i++) {
     const size_t end = static_cast<size_t>(entries[i].dataOffset) + entries[i].dataSize;
     if (end > ceiling) {
@@ -86,13 +82,6 @@ static int findEntry(const Entry* entries, uint8_t count, const char* familyName
   return -1;
 }
 
-// Erase the partition up to `bytes` (rounded up to sector boundary).
-static bool eraseRange(const esp_partition_t* part, size_t bytes) {
-  const size_t eraseLen = (bytes + SEC - 1) & ~(SEC - 1);
-  const size_t capped = std::min(eraseLen, static_cast<size_t>(part->size));
-  return esp_partition_erase_range(part, 0, capped) == ESP_OK;
-}
-
 // --- Write API ---
 
 bool beginWrite(const char* familyName) {
@@ -102,26 +91,26 @@ bool beginWrite(const char* familyName) {
     LOG_ERR("FFP", "beginWrite: partition is mmap'd — call unmap() first");
     return false;
   }
-  if (EspNorFlash::liveFontAreaMappings() > 0) {
+  if (FlashAreaRegion::liveFontAreaMappings() > 0) {
     LOG_ERR("FFP", "beginWrite: the TTF glyph store is open on this partition — close it first");
     return false;
   }
 
-  const esp_partition_t* part = findPartition();
-  if (!part) return false;
+  NorFlash* const area = findArea();
+  if (!area) return false;
 
   // Erase everything BELOW the language slot upfront so appendFile can write
-  // sequentially. Erasing part->size here would take the language pack with it
+  // sequentially. Erasing the whole area here would take the language pack with it
   // on every font cache rebuild.
-  const size_t usable = usableSizeOf(part);
+  const size_t usable = usableSizeOf(area);
   if (usable == 0) {
     LOG_ERR("FFP", "beginWrite: partition too small for the language reservation");
     s_ws.active = false;
     return false;
   }
   LOG_INF("FFP", "Erasing flash font partition (%u B of %u)...", static_cast<unsigned>(usable),
-          static_cast<unsigned>(part->size));
-  if (esp_partition_erase_range(part, 0, usable) != ESP_OK) {
+          static_cast<unsigned>(area->size()));
+  if (!area->erase(0, static_cast<uint32_t>(usable))) {
     LOG_ERR("FFP", "beginWrite: erase failed");
     s_ws.active = false;  // ensure no stale session survives a failed erase
     return false;
@@ -149,8 +138,8 @@ bool appendFile(const char* sdPath, const char* familyName, uint8_t pointSize) {
     return false;
   }
 
-  const esp_partition_t* part = findPartition();
-  if (!part) return false;
+  NorFlash* const area = findArea();
+  if (!area) return false;
 
   HalFile file;
   if (!Storage.openFileForRead("FFP", sdPath, file) || !file) {
@@ -189,7 +178,7 @@ bool appendFile(const char* sdPath, const char* familyName, uint8_t pointSize) {
       file.close();
       return false;
     }
-    if (esp_partition_write(part, dataOff + pos, buf, want) != ESP_OK) {
+    if (!area->program(static_cast<uint32_t>(dataOff + pos), buf, static_cast<uint32_t>(want))) {
       LOG_ERR("FFP", "appendFile: flash write error @%u", static_cast<unsigned>(dataOff + pos));
       file.close();
       return false;
@@ -223,8 +212,8 @@ bool finaliseWrite() {
     return false;
   }
 
-  const esp_partition_t* part = findPartition();
-  if (!part) {
+  NorFlash* const area = findArea();
+  if (!area) {
     s_ws.active = false;
     return false;
   }
@@ -239,18 +228,20 @@ bool finaliseWrite() {
   hdr[4] = s_ws.entryCount;
   // hdr[5..7] = 0 (reserved)
 
-  if (esp_partition_write(part, 0, hdr, 8) != ESP_OK) {
+  if (!area->program(0, hdr, 8)) {
     LOG_ERR("FFP", "finaliseWrite: header write failed");
     s_ws.active = false;
     return false;
   }
-  if (esp_partition_write(part, 8, s_ws.entries, s_ws.entryCount * ENTRY_SIZE) != ESP_OK) {
+  if (!area->program(8, s_ws.entries, static_cast<uint32_t>(s_ws.entryCount * ENTRY_SIZE))) {
     LOG_ERR("FFP", "finaliseWrite: entry table write failed");
     s_ws.active = false;
     return false;
   }
 
   s_ws.active = false;
+  // An area held in RAM keeps the family across a power cut from here on (NorFlash::sync); flash has it already.
+  area->sync();
   LOG_INF("FFP", "finaliseWrite: %u entries committed, %u B used", s_ws.entryCount,
           static_cast<unsigned>(s_ws.nextDataOff));
   return true;
@@ -267,17 +258,17 @@ bool mmap(const char* familyName, uint8_t pointSize, const uint8_t** outPtr, siz
     LOG_ERR("FFP", "mmap: write session still active");
     return false;
   }
-  if (EspNorFlash::liveFontAreaMappings() > 0) {
+  if (FlashAreaRegion::liveFontAreaMappings() > 0) {
     LOG_ERR("FFP", "mmap: the TTF glyph store is open on this partition — close it first");
     return false;
   }
 
-  const esp_partition_t* part = findPartition();
-  if (!part) return false;
+  NorFlash* const area = findArea();
+  if (!area) return false;
 
   Entry entries[MAX_ENTRIES];
   uint8_t count = 0;
-  if (!readIndex(part, entries, count)) {
+  if (!readIndex(area, entries, count)) {
     LOG_ERR("FFP", "mmap: no valid index in partition");
     return false;
   }
@@ -296,19 +287,17 @@ bool mmap(const char* familyName, uint8_t pointSize, const uint8_t** outPtr, siz
   // leaves ~32 of them free. Mapping from the partition start needed the whole
   // family below the entry as well: a family's largest sizes (Bitter 18 pt: 41
   // pages) could not be mapped at all and loaded from SD instead.
-  // esp_partition_mmap aligns the offset down to a page itself and returns a
-  // pointer already advanced to `dataOff`.
+  // On the partition the mapping is aligned down to a page and the pointer
+  // comes back advanced to `dataOff`.
   const size_t mapBytes =
       ((dataOff & 0xFFFFu) + static_cast<size_t>(dataSize) + 0xFFFFu) & ~static_cast<size_t>(0xFFFFu);
 
-  const void* rawPtr = nullptr;
-  if (esp_partition_mmap(part, dataOff, dataSize, ESP_PARTITION_MMAP_DATA, &rawPtr, &s_mmapHandle) != ESP_OK) {
-    LOG_ERR("FFP", "mmap: esp_partition_mmap failed (offset=%u, map=%u B)", static_cast<unsigned>(dataOff),
+  s_mmapPtr = area->map(dataOff, dataSize);
+  if (!s_mmapPtr) {
+    LOG_ERR("FFP", "mmap: mapping failed (offset=%u, map=%u B)", static_cast<unsigned>(dataOff),
             static_cast<unsigned>(mapBytes));
     return false;
   }
-
-  s_mmapPtr = static_cast<const uint8_t*>(rawPtr);
 
   *outPtr = s_mmapPtr;
   *outSize = dataSize;
@@ -320,8 +309,8 @@ bool mmap(const char* familyName, uint8_t pointSize, const uint8_t** outPtr, siz
 
 void unmap() {
   if (!s_mmapPtr) return;
-  esp_partition_munmap(s_mmapHandle);
-  s_mmapHandle = 0;
+  // A mapping exists, so the area does.
+  FlashArea::get()->unmap(s_mmapPtr);
   s_mmapPtr = nullptr;
   LOG_DBG("FFP", "unmap OK");
 }
@@ -329,32 +318,43 @@ void unmap() {
 // --- Query API ---
 
 bool hasValidIndex() {
-  const esp_partition_t* part = findPartition();
-  if (!part) return false;
+  const NorFlash* const area = findArea();
+  if (!area) return false;
   Entry entries[MAX_ENTRIES];
   uint8_t count = 0;
-  return readIndex(part, entries, count);
+  return readIndex(area, entries, count);
 }
 
 bool hasEntry(const char* familyName, uint8_t pointSize) {
-  const esp_partition_t* part = findPartition();
-  if (!part) return false;
+  const NorFlash* const area = findArea();
+  if (!area) return false;
   Entry entries[MAX_ENTRIES];
   uint8_t count = 0;
-  if (!readIndex(part, entries, count)) return false;
+  if (!readIndex(area, entries, count)) return false;
   return findEntry(entries, count, familyName, pointSize) >= 0;
 }
 
 bool hasFamilyComplete(const char* familyName, const uint8_t* sizes, uint8_t sizeCount) {
-  const esp_partition_t* part = findPartition();
-  if (!part) return false;
+  const NorFlash* const area = findArea();
+  if (!area) return false;
   Entry entries[MAX_ENTRIES];
   uint8_t count = 0;
-  if (!readIndex(part, entries, count)) return false;
+  if (!readIndex(area, entries, count)) return false;
   for (uint8_t i = 0; i < sizeCount; i++) {
     if (findEntry(entries, count, familyName, sizes[i]) < 0) return false;
   }
   return true;
+}
+
+size_t cachedBytes() {
+  const NorFlash* const area = findArea();
+  if (!area) return 0;
+  Entry entries[MAX_ENTRIES];
+  uint8_t count = 0;
+  if (!readIndex(area, entries, count)) return 0;
+  size_t total = 8 + static_cast<size_t>(count) * ENTRY_SIZE;
+  for (uint8_t i = 0; i < count; i++) total += entries[i].dataSize;
+  return total;
 }
 
 bool isMapped() { return s_mmapPtr != nullptr; }

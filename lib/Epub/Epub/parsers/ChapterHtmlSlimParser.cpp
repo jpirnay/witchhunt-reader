@@ -827,7 +827,7 @@ void ChapterHtmlSlimParser::pushBlockStyleEntry(const CssStyle& cssStyle) {
 }
 
 bool ChapterHtmlSlimParser::applyCssFontFamilyToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) const {
-  if (fontFamilies_.count == 0 || !cssStyle.defined.fontFamily) return false;
+  if (!fontFamilies_ || !cssStyle.defined.fontFamily) return false;
   entry.hasFontFamily = true;
   entry.fontFamily = cssStyle.fontFamily;
   return true;
@@ -1455,9 +1455,9 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
       attachPendingFloatImage(currentTextBlock->getBlockStyle());
     }
     uint8_t fontSlot = 0;
-    if (fontFamilies_.count != 0) {
+    if (fontFamilies_) {
       noteWordFamily();
-      fontSlot = fontFamilies_.slotOf(effectiveFontFamily_);
+      fontSlot = fontFamilySlot(effectiveFontFamily_);
     }
     const bool newFontSlot = (currentTextBlock->fontSlotsUsed() & (1u << fontSlot)) == 0;
     currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct,
@@ -2415,7 +2415,7 @@ void ChapterHtmlSlimParser::startDropCap(const CssStyle& cssStyle, const bool fi
   pendingDropCap_.multiplier = mult;
   pendingDropCap_.style = capStyle;
   // Its family, with the book's other families in use: the span's own, else the one it sits in.
-  pendingDropCap_.family = fontFamilies_.count == 0      ? 0
+  pendingDropCap_.family = !fontFamilies_                ? 0
                            : cssStyle.defined.fontFamily ? cssStyle.fontFamily
                                                          : effectiveFontFamily_;
   pendingDropCap_.textLen = 0;
@@ -2453,7 +2453,7 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   // rather than falling back to scaling the small body font — same decompressor budget.
   int32_t capFontId = 0;  // 0 = body font
   float capScale = pendingDropCap_.multiplier;
-  if (const BlockFontFamilies::Family* family = fontFamilies_.family(fontFamilies_.slotOf(pendingDropCap_.family))) {
+  if (const BlockFontFamilies::Family* family = fontFamily(fontFamilySlot(pendingDropCap_.family))) {
     // A cap in another of the book's families (a display face for the initials): that family's face at the cap's
     // size, as a heading in it takes, outside the body ladder's one-auxiliary-face budget.
     const FontSizeLadder::Resolved r = resolveFamilyFont(family, pendingDropCap_.multiplier);
@@ -2777,6 +2777,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   } else {
     currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled,
                                                          blockStyleWithIndent, bionicReadingEnabled));
+    if (currentTextBlock) currentTextBlock->lendLayoutScratch(&layoutScratch_);
   }
   if (currentTextBlock) {
     currentTextBlock->setTypography(typography_);
@@ -3141,6 +3142,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     self->clearSpentBlockHeadingStyle();
     self->clearSpentBlockDirection(self->depth);  // and its direction, for the same reason
     self->applyPendingPageBreak();
+    // The main block sits idle through the whole table while the rows buffer their cells beside it. Empty, it gives
+    // its word arrays back now (swapped out, as at a slice yield) rather than hold a paragraph's capacity through the
+    // table; the paragraph after the table grows them again.
+    if (self->currentTextBlock && self->currentTextBlock->isEmpty()) self->currentTextBlock->releaseLayoutScratch();
     self->currentTable = std::unique_ptr<BufferedTable>(new BufferedTable());
     self->currentTable->depth = 1;
     self->currentTable->rtl = self->startSideIsRight();
@@ -3228,15 +3233,17 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
     BufferedTableRow& row = self->currentTable->pendingRow;
 
+    std::unique_ptr<ParsedText> cellText = self->makeCellText();
+    if (!cellText) {
+      self->currentTableCell = nullptr;
+      self->depth += 1;
+      return;
+    }
     const bool isHeader = (strcmp(name, "th") == 0);
     row.cells.emplace_back();
     row.cells.back().isHeader = isHeader;
     row.cells.back().colSpan = colSpan;
-    row.cells.back().text =
-        std::unique_ptr<ParsedText>(new ParsedText(false, false));  // no paragraph spacing, no hyphenation in cells
-    row.cells.back().text->setTypography(self->typography_);
-    row.cells.back().text->setShapingLatch(&self->shapingDegradedAny_);
-    row.cells.back().text->setVertical(self->vertical_);
+    row.cells.back().text = std::move(cellText);
     row.cells.back().text->getBlockStyle().direction = self->blockDirection(cssStyle);
     self->currentTable->pendingRowBytes += TABLE_BUFFER_BYTES_PER_CELL;
     row.effectiveCols = static_cast<uint8_t>(row.effectiveCols + colSpan);
@@ -5471,16 +5478,16 @@ void ChapterHtmlSlimParser::resolveBlockFont(BlockStyle& bs) {
   bs.fontResolved = true;
   if (bs.headingFontId != 0) return;
   const uint8_t slot =
-      blockFamilyState_ == 0 ? 0 : fontFamilies_.slotOf(blockFamilyState_ == 1 ? blockFirstFamily_ : blockOwnFamily_);
+      blockFamilyState_ == 0 ? 0 : fontFamilySlot(blockFamilyState_ == 1 ? blockFirstFamily_ : blockOwnFamily_);
   const float size = bs.fontSizeMultiplier;
-  const FontSizeLadder::Resolved r = resolveFamilyFont(fontFamilies_.family(slot), size);
+  const FontSizeLadder::Resolved r = resolveFamilyFont(fontFamily(slot), size);
   bs.headingFontId = r.fontId;
   bs.fontSizeMultiplier = r.residual;
   // The block's words in other families than its own: each family's face at the block's size.
-  if (fontFamilies_.count == 0 || !currentTextBlock || &currentTextBlock->getBlockStyle() != &bs) return;
+  if (!fontFamilies_ || !currentTextBlock || &currentTextBlock->getBlockStyle() != &bs) return;
   wordFontsSize_ = size;
   blockFontSlot_ = slot;
-  for (uint8_t s = 0; s <= fontFamilies_.count; ++s) {
+  for (uint8_t s = 0; s <= fontFamilies_->count; ++s) {
     if ((currentTextBlock->fontSlotsUsed() & (1u << s)) != 0) resolveWordFont(s);
   }
 }
@@ -5507,7 +5514,7 @@ FontSizeLadder::Resolved ChapterHtmlSlimParser::resolveFamilyFont(const BlockFon
 
 void ChapterHtmlSlimParser::resolveWordFont(const uint8_t slot) {
   if (slot == blockFontSlot_) return;  // the block's own family: its font, the slot's default
-  const FontSizeLadder::Resolved r = resolveFamilyFont(fontFamilies_.family(slot), wordFontsSize_);
+  const FontSizeLadder::Resolved r = resolveFamilyFont(fontFamily(slot), wordFontsSize_);
   const TextBlock::WordFont font{r.fontId != 0 ? r.fontId : fontId, r.residual};
   const BlockStyle& bs = currentTextBlock->getBlockStyle();
   if (font.fontId == effectiveFontId(bs) && font.scale == bs.fontSizeMultiplier) return;  // the block's font after all
@@ -6686,15 +6693,47 @@ bool ChapterHtmlSlimParser::degradeRowAtOpenCell(const char* reason) {
     chunk.isHeader = open.isHeader;
     ok = emitCellAsParagraph(chunk, /*emitImage=*/false);
   }
-  open.text = std::unique_ptr<ParsedText>(new ParsedText(false, false));
-  open.text->setTypography(typography_);
-  open.text->setShapingLatch(&shapingDegradedAny_);
-  open.text->setVertical(vertical_);
+  open.text = makeCellText();
+  if (!open.text) return false;  // the parse stops; the open cell is left out (currentTableCell stays null)
 
   t.pendingRow.cells.push_back(std::move(open));
   t.pendingRow.effectiveCols = 0;
   currentTableCell = &t.pendingRow.cells.back();
   return ok;
+}
+
+void ChapterHtmlSlimParser::setFontFamilies(const BlockFontFamilies& families) {
+  fontFamilies_.reset();
+  if (families.count == 0) return;
+  fontFamilies_ = makeUniqueNoThrow<BlockFontFamilies>(families);
+  if (!fontFamilies_) {
+    LOG_ERR("EHP", "No heap for the book's font families (%u B): the chapter is set in the body font",
+            static_cast<unsigned>(sizeof(BlockFontFamilies)));
+  }
+}
+
+std::unique_ptr<ParsedText> ChapterHtmlSlimParser::makeCellText() {
+#ifdef TABLE_CELL_FAULT_INJECTION
+  const bool refused = tableCellTextsLeft() == 0;
+  if (!refused && tableCellTextsLeft() != SIZE_MAX) --tableCellTextsLeft();
+  auto text = refused ? nullptr : makeUniqueNoThrow<ParsedText>(false, false);
+#else
+  auto text = makeUniqueNoThrow<ParsedText>(false, false);
+#endif
+  if (!text) {
+    LOG_ERR("EHP", "No heap for a table cell's text (%u B; %u free, %u max alloc); stopping the parse",
+            static_cast<unsigned>(sizeof(ParsedText)), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+    streamFailed = true;
+    layoutFailed = true;
+    saxParser_.stop();
+    return nullptr;
+  }
+  text->setTypography(typography_);
+  text->setShapingLatch(&shapingDegradedAny_);
+  text->setVertical(vertical_);
+  text->lendLayoutScratch(&layoutScratch_);
+  text->setFirstWordReserve(ParsedText::kCellFirstWordReserve);
+  return text;
 }
 
 void ChapterHtmlSlimParser::streamClosedCell(BufferedTableRow& row) {

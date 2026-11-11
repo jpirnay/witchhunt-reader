@@ -237,3 +237,95 @@ TEST(FontDownloadRulesTest, UpdateAllTakesInstalledFamiliesWithAnUpdateAndPacksO
   catalog.setHasUpdate(2, false);
   EXPECT_EQ(FontDownloadRules::packUpdates(catalog), 0u);
 }
+
+// A web upload takes a .ttf or .otf as discovery lists them (any case) and a .cpfont as discovery parses it (lower-case
+// extension); nothing else goes into a family folder.
+TEST(FontDownloadRulesTest, AnUploadTakesTtfOtfAndCpfontFilesOnly) {
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata-Regular.ttf"), FileKind::TrueType);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata-Regular.TTF"), FileKind::TrueType);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("OpenDyslexic-Bold.otf"), FileKind::OpenTypeCff);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata_12.cpfont"), FileKind::Cpfont);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata_12.CPFONT"), FileKind::Unknown);  // discovery would skip it
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata_12.cpfont.part"), FileKind::Unknown);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata-Regular.woff"), FileKind::Unknown);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata.ttc"), FileKind::Unknown);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("de.cphyph"), FileKind::Unknown);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("de.cplang"), FileKind::Unknown);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("x.ttf.part"), FileKind::Unknown);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf(""), FileKind::Unknown);
+  EXPECT_TRUE(FontDownloadRules::isOutline(FileKind::TrueType));
+  EXPECT_TRUE(FontDownloadRules::isOutline(FileKind::OpenTypeCff));
+  EXPECT_FALSE(FontDownloadRules::isOutline(FileKind::Cpfont));
+}
+
+// The two kinds never share a family folder: a .ttf beside a .cpfont would never be drawn, a .cpfont beside .ttf files
+// would hide them.
+TEST(FontDownloadRulesTest, AnUploadJoinsOnlyAFolderOfItsOwnKind) {
+  for (const FileKind outline : {FileKind::TrueType, FileKind::OpenTypeCff}) {
+    EXPECT_TRUE(FontDownloadRules::joinsFolder(outline, false, false));
+    EXPECT_TRUE(FontDownloadRules::joinsFolder(outline, false, true));
+    EXPECT_FALSE(FontDownloadRules::joinsFolder(outline, true, false));
+    EXPECT_FALSE(FontDownloadRules::joinsFolder(outline, true, true));
+  }
+  EXPECT_TRUE(FontDownloadRules::joinsFolder(FileKind::Cpfont, false, false));
+  EXPECT_TRUE(FontDownloadRules::joinsFolder(FileKind::Cpfont, true, false));
+  EXPECT_FALSE(FontDownloadRules::joinsFolder(FileKind::Cpfont, false, true));
+  EXPECT_FALSE(FontDownloadRules::joinsFolder(FileKind::Unknown, false, false));
+  EXPECT_FALSE(FontDownloadRules::joinsFolder(FileKind::HyphenationPack, false, false));
+}
+
+// The web page's two lists: the fonts' "Download all updates" takes the missing fonts Download all takes and the font
+// updates; the packs' takes the pack updates only (a CJK interface pack among them); without a list, both, as before.
+TEST(FontDownloadRulesTest, TheWebsDownloadAllTakesTheFamiliesOfItsList) {
+  const auto feedFamilies = [](FontCatalog::Builder& builder) {
+    builder.beginFamily();
+    builder.keepFamily("Missing", 7);  // 0: a font not on the card, in Download all
+    builder.beginFamily();
+    builder.keepFamily("Updated", 7);  // 1: an installed font with an update
+    builder.beginFamily();
+    builder.inDownloadAll(false);
+    builder.keepFamily("ChineseUI", 9);  // 2: an installed CJK interface pack with an update
+    // The packs leave Download all, as the manifest says of every one of them.
+    builder.beginFamily();
+    builder.hyphenation(true);
+    builder.inDownloadAll(false);
+    builder.keepFamily("Hyphenation-German", 18);  // 3: an installed pack with an update
+    builder.beginFamily();
+    builder.languagePack(true);
+    builder.inDownloadAll(false);
+    builder.keepFamily("Language-French", 15);  // 4: a pack not on the card
+  };
+  FontCatalog::Builder counter;
+  feedFamilies(counter);
+  FontCatalog catalog;
+  ASSERT_TRUE(catalog.allocate(counter.size()));
+  FontCatalog::Builder filler(catalog);
+  feedFamilies(filler);
+  for (const size_t family : {1u, 2u, 3u}) {
+    catalog.setInstalled(family, true);
+    catalog.setHasUpdate(family, true);
+  }
+  const auto takes = [&](const size_t family, const FontDownloadRules::WebList list) {
+    return FontDownloadRules::webAllTakes(catalog, family, family == 2, list);
+  };
+  using FontDownloadRules::WebList;
+
+  EXPECT_TRUE(takes(0, WebList::Fonts));
+  EXPECT_TRUE(takes(1, WebList::Fonts));
+  EXPECT_FALSE(takes(2, WebList::Fonts));
+  EXPECT_FALSE(takes(3, WebList::Fonts));
+  EXPECT_FALSE(takes(4, WebList::Fonts));
+
+  EXPECT_FALSE(takes(0, WebList::Packs));
+  EXPECT_FALSE(takes(1, WebList::Packs));
+  EXPECT_TRUE(takes(2, WebList::Packs));
+  EXPECT_TRUE(takes(3, WebList::Packs));
+  EXPECT_FALSE(takes(4, WebList::Packs));  // a missing pack is fetched from its own row
+
+  for (const size_t family : {0u, 1u, 2u, 3u}) EXPECT_TRUE(takes(family, WebList::All));
+  EXPECT_FALSE(takes(4, WebList::All));
+
+  catalog.setHasUpdate(3, false);
+  EXPECT_FALSE(takes(3, WebList::Packs));
+  EXPECT_FALSE(takes(3, WebList::All));
+}
