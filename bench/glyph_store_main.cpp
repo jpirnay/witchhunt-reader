@@ -1,4 +1,4 @@
-// Device self-test for the TTF glyph store (Stage 2a): FlashGlyphStore through EspNorFlash on the real
+// Device self-test for the TTF glyph store (Stage 2a): FlashGlyphStore through FlashAreaRegion on the real
 // `spiffs` partition. Prints timings and checks, and ends with "=== done ===".
 //
 // It ERASES the partition's font area, which holds the .cpfont flash cache: the reader copies a .cpfont
@@ -7,7 +7,7 @@
 //
 // Build & flash: pio run -e bench_glyph_store -t upload
 #include <Arduino.h>
-#include <EspNorFlash.h>
+#include <FlashAreaRegion.h>
 #include <esp_partition.h>
 #include <esp_timer.h>
 #include <ttf/FlashGlyphStore.h>
@@ -101,7 +101,7 @@ void setup() {
   Serial.println("\n=== Glyph store device self-test (TTF Stage 2a) ===");
   const uint32_t langBefore = langSlotHash();
 
-  EspNorFlash flash;
+  FlashAreaRegion flash;
   if (!flash.begin()) return finish("no spiffs partition");
   Serial.printf("font area %u B, free map pages %u (planning with %u, the reader's budget), free heap %u B\n",
                 static_cast<unsigned>(flash.size()), static_cast<unsigned>(flash.freeMapPages()),

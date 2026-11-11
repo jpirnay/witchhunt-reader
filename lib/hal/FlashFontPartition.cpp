@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cstring>
 
-#include "EspNorFlash.h"
+#include "FlashAreaRegion.h"
 
 namespace FlashFontPartition {
 
@@ -102,7 +102,7 @@ bool beginWrite(const char* familyName) {
     LOG_ERR("FFP", "beginWrite: partition is mmap'd — call unmap() first");
     return false;
   }
-  if (EspNorFlash::liveFontAreaMappings() > 0) {
+  if (FlashAreaRegion::liveFontAreaMappings() > 0) {
     LOG_ERR("FFP", "beginWrite: the TTF glyph store is open on this partition — close it first");
     return false;
   }
@@ -267,7 +267,7 @@ bool mmap(const char* familyName, uint8_t pointSize, const uint8_t** outPtr, siz
     LOG_ERR("FFP", "mmap: write session still active");
     return false;
   }
-  if (EspNorFlash::liveFontAreaMappings() > 0) {
+  if (FlashAreaRegion::liveFontAreaMappings() > 0) {
     LOG_ERR("FFP", "mmap: the TTF glyph store is open on this partition — close it first");
     return false;
   }

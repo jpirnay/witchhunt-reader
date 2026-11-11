@@ -4,7 +4,7 @@
 
 /// A region of NOR flash. Bits program from 1 to 0 only; only an erase, in whole 4 KB sectors, sets them
 /// back to 1. FlashGlyphStore works through this interface, so its write-once rules run unchanged on
-/// the device (EspNorFlash, over the `spiffs` partition) and in host tests (a simulated chip).
+/// the device (FlashAreaRegion, over the `spiffs` partition) and in host tests (a simulated chip).
 ///
 /// Offsets are relative to the start of the region. The device region stops below the language slot at
 /// the end of the partition (FlashFontPartition::LANG_RESERVED_BYTES).

@@ -13,12 +13,12 @@
 /// program() and erase() are refused while a .cpfont is mapped or being written, and FlashFontPartition
 /// refuses to write or map while this class holds a mapping of the font area (liveFontAreaMappings()). Not
 /// thread-safe; callers serialise (RenderLock). Destroying it releases any mapping still held.
-class EspNorFlash final : public NorFlash {
+class FlashAreaRegion final : public NorFlash {
  public:
-  EspNorFlash() = default;
-  ~EspNorFlash() override;
-  EspNorFlash(const EspNorFlash&) = delete;
-  EspNorFlash& operator=(const EspNorFlash&) = delete;
+  FlashAreaRegion() = default;
+  ~FlashAreaRegion() override;
+  FlashAreaRegion(const FlashAreaRegion&) = delete;
+  FlashAreaRegion& operator=(const FlashAreaRegion&) = delete;
 
   /// Finds the partition. False when it is missing or not larger than the language slot.
   bool begin();
@@ -34,7 +34,7 @@ class EspNorFlash final : public NorFlash {
   void unmap(const uint8_t* mapped) override;
   uint32_t freeMapPages() const override;
 
-  /// The font area's mappings held by every EspNorFlash (begin(): the TTF glyph store's): FlashFontPartition stays
+  /// The font area's mappings held by every FlashAreaRegion (begin(): the TTF glyph store's): FlashFontPartition stays
   /// off the partition while this is not 0. A region's (beginRegion(): the hyphenation store's tries, mapped while a
   /// book is open) are not counted: no .cpfont reaches the region, nor does the store reach the font area.
   static uint32_t liveFontAreaMappings();
