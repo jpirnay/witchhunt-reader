@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <vector>
 
 #include "activities/settings/SettingInfo.h"
 
@@ -85,6 +86,54 @@ TEST(SettingInfoDynamicOptions, ARowWithoutThemIsUnchanged) {
                                                       &options, getSelected, setSelected);
   EXPECT_EQ(2, int{row.getEnumOptionCount()});
   EXPECT_NE(nullptr, row.getEnumOptionFlashLabel(1));
+}
+
+// Literal options: flash labels beside the translated ones, after them by default or from an index on.
+const char* literalLabel(const uint8_t index) {
+  static const char* const kLabels[] = {"L0", "L1", "L2"};
+  return kLabels[index];
+}
+
+SettingInfo literalRow(std::vector<StrId> values) {
+  return SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing, std::move(values));
+}
+
+TEST(SettingInfoLiteralOptions, FollowTheTranslatedOnesByDefault) {
+  const SettingInfo row = literalRow({StrId::STR_STATE_OFF, StrId::STR_STATE_ON}).withLiteralOptions(literalLabel, 3);
+  ASSERT_EQ(5, int{row.getEnumOptionCount()});
+  EXPECT_EQ(I18N.get(StrId::STR_STATE_OFF), row.getEnumOptionLabel(0));
+  EXPECT_EQ(I18N.get(StrId::STR_STATE_ON), row.getEnumOptionLabel(1));
+  EXPECT_EQ("L0", row.getEnumOptionLabel(2));
+  EXPECT_EQ("L2", row.getEnumOptionLabel(4));
+  EXPECT_EQ("", row.getEnumOptionLabel(5));
+}
+
+TEST(SettingInfoLiteralOptions, SitBetweenTheTranslatedOnesFromTheirIndex) {
+  const SettingInfo row =
+      literalRow({StrId::STR_DEFAULT_VALUE, StrId::STR_BOOK_S_STYLE}).withLiteralOptions(literalLabel, 3, 1);
+  ASSERT_EQ(5, int{row.getEnumOptionCount()});
+  EXPECT_EQ(I18N.get(StrId::STR_DEFAULT_VALUE), row.getEnumOptionLabel(0));
+  EXPECT_EQ("L0", row.getEnumOptionLabel(1));
+  EXPECT_EQ("L1", row.getEnumOptionLabel(2));
+  EXPECT_EQ("L2", row.getEnumOptionLabel(3));
+  EXPECT_EQ(I18N.get(StrId::STR_BOOK_S_STYLE), row.getEnumOptionLabel(4));
+  EXPECT_EQ(nullptr, row.getEnumOptionFlashLabel(5));
+}
+
+TEST(SettingInfoLiteralOptions, CanComeFirst) {
+  const SettingInfo row = literalRow({StrId::STR_BOOK_S_STYLE}).withLiteralOptions(literalLabel, 3, 0);
+  ASSERT_EQ(4, int{row.getEnumOptionCount()});
+  EXPECT_EQ("L0", row.getEnumOptionLabel(0));
+  EXPECT_EQ("L2", row.getEnumOptionLabel(2));
+  EXPECT_EQ(I18N.get(StrId::STR_BOOK_S_STYLE), row.getEnumOptionLabel(3));
+}
+
+TEST(SettingInfoLiteralOptions, AnIndexPastTheTranslatedOnesAppends) {
+  const SettingInfo row = literalRow({StrId::STR_STATE_OFF}).withLiteralOptions(literalLabel, 3, 7);
+  ASSERT_EQ(4, int{row.getEnumOptionCount()});
+  EXPECT_EQ(I18N.get(StrId::STR_STATE_OFF), row.getEnumOptionLabel(0));
+  EXPECT_EQ("L0", row.getEnumOptionLabel(1));
+  EXPECT_EQ("L2", row.getEnumOptionLabel(3));
 }
 
 }  // namespace

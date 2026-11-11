@@ -1291,6 +1291,9 @@ class ChapterHtmlSlimParser final : public Print {
   // Widow and orphan control (keepTogetherBreak), on by default. Off, a page fills before a paragraph's lines go
   // over; a heading still keeps with its text. A vertical section ignores it and always fills.
   void setWidowOrphanControl(const bool on) { widowOrphanControl_ = on; }
+  // The reader's Paragraph Indent, a stored ParagraphIndent (ParagraphIndent.h): Book's Style by default. Every page
+  // paragraph takes it; a table cell's text keeps Book's Style.
+  void setParagraphIndent(const uint8_t indent) { paragraphIndent_ = indent; }
 
  private:
   // Snap a completed block's effective font size (block multiplier, after uniform per-word
@@ -1327,6 +1330,8 @@ class ChapterHtmlSlimParser final : public Print {
   // The reader's "Avoid Widows & Orphans" (setWidowOrphanControl). Off, only headings end a page early. A vertical
   // section ignores it.
   bool widowOrphanControl_ = true;
+  // See setParagraphIndent.
+  uint8_t paragraphIndent_ = static_cast<uint8_t>(ParagraphIndent::FromBook);
   static constexpr int kOrphans = 2;
   static constexpr int kWidows = 2;
   static constexpr int kKeepWithNextLines = 2;  // body lines a heading keeps room for below it

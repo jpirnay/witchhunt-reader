@@ -12,6 +12,7 @@
 
 #include "BidiLine.h"
 #include "CjkPunctuation.h"
+#include "ParagraphIndent.h"
 #include "TokenBoundary.h"
 #include "TypographyProfile.h"
 #include "blocks/BlockStyle.h"
@@ -334,6 +335,8 @@ class ParsedText {
   // The book's typography (TypographyProfile.h): Latin rules until the parser sets the book's.
   TypographyProfile typography_;
   bool vertical_ = false;  // see setVertical
+  // The reader's Paragraph Indent (ParagraphIndent): see setParagraphIndent.
+  uint8_t paragraphIndent_ = static_cast<uint8_t>(ParagraphIndent::FromBook);
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
   bool bionicReadingEnabled;
@@ -586,6 +589,9 @@ class ParsedText {
   void setTypography(const TypographyProfile& typography) { typography_ = typography; }
   // Measure words as a column runs them (a vertical section's). Survives reset(): it is the section's.
   void setVertical(bool vertical) { vertical_ = vertical; }
+  // The reader's Paragraph Indent, a stored ParagraphIndent. Survives reset(): it is the section's. A table cell's
+  // text never takes it, so a cell keeps Book's Style.
+  void setParagraphIndent(const uint8_t indent) { paragraphIndent_ = indent; }
   // See lineArena_ / beforeLine_. Both survive reset().
   void setLineArena(BuildArena* arena) { lineArena_ = arena; }
   // A run laid out as its code points because it could not be shaped (no memory, or the font failed it) sets *latch

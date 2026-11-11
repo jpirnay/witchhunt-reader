@@ -2487,26 +2487,32 @@ void ParsedText::applyParagraphIndent(const GfxRenderer& renderer, const int fon
     return;
   }
 
-  if (blockStyle.textIndentDefined) {
-    // CSS text-indent is explicitly set (even if 0) — handled by extractLine() via firstLineIndent.
-  } else if (blockStyle.fromBrElement || blockStyle.fromLineFeed || blockStyle.keepsSpaces) {
-    // A block created by an inline <br> (or a kept line feed) is the next line of the SAME paragraph, so it gets no
-    // first-line indent. (A <br> standing between two paragraphs leaves its block empty; that
-    // block is merged into the following one, which brings its own indent.) Text that keeps its spaces is indented by
-    // them.
-  } else if (!extraParagraphSpacing && blockStyle.floatZoneCount == 0 &&
-             (blockStyle.alignment == CssTextAlign::Justify ||
-              blockStyle.alignment == (rtl() ? CssTextAlign::Right : CssTextAlign::Left))) {
-    // No CSS text-indent defined — apply a font-size-relative pixel indent so paragraph
-    // boundaries are visually clear. Using getFontAscenderSize() gives one em in pixels,
-    // matching the typographic convention for a paragraph indent. This avoids injecting
-    // U+2003 (em-space) as a character, which caused glyph-miss overhead on every page
-    // when the active font doesn't contain that codepoint.
-    // Skip when a float zone is active: the image already provides visual separation.
-    const int oneEm = static_cast<int>(renderer.getFontAscenderSize(fontId) * blockStyle.fontSizeMultiplier + 0.5f);
-    blockStyle.textIndent = oneEm;
-    blockStyle.textIndentDefined = true;
-  }
+  IndentInputs in;
+  // A CSS text-indent, 0 included, is laid out by extractLine() through firstLineIndent.
+  in.bookDefined = blockStyle.textIndentDefined;
+  in.bookPx = blockStyle.textIndent;
+  in.spanIndent = blockStyle.textIndentYields;
+  // A block created by an inline <br> (or a kept line feed) is the next line of the SAME paragraph, so it gets no
+  // first-line indent. (A <br> standing between two paragraphs leaves its block empty; that
+  // block is merged into the following one, which brings its own indent.)
+  in.brContinuation = blockStyle.fromBrElement || blockStyle.fromLineFeed;
+  in.startAligned = blockStyle.alignment == CssTextAlign::Justify ||
+                    blockStyle.alignment == (rtl() ? CssTextAlign::Right : CssTextAlign::Left);
+  // Text that keeps its spaces (white-space: pre, pre-wrap, break-spaces) is indented by them: like <pre>, it takes
+  // no indent but the book's own, and none from the reader.
+  in.bodyParagraph = !blockStyle.keepsBookIndent && !blockStyle.keepsSpaces;
+  in.preformatted = blockStyle.preformatted || blockStyle.keepsSpaces;
+  in.listItem = blockStyle.listItem;
+  // An image or a drop cap beside the text already sets the paragraph apart.
+  in.besideFloat = blockStyle.floatZoneCount > 0;
+  in.extraParagraphSpacing = extraParagraphSpacing;
+  // One em in pixels: the font's ascender at the block's size, the typographic convention for a
+  // paragraph indent. A pixel indent rather than an injected U+2003 (em space), which caused
+  // glyph-miss overhead on every page when the active font doesn't contain that codepoint.
+  const int oneEm = static_cast<int>(renderer.getFontAscenderSize(fontId) * blockStyle.fontSizeMultiplier + 0.5f);
+  const ResolvedIndent indent = resolveParagraphIndent(paragraphIndent_, in, oneEm);
+  blockStyle.textIndent = indent.px;
+  blockStyle.textIndentDefined = indent.defined;
 }
 
 void ParsedText::applyBionicReadingTransform() {

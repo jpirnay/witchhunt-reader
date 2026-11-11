@@ -135,6 +135,7 @@ add_executable(EpubPipelineTest
   HeadingBlockLayoutTest.cpp
   WritingModeLayoutTest.cpp
   LineSpacingLayoutTest.cpp
+  ParagraphIndentLayoutTest.cpp
   BlockEmphasisTest.cpp
   KeepTogetherTest.cpp
   NativeSizeLayoutTest.cpp
@@ -151,6 +152,7 @@ add_executable(EpubPipelineTest
   ImageParkTest.cpp
   StoredEntryDecodeTest.cpp
   PlaceholderOnlyScopeTest.cpp
+  ImageDitherPlacementTest.cpp
   PixelCacheWriteTest.cpp
   BufferedPrintTest.cpp
   VerticalPageTest.cpp
