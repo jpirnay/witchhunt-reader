@@ -50,21 +50,25 @@ static std::string formatBytes(uint64_t bytes) {
   return buf;
 }
 
-// The flash area, as technical values like the rest of this screen: "spiffs 3.4 MB" on the partition; otherwise
-// where it is instead ("PSRAM", or "-" for none) and what the partition table holds ("spiffs 80.0 KB", too small for
-// the language slot, or "spiffs -" for no `spiffs` partition at all).
+// The flash area, as technical values like the rest of this screen: "spiffs 3.4 MB" on the partition; otherwise where
+// it is instead ("PSRAM + card": the image in PSRAM, saved to /.crosspoint/flash-area.img; "-" for none), and on a
+// row of its own (spiffsValue()) what the partition table holds.
 static std::string flashAreaValue(const SystemStatus& status) {
-  const std::string partition =
-      "spiffs " + (status.flashPartitionBytes > 0 ? formatBytes(status.flashPartitionBytes) : std::string("-"));
   switch (status.flashArea) {
     case FlashArea::Backend::Partition:
-      return partition;
+      return "spiffs " + formatBytes(status.flashPartitionBytes);
     case FlashArea::Backend::PsramImage:
-      return "PSRAM (" + partition + ")";
+      return "PSRAM + card";
     case FlashArea::Backend::None:
-      return "- (" + partition + ")";
+      return "-";
   }
-  return partition;
+  return "-";
+}
+
+// The partition table's `spiffs` partition when it is not the area: "spiffs 80.0 KB" (too small for the language
+// slot) or "spiffs -" (none at all).
+static std::string spiffsValue(const SystemStatus& status) {
+  return "spiffs " + (status.flashPartitionBytes > 0 ? formatBytes(status.flashPartitionBytes) : std::string("-"));
 }
 
 // The interface language's code, and when its pack is not in use, why: a code for a report rather than prose.
@@ -271,12 +275,14 @@ void SystemInformationActivity::render(RenderLock&&) {
           formatBytesTriple(status.freeHeapBytes, status.minFreeHeapBytes, status.maxAllocHeapBytes));
 
   const bool hasArea = status.flashArea != FlashArea::Backend::None;
-  drawSection(tr(STR_SEC_FLASH), hasArea ? 5 : 4);
+  const bool onPartition = status.flashArea == FlashArea::Backend::Partition;
+  drawSection(tr(STR_SEC_FLASH), 4 + (hasArea ? 1 : 0) + (onPartition ? 0 : 1));
   drawRow(tr(STR_APP_PARTITION), formatBytes(status.flashAppPartitionSize));
   drawRow(tr(STR_FLASH_TOTAL), formatBytes(status.flashBytes));
   // What a report of an English interface (with its pack on the card) or of TrueType fonts that do not load needs
   // first: where the flash area is, the partition table's `spiffs` partition, and why the language pack is not in use.
   drawRow(tr(STR_FLASH_AREA), flashAreaValue(status));
+  if (!onPartition) drawRow("", spiffsValue(status));  // a continuation row: the value column is half the screen
   if (hasArea) {
     drawRow(tr(STR_FONT_CACHE), (status.fontCacheUsedBytes > 0 ? formatBytes(status.fontCacheUsedBytes) : "-") +
                                     std::string(" / ") + formatBytes(status.fontCacheTotalBytes));
