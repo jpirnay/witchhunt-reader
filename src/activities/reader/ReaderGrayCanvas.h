@@ -23,13 +23,14 @@ constexpr bool pageGoesOutOnCanvas(const uint8_t panelGrayLevels, const bool pag
   return panelGrayLevels > 4 && pageHasPictures && !picturesAreBoxes && imageMode == CrossPointSettings::IMAGES_DISPLAY;
 }
 
-// Text anti-aliasing on such a page, as canvas bytes, so its text looks like a text page's. The single push of a text
-// page draws its two greys as nudges from black in the panel's fast bank; the canvas goes out through the clean bank
-// and the driver's own linearisation, so the same greys are other bytes there. Measured on the T5S3 with a camera, on
-// 160 px patches against black and white in the same frame: a text page's dark grey came out as black and its light
-// one 0.02 above black (0 black, 1 white); on the canvas every byte up to 76 came out black and 84 at 0.02.
-constexpr uint8_t kAntiAliasingDark = 0;
-constexpr uint8_t kAntiAliasingLight = 84;
+// Text anti-aliasing on such a page, as canvas bytes, so its text looks like a text page's. A text page's single push
+// draws its two greys through the panel's fast bank; the canvas goes out through the clean bank and the driver's own
+// linearisation, so the same greys are other bytes there. Matched on the T5S3 at 24 C with a camera, 100 px patches
+// against black and white in the same frame (0 black, 1 white): a text page's turns land its greys at 0.28-0.31 and
+// 0.46-0.48; on a picture page with text, 172 lands at 0.30-0.31 and 204 at 0.47-0.48. A bare canvas lands them
+// 0.03-0.05 lighter, so match on a page with text.
+constexpr uint8_t kAntiAliasingDark = 172;
+constexpr uint8_t kAntiAliasingLight = 204;
 
 // What the 1-bit page render left, in panel layout (see gray8compose).
 struct PageBuffers {
