@@ -156,6 +156,7 @@ add_executable(EpubPipelineTest
   StoredEntryDecodeTest.cpp
   PlaceholderOnlyScopeTest.cpp
   ImageDitherPlacementTest.cpp
+  PixelCacheSizeTest.cpp
   PixelCacheWriteTest.cpp
   BufferedPrintTest.cpp
   VerticalPageTest.cpp
