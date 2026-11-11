@@ -72,9 +72,7 @@ size_t byteOffsetForIndex(const std::vector<CodepointInfo>& cps, const size_t in
 // Example: "Satel\u00ADliten" (soft-hyphen between 'l' and 'l')
 //   -> returns one BreakInfo with requiresInsertedHyphen=true (soft-hyphen
 //      is invisible and needs a visible '-' when the break is used).
-std::vector<Hyphenator::BreakInfo> buildExplicitBreakInfos(const std::vector<CodepointInfo>& cps) {
-  std::vector<Hyphenator::BreakInfo> breaks;
-
+void appendExplicitBreakInfos(const std::vector<CodepointInfo>& cps, std::vector<Hyphenator::BreakInfo>& breaks) {
   for (size_t i = 1; i + 1 < cps.size(); ++i) {
     const uint32_t cp = cps[i].value;
     if (!isExplicitHyphen(cp) || !isAlphabetic(cps[i - 1].value) || !isAlphabetic(cps[i + 1].value)) {
@@ -83,8 +81,6 @@ std::vector<Hyphenator::BreakInfo> buildExplicitBreakInfos(const std::vector<Cod
     // Offset points to the next codepoint so rendering starts after the hyphen marker.
     breaks.push_back({cps[i + 1].byteOffset, isSoftHyphen(cp)});
   }
-
-  return breaks;
 }
 
 // The Arabic part of the fallback rule, and only where Arabic is: never before a mark, never before a joiner that
@@ -217,13 +213,16 @@ void sortAndDedupeBreakInfos(std::vector<Hyphenator::BreakInfo>& infos) {
 
 }  // namespace
 
-std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& word, const bool includeFallback) {
+void Hyphenator::breakOffsets(const std::string& word, const bool includeFallback, Scratch& scratch) {
+  std::vector<BreakInfo>& breaks = scratch.breaks;
+  breaks.clear();
   if (word.empty()) {
-    return {};
+    return;
   }
 
   // Convert to codepoints and normalize word boundaries.
-  auto cps = collectCodepoints(word);
+  std::vector<CodepointInfo>& cps = scratch.cps;
+  collectCodepoints(word, cps);
   trimSurroundingPunctuationAndFootnote(cps);
   const auto* hyphenator = cachedHyphenator_;
 
@@ -237,8 +236,8 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
   }
 
   // Explicit hyphen markers (soft or hard) take precedence over language breaks.
-  auto explicitBreakInfos = buildExplicitBreakInfos(cps);
-  if (!explicitBreakInfos.empty()) {
+  appendExplicitBreakInfos(cps, breaks);
+  if (!breaks.empty()) {
     // When a word contains explicit hyphens we also run Liang patterns on each alphabetic
     // segment between them. Without this, "US-Satellitensystems" would only offer one split
     // point (after "US-"), making it impossible to break mid-"Satellitensystems" even when
@@ -254,16 +253,16 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
     //                                            @16 Satellitensys|tems  (+hyphen)
     //   Result: 6 sorted break points; the line-breaker picks the widest prefix that fits.
     if (hyphenator) {
-      appendSegmentPatternBreaks(cps, *hyphenator, /*includeFallback=*/false, explicitBreakInfos);
+      appendSegmentPatternBreaks(cps, *hyphenator, /*includeFallback=*/false, breaks);
     }
     // Also add apostrophe contraction breaks when present (e.g. "l'état-major"
     // has both an explicit hyphen and an apostrophe that can independently break).
     if (hasApostropheLikeSeparator) {
-      appendApostropheContractionBreaks(cps, explicitBreakInfos);
+      appendApostropheContractionBreaks(cps, breaks);
     }
     // Merge all break points into ascending byte-offset order.
-    sortAndDedupeBreakInfos(explicitBreakInfos);
-    return explicitBreakInfos;
+    sortAndDedupeBreakInfos(breaks);
+    return;
   }
 
   // Apostrophe-like separators split compounds into alphabetic segments; run Liang on each segment.
@@ -271,33 +270,33 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
   // completely unsplittable due to the apostrophe punctuation. Apostrophe contraction breaks are
   // applied regardless of whether a language hyphenator is available.
   if (hasApostropheLikeSeparator) {
-    std::vector<BreakInfo> segmentedBreaks;
     if (hyphenator) {
-      appendSegmentPatternBreaks(cps, *hyphenator, includeFallback, segmentedBreaks);
+      appendSegmentPatternBreaks(cps, *hyphenator, includeFallback, breaks);
     }
-    appendApostropheContractionBreaks(cps, segmentedBreaks);
-    sortAndDedupeBreakInfos(segmentedBreaks);
-    return segmentedBreaks;
+    appendApostropheContractionBreaks(cps, breaks);
+    sortAndDedupeBreakInfos(breaks);
+    return;
   }
 
   // Ask language hyphenator for legal break points.
-  std::vector<size_t> indexes;
+  std::vector<size_t>& indexes = scratch.indexes;
+  indexes.clear();
   if (hyphenator) {
-    indexes = hyphenator->breakIndexes(cps);
+    hyphenator->breakIndexes(cps, indexes);
   }
 
   // Only add fallback breaks if needed
   if (includeFallback && indexes.empty()) {
     const size_t minPrefix = hyphenator ? hyphenator->minPrefix() : LiangWordConfig::kDefaultMinPrefix;
     const size_t minSuffix = hyphenator ? hyphenator->minSuffix() : LiangWordConfig::kDefaultMinSuffix;
+    indexes.reserve(cps.size());  // nearly every position is one: no regrowth with the old block beside the new
     appendFallbackIndexes(cps, minPrefix, minSuffix, indexes);
   }
 
   if (indexes.empty()) {
-    return {};
+    return;
   }
 
-  std::vector<Hyphenator::BreakInfo> breaks;
   breaks.reserve(indexes.size());
   for (const size_t idx : indexes) {
     // CJK scripts are not hyphenated: a break next to a CJK character draws no hyphen. Ported from
@@ -308,8 +307,18 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
         (idx < cps.size() && unhyphenated(cps[idx].value)) || (idx > 0 && unhyphenated(cps[idx - 1].value));
     breaks.push_back({byteOffsetForIndex(cps, idx), !noHyphen && showsHyphen(hyphenator, cps, idx)});
   }
+}
 
-  return breaks;
+std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& word, const bool includeFallback) {
+  Scratch scratch;
+  breakOffsets(word, includeFallback, scratch);
+  return std::move(scratch.breaks);
+}
+
+void Hyphenator::Scratch::release() {
+  std::vector<CodepointInfo>().swap(cps);
+  std::vector<size_t>().swap(indexes);
+  std::vector<BreakInfo>().swap(breaks);
 }
 
 std::vector<Hyphenator::BreakInfo> Hyphenator::anywhereBreaks(const std::string& word) {

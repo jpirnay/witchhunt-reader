@@ -75,6 +75,15 @@ inline constexpr size_t estimatePagesForSpine(const size_t inflatedSize) {
 
 class BuildArena;  // lib/Memory -- see setBuildArena
 
+#ifdef TABLE_CELL_FAULT_INJECTION
+// Host tests only (firmware never defines it): how many more table cells may get their text before each one is
+// refused as if the heap were out. SIZE_MAX = never refuse. Drives makeCellText's out-of-memory path.
+inline size_t& tableCellTextsLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+#endif
+
 class ChapterHtmlSlimParser final : public Print {
   std::shared_ptr<Epub> epub;
   GfxRenderer& renderer;
@@ -328,6 +337,9 @@ class ChapterHtmlSlimParser final : public Print {
   // parser made up (alt text, a footnote preview), whose words take baseOffset unchanged.
   static void consumeText(void* userData, const char* s, int len, uint32_t baseOffset, bool source);
   bool nextWordContinues = false;  // true when next flushed word attaches to previous (inline element boundary)
+  // The layout pass's working memory, one for the build: every ParsedText the parser makes (the main block, each table
+  // cell) is lent it, so a row of buffered cells does not carry a set each (ParsedText::LayoutScratch).
+  ParsedText::LayoutScratch layoutScratch_;
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
@@ -466,8 +478,16 @@ class ChapterHtmlSlimParser final : public Print {
   // The book's other font families (see BlockFontFamilies); empty, font-family is not looked at. A block takes one
   // family: its words' when they are all in one, else the family of the element that opened it. Words are tracked
   // from the block's first (blockFamilyState_ 1: all in blockFirstFamily_, 2: in several); a block ends in
-  // startNewTextBlock, which starts the next one over.
-  BlockFontFamilies fontFamilies_;
+  // startNewTextBlock, which starts the next one over. Boxed, made only for a book that has some (setFontFamilies):
+  // the others carry a null pointer through the build, not 488 B. Null therefore means no families, and the lookups
+  // below answer as an empty set would: the body font's slot 0, no family.
+  std::unique_ptr<BlockFontFamilies> fontFamilies_;
+  uint8_t fontFamilySlot(const uint32_t cssFamily) const {
+    return fontFamilies_ ? fontFamilies_->slotOf(cssFamily) : 0;
+  }
+  const BlockFontFamilies::Family* fontFamily(const uint8_t slot) const {
+    return fontFamilies_ ? fontFamilies_->family(slot) : nullptr;
+  }
   uint32_t effectiveFontFamily_ = 0;  // CssStyle::fontFamily of the words being flushed
   uint32_t blockFirstFamily_ = 0;
   uint32_t blockOwnFamily_ = 0;
@@ -1181,6 +1201,9 @@ class ChapterHtmlSlimParser final : public Print {
   bool degradeRowAtOpenCell(const char* reason);
   // Called on </td> once degraded: emit and release the just-closed cell immediately.
   void streamClosedCell(BufferedTableRow& row);
+  // A table cell's text: no paragraph spacing, no hyphenation, the block's typography, shaping latch and writing mode.
+  // Null when the heap cannot hold it; the parse then stops, as any low-heap stop does (the pages so far are kept).
+  std::unique_ptr<ParsedText> makeCellText();
   // Resolve an image src to a sized ImageBlock (lazy-extracted from the EPUB), scaled to fit
   // maxWidth/maxHeight. Returns nullptr when the image is unsupported or its dimensions
   // cannot be resolved. The cache path is derived from the archive entry, not from parse order.
@@ -1422,6 +1445,7 @@ class ChapterHtmlSlimParser final : public Print {
   // may run before the next feed. See ParsedText::releaseLayoutScratch.
   void onSliceYield() {
     if (currentTextBlock) currentTextBlock->releaseLayoutScratch();
+    if (!layoutScratch_.inUse) layoutScratch_.release();  // grown by a table cell with no main block to release it
     // The line images' records, once a paragraph has placed them all: a book with none never grew them.
     if (pendingLineImages_.empty()) std::vector<PendingLineImage>().swap(pendingLineImages_);
   }
@@ -1456,7 +1480,7 @@ class ChapterHtmlSlimParser final : public Print {
   // effective font size differs from the body resolve to the nearest real font on it.
   void setFontSizeLadder(const FontSizeLadder& ladder) { fontSizeLadder_ = ladder; }
   // Supplies the book's other font families (see BlockFontFamilies); none by default.
-  void setFontFamilies(const BlockFontFamilies& families) { fontFamilies_ = families; }
+  void setFontFamilies(const BlockFontFamilies& families);
   // Census mode (BodySize::detect), set before setup(): the parse styles the chapter as a build does and counts its
   // running text into `census` by the size each word would be set at (block size times word size, see
   // countCensusWord), and lays nothing out: no line, no page, no image, no table. A block keeps its first word only,

@@ -62,4 +62,22 @@ TEST(WordCapacity, ACapBelowTheCapacityChangesNothingUntilTheArraysAreFull) {
   EXPECT_EQ(text.wordCapacity(), 160u);
 }
 
+TEST(WordCapacity, ACellsArraysStartAtFourAndDouble) {
+  // A table row holds every cell's arrays until it is laid out: a one-word cell reserves 4 entries, not 16.
+  ParsedText cell(false, false);
+  cell.setFirstWordReserve(ParsedText::kCellFirstWordReserve);
+  addWords(cell, 1);
+  EXPECT_EQ(cell.wordCapacity(), 4u);
+  addWords(cell, 4);  // 5
+  EXPECT_EQ(cell.wordCapacity(), 8u);
+  addWords(cell, 12);  // 17
+  EXPECT_EQ(cell.wordCapacity(), 32u);
+}
+
+TEST(WordCapacity, AParagraphsArraysStartAtSixteen) {
+  ParsedText text = paragraph();
+  addWords(text, 1);
+  EXPECT_EQ(text.wordCapacity(), 16u);
+}
+
 }  // namespace
