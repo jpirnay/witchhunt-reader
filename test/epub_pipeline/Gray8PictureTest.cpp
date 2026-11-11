@@ -1,5 +1,5 @@
 // Reader pictures painted into a panel's own 8-bit canvas: the converters' RenderConfig::gray8 sink (JPEG baseline and
-// progressive, PNG), ImageBlock::renderGray8 and Page::renderImagesGray8.
+// progressive, PNG), ImageBlock::renderGray8 and its gray cache on the card, and Page::renderImagesGray8.
 //
 // On such a panel (the T5S3) a page with pictures goes out on that canvas: the page as the B/W pass drew it, then each
 // picture's samples over its box. These tests pin that a picture's samples land where the B/W pass draws it, whole or
@@ -19,6 +19,7 @@
 #include "Epub/Page.h"
 #include "Epub/TurnedFrame.h"
 #include "Epub/blocks/ImageBlock.h"
+#include "Epub/blocks/PictureTone.h"
 #include "Epub/converters/DirectPixelWriter.h"
 #include "Epub/converters/JpegToFramebufferConverter.h"
 #include "GfxRenderer.h"
@@ -35,7 +36,8 @@ constexpr int kPanelW = 480;
 constexpr int kPanelH = 800;
 constexpr uint16_t kStride = kPanelW;
 constexpr int kFbBytes = kPanelW / 8 * kPanelH;
-// Odd, and the tests that count written bytes paint through evenTone(), so no sample can pass for an unwritten byte.
+// Odd, and the tests that count written bytes paint through evenTone() or picture_tone, neither of which yields it, so
+// no sample can pass for an unwritten byte.
 constexpr uint8_t kUnset = 0x5B;
 
 struct Box {
@@ -92,7 +94,10 @@ struct Gray8PictureFixture : testing::Test {
     clearCanvas();
     fillFrameBuffer(0xFF);
   }
-  void TearDown() override { fs::remove_all(work); }
+  void TearDown() override {
+    ImageBlock::setGrayVariant(ImageBlock::GrayVariant::Bayer);
+    fs::remove_all(work);
+  }
 
   void clearCanvas() { canvas.assign(static_cast<size_t>(kStride) * kPanelH, kUnset); }
   void fillFrameBuffer(const uint8_t byte) const { std::memset(renderer.getWriteTarget(), byte, kFbBytes); }
@@ -251,62 +256,117 @@ TEST_F(Gray8PictureFixture, JpegOfAnUnsupportedModeFailsAndWritesNothing) {
 // Where the B/W pass had no pixel cache to draw from it drew a placeholder: that stays, and nothing is decoded.
 TEST_F(Gray8PictureFixture, APictureWithoutItsPixelCacheIsLeftAlone) {
   ImageBlock image((work / "img.png").string(), 120, 160, "", kPngBook, "OEBPS/images/scaling_test.png");
-  EXPECT_FALSE(image.renderGray8(renderer, 10, 20, canvas.data(), kStride, nullptr));
+  EXPECT_FALSE(image.renderGray8(renderer, 10, 20, canvas.data(), kStride));
   EXPECT_TRUE(untouched());
-  EXPECT_EQ(renderer.bwRectsComposited, 0);
   EXPECT_FALSE(fs::exists(work / "img.png")) << "not even extracted";
+  EXPECT_FALSE(image.hasGray8Cache());
 }
 
-// A PNG over exactly its box, through the tone, the framebuffer and the caches as they were.
-TEST_F(Gray8PictureFixture, APngPictureFillsItsBox) {
+// A PNG over exactly its box, through the picture tone, the framebuffer as it was; its gray cache is written and no
+// Bayer one. (The tone never yields kUnset, so a count of the bytes that differ from it is a count of the written.)
+TEST_F(Gray8PictureFixture, APngPictureFillsItsBoxAndIsCached) {
+  for (int v = 0; v < 256; ++v) ASSERT_NE(picture_tone::kTable[v], kUnset) << "the count below needs it";
   ImageBlock image((work / "img.png").string(), 120, 160, "", kPngBook, "OEBPS/images/scaling_test.png");
   warm(image, 10, 20);
+  EXPECT_FALSE(image.hasGray8Cache());
   const Box box{10, 20, 120, 160};
-  ASSERT_TRUE(image.renderGray8(renderer, box.x, box.y, canvas.data(), kStride, evenTone()));
+  ASSERT_TRUE(image.renderGray8(renderer, box.x, box.y, canvas.data(), kStride));
   EXPECT_EQ(writtenIn(box), box.w * box.h);
   EXPECT_EQ(writtenOutside(box), 0);
   EXPECT_TRUE(frameBufferWhite());
-  EXPECT_FALSE(fs::exists(work / "img.bayer.pxc")) << "the gray decode writes no cache";
+  EXPECT_TRUE(fs::exists(work / "img.120x160.gray8")) << "named by its drawn size";
+  EXPECT_FALSE(fs::exists(work / "img.120x160.gray8.part"));
+  EXPECT_FALSE(fs::exists(work / "img.bayer.pxc"));
 }
 
 TEST_F(Gray8PictureFixture, JpegPicturesFillTheirBoxes) {
   ImageBlock baseline((work / "base.jpg").string(), 175, 125, "", kJpegBook, "OEBPS/images/jpeg_format.jpg");
   warm(baseline, 10, 20);
-  ASSERT_TRUE(baseline.renderGray8(renderer, 10, 20, canvas.data(), kStride, evenTone()));
+  ASSERT_TRUE(baseline.renderGray8(renderer, 10, 20, canvas.data(), kStride));
   EXPECT_EQ(writtenIn({10, 20, 175, 125}), 175 * 125);
+  EXPECT_TRUE(baseline.hasGray8Cache());
 
   clearCanvas();
   ImageBlock progressive((work / "prog.jpg").string(), 160, 200, "", kJpegBook, "OEBPS/images/gradient_test.jpg");
   warm(progressive, 200, 30);
-  ASSERT_TRUE(progressive.renderGray8(renderer, 200, 30, canvas.data(), kStride, evenTone()));
+  ASSERT_TRUE(progressive.renderGray8(renderer, 200, 30, canvas.data(), kStride));
   EXPECT_EQ(writtenIn({200, 30, 160, 200}), 160 * 200);
   EXPECT_EQ(writtenOutside({200, 30, 160, 200}), 0);
   EXPECT_TRUE(frameBufferWhite());
+  EXPECT_TRUE(progressive.hasGray8Cache());
 }
 
-// A slice of a picture split over pages holds that slice's rows of the whole picture, and nothing past it.
+// The second draw is the cache's: samples written into the cache file come out on the canvas.
+TEST_F(Gray8PictureFixture, TheNextDrawReadsTheCache) {
+  ImageBlock image((work / "img.png").string(), 120, 160, "", kPngBook, "OEBPS/images/scaling_test.png");
+  warm(image, 10, 20);
+  ASSERT_TRUE(image.renderGray8(renderer, 10, 20, canvas.data(), kStride));
+  const std::vector<uint8_t> decoded = canvas;
+  const fs::path cache = work / "img.120x160.gray8";
+  std::vector<uint8_t> bytes = readFile(cache.string());
+  ASSERT_EQ(bytes.size(), 12u + 120u * 160u) << "a 12-byte header, then the rows";
+  // The cache holds what the decode painted: row 7 of the picture is the canvas's row 27.
+  for (int c = 0; c < 120; ++c) ASSERT_EQ(bytes[12 + 7 * 120 + c], decoded[27 * kStride + 10 + c]);
+  std::fill(bytes.begin() + 12, bytes.end(), 0x10);
+  writeFile(cache, bytes);
+
+  clearCanvas();
+  ASSERT_TRUE(image.renderGray8(renderer, 10, 20, canvas.data(), kStride));
+  for (int y = 20; y < 180; ++y) {
+    for (int x = 10; x < 130; ++x) ASSERT_EQ(at(x, y), 0x10) << x << "," << y;
+  }
+}
+
+// A cache of another tone (or format, or size) is not read: the picture is decoded again and the cache written over.
+TEST_F(Gray8PictureFixture, ACacheOfAnotherToneIsDecodedAgain) {
+  ImageBlock image((work / "img.png").string(), 120, 160, "", kPngBook, "OEBPS/images/scaling_test.png");
+  warm(image, 10, 20);
+  ASSERT_TRUE(image.renderGray8(renderer, 10, 20, canvas.data(), kStride));
+  const std::vector<uint8_t> decoded = canvas;
+  const fs::path cache = work / "img.120x160.gray8";
+  std::vector<uint8_t> bytes = readFile(cache.string());
+  ASSERT_GE(bytes.size(), 12u);
+  const std::vector<uint8_t> header(bytes.begin(), bytes.begin() + 12);
+  bytes[8] ^= 0xFF;  // the tone's fingerprint
+  std::fill(bytes.begin() + 12, bytes.end(), 0x10);
+  writeFile(cache, bytes);
+
+  clearCanvas();
+  ASSERT_TRUE(image.renderGray8(renderer, 10, 20, canvas.data(), kStride));
+  EXPECT_EQ(canvas, decoded) << "decoded again, not the stale samples";
+  const std::vector<uint8_t> rewritten = readFile(cache.string());
+  ASSERT_GE(rewritten.size(), 12u);
+  EXPECT_EQ(std::vector<uint8_t>(rewritten.begin(), rewritten.begin() + 12), header);
+}
+
+// A slice of a picture split over pages holds that slice's rows of the whole picture, and nothing past it: decoded,
+// and from the cache.
 TEST_F(Gray8PictureFixture, ASplitPictureKeepsItsOwnSlice) {
   ImageBlock image((work / "img.png").string(), 120, 160, "", kPngBook, "OEBPS/images/scaling_test.png");
   warm(image, 10, 20);
-  ASSERT_TRUE(image.renderGray8(renderer, 10, 20, canvas.data(), kStride, evenTone()));
+  ASSERT_TRUE(image.cacheGray8(renderer));
+  ASSERT_TRUE(image.renderGray8(renderer, 10, 20, canvas.data(), kStride));
   const std::vector<uint8_t> whole = canvas;
 
   constexpr int kFrom = 60;
   constexpr int kRows = 50;
   const auto piece = image.makeCrop(kFrom, kRows);
-  clearCanvas();
   const Box box{200, 300, 120, kRows};
-  ASSERT_TRUE(piece->renderGray8(renderer, box.x, box.y, canvas.data(), kStride, evenTone()));
-  EXPECT_EQ(writtenOutside(box), 0) << "rows of the picture outside its slice";
-  for (int row = 0; row < kRows; ++row) {
-    for (int col = 0; col < box.w; ++col) {
-      ASSERT_EQ(at(box.x + col, box.y + row), whole[static_cast<size_t>(20 + kFrom + row) * kStride + 10 + col])
-          << "slice row " << row << ", column " << col;
+  for (const bool cached : {true, false}) {
+    if (!cached) fs::remove(work / "img.120x160.gray8");
+    clearCanvas();
+    ASSERT_TRUE(piece->renderGray8(renderer, box.x, box.y, canvas.data(), kStride));
+    EXPECT_EQ(writtenOutside(box), 0) << "rows of the picture outside its slice";
+    for (int row = 0; row < kRows; ++row) {
+      for (int col = 0; col < box.w; ++col) {
+        ASSERT_EQ(at(box.x + col, box.y + row), whole[static_cast<size_t>(20 + kFrom + row) * kStride + 10 + col])
+            << (cached ? "cached" : "decoded") << " slice row " << row << ", column " << col;
+      }
     }
   }
 }
 
-// A GIF has no gray decode: it keeps its dither, and nothing is put back because nothing was written.
+// A GIF has no gray decode: it keeps its dither, and gets no gray cache.
 TEST_F(Gray8PictureFixture, AGifKeepsItsDither) {
   const fs::path gif = work / "pic.gif";
   std::vector<uint8_t> bytes = {'G', 'I', 'F', '8', '9', 'a'};
@@ -314,33 +374,49 @@ TEST_F(Gray8PictureFixture, AGifKeepsItsDither) {
   writeFile(gif, bytes);
   fakePixelCache(gif);
   ImageBlock image(gif.string(), 40, 30);
-  EXPECT_FALSE(image.renderGray8(renderer, 10, 20, canvas.data(), kStride, nullptr));
+  EXPECT_FALSE(image.renderGray8(renderer, 10, 20, canvas.data(), kStride));
   EXPECT_TRUE(untouched());
-  EXPECT_EQ(renderer.bwRectsComposited, 0);
+  EXPECT_FALSE(image.hasGray8Cache());
 }
 
-// A decode that fails part way has written some rows; the box gets back what the B/W pass drew there.
-TEST_F(Gray8PictureFixture, AFailedDecodePutsTheDitherBack) {
+// A decode that fails part way leaves the canvas as it was, the B/W pass's dither on it, and writes no cache.
+TEST_F(Gray8PictureFixture, AFailedDecodeLeavesTheCanvasAlone) {
   std::vector<uint8_t> bytes = readFile(JPEG_FIXTURE_DIR "/thin_lines_gray.jpg");
   bytes.resize(bytes.size() * 2 / 3);  // cut inside the scan
   const fs::path cut = work / "cut.jpg";
   writeFile(cut, bytes);
   fakePixelCache(cut);
-  const Box box{10, 20, 300, 16};
-  // What the B/W pass drew in the box: a few black dots.
-  fillFrameBuffer(0xFF);
-  for (int x = box.x; x < box.x + box.w; x += 7)
-    renderer.getWriteTarget()[(box.y + 3) * (kPanelW / 8) + (x >> 3)] &= ~(0x80 >> (x & 7));
+  ImageBlock image(cut.string(), 300, 16);
+  EXPECT_FALSE(image.renderGray8(renderer, 10, 20, canvas.data(), kStride));
+  EXPECT_TRUE(untouched());
+  EXPECT_FALSE(image.hasGray8Cache());
+  EXPECT_FALSE(fs::exists(work / "cut.300x16.gray8.part"));
+}
 
-  ImageBlock image(cut.string(), box.w, box.h);
-  EXPECT_FALSE(image.renderGray8(renderer, box.x, box.y, canvas.data(), kStride, nullptr));
-  EXPECT_EQ(renderer.bwRectsComposited, 1);
-  for (int y = box.y; y < box.y + box.h; ++y) {
-    for (int x = box.x; x < box.x + box.w; ++x) {
-      ASSERT_EQ(at(x, y), black(x, y) ? 0x00 : 0xFF) << x << "," << y;
-    }
-  }
-  EXPECT_EQ(writtenOutside(box), 0);
+// Where the reader shows pictures on the gray canvas, the warms make each picture's gray cache in place of the Bayer
+// one, which nothing replays there; elsewhere the Bayer one, as before.
+TEST_F(Gray8PictureFixture, TheWarmMakesTheGrayVariant) {
+  const std::string path = (work / "img.png").string();
+  const auto pageWithPicture = [&] {
+    auto page = std::make_unique<Page>();
+    page->elements.push_back(std::make_unique<PageImage>(
+        std::make_unique<ImageBlock>(path, 120, 160, "", kPngBook, "OEBPS/images/scaling_test.png"), 10, 20));
+    return page;
+  };
+  ImageBlock::setGrayVariant(ImageBlock::GrayVariant::Gray8);
+  auto page = pageWithPicture();
+  EXPECT_TRUE(page->hasUncachedImages(true, true, /*alsoWarmGrayscale=*/true));
+  page->warmImageCaches(renderer, 0, 0, true, true, /*alsoWarmGrayscale=*/true);
+  ImageBlock::setGrayVariant(ImageBlock::GrayVariant::Bayer);
+  EXPECT_TRUE(fs::exists(work / "img.1bit.pxc"));
+  EXPECT_TRUE(fs::exists(work / "img.120x160.gray8"));
+  EXPECT_FALSE(fs::exists(work / "img.bayer.pxc"));
+  ImageBlock::setGrayVariant(ImageBlock::GrayVariant::Gray8);
+  EXPECT_FALSE(page->hasUncachedImages(true, true, /*alsoWarmGrayscale=*/true));
+  ImageBlock::setGrayVariant(ImageBlock::GrayVariant::Bayer);
+  EXPECT_TRUE(page->hasUncachedImages(true, true, /*alsoWarmGrayscale=*/true)) << "the Bayer variant is missing";
+  page->warmImageCaches(renderer, 0, 0, true, true, /*alsoWarmGrayscale=*/true);
+  EXPECT_TRUE(fs::exists(work / "img.bayer.pxc"));
 }
 
 // A picture of a vertical page is turned: it is drawn upright in the reader's frame, and its gray lands on the same
@@ -371,7 +447,7 @@ TEST_F(Gray8PictureFixture, ATurnedPictureLandsWhereItsDitherDoes) {
   ASSERT_GT(blackInside, 0) << "the B/W pass drew the picture";
   ASSERT_EQ(blackOutside, 0) << "the expected box is not where the B/W pass drew";
 
-  ASSERT_TRUE(image.renderGray8(renderer, kX, kY, canvas.data(), kStride, evenTone()));
+  ASSERT_TRUE(image.renderGray8(renderer, kX, kY, canvas.data(), kStride));
   EXPECT_EQ(writtenIn(physical), physical.w * physical.h);
   EXPECT_EQ(writtenOutside(physical), 0);
   EXPECT_EQ(renderer.getOrientation(), turnedframe::contentOf(GfxRenderer::Portrait)) << "the live frame comes back";
@@ -399,7 +475,7 @@ TEST_F(Gray8PictureFixture, APageOffersEveryPictureATableCellsToo) {
       std::make_unique<ImageBlock>((work / "other.png").string(), 60, 80, "", kPngBook, "OEBPS/images/png_format.png"),
       300, 20));
 
-  const Gray8Pictures count = page.renderImagesGray8(renderer, 0, 5, 7, canvas.data(), kStride, evenTone());
+  const Gray8Pictures count = page.renderImagesGray8(renderer, 0, 5, 7, canvas.data(), kStride);
   EXPECT_EQ(count.offered, 3);
   EXPECT_EQ(count.inGray, 2);
   const Box picture{10 + 5, 20 + 7, 60, 80};

@@ -182,14 +182,29 @@ class ImageBlock final : public Block {
   void renderGrayscaleFromCache(GfxRenderer& renderer, int x, int y) const;
 
   // On a panel that keeps a deeper gray buffer of its own (GfxRenderer::borrowGray8Canvas(), `canvas` with `stride`
-  // bytes a row), paint this picture's 8-bit samples there, over the box render() draws it in, each through `tone`
-  // (256 entries; null: as decoded). Decoded afresh: no pixel cache holds 8 bits. JPEG and PNG, a slice of a picture
-  // split over pages and a turned one included.
+  // bytes a row), paint this picture's 8-bit samples there through picture_tone, over the box render() draws it in.
+  // JPEG and PNG, a slice of a picture split over pages and a turned one included. From the picture's gray cache on
+  // the card when it has one, otherwise decoded, and the cache written for the next draw (unless the decode was short
+  // of memory).
   //
   // Only over a picture: where the B/W pass had no pixel cache to draw from, it drew a placeholder or a low-memory
-  // box, and that stays. True when the picture's gray is on the canvas. False when not, and the box then holds what
-  // the B/W pass drew there, put back over a decode that failed part way: a picture without its gray keeps its dither.
-  bool renderGray8(GfxRenderer& renderer, int x, int y, uint8_t* canvas, uint16_t stride, const uint8_t* tone) const;
+  // box, and that stays. True when the picture's gray is on the canvas. False when not, and the canvas is as it was,
+  // so a picture without its gray keeps what the B/W pass drew there, its dither.
+  bool renderGray8(GfxRenderer& renderer, int x, int y, uint8_t* canvas, uint16_t stride) const;
+
+  // What a picture's gray variant is: the 4-level Bayer cache the anti-aliasing passes replay over it (dual-plane
+  // panels), or its 8-bit gray cache, which a panel's own canvas shows (renderGray8). The reader sets it for its panel;
+  // Bayer until then. One for the whole process, as the panel is.
+  enum class GrayVariant : uint8_t { Bayer, Gray8 };
+  static void setGrayVariant(const GrayVariant variant) { grayVariant_ = variant; }
+  static GrayVariant grayVariant() { return grayVariant_; }
+  // Whether the gray variant's cache exists, and the decode that writes it. The Bayer one is render()'s, at (x, y).
+  bool hasGrayVariantCache() const;
+  void warmGrayVariant(GfxRenderer& renderer, int x, int y, bool forceLoad);
+  // The 8-bit gray cache (img_N.WxH.gray8): whether there is one, and the decode that writes it if not. True when it
+  // exists afterwards.
+  bool hasGray8Cache() const;
+  bool cacheGray8(GfxRenderer& renderer) const;
 
   BlockType getType() override { return IMAGE_BLOCK; }
   bool isEmpty() override { return false; }
@@ -248,11 +263,17 @@ class ImageBlock final : public Block {
   void renderUpright(GfxRenderer& renderer, int x, int y, bool forceLoad, bool monochromeOutput,
                      bool alsoCacheOtherVariant);
   void renderGrayscaleUpright(GfxRenderer& renderer, int x, int y) const;
-  bool renderGray8Upright(GfxRenderer& renderer, int x, int y, uint8_t* canvas, uint16_t stride,
-                          const uint8_t* tone) const;
-  // renderGray8Upright's decode: true when the picture's samples are all on the canvas. `decoderRan` says whether a
-  // decoder got as far as writing to it.
-  bool decodeGray8(GfxRenderer& renderer, const RenderConfig& config, bool& decoderRan) const;
+  bool renderGray8Upright(GfxRenderer& renderer, int x, int y, uint8_t* canvas, uint16_t stride) const;
+  // The picture's samples at its drawn size, through picture_tone, row after row; null when it could not be decoded.
+  std::unique_ptr<uint8_t[]> decodeGray8Picture(GfxRenderer& renderer) const;
+  // decodeGray8Picture's decode, by format: true when the picture's samples are all in config.gray8.
+  bool decodeGray8(GfxRenderer& renderer, const RenderConfig& config) const;
+  // The gray cache: written whole or not at all, and `rows` of it from `firstRow` painted at (x, y). False, with
+  // nothing painted, when there is none of this format, size and tone.
+  bool writeGray8Cache(const uint8_t* samples) const;
+  bool drawGray8FromCache(GfxRenderer& renderer, int x, int y, uint8_t* canvas, uint16_t stride, int firstRow,
+                          int rows) const;
+  static GrayVariant grayVariant_;
   static bool placeholderOnly_;
   static Placeholder placeholderOnlyKind_;
   static uint16_t placeholdersDrawn_;

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "Epub/blocks/PictureTone.h"
 #include "ReaderGrayCanvas.h"
 
 namespace {
@@ -36,28 +37,37 @@ TEST(ReaderGrayCanvas, OnlyWithImagesOnDisplay) {
   EXPECT_FALSE(RGC::pageGoesOutOnCanvas(11, true, false, S::IMAGES_SUPPRESS));
 }
 
-// --- The pictures' tone -------------------------------------------------------------------------------------------
+// --- The pictures' tone (picture_tone, lib/Epub) -----------------------------------------------------------------
 
 // v' = 255 * (v / 255)^0.28, rounded, for every byte: the curve the user chose on the T5S3.
 TEST(ReaderGrayCanvas, PictureToneIsTheChosenCurve) {
   for (int v = 0; v < 256; ++v) {
     const int expected = static_cast<int>(255.0 * std::pow(v / 255.0, 0.28) + 0.5);
-    EXPECT_EQ(RGC::kPictureTone[v], expected) << "at " << v;
+    EXPECT_EQ(picture_tone::kTable[v], expected) << "at " << v;
   }
 }
 
+// The fingerprint every gray cache carries follows the table: a cache made through any other tone is not read.
+TEST(ReaderGrayCanvas, PictureToneFingerprintFollowsTheTable) {
+  uint8_t other[256];
+  for (int v = 0; v < 256; ++v) other[v] = picture_tone::kTable[v];
+  EXPECT_EQ(picture_tone::fingerprint(other), picture_tone::kFingerprint);
+  other[128] ^= 1;
+  EXPECT_NE(picture_tone::fingerprint(other), picture_tone::kFingerprint);
+}
+
 TEST(ReaderGrayCanvas, PictureToneKeepsBlackAndWhiteAndOnlyBrightens) {
-  EXPECT_EQ(RGC::kPictureTone[0], 0);
-  EXPECT_EQ(RGC::kPictureTone[255], 255);
+  EXPECT_EQ(picture_tone::kTable[0], 0);
+  EXPECT_EQ(picture_tone::kTable[255], 255);
   for (int v = 1; v < 256; ++v) {
-    EXPECT_GE(RGC::kPictureTone[v], RGC::kPictureTone[v - 1]) << "falls at " << v;
-    EXPECT_GE(RGC::kPictureTone[v], v) << "darkens at " << v;
+    EXPECT_GE(picture_tone::kTable[v], picture_tone::kTable[v - 1]) << "falls at " << v;
+    EXPECT_GE(picture_tone::kTable[v], v) << "darkens at " << v;
   }
   // The steps of the ramp measured on the device.
-  EXPECT_EQ(RGC::kPictureTone[85], 187);
-  EXPECT_EQ(RGC::kPictureTone[136], 214);
-  EXPECT_EQ(RGC::kPictureTone[187], 234);
-  EXPECT_EQ(RGC::kPictureTone[221], 245);
+  EXPECT_EQ(picture_tone::kTable[85], 187);
+  EXPECT_EQ(picture_tone::kTable[136], 214);
+  EXPECT_EQ(picture_tone::kTable[187], 234);
+  EXPECT_EQ(picture_tone::kTable[221], 245);
 }
 
 TEST(ReaderGrayCanvas, AntiAliasingDarkIsNoLighterThanLight) {

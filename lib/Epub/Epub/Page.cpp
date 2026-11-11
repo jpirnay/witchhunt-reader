@@ -47,6 +47,10 @@ void PageImage::renderWithForceLoad(GfxRenderer& renderer, const int xOffset, co
   imageBlock->render(renderer, xPos + xOffset, yPos + yOffset, forceLoad, monochromeOutput, alsoCacheOtherVariant);
 }
 
+void PageImage::warmGrayVariant(GfxRenderer& renderer, const int xOffset, const int yOffset, const bool forceLoad) {
+  imageBlock->warmGrayVariant(renderer, xPos + xOffset, yPos + yOffset, forceLoad);
+}
+
 bool PageImage::serialize(FsFile& file) {
   serialization::writePod(file, xPos);
   serialization::writePod(file, yPos);
@@ -159,8 +163,7 @@ void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const in
 }
 
 void PageTableFragment::renderImagesGray8(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset,
-                                          uint8_t* canvas, const uint16_t stride, const uint8_t* tone,
-                                          Gray8Pictures& count) const {
+                                          uint8_t* canvas, const uint16_t stride, Gray8Pictures& count) const {
   if (!HalDisplay::kMayLendGray8Canvas) return;  // no canvas in this build
   const std::array<int, MAX_TABLE_COLS + 1> colX = columnEdges(xPos + xOffset, totalWidth, columnCount);
   const int lineHeight = renderer.getLineHeight(fontId);
@@ -174,7 +177,7 @@ void PageTableFragment::renderImagesGray8(GfxRenderer& renderer, const int fontI
         const int imageY =
             layOutCellLines(renderer, cell, fontId, x, rowY + TABLE_CELL_PADDING, lineHeight, /*draw=*/false);
         count.offered++;
-        if (cell.image->renderGray8(renderer, x, imageY, canvas, stride, tone)) count.inGray++;
+        if (cell.image->renderGray8(renderer, x, imageY, canvas, stride)) count.inGray++;
       }
       col = static_cast<uint8_t>(col + std::min<uint8_t>(cell.colSpan ? cell.colSpan : 1, columnCount - col));
     }
@@ -199,7 +202,7 @@ bool PageTableFragment::hasUncachedImages(const bool forceLoad, const bool monoc
       if (cell.image->wouldShowPlaceholder(forceLoad, monochromeOutput)) continue;
       const bool cached = monochromeOutput ? cell.image->hasPixelCache() : cell.image->hasGrayscaleCache();
       if (!cached) return true;
-      if (alsoWarmGrayscale && monochromeOutput && !cell.image->hasGrayscaleCache()) return true;
+      if (alsoWarmGrayscale && monochromeOutput && !cell.image->hasGrayVariantCache()) return true;
     }
   }
   return false;
@@ -219,8 +222,8 @@ void PageTableFragment::warmCellImages(GfxRenderer& renderer, const bool forceLo
         cell.image->render(renderer, 0, 0, forceLoad, monochromeOutput);
         if (CooperativeAbort::wasAborted()) return;  // see Page::warmImageCaches
       }
-      if (alsoWarmGrayscale && monochromeOutput && !cell.image->hasGrayscaleCache()) {
-        cell.image->render(renderer, 0, 0, forceLoad, /*monochromeOutput=*/false);
+      if (alsoWarmGrayscale && monochromeOutput && !cell.image->hasGrayVariantCache()) {
+        cell.image->warmGrayVariant(renderer, 0, 0, forceLoad);
         if (CooperativeAbort::wasAborted()) return;
       }
     }
@@ -365,7 +368,7 @@ void Page::renderImagesFromGrayscaleCache(GfxRenderer& renderer, const int xOffs
 }
 
 Gray8Pictures Page::renderImagesGray8(GfxRenderer& renderer, const int fontId, const int xOffsetIn, const int yOffsetIn,
-                                      uint8_t* canvas, const uint16_t stride, const uint8_t* tone) const {
+                                      uint8_t* canvas, const uint16_t stride) const {
   int xOffset = xOffsetIn;
   int yOffset = yOffsetIn;
   const PageFrameScope scope(renderer, *this, xOffset, yOffset);
@@ -373,13 +376,13 @@ Gray8Pictures Page::renderImagesGray8(GfxRenderer& renderer, const int fontId, c
   for (const auto& element : elements) {
     if (element->getTag() == TAG_PageTable) {
       static_cast<const PageTableFragment&>(*element).renderImagesGray8(renderer, fontId, xOffset, yOffset, canvas,
-                                                                        stride, tone, count);
+                                                                        stride, count);
       continue;
     }
     if (element->getTag() != TAG_PageImage) continue;
     const auto& pi = static_cast<const PageImage&>(*element);
     count.offered++;
-    if (pi.getImageBlock().renderGray8(renderer, pi.xPos + xOffset, pi.yPos + yOffset, canvas, stride, tone)) {
+    if (pi.getImageBlock().renderGray8(renderer, pi.xPos + xOffset, pi.yPos + yOffset, canvas, stride)) {
       count.inGray++;
     }
   }
@@ -422,7 +425,9 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffsetIn, const int
     // instead of paying two. Requires BOTH to be absent — if the BW cache is already on disk
     // the merged pass would redo work that is already done, so the plain second pass below is
     // the cheaper route.
-    const bool mergeVariants = alsoWarmGrayscale && monochromeOutput && !alreadyCached && !ib.hasGrayscaleCache();
+    // Only the Bayer variant is a companion of the 1-bit one: the 8-bit gray cache has a decode of its own.
+    const bool mergeVariants = alsoWarmGrayscale && monochromeOutput && !alreadyCached &&
+                               ImageBlock::grayVariant() == ImageBlock::GrayVariant::Bayer && !ib.hasGrayscaleCache();
     if (!alreadyCached) {
       static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
                                                             monochromeOutput, mergeVariants);
@@ -434,9 +439,8 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffsetIn, const int
     // Left in place as the fallback that keeps this correct for every decoder and every
     // failure: the companion is best-effort (JPEG and GIF ignore it, and its cache file can
     // fail to open on its own), so the re-check is what makes it safe to ask for.
-    if (alsoWarmGrayscale && monochromeOutput && !ib.hasGrayscaleCache()) {
-      static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
-                                                            /*monochromeOutput=*/false);
+    if (alsoWarmGrayscale && monochromeOutput && !ib.hasGrayVariantCache()) {
+      static_cast<PageImage&>(*element).warmGrayVariant(renderer, xOffset, yOffset, forceLoadLargeImages);
     }
   }
 }

@@ -3507,8 +3507,7 @@ bool EpubReaderActivity::displayPageOnGrayCanvas(const Page& page, const int mar
                                               .width = renderer.getDisplayWidth(),
                                               .height = renderer.getDisplayHeight()};
   const Gray8Pictures pictures = ReaderGrayCanvas::composePage(canvas, stride, buffers, [&] {
-    return page.renderImagesGray8(renderer, getEffectiveReaderFontId(), marginLeft, contentTop, canvas, stride,
-                                  ReaderGrayCanvas::kPictureTone);
+    return page.renderImagesGray8(renderer, getEffectiveReaderFontId(), marginLeft, contentTop, canvas, stride);
   });
   const auto tComposed = millis();
   if (pictures.inGray == 0) {

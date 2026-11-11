@@ -5,7 +5,6 @@
 #include <stdint.h>
 
 #include <cassert>
-#include <climits>
 
 // Direct framebuffer writer that eliminates per-pixel overhead from the image
 // rendering hot path.  Pre-computes orientation transform as linear coefficients
@@ -264,15 +263,14 @@ struct DirectGray8Writer {
   int stride;  // bytes per canvas row; may exceed canvasWidth
   int canvasWidth;
   int canvasHeight;
+  // Where samples may land, in logical coordinates: the oriented screen for a panel's canvas, the buffer for a plain
+  // one. The decoders clip to this rather than to the screen.
+  int logicalWidth;
+  int logicalHeight;
   DirectPixelWriter xf;
-  // A 256-entry tone curve every sample passes through on its way to the canvas (the reader's pictures, see
-  // ReaderGrayCanvas::kPictureTone). Null: the sample is stored as it comes.
+  // A 256-entry tone curve every sample passes through on its way in (the reader's pictures, see picture_tone).
+  // Null: the sample is stored as it comes.
   const uint8_t* tone = nullptr;
-  // Only logical rows [rowsFrom, rowsTo) are stored: a picture split over pages decodes whole and keeps its own
-  // slice (ImageBlock's crop). Every row by default.
-  int rowsFrom = INT_MIN;
-  int rowsTo = INT_MAX;
-  bool rowStored = true;
 
   // `gray8Canvas` is the PHYSICAL panel buffer (HalDisplay::borrowGray8Canvas),
   // so its extent is the panel's, not the oriented screen's.
@@ -281,17 +279,27 @@ struct DirectGray8Writer {
     stride = gray8Stride;
     canvasWidth = renderer.getDisplayWidth();
     canvasHeight = renderer.getDisplayHeight();
+    logicalWidth = renderer.getScreenWidth();
+    logicalHeight = renderer.getScreenHeight();
     tone = nullptr;
-    rowsFrom = INT_MIN;
-    rowsTo = INT_MAX;
-    rowStored = true;
     xf.init(renderer);
   }
 
-  inline void beginRow(int logicalY) {
-    rowStored = logicalY >= rowsFrom && logicalY < rowsTo;
-    xf.beginRow(logicalY);
+  // A plain buffer of `width` x `height` bytes, row after row, where logical and physical are one: a picture decoded
+  // on its own at (0, 0), at any size, as ImageBlock caches it.
+  void initPlain(uint8_t* buffer, const int width, const int height) {
+    canvas = buffer;
+    stride = width;
+    canvasWidth = logicalWidth = width;
+    canvasHeight = logicalHeight = height;
+    tone = nullptr;
+    xf = DirectPixelWriter{};
+    xf.clipRows = height;
+    xf.phyXStepX = 1;  // phyX = x
+    xf.phyYStepY = 1;  // phyY = y
   }
+
+  inline void beginRow(int logicalY) { xf.beginRow(logicalY); }
 
   inline void bandColRange(int xBase, int width, int& colStart, int& colEnd) const {
     xf.bandColRange(xBase, width, colStart, colEnd);
@@ -299,7 +307,6 @@ struct DirectGray8Writer {
 
   // Store one 8-bit sample (0 = black, 255 = white). Must follow beginRow().
   inline void writePixel(int logicalX, uint8_t gray) const {
-    if (!rowStored) return;
     const int phyX = xf.rowPhyXBase + logicalX * xf.phyXStepX;
     const int phyY = xf.rowPhyYBase + logicalX * xf.phyYStepX;
     // One unsigned compare per axis rejects negatives and overruns together —

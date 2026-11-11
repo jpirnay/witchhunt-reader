@@ -1524,8 +1524,9 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   JpegContext ctx;
   ctx.renderer = &renderer;
   ctx.config = &config;
-  ctx.screenWidth = renderer.getScreenWidth();
-  ctx.screenHeight = renderer.getScreenHeight();
+  // A gray8 decode clips to its writer's extent, which a plain buffer sets to the picture's own (DirectGray8Writer).
+  ctx.screenWidth = gray8Out ? config.gray8->logicalWidth : renderer.getScreenWidth();
+  ctx.screenHeight = gray8Out ? config.gray8->logicalHeight : renderer.getScreenHeight();
   ctx.effectiveDitherMode = config.ditherMode;
 
   // TJpgDec handles baseline JPEGs. Progressive ones go to ProgressiveJpeg (every scan, band by
@@ -2080,6 +2081,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   // ctx.caching (the partial file is dropped), so re-read the flag here.
   if (ctx.caching && ctx.cache.finalize() && finerNeed.bytes != 0) {
     image_scratch::noteCoarse(finerNeed);  // a coarse picture published for lack of memory
+  } else if (gray8Out && finerNeed.bytes != 0) {
+    image_scratch::noteCoarse(finerNeed);  // the same for the samples, which a caller would otherwise keep
   }
   // Only alongside a complete primary: a companion without it would be a cache nobody asked for.
   if (ctx.companion) {

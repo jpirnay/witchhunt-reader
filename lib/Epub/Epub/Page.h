@@ -66,6 +66,8 @@ class PageImage final : public PageElement {
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   void renderWithForceLoad(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoad,
                            bool monochromeOutput = true, bool alsoCacheOtherVariant = false);
+  // The image's gray variant (ImageBlock::GrayVariant), decoded and cached where render() draws it.
+  void warmGrayVariant(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoad);
   bool serialize(FsFile& file) override;
   PageElementTag getTag() const override { return TAG_PageImage; }
   static std::unique_ptr<PageImage> deserialize(FsFile& file);
@@ -143,7 +145,7 @@ class PageTableFragment final : public PageElement {
                       bool alsoWarmGrayscale = false) const;
   // Page::renderImagesGray8 for the in-cell graphics, each where render() draws it.
   void renderImagesGray8(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, uint8_t* canvas, uint16_t stride,
-                         const uint8_t* tone, Gray8Pictures& count) const;
+                         Gray8Pictures& count) const;
 };
 
 class Page {
@@ -205,10 +207,10 @@ class Page {
   // No-op for images without a grayscale cache (they degrade gracefully to BW-only).
   void renderImagesFromGrayscaleCache(GfxRenderer& renderer, int xOffset, int yOffset) const;
   // On a panel that keeps a deeper gray buffer of its own: each picture of the page, in-cell graphics included, as its
-  // 8-bit samples into that buffer (`canvas`, `stride` bytes a row) where render() draws it, through `tone`
+  // 8-bit samples into that buffer (`canvas`, `stride` bytes a row) where render() draws it
   // (ImageBlock::renderGray8). Run after render(), whose B/W pass is what a picture without its gray keeps.
   Gray8Pictures renderImagesGray8(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, uint8_t* canvas,
-                                  uint16_t stride, const uint8_t* tone) const;
+                                  uint16_t stride) const;
   // Decode any missing .pxc pixel caches for images on this page. Called before the
   // BW render so the large (~60 KB contiguous) PNG decoder allocation runs while heap
   // contig is at its peak — before font prewarm and BW backup chunks fragment it.
@@ -251,7 +253,7 @@ class Page {
       const auto& ib = static_cast<const PageImage&>(*el).getImageBlock();
       if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) return false;
       if (!(monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache())) return true;
-      return alsoWarmGrayscale && monochromeOutput && !ib.hasGrayscaleCache();
+      return alsoWarmGrayscale && monochromeOutput && !ib.hasGrayVariantCache();
     });
   }
 

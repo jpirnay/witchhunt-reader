@@ -6,8 +6,12 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 #include <esp_heap_caps.h>
+
+#include <algorithm>
+#include <cstring>
 
 #include "../../../../src/fontIds.h"
 #include "../../Epub.h"
@@ -16,6 +20,7 @@
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/PixelCache.h"
 #include "../converters/PngToFramebufferConverter.h"
+#include "PictureTone.h"
 
 // Cache file format (see PixelCache::PXC_MAGIC):
 // - uint16_t magic/version (high bit always set, distinguishing it from the legacy
@@ -445,39 +450,82 @@ void ImageBlock::renderGrayscaleUpright(GfxRenderer& renderer, const int x, cons
   renderFromCache(renderer, getGrayscaleCachePath(imagePath), x, y, width, height, srcYOffset_, srcHeight_);
 }
 
-bool ImageBlock::renderGray8(GfxRenderer& renderer, const int x, const int y, uint8_t* canvas, const uint16_t stride,
-                             const uint8_t* tone) const {
-  if (!turned_) return renderGray8Upright(renderer, x, y, canvas, stride, tone);
-  bool drawn = false;
-  inReadersFrame(renderer, x, y, getWidth(), getHeight(), [&](const int rx, const int ry) {
-    drawn = renderGray8Upright(renderer, rx, ry, canvas, stride, tone);
-  });
-  return drawn;
+namespace {
+// A picture's gray cache: its samples at the size it is drawn, through picture_tone, for a panel's own canvas.
+// img_3.png drawn 480 by 300 -> img_3.480x300.gray8: one per drawn size, the image named as feat/inline-images names
+// its sized caches.
+std::string getGray8CachePath(const std::string& imagePath, const int width, const int height) {
+  char suffix[32];
+  snprintf(suffix, sizeof(suffix), ".%dx%d.gray8", width, height);
+  return withSuffix(imagePath, suffix);
 }
 
-bool ImageBlock::renderGray8Upright(GfxRenderer& renderer, const int x, const int y, uint8_t* canvas,
-                                    const uint16_t stride, const uint8_t* tone) const {
-  const int renderedHeight = srcHeight_ > 0 ? srcHeight_ : height;
-  // render()'s own bounds: a box it refused holds nothing to put gray over.
-  if (!canvas || x < 0 || y < 0 || x + width > renderer.getScreenWidth() ||
-      y + renderedHeight > renderer.getScreenHeight()) {
-    return false;
-  }
-  // The B/W pass drew a picture here only from the 1-bit cache, which its warm pass writes; without one it drew a
-  // placeholder or a low-memory box, and that stays.
-  if (!hasPixelCache()) return false;
+// The file: this header, then height rows of width bytes (0 black .. 255 white), the tone applied.
+struct Gray8CacheHeader {
+  uint32_t magic;  // format and version: a file of any other is not read
+  uint16_t width;
+  uint16_t height;
+  uint32_t tone;  // picture_tone::kFingerprint of the tone the samples went through
+};
+static_assert(sizeof(Gray8CacheHeader) == 12, "the header is on the card");
+constexpr uint32_t kGray8CacheMagic = 0x31384750;  // "PG81"
 
+// Rows of a picture's samples onto a borrowed canvas, at the place render() draws the picture (live orientation).
+void blitGray8Rows(GfxRenderer& renderer, uint8_t* canvas, const uint16_t stride, const int x, const int y,
+                   const uint8_t* rows, const int width, const int count) {
   DirectGray8Writer writer;
   writer.init(renderer, canvas, stride);
-  writer.tone = tone;
-  // A slice of a picture split over pages decodes whole, placed srcYOffset_ rows above the slice, and keeps the slice's
-  // rows only. A whole picture is its own slice.
-  writer.rowsFrom = y;
-  writer.rowsTo = y + renderedHeight;
+  for (int r = 0; r < count; r++) {
+    const uint8_t* row = rows + static_cast<size_t>(r) * width;
+    writer.beginRow(y + r);
+    for (int c = 0; c < width; c++) writer.writePixel(x + c, row[c]);
+  }
+}
+}  // namespace
+
+ImageBlock::GrayVariant ImageBlock::grayVariant_ = ImageBlock::GrayVariant::Bayer;
+
+bool ImageBlock::hasGray8Cache() const { return Storage.exists(getGray8CachePath(imagePath, width, height).c_str()); }
+
+bool ImageBlock::hasGrayVariantCache() const {
+  if (HalDisplay::kMayLendGray8Canvas && grayVariant_ == GrayVariant::Gray8) return hasGray8Cache();
+  return hasGrayscaleCache();
+}
+
+void ImageBlock::warmGrayVariant(GfxRenderer& renderer, const int x, const int y, const bool forceLoad) {
+  if (HalDisplay::kMayLendGray8Canvas && grayVariant_ == GrayVariant::Gray8) {
+    cacheGray8(renderer);
+    return;
+  }
+  render(renderer, x, y, forceLoad, /*monochromeOutput=*/false);
+}
+
+bool ImageBlock::cacheGray8(GfxRenderer& renderer) const {
+  if (!HalDisplay::kMayLendGray8Canvas) return false;  // no canvas in this build: none of the decode below
+  if (hasGray8Cache()) return true;
+  const uint32_t shortBefore = image_scratch::heapShortCount();
+  const std::unique_ptr<uint8_t[]> samples = decodeGray8Picture(renderer);
+  // Not a picture decoded short of memory (a coarse one among them): a later decode can do better.
+  return samples && image_scratch::heapShortCount() == shortBefore && writeGray8Cache(samples.get());
+}
+
+std::unique_ptr<uint8_t[]> ImageBlock::decodeGray8Picture(GfxRenderer& renderer) const {
+  if (width <= 0 || height <= 0) return nullptr;
+  // Whole and at its drawn size, upright, wherever on the page it goes: a slice of a picture split over pages takes
+  // its rows from it, and the cache serves every draw. PSRAM on the boards that lend a canvas.
+  auto samples = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(width) * height);
+  if (!samples) {
+    image_scratch::noteHeapShort();
+    return nullptr;
+  }
+  memset(samples.get(), 0xFF, static_cast<size_t>(width) * height);
+  DirectGray8Writer writer;
+  writer.initPlain(samples.get(), width, height);
+  writer.tone = picture_tone::kTable;
 
   RenderConfig config;
-  config.x = x;
-  config.y = y - srcYOffset_;
+  config.x = 0;
+  config.y = 0;
   config.maxWidth = width;
   config.maxHeight = height;
   config.useGrayscale = true;
@@ -485,22 +533,101 @@ bool ImageBlock::renderGray8Upright(GfxRenderer& renderer, const int x, const in
   config.monochromeOutput = false;
   config.useExactDimensions = true;
   config.gray8 = &writer;
-
-  bool decoderRan = false;
-  if (decodeGray8(renderer, config, decoderRan)) return true;
-  // The rows a failed decode did write go: the box gets back what the B/W pass drew there, the picture's dither.
-  if (decoderRan) renderer.compositeBwRectOntoGray8Canvas({canvas, stride}, x, y, width, renderedHeight);
-  return false;
+  if (!decodeGray8(renderer, config)) return nullptr;
+  return samples;
 }
 
-bool ImageBlock::decodeGray8(GfxRenderer& renderer, const RenderConfig& config, bool& decoderRan) const {
+bool ImageBlock::writeGray8Cache(const uint8_t* samples) const {
+  const std::string path = getGray8CachePath(imagePath, width, height);
+  const std::string part = path + ".part";
+  FsFile file;
+  if (!Storage.openFileForWrite("IMG", part, file)) return false;
+  const Gray8CacheHeader header{kGray8CacheMagic, static_cast<uint16_t>(width), static_cast<uint16_t>(height),
+                                picture_tone::kFingerprint};
+  const size_t bytes = static_cast<size_t>(width) * height;
+  const bool ok = file.write(reinterpret_cast<const uint8_t*>(&header), sizeof(header)) == sizeof(header) &&
+                  file.write(samples, bytes) == bytes;
+  file.close();
+  // A whole file or none: a reset mid-write leaves only the .part, which is never read. FAT rename does not overwrite.
+  if (ok) Storage.remove(path.c_str());
+  if (!ok || !Storage.rename(part.c_str(), path.c_str())) {
+    Storage.remove(part.c_str());
+    LOG_ERR("IMG", "Gray cache not written: %s", path.c_str());
+    return false;
+  }
+  LOG_DBG("IMG", "Gray cache written: %s (%dx%d)", path.c_str(), width, height);
+  return true;
+}
+
+bool ImageBlock::drawGray8FromCache(GfxRenderer& renderer, const int x, const int y, uint8_t* canvas,
+                                    const uint16_t stride, const int firstRow, const int rows) const {
+  const std::string path = getGray8CachePath(imagePath, width, height);
+  FsFile file;
+  if (!Storage.exists(path.c_str()) || !Storage.openFileForRead("IMG", path, file)) return false;
+  Gray8CacheHeader header{};
+  const bool current = file.read(reinterpret_cast<uint8_t*>(&header), sizeof(header)) == sizeof(header) &&
+                       header.magic == kGray8CacheMagic && header.width == width && header.height == height &&
+                       header.tone == picture_tone::kFingerprint;
+  if (!current || !file.seekSet(sizeof(header) + static_cast<uint32_t>(firstRow) * width)) {
+    file.close();
+    return false;  // another format, size or tone: decoded again, and the cache written over
+  }
+  // A band of rows at a time, ~16 KB.
+  const int bandRows = std::max(1, std::min(rows, 16384 / std::max(1, static_cast<int>(width))));
+  auto band = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(bandRows) * width);
+  bool ok = band != nullptr;
+  for (int done = 0; ok && done < rows; done += bandRows) {
+    const int count = std::min(bandRows, rows - done);
+    const size_t bytes = static_cast<size_t>(count) * width;
+    ok = file.read(band.get(), bytes) == static_cast<int>(bytes);
+    if (ok) blitGray8Rows(renderer, canvas, stride, x, y + done, band.get(), width, count);
+  }
+  file.close();
+  if (!ok) LOG_ERR("IMG", "Gray cache unreadable, decoding again: %s", path.c_str());
+  return ok;
+}
+
+bool ImageBlock::renderGray8(GfxRenderer& renderer, const int x, const int y, uint8_t* canvas,
+                             const uint16_t stride) const {
+  if (!turned_) return renderGray8Upright(renderer, x, y, canvas, stride);
+  bool drawn = false;
+  inReadersFrame(renderer, x, y, getWidth(), getHeight(),
+                 [&](const int rx, const int ry) { drawn = renderGray8Upright(renderer, rx, ry, canvas, stride); });
+  return drawn;
+}
+
+bool ImageBlock::renderGray8Upright(GfxRenderer& renderer, const int x, const int y, uint8_t* canvas,
+                                    const uint16_t stride) const {
+  if (!HalDisplay::kMayLendGray8Canvas) return false;  // no canvas in this build
+  const int renderedHeight = srcHeight_ > 0 ? srcHeight_ : height;
+  // render()'s own bounds: a box it refused holds nothing to put gray over.
+  if (!canvas || x < 0 || y < 0 || x + width > renderer.getScreenWidth() ||
+      y + renderedHeight > renderer.getScreenHeight() || srcYOffset_ < 0 || srcYOffset_ + renderedHeight > height) {
+    return false;
+  }
+  // The B/W pass drew a picture here only from the 1-bit cache, which its warm pass writes; without one it drew a
+  // placeholder or a low-memory box, and that stays.
+  if (!hasPixelCache()) return false;
+  // A slice of a picture split over pages is its rows srcYOffset_.. of the whole; a whole picture is its own slice.
+  if (drawGray8FromCache(renderer, x, y, canvas, stride, srcYOffset_, renderedHeight)) return true;
+
+  // Nothing on the canvas until the decode has succeeded: a picture that fails keeps what the B/W pass drew.
+  const uint32_t shortBefore = image_scratch::heapShortCount();
+  const std::unique_ptr<uint8_t[]> samples = decodeGray8Picture(renderer);
+  if (!samples) return false;
+  if (image_scratch::heapShortCount() == shortBefore) writeGray8Cache(samples.get());
+  blitGray8Rows(renderer, canvas, stride, x, y, samples.get() + static_cast<size_t>(srcYOffset_) * width, width,
+                renderedHeight);
+  return true;
+}
+
+bool ImageBlock::decodeGray8(GfxRenderer& renderer, const RenderConfig& config) const {
   if (!HalDisplay::kMayLendGray8Canvas) return false;  // no canvas in this build: none of the decode below
   // As renderUpright() reaches the bytes: a PNG the archive stores is decoded where it lies (see decodePngInPlace),
   // anything else from its extract, which the warm pass made for the 1-bit cache.
   if (!epubFilePath_.empty() && !epubEntryPath_.empty() && !Storage.exists(imagePath.c_str()) &&
-      FsHelpers::hasPngExtension(imagePath)) {
-    decoderRan = true;
-    if (decodePngInPlace(epubFilePath_, epubEntryPath_, renderer, config)) return true;
+      FsHelpers::hasPngExtension(imagePath) && decodePngInPlace(epubFilePath_, epubEntryPath_, renderer, config)) {
+    return true;
   }
   if (!ensureExtracted()) return false;
   FsFile file;
@@ -513,9 +640,7 @@ bool ImageBlock::decodeGray8(GfxRenderer& renderer, const RenderConfig& config, 
     return false;
   }
   ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(format);
-  if (!decoder) return false;
-  decoderRan = true;
-  return decoder->decodeToFramebuffer(imagePath, renderer, config);
+  return decoder && decoder->decodeToFramebuffer(imagePath, renderer, config);
 }
 
 // A turned image is never sliced (placeImageBlockAsBlock places it whole), so the copied turned_ is unreachable today.
