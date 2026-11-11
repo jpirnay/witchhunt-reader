@@ -289,8 +289,8 @@ bool TtfFontSet::load(const Files* families, const uint8_t count, const uint8_t 
           static_cast<unsigned>(sizeof(TtfFont::Size::StyleFont)), static_cast<unsigned long>(store_.logUsed()),
           static_cast<unsigned long>(store_.geometry().logSize));
   for (uint8_t f = 0; f < count; ++f) {
-    LOG_INF("TTF", "family %u regular style: %u kern subtables%s, %u ligatures", f,
-            fonts_[f]->styles_[0].kerning.subtableCount(),
+    LOG_INF("TTF", "family %u regular style: %u kern lookups and subtables%s, %u ligatures", f,
+            fonts_[f]->styles_[0].kerning.entryCount(),
             fonts_[f]->styles_[0].kerning.legacy() ? " (legacy kern table)" : "",
             fonts_[f]->styles_[0].ligatures.count);
   }

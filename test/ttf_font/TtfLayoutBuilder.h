@@ -1,6 +1,6 @@
 #pragma once
 // Builds the OpenType layout tables the kerning and ligature tests need (GPOS pair adjustment, GSUB ligatures, the
-// legacy kern table), to go into a built font through Font::extraTables.
+// legacy kern table, GDEF glyph classes), to go into a built font through Font::extraTables.
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -27,6 +27,7 @@ struct PairSubtable {
 struct LayoutLookup {
   uint16_t type = 2;       // 2 pair adjustment (GPOS), 4 ligature (GSUB), or any other to be ignored
   bool extension = false;  // wrapped in an Extension subtable (GPOS type 9, GSUB type 7)
+  uint16_t flags = 0;      // LookupFlag: which GDEF glyph classes the lookup skips (no mark filtering set)
   std::vector<PairSubtable> pairSubtables;
   std::vector<std::pair<std::vector<uint16_t>, uint16_t>> ligatures;  // GSUB: components (first included), glyph
 };
@@ -181,7 +182,7 @@ inline Bytes layoutTable(const std::vector<LayoutScript>& scripts, const std::ve
     if (lookup.type == 4 && !lookup.ligatures.empty()) subtables.push_back(detail::ligatureSubtable(lookup.ligatures));
     for (const auto& p : lookup.pairSubtables) subtables.push_back(detail::pairSubtable(p));
     put16(lookupList, lookup.extension ? (gsub ? 7 : 9) : lookup.type);
-    put16(lookupList, 0);
+    put16(lookupList, lookup.flags);
     put16(lookupList, static_cast<uint32_t>(subtables.size()));
     for (size_t s = 0; s < subtables.size(); ++s) put16(lookupList, 0);
     for (size_t s = 0; s < subtables.size(); ++s) {
@@ -203,6 +204,36 @@ inline Bytes layoutTable(const std::vector<LayoutScript>& scripts, const std::ve
   out.insert(out.end(), featureList.begin(), featureList.end());
   out.insert(out.end(), lookupList.begin(), lookupList.end());
   return out;
+}
+
+/// A GDEF table, version 1.0, with only a GlyphClassDef: each listed glyph's class (1 base, 2 ligature, 3 mark,
+/// 4 component), every other glyph unclassified.
+inline Bytes gdefTable(const std::vector<std::pair<uint16_t, uint16_t>>& glyphClasses) {
+  Bytes out;
+  put32(out, 0x00010000);
+  put16(out, 12);  // GlyphClassDef, right after this header
+  put16(out, 0);   // AttachList
+  put16(out, 0);   // LigCaretList
+  put16(out, 0);   // MarkAttachClassDef
+  const Bytes classes = detail::classDef(glyphClasses);
+  out.insert(out.end(), classes.begin(), classes.end());
+  return out;
+}
+
+/// Sets the LookupFlag of every pair adjustment lookup (types 2 and 9) in a font file's GPOS: what a font such as
+/// Caecilia LT ships (0x000E: skip base glyphs, ligatures and marks). Ported from the SDK's GposKerningTest
+/// (Free-Ink/freeink-sdk PR #197, by Georg Kaindl).
+inline void setKernLookupFlags(Bytes& font, const uint16_t flags) {
+  const size_t record = findRecord(font, "GPOS");
+  if (record == 0) return;
+  const auto u16 = [&font](const size_t at) { return static_cast<size_t>(font[at] << 8 | font[at + 1]); };
+  const size_t gpos = u16(record + 8) << 16 | u16(record + 10);
+  const size_t lookups = gpos + u16(gpos + 8);
+  for (size_t i = 0; i < u16(lookups); ++i) {
+    const size_t lookup = lookups + u16(lookups + 2 + 2 * i);
+    if (u16(lookup) != 2 && u16(lookup) != 9) continue;
+    set16(font, lookup + 2, flags);
+  }
 }
 
 /// The legacy kern table, version 0, one horizontal format 0 subtable.

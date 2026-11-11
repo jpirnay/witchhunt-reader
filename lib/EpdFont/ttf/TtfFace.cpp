@@ -257,6 +257,10 @@ FaceStatus parseFace(FontBytes& bytes, Face* face) {
     face->kern = layout.offset;
     face->kernLength = layout.length;
   }
+  if (findTable(bytes, numTables, tag("GDEF"), 12, &layout)) {
+    face->gdef = layout.offset;
+    face->gdefLength = layout.length;
+  }
 
   face->cmapEnd = cmap.offset + cmap.length;
   if (!chooseCmap(bytes, cmap, face)) return readFailure(bytes, FaceStatus::Unsupported);

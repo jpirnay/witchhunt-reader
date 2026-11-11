@@ -9,7 +9,7 @@
 namespace ttf {
 
 bool Kerning::resolve(FontBytes& bytes, const Face& face) {
-  subtables_.reset();
+  entries_.reset();
   count_ = 0;
   legacy_ = false;
   // The layout tables are read in place: in SD mode every table but the outlines is mapped.
@@ -17,10 +17,10 @@ bool Kerning::resolve(FontBytes& bytes, const Face& face) {
   if (gpos != nullptr) {
     const unsigned found = freeink::font::gpos::ResolveKernSubtables(gpos, face.gposLength, nullptr, 0);
     if (found != 0) {
-      const uint16_t keep = found < kMaxSubtables ? static_cast<uint16_t>(found) : kMaxSubtables;
-      subtables_ = makeUniqueNoThrow<uint32_t[]>(keep);
-      if (!subtables_) return false;
-      freeink::font::gpos::ResolveKernSubtables(gpos, face.gposLength, subtables_.get(), keep);
+      const uint16_t keep = found < kMaxEntries ? static_cast<uint16_t>(found) : kMaxEntries;
+      entries_ = makeUniqueNoThrow<uint32_t[]>(keep);
+      if (!entries_) return false;
+      freeink::font::gpos::ResolveKernSubtables(gpos, face.gposLength, entries_.get(), keep);
       count_ = keep;
       return true;
     }
@@ -34,8 +34,10 @@ int32_t Kerning::pair(FontBytes& bytes, const Face& face, const uint16_t left, c
                       bool* covered) const {
   if (count_ != 0) {
     if (const uint8_t* gpos = bytes.span(face.gpos, face.gposLength)) {
-      return freeink::font::gpos::PairKernAdjustment(gpos, face.gposLength, subtables_.get(), count_, left, right,
-                                                     covered);
+      // Without GDEF (or one that cannot be mapped) every glyph is unclassified: no lookup skips one.
+      const uint8_t* gdef = face.gdef != 0 ? bytes.span(face.gdef, face.gdefLength) : nullptr;
+      return freeink::font::gpos::PairKernAdjustment(gpos, face.gposLength, entries_.get(), count_, left, right, gdef,
+                                                     gdef != nullptr ? face.gdefLength : 0, covered);
     }
   } else if (legacy_) {
     if (const uint8_t* kern = bytes.span(face.kern, face.kernLength)) {

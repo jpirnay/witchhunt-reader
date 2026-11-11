@@ -1116,6 +1116,20 @@ TEST_F(TtfFontTest, KerningIsTheFontsAtEachSizesScale) {
   EXPECT_EQ(1u, font->kernLookups());
 }
 
+TEST_F(TtfFontTest, CaeciliaLookupFlagsTakeLetterKerningAway) {
+  // Source Serif at 14 pt kerns A/V by -120 units (-3.5 px) and T/o by -40 (-1.2 px), in 4.4 pixels. Given Caecilia
+  // LT's lookup flags (0x000E), its GDEF's base glyphs are skipped, as HarfBuzz skips them: neither pair kerns.
+  {
+    const auto font = open();
+    EXPECT_EQ(-56, font->kerning(kRegular, 'A', 'V'));
+    EXPECT_EQ(-19, font->kerning(kRegular, 'T', 'o'));
+  }
+  setKernLookupFlags(files[kRegular].bytes, 0x000E);
+  const auto font = open(kIdentityB);  // another file: installed again
+  EXPECT_EQ(0, font->kerning(kRegular, 'A', 'V'));
+  EXPECT_EQ(0, font->kerning(kRegular, 'T', 'o'));
+}
+
 TEST_F(TtfFontTest, StoredKerningServesTheNextBoot) {
   useBuiltFont(kernedBoxes());
   {
