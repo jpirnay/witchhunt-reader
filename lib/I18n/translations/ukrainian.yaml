@@ -680,7 +680,7 @@ STR_QUICK_RESUME_TIMEOUT: "Швидке повернення після тайм
 STR_BTN_ACT_IGNORE: "Ігнорувати (нічого не робити)"
 STR_BTN_ACT_QUICK_OVERRIDES: "Швидкі налаштування"
 STR_FONT_CACHE: "Кеш шрифтів"
-STR_FLASH_AREA_MISSING: "Немає розділу spiffs"
+STR_FLASH_AREA: "Область Flash"
 STR_GO_TO_PRINTED_PAGE: "Перейти до друкованої сторінки"
 STR_GO_TO_PRINTED_PAGE_HINT: "Вгору/Вниз: ±1 (x2: ±10)  Вліво/Вправо: цифра"
 STR_GO_TO_PRINTED_PAGE_RANGE: "Діапазон: %u - %u"
