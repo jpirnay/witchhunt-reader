@@ -23,4 +23,8 @@ NorFlash* get();
 /// Which backend get() chose (choosing it, at the first call).
 Backend backend();
 
+/// The size of the partition table's `spiffs` partition, whether or not it is the area (one no larger than the
+/// language slot is not); 0 when the table has none. Chooses the area at the first call.
+uint32_t partitionBytes();
+
 }  // namespace FlashArea

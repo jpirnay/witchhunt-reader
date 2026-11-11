@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "FlashArea.h"
 #include "FlashFontPartition.h"
 #include "FlashLangPartition.h"
 #include "esp_partition.h"
@@ -301,6 +302,49 @@ TEST_F(FlashLangPartitionTest, APackWithoutAnExtensionStillMapsOnePage) {
   flp::Mapped m{};
   ASSERT_TRUE(flp::acquire(LANG, STAMP, pack.keyCount, pack.source(), nullptr, &m));
   expectIntact(m, /*withExt=*/false);
+}
+
+// Why acquire() had no strings: what System Information shows when the interface stays English (issue #733).
+TEST_F(FlashLangPartitionTest, ASlotInUseLeavesNoFailure) {
+  flp::Mapped m{};
+  ASSERT_TRUE(acquire(m));
+  EXPECT_EQ(flp::lastFailure(), flp::Failure::None);
+}
+
+TEST_F(FlashLangPartitionTest, StringsThatNeverVerifyAreCorrupt) {
+  fake_flash::chip().corruptWritesFrom = SLOT + 1;
+  flp::Mapped m{};
+  EXPECT_FALSE(acquire(m));
+  EXPECT_EQ(flp::lastFailure(), flp::Failure::Corrupt);
+}
+
+TEST_F(FlashLangPartitionTest, StringsTheMmuCannotMapAreMap) {
+  fake_flash::chip().mapLimit = 1;
+  flp::Mapped m{};
+  EXPECT_FALSE(acquire(m));
+  EXPECT_EQ(flp::lastFailure(), flp::Failure::Map);
+}
+
+TEST_F(FlashLangPartitionTest, StringsThatDoNotBuildAreBuild) {
+  struct Refuses {
+    static bool produce(void*, flp::StringsWriter&) { return false; }
+  };
+  flp::Mapped m{};
+  EXPECT_FALSE(flp::acquire(LANG, STAMP, pack.keyCount, flp::Strings{1024, &Refuses::produce, nullptr}, nullptr, &m));
+  EXPECT_EQ(flp::lastFailure(), flp::Failure::Build);
+}
+
+TEST_F(FlashLangPartitionTest, TheEightyKbPartitionOfTheX4ProFactoryLayoutHasNoRoomForTheSlot) {
+  // The table CrossPoint's web flasher calls the X4 Pro's factory-compatible layout has an 80 KB `spiffs` partition.
+  // 2.40's 64 KB slot fitted into it; the 128 KB slot since 2.41RC does not, and the interface stayed English. The
+  // area is taken over the full partition first: FlashArea itself now refuses such a partition
+  // (test/flash_area_select), and this is the slot's own guard behind it, as 2.41RC and 2.50 met the partition.
+  ASSERT_NE(FlashArea::get(), nullptr);
+  fake_flash::reset(0x14000);
+  flp::Mapped m{};
+  EXPECT_FALSE(acquire(m));
+  EXPECT_EQ(flp::lastFailure(), flp::Failure::SlotTooSmall);
+  EXPECT_EQ(fake_flash::chip().erases + fake_flash::chip().writes, 0) << "nothing written to the small partition";
 }
 
 }  // namespace

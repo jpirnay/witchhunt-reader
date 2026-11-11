@@ -1,6 +1,7 @@
-// Issue #733: an X4 Pro that kept its stock partition table has no `spiffs` partition, so the language slot had nowhere
-// to live and the interface stayed English with the pack on the card. The real FlashArea, built as on the S3 boards
-// (CONFIG_SPIRAM), over no partition at all (test/flash_lang_partition's in-memory one, empty) takes the
+// Issue #733: an X4 Pro whose partition table has an 80 KB `spiffs` partition (the X4 Pro's factory-compatible layout,
+// as CrossPoint's web flasher has it), or none, had no room for the 128 KB language slot of 2.41RC and later, and the
+// interface stayed English with the pack on the card. The real FlashArea, built as on the S3 boards (CONFIG_SPIRAM),
+// over such a table (test/flash_lang_partition's in-memory partition: TEST_PARTITION_BYTES, 0 for none) takes the
 // PSRAM image (test/flash_area_select's esp_heap_caps.h), and the Czech and the Polish pack gen_i18n.py writes build
 // their slot in it through the producer I18n uses: every string the pack has, by this build's StrIds.
 
@@ -99,7 +100,7 @@ struct Job {
 
 class LangSlotPsramImage : public ::testing::TestWithParam<const char*> {
  protected:
-  static void SetUpTestSuite() { fake_flash::reset(0); }
+  static void SetUpTestSuite() { fake_flash::reset(TEST_PARTITION_BYTES); }
   void TearDown() override { flp::unmap(); }
 };
 
@@ -114,7 +115,8 @@ TEST_P(LangSlotPsramImage, APackOnTheCardBecomesTheInterfaceWithoutThePartition)
   EXPECT_EQ(code, h.code);
 
   ASSERT_NE(nullptr, FlashArea::get());
-  EXPECT_EQ(FlashArea::Backend::PsramImage, FlashArea::backend()) << "no partition: the PSRAM image";
+  EXPECT_EQ(FlashArea::Backend::PsramImage, FlashArea::backend()) << "no usable partition: the PSRAM image";
+  EXPECT_EQ(TEST_PARTITION_BYTES, FlashArea::partitionBytes());
 
   Job job{&file, h};
   const uint32_t stamp = langpack::slotStamp(h, i18n_strings::KEY_LAYOUT_STAMP);

@@ -8,14 +8,16 @@
 
 #include "FlashArea.h"
 #include "FlashFontPartition.h"
+#include "FlashLangPartition.h"
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
 
 namespace {
 constexpr uint32_t kPartitionBytes = 0x360000;
 constexpr uint32_t kImagePages = 0x360000 / NorFlash::kMapPageBytes;
-// What CrossPoint's web repair writes on the X4 Pro: an 80 KB `spiffs` partition, smaller than the language slot.
-constexpr uint32_t kX4ProRepairBytes = 0x14000;
+// The X4 Pro's factory-compatible table, as CrossPoint's web flasher has it: an 80 KB `spiffs` partition, smaller than
+// the language slot (2.40's 64 KB slot fitted into it).
+constexpr uint32_t kX4ProFactoryBytes = 0x14000;
 
 using FlashArea::Backend;
 }  // namespace
@@ -25,6 +27,7 @@ TEST(FlashAreaSelect, WithoutTheImageInTheBuildAndWithoutAPartitionThereIsNone) 
   fake_flash::reset(0);
   EXPECT_EQ(nullptr, FlashArea::get());
   EXPECT_EQ(Backend::None, FlashArea::backend());
+  EXPECT_EQ(0u, FlashArea::partitionBytes());
 }
 #elif FLASH_AREA_SCENARIO == 1
 TEST(FlashAreaSelect, APartitionComesFirstAndTakesNoPsram) {
@@ -32,6 +35,7 @@ TEST(FlashAreaSelect, APartitionComesFirstAndTakesNoPsram) {
   NorFlash* const area = FlashArea::get();
   ASSERT_NE(nullptr, area);
   EXPECT_EQ(Backend::Partition, FlashArea::backend());
+  EXPECT_EQ(kPartitionBytes, FlashArea::partitionBytes());
   EXPECT_EQ(32u, area->freeMapPages()) << "the partition, through the MMU";
   EXPECT_EQ(kPartitionBytes, area->size());
   EXPECT_EQ(area, FlashArea::get()) << "picked once";
@@ -67,13 +71,15 @@ TEST(FlashAreaSelect, ATestBuildTakesThePsramImageOverThePartition) {
   ASSERT_NE(nullptr, area);
   EXPECT_EQ(Backend::PsramImage, FlashArea::backend());
   EXPECT_EQ(kImagePages, area->freeMapPages());
+  EXPECT_EQ(kPartitionBytes, FlashArea::partitionBytes()) << "what the table holds, though not used";
 }
 #elif FLASH_AREA_SCENARIO == 5
 TEST(FlashAreaSelect, APartitionTooSmallForTheLanguageSlotGivesWayToThePsramImage) {
-  fake_flash::reset(kX4ProRepairBytes);
+  fake_flash::reset(kX4ProFactoryBytes);
   NorFlash* const area = FlashArea::get();
   ASSERT_NE(nullptr, area);
   EXPECT_EQ(Backend::PsramImage, FlashArea::backend());
+  EXPECT_EQ(kX4ProFactoryBytes, FlashArea::partitionBytes()) << "System Information names it";
   EXPECT_EQ(kPartitionBytes, area->size());
   EXPECT_EQ(0, fake_flash::chip().erases + fake_flash::chip().writes) << "the small partition is left alone";
 }
@@ -82,6 +88,15 @@ TEST(FlashAreaSelect, APartitionTooSmallForTheLanguageSlotIsNoneWithoutTheImage)
   fake_flash::reset(FlashFontPartition::LANG_RESERVED_BYTES);
   EXPECT_EQ(nullptr, FlashArea::get());
   EXPECT_EQ(Backend::None, FlashArea::backend());
+  EXPECT_EQ(FlashFontPartition::LANG_RESERVED_BYTES, FlashArea::partitionBytes());
+  // The language slot then says why it has nothing to hand out.
+  struct Never {
+    static bool produce(void*, FlashLangPartition::StringsWriter&) { return false; }
+  };
+  FlashLangPartition::Mapped m{};
+  EXPECT_FALSE(
+      FlashLangPartition::acquire(1, 2, 3, FlashLangPartition::Strings{64, &Never::produce, nullptr}, nullptr, &m));
+  EXPECT_EQ(FlashLangPartition::Failure::NoArea, FlashLangPartition::lastFailure());
 }
 #elif FLASH_AREA_SCENARIO == 7
 TEST(FlashAreaSelect, AnImageKeptOnTheCardStillBuildsAndStartsErasedWithoutAFile) {

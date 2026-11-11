@@ -47,11 +47,13 @@ namespace {
 EspPartitionFlash partitionArea;
 NorFlash* chosen = nullptr;
 Backend chosenBackend = Backend::None;
+uint32_t foundPartitionBytes = 0;
 bool picked = false;
 
 // A partition no larger than the language slot holds none (FlashLangPartition reads such an area as having no slot),
-// and nothing else of the area either. CrossPoint's web repair writes such a table on the X4 Pro: an 80 KB `spiffs`
-// partition at 0xfd0000, where the stock table has its 80 KB `littlefs` one.
+// and nothing else of the area either. The table CrossPoint's web flasher calls the X4 Pro's factory-compatible layout
+// has such a one: an 80 KB `spiffs` partition at 0xfd0000 (a retail X4 Pro on Licorice OS has an 80 KB `littlefs` one
+// there). 2.40's 64 KB slot fitted into it; the 128 KB slot since 2.41RC does not (issue #733).
 bool partitionUsable() {
   if (!partitionArea.begin()) {
     LOG_ERR("FLA",
@@ -59,6 +61,7 @@ bool partitionUsable() {
             "wrote only the app)");
     return false;
   }
+  foundPartitionBytes = partitionArea.size();
   if (partitionArea.size() <= FlashFontPartition::LANG_RESERVED_BYTES) {
     LOG_ERR("FLA", "the `spiffs` partition is %u KB: too small for the flash area (more than %u KB)",
             static_cast<unsigned>(partitionArea.size() / 1024),
@@ -97,6 +100,8 @@ NorFlash* psramImage() {
 #endif
 
 NorFlash* pick() {
+  // The partition is looked at first in every build, so partitionBytes() says what the table holds.
+  const bool usable = partitionUsable();
 #if FLASH_AREA_PSRAM_IMAGE == 2
   if (NorFlash* const image = psramImage()) {
     LOG_INF("FLA",
@@ -105,7 +110,7 @@ NorFlash* pick() {
     return image;
   }
 #endif
-  if (partitionUsable()) {
+  if (usable) {
     chosenBackend = Backend::Partition;
     return &partitionArea;
   }
@@ -137,6 +142,11 @@ NorFlash* get() {
 Backend backend() {
   get();
   return chosenBackend;
+}
+
+uint32_t partitionBytes() {
+  get();
+  return foundPartitionBytes;
 }
 
 }  // namespace FlashArea

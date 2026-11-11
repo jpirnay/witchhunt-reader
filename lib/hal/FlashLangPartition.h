@@ -161,9 +161,20 @@ MapResult map(uint8_t langIndex, uint32_t stamp, uint16_t keyCount, Mapped* out)
 // most, whatever happens, so a slot that keeps failing costs one rebuild per
 // call rather than a loop. After a rebuild an extension that still fails is
 // left out and the strings stand alone. False: no strings could be had (the
-// caller stays on English).
+// caller stays on English), and lastFailure() says why.
 bool acquire(uint8_t langIndex, uint32_t stamp, uint16_t keyCount, const Strings& strings, const Extension* ext,
              Mapped* out);
+
+// Why the last acquire() had no strings to hand out, so System Information can name it.
+enum class Failure : uint8_t {
+  None,          // the last acquire() succeeded, or none ran
+  NoArea,        // the board has no flash area (FlashArea::get())
+  SlotTooSmall,  // the area is no larger than the slot
+  Build,         // the build failed: the pack's strings, memory, or an erase or program of the area
+  Map,           // the strings could not be mapped
+  Corrupt,       // the strings failed their CRC, even when just written
+};
+Failure lastFailure();
 
 // A slot an earlier firmware wrote, which held one NUL-terminated string per StrId of THAT firmware,
 // in its order, empty where the language left the key to English; a table entry with bit 15 set named

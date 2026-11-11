@@ -188,6 +188,7 @@ void I18n::refreshActiveStrings() {
   // below is about to tear down, and a stale pointer here is a crash in every
   // drawn row. The extension's reader lets go of it for the same reason.
   _active = englishStrings();
+  _packState = PackState::English;
   if (_ext) _ext->attach(_language, nullptr, 0);
 
   char path[48];
@@ -202,8 +203,14 @@ void I18n::refreshActiveStrings() {
   if (!openCardPack(path, codeBuf, pack)) {
     // An update from a firmware that kept its languages in the image leaves the reader's language in
     // the slot and none on the card. Written out as a pack, it is read like any other.
-    if (Storage.exists(path) || !convertLegacySlot(codeBuf, path) || !openCardPack(path, codeBuf, pack)) {
+    if (Storage.exists(path)) {
+      LOG_ERR("I18N", "language %s: the pack on the card does not read (%s) - staying on English", codeBuf, path);
+      _packState = PackState::BadPack;
+      return;
+    }
+    if (!convertLegacySlot(codeBuf, path) || !openCardPack(path, codeBuf, pack)) {
       LOG_INF("I18N", "language %s: no pack on the card (%s) - English until one is installed", codeBuf, path);
+      _packState = PackState::NoPack;
       return;
     }
   }
@@ -238,10 +245,12 @@ void I18n::refreshActiveStrings() {
   pack.file.close();
   if (!ok) {
     LOG_ERR("I18N", "language pack %s could not be built or mapped - staying on English", codeBuf);
+    _packState = PackState::SlotFailed;
     return;
   }
 
   _active = {mapped.data, mapped.offsets};
+  _packState = PackState::Active;
   LOG_INF("I18N", "language pack %s active", codeBuf);
 
   // An extension that failed to build, to map or to verify is simply not attached; its reader works

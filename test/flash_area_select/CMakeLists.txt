@@ -14,6 +14,7 @@ foreach(case "0;0;0" "1;1;0" "2;1;0" "3;1;0" "4;2;0" "5;1;0" "6;0;0" "7;1;1" "8;
     FlashAreaSelectTest.cpp
     ${REPO_ROOT}/lib/hal/EspPartitionFlash.cpp
     ${REPO_ROOT}/lib/hal/FlashArea.cpp
+    ${REPO_ROOT}/lib/hal/FlashLangPartition.cpp
     ${REPO_ROOT}/lib/hal/PsramImageFlash.cpp
   )
   if(onCard)
