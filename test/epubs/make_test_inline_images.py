@@ -23,6 +23,7 @@ Chapter 1, Latin:
   12. PICTURE    a 240x180 picture mid-paragraph: the block path, as before
   13. BLOCK      a small image the book makes display: block
   14. FLOAT      a small image floated left
+  22. LENGTH     vertical-align as a length: em, ex, px and a percentage of the line height
 Chapter 2, Hebrew (right to left): an icon between two words, ordered as a neutral.
 Chapter 3, Japanese: an icon among CJK characters, one beside a ruby, one inside a ruby
 (the block path, as before).
@@ -211,6 +212,10 @@ img.float { float: left }
 .va-bottom { vertical-align: bottom }
 .va-super { vertical-align: super }
 .va-sub { vertical-align: sub }
+.va-em { vertical-align: -0.3em }
+.va-ex { vertical-align: 0.5ex }
+.va-px { vertical-align: 4px }
+.va-pct { vertical-align: -20% }
 body.v { writing-mode: vertical-rl }
 """
 
@@ -258,6 +263,8 @@ interdisciplinary collaboration.</p>
 <p>CASE12 PICTURE before {img("picture.png", alt="picture")} after: a picture keeps its block.</p>
 <p>CASE13 BLOCK before {img("star.png", "block")} after: the book made it a block.</p>
 <p>CASE14 FLOAT {img("star.png", "float")} a floated image keeps the float path beside this text.</p>
+<p>CASE22 LENGTH em {img("dot.png", "va-em")} ex {img("dot.png", "va-ex")} px {img("dot.png", "va-px")}
+pct {img("formula.png", "va-pct")} end.</p>
 <p id="note1">NOTE1 The note the linked images lead to.</p>""",
 )
 

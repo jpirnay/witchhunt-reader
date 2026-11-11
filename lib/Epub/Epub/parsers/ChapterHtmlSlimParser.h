@@ -299,11 +299,17 @@ class ChapterHtmlSlimParser final : public Print {
   // (addLineToPage), or, in a paragraph that holds nothing else, until the paragraph places it as a block image as
   // before (placeImageOnlyParagraph). The cache path is imageCachePathFor's, the book epub->getPath(): not kept. A
   // record is two strings and 16 B; at most a split's worth wait at once (addLineImage).
+  // Where a line image sits against its text: a vertical-align keyword, or Baseline raised by a length.
+  struct LineImageAlign {
+    CssVerticalAlign align = CssVerticalAlign::Baseline;
+    int8_t shift = 0;  // CssStyle::verticalAlignShift: 1/16 em, or percent of the line height with shiftPercent
+    bool shiftPercent = false;
+  };
   struct PendingLineImage {
     uint16_t id = 0;
     int16_t width = 0;
     int16_t height = 0;
-    CssVerticalAlign align = CssVerticalAlign::Baseline;
+    LineImageAlign align;
     uint32_t visibleOffset = 0;
     uint32_t linkHash = 0;  // the internal link it is inside (linkHrefHash), 0: none
     std::string entryPath;
@@ -1114,7 +1120,7 @@ class ChapterHtmlSlimParser final : public Print {
   // one cell of the column, as far down it as it is tall, shrunk to the column's em when it is wider. False, nothing
   // added, when the heap holds no room for its record: the image is then placed as a block.
   bool addLineImage(const std::string& entryPath, std::string alt, int displayWidth, int displayHeight,
-                    CssVerticalAlign align);
+                    LineImageAlign align);
   const PendingLineImage* pendingLineImage(uint16_t id) const;
   // A line's text as its images are placed against it, from the text's top: its height, its baseline (the annotation
   // band and the ascent TextBlock::render draws at), its font's ascent and the descent below the baseline.

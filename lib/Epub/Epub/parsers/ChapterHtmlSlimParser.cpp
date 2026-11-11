@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <utility>
 
 #include "../../Epub.h"
@@ -850,6 +851,8 @@ void ChapterHtmlSlimParser::applyVerticalAlignToEntry(StyleStackEntry& entry, co
       entry.sub = true;
       break;
     case CssVerticalAlign::Baseline:
+      // A length places an inline image; on text it changes nothing, as before it was read.
+      if (cssStyle.verticalAlignShift != 0) break;
       // baseline: explicitly cancel any inherited sup/sub
       entry.hasSup = true;
       entry.sup = false;
@@ -3238,10 +3241,12 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 // A small image in a run of text is set in its line, as a word is. A paragraph that holds nothing
                 // else places its images below once it ends (placeImageOnlyParagraph). Inside a <sup> or <sub>
                 // without a vertical-align of its own it is raised or lowered with the text around it.
-                const CssVerticalAlign lineAlign = imgStyle.hasVerticalAlign() ? imgStyle.verticalAlign
-                                                   : self->effectiveSup        ? CssVerticalAlign::Super
-                                                   : self->effectiveSub        ? CssVerticalAlign::Sub
-                                                                               : CssVerticalAlign::Baseline;
+                LineImageAlign lineAlign;
+                if (imgStyle.hasVerticalAlign()) {
+                  lineAlign = {imgStyle.verticalAlign, imgStyle.verticalAlignShift, imgStyle.verticalAlignPercent};
+                } else if (self->effectiveSup || self->effectiveSub) {
+                  lineAlign.align = self->effectiveSup ? CssVerticalAlign::Super : CssVerticalAlign::Sub;
+                }
                 if (self->takesLineImage(imgStyle, displayWidth, displayHeight) &&
                     self->addLineImage(resolvedPath, alt, displayWidth, displayHeight, lineAlign)) {
                   self->depth += 1;
@@ -5853,7 +5858,7 @@ bool ChapterHtmlSlimParser::takesLineImage(const CssStyle& imgStyle, const int d
 }
 
 bool ChapterHtmlSlimParser::addLineImage(const std::string& entryPath, std::string alt, int displayWidth,
-                                         int displayHeight, const CssVerticalAlign align) {
+                                         int displayHeight, const LineImageAlign align) {
   if (!heapReserveFor(pendingLineImages_, 1)) {
     LOG_ERR("EHP", "No room for an inline image's record: placed as a block");
     return false;
@@ -5940,9 +5945,14 @@ ChapterHtmlSlimParser::LineText ChapterHtmlSlimParser::lineText(const BlockStyle
 int ChapterHtmlSlimParser::lineImageTop(const PendingLineImage& image, const LineText& text) {
   const int h = image.height;
   if (text.column) return text.axis - h / 2;
-  switch (image.align) {
-    case CssVerticalAlign::Baseline:
-      return text.baseline - h;
+  switch (image.align.align) {
+    case CssVerticalAlign::Baseline: {
+      // A length raises it (lowers it when negative): in ems of the line's text, or percent of its line height.
+      const LineImageAlign& a = image.align;
+      const float pixels = a.shiftPercent ? a.shift * (text.height - (text.baseline - text.ascent)) / 100.0f
+                                          : a.shift * text.ascent / 16.0f;
+      return text.baseline - h - static_cast<int>(std::lround(pixels));
+    }
     case CssVerticalAlign::Middle:
       // Its middle at half the x-height above the baseline: a third of the ascent, as the guide dots take it.
       return text.baseline - text.ascent / 3 - h / 2;

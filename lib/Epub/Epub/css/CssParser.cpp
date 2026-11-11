@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <new>
 #include <optional>
@@ -98,7 +99,8 @@ constexpr size_t MAX_SELECTOR_LENGTH = 256;
 
 constexpr size_t CSS_LENGTH_FIELD_COUNT = 11;
 constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
-// Layout: 4 enum bytes + 11 lengths + display byte + definedBits uint16 + 2 vertAlign bytes + cssFloat byte
+// Layout: 4 enum bytes + 11 lengths + display byte + definedBits uint16 + 3 vertAlign bytes (value, defined and
+//         percent flags, the length; v35) + cssFloat byte
 //         + smallCaps byte (bit 2 = text-emphasis defined, bits 3-6 = its mark; v31) + fontSizeMultiplier float +
 //         fontSize flags byte + block flags byte (listStyleNone / pageBreakBefore / pageBreakAfter value+defined pairs)
 //         + visibility flags byte (colorTransparent / opacityZero / visibilityHidden value+defined pairs; v19)
@@ -107,10 +109,10 @@ constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
 //         + the flow word (uint16: writing-mode, direction, text-combine-upright, text-orientation,
 //           unicode-bidi; packFlow; v30)
 constexpr size_t CSS_FIXED_STYLE_BYTES = 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
-                                         sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t) +
+                                         sizeof(uint8_t) + sizeof(uint16_t) + 3 * sizeof(uint8_t) + sizeof(uint8_t) +
                                          sizeof(uint8_t) + sizeof(float) + sizeof(uint8_t) + sizeof(uint8_t) +
                                          sizeof(uint8_t) + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t);
-static_assert(CSS_FIXED_STYLE_BYTES == 83,
+static_assert(CSS_FIXED_STYLE_BYTES == 84,
               "style payload layout changed — update read/writeCssStylePayload and bump CSS_CACHE_VERSION");
 // A rule record is selectorLen(2) selector order(2) payload; the order sits between selector and
 // payload so a reader that has matched the selector reads the rest in one go (v22).
@@ -742,6 +744,37 @@ bool CssParser::tryInterpretLength(const std::string_view v, CssLength& out) {
   return true;
 }
 
+bool CssParser::interpretVerticalAlignLength(const std::string_view v, int8_t& shift, bool& percent) {
+  // The units a formula image's offset comes in. Everything but % in sixteenths of an em: px and pt at CSS's 16 px
+  // medium, as interpretLineHeight takes them, and ex as half an em; rounded, and clamped to what a byte holds (about
+  // eight ems either way). A length that rounds to nothing is not kept, as before lengths were read: it is the
+  // baseline anyway, and kept it would cancel a <sup>'s raise.
+  CssLength length;
+  if (!tryInterpretLength(v, length)) return false;
+  const size_t unitAt = v.find_first_not_of("0123456789.+-");
+  const std::string_view unit = unitAt == std::string_view::npos ? std::string_view{} : v.substr(unitAt);
+  float sixteenths = 0.0f;
+  percent = false;
+  if (unit == "em" || unit == "rem") {
+    sixteenths = length.value * 16.0f;
+  } else if (unit == "ex") {
+    sixteenths = length.value * 8.0f;
+  } else if (unit == "px") {
+    sixteenths = length.value;
+  } else if (unit == "pt") {
+    sixteenths = length.value * 4.0f / 3.0f;
+  } else if (unit == "%") {
+    sixteenths = length.value;
+    percent = true;
+  } else {
+    return false;
+  }
+  const long rounded = std::lround(std::clamp(sixteenths, -127.0f, 127.0f));
+  if (rounded == 0) return false;
+  shift = static_cast<int8_t>(rounded);
+  return true;
+}
+
 bool CssParser::interpretWritingMode(const std::string_view v, CssWritingMode& out) {
   // The SVG 1.1 and IE values CSS Writing Modes 3 maps, and the sideways modes by the block direction they share.
   if (v == "horizontal-tb" || v == "lr" || v == "lr-tb" || v == "rl" || v == "rl-tb" || v == "initial") {
@@ -1128,29 +1161,31 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
     style.defined.display = 1;
   } else if (propNameBuf == "vertical-align") {
     const std::string_view va = propValueBuf;
-    if (va == "super") {
-      style.verticalAlign = CssVerticalAlign::Super;
-      style.defined.verticalAlign = 1;
-    } else if (va == "sub") {
-      style.verticalAlign = CssVerticalAlign::Sub;
-      style.defined.verticalAlign = 1;
-    } else if (va == "baseline") {
+    static constexpr struct {
+      const char* name;
+      CssVerticalAlign value;
+    } kKeywords[] = {{"baseline", CssVerticalAlign::Baseline}, {"super", CssVerticalAlign::Super},
+                     {"sub", CssVerticalAlign::Sub},           {"middle", CssVerticalAlign::Middle},
+                     {"text-top", CssVerticalAlign::TextTop},  {"text-bottom", CssVerticalAlign::TextBottom},
+                     {"top", CssVerticalAlign::Top},           {"bottom", CssVerticalAlign::Bottom}};
+    int8_t shift = 0;
+    bool percent = false;
+    bool kept = false;
+    for (const auto& keyword : kKeywords) {
+      if (va == keyword.name) {
+        style.verticalAlign = keyword.value;
+        kept = true;
+        break;
+      }
+    }
+    if (!kept && interpretVerticalAlignLength(va, shift, percent)) {
       style.verticalAlign = CssVerticalAlign::Baseline;
-      style.defined.verticalAlign = 1;
-    } else if (va == "middle") {
-      style.verticalAlign = CssVerticalAlign::Middle;
-      style.defined.verticalAlign = 1;
-    } else if (va == "text-top") {
-      style.verticalAlign = CssVerticalAlign::TextTop;
-      style.defined.verticalAlign = 1;
-    } else if (va == "text-bottom") {
-      style.verticalAlign = CssVerticalAlign::TextBottom;
-      style.defined.verticalAlign = 1;
-    } else if (va == "top") {
-      style.verticalAlign = CssVerticalAlign::Top;
-      style.defined.verticalAlign = 1;
-    } else if (va == "bottom") {
-      style.verticalAlign = CssVerticalAlign::Bottom;
+      kept = true;
+    }
+    // An unknown value leaves what came before it; a value replaces a length with its own (none for a keyword).
+    if (kept) {
+      style.verticalAlignShift = shift;
+      style.verticalAlignPercent = percent;
       style.defined.verticalAlign = 1;
     }
   } else if (propNameBuf == "font-variant" || propNameBuf == "font-variant-caps") {
@@ -1967,9 +2002,11 @@ uint16_t packFlow(const CssStyle& s) {
       ((static_cast<unsigned>(s.unicodeBidi) & 7u) << 9));
 }
 
-// The rule pool's flow word only: vertical-align's third bit (compressStyle). The rule cache's payload stores
-// vertical-align as a byte of its own.
+// The rule pool's flow word only: vertical-align's third bit, and its length (compressStyle): a byte after the word,
+// and whether it is a percentage. The rule cache's payload stores vertical-align in bytes of its own.
 constexpr uint16_t kFlowVerticalAlignBit = 1u << 12;
+constexpr uint16_t kFlowVerticalAlignShift = 1u << 13;
+constexpr uint16_t kFlowVerticalAlignPercent = 1u << 14;
 
 void unpackFlow(const uint16_t flow, CssStyle& s) {
   s.writingMode = static_cast<CssWritingMode>(flow & 3u);
@@ -2064,11 +2101,14 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.defined.display = (definedBits & 1 << 15) != 0;
   uint8_t vertAlignVal = 0;
   uint8_t vertAlignDefined = 0;
-  if (!get(&vertAlignVal, 1) || !get(&vertAlignDefined, 1)) {
+  uint8_t vertAlignShift = 0;
+  if (!get(&vertAlignVal, 1) || !get(&vertAlignDefined, 1) || !get(&vertAlignShift, 1)) {
     return false;
   }
   style.verticalAlign = static_cast<CssVerticalAlign>(vertAlignVal);
-  style.defined.verticalAlign = vertAlignDefined != 0 ? 1 : 0;
+  style.defined.verticalAlign = (vertAlignDefined & 0x1) != 0 ? 1 : 0;
+  style.verticalAlignPercent = (vertAlignDefined & 0x2) != 0;
+  style.verticalAlignShift = static_cast<int8_t>(vertAlignShift);
   uint8_t cssFloatVal = 0;
   if (!get(&cssFloatVal, 1)) {
     return false;
@@ -2189,7 +2229,9 @@ size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const pa
   if (style.defined.display) definedBits |= 1 << 15;
   put(&definedBits, sizeof(definedBits));
   put8(static_cast<uint8_t>(style.verticalAlign));
-  put8(static_cast<uint8_t>(style.defined.verticalAlign));
+  // bit 0 = defined, bit 1 = its length is a percentage; the length's byte follows (v35)
+  put8(static_cast<uint8_t>((style.defined.verticalAlign ? 0x1 : 0x0) | (style.verticalAlignPercent ? 0x2 : 0x0)));
+  put8(static_cast<uint8_t>(style.verticalAlignShift));
   put8(static_cast<uint8_t>(style.cssFloat));
   // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset), bit 2 = text-emphasis
   // defined, bits 3-6 = its mark (v31)
@@ -2545,9 +2587,9 @@ bool CssParser::ensureCacheIndexLoaded() const {
 // decompresses back to a full CssStyle. Values are copied with memcpy so the byte-packed
 // (unaligned) records are safe to read on the C3.
 
-// Worst case: 4 (mask) + 2 (packed enums) + 1 (extra values) + 2 (the flow word) + 11 lengths * 5 + 2 multipliers * 4
-// + the font-family hash (4) + the text-emphasis mark (1) = 77 bytes.
-constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 2 + 11 * 5 + 2 * 4 + 4 + 1;
+// Worst case: 4 (mask) + 2 (packed enums) + 1 (extra values) + 2 (the flow word) + 1 (a vertical-align length) + 11
+// lengths * 5 + 2 multipliers * 4 + the font-family hash (4) + the text-emphasis mark (1) = 78 bytes.
+constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 2 + 1 + 11 * 5 + 2 * 4 + 4 + 1;
 
 // Canonical "which properties are set" mask: the defined bits of the first 27 properties (0-26; the extra byte below
 // flags font-family, text-emphasis and the flow properties, which have no defined bit), then the three boolean
@@ -2587,6 +2629,9 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   // Bit 12 of the flow word, which packFlow leaves free, is vertical-align's third bit (the uint16 below holds two).
   uint16_t flow = packFlow(s);
   if (s.defined.verticalAlign && (static_cast<unsigned>(s.verticalAlign) & 4u)) flow |= kFlowVerticalAlignBit;
+  // Bits 13 and 14: a vertical-align length, its byte after the flow word, and whether it is a percentage.
+  if (s.defined.verticalAlign && s.verticalAlignShift != 0) flow |= kFlowVerticalAlignShift;
+  if (s.defined.verticalAlign && s.verticalAlignPercent) flow |= kFlowVerticalAlignPercent;
   if (flow != 0) extra |= 0x10;
   if (s.defined.textEmphasis) extra |= 0x20;
   extra |= static_cast<uint8_t>(s.ruleBorder << 6);
@@ -2613,6 +2658,7 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
     std::memcpy(p, &flow, 2);
     p += 2;
   }
+  if ((flow & kFlowVerticalAlignShift) != 0) *p++ = static_cast<uint8_t>(s.verticalAlignShift);
   const auto putLen = [&](bool def, const CssLength& l) {
     if (def) {
       std::memcpy(p, &l.value, 4);
@@ -2665,6 +2711,8 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
     p += 2;
     unpackFlow(flow, out);
   }
+  int8_t verticalAlignShift = 0;
+  if ((flow & kFlowVerticalAlignShift) != 0) verticalAlignShift = static_cast<int8_t>(*p++);
   const auto isDefined = [&](int index) { return (mask >> index) & 1u; };
   CssPropertyFlags& d = out.defined;
   d.textAlign = isDefined(0);
@@ -2711,6 +2759,8 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
   if (d.verticalAlign) {
     out.verticalAlign =
         static_cast<CssVerticalAlign>(((enums >> 8) & 3u) | ((flow & kFlowVerticalAlignBit) != 0 ? 4u : 0u));
+    out.verticalAlignShift = verticalAlignShift;
+    out.verticalAlignPercent = (flow & kFlowVerticalAlignPercent) != 0;
   }
   if (d.listStyleNone) out.listStyleNone = ((enums >> 10) & 1u) != 0;
   if (d.pageBreakBefore) out.pageBreakBefore = ((enums >> 11) & 1u) != 0;

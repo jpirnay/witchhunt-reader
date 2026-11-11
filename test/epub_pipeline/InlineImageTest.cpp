@@ -43,6 +43,7 @@ struct PlacedLine {
   int y = 0;
   std::vector<std::string> words;
   std::vector<int> xpos;
+  std::vector<EpdFontFamily::Style> styles;
   std::string reading;
 };
 
@@ -132,6 +133,7 @@ struct InlineImageFixture : testing::Test {
           for (uint16_t i = 0; i < block->wordCount(); ++i) {
             line.words.emplace_back(block->wordText(i));
             line.xpos.push_back(block->wordXpos(i));
+            line.styles.push_back(block->wordStyle(i));
           }
           block->appendReadingText(line.reading);
           laid.lines.push_back(std::move(line));
@@ -202,6 +204,21 @@ TEST_F(InlineImageFixture, VerticalAlignPlacesTheImageAgainstTheText) {
   EXPECT_EQ(0, placed("top"));
   EXPECT_EQ(kLineHeight - 16, placed("bottom"));
   EXPECT_EQ(kLineHeight - 16, placed("text-bottom"));
+  // A length raises it from the baseline (lowers it when negative), in ems of the text (the host's ascender, 18) or
+  // percent of the line height; raised above the text, the image lowers the text.
+  EXPECT_EQ(kAscender - 16 + 9, placed("-0.5em"));
+  EXPECT_EQ(-7, placed("8px")) << "9 px up: 7 above the text's top, which moves down by that";
+  EXPECT_EQ(kAscender - 16 + 6, placed("-25%"));
+  EXPECT_EQ(kAscender - 16 - 5, placed("0.5ex"));
+}
+
+TEST_F(InlineImageFixture, AVerticalAlignLengthLeavesTextAsItWas) {
+  // On a <sup> a length changes nothing, as before it was read: the marker stays raised.
+  const Laid laid = build("<p>claim<sup style=\"vertical-align: 0.3em\">1</sup> more</p>");
+  ASSERT_EQ(1u, laid.lines.size());
+  ASSERT_EQ(3u, laid.lines[0].words.size());
+  EXPECT_EQ("1", laid.lines[0].words[1]);
+  EXPECT_NE(0, laid.lines[0].styles[1] & EpdFontFamily::SUP);
 }
 
 TEST_F(InlineImageFixture, AnImageInsideSupIsRaisedWithIt) {

@@ -263,6 +263,11 @@ struct CssStyle {
   static constexpr uint8_t kRuleBorderNone = 0x01;  // border none or hidden, or no width
   static constexpr uint8_t kRulePainted = 0x02;     // a visible border, or a background
   uint8_t ruleBorder = 0;
+  // vertical-align as a length (verticalAlign Baseline): the baseline raised by it, lowered when negative. In 1/16 em
+  // (px and pt at CSS's 16 px medium, ex half an em), or with verticalAlignPercent in percent of the line height; set
+  // with verticalAlign. The two bytes of padding before `defined`.
+  int8_t verticalAlignShift = 0;
+  bool verticalAlignPercent = false;
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
 
@@ -354,6 +359,8 @@ struct CssStyle {
     }
     if (base.hasVerticalAlign() && take(defined.verticalAlign, 16)) {
       verticalAlign = base.verticalAlign;
+      verticalAlignShift = base.verticalAlignShift;
+      verticalAlignPercent = base.verticalAlignPercent;
       defined.verticalAlign = 1;
     }
     if (base.hasListStyleNone() && take(defined.listStyleNone, 17)) {
@@ -544,6 +551,8 @@ struct CssStyle {
     imageHeight = imageWidth = CssLength{};
     display = CssDisplay::Block;
     verticalAlign = CssVerticalAlign::Baseline;
+    verticalAlignShift = 0;
+    verticalAlignPercent = false;
     listStyleNone = false;
     pageBreakBefore = false;
     pageBreakAfter = false;
@@ -568,6 +577,7 @@ struct CssStyle {
 };
 
 // The flow properties sit in padding (after pageBreakAfter and after visibilityHidden), so they cost a style nothing;
-// textEmphasis, after fontFamily, is the one field that takes a word of its own (three bytes of it spare). Every member
+// textEmphasis, after fontFamily, is the one field that takes a word of its own, and ruleBorder and the vertical-align
+// length the rest of it. Every member
 // is 4-byte aligned or smaller, so the C3 lays it out as the host does.
 static_assert(sizeof(CssStyle) == 128, "CssStyle grew: the flow properties or textEmphasis no longer fit its padding");

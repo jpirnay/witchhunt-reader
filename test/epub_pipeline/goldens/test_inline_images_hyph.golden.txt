@@ -236,7 +236,7 @@ SPINE 0 href=OEBPS/text/chapter1.xhtml pages=5 truncated=0 cssFallback=0
   IMG y=6 x=352 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
   IMG y=6 x=400 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
   IMG y=6 x=442 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
- PAGE 4 elements=26 footnotes=0
+ PAGE 4 elements=32 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=w19
    W x=43 s=0 z=100 t=w20
@@ -318,7 +318,20 @@ SPINE 0 href=OEBPS/text/chapter1.xhtml pages=5 truncated=0 cssFallback=0
    W x=416 s=0 z=100 t=this
   LINE y=521 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=text.
-  LINE y=554 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=554 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=CASE22
+   W x=86 s=0 z=100 t=LENGTH
+   W x=168 s=0 z=100 t=em
+   W x=259 s=0 z=100 t=ex
+   W x=347 s=0 z=100 t=px
+   W x=432 s=0 z=100 t=pct
+  IMG y=566 x=217 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=555 x=305 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  IMG y=555 x=390 w=12 h=12 src=<cache>/epub_<hash>/img_54dda108a5b12cd2.png inline=1
+  LINE y=583 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=286 s=0 z=100 t=end.
+  IMG y=578 x=0 w=280 h=28 src=<cache>/epub_<hash>/img_c1bf25826fd3494f.png inline=1
+  LINE y=616 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=NOTE1
    W x=45 s=0 z=100 t=The
    W x=78 s=0 z=100 t=note
