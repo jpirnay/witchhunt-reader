@@ -3710,7 +3710,13 @@ uint8_t GfxRenderer::getGrayLevels() const { return display.getGrayLevels(); }
 
 uint8_t* GfxRenderer::borrowGray8Canvas(uint16_t* stride) const { return display.borrowGray8Canvas(stride); }
 
-void GfxRenderer::displayGray8Canvas() const { display.displayGray8Canvas(HalDisplay::FULL_REFRESH, fadingFix); }
+void GfxRenderer::displayGray8Canvas() const {
+  // A full refresh whatever was asked (the driver forces its clean bank), so it satisfies an armed override too (a
+  // book open's HALF), which would otherwise wait for the next refresh and land on the page after.
+  consumeRefreshOverride(HalDisplay::FULL_REFRESH);
+  noteRefresh(HalDisplay::FULL_REFRESH);
+  display.displayGray8Canvas(HalDisplay::FULL_REFRESH, fadingFix);
+}
 
 // Bit clear = black is the framebuffer's own convention (see DirectPixelWriter's
 // BW branch, which draws by clearing), and the driver expands it the same way.
