@@ -10,9 +10,14 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
+#include "FlashAreaRegion.h"
+#include "FlashLangPartition.h"
+#include "GlyphStoreTestUtil.h"
 #include "PsramImageFlash.h"
+#include "SimFlashArea.h"
 #include "SimImageFile.h"
 
 namespace {
@@ -313,4 +318,77 @@ TEST(PsramImageFlash, RefusesASizeThatIsNotWholePages) {
   EXPECT_FALSE(boot.area.begin());
   uint8_t byte = 0;
   EXPECT_FALSE(boot.area.read(0, &byte, 1));
+}
+
+// The language slot over the PSRAM image, as on a board without the partition: built once, on the card as soon as
+// it is built (FlashLangPartition syncs the area), and found again after a reboot without a rebuild.
+TEST(PsramImageFlash, TheLanguageSlotIsOnTheCardOnceBuiltAndSurvivesAReboot) {
+  namespace flp = FlashLangPartition;
+  constexpr uint32_t kAreaBytes = 1024 * 1024;
+  constexpr uint16_t kKeys = 40;
+  struct Strings {
+    int calls = 0;
+    static bool produce(void* ctx, flp::StringsWriter& out) {
+      ++static_cast<Strings*>(ctx)->calls;
+      for (uint16_t key = 0; key < kKeys; ++key) {
+        const std::string s = "text " + std::to_string(key);
+        if (!out.beginKey(key) || !out.write(s.c_str(), s.size() + 1)) return false;
+      }
+      return true;
+    }
+  } producer;
+  const flp::Strings strings{2048, &Strings::produce, &producer};
+
+  SimImageFile file;
+  {
+    Boot boot(file, kAreaBytes);
+    ASSERT_TRUE(boot.area.begin());
+    sim_area::use(&boot.area);
+    flp::Mapped m{};
+    ASSERT_TRUE(flp::acquire(1, 0x1234, kKeys, strings, nullptr, &m));
+    EXPECT_STREQ("text 39", m.data + m.offsets[39]);
+    flp::unmap();
+    sim_area::use(nullptr);
+  }
+  file.powerCycle();  // no sync of our own: the build's
+  Boot again(file, kAreaBytes);
+  ASSERT_TRUE(again.area.begin());
+  sim_area::use(&again.area);
+  const uint32_t readsBefore = file.reads();
+  flp::Mapped m{};
+  ASSERT_TRUE(flp::acquire(1, 0x1234, kKeys, strings, nullptr, &m));
+  EXPECT_EQ(1, producer.calls) << "the slot came back from the card, not from a rebuild";
+  EXPECT_STREQ("text 7", m.data + m.offsets[7]);
+  EXPECT_EQ(readsBefore + 1, file.reads()) << "one page: the slot's";
+  flp::unmap();
+  sim_area::use(nullptr);
+}
+
+// The TTF glyph store over the PSRAM image, through its font-area window: an install is on the card as soon as it
+// finishes (the store syncs its flash), so a reboot opens it without installing again.
+TEST(PsramImageFlash, AGlyphStoreInstallIsOnTheCardOnceFinished) {
+  constexpr uint32_t kAreaBytes = 1024 * 1024;
+  const glyphstore::Layout layout = gst_test::smallLayout();
+  SimImageFile file;
+  {
+    Boot boot(file, kAreaBytes);
+    ASSERT_TRUE(boot.area.begin());
+    sim_area::use(&boot.area);
+    FlashAreaRegion window;
+    ASSERT_TRUE(window.begin());
+    FlashGlyphStore store(window);
+    ASSERT_TRUE(gst_test::install(store, layout));
+    sim_area::use(nullptr);
+  }
+  file.powerCycle();
+  Boot again(file, kAreaBytes);
+  ASSERT_TRUE(again.area.begin());
+  sim_area::use(&again.area);
+  {
+    FlashAreaRegion window;
+    ASSERT_TRUE(window.begin());
+    FlashGlyphStore store(window);
+    EXPECT_EQ(gst_test::OpenResult::Ready, store.open(gst_test::kIdentityA));
+  }
+  sim_area::use(nullptr);
 }

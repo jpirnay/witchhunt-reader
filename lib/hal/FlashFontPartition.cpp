@@ -240,6 +240,8 @@ bool finaliseWrite() {
   }
 
   s_ws.active = false;
+  // An area held in RAM keeps the family across a power cut from here on (NorFlash::sync); flash has it already.
+  area->sync();
   LOG_INF("FFP", "finaliseWrite: %u entries committed, %u B used", s_ws.entryCount,
           static_cast<unsigned>(s_ws.nextDataOff));
   return true;

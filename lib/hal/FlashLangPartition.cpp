@@ -303,6 +303,8 @@ bool build(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCoun
       memcmp(old, MAGIC, 4) == 0 && old[4] == 1 && area->erase(static_cast<uint32_t>(format1), SECTOR_BYTES)) {
     LOG_INF("FLP", "an older firmware's format 1 slot retired");
   }
+  // An area held in RAM keeps the slot across a power cut from here on (NorFlash::sync); flash has it already.
+  area->sync();
   return true;
 }
 

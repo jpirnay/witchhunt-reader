@@ -30,6 +30,8 @@ class FlashAreaRegion final : public NorFlash {
   const uint8_t* map(uint32_t offset, uint32_t len) override;
   void unmap(const uint8_t* mapped) override;
   uint32_t freeMapPages() const override;
+  /// The whole area's: a window has nothing of its own to sync.
+  bool sync() override { return area_ != nullptr && area_->sync(); }
 
   /// The font area's mappings held by every FlashAreaRegion (begin(): the TTF glyph store's): FlashFontPartition stays
   /// off the area while this is not 0. A region's (beginRegion(): the hyphenation store's tries, mapped while a

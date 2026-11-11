@@ -209,8 +209,12 @@ bool FlashGlyphStore::finishInstall() {
   installing_.reset();
   if (!written) {
     LOG_ERR("GST", "install: header write failed");
+    return false;
   }
-  return written;
+  // A store held in RAM keeps the install across a power cut from here on (NorFlash::sync); flash has it already.
+  // The glyphs written while reading wait for the next sync, before deep sleep at the latest.
+  flash_.sync();
+  return true;
 }
 
 // --- Session ---
