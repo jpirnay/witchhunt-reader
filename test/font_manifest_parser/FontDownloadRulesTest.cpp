@@ -237,3 +237,39 @@ TEST(FontDownloadRulesTest, UpdateAllTakesInstalledFamiliesWithAnUpdateAndPacksO
   catalog.setHasUpdate(2, false);
   EXPECT_EQ(FontDownloadRules::packUpdates(catalog), 0u);
 }
+
+// A web upload takes a .ttf or .otf as discovery lists them (any case) and a .cpfont as discovery parses it (lower-case
+// extension); nothing else goes into a family folder.
+TEST(FontDownloadRulesTest, AnUploadTakesTtfOtfAndCpfontFilesOnly) {
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata-Regular.ttf"), FileKind::TrueType);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata-Regular.TTF"), FileKind::TrueType);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("OpenDyslexic-Bold.otf"), FileKind::OpenTypeCff);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata_12.cpfont"), FileKind::Cpfont);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata_12.CPFONT"), FileKind::Unknown);  // discovery would skip it
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata_12.cpfont.part"), FileKind::Unknown);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata-Regular.woff"), FileKind::Unknown);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("Literata.ttc"), FileKind::Unknown);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("de.cphyph"), FileKind::Unknown);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("de.cplang"), FileKind::Unknown);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf("x.ttf.part"), FileKind::Unknown);
+  EXPECT_EQ(FontDownloadRules::uploadKindOf(""), FileKind::Unknown);
+  EXPECT_TRUE(FontDownloadRules::isOutline(FileKind::TrueType));
+  EXPECT_TRUE(FontDownloadRules::isOutline(FileKind::OpenTypeCff));
+  EXPECT_FALSE(FontDownloadRules::isOutline(FileKind::Cpfont));
+}
+
+// The two kinds never share a family folder: a .ttf beside a .cpfont would never be drawn, a .cpfont beside .ttf files
+// would hide them.
+TEST(FontDownloadRulesTest, AnUploadJoinsOnlyAFolderOfItsOwnKind) {
+  for (const FileKind outline : {FileKind::TrueType, FileKind::OpenTypeCff}) {
+    EXPECT_TRUE(FontDownloadRules::joinsFolder(outline, false, false));
+    EXPECT_TRUE(FontDownloadRules::joinsFolder(outline, false, true));
+    EXPECT_FALSE(FontDownloadRules::joinsFolder(outline, true, false));
+    EXPECT_FALSE(FontDownloadRules::joinsFolder(outline, true, true));
+  }
+  EXPECT_TRUE(FontDownloadRules::joinsFolder(FileKind::Cpfont, false, false));
+  EXPECT_TRUE(FontDownloadRules::joinsFolder(FileKind::Cpfont, true, false));
+  EXPECT_FALSE(FontDownloadRules::joinsFolder(FileKind::Cpfont, false, true));
+  EXPECT_FALSE(FontDownloadRules::joinsFolder(FileKind::Unknown, false, false));
+  EXPECT_FALSE(FontDownloadRules::joinsFolder(FileKind::HyphenationPack, false, false));
+}

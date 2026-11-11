@@ -66,15 +66,11 @@
       #remoteStatus.status-ok, #remoteStatus.status-err { margin: 0 -4px; padding: 8px 10px; border-radius: var(--radius-sm); }
 
       .notice a { color: inherit; font-weight: 600; }
-      .upload-form {
-        display: flex;
-        gap: 8px 12px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      .upload-form input[type="file"] { flex: 1 1 240px; min-width: 0; max-width: 100%; }
       #pickedInfo { margin: 8px 0 0; }
       #pickedInfo:empty { display: none; }
+      .upload-options { margin: 16px 0; max-width: 360px; }
+      .upload-options .field-label { display: block; font-weight: 500; color: var(--text-strong); margin-bottom: 6px; }
+      .upload-options input[type="text"] { width: 100%; }
 
       /* The converter: where the fonts come from, which file is which style, and the options. */
       .card-intro { margin: -4px 0 14px; color: var(--text-muted); }
@@ -115,6 +111,7 @@
         border-color: transparent; }
       #status.status-err, #installedStatus.status-err, #remoteStatus.status-err, #convertStatus.status-err { display: block; background: var(--danger-soft); color: var(--danger);
         border-color: transparent; }
+      #status:not(.status-ok):not(.status-err) { color: var(--text-muted); }
 
       @media (max-width: 1060px) {
         .download-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
@@ -128,11 +125,11 @@
     <main class="page">
       <div class="page-head">
         <h1>Font Manager</h1>
-        <p class="page-intro">Reading fonts on the SD card: download them from the catalog, convert or upload your own,
+        <p class="page-intro">Reading fonts on the SD card: download them from the catalog, upload or convert your own,
           or delete those you no longer use.</p>
       </div>
 
-      <!-- One panel at a time, chosen in the menu; #installed, #download, #convert or #upload. -->
+      <!-- One panel at a time, chosen in the menu; #installed, #download, #upload or #convert. -->
       <div class="side-layout">
         <aside class="side-nav">
           <nav aria-label="Font Manager">
@@ -145,8 +142,8 @@
             <div class="cat-list">
               <a class="cat-link" href="#download" data-panel="download"><span>Download fonts</span>
                 <span class="cat-count" id="updateCount"></span></a>
-              <a class="cat-link" href="#convert" data-panel="convert"><span>Convert a font</span></a>
               <a class="cat-link" href="#upload" data-panel="upload"><span>Upload a font</span></a>
+              <a class="cat-link" href="#convert" data-panel="convert"><span>Convert a font</span></a>
             </div>
           </nav>
         </aside>
@@ -175,8 +172,9 @@
 
           <section class="card" id="panel-convert" hidden>
             <h2>Convert a font</h2>
-            <p class="card-intro">Makes a font family for the reader from TrueType or OpenType files, here in your
-              browser: the same conversion as the fonts in the catalog.</p>
+            <p class="card-intro">Makes <code>.cpfont</code> files at the sizes you choose from TrueType or OpenType
+              files, here in your browser: the same conversion as the <code>.cpfont</code> fonts in the catalog. To use
+              a TrueType or OpenType font as it is, at every size, <a href="#upload">upload it</a> instead.</p>
             <div class="segmented convert-source" role="radiogroup" aria-label="Convert from">
               <label><input type="radio" name="convertSource" value="files" checked><span>Font files</span></label>
               <label><input type="radio" name="convertSource" value="book"><span>The fonts of an EPUB</span></label>
@@ -215,12 +213,22 @@
 
           <section class="card" id="panel-upload" hidden>
             <h2>Upload a font</h2>
-            <p class="card-intro">Font files already converted to <code>.cpfont</code>, on this computer.</p>
-            <form class="upload-form" id="uploadForm">
-              <input type="file" id="fontFiles" accept=".cpfont" multiple required />
-              <button type="submit" class="btn btn-primary">Upload</button>
-            </form>
+            <p class="card-intro">TrueType (<code>.ttf</code>) and OpenType (<code>.otf</code>) files go onto the reader
+              as they are, and it draws them at every size, as the catalog's TrueType families. A <code>.woff</code>
+              file is unpacked here in your browser first. Fonts already converted to <code>.cpfont</code> are uploaded
+              as they are.</p>
+            <input type="file" id="fontFiles" accept=".ttf,.otf,.woff,.cpfont" multiple aria-label="Font files">
+            <p class="family-meta">Choose the family's files, up to four: regular, bold, italic and bold italic. Each
+              file's style is read from the font; without a bold or italic file the reader draws bold text emboldened
+              and italic text slanted. Or choose the <code>.cpfont</code> files of one family.</p>
+            <div id="uploadStyleTable" class="style-table" hidden></div>
             <p id="pickedInfo" class="family-meta"></p>
+            <div class="upload-options">
+              <label><span class="field-label">Family name</span>
+                <input type="text" id="uploadName" autocomplete="off" spellcheck="false"
+                  placeholder="Letters, digits, - and _"></label>
+            </div>
+            <button type="button" id="uploadBtn" class="btn btn-primary" disabled>Upload</button>
             <div id="status" role="status"></div>
           </section>
         </div>
@@ -244,10 +252,15 @@
       el.textContent = text;
     }
 
+    // The families the reader lists, as /api/fonts gave them last: what an upload or a conversion checks its family
+    // name against.
+    let installedFamilies = [];
+
     async function loadFonts() {
       try {
         const res = await fetch('/api/fonts');
         const data = await res.json();
+        installedFamilies = Array.isArray(data.families) ? data.families : [];
         const el = document.getElementById('families');
         el.innerHTML = '';
         document.getElementById('installedCount').textContent = data.families ? String(data.families.length) : '';
@@ -476,108 +489,11 @@
       btn.disabled = false;
     }
 
-    // Derive family name from a .cpfont filename: take everything before the
-    // last '-' or '_' (separator that precedes the size suffix, e.g. Bookerly_12.cpfont).
-    // From the NFC name, the one the file is uploaded under.
-    function familyFromFilename(name) {
-      const stem = nfcName(name).replace(/\.cpfont$/i, '');
-      const cut = Math.max(stem.lastIndexOf('-'), stem.lastIndexOf('_'));
-      return cut > 0 ? stem.slice(0, cut) : stem;
-    }
+    // ---- Font files: read in the browser, for Upload and Convert alike -----------------------------
 
-    // Sanitize to match firmware's [A-Za-z0-9_-]+ pattern.
-    function sanitizeFamily(raw) {
-      return raw.replace(/[^A-Za-z0-9_-]/g, '_');
-    }
-
-    function cpfontFilesOnly(fileList) {
-      return Array.from(fileList).filter(f => /\.cpfont$/i.test(f.name));
-    }
-
-    document.getElementById('fontFiles').addEventListener('change', function() {
-      const info = document.getElementById('pickedInfo');
-      const files = cpfontFilesOnly(this.files);
-      if (files.length === 0) {
-        info.textContent = 'Pick one or more .cpfont files.';
-        return;
-      }
-      const families = new Set(files.map(f => sanitizeFamily(familyFromFilename(f.name))));
-      if (families.size > 1) {
-        info.textContent = 'Picked files contain multiple families — please select files from a single family.';
-        return;
-      }
-      const family = families.values().next().value;
-      info.textContent = files.length + ' file' + (files.length === 1 ? '' : 's') +
-        ' → family "' + family + '"';
-    });
-
-    document.getElementById('uploadForm').addEventListener('submit', async function(e) {
-      e.preventDefault();
-      const status = document.getElementById('status');
-      const files = cpfontFilesOnly(document.getElementById('fontFiles').files);
-      if (files.length === 0) {
-        setStatus('status', 'No .cpfont files selected.', false);
-        return;
-      }
-
-      const families = files.map(f => sanitizeFamily(familyFromFilename(f.name)));
-      const uniqueFamilies = new Set(families);
-      if (uniqueFamilies.size !== 1) {
-        setStatus('status', 'Selected files belong to multiple families.', false);
-        return;
-      }
-
-      const family = families[0];
-
-      setStatus('status', 'Preparing upload...');
-
-      let uploaded = 0;
-      for (const file of files) {
-        status.textContent = 'Uploading ' + (uploaded + 1) + '/' + files.length + ': ' + file.name;
-        const formData = new FormData();
-        formData.append('family', family);
-        formData.append('file', file, nfcName(file.name));
-        try {
-          const res = await fetch('/api/fonts/upload', { method: 'POST', body: formData });
-          const data = await res.json();
-          if (!data.ok) {
-            setStatus('status', 'Failed on ' + file.name + ': ' + (data.error || 'unknown error'), false);
-            await loadFonts();
-            return;
-          }
-        } catch (err) {
-          setStatus('status', 'Upload error on ' + file.name + ': ' + err.message, false);
-          await loadFonts();
-          return;
-        }
-        uploaded++;
-      }
-
-      setStatus('status', 'Uploaded ' + uploaded + ' file' + (uploaded === 1 ? '' : 's') +
-        ' to family "' + family + '".', true);
-      await loadFonts();
-      await loadRemoteManifest();
-    });
-
-    // ---- Convert a font ----------------------------------------------------------------------------
-    //
-    // TrueType/OpenType files, or the fonts a book embeds, to .cpfont: in a module Web Worker
-    // (js/font-converter.js) running FreeType built to WebAssembly, which makes the same files as
-    // lib/EpdFont/scripts/fontconvert_sdcard.py makes for the catalog. The result is installed through
-    // /api/fonts/upload, one file at a time, as the Upload card does.
-    const CONVERT_SIZES = [8, 10, 12, 14, 16, 18, 20];
-    const CONVERT_DEFAULT_SIZES = [10, 12, 14, 16, 18];
     const STYLE_NAMES = { regular: 'Regular', bold: 'Bold', italic: 'Italic', bolditalic: 'Bold italic' };
     const FAMILY_NAME_MAX = 31;  // FontInstaller::MAX_FAMILY_NAME_LEN
-    let convertStyles = {};      // style -> { data: ArrayBuffer, label: file name }
-    let bookFamilies = [];
-    let converterWorker = null;
-
-    function convertMessage(text, ok) {
-      const el = document.getElementById('convertStatus');
-      el.className = ok === undefined ? '' : (ok ? 'status-ok' : 'status-err');
-      el.textContent = text || '';
-    }
+    const FAMILY_NAME_RULE = /^[A-Za-z0-9_-]{1,31}$/;
 
     function loadScript(src) {
       return new Promise((resolve, reject) => {
@@ -599,13 +515,38 @@
       return (family || '').replace(/\s+/g, '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, FAMILY_NAME_MAX);
     }
 
-    function updateConvertButton() {
-      document.getElementById('convertBtn').disabled = !convertStyles.regular;
+    // TrueType, OpenType or WOFF files, each read for its style (a WOFF unpacked to a plain font): { styles, family,
+    // problems }, styles keyed regular / bold / italic / bolditalic, each { data, label, variable }, the family the
+    // regular file names, and one sentence per file that cannot be taken. A variable font is one unless
+    // `variableOk`: the reader draws its default style, the converter cannot take it.
+    async function readFontFiles(files, variableOk) {
+      const styles = {};
+      const problems = [];
+      let family = '';
+      try {
+        const reader = await fontReader();
+        for (const file of files) {
+          try {
+            const font = await reader.read(await file.arrayBuffer());
+            if (font.variable && !variableOk) throw new Error('a variable font; choose the static files of the family');
+            if (styles[font.style]) {
+              throw new Error(`a second ${STYLE_NAMES[font.style].toLowerCase()} style besides ${styles[font.style].label}`);
+            }
+            styles[font.style] = { data: font.data, label: file.name, variable: font.variable };
+            if (!family || font.style === 'regular') family = font.family;
+          } catch (err) {
+            problems.push(file.name + ' is ' + err.message + '.');
+          }
+        }
+      } catch (err) {
+        problems.push(err.message);
+      }
+      return { styles, family, problems };
     }
 
-    function renderStyleTable() {
-      const table = document.getElementById('styleTable');
-      table.hidden = Object.keys(convertStyles).length === 0;
+    // Which file serves which style; `missingRegular` says what a family without a regular file gets.
+    function fillStyleTable(table, styles, missingRegular) {
+      table.hidden = Object.keys(styles).length === 0;
       table.replaceChildren(...Object.keys(STYLE_NAMES).map((style) => {
         const row = document.createElement('div');
         row.className = 'style-row';
@@ -613,12 +554,191 @@
         name.className = 'style-name';
         name.textContent = STYLE_NAMES[style];
         const file = document.createElement('span');
-        file.className = 'style-file' + (convertStyles[style] ? '' : ' missing');
-        file.textContent = convertStyles[style] ? convertStyles[style].label
-          : (style === 'regular' ? 'missing: the family needs a regular style' : 'none');
+        const entry = styles[style];
+        file.className = 'style-file' + (entry ? '' : ' missing');
+        file.textContent = entry ? entry.label + (entry.variable ? ' (a variable font: drawn in its default style)' : '')
+          : (style === 'regular' ? missingRegular : 'none');
         row.append(name, file);
         return row;
       }));
+    }
+
+    // Why `name` cannot take files of this kind (`outline`: TrueType or OpenType), or ''. The reader reads a folder
+    // with a .cpfont file as a .cpfont family, so the two kinds never share one (FontDownloadRules::joinsFolder).
+    // FAT names ignore case.
+    function familyClash(name, outline) {
+      const existing = installedFamilies.find((f) => f.name.toLowerCase() === name.toLowerCase());
+      if (!existing || !!existing.outline === outline) return '';
+      return (outline
+        ? 'The reader has a .cpfont family "' + existing.name + '": a TrueType or OpenType file would not be used beside it.'
+        : 'The reader has a TrueType family "' + existing.name + '": .cpfont files would hide its files.') +
+        ' Choose another family name, or delete "' + existing.name + '" under Installed fonts first.';
+    }
+
+    // ---- Upload a font -----------------------------------------------------------------------------
+    //
+    // TrueType and OpenType files go into /.crosspoint/fonts/<family>/ as they are, where the reader's TrueType engine
+    // draws them at every size, as the catalog's TrueType families; a WOFF is unpacked first (EpubFonts.read). Each
+    // style is uploaded as <family>-<Style>.ttf or .otf, so uploading a style again replaces it. .cpfont files keep
+    // their names, which carry their sizes. One file per POST /api/fonts/upload; the device checks each again.
+    const STYLE_FILE_NAMES = { regular: 'Regular', bold: 'Bold', italic: 'Italic', bolditalic: 'BoldItalic' };
+    // { outline, files }, or null while nothing can be uploaded: a .cpfont's file { blob, name }, a TrueType or OpenType
+    // style's { blob, style, data }, named at upload by the family name then chosen.
+    let uploadPlan = null;
+
+    // Derive family name from a .cpfont filename: take everything before the
+    // last '-' or '_' (separator that precedes the size suffix, e.g. Bookerly_12.cpfont).
+    // From the NFC name, the one the file is uploaded under.
+    function familyFromFilename(name) {
+      const stem = nfcName(name).replace(/\.cpfont$/i, '');
+      const cut = Math.max(stem.lastIndexOf('-'), stem.lastIndexOf('_'));
+      return cut > 0 ? stem.slice(0, cut) : stem;
+    }
+
+    // Sanitize to match firmware's [A-Za-z0-9_-]+ pattern.
+    function sanitizeFamily(raw) {
+      return raw.replace(/[^A-Za-z0-9_-]/g, '_');
+    }
+
+    // The extension the reader reads a plain font file by: 'otf' for CFF outlines ('OTTO'), 'ttf' otherwise.
+    function outlineExtension(data) {
+      return new DataView(data).getUint32(0) === 0x4F54544F ? 'otf' : 'ttf';
+    }
+
+    function uploadMessage(text, ok) {
+      if (!text) {
+        const el = document.getElementById('status');
+        el.className = '';
+        el.style.display = 'none';
+        return;
+      }
+      setStatus('status', text, ok);
+    }
+
+    async function pickUploadFiles(fileList) {
+      const files = Array.from(fileList || []);
+      const cpfonts = files.filter((f) => /\.cpfont$/i.test(f.name));
+      const info = document.getElementById('pickedInfo');
+      const table = document.getElementById('uploadStyleTable');
+      uploadPlan = null;
+      info.textContent = '';
+      fillStyleTable(table, {}, '');
+      uploadMessage('');
+      if (cpfonts.length && cpfonts.length < files.length) {
+        uploadMessage('Choose TrueType, OpenType or WOFF files, or .cpfont files, not both.', false);
+      } else if (cpfonts.length) {
+        const families = new Set(cpfonts.map((f) => sanitizeFamily(familyFromFilename(f.name))));
+        if (families.size > 1) {
+          uploadMessage('The files belong to more than one family: choose the .cpfont files of one family.', false);
+        } else {
+          const family = families.values().next().value;
+          document.getElementById('uploadName').value = family.slice(0, FAMILY_NAME_MAX);
+          info.textContent = cpfonts.length + ' .cpfont file' + (cpfonts.length === 1 ? '' : 's') + ', ' +
+            formatSize(cpfonts.reduce((sum, f) => sum + f.size, 0));
+          uploadPlan = { outline: false, files: cpfonts.map((f) => ({ blob: f, name: nfcName(f.name) })) };
+        }
+      } else if (files.length) {
+        const { styles, family, problems } = await readFontFiles(files, true);
+        fillStyleTable(table, styles, 'none: the reader draws it with another of the styles');
+        if (family) document.getElementById('uploadName').value = familyNameFor(family);
+        if (problems.length) uploadMessage(problems.join(' '), false);
+        const picked = Object.keys(STYLE_NAMES).filter((style) => styles[style]);  // the regular first
+        if (picked.length) {
+          uploadPlan = {
+            outline: true,
+            files: picked.map((style) => ({ blob: new Blob([styles[style].data]), style, data: styles[style].data })),
+          };
+        }
+      }
+      document.getElementById('uploadBtn').disabled = !uploadPlan;
+    }
+
+    document.getElementById('fontFiles').addEventListener('change', (e) => pickUploadFiles(e.target.files));
+
+    async function uploadFonts() {
+      const plan = uploadPlan;
+      let name = document.getElementById('uploadName').value.trim();
+      if (!plan) return;
+      if (!FAMILY_NAME_RULE.test(name)) {
+        uploadMessage('The family name may only hold letters, digits, - and _, at most 31 of them.', false);
+        return;
+      }
+      const clash = familyClash(name, plan.outline);
+      if (clash) {
+        uploadMessage(clash, false);
+        return;
+      }
+      const existing = installedFamilies.find((f) => f.name.toLowerCase() === name.toLowerCase());
+      if (existing && !confirm('The reader already has a family "' + existing.name + '". The files are added to it, ' +
+          'each replacing a file of the same name. Continue?')) {
+        return;
+      }
+      if (existing) name = existing.name;  // the folder's own spelling, which the reader lists it under
+      const files = plan.files.map((f) => (plan.outline
+        ? { blob: f.blob, name: name + '-' + STYLE_FILE_NAMES[f.style] + '.' + outlineExtension(f.data) }
+        : f));
+      const button = document.getElementById('uploadBtn');
+      button.disabled = true;
+      let total = 0;
+      let listed = true;
+      try {
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i];
+          uploadMessage('Uploading ' + (i + 1) + ' of ' + files.length + ': ' + f.name);
+          const form = new FormData();
+          form.append('family', name);
+          form.append('file', f.blob, f.name);
+          const res = await fetch('/api/fonts/upload', { method: 'POST', body: form });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.ok) throw new Error(f.name + ': ' + (data.error || 'the reader answered ' + res.status));
+          total += f.blob.size;
+          listed = data.listed !== false;  // the answer to the last file counts: the family as it now stands
+        }
+        const what = 'Uploaded "' + name + '": ' + files.length + ' file' + (files.length === 1 ? '' : 's') + ', ' +
+          formatSize(total) + '.';
+        if (!listed) {
+          uploadMessage(what + (plan.outline
+            ? ' But the family is too large for this reader\'s font area: the reader does not list it.'
+            : ' But the reader does not list it: a .cpfont file\'s name must end in _<size>.cpfont.'), false);
+        } else {
+          uploadMessage(what + ' Choose it on the reader as the reading font' +
+            (plan.outline ? ': it is drawn at every size.' : '.'), true);
+        }
+      } catch (err) {
+        uploadMessage('Could not upload: ' + err.message, false);
+      } finally {
+        button.disabled = !uploadPlan;
+      }
+      await loadFonts();
+      await loadRemoteManifest();
+    }
+
+    document.getElementById('uploadBtn').addEventListener('click', uploadFonts);
+
+    // ---- Convert a font ----------------------------------------------------------------------------
+    //
+    // TrueType/OpenType files, or the fonts a book embeds, to .cpfont: in a module Web Worker
+    // (js/font-converter.js) running FreeType built to WebAssembly, which makes the same files as
+    // lib/EpdFont/scripts/fontconvert_sdcard.py makes for the catalog. The result is installed through
+    // /api/fonts/upload, one file at a time, as the Upload card does.
+    const CONVERT_SIZES = [8, 10, 12, 14, 16, 18, 20];
+    const CONVERT_DEFAULT_SIZES = [10, 12, 14, 16, 18];
+    let convertStyles = {};      // style -> { data: ArrayBuffer, label: file name }
+    let bookFamilies = [];
+    let converterWorker = null;
+
+    function convertMessage(text, ok) {
+      const el = document.getElementById('convertStatus');
+      el.className = ok === undefined ? '' : (ok ? 'status-ok' : 'status-err');
+      el.textContent = text || '';
+    }
+
+    function updateConvertButton() {
+      document.getElementById('convertBtn').disabled = !convertStyles.regular;
+    }
+
+    function renderStyleTable() {
+      fillStyleTable(document.getElementById('styleTable'), convertStyles, 'missing: the family needs a regular style');
       updateConvertButton();
     }
 
@@ -636,27 +756,9 @@
     });
 
     document.getElementById('convertFiles').addEventListener('change', async (e) => {
-      convertStyles = {};
-      const problems = [];
-      let family = '';
-      try {
-        const reader = await fontReader();
-        for (const file of Array.from(e.target.files || [])) {
-          try {
-            const font = await reader.read(await file.arrayBuffer());
-            if (font.variable) throw new Error('a variable font; choose the static files of the family');
-            if (convertStyles[font.style]) {
-              throw new Error(`a second ${STYLE_NAMES[font.style].toLowerCase()} style besides ${convertStyles[font.style].label}`);
-            }
-            convertStyles[font.style] = { data: font.data, label: file.name };
-            if (!family || font.style === 'regular') family = font.family;
-          } catch (err) {
-            problems.push(file.name + ' is ' + err.message + '.');
-          }
-        }
-      } catch (err) {
-        problems.push(err.message);
-      }
+      const read = await readFontFiles(Array.from(e.target.files || []), false);
+      convertStyles = read.styles;
+      const { family, problems } = read;
       document.getElementById('convertName').value = familyNameFor(family);
       renderStyleTable();
       convertMessage(problems.join(' '), problems.length ? false : undefined);
@@ -740,8 +842,13 @@
     document.getElementById('convertBtn').addEventListener('click', async () => {
       const name = document.getElementById('convertName').value.trim();
       const sizes = Array.from(document.querySelectorAll('#convertSizes input:checked')).map((box) => Number(box.value));
-      if (!/^[A-Za-z0-9_-]{1,31}$/.test(name)) {
+      if (!FAMILY_NAME_RULE.test(name)) {
         convertMessage('The family name may only hold letters, digits, - and _, at most 31 of them.', false);
+        return;
+      }
+      const clash = familyClash(name, false);
+      if (clash) {
+        convertMessage(clash, false);
         return;
       }
       if (!sizes.length) {
@@ -797,7 +904,7 @@
       return label;
     }));
 
-    const PANELS = ['installed', 'download', 'convert', 'upload'];
+    const PANELS = ['installed', 'download', 'upload', 'convert'];
 
     function showPanel(id) {
       if (!PANELS.includes(id)) id = PANELS[0];

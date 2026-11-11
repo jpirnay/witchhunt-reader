@@ -50,6 +50,29 @@ inline FileKind kindOfFormat(const char* value, const size_t len) {
   return FileKind::Unknown;
 }
 
+// A .ttf or .otf file: drawn by the TrueType engine as it is, at every size.
+constexpr bool isOutline(const FileKind kind) { return kind == FileKind::TrueType || kind == FileKind::OpenTypeCff; }
+
+// What a web upload of `name` puts into a family folder, by its name as discovery reads it
+// (SdCardFontRegistry::scanDirectory): a .ttf or .otf file in any case, a .cpfont file with the lower-case extension
+// discovery takes. Unknown for any other file: a pack, a WOFF, a collection.
+inline FileKind uploadKindOf(const char* name) {
+  const FileKind kind = kindOf(name);
+  if (isOutline(kind)) return kind;
+  static constexpr char kCpfont[] = ".cpfont";
+  if (kind == FileKind::Cpfont && strcmp(name + strlen(name) - (sizeof kCpfont - 1), kCpfont) == 0) return kind;
+  return FileKind::Unknown;
+}
+
+// Whether an upload of a file of `kind` may join a family folder that holds .cpfont fonts (`holdsCpfont`) or .ttf and
+// .otf files (`holdsOutline`). Discovery reads a folder with a .cpfont font as a .cpfont family, whatever else it
+// holds: a .ttf beside one would never be drawn, and a .cpfont put beside .ttf files would hide them. So the two
+// kinds never share a folder; a new or empty one takes either.
+constexpr bool joinsFolder(const FileKind kind, const bool holdsCpfont, const bool holdsOutline) {
+  if (isOutline(kind)) return !holdsCpfont;
+  return kind == FileKind::Cpfont && !holdsOutline;
+}
+
 // The bytes headOk() reads.
 constexpr size_t kHeadBytes = 8;
 

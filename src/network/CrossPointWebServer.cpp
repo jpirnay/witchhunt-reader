@@ -2691,22 +2691,50 @@ void CrossPointWebServer::handleFontUploadData() {
       fontUpload.headerBytesReceived = 0;
       fontUpload.bytesWritten = 0;
       fontUpload.lowMemory = false;
+      fontUpload.error = nullptr;
       // END and ABORTED delete filePath's part whenever the upload is not valid; a START refused
       // below (bad family or file name, no family dir) leaves them none to delete.
       fontUpload.filePath.clear();
 
       if (!FontInstaller::isValidFamilyName(family.c_str())) {
         LOG_ERR("WEB", "Invalid font family name: %s", family.c_str());
+        fontUpload.error = "Invalid family name";
         break;
       }
 
       String filename = up.filename;
-      if (!filename.endsWith(".cpfont")) {
-        LOG_ERR("WEB", "Not a .cpfont file: %s", filename.c_str());
+      // A .ttf or .otf goes in as it is, for the TrueType engine to draw at every size, as the catalog's own
+      // TrueType families; a .cpfont as the converter made it.
+      fontUpload.kind = FontDownloadRules::uploadKindOf(filename.c_str());
+      if (fontUpload.kind == FontDownloadRules::FileKind::Unknown) {
+        LOG_ERR("WEB", "Not a font file the reader takes: %s", filename.c_str());
+        fontUpload.error = "Not a font file the reader takes: .ttf, .otf or .cpfont";
         break;
       }
-      if (filename.indexOf('/') >= 0 || filename.indexOf('\\') >= 0 || filename.indexOf("..") >= 0) {
+      // No '/' either: the name is one file in the family's folder.
+      if (filename.indexOf('/') >= 0 || !isValidFontFileName(filename.c_str())) {
         LOG_ERR("WEB", "Invalid font filename: %s", filename.c_str());
+        fontUpload.error = "Invalid file name: at most 60 characters, no / or ..";
+        break;
+      }
+      const bool outline = FontDownloadRules::isOutline(fontUpload.kind);
+
+      // A .ttf beside a .cpfont family would never be drawn, and a .cpfont beside .ttf files would hide them.
+      char dirPath[128];
+      snprintf(dirPath, sizeof(dirPath), "%s/%s", SdCardFontRegistry::FONTS_DIR, family.c_str());
+      const SdCardFontRegistry::FolderFonts held = SdCardFontRegistry::folderFonts(dirPath);
+      if (!FontDownloadRules::joinsFolder(fontUpload.kind, held.cpfont, held.outline)) {
+        LOG_ERR("WEB", "%s does not join the family %s", filename.c_str(), family.c_str());
+        fontUpload.error = outline
+                               ? "The family holds .cpfont files: a TrueType or OpenType file is not used beside them"
+                               : "The family holds TrueType or OpenType files: a .cpfont file would hide them";
+        break;
+      }
+
+      // The request is the file and a few hundred bytes of form: refused before a byte is written when the card
+      // cannot hold it, as a download is.
+      if (!FontInstaller::hasRoomFor(server->clientContentLength())) {
+        fontUpload.error = "Not enough space on the SD card for this file";
         break;
       }
 
@@ -2723,6 +2751,7 @@ void CrossPointWebServer::handleFontUploadData() {
       FontInstaller installer(sdFontSystem.registry());
       if (!installer.ensureFamilyDir(family.c_str())) {
         LOG_ERR("WEB", "Failed to create font family dir");
+        fontUpload.error = "Could not write to the SD card";
         break;
       }
 
@@ -2737,6 +2766,7 @@ void CrossPointWebServer::handleFontUploadData() {
       const std::string partPath = fontUpload.filePath + UPLOAD_PART_SUFFIX;
       if (!Storage.openFileForWrite("WEB", partPath, fontUpload.file)) {
         LOG_ERR("WEB", "Failed to open font file for write: %s", partPath.c_str());
+        fontUpload.error = "Could not write to the SD card";
         break;
       }
 
@@ -2757,8 +2787,12 @@ void CrossPointWebServer::handleFontUploadData() {
           fontUpload.headerBytesReceived += take;
         }
         if (fontUpload.headerBytesReceived == 8) {
-          if (memcmp(fontUpload.header, "CPFONT\0\0", 8) != 0) {
-            LOG_ERR("WEB", "Invalid .cpfont magic bytes");
+          // As a download is checked (FontInstaller::validateFontFile()): a .cpfont's magic, a .ttf's TrueType
+          // outlines, an .otf's CFF ones.
+          if (!FontDownloadRules::headOk(fontUpload.kind, fontUpload.header, sizeof fontUpload.header)) {
+            LOG_ERR("WEB", "Upload does not start as its kind of font file must");
+            fontUpload.error = FontDownloadRules::isOutline(fontUpload.kind) ? "Not a TrueType or OpenType font file"
+                                                                             : "Not a .cpfont file";
             fontUpload.valid = false;
             fontUpload.file.close();
             return;
@@ -2781,6 +2815,7 @@ void CrossPointWebServer::handleFontUploadData() {
           if (written != expected) {
             LOG_ERR("WEB", "Failed writing uploaded font chunk (%u/%u bytes)", static_cast<unsigned>(written),
                     static_cast<unsigned>(expected));
+            fontUpload.error = "Could not write to the SD card";
             fontUpload.valid = false;
             fontUpload.file.close();
             return;
@@ -2797,7 +2832,8 @@ void CrossPointWebServer::handleFontUploadData() {
       // after, so installing the font here would keep the font of an aborted upload.
       if (!server->client().connected()) break;
       if (fontUpload.valid && !fontUpload.magicChecked) {
-        LOG_ERR("WEB", "Invalid .cpfont upload: header not fully received");
+        LOG_ERR("WEB", "Invalid font upload: header not fully received");
+        fontUpload.error = "The file is too short to be a font";
         fontUpload.valid = false;
       }
       if (fontUpload.valid && fontUpload.buffer.size() > 0) {
@@ -2807,12 +2843,30 @@ void CrossPointWebServer::handleFontUploadData() {
         if (written != expected) {
           LOG_ERR("WEB", "Failed flushing uploaded font chunk (%u/%u bytes)", static_cast<unsigned>(written),
                   static_cast<unsigned>(expected));
+          fontUpload.error = "Could not write to the SD card";
           fontUpload.valid = false;
         }
         fontUpload.buffer.clear();
       }
-      if (fontUpload.valid && !finishUploadPart(fontUpload.file, fontUpload.filePath.c_str())) {
+      if (fontUpload.valid && FontDownloadRules::isOutline(fontUpload.kind)) {
+        // finishUploadPart() in two steps, so the whole part is read as discovery will read it before it replaces a
+        // file of its name: one the engine cannot draw would leave the family without that style, or unlisted.
+        const std::string partPath = fontUpload.filePath + UPLOAD_PART_SUFFIX;
+        if (!fontUpload.file.close()) {
+          fontUpload.error = "Could not write to the SD card";
+          fontUpload.valid = false;
+        } else if (!SdCardFontRegistry::drawsOutlineFile(partPath.c_str())) {
+          LOG_ERR("WEB", "Uploaded font is not one the engine draws: %s", fontUpload.filePath.c_str());
+          fontUpload.error =
+              "Not a font the reader can draw: a variable CFF2 font, or one without a Unicode character map";
+          fontUpload.valid = false;
+        } else if (!FileReplace::replace(partPath.c_str(), fontUpload.filePath.c_str())) {
+          fontUpload.error = "Could not write to the SD card";
+          fontUpload.valid = false;
+        }
+      } else if (fontUpload.valid && !finishUploadPart(fontUpload.file, fontUpload.filePath.c_str())) {
         LOG_ERR("WEB", "Failed to install uploaded font: %s", fontUpload.filePath.c_str());
+        fontUpload.error = "Could not write to the SD card";
         fontUpload.valid = false;
       }
       if (!fontUpload.valid) discardFontUploadPart();
@@ -2833,16 +2887,27 @@ void CrossPointWebServer::handleFontUploadData() {
 }
 
 void CrossPointWebServer::handleFontUpload() {
+  if (fontUpload.lowMemory) {
+    sendLowMemory(server.get());
+    return;
+  }
+  JsonDocument res;
+  res["ok"] = fontUpload.valid;
   if (fontUpload.valid) {
     FontInstaller installer(sdFontSystem.registry());
     installer.refreshRegistry();
-    server->send(200, "application/json", "{\"ok\":true}");
+    // Whether the reader lists the family now: a TrueType family too large for the font area is on the card but not
+    // listed (FontInstaller::installedButNotListed()). Under its folder's spelling, which FAT matched whatever the
+    // case.
+    const auto& families = sdFontSystem.registry().getFamilies();
+    res["listed"] = std::any_of(families.begin(), families.end(), [this](const SdCardFontFamilyInfo& family) {
+      return strcasecmp(family.name.c_str(), fontUpload.familyName.c_str()) == 0;
+    });
     LOG_DBG("WEB", "Font upload complete: %s", fontUpload.filePath.c_str());
-  } else if (fontUpload.lowMemory) {
-    sendLowMemory(server.get());
   } else {
-    server->send(400, "application/json", "{\"error\":\"Invalid .cpfont file\"}");
+    res["error"] = fontUpload.error ? fontUpload.error : "Invalid font file";
   }
+  sendJson(server.get(), fontUpload.valid ? 200 : 400, res);
 }
 
 void CrossPointWebServer::handleFontDelete() {

@@ -145,12 +145,13 @@ void SdCardFontRegistry::addTtfFiles(const char* dirPath, const std::vector<std:
   }
 }
 
-void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo& family) {
+namespace {
+
+// Calls `visit(ctx, name, bytes)` for each file of the folder `dirPath` that discovery reads: no folder, no hidden file
+// ('.') or macOS resource fork ('_'). A function, not a template: one walk in flash for every caller.
+void forEachFontFile(const char* dirPath, void (*visit)(void* ctx, const char* name, uint32_t bytes), void* ctx) {
   FsFile dir = Storage.open(dirPath);
   if (!dir || !dir.isDirectory()) return;
-
-  std::vector<std::string> ttfNames;
-  std::vector<uint32_t> ttfBytes;
   char nameBuffer[128];
   while (true) {
     FsFile entry = dir.openNextFile();
@@ -159,32 +160,71 @@ void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo
       entry.close();
       continue;
     }
-
     entry.getName(nameBuffer, sizeof(nameBuffer));
     const auto entryBytes = static_cast<uint32_t>(entry.fileSize());
     entry.close();
-
-    // Skip macOS resource fork files (._*) and other hidden files
     if (nameBuffer[0] == '.' || nameBuffer[0] == '_') continue;
-
-    uint8_t size, style;
-    if (!parseFilename(nameBuffer, size, style)) {
-      if (ttf::isOutlineFontFileName(nameBuffer)) {
-        ttfNames.emplace_back(nameBuffer);
-        ttfBytes.push_back(entryBytes);
-      }
-      continue;
-    }
-
-    SdCardFontFileInfo info;
-    info.path = std::string(dirPath) + "/" + nameBuffer;
-    info.pointSize = size;
-    info.style = style;
-    info.fileBytes = entryBytes;
-    family.files.push_back(std::move(info));
+    visit(ctx, nameBuffer, entryBytes);
   }
   dir.close();
-  if (family.files.empty() && !ttfNames.empty()) addTtfFiles(dirPath, ttfNames, ttfBytes, family);
+}
+
+}  // namespace
+
+void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo& family) {
+  struct Scan {
+    const char* dirPath;
+    SdCardFontFamilyInfo& family;
+    std::vector<std::string> ttfNames;
+    std::vector<uint32_t> ttfBytes;
+  } scan{dirPath, family, {}, {}};
+  forEachFontFile(
+      dirPath,
+      [](void* ctx, const char* name, const uint32_t entryBytes) {
+        Scan& scan = *static_cast<Scan*>(ctx);
+        uint8_t size, style;
+        if (!parseFilename(name, size, style)) {
+          if (ttf::isOutlineFontFileName(name)) {
+            scan.ttfNames.emplace_back(name);
+            scan.ttfBytes.push_back(entryBytes);
+          }
+          return;
+        }
+
+        SdCardFontFileInfo info;
+        info.path = std::string(scan.dirPath) + "/" + name;
+        info.pointSize = size;
+        info.style = style;
+        info.fileBytes = entryBytes;
+        scan.family.files.push_back(std::move(info));
+      },
+      &scan);
+  if (family.files.empty() && !scan.ttfNames.empty()) addTtfFiles(dirPath, scan.ttfNames, scan.ttfBytes, family);
+}
+
+SdCardFontRegistry::FolderFonts SdCardFontRegistry::folderFonts(const char* dirPath) {
+  FolderFonts held;
+  forEachFontFile(
+      dirPath,
+      [](void* ctx, const char* name, uint32_t) {
+        FolderFonts& held = *static_cast<FolderFonts*>(ctx);
+        uint8_t size, style;
+        if (parseFilename(name, size, style)) {
+          held.cpfont = true;
+        } else if (ttf::isOutlineFontFileName(name)) {
+          held.outline = true;
+        }
+      },
+      &held);
+  return held;
+}
+
+bool SdCardFontRegistry::drawsOutlineFile(const char* path) {
+  HalFile file;
+  if (!Storage.openFileForRead("SDREG", path, file)) return false;
+  const ttf::FileProbe probe = ttf::probeFile(ttf::fileSource(file, static_cast<uint32_t>(file.fileSize())));
+  file.close();
+  return probe.style >= 0;
 }
 
 void SdCardFontRegistry::scanRoot(const char* rootPath) {
