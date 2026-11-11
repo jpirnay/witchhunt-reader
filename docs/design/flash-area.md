@@ -73,6 +73,9 @@ use a `FlashAreaRegion`; `SystemStatus` asks `FlashFontPartition::cachedBytes()`
 - **Image.** One PSRAM block of the area's size (`FLASH_AREA_PSRAM_BYTES`, by default the partition's 3,456 KB, so
   every layout constant holds). `program` ANDs bytes, `erase` writes 0xFF: the consumers keep their NOR rules. `map`
   returns a pointer into the block and costs no MMU page, so `freeMapPages()` reports the whole image.
+- **On the card or not.** The board's SDK profile says (`BoardProfile::flashAreaOnCard`, read through
+  `HalCapabilities::flashAreaOnCard()`). Its default, for a board that has not decided, is PSRAM only: the image starts
+  erased at every boot, `sync()` does nothing, the card is never written, and every cache is built again after a boot.
 - **File.** `/.crosspoint/flash-area.img`: a 4 KB header block (magic, version, state, size, CRC), then the image.
   `CardImageFile` opens it for each call and closes it again, so nothing holds it open (a cleared cache may delete
   it, USB mass storage may take the card) and each write is on the card when it returns.
@@ -92,6 +95,23 @@ use a `FlashAreaRegion`; `SystemStatus` asks `FlashFontPartition::cachedBytes()`
 - **Cost.** PSRAM: the image (3,456 KB by default, of 8 MB). Internal RAM: the object, its mutex and the two bitmaps
   (112 B). Card writes: the first commit writes the whole file once (3.4 MB), later ones only the sectors that changed
   and 32 B of header. Boot: the header, then each page (64 KB) the first time something touches it.
+- **Measured** on the X4 Pro (1-bit SDMMC, 2026-11-11, image forced with `FLASH_AREA_PSRAM_IMAGE=2`, card on):
+
+  | What | Bytes | Time |
+  |---|---|---|
+  | First save, a new file | 3,456 KB | 2.41 s |
+  | Boot: the header | 16 B | 46 ms |
+  | A page loaded on first use | 64 KB | 36-37 ms (a .cpfont size at book open: 10 pages, 0.37 s) |
+  | TTF install into an empty area | 256 KB | 0.22 s |
+  | TTF install over a .cpfont family | 2,544 KB | 1.25 s (3 runs) |
+  | .cpfont family switch: the whole font area | 3,328 KB | 1.55-1.62 s (3 runs); once 18.2 s |
+  | Language slot (German) | 24 KB | 0.10 s |
+  | The pre-sleep sync after 10 TTF pages (called by hand, no sleep) | 372 KB | 0.44 s |
+  | Page turn | none | no sync |
+  | PSRAM left beside the image | 4,522 KB | |
+
+  The 18.2 s was the first in-place rewrite of the new file. The two runs after it took 1.55-1.62 s. A cause on the
+  card's side (its own housekeeping) is likely but not proven.
 - **Smaller images.** `FLASH_AREA_PSRAM_BYTES` may be smaller: the font area shrinks with it, larger .cpfont families
   fall back to the card (their existing path), and the TTF planner puts more styles in SD mode. The language slot
   needs 128 KB at the end in any case.
