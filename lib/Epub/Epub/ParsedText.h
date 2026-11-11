@@ -62,6 +62,8 @@ class ParsedText {
     std::vector<TextBlock::Annotation> lineAnnotations_;
   };
   void useLayoutScratch(LayoutScratch* scratch) { layoutScratch_ = scratch; }
+  // PROTOTYPE: the first reserve of the word vectors (16 by default; a table cell takes 4).
+  void setMinWordCapacity(const uint8_t n) { minWordCapacity_ = n; }
   enum class LineProcessResult {
     Accepted,
     RetryWithoutHyphenation,
@@ -95,6 +97,7 @@ class ParsedText {
 
  private:
   LayoutScratch* layoutScratch_ = nullptr;
+  uint8_t minWordCapacity_ = 16;  // PROTOTYPE
   mutable std::unique_ptr<LayoutScratch> ownScratch_;
   LayoutScratch& ls() const {
     if (layoutScratch_) return *layoutScratch_;

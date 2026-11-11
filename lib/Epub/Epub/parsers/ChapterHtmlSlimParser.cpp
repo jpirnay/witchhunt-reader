@@ -3236,6 +3236,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     row.cells.back().text =
         std::unique_ptr<ParsedText>(new ParsedText(false, false));  // no paragraph spacing, no hyphenation in cells
     row.cells.back().text->useLayoutScratch(&self->sharedLayoutScratch_);  // PROTOTYPE
+    {  // PROTOTYPE: PROTO_CELL_MIN=<n> sets a cell's first word reserve (default 4; 16 = master)
+      static const int kCellMin = getenv("PROTO_CELL_MIN") ? atoi(getenv("PROTO_CELL_MIN")) : 4;
+      row.cells.back().text->setMinWordCapacity(static_cast<uint8_t>(kCellMin));
+    }
     row.cells.back().text->setTypography(self->typography_);
     row.cells.back().text->setShapingLatch(&self->shapingDegradedAny_);
     row.cells.back().text->setVertical(self->vertical_);
