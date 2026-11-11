@@ -853,7 +853,7 @@ the firmware keeps its room for everything else. A pack you do not install costs
   128 KB the language takes since 2.41) or missing. The X4 Pro, T5 S3 and Murphy M3 then keep the area in their PSRAM
   and save it to the card as `/.crosspoint/flash-area.img` (3.4 MB) before sleeping or restarting, and when a book
   closes. Everything works; the first start writes the file once (a few seconds), and the first book after a start
-  reads its TrueType font back from the card (about 2 s). Deleting the file only costs that rebuild. **System
+  reads its TrueType font back from the card. Deleting the file only costs that rebuild. **System
   Information** shows it in its Flash section: **Flash area** reads "PSRAM + card", with "spiffs 80.0 KB" (or
   "spiffs -") below it.
 * **Updating from 2.40 or 2.41RC** keeps your interface language without a download: on the first start the reader writes

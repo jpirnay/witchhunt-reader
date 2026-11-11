@@ -87,14 +87,20 @@ use a `FlashAreaRegion`; `SystemStatus` asks `FlashFontPartition::cachedBytes()`
 - **Image.** One PSRAM block of the area's size (`FLASH_AREA_PSRAM_BYTES`, by default the partition's 3,456 KB, so
   every layout constant holds). `program` ANDs bytes, `erase` writes 0xFF: the consumers keep their NOR rules. `map`
   returns a pointer into the block and costs no MMU page, so `freeMapPages()` reports the whole image.
-- **File.** `/.crosspoint/flash-area.img`: a 4 KB header block (magic, version, state, size, CRC), then the image.
+- **File.** `/.crosspoint/flash-area.img`: a 4 KB header block (magic, version, state, size, CRC, and right after it
+  a bit per 64 KB page: the page is all 0xFF), then the image.
   `CardImageFile` opens it for each call and closes it again, so nothing holds it open (a cleared cache may delete
   it, USB mass storage may take the card) and each write is on the card when it returns.
 - **Load, on first use.** Pages (64 KB) are read from the file when something first reads, programs or maps them, so
-  a boot that maps one language slot and one font size reads only those pages. A file that is missing, of another
-  size, has a bad header, or says *dirty* gives an erased image instead, and every consumer rebuilds from the card.
-- **Commit (`sync()`).** Header *dirty*, sync; the dirty sectors, in runs; sync; header *clean*, sync. With nothing
-  changed since the last commit it writes nothing, not even the header. A refused write (no card) keeps the sectors
+  a boot that maps one language slot and one font size reads only those pages. A page the header's bitmap calls erased
+  is filled with 0xFF in PSRAM instead of read: the glyph store maps its whole log region (41 pages on the X4 Pro), of
+  which a short session fills a page or two. A file that is missing, of another size or version (version 1, from
+  before the bitmap, included), has a bad header, or says *dirty* gives an erased image instead, and every consumer
+  rebuilds from the card.
+- **Commit (`sync()`).** Header *dirty*, sync; the dirty sectors, in runs; sync; the bitmap, recomputed for the pages
+  with a changed sector (a scan of each in PSRAM), and header *clean* over it, sync. With nothing changed since the
+  last commit it writes nothing, not even the header. The bitmap shares the header's sector and CRC, and is only
+  trusted under a clean header, so a cut anywhere leaves the previous commit or an erased image, as before. A refused write (no card) keeps the sectors
   pending for the next one. A file that went away during the run is written again whole if every page is in PSRAM;
   otherwise the run's writes stay in PSRAM and the next boot starts erased.
 - **When it commits.** The consumers commit at the end of a .cpfont family copy, a language build and a glyph store
@@ -122,8 +128,10 @@ use a `FlashAreaRegion`; `SystemStatus` asks `FlashFontPartition::cachedBytes()`
     (Bitter, 2.6 MB) copied in 1.1 s plus its commit (3,407,872 B, 1,611 ms);
   - book close after reading: 192-381 KB of glyph log committed in 434-662 ms; a book read in a .cpfont family
     commits nothing;
-  - the first TTF book after a restart: the store's 52 pages (its log region is mapped whole) load in 2.0 s, where an
-    install from the TTF file takes ~1 s, but the glyphs rendered before come back with it;
+  - the first TTF book after a restart: the store's 52 pages (its log region is mapped whole) loaded in 2.0 s, where an
+    install from the TTF file takes ~1 s. With the erased-page bitmap only its pages with data are read; in that
+    state 12 of the 52 (the header, 4 style pages, 5 index pages, the pair page and the one live log segment), so
+    about 0.45 s at ~37 ms a page is expected, not yet measured. Each further live 64 KB log segment adds a page;
   - a restart with nothing changed writes nothing (the file's CRC is the same before and after).
 - **Smaller images.** `FLASH_AREA_PSRAM_BYTES` may be smaller: the font area shrinks with it, larger .cpfont families
   fall back to the card (their existing path), and the TTF planner puts more styles in SD mode. The language slot
