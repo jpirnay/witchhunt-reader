@@ -10,7 +10,14 @@ a shaper follows:
     pair whose left glyph it covers, through its class matrix (class 0 included). Fonts put their
     pair exceptions (format 1) ahead of their class kerning (format 2) for exactly this;
   - the legacy 'kern' table only counts when GPOS has no 'kern' feature. Fonts that carry both
-    repeat their pairs in each.
+    repeat their pairs in each;
+  - a lookup whose LookupFlag skips a glyph by its class in the font's GDEF (IgnoreBaseGlyphs,
+    IgnoreLigatures, IgnoreMarks, a MarkAttachmentType or UseMarkFilteringSet) kerns no pair holding
+    it, as HarfBuzz and the firmware's GPOS reader (freeink-sdk Gpos.cpp) apply it to adjacent pairs.
+    Without a GDEF (or one whose version is not 1.x) every glyph is unclassified and nothing is
+    skipped; as in HarfBuzz, a class outside 1-4 counts as unclassified and the reserved flag bits
+    change nothing. Caecilia LT's kern lookups set 0x000E over Latin letters classed as base glyphs:
+    HarfBuzz kerns none of them, and neither do the converters.
 Adding up every subtable and both tables instead kerned exception pairs twice: Literata's "Va" came
 out at -160 units instead of -70, Inter's "L*" at -348 instead of -81.
 
@@ -22,6 +29,65 @@ Based on crosspoint-reader PRs #3795 and #3800 (Stefan VanBuren, @stefanvanburen
 """
 
 import sys
+
+# LookupFlag bits that skip glyphs by their GDEF class (OpenType chapter 2).
+IGNORE_BASE_GLYPHS = 0x0002
+IGNORE_LIGATURES = 0x0004
+IGNORE_MARKS = 0x0008
+USE_MARK_FILTERING_SET = 0x0010
+MARK_ATTACHMENT_TYPE = 0xFF00
+SKIPPING_FLAGS = IGNORE_BASE_GLYPHS | IGNORE_LIGATURES | IGNORE_MARKS | USE_MARK_FILTERING_SET | MARK_ATTACHMENT_TYPE
+
+
+def _gdef(font):
+    """The font's GDEF table as lookup flags read it, or None: none, or not version 1.x."""
+    if 'GDEF' not in font:
+        return None
+    try:
+        table = font['GDEF'].table
+        if (table.Version >> 16) != 1:
+            return None
+        # Read what the flags need now: a GDEF fontTools cannot read counts as none, as a short one does in
+        # the firmware.
+        for name in ('GlyphClassDef', 'MarkAttachClassDef', 'MarkGlyphSetsDef'):
+            getattr(table, name, None)
+    except Exception:
+        return None
+    return table
+
+
+def _skips(gdef, flags, mark_set, glyph):
+    """Whether a lookup with these flags skips `glyph` (HarfBuzz's check_glyph_property)."""
+    classes = gdef.GlyphClassDef.classDefs if gdef.GlyphClassDef else {}
+    glyph_class = classes.get(glyph, 0)
+    if glyph_class == 1:
+        return bool(flags & IGNORE_BASE_GLYPHS)
+    if glyph_class == 2:
+        return bool(flags & IGNORE_LIGATURES)
+    if glyph_class != 3:
+        return False  # unclassified, a component, or a class GDEF does not define
+    if flags & IGNORE_MARKS:
+        return True
+    if flags & USE_MARK_FILTERING_SET:
+        sets = getattr(gdef, 'MarkGlyphSetsDef', None) if gdef.Version >= 0x00010002 else None
+        if sets is None or mark_set >= len(sets.Coverage):
+            return True  # a set the table does not have holds no mark
+        return glyph not in sets.Coverage[mark_set].glyphs
+    if flags & MARK_ATTACHMENT_TYPE:
+        attach = gdef.MarkAttachClassDef.classDefs if gdef.MarkAttachClassDef else {}
+        return (attach.get(glyph, 0) & 0xFF) != flags >> 8
+    return False
+
+
+def _lookup_glyphs(gdef, lookup, glyphs):
+    """The glyphs a lookup may kern: `glyphs`, less those its flags skip. A pair holding a skipped
+    glyph is not the lookup's in either position, so dropping the glyph from both sides is the rule
+    itself. The order of `glyphs` is kept (the converters' output depends on it)."""
+    flags = lookup.LookupFlag
+    if gdef is None or not flags & SKIPPING_FLAGS:
+        return glyphs
+    mark_set = getattr(lookup, 'MarkFilteringSet', 0) or 0
+    return {glyph: None for glyph in glyphs if not _skips(gdef, flags, mark_set, glyph)}
 
 
 def _pairpos_subtable(subtable, glyphs, raw_kern, claimed_pairs, claimed_left):
@@ -107,11 +173,13 @@ def extract_raw_kerning(font, glyphs):
 
     # 2. GPOS 'kern' feature. Lookups add up, so the order they are read in does not matter.
     if kern_features:
+        gdef = _gdef(font)
         kern_lookup_indices = set()
         for fr in kern_features:
             kern_lookup_indices.update(fr.Feature.LookupListIndex)
         for li in kern_lookup_indices:
             lookup = gpos.LookupList.Lookup[li]
+            lookup_glyphs = _lookup_glyphs(gdef, lookup, glyphs)
             claimed_pairs, claimed_left = set(), set()
             for st in lookup.SubTable:
                 actual = st
@@ -126,7 +194,7 @@ def extract_raw_kerning(font, glyphs):
                     # Only PairPos (type 2) is kerning: another type under 'kern' (contextual
                     # positioning, say) has a Format too, but none of the fields read above.
                     if effective_type == 2:
-                        _pairpos_subtable(actual, glyphs, raw_kern, claimed_pairs, claimed_left)
+                        _pairpos_subtable(actual, lookup_glyphs, raw_kern, claimed_pairs, claimed_left)
                     else:
                         print(f"  Debug: skipping unsupported GPOS kern lookupType="
                               f"{effective_type} (outer={lookup.LookupType}, Format={actual.Format})",

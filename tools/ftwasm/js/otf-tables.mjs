@@ -198,6 +198,67 @@ export class SfntFont {
     const dv = this.table(tag);
     return dv ? new LayoutTable(dv, tag, this.label) : null;
   }
+
+  /**
+   * The GDEF table as lookup flags read it (Gdef), or null: none, too short for its header, not version 1.x, or
+   * one whose class tables lie outside it (fontTools cannot read it either, and kern_extract.py takes none).
+   */
+  gdef() {
+    const dv = this.table('GDEF');
+    if (!dv || dv.byteLength < 12 || dv.getUint16(0) !== 1) return null;
+    try {
+      return new Gdef(dv);
+    } catch (err) {
+      if (err instanceof RangeError) return null;
+      throw err;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GDEF and lookup flags
+
+// LookupFlag bits that skip glyphs by their GDEF class (OpenType chapter 2).
+export const IGNORE_BASE_GLYPHS = 0x0002;
+export const IGNORE_LIGATURES = 0x0004;
+export const IGNORE_MARKS = 0x0008;
+export const USE_MARK_FILTERING_SET = 0x0010;
+export const MARK_ATTACHMENT_TYPE = 0xFF00;
+export const SKIPPING_FLAGS = IGNORE_BASE_GLYPHS | IGNORE_LIGATURES | IGNORE_MARKS | USE_MARK_FILTERING_SET | MARK_ATTACHMENT_TYPE;
+
+/**
+ * GDEF's glyph classes, mark attachment classes and mark glyph sets, as kern_extract.py reads them through
+ * fontTools: what a lookup's flags skip glyphs by. skips() is HarfBuzz's check_glyph_property(): a class
+ * outside 1-4 is unclassified, and the reserved flag bits change nothing.
+ */
+export class Gdef {
+  constructor(dv) {
+    const at = (field) => dv.getUint16(field);
+    this.classes = readClassDef(dv, at(4));
+    this.attachClasses = readClassDef(dv, at(10));
+    this.markSets = null; // GDEF 1.2 and later
+    if (dv.getUint16(2) >= 2 && dv.byteLength >= 14 && at(12)) {
+      const sets = at(12);
+      const n = dv.getUint16(sets + 2);
+      this.markSets = [];
+      for (let i = 0; i < n; i++) this.markSets.push(new Set(readCoverage(dv, sets + dv.getUint32(sets + 4 + 4 * i))));
+    }
+  }
+
+  /** Whether a lookup with `flags` (and mark filtering set `markSet`) skips `gid`. */
+  skips(flags, markSet, gid) {
+    const glyphClass = this.classes.get(gid) ?? 0;
+    if (glyphClass === 1) return (flags & IGNORE_BASE_GLYPHS) !== 0;
+    if (glyphClass === 2) return (flags & IGNORE_LIGATURES) !== 0;
+    if (glyphClass !== 3) return false; // unclassified, a component, or a class GDEF does not define
+    if (flags & IGNORE_MARKS) return true;
+    if (flags & USE_MARK_FILTERING_SET) {
+      // A set the table does not have holds no mark.
+      return !this.markSets || markSet >= this.markSets.length || !this.markSets[markSet].has(gid);
+    }
+    if (flags & MARK_ATTACHMENT_TYPE) return ((this.attachClasses.get(gid) ?? 0) & 0xFF) !== flags >> 8;
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -289,15 +350,18 @@ export class LayoutTable {
   lookupCount() { return this.lookupListOff ? this.dv.getUint16(this.lookupListOff) : 0; }
 
   /**
-   * One lookup: {type, subtables: [{type, off}]} where extension subtables
-   * (GPOS 9 / GSUB 7) are unwrapped to their ExtensionLookupType and target.
+   * One lookup: {type, flags, markSet, subtables: [{type, off}]} where extension
+   * subtables (GPOS 9 / GSUB 7) are unwrapped to their ExtensionLookupType and
+   * target, and markSet is the mark filtering set's index (0 without UseMarkFilteringSet).
    */
   lookup(li) {
     const dv = this.dv, ll = this.lookupListOff;
     if (!ll || li >= dv.getUint16(ll)) throw new FontError(`${this.label}: ${this.tag} lookup index ${li} out of range`);
     const lo = ll + dv.getUint16(ll + 2 + 2 * li);
     const type = dv.getUint16(lo);
+    const flags = dv.getUint16(lo + 2);
     const n = dv.getUint16(lo + 4);
+    const markSet = flags & USE_MARK_FILTERING_SET ? dv.getUint16(lo + 6 + 2 * n) : 0;
     const subtables = [];
     for (let i = 0; i < n; i++) {
       const so = dv.getUint16(lo + 6 + 2 * i);
@@ -307,7 +371,7 @@ export class LayoutTable {
         subtables.push({ type: dv.getUint16(off + 2), off: off + dv.getUint32(off + 4) });
       } else subtables.push({ type, off });
     }
-    return { type, subtables };
+    return { type, flags, markSet, subtables };
   }
 
   /**

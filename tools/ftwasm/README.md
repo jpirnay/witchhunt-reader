@@ -344,6 +344,12 @@ glyph id; fontTools keeps glyph names unique, so ids and names map one to one.
   - lookups add up. Within a lookup the **first subtable that matches a pair decides it**, as
     in OpenType: format 1 matches the pairs it lists (zero values too), format 2 every pair
     whose left glyph it covers. `pairPos()` keeps the matched pairs and left glyphs per lookup.
+  - a lookup whose LookupFlag skips a glyph by its GDEF class (IgnoreBaseGlyphs,
+    IgnoreLigatures, IgnoreMarks, a MarkAttachmentType, UseMarkFilteringSet) kerns no pair
+    holding it, as HarfBuzz and the firmware's GPOS reader apply it to adjacent pairs:
+    `lookupGlyphs()` drops those glyphs from both sides. Without a GDEF (or one that is not
+    version 1.x, or cannot be read) nothing is skipped; a class outside 1-4 is unclassified and
+    the reserved flag bits change nothing. `test/web/kern_gdef_test.mjs` checks it.
 - Rounding: Python `round()` is half to even; JS uses its own `roundHalfEven()`. The doubles
   are computed in the same order: `size*150.0/72.0`, `/upem`, then `du*scale*16`.
 - Values are clamped to int8, and pairs that end up 0 are dropped before the codepoint

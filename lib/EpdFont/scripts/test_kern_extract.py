@@ -8,6 +8,7 @@ against the same fonts when node is on the PATH, and skipped otherwise.
 The fonts are built here, with feaLib, so each one holds exactly the lookups a case needs.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -63,19 +64,80 @@ feature kern { lookup PAIRS; lookup MORE; lookup EXT; lookup SINGLE; } kern;
 
 LEGACY_KERN = {('A', 'V'): -40, ('V', 'a'): -25}
 
+# Lookup flags against GDEF classes: A V a base glyphs, fi a ligature, acute grave dot marks (acute
+# and grave in the attachment class @TOP, grave alone in the mark set @SET). Each lookup kerns one
+# pair its flags skip and one they keep; V is given class 5 after the build (GdefFlagsTest).
+GDEF_GLYPHS = ['.notdef', 'A', 'V', 'a', 'fi', 'acute', 'grave', 'dot']
+GDEF_CMAP = {0x41: 'A', 0x56: 'V', 0x61: 'a', 0xFB01: 'fi', 0x301: 'acute', 0x300: 'grave', 0x307: 'dot'}
+GDEF_KERN = """
+languagesystem DFLT dflt;
+@TOP = [acute grave];
+@SET = [grave];
+table GDEF {
+  GlyphClassDef [A V a], [fi], [acute grave dot], ;
+} GDEF;
+lookup BASE {
+  lookupflag IgnoreBaseGlyphs;
+  pos A V -100;
+  pos V V -8;
+} BASE;
+lookup LIGS {
+  lookupflag IgnoreLigatures;
+  pos fi a -30;
+  pos V a -20;
+} LIGS;
+lookup MARKS {
+  lookupflag IgnoreMarks;
+  pos A acute -40;
+  pos a a -7;
+} MARKS;
+lookup ATTACH {
+  lookupflag MarkAttachmentType @TOP;
+  pos acute a -11;
+  pos dot a -12;
+} ATTACH;
+lookup SET {
+  lookupflag UseMarkFilteringSet @SET;
+  pos grave a -13;
+  pos acute A -14;
+} SET;
+lookup RESERVED {
+  pos A a -9;
+} RESERVED;
+feature kern { lookup BASE; lookup LIGS; lookup MARKS; lookup ATTACH; lookup SET; lookup RESERVED; } kern;
+"""
 
-def build_font(gpos_fea=None, legacy_kern=None):
+
+def build_gdef_font(with_gdef=True):
+    """GDEF_KERN, V moved to the undefined class 5 and the reserved bit 0x0020 set on RESERVED: what
+    HarfBuzz (and the firmware's reader) skip nothing for. Without GDEF: the same lookups, nothing to
+    skip glyphs by."""
+    font = TTFont(io.BytesIO(build_font(GDEF_KERN, glyphs=GDEF_GLYPHS, cmap=GDEF_CMAP)))
+    font['GDEF'].table.GlyphClassDef.classDefs['V'] = 5
+    reserved = [lookup for lookup in font['GPOS'].table.LookupList.Lookup
+                if lookup.SubTable[0].Coverage.glyphs == ['A'] and lookup.LookupFlag == 0]
+    assert len(reserved) == 1, 'RESERVED is the one unflagged lookup of A'
+    reserved[0].LookupFlag = 0x0020
+    if not with_gdef:
+        del font['GDEF']
+    out = io.BytesIO()
+    font.save(out)
+    return out.getvalue()
+
+
+def build_font(gpos_fea=None, legacy_kern=None, glyphs=None, cmap=None):
+    glyphs = glyphs or GLYPHS
     fb = FontBuilder(1000, isTTF=True)
-    fb.setupGlyphOrder(GLYPHS)
-    fb.setupCharacterMap({ord(name): name for name in GLYPHS[1:]})
+    fb.setupGlyphOrder(glyphs)
+    fb.setupCharacterMap(cmap or {ord(name): name for name in glyphs[1:]})
     pen = TTGlyphPen(None)
     pen.moveTo((0, 0))
     pen.lineTo((0, 500))
     pen.lineTo((400, 500))
     pen.closePath()
     glyph = pen.glyph()
-    fb.setupGlyf({name: glyph for name in GLYPHS})
-    fb.setupHorizontalMetrics({name: (500, 0) for name in GLYPHS})
+    fb.setupGlyf({name: glyph for name in glyphs})
+    fb.setupHorizontalMetrics({name: (500, 0) for name in glyphs})
     fb.setupHorizontalHeader(ascent=800, descent=-200)
     fb.setupNameTable({'familyName': 'KernTest', 'styleName': 'Regular'})
     fb.setupOS2()
@@ -95,14 +157,44 @@ def build_font(gpos_fea=None, legacy_kern=None):
     return out.getvalue()
 
 
-def python_kerning(font_bytes):
+def python_kerning(font_bytes, glyphs=None):
+    """{(left, right): units} over `glyphs` (names; default: every glyph the cmap maps)."""
     font = TTFont(io.BytesIO(font_bytes))
     with redirect_stderr(io.StringIO()):  # the "skipping lookupType" note for SINGLE
-        return extract_raw_kerning(font, set(GLYPHS[1:]))
+        return extract_raw_kerning(font, set(glyphs) if glyphs else set(font.getBestCmap().values()))
+
+
+def pair_list_hash(font_bytes, kern):
+    """sha256 (16 hex digits) of the pair list as glyph IDs, sorted: 'left right units' lines."""
+    font = TTFont(io.BytesIO(font_bytes))
+    lines = sorted((font.getGlyphID(l), font.getGlyphID(r), v) for (l, r), v in kern.items())
+    return hashlib.sha256('\n'.join(f'{l} {r} {v}' for l, r, v in lines).encode()).hexdigest()[:16]
+
+
+def read_font(relative):
+    with open(os.path.join(REPO, relative), 'rb') as f:
+        return f.read()
+
+
+SERIF = 'lib/EpdFont/builtinFonts/source/SourceSerif4Caption/SourceSerif4Caption-Regular.ttf'
+
+
+def with_pair_lookup_flags(font_bytes, flags, drop_gdef=False):
+    """Every pair adjustment lookup (type 2, Extension 9) given `flags`, as a font such as Caecilia LT
+    ships them (0x000E: skip base glyphs, ligatures and marks); its GDEF dropped if asked."""
+    font = TTFont(io.BytesIO(font_bytes))
+    for lookup in font['GPOS'].table.LookupList.Lookup:
+        if lookup.LookupType in (2, 9):
+            lookup.LookupFlag = flags
+    if drop_gdef:
+        del font['GDEF']
+    out = io.BytesIO()
+    font.save(out)
+    return out.getvalue()
 
 
 def browser_kerning(font_bytes, tmp):
-    """The same table walk in tools/ftwasm/js, keyed by glyph name."""
+    """The same table walk in tools/ftwasm/js, keyed by glyph name, over every glyph the cmap maps."""
     path = os.path.join(tmp, 'font.ttf')
     with open(path, 'wb') as f:
         f.write(font_bytes)
@@ -119,7 +211,8 @@ console.log(JSON.stringify([...raw].map(([k, v]) => [Math.floor(k / 65536), k % 
     js = os.path.join(REPO, 'tools', 'ftwasm', 'js')
     r = subprocess.run(['node', '--input-type=module', '-e', script, js, path],
                        capture_output=True, text=True, check=True)
-    return {(GLYPHS[l], GLYPHS[r]): v for l, r, v in json.loads(r.stdout)}
+    order = TTFont(io.BytesIO(font_bytes)).getGlyphOrder()
+    return {(order[l], order[r]): v for l, r, v in json.loads(r.stdout)}
 
 
 class FirstMatchTest(unittest.TestCase):
@@ -162,6 +255,62 @@ class LegacyKernTableTest(unittest.TestCase):
         self.assertEqual(python_kerning(build_font(None, LEGACY_KERN)), LEGACY_KERN)
 
 
+class GdefFlagsTest(unittest.TestCase):
+    """A lookup whose flags skip a glyph by its GDEF class kerns no pair holding it, as HarfBuzz and
+    the firmware's GPOS reader (freeink-sdk Gpos.cpp) apply the flags to adjacent pairs."""
+
+    def test_each_flag_skips_what_it_names(self):
+        self.assertEqual(python_kerning(build_gdef_font()), {
+            ('V', 'V'): -8,      # BASE skips base glyphs; V is in class 5, unclassified as in HarfBuzz
+            ('V', 'a'): -20,     # LIGS skips fi, not these
+            ('a', 'a'): -7,      # MARKS skips acute
+            ('acute', 'a'): -11,  # ATTACH keeps @TOP's marks, skips dot
+            ('grave', 'a'): -13,  # SET keeps @SET's marks, skips acute
+            ('A', 'a'): -9,      # the reserved bit 0x0020 changes nothing
+        })
+
+    def test_without_gdef_nothing_is_skipped(self):
+        self.assertEqual(python_kerning(build_gdef_font(with_gdef=False)), {
+            ('A', 'V'): -100, ('V', 'V'): -8, ('fi', 'a'): -30, ('V', 'a'): -20, ('A', 'acute'): -40,
+            ('a', 'a'): -7, ('acute', 'a'): -11, ('dot', 'a'): -12, ('grave', 'a'): -13, ('acute', 'A'): -14,
+            ('A', 'a'): -9})
+
+    def test_caecilia_flags_take_letter_kerning_away(self):
+        # Source Serif kerns A/V by -120 units and T/o by -40; given Caecilia LT's flags (0x000E) its
+        # GDEF's base glyphs are skipped and neither pair kerns. Without GDEF the flags skip nothing.
+        serif = read_font(SERIF)
+        pairs = ['A', 'V', 'T', 'o']
+        kern = python_kerning(serif, pairs)
+        self.assertEqual((kern[('A', 'V')], kern[('T', 'o')]), (-120, -40))
+        caecilia = python_kerning(with_pair_lookup_flags(serif, 0x000E), pairs)
+        self.assertNotIn(('A', 'V'), caecilia)
+        self.assertNotIn(('T', 'o'), caecilia)
+        self.assertEqual(python_kerning(with_pair_lookup_flags(serif, 0x000E, drop_gdef=True), pairs), kern)
+
+
+class FullPairListTest(unittest.TestCase):
+    """The whole pair list (every glyph the cmap maps) as before GDEF-aware kerning, for fonts whose
+    lookups skip nothing a pair holds: Ubuntu has no GDEF; Source Serif's and Noto Sans's lookups
+    skip only marks, which they kern with nothing. The hashes are those of kern_extract.py before."""
+
+    BEFORE = {
+        'lib/EpdFont/builtinFonts/source/Ubuntu/Ubuntu-Regular.ttf': (56975, '5dfdacbdfcbe250a'),
+        SERIF: (115665, '795b2f38f93a3a1b'),
+        'lib/EpdFont/builtinFonts/source/NotoSans/NotoSans-Regular.ttf': (36062, '39ca7c4a0d09b2a9'),
+    }
+
+    def test_pair_lists_are_as_before(self):
+        for path, (count, digest) in self.BEFORE.items():
+            font = read_font(path)
+            kern = python_kerning(font)
+            with self.subTest(font=os.path.basename(path)):
+                self.assertEqual((len(kern), pair_list_hash(font, kern)), (count, digest))
+
+    def test_flags_without_gdef_change_no_pair(self):
+        font = with_pair_lookup_flags(read_font(SERIF), 0x000E, drop_gdef=True)
+        self.assertEqual(pair_list_hash(font, python_kerning(font)), self.BEFORE[SERIF][1])
+
+
 @unittest.skipUnless(shutil.which('node'), 'node is not on the PATH')
 class BrowserConverterTest(unittest.TestCase):
     def test_reads_the_same_kerning(self):
@@ -169,6 +318,14 @@ class BrowserConverterTest(unittest.TestCase):
             for fea, legacy in ((GPOS_KERN, None), (GPOS_KERN, LEGACY_KERN), (None, LEGACY_KERN)):
                 font = build_font(fea, legacy)
                 with self.subTest(gpos=bool(fea), legacy=bool(legacy)):
+                    self.assertEqual(browser_kerning(font, tmp), python_kerning(font))
+
+    def test_skips_what_the_lookup_flags_skip_as_the_python_one(self):
+        serif = read_font(SERIF)
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, font in (('flags', build_gdef_font()), ('flags without GDEF', build_gdef_font(False)),
+                               ('Caecilia flags', with_pair_lookup_flags(serif, 0x000E))):
+                with self.subTest(font=name):
                     self.assertEqual(browser_kerning(font, tmp), python_kerning(font))
 
 
