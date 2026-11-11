@@ -734,24 +734,37 @@ from the font server over TLS.
 | Method | Path                  | Request                                                 | Response                                                                 |
 | ------ | --------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------ |
 | GET    | `/api/fonts`          | -                                                       | `{"families":[{"name","outline","sizes":[pt...],"files":[{"name","size"}]}],"maxFamilies":N}` |
-| GET    | `/api/fonts/manifest` | -                                                       | `{"ok":true,"baseUrl","families":[{"name","description","installed","hasUpdate","totalSize","fileCount"}]}` |
-| POST   | `/api/fonts/download` | `{"family":"Name"}` or `{"all":true}`                   | `{"ok":true,"installedCount":N,"notListed":["Name",...]}`                |
-| POST   | `/api/fonts/upload`   | multipart: one `.cpfont` file; `?family=Name` in the URL | `{"ok":true}`                                                           |
+| GET    | `/api/fonts/manifest` | -                                                       | `{"ok":true,"baseUrl","families":[{"name","description","installed","hasUpdate","ownFiles","hyphenation","language","interfacePack","totalSize","fileCount"}]}` |
+| POST   | `/api/fonts/download` | `{"family":"Name"}`, or `{"all":true}` with an optional `"list":"fonts"` or `"packs"` | `{"ok":true,"installedCount":N,"notListed":["Name",...]}` |
+| POST   | `/api/fonts/upload`   | multipart: one `.ttf`, `.otf` or `.cpfont` file; `?family=Name` in the URL | `{"ok":true,"listed":true}`                         |
 | POST   | `/api/fonts/delete`   | `{"family":"Name"}`                                     | `{"ok":true}`                                                            |
 
 Notes:
 - `/api/fonts` rescans the SD card first. `maxFamilies` is the registry's limit on installed SD families.
 - `/api/fonts` marks an outline (TrueType or OpenType) family with `"outline":true`; its `sizes` are empty.
+- `manifest` marks a hyphenation pack `"hyphenation":true`, an interface language pack `"language":true` and a
+  CJK interface pack (ChineseUI and the like) `"interfacePack":true`; the Font Manager page lists these three
+  under Language packs, apart from the fonts.
 - `download` with `all` installs every missing family the manifest puts in Download all, and every update;
-  with `family`, that one (the CJK families are installed one at a time). The files of a batch share one
+  with `"list":"fonts"`, only those that are no pack; with `"list":"packs"`, only the updates of the installed packs
+  (the three kinds above), no missing one. With `family`, that one (the CJK families are installed one at a
+  time). The files of a batch share one
   TLS connection. Downloads are checked by file kind: `.cpfont` magic, TrueType or `OTTO` (CFF) outlines.
   `notListed` names the outline families installed that the reader does not list because they are too
   large for its font area; it is empty when there are none. The card needs the family's size plus 1 MB free.
 - `upload` takes the family name from the query string, because multipart fields are not
-  available until the file has arrived. The family name must be valid, and the file must end in `.cpfont`,
-  carry no path separators or `..`, and start with the `CPFONT\0\0` magic. A request refused on its names
-  (or because the family folder cannot be created) writes nothing and leaves the installed fonts alone; a file
-  that fails the magic check, or whose transfer breaks off, is deleted.
+  available until the file has arrived. A `.ttf` or `.otf` file goes into `/.crosspoint/fonts/<family>/` as it is,
+  for the TrueType engine to draw at every size, as the catalog's TrueType families; a `.cpfont` file as the
+  converter made it. The family name must be valid, and the file name must end in `.ttf` or `.otf` (any case) or
+  `.cpfont`, be at most 60 characters, carry no path separators or `..`, and the file must start as its kind does
+  (`CPFONT\0\0`, TrueType outlines, or `OTTO`). A `.ttf` or `.otf` file must also be one the engine draws (the
+  probe the reader lists families with): a variable CFF2 font, or one without a Unicode `cmap`, is refused before
+  it replaces a file of its name. The two kinds never share a family folder: a `.ttf` or `.otf` file is refused
+  for a folder holding `.cpfont` fonts, and a `.cpfont` file for one holding `.ttf` or `.otf` files. The card needs
+  the request's size plus 1 MB free. A request refused on its names, its folder or the card's room writes nothing
+  and leaves the installed fonts alone; a file that fails a check, or whose transfer breaks off, is deleted.
+  `listed` says whether the reader lists the family once the file is in: `false` for a TrueType family too large
+  for the font area.
 - Pressing **Back** on the device cancels an `upload` as it does for [`/upload`](#post-upload---upload-file):
   the connection is closed and the partial file deleted.
 
@@ -761,7 +774,7 @@ Notes:
 | ------ | ------------------------------------------------------- | ------------------------------------------ |
 | 400    | `{"ok":false,"error":"Invalid request"}`                | `download` body is not JSON                |
 | 400    | `{"ok":false,"error":"Missing family"}`                 | `download` with neither `family` nor `all` |
-| 400    | `{"error":"Invalid .cpfont file"}`                      | `upload` failed validation                 |
+| 400    | `{"ok":false,"error":"<reason>"}`                       | `upload` refused: the family or file name, the folder's other kind of font, the card's room, the file's start, a font the engine cannot draw, or a write |
 | 400    | `{"error":"Invalid request"}`                           | `delete` body has no `family`              |
 | 404    | `{"ok":false,"error":"Family not found in manifest"}`   | `download` of an unknown family            |
 | 500    | `{"ok":false,"error":"<message>"}`                      | Manifest fetch or install failed; install failures also carry `family` and `installedCount` |
