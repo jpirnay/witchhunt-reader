@@ -18,6 +18,7 @@
 #include "TypographyProfile.h"
 #include "blocks/BlockStyle.h"
 #include "blocks/TextBlock.h"
+#include "hyphenation/Hyphenator.h"
 
 class GfxRenderer;
 class BuildArena;
@@ -111,6 +112,11 @@ class ParsedText {
     std::string allText_;
     // The annotations of the line being extracted, handed to its TextBlock; reused across lines.
     std::vector<TextBlock::Annotation> lineAnnotations_;
+    // hyphenateWordAtIndex's: the word's code points, break indexes and breaks (Hyphenator::breakOffsets), reused from
+    // word to word within a pass instead of allocated for every word, and given back when the pass ends (ScratchPass):
+    // kept across passes it would sit beside a later peak. A long token's buffers go at once
+    // (Hyphenator::Scratch::trim).
+    Hyphenator::Scratch hyphenation;
     bool inUse = false;  // a pass runs in it (ScratchPass)
 
     // Out of line: a parser holds one, and its every construction site would otherwise inline 23 vectors' set-up.

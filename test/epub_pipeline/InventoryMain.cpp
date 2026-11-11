@@ -1,7 +1,7 @@
 // epub_build_inventory: an exact allocation inventory of section builds.
 //
 // Usage: epub_build_inventory <book.epub> <cacheDir> <outDir> [--arena=BYTES] [--spines=A,B,..]
-//                             [--viewport=WxH] [--shaping-font=FILE] [--load-only]
+//                             [--viewport=WxH] [--shaping-font=FILE] [--load-only] [--hyphenation]
 //
 // For every selected spine it measures ONE build (createSectionFile) and writes raw records to
 // <outDir>/spine_<N>.txt, for test/epub_pipeline/inventory_report.py to symbolize. With
@@ -244,7 +244,7 @@ int main(const int argc, char** argv) {
     std::fprintf(stderr,
                  "usage: %s <book.epub> <cacheDir> <outDir> [--arena=BYTES] [--spines=A,B] [--viewport=WxH] "
                  "[--shaping-font=FILE] "
-                 "[--load-only]\n",
+                 "[--load-only] [--hyphenation]\n",
                  argv[0]);
     return 2;
   }
@@ -271,6 +271,9 @@ int main(const int argc, char** argv) {
       profile.shapingFontFile = argv[i] + 15;
     } else if (std::strcmp(argv[i], "--load-only") == 0) {
       loadOnly = true;
+    } else if (std::strcmp(argv[i], "--hyphenation") == 0) {
+      // The reader's Hyphenation setting on: every word a line ends on is offered to the book's patterns.
+      profile.hyphenationEnabled = true;
     }
   }
 

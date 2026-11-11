@@ -1484,6 +1484,7 @@ class ParsedText::ScratchPass {
     scratch_.inUse = true;
   }
   ~ScratchPass() {
+    scratch_.hyphenation.release();  // per pass: held beyond it, it would sit beside the next pass's peak
     scratch_.inUse = false;
     text_.scratch_ = previous_;
   }
@@ -2065,6 +2066,7 @@ void ParsedText::LayoutScratch::release() {
   std::vector<int16_t>().swap(lineXPosScratch_);
   std::string().swap(allText_);
   std::vector<TextBlock::Annotation>().swap(lineAnnotations_);
+  hyphenation.release();
 }
 
 void ParsedText::releaseLayoutScratch() {
@@ -3045,11 +3047,18 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   // this breaker whatever the setting, and its Latin words get no pattern breaks with hyphenation off.
   const std::vector<Hyphenator::BreakInfo> hangulBreaks = CjkLineBreak::hangulLineEndBreaks(word);
   const std::vector<Hyphenator::BreakInfo> myanmarBreaks = Hyphenator::myanmarLineEndBreaks(word);
-  std::vector<Hyphenator::BreakInfo> hyphenatorBreaks;
+  // The language's breaks, in the pass's hyphenation scratch: no allocation for a word it already holds room for. A
+  // long token's buffers go back when the word is done (trim), rather than stay beside the lines the pass lays out.
+  struct TrimOnReturn {
+    Hyphenator::Scratch& scratch;
+    ~TrimOnReturn() { scratch.trim(); }
+  } const trimOnReturn{scratch_->hyphenation};
+  std::vector<Hyphenator::BreakInfo>& hyphenatorBreaks = scratch_->hyphenation.breaks;
+  hyphenatorBreaks.clear();
   if (kept) {
     hyphenatorBreaks = Hyphenator::anywhereBreaks(word);
   } else if (hyphenationEnabled || allowFallbackBreaks) {
-    hyphenatorBreaks = Hyphenator::breakOffsets(word, allowFallbackBreaks);
+    Hyphenator::breakOffsets(word, allowFallbackBreaks, scratch_->hyphenation);
   }
   const auto byOffset = [](const Hyphenator::BreakInfo& a, const Hyphenator::BreakInfo& b) {
     return a.byteOffset < b.byteOffset;

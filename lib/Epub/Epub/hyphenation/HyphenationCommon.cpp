@@ -158,8 +158,8 @@ void trimSurroundingPunctuationAndFootnote(std::vector<CodepointInfo>& cps) {
   }
 }
 
-std::vector<CodepointInfo> collectCodepoints(const std::string& word) {
-  std::vector<CodepointInfo> cps;
+void collectCodepoints(const std::string& word, std::vector<CodepointInfo>& cps) {
+  cps.clear();
   cps.reserve(word.size());
 
   const unsigned char* base = reinterpret_cast<const unsigned char*>(word.c_str());
@@ -430,6 +430,10 @@ std::vector<CodepointInfo> collectCodepoints(const std::string& word) {
 
     cps.push_back({cp, static_cast<size_t>(current - base)});
   }
+}
 
+std::vector<CodepointInfo> collectCodepoints(const std::string& word) {
+  std::vector<CodepointInfo> cps;
+  collectCodepoints(word, cps);
   return cps;
 }
