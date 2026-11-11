@@ -124,6 +124,8 @@ class ImageBlock final : public Block {
   // that can ever show. An accessibility description can run to KBs, and an image block holds
   // its alt for as long as its page is loaded -- every draw, pre-render and image-lane visit.
   static constexpr size_t MAX_ALT_TEXT_BYTES = 128;
+  // `alt` cut to MAX_ALT_TEXT_BYTES at a character boundary, as every block keeps it.
+  static void capAltText(std::string& alt);
   ~ImageBlock() override = default;
 
   // Return a new ImageBlock that renders a vertical crop of this image.

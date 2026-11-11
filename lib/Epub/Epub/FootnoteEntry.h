@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <cstring>
 
 #define FOOTNOTE_NUMBER_LEN 32
@@ -18,3 +19,14 @@ struct FootnoteEntry {
     std::memset(href, 0, sizeof(href));
   }
 };
+
+// The link an inline image is inside, as its page image keeps it (PageImage::linkHash): FNV-1a over the href, never 0,
+// which is none. The reader finds the image's entry among the page's links by it.
+inline uint32_t linkHrefHash(const char* href) {
+  uint32_t hash = 2166136261u;
+  for (const char* p = href; *p != '\0'; ++p) {
+    hash ^= static_cast<uint8_t>(*p);
+    hash *= 16777619u;
+  }
+  return hash != 0 ? hash : 1;
+}

@@ -115,7 +115,8 @@ const char* const kNormalizationSensitiveBooks[] = {"test_body_size", "test_font
 
 // Books with enough running text that hyphenation splits words, and a hyphenated line lands at
 // the bottom of a page (the retry).
-const char* const kHyphenationBooks[] = {"test_anchor_pagebreak", "test_kerning_ligature", "test_wrapped_paragraphs"};
+const char* const kHyphenationBooks[] = {"test_anchor_pagebreak", "test_inline_images", "test_kerning_ligature",
+                                         "test_wrapped_paragraphs"};
 
 // Bionic reading bolds a prefix of every word. Paragraphs over 96 words (test_long_paragraph_spacing
 // has seven) are laid out before they end, and the rebuild resumes where it stopped.
@@ -131,7 +132,7 @@ const char* const kBookAlignmentBooks[] = {"test_rtl_markup", "test_bidi_text"};
 // Books the reader may set vertically, under Automatic (<book>_vertical.golden.txt): each section decides from its CSS
 // writing mode and the book's page progression, and a vertical one is laid out in the turned frame.
 const char* const kVerticalBooks[] = {"test_writing_modes", "test_vertical_text", "test_vertical_text_zh_hant",
-                                      "test_boxes"};
+                                      "test_boxes", "test_inline_images"};
 
 // Books that declare no writing mode, under On (<book>_vertical_on.golden.txt): what an Aozora conversion looks like
 // once the reader turns it vertical.

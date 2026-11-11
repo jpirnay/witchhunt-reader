@@ -14,6 +14,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -355,12 +356,53 @@ class ChapterHtmlSlimParser final : public Print {
     int16_t height = 0;
     std::string alt;
     bool active = false;
-    bool isRight = false;  // true when float: right
+    bool isRight = false;   // true when float: right
+    uint32_t linkHash = 0;  // the link it is inside (imageLinkHash)
     // epubFilePath is not stored — epub->getPath() is read at ImageBlock construction time
     // to avoid a redundant heap copy of a constant string.
   };
   PendingInlineImage pendingInlineImage_;   // active=true when a float-context image is deferred
   PageImage* deferredPageImage_ = nullptr;  // borrowed from currentPage; its yPos needs updating
+
+  // Line images: small images set in their line of text as a word is (takesLineImage). Each is a token of
+  // currentTextBlock (ParsedText::addInlineObject) and a record here from its <img> until its line is placed
+  // (addLineToPage), or, in a paragraph that holds nothing else, until the paragraph places it as a block image as
+  // before (placeImageOnlyParagraph). The cache path is imageCachePathFor's, the book epub->getPath(): not kept. A
+  // record is two strings and 16 B; at most a split's worth wait at once (addLineImage).
+  // Where a line image sits against its text: a vertical-align keyword, or Baseline raised by a length.
+  struct LineImageAlign {
+    CssVerticalAlign align = CssVerticalAlign::Baseline;
+    int8_t shift = 0;  // CssStyle::verticalAlignShift: 1/16 em, or percent of the line height with shiftPercent
+    bool shiftPercent = false;
+  };
+  struct PendingLineImage {
+    uint16_t id = 0;
+    int16_t width = 0;
+    int16_t height = 0;
+    LineImageAlign align;
+    uint32_t visibleOffset = 0;
+    uint32_t linkHash = 0;  // the internal link it is inside (linkHrefHash), 0: none
+    std::string entryPath;
+    std::string alt;  // capped as ImageBlock caps it
+  };
+  std::vector<PendingLineImage> pendingLineImages_;
+  uint16_t nextLineImageId_ = 1;
+  // The records a long-block split triggered by line images left (the split keeps the last line): the next waits for
+  // kLineImageRegrowth more, as the token split waits for kSplitRegrowth.
+  size_t lineImagesKeptAtSplit_ = 0;
+  static constexpr size_t kMaxPendingLineImages = 16;
+  static constexpr size_t kLineImageRegrowth = 8;
+  // The line images a page holds at most. Each is a page image and its block with four strings (about 570 B on the
+  // 64-bit host, epub_build_inventory on test_inline_images.epub), held on the page until it is written and again
+  // whenever it is loaded. A line that would take the page past it starts the next page.
+  static constexpr size_t kMaxLineImagesPerPage = 16;
+  size_t lineImagesOnPage_ = 0;
+  // Whether a line with `images` line images must start a new page for the cap (never on a page without any yet).
+  bool lineImagesFillPage(const size_t images) const {
+    return images > 0 && lineImagesOnPage_ > 0 && lineImagesOnPage_ + images > kMaxLineImagesPerPage;
+  }
+  // An image is set in its line when it is at most this many of the paragraph's lines tall.
+  static constexpr int kLineImageMaxLines = 2;
 
   // Drop cap: a left-floated span with a large font-size at the very start of a
   // paragraph (<p><span class="first-letter">A</span>ll ...). The letter is captured
@@ -811,6 +853,19 @@ class ChapterHtmlSlimParser final : public Print {
   int footnoteLinkDepth = -1;
   FootnoteEntry currentFootnote = {};
   size_t currentFootnoteLinkTextLen = 0;
+  // The link holds an image and leads to a document of the book: it is kept without text of its own (listed with the
+  // footnote list's link label, STR_LINK), and the image is what a reader taps.
+  bool currentFootnoteHoldsImage_ = false;
+  // Whether the open link leads to a document of the book (linkLeadsToDocument), asked once a link: -1 not yet.
+  int8_t currentFootnoteLeadsToDocument_ = -1;
+  // A fragment of the document it is in, or a document of the spine (an XHTML file by its name, found in the spine):
+  // not an image, media or any other file, which a reader has nowhere to go to.
+  bool linkLeadsToDocument(const char* href) const;
+  // The link an image of this size placed now is inside, as its page image names it (linkHrefHash): its tap target.
+  // 0 outside an internal link, for a link that leads to no document (a Project Gutenberg picture linked to its
+  // full-size file), which is not listed either, and for an image over half the page, which a tap target would cover
+  // the page-turn zones with: its link is listed all the same.
+  uint32_t imageLinkHash(int width, int height);
   // Non-owning; the Section's BuildState keeps the lookup alive across build slices.
   // Membership in the book's preview store is the sole expansion gate: it already encodes
   // "this link points at a real note", so no epub:type/same-file checks here. The store is
@@ -1083,6 +1138,9 @@ class ChapterHtmlSlimParser final : public Print {
   bool heapAllowsTableRowLayout() const;
   bool flushPartWordBuffer();
   bool flushPartWordGlued();
+  // Lays out currentTextBlock's lines but its last, which stays for the words still to come: the long-block split that
+  // keeps a paragraph's word arrays bounded. False when the layout could not run (no heap, no page).
+  bool splitLongBlock();
   void makePages();
   // Puts currentTextBlock's top spacing on the current page, once per logical paragraph. Both
   // places that lay the block out call it first: makePages() and the long-block split in
@@ -1143,6 +1201,54 @@ class ChapterHtmlSlimParser final : public Print {
   void placeBackgroundImage(const std::string& resolvedPath, int elementDepth);
   // Place an already-built ImageBlock as a centered, full-width block element, page-breaking if needed.
   void placeImageBlockAsBlock(std::unique_ptr<ImageBlock> image);
+  // An image of the flow on a line of its own, centred, with the spacing of the empty block it stands in (a figure's or
+  // a paragraph's margins), which it uses up: the block's style is reset for the text after it. A page break pending
+  // goes first, and a page that has no room for it ends. False when no page or image could be had.
+  // linkHash: the link the image is inside (PageImage::linkHash).
+  bool placeImageWithBlockSpacing(const std::string& cachedImagePath, const std::string& entryPath,
+                                  const std::string& alt, int displayWidth, int displayHeight, uint32_t visibleOffset,
+                                  uint32_t linkHash = 0);
+  // Whether an <img> of this style and display size is set in its line (PendingLineImage): at most kLineImageMaxLines
+  // of the paragraph's lines tall (across them: in a vertical section the size is the content frame's, the image
+  // turned), not floated or made a block by the book, and not in a float, a table cell or a ruby, which keep their own
+  // paths.
+  bool takesLineImage(const CssStyle& imgStyle, int displayWidth, int displayHeight) const;
+  // Sets an image in currentTextBlock's text: the word in progress ends at it, glued to it as the source has it, and
+  // the text after it is glued to it unless whitespace comes first. In a vertical section it is an upright character:
+  // one cell of the column, as far down it as it is tall, shrunk to the column's em when it is wider. False, nothing
+  // added, when the heap holds no room for its record: the image is then placed as a block.
+  bool addLineImage(const std::string& entryPath, std::string alt, int displayWidth, int displayHeight,
+                    LineImageAlign align);
+  const PendingLineImage* pendingLineImage(uint16_t id) const;
+  // A line's text as its images are placed against it, from the text's top: its height, its baseline (the annotation
+  // band and the ascent TextBlock::render draws at), its font's ascent and the descent below the baseline.
+  struct LineText {
+    int height = 0;
+    int baseline = 0;
+    int ascent = 0;
+    int descent = 0;
+    // A column of a vertical section, and the column's centre line (columnAxis): an image there is an upright
+    // character, centred across the column whatever its vertical-align.
+    bool column = false;
+    int axis = 0;
+  };
+  LineText lineText(const BlockStyle& bs, int height, uint8_t maxSizePct, int band) const;
+  // Where an image's top goes, from its text's top, by its vertical-align: its bottom on the baseline by default; in a
+  // column, centred on its axis.
+  static int lineImageTop(const PendingLineImage& image, const LineText& text);
+  // A line with images, as tall as its text and its images need: the text moves down by what they rise above it.
+  struct LineImageBox {
+    int height = 0;
+    int textTop = 0;
+  };
+  LineImageBox lineImageBox(const LineText& text, std::span<const ParsedText::LineObject> images) const;
+  // Puts a placed line's images on the page, its text's top at textTop, and drops their records.
+  void placeLineImages(std::span<const ParsedText::LineObject> images, const LineText& text, int16_t xOffset,
+                       int textTop);
+  // A paragraph of line images and no text places them as block images, one under another, as it did before an image
+  // could be set in a line: an ornament or a picture on its own keeps its centred place and its paragraph's spacing.
+  // True when it did (currentTextBlock is then empty).
+  bool placeImageOnlyParagraph();
   // In a vertical section an image is sized in the content frame as its turned self: native width and height swap
   // before sizing, and the block it becomes is turned (drawn upright in the reader's frame).
   void turnIfVertical(ImageDimensions& dims) const;
@@ -1314,6 +1420,8 @@ class ChapterHtmlSlimParser final : public Print {
   // may run before the next feed. See ParsedText::releaseLayoutScratch.
   void onSliceYield() {
     if (currentTextBlock) currentTextBlock->releaseLayoutScratch();
+    // The line images' records, once a paragraph has placed them all: a book with none never grew them.
+    if (pendingLineImages_.empty()) std::vector<PendingLineImage>().swap(pendingLineImages_);
   }
   const std::string& getAnchorSpillPath() const { return anchorSpillPath; }
   size_t pageBreakLabelCount() const { return pageBreakLabelPages.size(); }

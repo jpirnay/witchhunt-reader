@@ -49,10 +49,14 @@ inline bool isBreakableDash(const uint32_t cp) {
 enum class RubyRole : uint8_t { None = 0, Leader = 1, Follower = 2 };
 
 struct Boundary {
-  bool continues = false;      // glued to the previous token: no space, and no break
-  bool noSpaceBefore = false;  // no space either; with continues=false, a breakable CJK gap
+  bool continues = false;  // glued to the previous token: no space, and no break
+  // No space either; with continues=false, a breakable CJK gap.
+  bool noSpaceBefore : 1 = false;
+  // Text whose spaces the book keeps (CSS white-space; keepsSpaces), in the byte noSpaceBefore leaves spare: annotation
+  // is full.
+  bool keptSpaces : 1 = false;
   // Bits 0-1 RubyRole; bits 2-5 the emphasis mark (TextEmphasis); bit 6 the combine request (text-combine-upright);
-  // bit 7 kept white space (keepsSpaces).
+  // bit 7 an inline object (isObject).
   uint8_t annotation = 0;
   // The tokens ParsedText merged into this one (deviation 7). A line counts them, so its token count is the parser's,
   // by which a footnote finds the line that holds its anchor. Kept here, so it travels with the token.
@@ -90,17 +94,27 @@ constexpr Boundary withCombineRequested(Boundary b, const bool requested) {
 
 // Whether the token is text whose spaces the book keeps (CSS white-space pre, pre-wrap, break-spaces): it is never
 // hyphenated. A token of nothing but spaces with it is a run of kept spaces (ParsedText::addWord).
-constexpr bool keepsSpaces(const Boundary b) { return (b.annotation & 0x80) != 0; }
+constexpr bool keepsSpaces(const Boundary b) { return b.keptSpaces; }
 
 constexpr Boundary withKeptSpaces(Boundary b, const bool kept) {
-  b.annotation = static_cast<uint8_t>((b.annotation & ~0x80) | (kept ? 0x80 : 0));
+  b.keptSpaces = kept;
   return b;
 }
 
 // b with what every token of a word carries from it, `word`'s emphasis mark, combine request and kept white space; b
-// keeps its ruby role.
+// keeps its ruby role, and its object bit: a piece of a word is no object.
 constexpr Boundary withWordMarks(Boundary b, const Boundary word) {
-  b.annotation = static_cast<uint8_t>((b.annotation & ~0xFC) | (word.annotation & 0xFC));
+  b.annotation = static_cast<uint8_t>((b.annotation & ~0x7C) | (word.annotation & 0x7C));
+  b.keptSpaces = word.keptSpaces;
+  return b;
+}
+
+// Whether the token stands for an object set in the line (an inline image, ParsedText::addInlineObject) rather than
+// text. Its text is U+FFFC, so the line pass orders it as the neutral it is; its width is the object's.
+constexpr bool isObject(const Boundary b) { return (b.annotation & 0x80) != 0; }
+
+constexpr Boundary withObject(Boundary b) {
+  b.annotation = static_cast<uint8_t>(b.annotation | 0x80);
   return b;
 }
 

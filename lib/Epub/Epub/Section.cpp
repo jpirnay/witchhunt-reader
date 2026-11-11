@@ -37,7 +37,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 125;  // v125: CSS borders and background shades draw boxes: a PageBox
+constexpr uint8_t SECTION_FILE_VERSION = 126;  // v126: an image a line or two tall in a run of text is set in its
+                                               // line, as a word is; a page image says whether it is in a line,
+                                               // and the link it is inside
+                                               // v125: CSS borders and background shades draw boxes: a PageBox
                                                // element frames a block's slice of a page, its padding inside
                                                // v124: CSS initial-letter makes a drop cap of its lines, on a span
                                                // or a ::first-letter rule, raised or sunken by its sink

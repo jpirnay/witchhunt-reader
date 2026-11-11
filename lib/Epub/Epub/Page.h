@@ -61,10 +61,20 @@ class PageLine final : public PageElement {
 // New PageImage class
 class PageImage final : public PageElement {
   std::unique_ptr<ImageBlock> imageBlock;
+  // Set in a line of text (an inline image), not a block of its own.
+  bool inLine_ = false;
+  // The internal link the image is inside (linkHrefHash of its href); 0: none.
+  uint32_t linkHash_ = 0;
+  // The serialized flags byte.
+  static constexpr uint8_t kInLine = 0x01;
+  static constexpr uint8_t kLinked = 0x02;
 
  public:
-  PageImage(std::unique_ptr<ImageBlock> block, const int16_t xPos, const int16_t yPos)
-      : PageElement(xPos, yPos), imageBlock(std::move(block)) {}
+  PageImage(std::unique_ptr<ImageBlock> block, const int16_t xPos, const int16_t yPos, const bool inLine = false,
+            const uint32_t linkHash = 0)
+      : PageElement(xPos, yPos), imageBlock(std::move(block)), inLine_(inLine), linkHash_(linkHash) {}
+  bool isInLine() const { return inLine_; }
+  uint32_t linkHash() const { return linkHash_; }
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   void renderWithForceLoad(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoad,
                            bool monochromeOutput = true, bool alsoCacheOtherVariant = false);
@@ -277,11 +287,13 @@ class Page {
     });
   }
 
-  // True when the page has elements and every one is an image.
+  // True when the page has elements and every one is an image of its own: an image set in a line of text is that
+  // line's, and a page that ends on such a line is not a picture page.
   bool isImageOnly() const {
     return !elements.empty() &&
            std::all_of(elements.begin(), elements.end(), [](const std::unique_ptr<PageElement>& element) {
-             return element && element->getTag() == TAG_PageImage;
+             return element && element->getTag() == TAG_PageImage &&
+                    !static_cast<const PageImage&>(*element).isInLine();
            });
   }
 

@@ -479,6 +479,7 @@ bool stylesEqual(const CssStyle& a, const CssStyle& b) {
   auto len = [](const CssLength& l) { return std::make_pair(l.value, static_cast<int>(l.unit)); };
   return a.textAlign == b.textAlign && a.fontStyle == b.fontStyle && a.fontWeight == b.fontWeight &&
          a.textDecoration == b.textDecoration && a.display == b.display && a.verticalAlign == b.verticalAlign &&
+         a.verticalAlignShift == b.verticalAlignShift && a.verticalAlignPercent == b.verticalAlignPercent &&
          a.listStyleNone == b.listStyleNone && a.pageBreakBefore == b.pageBreakBefore &&
          a.pageBreakAfter == b.pageBreakAfter && a.cssFloat == b.cssFloat && a.smallCaps == b.smallCaps &&
          a.lineHeightEm == b.lineHeightEm && a.fontSizeMultiplier == b.fontSizeMultiplier &&
@@ -717,7 +718,12 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       ".l { initial-letter: 3 2; }\n"  // a rule with nothing else is kept
       ".m { -webkit-initial-letter: 4; direction: rtl; text-emphasis: dot; }\n"
       ".n { border: 2px double; border-left: 3px solid #ccc; background-color: #eee; }\n"
-      ".o { border: none; background: transparent; }\n";  // the <hr> facts and explicit nones
+      ".o { border: none; background: transparent; }\n"  // the <hr> facts and explicit nones
+      ".p { vertical-align: text-bottom; }\n"            // vertical-align's third bit, in the flow word
+      ".q { vertical-align: bottom; direction: rtl; }\n"
+      ".r { vertical-align: middle; }\n"
+      ".s { vertical-align: -0.35em; }\n"                           // a length: its byte after the flow word
+      ".t { vertical-align: -20%; writing-mode: vertical-rl; }\n";  // a percentage beside a flow property
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
   std::string cssPath;
@@ -729,7 +735,8 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   const std::vector<std::pair<std::string, std::string>> probes = {
       {"p", "a"},    {"p", "b"},    {"div", "c"},  {"span", "a"}, {"p", "none"}, {"span", "d"},
       {"span", "e"}, {"div", "f"},  {"html", "g"}, {"span", "h"}, {"span", "i"}, {"pre", "j"},
-      {"p", "k"},    {"span", "l"}, {"span", "m"}, {"div", "n"},  {"hr", "o"}};
+      {"p", "k"},    {"span", "l"}, {"span", "m"}, {"div", "n"},  {"hr", "o"},   {"img", "p"},
+      {"img", "q"},  {"img", "r"},  {"img", "s"},  {"img", "t"}};
   auto resolveAll = [&](CssParser& p) {
     std::vector<CssStyle> out;
     for (const auto& pr : probes) out.push_back(p.resolveStyle(pr.first, pr.second));
@@ -778,6 +785,16 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   EXPECT_TRUE(box.shaded());
   EXPECT_TRUE(heapStyles[16].hidesRule()) << "the <hr> facts did not survive the disk cache";
   EXPECT_TRUE(heapStyles[16].box.hasStyle(CssBox::Top) && !heapStyles[16].box.drawn());
+  EXPECT_EQ(CssVerticalAlign::TextBottom, heapStyles[17].verticalAlign)
+      << "vertical-align did not survive the disk cache";
+  EXPECT_EQ(CssVerticalAlign::Bottom, heapStyles[18].verticalAlign);
+  EXPECT_EQ(CssDirection::Rtl, heapStyles[18].direction);
+  EXPECT_EQ(CssVerticalAlign::Middle, heapStyles[19].verticalAlign);
+  EXPECT_EQ(-6, heapStyles[20].verticalAlignShift) << "a vertical-align length did not survive the disk cache";
+  EXPECT_FALSE(heapStyles[20].verticalAlignPercent);
+  EXPECT_EQ(-20, heapStyles[21].verticalAlignShift);
+  EXPECT_TRUE(heapStyles[21].verticalAlignPercent);
+  EXPECT_EQ(CssWritingMode::VerticalRl, heapStyles[21].writingMode);
 
   BuildArena arena(64 * 1024);
   ASSERT_TRUE(arena.valid());

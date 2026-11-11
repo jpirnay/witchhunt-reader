@@ -79,8 +79,18 @@ enum class CssTextDecoration : uint8_t { None = 0, Underline = 1, LineThrough = 
 // <span> styled display:block is laid out as a block, one styled display:inline is not.
 enum class CssDisplay : uint8_t { Block = 0, None = 1, Inline = 2 };
 
-// Vertical align options relevant for inline text positioning
-enum class CssVerticalAlign : uint8_t { Baseline = 0, Super = 1, Sub = 2 };
+// Vertical align options. Text takes Baseline, Super and Sub; the rest place an inline image in its line (a span with
+// one is set as before). Three bits in the rule pool: the third rides in the flow word.
+enum class CssVerticalAlign : uint8_t {
+  Baseline = 0,
+  Super = 1,
+  Sub = 2,
+  Middle = 3,
+  TextTop = 4,
+  TextBottom = 5,
+  Top = 6,
+  Bottom = 7
+};
 
 // Float options — used to detect inline images beside paragraph text
 enum class CssFloat : uint8_t { None = 0, Left = 1, Right = 2 };
@@ -394,9 +404,14 @@ struct CssStyle {
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
 
-  // In the word after the flag word, the one CssStyle grew by (the size check below the struct).
+  // The word after the flag word, the one CssStyle grew by (the size check below the struct).
   CssWhiteSpace whiteSpace = CssWhiteSpace::Unset;
   uint8_t initialLetter = 0;  // CssInitialLetter; 0 unset
+  // vertical-align as a length (verticalAlign Baseline): the baseline raised by it, lowered when negative. In 1/16 em
+  // (px and pt at CSS's 16 px medium, ex half an em), or with verticalAlignPercent in percent of the line height; set
+  // with verticalAlign.
+  int8_t verticalAlignShift = 0;
+  bool verticalAlignPercent = false;
 
   // Number of properties applyOver() merges: the size of its `ranks` array. The box's longhands are the last ones.
   static constexpr int kFirstBoxProperty = 36;
@@ -487,6 +502,8 @@ struct CssStyle {
     }
     if (base.hasVerticalAlign() && take(defined.verticalAlign, 16)) {
       verticalAlign = base.verticalAlign;
+      verticalAlignShift = base.verticalAlignShift;
+      verticalAlignPercent = base.verticalAlignPercent;
       defined.verticalAlign = 1;
     }
     if (base.hasListStyleNone() && take(defined.listStyleNone, 17)) {
@@ -687,6 +704,8 @@ struct CssStyle {
     imageHeight = imageWidth = CssLength{};
     display = CssDisplay::Block;
     verticalAlign = CssVerticalAlign::Baseline;
+    verticalAlignShift = 0;
+    verticalAlignPercent = false;
     listStyleNone = false;
     pageBreakBefore = false;
     pageBreakAfter = false;
@@ -713,9 +732,9 @@ struct CssStyle {
 };
 
 // The flow properties sit in padding (after pageBreakAfter and after visibilityHidden), so they cost a style nothing;
-// textEmphasis and the box fill the word after fontFamily. whiteSpace and initialLetter take the word after the flag
-// word, the one CssStyle grew by when they and the box no longer fitted its padding (two bytes of it spare). Every
-// member is 4-byte aligned or smaller, so the C3 lays it out as the host does.
+// textEmphasis and the box fill the word after fontFamily. whiteSpace, initialLetter and the vertical-align length
+// take the word after the flag word, the one CssStyle grew by when they and the box no longer fitted its padding.
+// Every member is 4-byte aligned or smaller, so the C3 lays it out as the host does.
 static_assert(sizeof(CssStyle) == 132,
-              "CssStyle grew: the flow properties, textEmphasis, the box, white-space or initial-letter no longer "
-              "fit its padding");
+              "CssStyle grew: the flow properties, textEmphasis, the box, white-space, initial-letter or the "
+              "vertical-align length no longer fit its padding");

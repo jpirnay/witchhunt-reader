@@ -136,7 +136,9 @@ class CssParser {
   // v37: borders and background colours are parsed and persisted (CssBox): three bytes after the initial-letter byte,
   //      which take the <hr> facts of v32 along; in the resident pool, extra bit 6 and the three bytes after the flow
   //      word and the initial-letter byte.
-  static constexpr uint8_t CSS_CACHE_VERSION = 37;
+  // v38: vertical-align middle, text-top, text-bottom, top and bottom are kept (an inline image's place in its line),
+  //      and a vertical-align length, a byte more in each rule's payload; a v37 cache dropped them.
+  static constexpr uint8_t CSS_CACHE_VERSION = 38;
   // Bytes before the complex-rule table and the sorted offset index: version(1) + ruleCount(2) +
   // totalSelectorCandidates(4) + unsupportedSelectorSkips(4) + flags(1) + complexTableBytes(2).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 14;
@@ -555,6 +557,8 @@ class CssParser {
   static bool interpretImageSize(std::string_view val, CssLength& out);
   /** line-height as a multiple of the element's font size; false for normal, the keywords and what is not a length. */
   static bool interpretLineHeight(std::string_view val, float& em);
+  // vertical-align as a length (CssStyle::verticalAlignShift and verticalAlignPercent); false for anything else.
+  static bool interpretVerticalAlignLength(std::string_view val, int8_t& shift, bool& percent);
   // How text runs. Each leaves `out` alone and returns false for inherit, unset, revert and values it does not know,
   // which leaves the property unset: the element takes its parent's value where the property is inherited.
   static bool interpretWritingMode(std::string_view val, CssWritingMode& out);

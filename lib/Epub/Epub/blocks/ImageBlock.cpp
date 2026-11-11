@@ -24,16 +24,16 @@
 // - uint16_t height
 // - uint8_t pixels[...] - 2 bits per pixel, packed (4 pixels per byte), row-major order
 
-namespace {
 // Cut to MAX_ALT_TEXT_BYTES, never inside a UTF-8 sequence: a character the cut would split goes
 // whole.
-void capAltText(std::string& alt) {
-  if (alt.size() <= ImageBlock::MAX_ALT_TEXT_BYTES) return;
-  size_t cut = ImageBlock::MAX_ALT_TEXT_BYTES;
+void ImageBlock::capAltText(std::string& alt) {
+  if (alt.size() <= MAX_ALT_TEXT_BYTES) return;
+  size_t cut = MAX_ALT_TEXT_BYTES;
   while (cut > 0 && (static_cast<uint8_t>(alt[cut]) & 0xC0) == 0x80) cut--;
   alt.resize(cut);
 }
 
+namespace {
 // serialization::readString, except that it never holds more than the capped alt text: a cache
 // written before the cap may carry up to MAX_STRING_LENGTH. One byte past the cap is read so the
 // cut can see whether it falls inside a character; the rest is skipped.
@@ -48,7 +48,7 @@ bool readAltText(FsFile& file, std::string& alt) {
   alt.resize(keep);
   if (keep > 0 && file.read(reinterpret_cast<uint8_t*>(&alt[0]), keep) != static_cast<int>(keep)) return false;
   if (len > keep && !file.seekCur(static_cast<int64_t>(len - keep))) return false;
-  capAltText(alt);
+  ImageBlock::capAltText(alt);
   return true;
 }
 }  // namespace

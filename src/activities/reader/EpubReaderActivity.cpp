@@ -7271,6 +7271,23 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
   const turnedframe::Offsets origin =
       vertical ? turnedframe::contentOffsets(screenW, marginLeft, contentTop, page.verticalBlockExtent)
                : turnedframe::Offsets{marginLeft, contentTop};
+  // A link's target over [left, right) x [top, bottom) in the reader's frame: grown by the pad, floored, kept on the
+  // panel.
+  const auto addTarget = [&](const int left, const int top, const int right, const int bottom, const size_t link) {
+    int x = left - kLinkTargetPad;
+    int y = top - kLinkTargetPad;
+    int w = std::max(right - left + 2 * kLinkTargetPad, kLinkTargetMin);
+    int h = std::max(bottom - top + 2 * kLinkTargetPad, kLinkTargetMin);
+    // Centre the floor on the glyphs rather than growing right/down only, and keep the rect on
+    // the panel so a marker in a margin is still reachable.
+    x -= std::max(0, (w - (right - left + 2 * kLinkTargetPad)) / 2);
+    y -= std::max(0, (h - (bottom - top + 2 * kLinkTargetPad)) / 2);
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x + w > screenW) w = screenW - x;
+    if (y + h > screenH) h = screenH - y;
+    if (w > 0 && h > 0) targets.add(x, y, w, h, static_cast<int>(link));
+  };
 
   // The links arrive in page order, so one forward walk resolves them all: whichever word first
   // completes the text of the link we are looking for IS that link. Matching in order rather than
@@ -7357,23 +7374,27 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
 
       if (!LinkMarkerMatch::complete(marker, markerLen, markerPos)) continue;
 
-      int x = runLeft - kLinkTargetPad;
-      int y = runTop - kLinkTargetPad;
-      int w = std::max(runRight - runLeft + 2 * kLinkTargetPad, kLinkTargetMin);
-      int h = std::max(runBottom - runTop + 2 * kLinkTargetPad, kLinkTargetMin);
-      // Centre the floor on the glyphs rather than growing right/down only, and keep the rect on
-      // the panel so a marker in a margin is still reachable.
-      x -= std::max(0, (w - (runRight - runLeft + 2 * kLinkTargetPad)) / 2);
-      y -= std::max(0, (h - (runBottom - runTop + 2 * kLinkTargetPad)) / 2);
-      if (x < 0) x = 0;
-      if (y < 0) y = 0;
-      if (x + w > screenW) w = screenW - x;
-      if (y + h > screenH) h = screenH - y;
-      if (w > 0 && h > 0) targets.add(x, y, w, h, static_cast<int>(nextLink));
+      addTarget(runLeft, runTop, runRight, runBottom, nextLink);
 
       nextLink++;
       markerPos = 0;
       runOpen = false;
+    }
+  }
+
+  // An image inside a link is its target too: what a reader sees of a link around an icon or a marker image. The page
+  // image names its link by its href's hash; a link around an image alone has no text for the walk above to match.
+  for (const auto& element : page.elements) {
+    if (element->getTag() != TAG_PageImage) continue;
+    const auto& image = static_cast<const PageImage&>(*element);
+    if (image.linkHash() == 0) continue;
+    for (size_t link = 0; link < currentPageFootnotes.size(); ++link) {
+      if (linkHrefHash(currentPageFootnotes[link].href) != image.linkHash()) continue;
+      const ImageBlock& block = image.getImageBlock();
+      turnedframe::Rect box{image.xPos + origin.x, image.yPos + origin.y, block.getWidth(), block.getRenderedHeight()};
+      if (vertical) box = turnedframe::toReader(screenW, box);
+      addTarget(box.x, box.y, box.x + box.width, box.y + box.height, link);
+      break;
     }
   }
   TapTargets::readerLinks().record(targets);
