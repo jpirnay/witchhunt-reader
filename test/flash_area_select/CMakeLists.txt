@@ -1,26 +1,20 @@
 # How FlashArea::get() picks the board's area: one executable per scenario, since the pick is made once per run. The
-# real FlashArea.cpp and both backends, over test/flash_lang_partition's in-memory partition and this directory's
-# esp_heap_caps.h for the PSRAM. CardImageFile.cpp is linked only where the image is kept on the card
-# (FLASH_AREA_PSRAM_ON_CARD=1): every other scenario builds without it, which shows the default image never writes to
-# the card; test/shims' HalStorage stands in for the card (which holds no file).
-# scenario;FLASH_AREA_PSRAM_IMAGE;FLASH_AREA_PSRAM_ON_CARD. An image of "spiram" leaves FLASH_AREA_PSRAM_IMAGE to
-# FlashArea.cpp's default and builds as a board with PSRAM does (CONFIG_SPIRAM=1): the S3 boards.
-foreach(case "0;0;0" "1;1;0" "2;1;0" "3;1;0" "4;2;0" "5;1;0" "6;0;0" "7;1;1" "8;0;0" "9;spiram;0" "10;spiram;0")
+# real FlashArea.cpp and both backends, over test/flash_lang_partition's in-memory partition, this directory's
+# esp_heap_caps.h for the PSRAM, and test/shims' HalStorage for the card (which holds no file).
+# scenario;FLASH_AREA_PSRAM_IMAGE. An image of "spiram" leaves FLASH_AREA_PSRAM_IMAGE to FlashArea.cpp's default and
+# builds as a board with PSRAM does (CONFIG_SPIRAM=1): the S3 boards.
+foreach(case "0;0" "1;1" "2;1" "3;1" "4;2" "5;1" "6;0" "8;0" "9;spiram" "10;spiram")
   list(GET case 0 scenario)
   list(GET case 1 image)
-  list(GET case 2 onCard)
   set(target FlashAreaSelectTest${scenario})
-  set(sources
+  add_executable(${target}
     FlashAreaSelectTest.cpp
+    ${REPO_ROOT}/lib/hal/CardImageFile.cpp
     ${REPO_ROOT}/lib/hal/EspPartitionFlash.cpp
     ${REPO_ROOT}/lib/hal/FlashArea.cpp
     ${REPO_ROOT}/lib/hal/FlashLangPartition.cpp
     ${REPO_ROOT}/lib/hal/PsramImageFlash.cpp
   )
-  if(onCard)
-    list(APPEND sources ${REPO_ROOT}/lib/hal/CardImageFile.cpp)
-  endif()
-  add_executable(${target} ${sources})
   target_include_directories(${target} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${REPO_ROOT}/test/flash_lang_partition
@@ -32,8 +26,7 @@ foreach(case "0;0;0" "1;1;0" "2;1;0" "3;1;0" "4;2;0" "5;1;0" "6;0;0" "7;1;1" "8;
   if(image STREQUAL "spiram")
     target_compile_definitions(${target} PRIVATE FLASH_AREA_SCENARIO=${scenario} CONFIG_SPIRAM=1)
   else()
-    target_compile_definitions(${target} PRIVATE FLASH_AREA_SCENARIO=${scenario} FLASH_AREA_PSRAM_IMAGE=${image}
-                                                 FLASH_AREA_PSRAM_ON_CARD=${onCard})
+    target_compile_definitions(${target} PRIVATE FLASH_AREA_SCENARIO=${scenario} FLASH_AREA_PSRAM_IMAGE=${image})
   endif()
   target_link_libraries(${target} PRIVATE
     crosspoint_test_common
@@ -41,3 +34,7 @@ foreach(case "0;0;0" "1;1;0" "2;1;0" "3;1;0" "4;2;0" "5;1;0" "6;0;0" "7;1;1" "8;
   )
   gtest_discover_tests(${target})
 endforeach()
+
+# Every planned restart in src/ syncs the flash area first, or says why it need not (scripts/check_restart_flash_sync.py).
+add_test(NAME FlashAreaRestartSync COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/check_restart_flash_sync.py
+                                           ${REPO_ROOT})

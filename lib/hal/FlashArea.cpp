@@ -13,9 +13,9 @@
 // `spiffs` partition or none; 1, the PSRAM image when the partition table has no usable `spiffs` partition (an X4 Pro
 // that kept its stock table, a board such as the Onyx Picco), by default on every build with PSRAM; 2, the PSRAM image
 // even when there is a partition, to try the backend on an S3 board. FLASH_AREA_PSRAM_BYTES: the image's size, by
-// default the partition's, so every layout constant holds. FLASH_AREA_PSRAM_ON_CARD=1 keeps the image as a file on the
-// card as well (CardImageFile), so it outlives a restart; by default it is in PSRAM only and starts erased at each
-// boot.
+// default the partition's, so every layout constant holds. The image is kept on the card as /.crosspoint/flash-area.img
+// (CardImageFile): sync() writes what changed, and FlashArea::sync() is called on every planned restart and before
+// deep sleep, so the language slot, the font cache and the glyph store outlive them.
 #ifndef FLASH_AREA_PSRAM_IMAGE
 #if CONFIG_SPIRAM
 #define FLASH_AREA_PSRAM_IMAGE 1
@@ -32,12 +32,7 @@
 #ifndef FLASH_AREA_PSRAM_BYTES
 #define FLASH_AREA_PSRAM_BYTES 0x360000
 #endif
-#ifndef FLASH_AREA_PSRAM_ON_CARD
-#define FLASH_AREA_PSRAM_ON_CARD 0
-#endif
-#if FLASH_AREA_PSRAM_ON_CARD
 #include "CardImageFile.h"
-#endif
 #endif
 
 namespace FlashArea {
@@ -85,12 +80,8 @@ NorFlash* psramImage() {
           static_cast<unsigned>(kBytes / 1024),
           static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
           static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
-#if FLASH_AREA_PSRAM_ON_CARD
   static CardImageFile file("/.crosspoint/flash-area.img");
-  static PsramImageFlash area(image, kBytes, &file);
-#else
-  static PsramImageFlash area(image, kBytes, nullptr);
-#endif
+  static PsramImageFlash area(image, kBytes, file);
   if (!area.begin()) {
     heap_caps_free(image);
     return nullptr;
@@ -116,9 +107,7 @@ NorFlash* pick() {
   }
 #if FLASH_AREA_PSRAM_IMAGE == 1
   if (NorFlash* const image = psramImage()) {
-    LOG_INF("FLA",
-            "the flash area is a PSRAM image instead: the interface language and fonts are copied into it "
-            "again after each start");
+    LOG_INF("FLA", "the flash area is a PSRAM image instead, kept on the card as /.crosspoint/flash-area.img");
     chosenBackend = Backend::PsramImage;
     return image;
   }
@@ -147,6 +136,13 @@ Backend backend() {
 uint32_t partitionBytes() {
   get();
   return foundPartitionBytes;
+}
+
+bool sync() {
+  // Before the choice there is nothing to keep, and a sync must not make the choice (it may run on a restart path
+  // that comes before the card is mounted).
+  if (!picked || !chosen) return true;
+  return chosen->sync();
 }
 
 }  // namespace FlashArea

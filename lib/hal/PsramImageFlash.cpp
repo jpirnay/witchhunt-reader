@@ -1,5 +1,6 @@
 #include "PsramImageFlash.h"
 
+#include <Arduino.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <esp_rom_crc.h>
@@ -56,18 +57,14 @@ bool PsramImageFlash::begin() {
   std::memset(loaded_.get(), 0, pageWords * sizeof(uint32_t));
   std::memset(dirty_.get(), 0, sectorWords * sizeof(uint32_t));
 
-  if (file_ == nullptr) {
-    // Nothing to load: load() erases each page as it is first touched, so a boot pays for the pages it uses rather
-    // than for a memset of the whole image.
-    LOG_INF("FLA", "PSRAM image: %u KB, erased, kept in PSRAM only", static_cast<unsigned>(bytes_ / 1024));
-    return true;
-  }
+  const unsigned long start = millis();
   ImageHeader h{};
-  fileWhole_ = file_->size() == kHeaderBlockBytes + bytes_ && file_->read(0, &h, sizeof h) &&
+  fileWhole_ = file_.size() == kHeaderBlockBytes + bytes_ && file_.read(0, &h, sizeof h) &&
                std::memcmp(h.magic, kMagic, sizeof kMagic) == 0 && h.version == kVersion && h.state == kClean &&
                h.areaBytes == bytes_ && h.crc == headerCrc(h);
   if (fileWhole_) {
-    LOG_INF("FLA", "PSRAM image: %u KB on the card, loaded as it is used", static_cast<unsigned>(bytes_ / 1024));
+    LOG_INF("FLA", "PSRAM image: %u KB on the card, loaded as it is used (header read in %lu ms)",
+            static_cast<unsigned>(bytes_ / 1024), millis() - start);
   } else {
     startErased();
     LOG_INF("FLA", "PSRAM image: %u KB, erased (no clean image on the card)", static_cast<unsigned>(bytes_ / 1024));
@@ -98,12 +95,12 @@ bool PsramImageFlash::load(const uint32_t offset, const uint32_t len, const bool
     const uint32_t start = page * kMapPageBytes;
     const bool coveredWhole = erasing && offset <= start && start + kMapPageBytes <= offset + len;
     if (!coveredWhole) {
-      if (file_ == nullptr) {
-        std::memset(image_ + start, 0xFF, kMapPageBytes);
-      } else if (!file_->read(kHeaderBlockBytes + start, image_ + start, kMapPageBytes)) {
+      const unsigned long began = millis();
+      if (!file_.read(kHeaderBlockBytes + start, image_ + start, kMapPageBytes)) {
         LOG_ERR("FLA", "PSRAM image: page %u could not be read from the card", static_cast<unsigned>(page));
         return false;
       }
+      LOG_DBG("FLA", "PSRAM image: page %u loaded in %lu ms", static_cast<unsigned>(page), millis() - began);
     }
     setBit(loaded_.get(), page);
   }
@@ -154,13 +151,13 @@ bool PsramImageFlash::writeHeader(const uint8_t state, const bool wholeBlock) {
   h.state = state;
   h.areaBytes = bytes_;
   h.crc = headerCrc(h);
-  if (!file_->write(0, &h, sizeof h)) return false;
+  if (!file_.write(0, &h, sizeof h)) return false;
   if (!wholeBlock) return true;
   uint8_t pad[128];
   std::memset(pad, 0xFF, sizeof pad);
   for (uint32_t at = sizeof h; at < kHeaderBlockBytes;) {
     const uint32_t n = kHeaderBlockBytes - at < sizeof pad ? kHeaderBlockBytes - at : static_cast<uint32_t>(sizeof pad);
-    if (!file_->write(at, pad, n)) return false;
+    if (!file_.write(at, pad, n)) return false;
     at += n;
   }
   return true;
@@ -169,26 +166,26 @@ bool PsramImageFlash::writeHeader(const uint8_t state, const bool wholeBlock) {
 bool PsramImageFlash::sync() {
   std::lock_guard<std::mutex> hold(lock_);
   if (!dirty_) return false;
-  if (file_ == nullptr) return true;
   const uint32_t sectors = bytes_ / kSectorBytes;
   bool any = false;
   for (uint32_t s = 0; s < sectors && !any; ++s) any = testBit(dirty_.get(), s);
   if (!any) return true;
+  const unsigned long start = millis();
 
   // The file may have gone since begin() (a cleared cache): a new one needs every page, which only a fully loaded
   // image has. Otherwise this run's writes stay in PSRAM, and the next boot starts erased.
-  if (fileWhole_ && file_->size() != kHeaderBlockBytes + bytes_) fileWhole_ = false;
+  if (fileWhole_ && file_.size() != kHeaderBlockBytes + bytes_) fileWhole_ = false;
   if (!fileWhole_) {
     if (!allLoaded()) {
       LOG_ERR("FLA", "PSRAM image: the card's image is gone and part of it was never loaded - not synced");
       return false;
     }
     for (uint32_t s = 0; s < sectors; ++s) setBit(dirty_.get(), s);
-    if (!file_->truncate() || !writeHeader(kDirty, true)) return false;
+    if (!file_.truncate() || !writeHeader(kDirty, true)) return false;
   } else if (!writeHeader(kDirty, false)) {
     return false;
   }
-  if (!file_->sync()) return false;
+  if (!file_.sync()) return false;
 
   uint32_t written = 0;
   for (uint32_t s = 0; s < sectors;) {
@@ -200,7 +197,7 @@ bool PsramImageFlash::sync() {
     while (end < sectors && testBit(dirty_.get(), end)) ++end;
     const uint32_t at = s * kSectorBytes;
     const uint32_t len = (end - s) * kSectorBytes;
-    if (!file_->write(kHeaderBlockBytes + at, image_ + at, len)) {
+    if (!file_.write(kHeaderBlockBytes + at, image_ + at, len)) {
       LOG_ERR("FLA", "PSRAM image: %u B at %u could not be written", static_cast<unsigned>(len),
               static_cast<unsigned>(at));
       return false;
@@ -208,10 +205,10 @@ bool PsramImageFlash::sync() {
     written += len;
     s = end;
   }
-  if (!file_->sync() || !writeHeader(kClean, false) || !file_->sync()) return false;
+  if (!file_.sync() || !writeHeader(kClean, false) || !file_.sync()) return false;
 
   std::memset(dirty_.get(), 0, bitWords(sectors) * sizeof(uint32_t));
   fileWhole_ = true;
-  LOG_DBG("FLA", "PSRAM image: %u B synced", static_cast<unsigned>(written));
+  LOG_INF("FLA", "PSRAM image: %u B synced in %lu ms", static_cast<unsigned>(written), millis() - start);
   return true;
 }

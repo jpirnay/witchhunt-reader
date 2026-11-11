@@ -14,7 +14,7 @@ namespace FlashArea {
 enum class Backend : uint8_t {
   None,        // no area: the UI stays English, TTF families do not load, .cpfont fonts are read from the card
   Partition,   // the `spiffs` partition
-  PsramImage,  // an image in PSRAM: the partition table has no usable `spiffs` partition
+  PsramImage,  // an image in PSRAM, saved to the card: the partition table has no usable `spiffs` partition
 };
 
 /// The board's area, chosen at the first call and kept for the run; nullptr when the board has none.
@@ -26,5 +26,12 @@ Backend backend();
 /// The size of the partition table's `spiffs` partition, whether or not it is the area (one no larger than the
 /// language slot is not); 0 when the table has none. Chooses the area at the first call.
 uint32_t partitionBytes();
+
+/// Makes what the consumers changed in the area survive the loss of PSRAM: a PSRAM image writes its changed sectors
+/// to its card file (NorFlash::sync), nothing when nothing changed; the partition has nothing to do. Called before deep
+/// sleep, before every planned restart and before the card goes to a USB host, at book close too (the glyph store
+/// writes while a book is open). True also before the area is chosen, which it does not choose. False when the card
+/// refused: the changes stay pending.
+bool sync();
 
 }  // namespace FlashArea

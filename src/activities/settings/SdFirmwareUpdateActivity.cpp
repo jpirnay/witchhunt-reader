@@ -8,6 +8,7 @@
 #include <esp_ota_ops.h>
 
 #include "MappedInputManager.h"
+#include "SilentRestart.h"
 #include "activities/home/FileBrowserActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
@@ -168,7 +169,7 @@ void SdFirmwareUpdateActivity::performUpdate() {
   }
   requestUpdateAndWait();
   delay(1500);
-  ESP.restart();
+  restartKeepingFlashArea();
 }
 
 void SdFirmwareUpdateActivity::loop() {

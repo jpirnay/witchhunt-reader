@@ -91,13 +91,14 @@ gtest_discover_tests(LangPackConvertTest)
 
 # Issue #733: the language slot from a card pack without a usable `spiffs` partition, in the PSRAM image the S3 boards
 # take then (FlashArea.cpp as they build it): with none, and with the 80 KB one of the X4 Pro's factory-compatible
-# table. No CardImageFile: the image is kept in PSRAM only, and never on the card.
+# table. Its card file goes to test/shims' HalStorage, which keeps nothing.
 foreach(case "LangSlotPsramImageTest;0" "LangSlotX4ProFactoryTableTest;0x14000")
   list(GET case 0 target)
   list(GET case 1 partitionBytes)
   add_executable(${target}
     LangSlotPsramImageTest.cpp
     ${REPO_ROOT}/lib/I18n/LangPack.cpp
+    ${REPO_ROOT}/lib/hal/CardImageFile.cpp
     ${REPO_ROOT}/lib/hal/EspPartitionFlash.cpp
     ${REPO_ROOT}/lib/hal/FlashArea.cpp
     ${REPO_ROOT}/lib/hal/FlashLangPartition.cpp

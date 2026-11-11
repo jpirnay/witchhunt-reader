@@ -40,10 +40,14 @@ TEST(FlashAreaSelect, APartitionComesFirstAndTakesNoPsram) {
   EXPECT_EQ(kPartitionBytes, area->size());
   EXPECT_EQ(area, FlashArea::get()) << "picked once";
   EXPECT_EQ(0, g_psramAllocs) << "a board with the partition is as it was: no image";
+  EXPECT_TRUE(FlashArea::sync());
+  EXPECT_EQ(0, fake_flash::chip().erases + fake_flash::chip().writes) << "a sync costs the partition nothing";
 }
 #elif FLASH_AREA_SCENARIO == 2
-TEST(FlashAreaSelect, WithoutAPartitionThePsramImageKeptInPsramOnly) {
+TEST(FlashAreaSelect, WithoutAPartitionThePsramImage) {
   fake_flash::reset(0);
+  EXPECT_TRUE(FlashArea::sync()) << "a sync before the choice: nothing to keep";
+  EXPECT_EQ(0, g_psramAllocs) << "and it does not make the choice";
   NorFlash* const area = FlashArea::get();
   ASSERT_NE(nullptr, area);
   EXPECT_EQ(Backend::PsramImage, FlashArea::backend());
@@ -52,10 +56,7 @@ TEST(FlashAreaSelect, WithoutAPartitionThePsramImageKeptInPsramOnly) {
   EXPECT_EQ(1, g_psramAllocs);
   uint8_t byte = 0;
   ASSERT_TRUE(area->read(kPartitionBytes - 1, &byte, 1));
-  EXPECT_EQ(0xFF, byte) << "erased at boot";
-  const uint8_t zero = 0;
-  ASSERT_TRUE(area->program(0, &zero, 1));
-  EXPECT_TRUE(area->sync()) << "nothing to keep (and this build has no card file to keep it in)";
+  EXPECT_EQ(0xFF, byte) << "no image on the card: erased";
 }
 #elif FLASH_AREA_SCENARIO == 3
 TEST(FlashAreaSelect, WithoutAPartitionOrPsramThereIsNone) {
@@ -97,16 +98,6 @@ TEST(FlashAreaSelect, APartitionTooSmallForTheLanguageSlotIsNoneWithoutTheImage)
   EXPECT_FALSE(
       FlashLangPartition::acquire(1, 2, 3, FlashLangPartition::Strings{64, &Never::produce, nullptr}, nullptr, &m));
   EXPECT_EQ(FlashLangPartition::Failure::NoArea, FlashLangPartition::lastFailure());
-}
-#elif FLASH_AREA_SCENARIO == 7
-TEST(FlashAreaSelect, AnImageKeptOnTheCardStillBuildsAndStartsErasedWithoutAFile) {
-  fake_flash::reset(0);
-  NorFlash* const area = FlashArea::get();
-  ASSERT_NE(nullptr, area);
-  EXPECT_EQ(Backend::PsramImage, FlashArea::backend());
-  uint8_t byte = 0;
-  ASSERT_TRUE(area->read(kPartitionBytes - 1, &byte, 1));
-  EXPECT_EQ(0xFF, byte) << "no image on the card: erased";
 }
 #elif FLASH_AREA_SCENARIO == 8
 TEST(FlashAreaSelect, AnyPartitionLargerThanTheLanguageSlotIsTheArea) {
