@@ -105,6 +105,13 @@ bool rowLayoutFor(const uint8_t colorType, const uint8_t bitDepth, const uint32_
   }
 }
 
+// The image's whole inflated stream: a filter byte and the raw bytes of each row. A deflate back-reference never
+// reaches further back than what was produced, so the inflate ring is capped at it (InflateReader::ringSizeFor).
+// begin() and scratchFor() size the ring by this.
+size_t inflatedBytesFor(const uint32_t height, const uint32_t rawRowBytes) {
+  return static_cast<size_t>(height) * (rawRowBytes + 1);
+}
+
 constexpr int MAX_IMAGE_WIDTH = 2048;
 constexpr int MAX_IMAGE_HEIGHT = 3072;
 constexpr uint32_t MAX_RAW_ROW_BYTES = 16384;
@@ -119,11 +126,9 @@ PngStreamDecoder::Scratch PngStreamDecoder::scratchFor(const Info& info) {
       !isValidBitDepth(info.colorType, info.bitDepth) || rawRowBytes == 0 || rawRowBytes > MAX_RAW_ROW_BYTES) {
     return {};
   }
-  // As begin() sizes the ring: filter byte plus raw bytes per row, the whole inflated stream, at most the window.
-  const size_t uncompressed = static_cast<size_t>(info.height) * (rawRowBytes + 1);
   Scratch scratch;
   scratch.rowBytes = rawRowBytes;
-  scratch.ringBytes = InflateReader::ringSizeFor(uncompressed);
+  scratch.ringBytes = InflateReader::ringSizeFor(inflatedBytesFor(info.height, rawRowBytes));
   scratch.wholeWindow = scratch.ringBytes == InflateReader::ringSizeFor(0);  // 0: the full window
   return scratch;
 }
@@ -298,7 +303,7 @@ bool PngStreamDecoder::begin(FsFile& file, Info& info) {
   // A deflate back-reference can never point further back than the bytes
   // produced so far, so cap the ring at the exact uncompressed size (filter
   // byte + raw bytes per row). Small images thus pay only a few KB.
-  const size_t uncompressed = static_cast<size_t>(height_) * (rawRowBytes_ + 1);
+  const size_t uncompressed = inflatedBytesFor(height_, rawRowBytes_);
   // The ring is the largest single block on this path (up to 32 KB). Take it from the same
   // arena scope as the scanline buffers when available — initWithExternalRing leaves ownership
   // with us, so deinit() will not free arena memory.
