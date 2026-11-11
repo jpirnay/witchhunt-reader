@@ -449,7 +449,10 @@ class TtfFontSet {
   std::unique_ptr<TtfFont> fonts_[kMaxFamilies];
   uint8_t count_ = 0;
   bool readsCard_ = false;
-  bool failedForNow_ = false;   // failedForNow()
+  bool failedForNow_ = false;  // failedForNow()
+  // During a load: the store predates GDEF-aware kerning (glyphstore::kFlagGdefKerning) and a style's kerning depends
+  // on GDEF, so the pairs it holds are not those the style kerns now.
+  bool kerningPredatesGdef_ = false;
   bool missesStarved_ = false;  // the heap could not hold a miss's memory in this pass (beginMiss())
   bool ringMode_ = false;
 

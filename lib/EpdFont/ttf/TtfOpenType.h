@@ -14,20 +14,22 @@
 /// font's mapping moves. Integer only.
 namespace ttf {
 
-/// A style's kerning: the GPOS 'kern' feature's subtables, resolved once, or, for a font without them, the legacy
-/// 'kern' table. A pair's kerning is what OpenType layout gives (see Gpos.h).
+/// A style's kerning: the GPOS 'kern' feature's lookups and their subtables, resolved once, or, for a font without
+/// them, the legacy 'kern' table. A pair's kerning is what OpenType layout gives (see Gpos.h), the lookups' flags
+/// skipping glyphs by their class in the font's GDEF.
 class Kerning {
  public:
-  /// More would be a malformed or hostile table: the first ones are kept. More than three times the most found in a
-  /// real font (76, Calibri Light), and it bounds what a hostile table costs per pair: the resolved walk has no
-  /// budget of its own, so every subtable is read for every pair that misses the store.
-  static constexpr uint16_t kMaxSubtables = 256;
+  /// More would be a malformed or hostile table: the first ones are kept. More than three times the most subtables
+  /// found in a real font (76, Calibri Light), each lookup taking one entry more, and it bounds what a hostile table
+  /// costs per pair: the resolved walk has no budget of its own, so every entry is read for every pair that misses
+  /// the store.
+  static constexpr uint16_t kMaxEntries = 256;
 
-  /// Resolves the subtables (one heap block, 4 bytes each). False, with nothing held, for a font without kerning or
-  /// when memory is short; kerning is then 0.
+  /// Resolves the lookups and subtables (one heap block, 4 bytes an entry). False, with nothing held, for a font
+  /// without kerning or when memory is short; kerning is then 0.
   bool resolve(FontBytes& bytes, const Face& face);
   bool any() const { return count_ != 0 || legacy_; }
-  uint16_t subtableCount() const { return count_; }
+  uint16_t entryCount() const { return count_; }
   /// Kerned from the legacy kern table (the font has no GPOS kerning).
   bool legacy() const { return legacy_; }
 
@@ -36,10 +38,14 @@ class Kerning {
   int32_t pair(FontBytes& bytes, const Face& face, uint16_t left, uint16_t right, bool* covered = nullptr) const;
 
  private:
-  std::unique_ptr<uint32_t[]> subtables_;  // offsets into the GPOS table (Gpos.h)
+  std::unique_ptr<uint32_t[]> entries_;  // offsets into the GPOS table (Gpos.h)
   uint16_t count_ = 0;
   bool legacy_ = false;
 };
+
+/// Whether GDEF changes how the style kerns (gpos::KernsByGdefClass(): a kern lookup that skips base glyphs or
+/// ligatures, or skips marks and can kern a pair holding one), read from its mapped tables. False without GPOS or GDEF.
+bool kernsByGdefClass(FontBytes& bytes, const Face& face);
 
 /// The ligatures EpdFont applies (fi, fl, ff, ffi, ffl) where the font's GSUB has them. They are keyed by their
 /// Unicode presentation forms, U+FB00-FB04, whatever the font's cmap says of those: `glyphs` gives the glyph each one

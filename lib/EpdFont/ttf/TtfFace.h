@@ -38,6 +38,8 @@ struct Face {
   uint32_t gsubLength = 0;
   uint32_t kern = 0;  ///< the legacy kerning table
   uint32_t kernLength = 0;
+  uint32_t gdef = 0;  ///< the glyph classes GPOS kern lookups' flags skip glyphs by (TtfOpenType); 0 when absent
+  uint32_t gdefLength = 0;
   uint16_t unitsPerEm = 0;
   uint16_t numGlyphs = 0;  ///< maxp's; for CFF outlines the CharStrings count, as FreeType's num_glyphs
   uint16_t numHMetrics = 0;

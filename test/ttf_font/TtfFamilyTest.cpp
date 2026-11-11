@@ -736,10 +736,16 @@ TEST(TtfSdBlock, IsTheFontButForItsOutlines) {
   for (const uint32_t cp : {uint32_t{'A'}, uint32_t{'z'}, uint32_t{0xE9}, uint32_t{0x2014}, uint32_t{0x4E2D}}) {
     EXPECT_EQ(ttf::glyphIndex(whole, wholeFace, cp), ttf::glyphIndex(card, face, cp)) << cp;
   }
-  // Every table but glyf is in place, byte for byte the file's; glyf never is.
+  // Every table but glyf is in place, byte for byte the file's; glyf never is. GDEF too: kerning's lookup flags read
+  // its glyph classes.
   ASSERT_NE(nullptr, card.span(face.gpos, face.gposLength));
   EXPECT_EQ(0, std::memcmp(whole.span(wholeFace.gpos, wholeFace.gposLength), card.span(face.gpos, face.gposLength),
                            face.gposLength));
+  ASSERT_NE(0u, face.gdef);
+  ASSERT_EQ(wholeFace.gdefLength, face.gdefLength);
+  ASSERT_NE(nullptr, card.span(face.gdef, face.gdefLength));
+  EXPECT_EQ(0, std::memcmp(whole.span(wholeFace.gdef, wholeFace.gdefLength), card.span(face.gdef, face.gdefLength),
+                           face.gdefLength));
   EXPECT_EQ(0, std::memcmp(whole.span(wholeFace.loca, wholeFace.locaLength), card.span(face.loca, face.locaLength),
                            face.locaLength));
   EXPECT_EQ(nullptr, card.span(face.glyf, 1));

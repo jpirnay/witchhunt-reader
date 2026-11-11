@@ -1,6 +1,7 @@
 // Kerning and ligatures for the TTF engine (TtfOpenType): the glue over the SDK's FreeInkFont layout readers, which
 // test the OpenType rules themselves (libs/font/FreeInkFont/test/host). Here: that a style finds and resolves its
-// tables, which table it kerns from, and the ligatures EpdFont applies, on built fonts and on Source Serif 4 Caption.
+// tables, which table it kerns from, that its GDEF reaches the kern lookups' flags, and the ligatures EpdFont applies,
+// on built fonts and on Source Serif 4 Caption.
 #include <Gpos.h>
 #include <Gsub.h>
 #include <gtest/gtest.h>
@@ -53,7 +54,7 @@ TEST(TtfKerning, GposKernsThroughTheResolvedSubtables) {
   Parsed p(font);
   ttf::Kerning kerning;
   ASSERT_TRUE(kerning.resolve(p.bytes, p.face));
-  EXPECT_EQ(1u, kerning.subtableCount());
+  EXPECT_EQ(2u, kerning.entryCount());  // the lookup and its subtable
   EXPECT_FALSE(kerning.legacy());
   bool covered = false;
   EXPECT_EQ(-50, kerning.pair(p.bytes, p.face, 1, 2, &covered));
@@ -113,8 +114,8 @@ TEST(TtfKerning, ABrokenGposKernsNothing) {
 }
 
 TEST(TtfKerning, SerifResolvedAgreesWithTheStatelessReader) {
-  // The resolved subtables must give what the SDK's per-call walk gives: every pair of printable ASCII in each of
-  // the four styles.
+  // The resolved entries must give what the SDK's per-call walk gives, with the face's GDEF: every pair of printable
+  // ASCII in each of the four styles. Source Serif's kern lookups skip only marks, so GDEF changes none of them.
   for (const char* name :
        {"SourceSerif4Caption/SourceSerif4Caption-Regular.ttf", "SourceSerif4Caption/SourceSerif4Caption-Bold.ttf",
         "SourceSerif4Caption/SourceSerif4Caption-It.ttf", "SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf"}) {
@@ -122,6 +123,7 @@ TEST(TtfKerning, SerifResolvedAgreesWithTheStatelessReader) {
     FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
     ttf::Face face;
     ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+    ASSERT_NE(0u, face.gdef) << name;
     ttf::Kerning kerning;
     ASSERT_TRUE(kerning.resolve(bytes, face)) << name;
     int kerned = 0;
@@ -129,14 +131,109 @@ TEST(TtfKerning, SerifResolvedAgreesWithTheStatelessReader) {
       for (uint32_t r = 0x21; r < 0x7F; ++r) {
         const uint16_t gl = ttf::glyphIndex(bytes, face, l);
         const uint16_t gr = ttf::glyphIndex(bytes, face, r);
-        const int32_t expected =
-            freeink::font::gpos::PairKernAdjustment(file.data() + face.gpos, face.gposLength, gl, gr);
+        const int32_t expected = freeink::font::gpos::PairKernAdjustment(file.data() + face.gpos, face.gposLength, gl,
+                                                                         gr, file.data() + face.gdef, face.gdefLength);
         ASSERT_EQ(expected, kerning.pair(bytes, face, gl, gr)) << name << " " << char(l) << char(r);
+        ASSERT_EQ(freeink::font::gpos::PairKernAdjustment(file.data() + face.gpos, face.gposLength, gl, gr), expected)
+            << name << " " << char(l) << char(r);
         kerned += expected != 0;
       }
     }
     EXPECT_GT(kerned, 500) << name;  // a real kerning table, not a vacuous match
   }
+}
+
+TEST(TtfKerning, ALookupSkipsTheGlyphsItsFlagsSkipByTheirGdefClass) {
+  // A kern lookup that ignores marks (LookupFlag 0x0008), over boxes whose GDEF makes glyph 2 a mark.
+  LayoutLookup lookup;
+  lookup.flags = 0x0008;
+  PairSubtable pairs;
+  pairs.pairs = {{1, {{2, -50}, {3, 30}}}, {2, {{3, -40}}}};
+  lookup.pairSubtables = {pairs};
+  const Bytes gpos = layoutTable({{"latn", {0}}}, {{"kern", {0}}}, {lookup});
+  Font font = boxes(4);
+  font.extraTables = {{"GPOS", gpos}, {"GDEF", gdefTable({{1, 1}, {2, 3}, {3, 1}})}};
+  Parsed p(font);
+  ASSERT_NE(0u, p.face.gdef);
+  ttf::Kerning kerning;
+  ASSERT_TRUE(kerning.resolve(p.bytes, p.face));
+  bool covered = false;
+  EXPECT_EQ(0, kerning.pair(p.bytes, p.face, 1, 2, &covered));  // the mark is skipped...
+  EXPECT_TRUE(covered);                                         // ...but 1 kerns with others: worth remembering as 0
+  EXPECT_EQ(30, kerning.pair(p.bytes, p.face, 1, 3));
+  covered = true;
+  EXPECT_EQ(0, kerning.pair(p.bytes, p.face, 2, 3, &covered));
+  EXPECT_FALSE(covered);  // a skipped left glyph kerns with nothing
+
+  // The same lookup in a font without GDEF: every glyph unclassified, nothing skipped.
+  font.extraTables = {{"GPOS", gpos}};
+  Parsed bare(font);
+  EXPECT_EQ(0u, bare.face.gdef);
+  ASSERT_TRUE(kerning.resolve(bare.bytes, bare.face));
+  EXPECT_EQ(-50, kerning.pair(bare.bytes, bare.face, 1, 2));
+  EXPECT_EQ(-40, kerning.pair(bare.bytes, bare.face, 2, 3));
+}
+
+TEST(TtfKerning, CaeciliaLookupFlagsTakeBaseGlyphKerningAway) {
+  // Caecilia LT's kern lookups set 0x000E (skip base glyphs, ligatures and marks) and its GDEF classes Latin letters
+  // as base glyphs, so HarfBuzz kerns none of its letter pairs. Source Serif given the same flags kerns none either,
+  // and kerns as before once its GDEF is out of reach.
+  std::vector<uint8_t> file = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
+  const auto kernAV = [](const std::vector<uint8_t>& bytes, const bool withGdef) {
+    FontBytes font(bytes.data(), static_cast<uint32_t>(bytes.size()));
+    ttf::Face face;
+    EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(font, &face));
+    if (!withGdef) face.gdef = 0;
+    ttf::Kerning kerning;
+    EXPECT_TRUE(kerning.resolve(font, face));
+    return kerning.pair(font, face, ttf::glyphIndex(font, face, 'A'), ttf::glyphIndex(font, face, 'V'));
+  };
+  const int32_t kerned = kernAV(file, true);
+  EXPECT_LT(kerned, 0);
+  setKernLookupFlags(file, 0x000E);
+  EXPECT_EQ(0, kernAV(file, true));
+  EXPECT_EQ(kerned, kernAV(file, false));
+}
+
+TEST(TtfKerning, GranthaKernsNoMarkItsLookupIgnores) {
+  // Noto Sans Grantha 2.001 kerns sha before the anusvara by -40 units in a lookup that ignores marks (0x0508), and its
+  // GDEF classes the anusvara a mark: HarfBuzz kerns the pair 0, and so does the engine now.
+  const std::vector<uint8_t> file = readFixture("NotoSansGrantha-Kern-Regular.ttf");
+  FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
+  ttf::Face face;
+  ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+  ASSERT_NE(0u, face.gdef);
+  ttf::Kerning kerning;
+  ASSERT_TRUE(kerning.resolve(bytes, face));
+  const uint16_t sha = ttf::glyphIndex(bytes, face, 0x11336);
+  const uint16_t anusvara = ttf::glyphIndex(bytes, face, 0x11302);
+  ASSERT_NE(0, sha);
+  ASSERT_NE(0, anusvara);
+  bool covered = false;
+  EXPECT_EQ(0, kerning.pair(bytes, face, sha, anusvara, &covered));
+  EXPECT_TRUE(covered);  // sha kerns, only not with a mark
+  ttf::Face withoutGdef = face;
+  withoutGdef.gdef = 0;
+  EXPECT_EQ(-40, kerning.pair(bytes, withoutGdef, sha, anusvara));
+}
+
+TEST(TtfKerning, OnlyAStyleWhoseKerningGdefChangesKernsByGdefClass) {
+  // What decides whether a store installed before GDEF-aware kerning holds stale pairs for a style.
+  const auto kernsByClass = [](const std::vector<uint8_t>& file) {
+    FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
+    ttf::Face face;
+    EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+    return ttf::kernsByGdefClass(bytes, face);
+  };
+  // Their kern lookups skip only marks and kern no pair holding one; Ubuntu has no GDEF.
+  for (const char* name : {"SourceSerif4Caption/SourceSerif4Caption-Regular.ttf", "NotoSans/NotoSans-Regular.ttf",
+                           "Inter/Inter-Regular.ttf", "Inter/Inter-Bold.ttf", "Ubuntu/Ubuntu-Regular.ttf"}) {
+    EXPECT_FALSE(kernsByClass(readFont(name))) << name;
+  }
+  std::vector<uint8_t> caecilia = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
+  setKernLookupFlags(caecilia, 0x000E);
+  EXPECT_TRUE(kernsByClass(caecilia));
+  EXPECT_TRUE(kernsByClass(readFixture("NotoSansGrantha-Kern-Regular.ttf")));
 }
 
 // --- Ligatures ---
@@ -247,9 +344,9 @@ TEST(TtfLigatures, SerifHasTheFiAndFlLigatures) {
 
 // --- Hostile and truncated tables ---
 
-TEST(TtfKerning, AStyleKeepsAtMostTheSubtableCap) {
+TEST(TtfKerning, AStyleKeepsAtMostTheEntryCap) {
   // 76 PairPos subtables more than the cap, in one lookup. The first kern 1-2; the last one alone kerns 5-6.
-  const uint16_t total = ttf::Kerning::kMaxSubtables + 76;
+  const uint16_t total = ttf::Kerning::kMaxEntries + 76;
   LayoutLookup lookup;
   for (uint16_t s = 0; s < total; ++s) {
     PairSubtable pairs;
@@ -263,13 +360,13 @@ TEST(TtfKerning, AStyleKeepsAtMostTheSubtableCap) {
   Font font = boxes(6);
   font.extraTables = {{"GPOS", layoutTable({{"latn", {0}}}, {{"kern", {0}}}, {lookup})}};
   Parsed p(font);
-  // The font has them all, more than the cap.
+  // The font has them all, more than the cap: the lookup's entry, then its subtables.
   const unsigned found =
       freeink::font::gpos::ResolveKernSubtables(p.file.data() + p.face.gpos, p.face.gposLength, nullptr, 0);
-  ASSERT_EQ(total, found);
+  ASSERT_EQ(total + 1u, found);
   ttf::Kerning kerning;
   ASSERT_TRUE(kerning.resolve(p.bytes, p.face));
-  EXPECT_EQ(ttf::Kerning::kMaxSubtables, kerning.subtableCount());
+  EXPECT_EQ(ttf::Kerning::kMaxEntries, kerning.entryCount());
   EXPECT_EQ(-50, kerning.pair(p.bytes, p.face, 1, 2));
   // The subtable past the cap is dropped, so its pair kerns 0: the first ones are kept.
   EXPECT_EQ(0, kerning.pair(p.bytes, p.face, 5, 6));

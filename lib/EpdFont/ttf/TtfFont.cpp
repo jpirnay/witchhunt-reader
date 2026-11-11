@@ -249,16 +249,21 @@ bool TtfFontSet::load(const Files* families, const uint8_t count, const uint8_t 
   }
 
   ttf::ScratchPlan plan;
+  kerningPredatesGdef_ = false;
   TtfFont::StylesResult styles = openStyles(families, count, &plan);
-  if ((styles == TtfFont::StylesResult::MapFailed || styles == TtfFont::StylesResult::Changed) && !installed &&
-      mode == Install::IfNeeded) {
+  // A store that predates GDEF-aware kerning, read-only (Install::Never): drawn as it is, its pairs as they were.
+  const bool kerningChanged = styles == TtfFont::StylesResult::Ok && kerningPredatesGdef_;
+  if ((styles == TtfFont::StylesResult::MapFailed || styles == TtfFont::StylesResult::Changed || kerningChanged) &&
+      !installed && mode == Install::IfNeeded) {
     // The regions opened but a style no longer maps, as the mapping budget shrank since the install (a firmware
-    // update), or an SD-mode style's file is not the one installed. Install again, with a plan for today's budget
-    // and today's files (spec 6.2); a fresh install that still cannot open its styles is refused below rather than
-    // installed again at every load.
+    // update), an SD-mode style's file is not the one installed, or the store predates GDEF-aware kerning and a
+    // style's kerning depends on GDEF. Install again, with a plan for today's budget and today's files (spec 6.2); a
+    // fresh install that still cannot open its styles is refused below rather than installed again at every load.
     LOG_INF("TTF", "%s; installing the families again",
             styles == TtfFont::StylesResult::MapFailed ? "a style no longer fits the mapping budget"
-                                                       : "a style's file on the card changed since the install");
+            : styles == TtfFont::StylesResult::Changed ? "a style's file on the card changed since the install"
+                                                       : "the stored kerning predates GDEF lookup flags");
+    kerningPredatesGdef_ = false;
     if (!install(families, count, identity, onBusy)) return false;
     opened = store_.open(identity);
     if (opened != OpenResult::Ready) {
@@ -270,6 +275,11 @@ bool TtfFontSet::load(const Files* families, const uint8_t count, const uint8_t 
     styles = openStyles(families, count, &plan);
   }
   if (styles != TtfFont::StylesResult::Ok) return false;
+  // A store from before GDEF-aware kerning whose every style was checked and found to kern as before: remembered, so
+  // later loads skip the check (it reads each style's kern lookups whole).
+  if (!kerningPredatesGdef_ && !store_.kerningHonoursGdef() && mode == Install::IfNeeded) {
+    store_.markKerningHonoursGdef();
+  }
 
   // One block for every family: the output region doubles as the batch buffer, so it also holds the record header
   // of its largest bitmap. Planned only: the first miss makes it (beginMiss()).
@@ -289,8 +299,8 @@ bool TtfFontSet::load(const Files* families, const uint8_t count, const uint8_t 
           static_cast<unsigned>(sizeof(TtfFont::Size::StyleFont)), static_cast<unsigned long>(store_.logUsed()),
           static_cast<unsigned long>(store_.geometry().logSize));
   for (uint8_t f = 0; f < count; ++f) {
-    LOG_INF("TTF", "family %u regular style: %u kern subtables%s, %u ligatures", f,
-            fonts_[f]->styles_[0].kerning.subtableCount(),
+    LOG_INF("TTF", "family %u regular style: %u kern lookups and subtables%s, %u ligatures", f,
+            fonts_[f]->styles_[0].kerning.entryCount(),
             fonts_[f]->styles_[0].kerning.legacy() ? " (legacy kern table)" : "",
             fonts_[f]->styles_[0].ligatures.count);
   }
@@ -432,6 +442,8 @@ bool TtfFontSet::install(const Files* families, const uint8_t count, const uint8
     onCard += layout.styleMode[b] == glyphstore::kModeSd ? 1 : 0;
   }
   bool noHeaderMemory = false;
+  // Its pairs are kerned as the GPOS reader kerns now: a later load need not check the families again.
+  layout.geometry.flags |= glyphstore::kFlagGdefKerning;
   if (!store_.beginInstall(layout, identity, work->info, kept, &noHeaderMemory)) {
     failedForNow_ = noHeaderMemory;  // its header, made before anything is erased
     return false;
@@ -853,6 +865,12 @@ TtfFont::StylesResult TtfFont::openStyles(const ttf::FileSource (&files)[4], uin
     style.present = true;
     // Kerning and ligatures, resolved once per style (spec 5.4): a style without them draws without.
     style.kerning.resolve(bytes, style.face);
+    // A store installed before kerning honoured GDEF holds this style's pairs as they were kerned then: the load
+    // installs the families again (TtfFontSet::load()).
+    if (!set_.store_.kerningHonoursGdef() && !set_.kerningPredatesGdef_ && ttf::kernsByGdefClass(bytes, style.face)) {
+      LOG_INF("TTF", "family %u style %u kerns by GDEF class; the store's pairs predate that", family_, s);
+      set_.kerningPredatesGdef_ = true;
+    }
     ttf::resolveLigatures(bytes, style.face, &style.ligatures);
     maxNativePx_ = std::min(maxNativePx_, nativeCeilingPx(style.face));
     *plan = ttf::mergePlans(*plan, ttf::planScratch(style.face, largest, poolFor(style)));

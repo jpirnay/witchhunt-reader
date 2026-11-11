@@ -595,7 +595,7 @@ produces; a power cut leaves at worst bytes nothing references.
 
 | Offset | Size | Contents |
 |---|---|---|
-| 0 | 4 KB sector | `Header`, written last at install: `u32` magic `CPTT`, `u16` version, `u16` header bytes, the set's 16-byte identity, the `Geometry` (style count, the regions' offsets and sizes, `segmentBytes`), 8 `StyleInfo` (a style block's offset, size, mode and file size; in SD mode also its file's stamp and its outlines, below), then `u32` FNV-1a over all of it |
+| 0 | 4 KB sector | `Header`, written last at install: `u32` magic `CPTT`, `u16` version, `u16` header bytes, the set's 16-byte identity, the `Geometry` (style count, flags, the regions' offsets and sizes, `segmentBytes`; flag 0x01, `kFlagGdefKerning`: installed with GDEF-aware kerning, its byte reserved and zero before, so a store without it is installed again when a family's kerning depends on GDEF), 8 `StyleInfo` (a style block's offset, size, mode and file size; in SD mode also its file's stamp and its outlines, below), then `u32` FNV-1a over all of it |
 | 4 KB | 4 KB sector | The state: 32 face entries `{u32 face, u32 claimed}`, then the `u32` wipe word, then the rebuild journal: 479 entries `{u32 base, u32 done}` |
 | 64 KB | 64 KB pages | The style blocks, each family's styles in the set's order, each on its own page so one maps alone; the SD-mode blocks after every flash-mode one |
 | `indexOffset` | whole pages | Glyph index: 8-byte slots `{u32 key, u32 value}`, open addressing, at most 128 probes |

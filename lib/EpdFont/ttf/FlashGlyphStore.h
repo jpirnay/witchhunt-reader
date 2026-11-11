@@ -267,6 +267,13 @@ class FlashGlyphStore {
   /// The epoch the next segment the head moves into gets.
   uint32_t epoch() const { return nextEpoch_; }
   const glyphstore::Geometry& geometry() const { return geometry_; }
+  /// The pairs the store holds are kerned as the GPOS reader kerns now: it was installed with kFlagGdefKerning, or,
+  /// installed before, it was found to hold no family whose kerning depends on GDEF (markKerningHonoursGdef()).
+  bool kerningHonoursGdef() const { return kerningHonoursGdef_; }
+  /// Records that an open store installed before kFlagGdefKerning holds no family whose kerning depends on GDEF, so
+  /// later opens need not check: kGdefCheckedMagic programmed once into the header sector's last word. False when the
+  /// store is not open or the write failed.
+  bool markKerningHonoursGdef();
 
  private:
   enum class Insert : uint8_t { Done, ChainFull, WriteFailed };
@@ -346,6 +353,7 @@ class FlashGlyphStore {
   NorFlash& flash_;
   mutable Recent recent_[kRecentSets][kRecentWays];  // find() is const: the answers are RAM, not store state
   glyphstore::Geometry geometry_{};
+  bool kerningHonoursGdef_ = false;
   uint32_t styleOffset_[glyphstore::kMaxStyles] = {};
   uint32_t styleSize_[glyphstore::kMaxStyles] = {};
   const uint8_t* region_ = nullptr;  // one mapping: index, pair index, log

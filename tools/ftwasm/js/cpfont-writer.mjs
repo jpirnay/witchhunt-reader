@@ -21,7 +21,7 @@
 //
 // No Node or DOM APIs; runs in a module Web Worker.
 
-import { FontError, SfntFont } from './otf-tables.mjs';
+import { FontError, SfntFont, SKIPPING_FLAGS } from './otf-tables.mjs';
 import { PyIntSet } from './pyset-order.mjs';
 import { reduceKernClasses } from './kern-reduce.mjs';
 import { rasterizeStyle, resolveIntervals, CONVERTER_DPI } from './cpfont-raster.mjs';
@@ -53,7 +53,8 @@ export function fp4FromDesignUnits(du, scale) {
  * `codepoints` = every emitted glyph's codepoint (all_cps). The GPOS 'kern'
  * lookups add up; within a lookup only the first subtable that matches a pair
  * counts (OpenType's rule), and the legacy 'kern' table is used only when GPOS
- * has no 'kern' feature.
+ * has no 'kern' feature. A lookup whose flags skip a glyph by its GDEF class
+ * kerns no pair holding it (lookupGlyphs()).
  */
 export function prepareKerning(font, codepoints) {
   const cmap = font.bestCmap();
@@ -87,14 +88,29 @@ export function prepareKerning(font, codepoints) {
       }
     }
   }
+  const gdef = kernLookups.size ? font.gdef() : null;
   for (const li of kernLookups) {
     const lookup = gpos.lookup(li);
+    const wanted = lookupGlyphs(gdef, lookup, glyphToCps);
     const claimed = { pairs: new Set(), left: new Set() };
     for (const st of lookup.subtables) {
-      if (st.type === 2) gpos.pairPos(st.off, glyphToCps, add, claimed);
+      if (st.type === 2) gpos.pairPos(st.off, wanted, add, claimed);
     }
   }
   return { upem: font.unitsPerEm(), raw, glyphToCps };
+}
+
+/**
+ * The glyphs a lookup may kern (kern_extract.py's _lookup_glyphs()): `glyphs` less those its flags skip
+ * by GDEF class, in their order. A pair holding a skipped glyph is not the lookup's in either position.
+ */
+function lookupGlyphs(gdef, lookup, glyphs) {
+  if (!gdef || !(lookup.flags & SKIPPING_FLAGS)) return glyphs;
+  const kept = new Map();
+  for (const [gid, cps] of glyphs) {
+    if (!gdef.skips(lookup.flags, lookup.markSet, gid)) kept.set(gid, cps);
+  }
+  return kept;
 }
 
 /** The per-size half: scale, drop zeros, expand aliases, drop SMP. Map<lcp*0x110000+rcp, int8>. */
