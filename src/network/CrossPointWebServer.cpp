@@ -43,6 +43,7 @@
 #include "SettingsByKey.h"
 #include "SettingsList.h"
 #include "SystemStatus.h"
+#include "UiLanguagePacks.h"
 #include "UploadStallTolerance.h"
 #include "WebAssets.h"
 #include "WebDAVHandler.h"
@@ -2307,6 +2308,19 @@ bool fetchRemoteFontManifest(HttpDownloader::Session& session, FontInstaller& in
 }
 
 // Installs the family at `familyIndex` of `families`.
+// The catalog for a request, as fetchRemoteFontManifest() reads it, its TLS session closed before the caller goes on
+// (the installs open their own, the list's JSON needs the heap). False once the error is answered.
+bool fetchCatalogOrAnswer(WebServer* server, FontInstaller& installer, FontCatalog& families, std::string& baseUrl) {
+  HttpDownloader::Session manifestSession;
+  std::string error;
+  if (fetchRemoteFontManifest(manifestSession, installer, families, baseUrl, error)) return true;
+  JsonDocument errDoc;
+  errDoc["ok"] = false;
+  errDoc["error"] = error;
+  sendJson(server, 500, errDoc);
+  return false;
+}
+
 bool installRemoteFamily(HttpDownloader::Session& session, const FontCatalog& families, const size_t familyIndex,
                          const std::string& baseUrl, FontInstaller& installer, std::string& outError) {
   const char* familyName = families.name(familyIndex);
@@ -2532,17 +2546,7 @@ void CrossPointWebServer::handleFontManifest() {
 
   FontCatalog families;
   std::string baseUrl;
-  std::string error;
-  {
-    HttpDownloader::Session manifestSession;
-    if (!fetchRemoteFontManifest(manifestSession, installer, families, baseUrl, error)) {
-      JsonDocument errDoc;
-      errDoc["ok"] = false;
-      errDoc["error"] = error;
-      sendJson(server.get(), 500, errDoc);
-      return;
-    }
-  }  // close TLS before the response JSON document is built
+  if (!fetchCatalogOrAnswer(server.get(), installer, families, baseUrl)) return;
 
   JsonDocument doc;
   doc["ok"] = true;
@@ -2560,6 +2564,8 @@ void CrossPointWebServer::handleFontManifest() {
     obj["language"] = families.languagePack(i);
     // A CJK interface pack (ChineseUI): no reading font, listed with the language packs.
     obj["interfacePack"] = cjk_ui_pack::isFamily(families.name(i));
+    // A pack of the interface language: the page says what deleting it does first.
+    obj["inUse"] = families.installed(i) && UiLanguagePacks::usedByInterface(families, i);
     obj["totalSize"] = static_cast<unsigned long>(families.totalSize(i));
     obj["fileCount"] = static_cast<unsigned>(families.fileCount(i));
   }
@@ -2591,22 +2597,12 @@ void CrossPointWebServer::handleFontDownload() {
   FontInstaller installer(sdFontSystem.registry());
   installer.refreshRegistry();
 
-  // The manifest fetch uses its own session, closed at the end of the block
-  // below, before a separate install session is opened for the actual family
-  // downloads.
+  // The manifest fetch uses its own session, closed before a separate install
+  // session is opened for the actual family downloads.
   FontCatalog families;
   std::string baseUrl;
+  if (!fetchCatalogOrAnswer(server.get(), installer, families, baseUrl)) return;
   std::string error;
-  {
-    HttpDownloader::Session manifestSession;
-    if (!fetchRemoteFontManifest(manifestSession, installer, families, baseUrl, error)) {
-      JsonDocument errDoc;
-      errDoc["ok"] = false;
-      errDoc["error"] = error;
-      sendJson(server.get(), 500, errDoc);
-      return;
-    }
-  }  // manifestSession destructor closes the TLS connection here
 
   // The families to install, copied into a block of their own, so the whole
   // list can be freed before the downloads: their TLS session needs a
@@ -2930,6 +2926,10 @@ void CrossPointWebServer::handleFontDelete() {
   }
 
   const char* familyName = doc["family"];
+  if (doc["pack"].as<bool>()) {
+    deletePack(familyName);
+    return;
+  }
   FontInstaller installer(sdFontSystem.registry());
   auto result = installer.deleteFamily(familyName);
 
@@ -2941,6 +2941,27 @@ void CrossPointWebServer::handleFontDelete() {
     server->send(500, "application/json", "{\"error\":\"Delete failed\"}");
     LOG_ERR("WEB", "Failed to delete font family: %s", familyName);
   }
+}
+
+// A language or hyphenation pack, deleted as the reader's Font Manager deletes it (FontInstaller::deletePack()). Its
+// files are known from the catalog alone, so the manifest is fetched as for a download.
+void CrossPointWebServer::deletePack(const char* name) {
+  if (rejectIfLowMemory(server.get())) return;
+  FontInstaller installer(sdFontSystem.registry());
+  FontCatalog families;
+  std::string baseUrl;
+  if (!fetchCatalogOrAnswer(server.get(), installer, families, baseUrl)) return;
+  for (size_t i = 0; i < families.count(); i++) {
+    if (strcmp(name, families.name(i)) != 0 || !families.pack(i)) continue;
+    if (FontInstaller::deletePack(families, i) != FontInstaller::Error::OK) {
+      server->send(500, "application/json", "{\"ok\":false,\"error\":\"Delete failed\"}");
+      return;
+    }
+    LOG_DBG("WEB", "Deleted pack: %s", name);
+    server->send(200, "application/json", "{\"ok\":true}");
+    return;
+  }
+  server->send(404, "application/json", "{\"ok\":false,\"error\":\"Pack not found in manifest\"}");
 }
 
 // ---- Wi-Fi Credentials API ----

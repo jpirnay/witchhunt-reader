@@ -1,6 +1,10 @@
 #pragma once
 
+#include <cstddef>
+
 #include "PackOffer.h"
+
+class FontCatalog;
 
 // What the interface language would have the reader download (asked with PackOffer::ask): its own pack, the strings
 // of every language but English (LangPack.h), and its hyphenation pack (German, French, ... HyphenationPacks) or, for
@@ -24,5 +28,9 @@ PackOffer::Offer takeHomeOffer();
 // of two-letter keys: the language's code capitalised ("De" from "de" or "DE"), where a hyphenation pack's is lower
 // case ("de") and a CJK interface pack's upper case ("ZH"). Written into `key`, which it returns.
 const char* languageDeclineKey(const char* code, char (&key)[3]);
+
+// Whether the pack `family` of `families` is one the interface language uses: its strings, its hyphenation pack or its
+// CJK interface pack. The web Font Manager says what deleting such a pack does before it deletes it.
+bool usedByInterface(const FontCatalog& families, size_t family);
 
 }  // namespace UiLanguagePacks

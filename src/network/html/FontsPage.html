@@ -24,6 +24,7 @@
       .family:first-child { padding-top: 0; }
       .family:last-child { padding-bottom: 0; }
       .family-info { flex: 1 1 260px; min-width: 0; }
+      .family-actions { display: flex; gap: 8px; flex-wrap: wrap; }
       .family-info h3 { margin: 0 0 2px; font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
       .family-meta { color: var(--text-muted); font-size: 0.875rem; overflow-wrap: anywhere; }
       /* A group of the packs: a section label over its note, set off from the group before by a rule. */
@@ -254,8 +255,8 @@
           <section class="card" id="panel-packs" hidden>
             <h2>Language packs</h2>
             <p class="card-intro">Not fonts: what the reader needs for a language besides a font of its script. English
-              is built in. The reader downloads the packs itself, so it must be online. Delete a pack in the Font
-              Manager on the reader.</p>
+              is built in and needs none. The reader downloads the packs itself, so it must be online. Before
+              <strong>Delete</strong> removes a pack, the page says what that changes.</p>
             <div class="toolbar">
               <button id="refreshPacks" class="btn" type="button">Refresh catalog</button>
               <button id="updateAllPacks" class="btn btn-primary" type="button">Update all packs</button>
@@ -432,9 +433,64 @@
         btn.disabled = false;
       });
 
+      const actions = document.createElement('div');
+      actions.className = 'family-actions';
+      actions.appendChild(btn);
+      // A pack on the card is deleted here too (a font under Installed fonts).
+      if (list === 'packs' && f.installed) {
+        const del = document.createElement('button');
+        del.className = 'btn btn-danger btn-small';
+        del.dataset.deletePack = f.name;
+        del.textContent = 'Delete';
+        del.addEventListener('click', async () => {
+          if (!confirm(packDeleteQuestion(f))) return;
+          del.disabled = true;
+          await deletePack(f);
+          del.disabled = false;
+        });
+        actions.appendChild(del);
+      }
+
       row.appendChild(info);
-      row.appendChild(btn);
+      row.appendChild(actions);
       return row;
+    }
+
+    // What deleting the pack `f` changes, as the question before it. A pack the interface language uses (f.inUse)
+    // says so: its strings leave the interface English from the next start, and its other packs are offered again.
+    function packDeleteQuestion(f) {
+      const offeredAgain = ' It is a pack of the interface language: the reader may offer it again at its next start.';
+      let what = '';
+      if (f.language) {
+        what = f.inUse ? ' The reader\'s interface is in this language: without its pack the menus and messages are ' +
+          'English from the reader\'s next start.' : '';
+      } else if (f.hyphenation) {
+        what = ' Books in its language are no longer hyphenated.' + (f.inUse ? offeredAgain : '');
+      } else {
+        what = ' Book titles in its script show boxes outside a book for the characters the menu fonts lack.' +
+          (f.inUse ? offeredAgain : '');
+      }
+      return 'Delete "' + f.name + '"?' + what;
+    }
+
+    // Deleted as the reader's Font Manager deletes it: a language or hyphenation pack by its files in the catalog
+    // ({pack: true}), a CJK interface pack as the font folder it is.
+    async function deletePack(f) {
+      setStatus('packStatus', 'Deleting "' + f.name + '"...');
+      try {
+        const res = await fetch('/api/fonts/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(f.interfacePack ? {family: f.name} : {family: f.name, pack: true})
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error(data.error || 'the reader answered ' + res.status);
+        setStatus('packStatus', 'Deleted "' + f.name + '".' + (f.language && f.inUse
+          ? ' The interface is English from the reader\'s next start.' : ''), true);
+      } catch (err) {
+        setStatus('packStatus', 'Could not delete "' + f.name + '": ' + err.message, false);
+      }
+      await loadRemoteManifest();
     }
 
     function groupHead(title, note) {

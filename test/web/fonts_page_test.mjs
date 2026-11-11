@@ -156,7 +156,7 @@ const PACKED = { ...REMOTE, families: [
   { name: 'ChineseUI', description: 'Simplified Chinese in the interface', interfacePack: true, installed: true, hasUpdate: true, totalSize: 3000000, fileCount: 1 },
   REMOTE.families[0],
   { name: 'Literata', description: 'Serif', installed: true, hasUpdate: true, totalSize: 900000, fileCount: 5 },
-  { name: 'Language-German', description: 'Menus and messages in German', language: true, installed: true, hasUpdate: false, totalSize: 14000, fileCount: 1 },
+  { name: 'Language-German', description: 'Menus and messages in German', language: true, installed: true, hasUpdate: false, inUse: true, totalSize: 14000, fileCount: 1 },
   { name: 'Hyphenation-Dutch', description: 'Hyphenation for books in Dutch', hyphenation: true, installed: false, hasUpdate: false, totalSize: 64313, fileCount: 1 },
   { name: 'Hyphenation-German', description: 'Hyphenation for books in German', hyphenation: true, installed: true, hasUpdate: true, totalSize: 206283, fileCount: 1 },
 ] };
@@ -220,6 +220,58 @@ console.log('- a pack\'s download reports beside the packs');
   const status = w.document.getElementById('packStatus');
   await until(() => /^Installed/.test(status.textContent));
   same(status.textContent, 'Installed "Hyphenation-Dutch".', 'the packs\' status says it');
+  dom.window.close();
+}
+
+console.log('- deleting a pack');
+for (const [name, agree, inUse, body, asks, done] of [
+  ['Hyphenation-German', true, false, { family: 'Hyphenation-German', pack: true }, /^Delete "Hyphenation-German"\? Books in its language are no longer hyphenated\.$/,
+    'Deleted "Hyphenation-German".'],
+  ['Hyphenation-German', true, true, { family: 'Hyphenation-German', pack: true }, /no longer hyphenated\. It is a pack of the interface language: the reader may offer it again/,
+    'Deleted "Hyphenation-German".'],
+  ['Language-German', true, true, { family: 'Language-German', pack: true }, /interface is in this language: without its pack the menus and messages are English from the reader's next start\.$/,
+    'Deleted "Language-German". The interface is English from the reader\'s next start.'],
+  ['ChineseUI', true, false, { family: 'ChineseUI' }, /^Delete "ChineseUI"\? Book titles in its script show boxes outside a book/, 'Deleted "ChineseUI".'],
+  ['Hyphenation-German', false, false, null, /^Delete "Hyphenation-German"\?/, null],
+]) {
+  const asked = [];
+  const deletes = [];
+  const families = PACKED.families.map((f) => (f.name === name ? { ...f, inUse } : f));
+  const { w, dom } = loadPage((u, init) => {
+    if (u === '/api/fonts') return response(200, { families: [] });
+    if (u === '/api/fonts/manifest') return response(200, { ...PACKED, families });
+    if (u === '/api/fonts/delete') { deletes.push(JSON.parse(init.body)); return response(200, { ok: true }); }
+  }, agree, asked);
+  await until(() => w.document.querySelectorAll('#packFamilies button[data-family]').length === 4);
+  same([...w.document.querySelectorAll('button[data-delete-pack]')].map((b) => b.dataset.deletePack).join(','),
+    'Language-German,ChineseUI,Hyphenation-German', 'an installed pack has Delete, a missing one none, no font has it');
+  w.document.querySelector(`button[data-delete-pack="${name}"]`).click();
+  await until(() => asked.length > 0);
+  check(asks.test(asked[0] || ''), `${name}${inUse ? ' (in use)' : ''}: the question says what it changes (${asked[0]})`);
+  const status = w.document.getElementById('packStatus');
+  if (agree) {
+    await until(() => /^Deleted/.test(status.textContent));
+    same(JSON.stringify(deletes[0]), JSON.stringify(body), 'the delete goes as the reader deletes that kind');
+    same(status.textContent, done, 'the packs\' status says it');
+  } else {
+    await until(() => deletes.length > 0, 200);
+    same(deletes.length, 0, 'Cancel deletes nothing');
+  }
+  dom.window.close();
+}
+
+{
+  const { w, dom } = loadPage((u) => {
+    if (u === '/api/fonts') return response(200, { families: [] });
+    if (u === '/api/fonts/manifest') return response(200, PACKED);
+    if (u === '/api/fonts/delete') return response(500, { ok: false, error: 'Delete failed' });
+  });
+  await until(() => w.document.querySelectorAll('button[data-delete-pack]').length === 3);
+  w.document.querySelector('button[data-delete-pack="Hyphenation-German"]').click();
+  const status = w.document.getElementById('packStatus');
+  await until(() => /^Could not/.test(status.textContent));
+  same(status.textContent, 'Could not delete "Hyphenation-German": Delete failed', 'a refused delete shows the device\'s reason');
+  check(/status-err/.test(status.className), 'as an error');
   dom.window.close();
 }
 

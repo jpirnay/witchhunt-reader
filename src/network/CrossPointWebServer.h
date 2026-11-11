@@ -164,6 +164,7 @@ class CrossPointWebServer {
   void handleFontUpload();
   void handleFontUploadData();
   void handleFontDelete();
+  void deletePack(const char* name);
 
   void handleDictionaryPage() const;
 
