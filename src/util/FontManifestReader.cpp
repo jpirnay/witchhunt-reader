@@ -5,6 +5,7 @@
 #include <Memory.h>
 
 #include <cstring>
+#include <vector>
 
 #include "FontDownloadRules.h"
 
@@ -14,8 +15,14 @@
 // per read). About 1.9 KB plus the format fields, too much for the stack.
 struct FontManifestReader::Work {
   Work(const FontManifestCallbacks& callbacks, FontCatalog& catalog) : parser(callbacks), filler(catalog) {}
+  // forEachFamily()'s: the filler writes one family at a time into `one`.
+  explicit Work(const FontManifestCallbacks& callbacks) : parser(callbacks), filler(one) {}
 
   FontManifestParser parser;
+  // forEachFamily(): the block of the family being handed over (declared before the builders, which may point at it),
+  // and each family's size from the first pass, files << 16 | string bytes, kDropped for one left out.
+  FontCatalog one;
+  std::vector<uint32_t> familySizes;
   // Pass 1 counts what the families that pass their checks hold; pass 2 writes them into the block.
   // FontManifestReader::builder points at one of them while its pass runs.
   FontCatalog::Builder counter;
@@ -45,14 +52,9 @@ size_t copyBounded(char* dst, const size_t dstSize, const char* src, const size_
 
 }  // namespace
 
-FontManifestStatus FontManifestReader::read(HalFile& file, FontCatalog& catalog, std::string& baseUrl) {
-  catalog.clear();
-  baseUrl.clear();
-  failureReason = nullptr;
-  manifestVersion = 0;
-
+FontManifestCallbacks FontManifestReader::parserCallbacks(FontManifestReader* reader) {
   FontManifestCallbacks callbacks{};
-  callbacks.ctx = this;
+  callbacks.ctx = reader;
   callbacks.onFamilyBegin = [](void* ctx) { static_cast<FontManifestReader*>(ctx)->familyBegin(); };
   callbacks.onFamilyName = [](void* ctx, const char* v, size_t n) {
     static_cast<FontManifestReader*>(ctx)->familyName(v, n);
@@ -68,7 +70,16 @@ FontManifestStatus FontManifestReader::read(HalFile& file, FontCatalog& catalog,
   callbacks.onFamilyInDownloadAll = [](void* ctx, const bool v) {
     static_cast<FontManifestReader*>(ctx)->familyInDownloadAll(v);
   };
+  return callbacks;
+}
 
+FontManifestStatus FontManifestReader::read(HalFile& file, FontCatalog& catalog, std::string& baseUrl) {
+  catalog.clear();
+  baseUrl.clear();
+  failureReason = nullptr;
+  manifestVersion = 0;
+
+  const FontManifestCallbacks callbacks = parserCallbacks(this);
   const auto state = makeUniqueNoThrow<Work>(callbacks, catalog);
   if (!state) {
     LOG_ERR(logTag, "OOM: font manifest parser (%u bytes)", static_cast<unsigned>(sizeof(Work)));
@@ -87,13 +98,7 @@ FontManifestStatus FontManifestReader::read(HalFile& file, FontCatalog& catalog,
 
   // Pass 1: is this a manifest we read, and how much do the families that pass their checks hold?
   const FontCatalog::Builder& counter = work->counter;
-  builder = &work->counter;
-  filling = false;
-  if (!feedFile(file)) return FontManifestStatus::Invalid;
-  manifestVersion = work->parser.version();
-  // v1 (legacy, no crc32), v2 (with crc32) and v3 (each family's format) are all read; the crc check is skipped per
-  // file when the field is absent. See upstream PR #1904 and scripts/generate-font-manifest.py.
-  if (manifestVersion < 1 || manifestVersion > 3) return FontManifestStatus::UnsupportedVersion;
+  if (const FontManifestStatus checked = firstPass(file); checked != FontManifestStatus::Ok) return checked;
 
   const FontCatalog::Size size = counter.size();
   if (!FontCatalog::fits(size)) {
@@ -126,6 +131,71 @@ FontManifestStatus FontManifestReader::read(HalFile& file, FontCatalog& catalog,
   return FontManifestStatus::Ok;
 }
 
+FontManifestStatus FontManifestReader::forEachFamily(HalFile& file, const FamilyVisitor& familyVisitor,
+                                                     std::string& baseUrl) {
+  baseUrl.clear();
+  failureReason = nullptr;
+  manifestVersion = 0;
+  visitFailed = false;
+
+  const FontManifestCallbacks callbacks = parserCallbacks(this);
+  const auto state = makeUniqueNoThrow<Work>(callbacks);
+  if (!state) {
+    LOG_ERR(logTag, "OOM: font manifest parser (%u bytes)", static_cast<unsigned>(sizeof(Work)));
+    failureReason = "out of memory";
+    return FontManifestStatus::OutOfMemory;
+  }
+  // The shipped manifest's 123 families and room to grow: more only reallocates.
+  state->familySizes.reserve(160);
+  // work, builder and visitor point into this call's own state: nothing may hold them after it.
+  struct Detach {
+    FontManifestReader& reader;
+    ~Detach() {
+      reader.work = nullptr;
+      reader.builder = nullptr;
+      reader.visitor = nullptr;
+      reader.listing = false;
+    }
+  } detach{*this};
+  work = state.get();
+  listing = true;
+
+  // Pass 1, as read()'s, noting each family's size as it closes (visitor still unset).
+  if (const FontManifestStatus checked = firstPass(file); checked != FontManifestStatus::Ok) return checked;
+  if (visitFailed) return FontManifestStatus::OutOfMemory;
+
+  // Pass 2: each kept family into a block of its own, handed over as it closes.
+  visitor = &familyVisitor;
+  filling = true;
+  nextFamily = 0;
+  work->parser.reset();
+  if (visitor->checked) visitor->checked(visitor->ctx);
+  if (!feedFile(file)) return FontManifestStatus::Invalid;
+  if (visitFailed && failureReason) return FontManifestStatus::Invalid;
+  if (visitFailed) {
+    failureReason = "out of memory";
+    return FontManifestStatus::OutOfMemory;
+  }
+  if (nextFamily != work->familySizes.size()) {
+    failureReason = "changed between passes";
+    return FontManifestStatus::Invalid;
+  }
+  baseUrl = work->parser.baseUrl();
+  return FontManifestStatus::Ok;
+}
+
+// The first pass of read() and forEachFamily(): the whole document, counted, and its version.
+FontManifestStatus FontManifestReader::firstPass(HalFile& file) {
+  builder = &work->counter;
+  filling = false;
+  if (!feedFile(file)) return FontManifestStatus::Invalid;
+  manifestVersion = work->parser.version();
+  // v1 (legacy, no crc32), v2 (with crc32) and v3 (each family's format) are all read; the crc check is skipped per
+  // file when the field is absent. See upstream PR #1904 and scripts/generate-font-manifest.py.
+  if (manifestVersion < 1 || manifestVersion > 3) return FontManifestStatus::UnsupportedVersion;
+  return FontManifestStatus::Ok;
+}
+
 // The whole file, from its start. False, with the reason set, when it cannot be read or is not a
 // complete manifest document.
 bool FontManifestReader::feedFile(HalFile& file) {
@@ -145,6 +215,7 @@ bool FontManifestReader::feedFile(HalFile& file) {
 }
 
 void FontManifestReader::familyBegin() {
+  if (listing) visitingBegin();
   builder->beginFamily();
   work->familyName[0] = '\0';
   work->familyNameLen = 0;
@@ -187,20 +258,70 @@ void FontManifestReader::fileEntry(const FontManifestFile& f) {
 }
 
 void FontManifestReader::familyEnd() {
+  const bool kept = keepOrDrop();
+  if (listing) visitingEnd(kept);
+}
+
+// forEachFamily(): the first pass notes where a family starts; the second gives a kept one a block of the size the
+// first pass noted, and has a left-out one only counted.
+void FontManifestReader::visitingBegin() {
+  if (!visitor) {
+    familyStart = builder->size();
+    return;
+  }
+  const uint32_t size = nextFamily < work->familySizes.size() ? work->familySizes[nextFamily] : kDropped;
+  ++nextFamily;
+  if (size == kDropped || !work->one.allocate({1, size >> 16, size & 0xFFFFu})) {
+    if (size != kDropped) {
+      LOG_ERR(logTag, "OOM: one font family (%u bytes)", static_cast<unsigned>(size & 0xFFFFu));
+      visitFailed = true;
+    }
+    builder = &work->counter;
+    return;
+  }
+  work->filler = FontCatalog::Builder(work->one);
+  builder = &work->filler;
+}
+
+void FontManifestReader::visitingEnd(const bool kept) {
+  if (!visitor) {
+    const FontCatalog::Size end = builder->size();
+    const size_t files = end.files - familyStart.files;
+    const size_t strings = end.stringBytes - familyStart.stringBytes;
+    if (kept && (files > 0xFFFFu || strings > 0xFFFFu)) {
+      failureReason = "font family too large";
+      visitFailed = true;
+    }
+    work->familySizes.push_back(kept ? static_cast<uint32_t>(files << 16 | strings) : kDropped);
+    return;
+  }
+  if (builder != &work->filler) return;
+  // Kept in the first pass, so it must be kept again, and fill its block exactly.
+  if (kept && !work->filler.overflowed() && work->filler.size().families == 1) {
+    if (visitor->family) visitor->family(visitor->ctx, work->one);
+  } else {
+    failureReason = "changed between passes";
+    visitFailed = true;
+  }
+  work->one.clear();
+}
+
+// The checks read() makes as a family closes: true when it is kept.
+bool FontManifestReader::keepOrDrop() {
   const Work& w = *work;
   if (w.familyNameOverflow || !familyNameOk(w.familyName)) {
     if (filling) {
       LOG_ERR(logTag, "Manifest entry rejected, invalid family name: %s", w.familyName);
     }
     builder->dropFamily();
-    return;
+    return false;
   }
   if (w.badFile) {
     if (filling) {
       LOG_ERR(logTag, "Manifest entry rejected, invalid file name in %s: %s", w.familyName, w.badFileName);
     }
     builder->dropFamily();
-    return;
+    return false;
   }
   const bool isPack =
       w.format == FontDownloadRules::FileKind::HyphenationPack || w.format == FontDownloadRules::FileKind::LanguagePack;
@@ -208,18 +329,19 @@ void FontManifestReader::familyEnd() {
     // A format newer than this reader: not an error, the family is for firmware that knows it.
     if (filling) LOG_INF(logTag, "Manifest entry %s left out: format %s", w.familyName, w.formatName);
     builder->dropFamily();
-    return;
+    return false;
   }
   if (w.fileKinds & ~static_cast<uint8_t>(1u << static_cast<uint8_t>(w.format))) {
     if (filling) {
       LOG_ERR(logTag, "Manifest entry rejected, a file of %s is not of its format %s", w.familyName, w.formatName);
     }
     builder->dropFamily();
-    return;
+    return false;
   }
   builder->outline(w.format == FontDownloadRules::FileKind::TrueType ||
                    w.format == FontDownloadRules::FileKind::OpenTypeCff);
   builder->hyphenation(w.format == FontDownloadRules::FileKind::HyphenationPack);
   builder->languagePack(w.format == FontDownloadRules::FileKind::LanguagePack);
   builder->keepFamily(w.familyName, w.familyNameLen);
+  return true;
 }

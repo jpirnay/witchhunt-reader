@@ -99,10 +99,14 @@ class ChunkedPrint final : public Print {
 
 // JSON-array framing on top of ChunkedResponse: owns the brackets and the
 // separating commas so callers cannot emit a leading or doubled comma when an
-// entry is skipped.
+// entry is skipped. `head` goes before the "[" and finish()'s `tail` after the
+// "]", for an array that is one member of an object: {"families":[...],"ok":true}.
 class ChunkedJsonArray {
  public:
-  explicit ChunkedJsonArray(WebServer* server) : out(server) { out.append("[", 1); }
+  explicit ChunkedJsonArray(WebServer* server, const char* head = "") : out(server) {
+    if (*head) out.append(head);
+    out.append("[", 1);
+  }
 
   void addEntry(const char* json, size_t len) {
     if (seenFirst) out.append(",", 1);
@@ -118,8 +122,9 @@ class ChunkedJsonArray {
     return print;
   }
 
-  void finish() {
+  void finish(const char* tail = "") {
     out.append("]", 1);
+    if (*tail) out.append(tail);
     out.finish();
   }
 

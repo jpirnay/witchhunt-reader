@@ -26,6 +26,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 
 #include "BookRelocation.h"
 #include "BootDiagnostics.h"
@@ -57,9 +58,10 @@
 #include "util/UrlUtils.h"
 
 // Log free heap + max contiguous block at a named point.
-#define LOG_WEB_MEM(tag)                                                                             \
-  LOG_DBG("WEB", "[MEM] %s — free=%lu maxAlloc=%lu", (tag), (unsigned long)esp_get_free_heap_size(), \
-          (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT))
+#define LOG_WEB_MEM(tag)                                                                                              \
+  LOG_DBG("WEB", "[MEM] %s — free=%lu maxAlloc=%lu minSinceBoot=%lu", (tag), (unsigned long)esp_get_free_heap_size(), \
+          (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT),                      \
+          (unsigned long)esp_get_minimum_free_heap_size())
 
 // Minimum free heap to attempt serving a response. Below this threshold the
 // WebServer library's internal malloc(11) for chunked chunk-size headers fails
@@ -2256,10 +2258,10 @@ bool isValidFontFileName(const char* name) {
   return true;
 }
 
-bool fetchRemoteFontManifest(HttpDownloader::Session& session, FontInstaller& installer, FontCatalog& outFamilies,
-                             std::string& outBaseUrl, std::string& outError) {
-  static constexpr const char* MANIFEST_TMP = "/fonts_manifest_web.tmp";
+constexpr const char* MANIFEST_TMP = "/fonts_manifest_web.tmp";
 
+// The manifest, downloaded to MANIFEST_TMP over `session`. False, the file gone, with `outError` saying why.
+bool downloadFontManifest(HttpDownloader::Session& session, std::string& outError) {
   auto result = HttpDownloader::downloadToFile(session, FONT_MANIFEST_URL, MANIFEST_TMP, nullptr, "", "",
                                                HttpDownloader::TlsPolicy::Verified);
   if (result != HttpDownloader::OK) {
@@ -2267,6 +2269,50 @@ bool fetchRemoteFontManifest(HttpDownloader::Session& session, FontInstaller& in
     Storage.remove(MANIFEST_TMP);
     return false;
   }
+  return true;
+}
+
+// The reader both callers read MANIFEST_TMP with: streamed off the card a block at a time, never the whole document,
+// since this runs while Wi-Fi is up and a whole-document parse of the 24 KB manifest ran the X3 out of heap.
+FontManifestReader manifestReader() {
+  return FontManifestReader("WEB", FontInstaller::isValidFamilyName, isValidFontFileName, /*takesPacks=*/true);
+}
+
+// What a read of the manifest that did not return Ok answers.
+const char* manifestError(const FontManifestStatus status, const FontManifestReader& reader) {
+  switch (status) {
+    case FontManifestStatus::Ok:
+      return "";
+    case FontManifestStatus::Invalid:
+      return "Failed to parse font manifest";
+    case FontManifestStatus::UnsupportedVersion:
+      return "Unsupported manifest version";
+    case FontManifestStatus::OutOfMemory:
+      LOG_ERR("WEB", "Font manifest: %s", reader.failure());
+      return "Failed to read font manifest: out of memory";
+  }
+  return "Failed to read font manifest";
+}
+
+// {"ok":false,"error":<why>} with a 500, as every font request answers a failure.
+void answerFontError(WebServer* server, const char* why) {
+  JsonDocument errDoc;
+  errDoc["ok"] = false;
+  errDoc["error"] = why;
+  sendJson(server, 500, errDoc);
+}
+
+// The family `i` as the card holds it. On the card, listed or not: a family too large for the glyph store is
+// installed, and is not offered again. A hyphenation pack is on the card when the reader finds its file, in our folder
+// or CrossInk's.
+void markOnCard(const FontInstaller& installer, FontCatalog& families, const size_t i) {
+  families.setInstalled(i, installer.isOnCard(families, i));
+  families.setHasUpdate(i, families.installed(i) && FontInstaller::hasUpdate(families, i));
+}
+
+bool fetchRemoteFontManifest(HttpDownloader::Session& session, FontInstaller& installer, FontCatalog& outFamilies,
+                             std::string& outBaseUrl, std::string& outError) {
+  if (!downloadFontManifest(session, outError)) return false;
 
   FsFile manifestFile;
   if (!Storage.openFileForRead("WEB", MANIFEST_TMP, manifestFile)) {
@@ -2274,53 +2320,30 @@ bool fetchRemoteFontManifest(HttpDownloader::Session& session, FontInstaller& in
     Storage.remove(MANIFEST_TMP);
     return false;
   }
-
-  // Streamed off the card a block at a time, never the whole document: this
-  // runs while Wi-Fi is up, and a whole-document parse of the 24 KB manifest
-  // ran the X3 out of heap. The list is one block, which the install frees
-  // whole before its downloads -- see handleFontDownload().
-  FontManifestReader reader("WEB", FontInstaller::isValidFamilyName, isValidFontFileName, /*takesPacks=*/true);
+  // The list is one block, which the install frees whole before its downloads -- see handleFontDownload().
+  FontManifestReader reader = manifestReader();
   const FontManifestStatus status = reader.read(manifestFile, outFamilies, outBaseUrl);
   manifestFile.close();
   Storage.remove(MANIFEST_TMP);
-  if (status == FontManifestStatus::Invalid) {
-    outError = "Failed to parse font manifest";
+  if (status != FontManifestStatus::Ok) {
+    outError = manifestError(status, reader);
     return false;
   }
-  if (status == FontManifestStatus::UnsupportedVersion) {
-    outError = "Unsupported manifest version";
-    return false;
-  }
-  if (status == FontManifestStatus::OutOfMemory) {
-    LOG_ERR("WEB", "Font manifest: %s", reader.failure());
-    outError = "Failed to read font manifest: out of memory";
-    return false;
-  }
-
-  for (size_t i = 0; i < outFamilies.count(); i++) {
-    // On the card, listed or not: a family too large for the glyph store is installed, and is not offered again. A
-    // hyphenation pack is on the card when the reader finds its file, in our folder or CrossInk's.
-    outFamilies.setInstalled(i, installer.isOnCard(outFamilies, i));
-    outFamilies.setHasUpdate(i, outFamilies.installed(i) && FontInstaller::hasUpdate(outFamilies, i));
-  }
-
+  for (size_t i = 0; i < outFamilies.count(); i++) markOnCard(installer, outFamilies, i);
   return true;
 }
 
-// Installs the family at `familyIndex` of `families`.
 // The catalog for a request, as fetchRemoteFontManifest() reads it, its TLS session closed before the caller goes on
-// (the installs open their own, the list's JSON needs the heap). False once the error is answered.
+// (the installs open their own). False once the error is answered.
 bool fetchCatalogOrAnswer(WebServer* server, FontInstaller& installer, FontCatalog& families, std::string& baseUrl) {
   HttpDownloader::Session manifestSession;
   std::string error;
   if (fetchRemoteFontManifest(manifestSession, installer, families, baseUrl, error)) return true;
-  JsonDocument errDoc;
-  errDoc["ok"] = false;
-  errDoc["error"] = error;
-  sendJson(server, 500, errDoc);
+  answerFontError(server, error.c_str());
   return false;
 }
 
+// Installs the family at `familyIndex` of `families`.
 bool installRemoteFamily(HttpDownloader::Session& session, const FontCatalog& families, const size_t familyIndex,
                          const std::string& baseUrl, FontInstaller& installer, std::string& outError) {
   const char* familyName = families.name(familyIndex);
@@ -2497,6 +2520,8 @@ void CrossPointWebServer::handleFontsPage() const { serveBundlePage(web_bundle::
 // to learn archive formats, so serving the page is all the firmware does.
 void CrossPointWebServer::handleDictionaryPage() const { serveBundlePage(web_bundle::DictionaryPageHtml); }
 
+// Both font lists go out a record at a time, as the settings do (handleGetSettings()): one small document, cleared for
+// each family, written into the chunked answer, never the whole list in a document and its text beside it.
 void CrossPointWebServer::handleFontList() {
   if (rejectIfLowMemory(server.get())) return;
   LOG_WEB_MEM("font_list_enter");
@@ -2504,21 +2529,23 @@ void CrossPointWebServer::handleFontList() {
   installer.refreshRegistry();
   const auto& families = sdFontSystem.registry().getFamilies();
 
+  char head[40];
+  snprintf(head, sizeof(head), "{\"maxFamilies\":%d,\"families\":", SdCardFontRegistry::MAX_SD_FAMILIES);
+  server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server->send(200, "application/json", "");
+  ChunkedJsonArray out(server.get(), head);
   JsonDocument doc;
-  JsonArray arr = doc["families"].to<JsonArray>();
-  doc["maxFamilies"] = SdCardFontRegistry::MAX_SD_FAMILIES;
-
   for (const auto& family : families) {
-    JsonObject fObj = arr.add<JsonObject>();
-    fObj["name"] = family.name;
-    fObj["outline"] = family.ttf();
+    doc.clear();
+    doc["name"] = family.name;
+    doc["outline"] = family.ttf();
 
-    JsonArray sizes = fObj["sizes"].to<JsonArray>();
+    JsonArray sizes = doc["sizes"].to<JsonArray>();
     for (uint8_t s : family.availableSizes()) {
       sizes.add(s);
     }
 
-    JsonArray files = fObj["files"].to<JsonArray>();
+    JsonArray files = doc["files"].to<JsonArray>();
     for (const auto& file : family.files) {
       JsonObject fileObj = files.add<JsonObject>();
       const char* name = strrchr(file.path.c_str(), '/');
@@ -2532,48 +2559,88 @@ void CrossPointWebServer::handleFontList() {
         fileObj["size"] = 0;
       }
     }
+    serializeJson(doc, out.nextEntry());
   }
-
   LOG_WEB_MEM("font_list_exit");
-  sendJson(server.get(), 200, doc);
+  out.finish("}");
 }
 
+// The catalog, read off the downloaded manifest a family at a time (FontManifestReader::forEachFamily()) and written
+// as it is read: the list is never held, as a catalog or as an answer. The status line goes once the document has
+// passed its check, so a manifest that does not answers 500; a read that breaks off after it ends the answer with
+// "ok":false, which the page reads as a failed load.
 void CrossPointWebServer::handleFontManifest() {
   if (rejectIfLowMemory(server.get())) return;
   LOG_WEB_MEM("font_manifest_enter");
   FontInstaller installer(sdFontSystem.registry());
   installer.refreshRegistry();
 
-  FontCatalog families;
-  std::string baseUrl;
-  if (!fetchCatalogOrAnswer(server.get(), installer, families, baseUrl)) return;
+  std::string error;
+  {
+    HttpDownloader::Session manifestSession;
+    if (!downloadFontManifest(manifestSession, error)) {
+      answerFontError(server.get(), error.c_str());
+      return;
+    }
+  }  // the TLS session closes before the list is read
+  LOG_WEB_MEM("font_manifest_fetched");
 
-  JsonDocument doc;
-  doc["ok"] = true;
-  doc["baseUrl"] = baseUrl;
-  JsonArray arr = doc["families"].to<JsonArray>();
-  for (size_t i = 0; i < families.count(); i++) {
-    JsonObject obj = arr.add<JsonObject>();
-    obj["name"] = families.name(i);
-    obj["description"] = families.description(i);
-    obj["installed"] = families.installed(i);
-    obj["hasUpdate"] = families.hasUpdate(i);
-    // The folder is the reader's own family under this name: installing would replace its files.
-    obj["ownFiles"] = families.installed(i) && !families.hasUpdate(i) && FontInstaller::holdsOwnFiles(families, i);
-    obj["hyphenation"] = families.hyphenation(i);
-    obj["language"] = families.languagePack(i);
-    // Two flags written only when true, as the page reads a missing one as false: on all 123 families they would
-    // sit in the document and in its text at the answer's peak. A CJK interface pack (ChineseUI) is no reading font,
-    // listed with the language packs; a pack of the interface language is one the page warns about before deleting.
-    if (cjk_ui_pack::isFamily(families.name(i))) obj["interfacePack"] = true;
-    if (families.installed(i) && UiLanguagePacks::usedByInterface(families, i)) obj["inUse"] = true;
-    obj["totalSize"] = static_cast<unsigned long>(families.totalSize(i));
-    obj["fileCount"] = static_cast<unsigned>(families.fileCount(i));
+  FsFile manifestFile;
+  if (!Storage.openFileForRead("WEB", MANIFEST_TMP, manifestFile)) {
+    Storage.remove(MANIFEST_TMP);
+    answerFontError(server.get(), "Failed to open downloaded manifest");
+    return;
   }
-  // The document holds what the answer needs: the list's block goes before sendJson() writes the text beside it.
-  families.clear();
+
+  struct Stream {
+    WebServer* server;
+    const FontInstaller* installer;
+    std::optional<ChunkedJsonArray> out;
+    JsonDocument doc;
+  } stream{server.get(), &installer, std::nullopt, JsonDocument()};
+  FontManifestReader::FamilyVisitor visitor;
+  visitor.ctx = &stream;
+  visitor.checked = [](void* ctx) {
+    Stream& s = *static_cast<Stream*>(ctx);
+    s.server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    s.server->send(200, "application/json", "");
+    s.out.emplace(s.server, "{\"families\":");
+  };
+  visitor.family = [](void* ctx, FontCatalog& one) {
+    Stream& s = *static_cast<Stream*>(ctx);
+    markOnCard(*s.installer, one, 0);
+    JsonDocument& doc = s.doc;
+    doc.clear();
+    doc["name"] = one.name(0);
+    doc["description"] = one.description(0);
+    doc["installed"] = one.installed(0);
+    doc["hasUpdate"] = one.hasUpdate(0);
+    // The folder is the reader's own family under this name: installing would replace its files.
+    doc["ownFiles"] = one.installed(0) && !one.hasUpdate(0) && FontInstaller::holdsOwnFiles(one, 0);
+    doc["hyphenation"] = one.hyphenation(0);
+    doc["language"] = one.languagePack(0);
+    // Written only when true, as the page reads a missing flag as false. A CJK interface pack (ChineseUI) is no
+    // reading font, listed with the language packs; a pack of the interface language is one the page warns about
+    // before deleting it.
+    if (cjk_ui_pack::isFamily(one.name(0))) doc["interfacePack"] = true;
+    if (one.installed(0) && UiLanguagePacks::usedByInterface(one, 0)) doc["inUse"] = true;
+    doc["totalSize"] = static_cast<unsigned long>(one.totalSize(0));
+    doc["fileCount"] = static_cast<unsigned>(one.fileCount(0));
+    serializeJson(doc, s.out->nextEntry());
+  };
+  FontManifestReader reader = manifestReader();
+  std::string baseUrl;
+  const FontManifestStatus status = reader.forEachFamily(manifestFile, visitor, baseUrl);
+  manifestFile.close();
+  Storage.remove(MANIFEST_TMP);
   LOG_WEB_MEM("font_manifest_exit");
-  sendJson(server.get(), 200, doc);
+  if (!stream.out) {
+    answerFontError(server.get(), manifestError(status, reader));
+    return;
+  }
+  if (status != FontManifestStatus::Ok) LOG_ERR("WEB", "Font list broke off: %s", reader.failure());
+  stream.out->finish(status == FontManifestStatus::Ok ? ",\"ok\":true}"
+                                                      : ",\"ok\":false,\"error\":\"The font list broke off\"}");
 }
 
 void CrossPointWebServer::handleFontDownload() {
