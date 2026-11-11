@@ -27,6 +27,7 @@ the commands do, how to use them, and how to add one.
   - [Heap ballast: `HEAP`](#heap-ballast-heap)
   - [TrueType fonts: `TTF`](#truetype-fonts-ttf)
   - [Files on the card: `FS`](#files-on-the-card-fs)
+  - [The web bundle: `WEB`](#the-web-bundle-web)
   - [Other: `BOOTLOG`, `HELP`](#other-bootlog-help)
 - [The USB Transfer screen](#the-usb-transfer-screen)
 - [Safety notes](#safety-notes)
@@ -58,11 +59,22 @@ web settings page. A test therefore exercises the real code paths, not a back do
 
 The development builds (`pio run -e default`, `-e x4pro`, `-e lilygo_t5s3`) are compiled with
 `-DSERIAL_TEST_API=1` and have everything on this page. The release builds (`gh_release`,
-`gh_release_rc` and their X4 Pro and LilyGo twins) and `slim` leave the flag off and keep only the
-first commands: `BTN` (the six front and side keys, `:LONG`), `ACT` (`HOME`, `READER:<path>`,
-`SETTINGS`, `BOOKMARKS`, `FILES`, `LIBRARY`), `STATE` (screen, stack, the reader's book, spine and
-page), `SCREENSHOT`, `BOOTLOG` and `HELP`. Anything else gets `CMD_ERROR:unknown command`, and
-`CMD:HELP` lists what the build in hand has.
+`gh_release_rc` and their X4 Pro, LilyGo and Murphy twins) and `slim` leave the flag off and keep
+only these:
+
+| Command | In a release build |
+| --- | --- |
+| `BTN` | the six front and side keys, `:LONG` |
+| `ACT` | `HOME`, `READER:<path>`, `SETTINGS`, `BOOKMARKS`, `FILES`, `LIBRARY`, `USB_TRANSFER` |
+| `STATE` | screen, stack, the reader's book, spine and page |
+| `WEB` | all of it ([The web bundle](#the-web-bundle-web)) |
+| `SCREENSHOT`, `BOOTLOG`, `HELP` | all of it |
+
+The USB Transfer screen answers them too, and its file-transfer protocol is the same in every
+build. `ACT:USB_TRANSFER` and `WEB` are there for the web flasher (`flasher/`), which writes the
+web bundle to the card after a flash and installs it, so a fresh install needs no Wi-Fi for its
+pages. Anything else gets `CMD_ERROR:unknown command`, and `CMD:HELP` lists what the build in hand
+has.
 
 The full set costs about 19.4 KB of flash and 280 B of RAM on the X4 build: `PAGE` and the file
 commands brought 9 KB of the flash and no RAM, since their 2 KB scratch comes from the heap for the
@@ -172,8 +184,8 @@ Reply: `ACT_OK`, or `ACT_ERROR:<reason>` (`no such file <path>`, `bad position <
   text after the last `@` is read as a position, and only when it has one of the two forms. A book
   under `/test/` stays out of the recent books and the reading stats (see
   [Safety notes](#safety-notes)).
-- Positions are for EPUB books, and need the full API (so do `DICT`, `FILE_TRANSFER`,
-  `USB_TRANSFER` and the settings tab). `@<spine>:<page>` counts from 1, exactly as `STATE` reports
+- Positions are for EPUB books, and need the full API (so do `DICT`, `FILE_TRANSFER` and the
+  settings tab; `USB_TRANSFER` is in every build). `@<spine>:<page>` counts from 1, exactly as `STATE` reports
   `spine=` and `page=`: `@20:12` opens the 12th page of the 20th spine item and `STATE` then says
   `spine=20/.. page=12/..`. That is the page within the spine item; the status bar counts pages in
   the whole TOC chapter (`chapter_page=` in `STATE`), which is a larger number when the chapter
@@ -863,6 +875,40 @@ spelled with an 8.3 alias are refused (`lib/FsHelpers/ProtectedPaths.h`), but fo
 open book is using is not guarded: do it from Home. On the USB Transfer screen a command line is at most 127 bytes.
 Development builds only.
 
+### The web bundle: `WEB`
+
+```
+CMD:WEB             which bundle this build expects, and whether it is installed
+CMD:WEB:INSTALL     install it from the card's top folder
+```
+
+Replies:
+
+- `CMD:WEB` gives `WEB:state=<installed|missing|stale> asset=<web-hash.bin> release=<tag> onCard=<0|1>`.
+  `release` is `""` on a build that is not published. `onCard` says whether `/<asset>` is on the card.
+- `CMD:WEB:INSTALL` gives `WEB_OK`, or `WEB_ERROR:<reason>`, with the setup page's texts
+  (`no bundle file on the SD card`, `the file is not the bundle for this firmware`, ...).
+
+The install is the setup page's "card" source (`src/network/WebAssets.h`). The file must be this
+build's bundle: same size and SHA-256. On success the device deletes the card copy; a wrong file
+stays on the card. The install blocks the loop for the read and the unpacking, about a second.
+
+With the USB Transfer screen's `W` message this installs the pages without Wi-Fi. The web flasher
+does it after a flash, in this order:
+
+1. `CMD:WEB`, to learn the asset name.
+2. `CMD:ACT:USB_TRANSFER`.
+3. `W` with `/<asset>`.
+4. `CMD:WEB:INSTALL`.
+5. `CMD:ACT:HOME`, which restarts the device.
+
+```
+> CMD:WEB
+< WEB:state=missing asset=web-9748f943a3a6.bin release=2.51 onCard=0
+> CMD:WEB:INSTALL
+< WEB_ERROR:no bundle file on the SD card
+```
+
 ### Other: `BOOTLOG`, `HELP`
 
 - `CMD:BOOTLOG` prints the boot summary again (for a monitor attached after boot) as log lines,
@@ -875,7 +921,7 @@ Development builds only.
 File Transfer > USB Transfer (`CMD:ACT:USB_TRANSFER`) speaks a binary file-transfer protocol on the
 same port (`tools/serial_transfer.py`, compatible with MicroReader's tools). While it is up:
 
-- It still answers `CMD:` lines between transfer messages (full API, lines up to 127 bytes), so a
+- It still answers `CMD:` lines between transfer messages (the build's set, lines up to 127 bytes), so a
   script can check it with `CMD:STATE` and leave it with `CMD:BTN:BACK` or `CMD:ACT:HOME`. A
   transfer message starts with `CMND` or `EPUB`; a line starting with `CMD:` is told apart by its
   first four bytes.
