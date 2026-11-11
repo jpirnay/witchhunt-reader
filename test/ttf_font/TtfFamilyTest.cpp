@@ -431,12 +431,11 @@ TEST(TtfFamily, TheIdentityChangesWithAnyFileDetail) {
 }
 
 TEST(TtfFamily, TheIdentityChangesWithTheRenderVersion) {
-  // GDEF-aware kerning: a store written before holds pairs that a lookup's flags now skip; at version 5 it is
-  // installed again.
+  // Writing modes step 2: a store written before holds no CPac in its style blocks; at version 4 it is installed again.
   const ttf::FileStamp styles[4] = {{"Lit-Regular.ttf", 450048, 0x5A21, 0x6400}};
-  EXPECT_EQ(5, ttf::kRenderVersion);
-  EXPECT_EQ(identityAt(styles, 5), identityOf(styles));
-  EXPECT_NE(identityAt(styles, 4), identityOf(styles));
+  EXPECT_EQ(4, ttf::kRenderVersion);
+  EXPECT_EQ(identityAt(styles, 4), identityOf(styles));
+  EXPECT_NE(identityAt(styles, 3), identityOf(styles));
 }
 
 TEST(TtfFamily, TheIdentityIsSixteenIndependentBytes) {

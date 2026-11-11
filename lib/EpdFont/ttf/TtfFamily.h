@@ -198,9 +198,7 @@ bool fitsStore(const uint32_t* fileBytes, const uint32_t* sdBytes, uint8_t count
 /// and upright under the bold-italic bits, which now draw slanted.
 /// 4: shaping tables at install (writing modes step 2): the block of a font that shapes ends with its `CPac`, an
 /// SD-mode block holds GDEF, and keys from 0x110000 are glyph IDs.
-/// 5: GPOS kern lookups skip the glyphs their LookupFlag skips by GDEF class (SDK Gpos.h): a store holding the pairs
-/// such a lookup kerned before (Caecilia LT's base glyphs) must go.
-constexpr uint8_t kRenderVersion = 5;
+constexpr uint8_t kRenderVersion = 4;
 
 /// One style's file as the card lists it.
 struct FileStamp {
