@@ -455,7 +455,8 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
   DirectPixelWriter pw;
   pw.init(renderer);
 
-  // The decode's whole working set is in place here (the rows below allocate nothing): what it took, against its gate.
+  // The decode's whole working set is in place here (the rows below allocate nothing): what it took of the free heap
+  // it started from, against its gate. Its low point is the difference.
   const size_t freeDuring = ESP.getFreeHeap();
   const size_t heapTaken = freeHeap > freeDuring ? freeHeap - freeDuring : 0;
 
@@ -570,8 +571,9 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
     }
   }
 
-  LOG_DBG("PNG", "PNG decoding complete - render time: %lu ms%s, heap: took %u of the %u gated", millis() - decodeStart,
-          companion.caching ? " (both variants)" : "", (unsigned)heapTaken, (unsigned)need);
+  LOG_DBG("PNG", "PNG decoding complete - render time: %lu ms%s, heap: took %u of %u free, gate %u",
+          millis() - decodeStart, companion.caching ? " (both variants)" : "", (unsigned)heapTaken, (unsigned)freeHeap,
+          (unsigned)need);
   return ok;
 }
 
