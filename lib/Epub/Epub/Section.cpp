@@ -37,9 +37,15 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 122;  // v122: an image a line or two tall in a run of text is set in its
-                                               // line, as a word is; a page image says whether it is in a line,
-                                               // and the link it is inside
+constexpr uint8_t SECTION_FILE_VERSION = 123;  // v123: CSS white-space: pre, pre-wrap and break-spaces keep runs of
+                                               // spaces (a token each) and line feeds, pre-line keeps line feeds;
+                                               // a kept line feed starts the next line, not a block: the block's top
+                                               // spacing and first-line indent are not repeated per line
+                                               // v123 also: CSS initial-letter drop caps (span or ::first-letter)
+                                               // v123 also: CSS borders and background shades draw boxes (PageBox)
+                                               // v123 also: small images set in a text line (PageImage inline, link)
+                                               // v122: a <pre>'s lines take no first-line indent but the book's
+                                               // own; Book's Style gave each one em with extra spacing off
                                                // v121: the font-size keywords take the CSS Fonts 4 scale (small 8/9,
                                                // x-large 3/2, xx-large 2, xxx-large 3, smaller 1/1.2)
                                                // v120: a character the parser's 256-byte text chunks cut is read
@@ -425,9 +431,9 @@ uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   uint8_t buffer[104];
   static_assert(sizeof(buffer) >= 23 + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) +
                                       BlockFontFamilies::kMaxFamilies * 3 * sizeof(int32_t) + sizeof(uint8_t) +
-                                      sizeof(uint32_t) + sizeof(uint8_t),
+                                      sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t),
                 "the settings (23 B), Book's style line spacing, every family, the vertical request, the "
-                "hyphenation patterns and the body size fit");
+                "hyphenation patterns, the body size and the paragraph indent fit");
   size_t offset = 0;
 
   auto append = [&](const void* ptr, size_t size) {
@@ -481,6 +487,10 @@ uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   // key, and so does every book with normalization or its style off.
   if (p.fontSizeNormalization && p.embeddedStyle && p.bodySizePct != 100) {
     append(&p.bodySizePct, sizeof(p.bodySizePct));
+  }
+  // Only when the reader chose one: Book's Style, the default, keeps the key every chapter had before the setting.
+  if (p.paragraphIndent != static_cast<uint8_t>(ParagraphIndent::FromBook)) {
+    append(&p.paragraphIndent, sizeof(p.paragraphIndent));
   }
 
   return fnv1a(buffer, offset);
@@ -1358,6 +1368,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   st.visitor->setFontSizeLadder(p.fontSizeLadder);
   st.visitor->setBookLineHeight(p.bookLineHeightFloor, p.lineHeightEmPx);
   st.visitor->setWidowOrphanControl(p.widowOrphanControl);
+  st.visitor->setParagraphIndent(p.paragraphIndent);
   if (p.embeddedStyle) st.visitor->setBodySizePct(p.bodySizePct);
   if (p.embeddedStyle && p.fontFamilies) st.visitor->setFontFamilies(*p.fontFamilies);
   // Anchors stream to SD as they are found rather than accumulating in the parser; the

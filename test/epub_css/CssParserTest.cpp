@@ -424,7 +424,114 @@ TEST(CssParserDeclarations, TheFlowPropertiesCascade) {
   EXPECT_EQ(CssTextCombine::All, merged.textCombine);
 }
 
+TEST(CssParserDeclarations, WhiteSpaceValues) {
+  const auto ws = [](const char* decl) { return CssParser::parseInlineStyle(decl).whiteSpace; };
+  EXPECT_EQ(CssWhiteSpace::Normal, ws("white-space: normal"));
+  EXPECT_EQ(CssWhiteSpace::Nowrap, ws("white-space: nowrap"));
+  EXPECT_EQ(CssWhiteSpace::Pre, ws("white-space: pre"));
+  EXPECT_EQ(CssWhiteSpace::PreWrap, ws("white-space: pre-wrap"));
+  EXPECT_EQ(CssWhiteSpace::PreLine, ws("white-space: pre-line"));
+  EXPECT_EQ(CssWhiteSpace::BreakSpaces, ws("white-space: break-spaces"));
+  EXPECT_EQ(CssWhiteSpace::PreWrap, ws("white-space: -moz-pre-wrap"));
+  EXPECT_EQ(CssWhiteSpace::PreWrap, ws("white-space: -pre-wrap"));
+  EXPECT_EQ(CssWhiteSpace::PreWrap, ws("white-space: -o-pre-wrap"));
+  EXPECT_EQ(CssWhiteSpace::Normal, ws("white-space: initial"));
+  EXPECT_EQ(CssWhiteSpace::Pre, ws("WHITE-SPACE : PRE !important"));
+  // Inherited: inherit, unset and what is not known leave it to the parent.
+  EXPECT_EQ(CssWhiteSpace::Unset, ws("white-space: inherit"));
+  EXPECT_EQ(CssWhiteSpace::Unset, ws("white-space: unset"));
+  EXPECT_EQ(CssWhiteSpace::Unset, ws("white-space: preserve-everything"));
+  EXPECT_EQ(CssWhiteSpace::Pre, ws("white-space: normal; white-space: pre"));
+}
+
+TEST(CssParserDeclarations, WhiteSpaceKeepsWhatItSays) {
+  using CssWhiteSpaces::keepsLineFeeds;
+  using CssWhiteSpaces::keepsSpaces;
+  EXPECT_FALSE(keepsSpaces(CssWhiteSpace::Unset) || keepsLineFeeds(CssWhiteSpace::Unset));
+  EXPECT_FALSE(keepsSpaces(CssWhiteSpace::Normal) || keepsLineFeeds(CssWhiteSpace::Normal));
+  EXPECT_FALSE(keepsSpaces(CssWhiteSpace::Nowrap) || keepsLineFeeds(CssWhiteSpace::Nowrap));
+  EXPECT_TRUE(keepsSpaces(CssWhiteSpace::Pre) && keepsLineFeeds(CssWhiteSpace::Pre));
+  EXPECT_TRUE(keepsSpaces(CssWhiteSpace::PreWrap) && keepsLineFeeds(CssWhiteSpace::PreWrap));
+  EXPECT_TRUE(keepsSpaces(CssWhiteSpace::BreakSpaces) && keepsLineFeeds(CssWhiteSpace::BreakSpaces));
+  EXPECT_FALSE(keepsSpaces(CssWhiteSpace::PreLine));
+  EXPECT_TRUE(keepsLineFeeds(CssWhiteSpace::PreLine));
+}
+
+TEST(CssParserDeclarations, WhiteSpaceCascades) {
+  CssStyle merged;
+  uint32_t ranks[CssStyle::kCascadeProperties] = {};
+  merged.applyOver(CssParser::parseInlineStyle("white-space: pre"), 2, ranks);
+  merged.applyOver(CssParser::parseInlineStyle("white-space: normal"), 1, ranks);
+  EXPECT_EQ(CssWhiteSpace::Pre, merged.whiteSpace);
+  merged.applyOver(CssParser::parseInlineStyle("white-space: pre-line"), 3, ranks);
+  EXPECT_EQ(CssWhiteSpace::PreLine, merged.whiteSpace);
+  merged.applyOver(CssParser::parseInlineStyle("white-space: inherit"), 4, ranks);
+  EXPECT_EQ(CssWhiteSpace::PreLine, merged.whiteSpace);
+}
+
+TEST(CssParserDeclarations, InitialLetterValues) {
+  const auto letter = [](const char* decl) { return CssParser::parseInlineStyle(decl).initialLetter; };
+  using CssInitialLetter::pack;
+  EXPECT_EQ(pack(3, 0), letter("initial-letter: 3"));
+  EXPECT_EQ(pack(3, 0), letter("-webkit-initial-letter: 3"));
+  EXPECT_EQ(pack(3, 2), letter("initial-letter: 3 2"));
+  EXPECT_EQ(pack(3, 0), letter("initial-letter: 2.6"));  // a fractional size rounds
+  EXPECT_EQ(pack(3, 0), letter("initial-letter: 3 drop"));
+  EXPECT_EQ(pack(3, 1), letter("initial-letter: 3 raise"));
+  EXPECT_EQ(pack(3, 1), letter("initial-letter: raise 3"));
+  EXPECT_EQ(pack(15, 0), letter("initial-letter: 40"));
+  EXPECT_EQ(pack(4, 6), letter("INITIAL-LETTER: 4 6 !important"));
+  EXPECT_EQ(CssInitialLetter::kNormal, letter("initial-letter: normal"));
+  EXPECT_EQ(CssInitialLetter::kNormal, letter("initial-letter: initial"));
+  for (const char* unread : {"initial-letter: inherit", "initial-letter: 0", "initial-letter: 3 1.5",
+                             "initial-letter: 3 0", "initial-letter: big", "initial-letter: 3 sideways"}) {
+    EXPECT_EQ(0, letter(unread)) << unread;
+  }
+  EXPECT_EQ(pack(2, 0), letter("-webkit-initial-letter: 3; initial-letter: 2"));  // one property: the last wins
+}
+
+TEST(CssParserDeclarations, InitialLetterNamesADropCapFromTwoLines) {
+  EXPECT_EQ(3, CssParser::parseInlineStyle("initial-letter: 3 1").initialLetterLines());
+  EXPECT_EQ(2, CssParser::parseInlineStyle("initial-letter: 2").initialLetterLines());
+  EXPECT_EQ(0, CssParser::parseInlineStyle("initial-letter: 1").initialLetterLines());
+  EXPECT_EQ(0, CssParser::parseInlineStyle("initial-letter: normal").initialLetterLines());
+  EXPECT_EQ(0, CssStyle{}.initialLetterLines());
+  EXPECT_EQ(1, CssInitialLetter::sink(CssParser::parseInlineStyle("initial-letter: 3 raise").initialLetter));
+  EXPECT_EQ(3, CssInitialLetter::sink(CssParser::parseInlineStyle("initial-letter: 3").initialLetter));
+}
+
+TEST(CssParserDeclarations, InitialLetterCascades) {
+  CssStyle merged;
+  uint32_t ranks[CssStyle::kCascadeProperties] = {};
+  merged.applyOver(CssParser::parseInlineStyle("initial-letter: 3"), 2, ranks);
+  merged.applyOver(CssParser::parseInlineStyle("initial-letter: 2"), 1, ranks);
+  EXPECT_EQ(3, merged.initialLetterLines());
+  // `normal` in a more specific rule takes the drop cap away.
+  merged.applyOver(CssParser::parseInlineStyle("initial-letter: normal"), 3, ranks);
+  EXPECT_EQ(0, merged.initialLetterLines());
+  EXPECT_TRUE(merged.hasInitialLetter());
+}
+
+TEST(CssParserSupports, OnlyAnInitialLetterTestHolds) {
+  for (const char* holds :
+       {"supports (initial-letter: 3)", "supports (-webkit-initial-letter: 3)", "SUPPORTS (Initial-Letter: 2 1)",
+        "supports (initial-letter: 3) or (-webkit-initial-letter: 3)",
+        "supports ((initial-letter: 3) or (-webkit-initial-letter: 3))",
+        "supports (initial-letter: 3) and (-webkit-initial-letter: 3)", "supports(initial-letter:3)"}) {
+    EXPECT_TRUE(CssParser::supportsInitialLetter(holds)) << holds;
+  }
+  for (const char* fails :
+       {"supports not (initial-letter: 3)", "supports (not (initial-letter: 3))", "supports (display: grid)",
+        "supports (initial-letter: 3) and (display: grid)", "supports (initial-letter: 3) or (display: grid)",
+        "supports selector(p::first-letter)", "supports (initial-letter: big)", "supports (initial-letter)", "supports",
+        "media screen", "supports (initial-letter: calc(3))", "supportsx (initial-letter: 3)"}) {
+    EXPECT_FALSE(CssParser::supportsInitialLetter(fails)) << fails;
+  }
+}
+
 TEST(CssParserDeclarations, AStyleWithOnlyAFlowPropertySaysSomething) {
+  EXPECT_TRUE(CssParser::parseInlineStyle("white-space: pre").anyDefined());
+  EXPECT_TRUE(CssParser::parseInlineStyle("initial-letter: 3").anyDefined());
   EXPECT_TRUE(CssParser::parseInlineStyle("writing-mode: vertical-rl").anyDefined());
   EXPECT_TRUE(CssParser::parseInlineStyle("unicode-bidi: isolate").anyDefined());
   EXPECT_TRUE(CssParser::parseInlineStyle("text-combine-upright: none").anyDefined());

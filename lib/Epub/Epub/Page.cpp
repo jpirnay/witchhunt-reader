@@ -4,6 +4,7 @@
 #include <GfxRenderer.h>
 #include <HeapFit.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 
 #include <optional>
@@ -114,6 +115,111 @@ std::unique_ptr<PageHR> PageHR::deserialize(FsFile& file) {
   serialization::readPod(file, yPos);
   serialization::readPod(file, width);
   return std::unique_ptr<PageHR>(new PageHR(xPos, yPos, width));
+}
+
+namespace {
+// One edge of a box as strips along its side: `length` long from (x, y), `side.width` deep inward. Ported from
+// crosspoint-reader PR #3891 (Justin Mitchell, @itsthisjustin), its drawBorderEdge.
+void drawBoxEdge(const GfxRenderer& renderer, const int x, const int y, const int length, const PageBox::Edge& side,
+                 const bool horizontal) {
+  const int depth = side.width;
+  const auto strip = [&](const int offset, const int along, const int span, const int thickness) {
+    if (horizontal) {
+      renderer.fillRect(x + along, y + offset, span, thickness, true);
+    } else {
+      renderer.fillRect(x + offset, y + along, thickness, span, true);
+    }
+  };
+  switch (side.style) {
+    case CssBorderStyle::Double:
+      // Two lines and the gap between them; under three pixels there is no gap to leave, and the line is solid.
+      if (depth >= 3) {
+        const int line = depth / 3;
+        strip(0, 0, length, line);
+        strip(depth - line, 0, length, line);
+        return;
+      }
+      break;
+    case CssBorderStyle::Dotted:
+    case CssBorderStyle::Dashed: {
+      const bool dotted = side.style == CssBorderStyle::Dotted;
+      const int dash = dotted ? depth : std::max(3, depth * 3);
+      const int gap = dotted ? std::max(2, depth) : std::max(2, depth * 2);
+      for (int along = 0; along < length; along += dash + gap) strip(0, along, std::min(dash, length - along), depth);
+      return;
+    }
+    case CssBorderStyle::Unset:
+    case CssBorderStyle::None:
+      return;
+    case CssBorderStyle::Solid:
+      break;
+  }
+  strip(0, 0, length, depth);
+}
+}  // namespace
+
+void PageBox::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
+  (void)fontId;
+  // The black-and-white pass only. The same element list draws the anti-aliasing planes and the one-pass gray mask,
+  // where a shade would mark its pixels gray and a line would clear plane bits the text set; and the font cache's scan
+  // pass is no drawing at all.
+  if (renderer.getRenderMode() != GfxRenderer::BW || renderer.isFontCacheScanning()) return;
+  const int x = xPos + xOffset;
+  const int y = yPos + yOffset;
+  // One pixel in four, ink only: anything drawn here before (the glyphs of a line above that reach into the box) stays.
+  if (shaded) renderer.fillRectDither(x, y, width, height, Color::LightGray, /*keepInk=*/true);
+  const Edge& top = edges[CssBox::Top];
+  const Edge& right = edges[CssBox::Right];
+  const Edge& bottom = edges[CssBox::Bottom];
+  const Edge& left = edges[CssBox::Left];
+  if (top.width > 0) drawBoxEdge(renderer, x, y, width, top, /*horizontal=*/true);
+  if (bottom.width > 0) drawBoxEdge(renderer, x, y + height - bottom.width, width, bottom, /*horizontal=*/true);
+  if (left.width > 0) drawBoxEdge(renderer, x, y, height, left, /*horizontal=*/false);
+  if (right.width > 0) drawBoxEdge(renderer, x + width - right.width, y, height, right, /*horizontal=*/false);
+}
+
+bool PageBox::serialize(FsFile& file) {
+  serialization::writePod(file, xPos);
+  serialization::writePod(file, yPos);
+  serialization::writePod(file, width);
+  serialization::writePod(file, height);
+  for (const Edge& edge : edges) {
+    serialization::writePod(file, edge.width);
+    serialization::writePod(file, static_cast<uint8_t>(edge.style));
+  }
+  serialization::writePod(file, shaded);
+  return true;
+}
+
+std::unique_ptr<PageBox> PageBox::deserialize(FsFile& file) {
+  int16_t xPos = 0;
+  int16_t yPos = 0;
+  uint16_t width = 0;
+  uint16_t height = 0;
+  Edge edges[4];
+  bool shaded = false;
+  serialization::readPod(file, xPos);
+  serialization::readPod(file, yPos);
+  serialization::readPod(file, width);
+  serialization::readPod(file, height);
+  for (Edge& edge : edges) {
+    uint8_t style = 0;
+    serialization::readPod(file, edge.width);
+    serialization::readPod(file, style);
+    if (edge.width > CssBox::kMaxWidthPx || style > static_cast<uint8_t>(CssBorderStyle::Dashed)) {
+      LOG_ERR("PGE", "PageBox: invalid edge (width %u, style %u)", edge.width, style);
+      return nullptr;
+    }
+    edge.style = static_cast<CssBorderStyle>(style);
+  }
+  serialization::readPod(file, shaded);
+  if (width == 0 || height == 0) {
+    LOG_ERR("PGE", "PageBox: empty box %ux%u", width, height);
+    return nullptr;
+  }
+  auto box = makeUniqueNoThrow<PageBox>(xPos, yPos, width, height, edges, shaded);
+  if (!box) LOG_ERR("PGE", "PageBox: allocation failed");
+  return box;
 }
 
 void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
@@ -543,6 +649,10 @@ std::unique_ptr<Page> Page::deserialize(FsFile& file, BuildArena* scratch) {
       auto hr = PageHR::deserialize(file);
       if (!hr) return nullptr;
       page->elements.push_back(std::move(hr));
+    } else if (tag == TAG_PageBox) {
+      auto box = PageBox::deserialize(file);
+      if (!box) return nullptr;
+      page->elements.push_back(std::move(box));
     } else {
       LOG_ERR("PGE", "Deserialization failed: Unknown tag %u", tag);
       return nullptr;

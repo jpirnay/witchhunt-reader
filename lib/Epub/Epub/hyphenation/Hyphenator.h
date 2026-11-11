@@ -42,6 +42,11 @@ class Hyphenator {
   // (the Myanmar design's PR 3). Empty for a word without Myanmar text, and between Myanmar and another script.
   static std::vector<BreakInfo> myanmarLineEndBreaks(const std::string& word);
 
+  // Where `word` may be cut when nothing else lets it fit a line: between any two of its code points but inside an
+  // Indic syllable, an Arabic cluster or a Myanmar syllable (the fallback's rule), none drawing a hyphen. A token of
+  // text that keeps its spaces (CSS white-space: pre) is cut here, as CSS's overflow-wrap cuts, not at its syllables.
+  static std::vector<BreakInfo> anywhereBreaks(const std::string& word);
+
   // Provide a publication-level language hint (e.g. "en", "en-US", "ru") used to select hyphenation rules.
   static void setPreferredLanguage(const std::string& lang);
 

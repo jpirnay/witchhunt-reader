@@ -2184,6 +2184,18 @@ bool sendPage(const PageOnScreen& onScreen) {
       case TAG_PageHR:
         line.addf("PAGE_EL:%u hr", static_cast<unsigned>(i));
         break;
+      case TAG_PageBox: {
+        const PageBox& box = static_cast<const PageBox&>(element);
+        const PageBox::Edge& top = box.getEdge(CssBox::Top);
+        const PageBox::Edge& right = box.getEdge(CssBox::Right);
+        const PageBox::Edge& bottom = box.getEdge(CssBox::Bottom);
+        const PageBox::Edge& left = box.getEdge(CssBox::Left);
+        line.addf("PAGE_BOX:%u x=%d y=%d w=%u h=%u edges=%u/%u,%u/%u,%u/%u,%u/%u shaded=%d", static_cast<unsigned>(i),
+                  x, y, box.getWidth(), box.getHeight(), top.width, static_cast<unsigned>(top.style), right.width,
+                  static_cast<unsigned>(right.style), bottom.width, static_cast<unsigned>(bottom.style), left.width,
+                  static_cast<unsigned>(left.style), box.isShaded() ? 1 : 0);
+        break;
+      }
       default:
         line.addf("PAGE_EL:%u tag%u", static_cast<unsigned>(i), static_cast<unsigned>(element.getTag()));
         break;

@@ -136,6 +136,7 @@ add_executable(EpubPipelineTest
   HeadingBlockLayoutTest.cpp
   WritingModeLayoutTest.cpp
   LineSpacingLayoutTest.cpp
+  ParagraphIndentLayoutTest.cpp
   BlockEmphasisTest.cpp
   KeepTogetherTest.cpp
   NativeSizeLayoutTest.cpp
@@ -143,6 +144,8 @@ add_executable(EpubPipelineTest
   PrefixedPackageTest.cpp
   BlockElementsTest.cpp
   DashBreakTest.cpp
+  WhiteSpaceLayoutTest.cpp
+  InitialLetterLayoutTest.cpp
   FontFamilyLayoutTest.cpp
   SpineCacheLayoutTest.cpp
   SaxStateInArenaTest.cpp
@@ -151,6 +154,7 @@ add_executable(EpubPipelineTest
   ImageParkTest.cpp
   StoredEntryDecodeTest.cpp
   PlaceholderOnlyScopeTest.cpp
+  ImageDitherPlacementTest.cpp
   PixelCacheSizeTest.cpp
   PixelCacheWriteTest.cpp
   PngHeapGateTest.cpp
@@ -181,6 +185,7 @@ add_executable(EpubPipelineTest
   FirstOpenIndexingTest.cpp
   FirstChapterTest.cpp
   TocPassTest.cpp
+  BoxLayoutTest.cpp
   # A book's embedded body font (Publisher Fonts): the probe and the extraction. Its SHA-1 comes from
   # test/shims/wolfssl, standing in for wolfCrypt.
   ${REPO_ROOT}/lib/Epub/Epub/BookFonts.cpp

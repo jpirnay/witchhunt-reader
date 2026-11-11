@@ -153,12 +153,16 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=426 s=0 z=100 t=the
   LINE y=432 x=0 align=0 mult=1.000 hfid=1911 words=1
    W x=0 s=0 z=100 t=blockquote.
-  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=18 s=0 z=100 t=monospace
-   W x=112 s=0 z=100 t=stays
-   W x=166 s=0 z=100 t=the
-   W x=203 s=0 z=100 t=reader's
-   W x=282 s=0 z=100 t=font
+  LINE y=456 x=0 align=1 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=monospace
+   W x=88 s=0 z=100 t= 
+   W x=94 s=0 z=100 t=stays
+   W x=142 s=0 z=100 t= 
+   W x=148 s=0 z=100 t=the
+   W x=179 s=0 z=100 t= 
+   W x=185 s=0 z=100 t=reader's
+   W x=258 s=0 z=100 t= 
+   W x=264 s=0 z=100 t=font
   LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=Georgia,
    W x=100 s=0 z=100 t=with
@@ -279,12 +283,16 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=204 s=1 z=100 t=the
    W x=244 s=1 z=100 t=Second
    W x=315 s=1 z=100 t=Accent
-  LINE y=72 x=0 align=0 mult=1.000 hfid=2457 words=5
-   W x=18 s=0 z=100 t=code
-   W x=60 s=0 z=100 t=in
-   W x=83 s=0 z=100 t=the
-   W x=120 s=0 z=100 t=code
-   W x=162 s=0 z=100 t=family
+  LINE y=72 x=0 align=1 mult=1.000 hfid=2457 words=9
+   W x=0 s=0 z=100 t=code
+   W x=36 s=0 z=100 t= 
+   W x=42 s=0 z=100 t=in
+   W x=59 s=0 z=100 t= 
+   W x=65 s=0 z=100 t=the
+   W x=96 s=0 z=100 t= 
+   W x=102 s=0 z=100 t=code
+   W x=138 s=0 z=100 t= 
+   W x=144 s=0 z=100 t=family
 SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=21 footnotes=0
   LINE y=0 x=0 align=2 mult=1.000 hfid=305419823 words=2

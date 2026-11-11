@@ -13,6 +13,7 @@ class BuildArena;  // lib/Memory -- optional storage for TextBlock bytes on dese
 #include "FootnoteEntry.h"
 #include "blocks/ImageBlock.h"
 #include "blocks/TextBlock.h"
+#include "css/CssStyle.h"
 
 static constexpr uint8_t MAX_TABLE_COLS = 8;
 static constexpr uint16_t MAX_TABLE_ROWS = 48;
@@ -28,6 +29,7 @@ enum PageElementTag : uint8_t {
   TAG_PageImage = 2,
   TAG_PageTable = 3,
   TAG_PageHR = 4,
+  TAG_PageBox = 5,
 };
 
 // represents something that has been added to a page
@@ -91,6 +93,40 @@ class PageHR final : public PageElement {
   bool serialize(FsFile& file) override;
   PageElementTag getTag() const override { return TAG_PageHR; }
   static std::unique_ptr<PageHR> deserialize(FsFile& file);
+};
+
+// The border and background of a block's slice on this page, as CSS draws them (CssBox): the parser's box scope places
+// one before the content it frames, so the shade goes under it. A box a page break cuts is left open there: no bottom
+// edge before the break, no top edge after it. Drawn in the black-and-white pass only.
+// Ported from crosspoint-reader PR #3891 (Justin Mitchell, @itsthisjustin), its PageBorderBox.
+class PageBox final : public PageElement {
+ public:
+  struct Edge {
+    uint8_t width = 0;  // pixels; 0 draws nothing
+    CssBorderStyle style = CssBorderStyle::None;
+  };
+  // Edges top, right, bottom, left.
+  PageBox(const int16_t xPos, const int16_t yPos, const uint16_t width, const uint16_t height, const Edge (&edges)[4],
+          const bool shaded)
+      : PageElement(xPos, yPos),
+        width(width),
+        height(height),
+        edges{edges[0], edges[1], edges[2], edges[3]},
+        shaded(shaded) {}
+  void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
+  bool serialize(FsFile& file) override;
+  PageElementTag getTag() const override { return TAG_PageBox; }
+  static std::unique_ptr<PageBox> deserialize(FsFile& file);
+  uint16_t getWidth() const { return width; }
+  uint16_t getHeight() const { return height; }
+  const Edge& getEdge(const CssBox::Side side) const { return edges[side]; }
+  bool isShaded() const { return shaded; }
+
+ private:
+  uint16_t width;
+  uint16_t height;
+  Edge edges[4];
+  bool shaded;
 };
 
 struct TableCell {
