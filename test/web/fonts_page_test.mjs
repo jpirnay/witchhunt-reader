@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Tests the Font Manager page (FontsPage.html) against the font API's answers: an installed outline
 // family shows "all sizes", and an install the reader does not list, or the device refuses, says so;
-// a TrueType family is uploaded as it is.
+// the language packs are a list of their own; a TrueType family is uploaded as it is.
 //
 //   node test/web/fonts_page_test.mjs <dir with node_modules/jsdom>
 // (the folder CI installs jsdom into, see .github/workflows/ci.yml). Exit status 0: every check passed.
@@ -152,24 +152,74 @@ for (const agree of [false, true]) {
   dom.window.close();
 }
 
-console.log('- the hyphenation packs, after the fonts');
+const PACKED = { ...REMOTE, families: [
+  { name: 'ChineseUI', description: 'Simplified Chinese in the interface', interfacePack: true, installed: true, hasUpdate: true, totalSize: 3000000, fileCount: 1 },
+  REMOTE.families[0],
+  { name: 'Literata', description: 'Serif', installed: true, hasUpdate: true, totalSize: 900000, fileCount: 5 },
+  { name: 'Language-German', description: 'Menus and messages in German', language: true, installed: true, hasUpdate: false, totalSize: 14000, fileCount: 1 },
+  { name: 'Hyphenation-Dutch', description: 'Hyphenation for books in Dutch', hyphenation: true, installed: false, hasUpdate: false, totalSize: 64313, fileCount: 1 },
+  { name: 'Hyphenation-German', description: 'Hyphenation for books in German', hyphenation: true, installed: true, hasUpdate: true, totalSize: 206283, fileCount: 1 },
+] };
+
+// The rows and headings of a list, in order: a row by its family, a heading as "# <title>".
+function listOrder(list) {
+  return [...list.children].filter((e) => !e.classList.contains('family-note')).map((e) =>
+    e.classList.contains('family-group') ? '# ' + e.textContent : (e.querySelector('h3') || {}).textContent || e.className);
+}
+
+console.log('- the language packs, a list of their own');
 {
   const { w, dom } = loadPage((u) => {
     if (u === '/api/fonts') return response(200, { families: [] });
-    if (u === '/api/fonts/manifest') return response(200, { ...REMOTE, families: [
-      REMOTE.families[0],
-      { name: 'Hyphenation-Dutch', description: 'Hyphenation for books in Dutch', hyphenation: true, installed: false, hasUpdate: false, totalSize: 64313, fileCount: 1 },
-      { name: 'Hyphenation-German', description: 'Hyphenation for books in German', hyphenation: true, installed: true, hasUpdate: false, totalSize: 206283, fileCount: 1 },
-    ] });
+    if (u === '/api/fonts/manifest') return response(200, PACKED);
   });
-  await until(() => w.document.querySelectorAll('#remoteFamilies button[data-family]').length === 3);
-  const list = w.document.getElementById('remoteFamilies');
-  const heads = [...list.querySelectorAll('.family-group')];
-  same(heads.length, 1, 'one heading for the packs');
-  const order = [...list.children].map((e) => e.className === 'family-group' ? 'HEAD' : (e.querySelector('h3') || {}).textContent || e.className);
-  same(order.join(','), 'NotoSerifKR,HEAD,family-note,Hyphenation-Dutch,Hyphenation-German', 'it stands between the fonts and the packs');
-  const buttons = [...list.querySelectorAll('button[data-family]')].map((b) => b.textContent);
-  same(buttons.join(','), 'Download,Download,Reinstall', 'a pack is downloaded like a font');
+  await until(() => w.document.querySelectorAll('#packFamilies button[data-family]').length === 4);
+  const fonts = w.document.getElementById('remoteFamilies');
+  same(listOrder(fonts).join(','), 'NotoSerifKR,Literata', 'Download fonts lists the fonts alone');
+  same(fonts.querySelectorAll('.family-group').length, 0, 'under no heading');
+  const packs = w.document.getElementById('packFamilies');
+  same(listOrder(packs).join(','), '# Interface languages,Language-German,# Book titles in Chinese, Japanese and Korean,ChineseUI,' +
+    '# Hyphenation,Hyphenation-Dutch,Hyphenation-German', 'Language packs lists each kind of pack under its heading');
+  same(packs.querySelectorAll('.family-note').length, 3, 'each heading with its note');
+  same([...packs.querySelectorAll('button[data-family]')].map((b) => b.textContent).join(','), 'Reinstall,Update,Download,Update',
+    'a pack is downloaded like a font');
+  same(w.document.getElementById('updateCount').textContent, '1', 'the fonts count their own updates');
+  same(w.document.getElementById('packUpdateCount').textContent, '2', 'the packs theirs');
+  same(w.document.querySelector('.cat-link[data-panel="packs"]').closest('.cat-list').previousElementSibling.textContent,
+    'Languages', 'the packs have their own group in the menu');
+  dom.window.close();
+}
+
+console.log('- each list\'s "all updates" and status');
+for (const [button, list, statusId, other] of [['downloadAllRemote', 'fonts', 'remoteStatus', 'packStatus'], ['updateAllPacks', 'packs', 'packStatus', 'remoteStatus']]) {
+  const bodies = [];
+  const { w, dom } = loadPage((u, init) => {
+    if (u === '/api/fonts') return response(200, { families: [] });
+    if (u === '/api/fonts/manifest') return response(200, PACKED);
+    if (u === '/api/fonts/download') { bodies.push(JSON.parse(init.body)); return response(200, { ok: true, installedCount: 2, notListed: [] }); }
+  });
+  await until(() => w.document.querySelectorAll('#packFamilies button[data-family]').length === 4);
+  w.document.getElementById(button).click();
+  const status = w.document.getElementById(statusId);
+  await until(() => /^(Installed|Updated)/.test(status.textContent));
+  same(JSON.stringify(bodies[0]), JSON.stringify({ all: true, list }), `${button} asks for the ${list} only`);
+  same(status.textContent, list === 'packs' ? 'Updated 2 pack(s).' : 'Installed/updated 2 family(s).', 'and says so in its own status');
+  same(w.document.getElementById(other).textContent, 'Waiting for action...', 'the other list\'s status is untouched');
+  dom.window.close();
+}
+
+console.log('- a pack\'s download reports beside the packs');
+{
+  const { w, dom } = loadPage((u) => {
+    if (u === '/api/fonts') return response(200, { families: [] });
+    if (u === '/api/fonts/manifest') return response(200, PACKED);
+    if (u === '/api/fonts/download') return response(200, { ok: true, installedCount: 1, notListed: [] });
+  });
+  await until(() => w.document.querySelectorAll('#packFamilies button[data-family]').length === 4);
+  w.document.querySelector('#packFamilies button[data-family="Hyphenation-Dutch"]').click();
+  const status = w.document.getElementById('packStatus');
+  await until(() => /^Installed/.test(status.textContent));
+  same(status.textContent, 'Installed "Hyphenation-Dutch".', 'the packs\' status says it');
   dom.window.close();
 }
 

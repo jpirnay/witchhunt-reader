@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <BoardConfig.h>
 #include <BookCache.h>
+#include <CjkUiPacks.h>
 #include <Epub.h>
 #include <FileReplace.h>
 #include <FsHelpers.h>
@@ -2557,6 +2558,8 @@ void CrossPointWebServer::handleFontManifest() {
     obj["ownFiles"] = families.installed(i) && !families.hasUpdate(i) && FontInstaller::holdsOwnFiles(families, i);
     obj["hyphenation"] = families.hyphenation(i);
     obj["language"] = families.languagePack(i);
+    // A CJK interface pack (ChineseUI): no reading font, listed with the language packs.
+    obj["interfacePack"] = cjk_ui_pack::isFamily(families.name(i));
     obj["totalSize"] = static_cast<unsigned long>(families.totalSize(i));
     obj["fileCount"] = static_cast<unsigned>(families.fileCount(i));
   }
@@ -2574,6 +2577,11 @@ void CrossPointWebServer::handleFontDownload() {
   body.clear();  // Free memory early!
 
   const bool installAll = req["all"].as<bool>();
+  // Which list's "Download all updates": "fonts" or "packs"; without one, both.
+  const char* listName = req["list"] | "";
+  const FontDownloadRules::WebList list = strcmp(listName, "fonts") == 0   ? FontDownloadRules::WebList::Fonts
+                                          : strcmp(listName, "packs") == 0 ? FontDownloadRules::WebList::Packs
+                                                                           : FontDownloadRules::WebList::All;
   const std::string requestedFamily = req["family"] | "";
   if (!installAll && requestedFamily.empty()) {
     server->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing family\"}");
@@ -2608,10 +2616,11 @@ void CrossPointWebServer::handleFontDownload() {
   if (installAll) {
     copied = targets.copyFrom(
         families,
-        [](const void*, const FontCatalog& from, const size_t i) {
-          return FontDownloadRules::downloadAllTakes(from, i) || from.hasUpdate(i);
+        [](const void* ctx, const FontCatalog& from, const size_t i) {
+          return FontDownloadRules::webAllTakes(from, i, cjk_ui_pack::isFamily(from.name(i)),
+                                                *static_cast<const FontDownloadRules::WebList*>(ctx));
         },
-        nullptr);
+        &list);
   } else {
     size_t found = families.count();
     for (size_t i = 0; i < families.count(); i++) {

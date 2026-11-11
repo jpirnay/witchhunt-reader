@@ -125,6 +125,21 @@ inline bool updateAllTakes(const FontCatalog& catalog, const size_t family, cons
   return catalog.installed(family) && catalog.hasUpdate(family) && (!packsOnly || catalog.pack(family));
 }
 
+// The web Font Manager's lists of the catalog: Language packs holds the packs (FontCatalog::pack()) and the CJK
+// interface packs (`interfacePack`: cjk_ui_pack::isFamily()), which are no reading fonts either; Fonts holds every
+// other family. All is both, the one list of the page before them.
+enum class WebList : uint8_t { All, Fonts, Packs };
+
+// What the web's "Download all updates" takes in `list`: among the fonts, a missing family Download all takes and
+// every update; among the packs, the updates alone, since a pack is for one language and none is fetched unasked.
+// All: both, as the page before the two lists asked.
+inline bool webAllTakes(const FontCatalog& catalog, const size_t family, const bool interfacePack, const WebList list) {
+  const bool inPacks = catalog.pack(family) || interfacePack;
+  if (list == WebList::Packs) return inPacks && updateAllTakes(catalog, family, /*packsOnly=*/false);
+  if (list == WebList::Fonts && inPacks) return false;
+  return downloadAllTakes(catalog, family) || catalog.hasUpdate(family);
+}
+
 // The packs updateAllTakes() takes with `packsOnly`: how many updates Check for updates offers.
 inline size_t packUpdates(const FontCatalog& catalog) {
   size_t count = 0;

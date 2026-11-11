@@ -26,7 +26,18 @@
       .family-info { flex: 1 1 260px; min-width: 0; }
       .family-info h3 { margin: 0 0 2px; font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
       .family-meta { color: var(--text-muted); font-size: 0.875rem; overflow-wrap: anywhere; }
-      .family-group { margin: 18px 0 4px; font-size: 1rem; }
+      /* A group of the packs: a section label over its note, set off from the group before by a rule. */
+      .family-group {
+        margin: 8px 0 4px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+      }
+      .family-group:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
       .family-group + .family-note { margin: 0 0 6px; color: var(--text-muted); font-size: 0.875rem; }
 
       .toolbar {
@@ -62,8 +73,9 @@
         margin: 0 0 8px;
       }
       .status-panel p { margin: 0; }
-      #remoteStatus { color: var(--text-muted); overflow-wrap: anywhere; }
-      #remoteStatus.status-ok, #remoteStatus.status-err { margin: 0 -4px; padding: 8px 10px; border-radius: var(--radius-sm); }
+      #remoteStatus, #packStatus { color: var(--text-muted); overflow-wrap: anywhere; }
+      #remoteStatus.status-ok, #remoteStatus.status-err, #packStatus.status-ok, #packStatus.status-err {
+        margin: 0 -4px; padding: 8px 10px; border-radius: var(--radius-sm); }
 
       .notice a { color: inherit; font-weight: 600; }
       #pickedInfo { margin: 8px 0 0; }
@@ -107,10 +119,10 @@
       }
       #convertStatus:not(.status-ok):not(.status-err) { display: block; color: var(--text-muted); }
       #convertStatus:not(.status-ok):not(.status-err):empty { display: none; }
-      #status.status-ok, #installedStatus.status-ok, #remoteStatus.status-ok, #convertStatus.status-ok { display: block; background: var(--accent-soft); color: var(--ok-text);
-        border-color: transparent; }
-      #status.status-err, #installedStatus.status-err, #remoteStatus.status-err, #convertStatus.status-err { display: block; background: var(--danger-soft); color: var(--danger);
-        border-color: transparent; }
+      #status.status-ok, #installedStatus.status-ok, #remoteStatus.status-ok, #packStatus.status-ok, #convertStatus.status-ok {
+        display: block; background: var(--accent-soft); color: var(--ok-text); border-color: transparent; }
+      #status.status-err, #installedStatus.status-err, #remoteStatus.status-err, #packStatus.status-err, #convertStatus.status-err {
+        display: block; background: var(--danger-soft); color: var(--danger); border-color: transparent; }
       #status:not(.status-ok):not(.status-err) { color: var(--text-muted); }
 
       @media (max-width: 1060px) {
@@ -126,10 +138,10 @@
       <div class="page-head">
         <h1>Font Manager</h1>
         <p class="page-intro">Reading fonts on the SD card: download them from the catalog, upload or convert your own,
-          or delete those you no longer use.</p>
+          or delete those you no longer use. The language and hyphenation packs have a list of their own.</p>
       </div>
 
-      <!-- One panel at a time, chosen in the menu; #installed, #download, #upload or #convert. -->
+      <!-- One panel at a time, chosen in the menu; #installed, #download, #upload, #convert or #packs. -->
       <div class="side-layout">
         <aside class="side-nav">
           <nav aria-label="Font Manager">
@@ -145,6 +157,11 @@
               <a class="cat-link" href="#upload" data-panel="upload"><span>Upload a font</span></a>
               <a class="cat-link" href="#convert" data-panel="convert"><span>Convert a font</span></a>
             </div>
+            <div class="cat-group">Languages</div>
+            <div class="cat-list">
+              <a class="cat-link" href="#packs" data-panel="packs"><span>Language packs</span>
+                <span class="cat-count" id="packUpdateCount"></span></a>
+            </div>
           </nav>
         </aside>
 
@@ -157,6 +174,8 @@
 
           <section class="card" id="panel-download" hidden>
             <h2>Download fonts</h2>
+            <p class="card-intro">Reading fonts from the online catalog. The reader downloads them itself, so it must be
+              online. The packs for a language are under <a href="#packs">Language packs</a>.</p>
             <div class="toolbar">
               <button id="refreshManifest" class="btn" type="button">Refresh catalog</button>
               <button id="downloadAllRemote" class="btn btn-primary" type="button">Download all updates</button>
@@ -230,6 +249,24 @@
             </div>
             <button type="button" id="uploadBtn" class="btn btn-primary" disabled>Upload</button>
             <div id="status" role="status"></div>
+          </section>
+
+          <section class="card" id="panel-packs" hidden>
+            <h2>Language packs</h2>
+            <p class="card-intro">Not fonts: what the reader needs for a language besides a font of its script. English
+              is built in. The reader downloads the packs itself, so it must be online. Delete a pack in the Font
+              Manager on the reader.</p>
+            <div class="toolbar">
+              <button id="refreshPacks" class="btn" type="button">Refresh catalog</button>
+              <button id="updateAllPacks" class="btn btn-primary" type="button">Update all packs</button>
+            </div>
+            <div class="download-layout">
+              <div id="packFamilies"><p class="empty">Catalog not loaded</p></div>
+              <div class="status-panel" role="status">
+                <h3>Download status</h3>
+                <div id="packStatus" class="status-message"><p>Waiting for action...</p></div>
+              </div>
+            </div>
           </section>
         </div>
       </div>
@@ -332,122 +369,136 @@
       await loadRemoteManifest();
     }
 
-    // The number of catalog updates, beside Download fonts in the menu.
-    function showUpdateCount(n) {
-      const count = document.getElementById('updateCount');
+    // The catalog in two lists: the reading fonts under Download fonts, and under Language packs what a language needs
+    // besides a font: its interface pack, the CJK book-title packs and its hyphenation pack. Each list has its own
+    // status, update count and "all updates" button (POST /api/fonts/download {all, list}).
+    const LISTS = {
+      fonts: { el: 'remoteFamilies', status: 'remoteStatus', count: 'updateCount' },
+      packs: { el: 'packFamilies', status: 'packStatus', count: 'packUpdateCount' },
+    };
+    const PACK_GROUPS = [
+      { key: 'language', title: 'Interface languages',
+        note: 'Menus and messages in your language. Install the language you set in Settings; the reader uses it ' +
+          'from its next start.' },
+      { key: 'interfacePack', title: 'Book titles in Chinese, Japanese and Korean',
+        note: 'Draw CJK book titles whole in the menus, outside a book. No reading fonts: for reading, download a ' +
+          'font of the script under Download fonts.' },
+      { key: 'hyphenation', title: 'Hyphenation',
+        note: 'Every language but English hyphenates with its pack: install the languages of your books.' },
+    ];
+    const listOf = (f) => (f.language || f.hyphenation || f.interfacePack ? 'packs' : 'fonts');
+
+    // The number of updates in a list, beside its entry in the menu.
+    function showUpdateCount(list, n) {
+      const count = document.getElementById(LISTS[list].count);
       count.textContent = n ? String(n) : '';
       count.classList.toggle('attention', n > 0);
       count.title = n ? n + (n === 1 ? ' update' : ' updates') + ' available' : '';
     }
 
+    function catalogRow(f, list) {
+      const row = document.createElement('div');
+      row.className = 'family';
+
+      const info = document.createElement('div');
+      info.className = 'family-info';
+
+      const title = document.createElement('h3');
+      title.textContent = f.name;
+
+      const meta = document.createElement('span');
+      meta.className = 'family-meta';
+      const state = f.installed ? (f.hasUpdate ? 'Installed, update available' : 'Installed, up to date') : 'Not installed';
+      const details = state + ' - ' + (f.fileCount || 0) + ' file(s), ' + formatSize(f.totalSize || 0);
+      meta.textContent = f.description ? (f.description + ' - ' + details) : details;
+
+      info.appendChild(title);
+      info.appendChild(meta);
+
+      const btn = document.createElement('button');
+      // Only an update stands out; a list of green buttons would hide it.
+      btn.className = 'btn btn-small' + (f.installed && f.hasUpdate ? ' btn-primary' : '');
+      btn.dataset.family = f.name;
+      if (f.ownFiles) btn.dataset.ownFiles = '1';
+      btn.textContent = f.installed ? (f.hasUpdate ? 'Update' : 'Reinstall') : 'Download';
+      btn.addEventListener('click', async () => {
+        // The folder holds the reader's own files under this name: installing replaces them.
+        if (btn.dataset.ownFiles && !confirm('The folder "' + btn.dataset.family +
+            '" on the reader holds your own font files, not the hosted ones. Installing replaces its current files. Continue?')) {
+          return;
+        }
+        btn.disabled = true;
+        await downloadRemoteFamily(btn.dataset.family, list);
+        btn.disabled = false;
+      });
+
+      row.appendChild(info);
+      row.appendChild(btn);
+      return row;
+    }
+
+    function groupHead(title, note) {
+      const head = document.createElement('h3');
+      head.className = 'family-group';
+      head.textContent = title;
+      const text = document.createElement('p');
+      text.className = 'family-note';
+      text.textContent = note;
+      return [head, text];
+    }
+
+    function showCatalog(families) {
+      const fonts = families.filter((f) => listOf(f) === 'fonts');
+      const packs = families.filter((f) => listOf(f) === 'packs');
+      const fontsEl = document.getElementById(LISTS.fonts.el);
+      fontsEl.replaceChildren(...fonts.map((f) => catalogRow(f, 'fonts')));
+      if (!fonts.length) fontsEl.innerHTML = '<p class="empty">No remote fonts found</p>';
+      const packsEl = document.getElementById(LISTS.packs.el);
+      packsEl.replaceChildren(...PACK_GROUPS.flatMap((group) => {
+        const rows = packs.filter((f) => f[group.key]).map((f) => catalogRow(f, 'packs'));
+        return rows.length ? groupHead(group.title, group.note).concat(rows) : [];
+      }));
+      if (!packs.length) packsEl.innerHTML = '<p class="empty">No language packs found</p>';
+      for (const [list, rows] of [['fonts', fonts], ['packs', packs]]) {
+        showUpdateCount(list, rows.filter((f) => f.installed && f.hasUpdate).length);
+      }
+    }
+
     async function loadRemoteManifest() {
-      const el = document.getElementById('remoteFamilies');
-      el.innerHTML = '<p class="empty">Loading catalog...</p>';
-      showUpdateCount(0);
+      for (const list of Object.keys(LISTS)) {
+        document.getElementById(LISTS[list].el).innerHTML = '<p class="empty">Loading catalog...</p>';
+        showUpdateCount(list, 0);
+      }
       try {
         const res = await fetch('/api/fonts/manifest');
         const data = await res.json();
         if (!res.ok || !data.ok) {
           throw new Error(data.error || 'catalog unavailable');
         }
-
-        el.innerHTML = '';
-        if (!Array.isArray(data.families) || data.families.length === 0) {
-          el.innerHTML = '<p class="empty">No remote fonts found</p>';
-          return;
-        }
-        showUpdateCount(data.families.filter((f) => f.installed && f.hasUpdate).length);
-
-        let languagesHeaded = false;
-        let packsHeaded = false;
-        data.families.forEach(f => {
-          // The language packs come after the fonts: one per interface language.
-          if (f.language && !languagesHeaded) {
-            languagesHeaded = true;
-            const head = document.createElement('h3');
-            head.className = 'family-group';
-            head.textContent = 'Language packs';
-            const note = document.createElement('p');
-            note.className = 'family-note';
-            note.textContent = 'English is built in; every other interface language reads its pack. ' +
-                'Install the language you set in Settings; the reader uses it from its next start. ' +
-                'Delete a pack in the Font Manager on the reader.';
-            el.appendChild(head);
-            el.appendChild(note);
-          }
-          // The hyphenation packs come last: one per language, for the books in it.
-          if (f.hyphenation && !packsHeaded) {
-            packsHeaded = true;
-            const head = document.createElement('h3');
-            head.className = 'family-group';
-            head.textContent = 'Hyphenation packs';
-            const note = document.createElement('p');
-            note.className = 'family-note';
-            note.textContent = 'English is built in; every other language hyphenates with its pack. ' +
-                'Install the languages of your books. Delete a pack in the Font Manager on the reader.';
-            el.appendChild(head);
-            el.appendChild(note);
-          }
-          const row = document.createElement('div');
-          row.className = 'family';
-
-          const info = document.createElement('div');
-          info.className = 'family-info';
-
-          const title = document.createElement('h3');
-          title.textContent = f.name;
-
-          const meta = document.createElement('span');
-          meta.className = 'family-meta';
-          const state = f.installed ? (f.hasUpdate ? 'Installed, update available' : 'Installed, up to date') : 'Not installed';
-          const details = state + ' - ' + (f.fileCount || 0) + ' file(s), ' + formatSize(f.totalSize || 0);
-          meta.textContent = f.description ? (f.description + ' - ' + details) : details;
-
-          info.appendChild(title);
-          info.appendChild(meta);
-
-          const btn = document.createElement('button');
-          // Only an update stands out; a list of green buttons would hide it.
-          btn.className = 'btn btn-small' + (f.installed && f.hasUpdate ? ' btn-primary' : '');
-          btn.dataset.family = f.name;
-          if (f.ownFiles) btn.dataset.ownFiles = '1';
-          btn.textContent = f.installed ? (f.hasUpdate ? 'Update' : 'Reinstall') : 'Download';
-
-          row.appendChild(info);
-          row.appendChild(btn);
-          el.appendChild(row);
-        });
-
-        el.querySelectorAll('button[data-family]').forEach(btn => {
-          btn.addEventListener('click', async () => {
-            // The folder holds the reader's own files under this name: installing replaces them.
-            if (btn.dataset.ownFiles && !confirm('The folder "' + btn.dataset.family +
-                '" on the reader holds your own font files, not the hosted ones. Installing replaces its current files. Continue?')) {
-              return;
-            }
-            btn.disabled = true;
-            await downloadRemoteFamily(btn.dataset.family);
-            btn.disabled = false;
-          });
-        });
+        showCatalog(Array.isArray(data.families) ? data.families : []);
       } catch (err) {
-        el.innerHTML = '<p class="empty">Failed to load catalog: ' + err.message + '</p>';
+        for (const list of Object.keys(LISTS)) {
+          const el = document.getElementById(LISTS[list].el);
+          el.innerHTML = '<p class="empty"></p>';
+          el.firstChild.textContent = 'Failed to load catalog: ' + err.message;
+        }
       }
     }
 
     // The install answer's status: installed outline families the reader does not list are an error, one line each.
-    function showInstallResult(data, okText) {
+    function showInstallResult(statusId, data, okText) {
       const missing = Array.isArray(data.notListed) ? data.notListed : [];
       if (missing.length === 0) {
-        setStatus('remoteStatus', okText, true);
+        setStatus(statusId, okText, true);
         return;
       }
-      setStatus('remoteStatus', missing.map(name => 'Installed "' + name +
+      setStatus(statusId, missing.map(name => 'Installed "' + name +
         '", but it is too large for this reader\'s font area: the reader does not list it.').join(' '), false);
     }
 
-    async function downloadRemoteFamily(family) {
-      setStatus('remoteStatus', 'Downloading "' + family + '"...');
+    async function downloadRemoteFamily(family, list) {
+      const statusId = LISTS[list].status;
+      setStatus(statusId, 'Downloading "' + family + '"...');
       try {
         const res = await fetch('/api/fonts/download', {
           method: 'POST',
@@ -458,35 +509,37 @@
         if (!res.ok || !data.ok) {
           throw new Error(data.error || 'download failed');
         }
-        showInstallResult(data, 'Installed "' + family + '".');
+        showInstallResult(statusId, data, 'Installed "' + family + '".');
         await loadFonts();
         await loadRemoteManifest();
       } catch (err) {
-        setStatus('remoteStatus', 'Install failed for "' + family + '": ' + err.message, false);
+        setStatus(statusId, 'Install failed for "' + family + '": ' + err.message, false);
       }
     }
 
-    async function downloadAllRemoteUpdates() {
-      setStatus('remoteStatus', 'Downloading all available updates...');
-      const btn = document.getElementById('downloadAllRemote');
-      btn.disabled = true;
+    // A list's "all updates": the fonts' takes every missing font Download all takes too, the packs' only updates.
+    async function downloadAllRemoteUpdates(list, button) {
+      const statusId = LISTS[list].status;
+      setStatus(statusId, list === 'packs' ? 'Updating the packs...' : 'Downloading all available updates...');
+      button.disabled = true;
       try {
         const res = await fetch('/api/fonts/download', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({all: true})
+          body: JSON.stringify({all: true, list})
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
           throw new Error(data.error || 'download failed');
         }
-        showInstallResult(data, 'Installed/updated ' + (data.installedCount || 0) + ' family(s).');
+        const n = data.installedCount || 0;
+        showInstallResult(statusId, data, list === 'packs' ? 'Updated ' + n + ' pack(s).' : 'Installed/updated ' + n + ' family(s).');
         await loadFonts();
         await loadRemoteManifest();
       } catch (err) {
-        setStatus('remoteStatus', 'Download-all failed: ' + err.message, false);
+        setStatus(statusId, (list === 'packs' ? 'Update' : 'Download-all') + ' failed: ' + err.message, false);
       }
-      btn.disabled = false;
+      button.disabled = false;
     }
 
     // ---- Font files: read in the browser, for Upload and Convert alike -----------------------------
@@ -904,7 +957,7 @@
       return label;
     }));
 
-    const PANELS = ['installed', 'download', 'upload', 'convert'];
+    const PANELS = ['installed', 'download', 'upload', 'convert', 'packs'];
 
     function showPanel(id) {
       if (!PANELS.includes(id)) id = PANELS[0];
@@ -937,7 +990,11 @@
     }
 
     document.getElementById('refreshManifest').addEventListener('click', loadRemoteManifest);
-    document.getElementById('downloadAllRemote').addEventListener('click', downloadAllRemoteUpdates);
+    document.getElementById('refreshPacks').addEventListener('click', loadRemoteManifest);
+    for (const [id, list] of [['downloadAllRemote', 'fonts'], ['updateAllPacks', 'packs']]) {
+      const button = document.getElementById(id);
+      button.addEventListener('click', () => downloadAllRemoteUpdates(list, button));
+    }
 
     loadFonts();
     loadRemoteManifest();
