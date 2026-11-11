@@ -269,8 +269,13 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
   wolfSSL_UseMaxFragment(ssl, WOLFSSL_MFL_2_11);
 #endif
   if (verifyPeer && !_insecure) {
-    // Also check the hostname against the cert SAN/CN, not just the chain.
-    wolfSSL_check_domain_name(ssl, host);
+    // Also check the hostname against the cert SAN/CN, not just the chain. The call copies the name, so it can fail
+    // for want of memory; going on then would accept any valid certificate for any host. Refuse the connection.
+    if (wolfSSL_check_domain_name(ssl, host) != WOLFSSL_SUCCESS) {
+      LOG_ERR("TLS", "Could not set the hostname check for %s; connection refused", host);
+      stop();
+      return 0;
+    }
   }
 
   // Non-blocking recv => retry wolfSSL_connect across handshake round-trips.
