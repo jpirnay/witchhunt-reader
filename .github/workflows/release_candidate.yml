@@ -80,15 +80,19 @@ jobs:
           - env: gh_release_rc
             label: X3/X4
             asset: firmware.bin
+            full: full-install-x3x4.bin
           - env: x4pro_gh_release_rc
             label: X4 Pro
             asset: firmware-x4pro.bin
+            full: full-install-x4pro.bin
           - env: lilygo_gh_release_rc
             label: LilyGo T5S3
             asset: firmware-lilygo.bin
+            full: full-install-lilygo.bin
           - env: murphy_gh_release_rc
             label: Murphy M3
             asset: firmware-murphy.bin
+            full: full-install-murphy.bin
     steps:
       - uses: actions/checkout@v6
         with:
@@ -152,6 +156,15 @@ jobs:
       - name: Patch min_chip_rev_full to 0
         run: python3 scripts/patch_min_chip_rev.py .pio/build/${{ matrix.env }}/firmware.bin
 
+      # The full install: bootloader, partition table, otadata and this patched app, merged from 0x0
+      # with what `pio run -t upload` writes for the env (scripts/flash_layout.py records it), then
+      # checked byte for byte against those sources. For a device whose bootloader or partition table
+      # is not ours (a stock X4 Pro has no spiffs area); the web flasher (flasher/) writes it.
+      - name: Build ${{ matrix.full }}
+        run: >-
+          python3 scripts/full_install_image.py .pio/build/${{ matrix.env }}
+          --out .pio/build/${{ matrix.env }}/${{ matrix.full }}
+
       # Every env builds a file called firmware.bin; copy it to the board's
       # asset name. The X3/X4 leg's asset IS firmware.bin, so it needs no copy.
       - name: Name the release asset
@@ -181,6 +194,7 @@ jobs:
           name: ${{ matrix.asset }}
           path: |
             .pio/build/${{ matrix.env }}/${{ matrix.asset }}
+            .pio/build/${{ matrix.env }}/${{ matrix.full }}
             .pio/build/${{ matrix.env }}/web-*.bin
           if-no-files-found: error
 

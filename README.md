@@ -32,11 +32,30 @@ Want your device supported? Consider donating one: support for a board needs the
 
 Flashing is done from the browser — no toolchain or driver install needed. Use a Chromium-based browser (Chrome, Edge, Opera) or a recent Firefox version (>151); older versions of Firefox and Safari do not support WebSerial.
 
-1. Download `firmware.bin` for your device from the [latest release](../../releases/latest).
-2. Open the [CrossPoint flash tools](https://crosspointreader.com/#flash-tools).
-3. Pick your device.
-4. Choose **Custom .bin** and upload the `firmware.bin` you downloaded in step 1.
-5. Connect the device via USB and start the flash — pick the device's serial port when the browser asks.
+1. Open the **[Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/)**. It carries the latest release.
+2. Pick your device, connect it over USB and press **Connect**. The page reads the device's partition table and
+   says whether it is Witch Reader's, the original firmware's or unknown.
+3. Choose what to write:
+   - **Full install** (recommended): boot loader, partition table and firmware. Use it the first time, coming from
+     the original firmware or CrossPoint, and whenever the page does not find Witch Reader's partition table. It
+     fixes an X4 Pro whose interface stays in English after an update from its original firmware, and gives an X3 or
+     X4 the faster-waking boot loader. It replaces the original firmware for good: keep a backup if you may want it
+     back.
+   - **Update only**: just the firmware, on a device that already has Witch Reader's partition table.
+4. Leave **Install the web interface over USB afterwards** on, so the web pages work without Wi-Fi setup.
+
+Everything on the SD card stays: books, progress, settings, Wi-Fi networks, fonts. The page says what a full install
+resets in the device's own memory (the clock's last time, for one).
+
+The release page also lists `full-install-<device>.bin` for other flashing tools (written from 0x0) and the
+firmware-only `firmware*.bin`. Updating without a computer still works: **Check for Updates** over Wi-Fi, or copy the
+firmware `.bin` to the card and use **SD Firmware Update** (Settings → System). The flasher's **Custom file** takes a
+test build from a pull request.
+
+The [CrossPoint flash tools](https://crosspointreader.com/#flash-tools) install Witch Reader too: pick your device,
+choose **Custom .bin** and upload the `firmware*.bin` from the [latest release](../../releases/latest). On an X4 Pro
+they write the firmware only and keep the device's partition table, so an X4 Pro that still has its original table
+needs the **Full install** above. The Murphy M3 is not listed there.
 
 For everything the reader does and how to use it, see the **[User Guide](USER_GUIDE.md)**. How it compares with
 CrossPoint, feature by feature: **[Feature comparison](docs/feature-comparison.md)**.

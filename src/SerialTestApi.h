@@ -15,7 +15,8 @@
 // SERIAL_TEST_API (set by the development environments in platformio.ini) builds the full set.
 // Without it only the original commands remain -- BTN (the six front and side keys, :LONG), ACT
 // (HOME, READER:<path>, SETTINGS, BOOKMARKS, FILES, LIBRARY), STATE (screen, stack, the reader's
-// position), SCREENSHOT and BOOTLOG -- and every probe below compiles to nothing.
+// position), SCREENSHOT and BOOTLOG -- plus what the web flasher (flasher/) needs to install the web
+// bundle after a flash: ACT:USB_TRANSFER and WEB. Every probe below compiles to nothing.
 #ifndef SERIAL_TEST_API
 #define SERIAL_TEST_API 0
 #endif

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Only this site and the one pinned library: no analytics, no other fetches. The sha256 is that
+       of the import map below, the exact text between its tags, newlines included; change the map
+       and recompute it, or the browser refuses the map. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net/npm/esptool-js@0.7.0/bundle.js 'sha256-A7uwdoV1ig8TBVtkJP2SVBQiadbeR3NDYruCFdvr6+g='; connect-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+  <title>Witch Reader flasher</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- esptool-js (Espressif, Apache-2.0), pinned to one version and to its exact bytes. -->
+  <script type="importmap">
+{
+  "imports": { "esptool-js": "https://cdn.jsdelivr.net/npm/esptool-js@0.7.0/bundle.js" },
+  "integrity": { "https://cdn.jsdelivr.net/npm/esptool-js@0.7.0/bundle.js": "sha384-gg1uFHEfaf6612Q8/ovFzAYvLxRakqrLWyMjLe8LEMBP3+2qgUvxuYxTuk87KdIb" }
+}
+  </script>
+  <script type="module" src="flasher.js"></script>
+</head>
+<body>
+<main>
+  <h1>Witch Reader flasher</h1>
+  <p id="release" class="muted">Loading... If this stays, the page could not load its flashing library: check
+    the connection and use a current Chromium browser or Firefox.</p>
+  <div id="unsupported" class="note bad" hidden>
+    This browser cannot talk to a USB serial port. Use a Chromium-based browser (Chrome, Edge, Opera) or a
+    recent Firefox (newer than 151); older Firefox versions and Safari do not support WebSerial.
+  </div>
+
+  <section>
+    <h2>1. Your device</h2>
+    <div id="boards"></div>
+  </section>
+
+  <section>
+    <h2>2. Connect</h2>
+    <p>Plug the device in with a USB data cable and wake it, then press <strong>Connect</strong> and pick its
+      port (it may show up as "USB JTAG/serial debug unit").</p>
+    <div class="row">
+      <button id="connect" type="button">Connect</button>
+      <button id="disconnect" type="button" class="secondary" hidden>Disconnect</button>
+    </div>
+    <div id="device"></div>
+  </section>
+
+  <section>
+    <h2>3. What to write</h2>
+    <label class="choice"><input type="radio" name="mode" value="full" checked>
+      <strong>Full install</strong> (recommended)
+      <small id="full-info">The boot loader, the partition table and the firmware, written from the start of the
+        flash. Needed when the device runs other firmware, or an old layout of this one.</small></label>
+    <label class="choice"><input type="radio" name="mode" value="update">
+      <strong>Update only</strong>
+      <small id="update-info">Just the firmware. Only for a device that already has this reader's partition
+        table.</small></label>
+    <label class="choice"><input type="radio" name="mode" value="custom">
+      <strong>Custom file</strong>
+      <small>A .bin of your own, for example a test build from a pull request: a full image is written from the
+        start of the flash, a firmware image like <em>Update only</em>.</small></label>
+    <div id="custom" hidden>
+      <p><input id="custom-file" type="file" accept=".bin"></p>
+      <p id="custom-info" class="muted"></p>
+      <p class="muted">Its web interface bundle (web-....bin), if you have it:
+        <input id="custom-web" type="file" accept=".bin"></p>
+    </div>
+    <label class="choice"><input id="erase" type="checkbox">
+      Erase the whole flash first
+      <small>Clears everything outside the new firmware too (about 30 seconds more). Full install only.</small></label>
+    <label class="choice"><input id="web" type="checkbox" checked>
+      Install the web interface over USB afterwards
+      <small>So the device's web pages are ready without Wi-Fi. Optional: if it fails, the firmware is still
+        installed, and the pages install themselves the first time you open them.</small></label>
+    <div id="plan"></div>
+    <div class="row">
+      <button id="write" type="button" disabled>Write</button>
+    </div>
+    <progress id="progress" max="100" value="0" hidden></progress>
+    <p id="status" class="muted"></p>
+    <div id="after"></div>
+    <div class="row">
+      <button id="reconnect" type="button" class="secondary" hidden>Pick the device again</button>
+    </div>
+  </section>
+
+  <details>
+    <summary>What a full install keeps and what it loses</summary>
+    <p><strong>Kept:</strong> everything on the SD card. Your books, reading progress, bookmarks, settings,
+      Wi-Fi networks, fonts, dictionaries, language and hyphenation packs and reading statistics all live there.</p>
+    <p><strong>Lost from the device's own memory:</strong></p>
+    <ul>
+      <li>the clock's last known time and its learned drift: a device without a clock chip shows no time until
+        it next syncs it over Wi-Fi;</li>
+      <li>which model an X3/X4 is: it is detected again at the first start;</li>
+      <li>the boot diagnostics counters;</li>
+      <li>copies the firmware rebuilds by itself: the power-button settings and time zone (from the settings on
+        the card), the radio calibration, and the font, language and hyphenation caches, rebuilt from the card
+        when they are first needed (the first book or language switch may take a little longer).</li>
+    </ul>
+    <p><strong>On a device with its original firmware</strong> (for example a new X4 Pro), a full install
+      replaces that firmware, and what it kept in the device's memory, such as its Wi-Fi passwords, is lost with
+      it. There is no way back unless you have a backup of the whole flash. If you may want to return to it, make
+      one first, for example with esptool: <code>esptool read-flash 0 ALL backup.bin</code>.</p>
+    <p><strong>Leftovers.</strong> Without <em>Erase the whole flash first</em>, parts of the flash that Witch
+      Reader has not used yet keep their old bytes until it does; it never reads them as its own data. On a device
+      that had its original firmware, that can include what the old firmware stored. Erase first if you pass the
+      device on.</p>
+    <p><strong>Update only</strong> keeps all of the above; it replaces the firmware and makes the device start
+      it.</p>
+  </details>
+
+  <details>
+    <summary>If something goes wrong</summary>
+    <p><strong>The device does not come back after writing.</strong> Unplug it, then press the power button
+      (hold it for a second or two) to wake it; on an X3 or X4, press and release Reset, then quickly press and
+      hold Power. A stock X4 Pro has once needed exactly this after a reset. Then press <strong>Pick the device
+      again</strong> to install the web interface, or skip it: the pages install themselves later.</p>
+    <p><strong>The page cannot reach the device, or it refuses to be written.</strong> Some X4 Pro units are
+      locked and only take updates from the SD card. Then download the firmware image below, copy it to the
+      card's top folder and install it on the device: on the original firmware under Settings &gt; System &gt;
+      System Update &gt; SD Card Firmware Update, on Witch Reader under Settings &gt; System &gt; SD Firmware
+      Update.</p>
+    <p id="app-links" class="muted"></p>
+    <p><strong>Connect finds no port.</strong> Use a data cable, wake the device, and close any other program
+      that uses the port (a serial monitor, another flasher tab).</p>
+  </details>
+
+  <details>
+    <summary>Log</summary>
+    <pre id="log"></pre>
+  </details>
+
+  <p class="muted">Flashing uses <a href="https://github.com/espressif/esptool-js">esptool-js</a> 0.7.0 by
+    Espressif (Apache-2.0). <a href="https://github.com/jpirnay/witchhunt-reader">Witch Reader</a>.</p>
+</main>
+</body>
+</html>

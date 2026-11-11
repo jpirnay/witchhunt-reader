@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "BootDiagnostics.h"
@@ -17,6 +18,7 @@
 #include "activities/ActivityManager.h"
 #include "activities/RenderLock.h"
 #include "activities/home/LibraryTab.h"
+#include "network/WebAssets.h"
 #include "util/ScreenshotUtil.h"
 #include "util/SerialCommandGrammar.h"
 
@@ -43,8 +45,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <ttf/TtfFont.h>
-
-#include <cstring>
 
 #include "ButtonEventManager.h"
 #include "CjkUiFonts.h"
@@ -463,12 +463,14 @@ void cmdActivity(const std::string_view arg) {
   std::string_view target;
   std::string_view rest;
   splitHead(arg, target, rest);
-  static constexpr const char* kTargets[] = {"HOME",    "READER", "SETTINGS",      "BOOKMARKS",   "FILES",
-                                             "LIBRARY", "DICT",   "FILE_TRANSFER", "USB_TRANSFER"};
+  static constexpr const char* kTargets[] = {"HOME",    "READER",       "SETTINGS", "BOOKMARKS",    "FILES",
+                                             "LIBRARY", "USB_TRANSFER", "DICT",     "FILE_TRANSFER"};
 #if SERIAL_TEST_API
   constexpr int kTargetCount = 9;
 #else
-  constexpr int kTargetCount = 6;  // the original targets; the rest come with SERIAL_TEST_API
+  // The original targets, and USB_TRANSFER for the web flasher (flasher/), which writes the web
+  // bundle through it; the rest come with SERIAL_TEST_API.
+  constexpr int kTargetCount = 7;
 #endif
   switch (indexOf(target, kTargets, kTargetCount)) {
     case 0:
@@ -510,14 +512,7 @@ void cmdActivity(const std::string_view arg) {
       activityManager.goToLibrary(static_cast<LibraryTab>(tab));
       break;
     }
-#if SERIAL_TEST_API
     case 6:
-      lookUpWord(rest);
-      return;
-    case 7:
-      activityManager.goToFileTransfer();
-      break;
-    case 8:
       // Leaving the transfer screen reboots (SerialTransferActivity::onExit), so replacing it with
       // a fresh one would land on Home: already there is already done.
       if (std::strcmp(activityManager.currentActivityName(), "SerialTransfer") == 0) {
@@ -525,6 +520,13 @@ void cmdActivity(const std::string_view arg) {
         return;
       }
       activityManager.goToSerialTransfer();
+      break;
+#if SERIAL_TEST_API
+    case 7:
+      lookUpWord(rest);
+      return;
+    case 8:
+      activityManager.goToFileTransfer();
       break;
 #endif
     default:
@@ -1930,6 +1932,36 @@ void cmdBootLog(std::string_view /*arg*/) {
   reply("BOOTLOG_OK");
 }
 
+// ---- WEB ------------------------------------------------------------------------------------
+// The web interface's bundle (network/WebAssets.h). CMD:WEB says which bundle this build expects
+// and whether it is installed; CMD:WEB:INSTALL installs web-<hash>.bin from the card's top folder,
+// as the setup page's "card" source does, with the same hash check. Together with a file written
+// on the USB Transfer screen ('W') that installs the pages without Wi-Fi: the web flasher
+// (flasher/) does so after a flash, which is why both are in every build.
+void cmdWeb(const std::string_view arg) {
+  if (arg.empty()) {
+    WebAssets::forget();  // the card may have changed since the state was read (USB Transfer, a reader)
+    std::string line = "WEB:state=";
+    line.reserve(96);
+    line += WebAssets::stateName(WebAssets::state());
+    appendField(line, "asset", WebAssets::assetName());
+    appendField(line, "release", WebAssets::releaseTag());
+    appendField(line, "onCard", WebAssets::bundleOnCard() ? 1L : 0L);
+    reply(line);
+    return;
+  }
+  if (arg != "INSTALL") {
+    reply("WEB_ERROR:unknown argument ", arg);
+    return;
+  }
+  const WebAssets::InstallError err = WebAssets::installFromCard();
+  if (err == WebAssets::InstallError::None) {
+    reply("WEB_OK");
+  } else {
+    reply("WEB_ERROR:", WebAssets::errorText(err));
+  }
+}
+
 void cmdHelp(std::string_view arg);
 
 using Handler = void (*)(std::string_view arg);
@@ -1939,7 +1971,7 @@ struct Command {
 };
 constexpr Command kCommands[] = {
     {"BTN", &cmdButton},      {"ACT", &cmdActivity},  {"STATE", &cmdState}, {"SCREENSHOT", &cmdScreenshot},
-    {"BOOTLOG", &cmdBootLog}, {"HELP", &cmdHelp},
+    {"BOOTLOG", &cmdBootLog}, {"WEB", &cmdWeb},       {"HELP", &cmdHelp},
 #if SERIAL_TEST_API
     {"IDLE", &cmdIdle},       {"EVENTS", &cmdEvents}, {"GET", &cmdGet},     {"SET", &cmdSet},
     {"LOG", &cmdLog},         {"TOUCH", &cmdTouch},   {"SWIPE", &cmdSwipe}, {"SLEEP", &cmdSleep},
