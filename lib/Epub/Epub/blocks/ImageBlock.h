@@ -7,7 +7,8 @@
 
 #include "Block.h"
 
-class BuildArena;  // lib/Memory — optional decode scratch (see image_scratch below)
+class BuildArena;     // lib/Memory — optional decode scratch (see image_scratch below)
+struct RenderConfig;  // converters/ImageToFramebufferDecoder.h
 
 // Source file size above which an image is considered "large" and rendered as a placeholder
 // until the user explicitly requests it.
@@ -124,11 +125,13 @@ class ImageBlock final : public Block {
   // that can ever show. An accessibility description can run to KBs, and an image block holds
   // its alt for as long as its page is loaded -- every draw, pre-render and image-lane visit.
   static constexpr size_t MAX_ALT_TEXT_BYTES = 128;
+  // `alt` cut to MAX_ALT_TEXT_BYTES at a character boundary, as every block keeps it.
+  static void capAltText(std::string& alt);
   ~ImageBlock() override = default;
 
   // Return a new ImageBlock that renders a vertical crop of this image.
   // srcYOffset: first source row to render; srcHeight: number of rows (must be > 0).
-  // The new block shares the same imagePath (and thus the same decoded cache file);
+  // The new block shares the same imagePath and size (and thus the same decoded cache file);
   // only the rendering window differs.
   std::unique_ptr<ImageBlock> makeCrop(int16_t srcYOffset, int16_t srcHeight) const;
 
@@ -168,17 +171,49 @@ class ImageBlock final : public Block {
   // monochromeOutput selects which cache to check (BW or grayscale), matching render().
   bool wouldShowPlaceholder(bool forceLoad, bool monochromeOutput) const;
 
-  // True when the 1-bit .pxc pixel cache exists (BW plane rendering).
+  // The image's pixel caches at the size it is drawn at (drawnWidth by drawnHeight), one per size: img_3.png drawn 18
+  // by 18 caches as img_3.18x18.1bit.pxc (1-bit, the BW plane) and img_3.18x18.bayer.pxc (4-level, the gray passes).
+  std::string bwCachePath() const;
+  std::string grayscaleCachePath() const;
+  // Where a JPEG decode of it at that size, stopped for input, parks (RenderConfig::checkpointPath).
+  std::string checkpointPath() const;
+
+  // True when the 1-bit .pxc pixel cache of the drawn size exists (BW plane rendering).
   // Used by warm-cache paths to skip already-cached images.
   bool hasPixelCache() const;
 
-  // True when the 4-level .pxc pixel cache exists (grayscale AA rendering).
+  // True when the 4-level .pxc pixel cache of the drawn size exists (grayscale AA rendering).
   bool hasGrayscaleCache() const;
 
   // Render the 4-level cache into the framebuffer using the renderer's current
   // mode (GRAYSCALE_LSB or GRAYSCALE_MSB). No-op if no grayscale cache exists.
   // Called by the AA grayscale passes to give images proper gray tones.
   void renderGrayscaleFromCache(GfxRenderer& renderer, int x, int y) const;
+
+  // On a panel that keeps a deeper gray buffer of its own (GfxRenderer::borrowGray8Canvas(), `canvas` with `stride`
+  // bytes a row), paint this picture's 8-bit samples there through picture_tone, over the box render() draws it in.
+  // JPEG and PNG, a slice of a picture split over pages and a turned one included. From the picture's gray cache on
+  // the card when it has one, otherwise decoded, and the cache written for the next draw (unless the decode was short
+  // of memory).
+  //
+  // Only over a picture: where the B/W pass had no pixel cache to draw from, it drew a placeholder or a low-memory
+  // box, and that stays. True when the picture's gray is on the canvas. False when not, and the canvas is as it was,
+  // so a picture without its gray keeps what the B/W pass drew there, its dither.
+  bool renderGray8(GfxRenderer& renderer, int x, int y, uint8_t* canvas, uint16_t stride) const;
+
+  // What a picture's gray variant is: the 4-level Bayer cache the anti-aliasing passes replay over it (dual-plane
+  // panels), or its 8-bit gray cache, which a panel's own canvas shows (renderGray8). The reader sets it for its panel;
+  // Bayer until then. One for the whole process, as the panel is.
+  enum class GrayVariant : uint8_t { Bayer, Gray8 };
+  static void setGrayVariant(const GrayVariant variant) { grayVariant_ = variant; }
+  static GrayVariant grayVariant() { return grayVariant_; }
+  // Whether the gray variant's cache exists, and the decode that writes it. The Bayer one is render()'s, at (x, y).
+  bool hasGrayVariantCache() const;
+  void warmGrayVariant(GfxRenderer& renderer, int x, int y, bool forceLoad);
+  // The 8-bit gray cache (img_N.WxH.gray8): whether there is one, and the decode that writes it if not. True when it
+  // exists afterwards.
+  bool hasGray8Cache() const;
+  bool cacheGray8(GfxRenderer& renderer) const;
 
   BlockType getType() override { return IMAGE_BLOCK; }
   bool isEmpty() override { return false; }
@@ -213,6 +248,9 @@ class ImageBlock final : public Block {
   // Returns true if the file is ready for decoding.
   bool ensureExtracted() const;
 
+  // bwCachePath() or grayscaleCachePath(), as `monochromeOutput` selects.
+  std::string variantCachePath(bool monochromeOutput) const;
+
   // CoarseRedecodeScope's halves, for the variant `monochromeOutput` selects: the cache moved aside when stamped
   // coarse (true when it was), and moved back unless a cache has taken its place.
   bool setCoarseCacheAside(bool monochromeOutput) const;
@@ -233,10 +271,21 @@ class ImageBlock final : public Block {
 
  private:
   void renderPlaceholder(GfxRenderer& renderer, int x, int y, Placeholder kind) const;
-  // The bodies of render() and renderGrayscaleFromCache(), upright at (x, y) in the live orientation.
+  // The bodies of render(), renderGrayscaleFromCache() and renderGray8(), upright at (x, y) in the live orientation.
   void renderUpright(GfxRenderer& renderer, int x, int y, bool forceLoad, bool monochromeOutput,
                      bool alsoCacheOtherVariant);
   void renderGrayscaleUpright(GfxRenderer& renderer, int x, int y) const;
+  bool renderGray8Upright(GfxRenderer& renderer, int x, int y, uint8_t* canvas, uint16_t stride) const;
+  // The picture's samples at its drawn size, through picture_tone, row after row; null when it could not be decoded.
+  std::unique_ptr<uint8_t[]> decodeGray8Picture(GfxRenderer& renderer) const;
+  // decodeGray8Picture's decode, by format: true when the picture's samples are all in config.gray8.
+  bool decodeGray8(GfxRenderer& renderer, const RenderConfig& config) const;
+  // The gray cache: written whole or not at all, and `rows` of it from `firstRow` painted at (x, y). False, with
+  // nothing painted, when there is none of this format, size and tone.
+  bool writeGray8Cache(const uint8_t* samples) const;
+  bool drawGray8FromCache(GfxRenderer& renderer, int x, int y, uint8_t* canvas, uint16_t stride, int firstRow,
+                          int rows) const;
+  static GrayVariant grayVariant_;
   static bool placeholderOnly_;
   static Placeholder placeholderOnlyKind_;
   static uint16_t placeholdersDrawn_;

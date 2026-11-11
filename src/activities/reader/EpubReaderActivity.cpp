@@ -72,6 +72,7 @@
 #include "QrDisplayActivity.h"
 #include "QuickOverridesActivity.h"
 #include "ReaderActivity.h"
+#include "ReaderGrayCanvas.h"
 #include "ReaderImageMode.h"
 #include "ReaderUtils.h"
 #include "ReadingSessionTracker.h"
@@ -643,6 +644,12 @@ void EpubReaderActivity::onEnter() {
   // has drawn anything, which is the worst possible moment to take the display buffer.
   lastPageOnScreenMs_ = millis();
   secondaryBufferDegraded_ = !renderer.hasSecondaryBuffer();
+  // A panel that shows pictures on its own gray canvas (displayPageOnGrayCanvas) has no use for the Bayer cache the
+  // anti-aliasing passes replay: the warms make each picture's 8-bit gray cache in its place.
+  if constexpr (HalDisplay::kMayLendGray8Canvas) {
+    ImageBlock::setGrayVariant(renderer.getGrayLevels() > 4 ? ImageBlock::GrayVariant::Gray8
+                                                            : ImageBlock::GrayVariant::Bayer);
+  }
   // Cold open: arm the dramatic-transition HALF for the first section entry only (cleared by any
   // non-incremental entry in buildSection). Also clear any stale post-popup HALF left armed if the
   // previous reader session was abandoned mid-build.
@@ -850,6 +857,7 @@ void EpubReaderActivity::onEnter() {
 void EpubReaderActivity::onExit() {
   Activity::onExit();
   logReaderMemSnapshot("onExit_before_release");
+  if constexpr (HalDisplay::kMayLendGray8Canvas) ImageBlock::setGrayVariant(ImageBlock::GrayVariant::Bayer);
 
   // Leave the panel a clean baseline for whatever screen comes next.
   //
@@ -2108,10 +2116,20 @@ bool EpubReaderActivity::imageLaneMustWait() const {
 }
 
 bool EpubReaderActivity::imageLaneWarmsGrayscale() const {
+  if constexpr (HalDisplay::kMayLendGray8Canvas) {
+    if (ImageBlock::grayVariant() == ImageBlock::GrayVariant::Gray8) return picturesGoOutInGray();
+  }
   // A borrow degrades the buffer only until it goes back: a page is looked at as it will be drawn then. Black & White
   // images never replay a gray cache.
   return getEffectiveTextAntiAliasing() && ReaderImageMode::imagesInGray(getEffectiveImageRendering()) &&
          (!secondaryBufferDegraded_ || secondaryBorrowed_);
+}
+
+// Whether a page with pictures goes out on the panel's own gray canvas, its pictures' gray caches the variant to warm
+// (ImageBlock::GrayVariant::Gray8): the panel and the Images setting's half of ReaderGrayCanvas::pageGoesOutOnCanvas().
+bool EpubReaderActivity::picturesGoOutInGray() const {
+  return ReaderGrayCanvas::pageGoesOutOnCanvas(renderer.getGrayLevels(), /*pageHasPictures=*/true,
+                                               /*picturesAreBoxes=*/false, getEffectiveImageRendering());
 }
 
 BuildArena* EpubReaderActivity::arenaOfBuildHoldingBuffer() const {
@@ -3482,6 +3500,57 @@ bool EpubReaderActivity::displayComposedOnePass(const Page& page, const int marg
   const auto t1 = millis();
   renderer.displayOnePassFrame(mode);
   LOG_DBG("ERS", "One-pass AA (composed): gray=%lums upload=%lums", t1 - t0, millis() - t1);
+  return true;
+}
+
+// On a panel that keeps a deeper gray buffer of its own, a page with pictures goes out on that buffer
+// (ReaderGrayCanvas): composed from what the page render just drew, the pictures painted over in their own grays, and
+// shown with the panel's full gray refresh, which blocks until the page is up. Each picture is decoded again for it;
+// no pixel cache holds 8 bits. False, with nothing shown, when the page goes out as every other one does: a panel
+// without such a buffer, no picture to show (none, all boxes, the Images setting), no buffer to borrow, or not one
+// picture whose gray could be painted.
+bool EpubReaderActivity::displayPageOnGrayCanvas(const Page& page, const int marginLeft, const int contentTop,
+                                                 const uint8_t* capLsb, const uint8_t* capMsb,
+                                                 const bool picturesAreBoxes, const bool forceLoadLargeImages) {
+  if constexpr (!HalDisplay::kMayLendGray8Canvas) return false;  // a build without such a panel carries none of this
+  const bool pageHasPictures =
+      page.hasImages() && !page.allImagesArePlaceholders(forceLoadLargeImages, /*monochromeOutput=*/true);
+  if (!ReaderGrayCanvas::pageGoesOutOnCanvas(renderer.getGrayLevels(), pageHasPictures, picturesAreBoxes,
+                                             getEffectiveImageRendering())) {
+    return false;
+  }
+  uint16_t stride = 0;
+  uint8_t* canvas = renderer.borrowGray8Canvas(&stride);
+  if (!canvas) {
+    LOG_DBG("ERS", "Gray canvas: none to borrow, the page goes out with its pictures dithered");
+    return false;
+  }
+  const auto t0 = millis();
+  // The decoders' scratch, as in the warm pass: on these boards a block of PSRAM, where a progressive JPEG also keeps
+  // its read windows (T5S3: the index of a 1206x1525 picture took 1.85 s without them, 0.93 s with). Uninstalled
+  // before the lend goes back.
+  std::optional<LentSecondary> lend;
+  if (renderer.hasSecondaryBuffer()) lend.emplace(renderer);
+  const image_scratch::ScopedArena scratch(lend ? lend->arena() : nullptr);
+  const ReaderGrayCanvas::PageBuffers buffers{.frameBuffer = renderer.getFrameBuffer(),
+                                              .lsbPlane = capLsb,
+                                              .msbPlane = capMsb,
+                                              .widthBytes = renderer.getDisplayWidthBytes(),
+                                              .width = renderer.getDisplayWidth(),
+                                              .height = renderer.getDisplayHeight()};
+  const Gray8Pictures pictures = ReaderGrayCanvas::composePage(canvas, stride, buffers, [&] {
+    return page.renderImagesGray8(renderer, getEffectiveReaderFontId(), marginLeft, contentTop, canvas, stride);
+  });
+  const auto tComposed = millis();
+  if (pictures.inGray == 0) {
+    LOG_DBG("ERS", "Gray canvas: none of %u picture(s) decoded in gray (%lu ms), the page goes out dithered",
+            static_cast<unsigned>(pictures.offered), tComposed - t0);
+    return false;
+  }
+  renderer.displayGray8Canvas();
+  LOG_DBG("ERS", "Gray canvas: %u of %u picture(s) in gray, composed in %lu ms, refresh %lu ms",
+          static_cast<unsigned>(pictures.inGray), static_cast<unsigned>(pictures.offered), tComposed - t0,
+          millis() - tComposed);
   return true;
 }
 
@@ -5912,8 +5981,12 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // aaPreempted below), the 1-bit BW frame is what stays on the panel — the same output
   // as with AA off, never a crushed-to-black image. Black & White stops there on purpose:
   // no replay, so no .bayer.pxc either.
+  // On a panel with its own gray canvas the gray variant is the pictures' 8-bit cache, which the page composes from.
   const bool imagesGray = imagesTakeGrayPass(*page);
-  const bool warmGrayscaleImageCache = aaEnabledForThisRender && imagesGray;
+  bool warmGrayscaleImageCache = aaEnabledForThisRender && imagesGray;
+  if constexpr (HalDisplay::kMayLendGray8Canvas) {
+    if (ImageBlock::grayVariant() == ImageBlock::GrayVariant::Gray8) warmGrayscaleImageCache = picturesGoOutInGray();
+  }
 
   // Warm any missing image pixel caches BEFORE font prewarm and BW backup chunks
   // reduce heap contig below the ~49 KB the PNG decoder needs. The decode
@@ -6241,6 +6314,11 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   renderer.endGrayCapture();
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
+  // A page with pictures on a panel that keeps a deeper gray buffer of its own goes out there, now, its pictures in
+  // their own grays (the T5S3). Every other page, and this one when it cannot, goes out below.
+  const bool pageOnGrayCanvas = displayPageOnGrayCanvas(
+      *page, orientedMarginLeft, contentTop, capLsb.get(), capMsb.get(),
+      ladderGaveUp || ladder == ImageMemoryLadder::Action::Emergency || imagesWaitForBuild, effectiveForceLoad);
   logReaderMemSnapshot("after_bw_render");
   // Fire the refresh resolved above. With AA enabled on X4 the refresh goes out async so the grayscale planes can
   // render during the waveform (inline AA below); everywhere else the trigger blocks through the waveform.
@@ -6289,7 +6367,12 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   const bool deferredAaThisRender =
       aaEnabledForThisRender && !singlePushAaThisRender && !inlineAaAvailable && !composedOnePassThisRender;
   lastRenderStats.textAntiAliasing = inlineAaThisRender || deferredAaThisRender || composedOnePassThisRender;
-  if (capLsb) {
+  grayCanvasOnScreen_ = pageOnGrayCanvas;
+  if (pageOnGrayCanvas) {
+    // On the panel already: displayGray8Canvas() blocked through its refresh.
+    lastRenderStats.usedGrayscale = true;
+    lastRenderStats.textAntiAliasing = capLsb != nullptr;
+  } else if (capLsb) {
     // Hand the captured planes to the controller, then base + greys go out as
     // one waveform. Cheap: the planes were filled by the page render that just
     // ran, so nothing is walked twice.
@@ -6335,7 +6418,10 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   pendingHalfRefreshAfterImagePage =
       ReaderImageMode::refreshOwedAfterDraw(pendingHalfRefreshAfterImagePage, drewImages, imageMode);
 
-  if (singlePushAaThisRender) {
+  if (pageOnGrayCanvas) {
+    // As the single push below: nothing to schedule or restore, the page went out whole in one refresh.
+    lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, 0, 0, 0, 0, millis() - t0};
+  } else if (singlePushAaThisRender) {
     // Nothing to schedule and nothing to restore: the planes were staged before
     // the page render and went out with it in one waveform. No deferred pass, so
     // no second refresh for the idle loop to run and nothing for a page turn to
@@ -6488,6 +6574,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
 void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout,
                                           BuildArena::Block* drawBlock) {
   pinPageProgression();
+  grayCanvasOnScreen_ = false;
   // Draws one page from an in-progress Background-C build: a plain BW render + status bar, no
   // AA and no pre-render arming (those belong to the steady reading state set up by
   // renderNormalPass() once the build completes). Images come from their pixel cache when they
@@ -6701,6 +6788,7 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   publishPageLinkTargets(page, orientedMarginLeft, contentTop);
   renderStatusBar();
 
+  grayCanvasOnScreen_ = false;
   // The image-page follow-up half-refresh can carry over if the previous page had images; honour
   // and clear it here so the pre-render path doesn't skip it.
   const bool forceHalfRefreshThisPage = pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
@@ -7222,6 +7310,10 @@ bool EpubReaderActivity::shouldSkipPeriodicUpdate() const {
     periodicRefreshOwed_ = true;
     return true;
   }
+  // A page on the gray canvas (displayPageOnGrayCanvas): its redraw decodes every picture again and flashes the whole
+  // screen, seconds of it for a clock minute or a battery step (T5S3, a progressive JPEG: 5.8 s and a 2.8 s refresh).
+  // Its status bar waits for the next page.
+  if (grayCanvasOnScreen_) return true;
   // Background-B holds the secondary buffer: any render takes it back, and taking it back
   // discards B's live build (endBackgroundBorrow). A clock-minute or battery tick would do that
   // once a minute, and a build takes ~7-15 s of slices -- so a status refresh waits for B to hand
@@ -7274,6 +7366,23 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
   const turnedframe::Offsets origin =
       vertical ? turnedframe::contentOffsets(screenW, marginLeft, contentTop, page.verticalBlockExtent)
                : turnedframe::Offsets{marginLeft, contentTop};
+  // A link's target over [left, right) x [top, bottom) in the reader's frame: grown by the pad, floored, kept on the
+  // panel.
+  const auto addTarget = [&](const int left, const int top, const int right, const int bottom, const size_t link) {
+    int x = left - kLinkTargetPad;
+    int y = top - kLinkTargetPad;
+    int w = std::max(right - left + 2 * kLinkTargetPad, kLinkTargetMin);
+    int h = std::max(bottom - top + 2 * kLinkTargetPad, kLinkTargetMin);
+    // Centre the floor on the glyphs rather than growing right/down only, and keep the rect on
+    // the panel so a marker in a margin is still reachable.
+    x -= std::max(0, (w - (right - left + 2 * kLinkTargetPad)) / 2);
+    y -= std::max(0, (h - (bottom - top + 2 * kLinkTargetPad)) / 2);
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x + w > screenW) w = screenW - x;
+    if (y + h > screenH) h = screenH - y;
+    if (w > 0 && h > 0) targets.add(x, y, w, h, static_cast<int>(link));
+  };
 
   // The links arrive in page order, so one forward walk resolves them all: whichever word first
   // completes the text of the link we are looking for IS that link. Matching in order rather than
@@ -7360,23 +7469,27 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
 
       if (!LinkMarkerMatch::complete(marker, markerLen, markerPos)) continue;
 
-      int x = runLeft - kLinkTargetPad;
-      int y = runTop - kLinkTargetPad;
-      int w = std::max(runRight - runLeft + 2 * kLinkTargetPad, kLinkTargetMin);
-      int h = std::max(runBottom - runTop + 2 * kLinkTargetPad, kLinkTargetMin);
-      // Centre the floor on the glyphs rather than growing right/down only, and keep the rect on
-      // the panel so a marker in a margin is still reachable.
-      x -= std::max(0, (w - (runRight - runLeft + 2 * kLinkTargetPad)) / 2);
-      y -= std::max(0, (h - (runBottom - runTop + 2 * kLinkTargetPad)) / 2);
-      if (x < 0) x = 0;
-      if (y < 0) y = 0;
-      if (x + w > screenW) w = screenW - x;
-      if (y + h > screenH) h = screenH - y;
-      if (w > 0 && h > 0) targets.add(x, y, w, h, static_cast<int>(nextLink));
+      addTarget(runLeft, runTop, runRight, runBottom, nextLink);
 
       nextLink++;
       markerPos = 0;
       runOpen = false;
+    }
+  }
+
+  // An image inside a link is its target too: what a reader sees of a link around an icon or a marker image. The page
+  // image names its link by its href's hash; a link around an image alone has no text for the walk above to match.
+  for (const auto& element : page.elements) {
+    if (element->getTag() != TAG_PageImage) continue;
+    const auto& image = static_cast<const PageImage&>(*element);
+    if (image.linkHash() == 0) continue;
+    for (size_t link = 0; link < currentPageFootnotes.size(); ++link) {
+      if (linkHrefHash(currentPageFootnotes[link].href) != image.linkHash()) continue;
+      const ImageBlock& block = image.getImageBlock();
+      turnedframe::Rect box{image.xPos + origin.x, image.yPos + origin.y, block.getWidth(), block.getRenderedHeight()};
+      if (vertical) box = turnedframe::toReader(screenW, box);
+      addTarget(box.x, box.y, box.x + box.width, box.y + box.height, link);
+      break;
     }
   }
   TapTargets::readerLinks().record(targets);

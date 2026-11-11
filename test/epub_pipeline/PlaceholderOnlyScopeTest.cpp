@@ -60,14 +60,14 @@ TEST_F(PlaceholderOnlyScopeFixture, AnUncachedImageIsCountedAndNotDecoded) {
 
 TEST_F(PlaceholderOnlyScopeFixture, ACacheThatExistsButFailsToReplayIsCountedAndNotDecoded) {
   const fs::path target = work / "img.png";
+  ImageBlock block = blockAt(target);
   {
     // The legacy header began with the width, high bit clear: renderFromCache() deletes such a
     // file and reports a miss.
-    std::ofstream stale((work / "img.1bit.pxc").string(), std::ios::binary);
+    std::ofstream stale(block.bwCachePath(), std::ios::binary);
     const uint16_t header[3] = {120, 160, 0};
     stale.write(reinterpret_cast<const char*>(header), sizeof(header));
   }
-  ImageBlock block = blockAt(target);
   ASSERT_TRUE(block.hasPixelCache()) << "the pre-render's up-front check would admit this page";
 
   ImageBlock::PlaceholderOnlyScope scope;
@@ -162,7 +162,7 @@ void plantCoarseCache(const fs::path& cache) {
 
 TEST_F(LowMemoryFixture, ACoarseCacheIsDecodedAgainAndReplaced) {
   ImageBlock block = blockAt(work / "img.png");
-  const fs::path cache = work / "img.1bit.pxc";
+  const fs::path cache = block.bwCachePath();
   plantCoarseCache(cache);
   {
     const ImageBlock::CoarseRedecodeScope coarse(block, /*monochromeOutput=*/true, /*alsoGrayscale=*/false);
@@ -170,12 +170,12 @@ TEST_F(LowMemoryFixture, ACoarseCacheIsDecodedAgainAndReplaced) {
     block.render(renderer, 0, 0, /*forceLoad=*/true, /*monochromeOutput=*/true);
   }
   EXPECT_EQ(PixelCache::PXC_MAGIC, magicOf(cache)) << "the full picture in its place";
-  EXPECT_FALSE(fs::exists(work / "img.1bit.pxc.coarse"));
+  EXPECT_FALSE(fs::exists(cache.string() + ".coarse"));
 }
 
 TEST_F(LowMemoryFixture, ACoarseCacheStaysWhenItsDecodeIsRefused) {
   ImageBlock block = blockAt(work / "img.png");
-  const fs::path cache = work / "img.1bit.pxc";
+  const fs::path cache = block.bwCachePath();
   plantCoarseCache(cache);
   const auto before = fs::file_size(cache);
   {
@@ -185,28 +185,28 @@ TEST_F(LowMemoryFixture, ACoarseCacheStaysWhenItsDecodeIsRefused) {
   }
   EXPECT_EQ(PixelCache::PXC_MAGIC_COARSE, magicOf(cache)) << "the coarse picture, never none";
   EXPECT_EQ(before, fs::file_size(cache));
-  EXPECT_FALSE(fs::exists(work / "img.1bit.pxc.coarse"));
+  EXPECT_FALSE(fs::exists(cache.string() + ".coarse"));
 }
 
 TEST_F(LowMemoryFixture, WithTheCoarseCacheBackNothingTheDecodeParkedIsLeft) {
   ImageBlock block = blockAt(work / "img.png");
-  const fs::path cache = work / "img.1bit.pxc";
+  const fs::path cache = block.bwCachePath();
   plantCoarseCache(cache);
   {
     const ImageBlock::CoarseRedecodeScope coarse(block, true, false);
     // As a JPEG decode stopped for input leaves them: its checkpoint and the cache it was writing.
-    std::ofstream((work / "img.png.ckpt").string()) << "checkpoint";
+    std::ofstream(block.checkpointPath()) << "checkpoint";
     std::ofstream(PixelCache::partPathFor(cache.string())) << "rows";
   }
   EXPECT_EQ(PixelCache::PXC_MAGIC_COARSE, magicOf(cache));
-  EXPECT_FALSE(fs::exists(work / "img.png.ckpt")) << "no pass decodes the image again to resume it";
+  EXPECT_FALSE(fs::exists(block.checkpointPath())) << "no pass decodes the image again to resume it";
   EXPECT_FALSE(fs::exists(PixelCache::partPathFor(cache.string())));
 }
 
 TEST_F(LowMemoryFixture, AFullCacheIsNotDecodedAgain) {
   ImageBlock block = blockAt(work / "img.png");
   block.render(renderer, 0, 0, true, true);
-  const fs::path cache = work / "img.1bit.pxc";
+  const fs::path cache = block.bwCachePath();
   ASSERT_EQ(PixelCache::PXC_MAGIC, magicOf(cache));
   const auto written = fs::last_write_time(cache);
   {

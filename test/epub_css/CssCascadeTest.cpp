@@ -43,20 +43,21 @@ struct Probe {
   const char* classes;
   const char* id = "";
   std::vector<Element> ancestors = {};  // outermost first; empty: resolved without an Ancestry
+  bool firstLetter = false;             // the element's ::first-letter style, not its own
 };
 
 // Resolves the probe the way the chapter parser does: each ancestor's compound mask, then the
 // element against them.
 CssStyle resolve(const CssParser& parser, const Probe& probe, bool* dependsOnAncestors = nullptr) {
-  if (probe.ancestors.empty())
-    return parser.resolveStyle(probe.tag, probe.classes, probe.id, nullptr, dependsOnAncestors);
   std::vector<uint64_t> masks;
   for (const Element& e : probe.ancestors) masks.push_back(parser.compoundMask(e.tag, e.classes, e.id));
   CssParser::Ancestry ancestry;
   ancestry.masks = masks.data();
   ancestry.depth = masks.size();
   ancestry.self = parser.compoundMask(probe.tag, probe.classes, probe.id);
-  return parser.resolveStyle(probe.tag, probe.classes, probe.id, &ancestry, dependsOnAncestors);
+  const CssParser::Ancestry* const context = probe.ancestors.empty() ? nullptr : &ancestry;
+  if (probe.firstLetter) return parser.resolveFirstLetterStyle(probe.tag, probe.classes, probe.id, context);
+  return parser.resolveStyle(probe.tag, probe.classes, probe.id, context, dependsOnAncestors);
 }
 
 enum class Store { Parsed, HeapIndex, ArenaResident, ArenaIndex };
@@ -501,4 +502,61 @@ TEST(CssCascade, TextEmphasisResolvesAlikeInEveryStore) {
     EXPECT_TRUE(style.hasTextEmphasis()) << storeName(store);
     EXPECT_EQ(style.textEmphasis, TextEmphasis::Sesame) << storeName(store);
   });
+}
+
+// --- ::first-letter ---
+
+// A ::first-letter rule takes any selector an element's rule takes: one tag, class or id (the hashed index), a
+// compound, and descendant and child chains (the complex-rule table), matched where the element stands. It styles the
+// element's first letter, never the element.
+TEST(CssCascade, FirstLetterRulesTakeTheSelectorsElementRulesTake) {
+  const std::vector<std::string> css = {
+      "div.chapter > p.first::first-letter { initial-letter: 3; }\n"
+      "section p::first-letter { initial-letter: 4; }\n"
+      ".dropcap::first-letter { initial-letter: 2; }\n"
+      "p.a.b:first-letter { initial-letter: 5; }\n"
+      "*.star::first-letter { initial-letter: 6; }\n"
+      "div.chapter > p.first { font-weight: bold; }\n"};
+  const auto expectLines = [&](const Probe& probe, const int lines) {
+    resolveEverywhere(css, probe, [&](const Store store, const CssStyle& style) {
+      EXPECT_EQ(lines, style.initialLetterLines())
+          << storeName(store) << ": <" << probe.tag << " class=\"" << probe.classes << "\">";
+    });
+  };
+  expectLines({"p", "first", "", {{"div", "chapter"}}, true}, 3);                  // child
+  expectLines({"p", "first", "", {{"div", "chapter"}, {"blockquote"}}, true}, 0);  // not the child
+  expectLines({"p", "first", "", {{"div", "other"}}, true}, 0);                    // the wrong parent
+  expectLines({"p", "", "", {{"section"}, {"div"}}, true}, 4);                     // descendant
+  expectLines({"p", "", "", {{"div"}}, true}, 0);                                  // no section around it
+  expectLines({"div", "dropcap", "", {}, true}, 2);                                // one class
+  expectLines({"p", "b a", "", {}, true}, 5);                                      // a compound, in any order
+  expectLines({"p", "a", "", {}, true}, 0);                                        // half of it
+  expectLines({"h2", "star", "", {}, true}, 6);                                    // the universal element
+  // The more specific rule wins: div.chapter > p.first (0,3,2) over section p (0,0,2).
+  expectLines({"p", "first", "", {{"section"}, {"div", "chapter"}}, true}, 3);
+  // The element itself takes none of them, and its own rule is not its letter's.
+  resolveEverywhere(css, {"p", "first", "", {{"div", "chapter"}}}, [&](const Store store, const CssStyle& style) {
+    EXPECT_FALSE(style.hasInitialLetter()) << storeName(store);
+    EXPECT_EQ(CssFontWeight::Bold, style.fontWeight) << storeName(store);
+  });
+  resolveEverywhere(css, {"p", "first", "", {{"div", "chapter"}}, true},
+                    [&](const Store store, const CssStyle& s) { EXPECT_FALSE(s.hasFontWeight()) << storeName(store); });
+}
+
+// What the matcher does not take for an element's rule it does not take for a first letter's either: sibling
+// combinators and pseudo-classes. Read without them, each would give a cap to letters it does not match.
+TEST(CssCascade, FirstLetterAfterAnUnsupportedSelectorStaysUnsupported) {
+  const std::string path = writeCss(
+      "p + p::first-letter, h1 ~ p::first-letter, p:first-child::first-letter, section p:first-of-type::first-letter, "
+      "p[lang]::first-letter, ::first-letter { initial-letter: 3; }\n");
+  CssParser parser("");
+  FsFile file;
+  ASSERT_TRUE(Storage.openFileForRead("CSS", path.c_str(), file));
+  ASSERT_TRUE(parser.loadFromStream(file));
+  EXPECT_EQ(parser.selectorCandidates(), 6u);
+  EXPECT_EQ(parser.unsupportedSelectors(), 6u);
+  EXPECT_FALSE(parser.hasFirstLetterRules());
+  EXPECT_EQ(0, parser.resolveFirstLetterStyle("p", "").initialLetterLines());
+  std::error_code ec;
+  std::filesystem::remove(path, ec);
 }

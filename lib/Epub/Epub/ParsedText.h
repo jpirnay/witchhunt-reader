@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,6 +32,13 @@ class ParsedText {
   enum class LineProcessResult {
     Accepted,
     RetryWithoutHyphenation,
+  };
+
+  // An object of the line most recently handed to beforeLine_ and processLine (lineObjects()): the id addInlineObject
+  // was given, and its x in the line's word positions (TextBlock::wordXpos's space).
+  struct LineObject {
+    uint16_t id = 0;
+    int16_t x = 0;
   };
 
   // Where the line being laid out sits in its paragraph (linePlace()): set before beforeLine_
@@ -159,6 +167,39 @@ class ParsedText {
   std::vector<std::string> rubyTexts_;
   // The annotations of the line being extracted, handed to its TextBlock; reused across lines.
   std::vector<TextBlock::Annotation> lineAnnotations_;
+
+  // The block's inline objects (addInlineObject), one per object token (TokenBoundary::isObject), in token order: the
+  // n-th object token owns the n-th entry. Empty in a block without one, which is then laid out as before: every
+  // object test below is first a test of this vector. 4 B an object.
+  struct InlineObject {
+    uint16_t id = 0;
+    uint16_t width = 0;
+  };
+  std::vector<InlineObject> objects_;
+  bool isObject(const size_t i) const { return !objects_.empty() && TokenBoundary::isObject(wordBoundaries[i]); }
+  size_t objectsBefore(size_t tokenIndex) const;
+  // A line with objects is handed over without them: its TextBlock holds its text alone, and the objects go to
+  // lineObjects(). Boxed, and made by the first such line: a block without objects carries one null pointer.
+  struct ObjectLine {
+    std::vector<LineObject> objects;
+    // The line without its objects, a view of each word and the line's own per-word arrays (TextBlock::WordRange).
+    std::vector<std::string_view> words;
+    std::vector<std::string_view> forms;
+    std::vector<GlyphRun> glyphs;
+    std::vector<uint8_t> order;
+    std::vector<EpdFontFamily::Style> styles;
+    std::vector<TextBlock::WordSize> sizes;
+    std::vector<TokenBoundary::Boundary> boundaries;
+    std::vector<int16_t> xs;
+    std::vector<TextBlock::Annotation> annotations;
+  };
+  std::unique_ptr<ObjectLine> objectLine_;
+  // Takes the objects out of a laid-out line, `range` with `xs` its positions, into objectLine_: their ids and x into
+  // its objects, the rest into its range, `out`. `pieces`: a bidi line's pieces, in `range`'s order, which name each
+  // piece's token (from `first`); null when the range is in token order. False, nothing changed, when the line has no
+  // object or the heap has no room for its copy (logged: the line then keeps them as U+FFFC characters).
+  bool takeObjectsOut(const TextBlock::WordRange& range, const std::vector<int16_t>& xs, size_t first,
+                      const BidiLine::Piece* pieces, TextBlock::WordRange& out);
 
   // A paragraph that needs bidi is laid out one UAX #9 pass per line (decision 5, BidiLine.h). It needs it for a
   // right-to-left direction, or a token with a code point of class R, AL, RLE, RLO, RLI or FSI; once a pass of the
@@ -390,8 +431,10 @@ class ParsedText {
   // Han or kana and a Latin letter or digit.
   int cjkLatinGapBefore(const GfxRenderer& renderer, int fontId, size_t j) const;
   // Whether justification stretches the gap before words[j]: not before closing punctuation (. , ) » and the like),
-  // which keeps its natural width. Both line paths ask it.
+  // which keeps its natural width, nor after a run of kept spaces. Both line paths ask it.
   bool stretchesGapBefore(size_t j) const;
+  // Whether words[i] is a run of kept spaces (see addWord).
+  bool isKeptSpaceRun(size_t i) const;
   // Room in all five per-word vectors for `additional` more tokens; false (and wordGrowthRefused_)
   // when the heap cannot hold the growth.
   bool reserveWords(size_t additional);
@@ -430,24 +473,27 @@ class ParsedText {
                                         const std::vector<uint16_t>& wordWidths,
                                         const std::vector<TokenBoundary::Boundary>& boundaries, size_t lineStartIndex,
                                         int firstLineIndent, int16_t blockStartY = 0, int lineHeight = 0) const;
-  // Splits words[wordIndex] at the widest legal break whose prefix fits `availableWidth`. *outMyanmarCut: the cut falls
-  // between Myanmar syllables, how a Burmese line ends rather than a hyphenation, which the page-bottom retry leaves.
+  // Splits words[wordIndex] at the widest legal break whose prefix fits `availableWidth`. *outLineEndCut: the cut is
+  // how such a line ends rather than a hyphenation, which the page-bottom retry leaves: between Myanmar syllables, or
+  // in text that keeps its spaces, which is never hyphenated and is cut, without a hyphen, only where a token is wider
+  // than the line (allowFallbackBreaks).
   bool hyphenateWordAtIndex(size_t wordIndex, int availableWidth, const GfxRenderer& renderer, int fontId,
                             std::vector<uint16_t>& wordWidths, bool allowFallbackBreaks,
-                            bool* outInsertedHyphen = nullptr, bool* outMyanmarCut = nullptr);
+                            bool* outInsertedHyphen = nullptr, bool* outLineEndCut = nullptr);
   LineProcessResult extractLine(
       size_t breakIndex, int pageWidth, const std::vector<uint16_t>& wordWidths,
       const std::vector<TokenBoundary::Boundary>& boundaries, const std::vector<size_t>& lineBreakIndices,
       const std::function<LineProcessResult(std::unique_ptr<TextBlock>, bool, bool)>& processLine,
       const GfxRenderer& renderer, int fontId, bool lineEndsWithHyphenatedWord, bool suppressHyphenationRetry,
       int firstLineIndent, int16_t blockStartY = 0, int lineHeight = 0);
-  // Hands a laid-out line of tokens [first, end) over: the page-fit hook first (beforeLine_, with the line's largest
-  // word size and whether it takes the annotation band), then its TextBlock, then processLine. A line whose block
-  // cannot be had is dropped and counts as accepted. An accepted line steps bidiState_->openControls.
+  // Hands a laid-out line of tokens [first, end) over: its objects taken out (takeObjectsOut, `pieces` a bidi line's),
+  // the page-fit hook first (beforeLine_, with the line's largest word size and whether it takes the annotation band),
+  // then its TextBlock, then processLine. A line whose block cannot be had is dropped and counts as accepted. An
+  // accepted line steps bidiState_->openControls.
   LineProcessResult emitLine(
       const TextBlock::WordRange& range, uint8_t maxSizePct, bool band, size_t first, size_t end,
       const std::function<LineProcessResult(std::unique_ptr<TextBlock>, bool, bool)>& processLine,
-      bool lineEndsWithHyphenatedWord, bool suppressHyphenationRetry);
+      bool lineEndsWithHyphenatedWord, bool suppressHyphenationRetry, const BidiLine::Piece* pieces = nullptr);
   // Fills `out` (cleared first); uses blockStyle.fontSizeMultiplier internally. `passControls`: the bidi controls open
   // at the first token, the pass's start (bidiState_->openControls steps on as the pass's lines are accepted).
   void calculateWordWidths(const GfxRenderer& renderer, int fontId, std::vector<uint16_t>& out,
@@ -457,7 +503,7 @@ class ParsedText {
   // Whether token i, which asks to combine, may: see combines().
   bool fitsCombined(const GfxRenderer& renderer, int fontId, size_t i) const;
   // Narrows each CJK mark that is a token to its mid-line width and fills markClass_, edgeTrim_, shrink_ and
-  // edgeShrink_.
+  // edgeShrink_. A run of kept spaces hangs at a line's end: its edgeTrim_ takes its width off there.
   void applyPunctuationWidths(const GfxRenderer& renderer, int fontId, std::vector<uint16_t>& widths);
   // Widens the base of each ruby longer than what its neighbours let it overhang, and fills rubyEdge_; a mark in a
   // group, or between overhangs, gives push-in only what the rubies leave it (shrink_).
@@ -545,9 +591,27 @@ class ParsedText {
   // textEmphasis: the word's CSS text-emphasis mark (TextEmphasis), 0 for none; every token of the word carries it.
   // textCombine: the word's CSS text-combine-upright (a CssTextCombine). Under `all` every token of the word asks to
   // combine, under `digits N` a token of 1 to N ASCII digits and nothing else; see combines().
+  // keptSpaces: the word is text whose spaces the book keeps (CSS white-space pre, pre-wrap, break-spaces; <pre>). Its
+  // tokens are never hyphenated. A word of nothing but spaces is then a run of kept spaces: one token, as wide as its
+  // spaces, glued to the token before it, that a line may end after (where it hangs: it takes no room at the line's
+  // end) but not before. The word after a run starts at no gap of its own, and no gap a run makes is stretched.
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
                uint8_t sizePct = DEFAULT_WORD_SIZE_PCT, uint32_t visibleOffset = 0, uint8_t fontSlot = 0,
-               uint8_t textEmphasis = 0, uint8_t textCombine = 0);
+               uint8_t textEmphasis = 0, uint8_t textCombine = 0, bool keptSpaces = false);
+  // Adds an object set in the line like a word: an inline image. It is `width` pixels wide at any word size, never
+  // split, hyphenated or merged, and kerns with nothing. Its line hands it over in lineObjects() with the `id` given
+  // here, and its TextBlock holds the line's text alone. attachToPrevious: no whitespace before it in the source.
+  // Ported from CrossInk (commit 9e7cf2f0 by Julia Nguyen): the image as a token of its line, taken out before the
+  // line's TextBlock is made. Reworked here for bidi, CJK and shaped lines: the token is U+FFFC with a flag in its
+  // boundary and a side table, not an encoded string.
+  void addInlineObject(uint16_t id, uint16_t width, bool attachToPrevious, uint32_t visibleOffset);
+  // The objects of the line most recently handed to the before-line hook and to processLine, valid until the next line
+  // is laid out; empty for a line without any.
+  std::span<const LineObject> lineObjects() const {
+    return objectLine_ ? std::span<const LineObject>(objectLine_->objects) : std::span<const LineObject>();
+  }
+  // Whether the block holds objects and nothing else to read: no token but objects and no-break spaces.
+  bool holdsObjectsOnly() const;
   // Tokens [firstToken, firstToken + tokenCount) become one ruby group: the first keeps its boundary (a break may
   // come before the group), the rest are glued to it. False when the range is empty, runs past size(), or a token
   // in it already has a role.

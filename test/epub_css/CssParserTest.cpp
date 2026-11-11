@@ -82,6 +82,80 @@ TEST(CssParserDeclarations, DisplayKeepsBlockAndInlineApart) {
   }
 }
 
+// vertical-align keeps the keywords that place an inline image in its line, beside super, sub and baseline. A length
+// or a percentage is not kept.
+TEST(CssParserDeclarations, VerticalAlignKeepsTheImageKeywords) {
+  const struct {
+    const char* declaration;
+    CssVerticalAlign want;
+  } cases[] = {
+      {"vertical-align: baseline", CssVerticalAlign::Baseline},
+      {"vertical-align: super", CssVerticalAlign::Super},
+      {"vertical-align: sub", CssVerticalAlign::Sub},
+      {"vertical-align: middle", CssVerticalAlign::Middle},
+      {"vertical-align: text-top", CssVerticalAlign::TextTop},
+      {"vertical-align: text-bottom", CssVerticalAlign::TextBottom},
+      {"vertical-align: top", CssVerticalAlign::Top},
+      {"VERTICAL-ALIGN: BOTTOM !important", CssVerticalAlign::Bottom},
+  };
+  for (const auto& c : cases) {
+    const CssStyle style = CssParser::parseInlineStyle(c.declaration);
+    ASSERT_TRUE(style.hasVerticalAlign()) << c.declaration;
+    EXPECT_EQ(static_cast<int>(style.verticalAlign), static_cast<int>(c.want)) << c.declaration;
+  }
+}
+
+// A length is the baseline raised by it, in sixteenths of an em (ex half an em, px and pt at the 16 px medium), or a
+// percentage of the line height. One that rounds to nothing is not kept, nor is a unit the reader has no use for.
+TEST(CssParserDeclarations, VerticalAlignKeepsALengthCompactly) {
+  const struct {
+    const char* declaration;
+    int shift;
+    bool percent;
+  } cases[] = {
+      {"vertical-align: -0.2em", -3, false}, {"vertical-align: 0.25rem", 4, false},
+      {"vertical-align: -0.5ex", -4, false}, {"vertical-align: 3px", 3, false},
+      {"vertical-align: -6pt", -8, false},   {"vertical-align: -20%", -20, true},
+      {"vertical-align: 40em", 127, false},  {"vertical-align: -9em", -127, false},
+  };
+  for (const auto& c : cases) {
+    const CssStyle style = CssParser::parseInlineStyle(c.declaration);
+    ASSERT_TRUE(style.hasVerticalAlign()) << c.declaration;
+    EXPECT_EQ(static_cast<int>(CssVerticalAlign::Baseline), static_cast<int>(style.verticalAlign)) << c.declaration;
+    EXPECT_EQ(c.shift, style.verticalAlignShift) << c.declaration;
+    EXPECT_EQ(c.percent, style.verticalAlignPercent) << c.declaration;
+  }
+  for (const char* declaration : {"vertical-align: 0", "vertical-align: 0.01em", "vertical-align: 3vh",
+                                  "vertical-align: 2", "vertical-align: inherit"}) {
+    EXPECT_FALSE(CssParser::parseInlineStyle(declaration).hasVerticalAlign()) << declaration;
+  }
+  // A later keyword replaces a length, and a later length a keyword.
+  const CssStyle keyword = CssParser::parseInlineStyle("vertical-align: -0.2em; vertical-align: middle");
+  EXPECT_EQ(static_cast<int>(CssVerticalAlign::Middle), static_cast<int>(keyword.verticalAlign));
+  EXPECT_EQ(0, keyword.verticalAlignShift);
+  const CssStyle length = CssParser::parseInlineStyle("vertical-align: sub; vertical-align: 10%");
+  EXPECT_EQ(static_cast<int>(CssVerticalAlign::Baseline), static_cast<int>(length.verticalAlign));
+  EXPECT_EQ(10, length.verticalAlignShift);
+  EXPECT_TRUE(length.verticalAlignPercent);
+  // An unknown value leaves the length before it.
+  const CssStyle kept = CssParser::parseInlineStyle("vertical-align: -0.5em; vertical-align: auto");
+  EXPECT_EQ(-8, kept.verticalAlignShift);
+}
+
+TEST(CssParserDeclarations, AVerticalAlignLengthCascadesWithItsKeyword) {
+  CssStyle style = CssParser::parseInlineStyle("vertical-align: -0.5em");
+  style.applyOver(CssParser::parseInlineStyle("vertical-align: top"));
+  EXPECT_EQ(static_cast<int>(CssVerticalAlign::Top), static_cast<int>(style.verticalAlign));
+  EXPECT_EQ(0, style.verticalAlignShift);
+  CssStyle other = CssParser::parseInlineStyle("vertical-align: top");
+  other.applyOver(CssParser::parseInlineStyle("vertical-align: 25%"));
+  EXPECT_EQ(25, other.verticalAlignShift);
+  EXPECT_TRUE(other.verticalAlignPercent);
+  other.reset();
+  EXPECT_EQ(0, other.verticalAlignShift);
+  EXPECT_FALSE(other.verticalAlignPercent);
+}
+
 // Regression: `!important` used to be stripped only by the dozen properties that called
 // stripTrailingImportant themselves. Everything else compared the marker as part of the value
 // and silently dropped the declaration. crosspoint-reader PR #3221.
@@ -350,7 +424,114 @@ TEST(CssParserDeclarations, TheFlowPropertiesCascade) {
   EXPECT_EQ(CssTextCombine::All, merged.textCombine);
 }
 
+TEST(CssParserDeclarations, WhiteSpaceValues) {
+  const auto ws = [](const char* decl) { return CssParser::parseInlineStyle(decl).whiteSpace; };
+  EXPECT_EQ(CssWhiteSpace::Normal, ws("white-space: normal"));
+  EXPECT_EQ(CssWhiteSpace::Nowrap, ws("white-space: nowrap"));
+  EXPECT_EQ(CssWhiteSpace::Pre, ws("white-space: pre"));
+  EXPECT_EQ(CssWhiteSpace::PreWrap, ws("white-space: pre-wrap"));
+  EXPECT_EQ(CssWhiteSpace::PreLine, ws("white-space: pre-line"));
+  EXPECT_EQ(CssWhiteSpace::BreakSpaces, ws("white-space: break-spaces"));
+  EXPECT_EQ(CssWhiteSpace::PreWrap, ws("white-space: -moz-pre-wrap"));
+  EXPECT_EQ(CssWhiteSpace::PreWrap, ws("white-space: -pre-wrap"));
+  EXPECT_EQ(CssWhiteSpace::PreWrap, ws("white-space: -o-pre-wrap"));
+  EXPECT_EQ(CssWhiteSpace::Normal, ws("white-space: initial"));
+  EXPECT_EQ(CssWhiteSpace::Pre, ws("WHITE-SPACE : PRE !important"));
+  // Inherited: inherit, unset and what is not known leave it to the parent.
+  EXPECT_EQ(CssWhiteSpace::Unset, ws("white-space: inherit"));
+  EXPECT_EQ(CssWhiteSpace::Unset, ws("white-space: unset"));
+  EXPECT_EQ(CssWhiteSpace::Unset, ws("white-space: preserve-everything"));
+  EXPECT_EQ(CssWhiteSpace::Pre, ws("white-space: normal; white-space: pre"));
+}
+
+TEST(CssParserDeclarations, WhiteSpaceKeepsWhatItSays) {
+  using CssWhiteSpaces::keepsLineFeeds;
+  using CssWhiteSpaces::keepsSpaces;
+  EXPECT_FALSE(keepsSpaces(CssWhiteSpace::Unset) || keepsLineFeeds(CssWhiteSpace::Unset));
+  EXPECT_FALSE(keepsSpaces(CssWhiteSpace::Normal) || keepsLineFeeds(CssWhiteSpace::Normal));
+  EXPECT_FALSE(keepsSpaces(CssWhiteSpace::Nowrap) || keepsLineFeeds(CssWhiteSpace::Nowrap));
+  EXPECT_TRUE(keepsSpaces(CssWhiteSpace::Pre) && keepsLineFeeds(CssWhiteSpace::Pre));
+  EXPECT_TRUE(keepsSpaces(CssWhiteSpace::PreWrap) && keepsLineFeeds(CssWhiteSpace::PreWrap));
+  EXPECT_TRUE(keepsSpaces(CssWhiteSpace::BreakSpaces) && keepsLineFeeds(CssWhiteSpace::BreakSpaces));
+  EXPECT_FALSE(keepsSpaces(CssWhiteSpace::PreLine));
+  EXPECT_TRUE(keepsLineFeeds(CssWhiteSpace::PreLine));
+}
+
+TEST(CssParserDeclarations, WhiteSpaceCascades) {
+  CssStyle merged;
+  uint32_t ranks[CssStyle::kCascadeProperties] = {};
+  merged.applyOver(CssParser::parseInlineStyle("white-space: pre"), 2, ranks);
+  merged.applyOver(CssParser::parseInlineStyle("white-space: normal"), 1, ranks);
+  EXPECT_EQ(CssWhiteSpace::Pre, merged.whiteSpace);
+  merged.applyOver(CssParser::parseInlineStyle("white-space: pre-line"), 3, ranks);
+  EXPECT_EQ(CssWhiteSpace::PreLine, merged.whiteSpace);
+  merged.applyOver(CssParser::parseInlineStyle("white-space: inherit"), 4, ranks);
+  EXPECT_EQ(CssWhiteSpace::PreLine, merged.whiteSpace);
+}
+
+TEST(CssParserDeclarations, InitialLetterValues) {
+  const auto letter = [](const char* decl) { return CssParser::parseInlineStyle(decl).initialLetter; };
+  using CssInitialLetter::pack;
+  EXPECT_EQ(pack(3, 0), letter("initial-letter: 3"));
+  EXPECT_EQ(pack(3, 0), letter("-webkit-initial-letter: 3"));
+  EXPECT_EQ(pack(3, 2), letter("initial-letter: 3 2"));
+  EXPECT_EQ(pack(3, 0), letter("initial-letter: 2.6"));  // a fractional size rounds
+  EXPECT_EQ(pack(3, 0), letter("initial-letter: 3 drop"));
+  EXPECT_EQ(pack(3, 1), letter("initial-letter: 3 raise"));
+  EXPECT_EQ(pack(3, 1), letter("initial-letter: raise 3"));
+  EXPECT_EQ(pack(15, 0), letter("initial-letter: 40"));
+  EXPECT_EQ(pack(4, 6), letter("INITIAL-LETTER: 4 6 !important"));
+  EXPECT_EQ(CssInitialLetter::kNormal, letter("initial-letter: normal"));
+  EXPECT_EQ(CssInitialLetter::kNormal, letter("initial-letter: initial"));
+  for (const char* unread : {"initial-letter: inherit", "initial-letter: 0", "initial-letter: 3 1.5",
+                             "initial-letter: 3 0", "initial-letter: big", "initial-letter: 3 sideways"}) {
+    EXPECT_EQ(0, letter(unread)) << unread;
+  }
+  EXPECT_EQ(pack(2, 0), letter("-webkit-initial-letter: 3; initial-letter: 2"));  // one property: the last wins
+}
+
+TEST(CssParserDeclarations, InitialLetterNamesADropCapFromTwoLines) {
+  EXPECT_EQ(3, CssParser::parseInlineStyle("initial-letter: 3 1").initialLetterLines());
+  EXPECT_EQ(2, CssParser::parseInlineStyle("initial-letter: 2").initialLetterLines());
+  EXPECT_EQ(0, CssParser::parseInlineStyle("initial-letter: 1").initialLetterLines());
+  EXPECT_EQ(0, CssParser::parseInlineStyle("initial-letter: normal").initialLetterLines());
+  EXPECT_EQ(0, CssStyle{}.initialLetterLines());
+  EXPECT_EQ(1, CssInitialLetter::sink(CssParser::parseInlineStyle("initial-letter: 3 raise").initialLetter));
+  EXPECT_EQ(3, CssInitialLetter::sink(CssParser::parseInlineStyle("initial-letter: 3").initialLetter));
+}
+
+TEST(CssParserDeclarations, InitialLetterCascades) {
+  CssStyle merged;
+  uint32_t ranks[CssStyle::kCascadeProperties] = {};
+  merged.applyOver(CssParser::parseInlineStyle("initial-letter: 3"), 2, ranks);
+  merged.applyOver(CssParser::parseInlineStyle("initial-letter: 2"), 1, ranks);
+  EXPECT_EQ(3, merged.initialLetterLines());
+  // `normal` in a more specific rule takes the drop cap away.
+  merged.applyOver(CssParser::parseInlineStyle("initial-letter: normal"), 3, ranks);
+  EXPECT_EQ(0, merged.initialLetterLines());
+  EXPECT_TRUE(merged.hasInitialLetter());
+}
+
+TEST(CssParserSupports, OnlyAnInitialLetterTestHolds) {
+  for (const char* holds :
+       {"supports (initial-letter: 3)", "supports (-webkit-initial-letter: 3)", "SUPPORTS (Initial-Letter: 2 1)",
+        "supports (initial-letter: 3) or (-webkit-initial-letter: 3)",
+        "supports ((initial-letter: 3) or (-webkit-initial-letter: 3))",
+        "supports (initial-letter: 3) and (-webkit-initial-letter: 3)", "supports(initial-letter:3)"}) {
+    EXPECT_TRUE(CssParser::supportsInitialLetter(holds)) << holds;
+  }
+  for (const char* fails :
+       {"supports not (initial-letter: 3)", "supports (not (initial-letter: 3))", "supports (display: grid)",
+        "supports (initial-letter: 3) and (display: grid)", "supports (initial-letter: 3) or (display: grid)",
+        "supports selector(p::first-letter)", "supports (initial-letter: big)", "supports (initial-letter)", "supports",
+        "media screen", "supports (initial-letter: calc(3))", "supportsx (initial-letter: 3)"}) {
+    EXPECT_FALSE(CssParser::supportsInitialLetter(fails)) << fails;
+  }
+}
+
 TEST(CssParserDeclarations, AStyleWithOnlyAFlowPropertySaysSomething) {
+  EXPECT_TRUE(CssParser::parseInlineStyle("white-space: pre").anyDefined());
+  EXPECT_TRUE(CssParser::parseInlineStyle("initial-letter: 3").anyDefined());
   EXPECT_TRUE(CssParser::parseInlineStyle("writing-mode: vertical-rl").anyDefined());
   EXPECT_TRUE(CssParser::parseInlineStyle("unicode-bidi: isolate").anyDefined());
   EXPECT_TRUE(CssParser::parseInlineStyle("text-combine-upright: none").anyDefined());

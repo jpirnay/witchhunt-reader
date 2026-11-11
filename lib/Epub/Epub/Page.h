@@ -13,6 +13,7 @@ class BuildArena;  // lib/Memory -- optional storage for TextBlock bytes on dese
 #include "FootnoteEntry.h"
 #include "blocks/ImageBlock.h"
 #include "blocks/TextBlock.h"
+#include "css/CssStyle.h"
 
 static constexpr uint8_t MAX_TABLE_COLS = 8;
 static constexpr uint16_t MAX_TABLE_ROWS = 48;
@@ -28,6 +29,7 @@ enum PageElementTag : uint8_t {
   TAG_PageImage = 2,
   TAG_PageTable = 3,
   TAG_PageHR = 4,
+  TAG_PageBox = 5,
 };
 
 // represents something that has been added to a page
@@ -59,13 +61,25 @@ class PageLine final : public PageElement {
 // New PageImage class
 class PageImage final : public PageElement {
   std::unique_ptr<ImageBlock> imageBlock;
+  // Set in a line of text (an inline image), not a block of its own.
+  bool inLine_ = false;
+  // The internal link the image is inside (linkHrefHash of its href); 0: none.
+  uint32_t linkHash_ = 0;
+  // The serialized flags byte.
+  static constexpr uint8_t kInLine = 0x01;
+  static constexpr uint8_t kLinked = 0x02;
 
  public:
-  PageImage(std::unique_ptr<ImageBlock> block, const int16_t xPos, const int16_t yPos)
-      : PageElement(xPos, yPos), imageBlock(std::move(block)) {}
+  PageImage(std::unique_ptr<ImageBlock> block, const int16_t xPos, const int16_t yPos, const bool inLine = false,
+            const uint32_t linkHash = 0)
+      : PageElement(xPos, yPos), imageBlock(std::move(block)), inLine_(inLine), linkHash_(linkHash) {}
+  bool isInLine() const { return inLine_; }
+  uint32_t linkHash() const { return linkHash_; }
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   void renderWithForceLoad(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoad,
                            bool monochromeOutput = true, bool alsoCacheOtherVariant = false);
+  // The image's gray variant (ImageBlock::GrayVariant), decoded and cached where render() draws it.
+  void warmGrayVariant(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoad);
   bool serialize(FsFile& file) override;
   PageElementTag getTag() const override { return TAG_PageImage; }
   static std::unique_ptr<PageImage> deserialize(FsFile& file);
@@ -81,6 +95,46 @@ class PageHR final : public PageElement {
   bool serialize(FsFile& file) override;
   PageElementTag getTag() const override { return TAG_PageHR; }
   static std::unique_ptr<PageHR> deserialize(FsFile& file);
+};
+
+// What a page's pictures came to on the gray canvas (Page::renderImagesGray8).
+struct Gray8Pictures {
+  uint16_t offered = 0;  // pictures on the page, in-cell graphics included
+  uint16_t inGray = 0;   // of those, the ones whose gray is on the canvas; the rest keep what the B/W pass drew
+};
+
+// The border and background of a block's slice on this page, as CSS draws them (CssBox): the parser's box scope places
+// one before the content it frames, so the shade goes under it. A box a page break cuts is left open there: no bottom
+// edge before the break, no top edge after it. Drawn in the black-and-white pass only.
+// Ported from crosspoint-reader PR #3891 (Justin Mitchell, @itsthisjustin), its PageBorderBox.
+class PageBox final : public PageElement {
+ public:
+  struct Edge {
+    uint8_t width = 0;  // pixels; 0 draws nothing
+    CssBorderStyle style = CssBorderStyle::None;
+  };
+  // Edges top, right, bottom, left.
+  PageBox(const int16_t xPos, const int16_t yPos, const uint16_t width, const uint16_t height, const Edge (&edges)[4],
+          const bool shaded)
+      : PageElement(xPos, yPos),
+        width(width),
+        height(height),
+        edges{edges[0], edges[1], edges[2], edges[3]},
+        shaded(shaded) {}
+  void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
+  bool serialize(FsFile& file) override;
+  PageElementTag getTag() const override { return TAG_PageBox; }
+  static std::unique_ptr<PageBox> deserialize(FsFile& file);
+  uint16_t getWidth() const { return width; }
+  uint16_t getHeight() const { return height; }
+  const Edge& getEdge(const CssBox::Side side) const { return edges[side]; }
+  bool isShaded() const { return shaded; }
+
+ private:
+  uint16_t width;
+  uint16_t height;
+  Edge edges[4];
+  bool shaded;
 };
 
 struct TableCell {
@@ -133,8 +187,13 @@ class PageTableFragment final : public PageElement {
   // Decode any missing cell-image pixel caches. Position is irrelevant to the cache
   // (it is position-independent); images are warmed at the origin and the framebuffer
   // garbage is discarded by the caller's clearScreen(), mirroring the Page warm pass.
-  void warmCellImages(GfxRenderer& renderer, bool forceLoad, bool monochromeOutput,
+  // False when the page's warm ends here: a decode stopped for input, or one refused for memory beside a section build
+  // (see Page::warmImageCaches).
+  bool warmCellImages(GfxRenderer& renderer, bool forceLoad, bool monochromeOutput,
                       bool alsoWarmGrayscale = false) const;
+  // Page::renderImagesGray8 for the in-cell graphics, each where render() draws it.
+  void renderImagesGray8(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, uint8_t* canvas, uint16_t stride,
+                         Gray8Pictures& count) const;
 };
 
 class Page {
@@ -195,6 +254,11 @@ class Page {
   // Called by AA grayscale passes after renderTextOnly() so images get proper gray tones.
   // No-op for images without a grayscale cache (they degrade gracefully to BW-only).
   void renderImagesFromGrayscaleCache(GfxRenderer& renderer, int xOffset, int yOffset) const;
+  // On a panel that keeps a deeper gray buffer of its own: each picture of the page, in-cell graphics included, as its
+  // 8-bit samples into that buffer (`canvas`, `stride` bytes a row) where render() draws it
+  // (ImageBlock::renderGray8). Run after render(), whose B/W pass is what a picture without its gray keeps.
+  Gray8Pictures renderImagesGray8(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, uint8_t* canvas,
+                                  uint16_t stride) const;
   // Decode any missing .pxc pixel caches for images on this page. Called before the
   // BW render so the large (~60 KB contiguous) PNG decoder allocation runs while heap
   // contig is at its peak — before font prewarm and BW backup chunks fragment it.
@@ -206,6 +270,8 @@ class Page {
   // plane draws 1-bit Atkinson, the gray planes lift levels 1/2 back to real greys.
   // redecodeCoarse: a .pxc stamped coarse counts as missing, and stays unless a decode replaces it
   // (ImageBlock::CoarseRedecodeScope).
+  // Beside a section build (image_scratch::canWait) the first image refused for memory ends the warm: the images after
+  // it wait with it for the lane after the build.
   void warmImageCaches(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoadLargeImages,
                        bool monochromeOutput = true, bool alsoWarmGrayscale = false, bool redecodeCoarse = false) const;
   bool hasPlaceholderImages(bool forceLoadLargeImages, bool monochromeOutput) const;
@@ -237,15 +303,17 @@ class Page {
       const auto& ib = static_cast<const PageImage&>(*el).getImageBlock();
       if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) return false;
       if (!(monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache())) return true;
-      return alsoWarmGrayscale && monochromeOutput && !ib.hasGrayscaleCache();
+      return alsoWarmGrayscale && monochromeOutput && !ib.hasGrayVariantCache();
     });
   }
 
-  // True when the page has elements and every one is an image.
+  // True when the page has elements and every one is an image of its own: an image set in a line of text is that
+  // line's, and a page that ends on such a line is not a picture page.
   bool isImageOnly() const {
     return !elements.empty() &&
            std::all_of(elements.begin(), elements.end(), [](const std::unique_ptr<PageElement>& element) {
-             return element && element->getTag() == TAG_PageImage;
+             return element && element->getTag() == TAG_PageImage &&
+                    !static_cast<const PageImage&>(*element).isInLine();
            });
   }
 

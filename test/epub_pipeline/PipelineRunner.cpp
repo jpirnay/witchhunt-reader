@@ -149,7 +149,8 @@ void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, con
         const auto& img = static_cast<const PageImage&>(*el);
         const auto& ib = img.getImageBlock();
         out << "  IMG y=" << img.yPos << " x=" << img.xPos << " w=" << ib.getWidth() << " h=" << ib.getRenderedHeight()
-            << " src=" << normalizePath(ib.getImagePath(), cacheDir) << (ib.isTurned() ? " turned=1" : "") << "\n";
+            << " src=" << normalizePath(ib.getImagePath(), cacheDir) << (ib.isTurned() ? " turned=1" : "")
+            << (img.isInLine() ? " inline=1" : "") << (img.linkHash() != 0 ? " linked=1" : "") << "\n";
         break;
       }
       case TAG_PageTable:
@@ -158,6 +159,18 @@ void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, con
       case TAG_PageHR:
         out << "  HR y=" << el->yPos << " x=" << el->xPos << "\n";
         break;
+      case TAG_PageBox: {
+        const auto& box = static_cast<const PageBox&>(*el);
+        out << "  BOX y=" << box.yPos << " x=" << box.xPos << " w=" << box.getWidth() << " h=" << box.getHeight()
+            << " edges=";
+        for (const CssBox::Side side : {CssBox::Top, CssBox::Right, CssBox::Bottom, CssBox::Left}) {
+          const PageBox::Edge& edge = box.getEdge(side);
+          out << (side == CssBox::Top ? "" : ",") << static_cast<int>(edge.width) << "/"
+              << static_cast<int>(edge.style);
+        }
+        out << " shaded=" << (box.isShaded() ? 1 : 0) << "\n";
+        break;
+      }
     }
   }
   for (const auto& fn : page.footnotes) {

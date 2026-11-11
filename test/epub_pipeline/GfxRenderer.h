@@ -71,8 +71,11 @@ class GfxRenderer {
   int getDisplayHeight() const { return 800; }
   uint16_t getDisplayWidthBytes() const { return 60; }
   Orientation getOrientation() const { return live_; }
-  // BW unless a test draws a gray plane (setRenderMode), as the reader's AA passes do.
-  RenderMode getRenderMode() const { return renderMode_; }
+  // The pass a test draws in, BW unless it says otherwise, as every build and dump runs: one renderer's own mode
+  // (setRenderMode, as the reader's AA passes set it), else the mode every renderer of a test draws in
+  // (renderModeForTest).
+  inline static RenderMode renderModeForTest = BW;
+  RenderMode getRenderMode() const { return renderMode_ != BW ? renderMode_ : renderModeForTest; }
   void setRenderMode(const RenderMode mode) const { renderMode_ = mode; }
   uint8_t* getWriteTarget() const { return frameBuffer_; }
   int getWriteOriginY() const { return 0; }
@@ -80,13 +83,21 @@ class GfxRenderer {
   void clearScreen(uint8_t = 0xFF) const {}
 
   // --- Drawing (no-ops: the harness never inspects pixels) ---
+  // Test seam: every fillRect (color -1) and fillRectDither (its Color, -2 when it keeps ink), so a test can see what a
+  // page element draws. Null: nothing.
+  inline static void (*onFill)(int x, int y, int w, int h, int color) = nullptr;
   void drawPixel(int, int, bool = true) const {}
   void drawLine(int, int, int, int, bool = true) const {}
   void drawLine(int, int, int, int, int, bool) const {}
   void drawRect(int, int, int, int, bool = true) const {}
   void drawRect(int, int, int, int, int, bool) const {}
-  void fillRect(int, int, int, int, bool = true) const {}
-  void fillRectDither(int, int, int, int, Color) const {}
+  void fillRect(const int x, const int y, const int w, const int h, bool = true) const {
+    if (onFill != nullptr) onFill(x, y, w, h, -1);
+  }
+  void fillRectDither(const int x, const int y, const int w, const int h, const Color color,
+                      const bool keepInk = false) const {
+    if (onFill != nullptr) onFill(x, y, w, h, keepInk ? -2 : static_cast<int>(color));
+  }
 
   // --- Font lifecycle (built-in-font behavior: everything is always ready) ---
   bool isFontCacheScanning() const { return false; }

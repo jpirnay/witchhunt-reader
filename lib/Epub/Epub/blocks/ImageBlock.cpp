@@ -6,8 +6,13 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 #include <esp_heap_caps.h>
+
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
 
 #include "../../../../src/fontIds.h"
 #include "../../Epub.h"
@@ -16,6 +21,7 @@
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/PixelCache.h"
 #include "../converters/PngToFramebufferConverter.h"
+#include "PictureTone.h"
 
 // Cache file format (see PixelCache::PXC_MAGIC):
 // - uint16_t magic/version (high bit always set, distinguishing it from the legacy
@@ -24,16 +30,16 @@
 // - uint16_t height
 // - uint8_t pixels[...] - 2 bits per pixel, packed (4 pixels per byte), row-major order
 
-namespace {
 // Cut to MAX_ALT_TEXT_BYTES, never inside a UTF-8 sequence: a character the cut would split goes
 // whole.
-void capAltText(std::string& alt) {
-  if (alt.size() <= ImageBlock::MAX_ALT_TEXT_BYTES) return;
-  size_t cut = ImageBlock::MAX_ALT_TEXT_BYTES;
+void ImageBlock::capAltText(std::string& alt) {
+  if (alt.size() <= MAX_ALT_TEXT_BYTES) return;
+  size_t cut = MAX_ALT_TEXT_BYTES;
   while (cut > 0 && (static_cast<uint8_t>(alt[cut]) & 0xC0) == 0x80) cut--;
   alt.resize(cut);
 }
 
+namespace {
 // serialization::readString, except that it never holds more than the capped alt text: a cache
 // written before the cap may carry up to MAX_STRING_LENGTH. One byte past the cap is read so the
 // cut can see whether it falls inside a character; the rest is skipped.
@@ -48,7 +54,7 @@ bool readAltText(FsFile& file, std::string& alt) {
   alt.resize(keep);
   if (keep > 0 && file.read(reinterpret_cast<uint8_t*>(&alt[0]), keep) != static_cast<int>(keep)) return false;
   if (len > keep && !file.seekCur(static_cast<int64_t>(len - keep))) return false;
-  capAltText(alt);
+  ImageBlock::capAltText(alt);
   return true;
 }
 }  // namespace
@@ -152,16 +158,31 @@ std::string withSuffix(const std::string& imagePath, const std::string& suffix) 
   return imagePath + suffix;
 }
 
+// A file of the image at the size it is drawn at: img_3.png drawn 18 by 18 -> img_3.18x18<ending>. Each drawn size is
+// a cache of its own. Keyed on the image alone, an image a book sets at two sizes (an icon at its own size and at 1em)
+// found the other size's cache on every draw, refused it (renderFromCache's width check), decoded the image again and
+// rewrote the cache for the next draw to refuse. Caches named the old way (img_3.1bit.pxc) are never read again;
+// clearing the book's cache removes them with the rest.
+std::string sizedPath(const std::string& imagePath, const int width, const int height, const char* ending) {
+  char suffix[40];
+  snprintf(suffix, sizeof(suffix), ".%dx%d%s", width, height, ending);
+  return withSuffix(imagePath, suffix);
+}
+
 // BW-plane cache: 1-bit Atkinson, only values 0/3, for AA-off rendering.
 // Deliberately NOT keyed by the tone filter: tone mapping is applied only to the
 // grayscale variant (see ImageBlock::render), so these pixels are identical whatever
 // the filter is set to. Keying them too would fork every BW cache on SD for nothing.
-std::string getBwCachePath(const std::string& imagePath) { return withSuffix(imagePath, ".1bit.pxc"); }
+std::string getBwCachePath(const std::string& imagePath, const int width, const int height) {
+  return sizedPath(imagePath, width, height, ".1bit.pxc");
+}
 
 // Grayscale cache: 4-level Bayer (0–3), replayed in GRAYSCALE_LSB/MSB passes when AA is on.
 // Like the BW plane above, these pixels carry no tone correction, so one cache per image
-// serves every display setting — the name needs no key and never forks.
-std::string getGrayscaleCachePath(const std::string& imagePath) { return withSuffix(imagePath, ".bayer.pxc"); }
+// and size serves every display setting — the name needs no other key.
+std::string getGrayscaleCachePath(const std::string& imagePath, const int width, const int height) {
+  return sizedPath(imagePath, width, height, ".bayer.pxc");
+}
 
 // Decode a PNG straight out of the EPUB, with no extraction to SD first.
 //
@@ -361,23 +382,28 @@ bool ImageBlock::isLargeImage() const {
   return largeImageCached_ != 0;
 }
 
-bool ImageBlock::hasPixelCache() const { return Storage.exists(getBwCachePath(imagePath).c_str()); }
+std::string ImageBlock::bwCachePath() const { return getBwCachePath(imagePath, width, height); }
 
-bool ImageBlock::hasGrayscaleCache() const { return Storage.exists(getGrayscaleCachePath(imagePath).c_str()); }
+std::string ImageBlock::grayscaleCachePath() const { return getGrayscaleCachePath(imagePath, width, height); }
+
+// Beside the caches it fills, so one size's parked decode is never taken for another's.
+std::string ImageBlock::checkpointPath() const { return sizedPath(imagePath, width, height, ".ckpt"); }
+
+std::string ImageBlock::variantCachePath(const bool monochromeOutput) const {
+  return monochromeOutput ? bwCachePath() : grayscaleCachePath();
+}
+
+bool ImageBlock::hasPixelCache() const { return Storage.exists(bwCachePath().c_str()); }
+
+bool ImageBlock::hasGrayscaleCache() const { return Storage.exists(grayscaleCachePath().c_str()); }
 
 namespace {
-// The image's pixel cache for the variant `monochromeOutput` selects.
-std::string variantCachePath(const std::string& imagePath, const bool monochromeOutput) {
-  return monochromeOutput ? getBwCachePath(imagePath) : getGrayscaleCachePath(imagePath);
-}
 // Where CoarseRedecodeScope keeps a coarse cache while the image decodes again.
 std::string coarseAsidePath(const std::string& cachePath) { return cachePath + ".coarse"; }
-// Where a JPEG decode stopped for input parks (RenderConfig::checkpointPath).
-std::string checkpointPathFor(const std::string& imagePath) { return imagePath + ".ckpt"; }
 }  // namespace
 
 bool ImageBlock::setCoarseCacheAside(const bool monochromeOutput) const {
-  const std::string cachePath = variantCachePath(imagePath, monochromeOutput);
+  const std::string cachePath = variantCachePath(monochromeOutput);
   FsFile cacheFile;
   if (!Storage.exists(cachePath.c_str()) || !Storage.openFileForRead("IMG", cachePath, cacheFile)) return false;
   uint16_t magic = 0;
@@ -392,7 +418,7 @@ bool ImageBlock::setCoarseCacheAside(const bool monochromeOutput) const {
 }
 
 void ImageBlock::restoreCoarseCache(const bool monochromeOutput) const {
-  const std::string cachePath = variantCachePath(imagePath, monochromeOutput);
+  const std::string cachePath = variantCachePath(monochromeOutput);
   const std::string aside = coarseAsidePath(cachePath);
   if (Storage.exists(cachePath.c_str())) {
     Storage.remove(aside.c_str());  // the decode wrote the image's cache again
@@ -400,7 +426,7 @@ void ImageBlock::restoreCoarseCache(const bool monochromeOutput) const {
   }
   // A decode that stopped for input parked beside it: with the coarse picture back, no pass decodes the image again
   // to resume it, so it goes rather than stay on the card.
-  Storage.remove(checkpointPathFor(imagePath).c_str());
+  Storage.remove(checkpointPath().c_str());
   Storage.remove(PixelCache::partPathFor(cachePath).c_str());
   Storage.rename(aside.c_str(), cachePath.c_str());
 }
@@ -414,8 +440,7 @@ bool ImageBlock::wouldShowPlaceholder(bool forceLoad, bool monochromeOutput) con
   // asking it first paid that on every render of a cached image, for an answer that could not
   // change the result.
   // Check only the cache variant that render() will actually use for this mode.
-  const std::string& cachePath = monochromeOutput ? getBwCachePath(imagePath) : getGrayscaleCachePath(imagePath);
-  if (Storage.exists(cachePath.c_str())) return false;
+  if (Storage.exists(variantCachePath(monochromeOutput).c_str())) return false;
   return isLargeImage();
 }
 
@@ -443,7 +468,197 @@ void ImageBlock::renderGrayscaleFromCache(GfxRenderer& renderer, const int x, co
 }
 
 void ImageBlock::renderGrayscaleUpright(GfxRenderer& renderer, const int x, const int y) const {
-  renderFromCache(renderer, getGrayscaleCachePath(imagePath), x, y, width, height, srcYOffset_, srcHeight_);
+  renderFromCache(renderer, grayscaleCachePath(), x, y, width, height, srcYOffset_, srcHeight_);
+}
+
+namespace {
+// A picture's gray cache: its samples at the size it is drawn, through picture_tone, for a panel's own canvas.
+// img_3.png drawn 480 by 300 -> img_3.480x300.gray8: one per drawn size, like the image's other caches (sizedPath).
+std::string getGray8CachePath(const std::string& imagePath, const int width, const int height) {
+  return sizedPath(imagePath, width, height, ".gray8");
+}
+
+// The file: this header, then height rows of width bytes (0 black .. 255 white), the tone applied.
+struct Gray8CacheHeader {
+  uint32_t magic;  // format and version: a file of any other is not read
+  uint16_t width;
+  uint16_t height;
+  uint32_t tone;  // picture_tone::kFingerprint of the tone the samples went through
+};
+static_assert(sizeof(Gray8CacheHeader) == 12, "the header is on the card");
+constexpr uint32_t kGray8CacheMagic = 0x31384750;  // "PG81"
+
+// Rows of a picture's samples onto a borrowed canvas, at the place render() draws the picture (live orientation).
+void blitGray8Rows(GfxRenderer& renderer, uint8_t* canvas, const uint16_t stride, const int x, const int y,
+                   const uint8_t* rows, const int width, const int count) {
+  DirectGray8Writer writer;
+  writer.init(renderer, canvas, stride);
+  for (int r = 0; r < count; r++) {
+    const uint8_t* row = rows + static_cast<size_t>(r) * width;
+    writer.beginRow(y + r);
+    for (int c = 0; c < width; c++) writer.writePixel(x + c, row[c]);
+  }
+}
+}  // namespace
+
+ImageBlock::GrayVariant ImageBlock::grayVariant_ = ImageBlock::GrayVariant::Bayer;
+
+bool ImageBlock::hasGray8Cache() const { return Storage.exists(getGray8CachePath(imagePath, width, height).c_str()); }
+
+bool ImageBlock::hasGrayVariantCache() const {
+  if (HalDisplay::kMayLendGray8Canvas && grayVariant_ == GrayVariant::Gray8) return hasGray8Cache();
+  return hasGrayscaleCache();
+}
+
+void ImageBlock::warmGrayVariant(GfxRenderer& renderer, const int x, const int y, const bool forceLoad) {
+  if (HalDisplay::kMayLendGray8Canvas && grayVariant_ == GrayVariant::Gray8) {
+    cacheGray8(renderer);
+    return;
+  }
+  render(renderer, x, y, forceLoad, /*monochromeOutput=*/false);
+}
+
+bool ImageBlock::cacheGray8(GfxRenderer& renderer) const {
+  if (!HalDisplay::kMayLendGray8Canvas) return false;  // no canvas in this build: none of the decode below
+  if (hasGray8Cache()) return true;
+  const uint32_t shortBefore = image_scratch::heapShortCount();
+  const std::unique_ptr<uint8_t[]> samples = decodeGray8Picture(renderer);
+  // Not a picture decoded short of memory (a coarse one among them): a later decode can do better.
+  return samples && image_scratch::heapShortCount() == shortBefore && writeGray8Cache(samples.get());
+}
+
+std::unique_ptr<uint8_t[]> ImageBlock::decodeGray8Picture(GfxRenderer& renderer) const {
+  if (width <= 0 || height <= 0) return nullptr;
+  // Whole and at its drawn size, upright, wherever on the page it goes: a slice of a picture split over pages takes
+  // its rows from it, and the cache serves every draw. PSRAM on the boards that lend a canvas.
+  auto samples = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(width) * height);
+  if (!samples) {
+    image_scratch::noteHeapShort();
+    return nullptr;
+  }
+  memset(samples.get(), 0xFF, static_cast<size_t>(width) * height);
+  DirectGray8Writer writer;
+  writer.initPlain(samples.get(), width, height);
+  writer.tone = picture_tone::kTable;
+
+  RenderConfig config;
+  config.x = 0;
+  config.y = 0;
+  config.maxWidth = width;
+  config.maxHeight = height;
+  config.useGrayscale = true;
+  config.useDithering = false;
+  config.monochromeOutput = false;
+  config.useExactDimensions = true;
+  config.gray8 = &writer;
+  if (!decodeGray8(renderer, config)) return nullptr;
+  return samples;
+}
+
+bool ImageBlock::writeGray8Cache(const uint8_t* samples) const {
+  const std::string path = getGray8CachePath(imagePath, width, height);
+  const std::string part = path + ".part";
+  FsFile file;
+  if (!Storage.openFileForWrite("IMG", part, file)) return false;
+  const Gray8CacheHeader header{kGray8CacheMagic, static_cast<uint16_t>(width), static_cast<uint16_t>(height),
+                                picture_tone::kFingerprint};
+  const size_t bytes = static_cast<size_t>(width) * height;
+  const bool ok = file.write(reinterpret_cast<const uint8_t*>(&header), sizeof(header)) == sizeof(header) &&
+                  file.write(samples, bytes) == bytes;
+  file.close();
+  // A whole file or none: a reset mid-write leaves only the .part, which is never read. FAT rename does not overwrite.
+  if (ok) Storage.remove(path.c_str());
+  if (!ok || !Storage.rename(part.c_str(), path.c_str())) {
+    Storage.remove(part.c_str());
+    LOG_ERR("IMG", "Gray cache not written: %s", path.c_str());
+    return false;
+  }
+  LOG_DBG("IMG", "Gray cache written: %s (%dx%d)", path.c_str(), width, height);
+  return true;
+}
+
+bool ImageBlock::drawGray8FromCache(GfxRenderer& renderer, const int x, const int y, uint8_t* canvas,
+                                    const uint16_t stride, const int firstRow, const int rows) const {
+  const std::string path = getGray8CachePath(imagePath, width, height);
+  FsFile file;
+  if (!Storage.exists(path.c_str()) || !Storage.openFileForRead("IMG", path, file)) return false;
+  Gray8CacheHeader header{};
+  const bool current = file.read(reinterpret_cast<uint8_t*>(&header), sizeof(header)) == sizeof(header) &&
+                       header.magic == kGray8CacheMagic && header.width == width && header.height == height &&
+                       header.tone == picture_tone::kFingerprint;
+  if (!current || !file.seekSet(sizeof(header) + static_cast<uint32_t>(firstRow) * width)) {
+    file.close();
+    return false;  // another format, size or tone: decoded again, and the cache written over
+  }
+  // A band of rows at a time, ~16 KB.
+  const int bandRows = std::max(1, std::min(rows, 16384 / std::max(1, static_cast<int>(width))));
+  auto band = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(bandRows) * width);
+  bool ok = band != nullptr;
+  for (int done = 0; ok && done < rows; done += bandRows) {
+    const int count = std::min(bandRows, rows - done);
+    const size_t bytes = static_cast<size_t>(count) * width;
+    ok = file.read(band.get(), bytes) == static_cast<int>(bytes);
+    if (ok) blitGray8Rows(renderer, canvas, stride, x, y + done, band.get(), width, count);
+  }
+  file.close();
+  if (!ok) LOG_ERR("IMG", "Gray cache unreadable, decoding again: %s", path.c_str());
+  return ok;
+}
+
+bool ImageBlock::renderGray8(GfxRenderer& renderer, const int x, const int y, uint8_t* canvas,
+                             const uint16_t stride) const {
+  if (!turned_) return renderGray8Upright(renderer, x, y, canvas, stride);
+  bool drawn = false;
+  inReadersFrame(renderer, x, y, getWidth(), getHeight(),
+                 [&](const int rx, const int ry) { drawn = renderGray8Upright(renderer, rx, ry, canvas, stride); });
+  return drawn;
+}
+
+bool ImageBlock::renderGray8Upright(GfxRenderer& renderer, const int x, const int y, uint8_t* canvas,
+                                    const uint16_t stride) const {
+  if (!HalDisplay::kMayLendGray8Canvas) return false;  // no canvas in this build
+  const int renderedHeight = srcHeight_ > 0 ? srcHeight_ : height;
+  // render()'s own bounds: a box it refused holds nothing to put gray over.
+  if (!canvas || x < 0 || y < 0 || x + width > renderer.getScreenWidth() ||
+      y + renderedHeight > renderer.getScreenHeight() || srcYOffset_ < 0 || srcYOffset_ + renderedHeight > height) {
+    return false;
+  }
+  // The B/W pass drew a picture here only from the 1-bit cache, which its warm pass writes; without one it drew a
+  // placeholder or a low-memory box, and that stays.
+  if (!hasPixelCache()) return false;
+  // A slice of a picture split over pages is its rows srcYOffset_.. of the whole; a whole picture is its own slice.
+  if (drawGray8FromCache(renderer, x, y, canvas, stride, srcYOffset_, renderedHeight)) return true;
+
+  // Nothing on the canvas until the decode has succeeded: a picture that fails keeps what the B/W pass drew.
+  const uint32_t shortBefore = image_scratch::heapShortCount();
+  const std::unique_ptr<uint8_t[]> samples = decodeGray8Picture(renderer);
+  if (!samples) return false;
+  if (image_scratch::heapShortCount() == shortBefore) writeGray8Cache(samples.get());
+  blitGray8Rows(renderer, canvas, stride, x, y, samples.get() + static_cast<size_t>(srcYOffset_) * width, width,
+                renderedHeight);
+  return true;
+}
+
+bool ImageBlock::decodeGray8(GfxRenderer& renderer, const RenderConfig& config) const {
+  if (!HalDisplay::kMayLendGray8Canvas) return false;  // no canvas in this build: none of the decode below
+  // As renderUpright() reaches the bytes: a PNG the archive stores is decoded where it lies (see decodePngInPlace),
+  // anything else from its extract, which the warm pass made for the 1-bit cache.
+  if (!epubFilePath_.empty() && !epubEntryPath_.empty() && !Storage.exists(imagePath.c_str()) &&
+      FsHelpers::hasPngExtension(imagePath) && decodePngInPlace(epubFilePath_, epubEntryPath_, renderer, config)) {
+    return true;
+  }
+  if (!ensureExtracted()) return false;
+  FsFile file;
+  if (!Storage.openFileForRead("IMG", imagePath, file)) return false;
+  const ImageFormatDetector::Format format = ImageFormatDetector::detect(file);
+  file.close();
+  // The decoders that store 8-bit samples (RenderConfig::gray8). A GIF keeps its dither.
+  if (format != ImageFormatDetector::Format::Jpeg && format != ImageFormatDetector::Format::Png) {
+    LOG_DBG("IMG", "No gray decode for this format, the picture keeps its dither: %s", imagePath.c_str());
+    return false;
+  }
+  ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(format);
+  return decoder && decoder->decodeToFramebuffer(imagePath, renderer, config);
 }
 
 // A turned image is never sliced (placeImageBlockAsBlock places it whole), so the copied turned_ is unreachable today.
@@ -528,7 +743,7 @@ void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, 
   }
 
   // Select cache path based on rendering mode
-  const std::string cachePath = monochromeOutput ? getBwCachePath(imagePath) : getGrayscaleCachePath(imagePath);
+  const std::string cachePath = variantCachePath(monochromeOutput);
 
   // Try to render from pixel cache first (always, regardless of forceLoad). With the whole image's height, as the gray
   // replay passes it: given the crop's, a later piece of a split image drew fewer rows than it has, or none.
@@ -567,7 +782,7 @@ void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, 
   // One inflate, both caches. Only set on a real decode, which is the only place it can pay:
   // the cache-hit and placeholder paths above already returned.
   if (alsoCacheOtherVariant) {
-    config.companionCachePath = monochromeOutput ? getGrayscaleCachePath(imagePath) : getBwCachePath(imagePath);
+    config.companionCachePath = variantCachePath(!monochromeOutput);
   }
   // Deliberately no adaptive tone on either variant: both .pxc files are dithered straight
   // from the raw luminance. The curve has to be derived from a completed histogram, and a
@@ -646,7 +861,7 @@ void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, 
   // RenderConfig::checkpointPath): the reader's image lane gives its region back on every page
   // turn, and used to throw the decode away with it.
   const bool jpeg = format == ImageFormatDetector::Format::Jpeg;
-  if (jpeg) config.checkpointPath = checkpointPathFor(imagePath);
+  if (jpeg) config.checkpointPath = checkpointPath();
 
   // A resumed decode draws only the rows after its park; the finished cache has them all.
   const bool resuming = jpeg && Storage.exists(config.checkpointPath.c_str());

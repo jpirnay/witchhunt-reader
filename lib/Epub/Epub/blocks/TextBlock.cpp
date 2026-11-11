@@ -717,6 +717,13 @@ int TextBlock::annotationBandFor(const GfxRenderer& renderer, const int effFontI
   return (ascender + 1) / 2;  // the ruby's own ascender is round(ascender * 0.5)
 }
 
+int TextBlock::lineAscenderFor(const GfxRenderer& renderer, const int effFontId, const float blockScale,
+                               const uint8_t maxSizePct) {
+  return (maxSizePct == 100 && blockScale == 1.0f)
+             ? renderer.getFontAscenderSize(effFontId)
+             : renderer.getFontAscenderSizeScaled(effFontId, blockScale * maxSizePct / 100.0f);
+}
+
 int TextBlock::annotationBand(const GfxRenderer& renderer, const int fontId) const {
   if (!annotationBand_) return 0;
   const int effFontId = renderStyle.headingFontId != 0 ? renderStyle.headingFontId : fontId;
@@ -801,15 +808,12 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   // effective (fontId, scale) pair once and use it for every measure/draw below.
   const int effFontId = renderStyle.headingFontId != 0 ? renderStyle.headingFontId : fontId;
   const float blockScale = renderStyle.fontSizeMultiplier;
-  const int blockAscender = (blockScale == 1.0f) ? renderer.getFontAscenderSize(effFontId)
-                                                 : renderer.getFontAscenderSizeScaled(effFontId, blockScale);
+  const int blockAscender = lineAscenderFor(renderer, effFontId, blockScale, 100);
   // Mixed-size lines are baseline-aligned: every word's baseline sits at y + lineAscender,
   // where lineAscender is the tallest word's ascender. Uniform lines (no sizes) keep
   // lineAscender == blockAscender, i.e. the historical single-scale layout.
-  int lineAscender = blockAscender;
-  if (sizesPresent) {
-    lineAscender = renderer.getFontAscenderSizeScaled(effFontId, blockScale * (maxSizePct() / 100.0f));
-  }
+  const int lineAscender =
+      sizesPresent ? lineAscenderFor(renderer, effFontId, blockScale, maxSizePct()) : blockAscender;
   // The base sits below the band the line's ruby is drawn in.
   const int baseY = y + annotationBand(renderer, fontId);
   // Guide dots (see setGuideDots): one dot centered in each inter-word gap.

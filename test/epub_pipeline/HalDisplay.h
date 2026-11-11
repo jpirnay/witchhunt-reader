@@ -11,6 +11,9 @@ class HalDisplay {
   static constexpr uint16_t DISPLAY_HEIGHT = 800;
   static constexpr uint16_t DISPLAY_WIDTH_BYTES = 60;
 
+  // The converters' and ImageBlock's gray8 paths are compiled in, so the host can test them.
+  static constexpr bool kMayLendGray8Canvas = true;
+
   uint16_t getDisplayWidth() const { return DISPLAY_WIDTH; }
   uint16_t getDisplayHeight() const { return DISPLAY_HEIGHT; }
 };

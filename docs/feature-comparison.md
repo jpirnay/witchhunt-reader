@@ -8,24 +8,27 @@ sees and does on the device.
 > crosspoint-reader develop `7f04359f6`. Each row was checked against the source code of both projects.
 > The CrossPoint column describes its develop branch, which can be ahead of its latest release. Both
 > projects change quickly, so treat this as a picture of one day, not a guarantee.
+> **Updated 2026-11-11** for line and word spacing, character spacing, paragraph indent, margins, CSS
+> `white-space` and `initial-letter`, boxed text, images inside a line and the image modes, checked against
+> crosspoint-reader develop `fd4dbe41b`.
 
 ## At a glance
 
 **Witch Reader is ahead on** complex scripts and book layout. It draws bidi text in the right order on
 99.9% of the test lines (CrossPoint 52.6%), joins Arabic exactly as HarfBuzz does, shapes ten Indic
 scripts and Burmese, hyphenates Indic text, and sets Chinese, Japanese and Korean books in vertical
-columns. It hyphenates 32 languages, uses TrueType fonts and a book's own fonts on every board, and
-picks a font of the book's script by itself. In layout it adds floating images, grid tables of up to
-8 columns with images in their cells, CSS line height, background pictures, full-resolution progressive
-JPEG and Markdown. While you read it prepares the next page and the next chapters. Its Library shows
-covers in every tab, and it keeps reading statistics, bookmarks across books and printed page numbers,
-syncs KOReader progress automatically, lets every button press be reassigned, keeps a clock on the X4,
-shows the weather, logs into Wi-Fi login pages and transfers books over the USB cable. It runs on the
-LilyGo T5 S3 Pro and the Murphy M3.
+columns. It hyphenates 32 languages, uses TrueType fonts and a book's own fonts on every board, and picks
+a font of the book's script by itself. In layout it adds floating images, small images inside a line of
+text, grid tables of up to 8 columns with images in their cells, CSS line height, every CSS `white-space`
+value, background pictures, full-resolution progressive JPEG and Markdown. While you read it prepares the
+next page and the next chapters. Its Library shows covers in every tab, and it keeps reading statistics,
+bookmarks across books and printed page numbers, syncs KOReader progress automatically, lets every button
+press be reassigned, keeps a clock on the X4, shows the weather, logs into Wi-Fi login pages and
+transfers books over the USB cable. It runs on the LilyGo T5 S3 Pro and the Murphy M3.
 
 **CrossPoint is ahead on** highlights and clippings, Bluetooth page-turn remotes, night mode, library
-loans (LCP) and OPDS 2 catalogs, plugins on the device, indexed title and author search, boxed text with
-borders and shading, file rename and multi-delete on the device, 34 interface languages. It runs on six
+loans (LCP) and OPDS 2 catalogs, plugins on the device, indexed title and author search, word and
+character spacing, file rename and multi-delete on the device, 34 interface languages. It runs on six
 boards Witch Reader does not support: the Xteink X4 Classic, Seeed reTerminal Sticky, M5Stack PaperMono,
 Metalio E-Ink 4, EEGOREAD A4 and Onyx BOOX Picco.
 
@@ -47,7 +50,15 @@ Each section ends with a "Both have" line for features the two firmwares share.
 | Images in table cells | ✅ inside the grid | ⚠️ the row stacks into one column |
 | CSS `line-height` | ✅ ("Book's Style" line spacing) | ❌ |
 | CSS background pictures | ✅ drawn with their box's text | ❌ |
-| Boxed text (CSS borders, shaded backgrounds) | ❌ rules and table lines only | ✅ borders on all sides, gray fill |
+| Boxed text (CSS borders, shaded backgrounds) | ✅ solid, dashed, dotted and double borders up to 3 px, shading; a box cut by a page stays open at the cut | ✅ borders on all sides, gray fill |
+| Images inside a line of text | ✅ icons and symbols up to twice the line height, CSS `vertical-align` | ❌ placed as blocks |
+| CSS `white-space` | ✅ all six values: kept spaces, tabs and line breaks, `nowrap`, `pre-line` | ⚠️ `pre`, `pre-wrap` and `break-spaces` keep spaces; `nowrap` and `pre-line` ignored |
+| CSS `initial-letter` | ✅ 2 to 6 lines, raised or sunk | ⚠️ 2 to 6 lines, no raise or sink |
+| Line spacing | ✅ 90–175 % in 9 steps, or the book's `line-height` | ✅ 100–175 % in 7 steps |
+| Word spacing | ❌ | ✅ 50–200 % of a space |
+| Character spacing | ❌ | ✅ −2 to +2 px |
+| Paragraph indent | ✅ None, 0.5 to 2 em, or the book's own | ✅ 0 to 5 spaces |
+| Margins | ✅ top and bottom set apart from left and right | ⚠️ one margin for all sides |
 | Progressive JPEG | ✅ full resolution | ⚠️ 1/8 resolution |
 | GIF images | ✅ including interlaced | ⚠️ interlaced GIFs show a placeholder |
 | Large images | ✅ placeholder until Confirm; a tall image continues on the next page | ⚠️ shrunk to one page; a Placeholder mode for all images |
@@ -57,7 +68,7 @@ Each section ends with a "Both have" line for features the two firmwares share.
 
 **Both have:** small caps, strikethrough, underline, superscript and subscript, CSS font sizes and
 heading sizes, drop caps, horizontal rules, page breaks, avoiding widows and orphans, bionic reading
-(CrossPoint calls it Focus Reading), JPEG and PNG images, kerning.
+(CrossPoint calls it Focus Reading), JPEG and PNG images, a black-and-white image mode, kerning.
 
 ## Fonts
 

@@ -286,6 +286,7 @@ PAGE_LINE:<i> x=<x> y=<y> words=<n> align=<left|right|center|justify> vertical=<
 PAGE_W:<j> x=<x> w=<width> style=<n> glue=<0|1> text="<escaped>"
 ...                                   (one PAGE_W per word of the line, then the next element)
 PAGE_IMAGE:<i> x=<x> y=<y> w=<w> h=<h>
+PAGE_BOX:<i> x=<x> y=<y> w=<w> h=<h> edges=<w>/<s>,<w>/<s>,<w>/<s>,<w>/<s> shaded=<0|1>
 PAGE_EL:<i> <table|hr>
 PAGE_END:<k> starved=<n>
 ```
@@ -309,6 +310,10 @@ or `PAGE_ERROR:<reason>`.
   paragraph says `justify` although it is drawn ragged, as justified text ends; its words' `x` show
   where they are. `vertical=1` marks a line of a vertical-rl page.
 - A table is `PAGE_EL:<i> table` (its cells are not listed), a rule `PAGE_EL:<i> hr`.
+- `PAGE_BOX` is the frame of a CSS box (borders and background) on this page, listed before the content it
+  frames. `edges` are top, right, bottom and left, each `<width>/<style>` in pixels and `CssBorderStyle`
+  (0 unset, 1 none, 2 solid, 3 double, 4 dotted, 5 dashed); a width of 0 draws no edge, as at a page
+  break that cuts the box. `shaded=1`: the background is drawn as a light gray.
 - `starved` counts the glyph lookups during the dump that the heap had no room for
   (`glyph_miss::starvedCount()`). Such a glyph is measured as missing, so with `starved` above 0
   some `w=` are not what the panel shows: free some heap and ask again before trusting the widths.

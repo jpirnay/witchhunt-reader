@@ -14,6 +14,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -97,12 +98,79 @@ class ChapterHtmlSlimParser final : public Print {
   };
   std::vector<BackgroundImageScope> backgroundImageScopes_;
   uint8_t brRunInBackground_ = 0;
+  // Open elements drawn as a CSS box (borders, a background shade: CssBox), outermost first. Each puts a PageBox under
+  // its content on every page it reaches. Its border and padding are inside the frame, so a box places its own
+  // vertical spacing (openBox, closeBox) rather than leaving it to the empty-block merge, and its horizontal ones join
+  // the insets its content is laid out in. A page break cuts the box open (sliceBoxesAtPageEnd): no bottom edge on the
+  // page before, no top edge or padding on the page after. Based on crosspoint-reader PR #3891 (Justin Mitchell,
+  // @itsthisjustin), its box scope; empty for a book without boxes, which then pays a vector's three words.
+  struct BoxScope {
+    int depth = 0;
+    int16_t left = 0;   // the frame's x
+    int16_t right = 0;  // the x just past it
+    // Frame to content: the border, then the padding, at least kBoxMinGap on a side that is drawn.
+    int16_t padTop = 0;
+    int16_t padRight = 0;
+    int16_t padBottom = 0;
+    int16_t padLeft = 0;
+    PageBox::Edge edges[4];
+    bool shaded = false;
+    bool continued = false;      // an earlier page drew part of it
+    int16_t top = 0;             // the frame's y on the current page
+    int16_t contentBottom = -1;  // the lowest content of the box on this page; -1: none yet
+    uint16_t firstElement = 0;   // where its PageBox goes in the page's elements: before what it frames
+  };
+  // What startElement decides for an element drawn as a box, before its block style is built (planBox).
+  struct BoxPlan {
+    bool boxed = false;
+    BoxScope scope;
+    int16_t extraLeft = 0;  // what the border and the gap add to the element's own padding
+    int16_t extraRight = 0;
+  };
+  static constexpr size_t kMaxBoxScopes = 8;  // deeper boxes are drawn without a frame
+  static constexpr int16_t kBoxMinGap = 4;    // text keeps this far from a drawn edge, whatever the padding
+  std::vector<BoxScope> boxScopes_;
+  // The glyphs of the last line placed on this page reach down to here: under a tight line spacing below the line's
+  // advance. A box opening under it starts its frame below them. 0 on a fresh page.
+  int16_t lastGlyphBottom_ = 0;
+  // The extra paragraph spacing (setting) the last laid-out block added, and where it ended: a box closing right there
+  // keeps it out of its frame, which its top does not have either.
+  int16_t extraGap_ = 0;
+  int16_t extraGapEnd_ = -1;
+  // Whether `name`, with this style, is drawn as a box, and its plan: the pads, and `style`'s padding with the border
+  // in it (its vertical padding goes to the frame, out of the block's style).
+  BoxPlan planBox(const char* name, const CssStyle& cssStyle, bool floated, BlockStyle& style) const;
+  // The element startElement is ending opens its box: its pending top spacing is placed, the frame starts there, and
+  // its border and top padding follow. The element's block (and its children's) has the box's insets already.
+  void openBox(BoxScope scope);
+  // The element of the innermost box has closed: its last block is laid out inside it, and its frame closes below.
+  void closeBox();
+  // Every open box's frame bottom is at least `bottom`: content of the box was placed down to it.
+  void noteBoxContent(int bottom);
+  // Puts the box's PageBox on the current page, from `top` to `bottom`, its bottom edge drawn when `closing`.
+  void placeBoxSegment(const BoxScope& box, int top, int bottom, bool closing);
+  // emitPage's two halves: the open boxes' frames on the page that ends, then their seats on the page that begins.
+  void sliceBoxesAtPageEnd();
+  void seatBoxesOnNewPage();
+  // The x of a picture placed as a block, `width` wide: centred on the page, or in the innermost open box.
+  [[nodiscard]] int16_t blockPictureX(int width) const;
   int boldUntilDepth = INT_MAX;
   int italicUntilDepth = INT_MAX;
   int underlineUntilDepth = INT_MAX;
   int strikethroughUntilDepth = INT_MAX;
-  int preUntilDepth = INT_MAX;  // set when inside a <pre> element; enables \n → line-break handling
-  int svgDepth = 0;             // nesting counter for <svg> elements; text inside SVG is skipped (path data etc.)
+  int svgDepth = 0;  // nesting counter for <svg> elements; text inside SVG is skipped (path data etc.)
+  // The computed CSS white-space of the text being read: the innermost flow entry's (FlowEntry) at the current depth,
+  // set where an element opens and again where one closes (endElement).
+  CssWhiteSpace whiteSpace_ = CssWhiteSpace::Unset;
+  // Where text that keeps its spaces stands in its line, in code points since the line began (the block's start, or a
+  // kept line feed): a tab runs to the next multiple of kTabColumns. Counted as the words are flushed.
+  uint16_t lineColumn_ = 0;
+  // Four, not CSS's tab-size of 8: code nests three or four levels deep, and on a 480 px column of about 48 characters
+  // (10 px each) eight a level would take half the line at the third level.
+  static constexpr uint16_t kTabColumns = 4;
+  // The block laid out next ends at a kept line feed: the line after it is the same paragraph's, so no paragraph
+  // spacing comes between them (makePages).
+  bool blockEndsAtLineFeed_ = false;
   // buffer for building up words from characters, will auto break if longer than this
   // leave one char at end for null pointer
   char partWordBuffer[MAX_WORD_SIZE + 1] = {};
@@ -156,6 +224,9 @@ class ChapterHtmlSlimParser final : public Print {
   // A no-break space (U+00A0 or U+202F) at `offset`, a token of its own glued to both neighbours (consumeText). False
   // when the stream failed.
   bool addNoBreakSpace(uint32_t offset);
+  // A run of spaces, tabs and carriage returns the text keeps (`length` bytes at `run`, at `offset`): one token of as
+  // many spaces as the run has columns, a tab running to the next tab stop (consumeText). False when the stream failed.
+  bool addKeptSpaces(const char* run, int length, uint32_t offset);
   // The tokens partWordBuffer's CJK run will become: its CJK codepoints, plus one for each run of
   // non-CJK characters after the first CJK codepoint. consumeText flushes the run at
   // kCjkRunCodepoints of them.
@@ -285,24 +356,76 @@ class ChapterHtmlSlimParser final : public Print {
     int16_t height = 0;
     std::string alt;
     bool active = false;
-    bool isRight = false;  // true when float: right
+    bool isRight = false;   // true when float: right
+    uint32_t linkHash = 0;  // the link it is inside (imageLinkHash)
     // epubFilePath is not stored — epub->getPath() is read at ImageBlock construction time
     // to avoid a redundant heap copy of a constant string.
   };
   PendingInlineImage pendingInlineImage_;   // active=true when a float-context image is deferred
   PageImage* deferredPageImage_ = nullptr;  // borrowed from currentPage; its yPos needs updating
 
+  // Line images: small images set in their line of text as a word is (takesLineImage). Each is a token of
+  // currentTextBlock (ParsedText::addInlineObject) and a record here from its <img> until its line is placed
+  // (addLineToPage), or, in a paragraph that holds nothing else, until the paragraph places it as a block image as
+  // before (placeImageOnlyParagraph). The cache path is imageCachePathFor's, the book epub->getPath(): not kept. A
+  // record is two strings and 16 B; at most a split's worth wait at once (addLineImage).
+  // Where a line image sits against its text: a vertical-align keyword, or Baseline raised by a length.
+  struct LineImageAlign {
+    CssVerticalAlign align = CssVerticalAlign::Baseline;
+    int8_t shift = 0;  // CssStyle::verticalAlignShift: 1/16 em, or percent of the line height with shiftPercent
+    bool shiftPercent = false;
+  };
+  struct PendingLineImage {
+    uint16_t id = 0;
+    int16_t width = 0;
+    int16_t height = 0;
+    LineImageAlign align;
+    uint32_t visibleOffset = 0;
+    uint32_t linkHash = 0;  // the internal link it is inside (linkHrefHash), 0: none
+    std::string entryPath;
+    std::string alt;  // capped as ImageBlock caps it
+  };
+  std::vector<PendingLineImage> pendingLineImages_;
+  uint16_t nextLineImageId_ = 1;
+  // The records a long-block split triggered by line images left (the split keeps the last line): the next waits for
+  // kLineImageRegrowth more, as the token split waits for kSplitRegrowth.
+  size_t lineImagesKeptAtSplit_ = 0;
+  static constexpr size_t kMaxPendingLineImages = 16;
+  static constexpr size_t kLineImageRegrowth = 8;
+  // The line images a page holds at most. Each is a page image and its block with four strings (about 570 B on the
+  // 64-bit host, epub_build_inventory on test_inline_images.epub), held on the page until it is written and again
+  // whenever it is loaded. A line that would take the page past it starts the next page.
+  static constexpr size_t kMaxLineImagesPerPage = 16;
+  size_t lineImagesOnPage_ = 0;
+  // Whether a line with `images` line images must start a new page for the cap (never on a page without any yet).
+  bool lineImagesFillPage(const size_t images) const {
+    return images > 0 && lineImagesOnPage_ > 0 && lineImagesOnPage_ + images > kMaxLineImagesPerPage;
+  }
+  // An image is set in its line when it is at most this many of the paragraph's lines tall.
+  static constexpr int kLineImageMaxLines = 2;
+
   // Drop cap: a left-floated span with a large font-size at the very start of a
   // paragraph (<p><span class="first-letter">A</span>ll ...). The letter is captured
   // while the span is open, then rendered as its own top-aligned PageLine with a
   // FloatZone so the paragraph's first lines wrap beside it — the same mechanism
   // used for left-floated inline images.
+  // CSS initial-letter asks for one in so many lines, on such a span (float and size or not) or on the paragraph's
+  // ::first-letter: the letter is then as tall as the lines it spans, whatever font-size the book gives it.
   static constexpr float kDropCapMinMultiplier = 1.95f;  // spans below this render inline
   static constexpr float kDropCapMaxMultiplier = 4.0f;   // ≈3 text lines tall
   static constexpr int16_t kDropCapGapPx = 6;            // horizontal gap between cap and text
+  // The most lines an initial-letter cap spans (crosspoint-reader's MAX_INITIAL_LETTER too), and fewer where the cap
+  // would take more than half the column's width.
+  static constexpr uint8_t kMaxInitialLetterLines = 6;
   struct PendingDropCap {
-    bool active = false;      // true while capturing the span's text
-    int depth = 0;            // parser depth of the drop-cap span (pre-increment)
+    bool active = false;  // true while capturing the span's text
+    int depth = 0;        // parser depth of the drop-cap span (pre-increment)
+    // initial-letter: the lines the cap spans (2 and up; 0 for a cap sized by its font-size) and the lines it sinks,
+    // fewer for a raised cap, more for a sunken one.
+    uint8_t lines = 0;
+    uint8_t sink = 0;
+    // Captured from a ::first-letter rule: the capture ends after the first letter, and the punctuation before it.
+    bool firstLetter = false;
     float multiplier = 1.0f;  // composed font-size multiplier relative to the body font
     EpdFontFamily::Style style = EpdFontFamily::REGULAR;
     uint32_t family = 0;  // CssStyle::fontFamily of the cap, while the book has other families (fontFamilies_)
@@ -566,8 +689,9 @@ class ChapterHtmlSlimParser final : public Print {
   std::vector<BlockInsetEntry> blockInsetStack_;
 
   // Fold the insets of every enclosing block-level element into `style`, capping each side at
-  // MAX_HORIZONTAL_INSET_EM so deep nesting cannot squeeze the text column away.
-  void addAncestorInsets(BlockStyle& style, float emSize) const;
+  // MAX_HORIZONTAL_INSET_EM so deep nesting cannot squeeze the text column away. Only those opened above `belowDepth`
+  // (the elements around the one at that depth), when given.
+  void addAncestorInsets(BlockStyle& style, float emSize, int belowDepth = INT_MAX) const;
 
   // Bottom spacing (margin-bottom, padding-bottom) of the block-level elements currently open. A
   // block element's style starts only its FIRST text block -- child blocks and <br> lines follow
@@ -729,6 +853,19 @@ class ChapterHtmlSlimParser final : public Print {
   int footnoteLinkDepth = -1;
   FootnoteEntry currentFootnote = {};
   size_t currentFootnoteLinkTextLen = 0;
+  // The link holds an image and leads to a document of the book: it is kept without text of its own (listed with the
+  // footnote list's link label, STR_LINK), and the image is what a reader taps.
+  bool currentFootnoteHoldsImage_ = false;
+  // Whether the open link leads to a document of the book (linkLeadsToDocument), asked once a link: -1 not yet.
+  int8_t currentFootnoteLeadsToDocument_ = -1;
+  // A fragment of the document it is in, or a document of the spine (an XHTML file by its name, found in the spine):
+  // not an image, media or any other file, which a reader has nowhere to go to.
+  bool linkLeadsToDocument(const char* href) const;
+  // The link an image of this size placed now is inside, as its page image names it (linkHrefHash): its tap target.
+  // 0 outside an internal link, for a link that leads to no document (a Project Gutenberg picture linked to its
+  // full-size file), which is not listed either, and for an image over half the page, which a tap target would cover
+  // the page-turn zones with: its link is listed all the same.
+  uint32_t imageLinkHash(int width, int height);
   // Non-owning; the Section's BuildState keeps the lookup alive across build slices.
   // Membership in the book's preview store is the sole expansion gate: it already encodes
   // "this link points at a real note", so no epub:type/same-file checks here. The store is
@@ -784,14 +921,16 @@ class ChapterHtmlSlimParser final : public Print {
   CssParser::Ancestry cssAncestry(const std::string& tagName, const std::string& classAttr,
                                   const std::string& idAttr) const;
 
-  // The inherited values layout reads (writing mode, direction, line-height), where an open element changes one: an
-  // element takes the innermost entry above it. Trimmed by depth at every start tag, so an element closed through a
-  // skip path leaves nothing behind. A book nests a change a few levels deep; an entry past the eighth is dropped.
+  // The inherited values layout reads (writing mode, direction, line-height, white-space), where an open element
+  // changes one: an element takes the innermost entry above it. Trimmed by depth at every start tag, so an element
+  // closed through a skip path leaves nothing behind. A book nests a change a few levels deep; an entry past the eighth
+  // is dropped.
   struct FlowEntry {
     int16_t depth = 0;
     CssWritingMode writingMode = CssWritingMode::Unset;
     CssDirection direction = CssDirection::Unset;
     float lineHeightEm = 0.0f;  // 0: no line-height set
+    CssWhiteSpace whiteSpace = CssWhiteSpace::Unset;
   };
   static constexpr uint8_t kMaxFlowEntries = 8;
   FlowEntry flows_[kMaxFlowEntries] = {};
@@ -799,10 +938,13 @@ class ChapterHtmlSlimParser final : public Print {
   FlowEntry elementFlow_;  // the element startElement is resolving, its values computed
   bool flowLogged_ = false;
   bool flowOverflowLogged_ = false;
-  // Trims the stack to the element's ancestors, pushes the element when it sets a writing mode, direction or
-  // line-height other than its parent's, and returns its computed values. `depth` is the element's own (startElement
+  // Trims the stack to the element's ancestors, pushes the element when it sets a writing mode, direction, line-height
+  // or white-space other than its parent's, and returns its computed values. `depth` is the element's own (startElement
   // increments it last).
   FlowEntry enterFlow(const CssStyle& style);
+  // The white-space of text at the current depth: the innermost entry of an element still open. The stack is trimmed
+  // only at start tags, so an element that has just closed may still be on it.
+  CssWhiteSpace openWhiteSpace() const;
 
   // The open elements whose bidi markup put controls in the text (design deviation 5), innermost last: what each puts
   // in at its end tag. An element nested past the eighth, or whose opener a run of held controls has no room for
@@ -822,6 +964,10 @@ class ChapterHtmlSlimParser final : public Print {
   // elements' markup goes on, outermost first, at the new block's start. An edge whose openers the held run has no room
   // for is spent, and every edge inside it with it.
   void startNewTextBlockWithinElements(const BlockStyle& blockStyle);
+  // The style of the block a kept line feed starts (a <pre>'s): the next line of the paragraph it splits. It keeps that
+  // block's style but for what CSS gives a block once: its top and bottom spacing (the bottom is held for the end tag)
+  // and its first-line indent. A float stays with the block it was attached to.
+  BlockStyle lineFeedBlockStyle() const;
   // Puts the controls the element opening now asks for (CSS Writing Modes 3, 2.4.2: its unicode-bidi and computed
   // direction, elementFlow_) at the start of its text, and pushes the edge with their closers. An inline element takes
   // them all; one laid out as its own block (`inlineElement` false) only an override, as its other values set its
@@ -992,6 +1138,9 @@ class ChapterHtmlSlimParser final : public Print {
   bool heapAllowsTableRowLayout() const;
   bool flushPartWordBuffer();
   bool flushPartWordGlued();
+  // Lays out currentTextBlock's lines but its last, which stays for the words still to come: the long-block split that
+  // keeps a paragraph's word arrays bounded. False when the layout could not run (no heap, no page).
+  bool splitLongBlock();
   void makePages();
   // Puts currentTextBlock's top spacing on the current page, once per logical paragraph. Both
   // places that lay the block out call it first: makePages() and the long-block split in
@@ -1052,6 +1201,54 @@ class ChapterHtmlSlimParser final : public Print {
   void placeBackgroundImage(const std::string& resolvedPath, int elementDepth);
   // Place an already-built ImageBlock as a centered, full-width block element, page-breaking if needed.
   void placeImageBlockAsBlock(std::unique_ptr<ImageBlock> image);
+  // An image of the flow on a line of its own, centred, with the spacing of the empty block it stands in (a figure's or
+  // a paragraph's margins), which it uses up: the block's style is reset for the text after it. A page break pending
+  // goes first, and a page that has no room for it ends. False when no page or image could be had.
+  // linkHash: the link the image is inside (PageImage::linkHash).
+  bool placeImageWithBlockSpacing(const std::string& cachedImagePath, const std::string& entryPath,
+                                  const std::string& alt, int displayWidth, int displayHeight, uint32_t visibleOffset,
+                                  uint32_t linkHash = 0);
+  // Whether an <img> of this style and display size is set in its line (PendingLineImage): at most kLineImageMaxLines
+  // of the paragraph's lines tall (across them: in a vertical section the size is the content frame's, the image
+  // turned), not floated or made a block by the book, and not in a float, a table cell or a ruby, which keep their own
+  // paths.
+  bool takesLineImage(const CssStyle& imgStyle, int displayWidth, int displayHeight) const;
+  // Sets an image in currentTextBlock's text: the word in progress ends at it, glued to it as the source has it, and
+  // the text after it is glued to it unless whitespace comes first. In a vertical section it is an upright character:
+  // one cell of the column, as far down it as it is tall, shrunk to the column's em when it is wider. False, nothing
+  // added, when the heap holds no room for its record: the image is then placed as a block.
+  bool addLineImage(const std::string& entryPath, std::string alt, int displayWidth, int displayHeight,
+                    LineImageAlign align);
+  const PendingLineImage* pendingLineImage(uint16_t id) const;
+  // A line's text as its images are placed against it, from the text's top: its height, its baseline (the annotation
+  // band and the ascent TextBlock::render draws at), its font's ascent and the descent below the baseline.
+  struct LineText {
+    int height = 0;
+    int baseline = 0;
+    int ascent = 0;
+    int descent = 0;
+    // A column of a vertical section, and the column's centre line (columnAxis): an image there is an upright
+    // character, centred across the column whatever its vertical-align.
+    bool column = false;
+    int axis = 0;
+  };
+  LineText lineText(const BlockStyle& bs, int height, uint8_t maxSizePct, int band) const;
+  // Where an image's top goes, from its text's top, by its vertical-align: its bottom on the baseline by default; in a
+  // column, centred on its axis.
+  static int lineImageTop(const PendingLineImage& image, const LineText& text);
+  // A line with images, as tall as its text and its images need: the text moves down by what they rise above it.
+  struct LineImageBox {
+    int height = 0;
+    int textTop = 0;
+  };
+  LineImageBox lineImageBox(const LineText& text, std::span<const ParsedText::LineObject> images) const;
+  // Puts a placed line's images on the page, its text's top at textTop, and drops their records.
+  void placeLineImages(std::span<const ParsedText::LineObject> images, const LineText& text, int16_t xOffset,
+                       int textTop);
+  // A paragraph of line images and no text places them as block images, one under another, as it did before an image
+  // could be set in a line: an ornament or a picture on its own keeps its centred place and its paragraph's spacing.
+  // True when it did (currentTextBlock is then empty).
+  bool placeImageOnlyParagraph();
   // In a vertical section an image is sized in the content frame as its turned self: native width and height swap
   // before sizing, and the block it becomes is turned (drawn upright in the reader's frame).
   void turnIfVertical(ImageDimensions& dims) const;
@@ -1067,10 +1264,25 @@ class ChapterHtmlSlimParser final : public Print {
   // Attach the pending inline float image to `bs` and place it on the current page.
   // Clears pendingInlineImage_ on return.  No-op if pendingInlineImage_ is not active.
   void attachPendingFloatImage(BlockStyle& bs);
-  // Begin drop-cap capture when a left-floated large-font inline element opens at the
+  // Begin drop-cap capture when a left-floated large-font inline element, or one with an initial-letter, opens at the
   // start of an empty paragraph. Returns true when capture started (the element must
   // then not push an inline style entry).
   bool tryStartDropCapCapture(const CssStyle& cssStyle);
+  // Where a drop cap may start: at the start of an empty paragraph, horizontal and left to right, with no float, table
+  // or census in the way.
+  bool dropCapPositionAllows() const;
+  // Whether a style asks for a drop cap: an initial-letter of two lines or more, or a left float at a cap's size.
+  static bool dropCapStyleAsks(const CssStyle& cssStyle);
+  // Starts capturing the cap `cssStyle` describes; `firstLetter`: a ::first-letter's, which takes one letter.
+  void startDropCap(const CssStyle& cssStyle, bool firstLetter);
+  // A block element opening: its ::first-letter style, when that asks for a drop cap, waits for the block's first text
+  // (firstLetterDepth_).
+  void armFirstLetter(const char* name, const std::string& classAttr, const std::string& idAttr);
+  // The element whose ::first-letter style (firstLetterStyle_) waits for its first text; -1 when none waits.
+  int firstLetterDepth_ = -1;
+  // Boxed, made by the first ::first-letter that asks for a drop cap and reused after it: a book without one carries a
+  // null pointer through its builds, not a 132 B CssStyle in the parser. Set whenever firstLetterDepth_ >= 0.
+  std::unique_ptr<CssStyle> firstLetterStyle_;
   // Place the captured drop cap: one-word PageLine on the current page plus a FloatZone
   // on the paragraph's block style. Falls back to an inline word when the cap is unusable.
   void finalizePendingDropCap();
@@ -1210,6 +1422,8 @@ class ChapterHtmlSlimParser final : public Print {
   // may run before the next feed. See ParsedText::releaseLayoutScratch.
   void onSliceYield() {
     if (currentTextBlock) currentTextBlock->releaseLayoutScratch();
+    // The line images' records, once a paragraph has placed them all: a book with none never grew them.
+    if (pendingLineImages_.empty()) std::vector<PendingLineImage>().swap(pendingLineImages_);
   }
   const std::string& getAnchorSpillPath() const { return anchorSpillPath; }
   size_t pageBreakLabelCount() const { return pageBreakLabelPages.size(); }

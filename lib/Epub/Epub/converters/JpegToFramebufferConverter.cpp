@@ -749,6 +749,10 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
   GfxRenderer& renderer = *ctx->renderer;
   const int cfgX = ctx->config->x;
   const int cfgY = ctx->config->y;
+  // Native gray (RenderConfig::gray8): the resampled sample goes to the canvas, and nothing else is written. Never
+  // banded: the band exists for the error-diffusion ditherers, and this path runs none. Compiled out of a build whose
+  // panel cannot lend a canvas.
+  DirectGray8Writer* const gray8 = HalDisplay::kMayLendGray8Canvas ? ctx->config->gray8 : nullptr;
 
   // Determine destination pixel range covered by this source block
   const int srcYEnd = blockY + blockH;
@@ -864,6 +868,11 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
           gray;
       return;
     }
+    // The constant again: the lambda is compiled on its own, and `gray8` reaches it by reference.
+    if (HalDisplay::kMayLendGray8Canvas && gray8) {
+      gray8->writePixel(outX, adaptive_tone::apply(ctx->config->adaptiveTone, gray));
+      return;
+    }
     uint8_t dithered = ditherGray(*ctx, gray, dstX, outX, outY);
     pw.writePixel(outX, dithered);
     if (caching) cw.writePixel(outX, dithered);
@@ -879,6 +888,7 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
         prepareDitherRow(*ctx, dstY);
 #endif
         pw.beginRow(outY);
+        if (gray8) gray8->beginRow(outY);
         if (caching) cw.beginRow(outY);
       }
       const uint8_t* row = &pixels[(dstY - blockY) * stride];
@@ -912,6 +922,7 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
         prepareDitherRow(*ctx, dstY);
 #endif
         pw.beginRow(outY);
+        if (gray8) gray8->beginRow(outY);
         if (caching) cw.beginRow(outY);
       }
       const int32_t srcFyFP = dstY * invScaleFPY;
@@ -1002,6 +1013,7 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
       prepareDitherRow(*ctx, dstY);
 #endif
       pw.beginRow(outY);
+      if (gray8) gray8->beginRow(outY);
       if (caching) cw.beginRow(outY);
     }
     const int32_t srcFyFP = dstY * invScaleFPY;
@@ -1328,20 +1340,24 @@ bool parkDecode(JpegContext& ctx, const RenderConfig& config, Header header, Wri
 }  // namespace park
 
 // Draw a simple bordered placeholder where an undecodable (non-baseline) JPEG would
-// have gone, so the layout shows a framed gap rather than a silent blank.
-void drawUnsupportedPlaceholder(GfxRenderer& renderer, const RenderConfig& config) {
+// have gone, so the layout shows a framed gap rather than a silent blank. The decode's result:
+// true, the picture's place is taken care of. Not for a native-gray decode (RenderConfig::gray8),
+// which writes nothing but samples: false, and the caller keeps what the B/W pass drew there.
+bool framedGap(GfxRenderer& renderer, const RenderConfig& config) {
+  if (HalDisplay::kMayLendGray8Canvas && config.gray8) return false;
   const int w = config.maxWidth;
   const int h = config.maxHeight;
-  if (w <= 0 || h <= 0) return;
+  if (w <= 0 || h <= 0) return true;
   // A cache-only decode (the reader's image lane) must leave the displayed frame alone; the raw
   // pixel writers already see a zero-row window, this box would not.
-  if (renderer.getWriteRows() == 0) return;
+  if (renderer.getWriteRows() == 0) return true;
   if (config.x < 0 || config.y < 0 || config.x + w > renderer.getScreenWidth() ||
       config.y + h > renderer.getScreenHeight()) {
-    return;
+    return true;
   }
   constexpr int BORDER = 1;
   renderer.drawRect(config.x, config.y, w, h, BORDER, true);
+  return true;
 }
 
 }  // namespace
@@ -1501,11 +1517,16 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   // a good cover on every single open. Match the cover/thumbnail path
   // (Epub::coverImageCachedValidOnly): trust the magic bytes, let the decode fail.
 
+  // Native gray (RenderConfig::gray8): the samples are all this decode writes, so no cache and no ditherer. Compiled
+  // out of a build whose panel cannot lend a canvas.
+  const bool gray8Out = HalDisplay::kMayLendGray8Canvas && config.gray8 != nullptr;
+
   JpegContext ctx;
   ctx.renderer = &renderer;
   ctx.config = &config;
-  ctx.screenWidth = renderer.getScreenWidth();
-  ctx.screenHeight = renderer.getScreenHeight();
+  // A gray8 decode clips to its writer's extent, which a plain buffer sets to the picture's own (DirectGray8Writer).
+  ctx.screenWidth = gray8Out ? config.gray8->logicalWidth : renderer.getScreenWidth();
+  ctx.screenHeight = gray8Out ? config.gray8->logicalHeight : renderer.getScreenHeight();
   ctx.effectiveDitherMode = config.ditherMode;
 
   // TJpgDec handles baseline JPEGs. Progressive ones go to ProgressiveJpeg (every scan, band by
@@ -1517,8 +1538,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   }
   if (mode == JpegMode::Other) {
     LOG_INF("JPG", "Unsupported JPEG mode — drawing placeholder: %s", imagePath.c_str());
-    drawUnsupportedPlaceholder(renderer, config);
-    return true;
+    return framedGap(renderer, config);
   }
 
   const size_t requiredHeap = mode == JpegMode::Progressive ? MIN_FREE_HEAP_FOR_PROGRESSIVE_JPEG : minFreeHeapForJpeg();
@@ -1554,8 +1574,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
       // A frame no decoder here takes (precision, sampling) gets the framed gap; a header that is
       // not there, nothing.
       if (probeResult != ProgressiveJpeg::Result::Unsupported) return false;
-      drawUnsupportedPlaceholder(renderer, config);
-      return true;
+      return framedGap(renderer, config);
     }
     srcWidth = progressiveInfo.width;
     srcHeight = progressiveInfo.height;
@@ -1693,7 +1712,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   // Start streaming the pixel cache to disk.
   // (See PixelCache for why streaming replaced a full-image buffer; ported from
   // upstream commit d9bcef7a, crosspoint-reader#2230.)
-  ctx.caching = shouldEnableJpegCache(config, destWidth, destHeight, maxBlockDstRows);
+  ctx.caching = !gray8Out && shouldEnableJpegCache(config, destWidth, destHeight, maxBlockDstRows);
 #ifdef JPG_DIAG_DISABLE_CACHE
   // Diagnostic bisect: skip the streaming band-cache writer (DirectCacheWriter into
   // ctx.cache.buffer) entirely. Define in platformio.local.ini (build_flags) for a
@@ -1722,6 +1741,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     wantsStatefulDither = true;
   }
 #endif
+  if (gray8Out) wantsStatefulDither = false;
 
   bool ditherBandReady = false;
   if (wantsStatefulDither && destWidth > 0) {
@@ -2035,8 +2055,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
       if (ctx.companion) ctx.companion->cache.abort();
       if (resuming) park::discard(config);
     }
-    drawUnsupportedPlaceholder(renderer, config);
-    return true;
+    return framedGap(renderer, config);
   }
   const auto dropAll = [&]() {
     if (ctx.caching) ctx.cache.abort();
@@ -2047,8 +2066,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     LOG_ERR("JPG", "Progressive JPEG decode failed (%s): %s", ProgressiveJpeg::resultName(progressiveResult),
             imagePath.c_str());
     dropAll();
-    drawUnsupportedPlaceholder(renderer, config);
-    return true;
+    return framedGap(renderer, config);
   }
   if (mode == JpegMode::Baseline && jr != JDR_OK) {
     LOG_ERR("JPG", "TJpgDec decode failed (jr=%d): %s", jr, imagePath.c_str());
@@ -2063,6 +2081,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   // ctx.caching (the partial file is dropped), so re-read the flag here.
   if (ctx.caching && ctx.cache.finalize() && finerNeed.bytes != 0) {
     image_scratch::noteCoarse(finerNeed);  // a coarse picture published for lack of memory
+  } else if (gray8Out && finerNeed.bytes != 0) {
+    image_scratch::noteCoarse(finerNeed);  // the same for the samples, which a caller would otherwise keep
   }
   // Only alongside a complete primary: a companion without it would be a cache nobody asked for.
   if (ctx.companion) {

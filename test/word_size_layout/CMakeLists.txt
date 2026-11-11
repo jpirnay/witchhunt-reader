@@ -1,6 +1,7 @@
 add_executable(WordSizeLayoutTest
   WordSizeLayoutTest.cpp
   WordFontSlotTest.cpp
+  InlineObjectLayoutTest.cpp
   ShapedLayoutTest.cpp
   WordCapacityTest.cpp
   MyanmarLineBreakTest.cpp
