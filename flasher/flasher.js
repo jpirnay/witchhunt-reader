@@ -587,14 +587,20 @@ async function webBundle(mode) {
 
 // After the restart the device leaves the USB bus and comes back as a new port. The browser lets
 // the page reopen a port it was granted without asking, so look for it among those.
+// A port tells nothing but its USB ids, so with two Espressif devices granted the page cannot know
+// which one it just wrote: then it takes the port object it flashed through if that one is back,
+// and otherwise asks the user to pick the device, rather than talk to the other one.
 async function findPort(timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   await sleep(2000);
   while (Date.now() < deadline) {
-    const ports = await navigator.serial.getPorts();
-    for (const port of ports) {
-      const info = port.getInfo();
-      if (info.usbVendorId !== ESPRESSIF_VID) continue;
+    const ports = (await navigator.serial.getPorts()).filter((p) => p.getInfo().usbVendorId === ESPRESSIF_VID);
+    const candidates = ports.length === 1 ? ports : ports.filter((p) => p === state.port);
+    if (ports.length > 1 && !candidates.length) {
+      log(`${ports.length} Espressif ports are granted to this page; not guessing which one was written`);
+      return null;
+    }
+    for (const port of candidates) {
       const link = new DeviceLink(port, log);
       try {
         await link.open();
