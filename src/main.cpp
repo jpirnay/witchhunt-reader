@@ -45,6 +45,7 @@
 #include "CjkUiPack.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "DarkMode.h"
 #include "GestureEventManager.h"
 #include "GlobalBookmarkIndex.h"
 #include "HyphenationPacks.h"
@@ -404,7 +405,11 @@ static void saveSleepFrameBuffer() {
     return;
   }
   const size_t bufferSize = renderer.getBufferSize();
+  // Saved for the polarity the wake restores it in (DarkMode::savedFrameInverts).
+  const bool invert = DarkMode::savedFrameInverts(renderer.isOutputInverted(), SETTINGS.darkMode != 0);
+  if (invert) renderer.invertScreen();
   const size_t written = file.write(renderer.getFrameBuffer(), bufferSize);
+  if (invert) renderer.invertScreen();
   file.close();
   if (written != bufferSize) {
     LOG_DBG("MAIN", "Quick Resume frame save short write: %u/%u", static_cast<unsigned>(written),

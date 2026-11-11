@@ -37,6 +37,16 @@ constexpr bool showsTextAntiAliasing(const bool wanted, const bool outputInverte
   return wanted && (!outputInverted || panelInvertsGrayFrame);
 }
 
+// Quick Resume adds its moon icon to the page on screen. A HALF drives every pixel through its inverse, which on a
+// dark page is a white flash across the whole screen; only the moon changes, so a FAST adds it. Light mode keeps its
+// HALF. After crosspoint-reader 5bfaf7bdb (Justin Mitchell).
+constexpr bool moonGoesOutFast(const bool outputInverted) { return outputInverted; }
+
+// Quick Resume's saved frame comes back at wake before any screen has set the polarity, so it goes out the way boot
+// sets it: inverted exactly when Dark Mode is on. A frame that went out the other way (the image viewer, which keeps
+// normal polarity) is saved inverted, so it comes back as it was on the glass.
+constexpr bool savedFrameInverts(const bool shownInverted, const bool darkMode) { return shownInverted != darkMode; }
+
 // The ghosting budget, in pages or frames between ghost-clearing refreshes (Refresh Frequency). White text leaves more
 // behind on black than black text on white, so Dark Mode clears twice as often: 15 becomes 8. Never (0) stays never.
 constexpr int refreshFrequency(const int pages, const bool darkMode) {

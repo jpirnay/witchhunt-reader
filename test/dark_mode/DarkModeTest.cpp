@@ -36,6 +36,32 @@ TEST(DarkMode, OutputPolarityPerScreen) {
   }
 }
 
+// Quick Resume's moon: a FAST on a dark page (a HALF would flash it white), the HALF it always had on a light one.
+TEST(DarkMode, QuickResumeMoonIsFastOnlyOnADarkPage) {
+  EXPECT_TRUE(DarkMode::moonGoesOutFast(true));
+  EXPECT_FALSE(DarkMode::moonGoesOutFast(false));
+}
+
+// Quick Resume's frame, saved at sleep and restored at wake in the polarity boot sets (Dark Mode's), must reach the
+// glass as it was when the device went to sleep: from the reader or Home in either mode, and from the image viewer,
+// which shows in normal polarity while Dark Mode is on.
+TEST(DarkMode, QuickResumeFrameComesBackAsItWasOnTheGlass) {
+  const uint8_t frame[4] = {0x00, 0xFF, 0x0F, 0xA5};
+  const auto glass = [](const uint8_t byte, const bool inverted) { return inverted ? uint8_t(~byte) : byte; };
+  for (const bool darkMode : {false, true}) {
+    for (const bool shownInverted : {false, true}) {
+      const bool invert = DarkMode::savedFrameInverts(shownInverted, darkMode);
+      for (const uint8_t byte : frame) {
+        const uint8_t saved = invert ? uint8_t(~byte) : byte;
+        EXPECT_EQ(glass(saved, /*inverted at wake=*/darkMode), glass(byte, shownInverted))
+            << "darkMode=" << darkMode << " shownInverted=" << shownInverted;
+      }
+    }
+  }
+  EXPECT_FALSE(DarkMode::savedFrameInverts(true, true)) << "the dark reader page is saved as it is";
+  EXPECT_TRUE(DarkMode::savedFrameInverts(false, true)) << "the image viewer under Dark Mode";
+}
+
 // The plane pair does not survive inversion: anti-aliasing is off on every panel that cannot mirror its single push's
 // greys (the X3, X4, X4 Pro, Murphy), and stays on the LilyGo T5S3, which can.
 TEST(DarkMode, TextAntiAliasingIsOffWhereTheGraysDoNotSurviveInversion) {

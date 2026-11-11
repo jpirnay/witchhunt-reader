@@ -1106,7 +1106,8 @@ void SleepActivity::renderLastScreenSleepScreen() const {
   // it before the boot screen would otherwise paint.
   const auto pageHeight = renderer.getScreenHeight();
   renderer.drawImage(MoonIcon, 0, pageHeight - MOONICON_HEIGHT, MOONICON_WIDTH, MOONICON_HEIGHT);
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  renderer.displayBuffer(DarkMode::moonGoesOutFast(renderer.isOutputInverted()) ? HalDisplay::FAST_REFRESH
+                                                                                : HalDisplay::HALF_REFRESH);
 }
 
 void SleepActivity::renderOverlaySleepScreen() const {
