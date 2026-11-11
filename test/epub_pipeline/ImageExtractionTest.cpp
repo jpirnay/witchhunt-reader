@@ -259,7 +259,7 @@ TEST_F(ImageExtractionFixture, ATruncatedExtractIsReplacedBeforeItIsDecoded) {
   block.render(renderer, 0, 0, /*forceLoad=*/true, /*monochromeOutput=*/true);
   EXPECT_EQ(fs::file_size(path), kEntryBytes) << "the short extract must be replaced by the whole entry";
   // Decoded from the fresh extract: the pixel cache exists, so the page will show the image.
-  EXPECT_TRUE(fs::exists(path + ".1bit.pxc") || fs::exists((work / "cut.1bit.pxc").string()));
+  EXPECT_TRUE(fs::exists(block.bwCachePath()));
 }
 
 // --- the bytes pick the decoder, not the name ---------------------------------------------
@@ -279,7 +279,7 @@ bool decodesTo(const fs::path& work, const char* name, const char* book, const c
   ImageBlock block(path.string(), 120, 160, "", book, entry);
   GfxRenderer renderer;
   block.render(renderer, 0, 0, /*forceLoad=*/true, /*monochromeOutput=*/true);
-  return fs::exists(fs::path(path).replace_extension(".1bit.pxc"));
+  return fs::exists(block.bwCachePath());
 }
 }  // namespace
 
@@ -375,7 +375,7 @@ TEST_F(LargeImageFixture, PlaceholderIsSuppressedByThePixelCacheOfThatMode) {
   const std::string big = writeExtracted("cached.png", LARGE_IMAGE_SOURCE_BYTES + 1);
   ImageBlock block(big, 400, 600, "");
   {
-    std::ofstream((work / "cached.1bit.pxc").string()) << 'x';
+    std::ofstream(block.bwCachePath()) << 'x';
   }
 
   EXPECT_FALSE(block.wouldShowPlaceholder(/*forceLoad=*/false, /*monochromeOutput=*/true));
@@ -389,11 +389,11 @@ TEST_F(LargeImageFixture, PlaceholderIsSuppressedByThePixelCacheOfThatMode) {
 // call -- cache gone, file now small -- would wrongly answer with a placeholder.
 TEST_F(LargeImageFixture, SizeIsNotProbedWhileTheCacheExists) {
   const std::string path = writeExtracted("probe.png", LARGE_IMAGE_SOURCE_BYTES + 1);
-  const std::string cache = (work / "probe.1bit.pxc").string();
+  ImageBlock block(path, 400, 600, "");
+  const std::string cache = block.bwCachePath();
   {
     std::ofstream(cache) << 'x';
   }
-  ImageBlock block(path, 400, 600, "");
   ASSERT_FALSE(block.wouldShowPlaceholder(/*forceLoad=*/false, /*monochromeOutput=*/true));
 
   fs::remove(cache);
