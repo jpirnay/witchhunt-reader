@@ -98,9 +98,13 @@
         when they are first needed (the first book or language switch may take a little longer).</li>
     </ul>
     <p><strong>On a device with its original firmware</strong> (for example a new X4 Pro), a full install
-      replaces that firmware and wipes everything it kept in the device's memory, such as its Wi-Fi passwords.
-      There is no way back unless you have a backup of the whole flash. If you may want to return to it, make
+      replaces that firmware, and what it kept in the device's memory, such as its Wi-Fi passwords, is lost with
+      it. There is no way back unless you have a backup of the whole flash. If you may want to return to it, make
       one first, for example with esptool: <code>esptool read-flash 0 ALL backup.bin</code>.</p>
+    <p><strong>Leftovers.</strong> Without <em>Erase the whole flash first</em>, parts of the flash that Witch
+      Reader has not used yet keep their old bytes until it does; it never reads them as its own data. On a device
+      that had its original firmware, that can include what the old firmware stored. Erase first if you pass the
+      device on.</p>
     <p><strong>Update only</strong> keeps all of the above; it replaces the firmware and makes the device start
       it.</p>
   </details>
