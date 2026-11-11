@@ -131,6 +131,7 @@ class CssParser {
   //      1/1.2); a v33 cache stores small and smaller as 0.8, x-large as 1.4 and xx-large as 1.6.
   // v35: `white-space` is persisted, in bits 12-14 of the flow word (packFlow); a v34 cache never recorded it.
   // v35 also: `initial-letter` (a byte after the flow word) and ::first-letter rules (flags bit 2) are persisted.
+  // v35 also: borders and background colours (CssBox, three bytes after the initial-letter byte; the <hr> facts too).
   static constexpr uint8_t CSS_CACHE_VERSION = 35;
   // Bytes before the complex-rule table and the sorted offset index: version(1) + ruleCount(2) +
   // totalSelectorCandidates(4) + unsupportedSelectorSkips(4) + flags(1) + complexTableBytes(2).

@@ -42,6 +42,7 @@ constexpr uint8_t SECTION_FILE_VERSION = 123;  // v123: CSS white-space: pre, pr
                                                // a kept line feed starts the next line, not a block: the block's top
                                                // spacing and first-line indent are not repeated per line
                                                // v123 also: CSS initial-letter drop caps (span or ::first-letter)
+                                               // v123 also: CSS borders and background shades draw boxes (PageBox)
                                                // v122: a <pre>'s lines take no first-line indent but the book's
                                                // own; Book's Style gave each one em with extra spacing off
                                                // v121: the font-size keywords take the CSS Fonts 4 scale (small 8/9,

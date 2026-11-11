@@ -107,11 +107,12 @@ constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
 //         + the flow word (uint16: writing-mode, direction, text-combine-upright, text-orientation,
 //           unicode-bidi; packFlow; v30; white-space, v35)
 //         + the initial-letter byte (CssStyle::initialLetter; v35)
+//         + the box (CssBox's three bytes: the borders, the background and the <hr> facts; v35)
 constexpr size_t CSS_FIXED_STYLE_BYTES =
     4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) + sizeof(uint8_t) + sizeof(uint16_t) +
     2 * sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint8_t) + sizeof(float) + sizeof(uint8_t) + sizeof(uint8_t) +
-    sizeof(uint8_t) + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) + sizeof(uint8_t);
-static_assert(CSS_FIXED_STYLE_BYTES == 84,
+    sizeof(uint8_t) + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) + sizeof(uint8_t) + CssBox::kBytes;
+static_assert(CSS_FIXED_STYLE_BYTES == 87,
               "style payload layout changed — update read/writeCssStylePayload and bump CSS_CACHE_VERSION");
 // A rule record is selectorLen(2) selector order(2) payload; the order sits between selector and
 // payload so a reader that has matched the selector reads the rest in one go (v22).
@@ -1001,6 +1002,291 @@ bool isTransparentColour(const std::string_view v) {
   }
   return false;
 }
+
+// The border and background interpreters below are ported from crosspoint-reader PR #3891 (Justin Mitchell,
+// @itsthisjustin): its widths and line styles, and its luminance test for a background, which shades light colours
+// only and lets white through. Reworked here for CssBox's longhands and their cascade, for invalid declarations, for a
+// border the paper shows as white, and for dark backgrounds, which are shaded too.
+
+// The top-level tokens of a normalized value: split at spaces, but not inside parentheses, so `rgb(0, 0, 0)` and
+// `url(a b.png)` stay whole. Stops early when `fn` returns false.
+template <typename Fn>
+void forEachValueToken(const std::string_view v, Fn&& fn) {
+  int depth = 0;
+  size_t start = 0;
+  for (size_t i = 0; i <= v.size(); ++i) {
+    const char c = i < v.size() ? v[i] : ' ';
+    if (c == '(') ++depth;
+    if (c == ')' && depth > 0) --depth;
+    if (c != ' ' || depth > 0) continue;
+    if (i > start && !fn(v.substr(start, i - start))) return;
+    start = i + 1;
+  }
+}
+
+// A decimal number at the start of `t` in hundredths (`1.5` is 150, `.25` is 25), and what follows it in `unit`.
+// Integers only: the C3 has no FPU, and these values need no more than two decimals. False when no digit starts it.
+bool parseHundredths(const std::string_view t, int& hundredths, std::string_view& unit) {
+  size_t i = 0;
+  int whole = 0;
+  int fraction = 0;
+  int scale = 100;
+  bool digits = false;
+  for (; i < t.size() && t[i] >= '0' && t[i] <= '9'; ++i, digits = true)
+    whole = std::min(whole * 10 + (t[i] - '0'), 99999);
+  if (i < t.size() && t[i] == '.') {
+    for (++i; i < t.size() && t[i] >= '0' && t[i] <= '9'; ++i, digits = true) {
+      if (scale > 1) fraction += (t[i] - '0') * (scale /= 10);
+    }
+  }
+  if (!digits) return false;
+  hundredths = whole * 100 + fraction;
+  unit = t.substr(i);
+  return true;
+}
+
+// The perceived brightness (0-255, the Rec. 601 weights) of a colour token as it shows on white paper: hex, rgb(),
+// rgba(), hsl(), hsla(), and the near-white names; another name is a colour of unknown shade (kSomeColour). -1 when
+// the token is no colour. An alpha below 1 blends the colour with the white page, as a browser shows it. An hsl()
+// colour is taken by its lightness, which is its brightness when it is gray and close to it near white, the one shade
+// this has to tell.
+constexpr int kSomeColour = 128;
+int colourLuminance(const std::string_view t) {
+  // r, g, b 0-255; alpha 0-100.
+  const auto luminance = [](const int r, const int g, const int b, const int alpha) {
+    const int y = (299 * r + 587 * g + 114 * b) / 1000;
+    return (alpha * y + (100 - alpha) * 255) / 100;
+  };
+  if (!t.empty() && t.front() == '#') {
+    const std::string_view hex = t.substr(1);
+    const auto nibble = [](const char c) {
+      if (c >= '0' && c <= '9') return c - '0';
+      return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+    };
+    int c[4] = {0, 0, 0, 255};
+    const size_t channels = hex.size() == 3 || hex.size() == 6 ? 3 : (hex.size() == 4 || hex.size() == 8 ? 4 : 0);
+    if (channels == 0) return -1;
+    const bool shortForm = hex.size() <= 4;
+    for (size_t i = 0; i < channels; ++i) {
+      const int hi = nibble(hex[shortForm ? i : 2 * i]);
+      const int lo = nibble(hex[shortForm ? i : 2 * i + 1]);
+      if (hi < 0 || lo < 0) return -1;
+      c[i] = hi * 16 + lo;
+    }
+    return luminance(c[0], c[1], c[2], c[3] * 100 / 255);
+  }
+  const size_t open = t.find('(');
+  if (open != std::string_view::npos) {
+    const std::string_view fn = t.substr(0, open);
+    const bool rgb = fn == "rgb" || fn == "rgba";
+    if ((!rgb && fn != "hsl" && fn != "hsla") || t.back() != ')') return -1;
+    // Commas, spaces and the slash before an alpha all separate components. Each is kept in its own range: a channel
+    // 0-255 (or %), hsl's saturation and lightness 0-100, an alpha 0-100 (from 0-1 or %); the hue is not needed.
+    int v[4] = {0, 0, 0, 100};
+    int count = 0;
+    const std::string_view args = t.substr(open + 1, t.size() - open - 2);
+    size_t start = 0;
+    for (size_t i = 0; i <= args.size() && count < 4; ++i) {
+      if (i < args.size() && args[i] != ',' && args[i] != ' ' && args[i] != '/') continue;
+      const std::string_view part = args.substr(start, i - start);
+      start = i + 1;
+      if (part.empty()) continue;
+      int hundredths = 0;
+      std::string_view unit;
+      if (!parseHundredths(part, hundredths, unit)) return -1;
+      const bool percent = unit == "%";
+      int value = 0;
+      int limit = 100;
+      if (count == 3) {
+        value = percent ? hundredths / 100 : hundredths;  // 50% or 0.5 both 50
+      } else if (rgb) {
+        value = percent ? hundredths * 255 / 10000 : hundredths / 100;
+        limit = 255;
+      } else {
+        value = hundredths / 100;  // the hue's degrees, or a percent
+        limit = count == 0 ? 360 : 100;
+      }
+      v[count++] = std::max(0, std::min(value, limit));
+    }
+    if (count < 3) return -1;
+    if (rgb) return luminance(v[0], v[1], v[2], v[3]);
+    const int lightness = std::min(v[2], 100) * 255 / 100;
+    return luminance(lightness, lightness, lightness, v[3]);
+  }
+  // The names that are white on paper; any other word is some colour (a near-white below them still shows a tint).
+  static constexpr const char* const kWhiteNames[] = {"white",     "snow",  "ivory",      "floralwhite",
+                                                      "mintcream", "azure", "lightyellow"};
+  for (const char* name : kWhiteNames) {
+    if (t == name) return 255;
+  }
+  for (const char c : t) {
+    if (c < 'a' || c > 'z') return -1;
+  }
+  return t.empty() ? -1 : kSomeColour;
+}
+
+// A colour that leaves white paper white: no fill, no line. #fafafa and above; a browser shows #f5f5f5 as a tint.
+constexpr int kNearWhiteLuminance = 250;
+bool isPaperColour(const std::string_view t) {
+  if (t == "transparent") return true;
+  const int luminance = colourLuminance(t);
+  return luminance >= kNearWhiteLuminance;
+}
+
+// A border width token: thin, medium, thick, or a length in px, pt or em (taken at CSS's 16 px em; the cache is shared
+// by every font size). Whole pixels: a hairline stays one, and CssBox caps the rest. False for anything else.
+bool interpretBorderWidth(const std::string_view t, uint8_t& px) {
+  if (t == "thin") {
+    px = CssBox::kThinPx;
+  } else if (t == "medium" || t == "initial" || t == "unset" || t == "revert") {
+    px = CssBox::kMediumPx;
+  } else if (t == "thick") {
+    px = CssBox::kThickPx;
+  } else {
+    int hundredths = 0;
+    std::string_view unit;
+    if (!parseHundredths(t, hundredths, unit)) return false;
+    if (unit == "pt") {
+      hundredths = hundredths * 4 / 3;
+    } else if (unit == "em" || unit == "rem") {
+      hundredths *= 16;
+    } else if (!unit.empty() && unit != "px") {
+      return false;  // percentages and viewport units are not border widths
+    }
+    px = hundredths == 0 ? 0 : static_cast<uint8_t>(std::max(1, std::min((hundredths + 50) / 100, 255)));
+  }
+  return true;
+}
+
+bool interpretBorderStyle(const std::string_view t, CssBorderStyle& out) {
+  struct Name {
+    const char* name;
+    CssBorderStyle style;
+  };
+  static constexpr Name kNames[] = {
+      {"solid", CssBorderStyle::Solid},   {"none", CssBorderStyle::None},     {"dotted", CssBorderStyle::Dotted},
+      {"dashed", CssBorderStyle::Dashed}, {"double", CssBorderStyle::Double}, {"hidden", CssBorderStyle::None},
+      {"groove", CssBorderStyle::Solid},  {"ridge", CssBorderStyle::Solid},   {"inset", CssBorderStyle::Solid},
+      {"outset", CssBorderStyle::Solid},  {"initial", CssBorderStyle::None},  {"unset", CssBorderStyle::None},
+      {"revert", CssBorderStyle::None}};
+  for (const Name& n : kNames) {
+    if (t == n.name) {
+      out = n.style;
+      return true;
+    }
+  }
+  return false;
+}
+
+// A border shorthand (`border`, `border-top`, ...) into the sides it names: width, style and colour in any order, each
+// optional, the ones left out taking their initial value (medium, none). Colours draw black, except one the paper
+// shows as white -- `1px solid white`, `transparent` -- which draws nothing, as on the page it does. `inherit` is left
+// alone: a border is not inherited, and the parent's is not known here.
+void interpretBorderShorthand(const std::string_view v, const CssBox::Side* sides, const size_t count, CssBox& box) {
+  if (v == "inherit") return;
+  uint8_t width = CssBox::kMediumPx;
+  auto style = CssBorderStyle::None;
+  bool invisible = false;
+  bool valid = true;
+  forEachValueToken(v, [&](const std::string_view t) {
+    uint8_t w = 0;
+    CssBorderStyle s = CssBorderStyle::Unset;
+    if (interpretBorderStyle(t, s)) {
+      style = s;
+    } else if (interpretBorderWidth(t, w)) {
+      width = w;
+    } else if (isPaperColour(t)) {
+      invisible = true;
+    } else if (colourLuminance(t) < 0) {
+      valid = false;  // a declaration with a token that is none of the three is invalid as a whole
+    }
+    return valid;
+  });
+  if (!valid) return;
+  for (size_t i = 0; i < count; ++i) {
+    box.setWidth(sides[i], width);
+    box.setStyle(sides[i], invisible ? CssBorderStyle::None : style);
+  }
+}
+
+// border-width or border-style with one to four values, top, right, bottom and left as margin has them. A value it
+// cannot read makes the declaration invalid, as in CSS.
+template <typename Value, typename Interpret, typename Set>
+void interpretBorderEdges(const std::string_view v, Interpret&& interpret, Set&& set) {
+  std::string_view tokens[4];
+  size_t count = 0;
+  bool valid = true;
+  forEachValueToken(v, [&](const std::string_view t) {
+    valid = count < 4;
+    if (valid) tokens[count++] = t;
+    return valid;
+  });
+  if (!valid || count == 0) return;
+  const size_t source[4] = {0, count > 1 ? 1u : 0u, count > 2 ? 2u : 0u, count > 3 ? 3u : (count > 1 ? 1u : 0u)};
+  Value values[4] = {};
+  for (size_t i = 0; i < count; ++i) {
+    if (!interpret(tokens[i], values[i])) return;
+  }
+  for (uint8_t side = 0; side < 4; ++side) set(static_cast<CssBox::Side>(side), values[source[side]]);
+}
+
+// The sides of a border property's name: `border` all four, `border-top` and the like one, with the rest of the
+// name (`-width`, `-style`, `-color`, or empty for the shorthand) in `rest`. False for the border properties that are
+// not about a side's line: border-radius, -image, -collapse, -spacing, and the logical ones.
+bool borderSides(const std::string_view name, CssBox::Side* sides, size_t& count, std::string_view& rest) {
+  static constexpr CssBox::Side kAll[] = {CssBox::Top, CssBox::Right, CssBox::Bottom, CssBox::Left};
+  static constexpr const char* const kNames[] = {"top", "right", "bottom", "left"};
+  if (name.substr(0, 6) != "border") return false;
+  std::string_view after = name.substr(6);
+  if (after.empty() || after == "-width" || after == "-style" || after == "-color") {
+    std::copy(std::begin(kAll), std::end(kAll), sides);
+    count = 4;
+    rest = after;
+    return true;
+  }
+  if (after.front() != '-') return false;
+  after.remove_prefix(1);
+  for (uint8_t i = 0; i < 4; ++i) {
+    const std::string_view side = kNames[i];
+    if (after.substr(0, side.size()) != side) continue;
+    rest = after.substr(side.size());
+    if (!rest.empty() && rest != "-width" && rest != "-style" && rest != "-color") return false;
+    sides[0] = kAll[i];
+    count = 1;
+    return true;
+  }
+  return false;
+}
+
+// What a background or background-color value leaves the box. A colour the paper shows is Shaded -- dark ones too: the
+// reader draws all text black, so a dark fill is drawn as the same light shade, which keeps the text readable and the
+// box seen -- and transparent, a near-white, `none` and the cascade keywords (a background is not inherited) are None.
+// A shorthand with no colour in it sets the colour to transparent, so it is None as well. Unset for what cannot be
+// read: a var(), a background-color that is no colour.
+CssBox::Background interpretBackground(const std::string_view v, const bool shorthand) {
+  if (v.find("var(") != std::string_view::npos) return CssBox::Background::Unset;
+  if (isCascadeKeyword(v) || v == "none" || v == "currentcolor") return CssBox::Background::None;
+  // The words a background shorthand holds that are not colours: repeat, attachment, position, size, box keywords.
+  static constexpr const char* const kNotColours[] = {
+      "none",  "repeat",  "no-repeat",  "repeat-x",    "repeat-y",    "space", "round",  "scroll",
+      "fixed", "local",   "top",        "bottom",      "left",        "right", "center", "auto",
+      "cover", "contain", "border-box", "padding-box", "content-box", "text",  "/"};
+  int luminance = -1;
+  forEachValueToken(v, [&](const std::string_view t) {
+    if (t == "transparent") {
+      luminance = 255;
+      return false;
+    }
+    for (const char* word : kNotColours) {
+      if (t == word) return true;
+    }
+    luminance = colourLuminance(t);
+    return luminance < 0;  // keep looking past what is no colour (a url(), a gradient, a length)
+  });
+  if (luminance < 0) return shorthand ? CssBox::Background::None : CssBox::Background::Unset;
+  return luminance >= kNearWhiteLuminance ? CssBox::Background::None : CssBox::Background::Shaded;
+}
+
 // A (page-)break-before/after value: 1 forces a page break, 0 asks for none -- auto, avoid,
 // avoid-page -- and is kept, so a more specific or later rule can cancel an `always` (a
 // `.chapter.first { page-break-before: avoid }` under `.chapter { page-break-before: always }`),
@@ -1151,24 +1437,51 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
       style.colorTransparent = false;
       style.defined.colorTransparent = 0;
     }
-  } else if (propNameBuf == "border" || propNameBuf == "border-style" || propNameBuf == "border-width") {
-    // Read for the rule an <hr> draws, and for nothing else: see CssStyle::ruleBorder.
+  } else if (propNameBuf.compare(0, 6, "border") == 0) {
     const std::string_view val = propValueBuf;
-    if (!isCascadeKeyword(val)) {
-      style.ruleBorder |=
-          borderDrawsNothing(val, propNameBuf == "border") ? CssStyle::kRuleBorderNone : CssStyle::kRulePainted;
+    // What the rule an <hr> draws makes of it, as two facts of its own (CssStyle::kRuleBorderNone).
+    if (propNameBuf == "border" || propNameBuf == "border-style" || propNameBuf == "border-width") {
+      if (!isCascadeKeyword(val)) {
+        style.box.addRuleBorder(borderDrawsNothing(val, propNameBuf == "border") ? CssStyle::kRuleBorderNone
+                                                                                 : CssStyle::kRulePainted);
+      }
+    } else if (propNameBuf == "border-top" || propNameBuf == "border-bottom" || propNameBuf == "border-top-style" ||
+               propNameBuf == "border-bottom-style" || propNameBuf == "border-top-width" ||
+               propNameBuf == "border-bottom-width") {
+      if (!isCascadeKeyword(val) && !borderDrawsNothing(val, /*shorthand=*/true)) {
+        style.box.addRuleBorder(CssStyle::kRulePainted);
+      }
     }
-  } else if (propNameBuf == "border-top" || propNameBuf == "border-bottom" || propNameBuf == "border-top-style" ||
-             propNameBuf == "border-bottom-style" || propNameBuf == "border-top-width" ||
-             propNameBuf == "border-bottom-width") {
-    const std::string_view val = propValueBuf;
-    if (!isCascadeKeyword(val) && !borderDrawsNothing(val, /*shorthand=*/true)) {
-      style.ruleBorder |= CssStyle::kRulePainted;
+    // And what a block's box makes of it. Colours (border-color, border-top-color) draw black and are not kept.
+    CssBox::Side sides[4];
+    size_t count = 0;
+    std::string_view rest;
+    if (!borderSides(propNameBuf, sides, count, rest)) return;
+    if (rest.empty()) {
+      interpretBorderShorthand(val, sides, count, style.box);
+    } else if (rest == "-width") {
+      const auto set = [&style](const CssBox::Side side, const uint8_t px) { style.box.setWidth(side, px); };
+      if (count == 4) {
+        interpretBorderEdges<uint8_t>(val, interpretBorderWidth, set);
+      } else if (uint8_t px = 0; interpretBorderWidth(val, px)) {
+        set(sides[0], px);
+      }
+    } else if (rest == "-style") {
+      const auto set = [&style](const CssBox::Side side, const CssBorderStyle s) { style.box.setStyle(side, s); };
+      if (count == 4) {
+        interpretBorderEdges<CssBorderStyle>(val, interpretBorderStyle, set);
+      } else if (CssBorderStyle s = CssBorderStyle::Unset; interpretBorderStyle(val, s)) {
+        set(sides[0], s);
+      }
     }
   } else if (propNameBuf == "background" || propNameBuf == "background-color" || propNameBuf == "background-image") {
     const std::string_view val = propValueBuf;
     if (!isCascadeKeyword(val) && val != "none" && !isTransparentColour(val)) {
-      style.ruleBorder |= CssStyle::kRulePainted;
+      style.box.addRuleBorder(CssStyle::kRulePainted);
+    }
+    if (propNameBuf != "background-image") {
+      const CssBox::Background background = interpretBackground(val, propNameBuf == "background");
+      if (background != CssBox::Background::Unset) style.box.setBackground(background);
     }
   } else if (propNameBuf == "visibility") {
     // Same convention as color: hidden/collapse define, visible undefines.
@@ -2262,14 +2575,15 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.defined.opacityZero = (visibilityFlags & 0x08) != 0 ? 1 : 0;
   style.visibilityHidden = (visibilityFlags & 0x10) != 0;
   style.defined.visibilityHidden = (visibilityFlags & 0x20) != 0 ? 1 : 0;
-  style.ruleBorder = static_cast<uint8_t>(visibilityFlags >> 6);
   float lineHeightEm = 0.0f;
   uint16_t flow = 0;
+  uint8_t box[CssBox::kBytes];
   if (!get(&style.fontFamily, sizeof(style.fontFamily)) || !get(&lineHeightEm, sizeof(lineHeightEm)) ||
-      !get(&flow, sizeof(flow)) || !get(&style.initialLetter, sizeof(style.initialLetter))) {
+      !get(&flow, sizeof(flow)) || !get(&style.initialLetter, sizeof(style.initialLetter)) || !get(box, sizeof(box))) {
     return false;
   }
   unpackFlow(flow, style);
+  style.box.setBytes(box);
   if (lineHeightDefined) {
     style.lineHeightEm = lineHeightEm;
     style.defined.lineHeight = 1;
@@ -2357,14 +2671,14 @@ size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const pa
   const uint8_t visibilityFlags = (style.colorTransparent ? 0x01 : 0x00) |
                                   (style.defined.colorTransparent ? 0x02 : 0x00) | (style.opacityZero ? 0x04 : 0x00) |
                                   (style.defined.opacityZero ? 0x08 : 0x00) | (style.visibilityHidden ? 0x10 : 0x00) |
-                                  (style.defined.visibilityHidden ? 0x20 : 0x00) |
-                                  static_cast<uint8_t>(style.ruleBorder << 6);
+                                  (style.defined.visibilityHidden ? 0x20 : 0x00);
   put8(visibilityFlags);
   put(&style.fontFamily, sizeof(style.fontFamily));
   put(&style.lineHeightEm, sizeof(style.lineHeightEm));
   const uint16_t flow = packFlow(style);
   put(&flow, sizeof(flow));
   put8(style.initialLetter);
+  put(style.box.bytes(), CssBox::kBytes);
   return at;
 }
 
@@ -2685,6 +2999,32 @@ bool CssParser::ensureCacheIndexLoaded() const {
   return true;
 }
 
+void CssBox::cascadeFrom(const CssBox& base, const uint32_t rank, uint32_t* const ranks) {
+  // The same test as CssStyle::applyOver's.
+  const auto take = [rank, ranks](const bool alreadySet, const int longhand) {
+    if (ranks == nullptr) return true;
+    if (alreadySet && rank < ranks[longhand]) return false;
+    ranks[longhand] = rank;
+    return true;
+  };
+  uint32_t v = value();
+  const uint32_t b = base.value();
+  for (unsigned i = 0; i < 4; ++i) {
+    const unsigned shift = i * kSideBits;
+    const unsigned mine = (v >> shift) & 31u;
+    const unsigned theirs = (b >> shift) & 31u;
+    unsigned width = mine % kWidthCodes;
+    unsigned style = mine / kWidthCodes;
+    if (theirs % kWidthCodes != 0 && take(width != 0, 2 * i)) width = theirs % kWidthCodes;
+    if (theirs / kWidthCodes != 0 && take(style != 0, 2 * i + 1)) style = theirs / kWidthCodes;
+    v = (v & ~(31u << shift)) | (style * kWidthCodes + width) << shift;
+  }
+  const uint32_t backgroundMask = 3u << kBackgroundShift;
+  if ((b & backgroundMask) != 0 && take((v & backgroundMask) != 0, 8)) v = (v & ~backgroundMask) | (b & backgroundMask);
+  v |= b & (3u << kRuleShift);  // the <hr> facts only add up
+  store(v);
+}
+
 // --- Sparse CssStyle compression for the resident pool ---
 // A style is serialized to a canonical, SPARSE record: only the fields the 'defined' mask
 // flags are written (a real rule sets a handful of the 34 properties). Because the encoding is
@@ -2692,9 +3032,9 @@ bool CssParser::ensureCacheIndexLoaded() const {
 // decompresses back to a full CssStyle. Values are copied with memcpy so the byte-packed
 // (unaligned) records are safe to read on the C3.
 
-// Worst case: 4 (mask) + 2 (packed enums) + 1 (extra values) + 2 (the flow word) + the initial-letter (1) + 11 lengths
-// * 5 + 2 multipliers * 4 + the font-family hash (4) + the text-emphasis mark (1) = 78 bytes.
-constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 2 + 1 + 11 * 5 + 2 * 4 + 4 + 1;
+// Worst case: 4 (mask) + 2 (packed enums) + 1 (extra values) + 2 (the flow word) + the initial-letter (1) + the box
+// (3) + 11 lengths * 5 + 2 multipliers * 4 + the font-family hash (4) + the text-emphasis mark (1) = 81 bytes.
+constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 2 + 1 + CssBox::kBytes + 11 * 5 + 2 * 4 + 4 + 1;
 
 // Canonical "which properties are set" mask: the defined bits of the first 27 properties (0-26; the extra byte below
 // flags font-family, text-emphasis and the flow properties, which have no defined bit), then the three boolean
@@ -2725,9 +3065,9 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   // Bit 31 announces a byte of values the uint16 below has no room for, written after it: an
   // explicit `inherit` of font-weight (bit 0) and of font-style (bit 1), a font-size relative to
   // the body (bit 2), a font-family (bit 3: its hash follows the multipliers), a flow property or white-space (bit 4:
-  // the flow word, packFlow, follows this byte), a text-emphasis (bit 5: its mark byte follows the hash), and in bits
-  // 6-7 ruleBorder. An initial-letter is bit 15 of the flow word, which packFlow leaves free: its byte follows the
-  // word.
+  // the flow word, packFlow, follows this byte), a text-emphasis (bit 5: its mark byte follows the hash), and a box
+  // (bit 6: its three bytes follow the flow word and the initial-letter byte). An initial-letter is bit 15 of the
+  // flow word, which packFlow leaves free: its byte follows the word.
   uint8_t extra = 0;
   if (s.defined.fontWeight && s.fontWeight == CssFontWeight::Inherit) extra |= 0x01;
   if (s.defined.fontStyle && s.fontStyle == CssFontStyle::Inherit) extra |= 0x02;
@@ -2737,7 +3077,7 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   const uint16_t flow = static_cast<uint16_t>(packFlow(s) | (s.hasInitialLetter() ? kInitialLetterFollows : 0));
   if (flow != 0) extra |= 0x10;
   if (s.defined.textEmphasis) extra |= 0x20;
-  extra |= static_cast<uint8_t>(s.ruleBorder << 6);
+  if (s.box.any()) extra |= 0x40;
   if (extra != 0) mask |= 1u << 31;
   std::memcpy(p, &mask, 4);
   p += 4;
@@ -2761,6 +3101,10 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
     std::memcpy(p, &flow, 2);
     p += 2;
     if ((flow & kInitialLetterFollows) != 0) *p++ = s.initialLetter;
+  }
+  if (s.box.any()) {
+    std::memcpy(p, s.box.bytes(), CssBox::kBytes);
+    p += CssBox::kBytes;
   }
   const auto putLen = [&](bool def, const CssLength& l) {
     if (def) {
@@ -2807,13 +3151,16 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
   std::memcpy(&enums, p, 2);
   p += 2;
   const uint8_t extra = ((mask >> 31) & 1u) ? *p++ : 0;
-  out.ruleBorder = static_cast<uint8_t>(extra >> 6);
   if ((extra & 0x10) != 0) {
     uint16_t flow = 0;
     std::memcpy(&flow, p, 2);
     p += 2;
     unpackFlow(flow, out);
     if ((flow & 0x8000) != 0) out.initialLetter = *p++;  // compressStyle's kInitialLetterFollows
+  }
+  if ((extra & 0x40) != 0) {
+    out.box.setBytes(p);
+    p += CssBox::kBytes;
   }
   const auto isDefined = [&](int index) { return (mask >> index) & 1u; };
   CssPropertyFlags& d = out.defined;
