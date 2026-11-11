@@ -263,7 +263,14 @@ struct DirectGray8Writer {
   int stride;  // bytes per canvas row; may exceed canvasWidth
   int canvasWidth;
   int canvasHeight;
+  // Where samples may land, in logical coordinates: the oriented screen for a panel's canvas, the buffer for a plain
+  // one. The decoders clip to this rather than to the screen.
+  int logicalWidth;
+  int logicalHeight;
   DirectPixelWriter xf;
+  // A 256-entry tone curve every sample passes through on its way in (the reader's pictures, see picture_tone).
+  // Null: the sample is stored as it comes.
+  const uint8_t* tone = nullptr;
 
   // `gray8Canvas` is the PHYSICAL panel buffer (HalDisplay::borrowGray8Canvas),
   // so its extent is the panel's, not the oriented screen's.
@@ -272,7 +279,24 @@ struct DirectGray8Writer {
     stride = gray8Stride;
     canvasWidth = renderer.getDisplayWidth();
     canvasHeight = renderer.getDisplayHeight();
+    logicalWidth = renderer.getScreenWidth();
+    logicalHeight = renderer.getScreenHeight();
+    tone = nullptr;
     xf.init(renderer);
+  }
+
+  // A plain buffer of `width` x `height` bytes, row after row, where logical and physical are one: a picture decoded
+  // on its own at (0, 0), at any size, as ImageBlock caches it.
+  void initPlain(uint8_t* buffer, const int width, const int height) {
+    canvas = buffer;
+    stride = width;
+    canvasWidth = logicalWidth = width;
+    canvasHeight = logicalHeight = height;
+    tone = nullptr;
+    xf = DirectPixelWriter{};
+    xf.clipRows = height;
+    xf.phyXStepX = 1;  // phyX = x
+    xf.phyYStepY = 1;  // phyY = y
   }
 
   inline void beginRow(int logicalY) { xf.beginRow(logicalY); }
@@ -289,6 +313,6 @@ struct DirectGray8Writer {
     // an image placed at a negative offset, or wider than the panel.
     if (static_cast<unsigned>(phyX) >= static_cast<unsigned>(canvasWidth)) return;
     if (static_cast<unsigned>(phyY) >= static_cast<unsigned>(canvasHeight)) return;
-    canvas[static_cast<uint32_t>(phyY) * stride + phyX] = gray;
+    canvas[static_cast<uint32_t>(phyY) * stride + phyX] = tone ? tone[gray] : gray;
   }
 };

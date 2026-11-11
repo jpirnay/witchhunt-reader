@@ -155,6 +155,7 @@ add_executable(EpubPipelineTest
   ImageParkTest.cpp
   StoredEntryDecodeTest.cpp
   PlaceholderOnlyScopeTest.cpp
+  Gray8PictureTest.cpp
   ImageDitherPlacementTest.cpp
   PixelCacheSizeTest.cpp
   PixelCacheWriteTest.cpp

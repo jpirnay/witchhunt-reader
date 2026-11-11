@@ -2,6 +2,7 @@
 
 #include <CooperativeAbort.h>
 #include <GfxRenderer.h>
+#include <HalDisplay.h>
 #include <HeapFit.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -22,7 +23,7 @@ namespace {
 // render's memory ladder climbs between its passes, and a smaller image may fit where a larger one did not.
 bool refusalEndsWarm(const ImageBlock& image, const uint32_t shortBefore, const bool monochromeOutput) {
   if (!image_scratch::canWait() || image_scratch::heapShortCount() == shortBefore) return false;
-  return !(monochromeOutput ? image.hasPixelCache() : image.hasGrayscaleCache());
+  return !(monochromeOutput ? image.hasPixelCache() : image.hasGrayVariantCache());
 }
 
 }  // namespace
@@ -61,6 +62,10 @@ void PageImage::render(GfxRenderer& renderer, const int fontId, const int xOffse
 void PageImage::renderWithForceLoad(GfxRenderer& renderer, const int xOffset, const int yOffset, const bool forceLoad,
                                     const bool monochromeOutput, const bool alsoCacheOtherVariant) {
   imageBlock->render(renderer, xPos + xOffset, yPos + yOffset, forceLoad, monochromeOutput, alsoCacheOtherVariant);
+}
+
+void PageImage::warmGrayVariant(GfxRenderer& renderer, const int xOffset, const int yOffset, const bool forceLoad) {
+  imageBlock->warmGrayVariant(renderer, xPos + xOffset, yPos + yOffset, forceLoad);
 }
 
 bool PageImage::serialize(FsFile& file) {
@@ -116,6 +121,30 @@ std::unique_ptr<PageHR> PageHR::deserialize(FsFile& file) {
   serialization::readPod(file, width);
   return std::unique_ptr<PageHR>(new PageHR(xPos, yPos, width));
 }
+
+namespace {
+// Each column's left edge, and the table's right edge last, for a table `totalWidth` wide drawn at drawX. Integer
+// division per edge, so rounding does not drift across the columns. Idea from uxjulia/CrossInk; rewritten for our
+// layout model.
+std::array<int, MAX_TABLE_COLS + 1> columnEdges(const int drawX, const uint16_t totalWidth, const uint8_t columnCount) {
+  std::array<int, MAX_TABLE_COLS + 1> colX = {};
+  colX[0] = drawX;
+  for (uint8_t c = 0; c < columnCount; c++) {
+    colX[c + 1] = drawX + static_cast<int>((static_cast<uint32_t>(totalWidth) * (c + 1)) / columnCount);
+  }
+  return colX;
+}
+
+// A cell's lines from (x, lineY) down, drawn when `draw`; returns where its graphic goes, below them.
+int layOutCellLines(GfxRenderer& renderer, const TableCell& cell, const int fontId, const int x, int lineY,
+                    const int lineHeight, const bool draw) {
+  for (const auto& line : cell.lines) {
+    if (draw) line->render(renderer, fontId, x, lineY);
+    lineY += lineHeight + line->annotationBand(renderer, fontId);
+  }
+  return lineY;
+}
+}  // namespace
 
 namespace {
 // One edge of a box as strips along its side: `length` long from (x, y), `side.width` deep inward. Ported from
@@ -230,13 +259,7 @@ void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const in
     renderer.drawRect(drawX, drawY, totalWidth, totalHeight, true);
   }
 
-  // Pre-compute column X positions using integer division to avoid rounding drift across columns.
-  // Idea from uxjulia/CrossInk; rewritten for our layout model.
-  std::array<int, MAX_TABLE_COLS + 1> colX = {};
-  colX[0] = drawX;
-  for (uint8_t c = 0; c < columnCount; c++) {
-    colX[c + 1] = drawX + static_cast<int>((static_cast<uint32_t>(totalWidth) * (c + 1)) / columnCount);
-  }
+  const std::array<int, MAX_TABLE_COLS + 1> colX = columnEdges(drawX, totalWidth, columnCount);
 
   // Rows: text content + separators. Column separators are drawn per row rather than as full-height
   // lines, because a colspan cell has no internal boundaries to draw.
@@ -250,16 +273,13 @@ void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const in
     for (const TableCell& cell : row.cells) {
       if (col >= columnCount) break;
       const uint8_t span = std::min<uint8_t>(cell.colSpan ? cell.colSpan : 1, columnCount - col);
-      int lineY = rowY + TABLE_CELL_PADDING;
-      for (const auto& line : cell.lines) {
-        line->render(renderer, fontId, colX[col] + TABLE_CELL_PADDING, lineY);
-        lineY += lineHeight + line->annotationBand(renderer, fontId);
-      }
+      const int imageY = layOutCellLines(renderer, cell, fontId, colX[col] + TABLE_CELL_PADDING,
+                                         rowY + TABLE_CELL_PADDING, lineHeight, /*draw=*/true);
       // In-cell graphic, drawn below the cell text. Always 1-bit (BW) thumbnails:
       // the decode/cache machinery lives in ImageBlock; the BW cache is built during
       // the warm pass and simply blitted here (and again in grayscale strip passes).
       if (cell.image) {
-        cell.image->render(renderer, colX[col] + TABLE_CELL_PADDING, lineY, /*forceLoad=*/true,
+        cell.image->render(renderer, colX[col] + TABLE_CELL_PADDING, imageY, /*forceLoad=*/true,
                            /*monochromeOutput=*/true);
       }
       col = static_cast<uint8_t>(col + span);
@@ -273,6 +293,29 @@ void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const in
       const int sepLineWidth = row.isHeaderRow ? 2 : 1;
       renderer.drawLine(drawX, rowY, drawX + totalWidth - 1, rowY, sepLineWidth, true);
     }
+  }
+}
+
+void PageTableFragment::renderImagesGray8(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset,
+                                          uint8_t* canvas, const uint16_t stride, Gray8Pictures& count) const {
+  if (!HalDisplay::kMayLendGray8Canvas) return;  // no canvas in this build
+  const std::array<int, MAX_TABLE_COLS + 1> colX = columnEdges(xPos + xOffset, totalWidth, columnCount);
+  const int lineHeight = renderer.getLineHeight(fontId);
+  int rowY = yPos + yOffset;
+  for (const TableRow& row : rows) {
+    uint8_t col = 0;
+    for (const TableCell& cell : row.cells) {
+      if (col >= columnCount) break;
+      if (cell.image) {
+        const int x = colX[col] + TABLE_CELL_PADDING;
+        const int imageY =
+            layOutCellLines(renderer, cell, fontId, x, rowY + TABLE_CELL_PADDING, lineHeight, /*draw=*/false);
+        count.offered++;
+        if (cell.image->renderGray8(renderer, x, imageY, canvas, stride)) count.inGray++;
+      }
+      col = static_cast<uint8_t>(col + std::min<uint8_t>(cell.colSpan ? cell.colSpan : 1, columnCount - col));
+    }
+    rowY += row.height;
   }
 }
 
@@ -293,7 +336,7 @@ bool PageTableFragment::hasUncachedImages(const bool forceLoad, const bool monoc
       if (cell.image->wouldShowPlaceholder(forceLoad, monochromeOutput)) continue;
       const bool cached = monochromeOutput ? cell.image->hasPixelCache() : cell.image->hasGrayscaleCache();
       if (!cached) return true;
-      if (alsoWarmGrayscale && monochromeOutput && !cell.image->hasGrayscaleCache()) return true;
+      if (alsoWarmGrayscale && monochromeOutput && !cell.image->hasGrayVariantCache()) return true;
     }
   }
   return false;
@@ -315,9 +358,9 @@ bool PageTableFragment::warmCellImages(GfxRenderer& renderer, const bool forceLo
         if (CooperativeAbort::wasAborted()) return false;  // see Page::warmImageCaches
         if (refusalEndsWarm(*cell.image, shortBefore, monochromeOutput)) return false;
       }
-      if (alsoWarmGrayscale && monochromeOutput && !cell.image->hasGrayscaleCache()) {
+      if (alsoWarmGrayscale && monochromeOutput && !cell.image->hasGrayVariantCache()) {
         const uint32_t shortBefore = image_scratch::heapShortCount();
-        cell.image->render(renderer, 0, 0, forceLoad, /*monochromeOutput=*/false);
+        cell.image->warmGrayVariant(renderer, 0, 0, forceLoad);
         if (CooperativeAbort::wasAborted()) return false;
         if (refusalEndsWarm(*cell.image, shortBefore, /*monochromeOutput=*/false)) return false;
       }
@@ -463,6 +506,28 @@ void Page::renderImagesFromGrayscaleCache(GfxRenderer& renderer, const int xOffs
   }
 }
 
+Gray8Pictures Page::renderImagesGray8(GfxRenderer& renderer, const int fontId, const int xOffsetIn, const int yOffsetIn,
+                                      uint8_t* canvas, const uint16_t stride) const {
+  int xOffset = xOffsetIn;
+  int yOffset = yOffsetIn;
+  const PageFrameScope scope(renderer, *this, xOffset, yOffset);
+  Gray8Pictures count;
+  for (const auto& element : elements) {
+    if (element->getTag() == TAG_PageTable) {
+      static_cast<const PageTableFragment&>(*element).renderImagesGray8(renderer, fontId, xOffset, yOffset, canvas,
+                                                                        stride, count);
+      continue;
+    }
+    if (element->getTag() != TAG_PageImage) continue;
+    const auto& pi = static_cast<const PageImage&>(*element);
+    count.offered++;
+    if (pi.getImageBlock().renderGray8(renderer, pi.xPos + xOffset, pi.yPos + yOffset, canvas, stride)) {
+      count.inGray++;
+    }
+  }
+  return count;
+}
+
 void Page::warmImageCaches(GfxRenderer& renderer, const int xOffsetIn, const int yOffsetIn,
                            const bool forceLoadLargeImages, const bool monochromeOutput, const bool alsoWarmGrayscale,
                            const bool redecodeCoarse) const {
@@ -501,7 +566,9 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffsetIn, const int
     // instead of paying two. Requires BOTH to be absent — if the BW cache is already on disk
     // the merged pass would redo work that is already done, so the plain second pass below is
     // the cheaper route.
-    const bool mergeVariants = alsoWarmGrayscale && monochromeOutput && !alreadyCached && !ib.hasGrayscaleCache();
+    // Only the Bayer variant is a companion of the 1-bit one: the 8-bit gray cache has a decode of its own.
+    const bool mergeVariants = alsoWarmGrayscale && monochromeOutput && !alreadyCached &&
+                               ImageBlock::grayVariant() == ImageBlock::GrayVariant::Bayer && !ib.hasGrayscaleCache();
     if (!alreadyCached) {
       const uint32_t shortBefore = image_scratch::heapShortCount();
       static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
@@ -515,10 +582,9 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffsetIn, const int
     // Left in place as the fallback that keeps this correct for every decoder and every
     // failure: the companion is best-effort (JPEG and GIF ignore it, and its cache file can
     // fail to open on its own), so the re-check is what makes it safe to ask for.
-    if (alsoWarmGrayscale && monochromeOutput && !ib.hasGrayscaleCache()) {
+    if (alsoWarmGrayscale && monochromeOutput && !ib.hasGrayVariantCache()) {
       const uint32_t shortBefore = image_scratch::heapShortCount();
-      static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
-                                                            /*monochromeOutput=*/false);
+      static_cast<PageImage&>(*element).warmGrayVariant(renderer, xOffset, yOffset, forceLoadLargeImages);
       if (refusalEndsWarm(ib, shortBefore, /*monochromeOutput=*/false)) return;
     }
   }

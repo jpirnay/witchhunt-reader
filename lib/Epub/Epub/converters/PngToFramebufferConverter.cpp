@@ -383,8 +383,13 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
 
   const int srcWidth = static_cast<int>(info.width);
   const int srcHeight = static_cast<int>(info.height);
-  const int screenWidth = renderer.getScreenWidth();
-  const int screenHeight = renderer.getScreenHeight();
+  // Native grayscale (RenderConfig::gray8) short-circuits most of the machinery below: no ditherer, no pixel cache,
+  // no companion rendition. All three exist to make 2 bits per pixel carry as much as they can, and this path is not
+  // spending 2 bits per pixel. It clips to its writer's extent, which a plain buffer sets to the picture's own
+  // (DirectGray8Writer). Compiled out of a build whose panel cannot lend a canvas.
+  const bool gray8Out = HalDisplay::kMayLendGray8Canvas && config.gray8 != nullptr;
+  const int screenWidth = gray8Out ? config.gray8->logicalWidth : renderer.getScreenWidth();
+  const int screenHeight = gray8Out ? config.gray8->logicalHeight : renderer.getScreenHeight();
 
   const OutputSize out = outputSizeFor(srcWidth, srcHeight, config);
   const int dstWidth = out.width;
@@ -400,11 +405,6 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
     image_scratch::noteHeapShort();
     return false;
   }
-
-  // Native grayscale short-circuits most of the machinery below: no ditherer, no
-  // pixel cache, no companion rendition. All three exist to make 2 bits per pixel
-  // carry as much as they can, and this path is not spending 2 bits per pixel.
-  const bool gray8Out = config.gray8 != nullptr;
 
   DitherState dither;
   dither.config = &config;

@@ -25,6 +25,7 @@
 
 #include "FontCacheManager.h"
 #include "GlyphRun.h"
+#include "Gray8Compose.h"
 #include "ScaledGlyphResample.h"
 #include "UiShapedText.h"
 
@@ -3715,31 +3716,19 @@ uint8_t GfxRenderer::getGrayLevels() const { return display.getGrayLevels(); }
 
 uint8_t* GfxRenderer::borrowGray8Canvas(uint16_t* stride) const { return display.borrowGray8Canvas(stride); }
 
-void GfxRenderer::displayGray8Canvas() const { display.displayGray8Canvas(HalDisplay::FULL_REFRESH, fadingFix); }
+void GfxRenderer::displayGray8Canvas() const {
+  // A full refresh whatever was asked (the driver forces its clean bank), so it satisfies an armed override too (a
+  // book open's HALF), which would otherwise wait for the next refresh and land on the page after.
+  consumeRefreshOverride(HalDisplay::FULL_REFRESH);
+  noteRefresh(HalDisplay::FULL_REFRESH);
+  display.displayGray8Canvas(HalDisplay::FULL_REFRESH, fadingFix);
+}
 
 // Bit clear = black is the framebuffer's own convention (see DirectPixelWriter's
 // BW branch, which draws by clearing), and the driver expands it the same way.
 void GfxRenderer::stampBwOntoGray8Canvas(uint8_t* canvas, const uint16_t stride) const {
   if (!canvas || !frameBuffer) return;
-  const int width = getDisplayWidth();
-  const int height = getDisplayHeight();
-  const int widthBytes = getDisplayWidthBytes();
-  for (int y = 0; y < height; y++) {
-    const uint8_t* src = frameBuffer + static_cast<uint32_t>(y) * widthBytes;
-    uint8_t* dst = canvas + static_cast<uint32_t>(y) * stride;
-    for (int bx = 0; bx < widthBytes; bx++) {
-      const uint8_t bits = src[bx];
-      // The overwhelmingly common case on a text overlay: a fully white byte has
-      // nothing to stamp, so skip the eight-bit unpack entirely.
-      if (bits == 0xFF) continue;
-      const int x0 = bx * 8;
-      for (int bit = 0; bit < 8; bit++) {
-        const int x = x0 + bit;
-        if (x >= width) break;
-        if (!(bits & (0x80 >> bit))) dst[x] = 0x00;
-      }
-    }
-  }
+  gray8compose::stampBlack(canvas, stride, frameBuffer, getDisplayWidthBytes(), getDisplayWidth(), getDisplayHeight());
 }
 
 void GfxRenderer::compositeBwRectOntoGray8Canvas(const Gray8Target& gray8, const int x, const int y, const int width,
