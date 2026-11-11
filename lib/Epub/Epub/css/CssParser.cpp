@@ -220,6 +220,9 @@ constexpr size_t MAX_ELEMENT_CLASSES = 8;
 // before it (child combinator) rather than any ancestor (descendant combinator).
 constexpr uint8_t STEP_COMPOUND = 0x3F;
 constexpr uint8_t STEP_CHILD = 0x40;
+// A complex rule's steps byte: the step count, and whether the rule is a ::first-letter's.
+constexpr uint8_t RULE_STEP_COUNT = 0x0F;
+constexpr uint8_t RULE_FIRST_LETTER = 0x80;
 constexpr size_t MAX_COMPLEX_STEPS = 8;
 
 bool isNameChar(const char c) {
@@ -339,7 +342,8 @@ bool complexTableValid(const uint8_t* table, const size_t bytes) {
   if (pos != COMPLEX_HEADER_BYTES + readU16(table + 2)) return false;
   for (uint8_t r = 0; r < table[1]; ++r) {
     if (pos + COMPLEX_RULE_HEADER_BYTES > bytes) return false;
-    const uint8_t steps = table[pos + 4];
+    if ((table[pos + 4] & ~(RULE_STEP_COUNT | RULE_FIRST_LETTER)) != 0) return false;
+    const uint8_t steps = table[pos + 4] & RULE_STEP_COUNT;
     const uint8_t styleLen = table[pos + 5];
     if (steps == 0 || pos + COMPLEX_RULE_HEADER_BYTES + steps + styleLen > bytes) return false;
     for (uint8_t s = 0; s < steps; ++s) {
@@ -1416,12 +1420,19 @@ void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, 
     // Already normalized into selectorKeyBuf_ above — no second pass, no second allocation.
     const std::string& key = selectorKeyBuf_;
 
-    // A ::first-letter rule is kept under its selector with the pseudo-element, as resolveFirstLetterStyle looks it up,
-    // when the selector before it is one the hashed index keys. With anything else (a combinator, a compound, a
-    // pseudo-class) it is unsupported: read without its pseudo parts it would style elements it does not match.
+    // A ::first-letter rule is kept as resolveFirstLetterStyle looks it up: under its selector with the pseudo-element
+    // when the selector before it is one the hashed index keys, else in the complex-rule table, marked. A selector
+    // neither takes (a pseudo-class, a sibling combinator) is unsupported: read without its pseudo parts it would
+    // style letters it does not match.
     if (const size_t pseudoAt = firstLetterPseudoAt(key); pseudoAt != std::string::npos) {
-      if (!isSelectorUsableByResolver(std::string_view(key).substr(0, pseudoAt))) {
-        unsupportedSelectorSkips_++;
+      const std::string_view subject = std::string_view(key).substr(0, pseudoAt);
+      if (!isSelectorUsableByResolver(subject)) {
+        if (addComplexRule(subject, style, order, /*firstLetter=*/true)) {
+          hasFirstLetterRules_ = true;
+          stored = true;
+        } else {
+          unsupportedSelectorSkips_++;
+        }
         continue;
       }
       selectorKeyBuf_.replace(pseudoAt, std::string::npos, kFirstLetterPseudo);
@@ -3012,7 +3023,8 @@ bool CssParser::growComplexTable(const size_t needed) {
   return true;
 }
 
-bool CssParser::addComplexRule(const std::string_view selector, const CssStyle& style, const uint16_t order) {
+bool CssParser::addComplexRule(const std::string_view selector, const CssStyle& style, const uint16_t order,
+                               const bool firstLetter) {
   // The compounds right to left, the subject first, each step marked when it must be the parent
   // of the step before it (`div > p`) rather than any ancestor (`div p`).
   Compound compounds[MAX_COMPLEX_STEPS];
@@ -3078,7 +3090,7 @@ bool CssParser::addComplexRule(const std::string_view selector, const CssStyle& 
   const auto packed = static_cast<uint16_t>(specificity);
   std::memcpy(rule, &order, sizeof(order));
   std::memcpy(rule + 2, &packed, sizeof(packed));
-  rule[4] = static_cast<uint8_t>(count);
+  rule[4] = static_cast<uint8_t>(count | (firstLetter ? RULE_FIRST_LETTER : 0));
   rule[5] = static_cast<uint8_t>(styleLen);
   std::memcpy(rule + COMPLEX_RULE_HEADER_BYTES, steps, count);
   std::memcpy(rule + COMPLEX_RULE_HEADER_BYTES + count, styleBytes, styleLen);
@@ -3137,15 +3149,15 @@ uint64_t CssParser::compoundMask(const std::string& tagName, const std::string& 
 }
 
 void CssParser::applyComplexRules(const uint64_t self, const Ancestry* ancestry, Cascade& cascade,
-                                  bool* dependsOnAncestors) const {
+                                  bool* dependsOnAncestors, const bool firstLetter) const {
   const uint8_t* table = complexTable();
   if (table == nullptr || self == 0) return;
   const uint8_t* p = table + COMPLEX_HEADER_BYTES + readU16(table + 2);
   for (uint8_t r = 0; r < table[1]; ++r) {
-    const uint8_t steps = p[4];
+    const uint8_t steps = p[4] & RULE_STEP_COUNT;
     const uint8_t styleLen = p[5];
     const uint8_t* chain = p + COMPLEX_RULE_HEADER_BYTES;
-    if ((self >> (chain[0] & STEP_COMPOUND)) & 1u) {
+    if (((p[4] & RULE_FIRST_LETTER) != 0) == firstLetter && ((self >> (chain[0] & STEP_COMPOUND)) & 1u)) {
       // A rule with ancestor steps makes the result depend on where the element stands, matched
       // or not: the caller must not reuse it for another element with the same tag and class.
       if (steps > 1 && dependsOnAncestors != nullptr) *dependsOnAncestors = true;
@@ -3168,9 +3180,9 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
 }
 
 CssStyle CssParser::resolveFirstLetterStyle(const std::string& tagName, const std::string& classAttr,
-                                            const std::string& idAttr) const {
+                                            const std::string& idAttr, const Ancestry* ancestry) const {
   if (!hasFirstLetterRules_) return CssStyle{};
-  return resolve(tagName, classAttr, idAttr, nullptr, nullptr, kFirstLetterPseudo);
+  return resolve(tagName, classAttr, idAttr, ancestry, nullptr, kFirstLetterPseudo);
 }
 
 CssStyle CssParser::resolve(const std::string& tagName, const std::string& classAttr, const std::string& idAttr,
@@ -3223,8 +3235,8 @@ CssStyle CssParser::resolve(const std::string& tagName, const std::string& class
   lookup(tag, SPECIFICITY_TAG);
 
   // The element's class names, hashed for the complex rules when the sheet has any and the caller
-  // has not matched the element against them already (Ancestry::self). A ::first-letter rule is never a complex one.
-  const bool complexRules = complexBytes_ > 0 && pseudo.empty();
+  // has not matched the element against them already (Ancestry::self).
+  const bool complexRules = complexBytes_ > 0;
   const bool hashClasses = complexRules && ancestry == nullptr;
   uint32_t classHashes[MAX_ELEMENT_CLASSES];
   size_t classCount = 0;
@@ -3275,7 +3287,7 @@ CssStyle CssParser::resolve(const std::string& tagName, const std::string& class
     const uint64_t self = ancestry != nullptr ? ancestry->self
                                               : matchCompounds(selectorHash(tag), idAttr.empty() ? nullptr : &idHash,
                                                                classHashes, classCount);
-    applyComplexRules(self, ancestry, cascade, dependsOnAncestors);
+    applyComplexRules(self, ancestry, cascade, dependsOnAncestors, /*firstLetter=*/!pseudo.empty());
   }
 
   if (!cascade.result.anyDefined()) {

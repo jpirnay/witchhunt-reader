@@ -173,6 +173,41 @@ TEST_F(InitialLetterFixture, AFirstLetterKeepsItsMarks) {
   EXPECT_EQ("t\u00e9", lines[1].text.substr(0, 3)) << dump(lines);
 }
 
+// A ::first-letter after the selectors an element's rules take: child, descendant, class and compound, matched where
+// the paragraph stands; a paragraph the selector does not match gets no cap.
+TEST_F(InitialLetterFixture, AFirstLetterRuleMatchesWhereTheParagraphStands) {
+  const std::string css =
+      "div.chapter > p.first::first-letter { initial-letter: 3 }\n"
+      "section p::first-letter { initial-letter: 2 }\n"
+      ".dropcap::first-letter { initial-letter: 4 }\n"
+      "p.a.b::first-letter { initial-letter: 2 }\n";
+  struct Case {
+    std::string body;
+    int lines;  // 0: no cap
+  };
+  const Case cases[] = {
+      {"<div class=\"chapter\"><p class=\"first\">T" + kProse + "</p></div>", 3},
+      {"<div class=\"other\"><p class=\"first\">T" + kProse + "</p></div>", 0},
+      {"<div class=\"chapter\"><blockquote><p class=\"first\">T" + kProse + "</p></blockquote></div>", 0},
+      {"<section><div><p>T" + kProse + "</p></div></section>", 2},
+      {"<p class=\"dropcap\">T" + kProse + "</p>", 4},
+      {"<p class=\"b a\">T" + kProse + "</p>", 2},
+      {"<p class=\"a\">T" + kProse + "</p>", 0},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.body.substr(0, 60));
+    const auto lines = layout(css, c.body);
+    const Line* cap = capOf(lines);
+    if (c.lines == 0) {
+      EXPECT_EQ(nullptr, cap) << dump(lines);
+      continue;
+    }
+    ASSERT_NE(nullptr, cap) << dump(lines);
+    EXPECT_NEAR(scaleFor(c.lines), cap->mult, 0.01f);
+    EXPECT_EQ(c.lines, linesBeside(lines)) << dump(lines);
+  }
+}
+
 // The first letter of a wrapper's first line is in its first paragraph, as CSS has it.
 TEST_F(InitialLetterFixture, AWrappersFirstLetterIsItsFirstParagraphs) {
   const auto lines = layout(".chapter::first-letter { initial-letter: 3 }",

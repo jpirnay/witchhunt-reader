@@ -2086,7 +2086,9 @@ bool ChapterHtmlSlimParser::tryStartDropCapCapture(const CssStyle& cssStyle) {
 
 void ChapterHtmlSlimParser::armFirstLetter(const char* name, const std::string& classAttr, const std::string& idAttr) {
   if (!cssParser || !cssParser->hasFirstLetterRules()) return;
-  CssStyle letter = cssParser->resolveFirstLetterStyle(name, classAttr, idAttr);
+  // Matched where it stands, as its own style is: `div.chapter > p::first-letter`.
+  const CssParser::Ancestry ancestry = cssAncestry(name, classAttr, idAttr);
+  CssStyle letter = cssParser->resolveFirstLetterStyle(name, classAttr, idAttr, &ancestry);
   if (!dropCapStyleAsks(letter)) return;
   firstLetterStyle_ = letter;
   firstLetterDepth_ = depth;

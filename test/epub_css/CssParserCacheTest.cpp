@@ -1441,11 +1441,9 @@ TEST(CssParserFirstLetter, RulesAreKeptForTheFirstLetterOnly) {
       ".first::first-letter { initial-letter: 4; }\n"  // less specific than p.first's: loses
       "#opening::FIRST-LETTER { initial-letter: 5; }\n"
       "p.first { font-style: italic; }\n"
-      // Not read: a pseudo-class, a descendant, a compound before the pseudo-element. Read without it, each would
-      // give letters it does not match a drop cap.
-      "p:first-of-type::first-letter { initial-letter: 6; }\n"
-      "div p::first-letter { initial-letter: 6; }\n"
-      ".a.b::first-letter { initial-letter: 6; }\n";
+      // Not read: a pseudo-class before the pseudo-element. Read without it, it would give letters it does not match a
+      // drop cap. (Compounds and descendant chains are: CssCascadeTest.)
+      "p:first-of-type::first-letter { initial-letter: 6; }\n";
   for (const bool resident : {false, true}) {
     SCOPED_TRACE(resident ? "arena-resident" : "heap");
     CompiledSheet sheet;
@@ -1460,7 +1458,6 @@ TEST(CssParserFirstLetter, RulesAreKeptForTheFirstLetterOnly) {
     EXPECT_EQ(2, parser.resolveFirstLetterStyle("div", "chapter").initialLetterLines());
     EXPECT_EQ(5, parser.resolveFirstLetterStyle("p", "", "opening").initialLetterLines());
     EXPECT_EQ(0, parser.resolveFirstLetterStyle("p", "").initialLetterLines());
-    EXPECT_EQ(0, parser.resolveFirstLetterStyle("p", "a b").initialLetterLines());
     // And the element itself takes none of it.
     const CssStyle element = parser.resolveStyle("p", "first");
     EXPECT_FALSE(element.hasInitialLetter());
