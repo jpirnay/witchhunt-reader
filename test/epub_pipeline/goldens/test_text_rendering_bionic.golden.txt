@@ -185,17 +185,20 @@ SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
    W x=313 s=1 z=100 t=li
    W x=330 s=0 z=100 t=ne
    W x=350 s=0 z=100 t=:
-  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=86 x=0 align=1 mult=1.000 hfid=0 words=4
    W x=0 s=1 z=100 t=Li
    W x=20 s=0 z=100 t=ne
+   W x=40 s=0 z=100 t= 
    W x=46 s=0 z=100 t=one
-  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=110 x=0 align=1 mult=1.000 hfid=0 words=4
    W x=0 s=1 z=100 t=Li
    W x=20 s=0 z=100 t=ne
+   W x=40 s=0 z=100 t= 
    W x=46 s=0 z=100 t=two
-  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=134 x=0 align=1 mult=1.000 hfid=0 words=5
    W x=0 s=1 z=100 t=Li
    W x=20 s=0 z=100 t=ne
+   W x=40 s=0 z=100 t= 
    W x=46 s=1 z=100 t=thr
    W x=79 s=0 z=100 t=ee
   LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=13
@@ -256,38 +259,47 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=167 s=1 z=100 t=lin
    W x=196 s=0 z=100 t=es
    W x=214 s=0 z=100 t=:
-  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=86 x=0 align=1 mult=1.000 hfid=0 words=5
    W x=0 s=1 z=100 t=Fir
    W x=23 s=0 z=100 t=st
+   W x=42 s=0 z=100 t= 
    W x=48 s=1 z=100 t=li
    W x=65 s=0 z=100 t=ne
-  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=110 x=0 align=1 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t= 
-  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=12
+  LINE y=134 x=0 align=1 mult=1.000 hfid=0 words=16
    W x=0 s=1 z=100 t=Thi
    W x=27 s=0 z=100 t=rd
+   W x=43 s=0 z=100 t= 
    W x=49 s=1 z=100 t=li
    W x=66 s=0 z=100 t=ne
+   W x=86 s=0 z=100 t= 
    W x=92 s=0 z=100 t=(
    W x=103 s=1 z=100 t=bla
    W x=133 s=0 z=100 t=nk
+   W x=152 s=0 z=100 t= 
    W x=158 s=1 z=100 t=li
    W x=175 s=0 z=100 t=ne
+   W x=195 s=0 z=100 t= 
    W x=201 s=1 z=100 t=abo
    W x=234 s=0 z=100 t=ve
    W x=255 s=0 z=100 t=)
-  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=158 x=0 align=1 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t= 
-  LINE y=182 x=0 align=0 mult=1.000 hfid=0 words=12
+  LINE y=182 x=0 align=1 mult=1.000 hfid=0 words=16
    W x=0 s=1 z=100 t=Fif
    W x=25 s=0 z=100 t=th
+   W x=47 s=0 z=100 t= 
    W x=53 s=1 z=100 t=li
    W x=70 s=0 z=100 t=ne
+   W x=90 s=0 z=100 t= 
    W x=96 s=0 z=100 t=(
    W x=107 s=1 z=100 t=bla
    W x=137 s=0 z=100 t=nk
+   W x=156 s=0 z=100 t= 
    W x=162 s=1 z=100 t=li
    W x=179 s=0 z=100 t=ne
+   W x=199 s=0 z=100 t= 
    W x=205 s=1 z=100 t=abo
    W x=238 s=0 z=100 t=ve
    W x=259 s=0 z=100 t=)
@@ -362,33 +374,40 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
    W x=73 s=1 z=100 t=prese
    W x=119 s=0 z=100 t=rved
    W x=156 s=0 z=100 t=:
-  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=110 x=0 align=1 mult=1.000 hfid=0 words=11
    W x=0 s=1 z=100 t=func
    W x=43 s=0 z=100 t=tion
+   W x=82 s=0 z=100 t= 
    W x=88 s=1 z=100 t=gre
    W x=119 s=0 z=100 t=et
    W x=138 s=0 z=100 t=(
    W x=149 s=1 z=100 t=na
    W x=174 s=0 z=100 t=me
    W x=193 s=0 z=100 t=)
+   W x=205 s=0 z=100 t= 
    W x=211 s=0 z=100 t={
-  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=11
-   W x=0 s=1 z=100 t=ret
-   W x=30 s=0 z=100 t=urn
-   W x=66 s=0 z=100 t="
-   W x=78 s=1 z=100 t=Hel
-   W x=107 s=0 z=100 t=lo
-   W x=128 s=0 z=100 t=,
-   W x=142 s=0 z=100 t="
-   W x=160 s=0 z=100 t=+
-   W x=173 s=1 z=100 t=na
-   W x=198 s=0 z=100 t=me
-   W x=217 s=0 z=100 t=;
-  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=134 x=0 align=1 mult=1.000 hfid=0 words=16
+   W x=0 s=0 z=100 t=    
+   W x=24 s=1 z=100 t=ret
+   W x=54 s=0 z=100 t=urn
+   W x=84 s=0 z=100 t= 
+   W x=90 s=0 z=100 t="
+   W x=102 s=1 z=100 t=Hel
+   W x=131 s=0 z=100 t=lo
+   W x=152 s=0 z=100 t=,
+   W x=160 s=0 z=100 t= 
+   W x=166 s=0 z=100 t="
+   W x=178 s=0 z=100 t= 
+   W x=184 s=0 z=100 t=+
+   W x=191 s=0 z=100 t= 
+   W x=197 s=1 z=100 t=na
+   W x=222 s=0 z=100 t=me
+   W x=241 s=0 z=100 t=;
+  LINE y=158 x=0 align=1 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=}
-  LINE y=182 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=182 x=0 align=1 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t= 
-  LINE y=206 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=206 x=0 align=1 mult=1.000 hfid=0 words=6
    W x=0 s=1 z=100 t=gre
    W x=31 s=0 z=100 t=et
    W x=50 s=0 z=100 t=("
