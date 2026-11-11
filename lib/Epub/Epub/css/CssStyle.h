@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "../TextEmphasis.h"
@@ -117,6 +118,117 @@ constexpr uint8_t lines(const uint8_t v) { return v & 0x0F; }
 // The sink, its default resolved: as many lines as the letter is tall.
 constexpr uint8_t sink(const uint8_t v) { return (v >> 4) != 0 ? (v >> 4) : lines(v); }
 }  // namespace CssInitialLetter
+
+// A border's line style as a 1-bit page draws it: groove, ridge, inset and outset are Solid (they differ only in
+// shades of the border colour), hidden is None (it differs only where table borders meet). Unset is "not declared",
+// which the cascade tells from a declared none.
+enum class CssBorderStyle : uint8_t { Unset = 0, None, Solid, Double, Dotted, Dashed };
+
+// What the border and background properties say of an element, in three bytes: per side a border width and line style,
+// the background as the page draws it, and what an <hr> leaves to draw. Every value is 0 while unset, so a style
+// without any of them carries three zero bytes, and the rule cache keeps them only for the rules that set one.
+// The properties are crosspoint-reader PR #3891's (Justin Mitchell, @itsthisjustin), which keeps a byte each for the
+// width and style of a side; here a side is one 5-bit code, so the box fits CssStyle's padding.
+class CssBox {
+ public:
+  enum Side : uint8_t { Top = 0, Right = 1, Bottom = 2, Left = 3 };
+  // background-color as the page draws it: Shaded for a colour that shows on white paper, None for no fill.
+  enum class Background : uint8_t { Unset = 0, None = 1, Shaded = 2 };
+  // Border widths are whole pixels, a CSS pixel being one, as the reader takes margins. thin, medium and thick are
+  // crosspoint-reader's 1, 2 and 3 px: CSS's 1, 3 and 5 are meant for a monitor, and a 3 px default frame is heavy on a
+  // 480 px column. A side holds 0-3 px; a wider border is drawn 3 px wide, which on such a column is a bar already.
+  static constexpr uint8_t kThinPx = 1;
+  static constexpr uint8_t kMediumPx = 2;
+  static constexpr uint8_t kThickPx = 3;
+  static constexpr uint8_t kMaxWidthPx = 3;
+
+  // The side's declared width in pixels; CSS's initial `medium` while unset.
+  [[nodiscard]] uint8_t width(const Side side) const { return hasWidth(side) ? widthCode(side) - 1 : kMediumPx; }
+  [[nodiscard]] CssBorderStyle style(const Side side) const {
+    return static_cast<CssBorderStyle>(sideCode(side) / kWidthCodes);
+  }
+  [[nodiscard]] bool hasWidth(const Side side) const { return widthCode(side) != 0; }
+  [[nodiscard]] bool hasStyle(const Side side) const { return style(side) != CssBorderStyle::Unset; }
+  // How wide the side is drawn: 0 unless its style draws a line.
+  [[nodiscard]] uint8_t drawnWidth(const Side side) const {
+    const CssBorderStyle s = style(side);
+    return s == CssBorderStyle::Unset || s == CssBorderStyle::None ? 0 : width(side);
+  }
+  void setWidth(const Side side, const uint8_t px) {
+    setSideCode(side, codeOf(style(side), static_cast<uint8_t>((px < kMaxWidthPx ? px : kMaxWidthPx) + 1)));
+  }
+  void setStyle(const Side side, const CssBorderStyle style) { setSideCode(side, codeOf(style, widthCode(side))); }
+  // CssStyle::applyOver's merge of `base`: each side's width and style, and the background, are longhands of their own,
+  // so `.box { border: 1px solid }` and a more specific `.box.wide { border-width: 3px }` make a 3 px solid border
+  // whichever is merged first. With `ranks` (kCascadeLonghands of them), a longhand is taken only when `rank` is at
+  // least the rank that set it so far. The <hr> facts add up. Out of line (CssParser.cpp): applyOver is inlined widely.
+  static constexpr int kCascadeLonghands = 9;
+  void cascadeFrom(const CssBox& base, uint32_t rank, uint32_t* ranks);
+
+  [[nodiscard]] Background background() const { return static_cast<Background>((value() >> kBackgroundShift) & 3u); }
+  void setBackground(const Background background) {
+    store((value() & ~(3u << kBackgroundShift)) | static_cast<uint32_t>(background) << kBackgroundShift);
+  }
+  [[nodiscard]] bool shaded() const { return background() == Background::Shaded; }
+  // A side drawn, or a shade: the element is drawn as a box.
+  [[nodiscard]] bool drawn() const {
+    return shaded() || drawnWidth(Top) || drawnWidth(Right) || drawnWidth(Bottom) || drawnWidth(Left);
+  }
+
+  // What an <hr> leaves to draw (CssStyle::kRuleBorderNone, kRulePainted): facts that only add up, see CssStyle.
+  [[nodiscard]] uint8_t ruleBorder() const { return static_cast<uint8_t>((value() >> kRuleShift) & 3u); }
+  void addRuleBorder(const uint8_t facts) { store(value() | static_cast<uint32_t>(facts & 3u) << kRuleShift); }
+
+  [[nodiscard]] bool any() const { return (bytes_[0] | bytes_[1] | bytes_[2]) != 0; }
+  // Side i takes what side from[i] had: CssStyle::resolveLogical turns a vertical element's sides with it.
+  void turnSides(const Side (&from)[4]) {
+    uint32_t sides = 0;
+    for (uint8_t i = 0; i < 4; ++i) sides |= static_cast<uint32_t>(sideCode(from[i])) << (i * kSideBits);
+    store((value() & ~kSidesMask) | sides);
+  }
+  // The three bytes, for the rule cache's payloads.
+  [[nodiscard]] const uint8_t* bytes() const { return bytes_; }
+  void setBytes(const uint8_t* bytes) {
+    bytes_[0] = bytes[0];
+    bytes_[1] = bytes[1];
+    bytes_[2] = bytes[2];
+  }
+  static constexpr size_t kBytes = 3;
+
+ private:
+  // A side is one code: style * kWidthCodes + width code, the width code 0 for unset, else the width in pixels + 1.
+  // Bits 0-19 hold the four sides, top first; 20-21 the background; 22-23 the <hr> facts.
+  static constexpr uint8_t kWidthCodes = kMaxWidthPx + 2;
+  static constexpr unsigned kSideBits = 5;
+  static constexpr uint32_t kSidesMask = (1u << (4 * kSideBits)) - 1;
+  static constexpr unsigned kBackgroundShift = 4 * kSideBits;
+  static constexpr unsigned kRuleShift = kBackgroundShift + 2;
+  static_assert(static_cast<unsigned>(CssBorderStyle::Dashed) * kWidthCodes + kWidthCodes - 1 < (1u << kSideBits),
+                "a side's code no longer fits its bits");
+  static_assert(kRuleShift + 2 <= 8 * kBytes, "the box no longer fits its bytes");
+
+  static uint8_t codeOf(const CssBorderStyle style, const uint8_t widthCode) {
+    return static_cast<uint8_t>(static_cast<uint8_t>(style) * kWidthCodes + widthCode);
+  }
+  [[nodiscard]] uint32_t value() const {
+    return bytes_[0] | static_cast<uint32_t>(bytes_[1]) << 8 | static_cast<uint32_t>(bytes_[2]) << 16;
+  }
+  void store(const uint32_t v) {
+    bytes_[0] = static_cast<uint8_t>(v);
+    bytes_[1] = static_cast<uint8_t>(v >> 8);
+    bytes_[2] = static_cast<uint8_t>(v >> 16);
+  }
+  [[nodiscard]] uint8_t sideCode(const Side side) const {
+    return static_cast<uint8_t>((value() >> (side * kSideBits)) & ((1u << kSideBits) - 1));
+  }
+  void setSideCode(const Side side, const uint8_t code) {
+    const unsigned shift = side * kSideBits;
+    store((value() & ~(((1u << kSideBits) - 1) << shift)) | static_cast<uint32_t>(code) << shift);
+  }
+  [[nodiscard]] uint8_t widthCode(const Side side) const { return sideCode(side) % kWidthCodes; }
+
+  uint8_t bytes_[kBytes] = {};
+};
 
 // Bitmask for tracking which properties have been explicitly set
 struct CssPropertyFlags {
@@ -272,19 +384,23 @@ struct CssStyle {
   uint32_t fontFamily = 0;
   // A TextEmphasis mark (Shape | kOpen); 0 is `none`, which is a defined value.
   uint8_t textEmphasis = 0;
-  // What an <hr> leaves to draw, as two facts that cascade on their own: the `hr { border: 0 }` of a reset must not
-  // hide the rule a later `hr.sep { background: #000 }` paints. They only add up, so a doubt keeps the rule. No defined
-  // bit: 0 is "nothing declared", and the flag word is all but full.
+  // What an <hr> leaves to draw (box.ruleBorder()), as two facts that cascade on their own: the `hr { border: 0 }` of a
+  // reset must not hide the rule a later `hr.sep { background: #000 }` paints. They only add up, so a doubt keeps the
+  // rule. No defined bit: 0 is "nothing declared".
   static constexpr uint8_t kRuleBorderNone = 0x01;  // border none or hidden, or no width
   static constexpr uint8_t kRulePainted = 0x02;     // a visible border, or a background
-  uint8_t ruleBorder = 0;
-  CssWhiteSpace whiteSpace = CssWhiteSpace::Unset;
-  uint8_t initialLetter = 0;  // CssInitialLetter; 0 unset
+  // Borders and background, and the <hr> facts above: in the three bytes before the flag word.
+  CssBox box;
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
 
-  // Number of properties applyOver() merges: the size of its `ranks` array.
-  static constexpr int kCascadeProperties = 36;
+  // In the word after the flag word, the one CssStyle grew by (the size check below the struct).
+  CssWhiteSpace whiteSpace = CssWhiteSpace::Unset;
+  uint8_t initialLetter = 0;  // CssInitialLetter; 0 unset
+
+  // Number of properties applyOver() merges: the size of its `ranks` array. The box's longhands are the last ones.
+  static constexpr int kFirstBoxProperty = 36;
+  static constexpr int kCascadeProperties = kFirstBoxProperty + CssBox::kCascadeLonghands;
 
   // Apply properties from another style, only overwriting if the other style
   // has that property explicitly defined.
@@ -423,13 +539,13 @@ struct CssStyle {
     if (base.hasTextCombine() && take(hasTextCombine(), 30)) textCombine = base.textCombine;
     if (base.hasDirection() && take(hasDirection(), 31)) direction = base.direction;
     if (base.hasUnicodeBidi() && take(hasUnicodeBidi(), 32)) unicodeBidi = base.unicodeBidi;
-    ruleBorder |= base.ruleBorder;
     if (base.hasTextEmphasis() && take(defined.textEmphasis, 33)) {
       textEmphasis = base.textEmphasis;
       defined.textEmphasis = 1;
     }
     if (base.hasWhiteSpace() && take(hasWhiteSpace(), 34)) whiteSpace = base.whiteSpace;
     if (base.hasInitialLetter() && take(hasInitialLetter(), 35)) initialLetter = base.initialLetter;
+    if (base.box.any()) box.cascadeFrom(base.box, rank, ranks ? ranks + kFirstBoxProperty : nullptr);
   }
 
   // An explicit `inherit` is defined (it overrides lower rules in applyOver) but reports as unset:
@@ -468,7 +584,7 @@ struct CssStyle {
   }
   [[nodiscard]] bool isTextTransparent() const { return defined.colorTransparent && colorTransparent; }
   // An <hr> with this style has nothing to draw.
-  [[nodiscard]] bool hidesRule() const { return ruleBorder == kRuleBorderNone; }
+  [[nodiscard]] bool hidesRule() const { return box.ruleBorder() == kRuleBorderNone; }
   // Text declared too small to read: the `font-size: 1px` span a watermarking service hides in the
   // prose. Like colorTransparent a TEXT-only question (images are not sized by it), asked of the
   // element's own declared multiplier, before any baseline normalisation.
@@ -498,7 +614,7 @@ struct CssStyle {
   }
   // Whether the style says anything at all: a defined bit, or one of the properties that have none.
   [[nodiscard]] bool anyDefined() const {
-    return defined.anySet() || ruleBorder != 0 || hasWritingMode() || hasTextOrientation() || hasTextCombine() ||
+    return defined.anySet() || box.any() || hasWritingMode() || hasTextOrientation() || hasTextCombine() ||
            hasDirection() || hasUnicodeBidi() || hasWhiteSpace() || hasInitialLetter();
   }
   [[nodiscard]] bool hasFontSizeMultiplier() const { return defined.fontSizeMultiplier; }
@@ -557,6 +673,7 @@ struct CssStyle {
     defined.imageWidth = defined.imageHeight;
     imageHeight = width;
     defined.imageHeight = widthDefined;
+    box.turnSides({rl ? CssBox::Right : CssBox::Left, CssBox::Bottom, rl ? CssBox::Left : CssBox::Right, CssBox::Top});
   }
 
   void reset() {
@@ -582,7 +699,7 @@ struct CssStyle {
     opacityZero = false;
     visibilityHidden = false;
     fontFamily = 0;
-    ruleBorder = 0;
+    box = CssBox{};
     writingMode = CssWritingMode::Unset;
     textOrientation = CssTextOrientation::Unset;
     textCombine = CssTextCombine::Unset;
@@ -596,6 +713,9 @@ struct CssStyle {
 };
 
 // The flow properties sit in padding (after pageBreakAfter and after visibilityHidden), so they cost a style nothing;
-// textEmphasis, after fontFamily, is the one field that takes a word of its own, shared with ruleBorder, whiteSpace
-// and initialLetter. Every member is 4-byte aligned or smaller, so the C3 lays it out as the host does.
-static_assert(sizeof(CssStyle) == 128, "CssStyle grew: the flow properties or textEmphasis no longer fit its padding");
+// textEmphasis and the box fill the word after fontFamily. whiteSpace and initialLetter take the word after the flag
+// word, the one CssStyle grew by when they and the box no longer fitted its padding (two bytes of it spare). Every
+// member is 4-byte aligned or smaller, so the C3 lays it out as the host does.
+static_assert(sizeof(CssStyle) == 132,
+              "CssStyle grew: the flow properties, textEmphasis, the box, white-space or initial-letter no longer "
+              "fit its padding");

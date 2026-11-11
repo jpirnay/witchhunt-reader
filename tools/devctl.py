@@ -112,6 +112,7 @@ PAGE_LINE_FORMS = {
     "PAGE_W": re.compile(r'(\d+) x=-?\d+ w=-?\d+ style=\d+ glue=[01] text="(?:[^"\\]|\\.)*"( .*)?'),
     "PAGE_IMAGE": re.compile(r"(\d+) x=-?\d+ y=-?\d+ w=-?\d+ h=-?\d+"),
     "PAGE_EL": re.compile(r"(\d+) \w+"),
+    "PAGE_BOX": re.compile(r"(\d+) x=-?\d+ y=-?\d+ w=\d+ h=\d+ edges=\d+/\d+(?:,\d+/\d+){3} shaded=[01]"),
 }
 
 
@@ -326,8 +327,10 @@ class Device:
         text_lines = sum(line.startswith("PAGE_LINE:") for line in lines)
         words = sum(line.startswith("PAGE_W:") for line in lines)
         images = sum(line.startswith("PAGE_IMAGE:") for line in lines)
+        boxes = sum(line.startswith("PAGE_BOX:") for line in lines)
         print(f"page spine={start.get('spine')} page={start.get('page')} flow={start.get('flow')}: "
-              f"{start.get('elements')} elements ({text_lines} lines, {images} images), {words} words -> {path}")
+              f"{start.get('elements')} elements ({text_lines} lines, {images} images, {boxes} boxes), {words} words "
+              f"-> {path}")
         return None
 
     def put(self, local, remote):

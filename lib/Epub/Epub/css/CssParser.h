@@ -133,7 +133,10 @@ class CssParser {
   // v36: `initial-letter` (and -webkit-initial-letter) is persisted (a byte after the flow word; in the resident pool,
   //      flow-word bit 15 and a byte after it); ::first-letter rules are kept (flags bit 2; a complex one marked in its
   //      steps byte), and an @supports block that tests initial-letter is read. A v35 compile dropped all three.
-  static constexpr uint8_t CSS_CACHE_VERSION = 36;
+  // v37: borders and background colours are parsed and persisted (CssBox): three bytes after the initial-letter byte,
+  //      which take the <hr> facts of v32 along; in the resident pool, extra bit 6 and the three bytes after the flow
+  //      word and the initial-letter byte.
+  static constexpr uint8_t CSS_CACHE_VERSION = 37;
   // Bytes before the complex-rule table and the sorted offset index: version(1) + ruleCount(2) +
   // totalSelectorCandidates(4) + unsupportedSelectorSkips(4) + flags(1) + complexTableBytes(2).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 14;

@@ -262,3 +262,190 @@ TEST(CssGapsRule, TheTwoFactsCascadeOnTheirOwn) {
   paintThenReset.applyOver(CssParser::parseInlineStyle("border: 0"));
   EXPECT_FALSE(paintThenReset.hidesRule());
 }
+
+// ============================================================================
+// Boxes: borders and background shading (CssBox)
+// ============================================================================
+
+namespace {
+CssBox box(const char* declarations) { return CssParser::parseInlineStyle(declarations).box; }
+constexpr CssBox::Side kSides[] = {CssBox::Top, CssBox::Right, CssBox::Bottom, CssBox::Left};
+// "w/style" per side, top first, as the page draws them: 0 for a side that draws nothing.
+std::string drawn(const CssBox& b) {
+  std::string out;
+  for (const CssBox::Side side : kSides) {
+    if (!out.empty()) out += ' ';
+    out += std::to_string(b.drawnWidth(side));
+    if (b.drawnWidth(side) > 0) out += "/" + std::to_string(static_cast<int>(b.style(side)));
+  }
+  return out;
+}
+constexpr int kSolid = static_cast<int>(CssBorderStyle::Solid);
+}  // namespace
+
+TEST(CssGapsBox, TheShorthandSetsEverySide) {
+  EXPECT_EQ("1/2 1/2 1/2 1/2", drawn(box("border: 1px solid black")));
+  EXPECT_EQ("2/3 2/3 2/3 2/3", drawn(box("border: double")));  // medium
+  EXPECT_EQ("3/4 3/4 3/4 3/4", drawn(box("border: thick dotted #333")));
+  EXPECT_EQ("1/5 1/5 1/5 1/5", drawn(box("border: dashed thin")));
+  EXPECT_EQ("0 0 0 0", drawn(box("border: 2px")));  // no style: none
+  EXPECT_EQ("0 0 0 0", drawn(box("border: none")));
+  EXPECT_TRUE(box("border: none").hasStyle(CssBox::Top)) << "an explicit none must cancel a lower rule's line";
+  EXPECT_FALSE(box("width: 50%").any());
+}
+
+TEST(CssGapsBox, GrooveRidgeInsetAndOutsetAreSolidAndHiddenIsNone) {
+  for (const char* style : {"groove", "ridge", "inset", "outset"}) {
+    EXPECT_EQ(CssBorderStyle::Solid, box((std::string("border: 1px ") + style).c_str()).style(CssBox::Top)) << style;
+  }
+  EXPECT_EQ("0 0 0 0", drawn(box("border: 1px hidden")));
+}
+
+TEST(CssGapsBox, OneSide) {
+  EXPECT_EQ("0 0 0 3/2", drawn(box("border-left: 3px solid #ccc")));
+  EXPECT_EQ("1/2 0 0 0", drawn(box("border-top: 1px solid")));
+  EXPECT_EQ("0 0 2/5 0", drawn(box("border-bottom: 2px dashed")));
+  EXPECT_EQ("0 1/4 0 0", drawn(box("border-right-style: dotted; border-right-width: 1px")));
+  EXPECT_FALSE(box("border-left: 1px solid").hasStyle(CssBox::Top));
+}
+
+TEST(CssGapsBox, WidthsAndStylesTakeOneToFourValues) {
+  EXPECT_EQ("1/2 2/2 3/2 2/2", drawn(box("border-style: solid; border-width: 1px 2px 3px")));
+  EXPECT_EQ("1/2 2/2 1/2 2/2", drawn(box("border-style: solid; border-width: 1px 2px")));
+  EXPECT_EQ("0 0 2/2 0", drawn(box("border-width: 0 0 2px; border-style: solid")));
+  EXPECT_EQ("2/2 2/3 2/4 2/5", drawn(box("border-style: solid double dotted dashed")));
+  EXPECT_EQ("2/2 0 2/2 0", drawn(box("border-style: solid none")));
+  // A value that is no width (or style) makes the whole declaration invalid, as in CSS.
+  EXPECT_FALSE(box("border-width: 1px fat").hasWidth(CssBox::Top));
+  EXPECT_FALSE(box("border-style: solid wavy").hasStyle(CssBox::Top));
+  EXPECT_FALSE(box("border-width: 1px 1px 1px 1px 1px").hasWidth(CssBox::Top));
+}
+
+TEST(CssGapsBox, WidthUnits) {
+  const auto top = [](const char* decl) { return static_cast<int>(box(decl).width(CssBox::Top)); };
+  EXPECT_EQ(1, top("border-top-width: thin"));
+  EXPECT_EQ(2, top("border-top-width: medium"));
+  EXPECT_EQ(3, top("border-top-width: thick"));
+  EXPECT_EQ(2, top("border-top-width: 2px"));
+  EXPECT_EQ(1, top("border-top-width: 0.3px"));  // a hairline stays visible
+  EXPECT_EQ(0, top("border-top-width: 0"));
+  EXPECT_EQ(2, top("border-top-width: 1.5pt"));  // 2 px
+  EXPECT_EQ(2, top("border-top-width: 0.1em"));  // 1.6 px at CSS's 16 px em
+  EXPECT_EQ(3, top("border-top-width: 10px"));   // wider borders are drawn 3 px wide
+  EXPECT_EQ(3, top("border-top-width: 0.5em"));  // 8 px
+  EXPECT_FALSE(box("border-top-width: 10%").hasWidth(CssBox::Top));
+  EXPECT_FALSE(box("border-top-width: inherit").hasWidth(CssBox::Top));
+}
+
+// A colour the paper shows as white draws no line; every other colour draws black.
+TEST(CssGapsBox, PaperColouredBordersDrawNothing) {
+  EXPECT_EQ("0 0 0 0", drawn(box("border: 1px solid white")));
+  EXPECT_EQ("0 0 0 0", drawn(box("border: 1px solid transparent")));
+  EXPECT_EQ("0 0 0 0", drawn(box("border: 1px solid #fff")));
+  EXPECT_EQ("0 0 0 0", drawn(box("border: 1px solid rgba(0, 0, 0, 0)")));
+  EXPECT_EQ("1/2 1/2 1/2 1/2", drawn(box("border: 1px solid #ccc")));
+  EXPECT_EQ("1/2 1/2 1/2 1/2", drawn(box("border: 1px solid rgb(128 128 128 / 50%)")));
+  EXPECT_EQ("1/2 1/2 1/2 1/2", drawn(box("border: 1px solid currentColor")));
+  EXPECT_EQ("1/2 1/2 1/2 1/2", drawn(box("border: 1px solid darkslateblue")));
+  // Colours alone are not kept: border-color draws black.
+  EXPECT_FALSE(box("border-color: red").any());
+}
+
+TEST(CssGapsBox, BorderPropertiesThatAreNotALineAreIgnored) {
+  for (const char* decl :
+       {"border-radius: 4px", "border-collapse: collapse", "border-spacing: 2px", "border-image: url(x.png) 30 round",
+        "border-block-start: 1px solid", "border-top-left-radius: 3px"}) {
+    EXPECT_FALSE(box(decl).any()) << decl;
+  }
+  EXPECT_FALSE(box("border: inherit").any()) << "a border is not inherited, and the parent's is not known here";
+  EXPECT_EQ("0 0 0 0", drawn(box("border: 1px solid; border: initial")));
+}
+
+TEST(CssGapsBox, BackgroundColoursShade) {
+  const auto background = [](const char* decl) { return box(decl).background(); };
+  using B = CssBox::Background;
+  EXPECT_EQ(B::Shaded, background("background-color: #eee"));
+  EXPECT_EQ(B::Shaded, background("background-color: #f5f5f5"));  // a code box
+  EXPECT_EQ(B::Shaded, background("background: lightgray"));
+  EXPECT_EQ(B::Shaded, background("background-color: rgb(240, 240, 240)"));
+  EXPECT_EQ(B::Shaded, background("background-color: hsl(60, 100%, 90%)"));
+  EXPECT_EQ(B::Shaded, background("background: #eee8d5 url(paper.png) no-repeat"));
+  // Dark backgrounds draw the same light shade: the text stays black and must stay readable.
+  EXPECT_EQ(B::Shaded, background("background-color: #000"));
+  EXPECT_EQ(B::Shaded, background("background: navy"));
+  // What leaves the paper white.
+  EXPECT_EQ(B::None, background("background-color: white"));
+  EXPECT_EQ(B::None, background("background-color: #fff"));
+  EXPECT_EQ(B::None, background("background-color: #fafafa"));
+  EXPECT_EQ(B::None, background("background-color: transparent"));
+  EXPECT_EQ(B::None, background("background-color: rgba(0, 0, 0, 0)"));
+  EXPECT_EQ(B::None, background("background-color: #00000000"));
+  EXPECT_EQ(B::None, background("background-color: inherit"));
+  EXPECT_EQ(B::None, background("background: none"));
+  EXPECT_EQ(B::None,
+            background("background: url(rabbit.png) no-repeat center"));  // the shorthand's colour: transparent
+  EXPECT_EQ(B::None, background("background: linear-gradient(#000, #fff)"));
+  // What cannot be read leaves it alone.
+  EXPECT_EQ(B::Unset, background("background-color: var(--paper)"));
+  EXPECT_EQ(B::Unset, background("background-image: url(x.png)"));
+  EXPECT_EQ(B::Unset, background("color: #eee"));
+}
+
+TEST(CssGapsBox, AShadeOrABorderIsDrawn) {
+  EXPECT_TRUE(box("background: #eee").drawn());
+  EXPECT_TRUE(box("border-left: 1px solid").drawn());
+  EXPECT_FALSE(box("border: none; background: transparent").drawn());
+  EXPECT_FALSE(box("border-width: 2px").drawn());
+}
+
+// Each side's width and style cascade as longhands of their own, by specificity and then source order, whatever order
+// the rules are merged in.
+TEST(CssGapsBox, SidesCascadeAsLonghands) {
+  CssParser parser("");
+  loadCssFromString(parser,
+                    "div.box { border: 1px solid; background: #eee; }\n"
+                    "div.box.wide { border-width: 3px; }\n"
+                    "div.box.open { border-top: none; }\n"
+                    "div.box.plain { background: transparent; }\n"
+                    "div.box.dashed { border-style: dashed; }\n");
+  EXPECT_EQ("1/2 1/2 1/2 1/2", drawn(parser.resolveStyle("div", "box").box));
+  EXPECT_EQ("3/2 3/2 3/2 3/2", drawn(parser.resolveStyle("div", "wide box").box));
+  EXPECT_EQ("0 1/2 1/2 1/2", drawn(parser.resolveStyle("div", "open box").box));
+  EXPECT_EQ("3/5 3/5 3/5 3/5", drawn(parser.resolveStyle("div", "dashed wide box").box));
+  EXPECT_TRUE(parser.resolveStyle("div", "box").box.shaded());
+  EXPECT_FALSE(parser.resolveStyle("div", "plain box").box.shaded());
+  // A less specific rule later in the sheet does not take a side back.
+  CssParser later("");
+  loadCssFromString(later, "p.note { border-left: 2px solid; }\np { border: none; }\n");
+  EXPECT_EQ("0 0 0 2/2", drawn(later.resolveStyle("p", "note").box));
+}
+
+// An inline style= goes over the sheet, side by side.
+TEST(CssGapsBox, InlineStyleGoesOverTheSheet) {
+  CssStyle style = CssParser::parseInlineStyle("border: 1px solid; background: #eee");
+  style.applyOver(CssParser::parseInlineStyle("border-bottom: 2px double; background-color: white"));
+  EXPECT_EQ("1/2 1/2 2/3 1/2", drawn(style.box));
+  EXPECT_FALSE(style.box.shaded());
+}
+
+// A vertical-rl element's physical sides are its logical ones turned: its right border is where its lines start.
+TEST(CssGapsBox, AVerticalElementsSidesTurnWithIt) {
+  CssStyle rl = CssParser::parseInlineStyle("border-right: 1px solid; border-bottom: 2px dashed");
+  rl.resolveLogical(CssWritingMode::VerticalRl, CssDirection::Unset);
+  EXPECT_EQ("1/2 2/5 0 0", drawn(rl.box));  // block-start, inline-end, block-end, inline-start
+  CssStyle lr = CssParser::parseInlineStyle("border-left: 1px solid; border-top: 3px dotted");
+  lr.resolveLogical(CssWritingMode::VerticalLr, CssDirection::Unset);
+  EXPECT_EQ("1/2 0 0 3/4", drawn(lr.box));
+  CssStyle horizontal = CssParser::parseInlineStyle("border-left: 1px solid");
+  horizontal.resolveLogical(CssWritingMode::HorizontalTb, CssDirection::Rtl);
+  EXPECT_EQ("0 0 0 1/2", drawn(horizontal.box)) << "borders are physical in a horizontal element, rtl or not";
+}
+
+// The <hr> facts travel in the box and are unchanged by it.
+TEST(CssGapsBox, TheRuleFactsAreKeptBesideTheSides) {
+  const CssStyle style = CssParser::parseInlineStyle("border: none; background: #000");
+  EXPECT_FALSE(style.hidesRule());
+  EXPECT_TRUE(style.box.shaded());
+  EXPECT_EQ(CssStyle::kRuleBorderNone | CssStyle::kRulePainted, style.box.ruleBorder());
+  EXPECT_EQ(kSolid, static_cast<int>(CssParser::parseInlineStyle("border: 1px solid").box.style(CssBox::Left)));
+}

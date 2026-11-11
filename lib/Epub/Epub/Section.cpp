@@ -37,7 +37,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 124;  // v124: CSS initial-letter makes a drop cap of its lines, on a span
+constexpr uint8_t SECTION_FILE_VERSION = 125;  // v125: CSS borders and background shades draw boxes: a PageBox
+                                               // element frames a block's slice of a page, its padding inside
+                                               // v124: CSS initial-letter makes a drop cap of its lines, on a span
                                                // or a ::first-letter rule, raised or sunken by its sink
                                                // v123: CSS white-space: pre, pre-wrap and break-spaces keep runs of
                                                // spaces (a token each) and line feeds, pre-line keeps line feeds;

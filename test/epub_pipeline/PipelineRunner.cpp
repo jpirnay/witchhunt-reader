@@ -158,6 +158,18 @@ void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, con
       case TAG_PageHR:
         out << "  HR y=" << el->yPos << " x=" << el->xPos << "\n";
         break;
+      case TAG_PageBox: {
+        const auto& box = static_cast<const PageBox&>(*el);
+        out << "  BOX y=" << box.yPos << " x=" << box.xPos << " w=" << box.getWidth() << " h=" << box.getHeight()
+            << " edges=";
+        for (const CssBox::Side side : {CssBox::Top, CssBox::Right, CssBox::Bottom, CssBox::Left}) {
+          const PageBox::Edge& edge = box.getEdge(side);
+          out << (side == CssBox::Top ? "" : ",") << static_cast<int>(edge.width) << "/"
+              << static_cast<int>(edge.style);
+        }
+        out << " shaded=" << (box.isShaded() ? 1 : 0) << "\n";
+        break;
+      }
     }
   }
   for (const auto& fn : page.footnotes) {
