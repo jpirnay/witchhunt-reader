@@ -543,7 +543,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 - **Extra Paragraph Spacing**: "ON" adds vertical space between paragraphs; "OFF" uses first-line indentation instead.
 
 **Images** (submenu):
-- **Images**: "Display" (default), "Placeholder" (show a box where the image would be), "Suppress" (skip images entirely). On the **LilyGo T5 S3**, "Display" shows a page's JPEG and PNG pictures in shades of gray instead of black and white dots, and such a page comes up with a full refresh of the screen, so it flashes once. Text pages are not affected. A GIF, and a picture that cannot be decoded again for the gray, keeps its dots.
+- **Images**: "Display" (default), "Placeholder" (show a box where the image would be), "Suppress" (skip images entirely). On the **LilyGo T5 S3**, "Display" shows a page's JPEG and PNG pictures in shades of gray instead of black and white dots, and such a page comes up with a full refresh of the screen, so it flashes once. Text pages are not affected. A GIF, and a picture that cannot be decoded again for the gray, keeps its dots. Each picture's gray version is kept in the book's cache on the card, made ahead of the pages that show it, so a page comes up sooner from its second showing on; **Clear Reading Cache** removes these files too.
 - **Large Image Placeholder**: Whether to substitute an explicit placeholder for images that are too large to display inline. "ON" / "OFF"
 
 - **Embedded Style**: Use the EPUB's own HTML/CSS styling. "ON" (default) / "OFF"
