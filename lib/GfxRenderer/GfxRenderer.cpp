@@ -2094,7 +2094,7 @@ void GfxRenderer::drawRoundedRect(const int x, const int y, const int width, con
 // patternByte is repeated across the full span; partial edge bytes are blended with existing content.
 // Bit layout: MSB-first (bit 7 = phyX=0, bit 0 = phyX=7); 0 bits = dark pixel, 1 bits = white pixel.
 void GfxRenderer::fillPhysicalHSpanByte(const int phyY, const int phyX_start, const int phyX_end,
-                                        const uint8_t patternByte) const {
+                                        const uint8_t patternByte, const bool keepInk) const {
   const int cX0 = std::max(phyX_start, 0);
   const int cX1 = std::min(phyX_end, (int)getDisplayWidth() - 1);
   if (cX0 > cX1 || phyY < 0 || phyY >= (int)getDisplayHeight()) return;
@@ -2108,31 +2108,33 @@ void GfxRenderer::fillPhysicalHSpanByte(const int phyY, const int phyX_start, co
   const int leftBits = cX0 & 7;   // first bit index within startByte
   const int rightBits = cX1 & 7;  // last bit index within endByte
 
+  // keepInk: only the pattern's dark bits are written, so ink already in the span stays.
+  const auto blend = [patternByte, keepInk](uint8_t& byte, const uint8_t fillMask) {
+    byte = keepInk ? static_cast<uint8_t>(byte & (patternByte | ~fillMask))
+                   : static_cast<uint8_t>((byte & ~fillMask) | (patternByte & fillMask));
+  };
   if (startByte == endByte) {
     // Both endpoints in the same byte
-    const uint8_t fillMask = (0xFF >> leftBits) & ~(0xFF >> (rightBits + 1));
-    row[startByte] = (row[startByte] & ~fillMask) | (patternByte & fillMask);
+    blend(row[startByte], (0xFF >> leftBits) & ~(0xFF >> (rightBits + 1)));
     return;
   }
 
   // Left partial byte
-  if (leftBits != 0) {
-    const uint8_t fillMask = 0xFF >> leftBits;
-    row[startByte] = (row[startByte] & ~fillMask) | (patternByte & fillMask);
-  }
+  if (leftBits != 0) blend(row[startByte], 0xFF >> leftBits);
 
   // Full bytes in the middle
   const int fullStart = (leftBits == 0) ? startByte : startByte + 1;
   const int fullEnd = (rightBits == 7) ? endByte : endByte - 1;
   if (fullStart <= fullEnd) {
-    memset(row + fullStart, patternByte, fullEnd - fullStart + 1);
+    if (keepInk) {
+      for (int b = fullStart; b <= fullEnd; ++b) row[b] &= patternByte;
+    } else {
+      memset(row + fullStart, patternByte, fullEnd - fullStart + 1);
+    }
   }
 
   // Right partial byte
-  if (rightBits != 7) {
-    const uint8_t fillMask = ~(0xFF >> (rightBits + 1));
-    row[endByte] = (row[endByte] & ~fillMask) | (patternByte & fillMask);
-  }
+  if (rightBits != 7) blend(row[endByte], ~(0xFF >> (rightBits + 1)));
 }
 
 // Thin wrapper: state=true → 0x00 (all dark), false → 0xFF (all white).
@@ -2203,12 +2205,13 @@ void GfxRenderer::drawPixelDither<Color::DarkGray>(const int x, const int y) con
   drawPixel(x, y, (x + y) % 2 == 0);  // TODO: maybe find a better pattern?
 }
 
-void GfxRenderer::fillRectDither(const int x, const int y, const int width, const int height, Color color) const {
+void GfxRenderer::fillRectDither(const int x, const int y, const int width, const int height, Color color,
+                                 const bool keepInk) const {
   if (color == Color::Clear) {
   } else if (color == Color::Black) {
     fillRect(x, y, width, height, true);
   } else if (color == Color::White) {
-    fillRect(x, y, width, height, false);
+    if (!keepInk) fillRect(x, y, width, height, false);
   } else if (color == Color::DarkGray) {
     // Pattern: dark where (phyX + phyY) % 2 == 0 (alternating checkerboard).
     // Byte patterns (phyY even / phyY odd):
@@ -2219,28 +2222,28 @@ void GfxRenderer::fillRectDither(const int x, const int y, const int width, cons
         for (int lx = x; lx < x + width; lx++) {
           const int phyY = getDisplayHeight() - 1 - lx;
           const uint8_t pb = (phyY % 2 == 0) ? 0xAA : 0x55;
-          fillPhysicalHSpanByte(phyY, y, y + height - 1, pb);
+          fillPhysicalHSpanByte(phyY, y, y + height - 1, pb, keepInk);
         }
         return;
       case PortraitInverted:
         for (int lx = x; lx < x + width; lx++) {
           const int phyY = lx;
           const uint8_t pb = (phyY % 2 == 0) ? 0xAA : 0x55;
-          fillPhysicalHSpanByte(phyY, getDisplayWidth() - 1 - (y + height - 1), getDisplayWidth() - 1 - y, pb);
+          fillPhysicalHSpanByte(phyY, getDisplayWidth() - 1 - (y + height - 1), getDisplayWidth() - 1 - y, pb, keepInk);
         }
         return;
       case LandscapeCounterClockwise:
         for (int ly = y; ly < y + height; ly++) {
           const int phyY = ly;
           const uint8_t pb = (phyY % 2 == 0) ? 0x55 : 0xAA;
-          fillPhysicalHSpanByte(phyY, x, x + width - 1, pb);
+          fillPhysicalHSpanByte(phyY, x, x + width - 1, pb, keepInk);
         }
         return;
       case LandscapeClockwise:
         for (int ly = y; ly < y + height; ly++) {
           const int phyY = getDisplayHeight() - 1 - ly;
           const uint8_t pb = (phyY % 2 == 0) ? 0x55 : 0xAA;
-          fillPhysicalHSpanByte(phyY, getDisplayWidth() - 1 - (x + width - 1), getDisplayWidth() - 1 - x, pb);
+          fillPhysicalHSpanByte(phyY, getDisplayWidth() - 1 - (x + width - 1), getDisplayWidth() - 1 - x, pb, keepInk);
         }
         return;
     }
@@ -2256,28 +2259,30 @@ void GfxRenderer::fillRectDither(const int x, const int y, const int width, cons
         for (int lx = x; lx < x + width; lx++) {
           const int phyY = getDisplayHeight() - 1 - lx;
           if (phyY % 2 == 0) continue;  // all-white row — no dark pixels to write
-          fillPhysicalHSpanByte(phyY, y, y + height - 1, 0x55);
+          fillPhysicalHSpanByte(phyY, y, y + height - 1, 0x55, keepInk);
         }
         return;
       case PortraitInverted:
         for (int lx = x; lx < x + width; lx++) {
           const int phyY = lx;
           if (phyY % 2 != 0) continue;  // all-white row
-          fillPhysicalHSpanByte(phyY, getDisplayWidth() - 1 - (y + height - 1), getDisplayWidth() - 1 - y, 0xAA);
+          fillPhysicalHSpanByte(phyY, getDisplayWidth() - 1 - (y + height - 1), getDisplayWidth() - 1 - y, 0xAA,
+                                keepInk);
         }
         return;
       case LandscapeCounterClockwise:
         for (int ly = y; ly < y + height; ly++) {
           const int phyY = ly;
           if (phyY % 2 != 0) continue;  // all-white row
-          fillPhysicalHSpanByte(phyY, x, x + width - 1, 0x55);
+          fillPhysicalHSpanByte(phyY, x, x + width - 1, 0x55, keepInk);
         }
         return;
       case LandscapeClockwise:
         for (int ly = y; ly < y + height; ly++) {
           const int phyY = getDisplayHeight() - 1 - ly;
           if (phyY % 2 == 0) continue;  // all-white row
-          fillPhysicalHSpanByte(phyY, getDisplayWidth() - 1 - (x + width - 1), getDisplayWidth() - 1 - x, 0xAA);
+          fillPhysicalHSpanByte(phyY, getDisplayWidth() - 1 - (x + width - 1), getDisplayWidth() - 1 - x, 0xAA,
+                                keepInk);
         }
         return;
     }

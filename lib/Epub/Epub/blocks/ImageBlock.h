@@ -125,11 +125,13 @@ class ImageBlock final : public Block {
   // that can ever show. An accessibility description can run to KBs, and an image block holds
   // its alt for as long as its page is loaded -- every draw, pre-render and image-lane visit.
   static constexpr size_t MAX_ALT_TEXT_BYTES = 128;
+  // `alt` cut to MAX_ALT_TEXT_BYTES at a character boundary, as every block keeps it.
+  static void capAltText(std::string& alt);
   ~ImageBlock() override = default;
 
   // Return a new ImageBlock that renders a vertical crop of this image.
   // srcYOffset: first source row to render; srcHeight: number of rows (must be > 0).
-  // The new block shares the same imagePath (and thus the same decoded cache file);
+  // The new block shares the same imagePath and size (and thus the same decoded cache file);
   // only the rendering window differs.
   std::unique_ptr<ImageBlock> makeCrop(int16_t srcYOffset, int16_t srcHeight) const;
 
@@ -169,11 +171,18 @@ class ImageBlock final : public Block {
   // monochromeOutput selects which cache to check (BW or grayscale), matching render().
   bool wouldShowPlaceholder(bool forceLoad, bool monochromeOutput) const;
 
-  // True when the 1-bit .pxc pixel cache exists (BW plane rendering).
+  // The image's pixel caches at the size it is drawn at (drawnWidth by drawnHeight), one per size: img_3.png drawn 18
+  // by 18 caches as img_3.18x18.1bit.pxc (1-bit, the BW plane) and img_3.18x18.bayer.pxc (4-level, the gray passes).
+  std::string bwCachePath() const;
+  std::string grayscaleCachePath() const;
+  // Where a JPEG decode of it at that size, stopped for input, parks (RenderConfig::checkpointPath).
+  std::string checkpointPath() const;
+
+  // True when the 1-bit .pxc pixel cache of the drawn size exists (BW plane rendering).
   // Used by warm-cache paths to skip already-cached images.
   bool hasPixelCache() const;
 
-  // True when the 4-level .pxc pixel cache exists (grayscale AA rendering).
+  // True when the 4-level .pxc pixel cache of the drawn size exists (grayscale AA rendering).
   bool hasGrayscaleCache() const;
 
   // Render the 4-level cache into the framebuffer using the renderer's current
@@ -238,6 +247,9 @@ class ImageBlock final : public Block {
   // Ensure the SD cache file exists, extracting from the EPUB if necessary.
   // Returns true if the file is ready for decoding.
   bool ensureExtracted() const;
+
+  // bwCachePath() or grayscaleCachePath(), as `monochromeOutput` selects.
+  std::string variantCachePath(bool monochromeOutput) const;
 
   // CoarseRedecodeScope's halves, for the variant `monochromeOutput` selects: the cache moved aside when stamped
   // coarse (true when it was), and moved back unless a cache has taken its place.

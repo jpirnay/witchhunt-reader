@@ -87,6 +87,9 @@ class Atkinson1BitDitherer {
 
   ~Atkinson1BitDitherer() { delete[] errorRows; }
 
+  // The heap the constructor takes beside the object: its three error rows.
+  static size_t errorRowBytesFor(const int width) { return static_cast<size_t>(width + 4) * 3 * sizeof(int16_t); }
+
   // EXPLICITLY DELETE THE COPY CONSTRUCTOR
   Atkinson1BitDitherer(const Atkinson1BitDitherer& other) = delete;
 

@@ -5,11 +5,28 @@
 #include <HalDisplay.h>
 #include <HeapFit.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 
 #include <optional>
 
 #include "PageFrameScope.h"
+
+namespace {
+
+// Whether the decode of `image` just made ends the page's warm: refused for memory (image_scratch::heapShortCount
+// moved since `shortBefore`, and the variant asked for is still missing) while the decode can wait
+// (image_scratch::canWait). That is the image lane beside a section build, whose lane after the build decodes what is
+// left with the whole buffer. Each image after a refusal still paid its extraction check, cache probes and a decode
+// refused like the first: a page of icons on the X3 took 26 refused decodes in 3.5 s (2026-11-11), each image twice,
+// once for both variants and once for the 4-level one alone. Any other pass tries every image, as before: a page
+// render's memory ladder climbs between its passes, and a smaller image may fit where a larger one did not.
+bool refusalEndsWarm(const ImageBlock& image, const uint32_t shortBefore, const bool monochromeOutput) {
+  if (!image_scratch::canWait() || image_scratch::heapShortCount() == shortBefore) return false;
+  return !(monochromeOutput ? image.hasPixelCache() : image.hasGrayVariantCache());
+}
+
+}  // namespace
 
 void PageLine::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
   block->render(renderer, fontId, xPos + xOffset, yPos + yOffset);
@@ -54,6 +71,10 @@ void PageImage::warmGrayVariant(GfxRenderer& renderer, const int xOffset, const 
 bool PageImage::serialize(FsFile& file) {
   serialization::writePod(file, xPos);
   serialization::writePod(file, yPos);
+  // A flags byte, and the link's hash after it when it has one: a block image costs one byte.
+  const uint8_t flags = static_cast<uint8_t>((inLine_ ? kInLine : 0) | (linkHash_ != 0 ? kLinked : 0));
+  serialization::writePod(file, flags);
+  if (linkHash_ != 0) serialization::writePod(file, linkHash_);
 
   // serialize ImageBlock
   return imageBlock->serialize(file);
@@ -64,13 +85,21 @@ std::unique_ptr<PageImage> PageImage::deserialize(FsFile& file) {
   int16_t yPos;
   serialization::readPod(file, xPos);
   serialization::readPod(file, yPos);
+  uint8_t flags = 0;
+  serialization::readPod(file, flags);
+  if ((flags & ~(kInLine | kLinked)) != 0) {
+    LOG_ERR("PGE", "PageImage: unknown flags 0x%02X", flags);
+    return nullptr;
+  }
+  uint32_t linkHash = 0;
+  if ((flags & kLinked) != 0) serialization::readPod(file, linkHash);
 
   auto ib = ImageBlock::deserialize(file);
   if (!ib) {
     LOG_ERR("PGE", "PageImage: ImageBlock deserialize failed");
     return nullptr;
   }
-  return std::unique_ptr<PageImage>(new PageImage(std::move(ib), xPos, yPos));
+  return std::unique_ptr<PageImage>(new PageImage(std::move(ib), xPos, yPos, (flags & kInLine) != 0, linkHash));
 }
 
 void PageHR::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
@@ -116,6 +145,111 @@ int layOutCellLines(GfxRenderer& renderer, const TableCell& cell, const int font
   return lineY;
 }
 }  // namespace
+
+namespace {
+// One edge of a box as strips along its side: `length` long from (x, y), `side.width` deep inward. Ported from
+// crosspoint-reader PR #3891 (Justin Mitchell, @itsthisjustin), its drawBorderEdge.
+void drawBoxEdge(const GfxRenderer& renderer, const int x, const int y, const int length, const PageBox::Edge& side,
+                 const bool horizontal) {
+  const int depth = side.width;
+  const auto strip = [&](const int offset, const int along, const int span, const int thickness) {
+    if (horizontal) {
+      renderer.fillRect(x + along, y + offset, span, thickness, true);
+    } else {
+      renderer.fillRect(x + offset, y + along, thickness, span, true);
+    }
+  };
+  switch (side.style) {
+    case CssBorderStyle::Double:
+      // Two lines and the gap between them; under three pixels there is no gap to leave, and the line is solid.
+      if (depth >= 3) {
+        const int line = depth / 3;
+        strip(0, 0, length, line);
+        strip(depth - line, 0, length, line);
+        return;
+      }
+      break;
+    case CssBorderStyle::Dotted:
+    case CssBorderStyle::Dashed: {
+      const bool dotted = side.style == CssBorderStyle::Dotted;
+      const int dash = dotted ? depth : std::max(3, depth * 3);
+      const int gap = dotted ? std::max(2, depth) : std::max(2, depth * 2);
+      for (int along = 0; along < length; along += dash + gap) strip(0, along, std::min(dash, length - along), depth);
+      return;
+    }
+    case CssBorderStyle::Unset:
+    case CssBorderStyle::None:
+      return;
+    case CssBorderStyle::Solid:
+      break;
+  }
+  strip(0, 0, length, depth);
+}
+}  // namespace
+
+void PageBox::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
+  (void)fontId;
+  // The black-and-white pass only. The same element list draws the anti-aliasing planes and the one-pass gray mask,
+  // where a shade would mark its pixels gray and a line would clear plane bits the text set; and the font cache's scan
+  // pass is no drawing at all.
+  if (renderer.getRenderMode() != GfxRenderer::BW || renderer.isFontCacheScanning()) return;
+  const int x = xPos + xOffset;
+  const int y = yPos + yOffset;
+  // One pixel in four, ink only: anything drawn here before (the glyphs of a line above that reach into the box) stays.
+  if (shaded) renderer.fillRectDither(x, y, width, height, Color::LightGray, /*keepInk=*/true);
+  const Edge& top = edges[CssBox::Top];
+  const Edge& right = edges[CssBox::Right];
+  const Edge& bottom = edges[CssBox::Bottom];
+  const Edge& left = edges[CssBox::Left];
+  if (top.width > 0) drawBoxEdge(renderer, x, y, width, top, /*horizontal=*/true);
+  if (bottom.width > 0) drawBoxEdge(renderer, x, y + height - bottom.width, width, bottom, /*horizontal=*/true);
+  if (left.width > 0) drawBoxEdge(renderer, x, y, height, left, /*horizontal=*/false);
+  if (right.width > 0) drawBoxEdge(renderer, x + width - right.width, y, height, right, /*horizontal=*/false);
+}
+
+bool PageBox::serialize(FsFile& file) {
+  serialization::writePod(file, xPos);
+  serialization::writePod(file, yPos);
+  serialization::writePod(file, width);
+  serialization::writePod(file, height);
+  for (const Edge& edge : edges) {
+    serialization::writePod(file, edge.width);
+    serialization::writePod(file, static_cast<uint8_t>(edge.style));
+  }
+  serialization::writePod(file, shaded);
+  return true;
+}
+
+std::unique_ptr<PageBox> PageBox::deserialize(FsFile& file) {
+  int16_t xPos = 0;
+  int16_t yPos = 0;
+  uint16_t width = 0;
+  uint16_t height = 0;
+  Edge edges[4];
+  bool shaded = false;
+  serialization::readPod(file, xPos);
+  serialization::readPod(file, yPos);
+  serialization::readPod(file, width);
+  serialization::readPod(file, height);
+  for (Edge& edge : edges) {
+    uint8_t style = 0;
+    serialization::readPod(file, edge.width);
+    serialization::readPod(file, style);
+    if (edge.width > CssBox::kMaxWidthPx || style > static_cast<uint8_t>(CssBorderStyle::Dashed)) {
+      LOG_ERR("PGE", "PageBox: invalid edge (width %u, style %u)", edge.width, style);
+      return nullptr;
+    }
+    edge.style = static_cast<CssBorderStyle>(style);
+  }
+  serialization::readPod(file, shaded);
+  if (width == 0 || height == 0) {
+    LOG_ERR("PGE", "PageBox: empty box %ux%u", width, height);
+    return nullptr;
+  }
+  auto box = makeUniqueNoThrow<PageBox>(xPos, yPos, width, height, edges, shaded);
+  if (!box) LOG_ERR("PGE", "PageBox: allocation failed");
+  return box;
+}
 
 void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
   const int drawX = xPos + xOffset;
@@ -208,7 +342,7 @@ bool PageTableFragment::hasUncachedImages(const bool forceLoad, const bool monoc
   return false;
 }
 
-void PageTableFragment::warmCellImages(GfxRenderer& renderer, const bool forceLoad, const bool monochromeOutput,
+bool PageTableFragment::warmCellImages(GfxRenderer& renderer, const bool forceLoad, const bool monochromeOutput,
                                        const bool alsoWarmGrayscale) const {
   for (const auto& row : rows) {
     for (const auto& cell : row.cells) {
@@ -219,15 +353,20 @@ void PageTableFragment::warmCellImages(GfxRenderer& renderer, const bool forceLo
       // The cache is position-independent, so warm at the origin — the framebuffer write is
       // discarded by the caller's clearScreen().
       if (!cached) {
+        const uint32_t shortBefore = image_scratch::heapShortCount();
         cell.image->render(renderer, 0, 0, forceLoad, monochromeOutput);
-        if (CooperativeAbort::wasAborted()) return;  // see Page::warmImageCaches
+        if (CooperativeAbort::wasAborted()) return false;  // see Page::warmImageCaches
+        if (refusalEndsWarm(*cell.image, shortBefore, monochromeOutput)) return false;
       }
       if (alsoWarmGrayscale && monochromeOutput && !cell.image->hasGrayVariantCache()) {
+        const uint32_t shortBefore = image_scratch::heapShortCount();
         cell.image->warmGrayVariant(renderer, 0, 0, forceLoad);
-        if (CooperativeAbort::wasAborted()) return;
+        if (CooperativeAbort::wasAborted()) return false;
+        if (refusalEndsWarm(*cell.image, shortBefore, /*monochromeOutput=*/false)) return false;
       }
     }
   }
+  return true;
 }
 
 bool PageTableFragment::serialize(FsFile& file) {
@@ -409,8 +548,10 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffsetIn, const int
   for (auto& element : elements) {
     if (CooperativeAbort::wasAborted()) return;
     if (element->getTag() == TAG_PageTable) {
-      static_cast<const PageTableFragment&>(*element).warmCellImages(renderer, forceLoadLargeImages, monochromeOutput,
-                                                                     alsoWarmGrayscale);
+      if (!static_cast<const PageTableFragment&>(*element).warmCellImages(renderer, forceLoadLargeImages,
+                                                                          monochromeOutput, alsoWarmGrayscale)) {
+        return;
+      }
       continue;
     }
     if (element->getTag() != TAG_PageImage) continue;
@@ -429,9 +570,11 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffsetIn, const int
     const bool mergeVariants = alsoWarmGrayscale && monochromeOutput && !alreadyCached &&
                                ImageBlock::grayVariant() == ImageBlock::GrayVariant::Bayer && !ib.hasGrayscaleCache();
     if (!alreadyCached) {
+      const uint32_t shortBefore = image_scratch::heapShortCount();
       static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
                                                             monochromeOutput, mergeVariants);
       if (CooperativeAbort::wasAborted()) return;
+      if (refusalEndsWarm(ib, shortBefore, monochromeOutput)) return;
     }
     // Second decode for the other variant when AA needs the grayscale planes on top of
     // the BW frame. Skipped when monochromeOutput is already false — that pass wrote the
@@ -440,7 +583,9 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffsetIn, const int
     // failure: the companion is best-effort (JPEG and GIF ignore it, and its cache file can
     // fail to open on its own), so the re-check is what makes it safe to ask for.
     if (alsoWarmGrayscale && monochromeOutput && !ib.hasGrayVariantCache()) {
+      const uint32_t shortBefore = image_scratch::heapShortCount();
       static_cast<PageImage&>(*element).warmGrayVariant(renderer, xOffset, yOffset, forceLoadLargeImages);
+      if (refusalEndsWarm(ib, shortBefore, /*monochromeOutput=*/false)) return;
     }
   }
 }
@@ -570,6 +715,10 @@ std::unique_ptr<Page> Page::deserialize(FsFile& file, BuildArena* scratch) {
       auto hr = PageHR::deserialize(file);
       if (!hr) return nullptr;
       page->elements.push_back(std::move(hr));
+    } else if (tag == TAG_PageBox) {
+      auto box = PageBox::deserialize(file);
+      if (!box) return nullptr;
+      page->elements.push_back(std::move(box));
     } else {
       LOG_ERR("PGE", "Deserialization failed: Unknown tag %u", tag);
       return nullptr;

@@ -276,7 +276,7 @@ TEST_F(Gray8PictureFixture, APngPictureFillsItsBoxAndIsCached) {
   EXPECT_TRUE(frameBufferWhite());
   EXPECT_TRUE(fs::exists(work / "img.120x160.gray8")) << "named by its drawn size";
   EXPECT_FALSE(fs::exists(work / "img.120x160.gray8.part"));
-  EXPECT_FALSE(fs::exists(work / "img.bayer.pxc"));
+  EXPECT_FALSE(fs::exists(work / "img.120x160.bayer.pxc"));
 }
 
 TEST_F(Gray8PictureFixture, JpegPicturesFillTheirBoxes) {
@@ -408,15 +408,15 @@ TEST_F(Gray8PictureFixture, TheWarmMakesTheGrayVariant) {
   EXPECT_TRUE(page->hasUncachedImages(true, true, /*alsoWarmGrayscale=*/true));
   page->warmImageCaches(renderer, 0, 0, true, true, /*alsoWarmGrayscale=*/true);
   ImageBlock::setGrayVariant(ImageBlock::GrayVariant::Bayer);
-  EXPECT_TRUE(fs::exists(work / "img.1bit.pxc"));
+  EXPECT_TRUE(fs::exists(work / "img.120x160.1bit.pxc"));
   EXPECT_TRUE(fs::exists(work / "img.120x160.gray8"));
-  EXPECT_FALSE(fs::exists(work / "img.bayer.pxc"));
+  EXPECT_FALSE(fs::exists(work / "img.120x160.bayer.pxc"));
   ImageBlock::setGrayVariant(ImageBlock::GrayVariant::Gray8);
   EXPECT_FALSE(page->hasUncachedImages(true, true, /*alsoWarmGrayscale=*/true));
   ImageBlock::setGrayVariant(ImageBlock::GrayVariant::Bayer);
   EXPECT_TRUE(page->hasUncachedImages(true, true, /*alsoWarmGrayscale=*/true)) << "the Bayer variant is missing";
   page->warmImageCaches(renderer, 0, 0, true, true, /*alsoWarmGrayscale=*/true);
-  EXPECT_TRUE(fs::exists(work / "img.bayer.pxc"));
+  EXPECT_TRUE(fs::exists(work / "img.120x160.bayer.pxc"));
 }
 
 // A picture of a vertical page is turned: it is drawn upright in the reader's frame, and its gray lands on the same

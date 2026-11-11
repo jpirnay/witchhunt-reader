@@ -646,7 +646,11 @@ The heap gates must discount what the arena serves (`image_scratch::canServe`). 
 the decoder a framebuffer's worth less free heap than releasing did, so gates that still charged
 for the ring or the pool refused decodes the heap could serve, and every image skipped its `.pxc`
 and decoded again on every visit. `minFreeHeapForJpeg()` drops the pool term and the PNG floor
-drops to `PNG_DECODE_HEAP_FLOOR_WITH_ARENA` when the arena can serve them. The gate fix and the
+drops to `PNG_DECODE_HEAP_FLOOR_WITH_ARENA` when the arena can serve them. A PNG whose inflated
+stream is shorter than the 32 KB window (an icon) is gated on its own need instead
+(`PngToFramebufferConverter::decodeHeapNeed`): its rows and ring (on the heap only when the arena
+cannot serve them), the decoder object, the ditherer rows and cache bands, 1 KB of small blocks and
+8 KB of headroom, never more than the floor. A PNG that fills the window keeps the floors. The gate fix and the
 borrow only make sense together. Measured on both panels (2026-08-11): every borrow returned
 cleanly, contig stayed flat across the render, and every decode wrote its `.pxc`.
 

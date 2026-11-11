@@ -89,7 +89,7 @@ struct ImageDitherPlacementFixture : testing::Test {
   // The decode the warm pass does: both caches, as with Display and AA on.
   CachedImage decodeBoth(ImageBlock& image) {
     image.render(renderer, kX, kY, /*forceLoad=*/true, /*monochromeOutput=*/true, /*alsoCacheOtherVariant=*/true);
-    return read(work / "img.1bit.pxc");
+    return read(image.bwCachePath());
   }
 };
 
