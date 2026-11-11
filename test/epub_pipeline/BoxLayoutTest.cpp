@@ -557,11 +557,28 @@ TEST_F(BoxLayout, APaperColouredBorderDrawsNothing) {
   EXPECT_EQ(5, pages[0].lineWith("text")->x) << "its padding stays";
 }
 
-TEST_F(BoxLayout, WithTheBooksStyleOffNoBoxIsDrawn) {
+TEST_F(BoxLayout, WithTheBooksStyleOffNoBoxOfItsIsDrawn) {
   embeddedStyle = false;
-  const auto pages = layout("<p class=\"box\">text</p><fieldset><p>form</p></fieldset>",
+  const auto pages = layout("<p class=\"box\">text</p><div style=\"border: 1px solid\">inline style</div>",
                             std::string(kReset) + ".box { border: 1px solid; background: #eee; }");
   EXPECT_TRUE(pages[0].boxes.empty());
+}
+
+// A fieldset's outline is the browser's styling, as a heading's size is: it stays with the book's style off, and then
+// the book's CSS, which is not read, cannot take it away.
+TEST_F(BoxLayout, AFieldsetIsOutlinedWithTheBooksStyleOff) {
+  embeddedStyle = false;
+  const auto pages = layout("<p>before</p><fieldset><legend>Legend</legend><p>field</p></fieldset>",
+                            std::string(kReset) + "fieldset { border: none; padding: 0; }");
+  ASSERT_EQ(1u, pages[0].boxes.size());
+  const BoxView& box = pages[0].boxes[0];
+  for (const int width : box.widths) EXPECT_EQ(1, width);
+  for (const CssBorderStyle style : box.styles) EXPECT_EQ(CssBorderStyle::Solid, style);
+  EXPECT_EQ(2, box.x) << "the browser's 2 px margin";
+  const LineView* legend = pages[0].lineWith("Legend");
+  ASSERT_TRUE(legend);
+  EXPECT_LT(box.index, legend->index);
+  EXPECT_GT(legend->x, box.x + 1) << "the browser's padding, inside the outline";
 }
 
 // The reader's extra paragraph spacing comes after the frame, as after a paragraph: inside, the bottom padding is the

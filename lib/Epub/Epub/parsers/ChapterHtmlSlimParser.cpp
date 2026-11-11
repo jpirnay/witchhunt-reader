@@ -1781,10 +1781,12 @@ void ChapterHtmlSlimParser::emitPage() {
 ChapterHtmlSlimParser::BoxPlan ChapterHtmlSlimParser::planBox(const char* name, const CssStyle& cssStyle,
                                                               const bool floated, BlockStyle& style) const {
   BoxPlan plan;
-  // Publisher styling, so only with the book's style on. Not in a table: its cells are laid out apart from the page,
-  // and their text has no place for a frame of its own (the grid draws theirs). Not for a float: the reader floats
-  // pictures only, and a floated wrapper's picture is placed beside the text after it, outside the wrapper.
-  if (!embeddedStyle || census_ || currentTable || floated || !cssStyle.box.drawn()) return plan;
+  // Publisher styling, so only with the book's style on; with it off, only a fieldset's own outline, which is the
+  // browser's styling, as a heading's size is. Not in a table: its cells are laid out apart from the page, and their
+  // text has no place for a frame of its own (the grid draws theirs). Not for a float: the reader floats pictures only,
+  // and a floated wrapper's picture is placed beside the text after it, outside the wrapper.
+  if (!embeddedStyle && strcmp(name, "fieldset") != 0) return plan;
+  if (census_ || currentTable || floated || !cssStyle.box.drawn()) return plan;
   if (boxScopes_.size() >= kMaxBoxScopes) return plan;
   // The elements laid out as blocks of their own: headings, block tags, the containers, and a display:block span
   // where startElement opens one (one at a time).
@@ -2800,8 +2802,9 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (!styleAttr.empty()) cssStyle.applyOver(self->inlineStyleFor(styleAttr));
   }
   // A <fieldset> is outlined, as a browser draws it, under whatever the book's CSS says of it: a 1 px line (a groove
-  // reads as one on a 1-bit page) and the browser's padding. The idea is CrossInk's (commit 6b476a97, Julia Nguyen).
-  if (self->embeddedStyle && strcmp(name, "fieldset") == 0) {
+  // reads as one on a 1-bit page) and the browser's padding. Browser styling, like a heading's size, so it stays with
+  // the book's style off, when no CSS of the book is read. The idea is CrossInk's (commit 6b476a97, Julia Nguyen).
+  if (strcmp(name, "fieldset") == 0) {
     CssStyle outline;
     for (uint8_t i = 0; i < 4; ++i) {
       outline.box.setWidth(static_cast<CssBox::Side>(i), 1);
