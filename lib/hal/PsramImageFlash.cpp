@@ -11,28 +11,42 @@
 namespace {
 
 constexpr char kMagic[4] = {'W', 'H', 'F', 'A'};
-constexpr uint8_t kVersion = 1;
+// 2: the erased-page bitmap after the header. A file of version 1 reads as no image: the image starts erased and the
+// next commit writes it whole in this version.
+constexpr uint8_t kVersion = 2;
 constexpr uint8_t kClean = 0xC1;
 constexpr uint8_t kDirty = 0xD1;
 
-// The file's first bytes; the rest of the header block is 0xFF.
+// The file's first bytes. Right behind it, at kBitmapOffset, a bit per 64 KB page: the page is all 0xFF in the file,
+// so a load fills it in PSRAM instead of reading it. The rest of the header block is 0xFF.
 struct ImageHeader {
   char magic[4];
   uint8_t version;
-  uint8_t state;  // kClean: the image behind it is whole; anything else is no image
+  uint8_t state;  // kClean: the image behind it is whole, the bitmap with it; anything else is no image
   uint16_t reserved;
   uint32_t areaBytes;
-  uint32_t crc;  // of the bytes before it
+  uint32_t crc;  // of the bytes before it, then of the bitmap
 };
 static_assert(sizeof(ImageHeader) == 16, "image header layout changed");
+constexpr uint32_t kBitmapOffset = sizeof(ImageHeader);
 
-uint32_t headerCrc(const ImageHeader& h) {
-  return esp_rom_crc32_le(0, reinterpret_cast<const uint8_t*>(&h), offsetof(ImageHeader, crc));
+uint32_t headerCrc(const ImageHeader& h, const uint32_t* bitmap, const uint32_t bitmapBytes) {
+  const uint32_t head = esp_rom_crc32_le(0, reinterpret_cast<const uint8_t*>(&h), offsetof(ImageHeader, crc));
+  return esp_rom_crc32_le(head, reinterpret_cast<const uint8_t*>(bitmap), bitmapBytes);
 }
 
 constexpr uint32_t bitWords(const uint32_t bits) { return (bits + 31) / 32; }
 bool testBit(const uint32_t* bits, const uint32_t i) { return ((bits[i / 32] >> (i % 32)) & 1u) != 0; }
 void setBit(uint32_t* bits, const uint32_t i) { bits[i / 32] |= 1u << (i % 32); }
+void clearBit(uint32_t* bits, const uint32_t i) { bits[i / 32] &= ~(1u << (i % 32)); }
+
+bool allErased(const uint8_t* bytes, const uint32_t len) {
+  const auto* words = reinterpret_cast<const uint32_t*>(bytes);  // pages start on 64 KB in a 4-byte-aligned block
+  for (uint32_t i = 0; i < len / 4; ++i) {
+    if (words[i] != 0xFFFFFFFFu) return false;
+  }
+  return true;
+}
 
 }  // namespace
 
@@ -44,24 +58,29 @@ bool PsramImageFlash::begin() {
   }
   const uint32_t pageWords = bitWords(bytes_ / kMapPageBytes);
   const uint32_t sectorWords = bitWords(bytes_ / kSectorBytes);
-  // Held for the run: a bit per page and per sector, 112 B for the default 3,456 KB.
+  // Held for the run: two bits per page and one per sector, 120 B for the default 3,456 KB.
   loaded_ = makeUniqueNoThrow<uint32_t[]>(pageWords);
+  erased_ = makeUniqueNoThrow<uint32_t[]>(pageWords);
   dirty_ = makeUniqueNoThrow<uint32_t[]>(sectorWords);
-  if (!loaded_ || !dirty_) {
+  if (!loaded_ || !erased_ || !dirty_) {
     LOG_ERR("FLA", "no memory for the PSRAM image's bitmaps (%u B)",
-            static_cast<unsigned>((pageWords + sectorWords) * sizeof(uint32_t)));
+            static_cast<unsigned>((2 * pageWords + sectorWords) * sizeof(uint32_t)));
     loaded_.reset();
+    erased_.reset();
     dirty_.reset();
     return false;
   }
   std::memset(loaded_.get(), 0, pageWords * sizeof(uint32_t));
+  std::memset(erased_.get(), 0, pageWords * sizeof(uint32_t));
   std::memset(dirty_.get(), 0, sectorWords * sizeof(uint32_t));
 
   const unsigned long start = millis();
+  const uint32_t bitmapBytes = pageWords * sizeof(uint32_t);
   ImageHeader h{};
   fileWhole_ = file_.size() == kHeaderBlockBytes + bytes_ && file_.read(0, &h, sizeof h) &&
+               file_.read(kBitmapOffset, erased_.get(), bitmapBytes) &&
                std::memcmp(h.magic, kMagic, sizeof kMagic) == 0 && h.version == kVersion && h.state == kClean &&
-               h.areaBytes == bytes_ && h.crc == headerCrc(h);
+               h.areaBytes == bytes_ && h.crc == headerCrc(h, erased_.get(), bitmapBytes);
   if (fileWhole_) {
     LOG_INF("FLA", "PSRAM image: %u KB on the card, loaded as it is used (header read in %lu ms)",
             static_cast<unsigned>(bytes_ / 1024), millis() - start);
@@ -74,6 +93,8 @@ bool PsramImageFlash::begin() {
 
 void PsramImageFlash::startErased() {
   std::memset(image_, 0xFF, bytes_);
+  // Recomputed for every page at the next commit, which writes them all.
+  std::memset(erased_.get(), 0, bitWords(bytes_ / kMapPageBytes) * sizeof(uint32_t));
   for (uint32_t page = 0; page < bytes_ / kMapPageBytes; ++page) setBit(loaded_.get(), page);
   // Every sector, so the next sync writes the whole file.
   for (uint32_t sector = 0; sector < bytes_ / kSectorBytes; ++sector) setBit(dirty_.get(), sector);
@@ -94,7 +115,10 @@ bool PsramImageFlash::load(const uint32_t offset, const uint32_t len, const bool
     if (testBit(loaded_.get(), page)) continue;
     const uint32_t start = page * kMapPageBytes;
     const bool coveredWhole = erasing && offset <= start && start + kMapPageBytes <= offset + len;
-    if (!coveredWhole) {
+    if (!coveredWhole && testBit(erased_.get(), page)) {
+      // All 0xFF in the file (the bitmap of its last commit): nothing to read.
+      std::memset(image_ + start, 0xFF, kMapPageBytes);
+    } else if (!coveredWhole) {
       const unsigned long began = millis();
       if (!file_.read(kHeaderBlockBytes + start, image_ + start, kMapPageBytes)) {
         LOG_ERR("FLA", "PSRAM image: page %u could not be read from the card", static_cast<unsigned>(page));
@@ -145,12 +169,13 @@ const uint8_t* PsramImageFlash::map(const uint32_t offset, const uint32_t len) {
 }
 
 bool PsramImageFlash::writeHeader(const uint8_t state, const bool wholeBlock) {
+  const uint32_t bitmapBytes = bitWords(bytes_ / kMapPageBytes) * sizeof(uint32_t);
   ImageHeader h{};
   std::memcpy(h.magic, kMagic, sizeof kMagic);
   h.version = kVersion;
   h.state = state;
   h.areaBytes = bytes_;
-  h.crc = headerCrc(h);
+  h.crc = headerCrc(h, erased_.get(), bitmapBytes);
   if (!file_.write(0, &h, sizeof h)) return false;
   if (!wholeBlock) return true;
   uint8_t pad[128];
@@ -205,7 +230,29 @@ bool PsramImageFlash::sync() {
     written += len;
     s = end;
   }
-  if (!file_.sync() || !writeHeader(kClean, false) || !file_.sync()) return false;
+  if (!file_.sync()) return false;
+
+  // Which pages the file now holds as all 0xFF. Only a page with a changed sector can have turned (it is loaded); the
+  // others keep the bit of the commit they came from. Written with the clean header, in its sector and under its CRC:
+  // until that header lands the file's header says dirty, and no bitmap is trusted.
+  const uint32_t pages = bytes_ / kMapPageBytes;
+  constexpr uint32_t kSectorsPerPage = kMapPageBytes / kSectorBytes;
+  for (uint32_t page = 0; page < pages; ++page) {
+    bool changed = false;
+    for (uint32_t s = page * kSectorsPerPage; s < (page + 1) * kSectorsPerPage && !changed; ++s) {
+      changed = testBit(dirty_.get(), s);
+    }
+    if (!changed) continue;
+    if (allErased(image_ + page * kMapPageBytes, kMapPageBytes)) {
+      setBit(erased_.get(), page);
+    } else {
+      clearBit(erased_.get(), page);
+    }
+  }
+  if (!file_.write(kBitmapOffset, erased_.get(), bitWords(pages) * sizeof(uint32_t)) || !writeHeader(kClean, false) ||
+      !file_.sync()) {
+    return false;
+  }
 
   std::memset(dirty_.get(), 0, bitWords(sectors) * sizeof(uint32_t));
   fileWhole_ = true;
