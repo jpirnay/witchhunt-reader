@@ -847,6 +847,11 @@ the firmware keeps its room for everything else. A pack you do not install costs
   the `Language-<Name>` folders of the firmware's repository (`assets/sd-fonts/Language-German/de.cplang`).
 * A pack serves every firmware from 2.41 on. After an update the reader rebuilds the language from the pack on the card
   once, about a second, without a download.
+* **X4 Pro installed over its stock firmware.** The reader keeps the interface language (and its font cache) in a
+  flash area that the stock partition table does not have; an SD card, OTA or web-flasher install keeps that table.
+  The X4 Pro, T5 S3 and Murphy M3 then keep the area in their PSRAM instead: everything works, but the language is
+  rebuilt from its pack at every start, and TrueType and `.cpfont` fonts are copied again at the first book after a
+  start. **System Information** shows "(PSRAM)" after the Font cache size when this is the case.
 * **Updating from 2.40 or 2.41RC** keeps your interface language without a download: on the first start the reader writes
   the language it kept in its memory to the card as its pack. Chinese, Japanese and Korean, which only 2.41RC had, are
   downloaded once.
@@ -1216,7 +1221,7 @@ pio device monitor
 
 If the device is stuck in a bootloop, press and release the Reset button. Then, press and hold on to the configured Back button and the Power Button to boot to the Home Screen.
 
-**The interface is in English after an update or on another card:** every interface language but English reads its pack from the card (`/.crosspoint/lang/`). Pick your language again under **Language** (Settings → System) to download it, or copy it there by hand (see **[Interface languages](#interface-languages)**).
+**The interface is in English after an update or on another card:** every interface language but English reads its pack from the card (`/.crosspoint/lang/`). Pick your language again under **Language** (Settings → System) to download it, or copy it there by hand (see **[Interface languages](#interface-languages)**). If the pack is there and the interface stays English, look at **System Information**: "No spiffs partition" in the Font cache row means the device's partition table has no room for the language (see the X4 Pro note under **[Interface languages](#interface-languages)**); the serial log names it in a line starting `[FLA]`.
 
 **Books are no longer hyphenated after an update:** every language but English now hyphenates with a downloadable pack. With **Hyphenation** on, opening such a book offers its pack; if you answered **No**, install it from its row in the Font Manager (**Hyphenation-German** and so on) (see **[Hyphenation packs](#hyphenation-packs)**).
 
