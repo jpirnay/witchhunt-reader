@@ -275,6 +275,11 @@ bool TtfFontSet::load(const Files* families, const uint8_t count, const uint8_t 
     styles = openStyles(families, count, &plan);
   }
   if (styles != TtfFont::StylesResult::Ok) return false;
+  // A store from before GDEF-aware kerning whose every style was checked and found to kern as before: remembered, so
+  // later loads skip the check (it reads each style's kern lookups whole).
+  if (!kerningPredatesGdef_ && !store_.kerningHonoursGdef() && mode == Install::IfNeeded) {
+    store_.markKerningHonoursGdef();
+  }
 
   // One block for every family: the output region doubles as the batch buffer, so it also holds the record header
   // of its largest bitmap. Planned only: the first miss makes it (beginMiss()).
@@ -862,8 +867,7 @@ TtfFont::StylesResult TtfFont::openStyles(const ttf::FileSource (&files)[4], uin
     style.kerning.resolve(bytes, style.face);
     // A store installed before kerning honoured GDEF holds this style's pairs as they were kerned then: the load
     // installs the families again (TtfFontSet::load()).
-    if ((set_.store_.geometry().flags & glyphstore::kFlagGdefKerning) == 0 && !set_.kerningPredatesGdef_ &&
-        ttf::kernsByGdefClass(bytes, style.face)) {
+    if (!set_.store_.kerningHonoursGdef() && !set_.kerningPredatesGdef_ && ttf::kernsByGdefClass(bytes, style.face)) {
       LOG_INF("TTF", "family %u style %u kerns by GDEF class; the store's pairs predate that", family_, s);
       set_.kerningPredatesGdef_ = true;
     }

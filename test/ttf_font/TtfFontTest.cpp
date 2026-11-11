@@ -1161,6 +1161,12 @@ TEST_F(TtfFontTest, AStoreFromBeforeGdefKerningKeepsFamiliesWhoseKerningItDoesNo
     markInstalledBeforeGdefKerning(flash);
     ASSERT_NE(nullptr, open(identity)) << names[0];
     EXPECT_EQ(1, busy) << names[0];  // not installed again
+    // Found to kern as before: remembered in the header sector's last word, so the next open skips the check.
+    uint32_t checked = 0;
+    std::memcpy(&checked, flash.raw() + glyphstore::kGdefCheckedOffset, sizeof checked);
+    EXPECT_EQ(glyphstore::kGdefCheckedMagic, checked) << names[0];
+    ASSERT_NE(nullptr, open(identity)) << names[0];
+    EXPECT_EQ(1, busy) << names[0];
   }
 }
 
@@ -1191,6 +1197,9 @@ TEST_F(TtfFontTest, AStoreFromBeforeGdefKerningIsInstalledOnceMoreForAFamilyWhos
     }
     ASSERT_NE(nullptr, open(identity));
     EXPECT_EQ(2, busy) << grantha;  // installed again
+    uint32_t checked = 0;
+    std::memcpy(&checked, flash.raw() + glyphstore::kGdefCheckedOffset, sizeof checked);
+    EXPECT_EQ(glyphstore::kErased, checked);  // the new install's flag says it all
     ASSERT_NE(nullptr, open(identity));
     EXPECT_EQ(2, busy) << grantha;  // and kept from then on
   }

@@ -192,7 +192,8 @@ struct StyleInfo {
 
 /// Geometry::flags: the store was installed by firmware whose kerning honours GPOS lookup flags against GDEF glyph
 /// classes. A store without it (one installed before, whose byte was reserved and zero) holds pairs kerned without
-/// GDEF: the families whose kerning depends on it (gpos::KernsByGdefClass()) are installed again.
+/// GDEF: the families whose kerning depends on it (gpos::KernsByGdefClass()) are installed again, and a store with
+/// none is marked once (kGdefCheckedOffset).
 constexpr uint8_t kFlagGdefKerning = 0x01;
 
 struct Geometry {
@@ -219,6 +220,13 @@ struct Header {
   uint32_t check;  ///< FNV-1a over every byte before it: a torn header write fails it
 };
 static_assert(sizeof(Header) <= kSectorBytes, "the header fits its sector");
+
+/// The header sector's last word: kGdefCheckedMagic once a store installed before kFlagGdefKerning was found to hold no
+/// family whose kerning depends on GDEF, so later opens need not check again. Programmed once over the erased word an
+/// install leaves there (the header takes the sector's first bytes only); the next install erases it.
+constexpr uint32_t kGdefCheckedOffset = kSectorBytes - 4;
+constexpr uint32_t kGdefCheckedMagic = 0x47444546;  // "GDEF"
+static_assert(sizeof(Header) <= kGdefCheckedOffset, "the header leaves the sector's last word erased");
 
 /// The first 16 bytes of every log segment. The epoch is written with its complement, so a torn write fails the check;
 /// `retired` is programmed 0 before the segment is erased, so a cut during the erase never leaves a half-erased segment
