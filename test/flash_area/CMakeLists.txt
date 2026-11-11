@@ -5,9 +5,14 @@ add_executable(FlashAreaTest
   SimFlashArea.cpp
   FlashFontPartitionAreaTest.cpp
   FlashLangPartitionAreaTest.cpp
+  FlashAreaStoresTest.cpp
   ${REPO_ROOT}/lib/hal/FlashAreaRegion.cpp
   ${REPO_ROOT}/lib/hal/FlashFontPartition.cpp
   ${REPO_ROOT}/lib/hal/FlashLangPartition.cpp
+  ${REPO_ROOT}/lib/EpdFont/ttf/GlyphStoreFormat.cpp
+  ${REPO_ROOT}/lib/EpdFont/ttf/FlashGlyphStore.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/hyphenation/HyphenationPack.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/hyphenation/HyphenationStore.cpp
 )
 target_include_directories(FlashAreaTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -16,6 +21,10 @@ target_include_directories(FlashAreaTest PRIVATE
   ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/lib/hal
   ${REPO_ROOT}/lib/Logging
+  ${REPO_ROOT}/lib/Memory
+  ${REPO_ROOT}/lib/EpdFont
+  ${REPO_ROOT}/lib/EpdFont/ttf
+  ${REPO_ROOT}/lib/Epub
 )
 target_link_libraries(FlashAreaTest PRIVATE
   crosspoint_test_common
