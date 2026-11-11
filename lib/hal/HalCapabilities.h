@@ -106,6 +106,15 @@ static_assert(!usbPresenceFromFuelGauge(BoardConfig::XTEINK_X4) &&
                   !usbPresenceFromFuelGauge(BoardConfig::LILYGO_T5S3),
               "only the X3 infers USB from the fuel gauge");
 
+// --- Storage -----------------------------------------------------------------
+
+// A board whose partition table has no flash-area partition keeps the flash area
+// as an image in PSRAM (lib/hal/FlashArea.h). The profile says whether that image
+// is saved to the card too and read back at boot, so the caches in it outlive a
+// restart; the SDK's default, for a board that has not decided, is PSRAM only and
+// no card writes.
+inline bool flashAreaOnCard() { return BoardConfig::ACTIVE.flashAreaOnCard; }
+
 // --- Display -----------------------------------------------------------------
 
 // A genuine silicon quirk, and the one case B0 allows to key on the controller:

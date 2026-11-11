@@ -31,23 +31,27 @@ class AreaImageFile {
 /// program() only clears bits, erase() sets whole sectors to 0xFF. A mapping is a pointer into the image and costs no
 /// MMU page.
 ///
-/// The file is a header block (kHeaderBlockBytes) and then the image. A page (kMapPageBytes) is read from it the first
-/// time anything reads, programs or maps it. sync() writes the sectors changed since the last one, between a header
-/// that says dirty and one that says clean. A power cut loses what was not synced, and a cut inside sync() leaves the
-/// header dirty, so the next boot starts erased. Each is a state a power cut on NOR flash could have left (any instant
-/// between two calls is one), and every consumer is a cache of files on the card.
+/// Without a file (the board's profile keeps the image off the card) the image starts erased at every boot and sync()
+/// has nothing to do. With one, the file is a header block (kHeaderBlockBytes) and then the image. A page
+/// (kMapPageBytes) is read from it the first time anything reads, programs or maps it. sync() writes the sectors
+/// changed since the last one, between a header that says dirty and one that says clean. A power cut loses what was
+/// not synced, and a cut inside sync() leaves the header dirty, so the next boot starts erased. Each is a state a power
+/// cut on NOR flash could have left (any instant between two calls is one), and every consumer is a cache of files on
+/// the card.
 ///
 /// Thread-safe, unlike flash needs to be: a lazy load or a dirty bit must not interleave with a sync.
 class PsramImageFlash final : public NorFlash {
  public:
   static constexpr uint32_t kHeaderBlockBytes = 4096;
 
-  /// Over `bytes` of `image` (whole pages; the caller's, for this instance's life), kept in `file`.
-  PsramImageFlash(uint8_t* image, const uint32_t bytes, AreaImageFile& file)
+  /// Over `bytes` of `image` (whole pages; the caller's, for this instance's life), kept in `file`, or in PSRAM only
+  /// when `file` is null.
+  PsramImageFlash(uint8_t* image, const uint32_t bytes, AreaImageFile* file)
       : image_(image), bytes_(bytes), file_(file) {}
 
   /// Reads the file's header. A clean image of this size is used, each page loaded as it is first touched; anything
-  /// else gives an erased image, which the next sync() writes out whole. False without memory for the two bitmaps
+  /// else, or no file at all, gives an erased image, which the next sync() writes out whole when there is a file. False
+  /// without memory for the two bitmaps
   /// (~0.1 KB for the default size) or for a size that is not whole pages.
   bool begin();
 
@@ -60,6 +64,7 @@ class PsramImageFlash final : public NorFlash {
   /// Mapping costs no MMU page here: as many as the image has.
   uint32_t freeMapPages() const override { return bytes_ / kMapPageBytes; }
   /// Writes every sector changed since the last sync to the file. False when the card refused; they stay pending.
+  /// Without a file, nothing to do.
   bool sync() override;
 
  private:
@@ -76,7 +81,7 @@ class PsramImageFlash final : public NorFlash {
 
   uint8_t* image_;
   uint32_t bytes_;
-  AreaImageFile& file_;
+  AreaImageFile* file_;
   std::unique_ptr<uint32_t[]> loaded_;  // a bit per page: its bytes are in the image
   std::unique_ptr<uint32_t[]> dirty_;   // a bit per sector: changed since the last sync
   bool fileWhole_ = false;              // the file holds a whole image of this size, so sync() writes in place

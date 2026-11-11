@@ -30,7 +30,7 @@ constexpr uint32_t kFileBytes = PsramImageFlash::kHeaderBlockBytes + kImageBytes
 // A boot: fresh PSRAM (not zeroed: nothing may rely on what the allocator left) over the card as it is.
 struct Boot {
   explicit Boot(SimImageFile& file, const uint32_t bytes = kImageBytes)
-      : psram(bytes, 0xA5), area(psram.data(), bytes, file) {}
+      : psram(bytes, 0xA5), area(psram.data(), bytes, &file) {}
   std::vector<uint8_t> psram;
   PsramImageFlash area;
 };
@@ -310,6 +310,24 @@ TEST(PsramImageFlash, AFileOfAnotherSizeOrABadHeaderIsNoImage) {
   Boot bad(file);
   ASSERT_TRUE(bad.area.begin());
   EXPECT_TRUE(allErased(contents(bad.area))) << "a header that fails its CRC";
+}
+
+TEST(PsramImageFlash, WithoutAFileItStartsErasedAndNeverTouchesTheCard) {
+  // A board whose profile keeps the image off the card (the SDK's default).
+  std::vector<uint8_t> psram(kImageBytes, 0xA5);
+  {
+    PsramImageFlash area(psram.data(), kImageBytes, nullptr);
+    ASSERT_TRUE(area.begin());
+    EXPECT_TRUE(allErased(contents(area)));
+    fill(area, kPage + 3, 500, 0xD1);
+    const uint8_t* const mapped = area.map(kPage, 16);
+    ASSERT_NE(nullptr, mapped);
+    EXPECT_EQ(0xD1, mapped[3]);
+    EXPECT_TRUE(area.sync()) << "nothing to write, nothing failed";
+  }
+  PsramImageFlash again(psram.data(), kImageBytes, nullptr);
+  ASSERT_TRUE(again.begin());
+  EXPECT_TRUE(allErased(contents(again))) << "the next boot starts erased";
 }
 
 TEST(PsramImageFlash, RefusesASizeThatIsNotWholePages) {

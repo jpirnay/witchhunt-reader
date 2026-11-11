@@ -1,8 +1,9 @@
 # How FlashArea::get() picks the board's area: one executable per scenario, since the pick is made once per run. The
 # real FlashArea.cpp and both backends, over test/flash_lang_partition's in-memory partition, this directory's
-# esp_heap_caps.h for the PSRAM, and test/shims' HalStorage for the card (which holds no file).
+# esp_heap_caps.h for the PSRAM, HalCapabilities.h for the board's profile, and test/shims' HalStorage for the card
+# (which holds no file and takes no write).
 # scenario;FLASH_AREA_PSRAM_IMAGE
-foreach(case "0;0" "1;1" "2;1" "3;1" "4;2")
+foreach(case "0;0" "1;1" "2;1" "3;1" "4;2" "5;1")
   list(GET case 0 scenario)
   list(GET case 1 image)
   set(target FlashAreaSelectTest${scenario})

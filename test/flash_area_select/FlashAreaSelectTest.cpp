@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include "FlashArea.h"
+#include "HalCapabilities.h"
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
 
@@ -28,7 +29,7 @@ TEST(FlashAreaSelect, APartitionComesFirst) {
   EXPECT_EQ(area, FlashArea::get()) << "picked once";
 }
 #elif FLASH_AREA_SCENARIO == 2
-TEST(FlashAreaSelect, WithoutAPartitionThePsramImage) {
+TEST(FlashAreaSelect, WithoutAPartitionThePsramImageInPsramOnly) {
   fake_flash::reset(0);
   NorFlash* const area = FlashArea::get();
   ASSERT_NE(nullptr, area);
@@ -36,7 +37,20 @@ TEST(FlashAreaSelect, WithoutAPartitionThePsramImage) {
   EXPECT_EQ(kImagePages, area->freeMapPages()) << "the image: a mapping costs no MMU page";
   uint8_t byte = 0;
   ASSERT_TRUE(area->read(kPartitionBytes - 1, &byte, 1));
-  EXPECT_EQ(0xFF, byte) << "no image on the card: erased";
+  EXPECT_EQ(0xFF, byte) << "erased";
+  ASSERT_TRUE(area->program(0, &byte, 1));
+  EXPECT_TRUE(area->sync()) << "the profile's default: nothing goes to the card";
+}
+#elif FLASH_AREA_SCENARIO == 5
+TEST(FlashAreaSelect, AProfileThatKeepsTheImageOnTheCardSyncsToIt) {
+  fake_flash::reset(0);
+  HalCapabilities::g_flashAreaOnCard = true;
+  NorFlash* const area = FlashArea::get();
+  ASSERT_NE(nullptr, area);
+  EXPECT_EQ(kImagePages, area->freeMapPages());
+  const uint8_t byte = 0;
+  ASSERT_TRUE(area->program(0, &byte, 1));
+  EXPECT_FALSE(area->sync()) << "the image goes to the card, which test/shims' HalStorage refuses";
 }
 #elif FLASH_AREA_SCENARIO == 3
 TEST(FlashAreaSelect, WithoutAPartitionOrPsramThereIsNone) {
