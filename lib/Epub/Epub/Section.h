@@ -11,6 +11,7 @@
 #include "Epub.h"
 #include "FlowContext.h"
 #include "FontSizeLadder.h"
+#include "ParagraphIndent.h"
 #include "SpinePageIndex.h"
 
 class Page;
@@ -204,6 +205,9 @@ class Section {
     uint16_t lineHeightEmPx = 0;
     bool extraParagraphSpacing = false;
     uint8_t paragraphAlignment = 0;
+    // The reader's Paragraph Indent, a stored ParagraphIndent (ParagraphIndent.h). Hashed only when not Book's Style,
+    // so the layouts made before the setting existed keep their key.
+    uint8_t paragraphIndent = static_cast<uint8_t>(ParagraphIndent::FromBook);
     uint16_t viewportWidth = 0;
     uint16_t viewportHeight = 0;
     bool hyphenationEnabled = false;
