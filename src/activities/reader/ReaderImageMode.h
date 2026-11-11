@@ -37,6 +37,15 @@ constexpr bool imagePageOwesRefresh(const uint8_t mode) {
   return mode != CrossPointSettings::IMAGES_SUPPRESS && imagesInGray(mode);
 }
 
+// What "Refresh after image pages" still owes once a page is drawn. `owedBefore` is what was pending as the draw
+// began: a new page has paid it already, so it arrives set only on a redraw of the page on screen (a clock tick, a menu
+// closing), which keeps it for the turn away from that page. `drewImages`: this draw put an image, not a placeholder,
+// on the panel. A draw in a mode that leaves no gray owes nothing, so a Black & White redraw also drops the debt a
+// Display draw of the same page left.
+constexpr bool refreshOwedAfterDraw(const bool owedBefore, const bool drewImages, const uint8_t mode) {
+  return imagePageOwesRefresh(mode) && (owedBefore || drewImages);
+}
+
 // The page summary's images= field: none on the page, drawn with their gray pass, or in black and white.
 constexpr const char* logLabel(const bool pageHasImages, const uint8_t mode) {
   return !pageHasImages ? "none" : imagesInGray(mode) ? "gray" : "bw";

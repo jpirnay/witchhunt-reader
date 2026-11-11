@@ -6325,12 +6325,15 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   lastPageDisplayModeByte_ = renderer.getLastDisplayModeByte();
   const auto tDisplay = millis();
 
-  // Schedule a half-refresh on the next page turn after an image page to reduce ghosting.
+  // Schedule a half-refresh on the next page turn after an image page to reduce ghosting. A redraw of the page on
+  // screen kept the debt its earlier draw left (above); a redraw in Black & White replaces that draw's gray and drops
+  // it. The placeholder test stats each image's cache, so only where the mode owes the refresh at all.
   // Must be checked BEFORE page is moved into pendingGrayscale_ below.
-  if (page->hasImages() && ReaderImageMode::imagePageOwesRefresh(getEffectiveImageRendering()) &&
-      !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome)) {
-    pendingHalfRefreshAfterImagePage = true;
-  }
+  const uint8_t imageMode = getEffectiveImageRendering();
+  const bool drewImages = ReaderImageMode::imagePageOwesRefresh(imageMode) && page->hasImages() &&
+                          !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome);
+  pendingHalfRefreshAfterImagePage =
+      ReaderImageMode::refreshOwedAfterDraw(pendingHalfRefreshAfterImagePage, drewImages, imageMode);
 
   if (singlePushAaThisRender) {
     // Nothing to schedule and nothing to restore: the planes were staged before
