@@ -29,8 +29,8 @@
 #define CROSSPOINT_BOARD_NAME "m5"
 #elif FREEINK_DEVICE_MURPHY
 #define CROSSPOINT_BOARD_NAME "murphy"
-#elif FREEINK_DEVICE_DELINK
-#define CROSSPOINT_BOARD_NAME "delink"
+#elif FREEINK_DEVICE_SILKSCREEN  // formerly de-link; the SDK maps FREEINK_DEVICE_DELINK onto it
+#define CROSSPOINT_BOARD_NAME "silkscreen"
 #else
 #error "FirmwareBoardTag: no FREEINK_DEVICE_* flag set; cannot derive board name"
 #endif
