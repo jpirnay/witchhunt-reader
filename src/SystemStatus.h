@@ -82,6 +82,7 @@ struct SystemStatus {
   uint64_t sdFreeBytes;
   uint64_t fontCacheUsedBytes;   // bytes used in the flash font partition (0 if empty)
   uint64_t fontCacheTotalBytes;  // total size of the flash font partition
+  FlashArea::Backend flashArea;  // where that area is: the partition, a PSRAM image, or none
   // Power behaviour since boot. lightSleepSeconds is time the chip was actually
   // halted by the idle light-sleep path; lightSleepPercent is that as a share of
   // uptime, which is the readable proxy for average current. deepSleepSeconds is
@@ -157,6 +158,7 @@ struct SystemStatus {
       const NorFlash* const area = FlashArea::get();
       s.fontCacheTotalBytes = area ? static_cast<uint64_t>(area->size()) : 0;
       s.fontCacheUsedBytes = area ? FlashFontPartition::cachedBytes() : 0;
+      s.flashArea = FlashArea::backend();
     }
 
     const wifi_mode_t mode = WiFi.getMode();

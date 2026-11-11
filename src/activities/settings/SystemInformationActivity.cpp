@@ -211,14 +211,24 @@ void SystemInformationActivity::render(RenderLock&&) {
   drawRow(tr(STR_MEM_COMBINED),
           formatBytesTriple(status.freeHeapBytes, status.minFreeHeapBytes, status.maxAllocHeapBytes));
 
-  drawSection(tr(STR_SEC_FLASH), status.fontCacheTotalBytes > 0 ? 3 : 2);
+  drawSection(tr(STR_SEC_FLASH), 3);
   drawRow(tr(STR_APP_PARTITION), formatBytes(status.flashAppPartitionSize));
   drawRow(tr(STR_FLASH_TOTAL), formatBytes(status.flashBytes));
-  if (status.fontCacheTotalBytes > 0) {
-    const std::string fontCacheValue = status.fontCacheUsedBytes > 0 ? formatBytes(status.fontCacheUsedBytes) + " / " +
-                                                                           formatBytes(status.fontCacheTotalBytes)
-                                                                     : "- / " + formatBytes(status.fontCacheTotalBytes);
-    drawRow(tr(STR_FONT_CACHE), fontCacheValue);
+  // The flash area's state is what a report about an English interface or missing TrueType fonts needs first: no
+  // `spiffs` partition (an install that kept another firmware's partition table), or a PSRAM image in its place.
+  const std::string areaBytes =
+      (status.fontCacheUsedBytes > 0 ? formatBytes(status.fontCacheUsedBytes) : std::string("-")) + " / " +
+      formatBytes(status.fontCacheTotalBytes);
+  switch (status.flashArea) {
+    case FlashArea::Backend::Partition:
+      drawRow(tr(STR_FONT_CACHE), areaBytes);
+      break;
+    case FlashArea::Backend::PsramImage:
+      drawRow(tr(STR_FONT_CACHE), areaBytes + " (PSRAM)");
+      break;
+    case FlashArea::Backend::None:
+      drawRow(tr(STR_FONT_CACHE), tr(STR_FLASH_AREA_MISSING));
+      break;
   }
 
   // Uptime, light sleep, battery, and deep sleep when known.
