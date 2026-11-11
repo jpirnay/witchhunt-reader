@@ -5641,12 +5641,13 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
     deferredDropCapLine_ = nullptr;
   }
 
-  // The line's glyphs reach the font's full line height below its top, more than the advance under a tight spacing.
+  // The line's glyphs reach the font's full line height below its text's top, more than the advance under a tight
+  // spacing; a line's images lower its text by box.textTop.
   const int glyphHeight =
       static_cast<int>(renderer.getLineHeight(effectiveFontId(lineStyle)) * lineStyle.fontSizeMultiplier + 0.5f) *
           maxPct / 100 +
       band;
-  lastGlyphBottom_ = static_cast<int16_t>(currentPageNextY + std::max(lineHeight, glyphHeight));
+  lastGlyphBottom_ = static_cast<int16_t>(currentPageNextY + std::max(lineHeight, box.textTop + glyphHeight));
   if (!boxScopes_.empty()) {
     noteBoxContent(lastGlyphBottom_);
     if (floatPlaced) noteBoxContent(currentPageNextY + (activeFloatBottom_ - activeFloatTop_));

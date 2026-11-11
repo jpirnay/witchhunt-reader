@@ -911,6 +911,8 @@ void ParsedText::addInlineObject(const uint16_t id, const uint16_t width, const 
   // two objects (a run of emoji images) a line may end too. The word after an object is glued to it the same way:
   // addWord reads U+FFFC as the neutral it is.
   TokenBoundary::Boundary boundary{attachToPrevious, false};
+  // After a run of kept spaces: no gap of its own (the run is the space), and a line may end there, as addWord has it.
+  if (!attachToPrevious && !words.empty() && isKeptSpaceRun(words.size() - 1)) boundary.noSpaceBefore = true;
   if (attachToPrevious && !words.empty() && words.back() != " ") {
     if (isObject(words.size() - 1)) {
       boundary = TokenBoundary::Boundary{false, true};
