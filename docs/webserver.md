@@ -352,7 +352,10 @@ a font of its script, in three groups. English needs none of them.
 
 **Download** installs a pack, and the number beside **Language packs** in the menu counts the packs with
 an update. **Update all packs** updates the packs you have, but fetches no missing one: install the
-languages you need from their rows. A pack is deleted in the Font Manager on the reader.
+languages you need from their rows. **Delete** removes an installed pack, as the Font Manager on the reader
+does; it first says what that changes. Without the interface language's own pack the menus are English from
+the reader's next start; without a hyphenation pack its language's books are no longer hyphenated; without a
+title pack, CJK book titles outside a book show boxes for the characters the menu fonts lack.
 
 ## 8. Dictionaries
 

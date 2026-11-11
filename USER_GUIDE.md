@@ -850,7 +850,7 @@ the firmware keeps its room for everything else. A pack you do not install costs
 * **Updating from 2.40 or 2.41RC** keeps your interface language without a download: on the first start the reader writes
   the language it kept in its memory to the card as its pack. Chinese, Japanese and Korean, which only 2.41RC had, are
   downloaded once.
-* **Removing a pack** in the Font Manager makes the interface English from the next start.
+* **Removing a pack** in the Font Manager, or with **Delete** under Language packs in the web interface's Font Manager, makes the interface English from the next start.
 
 #### Hyphenation packs
 
@@ -874,7 +874,7 @@ the firmware keeps its room for everything else. A pack you do not install costs
   book that needs it ("Preparing hyphenation...", about a second for German, once). The X4 Pro, T5 S3 and Murphy M3 read
   it into memory when the book opens.
 * **Indic languages** break a line between two syllables of a word, without a hyphen.
-* **Removing a pack** in the Font Manager stops hyphenating that language's books.
+* **Removing a pack** in the Font Manager, or with **Delete** under Language packs in the web interface's Font Manager, stops hyphenating that language's books.
 * **Updating from 2.40 or earlier**, which had German, French, Spanish, Italian, Portuguese, Polish, Swedish, Russian and
   Ukrainian built in: their books are laid out once more, and are hyphenated again once their pack is installed.
 

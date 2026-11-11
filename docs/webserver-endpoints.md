@@ -734,17 +734,21 @@ from the font server over TLS.
 | Method | Path                  | Request                                                 | Response                                                                 |
 | ------ | --------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------ |
 | GET    | `/api/fonts`          | -                                                       | `{"families":[{"name","outline","sizes":[pt...],"files":[{"name","size"}]}],"maxFamilies":N}` |
-| GET    | `/api/fonts/manifest` | -                                                       | `{"ok":true,"baseUrl","families":[{"name","description","installed","hasUpdate","ownFiles","hyphenation","language","interfacePack","totalSize","fileCount"}]}` |
+| GET    | `/api/fonts/manifest` | -                                                       | `{"ok":true,"baseUrl","families":[{"name","description","installed","hasUpdate","ownFiles","hyphenation","language","interfacePack","inUse","totalSize","fileCount"}]}` |
 | POST   | `/api/fonts/download` | `{"family":"Name"}`, or `{"all":true}` with an optional `"list":"fonts"` or `"packs"` | `{"ok":true,"installedCount":N,"notListed":["Name",...]}` |
 | POST   | `/api/fonts/upload`   | multipart: one `.ttf`, `.otf` or `.cpfont` file; `?family=Name` in the URL | `{"ok":true,"listed":true}`                         |
-| POST   | `/api/fonts/delete`   | `{"family":"Name"}`                                     | `{"ok":true}`                                                            |
+| POST   | `/api/fonts/delete`   | `{"family":"Name"}`, or `{"family":"Name","pack":true}` for a language or hyphenation pack | `{"ok":true}`                    |
 
 Notes:
 - `/api/fonts` rescans the SD card first. `maxFamilies` is the registry's limit on installed SD families.
 - `/api/fonts` marks an outline (TrueType or OpenType) family with `"outline":true`; its `sizes` are empty.
 - `manifest` marks a hyphenation pack `"hyphenation":true`, an interface language pack `"language":true` and a
   CJK interface pack (ChineseUI and the like) `"interfacePack":true`; the Font Manager page lists these three
-  under Language packs, apart from the fonts.
+  under Language packs, apart from the fonts. `inUse` marks an installed pack the interface language uses (its
+  strings, its hyphenation pack or its CJK interface pack).
+- `delete` with `"pack":true` deletes a language or hyphenation pack as the reader's Font Manager does: the device
+  fetches the manifest (so it must be online), finds the pack and removes its files. A CJK interface pack is a font
+  folder and goes without `pack`.
 - `download` with `all` installs every missing family the manifest puts in Download all, and every update;
   with `"list":"fonts"`, only those that are no pack; with `"list":"packs"`, only the updates of the installed packs
   (the three kinds above), no missing one. With `family`, that one (the CJK families are installed one at a
@@ -776,6 +780,7 @@ Notes:
 | 400    | `{"ok":false,"error":"Missing family"}`                 | `download` with neither `family` nor `all` |
 | 400    | `{"ok":false,"error":"<reason>"}`                       | `upload` refused: the family or file name, the folder's other kind of font, the card's room, the file's start, a font the engine cannot draw, or a write |
 | 400    | `{"error":"Invalid request"}`                           | `delete` body has no `family`              |
+| 404    | `{"ok":false,"error":"Pack not found in manifest"}`     | `delete` with `pack` of no pack the manifest lists |
 | 404    | `{"ok":false,"error":"Family not found in manifest"}`   | `download` of an unknown family            |
 | 500    | `{"ok":false,"error":"<message>"}`                      | Manifest fetch or install failed; install failures also carry `family` and `installedCount` |
 | 500    | `{"ok":false,"error":"Out of memory"}`                  | `download` could not build its list        |
