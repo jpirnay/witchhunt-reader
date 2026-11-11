@@ -733,19 +733,23 @@ from the font server over TLS.
 
 | Method | Path                  | Request                                                 | Response                                                                 |
 | ------ | --------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------ |
-| GET    | `/api/fonts`          | -                                                       | `{"families":[{"name","outline","sizes":[pt...],"files":[{"name","size"}]}],"maxFamilies":N}` |
-| GET    | `/api/fonts/manifest` | -                                                       | `{"ok":true,"baseUrl","families":[{"name","description","installed","hasUpdate","ownFiles","hyphenation","language","interfacePack","inUse","totalSize","fileCount"}]}` |
+| GET    | `/api/fonts`          | -                                                       | `{"maxFamilies":N,"families":[{"name","outline","sizes":[pt...],"files":[{"name","size"}]}]}` |
+| GET    | `/api/fonts/manifest` | -                                                       | `{"families":[{"name","description","installed","hasUpdate","ownFiles","hyphenation","language","interfacePack","inUse","totalSize","fileCount"}],"ok":true}` |
 | POST   | `/api/fonts/download` | `{"family":"Name"}`, or `{"all":true}` with an optional `"list":"fonts"` or `"packs"` | `{"ok":true,"installedCount":N,"notListed":["Name",...]}` |
 | POST   | `/api/fonts/upload`   | multipart: one `.ttf`, `.otf` or `.cpfont` file; `?family=Name` in the URL | `{"ok":true,"listed":true}`                         |
 | POST   | `/api/fonts/delete`   | `{"family":"Name"}`, or `{"family":"Name","pack":true}` for a language or hyphenation pack | `{"ok":true}`                    |
 
 Notes:
+- Both lists are sent a family at a time (chunked), as `/api/settings` is: the device never builds the whole
+  answer, and `manifest` reads the downloaded manifest off the card family by family instead of holding it.
+  `manifest` answers 500 when the manifest cannot be fetched or is not one the reader reads; a read that breaks off
+  once the list has started ends it with `"ok":false,"error"`, so read `ok` after the families.
 - `/api/fonts` rescans the SD card first. `maxFamilies` is the registry's limit on installed SD families.
 - `/api/fonts` marks an outline (TrueType or OpenType) family with `"outline":true`; its `sizes` are empty.
 - `manifest` marks a hyphenation pack `"hyphenation":true`, an interface language pack `"language":true` and a
   CJK interface pack (ChineseUI and the like) `"interfacePack":true`; the Font Manager page lists these three
   under Language packs, apart from the fonts. `inUse` marks an installed pack the interface language uses (its
-  strings, its hyphenation pack or its CJK interface pack).
+  strings, its hyphenation pack or its CJK interface pack). `interfacePack` and `inUse` appear only when true.
 - `delete` with `"pack":true` deletes a language or hyphenation pack as the reader's Font Manager does: the device
   fetches the manifest (so it must be online), finds the pack and removes its files. A CJK interface pack is a font
   folder and goes without `pack`.
