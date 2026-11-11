@@ -1,15 +1,9 @@
 #include "FlashAreaRegion.h"
 
 #include <Logging.h>
-#include <spi_flash_mmap.h>
 
-#include <cstring>
-
+#include "FlashArea.h"
 #include "FlashFontPartition.h"
-
-#if CONFIG_SPIRAM
-#include <esp_memory_utils.h>
-#endif
 
 namespace {
 // The font area's mappings (begin()), not a region's (beginRegion()): see liveFontAreaMappings().
@@ -17,17 +11,17 @@ uint32_t s_liveFontAreaMappings = 0;
 }  // namespace
 
 FlashAreaRegion::~FlashAreaRegion() {
-  for (Mapping& m : maps_) {
-    if (m.ptr != nullptr) unmap(m.ptr);
+  for (const uint8_t* m : maps_) {
+    if (m != nullptr) unmap(m);
   }
 }
 
 uint32_t FlashAreaRegion::liveFontAreaMappings() { return s_liveFontAreaMappings; }
 
 bool FlashAreaRegion::begin() {
-  part_ = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
-  if (!part_) {
-    LOG_ERR("ENF", "spiffs partition not found");
+  area_ = FlashArea::get();
+  if (!area_) {
+    LOG_ERR("ENF", "no flash area");
     return false;
   }
   base_ = 0;
@@ -37,10 +31,10 @@ bool FlashAreaRegion::begin() {
 }
 
 bool FlashAreaRegion::beginRegion(const uint32_t base, const uint32_t size) {
-  part_ = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
-  if (!part_ || base % kMapPageBytes != 0 || base > part_->size || size > part_->size - base) {
+  area_ = FlashArea::get();
+  if (!area_ || base % kMapPageBytes != 0 || base > area_->size() || size > area_->size() - base) {
     LOG_ERR("ENF", "no region of %u B at %u", static_cast<unsigned>(size), static_cast<unsigned>(base));
-    part_ = nullptr;
+    area_ = nullptr;
     return false;
   }
   base_ = base;
@@ -51,7 +45,7 @@ bool FlashAreaRegion::beginRegion(const uint32_t base, const uint32_t size) {
 
 bool FlashAreaRegion::read(const uint32_t offset, void* dst, const uint32_t len) const {
   if (!inRange(offset, len)) return false;
-  return esp_partition_read(part_, base_ + offset, dst, len) == ESP_OK;
+  return area_->read(base_ + offset, dst, len);
 }
 
 bool FlashAreaRegion::writable(const char* what, const uint32_t offset, const uint32_t len) const {
@@ -67,30 +61,9 @@ bool FlashAreaRegion::writable(const char* what, const uint32_t offset, const ui
   return true;
 }
 
-bool FlashAreaRegion::write(const uint32_t offset, const void* src, const uint32_t len) {
-  const esp_err_t err = esp_partition_write(part_, base_ + offset, src, len);
-  if (err != ESP_OK) {
-    LOG_ERR("ENF", "program of %u B at %u failed: %d", static_cast<unsigned>(len), static_cast<unsigned>(offset), err);
-    return false;
-  }
-  return true;
-}
-
 bool FlashAreaRegion::program(const uint32_t offset, const void* src, const uint32_t len) {
   if (!writable("program", offset, len)) return false;
-#if CONFIG_SPIRAM
-  if (!esp_ptr_internal(src)) {
-    const auto* bytes = static_cast<const uint8_t*>(src);
-    for (uint32_t done = 0; done < len;) {
-      const uint32_t chunk = len - done < sizeof bounce_ ? len - done : static_cast<uint32_t>(sizeof bounce_);
-      std::memcpy(bounce_, bytes + done, chunk);
-      if (!write(offset + done, bounce_, chunk)) return false;
-      done += chunk;
-    }
-    return true;
-  }
-#endif
-  return write(offset, src, len);
+  return area_->program(base_ + offset, src, len);
 }
 
 bool FlashAreaRegion::erase(const uint32_t offset, const uint32_t len) {
@@ -100,33 +73,21 @@ bool FlashAreaRegion::erase(const uint32_t offset, const uint32_t len) {
             static_cast<unsigned>(offset));
     return false;
   }
-  const esp_err_t err = esp_partition_erase_range(part_, base_ + offset, len);
-  if (err != ESP_OK) {
-    LOG_ERR("ENF", "erase of %u B at %u failed: %d", static_cast<unsigned>(len), static_cast<unsigned>(offset), err);
-    return false;
-  }
-  return true;
+  return area_->erase(base_ + offset, len);
 }
 
 const uint8_t* FlashAreaRegion::map(const uint32_t offset, const uint32_t len) {
   if (len == 0 || !inRange(offset, len)) return nullptr;
   for (int i = 0; i < kMaxMaps; ++i) {
-    Mapping& m = maps_[i];
-    if (m.ptr != nullptr) continue;
-    const void* ptr = nullptr;
-    const esp_err_t err = esp_partition_mmap(part_, base_ + offset, len, ESP_PARTITION_MMAP_DATA, &ptr, &m.handle);
-    if (err != ESP_OK) {
-      LOG_ERR("ENF", "map of %u B at %u failed: %d (%u pages free)", static_cast<unsigned>(len),
-              static_cast<unsigned>(offset), err, static_cast<unsigned>(freeMapPages()));
-      m = Mapping{};
-      return nullptr;
-    }
-    m.ptr = static_cast<const uint8_t*>(ptr);
+    if (maps_[i] != nullptr) continue;
+    const uint8_t* const ptr = area_->map(base_ + offset, len);
+    if (ptr == nullptr) return nullptr;
+    maps_[i] = ptr;
     if (fontArea_) {
       fontAreaMaps_ |= static_cast<uint8_t>(1u << i);
       ++s_liveFontAreaMappings;
     }
-    return m.ptr;
+    return ptr;
   }
   LOG_ERR("ENF", "map refused: all %d mappings are in use", kMaxMaps);
   return nullptr;
@@ -135,19 +96,16 @@ const uint8_t* FlashAreaRegion::map(const uint32_t offset, const uint32_t len) {
 void FlashAreaRegion::unmap(const uint8_t* mapped) {
   if (mapped == nullptr) return;
   for (int i = 0; i < kMaxMaps; ++i) {
-    Mapping& m = maps_[i];
-    if (m.ptr != mapped) continue;
-    esp_partition_munmap(m.handle);
+    if (maps_[i] != mapped) continue;
+    area_->unmap(mapped);
     const auto bit = static_cast<uint8_t>(1u << i);
     if (fontAreaMaps_ & bit) {
       fontAreaMaps_ = static_cast<uint8_t>(fontAreaMaps_ & ~bit);
       --s_liveFontAreaMappings;
     }
-    m = Mapping{};
+    maps_[i] = nullptr;
     return;
   }
 }
 
-uint32_t FlashAreaRegion::freeMapPages() const {
-  return static_cast<uint32_t>(spi_flash_mmap_get_free_pages(SPI_FLASH_MMAP_DATA));
-}
+uint32_t FlashAreaRegion::freeMapPages() const { return area_ ? area_->freeMapPages() : 0; }

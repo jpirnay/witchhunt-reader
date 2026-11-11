@@ -1,8 +1,11 @@
-# The real FlashAreaRegion and FlashFontPartition over test/flash_lang_partition's in-memory `spiffs` partition: which
-# mappings keep the .cpfont cache off the partition. This directory's sdkconfig.h (no PSRAM: the boards with a
-# hyphenation region) and spi_flash_mmap.h stand in for ESP-IDF's. Logging stays compiled out.
+# The real FlashAreaRegion and FlashFontPartition, through the flash area's partition backend, over
+# test/flash_lang_partition's in-memory `spiffs` partition: which mappings keep the .cpfont cache off the partition.
+# That directory's sdkconfig.h (no PSRAM: the boards with a hyphenation region) and spi_flash_mmap.h stand in for
+# ESP-IDF's. Logging stays compiled out.
 add_executable(FlashAreaRegionTest
   FlashAreaRegionTest.cpp
+  ${REPO_ROOT}/lib/hal/EspPartitionFlash.cpp
+  ${REPO_ROOT}/lib/hal/FlashArea.cpp
   ${REPO_ROOT}/lib/hal/FlashAreaRegion.cpp
   ${REPO_ROOT}/lib/hal/FlashFontPartition.cpp
 )
