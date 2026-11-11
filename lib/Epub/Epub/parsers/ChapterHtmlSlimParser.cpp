@@ -6718,6 +6718,7 @@ std::unique_ptr<ParsedText> ChapterHtmlSlimParser::makeCellText() {
   text->setShapingLatch(&shapingDegradedAny_);
   text->setVertical(vertical_);
   text->lendLayoutScratch(&layoutScratch_);
+  text->setFirstWordReserve(ParsedText::kCellFirstWordReserve);
   return text;
 }
 

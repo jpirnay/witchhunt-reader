@@ -426,6 +426,9 @@ class ParsedText {
   // layout gate. std::vector growth cannot fail gracefully under -fno-exceptions, so the
   // check has to happen before the reserve.
   bool wordGrowthRefused_ = false;
+  // The word arrays' first reserve, in tokens: 16 for a paragraph; a table cell takes 4 (setFirstWordReserve), since a
+  // buffered row holds every cell's arrays at once and most cells are a few words.
+  uint8_t firstWordReserve_ = kParagraphFirstWordReserve;
   // The most tokens the parser lets the block hold before its long-block split (setSplitCapacity); 0: no split.
   // reserveWords grows the word arrays no further than it: a block of 97 tokens holds 97 entries, not 128.
   size_t splitCapacity_ = 0;
@@ -716,6 +719,10 @@ class ParsedText {
   // word arrays grow to it and no further, and past it by 16s (a ruby group may hold a split up a few tokens). 0: the
   // arrays double as they grow, as a table cell's do.
   void setSplitCapacity(const size_t tokens) { splitCapacity_ = tokens; }
+  static constexpr uint8_t kParagraphFirstWordReserve = 16;
+  static constexpr uint8_t kCellFirstWordReserve = 4;
+  // The word arrays' first reserve (see firstWordReserve_); they double from there.
+  void setFirstWordReserve(const uint8_t tokens) { firstWordReserve_ = tokens; }
   size_t wordCapacity() const { return words.capacity(); }
   uint32_t lastLineVisibleOffset() const { return lastLineVisibleOffset_; }
   uint32_t lastLineTokenCount() const { return lastLineTokenCount_; }

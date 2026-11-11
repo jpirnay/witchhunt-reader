@@ -719,7 +719,7 @@ bool ParsedText::reserveWords(const size_t additional) {
       wordVisibleOffsets.capacity() >= requiredSize) {
     return true;
   }
-  size_t newCapacity = std::max<size_t>(16, words.capacity());
+  size_t newCapacity = std::max<size_t>(firstWordReserve_, words.capacity());
   while (newCapacity < requiredSize) {
     newCapacity *= 2;
   }
