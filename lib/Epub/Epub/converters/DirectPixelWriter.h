@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include <cassert>
+#include <climits>
 
 // Direct framebuffer writer that eliminates per-pixel overhead from the image
 // rendering hot path.  Pre-computes orientation transform as linear coefficients
@@ -264,6 +265,14 @@ struct DirectGray8Writer {
   int canvasWidth;
   int canvasHeight;
   DirectPixelWriter xf;
+  // A 256-entry tone curve every sample passes through on its way to the canvas (the reader's pictures, see
+  // ReaderGrayCanvas::kPictureTone). Null: the sample is stored as it comes.
+  const uint8_t* tone = nullptr;
+  // Only logical rows [rowsFrom, rowsTo) are stored: a picture split over pages decodes whole and keeps its own
+  // slice (ImageBlock's crop). Every row by default.
+  int rowsFrom = INT_MIN;
+  int rowsTo = INT_MAX;
+  bool rowStored = true;
 
   // `gray8Canvas` is the PHYSICAL panel buffer (HalDisplay::borrowGray8Canvas),
   // so its extent is the panel's, not the oriented screen's.
@@ -272,10 +281,17 @@ struct DirectGray8Writer {
     stride = gray8Stride;
     canvasWidth = renderer.getDisplayWidth();
     canvasHeight = renderer.getDisplayHeight();
+    tone = nullptr;
+    rowsFrom = INT_MIN;
+    rowsTo = INT_MAX;
+    rowStored = true;
     xf.init(renderer);
   }
 
-  inline void beginRow(int logicalY) { xf.beginRow(logicalY); }
+  inline void beginRow(int logicalY) {
+    rowStored = logicalY >= rowsFrom && logicalY < rowsTo;
+    xf.beginRow(logicalY);
+  }
 
   inline void bandColRange(int xBase, int width, int& colStart, int& colEnd) const {
     xf.bandColRange(xBase, width, colStart, colEnd);
@@ -283,12 +299,13 @@ struct DirectGray8Writer {
 
   // Store one 8-bit sample (0 = black, 255 = white). Must follow beginRow().
   inline void writePixel(int logicalX, uint8_t gray) const {
+    if (!rowStored) return;
     const int phyX = xf.rowPhyXBase + logicalX * xf.phyXStepX;
     const int phyY = xf.rowPhyYBase + logicalX * xf.phyYStepX;
     // One unsigned compare per axis rejects negatives and overruns together —
     // an image placed at a negative offset, or wider than the panel.
     if (static_cast<unsigned>(phyX) >= static_cast<unsigned>(canvasWidth)) return;
     if (static_cast<unsigned>(phyY) >= static_cast<unsigned>(canvasHeight)) return;
-    canvas[static_cast<uint32_t>(phyY) * stride + phyX] = gray;
+    canvas[static_cast<uint32_t>(phyY) * stride + phyX] = tone ? tone[gray] : gray;
   }
 };

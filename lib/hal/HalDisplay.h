@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <BoardConfig.h>  // FREEINK_DRIVER_LGFX_EPD
 #include <EInkDisplay.h>
 
 class HalDisplay {
@@ -229,6 +230,11 @@ class HalDisplay {
   // caller that borrows and then abandons the frame corrupts nothing, because
   // every normal push rebuilds the buffer from the 1-bpp framebuffer.
   uint8_t* borrowGray8Canvas(uint16_t* stride);
+  // Whether this build's panel driver can lend such a buffer at all: the
+  // LovyanGFX EPD driver (LilyGo T5S3, PaperS3) only. Known when building, so
+  // code that paints one is compiled out of every other build; whether the
+  // panel resolves more than four levels is getGrayLevels()'s to say.
+  static constexpr bool kMayLendGray8Canvas = FREEINK_DRIVER_LGFX_EPD != 0;
   // Quantise the borrowed canvas to the panel's native depth and show it as one
   // waveform. The driver picks a bank that can land every level, so this may
   // refresh more thoroughly (and more slowly) than `refreshMode` asked for.

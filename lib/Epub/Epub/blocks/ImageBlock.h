@@ -7,7 +7,8 @@
 
 #include "Block.h"
 
-class BuildArena;  // lib/Memory — optional decode scratch (see image_scratch below)
+class BuildArena;     // lib/Memory — optional decode scratch (see image_scratch below)
+struct RenderConfig;  // converters/ImageToFramebufferDecoder.h
 
 // Source file size above which an image is considered "large" and rendered as a placeholder
 // until the user explicitly requests it.
@@ -180,6 +181,16 @@ class ImageBlock final : public Block {
   // Called by the AA grayscale passes to give images proper gray tones.
   void renderGrayscaleFromCache(GfxRenderer& renderer, int x, int y) const;
 
+  // On a panel that keeps a deeper gray buffer of its own (GfxRenderer::borrowGray8Canvas(), `canvas` with `stride`
+  // bytes a row), paint this picture's 8-bit samples there, over the box render() draws it in, each through `tone`
+  // (256 entries; null: as decoded). Decoded afresh: no pixel cache holds 8 bits. JPEG and PNG, a slice of a picture
+  // split over pages and a turned one included.
+  //
+  // Only over a picture: where the B/W pass had no pixel cache to draw from, it drew a placeholder or a low-memory
+  // box, and that stays. True when the picture's gray is on the canvas. False when not, and the box then holds what
+  // the B/W pass drew there, put back over a decode that failed part way: a picture without its gray keeps its dither.
+  bool renderGray8(GfxRenderer& renderer, int x, int y, uint8_t* canvas, uint16_t stride, const uint8_t* tone) const;
+
   BlockType getType() override { return IMAGE_BLOCK; }
   bool isEmpty() override { return false; }
 
@@ -233,10 +244,15 @@ class ImageBlock final : public Block {
 
  private:
   void renderPlaceholder(GfxRenderer& renderer, int x, int y, Placeholder kind) const;
-  // The bodies of render() and renderGrayscaleFromCache(), upright at (x, y) in the live orientation.
+  // The bodies of render(), renderGrayscaleFromCache() and renderGray8(), upright at (x, y) in the live orientation.
   void renderUpright(GfxRenderer& renderer, int x, int y, bool forceLoad, bool monochromeOutput,
                      bool alsoCacheOtherVariant);
   void renderGrayscaleUpright(GfxRenderer& renderer, int x, int y) const;
+  bool renderGray8Upright(GfxRenderer& renderer, int x, int y, uint8_t* canvas, uint16_t stride,
+                          const uint8_t* tone) const;
+  // renderGray8Upright's decode: true when the picture's samples are all on the canvas. `decoderRan` says whether a
+  // decoder got as far as writing to it.
+  bool decodeGray8(GfxRenderer& renderer, const RenderConfig& config, bool& decoderRan) const;
   static bool placeholderOnly_;
   static Placeholder placeholderOnlyKind_;
   static uint16_t placeholdersDrawn_;

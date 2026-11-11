@@ -445,6 +445,79 @@ void ImageBlock::renderGrayscaleUpright(GfxRenderer& renderer, const int x, cons
   renderFromCache(renderer, getGrayscaleCachePath(imagePath), x, y, width, height, srcYOffset_, srcHeight_);
 }
 
+bool ImageBlock::renderGray8(GfxRenderer& renderer, const int x, const int y, uint8_t* canvas, const uint16_t stride,
+                             const uint8_t* tone) const {
+  if (!turned_) return renderGray8Upright(renderer, x, y, canvas, stride, tone);
+  bool drawn = false;
+  inReadersFrame(renderer, x, y, getWidth(), getHeight(), [&](const int rx, const int ry) {
+    drawn = renderGray8Upright(renderer, rx, ry, canvas, stride, tone);
+  });
+  return drawn;
+}
+
+bool ImageBlock::renderGray8Upright(GfxRenderer& renderer, const int x, const int y, uint8_t* canvas,
+                                    const uint16_t stride, const uint8_t* tone) const {
+  const int renderedHeight = srcHeight_ > 0 ? srcHeight_ : height;
+  // render()'s own bounds: a box it refused holds nothing to put gray over.
+  if (!canvas || x < 0 || y < 0 || x + width > renderer.getScreenWidth() ||
+      y + renderedHeight > renderer.getScreenHeight()) {
+    return false;
+  }
+  // The B/W pass drew a picture here only from the 1-bit cache, which its warm pass writes; without one it drew a
+  // placeholder or a low-memory box, and that stays.
+  if (!hasPixelCache()) return false;
+
+  DirectGray8Writer writer;
+  writer.init(renderer, canvas, stride);
+  writer.tone = tone;
+  // A slice of a picture split over pages decodes whole, placed srcYOffset_ rows above the slice, and keeps the slice's
+  // rows only. A whole picture is its own slice.
+  writer.rowsFrom = y;
+  writer.rowsTo = y + renderedHeight;
+
+  RenderConfig config;
+  config.x = x;
+  config.y = y - srcYOffset_;
+  config.maxWidth = width;
+  config.maxHeight = height;
+  config.useGrayscale = true;
+  config.useDithering = false;
+  config.monochromeOutput = false;
+  config.useExactDimensions = true;
+  config.gray8 = &writer;
+
+  bool decoderRan = false;
+  if (decodeGray8(renderer, config, decoderRan)) return true;
+  // The rows a failed decode did write go: the box gets back what the B/W pass drew there, the picture's dither.
+  if (decoderRan) renderer.compositeBwRectOntoGray8Canvas({canvas, stride}, x, y, width, renderedHeight);
+  return false;
+}
+
+bool ImageBlock::decodeGray8(GfxRenderer& renderer, const RenderConfig& config, bool& decoderRan) const {
+  if (!HalDisplay::kMayLendGray8Canvas) return false;  // no canvas in this build: none of the decode below
+  // As renderUpright() reaches the bytes: a PNG the archive stores is decoded where it lies (see decodePngInPlace),
+  // anything else from its extract, which the warm pass made for the 1-bit cache.
+  if (!epubFilePath_.empty() && !epubEntryPath_.empty() && !Storage.exists(imagePath.c_str()) &&
+      FsHelpers::hasPngExtension(imagePath)) {
+    decoderRan = true;
+    if (decodePngInPlace(epubFilePath_, epubEntryPath_, renderer, config)) return true;
+  }
+  if (!ensureExtracted()) return false;
+  FsFile file;
+  if (!Storage.openFileForRead("IMG", imagePath, file)) return false;
+  const ImageFormatDetector::Format format = ImageFormatDetector::detect(file);
+  file.close();
+  // The decoders that store 8-bit samples (RenderConfig::gray8). A GIF keeps its dither.
+  if (format != ImageFormatDetector::Format::Jpeg && format != ImageFormatDetector::Format::Png) {
+    LOG_DBG("IMG", "No gray decode for this format, the picture keeps its dither: %s", imagePath.c_str());
+    return false;
+  }
+  ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(format);
+  if (!decoder) return false;
+  decoderRan = true;
+  return decoder->decodeToFramebuffer(imagePath, renderer, config);
+}
+
 // A turned image is never sliced (placeImageBlockAsBlock places it whole), so the copied turned_ is unreachable today.
 std::unique_ptr<ImageBlock> ImageBlock::makeCrop(const int16_t srcYOffset, const int16_t srcHeight) const {
   auto crop =

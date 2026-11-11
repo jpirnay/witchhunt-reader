@@ -83,6 +83,12 @@ class PageHR final : public PageElement {
   static std::unique_ptr<PageHR> deserialize(FsFile& file);
 };
 
+// What a page's pictures came to on the gray canvas (Page::renderImagesGray8).
+struct Gray8Pictures {
+  uint16_t offered = 0;  // pictures on the page, in-cell graphics included
+  uint16_t inGray = 0;   // of those, the ones whose gray is on the canvas; the rest keep what the B/W pass drew
+};
+
 struct TableCell {
   std::vector<std::unique_ptr<TextBlock>> lines;
   std::unique_ptr<ImageBlock> image;  // optional in-cell graphic, drawn below any cell text
@@ -135,6 +141,9 @@ class PageTableFragment final : public PageElement {
   // garbage is discarded by the caller's clearScreen(), mirroring the Page warm pass.
   void warmCellImages(GfxRenderer& renderer, bool forceLoad, bool monochromeOutput,
                       bool alsoWarmGrayscale = false) const;
+  // Page::renderImagesGray8 for the in-cell graphics, each where render() draws it.
+  void renderImagesGray8(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, uint8_t* canvas, uint16_t stride,
+                         const uint8_t* tone, Gray8Pictures& count) const;
 };
 
 class Page {
@@ -195,6 +204,11 @@ class Page {
   // Called by AA grayscale passes after renderTextOnly() so images get proper gray tones.
   // No-op for images without a grayscale cache (they degrade gracefully to BW-only).
   void renderImagesFromGrayscaleCache(GfxRenderer& renderer, int xOffset, int yOffset) const;
+  // On a panel that keeps a deeper gray buffer of its own: each picture of the page, in-cell graphics included, as its
+  // 8-bit samples into that buffer (`canvas`, `stride` bytes a row) where render() draws it, through `tone`
+  // (ImageBlock::renderGray8). Run after render(), whose B/W pass is what a picture without its gray keeps.
+  Gray8Pictures renderImagesGray8(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, uint8_t* canvas,
+                                  uint16_t stride, const uint8_t* tone) const;
   // Decode any missing .pxc pixel caches for images on this page. Called before the
   // BW render so the large (~60 KB contiguous) PNG decoder allocation runs while heap
   // contig is at its peak — before font prewarm and BW backup chunks fragment it.

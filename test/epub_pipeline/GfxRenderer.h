@@ -23,6 +23,7 @@
 #include <GlyphRun.h>
 #include <Utf8.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -85,6 +86,50 @@ class GfxRenderer {
   void drawRect(int, int, int, int, int, bool) const {}
   void fillRect(int, int, int, int, bool = true) const {}
   void fillRectDither(int, int, int, int, Color) const {}
+
+  // --- Borrowed 8-bit canvas (the real renderer's, physical panel layout) ---
+  struct Gray8Target {
+    uint8_t* canvas;
+    uint16_t stride;
+  };
+  // The real renderer's: a logical rectangle of the framebuffer onto the canvas as solid black and white, through the
+  // live orientation (as DirectPixelWriter maps it). Counted, so a test can see the put-back of a failed gray decode.
+  void compositeBwRectOntoGray8Canvas(const Gray8Target& gray8, const int x, const int y, const int width,
+                                      const int height) const {
+    bwRectsComposited++;
+    for (int row = std::max(0, y); row < std::min(y + height, getScreenHeight()); row++) {
+      for (int col = std::max(0, x); col < std::min(x + width, getScreenWidth()); col++) {
+        int phyX = 0;
+        int phyY = 0;
+        toPhysical(col, row, phyX, phyY);
+        if (phyX < 0 || phyX >= getDisplayWidth() || phyY < 0 || phyY >= getDisplayHeight()) continue;
+        const bool black = (frameBuffer_[phyY * getDisplayWidthBytes() + (phyX >> 3)] & (0x80 >> (phyX & 7))) == 0;
+        gray8.canvas[static_cast<size_t>(phyY) * gray8.stride + phyX] = black ? 0x00 : 0xFF;
+      }
+    }
+  }
+  mutable int bwRectsComposited = 0;
+  // DirectPixelWriter's transform, per orientation.
+  void toPhysical(const int x, const int y, int& phyX, int& phyY) const {
+    switch (live_) {
+      case Portrait:
+        phyX = y;
+        phyY = getDisplayHeight() - 1 - x;
+        return;
+      case LandscapeClockwise:
+        phyX = getDisplayWidth() - 1 - x;
+        phyY = getDisplayHeight() - 1 - y;
+        return;
+      case PortraitInverted:
+        phyX = getDisplayWidth() - 1 - y;
+        phyY = x;
+        return;
+      case LandscapeCounterClockwise:
+        phyX = x;
+        phyY = y;
+        return;
+    }
+  }
 
   // --- Font lifecycle (built-in-font behavior: everything is always ready) ---
   bool isFontCacheScanning() const { return false; }

@@ -328,7 +328,8 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
   // Native grayscale short-circuits most of the machinery below: no ditherer, no
   // pixel cache, no companion rendition. All three exist to make 2 bits per pixel
   // carry as much as they can, and this path is not spending 2 bits per pixel.
-  const bool gray8Out = config.gray8 != nullptr;
+  // Compiled out of a build whose panel cannot lend a canvas.
+  const bool gray8Out = HalDisplay::kMayLendGray8Canvas && config.gray8 != nullptr;
 
   DitherState dither;
   dither.config = &config;

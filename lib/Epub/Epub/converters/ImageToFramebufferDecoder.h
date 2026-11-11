@@ -104,8 +104,10 @@ struct RenderConfig {
   // One decode, one output. The three-pass BW/LSB/MSB dance the plane pipeline
   // needs has no counterpart here — there are no planes to fill.
   //
-  // Honoured by PngToFramebufferConverter. Other decoders ignore it, so callers
-  // must check getGrayLevels() AND the format before relying on it.
+  // Honoured by PngToFramebufferConverter and JpegToFramebufferConverter
+  // (baseline and progressive); a JPEG it cannot decode fails rather than
+  // drawing its framed gap. Other decoders ignore it, so callers must check
+  // getGrayLevels() AND the format before relying on it.
   DirectGray8Writer* gray8 = nullptr;
 };
 
