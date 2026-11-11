@@ -286,7 +286,8 @@ class ChapterHtmlSlimParser final : public Print {
     int16_t height = 0;
     std::string alt;
     bool active = false;
-    bool isRight = false;  // true when float: right
+    bool isRight = false;   // true when float: right
+    uint32_t linkHash = 0;  // the link it is inside (imageLinkHash)
     // epubFilePath is not stored — epub->getPath() is read at ImageBlock construction time
     // to avoid a redundant heap copy of a constant string.
   };
@@ -764,9 +765,12 @@ class ChapterHtmlSlimParser final : public Print {
   int footnoteLinkDepth = -1;
   FootnoteEntry currentFootnote = {};
   size_t currentFootnoteLinkTextLen = 0;
-  // The link holds a line image: it is kept without text of its own (its image is what a reader taps), and listed
-  // with the footnote list's link label (STR_LINK).
+  // The link holds an image: it is kept without text of its own (its image is what a reader taps), and listed with
+  // the footnote list's link label (STR_LINK).
   bool currentFootnoteHoldsImage_ = false;
+  // The link an image placed now is inside, as its page image names it (linkHrefHash), and the link marked as holding
+  // it; 0 outside an internal link.
+  uint32_t imageLinkHash();
   // Non-owning; the Section's BuildState keeps the lookup alive across build slices.
   // Membership in the book's preview store is the sole expansion gate: it already encodes
   // "this link points at a real note", so no epub:type/same-file checks here. The store is
@@ -1096,7 +1100,7 @@ class ChapterHtmlSlimParser final : public Print {
   // An image of the flow on a line of its own, centred, with the spacing of the empty block it stands in (a figure's or
   // a paragraph's margins), which it uses up: the block's style is reset for the text after it. A page break pending
   // goes first, and a page that has no room for it ends. False when no page or image could be had.
-  // linkHash: the link a line image of an image-only paragraph is inside (PageImage::linkHash).
+  // linkHash: the link the image is inside (PageImage::linkHash).
   bool placeImageWithBlockSpacing(const std::string& cachedImagePath, const std::string& entryPath,
                                   const std::string& alt, int displayWidth, int displayHeight, uint32_t visibleOffset,
                                   uint32_t linkHash = 0);

@@ -2019,7 +2019,9 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
       makeUniqueNoThrow<ImageBlock>(pendingInlineImage_.cachedPath, imgW, imgH, pendingInlineImage_.alt,
                                     epub->getPath(), pendingInlineImage_.epubEntryPath);
   turnIfVertical(fullImageBlock.get());
-  auto pageImage = fullImageBlock ? makeUniqueNoThrow<PageImage>(std::move(fullImageBlock), imgX, top) : nullptr;
+  auto pageImage = fullImageBlock ? makeUniqueNoThrow<PageImage>(std::move(fullImageBlock), imgX, top, /*inLine=*/false,
+                                                                 pendingInlineImage_.linkHash)
+                                  : nullptr;
   if (!pageImage) {
     LOG_ERR("EHP", "Float image dropped: allocation failed");
     return;
@@ -2049,6 +2051,7 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
   activeFloatIsRight_ = imgIsRight;
 
   pendingInlineImage_.active = false;
+  pendingInlineImage_.linkHash = 0;
   pendingInlineImage_.cachedPath.clear();
   pendingInlineImage_.epubEntryPath.clear();
   pendingInlineImage_.alt.clear();
@@ -3224,6 +3227,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   self->pendingInlineImage_.alt = alt;
                   self->pendingInlineImage_.isRight =
                       (self->floatDepth_ > 0) && self->floatOpenSides_[self->floatDepth_ - 1];
+                  self->pendingInlineImage_.linkHash = self->imageLinkHash();
                   self->pendingInlineImage_.active = true;
                   LOG_TRC("EHP", "Inline image deferred: w=%d h=%d", displayWidth, displayHeight);
                   // Don't flush the current text block — let it continue into the next paragraph.
@@ -3255,7 +3259,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   self->startNewTextBlock(parentBlockStyle);
                 }
                 if (!self->placeImageWithBlockSpacing(cachedImagePath, resolvedPath, alt, displayWidth, displayHeight,
-                                                      self->visibleTextOffset_)) {
+                                                      self->visibleTextOffset_, self->imageLinkHash())) {
                   return;
                 }
 
@@ -5886,10 +5890,7 @@ bool ChapterHtmlSlimParser::addLineImage(const std::string& entryPath, std::stri
   image.height = static_cast<int16_t>(displayHeight);
   image.align = align;
   image.visibleOffset = visibleTextOffset_;
-  if (insideFootnoteLink && currentFootnote.href[0] != '\0') {
-    image.linkHash = linkHrefHash(currentFootnote.href);
-    currentFootnoteHoldsImage_ = true;
-  }
+  image.linkHash = imageLinkHash();
   image.entryPath = entryPath;
   image.alt = std::move(alt);
   LOG_TRC("EHP", "Line image %u: %dx%d %s", id, displayWidth, displayHeight, entryPath.c_str());
@@ -5904,6 +5905,12 @@ bool ChapterHtmlSlimParser::addLineImage(const std::string& entryPath, std::stri
     lineImagesKeptAtSplit_ = pendingLineImages_.size();
   }
   return true;
+}
+
+uint32_t ChapterHtmlSlimParser::imageLinkHash() {
+  if (!insideFootnoteLink || currentFootnote.href[0] == '\0') return 0;
+  currentFootnoteHoldsImage_ = true;
+  return linkHrefHash(currentFootnote.href);
 }
 
 const ChapterHtmlSlimParser::PendingLineImage* ChapterHtmlSlimParser::pendingLineImage(const uint16_t id) const {

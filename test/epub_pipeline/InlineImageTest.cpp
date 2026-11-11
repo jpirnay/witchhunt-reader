@@ -471,6 +471,29 @@ TEST_F(InlineImageFixture, ALinkWithTextAndAnImageKeepsItsText) {
   EXPECT_EQ(linkHrefHash("#n2"), laid.images[0].linkHash);
 }
 
+TEST_F(InlineImageFixture, ABlockImageInsideALinkIsTheLinksTarget) {
+  // A picture alone inside a link: placed as a block as before, and listed and named as an inline image's link is.
+  const Laid laid = build("<p><a href=\"#n4\"><img src=\"big.png\" alt=\"\"/></a></p><p id=\"n4\">x</p>");
+  ASSERT_EQ(1u, laid.images.size());
+  EXPECT_FALSE(laid.images[0].inLine);
+  EXPECT_EQ((kViewportWidth - 120) / 2, laid.images[0].x);
+  ASSERT_EQ(1u, laid.links.size());
+  EXPECT_STREQ("#n4", laid.links[0].href);
+  EXPECT_STREQ("", laid.links[0].number);
+  EXPECT_EQ(linkHrefHash("#n4"), laid.images[0].linkHash);
+}
+
+TEST_F(InlineImageFixture, AFloatedImageInsideALinkIsTheLinksTarget) {
+  const Laid laid = build(
+      "<div style=\"float: left; width: 30%\"><a href=\"#n5\"><img src=\"big.png\" alt=\"\"/></a></div>"
+      "<p>Text beside the floated picture, long enough to wrap beside it.</p><p id=\"n5\">x</p>");
+  ASSERT_EQ(1u, laid.images.size());
+  EXPECT_EQ(0, laid.images[0].x) << "floated left, as before";
+  ASSERT_EQ(1u, laid.links.size());
+  EXPECT_STREQ("#n5", laid.links[0].href);
+  EXPECT_EQ(linkHrefHash("#n5"), laid.images[0].linkHash);
+}
+
 TEST_F(InlineImageFixture, AnImageOutsideALinkNamesNone) {
   const Laid laid = build("<p>Plain <img src=\"icon.png\" alt=\"\"/> image.</p>");
   ASSERT_EQ(1u, laid.images.size());
