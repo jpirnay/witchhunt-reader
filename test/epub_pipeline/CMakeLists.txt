@@ -131,6 +131,7 @@ add_executable(EpubPipelineTest
   ImageExtractionTest.cpp
   ImageManifestTest.cpp
   ImageWrapperWidthTest.cpp
+  InlineImageTest.cpp
   BookAlignmentLayoutTest.cpp
   HeadingBlockLayoutTest.cpp
   WritingModeLayoutTest.cpp
@@ -145,6 +146,7 @@ add_executable(EpubPipelineTest
   DashBreakTest.cpp
   WhiteSpaceLayoutTest.cpp
   InitialLetterLayoutTest.cpp
+  LayoutGapsInteractionTest.cpp
   FontFamilyLayoutTest.cpp
   SpineCacheLayoutTest.cpp
   SaxStateInArenaTest.cpp
@@ -154,7 +156,10 @@ add_executable(EpubPipelineTest
   StoredEntryDecodeTest.cpp
   PlaceholderOnlyScopeTest.cpp
   ImageDitherPlacementTest.cpp
+  PixelCacheSizeTest.cpp
   PixelCacheWriteTest.cpp
+  PngHeapGateTest.cpp
+  WarmRefusalStopTest.cpp
   BufferedPrintTest.cpp
   VerticalPageTest.cpp
   ImageOnlyPageTest.cpp

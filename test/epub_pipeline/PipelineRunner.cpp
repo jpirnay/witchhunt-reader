@@ -149,7 +149,8 @@ void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, con
         const auto& img = static_cast<const PageImage&>(*el);
         const auto& ib = img.getImageBlock();
         out << "  IMG y=" << img.yPos << " x=" << img.xPos << " w=" << ib.getWidth() << " h=" << ib.getRenderedHeight()
-            << " src=" << normalizePath(ib.getImagePath(), cacheDir) << (ib.isTurned() ? " turned=1" : "") << "\n";
+            << " src=" << normalizePath(ib.getImagePath(), cacheDir) << (ib.isTurned() ? " turned=1" : "")
+            << (img.isInLine() ? " inline=1" : "") << (img.linkHash() != 0 ? " linked=1" : "") << "\n";
         break;
       }
       case TAG_PageTable:

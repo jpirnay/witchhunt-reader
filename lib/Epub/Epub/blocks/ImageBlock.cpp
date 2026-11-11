@@ -9,6 +9,8 @@
 #include <Serialization.h>
 #include <esp_heap_caps.h>
 
+#include <cstdio>
+
 #include "../../../../src/fontIds.h"
 #include "../../Epub.h"
 #include "../TurnedFrame.h"
@@ -24,16 +26,16 @@
 // - uint16_t height
 // - uint8_t pixels[...] - 2 bits per pixel, packed (4 pixels per byte), row-major order
 
-namespace {
 // Cut to MAX_ALT_TEXT_BYTES, never inside a UTF-8 sequence: a character the cut would split goes
 // whole.
-void capAltText(std::string& alt) {
-  if (alt.size() <= ImageBlock::MAX_ALT_TEXT_BYTES) return;
-  size_t cut = ImageBlock::MAX_ALT_TEXT_BYTES;
+void ImageBlock::capAltText(std::string& alt) {
+  if (alt.size() <= MAX_ALT_TEXT_BYTES) return;
+  size_t cut = MAX_ALT_TEXT_BYTES;
   while (cut > 0 && (static_cast<uint8_t>(alt[cut]) & 0xC0) == 0x80) cut--;
   alt.resize(cut);
 }
 
+namespace {
 // serialization::readString, except that it never holds more than the capped alt text: a cache
 // written before the cap may carry up to MAX_STRING_LENGTH. One byte past the cap is read so the
 // cut can see whether it falls inside a character; the rest is skipped.
@@ -48,7 +50,7 @@ bool readAltText(FsFile& file, std::string& alt) {
   alt.resize(keep);
   if (keep > 0 && file.read(reinterpret_cast<uint8_t*>(&alt[0]), keep) != static_cast<int>(keep)) return false;
   if (len > keep && !file.seekCur(static_cast<int64_t>(len - keep))) return false;
-  capAltText(alt);
+  ImageBlock::capAltText(alt);
   return true;
 }
 }  // namespace
@@ -152,16 +154,31 @@ std::string withSuffix(const std::string& imagePath, const std::string& suffix) 
   return imagePath + suffix;
 }
 
+// A file of the image at the size it is drawn at: img_3.png drawn 18 by 18 -> img_3.18x18<ending>. Each drawn size is
+// a cache of its own. Keyed on the image alone, an image a book sets at two sizes (an icon at its own size and at 1em)
+// found the other size's cache on every draw, refused it (renderFromCache's width check), decoded the image again and
+// rewrote the cache for the next draw to refuse. Caches named the old way (img_3.1bit.pxc) are never read again;
+// clearing the book's cache removes them with the rest.
+std::string sizedPath(const std::string& imagePath, const int width, const int height, const char* ending) {
+  char suffix[40];
+  snprintf(suffix, sizeof(suffix), ".%dx%d%s", width, height, ending);
+  return withSuffix(imagePath, suffix);
+}
+
 // BW-plane cache: 1-bit Atkinson, only values 0/3, for AA-off rendering.
 // Deliberately NOT keyed by the tone filter: tone mapping is applied only to the
 // grayscale variant (see ImageBlock::render), so these pixels are identical whatever
 // the filter is set to. Keying them too would fork every BW cache on SD for nothing.
-std::string getBwCachePath(const std::string& imagePath) { return withSuffix(imagePath, ".1bit.pxc"); }
+std::string getBwCachePath(const std::string& imagePath, const int width, const int height) {
+  return sizedPath(imagePath, width, height, ".1bit.pxc");
+}
 
 // Grayscale cache: 4-level Bayer (0–3), replayed in GRAYSCALE_LSB/MSB passes when AA is on.
 // Like the BW plane above, these pixels carry no tone correction, so one cache per image
-// serves every display setting — the name needs no key and never forks.
-std::string getGrayscaleCachePath(const std::string& imagePath) { return withSuffix(imagePath, ".bayer.pxc"); }
+// and size serves every display setting — the name needs no other key.
+std::string getGrayscaleCachePath(const std::string& imagePath, const int width, const int height) {
+  return sizedPath(imagePath, width, height, ".bayer.pxc");
+}
 
 // Decode a PNG straight out of the EPUB, with no extraction to SD first.
 //
@@ -361,23 +378,28 @@ bool ImageBlock::isLargeImage() const {
   return largeImageCached_ != 0;
 }
 
-bool ImageBlock::hasPixelCache() const { return Storage.exists(getBwCachePath(imagePath).c_str()); }
+std::string ImageBlock::bwCachePath() const { return getBwCachePath(imagePath, width, height); }
 
-bool ImageBlock::hasGrayscaleCache() const { return Storage.exists(getGrayscaleCachePath(imagePath).c_str()); }
+std::string ImageBlock::grayscaleCachePath() const { return getGrayscaleCachePath(imagePath, width, height); }
+
+// Beside the caches it fills, so one size's parked decode is never taken for another's.
+std::string ImageBlock::checkpointPath() const { return sizedPath(imagePath, width, height, ".ckpt"); }
+
+std::string ImageBlock::variantCachePath(const bool monochromeOutput) const {
+  return monochromeOutput ? bwCachePath() : grayscaleCachePath();
+}
+
+bool ImageBlock::hasPixelCache() const { return Storage.exists(bwCachePath().c_str()); }
+
+bool ImageBlock::hasGrayscaleCache() const { return Storage.exists(grayscaleCachePath().c_str()); }
 
 namespace {
-// The image's pixel cache for the variant `monochromeOutput` selects.
-std::string variantCachePath(const std::string& imagePath, const bool monochromeOutput) {
-  return monochromeOutput ? getBwCachePath(imagePath) : getGrayscaleCachePath(imagePath);
-}
 // Where CoarseRedecodeScope keeps a coarse cache while the image decodes again.
 std::string coarseAsidePath(const std::string& cachePath) { return cachePath + ".coarse"; }
-// Where a JPEG decode stopped for input parks (RenderConfig::checkpointPath).
-std::string checkpointPathFor(const std::string& imagePath) { return imagePath + ".ckpt"; }
 }  // namespace
 
 bool ImageBlock::setCoarseCacheAside(const bool monochromeOutput) const {
-  const std::string cachePath = variantCachePath(imagePath, monochromeOutput);
+  const std::string cachePath = variantCachePath(monochromeOutput);
   FsFile cacheFile;
   if (!Storage.exists(cachePath.c_str()) || !Storage.openFileForRead("IMG", cachePath, cacheFile)) return false;
   uint16_t magic = 0;
@@ -392,7 +414,7 @@ bool ImageBlock::setCoarseCacheAside(const bool monochromeOutput) const {
 }
 
 void ImageBlock::restoreCoarseCache(const bool monochromeOutput) const {
-  const std::string cachePath = variantCachePath(imagePath, monochromeOutput);
+  const std::string cachePath = variantCachePath(monochromeOutput);
   const std::string aside = coarseAsidePath(cachePath);
   if (Storage.exists(cachePath.c_str())) {
     Storage.remove(aside.c_str());  // the decode wrote the image's cache again
@@ -400,7 +422,7 @@ void ImageBlock::restoreCoarseCache(const bool monochromeOutput) const {
   }
   // A decode that stopped for input parked beside it: with the coarse picture back, no pass decodes the image again
   // to resume it, so it goes rather than stay on the card.
-  Storage.remove(checkpointPathFor(imagePath).c_str());
+  Storage.remove(checkpointPath().c_str());
   Storage.remove(PixelCache::partPathFor(cachePath).c_str());
   Storage.rename(aside.c_str(), cachePath.c_str());
 }
@@ -414,8 +436,7 @@ bool ImageBlock::wouldShowPlaceholder(bool forceLoad, bool monochromeOutput) con
   // asking it first paid that on every render of a cached image, for an answer that could not
   // change the result.
   // Check only the cache variant that render() will actually use for this mode.
-  const std::string& cachePath = monochromeOutput ? getBwCachePath(imagePath) : getGrayscaleCachePath(imagePath);
-  if (Storage.exists(cachePath.c_str())) return false;
+  if (Storage.exists(variantCachePath(monochromeOutput).c_str())) return false;
   return isLargeImage();
 }
 
@@ -443,7 +464,7 @@ void ImageBlock::renderGrayscaleFromCache(GfxRenderer& renderer, const int x, co
 }
 
 void ImageBlock::renderGrayscaleUpright(GfxRenderer& renderer, const int x, const int y) const {
-  renderFromCache(renderer, getGrayscaleCachePath(imagePath), x, y, width, height, srcYOffset_, srcHeight_);
+  renderFromCache(renderer, grayscaleCachePath(), x, y, width, height, srcYOffset_, srcHeight_);
 }
 
 // A turned image is never sliced (placeImageBlockAsBlock places it whole), so the copied turned_ is unreachable today.
@@ -528,7 +549,7 @@ void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, 
   }
 
   // Select cache path based on rendering mode
-  const std::string cachePath = monochromeOutput ? getBwCachePath(imagePath) : getGrayscaleCachePath(imagePath);
+  const std::string cachePath = variantCachePath(monochromeOutput);
 
   // Try to render from pixel cache first (always, regardless of forceLoad). With the whole image's height, as the gray
   // replay passes it: given the crop's, a later piece of a split image drew fewer rows than it has, or none.
@@ -567,7 +588,7 @@ void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, 
   // One inflate, both caches. Only set on a real decode, which is the only place it can pay:
   // the cache-hit and placeholder paths above already returned.
   if (alsoCacheOtherVariant) {
-    config.companionCachePath = monochromeOutput ? getGrayscaleCachePath(imagePath) : getBwCachePath(imagePath);
+    config.companionCachePath = variantCachePath(!monochromeOutput);
   }
   // Deliberately no adaptive tone on either variant: both .pxc files are dithered straight
   // from the raw luminance. The curve has to be derived from a completed histogram, and a
@@ -646,7 +667,7 @@ void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, 
   // RenderConfig::checkpointPath): the reader's image lane gives its region back on every page
   // turn, and used to throw the decode away with it.
   const bool jpeg = format == ImageFormatDetector::Format::Jpeg;
-  if (jpeg) config.checkpointPath = checkpointPathFor(imagePath);
+  if (jpeg) config.checkpointPath = checkpointPath();
 
   // A resumed decode draws only the rows after its park; the finished cache has them all.
   const bool resuming = jpeg && Storage.exists(config.checkpointPath.c_str());

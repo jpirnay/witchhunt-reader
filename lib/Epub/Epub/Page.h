@@ -61,10 +61,20 @@ class PageLine final : public PageElement {
 // New PageImage class
 class PageImage final : public PageElement {
   std::unique_ptr<ImageBlock> imageBlock;
+  // Set in a line of text (an inline image), not a block of its own.
+  bool inLine_ = false;
+  // The internal link the image is inside (linkHrefHash of its href); 0: none.
+  uint32_t linkHash_ = 0;
+  // The serialized flags byte.
+  static constexpr uint8_t kInLine = 0x01;
+  static constexpr uint8_t kLinked = 0x02;
 
  public:
-  PageImage(std::unique_ptr<ImageBlock> block, const int16_t xPos, const int16_t yPos)
-      : PageElement(xPos, yPos), imageBlock(std::move(block)) {}
+  PageImage(std::unique_ptr<ImageBlock> block, const int16_t xPos, const int16_t yPos, const bool inLine = false,
+            const uint32_t linkHash = 0)
+      : PageElement(xPos, yPos), imageBlock(std::move(block)), inLine_(inLine), linkHash_(linkHash) {}
+  bool isInLine() const { return inLine_; }
+  uint32_t linkHash() const { return linkHash_; }
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   void renderWithForceLoad(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoad,
                            bool monochromeOutput = true, bool alsoCacheOtherVariant = false);
@@ -169,7 +179,9 @@ class PageTableFragment final : public PageElement {
   // Decode any missing cell-image pixel caches. Position is irrelevant to the cache
   // (it is position-independent); images are warmed at the origin and the framebuffer
   // garbage is discarded by the caller's clearScreen(), mirroring the Page warm pass.
-  void warmCellImages(GfxRenderer& renderer, bool forceLoad, bool monochromeOutput,
+  // False when the page's warm ends here: a decode stopped for input, or one refused for memory beside a section build
+  // (see Page::warmImageCaches).
+  bool warmCellImages(GfxRenderer& renderer, bool forceLoad, bool monochromeOutput,
                       bool alsoWarmGrayscale = false) const;
 };
 
@@ -242,6 +254,8 @@ class Page {
   // plane draws 1-bit Atkinson, the gray planes lift levels 1/2 back to real greys.
   // redecodeCoarse: a .pxc stamped coarse counts as missing, and stays unless a decode replaces it
   // (ImageBlock::CoarseRedecodeScope).
+  // Beside a section build (image_scratch::canWait) the first image refused for memory ends the warm: the images after
+  // it wait with it for the lane after the build.
   void warmImageCaches(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoadLargeImages,
                        bool monochromeOutput = true, bool alsoWarmGrayscale = false, bool redecodeCoarse = false) const;
   bool hasPlaceholderImages(bool forceLoadLargeImages, bool monochromeOutput) const;
@@ -277,11 +291,13 @@ class Page {
     });
   }
 
-  // True when the page has elements and every one is an image.
+  // True when the page has elements and every one is an image of its own: an image set in a line of text is that
+  // line's, and a page that ends on such a line is not a picture page.
   bool isImageOnly() const {
     return !elements.empty() &&
            std::all_of(elements.begin(), elements.end(), [](const std::unique_ptr<PageElement>& element) {
-             return element && element->getTag() == TAG_PageImage;
+             return element && element->getTag() == TAG_PageImage &&
+                    !static_cast<const PageImage&>(*element).isInLine();
            });
   }
 

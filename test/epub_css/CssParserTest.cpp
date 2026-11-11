@@ -82,6 +82,80 @@ TEST(CssParserDeclarations, DisplayKeepsBlockAndInlineApart) {
   }
 }
 
+// vertical-align keeps the keywords that place an inline image in its line, beside super, sub and baseline. A length
+// or a percentage is not kept.
+TEST(CssParserDeclarations, VerticalAlignKeepsTheImageKeywords) {
+  const struct {
+    const char* declaration;
+    CssVerticalAlign want;
+  } cases[] = {
+      {"vertical-align: baseline", CssVerticalAlign::Baseline},
+      {"vertical-align: super", CssVerticalAlign::Super},
+      {"vertical-align: sub", CssVerticalAlign::Sub},
+      {"vertical-align: middle", CssVerticalAlign::Middle},
+      {"vertical-align: text-top", CssVerticalAlign::TextTop},
+      {"vertical-align: text-bottom", CssVerticalAlign::TextBottom},
+      {"vertical-align: top", CssVerticalAlign::Top},
+      {"VERTICAL-ALIGN: BOTTOM !important", CssVerticalAlign::Bottom},
+  };
+  for (const auto& c : cases) {
+    const CssStyle style = CssParser::parseInlineStyle(c.declaration);
+    ASSERT_TRUE(style.hasVerticalAlign()) << c.declaration;
+    EXPECT_EQ(static_cast<int>(style.verticalAlign), static_cast<int>(c.want)) << c.declaration;
+  }
+}
+
+// A length is the baseline raised by it, in sixteenths of an em (ex half an em, px and pt at the 16 px medium), or a
+// percentage of the line height. One that rounds to nothing is not kept, nor is a unit the reader has no use for.
+TEST(CssParserDeclarations, VerticalAlignKeepsALengthCompactly) {
+  const struct {
+    const char* declaration;
+    int shift;
+    bool percent;
+  } cases[] = {
+      {"vertical-align: -0.2em", -3, false}, {"vertical-align: 0.25rem", 4, false},
+      {"vertical-align: -0.5ex", -4, false}, {"vertical-align: 3px", 3, false},
+      {"vertical-align: -6pt", -8, false},   {"vertical-align: -20%", -20, true},
+      {"vertical-align: 40em", 127, false},  {"vertical-align: -9em", -127, false},
+  };
+  for (const auto& c : cases) {
+    const CssStyle style = CssParser::parseInlineStyle(c.declaration);
+    ASSERT_TRUE(style.hasVerticalAlign()) << c.declaration;
+    EXPECT_EQ(static_cast<int>(CssVerticalAlign::Baseline), static_cast<int>(style.verticalAlign)) << c.declaration;
+    EXPECT_EQ(c.shift, style.verticalAlignShift) << c.declaration;
+    EXPECT_EQ(c.percent, style.verticalAlignPercent) << c.declaration;
+  }
+  for (const char* declaration : {"vertical-align: 0", "vertical-align: 0.01em", "vertical-align: 3vh",
+                                  "vertical-align: 2", "vertical-align: inherit"}) {
+    EXPECT_FALSE(CssParser::parseInlineStyle(declaration).hasVerticalAlign()) << declaration;
+  }
+  // A later keyword replaces a length, and a later length a keyword.
+  const CssStyle keyword = CssParser::parseInlineStyle("vertical-align: -0.2em; vertical-align: middle");
+  EXPECT_EQ(static_cast<int>(CssVerticalAlign::Middle), static_cast<int>(keyword.verticalAlign));
+  EXPECT_EQ(0, keyword.verticalAlignShift);
+  const CssStyle length = CssParser::parseInlineStyle("vertical-align: sub; vertical-align: 10%");
+  EXPECT_EQ(static_cast<int>(CssVerticalAlign::Baseline), static_cast<int>(length.verticalAlign));
+  EXPECT_EQ(10, length.verticalAlignShift);
+  EXPECT_TRUE(length.verticalAlignPercent);
+  // An unknown value leaves the length before it.
+  const CssStyle kept = CssParser::parseInlineStyle("vertical-align: -0.5em; vertical-align: auto");
+  EXPECT_EQ(-8, kept.verticalAlignShift);
+}
+
+TEST(CssParserDeclarations, AVerticalAlignLengthCascadesWithItsKeyword) {
+  CssStyle style = CssParser::parseInlineStyle("vertical-align: -0.5em");
+  style.applyOver(CssParser::parseInlineStyle("vertical-align: top"));
+  EXPECT_EQ(static_cast<int>(CssVerticalAlign::Top), static_cast<int>(style.verticalAlign));
+  EXPECT_EQ(0, style.verticalAlignShift);
+  CssStyle other = CssParser::parseInlineStyle("vertical-align: top");
+  other.applyOver(CssParser::parseInlineStyle("vertical-align: 25%"));
+  EXPECT_EQ(25, other.verticalAlignShift);
+  EXPECT_TRUE(other.verticalAlignPercent);
+  other.reset();
+  EXPECT_EQ(0, other.verticalAlignShift);
+  EXPECT_FALSE(other.verticalAlignPercent);
+}
+
 // Regression: `!important` used to be stripped only by the dozen properties that called
 // stripTrailingImportant themselves. Everything else compared the marker as part of the value
 // and silently dropped the declaration. crosspoint-reader PR #3221.

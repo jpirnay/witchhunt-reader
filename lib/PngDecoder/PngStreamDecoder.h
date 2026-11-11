@@ -4,6 +4,7 @@
 #include <HalStorage.h>     // FsFile
 #include <InflateReader.h>  // uzlib streaming inflate
 
+#include <cstddef>
 #include <cstdint>
 
 // Streaming PNG decoder built on uzlib (InflateReader) instead of PNGdec.
@@ -67,6 +68,17 @@ class PngStreamDecoder {
   bool begin(FsFile& file, Info& info);
   // begin() failed because a buffer could not be allocated: the image may well decode with more memory.
   bool outOfMemory() const { return outOfMemory_; }
+
+  // The blocks begin() takes for an image with this header, from the scratch arena when it has room for all of them
+  // and otherwise from the heap: two scanline buffers of rowBytes, then the inflate ring. The ring is the image's whole
+  // inflated stream, at most the 32 KB DEFLATE window (wholeWindow), so an icon's is a few hundred bytes. All zero for
+  // a header begin() refuses. A caller's memory gate charges these, so they are sized here, where begin() sizes them.
+  struct Scratch {
+    size_t rowBytes = 0;
+    size_t ringBytes = 0;
+    bool wholeWindow = false;
+  };
+  static Scratch scratchFor(const Info& info);
 
   // Draw the inflate ring and the two scanline buffers from `arena` instead of the heap.
   // Call BEFORE begin(); ignored once begin() has allocated.

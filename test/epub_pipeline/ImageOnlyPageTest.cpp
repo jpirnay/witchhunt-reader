@@ -41,6 +41,16 @@ TEST(ImageOnlyPage, TheCentringOffsetIsOneComputation) {
   EXPECT_EQ(0, page.imageOnlyCentringOffset(700));
 }
 
+TEST(ImageOnlyPage, AnImageInALineIsNoPicture) {
+  // A page that ends on a line of inline images is the end of a paragraph, not a picture to centre.
+  Page page;
+  page.elements.push_back(std::unique_ptr<PageElement>(
+      new PageImage(std::unique_ptr<ImageBlock>(new ImageBlock("/icon.png", 16, 16)), 0, 0, /*inLine=*/true)));
+  EXPECT_FALSE(page.isImageOnly());
+  EXPECT_EQ(0, page.imageOnlyCentringOffset(700));
+  EXPECT_TRUE(page.hasImages());
+}
+
 TEST(ImageOnlyPage, ThePredicateNeedsOnlyImages) {
   Page page = imagePage(false);
   EXPECT_TRUE(page.isImageOnly());
