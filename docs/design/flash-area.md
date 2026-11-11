@@ -1,8 +1,8 @@
 # The flash area — design
 
 > **Status.** Step 1 (one interface, the partition behind it) and step 2 (the PSRAM image) are implemented. Every
-> build with PSRAM (the S3 boards) takes the image, in PSRAM only, when its partition table has no usable `spiffs`
-> partition (issue #733: an X4 Pro that kept its stock table). The SD-only case is design only. Code:
+> build with PSRAM (the S3 boards) takes the image, saved to the card, when its partition table has no usable
+> `spiffs` partition (issue #733: an X4 Pro that kept its stock table). The SD-only case is design only. Code:
 > `lib/hal/FlashArea.*` (the choice), `lib/hal/EspPartitionFlash.*` (backend a), `lib/hal/PsramImageFlash.*` and
 > `lib/hal/CardImageFile.*` (backend b), `lib/hal/FlashAreaRegion.*` (a window for the glyph and hyphenation stores).
 > Tests: `test/flash_area/` (every consumer over a simulated area, the PSRAM backend with power cuts),
@@ -87,21 +87,25 @@ use a `FlashAreaRegion`; `SystemStatus` asks `FlashFontPartition::cachedBytes()`
 - **Image.** One PSRAM block of the area's size (`FLASH_AREA_PSRAM_BYTES`, by default the partition's 3,456 KB, so
   every layout constant holds). `program` ANDs bytes, `erase` writes 0xFF: the consumers keep their NOR rules. `map`
   returns a pointer into the block and costs no MMU page, so `freeMapPages()` reports the whole image.
-- **In PSRAM only (the default).** No file: the image starts erased at every boot, and each 64 KB page is set to 0xFF
-  the first time something reads, programs or maps it, so a boot pays for the pages it uses rather than a memset of
-  3.4 MB. `sync()` has nothing to do. Every consumer rebuilds from the card after each start, as after a cache clear:
-  the language slot at boot (I18n finds no slot in an erased area), a .cpfont family or the TTF families at the first
-  book. `FLASH_AREA_PSRAM_ON_CARD=1` keeps the image as the file below instead.
 - **File.** `/.crosspoint/flash-area.img`: a 4 KB header block (magic, version, state, size, CRC), then the image.
   `CardImageFile` opens it for each call and closes it again, so nothing holds it open (a cleared cache may delete
   it, USB mass storage may take the card) and each write is on the card when it returns.
 - **Load, on first use.** Pages (64 KB) are read from the file when something first reads, programs or maps them, so
   a boot that maps one language slot and one font size reads only those pages. A file that is missing, of another
   size, has a bad header, or says *dirty* gives an erased image instead, and every consumer rebuilds from the card.
-- **Commit (`sync()`).** Header *dirty*, sync; the dirty sectors, in runs; sync; header *clean*, sync. Called at the end
-  of a .cpfont family copy, a language build and a glyph store install, and before deep sleep. A refused write (no
-  card) keeps the sectors pending for the next one. A file that went away during the run is written again whole if
-  every page is in PSRAM; otherwise the run's writes stay in PSRAM and the next boot starts erased.
+- **Commit (`sync()`).** Header *dirty*, sync; the dirty sectors, in runs; sync; header *clean*, sync. With nothing
+  changed since the last commit it writes nothing, not even the header. A refused write (no card) keeps the sectors
+  pending for the next one. A file that went away during the run is written again whole if every page is in PSRAM;
+  otherwise the run's writes stay in PSRAM and the next boot starts erased.
+- **When it commits.** The consumers commit at the end of a .cpfont family copy, a language build and a glyph store
+  install. `FlashArea::sync()` commits on every planned loss of PSRAM: before deep sleep (`enterDeepSleep()`), before
+  every planned restart (`restartKeepingFlashArea()` in main.cpp, which every `silentRestart*()`, the heap-recovery
+  restart, the restart into sleep, the SD and OTA firmware updates and the USB-drive switch end in), before the card
+  goes to a USB host (`UsbDriveActivity`), and at book close (`unloadSdFontIfLoaded()`: the glyphs the book rendered).
+  Not after USB Drive (the card was the host's; the restart after it does not sync) and not in the boot-time heap check
+  (the area is not chosen yet). `scripts/check_restart_flash_sync.py`, run by the host tests, fails on an
+  `ESP.restart()` or `esp_restart()` in src/ that does neither. There is no low-battery power-off in this firmware; a
+  battery that runs flat, a crash or the reset button is a cut, below.
 - **Locking.** One mutex around every call: a lazy page load or a dirty bit must not interleave with a sync, which
   flash never needed.
 - **Power cut.** The image in PSRAM is gone. Cut before the *dirty* header lands: the file keeps the previous commit.
@@ -109,11 +113,18 @@ use a `FlashAreaRegion`; `SystemStatus` asks `FlashFontPartition::cachedBytes()`
   (any instant between two operations is), and every consumer already handles both; what differs is the time to
   rebuild (a TTF install takes seconds). Writes since the last commit (the glyph log while reading) are rendered again.
 - **Cost.** PSRAM: the image (3,456 KB by default, of 8 MB). Internal RAM: the object, its mutex and the two bitmaps
-  (112 B). In PSRAM only: no card writes; each start rebuilds what it uses. Measured on the X4 Pro with the image on
-  the card (2026-11-11, the times without their sync): a German slot built in under 0.1 s, one TTF style (Literata)
-  installed in ~1.0 s, a five-size .cpfont family (Bitter, 2.6 MB) copied in ~1.2 s. On the card: the first commit
-  writes the whole file once (3.4 MB, 2.4 s), later ones only the sectors that changed and 32 B of header; a boot
-  reads the header (46 ms), then each page (64 KB, ~37 ms) the first time something touches it.
+  (112 B). Measured on the X4 Pro (2026-11-11, test build forcing the image over our table):
+  - first boot without a file: a 117 ms erase of the image, then the language build and the first commit, which
+    writes the whole file (3,538,944 B in 2,349 ms);
+  - later boots: the header (45 ms) and the language slot's page (36 ms), nothing built;
+  - a language change: 24,576 B committed in 97 ms;
+  - a TTF style (Literata) installed in 0.96 s plus its commit (262,144 B, 274 ms); a five-size .cpfont family
+    (Bitter, 2.6 MB) copied in 1.1 s plus its commit (3,407,872 B, 1,611 ms);
+  - book close after reading: 192-381 KB of glyph log committed in 434-662 ms; a book read in a .cpfont family
+    commits nothing;
+  - the first TTF book after a restart: the store's 52 pages (its log region is mapped whole) load in 2.0 s, where an
+    install from the TTF file takes ~1 s, but the glyphs rendered before come back with it;
+  - a restart with nothing changed writes nothing (the file's CRC is the same before and after).
 - **Smaller images.** `FLASH_AREA_PSRAM_BYTES` may be smaller: the font area shrinks with it, larger .cpfont families
   fall back to the card (their existing path), and the TTF planner puts more styles in SD mode. The language slot
   needs 128 KB at the end in any case.
@@ -127,8 +138,8 @@ a glyph store reading its index and log through the card), so on such a board th
 not load. No board we know of is in that case: the S3 boards have 8 MB of PSRAM, and the C3 boards' tables have a
 large enough `spiffs` partition. The boot log says so (`[FLA] no flash area: ...`).
 
-**What shows it.** System Information's Flash section has a **Flash area** row ("spiffs 3.4 MB"; "PSRAM (spiffs 80.0
-KB)"; "- (spiffs -)": where the area is, then what the table holds) and a **Language** row: the language's code, and
+**What shows it.** System Information's Flash section has a **Flash area** row ("spiffs 3.4 MB"; "PSRAM + card" or
+"-", then on the next line what the table holds: "spiffs 80.0 KB", "spiffs -") and a **Language** row: the language's code, and
 when its pack is not in use, why: `no pack`, `bad pack` (I18n), or the slot's `FlashLangPartition::lastFailure()`:
 `no flash area`, `area too small`, `build`, `mmap`, `CRC`. A slot that does not start on a 64 KB page is not a failure:
 `esp_partition_mmap` maps from the page below and hands out the pointer advanced to the offset.
