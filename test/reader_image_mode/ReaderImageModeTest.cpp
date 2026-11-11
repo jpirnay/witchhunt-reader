@@ -70,6 +70,34 @@ TEST(ReaderImageMode, OnlyGrayImagesOweTheRefreshAfter) {
   EXPECT_FALSE(ReaderImageMode::imagePageOwesRefresh(kSuppress));
 }
 
+// The debt a draw leaves. A new page arrives owing nothing (renderContents takes the page before's debt for its own
+// refresh) and leaves one only when it drew images in gray.
+TEST(ReaderImageMode, ANewPageOwesTheRefreshForItsOwnGrayImagesOnly) {
+  EXPECT_TRUE(ReaderImageMode::refreshOwedAfterDraw(/*owedBefore=*/false, /*drewImages=*/true, kDisplay));
+  EXPECT_FALSE(ReaderImageMode::refreshOwedAfterDraw(false, /*drewImages=*/false, kDisplay)) << "text or placeholders";
+  EXPECT_FALSE(ReaderImageMode::refreshOwedAfterDraw(false, true, kBlackWhite));
+  EXPECT_FALSE(ReaderImageMode::refreshOwedAfterDraw(false, true, kSuppress));
+}
+
+// A redraw of the page on screen (a clock tick) keeps the debt its first draw left, so the turn away from a Display
+// image page still clears its gray.
+TEST(ReaderImageMode, ARedrawInDisplayKeepsTheDebt) {
+  EXPECT_TRUE(ReaderImageMode::refreshOwedAfterDraw(/*owedBefore=*/true, /*drewImages=*/true, kDisplay));
+  EXPECT_TRUE(ReaderImageMode::refreshOwedAfterDraw(true, /*drewImages=*/false, kDisplay));
+}
+
+// Switching a book from Display to Black & White with an image page open redraws that page. The Display draw armed
+// the refresh; the Black & White draw replaces it and leaves no gray, so the next turn is a plain one.
+TEST(ReaderImageMode, ABlackAndWhiteRedrawDropsTheDisplayDrawsDebt) {
+  bool owed = false;
+  owed = ReaderImageMode::refreshOwedAfterDraw(owed, /*drewImages=*/true, kDisplay);
+  ASSERT_TRUE(owed) << "the Display draw of the image page";
+  owed = ReaderImageMode::refreshOwedAfterDraw(owed, /*drewImages=*/true, kBlackWhite);
+  EXPECT_FALSE(owed) << "the Black & White redraw of the same page";
+  // And back: a Display redraw puts the gray up again and owes the refresh again.
+  EXPECT_TRUE(ReaderImageMode::refreshOwedAfterDraw(owed, /*drewImages=*/true, kDisplay));
+}
+
 // The page summary's images= field, which the device test counts.
 TEST(ReaderImageMode, LogLabel) {
   EXPECT_STREQ(ReaderImageMode::logLabel(false, kBlackWhite), "none");
