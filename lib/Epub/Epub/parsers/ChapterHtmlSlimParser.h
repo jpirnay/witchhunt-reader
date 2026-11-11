@@ -467,7 +467,10 @@ class ChapterHtmlSlimParser final : public Print {
   // family: its words' when they are all in one, else the family of the element that opened it. Words are tracked
   // from the block's first (blockFamilyState_ 1: all in blockFirstFamily_, 2: in several); a block ends in
   // startNewTextBlock, which starts the next one over.
-  BlockFontFamilies fontFamilies_;
+  // PROTOTYPE: boxed, made only for a book with other families; null (no families) otherwise.
+  std::unique_ptr<BlockFontFamilies> fontFamiliesBox_;
+  static const BlockFontFamilies kNoFamilies;
+  const BlockFontFamilies& fontFamilies() const { return fontFamiliesBox_ ? *fontFamiliesBox_ : kNoFamilies; }
   uint32_t effectiveFontFamily_ = 0;  // CssStyle::fontFamily of the words being flushed
   uint32_t blockFirstFamily_ = 0;
   uint32_t blockOwnFamily_ = 0;
@@ -1457,7 +1460,13 @@ class ChapterHtmlSlimParser final : public Print {
   // effective font size differs from the body resolve to the nearest real font on it.
   void setFontSizeLadder(const FontSizeLadder& ladder) { fontSizeLadder_ = ladder; }
   // Supplies the book's other font families (see BlockFontFamilies); none by default.
-  void setFontFamilies(const BlockFontFamilies& families) { fontFamilies_ = families; }
+  void setFontFamilies(const BlockFontFamilies& families) {  // PROTOTYPE
+    if (families.count == 0) {
+      fontFamiliesBox_.reset();
+      return;
+    }
+    fontFamiliesBox_.reset(new (std::nothrow) BlockFontFamilies(families));
+  }
   // Census mode (BodySize::detect), set before setup(): the parse styles the chapter as a build does and counts its
   // running text into `census` by the size each word would be set at (block size times word size, see
   // countCensusWord), and lays nothing out: no line, no page, no image, no table. A block keeps its first word only,
