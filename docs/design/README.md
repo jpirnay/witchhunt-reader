@@ -19,3 +19,7 @@ how it ranks a book's families by their text, which faces it copies, and the fir
 `writing-modes.md` is the record of right-to-left and vertical text (writing modes steps 0-4): the steps and their PRs,
 page progression, reading a Hebrew book, what vertical text does, and the analysis behind one shaper for Arabic and the
 Indic scripts. The shaping itself is the reference page `docs/text-shaping.md`.
+
+`flash-area.md` is the record of the raw flash area (`lib/hal/FlashArea.h`): what keeps caches in it and how each uses
+it, the one `NorFlash` interface they go through, and its backends, the `spiffs` partition and an image in PSRAM kept as
+a file on the card for a board without that partition.

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <esp_partition.h>
 #if __has_include(<sdkconfig.h>)
 #include <sdkconfig.h>
 #endif
@@ -10,9 +9,10 @@
 
 // Multi-entry flash font cache.
 //
-// The unused `spiffs` partition (3.47 MB at 0xc90000) stores one or more
-// .cpfont files so font metadata can be mmap'd directly from flash — zero SRAM
-// cost for fullIntervals / kern / ligature tables during layout.
+// The flash area (FlashArea.h: the unused `spiffs` partition, 3.47 MB at
+// 0xc90000, on every board so far) stores one or more .cpfont files so font
+// metadata can be mmap'd directly from flash — zero SRAM cost for
+// fullIntervals / kern / ligature tables during layout.
 //
 // The TAIL of the partition is NOT ours: the last LANG_RESERVED_BYTES belong to
 // FlashLangPartition, which keeps the decompressed UI language there. See
@@ -154,6 +154,10 @@ bool hasEntry(const char* familyName, uint8_t pointSize);
 
 // Returns true if the partition has all sizes in the provided array.
 bool hasFamilyComplete(const char* familyName, const uint8_t* sizes, uint8_t sizeCount);
+
+// Bytes the cache holds: its 8-byte header, the index entries in use and every
+// entry's data. 0 without a valid index (SystemStatus shows it).
+size_t cachedBytes();
 
 // Returns true if the partition is currently mmap'd.
 bool isMapped();

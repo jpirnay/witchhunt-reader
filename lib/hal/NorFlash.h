@@ -3,11 +3,11 @@
 #include <cstdint>
 
 /// A region of NOR flash. Bits program from 1 to 0 only; only an erase, in whole 4 KB sectors, sets them
-/// back to 1. FlashGlyphStore works through this interface, so its write-once rules run unchanged on
-/// the device (EspNorFlash, over the `spiffs` partition) and in host tests (a simulated chip).
+/// back to 1. The flash area (FlashArea::get()) and every window of it (FlashAreaRegion) are one, so the caches in it
+/// run their write-once rules unchanged on the device and in host tests (a simulated chip).
 ///
-/// Offsets are relative to the start of the region. The device region stops below the language slot at
-/// the end of the partition (FlashFontPartition::LANG_RESERVED_BYTES).
+/// Offsets are relative to the start of the region. The glyph store's region stops below the hyphenation region and
+/// the language slot at the end of the area (FlashFontPartition::fontUsableSize()).
 ///
 /// A power cut during program() leaves the bytes before the cut programmed and the rest erased, except for
 /// the data in flight (up to one 64-byte ESP-IDF chunk on the device), whose bits may be partly programmed.
@@ -35,4 +35,7 @@ class NorFlash {
   virtual void unmap(const uint8_t* mapped) = 0;
   /// MMU pages still free for data mappings.
   virtual uint32_t freeMapPages() const = 0;
+  /// Makes every program() and erase() so far survive a power cut. Flash does as it goes; an area held in RAM
+  /// (PsramImageFlash) writes them to its file here. False when that failed: they stay pending for the next call.
+  virtual bool sync() { return true; }
 };

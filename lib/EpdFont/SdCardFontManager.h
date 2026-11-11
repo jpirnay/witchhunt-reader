@@ -194,7 +194,7 @@ class SdCardFontManager {
   // serves the target size itself.
   int aliasFontId_ = 0;
   uint8_t aliasPointSize_ = 0;
-  // The loaded TTF families, if any: their font area (EspNorFlash), the set they are drawn from, and while a family
+  // The loaded TTF families, if any: their font area (FlashAreaRegion), the set they are drawn from, and while a family
   // reads its outlines from the card (SD mode), the open files. The set is destroyed first, so the store is closed
   // before the flash goes and stops reading before its files close.
   std::unique_ptr<NorFlash> ttfFlash_;

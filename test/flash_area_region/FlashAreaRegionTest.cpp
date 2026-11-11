@@ -1,5 +1,5 @@
-// EspNorFlash and FlashFontPartition share the `spiffs` partition, and the .cpfont cache stays off it while the TTF
-// glyph store holds a mapping of the font area. The hyphenation store's EspNorFlash maps a book's trie from its own
+// FlashAreaRegion and FlashFontPartition share the `spiffs` partition, and the .cpfont cache stays off it while the TTF
+// glyph store holds a mapping of the font area. The hyphenation store's FlashAreaRegion maps a book's trie from its own
 // region above the font area, and that mapping is no reason to refuse the cache. Seen on the X3: after a German book,
 // picking another .cpfont family logged "beginWrite: the TTF glyph store is open on this partition" and loaded the
 // family from the SD card. These tests run both over the in-memory partition of test/flash_lang_partition.
@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "EspNorFlash.h"
+#include "FlashAreaRegion.h"
 #include "FlashFontPartition.h"
 #include "esp_partition.h"
 
@@ -49,25 +49,25 @@ bool cpfontWriteStarts(const char* family) {
   return true;
 }
 
-class EspNorFlashTest : public ::testing::Test {
+class FlashAreaRegionTest : public ::testing::Test {
  protected:
   void SetUp() override { fake_flash::reset(kPartitionBytes); }
   void TearDown() override {
     FlashFontPartition::unmap();
-    EXPECT_EQ(0u, EspNorFlash::liveFontAreaMappings()) << "every mapping a test made is released";
+    EXPECT_EQ(0u, FlashAreaRegion::liveFontAreaMappings()) << "every mapping a test made is released";
   }
 };
 
 }  // namespace
 
-TEST_F(EspNorFlashTest, AMappedTrieLeavesTheCpfontCacheFree) {
-  EspNorFlash hyphenation;
+TEST_F(FlashAreaRegionTest, AMappedTrieLeavesTheCpfontCacheFree) {
+  FlashAreaRegion hyphenation;
   ASSERT_NE(0u, FlashFontPartition::hyphRegionOffset());
   ASSERT_TRUE(hyphenation.beginRegion(static_cast<uint32_t>(FlashFontPartition::hyphRegionOffset()),
                                       FlashFontPartition::HYPH_RESERVED_BYTES));
   const uint8_t* const trie = hyphenation.map(0, 3 * 64 * 1024);
   ASSERT_NE(nullptr, trie);
-  EXPECT_EQ(0u, EspNorFlash::liveFontAreaMappings());
+  EXPECT_EQ(0u, FlashAreaRegion::liveFontAreaMappings());
 
   // The family switch of the X3: the cache is written and mapped while the open book's trie stays mapped.
   EXPECT_TRUE(cpfontWriteStarts("Readerly"));
@@ -76,23 +76,23 @@ TEST_F(EspNorFlashTest, AMappedTrieLeavesTheCpfontCacheFree) {
   hyphenation.unmap(trie);
 }
 
-TEST_F(EspNorFlashTest, AGlyphStoreMappingKeepsTheCpfontCacheOff) {
+TEST_F(FlashAreaRegionTest, AGlyphStoreMappingKeepsTheCpfontCacheOff) {
   installCpfont("Readerly", 14);
-  EspNorFlash store;
+  FlashAreaRegion store;
   ASSERT_TRUE(store.begin());
   const uint8_t* const block = store.map(0, 4096);
   ASSERT_NE(nullptr, block);
-  EXPECT_EQ(1u, EspNorFlash::liveFontAreaMappings());
+  EXPECT_EQ(1u, FlashAreaRegion::liveFontAreaMappings());
   EXPECT_FALSE(cpfontMaps("Readerly", 14));
   EXPECT_FALSE(cpfontWriteStarts("Readerly"));
   store.unmap(block);
-  EXPECT_EQ(0u, EspNorFlash::liveFontAreaMappings());
+  EXPECT_EQ(0u, FlashAreaRegion::liveFontAreaMappings());
   EXPECT_TRUE(cpfontMaps("Readerly", 14));
 }
 
-TEST_F(EspNorFlashTest, AMappingCountsForTheAreaItWasMadeIn) {
+TEST_F(FlashAreaRegionTest, AMappingCountsForTheAreaItWasMadeIn) {
   // An instance begun again over the other area while it holds a mapping: the mapping is released as it was counted.
-  EspNorFlash flash;
+  FlashAreaRegion flash;
   ASSERT_TRUE(flash.begin());
   const uint8_t* const fontArea = flash.map(0, 4096);
   ASSERT_NE(nullptr, fontArea);
@@ -100,21 +100,21 @@ TEST_F(EspNorFlashTest, AMappingCountsForTheAreaItWasMadeIn) {
                                 FlashFontPartition::HYPH_RESERVED_BYTES));
   const uint8_t* const region = flash.map(0, 4096);
   ASSERT_NE(nullptr, region);
-  EXPECT_EQ(1u, EspNorFlash::liveFontAreaMappings());
+  EXPECT_EQ(1u, FlashAreaRegion::liveFontAreaMappings());
   flash.unmap(fontArea);
-  EXPECT_EQ(0u, EspNorFlash::liveFontAreaMappings());
+  EXPECT_EQ(0u, FlashAreaRegion::liveFontAreaMappings());
   flash.unmap(region);
-  EXPECT_EQ(0u, EspNorFlash::liveFontAreaMappings());
+  EXPECT_EQ(0u, FlashAreaRegion::liveFontAreaMappings());
 }
 
-TEST_F(EspNorFlashTest, DestroyingAStoreReleasesItsCount) {
+TEST_F(FlashAreaRegionTest, DestroyingAStoreReleasesItsCount) {
   {
-    EspNorFlash store;
+    FlashAreaRegion store;
     ASSERT_TRUE(store.begin());
     ASSERT_NE(nullptr, store.map(0, 4096));
     ASSERT_NE(nullptr, store.map(64 * 1024, 4096));
-    EXPECT_EQ(2u, EspNorFlash::liveFontAreaMappings());
+    EXPECT_EQ(2u, FlashAreaRegion::liveFontAreaMappings());
   }
-  EXPECT_EQ(0u, EspNorFlash::liveFontAreaMappings());
+  EXPECT_EQ(0u, FlashAreaRegion::liveFontAreaMappings());
   EXPECT_TRUE(cpfontWriteStarts("Readerly"));
 }

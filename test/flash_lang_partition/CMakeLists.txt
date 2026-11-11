@@ -1,10 +1,12 @@
 enable_language(C)
 
-# The real FlashLangPartition over an in-memory `spiffs` partition: this directory's esp_partition.h
-# and esp_rom_crc.h stand in for ESP-IDF's, so they come first on the include path. Logging stays
-# compiled out.
+# The real FlashLangPartition, through the flash area's partition backend, over an in-memory `spiffs` partition: this
+# directory's esp_partition.h, esp_rom_crc.h, sdkconfig.h and spi_flash_mmap.h stand in for ESP-IDF's, so they come
+# first on the include path. Logging stays compiled out.
 add_executable(FlashLangPartitionTest
   FlashLangPartitionTest.cpp
+  ${REPO_ROOT}/lib/hal/EspPartitionFlash.cpp
+  ${REPO_ROOT}/lib/hal/FlashArea.cpp
   ${REPO_ROOT}/lib/hal/FlashLangPartition.cpp
 )
 target_include_directories(FlashLangPartitionTest PRIVATE
