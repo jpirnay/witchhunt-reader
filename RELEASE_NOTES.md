@@ -2,6 +2,183 @@
 
 User-facing changes only. Full commit history is in git log.
 
+## 2.51 — 2026-11-11
+
+> **On 2.38 to 2.50, install 2.51 once by hand.** On those versions **Check for updates** finds 2.51 but cannot
+> download it: GitHub answers a release download with a header line longer than 4 KB, which they refuse. Copy the
+> release's `firmware.bin` (X3, X4), `firmware-x4pro.bin`, `firmware-lilygo.bin` or `firmware-murphy.bin` to the card
+> and use **Settings > System > System Update > SD Card Firmware Update**, or flash it over USB, for example with the
+> [Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/) (**Update only**). 2.51 reads such headers, so
+> from 2.51 on **Check for updates** works again.
+
+**More of the book's layout, a flasher in the browser, and updates over the air again.** Line spacing from 90 to 175 %, a
+Paragraph Indent setting and separate margins. Code that keeps its indentation, CSS drop caps, boxed text and small
+pictures inside a line. Black & White images on every board, grey pictures and visible grey text edges on the LilyGo
+T5 S3, and an X4 Pro whose interface stayed in English gets its language back.
+
+Read the upgrade notes at the end of this section before you update.
+
+### Updates and installation
+
+- **Check for updates downloads firmware again.** GitHub's download redirect now sends a header line of more than
+  4 KB. The reader gave up at 4,096 bytes, so on every board the download failed after the update was found. Such a
+  line is now skipped, unless it is one the download depends on. The web interface's setup page downloads its pages
+  from a release the same way, and works again too. Versions 2.38 to 2.50 keep the old limit: see the note above.
+- **The Witch Reader flasher** installs from the browser over USB, without a toolchain:
+  [jpirnay.github.io/witchhunt-reader](https://jpirnay.github.io/witchhunt-reader/), in a Chromium-based browser or a
+  Firefox newer than 151. Pick the device, connect it, and choose what to write:
+  - **Full install**: boot loader, partition table and firmware. For a device coming from its original firmware or
+    from CrossPoint, or whose partition table is not Witch Reader's. It gives an X4 Pro from the factory the flash area
+    its interface language needs, and an X3 or X4 the faster-waking boot loader, which only a PlatformIO upload
+    brought before.
+  - **Update only**: the firmware alone, for a device that already has Witch Reader's partition table.
+  - **Custom file**: a test build from a pull request.
+
+  Everything on the SD card stays: books, progress, settings, Wi-Fi networks, fonts. After the firmware the flasher
+  installs the web interface's pages over the cable, so they work without Wi-Fi. A locked device is sent to the
+  SD-card update instead.
+- **Full-install images on the release page:** `full-install-x3x4.bin`, `full-install-x4pro.bin`,
+  `full-install-lilygo.bin` and `full-install-murphy.bin` hold boot loader, partition table and firmware, written from
+  address 0x0 by any flashing tool. **SD Card Firmware Update** and Check for updates take the `firmware*.bin` files,
+  as before.
+- **The README links the flasher and CrossPoint's flash tools.** Those write the firmware only and keep the device's
+  partition table, so an X4 Pro that still has its original table needs the flasher's **Full install**.
+
+### Reading and layout
+
+- **Line Spacing from 90 % to 175 %** (Settings → Reader): nine steps named by their percentage of normal spacing, and
+  **Book's Style**. 95 % to 130 % are the former Tight, Normal, Wide, Extra Wide and Widest at the same spacing, so
+  your choice and your pages stay as they were. In Chinese, Japanese and Korean books the steps are fixed distances,
+  1.4 to 3 times the text size.
+- **Paragraph Indent** (Settings → Reader): None, 0.5, 1, 1.5 or 2 em, or **Book's Style** (default, as before). A fixed
+  step replaces the book's own first-line indent on running text, with **Extra Paragraph Spacing** on or off. Headings,
+  table cells, centred text and hanging indents keep the book's, and Chinese and Japanese text indents by whole
+  characters.
+- **Top & Bottom Margin** and **Left & Right Margin** replace Screen Margin: 5 to 40 px each, in EPUB, TXT and
+  Markdown. The update gives both the value Screen Margin had.
+- **Black & White** for **Images** (Settings → Reader, the reader menu and the quick overrides). Pictures are drawn as
+  black-and-white dots without the grey step, so a page with pictures turns like a text page: no extra refresh after
+  it, and with **One-Pass Anti-Aliasing** a single refresh. Text keeps its anti-aliasing, and switching between Display
+  and Black & White does not lay the book out again.
+- **Code keeps its indentation.** Every `<pre>` block, and text the book sets with CSS `white-space` (`pre`,
+  `pre-wrap`, `break-spaces`, `pre-line`), keeps its runs of spaces, its tabs (to stops of four) and its line breaks.
+  Before, every run of spaces collapsed to one. A line too long for the screen wraps at a space, and a word wider
+  than the screen is cut at the edge without a hyphen.
+- Fix: each line of a `<pre>` block repeated the block's top margin (40 px between 24 px lines) and took a first-line
+  indent of its own, which shifted every line of a code block.
+- **Drop caps from CSS `initial-letter`**, on a paragraph's first element or its `::first-letter`, also inside
+  `@supports (initial-letter: …)`. The cap spans as many lines as the book asks, at most six, and fewer where it would
+  take more than half the column. Raised and sunken caps stand where the book puts them, and `::first-letter` rules
+  match with the same selectors as any other rule.
+- **Boxed text.** A block the book draws with a border or a background colour (a sidebar, a note, a letter, an
+  epigraph, a code box) is framed on the page: solid, double, dotted or dashed borders up to 3 px, and a light grey
+  shade behind black text. A box cut by a page break stays open at the break, and boxes nest. It needs **Embedded
+  Style**; borders and shading in table cells and on words within a line are not drawn.
+- **Small pictures inside a line of text.** An image at most two lines tall within a paragraph (an icon, a letter the
+  font lacks, a small formula, an emoji, Japanese gaiji) is set in its line like a word, instead of splitting the
+  paragraph around a centred picture. It sits on the baseline and follows `vertical-align`, `<sup>` and `<sub>`; in
+  vertical text it stands upright as one character. A link around such a picture into the book is listed under
+  Footnotes, and on a touch screen the picture is its tap target.
+- **A picture the book shows at two sizes is decoded once for each**, instead of again every time it changes size, and a
+  small PNG asks only for the memory it needs. On the X3 the icons on a chapter's first page are now drawn while the
+  rest of the chapter is laid out.
+- **Chapters with tables need about 11 KB less memory** while they are laid out. On the X3 the lowest free memory in a
+  table-heavy appendix rose from 15.9 KB to 27.0 KB.
+- Fix: a table cell that found no memory restarted the reader. The chapter now stops there, as at any other
+  low-memory stop.
+
+### Fonts
+
+- **Kerning skips what the font tells it to skip**, as HarfBuzz does. A font's kerning table can leave out marks,
+  ligatures or base letters, and the reader kerned those pairs anyway: Caecilia LT asks for none of its letter pairs
+  to be kerned, and they were moved by 1–2 px. Among the Font Manager's families, the Grantha, Javanese, Lepcha, Tamil
+  and Telugu fonts use such rules.
+- **The web interface's Font Manager:**
+  - **Upload a font** takes `.ttf` and `.otf` files as they are, a `.woff` is unpacked in the browser first, and
+    `.cpfont` works as before. Replacing a font of the same name asks first.
+  - **Language packs** have a panel of their own under **Languages**, in three groups (interface, CJK titles,
+    hyphenation), with their status, the number of updates, **Update all packs** and **Delete**. Deleting the pack of
+    the interface language says that the menus turn English.
+  - Font lists are sent one family at a time, so a long list no longer needs memory for all of it at once. On the X3
+    the catalog left 4.5 KB of memory free; it now leaves 68 KB.
+
+### Interface languages
+
+- **X4 Pro: the interface language is back.** An X4 Pro installed over its original firmware stayed in English since
+  2.41, with its language pack on the card. SD-card and over-the-air updates keep the partition table a device came
+  with, and the factory table has a flash area of 80 KB, or none, too small for the 128 KB an interface language
+  takes since 2.41. Such a device now keeps that area, with the interface language and the font cache, in its PSRAM
+  and saves it to the card as `/.crosspoint/flash-area.img` (3.4 MB) before it sleeps or restarts and when a book
+  closes. A **Full install** with the flasher gives the device its own flash area instead.
+- **System Information** has a **Flash area** row (where that area is, with the partition table's `spiffs` partition
+  below it), and its **Language** row says why a language is not in use: `no pack`, `bad pack`, `no flash area`,
+  `area too small` and so on. Please quote both rows when you report an interface that stays in English.
+- **The Greek keyboard has a colon:** hold ; on the capital letters, as on a Greek keyboard, instead of going to the
+  symbols page.
+- The new labels (Black & White, Paragraph Indent, the two margins, Flash area) are translated in every language.
+
+### Display on the LilyGo T5 S3
+
+- **Pictures in grey.** With **Images** on Display, a page with JPEG or PNG pictures goes out in shades of grey
+  instead of black-and-white dots, with one full refresh, so it flashes once. Each picture's grey version is kept in
+  the book's cache on the card and made ahead of the page: a page with a large progressive JPEG comes up in 3.7 s once
+  its grey version is on the card, against 9.0 s while it has to be decoded. Text pages, GIF pictures and **Black &
+  White** are unchanged.
+- **Text anti-aliasing shows its greys.** Both grey levels came out nearly black; they now come out as a dark and a
+  light grey. A page turn takes 13 fewer panel frames: 1.0 s instead of 1.4 s (median of 12 turns). If you set **Text
+  Darkness** lighter to make up for the dark edges, try Normal again.
+
+### Network
+
+- Fix: a secure connection went ahead without its host-name check when there was no memory to set the check up, and
+  would then have accepted a valid certificate for any host. It is now refused.
+
+### Upgrade notes
+
+- **From 2.38 to 2.50, install 2.51 once by hand** (SD card or USB, see the note at the top of this section). Check for
+  updates works again from 2.51 on.
+- **Every chapter is laid out again the first time you open it**, and each book's stylesheet is compiled again,
+  because both formats changed. Your place, bookmarks and reading progress are kept. Pictures are decoded once more as
+  well, since their cached copies are now kept per drawn size.
+- **Settings carry over.** Line Spacing keeps your choice in its new numbering, and Top & Bottom and Left & Right Margin
+  both take your Screen Margin. Going back to 2.50 or older shifts Line Spacing, also a book's own (100 % comes back as
+  Wide), and resets Screen Margin to its default, until you set them again. Black & White images show as Display
+  there.
+- **A TrueType family whose kerning depends on the new rule is installed again once**, the first time it is loaded: among
+  the Font Manager's families, the Grantha, Javanese, Lepcha, Tamil and Telugu fonts. Every other family keeps what it
+  installed. A `.cpfont` font keeps its kerning pairs until it is converted again.
+- **X4 Pro installed over its original firmware:** the first start writes `/.crosspoint/flash-area.img` (3.4 MB) to the
+  card, about 2.4 s once, and rebuilds the interface language from its pack. Leave the file on the card: deleting it
+  costs that rebuild again, and your TrueType fonts are installed again. After a **Full install** the reader uses its
+  own flash area, and the file can go.
+- **Language packs:** the new labels show in English until **Check for updates** has updated your language's pack,
+  which it offers once 2.51 is installed.
+- **The web interface installs its pages again on your first visit**, because they changed. On your Wi-Fi network this
+  happens by itself. For hotspot mode, have the release's `web-….bin` ready, or let the flasher install the pages over
+  USB.
+- **Which file to flash:** the flasher brings its own. For an SD-card update: `firmware.bin` for the X3 and X4,
+  `firmware-x4pro.bin` for the X4 Pro, `firmware-lilygo.bin` for the LilyGo T5 S3 and `firmware-murphy.bin` for the
+  Murphy M3. For another flashing tool, written from 0x0: `full-install-x3x4.bin`, `full-install-x4pro.bin`,
+  `full-install-lilygo.bin` or `full-install-murphy.bin`.
+- **Translations:** the strings new in this release were machine-translated in every language, except Black & White in
+  Catalan, Spanish, Italian, Vietnamese, Swedish and Hebrew, which use the wording of CrossPoint's translators.
+  Corrections are welcome.
+
+### With thanks to
+
+- **vita5656**: the report and the patient answers behind the X4 Pro's interface language (#733).
+- **Georg Kaindl**: kerning that honours the font's lookup rules (Free-Ink/freeink-sdk #197).
+- **Justin Mitchell**, with **Uri Tauber** and **Sung-jin Brian Hong**: boxed text, and the layout work of
+  crosspoint-reader #3891 that CSS `white-space` and `initial-letter` follow. **Sung-jin Brian Hong** also: the
+  frame under the line above a box, and the 90–175 % line spacing range (crosspoint-reader #4174).
+- **Julia Nguyen** (CrossInk): small pictures inside a line of text, the shading and the fieldset outline of boxes,
+  and the separate margins.
+- **eunchurn**: the Black & White image mode in CrossPoint (crosspoint-reader #4160), whose setting this one matches.
+- **Leopoldo Pla Sempere**, **Matteo Scopel**, **Phạm Bình An**, **Stefan Blixten Karlsson** and **Uri Tauber**, whose
+  CrossPoint translations of Black & White six languages use (crosspoint-reader #4208, #4217, #4229, #4232).
+
+Source-level credits remain in the relevant files.
+
 ## 2.50 — 2026-11-10
 
 > **Known issue: Check for updates cannot download firmware (2.38 to 2.50).** GitHub now answers a release download with
