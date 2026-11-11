@@ -8,8 +8,8 @@ User-facing changes only. Full commit history is in git log.
 > download it: GitHub answers a release download with a header line longer than 4 KB, which they refuse. Copy the
 > release's `firmware.bin` (X3, X4), `firmware-x4pro.bin`, `firmware-lilygo.bin` or `firmware-murphy.bin` to the card
 > and use **Settings > System > System Update > SD Card Firmware Update**, or flash it over USB, for example with the
-> [Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/) (**Update only**). 2.51 reads such headers, so
-> from 2.51 on **Check for updates** works again.
+> [Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/) (**Update only**, or **Full install** where the
+> page asks for it). 2.51 reads such headers, so from 2.51 on **Check for updates** works again.
 
 **More of the book's layout, a flasher in the browser, and updates over the air again.** Line spacing from 90 to 175 %, a
 Paragraph Indent setting and separate margins. Code that keeps its indentation, CSS drop caps, boxed text and small
@@ -41,8 +41,9 @@ Read the upgrade notes at the end of this section before you update.
   `full-install-lilygo.bin` and `full-install-murphy.bin` hold boot loader, partition table and firmware, written from
   address 0x0 by any flashing tool. **SD Card Firmware Update** and Check for updates take the `firmware*.bin` files,
   as before.
-- **The README links the flasher and CrossPoint's flash tools.** Those write the firmware only and keep the device's
-  partition table, so an X4 Pro that still has its original table needs the flasher's **Full install**.
+- **The README links the flasher and CrossPoint's flash tools.** On an X4 Pro, CrossPoint's tools write the firmware
+  only and keep the device's partition table, so an X4 Pro that still has its original table needs the flasher's
+  **Full install**.
 
 ### Reading and layout
 
