@@ -43,6 +43,10 @@ class Kerning {
   bool legacy_ = false;
 };
 
+/// Whether GDEF changes how the style kerns (gpos::KernsByGdefClass(): a kern lookup that skips base glyphs or
+/// ligatures, or skips marks and can kern a pair holding one), read from its mapped tables. False without GPOS or GDEF.
+bool kernsByGdefClass(FontBytes& bytes, const Face& face);
+
 /// The ligatures EpdFont applies (fi, fl, ff, ffi, ffl) where the font's GSUB has them. They are keyed by their
 /// Unicode presentation forms, U+FB00-FB04, whatever the font's cmap says of those: `glyphs` gives the glyph each one
 /// draws. ffi and ffl chain through ff, as EpdFont applies them two at a time.

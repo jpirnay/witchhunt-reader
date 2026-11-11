@@ -190,9 +190,15 @@ struct StyleInfo {
   SdOutlines outlines;  ///< SD mode
 };
 
+/// Geometry::flags: the store was installed by firmware whose kerning honours GPOS lookup flags against GDEF glyph
+/// classes. A store without it (one installed before, whose byte was reserved and zero) holds pairs kerned without
+/// GDEF: the families whose kerning depends on it (gpos::KernsByGdefClass()) are installed again.
+constexpr uint8_t kFlagGdefKerning = 0x01;
+
 struct Geometry {
   uint8_t styleCount;
-  uint8_t reserved[3];
+  uint8_t flags;  ///< kFlagGdefKerning; 0 in a store installed before it
+  uint8_t reserved[2];
   uint32_t indexOffset;
   uint32_t indexSlots;
   uint32_t pairOffset;

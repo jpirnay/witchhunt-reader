@@ -1130,6 +1130,72 @@ TEST_F(TtfFontTest, CaeciliaLookupFlagsTakeLetterKerningAway) {
   EXPECT_EQ(0, font->kerning(kRegular, 'T', 'o'));
 }
 
+// The store as an install from before GDEF-aware kerning left it: its geometry's flag byte reserved and zero (the
+// header's check written again to match).
+void markInstalledBeforeGdefKerning(SimNorFlash& chip) {
+  glyphstore::Header header;
+  std::memcpy(&header, chip.raw(), sizeof header);
+  ASSERT_EQ(glyphstore::kFlagGdefKerning, header.geometry.flags);  // as this firmware installs
+  header.geometry.flags = 0;
+  header.check = glyphstore::fnv1a(&header, offsetof(glyphstore::Header, check));
+  std::memcpy(chip.raw(), &header, sizeof header);
+}
+
+TEST_F(TtfFontTest, AStoreFromBeforeGdefKerningKeepsFamiliesWhoseKerningItDoesNotChange) {
+  // Source Serif's, Noto Sans's and Inter's kern lookups skip only marks, and kern no pair holding one: their pairs
+  // are the same, and a store installed before keeps them.
+  const std::vector<std::vector<std::string>> families = {
+      {"SourceSerif4Caption/SourceSerif4Caption-Regular.ttf", "SourceSerif4Caption/SourceSerif4Caption-Bold.ttf",
+       "SourceSerif4Caption/SourceSerif4Caption-It.ttf", "SourceSerif4Caption/SourceSerif4Caption-BoldIt.ttf"},
+      {"NotoSans/NotoSans-Regular.ttf", "NotoSans/NotoSans-Bold.ttf", "NotoSans/NotoSans-Italic.ttf",
+       "NotoSans/NotoSans-BoldItalic.ttf"},
+      {"Inter/Inter-Regular.ttf", "Inter/Inter-Bold.ttf"}};
+  for (uint8_t f = 0; f < families.size(); ++f) {
+    const auto& names = families[f];
+    for (int s = 0; s < 4; ++s) files[s].bytes = s < static_cast<int>(names.size()) ? readFont(names[s]) : Bytes{};
+    const uint8_t identity[glyphstore::kIdentityBytes] = {'f', 'a', 'm', 'i',
+                                                          'l', 'y', '-', static_cast<uint8_t>('C' + f)};
+    busy = 0;
+    ASSERT_NE(nullptr, open(identity)) << names[0];
+    EXPECT_EQ(1, busy) << names[0];
+    markInstalledBeforeGdefKerning(flash);
+    ASSERT_NE(nullptr, open(identity)) << names[0];
+    EXPECT_EQ(1, busy) << names[0];  // not installed again
+  }
+}
+
+TEST_F(TtfFontTest, AStoreFromBeforeGdefKerningIsInstalledOnceMoreForAFamilyWhoseKerningChanges) {
+  // Source Serif given Caecilia LT's lookup flags (0x000E), and Noto Sans Grantha 2.001, whose lookup that ignores
+  // marks kerns sha before the anusvara: their stored pairs are kerned otherwise now. Installed again once, then kept.
+  for (const bool grantha : {false, true}) {
+    if (grantha) {
+      files[0].bytes = readFixture("NotoSansGrantha-Kern-Regular.ttf");
+      for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+    } else {
+      setKernLookupFlags(files[0].bytes, 0x000E);
+    }
+    const uint8_t* identity = grantha ? kIdentityB : kIdentityA;
+    busy = 0;
+    ASSERT_NE(nullptr, open(identity));
+    EXPECT_EQ(1, busy);
+    markInstalledBeforeGdefKerning(flash);
+    {
+      // Read-only, as a resume opens it: drawn as it is, its pairs as they were.
+      TtfFontSet same(flash);
+      ttf::FileSource sources[4];
+      for (int s = 0; s < 4; ++s) {
+        if (!files[s].bytes.empty()) sources[s] = files[s].source();
+      }
+      EXPECT_TRUE(same.load(&sources, 1, identity, [this] { ++busy; }, TtfFontSet::Install::Never));
+      EXPECT_EQ(1, busy);
+    }
+    ASSERT_NE(nullptr, open(identity));
+    EXPECT_EQ(2, busy) << grantha;  // installed again
+    ASSERT_NE(nullptr, open(identity));
+    EXPECT_EQ(2, busy) << grantha;  // and kept from then on
+  }
+}
+
 TEST_F(TtfFontTest, StoredKerningServesTheNextBoot) {
   useBuiltFont(kernedBoxes());
   {

@@ -48,6 +48,13 @@ int32_t Kerning::pair(FontBytes& bytes, const Face& face, const uint16_t left, c
   return 0;
 }
 
+bool kernsByGdefClass(FontBytes& bytes, const Face& face) {
+  const uint8_t* gpos = face.gpos != 0 ? bytes.span(face.gpos, face.gposLength) : nullptr;
+  const uint8_t* gdef = face.gdef != 0 ? bytes.span(face.gdef, face.gdefLength) : nullptr;
+  return gpos != nullptr && gdef != nullptr &&
+         freeink::font::gpos::KernsByGdefClass(gpos, face.gposLength, gdef, face.gdefLength);
+}
+
 uint16_t Ligatures::glyphFor(FontBytes& bytes, const Face& face, const uint32_t codepoint) const {
   // A glyph key names the glyph itself; one past the font's glyphs names none.
   if (glyph_key::is(codepoint)) {

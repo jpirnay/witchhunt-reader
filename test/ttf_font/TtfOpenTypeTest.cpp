@@ -217,6 +217,25 @@ TEST(TtfKerning, GranthaKernsNoMarkItsLookupIgnores) {
   EXPECT_EQ(-40, kerning.pair(bytes, withoutGdef, sha, anusvara));
 }
 
+TEST(TtfKerning, OnlyAStyleWhoseKerningGdefChangesKernsByGdefClass) {
+  // What decides whether a store installed before GDEF-aware kerning holds stale pairs for a style.
+  const auto kernsByClass = [](const std::vector<uint8_t>& file) {
+    FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
+    ttf::Face face;
+    EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+    return ttf::kernsByGdefClass(bytes, face);
+  };
+  // Their kern lookups skip only marks and kern no pair holding one; Ubuntu has no GDEF.
+  for (const char* name : {"SourceSerif4Caption/SourceSerif4Caption-Regular.ttf", "NotoSans/NotoSans-Regular.ttf",
+                           "Inter/Inter-Regular.ttf", "Inter/Inter-Bold.ttf", "Ubuntu/Ubuntu-Regular.ttf"}) {
+    EXPECT_FALSE(kernsByClass(readFont(name))) << name;
+  }
+  std::vector<uint8_t> caecilia = readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf");
+  setKernLookupFlags(caecilia, 0x000E);
+  EXPECT_TRUE(kernsByClass(caecilia));
+  EXPECT_TRUE(kernsByClass(readFixture("NotoSansGrantha-Kern-Regular.ttf")));
+}
+
 // --- Ligatures ---
 
 TEST(TtfLigatures, TheFontsFfiLigaturesBecomeEpdFontPairs) {
