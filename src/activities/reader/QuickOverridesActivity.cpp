@@ -80,10 +80,11 @@ void QuickOverridesActivity::buildMenuItems(const bool verticalAllowed) {
         static_cast<QuickOverridesActivity*>(ctx)->pendingEmbeddedStyleOverride = threeStateOverrideFromSlot(v);
       }));
 
-  // Image rendering: default(-1) / display(0) / placeholder(1) / suppress(2)
+  // Image rendering: default(-1) / display(0) / placeholder(1) / suppress(2) / black & white(3)
   menuItems.push_back(SettingInfo::DynamicEnumCtx(
       StrId::STR_IMAGES,
-      {StrId::STR_DEFAULT_VALUE, StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
+      {StrId::STR_DEFAULT_VALUE, StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS,
+       StrId::STR_IMAGES_DISPLAY_BW},
       self,
       [](const void* ctx) -> uint8_t {
         const auto* s = static_cast<const QuickOverridesActivity*>(ctx);

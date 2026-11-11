@@ -312,8 +312,15 @@ class CrossPointSettings {
   // is about making menu rows easier to hit, not about re-laying-out books.
   enum UI_FONT_SIZE { UI_FONT_SIZE_DEFAULT = 0, UI_FONT_SIZE_LARGE = 1, UI_FONT_SIZE_COUNT };
 
-  // Image rendering in EPUB reader
-  enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
+  // Image rendering in EPUB reader. Stored by number: a new value goes last. IMAGES_DISPLAY_BW lays images out as
+  // IMAGES_DISPLAY does and draws them in black and white, with no gray pass (activities/reader/ReaderImageMode.h).
+  enum IMAGE_RENDERING {
+    IMAGES_DISPLAY = 0,
+    IMAGES_PLACEHOLDER = 1,
+    IMAGES_SUPPRESS = 2,
+    IMAGES_DISPLAY_BW = 3,
+    IMAGE_RENDERING_COUNT
+  };
 
   // File browser sort mode (per-session, not persisted)
   enum FILE_SORT_MODE { SORT_BY_NAME = 0, SORT_BY_DATE = 1, SORT_BY_SIZE = 2, SORT_BY_TYPE = 3, FILE_SORT_MODE_COUNT };
