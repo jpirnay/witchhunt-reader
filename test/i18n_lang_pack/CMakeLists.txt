@@ -89,5 +89,32 @@ target_link_libraries(LangPackConvertTest PRIVATE
 )
 gtest_discover_tests(LangPackConvertTest)
 
+# Issue #733: the language slot from a card pack without the `spiffs` partition, in the PSRAM image the S3 boards take
+# then (FlashArea.cpp as they build it). No CardImageFile: the image is kept in PSRAM only, and never on the card.
+add_executable(LangSlotPsramImageTest
+  LangSlotPsramImageTest.cpp
+  ${REPO_ROOT}/lib/I18n/LangPack.cpp
+  ${REPO_ROOT}/lib/hal/EspPartitionFlash.cpp
+  ${REPO_ROOT}/lib/hal/FlashArea.cpp
+  ${REPO_ROOT}/lib/hal/FlashLangPartition.cpp
+  ${REPO_ROOT}/lib/hal/PsramImageFlash.cpp
+  ${REPO_ROOT}/lib/InflateReader/InflateReader.cpp
+  ${REPO_ROOT}/test/uzlib_lzcopy/UzlibChksumStubs.cpp
+  ${I18N_GENERATED_STRINGS}
+)
+target_include_directories(LangSlotPsramImageTest PRIVATE
+  ${LANG_PACK_INCLUDES}
+  ${REPO_ROOT}/test/flash_area_select
+  ${REPO_ROOT}/lib/Memory
+)
+target_compile_definitions(LangSlotPsramImageTest PRIVATE LANG_PACKS_DIR="${LANG_PACKS_DIR}" CONFIG_SPIRAM=1)
+add_dependencies(LangSlotPsramImageTest i18n_generated i18n_lang_packs)
+target_link_libraries(LangSlotPsramImageTest PRIVATE
+  crosspoint_test_common
+  uzlib_font_ring
+  GTest::gtest_main
+)
+gtest_discover_tests(LangSlotPsramImageTest)
+
 # The generator's side: the pack it writes reads back, and two key names with one hash fail the build.
 add_test(NAME GenI18nPacks COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/test_gen_i18n.py)

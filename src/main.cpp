@@ -1454,6 +1454,9 @@ void setup() {
   // a settings file existed, which the load path alone would not cover.
   SETTINGS.clockTimezone = timezones::activeIndex();
   timezones::applyToClock();
+  // The flash area before anything uses it, so every boot says in its log where the area is, or that it has none, and
+  // a board without the `spiffs` partition takes its PSRAM image while the PSRAM is still one block.
+  FlashArea::get();
   // A CJK language's pack carries its CJK UI faces, so the faces are read straight from flash
   // instead of decoded per glyph (CjkUiFonts.h). Registered before the first pack is resolved.
   I18N.setPackExtension(&CjkUiFonts::packExtension());
