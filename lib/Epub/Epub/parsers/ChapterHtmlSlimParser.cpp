@@ -3228,15 +3228,17 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
     BufferedTableRow& row = self->currentTable->pendingRow;
 
+    std::unique_ptr<ParsedText> cellText = self->makeCellText();
+    if (!cellText) {
+      self->currentTableCell = nullptr;
+      self->depth += 1;
+      return;
+    }
     const bool isHeader = (strcmp(name, "th") == 0);
     row.cells.emplace_back();
     row.cells.back().isHeader = isHeader;
     row.cells.back().colSpan = colSpan;
-    row.cells.back().text =
-        std::unique_ptr<ParsedText>(new ParsedText(false, false));  // no paragraph spacing, no hyphenation in cells
-    row.cells.back().text->setTypography(self->typography_);
-    row.cells.back().text->setShapingLatch(&self->shapingDegradedAny_);
-    row.cells.back().text->setVertical(self->vertical_);
+    row.cells.back().text = std::move(cellText);
     row.cells.back().text->getBlockStyle().direction = self->blockDirection(cssStyle);
     self->currentTable->pendingRowBytes += TABLE_BUFFER_BYTES_PER_CELL;
     row.effectiveCols = static_cast<uint8_t>(row.effectiveCols + colSpan);
@@ -6686,15 +6688,35 @@ bool ChapterHtmlSlimParser::degradeRowAtOpenCell(const char* reason) {
     chunk.isHeader = open.isHeader;
     ok = emitCellAsParagraph(chunk, /*emitImage=*/false);
   }
-  open.text = std::unique_ptr<ParsedText>(new ParsedText(false, false));
-  open.text->setTypography(typography_);
-  open.text->setShapingLatch(&shapingDegradedAny_);
-  open.text->setVertical(vertical_);
+  open.text = makeCellText();
+  if (!open.text) return false;  // the parse stops; the open cell is left out (currentTableCell stays null)
 
   t.pendingRow.cells.push_back(std::move(open));
   t.pendingRow.effectiveCols = 0;
   currentTableCell = &t.pendingRow.cells.back();
   return ok;
+}
+
+std::unique_ptr<ParsedText> ChapterHtmlSlimParser::makeCellText() {
+#ifdef TABLE_CELL_FAULT_INJECTION
+  const bool refused = tableCellTextsLeft() == 0;
+  if (!refused && tableCellTextsLeft() != SIZE_MAX) --tableCellTextsLeft();
+  auto text = refused ? nullptr : makeUniqueNoThrow<ParsedText>(false, false);
+#else
+  auto text = makeUniqueNoThrow<ParsedText>(false, false);
+#endif
+  if (!text) {
+    LOG_ERR("EHP", "No heap for a table cell's text (%u B; %u free, %u max alloc); stopping the parse",
+            static_cast<unsigned>(sizeof(ParsedText)), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+    streamFailed = true;
+    layoutFailed = true;
+    saxParser_.stop();
+    return nullptr;
+  }
+  text->setTypography(typography_);
+  text->setShapingLatch(&shapingDegradedAny_);
+  text->setVertical(vertical_);
+  return text;
 }
 
 void ChapterHtmlSlimParser::streamClosedCell(BufferedTableRow& row) {

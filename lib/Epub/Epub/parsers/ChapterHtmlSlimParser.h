@@ -75,6 +75,15 @@ inline constexpr size_t estimatePagesForSpine(const size_t inflatedSize) {
 
 class BuildArena;  // lib/Memory -- see setBuildArena
 
+#ifdef TABLE_CELL_FAULT_INJECTION
+// Host tests only (firmware never defines it): how many more table cells may get their text before each one is
+// refused as if the heap were out. SIZE_MAX = never refuse. Drives makeCellText's out-of-memory path.
+inline size_t& tableCellTextsLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+#endif
+
 class ChapterHtmlSlimParser final : public Print {
   std::shared_ptr<Epub> epub;
   GfxRenderer& renderer;
@@ -1181,6 +1190,9 @@ class ChapterHtmlSlimParser final : public Print {
   bool degradeRowAtOpenCell(const char* reason);
   // Called on </td> once degraded: emit and release the just-closed cell immediately.
   void streamClosedCell(BufferedTableRow& row);
+  // A table cell's text: no paragraph spacing, no hyphenation, the block's typography, shaping latch and writing mode.
+  // Null when the heap cannot hold it; the parse then stops, as any low-heap stop does (the pages so far are kept).
+  std::unique_ptr<ParsedText> makeCellText();
   // Resolve an image src to a sized ImageBlock (lazy-extracted from the EPUB), scaled to fit
   // maxWidth/maxHeight. Returns nullptr when the image is unsupported or its dimensions
   // cannot be resolved. The cache path is derived from the archive entry, not from parse order.
