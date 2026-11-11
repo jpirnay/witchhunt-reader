@@ -195,6 +195,28 @@ TEST(TtfKerning, CaeciliaLookupFlagsTakeBaseGlyphKerningAway) {
   EXPECT_EQ(kerned, kernAV(file, false));
 }
 
+TEST(TtfKerning, GranthaKernsNoMarkItsLookupIgnores) {
+  // Noto Sans Grantha 2.001 kerns sha before the anusvara by -40 units in a lookup that ignores marks (0x0508), and its
+  // GDEF classes the anusvara a mark: HarfBuzz kerns the pair 0, and so does the engine now.
+  const std::vector<uint8_t> file = readFixture("NotoSansGrantha-Kern-Regular.ttf");
+  FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
+  ttf::Face face;
+  ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+  ASSERT_NE(0u, face.gdef);
+  ttf::Kerning kerning;
+  ASSERT_TRUE(kerning.resolve(bytes, face));
+  const uint16_t sha = ttf::glyphIndex(bytes, face, 0x11336);
+  const uint16_t anusvara = ttf::glyphIndex(bytes, face, 0x11302);
+  ASSERT_NE(0, sha);
+  ASSERT_NE(0, anusvara);
+  bool covered = false;
+  EXPECT_EQ(0, kerning.pair(bytes, face, sha, anusvara, &covered));
+  EXPECT_TRUE(covered);  // sha kerns, only not with a mark
+  ttf::Face withoutGdef = face;
+  withoutGdef.gdef = 0;
+  EXPECT_EQ(-40, kerning.pair(bytes, withoutGdef, sha, anusvara));
+}
+
 // --- Ligatures ---
 
 TEST(TtfLigatures, TheFontsFfiLigaturesBecomeEpdFontPairs) {
