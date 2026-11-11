@@ -35,4 +35,7 @@ class NorFlash {
   virtual void unmap(const uint8_t* mapped) = 0;
   /// MMU pages still free for data mappings.
   virtual uint32_t freeMapPages() const = 0;
+  /// Makes every program() and erase() so far survive a power cut. Flash does as it goes; an area held in RAM
+  /// (PsramImageFlash) writes them to its file here. False when that failed: they stay pending for the next call.
+  virtual bool sync() { return true; }
 };
