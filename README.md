@@ -52,6 +52,11 @@ firmware-only `firmware*.bin`. Updating without a computer still works: **Check 
 firmware `.bin` to the card and use **SD Firmware Update** (Settings → System). The flasher's **Custom file** takes a
 test build from a pull request.
 
+The [CrossPoint flash tools](https://crosspointreader.com/#flash-tools) install Witch Reader too: pick your device,
+choose **Custom .bin** and upload the `firmware*.bin` from the [latest release](../../releases/latest). On an X4 Pro
+they write the firmware only and keep the device's partition table, so an X4 Pro that still has its original table
+needs the **Full install** above. The Murphy M3 is not listed there.
+
 For everything the reader does and how to use it, see the **[User Guide](USER_GUIDE.md)**. How it compares with
 CrossPoint, feature by feature: **[Feature comparison](docs/feature-comparison.md)**.
 
