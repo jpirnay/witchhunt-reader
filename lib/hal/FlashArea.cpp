@@ -41,7 +41,7 @@ NorFlash* psramImage() {
     return nullptr;
   }
   static CardImageFile file("/.crosspoint/flash-area.img");
-  static PsramImageFlash area(image, kBytes, file);
+  static PsramImageFlash area(image, kBytes, &file);
   if (!area.begin()) {
     heap_caps_free(image);
     return nullptr;

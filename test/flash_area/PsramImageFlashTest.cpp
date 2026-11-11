@@ -1,7 +1,8 @@
-// PsramImageFlash: the flash area held in PSRAM and kept as a file on the card, for a board without a `spiffs`
-// partition. A std::vector stands in for the PSRAM, SimImageFile for the card. What these tests hold it to:
+// PsramImageFlash: the flash area held in PSRAM, for a board without a `spiffs` partition, in PSRAM only or kept as a
+// file on the card. A std::vector stands in for the PSRAM, SimImageFile for the card. What these tests hold it to:
 // - NOR semantics, so every consumer's write-once and torn-write rules hold as on flash;
-// - a reboot finds what was synced, and reads only the pages something touches;
+// - in PSRAM only: erased at each boot, a page erased when something first touches it, and the consumers rebuild;
+// - on the card: a reboot finds what was synced, and reads only the pages something touches;
 // - a power cut anywhere, inside a sync included, leaves the last synced image, the new one, or an erased one: never a
 //   mix of two.
 
@@ -30,7 +31,14 @@ constexpr uint32_t kFileBytes = PsramImageFlash::kHeaderBlockBytes + kImageBytes
 // A boot: fresh PSRAM (not zeroed: nothing may rely on what the allocator left) over the card as it is.
 struct Boot {
   explicit Boot(SimImageFile& file, const uint32_t bytes = kImageBytes)
-      : psram(bytes, 0xA5), area(psram.data(), bytes, file) {}
+      : psram(bytes, 0xA5), area(psram.data(), bytes, &file) {}
+  std::vector<uint8_t> psram;
+  PsramImageFlash area;
+};
+
+// A boot of an image kept in PSRAM only, as FlashArea makes it by default.
+struct PsramOnlyBoot {
+  explicit PsramOnlyBoot(const uint32_t bytes = kImageBytes) : psram(bytes, 0xA5), area(psram.data(), bytes, nullptr) {}
   std::vector<uint8_t> psram;
   PsramImageFlash area;
 };
@@ -389,6 +397,98 @@ TEST(PsramImageFlash, AGlyphStoreInstallIsOnTheCardOnceFinished) {
     ASSERT_TRUE(window.begin());
     FlashGlyphStore store(window);
     EXPECT_EQ(gst_test::OpenResult::Ready, store.open(gst_test::kIdentityA));
+  }
+  sim_area::use(nullptr);
+}
+
+// In PSRAM only (the default on a board without the partition): erased at every boot, nothing kept anywhere else, and
+// no memset of the whole image at boot: a page is erased the first time something touches it.
+TEST(PsramImageFlash, InPsramOnlyAPageIsErasedWhenFirstTouched) {
+  PsramOnlyBoot boot;
+  PsramImageFlash& area = boot.area;
+  ASSERT_TRUE(area.begin());
+  EXPECT_EQ(kImageBytes, area.size());
+  EXPECT_EQ(0xA5, boot.psram[0]) << "begin() leaves the PSRAM alone";
+
+  const uint8_t* const mapped = area.map(2 * kPage + 8, 64);
+  ASSERT_EQ(boot.psram.data() + 2 * kPage + 8, mapped);
+  EXPECT_EQ(0xFF, mapped[0]) << "a mapped page reads erased";
+  EXPECT_EQ(0xFF, boot.psram[3 * kPage - 1]) << "the whole page it lies in";
+  EXPECT_EQ(0xA5, boot.psram[kPage]) << "and no other";
+
+  const uint8_t a = 0xF0, b = 0x0F;
+  ASSERT_TRUE(area.program(100, &a, 1));
+  ASSERT_TRUE(area.program(100, &b, 1));
+  uint8_t got = 0xAA;
+  ASSERT_TRUE(area.read(100, &got, 1));
+  EXPECT_EQ(0x00, got) << "a program only clears bits";
+  ASSERT_TRUE(area.read(101, &got, 1));
+  EXPECT_EQ(0xFF, got);
+  EXPECT_FALSE(area.erase(100, kSector)) << "an erase starts on a sector";
+  ASSERT_TRUE(area.erase(3 * kPage, kPage));
+  EXPECT_FALSE(allErased(contents(area))) << "byte 100 is still programmed";
+  EXPECT_TRUE(area.sync()) << "nothing to keep: a sync has nothing to do";
+}
+
+// The language slot in PSRAM only: built from the pack at every boot (FlashLangPartition finds no slot in an erased
+// area), its strings read in place as from flash.
+TEST(PsramImageFlash, InPsramOnlyTheLanguageSlotIsBuiltAgainAtEachBoot) {
+  namespace flp = FlashLangPartition;
+  constexpr uint32_t kAreaBytes = 1024 * 1024;
+  constexpr uint16_t kKeys = 40;
+  struct Strings {
+    int calls = 0;
+    static bool produce(void* ctx, flp::StringsWriter& out) {
+      ++static_cast<Strings*>(ctx)->calls;
+      for (uint16_t key = 0; key < kKeys; ++key) {
+        const std::string s = "text " + std::to_string(key);
+        if (!out.beginKey(key) || !out.write(s.c_str(), s.size() + 1)) return false;
+      }
+      return true;
+    }
+  } producer;
+  const flp::Strings strings{2048, &Strings::produce, &producer};
+
+  for (int boot = 1; boot <= 2; ++boot) {
+    PsramOnlyBoot psram(kAreaBytes);
+    ASSERT_TRUE(psram.area.begin());
+    sim_area::use(&psram.area);
+    flp::Mapped m{};
+    ASSERT_TRUE(flp::acquire(1, 0x1234, kKeys, strings, nullptr, &m));
+    EXPECT_EQ(boot, producer.calls) << "built from the pack at boot " << boot;
+    EXPECT_STREQ("text 39", m.data + m.offsets[39]);
+    EXPECT_GE(reinterpret_cast<const uint8_t*>(m.data), psram.psram.data()) << "read in place, in the image";
+    flp::Mapped again{};
+    ASSERT_TRUE(flp::acquire(1, 0x1234, kKeys, strings, nullptr, &again));
+    EXPECT_EQ(boot, producer.calls) << "and once per boot: the slot holds it from then on";
+    flp::unmap();
+    sim_area::use(nullptr);
+  }
+}
+
+// The TTF glyph store in PSRAM only: an install works as on flash, and is installed again after a reboot.
+TEST(PsramImageFlash, InPsramOnlyAGlyphStoreInstallsAndIsGoneAfterAReboot) {
+  constexpr uint32_t kAreaBytes = 1024 * 1024;
+  const glyphstore::Layout layout = gst_test::smallLayout();
+  {
+    PsramOnlyBoot boot(kAreaBytes);
+    ASSERT_TRUE(boot.area.begin());
+    sim_area::use(&boot.area);
+    FlashAreaRegion window;
+    ASSERT_TRUE(window.begin());
+    FlashGlyphStore store(window);
+    ASSERT_TRUE(gst_test::install(store, layout));
+    EXPECT_EQ(gst_test::OpenResult::Ready, store.open(gst_test::kIdentityA));
+    sim_area::use(nullptr);
+  }
+  PsramOnlyBoot again(kAreaBytes);
+  ASSERT_TRUE(again.area.begin());
+  sim_area::use(&again.area);
+  {
+    FlashAreaRegion window;
+    ASSERT_TRUE(window.begin());
+    FlashGlyphStore store(window);
+    EXPECT_NE(gst_test::OpenResult::Ready, store.open(gst_test::kIdentityA)) << "a new boot: an erased area";
   }
   sim_area::use(nullptr);
 }
