@@ -64,7 +64,8 @@ Corollary: LovyanGFX guides written for LCD boards (`pushBufferDMA()`, `waitDMA(
 do **not** transfer. Those are the `Panel_LCD` path. This is `Panel_EPD`, and its join is
 `waitDisplay()`, not `waitDMA()`.
 
-Measured full-refresh durations, for calibration: FAST ~1329-1559 ms, HALF ~2582-2950 ms. That is
+Measured full-refresh durations, for calibration: FAST ~1329-1559 ms (970-1130 ms since the fast
+bank shrank to `L[15]` rows, 2026-11-11), HALF ~2582-2950 ms. That is
 roughly 2-4x an X4 Pro and 3x an X3, and it is why several things that are affordable elsewhere
 are not affordable here.
 
@@ -105,6 +106,36 @@ The DU (fast) path needs no such compromise: DU is exactly `L[15]` frames of ful
 published DU phase counts for the same blob are our `L[15]` plus one in every range (epdiy counts a
 terminating phase). Two independent decoders agree, so the fast bank is as good as the vendor's.
 
+### The text AA greys: measured, not derived
+
+The fast bank's two grey columns self-normalise too: a run toward white that takes any source there,
+then `k` frames toward black. Up to 2026-11 the run was `L[15]` and `k` was `L[15]-L[g]`, the impulse
+model's distance from white to the grey's level, and that landed both greys on black (levels 7/12 at
+24 C: 13 and 9 frames; 0.00 and 0.02 on a reader page). `L` counts NET frames: the vendor reaches a
+grey with a long mixed sequence (GC16 24..27 C, white to level 14: 15 frames down, 14 up, 1 down),
+while a grey column here is one run down, and at `Panel_EPD`'s frame rate this panel covers most of
+the way in three or four frames. Measured 2026-11-11 at 24 C (`L[15]` = 21), 100x100 px patches
+through the fast bank, 4K camera, lightness 0 = black, 1 = white:
+
+| frames | 1 | 2 | 3 | 4 | 5 | 6 | 8 | 9 | 10+ |
+|---|---|---|---|---|---|---|---|---|---|
+| down, after 21 up | 0.82 | 0.56 | 0.34 | 0.19 | 0.11 | 0.07 | 0.04 | 0.01 | 0.00 |
+| down, after 12 up | 0.85 | 0.59 | 0.37 | 0.20 | 0.12 | 0.07 | 0.04 | 0.01 | 0.00 |
+| up, after 21 down | 0.08 | 0.42 | 0.74 | 0.87 | 0.93 | 0.96 | 0.95 | 0.96 | 0.98-1.00 |
+
+A white and a black start land within 0.05 of each other. A black pixel is white after 12 frames up,
+and the run up stops there: with 21, grey patches turned white after four page turns stayed ~5%
+darker than the white around them; with 12, ~1.5% (the old near-black greys ~0.6%).
+`gen_ed047tc2_waveform.py` carries these tables (`WALKUP_LIGHTNESS`, `WALKDOWN_AFTER_RUN`,
+`WALKDOWN_AFTER_RAIL`), picks `k` per range for the font buckets' targets 0.375 and 0.625, and scales
+both lengths to the other ranges by their `L[15]`; only 24..27 C was measured. It puts the two
+columns on the canvas levels whose clean-bank columns land nearest those greys (13/14 in most
+ranges), so a Half refresh carries them as far as the vendor columns allow. The clean bank follows
+the same curve: at 24 C its level 13 walks 5 frames down (0.10) and level 14 walks 2 (0.55); every
+other grey level is black. The fast bank is now `L[15]` rows in every range. The boot line names it
+all: `AA greys at level 13/14 (12 frames up, 3/2 down)`. `tools/test_gen_ed047tc2_waveform.py` in
+the SDK checks the generated tables against the generator.
+
 ### The LUT budget: 128 blocks, all banks together
 
 `blit_dmabuf` reads each pixel's progress word through `(int16_t)` and skips the pixel when it is
@@ -112,7 +143,8 @@ negative, and bits 8-14 of that word select the block. So no block index may rea
 terminators included, must fit in 128 rows. Overrunning it fails silently and globally (refreshes
 stop completing; the panel looks dead). `gen_ed047tc2_waveform.py` asserts the end of the last bank
 against `LUT_ROW_BUDGET = 128`, counting the 4-row `lut_eraser`; the header of the generated
-`ED047TC2Waveform.cpp` states the worst case (118 rows today), so a fourth clean phase would not fit.
+`ED047TC2Waveform.cpp` states the worst case (104 rows today; a fourth clean phase would take it to
+exactly 128 at 15..18 C).
 The boot line reports the budget in use (`[epd] LUT budget N/128 blocks`).
 
 `Panel_EPD::_lut_remain_table` is assigned but never read (only in commented-out logs); do not reason
