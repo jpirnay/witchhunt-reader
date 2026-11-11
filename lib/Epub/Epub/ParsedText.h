@@ -29,6 +29,39 @@ enum class Outcome : uint8_t;
 
 class ParsedText {
  public:
+  // PROTOTYPE (scratch/build-heap-analysis): the layout scratch, one per build, lent to every ParsedText the parser
+  // makes (the main block and every table cell), instead of 23 vector headers in each instance.
+  struct RubyEdge {
+    int16_t start = 0;
+    int16_t end = 0;
+    int16_t lead = 0;
+  };
+  struct LayoutScratch {
+    std::vector<int16_t> lineXPosScratch_;
+    std::vector<uint16_t> wordWidths_;
+    std::vector<uint8_t> markClass_;
+    std::vector<uint8_t> plainForm_;
+    std::vector<int8_t> edgeTrim_;
+    std::vector<uint8_t> shrink_;
+    std::vector<uint8_t> edgeShrink_;
+    std::vector<uint8_t> combined_;
+    std::vector<RubyEdge> rubyEdge_;
+    std::vector<size_t> lineBreakIndices_;
+    std::vector<bool> lineEndsWithHyphenatedWord_;
+    std::vector<int> splitPrefixWordIndexes_;
+    std::vector<bool> splitInsertedHyphen_;
+    std::vector<size_t> suffixBreaks_;
+    std::vector<bool> suffixLineEndsWithHyphenatedWord_;
+    std::vector<int> suffixSplitPrefixWordIndexes_;
+    std::vector<bool> suffixSplitInsertedHyphen_;
+    std::vector<int> interWordGaps_;
+    std::vector<int> lineIndexForWord_;  // computeLineBreaks' DP tables
+    std::vector<int> dp_;
+    std::vector<size_t> ans_;
+    std::string allText_;
+    std::vector<TextBlock::Annotation> lineAnnotations_;
+  };
+  void useLayoutScratch(LayoutScratch* scratch) { layoutScratch_ = scratch; }
   enum class LineProcessResult {
     Accepted,
     RetryWithoutHyphenation,
@@ -61,6 +94,13 @@ class ParsedText {
   static constexpr float kMinCombineScale = 0.5f;
 
  private:
+  LayoutScratch* layoutScratch_ = nullptr;
+  mutable std::unique_ptr<LayoutScratch> ownScratch_;
+  LayoutScratch& ls() const {
+    if (layoutScratch_) return *layoutScratch_;
+    if (!ownScratch_) ownScratch_.reset(new LayoutScratch());
+    return *ownScratch_;
+  }
   // Start and End (text-align: start / end, kept for the layout while the direction is unset or auto) become Left or
   // Right: Start is the right side in a right-to-left paragraph, End the left. Idempotent for one `rtl`: a block
   // resolves it once, with its decided direction.
@@ -73,56 +113,29 @@ class ParsedText {
   // TextBlock's single arena, and this handed the x positions over separately. Host profile of
   // one book: 16258 allocations at extractLine against 14459 rendered lines, essentially one
   // each, in the 16-32 byte classes that dominate the allocation count.
-  std::vector<int16_t> lineXPosScratch_;
   // Layout scratch kept across paragraphs (the parser reuses one ParsedText, see reset()).
   // Each of these was a per-block local before: one allocation per paragraph apiece, ~30,000
   // per book on the host census once the word vectors stopped regrowing (memory audit
   // 2026-09, R2). clear() keeps their capacity, so a chapter allocates them once.
-  std::vector<uint16_t> wordWidths_;
   // Each token's CjkPunctuation::Class when it is one full-width mark, and how much wider (> 0) or narrower (< 0) it
   // is at the line edge its mark acts at than mid-line, in pixels: where a line starts at an opening mark, where it
   // ends after any other. Then what push-in (spec 5.3) may take off the mark, in pixels: mid-line, its width there
   // less its minimum beside the same neighbour (shrink_); at its line edge, its line-edge width less its line-edge
   // minimum (edgeShrink_); 0 for other tokens. Four bytes a token. Layout scratch in step with wordWidths_:
   // calculateWordWidths fills all four, hyphenateWordAtIndex inserts into all four.
-  std::vector<uint8_t> markClass_;
   // In a paragraph that needs bidi, 1 for each token whose width the width pass measured of the very form the line
   // pass places (a plain token, BidiLine::tokenForm): placeBidiLine takes that width instead of measuring the piece
   // again. A byte a token, in step with wordWidths_ like markClass_; empty in a paragraph without bidi.
-  std::vector<uint8_t> plainForm_;
-  std::vector<int8_t> edgeTrim_;
-  std::vector<uint8_t> shrink_;
-  std::vector<uint8_t> edgeShrink_;
   // Whether each token combines (combines()): 1 for a token set upright as one block down its column, else 0. Layout
   // scratch in step with wordWidths_ like markClass_; empty on a horizontal line and in a block with no token that
   // asks to combine.
-  std::vector<uint8_t> combined_;
   // How a ruby group's tokens sit in their widths (applyRubyWidths), in pixels: `start` on the leader and `end` on
   // the group's last token are the overhang a line edge must hold when the group starts or ends a line; `lead` is
   // how far a base character widened by a longer ruby is drawn into its share (1:2:1 spreading).
-  struct RubyEdge {
-    int16_t start = 0;
-    int16_t end = 0;
-    int16_t lead = 0;
-  };
   // A RubyEdge per token, in step with wordWidths_ like markClass_; empty when the block has no ruby. 6 B a token.
-  std::vector<RubyEdge> rubyEdge_;
   // How far the block's lines sit in from the left: half of what rounding the width down to whole ems took (the CJK
   // grid, spec section 5.5). Set by each layout pass.
   int16_t gridInset_ = 0;
-  std::vector<size_t> lineBreakIndices_;
-  std::vector<bool> lineEndsWithHyphenatedWord_;
-  std::vector<int> splitPrefixWordIndexes_;
-  std::vector<bool> splitInsertedHyphen_;
-  std::vector<size_t> suffixBreaks_;
-  std::vector<bool> suffixLineEndsWithHyphenatedWord_;
-  std::vector<int> suffixSplitPrefixWordIndexes_;
-  std::vector<bool> suffixSplitInsertedHyphen_;
-  std::vector<int> interWordGaps_;
-  std::vector<int> lineIndexForWord_;  // computeLineBreaks' DP tables
-  std::vector<int> dp_;
-  std::vector<size_t> ans_;
-  std::string allText_;
   // Where each line's TextBlock takes its bytes: the build's lent region (a page-scoped block
   // the parser opens), or the heap when null. The parser sets it on its main text block (with
   // beforeLine_, see there for why the two go together) and on table cells laid out as a grid
@@ -166,7 +179,6 @@ class ParsedText {
   // n-th text. Moves with the tokens through every erase, snapshot and reset.
   std::vector<std::string> rubyTexts_;
   // The annotations of the line being extracted, handed to its TextBlock; reused across lines.
-  std::vector<TextBlock::Annotation> lineAnnotations_;
 
   // The block's inline objects (addInlineObject), one per object token (TokenBoundary::isObject), in token order: the
   // n-th object token owns the n-th entry. Empty in a block without one, which is then laid out as before: every
@@ -514,12 +526,14 @@ class ParsedText {
   // How token i's width changes when a line starts at it, and when a line ends after it: a CJK mark's line-edge
   // width, and the overhang of a ruby group's ruby that the line edge has to hold.
   int lineStartTrim(const size_t i) const {
-    return (opensLine(i) ? edgeTrim_[i] : 0) + (rubyEdge_.empty() ? 0 : rubyEdge_[i].start);
+    return (opensLine(i) ? ls().edgeTrim_[i] : 0) + (ls().rubyEdge_.empty() ? 0 : ls().rubyEdge_[i].start);
   }
   int lineEndTrim(const size_t i) const {
-    return (opensLine(i) ? 0 : edgeTrim_[i]) + (rubyEdge_.empty() ? 0 : rubyEdge_[i].end);
+    return (opensLine(i) ? 0 : ls().edgeTrim_[i]) + (ls().rubyEdge_.empty() ? 0 : ls().rubyEdge_[i].end);
   }
-  bool opensLine(const size_t i) const { return markClass_[i] == static_cast<uint8_t>(CjkPunctuation::Class::Opening); }
+  bool opensLine(const size_t i) const {
+    return ls().markClass_[i] == static_cast<uint8_t>(CjkPunctuation::Class::Opening);
+  }
   // A line first..last as drawn: its first and last token at their line-edge widths.
   int withEdgeTrims(const int naturalWidth, const size_t first, const size_t last) const {
     return naturalWidth + lineStartTrim(first) + lineEndTrim(last);
@@ -527,7 +541,7 @@ class ParsedText {
   // A mark that is not an opening one: a line's end edge acts on it. An ideographic space or an ambiguous quote passes
   // too, with nothing to give.
   bool closesLine(const size_t i) const {
-    return markClass_[i] != static_cast<uint8_t>(CjkPunctuation::Class::None) && !opensLine(i);
+    return ls().markClass_[i] != static_cast<uint8_t>(CjkPunctuation::Class::None) && !opensLine(i);
   }
   // What the gap of `gapBefore` px before token j may give under push-in: at a breakable CJK gap (where only a
   // CJK-Latin gap has a width) all but half of it, rounded down, as JLREQ lets a quarter-em gap shrink to 1/8 em; a
@@ -540,8 +554,8 @@ class ParsedText {
   // mid-line sum, each token's shrink_ and each gap's gapShrinkBefore.
   int withEdgeShrinks(const int shrinkSum, const size_t first, const size_t last) const {
     int sum = shrinkSum;
-    if (opensLine(first)) sum += edgeShrink_[first] - shrink_[first];
-    if (closesLine(last)) sum += edgeShrink_[last] - shrink_[last];
+    if (opensLine(first)) sum += ls().edgeShrink_[first] - ls().shrink_[first];
+    if (closesLine(last)) sum += ls().edgeShrink_[last] - ls().shrink_[last];
     return sum;
   }
   // The line first..last with everything that can give way at its minimum, what a breaker holds against the width
@@ -688,7 +702,7 @@ class ParsedText {
   // only, for a token that asks to (addWord's textCombine) and is the whole of its flagged run (no flagged neighbour
   // without a space between), of at most 4 code points with none drawn upright, and no wider than the em at
   // kMinCombineScale. Decided by each layout pass where it measures the words; false on a horizontal line.
-  bool combines(const size_t wordIdx) const { return wordIdx < combined_.size() && combined_[wordIdx] != 0; }
+  bool combines(const size_t wordIdx) const { return wordIdx < ls().combined_.size() && ls().combined_[wordIdx] != 0; }
 
   // CONSUMES ITS SOURCE by default: every word it lays out is erased from `words` (and the
   // parallel per-word vectors) before returning, so the vector shrinks as the paragraph drains.

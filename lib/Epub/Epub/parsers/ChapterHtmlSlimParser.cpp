@@ -2777,6 +2777,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   } else {
     currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled,
                                                          blockStyleWithIndent, bionicReadingEnabled));
+    if (currentTextBlock) currentTextBlock->useLayoutScratch(&sharedLayoutScratch_);  // PROTOTYPE
   }
   if (currentTextBlock) {
     currentTextBlock->setTypography(typography_);
@@ -3234,6 +3235,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     row.cells.back().colSpan = colSpan;
     row.cells.back().text =
         std::unique_ptr<ParsedText>(new ParsedText(false, false));  // no paragraph spacing, no hyphenation in cells
+    row.cells.back().text->useLayoutScratch(&self->sharedLayoutScratch_);  // PROTOTYPE
     row.cells.back().text->setTypography(self->typography_);
     row.cells.back().text->setShapingLatch(&self->shapingDegradedAny_);
     row.cells.back().text->setVertical(self->vertical_);
@@ -6687,6 +6689,7 @@ bool ChapterHtmlSlimParser::degradeRowAtOpenCell(const char* reason) {
     ok = emitCellAsParagraph(chunk, /*emitImage=*/false);
   }
   open.text = std::unique_ptr<ParsedText>(new ParsedText(false, false));
+  open.text->useLayoutScratch(&sharedLayoutScratch_);  // PROTOTYPE
   open.text->setTypography(typography_);
   open.text->setShapingLatch(&shapingDegradedAny_);
   open.text->setVertical(vertical_);
