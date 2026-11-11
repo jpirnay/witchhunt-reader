@@ -656,10 +656,9 @@ produces; a power cut leaves at worst bytes nothing references.
     the last one's `base`, and waits for an open; the hard bound is 3,968 (4,096 less two rings of 64 segments): no
     segment gets an epoch that far past the base until the index is rebuilt, in idle time if need be.
 - **The identity** is FNV-1a over the families' identities in the set's order (`ttf::setIdentity`); a family's is
-  FNV-1a over each style file's name, size and modification time, a marker for a file that kerns by GDEF class
-  (`ttf::kernsByGdefClass`: a GDEF, and a GPOS kern lookup whose flags skip glyphs by class; read from the card at each
-  open), and the engine's render version (`ttf::kRenderVersion`, 4; `ttf::familyIdentity`). A store of another
-  identity, or one whose header fails its check, is installed again.
+  FNV-1a over each style file's name, size and modification time and the engine's render version
+  (`ttf::kRenderVersion`, 4; `ttf::familyIdentity`). A store of another identity, or one whose header fails its
+  check, is installed again.
 
 Version 1 held one family: four style blocks, and a size table of bare ppems with pairs keyed by style alone.
 Version 2 had the mode in the `Geometry`, the store's, and a table map in each `StyleInfo` (1,240 B headers).

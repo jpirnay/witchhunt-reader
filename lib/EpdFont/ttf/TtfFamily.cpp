@@ -128,17 +128,6 @@ bool inFile(const FileSource& file, const uint32_t offset, const uint32_t length
 
 }  // namespace
 
-namespace {
-
-// What familyIdentity() adds for a file that kerns by GDEF class.
-constexpr uint8_t kGdefKerningMarker = 'G';
-
-// LookupFlag bits the GPOS reader skips glyphs by (Gpos.cpp): IgnoreBaseGlyphs, IgnoreLigatures, IgnoreMarks,
-// UseMarkFilteringSet and MarkAttachmentType.
-constexpr uint16_t kSkippingFlags = 0x0002 | 0x0004 | 0x0008 | 0x0010 | 0xFF00;
-
-}  // namespace
-
 bool isOutlineFontFileName(const char* name) {
   const size_t len = std::strlen(name);
   if (len <= 4 || name[len - 4] != '.') return false;
@@ -152,98 +141,6 @@ namespace {
 // A GSUB's or GPOS's header: u16 major and minor version, then the u16 offsets of its ScriptList (4), FeatureList (6)
 // and LookupList (8).
 constexpr uint32_t kLayoutHeaderBytes = 10;
-
-// What walkLookupHeaders() ended with: every header visited, `visit` stopping it, the read budget spent, or a read that
-// failed.
-enum class HeaderWalk : uint8_t { Done, Stopped, OverBudget, ReadFailed };
-
-// Calls `visit(ctx, at, header)` with the 6-byte header (type, flag, subtable count) of each of the `lookups` lookups
-// of the LookupList at `listAt` in the table at `offset`, `length` bytes, `at` its offset in the list: in pieces of 64
-// offsets, each piece in offset order, one read serving every header within 128 bytes of its first. A null or
-// out-of-list offset, or one with no room for a subtable, is no header. `reads` counts read calls (those before the
-// walk included); past `budget` the walk stops (OverBudget). `visit` returns false to stop (Stopped).
-HeaderWalk walkLookupHeaders(const FileSource& file, const uint32_t offset, const uint32_t length,
-                             const uint32_t listAt, const uint32_t lookups, const uint32_t budget, uint32_t& reads,
-                             bool (*visit)(void* ctx, uint32_t at, const uint8_t* header), void* ctx) {
-  const uint32_t listLength = length - listAt;
-  const uint32_t listed = std::min(lookups, (listLength - 2) / 2);
-  // One buffer, two uses: a piece of the list's offsets, decoded into `offsets` before anything else is read into it,
-  // then the window of lookup headers. 256 B of buffers in all.
-  uint8_t raw[128];        // 128 B: 64 of the list's offsets, then the lookup headers read so far
-  uint16_t offsets[64];    // 128 B: the piece, decoded and sorted
-  uint32_t windowAt = 0;   // the list offset raw[0] holds as a window
-  uint32_t windowEnd = 0;  // the list offset past the window's last byte (== windowAt: no window held)
-  for (uint32_t first = 0; first < listed; first += 64) {
-    const uint32_t n = std::min<uint32_t>(64, listed - first);
-    if (++reads > budget) break;
-    if (!file.read(file.ctx, offset + listAt + 2 + 2 * first, raw, 2 * n)) return HeaderWalk::ReadFailed;
-    for (uint32_t i = 0; i < n; ++i) offsets[i] = be16(raw + 2 * i);
-    windowEnd = windowAt;  // the piece took the window's bytes
-    // In offset order, so lookups packed one after another share a window.
-    std::sort(offsets, offsets + n);
-    for (uint32_t i = 0; i < n; ++i) {
-      const uint32_t at = offsets[i];
-      if (at == 0 || at >= listLength || listLength - at < 8) continue;  // under 8 bytes, no subtable fits
-      if (at < windowAt || at + 6 > windowEnd) {
-        // A window from this header on, as much as the list holds (at least the 8 bytes checked above).
-        const uint32_t len = std::min<uint32_t>(sizeof raw, listLength - at);
-        if (++reads > budget) break;
-        if (!file.read(file.ctx, offset + listAt + at, raw, len)) return HeaderWalk::ReadFailed;
-        windowAt = at;
-        windowEnd = at + len;
-      }
-      if (!visit(ctx, at, raw + (at - windowAt))) return HeaderWalk::Stopped;
-    }
-    if (reads > budget) break;
-  }
-  return reads > budget ? HeaderWalk::OverBudget : HeaderWalk::Done;
-}
-
-// What kernsByGdefClass() looks for among a GPOS's lookup headers: a pair adjustment lookup (type 2, or an Extension,
-// type 9, wrapping one) whose flags skip glyphs by GDEF class, with a first subtable the reader would read. Its own
-// reads (a first subtable's offset, an Extension's header) count against the walk's budget.
-struct FlagScan {
-  const FileSource& file;
-  uint32_t listFrom;  // where the LookupList lies in the file
-  uint32_t listLength;
-  uint32_t budget;
-  uint32_t& reads;
-  bool found = false;
-  bool failed = false;
-  bool over = false;
-
-  // The `n` bytes at `at` of the list; false past the list, past the budget (`over`) or when the read failed.
-  bool read(const uint32_t at, uint8_t* dst, const uint32_t n) {
-    if (at > listLength || n > listLength - at) return false;
-    if (++reads > budget) {
-      over = true;
-      return false;
-    }
-    failed = !file.read(file.ctx, listFrom + at, dst, n);
-    return !failed;
-  }
-};
-
-bool skipsByClass(void* ctx, const uint32_t at, const uint8_t* header) {
-  auto* scan = static_cast<FlagScan*>(ctx);
-  const uint16_t type = be16(header);
-  if ((type != 2 && type != 9) || (be16(header + 2) & kSkippingFlags) == 0 || be16(header + 4) == 0) return true;
-  uint8_t first[2];
-  if (!scan->read(at + 6, first, sizeof first)) return !scan->failed && !scan->over;
-  const uint32_t subtable = at + be16(first);
-  if (be16(first) == 0 || subtable >= scan->listLength) return true;
-  if (type == 2) {
-    scan->found = true;
-    return false;
-  }
-  // Extension format 1 wrapping a pair adjustment, at a 32-bit offset.
-  uint8_t extension[8];
-  if (!scan->read(subtable, extension, sizeof extension)) return !scan->failed && !scan->over;
-  const uint64_t wrapped = uint64_t{subtable} + be32(extension + 4);
-  scan->found =
-      be16(extension) == 1 && be16(extension + 2) == 2 && be32(extension + 4) != 0 && wrapped < scan->listLength;
-  return !scan->found;
-}
 
 // countLookups() of a table whose header (`header`, kLayoutHeaderBytes) was read already.
 bool countLookupsAfter(const FileSource& file, const uint32_t offset, const uint32_t length,
@@ -264,34 +161,52 @@ bool countLookupsAfter(const FileSource& file, const uint32_t offset, const uint
     return true;
   }
   out->lookups = lookups;
+  const uint32_t listed = std::min(lookups, (listLength - 2) / 2);
+  uint64_t subtables = 0;
   // Read calls so far: the two above, then a piece of offsets or a window of headers each. Past kMaxCountingReads the
   // list is crafted (a real one packs its lookups, a window serving a dozen or more): the table counts as capped, so
   // its font reserves no CPac, which costs only the computed filters (slower, never wrong).
   uint32_t reads = 2;
-  struct Sum {
-    uint32_t listLength;
-    uint64_t subtables;
-  } sum{listLength, 0};
-  const auto add = [](void* ctx, const uint32_t at, const uint8_t* lookupHeader) {
-    auto* total = static_cast<Sum*>(ctx);
-    total->subtables += std::min<uint32_t>(be16(lookupHeader + 4), (total->listLength - at - 6) / 2);
-    // Past the cap the rest need not be read.
-    return total->subtables <= kCpacMaxSubtables;
-  };
-  switch (walkLookupHeaders(file, offset, length, listAt, lookups, kMaxCountingReads, reads, add, &sum)) {
-    case HeaderWalk::ReadFailed:
-      return false;
-    case HeaderWalk::Stopped:
-      out->capped = true;
-      return true;
-    case HeaderWalk::OverBudget:
-      *out = {};
-      out->capped = true;
-      return true;
-    case HeaderWalk::Done:
-      break;
+  // One buffer, two uses: a piece of the list's offsets, decoded into `offsets` before anything else is read into it,
+  // then the window of lookup headers. 256 B of buffers in all.
+  uint8_t raw[128];        // 128 B: 64 of the list's offsets, then the lookup headers read so far
+  uint16_t offsets[64];    // 128 B: the piece, decoded and sorted
+  uint32_t windowAt = 0;   // the list offset raw[0] holds as a window
+  uint32_t windowEnd = 0;  // the list offset past the window's last byte (== windowAt: no window held)
+  for (uint32_t first = 0; first < listed; first += 64) {
+    const uint32_t n = std::min<uint32_t>(64, listed - first);
+    if (++reads > kMaxCountingReads) break;
+    if (!file.read(file.ctx, offset + listAt + 2 + 2 * first, raw, 2 * n)) return false;
+    for (uint32_t i = 0; i < n; ++i) offsets[i] = be16(raw + 2 * i);
+    windowEnd = windowAt;  // the piece took the window's bytes
+    // In offset order, so lookups packed one after another share a window.
+    std::sort(offsets, offsets + n);
+    for (uint32_t i = 0; i < n; ++i) {
+      const uint32_t at = offsets[i];
+      if (at == 0 || at >= listLength || listLength - at < 8) continue;  // under 8 bytes, no subtable fits
+      if (at < windowAt || at + 6 > windowEnd) {
+        // A window from this header on, as much as the list holds (at least the 8 bytes checked above).
+        const uint32_t len = std::min<uint32_t>(sizeof raw, listLength - at);
+        if (++reads > kMaxCountingReads) break;
+        if (!file.read(file.ctx, offset + listAt + at, raw, len)) return false;
+        windowAt = at;
+        windowEnd = at + len;
+      }
+      subtables += std::min<uint32_t>(be16(raw + (at - windowAt) + 4), (listLength - at - 6) / 2);
+      // Past the cap the rest need not be read.
+      if (subtables > kCpacMaxSubtables) {
+        out->capped = true;
+        return true;
+      }
+    }
+    if (reads > kMaxCountingReads) break;
   }
-  out->subtables = static_cast<uint32_t>(sum.subtables);
+  if (reads > kMaxCountingReads) {
+    *out = {};
+    out->capped = true;
+    return true;
+  }
+  out->subtables = static_cast<uint32_t>(subtables);
   return true;
 }
 
@@ -303,58 +218,6 @@ bool countLookups(const FileSource& file, const uint32_t offset, const uint32_t 
   uint8_t header[kLayoutHeaderBytes];
   if (!file.read(file.ctx, offset, header, sizeof header)) return false;
   return countLookupsAfter(file, offset, length, header, out);
-}
-
-bool kernsByGdefClass(const FileSource& file, bool* kerns) {
-  *kerns = false;
-  struct Tables {
-    Record gpos{};
-    Record gdef{};
-    bool seenGpos = false;
-    bool seenGdef = false;
-  } tables;
-  uint32_t version = 0;
-  const auto visit = [](void* ctx, const Record& record) {
-    auto* found = static_cast<Tables*>(ctx);
-    // The first record of a tag, the one parseFace() reads.
-    if (record.tag == tag("GPOS") && !found->seenGpos) {
-      found->gpos = record;
-      found->seenGpos = true;
-    } else if (record.tag == tag("GDEF") && !found->seenGdef) {
-      found->gdef = record;
-      found->seenGdef = true;
-    }
-    return true;
-  };
-  const Walk walk = forEachTable(file, &version, visit, &tables);
-  if (walk == Walk::ReadFailed) return false;
-  // As parseFace() takes the tables: in the file, with room for their headers; GDEF as the reader takes it, major
-  // version 1. A font without either kerns as before.
-  if (walk == Walk::Refused || !tables.seenGpos || !tables.seenGdef ||
-      !inFile(file, tables.gpos.offset, tables.gpos.length) || tables.gpos.length < 10 ||
-      !inFile(file, tables.gdef.offset, tables.gdef.length) || tables.gdef.length < 12) {
-    return true;
-  }
-  uint8_t major[2];
-  if (!file.read(file.ctx, tables.gdef.offset, major, sizeof major)) return false;
-  if (be16(major) != 1) return true;
-  // GPOS's LookupList, as the reader takes it: at u16 offset 8, whatever the version.
-  const uint32_t at = tables.gpos.offset;
-  const uint32_t length = tables.gpos.length;
-  uint8_t header[kLayoutHeaderBytes];
-  if (!file.read(file.ctx, at, header, sizeof header)) return false;
-  const uint32_t listAt = be16(header + 8);
-  if (listAt == 0 || listAt >= length || length - listAt < 2) return true;
-  uint8_t count[2];
-  if (!file.read(file.ctx, at + listAt, count, sizeof count)) return false;
-  uint32_t reads = 2;
-  FlagScan scan{file, at + listAt, length - listAt, kMaxKernFlagReads, reads};
-  const HeaderWalk headers =
-      walkLookupHeaders(file, at, length, listAt, be16(count), kMaxKernFlagReads, reads, skipsByClass, &scan);
-  if (headers == HeaderWalk::ReadFailed || scan.failed) return false;
-  // Past the budget: kerning by class, an extra install rather than a stale pair.
-  *kerns = scan.found || scan.over || headers == HeaderWalk::OverBudget;
-  return true;
 }
 
 namespace {
@@ -800,8 +663,6 @@ void familyIdentity(const FileStamp (&styles)[4], uint8_t out[glyphstore::kIdent
       putLe(fields + 4, file.date, 2);
       putLe(fields + 6, file.time, 2);
       hash = glyphstore::fnv1a(fields, sizeof fields, hash);
-      // Only a file whose kerning changed adds it: every other family keeps the identity its store was installed under.
-      if (file.kernsByGdefClass) hash = glyphstore::fnv1a(&kGdefKerningMarker, 1, hash);
     }
     hash = glyphstore::fnv1a(&kRenderVersion, 1, hash);
     putLe(out + 4 * lane, hash, 4);

@@ -135,9 +135,8 @@ namespace {
 
 static_assert(SdCardFontManager::kMaxTtfFamilies <= TtfFontSet::kMaxFamilies, "the set holds the manager's families");
 
-// Opens a family's style files, and gives the family's identity from what the card says of them and whether each
-// kerns by GDEF class (a few small reads of its GPOS). False: such a read failed, so the identity is not known for now.
-bool openTtfFiles(const SdCardFontFamilyInfo& family, HalFile (&files)[4], ttf::FileSource (&sources)[4],
+// Opens a family's style files, and gives the family's identity from what the card says of them.
+void openTtfFiles(const SdCardFontFamilyInfo& family, HalFile (&files)[4], ttf::FileSource (&sources)[4],
                   uint8_t (&identity)[glyphstore::kIdentityBytes]) {
   ttf::FileStamp stamps[4];
   for (const auto& file : family.files) {
@@ -158,13 +157,8 @@ bool openTtfFiles(const SdCardFontFamilyInfo& family, HalFile (&files)[4], ttf::
     sources[file.style] = ttf::fileSource(handle, size, stamp);
     const char* slash = std::strrchr(file.path.c_str(), '/');
     stamps[file.style] = {slash ? slash + 1 : file.path.c_str(), size, date, time};
-    if (!ttf::kernsByGdefClass(sources[file.style], &stamps[file.style].kernsByGdefClass)) {
-      LOG_ERR("SDMGR", "Cannot read the kerning of %s for now", file.path.c_str());
-      return false;
-    }
   }
   ttf::familyIdentity(stamps, identity);
-  return true;
 }
 
 // The first `count` families as one set, under the set's identity; nullptr when they cannot be drawn together.
@@ -225,11 +219,7 @@ bool SdCardFontManager::loadTtf(const SdCardFontFamilyInfo* const* families, uin
     return false;
   }
   for (uint8_t f = 0; f < count; ++f) {
-    // A family whose identity cannot be told for now would install over the store under a wrong one: none loads.
-    if (!openTtfFiles(*families[f], opened->files[f], opened->sources[f], opened->identities[f])) {
-      LOG_ERR("SDMGR", "TTF families could not load for now (memory, or a card read)");
-      return false;
-    }
+    openTtfFiles(*families[f], opened->files[f], opened->sources[f], opened->identities[f]);
   }
   // Exactly these families are a set the store holds already: never installed then (see resumeTtf()).
   const TtfFontSet::Install install =

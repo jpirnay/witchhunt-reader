@@ -87,21 +87,6 @@ constexpr uint32_t flashBlockBytes(const uint32_t fileBytes, const uint32_t cpac
 /// SdBlock::plan and the install's flash-mode sizes all count through it.
 bool filterTableBytes(const FileSource& file, uint32_t* bytes);
 
-/// The most read calls of GPOS kernsByGdefClass() makes: its header, the LookupList's count, pieces of its offsets,
-/// windows of lookup headers and a flagged lookup's first subtable. A real font needs a handful; past the cap the
-/// answer is true.
-constexpr uint32_t kMaxKernFlagReads = 32;
-
-/// Whether `file` kerns by GDEF class: it has a GDEF table the GPOS reader reads (Gpos.h: in the file, 12 bytes or
-/// more, major version 1), and a pair adjustment lookup of its GPOS LookupList (type 2, or an Extension wrapping one,
-/// with a first subtable) sets a LookupFlag that skips glyphs by GDEF class: IgnoreBaseGlyphs, IgnoreLigatures,
-/// IgnoreMarks, UseMarkFilteringSet or a MarkAttachmentType. Such a file may kern otherwise since the reader honours
-/// those flags, which its identity says (FileStamp::kernsByGdefClass). Every pair adjustment lookup counts, whatever
-/// feature lists it: a few more files than the 'kern' feature's lookups alone, each an extra install, never a stale
-/// pair. Read as countLookups() reads (the directory, GDEF's version, GPOS's header and LookupList); past
-/// kMaxKernFlagReads it counts as kerning by class. False: a read failed.
-bool kernsByGdefClass(const FileSource& file, bool* kerns);
-
 /// What discovery learns from a TrueType or OpenType CFF file, in a few small reads.
 struct FileProbe {
   /// head.macStyle: bit 0 bold, bit 1 italic, as EpdFontFamily::Style. -1 when it is not a font the engine
@@ -221,14 +206,10 @@ struct FileStamp {
   uint32_t size = 0;
   uint16_t date = 0;  ///< FAT modification date and time
   uint16_t time = 0;
-  /// kernsByGdefClass() of the file. Its kerning changed when the GPOS reader began to honour GDEF lookup flags, so
-  /// a store installed before holds pairs it no longer kerns: the identity tells. Every other file's is as before.
-  bool kernsByGdefClass = false;
 };
 
-/// The family identity (spec 4.2): FNV-1a over each style's file name, size and modification time (and a marker for
-/// a file that kerns by GDEF class), and kRenderVersion, in four lanes with different seeds. Any change to a file
-/// gives a new identity.
+/// The family identity (spec 4.2): FNV-1a over each style's file name, size and modification time, and
+/// kRenderVersion, in four lanes with different seeds. Any change to a file gives a new identity.
 void familyIdentity(const FileStamp (&styles)[4], uint8_t out[glyphstore::kIdentityBytes]);
 
 /// A family set's identity, the glyph store's (spec 11.1): FNV-1a over the families' identities in the set's
