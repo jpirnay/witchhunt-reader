@@ -2562,13 +2562,16 @@ void CrossPointWebServer::handleFontManifest() {
     obj["ownFiles"] = families.installed(i) && !families.hasUpdate(i) && FontInstaller::holdsOwnFiles(families, i);
     obj["hyphenation"] = families.hyphenation(i);
     obj["language"] = families.languagePack(i);
-    // A CJK interface pack (ChineseUI): no reading font, listed with the language packs.
-    obj["interfacePack"] = cjk_ui_pack::isFamily(families.name(i));
-    // A pack of the interface language: the page says what deleting it does first.
-    obj["inUse"] = families.installed(i) && UiLanguagePacks::usedByInterface(families, i);
+    // Two flags written only when true, as the page reads a missing one as false: on all 123 families they would
+    // sit in the document and in its text at the answer's peak. A CJK interface pack (ChineseUI) is no reading font,
+    // listed with the language packs; a pack of the interface language is one the page warns about before deleting.
+    if (cjk_ui_pack::isFamily(families.name(i))) obj["interfacePack"] = true;
+    if (families.installed(i) && UiLanguagePacks::usedByInterface(families, i)) obj["inUse"] = true;
     obj["totalSize"] = static_cast<unsigned long>(families.totalSize(i));
     obj["fileCount"] = static_cast<unsigned>(families.fileCount(i));
   }
+  // The document holds what the answer needs: the list's block goes before sendJson() writes the text beside it.
+  families.clear();
   LOG_WEB_MEM("font_manifest_exit");
   sendJson(server.get(), 200, doc);
 }
