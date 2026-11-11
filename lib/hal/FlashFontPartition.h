@@ -155,6 +155,10 @@ bool hasEntry(const char* familyName, uint8_t pointSize);
 // Returns true if the partition has all sizes in the provided array.
 bool hasFamilyComplete(const char* familyName, const uint8_t* sizes, uint8_t sizeCount);
 
+// Bytes the cache holds: its 8-byte header, the index entries in use and every
+// entry's data. 0 without a valid index (SystemStatus shows it).
+size_t cachedBytes();
+
 // Returns true if the partition is currently mmap'd.
 bool isMapped();
 

@@ -344,6 +344,17 @@ bool hasFamilyComplete(const char* familyName, const uint8_t* sizes, uint8_t siz
   return true;
 }
 
+size_t cachedBytes() {
+  const NorFlash* const area = findArea();
+  if (!area) return 0;
+  Entry entries[MAX_ENTRIES];
+  uint8_t count = 0;
+  if (!readIndex(area, entries, count)) return 0;
+  size_t total = 8 + static_cast<size_t>(count) * ENTRY_SIZE;
+  for (uint8_t i = 0; i < count; i++) total += entries[i].dataSize;
+  return total;
+}
+
 bool isMapped() { return s_mmapPtr != nullptr; }
 
 bool isWriting() { return s_ws.active; }

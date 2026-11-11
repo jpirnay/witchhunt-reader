@@ -134,3 +134,13 @@ TEST_F(FlashFontPartitionAreaTest, AGlyphStoreMappingOfTheFontAreaKeepsTheCacheO
   store.unmap(block);
   EXPECT_TRUE(ffp::mmap("Bitter", 14, &data, &size));
 }
+
+TEST_F(FlashFontPartitionAreaTest, CachedBytesCountTheHeaderTheIndexAndEveryEntrysData) {
+  // What SystemStatus reports as the cache's use.
+  EXPECT_EQ(0u, ffp::cachedBytes()) << "an erased area holds no cache";
+  const ffp::Entry entries[] = {entry("Bitter", 12, 4096, 6000), entry("Bitter", 14, 12288, 9000)};
+  install(entries, 2);
+  EXPECT_EQ(8u + 2u * ffp::ENTRY_SIZE + 6000u + 9000u, ffp::cachedBytes());
+  sim_area::use(nullptr);
+  EXPECT_EQ(0u, ffp::cachedBytes());
+}
