@@ -196,6 +196,7 @@ Section::BuildParams buildParams(const Profile& profile, const uint8_t bodySizeP
   p.bookLineHeightFloor = profile.bookLineHeightFloor;
   p.lineHeightEmPx = profile.lineHeightEmPx;
   p.extraParagraphSpacing = profile.extraParagraphSpacing;
+  p.paragraphIndent = profile.paragraphIndent;
   p.paragraphAlignment = profile.paragraphAlignment;
   p.viewportWidth = profile.viewportWidth;
   p.viewportHeight = profile.viewportHeight;

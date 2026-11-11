@@ -2,6 +2,7 @@
 
 #include <BoardConfig.h>
 #include <Epub/LineSpacing.h>
+#include <Epub/ParagraphIndent.h>
 #include <HalStorage.h>
 #include <JsonSettingsIO.h>
 #include <Logging.h>
@@ -241,13 +242,25 @@ bool CrossPointSettings::loadFromFile() {
   return false;
 }
 
-static_assert(CrossPointSettings::TIGHT == static_cast<uint8_t>(LineSpacingStep::Tight) &&
-                  CrossPointSettings::NORMAL == static_cast<uint8_t>(LineSpacingStep::Normal) &&
-                  CrossPointSettings::WIDE == static_cast<uint8_t>(LineSpacingStep::Wide) &&
-                  CrossPointSettings::EXTRA_WIDE == static_cast<uint8_t>(LineSpacingStep::ExtraWide) &&
-                  CrossPointSettings::WIDEST == static_cast<uint8_t>(LineSpacingStep::Widest) &&
+static_assert(CrossPointSettings::LINE_SPACING_90 == static_cast<uint8_t>(LineSpacingStep::Pct90) &&
+                  CrossPointSettings::LINE_SPACING_95 == static_cast<uint8_t>(LineSpacingStep::Pct95) &&
+                  CrossPointSettings::LINE_SPACING_100 == static_cast<uint8_t>(LineSpacingStep::Pct100) &&
+                  CrossPointSettings::LINE_SPACING_110 == static_cast<uint8_t>(LineSpacingStep::Pct110) &&
+                  CrossPointSettings::LINE_SPACING_120 == static_cast<uint8_t>(LineSpacingStep::Pct120) &&
+                  CrossPointSettings::LINE_SPACING_130 == static_cast<uint8_t>(LineSpacingStep::Pct130) &&
+                  CrossPointSettings::LINE_SPACING_145 == static_cast<uint8_t>(LineSpacingStep::Pct145) &&
+                  CrossPointSettings::LINE_SPACING_160 == static_cast<uint8_t>(LineSpacingStep::Pct160) &&
+                  CrossPointSettings::LINE_SPACING_175 == static_cast<uint8_t>(LineSpacingStep::Pct175) &&
                   CrossPointSettings::FROM_BOOK == static_cast<uint8_t>(LineSpacingStep::FromBook),
               "the stored line-spacing steps are LineSpacingStep's");
+static_assert(CrossPointSettings::PARAGRAPH_INDENT_NONE == static_cast<uint8_t>(ParagraphIndent::None) &&
+                  CrossPointSettings::PARAGRAPH_INDENT_HALF_EM == static_cast<uint8_t>(ParagraphIndent::HalfEm) &&
+                  CrossPointSettings::PARAGRAPH_INDENT_ONE_EM == static_cast<uint8_t>(ParagraphIndent::OneEm) &&
+                  CrossPointSettings::PARAGRAPH_INDENT_ONE_AND_HALF_EM ==
+                      static_cast<uint8_t>(ParagraphIndent::OneAndHalfEm) &&
+                  CrossPointSettings::PARAGRAPH_INDENT_TWO_EM == static_cast<uint8_t>(ParagraphIndent::TwoEm) &&
+                  CrossPointSettings::PARAGRAPH_INDENT_FROM_BOOK == static_cast<uint8_t>(ParagraphIndent::FromBook),
+              "the stored paragraph indents are ParagraphIndent's");
 
 float CrossPointSettings::getReaderLineCompression() const {
   // Without a book (the dictionary's pages): no CJK pitch, and Book's style reads as Normal.

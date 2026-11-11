@@ -161,15 +161,19 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=3 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=below.
  PAGE 1 elements=33 footnotes=0
   BOX y=0 x=0 w=460 h=88 edges=1/5,1/5,1/5,1/5 shaded=1
-  LINE y=8 x=8 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=0 z=100 t=int
-   W x=51 s=0 z=100 t=keeper(void)
-   W x=167 s=0 z=100 t={
-  LINE y=32 x=8 align=0 mult=1.000 hfid=0 words=2
-   W x=18 s=0 z=100 t=return
-   W x=81 s=0 z=100 t=lamp_on();
-  LINE y=56 x=8 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=}
+  LINE y=8 x=8 align=1 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=int
+   W x=27 s=0 z=100 t= 
+   W x=33 s=0 z=100 t=keeper(void)
+   W x=143 s=0 z=100 t= 
+   W x=149 s=0 z=100 t={
+  LINE y=32 x=8 align=1 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=    
+   W x=24 s=0 z=100 t=return
+   W x=81 s=0 z=100 t= 
+   W x=87 s=0 z=100 t=lamp_on();
+  LINE y=56 x=8 align=1 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=}
   BOX y=98 x=0 w=460 h=24 edges=0/0,0/0,0/0,3/2 shaded=0
   LINE y=98 x=12 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=A

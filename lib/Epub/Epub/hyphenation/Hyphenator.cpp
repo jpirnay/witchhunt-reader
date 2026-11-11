@@ -312,6 +312,16 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
   return breaks;
 }
 
+std::vector<Hyphenator::BreakInfo> Hyphenator::anywhereBreaks(const std::string& word) {
+  const std::vector<CodepointInfo> cps = collectCodepoints(word);
+  std::vector<size_t> indexes;
+  appendFallbackIndexes(cps, 1, 1, indexes);
+  std::vector<BreakInfo> breaks;
+  breaks.reserve(indexes.size());  // lives for one candidate search
+  for (const size_t idx : indexes) breaks.push_back({byteOffsetForIndex(cps, idx), false});
+  return breaks;
+}
+
 std::vector<Hyphenator::BreakInfo> Hyphenator::myanmarLineEndBreaks(const std::string& word) {
   // The byte scan first: most words are not Myanmar, and return here without a code point vector.
   if (!myanmar::holdsMyanmar(word.data(), word.size())) return {};

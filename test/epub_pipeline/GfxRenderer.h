@@ -71,9 +71,12 @@ class GfxRenderer {
   int getDisplayHeight() const { return 800; }
   uint16_t getDisplayWidthBytes() const { return 60; }
   Orientation getOrientation() const { return live_; }
-  // Test seam: the pass a test draws in. BW by default, as every build and dump runs.
+  // The pass a test draws in, BW unless it says otherwise, as every build and dump runs: one renderer's own mode
+  // (setRenderMode, as the reader's AA passes set it), else the mode every renderer of a test draws in
+  // (renderModeForTest).
   inline static RenderMode renderModeForTest = BW;
-  RenderMode getRenderMode() const { return renderModeForTest; }
+  RenderMode getRenderMode() const { return renderMode_ != BW ? renderMode_ : renderModeForTest; }
+  void setRenderMode(const RenderMode mode) const { renderMode_ = mode; }
   uint8_t* getWriteTarget() const { return frameBuffer_; }
   int getWriteOriginY() const { return 0; }
   int getWriteRows() const { return 800; }
@@ -295,6 +298,7 @@ class GfxRenderer {
 
   Orientation held_ = Portrait;
   mutable Orientation live_ = Portrait;
+  mutable RenderMode renderMode_ = BW;
 
   // Converters write decoded pixels through getWriteTarget(); give them a real
   // buffer so those paths are memory-safe if exercised.

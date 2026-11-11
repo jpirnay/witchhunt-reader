@@ -168,6 +168,18 @@ TEST_F(BodySizeTest, HeadingsAreLeftOut) {
   EXPECT_EQ(3 * proseChars(kProse), found.chars);
 }
 
+// Code keeps its spaces (white-space: pre), but they are no characters of the book's text: a book with long code
+// listings would otherwise weigh their indentation into the code's size.
+TEST_F(BodySizeTest, KeptSpacesAreNoCharacters) {
+  std::string code;
+  for (int i = 0; i < 40; ++i) code += "        x = y;\n\t\tz();\n";
+  auto epub = book("pre { font-size: small }", {paragraphs("tx", kProse, 3) + "<pre>" + code + "</pre>"});
+  const BodySize::Detected found = detect(*epub);
+  EXPECT_FALSE(found.failed);
+  EXPECT_EQ(3 * proseChars(kProse) + 40 * proseChars("x = y;z();"), found.chars);
+  EXPECT_EQ(100, found.pct);
+}
+
 // Many short notes, fewer long paragraphs: characters decide, not paragraphs.
 TEST_F(BodySizeTest, MostCharactersNotMostParagraphs) {
   const std::string css = ".tx { font-size: small } .xs { font-size: x-small }";

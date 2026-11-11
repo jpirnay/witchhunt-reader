@@ -93,6 +93,31 @@ enum class CssTextOrientation : uint8_t { Unset = 0, Mixed, Upright, Sideways };
 enum class CssTextCombine : uint8_t { Unset = 0, None, All, Digits2, Digits3, Digits4 };
 enum class CssDirection : uint8_t { Unset = 0, Ltr, Rtl, Auto };
 enum class CssUnicodeBidi : uint8_t { Unset = 0, Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext };
+// What the element's text keeps of its white space (CSS Text 3 white-space); inherited. Like the flow properties it has
+// no defined bit: 0 is Unset.
+enum class CssWhiteSpace : uint8_t { Unset = 0, Normal, Nowrap, Pre, PreWrap, PreLine, BreakSpaces };
+
+namespace CssWhiteSpaces {
+// Runs of spaces and tabs stay as they are written: pre, pre-wrap and break-spaces.
+constexpr bool keepsSpaces(const CssWhiteSpace w) {
+  return w == CssWhiteSpace::Pre || w == CssWhiteSpace::PreWrap || w == CssWhiteSpace::BreakSpaces;
+}
+// A line feed breaks the line: those three and pre-line.
+constexpr bool keepsLineFeeds(const CssWhiteSpace w) { return keepsSpaces(w) || w == CssWhiteSpace::PreLine; }
+}  // namespace CssWhiteSpaces
+
+// CSS initial-letter (and -webkit-initial-letter), packed in a byte: the letter's size in lines in the low nibble, how
+// many lines it sinks in the high one. 0 is unset (no defined bit, as for the flow properties); a size of 1 is
+// `normal`, which names no drop cap; a sink of 0 sinks the letter as many lines as it is tall. Fractional sizes are
+// rounded.
+namespace CssInitialLetter {
+constexpr uint8_t kMaxLines = 15;
+constexpr uint8_t kNormal = 1;
+constexpr uint8_t pack(const uint8_t lines, const uint8_t sink) { return static_cast<uint8_t>(lines | (sink << 4)); }
+constexpr uint8_t lines(const uint8_t v) { return v & 0x0F; }
+// The sink, its default resolved: as many lines as the letter is tall.
+constexpr uint8_t sink(const uint8_t v) { return (v >> 4) != 0 ? (v >> 4) : lines(v); }
+}  // namespace CssInitialLetter
 
 // A border's line style as a 1-bit page draws it: groove, ridge, inset and outset are Solid (they differ only in
 // shades of the border colour), hidden is None (it differs only where table borders meet). Unset is "not declared",
@@ -369,8 +394,12 @@ struct CssStyle {
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
 
+  // In the word after the flag word, the one CssStyle grew by (the size check below the struct).
+  CssWhiteSpace whiteSpace = CssWhiteSpace::Unset;
+  uint8_t initialLetter = 0;  // CssInitialLetter; 0 unset
+
   // Number of properties applyOver() merges: the size of its `ranks` array. The box's longhands are the last ones.
-  static constexpr int kFirstBoxProperty = 34;
+  static constexpr int kFirstBoxProperty = 36;
   static constexpr int kCascadeProperties = kFirstBoxProperty + CssBox::kCascadeLonghands;
 
   // Apply properties from another style, only overwriting if the other style
@@ -514,6 +543,8 @@ struct CssStyle {
       textEmphasis = base.textEmphasis;
       defined.textEmphasis = 1;
     }
+    if (base.hasWhiteSpace() && take(hasWhiteSpace(), 34)) whiteSpace = base.whiteSpace;
+    if (base.hasInitialLetter() && take(hasInitialLetter(), 35)) initialLetter = base.initialLetter;
     if (base.box.any()) box.cascadeFrom(base.box, rank, ranks ? ranks + kFirstBoxProperty : nullptr);
   }
 
@@ -574,10 +605,17 @@ struct CssStyle {
   [[nodiscard]] bool hasTextCombine() const { return textCombine != CssTextCombine::Unset; }
   [[nodiscard]] bool hasDirection() const { return direction != CssDirection::Unset; }
   [[nodiscard]] bool hasUnicodeBidi() const { return unicodeBidi != CssUnicodeBidi::Unset; }
-  // Whether the style says anything at all: a defined bit, or one of the flow properties, which have none.
+  [[nodiscard]] bool hasWhiteSpace() const { return whiteSpace != CssWhiteSpace::Unset; }
+  [[nodiscard]] bool hasInitialLetter() const { return initialLetter != 0; }
+  // The lines an initial-letter drop cap spans: 2 and up, else 0 (unset, or `normal`).
+  [[nodiscard]] uint8_t initialLetterLines() const {
+    const uint8_t n = CssInitialLetter::lines(initialLetter);
+    return n >= 2 ? n : 0;
+  }
+  // Whether the style says anything at all: a defined bit, or one of the properties that have none.
   [[nodiscard]] bool anyDefined() const {
     return defined.anySet() || box.any() || hasWritingMode() || hasTextOrientation() || hasTextCombine() ||
-           hasDirection() || hasUnicodeBidi();
+           hasDirection() || hasUnicodeBidi() || hasWhiteSpace() || hasInitialLetter();
   }
   [[nodiscard]] bool hasFontSizeMultiplier() const { return defined.fontSizeMultiplier; }
 
@@ -668,12 +706,16 @@ struct CssStyle {
     direction = CssDirection::Unset;
     unicodeBidi = CssUnicodeBidi::Unset;
     textEmphasis = 0;
+    whiteSpace = CssWhiteSpace::Unset;
+    initialLetter = 0;
     defined.clearAll();
   }
 };
 
 // The flow properties sit in padding (after pageBreakAfter and after visibilityHidden), so they cost a style nothing;
-// textEmphasis and the box fill the word after fontFamily. Every member is 4-byte aligned or smaller, so the C3 lays it
-// out as the host does.
-static_assert(sizeof(CssStyle) == 128,
-              "CssStyle grew: the flow properties, textEmphasis or the box no longer fit its padding");
+// textEmphasis and the box fill the word after fontFamily. whiteSpace and initialLetter take the word after the flag
+// word, the one CssStyle grew by when they and the box no longer fitted its padding (two bytes of it spare). Every
+// member is 4-byte aligned or smaller, so the C3 lays it out as the host does.
+static_assert(sizeof(CssStyle) == 132,
+              "CssStyle grew: the flow properties, textEmphasis, the box, white-space or initial-letter no longer "
+              "fit its padding");
