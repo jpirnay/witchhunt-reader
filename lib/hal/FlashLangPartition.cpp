@@ -1,24 +1,23 @@
 #include "FlashLangPartition.h"
 
 #include <Logging.h>
-#include <esp_partition.h>
 #include <esp_rom_crc.h>
 
 #include <algorithm>
 #include <cstring>
 #include <memory>
 
+#include "FlashArea.h"
 #include "FlashFontPartition.h"
 
 namespace FlashLangPartition {
 
 static constexpr char MAGIC[4] = {'C', 'P', 'L', 'P'};
 static constexpr size_t WRITE_CHUNK = 512;
-// esp_partition_erase_range() works in whole sectors, esp_partition_mmap() in whole MMU pages.
-static constexpr size_t SECTOR_BYTES = 4096;
-static constexpr size_t MAP_PAGE_BYTES = 64 * 1024;
+// The area erases in whole sectors and maps in whole MMU pages.
+static constexpr size_t SECTOR_BYTES = NorFlash::kSectorBytes;
+static constexpr size_t MAP_PAGE_BYTES = NorFlash::kMapPageBytes;
 
-static esp_partition_mmap_handle_t s_mmapHandle = 0;
 static const uint8_t* s_mmapPtr = nullptr;
 static size_t s_mapBytes = 0;  // how much of the slot the live mapping covers
 
@@ -48,29 +47,28 @@ struct Header {
 };
 static_assert(sizeof(Header) == HEADER_BYTES, "language slot header layout changed");
 
-static const esp_partition_t* findPartition() {
-  const esp_partition_t* part =
-      esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
-  if (!part) LOG_ERR("FLP", "spiffs partition not found");
-  return part;
+static NorFlash* findArea() {
+  NorFlash* const area = FlashArea::get();
+  if (!area) LOG_ERR("FLP", "no flash area");
+  return area;
 }
 
-// Byte offset of the language slot within the partition. Equal to
-// FlashFontPartition's ceiling, and 64 KB aligned because the partition both
+// Byte offset of the language slot within the area. Equal to
+// FlashFontPartition's ceiling, and 64 KB aligned because the area both
 // starts on and is a multiple of 64 KB — esp_partition_mmap requires that.
 // Format 1 (2.40) kept a 64 KB slot at the partition's end, behind a 32 B header: this slot's upper half.
 static constexpr size_t FORMAT1_SLOT_BYTES = 64 * 1024;
 static constexpr size_t FORMAT1_HEADER_BYTES = 32;
 
-static size_t slotOffset(const esp_partition_t* part) {
-  if (!part || part->size <= FlashFontPartition::LANG_RESERVED_BYTES) return 0;
-  return static_cast<size_t>(part->size) - FlashFontPartition::LANG_RESERVED_BYTES;
+static size_t slotOffset(const NorFlash* area) {
+  if (!area || area->size() <= FlashFontPartition::LANG_RESERVED_BYTES) return 0;
+  return static_cast<size_t>(area->size()) - FlashFontPartition::LANG_RESERVED_BYTES;
 }
 
-static bool readHeader(const esp_partition_t* part, Header& out) {
-  const size_t off = slotOffset(part);
+static bool readHeader(const NorFlash* area, Header& out) {
+  const size_t off = slotOffset(area);
   if (off == 0) return false;
-  if (esp_partition_read(part, off, &out, sizeof(Header)) != ESP_OK) return false;
+  if (!area->read(static_cast<uint32_t>(off), &out, sizeof(Header))) return false;
   if (memcmp(out.magic, MAGIC, 4) != 0) return false;
   if (out.version != FORMAT_VERSION) return false;
   return true;
@@ -91,10 +89,10 @@ static bool extensionValid(const Header& h) {
 }
 
 bool holds(const uint8_t langIndex, const uint32_t stamp, const uint32_t extBytes) {
-  const esp_partition_t* part = findPartition();
-  if (!part) return false;
+  const NorFlash* const area = findArea();
+  if (!area) return false;
   Header h;
-  if (!readHeader(part, h)) return false;
+  if (!readHeader(area, h)) return false;
   const uint32_t ext = extensionValid(h) ? h.extLen : 0;
   return h.langIndex == langIndex && h.stamp == stamp && ext == extBytes;
 }
@@ -103,9 +101,9 @@ bool holds(const uint8_t langIndex, const uint32_t stamp, const uint32_t extByte
 // also keeps the table: beginKey() points the key's entry at the next byte written.
 class ChunkedSlotWriter final : public StringsWriter {
  public:
-  ChunkedSlotWriter(const esp_partition_t* part, const size_t base, const size_t limit, uint8_t* chunk,
-                    uint8_t* scratch, const size_t scratchBytes, uint16_t* table = nullptr, const uint16_t keyCount = 0)
-      : part_(part),
+  ChunkedSlotWriter(NorFlash* area, const size_t base, const size_t limit, uint8_t* chunk, uint8_t* scratch,
+                    const size_t scratchBytes, uint16_t* table = nullptr, const uint16_t keyCount = 0)
+      : area_(area),
         base_(base),
         limit_(limit),
         chunk_(chunk),
@@ -156,7 +154,7 @@ class ChunkedSlotWriter final : public StringsWriter {
   bool flush() {
     if (failed_) return false;
     if (fill_ == 0) return true;
-    if (esp_partition_write(part_, base_ + written_, chunk_, fill_) != ESP_OK) {
+    if (!area_->program(static_cast<uint32_t>(base_ + written_), chunk_, static_cast<uint32_t>(fill_))) {
       LOG_ERR("FLP", "extension write failed at %u B", static_cast<unsigned>(written_));
       failed_ = true;
       return false;
@@ -166,7 +164,7 @@ class ChunkedSlotWriter final : public StringsWriter {
     return true;
   }
 
-  const esp_partition_t* part_;
+  NorFlash* area_;
   size_t base_;
   size_t limit_;
   uint8_t* chunk_;
@@ -184,9 +182,9 @@ bool build(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCoun
            const Extension* ext) {
   if (keyCount == 0 || !strings.produce || strings.maxBytes == 0) return false;
 
-  const esp_partition_t* part = findPartition();
-  if (!part) return false;
-  const size_t slot = slotOffset(part);
+  NorFlash* const area = findArea();
+  if (!area) return false;
+  const size_t slot = slotOffset(area);
   if (slot == 0) {
     LOG_ERR("FLP", "partition too small for a language slot");
     return false;
@@ -225,7 +223,7 @@ bool build(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCoun
   // Bytes past them may hold an earlier, longer build; the header bounds every read, so they are
   // never looked at.
   const size_t used = ext ? extBound + ext->bytes : dataOff + maxBytes;
-  if (esp_partition_erase_range(part, slot, roundUp(used, SECTOR_BYTES)) != ESP_OK) {
+  if (!area->erase(static_cast<uint32_t>(slot), static_cast<uint32_t>(roundUp(used, SECTOR_BYTES)))) {
     LOG_ERR("FLP", "erase failed");
     return false;
   }
@@ -244,7 +242,7 @@ bool build(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCoun
 
   // The strings. The writer's CRC is over the bytes as they are written, from RAM: a byte that did not
   // program, or that something else overwrites later, then fails map()'s check of what flash holds.
-  ChunkedSlotWriter strWriter(part, slot + dataOff, std::min<size_t>(maxBytes, FALLBACK), chunk.get(), scratch.get(),
+  ChunkedSlotWriter strWriter(area, slot + dataOff, std::min<size_t>(maxBytes, FALLBACK), chunk.get(), scratch.get(),
                               SCRATCH_BYTES, table.get(), keyCount);
   if (!strings.produce(strings.ctx, strWriter) || !strWriter.finish()) {
     LOG_ERR("FLP", "language %u strings failed after %u B", langIndex, static_cast<unsigned>(strWriter.written()));
@@ -252,7 +250,7 @@ bool build(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCoun
   }
   const size_t written = strWriter.written();
 
-  if (esp_partition_write(part, slot + tableOff, table.get(), tableBytes) != ESP_OK) {
+  if (!area->program(static_cast<uint32_t>(slot + tableOff), table.get(), static_cast<uint32_t>(tableBytes))) {
     LOG_ERR("FLP", "table write failed");
     return false;
   }
@@ -263,7 +261,7 @@ bool build(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCoun
   uint32_t extLen = 0;
   uint32_t extCrc = 0;
   if (ext) {
-    ChunkedSlotWriter writer(part, slot + extOff, ext->bytes, chunk.get(), scratch.get(), SCRATCH_BYTES);
+    ChunkedSlotWriter writer(area, slot + extOff, ext->bytes, chunk.get(), scratch.get(), SCRATCH_BYTES);
     if (ext->produce(ext->ctx, writer) && writer.finish() && writer.written() == ext->bytes) {
       extLen = ext->bytes;
       extCrc = writer.crc();
@@ -287,7 +285,7 @@ bool build(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCoun
   h.extLen = extLen;
   h.stringsCrc = stringsCrc;
   h.extCrc = extCrc;
-  if (esp_partition_write(part, slot, &h, sizeof(h)) != ESP_OK) {
+  if (!area->program(static_cast<uint32_t>(slot), &h, sizeof(h))) {
     LOG_ERR("FLP", "header write failed");
     return false;
   }
@@ -299,10 +297,10 @@ bool build(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCoun
   // built it has served. Retired, so a pack removed from the card later reads as missing rather than
   // as that firmware's strings again. Format 2 lay where this slot does and is gone already, as is a
   // format-1 slot this build's erase reached.
-  const size_t format1 = static_cast<size_t>(part->size) - FORMAT1_SLOT_BYTES;
+  const size_t format1 = static_cast<size_t>(area->size()) - FORMAT1_SLOT_BYTES;
   uint8_t old[5];
-  if (format1 >= slot + roundUp(used, SECTOR_BYTES) && esp_partition_read(part, format1, old, sizeof(old)) == ESP_OK &&
-      memcmp(old, MAGIC, 4) == 0 && old[4] == 1 && esp_partition_erase_range(part, format1, SECTOR_BYTES) == ESP_OK) {
+  if (format1 >= slot + roundUp(used, SECTOR_BYTES) && area->read(static_cast<uint32_t>(format1), old, sizeof(old)) &&
+      memcmp(old, MAGIC, 4) == 0 && old[4] == 1 && area->erase(static_cast<uint32_t>(format1), SECTOR_BYTES)) {
     LOG_INF("FLP", "an older firmware's format 1 slot retired");
   }
   return true;
@@ -311,13 +309,13 @@ bool build(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCoun
 MapResult map(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCount, Mapped* out) {
   if (!out) return MapResult::Absent;
 
-  const esp_partition_t* part = findPartition();
-  if (!part) return MapResult::Absent;
-  const size_t slot = slotOffset(part);
+  NorFlash* const area = findArea();
+  if (!area) return MapResult::Absent;
+  const size_t slot = slotOffset(area);
   if (slot == 0) return MapResult::Absent;
 
   Header h;
-  if (!readHeader(part, h)) return MapResult::Absent;
+  if (!readHeader(area, h)) return MapResult::Absent;
   if (h.langIndex != langIndex || h.stamp != stamp || h.keyCount != keyCount) return MapResult::Absent;
   if (!layoutValid(h)) return MapResult::Absent;
 
@@ -331,10 +329,9 @@ MapResult map(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyC
     const size_t need = roundUp(withExt ? static_cast<size_t>(h.extOff) + h.extLen : stringsEnd, MAP_PAGE_BYTES);
     if (s_mmapPtr && s_mapBytes >= need) break;
     unmap();
-    const void* raw = nullptr;
     // The slot starts on a 64 KB boundary, which is what esp_partition_mmap requires.
-    if (esp_partition_mmap(part, slot, need, ESP_PARTITION_MMAP_DATA, &raw, &s_mmapHandle) == ESP_OK) {
-      s_mmapPtr = static_cast<const uint8_t*>(raw);
+    s_mmapPtr = area->map(static_cast<uint32_t>(slot), static_cast<uint32_t>(need));
+    if (s_mmapPtr) {
       s_mapBytes = need;
       break;
     }
@@ -404,18 +401,18 @@ bool acquire(const uint8_t langIndex, const uint32_t stamp, const uint16_t keyCo
 
 bool mapLegacy(const uint8_t format, LegacySlot* out) {
   if (!out || (format != 1 && format != 2)) return false;
-  const esp_partition_t* part = findPartition();
-  if (!part) return false;
+  NorFlash* const area = findArea();
+  if (!area) return false;
   // Format 1 kept a 64 KB slot at the partition's end, format 2 this one.
   const size_t slotBytes = format == 1 ? FORMAT1_SLOT_BYTES : FlashFontPartition::LANG_RESERVED_BYTES;
-  if (part->size <= slotBytes) return false;
-  const size_t slot = static_cast<size_t>(part->size) - slotBytes;
+  if (area->size() <= slotBytes) return false;
+  const size_t slot = static_cast<size_t>(area->size()) - slotBytes;
 
   // Both formats start alike: magic, version, language, key count, stamp, table, data, data length;
   // format 2 goes on with the extension and the CRCs.
   Header h = {};
   const size_t headerBytes = format == 1 ? FORMAT1_HEADER_BYTES : HEADER_BYTES;
-  if (esp_partition_read(part, slot, &h, headerBytes) != ESP_OK) return false;
+  if (!area->read(static_cast<uint32_t>(slot), &h, static_cast<uint32_t>(headerBytes))) return false;
   if (memcmp(h.magic, MAGIC, 4) != 0 || h.version != format || h.keyCount == 0) return false;
   if (h.tableOff != headerBytes || h.dataOff < h.tableOff + static_cast<uint32_t>(h.keyCount) * 2u ||
       static_cast<size_t>(h.dataOff) + h.dataLen > slotBytes || h.dataLen == 0) {
@@ -424,13 +421,12 @@ bool mapLegacy(const uint8_t format, LegacySlot* out) {
   }
 
   unmap();
-  const void* raw = nullptr;
   const size_t need = roundUp(static_cast<size_t>(h.dataOff) + h.dataLen, MAP_PAGE_BYTES);
-  if (esp_partition_mmap(part, slot, need, ESP_PARTITION_MMAP_DATA, &raw, &s_mmapHandle) != ESP_OK) {
+  s_mmapPtr = area->map(static_cast<uint32_t>(slot), static_cast<uint32_t>(need));
+  if (!s_mmapPtr) {
     LOG_ERR("FLP", "format %u slot: mmap failed", format);
     return false;
   }
-  s_mmapPtr = static_cast<const uint8_t*>(raw);
   s_mapBytes = need;
 
   const bool hasExt = format == 2 && h.extLen != 0;
@@ -457,8 +453,8 @@ bool mapLegacy(const uint8_t format, LegacySlot* out) {
 
 void unmap() {
   if (!s_mmapPtr) return;
-  esp_partition_munmap(s_mmapHandle);
-  s_mmapHandle = 0;
+  // A mapping exists, so the area does.
+  FlashArea::get()->unmap(s_mmapPtr);
   s_mmapPtr = nullptr;
   s_mapBytes = 0;
 }
