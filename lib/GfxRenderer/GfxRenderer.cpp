@@ -26,6 +26,7 @@
 #include "FontCacheManager.h"
 #include "GlyphRun.h"
 #include "Gray8Compose.h"
+#include "ImagePolarity.h"
 #include "ScaledGlyphResample.h"
 #include "UiShapedText.h"
 
@@ -2638,6 +2639,50 @@ static void bitmapFastRow(uint8_t* const frameBuffer, const uint8_t* const outpu
   }
 }
 
+// Not while a page is scanned for its glyphs: the pass that draws it for real follows, and an inversion here would be
+// undone by its own.
+bool GfxRenderer::keepsImagePolarity() const {
+  return getRenderMode() == BW && frameBuffer != nullptr && !cacheOnlyImageWrites_ && !isFontCacheScanning() &&
+         display.isInverted();
+}
+
+void GfxRenderer::preserveImagePolarity(const int x, const int y, const int width, const int height) const {
+  if (!keepsImagePolarity()) return;
+  image_polarity::PanelRect box{};
+  if (!image_polarity::panelRectOf(static_cast<int>(getOrientation()), panelWidth, panelHeight, x, y, width, height,
+                                   box)) {
+    return;
+  }
+  image_polarity::invertPanelRect(frameBuffer, panelWidthBytes, box);
+}
+
+namespace {
+// preserveImagePolarity() over a bitmap's drawn box as the draw returns, whichever return that is: the draws below
+// leave early on a row they cannot read, and the rows drawn by then are a picture like any other.
+class PolarityOnReturn {
+ public:
+  PolarityOnReturn(const GfxRenderer& renderer, const bool active, const int x, const int y, const int width,
+                   const int height)
+      : renderer_(renderer), active_(active && renderer.keepsImagePolarity()), x_(x), y_(y), w_(width), h_(height) {}
+  ~PolarityOnReturn() {
+    if (active_) renderer_.preserveImagePolarity(x_, y_, w_, h_);
+  }
+  PolarityOnReturn(const PolarityOnReturn&) = delete;
+  PolarityOnReturn& operator=(const PolarityOnReturn&) = delete;
+
+ private:
+  const GfxRenderer& renderer_;
+  bool active_;
+  int x_, y_, w_, h_;
+};
+
+// How many pixels a run of `source` pixels covers once drawn at `scale` (pixel i lands at floor(i * scale)).
+int scaledExtent(const int source, const bool isScaled, const float scale) {
+  if (source <= 0) return 0;
+  return isScaled ? static_cast<int>(std::floor(static_cast<float>(source - 1) * scale)) + 1 : source;
+}
+}  // namespace
+
 void GfxRenderer::drawGray8Pixel(const Gray8Target& gray8, const int x, const int y, const uint8_t gray) const {
   int phyX = 0;
   int phyY = 0;
@@ -2708,6 +2753,9 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   const int widthBytes = getDisplayWidthBytes();
   // Width of the rendered (post-crop) region in source pixels
   const int renderWidth = bitmap.getWidth() - 2 * cropPixX;
+  // A canvas paint leaves the frame alone.
+  const PolarityOnReturn polarity(*this, gray8 == nullptr, x, y, scaledExtent(renderWidth, isScaled, scale),
+                                  scaledExtent(bitmap.getHeight() - 2 * cropPixY, isScaled, scale));
 
   // Pixel write state for each render mode:
   //   BW: black pixels (state=true clears the bit)
@@ -2877,6 +2925,10 @@ void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
   const int displayWidth = getDisplayWidth();
   const int displayHeight = getDisplayHeight();
   const int widthBytes = getDisplayWidthBytes();
+  // The scaled path below folds every source column into max(1, floor(width * scale)) destination columns.
+  const int drawnWidth =
+      isScaled ? std::max(1, static_cast<int>(std::floor(bitmap.getWidth() * scale))) : bitmap.getWidth();
+  const PolarityOnReturn polarity(*this, true, x, y, drawnWidth, scaledExtent(bitmap.getHeight(), isScaled, scale));
 
   // ── Unscaled fast path (scale == 1.0): draw each source row 1:1. ──────────────
   //

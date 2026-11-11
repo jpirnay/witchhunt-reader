@@ -1,4 +1,4 @@
-add_executable(Gray8WriterTest Gray8WriterTest.cpp)
+add_executable(Gray8WriterTest Gray8WriterTest.cpp DirectPixelWriterPolarityTest.cpp)
 
 target_include_directories(Gray8WriterTest PRIVATE
   # Stub GfxRenderer.h / HalDisplay.h must shadow the real device headers.

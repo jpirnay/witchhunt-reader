@@ -15,6 +15,7 @@ class GfxRenderer {
   int getWriteOriginY() const { return 0; }
   int getWriteRows() const { return 0; }
   RenderMode getRenderMode() const { return BW; }
+  bool keepsImagePolarity() const { return false; }
   uint16_t getDisplayWidthBytes() const { return 60; }
   int getDisplayWidth() const { return 480; }
   int getDisplayHeight() const { return 800; }

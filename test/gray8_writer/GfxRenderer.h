@@ -29,6 +29,10 @@ class GfxRenderer {
   uint8_t* getWriteTarget() const { return const_cast<uint8_t*>(frameBuffer_.data()); }
   int getWriteOriginY() const { return 0; }
   int getWriteRows() const { return height_; }
+  // Dark mode, as the device renderer answers it: inverted output and a B/W pass.
+  void setOutputInverted(const bool inverted) { inverted_ = inverted; }
+  bool keepsImagePolarity() const { return inverted_ && mode_ == BW; }
+  void fill(const uint8_t byte) { frameBuffer_.assign(frameBuffer_.size(), byte); }
 
   // Oriented logical surface, mirroring the device renderer's swap on portrait.
   int getScreenWidth() const {
@@ -49,5 +53,6 @@ class GfxRenderer {
   Orientation orientation_;
   int widthBytes_;
   RenderMode mode_ = BW;
+  bool inverted_ = false;
   std::vector<uint8_t> frameBuffer_;
 };

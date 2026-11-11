@@ -24,6 +24,9 @@ struct DirectPixelWriter {
   // (originY 0, clipRows panelHeight) so the clip doubles as a bounds guard.
   int originY;
   int clipRows;
+  // Dark mode (GfxRenderer::keepsImagePolarity): a B/W pass writes every pixel inverted, so the panel's inversion
+  // shows the picture as it is.
+  bool invert = false;
 
   // Orientation is collapsed into a linear transform:
   //   phyX = phyXBase + x * phyXStepX + y * phyXStepY
@@ -40,6 +43,7 @@ struct DirectPixelWriter {
     originY = renderer.getWriteOriginY();
     clipRows = renderer.getWriteRows();
     mode = renderer.getRenderMode();
+    invert = renderer.keepsImagePolarity();
     displayWidthBytes = renderer.getDisplayWidthBytes();
 
     const int phyW = renderer.getDisplayWidth();
@@ -153,8 +157,10 @@ struct DirectPixelWriter {
     bool state;
     switch (mode) {
       case GfxRenderer::BW:
-        draw = (pixelValue < 3);
-        state = true;
+        // Inverted, the white pixels are written too (black in the frame), so the picture shows white where it is
+        // white whatever was under it, and drawing it twice changes nothing.
+        draw = invert || pixelValue < 3;
+        state = !invert || pixelValue == 3;
         break;
       case GfxRenderer::GRAYSCALE_MSB:
         draw = (pixelValue == 1 || pixelValue == 2);

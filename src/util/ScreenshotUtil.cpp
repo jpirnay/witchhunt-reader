@@ -51,8 +51,12 @@ void ScreenshotUtil::service(GfxRenderer& renderer, void (*sendToHost)(const uin
   if (renderer.keepsPreviousFrame()) renderer.syncWriteBufferFromDisplayed();
   activityManager.prepareFramebufferForCapture();
   if (target == Target::Host) {
+    // In Dark Mode the panel shows the frame inverted (HalDisplay::setInverted): the capture shows what it shows.
+    const bool inverted = renderer.isOutputInverted();
+    if (inverted) renderer.invertScreen();
     sendToHost(renderer.getFrameBuffer(), renderer.getBufferSize(), renderer.getDisplayWidth(),
                renderer.getDisplayHeight(), /*busy=*/false);
+    if (inverted) renderer.invertScreen();
   } else {
     takeScreenshot(renderer);
   }
@@ -62,8 +66,12 @@ void ScreenshotUtil::takeScreenshot(GfxRenderer& renderer) {
   const uint8_t* fb = renderer.getFrameBuffer();
   if (fb) {
     String filename_str = "/screenshots/screenshot-" + String(millis()) + ".bmp";
-    if (ScreenshotUtil::saveFramebufferAsBmp(filename_str.c_str(), fb, renderer.getDisplayWidth(),
-                                             renderer.getDisplayHeight())) {
+    const bool inverted = renderer.isOutputInverted();  // as for the host capture in service()
+    if (inverted) renderer.invertScreen();
+    const bool saved = ScreenshotUtil::saveFramebufferAsBmp(filename_str.c_str(), fb, renderer.getDisplayWidth(),
+                                                            renderer.getDisplayHeight());
+    if (inverted) renderer.invertScreen();
+    if (saved) {
       LOG_DBG("SCR", "Screenshot saved to %s", filename_str.c_str());
     } else {
       LOG_ERR("SCR", "Failed to save screenshot");
