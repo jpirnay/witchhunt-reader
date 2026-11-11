@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -56,11 +58,39 @@ std::array<uint8_t, glyphstore::kIdentityBytes> identityAt(const ttf::FileStamp 
                                  static_cast<uint8_t>(file.date),       static_cast<uint8_t>(file.date >> 8),
                                  static_cast<uint8_t>(file.time),       static_cast<uint8_t>(file.time >> 8)};
       hash = glyphstore::fnv1a(fields, sizeof fields, hash);
+      if (file.kernsByGdefClass) hash = glyphstore::fnv1a("G", 1, hash);
     }
     hash = glyphstore::fnv1a(&version, 1, hash);
     for (int byte = 0; byte < 4; ++byte) out[4 * lane + byte] = static_cast<uint8_t>(hash >> (8 * byte));
   }
   return out;
+}
+
+// kernsByGdefClass() of a file, which must read.
+bool kernsByClass(MemoryFile& file) {
+  bool kerns = false;
+  EXPECT_TRUE(ttf::kernsByGdefClass(file.source(), &kerns));
+  return kerns;
+}
+
+// Boxes 1..3, a 'kern' feature (or `feature`) of one pair adjustment lookup with `flags`, and a GDEF making glyph 2 a
+// mark: what kernsByGdefClass() tells apart.
+Bytes flaggedFont(const uint16_t flags, const char* feature = "kern", const uint16_t type = 2,
+                  const bool extension = false, const bool gdef = true) {
+  Font font;
+  font.glyphs.resize(4);
+  for (auto& glyph : font.glyphs) glyph.contours = {rect(0, 0, 400, 600)};
+  for (uint16_t g = 1; g <= 3; ++g) font.cmap['A' + g - 1] = g;
+  LayoutLookup lookup;
+  lookup.type = type;
+  lookup.extension = extension;
+  lookup.flags = flags;
+  PairSubtable pairs;
+  pairs.pairs = {{1, {{2, -50}, {3, 30}}}};
+  lookup.pairSubtables = {pairs};
+  font.extraTables = {{"GPOS", layoutTable({{"latn", {0}}}, {{feature, {0}}}, {lookup})}};
+  if (gdef) font.extraTables.push_back({"GDEF", gdefTable({{1, 1}, {2, 3}, {3, 1}})});
+  return buildFont(font);
 }
 
 }  // namespace
@@ -436,6 +466,134 @@ TEST(TtfFamily, TheIdentityChangesWithTheRenderVersion) {
   EXPECT_EQ(4, ttf::kRenderVersion);
   EXPECT_EQ(identityAt(styles, 4), identityOf(styles));
   EXPECT_NE(identityAt(styles, 3), identityOf(styles));
+}
+
+// --- Kerning by GDEF class: the families whose identity changes once with GDEF-aware kerning ---
+
+TEST(TtfFamily, TheIdentityOfAFileThatDoesNotKernByGdefClassIsAsBefore) {
+  // A family whose kerning did not change keeps the identity its store was installed under: no install.
+  ttf::FileStamp styles[4] = {{"Lit-Regular.ttf", 450048, 0x5A21, 0x6400}, {"Lit-Bold.ttf", 451000, 0x5A21, 0x6400}};
+  const auto before = identityAt(styles, 4);  // the formula before the marker, at this render version
+  EXPECT_EQ(before, identityOf(styles));
+  // One with a file that kerns by GDEF class gets another identity, the same every time: installed once more, once.
+  styles[1].kernsByGdefClass = true;
+  const auto marked = identityOf(styles);
+  EXPECT_NE(before, marked);
+  EXPECT_EQ(identityAt(styles, 4), marked);  // the documented formula: the marker after the file's fields
+  EXPECT_EQ(marked, identityOf(styles));
+  styles[1].kernsByGdefClass = false;
+  EXPECT_EQ(before, identityOf(styles));
+}
+
+TEST(TtfFamily, AFileKernsByGdefClassWhenAKernLookupSkipsGlyphsByClass) {
+  MemoryFile serif{readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf")};
+  EXPECT_TRUE(kernsByClass(serif));  // its kern lookup ignores marks (0x0008)
+  for (const auto& [flags, kerns] :
+       std::initializer_list<std::pair<uint16_t, bool>>{
+           {0x000E, true},    // Caecilia LT's: base glyphs, ligatures and marks
+           {0x0002, true},    // IgnoreBaseGlyphs
+           {0x0004, true},    // IgnoreLigatures
+           {0x0010, true},    // UseMarkFilteringSet
+           {0x0500, true},    // a MarkAttachmentType
+           {0x0000, false},   // no flags
+           {0x0001, false},   // RightToLeft: nothing for a pair adjustment
+           {0x00E0, false}})  // reserved bits, ignored as HarfBuzz ignores them
+  {
+    setKernLookupFlags(serif.bytes, flags);
+    EXPECT_EQ(kerns, kernsByClass(serif)) << std::hex << flags;
+  }
+  // Noto Sans Grantha 2.001: a 'kern' pair adjustment lookup with 0x0508 kerns sha before the anusvara, a mark.
+  MemoryFile grantha{readFixture("NotoSansGrantha-Kern-Regular.ttf")};
+  EXPECT_TRUE(kernsByClass(grantha));
+  // Fonts without GDEF kern as before, whatever their lookups set.
+  for (const char* name : {"Ubuntu/Ubuntu-Regular.ttf", "Ubuntu/Ubuntu-Bold.ttf"}) {
+    MemoryFile ubuntu{readFont(name)};
+    EXPECT_FALSE(kernsByClass(ubuntu)) << name;
+  }
+  MemoryFile cjk{readFixture("NotoSansJP-TrueType.ttf")};
+  EXPECT_FALSE(kernsByClass(cjk));
+}
+
+TEST(TtfFamily, APairAdjustmentLookupCountsOnlyWithAGdefTheReaderReads) {
+  MemoryFile flagged{flaggedFont(0x0008)};
+  EXPECT_TRUE(kernsByClass(flagged));
+  MemoryFile wrapped{flaggedFont(0x0008, "kern", 2, /*extension=*/true)};
+  EXPECT_TRUE(kernsByClass(wrapped));
+  // Whatever feature lists it: the LookupList alone is read, a few more families installed than need it.
+  MemoryFile otherFeature{flaggedFont(0x0008, "dist")};
+  EXPECT_TRUE(kernsByClass(otherFeature));
+  MemoryFile notPairs{flaggedFont(0x0008, "kern", 8, /*extension=*/true)};  // an Extension wrapping chained contexts
+  EXPECT_FALSE(kernsByClass(notPairs));
+  MemoryFile noGdef{flaggedFont(0x0008, "kern", 2, false, /*gdef=*/false)};
+  EXPECT_FALSE(kernsByClass(noGdef));
+  // A GDEF the reader does not read: another major version, or too short for its header.
+  Bytes otherMajor = flaggedFont(0x0008);
+  const size_t record = findRecord(otherMajor, "GDEF");
+  const uint32_t gdef = static_cast<uint32_t>(otherMajor[record + 8] << 24 | otherMajor[record + 9] << 16 |
+                                              otherMajor[record + 10] << 8 | otherMajor[record + 11]);
+  set16(otherMajor, gdef, 2);
+  MemoryFile major{otherMajor};
+  EXPECT_FALSE(kernsByClass(major));
+  Bytes shortGdef = flaggedFont(0x0008);
+  set16(shortGdef, record + 14, 11);  // the record's length: 11 bytes
+  MemoryFile cut{shortGdef};
+  EXPECT_FALSE(kernsByClass(cut));
+}
+
+TEST(TtfFamily, KerningByGdefClassIsToldInAFewReads) {
+  // The manager asks at every open of a family, from the card: the directory, GDEF's version, GPOS's header and
+  // LookupList.
+  for (const std::string& name : bundledTtfs()) {
+    MemoryFile file{readFont(name)};
+    bool kerns = false;
+    ASSERT_TRUE(ttf::kernsByGdefClass(file.source(), &kerns)) << name;
+    EXPECT_LE(file.reads, 14u) << name;
+    std::set<uint32_t> sectors;
+    for (const uint32_t at : file.offsets) sectors.insert(at / 512);
+    std::printf("kernsByGdefClass %s: %s, %u reads, %zu sectors\n", name.c_str(), kerns ? "true" : "false", file.reads,
+                sectors.size());
+  }
+  MemoryFile failing{readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf")};
+  failing.failReads = true;
+  bool kerns = true;
+  EXPECT_FALSE(ttf::kernsByGdefClass(failing.source(), &kerns));
+  EXPECT_FALSE(kerns);
+  // A read past the directory fails: not an answer either.
+  failing.failReads = false;
+  failing.readsTo = 1024;
+  EXPECT_FALSE(ttf::kernsByGdefClass(failing.source(), &kerns));
+}
+
+TEST(TtfFamily, ALookupListTooScatteredToWalkCountsAsKerningByGdefClass) {
+  // 64 unflagged kern lookups, each behind a pair adjustment subtable of 40 pairs: every lookup header is a window of
+  // its own, past kMaxKernFlagReads. The answer is then true: one install more, never a stale pair.
+  std::vector<LayoutLookup> lookups(64);
+  std::vector<uint16_t> indices;
+  for (uint16_t i = 0; i < lookups.size(); ++i) {
+    PairSubtable pairs;
+    std::vector<std::pair<uint16_t, int16_t>> seconds;
+    for (uint16_t r = 1; r <= 40; ++r) seconds.push_back({r, -10});
+    pairs.pairs = {{1, seconds}};
+    lookups[i].pairSubtables = {pairs};
+    indices.push_back(i);
+  }
+  Font font;
+  font.glyphs.resize(41);
+  for (auto& glyph : font.glyphs) glyph.contours = {rect(0, 0, 400, 600)};
+  font.cmap['A'] = 1;
+  font.extraTables = {{"GPOS", layoutTable({{"latn", {0}}}, {{"kern", indices}}, lookups)},
+                      {"GDEF", gdefTable({{1, 1}})}};
+  MemoryFile file{buildFont(font)};
+  bool kerns = false;
+  ASSERT_TRUE(ttf::kernsByGdefClass(file.source(), &kerns));
+  EXPECT_TRUE(kerns);
+  // The same font with 20 such lookups is walked whole: none skips anything.
+  font.extraTables[0].second =
+      layoutTable({{"latn", {0}}}, {{"kern", std::vector<uint16_t>(indices.begin(), indices.begin() + 20)}},
+                  std::vector<LayoutLookup>(lookups.begin(), lookups.begin() + 20));
+  MemoryFile fewer{buildFont(font)};
+  ASSERT_TRUE(ttf::kernsByGdefClass(fewer.source(), &kerns));
+  EXPECT_FALSE(kerns);
 }
 
 TEST(TtfFamily, TheIdentityIsSixteenIndependentBytes) {

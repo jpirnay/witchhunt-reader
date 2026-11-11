@@ -20,6 +20,7 @@
 #include "GlyphProvider.h"
 #include "SimNorFlash.h"
 #include "TtfBuilder.h"
+#include "TtfFamily.h"
 #include "TtfFont.h"
 #include "TtfFontTestUtil.h"
 #include "TtfLayoutBuilder.h"
@@ -1128,6 +1129,39 @@ TEST_F(TtfFontTest, CaeciliaLookupFlagsTakeLetterKerningAway) {
   const auto font = open(kIdentityB);  // another file: installed again
   EXPECT_EQ(0, font->kerning(kRegular, 'A', 'V'));
   EXPECT_EQ(0, font->kerning(kRegular, 'T', 'o'));
+}
+
+TEST_F(TtfFontTest, AFamilyThatKernsByGdefClassIsInstalledOnceMore) {
+  // What the manager computes at each open (SdCardFontManager's openTtfFiles()): the files' stamps, whether each kerns
+  // by GDEF class, the family's identity. `marked` false gives the identity before GDEF-aware kerning.
+  const auto setOf = [this](const bool marked) {
+    const char* const names[4] = {"R.ttf", "B.ttf", "I.ttf", "BI.ttf"};
+    ttf::FileStamp stamps[4];
+    for (int s = 0; s < 4; ++s) {
+      stamps[s] = {names[s], static_cast<uint32_t>(files[s].bytes.size()), 0x5A21, 0x6400};
+      EXPECT_TRUE(ttf::kernsByGdefClass(files[s].source(), &stamps[s].kernsByGdefClass));
+      if (!marked) stamps[s].kernsByGdefClass = false;
+    }
+    std::array<uint8_t, glyphstore::kIdentityBytes> family{};
+    std::array<uint8_t, glyphstore::kIdentityBytes> set{};
+    ttf::familyIdentity(stamps, family.data());
+    ttf::setIdentity(reinterpret_cast<const uint8_t (*)[glyphstore::kIdentityBytes]>(family.data()), 1, set.data());
+    return set;
+  };
+  // Source Serif's kern lookups ignore marks: its store, installed before, is installed again once, then kept.
+  ASSERT_NE(nullptr, open(setOf(false).data()));
+  EXPECT_EQ(1, busy);
+  ASSERT_NE(nullptr, open(setOf(true).data()));
+  EXPECT_EQ(2, busy);
+  ASSERT_NE(nullptr, open(setOf(true).data()));
+  EXPECT_EQ(2, busy);
+  // With lookups that skip nothing, the identity is the one before: the store stays.
+  for (MemoryFile& file : files) setKernLookupFlags(file.bytes, 0);
+  ASSERT_NE(nullptr, open(setOf(false).data()));
+  EXPECT_EQ(3, busy);  // the store held the marked identity
+  EXPECT_EQ(setOf(false), setOf(true));
+  ASSERT_NE(nullptr, open(setOf(true).data()));
+  EXPECT_EQ(3, busy);
 }
 
 TEST_F(TtfFontTest, StoredKerningServesTheNextBoot) {

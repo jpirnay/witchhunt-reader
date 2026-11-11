@@ -128,6 +128,17 @@ bool inFile(const FileSource& file, const uint32_t offset, const uint32_t length
 
 }  // namespace
 
+namespace {
+
+// What familyIdentity() adds for a file that kerns by GDEF class.
+constexpr uint8_t kGdefKerningMarker = 'G';
+
+// LookupFlag bits the GPOS reader skips glyphs by (Gpos.cpp): IgnoreBaseGlyphs, IgnoreLigatures, IgnoreMarks,
+// UseMarkFilteringSet and MarkAttachmentType.
+constexpr uint16_t kSkippingFlags = 0x0002 | 0x0004 | 0x0008 | 0x0010 | 0xFF00;
+
+}  // namespace
+
 bool isOutlineFontFileName(const char* name) {
   const size_t len = std::strlen(name);
   if (len <= 4 || name[len - 4] != '.') return false;
@@ -188,6 +199,52 @@ HeaderWalk walkLookupHeaders(const FileSource& file, const uint32_t offset, cons
   return reads > budget ? HeaderWalk::OverBudget : HeaderWalk::Done;
 }
 
+// What kernsByGdefClass() looks for among a GPOS's lookup headers: a pair adjustment lookup (type 2, or an Extension,
+// type 9, wrapping one) whose flags skip glyphs by GDEF class, with a first subtable the reader would read. Its own
+// reads (a first subtable's offset, an Extension's header) count against the walk's budget.
+struct FlagScan {
+  const FileSource& file;
+  uint32_t listFrom;  // where the LookupList lies in the file
+  uint32_t listLength;
+  uint32_t budget;
+  uint32_t& reads;
+  bool found = false;
+  bool failed = false;
+  bool over = false;
+
+  // The `n` bytes at `at` of the list; false past the list, past the budget (`over`) or when the read failed.
+  bool read(const uint32_t at, uint8_t* dst, const uint32_t n) {
+    if (at > listLength || n > listLength - at) return false;
+    if (++reads > budget) {
+      over = true;
+      return false;
+    }
+    failed = !file.read(file.ctx, listFrom + at, dst, n);
+    return !failed;
+  }
+};
+
+bool skipsByClass(void* ctx, const uint32_t at, const uint8_t* header) {
+  auto* scan = static_cast<FlagScan*>(ctx);
+  const uint16_t type = be16(header);
+  if ((type != 2 && type != 9) || (be16(header + 2) & kSkippingFlags) == 0 || be16(header + 4) == 0) return true;
+  uint8_t first[2];
+  if (!scan->read(at + 6, first, sizeof first)) return !scan->failed && !scan->over;
+  const uint32_t subtable = at + be16(first);
+  if (be16(first) == 0 || subtable >= scan->listLength) return true;
+  if (type == 2) {
+    scan->found = true;
+    return false;
+  }
+  // Extension format 1 wrapping a pair adjustment, at a 32-bit offset.
+  uint8_t extension[8];
+  if (!scan->read(subtable, extension, sizeof extension)) return !scan->failed && !scan->over;
+  const uint64_t wrapped = uint64_t{subtable} + be32(extension + 4);
+  scan->found =
+      be16(extension) == 1 && be16(extension + 2) == 2 && be32(extension + 4) != 0 && wrapped < scan->listLength;
+  return !scan->found;
+}
+
 // countLookups() of a table whose header (`header`, kLayoutHeaderBytes) was read already.
 bool countLookupsAfter(const FileSource& file, const uint32_t offset, const uint32_t length,
                        const uint8_t (&header)[kLayoutHeaderBytes], LayoutCounts* out) {
@@ -246,6 +303,58 @@ bool countLookups(const FileSource& file, const uint32_t offset, const uint32_t 
   uint8_t header[kLayoutHeaderBytes];
   if (!file.read(file.ctx, offset, header, sizeof header)) return false;
   return countLookupsAfter(file, offset, length, header, out);
+}
+
+bool kernsByGdefClass(const FileSource& file, bool* kerns) {
+  *kerns = false;
+  struct Tables {
+    Record gpos{};
+    Record gdef{};
+    bool seenGpos = false;
+    bool seenGdef = false;
+  } tables;
+  uint32_t version = 0;
+  const auto visit = [](void* ctx, const Record& record) {
+    auto* found = static_cast<Tables*>(ctx);
+    // The first record of a tag, the one parseFace() reads.
+    if (record.tag == tag("GPOS") && !found->seenGpos) {
+      found->gpos = record;
+      found->seenGpos = true;
+    } else if (record.tag == tag("GDEF") && !found->seenGdef) {
+      found->gdef = record;
+      found->seenGdef = true;
+    }
+    return true;
+  };
+  const Walk walk = forEachTable(file, &version, visit, &tables);
+  if (walk == Walk::ReadFailed) return false;
+  // As parseFace() takes the tables: in the file, with room for their headers; GDEF as the reader takes it, major
+  // version 1. A font without either kerns as before.
+  if (walk == Walk::Refused || !tables.seenGpos || !tables.seenGdef ||
+      !inFile(file, tables.gpos.offset, tables.gpos.length) || tables.gpos.length < 10 ||
+      !inFile(file, tables.gdef.offset, tables.gdef.length) || tables.gdef.length < 12) {
+    return true;
+  }
+  uint8_t major[2];
+  if (!file.read(file.ctx, tables.gdef.offset, major, sizeof major)) return false;
+  if (be16(major) != 1) return true;
+  // GPOS's LookupList, as the reader takes it: at u16 offset 8, whatever the version.
+  const uint32_t at = tables.gpos.offset;
+  const uint32_t length = tables.gpos.length;
+  uint8_t header[kLayoutHeaderBytes];
+  if (!file.read(file.ctx, at, header, sizeof header)) return false;
+  const uint32_t listAt = be16(header + 8);
+  if (listAt == 0 || listAt >= length || length - listAt < 2) return true;
+  uint8_t count[2];
+  if (!file.read(file.ctx, at + listAt, count, sizeof count)) return false;
+  uint32_t reads = 2;
+  FlagScan scan{file, at + listAt, length - listAt, kMaxKernFlagReads, reads};
+  const HeaderWalk headers =
+      walkLookupHeaders(file, at, length, listAt, be16(count), kMaxKernFlagReads, reads, skipsByClass, &scan);
+  if (headers == HeaderWalk::ReadFailed || scan.failed) return false;
+  // Past the budget: kerning by class, an extra install rather than a stale pair.
+  *kerns = scan.found || scan.over || headers == HeaderWalk::OverBudget;
+  return true;
 }
 
 namespace {
@@ -691,6 +800,8 @@ void familyIdentity(const FileStamp (&styles)[4], uint8_t out[glyphstore::kIdent
       putLe(fields + 4, file.date, 2);
       putLe(fields + 6, file.time, 2);
       hash = glyphstore::fnv1a(fields, sizeof fields, hash);
+      // Only a file whose kerning changed adds it: every other family keeps the identity its store was installed under.
+      if (file.kernsByGdefClass) hash = glyphstore::fnv1a(&kGdefKerningMarker, 1, hash);
     }
     hash = glyphstore::fnv1a(&kRenderVersion, 1, hash);
     putLe(out + 4 * lane, hash, 4);
