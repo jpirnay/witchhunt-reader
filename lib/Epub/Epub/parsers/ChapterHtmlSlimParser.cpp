@@ -3144,6 +3144,8 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     self->clearSpentBlockHeadingStyle();
     self->clearSpentBlockDirection(self->depth);  // and its direction, for the same reason
     self->applyPendingPageBreak();
+    // PROTOTYPE G9: the main block is idle through the table; an empty one gives its word vectors back.
+    if (self->currentTextBlock && self->currentTextBlock->isEmpty()) self->currentTextBlock->releaseLayoutScratch();
     self->currentTable = std::unique_ptr<BufferedTable>(new BufferedTable());
     self->currentTable->depth = 1;
     self->currentTable->rtl = self->startSideIsRight();
