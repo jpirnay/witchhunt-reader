@@ -1,6 +1,8 @@
 #pragma once
 
 #include <BoardConfig.h>
+#include <Epub/LineSpacing.h>
+#include <Epub/ParagraphIndent.h>
 #include <HalCapabilities.h>
 #include <HalDisplay.h>
 #include <HalFrontlight.h>
@@ -406,17 +408,32 @@ inline void buildSettings(const RowSink& emit) {
   emit(SettingInfo::Toggle(StrId::STR_LARGE_IMAGE_PLACEHOLDER, &CrossPointSettings::largeImagePlaceholder,
                            "largeImagePlaceholder", StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_IMAGES));
-  emit(SettingInfo::Value(StrId::STR_SCREEN_MARGIN, &CrossPointSettings::screenMargin, {5, 40, 5}, "screenMargin",
-                          StrId::STR_CAT_READER)
+  // The margins above and below the text, and beside it. Each was "screenMargin", one value for all four sides, before.
+  emit(SettingInfo::Value(StrId::STR_MARGIN_TOP_BOTTOM, &CrossPointSettings::screenMarginVertical,
+                          {CrossPointSettings::SCREEN_MARGIN_MIN, CrossPointSettings::SCREEN_MARGIN_MAX,
+                           CrossPointSettings::SCREEN_MARGIN_STEP},
+                          "screenMarginVertical", StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_MENU_READER_SPACING));
-  emit(SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing,
-                         {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE,
-                          StrId::STR_WIDEST, StrId::STR_BOOK_S_STYLE},
+  emit(SettingInfo::Value(StrId::STR_MARGIN_LEFT_RIGHT, &CrossPointSettings::screenMarginHorizontal,
+                          {CrossPointSettings::SCREEN_MARGIN_MIN, CrossPointSettings::SCREEN_MARGIN_MAX,
+                           CrossPointSettings::SCREEN_MARGIN_STEP},
+                          "screenMarginHorizontal", StrId::STR_CAT_READER)
+           .withSubmenu(StrId::STR_MENU_READER_SPACING));
+  // Each step's percentage of Normal, then Book's Style: nine numbers and one translated label.
+  emit(SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing, {StrId::STR_BOOK_S_STYLE},
                          "lineSpacing", StrId::STR_CAT_READER)
-           .withSubmenu(StrId::STR_MENU_READER_SPACING));
+           .withLiteralOptions(lineSpacingStepLabel, kLineSpacingPercentSteps, 0)
+           .withSubmenu(StrId::STR_MENU_READER_SPACING)
+           .withSelectorActivity());
   emit(SettingInfo::Toggle(StrId::STR_EXTRA_SPACING, &CrossPointSettings::extraParagraphSpacing,
                            "extraParagraphSpacing", StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_MENU_READER_SPACING));
+  // None, the sizes in ems (literals: "em" is the unit, not a word), then Book's Style.
+  emit(SettingInfo::Enum(StrId::STR_PARAGRAPH_INDENT, &CrossPointSettings::paragraphIndent,
+                         {StrId::STR_NONE_OPT, StrId::STR_BOOK_S_STYLE}, "paragraphIndent", StrId::STR_CAT_READER)
+           .withLiteralOptions(paragraphIndentSizeLabel, kParagraphIndentFixedSteps - 1, 1)
+           .withSubmenu(StrId::STR_MENU_READER_SPACING)
+           .withSelectorActivity());
 
   // Generic reader settings
   emit(SettingInfo::Toggle(StrId::STR_CREATE_FALLBACK_FOR_INVALID_TOC, &CrossPointSettings::syntheticTocFallback,

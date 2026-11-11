@@ -2400,6 +2400,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     currentTextBlock->setTypography(typography_);
     currentTextBlock->setShapingLatch(&shapingDegradedAny_);
     currentTextBlock->setVertical(vertical_);
+    currentTextBlock->setParagraphIndent(paragraphIndent_);
   }
   splitKeptTokens_ = 0;  // a new block has had no split
   applySplitCapacity();
@@ -3585,6 +3586,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     headerBlockStyle.direction = self->blockDirection(cssStyle);
     headerBlockStyle.textAlignDefined = true;
     headerBlockStyle.keepWithNext = true;
+    headerBlockStyle.keepsBookIndent = true;
     if (self->booksAlignmentStands(cssStyle)) {
       headerBlockStyle.alignment = cssStyle.textAlign;
     }
@@ -3673,6 +3675,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         blockStyle.textAlignDefined = true;
       }
       if (self->depth > self->headingDepth_) self->applyHeadingScope(blockStyle, cssStyle);
+      // A list's items and the blocks inside them, and <pre>: the reader's Paragraph Indent is for running text. A
+      // <pre> takes no indent its CSS does not set at all (BlockStyle::preformatted).
+      const bool preformatted = strcmp(name, "pre") == 0 || self->preUntilDepth < self->depth;
+      if (preformatted) blockStyle.preformatted = true;
+      if (preformatted || strcmp(name, "li") == 0 || !self->listStack.empty()) blockStyle.keepsBookIndent = true;
       self->holdBottomSpacing(blockStyle, isFloated);
       self->startNewTextBlock(blockStyle);
       self->currentBlockOwnerDepth_ = self->depth;
@@ -5216,6 +5223,7 @@ void ChapterHtmlSlimParser::applyHeadingScope(BlockStyle& blockStyle, const CssS
   if (!booksAlignmentStands(cssStyle)) blockStyle.alignment = headingAlignment_;
   blockStyle.textAlignDefined = true;
   blockStyle.keepWithNext = true;
+  blockStyle.keepsBookIndent = true;
   if (!cssStyle.hasFontSizeMultiplier()) blockStyle.fontSizeMultiplier = headingFontSizeMultiplier_;
 }
 

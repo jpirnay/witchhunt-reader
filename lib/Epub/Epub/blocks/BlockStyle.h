@@ -63,6 +63,13 @@ struct BlockStyle {
   // getCombinedBlockStyle takes the child's, so a wrapper's empty block merging into a heading
   // gets it and a spent heading block lends it to nothing.
   bool keepWithNext = false;
+  // A heading, a list item or <pre>, or a block inside one: the reader's Paragraph Indent leaves its first line as the
+  // book sets it (ParagraphIndent.h). Parse-time only, NOT serialised; a merge takes the child's, as keepWithNext.
+  bool keepsBookIndent = false;
+  // <pre>, or a block inside one: its lines are laid out as the book wrote them, so it takes no first-line indent the
+  // book's CSS does not set, whatever the setting (ParagraphIndent.h). Parse-time only, NOT serialised; a merge takes
+  // the child's. A <pre>'s next line starts a block in the same style, so every line carries it.
+  bool preformatted = false;
   // Heading sizing. Two strategies share these two fields:
   //  - headingFontId == 0: scale the *body* font by fontSizeMultiplier (nearest-neighbor
   //    upscale path). Used for SD fonts (only one size loaded), steps past the largest
@@ -146,6 +153,8 @@ struct BlockStyle {
     // when the empty <br> block is merged with the following paragraph.
     combinedBlockStyle.fromBrElement = false;
     combinedBlockStyle.keepWithNext = child.keepWithNext;
+    combinedBlockStyle.keepsBookIndent = child.keepsBookIndent;
+    combinedBlockStyle.preformatted = child.preformatted;
     combinedBlockStyle.lineHeightEm = child.lineHeightEm;
     combinedBlockStyle.direction = child.direction != CssDirection::Unset ? child.direction : direction;
     // fontSizeMultiplier: use child's if != 1.0, else parent's

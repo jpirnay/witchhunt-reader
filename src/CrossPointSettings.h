@@ -274,15 +274,30 @@ class CrossPointSettings {
     return best;
   }
 
-  // Stored by number, in LineSpacingStep's order (Epub/LineSpacing.h). FROM_BOOK is Book's style.
+  // Stored by number, in LineSpacingStep's order (Epub/LineSpacing.h): a percentage of Normal, then FROM_BOOK, Book's
+  // style. Renumbered at LINE_SPACING_ORDER_VERSION 1; older files are converted as they load.
   enum LINE_COMPRESSION {
-    TIGHT = 0,
-    NORMAL = 1,
-    WIDE = 2,
-    EXTRA_WIDE = 3,
-    WIDEST = 4,
-    FROM_BOOK = 5,
+    LINE_SPACING_90 = 0,
+    LINE_SPACING_95 = 1,
+    LINE_SPACING_100 = 2,
+    LINE_SPACING_110 = 3,
+    LINE_SPACING_120 = 4,
+    LINE_SPACING_130 = 5,
+    LINE_SPACING_145 = 6,
+    LINE_SPACING_160 = 7,
+    LINE_SPACING_175 = 8,
+    FROM_BOOK = 9,
     LINE_COMPRESSION_COUNT
+  };
+  // Stored by number, in ParagraphIndent's order (Epub/ParagraphIndent.h): none, four sizes in ems, then Book's style.
+  enum PARAGRAPH_INDENT {
+    PARAGRAPH_INDENT_NONE = 0,
+    PARAGRAPH_INDENT_HALF_EM = 1,
+    PARAGRAPH_INDENT_ONE_EM = 2,
+    PARAGRAPH_INDENT_ONE_AND_HALF_EM = 3,
+    PARAGRAPH_INDENT_TWO_EM = 4,
+    PARAGRAPH_INDENT_FROM_BOOK = 5,
+    PARAGRAPH_INDENT_COUNT
   };
   // Stored by number, in VerticalText's order (Epub/FlowContext.h).
   enum VERTICAL_TEXT { VERTICAL_TEXT_AUTOMATIC = 0, VERTICAL_TEXT_ON = 1, VERTICAL_TEXT_OFF = 2, VERTICAL_TEXT_COUNT };
@@ -446,6 +461,9 @@ class CrossPointSettings {
   uint8_t statusBarBattery = 1;
   // Text rendering settings
   uint8_t extraParagraphSpacing = 1;
+  // A body paragraph's first-line indent: Book's Style (the book's, one em where it sets none and extra paragraph
+  // spacing is off), or a size the reader chose. See ParagraphIndent.h.
+  uint8_t paragraphIndent = PARAGRAPH_INDENT_FROM_BOOK;
   // The interval Auto Turn last ran at, in seconds: where its picker opens. The reader starts it from the menu.
   uint8_t autoTurnSeconds = 30;
 #if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY && !FREEINK_MURPHY_GRAY
@@ -484,7 +502,7 @@ class CrossPointSettings {
   uint8_t txtFontFamily = NOTOSANS;
   char txtSdFontFamilyName[32] = "";
   uint8_t txtFontPointSize = DEFAULT_FONT_POINT_SIZE;  // persisted as "txtFontSize"
-  uint8_t lineSpacing = NORMAL;
+  uint8_t lineSpacing = LINE_SPACING_100;
   uint8_t verticalText = VERTICAL_TEXT_AUTOMATIC;
   uint8_t pageTurnButtons = PAGE_TURN_FOLLOW_BOOK;
   uint8_t paragraphAlignment = JUSTIFIED;
@@ -508,8 +526,24 @@ class CrossPointSettings {
   // paragraphs and a size stated on the block itself (p.body { font-size: 1.1em }). Default on.
   uint8_t fontSizeNormalization = 1;
 
-  // Reader screen margin settings
-  uint8_t screenMargin = 5;
+  // The reader's margins, in pixels on top of the panel's viewable insets (ReaderUtils::addReaderMargins): Top &
+  // Bottom, never less than the status bar there, and Left & Right. One "screenMargin" for all four sides before; a
+  // file with only that key gives it to both (screenMarginFromStored).
+  static constexpr uint8_t SCREEN_MARGIN_MIN = 5;
+  static constexpr uint8_t SCREEN_MARGIN_MAX = 40;
+  static constexpr uint8_t SCREEN_MARGIN_STEP = 5;
+  static constexpr uint8_t DEFAULT_SCREEN_MARGIN = 5;
+  uint8_t screenMarginVertical = DEFAULT_SCREEN_MARGIN;
+  uint8_t screenMarginHorizontal = DEFAULT_SCREEN_MARGIN;
+  /// A reader margin read from a settings file: its own key's value (`stored`, -1 when the file has none), else the one
+  /// margin of a file from before the two (`legacy`, -1 when absent), else the default. Clamped to the rows' range, as
+  /// the settings loop clamps a value row.
+  static constexpr uint8_t screenMarginFromStored(const int stored, const int legacy) {
+    const int value = stored >= 0 ? stored : legacy >= 0 ? legacy : DEFAULT_SCREEN_MARGIN;
+    return static_cast<uint8_t>(value < SCREEN_MARGIN_MIN   ? SCREEN_MARGIN_MIN
+                                : value > SCREEN_MARGIN_MAX ? SCREEN_MARGIN_MAX
+                                                            : value);
+  }
 
   // Extra clearance from the panel edge, on TOP of the board profile's own viewableInsets --
   // see GfxRenderer::setViewablePaddingProvider. The profile says where the case covers the
