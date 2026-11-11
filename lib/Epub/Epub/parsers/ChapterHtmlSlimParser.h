@@ -337,6 +337,9 @@ class ChapterHtmlSlimParser final : public Print {
   // parser made up (alt text, a footnote preview), whose words take baseOffset unchanged.
   static void consumeText(void* userData, const char* s, int len, uint32_t baseOffset, bool source);
   bool nextWordContinues = false;  // true when next flushed word attaches to previous (inline element boundary)
+  // The layout pass's working memory, one for the build: every ParsedText the parser makes (the main block, each table
+  // cell) is lent it, so a row of buffered cells does not carry a set each (ParsedText::LayoutScratch).
+  ParsedText::LayoutScratch layoutScratch_;
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
@@ -1434,6 +1437,7 @@ class ChapterHtmlSlimParser final : public Print {
   // may run before the next feed. See ParsedText::releaseLayoutScratch.
   void onSliceYield() {
     if (currentTextBlock) currentTextBlock->releaseLayoutScratch();
+    if (!layoutScratch_.inUse) layoutScratch_.release();  // grown by a table cell with no main block to release it
     // The line images' records, once a paragraph has placed them all: a book with none never grew them.
     if (pendingLineImages_.empty()) std::vector<PendingLineImage>().swap(pendingLineImages_);
   }

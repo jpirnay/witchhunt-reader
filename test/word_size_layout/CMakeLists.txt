@@ -4,6 +4,7 @@ add_executable(WordSizeLayoutTest
   InlineObjectLayoutTest.cpp
   ShapedLayoutTest.cpp
   WordCapacityTest.cpp
+  LayoutScratchTest.cpp
   MyanmarLineBreakTest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/CjkLineBreak.cpp
   ${REPO_ROOT}/lib/Epub/Epub/CjkPunctuation.cpp

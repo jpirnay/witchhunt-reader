@@ -2777,6 +2777,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   } else {
     currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled,
                                                          blockStyleWithIndent, bionicReadingEnabled));
+    if (currentTextBlock) currentTextBlock->lendLayoutScratch(&layoutScratch_);
   }
   if (currentTextBlock) {
     currentTextBlock->setTypography(typography_);
@@ -6716,6 +6717,7 @@ std::unique_ptr<ParsedText> ChapterHtmlSlimParser::makeCellText() {
   text->setTypography(typography_);
   text->setShapingLatch(&shapingDegradedAny_);
   text->setVertical(vertical_);
+  text->lendLayoutScratch(&layoutScratch_);
   return text;
 }
 
