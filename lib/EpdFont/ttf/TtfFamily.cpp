@@ -142,6 +142,52 @@ namespace {
 // and LookupList (8).
 constexpr uint32_t kLayoutHeaderBytes = 10;
 
+// What walkLookupHeaders() ended with: every header visited, `visit` stopping it, the read budget spent, or a read that
+// failed.
+enum class HeaderWalk : uint8_t { Done, Stopped, OverBudget, ReadFailed };
+
+// Calls `visit(ctx, at, header)` with the 6-byte header (type, flag, subtable count) of each of the `lookups` lookups
+// of the LookupList at `listAt` in the table at `offset`, `length` bytes, `at` its offset in the list: in pieces of 64
+// offsets, each piece in offset order, one read serving every header within 128 bytes of its first. A null or
+// out-of-list offset, or one with no room for a subtable, is no header. `reads` counts read calls (those before the
+// walk included); past `budget` the walk stops (OverBudget). `visit` returns false to stop (Stopped).
+HeaderWalk walkLookupHeaders(const FileSource& file, const uint32_t offset, const uint32_t length,
+                             const uint32_t listAt, const uint32_t lookups, const uint32_t budget, uint32_t& reads,
+                             bool (*visit)(void* ctx, uint32_t at, const uint8_t* header), void* ctx) {
+  const uint32_t listLength = length - listAt;
+  const uint32_t listed = std::min(lookups, (listLength - 2) / 2);
+  // One buffer, two uses: a piece of the list's offsets, decoded into `offsets` before anything else is read into it,
+  // then the window of lookup headers. 256 B of buffers in all.
+  uint8_t raw[128];        // 128 B: 64 of the list's offsets, then the lookup headers read so far
+  uint16_t offsets[64];    // 128 B: the piece, decoded and sorted
+  uint32_t windowAt = 0;   // the list offset raw[0] holds as a window
+  uint32_t windowEnd = 0;  // the list offset past the window's last byte (== windowAt: no window held)
+  for (uint32_t first = 0; first < listed; first += 64) {
+    const uint32_t n = std::min<uint32_t>(64, listed - first);
+    if (++reads > budget) break;
+    if (!file.read(file.ctx, offset + listAt + 2 + 2 * first, raw, 2 * n)) return HeaderWalk::ReadFailed;
+    for (uint32_t i = 0; i < n; ++i) offsets[i] = be16(raw + 2 * i);
+    windowEnd = windowAt;  // the piece took the window's bytes
+    // In offset order, so lookups packed one after another share a window.
+    std::sort(offsets, offsets + n);
+    for (uint32_t i = 0; i < n; ++i) {
+      const uint32_t at = offsets[i];
+      if (at == 0 || at >= listLength || listLength - at < 8) continue;  // under 8 bytes, no subtable fits
+      if (at < windowAt || at + 6 > windowEnd) {
+        // A window from this header on, as much as the list holds (at least the 8 bytes checked above).
+        const uint32_t len = std::min<uint32_t>(sizeof raw, listLength - at);
+        if (++reads > budget) break;
+        if (!file.read(file.ctx, offset + listAt + at, raw, len)) return HeaderWalk::ReadFailed;
+        windowAt = at;
+        windowEnd = at + len;
+      }
+      if (!visit(ctx, at, raw + (at - windowAt))) return HeaderWalk::Stopped;
+    }
+    if (reads > budget) break;
+  }
+  return reads > budget ? HeaderWalk::OverBudget : HeaderWalk::Done;
+}
+
 // countLookups() of a table whose header (`header`, kLayoutHeaderBytes) was read already.
 bool countLookupsAfter(const FileSource& file, const uint32_t offset, const uint32_t length,
                        const uint8_t (&header)[kLayoutHeaderBytes], LayoutCounts* out) {
@@ -161,52 +207,34 @@ bool countLookupsAfter(const FileSource& file, const uint32_t offset, const uint
     return true;
   }
   out->lookups = lookups;
-  const uint32_t listed = std::min(lookups, (listLength - 2) / 2);
-  uint64_t subtables = 0;
   // Read calls so far: the two above, then a piece of offsets or a window of headers each. Past kMaxCountingReads the
   // list is crafted (a real one packs its lookups, a window serving a dozen or more): the table counts as capped, so
   // its font reserves no CPac, which costs only the computed filters (slower, never wrong).
   uint32_t reads = 2;
-  // One buffer, two uses: a piece of the list's offsets, decoded into `offsets` before anything else is read into it,
-  // then the window of lookup headers. 256 B of buffers in all.
-  uint8_t raw[128];        // 128 B: 64 of the list's offsets, then the lookup headers read so far
-  uint16_t offsets[64];    // 128 B: the piece, decoded and sorted
-  uint32_t windowAt = 0;   // the list offset raw[0] holds as a window
-  uint32_t windowEnd = 0;  // the list offset past the window's last byte (== windowAt: no window held)
-  for (uint32_t first = 0; first < listed; first += 64) {
-    const uint32_t n = std::min<uint32_t>(64, listed - first);
-    if (++reads > kMaxCountingReads) break;
-    if (!file.read(file.ctx, offset + listAt + 2 + 2 * first, raw, 2 * n)) return false;
-    for (uint32_t i = 0; i < n; ++i) offsets[i] = be16(raw + 2 * i);
-    windowEnd = windowAt;  // the piece took the window's bytes
-    // In offset order, so lookups packed one after another share a window.
-    std::sort(offsets, offsets + n);
-    for (uint32_t i = 0; i < n; ++i) {
-      const uint32_t at = offsets[i];
-      if (at == 0 || at >= listLength || listLength - at < 8) continue;  // under 8 bytes, no subtable fits
-      if (at < windowAt || at + 6 > windowEnd) {
-        // A window from this header on, as much as the list holds (at least the 8 bytes checked above).
-        const uint32_t len = std::min<uint32_t>(sizeof raw, listLength - at);
-        if (++reads > kMaxCountingReads) break;
-        if (!file.read(file.ctx, offset + listAt + at, raw, len)) return false;
-        windowAt = at;
-        windowEnd = at + len;
-      }
-      subtables += std::min<uint32_t>(be16(raw + (at - windowAt) + 4), (listLength - at - 6) / 2);
-      // Past the cap the rest need not be read.
-      if (subtables > kCpacMaxSubtables) {
-        out->capped = true;
-        return true;
-      }
-    }
-    if (reads > kMaxCountingReads) break;
+  struct Sum {
+    uint32_t listLength;
+    uint64_t subtables;
+  } sum{listLength, 0};
+  const auto add = [](void* ctx, const uint32_t at, const uint8_t* lookupHeader) {
+    auto* total = static_cast<Sum*>(ctx);
+    total->subtables += std::min<uint32_t>(be16(lookupHeader + 4), (total->listLength - at - 6) / 2);
+    // Past the cap the rest need not be read.
+    return total->subtables <= kCpacMaxSubtables;
+  };
+  switch (walkLookupHeaders(file, offset, length, listAt, lookups, kMaxCountingReads, reads, add, &sum)) {
+    case HeaderWalk::ReadFailed:
+      return false;
+    case HeaderWalk::Stopped:
+      out->capped = true;
+      return true;
+    case HeaderWalk::OverBudget:
+      *out = {};
+      out->capped = true;
+      return true;
+    case HeaderWalk::Done:
+      break;
   }
-  if (reads > kMaxCountingReads) {
-    *out = {};
-    out->capped = true;
-    return true;
-  }
-  out->subtables = static_cast<uint32_t>(subtables);
+  out->subtables = static_cast<uint32_t>(sum.subtables);
   return true;
 }
 
