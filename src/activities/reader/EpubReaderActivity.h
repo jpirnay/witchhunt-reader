@@ -232,6 +232,9 @@ class EpubReaderActivity final : public Activity {
   bool forceLoadLargeImages = false;
   // Set after each render: true if the current page contains at least one placeholder image.
   bool pageHasPlaceholders = false;
+  // The page on the panel went out on the gray canvas (displayPageOnGrayCanvas); its status-bar ticks wait for the
+  // next page (shouldSkipPeriodicUpdate). Under RenderLock.
+  bool grayCanvasOnScreen_ = false;
   bool showTruncatedSectionHintThisRender = false;
   uint8_t truncatedSectionHintRendersRemaining = 0;
   int lastWarnedTruncatedSpineIndex = -1;
@@ -1118,6 +1121,8 @@ class EpubReaderActivity final : public Activity {
   bool onePassTextFor(const Page& page) const;
   bool onePassComposedFor(const Page& page) const;
   bool displayComposedOnePass(const Page& page, int marginLeft, int contentTop, HalDisplay::RefreshMode mode);
+  bool displayPageOnGrayCanvas(const Page& page, int marginLeft, int contentTop, const uint8_t* capLsb,
+                               const uint8_t* capMsb, bool picturesAreBoxes, bool forceLoadLargeImages);
   bool getEffectiveHyphenation() const;
   bool getEffectiveFontSizeNormalization() const;
   bool getEffectiveGuideDots() const;

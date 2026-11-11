@@ -72,6 +72,7 @@
 #include "QrDisplayActivity.h"
 #include "QuickOverridesActivity.h"
 #include "ReaderActivity.h"
+#include "ReaderGrayCanvas.h"
 #include "ReaderUtils.h"
 #include "ReadingSessionTracker.h"
 #include "RecentBooksStore.h"
@@ -3470,6 +3471,58 @@ bool EpubReaderActivity::displayComposedOnePass(const Page& page, const int marg
   return true;
 }
 
+// On a panel that keeps a deeper gray buffer of its own, a page with pictures goes out on that buffer
+// (ReaderGrayCanvas): composed from what the page render just drew, the pictures painted over in their own grays, and
+// shown with the panel's full gray refresh, which blocks until the page is up. Each picture is decoded again for it;
+// no pixel cache holds 8 bits. False, with nothing shown, when the page goes out as every other one does: a panel
+// without such a buffer, no picture to show (none, all boxes, the Images setting), no buffer to borrow, or not one
+// picture whose gray could be painted.
+bool EpubReaderActivity::displayPageOnGrayCanvas(const Page& page, const int marginLeft, const int contentTop,
+                                                 const uint8_t* capLsb, const uint8_t* capMsb,
+                                                 const bool picturesAreBoxes, const bool forceLoadLargeImages) {
+  if constexpr (!HalDisplay::kMayLendGray8Canvas) return false;  // a build without such a panel carries none of this
+  const bool pageHasPictures =
+      page.hasImages() && !page.allImagesArePlaceholders(forceLoadLargeImages, /*monochromeOutput=*/true);
+  if (!ReaderGrayCanvas::pageGoesOutOnCanvas(renderer.getGrayLevels(), pageHasPictures, picturesAreBoxes,
+                                             getEffectiveImageRendering())) {
+    return false;
+  }
+  uint16_t stride = 0;
+  uint8_t* canvas = renderer.borrowGray8Canvas(&stride);
+  if (!canvas) {
+    LOG_DBG("ERS", "Gray canvas: none to borrow, the page goes out with its pictures dithered");
+    return false;
+  }
+  const auto t0 = millis();
+  // The decoders' scratch, as in the warm pass: on these boards a block of PSRAM, where a progressive JPEG also keeps
+  // its read windows (T5S3: the index of a 1206x1525 picture took 1.85 s without them, 0.93 s with). Uninstalled
+  // before the lend goes back.
+  std::optional<LentSecondary> lend;
+  if (renderer.hasSecondaryBuffer()) lend.emplace(renderer);
+  const image_scratch::ScopedArena scratch(lend ? lend->arena() : nullptr);
+  const ReaderGrayCanvas::PageBuffers buffers{.frameBuffer = renderer.getFrameBuffer(),
+                                              .lsbPlane = capLsb,
+                                              .msbPlane = capMsb,
+                                              .widthBytes = renderer.getDisplayWidthBytes(),
+                                              .width = renderer.getDisplayWidth(),
+                                              .height = renderer.getDisplayHeight()};
+  const Gray8Pictures pictures = ReaderGrayCanvas::composePage(canvas, stride, buffers, [&] {
+    return page.renderImagesGray8(renderer, getEffectiveReaderFontId(), marginLeft, contentTop, canvas, stride,
+                                  ReaderGrayCanvas::kPictureTone);
+  });
+  const auto tComposed = millis();
+  if (pictures.inGray == 0) {
+    LOG_DBG("ERS", "Gray canvas: none of %u picture(s) decoded in gray (%lu ms), the page goes out dithered",
+            static_cast<unsigned>(pictures.offered), tComposed - t0);
+    return false;
+  }
+  renderer.displayGray8Canvas();
+  LOG_DBG("ERS", "Gray canvas: %u of %u picture(s) in gray, composed in %lu ms, refresh %lu ms",
+          static_cast<unsigned>(pictures.inGray), static_cast<unsigned>(pictures.offered), tComposed - t0,
+          millis() - tComposed);
+  return true;
+}
+
 // Text only: the planes ride the glyph blit and record no image grays, so a page with images keeps
 // the two-pass path, which draws them.
 bool EpubReaderActivity::onePassTextFor(const Page& page) const {
@@ -6223,6 +6276,11 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   renderer.endGrayCapture();
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
+  // A page with pictures on a panel that keeps a deeper gray buffer of its own goes out there, now, its pictures in
+  // their own grays (the T5S3). Every other page, and this one when it cannot, goes out below.
+  const bool pageOnGrayCanvas = displayPageOnGrayCanvas(
+      *page, orientedMarginLeft, contentTop, capLsb.get(), capMsb.get(),
+      ladderGaveUp || ladder == ImageMemoryLadder::Action::Emergency || imagesWaitForBuild, effectiveForceLoad);
   logReaderMemSnapshot("after_bw_render");
   // Fire the refresh resolved above. With AA enabled on X4 the refresh goes out async so the grayscale planes can
   // render during the waveform (inline AA below); everywhere else the trigger blocks through the waveform.
@@ -6271,7 +6329,12 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   const bool deferredAaThisRender =
       aaEnabledForThisRender && !singlePushAaThisRender && !inlineAaAvailable && !composedOnePassThisRender;
   lastRenderStats.textAntiAliasing = inlineAaThisRender || deferredAaThisRender || composedOnePassThisRender;
-  if (capLsb) {
+  grayCanvasOnScreen_ = pageOnGrayCanvas;
+  if (pageOnGrayCanvas) {
+    // On the panel already: displayGray8Canvas() blocked through its refresh.
+    lastRenderStats.usedGrayscale = true;
+    lastRenderStats.textAntiAliasing = capLsb != nullptr;
+  } else if (capLsb) {
     // Hand the captured planes to the controller, then base + greys go out as
     // one waveform. Cheap: the planes were filled by the page render that just
     // ran, so nothing is walked twice.
@@ -6314,7 +6377,10 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     pendingHalfRefreshAfterImagePage = true;
   }
 
-  if (singlePushAaThisRender) {
+  if (pageOnGrayCanvas) {
+    // As the single push below: nothing to schedule or restore, the page went out whole in one refresh.
+    lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, 0, 0, 0, 0, millis() - t0};
+  } else if (singlePushAaThisRender) {
     // Nothing to schedule and nothing to restore: the planes were staged before
     // the page render and went out with it in one waveform. No deferred pass, so
     // no second refresh for the idle loop to run and nothing for a page turn to
@@ -6466,6 +6532,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
 void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout,
                                           BuildArena::Block* drawBlock) {
   pinPageProgression();
+  grayCanvasOnScreen_ = false;
   // Draws one page from an in-progress Background-C build: a plain BW render + status bar, no
   // AA and no pre-render arming (those belong to the steady reading state set up by
   // renderNormalPass() once the build completes). Images come from their pixel cache when they
@@ -6679,6 +6746,7 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   publishPageLinkTargets(page, orientedMarginLeft, contentTop);
   renderStatusBar();
 
+  grayCanvasOnScreen_ = false;
   // The image-page follow-up half-refresh can carry over if the previous page had images; honour
   // and clear it here so the pre-render path doesn't skip it.
   const bool forceHalfRefreshThisPage = pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
@@ -7202,6 +7270,10 @@ bool EpubReaderActivity::shouldSkipPeriodicUpdate() const {
     periodicRefreshOwed_ = true;
     return true;
   }
+  // A page on the gray canvas (displayPageOnGrayCanvas): its redraw decodes every picture again and flashes the whole
+  // screen, seconds of it for a clock minute or a battery step (T5S3, a progressive JPEG: 5.8 s and a 2.8 s refresh).
+  // Its status bar waits for the next page.
+  if (grayCanvasOnScreen_) return true;
   // Background-B holds the secondary buffer: any render takes it back, and taking it back
   // discards B's live build (endBackgroundBorrow). A clock-minute or battery tick would do that
   // once a minute, and a build takes ~7-15 s of slices -- so a status refresh waits for B to hand

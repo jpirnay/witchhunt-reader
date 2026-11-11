@@ -298,6 +298,7 @@ add_subdirectory(utf8_compose)
 add_subdirectory(utf8_lower)
 add_subdirectory(adaptive_tone)
 add_subdirectory(gray8_writer)
+add_subdirectory(reader_gray_canvas)
 add_subdirectory(glyph_fallback)
 add_subdirectory(glyph_provider)
 add_subdirectory(fallback_face_provider)  # after font_group_stream: links its uzlib_font_ring
