@@ -2369,7 +2369,15 @@ void ChapterHtmlSlimParser::armFirstLetter(const char* name, const std::string& 
   const CssParser::Ancestry ancestry = cssAncestry(name, classAttr, idAttr);
   CssStyle letter = cssParser->resolveFirstLetterStyle(name, classAttr, idAttr, &ancestry);
   if (!dropCapStyleAsks(letter)) return;
-  firstLetterStyle_ = letter;
+  if (!firstLetterStyle_) {
+    firstLetterStyle_ = makeUniqueNoThrow<CssStyle>();
+    if (!firstLetterStyle_) {
+      LOG_ERR("EHP", "No heap for a ::first-letter style (%u B); the letter stays in its line",
+              static_cast<unsigned>(sizeof(CssStyle)));
+      return;
+    }
+  }
+  *firstLetterStyle_ = letter;
   firstLetterDepth_ = depth;
 }
 
@@ -4455,7 +4463,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     int first = 0;
     while (first < len && isWhitespace(s[first])) ++first;
     if (first < len) {
-      if (self->dropCapPositionAllows()) self->startDropCap(self->firstLetterStyle_, /*firstLetter=*/true);
+      if (self->dropCapPositionAllows()) self->startDropCap(*self->firstLetterStyle_, /*firstLetter=*/true);
       self->firstLetterDepth_ = -1;
     }
   }
