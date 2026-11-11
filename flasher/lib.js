@@ -17,8 +17,9 @@ const APP_DESC_MAGIC = 0xabcd5432;
 export const CHIP_IDS = { "ESP32-C3": 5, "ESP32-S3": 9 };
 
 // The boards the page offers. `chip` is esptool-js's CHIP_NAME; `reset` is how the device leaves
-// the ROM loader after a write: the C3 boards take esptool's hard reset (RTS), the S3 boards a
-// watchdog reset, as tools/devctl.py's flashing does.
+// the ROM loader after a write (flasher.js, restart()): the C3 boards by the USB Serial/JTAG RTS
+// reset, the S3 boards by the RTC watchdog, since an RTS reset has left our S3 boards in the ROM
+// loader.
 export const BOARDS = [
   { id: "x3x4", label: "Xteink X3 / X4", chip: "ESP32-C3", reset: "hard" },
   { id: "x4pro", label: "Xteink X4 Pro", chip: "ESP32-S3", reset: "watchdog" },

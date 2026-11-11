@@ -6,9 +6,14 @@
 // cable. The page and its images come from GitHub Pages (scripts/stage_flasher_site.py writes
 // manifest.json); nothing else is fetched.
 //
-// Two reset sequences follow esptool (Espressif, GPL-2.0-or-later), which esptool-js 0.7.0 lacks:
-// the S3 watchdog reset (esptool/targets/esp32s3.py, ESP32S3ROM.watchdog_reset) and the RTS hard
-// reset (esptool/reset.py, HardReset), whose esptool-js version never raises RTS.
+// The two resets that leave the ROM loader are written from Espressif's Technical Reference Manuals,
+// since esptool-js 0.7.0 has no watchdog reset and its hard reset never raises RTS:
+//   - RTS: the USB Serial/JTAG controller's CDC-ACM line states, ESP32-C3 TRM v1.4, Chapter 30
+//     USB Serial/JTAG Controller, Table 30.3-2 "CDC-ACM Settings with RTS and DTR" and Table 30.4-2
+//     "Reset SoC into Booting" (ESP32-S3 TRM v1.8: Chapter 33, Table 33.4-4);
+//   - the RTC watchdog (RWDT): ESP32-S3 TRM v1.8, Chapter 10 Low-power Management (RTC_CNTL),
+//     Registers 10.32/10.33/10.38, Chapter 13 Watchdog Timers, 13.2.2.3 Write Protection, and the
+//     base address in Table 4.3-3. See watchdogResetS3() for the one value the TRM does not document.
 
 import { ESPLoader, Transport } from "esptool-js";
 import * as lib from "./lib.js";
@@ -151,13 +156,16 @@ const boardImages = () => (state.manifest && state.manifest.boards[state.board.i
 
 // ---- Connect ------------------------------------------------------------------------------------
 
-// esptool's HardReset (reset.py): RTS raised, then released. esptool-js 0.7.0 only releases it,
-// which on a USB Serial/JTAG port (DTR and RTS already low) changes nothing.
+// "Reset SoC into Booting" (ESP32-C3 TRM v1.4, Table 30.4-2): clear DTR, clear RTS (download flag
+// cleared), set RTS (RTS=1, DTR=0: reset), clear RTS (exit reset). esptool-js 0.7.0's hard reset
+// only clears RTS, which on a USB Serial/JTAG port whose lines are already low changes nothing.
 class RtsHardReset {
   constructor(transport) {
     this.transport = transport;
   }
   async reset() {
+    await this.transport.setDTR(false);
+    await this.transport.setRTS(false);
     await this.transport.setRTS(true);
     await sleep(100);
     await this.transport.setRTS(false);
@@ -522,9 +530,9 @@ async function write() {
   setBusy(false);
 }
 
-// The C3 boards leave the ROM loader by an RTS reset, the S3 boards by the RTC watchdog, as esptool's
-// --after watchdog-reset (the RTS path can leave an S3 in download mode). Secure Download Mode
-// refuses register writes, so there it falls back to RTS, as esptool does.
+// The C3 boards leave the ROM loader by an RTS reset, the S3 boards by the RTC watchdog: on our S3
+// boards an RTS reset has left the chip in the ROM loader. Secure Download Mode refuses register
+// writes, so there the S3 boards take the RTS reset too.
 async function restart() {
   try {
     // usingUsbOtg false: every board here is on the chip's USB Serial/JTAG port, and asking the
@@ -536,16 +544,30 @@ async function restart() {
   }
 }
 
+// The RTC watchdog (RWDT) reset, ESP32-S3 TRM v1.8:
+//   - Low-power Management (RTC_CNTL) at 0x6000_8000 (Table 4.3-3);
+//   - RTC_CNTL_RTC_WDTWPROTECT_REG (0x00B0, Register 10.38): writing 0x50D83AA1 to
+//     RTC_CNTL_WDT_WKEY lifts the write protection and any other value restores it
+//     (13.2.2.3 Write Protection);
+//   - RTC_CNTL_RTC_WDTCONFIG1_REG (0x009C, Register 10.33): RTC_CNTL_WDT_STG0_HOLD, stage 0's
+//     timeout in RTC slow clock cycles;
+//   - RTC_CNTL_RTC_WDTCONFIG0_REG (0x0098, Register 10.32): RTC_CNTL_WDT_EN (bit 31) and
+//     RTC_CNTL_WDT_STG0 (bits 30:28), stage 0's action.
+// Not from the TRM: the CONFIG0 value is the one `esptool --after watchdog-reset` writes, with which
+// these boards are flashed. Its STG0 = 5 is outside the values Register 10.32 documents (1-4, 4 =
+// reset the system and RTC), and its bits 8 and 1 lie in the field the TRM marks reserved (8:0).
+// It is kept because it is the value known to work on these boards; a TRM-only value (STG0 = 4)
+// is untested.
 async function watchdogResetS3(loader) {
   const RTC_CNTL_BASE = 0x60008000;
   const WDTWPROTECT = RTC_CNTL_BASE + 0xb0;
   const WDTCONFIG0 = RTC_CNTL_BASE + 0x98;
   const WDTCONFIG1 = RTC_CNTL_BASE + 0x9c;
   const WDT_WKEY = 0x50d83aa1;
-  log("Hard resetting with a watchdog...");
+  log("Resetting with the RTC watchdog...");
   await loader.writeReg(WDTWPROTECT, WDT_WKEY); // unlock
-  await loader.writeReg(WDTCONFIG1, 2000); // timeout
-  await loader.writeReg(WDTCONFIG0, ((1 << 31) | (5 << 28) | (1 << 8) | 2) >>> 0); // enable
+  await loader.writeReg(WDTCONFIG1, 2000); // stage 0 hold
+  await loader.writeReg(WDTCONFIG0, ((1 << 31) | (5 << 28) | (1 << 8) | 2) >>> 0); // enable, see above
   await loader.writeReg(WDTWPROTECT, 0); // lock
   await sleep(500);
 }
