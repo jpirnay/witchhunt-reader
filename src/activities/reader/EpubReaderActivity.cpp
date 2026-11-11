@@ -643,6 +643,12 @@ void EpubReaderActivity::onEnter() {
   // has drawn anything, which is the worst possible moment to take the display buffer.
   lastPageOnScreenMs_ = millis();
   secondaryBufferDegraded_ = !renderer.hasSecondaryBuffer();
+  // A panel that shows pictures on its own gray canvas (displayPageOnGrayCanvas) has no use for the Bayer cache the
+  // anti-aliasing passes replay: the warms make each picture's 8-bit gray cache in its place.
+  if constexpr (HalDisplay::kMayLendGray8Canvas) {
+    ImageBlock::setGrayVariant(renderer.getGrayLevels() > 4 ? ImageBlock::GrayVariant::Gray8
+                                                            : ImageBlock::GrayVariant::Bayer);
+  }
   // Cold open: arm the dramatic-transition HALF for the first section entry only (cleared by any
   // non-incremental entry in buildSection). Also clear any stale post-popup HALF left armed if the
   // previous reader session was abandoned mid-build.
@@ -850,6 +856,7 @@ void EpubReaderActivity::onEnter() {
 void EpubReaderActivity::onExit() {
   Activity::onExit();
   logReaderMemSnapshot("onExit_before_release");
+  if constexpr (HalDisplay::kMayLendGray8Canvas) ImageBlock::setGrayVariant(ImageBlock::GrayVariant::Bayer);
 
   // Leave the panel a clean baseline for whatever screen comes next.
   //
@@ -2106,8 +2113,18 @@ bool EpubReaderActivity::imageLaneMustWait() const {
 }
 
 bool EpubReaderActivity::imageLaneWarmsGrayscale() const {
+  if constexpr (HalDisplay::kMayLendGray8Canvas) {
+    if (ImageBlock::grayVariant() == ImageBlock::GrayVariant::Gray8) return picturesGoOutInGray();
+  }
   // A borrow degrades the buffer only until it goes back: a page is looked at as it will be drawn then.
   return getEffectiveTextAntiAliasing() && (!secondaryBufferDegraded_ || secondaryBorrowed_);
+}
+
+// Whether a page with pictures goes out on the panel's own gray canvas, its pictures' gray caches the variant to warm
+// (ImageBlock::GrayVariant::Gray8): the panel and the Images setting's half of ReaderGrayCanvas::pageGoesOutOnCanvas().
+bool EpubReaderActivity::picturesGoOutInGray() const {
+  return ReaderGrayCanvas::pageGoesOutOnCanvas(renderer.getGrayLevels(), /*pageHasPictures=*/true,
+                                               /*picturesAreBoxes=*/false, getEffectiveImageRendering());
 }
 
 BuildArena* EpubReaderActivity::arenaOfBuildHoldingBuffer() const {
@@ -5947,7 +5964,11 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // warm both variants. If the grayscale pass is preempted or aborted (decided later, at
   // aaPreempted below), the 1-bit BW frame is what stays on the panel — the same output
   // as with AA off, never a crushed-to-black image.
-  const bool warmGrayscaleImageCache = aaEnabledForThisRender;
+  // On a panel with its own gray canvas the gray variant is the pictures' 8-bit cache, which the page composes from.
+  bool warmGrayscaleImageCache = aaEnabledForThisRender;
+  if constexpr (HalDisplay::kMayLendGray8Canvas) {
+    if (ImageBlock::grayVariant() == ImageBlock::GrayVariant::Gray8) warmGrayscaleImageCache = picturesGoOutInGray();
+  }
 
   // Warm any missing image pixel caches BEFORE font prewarm and BW backup chunks
   // reduce heap contig below the ~49 KB the PNG decoder needs. The decode

@@ -1123,6 +1123,7 @@ class EpubReaderActivity final : public Activity {
   bool displayComposedOnePass(const Page& page, int marginLeft, int contentTop, HalDisplay::RefreshMode mode);
   bool displayPageOnGrayCanvas(const Page& page, int marginLeft, int contentTop, const uint8_t* capLsb,
                                const uint8_t* capMsb, bool picturesAreBoxes, bool forceLoadLargeImages);
+  bool picturesGoOutInGray() const;
   bool getEffectiveHyphenation() const;
   bool getEffectiveFontSizeNormalization() const;
   bool getEffectiveGuideDots() const;
