@@ -19,14 +19,16 @@ octal PSRAM, 4-bit SDMMC card, per freeink-sdk's `picco` profile and env) runs a
 layout cannot be ours; the SDK does not record that layout. A firmware that keeps it has no `spiffs` partition, and
 none of the four caches would have anywhere to live.
 
-The X4 Pro is in that case already (issue #733). Its stock table, read from a retail unit's flash, is app0 0x10000 and
-app1 0x7f0000 (0x7e0000 each), an 80 KB `littlefs` partition at 0xfd0000 and a coredump: no `spiffs`. Every way onto
-an X4 Pro from its stock firmware writes the app alone and keeps that table: the stock SD and OTA updaters, our SD
-Card Firmware Update and OTA, and CrossPoint's web flasher (crosspointreader.com/install reads the device's table and
-writes the app into its idle OTA slot; its repair page writes, for the X4 Pro, a table whose `spiffs` partition is the
-same 80 KB at 0xfd0000). Only a USB flash of a PlatformIO build writes `partitions.csv`. Before the PSRAM image was
-the fallback, such an X4 Pro had no area at all: the interface stayed English with its pack on the card, TTF families
-did not load, .cpfont fonts were read from the card.
+The X4 Pro is in that case already (issue #733). Its stock tables have app0 0x10000 and app1 0x7f0000 (0x7e0000 each)
+and an 80 KB data partition at 0xfd0000: `littlefs` on a retail unit on Licorice OS (read from its flash), `spiffs` in
+what CrossPoint's web flasher calls the X4 Pro's factory-compatible layout. Every way onto an X4 Pro from its stock
+firmware writes the app alone and keeps that table: the stock SD and OTA updaters, our SD Card Firmware Update and
+OTA, and CrossPoint's web flasher (crosspointreader.com/install reads the device's table and writes the app into its
+idle OTA slot; its repair page writes the factory-compatible table). Only a USB flash of a PlatformIO build writes
+`partitions.csv`. An 80 KB `spiffs` partition held 2.40's 64 KB language slot; the slot grew to 128 KB in 2.41RC (for
+the CJK UI faces, 42350ddd5), and from then on such an X4 Pro had no room for it: the interface stayed English with
+its pack on the card (the reporter of #733 had Czech on 2.40 and English on 2.41RC and 2.50 after SD updates), and
+with no `spiffs` partition at all there was no area for anything, TTF families included.
 
 ## Consumers
 
@@ -123,8 +125,13 @@ What a board without the partition and without PSRAM (or whose image cannot be a
 glyph store would need a different design (strings in heap RAM, ~30 KB, rejected for the C3 in `FlashLangPartition.h`;
 a glyph store reading its index and log through the card), so on such a board the UI stays English and TTF families do
 not load. No board we know of is in that case: the S3 boards have 8 MB of PSRAM, and the C3 boards' tables have a
-`spiffs` partition. The boot log says so (`[FLA] no flash area: ...`), and System Information shows "No spiffs
-partition" in its Font cache row.
+large enough `spiffs` partition. The boot log says so (`[FLA] no flash area: ...`).
+
+**What shows it.** System Information's Flash section has a **Flash area** row ("spiffs 3.4 MB"; "PSRAM (spiffs 80.0
+KB)"; "- (spiffs -)": where the area is, then what the table holds) and a **Language** row: the language's code, and
+when its pack is not in use, why: `no pack`, `bad pack` (I18n), or the slot's `FlashLangPartition::lastFailure()`:
+`no flash area`, `area too small`, `build`, `mmap`, `CRC`. A slot that does not start on a 64 KB page is not a failure:
+`esp_partition_mmap` maps from the page below and hands out the pointer advanced to the offset.
 
 ## How a board chooses
 
@@ -132,8 +139,8 @@ One place, `FlashArea.cpp`, at the first `FlashArea::get()`:
 
 1. `FLASH_AREA_PSRAM_IMAGE=2` (a test build): the PSRAM image, whatever the partition table holds.
 2. The `spiffs` partition, when the partition table has one larger than the language slot (128 KB). Every board
-   flashed with `partitions.csv`: as before. A smaller one (the 80 KB of CrossPoint's X4 Pro repair) is left alone:
-   the language slot could not live in it.
+   flashed with `partitions.csv`: as before. A smaller one (the 80 KB of the X4 Pro's factory-compatible table) is
+   left alone: the language slot could not live in it.
 3. `FLASH_AREA_PSRAM_IMAGE=1` and PSRAM to hold the image: the PSRAM image. The default on every build with
    `CONFIG_SPIRAM`, so the X4 Pro, T5S3 and Murphy builds take it without a flag of their own.
 4. None.
