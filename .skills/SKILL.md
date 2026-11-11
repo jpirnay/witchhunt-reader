@@ -812,7 +812,8 @@ build_flags =
    - Font family or size (`SETTINGS.fontFamily`, `SETTINGS.fontSize`)
    - Line spacing (`SETTINGS.lineSpacing`)
    - Paragraph spacing (`SETTINGS.extraParagraphSpacing`)
-   - Screen margins (`SETTINGS.screenMargin`)
+   - Paragraph indent (`SETTINGS.paragraphIndent`, only when not Book's Style)
+   - Screen margins (`SETTINGS.screenMarginVertical`, `SETTINGS.screenMarginHorizontal`)
 3. **Viewport dimensions change**:
    - Screen orientation change
    - Display resolution change

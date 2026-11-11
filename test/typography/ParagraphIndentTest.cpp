@@ -56,7 +56,7 @@ void expectIndent(const ResolvedIndent got, const ResolvedIndent want, const std
 // Every combination of the block's state, under Book's Style: today's rule, whatever kind of block it is.
 TEST(ParagraphIndent, BooksStyleIsTheRuleBeforeTheSetting) {
   for (const Book& book : kBooks) {
-    for (int mask = 0; mask < 128; ++mask) {
+    for (int mask = 0; mask < 256; ++mask) {
       IndentInputs in = bodyParagraph(book);
       in.startAligned = (mask & 1) != 0;
       in.brContinuation = (mask & 2) != 0;
@@ -65,6 +65,7 @@ TEST(ParagraphIndent, BooksStyleIsTheRuleBeforeTheSetting) {
       in.bodyParagraph = (mask & 16) != 0;
       in.spanIndent = (mask & 32) != 0 && book.defined;
       in.preformatted = (mask & 64) != 0;
+      in.listItem = (mask & 128) != 0;
       expectIndent(resolveParagraphIndent(kFromBook, in, kEm), booksStyle(in),
                    std::string(book.name) + " mask " + std::to_string(mask));
     }
@@ -107,7 +108,7 @@ struct Exemption {
 constexpr Exemption kExemptions[] = {
     {"centred or end-aligned", [](IndentInputs& in) { in.startAligned = false; }},
     {"<br> continuation", [](IndentInputs& in) { in.brContinuation = true; }},
-    {"heading or list item", [](IndentInputs& in) { in.bodyParagraph = false; }},
+    {"heading or table cell", [](IndentInputs& in) { in.bodyParagraph = false; }},
     {"<pre>",
      [](IndentInputs& in) {
        in.bodyParagraph = false;
@@ -151,13 +152,22 @@ TEST(ParagraphIndent, PreformattedTextTakesOnlyTheBooksIndent) {
   }
 }
 
-// A list item keeps Book's Style's one em where its book sets none, under every setting.
-TEST(ParagraphIndent, AListItemKeepsBooksStylesEm) {
-  IndentInputs in = bodyParagraph(kBooks[0]);
-  in.bodyParagraph = false;
-  for (const uint8_t step : {kFixed[0], kFixed[1], kFixed[2], kFixed[3], kFixed[4], kFromBook}) {
-    expectIndent(resolveParagraphIndent(step, in, kEm), {static_cast<int16_t>(kEm), true},
-                 "step " + std::to_string(step));
+// A list item: Book's Style gives it one em where its book sets none; every fixed step drops that em, None to 2 em,
+// with Extra Paragraph Spacing on or off. An indent the book sets, zero, positive or hanging, stands under every step.
+TEST(ParagraphIndent, AFixedStepDropsAListItemsEmAndKeepsTheBooksIndent) {
+  for (const Book& book : kBooks) {
+    for (const bool extraSpacing : {false, true}) {
+      IndentInputs in = bodyParagraph(book);
+      in.bodyParagraph = false;
+      in.listItem = true;
+      in.extraParagraphSpacing = extraSpacing;
+      const std::string what = std::string(book.name) + (extraSpacing ? " spaced" : "");
+      expectIndent(resolveParagraphIndent(kFromBook, in, kEm), booksStyle(in), what + ", Book's Style");
+      const ResolvedIndent want = book.defined ? ResolvedIndent{book.px, true} : ResolvedIndent{0, false};
+      for (const uint8_t step : kFixed) {
+        expectIndent(resolveParagraphIndent(step, in, kEm), want, what + ", step " + std::to_string(step));
+      }
+    }
   }
 }
 

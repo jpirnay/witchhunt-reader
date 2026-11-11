@@ -148,6 +148,15 @@ struct ParagraphIndentLayout : testing::Test {
     return xs;
   }
 
+  // Where each list item's marker starts, in reading order.
+  std::vector<int> markersAt(const std::string& path, const pipeline_harness::Profile& profile) {
+    std::vector<int> xs;
+    for (const Line& line : layOut(path, profile)) {
+      if (!line.words.empty() && line.words.front().text == "\xE2\x80\xA2") xs.push_back(line.words.front().x);
+    }
+    return xs;
+  }
+
   // The section files a build under `profile` leaves, by name (<spine>_<property hash>.bin).
   std::set<std::string> sectionFiles(const pipeline_harness::Profile& profile) {
     const std::string path = writeBook("", "<p>Alpha</p>");
@@ -236,20 +245,28 @@ TEST_F(ParagraphIndentLayout, AHeadingKeepsTheBooksFirstLine) {
   EXPECT_EQ(underEverySetting(path, "Charlie", booksAlignment), (std::vector<int>{0, 9, 18, 27, 36, 18}));
 }
 
-// Each item's first line starts with its marker, the second item's inside its <p>.
-TEST_F(ParagraphIndentLayout, AListItemAndAParagraphInsideOneKeepTheBooksFirstLine) {
+// The first item's marker on its own line, the second's inside its <p>. Book's Style indents each item's marker by one
+// em where the book sets no indent; every fixed step, None to 2 em, drops that em, so the markers start one em further
+// left. The paragraph after the list takes the step as usual.
+TEST_F(ParagraphIndentLayout, AFixedStepDropsTheEmBeforeAListItemsMarker) {
   const std::string path = writeBook("", "<ul><li>Alpha bravo.</li><li><p>Charlie delta.</p></li></ul><p>Echo.</p>");
-  const auto markersAt = [&](const uint8_t indent) {
-    std::vector<int> xs;
-    for (const Line& line : layOut(path, profile(indent))) {
-      if (!line.words.empty() && line.words.front().text == "\xE2\x80\xA2") xs.push_back(line.words.front().x);
-    }
-    return xs;
-  };
-  const std::vector<int> booksStyle = markersAt(kBooksStyle);
+  const std::vector<int> booksStyle = markersAt(path, profile(kBooksStyle));
   ASSERT_EQ(booksStyle.size(), 2u);
-  for (const uint8_t indent : kAllSettings) EXPECT_EQ(markersAt(indent), booksStyle) << "setting " << int{indent};
+  for (const uint8_t indent : {kNone, kHalfEm, kOneEm, kOneAndHalfEm, kTwoEm}) {
+    EXPECT_EQ(markersAt(path, profile(indent)), (std::vector<int>{booksStyle[0] - 18, booksStyle[1] - 18}))
+        << "setting " << int{indent};
+  }
   EXPECT_EQ(underEverySetting(path, "Echo."), (std::vector<int>{0, 9, 18, 27, 36, 18}));
+}
+
+// An indent the book gives its list items stands under every setting.
+TEST_F(ParagraphIndentLayout, AListItemKeepsTheBooksOwnIndent) {
+  const std::string path = writeBook("li { text-indent: 1.5em }", "<ul><li>Alpha bravo.</li></ul><p>Echo.</p>");
+  const std::vector<int> booksStyle = markersAt(path, profile(kBooksStyle));
+  ASSERT_EQ(booksStyle.size(), 1u);
+  for (const uint8_t indent : kAllSettings) {
+    EXPECT_EQ(markersAt(path, profile(indent)), booksStyle) << "setting " << int{indent};
+  }
 }
 
 // A code block or a verse set in <pre>: no line of it is indented under any setting, Book's Style included, with

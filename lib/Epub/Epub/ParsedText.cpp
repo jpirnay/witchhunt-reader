@@ -2580,6 +2580,7 @@ void ParsedText::applyParagraphIndent(const GfxRenderer& renderer, const int fon
   // no indent but the book's own, and none from the reader.
   in.bodyParagraph = !blockStyle.keepsBookIndent && !blockStyle.keepsSpaces;
   in.preformatted = blockStyle.preformatted || blockStyle.keepsSpaces;
+  in.listItem = blockStyle.listItem;
   // An image or a drop cap beside the text already sets the paragraph apart.
   in.besideFloat = blockStyle.floatZoneCount > 0;
   in.extraParagraphSpacing = extraParagraphSpacing;

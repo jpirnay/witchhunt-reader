@@ -4037,7 +4037,9 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       // which inherits its white-space (whiteSpace_ is this element's, set above).
       const bool preformatted = strcmp(name, "pre") == 0 || CssWhiteSpaces::keepsSpaces(self->whiteSpace_);
       if (preformatted) blockStyle.preformatted = true;
-      if (preformatted || strcmp(name, "li") == 0 || !self->listStack.empty()) blockStyle.keepsBookIndent = true;
+      const bool listItem = strcmp(name, "li") == 0 || !self->listStack.empty();
+      if (listItem) blockStyle.listItem = true;
+      if (preformatted || listItem) blockStyle.keepsBookIndent = true;
       self->holdBottomSpacing(blockStyle, isFloated);
       self->startNewTextBlock(blockStyle);
       self->currentBlockOwnerDepth_ = self->depth;
