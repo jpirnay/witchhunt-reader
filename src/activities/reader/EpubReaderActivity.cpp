@@ -72,6 +72,7 @@
 #include "QrDisplayActivity.h"
 #include "QuickOverridesActivity.h"
 #include "ReaderActivity.h"
+#include "ReaderImageMode.h"
 #include "ReaderUtils.h"
 #include "ReadingSessionTracker.h"
 #include "RecentBooksStore.h"
@@ -1407,6 +1408,7 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   const int fontId = pendingGrayscale_.fontId;
   const int marginLeft = pendingGrayscale_.marginLeft;
   const int contentTop = pendingGrayscale_.contentTop;
+  const bool imagesGray = pendingGrayscale_.imagesGray;
   const Page* pagePtr = pendingGrayscale_.page.get();
   // This pass runs ON the loop task, so while it is in flight no input is sampled or dispatched
   // at all (measured: 1237 ms max loop duration on X3; a measurement at full clock on X3
@@ -1420,7 +1422,7 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
           planeAborted = true;
           return;
         }
-        pagePtr->renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
+        if (imagesGray) pagePtr->renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
       },
       [&] { return planeAborted || aaPreemptedByNavigation(); });
   logReaderMemSnapshot("aa_after_planes");
@@ -2105,8 +2107,10 @@ bool EpubReaderActivity::imageLaneMustWait() const {
 }
 
 bool EpubReaderActivity::imageLaneWarmsGrayscale() const {
-  // A borrow degrades the buffer only until it goes back: a page is looked at as it will be drawn then.
-  return getEffectiveTextAntiAliasing() && (!secondaryBufferDegraded_ || secondaryBorrowed_);
+  // A borrow degrades the buffer only until it goes back: a page is looked at as it will be drawn then. Black & White
+  // images never replay a gray cache.
+  return getEffectiveTextAntiAliasing() && ReaderImageMode::imagesInGray(getEffectiveImageRendering()) &&
+         (!secondaryBufferDegraded_ || secondaryBorrowed_);
 }
 
 BuildArena* EpubReaderActivity::arenaOfBuildHoldingBuffer() const {
@@ -3308,9 +3312,14 @@ bool EpubReaderActivity::applyBookReaderOverrides(
 
   // Guide dots are excluded from this comparison on purpose: they are render-time
   // only (see TextBlock::setGuideDots), so a guide-dots-only change must not fall
-  // through to the section relayout below.
+  // through to the section relayout below. Images count by the value they are laid out with:
+  // Display and Black & White differ only when drawn (ReaderImageMode::forLayout).
+  const auto imageLayoutFor = [](const int8_t override) {
+    return ReaderImageMode::forLayout(override >= 0 ? static_cast<uint8_t>(override) : SETTINGS.imageRendering);
+  };
   const bool layoutOverridesUnchanged =
-      bookEmbeddedStyleOverride == embeddedStyleOverride && bookImageRenderingOverride == imageRenderingOverride &&
+      bookEmbeddedStyleOverride == embeddedStyleOverride &&
+      imageLayoutFor(bookImageRenderingOverride) == imageLayoutFor(imageRenderingOverride) &&
       bookFontFamilyOverride == normalizedFontFamilyOverride &&
       bookSdFontFamilyOverride == normalizedSdFontFamilyOverride && bookFontSizeOverride == fontSizeOverride &&
       bookBionicReadingOverride == bionicReadingOverride &&
@@ -3321,7 +3330,8 @@ bool EpubReaderActivity::applyBookReaderOverrides(
       bookLineSpacingOverride == lineSpacingOverride && bookVerticalTextOverride == verticalTextOverride &&
       bookPublisherFontsOverride == publisherFontsOverride;
 
-  if (layoutOverridesUnchanged && bookGuideDotsOverride == guideDotsOverride) {
+  if (layoutOverridesUnchanged && bookGuideDotsOverride == guideDotsOverride &&
+      bookImageRenderingOverride == imageRenderingOverride) {
     return false;
   }
 
@@ -3348,8 +3358,8 @@ bool EpubReaderActivity::applyBookReaderOverrides(
       bookPublisherFontsOverride);
 
   if (layoutOverridesUnchanged) {
-    // Only guide dots changed: persisted above, and the repaint on resume picks
-    // the new value up in render(). No section relayout, no refresh override.
+    // Only guide dots or how images are drawn changed: persisted above, and the repaint on
+    // resume picks the new value up in render(). No section relayout, no refresh override.
     return false;
   }
 
@@ -3439,6 +3449,10 @@ uint8_t EpubReaderActivity::getEffectiveImageRendering() const {
   return SETTINGS.imageRendering;
 }
 
+bool EpubReaderActivity::imagesTakeGrayPass(const Page& page) const {
+  return ReaderImageMode::imagesTakeGrayPass(page.hasImages(), getEffectiveImageRendering());
+}
+
 bool EpubReaderActivity::getEffectiveTextAntiAliasing() const {
   if (!HalCapabilities::panelShowsGray()) return false;  // a book's stored override included
   if (bookTextAntiAliasingOverride >= 0) {
@@ -3450,7 +3464,7 @@ bool EpubReaderActivity::getEffectiveTextAntiAliasing() const {
 // The same choice where the planes are composed in the frame buffers (the X3, the X4).
 bool EpubReaderActivity::onePassComposedFor(const Page& page) const {
   return SETTINGS.onePassTextAa != 0 && renderer.composesOnePassText() && getEffectiveTextAntiAliasing() &&
-         !page.hasImages();
+         !imagesTakeGrayPass(page);
 }
 
 // The page is in the write buffer. The buffer holding the page on screen becomes the old plane: it
@@ -3470,10 +3484,10 @@ bool EpubReaderActivity::displayComposedOnePass(const Page& page, const int marg
   return true;
 }
 
-// Text only: the planes ride the glyph blit and record no image grays, so a page with images keeps
-// the two-pass path, which draws them.
+// Text only: the planes ride the glyph blit and record no image grays, so a page whose images take the gray pass keeps
+// the two-pass path, which draws them. Black & White images have no grays: their page goes one-pass like text.
 bool EpubReaderActivity::onePassTextFor(const Page& page) const {
-  return SETTINGS.onePassTextAa != 0 && getEffectiveTextAntiAliasing() && !page.hasImages();
+  return SETTINGS.onePassTextAa != 0 && getEffectiveTextAntiAliasing() && !imagesTakeGrayPass(page);
 }
 
 bool EpubReaderActivity::getEffectiveHyphenation() const {
@@ -4298,9 +4312,9 @@ bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
     markStagedForCurrentPage();
     requestUpdate();
   }
-  LOG_DBG("ERS", "Page summary: spine=%d page=%d/%d prerendered=1 refresh=%s mode=0x%02X", currentSpineIndex,
+  LOG_DBG("ERS", "Page summary: spine=%d page=%d/%d prerendered=1 refresh=%s mode=0x%02X images=%s", currentSpineIndex,
           lastRenderedPageIndex_, lastRenderedPageCount_, refreshModeName(lastPageRefreshMode_),
-          lastPageDisplayModeByte_);
+          lastPageDisplayModeByte_, ReaderImageMode::logLabel(p->hasImages(), getEffectiveImageRendering()));
   return true;
 }
 
@@ -4362,12 +4376,14 @@ void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
   // required wherever the display replays it (the lane's warmGrayscale rule), or the images would
   // come up without their grey levels. Not on a single-push panel: its capture rides the glyph
   // blit and records no image greys, so the two-push fallback would show such a page differently
-  // from the same page rendered fresh.
-  const bool drawn =
-      p && (!p->hasImages() ||
-            (!renderer.supportsGrayFrame() &&
-             !p->hasUncachedImages(/*forceLoadLargeImages=*/true, /*monochromeOutput=*/true,
-                                   /*alsoWarmGrayscale=*/getEffectiveTextAntiAliasing() && !secondaryBufferDegraded_)));
+  // from the same page rendered fresh. Black & White images have no greys to record or replay, so
+  // there only their 1-bit caches count, on every panel.
+  const bool imagesGray = p && imagesTakeGrayPass(*p);
+  const bool drawn = p && (!p->hasImages() ||
+                           ((!imagesGray || !renderer.supportsGrayFrame()) &&
+                            !p->hasUncachedImages(/*forceLoadLargeImages=*/true, /*monochromeOutput=*/true,
+                                                  /*alsoWarmGrayscale=*/imagesGray && getEffectiveTextAntiAliasing() &&
+                                                      !secondaryBufferDegraded_)));
   const bool skippedForImages = p && !drawn;
   const bool inkOnly = drawn && inkOnlyPrerenderAvailable() && pageDrawsUnscaled(*p);
   // The floor above assumed ink masks where they were possible; a page that needs its 2-bit glyphs
@@ -5452,9 +5468,10 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
         totalFontLookups > 0 ? (lastRenderStats.fontCacheHits * 100UL) / totalFontLookups : 0UL;
     LOG_DBG(
         "ERS",
-        "Page summary: spine=%d page=%d/%d prerendered=0 refresh=%s mode=0x%02X renderMs=%lu "
+        "Page summary: spine=%d page=%d/%d prerendered=0 refresh=%s mode=0x%02X images=%s renderMs=%lu "
         "prewarmMs=%lu bwMs=%lu displayMs=%lu fontHits=%lu fontMisses=%lu fontHitPct=%lu glyphCalls=%lu glyphUs=%lu",
         drawn.spine, drawn.page, drawn.pageCount, refreshModeName(lastPageRefreshMode_), lastPageDisplayModeByte_,
+        ReaderImageMode::logLabel(lastRenderStats.hadImages, getEffectiveImageRendering()),
         lastRenderStats.requestRenderMs, lastRenderStats.phases.prewarmMs, lastRenderStats.phases.bwRenderMs,
         lastRenderStats.phases.displayMs, lastRenderStats.fontCacheHits, lastRenderStats.fontCacheMisses,
         fontHitRatePct, lastRenderStats.fontGetBitmapCalls, lastRenderStats.fontGetBitmapTimeUs);
@@ -5586,7 +5603,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   lastRenderStats.viewportWidth = layout.viewportWidth;
   lastRenderStats.viewportHeight = layout.viewportHeight;
   lastRenderStats.embeddedStyle = getEffectiveEmbeddedStyle();
-  lastRenderStats.imageRendering = getEffectiveImageRendering();
+  lastRenderStats.imageRendering = ReaderImageMode::forLayout(getEffectiveImageRendering());
   lastRenderStats.effectiveFontId = getEffectiveReaderFontId();
   lastRenderStats.textAntiAliasing = getEffectiveTextAntiAliasing();
   lastRenderStats.freeHeapBefore = esp_get_free_heap_size();
@@ -5894,8 +5911,10 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // to lift levels 1 and 2 back to real greys. That replay needs its own .bayer.pxc, so
   // warm both variants. If the grayscale pass is preempted or aborted (decided later, at
   // aaPreempted below), the 1-bit BW frame is what stays on the panel — the same output
-  // as with AA off, never a crushed-to-black image.
-  const bool warmGrayscaleImageCache = aaEnabledForThisRender;
+  // as with AA off, never a crushed-to-black image. Black & White stops there on purpose:
+  // no replay, so no .bayer.pxc either.
+  const bool imagesGray = imagesTakeGrayPass(*page);
+  const bool warmGrayscaleImageCache = aaEnabledForThisRender && imagesGray;
 
   // Warm any missing image pixel caches BEFORE font prewarm and BW backup chunks
   // reduce heap contig below the ~49 KB the PNG decoder needs. The decode
@@ -6307,12 +6326,15 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   lastPageDisplayModeByte_ = renderer.getLastDisplayModeByte();
   const auto tDisplay = millis();
 
-  // Schedule a half-refresh on the next page turn after an image page to reduce ghosting.
+  // Schedule a half-refresh on the next page turn after an image page to reduce ghosting. A redraw of the page on
+  // screen kept the debt its earlier draw left (above); a redraw in Black & White replaces that draw's gray and drops
+  // it. The placeholder test stats each image's cache, so only where the mode owes the refresh at all.
   // Must be checked BEFORE page is moved into pendingGrayscale_ below.
-  if (page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome) &&
-      getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
-    pendingHalfRefreshAfterImagePage = true;
-  }
+  const uint8_t imageMode = getEffectiveImageRendering();
+  const bool drewImages = ReaderImageMode::imagePageOwesRefresh(imageMode) && page->hasImages() &&
+                          !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome);
+  pendingHalfRefreshAfterImagePage =
+      ReaderImageMode::refreshOwedAfterDraw(pendingHalfRefreshAfterImagePage, drewImages, imageMode);
 
   if (singlePushAaThisRender) {
     // Nothing to schedule and nothing to restore: the planes were staged before
@@ -6342,7 +6364,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
             planeAborted = true;
             return;
           }
-          pagePtr->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
+          if (imagesGray) pagePtr->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
         },
         // Re-checked here because the up-front gate can only see the gesture as it stands when
         // the render begins; the pass itself is ~1 s long, so most presses during a burst land
@@ -6369,6 +6391,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     // is board-agnostic; only the choice to use it was ever board-specific.
     pendingGrayscale_.active = true;
     pendingGrayscale_.page = std::move(page);
+    pendingGrayscale_.imagesGray = imagesGray;
     markStagedForCurrentPage();
     pendingGrayscale_.fontId = getEffectiveReaderFontId();
     pendingGrayscale_.marginLeft = orientedMarginLeft;
@@ -6591,7 +6614,7 @@ uint16_t EpubReaderActivity::renderPageContentOnly(const Page& page, const int o
   // before it returns and the display consumes them at the page turn.
   preRenderedPlanesStaged_ = false;
   std::unique_ptr<uint8_t[]> capLsb, capMsb;
-  const bool wantCapture = renderer.supportsGrayFrame() && getEffectiveTextAntiAliasing() && !page.hasImages();
+  const bool wantCapture = renderer.supportsGrayFrame() && getEffectiveTextAntiAliasing() && !imagesTakeGrayPass(page);
   if (wantCapture) {
     const size_t planeBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
     capLsb = makeUniqueNoThrow<uint8_t[]>(planeBytes);
@@ -6739,7 +6762,7 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   // none is a placeholder, and the half refresh that clears an image's grey particles is armed
   // for the page after it whenever it has images at all.
   pageHasPlaceholders = false;
-  if (page.hasImages() && getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
+  if (page.hasImages() && ReaderImageMode::imagePageOwesRefresh(getEffectiveImageRendering())) {
     pendingHalfRefreshAfterImagePage = true;
   }
 
@@ -6768,13 +6791,14 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     // No waveform to hide behind on this path (displayBuffer() above already returned), so the
     // per-element abort translates directly into saved wall-clock on both devices.
     bool planeAborted = false;
+    const bool imagesGray = imagesTakeGrayPass(page);
     const auto gt = renderer.renderGrayscalePlanesSequential(
         [&](GfxRenderer::RenderMode) {
           if (!page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop, /*abortable=*/true)) {
             planeAborted = true;
             return;
           }
-          page.renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
+          if (imagesGray) page.renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
         },
         [&] { return planeAborted || aaPreemptedByNavigation(); });
     if (gt.aborted) {
@@ -7672,7 +7696,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   p.verticalText =
       FlowContext::requestFor(static_cast<VerticalText>(SETTINGS.verticalText), currentBook.verticalTextOverride,
                               TypographyProfile::forLanguage(epub->getLanguage()).verticalAllowed);
-  p.imageRendering = effectiveImageRendering;
+  p.imageRendering = ReaderImageMode::forLayout(effectiveImageRendering);
   p.fontSizeLadder = buildReaderFontSizeLadder(effectiveFontId);
   // On the heap: about 0.5 KB with the book's accent families, too much for this frame under a section build.
   const auto fontFamilies = makeUniqueNoThrow<BlockFontFamilies>();

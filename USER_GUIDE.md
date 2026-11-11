@@ -494,7 +494,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
   - "Never" (default), "In Reader", "Always"
 - **Refresh Frequency** (submenu): Settings for screen refresh behaviour while reading:
   - **Refresh Frequency** - Slider (0 = Never, up to 60) for how often a full refresh runs to clear ghosting
-  - **Refresh After Image Pages** - Whether to do an extra refresh after pages containing images
+  - **Refresh After Image Pages** - Whether to do an extra refresh after pages containing images. Not after images shown in Black & White (see **Images**)
 - **Sunlight Fading Fix**: Software fix for white X4 models that may fade in direct sunlight. "OFF" (default) / "ON".
 
 **User interface**:
@@ -518,7 +518,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 - **Normalize Font Size**: Shows text the book sets only slightly larger or smaller than its body text (within 10%) at your font size. It also treats the size of the book's running text as your font size, so a book that shrinks or enlarges all its text reads at your size, with headings and small print in proportion. That size is measured when the book is first opened (the "Indexing" popup), and needs **Embedded Style** on. "ON" (default) / "OFF"
 - **Font Manager**: downloads font families over Wi-Fi and deletes the ones you no longer use. Each row shows the family, what it is for, and, until it is installed, its download size. **Download All** installs every missing family but the eight CJK ones (Japanese, Simplified Chinese, Traditional Chinese and Korean, each sans serif and serif, 1.6–7.0 MB), the twenty Indic ones (Noto Sans and Noto Serif for each of the ten scripts below), the two Arabic ones (NotoNaskhArabic and NotoSansArabic), the two Hebrew ones (NotoSansHebrew and NotoSerifHebrew) and the two Myanmar ones (NotoSansMyanmar and NotoSerifMyanmar), 34 families in all: install your language's from its own row. Download All leaves out the **[language packs](#language-packs)** too: the interface packs (ChineseUI, ChineseTradUI, JapaneseUI, KoreanUI), which draw book titles in those scripts outside a book, the **Language-** rows after the fonts, one per interface language (10–15 KB), and the **Hyphenation-** rows at the end of the list, one per language (0.2–206 KB): install your interface language's and the ones for your books from their rows. Deleting a hyphenation pack stops hyphenating that language's books. A CJK family is one file (Regular only) and an Indic, Arabic, Hebrew or Myanmar family a Regular and a Bold file, each drawn at every size. The reader restarts when you leave the Font Manager.
 - **Text Anti-Aliasing**: Smooth grey edges on text. They appear just after a page does, and are skipped while you flip through pages quickly. "ON" / "OFF"
-- **One-Pass Anti-Aliasing** *(X3, X4 with an SSD1677 panel, X4 Pro with a UC8179 panel, Murphy M3)*: Draws a text page and its grey edges in one refresh, so there is no second flicker when the grey arrives, and the edges stay on while you flip through pages quickly. The edges use one grey level instead of two, and pages with images keep the usual two steps. It is one setting for the whole device, with no per-book override. "ON" / "OFF" (default).
+- **One-Pass Anti-Aliasing** *(X3, X4 with an SSD1677 panel, X4 Pro with a UC8179 panel, Murphy M3)*: Draws a text page and its grey edges in one refresh, so there is no second flicker when the grey arrives, and the edges stay on while you flip through pages quickly. The edges use one grey level instead of two, and pages with images keep the usual two steps, unless **Images** is "Black & White". It is one setting for the whole device, with no per-book override. "ON" / "OFF" (default).
 - **Text Darkness**: Ink density for rendered text: "Normal" (default), "Dark", "Extra Dark", "Max Dark"
 
 **TXT/Markdown Font** (submenu):
@@ -543,7 +543,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 - **Extra Paragraph Spacing**: "ON" adds vertical space between paragraphs; "OFF" uses first-line indentation instead.
 
 **Images** (submenu):
-- **Images**: "Display" (default), "Placeholder" (show a box where the image would be), "Suppress" (skip images entirely)
+- **Images**: "Display" (default), "Placeholder" (show a box where the image would be), "Suppress" (skip images entirely), "Black & White". Black & White lays images out as Display does and draws them as black and white dots, which the reader dithers from the image at the size it is drawn. They get no grey step, so a page with images turns like a text page: no extra refresh after it (**Refresh After Image Pages**), and with **One-Pass Anti-Aliasing** on it goes out in one refresh. Text keeps its anti-aliasing. Switching between Display and Black & White does not lay the book out again. The reader menu's settings and the quick overrides set it for one book.
 - **Large Image Placeholder**: Whether to substitute an explicit placeholder for images that are too large to display inline. "ON" / "OFF"
 
 - **Embedded Style**: Use the EPUB's own HTML/CSS styling. "ON" (default) / "OFF"
