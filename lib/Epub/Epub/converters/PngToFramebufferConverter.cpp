@@ -9,6 +9,8 @@
 #include <Memory.h>
 #include <PngStreamDecoder.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 #include <memory>
 #include <new>
@@ -120,8 +122,8 @@ constexpr size_t PNG_DECODE_HEAP_FLOOR = 36 * 1024;
 constexpr size_t PNG_DECODE_HEAP_FLOOR_WITH_ARENA = 16 * 1024;
 
 // Worst case the arena is asked for on this path, in the order PngStreamDecoder::begin() takes
-// them: two scanline buffers, then the ring (capped at 32 KB). Image width is unknown at the
-// gate, so budget the same way WARM_PASS_SCRATCH_BYTES does. Asking for the whole worst case is
+// them: two scanline buffers, then the ring (capped at 32 KB). The floors do not look at the
+// image, so budget the same way WARM_PASS_SCRATCH_BYTES does. Asking for the whole worst case is
 // deliberate — a partial fit sends the ring back to the heap, which is the block the floor
 // exists for.
 constexpr size_t PNG_ARENA_WORST_CASE_BYTES = 32 * 1024 + 2 * 4096;
@@ -130,7 +132,92 @@ size_t pngDecodeHeapFloor() {
   return image_scratch::canServe(PNG_ARENA_WORST_CASE_BYTES) ? PNG_DECODE_HEAP_FLOOR_WITH_ARENA : PNG_DECODE_HEAP_FLOOR;
 }
 
+// The floors above are a worst case: a 32 KB ring and rows of any width. A small image needs a fraction of them -- its
+// ring is its whole inflated stream (PngStreamDecoder::scratchFor), under 1.4 KB for an 18 px RGBA icon -- and the
+// worst case refused every icon beside a section build on the X3: the build's free tail could not serve 40 KB, the heap
+// had 35.2 KB of the 36 KB asked, and a page of icons took 26 refused decodes in 3.5 s, then waited for the build to
+// end. So an image whose inflated stream is shorter than the window is charged what it takes (pngDecodeHeapNeed). One
+// that fills the window is gated by the floors, as it always was.
+//
+// What a decode takes from the heap beside the decoder object, the source row, the ditherers and the cache bands, all
+// counted below: the open cache files' handles, their paths (a .pxc path and its .part, each a heap string on the C3)
+// and the allocator's block headers. A few hundred bytes; budgeted at 1 KB.
+constexpr size_t PNG_DECODE_SMALL_BLOCKS = 1024;
+// What a decode leaves free for everything else once its working set is taken: the JPEG decoder's
+// JPEG_CACHE_HEAP_FLOOR. The old 16 KB arena floor was a measured ~9 KB residual plus 7 KB of it.
+constexpr size_t PNG_DECODE_HEADROOM = 8 * 1024;
+
+struct OutputSize {
+  int width;
+  int height;
+};
+
+// The size the decode draws at (same policy as the old decoder): the exact box, or the source scaled into the box,
+// never up.
+OutputSize outputSizeFor(const int srcWidth, const int srcHeight, const RenderConfig& config) {
+  if (config.useExactDimensions && config.maxWidth > 0 && config.maxHeight > 0) {
+    return {config.maxWidth, config.maxHeight};
+  }
+  const float scaleX = (float)config.maxWidth / srcWidth;
+  const float scaleY = (float)config.maxHeight / srcHeight;
+  float scale = (scaleX < scaleY) ? scaleX : scaleY;
+  if (scale > 1.0f) scale = 1.0f;  // never upscale
+  OutputSize out{(int)(srcWidth * scale), (int)(srcHeight * scale)};
+  if (out.width < 1) out.width = 1;
+  if (out.height < 1) out.height = 1;
+  return out;
+}
+
+// Free heap a decode of an image with this header must find before it starts, drawn as `config` asks.
+size_t pngDecodeHeapNeed(const PngStreamDecoder::Info& info, const RenderConfig& config) {
+  const size_t worstCase = pngDecodeHeapFloor();
+  const PngStreamDecoder::Scratch scratch = PngStreamDecoder::scratchFor(info);
+  // A header begin() will refuse, or a ring that fills the window: the worst case, unchanged.
+  if (scratch.rowBytes == 0 || scratch.wholeWindow) return worstCase;
+
+  // begin()'s scanline buffers and ring, all from the arena when it has room for the three (with the alignment padding
+  // before the second and third), else all from the heap.
+  const size_t blocks = 2 * scratch.rowBytes + scratch.ringBytes;
+  const size_t heapBlocks = image_scratch::canServe(blocks + 2 * alignof(std::max_align_t)) ? 0 : blocks;
+
+  // The rest, as decodeOpenFile() takes it: the decoder object, one source row, and for each 2-bit rendition (the
+  // primary, and the companion when one is asked for) at most one ditherer of three error rows and a cache band.
+  const OutputSize out = outputSizeFor(static_cast<int>(info.width), static_cast<int>(info.height), config);
+  const bool gray8Out = config.gray8 != nullptr;
+  const size_t renditions = gray8Out ? 0 : (config.companionCachePath.empty() ? 1 : 2);
+  const size_t bands = gray8Out ? 0 : (config.cachePath.empty() ? 0 : 1) + (config.companionCachePath.empty() ? 0 : 1);
+  const size_t residual =
+      sizeof(PngStreamDecoder) + info.width +
+      renditions * (sizeof(Atkinson1BitDitherer) + Atkinson1BitDitherer::errorRowBytesFor(out.width)) +
+      bands * PixelCache::bandBytesFor(out.width, out.height, 1) + PNG_DECODE_SMALL_BLOCKS;
+  return std::min(worstCase, heapBlocks + residual + PNG_DECODE_HEADROOM);
+}
+
+// The header of the PNG at the file's read position, which is put back: the gate reads it before the decoder exists.
+bool peekHeader(FsFile& file, PngStreamDecoder::Info& info) {
+  // Signature, IHDR's length and type, width and height (what getDimensionsFromBuffer checks), bit depth, colour type.
+  uint8_t header[26];
+  const size_t start = file.position();
+  const int n = file.read(header, sizeof(header));
+  if (!file.seekSet(start)) return false;
+  ImageDimensions dims;
+  if (n != static_cast<int>(sizeof(header)) ||
+      !PngToFramebufferConverter::getDimensionsFromBuffer(header, sizeof(header), dims)) {
+    return false;
+  }
+  info.width = static_cast<uint32_t>(dims.width);
+  info.height = static_cast<uint32_t>(dims.height);
+  info.bitDepth = header[24];
+  info.colorType = header[25];
+  return true;
+}
+
 }  // namespace
+
+size_t PngToFramebufferConverter::decodeHeapNeed(FsFile& file, const RenderConfig& config) {
+  PngStreamDecoder::Info info;
+  return peekHeader(file, info) ? pngDecodeHeapNeed(info, config) : pngDecodeHeapFloor();
+}
 
 bool PngToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, const size_t len, ImageDimensions& out) {
   if (!buf || len < 24) return false;
@@ -273,8 +360,9 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
   const std::string& imagePath = label;  // logging only; the stream is the caller's
 
   const size_t freeHeap = ESP.getFreeHeap();
-  if (const size_t floor = pngDecodeHeapFloor(); freeHeap < floor) {
-    LOG_ERR("PNG", "Not enough heap for PNG decode (%u free, need %u)", (unsigned)freeHeap, (unsigned)floor);
+  const size_t need = decodeHeapNeed(file, config);
+  if (freeHeap < need) {
+    LOG_ERR("PNG", "Not enough heap for PNG decode (%u free, need %u)", (unsigned)freeHeap, (unsigned)need);
     image_scratch::noteHeapShort();
     return false;
   }
@@ -298,21 +386,9 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
 
-  // Output dimensions (same policy as the old decoder).
-  int dstWidth, dstHeight;
-  if (config.useExactDimensions && config.maxWidth > 0 && config.maxHeight > 0) {
-    dstWidth = config.maxWidth;
-    dstHeight = config.maxHeight;
-  } else {
-    const float scaleX = (float)config.maxWidth / srcWidth;
-    const float scaleY = (float)config.maxHeight / srcHeight;
-    float scale = (scaleX < scaleY) ? scaleX : scaleY;
-    if (scale > 1.0f) scale = 1.0f;  // never upscale
-    dstWidth = (int)(srcWidth * scale);
-    dstHeight = (int)(srcHeight * scale);
-    if (dstWidth < 1) dstWidth = 1;
-    if (dstHeight < 1) dstHeight = 1;
-  }
+  const OutputSize out = outputSizeFor(srcWidth, srcHeight, config);
+  const int dstWidth = out.width;
+  const int dstHeight = out.height;
   // No single scale factor: the axes map independently below (Bresenham across, pull-per-row
   // down), so nothing here relies on the caller having handed us an aspect-correct box.
   LOG_TRC("PNG", "PNG %dx%d -> %dx%d (scale %.2fx%.2f), colorType=%d bitDepth=%d", srcWidth, srcHeight, dstWidth,
@@ -378,6 +454,10 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
 
   DirectPixelWriter pw;
   pw.init(renderer);
+
+  // The decode's whole working set is in place here (the rows below allocate nothing): what it took, against its gate.
+  const size_t freeDuring = ESP.getFreeHeap();
+  const size_t heapTaken = freeHeap > freeDuring ? freeHeap - freeDuring : 0;
 
   bool ok = true;
   int decodedSrcY = -1;  // source row currently held in grayLine
@@ -490,8 +570,8 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
     }
   }
 
-  LOG_DBG("PNG", "PNG decoding complete - render time: %lu ms%s", millis() - decodeStart,
-          companion.caching ? " (both variants)" : "");
+  LOG_DBG("PNG", "PNG decoding complete - render time: %lu ms%s, heap: took %u of the %u gated", millis() - decodeStart,
+          companion.caching ? " (both variants)" : "", (unsigned)heapTaken, (unsigned)need);
   return ok;
 }
 
