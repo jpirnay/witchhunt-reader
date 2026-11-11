@@ -167,11 +167,32 @@ Local runs are useful for validating:
 
 - workflow wiring and job conditions
 - PlatformIO release builds
+- the full-install images (`full-install-<board>.bin`, `scripts/full_install_image.py`), each checked
+  against its sources
+- the web flasher's site (`scripts/stage_flasher_site.py`)
 - release-notes generation via `scripts/generate_release_notes.py` (`release_candidate.yml`)
 
-Local `act` runs do **not** publish GitHub releases or upload release assets.
-Those steps are skipped when `ACT=true`, so final release publication still
-requires a real GitHub Actions run.
+Local `act` runs do **not** publish GitHub releases, upload release assets or
+deploy the web flasher to GitHub Pages. Those steps are skipped when `ACT=true`,
+so final release publication still requires a real GitHub Actions run.
+
+Without `act`, the same checks run against a local build:
+
+```sh
+pio run -e gh_release
+cp .pio/build/gh_release/firmware.bin /tmp/firmware.bin
+python3 scripts/patch_min_chip_rev.py /tmp/firmware.bin
+python3 scripts/full_install_image.py .pio/build/gh_release --app /tmp/firmware.bin --out /tmp/full-install-x3x4.bin
+```
+
+To try the flasher, stage a folder of release assets with
+`scripts/stage_flasher_site.py --assets <dir> --out <site> --tag test` and serve it with
+`python3 -m http.server --bind 127.0.0.1` from `<site>` (WebSerial needs `localhost` or HTTPS).
+
+A release publishes per board `firmware*.bin` (the app; OTA and SD updates), `full-install-<board>.bin` (from 0x0)
+and one `web-<hash>.bin`. A full release, not a pre-release, also deploys the flasher with them to GitHub Pages. To
+redeploy it between releases (a change to `flasher/` on master), re-run the `deploy-flasher` job of the latest
+release's "Compile Release" run: it takes the page from master and the images from that run.
 
 ### Prerequisites
 
