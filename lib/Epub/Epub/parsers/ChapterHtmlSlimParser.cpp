@@ -3142,6 +3142,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     self->clearSpentBlockHeadingStyle();
     self->clearSpentBlockDirection(self->depth);  // and its direction, for the same reason
     self->applyPendingPageBreak();
+    // The main block sits idle through the whole table while the rows buffer their cells beside it. Empty, it gives
+    // its word arrays back now (swapped out, as at a slice yield) rather than hold a paragraph's capacity through the
+    // table; the paragraph after the table grows them again.
+    if (self->currentTextBlock && self->currentTextBlock->isEmpty()) self->currentTextBlock->releaseLayoutScratch();
     self->currentTable = std::unique_ptr<BufferedTable>(new BufferedTable());
     self->currentTable->depth = 1;
     self->currentTable->rtl = self->startSideIsRight();
