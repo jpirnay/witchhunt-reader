@@ -492,7 +492,7 @@ bool stylesEqual(const CssStyle& a, const CssStyle& b) {
          a.visibilityHidden == b.visibilityHidden && a.writingMode == b.writingMode &&
          a.textOrientation == b.textOrientation && a.textCombine == b.textCombine && a.direction == b.direction &&
          a.unicodeBidi == b.unicodeBidi && a.textEmphasis == b.textEmphasis && a.whiteSpace == b.whiteSpace &&
-         definedEqual(a.defined, b.defined);
+         a.initialLetter == b.initialLetter && definedEqual(a.defined, b.defined);
 }
 }  // namespace
 
@@ -712,7 +712,9 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       ".h { text-emphasis-style: none; }\n"
       ".i { writing-mode: vertical-rl; text-emphasis: filled triangle; }\n"  // the flow word and a mark in one record
       ".j { white-space: break-spaces; }\n"                                  // a rule with nothing else is kept
-      ".k { white-space: pre-line; unicode-bidi: plaintext; direction: rtl; }\n";
+      ".k { white-space: pre-line; unicode-bidi: plaintext; direction: rtl; }\n"
+      ".l { initial-letter: 3 2; }\n"  // a rule with nothing else is kept
+      ".m { -webkit-initial-letter: 4; direction: rtl; text-emphasis: dot; }\n";
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
   std::string cssPath;
@@ -722,8 +724,9 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   ASSERT_TRUE(compileCache(parser, cssPath));
 
   const std::vector<std::pair<std::string, std::string>> probes = {
-      {"p", "a"},   {"p", "b"},    {"div", "c"},  {"span", "a"}, {"p", "none"}, {"span", "d"}, {"span", "e"},
-      {"div", "f"}, {"html", "g"}, {"span", "h"}, {"span", "i"}, {"pre", "j"},  {"p", "k"}};
+      {"p", "a"},    {"p", "b"},    {"div", "c"}, {"span", "a"}, {"p", "none"},
+      {"span", "d"}, {"span", "e"}, {"div", "f"}, {"html", "g"}, {"span", "h"},
+      {"span", "i"}, {"pre", "j"},  {"p", "k"},   {"span", "l"}, {"span", "m"}};
   auto resolveAll = [&](CssParser& p) {
     std::vector<CssStyle> out;
     for (const auto& pr : probes) out.push_back(p.resolveStyle(pr.first, pr.second));
@@ -759,6 +762,10 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   EXPECT_EQ(CssWhiteSpace::BreakSpaces, heapStyles[11].whiteSpace) << "a rule with only white-space was dropped";
   EXPECT_EQ(CssWhiteSpace::PreLine, heapStyles[12].whiteSpace) << "white-space did not survive beside the flow";
   EXPECT_EQ(CssUnicodeBidi::Plaintext, heapStyles[12].unicodeBidi);
+  EXPECT_EQ(CssInitialLetter::pack(3, 2), heapStyles[13].initialLetter)
+      << "a rule with only initial-letter was dropped";
+  EXPECT_EQ(CssInitialLetter::pack(4, 0), heapStyles[14].initialLetter) << "initial-letter beside the flow word";
+  EXPECT_EQ(CssDirection::Rtl, heapStyles[14].direction);
   EXPECT_EQ(CssDirection::Rtl, heapStyles[12].direction);
 
   BuildArena arena(64 * 1024);
@@ -1402,4 +1409,104 @@ TEST(CssParserFonts, TheSrcEntryIsRankedByWhatTheReaderDraws) {
   removePath(cacheDir);
   std::error_code rmEc;
   std::filesystem::remove(cssPath, rmEc);
+}
+
+namespace {
+// The stylesheet at `css`, compiled and loaded as the device does; `resident` loads it into an arena.
+struct CompiledSheet {
+  std::string cacheDir = makeTempDir();
+  std::string cssPath;
+  BuildArena arena{64 * 1024};
+  CssParser parser{cacheDir};
+  ::testing::AssertionResult load(const std::string& css, const bool resident) {
+    if (!writeTempCssFile(std::vector<uint8_t>(css.begin(), css.end()), cssPath)) {
+      return ::testing::AssertionFailure() << "cannot write the sheet";
+    }
+    if (const auto compiled = compileCache(parser, cssPath); !compiled) return compiled;
+    parser.clear();
+    if (resident) {
+      parser.setIndexArena(&arena);
+      parser.setLeanResolve(true);
+    }
+    if (!parser.loadFromCache()) return ::testing::AssertionFailure() << "loadFromCache failed";
+    return ::testing::AssertionSuccess();
+  }
+  ~CompiledSheet() {
+    parser.clear();
+    removePath(cacheDir);
+    std::error_code ec;
+    std::filesystem::remove(cssPath, ec);
+  }
+};
+}  // namespace
+
+// ::first-letter rules are kept apart from the element's own, for its drop cap, through the compile and both loads.
+TEST(CssParserFirstLetter, RulesAreKeptForTheFirstLetterOnly) {
+  const std::string css =
+      "p.first::first-letter { initial-letter: 3; font-weight: bold; }\n"
+      ".chapter:first-letter { initial-letter: 2; }\n"
+      ".first::first-letter { initial-letter: 4; }\n"  // less specific than p.first's: loses
+      "#opening::FIRST-LETTER { initial-letter: 5; }\n"
+      "p.first { font-style: italic; }\n"
+      // Not read: a pseudo-class before the pseudo-element. Read without it, it would give letters it does not match a
+      // drop cap. (Compounds and descendant chains are: CssCascadeTest.)
+      "p:first-of-type::first-letter { initial-letter: 6; }\n";
+  for (const bool resident : {false, true}) {
+    SCOPED_TRACE(resident ? "arena-resident" : "heap");
+    CompiledSheet sheet;
+    ASSERT_FALSE(sheet.cacheDir.empty());
+    ASSERT_TRUE(sheet.load(css, resident));
+    const CssParser& parser = sheet.parser;
+    EXPECT_TRUE(parser.hasFirstLetterRules());
+    const CssStyle letter = parser.resolveFirstLetterStyle("p", "first");
+    EXPECT_EQ(3, letter.initialLetterLines());
+    EXPECT_EQ(CssFontWeight::Bold, letter.fontWeight);
+    EXPECT_FALSE(letter.hasFontStyle());  // the element's own rule is not the letter's
+    EXPECT_EQ(2, parser.resolveFirstLetterStyle("div", "chapter").initialLetterLines());
+    EXPECT_EQ(5, parser.resolveFirstLetterStyle("p", "", "opening").initialLetterLines());
+    EXPECT_EQ(0, parser.resolveFirstLetterStyle("p", "").initialLetterLines());
+    // And the element itself takes none of it.
+    const CssStyle element = parser.resolveStyle("p", "first");
+    EXPECT_FALSE(element.hasInitialLetter());
+    EXPECT_EQ(CssFontStyle::Italic, element.fontStyle);
+  }
+}
+
+TEST(CssParserFirstLetter, ASheetWithoutThemSaysSo) {
+  CompiledSheet sheet;
+  ASSERT_TRUE(sheet.load("p { initial-letter: 3; }\n", false));
+  EXPECT_FALSE(sheet.parser.hasFirstLetterRules());
+  EXPECT_FALSE(sheet.parser.resolveFirstLetterStyle("p", "").hasInitialLetter());
+  EXPECT_EQ(3, sheet.parser.resolveStyle("p", "").initialLetterLines());
+}
+
+// Books guard their initial-letter rules with @supports, which every @supports block was skipped for: such a block is
+// read now, and only such a block, so a fallback for anything else stays as it was.
+TEST(CssParserSupports, AnInitialLetterBlockIsRead) {
+  const std::string css =
+      ".dropcap { float: left; font-size: 3em; }\n"
+      "@supports (initial-letter: 3) or (-webkit-initial-letter: 3) {\n"
+      "  .dropcap { float: none; font-size: 1em; initial-letter: 3; }\n"
+      "  p.lead::first-letter { -webkit-initial-letter: 2; }\n"
+      "  @media screen { .nested { font-weight: bold; } }\n"
+      "  .inner { text-align: right; }\n"
+      "}\n"
+      "@supports not (initial-letter: 3) { .fallback { font-weight: bold; } }\n"
+      "@supports (display: grid) { .grid { font-style: italic; } }\n"
+      "@media print { .print { font-style: italic; } }\n"
+      ".after { text-align: center; }\n";
+  CompiledSheet sheet;
+  ASSERT_TRUE(sheet.load(css, false));
+  const CssParser& parser = sheet.parser;
+  const CssStyle cap = parser.resolveStyle("span", "dropcap");
+  EXPECT_EQ(3, cap.initialLetterLines());
+  EXPECT_EQ(CssFloat::None, cap.cssFloat);
+  EXPECT_FLOAT_EQ(1.0f, cap.fontSizeMultiplier);
+  EXPECT_EQ(2, parser.resolveFirstLetterStyle("p", "lead").initialLetterLines());
+  EXPECT_EQ(CssTextAlign::Right, parser.resolveStyle("div", "inner").textAlign);
+  EXPECT_FALSE(parser.resolveStyle("span", "nested").anyDefined());  // @media inside: skipped as ever
+  EXPECT_FALSE(parser.resolveStyle("span", "fallback").anyDefined());
+  EXPECT_FALSE(parser.resolveStyle("span", "grid").anyDefined());
+  EXPECT_FALSE(parser.resolveStyle("span", "print").anyDefined());
+  EXPECT_EQ(CssTextAlign::Center, parser.resolveStyle("p", "after").textAlign);  // the sheet goes on past the blocks
 }
