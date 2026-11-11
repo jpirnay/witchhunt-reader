@@ -37,7 +37,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 123;  // v123: CSS white-space: pre, pre-wrap and break-spaces keep runs of
+constexpr uint8_t SECTION_FILE_VERSION = 124;  // v124: CSS initial-letter makes a drop cap of its lines, on a span
+                                               // or a ::first-letter rule, raised or sunken by its sink
+                                               // v123: CSS white-space: pre, pre-wrap and break-spaces keep runs of
                                                // spaces (a token each) and line feeds, pre-line keeps line feeds;
                                                // a kept line feed starts the next line, not a block: the block's top
                                                // spacing and first-line indent are not repeated per line
