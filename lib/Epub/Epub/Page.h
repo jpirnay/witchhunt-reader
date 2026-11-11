@@ -143,7 +143,9 @@ class PageTableFragment final : public PageElement {
   // Decode any missing cell-image pixel caches. Position is irrelevant to the cache
   // (it is position-independent); images are warmed at the origin and the framebuffer
   // garbage is discarded by the caller's clearScreen(), mirroring the Page warm pass.
-  void warmCellImages(GfxRenderer& renderer, bool forceLoad, bool monochromeOutput,
+  // False when the page's warm ends here: a decode stopped for input, or one refused for memory beside a section build
+  // (see Page::warmImageCaches).
+  bool warmCellImages(GfxRenderer& renderer, bool forceLoad, bool monochromeOutput,
                       bool alsoWarmGrayscale = false) const;
 };
 
@@ -216,6 +218,8 @@ class Page {
   // plane draws 1-bit Atkinson, the gray planes lift levels 1/2 back to real greys.
   // redecodeCoarse: a .pxc stamped coarse counts as missing, and stays unless a decode replaces it
   // (ImageBlock::CoarseRedecodeScope).
+  // Beside a section build (image_scratch::canWait) the first image refused for memory ends the warm: the images after
+  // it wait with it for the lane after the build.
   void warmImageCaches(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoadLargeImages,
                        bool monochromeOutput = true, bool alsoWarmGrayscale = false, bool redecodeCoarse = false) const;
   bool hasPlaceholderImages(bool forceLoadLargeImages, bool monochromeOutput) const;

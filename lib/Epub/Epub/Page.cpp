@@ -10,6 +10,22 @@
 
 #include "PageFrameScope.h"
 
+namespace {
+
+// Whether the decode of `image` just made ends the page's warm: refused for memory (image_scratch::heapShortCount
+// moved since `shortBefore`, and the variant asked for is still missing) while the decode can wait
+// (image_scratch::canWait). That is the image lane beside a section build, whose lane after the build decodes what is
+// left with the whole buffer. Each image after a refusal still paid its extraction check, cache probes and a decode
+// refused like the first: a page of icons on the X3 took 26 refused decodes in 3.5 s (2026-11-11), each image twice,
+// once for both variants and once for the 4-level one alone. Any other pass tries every image, as before: a page
+// render's memory ladder climbs between its passes, and a smaller image may fit where a larger one did not.
+bool refusalEndsWarm(const ImageBlock& image, const uint32_t shortBefore, const bool monochromeOutput) {
+  if (!image_scratch::canWait() || image_scratch::heapShortCount() == shortBefore) return false;
+  return !(monochromeOutput ? image.hasPixelCache() : image.hasGrayscaleCache());
+}
+
+}  // namespace
+
 void PageLine::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
   block->render(renderer, fontId, xPos + xOffset, yPos + yOffset);
 }
@@ -177,7 +193,7 @@ bool PageTableFragment::hasUncachedImages(const bool forceLoad, const bool monoc
   return false;
 }
 
-void PageTableFragment::warmCellImages(GfxRenderer& renderer, const bool forceLoad, const bool monochromeOutput,
+bool PageTableFragment::warmCellImages(GfxRenderer& renderer, const bool forceLoad, const bool monochromeOutput,
                                        const bool alsoWarmGrayscale) const {
   for (const auto& row : rows) {
     for (const auto& cell : row.cells) {
@@ -188,15 +204,20 @@ void PageTableFragment::warmCellImages(GfxRenderer& renderer, const bool forceLo
       // The cache is position-independent, so warm at the origin — the framebuffer write is
       // discarded by the caller's clearScreen().
       if (!cached) {
+        const uint32_t shortBefore = image_scratch::heapShortCount();
         cell.image->render(renderer, 0, 0, forceLoad, monochromeOutput);
-        if (CooperativeAbort::wasAborted()) return;  // see Page::warmImageCaches
+        if (CooperativeAbort::wasAborted()) return false;  // see Page::warmImageCaches
+        if (refusalEndsWarm(*cell.image, shortBefore, monochromeOutput)) return false;
       }
       if (alsoWarmGrayscale && monochromeOutput && !cell.image->hasGrayscaleCache()) {
+        const uint32_t shortBefore = image_scratch::heapShortCount();
         cell.image->render(renderer, 0, 0, forceLoad, /*monochromeOutput=*/false);
-        if (CooperativeAbort::wasAborted()) return;
+        if (CooperativeAbort::wasAborted()) return false;
+        if (refusalEndsWarm(*cell.image, shortBefore, /*monochromeOutput=*/false)) return false;
       }
     }
   }
+  return true;
 }
 
 bool PageTableFragment::serialize(FsFile& file) {
@@ -356,8 +377,10 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffsetIn, const int
   for (auto& element : elements) {
     if (CooperativeAbort::wasAborted()) return;
     if (element->getTag() == TAG_PageTable) {
-      static_cast<const PageTableFragment&>(*element).warmCellImages(renderer, forceLoadLargeImages, monochromeOutput,
-                                                                     alsoWarmGrayscale);
+      if (!static_cast<const PageTableFragment&>(*element).warmCellImages(renderer, forceLoadLargeImages,
+                                                                          monochromeOutput, alsoWarmGrayscale)) {
+        return;
+      }
       continue;
     }
     if (element->getTag() != TAG_PageImage) continue;
@@ -374,9 +397,11 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffsetIn, const int
     // the cheaper route.
     const bool mergeVariants = alsoWarmGrayscale && monochromeOutput && !alreadyCached && !ib.hasGrayscaleCache();
     if (!alreadyCached) {
+      const uint32_t shortBefore = image_scratch::heapShortCount();
       static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
                                                             monochromeOutput, mergeVariants);
       if (CooperativeAbort::wasAborted()) return;
+      if (refusalEndsWarm(ib, shortBefore, monochromeOutput)) return;
     }
     // Second decode for the other variant when AA needs the grayscale planes on top of
     // the BW frame. Skipped when monochromeOutput is already false — that pass wrote the
@@ -385,8 +410,10 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffsetIn, const int
     // failure: the companion is best-effort (JPEG and GIF ignore it, and its cache file can
     // fail to open on its own), so the re-check is what makes it safe to ask for.
     if (alsoWarmGrayscale && monochromeOutput && !ib.hasGrayscaleCache()) {
+      const uint32_t shortBefore = image_scratch::heapShortCount();
       static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
                                                             /*monochromeOutput=*/false);
+      if (refusalEndsWarm(ib, shortBefore, /*monochromeOutput=*/false)) return;
     }
   }
 }
