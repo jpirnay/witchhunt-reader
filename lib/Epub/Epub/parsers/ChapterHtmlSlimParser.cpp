@@ -827,7 +827,7 @@ void ChapterHtmlSlimParser::pushBlockStyleEntry(const CssStyle& cssStyle) {
 }
 
 bool ChapterHtmlSlimParser::applyCssFontFamilyToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) const {
-  if (fontFamilies_.count == 0 || !cssStyle.defined.fontFamily) return false;
+  if (!fontFamilies_ || !cssStyle.defined.fontFamily) return false;
   entry.hasFontFamily = true;
   entry.fontFamily = cssStyle.fontFamily;
   return true;
@@ -1455,9 +1455,9 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
       attachPendingFloatImage(currentTextBlock->getBlockStyle());
     }
     uint8_t fontSlot = 0;
-    if (fontFamilies_.count != 0) {
+    if (fontFamilies_) {
       noteWordFamily();
-      fontSlot = fontFamilies_.slotOf(effectiveFontFamily_);
+      fontSlot = fontFamilySlot(effectiveFontFamily_);
     }
     const bool newFontSlot = (currentTextBlock->fontSlotsUsed() & (1u << fontSlot)) == 0;
     currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct,
@@ -2415,7 +2415,7 @@ void ChapterHtmlSlimParser::startDropCap(const CssStyle& cssStyle, const bool fi
   pendingDropCap_.multiplier = mult;
   pendingDropCap_.style = capStyle;
   // Its family, with the book's other families in use: the span's own, else the one it sits in.
-  pendingDropCap_.family = fontFamilies_.count == 0      ? 0
+  pendingDropCap_.family = !fontFamilies_                ? 0
                            : cssStyle.defined.fontFamily ? cssStyle.fontFamily
                                                          : effectiveFontFamily_;
   pendingDropCap_.textLen = 0;
@@ -2453,7 +2453,7 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   // rather than falling back to scaling the small body font — same decompressor budget.
   int32_t capFontId = 0;  // 0 = body font
   float capScale = pendingDropCap_.multiplier;
-  if (const BlockFontFamilies::Family* family = fontFamilies_.family(fontFamilies_.slotOf(pendingDropCap_.family))) {
+  if (const BlockFontFamilies::Family* family = fontFamily(fontFamilySlot(pendingDropCap_.family))) {
     // A cap in another of the book's families (a display face for the initials): that family's face at the cap's
     // size, as a heading in it takes, outside the body ladder's one-auxiliary-face budget.
     const FontSizeLadder::Resolved r = resolveFamilyFont(family, pendingDropCap_.multiplier);
@@ -5478,16 +5478,16 @@ void ChapterHtmlSlimParser::resolveBlockFont(BlockStyle& bs) {
   bs.fontResolved = true;
   if (bs.headingFontId != 0) return;
   const uint8_t slot =
-      blockFamilyState_ == 0 ? 0 : fontFamilies_.slotOf(blockFamilyState_ == 1 ? blockFirstFamily_ : blockOwnFamily_);
+      blockFamilyState_ == 0 ? 0 : fontFamilySlot(blockFamilyState_ == 1 ? blockFirstFamily_ : blockOwnFamily_);
   const float size = bs.fontSizeMultiplier;
-  const FontSizeLadder::Resolved r = resolveFamilyFont(fontFamilies_.family(slot), size);
+  const FontSizeLadder::Resolved r = resolveFamilyFont(fontFamily(slot), size);
   bs.headingFontId = r.fontId;
   bs.fontSizeMultiplier = r.residual;
   // The block's words in other families than its own: each family's face at the block's size.
-  if (fontFamilies_.count == 0 || !currentTextBlock || &currentTextBlock->getBlockStyle() != &bs) return;
+  if (!fontFamilies_ || !currentTextBlock || &currentTextBlock->getBlockStyle() != &bs) return;
   wordFontsSize_ = size;
   blockFontSlot_ = slot;
-  for (uint8_t s = 0; s <= fontFamilies_.count; ++s) {
+  for (uint8_t s = 0; s <= fontFamilies_->count; ++s) {
     if ((currentTextBlock->fontSlotsUsed() & (1u << s)) != 0) resolveWordFont(s);
   }
 }
@@ -5514,7 +5514,7 @@ FontSizeLadder::Resolved ChapterHtmlSlimParser::resolveFamilyFont(const BlockFon
 
 void ChapterHtmlSlimParser::resolveWordFont(const uint8_t slot) {
   if (slot == blockFontSlot_) return;  // the block's own family: its font, the slot's default
-  const FontSizeLadder::Resolved r = resolveFamilyFont(fontFamilies_.family(slot), wordFontsSize_);
+  const FontSizeLadder::Resolved r = resolveFamilyFont(fontFamily(slot), wordFontsSize_);
   const TextBlock::WordFont font{r.fontId != 0 ? r.fontId : fontId, r.residual};
   const BlockStyle& bs = currentTextBlock->getBlockStyle();
   if (font.fontId == effectiveFontId(bs) && font.scale == bs.fontSizeMultiplier) return;  // the block's font after all
@@ -6700,6 +6700,16 @@ bool ChapterHtmlSlimParser::degradeRowAtOpenCell(const char* reason) {
   t.pendingRow.effectiveCols = 0;
   currentTableCell = &t.pendingRow.cells.back();
   return ok;
+}
+
+void ChapterHtmlSlimParser::setFontFamilies(const BlockFontFamilies& families) {
+  fontFamilies_.reset();
+  if (families.count == 0) return;
+  fontFamilies_ = makeUniqueNoThrow<BlockFontFamilies>(families);
+  if (!fontFamilies_) {
+    LOG_ERR("EHP", "No heap for the book's font families (%u B): the chapter is set in the body font",
+            static_cast<unsigned>(sizeof(BlockFontFamilies)));
+  }
 }
 
 std::unique_ptr<ParsedText> ChapterHtmlSlimParser::makeCellText() {
