@@ -206,6 +206,7 @@ bool decodePngInPlace(const std::string& epubFilePath, const std::string& epubEn
   return ok;
 }
 
+// expectedHeight: the whole image's height, also for a crop, whose rows are srcYOffset.. of it.
 // srcYOffset: first source row to render (0 = top of image).
 // srcHeight:  number of rows to render (0 = full image from srcYOffset).
 bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x, int y, int expectedWidth,
@@ -727,8 +728,9 @@ void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, 
   // Select cache path based on rendering mode
   const std::string cachePath = monochromeOutput ? getBwCachePath(imagePath) : getGrayscaleCachePath(imagePath);
 
-  // Try to render from pixel cache first (always, regardless of forceLoad)
-  if (renderFromCache(renderer, cachePath, x, y, width, renderedHeight, srcYOffset_, srcHeight_)) {
+  // Try to render from pixel cache first (always, regardless of forceLoad). With the whole image's height, as the gray
+  // replay passes it: given the crop's, a later piece of a split image drew fewer rows than it has, or none.
+  if (renderFromCache(renderer, cachePath, x, y, width, height, srcYOffset_, srcHeight_)) {
     return;
   }
 
@@ -858,7 +860,7 @@ void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, 
     return;
   }
   if (resuming && !Storage.exists(config.checkpointPath.c_str())) {
-    renderFromCache(renderer, cachePath, x, y, width, renderedHeight, srcYOffset_, srcHeight_);
+    renderFromCache(renderer, cachePath, x, y, width, height, srcYOffset_, srcHeight_);
   }
 }
 

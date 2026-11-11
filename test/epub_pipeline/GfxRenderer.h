@@ -71,7 +71,9 @@ class GfxRenderer {
   int getDisplayHeight() const { return 800; }
   uint16_t getDisplayWidthBytes() const { return 60; }
   Orientation getOrientation() const { return live_; }
-  RenderMode getRenderMode() const { return BW; }
+  // BW unless a test draws a gray plane (setRenderMode), as the reader's AA passes do.
+  RenderMode getRenderMode() const { return renderMode_; }
+  void setRenderMode(const RenderMode mode) const { renderMode_ = mode; }
   uint8_t* getWriteTarget() const { return frameBuffer_; }
   int getWriteOriginY() const { return 0; }
   int getWriteRows() const { return 800; }
@@ -285,6 +287,7 @@ class GfxRenderer {
 
   Orientation held_ = Portrait;
   mutable Orientation live_ = Portrait;
+  mutable RenderMode renderMode_ = BW;
 
   // Converters write decoded pixels through getWriteTarget(); give them a real
   // buffer so those paths are memory-safe if exercised.

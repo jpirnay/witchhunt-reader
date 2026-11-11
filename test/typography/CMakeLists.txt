@@ -2,6 +2,7 @@ add_executable(TypographyTest
   TypographyTest.cpp
   FlowContextTest.cpp
   LineSpacingTest.cpp
+  ParagraphIndentTest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/CjkPunctuation.cpp
   ${REPO_ROOT}/lib/Epub/Epub/FlowContext.cpp
   ${REPO_ROOT}/lib/Epub/Epub/TypographyProfile.cpp
