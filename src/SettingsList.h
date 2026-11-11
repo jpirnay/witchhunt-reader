@@ -24,6 +24,7 @@
 #include "TouchGestures.h"
 #include "TouchUi.h"
 #include "activities/reader/KOReaderAutoSync.h"
+#include "activities/settings/DarkModeOption.h"
 #include "activities/settings/SettingInfo.h"
 #include "activities/settings/TimezoneOptions.h"
 #include "components/themes/PanelMetrics.h"
@@ -230,13 +231,14 @@ inline void buildSettings(const RowSink& emit) {
                          StrId::STR_CAT_DISPLAY)
            .withSubcategory(StrId::STR_MENU_DISP_BATTERY));
   // --- User interface ---
-  // One heading for the four rows: headings stick, so the rows after UI Theme sit under it.
+  // One heading for the five rows: headings stick, so the rows after UI Theme sit under it.
   emit(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme, uiThemeChoices(), "uiTheme",
                          StrId::STR_CAT_DISPLAY)
            .withSelectorActivity()
            .withSubcategory(StrId::STR_MENU_DISP_UI));
   emit(SettingInfo::Enum(StrId::STR_UI_FONT_SIZE, &CrossPointSettings::uiFontSize,
                          {StrId::STR_NORMAL, StrId::STR_LARGE}, "uiFontSize", StrId::STR_CAT_DISPLAY));
+  emit(DarkModeOption::make());
   // Home screen entries: on = on the home screen, off = behind its "More" entry.
   emit(SettingInfo::Toggle(StrId::STR_LIBRARY, &CrossPointSettings::showLibraryOnHome, "showLibraryOnHome",
                            StrId::STR_CAT_DISPLAY)

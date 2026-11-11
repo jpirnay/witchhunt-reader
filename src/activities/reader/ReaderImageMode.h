@@ -22,6 +22,14 @@ constexpr uint8_t forLayout(const uint8_t mode) {
                                                        : mode;
 }
 
+// The mode a page's images are drawn in. Inverted output (Dark Mode) is B/W, so Display draws them as Black & White
+// does: from the 1-bit cache, no gray pass, no gray canvas, their polarity kept (GfxRenderer::keepsImagePolarity).
+constexpr uint8_t forOutput(const uint8_t mode, const bool outputInverted) {
+  return outputInverted && mode == CrossPointSettings::IMAGES_DISPLAY
+             ? static_cast<uint8_t>(CrossPointSettings::IMAGES_DISPLAY_BW)
+             : mode;
+}
+
 // Whether the gray pass replays the images' 4-level cache, and so whether that cache is worth decoding.
 constexpr bool imagesInGray(const uint8_t mode) { return mode != CrossPointSettings::IMAGES_DISPLAY_BW; }
 

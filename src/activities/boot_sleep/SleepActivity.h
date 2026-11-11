@@ -23,8 +23,15 @@ class SleepActivity final : public Activity {
   // write buffer rather than clearing it, so anything that repaints just before the transition
   // ends up underneath the sleep cover.
   bool suppressesBusyIndicator() const override { return true; }
+  // Sleep screens are out of Dark Mode's reach and show as they always have. Quick Resume is not one: it leaves the
+  // page on screen as it is, in the polarity it went out in.
+  DarkMode::ScreenPolarity outputPolarity() const override {
+    return keepsLastScreen() ? DarkMode::ScreenPolarity::AsOnScreen : DarkMode::ScreenPolarity::Normal;
+  }
 
  private:
+  // Quick Resume: the page on screen stays, with a moon icon over it.
+  bool keepsLastScreen() const;
   void renderSleepScreen();
   void renderDefaultSleepScreen() const;
   void renderCustomSleepScreen() const;

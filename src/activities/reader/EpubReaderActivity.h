@@ -1117,6 +1117,9 @@ class EpubReaderActivity final : public Activity {
   bool getEffectiveEmbeddedStyle() const;
   bool getEffectiveBionicReading() const;
   // The Images setting for this book: its override, else the setting (CrossPointSettings::IMAGE_RENDERING).
+  uint8_t imageRenderingSetting() const;
+  // How this page's images are drawn: the setting, Display drawn as Black & White in Dark Mode
+  // (ReaderImageMode::forOutput). Every gray-pass and gray-canvas decision reads this one.
   uint8_t getEffectiveImageRendering() const;
   // Whether the page's images take part in its gray pass: not in Black & White (ReaderImageMode).
   bool imagesTakeGrayPass(const Page& page) const;

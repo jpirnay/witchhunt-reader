@@ -735,6 +735,9 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   display.seedLastFastRefreshMs(SETTINGS.measuredFastRefreshMs);
   renderer.begin();
   activityManager.begin();
+  // Dark Mode before the first paint, whichever it is: the splash, a Quick Resume page restored in the polarity it was
+  // saved in, or the reader's first page.
+  activityManager.applyOutputPolarity();
   LOG_DBG("MAIN", "Display initialized");
 
   // Initialize font decompressor for compressed reader fonts

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <string>
 
+#include "DarkMode.h"
 #include "SdCardFontGlobals.h"
 #include "fontIds.h"
 
@@ -275,7 +276,9 @@ unsigned long CrossPointSettings::getSleepTimeoutMs() const {
   return static_cast<unsigned long>(sleepTimeoutMinutes) * 60UL * 1000UL;
 }
 
-int CrossPointSettings::getRefreshFrequency() const { return static_cast<int>(refreshFrequencyPages); }
+int CrossPointSettings::getRefreshFrequency() const {
+  return DarkMode::refreshFrequency(static_cast<int>(refreshFrequencyPages), darkMode != 0);
+}
 
 int CrossPointSettings::getBuiltinReaderFontId(uint8_t family, FONT_SIZE size) {
   switch (family) {
