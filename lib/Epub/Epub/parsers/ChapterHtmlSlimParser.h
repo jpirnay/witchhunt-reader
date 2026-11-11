@@ -771,12 +771,19 @@ class ChapterHtmlSlimParser final : public Print {
   int footnoteLinkDepth = -1;
   FootnoteEntry currentFootnote = {};
   size_t currentFootnoteLinkTextLen = 0;
-  // The link holds an image: it is kept without text of its own (its image is what a reader taps), and listed with
-  // the footnote list's link label (STR_LINK).
+  // The link holds an image and leads to a document of the book: it is kept without text of its own (listed with the
+  // footnote list's link label, STR_LINK), and the image is what a reader taps.
   bool currentFootnoteHoldsImage_ = false;
-  // The link an image placed now is inside, as its page image names it (linkHrefHash), and the link marked as holding
-  // it; 0 outside an internal link.
-  uint32_t imageLinkHash();
+  // Whether the open link leads to a document of the book (linkLeadsToDocument), asked once a link: -1 not yet.
+  int8_t currentFootnoteLeadsToDocument_ = -1;
+  // A fragment of the document it is in, or a document of the spine (an XHTML file by its name, found in the spine):
+  // not an image, media or any other file, which a reader has nowhere to go to.
+  bool linkLeadsToDocument(const char* href) const;
+  // The link an image of this size placed now is inside, as its page image names it (linkHrefHash): its tap target.
+  // 0 outside an internal link, for a link that leads to no document (a Project Gutenberg picture linked to its
+  // full-size file), which is not listed either, and for an image over half the page, which a tap target would cover
+  // the page-turn zones with: its link is listed all the same.
+  uint32_t imageLinkHash(int width, int height);
   // Non-owning; the Section's BuildState keeps the lookup alive across build slices.
   // Membership in the book's preview store is the sole expansion gate: it already encodes
   // "this link points at a real note", so no epub:type/same-file checks here. The store is

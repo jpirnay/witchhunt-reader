@@ -79,13 +79,13 @@ struct InlineImageFixture : testing::Test {
   }
   void TearDown() override { fs::remove_all(work); }
 
-  // The book's images: icon 16x16, tall 40x40 (under two lines of 24), big 120x120 (a picture), wide 300x20.
+  // The book's images: icon 16x16, tall 40x40 (under two lines of 24), big 120x120 (a picture), wide 300x20, full
+  // 480x600 (over half the 480x800 page).
   std::vector<SyntheticFile> images(const std::string& css) const {
     std::vector<SyntheticFile> files = {
-        {"icon.png", "image/png", syntheticPngHeader(16, 16)},
-        {"tall.png", "image/png", syntheticPngHeader(40, 40)},
-        {"big.png", "image/png", syntheticPngHeader(120, 120)},
-        {"wide.png", "image/png", syntheticPngHeader(300, 20)},
+        {"icon.png", "image/png", syntheticPngHeader(16, 16)},   {"tall.png", "image/png", syntheticPngHeader(40, 40)},
+        {"big.png", "image/png", syntheticPngHeader(120, 120)},  {"wide.png", "image/png", syntheticPngHeader(300, 20)},
+        {"full.png", "image/png", syntheticPngHeader(480, 600)},
     };
     if (!css.empty()) files.push_back({"style.css", "text/css", css});
     return files;
@@ -509,6 +509,43 @@ TEST_F(InlineImageFixture, AFloatedImageInsideALinkIsTheLinksTarget) {
   ASSERT_EQ(1u, laid.links.size());
   EXPECT_STREQ("#n5", laid.links[0].href);
   EXPECT_EQ(linkHrefHash("#n5"), laid.images[0].linkHash);
+}
+
+TEST_F(InlineImageFixture, AGutenbergLinkToTheFullSizeFileIsNoLink) {
+  // Project Gutenberg links each picture to its own full-size file: nowhere for the reader to go, so no entry in the
+  // list and no tap target, inline or as a block.
+  const Laid laid = build(
+      "<p><a href=\"big.png\"><img src=\"big.png\" alt=\"\"/></a></p>"
+      "<p>See <a href=\"icon.png\"><img src=\"icon.png\" alt=\"\"/></a> here.</p>");
+  ASSERT_EQ(2u, laid.images.size());
+  EXPECT_TRUE(laid.links.empty());
+  EXPECT_EQ(0u, laid.images[0].linkHash);
+  EXPECT_TRUE(laid.images[1].inLine);
+  EXPECT_EQ(0u, laid.images[1].linkHash);
+}
+
+TEST_F(InlineImageFixture, ALinkToADocumentOutsideTheSpineIsNoLink) {
+  const Laid laid = build("<p><a href=\"missing.xhtml\"><img src=\"big.png\" alt=\"\"/></a></p>");
+  ASSERT_EQ(1u, laid.images.size());
+  EXPECT_TRUE(laid.links.empty());
+  EXPECT_EQ(0u, laid.images[0].linkHash);
+}
+
+TEST_F(InlineImageFixture, ALinkedFullPagePictureIsListedButNotTapped) {
+  // Over half the page a tap target would take the page-turn taps: the link is reached from the list alone.
+  const Laid laid = build("<p><a href=\"chapter.xhtml#n6\"><img src=\"full.png\" alt=\"\"/></a></p><p id=\"n6\">x</p>");
+  ASSERT_EQ(1u, laid.images.size());
+  ASSERT_EQ(1u, laid.links.size());
+  EXPECT_STREQ("chapter.xhtml#n6", laid.links[0].href);
+  EXPECT_EQ(0u, laid.images[0].linkHash);
+}
+
+TEST_F(InlineImageFixture, ASmallLinkedPictureToAChapterIsListedAndTapped) {
+  const Laid laid = build("<p><a href=\"chapter.xhtml#n7\"><img src=\"big.png\" alt=\"\"/></a></p><p id=\"n7\">x</p>");
+  ASSERT_EQ(1u, laid.images.size());
+  ASSERT_EQ(1u, laid.links.size());
+  EXPECT_STREQ("chapter.xhtml#n7", laid.links[0].href);
+  EXPECT_EQ(linkHrefHash("chapter.xhtml#n7"), laid.images[0].linkHash);
 }
 
 TEST_F(InlineImageFixture, AnImageOutsideALinkNamesNone) {

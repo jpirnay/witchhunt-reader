@@ -3230,7 +3230,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   self->pendingInlineImage_.alt = alt;
                   self->pendingInlineImage_.isRight =
                       (self->floatDepth_ > 0) && self->floatOpenSides_[self->floatDepth_ - 1];
-                  self->pendingInlineImage_.linkHash = self->imageLinkHash();
+                  self->pendingInlineImage_.linkHash = self->imageLinkHash(displayWidth, displayHeight);
                   self->pendingInlineImage_.active = true;
                   LOG_TRC("EHP", "Inline image deferred: w=%d h=%d", displayWidth, displayHeight);
                   // Don't flush the current text block — let it continue into the next paragraph.
@@ -3264,7 +3264,8 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   self->startNewTextBlock(parentBlockStyle);
                 }
                 if (!self->placeImageWithBlockSpacing(cachedImagePath, resolvedPath, alt, displayWidth, displayHeight,
-                                                      self->visibleTextOffset_, self->imageLinkHash())) {
+                                                      self->visibleTextOffset_,
+                                                      self->imageLinkHash(displayWidth, displayHeight))) {
                   return;
                 }
 
@@ -3393,6 +3394,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       self->currentFootnote.number[0] = '\0';
       self->currentFootnoteLinkTextLen = 0;
       self->currentFootnoteHoldsImage_ = false;
+      self->currentFootnoteLeadsToDocument_ = -1;
 
       // Apply underline style to visually indicate the link
       self->underlineUntilDepth = std::min(self->underlineUntilDepth, self->depth);
@@ -5895,7 +5897,7 @@ bool ChapterHtmlSlimParser::addLineImage(const std::string& entryPath, std::stri
   image.height = static_cast<int16_t>(displayHeight);
   image.align = align;
   image.visibleOffset = visibleTextOffset_;
-  image.linkHash = imageLinkHash();
+  image.linkHash = imageLinkHash(displayWidth, displayHeight);
   image.entryPath = entryPath;
   image.alt = std::move(alt);
   LOG_TRC("EHP", "Line image %u: %dx%d %s", id, displayWidth, displayHeight, entryPath.c_str());
@@ -5912,9 +5914,29 @@ bool ChapterHtmlSlimParser::addLineImage(const std::string& entryPath, std::stri
   return true;
 }
 
-uint32_t ChapterHtmlSlimParser::imageLinkHash() {
+bool ChapterHtmlSlimParser::linkLeadsToDocument(const char* href) const {
+  if (href[0] == '#') return true;
+  // The name first, which turns away a link to an image file without a look at the spine.
+  const std::string_view path(href, strcspn(href, "#?"));
+  const size_t dot = path.rfind('.');
+  if (dot == std::string_view::npos || path.find('/', dot) != std::string_view::npos) return false;
+  const std::string_view ext = path.substr(dot + 1);
+  const auto is = [&ext](const char* name) {
+    return ext.size() == strlen(name) && strncasecmp(ext.data(), name, ext.size()) == 0;
+  };
+  if (!is("xhtml") && !is("html") && !is("htm") && !is("xht")) return false;
+  // A walk of the spine in book.bin, once a link (currentFootnoteLeadsToDocument_).
+  return epub->resolveHrefToSpineIndex(href) >= 0;
+}
+
+uint32_t ChapterHtmlSlimParser::imageLinkHash(const int width, const int height) {
   if (!insideFootnoteLink || currentFootnote.href[0] == '\0') return 0;
+  if (currentFootnoteLeadsToDocument_ < 0) {
+    currentFootnoteLeadsToDocument_ = linkLeadsToDocument(currentFootnote.href) ? 1 : 0;
+  }
+  if (currentFootnoteLeadsToDocument_ == 0) return 0;
   currentFootnoteHoldsImage_ = true;
+  if (2 * static_cast<int64_t>(width) * height > static_cast<int64_t>(viewportWidth) * viewportHeight) return 0;
   return linkHrefHash(currentFootnote.href);
 }
 
