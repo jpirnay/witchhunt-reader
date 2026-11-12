@@ -234,6 +234,10 @@ class Device:
         self.read_pause = 0.0  # --read-pause: seconds get: waits after every MB, as a slow host would
         self.expected = ()  # what a reply to the command sent last starts with (reply_prefixes)
         self.sent = ""  # the command sent last, for messages
+        # Lines skipped while waiting for that command's reply, and the first of them holding a reply prefix after its
+        # start: what a no-reply message reports, so a silent port reads differently from a reply glued to a cut line.
+        self.skipped = 0
+        self.glued = None
         self.reopens = 0  # times the port was opened again
         self.reopens_at_send = 0  # self.reopens when the command was sent last
         self.ser = self._open()
@@ -353,11 +357,27 @@ class Device:
         """Whether `line` answers the command sent last: not a log line, nor a late reply to an earlier command."""
         return line.startswith(self.expected)
 
+    def skip(self, line):
+        """`line` came while a reply was awaited and is not it."""
+        self.skipped += 1
+        if self.glued is None and any(line.find(prefix) > 0 for prefix in self.expected):
+            self.glued = line
+
+    def no_reply_reason(self):
+        """What came instead of the reply: told apart because each points somewhere else. A silent port is a device
+        that is asleep, busy or rebooting; a reply prefix inside a line is a reply joined to a line the device left
+        unfinished while no host read the port (firmware before the cut-line fix)."""
+        if self.glued is not None:
+            return f"a reply glued to the end of a cut line came instead: {self.glued!r}"
+        if self.skipped:
+            return f"{self.skipped} other line{'s' if self.skipped != 1 else ''} came, none of them a reply"
+        return "the port stayed silent"
+
     def no_reply(self, waited):
         """Nothing answered the command sent last within `waited` seconds. Raises LinkUnsynced when the port stayed
         open meanwhile; returns None when it was reopened, since the reply went with the old port."""
         if self.reopens == self.reopens_at_send:
-            raise LinkUnsynced(f"no reply to CMD:{self.sent} within {waited:g} s")
+            raise LinkUnsynced(f"no reply to CMD:{self.sent} within {waited:g} s: {self.no_reply_reason()}")
         return None
 
     def reply(self, timeout):
@@ -367,6 +387,7 @@ class Device:
         while (line := self.read_line(deadline, since=self.reopens_at_send)) is not None:
             if self.is_reply(line):
                 return line
+            self.skip(line)
         return self.no_reply(timeout)
 
     def drain(self):
@@ -389,6 +410,8 @@ class Device:
         self.note(f">>> CMD:{text}")
         self.expected = reply_prefixes(text)
         self.sent = text
+        self.skipped = 0
+        self.glued = None
         self.reopens_at_send = self.reopens
         self._write(("CMD:" + text + "\n").encode(), f"CMD:{text}")
 
@@ -401,7 +424,8 @@ class Device:
         deadline = time.monotonic() + wait
         while (line := self.read_line(deadline, since=self.reopens_at_send)) is not None:
             if not self.is_reply(line):
-                continue  # a log line
+                self.skip(line)  # a log line, or a reply glued to one
+                continue
             if line == "IDLE_ERROR:busy":
                 raise LinkUnsynced("IDLE_ERROR:busy: a wait from before this run is still running, and its answer is "
                                    "still to come")

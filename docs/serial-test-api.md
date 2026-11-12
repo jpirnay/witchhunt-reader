@@ -1065,7 +1065,11 @@ cannot read). A step that failed with any other error reply does not stop a `--k
 reply lost because the port went away meanwhile (the cable pulled, deep sleep): devctl reopens the port and drops what
 it had read from the old one. A reset that keeps the port (any reset on the ESP32-C3) with a reply outstanding across
 it stops the run, as any missing reply does. A run that stopped on a missing reply can leave that reply still to come: let the device answer, or
-restart it, before the next run.
+restart it, before the next run. The `LINK UNSYNCED` message says what came instead, since each points somewhere else:
+`the port stayed silent` (a device asleep, busy or restarting), `N other lines came, none of them a reply`, or `a reply
+glued to the end of a cut line came instead: '...'` (firmware older than the cut-line fix, which left a log line
+unfinished while no host read the port and wrote the reply straight after it). One silent command is not proof the
+device is down: a second command, or the raw output, tells a busy port from a dead one.
 `--script FILE` reads one step per line (`#` comments), `--keep-going` runs all steps and reports every failure,
 `--rotate` sets the screenshot rotation, `--read-pause S` makes `get:` stop reading for S seconds after every MB, as a
 slow host would (a test of the pacing above). Paths may be given as Git Bash writes them (`/c/tmp/page.png`); output is

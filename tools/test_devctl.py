@@ -232,6 +232,27 @@ class RepliesAreTheirCommands(unittest.TestCase):
         self.assertEqual(device.received, [(0, "STATE")], "the run stopped before the next command")
         self.assertNotIn("check activity", out)
 
+    def test_no_reply_from_a_silent_port_says_so(self):
+        device = FakeDevice({})
+        ok, out = run(connect(device), ["state"])
+        self.assertFalse(ok)
+        self.assertIn("no reply to CMD:STATE within 0.3 s: the port stayed silent", out)
+
+    def test_no_reply_among_log_lines_counts_them(self):
+        device = FakeDevice({"STATE": ["[1181628] [INF] [MEM] Free: 190092 bytes", "[1181629] [INF] [SER] armed"]})
+        ok, out = run(connect(device), ["state"])
+        self.assertFalse(ok)
+        self.assertIn("no reply to CMD:STATE within 0.3 s: 2 other lines came, none of them a reply", out)
+
+    def test_a_reply_glued_to_a_cut_line_is_named_not_taken(self):
+        # Firmware before the cut-line fix: a log line given up part way while no host read the port, and the reply
+        # written straight after it. The reply is not at the start of a line, so it is not taken; the message says so.
+        device = FakeDevice({"STATE": ["[1181628] [INF] [MEM] Free: 19STATE:activity=Home"]})
+        ok, out = run(connect(device), ["state"])
+        self.assertFalse(ok)
+        self.assertIn("a reply glued to the end of a cut line came instead: "
+                      "'[1181628] [INF] [MEM] Free: 19STATE:activity=Home'", out)
+
     def test_an_error_reply_does_not_end_the_run(self):
         device = FakeDevice({"NOPE": ["CMD_ERROR:unknown command NOPE"], "STATE": ["STATE:activity=Home"]})
         port = connect(device)
