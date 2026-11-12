@@ -72,8 +72,10 @@ class ButtonPressQueue {
           return bit;
         }
         if (commitTimedOut(nowMs)) {
+          // Failed, and counted once: no release of it to wait for. Should the key read down after all (a
+          // finger, a late commit), the next press of it waits in Starting.
           ++dropped;
-          enter(Phase::Releasing, nowMs);
+          enter(Phase::Idle, nowMs);
           return 0;
         }
         return bit;

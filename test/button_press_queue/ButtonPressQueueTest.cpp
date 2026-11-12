@@ -188,6 +188,35 @@ TEST(ButtonPressQueue, AnUncommittedPressIsGivenUp) {
   EXPECT_EQ(loop.held, 0);
 }
 
+// A press the input layer never took in is one failure, however its key reads afterwards: here a finger
+// lands on the same key on the very pass the press is given up, and holds it 1.5 s (the audit's case:
+// the release wait that followed counted the same press a second time).
+TEST(ButtonPressQueue, AnUncommittedPressCountsOnceWhateverItsKeyDoesAfter) {
+  // The pass on which the press is given up: the model runs the same every time.
+  int dropPass = -1;
+  {
+    Loop dry;
+    dry.input.ignoresHook = true;
+    ASSERT_TRUE(dry.queue.push(CONFIRM, SHORT_HOLD_MS));
+    for (int i = 0; i < 400 && dropPass < 0; ++i) {
+      dry.pass();
+      if (dry.queue.droppedPresses() == 1) dropPass = i;
+    }
+  }
+  ASSERT_GE(dropPass, 0) << "the press was never given up";
+  Loop loop;
+  loop.input.ignoresHook = true;
+  ASSERT_TRUE(loop.queue.push(CONFIRM, SHORT_HOLD_MS));
+  for (int i = 0; i < 400; ++i) {
+    // The finger's contact starts on the drop pass, so the input layer has it down on the next one.
+    loop.realKeys = i >= dropPass && i < dropPass + 150 ? static_cast<uint8_t>(1u << CONFIRM) : 0;
+    loop.pass();
+  }
+  EXPECT_EQ(loop.presses[CONFIRM], 1) << "the finger's own press";
+  EXPECT_TRUE(loop.queue.idle());
+  EXPECT_EQ(loop.queue.droppedPresses(), 1u);
+}
+
 // What the host sees for that press: BTN_OK, then an IDLE. SerialTestApi::serviceIdle() samples the
 // queue so (effectHandled = idle(), droppedPresses = droppedPresses()); the IDLE must fail, not answer
 // IDLE:<ms> as if the press had gone through.
