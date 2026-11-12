@@ -67,8 +67,9 @@ New to the reader? These are the steps to your first book, and what the keys do 
    or USB with **[File Transfer](#36-file-transfer-screen)**.
 2. **Turn the device on** with the key listed for your device below. The **Home** screen opens.
 3. **Open a book.** Choose **Library**, move to a book, and open it.
-4. **Read.** Turn the pages. Open the reader menu for the table of contents, bookmarks and
-   per-book settings.
+4. **Read.** Turn the pages. Press **Confirm** (or tap the middle of the page or the status bar) for the
+   reader bars: the table of contents, where you are in the book, and **More** for the reader menu with
+   bookmarks and per-book settings.
 5. **Leave the book** with **Back**. Your place is saved.
 6. **Put the device to sleep** with the same key that turned it on. If you forget, it sleeps by
    itself after 10 minutes.
@@ -92,7 +93,7 @@ Every button is a real key. On both, the four front buttons are two double keys:
 | --- | --- | --- |
 | **Power** | | Turn on, or sleep |
 | **Back** | Go back, leave a book | Go to the Home screen |
-| **Confirm** | Open the selected row. In a book: open the reader menu | |
+| **Confirm** | Open the selected row. In a book: open the reader bars | |
 | **Left** / **Right** | In a book: previous / next page. In a list: what the label says | In a book: previous / next chapter. In a list: page back / forward |
 | **Up** / **Down** | In a book: previous / next page. In a list: move up / down | In a book: previous / next chapter. In a list: jump to the first / last row |
 | **Reset** | Restart the device | |
@@ -108,7 +109,7 @@ Confirm, which have no keys of their own.
 | Key | Press | Hold |
 | --- | --- | --- |
 | **Power** | Twice quickly: reading light on or off | Turn on, or sleep |
-| **Home key** | Works as **Confirm**: open the selected row. In a book: open the reader menu | Works as **Back**: go back, leave a book |
+| **Home key** | Works as **Confirm**: open the selected row. In a book: open the reader bars | Works as **Back**: go back, leave a book |
 | **Up** / **Down** | In a book: previous / next page. In a list: move up / down | In a book: previous / next chapter. In a list: jump to the first / last row |
 | **Reset** | Restart the device | |
 
@@ -124,7 +125,7 @@ is no Up, Back or Confirm key.
 | Key | Press | Hold |
 | --- | --- | --- |
 | **Power** (marked BOOT) | Twice quickly: reading light on or off | Turn on, or sleep |
-| **Home key** | Works as **Confirm**: open the selected row. In a book: open the reader menu | Works as **Back**: go back, leave a book |
+| **Home key** | Works as **Confirm**: open the selected row. In a book: open the reader bars | Works as **Back**: go back, leave a book |
 | **Down** (marked IO48) | In a book: next page. In a list: move down | In a book: next chapter. In a list: jump to the last row |
 
 > [!WARNING]
@@ -146,7 +147,7 @@ does those jobs too. All three are on the right edge: **Up**, **Down**, then **C
 
 | Key | Press | Press twice quickly | Hold |
 | --- | --- | --- | --- |
-| **Confirm** (the lowest key) | Open the selected row. In a book: open the reader menu | **Back**: go back, leave a book | **Sleep**. While asleep, hold it briefly to wake |
+| **Confirm** (the lowest key) | Open the selected row. In a book: open the reader bars | **Back**: go back, leave a book | **Sleep**. While asleep, hold it briefly to wake |
 | **Up** / **Down** | In a book: previous / next page. In a list: move up / down | | In a book: previous / next chapter. In a list: jump to the first / last row |
 
 > [!WARNING]
@@ -177,7 +178,7 @@ On the **X4 Pro**, the **LilyGo T5 S3** and the **Murphy M3**, a finger does mos
 | Anywhere | Tap a box at the edge of the screen | Press the button it names. Hold it to hold the button |
 | Anywhere | Swipe down from the top edge | Open the reading light |
 | In a book | Tap the left / right side | Previous / next page |
-| In a book | Tap the middle | Open the reader menu |
+| In a book | Tap the middle, or the status bar | Open the reader bars |
 
 There is much more in **[Touch Controls](#5-touch-controls)**.
 
@@ -277,7 +278,7 @@ two.
 ### Taking a Screenshot
 When the Power Button and Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`.
 
-Alternatively, while reading a book, press the **Confirm** button to open the reader menu and select **Take screenshot**.
+Alternatively, while reading a book, press **Confirm**, then **More**, to open the reader menu and select **Take screenshot**.
 
 ---
 
@@ -723,7 +724,7 @@ docker compose up -d
 
 ##### Using sync while reading
 
-Press **Confirm** to open the reader menu and go to its **Sync** tab:
+Press **Confirm**, then **More**, to open the reader menu and go to its **Sync** tab:
 - **Pull progress from other devices** — jump to the position stored on the server.
 - **Push progress from this device** — send the current position to the server.
 - **Compare progress with other devices** — show which side is further on and let you choose. A long **Confirm** while reading does the same.
@@ -817,7 +818,8 @@ This feature can be disabled in the **[Controls Settings](#373-controls)** to he
 ### System Navigation
 * **Leave the book:** Press **Back** to close the book and return to where you opened it: the **[Home](#31-home-screen)** screen, or the **[Library](#33-library-screen)** at the tab, the folder or author, and the row you opened it from. Holding **Back** does the same, unless you give the long press an action of its own under **[Controls](#373-controls)**.
 * **Back after a link:** After you follow a link in the book, such as a footnote, **Back** first returns to the page you followed it from, step by step for the last three links. These steps are kept when the device sleeps or you close the book there.
-* **Reader Menu:** Press **Confirm** to open the reader menu, which includes: **[Table of Contents](#6-chapter-selection-screen)**, bookmarks, sync progress, reading statistics, quick per-book overrides (font, images, hyphenation, bionic reading…), take screenshot, and more. Its entries are grouped into tabs. While the tab bar is selected, **Confirm** moves to the next tab, and its button hint names that tab. **Hold Up / Down** to switch tabs: each opens where you left it. **Hold Back** to close the book as **Go Home** does; changes made in the menu are kept.
+* **Reader bars:** Press **Confirm** (on a touch screen: tap the middle of the page or the status bar) for two bars over the page, which stays in view between them. The top one leaves the book (**<**) and stars or unstars the page (the star). The bottom one has three tabs: **Contents** opens the **[Table of Contents](#6-chapter-selection-screen)**; **Progress** shows how far you are in the book and in the chapter and the time you have spent in the book, with buttons for the previous chapter, **Go to %** and the next chapter; **More** opens the reader menu. With the keys, **Left / Right** move along a row, **Up / Down** between the top bar, the Progress buttons and the tabs, **Confirm** chooses, and **Back** (or a tap on the page) closes the bars. Closing Progress closes the bars as well. A key bound to **Open reader menu** under **[Controls](#373-controls)** still opens the menu directly.
+* **Reader Menu:** Reach it through **More** in the reader bars. It includes: **[Table of Contents](#6-chapter-selection-screen)**, bookmarks, sync progress, reading statistics, quick per-book overrides (font, images, hyphenation, bionic reading…), take screenshot, and more. Its entries are grouped into tabs. While the tab bar is selected, **Confirm** moves to the next tab, and its button hint names that tab. **Hold Up / Down** to switch tabs: each opens where you left it. **Hold Back** to close the book as **Go Home** does; changes made in the menu are kept.
 * **Your place is kept by paragraph as well as by page.** If a book is laid out differently the next time you open it, for example after you changed the font size from outside the book or after a firmware update re-indexed it, it opens at the paragraph you were reading rather than at a page number scaled to the new length.
 
 ### Supported Languages
@@ -956,8 +958,9 @@ page should not also stop you tapping a book in the library, and vice versa.
 
 Neither can strand you:
 
-- With **Touch Page Turn** off, the reader menu is still reachable — by the swipe up from
-  the bottom edge, by the centre tap, and by the Confirm button.
+- With **Touch Page Turn** off, the reader bars (and through them the reader menu) are still
+  reachable — by the swipe up from the bottom edge, by the centre tap, by a tap on the status
+  bar, and by the Confirm button.
 - With **Touch Navigation** off, the menus are button-only. On these devices Back and
   Confirm come from the capacitive Home key, and the firmware feeds those in as *button*
   presses, below the level this setting acts on.
@@ -1020,7 +1023,8 @@ height; the middle column is split into three.
 | --- | --- |
 | Tap left column | Previous page |
 | Tap right column | Next page |
-| Tap centre | Reader menu |
+| Tap centre | Reader bars |
+| Tap the status bar | Reader bars |
 | Tap top / bottom | *(nothing — reserved for vertical gestures)* |
 | Hold left / right column | Previous / Next chapter |
 | Hold centre | Look the word up in the dictionary |
@@ -1036,9 +1040,13 @@ height; the middle column is split into three.
 | **Swipe** | Horizontal swipes turn pages; the taps stay free |
 | **Off** | The page ignores touch for page turns |
 
-The centre tap for the reader menu has no switch of its own. To turn it off, bind
+A tap on the status bar, at the top or the bottom of the page wherever it is shown, opens the reader bars
+even in the two outer columns: the band from the screen edge to the text (at least about a fingertip tall)
+belongs to the status bar, and the columns turn pages everywhere else.
+
+The centre tap for the reader bars has no switch of its own. To turn it off, bind
 **Tap centre** to *Ignore (do nothing)* in *Gesture actions* — the bottom-edge swipe and
-the Confirm button still reach the menu.
+the Confirm button still reach the bars.
 
 ### 5.4 The reading page: swipes
 
@@ -1055,14 +1063,14 @@ about 60 px of travel to count as a swipe rather than a tap.
  | ness |                    |      |
  |     |                     |     |
  +-----+---------------------+-----+
- |   bottom edge: reader menu      |
+ |   bottom edge: reader bars      |
  +---------------------------------+
 ```
 
 | Gesture | Default |
 | --- | --- |
 | Swipe **down** from the top edge | Reading light panel |
-| Swipe **up** from the bottom edge | Reader menu |
+| Swipe **up** from the bottom edge | Reader bars |
 | Swipe up / down in the **left edge** column | Light brighter / dimmer |
 | Swipe up / down in the **right edge** column | Light warmer / cooler |
 | Swipe **left** inside the left (back) column | Skip 10 pages back |
@@ -1155,12 +1163,12 @@ Brighter**, **Light Dimmer**, and on a warm/cool device **Light Warmer** and **L
 | Physical keys | Up, Down, Power | Down, Power | Confirm, Up, Down |
 | Back / Confirm | Home key: hold / tap | Home key: hold / tap | Confirm key: press twice / press |
 | Top edge, swipe down | Reading light | Reading light | Reading light |
-| Bottom edge, swipe up | Reader menu | Reader menu | Reader menu |
+| Bottom edge, swipe up | Reader bars | Reader bars | Reader bars |
 | Right edge, swipe up/down | Light warmer / cooler | *(free — single-channel light)* | *(free — single-channel light)* |
 | Two-finger gestures | Yes | Yes | No |
 
 On a touch device **without** a reading light the two vertical edges swap roles: the top edge
-becomes the reader menu, there being no light panel to put there, and the bottom edge returns
+becomes the reader bars, there being no light panel to put there, and the bottom edge returns
 Home.
 
 ### 5.8 Turning it off
