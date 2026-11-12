@@ -49,12 +49,13 @@ Every line the device prints goes to --log with a timestamp. Needs pyserial, and
 
 The port is opened with the default DTR/RTS lines, which does not reset an ESP32-C3 (unlike
 tools/serial_transfer.py, which deasserts them), and closed with RTS dropped before DTR, which does
-not either (a plain close on Windows does). The device re-enumerates its USB port across a
-reboot or a sleep; the reader reopens it, drops what it had read from the old one, and carries on: a
-device that restarted answers nothing it was sent before, so a step whose reply was lost that way just
-fails. A command (or a piece of a put:, or a get:'s acknowledgement) whose write fails that way is not
-sent again, since the device may have taken it: its step fails with DELIVERY UNCERTAIN, and the next
-step uses the reopened port.
+not either (a plain close on Windows does). When the port goes away (the cable is pulled, the device
+goes into deep sleep), the reader reopens it, drops what it had read from the old one, and carries on:
+a step whose reply was lost that way just fails. A command (or a piece of a put:, or a get:'s
+acknowledgement) whose write fails that way is not sent again, since the device may have taken it: its
+step fails with DELIVERY UNCERTAIN, and the next step uses the reopened port. On the ESP32-C3 a restart
+(CMD:REBOOT) or a reset from the host keeps the port: a reply outstanding across it never comes, and the
+run stops LINK UNSYNCED.
 """
 import argparse
 import math
@@ -97,7 +98,7 @@ GET_ACK = b"\x06"
 GET_CANCEL = b"\x18"
 GET_PIECE_IDLE = 5
 FAILED = re.compile(r"_ERROR|_TIMEOUT|^CMD_ERROR")
-# Seconds to give a port that went away (a reboot, a sleep) before it is opened again.
+# Seconds to give a port that went away (the cable pulled, deep sleep) before it is opened again.
 REOPEN_PAUSE = 1.0
 
 
@@ -258,8 +259,8 @@ class Device:
         self.ser.close()
 
     def _reopen(self):
-        """The port went away (reboot, sleep, re-enumeration): open it again. What was read from the old port and
-        not used yet is dropped: the device behind it restarted, or slept, and answers nothing sent before."""
+        """The port went away (unplugged, deep sleep, re-enumeration): open it again. What was read from the old port
+        and not used yet is dropped: the device behind it answers nothing sent before."""
         try:
             self.close()
         except Exception:
@@ -334,7 +335,7 @@ class Device:
 
     def no_reply(self, waited):
         """Nothing answered the command sent last within `waited` seconds. Raises LinkUnsynced when the port stayed
-        open meanwhile; returns None when it was reopened, since the device restarted and its reply is gone."""
+        open meanwhile; returns None when it was reopened, since the reply went with the old port."""
         if self.reopens == self.reopens_at_send:
             raise LinkUnsynced(f"no reply to CMD:{self.sent} within {waited:g} s")
         return None
@@ -399,7 +400,7 @@ class Device:
         wait = reply_timeout("SCREENSHOT")
         line = self.reply(wait)
         if line is None:
-            return "no reply (the device restarted)"
+            return "no reply (the port went away)"
         if not line.startswith("SCREENSHOT_START:"):
             return line  # SCREENSHOT_ERROR:..., or CMD_ERROR
         start = re.fullmatch(r"SCREENSHOT_START:(\d+):(\d+):(\d+)", line)
@@ -409,10 +410,10 @@ class Device:
         data = self.read_exact(size, time.time() + DEVICE_STREAM_STALL + REPLY_TIMEOUT)
         if len(data) != size:
             self.no_reply(DEVICE_STREAM_STALL + REPLY_TIMEOUT)
-            return f"short frame: {len(data)} of {size} bytes (the device restarted)"
+            return f"short frame: {len(data)} of {size} bytes (the port went away)"
         end = self.reply(REPLY_TIMEOUT)
         if end is None:
-            return "no SCREENSHOT_END (the device restarted)"
+            return "no SCREENSHOT_END (the port went away)"
         if end != "SCREENSHOT_END":
             return end
         if path is None:
@@ -440,11 +441,11 @@ class Device:
             if line.startswith(("PAGE_END", "PAGE_ERROR")):
                 break
         if not lines:
-            return "no reply (the device restarted)"
+            return "no reply (the port went away)"
         if lines[-1].startswith("PAGE_ERROR"):
             return lines[-1]
         if not lines[-1].startswith("PAGE_END"):
-            return f"no PAGE_END after {len(lines)} lines (the device restarted)"
+            return f"no PAGE_END after {len(lines)} lines (the port went away)"
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines) + "\n")
         damage = check_page(lines)
@@ -687,11 +688,11 @@ def run_step(device, step, rotate, state):
         reply = device.command(rest, until=until, lines=lines)
         for line in lines:
             print(line)
-        print(reply if reply else f"NO REPLY to {rest} (the device restarted)")
+        print(reply if reply else f"NO REPLY to {rest} (the port went away)")
         ok = bool(reply) and not FAILED.search(reply)
     elif kind == "state":
         reply = device.command("STATE")
-        print(reply if reply else "NO REPLY to STATE (the device restarted)")
+        print(reply if reply else "NO REPLY to STATE (the port went away)")
         ok = bool(reply) and reply.startswith("STATE:")
         if ok:
             state = split_fields(reply[len("STATE:"):])
@@ -702,7 +703,7 @@ def run_step(device, step, rotate, state):
         print(f"check {key}={value!r} ~ /{pattern}/: {'ok' if ok else 'FAILED'}")
     elif kind == "idle":
         reply = device.command("IDLE" + (":" + rest if rest else ""))
-        print(reply if reply else "NO REPLY to IDLE (the device restarted)")
+        print(reply if reply else "NO REPLY to IDLE (the port went away)")
         ok = bool(reply) and reply.startswith("IDLE:")
     elif kind == "shot":
         path = native_path(rest)

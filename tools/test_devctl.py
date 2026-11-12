@@ -174,7 +174,7 @@ class PortGoesAway(unittest.TestCase):
         port = connect(device)
         ok, _ = run(port, ["cmd:BTN:RIGHT"])
         self.assertTrue(ok)
-        device.opened[0].gone = True  # the device restarted while the host was between steps
+        device.opened[0].gone = True  # the device went away while the host was between steps
         ok, out = run(port, ["state"])
         self.assertTrue(ok, out)
         self.assertEqual(device.received, [(0, "BTN:RIGHT"), (1, "STATE")])
@@ -204,7 +204,7 @@ class PortGoesAway(unittest.TestCase):
         device.after_command = restart
         ok, out = run(port, ["cmd:BTN:RIGHT", "state"])
         self.assertFalse(ok)
-        self.assertIn("NO REPLY to BTN:RIGHT (the device restarted)", out)
+        self.assertIn("NO REPLY to BTN:RIGHT (the port went away)", out)
         self.assertNotIn("LINK UNSYNCED", out)
         self.assertEqual(device.received, [(0, "BTN:RIGHT"), (1, "STATE")])
         self.assertNotIn("step failed: state", out)

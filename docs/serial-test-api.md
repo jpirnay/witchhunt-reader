@@ -99,12 +99,15 @@ Things to know about the port:
 - **Closing it can.** On Windows a plain close drops DTR before RTS, and an ESP32-C3 takes RTS high
   with DTR low as a reset request: it restarts to Home (`resetReason=11` in the boot log). Set RTS
   low, then DTR low, then close, as `tools/devctl.py` does.
-- **The port goes away on a reboot or sleep.** The USB device re-enumerates. A long-running host
-  has to close and reopen the port; `tools/devctl.py` does this by itself, and drops what it had
-  read from the old port: the restarted device answers nothing it was sent before. A command whose
-  write fails that way may or may not have reached the device, so do not send it again blindly:
-  `devctl.py` fails that step with `DELIVERY UNCERTAIN: CMD:<text> (port reopened, not resent)`
-  and goes on with the next one on the reopened port.
+- **The port goes away when the cable is pulled or the device goes into deep sleep.** Only then
+  does a long-running host have to close and reopen it; `tools/devctl.py` does this by itself, and
+  drops what it had read from the old port. A command whose write fails that way may or may not
+  have reached the device, so do not send it again blindly: `devctl.py` fails that step with
+  `DELIVERY UNCERTAIN: CMD:<text> (port reopened, not resent)` and goes on with the next one on the
+  reopened port. A reset does not take the port away on the ESP32-C3 boards (X3, X4): their USB
+  serial port stays up through a restart (`CMD:REBOOT`) and through a reset from the host (RTS), so
+  a reply outstanding when the device resets never comes, and `devctl.py` stops the run with
+  `LINK UNSYNCED`.
 - **One program at a time.** Close your monitor before running a script, and never hold the port
   while flashing.
 - **Log lines share the wire.** The device keeps printing its log (`[1234] [INF] [ERS] ...`) between
@@ -659,7 +662,9 @@ Replies: `SLEEP_OK`, `REBOOT_OK`, sent before the device acts.
   **Deep sleep switches the USB port off, and only a real button press wakes the device.** Do not
   use it on a device nobody can reach.
 - `REBOOT` restarts to Home the way the firmware's own maintenance restarts do: the reading session
-  is closed, no boot screen. The port re-enumerates; reopen it.
+  is closed, no boot screen. On the ESP32-C3 boards the port stays up through it (the boot log
+  arrives on it), so nothing has to be reopened; a command sent right behind `REBOOT` is lost with
+  the restart and gets no reply.
 
 ### Heap ballast: `HEAP`
 
@@ -1057,8 +1062,10 @@ earlier wait still has its answer to come. A step whose own number or regular ex
 `BAD STEP` before anything is sent, and a malformed reply fails its step, or stops the run when it leaves bytes of
 unknown length on the line or an exchange it cannot finish (a `SCREENSHOT_START`, `FS_GET_START` or `FS_PUT_READY` it
 cannot read). A step that failed with any other error reply does not stop a `--keep-going` run, and nor does a
-reply lost to a restart (the port went away meanwhile): the device answers nothing it was sent before it restarted. A run that stopped on a missing reply can leave that reply still to come: let
-the device answer, or restart it, before the next run.
+reply lost because the port went away meanwhile (the cable pulled, deep sleep): devctl reopens the port and drops what
+it had read from the old one. A reset that keeps the port (any reset on the ESP32-C3) with a reply outstanding across
+it stops the run, as any missing reply does. A run that stopped on a missing reply can leave that reply still to come: let the device answer, or
+restart it, before the next run.
 `--script FILE` reads one step per line (`#` comments), `--keep-going` runs all steps and reports every failure,
 `--rotate` sets the screenshot rotation, `--read-pause S` makes `get:` stop reading for S seconds after every MB, as a
 slow host would (a test of the pacing above). Paths may be given as Git Bash writes them (`/c/tmp/page.png`); output is
