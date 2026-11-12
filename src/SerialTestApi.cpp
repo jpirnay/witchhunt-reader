@@ -584,7 +584,7 @@ void cmdState(std::string_view /*arg*/) {
   }
   // The TrueType family behind the UI faces (CjkUiFonts::setReaderFont), when one is.
   if (CjkUiFonts::hasReaderFont()) appendField(state, "ui_font", sdFontSystem.loadedFamily().c_str());
-  // Held presses the input layer never took in (ButtonPressQueue): only when there were any.
+  // Held presses that failed, the press or its release not taken in (ButtonPressQueue): only when there were any.
   if (heldPresses.droppedPresses() != 0) {
     appendField(state, "btn_dropped", static_cast<long>(heldPresses.droppedPresses()));
   }

@@ -17,10 +17,11 @@
 //    a render pass starts after that pass, or once kNoRenderGraceMs pass without one (the press
 //    changed nothing on screen).
 //
-// A press the input path gave up (ButtonPressQueue::droppedPresses()) never reached the screen, so the
-// wait that ends after it fails, however it ended: PressDropped instead of Idle or TimedOut, once for
-// each drop since the previous wait ended, whether it came during the wait or before it. With no input
-// left to follow then, the effect is done: the next wait does not wait for a frame the press never caused.
+// A held press that failed (ButtonPressQueue::droppedPresses(): the press or its release was not taken
+// in) was not played as asked, so the wait that ends after it fails, however it ended: PressDropped
+// instead of Idle or TimedOut, once for each failure since the previous wait ended, whether it came
+// during the wait or before it. With no input left to follow then, the effect is done: the next wait
+// does not wait for a frame that will not come.
 class IdleGate {
  public:
   static constexpr uint32_t kQuietMs = 250;
@@ -33,7 +34,7 @@ class IdleGate {
     const char* busy = nullptr;   // the device's own busy reason, nullptr when it looks idle
     bool effectHandled = true;    // the input path is done with the last effect
     uint32_t renderPasses = 0;    // render passes started so far
-    uint32_t droppedPresses = 0;  // presses the input path gave up so far
+    uint32_t droppedPresses = 0;  // held presses that failed so far
   };
 
   // A command that should change the screen ran.
@@ -87,7 +88,8 @@ class IdleGate {
     const bool dropped = sample.droppedPresses != dropsAnswered_;
     dropsAnswered_ = sample.droppedPresses;
     if (!dropped) return verdict;
-    // A dropped press draws nothing. With no input left to follow, the effect's render grace would only
+    // A failed press leaves no frame to wait for: it never went in, or it went in over a second ago and
+    // its frame has come. With no input left to follow, the effect's render grace would only
     // run out on the next wait (IDLE_TIMEOUT:render for a frame that never comes); input still under
     // way, another press queued, is followed as before.
     if (sample.effectHandled) effectPending_ = false;

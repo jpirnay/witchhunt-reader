@@ -172,8 +172,10 @@ held press `BTN_ERROR:busy`.
   A real key pressed meanwhile keeps its own press and release; the same key merges with the held
   one into one press, and a held press of a key that is still down waits for it to come up, so it
   gets a press of its own. `POWER` held past the power-key duration sleeps the device, as the key
-  does. A press the input layer never takes in, or whose key stays down, is given up after a second,
-  counted in `STATE`'s `btn_dropped`, and the next `IDLE` answers `IDLE_ERROR:press dropped`.
+  does. A held press fails when the input layer does not take the press or its release in within a
+  second (a finger still on the key keeps the release out), or when its key is still down a second
+  after the press is due. A failed press is counted in `STATE`'s `btn_dropped`, and the next `IDLE`
+  answers `IDLE_ERROR:press dropped`.
 
 ```
 > CMD:BTN:DOWN
@@ -247,7 +249,7 @@ Reply: one line, `STATE:` followed by `key=value` pairs.
 | `font`, `font_pt` | EPUB reader | the font family and point size the book is set in |
 | `chapter`, `chapter_page`, `percent` | EPUB reader | what the status bar shows: the TOC chapter title, the page within the whole chapter, which can span several spine items (`~` when the total is still an estimate), the book percentage |
 | `flow`, `progression`, `input_progression` | EPUB reader, with a section open | how the section on screen runs and which way its pages turn: `horizontal` or `vertical-rl`; `ltr` or `rtl`; `input_progression` is the direction the buttons, taps and bar use, which equals `progression` once the section's first build pass or page has been drawn (while a cold section's "Indexing" popup is up, about 1 s, it still holds the previous section's direction, or `ltr` in a book just opened) |
-| `btn_dropped` | when not 0 | held presses (`BTN:<key>:<ms>`) the input layer never took in |
+| `btn_dropped` | when not 0 | held presses (`BTN:<key>:<ms>`) that failed: the press or its release was not taken in |
 | `heap`, `maxblock` | always | free heap and the largest free block, in bytes |
 
 Everything but `activity`, `stack`, `book`, `spine` and `page` needs the full API. A popup counts as
@@ -404,8 +406,8 @@ CMD:IDLE[:<timeout_ms>][:SCREEN]
 Reply, once the device is idle: `IDLE:<milliseconds waited>`. If it is not idle within the
 timeout (default 10000 ms, at most 600000): `IDLE_TIMEOUT:<what kept it busy>`.
 `IDLE_ERROR:...` for a malformed argument, and `IDLE_ERROR:busy` while another `IDLE` waits.
-`IDLE_ERROR:press dropped` replaces either answer when a held press (`BTN:<key>:<ms>`) was given
-up since the last `IDLE` answer, during the wait or before it: the press never reached the screen.
+`IDLE_ERROR:press dropped` replaces either answer when a held press (`BTN:<key>:<ms>`) failed since
+the last `IDLE` answer, during the wait or before it: the press or its release was not taken in.
 
 `IDLE` follows the last command that should change the screen (`BTN`, `TOUCH`, `SWIPE`, an `ACT`
 that opens a screen) to its end, so it never answers between the command and its effect. The

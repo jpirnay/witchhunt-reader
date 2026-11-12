@@ -39,7 +39,7 @@ class ButtonPressQueue {
   // Nothing queued, held, or waiting for its release to be committed.
   bool idle() const { return phase == Phase::Idle && count == 0; }
 
-  // Presses given up because the input layer never committed them, or their key never read up.
+  // Presses that failed: the input layer never committed the press or its release, or the key never read up.
   uint32_t droppedPresses() const { return dropped; }
 
   uint8_t step(const uint32_t nowMs, const uint8_t committed) {
@@ -84,7 +84,12 @@ class ButtonPressQueue {
         }
         return bit;
       case Phase::Releasing:
-        if (!(committed & bit) || commitTimedOut(nowMs)) {
+        if (!(committed & bit)) {
+          enter(Phase::Idle, nowMs);
+        } else if (commitTimedOut(nowMs)) {
+          // The release never went in (a finger still holds the key): the press was not played as
+          // asked, and it fails like one never taken in.
+          ++dropped;
           enter(Phase::Idle, nowMs);
         }
         return 0;
