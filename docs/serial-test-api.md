@@ -108,10 +108,12 @@ Things to know about the port:
 - **One program at a time.** Close your monitor before running a script, and never hold the port
   while flashing.
 - **Log lines share the wire.** The device keeps printing its log (`[1234] [INF] [ERS] ...`) between
-  replies. A host must pick out the reply by its prefix and skip everything else. A reply line goes
-  out whole: other tasks' log lines wait for it. If the host stops reading for 2 s (50 ms for an
-  `EVT:` line), the device gives the line up unfinished and starts its next line with a line break,
-  so the cut part stays a line of its own.
+  replies. A host must pick out the reply by its prefix and skip everything else. Each reply line
+  goes out in one write, so a log line lands inside it only when the host lags far enough behind
+  for that write to come back short. A line left unfinished (a log line the USB link cut short, or a
+  reply the device gave up on after 2 s without the host reading, 50 ms for an `EVT:` line) is
+  followed by a line break before the next reply, so that reply starts a fresh line. Log lines may
+  still sit between replies.
 
 ## How a command works
 
@@ -1054,8 +1056,8 @@ open, the run stops (`LINK UNSYNCED: ...`, exit 1), `--keep-going` or not, and s
 earlier wait still has its answer to come. A step whose own number or regular expression is malformed fails as
 `BAD STEP` before anything is sent, and a malformed reply fails its step, or stops the run when it leaves bytes of
 unknown length on the line or an exchange it cannot finish (a `SCREENSHOT_START`, `FS_GET_START` or `FS_PUT_READY` it
-cannot read). A step that failed with any other error reply does not stop a `--keep-going` run, and nor does a reply lost to a restart (the port went away meanwhile): the device answers
-nothing it was sent before it restarted. A run that stopped on a missing reply can leave that reply still to come: let
+cannot read). A step that failed with any other error reply does not stop a `--keep-going` run, and nor does a
+reply lost to a restart (the port went away meanwhile): the device answers nothing it was sent before it restarted. A run that stopped on a missing reply can leave that reply still to come: let
 the device answer, or restart it, before the next run.
 `--script FILE` reads one step per line (`#` comments), `--keep-going` runs all steps and reports every failure,
 `--rotate` sets the screenshot rotation, `--read-pause S` makes `get:` stop reading for S seconds after every MB, as a

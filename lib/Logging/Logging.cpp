@@ -8,6 +8,7 @@
 #include <freertos/task.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <string>
 
@@ -90,6 +91,18 @@ static SemaphoreHandle_t logMutex() {
 // the logger. logPrintf is a public entry point, so this is asserted here rather
 // than assumed of every caller.
 static bool logLockUsable() { return !xPortInIsrContext() && xTaskGetSchedulerState() == taskSCHEDULER_RUNNING; }
+
+static std::atomic<bool> serialLineCut{false};
+
+void markSerialLineCut() { serialLineCut.store(true, std::memory_order_relaxed); }
+
+bool takeSerialLineCut() { return serialLineCut.exchange(false, std::memory_order_relaxed); }
+
+// A log line the USB link took only part of (HWCDC gives up after its TX timeout) leaves the wire mid-line: the
+// next serial test API reply starts a fresh one. A line it took none of leaves nothing behind.
+[[maybe_unused]] static void noteWireWrite(const size_t written, const size_t length) {
+  if (written != 0 && written < length) markSerialLineCut();
+}
 
 SerialWireLock::SerialWireLock() : locked_(logLockUsable()) {
   if (locked_) xSemaphoreTake(logMutex(), portMAX_DELAY);
@@ -180,7 +193,7 @@ void logPrintf(const char* level, const char* origin, const char* format, ...) {
     // Native USB CDC: write unconditionally. Deliberately NOT guarded on
     // `logSerial`, which is the whole point — the readiness check is the bug on
     // this transport, not a safeguard.
-    logSerial.write(reinterpret_cast<const uint8_t*>(buf), strlen(buf));
+    noteWireWrite(logSerial.write(reinterpret_cast<const uint8_t*>(buf), strlen(buf)), strlen(buf));
 #else
     // Unguarded for the same reason, on the C3 boards (X4, X3) and the X4 Pro. At the
     // 10 MHz low-power clock FreeRTOS ticks arrive late, the USB Serial/JTAG SOF
@@ -192,7 +205,7 @@ void logPrintf(const char* level, const char* origin, const char* format, ...) {
     // the interrupt that sets `connected` again; connected, nothing changes.
     // Ported from crosspoint-reader PR #3737 ("fix: stop dropping log lines at the
     // low-power clock", Sung-jin Brian Hong / @serialx).
-    logSerial.print(buf);
+    noteWireWrite(logSerial.print(buf), strlen(buf));
 #endif
   }
   addToLogRingBuffer(buf);

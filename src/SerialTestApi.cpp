@@ -78,10 +78,9 @@ using SerialCommandGrammar::appendField;
 // after `stallMs` without progress (the host stopped reading). `waiting` runs on each wait: a long stream feeds the
 // task watchdog there.
 //
-// A write that gives up leaves its line (or stream) unfinished; lineCut makes the next line start with "\n", so that
-// line is one of its own on the host rather than the tail of the cut one. Loop task only, as every write here is.
-bool lineCut = false;
-
+// A write that gives up leaves its line (or stream) unfinished: it marks the wire's line cut (Logging's
+// markSerialLineCut(), which a log line the USB link cut short marks too), and the next reply starts with "\n", so it
+// is a line of its own on the host rather than the tail of the cut one.
 bool writeAll(const uint8_t* data, const size_t len, const unsigned long stallMs, void (*waiting)() = nullptr) {
   size_t sent = 0;
   unsigned long lastProgressMs = millis();
@@ -93,7 +92,7 @@ bool writeAll(const uint8_t* data, const size_t len, const unsigned long stallMs
       continue;
     }
     if (millis() - lastProgressMs > stallMs) {
-      lineCut = true;
+      markSerialLineCut();
       return false;
     }
     if (waiting) waiting();
@@ -106,21 +105,38 @@ bool writeText(const std::string_view text, const unsigned long stallMs) {
   return writeAll(reinterpret_cast<const uint8_t*>(text.data()), text.size(), stallMs);
 }
 
-// Begins a line: first ends one a write gave up on (see lineCut). False when even that cannot go out.
+// Begins a line written in pieces (PAGE's): first ends one that was cut. False when even that cannot go out.
 bool startLine(const unsigned long stallMs) {
-  if (!lineCut) return true;
-  lineCut = false;
+  if (!takeSerialLineCut()) return true;
   return writeText("\n", stallMs);
 }
 
 // A reply waits up to 2 s for the host to read it.
 constexpr unsigned long kReplyStallMs = 2000;
 
-// One reply line: `head`, then `tail` (an argument echoed back), then the line end. Its pieces go out with the wire
-// held (SerialWireLock), so another task's log line cannot land between them.
+// One reply line: `head`, then `tail` (an argument echoed back), then the line end, after a "\n" when the wire's
+// last line was cut. Put together first and written in one write: HWCDC writes one call under its own lock, so no
+// other task's log line lands inside it, unless the host lags long enough for the write to come back short. Nothing
+// here holds the logger up. Most replies fit the stack buffer; a longer one (a STATE line) takes a heap one for the
+// moment.
 void reply(const std::string_view head, const std::string_view tail = {}, const unsigned long stallMs = kReplyStallMs) {
-  const SerialWireLock wire;
-  if (startLine(stallMs) && writeText(head, stallMs) && writeText(tail, stallMs)) writeText("\n", stallMs);
+  const bool cut = takeSerialLineCut();
+  const size_t length = (cut ? 1 : 0) + head.size() + tail.size() + 1;
+  char small[160];
+  std::string large;
+  char* line = small;
+  if (length > sizeof(small)) {
+    large.resize(length);
+    line = large.data();
+  }
+  size_t at = 0;
+  if (cut) line[at++] = '\n';
+  memcpy(line + at, head.data(), head.size());
+  at += head.size();
+  memcpy(line + at, tail.data(), tail.size());
+  at += tail.size();
+  line[at++] = '\n';
+  writeAll(reinterpret_cast<const uint8_t*>(line), at, stallMs);
 }
 
 void replyf(const char* format, ...) {
@@ -1321,16 +1337,21 @@ constexpr unsigned long kStreamStallMs = 15000;
 // A short protocol line (FS_PUT_READY, FS_PUT_ACK, FS_GET_START) in one write, as WireLine writes its lines, from a
 // buffer of its own: the command's scratch may hold data.
 __attribute__((format(printf, 1, 2))) void replyWhole(const char* format, ...) {
-  char line[64];
+  char line[66];
+  // A "\n" first when the wire's last line was cut, then the line: one write, as reply() does.
+  const size_t lead = takeSerialLineCut() ? 1 : 0;
+  line[0] = '\n';
   va_list args;
   va_start(args, format);
-  const int n = vsnprintf(line, sizeof(line) - 1, format, args);
+  const int n = vsnprintf(line + lead, sizeof(line) - lead - 1, format, args);
   va_end(args);
-  if (n <= 0) return;
-  const size_t length = std::min(static_cast<size_t>(n), sizeof(line) - 2);
+  if (n <= 0) {
+    if (lead) markSerialLineCut();  // still to be ended
+    return;
+  }
+  const size_t length = lead + std::min(static_cast<size_t>(n), sizeof(line) - lead - 2);
   line[length] = '\n';
-  const SerialWireLock wire;
-  if (startLine(kReplyStallMs)) writeAll(reinterpret_cast<const uint8_t*>(line), length + 1, kReplyStallMs);
+  writeAll(reinterpret_cast<const uint8_t*>(line), length + 1, kReplyStallMs);
 }
 
 // ---- PAGE -----------------------------------------------------------------------------------
