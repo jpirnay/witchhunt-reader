@@ -20,6 +20,7 @@ struct Device {
   const char* busy = nullptr;
   bool handled = true;
   uint32_t passes = 0;
+  uint32_t dropped = 0;  // presses the input path gave up, since boot
 
   Verdict pass() {
     now += 10;
@@ -28,6 +29,7 @@ struct Device {
     sample.busy = busy;
     sample.effectHandled = handled;
     sample.renderPasses = passes;
+    sample.droppedPresses = dropped;
     return gate.step(sample);
   }
 
@@ -180,6 +182,40 @@ TEST(IdleGate, ASecondWaitIsRefusedAndTheFirstKeepsItsDeadline) {
   EXPECT_STREQ(d.gate.reason(), "background");
   // Answered: the next wait starts.
   EXPECT_TRUE(d.gate.begin(d.now, 500));
+}
+
+// A press the input path gave up never reached the screen: the IDLE that follows it must not report
+// success (the caller answers IDLE_ERROR:press dropped). Once answered, the drop is not reported again.
+TEST(IdleGate, APressDroppedDuringTheWaitFailsIt) {
+  Device d;
+  d.gate.noteEffect();
+  d.handled = false;
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
+  for (int i = 0; i < 100; ++i) ASSERT_EQ(d.pass(), Verdict::Waiting);
+  d.dropped = 1;  // given up after a second; the queue is idle, so the input path is done
+  d.handled = true;
+  EXPECT_EQ(d.runUntilDone(), Verdict::PressDropped);
+  EXPECT_FALSE(d.gate.waiting());
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
+  EXPECT_EQ(d.runUntilDone(), Verdict::Idle) << "reported once";
+}
+
+// The press was given up before the IDLE came (BTN, STATE, then IDLE): still that IDLE's failure.
+TEST(IdleGate, APressDroppedBeforeTheWaitFailsTheNextOne) {
+  Device d;
+  d.dropped = 2;
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
+  EXPECT_EQ(d.runUntilDone(), Verdict::PressDropped);
+}
+
+// A wait that runs out with a press given up says so rather than what kept it busy.
+TEST(IdleGate, APressDroppedInATimedOutWaitIsWhatItReports) {
+  Device d;
+  d.busy = "background";
+  ASSERT_TRUE(d.gate.begin(d.now, 500));
+  d.pass();
+  d.dropped = 1;
+  EXPECT_EQ(d.runUntilDone(), Verdict::PressDropped);
 }
 
 TEST(IdleGate, ATimeoutWithNothingBusyIsSettling) {

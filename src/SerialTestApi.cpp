@@ -2113,6 +2113,7 @@ void serviceIdle() {
   sample.busy = activityManager.busyReason(/*includeBackground=*/idleGate.waiting() && !idleScreenOnly);
   sample.effectHandled = effectHandled();
   sample.renderPasses = activityManager.renderPassCount();
+  sample.droppedPresses = heldPresses.droppedPresses();
   switch (idleGate.step(sample)) {
     case IdleGate::Verdict::Waiting:
       break;
@@ -2121,6 +2122,9 @@ void serviceIdle() {
       break;
     case IdleGate::Verdict::TimedOut:
       reply("IDLE_TIMEOUT:", idleGate.reason());
+      break;
+    case IdleGate::Verdict::PressDropped:
+      reply("IDLE_ERROR:press dropped");
       break;
   }
 }

@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "util/ButtonPressQueue.h"
+#include "util/IdleGate.h"
 
 namespace {
 
@@ -178,6 +179,29 @@ TEST(ButtonPressQueue, AnUncommittedPressIsGivenUp) {
   ASSERT_TRUE(loop.runUntilIdle());
   EXPECT_EQ(loop.queue.droppedPresses(), 2u);
   EXPECT_EQ(loop.held, 0);
+}
+
+// What the host sees for that press: BTN_OK, then an IDLE. SerialTestApi::serviceIdle() samples the
+// queue so (effectHandled = idle(), droppedPresses = droppedPresses()); the IDLE must fail, not answer
+// IDLE:<ms> as if the press had gone through.
+TEST(ButtonPressQueue, AnUncommittedPressFailsTheIdleThatFollowsIt) {
+  Loop loop;
+  loop.input.ignoresHook = true;
+  IdleGate gate;
+  ASSERT_TRUE(loop.queue.push(CONFIRM, SHORT_HOLD_MS));
+  gate.noteEffect();  // BTN_OK
+  ASSERT_TRUE(gate.begin(loop.now, 10000));
+  IdleGate::Verdict verdict = IdleGate::Verdict::Waiting;
+  for (int i = 0; i < 2000 && verdict == IdleGate::Verdict::Waiting; ++i) {
+    loop.pass();
+    IdleGate::Sample sample;
+    sample.nowMs = loop.now;
+    sample.effectHandled = loop.queue.idle();
+    sample.droppedPresses = loop.queue.droppedPresses();
+    verdict = gate.step(sample);
+  }
+  EXPECT_EQ(loop.queue.droppedPresses(), 1u);
+  EXPECT_EQ(verdict, IdleGate::Verdict::PressDropped);
 }
 
 // One loop pass blocked for seconds (a command waiting for the render lock) right after the press

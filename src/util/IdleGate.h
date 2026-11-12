@@ -16,18 +16,23 @@
 //    normal busy check follows it from there. If nothing is under way yet, the effect is done once
 //    a render pass starts after that pass, or once kNoRenderGraceMs pass without one (the press
 //    changed nothing on screen).
+//
+// A press the input path gave up (ButtonPressQueue::droppedPresses()) never reached the screen, so the
+// wait that ends after it fails, however it ended: PressDropped instead of Idle or TimedOut, once for
+// each drop since the previous wait ended, whether it came during the wait or before it.
 class IdleGate {
  public:
   static constexpr uint32_t kQuietMs = 250;
   static constexpr uint32_t kNoRenderGraceMs = 1000;
 
-  enum class Verdict : uint8_t { Waiting, Idle, TimedOut };
+  enum class Verdict : uint8_t { Waiting, Idle, TimedOut, PressDropped };
 
   struct Sample {
     uint32_t nowMs = 0;
-    const char* busy = nullptr;  // the device's own busy reason, nullptr when it looks idle
-    bool effectHandled = true;   // the input path is done with the last effect
-    uint32_t renderPasses = 0;   // render passes started so far
+    const char* busy = nullptr;   // the device's own busy reason, nullptr when it looks idle
+    bool effectHandled = true;    // the input path is done with the last effect
+    uint32_t renderPasses = 0;    // render passes started so far
+    uint32_t droppedPresses = 0;  // presses the input path gave up so far
   };
 
   // A command that should change the screen ran.
@@ -70,18 +75,19 @@ class IdleGate {
     }
     // The deadline first: a pass that stalled past it can show a quiet window long enough, and the
     // wait must not answer success later than the timeout it was given.
-    if (sample.nowMs - startMs_ >= timeoutMs_) {
-      waiting_ = false;
-      return Verdict::TimedOut;
-    }
-    if (quiet_ && sample.nowMs - quietSinceMs_ >= kQuietMs) {
-      waiting_ = false;
-      return Verdict::Idle;
-    }
+    if (sample.nowMs - startMs_ >= timeoutMs_) return finish(Verdict::TimedOut, sample);
+    if (quiet_ && sample.nowMs - quietSinceMs_ >= kQuietMs) return finish(Verdict::Idle, sample);
     return Verdict::Waiting;
   }
 
  private:
+  Verdict finish(const Verdict verdict, const Sample& sample) {
+    waiting_ = false;
+    const bool dropped = sample.droppedPresses != dropsAnswered_;
+    dropsAnswered_ = sample.droppedPresses;
+    return dropped ? Verdict::PressDropped : verdict;
+  }
+
   const char* effectBusy(const Sample& sample) {
     if (!effectPending_) return nullptr;
     if (!sample.effectHandled) return "input";
@@ -108,6 +114,7 @@ class IdleGate {
   uint32_t timeoutMs_ = 0;
   uint32_t quietSinceMs_ = 0;
   const char* lastBusy_ = "settling";
+  uint32_t dropsAnswered_ = 0;  // Sample::droppedPresses when the last wait ended
 
   bool effectPending_ = false;
   bool effectHandledSeen_ = false;

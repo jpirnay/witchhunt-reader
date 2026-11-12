@@ -169,8 +169,8 @@ held press `BTN_ERROR:busy`.
   A real key pressed meanwhile keeps its own press and release; the same key merges with the held
   one into one press, and a held press of a key that is still down waits for it to come up, so it
   gets a press of its own. `POWER` held past the power-key duration sleeps the device, as the key
-  does. A press the input layer never takes in, or whose key stays down, is given up after a second
-  and counted in `STATE`'s `btn_dropped`.
+  does. A press the input layer never takes in, or whose key stays down, is given up after a second,
+  counted in `STATE`'s `btn_dropped`, and the next `IDLE` answers `IDLE_ERROR:press dropped`.
 
 ```
 > CMD:BTN:DOWN
@@ -401,6 +401,8 @@ CMD:IDLE[:<timeout_ms>][:SCREEN]
 Reply, once the device is idle: `IDLE:<milliseconds waited>`. If it is not idle within the
 timeout (default 10000 ms, at most 600000): `IDLE_TIMEOUT:<what kept it busy>`.
 `IDLE_ERROR:...` for a malformed argument, and `IDLE_ERROR:busy` while another `IDLE` waits.
+`IDLE_ERROR:press dropped` replaces either answer when a held press (`BTN:<key>:<ms>`) was given
+up since the last `IDLE` answer, during the wait or before it: the press never reached the screen.
 
 `IDLE` follows the last command that should change the screen (`BTN`, `TOUCH`, `SWIPE`, an `ACT`
 that opens a screen) to its end, so it never answers between the command and its effect. The
