@@ -5,6 +5,7 @@
 #if CP_TOUCH_UI
 
 #include "activities/Activity.h"
+#include "activities/util/LightDrawerLayout.h"
 #include "components/UiAppHost.h"
 #include "util/ButtonNavigator.h"
 
@@ -27,7 +28,8 @@
 //                   dismissAction over the page below that makes a tap outside close it.
 //   fui::sliderRow  caption + value + [-] [capsule] [+], with the optional trailing icon button
 //                   its own documentation names as "a lamp on/off toggle beside a brightness
-//                   slider". That is the sun.
+//                   slider". That is the sun where there is a warmth row, which takes the moon;
+//                   without one the two switches share a line under the brightness row.
 //
 // The kit also removes upstream's draggingSlider guard: FUI's router has grab semantics (a drag
 // stays bound to the element the finger landed on, and a contact that dragged commits as a drag
@@ -48,8 +50,10 @@
 //    floor). A 0% level with the light still "on" would leave the sun icon lit over a dark
 //    panel, which is a second and worse way of saying off when the switch is one tap away.
 //
-// Also this fork's: a Dark Mode row under the sliders (DarkModeNow::flip), the switch a reader reaches for in the same
-// moment as the light. A tap closes the drawer, so the screen under it is drawn again in the new polarity.
+// Also this fork's: a Dark Mode switch beside the light's (DarkModeNow::flip), the one a reader reaches for in the same
+// moment as the light. A tap closes the drawer, so the screen under it is drawn again in the new polarity. Where the
+// two switches go, and how big the controls are on a compact panel, is LightDrawerLayout.h's, which the host test
+// lays out on every lit board.
 //
 // Gated on CP_TOUCH_UI: nothing opens this without a digitiser, and this fork compiles the whole
 // app-side touch layer out of a board that cannot have one.
@@ -66,9 +70,10 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   // unconditionally on boot), so only lightOn needs a touched-by-the-user flag: onExit() must
   // not persist a mirror that never reflected user intent in the first place.
   bool lightOnChanged = false;
-  // Sheet height for the pass being built. Set in render() before renderUi(), because the sheet
+  // Sheet height and layout metrics for the pass being built. Set in render() before renderUi(), because the sheet
   // must be sized before anything lays out inside it.
-  int panelHeight = 0;
+  int16_t panelHeight = 0;
+  LightDrawerLayout::Metrics layoutMetrics{};
   // The opening pass composites over a frame another activity drew; see render() for why that
   // one cannot be a FAST differential.
   bool firstRender = true;
@@ -83,10 +88,7 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   static void onDarkModeEvent(const freeink::ui::ActionEvent& event, void* user);
 
   void buildPanelScreen(UiScreen& screen);
-  // Height of one sliderRow as Screen::sliderRow() will actually lay it out -- the same theme
-  // substitutions, so the sheet is sized to what goes in it rather than to an estimate.
-  int16_t sliderRowBandHeight() const;
-  int computePanelHeight() const;
+  LightDrawerLayout::Model layoutModel() const;
   void adjustBrightness(int delta);
   void adjustWarmth(int delta);
   void toggleLight();
