@@ -60,11 +60,11 @@ void RecentBooksStore::addBook(const std::string& path, const std::string& title
 
   pruneMissing();
 
-  // Remove existing entry if present, preserving its per-book overrides.
+  // Remove existing entry if present, keeping the settings it still carries for moveReaderOverridesToBook().
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   if (it != recentBooks.end()) {
-    newBook.overrides = it->overrides;
+    newBook.legacyOverrides = it->legacyOverrides;
     recentBooks.erase(it);
   }
 
@@ -187,15 +187,53 @@ RecentBook RecentBooksStore::getBookByPath(const std::string& path) const {
   return RecentBook{};
 }
 
-bool RecentBooksStore::setReaderOverrides(const std::string& path, const BookReaderOverrides& overrides) {
+namespace {
+// Only an EPUB has settings of its own; "" for any other book.
+std::string overridesCacheDir(const std::string& path) {
+  return FsHelpers::hasEpubExtension(path) ? Epub::cachePathFor(path, "/.crosspoint") : std::string();
+}
+}  // namespace
+
+BookReaderOverrides RecentBooksStore::readerOverrides(const std::string& path) const {
+  const std::string cacheDir = overridesCacheDir(path);
+  if (cacheDir.empty()) return {};
+  BookReaderOverrides overrides;
+  if (BookReaderOverridesFile::load(cacheDir, overrides)) return overrides;
+  const Hold hold;  // the list only for this read, unless a caller already holds it
+  return getBookByPath(path).legacyOverrides;
+}
+
+BookReaderOverrides RecentBooksStore::moveReaderOverridesToBook(const std::string& path) {
+  const std::string cacheDir = overridesCacheDir(path);
+  if (cacheDir.empty()) return {};
   const Hold hold;
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
-  if (it == recentBooks.end()) {
-    return false;
+  if (it == recentBooks.end() || !it->legacyOverrides.any()) {
+    BookReaderOverrides overrides;
+    BookReaderOverridesFile::load(cacheDir, overrides);
+    return overrides;
   }
-  it->overrides = overrides;
-  return saveToFile();
+  const BookReaderOverrides carried = it->legacyOverrides;
+  // Left in the row when the move fails: the next open tries again, and nothing is lost meanwhile.
+  if (!BookReaderOverridesFile::save(cacheDir, carried)) return carried;
+  LOG_INF("RBS", "Moved a book's own settings from recent.json into %s", cacheDir.c_str());
+  it->legacyOverrides = {};
+  saveToFile();
+  return carried;
+}
+
+bool RecentBooksStore::setReaderOverrides(const std::string& path, const BookReaderOverrides& overrides) {
+  const std::string cacheDir = overridesCacheDir(path);
+  if (cacheDir.empty() || !BookReaderOverridesFile::save(cacheDir, overrides)) return false;
+  const Hold hold;
+  auto it =
+      std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
+  if (it != recentBooks.end() && it->legacyOverrides.any()) {
+    it->legacyOverrides = {};
+    saveToFile();
+  }
+  return true;
 }
 
 bool RecentBooksStore::saveToFile() const {

@@ -84,3 +84,20 @@ struct BookReaderOverrides {
   bool any() const;
   bool operator==(const BookReaderOverrides& other) const = default;
 };
+
+// A book's own settings on the card: overrides.bin in its cache folder (/.crosspoint/epub_<hash>/), where they stay
+// for as long as the book does. Layout in docs/file-formats.md. The folder moves with the book (BookRelocation), and
+// a cache clear keeps the file as reading state (BookCache::isReadingState).
+namespace BookReaderOverridesFile {
+
+inline constexpr char kName[] = "overrides.bin";
+
+// Reads the book's settings into `out`. False, leaving `out` as it was, when there is no file or it is not one this
+// firmware can read; a value in it that a field cannot have follows the setting (BookReaderOverrides::setFromStored).
+bool load(const std::string& cacheDir, BookReaderOverrides& out);
+
+// Writes `overrides`, replacing the file whole so a cut write never leaves a torn one, or removes the file when the
+// book has no setting of its own. False when that failed, logged.
+bool save(const std::string& cacheDir, const BookReaderOverrides& overrides);
+
+}  // namespace BookReaderOverridesFile

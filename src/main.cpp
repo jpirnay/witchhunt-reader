@@ -862,10 +862,9 @@ std::string publisherFontsCache(const char* path, const BookReaderOverrides& boo
 // book open, which also tries the accent families again that the memory ladder left out (BookFonts::accentLimit).
 bool chooseEpubFonts(const char* path, const bool wait, const bool opening,
                      const char* (&families)[1 + BookFonts::kMaxAccents], std::string& body, uint8_t& size) {
-  // For EPUB: honour per-book SD font and/or size overrides. The book record
-  // is available here — the reader activity hasn't started yet, but
-  // RecentBooksStore already has the persisted overrides for this path.
-  const BookReaderOverrides book = RECENT_BOOKS.getBookByPath(path).overrides;
+  // For EPUB: honour per-book SD font and/or size overrides. The reader activity has not started yet, but the book's
+  // own settings are on the card already (RecentBooksStore::readerOverrides).
+  const BookReaderOverrides book = RECENT_BOOKS.readerOverrides(path);
   size = (book.fontSizeOverride >= 0) ? static_cast<uint8_t>(book.fontSizeOverride) : SETTINGS.fontPointSize;
 
   // Publisher Fonts: not examined yet, what is loaded stays, until the reader has examined the book and asks again.
@@ -905,7 +904,7 @@ bool bookFontsPendingForPath(const char* path) {
   // No shortcut on the setting being Off: a book can have them on of its own
   // (BookReaderOverrides::publisherFontsOverride).
   if (!path || !FsHelpers::hasEpubExtension(std::string_view(path))) return false;
-  const std::string cachePath = publisherFontsCache(path, RECENT_BOOKS.getBookByPath(path).overrides);
+  const std::string cachePath = publisherFontsCache(path, RECENT_BOOKS.readerOverrides(path));
   return !cachePath.empty() && BookFonts::read(cachePath) == BookFonts::State::Pending;
 }
 

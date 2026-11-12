@@ -49,6 +49,7 @@ class BookCacheTest : public ::testing::Test {
     file("linkstack.bin", "back stack");
     file("bookmarks.bin", "marks");
     file("koreader_syncmethod.txt", "1");
+    file("overrides.bin", "settings");
   }
 
   std::string dir_;
@@ -68,6 +69,7 @@ TEST_F(BookCacheTest, KeepReadingStateLeavesOnlyTheReadersFiles) {
   EXPECT_EQ("back stack", read("linkstack.bin"));
   EXPECT_EQ("marks", read("bookmarks.bin"));
   EXPECT_EQ("1", read("koreader_syncmethod.txt"));
+  EXPECT_EQ("settings", read("overrides.bin"));
   for (const char* derived : {"book.bin", "css_rules.cache", "fingerprint.bin", "pages.bin", "spines", "img",
                               "thumb_400.bmp", "cover.img", "kosync_push.bin", "koreader_docid.txt"}) {
     EXPECT_FALSE(has(derived)) << derived << " is derived from the book and must go";
@@ -84,6 +86,7 @@ TEST_F(BookCacheTest, KeepCoversLeavesTheImagesAndNothingElse) {
   EXPECT_FALSE(has("linkstack.bin"));
   EXPECT_FALSE(has("bookmarks.bin"));
   EXPECT_FALSE(has("koreader_syncmethod.txt"));
+  EXPECT_FALSE(has("overrides.bin"));
   EXPECT_FALSE(has("spines"));
 }
 

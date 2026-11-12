@@ -14,8 +14,10 @@ struct RecentBook {
   // SidecarFiles::metadataStamp() of the metadata sidecar title/author/series were
   // taken with (0 = none). EPUB only; see refreshSidecarMetadata().
   uint32_t metadataStamp = 0;
-  // The book's own reader settings.
-  BookReaderOverrides overrides;
+  // The book's own reader settings as a recent.json written before they moved to the book's folder carries them
+  // (BookReaderOverridesFile). Moved there at the book's next open (moveReaderOverridesToBook), and never written to
+  // recent.json again once they are: read them through readerOverrides(), not here.
+  BookReaderOverrides legacyOverrides;
 
   bool operator==(const RecentBook& other) const { return path == other.path; }
 };
@@ -29,7 +31,8 @@ namespace JsonSettingsIO {
 RecentBooksLoad loadRecentBooks(RecentBooksStore& store, const char* json);
 }  // namespace JsonSettingsIO
 
-// The list of books lately opened, newest first, with each book's per-book reader overrides.
+// The list of books lately opened, newest first. Also the way to a book's own reader settings, which live in its
+// folder (readerOverrides()).
 //
 // Kept in RAM only while something holds it (Hold), not for the whole session: loaded at boot it
 // cost ~4.5 KB for good and, worse, split the heap's largest free block (61 KB -> 45 KB, X3), which
@@ -85,8 +88,8 @@ class RecentBooksStore {
 
   // Remove a book from the recent list by path
   void removeBook(const std::string& path);
-  // A book renamed or moved on the card (BookRelocation): its row follows it, keeping its place and
-  // its per-book overrides. Its cover thumbnail lives in the book's cache folder, which moved too.
+  // A book renamed or moved on the card (BookRelocation): its row follows it, keeping its place. Its cover thumbnail
+  // and its own settings live in the book's cache folder, which moved too.
   void relocate(const std::string& oldPath, const std::string& newPath, const std::string& oldCacheDir,
                 const std::string& newCacheDir);
 
@@ -116,7 +119,15 @@ class RecentBooksStore {
   bool loadFromFile();
   RecentBook getDataFromBook(std::string path) const;
   RecentBook getBookByPath(const std::string& path) const;
-  // Saves `overrides` as the book's own settings. False when the book has no entry in the list.
+  // The EPUB's own reader settings: its overrides.bin, else what its row in this list still carries (a book not
+  // opened since they moved to its folder), else none. Loads the list only for that second answer.
+  BookReaderOverrides readerOverrides(const std::string& path) const;
+  // readerOverrides(), with a copy the book's row still carries moved into its folder first and dropped from the row.
+  // The row's copy wins over a file already there: only a firmware that kept them in this list writes one, so it is
+  // the later of the two. The reader calls this as it opens a book.
+  BookReaderOverrides moveReaderOverridesToBook(const std::string& path);
+  // Saves the EPUB's own reader settings in its folder, and drops any copy its row still carries so that clearing the
+  // book's cache cannot bring the old values back. False when the save failed.
   bool setReaderOverrides(const std::string& path, const BookReaderOverrides& overrides);
 };
 

@@ -768,7 +768,7 @@ void EpubReaderActivity::onEnter() {
     const RecentBooksStore::Hold recents;
     RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), series,
                          ReaderActivity::coverThumbPlaceholder(epub->getPath()));
-    saved = RECENT_BOOKS.getBookByPath(epub->getPath()).overrides;
+    saved = RECENT_BOOKS.moveReaderOverridesToBook(epub->getPath());
   }
   bookEmbeddedStyleOverride = saved.embeddedStyleOverride;
   bookImageRenderingOverride = saved.imageRenderingOverride;
@@ -3403,7 +3403,8 @@ bool EpubReaderActivity::applyBookReaderOverrides(
   // (ReaderActivity::onEnter); loaded from here, they would wait (ensureSdFontLoadedForPath) and the book would stay
   // in its old font until it was next opened. So it is opened again, as a KOReader sync does: onExit saves the page
   // and its paragraph, which the new layout lands on. Read after the overrides were persisted above, as it reads
-  // them from RECENT_BOOKS. An examination that fails stays pending for only a few attempts (BookFonts::prepare).
+  // them from the book's folder (RecentBooksStore::readerOverrides). An examination that fails stays pending for only a
+  // few attempts (BookFonts::prepare).
   if (bookFontsPendingForPath(epub->getPath().c_str())) {
     LOG_INF("ERS", "Publisher Fonts now apply to a book not examined yet: reopening it");
     activityManager.openBook(epub->getPath());
@@ -7727,7 +7728,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   // getEffective*() helpers. Passing raw SETTINGS values here diverges the section property
   // hash from the reader's whenever an override is set, and this path then silently rebuilds
   // a duplicate section variant during sleep preparation.
-  const BookReaderOverrides saved = RECENT_BOOKS.getBookByPath(filePath).overrides;
+  const BookReaderOverrides saved = RECENT_BOOKS.readerOverrides(filePath);
   const bool effectiveEmbeddedStyle =
       saved.embeddedStyleOverride >= 0 ? saved.embeddedStyleOverride != 0 : SETTINGS.embeddedStyle != 0;
   const bool effectiveHyphenation =

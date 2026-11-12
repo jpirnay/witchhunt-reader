@@ -838,8 +838,8 @@ bool JsonSettingsIO::loadWifi(WifiCredentialStore& store, const char* json, bool
 // ---- RecentBooksStore ----
 
 namespace {
-// Each book override's key in recent.json. The SD family name is the one override that is not a number, and is written
-// apart.
+// Each book override's key in recent.json, which carried a book's own settings before they moved to its folder and
+// still holds them for a book not opened since. The SD family name is the one that is not a number, and goes apart.
 struct OverrideKey {
   BookReaderOverrides::Field field;
   const char* key;
@@ -882,9 +882,15 @@ bool JsonSettingsIO::saveRecentBooks(const RecentBooksStore& store, const char* 
     obj["series"] = book.series;
     obj["coverBmpPath"] = book.coverBmpPath;
     obj["metadataStamp"] = book.metadataStamp;
-    for (const auto& [field, key] : kRecentBookOverrideKeys) obj[key] = book.overrides.get(field);
-    if (!book.overrides.sdFontFamilyOverride.empty()) {
-      obj["sdFontFamilyOverride"] = book.overrides.sdFontFamilyOverride;
+    // A book's own settings live in its folder now (BookReaderOverridesFile). A row keeps writing the ones it was
+    // loaded with only until its book's next open moves them there, so none is lost before then.
+    if (book.legacyOverrides.any()) {
+      for (const OverrideKey& entry : kRecentBookOverrideKeys) {
+        obj[entry.key] = book.legacyOverrides.get(entry.field);
+      }
+      if (!book.legacyOverrides.sdFontFamilyOverride.empty()) {
+        obj["sdFontFamilyOverride"] = book.legacyOverrides.sdFontFamilyOverride;
+      }
     }
   }
 
@@ -939,9 +945,10 @@ RecentBooksLoad JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const c
     // a sidecar is refreshed once.
     book.metadataStamp = obj["metadataStamp"].as<unsigned>();
     const BookReaderOverrides::Numbering numbering{fontSizeOrderV, lineSpacingOrderV};
-    book.overrides.setSdFontFamilyFromStored(obj["sdFontFamilyOverride"] | std::string(""));
-    for (const auto& [field, key] : kRecentBookOverrideKeys)
-      book.overrides.setFromStored(field, obj[key] | -1, numbering);
+    book.legacyOverrides.setSdFontFamilyFromStored(obj["sdFontFamilyOverride"] | std::string(""));
+    for (const OverrideKey& entry : kRecentBookOverrideKeys) {
+      book.legacyOverrides.setFromStored(entry.field, obj[entry.key] | -1, numbering);
+    }
     store.recentBooks.push_back(std::move(book));
   }
 
