@@ -17,7 +17,7 @@ truncates the file in place.
 |---|---|---|---|
 | `settings.json` | `JsonSettingsIO::saveSettings` | `fontSizeOrderV`: `CrossPointSettings::FONT_SIZE_ORDER_VERSION` (2); `gestureDefaultsV`: `GESTURE_DEFAULTS_VERSION` (3) | The settings. From `fontSizeOrderV` 2, `fontSize` and `txtFontSize` are point sizes; an older file is converted as it loads and saved again |
 | `state.json` | `JsonSettingsIO::saveState` | none | The open book, the sleep image, a pending KOReader sync or bookmark jump, the pack offers declined (`hyphenationOffersDeclined`, two-letter keys back to back: a hyphenation pack's language in lower case, `de`; a CJK interface pack's UI language in upper case, `ZH`; a UI language pack's capitalised, `De`), the Library tab last left (`libraryTab`) and the views of its lists (`recentBooksView`, `addedBooksView`, `authorsView`; an old `recentBooksGridView` is read to migrate) |
-| `recent.json` | `JsonSettingsIO::saveRecentBooks` | `fontSizeOrderV` (2), stamped separately from `settings.json` | Recently opened books and their per-book overrides; `fontSizeOverride` is a point size from version 2 |
+| `recent.json` | `JsonSettingsIO::saveRecentBooks` | `fontSizeOrderV` (2), stamped separately from `settings.json` | Recently opened books. Before the per-book `overrides.bin`, also each book's own settings: a row still carrying them keeps them until the book's next open moves them to its folder; `fontSizeOverride` is a point size from version 2 |
 | `wifi.json`, `opds.json`, `koreader.json` | `JsonSettingsIO::saveWifi`, `saveOpds`, `saveKOReader` | none | Credentials, obfuscated with the key of the reader that saved them, which `wifi.json` names in `lastKnownMacAddress` and the other two in `keyId`, so a card moved to another reader still decodes; `wifi.json` also keeps `arrivedFrom`, the reader it was re-keyed from when the card moved. A file without `keyId` (older firmware) gets one the first time it loads if its passwords decode to plausible text with this reader's key and `wifi.json` does not say the card came from another reader; otherwise it is left as it is, and no later save records a `keyId` until those passwords are entered again. The web file endpoints refuse them (`lib/FsHelpers/ProtectedPaths.h`) |
 | `weather_settings.json`, `weather_cache.json` | `WeatherSettingsStore`, `WeatherClient::saveCache` | none | Weather settings, and the last forecast (dropped when its `requestSignature` no longer matches the settings) |
 | `autosync.json` | `AutoSyncState::saveToFile` | none | KOReader auto-sync state |
@@ -42,14 +42,15 @@ truncates the file in place.
 `Epub`, `Xtc` and `Txt` constructors; `ReaderActivity::bookCacheDir`). TXT and Markdown books share
 `txt_`. Settings → System → Clear Reading Cache (`ClearCacheActivity`, which also removes
 `fontprev/`) and a book's Delete Book Cache clear them through `BookCache` (`lib/FsHelpers/`):
-**Keep** leaves the reading state, `progress.bin`, `linkstack.bin`, `bookmarks.bin` and
-`koreader_syncmethod.txt` (`BookCache::isReadingState`), and removes the rest; **Reset** removes the
+**Keep** leaves the reading state, `progress.bin`, `linkstack.bin`, `bookmarks.bin`,
+`koreader_syncmethod.txt` and `overrides.bin` (`BookCache::isReadingState`), and removes the rest; **Reset** removes the
 directory whole.
 
 | File | Formats | Version | Contents |
 |---|---|---|---|
 | `progress.bin` | all | none (told apart by length) | Where the book was left: [below](#progressbin) |
 | `bookmarks.bin` | all | `BookmarkStore::FILE_VERSION` (2) | `u8` version, `u16` count, then per bookmark `u16` spine, `u16` page, `u16` name length, the name. Version 1 (no names) still reads |
+| `overrides.bin` | EPUB | `kFormatVersion` (1) in `src/BookReaderOverrides.cpp` | The settings chosen for this book alone (`BookReaderOverridesFile`): `BO`, `u8` format version, `u8` font-size numbering (`FONT_SIZE_ORDER_VERSION`), `u8` line-spacing numbering (`LINE_SPACING_ORDER_VERSION`), `u8` count, then `count` `i8` values in `BookReaderOverrides::Field` order (-1 follows the global setting), `u8` length and the SD font family's name. Fields are only appended: a reader takes the ones it knows. No file while the book follows every setting. Replaced whole through `FileReplace`; a left-over `overrides.bin.old` is read when the file is missing |
 | `details.bin` | all | `BookDetailsCache` `VERSION` (3) | What the Library's lists show: [below](#detailsbin) |
 | `thumb_*.bmp` | all | in the name | Cover thumbnails: [below](#cover-thumbnails) |
 | `cover.bmp` | all | none | The sleep screen's cover (`cover_crop.bmp` for an EPUB's cropped one) |

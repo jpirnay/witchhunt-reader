@@ -1004,8 +1004,8 @@ class CrossPointSettings {
   static int getBuiltinReaderFontIdForPoints(const uint8_t family, const uint8_t pt) {
     return getBuiltinReaderFontId(family, builtinRungForPoints(pt));
   }
-  // The Publisher Fonts (PUBLISHER_FONTS) a book is drawn with: its override (RecentBook::publisherFontsOverride), or
-  // `setting` (publisherFonts) when it has none.
+  // The Publisher Fonts (PUBLISHER_FONTS) a book is drawn with: its override
+  // (BookReaderOverrides::publisherFontsOverride), or `setting` (publisherFonts) when it has none.
   static constexpr uint8_t publisherFontsFor(const int8_t bookOverride, const uint8_t setting) {
     return bookOverride >= 0 && bookOverride < PUBLISHER_FONTS_COUNT ? static_cast<uint8_t>(bookOverride) : setting;
   }

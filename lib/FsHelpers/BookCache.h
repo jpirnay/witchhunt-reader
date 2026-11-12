@@ -21,8 +21,9 @@ enum class Keep : uint8_t {
 };
 
 // The reader's own files: where the book was left (progress.bin) and the link Back stack that
-// leads back from there (linkstack.bin), its bookmarks (bookmarks.bin), and which document id the
-// KOReader sync server keeps it under (koreader_syncmethod.txt), learned from the server. None of
+// leads back from there (linkstack.bin), its bookmarks (bookmarks.bin), which document id the
+// KOReader sync server keeps it under (koreader_syncmethod.txt), learned from the server, and the
+// settings chosen for this book alone (overrides.bin, BookReaderOverridesFile in src/). None of
 // them needs what a clear removes. A position and a bookmark name a page of the book's layout, and
 // the next open lays the book out again the same way from the same book and settings; a position
 // also carries its page's paragraph, which finds it in a layout that did change.

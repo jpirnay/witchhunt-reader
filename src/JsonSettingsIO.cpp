@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <iterator>
 #include <string>
 
 #include "CrossPointSettings.h"
@@ -836,6 +837,34 @@ bool JsonSettingsIO::loadWifi(WifiCredentialStore& store, const char* json, bool
 
 // ---- RecentBooksStore ----
 
+namespace {
+// Each book override's key in recent.json, which carried a book's own settings before they moved to its folder and
+// still holds them for a book not opened since. The SD family name is the one that is not a number, and goes apart.
+struct OverrideKey {
+  BookReaderOverrides::Field field;
+  const char* key;
+};
+using Field = BookReaderOverrides::Field;
+constexpr OverrideKey kRecentBookOverrideKeys[] = {
+    {Field::EmbeddedStyle, "embeddedStyleOverride"},
+    {Field::ImageRendering, "imageRenderingOverride"},
+    {Field::FontFamily, "fontFamilyOverride"},
+    {Field::FontSize, "fontSizeOverride"},
+    {Field::BionicReading, "bionicReadingOverride"},
+    {Field::ParagraphAlignment, "paragraphAlignmentOverride"},
+    {Field::TextAntiAliasing, "textAntiAliasingOverride"},
+    {Field::Hyphenation, "hyphenationOverride"},
+    {Field::FontSizeNormalization, "fontSizeNormalizationOverride"},
+    {Field::GuideDots, "guideDotsOverride"},
+    {Field::InlineFootnotePreviews, "inlineFootnotePreviewsOverride"},
+    {Field::LineSpacing, "lineSpacingOverride"},
+    {Field::VerticalText, "verticalTextOverride"},
+    {Field::PublisherFonts, "publisherFontsOverride"},
+};
+static_assert(std::size(kRecentBookOverrideKeys) == BookReaderOverrides::kFieldCount,
+              "every book override has a key in recent.json");
+}  // namespace
+
 bool JsonSettingsIO::saveRecentBooks(const RecentBooksStore& store, const char* path) {
   JsonDocument doc;
   // Which numbering each book's fontSizeOverride is in. Its own stamp rather than the settings
@@ -853,23 +882,16 @@ bool JsonSettingsIO::saveRecentBooks(const RecentBooksStore& store, const char* 
     obj["series"] = book.series;
     obj["coverBmpPath"] = book.coverBmpPath;
     obj["metadataStamp"] = book.metadataStamp;
-    obj["embeddedStyleOverride"] = book.embeddedStyleOverride;
-    obj["imageRenderingOverride"] = book.imageRenderingOverride;
-    obj["fontFamilyOverride"] = book.fontFamilyOverride;
-    if (!book.sdFontFamilyOverride.empty()) {
-      obj["sdFontFamilyOverride"] = book.sdFontFamilyOverride;
+    // A book's own settings live in its folder now (BookReaderOverridesFile). A row keeps writing the ones it was
+    // loaded with only until its book's next open moves them there, so none is lost before then.
+    if (book.legacyOverrides.any()) {
+      for (const OverrideKey& entry : kRecentBookOverrideKeys) {
+        obj[entry.key] = book.legacyOverrides.get(entry.field);
+      }
+      if (!book.legacyOverrides.sdFontFamilyOverride.empty()) {
+        obj["sdFontFamilyOverride"] = book.legacyOverrides.sdFontFamilyOverride;
+      }
     }
-    obj["fontSizeOverride"] = book.fontSizeOverride;
-    obj["bionicReadingOverride"] = book.bionicReadingOverride;
-    obj["paragraphAlignmentOverride"] = book.paragraphAlignmentOverride;
-    obj["textAntiAliasingOverride"] = book.textAntiAliasingOverride;
-    obj["hyphenationOverride"] = book.hyphenationOverride;
-    obj["fontSizeNormalizationOverride"] = book.fontSizeNormalizationOverride;
-    obj["guideDotsOverride"] = book.guideDotsOverride;
-    obj["inlineFootnotePreviewsOverride"] = book.inlineFootnotePreviewsOverride;
-    obj["lineSpacingOverride"] = book.lineSpacingOverride;
-    obj["verticalTextOverride"] = book.verticalTextOverride;
-    obj["publisherFontsOverride"] = book.publisherFontsOverride;
   }
 
   String json;
@@ -908,12 +930,6 @@ RecentBooksLoad JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const c
   const auto fontSizeOrderV = static_cast<uint8_t>(doc["fontSizeOrderV"].as<int>());
   // And which numbering the per-book line-spacing overrides are in: absent (0) before 90% and 145% to 175% existed.
   const auto lineSpacingOrderV = static_cast<uint8_t>(doc["lineSpacingOrderV"].as<int>());
-  auto clampInt8 = [](int value, int minValue, int maxValue, int8_t fallback) -> int8_t {
-    if (value < minValue || value > maxValue) {
-      return fallback;
-    }
-    return static_cast<int8_t>(value);
-  };
 
   for (JsonObject obj : arr) {
     // The list as filled so far, not getCount(): that asks ensureLoaded(), and the store is not loaded until this
@@ -928,35 +944,11 @@ RecentBooksLoad JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const c
     // Absent in files written before it existed: 0, so an entry whose book has
     // a sidecar is refreshed once.
     book.metadataStamp = obj["metadataStamp"].as<unsigned>();
-    book.embeddedStyleOverride = clampInt8(obj["embeddedStyleOverride"] | -1, -1, 1, -1);
-    book.imageRenderingOverride =
-        clampInt8(obj["imageRenderingOverride"] | -1, -1, CrossPointSettings::IMAGE_RENDERING_COUNT - 1, -1);
-    book.fontFamilyOverride =
-        clampInt8(obj["fontFamilyOverride"] | -1, -1, CrossPointSettings::FONT_FAMILY_COUNT - 1, -1);
-    book.sdFontFamilyOverride = obj["sdFontFamilyOverride"] | std::string("");
-    if (!book.sdFontFamilyOverride.empty()) {
-      // Keep built-in and SD font overrides mutually exclusive.
-      book.fontFamilyOverride = -1;
+    const BookReaderOverrides::Numbering numbering{fontSizeOrderV, lineSpacingOrderV};
+    book.legacyOverrides.setSdFontFamilyFromStored(obj["sdFontFamilyOverride"] | std::string(""));
+    for (const OverrideKey& entry : kRecentBookOverrideKeys) {
+      book.legacyOverrides.setFromStored(entry.field, obj[entry.key] | -1, numbering);
     }
-    // -1 means "follow the default". Anything else is a size in this file's meaning; one that does
-    // not convert to a usable point size goes back to the default rather than to a guess.
-    const uint8_t overridePt =
-        CrossPointSettings::fontPointSizeFromStored(obj["fontSizeOverride"] | -1, fontSizeOrderV);
-    book.fontSizeOverride = overridePt != 0 ? static_cast<int8_t>(overridePt) : -1;
-    book.bionicReadingOverride = clampInt8(obj["bionicReadingOverride"] | -1, -1, 1, -1);
-    book.paragraphAlignmentOverride =
-        clampInt8(obj["paragraphAlignmentOverride"] | -1, -1, CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT - 1, -1);
-    book.textAntiAliasingOverride = clampInt8(obj["textAntiAliasingOverride"] | -1, -1, 1, -1);
-    book.hyphenationOverride = clampInt8(obj["hyphenationOverride"] | -1, -1, 1, -1);
-    book.fontSizeNormalizationOverride = clampInt8(obj["fontSizeNormalizationOverride"] | -1, -1, 1, -1);
-    book.guideDotsOverride = clampInt8(obj["guideDotsOverride"] | -1, -1, 1, -1);
-    book.inlineFootnotePreviewsOverride = clampInt8(obj["inlineFootnotePreviewsOverride"] | -1, -1, 1, -1);
-    const uint8_t lineSpacingStep = lineSpacingStepFromStored(obj["lineSpacingOverride"] | -1, lineSpacingOrderV);
-    book.lineSpacingOverride = lineSpacingStep != kNoLineSpacingStep ? static_cast<int8_t>(lineSpacingStep) : -1;
-    book.verticalTextOverride =
-        clampInt8(obj["verticalTextOverride"] | -1, -1, CrossPointSettings::VERTICAL_TEXT_COUNT - 1, -1);
-    book.publisherFontsOverride =
-        clampInt8(obj["publisherFontsOverride"] | -1, -1, CrossPointSettings::PUBLISHER_FONTS_COUNT - 1, -1);
     store.recentBooks.push_back(std::move(book));
   }
 

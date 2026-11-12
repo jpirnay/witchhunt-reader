@@ -12,7 +12,7 @@ namespace BookCache {
 // names its place by page number in the layout that is being cleared.
 bool isReadingState(const std::string_view name) {
   return name == "progress.bin" || name == "linkstack.bin" || name == "bookmarks.bin" ||
-         name == "koreader_syncmethod.txt";
+         name == "koreader_syncmethod.txt" || name == "overrides.bin";
 }
 
 bool isCoverImage(const std::string_view name) {
