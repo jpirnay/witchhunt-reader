@@ -31,6 +31,19 @@ class SettingsActivity final : public TabbedUiListActivity {
 
   void enterCategory(int categoryIndex);
 
+  // The tabs' rows, as onEnter() builds them; rows a SettingInfo::shownWhen hides are left out.
+  void buildRows();
+  // What each SettingInfo::shownWhen answered when the rows were built. A change that makes one answer otherwise (Dark
+  // Mode set to Scheduled, or away from it) builds the rows again, the selection where it was.
+  struct ShownAnswer {
+    SettingInfo::ShownWhenFn fn;
+    bool shown;
+  };
+  static constexpr size_t MAX_SHOWN_ANSWERS = 4;
+  std::array<ShownAnswer, MAX_SHOWN_ANSWERS> shownAnswers{};
+  size_t shownAnswerCount = 0;
+  void rebuildRowsIfShownChanged();
+
   static constexpr size_t LIST_WINDOW_CAPACITY = 24;
   std::array<std::string, LIST_WINDOW_CAPACITY> windowLabels;
   std::array<std::string, LIST_WINDOW_CAPACITY> windowValues;

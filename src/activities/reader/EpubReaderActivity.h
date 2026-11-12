@@ -334,6 +334,9 @@ class EpubReaderActivity final : public Activity {
     // (so `ready` stays true for restoreCurrentPageToBufferIfPreRendered), but the page turn
     // must not show it: it renders the page afresh, by when the pass's own Page is gone.
     bool incomplete = false;
+    // Drawn for an inverted output (Dark Mode): its pictures went into the buffer inverted. Shown only in the polarity
+    // it was drawn for; Scheduled can switch between the pre-render and the page turn that shows it.
+    bool inverted = false;
   };
   PreRenderedPage preRenderedPage;
   // The pre-render staged this page's grayscale planes, so displaying it can go

@@ -1121,7 +1121,7 @@ void SleepActivity::renderOverlaySleepScreen() const {
   // When coming from a reader activity the frame buffer already holds the page.
   // When coming from a non-reader activity we re-render it from the saved progress. So too when the reader drew it
   // for Dark Mode, its pictures inverted (GfxRenderer::keepsImagePolarity): this screen shows in normal polarity.
-  const bool pageDrawnForDarkMode = APP_STATE.lastSleepFromReader && SETTINGS.darkMode != 0;
+  const bool pageDrawnForDarkMode = APP_STATE.lastSleepFromReader && pageWentOutInverted;
   if ((!APP_STATE.lastSleepFromReader || pageDrawnForDarkMode) && !APP_STATE.openEpubPath.empty()) {
     const auto& path = APP_STATE.openEpubPath;
     bool rendered = false;

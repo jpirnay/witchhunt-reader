@@ -583,8 +583,12 @@ class CrossPointSettings {
   uint16_t measuredFastRefreshMs = 0;
   // Menu/chrome text size (UI_FONT_SIZE)
   uint8_t uiFontSize = UI_FONT_SIZE_DEFAULT;
-  // Dark Mode: every screen but the sleep screens and the image viewer white on black. See DarkMode.h.
+  // Dark Mode: every screen but the sleep screens and the image viewer white on black. A DarkMode::Setting: off, on,
+  // or Scheduled, from darkModeFrom to darkModeUntil (half-hour slots of the day, DarkMode::SLOT_MINUTES). See
+  // DarkMode.h; what the screens follow now is DarkModeNow::isDark().
   uint8_t darkMode = 0;
+  uint8_t darkModeFrom = 44;   // 22:00
+  uint8_t darkModeUntil = 14;  // 07:00
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
   // --- Frontlight / backlight (boards with FrontlightConfig; T5S3, X4 Pro) ---

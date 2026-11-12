@@ -4359,6 +4359,12 @@ bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
   if (!section) {
     return false;
   }
+  // The polarity changed since the pre-render (Dark Mode's night hours began or ended at this frame, or another way
+  // in): its pictures and staged grays are the other polarity's, so the page is drawn afresh.
+  if (preRenderedPage.inverted != renderer.isOutputInverted()) {
+    preRenderedPlanesStaged_ = false;
+    return false;
+  }
   auto p = section->loadPageFromSectionFile();
   if (!p) {
     // Page load failed — caller falls through to full render.
@@ -4505,7 +4511,8 @@ void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
     // overlay and screenshots restore the current one from it) but is never shown: the turn
     // renders afresh, without this pass's Page in the heap.
     const bool incomplete = glyphsDropped > 0 || imagesMissed > 0;
-    preRenderedPage = {true, currentSpineIndex, nextPage, preRenderDuration, millis(), incomplete};
+    preRenderedPage = {true,       currentSpineIndex,          nextPage, preRenderDuration, millis(),
+                       incomplete, renderer.isOutputInverted()};
     // Drawn whole, the page that had a gap for lack of memory (renderContents) is shown without the sign.
     if (!incomplete && glyphStarvedPage(currentSpineIndex, nextPage)) glyphStarvedSpine_ = glyphStarvedPage_ = -1;
 #if DEBUG_BACKGROUND_WORK

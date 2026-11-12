@@ -405,8 +405,8 @@ static void saveSleepFrameBuffer() {
     return;
   }
   const size_t bufferSize = renderer.getBufferSize();
-  // Saved for the polarity the wake restores it in (DarkMode::savedFrameInverts).
-  const bool invert = DarkMode::savedFrameInverts(renderer.isOutputInverted(), SETTINGS.darkMode != 0);
+  // Saved as it is on the glass; loadSleepFrameBuffer() converts back for the wake's polarity.
+  const bool invert = DarkMode::glassDiffersFromBuffer(renderer.isOutputInverted());
   if (invert) renderer.invertScreen();
   const size_t written = file.write(renderer.getFrameBuffer(), bufferSize);
   if (invert) renderer.invertScreen();
@@ -436,6 +436,8 @@ static bool loadSleepFrameBuffer() {
             bytesRead, static_cast<unsigned>(bufferSize));
     return false;
   }
+  // The file holds the glass (saveSleepFrameBuffer); boot has set this wake's polarity already (setupDisplayAndFonts).
+  if (DarkMode::glassDiffersFromBuffer(renderer.isOutputInverted())) renderer.invertScreen();
   return true;
 }
 
