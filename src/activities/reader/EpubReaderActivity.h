@@ -1066,6 +1066,11 @@ class EpubReaderActivity final : public Activity {
   // nothing worth having and cost the next visit a needless re-open.
   void suspendBackgroundWork();
   void resumeBackgroundWork();
+  // Before a screen opens over the page, the bars' own or another (startActivityForResult): Background-B's borrow
+  // handed back and the work staged for the page under it dropped. Under RenderLock.
+  void prepareForOverlay(const char* overlay);
+  // The deferred AA and the pre-render staged for the page dropped, `by` named in the log. Under RenderLock.
+  void dropStagedPageWork(const char* by);
   void launchKOReaderSync(SyncLaunchMode mode = SyncLaunchMode::COMPARE,
                           const SyncPositionOverride* positionOverride = nullptr,
                           const SyncPostAction& postAction = {});

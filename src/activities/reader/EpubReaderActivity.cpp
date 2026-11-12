@@ -1533,53 +1533,56 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
 
 void EpubReaderActivity::startActivityForResult(std::unique_ptr<Activity>&& activity,
                                                 ActivityResultHandler resultHandler) {
-  // See the header: B's borrow must not outlive the reader being the top activity, or every
-  // redraw the child makes runs a HALF waveform. No-op unless B currently holds the block.
-  //
-  // endBackgroundBorrow() rather than resetBackgroundBuild(): the former discards only a build
-  // that is still live, and keeps a COMPLETED one for buildSection() to adopt. Resetting would
-  // throw that finished section away and make the next page turn rebuild it — paying for the
-  // refresh fix with a page-turn stall.
-  //
-  // Under the render lock, like every other endBackgroundBorrow() call site. This runs on the
-  // loop task, and the render task calls the same function from recoverSecondaryBufferIfNeeded()
-  // at the top of every render(). Its `if (!backgroundBorrowActive_) return;` is a plain bool,
-  // not a guard against concurrency: unlocked, both tasks pass it and both run the teardown —
-  // double-destroying backgroundSection_ and buildScratch_ (two frees into TLSF, which corrupts
-  // the free list and hangs a later malloc) while returnSecondaryBuffer() memcpy's 48 KB into a
-  // framebuffer the render task is using.
   {
     RenderLock lock(*this);
-    if (backgroundBorrowActive_) {
-      LOG_INF("ERS", "Overlay '%s' opening; returning Background-B's borrowed buffer so its refreshes stay fast",
-              activity ? activity->getName().c_str() : "<null>");
-    }
-    // Not a preemption. backgroundPreemptCount_ measures one specific thing — a build that keeps
-    // losing the race against page turns — and BG_BUILD_MAX_PREEMPTIONS (2) makes B abandon the
-    // spine to the foreground once it is hit. An overlay opening says nothing about whether the
-    // parse fits between two turns, so letting it burn that budget would mean two visits to the
-    // reader menu permanently demote the next section to a blocking Background-C build with its
-    // popup. So it is not counted: B resumes with exactly the budget it had.
-    endBackgroundBorrow(/*preemption=*/false);
-    // The child draws over the page, so nothing staged for this screen survives it: the owed
-    // deferred AA of the page on it, and a queued or finished pre-render of the next page (it lives
-    // in the write framebuffer, which the child draws into). Left armed, the render that follows
-    // the child's return was classified as that pre-render and drew nothing -- the menu stayed on
-    // screen until the next page turn (X3 run 23: a lane redraw finished 11 ms before the menu
-    // press, arming the pre-render, which the heap floor then skipped). Dropped, that render is a
-    // Normal pass that redraws the page and stages its AA afresh.
-    if (pendingGrayscale_.active || pendingPreRender || usePreRenderedBuffer || preRenderedPage.ready) {
-      LOG_DBG("ERS", "Overlay '%s' opening; dropping the%s%s%s staged for the page under it",
-              activity ? activity->getName().c_str() : "<null>", pendingGrayscale_.active ? " deferred AA" : "",
-              pendingPreRender ? " pre-render request" : "", preRenderedPage.ready ? " pre-rendered page" : "");
-    }
-    pendingGrayscale_ = {};
-    pendingPreRender = false;
-    usePreRenderedBuffer = false;
-    preRenderedPage = {};
-    preRenderedPlanesStaged_ = false;
+    prepareForOverlay(activity ? activity->getName().c_str() : "<null>");
   }
   Activity::startActivityForResult(std::move(activity), std::move(resultHandler));
+}
+
+// See the header: B's borrow must not outlive the reader being the top activity, or every redraw the child makes runs
+// a HALF waveform. No-op unless B currently holds the block.
+//
+// endBackgroundBorrow() rather than resetBackgroundBuild(): the former discards only a build that is still live, and
+// keeps a COMPLETED one for buildSection() to adopt. Resetting would throw that finished section away and make the
+// next page turn rebuild it — paying for the refresh fix with a page-turn stall.
+//
+// Under the render lock, like every other endBackgroundBorrow() call site. This runs on the loop task, and the render
+// task calls the same function from recoverSecondaryBufferIfNeeded() at the top of every render(). Its
+// `if (!backgroundBorrowActive_) return;` is a plain bool, not a guard against concurrency: unlocked, both tasks pass
+// it and both run the teardown — double-destroying backgroundSection_ and buildScratch_ (two frees into TLSF, which
+// corrupts the free list and hangs a later malloc) while returnSecondaryBuffer() memcpy's 48 KB into a framebuffer the
+// render task is using.
+void EpubReaderActivity::prepareForOverlay(const char* overlay) {
+  if (backgroundBorrowActive_) {
+    LOG_INF("ERS", "Overlay '%s' opening; returning Background-B's borrowed buffer so its refreshes stay fast",
+            overlay);
+  }
+  // Not a preemption. backgroundPreemptCount_ measures one specific thing — a build that keeps losing the race
+  // against page turns — and BG_BUILD_MAX_PREEMPTIONS (2) makes B abandon the spine to the foreground once it is hit.
+  // An overlay opening says nothing about whether the parse fits between two turns, so letting it burn that budget
+  // would mean two visits to the reader menu permanently demote the next section to a blocking Background-C build with
+  // its popup. So it is not counted: B resumes with exactly the budget it had.
+  endBackgroundBorrow(/*preemption=*/false);
+  // The child draws over the page, so nothing staged for this screen survives it: the owed deferred AA of the page on
+  // it, and a queued or finished pre-render of the next page (it lives in the write framebuffer, which the child draws
+  // into). Left armed, the render that follows the child's return was classified as that pre-render and drew nothing
+  // -- the menu stayed on screen until the next page turn (X3 run 23: a lane redraw finished 11 ms before the menu
+  // press, arming the pre-render, which the heap floor then skipped). Dropped, that render is a Normal pass that
+  // redraws the page and stages its AA afresh.
+  dropStagedPageWork(overlay);
+}
+
+void EpubReaderActivity::dropStagedPageWork(const char* by) {
+  if (pendingGrayscale_.active || pendingPreRender || usePreRenderedBuffer || preRenderedPage.ready) {
+    LOG_DBG("ERS", "%s: dropping the%s%s%s staged for the page", by, pendingGrayscale_.active ? " deferred AA" : "",
+            pendingPreRender ? " pre-render request" : "", preRenderedPage.ready ? " pre-rendered page" : "");
+  }
+  pendingGrayscale_ = {};
+  pendingPreRender = false;
+  usePreRenderedBuffer = false;
+  preRenderedPage = {};
+  preRenderedPlanesStaged_ = false;
 }
 
 void EpubReaderActivity::suspendBackgroundWork() {
