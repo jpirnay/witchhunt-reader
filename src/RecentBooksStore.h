@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "BookReaderOverrides.h"
+
 struct RecentBook {
   std::string path;
   std::string title;
@@ -12,36 +14,8 @@ struct RecentBook {
   // SidecarFiles::metadataStamp() of the metadata sidecar title/author/series were
   // taken with (0 = none). EPUB only; see refreshSidecarMetadata().
   uint32_t metadataStamp = 0;
-  // -1 = use global setting, otherwise explicit per-book override.
-  int8_t embeddedStyleOverride = -1;
-  // -1 = use global setting, otherwise CrossPointSettings::IMAGE_RENDERING value.
-  int8_t imageRenderingOverride = -1;
-  // -1 = use global setting, otherwise CrossPointSettings::FONT_FAMILY value.
-  int8_t fontFamilyOverride = -1;
-  // Empty = use global setting, otherwise explicit SD-card family name override.
-  std::string sdFontFamilyOverride;
-  // -1 = use global setting, otherwise a point size (see CrossPointSettings::fontPointSize).
-  int8_t fontSizeOverride = -1;
-  // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
-  int8_t bionicReadingOverride = -1;
-  // -1 = use global setting, otherwise CrossPointSettings::PARAGRAPH_ALIGNMENT value.
-  int8_t paragraphAlignmentOverride = -1;
-  // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
-  int8_t textAntiAliasingOverride = -1;
-  // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
-  int8_t hyphenationOverride = -1;
-  // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
-  int8_t fontSizeNormalizationOverride = -1;
-  // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
-  int8_t guideDotsOverride = -1;
-  // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
-  int8_t inlineFootnotePreviewsOverride = -1;
-  // -1 = use global setting, otherwise CrossPointSettings::LINE_COMPRESSION value.
-  int8_t lineSpacingOverride = -1;
-  // -1 = use global setting, otherwise CrossPointSettings::VERTICAL_TEXT value.
-  int8_t verticalTextOverride = -1;
-  // -1 = use global setting, otherwise CrossPointSettings::PUBLISHER_FONTS value.
-  int8_t publisherFontsOverride = -1;
+  // The book's own reader settings.
+  BookReaderOverrides overrides;
 
   bool operator==(const RecentBook& other) const { return path == other.path; }
 };
@@ -142,30 +116,8 @@ class RecentBooksStore {
   bool loadFromFile();
   RecentBook getDataFromBook(std::string path) const;
   RecentBook getBookByPath(const std::string& path) const;
-  bool setReaderOverrides(const std::string& path, int8_t embeddedStyleOverride, int8_t imageRenderingOverride);
-  bool setReaderOverrides(const std::string& path, int8_t embeddedStyleOverride, int8_t imageRenderingOverride,
-                          int8_t fontFamilyOverride, int8_t fontSizeOverride);
-  bool setReaderOverrides(const std::string& path, int8_t embeddedStyleOverride, int8_t imageRenderingOverride,
-                          int8_t fontFamilyOverride, const std::string& sdFontFamilyOverride, int8_t fontSizeOverride);
-  bool setReaderOverrides(const std::string& path, int8_t embeddedStyleOverride, int8_t imageRenderingOverride,
-                          bool bionicReadingOverride);
-  bool setReaderOverrides(const std::string& path, int8_t embeddedStyleOverride, int8_t imageRenderingOverride,
-                          int8_t fontFamilyOverride, int8_t fontSizeOverride, bool bionicReadingOverride);
-  bool setReaderOverrides(const std::string& path, int8_t embeddedStyleOverride, int8_t imageRenderingOverride,
-                          int8_t fontFamilyOverride, const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
-                          bool bionicReadingOverride);
-  bool setReaderOverrides(const std::string& path, int8_t embeddedStyleOverride, int8_t imageRenderingOverride,
-                          int8_t fontFamilyOverride, const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
-                          bool bionicReadingOverride, int8_t paragraphAlignmentOverride);
-  // Master overload — covers every per-book override. The narrower overloads above
-  // all funnel through here, preserving any fields they don't take as arguments.
-  bool setReaderOverrides(const std::string& path, int8_t embeddedStyleOverride, int8_t imageRenderingOverride,
-                          int8_t fontFamilyOverride, const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
-                          int8_t bionicReadingOverride, int8_t paragraphAlignmentOverride,
-                          int8_t textAntiAliasingOverride, int8_t hyphenationOverride,
-                          int8_t fontSizeNormalizationOverride, int8_t guideDotsOverride,
-                          int8_t inlineFootnotePreviewsOverride, int8_t lineSpacingOverride,
-                          int8_t verticalTextOverride, int8_t publisherFontsOverride);
+  // Saves `overrides` as the book's own settings. False when the book has no entry in the list.
+  bool setReaderOverrides(const std::string& path, const BookReaderOverrides& overrides);
 };
 
 // Helper macro to access recent books store

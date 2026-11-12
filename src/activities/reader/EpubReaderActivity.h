@@ -19,6 +19,7 @@
 #include <atomic>
 #include <optional>
 
+#include "BookReaderOverrides.h"
 #include "BookmarkStore.h"
 #include "ChapterPageSpan.h"
 #include "CrossPointState.h"
@@ -1115,6 +1116,8 @@ class EpubReaderActivity final : public Activity {
                                 int8_t fontSizeNormalizationOverride, int8_t guideDotsOverride,
                                 int8_t inlineFootnotePreviewsOverride, int8_t lineSpacingOverride,
                                 int8_t verticalTextOverride, int8_t publisherFontsOverride);
+  // The book's own settings as this reader holds them (the book*Override members).
+  BookReaderOverrides bookOverrides() const;
   void openReaderMenu();
   void openQuickOverrides();
   bool getEffectiveEmbeddedStyle() const;

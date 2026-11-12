@@ -761,30 +761,30 @@ void EpubReaderActivity::onEnter() {
   if (!series.empty() && !epub->getSeriesIndex().empty()) {
     series += " #" + epub->getSeriesIndex();
   }
-  RecentBook currentBook;
+  BookReaderOverrides saved;
   {
     // One load of the list for both: the add and the read of this book's overrides. Released
     // again before the reader allocates anything of its own.
     const RecentBooksStore::Hold recents;
     RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), series,
                          ReaderActivity::coverThumbPlaceholder(epub->getPath()));
-    currentBook = RECENT_BOOKS.getBookByPath(epub->getPath());
+    saved = RECENT_BOOKS.getBookByPath(epub->getPath()).overrides;
   }
-  bookEmbeddedStyleOverride = currentBook.embeddedStyleOverride;
-  bookImageRenderingOverride = currentBook.imageRenderingOverride;
-  bookFontFamilyOverride = currentBook.fontFamilyOverride;
-  bookSdFontFamilyOverride = currentBook.sdFontFamilyOverride;
-  bookFontSizeOverride = currentBook.fontSizeOverride;
-  bookBionicReadingOverride = currentBook.bionicReadingOverride;
-  bookParagraphAlignmentOverride = currentBook.paragraphAlignmentOverride;
-  bookTextAntiAliasingOverride = currentBook.textAntiAliasingOverride;
-  bookHyphenationOverride = currentBook.hyphenationOverride;
-  bookFontSizeNormalizationOverride = currentBook.fontSizeNormalizationOverride;
-  bookGuideDotsOverride = currentBook.guideDotsOverride;
-  bookInlineFootnotePreviewsOverride = currentBook.inlineFootnotePreviewsOverride;
-  bookLineSpacingOverride = currentBook.lineSpacingOverride;
-  bookVerticalTextOverride = currentBook.verticalTextOverride;
-  bookPublisherFontsOverride = currentBook.publisherFontsOverride;
+  bookEmbeddedStyleOverride = saved.embeddedStyleOverride;
+  bookImageRenderingOverride = saved.imageRenderingOverride;
+  bookFontFamilyOverride = saved.fontFamilyOverride;
+  bookSdFontFamilyOverride = saved.sdFontFamilyOverride;
+  bookFontSizeOverride = saved.fontSizeOverride;
+  bookBionicReadingOverride = saved.bionicReadingOverride;
+  bookParagraphAlignmentOverride = saved.paragraphAlignmentOverride;
+  bookTextAntiAliasingOverride = saved.textAntiAliasingOverride;
+  bookHyphenationOverride = saved.hyphenationOverride;
+  bookFontSizeNormalizationOverride = saved.fontSizeNormalizationOverride;
+  bookGuideDotsOverride = saved.guideDotsOverride;
+  bookInlineFootnotePreviewsOverride = saved.inlineFootnotePreviewsOverride;
+  bookLineSpacingOverride = saved.lineSpacingOverride;
+  bookVerticalTextOverride = saved.verticalTextOverride;
+  bookPublisherFontsOverride = saved.publisherFontsOverride;
   // Measured at the open that compiled the book's CSS (ReaderActivity); taken into account with Normalize Font Size and
   // the book's style on (makeSectionBuildParams).
   if (const uint8_t bodySize = BodySize::read(epub->getCachePath()); bodySize != 0) bookBodySizePct_ = bodySize;
@@ -3310,6 +3310,26 @@ void EpubReaderActivity::applyBookReaderOverrides(const int8_t embeddedStyleOver
                            bookVerticalTextOverride, bookPublisherFontsOverride);
 }
 
+BookReaderOverrides EpubReaderActivity::bookOverrides() const {
+  BookReaderOverrides overrides;
+  overrides.embeddedStyleOverride = bookEmbeddedStyleOverride;
+  overrides.imageRenderingOverride = bookImageRenderingOverride;
+  overrides.fontFamilyOverride = bookFontFamilyOverride;
+  overrides.sdFontFamilyOverride = bookSdFontFamilyOverride;
+  overrides.fontSizeOverride = bookFontSizeOverride;
+  overrides.bionicReadingOverride = bookBionicReadingOverride;
+  overrides.paragraphAlignmentOverride = bookParagraphAlignmentOverride;
+  overrides.textAntiAliasingOverride = bookTextAntiAliasingOverride;
+  overrides.hyphenationOverride = bookHyphenationOverride;
+  overrides.fontSizeNormalizationOverride = bookFontSizeNormalizationOverride;
+  overrides.guideDotsOverride = bookGuideDotsOverride;
+  overrides.inlineFootnotePreviewsOverride = bookInlineFootnotePreviewsOverride;
+  overrides.lineSpacingOverride = bookLineSpacingOverride;
+  overrides.verticalTextOverride = bookVerticalTextOverride;
+  overrides.publisherFontsOverride = bookPublisherFontsOverride;
+  return overrides;
+}
+
 bool EpubReaderActivity::applyBookReaderOverrides(
     const int8_t embeddedStyleOverride, const int8_t imageRenderingOverride, const int8_t fontFamilyOverride,
     const std::string& sdFontFamilyOverride, const int8_t fontSizeOverride, const int8_t bionicReadingOverride,
@@ -3370,12 +3390,7 @@ bool EpubReaderActivity::applyBookReaderOverrides(
   bookLineSpacingOverride = lineSpacingOverride;
   bookVerticalTextOverride = verticalTextOverride;
   bookPublisherFontsOverride = publisherFontsOverride;
-  RECENT_BOOKS.setReaderOverrides(
-      epub->getPath(), bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
-      bookSdFontFamilyOverride, bookFontSizeOverride, bookBionicReadingOverride, bookParagraphAlignmentOverride,
-      bookTextAntiAliasingOverride, bookHyphenationOverride, bookFontSizeNormalizationOverride, bookGuideDotsOverride,
-      bookInlineFootnotePreviewsOverride, bookLineSpacingOverride, bookVerticalTextOverride,
-      bookPublisherFontsOverride);
+  RECENT_BOOKS.setReaderOverrides(epub->getPath(), bookOverrides());
 
   if (layoutOverridesUnchanged) {
     // Only guide dots or how images are drawn changed: persisted above, and the repaint on
@@ -7712,25 +7727,24 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   // getEffective*() helpers. Passing raw SETTINGS values here diverges the section property
   // hash from the reader's whenever an override is set, and this path then silently rebuilds
   // a duplicate section variant during sleep preparation.
-  const RecentBook currentBook = RECENT_BOOKS.getBookByPath(filePath);
+  const BookReaderOverrides saved = RECENT_BOOKS.getBookByPath(filePath).overrides;
   const bool effectiveEmbeddedStyle =
-      currentBook.embeddedStyleOverride >= 0 ? currentBook.embeddedStyleOverride != 0 : SETTINGS.embeddedStyle != 0;
+      saved.embeddedStyleOverride >= 0 ? saved.embeddedStyleOverride != 0 : SETTINGS.embeddedStyle != 0;
   const bool effectiveHyphenation =
-      currentBook.hyphenationOverride >= 0 ? currentBook.hyphenationOverride != 0 : SETTINGS.hyphenationEnabled != 0;
-  const bool effectiveFontSizeNormalization = currentBook.fontSizeNormalizationOverride >= 0
-                                                  ? currentBook.fontSizeNormalizationOverride != 0
+      saved.hyphenationOverride >= 0 ? saved.hyphenationOverride != 0 : SETTINGS.hyphenationEnabled != 0;
+  const bool effectiveFontSizeNormalization = saved.fontSizeNormalizationOverride >= 0
+                                                  ? saved.fontSizeNormalizationOverride != 0
                                                   : SETTINGS.fontSizeNormalization != 0;
   const bool effectiveBionicReading =
-      currentBook.bionicReadingOverride >= 0 ? currentBook.bionicReadingOverride != 0 : SETTINGS.bionicReading != 0;
-  const bool effectiveInlineFootnotePreviews = currentBook.inlineFootnotePreviewsOverride >= 0
-                                                   ? currentBook.inlineFootnotePreviewsOverride != 0
+      saved.bionicReadingOverride >= 0 ? saved.bionicReadingOverride != 0 : SETTINGS.bionicReading != 0;
+  const bool effectiveInlineFootnotePreviews = saved.inlineFootnotePreviewsOverride >= 0
+                                                   ? saved.inlineFootnotePreviewsOverride != 0
                                                    : SETTINGS.inlineFootnotePreviews != 0;
-  const uint8_t effectiveParagraphAlignment = currentBook.paragraphAlignmentOverride >= 0
-                                                  ? static_cast<uint8_t>(currentBook.paragraphAlignmentOverride)
+  const uint8_t effectiveParagraphAlignment = saved.paragraphAlignmentOverride >= 0
+                                                  ? static_cast<uint8_t>(saved.paragraphAlignmentOverride)
                                                   : SETTINGS.paragraphAlignment;
-  const uint8_t effectiveImageRendering = currentBook.imageRenderingOverride >= 0
-                                              ? static_cast<uint8_t>(currentBook.imageRenderingOverride)
-                                              : SETTINGS.imageRendering;
+  const uint8_t effectiveImageRendering =
+      saved.imageRenderingOverride >= 0 ? static_cast<uint8_t>(saved.imageRenderingOverride) : SETTINGS.imageRendering;
 
   auto epub = std::make_shared<Epub>(filePath, "/.crosspoint");
   // Load CSS when embeddedStyle is effectively enabled, as createSectionFile may need it to
@@ -7769,35 +7783,34 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
 
   // Load or rebuild the section cache. Rebuilding is needed when the cache is missing or stale
   // (e.g. after a firmware update). A no-op popup callback avoids any UI during sleep preparation.
-  const bool hasLocalSdOverride = !currentBook.sdFontFamilyOverride.empty();
+  const bool hasLocalSdOverride = !saved.sdFontFamilyOverride.empty();
   const uint8_t effectiveFontFamily =
-      currentBook.fontFamilyOverride >= 0 ? static_cast<uint8_t>(currentBook.fontFamilyOverride) : SETTINGS.fontFamily;
+      saved.fontFamilyOverride >= 0 ? static_cast<uint8_t>(saved.fontFamilyOverride) : SETTINGS.fontFamily;
   const uint8_t effectiveFontSize =
-      currentBook.fontSizeOverride >= 0 ? static_cast<uint8_t>(currentBook.fontSizeOverride) : SETTINGS.fontPointSize;
+      saved.fontSizeOverride >= 0 ? static_cast<uint8_t>(saved.fontSizeOverride) : SETTINGS.fontPointSize;
   int effectiveFontId = 0;
   if (hasLocalSdOverride) {
-    effectiveFontId = resolveSdCardFontId(currentBook.sdFontFamilyOverride.c_str(), effectiveFontSize);
-  } else if (currentBook.fontFamilyOverride < 0) {
+    effectiveFontId = resolveSdCardFontId(saved.sdFontFamilyOverride.c_str(), effectiveFontSize);
+  } else if (saved.fontFamilyOverride < 0) {
     // Publisher Fonts, as getEffectiveReaderFontId(): the book's embedded body family when it has one, then the Noto
     // family a CJK or Indic book takes in place of a font without its script, each only while it is loaded.
     effectiveFontId = resolveSdCardFontId(sdFontSystem.bookFamilyNameFor(epub->getCachePath()), effectiveFontSize);
     if (effectiveFontId == 0) effectiveFontId = resolveSdCardFontId(sdFontSystem.languageFamily(), effectiveFontSize);
   }
-  if (effectiveFontId == 0 && currentBook.fontFamilyOverride >= 0) {
+  if (effectiveFontId == 0 && saved.fontFamilyOverride >= 0) {
     effectiveFontId = CrossPointSettings::getBuiltinReaderFontIdForPoints(effectiveFontFamily, effectiveFontSize);
   }
-  if (effectiveFontId == 0 && currentBook.fontSizeOverride >= 0 && SETTINGS.sdFontFamilyName[0] != '\0') {
+  if (effectiveFontId == 0 && saved.fontSizeOverride >= 0 && SETTINGS.sdFontFamilyName[0] != '\0') {
     effectiveFontId = resolveSdCardFontId(SETTINGS.sdFontFamilyName, effectiveFontSize);
   }
-  if (effectiveFontId == 0 && currentBook.fontSizeOverride >= 0) {
+  if (effectiveFontId == 0 && saved.fontSizeOverride >= 0) {
     effectiveFontId = CrossPointSettings::getBuiltinReaderFontIdForPoints(SETTINGS.fontFamily, effectiveFontSize);
   }
   if (effectiveFontId == 0) {
     effectiveFontId = SETTINGS.getReaderFontId();
   }
-  const uint8_t effectiveLineSpacingStep = currentBook.lineSpacingOverride >= 0
-                                               ? static_cast<uint8_t>(currentBook.lineSpacingOverride)
-                                               : SETTINGS.lineSpacing;
+  const uint8_t effectiveLineSpacingStep =
+      saved.lineSpacingOverride >= 0 ? static_cast<uint8_t>(saved.lineSpacingOverride) : SETTINGS.lineSpacing;
   const LineSpacing lineSpacing =
       lineSpacingForBook(effectiveLineSpacingStep, *epub, effectiveFontId, effectiveFontSize, renderer);
   auto section = std::make_unique<Section>(epub, spineIndex, renderer);
@@ -7818,9 +7831,8 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   p.embeddedStyle = effectiveEmbeddedStyle;
   p.bionicReadingEnabled = effectiveBionicReading;
   p.inlineFootnotePreviews = effectiveInlineFootnotePreviews;
-  p.verticalText =
-      FlowContext::requestFor(static_cast<VerticalText>(SETTINGS.verticalText), currentBook.verticalTextOverride,
-                              TypographyProfile::forLanguage(epub->getLanguage()).verticalAllowed);
+  p.verticalText = FlowContext::requestFor(static_cast<VerticalText>(SETTINGS.verticalText), saved.verticalTextOverride,
+                                           TypographyProfile::forLanguage(epub->getLanguage()).verticalAllowed);
   p.imageRendering = ReaderImageMode::forLayout(effectiveImageRendering);
   p.fontSizeLadder = buildReaderFontSizeLadder(effectiveFontId);
   // On the heap: about 0.5 KB with the book's accent families, too much for this frame under a section build.

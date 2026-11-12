@@ -840,13 +840,13 @@ void unloadSdFontIfLoaded() {
 
 namespace {
 // The Publisher Fonts the book is drawn with: its own choice, else the setting.
-uint8_t publisherFontsMode(const RecentBook& book) {
+uint8_t publisherFontsMode(const BookReaderOverrides& book) {
   return CrossPointSettings::publisherFontsFor(book.publisherFontsOverride, SETTINGS.publisherFonts);
 }
 
 // The cache of the EPUB at `path` when Publisher Fonts apply to it, else "": they are on for the book, its own style
 // is in use, and no font family has been chosen for it (a family chosen for a book still beats them).
-std::string publisherFontsCache(const char* path, const RecentBook& book) {
+std::string publisherFontsCache(const char* path, const BookReaderOverrides& book) {
   const bool embeddedStyle =
       book.embeddedStyleOverride >= 0 ? book.embeddedStyleOverride != 0 : SETTINGS.embeddedStyle != 0;
   if (publisherFontsMode(book) == CrossPointSettings::PUBLISHER_FONTS_OFF || !embeddedStyle ||
@@ -865,7 +865,7 @@ bool chooseEpubFonts(const char* path, const bool wait, const bool opening,
   // For EPUB: honour per-book SD font and/or size overrides. The book record
   // is available here — the reader activity hasn't started yet, but
   // RecentBooksStore already has the persisted overrides for this path.
-  const RecentBook book = RECENT_BOOKS.getBookByPath(path);
+  const BookReaderOverrides book = RECENT_BOOKS.getBookByPath(path).overrides;
   size = (book.fontSizeOverride >= 0) ? static_cast<uint8_t>(book.fontSizeOverride) : SETTINGS.fontPointSize;
 
   // Publisher Fonts: not examined yet, what is loaded stays, until the reader has examined the book and asks again.
@@ -902,9 +902,10 @@ bool chooseEpubFonts(const char* path, const bool wait, const bool opening,
 }  // namespace
 
 bool bookFontsPendingForPath(const char* path) {
-  // No shortcut on the setting being Off: a book can have them on of its own (RecentBook::publisherFontsOverride).
+  // No shortcut on the setting being Off: a book can have them on of its own
+  // (BookReaderOverrides::publisherFontsOverride).
   if (!path || !FsHelpers::hasEpubExtension(std::string_view(path))) return false;
-  const std::string cachePath = publisherFontsCache(path, RECENT_BOOKS.getBookByPath(path));
+  const std::string cachePath = publisherFontsCache(path, RECENT_BOOKS.getBookByPath(path).overrides);
   return !cachePath.empty() && BookFonts::read(cachePath) == BookFonts::State::Pending;
 }
 
