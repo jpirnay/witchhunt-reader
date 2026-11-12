@@ -36,13 +36,16 @@ class IdleGate {
     effectHandledSeen_ = false;
   }
 
-  // Starts a wait (CMD:IDLE); a wait already running is replaced.
-  void begin(const uint32_t nowMs, const uint32_t timeoutMs) {
+  // Starts a wait (CMD:IDLE). False, with the running wait left as it is, while one runs: every IDLE
+  // gets one reply, and a second wait in its place would leave the first without one.
+  [[nodiscard]] bool begin(const uint32_t nowMs, const uint32_t timeoutMs) {
+    if (waiting_) return false;
     waiting_ = true;
     startMs_ = nowMs;
     timeoutMs_ = timeoutMs;
     quiet_ = false;
     lastBusy_ = "settling";
+    return true;
   }
 
   bool waiting() const { return waiting_; }

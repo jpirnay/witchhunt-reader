@@ -614,8 +614,13 @@ void cmdIdle(const std::string_view arg) {
     reply("IDLE_ERROR:bad mode ", second);
     return;
   }
+  // One wait at a time, so every IDLE gets its own reply: a second one while the first waits is
+  // refused, and the first goes on with its own timeout and mode.
+  if (!idleGate.begin(millis(), std::min(static_cast<uint32_t>(timeout), kIdleMaxTimeoutMs))) {
+    reply("IDLE_ERROR:busy");
+    return;
+  }
   idleScreenOnly = !second.empty();
-  idleGate.begin(millis(), std::min(static_cast<uint32_t>(timeout), kIdleMaxTimeoutMs));
 }
 
 void cmdEvents(const std::string_view arg) {

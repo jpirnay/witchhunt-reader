@@ -399,7 +399,7 @@ CMD:IDLE[:<timeout_ms>][:SCREEN]
 
 Reply, once the device is idle: `IDLE:<milliseconds waited>`. If it is not idle within the
 timeout (default 10000 ms, at most 600000): `IDLE_TIMEOUT:<what kept it busy>`.
-`IDLE_ERROR:...` for a malformed argument.
+`IDLE_ERROR:...` for a malformed argument, and `IDLE_ERROR:busy` while another `IDLE` waits.
 
 `IDLE` follows the last command that should change the screen (`BTN`, `TOUCH`, `SWIPE`, an `ACT`
 that opens a screen) to its end, so it never answers between the command and its effect. The
@@ -425,7 +425,9 @@ needs room made (a reclaim or an index rebuild, `CMD:TTF`) or still has its use 
 allocated at an idle step, not inside a draw), which the reader does in idle time.
 
 Send `CMD:IDLE` after the command it should wait for; the device handles them in order. While an
-`IDLE` is pending, the device still answers other commands; a second `IDLE` replaces the first.
+`IDLE` is pending, the device still answers other commands. One `IDLE` waits at a time, so each
+gets its own reply: a second one sent while the first waits is answered `IDLE_ERROR:busy` at once,
+and the first goes on with its own timeout and `:SCREEN` mode.
 
 **`IDLE:<ms>` is no timing of what it waited for.** It counts from when the device read the `IDLE`
 line, and the device reads one command line per loop pass: work that holds the loop before that
