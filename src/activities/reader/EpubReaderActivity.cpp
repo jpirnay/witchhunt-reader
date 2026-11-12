@@ -8119,6 +8119,9 @@ void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
     case ReaderBarsResult::Action::Exit:
       onReaderMenuConfirm(MenuAction::GO_HOME);
       return;
+    case ReaderBarsResult::Action::BookInfo:
+      onReaderMenuConfirm(MenuAction::BOOK_INFO);
+      return;
   }
 }
 

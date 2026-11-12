@@ -66,7 +66,7 @@ void ReaderBarsController::begin(const bool touch, const bool live) {
 }
 
 void ReaderBarsController::appendDebugState(std::string& out) const {
-  static constexpr const char* kFocus[] = {"none", "exit", "star", "tabs", "prev", "goto", "next", "layout"};
+  static constexpr const char* kFocus[] = {"none", "exit", "star", "tabs", "prev", "goto", "next", "layout", "title"};
   static constexpr const char* kTab[] = {"contents", "progress", "layout", "more"};
   static constexpr const char* kPanel[] = {"none", "progress", "layout"};
   SerialCommandGrammar::appendField(out, "focus", kFocus[static_cast<uint8_t>(focus)]);
@@ -290,6 +290,9 @@ void ReaderBarsController::pressButton(const Button button) {
     case Button::NextChapter:
       close(ReaderBarsResult::Action::NextChapter);
       return;
+    case Button::Info:
+      close(ReaderBarsResult::Action::BookInfo);
+      return;
   }
 }
 
@@ -340,6 +343,9 @@ void ReaderBarsController::activateFocus() {
     case Focus::Exit:
       pressButton(Button::Exit);
       return;
+    case Focus::Title:
+      pressButton(Button::Info);
+      return;
     case Focus::Star:
       pressButton(Button::Star);
       return;
@@ -373,9 +379,15 @@ void ReaderBarsController::moveAlongRow(const int step) {
     case Focus::None:
       focus = Focus::Tabs;
       return;
+    // The top row runs back, title, star.
     case Focus::Exit:
-    case Focus::Star:
+      if (step > 0) focus = Focus::Title;
+      return;
+    case Focus::Title:
       if (step != 0) focus = step < 0 ? Focus::Exit : Focus::Star;
+      return;
+    case Focus::Star:
+      if (step < 0) focus = Focus::Title;
       return;
     case Focus::Tabs: {
       const int next = static_cast<int>(focusedTab) + step;
@@ -432,6 +444,7 @@ void ReaderBarsController::moveBetweenRows(const int step) {
     case Focus::None:
       return;
     case Focus::Exit:
+    case Focus::Title:
     case Focus::Star:
       if (step < 0) return;
       if (panel == Panel::Progress) {
