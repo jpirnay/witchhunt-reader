@@ -31,6 +31,11 @@ drive letter: put:C:/books/a.epub:/test/a.epub splits at its last ':', get:/test
 at its first. hash: splits at the first '=', so a card path with '=' in it cannot be compared there
 (use cmd:FS:HASH:<path>). Local paths may be given as Git Bash writes them (/c/tmp/a.epub).
 
+A step takes only a reply to its own command: a line that starts with the command's name and '_' or ':'
+(BTN_OK, STATE:..., IDLE_TIMEOUT:...), or CMD_ERROR. Log lines, and a late reply to an earlier command,
+are skipped. After a step got no reply, the next command first reads until the line has been quiet for
+1 s (at most 10 s), so that reply, should it still come, cannot pass for the next one's.
+
 A --script file holds one step per line; blank lines and lines starting with # are skipped.
 Every line the device prints goes to --log with a timestamp. Needs pyserial, and Pillow for shot:.
 
@@ -53,11 +58,16 @@ try:
 except ImportError:
     sys.exit("pyserial is required: pip install pyserial")
 
-# First words of every reply the firmware sends to a command (see docs/serial-test-api.md).
-REPLY = re.compile(
-    r"^(BTN_|ACT_|STATE:|CMD_ERROR|GET:|GET_END|GET_ERROR|SET_|LOG_|TOUCH_|SWIPE_|SLEEP_OK|REBOOT_OK|"
-    r"EVENTS_|IDLE|DICT|HELP:|BOOTLOG_|HEAP_|TTF:|TTF_|FS:|FS_|PAGE_)"
-)
+# A reply to CMD:<NAME>... starts with NAME and '_' or ':' (BTN_OK, STATE:..., IDLE_TIMEOUT:..., GET_END:...; see
+# docs/serial-test-api.md), or is CMD_ERROR (an unknown command). These commands also answer under another word: SWIPE's
+# errors are TOUCH_ERROR (no panel, not on screen), and ACT:DICT answers DICT:result=... or DICT_ERROR.
+OTHER_REPLIES = {"SWIPE": ("TOUCH_",), "ACT": ("DICT:", "DICT_")}
+# Seconds a step waits for its reply when it names no other wait.
+REPLY_TIMEOUT = 20
+# After a command got no reply, the next one first reads the line until it has been quiet this long (at most
+# RESYNC_MAX seconds): that reply, should it still come, is dropped there rather than taken for the next one's.
+RESYNC_QUIET = 1.0
+RESYNC_MAX = 10.0
 # Commands that answer with several lines, and the line that ends them.
 MULTI_LINE = {"GET:*": re.compile(r"^GET_END"), "FS:LS:": re.compile(r"^FS_END"), "PAGE": re.compile(r"^PAGE_END")}
 # A file the device reads through for its CRC32 before it answers (FS:GET, FS:HASH): seconds a megabyte, and then
@@ -77,6 +87,12 @@ REOPEN_PAUSE = 1.0
 class DeliveryUncertain(Exception):
     """A write failed because the port went away. The port is open again, but whether the device took the bytes is
     unknown, so what was being written is not sent again: a press or a file write must not happen twice."""
+
+
+def reply_prefixes(text):
+    """What a reply to CMD:<text> starts with (see OTHER_REPLIES)."""
+    name = text.split(":", 1)[0].strip()
+    return (f"{name}_", f"{name}:", "CMD_ERROR") + OTHER_REPLIES.get(name, ())
 
 
 def native_path(path):
@@ -170,6 +186,8 @@ class Device:
         self.t0 = time.time()
         self.buf = b""
         self.read_pause = 0.0  # --read-pause: seconds get: waits after every MB, as a slow host would
+        self.expected = ()  # what a reply to the command sent last starts with (reply_prefixes)
+        self.unanswered = False  # it got no reply: the next command resyncs first
         self.ser = self._open()
 
     def note(self, line):
@@ -259,13 +277,33 @@ class Device:
                 deadline = time.time() + idle
         return bytes(out)
 
+    def is_reply(self, line):
+        """Whether `line` answers the command sent last: not a log line, nor a late reply to an earlier command."""
+        return line.startswith(self.expected)
+
     def reply(self, timeout):
-        """The next reply line (see REPLY); log lines are skipped. None after `timeout` seconds."""
+        """The next reply line to the command sent last; other lines are skipped. None after `timeout` seconds."""
         deadline = time.time() + timeout
         while (line := self.read_line(deadline)) is not None:
-            if REPLY.match(line):
+            if self.is_reply(line):
                 return line
+        self.unanswered = True
         return None
+
+    def resync(self):
+        """After a command that got no reply: read until the line has been quiet for RESYNC_QUIET seconds (at most
+        RESYNC_MAX), so that reply, should it come late, is dropped by drain() rather than taken for the next one's.
+        A late reply of another command's kind would be skipped anyway (is_reply); this catches one of the same kind."""
+        if not self.unanswered:
+            return
+        self.unanswered = False
+        end = time.time() + RESYNC_MAX
+        quiet_until = time.time() + RESYNC_QUIET
+        while time.time() < min(end, quiet_until):
+            got = self._read_some()
+            if got:
+                self.buf += got
+                quiet_until = time.time() + RESYNC_QUIET
 
     def drain(self):
         """Log and drop the lines already received, so a late reply to an earlier command (one that
@@ -283,28 +321,31 @@ class Device:
             self.note(line.decode("utf-8", errors="replace").rstrip("\r"))
 
     def send(self, text):
+        self.resync()
         self.drain()
         self.note(f">>> CMD:{text}")
+        self.expected = reply_prefixes(text)
         self._write(("CMD:" + text + "\n").encode(), f"CMD:{text}")
 
-    def command(self, text, timeout=20, until=None, lines=None):
-        """Send a command; return its reply line (the terminator of a several-line reply), or None. With `until`,
-        the lines before the terminator that are not log lines go to `lines`."""
+    def command(self, text, timeout=None, until=None, lines=None):
+        """Send a command; return its reply line (the terminator of a several-line reply), or None after `timeout`
+        seconds (REPLY_TIMEOUT when not given). With `until`, the reply lines before the terminator go to `lines`."""
         self.send(text)
-        deadline = time.time() + timeout
+        deadline = time.time() + (REPLY_TIMEOUT if timeout is None else timeout)
         while (line := self.read_line(deadline)) is not None:
-            if until is not None:
-                if until.match(line) or FAILED.search(line):
-                    return line
-                if lines is not None and REPLY.match(line):
-                    lines.append(line)
-                continue
-            if REPLY.match(line):
+            if not self.is_reply(line):
+                continue  # a log line, or a late reply to an earlier command
+            if until is None or until.match(line) or FAILED.search(line):
                 return line
+            if lines is not None:
+                lines.append(line)
+        self.unanswered = True
         return None
 
     def screenshot(self, path, rotate):
         self.send("SCREENSHOT")
+        # Until it is answered in full, the frame's bytes may still be on their way: the next command resyncs first.
+        self.unanswered = True
         deadline = time.time() + 30
         while (line := self.read_line(deadline)) is not None:
             if line.startswith("SCREENSHOT_START:"):
@@ -319,8 +360,12 @@ class Device:
                     image = image.rotate(rotate, expand=True)
                 image.save(path)
                 end = self.read_line(time.time() + 5)
-                return None if end == "SCREENSHOT_END" else f"no SCREENSHOT_END (got {end!r})"
+                if end != "SCREENSHOT_END":
+                    return f"no SCREENSHOT_END (got {end!r})"
+                self.unanswered = False
+                return None
             if line.startswith("SCREENSHOT_ERROR"):
+                self.unanswered = False
                 return line
         return "no reply"
 
@@ -336,10 +381,12 @@ class Device:
             if line.startswith(("PAGE_END", "PAGE_ERROR")):
                 break
         if not lines:
+            self.unanswered = True
             return "no reply"
         if lines[-1].startswith("PAGE_ERROR"):
             return lines[-1]
         if not lines[-1].startswith("PAGE_END"):
+            self.unanswered = True  # the rest of the dump may still come
             return f"no PAGE_END after {len(lines)} lines (the last {lines[-1][:60]!r})"
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines) + "\n")
@@ -532,7 +579,7 @@ def run_step(device, step, rotate, state):
     ok = True
     if kind == "cmd":
         until = next((end for start, end in MULTI_LINE.items() if rest.startswith(start)), None)
-        timeout = idle_timeout(rest[5:]) if rest.startswith("IDLE") else 20
+        timeout = idle_timeout(rest[5:]) if rest.startswith("IDLE") else REPLY_TIMEOUT
         lines = []
         reply = device.command(rest, timeout=timeout, until=until, lines=lines)
         for line in lines:

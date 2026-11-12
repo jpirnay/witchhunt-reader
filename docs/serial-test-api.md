@@ -1034,6 +1034,9 @@ that fails says how many bytes came and with which CRC, cancels, and tries again
 card path starts with `/` and holds no `:`, so `put:` splits at its last `:` and `get:` at its first (and at a
 trailing `:<digits>`, the retry count), and a local path may carry a drive letter (`put:C:/books/a.epub:/test/a.epub`);
 `hash:` splits at the first `=`.
+A step takes only a reply to its own command: a line starting with the command's name and `_` or `:`, or
+`CMD_ERROR`. After a step got no reply, the next command waits until the line has been quiet for 1 s (at most 10 s),
+so a reply that comes late is dropped rather than taken for the next command's.
 `--script FILE` reads one step per line (`#` comments), `--keep-going` runs all steps and reports every failure,
 `--rotate` sets the screenshot rotation, `--read-pause S` makes `get:` stop reading for S seconds after every MB, as a
 slow host would (a test of the pacing above). Paths may be given as Git Bash writes them (`/c/tmp/page.png`); output is
@@ -1079,7 +1082,9 @@ so it can be tested on the host (`test/serial_command_grammar`).
    `#if SERIAL_TEST_API` so release builds do not carry it (see
    [Which builds have it](#which-builds-have-it)); a probe the UI calls gets an empty inline twin in
    `SerialTestApi.h` for builds without the flag.
-6. Add the reply prefix to `REPLY` in `tools/devctl.py` and document the command on this page.
+6. Start every reply line with the command's name and `_` or `:`: that is how `tools/devctl.py` tells a reply
+   from a log line or a late reply to another command. A reply under another word goes in its `OTHER_REPLIES`.
+   Document the command on this page.
 
 For what a screen reports in `STATE`, override `Activity::appendDebugState()` and write each pair
 with `SerialCommandGrammar::appendField()`. For work `IDLE` should wait for, override
