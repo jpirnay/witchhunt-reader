@@ -19,9 +19,9 @@
 //
 // A held press that failed (ButtonPressQueue::droppedPresses(): the press or its release was not taken
 // in) was not played as asked, so the wait that ends after it fails, however it ended: PressDropped
-// instead of Idle or TimedOut, once for each failure since the previous wait ended, whether it came
-// during the wait or before it. With no input left to follow then, the effect is done: the next wait
-// does not wait for a frame that will not come.
+// instead of Idle or TimedOut. One such answer covers every failure since the previous wait ended,
+// whether it came during the wait or before it. With no input left to follow then, the effect is
+// done: the next wait does not wait for a frame that will not come.
 class IdleGate {
  public:
   static constexpr uint32_t kQuietMs = 250;
