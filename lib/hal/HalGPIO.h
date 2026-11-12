@@ -293,6 +293,16 @@ class HalGPIO {
   // to it, so two quick taps on a box stay a double-tap. 0 means now.
   void injectPress(uint8_t buttonIndex, bool longPress = false, uint32_t atMs = 0);
 
+#if defined(SERIAL_TEST_API) && SERIAL_TEST_API
+  // A key held down, for the serial CMD:BTN:<name>:<ms> (util/ButtonPressQueue.h steps it): the buttons
+  // in `mask` (1 << BTN_*) read as pressed until the next call. They enter through a button hook of their
+  // own beside the board's (InputManager::addButtonHook), OR'd into the raw state before the debounce, so
+  // isPressed(), wasReleased(), getHeldTime() and ButtonEventManager take them as a key held that long. A
+  // real key is OR'd in beside them: another button keeps its own edges, the same button merges into one
+  // press.
+  void holdSyntheticButtons(uint8_t mask);
+#endif
+
   // How far back an injected long press dates its press edge. Must stay above
   // ButtonEventManager::LONG_PRESS_MS, which lives in src/ and cannot be included from the HAL;
   // ActivityManager static_asserts the relationship where both are visible.

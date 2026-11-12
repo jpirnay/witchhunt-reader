@@ -142,10 +142,11 @@ are outside quotes.
 ### Buttons: `BTN`
 
 ```
-CMD:BTN:<BACK|CONFIRM|LEFT|RIGHT|UP|DOWN|POWER>[:LONG|:DOUBLE]
+CMD:BTN:<BACK|CONFIRM|LEFT|RIGHT|UP|DOWN|POWER>[:LONG|:DOUBLE|:<ms>]
 ```
 
-Reply: `BTN_OK`, or `BTN_ERROR:unknown button <name>` / `BTN_ERROR:bad press <text>`.
+Reply: `BTN_OK`, or `BTN_ERROR:unknown button <name>` / `BTN_ERROR:bad press <text>`, and for a
+held press `BTN_ERROR:busy`.
 
 - The names are the **physical keys**. The user's front-button remapping and the configured
   short/double/long actions apply as they would for a finger (on this X4, `POWER` is bound to the
@@ -157,11 +158,25 @@ Reply: `BTN_OK`, or `BTN_ERROR:unknown button <name>` / `BTN_ERROR:bad press <te
   need the full API.
 - `POWER:LONG` puts the device to sleep, like holding the power key (see
   [Power](#power-sleep-and-reboot) before you use it).
+- `:<ms>` (1 to 10000, full API only) **holds the key down** for that long. The other forms are a
+  press and a release handed over at once, so code that checks whether a key is still down across
+  loop passes never sees them held; this one goes in where the board's buttons are read, beside the
+  board's own button hook and before the debounce, on every board, so `isPressed()`, the release and the
+  held time are a real key's. A long press fires
+  mid-hold, at 1 s, as it does for a finger. Held presses queue (four at most) and play one after
+  the other, each starting once the last release has gone through; while one plays, a tap, `:LONG`
+  or `:DOUBLE` answers `BTN_ERROR:busy`, so wait with `CMD:IDLE` (its timeout longer than the hold).
+  A real key pressed meanwhile keeps its own press and release; the same key merges with the held
+  one into one press. `POWER` held past the power-key duration sleeps the device, as the key does.
+  A press the input layer never takes in is given up after a second and counted in `STATE`'s
+  `btn_dropped`.
 
 ```
 > CMD:BTN:DOWN
 < BTN_OK
 > CMD:BTN:CONFIRM:LONG
+< BTN_OK
+> CMD:BTN:DOWN:1500
 < BTN_OK
 ```
 
@@ -228,6 +243,7 @@ Reply: one line, `STATE:` followed by `key=value` pairs.
 | `font`, `font_pt` | EPUB reader | the font family and point size the book is set in |
 | `chapter`, `chapter_page`, `percent` | EPUB reader | what the status bar shows: the TOC chapter title, the page within the whole chapter, which can span several spine items (`~` when the total is still an estimate), the book percentage |
 | `flow`, `progression`, `input_progression` | EPUB reader, with a section open | how the section on screen runs and which way its pages turn: `horizontal` or `vertical-rl`; `ltr` or `rtl`; `input_progression` is the direction the buttons, taps and bar use, which equals `progression` once the section's first build pass or page has been drawn (while a cold section's "Indexing" popup is up, about 1 s, it still holds the previous section's direction, or `ltr` in a book just opened) |
+| `btn_dropped` | when not 0 | held presses (`BTN:<key>:<ms>`) the input layer never took in |
 | `heap`, `maxblock` | always | free heap and the largest free block, in bytes |
 
 Everything but `activity`, `stack`, `book`, `spine` and `page` needs the full API. A popup counts as
