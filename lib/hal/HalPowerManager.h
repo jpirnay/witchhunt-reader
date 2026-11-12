@@ -114,12 +114,15 @@ class HalPowerManager {
   // Control CPU frequency for power saving
   void setPowerSaving(bool enabled);
 
-  // Force the CPU back to its normal frequency before bringing the radio up.
+  // Force the CPU back to its normal frequency, whichever downclock lowered it: the idle governor's,
+  // or a refresh's waveform wait (enterWaveformWait()) still running on the render task. Two kinds of
+  // caller need that guarantee: bringing the radio up, and a serial command, whose reply the USB
+  // link can drop unseen at 10 MHz (SerialTestApi::handleLine()).
   //
-  // CALL THIS IMMEDIATELY BEFORE WiFi.mode()/WiFi.begin()/softAP(). WiFi does not work below
-  // 80 MHz on this SoC — the same fact enterWaveformWait() relies on when it refuses to
-  // downclock while WiFi is up — and LOW_POWER_FREQ is 10 MHz. Bringing the radio up from
-  // there wedges PHY init.
+  // Before the radio: CALL THIS IMMEDIATELY BEFORE WiFi.mode()/WiFi.begin()/softAP(). WiFi does
+  // not work below 80 MHz on this SoC — the same fact enterWaveformWait() relies on when it
+  // refuses to downclock while WiFi is up — and LOW_POWER_FREQ is 10 MHz. Bringing the radio up
+  // from there wedges PHY init.
   //
   // setPowerSaving(false) is NOT a substitute. It only acts when its own isLowPower flag is
   // set, and it forces enabled=false only once WiFi.getMode() is already non-null — i.e. it
@@ -128,7 +131,7 @@ class HalPowerManager {
   // flag; that combination leaves the CPU at 10 MHz with isLowPower false, so every later
   // setPowerSaving(false) is a silent no-op. This clears both flags and restores the frequency
   // unconditionally.
-  void ensureFullSpeedForRadio();
+  void ensureFullSpeed();
 
   // Waveform-wait power hooks, installed on the display driver by HalDisplay:
   // drop the CPU clock while the render task sleeps on the e-ink BUSY-ISR
