@@ -77,6 +77,11 @@ using SerialCommandGrammar::appendField;
 // rather than spins: a tight loop on the C3 starves the USB-CDC task being waited on. Gives up
 // after `stallMs` without progress (the host stopped reading). `waiting` runs on each wait: a long stream feeds the
 // task watchdog there.
+//
+// A write that gives up leaves its line (or stream) unfinished; lineCut makes the next line start with "\n", so that
+// line is one of its own on the host rather than the tail of the cut one. Loop task only, as every write here is.
+bool lineCut = false;
+
 bool writeAll(const uint8_t* data, const size_t len, const unsigned long stallMs, void (*waiting)() = nullptr) {
   size_t sent = 0;
   unsigned long lastProgressMs = millis();
@@ -87,7 +92,10 @@ bool writeAll(const uint8_t* data, const size_t len, const unsigned long stallMs
       lastProgressMs = millis();
       continue;
     }
-    if (millis() - lastProgressMs > stallMs) return false;
+    if (millis() - lastProgressMs > stallMs) {
+      lineCut = true;
+      return false;
+    }
     if (waiting) waiting();
     delay(1);
   }
@@ -98,12 +106,21 @@ bool writeText(const std::string_view text, const unsigned long stallMs) {
   return writeAll(reinterpret_cast<const uint8_t*>(text.data()), text.size(), stallMs);
 }
 
+// Begins a line: first ends one a write gave up on (see lineCut). False when even that cannot go out.
+bool startLine(const unsigned long stallMs) {
+  if (!lineCut) return true;
+  lineCut = false;
+  return writeText("\n", stallMs);
+}
+
 // A reply waits up to 2 s for the host to read it.
 constexpr unsigned long kReplyStallMs = 2000;
 
-// One reply line: `head`, then `tail` (an argument echoed back), then the line end.
+// One reply line: `head`, then `tail` (an argument echoed back), then the line end. Its pieces go out with the wire
+// held (SerialWireLock), so another task's log line cannot land between them.
 void reply(const std::string_view head, const std::string_view tail = {}, const unsigned long stallMs = kReplyStallMs) {
-  if (writeText(head, stallMs) && writeText(tail, stallMs)) writeText("\n", stallMs);
+  const SerialWireLock wire;
+  if (startLine(stallMs) && writeText(head, stallMs) && writeText(tail, stallMs)) writeText("\n", stallMs);
 }
 
 void replyf(const char* format, ...) {
@@ -1221,7 +1238,7 @@ class WireScratch {
 // word of thousands of bytes, goes out in pieces.
 class WireLine {
  public:
-  explicit WireLine(uint8_t* buffer) : buffer_(buffer) {}
+  explicit WireLine(uint8_t* buffer) : buffer_(buffer), ok_(startLine(kReplyStallMs)) {}
   void add(std::string_view text) {
     while (!text.empty()) {
       if (length_ == kWireChunk) flush();
@@ -1267,10 +1284,14 @@ class WireLine {
 
 // Holds LOG_* lines back from the wire while it lives, as the USB Transfer screen does (Logging's mute: they still
 // reach the crash ring), so none cuts into a binary payload or a dump; then puts back what was, since the transfer
-// screen keeps the mute on for its whole session.
+// screen keeps the mute on for its whole session. The mute is set with the wire held, so a log line already on its
+// way is finished first rather than cut by what follows.
 class LogHold {
  public:
-  LogHold() : wasMuted_(isSerialWireMuted()) { setSerialWireMuted(true); }
+  LogHold() : wasMuted_(isSerialWireMuted()) {
+    const SerialWireLock wire;
+    setSerialWireMuted(true);
+  }
   ~LogHold() { setSerialWireMuted(wasMuted_); }
   LogHold(const LogHold&) = delete;
   LogHold& operator=(const LogHold&) = delete;
@@ -1308,7 +1329,8 @@ __attribute__((format(printf, 1, 2))) void replyWhole(const char* format, ...) {
   if (n <= 0) return;
   const size_t length = std::min(static_cast<size_t>(n), sizeof(line) - 2);
   line[length] = '\n';
-  writeAll(reinterpret_cast<const uint8_t*>(line), length + 1, kReplyStallMs);
+  const SerialWireLock wire;
+  if (startLine(kReplyStallMs)) writeAll(reinterpret_cast<const uint8_t*>(line), length + 1, kReplyStallMs);
 }
 
 // ---- PAGE -----------------------------------------------------------------------------------
@@ -2016,12 +2038,12 @@ constexpr Command kCommands[] = {
 
 // The commands this build has: with SERIAL_TEST_API or without.
 void cmdHelp(std::string_view /*arg*/) {
-  writeText("HELP:", kReplyStallMs);
+  std::string line = "HELP:";
   for (const Command& command : kCommands) {
-    writeText(" ", kReplyStallMs);
-    writeText(command.name, kReplyStallMs);
+    line += ' ';
+    line += command.name;
   }
-  writeText("\n", kReplyStallMs);
+  reply(line);
 }
 
 #if SERIAL_TEST_API

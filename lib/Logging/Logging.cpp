@@ -91,6 +91,14 @@ static SemaphoreHandle_t logMutex() {
 // than assumed of every caller.
 static bool logLockUsable() { return !xPortInIsrContext() && xTaskGetSchedulerState() == taskSCHEDULER_RUNNING; }
 
+SerialWireLock::SerialWireLock() : locked_(logLockUsable()) {
+  if (locked_) xSemaphoreTake(logMutex(), portMAX_DELAY);
+}
+
+SerialWireLock::~SerialWireLock() {
+  if (locked_) xSemaphoreGive(logMutex());
+}
+
 void addToLogRingBuffer(const char* message) {
   // Add the message to the ring buffer, overwriting old messages if necessary.
   // If the magic is wrong or logHead is out of range (RTC_NOINIT_ATTR garbage

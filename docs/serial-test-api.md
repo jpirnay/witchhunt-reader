@@ -108,7 +108,10 @@ Things to know about the port:
 - **One program at a time.** Close your monitor before running a script, and never hold the port
   while flashing.
 - **Log lines share the wire.** The device keeps printing its log (`[1234] [INF] [ERS] ...`) between
-  replies. A host must pick out the reply by its prefix and skip everything else.
+  replies. A host must pick out the reply by its prefix and skip everything else. A reply line goes
+  out whole: other tasks' log lines wait for it. If the host stops reading for 2 s (50 ms for an
+  `EVT:` line), the device gives the line up unfinished and starts its next line with a line break,
+  so the cut part stays a line of its own.
 
 ## How a command works
 

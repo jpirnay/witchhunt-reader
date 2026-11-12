@@ -60,6 +60,21 @@ void logPrintf(const char* level, const char* origin, const char* format, ...);
 void setSerialWireMuted(bool muted);
 bool isSerialWireMuted();
 
+// Holds the serial wire for one line written straight to logSerial (a serial test API reply): LOG_* lines
+// of other tasks wait until it is gone, rather than land inside the line or have it land inside theirs.
+// They wait, they are not dropped, so keep what it covers short; and log nothing while holding it (the
+// lock is the logger's own, not recursive).
+class SerialWireLock {
+ public:
+  SerialWireLock();
+  ~SerialWireLock();
+  SerialWireLock(const SerialWireLock&) = delete;
+  SerialWireLock& operator=(const SerialWireLock&) = delete;
+
+ private:
+  bool locked_;
+};
+
 // The most verbose level written to the serial wire at run time (0 = ERR .. 3 = TRC; the serial
 // CMD:LOG sets it). LOG_LEVEL still decides what is compiled in, so this can only quieten the
 // wire; it starts at LOG_LEVEL. The RTC ring buffer keeps every line either way.
