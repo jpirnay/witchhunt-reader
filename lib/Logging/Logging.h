@@ -60,6 +60,26 @@ void logPrintf(const char* level, const char* origin, const char* format, ...);
 void setSerialWireMuted(bool muted);
 bool isSerialWireMuted();
 
+// Waits for a LOG_* line being written to the wire to finish, and holds new ones back while it lives. For a
+// moment only, such as setting the mute: every task that logs waits on it. Log nothing while holding it (the
+// lock is the logger's own, not recursive).
+class SerialWireLock {
+ public:
+  SerialWireLock();
+  ~SerialWireLock();
+  SerialWireLock(const SerialWireLock&) = delete;
+  SerialWireLock& operator=(const SerialWireLock&) = delete;
+
+ private:
+  bool locked_;
+};
+
+// A line on the serial wire was left unfinished: a log line the USB link took only part of (its TX
+// timeout), or a line the serial test API gave up on. The next reply then starts with a line break, so it
+// is a line of its own on the host. Any task, lock-free; takeSerialLineCut() reads and clears it.
+void markSerialLineCut();
+bool takeSerialLineCut();
+
 // The most verbose level written to the serial wire at run time (0 = ERR .. 3 = TRC; the serial
 // CMD:LOG sets it). LOG_LEVEL still decides what is compiled in, so this can only quieten the
 // wire; it starts at LOG_LEVEL. The RTC ring buffer keeps every line either way.

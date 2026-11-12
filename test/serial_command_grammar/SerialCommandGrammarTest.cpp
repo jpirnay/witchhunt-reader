@@ -182,6 +182,11 @@ TEST(SerialCommandGrammar, IntegersAndLists) {
   EXPECT_TRUE(SerialCommandGrammar::parseInt("-2147483647", value));
   EXPECT_EQ(value, -2147483647);
   EXPECT_FALSE(SerialCommandGrammar::parseInt("2147483648", value));
+  // An int reaches one further below zero than above it.
+  EXPECT_TRUE(SerialCommandGrammar::parseInt("-2147483648", value));
+  EXPECT_EQ(value, INT32_MIN);
+  EXPECT_FALSE(SerialCommandGrammar::parseInt("-2147483649", value));
+  EXPECT_FALSE(SerialCommandGrammar::parseInt("+2147483648", value));
   EXPECT_FALSE(SerialCommandGrammar::parseInt("9999999999", value));
   EXPECT_FALSE(SerialCommandGrammar::parseInt("4294967296", value));
   EXPECT_FALSE(SerialCommandGrammar::parseInt("999999999999", value));

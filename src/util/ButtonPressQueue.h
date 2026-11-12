@@ -12,14 +12,16 @@
 //
 // The caller samples once per main-loop pass: step() gets the buttons the input layer has committed
 // as down and returns the buttons to hold until the next sample (HalGPIO::holdSyntheticButtons()). A
-// press is held until the input layer has committed it, then for its hold time, then released; the
-// next press starts once that release is committed. So each press goes through the same debounce and
-// hold timing as a real key, however long the loop passes take.
+// press starts once its key reads up, is held until the input layer has committed it, then for its
+// hold time, then released; the next press starts once that release is committed. So each press goes
+// through the same debounce and hold timing as a real key, with a press edge of its own, however long
+// the loop passes take.
 class ButtonPressQueue {
  public:
   static constexpr uint16_t MAX_HOLD_MS = 10000;
   // A press or release the input layer has not committed after this long, and this many samples, is
-  // given up. The samples keep one stalled loop pass (a blocking command) from dropping it.
+  // given up; so is a press whose key has not read up by then. The samples keep one stalled loop
+  // pass (a blocking command) from dropping it.
   static constexpr uint16_t COMMIT_TIMEOUT_MS = 1000;
   static constexpr uint8_t COMMIT_TIMEOUT_SAMPLES = 4;
   static constexpr size_t CAPACITY = 4;
@@ -37,27 +39,43 @@ class ButtonPressQueue {
   // Nothing queued, held, or waiting for its release to be committed.
   bool idle() const { return phase == Phase::Idle && count == 0; }
 
-  // Presses given up because the input layer never committed them.
+  // Presses that failed: the input layer never committed the press or its release, or the key never read up.
   uint32_t droppedPresses() const { return dropped; }
 
   uint8_t step(const uint32_t nowMs, const uint8_t committed) {
+    if (phase == Phase::Idle) {
+      if (count == 0) return 0;
+      current = queue[head];
+      head = static_cast<uint8_t>((head + 1) % CAPACITY);
+      --count;
+      enter(Phase::Starting, nowMs);
+    }
     const auto bit = static_cast<uint8_t>(1u << current.button);
     switch (phase) {
       case Phase::Idle:
-        if (count == 0) return 0;
-        current = queue[head];
-        head = static_cast<uint8_t>((head + 1) % CAPACITY);
-        --count;
-        enter(Phase::Pressing, nowMs);
-        return static_cast<uint8_t>(1u << current.button);
+        return 0;  // handled above
+      case Phase::Starting:
+        // The key must read up first, or the press would take over the one already down and have no
+        // edge of its own: a finger may be on it, or the last press's release never went through.
+        if (!(committed & bit)) {
+          enter(Phase::Pressing, nowMs);
+          return bit;
+        }
+        if (commitTimedOut(nowMs)) {
+          ++dropped;
+          enter(Phase::Idle, nowMs);
+        }
+        return 0;
       case Phase::Pressing:
         if (committed & bit) {
           enter(Phase::Holding, nowMs);  // the hold counts from the committed press
           return bit;
         }
         if (commitTimedOut(nowMs)) {
+          // Failed, and counted once: no release of it to wait for. Should the key read down after all (a
+          // finger, a late commit), the next press of it waits in Starting.
           ++dropped;
-          enter(Phase::Releasing, nowMs);
+          enter(Phase::Idle, nowMs);
           return 0;
         }
         return bit;
@@ -68,7 +86,12 @@ class ButtonPressQueue {
         }
         return bit;
       case Phase::Releasing:
-        if (!(committed & bit) || commitTimedOut(nowMs)) {
+        if (!(committed & bit)) {
+          enter(Phase::Idle, nowMs);
+        } else if (commitTimedOut(nowMs)) {
+          // The release never went in (a finger still holds the key): the press was not played as
+          // asked, and it fails like one never taken in.
+          ++dropped;
           enter(Phase::Idle, nowMs);
         }
         return 0;
@@ -77,7 +100,7 @@ class ButtonPressQueue {
   }
 
  private:
-  enum class Phase : uint8_t { Idle, Pressing, Holding, Releasing };
+  enum class Phase : uint8_t { Idle, Starting, Pressing, Holding, Releasing };
   struct Press {
     uint8_t button;
     uint16_t holdMs;

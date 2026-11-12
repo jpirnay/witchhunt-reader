@@ -14,23 +14,26 @@
 #include "activities/RenderLock.h"
 
 namespace {
-ScreenshotUtil::Target pendingTarget = ScreenshotUtil::Target::None;
-unsigned long pendingDeadline = 0;
-constexpr unsigned long kWaitMs = 5000;
+ScreenshotRequest requests;
 }  // namespace
 
-void ScreenshotUtil::request(const Target target) {
-  pendingTarget = target;
-  pendingDeadline = millis() + kWaitMs;
+bool ScreenshotUtil::request(const Target target) {
+  if (requests.request(target, millis())) return true;
+  // A user's POWER+DOWN screenshot lost this way is worth seeing in the log.
+  LOG_INF("SCR", "%s screenshot skipped: a host screenshot is still pending", target == Target::Host ? "Host" : "Card");
+  return false;
 }
+
+void ScreenshotUtil::requestCardFromAnyTask() { requests.askForCard(); }
 
 void ScreenshotUtil::service(GfxRenderer& renderer, void (*sendToHost)(const uint8_t* frame, uint32_t size, int width,
                                                                        int height, bool busy)) {
-  if (pendingTarget == Target::None) return;
-  const Target target = pendingTarget;
-  if (static_cast<long>(millis() - pendingDeadline) >= 0) {
-    pendingTarget = Target::None;
-    LOG_ERR("SCR", "Screenshot skipped: the display stayed busy for %lu ms", kWaitMs);
+  if (requests.takeCardAsk()) request(Target::Card);
+  const Target target = requests.pending();
+  if (target == Target::None) return;
+  if (requests.expired(millis())) {
+    requests.clear();
+    LOG_ERR("SCR", "Screenshot skipped: the display stayed busy for %lu ms", ScreenshotRequest::kWaitMs);
     if (target == Target::Host) sendToHost(nullptr, 0, 0, 0, /*busy=*/true);
     return;
   }
@@ -40,7 +43,7 @@ void ScreenshotUtil::service(GfxRenderer& renderer, void (*sendToHost)(const uin
   // reader's pre-render clears the write buffer without ever displaying it, so that marker stays set
   // until it goes stale (2 s), holding every capture back for nothing.
   if (renderer.isRefreshPending()) return;
-  pendingTarget = Target::None;
+  requests.clear();
   // The write buffer is not the frame on the panel: after a two-buffer refresh it holds an older
   // frame, and the reader pre-renders its next page into it. So first the panel's frame as the
   // display keeps it, then the activity's correction on top, in the order the light drawer uses

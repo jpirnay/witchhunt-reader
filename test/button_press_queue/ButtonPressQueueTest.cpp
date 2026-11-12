@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "util/ButtonPressQueue.h"
+#include "util/IdleGate.h"
 
 namespace {
 
@@ -69,6 +70,13 @@ struct Loop {
     held = queue.step(now, input.currentState);
   }
 
+  // Passes until the input layer has committed a press of `button`; false if it never did. A press
+  // commits within a few passes, so the bound only keeps a broken queue from hanging the test.
+  bool runUntilPressed(const uint8_t button, const int maxPasses = 200) {
+    for (int i = 0; i < maxPasses && presses[button] == 0; ++i) pass();
+    return presses[button] > 0;
+  }
+
   // Passes until the queue is done; false if it never was.
   bool runUntilIdle(const int maxPasses = 2000) {
     for (int i = 0; i < maxPasses; ++i) {
@@ -107,7 +115,7 @@ TEST(ButtonPressQueue, ALongPressIsHeldPastTheOneSecondThreshold) {
 TEST(ButtonPressQueue, TheButtonReadsDownForTheWholeHold) {
   Loop loop;
   ASSERT_TRUE(loop.queue.push(DOWN, 2000));
-  while (loop.presses[DOWN] == 0) loop.pass();
+  ASSERT_TRUE(loop.runUntilPressed(DOWN)) << "the press was never committed";
   const uint32_t pressedAt = loop.now;
   while (loop.now - pressedAt < 1990) {
     loop.pass();
@@ -155,7 +163,7 @@ TEST(ButtonPressQueue, PressesPlayInOrder) {
   Loop loop;
   ASSERT_TRUE(loop.queue.push(BACK, SHORT_HOLD_MS));
   ASSERT_TRUE(loop.queue.push(CONFIRM, SHORT_HOLD_MS));
-  while (loop.presses[BACK] == 0) loop.pass();
+  ASSERT_TRUE(loop.runUntilPressed(BACK)) << "the press was never committed";
   EXPECT_EQ(loop.presses[CONFIRM], 0);
   ASSERT_TRUE(loop.runUntilIdle());
   EXPECT_EQ(loop.presses[CONFIRM], 1);
@@ -180,6 +188,82 @@ TEST(ButtonPressQueue, AnUncommittedPressIsGivenUp) {
   EXPECT_EQ(loop.held, 0);
 }
 
+// A press the input layer never took in is one failure, however its key reads afterwards: here a finger
+// lands on the same key on the very pass the press is given up, and holds it 1.5 s (the audit's case:
+// the release wait that followed counted the same press a second time).
+TEST(ButtonPressQueue, AnUncommittedPressCountsOnceWhateverItsKeyDoesAfter) {
+  // The pass on which the press is given up: the model runs the same every time.
+  int dropPass = -1;
+  {
+    Loop dry;
+    dry.input.ignoresHook = true;
+    ASSERT_TRUE(dry.queue.push(CONFIRM, SHORT_HOLD_MS));
+    for (int i = 0; i < 400 && dropPass < 0; ++i) {
+      dry.pass();
+      if (dry.queue.droppedPresses() == 1) dropPass = i;
+    }
+  }
+  ASSERT_GE(dropPass, 0) << "the press was never given up";
+  Loop loop;
+  loop.input.ignoresHook = true;
+  ASSERT_TRUE(loop.queue.push(CONFIRM, SHORT_HOLD_MS));
+  for (int i = 0; i < 400; ++i) {
+    // The finger's contact starts on the drop pass, so the input layer has it down on the next one.
+    loop.realKeys = i >= dropPass && i < dropPass + 150 ? static_cast<uint8_t>(1u << CONFIRM) : 0;
+    loop.pass();
+  }
+  EXPECT_EQ(loop.presses[CONFIRM], 1) << "the finger's own press";
+  EXPECT_TRUE(loop.queue.idle());
+  EXPECT_EQ(loop.queue.droppedPresses(), 1u);
+}
+
+// What the host sees for that press: BTN_OK, then an IDLE. SerialTestApi::serviceIdle() samples the
+// queue so (effectHandled = idle(), droppedPresses = droppedPresses()); the IDLE must fail, not answer
+// IDLE:<ms> as if the press had gone through.
+TEST(ButtonPressQueue, AnUncommittedPressFailsTheIdleThatFollowsIt) {
+  Loop loop;
+  loop.input.ignoresHook = true;
+  IdleGate gate;
+  ASSERT_TRUE(loop.queue.push(CONFIRM, SHORT_HOLD_MS));
+  gate.noteEffect();  // BTN_OK
+  ASSERT_TRUE(gate.begin(loop.now, 10000));
+  IdleGate::Verdict verdict = IdleGate::Verdict::Waiting;
+  for (int i = 0; i < 2000 && verdict == IdleGate::Verdict::Waiting; ++i) {
+    loop.pass();
+    IdleGate::Sample sample;
+    sample.nowMs = loop.now;
+    sample.effectHandled = loop.queue.idle();
+    sample.droppedPresses = loop.queue.droppedPresses();
+    verdict = gate.step(sample);
+  }
+  EXPECT_EQ(loop.queue.droppedPresses(), 1u);
+  EXPECT_EQ(verdict, IdleGate::Verdict::PressDropped);
+}
+
+// The press went in, but its release never did (a finger holds the key past the hold): the press was
+// not played as asked, and with nothing queued after it the IDLE that follows must still say so.
+TEST(ButtonPressQueue, AReleaseNeverTakenInFailsTheIdleThatFollowsIt) {
+  Loop loop;
+  IdleGate gate;
+  ASSERT_TRUE(loop.queue.push(CONFIRM, SHORT_HOLD_MS));
+  gate.noteEffect();  // BTN_OK
+  ASSERT_TRUE(gate.begin(loop.now, 10000));
+  IdleGate::Verdict verdict = IdleGate::Verdict::Waiting;
+  for (int i = 0; i < 2000 && verdict == IdleGate::Verdict::Waiting; ++i) {
+    loop.pass();
+    if (loop.presses[CONFIRM] == 1) loop.realKeys = 1u << CONFIRM;  // the finger comes once the press is in
+    IdleGate::Sample sample;
+    sample.nowMs = loop.now;
+    sample.effectHandled = loop.queue.idle();
+    sample.droppedPresses = loop.queue.droppedPresses();
+    verdict = gate.step(sample);
+  }
+  EXPECT_EQ(loop.presses[CONFIRM], 1);
+  EXPECT_EQ(loop.releases[CONFIRM], 0) << "the finger still holds it";
+  EXPECT_EQ(loop.queue.droppedPresses(), 1u);
+  EXPECT_EQ(verdict, IdleGate::Verdict::PressDropped);
+}
+
 // One loop pass blocked for seconds (a command waiting for the render lock) right after the press
 // started: the input layer commits it on the next update, so it must not be given up meanwhile.
 TEST(ButtonPressQueue, AStalledPassDoesNotDropThePress) {
@@ -200,7 +284,9 @@ TEST(ButtonPressQueue, AStalledPassDoesNotDropThePress) {
 TEST(ButtonPressQueue, NotIdleUntilTheReleaseIsCommitted) {
   Loop loop;
   ASSERT_TRUE(loop.queue.push(CONFIRM, SHORT_HOLD_MS));
-  while (loop.held != 0 || loop.presses[CONFIRM] == 0) loop.pass();
+  ASSERT_TRUE(loop.runUntilPressed(CONFIRM)) << "the press was never committed";
+  for (int i = 0; i < 200 && loop.held != 0; ++i) loop.pass();
+  ASSERT_EQ(loop.held, 0) << "the queue never released the press";
   // Released by the queue, but the input layer still reports the button down.
   EXPECT_TRUE(loop.input.currentState & (1u << CONFIRM));
   EXPECT_FALSE(loop.queue.idle());
@@ -213,7 +299,7 @@ TEST(ButtonPressQueue, NotIdleUntilTheReleaseIsCommitted) {
 TEST(ButtonPressQueue, ARealKeyPressedDuringAHoldKeepsItsOwnEdges) {
   Loop loop;
   ASSERT_TRUE(loop.queue.push(DOWN, 1000));
-  while (loop.presses[DOWN] == 0) loop.pass();
+  ASSERT_TRUE(loop.runUntilPressed(DOWN)) << "the press was never committed";
   for (int i = 0; i < 20; ++i) loop.pass();
   loop.realKeys = 1u << BACK;
   for (int i = 0; i < 10; ++i) loop.pass();
@@ -227,17 +313,69 @@ TEST(ButtonPressQueue, ARealKeyPressedDuringAHoldKeepsItsOwnEdges) {
 }
 
 // A finger on the same key: the two are one press, released when both have let go, and the queue
-// does not hang waiting for a release it cannot cause.
+// does not hang waiting for a release it cannot cause. The held press's own release never went in, so
+// it counts as failed.
 TEST(ButtonPressQueue, ARealKeyHeldPastTheHoldEndsThePressAtItsRelease) {
   Loop loop;
   ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
-  while (loop.presses[DOWN] == 0) loop.pass();
+  ASSERT_TRUE(loop.runUntilPressed(DOWN)) << "the press was never committed";
   loop.realKeys = 1u << DOWN;
   for (int i = 0; i < 300; ++i) loop.pass();  // 3 s, long past the hold and the commit timeout
   EXPECT_TRUE(loop.queue.idle()) << "given up waiting for the release";
   EXPECT_EQ(loop.releases[DOWN], 0) << "the finger still holds it";
+  EXPECT_EQ(loop.queue.droppedPresses(), 1u);
   loop.realKeys = 0;
   for (int i = 0; i < 5; ++i) loop.pass();
   EXPECT_EQ(loop.presses[DOWN], 1);
   EXPECT_EQ(loop.releases[DOWN], 1);
+}
+
+// The key still reads down when the next press of it is due (a finger on it, or a release the input
+// layer never took in): that press waits for the release, so it gets a press edge of its own rather
+// than taking over the one already down.
+TEST(ButtonPressQueue, APressOfAKeyStillDownWaitsForItsRelease) {
+  Loop loop;
+  ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
+  ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
+  ASSERT_TRUE(loop.runUntilPressed(DOWN)) << "the press was never committed";
+  loop.realKeys = 1u << DOWN;
+  for (int i = 0; i < 130; ++i) loop.pass();  // past the first press's release timeout
+  EXPECT_EQ(loop.presses[DOWN], 1);
+  EXPECT_FALSE(loop.queue.idle()) << "the second press waits for the key to come up";
+  loop.realKeys = 0;
+  ASSERT_TRUE(loop.runUntilIdle());
+  EXPECT_EQ(loop.presses[DOWN], 2) << "the second press has its own edge";
+  EXPECT_EQ(loop.releases[DOWN], 2);
+  EXPECT_EQ(loop.queue.droppedPresses(), 1u) << "the first press, whose release never went in";
+}
+
+// The key never comes up within the commit timeout: the press is given up and counted, as one the
+// input layer never took in (STATE's btn_dropped, and the next IDLE fails).
+TEST(ButtonPressQueue, APressOfAKeyThatStaysDownIsGivenUp) {
+  Loop loop;
+  ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
+  ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
+  ASSERT_TRUE(loop.runUntilPressed(DOWN)) << "the press was never committed";
+  loop.realKeys = 1u << DOWN;
+  for (int i = 0; i < 400; ++i) loop.pass();  // 4 s
+  EXPECT_TRUE(loop.queue.idle());
+  EXPECT_EQ(loop.presses[DOWN], 1) << "no second press edge";
+  EXPECT_EQ(loop.queue.droppedPresses(), 2u) << "the first one's release, and the second press";
+  EXPECT_EQ(loop.held, 0);
+  loop.realKeys = 0;
+  for (int i = 0; i < 5; ++i) loop.pass();
+  EXPECT_EQ(loop.releases[DOWN], 1);
+}
+
+// Another key held down when the queue starts a press does not hold that press up.
+TEST(ButtonPressQueue, AnotherKeyDownDoesNotDelayAPress) {
+  Loop loop;
+  loop.realKeys = 1u << BACK;
+  for (int i = 0; i < 5; ++i) loop.pass();
+  ASSERT_TRUE(loop.queue.push(CONFIRM, SHORT_HOLD_MS));
+  loop.pass();
+  EXPECT_EQ(loop.held, 1u << CONFIRM) << "held from the first step";
+  ASSERT_TRUE(loop.runUntilIdle());
+  EXPECT_EQ(loop.presses[CONFIRM], 1);
+  EXPECT_EQ(loop.queue.droppedPresses(), 0u);
 }

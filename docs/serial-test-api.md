@@ -99,12 +99,24 @@ Things to know about the port:
 - **Closing it can.** On Windows a plain close drops DTR before RTS, and an ESP32-C3 takes RTS high
   with DTR low as a reset request: it restarts to Home (`resetReason=11` in the boot log). Set RTS
   low, then DTR low, then close, as `tools/devctl.py` does.
-- **The port goes away on a reboot or sleep.** The USB device re-enumerates. A long-running host
-  has to close and reopen the port; `tools/devctl.py` does this by itself.
+- **The port goes away when the cable is pulled or the device goes into deep sleep.** Only then
+  does a long-running host have to close and reopen it; `tools/devctl.py` does this by itself, and
+  drops what it had read from the old port. A command whose write fails that way may or may not
+  have reached the device, so do not send it again blindly: `devctl.py` fails that step with
+  `DELIVERY UNCERTAIN: CMD:<text> (port reopened, not resent)` and goes on with the next one on the
+  reopened port. A reset does not take the port away on the ESP32-C3 boards (X3, X4): their USB
+  serial port stays up through a restart (`CMD:REBOOT`) and through a reset from the host (RTS), so
+  a reply outstanding when the device resets never comes, and `devctl.py` stops the run with
+  `LINK UNSYNCED`.
 - **One program at a time.** Close your monitor before running a script, and never hold the port
   while flashing.
 - **Log lines share the wire.** The device keeps printing its log (`[1234] [INF] [ERS] ...`) between
-  replies. A host must pick out the reply by its prefix and skip everything else.
+  replies. A host must pick out the reply by its prefix and skip everything else. Each reply line
+  goes out in one write, so a log line lands inside it only when the host lags far enough behind
+  for that write to come back short. A line left unfinished (a log line the USB link cut short, or a
+  reply the device gave up on after 2 s without the host reading, 50 ms for an `EVT:` line) is
+  followed by a line break before the next reply, so that reply starts a fresh line. Log lines may
+  still sit between replies.
 
 ## How a command works
 
@@ -167,9 +179,12 @@ held press `BTN_ERROR:busy`.
   the other, each starting once the last release has gone through; while one plays, a tap, `:LONG`
   or `:DOUBLE` answers `BTN_ERROR:busy`, so wait with `CMD:IDLE` (its timeout longer than the hold).
   A real key pressed meanwhile keeps its own press and release; the same key merges with the held
-  one into one press. `POWER` held past the power-key duration sleeps the device, as the key does.
-  A press the input layer never takes in is given up after a second and counted in `STATE`'s
-  `btn_dropped`.
+  one into one press, and a held press of a key that is still down waits for it to come up, so it
+  gets a press of its own. `POWER` held past the power-key duration sleeps the device, as the key
+  does. A held press fails when the input layer does not take the press or its release in within a
+  second and four loop passes (a finger still on the key keeps the release out), or when its key is
+  still down that long after the press is due. A failed press is counted in `STATE`'s `btn_dropped`,
+  and the next `IDLE` answers `IDLE_ERROR:press dropped`.
 
 ```
 > CMD:BTN:DOWN
@@ -243,7 +258,7 @@ Reply: one line, `STATE:` followed by `key=value` pairs.
 | `font`, `font_pt` | EPUB reader | the font family and point size the book is set in |
 | `chapter`, `chapter_page`, `percent` | EPUB reader | what the status bar shows: the TOC chapter title, the page within the whole chapter, which can span several spine items (`~` when the total is still an estimate), the book percentage |
 | `flow`, `progression`, `input_progression` | EPUB reader, with a section open | how the section on screen runs and which way its pages turn: `horizontal` or `vertical-rl`; `ltr` or `rtl`; `input_progression` is the direction the buttons, taps and bar use, which equals `progression` once the section's first build pass or page has been drawn (while a cold section's "Indexing" popup is up, about 1 s, it still holds the previous section's direction, or `ltr` in a book just opened) |
-| `btn_dropped` | when not 0 | held presses (`BTN:<key>:<ms>`) the input layer never took in |
+| `btn_dropped` | when not 0 | held presses (`BTN:<key>:<ms>`) that failed: the press or its release was not taken in |
 | `heap`, `maxblock` | always | free heap and the largest free block, in bytes |
 
 Everything but `activity`, `stack`, `book`, `spine` and `page` needs the full API. A popup counts as
@@ -272,9 +287,11 @@ SCREENSHOT_START:<width>:<height>:<bytes>
 SCREENSHOT_END
 ```
 
-or `SCREENSHOT_ERROR:busy` (the display stayed busy for 5 s), `SCREENSHOT_ERROR:framebuffer
-released` (the Wi-Fi file server has the memory), `SCREENSHOT_ERROR:transfer stalled` (the host
-stopped reading).
+or `SCREENSHOT_ERROR:busy` (the display stayed busy for 5 s, or, at once, an earlier `SCREENSHOT` is
+still pending: one at a time, so each gets its reply), `SCREENSHOT_ERROR:framebuffer released` (the
+Wi-Fi file server has the memory), `SCREENSHOT_ERROR:transfer stalled` (the host stopped reading).
+A screenshot to the card (POWER+DOWN, the reader menu) asked for while a `SCREENSHOT` is pending is
+skipped, with a `[SCR]` log line.
 
 The capture waits for the current render pass and copies the frame that is on the panel, not one
 being drawn. In the reader, whose next page may already be drawn off-screen in the same memory, the
@@ -399,7 +416,9 @@ CMD:IDLE[:<timeout_ms>][:SCREEN]
 
 Reply, once the device is idle: `IDLE:<milliseconds waited>`. If it is not idle within the
 timeout (default 10000 ms, at most 600000): `IDLE_TIMEOUT:<what kept it busy>`.
-`IDLE_ERROR:...` for a malformed argument.
+`IDLE_ERROR:...` for a malformed argument, and `IDLE_ERROR:busy` while another `IDLE` waits.
+`IDLE_ERROR:press dropped` replaces either answer when a held press (`BTN:<key>:<ms>`) failed since
+the last `IDLE` answer, during the wait or before it: the press or its release was not taken in.
 
 `IDLE` follows the last command that should change the screen (`BTN`, `TOUCH`, `SWIPE`, an `ACT`
 that opens a screen) to its end, so it never answers between the command and its effect. The
@@ -425,7 +444,11 @@ needs room made (a reclaim or an index rebuild, `CMD:TTF`) or still has its use 
 allocated at an idle step, not inside a draw), which the reader does in idle time.
 
 Send `CMD:IDLE` after the command it should wait for; the device handles them in order. While an
-`IDLE` is pending, the device still answers other commands; a second `IDLE` replaces the first.
+`IDLE` is pending, the device still answers other commands. One `IDLE` waits at a time, so each
+gets its own reply: a second one sent while the first waits is answered `IDLE_ERROR:busy` at once,
+and the first goes on with its own timeout and `:SCREEN` mode. A wait outlives the script that sent
+it: after a script stopped during a long `IDLE`, a new `IDLE` is answered `IDLE_ERROR:busy` until
+that wait has answered.
 
 **`IDLE:<ms>` is no timing of what it waited for.** It counts from when the device read the `IDLE`
 line, and the device reads one command line per loop pass: work that holds the loop before that
@@ -639,7 +662,9 @@ Replies: `SLEEP_OK`, `REBOOT_OK`, sent before the device acts.
   **Deep sleep switches the USB port off, and only a real button press wakes the device.** Do not
   use it on a device nobody can reach.
 - `REBOOT` restarts to Home the way the firmware's own maintenance restarts do: the reading session
-  is closed, no boot screen. The port re-enumerates; reopen it.
+  is closed, no boot screen. On the ESP32-C3 boards the port stays up through it (the boot log
+  arrives on it), so nothing has to be reopened; a command sent right behind `REBOOT` is lost with
+  the restart and gets no reply.
 
 ### Heap ballast: `HEAP`
 
@@ -1026,6 +1051,25 @@ that fails says how many bytes came and with which CRC, cancels, and tries again
 card path starts with `/` and holds no `:`, so `put:` splits at its last `:` and `get:` at its first (and at a
 trailing `:<digits>`, the retry count), and a local path may carry a drive letter (`put:C:/books/a.epub:/test/a.epub`);
 `hash:` splits at the first `=`.
+A step takes only a reply to its own command: a line starting with the command's name and `_` or `:`, or
+`CMD_ERROR`. It waits as long as the device may take: 20 s for the device to read the command (a loop pass can be held
+up by long work), and on top what the command itself may take (an `IDLE` its own timeout, `FS:GET`, `FS:HASH` and
+`ACT:DICT` 300 s for a file read through, `SCREENSHOT` 5 s). Replies carry no tag that ties them to their command: a
+reply that comes after its step stopped waiting can be taken by the first command of its name, if it arrives just as
+that command is sent (lines that arrived before are dropped then). So when a command gets no reply while the port stays
+open, the run stops (`LINK UNSYNCED: ...`, exit 1), `--keep-going` or not, and so it does on `IDLE_ERROR:busy`, whose
+earlier wait still has its answer to come. A step whose own number or regular expression is malformed fails as
+`BAD STEP` before anything is sent, and a malformed reply fails its step, or stops the run when it leaves bytes of
+unknown length on the line or an exchange it cannot finish (a `SCREENSHOT_START`, `FS_GET_START` or `FS_PUT_READY` it
+cannot read). A step that failed with any other error reply does not stop a `--keep-going` run, and nor does a
+reply lost because the port went away meanwhile (the cable pulled, deep sleep): devctl reopens the port and drops what
+it had read from the old one. A reset that keeps the port (any reset on the ESP32-C3) with a reply outstanding across
+it stops the run, as any missing reply does. A run that stopped on a missing reply can leave that reply still to come: let the device answer, or
+restart it, before the next run. The `LINK UNSYNCED` message says what came instead, since each points somewhere else:
+`the port stayed silent` (a device asleep, busy or restarting), `N other lines came, none of them a reply`, or `a reply
+glued to the end of a cut line came instead: '...'` (firmware older than the cut-line fix, which left a log line
+unfinished while no host read the port and wrote the reply straight after it). One silent command is not proof the
+device is down: a second command, or the raw output, tells a busy port from a dead one.
 `--script FILE` reads one step per line (`#` comments), `--keep-going` runs all steps and reports every failure,
 `--rotate` sets the screenshot rotation, `--read-pause S` makes `get:` stop reading for S seconds after every MB, as a
 slow host would (a test of the pacing above). Paths may be given as Git Bash writes them (`/c/tmp/page.png`); output is
@@ -1071,7 +1115,9 @@ so it can be tested on the host (`test/serial_command_grammar`).
    `#if SERIAL_TEST_API` so release builds do not carry it (see
    [Which builds have it](#which-builds-have-it)); a probe the UI calls gets an empty inline twin in
    `SerialTestApi.h` for builds without the flag.
-6. Add the reply prefix to `REPLY` in `tools/devctl.py` and document the command on this page.
+6. Start every reply line with the command's name and `_` or `:`: that is how `tools/devctl.py` tells a reply
+   from a log line or a line of another command. A reply under another word goes in its `OTHER_REPLIES`.
+   Document the command on this page.
 
 For what a screen reports in `STATE`, override `Activity::appendDebugState()` and write each pair
 with `SerialCommandGrammar::appendField()`. For work `IDLE` should wait for, override

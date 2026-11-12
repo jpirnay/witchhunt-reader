@@ -104,6 +104,10 @@ void SerialTransferActivity::onExit() {
 }
 
 void SerialTransferActivity::loop() {
+  // onEnter() could not grow the receive queue while bytes waited in it; it grows on the first pass that finds it
+  // empty, before the host's pieces come (a no-op once grown).
+  SerialBuffers::arm();
+
   // Check Back first so the session can be left between protocol frames.
   // finish() (not onGoHome()) returns control to the File Transfer picker that
   // launched us via startActivityForResult, matching the Calibre branch.

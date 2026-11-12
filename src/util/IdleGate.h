@@ -16,18 +16,25 @@
 //    normal busy check follows it from there. If nothing is under way yet, the effect is done once
 //    a render pass starts after that pass, or once kNoRenderGraceMs pass without one (the press
 //    changed nothing on screen).
+//
+// A held press that failed (ButtonPressQueue::droppedPresses(): the press or its release was not taken
+// in) was not played as asked, so the wait that ends after it fails, however it ended: PressDropped
+// instead of Idle or TimedOut. One such answer covers every failure since the previous wait ended,
+// whether it came during the wait or before it. With no input left to follow then, the effect is
+// done: the next wait does not wait for a frame that will not come.
 class IdleGate {
  public:
   static constexpr uint32_t kQuietMs = 250;
   static constexpr uint32_t kNoRenderGraceMs = 1000;
 
-  enum class Verdict : uint8_t { Waiting, Idle, TimedOut };
+  enum class Verdict : uint8_t { Waiting, Idle, TimedOut, PressDropped };
 
   struct Sample {
     uint32_t nowMs = 0;
-    const char* busy = nullptr;  // the device's own busy reason, nullptr when it looks idle
-    bool effectHandled = true;   // the input path is done with the last effect
-    uint32_t renderPasses = 0;   // render passes started so far
+    const char* busy = nullptr;   // the device's own busy reason, nullptr when it looks idle
+    bool effectHandled = true;    // the input path is done with the last effect
+    uint32_t renderPasses = 0;    // render passes started so far
+    uint32_t droppedPresses = 0;  // held presses that failed so far
   };
 
   // A command that should change the screen ran.
@@ -36,13 +43,16 @@ class IdleGate {
     effectHandledSeen_ = false;
   }
 
-  // Starts a wait (CMD:IDLE); a wait already running is replaced.
-  void begin(const uint32_t nowMs, const uint32_t timeoutMs) {
+  // Starts a wait (CMD:IDLE). False, with the running wait left as it is, while one runs: every IDLE
+  // gets one reply, and a second wait in its place would leave the first without one.
+  [[nodiscard]] bool begin(const uint32_t nowMs, const uint32_t timeoutMs) {
+    if (waiting_) return false;
     waiting_ = true;
     startMs_ = nowMs;
     timeoutMs_ = timeoutMs;
     quiet_ = false;
     lastBusy_ = "settling";
+    return true;
   }
 
   bool waiting() const { return waiting_; }
@@ -65,18 +75,27 @@ class IdleGate {
       quiet_ = true;
       quietSinceMs_ = sample.nowMs;
     }
-    if (quiet_ && sample.nowMs - quietSinceMs_ >= kQuietMs) {
-      waiting_ = false;
-      return Verdict::Idle;
-    }
-    if (sample.nowMs - startMs_ >= timeoutMs_) {
-      waiting_ = false;
-      return Verdict::TimedOut;
-    }
+    // The deadline first: a pass that stalled past it can show a quiet window long enough, and the
+    // wait must not answer success later than the timeout it was given.
+    if (sample.nowMs - startMs_ >= timeoutMs_) return finish(Verdict::TimedOut, sample);
+    if (quiet_ && sample.nowMs - quietSinceMs_ >= kQuietMs) return finish(Verdict::Idle, sample);
     return Verdict::Waiting;
   }
 
  private:
+  Verdict finish(const Verdict verdict, const Sample& sample) {
+    waiting_ = false;
+    const bool dropped = sample.droppedPresses != dropsAnswered_;
+    dropsAnswered_ = sample.droppedPresses;
+    if (!dropped) return verdict;
+    // A failed press leaves no frame to wait for: it never went in, or it went in over a second ago and
+    // its frame has come. With no input left to follow, the effect's render grace would only
+    // run out on the next wait (IDLE_TIMEOUT:render for a frame that never comes); input still under
+    // way, another press queued, is followed as before.
+    if (sample.effectHandled) effectPending_ = false;
+    return Verdict::PressDropped;
+  }
+
   const char* effectBusy(const Sample& sample) {
     if (!effectPending_) return nullptr;
     if (!sample.effectHandled) return "input";
@@ -103,6 +122,7 @@ class IdleGate {
   uint32_t timeoutMs_ = 0;
   uint32_t quietSinceMs_ = 0;
   const char* lastBusy_ = "settling";
+  uint32_t dropsAnswered_ = 0;  // Sample::droppedPresses when the last wait ended
 
   bool effectPending_ = false;
   bool effectHandledSeen_ = false;

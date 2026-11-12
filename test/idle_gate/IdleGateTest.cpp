@@ -20,6 +20,7 @@ struct Device {
   const char* busy = nullptr;
   bool handled = true;
   uint32_t passes = 0;
+  uint32_t dropped = 0;  // presses the input path gave up, since boot
 
   Verdict pass() {
     now += 10;
@@ -28,6 +29,7 @@ struct Device {
     sample.busy = busy;
     sample.effectHandled = handled;
     sample.renderPasses = passes;
+    sample.droppedPresses = dropped;
     return gate.step(sample);
   }
 
@@ -46,7 +48,7 @@ struct Device {
 
 TEST(IdleGate, AQuietDeviceIsIdleAfterTheQuietWindow) {
   Device d;
-  d.gate.begin(d.now, 10000);
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
   const uint32_t start = d.now;
   EXPECT_EQ(d.runUntilDone(), Verdict::Idle);
   EXPECT_GE(d.now - start, IdleGate::kQuietMs);
@@ -55,7 +57,7 @@ TEST(IdleGate, AQuietDeviceIsIdleAfterTheQuietWindow) {
 
 TEST(IdleGate, BusyRestartsTheQuietWindow) {
   Device d;
-  d.gate.begin(d.now, 10000);
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
   for (int i = 0; i < 20; ++i) EXPECT_EQ(d.pass(), Verdict::Waiting);  // 200 ms quiet
   d.busy = "render";
   EXPECT_EQ(d.pass(), Verdict::Waiting);
@@ -71,7 +73,7 @@ TEST(IdleGate, AnUnhandledPressKeepsTheDeviceBusy) {
   Device d;
   d.gate.noteEffect();
   d.handled = false;
-  d.gate.begin(d.now, 10000);
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
   for (int i = 0; i < 60; ++i) ASSERT_EQ(d.pass(), Verdict::Waiting) << "600 ms, the press still queued";
   // Handled now, and its page turn queued in the same pass.
   d.handled = true;
@@ -88,7 +90,7 @@ TEST(IdleGate, AnUnhandledPressKeepsTheDeviceBusy) {
 TEST(IdleGate, AHandledPressWaitsForTheFrameItCauses) {
   Device d;
   d.gate.noteEffect();
-  d.gate.begin(d.now, 10000);
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
   for (int i = 0; i < 40; ++i) ASSERT_EQ(d.pass(), Verdict::Waiting) << "no pass has started since";
   d.passes++;  // the page turn's render pass starts...
   d.busy = "render";
@@ -101,7 +103,7 @@ TEST(IdleGate, AHandledPressWaitsForTheFrameItCauses) {
 TEST(IdleGate, APressThatDrawsNothingIsDoneAfterTheGrace) {
   Device d;
   d.gate.noteEffect();
-  d.gate.begin(d.now, 10000);
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
   const uint32_t start = d.now;
   EXPECT_EQ(d.runUntilDone(), Verdict::Idle);
   EXPECT_GE(d.now - start, IdleGate::kNoRenderGraceMs);
@@ -113,7 +115,7 @@ TEST(IdleGate, APassBeforeThePressWasHandledDoesNotCount) {
   Device d;
   d.gate.noteEffect();
   d.handled = false;
-  d.gate.begin(d.now, 10000);
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
   d.passes++;  // e.g. the reader's pre-render of the page before
   for (int i = 0; i < 10; ++i) ASSERT_EQ(d.pass(), Verdict::Waiting);
   d.handled = true;  // handled with nothing under way yet
@@ -132,7 +134,7 @@ TEST(IdleGate, AnEffectSeenThroughBeforeTheWaitCostsNothingLater) {
   d.busy = nullptr;
   d.pass();
   EXPECT_FALSE(d.gate.active()) << "nothing left to follow";
-  d.gate.begin(d.now, 10000);
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
   const uint32_t start = d.now;
   EXPECT_EQ(d.runUntilDone(), Verdict::Idle);
   EXPECT_LT(d.now - start, IdleGate::kQuietMs + 30);
@@ -141,15 +143,116 @@ TEST(IdleGate, AnEffectSeenThroughBeforeTheWaitCostsNothingLater) {
 TEST(IdleGate, TimesOutNamingWhatKeptItBusy) {
   Device d;
   d.busy = "background";
-  d.gate.begin(d.now, 500);
+  ASSERT_TRUE(d.gate.begin(d.now, 500));
   EXPECT_EQ(d.runUntilDone(), Verdict::TimedOut);
   EXPECT_STREQ(d.gate.reason(), "background");
   EXPECT_FALSE(d.gate.waiting());
 }
 
+// A loop pass that stalls past the deadline: the next sample may show quiet long enough, but the
+// wait has run out by then, and IDLE must not answer success later than the timeout it was given.
+TEST(IdleGate, ASampleAfterTheDeadlineTimesOutEvenWhenQuiet) {
+  Device d;
+  ASSERT_TRUE(d.gate.begin(d.now, 500));
+  EXPECT_EQ(d.pass(), Verdict::Waiting);  // quiet from here
+  d.now += 990;                           // the loop stalls
+  EXPECT_EQ(d.pass(), Verdict::TimedOut);
+  EXPECT_FALSE(d.gate.waiting());
+}
+
+// Quiet long enough before the deadline is still idle.
+TEST(IdleGate, QuietBeforeTheDeadlineIsIdle) {
+  Device d;
+  ASSERT_TRUE(d.gate.begin(d.now, IdleGate::kQuietMs + 50));
+  EXPECT_EQ(d.runUntilDone(), Verdict::Idle);
+}
+
+// Every CMD:IDLE gets its reply. A second one while the first waits is refused (the caller answers it
+// IDLE_ERROR:busy) and the first goes on as it was, with its own deadline: replacing it, as before,
+// left the first command without a reply.
+TEST(IdleGate, ASecondWaitIsRefusedAndTheFirstKeepsItsDeadline) {
+  Device d;
+  d.busy = "background";
+  ASSERT_TRUE(d.gate.begin(d.now, 500));
+  const uint32_t start = d.now;
+  for (int i = 0; i < 20; ++i) ASSERT_EQ(d.pass(), Verdict::Waiting);
+  EXPECT_FALSE(d.gate.begin(d.now, 10000));
+  EXPECT_EQ(d.runUntilDone(), Verdict::TimedOut);
+  EXPECT_LT(d.now - start, 600u) << "the first wait's 500 ms, not the second's 10 s";
+  EXPECT_STREQ(d.gate.reason(), "background");
+  // Answered: the next wait starts.
+  EXPECT_TRUE(d.gate.begin(d.now, 500));
+}
+
+// A press the input path gave up never reached the screen: the IDLE that follows it must not report
+// success (the caller answers IDLE_ERROR:press dropped). Once answered, the drop is not reported again.
+TEST(IdleGate, APressDroppedDuringTheWaitFailsIt) {
+  Device d;
+  d.gate.noteEffect();
+  d.handled = false;
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
+  for (int i = 0; i < 100; ++i) ASSERT_EQ(d.pass(), Verdict::Waiting);
+  d.dropped = 1;  // given up after a second; the queue is idle, so the input path is done
+  d.handled = true;
+  EXPECT_EQ(d.runUntilDone(), Verdict::PressDropped);
+  EXPECT_FALSE(d.gate.waiting());
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
+  EXPECT_EQ(d.runUntilDone(), Verdict::Idle) << "reported once";
+}
+
+// The press was given up before the IDLE came (BTN, STATE, then IDLE): still that IDLE's failure.
+TEST(IdleGate, APressDroppedBeforeTheWaitFailsTheNextOne) {
+  Device d;
+  d.dropped = 2;
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
+  EXPECT_EQ(d.runUntilDone(), Verdict::PressDropped);
+}
+
+// A wait that runs out with a press given up says so rather than what kept it busy.
+TEST(IdleGate, APressDroppedInATimedOutWaitIsWhatItReports) {
+  Device d;
+  d.busy = "background";
+  ASSERT_TRUE(d.gate.begin(d.now, 500));
+  d.pass();
+  d.dropped = 1;
+  EXPECT_EQ(d.runUntilDone(), Verdict::PressDropped);
+}
+
+// A wait runs out just after the queue gave its press up. The press drew nothing, so nothing is left to
+// follow: a wait sent right after the PressDropped answer must not sit out the effect's render grace
+// (IDLE_TIMEOUT:render for a frame that will never come).
+TEST(IdleGate, AfterADroppedPressWithNoInputLeftTheNextWaitIsIdle) {
+  Device d;
+  d.gate.noteEffect();
+  d.handled = false;
+  ASSERT_TRUE(d.gate.begin(d.now, 1000));
+  for (int i = 0; i < 95; ++i) ASSERT_EQ(d.pass(), Verdict::Waiting);
+  d.dropped = 1;  // given up; the queue is empty, so the input path is done
+  d.handled = true;
+  EXPECT_EQ(d.runUntilDone(), Verdict::PressDropped);
+  EXPECT_FALSE(d.gate.active()) << "nothing left to follow";
+  ASSERT_TRUE(d.gate.begin(d.now, 500));
+  EXPECT_EQ(d.runUntilDone(), Verdict::Idle);
+}
+
+// The same, with another press still queued: its input is still followed.
+TEST(IdleGate, AfterADroppedPressWithInputLeftTheEffectIsStillFollowed) {
+  Device d;
+  d.gate.noteEffect();
+  d.handled = false;
+  ASSERT_TRUE(d.gate.begin(d.now, 1000));
+  for (int i = 0; i < 95; ++i) ASSERT_EQ(d.pass(), Verdict::Waiting);
+  d.dropped = 1;  // the first press given up, the second one still playing
+  EXPECT_EQ(d.runUntilDone(), Verdict::PressDropped);
+  EXPECT_TRUE(d.gate.active());
+  ASSERT_TRUE(d.gate.begin(d.now, 300));
+  EXPECT_EQ(d.runUntilDone(), Verdict::TimedOut);
+  EXPECT_STREQ(d.gate.reason(), "input");
+}
+
 TEST(IdleGate, ATimeoutWithNothingBusyIsSettling) {
   Device d;
-  d.gate.begin(d.now, 100);  // shorter than the quiet window
+  ASSERT_TRUE(d.gate.begin(d.now, 100));  // shorter than the quiet window
   EXPECT_EQ(d.runUntilDone(), Verdict::TimedOut);
   EXPECT_STREQ(d.gate.reason(), "settling");
 }
@@ -158,7 +261,7 @@ TEST(IdleGate, AnUnhandledPressIsNamedInTheTimeout) {
   Device d;
   d.gate.noteEffect();
   d.handled = false;
-  d.gate.begin(d.now, 300);
+  ASSERT_TRUE(d.gate.begin(d.now, 300));
   EXPECT_EQ(d.runUntilDone(), Verdict::TimedOut);
   EXPECT_STREQ(d.gate.reason(), "input");
 }
@@ -183,7 +286,7 @@ TEST(IdleGate, ActiveLastsFromThePressToItsFrameAndThroughTheWait) {
   d.pass();
   EXPECT_FALSE(d.gate.active()) << "the effect is seen through, and no wait runs";
 
-  d.gate.begin(d.now, 10000);
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
   d.busy = "render";
   for (int i = 0; i < 40; ++i) {
     ASSERT_EQ(d.pass(), Verdict::Waiting);
@@ -207,7 +310,7 @@ TEST(IdleGate, AnEffectThatDrawsNothingStopsBeingActiveAfterTheGrace) {
 TEST(IdleGate, ATimedOutWaitIsNoLongerActive) {
   Device d;
   d.busy = "background";
-  d.gate.begin(d.now, 500);
+  ASSERT_TRUE(d.gate.begin(d.now, 500));
   EXPECT_TRUE(d.gate.active());
   EXPECT_EQ(d.runUntilDone(), Verdict::TimedOut);
   EXPECT_FALSE(d.gate.active());
