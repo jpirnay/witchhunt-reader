@@ -174,9 +174,9 @@ held press `BTN_ERROR:busy`.
   one into one press, and a held press of a key that is still down waits for it to come up, so it
   gets a press of its own. `POWER` held past the power-key duration sleeps the device, as the key
   does. A held press fails when the input layer does not take the press or its release in within a
-  second (a finger still on the key keeps the release out), or when its key is still down a second
-  after the press is due. A failed press is counted in `STATE`'s `btn_dropped`, and the next `IDLE`
-  answers `IDLE_ERROR:press dropped`.
+  second and four loop passes (a finger still on the key keeps the release out), or when its key is
+  still down that long after the press is due. A failed press is counted in `STATE`'s `btn_dropped`,
+  and the next `IDLE` answers `IDLE_ERROR:press dropped`.
 
 ```
 > CMD:BTN:DOWN
@@ -1095,7 +1095,7 @@ so it can be tested on the host (`test/serial_command_grammar`).
    [Which builds have it](#which-builds-have-it)); a probe the UI calls gets an empty inline twin in
    `SerialTestApi.h` for builds without the flag.
 6. Start every reply line with the command's name and `_` or `:`: that is how `tools/devctl.py` tells a reply
-   from a log line or a late reply to another command. A reply under another word goes in its `OTHER_REPLIES`.
+   from a log line or a line of another command. A reply under another word goes in its `OTHER_REPLIES`.
    Document the command on this page.
 
 For what a screen reports in `STATE`, override `Activity::appendDebugState()` and write each pair
