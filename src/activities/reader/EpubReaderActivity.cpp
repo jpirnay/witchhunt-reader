@@ -3462,6 +3462,13 @@ void EpubReaderActivity::resetSectionKeepingPosition() {
         navTarget = NavigationTarget::makePage(currentPage);
       }
       navTarget.cachedPageCount = section->pageCount;
+    } else if (navTarget.kind != NavigationTarget::Kind::Page || navTarget.awaitsItsText()) {
+      // The build has not reached the text it was started for: the next layout waits for the same text. The page shown
+      // meanwhile has a number from the layout given up.
+      LOG_DBG("ERS", "Keeping the target the build was waiting for across a relayout (page %d shown)", currentPage);
+    } else if (landedText_.spine == currentSpineIndex && landedText_.page == currentPage) {
+      // The text the build landed on (noteLandedText): the next layout lands on it too, not on this page's number.
+      navTarget = NavigationTarget::makeVisibleOffset(landedText_.offset, currentPage);
     } else {
       // pageCount is only the number of pages produced so far. Treating it as a
       // completed layout count would proportionally jump forward after relayout.
