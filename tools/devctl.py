@@ -8,7 +8,7 @@ Steps run in order; the run stops at the first failed step and exits non-zero (-
 them all and exits non-zero if any failed).
 
   cmd:<TEXT>            send "CMD:<TEXT>", wait for its reply line, print it
-                        (fails on a *_ERROR / *_TIMEOUT reply or none at all)
+                        (fails on a *_ERROR / *_TIMEOUT reply; no reply at all stops the run, see below)
   state                 CMD:STATE, print the reply and remember its fields for `check:`
   check:<key>=<regex>   the last STATE's <key> must match <regex> (re.fullmatch)
   idle[:<ms>[:SCREEN]]  CMD:IDLE..., wait for IDLE / IDLE_TIMEOUT (a timeout fails the step)
@@ -36,9 +36,11 @@ A step takes only a reply to its own command: a line that starts with the comman
 the device may take to answer it: 20 s for the device to read it (a loop pass can be held up by long
 work), and on top what the command itself may take (an IDLE its own timeout, an FS:GET or FS:HASH or
 ACT:DICT a file read through). A command that got no reply while the port stayed open ends the run,
---keep-going or not: the device may still answer, and that reply could not be told from the next
-command's. So does IDLE_ERROR:busy: a wait from before the run is still running, and its answer is still
-to come. A step that failed with any other error reply does not end the run under --keep-going. A run
+--keep-going or not: the device may still answer, and replies carry no tag, so that late reply can be
+taken by the first command of its name if it arrives just as that command is sent (lines that arrived
+before are dropped then). IDLE_ERROR:busy ends the run too: a wait from before the run is still running,
+and its answer is still to come. A step that failed with any other error reply does not end the run
+under --keep-going. A run
 that stopped for a missing reply may leave that reply still to come: let the device answer, or restart
 it, before the next run.
 
@@ -55,6 +57,7 @@ sent again, since the device may have taken it: its step fails with DELIVERY UNC
 step uses the reopened port.
 """
 import argparse
+import math
 import os
 import re
 import sys
@@ -105,8 +108,8 @@ class DeliveryUncertain(Exception):
 
 class LinkUnsynced(Exception):
     """A reply is still to come while the port stayed open: it timed out here, or the device said a wait from before
-    is still running. The device may answer later, and nothing tells that reply from the next command's, so the run
-    cannot go on."""
+    is still running. Replies carry no tag: should it arrive just as the next command of its name is sent, that
+    command would take it, so the run cannot go on."""
 
 
 def reply_prefixes(text):
@@ -399,9 +402,12 @@ class Device:
             return "no reply (the device restarted)"
         if not line.startswith("SCREENSHOT_START:"):
             return line  # SCREENSHOT_ERROR:..., or CMD_ERROR
-        _, w, h, size = line.split(":")
-        data = self.read_exact(int(size), time.time() + DEVICE_STREAM_STALL + REPLY_TIMEOUT)
-        if len(data) != int(size):
+        start = re.fullmatch(r"SCREENSHOT_START:(\d+):(\d+):(\d+)", line)
+        if not start:
+            raise LinkUnsynced(f"malformed {line!r}: a frame of unknown length follows")
+        w, h, size = (int(group) for group in start.groups())
+        data = self.read_exact(size, time.time() + DEVICE_STREAM_STALL + REPLY_TIMEOUT)
+        if len(data) != size:
             self.no_reply(DEVICE_STREAM_STALL + REPLY_TIMEOUT)
             return f"short frame: {len(data)} of {size} bytes (the device restarted)"
         end = self.reply(REPLY_TIMEOUT)
@@ -413,7 +419,10 @@ class Device:
             return None
         from PIL import Image  # only shot: needs Pillow
 
-        image = Image.frombytes("1", (int(w), int(h)), data)
+        try:
+            image = Image.frombytes("1", (w, h), data)
+        except ValueError:
+            return f"a frame of {size} bytes does not fill {w}x{h}"
         if rotate:
             image = image.rotate(rotate, expand=True)
         image.save(path)
@@ -461,7 +470,10 @@ class Device:
         line = self.reply(REPLY_TIMEOUT)
         if not line or not line.startswith("FS_PUT_READY:"):
             return line or "no reply"
-        chunk = int(line.split(":", 1)[1])
+        ready = re.fullmatch(r"FS_PUT_READY:([1-9]\d*)", line)
+        if not ready:
+            raise LinkUnsynced(f"malformed {line!r}: the device waits for an upload whose pieces cannot be sized")
+        chunk = int(ready.group(1))
         sent = 0
         while sent < len(data):
             piece = data[sent:sent + chunk]
@@ -494,13 +506,11 @@ class Device:
         line = self.reply(reply_timeout(f"FS:GET:{remote}"))
         if not line or not line.startswith("FS_GET_START:"):
             return line or "no reply"
-        fields = line.split(":")
-        if len(fields) != 4:
-            return f"expected FS_GET_START:<size>:<crc32hex>:<piece>, got {line!r}"
-        try:
-            size, crc, piece = int(fields[1]), int(fields[2], 16), int(fields[3])
-        except ValueError:
-            return f"bad FS_GET_START {line!r}"
+        start = re.fullmatch(r"FS_GET_START:(\d+):([0-9a-fA-F]{1,8}):([1-9]\d*)", line)
+        if not start:
+            # The device sends its first piece now and waits for it to be taken: cancel, and read its answer.
+            return self._abandon_get(f"expected FS_GET_START:<size>:<crc32hex>:<piece>, got {line!r}", b"")
+        size, crc, piece = int(start.group(1)), int(start.group(2), 16), int(start.group(3))
         started = time.time()
         data = bytearray()
         next_pause = 1 << 20
@@ -548,13 +558,16 @@ class Device:
         print(line if line else f"NO REPLY to FS:HASH:{remote}")
         if not line or not line.startswith("FS_HASH:"):
             return line or "no reply"
-        crc, size, _ = line[len("FS_HASH:"):].split(" ", 2)
+        hashed = re.match(r"FS_HASH:([0-9a-f]{8}) (\d+)( |$)", line)
+        if not hashed:
+            return f"expected FS_HASH:<crc32hex> <size> <path>, got {line!r}"
+        crc, size = hashed.group(1), int(hashed.group(2))
         if local is None:
             return None
         with open(local, "rb") as f:
             data = f.read()
         mine = f"{zlib.crc32(data) & 0xFFFFFFFF:08x}"
-        if (crc, int(size)) != (mine, len(data)):
+        if (crc, size) != (mine, len(data)):
             return f"differs from {local}: crc {mine}, {len(data)} bytes"
         print(f"matches {local}")
         return None
@@ -609,9 +622,9 @@ def run(device, steps, rotate, keep_going=False):
             print(f"DELIVERY UNCERTAIN: {error} (port reopened, not resent)")
             ok = False
         except LinkUnsynced as error:
-            # --keep-going or not: a reply still to come could pass for the next command's.
-            print(f"LINK UNSYNCED: {error}; a reply that comes later could not be told from the next command's, so "
-                  f"the run stops")
+            # --keep-going or not: a reply still to come could be taken by the next command of its name.
+            print(f"LINK UNSYNCED: {error}; a late reply could be taken by the next command of its name, so the run "
+                  f"stops")
             print(f"step failed: {step}")
             return False
         if not ok:
@@ -622,9 +635,45 @@ def run(device, steps, rotate, keep_going=False):
     return all_ok
 
 
+def step_error(kind, rest):
+    """What is wrong with a step's own text (a number of seconds, a regular expression), or None. Checked before
+    anything is sent, so a typo fails its step instead of ending the run with a traceback."""
+    def bad_seconds(text):
+        try:
+            value = float(text)
+        except ValueError:
+            return True
+        return not (math.isfinite(value) and value >= 0)  # inf would wait for ever
+
+    def bad_pattern(text):
+        try:
+            re.compile(text)
+        except re.error:
+            return True
+        return False
+
+    if kind == "wait" and bad_seconds(rest):
+        return f"wait:<seconds> takes a number of seconds, got {rest!r}"
+    if kind == "expect":
+        pattern, _, seconds = rest.rpartition(":")
+        if bad_seconds(seconds):
+            return f"expect:<regex>:<seconds> takes a number of seconds, got {seconds!r}"
+        if bad_pattern(pattern):
+            return f"expect: {pattern!r} is no regular expression"
+    if kind == "check" and bad_pattern(rest.partition("=")[2]):
+        return f"check: {rest.partition('=')[2]!r} is no regular expression"
+    if kind == "select" and bad_pattern(rest.partition(":")[0]):
+        return f"select: {rest.partition(':')[0]!r} is no regular expression"
+    return None
+
+
 def run_step(device, step, rotate, state):
     """One step. Returns whether it passed, and the STATE fields `check:` reads from then on."""
     kind, _, rest = step.partition(":")
+    error = step_error(kind, rest)
+    if error:
+        print(f"BAD STEP: {error}")
+        return False, state
     ok = True
     if kind == "cmd" and rest.strip().split(":")[0] == "SCREENSHOT":
         # The frame's bytes follow the first line: read them, so they do not stay on the line (shot: saves them).

@@ -1047,10 +1047,14 @@ trailing `:<digits>`, the retry count), and a local path may carry a drive lette
 A step takes only a reply to its own command: a line starting with the command's name and `_` or `:`, or
 `CMD_ERROR`. It waits as long as the device may take: 20 s for the device to read the command (a loop pass can be held
 up by long work), and on top what the command itself may take (an `IDLE` its own timeout, `FS:GET`, `FS:HASH` and
-`ACT:DICT` 300 s for a file read through, `SCREENSHOT` 5 s). Replies carry no tag that ties them to their command, so a
-reply that comes after the step stopped waiting could pass for the next command's: when a command gets no reply while
-the port stays open, the run stops (`LINK UNSYNCED: ...`, exit 1), `--keep-going` or not, and so it does on
-`IDLE_ERROR:busy`, whose earlier wait still has its answer to come. A step that failed with any other error reply does
+`ACT:DICT` 300 s for a file read through, `SCREENSHOT` 5 s). Replies carry no tag that ties them to their command: a
+reply that comes after its step stopped waiting can be taken by the first command of its name, if it arrives just as
+that command is sent (lines that arrived before are dropped then). So when a command gets no reply while the port stays
+open, the run stops (`LINK UNSYNCED: ...`, exit 1), `--keep-going` or not, and so it does on `IDLE_ERROR:busy`, whose
+earlier wait still has its answer to come. A step whose own number or regular expression is malformed fails as
+`BAD STEP` before anything is sent, and a malformed reply fails its step, or stops the run when it leaves bytes of
+unknown length on the line (a `SCREENSHOT_START` or `FS_PUT_READY` it cannot read). A step that failed with any other
+error reply does
 not stop a `--keep-going` run, and nor does a reply lost to a restart (the port went away meanwhile): the device answers
 nothing it was sent before it restarted. A run that stopped on a missing reply can leave that reply still to come: let
 the device answer, or restart it, before the next run.
