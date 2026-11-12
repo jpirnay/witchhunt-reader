@@ -29,7 +29,6 @@ class FakeDevice:
         self.received = []  # (port number, command) for every CMD: line the device took
         self.after_command = None  # called with the port once a command is answered
         self.later = []  # (due time, line) still to come
-        self.raw_answers = {}  # a protocol byte the host writes alone (FS:GET's cancel) -> the lines it answers with
 
     def deliver(self):
         """The lines that are due, in turn, to the port open now."""
@@ -44,10 +43,6 @@ class FakeDevice:
         return port
 
     def take(self, port, data):
-        if data in self.raw_answers:
-            self.later.extend((time.time(), line) for line in self.raw_answers[data])
-            self.deliver()
-            return
         port.partial += data
         while b"\n" in port.partial:
             line, port.partial = port.partial.split(b"\n", 1)
@@ -321,16 +316,19 @@ class MalformedInputFailsCleanly(unittest.TestCase):
         self.assertIn("LINK UNSYNCED: malformed 'FS_PUT_READY:lots'", out)
         self.assertEqual(len(device.received), 1)
 
-    def test_a_malformed_download_start_is_cancelled_and_the_run_goes_on(self):
-        device = FakeDevice({"FS:GET:/test/a.bin": ["FS_GET_START:zz"], "STATE": ["STATE:activity=Home"]})
-        device.raw_answers = {devctl.GET_CANCEL: ["FS_ERROR:cancelled /test/a.bin"]}
+    def test_a_malformed_download_start_stops_the_run(self):
+        # As the device does: the first raw piece follows the line at once, and an answer to a cancel would come
+        # straight after its last byte, with no line break before it.
+        device = FakeDevice({"FS:GET:/test/a.bin": ["FS_GET_START:zz", b"\x00\x01\x02piece"],
+                             "STATE": ["STATE:activity=Home"]})
         port = connect(device)
+        started = time.time()
         with tempfile.TemporaryDirectory() as folder:
             ok, out = run(port, [f"get:/test/a.bin:{os.path.join(folder, 'a.bin')}", "state"])
         self.assertFalse(ok)
-        self.assertIn("cancelled (FS_ERROR:cancelled /test/a.bin)", out)
-        self.assertIn("STATE:activity=Home", out)
-        self.assertNotIn("LINK UNSYNCED", out)
+        self.assertIn("LINK UNSYNCED: malformed 'FS_GET_START:zz'", out)
+        self.assertEqual(len(device.received), 1, "the run stopped before STATE")
+        self.assertLess(time.time() - started, 5, "at once, not after a wait for an answer")
 
     def test_a_malformed_hash_answer_fails_its_step(self):
         device = FakeDevice({"FS:HASH:/test/a.bin": ["FS_HASH:nothex"], "STATE": ["STATE:activity=Home"]})

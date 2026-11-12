@@ -508,8 +508,9 @@ class Device:
             return line or "no reply"
         start = re.fullmatch(r"FS_GET_START:(\d+):([0-9a-fA-F]{1,8}):([1-9]\d*)", line)
         if not start:
-            # The device sends its first piece now and waits for it to be taken: cancel, and read its answer.
-            return self._abandon_get(f"expected FS_GET_START:<size>:<crc32hex>:<piece>, got {line!r}", b"")
+            # The first piece follows at once, raw, of a size this line was to give; its answer would come straight
+            # after its last byte, not on a line of its own.
+            raise LinkUnsynced(f"malformed {line!r}: a piece of unknown length follows")
         size, crc, piece = int(start.group(1)), int(start.group(2), 16), int(start.group(3))
         started = time.time()
         data = bytearray()
