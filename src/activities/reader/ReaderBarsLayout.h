@@ -33,15 +33,15 @@ namespace fui = freeink::ui;
 constexpr fui::ActionId ACTION_BAR = 1;  // the value is the Button
 constexpr fui::ActionId ACTION_TAB = 3;  // the value is the Tab
 
-// The bars' own buttons: the top bar's two and Progress's three.
-enum class Button : uint8_t { Exit, Star, PrevChapter, GoTo, NextChapter };
+// The bars' own buttons: the top bar's three (the title opens the book's details) and Progress's three.
+enum class Button : uint8_t { Exit, Star, PrevChapter, GoTo, NextChapter, Info };
 
 enum class Tab : uint8_t { Contents, Progress, Layout, More, Count };
 constexpr uint8_t kTabCount = static_cast<uint8_t>(Tab::Count);
 
 // What the keys' cursor rests on. None on a touch board until a key moves it: a cursor nobody asked for would only say
 // which control the next Confirm hits, and a finger needs no such hint.
-enum class Focus : uint8_t { None, Exit, Star, Tabs, PrevChapter, GoTo, NextChapter, Layout };
+enum class Focus : uint8_t { None, Exit, Star, Tabs, PrevChapter, GoTo, NextChapter, Layout, Title };
 
 // The panel open above the tab bar.
 enum class Panel : uint8_t { None, Progress, Layout };
@@ -221,12 +221,17 @@ void build(ScreenT& screen, const Model& model, const Metrics& metrics, const fu
   if (top.height > 0) {
     target.fill(top, white);
     target.fill(fui::Rect{top.x, static_cast<int16_t>(top.bottom() - metrics.rule), top.width, metrics.rule}, black);
+    // The title between the two buttons: a tap there opens the book's details. Inverted under the keys' cursor.
+    const fui::Rect title{static_cast<int16_t>(top.x + metrics.topBar), top.y,
+                          static_cast<int16_t>(top.width - 2 * metrics.topBar),
+                          static_cast<int16_t>(metrics.topBar - metrics.rule)};
+    const bool titleFocused = model.focus == Focus::Title;
+    if (titleFocused) target.fill(title.inset(fui::Insets{4, 0, 4, 0}), black, 8);
     fui::TextStyle titleStyle = theme.bodyText;
     titleStyle.align = fui::TextAlign::Center;
-    target.text(fui::Rect{static_cast<int16_t>(top.x + metrics.topBar), top.y,
-                          static_cast<int16_t>(top.width - 2 * metrics.topBar),
-                          static_cast<int16_t>(metrics.topBar - metrics.rule)},
-                model.title ? model.title : "", titleStyle);
+    titleStyle.color = titleFocused ? fui::Color::White : fui::Color::Black;
+    target.text(title, model.title ? model.title : "", titleStyle);
+    screen.frame().hit(title, ACTION_BAR, static_cast<int16_t>(Button::Info));
     const int16_t square = static_cast<int16_t>(metrics.topBar - metrics.rule - theme.spaceSm);
     const int16_t squareY = static_cast<int16_t>(top.y + (metrics.topBar - metrics.rule - square) / 2);
     iconButton(screen, fui::Rect{static_cast<int16_t>(top.x + theme.spaceSm), squareY, square, square}, icon_back_32,

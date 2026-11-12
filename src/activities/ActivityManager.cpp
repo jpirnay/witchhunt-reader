@@ -773,12 +773,14 @@ bool ActivityManager::requiresExclusiveStorageLoop() const {
 }
 
 bool ActivityManager::isReaderActivity() const {
-  if (currentIsReaderActivity()) return true;
+  if (currentActivity && currentActivity->isReaderActivity()) return true;
   return std::any_of(stackActivities.begin(), stackActivities.end(),
                      [](const auto& activity) { return activity->isReaderActivity(); });
 }
 
-bool ActivityManager::currentIsReaderActivity() const { return currentActivity && currentActivity->isReaderActivity(); }
+bool ActivityManager::currentIsReaderActivity() const {
+  return currentActivity && currentActivity->takesReaderControls();
+}
 
 bool ActivityManager::currentMirrorsLeftRight() const { return currentActivity && currentActivity->mirrorsLeftRight(); }
 

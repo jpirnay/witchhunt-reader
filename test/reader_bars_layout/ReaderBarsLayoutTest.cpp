@@ -256,6 +256,7 @@ TEST(ReaderBarsLayout, EachActionIsThereOnce) {
     const size_t topBar = rb::coversPage(laid.model, laid.metrics, laid.area.height) ? 0u : 1u;
     EXPECT_EQ(countOf(laid, rb::Button::Exit), topBar);
     EXPECT_EQ(countOf(laid, rb::Button::Star), topBar);
+    EXPECT_EQ(countOf(laid, rb::Button::Info), topBar);
     EXPECT_EQ(countOf(laid, rb::ACTION_TAB), rb::kTabCount);
     const size_t progress = laid.model.panel == rb::Panel::Progress ? 1u : 0u;
     EXPECT_EQ(countOf(laid, rb::Button::PrevChapter), progress);

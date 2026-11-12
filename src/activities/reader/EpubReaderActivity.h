@@ -38,6 +38,8 @@
 #include "components/themes/BaseTheme.h"
 #include "components/themes/TapTargets.h"
 
+class ReaderBarsController;
+
 class EpubReaderActivity final : public Activity {
   // Reader can launch sync in several UX modes:
   // - COMPARE: legacy chooser (apply/upload) for power users.
@@ -1066,6 +1068,11 @@ class EpubReaderActivity final : public Activity {
   // nothing worth having and cost the next visit a needless re-open.
   void suspendBackgroundWork();
   void resumeBackgroundWork();
+  // Before a screen opens over the page, the bars' own or another (startActivityForResult): Background-B's borrow
+  // handed back and the work staged for the page under it dropped. Under RenderLock.
+  void prepareForOverlay(const char* overlay);
+  // The deferred AA and the pre-render staged for the page dropped, `by` named in the log. Under RenderLock.
+  void dropStagedPageWork(const char* by);
   void launchKOReaderSync(SyncLaunchMode mode = SyncLaunchMode::COMPARE,
                           const SyncPositionOverride* positionOverride = nullptr,
                           const SyncPostAction& postAction = {});
@@ -1122,10 +1129,46 @@ class EpubReaderActivity final : public Activity {
   // The book's own settings as this reader holds them (the book*Override members).
   BookReaderOverrides bookOverrides() const;
   void openReaderMenu();
-  // The reader bars (ReaderBarsActivity) over the page: Confirm, a centre tap and a status-bar tap open them; a key
-  // bound to the reader menu still opens the full menu, which the bars reach through More.
+  // The reader bars over the page: Confirm, a centre tap and a status-bar tap open them; a key bound to the reader
+  // menu still opens the full menu, which the bars reach through More. Pushed as ReaderBarsActivity, or drawn by the
+  // reader itself, which lays the page out again under them at each change (HalCapabilities::laysOutReaderLive).
   void openReaderBars();
   void onReaderBarsClosed(const ActivityResult& result);
+
+  // --- The reader bars, live ---
+  // Open while the bars are over the page and the reader runs under them: their input in loop(), the build of a
+  // chapter laid out anew in its idle branch, the bars drawn over every page (renderContents, displayBuildPage) or,
+  // where a pass has no page to draw, over the frame on the panel (paintLiveBars). Null while closed, and always on
+  // the C3s. Opened and closed on the loop task under the render lock; the render task reads it under the lock.
+  std::unique_ptr<ReaderBarsController> liveBars_;
+  // A page is owed under the live bars: a forced refresh asked for one. Cleared by the pass that draws a page
+  // (drawLiveBarsOverPage). Under RenderLock.
+  bool liveBarsPageOwed_ = false;
+  // The page under the live bars is drawn again once the chapter's build is done: a build still running drew it, its
+  // pictures as placeholders, or it was on the panel when the bars opened. Under RenderLock.
+  bool liveBarsRedrawWhenBuilt_ = false;
+  // The bars on the panel are not the ones the controller would draw now: they opened, or their input changed them.
+  // Without it a pass with no page to draw draws nothing. Under RenderLock.
+  bool liveBarsStale_ = false;
+  // The live bars are open. False at compile time where they never open (the C3s), so their code drops out there.
+  bool liveBarsOpen() const;
+  // One loop() pass with the live bars open: their input, then what it asked for.
+  void serviceLiveBars();
+  // The Layout tab's values applied as they changed, the page owed, and the bars told what the book is read with now.
+  void applyLiveLayout();
+  // The bars closed by their own input: they come down, and the reader does what they asked (onReaderBarsClosed).
+  void closeLiveBars();
+  // The bars down without their result: the reader is leaving, or another screen opens over it. Under RenderLock.
+  void dismissLiveBars();
+  // Whether this pass has a page to draw under the live bars; without one it paints only the bars (render()).
+  bool liveBarsPageDue() const;
+  // The bars over the frame on the panel, for a pass with no page to draw, when they changed. Under RenderLock.
+  void paintLiveBars();
+  // The bars into the frame being drawn, over the page and its status bar; the page is the one owed.
+  // `redrawWhenBuilt`: liveBarsRedrawWhenBuilt_. Under RenderLock.
+  void drawLiveBarsOverPage(bool redrawWhenBuilt);
+  // The sizes the reader's font offers, for the Layout tab.
+  ReaderSizeList layoutSheetSizes() const;
   // The Layout tab's values (ReaderLayoutValues): as the book is read now, and as the global settings have them.
   ReaderLayoutValues effectiveLayoutValues() const;
   static ReaderLayoutValues globalLayoutValues();
@@ -1256,8 +1299,9 @@ class EpubReaderActivity final : public Activity {
   bool handleLinkTouch();
 
  public:
-  explicit EpubReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Epub> epub)
-      : Activity("EpubReader", renderer, mappedInput), epub(std::move(epub)) {}
+  // Both out of line: liveBars_ holds a type this header only declares.
+  explicit EpubReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Epub> epub);
+  ~EpubReaderActivity() override;
   void onEnter() override;
   void onExit() override;
   void loop() override;
@@ -1285,6 +1329,8 @@ class EpubReaderActivity final : public Activity {
   // DISP log now says so out loud.
   void startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler) override;
   bool isReaderActivity() const override { return true; }
+  // Not while the live bars are open: reader actions on keys and gestures would turn the page under them.
+  bool takesReaderControls() const override;
   bool mirrorsLeftRight() const override {
     return pageProgressionRtl_.load() && SETTINGS.pageTurnButtons == CrossPointSettings::PAGE_TURN_FOLLOW_BOOK;
   }
