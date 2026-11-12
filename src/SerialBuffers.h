@@ -4,9 +4,9 @@
 //
 // They used to be 4 KB in and 8 KB out from the moment a cable was seen, which took 12 KB of a C3's heap
 // from anyone reading with the charger in. Now the wire opens with room for one command line, and the
-// first command from a host, or the Serial Transfer screen, takes the 4 KB a bulk transfer needs: its
-// 2,048-byte pieces come in a burst, and a queue that overflows drops bytes without a word. That stays
-// until the next restart.
+// first command from a host with nothing queued behind it, or the Serial Transfer screen, takes the 4 KB
+// a bulk transfer needs: its 2,048-byte pieces come in a burst, and a queue that overflows drops bytes
+// without a word. That stays until the next restart.
 //
 // The transmit ring stays at the driver's 256 bytes, on purpose. HWCDC frees it without its own lock, and
 // any task may be logging, so it cannot safely be resized once the system runs; and it does not need to
@@ -18,7 +18,9 @@ namespace SerialBuffers {
 void sizeForCommands();
 
 // Loop task only, as the wire's only reader: the old queue is deleted, so nothing may be reading it.
-// Safe to call again.
+// Grows the queue at the first call that finds nothing waiting in it, since deleting it would take
+// commands sent back to back with it (ReceiveQueueGrowth); until then, and after, a call does nothing.
+// So it is called on every command, and on every pass of the Serial Transfer screen.
 void arm();
 
 }  // namespace SerialBuffers
