@@ -295,12 +295,12 @@ class HalGPIO {
 
 #if defined(SERIAL_TEST_API) && SERIAL_TEST_API
   // A key held down, for the serial CMD:BTN:<name>:<ms> (util/ButtonPressQueue.h steps it): the buttons
-  // in `mask` (1 << BTN_*) read as pressed until the next call. They enter through the SDK's board-button
-  // hook, OR'd into the raw state before the debounce, so isPressed(), wasReleased(), getHeldTime() and
-  // ButtonEventManager take them as a key held that long. A real key is OR'd in beside them: another
-  // button keeps its own edges, the same button merges into one press. False when a board hook this one
-  // cannot read through occupies the slot: then nothing is held.
-  bool holdSyntheticButtons(uint8_t mask);
+  // in `mask` (1 << BTN_*) read as pressed until the next call. They enter through a button hook of their
+  // own beside the board's (InputManager::addButtonHook), OR'd into the raw state before the debounce, so
+  // isPressed(), wasReleased(), getHeldTime() and ButtonEventManager take them as a key held that long. A
+  // real key is OR'd in beside them: another button keeps its own edges, the same button merges into one
+  // press.
+  void holdSyntheticButtons(uint8_t mask);
 #endif
 
   // How far back an injected long press dates its press edge. Must stay above

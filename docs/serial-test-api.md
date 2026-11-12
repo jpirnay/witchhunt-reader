@@ -146,7 +146,7 @@ CMD:BTN:<BACK|CONFIRM|LEFT|RIGHT|UP|DOWN|POWER>[:LONG|:DOUBLE|:<ms>]
 ```
 
 Reply: `BTN_OK`, or `BTN_ERROR:unknown button <name>` / `BTN_ERROR:bad press <text>`, and for a
-held press `BTN_ERROR:busy` / `BTN_ERROR:not supported on this board`.
+held press `BTN_ERROR:busy`.
 
 - The names are the **physical keys**. The user's front-button remapping and the configured
   short/double/long actions apply as they would for a finger (on this X4, `POWER` is bound to the
@@ -160,8 +160,9 @@ held press `BTN_ERROR:busy` / `BTN_ERROR:not supported on this board`.
   [Power](#power-sleep-and-reboot) before you use it).
 - `:<ms>` (1 to 10000, full API only) **holds the key down** for that long. The other forms are a
   press and a release handed over at once, so code that checks whether a key is still down across
-  loop passes never sees them held; this one goes in where the board's buttons are read, before the
-  debounce, so `isPressed()`, the release and the held time are a real key's. A long press fires
+  loop passes never sees them held; this one goes in where the board's buttons are read, beside the
+  board's own button hook and before the debounce, on every board, so `isPressed()`, the release and the
+  held time are a real key's. A long press fires
   mid-hold, at 1 s, as it does for a finger. Held presses queue (four at most) and play one after
   the other, each starting once the last release has gone through; while one plays, a tap, `:LONG`
   or `:DOUBLE` answers `BTN_ERROR:busy`, so wait with `CMD:IDLE` (its timeout longer than the hold).

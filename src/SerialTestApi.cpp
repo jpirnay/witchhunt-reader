@@ -317,11 +317,6 @@ void cmdButton(const std::string_view arg) {
       }
       case PressKind::Hold:
 #if SERIAL_TEST_API
-        // Releasing nothing tells whether this board lets the hook in.
-        if (heldPresses.idle() && !gpio.holdSyntheticButtons(0)) {
-          reply("BTN_ERROR:not supported on this board");
-          return;
-        }
         if (!heldPresses.push(button.index, static_cast<uint16_t>(holdMs))) {
           reply("BTN_ERROR:busy");
           return;

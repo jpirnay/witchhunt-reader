@@ -13,10 +13,6 @@
 
 #if defined(SERIAL_TEST_API) && SERIAL_TEST_API
 #include <atomic>
-// Board-support layer, linked only into the LilyGo env (see its lib_deps).
-#if defined(FREEINK_DEVICE_LILYGO) && FREEINK_DEVICE_LILYGO
-#include <BoardT5S3.h>
-#endif
 #endif
 
 // Global HalGPIO instance
@@ -137,19 +133,10 @@ HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
 
 #if defined(SERIAL_TEST_API) && SERIAL_TEST_API
 // The buttons the serial test API holds down (holdSyntheticButtons()). Written by the loop task, read
-// on the sampler task inside inputMgr.update() through the SDK's board-button hook.
+// on the sampler task inside inputMgr.update() through the SDK's button hooks.
 std::atomic<uint8_t> syntheticButtons{0};
-bool syntheticHookInstalled = false;
 
-uint8_t syntheticButtonHook() {
-  uint8_t mask = syntheticButtons.load(std::memory_order_relaxed);
-#if defined(FREEINK_DEVICE_LILYGO) && FREEINK_DEVICE_LILYGO
-  // This hook takes the place of the one BoardT5S3::begin() installed, so it reads the board's user
-  // button (behind the PCA9535 expander) as that one does.
-  if (BoardT5S3::readButton()) mask |= static_cast<uint8_t>(1U << InputManager::BTN_DOWN);
-#endif
-  return mask;
-}
+uint8_t syntheticButtonHook() { return syntheticButtons.load(std::memory_order_relaxed); }
 #endif
 
 }  // namespace
@@ -185,16 +172,10 @@ void HalGPIO::begin() {
   inputMgr.begin();
 
 #if defined(SERIAL_TEST_API) && SERIAL_TEST_API
-  // Only where no board hook is in place, or where this one reads the board's buttons itself (the T5S3).
-  // Anywhere else the held presses are refused: replacing the hook would cost the board its buttons.
-#if defined(FREEINK_DEVICE_LILYGO) && FREEINK_DEVICE_LILYGO
-  constexpr bool kHookReadsBoardButtons = true;
-#else
-  constexpr bool kHookReadsBoardButtons = false;
-#endif
-  if (kHookReadsBoardButtons || !InputManager::hasButtonHook()) {
-    InputManager::setButtonHook(&syntheticButtonHook);
-    syntheticHookInstalled = true;
+  // Beside the board's own hook (the T5S3's expander button), not in its place. Without a free slot the held
+  // presses are never committed, and the serial queue gives them up and counts them (STATE's btn_dropped).
+  if (!InputManager::addButtonHook(&syntheticButtonHook)) {
+    LOG_ERR("HW", "No button hook slot left for the serial test API's held keys");
   }
 #endif
 
@@ -806,11 +787,7 @@ void HalGPIO::injectPress(const uint8_t buttonIndex, const bool longPress, const
 }
 
 #if defined(SERIAL_TEST_API) && SERIAL_TEST_API
-bool HalGPIO::holdSyntheticButtons(const uint8_t mask) {
-  if (!syntheticHookInstalled) return false;
-  syntheticButtons.store(mask, std::memory_order_relaxed);
-  return true;
-}
+void HalGPIO::holdSyntheticButtons(const uint8_t mask) { syntheticButtons.store(mask, std::memory_order_relaxed); }
 #endif
 
 void HalGPIO::injectTouch(const float nx, const float ny) {
