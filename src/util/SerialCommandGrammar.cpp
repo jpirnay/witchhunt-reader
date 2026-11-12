@@ -103,17 +103,20 @@ bool parseInt(const std::string_view text, int& out) {
   }
   if (i >= text.size()) return false;
   // Checked before the step, not after it: `long` is 32 bits on the device, so value * 10 + digit
-  // could wrap back into range first ("9999999999" became 1410065407 and was accepted).
-  constexpr uint32_t kMax = 0x7fffffffu;
+  // could wrap back into range first ("9999999999" became 1410065407 and was accepted). An int
+  // reaches one further below zero than above it: -2147483648 is in range.
+  const uint32_t limit = negative ? 0x80000000u : 0x7fffffffu;
   uint32_t value = 0;
   for (; i < text.size(); ++i) {
     const char c = text[i];
     if (c < '0' || c > '9') return false;
     const uint32_t digit = static_cast<uint32_t>(c - '0');
-    if (value > (kMax - digit) / 10) return false;
+    if (value > (limit - digit) / 10) return false;
     value = value * 10 + digit;
   }
-  out = negative ? -static_cast<int>(value) : static_cast<int>(value);
+  // In 64 bits: the magnitude 2147483648 has no int to negate.
+  const int64_t signedValue = negative ? -static_cast<int64_t>(value) : static_cast<int64_t>(value);
+  out = static_cast<int>(signedValue);
   return true;
 }
 
