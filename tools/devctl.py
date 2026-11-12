@@ -247,8 +247,11 @@ class Device:
         # RTS goes low before DTR: a plain close on Windows drops DTR first, and the ESP32-C3's USB serial unit
         # takes RTS high with DTR low as a reset request (esptool's), so every run restarted the device to Home.
         if self.ser.is_open:
-            self.ser.rts = False
-            self.ser.dtr = False
+            try:
+                self.ser.rts = False
+                self.ser.dtr = False
+            except (serial.SerialException, OSError):
+                pass  # the port went away: no line left to reset the device with
         self.ser.close()
 
     def _reopen(self):

@@ -66,12 +66,19 @@ class FakePort:
         self.device = device
         self.number = number
         self.is_open = True
-        self.rts = True
-        self.dtr = True
+        self.lines = {"rts": True, "dtr": True}
         self.incoming = bytearray()
         self.partial = b""
         self.gone = False  # the device rebooted: every call fails, as on a port that went away
         self.fail_write = False  # it goes away during the next write
+
+    def _set_line(self, name, value):
+        if self.gone:
+            raise PortGone(f"could not set {name}: [Errno 5] Input/output error")
+        self.lines[name] = value
+
+    rts = property(lambda self: self.lines["rts"], lambda self, value: self._set_line("rts", value))
+    dtr = property(lambda self: self.lines["dtr"], lambda self, value: self._set_line("dtr", value))
 
     @property
     def in_waiting(self):
@@ -275,6 +282,20 @@ class RepliesAreTheirCommands(unittest.TestCase):
         self.assertTrue(ok, out)
         self.assertIn("GET:b=2", out)
         self.assertIn("GET_END:2", out)
+
+
+class ClosingThePort(unittest.TestCase):
+    def test_a_port_that_went_away_closes_without_an_error(self):
+        # The device slept at the end of the run: the close must not turn a passing run into a traceback.
+        port = connect(FakeDevice({}))
+        port.ser.gone = True
+        port.close()
+        self.assertFalse(port.ser.is_open)
+
+    def test_the_close_drops_rts_before_dtr(self):
+        port = connect(FakeDevice({}))
+        port.close()
+        self.assertEqual(port.ser.lines, {"rts": False, "dtr": False})
 
 
 class TheModelStaysInTheseTests(unittest.TestCase):
