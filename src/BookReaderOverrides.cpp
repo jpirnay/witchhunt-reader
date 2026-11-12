@@ -67,6 +67,12 @@ int8_t BookReaderOverrides::get(const Field field) const {
       return verticalTextOverride;
     case Field::PublisherFonts:
       return publisherFontsOverride;
+    case Field::MarginHorizontal:
+      return marginHorizontalOverride;
+    case Field::ExtraParagraphSpacing:
+      return extraParagraphSpacingOverride;
+    case Field::TextDarkness:
+      return textDarknessOverride;
     case Field::Count:
       break;
   }
@@ -122,6 +128,18 @@ void BookReaderOverrides::setFromStored(const Field field, const int stored, con
       return;
     case Field::PublisherFonts:
       publisherFontsOverride = inRange(stored, CrossPointSettings::PUBLISHER_FONTS_COUNT - 1);
+      return;
+    case Field::MarginHorizontal:
+      marginHorizontalOverride =
+          stored >= CrossPointSettings::SCREEN_MARGIN_MIN && stored <= CrossPointSettings::SCREEN_MARGIN_MAX
+              ? static_cast<int8_t>(stored)
+              : int8_t{-1};
+      return;
+    case Field::ExtraParagraphSpacing:
+      extraParagraphSpacingOverride = inRange(stored, kOnOff);
+      return;
+    case Field::TextDarkness:
+      textDarknessOverride = inRange(stored, CrossPointSettings::TEXT_DARKNESS_COUNT - 1);
       return;
     case Field::Count:
       return;

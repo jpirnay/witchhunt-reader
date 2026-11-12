@@ -657,6 +657,9 @@ class EpubReaderActivity final : public Activity {
   int8_t bookLineSpacingOverride = -1;
   int8_t bookVerticalTextOverride = -1;
   int8_t bookPublisherFontsOverride = -1;
+  int8_t bookMarginHorizontalOverride = -1;
+  int8_t bookExtraParagraphSpacingOverride = -1;
+  int8_t bookTextDarknessOverride = -1;
   // Whether the book's language is ever set vertically (TypographyProfile::verticalAllowed); read once in onEnter.
   bool bookVerticalAllowed_ = false;
 
@@ -1137,6 +1140,12 @@ class EpubReaderActivity final : public Activity {
   bool imagesTakeGrayPass(const Page& page) const;
   uint8_t getEffectiveParagraphAlignment() const;
   bool getEffectiveTextAntiAliasing() const;
+  // The book's own left and right margin, else the setting (CrossPointSettings::screenMarginHorizontal).
+  uint8_t getEffectiveMarginHorizontal() const;
+  bool getEffectiveExtraParagraphSpacing() const;
+  // The book's own text darkness, else the setting. The renderer carries it while the book is open and gets the
+  // setting back on exit, the darkness every other screen draws with.
+  uint8_t getEffectiveTextDarkness() const;
   bool onePassTextFor(const Page& page) const;
   bool onePassComposedFor(const Page& page) const;
   bool displayComposedOnePass(const Page& page, int marginLeft, int contentTop, HalDisplay::RefreshMode mode);

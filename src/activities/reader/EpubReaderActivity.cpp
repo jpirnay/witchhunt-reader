@@ -790,6 +790,10 @@ void EpubReaderActivity::onEnter() {
   bookLineSpacingOverride = saved.lineSpacingOverride;
   bookVerticalTextOverride = saved.verticalTextOverride;
   bookPublisherFontsOverride = saved.publisherFontsOverride;
+  bookMarginHorizontalOverride = saved.marginHorizontalOverride;
+  bookExtraParagraphSpacingOverride = saved.extraParagraphSpacingOverride;
+  bookTextDarknessOverride = saved.textDarknessOverride;
+  renderer.setTextDarkness(getEffectiveTextDarkness());
   // Measured at the open that compiled the book's CSS (ReaderActivity); taken into account with Normalize Font Size and
   // the book's style on (makeSectionBuildParams).
   if (const uint8_t bodySize = BodySize::read(epub->getCachePath()); bodySize != 0) bookBodySizePct_ = bodySize;
@@ -862,6 +866,8 @@ void EpubReaderActivity::onEnter() {
 
 void EpubReaderActivity::onExit() {
   Activity::onExit();
+  // A book's own darkness stays with the book: every other screen draws with the setting.
+  renderer.setTextDarkness(SETTINGS.textDarkness);
   logReaderMemSnapshot("onExit_before_release");
   if constexpr (HalDisplay::kMayLendGray8Canvas) ImageBlock::setGrayVariant(ImageBlock::GrayVariant::Bayer);
 
@@ -1511,7 +1517,7 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.lineCompression = lineSpacing.compression;
   p.bookLineHeightFloor = lineSpacing.bookFloor;
   p.lineHeightEmPx = lineSpacing.emPx;
-  p.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
+  p.extraParagraphSpacing = getEffectiveExtraParagraphSpacing();
   p.paragraphIndent = SETTINGS.paragraphIndent;
   p.paragraphAlignment = getEffectiveParagraphAlignment();
   p.viewportWidth = layout.viewportWidth;
@@ -3256,7 +3262,7 @@ void EpubReaderActivity::applyTextDarkness(const uint8_t textDarkness) {
   }
   SETTINGS.textDarkness = textDarkness;
   SETTINGS.saveToFile();
-  renderer.setTextDarkness(textDarkness);
+  renderer.setTextDarkness(getEffectiveTextDarkness());
   // Force a re-render so the new darkness is visible immediately.
   requestUpdate();
 }
@@ -3339,6 +3345,9 @@ BookReaderOverrides EpubReaderActivity::bookOverrides() const {
   overrides.lineSpacingOverride = bookLineSpacingOverride;
   overrides.verticalTextOverride = bookVerticalTextOverride;
   overrides.publisherFontsOverride = bookPublisherFontsOverride;
+  overrides.marginHorizontalOverride = bookMarginHorizontalOverride;
+  overrides.extraParagraphSpacingOverride = bookExtraParagraphSpacingOverride;
+  overrides.textDarknessOverride = bookTextDarknessOverride;
   return overrides;
 }
 
@@ -3510,6 +3519,20 @@ bool EpubReaderActivity::getEffectiveTextAntiAliasing() const {
   const bool wanted =
       bookTextAntiAliasingOverride >= 0 ? bookTextAntiAliasingOverride != 0 : SETTINGS.textAntiAliasing != 0;
   return DarkMode::showsTextAntiAliasing(wanted, renderer.isOutputInverted(), renderer.invertsGrayFrame());
+}
+
+uint8_t EpubReaderActivity::getEffectiveMarginHorizontal() const {
+  return bookMarginHorizontalOverride >= 0 ? static_cast<uint8_t>(bookMarginHorizontalOverride)
+                                           : SETTINGS.screenMarginHorizontal;
+}
+
+bool EpubReaderActivity::getEffectiveExtraParagraphSpacing() const {
+  return bookExtraParagraphSpacingOverride >= 0 ? bookExtraParagraphSpacingOverride != 0
+                                                : SETTINGS.extraParagraphSpacing != 0;
+}
+
+uint8_t EpubReaderActivity::getEffectiveTextDarkness() const {
+  return bookTextDarknessOverride >= 0 ? static_cast<uint8_t>(bookTextDarknessOverride) : SETTINGS.textDarkness;
 }
 
 // The same choice where the planes are composed in the frame buffers (the X3, the X4).
@@ -4282,18 +4305,18 @@ EpubReaderActivity::RenderLayout EpubReaderActivity::computeRenderLayout() const
 
   const int bezelLeft = orientedMarginLeft, bezelRight = orientedMarginRight;
   ReaderUtils::addReaderMargins(orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft,
-                                statusBarTopHeight, statusBarBottomHeight);
+                                statusBarTopHeight, statusBarBottomHeight, getEffectiveMarginHorizontal());
 
   // One-shot per distinct result. The bezel inset is only one of two terms here:
   // the reader's Left & Right margin is added on top, so a few pixels of inset change can be
   // invisible next to a large user margin. Logging both terms and the total says
   // which one actually governs the edge the reader sees.
   static int lastMarginKey = -1;
-  const int marginKey = (orientedMarginLeft << 16) | (orientedMarginRight << 8) | SETTINGS.screenMarginHorizontal;
+  const int marginKey = (orientedMarginLeft << 16) | (orientedMarginRight << 8) | getEffectiveMarginHorizontal();
   if (marginKey != lastMarginKey) {
     lastMarginKey = marginKey;
     LOG_INF("ERS", "Reader margins: bezel L%d R%d + side margin %d = L%d R%d (screen %dx%d)", bezelLeft, bezelRight,
-            static_cast<int>(SETTINGS.screenMarginHorizontal), orientedMarginLeft, orientedMarginRight, screenWidth,
+            static_cast<int>(getEffectiveMarginHorizontal()), orientedMarginLeft, orientedMarginRight, screenWidth,
             screenHeight);
   }
 
@@ -7057,7 +7080,8 @@ void EpubReaderActivity::restoreCurrentPageToBufferIfPreRendered() {
                                    &orientedMarginLeft);
   ReaderUtils::addReaderMargins(orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft,
                                 UITheme::getStatusBarTopHeight(automaticPageTurnActive),
-                                UITheme::getStatusBarBottomHeight(automaticPageTurnActive));
+                                UITheme::getStatusBarBottomHeight(automaticPageTurnActive),
+                                getEffectiveMarginHorizontal());
 
   auto p = section->loadPageFromSectionFile();
   if (!p) {
@@ -7788,8 +7812,10 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   // Compute margins exactly as render() does
   int marginTop, marginRight, marginBottom, marginLeft;
   renderer.getOrientedViewableTRBL(&marginTop, &marginRight, &marginBottom, &marginLeft);
-  ReaderUtils::addReaderMargins(marginTop, marginRight, marginBottom, marginLeft, UITheme::getStatusBarTopHeight(),
-                                UITheme::getStatusBarBottomHeight());
+  ReaderUtils::addReaderMargins(
+      marginTop, marginRight, marginBottom, marginLeft, UITheme::getStatusBarTopHeight(),
+      UITheme::getStatusBarBottomHeight(),
+      saved.marginHorizontalOverride >= 0 ? saved.marginHorizontalOverride : SETTINGS.screenMarginHorizontal);
 
   const uint16_t viewportWidth = renderer.getScreenWidth() - marginLeft - marginRight;
   const uint16_t viewportHeight = renderer.getScreenHeight() - marginTop - marginBottom;
@@ -7832,7 +7858,8 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   p.lineCompression = lineSpacing.compression;
   p.bookLineHeightFloor = lineSpacing.bookFloor;
   p.lineHeightEmPx = lineSpacing.emPx;
-  p.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
+  p.extraParagraphSpacing = saved.extraParagraphSpacingOverride >= 0 ? saved.extraParagraphSpacingOverride != 0
+                                                                     : SETTINGS.extraParagraphSpacing != 0;
   p.paragraphIndent = SETTINGS.paragraphIndent;
   p.paragraphAlignment = effectiveParagraphAlignment;
   p.viewportWidth = viewportWidth;
@@ -8009,7 +8036,8 @@ bool EpubReaderActivity::statusBarTapped() const {
   int marginBottom = 0;
   int marginLeft = 0;
   renderer.getOrientedViewableTRBL(&marginTop, &marginRight, &marginBottom, &marginLeft);
-  ReaderUtils::addReaderMargins(marginTop, marginRight, marginBottom, marginLeft, topBar, bottomBar);
+  ReaderUtils::addReaderMargins(marginTop, marginRight, marginBottom, marginLeft, topBar, bottomBar,
+                                getEffectiveMarginHorizontal());
   // A thin line to aim at: at least this tall wherever the margin is narrower.
   constexpr int kMinBand = PanelMetrics::capped(64, 40);
   return TapZones::statusBandFor(y, renderer.getScreenHeight(), topBar > 0 ? marginTop : 0,

@@ -43,10 +43,11 @@ inline uint8_t fractionProgressPercentByte(float fraction) {
 // in place. The top and bottom are never less than the status bar's height on their side: the bar is drawn in the
 // margin. One place for every reader (EPUB, TXT, Markdown) and for the pages they draw for the sleep screen, so they
 // all agree on the text area.
+// `horizontal` is the left and right margin the page is laid out with: the setting, or a book's own
+// (EpubReaderActivity::getEffectiveMarginHorizontal).
 inline void addReaderMargins(int& top, int& right, int& bottom, int& left, const int statusBarTop,
-                             const int statusBarBottom) {
+                             const int statusBarBottom, const int horizontal = SETTINGS.screenMarginHorizontal) {
   const int vertical = SETTINGS.screenMarginVertical;
-  const int horizontal = SETTINGS.screenMarginHorizontal;
   top += std::max(vertical, statusBarTop);
   right += horizontal;
   bottom += std::max(vertical, statusBarBottom);

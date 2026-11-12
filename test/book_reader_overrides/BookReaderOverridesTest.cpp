@@ -19,15 +19,27 @@ TEST(BookReaderOverrides, ANewBookFollowsEverySetting) {
 }
 
 TEST(BookReaderOverrides, EveryFieldReadsBackWhatWasStored) {
-  // 1 is a valid value of every field but the size, which is a point size.
   for (uint8_t i = 0; i < BookReaderOverrides::kFieldCount; ++i) {
     const auto field = static_cast<Field>(i);
-    if (field == Field::FontSize) continue;
+    // 1 is a valid value of every field but the size, a point size, and the margin, in pixels.
+    int value = 1;
+    if (field == Field::FontSize) value = CrossPointSettings::DEFAULT_FONT_POINT_SIZE;
+    if (field == Field::MarginHorizontal) value = CrossPointSettings::SCREEN_MARGIN_MIN + 5;
     BookReaderOverrides overrides;
-    overrides.setFromStored(field, 1, kCurrent);
-    EXPECT_EQ(overrides.get(field), 1) << "field " << int{i};
+    overrides.setFromStored(field, value, kCurrent);
+    EXPECT_EQ(overrides.get(field), value) << "field " << int{i};
     EXPECT_TRUE(overrides.any());
   }
+}
+
+TEST(BookReaderOverrides, AMarginOutsideTheSettingsRangeFollowsTheSetting) {
+  BookReaderOverrides overrides;
+  overrides.setFromStored(Field::MarginHorizontal, CrossPointSettings::SCREEN_MARGIN_MIN - 1, kCurrent);
+  EXPECT_EQ(overrides.get(Field::MarginHorizontal), -1);
+  overrides.setFromStored(Field::MarginHorizontal, CrossPointSettings::SCREEN_MARGIN_MAX + 1, kCurrent);
+  EXPECT_EQ(overrides.get(Field::MarginHorizontal), -1);
+  overrides.setFromStored(Field::MarginHorizontal, CrossPointSettings::SCREEN_MARGIN_MAX, kCurrent);
+  EXPECT_EQ(overrides.get(Field::MarginHorizontal), CrossPointSettings::SCREEN_MARGIN_MAX);
 }
 
 TEST(BookReaderOverrides, ValuesAFieldCannotHaveFollowTheSetting) {
