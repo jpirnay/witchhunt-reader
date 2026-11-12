@@ -234,6 +234,10 @@ inline bool decodesThroughRefresh() { return !sdUsesSpi() && keepsSecondaryBuffe
 // A frontlight is present (PWM or PM1-driven).
 inline bool hasFrontlight() { return BoardConfig::hasPwmFrontlight(); }
 
+// A frontlight on a board whose hardware RTC keeps the time of day through sleep: what Dark Mode's night hours need.
+// Every frontlit board this firmware builds for has the clock too (X4 Pro BM8563, T5S3 PCF8563, Murphy M3 RX8010).
+inline bool hasFrontlightAndRtc() { return hasFrontlight() && hasHardwareRtc(); }
+
 // The frontlight has a second (warm) channel, so colour temperature is
 // adjustable rather than brightness-only.
 inline bool hasColorTemperature() {

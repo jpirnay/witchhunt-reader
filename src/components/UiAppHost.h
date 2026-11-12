@@ -10,7 +10,9 @@ class MappedInputManager;
 
 class UiAppHost {
  public:
-  using UiApp = freeink::ui::FreeInkApp<24, 6>;
+  // Up to 24 interactions on a screen and 8 action handlers: the light drawer has seven. FreeInkApp::on() drops a
+  // handler past the cap without a sign, so renderUi() logs it.
+  using UiApp = freeink::ui::FreeInkApp<24, 8>;
   using UiScreen = UiApp::ScreenType;
 
   explicit UiAppHost(const GfxRenderer& renderer);

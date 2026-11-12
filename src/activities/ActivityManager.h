@@ -110,7 +110,11 @@ class ActivityManager {
   // interface stamps what it observes on screen with it, so a popup or a highlighted row noted
   // on one screen is never reported for the next. Written on the loop task, read from any.
   std::atomic<uint32_t> activityChanges{0};
-  void noteActivityChanged() { activityChanges.fetch_add(1, std::memory_order_relaxed); }
+  // Every change of currentActivity also sets the panel's polarity for it, before its onEnter() draws anything.
+  void noteActivityChanged() {
+    activityChanges.fetch_add(1, std::memory_order_relaxed);
+    applyOutputPolarity();
+  }
   // The count the last frame saw. Render task, and the loop task for a screen that paints itself.
   std::atomic<uint32_t> activityChangesRendered{0};
   // The last book's fonts open behind the UI faces while the current activity draws book text (syncUiBookFonts).
@@ -152,6 +156,10 @@ class ActivityManager {
  public:
   // render() gets this for free. A screen that paints from anywhere else calls it first.
   void armGhostClearingRefresh();
+  // Dark Mode: sets the panel's polarity for the screen on top (DarkMode::invertsOutput). Every activity change and
+  // every render pass does, so a change of the setting lands on the next frame; boot does before its first paint.
+  // Under RenderLock, or before anything renders: a refresh in flight is drained first.
+  void applyOutputPolarity();
 
   explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : renderer(renderer), mappedInput(mappedInput), buttonEvents(globalButtonEvents()) {

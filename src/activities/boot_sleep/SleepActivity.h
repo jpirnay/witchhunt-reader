@@ -17,14 +17,23 @@ struct BookOverlayInfo {
 class SleepActivity final : public Activity {
  public:
   explicit SleepActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool fromTimeout = false)
-      : Activity("Sleep", renderer, mappedInput), fromTimeout(fromTimeout) {}
+      : Activity("Sleep", renderer, mappedInput),
+        fromTimeout(fromTimeout),
+        pageWentOutInverted(renderer.isOutputInverted()) {}
   void onEnter() override;
   // renderOverlaySleepScreen() and the Quick Resume path both draw over the frame already in the
   // write buffer rather than clearing it, so anything that repaints just before the transition
   // ends up underneath the sleep cover.
   bool suppressesBusyIndicator() const override { return true; }
+  // Sleep screens are out of Dark Mode's reach and show as they always have. Quick Resume is not one: it leaves the
+  // page on screen as it is, in the polarity it went out in.
+  DarkMode::ScreenPolarity outputPolarity() const override {
+    return keepsLastScreen() ? DarkMode::ScreenPolarity::AsOnScreen : DarkMode::ScreenPolarity::Normal;
+  }
 
  private:
+  // Quick Resume: the page on screen stays, with a moon icon over it.
+  bool keepsLastScreen() const;
   void renderSleepScreen();
   void renderDefaultSleepScreen() const;
   void renderCustomSleepScreen() const;
@@ -37,4 +46,7 @@ class SleepActivity final : public Activity {
   BookOverlayInfo getBookOverlayInfo(const std::string& bookPath) const;
 
   const bool fromTimeout = false;
+  // How the screen before this one went out, read before this screen sets its own polarity: a reader page drawn for
+  // Dark Mode has its pictures inverted in the frame buffer (renderOverlaySleepScreen).
+  const bool pageWentOutInverted;
 };

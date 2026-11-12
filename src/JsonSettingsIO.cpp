@@ -115,6 +115,10 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   doc["addedBooksView"] = s.addedBooksView;
   doc["authorsView"] = s.authorsView;
   doc["showBootScreen"] = s.showBootScreen;
+  if (s.darkModeFlipUntil != 0) {
+    doc["darkModeFlipUntil"] = s.darkModeFlipUntil;
+    doc["darkModeFlipDark"] = s.darkModeFlipDark;
+  }
   doc["hyphenationOffersDeclined"] = s.hyphenationOffersDeclined;
   doc["fontOffersDeclined"] = s.fontOffersDeclined;
   // Information about a pending KOReader sync session
@@ -199,6 +203,8 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
     s.authorsView = CrossPointSettings::BROWSER_VIEW_DETAILS;
   }
   s.showBootScreen = doc["showBootScreen"] | true;
+  s.darkModeFlipUntil = doc["darkModeFlipUntil"].as<uint32_t>();  // absent: 0, no flip
+  s.darkModeFlipDark = doc["darkModeFlipDark"].as<bool>();
   s.hyphenationOffersDeclined = doc["hyphenationOffersDeclined"] | std::string("");
   s.fontOffersDeclined = doc["fontOffersDeclined"] | std::string("");
   JsonObject sync = doc["koReaderSyncSession"].as<JsonObject>();

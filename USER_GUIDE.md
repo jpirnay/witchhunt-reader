@@ -504,6 +504,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
   - "Lyra Extended" - Lyra with 3 books on the Home Screen
   - "Lyra Carousel" - Lyra with a full cover carousel on the Home Screen
 - **UI Font Size**: Text size for menus, headers and lists: "Normal" (default) / "Large". The reader's own status bar is not affected.
+- **Dark Mode**: White text on black, in the reader and every menu. Pictures, covers and QR codes keep their own colours; sleep screens and the image viewer show as usual. Text anti-aliasing and the gray shades of pictures are off while it is on (except anti-aliased text in the EPUB reader on the LilyGo T5 S3), and the screen clears its ghosting twice as often as **Refresh Frequency** says. "OFF" (default) / "ON". On a device with a reading light the choices are "Off" / "On" / "Scheduled": **Dark From** and **Dark Until** (in half-hour steps, shown under Scheduled) set the hours, which may run past midnight. The switch happens with the next page turn or screen change after the hour, never in the middle of one, and the device does not wake for it.
 - **Home screen** (submenu): Which entries sit on the Home screen; the rest move behind **More**. See **[Home Screen](#31-home-screen)**.
 - **Show Busy Indicator**: Shows a small hourglass in the middle of the screen when a button press starts a screen change that takes a second or more, such as opening or leaving a book, so you can tell the press was received. It only appears on devices whose screen refreshes fast enough for it to help, so never on the LilyGo T5 S3. "ON" (default) / "OFF".
 
@@ -1134,7 +1135,9 @@ brightness is not asking for the light to come on.
 
 The quickest routes to it without opening Settings:
 
-- **Swipe down from the top edge** for the light panel, on any screen
+- **Swipe down from the top edge** for the light panel, on any screen. Its **Dark Mode** switch
+  turns Dark Mode on or off in one tap; the panel closes and the screen comes back in the other
+  colours. Under **Scheduled** it holds until the dark hours next start or end
 - **Hold the top-left corner**, or **double-press Power**, to toggle it
 - **Swipe up / down at the left edge** to brighten and dim, and at the right edge for warmth
 

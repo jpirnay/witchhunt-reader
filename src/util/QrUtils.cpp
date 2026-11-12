@@ -114,6 +114,14 @@ bool QrUtils::drawQrCode(const GfxRenderer& renderer, const Rect& bounds, const 
         }
       }
     }
+    // In Dark Mode the code keeps its polarity as a picture does: not every scanner reads white modules on black. Its
+    // quiet zone (four modules, as far as the bounds reach) turns white with it.
+    const int quiet = 4 * px;
+    const int qx0 = std::max(bounds.x, xOff - quiet);
+    const int qy0 = std::max(bounds.y, yOff - quiet);
+    const int qx1 = std::min(bounds.x + bounds.width, xOff + qrDisplaySize + quiet);
+    const int qy1 = std::min(bounds.y + bounds.height, yOff + qrDisplaySize + quiet);
+    renderer.preserveImagePolarity(qx0, qy0, qx1 - qx0, qy1 - qy0);
   } else {
     LOG_ERR("QR", "Failed to encode QR code (%u bytes)", len);
   }

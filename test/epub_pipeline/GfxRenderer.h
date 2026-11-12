@@ -80,6 +80,7 @@ class GfxRenderer {
   uint8_t* getWriteTarget() const { return frameBuffer_; }
   int getWriteOriginY() const { return 0; }
   int getWriteRows() const { return 800; }
+  bool keepsImagePolarity() const { return false; }  // light mode: the harness has no inverted output
   void clearScreen(uint8_t = 0xFF) const {}
 
   // --- Drawing (no-ops: the harness never inspects pixels) ---

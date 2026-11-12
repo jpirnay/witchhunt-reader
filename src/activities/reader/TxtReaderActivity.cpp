@@ -11,6 +11,7 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "DarkMode.h"
 #include "GlobalBookmarkIndex.h"
 #include "MappedInputManager.h"
 #include "ReaderUtils.h"
@@ -302,7 +303,8 @@ void TxtReaderActivity::renderPage() {
 
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
-  if (SETTINGS.textAntiAliasing) {
+  // The two-pass plane flow, which inverted output (Dark Mode) never keeps, whatever the panel's single push does.
+  if (DarkMode::showsTextAntiAliasing(SETTINGS.textAntiAliasing != 0, renderer.isOutputInverted(), false)) {
     // Same AA pass as EpubReaderActivity: displayBuffer() above ended with
     // swapBuffers(), so the write framebuffer now holds the stale previous
     // frame. renderGrayscalePlanesSequential() reseeds the controller baseline

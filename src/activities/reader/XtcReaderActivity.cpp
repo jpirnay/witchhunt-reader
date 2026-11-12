@@ -298,6 +298,12 @@ void XtcReaderActivity::renderPage() {
     // Display BW with conditional refresh based on pagesUntilFullRefresh
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
+    // Inverted output (Dark Mode) keeps no gray planes: the page stays as the B/W pass drew it.
+    if (renderer.isOutputInverted()) {
+      free(row);
+      return;
+    }
+
     // Passes 2 and 3 through the readers' shared plane sequence: LSB marks DARK gray only (XTH value 1), MSB LIGHT
     // and DARK gray (value 1 or 2); in the LUT a 0 bit applies the gray, a 1 bit leaves the pixel. A row the stream
     // cannot read aborts the pass before its plane reaches the controller, and the abort, like the completed pass,

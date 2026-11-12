@@ -81,6 +81,16 @@ class HalDisplay {
   // No-op on non-X3 panels. Consumed by the next displayBuffer/refreshDisplay call.
   void requestResync(uint8_t settlePasses = 0);
 
+  // Dark mode: the panel shows every frame inverted, white on black. The frame buffers keep their
+  // colours and nothing draws differently; the SDK inverts each frame on its way to the panel and
+  // back (FreeInkDisplay::setInverted), promotes the first FAST after a change to HALF, and sends
+  // inverted frames B/W: the gray planes do not survive inversion. Only a single push whose driver
+  // mirrors its greys keeps them (invertsGrayFrame(): the LilyGo T5S3). Pictures keep their own
+  // polarity by drawing inverted (GfxRenderer::keepsImagePolarity).
+  void setInverted(bool inverted);
+  bool isInverted() const;
+  bool invertsGrayFrame() const;
+
   // Power management
   void deepSleep();
 

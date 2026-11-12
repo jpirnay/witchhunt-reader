@@ -54,6 +54,7 @@
 #include "BookRelocation.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "DarkMode.h"
 #include "DictionaryWordSelectActivity.h"
 #include "DisplayedPage.h"
 #include "EpubReaderChapterSelectionActivity.h"
@@ -3461,11 +3462,15 @@ bool EpubReaderActivity::getEffectiveBionicReading() const {
   return SETTINGS.bionicReading;
 }
 
-uint8_t EpubReaderActivity::getEffectiveImageRendering() const {
+uint8_t EpubReaderActivity::imageRenderingSetting() const {
   if (bookImageRenderingOverride >= 0) {
     return static_cast<uint8_t>(bookImageRenderingOverride);
   }
   return SETTINGS.imageRendering;
+}
+
+uint8_t EpubReaderActivity::getEffectiveImageRendering() const {
+  return ReaderImageMode::forOutput(imageRenderingSetting(), renderer.isOutputInverted());
 }
 
 bool EpubReaderActivity::imagesTakeGrayPass(const Page& page) const {
@@ -3474,10 +3479,9 @@ bool EpubReaderActivity::imagesTakeGrayPass(const Page& page) const {
 
 bool EpubReaderActivity::getEffectiveTextAntiAliasing() const {
   if (!HalCapabilities::panelShowsGray()) return false;  // a book's stored override included
-  if (bookTextAntiAliasingOverride >= 0) {
-    return bookTextAntiAliasingOverride != 0;
-  }
-  return SETTINGS.textAntiAliasing != 0;
+  const bool wanted =
+      bookTextAntiAliasingOverride >= 0 ? bookTextAntiAliasingOverride != 0 : SETTINGS.textAntiAliasing != 0;
+  return DarkMode::showsTextAntiAliasing(wanted, renderer.isOutputInverted(), renderer.invertsGrayFrame());
 }
 
 // The same choice where the planes are composed in the frame buffers (the X3, the X4).
@@ -4355,6 +4359,12 @@ bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
   if (!section) {
     return false;
   }
+  // The polarity changed since the pre-render (Dark Mode's night hours began or ended at this frame, or another way
+  // in): its pictures and staged grays are the other polarity's, so the page is drawn afresh.
+  if (preRenderedPage.inverted != renderer.isOutputInverted()) {
+    preRenderedPlanesStaged_ = false;
+    return false;
+  }
   auto p = section->loadPageFromSectionFile();
   if (!p) {
     // Page load failed — caller falls through to full render.
@@ -4501,7 +4511,8 @@ void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
     // overlay and screenshots restore the current one from it) but is never shown: the turn
     // renders afresh, without this pass's Page in the heap.
     const bool incomplete = glyphsDropped > 0 || imagesMissed > 0;
-    preRenderedPage = {true, currentSpineIndex, nextPage, preRenderDuration, millis(), incomplete};
+    preRenderedPage = {true,       currentSpineIndex,          nextPage, preRenderDuration, millis(),
+                       incomplete, renderer.isOutputInverted()};
     // Drawn whole, the page that had a gap for lack of memory (renderContents) is shown without the sign.
     if (!incomplete && glyphStarvedPage(currentSpineIndex, nextPage)) glyphStarvedSpine_ = glyphStarvedPage_ = -1;
 #if DEBUG_BACKGROUND_WORK
@@ -6412,7 +6423,9 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // screen kept the debt its earlier draw left (above); a redraw in Black & White replaces that draw's gray and drops
   // it. The placeholder test stats each image's cache, so only where the mode owes the refresh at all.
   // Must be checked BEFORE page is moved into pendingGrayscale_ below.
-  const uint8_t imageMode = getEffectiveImageRendering();
+  // The setting, not the mode drawn: in Dark Mode a Display picture is drawn B/W, and its light areas on the black
+  // page leave more behind than the gray it would have had.
+  const uint8_t imageMode = imageRenderingSetting();
   const bool drewImages = ReaderImageMode::imagePageOwesRefresh(imageMode) && page->hasImages() &&
                           !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome);
   pendingHalfRefreshAfterImagePage =
@@ -6849,7 +6862,7 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   // none is a placeholder, and the half refresh that clears an image's grey particles is armed
   // for the page after it whenever it has images at all.
   pageHasPlaceholders = false;
-  if (page.hasImages() && ReaderImageMode::imagePageOwesRefresh(getEffectiveImageRendering())) {
+  if (page.hasImages() && ReaderImageMode::imagePageOwesRefresh(imageRenderingSetting())) {  // as renderContents()
     pendingHalfRefreshAfterImagePage = true;
   }
 

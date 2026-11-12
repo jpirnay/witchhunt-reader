@@ -45,6 +45,7 @@
 #include "CjkUiPack.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "DarkMode.h"
 #include "GestureEventManager.h"
 #include "GlobalBookmarkIndex.h"
 #include "HyphenationPacks.h"
@@ -404,7 +405,11 @@ static void saveSleepFrameBuffer() {
     return;
   }
   const size_t bufferSize = renderer.getBufferSize();
+  // Saved as it is on the glass; loadSleepFrameBuffer() converts back for the wake's polarity.
+  const bool invert = DarkMode::glassDiffersFromBuffer(renderer.isOutputInverted());
+  if (invert) renderer.invertScreen();
   const size_t written = file.write(renderer.getFrameBuffer(), bufferSize);
+  if (invert) renderer.invertScreen();
   file.close();
   if (written != bufferSize) {
     LOG_DBG("MAIN", "Quick Resume frame save short write: %u/%u", static_cast<unsigned>(written),
@@ -431,6 +436,8 @@ static bool loadSleepFrameBuffer() {
             bytesRead, static_cast<unsigned>(bufferSize));
     return false;
   }
+  // The file holds the glass (saveSleepFrameBuffer); boot has set this wake's polarity already (setupDisplayAndFonts).
+  if (DarkMode::glassDiffersFromBuffer(renderer.isOutputInverted())) renderer.invertScreen();
   return true;
 }
 
@@ -735,6 +742,9 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   display.seedLastFastRefreshMs(SETTINGS.measuredFastRefreshMs);
   renderer.begin();
   activityManager.begin();
+  // Dark Mode before the first paint, whichever it is: the splash, a Quick Resume page restored in the polarity it was
+  // saved in, or the reader's first page.
+  activityManager.applyOutputPolarity();
   LOG_DBG("MAIN", "Display initialized");
 
   // Initialize font decompressor for compressed reader fonts

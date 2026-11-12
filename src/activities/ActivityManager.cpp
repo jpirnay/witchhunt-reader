@@ -15,6 +15,8 @@
 #include <cstdlib>
 
 #include "CrossPointState.h"
+#include "DarkMode.h"
+#include "DarkModeNow.h"
 #include "OpdsServerStore.h"
 #include "SdCardFontGlobals.h"
 #include "SettingsList.h"
@@ -161,6 +163,8 @@ void ActivityManager::renderTaskLoop() {
       // on activity transitions like the rest, and every path that displays a page republishes
       // it (with an empty set when the page has no links), so a displayed page always describes
       // itself.
+      // A Dark Mode change since the last frame (Settings, the web settings, the light drawer) lands on this one.
+      applyOutputPolarity();
       armGhostClearingRefresh();
       {
         // A screen that draws book text draws its first-sight glyphs in the secondary framebuffer, not on the heap:
@@ -241,6 +245,11 @@ void ActivityManager::armGhostClearingRefresh() {
   const bool cadenceDue = frequency > 0 && !currentActivity->isReaderActivity() &&
                           renderer.ghostClearingHalfWorthwhile(static_cast<uint8_t>(frequency - 1));
   if (activityChanged || cadenceDue) renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
+}
+
+void ActivityManager::applyOutputPolarity() {
+  const auto screen = currentActivity ? currentActivity->outputPolarity() : DarkMode::ScreenPolarity::FollowDarkMode;
+  renderer.setOutputInverted(DarkMode::invertsOutput(DarkModeNow::isDark(), screen, renderer.isOutputInverted()));
 }
 
 void ActivityManager::loop() {
