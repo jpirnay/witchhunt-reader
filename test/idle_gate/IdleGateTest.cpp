@@ -218,6 +218,38 @@ TEST(IdleGate, APressDroppedInATimedOutWaitIsWhatItReports) {
   EXPECT_EQ(d.runUntilDone(), Verdict::PressDropped);
 }
 
+// A wait runs out just after the queue gave its press up. The press drew nothing, so nothing is left to
+// follow: a wait sent right after the PressDropped answer must not sit out the effect's render grace
+// (IDLE_TIMEOUT:render for a frame that will never come).
+TEST(IdleGate, AfterADroppedPressWithNoInputLeftTheNextWaitIsIdle) {
+  Device d;
+  d.gate.noteEffect();
+  d.handled = false;
+  ASSERT_TRUE(d.gate.begin(d.now, 1000));
+  for (int i = 0; i < 95; ++i) ASSERT_EQ(d.pass(), Verdict::Waiting);
+  d.dropped = 1;  // given up; the queue is empty, so the input path is done
+  d.handled = true;
+  EXPECT_EQ(d.runUntilDone(), Verdict::PressDropped);
+  EXPECT_FALSE(d.gate.active()) << "nothing left to follow";
+  ASSERT_TRUE(d.gate.begin(d.now, 500));
+  EXPECT_EQ(d.runUntilDone(), Verdict::Idle);
+}
+
+// The same, with another press still queued: its input is still followed.
+TEST(IdleGate, AfterADroppedPressWithInputLeftTheEffectIsStillFollowed) {
+  Device d;
+  d.gate.noteEffect();
+  d.handled = false;
+  ASSERT_TRUE(d.gate.begin(d.now, 1000));
+  for (int i = 0; i < 95; ++i) ASSERT_EQ(d.pass(), Verdict::Waiting);
+  d.dropped = 1;  // the first press given up, the second one still playing
+  EXPECT_EQ(d.runUntilDone(), Verdict::PressDropped);
+  EXPECT_TRUE(d.gate.active());
+  ASSERT_TRUE(d.gate.begin(d.now, 300));
+  EXPECT_EQ(d.runUntilDone(), Verdict::TimedOut);
+  EXPECT_STREQ(d.gate.reason(), "input");
+}
+
 TEST(IdleGate, ATimeoutWithNothingBusyIsSettling) {
   Device d;
   ASSERT_TRUE(d.gate.begin(d.now, 100));  // shorter than the quiet window

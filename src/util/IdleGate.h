@@ -19,7 +19,8 @@
 //
 // A press the input path gave up (ButtonPressQueue::droppedPresses()) never reached the screen, so the
 // wait that ends after it fails, however it ended: PressDropped instead of Idle or TimedOut, once for
-// each drop since the previous wait ended, whether it came during the wait or before it.
+// each drop since the previous wait ended, whether it came during the wait or before it. With no input
+// left to follow then, the effect is done: the next wait does not wait for a frame the press never caused.
 class IdleGate {
  public:
   static constexpr uint32_t kQuietMs = 250;
@@ -85,7 +86,12 @@ class IdleGate {
     waiting_ = false;
     const bool dropped = sample.droppedPresses != dropsAnswered_;
     dropsAnswered_ = sample.droppedPresses;
-    return dropped ? Verdict::PressDropped : verdict;
+    if (!dropped) return verdict;
+    // A dropped press draws nothing. With no input left to follow, the effect's render grace would only
+    // run out on the next wait (IDLE_TIMEOUT:render for a frame that never comes); input still under
+    // way, another press queued, is followed as before.
+    if (sample.effectHandled) effectPending_ = false;
+    return Verdict::PressDropped;
   }
 
   const char* effectBusy(const Sample& sample) {
