@@ -115,9 +115,18 @@ struct ConfirmResult {
   bool alternate = false;
 };
 
-using ResultVariant = std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult,
-                                   PageResult, SyncResult, NetworkModeResult, FootnoteResult, FilePathResult,
-                                   StarredPageResult, PrintedPageResult, DictionarySwitchResult, ConfirmResult>;
+// What the reader does once its bars (ReaderBarsActivity) close: the control that closed them, and whether the page's
+// star was flipped while they were open. The reader owns the bookmarks and the navigation, so the bars only report.
+struct ReaderBarsResult {
+  enum class Action : uint8_t { None, Contents, More, PrevChapter, NextChapter, GoToPercent, Exit };
+  Action action = Action::None;
+  bool starToggled = false;
+};
+
+using ResultVariant =
+    std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult, PageResult,
+                 SyncResult, NetworkModeResult, FootnoteResult, FilePathResult, StarredPageResult, PrintedPageResult,
+                 DictionarySwitchResult, ConfirmResult, ReaderBarsResult>;
 
 struct ActivityResult {
   bool isCancelled = false;
