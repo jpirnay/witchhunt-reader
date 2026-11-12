@@ -97,7 +97,6 @@ FILE_READ_TIMEOUT = 300
 GET_ACK = b"\x06"
 GET_CANCEL = b"\x18"
 GET_PIECE_IDLE = 5
-FAILED = re.compile(r"_ERROR|_TIMEOUT|^CMD_ERROR")
 # Seconds to give a port that went away (the cable pulled, deep sleep) before it is opened again.
 REOPEN_PAUSE = 1.0
 
@@ -113,6 +112,13 @@ class LinkUnsynced(Exception):
     command would take it, so the run cannot go on."""
 
 
+def failed(line):
+    """Whether a reply reports a failure: its type, the text before the first ':', ends in _ERROR or _TIMEOUT
+    (BTN_ERROR:..., IDLE_TIMEOUT:..., CMD_ERROR:...). Only the type: a book title or a file name in the body may hold
+    those words."""
+    return line.split(":", 1)[0].endswith(("_ERROR", "_TIMEOUT"))
+
+
 def reply_prefixes(text):
     """What a reply to CMD:<text> starts with (see OTHER_REPLIES)."""
     name = text.split(":", 1)[0].strip()
@@ -125,7 +131,7 @@ def reply_timeout(text):
     name, _, arg = text.strip().partition(":")
     if name == "IDLE":
         first = arg.split(":")[0]
-        ms = int(first) if re.fullmatch(r"\+?\d+", first) else IDLE_DEFAULT_MS
+        ms = int(first) if re.fullmatch(r"\+?[0-9]+", first) else IDLE_DEFAULT_MS
         return min(ms, IDLE_MAX_MS) / 1000 + REPLY_TIMEOUT
     if name == "SCREENSHOT":
         return SCREENSHOT_WAIT + REPLY_TIMEOUT
@@ -223,7 +229,7 @@ class Device:
     def __init__(self, port, log_path=None):
         self.port = port
         self.log = open(log_path, "a", encoding="utf-8", errors="replace") if log_path else None
-        self.t0 = time.time()
+        self.t0 = time.monotonic()
         self.buf = b""
         self.read_pause = 0.0  # --read-pause: seconds get: waits after every MB, as a slow host would
         self.expected = ()  # what a reply to the command sent last starts with (reply_prefixes)
@@ -234,16 +240,22 @@ class Device:
 
     def note(self, line):
         if self.log:
-            self.log.write(f"[{time.time() - self.t0:8.2f}] {line}\n")
+            self.log.write(f"[{time.monotonic() - self.t0:8.2f}] {line}\n")
             self.log.flush()
 
     def _open(self):
         for _ in range(60):
+            s = None
             try:
                 s = serial.Serial(self.port, 115200, timeout=0.2)
                 s.write(b"\r\n")  # C3 USB-CDC output waits until the host has written something
                 return s
             except (serial.SerialException, OSError):
+                if s is not None:  # opened, but the port went away again: close it, or its handle leaks
+                    try:
+                        s.close()
+                    except (serial.SerialException, OSError):
+                        pass
                 time.sleep(0.5)
         sys.exit(f"cannot open {self.port}")
 
@@ -299,8 +311,13 @@ class Device:
             waiting = 0
         return self._read(min(max(waiting, 1), 65536))
 
-    def read_line(self, deadline):
-        while time.time() < deadline:
+    def read_line(self, deadline, since=None):
+        """The next line, or None at `deadline`. With `since` (a count of self.reopens) also None as soon as the port
+        has been reopened after it: a reply to a command sent over the old port cannot come any more. Without it
+        (wait:, expect:) reading goes on across a reopen."""
+        while time.monotonic() < deadline:
+            if since is not None and self.reopens != since:
+                return None
             nl = self.buf.find(b"\n")
             if nl >= 0:
                 line, self.buf = self.buf[:nl], self.buf[nl + 1:]
@@ -310,8 +327,11 @@ class Device:
             self.buf += self._read_some()
         return None
 
-    def read_exact(self, size, deadline):
-        while len(self.buf) < size and time.time() < deadline:
+    def read_exact(self, size, deadline, since=None):
+        """`size` bytes, or fewer at `deadline`, or as soon as the port has been reopened after `since`."""
+        while len(self.buf) < size and time.monotonic() < deadline:
+            if since is not None and self.reopens != since:
+                break
             self.buf += self._read(min(65536, size - len(self.buf)))
         data, self.buf = self.buf[:size], self.buf[size:]
         return data
@@ -321,12 +341,12 @@ class Device:
         megabytes added to a bytes object piece by piece is copied over and over."""
         out = bytearray(self.buf[:size])
         self.buf = self.buf[size:]
-        deadline = time.time() + idle
-        while len(out) < size and time.time() < deadline:
+        deadline = time.monotonic() + idle
+        while len(out) < size and time.monotonic() < deadline:
             piece = self._read(min(65536, size - len(out)))
             if piece:
                 out += piece
-                deadline = time.time() + idle
+                deadline = time.monotonic() + idle
         return bytes(out)
 
     def is_reply(self, line):
@@ -343,8 +363,8 @@ class Device:
     def reply(self, timeout):
         """The next reply line to the command sent last; other lines are skipped. After `timeout` seconds: see
         no_reply()."""
-        deadline = time.time() + timeout
-        while (line := self.read_line(deadline)) is not None:
+        deadline = time.monotonic() + timeout
+        while (line := self.read_line(deadline, since=self.reopens_at_send)) is not None:
             if self.is_reply(line):
                 return line
         return self.no_reply(timeout)
@@ -378,19 +398,19 @@ class Device:
         lines before the terminator go to `lines`."""
         self.send(text)
         wait = reply_timeout(text)
-        deadline = time.time() + wait
-        while (line := self.read_line(deadline)) is not None:
+        deadline = time.monotonic() + wait
+        while (line := self.read_line(deadline, since=self.reopens_at_send)) is not None:
             if not self.is_reply(line):
                 continue  # a log line
             if line == "IDLE_ERROR:busy":
                 raise LinkUnsynced("IDLE_ERROR:busy: a wait from before this run is still running, and its answer is "
                                    "still to come")
-            if until is None or until.match(line) or FAILED.search(line):
+            if until is None or until.match(line) or failed(line):
                 return line
             if lines is not None:
                 lines.append(line)
             wait = REPLY_TIMEOUT  # for the next line of the listing
-            deadline = time.time() + wait
+            deadline = time.monotonic() + wait
         return self.no_reply(wait)
 
     def screenshot(self, path, rotate):
@@ -407,7 +427,7 @@ class Device:
         if not start:
             raise LinkUnsynced(f"malformed {line!r}: a frame of unknown length follows")
         w, h, size = (int(group) for group in start.groups())
-        data = self.read_exact(size, time.time() + DEVICE_STREAM_STALL + REPLY_TIMEOUT)
+        data = self.read_exact(size, time.monotonic() + DEVICE_STREAM_STALL + REPLY_TIMEOUT, since=self.reopens_at_send)
         if len(data) != size:
             self.no_reply(DEVICE_STREAM_STALL + REPLY_TIMEOUT)
             return f"short frame: {len(data)} of {size} bytes (the port went away)"
@@ -426,7 +446,10 @@ class Device:
             return f"a frame of {size} bytes does not fill {w}x{h}"
         if rotate:
             image = image.rotate(rotate, expand=True)
-        image.save(path)
+        try:
+            image.save(path)
+        except OSError as error:  # a folder that is not there, no room: the link itself is fine
+            return f"cannot save {path}: {error}"
         return None
 
     def page(self, path):
@@ -467,7 +490,7 @@ class Device:
             data = f.read()
         crc = zlib.crc32(data) & 0xFFFFFFFF
         self.send(f"FS:PUT:{remote}:{len(data)}:{crc:08x}")
-        started = time.time()
+        started = time.monotonic()
         line = self.reply(REPLY_TIMEOUT)
         if not line or not line.startswith("FS_PUT_READY:"):
             return line or "no reply"
@@ -486,7 +509,7 @@ class Device:
         done = self.reply(REPLY_TIMEOUT)
         if not done or not done.startswith("FS_OK:put"):
             return done or "no FS_OK"
-        seconds = time.time() - started
+        seconds = time.monotonic() - started
         print(f"{done} ({len(data) / 1024 / max(seconds, 0.001):.0f} KB/s)")
         return None
 
@@ -513,7 +536,7 @@ class Device:
             # after its last byte, not on a line of its own.
             raise LinkUnsynced(f"malformed {line!r}: a piece of unknown length follows")
         size, crc, piece = int(start.group(1)), int(start.group(2), 16), int(start.group(3))
-        started = time.time()
+        started = time.monotonic()
         data = bytearray()
         next_pause = 1 << 20
         while len(data) < size:
@@ -536,7 +559,7 @@ class Device:
             return f"crc mismatch: received {len(data)} of {size} bytes, crc {mine:08x}, the device sent {crc:08x}"
         with open(local, "wb") as f:
             f.write(data)
-        seconds = time.time() - started
+        seconds = time.monotonic() - started
         print(f"{remote} -> {local}: {size} bytes, crc {crc:08x} ({size / 1024 / max(seconds, 0.001):.0f} KB/s)")
         return None
 
@@ -590,7 +613,7 @@ def file_step(device, kind, rest):
         # A trailing ":<n>" is the retry count; a Windows file name cannot hold ':', so it cannot be part of the path.
         retries = 0
         head, _, tail = local.rpartition(":")
-        if head and tail.isdigit():
+        if head and re.fullmatch(r"[0-9]+", tail):
             local, retries = head, int(tail)
         if not remote.startswith("/") or not local:
             return "expected get:/<remote>:<local>[:<retries>]"
@@ -689,8 +712,9 @@ def run_step(device, step, rotate, state):
         for line in lines:
             print(line)
         print(reply if reply else f"NO REPLY to {rest} (the port went away)")
-        ok = bool(reply) and not FAILED.search(reply)
+        ok = bool(reply) and not failed(reply)
     elif kind == "state":
+        state = {}  # a check: after a failed state step must not pass on the fields of an older one
         reply = device.command("STATE")
         print(reply if reply else "NO REPLY to STATE (the port went away)")
         ok = bool(reply) and reply.startswith("STATE:")
@@ -712,7 +736,7 @@ def run_step(device, step, rotate, state):
         ok = error is None
     elif kind == "select":
         pattern, _, most = rest.partition(":")
-        presses = int(most) if most.isdigit() else 40
+        presses = int(most) if re.fullmatch(r"[0-9]+", most) else 40
         ok = False
         for press in range(presses + 1):
             reply = device.command("STATE")
@@ -736,12 +760,12 @@ def run_step(device, step, rotate, state):
             print(f"{kind.upper()} FAILED: {error}")
         ok = error is None
     elif kind == "wait":
-        end = time.time() + float(rest)
+        end = time.monotonic() + float(rest)
         while device.read_line(end) is not None:
             pass
     elif kind == "expect":
         pattern, _, seconds = rest.rpartition(":")
-        end = time.time() + float(seconds)
+        end = time.monotonic() + float(seconds)
         found = None
         while (line := device.read_line(end)) is not None:
             if re.search(pattern, line):

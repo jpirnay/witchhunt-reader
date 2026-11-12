@@ -3,6 +3,7 @@
 what a run does when the port goes away between or during steps, which reply a step takes, how long it waits for
 it, and that a reply still to come ends the run. Run by ctest (test/devctl)."""
 import importlib
+import importlib.util
 import io
 import os
 import sys
@@ -29,6 +30,7 @@ class FakeDevice:
         self.received = []  # (port number, command) for every CMD: line the device took
         self.after_command = None  # called with the port once a command is answered
         self.later = []  # (due time, line) still to come
+        self.first_open_fails = False  # the first port opened goes away at its first write
 
     def deliver(self):
         """The lines that are due, in turn, to the port open now."""
@@ -39,6 +41,7 @@ class FakeDevice:
 
     def open(self):
         port = FakePort(self, len(self.opened))
+        port.fail_write = self.first_open_fails and not self.opened
         self.opened.append(port)
         return port
 
@@ -288,10 +291,11 @@ class MalformedInputFailsCleanly(unittest.TestCase):
     def test_a_bad_number_or_pattern_fails_its_step_and_the_run_goes_on(self):
         device = FakeDevice({"STATE": ["STATE:activity=Home"]})
         port = connect(device)
-        steps = ["wait:soon", "wait:inf", "expect:ready:soon", "expect:([:1", "check:activity=([", "select:([", "state"]
+        steps = ["wait:soon", "wait:inf", "wait:nan", "wait:-1", "expect:ready:soon", "expect:([:1",
+                 "check:activity=([", "select:([", "state"]
         ok, out = run(port, steps)
         self.assertFalse(ok)
-        self.assertEqual(out.count("BAD STEP:"), 6, out)
+        self.assertEqual(out.count("BAD STEP:"), 8, out)
         self.assertIn("STATE:activity=Home", out)
         self.assertEqual(device.received, [(0, "STATE")], "nothing was sent for the bad steps")
 
@@ -337,6 +341,102 @@ class MalformedInputFailsCleanly(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("HASH FAILED: expected FS_HASH:<crc32hex> <size> <path>", out)
         self.assertIn("STATE:activity=Home", out)
+
+
+class SecondAuditList(unittest.TestCase):
+    def test_a_reply_wait_ends_at_once_when_the_port_is_reopened(self):
+        device = FakeDevice({"STATE": ["STATE:activity=Home"]})
+        port = connect(device)
+
+        def unplug(p):  # the cable comes out right after the device took the IDLE
+            device.after_command = None
+            p.gone = True
+
+        device.after_command = unplug
+        started = time.monotonic()
+        ok, out = run(port, ["cmd:IDLE:30000", "state"])
+        self.assertLess(time.monotonic() - started, 5, "not the 30 s the IDLE asked for")
+        self.assertIn("NO REPLY to IDLE:30000 (the port went away)", out)
+        self.assertIn("STATE:activity=Home", out)
+
+    def test_wait_reads_on_across_a_reopen(self):
+        device = FakeDevice({"STATE": ["STATE:activity=Home"]})
+        port = connect(device)
+        device.opened[0].gone = True
+        started = time.monotonic()
+        ok, out = run(port, ["wait:0.5", "state"])
+        self.assertTrue(ok, out)
+        self.assertGreaterEqual(time.monotonic() - started, 0.5)
+        self.assertEqual(device.received, [(1, "STATE")])
+
+    def test_a_port_that_goes_away_while_being_opened_is_closed(self):
+        device = FakeDevice({})
+        device.first_open_fails = True
+        connect(device)
+        self.assertEqual(len(device.opened), 2)
+        self.assertFalse(device.opened[0].is_open, "its handle must not leak")
+        self.assertTrue(device.opened[1].is_open)
+
+    def test_error_words_in_a_reply_body_do_not_fail_it(self):
+        device = FakeDevice({
+            "STATE": ['STATE:activity=EpubReader book="/test/NETWORK_ERROR.epub" chapter=LOGIN_TIMEOUT'],
+            "FS:LS:/test": ["FS:f 3 A_ERROR.txt", "FS:f 4 b.txt", "FS_END:2"],
+        })
+        port = connect(device)
+        ok, out = run(port, ["cmd:STATE", "cmd:FS:LS:/test"])
+        self.assertTrue(ok, out)
+        self.assertIn("FS:f 4 b.txt", out)
+        self.assertIn("FS_END:2", out)
+
+    def test_a_failed_state_step_leaves_no_fields_for_check(self):
+        device = FakeDevice({"STATE": ["STATE:activity=Home"]})
+
+        def break_state(p):  # the second STATE fails
+            device.after_command = None
+            device.answers["STATE"] = ["CMD_ERROR:unknown command STATE"]
+
+        device.after_command = break_state
+        port = connect(device)
+        ok, out = run(port, ["state", "state", "check:activity=Home"])
+        self.assertFalse(ok)
+        self.assertIn("check activity=None", out)
+
+    @unittest.skipUnless(importlib.util.find_spec("PIL"), "needs Pillow, as shot: does")
+    def test_a_screenshot_into_a_missing_folder_fails_its_step(self):
+        device = FakeDevice({"SCREENSHOT": ["SCREENSHOT_START:8:2:2", bytes([0x0A, 0xFF]), "SCREENSHOT_END"],
+                             "STATE": ["STATE:activity=Home"]})
+        port = connect(device)
+        with tempfile.TemporaryDirectory() as folder:
+            ok, out = run(port, [f"shot:{os.path.join(folder, 'missing', 'x.png')}", "state"])
+        self.assertFalse(ok)
+        self.assertIn("SCREENSHOT FAILED: cannot save", out)
+        self.assertIn("STATE:activity=Home", out)
+
+    def test_deadlines_do_not_follow_the_wall_clock(self):
+        # A wall clock set back or forward mid-run (NTP) must not end a wait early or stretch it.
+        class WallClockTrap:
+            monotonic = staticmethod(time.monotonic)
+            sleep = staticmethod(time.sleep)
+
+            @staticmethod
+            def time():
+                raise AssertionError("devctl read the wall clock")
+
+        device = FakeDevice({"STATE": ["STATE:activity=Home"]})
+        port = connect(device)
+        saved, devctl.time = devctl.time, WallClockTrap
+        try:
+            ok, out = run(port, ["state"])
+        finally:
+            devctl.time = saved
+        self.assertTrue(ok, out)
+
+    def test_a_press_count_takes_ascii_digits_only(self):
+        device = FakeDevice({"STATE": ["STATE:activity=Home sel=0 label=Home"]})
+        port = connect(device)
+        ok, out = run(port, ["select:Home:²"])  # a superscript two is a digit to str.isdigit(), not to int()
+        self.assertTrue(ok, out)
+        self.assertIn("selected 'Home' after 0 presses", out)
 
 
 class ClosingThePort(unittest.TestCase):
