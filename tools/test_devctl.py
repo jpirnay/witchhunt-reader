@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Host tests of tools/devctl.py against a model of the device's port: no pyserial and no device needed. They cover
-what a run does when the port goes away between or during steps. Run by ctest (test/devctl)."""
+what a run does when the port goes away between or during steps, which reply a step takes, how long it waits for
+it, and that a reply still to come ends the run. Run by ctest (test/devctl)."""
+import importlib
 import io
 import os
 import sys
@@ -17,8 +19,9 @@ class PortGone(Exception):
 
 class FakeDevice:
     """The device behind the port. `answers` maps a command (the text after CMD:) to the lines it answers with, in
-    order: a line at once, or (seconds, line) for one that comes that much later. Every opening of the port is a
-    FakePort; output goes to the newest one, as the device's USB port is one."""
+    order: a line at once, or (seconds, line) for one that comes that much later; bytes go out as they are (a
+    screenshot's frame). Every opening of the port is a FakePort; output goes to the newest one, as the device's USB
+    port is one."""
 
     def __init__(self, answers):
         self.answers = answers
@@ -31,7 +34,8 @@ class FakeDevice:
         """The lines that are due, in turn, to the port open now."""
         now = time.time()
         while self.later and self.later[0][0] <= now:
-            self.opened[-1].incoming += (self.later.pop(0)[1] + "\n").encode()
+            out = self.later.pop(0)[1]
+            self.opened[-1].incoming += out if isinstance(out, bytes) else (out + "\n").encode()
 
     def open(self):
         port = FakePort(self, len(self.opened))
@@ -94,6 +98,9 @@ class FakePort:
         self.device.take(self, bytes(data))
         return len(data)
 
+    def reset_input_buffer(self):
+        self.incoming.clear()
+
     def close(self):
         self.is_open = False
 
@@ -102,20 +109,31 @@ class Harness:
     device = None
 
 
-fake_serial = types.ModuleType("serial")
-fake_serial.SerialException = PortGone
-fake_serial.Serial = lambda *args, **kwargs: Harness.device.open()
-sys.modules["serial"] = fake_serial
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import devctl  # noqa: E402  (after the fake serial module is in place)
+def load_devctl():
+    """tools/devctl.py with the model in pyserial's place. The fake `serial` module is in sys.modules only while
+    devctl imports it (devctl keeps its own reference), so nothing else that runs in this process sees it."""
+    fake_serial = types.ModuleType("serial")
+    fake_serial.SerialException = PortGone
+    fake_serial.Serial = lambda *args, **kwargs: Harness.device.open()
+    saved = {name: sys.modules.get(name) for name in ("serial", "devctl")}
+    folder = os.path.dirname(os.path.abspath(__file__))
+    sys.modules["serial"] = fake_serial
+    sys.path.insert(0, folder)
+    try:
+        return importlib.import_module("devctl")
+    finally:
+        sys.path.remove(folder)
+        for name, module in saved.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
+
+devctl = load_devctl()
 devctl.REOPEN_PAUSE = 0
-# Short waits, in the same proportions: a late reply comes 0.3 s after the host gave up on it, which leaves the
-# resync 0.3 s to spare at either end.
-devctl.REPLY_TIMEOUT = 0.3
-devctl.RESYNC_QUIET = 0.6
-devctl.RESYNC_MAX = 3
-LATE = 0.6
+devctl.REPLY_TIMEOUT = 0.3  # the device reads a command and answers it within this, here
+LATE = 0.6  # a reply that comes after the host gave up on it
 
 
 def connect(device):
@@ -168,25 +186,69 @@ class PortGoesAway(unittest.TestCase):
         self.assertEqual(device.received, [(0, "FS:PUT:/test/a.bin:5:3610a686")])
 
 
-class RepliesMatchTheirCommand(unittest.TestCase):
-    def test_a_late_reply_of_another_command_is_not_taken(self):
-        # STATE gets no reply in time; its reply comes while ACT:HOME waits, and ACT:HOME gets none.
-        device = FakeDevice({"ACT:HOME": ["STATE:activity=Home"]})
+    def test_a_reply_lost_to_a_restart_fails_its_step_and_the_run_goes_on(self):
+        device = FakeDevice({"STATE": ["STATE:activity=Home"]})
         port = connect(device)
-        ok, out = run(port, ["cmd:STATE", "cmd:ACT:HOME"])
-        self.assertFalse(ok)
-        self.assertIn("NO REPLY to ACT:HOME", out)
-        self.assertIn("step failed: cmd:ACT:HOME", out)
 
-    def test_a_late_reply_of_the_same_kind_is_dropped_before_the_next_command(self):
+        def restart(p):  # the device restarts right after it took the press, before it answers
+            device.after_command = None
+            p.gone = True
+
+        device.after_command = restart
+        ok, out = run(port, ["cmd:BTN:RIGHT", "state"])
+        self.assertFalse(ok)
+        self.assertIn("NO REPLY to BTN:RIGHT (the device restarted)", out)
+        self.assertNotIn("LINK UNSYNCED", out)
+        self.assertEqual(device.received, [(0, "BTN:RIGHT"), (1, "STATE")])
+        self.assertNotIn("step failed: state", out)
+
+
+class RepliesAreTheirCommands(unittest.TestCase):
+    def test_a_line_of_another_command_is_not_taken(self):
+        device = FakeDevice({"ACT:HOME": ["IDLE:123", "EVT:ACT Home", "ACT_OK"]})
+        port = connect(device)
+        ok, out = run(port, ["cmd:ACT:HOME"])
+        self.assertTrue(ok, out)
+        self.assertIn("ACT_OK", out)
+        self.assertNotIn("IDLE:123", out)
+
+    def test_no_reply_with_the_port_open_ends_the_run_even_with_keep_going(self):
+        # The reply comes late, while the next command would wait: it must not pass for that one's.
         device = FakeDevice({"STATE": [(LATE, "STATE:activity=Old")]})
         port = connect(device)
-        ok, out = run(port, ["state"])
-        self.assertFalse(ok, out)  # timed out; the reply is still on its way
-        device.answers["STATE"] = ["STATE:activity=New"]
-        ok, out = run(port, ["state", "check:activity=New"])
+        ok, out = run(port, ["state", "state", "check:activity=Old"])
+        self.assertFalse(ok)
+        self.assertIn("LINK UNSYNCED: no reply to CMD:STATE within 0.3 s", out)
+        self.assertEqual(device.received, [(0, "STATE")], "the run stopped before the next command")
+        self.assertNotIn("check activity", out)
+
+    def test_an_error_reply_does_not_end_the_run(self):
+        device = FakeDevice({"NOPE": ["CMD_ERROR:unknown command NOPE"], "STATE": ["STATE:activity=Home"]})
+        port = connect(device)
+        ok, out = run(port, ["cmd:NOPE", "state"])
+        self.assertFalse(ok)
+        self.assertIn("step failed: cmd:NOPE", out)
+        self.assertIn("STATE:activity=Home", out)
+        self.assertNotIn("LINK UNSYNCED", out)
+
+    def test_idle_busy_ends_the_run(self):
+        # A wait from before the run still runs: its answer is still to come, and could pass for the next IDLE's.
+        device = FakeDevice({"IDLE": ["IDLE_ERROR:busy"], "STATE": ["STATE:activity=Home"]})
+        port = connect(device)
+        ok, out = run(port, ["idle", "state"])
+        self.assertFalse(ok)
+        self.assertIn("LINK UNSYNCED: IDLE_ERROR:busy", out)
+        self.assertEqual(device.received, [(0, "IDLE")])
+
+    def test_a_screenshot_sent_as_cmd_reads_its_frame_off_the_line(self):
+        frame = bytes([0x0A, 0xFF])  # a newline byte among the pixels
+        device = FakeDevice({"SCREENSHOT": ["SCREENSHOT_START:8:2:2", frame, "SCREENSHOT_END"],
+                             "STATE": ["STATE:activity=Home"]})
+        port = connect(device)
+        ok, out = run(port, ["cmd:SCREENSHOT", "state"])
         self.assertTrue(ok, out)
-        self.assertNotIn("activity=Old", out)
+        self.assertIn("SCREENSHOT_END (not saved", out)
+        self.assertIn("STATE:activity=Home", out)
 
     def test_an_unknown_command_is_answered_by_cmd_error(self):
         device = FakeDevice({"NOPE": ["CMD_ERROR:unknown command NOPE"]})
@@ -213,6 +275,41 @@ class RepliesMatchTheirCommand(unittest.TestCase):
         self.assertTrue(ok, out)
         self.assertIn("GET:b=2", out)
         self.assertIn("GET_END:2", out)
+
+
+class TheModelStaysInTheseTests(unittest.TestCase):
+    def test_the_fake_serial_module_is_not_left_in_sys_modules(self):
+        self.assertIsNot(sys.modules.get("serial"), devctl.serial)
+        self.assertNotIn("devctl", sys.modules)
+
+
+class WaitsAsLongAsTheDevice(unittest.TestCase):
+    def test_the_reply_timeout_covers_what_the_command_takes_on_the_device(self):
+        read = devctl.REPLY_TIMEOUT  # for the device to read the command
+        cases = {
+            "STATE": read,
+            "IDLE": 10 + read,  # the device's default
+            "IDLE:SCREEN": 10 + read,
+            "IDLE:30000": 30 + read,
+            " IDLE:30000 ": 30 + read,  # the device trims the text
+            "IDLE:5000:SCREEN": 5 + read,
+            "IDLE:+2000": 2 + read,
+            "IDLE:9999999": 600 + read,  # the device's longest
+            "SCREENSHOT": devctl.SCREENSHOT_WAIT + read,
+            "FS:HASH:/test/a.epub": devctl.FILE_READ_TIMEOUT + read,
+            "FS:GET:/test/a.epub": devctl.FILE_READ_TIMEOUT + read,
+            "ACT:DICT:word": devctl.FILE_READ_TIMEOUT + read,
+        }
+        for text, seconds in cases.items():
+            self.assertAlmostEqual(devctl.reply_timeout(text), seconds, msg=text)
+
+    def test_an_idle_written_with_a_space_waits_for_its_own_timeout(self):
+        # cmd: IDLE:1000 used to wait only the plain reply timeout, as its text did not start with IDLE.
+        device = FakeDevice({" IDLE:1000": [(LATE, "IDLE:600")]})
+        port = connect(device)
+        ok, out = run(port, ["cmd: IDLE:1000"])
+        self.assertTrue(ok, out)
+        self.assertIn("IDLE:600", out)
 
 
 if __name__ == "__main__":

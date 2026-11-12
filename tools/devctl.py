@@ -32,9 +32,15 @@ at its first. hash: splits at the first '=', so a card path with '=' in it canno
 (use cmd:FS:HASH:<path>). Local paths may be given as Git Bash writes them (/c/tmp/a.epub).
 
 A step takes only a reply to its own command: a line that starts with the command's name and '_' or ':'
-(BTN_OK, STATE:..., IDLE_TIMEOUT:...), or CMD_ERROR. Log lines, and a late reply to an earlier command,
-are skipped. After a step got no reply, the next command first reads until the line has been quiet for
-1 s (at most 10 s), so that reply, should it still come, cannot pass for the next one's.
+(BTN_OK, STATE:..., IDLE_TIMEOUT:...), or CMD_ERROR; log lines are skipped. A command waits as long as
+the device may take to answer it: 20 s for the device to read it (a loop pass can be held up by long
+work), and on top what the command itself may take (an IDLE its own timeout, an FS:GET or FS:HASH or
+ACT:DICT a file read through). A command that got no reply while the port stayed open ends the run,
+--keep-going or not: the device may still answer, and that reply could not be told from the next
+command's. So does IDLE_ERROR:busy: a wait from before the run is still running, and its answer is still
+to come. A step that failed with any other error reply does not end the run under --keep-going. A run
+that stopped for a missing reply may leave that reply still to come: let the device answer, or restart
+it, before the next run.
 
 A --script file holds one step per line; blank lines and lines starting with # are skipped.
 Every line the device prints goes to --log with a timestamp. Needs pyserial, and Pillow for shot:.
@@ -42,9 +48,11 @@ Every line the device prints goes to --log with a timestamp. Needs pyserial, and
 The port is opened with the default DTR/RTS lines, which does not reset an ESP32-C3 (unlike
 tools/serial_transfer.py, which deasserts them), and closed with RTS dropped before DTR, which does
 not either (a plain close on Windows does). The device re-enumerates its USB port across a
-reboot or a sleep; the reader reopens it and carries on. A command (or a piece of a put:, or a get:'s
-acknowledgement) whose write fails that way is not sent again, since the device may have taken it:
-its step fails with DELIVERY UNCERTAIN, and the next step uses the reopened port.
+reboot or a sleep; the reader reopens it, drops what it had read from the old one, and carries on: a
+device that restarted answers nothing it was sent before, so a step whose reply was lost that way just
+fails. A command (or a piece of a put:, or a get:'s acknowledgement) whose write fails that way is not
+sent again, since the device may have taken it: its step fails with DELIVERY UNCERTAIN, and the next
+step uses the reopened port.
 """
 import argparse
 import os
@@ -62,12 +70,18 @@ except ImportError:
 # docs/serial-test-api.md), or is CMD_ERROR (an unknown command). These commands also answer under another word: SWIPE's
 # errors are TOUCH_ERROR (no panel, not on screen), and ACT:DICT answers DICT:result=... or DICT_ERROR.
 OTHER_REPLIES = {"SWIPE": ("TOUCH_",), "ACT": ("DICT:", "DICT_")}
-# Seconds a step waits for its reply when it names no other wait.
+# Seconds the device may take to read a command and answer it, when the command itself takes no time: a loop pass
+# can be held up by long work (a font install held one for 20.6 s). A several-line reply waits this long for each line.
 REPLY_TIMEOUT = 20
-# After a command got no reply, the next one first reads the line until it has been quiet this long (at most
-# RESYNC_MAX seconds): that reply, should it still come, is dropped there rather than taken for the next one's.
-RESYNC_QUIET = 1.0
-RESYNC_MAX = 10.0
+# CMD:IDLE's timeout on the device when it names none, and the longest it takes, in ms (SerialTestApi.cpp).
+IDLE_DEFAULT_MS = 10000
+IDLE_MAX_MS = 600000
+# CMD:SCREENSHOT is answered within this many seconds once the device has read it: the frame, or SCREENSHOT_ERROR:busy
+# when the display stayed busy (ScreenshotUtil's 5 s).
+SCREENSHOT_WAIT = 5
+# A stream (a frame, an FS:GET piece) that the host stops taking, or acknowledging, is given up by the device after
+# this many seconds, with an error line (SerialTestApi.cpp kStreamStallMs).
+DEVICE_STREAM_STALL = 15
 # Commands that answer with several lines, and the line that ends them.
 MULTI_LINE = {"GET:*": re.compile(r"^GET_END"), "FS:LS:": re.compile(r"^FS_END"), "PAGE": re.compile(r"^PAGE_END")}
 # A file the device reads through for its CRC32 before it answers (FS:GET, FS:HASH): seconds a megabyte, and then
@@ -89,10 +103,32 @@ class DeliveryUncertain(Exception):
     unknown, so what was being written is not sent again: a press or a file write must not happen twice."""
 
 
+class LinkUnsynced(Exception):
+    """A reply is still to come while the port stayed open: it timed out here, or the device said a wait from before
+    is still running. The device may answer later, and nothing tells that reply from the next command's, so the run
+    cannot go on."""
+
+
 def reply_prefixes(text):
     """What a reply to CMD:<text> starts with (see OTHER_REPLIES)."""
     name = text.split(":", 1)[0].strip()
     return (f"{name}_", f"{name}:", "CMD_ERROR") + OTHER_REPLIES.get(name, ())
+
+
+def reply_timeout(text):
+    """Seconds to wait for the reply to CMD:<text>: what the command may take on the device, and REPLY_TIMEOUT on top
+    for the device to read it. The device trims the text, so this does too."""
+    name, _, arg = text.strip().partition(":")
+    if name == "IDLE":
+        first = arg.split(":")[0]
+        ms = int(first) if re.fullmatch(r"\+?\d+", first) else IDLE_DEFAULT_MS
+        return min(ms, IDLE_MAX_MS) / 1000 + REPLY_TIMEOUT
+    if name == "SCREENSHOT":
+        return SCREENSHOT_WAIT + REPLY_TIMEOUT
+    # A file read through: FS:GET and FS:HASH for its CRC32, ACT:DICT a dictionary's index built on its first lookup.
+    if (name == "FS" and arg.startswith(("GET:", "HASH:"))) or (name == "ACT" and arg.startswith("DICT:")):
+        return FILE_READ_TIMEOUT + REPLY_TIMEOUT
+    return REPLY_TIMEOUT
 
 
 def native_path(path):
@@ -187,7 +223,9 @@ class Device:
         self.buf = b""
         self.read_pause = 0.0  # --read-pause: seconds get: waits after every MB, as a slow host would
         self.expected = ()  # what a reply to the command sent last starts with (reply_prefixes)
-        self.unanswered = False  # it got no reply: the next command resyncs first
+        self.sent = ""  # the command sent last, for messages
+        self.reopens = 0  # times the port was opened again
+        self.reopens_at_send = 0  # self.reopens when the command was sent last
         self.ser = self._open()
 
     def note(self, line):
@@ -214,13 +252,20 @@ class Device:
         self.ser.close()
 
     def _reopen(self):
-        """The port went away (reboot, sleep, re-enumeration): open it again."""
+        """The port went away (reboot, sleep, re-enumeration): open it again. What was read from the old port and
+        not used yet is dropped: the device behind it restarted, or slept, and answers nothing sent before."""
         try:
             self.close()
         except Exception:
             pass
         time.sleep(REOPEN_PAUSE)
         self.ser = self._open()
+        self.reopens += 1
+        self.buf = b""
+        try:
+            self.ser.reset_input_buffer()
+        except (serial.SerialException, OSError):
+            pass
 
     def _read(self, size):
         try:
@@ -281,34 +326,26 @@ class Device:
         """Whether `line` answers the command sent last: not a log line, nor a late reply to an earlier command."""
         return line.startswith(self.expected)
 
+    def no_reply(self, waited):
+        """Nothing answered the command sent last within `waited` seconds. Raises LinkUnsynced when the port stayed
+        open meanwhile; returns None when it was reopened, since the device restarted and its reply is gone."""
+        if self.reopens == self.reopens_at_send:
+            raise LinkUnsynced(f"no reply to CMD:{self.sent} within {waited:g} s")
+        return None
+
     def reply(self, timeout):
-        """The next reply line to the command sent last; other lines are skipped. None after `timeout` seconds."""
+        """The next reply line to the command sent last; other lines are skipped. After `timeout` seconds: see
+        no_reply()."""
         deadline = time.time() + timeout
         while (line := self.read_line(deadline)) is not None:
             if self.is_reply(line):
                 return line
-        self.unanswered = True
-        return None
-
-    def resync(self):
-        """After a command that got no reply: read until the line has been quiet for RESYNC_QUIET seconds (at most
-        RESYNC_MAX), so that reply, should it come late, is dropped by drain() rather than taken for the next one's.
-        A late reply of another command's kind would be skipped anyway (is_reply); this catches one of the same kind."""
-        if not self.unanswered:
-            return
-        self.unanswered = False
-        end = time.time() + RESYNC_MAX
-        quiet_until = time.time() + RESYNC_QUIET
-        while time.time() < min(end, quiet_until):
-            got = self._read_some()
-            if got:
-                self.buf += got
-                quiet_until = time.time() + RESYNC_QUIET
+        return self.no_reply(timeout)
 
     def drain(self):
-        """Log and drop the lines already received, so a late reply to an earlier command (one that
-        timed out here) cannot pass for the reply to the next. A partial line is kept. A port that went
-        away since the last step is opened again here, so the next command goes to the live one."""
+        """Log and drop the complete lines already received. Hygiene only: they are log lines, since every reply
+        was waited for (or the run stopped). A partial line is kept. A port that went away since the last step is
+        opened again here, so the next command goes to the live one."""
         try:
             waiting = self.ser.in_waiting
         except (serial.SerialException, OSError):
@@ -321,73 +358,81 @@ class Device:
             self.note(line.decode("utf-8", errors="replace").rstrip("\r"))
 
     def send(self, text):
-        self.resync()
         self.drain()
         self.note(f">>> CMD:{text}")
         self.expected = reply_prefixes(text)
+        self.sent = text
+        self.reopens_at_send = self.reopens
         self._write(("CMD:" + text + "\n").encode(), f"CMD:{text}")
 
-    def command(self, text, timeout=None, until=None, lines=None):
-        """Send a command; return its reply line (the terminator of a several-line reply), or None after `timeout`
-        seconds (REPLY_TIMEOUT when not given). With `until`, the reply lines before the terminator go to `lines`."""
+    def command(self, text, until=None, lines=None):
+        """Send a command; return its reply line (the terminator of a several-line reply). It waits reply_timeout()
+        for the reply, and for each further line of a several-line one; then see no_reply(). With `until`, the reply
+        lines before the terminator go to `lines`."""
         self.send(text)
-        deadline = time.time() + (REPLY_TIMEOUT if timeout is None else timeout)
+        wait = reply_timeout(text)
+        deadline = time.time() + wait
         while (line := self.read_line(deadline)) is not None:
             if not self.is_reply(line):
-                continue  # a log line, or a late reply to an earlier command
+                continue  # a log line
+            if line == "IDLE_ERROR:busy":
+                raise LinkUnsynced("IDLE_ERROR:busy: a wait from before this run is still running, and its answer is "
+                                   "still to come")
             if until is None or until.match(line) or FAILED.search(line):
                 return line
             if lines is not None:
                 lines.append(line)
-        self.unanswered = True
-        return None
+            wait = REPLY_TIMEOUT  # for the next line of the listing
+            deadline = time.time() + wait
+        return self.no_reply(wait)
 
     def screenshot(self, path, rotate):
+        """CMD:SCREENSHOT into `path` (read and dropped when None). Returns None, or what went wrong. A frame that
+        stops short leaves the rest of it, and its last line, still to come on an open port: see no_reply()."""
         self.send("SCREENSHOT")
-        # Until it is answered in full, the frame's bytes may still be on their way: the next command resyncs first.
-        self.unanswered = True
-        deadline = time.time() + 30
-        while (line := self.read_line(deadline)) is not None:
-            if line.startswith("SCREENSHOT_START:"):
-                _, w, h, size = line.split(":")
-                data = self.read_exact(int(size), time.time() + 30)
-                if len(data) != int(size):
-                    return f"short frame: {len(data)} of {size} bytes"
-                from PIL import Image  # only shot: needs Pillow
+        wait = reply_timeout("SCREENSHOT")
+        line = self.reply(wait)
+        if line is None:
+            return "no reply (the device restarted)"
+        if not line.startswith("SCREENSHOT_START:"):
+            return line  # SCREENSHOT_ERROR:..., or CMD_ERROR
+        _, w, h, size = line.split(":")
+        data = self.read_exact(int(size), time.time() + DEVICE_STREAM_STALL + REPLY_TIMEOUT)
+        if len(data) != int(size):
+            self.no_reply(DEVICE_STREAM_STALL + REPLY_TIMEOUT)
+            return f"short frame: {len(data)} of {size} bytes (the device restarted)"
+        end = self.reply(REPLY_TIMEOUT)
+        if end is None:
+            return "no SCREENSHOT_END (the device restarted)"
+        if end != "SCREENSHOT_END":
+            return end
+        if path is None:
+            return None
+        from PIL import Image  # only shot: needs Pillow
 
-                image = Image.frombytes("1", (int(w), int(h)), data)
-                if rotate:
-                    image = image.rotate(rotate, expand=True)
-                image.save(path)
-                end = self.read_line(time.time() + 5)
-                if end != "SCREENSHOT_END":
-                    return f"no SCREENSHOT_END (got {end!r})"
-                self.unanswered = False
-                return None
-            if line.startswith("SCREENSHOT_ERROR"):
-                self.unanswered = False
-                return line
-        return "no reply"
+        image = Image.frombytes("1", (int(w), int(h)), data)
+        if rotate:
+            image = image.rotate(rotate, expand=True)
+        image.save(path)
+        return None
 
     def page(self, path):
         """CMD:PAGE into `path`, one PAGE_ line a line. Returns None, or what went wrong."""
         self.send("PAGE")
         lines = []
-        deadline = time.time() + 30
-        while (line := self.read_line(deadline)) is not None:
-            if not line.startswith("PAGE_"):
-                continue  # a log line
+        # Each line within REPLY_TIMEOUT of the one before: a dump of a dense page is long, a stalled one is not.
+        while (line := self.reply(REPLY_TIMEOUT)) is not None:
+            if line.startswith("CMD_ERROR"):
+                return line
             lines.append(line)
             if line.startswith(("PAGE_END", "PAGE_ERROR")):
                 break
         if not lines:
-            self.unanswered = True
-            return "no reply"
+            return "no reply (the device restarted)"
         if lines[-1].startswith("PAGE_ERROR"):
             return lines[-1]
         if not lines[-1].startswith("PAGE_END"):
-            self.unanswered = True  # the rest of the dump may still come
-            return f"no PAGE_END after {len(lines)} lines (the last {lines[-1][:60]!r})"
+            return f"no PAGE_END after {len(lines)} lines (the device restarted)"
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines) + "\n")
         damage = check_page(lines)
@@ -410,7 +455,7 @@ class Device:
         crc = zlib.crc32(data) & 0xFFFFFFFF
         self.send(f"FS:PUT:{remote}:{len(data)}:{crc:08x}")
         started = time.time()
-        line = self.reply(20)
+        line = self.reply(REPLY_TIMEOUT)
         if not line or not line.startswith("FS_PUT_READY:"):
             return line or "no reply"
         chunk = int(line.split(":", 1)[1])
@@ -419,10 +464,10 @@ class Device:
             piece = data[sent:sent + chunk]
             self._write(piece, f"FS:PUT:{remote}, the piece at byte {sent}")
             sent += len(piece)
-            ack = self.reply(15)
+            ack = self.reply(REPLY_TIMEOUT)
             if ack != f"FS_PUT_ACK:{sent}":
                 return ack or f"no FS_PUT_ACK:{sent}"
-        done = self.reply(20)
+        done = self.reply(REPLY_TIMEOUT)
         if not done or not done.startswith("FS_OK:put"):
             return done or "no FS_OK"
         seconds = time.time() - started
@@ -443,7 +488,7 @@ class Device:
 
     def _get_once(self, remote, local):
         self.send(f"FS:GET:{remote}")
-        line = self.reply(FILE_READ_TIMEOUT)
+        line = self.reply(reply_timeout(f"FS:GET:{remote}"))
         if not line or not line.startswith("FS_GET_START:"):
             return line or "no reply"
         fields = line.split(":")
@@ -468,7 +513,7 @@ class Device:
             if self.read_pause and len(data) >= next_pause:
                 time.sleep(self.read_pause)  # a slow host, for testing: the next piece waits in the host's buffer
                 next_pause += 1 << 20
-        end = self.reply(20)
+        end = self.reply(REPLY_TIMEOUT)
         mine = zlib.crc32(data) & 0xFFFFFFFF
         if end != "FS_GET_END":
             return f"{end or 'no FS_GET_END'} (received {len(data)} of {size} bytes, crc {mine:08x})"
@@ -489,13 +534,14 @@ class Device:
             self.note(told)
             return f"{reason}; the device said {told}"
         self._write(GET_CANCEL, "the FS:GET cancel")
-        answer = self.reply(GET_PIECE_IDLE)
+        # The device reads the cancel once it has sent the piece, or gives the stream up after its own stall.
+        answer = self.reply(DEVICE_STREAM_STALL + REPLY_TIMEOUT)
         return f"{reason}; cancelled ({answer or 'no answer'})"
 
     def hash(self, remote, local=None):
         """CMD:FS:HASH, compared with `local` when given."""
         self.send(f"FS:HASH:{remote}")
-        line = self.reply(FILE_READ_TIMEOUT)
+        line = self.reply(reply_timeout(f"FS:HASH:{remote}"))
         print(line if line else f"NO REPLY to FS:HASH:{remote}")
         if not line or not line.startswith("FS_HASH:"):
             return line or "no reply"
@@ -509,12 +555,6 @@ class Device:
             return f"differs from {local}: crc {mine}, {len(data)} bytes"
         print(f"matches {local}")
         return None
-
-
-def idle_timeout(arg):
-    """Seconds to wait for the reply to CMD:IDLE<arg>: the device's own timeout and some slack."""
-    first = arg.split(":")[0] if arg else ""
-    return (int(first) if first.isdigit() else 10000) / 1000 + 5
 
 
 def file_step(device, kind, rest):
@@ -565,6 +605,12 @@ def run(device, steps, rotate, keep_going=False):
             # must not happen twice.
             print(f"DELIVERY UNCERTAIN: {error} (port reopened, not resent)")
             ok = False
+        except LinkUnsynced as error:
+            # --keep-going or not: a reply still to come could pass for the next command's.
+            print(f"LINK UNSYNCED: {error}; a reply that comes later could not be told from the next command's, so "
+                  f"the run stops")
+            print(f"step failed: {step}")
+            return False
         if not ok:
             print(f"step failed: {step}")
             all_ok = False
@@ -577,18 +623,22 @@ def run_step(device, step, rotate, state):
     """One step. Returns whether it passed, and the STATE fields `check:` reads from then on."""
     kind, _, rest = step.partition(":")
     ok = True
-    if kind == "cmd":
-        until = next((end for start, end in MULTI_LINE.items() if rest.startswith(start)), None)
-        timeout = idle_timeout(rest[5:]) if rest.startswith("IDLE") else REPLY_TIMEOUT
+    if kind == "cmd" and rest.strip().split(":")[0] == "SCREENSHOT":
+        # The frame's bytes follow the first line: read them, so they do not stay on the line (shot: saves them).
+        error = device.screenshot(None, rotate)
+        print("SCREENSHOT_END (not saved: shot:<file.png> saves it)" if error is None else error)
+        ok = error is None
+    elif kind == "cmd":
+        until = next((end for start, end in MULTI_LINE.items() if rest.strip().startswith(start)), None)
         lines = []
-        reply = device.command(rest, timeout=timeout, until=until, lines=lines)
+        reply = device.command(rest, until=until, lines=lines)
         for line in lines:
             print(line)
-        print(reply if reply else f"NO REPLY to {rest}")
+        print(reply if reply else f"NO REPLY to {rest} (the device restarted)")
         ok = bool(reply) and not FAILED.search(reply)
     elif kind == "state":
         reply = device.command("STATE")
-        print(reply if reply else "NO REPLY to STATE")
+        print(reply if reply else "NO REPLY to STATE (the device restarted)")
         ok = bool(reply) and reply.startswith("STATE:")
         if ok:
             state = split_fields(reply[len("STATE:"):])
@@ -598,8 +648,8 @@ def run_step(device, step, rotate, state):
         ok = value is not None and re.fullmatch(pattern, value) is not None
         print(f"check {key}={value!r} ~ /{pattern}/: {'ok' if ok else 'FAILED'}")
     elif kind == "idle":
-        reply = device.command("IDLE" + (":" + rest if rest else ""), timeout=idle_timeout(rest))
-        print(reply if reply else "NO REPLY to IDLE")
+        reply = device.command("IDLE" + (":" + rest if rest else ""))
+        print(reply if reply else "NO REPLY to IDLE (the device restarted)")
         ok = bool(reply) and reply.startswith("IDLE:")
     elif kind == "shot":
         path = native_path(rest)
@@ -623,7 +673,7 @@ def run_step(device, step, rotate, state):
             # One press at a time: presses sent back to back reach the list faster than it redraws, and it
             # moves further than asked.
             device.command("BTN:DOWN")
-            device.command("IDLE:5000", timeout=idle_timeout("5000"))
+            device.command("IDLE:5000")
         if not ok:
             print(f"NOT SELECTED: {pattern} (last label {fields.get('label')!r})")
     elif kind in ("page", "put", "get", "hash", "mkdir", "mv"):

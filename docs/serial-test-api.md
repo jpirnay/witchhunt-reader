@@ -100,8 +100,9 @@ Things to know about the port:
   with DTR low as a reset request: it restarts to Home (`resetReason=11` in the boot log). Set RTS
   low, then DTR low, then close, as `tools/devctl.py` does.
 - **The port goes away on a reboot or sleep.** The USB device re-enumerates. A long-running host
-  has to close and reopen the port; `tools/devctl.py` does this by itself. A command whose write
-  fails that way may or may not have reached the device, so do not send it again blindly:
+  has to close and reopen the port; `tools/devctl.py` does this by itself, and drops what it had
+  read from the old port: the restarted device answers nothing it was sent before. A command whose
+  write fails that way may or may not have reached the device, so do not send it again blindly:
   `devctl.py` fails that step with `DELIVERY UNCERTAIN: CMD:<text> (port reopened, not resent)`
   and goes on with the next one on the reopened port.
 - **One program at a time.** Close your monitor before running a script, and never hold the port
@@ -435,7 +436,9 @@ allocated at an idle step, not inside a draw), which the reader does in idle tim
 Send `CMD:IDLE` after the command it should wait for; the device handles them in order. While an
 `IDLE` is pending, the device still answers other commands. One `IDLE` waits at a time, so each
 gets its own reply: a second one sent while the first waits is answered `IDLE_ERROR:busy` at once,
-and the first goes on with its own timeout and `:SCREEN` mode.
+and the first goes on with its own timeout and `:SCREEN` mode. A wait outlives the script that sent
+it: after a script stopped during a long `IDLE`, a new `IDLE` is answered `IDLE_ERROR:busy` until
+that wait has answered.
 
 **`IDLE:<ms>` is no timing of what it waited for.** It counts from when the device read the `IDLE`
 line, and the device reads one command line per loop pass: work that holds the loop before that
@@ -1037,8 +1040,15 @@ card path starts with `/` and holds no `:`, so `put:` splits at its last `:` and
 trailing `:<digits>`, the retry count), and a local path may carry a drive letter (`put:C:/books/a.epub:/test/a.epub`);
 `hash:` splits at the first `=`.
 A step takes only a reply to its own command: a line starting with the command's name and `_` or `:`, or
-`CMD_ERROR`. After a step got no reply, the next command waits until the line has been quiet for 1 s (at most 10 s),
-so a reply that comes late is dropped rather than taken for the next command's.
+`CMD_ERROR`. It waits as long as the device may take: 20 s for the device to read the command (a loop pass can be held
+up by long work), and on top what the command itself may take (an `IDLE` its own timeout, `FS:GET`, `FS:HASH` and
+`ACT:DICT` 300 s for a file read through, `SCREENSHOT` 5 s). Replies carry no tag that ties them to their command, so a
+reply that comes after the step stopped waiting could pass for the next command's: when a command gets no reply while
+the port stays open, the run stops (`LINK UNSYNCED: ...`, exit 1), `--keep-going` or not, and so it does on
+`IDLE_ERROR:busy`, whose earlier wait still has its answer to come. A step that failed with any other error reply does
+not stop a `--keep-going` run, and nor does a reply lost to a restart (the port went away meanwhile): the device answers
+nothing it was sent before it restarted. A run that stopped on a missing reply can leave that reply still to come: let
+the device answer, or restart it, before the next run.
 `--script FILE` reads one step per line (`#` comments), `--keep-going` runs all steps and reports every failure,
 `--rotate` sets the screenshot rotation, `--read-pause S` makes `get:` stop reading for S seconds after every MB, as a
 slow host would (a test of the pacing above). Paths may be given as Git Bash writes them (`/c/tmp/page.png`); output is
