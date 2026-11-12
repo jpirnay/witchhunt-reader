@@ -147,6 +147,24 @@ TEST(IdleGate, TimesOutNamingWhatKeptItBusy) {
   EXPECT_FALSE(d.gate.waiting());
 }
 
+// A loop pass that stalls past the deadline: the next sample may show quiet long enough, but the
+// wait has run out by then, and IDLE must not answer success later than the timeout it was given.
+TEST(IdleGate, ASampleAfterTheDeadlineTimesOutEvenWhenQuiet) {
+  Device d;
+  d.gate.begin(d.now, 500);
+  EXPECT_EQ(d.pass(), Verdict::Waiting);  // quiet from here
+  d.now += 990;                           // the loop stalls
+  EXPECT_EQ(d.pass(), Verdict::TimedOut);
+  EXPECT_FALSE(d.gate.waiting());
+}
+
+// Quiet long enough before the deadline is still idle.
+TEST(IdleGate, QuietBeforeTheDeadlineIsIdle) {
+  Device d;
+  d.gate.begin(d.now, IdleGate::kQuietMs + 50);
+  EXPECT_EQ(d.runUntilDone(), Verdict::Idle);
+}
+
 TEST(IdleGate, ATimeoutWithNothingBusyIsSettling) {
   Device d;
   d.gate.begin(d.now, 100);  // shorter than the quiet window

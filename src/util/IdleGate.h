@@ -65,13 +65,15 @@ class IdleGate {
       quiet_ = true;
       quietSinceMs_ = sample.nowMs;
     }
-    if (quiet_ && sample.nowMs - quietSinceMs_ >= kQuietMs) {
-      waiting_ = false;
-      return Verdict::Idle;
-    }
+    // The deadline first: a pass that stalled past it can show a quiet window long enough, and the
+    // wait must not answer success later than the timeout it was given.
     if (sample.nowMs - startMs_ >= timeoutMs_) {
       waiting_ = false;
       return Verdict::TimedOut;
+    }
+    if (quiet_ && sample.nowMs - quietSinceMs_ >= kQuietMs) {
+      waiting_ = false;
+      return Verdict::Idle;
     }
     return Verdict::Waiting;
   }
