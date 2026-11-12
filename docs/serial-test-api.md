@@ -279,9 +279,9 @@ SCREENSHOT_START:<width>:<height>:<bytes>
 SCREENSHOT_END
 ```
 
-or `SCREENSHOT_ERROR:busy` (the display stayed busy for 5 s), `SCREENSHOT_ERROR:framebuffer
-released` (the Wi-Fi file server has the memory), `SCREENSHOT_ERROR:transfer stalled` (the host
-stopped reading).
+or `SCREENSHOT_ERROR:busy` (the display stayed busy for 5 s, or, at once, an earlier `SCREENSHOT` is
+still pending: one at a time, so each gets its reply), `SCREENSHOT_ERROR:framebuffer released` (the
+Wi-Fi file server has the memory), `SCREENSHOT_ERROR:transfer stalled` (the host stopped reading).
 
 The capture waits for the current render pass and copies the frame that is on the panel, not one
 being drawn. In the reader, whose next page may already be drawn off-screen in the same memory, the

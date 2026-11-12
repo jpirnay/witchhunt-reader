@@ -19,9 +19,14 @@ unsigned long pendingDeadline = 0;
 constexpr unsigned long kWaitMs = 5000;
 }  // namespace
 
-void ScreenshotUtil::request(const Target target) {
+bool ScreenshotUtil::request(const Target target) {
+  if (pendingTarget == Target::Host) {
+    LOG_DBG("SCR", "Screenshot request skipped: a host request is still pending");
+    return false;
+  }
   pendingTarget = target;
   pendingDeadline = millis() + kWaitMs;
+  return true;
 }
 
 void ScreenshotUtil::service(GfxRenderer& renderer, void (*sendToHost)(const uint8_t* frame, uint32_t size, int width,

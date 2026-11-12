@@ -12,8 +12,9 @@ class ScreenshotUtil {
   // Asks for a screenshot of the frame on the panel. It is taken by service(), like any other access to
   // the framebuffer: once no render pass holds the buffers and no refresh still uses them. A request
   // made mid-render is served a few loop passes later instead of capturing a frame in flux. A newer
-  // request replaces a pending one.
-  static void request(Target target);
+  // request replaces a pending card one. A pending host request is owed its reply, so nothing replaces
+  // it: false then, and the newer request is not taken.
+  static bool request(Target target);
 
   // Serves a pending request; the main loop calls it on every pass. `sendToHost` writes the frame to
   // the serial port (main.cpp owns the serial writer). A request the display keeps busy for 5 s is

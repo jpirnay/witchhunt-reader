@@ -1953,7 +1953,10 @@ void cmdReboot(std::string_view /*arg*/) {
 }
 #endif  // SERIAL_TEST_API
 
-void cmdScreenshot(std::string_view /*arg*/) { ScreenshotUtil::request(ScreenshotUtil::Target::Host); }
+// Answered by sendScreenshot() once ScreenshotUtil serves the request. One at a time, so each gets its reply.
+void cmdScreenshot(std::string_view /*arg*/) {
+  if (!ScreenshotUtil::request(ScreenshotUtil::Target::Host)) reply("SCREENSHOT_ERROR:busy");
+}
 
 // On-demand replay of this session's boot summary, for when the monitor was attached too late to
 // catch it and the automatic repeats are used up. The summary is log lines; the reply after them
