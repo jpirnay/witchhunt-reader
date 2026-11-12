@@ -24,7 +24,7 @@ void ServerSession::prepareRadio() {
   sdFontSystem.unload(renderer);
   trimMemoryForNetworkSession(renderer, tag);
   LOG_DBG(tag, "Free heap after trim: %d bytes", ESP.getFreeHeap());
-  powerManager.ensureFullSpeedForRadio();  // WiFi needs >=80 MHz; see HalPowerManager
+  powerManager.ensureFullSpeed();  // WiFi needs >=80 MHz; see HalPowerManager
 }
 
 bool ServerSession::start(const bool hotspot) {
