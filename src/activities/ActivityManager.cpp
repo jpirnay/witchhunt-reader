@@ -812,9 +812,13 @@ const char* ActivityManager::busyReason(const bool includeBackground) {
   if (mappedInput.hasPendingInput() || buttonEvents.isMidGesture()) return "input";
   // A frame is queued (requestedUpdate, or a notification the render task has not taken), is
   // being drawn (renderPassActive covers the stretch where render() lets go of the mutex), has a
-  // task waiting on it, or is still going onto the panel.
-  if (isUpdateSuperseded() || renderPassActive.load(std::memory_order_acquire) || waitingTaskHandle != nullptr ||
-      RenderLock::peek() || renderer.isRefreshPending()) {
+  // task waiting on it, or is still going onto the panel. The waiter is read under the mux its
+  // writers hold: on the dual-core S3 the render task can clear it while this runs.
+  taskENTER_CRITICAL(&activityStateMux);
+  const bool renderAwaited = waitingTaskHandle != nullptr;
+  taskEXIT_CRITICAL(&activityStateMux);
+  if (isUpdateSuperseded() || renderPassActive.load(std::memory_order_acquire) || renderAwaited || RenderLock::peek() ||
+      renderer.isRefreshPending()) {
     return "render";
   }
   // Between taking its notification and taking the mutex the render task shows none of the above
