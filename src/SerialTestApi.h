@@ -30,9 +30,9 @@ namespace SerialTestApi {
 // stray keys do no harm. Called by the main loop, and by the USB transfer screen, which owns the
 // port while it is up and reads the lines itself. Replies and event lines are only ever written
 // from the loop task, so they never interleave with each other or a screenshot.
-// A command runs and answers under a HalPowerManager::Lock, so the idle governor's low clock is lifted
-// first. True when the line named a command this build has: main.cpp counts that as user activity, as
-// it does a key press.
+// A command runs and answers at the full CPU clock (a HalPowerManager::Lock, and ensureFullSpeed() for
+// a refresh's drop). True when the line named a command this build has: main.cpp counts that as user
+// activity, as it does a key press.
 bool handleLine(std::string_view line);
 
 // ScreenshotUtil's host sender (CMD:SCREENSHOT): SCREENSHOT_START:<w>:<h>:<bytes>, the raw

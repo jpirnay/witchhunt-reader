@@ -2087,10 +2087,13 @@ void serviceIdle() {
 bool handleLine(const std::string_view line) {
   constexpr std::string_view kPrefix = "CMD:";
   if (line.substr(0, kPrefix.size()) != kPrefix) return false;
-  // A command can arrive while the idle governor has the CPU at 10 MHz, and main.cpp raises it only
-  // after this returns. At that clock the USB link can drop reply bytes unseen (lib/Logging/Logging.cpp
-  // says how), and the command's own work (a card copy, a dictionary lookup) would run at it too.
+  // A command can arrive with the CPU at 10 MHz, and main.cpp raises it only after this returns. At
+  // that clock the USB link can drop reply bytes unseen (lib/Logging/Logging.cpp says how), and the
+  // command's own work (a card copy, a dictionary lookup) would run at it too. The Lock lifts the idle
+  // governor's drop and keeps a refresh from lowering the clock meanwhile; ensureFullSpeed() lifts a
+  // refresh's drop already under way, which the Lock does not see.
   const HalPowerManager::Lock fullSpeed;
+  powerManager.ensureFullSpeed();
   const std::string_view command = trim(line.substr(kPrefix.size()));
   std::string_view name;
   std::string_view arg;
