@@ -17,7 +17,10 @@ next change easier is the win, not lines added.
   it separately; do not fold it in.
 - When the working tree has bundled two changes, separate them with the
   copy-affected-files-aside, reset, re-apply one concern, restore the rest
-  pattern, not by committing the tangle.
+  pattern, not by committing the tangle. `git add -p` does not work here: the
+  pre-commit hook formats and then re-stages every staged path whole (the
+  submodule pointer too). Make the working tree equal the commit you want,
+  commit, then restore the rest. Build each commit of a split series.
 - Refactor and behavior change do not ride together. A pure refactor must not
   alter behavior; a behavior change should not drag a refactor along. If both
   are needed: two commits, refactor first.
@@ -32,6 +35,12 @@ next change easier is the win, not lines added.
   topological pass, and land it separately, not as a rider on a feature.
 - Match the surrounding code: comment density, naming, idiom. The diff should
   read like the file, not like a different author.
+- Formatting is part of the diff. Run `bin/clang-format-fix -g` (and
+  `clang-format-21 -style=file -i` on new files) so the reviewer sees no
+  whitespace churn and CI's format check passes.
+- SDK changes are commits in `freeink-sdk`, landed on its `witchhunt` branch;
+  the firmware commit only moves the pointer. Do not mix an SDK bump into an
+  unrelated firmware change.
 
 ## Decompose oversized units
 
@@ -48,6 +57,15 @@ constraint. Never what the next line already says. Delete narration, phase-marke
 comments ("now we loop over..."), and restated function names. If a comment and
 the code it sits on say the same thing, the comment is the thing to cut.
 
+## The PR description
+
+Short: about 2–4 KB. What (a few bullets), why (the cause in a few sentences,
+one key log line if there is one), how verified (device results in a few
+lines; host tests, cppcheck and builds), cost (one line, measured), open points
+(one line each). Leave out step-by-step procedures, audit tables and
+commit-by-commit narration; they belong in commit messages. Say plainly what
+was not run on a device.
+
 ## Self-review before handoff
 
 - [ ] The change does exactly one thing; nothing unrelated rode along.
@@ -56,4 +74,5 @@ the code it sits on say the same thing, the comment is the thing to cut.
 - [ ] Extractions remove real duplication or name a real concept, not
       speculative abstraction.
 - [ ] New comments say why, not what; no narration or phase markers.
+- [ ] Every commit builds and is clang-formatted; host tests pass on the tip.
 - [ ] A reviewer can understand the diff without running it.

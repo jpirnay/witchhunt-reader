@@ -14,11 +14,13 @@ ad-hoc ints and nesting forces the reader to reconstruct intent.
 - **Model a closed set of states/modes as an `enum class`, not ints or bools.**
   A variable kept honest by a comment ("0 = hidden, 1 = showing, 2 = confirm")
   is a latent bug. Make it an enum and the comment becomes the type.
-- **Dispatch on an enum with an exhaustive `switch`, no `default`.** This
-  codebase relies on it: omitting `default` lets the compiler flag the
-  unhandled case when someone adds an enum value. A `default:` that swallows the
-  unknown case throws that safety away. Add `default` only when "every other
-  value does nothing" is a deliberate, documented decision.
+- **Dispatch on an enum with an exhaustive `switch`, no `default`.** Without a
+  `default`, `-Wswitch` flags the unhandled case when someone adds an enum
+  value. The host test build (`-Wall -Wextra`) reports it; the firmware build
+  does not enable `-Wall`, so the warning shows only for code a host test
+  compiles. A `default:` that swallows the unknown case throws that safety
+  away. Add `default` only when "every other value does nothing" is a
+  deliberate, documented decision.
 - **Replace nested `if/else-if` ladders that branch on one discriminant with a
   `switch`.** If each branch only maps input to a value, prefer a lookup table
   (`static constexpr` array) over both.
@@ -37,9 +39,10 @@ ad-hoc ints and nesting forces the reader to reconstruct intent.
 ## Enum hygiene
 
 - `enum class` by default for type safety. Plain `enum` only when values must
-  implicitly convert (e.g. a value that doubles as a UI dropdown index), and
-  then give it a trailing `_COUNT` sentinel for safe bounds/iteration, matching
-  the existing settings enums.
+  implicitly convert (a value persisted in `CrossPointSettings` that doubles as
+  an option index), and then give it a trailing `_COUNT` sentinel for bounds
+  and iteration, as the settings enums do. A persisted value's numbering is
+  part of the settings file: append new values, never renumber.
 - Name the discriminant after what it selects, not its storage:
   `Orientation orientation`, not `uint8_t mode`.
 - No magic numeric codes for states. If you write a comment mapping numbers to
