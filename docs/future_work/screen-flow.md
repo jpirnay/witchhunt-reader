@@ -36,7 +36,13 @@ canvas, pre-render or look-ahead while the bars are open), and a pass with no pa
 2026-11-12: a size, spacing or margin never used for the chapter took 5 to 6.5 s until the build was done (the page
 showed 3.6 to 4.2 s after the press), one used before 1.5 s.
 
-**Open.** Speed: the build skips its slices while a refresh is pending, and the bars' own repaint after a change waits
-behind the build's slices. The X3 and X4 keep laying the book out on closing; going live there depends on a heap
-measurement with the sheet open during a rebuild. The Murphy held sideways has no room for the sheet; its Layout tab
+**Done (2026-11-13), less waiting.** The bars' repaint lets the render lock go during its refresh, a change is applied
+once the bars showing it are painted, and where the card is not on the panel's bus (`decodesThroughRefresh`) the build
+runs through refreshes. X4 Pro, cold Size+ to 18 pt: the new value showed after 0.7 s (was 2.5 s), the page after about
+3.0 s (about 4.3 s), the build ended after 4.25 s (6.2 s). A size used before now takes 2.05 s (was 1.7 s), because its
+page waits behind the bars' refresh.
+
+**Open.** Speed: writing the pages took 0.8 s of the chapter's 2.7 s of build work (about 12 ms a page, on every
+board), and the first build pass starts only after the bars' refresh. The X3 and X4 keep laying the book out on
+closing; going live there depends on a heap measurement with the sheet open during a rebuild. The Murphy held sideways has no room for the sheet; its Layout tab
 opens the reader menu.
