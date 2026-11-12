@@ -241,3 +241,53 @@ TEST(ButtonPressQueue, ARealKeyHeldPastTheHoldEndsThePressAtItsRelease) {
   EXPECT_EQ(loop.presses[DOWN], 1);
   EXPECT_EQ(loop.releases[DOWN], 1);
 }
+
+// The key still reads down when the next press of it is due (a finger on it, or a release the input
+// layer never took in): that press waits for the release, so it gets a press edge of its own rather
+// than taking over the one already down.
+TEST(ButtonPressQueue, APressOfAKeyStillDownWaitsForItsRelease) {
+  Loop loop;
+  ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
+  ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
+  while (loop.presses[DOWN] == 0) loop.pass();
+  loop.realKeys = 1u << DOWN;
+  for (int i = 0; i < 130; ++i) loop.pass();  // past the first press's release timeout
+  EXPECT_EQ(loop.presses[DOWN], 1);
+  EXPECT_FALSE(loop.queue.idle()) << "the second press waits for the key to come up";
+  loop.realKeys = 0;
+  ASSERT_TRUE(loop.runUntilIdle());
+  EXPECT_EQ(loop.presses[DOWN], 2) << "the second press has its own edge";
+  EXPECT_EQ(loop.releases[DOWN], 2);
+  EXPECT_EQ(loop.queue.droppedPresses(), 0u);
+}
+
+// The key never comes up within the commit timeout: the press is given up and counted, as one the
+// input layer never took in (STATE's btn_dropped, and the next IDLE fails).
+TEST(ButtonPressQueue, APressOfAKeyThatStaysDownIsGivenUp) {
+  Loop loop;
+  ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
+  ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
+  while (loop.presses[DOWN] == 0) loop.pass();
+  loop.realKeys = 1u << DOWN;
+  for (int i = 0; i < 400; ++i) loop.pass();  // 4 s
+  EXPECT_TRUE(loop.queue.idle());
+  EXPECT_EQ(loop.presses[DOWN], 1) << "no second press edge";
+  EXPECT_EQ(loop.queue.droppedPresses(), 1u);
+  EXPECT_EQ(loop.held, 0);
+  loop.realKeys = 0;
+  for (int i = 0; i < 5; ++i) loop.pass();
+  EXPECT_EQ(loop.releases[DOWN], 1);
+}
+
+// Another key held down when the queue starts a press does not hold that press up.
+TEST(ButtonPressQueue, AnotherKeyDownDoesNotDelayAPress) {
+  Loop loop;
+  loop.realKeys = 1u << BACK;
+  for (int i = 0; i < 5; ++i) loop.pass();
+  ASSERT_TRUE(loop.queue.push(CONFIRM, SHORT_HOLD_MS));
+  loop.pass();
+  EXPECT_EQ(loop.held, 1u << CONFIRM) << "held from the first step";
+  ASSERT_TRUE(loop.runUntilIdle());
+  EXPECT_EQ(loop.presses[CONFIRM], 1);
+  EXPECT_EQ(loop.queue.droppedPresses(), 0u);
+}

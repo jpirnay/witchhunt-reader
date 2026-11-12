@@ -167,9 +167,10 @@ held press `BTN_ERROR:busy`.
   the other, each starting once the last release has gone through; while one plays, a tap, `:LONG`
   or `:DOUBLE` answers `BTN_ERROR:busy`, so wait with `CMD:IDLE` (its timeout longer than the hold).
   A real key pressed meanwhile keeps its own press and release; the same key merges with the held
-  one into one press. `POWER` held past the power-key duration sleeps the device, as the key does.
-  A press the input layer never takes in is given up after a second and counted in `STATE`'s
-  `btn_dropped`.
+  one into one press, and a held press of a key that is still down waits for it to come up, so it
+  gets a press of its own. `POWER` held past the power-key duration sleeps the device, as the key
+  does. A press the input layer never takes in, or whose key stays down, is given up after a second
+  and counted in `STATE`'s `btn_dropped`.
 
 ```
 > CMD:BTN:DOWN
