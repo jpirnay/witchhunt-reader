@@ -285,6 +285,8 @@ SCREENSHOT_END
 or `SCREENSHOT_ERROR:busy` (the display stayed busy for 5 s, or, at once, an earlier `SCREENSHOT` is
 still pending: one at a time, so each gets its reply), `SCREENSHOT_ERROR:framebuffer released` (the
 Wi-Fi file server has the memory), `SCREENSHOT_ERROR:transfer stalled` (the host stopped reading).
+A screenshot to the card (POWER+DOWN, the reader menu) asked for while a `SCREENSHOT` is pending is
+skipped, with a `[SCR]` log line.
 
 The capture waits for the current render pass and copies the frame that is on the panel, not one
 being drawn. In the reader, whose next page may already be drawn off-screen in the same memory, the
