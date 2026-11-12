@@ -70,6 +70,13 @@ struct Loop {
     held = queue.step(now, input.currentState);
   }
 
+  // Passes until the input layer has committed a press of `button`; false if it never did. A press
+  // commits within a few passes, so the bound only keeps a broken queue from hanging the test.
+  bool runUntilPressed(const uint8_t button, const int maxPasses = 200) {
+    for (int i = 0; i < maxPasses && presses[button] == 0; ++i) pass();
+    return presses[button] > 0;
+  }
+
   // Passes until the queue is done; false if it never was.
   bool runUntilIdle(const int maxPasses = 2000) {
     for (int i = 0; i < maxPasses; ++i) {
@@ -108,7 +115,7 @@ TEST(ButtonPressQueue, ALongPressIsHeldPastTheOneSecondThreshold) {
 TEST(ButtonPressQueue, TheButtonReadsDownForTheWholeHold) {
   Loop loop;
   ASSERT_TRUE(loop.queue.push(DOWN, 2000));
-  while (loop.presses[DOWN] == 0) loop.pass();
+  ASSERT_TRUE(loop.runUntilPressed(DOWN)) << "the press was never committed";
   const uint32_t pressedAt = loop.now;
   while (loop.now - pressedAt < 1990) {
     loop.pass();
@@ -156,7 +163,7 @@ TEST(ButtonPressQueue, PressesPlayInOrder) {
   Loop loop;
   ASSERT_TRUE(loop.queue.push(BACK, SHORT_HOLD_MS));
   ASSERT_TRUE(loop.queue.push(CONFIRM, SHORT_HOLD_MS));
-  while (loop.presses[BACK] == 0) loop.pass();
+  ASSERT_TRUE(loop.runUntilPressed(BACK)) << "the press was never committed";
   EXPECT_EQ(loop.presses[CONFIRM], 0);
   ASSERT_TRUE(loop.runUntilIdle());
   EXPECT_EQ(loop.presses[CONFIRM], 1);
@@ -224,7 +231,9 @@ TEST(ButtonPressQueue, AStalledPassDoesNotDropThePress) {
 TEST(ButtonPressQueue, NotIdleUntilTheReleaseIsCommitted) {
   Loop loop;
   ASSERT_TRUE(loop.queue.push(CONFIRM, SHORT_HOLD_MS));
-  while (loop.held != 0 || loop.presses[CONFIRM] == 0) loop.pass();
+  ASSERT_TRUE(loop.runUntilPressed(CONFIRM)) << "the press was never committed";
+  for (int i = 0; i < 200 && loop.held != 0; ++i) loop.pass();
+  ASSERT_EQ(loop.held, 0) << "the queue never released the press";
   // Released by the queue, but the input layer still reports the button down.
   EXPECT_TRUE(loop.input.currentState & (1u << CONFIRM));
   EXPECT_FALSE(loop.queue.idle());
@@ -237,7 +246,7 @@ TEST(ButtonPressQueue, NotIdleUntilTheReleaseIsCommitted) {
 TEST(ButtonPressQueue, ARealKeyPressedDuringAHoldKeepsItsOwnEdges) {
   Loop loop;
   ASSERT_TRUE(loop.queue.push(DOWN, 1000));
-  while (loop.presses[DOWN] == 0) loop.pass();
+  ASSERT_TRUE(loop.runUntilPressed(DOWN)) << "the press was never committed";
   for (int i = 0; i < 20; ++i) loop.pass();
   loop.realKeys = 1u << BACK;
   for (int i = 0; i < 10; ++i) loop.pass();
@@ -255,7 +264,7 @@ TEST(ButtonPressQueue, ARealKeyPressedDuringAHoldKeepsItsOwnEdges) {
 TEST(ButtonPressQueue, ARealKeyHeldPastTheHoldEndsThePressAtItsRelease) {
   Loop loop;
   ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
-  while (loop.presses[DOWN] == 0) loop.pass();
+  ASSERT_TRUE(loop.runUntilPressed(DOWN)) << "the press was never committed";
   loop.realKeys = 1u << DOWN;
   for (int i = 0; i < 300; ++i) loop.pass();  // 3 s, long past the hold and the commit timeout
   EXPECT_TRUE(loop.queue.idle()) << "given up waiting for the release";
@@ -273,7 +282,7 @@ TEST(ButtonPressQueue, APressOfAKeyStillDownWaitsForItsRelease) {
   Loop loop;
   ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
   ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
-  while (loop.presses[DOWN] == 0) loop.pass();
+  ASSERT_TRUE(loop.runUntilPressed(DOWN)) << "the press was never committed";
   loop.realKeys = 1u << DOWN;
   for (int i = 0; i < 130; ++i) loop.pass();  // past the first press's release timeout
   EXPECT_EQ(loop.presses[DOWN], 1);
@@ -291,7 +300,7 @@ TEST(ButtonPressQueue, APressOfAKeyThatStaysDownIsGivenUp) {
   Loop loop;
   ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
   ASSERT_TRUE(loop.queue.push(DOWN, SHORT_HOLD_MS));
-  while (loop.presses[DOWN] == 0) loop.pass();
+  ASSERT_TRUE(loop.runUntilPressed(DOWN)) << "the press was never committed";
   loop.realKeys = 1u << DOWN;
   for (int i = 0; i < 400; ++i) loop.pass();  // 4 s
   EXPECT_TRUE(loop.queue.idle());
