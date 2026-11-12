@@ -11,6 +11,14 @@
 #include <esp_sleep.h>
 #include <soc/soc_caps.h>
 
+#if defined(SERIAL_TEST_API) && SERIAL_TEST_API
+#include <atomic>
+// Board-support layer, linked only into the LilyGo env (see its lib_deps).
+#if defined(FREEINK_DEVICE_LILYGO) && FREEINK_DEVICE_LILYGO
+#include <BoardT5S3.h>
+#endif
+#endif
+
 // Global HalGPIO instance
 HalGPIO gpio;
 
@@ -127,6 +135,23 @@ HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
   return HalGPIO::DeviceType::X4;
 }
 
+#if defined(SERIAL_TEST_API) && SERIAL_TEST_API
+// The buttons the serial test API holds down (holdSyntheticButtons()). Written by the loop task, read
+// on the sampler task inside inputMgr.update() through the SDK's board-button hook.
+std::atomic<uint8_t> syntheticButtons{0};
+bool syntheticHookInstalled = false;
+
+uint8_t syntheticButtonHook() {
+  uint8_t mask = syntheticButtons.load(std::memory_order_relaxed);
+#if defined(FREEINK_DEVICE_LILYGO) && FREEINK_DEVICE_LILYGO
+  // This hook takes the place of the one BoardT5S3::begin() installed, so it reads the board's user
+  // button (behind the PCA9535 expander) as that one does.
+  if (BoardT5S3::readButton()) mask |= static_cast<uint8_t>(1U << InputManager::BTN_DOWN);
+#endif
+  return mask;
+}
+#endif
+
 }  // namespace
 
 void HalGPIO::begin() {
@@ -158,6 +183,20 @@ void HalGPIO::begin() {
   //   display.cs, SPI_MISO 7 = sd.miso, BAT_GPIO0 0 = batteryAdc,
   //   UART0_RXD 20 = usbDetect.
   inputMgr.begin();
+
+#if defined(SERIAL_TEST_API) && SERIAL_TEST_API
+  // Only where no board hook is in place, or where this one reads the board's buttons itself (the T5S3).
+  // Anywhere else the held presses are refused: replacing the hook would cost the board its buttons.
+#if defined(FREEINK_DEVICE_LILYGO) && FREEINK_DEVICE_LILYGO
+  constexpr bool kHookReadsBoardButtons = true;
+#else
+  constexpr bool kHookReadsBoardButtons = false;
+#endif
+  if (kHookReadsBoardButtons || !InputManager::hasButtonHook()) {
+    InputManager::setButtonHook(&syntheticButtonHook);
+    syntheticHookInstalled = true;
+  }
+#endif
 
   // Pre-claim the shared SPI bus with the C3's display + SD pins.
   //
@@ -765,6 +804,14 @@ void HalGPIO::injectPress(const uint8_t buttonIndex, const bool longPress, const
   pushEdgeLocked(buttonIndex, false, releaseAt);
   portEXIT_CRITICAL(&inputMux_);
 }
+
+#if defined(SERIAL_TEST_API) && SERIAL_TEST_API
+bool HalGPIO::holdSyntheticButtons(const uint8_t mask) {
+  if (!syntheticHookInstalled) return false;
+  syntheticButtons.store(mask, std::memory_order_relaxed);
+  return true;
+}
+#endif
 
 void HalGPIO::injectTouch(const float nx, const float ny) {
   if (!hasTouch()) return;

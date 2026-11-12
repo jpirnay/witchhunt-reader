@@ -20,6 +20,7 @@
 #include "activities/RenderLock.h"
 #include "activities/home/LibraryTab.h"
 #include "network/WebAssets.h"
+#include "util/ButtonPressQueue.h"
 #include "util/ScreenshotUtil.h"
 #include "util/SerialCommandGrammar.h"
 
@@ -220,6 +221,9 @@ bool idleScreenOnly = false;
 constexpr uint32_t kIdleDefaultTimeoutMs = 10000;
 constexpr uint32_t kIdleMaxTimeoutMs = 600000;
 
+// CMD:BTN:<name>:<ms>'s presses, held down through HalGPIO::holdSyntheticButtons() and stepped by service().
+ButtonPressQueue heldPresses;
+
 // The last command meant to change the screen, which CMD:IDLE waits to see through (IdleGate).
 // Input: a press or touch, handed over once HalGPIO has delivered it and the classifier is done
 // with it. Screen: an ACT, handed over once the activity on top has changed.
@@ -236,7 +240,7 @@ void noteEffect(const Effect kind) {
 bool effectHandled() {
   switch (effect) {
     case Effect::Input:
-      return !gpio.injectedInputPending() && !globalButtonEvents().isMidGesture();
+      return heldPresses.idle() && !gpio.injectedInputPending() && !globalButtonEvents().isMidGesture();
     case Effect::Screen:
       return activityManager.activityChangeCount() != effectActivityBase;
   }
@@ -255,7 +259,8 @@ void cmdButton(const std::string_view arg) {
   using SerialCommandGrammar::PressKind;
   std::string_view name;
   PressKind kind = PressKind::Short;
-  if (!SerialCommandGrammar::parseButtonArg(arg, name, kind)) {
+  int holdMs = 0;
+  if (!SerialCommandGrammar::parseButtonArg(arg, name, kind, holdMs, ButtonPressQueue::MAX_HOLD_MS)) {
     reply("BTN_ERROR:bad press ", arg);
     return;
   }
@@ -272,6 +277,13 @@ void cmdButton(const std::string_view arg) {
   };
   for (const NamedButton& button : kButtons) {
     if (name != button.name) continue;
+#if SERIAL_TEST_API
+    // A held press plays out over its hold; a tap now would reach the screen before it ends.
+    if (kind != PressKind::Hold && !heldPresses.idle()) {
+      reply("BTN_ERROR:busy");
+      return;
+    }
+#endif
     switch (kind) {
       case PressKind::Short:
         gpio.injectPress(button.index);
@@ -303,6 +315,22 @@ void cmdButton(const std::string_view arg) {
         return;
 #endif
       }
+      case PressKind::Hold:
+#if SERIAL_TEST_API
+        // Releasing nothing tells whether this board lets the hook in.
+        if (heldPresses.idle() && !gpio.holdSyntheticButtons(0)) {
+          reply("BTN_ERROR:not supported on this board");
+          return;
+        }
+        if (!heldPresses.push(button.index, static_cast<uint16_t>(holdMs))) {
+          reply("BTN_ERROR:busy");
+          return;
+        }
+        break;
+#else
+        reply("BTN_ERROR:bad press ", arg);
+        return;
+#endif
     }
     noteEffect(Effect::Input);
     reply("BTN_OK");
@@ -561,6 +589,10 @@ void cmdState(std::string_view /*arg*/) {
   }
   // The TrueType family behind the UI faces (CjkUiFonts::setReaderFont), when one is.
   if (CjkUiFonts::hasReaderFont()) appendField(state, "ui_font", sdFontSystem.loadedFamily().c_str());
+  // Held presses the input layer never took in (ButtonPressQueue): only when there were any.
+  if (heldPresses.droppedPresses() != 0) {
+    appendField(state, "btn_dropped", static_cast<long>(heldPresses.droppedPresses()));
+  }
   appendField(state, "heap", static_cast<long>(ESP.getFreeHeap()));
   appendField(state, "maxblock",
               static_cast<long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
@@ -833,7 +865,9 @@ void cmdTouch(const std::string_view arg) {
   // BTN's suffix grammar, with the point where the button's name goes.
   std::string_view point;
   SerialCommandGrammar::PressKind kind = SerialCommandGrammar::PressKind::Short;
-  if (!SerialCommandGrammar::parseButtonArg(arg, point, kind) || kind == SerialCommandGrammar::PressKind::Double) {
+  int holdMs = 0;
+  if (!SerialCommandGrammar::parseButtonArg(arg, point, kind, holdMs, ButtonPressQueue::MAX_HOLD_MS) ||
+      (kind != SerialCommandGrammar::PressKind::Short && kind != SerialCommandGrammar::PressKind::Long)) {
     reply("TOUCH_ERROR:not on screen ", arg);
     return;
   }
@@ -2060,6 +2094,16 @@ void serviceEvents() {
   }
 }
 
+// Plays CMD:BTN:<name>:<ms>'s presses, against the buttons this pass's input snapshot shows down.
+void serviceHeldPresses() {
+  if (heldPresses.idle()) return;  // its last step released everything
+  uint8_t committed = 0;
+  for (uint8_t i = 0; i <= HalGPIO::BTN_POWER; ++i) {
+    if (gpio.isPressed(i)) committed |= static_cast<uint8_t>(1u << i);
+  }
+  gpio.holdSyntheticButtons(heldPresses.step(millis(), committed));
+}
+
 void serviceIdle() {
   // Nothing to follow most of the time: then the device is not sampled at all, which keeps the
   // reader's lock attempt in hasPendingBackgroundWork() off the ordinary loop pass.
@@ -2133,6 +2177,7 @@ void sendScreenshot(const uint8_t* frame, const uint32_t size, const int width, 
 void begin(GfxRenderer& renderer) { testRenderer = &renderer; }
 
 void service() {
+  serviceHeldPresses();
   serviceEvents();
   serviceIdle();
 }
