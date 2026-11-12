@@ -8093,6 +8093,13 @@ void EpubReaderActivity::openReaderBars() {
 
 void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
   using MenuAction = EpubReaderMenuActivity::MenuAction;
+  {
+    // Over a chapter still being built, the build's pass draws its page once, and its popup once: both again now, or
+    // the bars stayed on the panel until the build was done.
+    RenderLock lock(*this);
+    buildDisplayedPage_ = -1;
+    buildingPopupShown_ = false;
+  }
   const auto* bars = std::get_if<ReaderBarsResult>(&result.data);
   if (bars && bars->starToggled) onReaderMenuConfirm(MenuAction::STAR_PAGE);
   // The Layout tab's values before anything else: the book may be laid out again with them, or opened again.
