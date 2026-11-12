@@ -37,7 +37,9 @@ Every line the device prints goes to --log with a timestamp. Needs pyserial, and
 The port is opened with the default DTR/RTS lines, which does not reset an ESP32-C3 (unlike
 tools/serial_transfer.py, which deasserts them), and closed with RTS dropped before DTR, which does
 not either (a plain close on Windows does). The device re-enumerates its USB port across a
-reboot or a sleep; the reader reopens it and carries on.
+reboot or a sleep; the reader reopens it and carries on. A command (or a piece of a put:, or a get:'s
+acknowledgement) whose write fails that way is not sent again, since the device may have taken it:
+its step fails with DELIVERY UNCERTAIN, and the next step uses the reopened port.
 """
 import argparse
 import os
@@ -68,6 +70,13 @@ GET_ACK = b"\x06"
 GET_CANCEL = b"\x18"
 GET_PIECE_IDLE = 5
 FAILED = re.compile(r"_ERROR|_TIMEOUT|^CMD_ERROR")
+# Seconds to give a port that went away (a reboot, a sleep) before it is opened again.
+REOPEN_PAUSE = 1.0
+
+
+class DeliveryUncertain(Exception):
+    """A write failed because the port went away. The port is open again, but whether the device took the bytes is
+    unknown, so what was being written is not sent again: a press or a file write must not happen twice."""
 
 
 def native_path(path):
@@ -186,18 +195,30 @@ class Device:
             self.ser.dtr = False
         self.ser.close()
 
+    def _reopen(self):
+        """The port went away (reboot, sleep, re-enumeration): open it again."""
+        try:
+            self.close()
+        except Exception:
+            pass
+        time.sleep(REOPEN_PAUSE)
+        self.ser = self._open()
+
     def _read(self, size):
         try:
             return self.ser.read(size)
         except (serial.SerialException, OSError):
-            # The port went away (reboot, sleep, re-enumeration): reopen and go on.
-            try:
-                self.close()
-            except Exception:
-                pass
-            time.sleep(1)
-            self.ser = self._open()
+            self._reopen()
             return b""
+
+    def _write(self, data, what):
+        """Write `data`. When the port has gone away, reopen it and raise DeliveryUncertain naming `what`: the step
+        fails, and the next one goes to the reopened port."""
+        try:
+            self.ser.write(data)
+        except (serial.SerialException, OSError):
+            self._reopen()
+            raise DeliveryUncertain(what) from None
 
     def _read_some(self):
         """What has arrived, or the next byte within the port's timeout. A read of a fixed size waits out the whole
@@ -248,10 +269,12 @@ class Device:
 
     def drain(self):
         """Log and drop the lines already received, so a late reply to an earlier command (one that
-        timed out here) cannot pass for the reply to the next. A partial line is kept."""
+        timed out here) cannot pass for the reply to the next. A partial line is kept. A port that went
+        away since the last step is opened again here, so the next command goes to the live one."""
         try:
             waiting = self.ser.in_waiting
         except (serial.SerialException, OSError):
+            self._reopen()
             waiting = 0
         if waiting:
             self.buf += self._read(waiting)
@@ -262,7 +285,7 @@ class Device:
     def send(self, text):
         self.drain()
         self.note(f">>> CMD:{text}")
-        self.ser.write(("CMD:" + text + "\n").encode())
+        self._write(("CMD:" + text + "\n").encode(), f"CMD:{text}")
 
     def command(self, text, timeout=20, until=None, lines=None):
         """Send a command; return its reply line (the terminator of a several-line reply), or None. With `until`,
@@ -347,7 +370,7 @@ class Device:
         sent = 0
         while sent < len(data):
             piece = data[sent:sent + chunk]
-            self.ser.write(piece)
+            self._write(piece, f"FS:PUT:{remote}, the piece at byte {sent}")
             sent += len(piece)
             ack = self.reply(15)
             if ack != f"FS_PUT_ACK:{sent}":
@@ -393,7 +416,8 @@ class Device:
             if len(got) < want:
                 return self._abandon_get(f"short piece at byte {len(data) - len(got)}: {len(got)} of {want} bytes "
                                          f"({len(data)} of {size} received)", got)
-            self.ser.write(GET_ACK)  # the device sends the next piece only now
+            # The device sends the next piece only now.
+            self._write(GET_ACK, f"FS:GET:{remote}, the acknowledgement of byte {len(data)}")
             if self.read_pause and len(data) >= next_pause:
                 time.sleep(self.read_pause)  # a slow host, for testing: the next piece waits in the host's buffer
                 next_pause += 1 << 20
@@ -417,7 +441,7 @@ class Device:
             told = piece[at:].split(b"\n", 1)[0].decode("utf-8", errors="replace").rstrip("\r")
             self.note(told)
             return f"{reason}; the device said {told}"
-        self.ser.write(GET_CANCEL)
+        self._write(GET_CANCEL, "the FS:GET cancel")
         answer = self.reply(GET_PIECE_IDLE)
         return f"{reason}; cancelled ({answer or 'no answer'})"
 
@@ -487,78 +511,12 @@ def run(device, steps, rotate, keep_going=False):
     state = {}
     all_ok = True
     for step in steps:
-        kind, _, rest = step.partition(":")
-        ok = True
-        if kind == "cmd":
-            until = next((end for start, end in MULTI_LINE.items() if rest.startswith(start)), None)
-            timeout = idle_timeout(rest[5:]) if rest.startswith("IDLE") else 20
-            lines = []
-            reply = device.command(rest, timeout=timeout, until=until, lines=lines)
-            for line in lines:
-                print(line)
-            print(reply if reply else f"NO REPLY to {rest}")
-            ok = bool(reply) and not FAILED.search(reply)
-        elif kind == "state":
-            reply = device.command("STATE")
-            print(reply if reply else "NO REPLY to STATE")
-            ok = bool(reply) and reply.startswith("STATE:")
-            if ok:
-                state = split_fields(reply[len("STATE:"):])
-        elif kind == "check":
-            key, _, pattern = rest.partition("=")
-            value = state.get(key)
-            ok = value is not None and re.fullmatch(pattern, value) is not None
-            print(f"check {key}={value!r} ~ /{pattern}/: {'ok' if ok else 'FAILED'}")
-        elif kind == "idle":
-            reply = device.command("IDLE" + (":" + rest if rest else ""), timeout=idle_timeout(rest))
-            print(reply if reply else "NO REPLY to IDLE")
-            ok = bool(reply) and reply.startswith("IDLE:")
-        elif kind == "shot":
-            path = native_path(rest)
-            error = device.screenshot(path, rotate)
-            print(f"screenshot -> {path}" if error is None else f"SCREENSHOT FAILED: {error}")
-            ok = error is None
-        elif kind == "select":
-            pattern, _, most = rest.partition(":")
-            presses = int(most) if most.isdigit() else 40
-            ok = False
-            for press in range(presses + 1):
-                reply = device.command("STATE")
-                fields = split_fields(reply[len("STATE:"):]) if reply and reply.startswith("STATE:") else {}
-                if re.fullmatch(pattern, fields.get("label", "")):
-                    state = fields
-                    ok = True
-                    print(f"selected {fields.get('label')!r} after {press} presses")
-                    break
-                if press == presses:
-                    break
-                # One press at a time: presses sent back to back reach the list faster than it redraws, and it
-                # moves further than asked.
-                device.command("BTN:DOWN")
-                device.command("IDLE:5000", timeout=idle_timeout("5000"))
-            if not ok:
-                print(f"NOT SELECTED: {pattern} (last label {fields.get('label')!r})")
-        elif kind in ("page", "put", "get", "hash", "mkdir", "mv"):
-            error = file_step(device, kind, rest)
-            if error:
-                print(f"{kind.upper()} FAILED: {error}")
-            ok = error is None
-        elif kind == "wait":
-            end = time.time() + float(rest)
-            while device.read_line(end) is not None:
-                pass
-        elif kind == "expect":
-            pattern, _, seconds = rest.rpartition(":")
-            end = time.time() + float(seconds)
-            found = None
-            while (line := device.read_line(end)) is not None:
-                if re.search(pattern, line):
-                    found = line
-                    break
-            print(f"matched: {found}" if found else f"NOT SEEN: {pattern}")
-            ok = found is not None
-        else:
-            print(f"unknown step {step!r}")
+        try:
+            ok, state = run_step(device, step, rotate, state)
+        except DeliveryUncertain as error:
+            # Not sent again: the device may have taken it before the port went away, and a press or a file write
+            # must not happen twice.
+            print(f"DELIVERY UNCERTAIN: {error} (port reopened, not resent)")
             ok = False
         if not ok:
             print(f"step failed: {step}")
@@ -566,6 +524,84 @@ def run(device, steps, rotate, keep_going=False):
             if not keep_going:
                 return False
     return all_ok
+
+
+def run_step(device, step, rotate, state):
+    """One step. Returns whether it passed, and the STATE fields `check:` reads from then on."""
+    kind, _, rest = step.partition(":")
+    ok = True
+    if kind == "cmd":
+        until = next((end for start, end in MULTI_LINE.items() if rest.startswith(start)), None)
+        timeout = idle_timeout(rest[5:]) if rest.startswith("IDLE") else 20
+        lines = []
+        reply = device.command(rest, timeout=timeout, until=until, lines=lines)
+        for line in lines:
+            print(line)
+        print(reply if reply else f"NO REPLY to {rest}")
+        ok = bool(reply) and not FAILED.search(reply)
+    elif kind == "state":
+        reply = device.command("STATE")
+        print(reply if reply else "NO REPLY to STATE")
+        ok = bool(reply) and reply.startswith("STATE:")
+        if ok:
+            state = split_fields(reply[len("STATE:"):])
+    elif kind == "check":
+        key, _, pattern = rest.partition("=")
+        value = state.get(key)
+        ok = value is not None and re.fullmatch(pattern, value) is not None
+        print(f"check {key}={value!r} ~ /{pattern}/: {'ok' if ok else 'FAILED'}")
+    elif kind == "idle":
+        reply = device.command("IDLE" + (":" + rest if rest else ""), timeout=idle_timeout(rest))
+        print(reply if reply else "NO REPLY to IDLE")
+        ok = bool(reply) and reply.startswith("IDLE:")
+    elif kind == "shot":
+        path = native_path(rest)
+        error = device.screenshot(path, rotate)
+        print(f"screenshot -> {path}" if error is None else f"SCREENSHOT FAILED: {error}")
+        ok = error is None
+    elif kind == "select":
+        pattern, _, most = rest.partition(":")
+        presses = int(most) if most.isdigit() else 40
+        ok = False
+        for press in range(presses + 1):
+            reply = device.command("STATE")
+            fields = split_fields(reply[len("STATE:"):]) if reply and reply.startswith("STATE:") else {}
+            if re.fullmatch(pattern, fields.get("label", "")):
+                state = fields
+                ok = True
+                print(f"selected {fields.get('label')!r} after {press} presses")
+                break
+            if press == presses:
+                break
+            # One press at a time: presses sent back to back reach the list faster than it redraws, and it
+            # moves further than asked.
+            device.command("BTN:DOWN")
+            device.command("IDLE:5000", timeout=idle_timeout("5000"))
+        if not ok:
+            print(f"NOT SELECTED: {pattern} (last label {fields.get('label')!r})")
+    elif kind in ("page", "put", "get", "hash", "mkdir", "mv"):
+        error = file_step(device, kind, rest)
+        if error:
+            print(f"{kind.upper()} FAILED: {error}")
+        ok = error is None
+    elif kind == "wait":
+        end = time.time() + float(rest)
+        while device.read_line(end) is not None:
+            pass
+    elif kind == "expect":
+        pattern, _, seconds = rest.rpartition(":")
+        end = time.time() + float(seconds)
+        found = None
+        while (line := device.read_line(end)) is not None:
+            if re.search(pattern, line):
+                found = line
+                break
+        print(f"matched: {found}" if found else f"NOT SEEN: {pattern}")
+        ok = found is not None
+    else:
+        print(f"unknown step {step!r}")
+        ok = False
+    return ok, state
 
 
 def main():

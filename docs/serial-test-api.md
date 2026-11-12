@@ -100,7 +100,10 @@ Things to know about the port:
   with DTR low as a reset request: it restarts to Home (`resetReason=11` in the boot log). Set RTS
   low, then DTR low, then close, as `tools/devctl.py` does.
 - **The port goes away on a reboot or sleep.** The USB device re-enumerates. A long-running host
-  has to close and reopen the port; `tools/devctl.py` does this by itself.
+  has to close and reopen the port; `tools/devctl.py` does this by itself. A command whose write
+  fails that way may or may not have reached the device, so do not send it again blindly:
+  `devctl.py` fails that step with `DELIVERY UNCERTAIN: CMD:<text> (port reopened, not resent)`
+  and goes on with the next one on the reopened port.
 - **One program at a time.** Close your monitor before running a script, and never hold the port
   while flashing.
 - **Log lines share the wire.** The device keeps printing its log (`[1234] [INF] [ERS] ...`) between
