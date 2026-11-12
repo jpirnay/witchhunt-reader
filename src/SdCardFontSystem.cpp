@@ -137,17 +137,46 @@ int resolveSdCardFontId(const char* familyName, uint8_t pointSize) {
 // consult sdFontSystem at every call. enumLabels is enriched lazily by the
 // consumers (SettingsActivity, CrossPointWebServer) before each iteration.
 
-uint8_t fontFamilyDynamicGetter(const void* /*ctx*/) {
-  if (SETTINGS.sdFontFamilyName[0] != '\0') {
-    const auto& families = sdFontSystem.registry().getFamilies();
-    for (size_t i = 0; i < families.size(); i++) {
-      if (families[i].name == SETTINGS.sdFontFamilyName) {
-        return static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i);
-      }
-    }
-    // SD family no longer present (card removed?); fall through to built-in.
+namespace {
+// The option of the SD family called `name`, or -1 when there is none of that name on the card (removed?).
+int sdFamilyOption(const char* name) {
+  if (!name || name[0] == '\0') return -1;
+  const auto& families = sdFontSystem.registry().getFamilies();
+  for (size_t i = 0; i < families.size(); i++) {
+    if (families[i].name == name) return static_cast<int>(CrossPointSettings::BUILTIN_FONT_COUNT + i);
   }
+  return -1;
+}
+}  // namespace
+
+uint8_t fontFamilyDynamicGetter(const void* /*ctx*/) {
+  const int sd = sdFamilyOption(SETTINGS.sdFontFamilyName);
+  if (sd >= 0) return static_cast<uint8_t>(sd);
   return SETTINGS.fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? SETTINGS.fontFamily : CrossPointSettings::SERIF;
+}
+
+int fontFamilyOptionForOverrides(const int8_t builtinOverride, const std::string& sdOverride) {
+  if (!sdOverride.empty()) return sdFamilyOption(sdOverride.c_str());
+  return builtinOverride >= 0 && builtinOverride < CrossPointSettings::BUILTIN_FONT_COUNT ? builtinOverride : -1;
+}
+
+void fontFamilyOverridesForOption(const uint8_t value, int8_t& builtinOverride, std::string& sdOverride) {
+  builtinOverride = -1;
+  sdOverride.clear();
+  if (value < CrossPointSettings::BUILTIN_FONT_COUNT) {
+    builtinOverride = static_cast<int8_t>(value);
+    return;
+  }
+  const auto& families = sdFontSystem.registry().getFamilies();
+  const size_t sdIdx = value - CrossPointSettings::BUILTIN_FONT_COUNT;
+  if (sdIdx < families.size()) sdOverride = families[sdIdx].name;
+}
+
+const char* fontFamilyOptionSdName(const uint8_t value) {
+  const auto& families = sdFontSystem.registry().getFamilies();
+  const size_t sdIdx =
+      value < CrossPointSettings::BUILTIN_FONT_COUNT ? families.size() : value - CrossPointSettings::BUILTIN_FONT_COUNT;
+  return sdIdx < families.size() ? families[sdIdx].name.c_str() : "";
 }
 
 void fontFamilyDynamicSetter(void* /*ctx*/, uint8_t value) {
@@ -165,14 +194,8 @@ void fontFamilyDynamicSetter(void* /*ctx*/, uint8_t value) {
 }
 
 uint8_t txtFontFamilyDynamicGetter(const void* /*ctx*/) {
-  if (SETTINGS.txtSdFontFamilyName[0] != '\0') {
-    const auto& families = sdFontSystem.registry().getFamilies();
-    for (size_t i = 0; i < families.size(); i++) {
-      if (families[i].name == SETTINGS.txtSdFontFamilyName) {
-        return static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i);
-      }
-    }
-  }
+  const int sd = sdFamilyOption(SETTINGS.txtSdFontFamilyName);
+  if (sd >= 0) return static_cast<uint8_t>(sd);
   return SETTINGS.txtFontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? SETTINGS.txtFontFamily
                                                                          : CrossPointSettings::NOTOSANS;
 }

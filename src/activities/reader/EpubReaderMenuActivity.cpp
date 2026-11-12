@@ -201,28 +201,17 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
         s->pendingImageRenderingOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
       }));
 
-  // Reader font family: default + built-ins + discovered SD families.
+  // Reader font family: default, then the built-in and the card's families as the settings list them
+  // (fontFamilyOptionCount), mapped to the book's overrides by the helpers the reader bars' Layout tab shares.
   {
-    std::vector<StrId> values = {StrId::STR_DEFAULT_VALUE, StrId::STR_SERIF, StrId::STR_NOTO_SANS};
-    const auto& families = sdFontSystem.registry().getFamilies();
-    values.insert(values.end(), families.size(), StrId::STR_NONE_OPT);
-
+    std::vector<StrId> values(1 + fontFamilyOptionCount(), StrId::STR_NONE_OPT);
     auto familySetting = SettingInfo::DynamicEnumCtx(
-                             StrId::STR_FONT_FAMILY, values, self,
+                             StrId::STR_FONT_FAMILY, std::move(values), self,
                              [](const void* ctx) -> uint8_t {
                                const auto* s = static_cast<const EpubReaderMenuActivity*>(ctx);
-                               if (s->pendingFontFamilyOverride >= 0) {
-                                 return static_cast<uint8_t>(s->pendingFontFamilyOverride + 1);
-                               }
-                               if (!s->pendingSdFontFamilyOverride.empty()) {
-                                 const auto& fs = sdFontSystem.registry().getFamilies();
-                                 for (size_t i = 0; i < fs.size(); i++) {
-                                   if (fs[i].name == s->pendingSdFontFamilyOverride) {
-                                     return static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + 1 + i);
-                                   }
-                                 }
-                               }
-                               return 0;
+                               const int option = fontFamilyOptionForOverrides(s->pendingFontFamilyOverride,
+                                                                               s->pendingSdFontFamilyOverride);
+                               return static_cast<uint8_t>(option + 1);
                              },
                              [](void* ctx, uint8_t v) {
                                auto* s = static_cast<EpubReaderMenuActivity*>(ctx);
@@ -231,29 +220,12 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
                                  s->pendingSdFontFamilyOverride.clear();
                                  return;
                                }
-
-                               const uint8_t builtinCount = CrossPointSettings::BUILTIN_FONT_COUNT;
-                               if (v <= builtinCount) {
-                                 s->pendingFontFamilyOverride = static_cast<int8_t>(v - 1);
-                                 s->pendingSdFontFamilyOverride.clear();
-                                 return;
-                               }
-
-                               const size_t sdIdx = static_cast<size_t>(v - (builtinCount + 1));
-                               const auto& fs = sdFontSystem.registry().getFamilies();
-                               s->pendingFontFamilyOverride = -1;
-                               if (sdIdx < fs.size()) {
-                                 s->pendingSdFontFamilyOverride = fs[sdIdx].name;
-                               } else {
-                                 s->pendingSdFontFamilyOverride.clear();
-                               }
+                               fontFamilyOverridesForOption(static_cast<uint8_t>(v - 1), s->pendingFontFamilyOverride,
+                                                            s->pendingSdFontFamilyOverride);
                              })
                              .withSelectorActivity();
-
-    familySetting.enumLabels = {tr(STR_DEFAULT_VALUE), tr(STR_SERIF), tr(STR_NOTO_SANS)};
-    for (const auto& fam : families) {
-      familySetting.enumLabels.push_back(fam.name);
-    }
+    familySetting.enumLabels.push_back(tr(STR_DEFAULT_VALUE));
+    for (uint8_t i = 0; i < fontFamilyOptionCount(); ++i) familySetting.enumLabels.push_back(fontFamilyOptionLabel(i));
     settingsItems.push_back(std::move(familySetting));
   }
 

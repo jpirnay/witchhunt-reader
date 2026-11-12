@@ -861,8 +861,8 @@ constexpr OverrideKey kRecentBookOverrideKeys[] = {
     {Field::VerticalText, "verticalTextOverride"},
     {Field::PublisherFonts, "publisherFontsOverride"},
 };
-static_assert(std::size(kRecentBookOverrideKeys) == BookReaderOverrides::kFieldCount,
-              "every book override has a key in recent.json");
+static_assert(std::size(kRecentBookOverrideKeys) == BookReaderOverrides::kLegacyFieldCount,
+              "every override recent.json carried has its key; later ones live only in overrides.bin");
 }  // namespace
 
 bool JsonSettingsIO::saveRecentBooks(const RecentBooksStore& store, const char* path) {

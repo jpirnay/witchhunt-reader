@@ -1,18 +1,44 @@
 #include "ReaderBarsActivity.h"
 
+#include <Epub/LineSpacing.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
 
+#include <cstdio>
 #include <utility>
 
 #include "MappedInputManager.h"
+#include "ReaderLayoutControls.h"
+#include "SdCardFontGlobals.h"
+#include "SerialTestApi.h"
 #include "activities/ListTabBar.h"
 #include "components/UIThemeTokens.h"
 #include "util/SerialCommandGrammar.h"
 
 namespace fui = freeink::ui;
 using namespace ReaderBarsLayout;
+using ReaderLayout::Control;
+
+namespace {
+
+// The labels as the settings store the values: TEXT_DARKNESS and PARAGRAPH_ALIGNMENT, in their stored order.
+constexpr StrId kDarknessLabels[] = {StrId::STR_NORMAL, StrId::STR_DARK, StrId::STR_EXTRA_DARK, StrId::STR_MAX_DARK,
+                                     StrId::STR_LIGHT};
+static_assert(sizeof(kDarknessLabels) / sizeof(kDarknessLabels[0]) == CrossPointSettings::TEXT_DARKNESS_COUNT);
+constexpr StrId kAlignmentLabels[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER,
+                                      StrId::STR_ALIGN_RIGHT, StrId::STR_BOOK_S_STYLE};
+static_assert(sizeof(kAlignmentLabels) / sizeof(kAlignmentLabels[0]) == CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT);
+// The controls' labels, in ReaderLayout::Control order.
+constexpr StrId kControlLabels[] = {
+    StrId::STR_LAYOUT_SIZE,          StrId::STR_LAYOUT_LINES, StrId::STR_LAYOUT_MARGIN,  StrId::STR_LAYOUT_DARKNESS,
+    StrId::STR_LAYOUT_PARAGRAPH_GAP, StrId::STR_LAYOUT_ALIGN, StrId::STR_LAYOUT_HYPHENS, StrId::STR_LAYOUT_BOOK_STYLE};
+static_assert(sizeof(kControlLabels) / sizeof(kControlLabels[0]) == ReaderLayout::kControlCount);
+
+const char* text(const StrId id) { return I18n::getInstance().get(id); }
+const char* onOff(const bool on) { return text(on ? StrId::STR_ON : StrId::STR_OFF); }
+
+}  // namespace
 
 ReaderBarsActivity::ReaderBarsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, Info info)
     : Activity("ReaderBars", renderer, mappedInput), UiAppHost(renderer), info(std::move(info)) {}
@@ -20,30 +46,47 @@ ReaderBarsActivity::ReaderBarsActivity(GfxRenderer& renderer, MappedInputManager
 void ReaderBarsActivity::onEnter() {
   Activity::onEnter();
   starred = info.starred;
+  thisBookOnly = info.thisBookOnly;
+  layout = thisBookOnly ? info.bookValues : info.globalValues;
   // Keys show their cursor from the start where they are the only way in; a touch board waits for a key.
   focus = mappedInput.hasTouch() ? Focus::None : Focus::Tabs;
 
   resetUi();
-  metrics = ReaderBarsLayout::metricsFor(uiTarget, uiThemeTokens(uiTarget), ListTabBar::HEIGHT, mappedInput.hasTouch());
   area = fui::Rect{0, 0, static_cast<int16_t>(renderer.getScreenWidth()),
                    static_cast<int16_t>(renderer.getScreenHeight())};
-  app.on(ACTION_EXIT, &ReaderBarsActivity::onExitEvent, this);
-  app.on(ACTION_STAR, &ReaderBarsActivity::onStarEvent, this);
-  app.on(ACTION_TAB, &ReaderBarsActivity::onTabEvent, this);
-  app.on(ACTION_PREV_CHAPTER, &ReaderBarsActivity::onPrevChapterEvent, this);
-  app.on(ACTION_GO_TO, &ReaderBarsActivity::onGoToEvent, this);
-  app.on(ACTION_NEXT_CHAPTER, &ReaderBarsActivity::onNextChapterEvent, this);
+  metrics = ReaderBarsLayout::metricsFor(uiTarget, uiThemeTokens(uiTarget), ListTabBar::HEIGHT, mappedInput.hasTouch(),
+                                         area.width, area.height);
+  fontLabel = fontOptionLabel(layout.font);
+  // Three actions, one handler: FreeInkApp keeps 8 a screen and drops any past that without a sign.
+  app.on(ACTION_BAR, &ReaderBarsActivity::onAction, this);
+  app.on(ACTION_TAB, &ReaderBarsActivity::onAction, this);
+  app.on(ReaderLayoutSheet::ACTION_SHEET, &ReaderBarsActivity::onAction, this);
   app.setScreen(&ReaderBarsActivity::barsScreen, this);
   requestUpdate();
 }
 
 void ReaderBarsActivity::appendDebugState(std::string& out) const {
-  static constexpr const char* kFocus[] = {"none", "exit", "star", "tabs", "prev", "goto", "next"};
-  static constexpr const char* kTab[] = {"contents", "progress", "more"};
+  static constexpr const char* kFocus[] = {"none", "exit", "star", "tabs", "prev", "goto", "next", "layout"};
+  static constexpr const char* kTab[] = {"contents", "progress", "layout", "more"};
+  static constexpr const char* kPanel[] = {"none", "progress", "layout"};
   SerialCommandGrammar::appendField(out, "focus", kFocus[static_cast<uint8_t>(focus)]);
   SerialCommandGrammar::appendField(out, "tab", kTab[static_cast<uint8_t>(focusedTab)]);
-  SerialCommandGrammar::appendField(out, "progress", progressOpen ? 1L : 0L);
+  SerialCommandGrammar::appendField(out, "panel", kPanel[static_cast<uint8_t>(panel)]);
   SerialCommandGrammar::appendField(out, "starred", starred ? 1L : 0L);
+#if SERIAL_TEST_API
+  // The Layout tab's values: what a device test checks a press against. Release builds keep the short reply.
+  if (panel != Panel::Layout) return;
+  SerialCommandGrammar::appendField(out, "target", static_cast<long>(layoutFocus));
+  SerialCommandGrammar::appendField(out, "own", thisBookOnly ? 1L : 0L);
+  SerialCommandGrammar::appendField(out, "size", static_cast<long>(layout.fontSize));
+  SerialCommandGrammar::appendField(out, "lines", static_cast<long>(layout.lineSpacing));
+  SerialCommandGrammar::appendField(out, "margin", static_cast<long>(layout.marginHorizontal));
+  SerialCommandGrammar::appendField(out, "darkness", static_cast<long>(layout.textDarkness));
+  SerialCommandGrammar::appendField(out, "paragraphs", layout.extraParagraphSpacing ? 1L : 0L);
+  SerialCommandGrammar::appendField(out, "align", static_cast<long>(layout.paragraphAlignment));
+  SerialCommandGrammar::appendField(out, "hyphens", layout.hyphenation ? 1L : 0L);
+  SerialCommandGrammar::appendField(out, "bookstyle", layout.embeddedStyle ? 1L : 0L);
+#endif
 }
 
 void ReaderBarsActivity::onExit() {
@@ -55,7 +98,7 @@ ReaderBarsLayout::Model ReaderBarsActivity::model() const {
   ReaderBarsLayout::Model model;
   model.title = info.title.c_str();
   model.starred = starred;
-  model.progressOpen = progressOpen;
+  model.panel = panel;
   model.focus = focus;
   model.focusedTab = focusedTab;
   model.bookLabel = tr(STR_BOOK);
@@ -68,21 +111,70 @@ ReaderBarsLayout::Model ReaderBarsActivity::model() const {
   return model;
 }
 
+ReaderLayoutSheet::Model ReaderBarsActivity::sheetModel() {
+  ReaderLayoutSheet::Model sheet;
+  sheet.font = {text(StrId::STR_LAYOUT_FONT), fontLabel.c_str()};
+  sheet.thisBook = {text(StrId::STR_THIS_BOOK_ONLY), onOff(thisBookOnly)};
+  sheet.focus = focus == Focus::Layout ? layoutFocus : int16_t{-1};
+  for (uint8_t c = 0; c < ReaderLayout::kControlCount; ++c) {
+    sheet.controls[c] = {text(kControlLabels[c]), cellValue(static_cast<Control>(c))};
+  }
+  return sheet;
+}
+
+// A control's value as its cell shows it. Numbers go into cellValues, kept for the pass that draws them.
+const char* ReaderBarsActivity::cellValue(const Control control) {
+  char* number = cellValues[static_cast<uint8_t>(control)];
+  switch (control) {
+    case Control::Size:
+      snprintf(number, sizeof(cellValues[0]), "%u", static_cast<unsigned>(info.sizes.snap(layout.fontSize)));
+      return number;
+    case Control::Line: {
+      const char* percent = lineSpacingStepLabel(layout.lineSpacing);
+      return percent ? percent : text(StrId::STR_BOOK_S_STYLE);
+    }
+    case Control::Margin:
+      snprintf(number, sizeof(cellValues[0]), "%u", static_cast<unsigned>(layout.marginHorizontal));
+      return number;
+    case Control::Darkness:
+      return text(
+          kDarknessLabels[layout.textDarkness < CrossPointSettings::TEXT_DARKNESS_COUNT ? layout.textDarkness : 0]);
+    case Control::Paragraph:
+      return onOff(layout.extraParagraphSpacing);
+    case Control::Align:
+      return text(kAlignmentLabels[layout.paragraphAlignment < CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT
+                                       ? layout.paragraphAlignment
+                                       : 0]);
+    case Control::Hyphenation:
+      return onOff(layout.hyphenation);
+    case Control::BookStyle:
+      return onOff(layout.embeddedStyle);
+    case Control::Count:
+      break;
+  }
+  return "";
+}
+
 void ReaderBarsActivity::barsScreen(UiScreen& screen, void* user) {
   static_cast<ReaderBarsActivity*>(user)->buildBars(screen);
 }
 
 void ReaderBarsActivity::buildBars(UiScreen& screen) {
-  const char* labels[kTabCount] = {tr(STR_CONTENTS), tr(STR_READING_STATS_PROGRESS), tr(STR_MORE)};
+  const char* labels[kTabCount] = {text(StrId::STR_CONTENTS), text(StrId::STR_READING_STATS_PROGRESS),
+                                   text(StrId::STR_LAYOUT), text(StrId::STR_MORE)};
   for (uint8_t i = 0; i < kTabCount; ++i) {
     tabs[i].label = labels[i];
     tabs[i].value = static_cast<int16_t>(i);
     // The open panel's tab, or the one under the keys' cursor.
-    tabs[i].selected = (progressOpen && static_cast<Tab>(i) == Tab::Progress) ||
-                       (focus == Focus::Tabs && static_cast<Tab>(i) == focusedTab);
+    const auto tab = static_cast<Tab>(i);
+    tabs[i].selected = (panel == Panel::Progress && tab == Tab::Progress) ||
+                       (panel == Panel::Layout && tab == Tab::Layout) || (focus == Focus::Tabs && tab == focusedTab);
   }
   const fui::TabBarProps props = ListTabBar::props(screen, tabs, kTabCount, ACTION_TAB, focus == Focus::Tabs);
-  ReaderBarsLayout::build(screen, model(), metrics, props);
+  const ReaderLayoutSheet::Model sheet = sheetModel();
+  ReaderBarsLayout::Model bars = model();
+  bars.layout = &sheet;
+  ReaderBarsLayout::build(screen, bars, metrics, props);
 }
 
 void ReaderBarsActivity::render(RenderLock&&) {
@@ -100,6 +192,10 @@ void ReaderBarsActivity::close(const ReaderBarsResult::Action action) {
   ReaderBarsResult result;
   result.action = action;
   result.starToggled = starToggled;
+  const ReaderLayoutValues& opened = info.thisBookOnly ? info.bookValues : info.globalValues;
+  result.layoutChanged = thisBookOnly != info.thisBookOnly || !(layout == opened);
+  result.thisBookOnly = thisBookOnly;
+  result.layout = layout;
   setResult(ActivityResult(result));
   finish();
 }
@@ -122,46 +218,126 @@ void ReaderBarsActivity::openTab(const Tab tab) {
       close(ReaderBarsResult::Action::More);
       return;
     case Tab::Progress:
-      // Progress closing would have to bring back the page it covered: the reader draws it instead.
-      if (progressOpen) {
+    case Tab::Layout: {
+      const Panel wanted = tab == Tab::Progress ? Panel::Progress : Panel::Layout;
+      // A screen too short for the Layout sheet (the Murphy held sideways) has the settings in the reader menu.
+      if (wanted == Panel::Layout && !ReaderBarsLayout::layoutFits(metrics, area.height)) {
+        close(ReaderBarsResult::Action::More);
+        return;
+      }
+      // A panel closing, or giving way to the other, would have to bring back the page it covered: the reader draws
+      // it instead. The other panel's tab closes the bars too: the next open shows it.
+      if (panel != Panel::None) {
         close(ReaderBarsResult::Action::None);
         return;
       }
       {
         RenderLock lock;
-        progressOpen = true;
-        if (focus != Focus::None) focus = Focus::GoTo;
+        panel = wanted;
+        layoutFocus = 0;
+        if (focus != Focus::None) focus = wanted == Panel::Progress ? Focus::GoTo : Focus::Layout;
       }
       requestUpdate();
       return;
+    }
     case Tab::Count:
       return;
   }
 }
 
-void ReaderBarsActivity::onExitEvent(const fui::ActionEvent&, void* user) {
-  static_cast<ReaderBarsActivity*>(user)->close(ReaderBarsResult::Action::Exit);
+void ReaderBarsActivity::pressControl(const Control control, const int delta) {
+  {
+    RenderLock lock;
+    ReaderLayout::press(layout, control, delta, info.sizes);
+  }
+  requestUpdate();
 }
 
-void ReaderBarsActivity::onStarEvent(const fui::ActionEvent&, void* user) {
-  static_cast<ReaderBarsActivity*>(user)->toggleStar();
+// Off: the book follows the global settings, which the sheet shows from then on and changes for every book. On: the
+// values on show become the book's own.
+void ReaderBarsActivity::flipThisBookOnly() {
+  {
+    RenderLock lock;
+    thisBookOnly = !thisBookOnly;
+    if (!thisBookOnly) layout = info.globalValues;
+  }
+  requestUpdate();
 }
 
-void ReaderBarsActivity::onTabEvent(const fui::ActionEvent& event, void* user) {
-  if (event.value < 0 || event.value >= kTabCount) return;
-  static_cast<ReaderBarsActivity*>(user)->openTab(static_cast<Tab>(event.value));
+void ReaderBarsActivity::onAction(const fui::ActionEvent& event, void* user) {
+  auto* self = static_cast<ReaderBarsActivity*>(user);
+  switch (event.action) {
+    case ACTION_BAR:
+      self->pressButton(static_cast<Button>(event.value));
+      return;
+    case ACTION_TAB:
+      if (event.value >= 0 && event.value < kTabCount) self->openTab(static_cast<Tab>(event.value));
+      return;
+    case ReaderLayoutSheet::ACTION_SHEET:
+      self->pressSheet(event.value);
+      return;
+    default:
+      return;
+  }
 }
 
-void ReaderBarsActivity::onPrevChapterEvent(const fui::ActionEvent&, void* user) {
-  static_cast<ReaderBarsActivity*>(user)->close(ReaderBarsResult::Action::PrevChapter);
+void ReaderBarsActivity::pressButton(const Button button) {
+  switch (button) {
+    case Button::Exit:
+      close(ReaderBarsResult::Action::Exit);
+      return;
+    case Button::Star:
+      toggleStar();
+      return;
+    case Button::PrevChapter:
+      close(ReaderBarsResult::Action::PrevChapter);
+      return;
+    case Button::GoTo:
+      close(ReaderBarsResult::Action::GoToPercent);
+      return;
+    case Button::NextChapter:
+      close(ReaderBarsResult::Action::NextChapter);
+      return;
+  }
 }
 
-void ReaderBarsActivity::onGoToEvent(const fui::ActionEvent&, void* user) {
-  static_cast<ReaderBarsActivity*>(user)->close(ReaderBarsResult::Action::GoToPercent);
+void ReaderBarsActivity::pressSheet(const int16_t value) {
+  if (value == ReaderLayoutSheet::kFontValue) {
+    nextFont();
+    return;
+  }
+  if (value == ReaderLayoutSheet::kThisBookValue) {
+    flipThisBookOnly();
+    return;
+  }
+  const int16_t control = static_cast<int16_t>(value & ~ReaderLayoutSheet::kUpFlag);
+  if (control < 0 || control >= ReaderLayout::kControlCount) return;
+  pressControl(static_cast<Control>(control), (value & ReaderLayoutSheet::kUpFlag) != 0 ? +1 : -1);
 }
 
-void ReaderBarsActivity::onNextChapterEvent(const fui::ActionEvent&, void* user) {
-  static_cast<ReaderBarsActivity*>(user)->close(ReaderBarsResult::Action::NextChapter);
+std::string ReaderBarsActivity::fontOptionLabel(const uint8_t font) {
+  return font == 0 ? std::string(tr(STR_BOOK_FONTS)) : fontFamilyOptionLabel(static_cast<uint8_t>(font - 1));
+}
+
+// The next font round the list, the book's own first: few enough to go round rather than open a list for. The size
+// steps through what the new family offers.
+void ReaderBarsActivity::nextFont() {
+  const uint8_t options = static_cast<uint8_t>(1 + fontFamilyOptionCount());
+  const uint8_t next = static_cast<uint8_t>((layout.font + 1) % options);
+  const ReaderSizeList sizes = sdFontSystem.sizeListFor(
+      next == 0 ? SETTINGS.sdFontFamilyName : fontFamilyOptionSdName(static_cast<uint8_t>(next - 1)));
+  std::string label = fontOptionLabel(next);
+  {
+    RenderLock lock;
+    layout.font = next;
+    info.sizes = sizes;
+    fontLabel = std::move(label);
+  }
+  requestUpdate();
+}
+
+uint8_t ReaderBarsActivity::layoutTargets(ReaderLayoutSheet::Target (&out)[ReaderLayoutSheet::kMaxTargets]) const {
+  return ReaderLayoutSheet::targets(ReaderBarsLayout::sheetRect(area, model(), metrics), metrics.sheet, out);
 }
 
 void ReaderBarsActivity::activateFocus() {
@@ -169,28 +345,36 @@ void ReaderBarsActivity::activateFocus() {
     case Focus::None:
       return;
     case Focus::Exit:
-      close(ReaderBarsResult::Action::Exit);
+      pressButton(Button::Exit);
       return;
     case Focus::Star:
-      toggleStar();
+      pressButton(Button::Star);
       return;
     case Focus::Tabs:
       openTab(focusedTab);
       return;
     case Focus::PrevChapter:
-      close(ReaderBarsResult::Action::PrevChapter);
+      pressButton(Button::PrevChapter);
       return;
     case Focus::GoTo:
-      close(ReaderBarsResult::Action::GoToPercent);
+      pressButton(Button::GoTo);
       return;
     case Focus::NextChapter:
-      close(ReaderBarsResult::Action::NextChapter);
+      pressButton(Button::NextChapter);
       return;
+    case Focus::Layout: {
+      ReaderLayoutSheet::Target all[ReaderLayoutSheet::kMaxTargets];
+      const uint8_t count = layoutTargets(all);
+      if (layoutFocus >= 0 && layoutFocus < count) pressSheet(all[layoutFocus].value);
+      return;
+    }
   }
 }
 
 // Left/Right: along the row the cursor is on, stopping at its ends.
 void ReaderBarsActivity::moveAlongRow(const int step) {
+  ReaderLayoutSheet::Target all[ReaderLayoutSheet::kMaxTargets];
+  const uint8_t count = focus == Focus::Layout ? layoutTargets(all) : 0;
   RenderLock lock;
   switch (focus) {
     case Focus::None:
@@ -198,7 +382,7 @@ void ReaderBarsActivity::moveAlongRow(const int step) {
       return;
     case Focus::Exit:
     case Focus::Star:
-      focus = step < 0 ? Focus::Exit : Focus::Star;
+      if (step != 0) focus = step < 0 ? Focus::Exit : Focus::Star;
       return;
     case Focus::Tabs: {
       const int next = static_cast<int>(focusedTab) + step;
@@ -206,59 +390,89 @@ void ReaderBarsActivity::moveAlongRow(const int step) {
       return;
     }
     case Focus::PrevChapter:
-      focus = step < 0 ? Focus::PrevChapter : Focus::GoTo;
+      if (step > 0) focus = Focus::GoTo;
       return;
     case Focus::GoTo:
-      focus = step < 0 ? Focus::PrevChapter : Focus::NextChapter;
+      if (step != 0) focus = step < 0 ? Focus::PrevChapter : Focus::NextChapter;
       return;
     case Focus::NextChapter:
-      focus = step < 0 ? Focus::GoTo : Focus::NextChapter;
+      if (step < 0) focus = Focus::GoTo;
+      return;
+    case Focus::Layout:
+      if (step != 0) layoutFocus = ReaderLayoutSheet::targetAlong(all, count, layoutFocus, step);
       return;
   }
 }
 
-// Up/Down: between the rows as they lie on screen, the top bar, the Progress buttons while Progress is open, and the
-// tabs. A row is entered on its middle control: the star, Go to %, the tab the cursor last left.
+// Up/Down: between the rows as they lie on screen, the top bar, the open panel's rows, and the tabs. The Progress
+// buttons are entered on Go to %, the top bar on the star, the Layout sheet on its nearest target.
 void ReaderBarsActivity::moveBetweenRows(const int step) {
+  ReaderLayoutSheet::Target all[ReaderLayoutSheet::kMaxTargets];
+  const uint8_t count = panel == Panel::Layout ? layoutTargets(all) : 0;
+  const bool topBar = ReaderBarsLayout::topRect(area, model(), metrics).height > 0;
   RenderLock lock;
-  enum class Row : uint8_t { Top, Buttons, Tabs };
-  Row row = Row::Tabs;
+  if (focus == Focus::None || step == 0) {
+    if (focus == Focus::None) focus = Focus::Tabs;
+    return;
+  }
+  const auto enterTop = [&] {
+    if (topBar) focus = Focus::Star;
+  };
+  const auto enterPanelFromBelow = [&] {
+    if (panel == Panel::Progress) {
+      focus = Focus::GoTo;
+    } else if (panel == Panel::Layout && count > 0) {
+      // The last row's target nearest the middle.
+      int16_t best = static_cast<int16_t>(count - 1);
+      for (int16_t i = 0; i < count; ++i) {
+        if (all[i].row == all[count - 1].row && std::abs(all[i].centre - 500) < std::abs(all[best].centre - 500)) {
+          best = i;
+        }
+      }
+      focus = Focus::Layout;
+      layoutFocus = best;
+    } else {
+      enterTop();
+    }
+  };
   switch (focus) {
     case Focus::None:
-      focus = Focus::Tabs;
       return;
     case Focus::Exit:
     case Focus::Star:
-      row = Row::Top;
-      break;
+      if (step < 0) return;
+      if (panel == Panel::Progress) {
+        focus = Focus::GoTo;
+      } else if (panel == Panel::Layout) {
+        focus = Focus::Layout;
+        layoutFocus = 0;
+      } else {
+        focus = Focus::Tabs;
+      }
+      return;
     case Focus::PrevChapter:
     case Focus::GoTo:
     case Focus::NextChapter:
-      row = Row::Buttons;
-      break;
+      if (step < 0) {
+        enterTop();
+      } else {
+        focus = Focus::Tabs;
+      }
+      return;
     case Focus::Tabs:
-      row = Row::Tabs;
-      break;
-  }
-  Row target = row;
-  if (step < 0) {
-    if (row == Row::Tabs) target = progressOpen ? Row::Buttons : Row::Top;
-    if (row == Row::Buttons) target = Row::Top;
-  } else {
-    if (row == Row::Top) target = progressOpen ? Row::Buttons : Row::Tabs;
-    if (row == Row::Buttons) target = Row::Tabs;
-  }
-  if (target == row) return;
-  switch (target) {
-    case Row::Top:
-      focus = Focus::Star;
+      if (step < 0) enterPanelFromBelow();
       return;
-    case Row::Buttons:
-      focus = Focus::GoTo;
+    case Focus::Layout: {
+      const int16_t next = ReaderLayoutSheet::targetAcross(all, count, layoutFocus, step);
+      if (next >= 0) {
+        layoutFocus = next;
+      } else if (step < 0) {
+        enterTop();
+      } else {
+        focus = Focus::Tabs;
+      }
       return;
-    case Row::Tabs:
-      focus = Focus::Tabs;
-      return;
+    }
   }
 }
 

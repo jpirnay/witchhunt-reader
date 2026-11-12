@@ -26,9 +26,16 @@ struct BookReaderOverrides {
     LineSpacing,
     VerticalText,
     PublisherFonts,
+    // Not in recent.json, which carried the fields above before the settings moved to the book's folder: these exist
+    // only in overrides.bin.
+    MarginHorizontal,
+    ExtraParagraphSpacing,
+    TextDarkness,
     Count
   };
   static constexpr uint8_t kFieldCount = static_cast<uint8_t>(Field::Count);
+  // The fields recent.json carried (JsonSettingsIO's keys), the leading ones.
+  static constexpr uint8_t kLegacyFieldCount = static_cast<uint8_t>(Field::MarginHorizontal);
 
   // The numbering a stored value is in. Font sizes and line-spacing steps have been renumbered before; every file
   // that stores them stamps the numbering it used, and setFromStored() converts from it.
@@ -69,6 +76,12 @@ struct BookReaderOverrides {
   int8_t verticalTextOverride = -1;
   // CrossPointSettings::PUBLISHER_FONTS.
   int8_t publisherFontsOverride = -1;
+  // The left and right margin in pixels, as CrossPointSettings::screenMarginHorizontal stores it.
+  int8_t marginHorizontalOverride = -1;
+  // 0 = off, 1 = on.
+  int8_t extraParagraphSpacingOverride = -1;
+  // CrossPointSettings::TEXT_DARKNESS.
+  int8_t textDarknessOverride = -1;
 
   // The value of `field`, -1 while the book follows the setting.
   int8_t get(Field field) const;
