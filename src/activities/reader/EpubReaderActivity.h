@@ -1126,6 +1126,20 @@ class EpubReaderActivity final : public Activity {
   // bound to the reader menu still opens the full menu, which the bars reach through More.
   void openReaderBars();
   void onReaderBarsClosed(const ActivityResult& result);
+  // The Layout tab's values (ReaderLayoutValues): as the book is read now, and as the global settings have them.
+  ReaderLayoutValues effectiveLayoutValues() const;
+  static ReaderLayoutValues globalLayoutValues();
+  // The book has settings of its own that the Layout tab shows: its font, or any of the tab's values.
+  bool hasOwnLayout() const;
+  // Lays the book out with the Layout tab's values, as the book's own (`thisBookOnly`) or as the global settings, the
+  // book's own for them, its font among them, dropped then. True when the book is opened again instead.
+  bool applyReaderLayout(const ReaderLayoutValues& values, bool thisBookOnly);
+  // The book*Override members from `overrides`, the reverse of bookOverrides().
+  void setBookOverrides(const BookReaderOverrides& overrides);
+  // After a change of the book's own settings or the global ones: opens the book again where its Publisher Fonts now
+  // apply and were never examined (true), else lays it out again from the page on screen.
+  bool relayoutWithChangedSettings();
+
   // A tap on the status bar band (TapZones::statusBandFor), touch boards only.
   bool statusBarTapped() const;
   void openQuickOverrides();

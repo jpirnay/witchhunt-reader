@@ -76,6 +76,7 @@
 #include "ReaderBarsActivity.h"
 #include "ReaderGrayCanvas.h"
 #include "ReaderImageMode.h"
+#include "ReaderLayoutControls.h"
 #include "ReaderUtils.h"
 #include "ReadingSessionTracker.h"
 #include "ReadingStats.h"
@@ -775,24 +776,7 @@ void EpubReaderActivity::onEnter() {
                          ReaderActivity::coverThumbPlaceholder(epub->getPath()));
     saved = RECENT_BOOKS.moveReaderOverridesToBook(epub->getPath());
   }
-  bookEmbeddedStyleOverride = saved.embeddedStyleOverride;
-  bookImageRenderingOverride = saved.imageRenderingOverride;
-  bookFontFamilyOverride = saved.fontFamilyOverride;
-  bookSdFontFamilyOverride = saved.sdFontFamilyOverride;
-  bookFontSizeOverride = saved.fontSizeOverride;
-  bookBionicReadingOverride = saved.bionicReadingOverride;
-  bookParagraphAlignmentOverride = saved.paragraphAlignmentOverride;
-  bookTextAntiAliasingOverride = saved.textAntiAliasingOverride;
-  bookHyphenationOverride = saved.hyphenationOverride;
-  bookFontSizeNormalizationOverride = saved.fontSizeNormalizationOverride;
-  bookGuideDotsOverride = saved.guideDotsOverride;
-  bookInlineFootnotePreviewsOverride = saved.inlineFootnotePreviewsOverride;
-  bookLineSpacingOverride = saved.lineSpacingOverride;
-  bookVerticalTextOverride = saved.verticalTextOverride;
-  bookPublisherFontsOverride = saved.publisherFontsOverride;
-  bookMarginHorizontalOverride = saved.marginHorizontalOverride;
-  bookExtraParagraphSpacingOverride = saved.extraParagraphSpacingOverride;
-  bookTextDarknessOverride = saved.textDarknessOverride;
+  setBookOverrides(saved);
   renderer.setTextDarkness(getEffectiveTextDarkness());
   // Measured at the open that compiled the book's CSS (ReaderActivity); taken into account with Normalize Font Size and
   // the book's style on (makeSectionBuildParams).
@@ -3419,6 +3403,10 @@ bool EpubReaderActivity::applyBookReaderOverrides(
     return false;
   }
 
+  return relayoutWithChangedSettings();
+}
+
+bool EpubReaderActivity::relayoutWithChangedSettings() {
   // Publisher Fonts that apply to the book now and have never examined it: switched on for it, or its own font family
   // or style turned off. Only an open examines them, under the indexing popup and in the lent framebuffer
   // (ReaderActivity::onEnter); loaded from here, they would wait (ensureSdFontLoadedForPath) and the book would stay
@@ -8065,6 +8053,11 @@ void EpubReaderActivity::openReaderBars() {
       info.bookValue = std::to_string(clampPercent(static_cast<int>(statusBarBookPercent() + 0.5f))) + "%";
     }
   }
+  // The Layout tab: the values as the book is read and as the settings have them, and the sizes of its font.
+  info.bookValues = effectiveLayoutValues();
+  info.globalValues = globalLayoutValues();
+  info.thisBookOnly = hasOwnLayout();
+  info.sizes = sdFontSystem.sizeListFor(bookSdFontFamily(bookFontFamilyOverride, bookSdFontFamilyOverride));
   // The time spent in the book: what the history holds, and the session under way, which lands there only when the
   // reader closes.
   {
@@ -8095,6 +8088,8 @@ void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
   using MenuAction = EpubReaderMenuActivity::MenuAction;
   const auto* bars = std::get_if<ReaderBarsResult>(&result.data);
   if (bars && bars->starToggled) onReaderMenuConfirm(MenuAction::STAR_PAGE);
+  // The Layout tab's values before anything else: the book may be laid out again with them, or opened again.
+  if (bars && bars->layoutChanged && applyReaderLayout(bars->layout, bars->thisBookOnly)) return;
   // Every path below draws the page afresh, or puts another screen up: the bars covered parts of it and kept no copy.
   if (!bars) {
     requestUpdate();
@@ -8125,6 +8120,126 @@ void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
       onReaderMenuConfirm(MenuAction::GO_HOME);
       return;
   }
+}
+
+ReaderLayoutValues EpubReaderActivity::effectiveLayoutValues() const {
+  ReaderLayoutValues values;
+  // The book's own fonts while Publisher Fonts apply to it and no family was chosen for it; else its family's option.
+  const bool bookFonts = CrossPointSettings::publisherFontsFor(bookPublisherFontsOverride, SETTINGS.publisherFonts) !=
+                             CrossPointSettings::PUBLISHER_FONTS_OFF &&
+                         bookFontFamilyOverride < 0 && bookSdFontFamilyOverride.empty();
+  const int option = fontFamilyOptionForOverrides(bookFontFamilyOverride, bookSdFontFamilyOverride);
+  values.font = bookFonts ? 0 : static_cast<uint8_t>(1 + (option >= 0 ? option : fontFamilyDynamicGetter(nullptr)));
+  values.fontSize = bookFontSizeOverride >= 0 ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontPointSize;
+  values.lineSpacing =
+      bookLineSpacingOverride >= 0 ? static_cast<uint8_t>(bookLineSpacingOverride) : SETTINGS.lineSpacing;
+  values.marginHorizontal = getEffectiveMarginHorizontal();
+  values.extraParagraphSpacing = getEffectiveExtraParagraphSpacing();
+  values.paragraphAlignment = getEffectiveParagraphAlignment();
+  values.hyphenation = getEffectiveHyphenation();
+  values.textDarkness = getEffectiveTextDarkness();
+  values.embeddedStyle = getEffectiveEmbeddedStyle();
+  return values;
+}
+
+ReaderLayoutValues EpubReaderActivity::globalLayoutValues() {
+  ReaderLayoutValues values;
+  values.font = SETTINGS.publisherFonts != CrossPointSettings::PUBLISHER_FONTS_OFF
+                    ? 0
+                    : static_cast<uint8_t>(1 + fontFamilyDynamicGetter(nullptr));
+  values.fontSize = SETTINGS.fontPointSize;
+  values.lineSpacing = SETTINGS.lineSpacing;
+  values.marginHorizontal = SETTINGS.screenMarginHorizontal;
+  values.extraParagraphSpacing = SETTINGS.extraParagraphSpacing != 0;
+  values.paragraphAlignment = SETTINGS.paragraphAlignment;
+  values.hyphenation = SETTINGS.hyphenationEnabled != 0;
+  values.textDarkness = SETTINGS.textDarkness;
+  values.embeddedStyle = SETTINGS.embeddedStyle != 0;
+  return values;
+}
+
+bool EpubReaderActivity::hasOwnLayout() const {
+  for (const int8_t own :
+       {bookFontSizeOverride, bookLineSpacingOverride, bookMarginHorizontalOverride, bookExtraParagraphSpacingOverride,
+        bookParagraphAlignmentOverride, bookHyphenationOverride, bookTextDarknessOverride, bookEmbeddedStyleOverride,
+        bookFontFamilyOverride, bookPublisherFontsOverride}) {
+    if (own >= 0) return true;
+  }
+  return !bookSdFontFamilyOverride.empty();
+}
+
+void EpubReaderActivity::setBookOverrides(const BookReaderOverrides& overrides) {
+  bookEmbeddedStyleOverride = overrides.embeddedStyleOverride;
+  bookImageRenderingOverride = overrides.imageRenderingOverride;
+  bookFontFamilyOverride = overrides.fontFamilyOverride;
+  bookSdFontFamilyOverride = overrides.sdFontFamilyOverride;
+  bookFontSizeOverride = overrides.fontSizeOverride;
+  bookBionicReadingOverride = overrides.bionicReadingOverride;
+  bookParagraphAlignmentOverride = overrides.paragraphAlignmentOverride;
+  bookTextAntiAliasingOverride = overrides.textAntiAliasingOverride;
+  bookHyphenationOverride = overrides.hyphenationOverride;
+  bookFontSizeNormalizationOverride = overrides.fontSizeNormalizationOverride;
+  bookGuideDotsOverride = overrides.guideDotsOverride;
+  bookInlineFootnotePreviewsOverride = overrides.inlineFootnotePreviewsOverride;
+  bookLineSpacingOverride = overrides.lineSpacingOverride;
+  bookVerticalTextOverride = overrides.verticalTextOverride;
+  bookPublisherFontsOverride = overrides.publisherFontsOverride;
+  bookMarginHorizontalOverride = overrides.marginHorizontalOverride;
+  bookExtraParagraphSpacingOverride = overrides.extraParagraphSpacingOverride;
+  bookTextDarknessOverride = overrides.textDarknessOverride;
+}
+
+bool EpubReaderActivity::applyReaderLayout(const ReaderLayoutValues& values, const bool thisBookOnly) {
+  if (!epub) return false;
+  const ReaderLayoutValues before = effectiveLayoutValues();
+  BookReaderOverrides next = bookOverrides();
+  // The book's own value, or none: the setting then decides.
+  const auto own = [thisBookOnly](int8_t& field, const int value) {
+    field = thisBookOnly ? static_cast<int8_t>(value) : int8_t{-1};
+  };
+  own(next.fontSizeOverride, values.fontSize);
+  own(next.lineSpacingOverride, values.lineSpacing);
+  own(next.marginHorizontalOverride, values.marginHorizontal);
+  own(next.extraParagraphSpacingOverride, values.extraParagraphSpacing ? 1 : 0);
+  own(next.paragraphAlignmentOverride, values.paragraphAlignment);
+  own(next.hyphenationOverride, values.hyphenation ? 1 : 0);
+  own(next.textDarknessOverride, values.textDarkness);
+  own(next.embeddedStyleOverride, values.embeddedStyle ? 1 : 0);
+  // The font: the book's own fonts (Publisher Fonts' All Text) or a family, as the book's or as the settings'.
+  next.fontFamilyOverride = -1;
+  next.sdFontFamilyOverride.clear();
+  next.publisherFontsOverride = -1;
+  if (thisBookOnly && values.font == 0) next.publisherFontsOverride = CrossPointSettings::PUBLISHER_FONTS_ALL;
+  if (thisBookOnly && values.font > 0) {
+    fontFamilyOverridesForOption(static_cast<uint8_t>(values.font - 1), next.fontFamilyOverride,
+                                 next.sdFontFamilyOverride);
+  }
+  if (!thisBookOnly) {
+    // The values are the global settings now, for every book that has none of its own; and this book follows the
+    // settings, its font as well.
+    SETTINGS.fontPointSize = values.fontSize;
+    SETTINGS.lineSpacing = values.lineSpacing;
+    SETTINGS.screenMarginHorizontal = values.marginHorizontal;
+    SETTINGS.extraParagraphSpacing = values.extraParagraphSpacing ? 1 : 0;
+    SETTINGS.paragraphAlignment = values.paragraphAlignment;
+    SETTINGS.hyphenationEnabled = values.hyphenation ? 1 : 0;
+    SETTINGS.textDarkness = values.textDarkness;
+    SETTINGS.embeddedStyle = values.embeddedStyle ? 1 : 0;
+    SETTINGS.publisherFonts =
+        values.font == 0 ? CrossPointSettings::PUBLISHER_FONTS_ALL : CrossPointSettings::PUBLISHER_FONTS_OFF;
+    if (values.font > 0) fontFamilyDynamicSetter(nullptr, static_cast<uint8_t>(values.font - 1));
+    SETTINGS.saveToFile();
+  }
+  LOG_INF("ERS", "Layout tab: %s, size %u, line step %u, margin %u", thisBookOnly ? "this book" : "global settings",
+          static_cast<unsigned>(values.fontSize), static_cast<unsigned>(values.lineSpacing),
+          static_cast<unsigned>(values.marginHorizontal));
+  setBookOverrides(next);
+  RECENT_BOOKS.setReaderOverrides(epub->getPath(), bookOverrides());
+  const ReaderLayoutValues after = effectiveLayoutValues();
+  if (after.textDarkness != before.textDarkness) renderer.setTextDarkness(after.textDarkness);
+  if (ReaderLayout::laysOutDifferently(before, after) && relayoutWithChangedSettings()) return true;
+  requestUpdate();
+  return false;
 }
 
 void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION action) {

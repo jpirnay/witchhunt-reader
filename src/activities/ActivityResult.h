@@ -8,6 +8,8 @@
 #include <utility>
 #include <variant>
 
+#include "reader/ReaderLayoutValues.h"
+
 struct WifiResult {
   bool connected = false;
   std::string ssid;
@@ -121,6 +123,11 @@ struct ReaderBarsResult {
   enum class Action : uint8_t { None, Contents, More, PrevChapter, NextChapter, GoToPercent, Exit };
   Action action = Action::None;
   bool starToggled = false;
+  // The Layout tab, when anything on it changed: the values, and whether they are the book's own ("This book only") or
+  // the global settings. The reader applies them before it acts on `action`.
+  bool layoutChanged = false;
+  bool thisBookOnly = false;
+  ReaderLayoutValues layout{};
 };
 
 using ResultVariant =

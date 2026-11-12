@@ -1,5 +1,5 @@
 // The reader bars (ReaderBarsActivity) laid out by ReaderBarsLayout at every board's size, held upright and sideways,
-// with Progress closed and open.
+// with no panel, Progress and Layout open.
 //
 // What it holds: every control lies on a bar and on the screen; a strip of the page stays in view between the bars;
 // each action is there once; touch boards get finger-sized Progress buttons; and onBars() answers for exactly the bars,
@@ -57,12 +57,13 @@ constexpr Board BOARDS[] = {
 struct Laid {
   fui::Rect area;
   rb::Model model;
+  ReaderLayoutSheet::Model sheet;
   rb::Metrics metrics;
   std::vector<fui::Interaction> hits;
   bool overflowed = false;
 };
 
-Laid layOut(const Board& board, const bool sideways, const bool progressOpen) {
+Laid layOut(const Board& board, const bool sideways, const rb::Panel panel) {
   LineTarget target(board.small, board.body, board.title);
   const fui::ThemeTokens tokens = fui::themeTokensForLineHeight(board.body);
   fui::DeviceContext device;
@@ -77,7 +78,7 @@ Laid layOut(const Board& board, const bool sideways, const bool progressOpen) {
   Laid laid;
   laid.area = screen.contentRect();
   laid.model.title = "A Rather Long Book Title That Will Not Fit";
-  laid.model.progressOpen = progressOpen;
+  laid.model.panel = panel;
   laid.model.bookLabel = "Book";
   laid.model.bookValue = "47%";
   laid.model.chapterLabel = "Chapter";
@@ -85,10 +86,16 @@ Laid layOut(const Board& board, const bool sideways, const bool progressOpen) {
   laid.model.timeLabel = "Total time";
   laid.model.timeValue = "2 h 15 min";
   laid.model.goToLabel = "Go to %";
-  laid.metrics = rb::metricsFor(target, tokens, board.tabBar, board.touch);
+  laid.sheet.font = {"Font", "Literata"};
+  laid.sheet.thisBook = {"This book only", "On"};
+  const char* controlLabels[ReaderLayout::kControlCount] = {"Size",       "Lines",     "Margin",  "Darkness",
+                                                            "Paragraphs", "Alignment", "Hyphens", "Book style"};
+  for (uint8_t i = 0; i < ReaderLayout::kControlCount; ++i) laid.sheet.controls[i] = {controlLabels[i], "Maximum"};
+  laid.model.layout = &laid.sheet;
+  laid.metrics = rb::metricsFor(target, tokens, board.tabBar, board.touch, device.width, device.height);
 
   fui::TabItem tabs[rb::kTabCount]{};
-  const char* labels[rb::kTabCount] = {"Contents", "Progress", "More"};
+  const char* labels[rb::kTabCount] = {"Contents", "Progress", "Layout", "More"};
   for (uint8_t i = 0; i < rb::kTabCount; ++i) {
     tabs[i].label = labels[i];
     tabs[i].value = i;
@@ -109,13 +116,27 @@ size_t countOf(const Laid& laid, const fui::ActionId action) {
   return n;
 }
 
+size_t countOf(const Laid& laid, const fui::ActionId action, const int16_t value) {
+  size_t n = 0;
+  for (const auto& hit : laid.hits) n += hit.action == action && hit.value == value ? 1 : 0;
+  return n;
+}
+
+size_t countOf(const Laid& laid, const rb::Button button) {
+  return countOf(laid, rb::ACTION_BAR, static_cast<int16_t>(button));
+}
+
 template <typename Check>
 void forEveryLayout(Check check) {
   for (const Board& board : BOARDS) {
     for (const bool sideways : {false, true}) {
-      for (const bool open : {false, true}) {
-        SCOPED_TRACE(std::string(board.name) + (sideways ? " sideways" : " upright") + (open ? ", Progress" : ""));
-        check(board, layOut(board, sideways, open));
+      for (const rb::Panel panel : {rb::Panel::None, rb::Panel::Progress, rb::Panel::Layout}) {
+        const char* names[] = {"", ", Progress", ", Layout"};
+        SCOPED_TRACE(std::string(board.name) + (sideways ? " sideways" : " upright") + names[static_cast<int>(panel)]);
+        const Laid laid = layOut(board, sideways, panel);
+        // A screen the Layout sheet does not fit has none: its Layout tab does what More does (layoutFits).
+        if (panel == rb::Panel::Layout && !rb::layoutFits(laid.metrics, laid.area.height)) continue;
+        check(board, laid);
       }
     }
   }
@@ -126,7 +147,7 @@ void forEveryLayout(Check check) {
 TEST(ReaderBarsLayout, EveryControlIsOnABarAndOnTheScreen) {
   forEveryLayout([](const Board&, const Laid& laid) {
     EXPECT_FALSE(laid.overflowed);
-    const fui::Rect top = rb::topRect(laid.area, laid.metrics);
+    const fui::Rect top = rb::topRect(laid.area, laid.model, laid.metrics);
     const fui::Rect bottom = rb::bottomRect(laid.area, laid.model, laid.metrics);
     for (const auto& hit : laid.hits) {
       SCOPED_TRACE(hit.action);
@@ -144,32 +165,118 @@ TEST(ReaderBarsLayout, EveryControlIsOnABarAndOnTheScreen) {
 // quarter of the screen. On the Murphy held sideways (240 px) that is all Progress leaves, with its values on one line.
 TEST(ReaderBarsLayout, TheBarsLeaveAStripOfThePage) {
   forEveryLayout([](const Board& board, const Laid& laid) {
-    const int page =
-        rb::bottomRect(laid.area, laid.model, laid.metrics).y - rb::topRect(laid.area, laid.metrics).bottom();
+    if (laid.model.panel == rb::Panel::Layout) return;  // its own rule below
+    const int page = rb::bottomRect(laid.area, laid.model, laid.metrics).y -
+                     rb::topRect(laid.area, laid.model, laid.metrics).bottom();
     EXPECT_GE(page, fui::themeTokensForLineHeight(board.body).minTouchSize);
     EXPECT_GE(page * 4, laid.area.height);
   });
 }
 
+// The Layout sheet leaves a finger's width of page to show its changes on, or, where it cannot, takes the whole
+// screen; and on the boards the bars were made for it is there at all, upright and sideways. Only the Murphy held
+// sideways (240 px) may go without it.
+TEST(ReaderBarsLayout, TheLayoutSheetLeavesAStripOrCoversThePage) {
+  for (const Board& board : BOARDS) {
+    for (const bool sideways : {false, true}) {
+      SCOPED_TRACE(std::string(board.name) + (sideways ? " sideways" : " upright"));
+      const Laid laid = layOut(board, sideways, rb::Panel::Layout);
+      const bool fits = rb::layoutFits(laid.metrics, laid.area.height);
+      if (std::string(board.name).rfind("Murphy", 0) != 0 || !sideways) EXPECT_TRUE(fits);
+      if (!fits) continue;
+      if (rb::coversPage(laid.model, laid.metrics, laid.area.height)) {
+        EXPECT_EQ(rb::topRect(laid.area, laid.model, laid.metrics).height, 0);
+        EXPECT_EQ(countOf(laid, rb::Button::Exit), 0u);
+        continue;
+      }
+      const int page = rb::bottomRect(laid.area, laid.model, laid.metrics).y -
+                       rb::topRect(laid.area, laid.model, laid.metrics).bottom();
+      EXPECT_GE(page, laid.metrics.minPage);
+    }
+  }
+}
+
+// Every row of the sheet full: no row ends with a lone cell and empty space beside it.
+TEST(ReaderBarsLayout, TheLayoutSheetsRowsAreFull) {
+  forEveryLayout([](const Board&, const Laid& laid) {
+    if (laid.model.panel != rb::Panel::Layout) return;
+    const ReaderLayoutSheet::Metrics& m = laid.metrics.sheet;
+    EXPECT_EQ(ReaderLayout::kStepperCount % m.stepperColumns, 0) << int{m.stepperColumns} << " stepper columns";
+    EXPECT_EQ((ReaderLayout::kControlCount - ReaderLayout::kStepperCount) % m.pressColumns, 0)
+        << int{m.pressColumns} << " press columns";
+  });
+}
+
+TEST(ReaderBarsLayout, TheLayoutSheetHasEachControlOnce) {
+  forEveryLayout([](const Board& board, const Laid& laid) {
+    if (laid.model.panel != rb::Panel::Layout) return;
+    using ReaderLayoutSheet::ACTION_SHEET;
+    EXPECT_EQ(countOf(laid, ACTION_SHEET, ReaderLayoutSheet::kFontValue), 1u);
+    EXPECT_EQ(countOf(laid, ACTION_SHEET, ReaderLayoutSheet::kThisBookValue), 1u);
+    for (uint8_t c = 0; c < ReaderLayout::kControlCount; ++c) {
+      const auto control = static_cast<ReaderLayout::Control>(c);
+      EXPECT_EQ(countOf(laid, ACTION_SHEET, ReaderLayoutSheet::stepValue(control, true)), 1u) << "control " << int{c};
+      EXPECT_EQ(countOf(laid, ACTION_SHEET, ReaderLayoutSheet::stepValue(control, false)),
+                ReaderLayout::isStepper(control) ? 1u : 0u)
+          << "control " << int{c};
+    }
+    if (!board.touch) return;
+    const int16_t minTouch = fui::themeTokensForLineHeight(board.body).minTouchSize;
+    for (const auto& hit : laid.hits) {
+      if (hit.action != ReaderLayoutSheet::ACTION_SHEET) continue;
+      EXPECT_GE(hit.rect.height, minTouch) << "action " << hit.action;
+      EXPECT_GE(hit.rect.width, minTouch * 3 / 4) << "action " << hit.action;
+    }
+  });
+}
+
+TEST(ReaderBarsLayout, TheLayoutSheetsKeysGoBackTheWayTheyCame) {
+  forEveryLayout([](const Board&, const Laid& laid) {
+    if (laid.model.panel != rb::Panel::Layout) return;
+    ReaderLayoutSheet::Target all[ReaderLayoutSheet::kMaxTargets];
+    const fui::Rect sheet = rb::sheetRect(laid.area, laid.model, laid.metrics);
+    const uint8_t count = ReaderLayoutSheet::targets(sheet, laid.metrics.sheet, all);
+    EXPECT_EQ(count, ReaderLayoutSheet::kMaxTargets);
+    for (int16_t i = 0; i < count; ++i) {
+      // Every target lies inside the sheet.
+      EXPECT_GE(all[i].rect.y, sheet.y);
+      EXPECT_LE(all[i].rect.bottom(), sheet.bottom());
+      const int16_t down = ReaderLayoutSheet::targetAcross(all, count, i, +1);
+      if (down < 0) continue;
+      EXPECT_EQ(all[down].row, all[i].row + 1);
+      const int16_t back = ReaderLayoutSheet::targetAcross(all, count, down, -1);
+      ASSERT_GE(back, 0);
+      EXPECT_EQ(all[back].row, all[i].row);
+    }
+  });
+}
+
 TEST(ReaderBarsLayout, EachActionIsThereOnce) {
   forEveryLayout([](const Board&, const Laid& laid) {
-    EXPECT_EQ(countOf(laid, rb::ACTION_EXIT), 1u);
-    EXPECT_EQ(countOf(laid, rb::ACTION_STAR), 1u);
+    const size_t topBar = rb::coversPage(laid.model, laid.metrics, laid.area.height) ? 0u : 1u;
+    EXPECT_EQ(countOf(laid, rb::Button::Exit), topBar);
+    EXPECT_EQ(countOf(laid, rb::Button::Star), topBar);
     EXPECT_EQ(countOf(laid, rb::ACTION_TAB), rb::kTabCount);
-    const size_t progress = laid.model.progressOpen ? 1u : 0u;
-    EXPECT_EQ(countOf(laid, rb::ACTION_PREV_CHAPTER), progress);
-    EXPECT_EQ(countOf(laid, rb::ACTION_GO_TO), progress);
-    EXPECT_EQ(countOf(laid, rb::ACTION_NEXT_CHAPTER), progress);
+    const size_t progress = laid.model.panel == rb::Panel::Progress ? 1u : 0u;
+    EXPECT_EQ(countOf(laid, rb::Button::PrevChapter), progress);
+    EXPECT_EQ(countOf(laid, rb::Button::GoTo), progress);
+    EXPECT_EQ(countOf(laid, rb::Button::NextChapter), progress);
+    // Three actions in all: FreeInkApp keeps 8 handlers a screen and drops any past that without a sign.
+    for (const auto& hit : laid.hits) {
+      EXPECT_TRUE(hit.action == rb::ACTION_BAR || hit.action == rb::ACTION_TAB ||
+                  hit.action == ReaderLayoutSheet::ACTION_SHEET)
+          << "action " << hit.action;
+    }
   });
 }
 
 TEST(ReaderBarsLayout, TouchBoardsGetFingerSizedProgressButtons) {
   forEveryLayout([](const Board& board, const Laid& laid) {
-    if (!board.touch || !laid.model.progressOpen) return;
+    if (!board.touch || laid.model.panel != rb::Panel::Progress) return;
     const int16_t minTouch = fui::themeTokensForLineHeight(board.body).minTouchSize;
-    for (const fui::ActionId action : {rb::ACTION_PREV_CHAPTER, rb::ACTION_GO_TO, rb::ACTION_NEXT_CHAPTER}) {
+    for (const rb::Button button : {rb::Button::PrevChapter, rb::Button::GoTo, rb::Button::NextChapter}) {
       for (const auto& hit : laid.hits) {
-        if (hit.action != action) continue;
+        if (hit.action != rb::ACTION_BAR || hit.value != static_cast<int16_t>(button)) continue;
         EXPECT_GE(hit.rect.height, minTouch);
         EXPECT_GE(hit.rect.width, minTouch);
       }
@@ -184,8 +291,9 @@ TEST(ReaderBarsLayout, OnBarsAnswersForTheBarsAndNotThePage) {
       const int cy = hit.rect.y + hit.rect.height / 2;
       EXPECT_TRUE(rb::onBars(laid.area, laid.model, laid.metrics, cx, cy)) << "action " << hit.action;
     }
-    const fui::Rect top = rb::topRect(laid.area, laid.metrics);
+    const fui::Rect top = rb::topRect(laid.area, laid.model, laid.metrics);
     const fui::Rect bottom = rb::bottomRect(laid.area, laid.model, laid.metrics);
+    if (bottom.y <= top.bottom()) return;  // the Layout sheet covers the page: there is none to tap
     const int pageMiddle = (top.bottom() + bottom.y) / 2;
     EXPECT_FALSE(rb::onBars(laid.area, laid.model, laid.metrics, laid.area.width / 2, pageMiddle));
   });
