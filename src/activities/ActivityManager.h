@@ -263,6 +263,7 @@ class ActivityManager {
   // delivered (see currentTakesButtonAction()). A list opened from the reader answers false here
   // but true above. witchling-reader commit babb8050 (syfq91, isCurrentReaderActivity()) made the
   // same split ten days earlier, for the bug syfq91 then reported here as issue #350.
+  // False too while the reader's own bars take the input (Activity::takesReaderControls()).
   bool currentIsReaderActivity() const;
   // The activity on top reverses Left/Right (Activity::mirrorsLeftRight()).
   bool currentMirrorsLeftRight() const;

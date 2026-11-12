@@ -21,7 +21,7 @@ class MappedInputManager;
 // spent in the book, and previous chapter / Go to % / next chapter. Layout opens the layout sheet there
 // (ReaderLayoutSheet): the font, size, line spacing, margin, darkness, paragraph spacing, alignment, hyphenation and
 // the book's style, and whether they are this book's own or the global settings. The reader lays the book out with
-// them when the bars close; the font cell hands over to the font list.
+// them when the bars close, or at each change where it keeps running under them (`live`, below).
 //
 // The bars draw over the page and keep no copy of it: a C3 has no 48 KB to spare for one. So anything that would have
 // to bring a covered part of the page back closes them instead, and the reader draws the page afresh: Back, a tap on
@@ -31,7 +31,7 @@ class MappedInputManager;
 // lie on screen, Confirm to act, Back to close. On a touch board the keys' cursor stays hidden until a key is pressed.
 //
 // The state, input and drawing, for a host to run: ReaderBarsActivity, pushed over the reader, which lays the book out
-// with the Layout tab's values when the bars close; or the reader itself (EpubReaderActivity's bars overlay), which
+// with the Layout tab's values when the bars close; or the reader itself (EpubReaderActivity::liveBars_), which
 // keeps running under them and lays the page out again at each change (`live`).
 class ReaderBarsController final : private UiAppHost {
  public:

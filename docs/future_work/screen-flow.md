@@ -29,7 +29,14 @@ fonts as the first choice, Publisher Fonts' All Text), size, line spacing, margi
 hyphenation and the book's style, with "This book only" sending them to the book's own settings or to the global ones;
 they apply when the bars close. Margin, paragraph spacing and darkness have per-book overrides for it.
 
-**Open.** The page laid out again live under the sheet, on the S3 boards first: it needs the sheet to be part of the
-reader (a pushed screen stops the reader's loop, so nothing could be rebuilt under it) and the gray pass kept off the
-sheet. Whether the X3 and X4 can have it too depends on a heap measurement with the sheet open during a rebuild. The
-Murphy held sideways has no room for the sheet; its Layout tab opens the reader menu.
+**Done (2026-11-12), live on the PSRAM boards** (`HalCapabilities::laysOutReaderLive`). The reader draws the bars
+itself (`EpubReaderActivity::liveBars_`) and keeps running under them: each Layout change lays the chapter out again
+(Background-C), the page lands under the sheet as soon as the build reaches its text, black and white (no AA, gray
+canvas, pre-render or look-ahead while the bars are open), and a pass with no page to draw paints only the bars. X4 Pro,
+2026-11-12: a size, spacing or margin never used for the chapter took 5 to 6.5 s until the build was done (the page
+showed 3.6 to 4.2 s after the press), one used before 1.5 s.
+
+**Open.** Speed: the build skips its slices while a refresh is pending, and the bars' own repaint after a change waits
+behind the build's slices. The X3 and X4 keep laying the book out on closing; going live there depends on a heap
+measurement with the sheet open during a rebuild. The Murphy held sideways has no room for the sheet; its Layout tab
+opens the reader menu.

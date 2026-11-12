@@ -231,6 +231,18 @@ inline bool keepsSecondaryBuffer() {
 // its driver blocks in triggerDisplay, so a decode follows its refresh anyway.
 inline bool decodesThroughRefresh() { return !sdUsesSpi() && keepsSecondaryBuffer(); }
 
+// The reader keeps running under its bars and lays the book out again at each change on their Layout tab, the page
+// redrawn between the bars (EpubReaderActivity's live bars): a chapter build, the bars' UI screen and the page at
+// once. The PSRAM boards. The C3s push the bars as a screen of their own and lay the book out once they close
+// (ReaderBarsActivity); whether their heap holds the build next to the bars has not been measured.
+// The reader folds its live code away with this on the C3s; cppcheck, which reads one board's build, is left without
+// the value, so it checks both sides instead of calling one dead (as PanelMetrics::COMPACT).
+#if defined(CPPCHECK_ANALYSIS)
+bool laysOutReaderLive();
+#else
+inline bool laysOutReaderLive() { return keepsSecondaryBuffer(); }
+#endif
+
 // A frontlight is present (PWM or PM1-driven).
 inline bool hasFrontlight() { return BoardConfig::hasPwmFrontlight(); }
 
