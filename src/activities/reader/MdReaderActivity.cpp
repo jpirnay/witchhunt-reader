@@ -12,6 +12,7 @@
 #include <numeric>
 
 #include "CrossPointSettings.h"
+#include "DarkMode.h"
 #include "MappedInputManager.h"
 #include "MdReaderTocSelectionActivity.h"
 #include "ReaderUtils.h"
@@ -1008,7 +1009,8 @@ void MdReaderActivity::renderPage() {
 
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
-  if (SETTINGS.textAntiAliasing) {
+  // The two-pass plane flow, which inverted output (Dark Mode) never keeps (see TxtReaderActivity::renderPage()).
+  if (DarkMode::showsTextAntiAliasing(SETTINGS.textAntiAliasing != 0, renderer.isOutputInverted(), false)) {
     // Same AA pass as EpubReaderActivity — see TxtReaderActivity::renderPage()
     // for why the legacy store/restore helper ghosted after swapBuffers().
     // Never aborts: the navigation-preempt gate is currently EPUB-only (see

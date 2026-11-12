@@ -24,6 +24,7 @@
 #include "TouchGestures.h"
 #include "TouchUi.h"
 #include "activities/reader/KOReaderAutoSync.h"
+#include "activities/settings/DarkModeOption.h"
 #include "activities/settings/SettingInfo.h"
 #include "activities/settings/TimezoneOptions.h"
 #include "components/themes/PanelMetrics.h"
@@ -230,13 +231,16 @@ inline void buildSettings(const RowSink& emit) {
                          StrId::STR_CAT_DISPLAY)
            .withSubcategory(StrId::STR_MENU_DISP_BATTERY));
   // --- User interface ---
-  // One heading for the four rows: headings stick, so the rows after UI Theme sit under it.
+  // One heading for the five rows: headings stick, so the rows after UI Theme sit under it.
   emit(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme, uiThemeChoices(), "uiTheme",
                          StrId::STR_CAT_DISPLAY)
            .withSelectorActivity()
            .withSubcategory(StrId::STR_MENU_DISP_UI));
   emit(SettingInfo::Enum(StrId::STR_UI_FONT_SIZE, &CrossPointSettings::uiFontSize,
                          {StrId::STR_NORMAL, StrId::STR_LARGE}, "uiFontSize", StrId::STR_CAT_DISPLAY));
+  emit(DarkModeOption::make(HalCapabilities::hasFrontlightAndRtc()));
+  emit(DarkModeOption::fromRow());
+  emit(DarkModeOption::untilRow());
   // Home screen entries: on = on the home screen, off = behind its "More" entry.
   emit(SettingInfo::Toggle(StrId::STR_LIBRARY, &CrossPointSettings::showLibraryOnHome, "showLibraryOnHome",
                            StrId::STR_CAT_DISPLAY)
@@ -805,6 +809,8 @@ inline bool boardHas(const SettingRequires capability) {
       return Frontlight.present();
     case SettingRequires::WarmLight:
       return Frontlight.present() && Frontlight.hasColorTemperature();
+    case SettingRequires::ReadingLightAndClock:
+      return HalCapabilities::hasFrontlightAndRtc();
     case SettingRequires::MultiTouchPanel:
       return gpio.hasTouch() && gpio.supportsMultiTouch();
     case SettingRequires::SunlightFadingPanel:
@@ -837,6 +843,7 @@ inline bool boardKeeps(const SettingRequires capability) {
     case SettingRequires::GrayscalePanel:
     case SettingRequires::ReadingLight:
     case SettingRequires::WarmLight:
+    case SettingRequires::ReadingLightAndClock:
     case SettingRequires::SunlightFadingPanel:
       return boardHas(capability);
   }

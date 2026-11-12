@@ -538,6 +538,10 @@ class GfxRenderer {
   bool fastRefreshNeedsHostFrame() const { return display.fastRefreshNeedsHostFrame(); }
   bool asyncRefreshHoldsFrameBuffer() const { return display.asyncRefreshHoldsFrameBuffer(); }
   bool ghostsUnderFastRefresh() const { return display.ghostsUnderFastRefresh(); }
+  // Dark mode: the panel shows the frame inverted. See HalDisplay::setInverted; ActivityManager sets it per screen.
+  bool isOutputInverted() const { return display.isInverted(); }
+  void setOutputInverted(const bool inverted) const { display.setInverted(inverted); }
+  bool invertsGrayFrame() const { return display.invertsGrayFrame(); }
 
   // True when triggerDisplayAsync() genuinely overlaps the waveform on this
   // panel. Ask this before spending the async gap on work; see
@@ -673,6 +677,15 @@ class GfxRenderer {
   // the edge, and one log line per pixel would be its own failure.
   void drawGray8Pixel(const Gray8Target& gray8, int x, int y, uint8_t gray) const;
   void drawBitmap1Bit(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight) const;
+  // Dark mode shows pictures as they are, not as negatives: a picture goes into the frame inverted, and the panel's
+  // inversion turns it back. True while that applies to a picture drawn now: output inverted, a B/W pass, and a frame
+  // to draw into (gray planes, cache-only image passes and the 8-bit canvas never reach the panel inverted). The raw
+  // pixel writers ask it (DirectPixelWriter); the bitmap draws above apply it through preserveImagePolarity().
+  bool keepsImagePolarity() const;
+  // Inverts a logical box of the frame when keepsImagePolarity(): for a picture drawn the light way, its black pixels
+  // over a white box (a cover, a QR code). A second call undoes the first, so call it once per draw. Ported from
+  // crosspoint-reader PR #2705 (Justin Mitchell).
+  void preserveImagePolarity(int x, int y, int width, int height) const;
   void fillPolygon(const int* xPoints, const int* yPoints, int numPoints, bool state = true) const;
 
   // Text

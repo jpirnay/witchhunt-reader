@@ -43,6 +43,9 @@ enum class SettingRequires : uint8_t {
   // A second (warm) light channel, so colour temperature is a real control.
   // Sub-capability of Frontlight — the T5S3's single backlight channel has none.
   WarmLight,
+  // A reading light and a hardware RTC that keeps the time of day through sleep: what Dark Mode's night hours need
+  // (HalCapabilities::hasFrontlightAndRtc).
+  ReadingLightAndClock,
   // A touch controller that reports more than one contact (GT911). Pinch and
   // rotation can never fire without it. Sub-capability of TouchPanel.
   MultiTouchPanel,
@@ -441,6 +444,16 @@ struct SettingInfo {
   // Default is SettingRequires::Nothing (always visible).
   SettingInfo& requiring(SettingRequires capability) {
     requiredCapability = capability;
+    return *this;
+  }
+
+  // A row the settings screen lists only while this answers true: one that means something only in a mode another row
+  // picks (Dark Mode's hours, under Scheduled). SettingsActivity asks again after each change it makes. Saved, loaded
+  // and offered to the web settings either way. A plain function pointer, as the getters above.
+  using ShownWhenFn = bool (*)();
+  ShownWhenFn shownWhen = nullptr;
+  SettingInfo& shownOnlyWhen(const ShownWhenFn fn) {
+    shownWhen = fn;
     return *this;
   }
 

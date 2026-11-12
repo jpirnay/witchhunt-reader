@@ -2,7 +2,6 @@
 
 #if CP_TOUCH_UI
 
-#include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
 #include <HalFrontlight.h>
 #include <I18n.h>
@@ -10,20 +9,17 @@
 #include <cstdio>
 
 #include "CrossPointSettings.h"
+#include "DarkModeNow.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
-#include "components/icons/sunIcons.h"
+#include "components/themes/PanelMetrics.h"
 
 namespace fui = freeink::ui;
 
 namespace {
-constexpr fui::ActionId ACTION_BRIGHTNESS = 1;
-constexpr fui::ActionId ACTION_WARMTH = 2;
-constexpr fui::ActionId ACTION_TOGGLE = 3;
-constexpr fui::ActionId ACTION_BRIGHTNESS_STEP = 4;
-constexpr fui::ActionId ACTION_WARMTH_STEP = 5;
-constexpr fui::ActionId ACTION_DISMISS = 6;
+using namespace LightDrawerLayout;
+
 constexpr int BUTTON_BRIGHTNESS_STEP = 5;
 constexpr int FINE_STEP = 1;
 
@@ -60,10 +56,11 @@ void FrontlightPanelActivity::onEnter() {
   resetUi();
   app.on(ACTION_BRIGHTNESS, &FrontlightPanelActivity::onBrightnessEvent, this);
   app.on(ACTION_WARMTH, &FrontlightPanelActivity::onWarmthEvent, this);
-  app.on(ACTION_TOGGLE, &FrontlightPanelActivity::onToggleEvent, this);
+  app.on(ACTION_LIGHT, &FrontlightPanelActivity::onToggleEvent, this);
   app.on(ACTION_BRIGHTNESS_STEP, &FrontlightPanelActivity::onBrightnessStepEvent, this);
   app.on(ACTION_WARMTH_STEP, &FrontlightPanelActivity::onWarmthStepEvent, this);
   app.on(ACTION_DISMISS, &FrontlightPanelActivity::onDismissEvent, this);
+  app.on(ACTION_DARK_MODE, &FrontlightPanelActivity::onDarkModeEvent, this);
   app.setScreen(&FrontlightPanelActivity::panelScreen, this);
   requestUpdate();
 }
@@ -120,6 +117,14 @@ void FrontlightPanelActivity::onWarmthStepEvent(const fui::ActionEvent& event, v
 }
 
 void FrontlightPanelActivity::onDismissEvent(const fui::ActionEvent&, void* user) {
+  static_cast<FrontlightPanelActivity*>(user)->close();
+}
+
+// One tap, and the drawer goes: the screen under it is what has to come back in the other polarity, and it does on its
+// next frame (ActivityManager::applyOutputPolarity), drawn afresh with the full refresh every polarity change takes.
+// Left open, the drawer would composite over a copy of that screen, whose pictures were drawn for the old polarity.
+void FrontlightPanelActivity::onDarkModeEvent(const fui::ActionEvent&, void* user) {
+  DarkModeNow::flip();
   static_cast<FrontlightPanelActivity*>(user)->close();
 }
 
@@ -193,37 +198,16 @@ void FrontlightPanelActivity::loop() {
                                        [this] { adjustBrightness(BUTTON_BRIGHTNESS_STEP); });
 }
 
-int16_t FrontlightPanelActivity::sliderRowBandHeight() const {
-  // Mirrors the substitutions Screen::sliderRow() makes on an unstyled props, so the height the
-  // sheet reserves is the height the row actually takes. Reading them off the same
-  // uiThemeTokens() the app's theme cell is built from is what keeps the two in step.
-  const auto tokens = uiThemeTokens(uiTarget);
-  fui::SliderRowProps probe;
-  probe.labelText = tokens.smallText;
-  probe.labelText.bold = true;
-  probe.captionGap = tokens.spaceMd;
-  return fui::sliderRowHeight(uiTarget, probe, static_cast<int16_t>(tokens.minTouchSize + 12));
-}
-
-int FrontlightPanelActivity::computePanelHeight() const {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const auto tokens = uiThemeTokens(uiTarget);
-  const int16_t row = sliderRowBandHeight();
-
-  // Header band, air, one row per channel (each followed by the spaceMd gap Screen::sliderRow
-  // consumes), then air before the grabber.
-  int height = metrics.topPadding + metrics.headerHeight + tokens.spaceLg;
-  height += row + tokens.spaceMd;
-  if (Frontlight.hasColorTemperature()) height += row + tokens.spaceMd;
-  height += tokens.spaceLg;
-
-  // The grabber band is taken OUT of the height passed to Screen::sheet() (see
-  // sheetContentRect), so it has to be added back in or the last row would be laid out under the
-  // pill. Read from a default-constructed SheetProps rather than restated, so the two cannot
-  // drift if the SDK retunes the pill.
-  const fui::SheetProps chrome;
-  height += chrome.grabberMargin + chrome.grabberHeight + chrome.grabberInset;
-  return height;
+LightDrawerLayout::Model FrontlightPanelActivity::layoutModel() const {
+  LightDrawerLayout::Model model;
+  model.brightness = brightness;
+  model.warmth = warmth;
+  model.lightOn = lightOn;
+  model.dark = DarkModeNow::isDark();
+  model.hasWarmth = Frontlight.hasColorTemperature();
+  model.brightnessLabel = tr(STR_LIGHT_BRIGHTNESS);
+  model.warmthLabel = tr(STR_LIGHT_WARMTH);
+  return model;
 }
 
 void FrontlightPanelActivity::panelScreen(UiScreen& screen, void* user) {
@@ -231,51 +215,7 @@ void FrontlightPanelActivity::panelScreen(UiScreen& screen, void* user) {
 }
 
 void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const auto& theme = screen.theme();
-
-  fui::SheetProps chrome;
-  chrome.anchor = fui::SheetEdge::Top;
-  // The customary way to close a drawer. Registered by the component over the screen below the
-  // sheet, so nothing here has to hit-test the page.
-  chrome.dismissAction = ACTION_DISMISS;
-  screen.sheet(chrome, static_cast<int16_t>(panelHeight));
-
-  screen.insetContent(
-      fui::Insets{0, static_cast<int16_t>(theme.spaceLg * 2), 0, static_cast<int16_t>(theme.spaceLg * 2)});
-  // Room for the header, which render() draws with GUI.drawHeader after this pass: FUI has its
-  // own header component, but the firmware's header language is the themes', and a drawer that
-  // titled itself differently from every other screen would read as a different app.
-  screen.spacer(static_cast<int16_t>(metrics.topPadding + metrics.headerHeight + theme.spaceLg));
-
-  // One buffer for both rows: sliderRow() draws immediately, so the text is on the framebuffer
-  // before the second snprintf overwrites it.
-  char value[16];
-
-  fui::SliderRowProps light;
-  light.label = tr(STR_LIGHT_BRIGHTNESS);
-  snprintf(value, sizeof(value), "%u%%", static_cast<unsigned>(brightness));
-  light.value = value;
-  light.sliderValue = brightness;
-  light.sliderAction = ACTION_BRIGHTNESS;
-  light.decrement = ACTION_BRIGHTNESS_STEP;
-  light.increment = ACTION_BRIGHTNESS_STEP;
-  // The trailing icon button the component reserves for exactly this.
-  light.toggleAction = ACTION_TOGGLE;
-  light.toggleIcon = fui::bitmapFromIcon(lightOn ? icon_sun_filled_32 : icon_sun_32);
-  screen.sliderRow(light);
-
-  if (Frontlight.hasColorTemperature()) {
-    fui::SliderRowProps warm;
-    warm.label = tr(STR_LIGHT_WARMTH);
-    snprintf(value, sizeof(value), "%u%%", static_cast<unsigned>(warmth));
-    warm.value = value;
-    warm.sliderValue = warmth;
-    warm.sliderAction = ACTION_WARMTH;
-    warm.decrement = ACTION_WARMTH_STEP;
-    warm.increment = ACTION_WARMTH_STEP;
-    screen.sliderRow(warm);
-  }
+  LightDrawerLayout::build(screen, layoutModel(), layoutMetrics, panelHeight);
 }
 
 void FrontlightPanelActivity::render(RenderLock&&) {
@@ -294,13 +234,19 @@ void FrontlightPanelActivity::render(RenderLock&&) {
   // the reader is suspended while this is the current activity.
   if (!firstRender) renderer.syncWriteBufferFromDisplayed();
 
-  // Before renderUi(): the sheet is sized at the top of the screen build.
-  panelHeight = computePanelHeight();
+  // Before renderUi(): the sheet is sized at the top of the screen build. The header band is left
+  // for GUI.drawHeader below: FUI has its own header component, but the firmware's header language
+  // is the themes', and a drawer that titled itself differently from every other screen would read
+  // as a different app.
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto tokens = uiThemeTokens(uiTarget);
+  layoutMetrics = LightDrawerLayout::metricsFor(tokens, static_cast<int16_t>(metrics.topPadding + metrics.headerHeight),
+                                                PanelMetrics::COMPACT);
+  panelHeight = LightDrawerLayout::sheetHeight(uiTarget, tokens, layoutModel(), layoutMetrics);
   renderUi();
 
   // After renderUi(), not before: the sheet paints its own body, which would otherwise erase the
   // header drawn onto it.
-  const auto& metrics = UITheme::getInstance().getMetrics();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight},
                  tr(STR_MENU_DISP_LIGHT));
 

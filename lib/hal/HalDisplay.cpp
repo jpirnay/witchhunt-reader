@@ -201,6 +201,20 @@ void HalDisplay::requestResync(uint8_t settlePasses) {
   }
 }
 
+void HalDisplay::setInverted(const bool inverted) {
+  if (einkDisplay.isInverted() == inverted) return;  // every render pass asks; no bus lock for a no-op
+  HalSpiBus::Lock spiLock;                           // a pending refresh is drained first
+  einkDisplay.setInverted(inverted);
+  // The SDK turns the next FAST into a HALF, below this layer, so displayBuffer() cannot see it to
+  // add the UC8253's settle the way it does for every HALF it is asked for (see there).
+  if (HalCapabilities::panelNeedsHalfRefreshSettle()) einkDisplay.requestResync(1);
+  LOG_INF("DISP", "Output %s", inverted ? "inverted (dark mode)" : "normal");
+}
+
+bool HalDisplay::isInverted() const { return einkDisplay.isInverted(); }
+
+bool HalDisplay::invertsGrayFrame() const { return einkDisplay.invertsGrayFrame(); }
+
 // Every path that reaches the panel logs one line with a shared sequence number.
 // Only displayBuffer() used to log, so a second refresh arriving through
 // refreshDisplay / triggerDisplay / displayWindow was invisible -- and an

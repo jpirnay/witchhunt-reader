@@ -1,5 +1,7 @@
 #include "UiAppHost.h"
 
+#include <Logging.h>
+
 #include "UiAppHelpers.h"
 
 UiAppHost::UiAppHost(const GfxRenderer& renderer)
@@ -13,6 +15,8 @@ void UiAppHost::resetUi() {
 }
 
 void UiAppHost::renderUi() {
+  // A dropped handler leaves its control drawn but dead to a tap (the light drawer's seventh, before the cap was 8).
+  if (app.handlerOverflowed()) LOG_ERR("UI", "More action handlers than UiApp holds: a control will not respond");
   app.setDevice(uiTarget.deviceContext());
   app.render();
   uiReady = true;

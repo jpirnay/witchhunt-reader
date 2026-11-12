@@ -42,7 +42,28 @@ bool SettingsActivity::releaseBuriedState() {
 
 void SettingsActivity::onEnter() {
   needsHalfRefresh = true;
+  buildRows();
 
+  resetUi();
+  // Opens on the Display tab with the bar focused; TabbedUiListActivity::onEnter() wires the row
+  // and tab actions, points the screen at buildScreen(), and puts focus on the bar.
+  enterCategory(0);
+  TabbedUiListActivity::onEnter();
+  // Another tab when asked for one (the serial CMD:ACT:SETTINGS:<tab>), the way a tap on it goes.
+  if (initialTab > 0) selectTab(initialTab);
+}
+
+void SettingsActivity::rebuildRowsIfShownChanged() {
+  bool changed = false;
+  for (size_t i = 0; i < shownAnswerCount; ++i) changed |= shownAnswers[i].fn() != shownAnswers[i].shown;
+  if (!changed) return;
+  // The rows that come and go follow the one that decides them, so the selected row keeps its index.
+  buildRows();
+  enterCategory(selectedTab());
+}
+
+void SettingsActivity::buildRows() {
+  shownAnswerCount = 0;
   // Build per-category vectors from the shared settings list.
   // addTo tracks the last subcategory per vector and automatically inserts a separator
   // row whenever a setting carries a new subcategory label.
@@ -83,6 +104,13 @@ void SettingsActivity::onEnter() {
 
   forEachSetting([&](const SettingInfo& setting) {
     if (setting.category == StrId::STR_NONE_OPT) return;
+    if (setting.shownWhen) {
+      const bool shown = setting.shownWhen();
+      bool known = false;
+      for (size_t i = 0; i < shownAnswerCount; ++i) known |= shownAnswers[i].fn == setting.shownWhen;
+      if (!known && shownAnswerCount < MAX_SHOWN_ANSWERS) shownAnswers[shownAnswerCount++] = {setting.shownWhen, shown};
+      if (!shown) return;
+    }
     if (setting.category == StrId::STR_CAT_SYSTEM &&
         (setting.nameId == StrId::STR_USE_CLOCK || setting.nameId == StrId::STR_CLOCK_FORMAT ||
          setting.nameId == StrId::STR_TIMEZONE)) {
@@ -208,14 +236,6 @@ void SettingsActivity::onEnter() {
   SettingInfo::groupRows(readerSettings, submenuData);
   SettingInfo::groupRows(controlsSettings, submenuData);
   SettingInfo::groupRows(systemSettings, submenuData);
-
-  resetUi();
-  // Opens on the Display tab with the bar focused; TabbedUiListActivity::onEnter() wires the row
-  // and tab actions, points the screen at buildScreen(), and puts focus on the bar.
-  enterCategory(0);
-  TabbedUiListActivity::onEnter();
-  // Another tab when asked for one (the serial CMD:ACT:SETTINGS:<tab>), the way a tap on it goes.
-  if (initialTab > 0) selectTab(initialTab);
 }
 
 void SettingsActivity::onExit() {
@@ -262,6 +282,7 @@ void SettingsActivity::activateIndex(const int index) {
         CrossPointSettings::normalizeDependentSettings(SETTINGS);
         SETTINGS.saveToFile();
         needsHalfRefresh = true;
+        rebuildRowsIfShownChanged();
       });
     }
     return;
@@ -315,6 +336,8 @@ void SettingsActivity::activateIndex(const int index) {
   setting.toggleValue();
   CrossPointSettings::normalizeDependentSettings(SETTINGS);
   SETTINGS.saveToFile();
+  // Last use of `setting`: a rebuild replaces the row it refers to.
+  rebuildRowsIfShownChanged();
   // Repaint: nothing else will. Every other way this list changes asks for an
   // update -- moveSelectionTo(), the swipe handler, routeListTouch() -- but the
   // Confirm path in the list controller calls activateIndex() and

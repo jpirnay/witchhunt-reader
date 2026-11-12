@@ -483,17 +483,20 @@ void SleepActivity::onEnter() {
 #endif
 }
 
+// Applies always when the user picked Quick Resume as sleep screen, or only on timeout sleeps when "Quick Resume on
+// Timeout" is on.
+bool SleepActivity::keepsLastScreen() const {
+  return SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
+         (fromTimeout &&
+          SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
+}
+
 void SleepActivity::renderSleepScreen() {
   RenderLock lock(*this);
 
   // Quick Resume: paint a moon icon over the current page and keep the framebuffer
-  // intact for the next wake. Applies always when the user picked Quick Resume as
-  // sleep screen, or only on timeout sleeps when "Quick Resume on Timeout" is on.
-  const bool renderQuickResume =
-      SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
-      (fromTimeout &&
-       SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
-  if (renderQuickResume) {
+  // intact for the next wake.
+  if (keepsLastScreen()) {
     return renderLastScreenSleepScreen();
   }
 
@@ -1103,7 +1106,8 @@ void SleepActivity::renderLastScreenSleepScreen() const {
   // it before the boot screen would otherwise paint.
   const auto pageHeight = renderer.getScreenHeight();
   renderer.drawImage(MoonIcon, 0, pageHeight - MOONICON_HEIGHT, MOONICON_WIDTH, MOONICON_HEIGHT);
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  renderer.displayBuffer(DarkMode::moonGoesOutFast(renderer.isOutputInverted()) ? HalDisplay::FAST_REFRESH
+                                                                                : HalDisplay::HALF_REFRESH);
 }
 
 void SleepActivity::renderOverlaySleepScreen() const {
@@ -1115,8 +1119,10 @@ void SleepActivity::renderOverlaySleepScreen() const {
 
   // Step 1: Ensure the frame buffer contains the reader page.
   // When coming from a reader activity the frame buffer already holds the page.
-  // When coming from a non-reader activity we re-render it from the saved progress.
-  if (!APP_STATE.lastSleepFromReader && !APP_STATE.openEpubPath.empty()) {
+  // When coming from a non-reader activity we re-render it from the saved progress. So too when the reader drew it
+  // for Dark Mode, its pictures inverted (GfxRenderer::keepsImagePolarity): this screen shows in normal polarity.
+  const bool pageDrawnForDarkMode = APP_STATE.lastSleepFromReader && pageWentOutInverted;
+  if ((!APP_STATE.lastSleepFromReader || pageDrawnForDarkMode) && !APP_STATE.openEpubPath.empty()) {
     const auto& path = APP_STATE.openEpubPath;
     bool rendered = false;
 

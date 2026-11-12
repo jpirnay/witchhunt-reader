@@ -362,9 +362,11 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
   const int regionH = frameRegion.h;
   const size_t regionBytes = renderer.getRegionByteSize(0, regionY, pageWidth, regionH);
 
-  // Build cache key from book paths
+  // Build cache key from book paths, and Dark Mode's polarity: a frame drawn in one has its covers inverted for it
+  // (GfxRenderer::keepsImagePolarity) and would show them as negatives in the other.
   std::string newKey;
   newKey.reserve(128);
+  newKey += renderer.isOutputInverted() ? 'D' : 'L';
   for (const auto& b : recentBooks) {
     newKey += b.path;
     newKey += '\0';

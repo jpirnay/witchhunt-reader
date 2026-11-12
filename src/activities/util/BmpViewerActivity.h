@@ -17,6 +17,8 @@ class BmpViewerActivity final : public Activity {
   void onEnter() override;
   void onExit() override;
   void loop() override;
+  // A picture viewer: in Dark Mode its picture would lose its grays (inverted output is B/W), so it shows as always.
+  DarkMode::ScreenPolarity outputPolarity() const override { return DarkMode::ScreenPolarity::Normal; }
 
  private:
   std::string filePath;

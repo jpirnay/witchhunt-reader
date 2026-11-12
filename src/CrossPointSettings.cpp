@@ -11,6 +11,8 @@
 #include <cstring>
 #include <string>
 
+#include "DarkMode.h"
+#include "DarkModeNow.h"
 #include "SdCardFontGlobals.h"
 #include "fontIds.h"
 
@@ -275,7 +277,10 @@ unsigned long CrossPointSettings::getSleepTimeoutMs() const {
   return static_cast<unsigned long>(sleepTimeoutMinutes) * 60UL * 1000UL;
 }
 
-int CrossPointSettings::getRefreshFrequency() const { return static_cast<int>(refreshFrequencyPages); }
+// Halved while the screens are dark, which Scheduled leaves to the clock: DarkModeNow, not darkMode alone.
+int CrossPointSettings::getRefreshFrequency() const {
+  return DarkMode::refreshFrequency(static_cast<int>(refreshFrequencyPages), DarkModeNow::isDark());
+}
 
 int CrossPointSettings::getBuiltinReaderFontId(uint8_t family, FONT_SIZE size) {
   switch (family) {
