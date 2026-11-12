@@ -48,6 +48,9 @@
 //    floor). A 0% level with the light still "on" would leave the sun icon lit over a dark
 //    panel, which is a second and worse way of saying off when the switch is one tap away.
 //
+// Also this fork's: a Dark Mode row under the sliders (DarkModeNow::flip), the switch a reader reaches for in the same
+// moment as the light. A tap closes the drawer, so the screen under it is drawn again in the new polarity.
+//
 // Gated on CP_TOUCH_UI: nothing opens this without a digitiser, and this fork compiles the whole
 // app-side touch layer out of a board that cannot have one.
 class FrontlightPanelActivity final : public Activity, private UiAppHost {
@@ -77,6 +80,7 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   static void onBrightnessStepEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onWarmthStepEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onDismissEvent(const freeink::ui::ActionEvent& event, void* user);
+  static void onDarkModeEvent(const freeink::ui::ActionEvent& event, void* user);
 
   void buildPanelScreen(UiScreen& screen);
   // Height of one sliderRow as Screen::sliderRow() will actually lay it out -- the same theme

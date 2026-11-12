@@ -1129,7 +1129,9 @@ brightness is not asking for the light to come on.
 
 The quickest routes to it without opening Settings:
 
-- **Swipe down from the top edge** for the light panel, on any screen
+- **Swipe down from the top edge** for the light panel, on any screen. Its **Dark Mode** switch
+  turns Dark Mode on or off in one tap; the panel closes and the screen comes back in the other
+  colours
 - **Hold the top-left corner**, or **double-press Power**, to toggle it
 - **Swipe up / down at the left edge** to brighten and dim, and at the right edge for warmth
 

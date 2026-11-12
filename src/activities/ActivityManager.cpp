@@ -16,6 +16,7 @@
 
 #include "CrossPointState.h"
 #include "DarkMode.h"
+#include "DarkModeNow.h"
 #include "OpdsServerStore.h"
 #include "SdCardFontGlobals.h"
 #include "SettingsList.h"
@@ -162,7 +163,7 @@ void ActivityManager::renderTaskLoop() {
       // on activity transitions like the rest, and every path that displays a page republishes
       // it (with an empty set when the page has no links), so a displayed page always describes
       // itself.
-      // A Dark Mode change since the last frame (the Settings row, the web settings) lands on this one.
+      // A Dark Mode change since the last frame (Settings, the web settings, the light drawer) lands on this one.
       applyOutputPolarity();
       armGhostClearingRefresh();
       {
@@ -248,7 +249,7 @@ void ActivityManager::armGhostClearingRefresh() {
 
 void ActivityManager::applyOutputPolarity() {
   const auto screen = currentActivity ? currentActivity->outputPolarity() : DarkMode::ScreenPolarity::FollowDarkMode;
-  renderer.setOutputInverted(DarkMode::invertsOutput(SETTINGS.darkMode != 0, screen, renderer.isOutputInverted()));
+  renderer.setOutputInverted(DarkMode::invertsOutput(DarkModeNow::isDark(), screen, renderer.isOutputInverted()));
 }
 
 void ActivityManager::loop() {

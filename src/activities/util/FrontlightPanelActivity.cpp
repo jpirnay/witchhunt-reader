@@ -10,6 +10,7 @@
 #include <cstdio>
 
 #include "CrossPointSettings.h"
+#include "DarkModeNow.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
@@ -24,6 +25,7 @@ constexpr fui::ActionId ACTION_TOGGLE = 3;
 constexpr fui::ActionId ACTION_BRIGHTNESS_STEP = 4;
 constexpr fui::ActionId ACTION_WARMTH_STEP = 5;
 constexpr fui::ActionId ACTION_DISMISS = 6;
+constexpr fui::ActionId ACTION_DARK_MODE = 7;
 constexpr int BUTTON_BRIGHTNESS_STEP = 5;
 constexpr int FINE_STEP = 1;
 
@@ -64,6 +66,7 @@ void FrontlightPanelActivity::onEnter() {
   app.on(ACTION_BRIGHTNESS_STEP, &FrontlightPanelActivity::onBrightnessStepEvent, this);
   app.on(ACTION_WARMTH_STEP, &FrontlightPanelActivity::onWarmthStepEvent, this);
   app.on(ACTION_DISMISS, &FrontlightPanelActivity::onDismissEvent, this);
+  app.on(ACTION_DARK_MODE, &FrontlightPanelActivity::onDarkModeEvent, this);
   app.setScreen(&FrontlightPanelActivity::panelScreen, this);
   requestUpdate();
 }
@@ -120,6 +123,14 @@ void FrontlightPanelActivity::onWarmthStepEvent(const fui::ActionEvent& event, v
 }
 
 void FrontlightPanelActivity::onDismissEvent(const fui::ActionEvent&, void* user) {
+  static_cast<FrontlightPanelActivity*>(user)->close();
+}
+
+// One tap, and the drawer goes: the screen under it is what has to come back in the other polarity, and it does on its
+// next frame (ActivityManager::applyOutputPolarity), drawn afresh with the full refresh every polarity change takes.
+// Left open, the drawer would composite over a copy of that screen, whose pictures were drawn for the old polarity.
+void FrontlightPanelActivity::onDarkModeEvent(const fui::ActionEvent&, void* user) {
+  DarkModeNow::flip();
   static_cast<FrontlightPanelActivity*>(user)->close();
 }
 
@@ -215,6 +226,8 @@ int FrontlightPanelActivity::computePanelHeight() const {
   int height = metrics.topPadding + metrics.headerHeight + tokens.spaceLg;
   height += row + tokens.spaceMd;
   if (Frontlight.hasColorTemperature()) height += row + tokens.spaceMd;
+  // The Dark Mode row: Screen::toggleRow() takes the theme's row height and its spaceSm gap.
+  height += tokens.rowHeight + tokens.spaceSm;
   height += tokens.spaceLg;
 
   // The grabber band is taken OUT of the height passed to Screen::sheet() (see
@@ -276,6 +289,17 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
     warm.increment = ACTION_WARMTH_STEP;
     screen.sliderRow(warm);
   }
+
+  // Captioned like the sliders and flush with them; the whole row is the switch.
+  fui::ToggleRowProps dark;
+  dark.row.label = tr(STR_DARK_MODE);
+  dark.row.labelText = theme.smallText;
+  dark.row.labelText.bold = true;
+  dark.row.sidePadding = 0;
+  dark.row.minTouchSize = theme.minTouchSize;
+  dark.checked = DarkModeNow::isDark();
+  dark.toggleAction = ACTION_DARK_MODE;
+  screen.toggleRow(dark);
 }
 
 void FrontlightPanelActivity::render(RenderLock&&) {
