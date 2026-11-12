@@ -132,6 +132,24 @@ void replyf(const char* format, ...) {
   if (n > 0) reply(std::string_view(line, std::min(static_cast<size_t>(n), sizeof(line) - 1)));
 }
 
+// Holds LOG_* lines back from the wire while it lives, as the USB Transfer screen does (Logging's mute: they still
+// reach the crash ring), so none cuts into a binary payload or a dump; then puts back what was, since the transfer
+// screen keeps the mute on for its whole session. The mute is set with the wire held, so a log line already on its
+// way is finished first rather than cut by what follows.
+class LogHold {
+ public:
+  LogHold() : wasMuted_(isSerialWireMuted()) {
+    const SerialWireLock wire;
+    setSerialWireMuted(true);
+  }
+  ~LogHold() { setSerialWireMuted(wasMuted_); }
+  LogHold(const LogHold&) = delete;
+  LogHold& operator=(const LogHold&) = delete;
+
+ private:
+  bool wasMuted_;
+};
+
 std::string_view trim(std::string_view text) {
   while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.remove_prefix(1);
   while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r')) text.remove_suffix(1);
@@ -1282,24 +1300,6 @@ class WireLine {
   bool ok_ = true;
 };
 
-// Holds LOG_* lines back from the wire while it lives, as the USB Transfer screen does (Logging's mute: they still
-// reach the crash ring), so none cuts into a binary payload or a dump; then puts back what was, since the transfer
-// screen keeps the mute on for its whole session. The mute is set with the wire held, so a log line already on its
-// way is finished first rather than cut by what follows.
-class LogHold {
- public:
-  LogHold() : wasMuted_(isSerialWireMuted()) {
-    const SerialWireLock wire;
-    setSerialWireMuted(true);
-  }
-  ~LogHold() { setSerialWireMuted(wasMuted_); }
-  LogHold(const LogHold&) = delete;
-  LogHold& operator=(const LogHold&) = delete;
-
- private:
-  bool wasMuted_;
-};
-
 // A file command holds the loop task for as long as the file takes. Every 100 ms it feeds the task watchdog and lets
 // the other tasks run, the idle task the watchdog also watches among them, as SDCardManager's long reads do.
 class LongWork {
@@ -2194,6 +2194,8 @@ void sendScreenshot(const uint8_t* frame, const uint32_t size, const int width, 
     reply("SCREENSHOT_ERROR:framebuffer released");
     return;
   }
+  // No log line may land inside the frame: the host reads exactly `size` bytes after START, as PAGE and FS hold them.
+  const LogHold hold;
   replyf("SCREENSHOT_START:%d:%d:%lu", width, height, static_cast<unsigned long>(size));
   // ~48 KB in one go is exactly the sustained write that trips the short-write behaviour, so the
   // END marker must not be sent if the payload was cut short: a truncated frame with a valid
