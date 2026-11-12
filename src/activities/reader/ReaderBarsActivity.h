@@ -1,46 +1,16 @@
 #pragma once
 
-#include <string>
+#include <memory>
 
-#include "ReaderBarsLayout.h"
-#include "ReaderFontSizes.h"
-#include "ReaderLayoutValues.h"
+#include "ReaderBarsController.h"
 #include "activities/Activity.h"
-#include "components/UiAppHost.h"
 
-// The reader bars: a top bar (back out of the book, its title, the page's star) and a tab bar (Contents, Progress,
-// Layout, More) painted over the page the reader left on the panel, which stays readable between them. Opened by
-// Confirm, a tap in the middle of the page, or a tap on the status bar (EpubReaderActivity::openReaderBars).
-//
-// Contents and More hand back to the reader, which opens its chapter list and its full menu: every reader feature
-// stays one step past More. Progress opens in place, above the tab bar: where the book and the chapter stand, the time
-// spent in the book, and previous chapter / Go to % / next chapter. Layout opens the layout sheet there
-// (ReaderLayoutSheet): the font, size, line spacing, margin, darkness, paragraph spacing, alignment, hyphenation and
-// the book's style, and whether they are this book's own or the global settings. The reader lays the book out with
-// them when the bars close; the font cell hands over to the font list.
-//
-// The bars draw over the page and keep no copy of it: a C3 has no 48 KB to spare for one. So anything that would have
-// to bring a covered part of the page back closes them instead, and the reader draws the page afresh: Back, a tap on
-// the page, and a panel closing (its tab again, or Back while it is open).
-//
-// Keys work on every board, so the X3 and X4 reach all of it: Left/Right along a row, Up/Down between the rows as they
-// lie on screen, Confirm to act, Back to close. On a touch board the keys' cursor stays hidden until a key is pressed.
-class ReaderBarsActivity final : public Activity, private UiAppHost {
+// The reader bars (ReaderBarsController) as a screen of their own, pushed over the reader where it does not keep
+// running under them (the X3 and X4): they paint over the page the reader left on the panel, and the reader lays the
+// book out with the Layout tab's values once they close.
+class ReaderBarsActivity final : public Activity {
  public:
-  // What the reader fills in. The values are formatted; an empty timeValue leaves the time row out.
-  struct Info {
-    std::string title;
-    bool starred = false;
-    std::string bookValue;
-    std::string chapterValue;
-    std::string timeValue;
-    // The Layout tab: the values the book is read with and the global ones, whether the book has settings of its own,
-    // and the sizes its font offers.
-    ReaderLayoutValues bookValues;
-    ReaderLayoutValues globalValues;
-    bool thisBookOnly = false;
-    ReaderSizeList sizes;
-  };
+  using Info = ReaderBarsController::Info;
 
   ReaderBarsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, Info info);
 
@@ -51,57 +21,10 @@ class ReaderBarsActivity final : public Activity, private UiAppHost {
   // The bars paint only their bands over the frame the reader prepared before pushing them; a busy indicator synced
   // in between would put another frame under them.
   bool suppressesBusyIndicator() const override { return true; }
-  // For the serial CMD:STATE: where the keys' cursor is, the open panel, the page's star, the Layout tab's values.
-  void appendDebugState(std::string& out) const override;
+  void appendDebugState(std::string& out) const override { bars.appendDebugState(out); }
 
  private:
-  using Tab = ReaderBarsLayout::Tab;
-  using Focus = ReaderBarsLayout::Focus;
-  using Panel = ReaderBarsLayout::Panel;
-  using Button = ReaderBarsLayout::Button;
-
-  Info info;
-  bool starred = false;
-  bool starToggled = false;
-  Panel panel = Panel::None;
-  Focus focus = Focus::None;
-  Tab focusedTab = Tab::Contents;
-  // The Layout tab's values as the reader is changing them, and the target its cursor is on while focus is Layout.
-  ReaderLayoutValues layout{};
-  bool thisBookOnly = false;
-  int16_t layoutFocus = 0;
+  ReaderBarsController bars;
   // The opening pass composites over the frame the reader prepared; every later one syncs first (render()).
   bool firstRender = true;
-  // Set once in onEnter(): the faces do not change while the bars are open, and the loop task's tap test reads them.
-  ReaderBarsLayout::Metrics metrics{};
-  freeink::ui::Rect area{};
-  freeink::ui::TabItem tabs[ReaderBarsLayout::kTabCount]{};
-  // The Layout cells' values, formatted for the pass that draws them (buildBars, on the render task), and the font's
-  // name, set where the font changes.
-  char cellValues[ReaderLayout::kControlCount][24]{};
-  std::string fontLabel;
-
-  ReaderBarsLayout::Model model() const;
-  ReaderLayoutSheet::Model sheetModel();
-  const char* cellValue(ReaderLayout::Control control);
-  static void barsScreen(UiScreen& screen, void* user);
-  void buildBars(UiScreen& screen);
-
-  static void onAction(const freeink::ui::ActionEvent& event, void* user);
-  void pressButton(ReaderBarsLayout::Button button);
-  // An ACTION_SHEET target's value (ReaderLayoutSheet): the font, "This book only", a control stepped.
-  void pressSheet(int16_t value);
-  void nextFont();
-  static std::string fontOptionLabel(uint8_t font);
-
-  void close(ReaderBarsResult::Action action);
-  void toggleStar();
-  void openTab(Tab tab);
-  void pressControl(ReaderLayout::Control control, int delta);
-  void flipThisBookOnly();
-  void activateFocus();
-  void moveAlongRow(int step);
-  void moveBetweenRows(int step);
-  // The Layout sheet's key targets, as it lies now.
-  uint8_t layoutTargets(ReaderLayoutSheet::Target (&out)[ReaderLayoutSheet::kMaxTargets]) const;
 };
