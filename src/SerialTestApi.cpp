@@ -118,8 +118,8 @@ constexpr unsigned long kReplyStallMs = 2000;
 // last line was cut. Put together first and written in one write: HWCDC writes one call under its own lock, so no
 // other task's log line lands inside it, unless the host lags long enough for the write to come back short. Nothing
 // here holds the logger up. Most replies fit the stack buffer; a longer one (a STATE line) takes a heap one for the
-// moment.
-void reply(const std::string_view head, const std::string_view tail = {}, const unsigned long stallMs = kReplyStallMs) {
+// moment. False when the line did not go out whole (it is then marked cut).
+bool reply(const std::string_view head, const std::string_view tail = {}, const unsigned long stallMs = kReplyStallMs) {
   const bool cut = takeSerialLineCut();
   const size_t length = (cut ? 1 : 0) + head.size() + tail.size() + 1;
   char small[160];
@@ -136,16 +136,16 @@ void reply(const std::string_view head, const std::string_view tail = {}, const 
   memcpy(line + at, tail.data(), tail.size());
   at += tail.size();
   line[at++] = '\n';
-  writeAll(reinterpret_cast<const uint8_t*>(line), at, stallMs);
+  return writeAll(reinterpret_cast<const uint8_t*>(line), at, stallMs);
 }
 
-void replyf(const char* format, ...) {
+bool replyf(const char* format, ...) {
   char line[96];
   va_list args;
   va_start(args, format);
   const int n = vsnprintf(line, sizeof(line), format, args);
   va_end(args);
-  if (n > 0) reply(std::string_view(line, std::min(static_cast<size_t>(n), sizeof(line) - 1)));
+  return n > 0 && reply(std::string_view(line, std::min(static_cast<size_t>(n), sizeof(line) - 1)));
 }
 
 // Holds LOG_* lines back from the wire while it lives, as the USB Transfer screen does (Logging's mute: they still
@@ -1930,37 +1930,39 @@ void fill(uint8_t* bw, uint8_t* red, const uint16_t width, const uint16_t height
 void cmdLab(std::string_view arg) {
   if (arg.substr(0, 4) == "LUT:") {
     const std::string_view hex = arg.substr(4);
-    if (hex.empty() || hex.size() % 2 != 0 || hex.size() / 2 > sizeof(lab::lut)) return reply("LAB_ERROR:bad lut");
+    if (hex.empty() || hex.size() % 2 != 0 || hex.size() / 2 > sizeof(lab::lut))
+      return static_cast<void>(reply("LAB_ERROR:bad lut"));
     for (size_t i = 0; i < hex.size() / 2; ++i) {
       const int high = lab::hexDigit(hex[2 * i]), low = lab::hexDigit(hex[2 * i + 1]);
-      if (high < 0 || low < 0) return reply("LAB_ERROR:bad lut");
+      if (high < 0 || low < 0) return static_cast<void>(reply("LAB_ERROR:bad lut"));
       lab::lut[i] = static_cast<uint8_t>(high << 4 | low);
     }
     lab::lutLength = hex.size() / 2;
-    return replyf("LAB_OK:lut %u", static_cast<unsigned>(lab::lutLength));
+    return static_cast<void>(replyf("LAB_OK:lut %u", static_cast<unsigned>(lab::lutLength)));
   }
-  if (arg.substr(0, 5) != "DRAW:") return reply("LAB_ERROR:LUT or DRAW");
+  if (arg.substr(0, 5) != "DRAW:") return static_cast<void>(reply("LAB_ERROR:LUT or DRAW"));
   arg.remove_prefix(5);
   const bool full = arg.substr(0, 5) == "FULL:";
-  if (!full && arg.substr(0, 4) != "LUT:") return reply("LAB_ERROR:FULL or LUT");
+  if (!full && arg.substr(0, 4) != "LUT:") return static_cast<void>(reply("LAB_ERROR:FULL or LUT"));
   arg.remove_prefix(full ? 5 : 4);
-  if (!full && lab::lutLength == 0) return reply("LAB_ERROR:no lut");
+  if (!full && lab::lutLength == 0) return static_cast<void>(reply("LAB_ERROR:no lut"));
   long background = 0;
-  if (!lab::takeNumber(arg, ':', background) || background > 3) return reply("LAB_ERROR:bad background");
+  if (!lab::takeNumber(arg, ':', background) || background > 3)
+    return static_cast<void>(reply("LAB_ERROR:bad background"));
 
   const uint16_t width = display.getDisplayWidth(), height = display.getDisplayHeight();
   const uint16_t widthBytes = display.getDisplayWidthBytes();
   RenderLock lock;  // the frame buffer is the render task's
   uint8_t* bw = renderer.getFrameBuffer();
   uint8_t* red = nullptr;
-  if (!bw) return reply("LAB_ERROR:no frame buffer");
+  if (!bw) return static_cast<void>(reply("LAB_ERROR:no frame buffer"));
   if (!full) {
     // The display's second frame buffer: a third 48 KB block is more than a C3 has free.
     size_t lent = 0;
     red = renderer.borrowSecondaryBuffer(&lent);
     if (!red || lent < display.getBufferSize()) {
       if (red) renderer.returnSecondaryBuffer();
-      return reply("LAB_ERROR:no second buffer");
+      return static_cast<void>(reply("LAB_ERROR:no second buffer"));
     }
   }
   lab::fill(bw, red, width, height, widthBytes, 0, 0, width, height, background);
@@ -1969,7 +1971,7 @@ void cmdLab(std::string_view arg) {
     if (!lab::takeNumber(arg, ',', x) || !lab::takeNumber(arg, ',', y) || !lab::takeNumber(arg, ',', w) ||
         !lab::takeNumber(arg, ',', h) || !lab::takeNumber(arg, ';', code) || code > 3) {
       if (red) renderer.returnSecondaryBuffer();
-      return reply("LAB_ERROR:bad rectangle");
+      return static_cast<void>(reply("LAB_ERROR:bad rectangle"));
     }
     lab::fill(bw, red, width, height, widthBytes, x, y, w, h, code);
   }
@@ -1981,7 +1983,7 @@ void cmdLab(std::string_view arg) {
     shown = display.displayLabFrame(bw, red, lab::lut);
   }
   if (red) renderer.returnSecondaryBuffer();
-  if (!shown) return reply("LAB_ERROR:no lab path on this panel");
+  if (!shown) return static_cast<void>(reply("LAB_ERROR:no lab path on this panel"));
   replyf("LAB_OK:%lu", millis() - start);
 }
 
@@ -2217,7 +2219,9 @@ void sendScreenshot(const uint8_t* frame, const uint32_t size, const int width, 
   }
   // No log line may land inside the frame: the host reads exactly `size` bytes after START, as PAGE and FS hold them.
   const LogHold hold;
-  replyf("SCREENSHOT_START:%d:%d:%lu", width, height, static_cast<unsigned long>(size));
+  // A START that did not go out whole leaves the host without the frame's size: no frame then, only the cut line
+  // (ended by the next reply's line break).
+  if (!replyf("SCREENSHOT_START:%d:%d:%lu", width, height, static_cast<unsigned long>(size))) return;
   // ~48 KB in one go is exactly the sustained write that trips the short-write behaviour, so the
   // END marker must not be sent if the payload was cut short: a truncated frame with a valid
   // trailer looks complete to the host. 15 s without progress matches SerialTransferDevice.
