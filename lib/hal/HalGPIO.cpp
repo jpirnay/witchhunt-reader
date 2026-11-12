@@ -11,6 +11,10 @@
 #include <esp_sleep.h>
 #include <soc/soc_caps.h>
 
+#if defined(SERIAL_TEST_API) && SERIAL_TEST_API
+#include <atomic>
+#endif
+
 // Global HalGPIO instance
 HalGPIO gpio;
 
@@ -127,6 +131,14 @@ HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
   return HalGPIO::DeviceType::X4;
 }
 
+#if defined(SERIAL_TEST_API) && SERIAL_TEST_API
+// The buttons the serial test API holds down (holdSyntheticButtons()). Written by the loop task, read
+// on the sampler task inside inputMgr.update() through the SDK's button hooks.
+std::atomic<uint8_t> syntheticButtons{0};
+
+uint8_t syntheticButtonHook() { return syntheticButtons.load(std::memory_order_relaxed); }
+#endif
+
 }  // namespace
 
 void HalGPIO::begin() {
@@ -158,6 +170,14 @@ void HalGPIO::begin() {
   //   display.cs, SPI_MISO 7 = sd.miso, BAT_GPIO0 0 = batteryAdc,
   //   UART0_RXD 20 = usbDetect.
   inputMgr.begin();
+
+#if defined(SERIAL_TEST_API) && SERIAL_TEST_API
+  // Beside the board's own hook (the T5S3's expander button), not in its place. Without a free slot the held
+  // presses are never committed, and the serial queue gives them up and counts them (STATE's btn_dropped).
+  if (!InputManager::addButtonHook(&syntheticButtonHook)) {
+    LOG_ERR("HW", "No button hook slot left for the serial test API's held keys");
+  }
+#endif
 
   // Pre-claim the shared SPI bus with the C3's display + SD pins.
   //
@@ -765,6 +785,10 @@ void HalGPIO::injectPress(const uint8_t buttonIndex, const bool longPress, const
   pushEdgeLocked(buttonIndex, false, releaseAt);
   portEXIT_CRITICAL(&inputMux_);
 }
+
+#if defined(SERIAL_TEST_API) && SERIAL_TEST_API
+void HalGPIO::holdSyntheticButtons(const uint8_t mask) { syntheticButtons.store(mask, std::memory_order_relaxed); }
+#endif
 
 void HalGPIO::injectTouch(const float nx, const float ny) {
   if (!hasTouch()) return;

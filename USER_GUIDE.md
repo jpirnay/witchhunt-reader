@@ -396,7 +396,7 @@ The File Transfer screen allows you to upload new e-books to the device. When yo
 
 The [Web Interface Guide](./docs/webserver.md) walks through every page of the web interface, with screenshots: connecting, the first-visit setup, uploading and organising books, the EPUB optimizer, book details, settings, fonts, dictionaries, reading stats, plugins and diagnostics.
 
-The web interface's pages are kept on the SD card, not in the firmware. The first time you open the device's address, and after a firmware update that changed them, a setup page installs them: on your WiFi network it downloads them by itself; in hotspot mode, choose the `web-….bin` file from the release page, or copy it to the top folder of the SD card. The setup page can upload books on its own as well.
+The web interface's pages are kept on the SD card, not in the firmware. The first time you open the device's address, and after a firmware update that changed them, a setup page installs them: on your WiFi network it downloads them by itself; in hotspot mode, choose the `web-….bin` file from the release page, or copy it to the top folder of the SD card. The [Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/) installs them over the USB cable right after it writes the firmware. The setup page can upload books on its own as well.
 
 The **Dictionaries** page installs dictionaries for looking up words while you read. Choose the StarDict dictionary you downloaded, as an archive (`.zip`, `.tar.gz`, `.tar.bz2`) or as its files; your browser unpacks the parts the reader cannot use compressed, checks them and puts each dictionary into its own folder under `/dictionaries`. Then choose it on the device under **Settings → Reader → Dictionary**. The page also shows whether each installed dictionary is usable, and removes one. See [Dictionary](./docs/dictionary.md).
 
@@ -614,7 +614,13 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 **Firmware Update**:
 - **Check for Updates**: Check for and download Witch Reader firmware updates over WiFi. When a newer release is found, the question to update shows the release's title and the first few lines of its release notes, so you can see what it brings before you install it. The download is always checked against the certificate of GitHub's servers (**Skip HTTPS validation** does not apply), and the firmware against the SHA-256 checksum the release lists, before the reader switches to it. When the firmware is up to date, or you decline its update, the same screen goes on to the [language and hyphenation packs](#language-packs) on the card: a line under the versions says they are up to date, or how many have an update, and then asks whether to update them now. **Update** installs them in the Font Manager, which restarts the reader into Settings when you leave it. A pack has an update when its size or its checksum differs from the Font Manager's list, so the interface language pack the reader wrote to the card on its first start after 2.40 or 2.41RC is offered as an update too. The reader restarts when you leave this screen.
 - **Include Beta Updates**: Whether to include release-candidate builds in update checks. "ON" / "OFF"
-- **SD Firmware Update**: Flash a firmware `.bin` file from the SD card. Press **Confirm** on a file to flash it. The **Options** button hint in the file picker opens a smaller menu than the Library's: the sort and visibility options, **Search**, **Search all folders**, and **Remove** to delete a `.bin` you no longer need.
+- **SD Firmware Update**: Flash a firmware `.bin` file from the SD card. Press **Confirm** on a file to flash it. The **Options** button hint in the file picker opens a smaller menu than the Library's: the sort and visibility options, **Search**, **Search all folders**, and **Remove** to delete a `.bin` you no longer need. Use the release's `firmware*.bin` here, not a `full-install-*.bin`.
+
+These updates replace the firmware only. The device's boot loader and partition table stay as they are. If the
+interface stays in English although your language's pack is on the card (an X4 Pro updated from its original
+firmware), or to give an X3 or X4 the faster-waking boot loader, use the **Full install** of the
+[Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/) once, from a computer. It keeps the SD card. The
+page lists what it resets in the device's own memory.
 
 #### 3.7.5 OPDS Servers (Multiple Libraries)
 

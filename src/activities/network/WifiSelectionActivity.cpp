@@ -606,7 +606,7 @@ void WifiSelectionActivity::prepareForConnect() {
   // the idle threshold before the action fired. main.cpp now keeps the clock up while a button is
   // held, which removes that particular trigger; this stays as the guarantee at the point that
   // actually depends on it, for every other way the clock could be low when we get here.
-  powerManager.ensureFullSpeedForRadio();
+  powerManager.ensureFullSpeed();
 
   WiFi.persistent(false);  // Credentials are managed by WifiCredentialStore; suppress SDK NVS auto-connect
 

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <HalGPIO.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <Logging.h>
 
@@ -10,6 +11,7 @@
 #include <cctype>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "BootDiagnostics.h"
@@ -17,6 +19,8 @@
 #include "activities/ActivityManager.h"
 #include "activities/RenderLock.h"
 #include "activities/home/LibraryTab.h"
+#include "network/WebAssets.h"
+#include "util/ButtonPressQueue.h"
 #include "util/ScreenshotUtil.h"
 #include "util/SerialCommandGrammar.h"
 
@@ -30,7 +34,6 @@
 #include <GlyphKey.h>
 #include <GlyphProvider.h>
 #include <GlyphRun.h>
-#include <HalPowerManager.h>
 #include <HalSystem.h>
 #include <IndicScripts.h>
 #include <Memory.h>
@@ -43,8 +46,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <ttf/TtfFont.h>
-
-#include <cstring>
 
 #include "ButtonEventManager.h"
 #include "CjkUiFonts.h"
@@ -220,6 +221,9 @@ bool idleScreenOnly = false;
 constexpr uint32_t kIdleDefaultTimeoutMs = 10000;
 constexpr uint32_t kIdleMaxTimeoutMs = 600000;
 
+// CMD:BTN:<name>:<ms>'s presses, held down through HalGPIO::holdSyntheticButtons() and stepped by service().
+ButtonPressQueue heldPresses;
+
 // The last command meant to change the screen, which CMD:IDLE waits to see through (IdleGate).
 // Input: a press or touch, handed over once HalGPIO has delivered it and the classifier is done
 // with it. Screen: an ACT, handed over once the activity on top has changed.
@@ -236,7 +240,7 @@ void noteEffect(const Effect kind) {
 bool effectHandled() {
   switch (effect) {
     case Effect::Input:
-      return !gpio.injectedInputPending() && !globalButtonEvents().isMidGesture();
+      return heldPresses.idle() && !gpio.injectedInputPending() && !globalButtonEvents().isMidGesture();
     case Effect::Screen:
       return activityManager.activityChangeCount() != effectActivityBase;
   }
@@ -255,7 +259,8 @@ void cmdButton(const std::string_view arg) {
   using SerialCommandGrammar::PressKind;
   std::string_view name;
   PressKind kind = PressKind::Short;
-  if (!SerialCommandGrammar::parseButtonArg(arg, name, kind)) {
+  int holdMs = 0;
+  if (!SerialCommandGrammar::parseButtonArg(arg, name, kind, holdMs, ButtonPressQueue::MAX_HOLD_MS)) {
     reply("BTN_ERROR:bad press ", arg);
     return;
   }
@@ -272,6 +277,13 @@ void cmdButton(const std::string_view arg) {
   };
   for (const NamedButton& button : kButtons) {
     if (name != button.name) continue;
+#if SERIAL_TEST_API
+    // A held press plays out over its hold; a tap now would reach the screen before it ends.
+    if (kind != PressKind::Hold && !heldPresses.idle()) {
+      reply("BTN_ERROR:busy");
+      return;
+    }
+#endif
     switch (kind) {
       case PressKind::Short:
         gpio.injectPress(button.index);
@@ -303,6 +315,17 @@ void cmdButton(const std::string_view arg) {
         return;
 #endif
       }
+      case PressKind::Hold:
+#if SERIAL_TEST_API
+        if (!heldPresses.push(button.index, static_cast<uint16_t>(holdMs))) {
+          reply("BTN_ERROR:busy");
+          return;
+        }
+        break;
+#else
+        reply("BTN_ERROR:bad press ", arg);
+        return;
+#endif
     }
     noteEffect(Effect::Input);
     reply("BTN_OK");
@@ -463,12 +486,14 @@ void cmdActivity(const std::string_view arg) {
   std::string_view target;
   std::string_view rest;
   splitHead(arg, target, rest);
-  static constexpr const char* kTargets[] = {"HOME",    "READER", "SETTINGS",      "BOOKMARKS",   "FILES",
-                                             "LIBRARY", "DICT",   "FILE_TRANSFER", "USB_TRANSFER"};
+  static constexpr const char* kTargets[] = {"HOME",    "READER",       "SETTINGS", "BOOKMARKS",    "FILES",
+                                             "LIBRARY", "USB_TRANSFER", "DICT",     "FILE_TRANSFER"};
 #if SERIAL_TEST_API
   constexpr int kTargetCount = 9;
 #else
-  constexpr int kTargetCount = 6;  // the original targets; the rest come with SERIAL_TEST_API
+  // The original targets, and USB_TRANSFER for the web flasher (flasher/), which writes the web
+  // bundle through it; the rest come with SERIAL_TEST_API.
+  constexpr int kTargetCount = 7;
 #endif
   switch (indexOf(target, kTargets, kTargetCount)) {
     case 0:
@@ -510,14 +535,7 @@ void cmdActivity(const std::string_view arg) {
       activityManager.goToLibrary(static_cast<LibraryTab>(tab));
       break;
     }
-#if SERIAL_TEST_API
     case 6:
-      lookUpWord(rest);
-      return;
-    case 7:
-      activityManager.goToFileTransfer();
-      break;
-    case 8:
       // Leaving the transfer screen reboots (SerialTransferActivity::onExit), so replacing it with
       // a fresh one would land on Home: already there is already done.
       if (std::strcmp(activityManager.currentActivityName(), "SerialTransfer") == 0) {
@@ -525,6 +543,13 @@ void cmdActivity(const std::string_view arg) {
         return;
       }
       activityManager.goToSerialTransfer();
+      break;
+#if SERIAL_TEST_API
+    case 7:
+      lookUpWord(rest);
+      return;
+    case 8:
+      activityManager.goToFileTransfer();
       break;
 #endif
     default:
@@ -559,6 +584,10 @@ void cmdState(std::string_view /*arg*/) {
   }
   // The TrueType family behind the UI faces (CjkUiFonts::setReaderFont), when one is.
   if (CjkUiFonts::hasReaderFont()) appendField(state, "ui_font", sdFontSystem.loadedFamily().c_str());
+  // Held presses the input layer never took in (ButtonPressQueue): only when there were any.
+  if (heldPresses.droppedPresses() != 0) {
+    appendField(state, "btn_dropped", static_cast<long>(heldPresses.droppedPresses()));
+  }
   appendField(state, "heap", static_cast<long>(ESP.getFreeHeap()));
   appendField(state, "maxblock",
               static_cast<long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
@@ -831,7 +860,9 @@ void cmdTouch(const std::string_view arg) {
   // BTN's suffix grammar, with the point where the button's name goes.
   std::string_view point;
   SerialCommandGrammar::PressKind kind = SerialCommandGrammar::PressKind::Short;
-  if (!SerialCommandGrammar::parseButtonArg(arg, point, kind) || kind == SerialCommandGrammar::PressKind::Double) {
+  int holdMs = 0;
+  if (!SerialCommandGrammar::parseButtonArg(arg, point, kind, holdMs, ButtonPressQueue::MAX_HOLD_MS) ||
+      (kind != SerialCommandGrammar::PressKind::Short && kind != SerialCommandGrammar::PressKind::Long)) {
     reply("TOUCH_ERROR:not on screen ", arg);
     return;
   }
@@ -1474,7 +1505,6 @@ void fsPut(const std::string_view arg) {
     return;
   }
 
-  const HalPowerManager::Lock fullSpeed;
   LongWork work;
   const char* error = nullptr;
   {
@@ -1567,7 +1597,6 @@ void fsGet(const std::string_view arg) {
     reply("FS_ERROR:no memory ", path);
     return;
   }
-  const HalPowerManager::Lock fullSpeed;
   const auto size = static_cast<uint32_t>(file.fileSize());
   uint32_t crc = 0;
   if (!crcOfFile(file, size, scratch.get(), crc) || !file.seek(0)) {
@@ -1641,7 +1670,6 @@ void fsHash(const std::string_view arg) {
     reply("FS_ERROR:no memory ", path);
     return;
   }
-  const HalPowerManager::Lock fullSpeed;
   const auto size = static_cast<uint32_t>(file.fileSize());
   uint32_t crc = 0;
   if (!crcOfFile(file, size, scratch.get(), crc)) {
@@ -1930,6 +1958,36 @@ void cmdBootLog(std::string_view /*arg*/) {
   reply("BOOTLOG_OK");
 }
 
+// ---- WEB ------------------------------------------------------------------------------------
+// The web interface's bundle (network/WebAssets.h). CMD:WEB says which bundle this build expects
+// and whether it is installed; CMD:WEB:INSTALL installs web-<hash>.bin from the card's top folder,
+// as the setup page's "card" source does, with the same hash check. Together with a file written
+// on the USB Transfer screen ('W') that installs the pages without Wi-Fi: the web flasher
+// (flasher/) does so after a flash, which is why both are in every build.
+void cmdWeb(const std::string_view arg) {
+  if (arg.empty()) {
+    WebAssets::forget();  // the card may have changed since the state was read (USB Transfer, a reader)
+    std::string line = "WEB:state=";
+    line.reserve(96);
+    line += WebAssets::stateName(WebAssets::state());
+    appendField(line, "asset", WebAssets::assetName());
+    appendField(line, "release", WebAssets::releaseTag());
+    appendField(line, "onCard", WebAssets::bundleOnCard() ? 1L : 0L);
+    reply(line);
+    return;
+  }
+  if (arg != "INSTALL") {
+    reply("WEB_ERROR:unknown argument ", arg);
+    return;
+  }
+  const WebAssets::InstallError err = WebAssets::installFromCard();
+  if (err == WebAssets::InstallError::None) {
+    reply("WEB_OK");
+  } else {
+    reply("WEB_ERROR:", WebAssets::errorText(err));
+  }
+}
+
 void cmdHelp(std::string_view arg);
 
 using Handler = void (*)(std::string_view arg);
@@ -1939,7 +1997,7 @@ struct Command {
 };
 constexpr Command kCommands[] = {
     {"BTN", &cmdButton},      {"ACT", &cmdActivity},  {"STATE", &cmdState}, {"SCREENSHOT", &cmdScreenshot},
-    {"BOOTLOG", &cmdBootLog}, {"HELP", &cmdHelp},
+    {"BOOTLOG", &cmdBootLog}, {"WEB", &cmdWeb},       {"HELP", &cmdHelp},
 #if SERIAL_TEST_API
     {"IDLE", &cmdIdle},       {"EVENTS", &cmdEvents}, {"GET", &cmdGet},     {"SET", &cmdSet},
     {"LOG", &cmdLog},         {"TOUCH", &cmdTouch},   {"SWIPE", &cmdSwipe}, {"SLEEP", &cmdSleep},
@@ -2031,6 +2089,16 @@ void serviceEvents() {
   }
 }
 
+// Plays CMD:BTN:<name>:<ms>'s presses, against the buttons this pass's input snapshot shows down.
+void serviceHeldPresses() {
+  if (heldPresses.idle()) return;  // its last step released everything
+  uint8_t committed = 0;
+  for (uint8_t i = 0; i <= HalGPIO::BTN_POWER; ++i) {
+    if (gpio.isPressed(i)) committed |= static_cast<uint8_t>(1u << i);
+  }
+  gpio.holdSyntheticButtons(heldPresses.step(millis(), committed));
+}
+
 void serviceIdle() {
   // Nothing to follow most of the time: then the device is not sampled at all, which keeps the
   // reader's lock attempt in hasPendingBackgroundWork() off the ordinary loop pass.
@@ -2055,9 +2123,16 @@ void serviceIdle() {
 
 }  // namespace
 
-void handleLine(const std::string_view line) {
+bool handleLine(const std::string_view line) {
   constexpr std::string_view kPrefix = "CMD:";
-  if (line.substr(0, kPrefix.size()) != kPrefix) return;
+  if (line.substr(0, kPrefix.size()) != kPrefix) return false;
+  // A command can arrive with the CPU at 10 MHz, and main.cpp raises it only after this returns. At
+  // that clock the USB link can drop reply bytes unseen (lib/Logging/Logging.cpp says how), and the
+  // command's own work (a card copy, a dictionary lookup) would run at it too. The Lock lifts the idle
+  // governor's drop and keeps a refresh from lowering the clock meanwhile; ensureFullSpeed() lifts a
+  // refresh's drop already under way, which the Lock does not see.
+  const HalPowerManager::Lock fullSpeed;
+  powerManager.ensureFullSpeed();
   const std::string_view command = trim(line.substr(kPrefix.size()));
   std::string_view name;
   std::string_view arg;
@@ -2065,13 +2140,17 @@ void handleLine(const std::string_view line) {
   for (const Command& entry : kCommands) {
     if (name == entry.name) {
       entry.run(arg);
-      return;
+      return true;
     }
   }
   reply("CMD_ERROR:unknown command ", command);
+  return false;
 }
 
 void sendScreenshot(const uint8_t* frame, const uint32_t size, const int width, const int height, const bool busy) {
+  // CMD:SCREENSHOT is answered here, on a later loop pass when a render held the frame, after the
+  // idle governor may have lowered the clock again: a frame is the longest reply, where a lost byte shows.
+  const HalPowerManager::Lock fullSpeed;
   if (busy) {
     reply("SCREENSHOT_ERROR:busy");
     return;
@@ -2096,9 +2175,12 @@ void sendScreenshot(const uint8_t* frame, const uint32_t size, const int width, 
 void begin(GfxRenderer& renderer) { testRenderer = &renderer; }
 
 void service() {
+  serviceHeldPresses();
   serviceEvents();
   serviceIdle();
 }
+
+bool commandPending() { return idleGate.active(); }
 
 void notePopup(const char* text) { noteText(popupProbe, -1, text); }
 

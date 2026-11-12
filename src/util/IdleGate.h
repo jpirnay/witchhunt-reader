@@ -46,7 +46,8 @@ class IdleGate {
   }
 
   bool waiting() const { return waiting_; }
-  // A wait is running or an effect is being followed: step() has something to do.
+  // A wait is running or an effect is being followed: step() has something to do. The main loop
+  // counts this as user activity (SerialTestApi::commandPending()).
   bool active() const { return waiting_ || effectPending_; }
   uint32_t elapsedMs(const uint32_t nowMs) const { return nowMs - startMs_; }
   // What last kept the device busy; "settling" when nothing did but quiet was not long enough yet.

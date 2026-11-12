@@ -10,12 +10,12 @@
 // here touches the device: every function reads a view of the command line and fills plain values.
 namespace SerialCommandGrammar {
 
-// How CMD:BTN:<name>[:LONG|:DOUBLE] presses the button.
-enum class PressKind : uint8_t { Short, Long, Double };
+// How CMD:BTN:<name>[:LONG|:DOUBLE|:<ms>] presses the button: Hold keeps it down for `holdMs`.
+enum class PressKind : uint8_t { Short, Long, Double, Hold };
 
-// Splits "<NAME>[:LONG|:DOUBLE]". False for any other suffix, so a typo is an error rather than a
-// short press of a button called "BACK:LONGG".
-bool parseButtonArg(std::string_view arg, std::string_view& name, PressKind& kind);
+// Splits "<NAME>[:LONG|:DOUBLE|:<ms>]", <ms> a plain decimal 1..maxHoldMs. False for any other suffix,
+// so a typo is an error rather than a short press of a button called "BACK:LONGG".
+bool parseButtonArg(std::string_view arg, std::string_view& name, PressKind& kind, int& holdMs, int maxHoldMs);
 
 // Where CMD:ACT:READER:<path>[@<spine>:<page>|@<percent>%] opens the book. Spine and page are
 // 1-based, as CMD:STATE reports them.

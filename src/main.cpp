@@ -1852,9 +1852,10 @@ void loop() {
     }
   }
   // The serial test commands (CMD:..., see SerialTestApi.h and docs/serial-test-api.md).
+  bool serialCommandRan = false;
   if (serialLineComplete) {
     SerialBuffers::arm();
-    SerialTestApi::handleLine(serialLine.take());
+    serialCommandRan = SerialTestApi::handleLine(serialLine.take());
   }
 
   // Before the POWER+DOWN block below, which returns while the combo is held.
@@ -1879,8 +1880,12 @@ void loop() {
   // (reader -> KOReader sync) reached WiFi.begin() at 10 MHz and wedged. Holding a button is
   // user activity by any reasonable reading, so count it as such. wasTouchActivity() is the same
   // argument for the touch boards: a finger on the glass raises no button edge at all.
-  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.isAnyPressed() || gpio.wasTouchActivity() ||
-      halTiltSensor.hadActivity() || activityManager.preventAutoSleep()) {
+  // A serial command is user activity too, and so is one still under way (an IDLE wait, a press
+  // being followed to its frame): a device driven only over USB used to auto-sleep mid-test, and
+  // to answer at 10 MHz, where the USB link can drop reply bytes unseen.
+  if (serialCommandRan || SerialTestApi::commandPending() || gpio.wasAnyPressed() || gpio.wasAnyReleased() ||
+      gpio.isAnyPressed() || gpio.wasTouchActivity() || halTiltSensor.hadActivity() ||
+      activityManager.preventAutoSleep()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
     sleepTimerStart = lastActivityTime;

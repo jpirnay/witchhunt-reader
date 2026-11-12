@@ -10,10 +10,14 @@
 #include <string>
 #include <vector>
 
+#include "util/ButtonPressQueue.h"
 #include "util/SerialCommandGrammar.h"
 
 using SerialCommandGrammar::PressKind;
 using SerialCommandGrammar::ReaderTarget;
+
+// What SerialTestApi passes.
+constexpr int kMaxHoldMs = ButtonPressQueue::MAX_HOLD_MS;
 
 namespace {
 
@@ -49,13 +53,14 @@ std::vector<std::pair<std::string, std::string>> splitFields(const std::string& 
 TEST(SerialCommandGrammar, ButtonNamesAndModifiers) {
   std::string_view name;
   PressKind kind = PressKind::Long;
-  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("BACK", name, kind));
+  int holdMs = 0;
+  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("BACK", name, kind, holdMs, kMaxHoldMs));
   EXPECT_EQ(name, "BACK");
   EXPECT_EQ(kind, PressKind::Short);
-  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("CONFIRM:LONG", name, kind));
+  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("CONFIRM:LONG", name, kind, holdMs, kMaxHoldMs));
   EXPECT_EQ(name, "CONFIRM");
   EXPECT_EQ(kind, PressKind::Long);
-  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("POWER:DOUBLE", name, kind));
+  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("POWER:DOUBLE", name, kind, holdMs, kMaxHoldMs));
   EXPECT_EQ(name, "POWER");
   EXPECT_EQ(kind, PressKind::Double);
 }
@@ -63,21 +68,43 @@ TEST(SerialCommandGrammar, ButtonNamesAndModifiers) {
 TEST(SerialCommandGrammar, ATouchPointTakesTheSameSuffix) {
   std::string_view point;
   PressKind kind = PressKind::Short;
-  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("120,300", point, kind));
+  int holdMs = 0;
+  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("120,300", point, kind, holdMs, kMaxHoldMs));
   EXPECT_EQ(point, "120,300");
   EXPECT_EQ(kind, PressKind::Short);
-  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("120,300:LONG", point, kind));
+  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("120,300:LONG", point, kind, holdMs, kMaxHoldMs));
   EXPECT_EQ(point, "120,300");
   EXPECT_EQ(kind, PressKind::Long);
-  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("120,300:LONGER", point, kind));
+  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("120,300:LONGER", point, kind, holdMs, kMaxHoldMs));
+}
+
+TEST(SerialCommandGrammar, ANumberIsAHeldPressOfThatManyMilliseconds) {
+  std::string_view name;
+  PressKind kind = PressKind::Short;
+  int holdMs = 0;
+  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("DOWN:1500", name, kind, holdMs, kMaxHoldMs));
+  EXPECT_EQ(name, "DOWN");
+  EXPECT_EQ(kind, PressKind::Hold);
+  EXPECT_EQ(holdMs, 1500);
+  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("BACK:1", name, kind, holdMs, kMaxHoldMs));
+  EXPECT_EQ(holdMs, 1);
+  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("BACK:10000", name, kind, holdMs, kMaxHoldMs));
+  EXPECT_EQ(holdMs, 10000);
+  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("BACK:10001", name, kind, holdMs, kMaxHoldMs)) << "past the cap";
+  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("BACK:0", name, kind, holdMs, kMaxHoldMs));
+  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("BACK:-5", name, kind, holdMs, kMaxHoldMs));
+  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("BACK:+5", name, kind, holdMs, kMaxHoldMs));
+  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("BACK:15OO", name, kind, holdMs, kMaxHoldMs));
+  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("BACK:99999999999", name, kind, holdMs, kMaxHoldMs));
 }
 
 TEST(SerialCommandGrammar, ATypoInTheModifierIsAnErrorNotAShortPress) {
   std::string_view name;
   PressKind kind = PressKind::Short;
-  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("BACK:LONGG", name, kind));
-  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("BACK:", name, kind));
-  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("", name, kind));
+  int holdMs = 0;
+  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("BACK:LONGG", name, kind, holdMs, kMaxHoldMs));
+  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("BACK:", name, kind, holdMs, kMaxHoldMs));
+  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("", name, kind, holdMs, kMaxHoldMs));
 }
 
 TEST(SerialCommandGrammar, ReaderTargetWithoutAPositionOpensAtTheSavedOne) {

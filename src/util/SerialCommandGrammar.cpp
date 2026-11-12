@@ -30,7 +30,8 @@ bool needsQuotes(const std::string_view value) {
 
 }  // namespace
 
-bool parseButtonArg(const std::string_view arg, std::string_view& name, PressKind& kind) {
+bool parseButtonArg(const std::string_view arg, std::string_view& name, PressKind& kind, int& holdMs,
+                    const int maxHoldMs) {
   const size_t colon = arg.find(':');
   name = arg.substr(0, colon);
   kind = PressKind::Short;
@@ -45,7 +46,14 @@ bool parseButtonArg(const std::string_view arg, std::string_view& name, PressKin
     kind = PressKind::Double;
     return true;
   }
-  return false;
+  int ms = 0;
+  if (modifier.empty() || modifier[0] < '0' || modifier[0] > '9' || !parseInt(modifier, ms) || ms < 1 ||
+      ms > maxHoldMs) {
+    return false;
+  }
+  kind = PressKind::Hold;
+  holdMs = ms;
+  return true;
 }
 
 bool parseReaderTarget(const std::string_view arg, ReaderTarget& out) {
