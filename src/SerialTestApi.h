@@ -30,7 +30,10 @@ namespace SerialTestApi {
 // stray keys do no harm. Called by the main loop, and by the USB transfer screen, which owns the
 // port while it is up and reads the lines itself. Replies and event lines are only ever written
 // from the loop task, so they never interleave with each other or a screenshot.
-void handleLine(std::string_view line);
+// A command runs and answers under a HalPowerManager::Lock, so the idle governor's low clock is lifted
+// first. True when the line named a command this build has: main.cpp counts that as user activity, as
+// it does a key press.
+bool handleLine(std::string_view line);
 
 // ScreenshotUtil's host sender (CMD:SCREENSHOT): SCREENSHOT_START:<w>:<h>:<bytes>, the raw
 // 1-bit frame, SCREENSHOT_END; or SCREENSHOT_ERROR:<why>.
@@ -48,6 +51,10 @@ void begin(GfxRenderer& renderer);
 // EVT: lines a host asked for (CMD:EVENTS:ON).
 void service();
 PowerRequest takePowerRequest();
+// True while a CMD:IDLE waits, or while the effect of a BTN, TOUCH, SWIPE or ACT is still being followed
+// (IdleGate::active()). main.cpp counts that as user activity too, so a device under test neither
+// sleeps nor drops to its idle clock while a command is under way.
+bool commandPending();
 
 // Probes the UI calls from whichever task draws. Each copies a few bytes into a fixed slot (no
 // heap) for CMD:STATE and the EVT: lines to report later.
@@ -92,6 +99,7 @@ bool sendPage(const PageOnScreen& onScreen);
 inline void begin(GfxRenderer&) {}
 inline void service() {}
 inline PowerRequest takePowerRequest() { return PowerRequest::None; }
+inline bool commandPending() { return false; }
 inline void notePopup(const char*) {}
 inline void noteSelection(int, const char*) {}
 inline void noteBuildDone(int, int) {}

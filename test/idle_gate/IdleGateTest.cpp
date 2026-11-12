@@ -162,3 +162,53 @@ TEST(IdleGate, AnUnhandledPressIsNamedInTheTimeout) {
   EXPECT_EQ(d.runUntilDone(), Verdict::TimedOut);
   EXPECT_STREQ(d.gate.reason(), "input");
 }
+
+// The main loop counts active() as user activity (SerialTestApi::commandPending()): it holds off
+// auto-sleep and the idle clock. So it must last from a command's effect to its frame and through an
+// IDLE wait, and end with them: too short and a device under test sleeps or downclocks mid-wait, too
+// long and it never sleeps again.
+TEST(IdleGate, ActiveLastsFromThePressToItsFrameAndThroughTheWait) {
+  Device d;
+  EXPECT_FALSE(d.gate.active());
+  d.gate.noteEffect();
+  d.handled = false;
+  for (int i = 0; i < 60; ++i) {
+    d.pass();
+    ASSERT_TRUE(d.gate.active()) << "the press is still queued";
+  }
+  d.handled = true;  // handled, its frame not started yet
+  d.pass();
+  EXPECT_TRUE(d.gate.active());
+  d.passes++;  // the page turn's render pass starts
+  d.pass();
+  EXPECT_FALSE(d.gate.active()) << "the effect is seen through, and no wait runs";
+
+  d.gate.begin(d.now, 10000);
+  d.busy = "render";
+  for (int i = 0; i < 40; ++i) {
+    ASSERT_EQ(d.pass(), Verdict::Waiting);
+    ASSERT_TRUE(d.gate.active()) << "the wait runs";
+  }
+  d.busy = nullptr;
+  EXPECT_EQ(d.runUntilDone(), Verdict::Idle);
+  EXPECT_FALSE(d.gate.active()) << "answered";
+}
+
+TEST(IdleGate, AnEffectThatDrawsNothingStopsBeingActiveAfterTheGrace) {
+  Device d;
+  d.gate.noteEffect();
+  const uint32_t start = d.now;
+  while (d.gate.active() && d.now - start < 5000) d.pass();
+  EXPECT_FALSE(d.gate.active());
+  EXPECT_GE(d.now - start, IdleGate::kNoRenderGraceMs);
+  EXPECT_LT(d.now - start, IdleGate::kNoRenderGraceMs + 30);
+}
+
+TEST(IdleGate, ATimedOutWaitIsNoLongerActive) {
+  Device d;
+  d.busy = "background";
+  d.gate.begin(d.now, 500);
+  EXPECT_TRUE(d.gate.active());
+  EXPECT_EQ(d.runUntilDone(), Verdict::TimedOut);
+  EXPECT_FALSE(d.gate.active());
+}

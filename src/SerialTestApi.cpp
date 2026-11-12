@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <HalGPIO.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <Logging.h>
 
@@ -32,7 +33,6 @@
 #include <GlyphKey.h>
 #include <GlyphProvider.h>
 #include <GlyphRun.h>
-#include <HalPowerManager.h>
 #include <HalSystem.h>
 #include <IndicScripts.h>
 #include <Memory.h>
@@ -1476,7 +1476,6 @@ void fsPut(const std::string_view arg) {
     return;
   }
 
-  const HalPowerManager::Lock fullSpeed;
   LongWork work;
   const char* error = nullptr;
   {
@@ -1569,7 +1568,6 @@ void fsGet(const std::string_view arg) {
     reply("FS_ERROR:no memory ", path);
     return;
   }
-  const HalPowerManager::Lock fullSpeed;
   const auto size = static_cast<uint32_t>(file.fileSize());
   uint32_t crc = 0;
   if (!crcOfFile(file, size, scratch.get(), crc) || !file.seek(0)) {
@@ -1643,7 +1641,6 @@ void fsHash(const std::string_view arg) {
     reply("FS_ERROR:no memory ", path);
     return;
   }
-  const HalPowerManager::Lock fullSpeed;
   const auto size = static_cast<uint32_t>(file.fileSize());
   uint32_t crc = 0;
   if (!crcOfFile(file, size, scratch.get(), crc)) {
@@ -2087,9 +2084,13 @@ void serviceIdle() {
 
 }  // namespace
 
-void handleLine(const std::string_view line) {
+bool handleLine(const std::string_view line) {
   constexpr std::string_view kPrefix = "CMD:";
-  if (line.substr(0, kPrefix.size()) != kPrefix) return;
+  if (line.substr(0, kPrefix.size()) != kPrefix) return false;
+  // A command can arrive while the idle governor has the CPU at 10 MHz, and main.cpp raises it only
+  // after this returns. At that clock the USB link can drop reply bytes unseen (lib/Logging/Logging.cpp
+  // says how), and the command's own work (a card copy, a dictionary lookup) would run at it too.
+  const HalPowerManager::Lock fullSpeed;
   const std::string_view command = trim(line.substr(kPrefix.size()));
   std::string_view name;
   std::string_view arg;
@@ -2097,13 +2098,17 @@ void handleLine(const std::string_view line) {
   for (const Command& entry : kCommands) {
     if (name == entry.name) {
       entry.run(arg);
-      return;
+      return true;
     }
   }
   reply("CMD_ERROR:unknown command ", command);
+  return false;
 }
 
 void sendScreenshot(const uint8_t* frame, const uint32_t size, const int width, const int height, const bool busy) {
+  // CMD:SCREENSHOT is answered here, on a later loop pass when a render held the frame, after the
+  // idle governor may have lowered the clock again: a frame is the longest reply, where a lost byte shows.
+  const HalPowerManager::Lock fullSpeed;
   if (busy) {
     reply("SCREENSHOT_ERROR:busy");
     return;
@@ -2131,6 +2136,8 @@ void service() {
   serviceEvents();
   serviceIdle();
 }
+
+bool commandPending() { return idleGate.active(); }
 
 void notePopup(const char* text) { noteText(popupProbe, -1, text); }
 

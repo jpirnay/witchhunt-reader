@@ -129,6 +129,10 @@ A reply means the command was **accepted**, not that its effect is finished: aft
 press is queued and the screen has not been redrawn yet. Use [`CMD:IDLE`](#waiting-idle) to wait for
 the effect before you look at the screen.
 
+A command counts as user activity, as a key press does: it restarts the auto-sleep countdown and
+keeps the CPU at its full clock, and so does a pending `IDLE` or a press or screen switch still on
+its way to the panel, so a session driven only over USB needs no keep-alive presses.
+
 Values that contain spaces are written in double quotes, with `"` and `\` escaped by a backslash,
 for example `book="/test/The Anarchy - Dalrymple, William.epub"`. Split such a line on spaces that
 are outside quotes.
