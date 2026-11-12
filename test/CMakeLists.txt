@@ -314,6 +314,7 @@ add_subdirectory(fallback_face_provider)  # after font_group_stream: links its u
 add_subdirectory(cjk_ui_pack)  # likewise
 add_subdirectory(keyboard_labels)
 add_subdirectory(light_drawer_layout)
+add_subdirectory(reader_bars_layout)
 add_subdirectory(ui_face_scripts)
 add_subdirectory(ui_shaped_text)  # after font_group_stream: links its uzlib_font_ring
 add_subdirectory(ui_font_compression)  # likewise

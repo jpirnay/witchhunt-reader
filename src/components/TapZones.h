@@ -151,4 +151,24 @@ inline Half halfOfBand(const int px, const int py, const int x, const int y, con
   return px < x + width / 2 ? Half::Previous : Half::Next;
 }
 
+// A tap on the reader's status bar, which opens the reader bars (ReaderBarsActivity).
+//
+// The status bar sits in the margin between a screen edge and the text area, so the band is that margin, made at least
+// `minBand` tall where it is narrower: a status bar is a thin line to aim a finger at, and the band reaches the last or
+// first line of text no further than that. `topMargin` / `bottomMargin` are the reader's oriented margins with the
+// status bars in them (ReaderUtils::addReaderMargins), 0 on a side that draws no status bar.
+//
+// Checked before the page-turn zones, whose outer thirds run the full height: inside the band a tap means the status
+// bar, and everywhere else exactly what it meant before. After CrossInk's status-bar tap target
+// (ReaderStatusBarTapTarget, Julia Nguyen), which hides and shows its bars with it; the idea only.
+enum class StatusBand : uint8_t { None, Top, Bottom };
+
+inline StatusBand statusBandFor(const int y, const int height, const int topMargin, const int bottomMargin,
+                                const int minBand) {
+  if (height <= 0 || y < 0 || y >= height) return StatusBand::None;
+  if (bottomMargin > 0 && y >= height - (bottomMargin > minBand ? bottomMargin : minBand)) return StatusBand::Bottom;
+  if (topMargin > 0 && y < (topMargin > minBand ? topMargin : minBand)) return StatusBand::Top;
+  return StatusBand::None;
+}
+
 }  // namespace TapZones

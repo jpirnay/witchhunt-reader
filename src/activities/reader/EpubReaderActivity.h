@@ -1119,6 +1119,12 @@ class EpubReaderActivity final : public Activity {
   // The book's own settings as this reader holds them (the book*Override members).
   BookReaderOverrides bookOverrides() const;
   void openReaderMenu();
+  // The reader bars (ReaderBarsActivity) over the page: Confirm, a centre tap and a status-bar tap open them; a key
+  // bound to the reader menu still opens the full menu, which the bars reach through More.
+  void openReaderBars();
+  void onReaderBarsClosed(const ActivityResult& result);
+  // A tap on the status bar band (TapZones::statusBandFor), touch boards only.
+  bool statusBarTapped() const;
   void openQuickOverrides();
   bool getEffectiveEmbeddedStyle() const;
   bool getEffectiveBionicReading() const;

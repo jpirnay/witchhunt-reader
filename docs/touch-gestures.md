@@ -40,7 +40,8 @@ the grid and answer only to a **hold**, never a tap — so no tap changes meanin
 | --- | --- |
 | Tap left column | Previous page |
 | Tap right column | Next page |
-| Tap centre | Reader menu |
+| Tap centre | Reader bars (ReaderBarsActivity; More opens the reader menu) |
+| Tap the status bar | Reader bars, before the column test (TapZones::statusBandFor) |
 | Tap top / bottom | *(nothing — reserved for vertical gestures)* |
 | Hold left / right column | Previous / Next chapter |
 | Hold centre | Dictionary |
@@ -71,14 +72,14 @@ your finger on the control you want, then move — you never have to judge dista
  | ness |                    |      |
  |     |                     |     |
  +-----+---------------------+-----+
- |   bottom edge: reader menu      |
+ |   bottom edge: reader bars      |
  +---------------------------------+
 ```
 
 | Gesture | Default |
 | --- | --- |
 | Swipe **down** from the top edge | Reading light panel |
-| Swipe **up** from the bottom edge | Reader menu |
+| Swipe **up** from the bottom edge | Reader bars |
 | Swipe up / down in the **left edge** column | Light brighter / dimmer |
 | Swipe up / down in the **right edge** column | Light warmer / cooler |
 | Swipe **left** inside the left (back) column | Skip 10 pages back |
@@ -140,13 +141,13 @@ button, and it works on every screen.
 | | X4 Pro | T5S3 |
 | --- | --- | --- |
 | Top edge, swipe down | Reading light | Reading light |
-| Bottom edge, swipe up | Reader menu | Reader menu |
+| Bottom edge, swipe up | Reader bars | Reader bars |
 | Right edge, swipe up/down | Light warmer / cooler | *(free — single-channel light)* |
 | Physical keys | Up, Down, Power | Down, Power |
 | Back / Confirm | Home key: hold / tap | Home key: hold / tap |
 
 On a touchscreen board **without** a reading light the two vertical edges swap roles:
-the top edge becomes the reader menu (there being no light panel to put there) and the
+the top edge becomes the reader bars (there being no light panel to put there) and the
 bottom edge returns Home.
 
 ---
@@ -155,16 +156,16 @@ bottom edge returns Home.
 
 - **Settings → Controls → Touch Page Turn** chooses how touch turns pages: *Off*,
   *Tap Zones*, *Swipe*, or *Tap Zones (Inverted)*. It governs page turns only — the
-  reader menu and the light
+  reader bars and the light
   stay reachable, so switching page turns off while reading with a palm on the glass does
   not strand you.
 - **Settings → Controls → Touch Navigation** silences touch outside the reader.
 - **Settings → Controls → Tap Action** chooses whether a tap on a list row selects it
   (*Select, then activate*, the default) or opens it straight away.
 - Any single gesture can be set to **Ignore (do nothing)** in *Gesture actions* to switch
-  just that one off. That is how the centre tap for the reader menu is turned off: bind
+  just that one off. That is how the centre tap for the reader bars is turned off: bind
   **Tap centre** to *Ignore*. There is no separate switch for it — the swipe up from the
-  bottom edge and the Confirm button both still reach the menu.
+  bottom edge, a tap on the status bar and the Confirm button all still reach the bars.
 
 ---
 

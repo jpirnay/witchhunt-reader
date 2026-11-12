@@ -257,3 +257,31 @@ TEST(TapZones, DegenerateBandIsInert) {
 TEST(TapZones, SinglePixelBandGoesForward) {
   EXPECT_EQ(TapZones::halfOfBand(50, 50, 50, 50, 1, 1), TapZones::Half::Next);
 }
+
+// ---- The status bar band -----------------------------------------------------------------------
+
+TEST(TapZonesStatusBand, TheBottomMarginIsTheBandWhereAStatusBarIsDrawn) {
+  // 800 px tall, a 70 px bottom margin holding the status bar, a 64 px floor.
+  EXPECT_EQ(TapZones::statusBandFor(799, 800, 0, 70, 64), TapZones::StatusBand::Bottom);
+  EXPECT_EQ(TapZones::statusBandFor(730, 800, 0, 70, 64), TapZones::StatusBand::Bottom);
+  EXPECT_EQ(TapZones::statusBandFor(729, 800, 0, 70, 64), TapZones::StatusBand::None);
+}
+
+TEST(TapZonesStatusBand, ANarrowMarginIsWidenedToTheFloor) {
+  // A 30 px margin: a finger still gets 64 px.
+  EXPECT_EQ(TapZones::statusBandFor(736, 800, 0, 30, 64), TapZones::StatusBand::Bottom);
+  EXPECT_EQ(TapZones::statusBandFor(735, 800, 0, 30, 64), TapZones::StatusBand::None);
+  EXPECT_EQ(TapZones::statusBandFor(63, 800, 30, 0, 64), TapZones::StatusBand::Top);
+  EXPECT_EQ(TapZones::statusBandFor(64, 800, 30, 0, 64), TapZones::StatusBand::None);
+}
+
+TEST(TapZonesStatusBand, ASideWithoutAStatusBarHasNoBand) {
+  EXPECT_EQ(TapZones::statusBandFor(799, 800, 70, 0, 64), TapZones::StatusBand::None);
+  EXPECT_EQ(TapZones::statusBandFor(0, 800, 0, 70, 64), TapZones::StatusBand::None);
+}
+
+TEST(TapZonesStatusBand, OutsideTheFrameIsNoBand) {
+  EXPECT_EQ(TapZones::statusBandFor(-1, 800, 70, 70, 64), TapZones::StatusBand::None);
+  EXPECT_EQ(TapZones::statusBandFor(800, 800, 70, 70, 64), TapZones::StatusBand::None);
+  EXPECT_EQ(TapZones::statusBandFor(10, 0, 70, 70, 64), TapZones::StatusBand::None);
+}

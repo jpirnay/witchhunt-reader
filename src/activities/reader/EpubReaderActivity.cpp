@@ -73,10 +73,12 @@
 #include "QrDisplayActivity.h"
 #include "QuickOverridesActivity.h"
 #include "ReaderActivity.h"
+#include "ReaderBarsActivity.h"
 #include "ReaderGrayCanvas.h"
 #include "ReaderImageMode.h"
 #include "ReaderUtils.h"
 #include "ReadingSessionTracker.h"
+#include "ReadingStats.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontGlobals.h"
 #include "SdCardFontSystem.h"
@@ -88,8 +90,11 @@
 #include "activities/settings/DictionarySelectionActivity.h"
 #include "activities/settings/ReadingStatsBookDetailActivity.h"
 #include "activities/util/ConfirmationActivity.h"
+#include "components/BookProgressPresentation.h"
 #include "components/LinkMarkerMatch.h"
+#include "components/TapZones.h"
 #include "components/UITheme.h"
+#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 #include "util/ScreenshotUtil.h"
 #include "util/SerialCommandGrammar.h"
@@ -1107,7 +1112,7 @@ void EpubReaderActivity::loop() {
           requestUpdate();
           return;
         }
-        openReaderMenu();
+        openReaderBars();
         return;
       }
     }
@@ -1185,13 +1190,20 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  // A centre-third tap, or the top-edge menu swipe, opens the reader menu.
+  // A tap on the status bar opens the reader bars. Before the page-turn zones, whose outer thirds run the full height
+  // and so take in the status bar: there the tap means the bar (TapZones::statusBandFor).
+  if (statusBarTapped()) {
+    openReaderBars();
+    return;
+  }
+
+  // A centre-third tap, or the top-edge menu swipe, opens the reader bars, as Confirm does.
   // Kept next to the page-turn zones so both touch paths live in one place; the
   // zones do not overlap (outer thirds vs centre), so the order is not
   // load-bearing. Inert unless the board has touch and the user left touch
   // reading controls on.
   if (ReaderUtils::isTouchMenuGesture(renderer, mappedInput)) {
-    openReaderMenu();
+    openReaderBars();
     return;
   }
 
@@ -7981,6 +7993,110 @@ void EpubReaderActivity::openReaderMenu() {
         ReaderUtils::enforceExitFullRefresh(renderer);
         requestUpdate();
       });
+}
+
+bool EpubReaderActivity::statusBarTapped() const {
+  if (!mappedInput.hasTouch() || !section) return false;
+  const int topBar = UITheme::getStatusBarTopHeight(automaticPageTurnActive);
+  const int bottomBar = UITheme::getStatusBarBottomHeight(automaticPageTurnActive);
+  if (topBar == 0 && bottomBar == 0) return false;
+  int x = 0;
+  int y = 0;
+  if (!mappedInput.wasScreenTapped(x, y)) return false;
+  // The margins as the page is drawn with them: the status bars sit between the screen edges and the text.
+  int marginTop = 0;
+  int marginRight = 0;
+  int marginBottom = 0;
+  int marginLeft = 0;
+  renderer.getOrientedViewableTRBL(&marginTop, &marginRight, &marginBottom, &marginLeft);
+  ReaderUtils::addReaderMargins(marginTop, marginRight, marginBottom, marginLeft, topBar, bottomBar);
+  // A thin line to aim at: at least this tall wherever the margin is narrower.
+  constexpr int kMinBand = PanelMetrics::capped(64, 40);
+  return TapZones::statusBandFor(y, renderer.getScreenHeight(), topBar > 0 ? marginTop : 0,
+                                 bottomBar > 0 ? marginBottom : 0, kMinBand) != TapZones::StatusBand::None;
+}
+
+void EpubReaderActivity::openReaderBars() {
+  if (!epub) {
+    return;
+  }
+
+  ReaderBarsActivity::Info info;
+  info.title = epub->getTitle();
+  {
+    RenderLock lock(*this);
+    if (section) {
+      info.starred =
+          bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
+      // What the status bar counts: the TOC chapter, which can span several spine items (#325).
+      const ChapterPageSpan::Display chapter = chapterPageDisplay();
+      if (chapter.total > 0) {
+        info.chapterValue =
+            std::to_string(chapter.page) + (chapter.approximate ? " / ~" : " / ") + std::to_string(chapter.total);
+      }
+      info.bookValue = std::to_string(clampPercent(static_cast<int>(statusBarBookPercent() + 0.5f))) + "%";
+    }
+  }
+  // The time spent in the book: what the history holds, and the session under way, which lands there only when the
+  // reader closes.
+  {
+    const std::string docId = KOReaderDocumentId::calculateFromFilename(epub->getPath());
+    uint32_t seconds = 0;
+    ReadingStatsStore::BookQuery query;
+    if (READING_STATS.queryBook(docId, query) == ReadingStatsStore::ReadResult::Ok && query.found) {
+      seconds = query.book.totalSeconds;
+    }
+    const ReadingSessionTracker& session = globalReadingSessionTracker();
+    if (session.isActive() && session.getDocId() == docId) seconds += session.getLiveSeconds();
+    if (seconds > 0) info.timeValue = BookProgressPresentation::formatReadingDuration(seconds);
+  }
+
+  // The bars paint only their two bands, so the write buffer must hold the page on the panel. The two steps the light
+  // drawer takes, for the same two reasons (ActivityManager::dispatchLightPanelGesture): the buffer is two frames
+  // behind after a display, and a pre-rendered next page may sit in it.
+  {
+    RenderLock lock(*this);
+    renderer.syncWriteBufferFromDisplayed();
+    prepareFramebufferForCapture();
+  }
+  startActivityForResult(std::make_unique<ReaderBarsActivity>(renderer, mappedInput, std::move(info)),
+                         [this](const ActivityResult& result) { onReaderBarsClosed(result); });
+}
+
+void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
+  using MenuAction = EpubReaderMenuActivity::MenuAction;
+  const auto* bars = std::get_if<ReaderBarsResult>(&result.data);
+  if (bars && bars->starToggled) onReaderMenuConfirm(MenuAction::STAR_PAGE);
+  // Every path below draws the page afresh, or puts another screen up: the bars covered parts of it and kept no copy.
+  if (!bars) {
+    requestUpdate();
+    return;
+  }
+  switch (bars->action) {
+    case ReaderBarsResult::Action::None:
+      requestUpdate();
+      return;
+    case ReaderBarsResult::Action::Contents:
+      onReaderMenuConfirm(MenuAction::SELECT_CHAPTER);
+      return;
+    case ReaderBarsResult::Action::More:
+      openReaderMenu();
+      return;
+    case ReaderBarsResult::Action::PrevChapter:
+      onButtonAction(CrossPointSettings::BTN_PREV_SECTION);
+      requestUpdate();
+      return;
+    case ReaderBarsResult::Action::NextChapter:
+      onButtonAction(CrossPointSettings::BTN_NEXT_SECTION);
+      requestUpdate();
+      return;
+    case ReaderBarsResult::Action::GoToPercent:
+      onReaderMenuConfirm(MenuAction::GO_TO_PERCENT);
+      return;
+    case ReaderBarsResult::Action::Exit:
+      onReaderMenuConfirm(MenuAction::GO_HOME);
+      return;
+  }
 }
 
 void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION action) {
