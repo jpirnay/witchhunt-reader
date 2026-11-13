@@ -2496,14 +2496,26 @@ void unpackFlow(const uint16_t flow, CssStyle& s) {
 }  // namespace
 
 bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
-  // The payload sets only what its rule declares, and lookupRules reads every record of a selector into
-  // one style: without the reset, a record with no font-size kept the previous record's, under its own
-  // later order (as decompressStyle resets for the arena path). Found by syfq91, witchling-reader f3e3e1b98.
-  style.reset();
   // Read in one call and taken apart in RAM: a field at a time was ~30 SdFat calls a rule, paid for
   // every rule each time a section build loads the ruleset into its arena.
   std::array<uint8_t, CSS_FIXED_STYLE_BYTES> payload;
   if (file.read(payload.data(), payload.size()) != static_cast<int>(payload.size())) return false;
+  return decodeCssStylePayload(payload.data(), style);
+}
+
+bool CssParser::readCssStylePayload(serialization::BufferedFileReader& in, CssStyle& style) {
+  std::array<uint8_t, CSS_FIXED_STYLE_BYTES> payload;
+  if (!in.read(payload.data(), payload.size())) return false;
+  return decodeCssStylePayload(payload.data(), style);
+}
+
+bool CssParser::decodeCssStylePayload(const uint8_t* const bytes, CssStyle& style) {
+  // The payload sets only what its rule declares, and lookupRules reads every record of a selector into
+  // one style: without the reset, a record with no font-size kept the previous record's, under its own
+  // later order (as decompressStyle resets for the arena path). Found by syfq91, witchling-reader f3e3e1b98.
+  style.reset();
+  std::array<uint8_t, CSS_FIXED_STYLE_BYTES> payload;
+  memcpy(payload.data(), bytes, payload.size());
   size_t at = 0;
   const auto get = [&payload, &at](void* out, const size_t n) {
     if (at + n > payload.size()) return false;  // a field past CSS_FIXED_STYLE_BYTES: see its static_assert
@@ -3369,16 +3381,20 @@ bool CssParser::loadArenaResident(FsFile& file, const uint16_t ruleCount, const 
     }
     char selectorBuf[MAX_SELECTOR_LENGTH];
     uint8_t rec[kMaxCompressedStyle];
+    // The records through a window on the stack: a rule is four reads (its selector's length, the selector, its order
+    // and its payload), some 1,800 SdFat calls for a book's stylesheet at every section build (X3, 2026-11-13).
+    uint8_t window[512];
+    serialization::BufferedFileReader in(file, window, sizeof(window));
     for (uint16_t i = 0; i < ruleCount; ++i) {
       uint16_t selectorLen = 0;
       uint16_t order = 0;
-      if (file.read(&selectorLen, sizeof(selectorLen)) != sizeof(selectorLen) || selectorLen > MAX_SELECTOR_LENGTH ||
-          file.read(selectorBuf, selectorLen) != selectorLen || file.read(&order, sizeof(order)) != sizeof(order)) {
+      if (!in.readPod(selectorLen) || selectorLen > MAX_SELECTOR_LENGTH || !in.read(selectorBuf, selectorLen) ||
+          !in.readPod(order)) {
         indexArena_->release(block);
         return false;
       }
       CssStyle style;
-      if (!readCssStylePayload(file, style)) {
+      if (!readCssStylePayload(in, style)) {
         indexArena_->release(block);
         return false;
       }
