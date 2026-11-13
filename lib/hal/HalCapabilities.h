@@ -297,6 +297,8 @@ inline const char* boardDisplayName(BoardConfig::Board board) {
       return "Paper Mono";
     case BoardConfig::Board::M5PaperS3:
       return "M5Paper S3";
+    case BoardConfig::Board::Picco:
+      return "Picco";
   }
   return "Unknown";
 }
