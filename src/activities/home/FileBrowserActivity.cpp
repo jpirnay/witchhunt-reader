@@ -1844,7 +1844,13 @@ void FileBrowserActivity::doRemove(const std::string& fullPath, const std::strin
                                startLibraryBuildIfStale();  // New and Authors catch up with the card
                                requestUpdate(true);
                              } else {
+                               // Said on screen too: the list as it was is all the user would see.
                                LOG_ERR("FBR", "Failed to delete: %s", fullPath.c_str());
+                               {
+                                 RenderLock lock(*this);
+                                 renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
+                                 GUI.drawPopup(renderer, tr(STR_DELETE_FAILED));
+                               }
                                requestUpdate();
                              }
                            } else {
