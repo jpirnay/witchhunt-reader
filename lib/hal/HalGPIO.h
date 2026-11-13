@@ -357,6 +357,10 @@ class HalGPIO {
   // Capacitive Home key reported by the touch controller (X4 Pro). The tap
   // event fires on release and excludes a long hold.
   bool hasHomeKey() const;
+  // A two-position slide switch (BOOX Picco, GPIO6): its debounced position. What it controls is the
+  // firmware's choice (SETTINGS.slideSwitchAction).
+  bool hasToggleSwitch() const;
+  bool isToggleSwitchOn() const;
   bool wasHomeKeyTapped() const;
   bool wasHomeKeyLongPressed() const;
   bool wasTouchTap(float& nx, float& ny) const;

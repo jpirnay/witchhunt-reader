@@ -46,6 +46,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "DarkMode.h"
+#include "DarkModeNow.h"
 #include "GestureEventManager.h"
 #include "GlobalBookmarkIndex.h"
 #include "HyphenationPacks.h"
@@ -1725,6 +1726,37 @@ void setup() {
   logStartupMemory("setup_complete");
 }
 
+// A board's slide switch (BOOX Picco) sets what it is bound to (SETTINGS.slideSwitchAction): at the first pass, when
+// it moves, and when the binding changes. The position is compared, not a change edge, because the input loops of the
+// transfer screens drain the edge before this runs. In between, the bound setting is free to change from the UI.
+// Based on crosspoint-reader PR #3947 (Justin Mitchell, handleSlideSwitch).
+static void applySlideSwitch() {
+  static int appliedAction = -1;
+  static int appliedOn = -1;
+  if (!gpio.hasToggleSwitch()) return;
+  const bool on = gpio.isToggleSwitchOn();
+  if (appliedAction == SETTINGS.slideSwitchAction && appliedOn == static_cast<int>(on)) return;
+  appliedAction = SETTINGS.slideSwitchAction;
+  appliedOn = on ? 1 : 0;
+  switch (static_cast<CrossPointSettings::SLIDE_SWITCH_ACTION>(SETTINGS.slideSwitchAction)) {
+    case CrossPointSettings::SLIDE_SWITCH_READING_LIGHT:
+      if (!Frontlight.present() || Frontlight.isOn() == on) return;
+      Frontlight.setOn(on);
+      SETTINGS.frontlightOn = on ? 1 : 0;
+      SETTINGS.saveToFile();
+      break;
+    case CrossPointSettings::SLIDE_SWITCH_DARK_MODE:
+      if (DarkModeNow::isDark() == on) return;
+      DarkModeNow::flip();  // saves; the next frame takes the new polarity with a full refresh
+      activityManager.requestUpdate();
+      break;
+    case CrossPointSettings::SLIDE_SWITCH_NOTHING:
+    case CrossPointSettings::SLIDE_SWITCH_ACTION_COUNT:
+      return;
+  }
+  LOG_INF("SWITCH", "Slide switch %s", on ? "on" : "off");
+}
+
 void loop() {
   static unsigned long maxLoopDuration = 0;
   const unsigned long loopStartTime = millis();
@@ -1753,6 +1785,9 @@ void loop() {
     }
     return;
   }
+
+  // After the exclusive-storage return: it saves settings to the card.
+  applySlideSwitch();
 
   // The UI touch gate, refreshed every tick from the setting and the activity on
   // top. The reader keeps touch whatever this says — touchReaderControls governs

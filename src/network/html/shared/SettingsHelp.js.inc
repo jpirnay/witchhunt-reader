@@ -105,6 +105,7 @@ const SETTINGS_HELP = {
     "touchUiControls": "Lets you use touch outside books: list rows, covers, the Home menu, settings tabs and button hints.",
     "touchListAct": "Whether the first tap on a list row only selects it (tap again to open) or opens it straight away.",
     "touchReaderCtl": "How touch turns pages: tap the left or right third, the same mirrored, swipe, or not at all.",
+    "slideSwitch": "What the slide switch turns on and off: the reading light, Dark Mode, or nothing. Its position wins at start-up and whenever it moves.",
     "gestSwipeLeft": "Action for a leftward swipe; by default the next page in Swipe mode, otherwise nothing.",
     "gestSwipeRight": "Action for a rightward swipe; by default the previous page in Swipe mode, otherwise nothing.",
     "gestSwipeUpLeft": "Action for swiping up in the left edge column; by default the light gets brighter.",

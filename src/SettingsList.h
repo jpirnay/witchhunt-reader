@@ -588,6 +588,11 @@ inline void buildSettings(const RowSink& emit) {
                           StrId::STR_TOUCH_READER_INVERTED},
                          "touchReaderCtl", StrId::STR_CAT_CONTROLS)
            .requiring(SettingRequires::TouchPanel));
+  // Option order is CrossPointSettings::SLIDE_SWITCH_ACTION.
+  emit(SettingInfo::Enum(StrId::STR_SLIDE_SWITCH, &CrossPointSettings::slideSwitchAction,
+                         {StrId::STR_READING_LIGHT, StrId::STR_DARK_MODE, StrId::STR_BTN_DEF_NOTHING}, "slideSwitch",
+                         StrId::STR_CAT_CONTROLS)
+           .requiring(SettingRequires::SlideSwitch));
   for (const auto& binding : TouchGestures::BINDINGS) {
     // cppcheck-suppress useStlAlgorithm ; std::transform would have to carry this
     // whole chained builder in a lambda and append through a back_inserter, which
@@ -818,6 +823,8 @@ inline bool boardHas(const SettingRequires capability) {
       return gpio.hasTouch() && gpio.supportsMultiTouch();
     case SettingRequires::SunlightFadingPanel:
       return HalCapabilities::panelFadesInSunlight();
+    case SettingRequires::SlideSwitch:
+      return gpio.hasToggleSwitch();
   }
   return true;
 }
@@ -848,6 +855,7 @@ inline bool boardKeeps(const SettingRequires capability) {
     case SettingRequires::WarmLight:
     case SettingRequires::ReadingLightAndClock:
     case SettingRequires::SunlightFadingPanel:
+    case SettingRequires::SlideSwitch:
       return boardHas(capability);
   }
   return true;

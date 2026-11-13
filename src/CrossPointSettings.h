@@ -603,6 +603,15 @@ class CrossPointSettings {
   // Whether waking restores the light. Off by default so a device that wakes in
   // a dark bag does not light up; brightness/warmth are always restored.
   uint8_t frontlightRestoreOnWake = 1;
+  // What a board's slide switch (BOOX Picco) controls. Its position sets that at boot and on every move; the setting
+  // itself stays free to change in between. Persisted as a number: append only.
+  enum SLIDE_SWITCH_ACTION : uint8_t {
+    SLIDE_SWITCH_READING_LIGHT = 0,
+    SLIDE_SWITCH_DARK_MODE = 1,
+    SLIDE_SWITCH_NOTHING = 2,
+    SLIDE_SWITCH_ACTION_COUNT
+  };
+  uint8_t slideSwitchAction = SLIDE_SWITCH_READING_LIGHT;
   // Use book's embedded CSS styles for EPUB rendering (1 = enabled, 0 = disabled)
   uint8_t embeddedStyle = 1;
   // Publisher Fonts (PUBLISHER_FONTS; BookFonts). Off by default: opening a book in its own font installs its family
