@@ -44,8 +44,8 @@ const char* onOff(const bool on) { return text(on ? StrId::STR_ON : StrId::STR_O
 ReaderBarsController::ReaderBarsController(GfxRenderer& renderer, Info info)
     : UiAppHost(renderer), renderer(renderer), info(std::move(info)) {}
 
-void ReaderBarsController::begin(const bool touch, const bool live) {
-  live_ = live;
+void ReaderBarsController::begin(const bool touch, const bool fontWaits) {
+  fontWaits_ = fontWaits;
   starred = info.starred;
   thisBookOnly = info.thisBookOnly;
   layout = thisBookOnly ? info.bookValues : info.globalValues;
@@ -148,7 +148,14 @@ void ReaderBarsController::fillList(ReaderBarsLayout::Model& model, const Panel 
 
 ReaderLayoutSheet::Model ReaderBarsController::sheetModel() {
   ReaderLayoutSheet::Model sheet;
-  sheet.font = {text(StrId::STR_LAYOUT_FONT), fontLabel.c_str()};
+  // A font that waits for the bars to close is marked, as an unsaved change is: the page keeps the one it has until
+  // then.
+  const char* fontName = text(StrId::STR_LAYOUT_FONT);
+  if (fontPending()) {
+    snprintf(fontCellLabel, sizeof(fontCellLabel), "%s *", fontName);
+    fontName = fontCellLabel;
+  }
+  sheet.font = {fontName, fontLabel.c_str()};
   sheet.thisBook = {text(StrId::STR_THIS_BOOK_ONLY), onOff(thisBookOnly)};
   sheet.focus = focus == Focus::Layout ? layoutFocus : int16_t{-1};
   for (uint8_t c = 0; c < ReaderLayout::kControlCount; ++c) {
@@ -222,12 +229,10 @@ void ReaderBarsController::close(const ReaderBarsResult::Action action) {
   ReaderBarsResult closing;
   closing.action = action;
   closing.starToggled = starToggled;
-  const ReaderLayoutValues& opened = info.thisBookOnly ? info.bookValues : info.globalValues;
-  closing.layoutChanged = thisBookOnly != info.thisBookOnly || !(layout == opened);
+  // The reader applied every change as it was made: nothing is left to apply but a font that waited.
+  closing.layoutChanged = fontPending();
   closing.thisBookOnly = thisBookOnly;
   closing.layout = layout;
-  // Live, the reader applied every change as it was made: nothing is left to apply.
-  if (live_) closing.layoutChanged = false;
   result_ = closing;
   closed_ = true;
 }
@@ -298,7 +303,7 @@ void ReaderBarsController::pressControl(const Control control, const int delta) 
     ReaderLayout::press(layout, control, delta, info.sizes);
   }
   redraw_ = true;
-  layoutChanged_ = live_;
+  layoutChanged_ = true;
 }
 
 // Off: the book follows the global settings, which the sheet shows from then on and changes for every book. On: the
@@ -310,7 +315,7 @@ void ReaderBarsController::flipThisBookOnly() {
     if (!thisBookOnly) layout = info.globalValues;
   }
   redraw_ = true;
-  layoutChanged_ = live_;
+  layoutChanged_ = true;
 }
 
 void ReaderBarsController::onAction(const fui::ActionEvent& event, void* user) {
@@ -411,7 +416,8 @@ void ReaderBarsController::nextFont() {
     fontLabel = std::move(label);
   }
   redraw_ = true;
-  layoutChanged_ = live_;
+  // A font that waits for the bars to close changes only the cell.
+  layoutChanged_ = !fontWaits_;
 }
 
 uint8_t ReaderBarsController::layoutTargets(ReaderLayoutSheet::Target (&out)[ReaderLayoutSheet::kMaxTargets]) const {
@@ -691,5 +697,12 @@ void ReaderBarsController::resync(const ReaderLayoutValues& book, const ReaderLa
   RenderLock lock;
   info.bookValues = book;
   info.globalValues = global;
-  info.sizes = sizes;
+  // A font that waits keeps the sizes it offers: the Size cell steps along them.
+  if (!fontPending()) info.sizes = sizes;
+}
+
+ReaderLayoutValues ReaderBarsController::liveLayoutValues() const {
+  ReaderLayoutValues values = layout;
+  if (fontWaits_) values.font = info.bookValues.font;
+  return values;
 }

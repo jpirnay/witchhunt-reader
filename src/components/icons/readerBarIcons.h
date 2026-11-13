@@ -1,7 +1,7 @@
 #pragma once
 #include <Icon.h>
 
-// The reader bars' two buttons (ReaderBarsActivity): back out of the book, and star the page, outline while the page
+// The reader bars' two buttons (ReaderBarsController): back out of the book, and star the page, outline while the page
 // is not starred and filled while it is. freeink::Icon, as the light drawer's sun and moon, because the bars draw
 // through FreeInkUI (fui::bitmapFromIcon).
 //

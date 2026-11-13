@@ -11,7 +11,7 @@
 class GfxRenderer;
 class MappedInputManager;
 
-// The reader bars, whoever shows them: a top bar (back out of the book, its title, the page's star) and a tab bar
+// The reader bars: a top bar (back out of the book, its title, the page's star) and a tab bar
 // (Navigation, Progress, Layout, Orientation, More, an icon each) painted over the page the reader left on the panel,
 // which stays readable between them. Opened by Confirm, a tap in the middle of the page, or a tap on the status bar
 // (EpubReaderActivity::openReaderBars).
@@ -22,8 +22,8 @@ class MappedInputManager;
 // the time spent in the book, previous chapter / Go to % / next chapter, and KOReader sync's pull and push where it is
 // set up. Orientation: the four ways to hold the device, the current one marked. Layout opens the layout sheet there
 // (ReaderLayoutSheet): the font, size, line spacing, margin, darkness, paragraph spacing, alignment, hyphenation and
-// the book's style, and whether they are this book's own or the global settings. The reader lays the book out with
-// them when the bars close, or at each change where it keeps running under them (`live`, below).
+// the book's style, and whether they are this book's own or the global settings. The reader, running under the bars,
+// lays the page out again at each change; on the C3s a new font waits for them to close (`fontWaits`, below).
 //
 // The bars draw over the page and keep no copy of it: a C3 has no 48 KB to spare for one. So anything that would have
 // to bring a covered part of the page back closes them instead, and the reader draws the page afresh: Back, a tap on
@@ -32,9 +32,7 @@ class MappedInputManager;
 // Keys work on every board, so the X3 and X4 reach all of it: Left/Right along a row, Up/Down between the rows as they
 // lie on screen, Confirm to act, Back to close. On a touch board the keys' cursor stays hidden until a key is pressed.
 //
-// The state, input and drawing, for a host to run: ReaderBarsActivity, pushed over the reader, which lays the book out
-// with the Layout tab's values when the bars close; or the reader itself (EpubReaderActivity::liveBars_), which
-// keeps running under them and lays the page out again at each change (`live`).
+// The state, input and drawing, run by the reader itself (EpubReaderActivity::liveBars_).
 class ReaderBarsController final : private UiAppHost {
  public:
   // What the reader fills in. The values are formatted; an empty timeValue leaves the time row out.
@@ -57,23 +55,26 @@ class ReaderBarsController final : private UiAppHost {
     uint8_t orientation = 0;
   };
 
-  // What one input pass asks of the host: nothing, a redraw, the Layout tab's values applied (live only), or the bars
-  // gone, result() saying what the reader does next.
+  // What one input pass asks of the host: nothing, a redraw, the Layout tab's values applied, or the bars gone,
+  // result() saying what the reader does next.
   enum class Event : uint8_t { None, Redraw, LayoutChanged, Closed };
 
   ReaderBarsController(GfxRenderer& renderer, Info info);
 
-  // `touch`: the cursor waits for a key. `live`: a Layout change is reported at once (Event::LayoutChanged) rather
-  // than carried in the result.
-  void begin(bool touch, bool live);
+  // `touch`: the cursor waits for a key. A Layout change is reported at once (Event::LayoutChanged); with `fontWaits`
+  // a new font is not, but carried in the result, for the reader to lay the book out with once the bars close
+  // (HalCapabilities::defersLiveFontChange).
+  void begin(bool touch, bool fontWaits);
   void end();
   Event loop(MappedInputManager& mappedInput);
   // Paints the bars into the frame being drawn. No refresh: the host's.
   void draw();
   const ReaderBarsResult& result() const { return result_; }
-  const ReaderLayoutValues& layoutValues() const { return layout; }
+  // The values to lay the book out with now. The Layout tab's, but for a font that waits for the bars to close:
+  // the book keeps the one it is laid out in.
+  ReaderLayoutValues liveLayoutValues() const;
   bool layoutIsThisBooks() const { return thisBookOnly; }
-  // Live: the values as the reader lays the book out after a change, for "This book only" to go back to.
+  // The values as the reader lays the book out after a change, for "This book only" to go back to.
   void resync(const ReaderLayoutValues& book, const ReaderLayoutValues& global, const ReaderSizeList& sizes);
   // For the serial CMD:STATE: where the keys' cursor is, the open panel, the page's star, the Layout tab's values.
   void appendDebugState(std::string& out) const;
@@ -103,6 +104,8 @@ class ReaderBarsController final : private UiAppHost {
   // The Layout cells' values, formatted for the pass that draws them (buildBars, on the render task), and the font's
   // name, set where the font changes.
   char cellValues[ReaderLayout::kControlCount][24]{};
+  // The Font cell's label with the mark of a font that waits for the bars to close.
+  char fontCellLabel[40]{};
   std::string fontLabel;
 
   ReaderBarsLayout::Model model() const;
@@ -123,7 +126,9 @@ class ReaderBarsController final : private UiAppHost {
   static std::string fontOptionLabel(uint8_t font);
 
   GfxRenderer& renderer;
-  bool live_ = false;
+  bool fontWaits_ = false;
+  // A font chosen on the Layout tab that waits for the bars to close: not the one the book is laid out in.
+  bool fontPending() const { return fontWaits_ && layout.font != info.bookValues.font; }
   // What the last input pass did, for loop() to report; and the result once the bars closed.
   bool redraw_ = false;
   bool layoutChanged_ = false;
