@@ -134,15 +134,6 @@ std::string formatDocId(const DocKey& key) {
   return text;
 }
 
-uint32_t crc32(const uint8_t* data, const size_t size) {
-  uint32_t crc = 0xFFFFFFFFu;
-  for (size_t i = 0; i < size; ++i) {
-    crc ^= data[i];
-    for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
-  }
-  return ~crc;
-}
-
 size_t cutLength(const std::string& text, const size_t maxBytes) {
   if (text.size() <= maxBytes) return text.size();
   size_t n = maxBytes;

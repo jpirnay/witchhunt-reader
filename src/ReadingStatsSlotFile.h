@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Crc32.h>
 #include <HalStorage.h>
 
 #include <array>
@@ -49,8 +50,8 @@ bool parseDocId(const std::string& docId, DocKey& key);
 // Lowercase hex, as KOReaderDocumentId writes it.
 std::string formatDocId(const DocKey& key);
 
-// CRC-32 as zlib computes it (IEEE, reflected, 0xEDB88320).
-uint32_t crc32(const uint8_t* data, size_t size);
+// CRC-32 as zlib computes it, shared with the other slot files.
+using FsHelpers::crc32;
 
 // How many bytes of `text` fit in `maxBytes` without splitting a UTF-8 character.
 size_t cutLength(const std::string& text, size_t maxBytes);
