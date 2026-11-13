@@ -117,6 +117,16 @@ struct ConfirmResult {
   bool alternate = false;
 };
 
+// The hit chosen in the book's search (BookSearchSession::hits): the reader shows its page.
+struct BookSearchResult {
+  int hit = -1;
+};
+
+// A word chosen on the page to search the book for (DictionaryWordSelectActivity, a long Confirm).
+struct WordSearchResult {
+  std::string word;
+};
+
 // What the reader does once its bars (ReaderBarsController) close: the control that closed them, and whether the page's
 // star was flipped while they were open. The reader owns the bookmarks and the navigation, so the bars only report.
 struct ReaderBarsResult {
@@ -131,6 +141,7 @@ struct ReaderBarsResult {
     BookInfo,
     StarredPages,
     PrintedPage,
+    Search,
     Orientation,
     SyncPull,
     SyncPush
@@ -150,7 +161,7 @@ struct ReaderBarsResult {
 using ResultVariant =
     std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult, PageResult,
                  SyncResult, NetworkModeResult, FootnoteResult, FilePathResult, StarredPageResult, PrintedPageResult,
-                 DictionarySwitchResult, ConfirmResult, ReaderBarsResult>;
+                 DictionarySwitchResult, ConfirmResult, ReaderBarsResult, BookSearchResult, WordSearchResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

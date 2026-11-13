@@ -48,6 +48,13 @@ std::string utf8ToLower(const std::string& s);
 // allocation; bytes that do not decode are kept as they are. The Library's search.
 void utf8SearchFold(std::string& s);
 
+// One codepoint of a book's text, or of a query, as book search compares them, into `out`: utf8SearchFold()'s fold,
+// and a Latin letter's diacritics taken off (é -> e, ő -> o, ạ -> a; ß -> ss, æ -> ae, œ -> oe, ø -> o, ł -> l,
+// đ -> d), curly quotes, apostrophes and dashes made their ASCII forms, a no-break or thin space a space. Returns how
+// many codepoints it gave: 1, 2 for a letter that folds to two, 0 for what search passes over (a soft hyphen, a
+// zero-width character, a combining mark).
+size_t utf8BookSearchFold(uint32_t cp, uint32_t (&out)[2]);
+
 // Truncate a raw char buffer to the last complete UTF-8 codepoint boundary.
 // Returns the new length (<= len). If the buffer ends mid-sequence, the
 // incomplete trailing bytes are excluded.

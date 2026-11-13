@@ -41,10 +41,12 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <SdCardFont.h>
+#include <Utf8.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 
 #include <algorithm>
+#include <climits>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -52,6 +54,7 @@
 
 #include "BookPackOffer.h"
 #include "BookRelocation.h"
+#include "BookSearchActivity.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "DarkMode.h"
@@ -86,6 +89,7 @@
 #include "SerialTestApi.h"
 #include "SilentRestart.h"
 #include "StarredPagesActivity.h"
+#include "WordOutline.h"
 #include "activities/home/BookInfoActivity.h"
 #include "activities/settings/ClearCacheActivity.h"
 #include "activities/settings/DictionarySelectionActivity.h"
@@ -95,6 +99,7 @@
 #include "components/LinkMarkerMatch.h"
 #include "components/TapZones.h"
 #include "components/UITheme.h"
+#include "components/themes/ButtonHintStrip.h"
 #include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 #include "util/ScreenshotUtil.h"
@@ -910,6 +915,8 @@ void EpubReaderActivity::onExit() {
   // Save bookmarks before exit
   bookmarkStore.save();
   saveLinkBackStack();
+  // A search still open ends with the book, and its hits' file with it.
+  if (search_) Storage.remove(search_->hitsPath.c_str());
   if (epub) {
     GLOBAL_BOOKMARKS.syncFromStore(bookmarkStore, epub->getPath(), epub->getCachePath(), epub->getTitle(), false);
   }
@@ -1097,6 +1104,8 @@ void EpubReaderActivity::loop() {
 
   ButtonEventManager::ButtonEvent ev;
   while (buttonEvents.consumeEvent(ev)) {
+    // A search hit on the page: its strip takes Back, Confirm, Left and Right (handleBookSearchKey).
+    if (handleBookSearchKey(ev)) return;
     if (ev.button == MappedInputManager::Button::Confirm) {
       if (ev.type == ButtonEventManager::PressType::Long && KOREADER_STORE.hasCredentials()) {
         launchKOReaderSync(SyncLaunchMode::COMPARE);
@@ -1179,6 +1188,16 @@ void EpubReaderActivity::loop() {
       }
     }
   }
+
+  // A tap on the search's strip is the strip's (ActivityManager::dispatchHintStripTap, after this loop), not the page
+  // turn or the link beneath it. Not compiled without touch, where the strip records nothing to hit.
+#if CP_TOUCH_UI
+  if (bookSearchShown() && mappedInput.hasTouch()) {
+    int x = 0;
+    int y = 0;
+    if (mappedInput.peekScreenTapIn(touchtransform::Portrait, x, y) && ButtonHintStrip::hitTest(x, y) >= 0) return;
+  }
+#endif  // CP_TOUCH_UI
 
   // A tap on a footnote marker or cross-reference follows the link. Tested before the page-turn
   // zones and the menu tap: a marker can sit anywhere on the page, including inside one of them,
@@ -1623,7 +1642,7 @@ void EpubReaderActivity::suspendBackgroundWork() {
     // what the overlay is about to draw over.
     preRenderedPage = {};
   }
-  LOG_INF("ERS", "Background work suspended for a dictionary interaction");
+  LOG_INF("ERS", "Background work suspended for an overlay (dictionary, search)");
 }
 
 void EpubReaderActivity::resumeBackgroundWork() {
@@ -2888,8 +2907,14 @@ void EpubReaderActivity::openDictionary() {
       std::make_unique<DictionaryWordSelectActivity>(renderer, mappedInput, std::move(page), effectiveFontId,
                                                      layout.marginLeft, layout.marginTop,
                                                      TypographyProfile::forLanguage(epub->getLanguage()).hyphenator),
-      [this](const ActivityResult&) {
+      [this](const ActivityResult& result) {
         resumeBackgroundWork();
+        // A long Confirm on a word searches the book for it.
+        const auto* word = result.isCancelled ? nullptr : std::get_if<WordSearchResult>(&result.data);
+        if (word != nullptr && !word->word.empty()) {
+          openBookSearch(word->word);
+          return;
+        }
         requestUpdate();
       });
 }
@@ -3101,6 +3126,9 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                              [this](const ActivityResult&) { requestUpdate(); });
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::SEARCH:
+      openBookSearch();
+      break;
     case EpubReaderMenuActivity::MenuAction::BOOK_INFO: {
       if (!epub) break;
       startActivityForResult(std::make_unique<BookInfoActivity>(renderer, mappedInput, epub->getPath()),
@@ -4474,7 +4502,9 @@ bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
 
 void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
   // Pre-render pass: render next page content into the frame buffer (no status bar, no flush).
-  if (!section || preRenderedPage.ready || backgroundWorkSuspended_ || backgroundBuildThrough_) {
+  // Not under UI drawn over the page (uiOverPage()): the page would be shown without it. Checked here, where every
+  // arming of the pass ends, not at each of them.
+  if (!section || preRenderedPage.ready || backgroundWorkSuspended_ || backgroundBuildThrough_ || uiOverPage()) {
     return;
   }
   const int nextPage = section->currentPage + 1;
@@ -6027,8 +6057,8 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
 void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
-  // Under the live bars the page goes out in black and white (aaEnabledForThisRender below).
-  const ReaderUtils::OnePassTextScope onePassText(onePassTextFor(*page) && !liveBarsOpen());
+  // Under the live bars or a search's strip the page goes out in black and white (aaEnabledForThisRender below).
+  const ReaderUtils::OnePassTextScope onePassText(onePassTextFor(*page) && !uiOverPage());
   const auto t0 = millis();
   logReaderMemSnapshot("render_start");
   // Read before the pin below overwrites it: this pass redraws the page already on the panel (a
@@ -6067,11 +6097,11 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     }
   }
 
-  // Not under the live bars: the page goes out in black and white with the bars in the same frame, and gets its gray
-  // once they close. The gray planes hold the page's text, under the bars too.
+  // Not under the live bars or a search's strip: the page goes out in black and white with them in the same frame, and
+  // gets its gray once they close. The gray planes hold the page's text, under them too.
   const bool aaEnabledForThisRender =
-      getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() && !secondaryBufferDegraded_ && !liveBarsOpen();
-  if (getEffectiveTextAntiAliasing() && !aaEnabledForThisRender && !liveBarsOpen()) {
+      getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() && !secondaryBufferDegraded_ && !uiOverPage();
+  if (getEffectiveTextAntiAliasing() && !aaEnabledForThisRender && !uiOverPage()) {
     LOG_DBG("ERS", "AA skipped: secondary display buffer unavailable/degraded");
   }
   lastRenderStats.textAntiAliasing = aaEnabledForThisRender;
@@ -6414,6 +6444,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     renderer.drawText(UI_10_FONT_ID, hintX, hintY1, line1.c_str(), true, EpdFontFamily::BOLD);
     renderer.drawText(UI_10_FONT_ID, hintX, hintY2, line2.c_str(), true);
   }
+  drawBookSearchOverlay(*page, orientedMarginLeft, contentTop);
   drawLiveBarsOverPage(/*redrawWhenBuilt=*/false);
   // Everything the capture was meant to see is drawn. The status bar is inside
   // the window on purpose and costs nothing: UI chrome is 1-bit, so it produces
@@ -6627,9 +6658,10 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     // as a pre-render, which would find no more memory than this pass did. Its AA is not worth waiting for.
     glyphStarvedRedraw_ = false;
     requestUpdate();
-  } else if (!preRenderedPage.ready && !backgroundBuildThrough_ && !liveBarsOpen() && section &&
+  } else if (!preRenderedPage.ready && !backgroundBuildThrough_ && !uiOverPage() && section &&
              section->currentPage + 1 < section->pageCount) {
-    // Not under the live bars: the next change lays the chapter out again.
+    // Not under the live bars (the next change lays the chapter out again) or a search's strip (the next page is drawn
+    // with it, and its hits outlined).
     pendingPreRender = true;
     markStagedForCurrentPage();
     // Do NOT request the update while a deferred AA is owed: isUpdateSuperseded()
@@ -6727,6 +6759,7 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
     }
     publishPageLinkTargets(page, layout.marginLeft, contentTop);
     renderStatusBar();
+    drawBookSearchOverlay(page, layout.marginLeft, contentTop);
     // A page with pictures is drawn again once the build is done, with them; a page of text would come out the same.
     drawLiveBarsOverPage(/*redrawWhenBuilt=*/page.hasImages());
     if (forceHalfRefreshAfterPopup_) {
@@ -7689,25 +7722,7 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
   // bring that entry back anyway.
   {
     RenderLock lock(*this);
-    const bool pushed = savePosition && section;
-    if (pushed) {
-      SavedPosition saved;
-      saved.spineIndex = currentSpineIndex;
-      saved.pageNumber = section->currentPage;
-      // Mid-build pageCount is "pages so far", which would rescale the fallback against the wrong
-      // total; the paragraph anchor below is unaffected either way.
-      if (!section->hasActiveBuild()) {
-        saved.pageCount = section->pageCount;
-        if (const auto paragraphIndex = section->getParagraphIndexForPage(section->currentPage)) {
-          saved.paragraphIndex = *paragraphIndex;
-          saved.hasParagraph = true;
-        }
-      }
-      EpubLinkBackStack::push(savedPositions, footnoteDepth, sessionLinkDepth_, saved);
-      noteLinkBackStackChanged();
-      LOG_DBG("ERS", "Saved position [%d]: spine %d, page %d, paragraph %d", footnoteDepth, saved.spineIndex,
-              saved.pageNumber, saved.hasParagraph ? saved.paragraphIndex : -1);
-    }
+    const bool pushed = savePosition && pushLinkOrigin();
     navTarget = anchor.empty() ? NavigationTarget::makePage(0) : NavigationTarget::makeAnchor(std::move(anchor));
     // Only a fragment can lead back to an origin: a note's return link names the marker's id.
     navTarget.followedLink = pushed && navTarget.kind == NavigationTarget::Kind::Anchor;
@@ -7716,6 +7731,27 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
   }
   requestUpdate();
   LOG_DBG("ERS", "Navigated to spine %d for href: %s", targetSpineIndex, hrefStr.c_str());
+}
+
+bool EpubReaderActivity::pushLinkOrigin() {
+  if (!section) return false;
+  SavedPosition saved;
+  saved.spineIndex = currentSpineIndex;
+  saved.pageNumber = section->currentPage;
+  // Mid-build pageCount is "pages so far", which would rescale the fallback against the wrong
+  // total; the paragraph anchor below is unaffected either way.
+  if (!section->hasActiveBuild()) {
+    saved.pageCount = section->pageCount;
+    if (const auto paragraphIndex = section->getParagraphIndexForPage(section->currentPage)) {
+      saved.paragraphIndex = *paragraphIndex;
+      saved.hasParagraph = true;
+    }
+  }
+  EpubLinkBackStack::push(savedPositions, footnoteDepth, sessionLinkDepth_, saved);
+  noteLinkBackStackChanged();
+  LOG_DBG("ERS", "Saved position [%d]: spine %d, page %d, paragraph %d", footnoteDepth, saved.spineIndex,
+          saved.pageNumber, saved.hasParagraph ? saved.paragraphIndex : -1);
+  return true;
 }
 
 // Following a note's "Return" link pushed the note as one more Back entry, so Back from the reader's
@@ -8383,6 +8419,9 @@ void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
     case ReaderBarsResult::Action::PrintedPage:
       onReaderMenuConfirm(MenuAction::GO_TO_PRINTED_PAGE);
       return;
+    case ReaderBarsResult::Action::Search:
+      openBookSearch();
+      return;
     case ReaderBarsResult::Action::Orientation:
       applyOrientation(bars->orientation);
       requestUpdate();
@@ -8394,6 +8433,200 @@ void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
       onReaderMenuConfirm(MenuAction::PUSH_LOCAL);
       return;
   }
+}
+
+void EpubReaderActivity::openBookSearch(std::string startQuery) {
+  if (!epub) return;
+  {
+    RenderLock lock(*this);
+    // A new search starts at this page; the list of one still open (its hint strip's Confirm) keeps its own start.
+    if (!search_ || !startQuery.empty()) {
+      if (!search_) search_ = makeUniqueNoThrow<BookSearchSession>();
+      if (!search_) {
+        LOG_ERR("ERS", "Book search: no memory for its session");
+        return;
+      }
+      search_->hitsPath = epub->getCachePath() + "/search.bin";
+      search_->originSpine = static_cast<uint16_t>(std::max(0, currentSpineIndex));
+      search_->originOffset = readingOffset().value_or(0);
+      search_->current = -1;
+      search_->originSaved = false;
+    }
+  }
+  // As for the dictionary: the search reads the book chapter by chapter and wants the heap a look-ahead section holds.
+  suspendBackgroundWork();
+  startActivityForResult(
+      std::make_unique<BookSearchActivity>(renderer, mappedInput, epub, *search_, std::move(startQuery)),
+      [this](const ActivityResult& result) { onBookSearchClosed(result); });
+}
+
+void EpubReaderActivity::onBookSearchClosed(const ActivityResult& result) {
+  resumeBackgroundWork();
+  const auto* chosen = result.isCancelled ? nullptr : std::get_if<BookSearchResult>(&result.data);
+  if (chosen != nullptr && search_ && chosen->hit >= 0 && static_cast<size_t>(chosen->hit) < search_->count) {
+    showSearchHit(chosen->hit);
+    return;
+  }
+  // Back from the list: a hit still shown keeps its strip; with none, the search is over.
+  if (search_ && search_->current < 0) {
+    closeBookSearch();
+    return;
+  }
+  requestUpdate();
+}
+
+void EpubReaderActivity::showSearchHit(const int index) {
+  if (!search_ || index < 0) return;
+  BookSearch::Hit hit;
+  if (!search_->hit(static_cast<size_t>(index), hit)) {
+    LOG_ERR("ERS", "Search hit %d could not be read from %s", index + 1, search_->hitsPath.c_str());
+    return;
+  }
+  {
+    RenderLock lock(*this);
+    // Back from the search returns to where the reader was before its first hit.
+    if (!search_->originSaved) search_->originSaved = pushLinkOrigin();
+    search_->current = index;
+    navTarget = NavigationTarget::makeVisibleOffset(hit.offset, 0);
+    currentSpineIndex = hit.spine;
+    section.reset();
+  }
+  LOG_DBG("ERS", "Search hit %d/%u: spine %u, offset %u", index + 1, static_cast<unsigned>(search_->count), hit.spine,
+          static_cast<unsigned>(hit.offset));
+  requestUpdate();
+}
+
+void EpubReaderActivity::closeBookSearch() {
+  if (!search_) return;
+  // The hits' file goes with the search.
+  Storage.remove(search_->hitsPath.c_str());
+  {
+    RenderLock lock(*this);
+    search_.reset();
+  }
+  // The strip goes with the search: a tap where it was is the page's again.
+  ButtonHintStrip::invalidate();
+  requestUpdate();
+}
+
+bool EpubReaderActivity::handleBookSearchKey(const ButtonEventManager::ButtonEvent& ev) {
+  if (!bookSearchShown() || ev.type != ButtonEventManager::PressType::Short) return false;
+  switch (ev.button) {
+    case MappedInputManager::Button::Back:
+      closeBookSearch();
+      return true;
+    case MappedInputManager::Button::Confirm:
+      openBookSearch();
+      return true;
+    case MappedInputManager::Button::Left:
+      if (search_->current > 0) showSearchHit(search_->current - 1);
+      return true;
+    case MappedInputManager::Button::Right:
+      if (static_cast<size_t>(search_->current) + 1 < search_->count) showSearchHit(search_->current + 1);
+      return true;
+    default:
+      return false;
+  }
+}
+
+void EpubReaderActivity::drawBookSearchOverlay(const Page& page, const int marginLeft, const int contentTop) const {
+  if (!bookSearchShown()) return;
+  // The page's words in reading order, each numbered: fn(line, word index in its block, last on its line, number).
+  constexpr uint16_t kMaxWords = 1024;
+  const auto forEachWord = [&page](auto&& fn) {
+    uint16_t number = 0;
+    for (const auto& element : page.elements) {
+      if (element->getTag() != TAG_PageLine) continue;
+      const auto* line = static_cast<const PageLine*>(element.get());
+      const auto& block = line->getBlock();
+      if (!block || !block->valid()) continue;
+      uint16_t order[TextBlock::kMaxOrderedWords];
+      const bool ordered = block->hasLogicalOrder() && block->wordCount() <= TextBlock::kMaxOrderedWords;
+      if (ordered) block->readingOrder(order);
+      for (uint16_t k = 0; k < block->wordCount() && number < kMaxWords; ++k) {
+        fn(*line, ordered ? order[k] : k, k + 1 == block->wordCount(), number++);
+      }
+    }
+  };
+  // Which of them a match covers. The words are folded as the search folds the book, a space between two that are not
+  // glued, so a match runs over several words as it did in the book. A line ending in a hyphen runs on into the next
+  // one, the hyphen dropped: a hyphenated word was found whole.
+  uint8_t outlined[kMaxWords / 8] = {};
+  const BookSearch::Pattern pattern(search_->query);
+  if (!pattern.empty()) {
+    BookSearch::Matcher matcher(pattern, search_->wholeWords);
+    const auto found = [&outlined](const uint32_t first, const uint32_t last) {
+      for (uint32_t w = first; w <= last && w < kMaxWords; ++w) outlined[w / 8] |= static_cast<uint8_t>(1u << (w % 8));
+    };
+    bool joinNext = false;
+    forEachWord([&](const PageLine& line, const uint16_t i, const bool lastOnLine, const uint16_t number) {
+      const auto& block = line.getBlock();
+      if (number > 0 && !joinNext && !block->wordContinues(i)) matcher.push(' ', number - 1u, found);
+      joinNext = false;
+      const char* text = block->wordText(i);
+      size_t length = block->wordTextLen(i);
+      if (lastOnLine && length > 1 && text[length - 1] == '-') {
+        --length;
+        joinNext = true;
+      }
+      const auto* p = reinterpret_cast<const unsigned char*>(text);
+      const auto* const end = p + length;
+      while (p < end) {
+        uint32_t folded[2];
+        const size_t n = utf8BookSearchFold(utf8NextCodepoint(&p), folded);
+        for (size_t f = 0; f < n; ++f) matcher.push(folded[f], number, found);
+      }
+    });
+    matcher.end(found);
+  }
+  // One outline round each run of covered words on a line, in the reader's frame.
+  const int fontId = getEffectiveReaderFontId();
+  const GfxRenderer::Orientation held = renderer.getHeldOrientation();
+  const int screenW = renderer.getScreenWidth(held);
+  const int screenH = renderer.getScreenHeight(held);
+  const bool vertical = page.isVertical();
+  const turnedframe::Offsets origin =
+      vertical ? turnedframe::contentOffsets(screenW, marginLeft, contentTop, page.verticalBlockExtent)
+               : turnedframe::Offsets{marginLeft, contentTop};
+  const PageLine* runLine = nullptr;
+  int left = INT_MAX;
+  int top = INT_MAX;
+  int right = INT_MIN;
+  int bottom = INT_MIN;
+  const auto closeRun = [&] {
+    WordOutlineBox outline;
+    if (runLine != nullptr && left < right &&
+        wordOutlineBox(left, top, right - left, bottom - top, screenW, screenH, outline)) {
+      renderer.drawRect(outline.x, outline.y, outline.width, outline.height, true);
+    }
+    runLine = nullptr;
+    left = top = INT_MAX;
+    right = bottom = INT_MIN;
+  };
+  forEachWord([&](const PageLine& line, const uint16_t i, bool, const uint16_t number) {
+    if ((outlined[number / 8] & (1u << (number % 8))) == 0) {
+      closeRun();
+      return;
+    }
+    if (runLine != &line) closeRun();
+    runLine = &line;
+    const TextBlock::WordBox content =
+        line.getBlock()->wordBox(renderer, i, fontId, line.xPos + origin.x, line.yPos + origin.y);
+    if (content.width <= 0 || content.height <= 0) return;
+    turnedframe::Rect box{content.x, content.y, content.width, content.height};
+    if (vertical) box = turnedframe::toReader(screenW, box);
+    left = std::min(left, static_cast<int>(box.x));
+    top = std::min(top, static_cast<int>(box.y));
+    right = std::max(right, static_cast<int>(box.x + box.width));
+    bottom = std::max(bottom, static_cast<int>(box.y + box.height));
+  });
+  closeRun();
+  // The strip: the previous and the next hit, the list (this hit's place in it), and Back, which ends the search.
+  char place[24];
+  snprintf(place, sizeof(place), "%d/%u%s", search_->current + 1, static_cast<unsigned>(search_->count),
+           search_->full() ? "+" : "");
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), place, tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
 ReaderLayoutValues EpubReaderActivity::effectiveLayoutValues() const {

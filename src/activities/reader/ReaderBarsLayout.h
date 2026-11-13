@@ -49,6 +49,7 @@ enum class Button : uint8_t {
   Chapters,
   StarredPages,
   PrintedPage,
+  Search,
   GoHome,
   Portrait,
   LandscapeCw,
@@ -86,7 +87,7 @@ struct ListRow {
   Button button = Button::Chapters;
   bool marked = false;
 };
-constexpr uint8_t kMaxListRows = 4;
+constexpr uint8_t kMaxListRows = 5;
 
 // What the bars show. The strings are the caller's, already translated and formatted, alive until build() returns.
 struct Model {

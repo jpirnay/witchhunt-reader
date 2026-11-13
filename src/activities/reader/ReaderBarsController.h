@@ -18,12 +18,13 @@ class MappedInputManager;
 //
 // More hands back to the reader, which opens its full menu: every reader feature stays one step past More. The other
 // tabs open in place, above the tab bar. Navigation: the chapter list, the starred pages, a printed page where the
-// book has them, and leaving the book, each handed back to the reader. Progress: where the book and the chapter stand,
-// the time spent in the book, previous chapter / Go to % / next chapter, and KOReader sync's pull and push where it is
-// set up. Orientation: the four ways to hold the device, the current one marked. Layout opens the layout sheet there
-// (ReaderLayoutSheet): the font, size, line spacing, margin, darkness, paragraph spacing, alignment, hyphenation and
-// the book's style, and whether they are this book's own or the global settings. The reader, running under the bars,
-// lays the page out again at each change; on the C3s a new font waits for them to close (`fontWaits`, below).
+// book has them, the book's search, and leaving the book, each handed back to the reader. Progress: where the book and
+// the chapter stand, the time spent in the book, previous chapter / Go to % / next chapter, and KOReader sync's pull
+// and push where it is set up. Orientation: the four ways to hold the device, the current one marked. Layout opens the
+// layout sheet there (ReaderLayoutSheet): the font, size, line spacing, margin, darkness, paragraph spacing, alignment,
+// hyphenation and the book's style, and whether they are this book's own or the global settings. The reader, running
+// under the bars, lays the page out again at each change; on the C3s a new font waits for them to close (`fontWaits`,
+// below).
 //
 // The bars draw over the page and keep no copy of it: a C3 has no 48 KB to spare for one. So anything that would have
 // to bring a covered part of the page back closes them instead, and the reader draws the page afresh: Back, a tap on
