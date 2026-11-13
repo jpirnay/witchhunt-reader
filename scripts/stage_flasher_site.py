@@ -35,6 +35,7 @@ BOARDS = {
     "x4pro": ("firmware-x4pro.bin", "full-install-x4pro.bin"),
     "lilygo": ("firmware-lilygo.bin", "full-install-lilygo.bin"),
     "murphy": ("firmware-murphy.bin", "full-install-murphy.bin"),
+    "picco": ("firmware-picco.bin", "full-install-picco.bin"),
 }
 OTADATA = (0xE000, 0x10000)
 TABLE = (0x8000, 0x8C00)

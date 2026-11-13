@@ -25,6 +25,7 @@ export const BOARDS = [
   { id: "x4pro", label: "Xteink X4 Pro", chip: "ESP32-S3", reset: "watchdog" },
   { id: "lilygo", label: "LilyGo T5 S3", chip: "ESP32-S3", reset: "watchdog" },
   { id: "murphy", label: "Murphy M3", chip: "ESP32-S3", reset: "watchdog" },
+  { id: "picco", label: "BOOX Picco", chip: "ESP32-S3", reset: "watchdog" },
 ];
 
 const u16 = (b, o) => b[o] | (b[o + 1] << 8);
