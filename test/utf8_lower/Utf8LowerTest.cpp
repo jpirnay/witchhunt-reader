@@ -219,3 +219,43 @@ TEST(Utf8SearchFold, NeverLongerAndKeepsWhatDoesNotDecode) {
 }
 
 }  // namespace
+
+namespace {
+// A string folded codepoint by codepoint the way book search folds its text and its query.
+std::string bookFold(const std::string& s) {
+  std::string out;
+  const auto* p = reinterpret_cast<const unsigned char*>(s.c_str());
+  while (*p != '\0') {
+    uint32_t folded[2];
+    const size_t n = utf8BookSearchFold(utf8NextCodepoint(&p), folded);
+    for (size_t i = 0; i < n; ++i) utf8AppendCodepoint(out, folded[i]);
+  }
+  return out;
+}
+}  // namespace
+
+TEST(Utf8BookSearchFold, TakesDiacriticsOffLatinLetters) {
+  EXPECT_EQ("elephant", bookFold("Éléphant"));
+  EXPECT_EQ("gross strasse", bookFold("GROSS Straße"));
+  EXPECT_EQ("aeon oeuvre", bookFold("Æon Œuvre"));
+  EXPECT_EQ("lodz", bookFold("Łódź"));
+  EXPECT_EQ("tieng viet", bookFold("Tiếng Việt"));
+  EXPECT_EQ("ohjelma", bookFold("ÖHJELMA"));
+}
+
+TEST(Utf8BookSearchFold, MakesPunctuationAndSpacesPlain) {
+  EXPECT_EQ("it's \"so\" - a b", bookFold("It’s “so” — a\xC2\xA0"
+                                          "b"));
+}
+
+TEST(Utf8BookSearchFold, PassesOverInvisibleCharactersAndCombiningMarks) {
+  EXPECT_EQ("hyphenation", bookFold("hy\xC2\xADphen\xE2\x80\x8B"
+                                    "ation"));
+  EXPECT_EQ("cafe", bookFold("cafe\xCC\x81"));  // é as e and a combining acute
+}
+
+TEST(Utf8BookSearchFold, KeepsTheLibrarysGreekFoldAndOtherScripts) {
+  EXPECT_EQ("αθηνα", bookFold("Αθήνα"));
+  EXPECT_EQ("москва", bookFold("МОСКВА"));
+  EXPECT_EQ("東京", bookFold("東京"));
+}
