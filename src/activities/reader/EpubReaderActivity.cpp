@@ -8110,7 +8110,7 @@ void EpubReaderActivity::openReaderBars() {
     return;
   }
 
-  ReaderBarsActivity::Info info;
+  ReaderBarsController::Info info;
   info.title = epub->getTitle();
   {
     RenderLock lock(*this);
@@ -8148,38 +8148,24 @@ void EpubReaderActivity::openReaderBars() {
     if (seconds > 0) info.timeValue = BookProgressPresentation::formatReadingDuration(seconds);
   }
 
-  if (HalCapabilities::laysOutReaderLive()) {
-    // Drawn by the reader, which keeps running under them. The first pass paints them over the frame on the panel
-    // (paintLiveBars): the page under them stays as it is until a change asks for it again.
-    auto bars = makeUniqueNoThrow<ReaderBarsController>(renderer, std::move(info));
-    if (!bars) {
-      LOG_ERR("ERS", "Reader bars: no memory for them");
-      return;
-    }
-    bars->begin(mappedInput.hasTouch(), /*live=*/true);
-    {
-      RenderLock lock(*this);
-      prepareForOverlay("ReaderBars");
-      liveBars_ = std::move(bars);
-      liveBarsPageOwed_ = false;
-      liveBarsRedrawWhenBuilt_ = section && section->hasActiveBuild();
-      liveBarsStale_ = true;
-      noteLiveLayoutBuilt();
-    }
-    requestUpdate();
+  // Drawn by the reader, which keeps running under them. The first pass paints them over the frame on the panel
+  // (paintLiveBars): the page under them stays as it is until a change asks for it again.
+  auto bars = makeUniqueNoThrow<ReaderBarsController>(renderer, std::move(info));
+  if (!bars) {
+    LOG_ERR("ERS", "Reader bars: no memory for them");
     return;
   }
-
-  // The bars paint only their two bands, so the write buffer must hold the page on the panel. The two steps the light
-  // drawer takes, for the same two reasons (ActivityManager::dispatchLightPanelGesture): the buffer is two frames
-  // behind after a display, and a pre-rendered next page may sit in it.
+  bars->begin(mappedInput.hasTouch(), /*live=*/true, HalCapabilities::defersLiveFontChange());
   {
     RenderLock lock(*this);
-    renderer.syncWriteBufferFromDisplayed();
-    prepareFramebufferForCapture();
+    prepareForOverlay("ReaderBars");
+    liveBars_ = std::move(bars);
+    liveBarsPageOwed_ = false;
+    liveBarsRedrawWhenBuilt_ = section && section->hasActiveBuild();
+    liveBarsStale_ = true;
+    noteLiveLayoutBuilt();
   }
-  startActivityForResult(std::make_unique<ReaderBarsActivity>(renderer, mappedInput, std::move(info)),
-                         [this](const ActivityResult& result) { onReaderBarsClosed(result); });
+  requestUpdate();
 }
 
 ReaderSizeList EpubReaderActivity::layoutSheetSizes() const {
@@ -8241,15 +8227,19 @@ void EpubReaderActivity::applyLiveLayout() {
   // (liveBarsPageDue); the darkness only picks the gray levels, which the black and white page under the bars does not
   // draw (GfxRenderer's drawMaskFor2BitMode): it shows once they close.
   // True when the book opens again: this reader is on its way out, the bars with it (onExit).
-  if (applyReaderLayout(liveBars_->layoutValues(), liveBars_->layoutIsThisBooks())) return;
+  if (applyReaderLayout(liveBars_->liveLayoutValues(), liveBars_->layoutIsThisBooks())) return;
   liveBars_->resync(effectiveLayoutValues(), globalLayoutValues(), layoutSheetSizes());
 }
 
 void EpubReaderActivity::closeLiveBars() {
-  // A change still waiting for its bars to be painted goes in now. True: the book opens again, the bars with it.
+  // A change still waiting for its bars to be painted goes in now, unless a font that waited carries every value in
+  // the result (onReaderBarsClosed). True: the book opens again, the bars with it.
   if (liveLayoutOwed_) {
     liveLayoutOwed_ = false;
-    if (applyReaderLayout(liveBars_->layoutValues(), liveBars_->layoutIsThisBooks())) return;
+    if (!liveBars_->result().layoutChanged &&
+        applyReaderLayout(liveBars_->liveLayoutValues(), liveBars_->layoutIsThisBooks())) {
+      return;
+    }
   }
   const ReaderBarsResult result = liveBars_->result();
   {
@@ -8287,7 +8277,7 @@ void EpubReaderActivity::noteLiveLayoutBuilt() {
 }
 
 bool EpubReaderActivity::liveLayoutChangeIsBuilt() {
-  const ReaderLayoutValues wanted = liveBars_->layoutValues();
+  const ReaderLayoutValues wanted = liveBars_->liveLayoutValues();
   // A change the page shows without a new layout (the darkness, This book only) is not one: its bars repaint alone.
   if (!ReaderLayout::laysOutDifferently(effectiveLayoutValues(), wanted)) return false;
   RenderLock lock(*this);
@@ -8297,7 +8287,7 @@ bool EpubReaderActivity::liveLayoutChangeIsBuilt() {
   return false;
 }
 
-bool EpubReaderActivity::liveBarsOpen() const { return HalCapabilities::laysOutReaderLive() && liveBars_ != nullptr; }
+bool EpubReaderActivity::liveBarsOpen() const { return liveBars_ != nullptr; }
 
 bool EpubReaderActivity::takesReaderControls() const { return !liveBarsOpen(); }
 

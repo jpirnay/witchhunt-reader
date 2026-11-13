@@ -44,8 +44,9 @@ const char* onOff(const bool on) { return text(on ? StrId::STR_ON : StrId::STR_O
 ReaderBarsController::ReaderBarsController(GfxRenderer& renderer, Info info)
     : UiAppHost(renderer), renderer(renderer), info(std::move(info)) {}
 
-void ReaderBarsController::begin(const bool touch, const bool live) {
+void ReaderBarsController::begin(const bool touch, const bool live, const bool fontWaits) {
   live_ = live;
+  fontWaits_ = live && fontWaits;
   starred = info.starred;
   thisBookOnly = info.thisBookOnly;
   layout = thisBookOnly ? info.bookValues : info.globalValues;
@@ -226,8 +227,8 @@ void ReaderBarsController::close(const ReaderBarsResult::Action action) {
   closing.layoutChanged = thisBookOnly != info.thisBookOnly || !(layout == opened);
   closing.thisBookOnly = thisBookOnly;
   closing.layout = layout;
-  // Live, the reader applied every change as it was made: nothing is left to apply.
-  if (live_) closing.layoutChanged = false;
+  // Live, the reader applied every change as it was made: nothing is left to apply but a font that waited.
+  if (live_) closing.layoutChanged = fontPending();
   result_ = closing;
   closed_ = true;
 }
@@ -411,7 +412,8 @@ void ReaderBarsController::nextFont() {
     fontLabel = std::move(label);
   }
   redraw_ = true;
-  layoutChanged_ = live_;
+  // A font that waits for the bars to close changes only the cell.
+  layoutChanged_ = live_ && !fontWaits_;
 }
 
 uint8_t ReaderBarsController::layoutTargets(ReaderLayoutSheet::Target (&out)[ReaderLayoutSheet::kMaxTargets]) const {
@@ -691,5 +693,12 @@ void ReaderBarsController::resync(const ReaderLayoutValues& book, const ReaderLa
   RenderLock lock;
   info.bookValues = book;
   info.globalValues = global;
-  info.sizes = sizes;
+  // A font that waits keeps the sizes it offers: the Size cell steps along them.
+  if (!fontPending()) info.sizes = sizes;
+}
+
+ReaderLayoutValues ReaderBarsController::liveLayoutValues() const {
+  ReaderLayoutValues values = layout;
+  if (fontWaits_) values.font = info.bookValues.font;
+  return values;
 }

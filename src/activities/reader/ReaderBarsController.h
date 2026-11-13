@@ -64,14 +64,17 @@ class ReaderBarsController final : private UiAppHost {
   ReaderBarsController(GfxRenderer& renderer, Info info);
 
   // `touch`: the cursor waits for a key. `live`: a Layout change is reported at once (Event::LayoutChanged) rather
-  // than carried in the result.
-  void begin(bool touch, bool live);
+  // than carried in the result. `fontWaits` (live): a new font is not; it is carried in the result, for the reader to
+  // lay the book out with once the bars close (HalCapabilities::defersLiveFontChange).
+  void begin(bool touch, bool live, bool fontWaits = false);
   void end();
   Event loop(MappedInputManager& mappedInput);
   // Paints the bars into the frame being drawn. No refresh: the host's.
   void draw();
   const ReaderBarsResult& result() const { return result_; }
-  const ReaderLayoutValues& layoutValues() const { return layout; }
+  // Live: the values to lay the book out with now. The Layout tab's, but for a font that waits for the bars to close:
+  // the book keeps the one it is laid out in.
+  ReaderLayoutValues liveLayoutValues() const;
   bool layoutIsThisBooks() const { return thisBookOnly; }
   // Live: the values as the reader lays the book out after a change, for "This book only" to go back to.
   void resync(const ReaderLayoutValues& book, const ReaderLayoutValues& global, const ReaderSizeList& sizes);
@@ -124,6 +127,9 @@ class ReaderBarsController final : private UiAppHost {
 
   GfxRenderer& renderer;
   bool live_ = false;
+  bool fontWaits_ = false;
+  // A font chosen on the Layout tab that waits for the bars to close: not the one the book is laid out in.
+  bool fontPending() const { return fontWaits_ && layout.font != info.bookValues.font; }
   // What the last input pass did, for loop() to report; and the result once the bars closed.
   bool redraw_ = false;
   bool layoutChanged_ = false;

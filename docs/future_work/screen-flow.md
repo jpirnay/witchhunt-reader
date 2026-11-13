@@ -54,7 +54,15 @@ goes in at once and its page comes with the bars in one refresh (`EpubReaderActi
 them and still shows the bars first. The whole series on the X4 Pro, press to idle: a new layout 5.6 s (#749) to 3.8 s,
 one built before 1.5 s.
 
+**Done (2026-11-13), live on the X3 and X4 but for the font.** Measured on the X3 with the sheet open: a cold Size+ build
+(39 pages, 2.9-3.1 s) bottomed out at 29.6 KB free against 32.2 KB for the same build after the bars close (15 KB of
+ballast held: Min Free 14.6 KB against 17.2 KB, the build completed either way, no failed allocation), and the page
+draws between the bars. What did not fit was the font: each step copies the family into the flash font area first, a
+3 MB erase (5.3 s) and the file (1.8 s for 608 KB), 10-12 s a Font press with the build. So on the C3s a new font waits
+for the bars to close (`HalCapabilities::defersLiveFontChange`): the cell shows it, the Size cell steps along its sizes,
+and the reader lays the book out with it once (`ReaderBarsResult::layoutChanged`).
+
 **Open.** Speed: the first build pass of a new layout starts only after the bars' refresh; the book's settings are saved
-(about 0.2 s) before the font is looked up, also for a layout already built. The X3 and X4 keep laying the book out on
-closing; going live there depends on a heap measurement with the sheet open during a rebuild. The Murphy held sideways has no room for the sheet; its Layout tab
-opens the reader menu.
+(about 0.2 s) before the font is looked up, also for a layout already built. A Font step on the X4 Pro took 4 to 15 s by
+family (live there). The X4 has not run the live bars. The Murphy held sideways has no room for the sheet; its Layout
+tab opens the reader menu.

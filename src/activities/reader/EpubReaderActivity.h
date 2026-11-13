@@ -1130,16 +1130,17 @@ class EpubReaderActivity final : public Activity {
   BookReaderOverrides bookOverrides() const;
   void openReaderMenu();
   // The reader bars over the page: Confirm, a centre tap and a status-bar tap open them; a key bound to the reader
-  // menu still opens the full menu, which the bars reach through More. Pushed as ReaderBarsActivity, or drawn by the
-  // reader itself, which lays the page out again under them at each change (HalCapabilities::laysOutReaderLive).
+  // menu still opens the full menu, which the bars reach through More. Drawn by the reader itself, which lays the page
+  // out again under them at each change; on the C3s a new font waits for them to close
+  // (HalCapabilities::defersLiveFontChange).
   void openReaderBars();
   void onReaderBarsClosed(const ActivityResult& result);
 
   // --- The reader bars, live ---
   // Open while the bars are over the page and the reader runs under them: their input in loop(), the build of a
   // chapter laid out anew in its idle branch, the bars drawn over every page (renderContents, displayBuildPage) or,
-  // where a pass has no page to draw, over the frame on the panel (paintLiveBars). Null while closed, and always on
-  // the C3s. Opened and closed on the loop task under the render lock; the render task reads it under the lock.
+  // where a pass has no page to draw, over the frame on the panel (paintLiveBars). Null while closed. Opened and
+  // closed on the loop task under the render lock; the render task reads it under the lock.
   std::unique_ptr<ReaderBarsController> liveBars_;
   // A page is owed under the live bars: a forced refresh asked for one. Cleared by the pass that draws a page
   // (drawLiveBarsOverPage). Under RenderLock.
