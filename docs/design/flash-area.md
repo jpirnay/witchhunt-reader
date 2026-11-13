@@ -16,8 +16,8 @@ Every board we ship builds for the same `partitions.csv`, whose `spiffs` partiti
 the firmware keeps four caches in it as raw NOR flash and reads three of them in place through `esp_partition_mmap`.
 Each cache found the partition by its name and called ESP-IDF itself. The Onyx BOOX Picco (ESP32-S3, 16 MB flash, 8 MB
 octal PSRAM, 4-bit SDMMC card, per freeink-sdk's `picco` profile and env) runs a retail app of ~9 MB, so its stock
-layout cannot be ours; the SDK does not record that layout. A firmware that keeps it has no `spiffs` partition, and
-none of the four caches would have anywhere to live.
+layout cannot be ours (`partitions_picco.csv`, read from a retail unit). A firmware that keeps it has one app slot and
+a 512 KB `spiffs` partition holding the stock firmware's data, too small for the caches and not ours to write.
 
 The X4 Pro is in that case already (issue #733). Its stock tables have app0 0x10000 and app1 0x7f0000 (0x7e0000 each)
 and an 80 KB data partition at 0xfd0000: `littlefs` on a retail unit on Licorice OS (read from its flash), `spiffs` in
@@ -159,9 +159,12 @@ One place, `FlashArea.cpp`, at the first `FlashArea::get()`:
 1. `FLASH_AREA_PSRAM_IMAGE=2` (a test build): the PSRAM image, whatever the partition table holds.
 2. The `spiffs` partition, when the partition table has one larger than the language slot (128 KB). Every board
    flashed with `partitions.csv`: as before. A smaller one (the 80 KB of the X4 Pro's factory-compatible table) is
-   left alone: the language slot could not live in it.
+   left alone: the language slot could not live in it. On a build with the PSRAM image, a partition smaller than the
+   area (`FLASH_AREA_PSRAM_BYTES`) is left alone too when the image fits: it would hold less of every cache, and such
+   a partition is another firmware's. Onyx's stock BOOX Picco table has a 512 KB one with the stock firmware's data
+   in it. On the C3 builds (no image) a smaller partition is used as before, the stock X3 layout's 1 MB included.
 3. `FLASH_AREA_PSRAM_IMAGE=1` and PSRAM to hold the image: the PSRAM image. The default on every build with
-   `CONFIG_SPIRAM`, so the X4 Pro, T5S3 and Murphy builds take it without a flag of their own.
+   `CONFIG_SPIRAM`, so the X4 Pro, T5S3, Murphy and Picco builds take it without a flag of their own.
 4. None.
 
 `main.cpp` asks for the area before I18n loads its language, so the choice is made, and logged, at every boot: no line
