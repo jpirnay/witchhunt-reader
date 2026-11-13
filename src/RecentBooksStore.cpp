@@ -147,8 +147,8 @@ void RecentBooksStore::useFilesForTest(std::string binPath, std::string legacyJs
 
 namespace {
 
-// recent.bin, open; started afresh when it is not there or not of this layout, from recent.json the first time. False
-// when it cannot be opened now, or the move from recent.json has to wait (too little memory to read it).
+// recent-books.bin, open; started afresh when it is not there or not of this layout, from recent.json the first time.
+// False when it cannot be opened now, or the move from recent.json has to wait (too little memory to read it).
 bool openList(File& file, const std::string& binPathSet, const std::string& jsonPathSet) {
   const char* const binPath = binPathSet.empty() ? RecentBooksFile::kPath : binPathSet.c_str();
   const char* const jsonPath = jsonPathSet.empty() ? kLegacyJsonPath : jsonPathSet.c_str();

@@ -8,7 +8,7 @@
 
 struct RecentBook;
 
-// /.crosspoint/recent.bin: the books lately opened, a fixed slot each, so that opening, removing or moving a book
+// /.crosspoint/recent-books.bin: the books lately opened, a fixed slot each, so that opening, removing or moving a book
 // writes only what changed (docs/file-formats.md). This is the layout; RecentBooksStore is the store on top.
 //
 //   0     header, 512 B: magic, version, slot count, slot size
@@ -25,7 +25,7 @@ struct RecentBook;
 // wanted.
 namespace RecentBooksFile {
 
-constexpr char kPath[] = "/.crosspoint/recent.bin";
+constexpr char kPath[] = "/.crosspoint/recent-books.bin";
 constexpr uint8_t kSlotCount = 100;
 constexpr uint32_t kTableOffset = 512;
 constexpr uint32_t kEntrySize = 8;
@@ -58,7 +58,7 @@ class File {
   enum class Open : uint8_t { Ok, Missing, Foreign, Unreadable };
   // `path`: kPath, or a test's.
   Open open(const char* path = kPath);
-  // A fresh, empty recent.bin over whatever was there: the header and a table of free entries, no slots yet.
+  // A fresh, empty recent-books.bin over whatever was there: the header and a table of free entries, no slots yet.
   bool create(const char* path = kPath);
   void close() { file_.close(); }
 

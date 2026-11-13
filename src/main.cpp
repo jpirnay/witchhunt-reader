@@ -1635,7 +1635,7 @@ void setup() {
   // attributable to one of these three stores rather than inferred across boots.
   logStartupMemory("before_stores");
   // The recent-books list is not loaded here, nor anywhere: each call reads what it needs from
-  // recent.bin (RecentBooksStore). Loaded at boot it split the largest free block for the
+  // recent-books.bin (RecentBooksStore). Loaded at boot it split the largest free block for the
   // session -- the reader opened every book with 45 KB of it instead of 61 KB (X3).
   logStartupMemory("after_recent_books");
   // Nor is the bookmark index, for the same reason: GlobalBookmarkIndex::Hold.

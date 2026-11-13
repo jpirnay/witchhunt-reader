@@ -481,7 +481,7 @@ TEST_F(FileBrowserModelTest, SearchingEverywhereStopsAtItsCap) {
 
 }  // namespace
 
-// Recents are streamed from recent.bin a window at a time: rows read as they are reached, forwards or back, and a
+// Recents are streamed from recent-books.bin a window at a time: rows read as they are reached, forwards or back, and a
 // name found, while no call asks for more than one window of a hundred books.
 TEST(FileBrowserModelRecents, AreStreamedAWindowAtATime) {
   g_recents.clear();

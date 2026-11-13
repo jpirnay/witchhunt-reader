@@ -111,7 +111,7 @@ sidecar exists is a file-existence check per extension (`.opf`, `.OPF`).
 Deleting the sidecar restores the book's embedded metadata, again on next load.
 
 The home screen is an exception: it shows a copy of the title, author and series
-kept in `recent.bin`, taken when the book is opened. So that a sidecar written later still shows without reopening the book,
+kept in `recent-books.bin`, taken when the book is opened. So that a sidecar written later still shows without reopening the book,
 each entry also stores a hash of the sidecar it was taken with
 (`SidecarFiles::metadataStamp()`). When Home reads its books, any entry whose
 sidecar hash has changed (sidecar added, edited or removed) has its metadata

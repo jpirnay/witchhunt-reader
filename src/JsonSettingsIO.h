@@ -31,7 +31,7 @@ bool loadWifi(WifiCredentialStore& store, const char* json, bool* needsResave = 
 bool saveKOReader(const KOReaderCredentialStore& store, const char* path);
 bool loadKOReader(KOReaderCredentialStore& store, const char* json, bool* needsResave = nullptr);
 
-// recent.json, read once as the list moves to recent.bin (RecentBooksStore)
+// recent.json, read once as the list moves to recent-books.bin (RecentBooksStore)
 RecentBooksLoad loadRecentBooks(std::vector<LegacyRecentBook>& out, const char* json);
 
 // OpdsServerStore

@@ -1,5 +1,5 @@
-// recent.bin's layout: the table read a chunk at a time, slots round-tripped and checked, the file growing a slot at a
-// time. Against real files in a folder of this process's own.
+// recent-books.bin's layout: the table read a chunk at a time, slots round-tripped and checked, the file growing a slot
+// at a time. Against real files in a folder of this process's own.
 #include <gtest/gtest.h>
 #include <unistd.h>
 
@@ -26,7 +26,7 @@ class RecentBooksFileTest : public testing::Test {
                                                   "_" + testing::UnitTest::GetInstance()->current_test_info()->name());
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
-    path = (dir / "recent.bin").string();
+    path = (dir / "recent-books.bin").string();
   }
   void TearDown() override { std::filesystem::remove_all(dir); }
 };

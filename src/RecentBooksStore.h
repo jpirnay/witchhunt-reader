@@ -19,8 +19,9 @@ struct RecentBook {
   bool operator==(const RecentBook& other) const { return path == other.path; }
 };
 
-// A row of recent.json, the list's file before recent.bin: the book, and the reader settings of its own a row of a
-// firmware from before they moved to the book's folder still carries. Read once, when the list moves to recent.bin.
+// A row of recent.json, the list's file before recent-books.bin: the book, and the reader settings of its own a row of
+// a firmware from before they moved to the book's folder still carries. Read once, when the list moves to
+// recent-books.bin.
 struct LegacyRecentBook {
   RecentBook book;
   BookReaderOverrides overrides;
@@ -34,7 +35,7 @@ namespace JsonSettingsIO {
 RecentBooksLoad loadRecentBooks(std::vector<LegacyRecentBook>& out, const char* json);
 }  // namespace JsonSettingsIO
 
-// The books lately opened, newest first, in /.crosspoint/recent.bin (RecentBooksFile): at most kMaxBooks, the one
+// The books lately opened, newest first, in /.crosspoint/recent-books.bin (RecentBooksFile): at most kMaxBooks, the one
 // opened longest ago making room for a new one. Also the way to a book's own reader settings, which live in its folder
 // (readerOverrides()).
 //
@@ -104,7 +105,7 @@ class RecentBooksStore {
   // Saves the EPUB's own reader settings in its folder. False when the save failed.
   bool setReaderOverrides(const std::string& path, const BookReaderOverrides& overrides);
 
-  // Where the list lives, for a test: recent.bin and the recent.json it moves from.
+  // Where the list lives, for a test: recent-books.bin and the recent.json it moves from.
   void useFilesForTest(std::string binPath, std::string legacyJsonPath);
 
  private:

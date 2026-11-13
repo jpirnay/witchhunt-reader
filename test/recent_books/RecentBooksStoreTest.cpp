@@ -1,6 +1,6 @@
-// The recent-books store on recent.bin: the order books were opened in, the hundred-book cap, removal and moves, the
-// Library's pages, books gone from the card, the move from recent.json, and what a power cut can leave. Against real
-// files in a folder of this process's own; the books' metadata and recent.json's parser are stood in for below.
+// The recent-books store on recent-books.bin: the order books were opened in, the hundred-book cap, removal and moves,
+// the Library's pages, books gone from the card, the move from recent.json, and what a power cut can leave. Against
+// real files in a folder of this process's own; the books' metadata and recent.json's parser are stood in for below.
 #include <gtest/gtest.h>
 #include <unistd.h>
 
@@ -59,7 +59,7 @@ class RecentBooksStoreTest : public testing::Test {
     g_refresh = nullptr;
     g_legacy.clear();
     g_load = RecentBooksLoad::Loaded;
-    binPath = (dir / "recent.bin").string();
+    binPath = (dir / "recent-books.bin").string();
     jsonPath = (dir / "recent.json").string();
     RECENT_BOOKS.useFilesForTest(binPath, jsonPath);
   }

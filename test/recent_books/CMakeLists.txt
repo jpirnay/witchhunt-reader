@@ -1,4 +1,4 @@
-# The layout of recent.bin against real files in a temporary directory.
+# The layout of recent-books.bin against real files in a temporary directory.
 add_executable(RecentBooksFileTest
   RecentBooksFileTest.cpp
   ${REPO_ROOT}/src/RecentBooksFile.cpp
@@ -25,7 +25,7 @@ target_link_libraries(RecentBooksFileTest PRIVATE
 
 gtest_discover_tests(RecentBooksFileTest)
 
-# The store on recent.bin, the books' metadata and recent.json's parser stood in for in the test.
+# The store on recent-books.bin, the books' metadata and recent.json's parser stood in for in the test.
 add_executable(RecentBooksStoreTest
   RecentBooksStoreTest.cpp
   ${REPO_ROOT}/src/RecentBooksStore.cpp

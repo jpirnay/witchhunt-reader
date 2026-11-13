@@ -223,9 +223,9 @@ class FileBrowserModel {
     std::vector<RecentBooksStore::Row>().swap(recentWindow);
   }
 
-  // Recents, streamed from recent.bin: a window of kRecentWindow rows at a time (RecentBooksStore::rowsBefore), so a
-  // list of a hundred books holds no more than those. A window starts at a multiple of kRecentWindow; the one after
-  // the window on hand reads on from its last row, any other is walked to from the newest.
+  // Recents, streamed from recent-books.bin: a window of kRecentWindow rows at a time (RecentBooksStore::rowsBefore),
+  // so a list of a hundred books holds no more than those. A window starts at a multiple of kRecentWindow; the one
+  // after the window on hand reads on from its last row, any other is walked to from the newest.
   static constexpr size_t kRecentWindow = 16;
   size_t recentCount = 0;
   size_t recentWindowStart = 0;
