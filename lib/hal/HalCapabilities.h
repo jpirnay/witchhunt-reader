@@ -201,12 +201,16 @@ inline bool upKeyIsBootStrap() {
 // touch boards. Read by ThemeMetrics in touch phase 5.
 inline float uiScale() { return BoardConfig::ACTIVE.uiScale; }
 
-// FAST ghosts badly enough on this panel that the UI cannot rely on each screen's own cleaning:
+// FAST ghosts badly enough on these panels that the UI cannot rely on each screen's own cleaning:
 // every activity change gets a HALF and every screen follows the refresh frequency setting, the
-// way the reader's pages do (ActivityManager::armGhostClearingRefresh()). Not the same question as
-// the SDK's ghostsUnderFastRefresh(), which is true on the X3 too and only asks for the occasional
-// HALF on a menu.
-inline bool clearsGhostsOnEveryScreen() { return BoardConfig::isMurphyM3(); }
+// way the reader's pages do (ActivityManager::armGhostClearingRefresh()). Murphy's UC8253, and the
+// T5S3's ED047TC2, whose fast bank drives only the pixels whose target changed: photographed
+// 2026-11-13, Settings opened over Home showed the cover through its rows, and Home the Settings rows.
+// Not the same question as the SDK's ghostsUnderFastRefresh(), which is true on the X3 too and only
+// asks for the occasional HALF on a menu.
+inline bool clearsGhostsOnEveryScreen() {
+  return BoardConfig::isMurphyM3() || BoardConfig::ACTIVE.board == BoardConfig::Board::LilyGoT5S3;
+}
 
 // The panel can show gray at all. Murphy's only can in a build with -DFREEINK_MURPHY_GRAY: without
 // it the UC8253 driver has no gray waveforms and ignores a gray pass
