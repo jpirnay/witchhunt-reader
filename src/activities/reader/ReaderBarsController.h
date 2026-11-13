@@ -12,13 +12,15 @@ class GfxRenderer;
 class MappedInputManager;
 
 // The reader bars, whoever shows them: a top bar (back out of the book, its title, the page's star) and a tab bar
-// (Contents, Progress, Layout, More) painted over the page the reader left on the panel, which stays readable between
-// them. Opened by Confirm, a tap in the middle of the page, or a tap on the status bar
+// (Navigation, Progress, Layout, Orientation, More, an icon each) painted over the page the reader left on the panel,
+// which stays readable between them. Opened by Confirm, a tap in the middle of the page, or a tap on the status bar
 // (EpubReaderActivity::openReaderBars).
 //
-// Contents and More hand back to the reader, which opens its chapter list and its full menu: every reader feature
-// stays one step past More. Progress opens in place, above the tab bar: where the book and the chapter stand, the time
-// spent in the book, and previous chapter / Go to % / next chapter. Layout opens the layout sheet there
+// More hands back to the reader, which opens its full menu: every reader feature stays one step past More. The other
+// tabs open in place, above the tab bar. Navigation: the chapter list, the starred pages, a printed page where the
+// book has them, and leaving the book, each handed back to the reader. Progress: where the book and the chapter stand,
+// the time spent in the book, previous chapter / Go to % / next chapter, and KOReader sync's pull and push where it is
+// set up. Orientation: the four ways to hold the device, the current one marked. Layout opens the layout sheet there
 // (ReaderLayoutSheet): the font, size, line spacing, margin, darkness, paragraph spacing, alignment, hyphenation and
 // the book's style, and whether they are this book's own or the global settings. The reader lays the book out with
 // them when the bars close, or at each change where it keeps running under them (`live`, below).
@@ -48,6 +50,11 @@ class ReaderBarsController final : private UiAppHost {
     ReaderLayoutValues globalValues;
     bool thisBookOnly = false;
     ReaderSizeList sizes;
+    // Navigation offers a printed page (the book has page numbers of its print edition); Progress offers KOReader
+    // sync (its account is set up); Orientation marks the one the book is read in.
+    bool hasPrintedPages = false;
+    bool hasSync = false;
+    uint8_t orientation = 0;
   };
 
   // What one input pass asks of the host: nothing, a redraw, the Layout tab's values applied (live only), or the bars
@@ -82,7 +89,9 @@ class ReaderBarsController final : private UiAppHost {
   bool starToggled = false;
   Panel panel = Panel::None;
   Focus focus = Focus::None;
-  Tab focusedTab = Tab::Contents;
+  Tab focusedTab = Tab::Navigation;
+  // The Navigation or Orientation list's row under the cursor while focus is List.
+  uint8_t listFocus = 0;
   // The Layout tab's values as the reader is changing them, and the target its cursor is on while focus is Layout.
   ReaderLayoutValues layout{};
   bool thisBookOnly = false;
@@ -97,6 +106,10 @@ class ReaderBarsController final : private UiAppHost {
   std::string fontLabel;
 
   ReaderBarsLayout::Model model() const;
+  // The rows of list `which` (Navigation, Orientation; none for another panel) into `model`.
+  void fillList(ReaderBarsLayout::Model& model, Panel which) const;
+  // Panel `wanted` fits the screen, the top bar given up if need be (ReaderBarsLayout::panelFits).
+  bool fits(Panel wanted) const;
   ReaderLayoutSheet::Model sheetModel();
   const char* cellValue(ReaderLayout::Control control);
   static void barsScreen(UiScreen& screen, void* user);

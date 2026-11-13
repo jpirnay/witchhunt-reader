@@ -68,8 +68,8 @@ New to the reader? These are the steps to your first book, and what the keys do 
 2. **Turn the device on** with the key listed for your device below. The **Home** screen opens.
 3. **Open a book.** Choose **Library**, move to a book, and open it.
 4. **Read.** Turn the pages. Press **Confirm** (or tap the middle of the page or the status bar) for the
-   reader bars: the table of contents, where you are in the book, and **More** for the reader menu with
-   bookmarks and per-book settings.
+   reader bars: the table of contents and starred pages, where you are in the book, the layout, the
+   orientation, and **More** for the reader menu with every other per-book setting.
 5. **Leave the book** with **Back**. Your place is saved.
 6. **Put the device to sleep** with the same key that turned it on. If you forget, it sleeps by
    itself after 10 minutes.
@@ -724,7 +724,8 @@ docker compose up -d
 
 ##### Using sync while reading
 
-Press **Confirm**, then **More**, to open the reader menu and go to its **Sync** tab:
+Press **Confirm** and open **Progress** (the dial) in the reader bars: **Pull** and **Push** there do
+the first two of these. All three are in the reader menu's **Sync** tab (**Confirm**, then **More**):
 - **Pull progress from other devices** — jump to the position stored on the server.
 - **Push progress from this device** — send the current position to the server.
 - **Compare progress with other devices** — show which side is further on and let you choose. A long **Confirm** while reading does the same.
@@ -818,7 +819,14 @@ This feature can be disabled in the **[Controls Settings](#373-controls)** to he
 ### System Navigation
 * **Leave the book:** Press **Back** to close the book and return to where you opened it: the **[Home](#31-home-screen)** screen, or the **[Library](#33-library-screen)** at the tab, the folder or author, and the row you opened it from. Holding **Back** does the same, unless you give the long press an action of its own under **[Controls](#373-controls)**.
 * **Back after a link:** After you follow a link in the book, such as a footnote, **Back** first returns to the page you followed it from, step by step for the last three links. These steps are kept when the device sleeps or you close the book there.
-* **Reader bars:** Press **Confirm** (on a touch screen: tap the middle of the page or the status bar) for two bars over the page, which stays in view between them. The top one leaves the book (**<**), shows the book's details (a tap on its title) and stars or unstars the page (the star). The bottom one has four tabs: **Contents** opens the **[Table of Contents](#6-chapter-selection-screen)**; **Progress** shows how far you are in the book and in the chapter and the time you have spent in the book, with buttons for the previous chapter, **Go to %** and the next chapter; **Layout** (below); **More** opens the reader menu. With the keys, **Left / Right** move along a row, **Up / Down** between the rows as they lie on screen, **Confirm** chooses, and **Back** (or a tap on the page) closes the bars. Closing Progress or Layout closes the bars as well.
+* **Reader bars:** Press **Confirm** (on a touch screen: tap the middle of the page or the status bar) for two bars over the page, which stays in view between them. The top one leaves the book (**<**), shows the book's details (a tap on its title) and stars or unstars the page (the star). The bottom one has five tabs, an icon each:
+  - **Navigation** (a list): **Select Chapter** opens the **[Table of Contents](#6-chapter-selection-screen)**, **Starred Pages** the pages you starred, **Go to printed page** a page of the book's print edition (where the book numbers them), and **Go Home** closes the book.
+  - **Progress** (a dial): how far you are in the book and in the chapter and the time you have spent in the book, with buttons for the previous chapter, **Go to %** and the next chapter. With **[KOReader Sync](#377-koreader-sync-quick-setup)** set up, **Pull** fetches your position from the server and **Push** sends it there. On the Murphy held sideways there is no room for them; the reader menu's **Sync** tab has both.
+  - **Layout** (**Aa**): below.
+  - **Orientation** (a turning page): **Portrait**, **Landscape CW**, **Inverted** and **Landscape CCW**, the one you read in marked.
+  - **More** (three dots) opens the reader menu.
+
+  With the keys, **Left / Right** move along a row, **Up / Down** between the rows as they lie on screen, **Confirm** chooses, and **Back** (or a tap on the page) closes the bars. Closing a tab (its icon again, or **Back**) closes the bars as well.
 * **Layout:** the font and how the page is laid out, with the page still in view above where the screen leaves room. **Font** goes round the fonts, starting with the book's own (**Book's fonts**, Publisher Fonts' All Text), then the built-in and the card's. **Size**, **Line spacing**, **Margin** (left and right) and **Darkness** step down and up with **-** and **+**; **Paragraph gap**, **Alignment**, **Hyphens** and **Book style** (the book's own CSS) change with one tap. **This book only** decides where the values go: on, they are this book's own and no other book changes; off, they are the global settings, which every book without its own follows, and the sheet shows those. Turning it off gives the book back to the global settings. On the X4 Pro, the T5S3 and the Murphy the page is laid out again under the sheet at each change, in black and white while the bars are open (so **Darkness** shows once they close); a new size or spacing takes a few seconds the first time and is quicker when you step back to one you have used. On the X3 and X4 the book is laid out again when the bars close. On a small screen the sheet takes the whole screen; on the Murphy held sideways there is no room for it, and **Layout** opens the reader menu instead. A key bound to **Open reader menu** under **[Controls](#373-controls)** still opens the menu directly.
 * **Reader Menu:** Reach it through **More** in the reader bars. It includes: **[Table of Contents](#6-chapter-selection-screen)**, bookmarks, sync progress, reading statistics, quick per-book overrides (font, images, hyphenation, bionic reading…), take screenshot, and more. Its entries are grouped into tabs. While the tab bar is selected, **Confirm** moves to the next tab, and its button hint names that tab. **Hold Up / Down** to switch tabs: each opens where you left it. **Hold Back** to close the book as **Go Home** does; changes made in the menu are kept.
 * **Your place is kept by paragraph as well as by page.** If a book is laid out differently the next time you open it, for example after you changed the font size from outside the book or after a firmware update re-indexed it, it opens at the paragraph you were reading rather than at a page number scaled to the new length.

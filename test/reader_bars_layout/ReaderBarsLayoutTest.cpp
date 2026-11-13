@@ -86,6 +86,22 @@ Laid layOut(const Board& board, const bool sideways, const rb::Panel panel) {
   laid.model.timeLabel = "Total time";
   laid.model.timeValue = "2 h 15 min";
   laid.model.goToLabel = "Go to %";
+  laid.model.syncPullLabel = "Pull";
+  laid.model.syncPushLabel = "Push";
+  // The longest lists the bars make: Navigation with a printed page, the four orientations, one marked.
+  if (panel == rb::Panel::Navigation) {
+    laid.model.list[0] = {"Select Chapter", rb::Button::Chapters, false};
+    laid.model.list[1] = {"Starred Pages", rb::Button::StarredPages, false};
+    laid.model.list[2] = {"Go to Printed Page", rb::Button::PrintedPage, false};
+    laid.model.list[3] = {"Go Home", rb::Button::GoHome, false};
+    laid.model.listCount = 4;
+  } else if (panel == rb::Panel::Orientation) {
+    laid.model.list[0] = {"Portrait", rb::Button::Portrait, true};
+    laid.model.list[1] = {"Landscape CW", rb::Button::LandscapeCw, false};
+    laid.model.list[2] = {"Inverted", rb::Button::Inverted, false};
+    laid.model.list[3] = {"Landscape CCW", rb::Button::LandscapeCcw, false};
+    laid.model.listCount = 4;
+  }
   laid.sheet.font = {"Font", "Literata"};
   laid.sheet.thisBook = {"This book only", "On"};
   const char* controlLabels[ReaderLayout::kControlCount] = {"Size",       "Lines",     "Margin",  "Darkness",
@@ -95,9 +111,10 @@ Laid layOut(const Board& board, const bool sideways, const rb::Panel panel) {
   laid.metrics = rb::metricsFor(target, tokens, board.tabBar, board.touch, device.width, device.height);
 
   fui::TabItem tabs[rb::kTabCount]{};
-  const char* labels[rb::kTabCount] = {"Contents", "Progress", "Layout", "More"};
+  const freeink::Icon* icons[rb::kTabCount] = {&icon_navigation_32, &icon_progress_32, &icon_layout_32,
+                                               &icon_orientation_32, &icon_more_32};
   for (uint8_t i = 0; i < rb::kTabCount; ++i) {
-    tabs[i].label = labels[i];
+    tabs[i].icon = fui::bitmapFromIcon(*icons[i]);
     tabs[i].value = i;
   }
   fui::TabBarProps props;
@@ -130,12 +147,13 @@ template <typename Check>
 void forEveryLayout(Check check) {
   for (const Board& board : BOARDS) {
     for (const bool sideways : {false, true}) {
-      for (const rb::Panel panel : {rb::Panel::None, rb::Panel::Progress, rb::Panel::Layout}) {
-        const char* names[] = {"", ", Progress", ", Layout"};
+      for (const rb::Panel panel :
+           {rb::Panel::None, rb::Panel::Progress, rb::Panel::Layout, rb::Panel::Navigation, rb::Panel::Orientation}) {
+        const char* names[] = {"", ", Progress", ", Layout", ", Navigation", ", Orientation"};
         SCOPED_TRACE(std::string(board.name) + (sideways ? " sideways" : " upright") + names[static_cast<int>(panel)]);
         const Laid laid = layOut(board, sideways, panel);
-        // A screen the Layout sheet does not fit has none: its Layout tab does what More does (layoutFits).
-        if (panel == rb::Panel::Layout && !rb::layoutFits(laid.metrics, laid.area.height)) continue;
+        // A screen the panel does not fit has none: its tab hands over to the reader (panelFits).
+        if (!rb::panelFits(laid.model, laid.metrics, laid.area.height)) continue;
         check(board, laid);
       }
     }
@@ -165,7 +183,8 @@ TEST(ReaderBarsLayout, EveryControlIsOnABarAndOnTheScreen) {
 // quarter of the screen. On the Murphy held sideways (240 px) that is all Progress leaves, with its values on one line.
 TEST(ReaderBarsLayout, TheBarsLeaveAStripOfThePage) {
   forEveryLayout([](const Board& board, const Laid& laid) {
-    if (laid.model.panel == rb::Panel::Layout) return;  // its own rule below
+    // The sheet and the lists: their own rule below.
+    if (laid.model.panel != rb::Panel::None && laid.model.panel != rb::Panel::Progress) return;
     const int page = rb::bottomRect(laid.area, laid.model, laid.metrics).y -
                      rb::topRect(laid.area, laid.model, laid.metrics).bottom();
     EXPECT_GE(page, fui::themeTokensForLineHeight(board.body).minTouchSize);
@@ -192,6 +211,41 @@ TEST(ReaderBarsLayout, TheLayoutSheetLeavesAStripOrCoversThePage) {
       const int page = rb::bottomRect(laid.area, laid.model, laid.metrics).y -
                        rb::topRect(laid.area, laid.model, laid.metrics).bottom();
       EXPECT_GE(page, laid.metrics.minPage);
+    }
+  }
+}
+
+// The Navigation and Orientation lists are there on every board, upright and sideways (two columns where one would
+// crowd the page), and leave a finger's width of page or take the whole screen.
+TEST(ReaderBarsLayout, TheListsFitAndLeaveAStripOrCoverThePage) {
+  for (const Board& board : BOARDS) {
+    for (const bool sideways : {false, true}) {
+      for (const rb::Panel panel : {rb::Panel::Navigation, rb::Panel::Orientation}) {
+        SCOPED_TRACE(std::string(board.name) + (sideways ? " sideways" : " upright") +
+                     (panel == rb::Panel::Navigation ? ", Navigation" : ", Orientation"));
+        const Laid laid = layOut(board, sideways, panel);
+        ASSERT_TRUE(rb::panelFits(laid.model, laid.metrics, laid.area.height));
+        if (rb::coversPage(laid.model, laid.metrics, laid.area.height)) {
+          EXPECT_EQ(rb::topRect(laid.area, laid.model, laid.metrics).height, 0);
+          continue;
+        }
+        const int page = rb::bottomRect(laid.area, laid.model, laid.metrics).y -
+                         rb::topRect(laid.area, laid.model, laid.metrics).bottom();
+        EXPECT_GE(page, laid.metrics.minPage);
+      }
+    }
+  }
+}
+
+// KOReader sync's row is on Progress wherever a finger's width of page is left with it: on every board but the Murphy
+// held sideways.
+TEST(ReaderBarsLayout, TheSyncRowIsThereWhereThePageAllowsIt) {
+  for (const Board& board : BOARDS) {
+    for (const bool sideways : {false, true}) {
+      SCOPED_TRACE(std::string(board.name) + (sideways ? " sideways" : " upright"));
+      const Laid laid = layOut(board, sideways, rb::Panel::Progress);
+      const bool murphySideways = std::string(board.name).rfind("Murphy", 0) == 0 && sideways;
+      if (!murphySideways) EXPECT_TRUE(rb::showsSyncRow(laid.model, laid.metrics, laid.area.height));
     }
   }
 }
@@ -262,6 +316,19 @@ TEST(ReaderBarsLayout, EachActionIsThereOnce) {
     EXPECT_EQ(countOf(laid, rb::Button::PrevChapter), progress);
     EXPECT_EQ(countOf(laid, rb::Button::GoTo), progress);
     EXPECT_EQ(countOf(laid, rb::Button::NextChapter), progress);
+    const size_t sync = progress != 0 && rb::showsSyncRow(laid.model, laid.metrics, laid.area.height) ? 1u : 0u;
+    EXPECT_EQ(countOf(laid, rb::Button::SyncPull), sync);
+    EXPECT_EQ(countOf(laid, rb::Button::SyncPush), sync);
+    const size_t navigation = laid.model.panel == rb::Panel::Navigation ? 1u : 0u;
+    for (const rb::Button button :
+         {rb::Button::Chapters, rb::Button::StarredPages, rb::Button::PrintedPage, rb::Button::GoHome}) {
+      EXPECT_EQ(countOf(laid, button), navigation) << "button " << static_cast<int>(button);
+    }
+    const size_t orientation = laid.model.panel == rb::Panel::Orientation ? 1u : 0u;
+    for (const rb::Button button :
+         {rb::Button::Portrait, rb::Button::LandscapeCw, rb::Button::Inverted, rb::Button::LandscapeCcw}) {
+      EXPECT_EQ(countOf(laid, button), orientation) << "button " << static_cast<int>(button);
+    }
     // Three actions in all: FreeInkApp keeps 8 handlers a screen and drops any past that without a sign.
     for (const auto& hit : laid.hits) {
       EXPECT_TRUE(hit.action == rb::ACTION_BAR || hit.action == rb::ACTION_TAB ||
@@ -271,16 +338,16 @@ TEST(ReaderBarsLayout, EachActionIsThereOnce) {
   });
 }
 
-TEST(ReaderBarsLayout, TouchBoardsGetFingerSizedProgressButtons) {
+TEST(ReaderBarsLayout, TouchBoardsGetFingerSizedPanelButtons) {
   forEveryLayout([](const Board& board, const Laid& laid) {
-    if (!board.touch || laid.model.panel != rb::Panel::Progress) return;
+    if (!board.touch || laid.model.panel == rb::Panel::None || laid.model.panel == rb::Panel::Layout) return;
     const int16_t minTouch = fui::themeTokensForLineHeight(board.body).minTouchSize;
-    for (const rb::Button button : {rb::Button::PrevChapter, rb::Button::GoTo, rb::Button::NextChapter}) {
-      for (const auto& hit : laid.hits) {
-        if (hit.action != rb::ACTION_BAR || hit.value != static_cast<int16_t>(button)) continue;
-        EXPECT_GE(hit.rect.height, minTouch);
-        EXPECT_GE(hit.rect.width, minTouch);
-      }
+    for (const auto& hit : laid.hits) {
+      if (hit.action != rb::ACTION_BAR) continue;
+      const auto button = static_cast<rb::Button>(hit.value);
+      if (button == rb::Button::Exit || button == rb::Button::Star || button == rb::Button::Info) continue;
+      EXPECT_GE(hit.rect.height, minTouch) << "button " << hit.value;
+      EXPECT_GE(hit.rect.width, minTouch) << "button " << hit.value;
     }
   });
 }

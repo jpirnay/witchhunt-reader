@@ -8131,6 +8131,9 @@ void EpubReaderActivity::openReaderBars() {
   info.globalValues = globalLayoutValues();
   info.thisBookOnly = hasOwnLayout();
   info.sizes = layoutSheetSizes();
+  info.hasPrintedPages = epub->hasNumericPrintedPages();
+  info.hasSync = KOREADER_STORE.hasCredentials();
+  info.orientation = SETTINGS.orientation;
   // The time spent in the book: what the history holds, and the session under way, which lands there only when the
   // reader closes.
   {
@@ -8389,6 +8392,22 @@ void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
       return;
     case ReaderBarsResult::Action::BookInfo:
       onReaderMenuConfirm(MenuAction::BOOK_INFO);
+      return;
+    case ReaderBarsResult::Action::StarredPages:
+      onReaderMenuConfirm(MenuAction::STARRED_PAGES);
+      return;
+    case ReaderBarsResult::Action::PrintedPage:
+      onReaderMenuConfirm(MenuAction::GO_TO_PRINTED_PAGE);
+      return;
+    case ReaderBarsResult::Action::Orientation:
+      applyOrientation(bars->orientation);
+      requestUpdate();
+      return;
+    case ReaderBarsResult::Action::SyncPull:
+      onReaderMenuConfirm(MenuAction::PULL_REMOTE);
+      return;
+    case ReaderBarsResult::Action::SyncPush:
+      onReaderMenuConfirm(MenuAction::PUSH_LOCAL);
       return;
   }
 }

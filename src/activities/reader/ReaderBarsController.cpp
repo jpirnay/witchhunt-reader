@@ -66,12 +66,14 @@ void ReaderBarsController::begin(const bool touch, const bool live) {
 }
 
 void ReaderBarsController::appendDebugState(std::string& out) const {
-  static constexpr const char* kFocus[] = {"none", "exit", "star", "tabs", "prev", "goto", "next", "layout", "title"};
-  static constexpr const char* kTab[] = {"contents", "progress", "layout", "more"};
-  static constexpr const char* kPanel[] = {"none", "progress", "layout"};
+  static constexpr const char* kFocus[] = {"none", "exit",   "star",  "tabs", "prev", "goto",
+                                           "next", "layout", "title", "pull", "push", "list"};
+  static constexpr const char* kTab[] = {"navigation", "progress", "layout", "orientation", "more"};
+  static constexpr const char* kPanel[] = {"none", "progress", "layout", "navigation", "orientation"};
   SerialCommandGrammar::appendField(out, "focus", kFocus[static_cast<uint8_t>(focus)]);
   SerialCommandGrammar::appendField(out, "tab", kTab[static_cast<uint8_t>(focusedTab)]);
   SerialCommandGrammar::appendField(out, "panel", kPanel[static_cast<uint8_t>(panel)]);
+  if (focus == Focus::List) SerialCommandGrammar::appendField(out, "row", static_cast<long>(listFocus));
   SerialCommandGrammar::appendField(out, "starred", starred ? 1L : 0L);
 #if SERIAL_TEST_API
   // The Layout tab's values: what a device test checks a press against. Release builds keep the short reply.
@@ -105,7 +107,43 @@ ReaderBarsLayout::Model ReaderBarsController::model() const {
   model.timeLabel = tr(STR_READING_STATS_TOTAL_TIME);
   model.timeValue = info.timeValue.empty() ? nullptr : info.timeValue.c_str();
   model.goToLabel = tr(STR_GO_TO_PERCENT);
+  if (info.hasSync) {
+    model.syncPullLabel = tr(STR_SYNC_PULL);
+    model.syncPushLabel = tr(STR_SYNC_PUSH);
+  }
+  model.listFocus = listFocus;
+  fillList(model, panel);
   return model;
+}
+
+void ReaderBarsController::fillList(ReaderBarsLayout::Model& model, const Panel which) const {
+  uint8_t count = 0;
+  const auto add = [&](const StrId label, const Button button, const bool marked) {
+    if (count < kMaxListRows) model.list[count++] = {text(label), button, marked};
+  };
+  switch (which) {
+    case Panel::Navigation:
+      add(StrId::STR_SELECT_CHAPTER, Button::Chapters, false);
+      add(StrId::STR_STARRED_PAGES, Button::StarredPages, false);
+      if (info.hasPrintedPages) add(StrId::STR_GO_TO_PRINTED_PAGE, Button::PrintedPage, false);
+      add(StrId::STR_GO_HOME_BUTTON, Button::GoHome, false);
+      break;
+    case Panel::Orientation: {
+      // CrossPointSettings::ORIENTATION's order, which Button follows from Portrait.
+      constexpr StrId kNames[] = {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED,
+                                  StrId::STR_LANDSCAPE_CCW};
+      static_assert(sizeof(kNames) / sizeof(kNames[0]) == CrossPointSettings::ORIENTATION_COUNT);
+      for (uint8_t o = 0; o < CrossPointSettings::ORIENTATION_COUNT; ++o) {
+        add(kNames[o], static_cast<Button>(static_cast<uint8_t>(Button::Portrait) + o), o == info.orientation);
+      }
+      break;
+    }
+    case Panel::None:
+    case Panel::Progress:
+    case Panel::Layout:
+      break;
+  }
+  model.listCount = count;
 }
 
 ReaderLayoutSheet::Model ReaderBarsController::sheetModel() {
@@ -157,15 +195,19 @@ void ReaderBarsController::barsScreen(UiScreen& screen, void* user) {
 }
 
 void ReaderBarsController::buildBars(UiScreen& screen) {
-  const char* labels[kTabCount] = {text(StrId::STR_CONTENTS), text(StrId::STR_READING_STATS_PROGRESS),
-                                   text(StrId::STR_LAYOUT), text(StrId::STR_MORE)};
+  // An icon a tab, as KOReader's: five labels did not fit across the Murphy's 240 px, nor most of the translations.
+  const freeink::Icon* icons[kTabCount] = {&icon_navigation_32, &icon_progress_32, &icon_layout_32,
+                                           &icon_orientation_32, &icon_more_32};
   for (uint8_t i = 0; i < kTabCount; ++i) {
-    tabs[i].label = labels[i];
+    tabs[i].label = nullptr;
+    tabs[i].icon = fui::bitmapFromIcon(*icons[i]);
     tabs[i].value = static_cast<int16_t>(i);
     // The open panel's tab, or the one under the keys' cursor.
     const auto tab = static_cast<Tab>(i);
-    tabs[i].selected = (panel == Panel::Progress && tab == Tab::Progress) ||
-                       (panel == Panel::Layout && tab == Tab::Layout) || (focus == Focus::Tabs && tab == focusedTab);
+    tabs[i].selected =
+        (panel == Panel::Progress && tab == Tab::Progress) || (panel == Panel::Layout && tab == Tab::Layout) ||
+        (panel == Panel::Navigation && tab == Tab::Navigation) ||
+        (panel == Panel::Orientation && tab == Tab::Orientation) || (focus == Focus::Tabs && tab == focusedTab);
   }
   const fui::TabBarProps props = ListTabBar::props(screen, tabs, kTabCount, ACTION_TAB, focus == Focus::Tabs);
   const ReaderLayoutSheet::Model sheet = sheetModel();
@@ -201,18 +243,20 @@ void ReaderBarsController::toggleStar() {
 
 void ReaderBarsController::openTab(const Tab tab) {
   switch (tab) {
-    case Tab::Contents:
-      close(ReaderBarsResult::Action::Contents);
-      return;
     case Tab::More:
       close(ReaderBarsResult::Action::More);
       return;
+    case Tab::Navigation:
     case Tab::Progress:
-    case Tab::Layout: {
-      const Panel wanted = tab == Tab::Progress ? Panel::Progress : Panel::Layout;
-      // A screen too short for the Layout sheet (the Murphy held sideways) has the settings in the reader menu.
-      if (wanted == Panel::Layout && !ReaderBarsLayout::layoutFits(metrics, area.height)) {
-        close(ReaderBarsResult::Action::More);
+    case Tab::Layout:
+    case Tab::Orientation: {
+      const Panel wanted = tab == Tab::Navigation    ? Panel::Navigation
+                           : tab == Tab::Progress    ? Panel::Progress
+                           : tab == Tab::Orientation ? Panel::Orientation
+                                                     : Panel::Layout;
+      // A screen too short for the panel even without the top bar has the chapter list or the reader menu instead.
+      if (panel == Panel::None && !fits(wanted)) {
+        close(wanted == Panel::Navigation ? ReaderBarsResult::Action::Contents : ReaderBarsResult::Action::More);
         return;
       }
       // A panel closing, or giving way to the other, would have to bring back the page it covered: the reader draws
@@ -225,7 +269,11 @@ void ReaderBarsController::openTab(const Tab tab) {
         RenderLock lock;
         panel = wanted;
         layoutFocus = 0;
-        if (focus != Focus::None) focus = wanted == Panel::Progress ? Focus::GoTo : Focus::Layout;
+        // On the current orientation, or the list's first row.
+        listFocus = wanted == Panel::Orientation ? info.orientation : uint8_t{0};
+        if (focus != Focus::None) {
+          focus = wanted == Panel::Progress ? Focus::GoTo : wanted == Panel::Layout ? Focus::Layout : Focus::List;
+        }
       }
       redraw_ = true;
       return;
@@ -233,6 +281,15 @@ void ReaderBarsController::openTab(const Tab tab) {
     case Tab::Count:
       return;
   }
+}
+
+bool ReaderBarsController::fits(const Panel wanted) const {
+  if (wanted == Panel::Layout) return ReaderBarsLayout::layoutFits(metrics, area.height);
+  // As the panel would lie, without opening it.
+  ReaderBarsLayout::Model probe = model();
+  probe.panel = wanted;
+  fillList(probe, wanted);
+  return ReaderBarsLayout::panelFits(probe, metrics, area.height);
 }
 
 void ReaderBarsController::pressControl(const Control control, const int delta) {
@@ -292,6 +349,31 @@ void ReaderBarsController::pressButton(const Button button) {
       return;
     case Button::Info:
       close(ReaderBarsResult::Action::BookInfo);
+      return;
+    case Button::SyncPull:
+      close(ReaderBarsResult::Action::SyncPull);
+      return;
+    case Button::SyncPush:
+      close(ReaderBarsResult::Action::SyncPush);
+      return;
+    case Button::Chapters:
+      close(ReaderBarsResult::Action::Contents);
+      return;
+    case Button::StarredPages:
+      close(ReaderBarsResult::Action::StarredPages);
+      return;
+    case Button::PrintedPage:
+      close(ReaderBarsResult::Action::PrintedPage);
+      return;
+    case Button::GoHome:
+      close(ReaderBarsResult::Action::Exit);
+      return;
+    case Button::Portrait:
+    case Button::LandscapeCw:
+    case Button::Inverted:
+    case Button::LandscapeCcw:
+      close(ReaderBarsResult::Action::Orientation);
+      result_.orientation = static_cast<uint8_t>(static_cast<uint8_t>(button) - static_cast<uint8_t>(Button::Portrait));
       return;
   }
 }
@@ -361,6 +443,17 @@ void ReaderBarsController::activateFocus() {
     case Focus::NextChapter:
       pressButton(Button::NextChapter);
       return;
+    case Focus::SyncPull:
+      pressButton(Button::SyncPull);
+      return;
+    case Focus::SyncPush:
+      pressButton(Button::SyncPush);
+      return;
+    case Focus::List: {
+      const ReaderBarsLayout::Model current = model();
+      if (listFocus < current.listCount) pressButton(current.list[listFocus].button);
+      return;
+    }
     case Focus::Layout: {
       ReaderLayoutSheet::Target all[ReaderLayoutSheet::kMaxTargets];
       const uint8_t count = layoutTargets(all);
@@ -374,6 +467,8 @@ void ReaderBarsController::activateFocus() {
 void ReaderBarsController::moveAlongRow(const int step) {
   ReaderLayoutSheet::Target all[ReaderLayoutSheet::kMaxTargets];
   const uint8_t count = focus == Focus::Layout ? layoutTargets(all) : 0;
+  const ReaderBarsLayout::Model now = model();
+  const uint8_t columns = ReaderBarsLayout::listColumns(now, metrics, area.height);
   RenderLock lock;
   switch (focus) {
     case Focus::None:
@@ -406,6 +501,20 @@ void ReaderBarsController::moveAlongRow(const int step) {
     case Focus::Layout:
       if (step != 0) layoutFocus = ReaderLayoutSheet::targetAlong(all, count, layoutFocus, step);
       return;
+    case Focus::SyncPull:
+      if (step > 0) focus = Focus::SyncPush;
+      return;
+    case Focus::SyncPush:
+      if (step < 0) focus = Focus::SyncPull;
+      return;
+    case Focus::List: {
+      // Along a row of a two-column list; a one-column list has nothing beside a row.
+      const int next = listFocus + step;
+      if (columns > 1 && step != 0 && next >= 0 && next < now.listCount && next / columns == listFocus / columns) {
+        listFocus = static_cast<uint8_t>(next);
+      }
+      return;
+    }
   }
 }
 
@@ -414,7 +523,11 @@ void ReaderBarsController::moveAlongRow(const int step) {
 void ReaderBarsController::moveBetweenRows(const int step) {
   ReaderLayoutSheet::Target all[ReaderLayoutSheet::kMaxTargets];
   const uint8_t count = panel == Panel::Layout ? layoutTargets(all) : 0;
-  const bool topBar = ReaderBarsLayout::topRect(area, model(), metrics).height > 0;
+  const ReaderBarsLayout::Model now = model();
+  const bool topBar = ReaderBarsLayout::topRect(area, now, metrics).height > 0;
+  const bool syncRow = ReaderBarsLayout::showsSyncRow(now, metrics, area.height);
+  const uint8_t columns = ReaderBarsLayout::listColumns(now, metrics, area.height);
+  const bool listed = panel == Panel::Navigation || panel == Panel::Orientation;
   RenderLock lock;
   if (focus == Focus::None || step == 0) {
     if (focus == Focus::None) focus = Focus::Tabs;
@@ -425,7 +538,11 @@ void ReaderBarsController::moveBetweenRows(const int step) {
   };
   const auto enterPanelFromBelow = [&] {
     if (panel == Panel::Progress) {
-      focus = Focus::GoTo;
+      focus = syncRow ? Focus::SyncPull : Focus::GoTo;
+    } else if (listed && now.listCount > 0) {
+      // The last row's first entry.
+      focus = Focus::List;
+      listFocus = static_cast<uint8_t>((ReaderBarsLayout::listRows(now.listCount, columns) - 1) * columns);
     } else if (panel == Panel::Layout && count > 0) {
       // The last row's target nearest the middle.
       int16_t best = static_cast<int16_t>(count - 1);
@@ -452,6 +569,9 @@ void ReaderBarsController::moveBetweenRows(const int step) {
       } else if (panel == Panel::Layout) {
         focus = Focus::Layout;
         layoutFocus = 0;
+      } else if (listed && now.listCount > 0) {
+        focus = Focus::List;
+        listFocus = 0;
       } else {
         focus = Focus::Tabs;
       }
@@ -461,10 +581,31 @@ void ReaderBarsController::moveBetweenRows(const int step) {
     case Focus::NextChapter:
       if (step < 0) {
         enterTop();
+      } else if (syncRow) {
+        focus = focus == Focus::NextChapter ? Focus::SyncPush : Focus::SyncPull;
       } else {
         focus = Focus::Tabs;
       }
       return;
+    case Focus::SyncPull:
+    case Focus::SyncPush:
+      if (step < 0) {
+        focus = focus == Focus::SyncPush ? Focus::NextChapter : Focus::PrevChapter;
+      } else {
+        focus = Focus::Tabs;
+      }
+      return;
+    case Focus::List: {
+      const int next = listFocus + step * columns;
+      if (next >= 0 && next < now.listCount) {
+        listFocus = static_cast<uint8_t>(next);
+      } else if (step < 0) {
+        enterTop();
+      } else {
+        focus = Focus::Tabs;
+      }
+      return;
+    }
     case Focus::Tabs:
       if (step < 0) enterPanelFromBelow();
       return;
