@@ -3,6 +3,7 @@
 #include <BookCache.h>
 #include <Print.h>
 
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -106,6 +107,22 @@ class Epub {
   mutable std::unique_ptr<ZipFile::KnownEntries> packageEntries_;
   // getSpineIndexForTextReference's answer once looked up; -1 until then.
   mutable int textReferenceSpine_ = -1;
+  // book.bin answers the reader asks again for every page it draws, and that do not change while the file is loaded:
+  // the book's size and two cumulative sizes for its progress (calculateProgress, twice a page), the chapter's TOC
+  // index and entry for its title. They were 18 book.bin lookups a page turn, two seeks each (X3, 2026-11-13).
+  // Forgotten whenever the metadata is loaded again (forgetMetadataMemos).
+  struct CumulativeSizeMemo {
+    int spine = -1;
+    size_t size = 0;
+  };
+  mutable size_t bookSizeMemo_ = SIZE_MAX;
+  mutable CumulativeSizeMemo cumulativeSizeMemo_[2];
+  mutable uint8_t cumulativeSizeMemoNext_ = 0;
+  mutable int tocForSpineMemoSpine_ = -1;
+  mutable int tocForSpineMemoToc_ = -1;
+  mutable int tocEntryMemoIndex_ = -1;
+  mutable BookMetadataCache::TocEntry tocEntryMemo_;
+  void forgetMetadataMemos() const;
   // The stat of the entry at the normalised `path`, from the memo or one lookup.
   bool lookupItemStat(ZipFile& zip, const std::string& path, ZipFile::FileStatSlim* out) const;
 

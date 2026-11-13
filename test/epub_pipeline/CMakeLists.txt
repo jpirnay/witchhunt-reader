@@ -121,6 +121,7 @@ add_executable(EpubPipelineTest
   SavedPositionRestoreTest.cpp
   KeptReadingStateTest.cpp
   PagesWithoutPicturesTest.cpp
+  EpubMetadataMemoTest.cpp
   ParsedTextOffsetTest.cpp
   LowHeapLoadTest.cpp
   LongChapterPageTablesTest.cpp
