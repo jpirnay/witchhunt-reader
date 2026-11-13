@@ -113,6 +113,7 @@ class HalFile : public Print {
     }
     return false;
   }
+  bool detectContiguous() { return hasData_; }  // a host file has no cluster chain to walk
   HalFile openNextFile() { return opened(); }
   bool isOpen() const { return hasData_; }
   operator bool() const { return hasData_; }
