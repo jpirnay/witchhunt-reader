@@ -57,7 +57,8 @@ No completed work is thrown away. A look-ahead build that was still running is a
 One word on the page becomes highlighted:
 
 1. Use **Left/Right** to move between words in reading order, and the side **Up/Down** buttons to jump between lines. Moving the highlight repaints only the two word boxes that changed, so stepping through a line does not re-render the page. On a page set vertically (**Vertical Text**) the keys follow the columns: **Up/Down** move between words in reading order, down the column and on into the next one, **Left** moves to the next column (the one to the left) and **Right** to the previous one. The button hints name the direction each button moves the highlight on screen.
-2. Press **Confirm** to look up the highlighted word.
+2. Press **Confirm** to look up the highlighted word, or hold it for half a second to search the book for the word
+   instead (see [Searching the book](../USER_GUIDE.md#searching-the-book)).
 3. Press **Back** to return to the reader.
 
 On the very first lookup with a dictionary (and again whenever the `.idx` or `.syn` source file changes), the reader shows *"Indexing dictionary…"* while it builds small sidecar files next to them — a `.qidx` for the word index, and a `.sidx` when a `.syn` synonym file is present. Each sidecar is rebuilt independently, only when its own source changes. This takes a few seconds for large dictionaries and makes all subsequent lookups fast. The sidecars can be deleted safely at any time — they will simply be rebuilt.
