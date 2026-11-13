@@ -808,6 +808,7 @@ inline bool boardHas(const SettingRequires capability) {
     case SettingRequires::TiltSensor:
       return BoardConfig::ACTIVE.sensors.imuType != BoardConfig::ImuType::None;
     case SettingRequires::GrayscalePanel:
+      // cppcheck-suppress knownConditionTrueFalse ; a compile-time constant on Murphy, live on the other boards
       return HalCapabilities::panelShowsGray();
     case SettingRequires::OnePassTextPanel:
       return display.supportsOnePassText();

@@ -145,6 +145,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   if (hasPrintedPages) {
     navigationItems.push_back(SettingInfo::Action(StrId::STR_GO_TO_PRINTED_PAGE, SettingAction::None));
   }
+  navigationItems.push_back(SettingInfo::Action(StrId::STR_SEARCH, SettingAction::None));
   // Auto page turn: ACTION type with its own picker in onActionSelected
   navigationItems.push_back(SettingInfo::Action(StrId::STR_AUTO_TURN_SECONDS, SettingAction::None));
   navigationItems.push_back(SettingInfo::Action(StrId::STR_STAR_PAGE, SettingAction::None));
@@ -371,6 +372,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   }
 
   // Text anti-aliasing: default / on / off (mirrors QuickOverrides)
+  // cppcheck-suppress knownConditionTrueFalse ; a compile-time constant on Murphy, live on the other boards
   if (HalCapabilities::panelShowsGray()) {
     settingsItems.push_back(SettingInfo::DynamicEnumCtx(
         StrId::STR_TEXT_AA, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
@@ -443,6 +445,8 @@ EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForNameId(StrId
       return MenuAction::GO_TO_PERCENT;
     case StrId::STR_GO_TO_PRINTED_PAGE:
       return MenuAction::GO_TO_PRINTED_PAGE;
+    case StrId::STR_SEARCH:
+      return MenuAction::SEARCH;
     case StrId::STR_STARRED_PAGES:
       return MenuAction::STARRED_PAGES;
     case StrId::STR_STAR_PAGE:

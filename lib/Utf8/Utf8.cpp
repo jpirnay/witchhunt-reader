@@ -1,5 +1,7 @@
 #include "Utf8.h"
 
+#include "SearchFoldTable.h"
+
 int utf8CodepointLen(const unsigned char c) {
   if (c < 0x80) return 1;          // 0xxxxxxx
   if ((c >> 5) == 0x6) return 2;   // 110xxxxx
@@ -551,6 +553,97 @@ uint32_t greekSearchBase(const uint32_t cp) {
 }
 
 }  // namespace
+
+size_t utf8BookSearchFold(const uint32_t cp, uint32_t (&out)[2]) {
+  switch (cp) {
+    case 0x00AD:  // soft hyphen
+    case 0x200B:  // zero width space
+    case 0x200C:  // zero width non-joiner
+    case 0x200D:  // zero width joiner
+    case 0x200E:  // left-to-right mark
+    case 0x200F:  // right-to-left mark
+    case 0x2060:  // word joiner
+    case 0xFEFF:  // zero width no-break space
+      return 0;
+    case 0x00A0:  // no-break space
+    case 0x2007:  // figure space
+    case 0x2009:  // thin space
+    case 0x200A:  // hair space
+    case 0x202F:  // narrow no-break space
+      out[0] = ' ';
+      return 1;
+    case 0x2018:  // ‘
+    case 0x2019:  // ’
+    case 0x201A:  // ‚
+    case 0x201B:  // ‛
+    case 0x02BC:  // ʼ
+    case 0x2032:  // ′
+      out[0] = '\'';
+      return 1;
+    case 0x201C:  // “
+    case 0x201D:  // ”
+    case 0x201E:  // „
+    case 0x201F:  // ‟
+    case 0x2033:  // ″
+      out[0] = '"';
+      return 1;
+    case 0x2010:  // hyphen
+    case 0x2011:  // non-breaking hyphen
+    case 0x2012:  // figure dash
+    case 0x2013:  // en dash
+    case 0x2014:  // em dash
+    case 0x2015:  // horizontal bar
+    case 0x2212:  // minus
+      out[0] = '-';
+      return 1;
+    default:
+      break;
+  }
+  if (cp >= 0x0300 && cp <= 0x036F) return 0;  // a combining diacritic of a decomposed letter
+  const uint32_t lower = greekSearchBase(utf8LowerCodepoint(cp));
+  const auto pair = [&out](const char a, const char b) {
+    out[0] = static_cast<uint8_t>(a);
+    out[1] = static_cast<uint8_t>(b);
+    return size_t{2};
+  };
+  switch (lower) {
+    case 0x00DF:  // ß
+      return pair('s', 's');
+    case 0x00E6:  // æ
+      return pair('a', 'e');
+    case 0x0153:  // œ
+      return pair('o', 'e');
+    case 0x00F8:  // ø
+      out[0] = 'o';
+      return 1;
+    case 0x0111:  // đ
+    case 0x00F0:  // ð
+      out[0] = 'd';
+      return 1;
+    case 0x0142:  // ł
+      out[0] = 'l';
+      return 1;
+    case 0x0127:  // ħ
+      out[0] = 'h';
+      return 1;
+    case 0x0131:  // dotless ı
+      out[0] = 'i';
+      return 1;
+    default:
+      break;
+  }
+  using namespace SearchFoldTable;
+  if (lower >= kFirst00C0 && lower < kFirst00C0 + sizeof(kBase00C0) && kBase00C0[lower - kFirst00C0] != 0) {
+    out[0] = static_cast<uint8_t>(kBase00C0[lower - kFirst00C0]);
+    return 1;
+  }
+  if (lower >= kFirst1E00 && lower < kFirst1E00 + sizeof(kBase1E00) && kBase1E00[lower - kFirst1E00] != 0) {
+    out[0] = static_cast<uint8_t>(kBase1E00[lower - kFirst1E00]);
+    return 1;
+  }
+  out[0] = lower;
+  return 1;
+}
 
 void utf8SearchFold(std::string& s) {
   size_t out = 0;

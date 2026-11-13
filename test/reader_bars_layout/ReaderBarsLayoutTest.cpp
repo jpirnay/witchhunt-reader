@@ -93,8 +93,9 @@ Laid layOut(const Board& board, const bool sideways, const rb::Panel panel) {
     laid.model.list[0] = {"Select Chapter", rb::Button::Chapters, false};
     laid.model.list[1] = {"Starred Pages", rb::Button::StarredPages, false};
     laid.model.list[2] = {"Go to Printed Page", rb::Button::PrintedPage, false};
-    laid.model.list[3] = {"Go Home", rb::Button::GoHome, false};
-    laid.model.listCount = 4;
+    laid.model.list[3] = {"Search", rb::Button::Search, false};
+    laid.model.list[4] = {"Go Home", rb::Button::GoHome, false};
+    laid.model.listCount = 5;
   } else if (panel == rb::Panel::Orientation) {
     laid.model.list[0] = {"Portrait", rb::Button::Portrait, true};
     laid.model.list[1] = {"Landscape CW", rb::Button::LandscapeCw, false};

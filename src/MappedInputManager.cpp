@@ -290,6 +290,14 @@ bool MappedInputManager::wasScreenTappedIn(const touchtransform::Orientation ori
   return true;
 }
 
+bool MappedInputManager::peekScreenTapIn(const touchtransform::Orientation orientation, int& x, int& y) const {
+  float nx = 0.0f;
+  float ny = 0.0f;
+  if (!rawTap(nx, ny)) return false;
+  renderer.tapToLogical(static_cast<GfxRenderer::Orientation>(orientation), nx, ny, x, y);
+  return true;
+}
+
 bool MappedInputManager::wasScreenTouchPressed(int& x, int& y) const {
   if (!touchEventsEnabled_) return false;
   float nx = 0.0f;

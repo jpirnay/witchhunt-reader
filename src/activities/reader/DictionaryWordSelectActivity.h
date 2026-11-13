@@ -20,7 +20,7 @@ class LanguageHyphenator;
 
 // Word selection over the current reader page: Left/Right step through words in
 // reading order, Up/Down jump rows, Confirm looks the word up and opens
-// DictionaryDefinitionActivity, Back returns to the reader.
+// DictionaryDefinitionActivity, a long Confirm searches the book for it (WordSearchResult), Back returns to the reader.
 //
 // A vertical page is a horizontal page in the turned frame (TurnedFrame.h): its words are boxed there, a row is a
 // column, and the frame is mapped only at the edges -- a tap in, the highlight's boxes out, its text redrawn in the
@@ -116,6 +116,10 @@ class DictionaryWordSelectActivity final : public Activity {
   // Longest word handed to the dictionary, joined across fragments. Headwords far shorter
   // than this; the buffer is a stack local, so it stays well inside the task stack budget.
   static constexpr size_t WORD_TEXT_CAPACITY = 128;
+  // How long Confirm is held to search the book for the word rather than look it up; KeyboardEntryActivity's hold.
+  static constexpr unsigned long SEARCH_HOLD_MS = 500;
+  // The held Confirm searched: its release is not also a look-up.
+  bool confirmLongHandled_ = false;
   // Largest block a lookup may need on the heap: dictzip's 32 KB inflate window plus its ~3 KB
   // chunk scratch, when they cannot be had from the lent framebuffer. Below it the font caches go.
   static constexpr size_t LOOKUP_CONTIGUOUS_BYTES = 36 * 1024;

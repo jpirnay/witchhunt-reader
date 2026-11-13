@@ -230,6 +230,7 @@ void QuickOverridesActivity::buildMenuItems(const bool verticalAllowed) {
   }
 
   // Text anti-aliasing: default / on / off
+  // cppcheck-suppress knownConditionTrueFalse ; a compile-time constant on Murphy, live on the other boards
   if (HalCapabilities::panelShowsGray()) {
     menuItems.push_back(SettingInfo::DynamicEnumCtx(
         StrId::STR_TEXT_AA, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
