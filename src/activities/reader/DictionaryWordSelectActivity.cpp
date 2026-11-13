@@ -24,6 +24,7 @@
 
 #include "CrossPointSettings.h"
 #include "DictionaryDefinitionActivity.h"
+#include "WordOutline.h"
 #include "components/UITheme.h"
 #include "util/SerialCommandGrammar.h"
 
@@ -1125,7 +1126,27 @@ void DictionaryWordSelectActivity::loop() {
   }
   // Until the rebuild after a definition has been drawn there is nothing to move over or look up.
   if (!wordsExtracted || words.empty()) return;
+  // A long Confirm searches the book for the word (BookSearchActivity); a short one looks it up.
+  if (!confirmLongHandled_ && mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
+      mappedInput.getHeldTime() >= SEARCH_HOLD_MS) {
+    confirmLongHandled_ = true;
+    char text[WORD_TEXT_CAPACITY];
+    // The word as a lookup takes it, without the punctuation at its edges: `happens.”` searched as itself finds only
+    // the places it ends a quoted sentence.
+    std::string word = buildWordText(selected, text, sizeof(text), /*dropJoinHyphen=*/true) > 0
+                           ? Dictionary::cleanWord(text)
+                           : std::string();
+    if (!word.empty()) {
+      setResult(WordSearchResult{std::move(word)});
+      finish();
+      return;
+    }
+  }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    if (confirmLongHandled_) {
+      confirmLongHandled_ = false;
+      return;
+    }
     performLookup();
     return;
   }
@@ -1225,21 +1246,15 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
     // a little air around the glyphs. Clamped to the panel so save, draw and
     // restore all use the same rectangle.
     const turnedframe::Rect box = readerBox(vertical, readerWidth, {left, top, right - left, bottom - top});
-    int hx = box.x - 2;
-    int hy = box.y - 2;
-    int hw = box.width + 4;
-    int hh = box.height + 4;
-    if (hx < 0) {
-      hw += hx;
-      hx = 0;
+    WordOutlineBox outline;
+    if (!wordOutlineBox(box.x, box.y, box.width, box.height, renderer.getScreenWidth(), renderer.getScreenHeight(),
+                        outline)) {
+      return;
     }
-    if (hy < 0) {
-      hh += hy;
-      hy = 0;
-    }
-    if (hx + hw > renderer.getScreenWidth()) hw = renderer.getScreenWidth() - hx;
-    if (hy + hh > renderer.getScreenHeight()) hh = renderer.getScreenHeight() - hy;
-    if (hw <= 0 || hh <= 0) return;
+    const int hx = outline.x;
+    const int hy = outline.y;
+    const int hw = outline.width;
+    const int hh = outline.height;
 
     if (!draw) {
       if (!saved) return;

@@ -126,6 +126,7 @@ void ReaderBarsController::fillList(ReaderBarsLayout::Model& model, const Panel 
       add(StrId::STR_SELECT_CHAPTER, Button::Chapters, false);
       add(StrId::STR_STARRED_PAGES, Button::StarredPages, false);
       if (info.hasPrintedPages) add(StrId::STR_GO_TO_PRINTED_PAGE, Button::PrintedPage, false);
+      add(StrId::STR_SEARCH, Button::Search, false);
       add(StrId::STR_GO_HOME_BUTTON, Button::GoHome, false);
       break;
     case Panel::Orientation: {
@@ -369,6 +370,9 @@ void ReaderBarsController::pressButton(const Button button) {
       return;
     case Button::PrintedPage:
       close(ReaderBarsResult::Action::PrintedPage);
+      return;
+    case Button::Search:
+      close(ReaderBarsResult::Action::Search);
       return;
     case Button::GoHome:
       close(ReaderBarsResult::Action::Exit);

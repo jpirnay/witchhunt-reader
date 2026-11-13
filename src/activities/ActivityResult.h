@@ -141,6 +141,7 @@ struct ReaderBarsResult {
     BookInfo,
     StarredPages,
     PrintedPage,
+    Search,
     Orientation,
     SyncPull,
     SyncPush

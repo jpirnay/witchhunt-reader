@@ -20,6 +20,7 @@
 #include <optional>
 
 #include "BookReaderOverrides.h"
+#include "BookSearchSession.h"
 #include "BookmarkStore.h"
 #include "ChapterPageSpan.h"
 #include "CrossPointState.h"
@@ -1135,6 +1136,31 @@ class EpubReaderActivity final : public Activity {
   // (HalCapabilities::defersLiveFontChange).
   void openReaderBars();
   void onReaderBarsClosed(const ActivityResult& result);
+
+  // --- The book's search ---
+  // A search's hits while they are wanted (BookSearchSession): the results list (BookSearchActivity), and a hit shown
+  // on its page, the query outlined there and the hint strip stepping through the others (Left/Right), back to the list
+  // (Confirm) or closing the search (Back). Null while no search is open. Changed on the loop task under the render
+  // lock; the render task reads it under the lock.
+  std::unique_ptr<BookSearchSession> search_;
+  // The results list: the session's last search, or the keyboard for a new one from this page; `startQuery` searches
+  // for a word at once (a long Confirm in word selection).
+  void openBookSearch(std::string startQuery = "");
+  void onBookSearchClosed(const ActivityResult& result);
+  // The page of hit `index`. The first hit a search shows saves where the reader was first (pushLinkOrigin), so Back
+  // after the search returns there.
+  void showSearchHit(int index);
+  void closeBookSearch();
+  bool bookSearchShown() const { return search_ != nullptr && search_->current >= 0; }
+  // Something is drawn over the page (the live bars, a search's strip): it goes out in black and white, and the next
+  // page is not drawn ahead without it.
+  bool uiOverPage() const { return liveBarsOpen() || bookSearchShown(); }
+  // A key while a hit is shown. True when the search took it.
+  bool handleBookSearchKey(const ButtonEventManager::ButtonEvent& ev);
+  // The query outlined wherever it is on the page, and the hint strip. In the page's draw, after the status bar.
+  void drawBookSearchOverlay(const Page& page, int marginLeft, int contentTop) const;
+  // Where the reader is, onto the link Back stack, as a followed link saves it. False with no section to save.
+  bool pushLinkOrigin();
 
   // --- The reader bars, live ---
   // Open while the bars are over the page and the reader runs under them: their input in loop(), the build of a
