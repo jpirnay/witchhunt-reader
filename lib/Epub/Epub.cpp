@@ -2523,15 +2523,17 @@ void Epub::streamPrintedPageEntries(
   if (!Storage.openFileForRead("EBP", path, f)) {
     return;
   }
+  // Six reads an entry, through a window.
+  uint8_t window[512];
+  serialization::BufferedFileReader in(f, window, sizeof(window));
   uint16_t count = 0;
-  serialization::readPod(f, count);
+  in.readPod(count);
   // Reused across iterations — labels/hrefs are short, so this never grows into the ~200 KB block
   // the full list would reserve. count is never used to pre-size anything: a corrupt/oversized
   // count simply runs the loop until readString hits EOF or a malformed field and we stop.
   std::string href, anchor, label;
   for (uint16_t i = 0; i < count; i++) {
-    if (!serialization::readString(f, href) || !serialization::readString(f, anchor) ||
-        !serialization::readString(f, label)) {
+    if (!in.readString(href) || !in.readString(anchor) || !in.readString(label)) {
       break;  // malformed / oversized field: stop rather than risk desync
     }
     if (!visit(href, anchor, label)) {

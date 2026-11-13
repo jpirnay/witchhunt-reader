@@ -1,7 +1,9 @@
 #pragma once
 
+#include <BufferedFileIO.h>
 #include <HalStorage.h>
 
+#include <optional>
 #include <string>
 
 // Streams printed-page entries (href, anchor, label) directly to pagelist.bin
@@ -52,6 +54,9 @@ class PageListSink {
  private:
   std::string path;
   FsFile file;
+  // An entry is three strings, six writes: 4,058 SdFat calls for a 676-entry page list at a book's first open (X3,
+  // 2026-11-13). They go through a 512-byte buffer from the heap (unbuffered if the block cannot be had).
+  std::optional<serialization::BufferedFileWriter> writer;
   uint16_t count = 0;
   bool finalized = false;
 };
