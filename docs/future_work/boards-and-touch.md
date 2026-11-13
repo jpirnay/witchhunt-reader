@@ -189,13 +189,19 @@ Next: apply the browser's "short / long" form wherever a screen has a hold-only 
 
 ## BOOX Picco: after the first build
 
-Status: 2026-11-13, branch `feat/picco-support`. The board builds (`picco`, `picco_stock`) and a retail unit's flash
-is dumped, but nothing of Witch Reader has run on it yet. Board notes: [Board Support](../contributing/board-support.md#onyx-boox-picco).
+Status: 2026-11-13, branch `feat/picco-support`. A retail unit's flash is dumped, and the `picco_stock` build runs on
+it on Onyx's table: boot to Home in about 1 s of setup, SSD2677 with an SE0400NQW47 panel, TMA525C reporting two
+contacts, charger configured, RTC and IMU found, the light present (`Frontlight up`), the flash area taken as the
+PSRAM image beside the 512 KB `spiffs`, no System Update rows, the Slide Switch row and double Power = Back as
+defaults (serial log, screenshots, `GET`). Nothing physical has been tried yet. Board notes:
+[Board Support](../contributing/board-support.md#onyx-boox-picco).
 
-- **Validate on the device**, on both tables: boot to Home, panel (SSD1677 or SSD2677), touch orientation in all four
-  orientations (the SDK profile sets `swapXY` and `flipY`), Power / Up / Down and the double-Power Back, the slide
-  switch, the light (on, off, warmth, off in deep sleep), the battery reading, SD card, USB Drive, deep sleep and wake,
-  and on the stock table that the System Update rows are gone and the flash area is the PSRAM image.
+- **Validate on the device**: the screen upright, touch in all four orientations (the SDK profile sets `swapXY` and
+  `flipY`), Power / Up / Down and the double-Power Back, the slide switch, the light (on, off, warmth, off in deep
+  sleep), the battery reading, USB Drive, deep sleep and wake; then the full install on our table.
+- **Two boot-log errors** on that unit, cause not looked at: `i2c_master_transmit_receive failed: ESP_ERR_INVALID_STATE`
+  right after `Charger configured` (the IMU is found just after it), and `gpio_isr_handler_remove(): GPIO isr service is
+  not installed`.
 - **SDK resync.** Free-Ink main has Picco display fixes the pin lacks: grayscale LUTs for the SSD1677 panels
   (7ca5f5c), SSD2677 night-mode refresh (5c40622), dark AA pixels on the SE0400NQW47 (df3f41e), no two-pass clearing
   on the first paint (d73c852), grayscale overlay in inverted mode (99809a0). Several commits of that range change the

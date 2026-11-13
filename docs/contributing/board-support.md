@@ -241,6 +241,7 @@ chosen; without it a UC81xx unit is sent SSD1677 command streams and shows no im
 Profile `PICCO` in the SDK, recovered from the retail firmware by upstream; the board was brought up in CrossPoint
 (PR #3947, Justin Mitchell). Read from a retail unit here (2026-11-13): ESP32-S3 rev v0.2 with 8 MB embedded octal
 PSRAM (eFuse vendor AP_3v3), 16 MB GigaDevice quad flash, no secure boot, no flash encryption, download mode enabled.
+Its panel is an SE0400NQW47 on an SSD2677 (the driver's probe, boot log).
 
 - Keys: Power on GPIO2 (the deep-sleep wake), Up GPIO21, Down GPIO9, all active-low. The SDK carries GPIO5 as
   Confirm; what drives it on the device is not known. There is no Back key and no Home key, so a double press of
