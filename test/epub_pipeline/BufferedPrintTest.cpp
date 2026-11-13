@@ -108,3 +108,22 @@ TEST(BufferedPrintTest, FlushReportsSinkFailure) {
 }
 
 }  // namespace
+
+// A caller's buffer (JsonSettingsIO::saveState passes one on the stack) batches exactly as an owned one does.
+TEST(BufferedPrintTest, CallersBufferBatchesTheSame) {
+  CountingSink sink;
+  uint8_t buffer[64];
+  std::vector<uint8_t> expected;
+  {
+    BufferedPrint out(sink, buffer, sizeof(buffer));
+    EXPECT_EQ(out.capacity(), sizeof(buffer));
+    for (int i = 0; i < 200; i++) {
+      const auto c = static_cast<uint8_t>('a' + i % 26);
+      ASSERT_EQ(out.write(c), 1u);  // one character at a time, as ArduinoJson writes punctuation
+      expected.push_back(c);
+    }
+    ASSERT_TRUE(out.flushBuffer());
+  }
+  EXPECT_EQ(sink.bytes, expected);
+  EXPECT_EQ(sink.calls, 4);  // 64 + 64 + 64 + 8
+}

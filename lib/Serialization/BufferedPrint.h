@@ -31,6 +31,10 @@ class BufferedPrint final : public Print {
     buf_.reset(new (std::nothrow) uint8_t[bufferBytes]);
     cap_ = buf_ ? bufferBytes : 0;
   }
+  // Caller-supplied buffer, NOT owned: for a short write that should not take a heap block (JsonSettingsIO::saveState
+  // streams through one on the stack). A null buffer degrades to pass-through. The buffer must outlive this object.
+  BufferedPrint(Print& out, uint8_t* const buffer, const size_t bufferBytes)
+      : out_(out), external_(buffer), cap_(buffer ? bufferBytes : 0) {}
   ~BufferedPrint() override { flushBuffer(); }
   BufferedPrint(const BufferedPrint&) = delete;
   BufferedPrint& operator=(const BufferedPrint&) = delete;
@@ -75,10 +79,11 @@ class BufferedPrint final : public Print {
   // std::unique_ptr<uint8_t[]>::get() and reads arithmetic on it as void* pointer maths
   // (arithOperationsOnVoidPointer). Same accessor pattern, for the same reason, as
   // BufferedFileWriter::bufferBase() in Serialization/BufferedFileIO.h.
-  uint8_t* bufferBase() const { return buf_.get(); }
+  uint8_t* bufferBase() const { return external_ ? external_ : buf_.get(); }
 
   Print& out_;
   std::unique_ptr<uint8_t[]> buf_;
+  uint8_t* external_ = nullptr;  // owned or borrowed, never both: the owning constructor leaves this null
   size_t cap_ = 0;
   size_t fill_ = 0;
 };
