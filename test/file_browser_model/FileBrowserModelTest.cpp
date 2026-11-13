@@ -81,8 +81,21 @@ void operator delete[](void* p, const std::nothrow_t&) noexcept { heap::give(p);
 
 CrossPointSettings CrossPointSettings::instance;
 RecentBooksStore RecentBooksStore::instance;
-void RecentBooksStore::rowsBefore(uint32_t, size_t, std::vector<Row>&) {}
-size_t RecentBooksStore::count() { return 0; }
+// The recent-books list a test sets: newest first, each row's seq below the one before. And the most rows any one call
+// was asked for, which is what the Library holds of it.
+std::vector<RecentBooksStore::Row> g_recents;
+size_t g_recentRowsAsked = 0;
+void RecentBooksStore::rowsBefore(const uint32_t before, const size_t max, std::vector<Row>& out) {
+  g_recentRowsAsked = std::max(g_recentRowsAsked, max);
+  size_t added = 0;
+  for (const Row& row : g_recents) {
+    if (added == max) break;
+    if (row.seq >= before) continue;
+    out.push_back(row);
+    ++added;
+  }
+}
+size_t RecentBooksStore::count() { return g_recents.size(); }
 
 namespace LibraryFreshness {
 void checkListedEntry(uint32_t) {}
@@ -467,3 +480,24 @@ TEST_F(FileBrowserModelTest, SearchingEverywhereStopsAtItsCap) {
 }
 
 }  // namespace
+
+// Recents are streamed from recent.bin a window at a time: rows read as they are reached, forwards or back, and a
+// name found, while no call asks for more than one window of a hundred books.
+TEST(FileBrowserModelRecents, AreStreamedAWindowAtATime) {
+  g_recents.clear();
+  for (uint32_t i = 0; i < 100; ++i) g_recents.push_back({"/books/b" + std::to_string(i) + ".epub", 100 - i});
+  g_recentRowsAsked = 0;
+  FileBrowserModel model(FileBrowserModel::Mode::Recents);
+  model.load();
+  ASSERT_EQ(100u, model.entryCount());
+  EXPECT_EQ("books/b0.epub", model.entryName(0));
+  EXPECT_EQ("books/b17.epub", model.entryName(17));
+  EXPECT_EQ("books/b99.epub", model.entryName(99));
+  EXPECT_EQ("books/b3.epub", model.entryName(3)) << "back to the first window";
+  EXPECT_EQ("/books/b42.epub", model.entryFullPath(42));
+  EXPECT_EQ(64u, model.findEntry("books/b64.epub"));
+  EXPECT_EQ(100u, model.findEntry("books/none.epub"));
+  EXPECT_EQ("", model.entryName(100));
+  EXPECT_LE(g_recentRowsAsked, 16u);
+  g_recents.clear();
+}
