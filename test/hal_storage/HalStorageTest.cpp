@@ -2,7 +2,7 @@
 // in-memory card. Whatever an open returns, its handle may be closed: an open that fails holds the
 // Impl all failed opens share, costing no heap, and an open whose own Impl cannot be had fails like
 // any other instead of aborting the device, an open for writing before it touches the card. A
-// handle never opened keeps its assert.
+// handle never opened keeps its assert. A remove deletes a file the card marks read-only.
 // As in HalStorage.cpp: FsFile is SdFat's here, which the test mounts and writes through.
 #define HAL_STORAGE_IMPL
 #include <HalClock.h>
@@ -134,6 +134,19 @@ class HalStorageTest : public ::testing::Test {
     EXPECT_EQ(file.read(text.data(), text.size()), static_cast<int>(text.size()));
     file.close();
     return text;
+  }
+
+  // The user-settable attributes of `path`, as a PC sets them: through a handle open for reading,
+  // since SdFat sets no read-only flag on one open for writing.
+  void setAttributes(const char* path, const uint8_t bits) {
+    FsFile file = vol_.open(path, O_RDONLY);
+    ASSERT_TRUE(file);
+    ASSERT_TRUE(file.attrib(bits));
+    ASSERT_TRUE(file.close());
+  }
+  int attributes(const char* path) {
+    FsFile file = vol_.open(path, O_RDONLY);
+    return file ? file.attrib() : -1;
   }
 
   RamCard card_{64 * 2048};  // 64 MB
@@ -287,6 +300,33 @@ TEST_F(HalStorageTest, ClosingAHandleNeverOpenedStillAsserts) {
         never.close();
       },
       "impl != nullptr");
+}
+
+// A book a PC marked read-only (#750): SdFat alone will not remove it, the HAL does.
+TEST_F(HalStorageTest, AReadOnlyFileIsRemovedAllTheSame) {
+  ASSERT_TRUE(vol_.mkdir("/Books"));
+  put("/Books/Done.epub", "PK");
+  setAttributes("/Books/Done.epub", FS_ATTRIB_READ_ONLY | FS_ATTRIB_ARCHIVE);
+  ASSERT_FALSE(vol_.remove("/Books/Done.epub")) << "SdFat removes read-only files now: the HAL's retry is moot";
+
+  EXPECT_TRUE(Storage.remove("/Books/Done.epub"));
+  EXPECT_FALSE(vol_.exists("/Books/Done.epub"));
+  EXPECT_TRUE(vol_.exists("/Books"));
+}
+
+TEST_F(HalStorageTest, ARemoveOfAMissingFileStillFails) {
+  EXPECT_FALSE(Storage.remove("/missing.epub"));
+  EXPECT_FALSE(Storage.remove("/no-folder/missing.epub"));
+}
+
+// remove() is for files: a folder stays, and a read-only one keeps its flag.
+TEST_F(HalStorageTest, ARemoveLeavesAFolderAsItWas) {
+  ASSERT_TRUE(vol_.mkdir("/Kept"));
+  setAttributes("/Kept", FS_ATTRIB_READ_ONLY);
+
+  EXPECT_FALSE(Storage.remove("/Kept"));
+  EXPECT_TRUE(vol_.exists("/Kept"));
+  EXPECT_EQ(attributes("/Kept") & FS_ATTRIB_READ_ONLY, FS_ATTRIB_READ_ONLY);
 }
 
 }  // namespace

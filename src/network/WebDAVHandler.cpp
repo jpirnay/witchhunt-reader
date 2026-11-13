@@ -452,8 +452,8 @@ void WebDAVHandler::handleDelete(WebServer& s) {
     }
   } else {
     file.close();
-    clearEpubCacheIfNeeded(path);
     if (Storage.remove(path.c_str())) {
+      clearEpubCacheIfNeeded(path);  // where the book was left goes only with the book
       s.send(204);
     } else {
       s.send(500, "text/plain", "Failed to delete file");
