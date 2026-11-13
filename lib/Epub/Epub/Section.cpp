@@ -2402,7 +2402,8 @@ std::unique_ptr<Page> Section::loadPageFromSectionFile() {
     LOG_ERR("SCT", "loadPageFromSectionFile: seek to page %d offset %u failed", currentPage, pageOffset);
     return nullptr;
   }
-  return Page::deserialize(file);
+  serialization::BufferedFileReader in(file, pageReadWindow_, sizeof(pageReadWindow_));
+  return Page::deserialize(in);
   // File is intentionally NOT closed; stays open for the next page load
 }
 
@@ -2501,7 +2502,8 @@ std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex,
     LOG_ERR("SCT", "loadPageFromActiveBuild: seek to %u failed", offset);
     return nullptr;
   }
-  auto page = Page::deserialize(readHandle, scratch);
+  serialization::BufferedFileReader in(readHandle, pageReadWindow_, sizeof(pageReadWindow_));
+  auto page = Page::deserialize(in, scratch);
   readHandle.close();
   return page;
 }

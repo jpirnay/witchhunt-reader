@@ -120,7 +120,8 @@ std::unique_ptr<TextBlock> readBack(const std::string& bytes) {
   FsFile file = HalFile::forReadWrite();
   file.write(bytes.data(), bytes.size());
   if (!file.seek(0)) return nullptr;
-  return TextBlock::deserialize(file);
+  serialization::BufferedFileReader reader(file);
+  return TextBlock::deserialize(reader);
 }
 
 std::string octets(const std::initializer_list<int> values) {

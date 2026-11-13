@@ -1108,27 +1108,23 @@ bool TextBlock::serialize(serialization::BufferedFileWriter& out) const {
   return true;
 }
 
-std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scratch) {
+std::unique_ptr<TextBlock> TextBlock::deserialize(serialization::BufferedFileReader& in, BuildArena* scratch) {
   uint16_t wc = 0;
   uint8_t flags = 0;
   uint16_t textBytes = 0;
   uint16_t annotationBytes = 0;
   uint16_t bidiBytes = 0;
-  if (file.read(reinterpret_cast<uint8_t*>(&wc), sizeof(wc)) != static_cast<int>(sizeof(wc)) ||
-      file.read(&flags, sizeof(flags)) != static_cast<int>(sizeof(flags)) ||
-      file.read(reinterpret_cast<uint8_t*>(&textBytes), sizeof(textBytes)) != static_cast<int>(sizeof(textBytes))) {
+  if (!in.read(&wc, sizeof(wc)) || !in.read(&flags, sizeof(flags)) || !in.read(&textBytes, sizeof(textBytes))) {
     LOG_ERR("TXB", "Deserialization failed: incomplete arena header");
     return nullptr;
   }
-  if ((flags & 0x02) != 0 && file.read(reinterpret_cast<uint8_t*>(&annotationBytes), sizeof(annotationBytes)) !=
-                                 static_cast<int>(sizeof(annotationBytes))) {
+  if ((flags & 0x02) != 0 && !in.read(&annotationBytes, sizeof(annotationBytes))) {
     LOG_ERR("TXB", "Deserialization failed: incomplete annotation size");
     return nullptr;
   }
   const bool hasBidi = (wc & kBidiWordCountBit) != 0;
   wc &= static_cast<uint16_t>(~kBidiWordCountBit);
-  if (hasBidi &&
-      file.read(reinterpret_cast<uint8_t*>(&bidiBytes), sizeof(bidiBytes)) != static_cast<int>(sizeof(bidiBytes))) {
+  if (hasBidi && !in.read(&bidiBytes, sizeof(bidiBytes))) {
     LOG_ERR("TXB", "Deserialization failed: incomplete bidi size");
     return nullptr;
   }
@@ -1171,7 +1167,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
       LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
       return nullptr;
     }
-    if (file.read(block->arena, size) != static_cast<int>(size)) {
+    if (!in.read(block->arena, size)) {
       LOG_ERR("TXB", "Deserialization failed: arena read (%u bytes)", static_cast<uint32_t>(size));
       return nullptr;
     }
@@ -1219,9 +1215,9 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
 
   // Style: the render slice only (see serialize).
   RenderStyle& renderStyle = block->renderStyle;
-  serialization::readPod(file, renderStyle.alignment);
-  serialization::readPod(file, renderStyle.fontSizeMultiplier);
-  serialization::readPod(file, renderStyle.headingFontId);
+  in.readPod(renderStyle.alignment);
+  in.readPod(renderStyle.fontSizeMultiplier);
+  in.readPod(renderStyle.headingFontId);
 
   return block;
 }

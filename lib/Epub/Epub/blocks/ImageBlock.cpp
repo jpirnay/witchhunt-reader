@@ -44,17 +44,17 @@ namespace {
 // serialization::readString, except that it never holds more than the capped alt text: a cache
 // written before the cap may carry up to MAX_STRING_LENGTH. One byte past the cap is read so the
 // cut can see whether it falls inside a character; the rest is skipped.
-bool readAltText(FsFile& file, std::string& alt) {
+bool readAltText(serialization::BufferedFileReader& in, std::string& alt) {
   uint32_t len = 0;
-  if (file.read(reinterpret_cast<uint8_t*>(&len), sizeof(len)) != sizeof(len)) return false;
+  if (!in.readPod(len)) return false;
   if (len > serialization::MAX_STRING_LENGTH) {
-    file.seekCur(static_cast<int64_t>(len));
+    in.seek(in.position() + len);
     return false;
   }
   const uint32_t keep = std::min<uint32_t>(len, ImageBlock::MAX_ALT_TEXT_BYTES + 1);
   alt.resize(keep);
-  if (keep > 0 && file.read(reinterpret_cast<uint8_t*>(&alt[0]), keep) != static_cast<int>(keep)) return false;
-  if (len > keep && !file.seekCur(static_cast<int64_t>(len - keep))) return false;
+  if (keep > 0 && !in.read(&alt[0], keep)) return false;
+  if (len > keep) in.seek(in.position() + (len - keep));
   ImageBlock::capAltText(alt);
   return true;
 }
@@ -895,21 +895,21 @@ bool ImageBlock::serialize(serialization::BufferedFileWriter& out) {
   return true;
 }
 
-std::unique_ptr<ImageBlock> ImageBlock::deserialize(FsFile& file) {
+std::unique_ptr<ImageBlock> ImageBlock::deserialize(serialization::BufferedFileReader& in) {
   std::string path;
-  serialization::readString(file, path);
+  in.readString(path);
   int16_t w, h;
-  serialization::readPod(file, w);
-  serialization::readPod(file, h);
+  in.readPod(w);
+  in.readPod(h);
   std::string alt, epubFile, epubEntry;
-  readAltText(file, alt);
-  serialization::readString(file, epubFile);
-  serialization::readString(file, epubEntry);
+  readAltText(in, alt);
+  in.readString(epubFile);
+  in.readString(epubEntry);
   int16_t srcYOffset = 0, srcHeight = 0;
-  serialization::readPod(file, srcYOffset);
-  serialization::readPod(file, srcHeight);
+  in.readPod(srcYOffset);
+  in.readPod(srcHeight);
   uint8_t flags = 0;
-  serialization::readPod(file, flags);
+  in.readPod(flags);
   auto block = std::unique_ptr<ImageBlock>(
       new ImageBlock(std::move(path), w, h, std::move(alt), std::move(epubFile), std::move(epubEntry)));
   block->srcYOffset_ = srcYOffset;

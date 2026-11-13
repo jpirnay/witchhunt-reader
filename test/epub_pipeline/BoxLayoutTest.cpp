@@ -123,7 +123,8 @@ TEST(PageBox, SurvivesTheSectionFile) {
   }
   FsFile in;
   ASSERT_TRUE(Storage.openFileForRead("TST", path, in));
-  const std::unique_ptr<Page> back = Page::deserialize(in);
+  serialization::BufferedFileReader reader(in);
+  const std::unique_ptr<Page> back = Page::deserialize(reader);
   in.close();
   ASSERT_TRUE(back);
   ASSERT_EQ(1u, back->elements.size());

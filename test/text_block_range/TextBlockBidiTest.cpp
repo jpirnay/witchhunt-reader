@@ -58,7 +58,8 @@ std::unique_ptr<TextBlock> readBack(const std::string& bytes) {
   FsFile file = HalFile::forReadWrite();
   file.write(bytes.data(), bytes.size());
   if (!file.seek(0)) return nullptr;
-  return TextBlock::deserialize(file);
+  serialization::BufferedFileReader reader(file);
+  return TextBlock::deserialize(reader);
 }
 
 // Where the region sits in a serialised line without annotations: the header is u16 words, u8 flags, u16 text size,

@@ -46,6 +46,10 @@ class Section {
   // Where the LUT sits in the cache file when `lut` could not be held (no heap block for it on a
   // long single-file book): page loads then read their offset from the file. 0 otherwise.
   uint32_t lutFileOffset_ = 0;
+  // The window page loads read through (serialization::BufferedFileReader). A page is a few hundred small fields, and
+  // each was a card call of its own: ~180 reads, 2.8 ms a load on the X3, three loads a turn. One sector, kept with the
+  // section rather than taken per load; both loads run under the render lock, which `file` needs anyway.
+  uint8_t pageReadWindow_[512]{};
   bool truncatedCache = false;
   bool embeddedStyleFallback = false;
   // Set by the last build when CssParser hit its own low-heap mode mid-parse

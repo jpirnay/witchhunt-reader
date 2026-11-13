@@ -166,6 +166,7 @@ add_executable(EpubPipelineTest
   WarmRefusalStopTest.cpp
   BufferedPrintTest.cpp
   VerticalPageTest.cpp
+  PageWindowReadTest.cpp
   ImageOnlyPageTest.cpp
   VerticalLayoutTest.cpp
   VerticalRulesTest.cpp
