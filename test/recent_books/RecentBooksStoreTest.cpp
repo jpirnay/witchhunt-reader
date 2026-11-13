@@ -61,10 +61,10 @@ class RecentBooksStoreTest : public testing::Test {
     g_load = RecentBooksLoad::Loaded;
     binPath = (dir / "recent-books.bin").string();
     jsonPath = (dir / "recent.json").string();
-    RECENT_BOOKS.useFilesForTest(binPath, jsonPath);
+    RECENT_BOOKS.useFilesForTest(binPath.c_str(), jsonPath.c_str());
   }
   void TearDown() override {
-    RECENT_BOOKS.useFilesForTest("", "");
+    RECENT_BOOKS.useFilesForTest(nullptr, nullptr);
     std::filesystem::remove_all(dir);
   }
 

@@ -105,12 +105,13 @@ class RecentBooksStore {
   // Saves the EPUB's own reader settings in its folder. False when the save failed.
   bool setReaderOverrides(const std::string& path, const BookReaderOverrides& overrides);
 
-  // Where the list lives, for a test: recent-books.bin and the recent.json it moves from.
-  void useFilesForTest(std::string binPath, std::string legacyJsonPath);
+  // Where the list lives, for a test: recent-books.bin and the recent.json it moves from; nullptr for the card's. The
+  // strings must outlive their use.
+  void useFilesForTest(const char* binPath, const char* legacyJsonPath);
 
  private:
-  std::string binPath_;
-  std::string legacyJsonPath_;
+  const char* binPath_ = nullptr;
+  const char* legacyJsonPath_ = nullptr;
 };
 
 // Helper macro to access recent books store
