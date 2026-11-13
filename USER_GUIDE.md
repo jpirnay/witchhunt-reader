@@ -494,7 +494,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 - **Hide Battery %**: Where to suppress the battery percentage in the status bar:
   - "Never" (default), "In Reader", "Always"
 - **Refresh Frequency** (submenu): Settings for screen refresh behaviour while reading:
-  - **Refresh Frequency** - Slider (0 = Never, up to 60) for how often a full refresh runs to clear ghosting
+  - **Refresh Frequency** - Slider (0 = Never, up to 60) for how often a full refresh runs to clear ghosting. On the Murphy M3 and the LilyGo T5 S3 every change of screen is a full refresh too, and the menus follow the same count as the pages
   - **Refresh After Image Pages** - Whether to do an extra refresh after pages containing images. Not after images shown in Black & White (see **Images**)
 - **Sunlight Fading Fix**: Software fix for white X4 models that may fade in direct sunlight. "OFF" (default) / "ON".
 
