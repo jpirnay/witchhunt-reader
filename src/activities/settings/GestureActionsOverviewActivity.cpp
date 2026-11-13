@@ -324,9 +324,9 @@ void GestureActionsOverviewActivity::render(RenderLock&&) {
       // whether there is a light to reach (see MappedInputManager::wasMenuGesture).
       const bool lit = Frontlight.present();
       drawBoxedPair(renderer, fontId, Rect{frame.x, frame.y, frame.width, band},
-                    I18N.get(lit ? StrId::STR_READING_LIGHT : StrId::STR_BTN_DEF_READER_MENU), nullptr);
+                    I18N.get(lit ? StrId::STR_READING_LIGHT : StrId::STR_BTN_DEF_READER_BARS), nullptr);
       drawBoxedPair(renderer, fontId, Rect{frame.x, frame.y + frame.height - band, frame.width, band},
-                    I18N.get(lit ? StrId::STR_BTN_DEF_READER_MENU : StrId::STR_BTN_DEF_GO_HOME), nullptr);
+                    I18N.get(lit ? StrId::STR_BTN_DEF_READER_BARS : StrId::STR_BTN_DEF_GO_HOME), nullptr);
     }
   }
 

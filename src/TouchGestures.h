@@ -251,7 +251,7 @@ inline StrId builtinLabelFor(const Gesture gesture) {
       if (!tapTurnsPages) return StrId::STR_BTN_DEF_NOTHING;
       return invertedTaps ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NEXT_PAGE;
     case Gesture::TapCentre:
-      return readerTouchOn ? StrId::STR_BTN_DEF_READER_MENU : StrId::STR_BTN_DEF_NOTHING;
+      return readerTouchOn ? StrId::STR_BTN_DEF_READER_BARS : StrId::STR_BTN_DEF_NOTHING;
     default:
       // Everything else was dead before gestures existed, so leaving it alone
       // genuinely does nothing.

@@ -472,10 +472,10 @@ inline void buildSettings(const RowSink& emit) {
                          makeBtnActionOptions(StrId::STR_BTN_DEF_GO_HOME), "btnLongBack", StrId::STR_CAT_CONTROLS)
            .withSubmenu(StrId::STR_BTN_BACK)
            .withSelectorActivity());
-  // Confirm's built-in defaults are reader menu / ignore / KOReader sync. Murphy
+  // Confirm's built-in defaults are reader bars / ignore / KOReader sync. Murphy
   // overrides double and long to Back and Sleep because those keys are absent.
   emit(SettingInfo::Enum(StrId::STR_BTN_SHORT_PRESS, &CrossPointSettings::btnShortConfirm,
-                         {StrId::STR_BTN_DEF_READER_MENU}, "btnShortConfirm", StrId::STR_CAT_CONTROLS)
+                         {StrId::STR_BTN_DEF_READER_BARS}, "btnShortConfirm", StrId::STR_CAT_CONTROLS)
            .withSubmenu(StrId::STR_BTN_CONFIRM));
   emit(SettingInfo::Enum(StrId::STR_BTN_DOUBLE_PRESS, &CrossPointSettings::btnDoubleConfirm,
                          makeBtnActionOptions(StrId::STR_BTN_DEF_IGNORE), "btnDoubleConfirm", StrId::STR_CAT_CONTROLS)
