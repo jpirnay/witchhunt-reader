@@ -47,8 +47,17 @@ CrossPointSettings CrossPointSettings::instance;
 void CrossPointSettings::applyDeviceButtonDefaults() {
   btnDoubleConfirm = BTN_DEFAULT;
   btnLongConfirm = BTN_DEFAULT;
+  btnDoublePower = BTN_LIGHT_TOGGLE;
 
   const auto& input = BoardConfig::ACTIVE.input;
+  // No Back key and no Home key to carry Back (BOOX Picco: Power, Up, Down and touch): a double press of Power is
+  // Back, so Back is a key away and not only a hint to tap. The light that double press toggles elsewhere is the slide
+  // switch's on that board. Murphy is left out by the dedicated Power key: its Power is its Confirm.
+  const bool hasDedicatedPowerKey = input.power >= 0 && input.power != input.confirm;
+  if (input.back < 0 && !BoardConfig::hasHomeKey() && hasDedicatedPowerKey) {
+    btnDoublePower = BTN_BACK;
+  }
+
   if (!BoardConfig::isMurphyM3() || input.confirm < 0) return;
 
   if (input.back < 0) btnDoubleConfirm = BTN_BACK;

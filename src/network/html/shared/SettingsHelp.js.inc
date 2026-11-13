@@ -100,7 +100,7 @@ const SETTINGS_HELP = {
     "btnDoublePageForward": "Action for pressing Down twice quickly; setting one delays single presses slightly.",
     "btnLongPageForward": "Action for holding Down; by default the next chapter while reading.",
     "btnShortPower": "Action for a short press of Power, such as Sleep or Next Page; it does nothing by default.",
-    "btnDoublePower": "Action for pressing Power twice quickly; toggles the reading light by default, where there is one.",
+    "btnDoublePower": "Action for pressing Power twice quickly; toggles the reading light by default, where there is one, and is Back on a device without a Back or Home key.",
     "btnLongPower": "Holding Power always puts the device to sleep; it cannot be changed.",
     "touchUiControls": "Lets you use touch outside books: list rows, covers, the Home menu, settings tabs and button hints.",
     "touchListAct": "Whether the first tap on a list row only selects it (tap again to open) or opens it straight away.",
