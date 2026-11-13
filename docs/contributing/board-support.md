@@ -244,8 +244,9 @@ PSRAM (eFuse vendor AP_3v3), 16 MB GigaDevice quad flash, no secure boot, no fla
 Its panel is an SE0400NQW47 on an SSD2677 (the driver's probe, boot log).
 
 - Keys: Power on GPIO2 (the deep-sleep wake), Up GPIO21, Down GPIO9, all active-low. The SDK carries GPIO5 as
-  Confirm; what drives it on the device is not known. There is no Back key and no Home key, so a double press of
-  Power defaults to Back (`CrossPointSettings::applyDeviceButtonDefaults()`); touch and the hint boxes do the rest.
+  Confirm; what drives it on the device is not known. There is no Back key and no Home key, so a press of Power
+  defaults to Confirm and a double press to Back (`CrossPointSettings::applyDeviceButtonDefaults()`, actions
+  `BTN_CONFIRM` and `BTN_BACK`); touch and the hint boxes do the rest.
 - Slide switch on GPIO6, read and debounced by the SDK (`InputManager::isToggleSwitchOn()`). The **Slide Switch**
   setting binds it to the reading light (default), Dark Mode or nothing; `applySlideSwitch()` in `main.cpp` sets the
   bound function at the first loop pass, when the switch moves and when the binding changes.

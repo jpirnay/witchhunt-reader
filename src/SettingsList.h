@@ -143,7 +143,8 @@ inline void buildSettings(const RowSink& emit) {
                                                  StrId::STR_BTN_ACT_TOGGLE_TOUCH_UI,
                                                  StrId::STR_BTN_ACT_CYCLE_ORIENTATION_BACK,
                                                  StrId::STR_BACK,
-                                                 StrId::STR_BTN_ACT_READER_BARS};
+                                                 StrId::STR_BTN_ACT_READER_BARS,
+                                                 StrId::STR_CONFIRM};
   // The ONLY conditional block, and correspondingly the LAST entries of
   // BUTTON_ACTION. Dropping them on a board with no light therefore leaves every
   // other action's numeric value untouched, so a settings file written on a lit

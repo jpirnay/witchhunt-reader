@@ -2197,6 +2197,11 @@ void loop() {
         case BA::BTN_READER_BARS:
           activityManager.dispatchButtonAction(BA::BTN_READER_BARS);
           break;
+        case BA::BTN_CONFIRM:
+          mappedInputManager.injectLogicalPress(B::Confirm);
+          buttonEventManager.pushEventFront(
+              {B::Confirm, ButtonEventManager::PressType::Short, millis(), /*bypassActionMapping=*/true});
+          break;
         case BA::BTN_KOREADER_SYNC:
           activityManager.dispatchButtonAction(BA::BTN_KOREADER_SYNC);
           break;

@@ -683,7 +683,9 @@ class CrossPointSettings {
   //    explicit custom actions, while old built-in Confirm double/long entries
   //    inherit Murphy's Back/Sleep defaults.
   // 2: BTN_READER_BARS inserted after BTN_BACK.
-  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 2;
+  // 3: BTN_CONFIRM inserted after BTN_READER_BARS. A stored built-in short Power takes the board's
+  //    default, Confirm on a board with no Back or Home key (BOOX Picco), in place of nothing.
+  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 3;
 
   // --- Gesture actions (touch boards) ---------------------------------------
   // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
@@ -916,6 +918,9 @@ class CrossPointSettings {
     // press, a gesture) or a board whose Confirm sits awkwardly. A reader without bars (XTC, TXT)
     // opens what its Confirm opens.
     BTN_READER_BARS,
+    // Send a normal Confirm press to the current activity, as BTN_BACK sends Back. On a board with no
+    // Back or Home key (BOOX Picco) a short press of Power carries it by default.
+    BTN_CONFIRM,
     // --- Board-gated actions MUST stay at the end of this enum ---------------
     // SettingsList builds each button's option list positionally: index i in the
     // list is action value i. Actions it drops on boards that cannot perform them
@@ -1089,6 +1094,7 @@ class CrossPointSettings {
   static constexpr uint8_t upgradeStoredAction(uint8_t action, const int fromVersion) {
     if (fromVersion < 1 && action >= BTN_BACK) ++action;
     if (fromVersion < 2 && action >= BTN_READER_BARS) ++action;
+    if (fromVersion < 3 && action >= BTN_CONFIRM) ++action;
     return action;
   }
 

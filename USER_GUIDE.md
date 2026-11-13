@@ -170,18 +170,19 @@ Double and long Confirm can be changed under **Settings → Controls → Button 
 ### BOOX Picco
 
 The Picco has three keys, **Power**, **Up** and **Down**, a slide switch, and a touchscreen. There is no Back or
-Confirm key: tap the screen to open what you point at, and use the boxes at the edge of the screen for the rest.
+Confirm key: **Power** does both jobs, and the boxes at the edge of the screen do the rest.
 
 | Key | Press | Press twice quickly | Hold |
 | --- | --- | --- | --- |
-| **Power** | | **Back**: go back, leave a book | Turn on, or sleep |
+| **Power** | Works as **Confirm**: open the selected row. In a book: open the reader bars | **Back**: go back, leave a book | Turn on, or sleep |
 | **Up** / **Down** | In a book: previous / next page. In a list: move up / down | | In a book: previous / next chapter. In a list: jump to the first / last row |
 
 The **slide switch** turns the reading light on and off. **Settings → Controls → Slide Switch** makes it switch
 Dark Mode instead, or nothing. Wherever it is set, the switch's position counts at start-up and each time it moves;
 in between, the light and Dark Mode can still be changed on the screen.
 
-Double Power can be changed under **Settings → Controls → Button Actions**.
+A press of Power takes effect after a short pause, because the device waits to see if a second press follows.
+Single and double Power can be changed under **Settings → Controls → Button Actions**.
 
 ### On a touch screen
 
@@ -227,7 +228,7 @@ with the touchscreen:
 | **X4 Pro** | Up, Down, Power | Capacitive Home key — **tap** for Confirm, **hold** for Back |
 | **LilyGo T5 S3** | Down, Power | Capacitive Home key — **tap** for Confirm, **hold** for Back |
 | **Murphy M3** | Confirm, Up, Down | **Confirm** key, and **press twice** for Back. **Hold** Confirm to sleep: there is no Power key |
-| **BOOX Picco** | Up, Down, Power, slide switch | Tap the screen for Confirm; **press Power twice** for Back |
+| **BOOX Picco** | Up, Down, Power, slide switch | **Power** for Confirm, and **press twice** for Back |
 
 The T5 S3 has no **Up** key at all. On lists that follow **[Moving through lists](#moving-through-lists)**
 the side **Up** box stands in for it, and any list pages backward with a swipe — see
