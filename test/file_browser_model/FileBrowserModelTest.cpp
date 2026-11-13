@@ -81,11 +81,8 @@ void operator delete[](void* p, const std::nothrow_t&) noexcept { heap::give(p);
 
 CrossPointSettings CrossPointSettings::instance;
 RecentBooksStore RecentBooksStore::instance;
-RecentBooksStore::Hold::Hold() = default;
-RecentBooksStore::Hold::~Hold() = default;
-void RecentBooksStore::ensureLoaded() const {}
-bool RecentBooksStore::pruneMissing() { return false; }
-bool RecentBooksStore::saveToFile() const { return true; }
+void RecentBooksStore::rowsBefore(uint32_t, size_t, std::vector<Row>&) {}
+size_t RecentBooksStore::count() { return 0; }
 
 namespace LibraryFreshness {
 void checkListedEntry(uint32_t) {}

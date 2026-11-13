@@ -760,18 +760,15 @@ void FileBrowserModel::resort() {
 
 // The recent-books list, newest first, as paths relative to "/" -- the shape a card-wide search's
 // results already have, so every row accessor serves both. Books no longer on the card are dropped
-// from the list for good, as the Recent Books screen always did on the way in.
+// from the list for good (RecentBooksStore::rowsBefore).
 void FileBrowserModel::loadRecents() {
   clearDeepSearch();
-  // One load of the list for the prune, its save and the read below; the paths are copied out, so
-  // nothing here outlives the hold (RecentBooksStore::Hold).
-  const RecentBooksStore::Hold recents;
-  if (RECENT_BOOKS.pruneMissing()) RECENT_BOOKS.saveToFile();
   deepRoot = "/";
-  const auto& books = RECENT_BOOKS.getBooks();
-  deepResults.reserve(books.size());
-  for (const auto& book : books) {
-    if (book.path.size() > 1 && book.path.front() == '/') deepResults.push_back(book.path.substr(1));
+  std::vector<RecentBooksStore::Row> rows;
+  RECENT_BOOKS.rowsBefore(RecentBooksStore::kNewest, RecentBooksStore::kMaxBooks, rows);
+  deepResults.reserve(rows.size());
+  for (const auto& row : rows) {
+    if (row.path.size() > 1 && row.path.front() == '/') deepResults.push_back(row.path.substr(1));
   }
 }
 

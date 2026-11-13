@@ -110,13 +110,12 @@ sidecar exists is a file-existence check per extension (`.opf`, `.OPF`).
 
 Deleting the sidecar restores the book's embedded metadata, again on next load.
 
-The home screen and the Library's Recent tab are an exception: they show a copy
-of the title, author and series kept in `recent.json`, taken when the book is
-opened. So that a sidecar written later still shows without reopening the book,
+The home screen is an exception: it shows a copy of the title, author and series
+kept in `recent.bin`, taken when the book is opened. So that a sidecar written later still shows without reopening the book,
 each entry also stores a hash of the sidecar it was taken with
-(`SidecarFiles::metadataStamp()`). When those screens open, any EPUB entry whose
+(`SidecarFiles::metadataStamp()`). When Home reads its books, any entry whose
 sidecar hash has changed (sidecar added, edited or removed) has its metadata
-reloaded (`RecentBooksStore::refreshSidecarMetadata()`). Hashing the content
+reloaded and written back (`RecentBooksStore::newestBooks()`). Hashing the content
 rather than checking the modification time catches edits that keep the same
 length, and works on a device whose clock was never set.
 

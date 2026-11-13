@@ -132,21 +132,9 @@ void HomeActivity::rebuildMenuEntries() {
 }
 
 void HomeActivity::loadRecentBooks(int maxBooks) {
-  recentBooks.clear();
-  RECENT_BOOKS.refreshSidecarMetadata(static_cast<size_t>(std::max(0, maxBooks)));
-  const auto& books = RECENT_BOOKS.getBooks();
-  recentBooks.reserve(std::min(static_cast<int>(books.size()), maxBooks));
-
-  for (const RecentBook& book : books) {
-    // Limit to maximum number of recent books
-    if (recentBooks.size() >= maxBooks) {
-      break;
-    }
-
-    if (RecentBooksStore::isMissing(book)) {
-      continue;
-    }
-
+  // The newest books still on the card, their metadata sidecars applied (RecentBooksStore::newestBooks).
+  recentBooks = RECENT_BOOKS.newestBooks(static_cast<size_t>(std::max(0, maxBooks)));
+  for (RecentBook& book : recentBooks) {
     // Check for a sidecar cover — takes priority over embedded cover.
     // Also catches books registered before sidecar support (empty coverBmpPath).
     const std::string sidecar = ReaderActivity::sidecarCoverPath(book.path);
@@ -160,14 +148,9 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
       if (!sidecarAlreadyStored) {
         LOG_DBG("HOME", "Updating coverBmpPath to sidecar: %s", sidecar.c_str());
         RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, sidecar);
-        RecentBook updated = book;
-        updated.coverBmpPath = sidecar;
-        recentBooks.push_back(updated);
-        continue;
+        book.coverBmpPath = sidecar;
       }
     }
-
-    recentBooks.push_back(book);
   }
 }
 
@@ -491,7 +474,6 @@ void HomeActivity::restoreSecondaryBuffer(bool callerHoldsRenderLock) {
 
 void HomeActivity::onEnter() {
   Activity::onEnter();
-  recentsHold.emplace();
 
   // A finished-book "sync to KOReader, then search OPDS for this author" request that just
   // rebooted (the sync reboots to reclaim WiFi-session heap fragmentation, see
@@ -571,7 +553,6 @@ void HomeActivity::onExit() {
   Epub::clearCoverMetadataMemo();
   Activity::onExit();
   freeCoverBuffer();
-  recentsHold.reset();
   UITheme::getInstance().getMutableTheme().invalidateFrameCache();
   // Never hand the next activity a degraded display: if we exit mid-load (e.g. the
   // user opened a book before covers finished), put the secondary framebuffer back.

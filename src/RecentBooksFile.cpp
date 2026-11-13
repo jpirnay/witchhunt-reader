@@ -56,18 +56,25 @@ uint32_t pathHash(const std::string_view path) {
   return hash != 0 ? hash : 1;
 }
 
-bool File::open(const char* const path) {
-  if (!Storage.exists(path) || !Storage.openFileForUpdate("RCB", path, file_)) return false;
+File::Open File::open(const char* const path) {
+  if (!Storage.exists(path)) return Open::Missing;
+  if (!Storage.openFileForUpdate("RCB", path, file_)) return Open::Unreadable;
+  if (file_.fileSize() < kSlotsOffset) {
+    file_.close();
+    return Open::Foreign;
+  }
   uint8_t head[kHeaderUsed];
-  if (!file_.seek(0) || file_.read(head, sizeof(head)) != static_cast<int>(sizeof(head)) ||
-      std::memcmp(head, kMagic, sizeof(kMagic)) != 0 || get16(head + 4) != kVersion || get16(head + 6) != kSlotCount ||
-      get32(head + 8) != kSlotSize || get32(head + 12) != kTableOffset || get32(head + 16) != kSlotsOffset ||
-      file_.fileSize() < kSlotsOffset) {
+  if (!file_.seek(0) || file_.read(head, sizeof(head)) != static_cast<int>(sizeof(head))) {
+    file_.close();
+    return Open::Unreadable;
+  }
+  if (std::memcmp(head, kMagic, sizeof(kMagic)) != 0 || get16(head + 4) != kVersion || get16(head + 6) != kSlotCount ||
+      get32(head + 8) != kSlotSize || get32(head + 12) != kTableOffset || get32(head + 16) != kSlotsOffset) {
     LOG_ERR("RCB", "%s is not a recent-books list this firmware reads", path);
     file_.close();
-    return false;
+    return Open::Foreign;
   }
-  return true;
+  return Open::Ok;
 }
 
 bool File::create(const char* const path) {
@@ -92,7 +99,7 @@ bool File::create(const char* const path) {
   file_.flush();
   // Reopened in the mode every later change writes in.
   file_.close();
-  return open(path);
+  return open(path) == Open::Ok;
 }
 
 bool File::readEntries(const uint8_t first, Entry* out, const uint8_t count) {

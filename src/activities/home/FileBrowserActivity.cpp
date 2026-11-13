@@ -146,19 +146,8 @@ void FileBrowserActivity::onEnter() {
   resetNavigation(selectedIndex);
 }
 
-// Reads the rows of the list showing. Recent Books first brings the home screen's snapshot of each
-// book's details up to date, as the screen it replaced did on the way in: a metadata sidecar may have
-// changed since the book was read. One load of the recent-books list serves the refresh and the rows
-// (loadRecents copies the paths out), let go again before the screen draws: the list is not kept
-// while browsing.
-void FileBrowserActivity::loadRows() {
-  std::optional<RecentBooksStore::Hold> recents;
-  if (model.getMode() == Mode::Recents) {
-    recents.emplace();
-    RECENT_BOOKS.refreshSidecarMetadata(static_cast<size_t>(RECENT_BOOKS.getCount()));
-  }
-  model.load();
-}
+// Reads the rows of the list showing.
+void FileBrowserActivity::loadRows() { model.load(); }
 
 void FileBrowserActivity::onExit() {
   UiListActivity::onExit();

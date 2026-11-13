@@ -79,12 +79,9 @@ class HomeActivity final : public Activity {
   int coverRectW = 0;
   int coverRectH = 0;
 
+  // The books Home shows: its own copy of the newest few (RecentBooksStore::newestBooks), each cover it makes written
+  // back to the list (updateBook).
   std::vector<RecentBook> recentBooks;
-  // The recent-books store stays loaded while Home is open: it refreshes the list on entry and
-  // writes each cover it makes back into it (updateBook), and reloading the file for each of
-  // those would cost far more than the ~4.5 KB it holds here. Released on exit, so the reader
-  // does not carry it.
-  std::optional<RecentBooksStore::Hold> recentsHold;
   std::vector<HomeMenuEntry> menuEntries;
 
   std::string focusBookPath;

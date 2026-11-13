@@ -172,7 +172,7 @@ The `hal-and-abstractions` skill has the rules and a checklist. In short:
 Formats: `docs/file-formats.md`, `docs/sidecar-files.md`.
 
 - The firmware's own files live under `/.crosspoint/` on the card: `settings.json`, `state.json`,
-  `recent.json`, the credential stores, `fonts/`, `lang/`, `hyphenation/`, `library/`, and one cache folder
+  `recent.bin`, the credential stores, `fonts/`, `lang/`, `hyphenation/`, `library/`, and one cache folder
   per book: `epub_<std::hash of the path>/` (also `txt_`, `xtc_`). That folder holds progress, bookmarks,
   `book.bin` and the laid-out chapters in `spines/<bucket>/` (the flat `sections/` layout is legacy and
   is only deleted). Screenshots go to `/screenshots/`.

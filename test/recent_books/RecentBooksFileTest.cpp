@@ -73,7 +73,7 @@ TEST_F(RecentBooksFileTest, EntriesRoundTripInSlotOrder) {
     ASSERT_TRUE(file.writeEntry(slot, Entry{1000u + slot, 7u * slot + 1}));
   }
   file.close();
-  ASSERT_TRUE(file.open(path.c_str()));
+  ASSERT_EQ(File::Open::Ok, file.open(path.c_str()));
   std::vector<uint8_t> used;
   ASSERT_TRUE(file.forEachEntry([&](const uint8_t slot, const Entry& e) {
     if (!e.used()) return;
@@ -99,7 +99,7 @@ TEST_F(RecentBooksFileTest, SlotsRoundTripAndTheFileGrowsOneAtATime) {
   EXPECT_EQ(2, file.slotsOnCard());
 
   file.close();
-  ASSERT_TRUE(file.open(path.c_str()));
+  ASSERT_EQ(File::Open::Ok, file.open(path.c_str()));
   RecentBook out;
   ASSERT_TRUE(file.readSlot(0, out));
   const RecentBook c = book("c");
@@ -140,7 +140,7 @@ TEST_F(RecentBooksFileTest, ADamagedSlotIsNotRead) {
     raw.seekp(kSlotsOffset + 20);
     raw.put('#');
   }
-  ASSERT_TRUE(file.open(path.c_str()));
+  ASSERT_EQ(File::Open::Ok, file.open(path.c_str()));
   RecentBook out;
   EXPECT_FALSE(file.readSlot(0, out));
 }
@@ -151,6 +151,11 @@ TEST_F(RecentBooksFileTest, AFileOfAnotherLayoutIsNotOpened) {
     raw << std::string(kSlotsOffset, 'z');
   }
   File file;
-  EXPECT_FALSE(file.open(path.c_str()));
-  EXPECT_FALSE(file.open((dir / "missing.bin").string().c_str()));
+  EXPECT_EQ(File::Open::Foreign, file.open(path.c_str()));
+  EXPECT_EQ(File::Open::Missing, file.open((dir / "missing.bin").string().c_str()));
+  {
+    std::ofstream raw(path, std::ios::binary | std::ios::trunc);
+    raw << "RCNT";
+  }
+  EXPECT_EQ(File::Open::Foreign, file.open(path.c_str())) << "cut short";
 }

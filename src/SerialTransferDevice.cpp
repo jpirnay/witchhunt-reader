@@ -316,7 +316,7 @@ bool SerialTransferDevice::makeDir(const std::string& path) {
 
 std::vector<serialtransfer::BookEntry> SerialTransferDevice::listBooks() {
   emitStatus("Listing books...");
-  const RecentBooksStore::Hold recents;  // one load for every book's lookup below
+  RecentBooksStore::Lookup recents;  // the list's table read once for every book's lookup below
   std::vector<std::string> paths;
   collectEpubs("/", paths);
 
@@ -328,8 +328,8 @@ std::vector<serialtransfer::BookEntry> SerialTransferDevice::listBooks() {
     // Use cached metadata if this book has been opened before; otherwise leave
     // title/author empty (the host falls back to the filename). No metadata
     // opens here — that would risk OOM on large folders.
-    const RecentBook cached = RECENT_BOOKS.getBookByPath(p);
-    if (!cached.path.empty()) {
+    RecentBook cached;
+    if (recents.find(p, cached)) {
       e.title = cached.title;
       e.author = cached.author;
     }

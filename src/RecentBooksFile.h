@@ -52,9 +52,12 @@ uint32_t pathHash(std::string_view path);
 
 class File {
  public:
-  // An existing recent.bin of this layout, open for reading and writing. False when it is not there, cannot be
-  // opened or is not one this firmware reads. `path`: kPath, or a test's.
-  bool open(const char* path = kPath);
+  // How an open went: the file of this layout, open for reading and writing; not there; there but of another layout
+  // or cut short (started afresh); or there and not readable now (left alone: a card that fails a read today may not
+  // tomorrow, and starting afresh would lose the list).
+  enum class Open : uint8_t { Ok, Missing, Foreign, Unreadable };
+  // `path`: kPath, or a test's.
+  Open open(const char* path = kPath);
   // A fresh, empty recent.bin over whatever was there: the header and a table of free entries, no slots yet.
   bool create(const char* path = kPath);
   void close() { file_.close(); }
