@@ -752,6 +752,7 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
 }
 
 bool Section::loadSectionFile(const BuildParams& p) {
+  forgetPagesWithoutPictures();
   truncatedCache = false;
   imageHeaderDegraded_ = false;
   tableRowDegraded_ = false;
@@ -904,7 +905,25 @@ bool Section::loadSectionFile(const BuildParams& p) {
   return true;
 }
 
+void Section::notePageWithoutPictures(const int page) {
+  if (page < 0 || page >= UINT16_MAX || pageKnownWithoutPictures(page)) return;
+  pagesWithoutPictures_[pagesWithoutPicturesNext_] = static_cast<uint16_t>(page + 1);
+  pagesWithoutPicturesNext_ = static_cast<uint8_t>((pagesWithoutPicturesNext_ + 1) % kPagesWithoutPicturesKept);
+}
+
+bool Section::pageKnownWithoutPictures(const int page) const {
+  if (page < 0 || page >= UINT16_MAX) return false;
+  return std::find(pagesWithoutPictures_.begin(), pagesWithoutPictures_.end(), static_cast<uint16_t>(page + 1)) !=
+         pagesWithoutPictures_.end();
+}
+
+void Section::forgetPagesWithoutPictures() {
+  pagesWithoutPictures_.fill(0);
+  pagesWithoutPicturesNext_ = 0;
+}
+
 bool Section::clearCache() {
+  forgetPagesWithoutPictures();
   // Only close a handle we actually opened: a Section whose cache is cleared before it ever
   // loaded or built (settings change on a freshly constructed Section) still holds the default
   // handle, and HalFile::close() asserts on those. Same reason as the guards in runBuildSetup
@@ -1233,6 +1252,7 @@ bool Section::htmlCacheReusable(const BuildState& st) const {
 }
 
 Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
+  forgetPagesWithoutPictures();
   const BuildParams& p = st.params;
   st.propertyHash = calculatePropertyHash(p);
   filePath = getSectionFilePath(st.propertyHash);
