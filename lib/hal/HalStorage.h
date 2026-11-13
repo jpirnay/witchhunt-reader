@@ -193,6 +193,11 @@ class HalFile : public Print {
   bool seekSet64(uint64_t offset);
   uint64_t position64() const;
   size_t write(const void* buf, size_t count);
+  // Print's own write(buffer, size) sends the bytes one by one through write(uint8_t), each taking the storage
+  // lock and SdFat's sector cache on its own. Anything that writes a file through a Print& went that way: the zip
+  // extractor (CSS, the cover), BufferedPrint (every BMP the image converters write), ArduinoJson (state.json).
+  // Measured on the X3, 2026-11-13: 37,031 calls for 36 KB of CSS at a book's first open.
+  size_t write(const uint8_t* buf, size_t count) override;
   size_t write(uint8_t b) override;
   bool rename(const char* newPath);
   bool getModifyDateTime(uint16_t* pdate, uint16_t* ptime);
