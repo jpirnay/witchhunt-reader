@@ -23,6 +23,7 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/Epub/Epub/FootnoteShape.cpp
   ${REPO_ROOT}/lib/Epub/Epub/EpubImageManifest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/htmlEntities.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/BookSearch.cpp
   ${REPO_ROOT}/lib/Epub/Epub/css/CssParser.cpp
   ${REPO_ROOT}/lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp
   ${REPO_ROOT}/lib/Epub/Epub/parsers/ContainerParser.cpp
@@ -104,6 +105,8 @@ set_source_files_properties(PipelineRunner.cpp PROPERTIES
 
 add_executable(EpubPipelineTest
   EpubPipelineTest.cpp
+  BookSearchTest.cpp
+  BookSearchPageTest.cpp
   CjkRulesTest.cpp
   RubyLayoutTest.cpp
   FingerprintTest.cpp
