@@ -104,6 +104,8 @@ class ReaderBarsController final : private UiAppHost {
   // The Layout cells' values, formatted for the pass that draws them (buildBars, on the render task), and the font's
   // name, set where the font changes.
   char cellValues[ReaderLayout::kControlCount][24]{};
+  // The Font cell's label with the mark of a font that waits for the bars to close.
+  char fontCellLabel[40]{};
   std::string fontLabel;
 
   ReaderBarsLayout::Model model() const;

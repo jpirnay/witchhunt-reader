@@ -148,7 +148,14 @@ void ReaderBarsController::fillList(ReaderBarsLayout::Model& model, const Panel 
 
 ReaderLayoutSheet::Model ReaderBarsController::sheetModel() {
   ReaderLayoutSheet::Model sheet;
-  sheet.font = {text(StrId::STR_LAYOUT_FONT), fontLabel.c_str()};
+  // A font that waits for the bars to close is marked, as an unsaved change is: the page keeps the one it has until
+  // then.
+  const char* fontName = text(StrId::STR_LAYOUT_FONT);
+  if (fontPending()) {
+    snprintf(fontCellLabel, sizeof(fontCellLabel), "%s *", fontName);
+    fontName = fontCellLabel;
+  }
+  sheet.font = {fontName, fontLabel.c_str()};
   sheet.thisBook = {text(StrId::STR_THIS_BOOK_ONLY), onOff(thisBookOnly)};
   sheet.focus = focus == Focus::Layout ? layoutFocus : int16_t{-1};
   for (uint8_t c = 0; c < ReaderLayout::kControlCount; ++c) {
