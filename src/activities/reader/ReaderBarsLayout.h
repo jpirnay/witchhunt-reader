@@ -10,8 +10,8 @@
 #include "ReaderLayoutSheet.h"
 #include "components/icons/readerBarIcons.h"
 
-// The reader bars' layout, kept out of ReaderBarsActivity so that it needs FreeInkUI and nothing else of the
-// firmware's: the activity draws it, and test/reader_bars_layout lays it out at every board's size in both
+// The reader bars' layout, kept out of ReaderBarsController so that it needs FreeInkUI and nothing else of the
+// firmware's: the controller draws it, and test/reader_bars_layout lays it out at every board's size in both
 // orientations.
 //
 // Two bands over the page, which stays standing between them:

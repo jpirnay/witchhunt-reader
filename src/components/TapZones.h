@@ -151,7 +151,7 @@ inline Half halfOfBand(const int px, const int py, const int x, const int y, con
   return px < x + width / 2 ? Half::Previous : Half::Next;
 }
 
-// A tap on the reader's status bar, which opens the reader bars (ReaderBarsActivity).
+// A tap on the reader's status bar, which opens the reader bars (EpubReaderActivity::openReaderBars).
 //
 // The status bar sits in the margin between a screen edge and the text area, so the band is that margin, made at least
 // `minBand` tall where it is narrower: a status bar is a thin line to aim a finger at, and the band reaches the last or

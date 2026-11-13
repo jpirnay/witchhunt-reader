@@ -73,7 +73,6 @@
 #include "QrDisplayActivity.h"
 #include "QuickOverridesActivity.h"
 #include "ReaderActivity.h"
-#include "ReaderBarsActivity.h"
 #include "ReaderBarsController.h"
 #include "ReaderGrayCanvas.h"
 #include "ReaderImageMode.h"
@@ -8155,7 +8154,7 @@ void EpubReaderActivity::openReaderBars() {
     LOG_ERR("ERS", "Reader bars: no memory for them");
     return;
   }
-  bars->begin(mappedInput.hasTouch(), /*live=*/true, HalCapabilities::defersLiveFontChange());
+  bars->begin(mappedInput.hasTouch(), HalCapabilities::defersLiveFontChange());
   {
     RenderLock lock(*this);
     prepareForOverlay("ReaderBars");

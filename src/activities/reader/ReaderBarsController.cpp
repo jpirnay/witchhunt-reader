@@ -44,9 +44,8 @@ const char* onOff(const bool on) { return text(on ? StrId::STR_ON : StrId::STR_O
 ReaderBarsController::ReaderBarsController(GfxRenderer& renderer, Info info)
     : UiAppHost(renderer), renderer(renderer), info(std::move(info)) {}
 
-void ReaderBarsController::begin(const bool touch, const bool live, const bool fontWaits) {
-  live_ = live;
-  fontWaits_ = live && fontWaits;
+void ReaderBarsController::begin(const bool touch, const bool fontWaits) {
+  fontWaits_ = fontWaits;
   starred = info.starred;
   thisBookOnly = info.thisBookOnly;
   layout = thisBookOnly ? info.bookValues : info.globalValues;
@@ -223,12 +222,10 @@ void ReaderBarsController::close(const ReaderBarsResult::Action action) {
   ReaderBarsResult closing;
   closing.action = action;
   closing.starToggled = starToggled;
-  const ReaderLayoutValues& opened = info.thisBookOnly ? info.bookValues : info.globalValues;
-  closing.layoutChanged = thisBookOnly != info.thisBookOnly || !(layout == opened);
+  // The reader applied every change as it was made: nothing is left to apply but a font that waited.
+  closing.layoutChanged = fontPending();
   closing.thisBookOnly = thisBookOnly;
   closing.layout = layout;
-  // Live, the reader applied every change as it was made: nothing is left to apply but a font that waited.
-  if (live_) closing.layoutChanged = fontPending();
   result_ = closing;
   closed_ = true;
 }
@@ -299,7 +296,7 @@ void ReaderBarsController::pressControl(const Control control, const int delta) 
     ReaderLayout::press(layout, control, delta, info.sizes);
   }
   redraw_ = true;
-  layoutChanged_ = live_;
+  layoutChanged_ = true;
 }
 
 // Off: the book follows the global settings, which the sheet shows from then on and changes for every book. On: the
@@ -311,7 +308,7 @@ void ReaderBarsController::flipThisBookOnly() {
     if (!thisBookOnly) layout = info.globalValues;
   }
   redraw_ = true;
-  layoutChanged_ = live_;
+  layoutChanged_ = true;
 }
 
 void ReaderBarsController::onAction(const fui::ActionEvent& event, void* user) {
@@ -413,7 +410,7 @@ void ReaderBarsController::nextFont() {
   }
   redraw_ = true;
   // A font that waits for the bars to close changes only the cell.
-  layoutChanged_ = live_ && !fontWaits_;
+  layoutChanged_ = !fontWaits_;
 }
 
 uint8_t ReaderBarsController::layoutTargets(ReaderLayoutSheet::Target (&out)[ReaderLayoutSheet::kMaxTargets]) const {

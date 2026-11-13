@@ -40,7 +40,7 @@ the grid and answer only to a **hold**, never a tap — so no tap changes meanin
 | --- | --- |
 | Tap left column | Previous page |
 | Tap right column | Next page |
-| Tap centre | Reader bars (ReaderBarsActivity; More opens the reader menu) |
+| Tap centre | Reader bars (More opens the reader menu) |
 | Tap the status bar | Reader bars, before the column test (TapZones::statusBandFor) |
 | Tap top / bottom | *(nothing — reserved for vertical gestures)* |
 | Hold left / right column | Previous / Next chapter |

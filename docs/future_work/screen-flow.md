@@ -60,7 +60,8 @@ ballast held: Min Free 14.6 KB against 17.2 KB, the build completed either way, 
 draws between the bars. What did not fit was the font: each step copies the family into the flash font area first, a
 3 MB erase (5.3 s) and the file (1.8 s for 608 KB), 10-12 s a Font press with the build. So on the C3s a new font waits
 for the bars to close (`HalCapabilities::defersLiveFontChange`): the cell shows it, the Size cell steps along its sizes,
-and the reader lays the book out with it once (`ReaderBarsResult::layoutChanged`).
+and the reader lays the book out with it once (`ReaderBarsResult::layoutChanged`). The pushed bars screen
+(`ReaderBarsActivity`) went with it.
 
 **Open.** Speed: the first build pass of a new layout starts only after the bars' refresh; the book's settings are saved
 (about 0.2 s) before the font is looked up, also for a layout already built. A Font step on the X4 Pro took 4 to 15 s by

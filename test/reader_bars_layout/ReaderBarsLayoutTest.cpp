@@ -1,4 +1,4 @@
-// The reader bars (ReaderBarsActivity) laid out by ReaderBarsLayout at every board's size, held upright and sideways,
+// The reader bars (ReaderBarsController) laid out by ReaderBarsLayout at every board's size, held upright and sideways,
 // with no panel, Progress and Layout open.
 //
 // What it holds: every control lies on a bar and on the screen; a strip of the page stays in view between the bars;
