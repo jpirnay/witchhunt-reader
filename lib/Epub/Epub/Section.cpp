@@ -1,5 +1,6 @@
 #include "Section.h"
 
+#include <BufferedFileIO.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <HeapFit.h>
@@ -638,20 +639,20 @@ void Section::evictOldVariants() const {
   }
 }
 
-uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
+uint32_t Section::onPageComplete(std::unique_ptr<Page> page, serialization::BufferedFileWriter& out) {
   if (!file) {
     LOG_ERR("SCT", "File not open for writing page %d", pageCount);
     return 0;
   }
 
-  const uint32_t position = file.position();
+  const uint32_t position = out.position();
   if (page->elements.size() > Page::MAX_ELEMENTS) {
     // serialize() writes the first MAX_ELEMENTS; the rest of this page is lost, and said so.
     LOG_ERR("SCT", "Page %d has %u elements, more than a page can load (%u); tail dropped", pageCount,
             static_cast<unsigned>(page->elements.size()), static_cast<unsigned>(Page::MAX_ELEMENTS));
     simplified_ = true;
   }
-  if (!page->serialize(file)) {
+  if (!page->serialize(out)) {
     LOG_ERR("SCT", "Failed to serialize page %d", pageCount);
     return 0;
   }
@@ -937,6 +938,17 @@ bool Section::clearCache() {
   return true;
 }
 
+// The page writer's buffer (BuildState::pageWriter), from the heap and held for the build. Measured 2026-11-13, a page
+// took to write: X3 5.8 ms field by field, 1.2 ms gathered in 2 KB, 1.0 ms in 4 KB; T5S3 13.4 / 2.5 / 1.5 ms; X4 Pro
+// 6.3 / 3.1 / 1.7 ms (its SDMMC moves up to 4 KB a command). The PSRAM boards take 4 KB, the C3s 2 KB. The macro is
+// the one HalCapabilities::keepsSecondaryBuffer() reads: HalCapabilities needs the device's BoardConfig, which the
+// host tests that build this file do not have.
+#if defined(BOARD_HAS_PSRAM) && BOARD_HAS_PSRAM
+constexpr size_t PAGE_WRITE_BUFFER_BYTES = 4096;
+#else
+constexpr size_t PAGE_WRITE_BUFFER_BYTES = 2048;
+#endif
+
 // Live state of an in-progress section build. Holds exactly the locals that span build
 // phases. Held by Section as a
 // unique_ptr so its address (and thus visitor's completePageFn lut capture) is stable
@@ -1061,6 +1073,7 @@ struct Section::BuildState {
     chunkBuf = nullptr;
   }
   ~BuildState() {
+    if (pageWriter) pageWriter->discard();  // a build that never reached runBuildFinalize: its file is not read
     if (extractGrowBlock.valid()) arena->release(extractGrowBlock);
     reader.reset();
     // The note-preview resolver reserves its ring block ABOVE chunkBlock and holds it across
@@ -1118,6 +1131,11 @@ struct Section::BuildState {
   uint32_t previewResolveStartMs = 0;
   uint32_t previewResolveMs = 0;          // CPU actually spent resolving, summed across slices
   uint32_t previewResolveMaxSliceMs = 0;  // worst single slice — the number that says it slices
+  // The pages on their way to `file`. A page is some 150 fields of a few bytes; this gathers them and sends them to
+  // the card in whole sectors (BufferedFileWriter::writeWholeSectors). Made once the header is written. A page loaded
+  // mid-build is sent first (loadPageFromActiveBuild), and runBuildFinalize sends the rest before it reads or patches
+  // the file. A build that never reaches finalize leaves a file nothing reads, so what is still here then is dropped.
+  std::optional<serialization::BufferedFileWriter> pageWriter;
   // Parse-result flags, set by runBuildParse and consumed by runBuildFinalize.
   bool streamOk = false;
   bool finalizeOk = false;
@@ -1263,6 +1281,11 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   writeSectionFileHeader(p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment, p.viewportWidth,
                          p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle, p.bionicReadingEnabled,
                          p.imageRendering, p.verticalText);
+  st.pageWriter.emplace(file, PAGE_WRITE_BUFFER_BYTES);
+  if (!st.pageWriter->buffered()) {
+    LOG_INF("SCT", "createSectionFile spine=%d: no %u-byte block for the page writer, pages go out field by field",
+            spineIndex, static_cast<unsigned>(PAGE_WRITE_BUFFER_BYTES));
+  }
   st.lut.clear();
   // One u32 per page, appended by the completePageFn below across the whole parse. Pre-sized for
   // the same reason as the parser's paragraph LUT — see estimatePagesForSpine and
@@ -1336,7 +1359,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
           LOG_ERR("SCT", "No room in the page LUT for page %u; the build stops here", pageCount);
           return false;
         }
-        st.lut.back() = this->onPageComplete(std::move(page));
+        st.lut.back() = this->onPageComplete(std::move(page), *st.pageWriter);
         return true;
       },
       p.embeddedStyle, st.contentBase, st.imageBasePath, p.imageRendering, std::move(tocAnchors), st.progressFn,
@@ -1805,6 +1828,18 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
 
 Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   ChapterHtmlSlimParser& visitor = *st.visitor;
+  // The pages still in the writer go out before anything below reads or patches the file.
+  const bool pagesWritten = !st.pageWriter || st.pageWriter->flush();
+  st.pageWriter.reset();
+  if (!pagesWritten) {
+    LOG_ERR("SCT", "createSectionFile spine=%d: writing the last pages failed", spineIndex);
+    file.close();
+    Storage.remove(filePath.c_str());
+    if (st.cssParser) {
+      st.cssParser->clear();
+    }
+    return BuildPhaseResult::Failed;
+  }
   const bool parseComplete = st.streamOk && st.finalizeOk && st.parserStreamOk;
   bool success = parseComplete;
   const bool hasParsedPages = pageCount > 0;
@@ -2427,10 +2462,14 @@ std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex,
     LOG_ERR("SCT", "loadPageFromActiveBuild: bad LUT entry %u for page %u", offset, pageIndex);
     return nullptr;
   }
-  // The build writes pages to `file` without syncing per page, so its most recently written
-  // sector — and the directory-entry size — may not be on the card yet. A separate read handle
-  // only sees committed data, so flush the writer first; otherwise the read could seek past a
-  // stale EOF or deserialize a half-written sector.
+  // The build's last pages may still be in its page writer, and the most recently written sector -- and the
+  // directory-entry size -- may not be on the card yet. A separate read handle only sees committed data, so send the
+  // writer's pages and sync the file first; otherwise the read could seek past a stale EOF or deserialize a
+  // half-written sector.
+  if (buildState_->pageWriter && !buildState_->pageWriter->flush()) {
+    LOG_ERR("SCT", "loadPageFromActiveBuild: writing the buffered pages failed");
+    return nullptr;
+  }
   if (file) file.flush();  // SdFat flush() == sync(): commits the cached sector + dir entry
   FsFile readHandle;
   if (!Storage.openFileForRead("SCT", filePath, readHandle)) {

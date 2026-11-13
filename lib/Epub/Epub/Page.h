@@ -9,6 +9,9 @@
 #include <vector>
 
 class BuildArena;  // lib/Memory -- optional storage for TextBlock bytes on deserialize
+namespace serialization {
+class BufferedFileWriter;  // lib/Serialization -- where a block writes itself
+}
 
 #include "FootnoteEntry.h"
 #include "blocks/ImageBlock.h"
@@ -40,7 +43,7 @@ class PageElement {
   explicit PageElement(const int16_t xPos, const int16_t yPos) : xPos(xPos), yPos(yPos) {}
   virtual ~PageElement() = default;
   virtual void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) = 0;
-  virtual bool serialize(FsFile& file) = 0;
+  virtual bool serialize(serialization::BufferedFileWriter& out) = 0;
   virtual PageElementTag getTag() const = 0;  // Add type identification
 };
 
@@ -53,7 +56,7 @@ class PageLine final : public PageElement {
       : PageElement(xPos, yPos), block(std::move(block)) {}
   const TextBlock* getBlock() const { return block.get(); }
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
-  bool serialize(FsFile& file) override;
+  bool serialize(serialization::BufferedFileWriter& out) override;
   PageElementTag getTag() const override { return TAG_PageLine; }
   static std::unique_ptr<PageLine> deserialize(FsFile& file, BuildArena* scratch = nullptr);
 };
@@ -80,7 +83,7 @@ class PageImage final : public PageElement {
                            bool monochromeOutput = true, bool alsoCacheOtherVariant = false);
   // The image's gray variant (ImageBlock::GrayVariant), decoded and cached where render() draws it.
   void warmGrayVariant(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoad);
-  bool serialize(FsFile& file) override;
+  bool serialize(serialization::BufferedFileWriter& out) override;
   PageElementTag getTag() const override { return TAG_PageImage; }
   static std::unique_ptr<PageImage> deserialize(FsFile& file);
   const ImageBlock& getImageBlock() const { return *imageBlock; }
@@ -92,7 +95,7 @@ class PageHR final : public PageElement {
  public:
   PageHR(const int16_t xPos, const int16_t yPos, const int16_t width) : PageElement(xPos, yPos), width(width) {}
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
-  bool serialize(FsFile& file) override;
+  bool serialize(serialization::BufferedFileWriter& out) override;
   PageElementTag getTag() const override { return TAG_PageHR; }
   static std::unique_ptr<PageHR> deserialize(FsFile& file);
 };
@@ -122,7 +125,7 @@ class PageBox final : public PageElement {
         edges{edges[0], edges[1], edges[2], edges[3]},
         shaded(shaded) {}
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
-  bool serialize(FsFile& file) override;
+  bool serialize(serialization::BufferedFileWriter& out) override;
   PageElementTag getTag() const override { return TAG_PageBox; }
   static std::unique_ptr<PageBox> deserialize(FsFile& file);
   uint16_t getWidth() const { return width; }
@@ -170,7 +173,7 @@ class PageTableFragment final : public PageElement {
         hasBorder(hasBorder) {}
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
-  bool serialize(FsFile& file) override;
+  bool serialize(serialization::BufferedFileWriter& out) override;
   static std::unique_ptr<PageTableFragment> deserialize(FsFile& file, BuildArena* scratch = nullptr);
   PageElementTag getTag() const override { return TAG_PageTable; }
   uint16_t getTotalHeight() const { return totalHeight; }
@@ -276,7 +279,7 @@ class Page {
                        bool monochromeOutput = true, bool alsoWarmGrayscale = false, bool redecodeCoarse = false) const;
   bool hasPlaceholderImages(bool forceLoadLargeImages, bool monochromeOutput) const;
   bool allImagesArePlaceholders(bool forceLoadLargeImages, bool monochromeOutput) const;
-  bool serialize(FsFile& file) const;
+  bool serialize(serialization::BufferedFileWriter& out) const;
   // `scratch`: every TextBlock on the page takes its bytes from it when given (see
   // TextBlock::deserialize); the page must then die before the caller's arena block does.
   static std::unique_ptr<Page> deserialize(FsFile& file, BuildArena* scratch = nullptr);

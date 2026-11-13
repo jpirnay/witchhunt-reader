@@ -1,6 +1,7 @@
 // Ruby on a TextBlock line (spec section 7): the boxes a line carries in its arena behind bit 1 of the flags byte, the
 // band above the base they are drawn in, and the disk format. Against the fixed-width shim of test/word_size_layout:
 // every codepoint 10 px, ascender 16.
+#include <BufferedFileIO.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -54,7 +55,11 @@ using Kind = TextBlock::AnnotationKind;
 
 std::string serialized(const TextBlock& block) {
   FsFile file = HalFile::forReadWrite();
-  EXPECT_TRUE(block.serialize(file));
+  {
+    serialization::BufferedFileWriter writer(file);
+    EXPECT_TRUE(block.serialize(writer));
+    EXPECT_TRUE(writer.flush());
+  }
   EXPECT_TRUE(file.seek(0));
   std::string bytes(file.size(), '\0');
   file.read(bytes.data(), bytes.size());

@@ -13,6 +13,7 @@
 //
 // Per-word font slots follow crosspoint-reader PR #3934 (Justin Mitchell).
 
+#include <BufferedFileIO.h>
 #include <Utf8.h>
 #include <gtest/gtest.h>
 
@@ -51,7 +52,11 @@ std::vector<std::unique_ptr<TextBlock>> layout(ParsedText& text, const GfxRender
 
 std::string serialized(const TextBlock& block) {
   FsFile file = HalFile::forReadWrite();
-  EXPECT_TRUE(block.serialize(file));
+  {
+    serialization::BufferedFileWriter writer(file);
+    EXPECT_TRUE(block.serialize(writer));
+    EXPECT_TRUE(writer.flush());
+  }
   EXPECT_TRUE(file.seek(0));
   std::string bytes(file.size(), '\0');
   file.read(bytes.data(), bytes.size());

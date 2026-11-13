@@ -10,6 +10,9 @@
 #include <vector>
 
 class BuildArena;  // lib/Memory -- optional page-scoped storage for the arena bytes
+namespace serialization {
+class BufferedFileWriter;  // lib/Serialization -- where a block writes itself
+}
 
 #include "../TokenBoundary.h"
 #include "Block.h"
@@ -420,7 +423,7 @@ class TextBlock final : public Block {
   // given a renderer works out where to break the words into lines
   void render(const GfxRenderer& renderer, int fontId, int x, int y) const;
   BlockType getType() override { return TEXT_BLOCK; }
-  bool serialize(FsFile& file) const;
+  bool serialize(serialization::BufferedFileWriter& out) const;
   // `scratch`: the arena bytes come from it when given (a page drawn mid-build takes them from
   // the build's lent region, inside a block the caller opens and closes); null means the heap.
   static std::unique_ptr<TextBlock> deserialize(FsFile& file, BuildArena* scratch = nullptr);

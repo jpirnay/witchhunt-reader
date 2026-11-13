@@ -42,7 +42,11 @@ runs through refreshes. X4 Pro, cold Size+ to 18 pt: the new value showed after 
 3.0 s (about 4.3 s), the build ended after 4.25 s (6.2 s). A size used before now takes 2.05 s (was 1.7 s), because its
 page waits behind the bars' refresh.
 
-**Open.** Speed: writing the pages took 0.8 s of the chapter's 2.7 s of build work (about 12 ms a page, on every
-board), and the first build pass starts only after the bars' refresh. The X3 and X4 keep laying the book out on
+**Done (2026-11-13), page writes.** A page went to the card as some 150 to 220 writes of a few bytes, one card
+command per 512 bytes. The build now gathers them in a heap buffer (2 KB on the C3s, 4 KB on the PSRAM boards) and
+writes whole sectors (`Section::BuildState::pageWriter`). Same chapters built cold, parse time before and after: X3
+1,961 -> 1,816 ms (37 pages), X4 Pro 2,100 -> 1,760 ms (48 pages); the section files are byte-identical.
+
+**Open.** Speed: the first build pass starts only after the bars' refresh. The X3 and X4 keep laying the book out on
 closing; going live there depends on a heap measurement with the sheet open during a rebuild. The Murphy held sideways has no room for the sheet; its Layout tab
 opens the reader menu.

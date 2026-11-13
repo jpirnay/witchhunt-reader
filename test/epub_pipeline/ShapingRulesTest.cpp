@@ -42,6 +42,7 @@
 // Every rule walks every page line and every table cell line. forEachPage frees each page when its callback returns,
 // so a book is read into copies first, and the rules run on those.
 #include <BidiUtils.h>
+#include <BufferedFileIO.h>
 #include <GlyphRun.h>
 #include <OtShaper.h>
 #include <ShapingFace.h>
@@ -527,7 +528,11 @@ BookReading readBook(const Book& book, const pipeline_harness::Profile& profile,
           if (serialized != nullptr) {
             const fs::path lineFile = work / "line.bin";
             HalFile file;
-            const bool written = file.openForWrite(lineFile.string()) && block.serialize(file);
+            bool written = file.openForWrite(lineFile.string());
+            if (written) {
+              serialization::BufferedFileWriter writer(file);
+              written = block.serialize(writer) && writer.flush();
+            }
             file.close();
             std::ifstream in(lineFile, std::ios::binary);
             serialized->emplace_back(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());

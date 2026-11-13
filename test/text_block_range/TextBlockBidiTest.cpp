@@ -2,6 +2,7 @@
 // TextBlock bidi region, section v108): a word's display form, the characters it is drawn with in visual order, and the
 // line's logical order, each word's place in reading order. A line that needs neither writes the bytes it always did.
 // Against the fixed-width shim of this directory: every codepoint 10 px.
+#include <BufferedFileIO.h>
 #include <GfxRenderer.h>
 #include <Memory.h>
 #include <gtest/gtest.h>
@@ -43,7 +44,11 @@ std::unique_ptr<TextBlock> line(const std::vector<std::string_view>& words,
 
 std::string bytesOf(const TextBlock& block) {
   FsFile file = HalFile::forReadWrite();
-  if (!block.serialize(file) || !file.seek(0)) return {};
+  {
+    serialization::BufferedFileWriter writer(file);
+    if (!block.serialize(writer) || !writer.flush()) return {};
+  }
+  if (!file.seek(0)) return {};
   std::string bytes(file.size(), '\0');
   file.read(bytes.data(), bytes.size());
   return bytes;

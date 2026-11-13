@@ -6,6 +6,7 @@
 // for the block first (HeapFit.h) and carry on without it. These tests put the loaders under a
 // heap whose largest block is too small and check what comes out still reads.
 #include <Arduino.h>
+#include <BufferedFileIO.h>
 #include <Serialization.h>
 #include <esp_heap_caps.h>
 #include <gtest/gtest.h>
@@ -65,7 +66,11 @@ TEST(LowHeapLoad, PageWithoutABlockForItsFootnotesLoadsWithoutThem) {
     ASSERT_TRUE(page.addFootnote("3", "notes.xhtml#n3"));
     FsFile out;
     ASSERT_TRUE(Storage.openFileForWrite("TST", path, out));
-    ASSERT_TRUE(page.serialize(out));
+    {
+      serialization::BufferedFileWriter writer(out);
+      ASSERT_TRUE(page.serialize(writer));
+      ASSERT_TRUE(writer.flush());
+    }
     out.close();
   }
 

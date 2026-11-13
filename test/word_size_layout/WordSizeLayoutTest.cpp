@@ -11,6 +11,7 @@
 //   - TextBlock serialization round-trips sizes (and stays 1 byte for uniform lines)
 //   - render baseline-aligns mixed-size words (smaller words shift down)
 
+#include <BufferedFileIO.h>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -185,7 +186,11 @@ TEST(WordSizeSerialization, RoundTripsMixedSizes) {
                      {100, 80, 150});
 
   FsFile file = HalFile::forReadWrite();
-  ASSERT_TRUE(original.serialize(file));
+  {
+    serialization::BufferedFileWriter writer(file);
+    ASSERT_TRUE(original.serialize(writer));
+    ASSERT_TRUE(writer.flush());
+  }
   ASSERT_TRUE(file.seek(0));
 
   const auto restored = TextBlock::deserialize(file);
@@ -202,8 +207,16 @@ TEST(WordSizeSerialization, UniformBlockCostsOneFlagByte) {
 
   FsFile uniformFile = HalFile::forReadWrite();
   FsFile mixedFile = HalFile::forReadWrite();
-  ASSERT_TRUE(uniform.serialize(uniformFile));
-  ASSERT_TRUE(mixed.serialize(mixedFile));
+  {
+    serialization::BufferedFileWriter writer(uniformFile);
+    ASSERT_TRUE(uniform.serialize(writer));
+    ASSERT_TRUE(writer.flush());
+  }
+  {
+    serialization::BufferedFileWriter writer(mixedFile);
+    ASSERT_TRUE(mixed.serialize(writer));
+    ASSERT_TRUE(writer.flush());
+  }
   // Mixed pays the flag byte plus one byte per word; uniform only the flag byte.
   EXPECT_EQ(mixedFile.size(), uniformFile.size() + 2);
 
@@ -225,7 +238,11 @@ TEST(WordSizeSerialization, ArenaRoundTripPreservesPerWordFields) {
   ASSERT_TRUE(original.valid());
 
   FsFile file = HalFile::forReadWrite();
-  ASSERT_TRUE(original.serialize(file));
+  {
+    serialization::BufferedFileWriter writer(file);
+    ASSERT_TRUE(original.serialize(writer));
+    ASSERT_TRUE(writer.flush());
+  }
   ASSERT_TRUE(file.seek(0));
 
   const auto restored = TextBlock::deserialize(file);
@@ -472,7 +489,11 @@ TEST(WordSizeSerialization, ContinuationFlagRoundTrips) {
   ASSERT_TRUE(original.valid());
 
   FsFile file = HalFile::forReadWrite();
-  ASSERT_TRUE(original.serialize(file));
+  {
+    serialization::BufferedFileWriter writer(file);
+    ASSERT_TRUE(original.serialize(writer));
+    ASSERT_TRUE(writer.flush());
+  }
   ASSERT_TRUE(file.seek(0));
 
   const auto restored = TextBlock::deserialize(file);
@@ -492,7 +513,11 @@ TEST(WordSizeSerialization, EmptyStringWordRoundTrips) {
   ASSERT_TRUE(original.valid());
 
   FsFile file = HalFile::forReadWrite();
-  ASSERT_TRUE(original.serialize(file));
+  {
+    serialization::BufferedFileWriter writer(file);
+    ASSERT_TRUE(original.serialize(writer));
+    ASSERT_TRUE(writer.flush());
+  }
   ASSERT_TRUE(file.seek(0));
 
   const auto restored = TextBlock::deserialize(file);
@@ -511,7 +536,11 @@ TEST(WordSizeSerialization, EmptyBlockRoundTrips) {
   EXPECT_TRUE(original.isEmpty());
 
   FsFile file = HalFile::forReadWrite();
-  ASSERT_TRUE(original.serialize(file));
+  {
+    serialization::BufferedFileWriter writer(file);
+    ASSERT_TRUE(original.serialize(writer));
+    ASSERT_TRUE(writer.flush());
+  }
   ASSERT_TRUE(file.seek(0));
 
   const auto restored = TextBlock::deserialize(file);

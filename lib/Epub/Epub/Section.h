@@ -19,6 +19,9 @@ class GfxRenderer;
 class ChapterHtmlSlimParser;
 class CssParser;
 class BuildArena;
+namespace serialization {
+class BufferedFileWriter;
+}
 
 class Section {
  public:
@@ -82,7 +85,7 @@ class Section {
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
                               bool embeddedStyle, bool bionicReadingEnabled, uint8_t imageRendering,
                               VerticalText verticalText);
-  uint32_t onPageComplete(std::unique_ptr<Page> page);
+  uint32_t onPageComplete(std::unique_ptr<Page> page, serialization::BufferedFileWriter& out);
 
   struct TocBoundary {
     int tocIndex = 0;
