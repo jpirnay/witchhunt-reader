@@ -186,3 +186,32 @@ opened author (the box says Back), and long Confirm on an EPUB opens it with a K
 credentials are set (the box says Open).
 
 Next: apply the browser's "short / long" form wherever a screen has a hold-only action.
+
+## BOOX Picco: after the first build
+
+Status: 2026-11-13, branch `feat/picco-support`. The board builds (`picco`, `picco_stock`) and a retail unit's flash
+is dumped, but nothing of Witch Reader has run on it yet. Board notes: [Board Support](../contributing/board-support.md#onyx-boox-picco).
+
+- **Validate on the device**, on both tables: boot to Home, panel (SSD1677 or SSD2677), touch orientation in all four
+  orientations (the SDK profile sets `swapXY` and `flipY`), Power / Up / Down and the double-Power Back, the slide
+  switch, the light (on, off, warmth, off in deep sleep), the battery reading, SD card, USB Drive, deep sleep and wake,
+  and on the stock table that the System Update rows are gone and the flash area is the PSRAM image.
+- **SDK resync.** Free-Ink main has Picco display fixes the pin lacks: grayscale LUTs for the SSD1677 panels
+  (7ca5f5c), SSD2677 night-mode refresh (5c40622), dark AA pixels on the SE0400NQW47 (df3f41e), no two-pass clearing
+  on the first paint (d73c852), grayscale overlay in inverted mode (99809a0). Several commits of that range change the
+  X4 and X4 Pro refresh code too, so it is its own change, validated on every board.
+- **Stock-table installs in the flasher.** It reads Onyx's table as unknown and offers only the full install. An
+  update mode for it would write the app at 0xE0000 and otadata at 0x15000, as `scripts/stock_table_upload.py` does.
+- **Updates on the stock table.** Onyx's recovery installs `/update/firmware.bin` from the card. An action that erases
+  otadata and restarts would hand the stock-table Picco to it, the way the stock app's Power + Volume Up does.
+- **USB presence from the charger.** No detect pin, so a wall charger shows no charging bolt. Upstream asks
+  `BatteryMonitor::isExternalPowerPresent()` in `HalGPIO::isUsbConnected()`; that also changes the T5S3 (BQ25896), so
+  test both.
+- **Sleep on USB power.** Upstream keeps the Picco in light sleep while USB powers it, with a charge strip on the sleep
+  screen, because deep sleep cannot see the charger; and it powers on when a cable is plugged in, since that pulses
+  the wake line. Here the wake gate rejects that wake and the device sleeps on. Decide after seeing it.
+- **GPIO5.** The SDK carries it as Confirm; what drives it on the device is not known.
+- **Slide switch and touch page turns.** Upstream's third binding. Here Touch Page Turn has four values, so "on" needs
+  a remembered mode.
+- **Multi-touch.** The TMA525C reports more than one contact when its GET_SYSINFO says so, but
+  `HalCapabilities::hasMultiTouch()` (which decides the persisted rows) names only the GT911.
