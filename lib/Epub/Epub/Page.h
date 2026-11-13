@@ -1,5 +1,6 @@
 #pragma once
 #include <HalStorage.h>
+#include <HeapFit.h>
 
 #include <algorithm>
 #include <array>
@@ -230,9 +231,10 @@ class Page {
   // status, so a monster spine is cached once instead of rebuilt on every open (audit §4.2).
   static constexpr uint16_t MAX_PAGES_PER_SECTION = 10000;
 
-  // False when the page already holds MAX_FOOTNOTES_PER_PAGE entries (the link is dropped).
+  // False when the page already holds MAX_FOOTNOTES_PER_PAGE entries, or the heap has no block to grow the list to
+  // (8 KB at 64): the link is dropped, not the build aborted.
   bool addFootnote(const char* number, const char* href) {
-    if (footnotes.size() >= MAX_FOOTNOTES_PER_PAGE) return false;
+    if (footnotes.size() >= MAX_FOOTNOTES_PER_PAGE || !heapReserveFor(footnotes, 1)) return false;
     FootnoteEntry entry;
     strncpy(entry.number, number, sizeof(entry.number) - 1);
     entry.number[sizeof(entry.number) - 1] = '\0';
