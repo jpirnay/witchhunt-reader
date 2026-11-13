@@ -16,13 +16,14 @@
 //
 // Two bands over the page, which stays standing between them:
 //  - the top bar: back out of the book on the left, the book's title, the page's star on the right;
-//  - the bottom band: the tab bar (Contents, Progress, Layout, More) and the open panel above it: Progress (where the
-//    book and the chapter stand, the time spent in the book, previous chapter / Go to % / next chapter) or Layout
-//    (ReaderLayoutSheet).
+//  - the bottom band: the tab bar (Navigation, Progress, Layout, Orientation, More: an icon each) and the open panel
+//    above it: Navigation (the chapter list, the starred pages, a printed page, leaving the book), Progress (where the
+//    book and the chapter stand, the time spent in the book, previous chapter / Go to % / next chapter, and KOReader
+//    sync's pull and push where it is set up), Layout (ReaderLayoutSheet) or Orientation (the four ways to hold it).
 //
-// A screen too short to leave a strip of page under the Layout sheet gives the sheet the whole height: the top bar
-// goes (coversPage). One too short even for that has no Layout sheet (layoutFits), and its Layout tab does what More
-// does.
+// A screen too short to leave a strip of page under a panel gives the panel the whole height: the top bar goes
+// (coversPage). A list too long for one column takes two (listColumns). A screen too short even for that has no such
+// panel (panelFits): its tab does what the reader menu does.
 //
 // The arrangement follows the reader bars of the stock XT Licorice firmware (the idea only; nothing of its code).
 namespace ReaderBarsLayout {
@@ -33,18 +34,59 @@ namespace fui = freeink::ui;
 constexpr fui::ActionId ACTION_BAR = 1;  // the value is the Button
 constexpr fui::ActionId ACTION_TAB = 3;  // the value is the Tab
 
-// The bars' own buttons: the top bar's three (the title opens the book's details) and Progress's three.
-enum class Button : uint8_t { Exit, Star, PrevChapter, GoTo, NextChapter, Info };
+// The bars' own buttons: the top bar's three (the title opens the book's details), Progress's chapter row and sync row,
+// and the rows of the Navigation and Orientation lists. The four orientations in CrossPointSettings::ORIENTATION's
+// order, from Portrait.
+enum class Button : uint8_t {
+  Exit,
+  Star,
+  PrevChapter,
+  GoTo,
+  NextChapter,
+  Info,
+  SyncPull,
+  SyncPush,
+  Chapters,
+  StarredPages,
+  PrintedPage,
+  GoHome,
+  Portrait,
+  LandscapeCw,
+  Inverted,
+  LandscapeCcw,
+};
 
-enum class Tab : uint8_t { Contents, Progress, Layout, More, Count };
+enum class Tab : uint8_t { Navigation, Progress, Layout, Orientation, More, Count };
 constexpr uint8_t kTabCount = static_cast<uint8_t>(Tab::Count);
 
 // What the keys' cursor rests on. None on a touch board until a key moves it: a cursor nobody asked for would only say
-// which control the next Confirm hits, and a finger needs no such hint.
-enum class Focus : uint8_t { None, Exit, Star, Tabs, PrevChapter, GoTo, NextChapter, Layout, Title };
+// which control the next Confirm hits, and a finger needs no such hint. List: a row of the Navigation or Orientation
+// list (Model::listFocus).
+enum class Focus : uint8_t {
+  None,
+  Exit,
+  Star,
+  Tabs,
+  PrevChapter,
+  GoTo,
+  NextChapter,
+  Layout,
+  Title,
+  SyncPull,
+  SyncPush,
+  List
+};
 
 // The panel open above the tab bar.
-enum class Panel : uint8_t { None, Progress, Layout };
+enum class Panel : uint8_t { None, Progress, Layout, Navigation, Orientation };
+
+// One row of the Navigation or Orientation list. `marked`: the orientation the book is read in.
+struct ListRow {
+  const char* label = nullptr;
+  Button button = Button::Chapters;
+  bool marked = false;
+};
+constexpr uint8_t kMaxListRows = 4;
 
 // What the bars show. The strings are the caller's, already translated and formatted, alive until build() returns.
 struct Model {
@@ -52,7 +94,7 @@ struct Model {
   bool starred = false;
   Panel panel = Panel::None;
   Focus focus = Focus::None;
-  Tab focusedTab = Tab::Contents;  // the tab under the cursor while focus is Tabs
+  Tab focusedTab = Tab::Navigation;  // the tab under the cursor while focus is Tabs
   // The Progress rows. A row without a value is left out.
   const char* bookLabel = nullptr;
   const char* bookValue = nullptr;
@@ -61,8 +103,15 @@ struct Model {
   const char* timeLabel = nullptr;
   const char* timeValue = nullptr;
   const char* goToLabel = nullptr;
+  // Progress's sync row, where KOReader sync is set up; null leaves it out.
+  const char* syncPullLabel = nullptr;
+  const char* syncPushLabel = nullptr;
   // The Layout sheet, while it is the panel. Its focus is the target the cursor is on when focus is Layout.
   const ReaderLayoutSheet::Model* layout = nullptr;
+  // The Navigation or Orientation list, while it is the panel, and the row under the cursor while focus is List.
+  ListRow list[kMaxListRows]{};
+  uint8_t listCount = 0;
+  uint8_t listFocus = 0;
 };
 
 struct Metrics {
@@ -101,46 +150,85 @@ inline uint8_t rowCount(const Model& model) {
   return static_cast<uint8_t>((model.bookValue ? 1 : 0) + (model.chapterValue ? 1 : 0) + (model.timeValue ? 1 : 0));
 }
 
-inline int16_t progressHeight(const Metrics& metrics, const uint8_t rows) {
-  return static_cast<int16_t>(rows * metrics.row + metrics.gap + metrics.button + metrics.gap);
+// The value rows, then the chapter buttons, then the sync row where there is one.
+inline int16_t progressHeight(const Metrics& metrics, const uint8_t rows, const bool syncRow) {
+  return static_cast<int16_t>(rows * metrics.row + metrics.gap + metrics.button + metrics.gap +
+                              (syncRow ? metrics.button + metrics.gap : 0));
 }
 
 // One row a value, or, where that leaves too little of the page between the bars (the Murphy held sideways), the
 // values together on one line. The bars may take at most three fifths of the screen.
 inline bool stacksRows(const Model& model, const Metrics& metrics, const int16_t screenHeight) {
-  const int stacked = metrics.topBar + metrics.rule + metrics.tabBar + progressHeight(metrics, rowCount(model));
+  const int stacked = metrics.topBar + metrics.rule + metrics.tabBar + progressHeight(metrics, rowCount(model), false);
   return stacked * 5 <= screenHeight * 3;
 }
 
-// The Layout sheet and the tab bar under it fit the screen at all, the top bar given up if need be.
+// The sync row, where KOReader sync is set up and the screen still has a finger's width of page with it. The Murphy
+// held sideways has not: there sync stays in the reader menu, one step past More.
+inline bool showsSyncRow(const Model& model, const Metrics& metrics, const int16_t screenHeight) {
+  if (!model.syncPullLabel || !model.syncPushLabel) return false;
+  const uint8_t rows = stacksRows(model, metrics, screenHeight) ? rowCount(model) : uint8_t{1};
+  return metrics.topBar + metrics.rule + metrics.tabBar + progressHeight(metrics, rows, true) + metrics.minPage <=
+         screenHeight;
+}
+
+// A list of `rows` rows of buttons, a gap above, between and below them.
+inline int16_t listHeight(const Metrics& metrics, const uint8_t rows) {
+  return static_cast<int16_t>(rows * metrics.button + (rows + 1) * metrics.gap);
+}
+
+inline uint8_t listRows(const uint8_t count, const uint8_t columns) {
+  return static_cast<uint8_t>((count + columns - 1) / columns);
+}
+
+// One column, or two where one would leave less than a finger's width of page with the top bar there.
+inline uint8_t listColumns(const Model& model, const Metrics& metrics, const int16_t screenHeight) {
+  const int oneColumn =
+      metrics.topBar + metrics.rule + metrics.tabBar + listHeight(metrics, model.listCount) + metrics.minPage;
+  return oneColumn > screenHeight ? uint8_t{2} : uint8_t{1};
+}
+
+// The open panel's height above the tab bar.
+inline int16_t panelHeight(const Model& model, const Metrics& metrics, const int16_t screenHeight) {
+  switch (model.panel) {
+    case Panel::None:
+      return 0;
+    case Panel::Progress: {
+      const uint8_t rows = stacksRows(model, metrics, screenHeight) ? rowCount(model) : uint8_t{1};
+      return progressHeight(metrics, rows, showsSyncRow(model, metrics, screenHeight));
+    }
+    case Panel::Layout:
+      return ReaderLayoutSheet::height(metrics.sheet);
+    case Panel::Navigation:
+    case Panel::Orientation:
+      return listHeight(metrics, listRows(model.listCount, listColumns(model, metrics, screenHeight)));
+  }
+  return 0;
+}
+
+// The panel and the tab bar under it fit the screen at all, the top bar given up if need be. A screen they do not fit
+// has no such panel: its tab hands over to the reader.
+inline bool panelFits(const Model& model, const Metrics& metrics, const int16_t screenHeight) {
+  return metrics.rule + metrics.tabBar + panelHeight(model, metrics, screenHeight) <= screenHeight;
+}
+
+// The Layout sheet as the panel, for the tab's check before it opens.
 inline bool layoutFits(const Metrics& metrics, const int16_t screenHeight) {
   return metrics.rule + metrics.tabBar + ReaderLayoutSheet::height(metrics.sheet) <= screenHeight;
 }
 
-// The Layout sheet takes the whole height: with the top bar there it would leave less than a finger's width of page.
+// The panel takes the whole height: with the top bar there it would leave less than a finger's width of page.
+// Progress never does: its rows go onto one line instead (stacksRows).
 inline bool coversPage(const Model& model, const Metrics& metrics, const int16_t screenHeight) {
-  if (model.panel != Panel::Layout) return false;
+  if (model.panel == Panel::None || model.panel == Panel::Progress) return false;
   const int withTopBar =
-      metrics.topBar + metrics.rule + metrics.tabBar + ReaderLayoutSheet::height(metrics.sheet) + metrics.minPage;
+      metrics.topBar + metrics.rule + metrics.tabBar + panelHeight(model, metrics, screenHeight) + metrics.minPage;
   return withTopBar > screenHeight;
 }
 
 inline int16_t bottomHeight(const Model& model, const Metrics& metrics, const int16_t screenHeight) {
   if (coversPage(model, metrics, screenHeight)) return screenHeight;
-  int height = metrics.rule + metrics.tabBar;
-  switch (model.panel) {
-    case Panel::None:
-      break;
-    case Panel::Progress: {
-      const uint8_t rows = stacksRows(model, metrics, screenHeight) ? rowCount(model) : uint8_t{1};
-      height += progressHeight(metrics, rows);
-      break;
-    }
-    case Panel::Layout:
-      height += ReaderLayoutSheet::height(metrics.sheet);
-      break;
-  }
-  return static_cast<int16_t>(height);
+  return static_cast<int16_t>(metrics.rule + metrics.tabBar + panelHeight(model, metrics, screenHeight));
 }
 
 // The top bar, or nothing while the Layout sheet covers the page.
@@ -159,6 +247,25 @@ inline fui::Rect sheetRect(const fui::Rect& area, const Model& model, const Metr
   const fui::Rect bottom = bottomRect(area, model, metrics);
   const int16_t height = ReaderLayoutSheet::height(metrics.sheet);
   return fui::Rect{bottom.x, static_cast<int16_t>(bottom.bottom() - metrics.tabBar - height), bottom.width, height};
+}
+
+// The list's rect, as the sheet's: above the tab bar, its rows from the top down.
+inline fui::Rect listRect(const fui::Rect& area, const Model& model, const Metrics& metrics) {
+  const fui::Rect bottom = bottomRect(area, model, metrics);
+  const int16_t height = panelHeight(model, metrics, area.height);
+  return fui::Rect{bottom.x, static_cast<int16_t>(bottom.bottom() - metrics.tabBar - height), bottom.width, height};
+}
+
+// Row `index` of the list in `rect`, laid in `columns` columns left to right, then down.
+inline fui::Rect listCell(const fui::Rect& rect, const Metrics& metrics, const fui::ThemeTokens& theme,
+                          const uint8_t columns, const uint8_t index) {
+  const int16_t inner = static_cast<int16_t>(rect.width - 2 * metrics.sideInset);
+  const int16_t width = static_cast<int16_t>((inner - (columns - 1) * theme.spaceMd) / columns);
+  const uint8_t column = static_cast<uint8_t>(index % columns);
+  const uint8_t row = static_cast<uint8_t>(index / columns);
+  return fui::Rect{static_cast<int16_t>(rect.x + metrics.sideInset + column * (width + theme.spaceMd)),
+                   static_cast<int16_t>(rect.y + metrics.gap + row * (metrics.button + metrics.gap)), width,
+                   metrics.button};
 }
 
 // True when (x, y) falls on a bar. A tap anywhere else lands on the page, and closes the bars.
@@ -251,6 +358,24 @@ void build(ScreenT& screen, const Model& model, const Metrics& metrics, const fu
     ReaderLayoutSheet::build(screen, sheetRect(area, model, metrics), *model.layout, metrics.sheet);
     return;
   }
+  if (model.panel == Panel::Navigation || model.panel == Panel::Orientation) {
+    const fui::Rect rect = listRect(area, model, metrics);
+    const uint8_t columns = listColumns(model, metrics, area.height);
+    for (uint8_t i = 0; i < model.listCount && i < kMaxListRows; ++i) {
+      const ListRow& row = model.list[i];
+      const fui::Rect cell = listCell(rect, metrics, theme, columns, i);
+      const bool focused = model.focus == Focus::List && model.listFocus == i;
+      textButton(screen, cell, row.label, row.button, focused);
+      // The orientation the book is read in: a dot at the row's start, in the button's own ink.
+      if (row.marked) {
+        const int16_t dot = static_cast<int16_t>(std::max<int>(8, metrics.button / 5));
+        target.fill(fui::Rect{static_cast<int16_t>(cell.x + theme.spaceMd),
+                              static_cast<int16_t>(cell.y + (cell.height - dot) / 2), dot, dot},
+                    focused ? white : black, static_cast<int16_t>(dot / 2));
+      }
+    }
+    return;
+  }
   if (model.panel != Panel::Progress) return;
 
   const int16_t left = static_cast<int16_t>(bottom.x + metrics.sideInset);
@@ -291,6 +416,14 @@ void build(ScreenT& screen, const Model& model, const Metrics& metrics, const fu
              model.goToLabel, Button::GoTo, model.focus == Focus::GoTo);
   textButton(screen, fui::Rect{static_cast<int16_t>(left + width - chapterWidth), y, chapterWidth, metrics.button},
              "\xC2\xBB", Button::NextChapter, model.focus == Focus::NextChapter);
+  if (!showsSyncRow(model, metrics, area.height)) return;
+  // KOReader sync: pull, push, half the width each.
+  y = static_cast<int16_t>(y + metrics.button + metrics.gap);
+  const int16_t half = static_cast<int16_t>((width - theme.spaceMd) / 2);
+  textButton(screen, fui::Rect{left, y, half, metrics.button}, model.syncPullLabel, Button::SyncPull,
+             model.focus == Focus::SyncPull);
+  textButton(screen, fui::Rect{static_cast<int16_t>(left + width - half), y, half, metrics.button}, model.syncPushLabel,
+             Button::SyncPush, model.focus == Focus::SyncPush);
 }
 
 }  // namespace ReaderBarsLayout

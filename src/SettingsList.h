@@ -138,9 +138,12 @@ inline void buildSettings(const RowSink& emit) {
 
   // Offered everywhere, so a plain continuation of btnActionOptions above. Kept
   // separate only for legibility.
-  const std::vector<StrId> extraActionOptions = {
-      StrId::STR_BTN_ACT_FONT_SIZE_SMALLER, StrId::STR_BTN_ACT_FONT_SIZE_LARGER, StrId::STR_BTN_ACT_TOGGLE_TOUCH_UI,
-      StrId::STR_BTN_ACT_CYCLE_ORIENTATION_BACK, StrId::STR_BACK};
+  const std::vector<StrId> extraActionOptions = {StrId::STR_BTN_ACT_FONT_SIZE_SMALLER,
+                                                 StrId::STR_BTN_ACT_FONT_SIZE_LARGER,
+                                                 StrId::STR_BTN_ACT_TOGGLE_TOUCH_UI,
+                                                 StrId::STR_BTN_ACT_CYCLE_ORIENTATION_BACK,
+                                                 StrId::STR_BACK,
+                                                 StrId::STR_BTN_ACT_READER_BARS};
   // The ONLY conditional block, and correspondingly the LAST entries of
   // BUTTON_ACTION. Dropping them on a board with no light therefore leaves every
   // other action's numeric value untouched, so a settings file written on a lit
@@ -469,10 +472,10 @@ inline void buildSettings(const RowSink& emit) {
                          makeBtnActionOptions(StrId::STR_BTN_DEF_GO_HOME), "btnLongBack", StrId::STR_CAT_CONTROLS)
            .withSubmenu(StrId::STR_BTN_BACK)
            .withSelectorActivity());
-  // Confirm's built-in defaults are reader menu / ignore / KOReader sync. Murphy
+  // Confirm's built-in defaults are reader bars / ignore / KOReader sync. Murphy
   // overrides double and long to Back and Sleep because those keys are absent.
   emit(SettingInfo::Enum(StrId::STR_BTN_SHORT_PRESS, &CrossPointSettings::btnShortConfirm,
-                         {StrId::STR_BTN_DEF_READER_MENU}, "btnShortConfirm", StrId::STR_CAT_CONTROLS)
+                         {StrId::STR_BTN_DEF_READER_BARS}, "btnShortConfirm", StrId::STR_CAT_CONTROLS)
            .withSubmenu(StrId::STR_BTN_CONFIRM));
   emit(SettingInfo::Enum(StrId::STR_BTN_DOUBLE_PRESS, &CrossPointSettings::btnDoubleConfirm,
                          makeBtnActionOptions(StrId::STR_BTN_DEF_IGNORE), "btnDoubleConfirm", StrId::STR_CAT_CONTROLS)

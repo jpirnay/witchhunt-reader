@@ -670,9 +670,11 @@ class CrossPointSettings {
   uint8_t gestureDefaultsVersion = GESTURE_DEFAULTS_VERSION;
 
   // Tracks button-action enum ordering and board-specific keymap defaults.
-  // Older settings keep explicit custom actions, while old built-in Confirm
-  // double/long entries inherit Murphy's Back/Sleep defaults.
-  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 1;
+  // 1: BTN_BACK inserted before the board-gated block. Older settings keep
+  //    explicit custom actions, while old built-in Confirm double/long entries
+  //    inherit Murphy's Back/Sleep defaults.
+  // 2: BTN_READER_BARS inserted after BTN_BACK.
+  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 2;
 
   // --- Gesture actions (touch boards) ---------------------------------------
   // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
@@ -901,6 +903,10 @@ class CrossPointSettings {
     // Send a normal Back press to the current activity. This is distinct from
     // Go Home and is useful as a selectable action on boards without a Back key.
     BTN_BACK,
+    // Open the reader bars, as a short Confirm in a book does: for a second way in (a double
+    // press, a gesture) or a board whose Confirm sits awkwardly. A reader without bars (XTC, TXT)
+    // opens what its Confirm opens.
+    BTN_READER_BARS,
     // --- Board-gated actions MUST stay at the end of this enum ---------------
     // SettingsList builds each button's option list positionally: index i in the
     // list is action value i. Actions it drops on boards that cannot perform them
@@ -1065,6 +1071,16 @@ class CrossPointSettings {
       default:
         return action;
     }
+  }
+
+  // A stored action from a settings file written at BUTTON_ACTIONS_VERSION `fromVersion`, in today's numbering. Each
+  // version that inserted an action before the board-gated block moved every action from its place up by one. The
+  // insertions run in order and each lands after the one before, so today's value of an inserted action is also where
+  // it went in. Past the end is left for the loader's range check.
+  static constexpr uint8_t upgradeStoredAction(uint8_t action, const int fromVersion) {
+    if (fromVersion < 1 && action >= BTN_BACK) ++action;
+    if (fromVersion < 2 && action >= BTN_READER_BARS) ++action;
+    return action;
   }
 
   // Enforce settings whose values depend on others (e.g. sleepScreen=QUICK_RESUME implies

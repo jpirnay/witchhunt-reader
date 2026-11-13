@@ -354,8 +354,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   // which is exactly the case for every file written before the stamp existed.
   const bool staleGestureDefaults =
       doc["gestureDefaultsV"].as<int>() < static_cast<int>(CrossPointSettings::GESTURE_DEFAULTS_VERSION);
-  const bool staleButtonActions =
-      doc["buttonActionsV"].as<int>() < static_cast<int>(CrossPointSettings::BUTTON_ACTIONS_VERSION);
+  const int storedButtonActions = doc["buttonActionsV"].as<int>();
+  const bool staleButtonActions = storedButtonActions < static_cast<int>(CrossPointSettings::BUTTON_ACTIONS_VERSION);
   if (staleButtonActions && needsResave) *needsResave = true;
   // Cannot match on a board with no digitiser: the loop below walks the FILTERED
   // settings list, which carries no gesture rows there, so no gesture key ever
@@ -432,7 +432,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
       if (staleButtonActions && isButtonActionKey(info.key) && !doc[info.key].isNull()) {
         const bool isConfirmDoubleOrLong =
             std::strcmp(info.key, "btnDoubleConfirm") == 0 || std::strcmp(info.key, "btnLongConfirm") == 0;
-        if (BoardConfig::isMurphyM3() && isConfirmDoubleOrLong && v == CrossPointSettings::BTN_DEFAULT) {
+        if (storedButtonActions < 1 && BoardConfig::isMurphyM3() && isConfirmDoubleOrLong &&
+            v == CrossPointSettings::BTN_DEFAULT) {
           // On Murphy the Confirm double/long defaults replace missing Back and
           // Power keys. Keep explicit custom mappings, but migrate the old
           // built-in values to the board's keymap defaults.
@@ -440,13 +441,9 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
           return;
         }
 
-        // BTN_BACK was added immediately before the board-gated light actions.
-        // Shift persisted light-action IDs so they retain their meaning.
-        const uint8_t previousFirstLightAction =
-            static_cast<uint8_t>(static_cast<uint8_t>(CrossPointSettings::BTN_LIGHT_TOGGLE) - 1u);
-        const uint8_t previousActionCount =
-            static_cast<uint8_t>(static_cast<uint8_t>(CrossPointSettings::BUTTON_ACTION_COUNT) - 1u);
-        if (v >= previousFirstLightAction && v < previousActionCount) ++v;
+        // Actions inserted before the board-gated light actions since the file was written: shift what it stored
+        // after them so it keeps its meaning.
+        v = CrossPointSettings::upgradeStoredAction(v, storedButtonActions);
       }
       if (info.persistPtr) {
         // A slider's range is its own; anything past it falls back rather than driving the

@@ -509,11 +509,12 @@ void XtcReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
       ReaderUtils::enforceExitFullRefresh(renderer);
       finish();
       break;
-    // The chapter list is the whole of this reader's navigation, so it answers both names: a
-    // gesture bound to "Table of contents" and one bound to "Reader menu" find the same thing,
+    // The chapter list is the whole of this reader's navigation, so it answers all three names: a
+    // gesture bound to "Table of contents", "Reader menu" or "Reader bars" finds the same thing,
     // rather than one of them silently doing nothing here.
     case BA::BTN_OPEN_TOC:
     case BA::BTN_READER_MENU:
+    case BA::BTN_READER_BARS:
       openChapterSelection();
       break;
     default:

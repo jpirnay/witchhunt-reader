@@ -2157,6 +2157,9 @@ void loop() {
         case BA::BTN_READER_MENU:
           activityManager.dispatchButtonAction(BA::BTN_READER_MENU);
           break;
+        case BA::BTN_READER_BARS:
+          activityManager.dispatchButtonAction(BA::BTN_READER_BARS);
+          break;
         case BA::BTN_KOREADER_SYNC:
           activityManager.dispatchButtonAction(BA::BTN_KOREADER_SYNC);
           break;

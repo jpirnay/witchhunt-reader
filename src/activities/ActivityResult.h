@@ -120,8 +120,24 @@ struct ConfirmResult {
 // What the reader does once its bars (ReaderBarsActivity) close: the control that closed them, and whether the page's
 // star was flipped while they were open. The reader owns the bookmarks and the navigation, so the bars only report.
 struct ReaderBarsResult {
-  enum class Action : uint8_t { None, Contents, More, PrevChapter, NextChapter, GoToPercent, Exit, BookInfo };
+  enum class Action : uint8_t {
+    None,
+    Contents,
+    More,
+    PrevChapter,
+    NextChapter,
+    GoToPercent,
+    Exit,
+    BookInfo,
+    StarredPages,
+    PrintedPage,
+    Orientation,
+    SyncPull,
+    SyncPush
+  };
   Action action = Action::None;
+  // Action::Orientation: the one chosen, a CrossPointSettings::ORIENTATION.
+  uint8_t orientation = 0;
   bool starToggled = false;
   // The Layout tab, when anything on it changed: the values, and whether they are the book's own ("This book only") or
   // the global settings. The reader applies them before it acts on `action`.
