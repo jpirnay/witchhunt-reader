@@ -1,6 +1,7 @@
 #pragma once
 #include <ChunkedVector.h>
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -119,6 +120,11 @@ class Section {
   // In-flight incremental build, owned across stepSectionBuild() calls. Null when no build
   // is live. Heap-owned so the visitor's &lut capture stays stable across ticks.
   std::unique_ptr<BuildState> buildState_;
+  // notePageWithoutPictures(): page index + 1, 0 for an empty slot, written round-robin.
+  static constexpr size_t kPagesWithoutPicturesKept = 16;
+  std::array<uint16_t, kPagesWithoutPicturesKept> pagesWithoutPictures_{};
+  uint8_t pagesWithoutPicturesNext_ = 0;
+  void forgetPagesWithoutPictures();
   // The live build's arena (nullptr when no build is live, or it has none): read by the per-page
   // heap trace, which sits above BuildState's definition in Section.cpp.
   const BuildArena* activeBuildArena() const;
@@ -276,6 +282,12 @@ class Section {
                              const std::function<void(int)>& progressFn = {}, bool skipEviction = false);
   // True while an incremental build is in flight (stepSectionBuild returned More).
   bool hasActiveBuild() const { return static_cast<bool>(buildState_); }
+  // Pages known to carry no picture, for the reader's image lane (EpubReaderActivity::stepImageWarmLocked). It looks
+  // ahead of the page on screen at every turn, and on a book without pictures six of a turn's eight page loads were
+  // only to find none (X3, 2026-11-13: 2.8 ms of card reads a load). The last few are kept, and forgotten whenever the
+  // section's pages are: clearCache(), loadSectionFile(), a new build.
+  void notePageWithoutPictures(int page);
+  bool pageKnownWithoutPictures(int page) const;
   // Optional external scratch region for the build's arena (arena builds only;
   // ignored otherwise): typically the borrowed secondary framebuffer, so build
   // scratch never touches — or fragments — the heap. The region must stay valid

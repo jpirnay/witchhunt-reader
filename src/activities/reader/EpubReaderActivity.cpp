@@ -2239,12 +2239,19 @@ LaneBeforeBuild::Window EpubReaderActivity::stepImageWarmLocked() {
   for (int p = cur; p <= std::min(lastPage, windowEnd); ++p) {
     // A page the reader's own ladder just gave up on is not climbed again here: every step was refused a moment ago.
     if (imageWarmGaveUp(currentSpineIndex, p) || memoryDegradedPage(currentSpineIndex, p)) continue;
+    // Looked at on an earlier turn and found without a picture: nothing on it can ever need warming.
+    if (section->pageKnownWithoutPictures(p)) continue;
     if (CooperativeAbort::shouldAbortLongTask()) return Window::Unknown;
     section->currentPage = p;
     auto page = building ? section->loadPageFromActiveBuild(static_cast<uint16_t>(p), buildArena)
                          : section->loadPageFromSectionFile();
     section->currentPage = cur;
-    if (!page || !page->hasUncachedImages(/*forceLoad=*/true, /*monochromeOutput=*/true, warmGrayscale)) continue;
+    if (!page) continue;
+    if (!page->hasImages()) {
+      section->notePageWithoutPictures(p);
+      continue;
+    }
+    if (!page->hasUncachedImages(/*forceLoad=*/true, /*monochromeOutput=*/true, warmGrayscale)) continue;
     // Nothing to lend after all: the lane cannot run, and B must not wait for it.
     return warmPageTakingBuffer(*page, currentSpineIndex, p, /*onScreen=*/p == cur, warmGrayscale) ? Window::Dirty
                                                                                                    : Window::Closed;

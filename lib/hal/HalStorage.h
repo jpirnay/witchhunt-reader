@@ -205,6 +205,11 @@ class HalFile : public Print {
   bool isDirectory() const;
   void rewindDirectory();
   bool close();
+  // Whether the file is one run of clusters. On FAT32 SdFat walks the file's cluster chain once to find out and, when
+  // it is, keeps that: every later seek then finds its cluster directly, where it walked the chain from the file's
+  // start for any seek backwards (an exFAT file carries the fact itself). For a file read at scattered offsets for a
+  // long time, as an SD-mode font is.
+  bool detectContiguous();
   HalFile openNextFile();
   bool isOpen() const;
   operator bool() const;
