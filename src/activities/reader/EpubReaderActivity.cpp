@@ -8675,6 +8675,10 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
         openReaderMenu();
       }
       break;
+    case BA::BTN_READER_BARS:
+      // Live bars run inside the reader, which still gets the actions: a second press would stack a second set.
+      if (!liveBarsOpen()) openReaderBars();
+      break;
     case BA::BTN_TOGGLE_BIONIC_READING:
       if (epub) {
         applyBookReaderOverrides(bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,

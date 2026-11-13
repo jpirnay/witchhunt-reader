@@ -204,10 +204,11 @@ void LineReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       }
       break;
     }
-    // Whatever overlay this reader has -- MD's heading list, TXT's starred pages -- under both
-    // names, so neither binding is silently inert here. A reader with none simply ignores it.
+    // Whatever overlay this reader has -- MD's heading list, TXT's starred pages -- under all three
+    // names, so no binding is silently inert here. A reader with none simply ignores it.
     case BA::BTN_OPEN_TOC:
     case BA::BTN_READER_MENU:
+    case BA::BTN_READER_BARS:
       onConfirmShortPress();
       break;
     case BA::BTN_EXIT_READER:

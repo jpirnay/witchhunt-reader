@@ -85,6 +85,7 @@ bool CrossPointSettings::isReaderScopedAction(const uint8_t action) {
     case BTN_PREV_SECTION:
     case BTN_EXIT_READER:
     case BTN_READER_MENU:
+    case BTN_READER_BARS:
     case BTN_TOGGLE_BIONIC_READING:
     case BTN_KOREADER_SYNC:
     case BTN_CYCLE_FONT_SIZE:
