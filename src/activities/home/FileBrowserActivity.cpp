@@ -622,8 +622,9 @@ bool FileBrowserActivity::removeDirRecursive(const std::string& fullPath) {
   }
   if (!file.isDirectory()) {
     file.close();
+    if (!Storage.remove(fullPath.c_str())) return false;
     clearFileMetadata(fullPath);
-    return Storage.remove(fullPath.c_str());
+    return true;
   }
   file.close();
 
@@ -671,12 +672,12 @@ bool FileBrowserActivity::removeDirRecursive(const std::string& fullPath) {
       if (isDir) {
         stack.push_back({std::move(entryPath), false});
       } else {
-        clearFileMetadata(entryPath);
         if (!Storage.remove(entryPath.c_str())) {
           LOG_ERR("FBR", "Failed to remove file: %s", entryPath.c_str());
           dir.close();
           return false;
         }
+        clearFileMetadata(entryPath);
       }
     }
     dir.close();
@@ -1824,10 +1825,14 @@ void FileBrowserActivity::doRemove(const std::string& fullPath, const std::strin
                              if (isDirectory) {
                                deleted = removeDirRecursive(fullPath);
                              } else {
-                               clearFileMetadata(fullPath);
+                               // The cache holds where the book was left and its bookmarks: it goes
+                               // only once the book has.
                                deleted = Storage.remove(fullPath.c_str());
-                               if (deleted && withSidecars && !SidecarFiles::removeAll(fullPath)) {
-                                 LOG_ERR("FBR", "Deleted %s but not all of its sidecars", fullPath.c_str());
+                               if (deleted) {
+                                 clearFileMetadata(fullPath);
+                                 if (withSidecars && !SidecarFiles::removeAll(fullPath)) {
+                                   LOG_ERR("FBR", "Deleted %s but not all of its sidecars", fullPath.c_str());
+                                 }
                                }
                              }
                              if (deleted) {

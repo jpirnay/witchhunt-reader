@@ -2009,7 +2009,7 @@ void CrossPointWebServer::handleDelete() const {
       // It's a file (or couldn't open as dir) — remove file
       if (f) f.close();
       success = Storage.remove(itemPath.c_str());
-      clearBookCacheIfNeeded(itemPath);
+      if (success) clearBookCacheIfNeeded(itemPath);  // where the book was left goes only with the book
     }
 
     if (!success) {
