@@ -86,11 +86,13 @@ bool AutoSyncState::loadFromFile() {
   lastDocPath = doc["lastDocPath"] | std::string("");
   lastPushedSpine = doc["lastPushedSpine"] | -1;
   lastPushedPage = doc["lastPushedPage"] | -1;
-  pending = doc["pending"] | false;
-  lastSyncFailedFlag = doc["lastSyncFailed"] | false;
+  // as<T>() reads a missing key as false or 0, as `| false` did; cppcheck took that `|` for a bitmask with a zero
+  // operand (badBitmaskCheck, on the S3 builds, the only ones that compile this file).
+  pending = doc["pending"].as<bool>();
+  lastSyncFailedFlag = doc["lastSyncFailed"].as<bool>();
   lastSeenSpine = doc["lastSeenSpine"] | -2;
   lastSeenPage = doc["lastSeenPage"] | -2;
-  turnsSincePush = doc["turnsSincePush"] | 0;
+  turnsSincePush = doc["turnsSincePush"].as<int32_t>();
   lastNoteWasTurnFlag = false;
   return true;
 }

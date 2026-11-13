@@ -371,6 +371,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   }
 
   // Text anti-aliasing: default / on / off (mirrors QuickOverrides)
+  // cppcheck-suppress knownConditionTrueFalse ; a compile-time constant on Murphy, live on the other boards
   if (HalCapabilities::panelShowsGray()) {
     settingsItems.push_back(SettingInfo::DynamicEnumCtx(
         StrId::STR_TEXT_AA, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,

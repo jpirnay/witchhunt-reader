@@ -3537,6 +3537,7 @@ bool EpubReaderActivity::imagesTakeGrayPass(const Page& page) const {
 }
 
 bool EpubReaderActivity::getEffectiveTextAntiAliasing() const {
+  // cppcheck-suppress knownConditionTrueFalse ; a compile-time constant on Murphy, live on the other boards
   if (!HalCapabilities::panelShowsGray()) return false;  // a book's stored override included
   const bool wanted =
       bookTextAntiAliasingOverride >= 0 ? bookTextAntiAliasingOverride != 0 : SETTINGS.textAntiAliasing != 0;
@@ -6302,6 +6303,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     // they return (glyph_miss, FontDecompressor's ringArena()). The page slots stay on the heap: the BW render and the
     // AA pass read them after the lend. Not when Background-B holds the buffer.
     std::optional<LentSecondary> prewarmLend;
+    // cppcheck-suppress knownConditionTrueFalse ; compile-time true on the S3s, which keep the frame either way
     if (renderer.hasSecondaryBuffer() && !prewarmKeepsFrameOnScreen) prewarmLend.emplace(renderer);
     const glyph_miss::Scope misses(prewarmLend ? prewarmLend->arena() : nullptr);
     prewarmPageFonts(*page, orientedMarginLeft, contentTop);

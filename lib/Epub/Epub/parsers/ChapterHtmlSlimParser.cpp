@@ -4951,7 +4951,15 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
       // In the parser's tokens, as each line counts them: a token layout merged counts as its parts.
       int wordIndex = self->wordsExtractedInBlock +
                       (self->currentTextBlock ? static_cast<int>(self->currentTextBlock->sourceTokenCount()) : 0);
-      self->pendingFootnotes.push_back({wordIndex, entry});
+      // The block's links wait here for the line that ends them, and a table of contents is one block of dozens:
+      // Pride and Prejudice's holds 63, an 8.4 KB list once it doubles. A link is worth less than the chapter, so
+      // without a heap block to grow the list it is dropped rather than the build aborted (X3, 2026-11-13: abort()
+      // in this push_back, building that chapter with 21 KB as the largest block).
+      if (heapReserveFor(self->pendingFootnotes, 1)) {
+        self->pendingFootnotes.push_back({wordIndex, entry});
+      } else {
+        self->noteCapOverflow(kCapFootnotesPerPage, "footnote links: no heap block to grow the list");
+      }
     }
     if (self->inlineFootnotePreviews && self->currentFootnote.href[0] != '\0') {
       // Membership in the preview store is the gate: only targets of footnote-shaped links

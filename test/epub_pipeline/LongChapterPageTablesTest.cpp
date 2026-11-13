@@ -290,3 +290,54 @@ TEST(LongChapterPageTables, ResidentAnchorsPastTheHeapAreDroppedNotTheChapter) {
     EXPECT_FALSE(s.getPageForAnchor("a" + std::to_string(kAnchors - 1)).has_value());
   });
 }
+
+// A table of contents is one block of links -- Pride and Prejudice's holds 63 -- and its links wait in a list for the
+// line that ends them, then go onto their page's. Both lists grow only when the heap has the block; past that the links
+// are dropped and the section marked simplified, the chapter built whole. Unguarded, the list's 8.4 KB growth aborted
+// the X3's build of that chapter (2026-11-13).
+TEST(LongChapterPageTables, FootnoteLinksPastTheHeapAreDroppedNotTheChapter) {
+  constexpr int kLinks = 63;
+  std::string body = "<p>";
+  for (int i = 0; i < kLinks; ++i) body += "<a href=\"#t" + std::to_string(i) + "\">" + word(i) + "</a><br/>\n";
+  body += "</p>\n";
+  for (int i = 0; i < kLinks; ++i) body += "<p id=\"t" + std::to_string(i) + "\">" + word(kLinks + i) + "</p>\n";
+  Section::BuildParams p = shortPages();
+  p.viewportHeight = 800;  // the links' block on few pages, as a contents page lies
+  GfxRenderer renderer;
+  const auto linksKept = [&](const int index, const size_t largestBlock, bool& simplified) {
+    const auto work = freshWorkDir("links_" + std::to_string(index));
+    auto epub = syntheticBook(work, index, body);
+    size_t links = 0;
+    {
+      Section built(epub, 0, renderer);
+      bool ok = false;
+      {
+        const HostLargestFreeBlock heap(largestBlock);
+        ok = built.createSectionFile(p, {}, /*skipEviction=*/true);
+      }
+      EXPECT_TRUE(ok);
+      EXPECT_FALSE(built.isTruncatedCache()) << "a link is never worth the chapter";
+      Section loaded(epub, 0, renderer);
+      EXPECT_TRUE(loaded.loadSectionFile(p));
+      simplified = loaded.isSimplified();
+      expectChapterPrefix(wordsOfAllPages(loaded), 2 * kLinks);
+      for (int pg = 0; pg < loaded.pageCount; ++pg) {
+        loaded.currentPage = pg;
+        const auto page = loaded.loadPageFromSectionFile();
+        if (page) links += page->footnotes.size();
+      }
+    }
+    epub.reset();
+    fs::remove_all(work);
+    return links;
+  };
+
+  bool simplified = true;
+  EXPECT_EQ(linksKept(0, 200 * 1024, simplified), static_cast<size_t>(kLinks)) << "with the heap, every link is kept";
+  EXPECT_FALSE(simplified);
+  // A 4 KB largest block: each list doubles to 16 entries and no further.
+  const size_t kept = linksKept(1, 4 * 1024, simplified);
+  EXPECT_GT(kept, 0u);
+  EXPECT_LT(kept, static_cast<size_t>(kLinks));
+  EXPECT_TRUE(simplified) << "the dropped links are latched in the status byte";
+}
