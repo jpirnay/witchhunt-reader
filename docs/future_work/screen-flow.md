@@ -47,6 +47,14 @@ command per 512 bytes. The build now gathers them in a heap buffer (2 KB on the 
 writes whole sectors (`Section::BuildState::pageWriter`). Same chapters built cold, parse time before and after: X3
 1,961 -> 1,816 ms (37 pages), X4 Pro 2,100 -> 1,760 ms (48 pages); the section files are byte-identical.
 
-**Open.** Speed: the first build pass starts only after the bars' refresh. The X3 and X4 keep laying the book out on
+**Done (2026-11-13), a layout already built in one refresh.** The bars remember the layouts this chapter has complete on
+the card (the one they opened on, each build that ended, each page drawn from a complete chapter); a change back to one
+goes in at once and its page comes with the bars in one refresh (`EpubReaderActivity::liveLayoutChangeIsBuilt`). X4 Pro:
+1.94 s back to 1.54 s, the page on the panel 1.22 s after the press. A layout built in an earlier session is not known to
+them and still shows the bars first. The whole series on the X4 Pro, press to idle: a new layout 5.6 s (#749) to 3.8 s,
+one built before 1.5 s.
+
+**Open.** Speed: the first build pass of a new layout starts only after the bars' refresh; the book's settings are saved
+(about 0.2 s) before the font is looked up, also for a layout already built. The X3 and X4 keep laying the book out on
 closing; going live there depends on a heap measurement with the sheet open during a rebuild. The Murphy held sideways has no room for the sheet; its Layout tab
 opens the reader menu.

@@ -1152,6 +1152,19 @@ class EpubReaderActivity final : public Activity {
   bool liveBarsStale_ = false;
   // A change on the Layout tab waits for the bars showing it to be painted (serviceLiveBars). Loop task only.
   bool liveLayoutOwed_ = false;
+  // Layouts of this chapter the live bars have seen complete on the card (noteLiveLayoutBuilt): the one they opened
+  // on, every build that ended under them, every page drawn from a complete chapter. A change back to one goes in at
+  // once and its page comes with the bars in one refresh, where a new one shows the bars first while it builds.
+  // Cleared when the bars close. Under RenderLock.
+  struct BuiltLiveLayout {
+    ReaderLayoutValues values;
+    int spine = -1;
+  };
+  std::array<BuiltLiveLayout, 8> builtLiveLayouts_{};
+  uint8_t builtLiveLayoutsNext_ = 0;
+  void noteLiveLayoutBuilt();
+  // The Layout tab asks for a layout other than the page's, and one this chapter already has on the card.
+  bool liveLayoutChangeIsBuilt();
   // The live bars are open. False at compile time where they never open (the C3s), so their code drops out there.
   bool liveBarsOpen() const;
   // One loop() pass with the live bars open: their input, then what it asked for.
