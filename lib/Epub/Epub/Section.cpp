@@ -1393,13 +1393,14 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
     const auto pageListPath = epub->getCachePath() + "/pagelist.bin";
     FsFile pageListFile;
     if (Storage.exists(pageListPath.c_str()) && Storage.openFileForRead("SCT", pageListPath, pageListFile)) {
+      // The whole list is read at every build for this chapter's entries, six reads an entry: through a window.
+      uint8_t window[512];
+      serialization::BufferedFileReader in(pageListFile, window, sizeof(window));
       uint16_t count = 0;
-      serialization::readPod(pageListFile, count);
+      in.readPod(count);
       std::string href, anchor, label;  // reused across entries
       for (uint16_t i = 0; i < count; i++) {
-        serialization::readString(pageListFile, href);
-        serialization::readString(pageListFile, anchor);
-        serialization::readString(pageListFile, label);
+        if (!in.readString(href) || !in.readString(anchor) || !in.readString(label)) break;
         if (href == st.localPath) {
           st.visitor->addExternalPageBreakAnchor(anchor, label);
         }

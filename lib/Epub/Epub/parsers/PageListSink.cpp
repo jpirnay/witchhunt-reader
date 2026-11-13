@@ -10,6 +10,7 @@ PageListSink::PageListSink(const std::string& cachePath) : path(cachePath + "/pa
   }
   // Placeholder count; patched in finalize().
   serialization::writePod(file, static_cast<uint16_t>(0));
+  writer.emplace(file, 512);
 }
 
 PageListSink::~PageListSink() {
@@ -20,14 +21,15 @@ PageListSink::~PageListSink() {
 
 void PageListSink::addEntry(const std::string& href, const std::string& anchor, const std::string& label) {
   if (!file.isOpen() || finalized) return;
-  serialization::writeString(file, href);
-  serialization::writeString(file, anchor);
-  serialization::writeString(file, label);
+  writer->writeString(href);
+  writer->writeString(anchor);
+  writer->writeString(label);
   count++;
 }
 
 void PageListSink::discard() {
   finalized = true;
+  if (writer) writer->discard();
   if (file.isOpen()) file.close();
   Storage.remove(path.c_str());
 }
@@ -38,11 +40,18 @@ void PageListSink::finalize() {
   if (!file.isOpen()) return;
 
   if (count == 0) {
+    if (writer) writer->discard();
     file.close();
     Storage.remove(path.c_str());
     return;
   }
 
+  if (writer && !writer->flush()) {
+    LOG_ERR("EBP", "PageListSink: writing the entries failed");
+    file.close();
+    Storage.remove(path.c_str());
+    return;
+  }
   file.flush();
   if (!file.seek(0)) {
     LOG_ERR("EBP", "PageListSink: could not seek to patch count");
