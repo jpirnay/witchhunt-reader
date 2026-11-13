@@ -14,6 +14,10 @@
 
 #include "CssStyle.h"
 
+namespace serialization {
+class BufferedFileReader;
+}
+
 class BuildArena;  // lib/Memory — optional backing store for the disk index (Phase 2)
 
 /**
@@ -582,6 +586,9 @@ class CssParser {
   bool readRuleFromDiskAtOffset(uint32_t ruleOffset, const std::string& selector, CssStyle& outStyle,
                                 uint16_t& outOrder) const;
   static bool readCssStylePayload(FsFile& file, CssStyle& style);
+  static bool readCssStylePayload(serialization::BufferedFileReader& in, CssStyle& style);
+  // A payload's CSS_FIXED_STYLE_BYTES bytes, as readCssStylePayload reads them, into `style`.
+  static bool decodeCssStylePayload(const uint8_t* bytes, CssStyle& style);
   static void writeCssStylePayload(FsFile& file, const CssStyle& style);
   // The payload writeCssStylePayload writes, into `out` (CSS_FIXED_STYLE_BYTES); its length.
   static size_t encodeCssStylePayload(const CssStyle& style, uint8_t* out);
