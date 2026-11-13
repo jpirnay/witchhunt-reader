@@ -1150,6 +1150,8 @@ class EpubReaderActivity final : public Activity {
   // The bars on the panel are not the ones the controller would draw now: they opened, or their input changed them.
   // Without it a pass with no page to draw draws nothing. Under RenderLock.
   bool liveBarsStale_ = false;
+  // A change on the Layout tab waits for the bars showing it to be painted (serviceLiveBars). Loop task only.
+  bool liveLayoutOwed_ = false;
   // The live bars are open. False at compile time where they never open (the C3s), so their code drops out there.
   bool liveBarsOpen() const;
   // One loop() pass with the live bars open: their input, then what it asked for.
@@ -1162,8 +1164,9 @@ class EpubReaderActivity final : public Activity {
   void dismissLiveBars();
   // Whether this pass has a page to draw under the live bars; without one it paints only the bars (render()).
   bool liveBarsPageDue() const;
-  // The bars over the frame on the panel, for a pass with no page to draw, when they changed. Under RenderLock.
-  void paintLiveBars();
+  // The bars over the frame on the panel, for a pass with no page to draw, when they changed. Releases `lock` for the
+  // refresh.
+  void paintLiveBars(RenderLock& lock);
   // The bars into the frame being drawn, over the page and its status bar; the page is the one owed.
   // `redrawWhenBuilt`: liveBarsRedrawWhenBuilt_. Under RenderLock.
   void drawLiveBarsOverPage(bool redrawWhenBuilt);

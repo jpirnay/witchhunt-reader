@@ -2559,7 +2559,11 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
     return;
   }
   RenderLock lock;
-  if (!epub || !section || !section->hasActiveBuild() || renderer.isRefreshPending() || imageProcessingActive_) {
+  // A refresh in flight holds the panel's bus. Where the card is on another one and the build's memory is PSRAM, the
+  // slice runs through it, as an image decode does (HalCapabilities::decodesThroughRefresh): on the X4 Pro the build
+  // under the live bars sat out 1.3 s of refreshes in a 6.2 s rebuild.
+  const bool refreshBlocks = renderer.isRefreshPending() && !HalCapabilities::decodesThroughRefresh();
+  if (!epub || !section || !section->hasActiveBuild() || refreshBlocks || imageProcessingActive_) {
     return;
   }
 
@@ -5662,8 +5666,8 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
   const int built = static_cast<int>(section->activeBuildPageCount());
   if (navTarget.kind == NavigationTarget::Kind::Page && target >= 0 && target < built) {
     if (target == buildDisplayedPage_) {
-      if (liveBarsOpen()) paintLiveBars();  // a pass for the bars, or a page owed that the build has not redrawn
-      return;                               // already handled this target (drawn, or an image page we're waiting out)
+      if (liveBarsOpen()) paintLiveBars(lock);  // a pass for the bars, or a page owed that the build has not redrawn
+      return;  // already handled this target (drawn, or an image page we're waiting out)
     }
     // Text-only pages render cleanly without the image decode / secondary-buffer dance that the
     // lock-light build path avoids; an image target waits for the final Normal render but is
@@ -5700,7 +5704,7 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
   // Under the live bars the page they cover stays until the build reaches the text: the popup would land on them, and
   // the Layout tab already shows the change.
   if (liveBarsOpen()) {
-    paintLiveBars();
+    paintLiveBars(lock);
     return;
   }
 
@@ -5749,7 +5753,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   // Under the live bars a pass with no page to draw would draw the page on the panel again: it paints only the bars.
   if (liveBarsOpen() && !liveBarsPageDue()) {
-    paintLiveBars();
+    paintLiveBars(lock);
     return;
   }
 
@@ -8179,23 +8183,34 @@ void EpubReaderActivity::serviceLiveBars() {
   }
   switch (event) {
     case ReaderBarsController::Event::None:
-      // Idle: the build of a chapter laid out anew runs on under the bars. The look-ahead and the pre-render wait for
-      // them to close (lookAheadMayRun, renderContents): the next change would throw their work away.
-      serviceBackgroundWork();
+      // The change the bars show goes in once their repaint is on its way (below), during its refresh.
+      if (liveLayoutOwed_) {
+        bool painted = false;
+        {
+          RenderLock lock(*this);
+          painted = !liveBarsStale_;
+        }
+        if (painted) {
+          liveLayoutOwed_ = false;
+          applyLiveLayout();
+          return;
+        }
+      }
+      // Idle: the build of a chapter laid out anew runs on under the bars. Not while a render pass holds the lock: the
+      // loop would wait for it and take no input meanwhile. The look-ahead and the pre-render wait for the bars to
+      // close (lookAheadMayRun, renderContents): the next change would throw their work away.
+      if (!RenderLock::peek()) serviceBackgroundWork();
       return;
     case ReaderBarsController::Event::Redraw:
     case ReaderBarsController::Event::LayoutChanged: {
-      {
-        RenderLock lock(*this);
-        liveBarsStale_ = true;
-      }
-      if (event == ReaderBarsController::Event::LayoutChanged) {
-        applyLiveLayout();
-      } else {
-        requestUpdate();
-      }
-      return;
+      RenderLock lock(*this);
+      liveBarsStale_ = true;
     }
+      // A change is applied after the bars showing it are painted: the new value is on the panel at once, and the
+      // rebuild follows. Presses in between go in as one change.
+      if (event == ReaderBarsController::Event::LayoutChanged) liveLayoutOwed_ = true;
+      requestUpdate();
+      return;
     case ReaderBarsController::Event::Closed:
       closeLiveBars();
       return;
@@ -8212,6 +8227,11 @@ void EpubReaderActivity::applyLiveLayout() {
 }
 
 void EpubReaderActivity::closeLiveBars() {
+  // A change still waiting for its bars to be painted goes in now. True: the book opens again, the bars with it.
+  if (liveLayoutOwed_) {
+    liveLayoutOwed_ = false;
+    if (applyReaderLayout(liveBars_->layoutValues(), liveBars_->layoutIsThisBooks())) return;
+  }
   const ReaderBarsResult result = liveBars_->result();
   {
     RenderLock lock(*this);
@@ -8232,6 +8252,7 @@ void EpubReaderActivity::dismissLiveBars() {
   liveBarsPageOwed_ = false;
   liveBarsRedrawWhenBuilt_ = false;
   liveBarsStale_ = false;
+  liveLayoutOwed_ = false;
 }
 
 bool EpubReaderActivity::liveBarsOpen() const { return HalCapabilities::laysOutReaderLive() && liveBars_ != nullptr; }
@@ -8260,7 +8281,7 @@ bool EpubReaderActivity::liveBarsPageDue() const {
   return false;
 }
 
-void EpubReaderActivity::paintLiveBars() {
+void EpubReaderActivity::paintLiveBars(RenderLock& lock) {
   // Nothing new to show: the pass came for the page (the build's end, a picture landing) and found none to draw.
   if (!liveBarsStale_) return;
   liveBarsStale_ = false;
@@ -8268,7 +8289,12 @@ void EpubReaderActivity::paintLiveBars() {
   // bars only grow over the page while they are open (a panel closing closes them), so the rest of it is the page.
   renderer.syncWriteBufferFromDisplayed();
   liveBars_->draw();
-  renderer.displayBuffer();
+  // Started, then waited for without the lock, as a page is (renderContents): the loop task takes the bars' input and
+  // applies the change they show (serviceLiveBars), and the build slices on where it can run through a refresh
+  // (stepCurrentSectionBuild). Held through it, the lock kept the loop out for the whole refresh: 0.95 s on the X4 Pro.
+  renderer.triggerDisplay(HalDisplay::FAST_REFRESH);
+  lock.unlock();
+  renderer.completeDisplay();
 }
 
 void EpubReaderActivity::drawLiveBarsOverPage(const bool redrawWhenBuilt) {
