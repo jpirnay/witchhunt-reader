@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -47,6 +48,12 @@ void BookSearchActivity::onEnter() {
   if (session.current >= 0) nav.selected = kLeadRows + session.current;
 }
 
+void BookSearchActivity::onExit() {
+  // Closed while it read: what it found stands, and the file is complete up to it.
+  if (searching) endSearch();
+  UiListActivity::onExit();
+}
+
 void BookSearchActivity::openKeyboard() {
   startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SEARCH), session.query,
                                                                  64, InputType::Text),
@@ -68,17 +75,17 @@ void BookSearchActivity::openKeyboard() {
 }
 
 void BookSearchActivity::startSearch() {
-  if (!epub || !session.ensureHits()) {
-    LOG_ERR("BSR", "No memory for the search's hits");
+  if (!epub) {
     finish();
     return;
   }
   {
     RenderLock lock(*this);
     session.clearResults();
+    windowCount = 0;
     pattern = BookSearch::Pattern(session.query);
     step = 0;
-    searching = !pattern.empty() && epub->getSpineItemsCount() > 0;
+    searching = !pattern.empty() && epub->getSpineItemsCount() > 0 && hitFile.create(session.hitsPath);
     drawnCount = 0;
     nav.selected = 0;
   }
@@ -89,12 +96,17 @@ void BookSearchActivity::startSearch() {
 }
 
 void BookSearchActivity::stopSearch() {
-  {
-    RenderLock lock(*this);
-    searching = false;
-  }
+  endSearch();
   LOG_INF("BSR", "Search stopped at step %d: %u hits", step, static_cast<unsigned>(session.count));
   requestUpdate();
+}
+
+void BookSearchActivity::endSearch() {
+  RenderLock lock(*this);
+  searching = false;
+  // A write that failed lost the hits from it on: the list holds those before.
+  if (!hitFile.close()) session.count = std::min(session.count, hitFile.written());
+  windowCount = 0;
 }
 
 void BookSearchActivity::searchStep() {
@@ -121,23 +133,29 @@ void BookSearchActivity::searchStep() {
       std::optional<BuildArena> arena;
       if (lent != nullptr) arena.emplace(lent, lentSize);
       BuildArena* const scratch = arena ? &*arena : nullptr;
-      BookSearch::ChapterSearch chapter(pattern, session.wholeWords, session.hits.get(), BookSearchSession::kMaxHits,
-                                        session.count, static_cast<uint16_t>(spine), from, until);
+      // The chapter's bytes, as the book's progress weighs it: each hit's place in the chapter comes from them.
+      const size_t before = spine > 0 ? epub->getCumulativeSpineItemSize(spine - 1) : 0;
+      const auto chapterBytes = static_cast<uint32_t>(epub->getCumulativeSpineItemSize(spine) - before);
+      BookSearch::ChapterSearch chapter(pattern, session.wholeWords, hitFile, BookSearchSession::kMaxHits,
+                                        session.count, static_cast<uint16_t>(spine), chapterBytes, from, until);
       parsed = chapter.begin(scratch) && epub->readItemContentsToStream(epub->getSpineItem(spine).href, chapter.sink(),
                                                                         1024, chapter.stopFlag(), scratch);
       parsed = chapter.finish() && parsed;
     }
     if (lent != nullptr) renderer.returnSecondaryBuffer();
+    // On the card before the list reads it; and the window read again, the last one having perhaps grown.
+    hitFile.flush();
+    windowCount = 0;
   }
   if (!parsed) LOG_ERR("BSR", "Spine %d could not be searched", spine);
   LOG_DBG("BSR", "Spine %d searched in %lu ms: %u hits so far", spine, millis() - started,
           static_cast<unsigned>(session.count));
   ++step;
-  if (session.full() || step > spines) {
+  if (session.full() || step > spines || hitFile.failed()) {
+    endSearch();
     {
       RenderLock lock(*this);
-      searching = false;
-      session.complete = !session.full();
+      session.complete = step > spines && !session.full();
     }
     LOG_INF("BSR", "Search done: %u hits%s", static_cast<unsigned>(session.count), session.full() ? " (full)" : "");
     requestUpdate();
@@ -211,17 +229,16 @@ void BookSearchActivity::provideRow(void* ctx, const uint16_t index, fui::ListIt
     return;
   }
   const size_t hitIndex = index - kLeadRows;
-  if (hitIndex >= self->session.count) return;
-  const BookSearch::Hit& hit = self->session.hits[hitIndex];
+  const BookSearch::Hit* const read = self->windowHit(hitIndex);
+  if (read == nullptr) return;
+  const BookSearch::Hit& hit = *read;
   // The text around the hit, an ellipsis at each end it was cut at.
   snprintf(self->labelBuf_, sizeof(self->labelBuf_), "…%.*s…", static_cast<int>(hit.snippetLength), hit.snippet);
   item.label = self->labelBuf_;
   // How far into the book it lies, and its chapter: the percentage first, where a long title cut at the row's end
   // leaves it.
   const Epub& book = *self->epub;
-  const float within = hit.chapterPermille == BookSearch::ChapterSearch::kPermilleUnknown
-                           ? 0.0f
-                           : static_cast<float>(hit.chapterPermille) / 1000.0f;
+  const float within = static_cast<float>(hit.chapterPermille) / 1000.0f;
   const int percent = static_cast<int>(book.calculateProgress(hit.spine, within) * 100.0f + 0.5f);
   const int toc = book.getTocIndexForSpineIndex(hit.spine);
   const std::string title = toc >= 0 ? book.getTocItem(toc).title : std::string();
@@ -230,6 +247,19 @@ void BookSearchActivity::provideRow(void* ctx, const uint16_t index, fui::ListIt
   snprintf(self->subtitleBuf_, sizeof(self->subtitleBuf_), "%d%%%s%.*s", percent, titleBytes > 0 ? " · " : "",
            titleBytes, title.c_str());
   item.subtitle = self->subtitleBuf_;
+}
+
+const BookSearch::Hit* BookSearchActivity::windowHit(const size_t index) {
+  if (index >= session.count) return nullptr;
+  if (index < windowStart || index >= windowStart + windowCount) {
+    if (!window) window = makeUniqueNoThrow<BookSearch::Hit[]>(kWindow);
+    if (!window) return nullptr;
+    windowStart = index / kWindow * kWindow;
+    windowCount = BookSearch::HitFile::read(session.hitsPath, windowStart, window.get(),
+                                            std::min(kWindow, session.count - windowStart));
+    if (index >= windowStart + windowCount) return nullptr;
+  }
+  return &window[index - windowStart];
 }
 
 void BookSearchActivity::activateIndex(const int index) {

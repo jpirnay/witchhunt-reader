@@ -17,7 +17,9 @@ class Epub;
 //
 // One chapter is read a loop() at a time, under the render lock, with the secondary framebuffer lent as the inflate
 // window and the parser's state, as a section build takes it; the list is drawn again between chapters, at most once
-// a second unless new hits came. Back while it reads stops it, the hits so far kept.
+// a second unless new hits came. Back while it reads stops it, the hits so far kept. The hits go to the card as they
+// are found (BookSearch::HitFile), and the list reads them back kWindow rows at a time: a search of a thousand hits
+// holds no more of them in RAM than a window.
 class BookSearchActivity final : public UiListActivity {
  public:
   // `startQuery`: a query to search for at once (a selected word). Otherwise the session's last search is listed, or
@@ -25,12 +27,15 @@ class BookSearchActivity final : public UiListActivity {
   BookSearchActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::shared_ptr<Epub> epub,
                      BookSearchSession& session, std::string startQuery = "");
   void onEnter() override;
+  void onExit() override;
   void loop() override;
   bool drawsBookText() const override { return true; }
 
  private:
   // The first two rows: search again, Whole words.
   static constexpr int kLeadRows = 2;
+  // Hits read from the card at a time, for the rows on screen and around them.
+  static constexpr size_t kWindow = 16;
 
   std::shared_ptr<Epub> epub;
   BookSearchSession& session;
@@ -40,6 +45,11 @@ class BookSearchActivity final : public UiListActivity {
   int step = 0;  // of getSpineItemsCount() + 1: the origin's chapter from the origin, the others, the origin's again
   unsigned long lastDrawMs = 0;
   size_t drawnCount = 0;
+  BookSearch::HitFile hitFile;
+  // Render task, and the loop task under the render lock: the hits [windowStart, windowStart + windowCount) as read.
+  std::unique_ptr<BookSearch::Hit[]> window;
+  size_t windowStart = 0;
+  size_t windowCount = 0;
 
   // Render task only: the strings of the row the provider is filling, and the header's.
   char labelBuf_[BookSearch::Hit::kSnippetBytes + 8] = {};
@@ -58,6 +68,10 @@ class BookSearchActivity final : public UiListActivity {
   void startSearch();
   void searchStep();
   void stopSearch();
+  // Ends the search's writing: the file closed, what it holds counted.
+  void endSearch();
+  // Hit `index` from the window, read anew when it is outside; null when it cannot be read.
+  const BookSearch::Hit* windowHit(size_t index);
   // How far through the search is, in percent.
   int progressPercent() const;
 };

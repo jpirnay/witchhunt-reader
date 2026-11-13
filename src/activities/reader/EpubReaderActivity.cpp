@@ -915,6 +915,8 @@ void EpubReaderActivity::onExit() {
   // Save bookmarks before exit
   bookmarkStore.save();
   saveLinkBackStack();
+  // A search still open ends with the book, and its hits' file with it.
+  if (search_) Storage.remove(search_->hitsPath.c_str());
   if (epub) {
     GLOBAL_BOOKMARKS.syncFromStore(bookmarkStore, epub->getPath(), epub->getCachePath(), epub->getTitle(), false);
   }
@@ -8442,6 +8444,7 @@ void EpubReaderActivity::openBookSearch(std::string startQuery) {
         LOG_ERR("ERS", "Book search: no memory for its session");
         return;
       }
+      search_->hitsPath = epub->getCachePath() + "/search.bin";
       search_->originSpine = static_cast<uint16_t>(std::max(0, currentSpineIndex));
       search_->originOffset = readingOffset().value_or(0);
       search_->current = -1;
@@ -8471,10 +8474,14 @@ void EpubReaderActivity::onBookSearchClosed(const ActivityResult& result) {
 }
 
 void EpubReaderActivity::showSearchHit(const int index) {
-  if (!search_ || index < 0 || static_cast<size_t>(index) >= search_->count) return;
+  if (!search_ || index < 0) return;
+  BookSearch::Hit hit;
+  if (!search_->hit(static_cast<size_t>(index), hit)) {
+    LOG_ERR("ERS", "Search hit %d could not be read from %s", index + 1, search_->hitsPath.c_str());
+    return;
+  }
   {
     RenderLock lock(*this);
-    const BookSearch::Hit& hit = search_->hits[index];
     // Back from the search returns to where the reader was before its first hit.
     if (!search_->originSaved) search_->originSaved = pushLinkOrigin();
     search_->current = index;
@@ -8482,12 +8489,15 @@ void EpubReaderActivity::showSearchHit(const int index) {
     currentSpineIndex = hit.spine;
     section.reset();
   }
-  LOG_DBG("ERS", "Search hit %d/%u: spine %u, offset %u", index + 1, static_cast<unsigned>(search_->count),
-          search_->hits[index].spine, static_cast<unsigned>(search_->hits[index].offset));
+  LOG_DBG("ERS", "Search hit %d/%u: spine %u, offset %u", index + 1, static_cast<unsigned>(search_->count), hit.spine,
+          static_cast<unsigned>(hit.offset));
   requestUpdate();
 }
 
 void EpubReaderActivity::closeBookSearch() {
+  if (!search_) return;
+  // The hits' file goes with the search.
+  Storage.remove(search_->hitsPath.c_str());
   {
     RenderLock lock(*this);
     search_.reset();

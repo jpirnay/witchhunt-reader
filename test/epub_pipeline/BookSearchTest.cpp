@@ -1,18 +1,27 @@
 // Book search over a chapter's XHTML: the query folded as the text is, matches across inline markup and white space,
 // whole words, entities, the text the layout never counts, the range a search keeps, the cap, and each hit's offset
 // as the layout parser counts it (VisibleText.h: non-whitespace bytes from <body> on, outside head, script, style).
+// The hits go out one by one in the order found, and the card's file gives them back by index.
 #include <gtest/gtest.h>
+#include <unistd.h>
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
 #include "Epub/BookSearch.h"
+#include "Epub/BookSearchHitFile.h"
 
 namespace {
 
 using BookSearch::ChapterSearch;
 using BookSearch::Hit;
 using BookSearch::Pattern;
+
+struct Collected final : BookSearch::HitSink {
+  std::vector<Hit> hits;
+  void add(const Hit& hit) override { hits.push_back(hit); }
+};
 
 std::string page(const std::string& body) {
   return "<?xml version=\"1.0\" encoding=\"utf-8\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Fox "
@@ -30,9 +39,9 @@ Found search(const std::string& xhtml, const std::string& query, const bool whol
              const size_t chunk = 7) {
   const Pattern pattern(query);
   Found found;
-  found.hits.resize(capacity);
+  Collected out;
   size_t count = 0;
-  ChapterSearch chapter(pattern, wholeWords, found.hits.data(), capacity, count, 3, from, until);
+  ChapterSearch chapter(pattern, wholeWords, out, capacity, count, 3, static_cast<uint32_t>(xhtml.size()), from, until);
   EXPECT_TRUE(chapter.begin());
   // In small pieces, as a stream delivers it: sequences and entities are cut between them.
   for (size_t at = 0; at < xhtml.size() && !*chapter.stopFlag(); at += chunk) {
@@ -40,7 +49,8 @@ Found search(const std::string& xhtml, const std::string& query, const bool whol
     chapter.sink().write(reinterpret_cast<const uint8_t*>(piece.data()), piece.size());
   }
   found.parsed = chapter.finish();
-  found.hits.resize(count);
+  EXPECT_EQ(count, out.hits.size()) << "every hit counted is handed on";
+  found.hits = std::move(out.hits);
   return found;
 }
 
@@ -116,15 +126,59 @@ TEST(BookSearch, KeepsOnlyTheHitsInItsRange) {
 
 TEST(BookSearch, StopsWhenItsHitsAreFull) {
   const Found found = search(page("<p>fox fox fox fox</p><p>" + std::string(2000, 'x') + "</p>"), "fox", false, 2);
+  ASSERT_TRUE(found.parsed);
   ASSERT_EQ(2u, found.hits.size());
-  EXPECT_EQ(ChapterSearch::kPermilleUnknown, found.hits[0].chapterPermille) << "the chapter was not read to its end";
+  EXPECT_LT(found.hits[0].offset, found.hits[1].offset);
 }
 
-TEST(BookSearch, PlacesEachHitInItsChapter) {
-  const Found found = search(page("<p>fox " + std::string(98, 'y') + " fox</p>"), "fox");
-  ASSERT_EQ(2u, found.hits.size());
-  EXPECT_EQ(0, found.hits[0].chapterPermille);
-  EXPECT_EQ(1000u * 101 / 104, found.hits[1].chapterPermille);
+TEST(BookSearch, PlacesEachHitInItsChapterByItsBytes) {
+  const std::string filler(2000, 'y');
+  const Found found = search(page("<p>fox</p><p>" + filler + "</p><p>fox</p><p>" + filler + "</p><p>fox</p>"), "fox");
+  ASSERT_EQ(3u, found.hits.size());
+  EXPECT_LT(found.hits[0].chapterPermille, 100);
+  EXPECT_GT(found.hits[1].chapterPermille, 400);
+  EXPECT_LT(found.hits[1].chapterPermille, 600);
+  EXPECT_GT(found.hits[2].chapterPermille, 900);
+  EXPECT_LT(found.hits[2].chapterPermille, 1000);
+}
+
+TEST(BookSearch, HandsOnManyCloseHitsInTheOrderFound) {
+  // More hits than snippets kept open at once, each wanting the text after it: they still go out in order, whole.
+  std::string text;
+  for (int i = 0; i < 40; ++i) text += "ox" + std::to_string(i % 10) + " ";
+  const Found found = search(page("<p>" + text + "</p>"), "ox");
+  ASSERT_EQ(40u, found.hits.size());
+  for (size_t i = 1; i < found.hits.size(); ++i) EXPECT_LT(found.hits[i - 1].offset, found.hits[i].offset) << i;
+  EXPECT_EQ(0u, snippetOf(found.hits[0]).find("ox0 ox1"));
+}
+
+TEST(BookSearchHitFile, GivesBackTheHitsByIndex) {
+  const auto path = std::filesystem::temp_directory_path() /
+                    ("book_search_hits_" + std::to_string(static_cast<long>(getpid())) + ".bin");
+  BookSearch::HitFile file;
+  ASSERT_TRUE(file.create(path.string()));
+  for (uint16_t i = 0; i < 40; ++i) {
+    Hit hit;
+    hit.spine = i;
+    hit.chapterPermille = static_cast<uint16_t>(i * 10);
+    hit.offset = 1000u + i;
+    const std::string snippet = "hit " + std::to_string(i);
+    hit.snippetLength = static_cast<uint8_t>(snippet.size());
+    snippet.copy(hit.snippet, snippet.size());
+    file.add(hit);
+  }
+  ASSERT_TRUE(file.close());
+  EXPECT_EQ(40u, file.written());
+  Hit window[16];
+  ASSERT_EQ(16u, BookSearch::HitFile::read(path.string(), 16, window, 16));
+  EXPECT_EQ(16, window[0].spine);
+  EXPECT_EQ(160, window[0].chapterPermille);
+  EXPECT_EQ(1031u, window[15].offset);
+  EXPECT_EQ("hit 31", snippetOf(window[15]));
+  EXPECT_EQ(8u, BookSearch::HitFile::read(path.string(), 32, window, 16)) << "the file ends after 40";
+  EXPECT_EQ(0u, BookSearch::HitFile::read(path.string(), 40, window, 16));
+  std::filesystem::remove(path);
+  EXPECT_EQ(0u, BookSearch::HitFile::read(path.string(), 0, window, 16)) << "no file, nothing read";
 }
 
 TEST(BookSearch, CutsASnippetAtACharacterAndSurvivesMalformedText) {

@@ -98,7 +98,8 @@ class Matcher {
 };
 
 // One place the query was found: the chapter, the visible-text offset of the match's first character in it, how far
-// through the chapter that is (per mille of its visible text), and the text around it.
+// through the chapter that is (per mille of its bytes, as Epub::calculateProgress weighs a chapter), and the text
+// around it.
 struct Hit {
   static constexpr size_t kSnippetBytes = 80;
   uint16_t spine = 0;
@@ -108,16 +109,22 @@ struct Hit {
   char snippet[kSnippetBytes]{};
 };
 
-// One chapter's search, its hits tagged `spine` and added to the caller's array until it is full: the parse then
-// stops. Only hits at an offset in [from, until) are kept (a search begins and ends at the page it was started on).
-// One object a chapter.
+// Where a search's hits go, one at a time and in the order they were found, each once its snippet is complete.
+class HitSink {
+ public:
+  virtual ~HitSink() = default;
+  virtual void add(const Hit& hit) = 0;
+};
+
+// One chapter's search: its hits, tagged `spine`, go to `out` as their snippets fill, and `count` counts them up to
+// `capacity` (the whole search's), where the parse stops. Only hits at an offset in [from, until) are kept (a search
+// begins and ends at the page it was started on). `chapterBytes`: the chapter's XHTML size, for each hit's place in
+// it. Nothing is kept of a hit once it has gone: a search finds as many as `capacity` in RAM of a few. One object a
+// chapter.
 class ChapterSearch {
  public:
-  // A chapter's place in the hits' order is unknown when its parse stopped before the end (the hits were full).
-  static constexpr uint16_t kPermilleUnknown = UINT16_MAX;
-
-  ChapterSearch(const Pattern& pattern, bool wholeWords, Hit* hits, size_t capacity, size_t& count, uint16_t spine,
-                uint32_t from = 0, uint32_t until = UINT32_MAX);
+  ChapterSearch(const Pattern& pattern, bool wholeWords, HitSink& out, size_t capacity, size_t& count, uint16_t spine,
+                uint32_t chapterBytes, uint32_t from = 0, uint32_t until = UINT32_MAX);
   ChapterSearch(const ChapterSearch&) = delete;
   ChapterSearch& operator=(const ChapterSearch&) = delete;
 
@@ -127,15 +134,15 @@ class ChapterSearch {
   // Where the chapter's XHTML goes, and the flag that stops its stream once the hits are full or the parse failed.
   Print& sink() { return sink_; }
   const bool* stopFlag() const { return sink_.stopFlag(); }
-  // The chapter read: the last match closed, each hit's place in the chapter set. False on a parse error; the hits
-  // found before it stand.
+  // The chapter read: the last match closed and every hit handed on. False on a parse error; the hits found before it
+  // stand.
   bool finish();
   bool full() const { return count_ >= capacity_; }
 
  private:
   static constexpr size_t kRing = 128;     // bytes of recent text, for snippets
   static constexpr size_t kBefore = 28;    // of a snippet, at most, before the match
-  static constexpr uint8_t kOpenHits = 4;  // snippets still taking text after their match
+  static constexpr uint8_t kOpenHits = 4;  // hits not yet handed on: snippets still taking text, and those after them
 
   static void onStart(void* self, const char* name, const char** atts);
   static void onEnd(void* self, const char* name);
@@ -148,17 +155,19 @@ class ChapterSearch {
   void ring(const char* bytes, uint8_t length);
   void unit(uint32_t folded);
   void accept(uint32_t firstUnit);
+  // Hands on the hits at the head of the queue whose snippets are complete; `all`: every one, as it stands.
+  void handOn(bool all);
 
   const Pattern& pattern_;
   Matcher matcher_;
-  Hit* const hits_;
+  HitSink& out_;
   const size_t capacity_;
   size_t& count_;
 
   const uint16_t spine_;
+  const uint32_t chapterBytes_;
   const uint32_t from_;
   const uint32_t until_;
-  const size_t firstHit_;
   SaxParser parser_;
   SaxFeedSink sink_{parser_};
   // The hits are full: the parse stops once the open snippets have their text.
@@ -189,10 +198,11 @@ class ChapterSearch {
   // Recent text, white space collapsed, for snippets; `source_` counts every byte it has taken.
   char ring_[kRing]{};
   uint32_t source_ = 0;
-  // Hits whose snippets still take text: index into the hits, and bytes still wanted.
-  size_t openHit_[kOpenHits]{};
-  uint8_t openWant_[kOpenHits]{};
-  uint8_t openCount_ = 0;
+  // Hits not handed on yet, oldest first, and the bytes each snippet still wants (0: complete). Handed on in the order
+  // they were found, so a complete one waits for those before it.
+  Hit queue_[kOpenHits]{};
+  uint8_t want_[kOpenHits]{};
+  uint8_t queued_ = 0;
 };
 
 }  // namespace BookSearch

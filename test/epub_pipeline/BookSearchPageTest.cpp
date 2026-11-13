@@ -20,6 +20,11 @@ namespace fs = std::filesystem;
 
 namespace {
 
+struct Collected final : BookSearch::HitSink {
+  std::vector<BookSearch::Hit> hits;
+  void add(const BookSearch::Hit& hit) override { hits.push_back(hit); }
+};
+
 Section::BuildParams params() {
   Section::BuildParams p;
   p.fontId = 0;
@@ -75,14 +80,16 @@ TEST(BookSearchPage, EveryHitIsOnThePageItsOffsetNames) {
   for (int marker = 0; marker < kMarkers; ++marker) {
     const std::string word = "zq" + std::to_string(marker) + "marker";
     const BookSearch::Pattern pattern(word);
-    BookSearch::Hit hits[4];
+    Collected out;
     size_t count = 0;
-    BookSearch::ChapterSearch chapter(pattern, /*wholeWords=*/true, hits, 4, count, 0);
+    BookSearch::ChapterSearch chapter(pattern, /*wholeWords=*/true, out, 4, count, 0,
+                                      static_cast<uint32_t>(epub->getCumulativeSpineItemSize(0)));
     ASSERT_TRUE(chapter.begin());
     ASSERT_TRUE(epub->readItemContentsToStream(epub->getSpineItem(0).href, chapter.sink(), 1024, chapter.stopFlag()));
     ASSERT_TRUE(chapter.finish());
     ASSERT_EQ(1u, count) << word;
-    const std::optional<uint16_t> page = section.getPageForVisibleTextOffset(hits[0].offset);
+    ASSERT_EQ(1u, out.hits.size()) << word;
+    const std::optional<uint16_t> page = section.getPageForVisibleTextOffset(out.hits[0].offset);
     ASSERT_TRUE(page.has_value()) << word;
     section.currentPage = *page;
     const std::unique_ptr<Page> loaded = section.loadPageFromSectionFile();
