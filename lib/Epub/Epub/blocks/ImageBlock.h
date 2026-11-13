@@ -11,7 +11,8 @@ class BuildArena;     // lib/Memory — optional decode scratch (see image_scrat
 struct RenderConfig;  // converters/ImageToFramebufferDecoder.h
 namespace serialization {
 class BufferedFileWriter;  // lib/Serialization -- where a block writes itself
-}
+class BufferedFileReader;  // and where it reads itself back
+}  // namespace serialization
 
 // Source file size above which an image is considered "large" and rendered as a placeholder
 // until the user explicitly requests it.
@@ -230,7 +231,7 @@ class ImageBlock final : public Block {
   void render(GfxRenderer& renderer, int x, int y, bool forceLoad = true, bool monochromeOutput = true,
               bool alsoCacheOtherVariant = false);
   bool serialize(serialization::BufferedFileWriter& out);
-  static std::unique_ptr<ImageBlock> deserialize(FsFile& file);
+  static std::unique_ptr<ImageBlock> deserialize(serialization::BufferedFileReader& in);
 
  private:
   std::string imagePath;  // SD card destination path (may not exist until first render)

@@ -76,7 +76,8 @@ TEST(LowHeapLoad, PageWithoutABlockForItsFootnotesLoadsWithoutThem) {
 
   FsFile in;
   ASSERT_TRUE(Storage.openFileForRead("TST", path, in));
-  const auto full = Page::deserialize(in);
+  serialization::BufferedFileReader reader(in);
+  const auto full = Page::deserialize(reader);
   ASSERT_TRUE(full);
   ASSERT_EQ(3u, full->footnotes.size());
   EXPECT_STREQ("notes.xhtml#n2", full->footnotes[1].href);
@@ -84,7 +85,8 @@ TEST(LowHeapLoad, PageWithoutABlockForItsFootnotesLoadsWithoutThem) {
   // Three entries need 384 bytes in one block.
   const HostLargestFreeBlock fragmented(256);
   ASSERT_TRUE(in.seek(0));
-  const auto bare = Page::deserialize(in);
+  serialization::BufferedFileReader bareReader(in);
+  const auto bare = Page::deserialize(bareReader);
   ASSERT_TRUE(bare) << "the page itself must still load";
   EXPECT_TRUE(bare->footnotes.empty());
   in.close();
@@ -163,14 +165,15 @@ TEST(LowHeapLoad, LongStoredAltTextIsCutOnLoad) {
   }
   FsFile in;
   ASSERT_TRUE(Storage.openFileForRead("TST", path, in));
-  const auto block = ImageBlock::deserialize(in);
+  serialization::BufferedFileReader reader(in);
+  const auto block = ImageBlock::deserialize(reader);
   ASSERT_TRUE(block);
   EXPECT_EQ(std::string(ImageBlock::MAX_ALT_TEXT_BYTES, 'x'), block->getAltText());
   EXPECT_EQ("/cache/img_1.pxc", block->getImagePath());
   EXPECT_EQ(320, block->getWidth());
   EXPECT_EQ(120, block->getRenderedHeight());
   uint32_t next = 0;
-  serialization::readPod(in, next);
+  EXPECT_TRUE(reader.readPod(next));
   EXPECT_EQ(0xC0FFEEu, next);
   in.close();
 }

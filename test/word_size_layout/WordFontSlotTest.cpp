@@ -219,7 +219,8 @@ TEST(WordFontSlots, SerializationKeepsTheFontsAndRefusesASlotThatNamesNone) {
   FsFile file = HalFile::forReadWrite();
   file.write(bytes.data(), bytes.size());
   ASSERT_TRUE(file.seek(0));
-  const auto restored = TextBlock::deserialize(file);
+  serialization::BufferedFileReader reader(file);
+  const auto restored = TextBlock::deserialize(reader);
   ASSERT_NE(nullptr, restored);
   EXPECT_EQ(nullptr, restored->wordFont(0));
   ASSERT_NE(nullptr, restored->wordFont(1));
@@ -235,7 +236,8 @@ TEST(WordFontSlots, SerializationKeepsTheFontsAndRefusesASlotThatNamesNone) {
   FsFile bad = HalFile::forReadWrite();
   bad.write(corrupt.data(), corrupt.size());
   ASSERT_TRUE(bad.seek(0));
-  EXPECT_EQ(nullptr, TextBlock::deserialize(bad));
+  serialization::BufferedFileReader badReader(bad);
+  EXPECT_EQ(nullptr, TextBlock::deserialize(badReader));
 }
 
 TEST(SpaceParts, EveryGapIsTheRenderersThoughThePassRemembersItsParts) {

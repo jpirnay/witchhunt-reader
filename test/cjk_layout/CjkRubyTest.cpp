@@ -70,7 +70,8 @@ std::unique_ptr<TextBlock> restore(const std::string& bytes) {
   FsFile file = HalFile::forReadWrite();
   file.write(bytes.data(), bytes.size());
   EXPECT_TRUE(file.seek(0));
-  return TextBlock::deserialize(file);
+  serialization::BufferedFileReader reader(file);
+  return TextBlock::deserialize(reader);
 }
 
 // The draw calls at the ruby's scale 0.5 (the base words are drawn at 1.0).

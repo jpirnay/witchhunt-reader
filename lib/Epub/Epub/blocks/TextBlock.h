@@ -12,7 +12,8 @@
 class BuildArena;  // lib/Memory -- optional page-scoped storage for the arena bytes
 namespace serialization {
 class BufferedFileWriter;  // lib/Serialization -- where a block writes itself
-}
+class BufferedFileReader;  // and where it reads itself back
+}  // namespace serialization
 
 #include "../TokenBoundary.h"
 #include "Block.h"
@@ -426,5 +427,5 @@ class TextBlock final : public Block {
   bool serialize(serialization::BufferedFileWriter& out) const;
   // `scratch`: the arena bytes come from it when given (a page drawn mid-build takes them from
   // the build's lent region, inside a block the caller opens and closes); null means the heap.
-  static std::unique_ptr<TextBlock> deserialize(FsFile& file, BuildArena* scratch = nullptr);
+  static std::unique_ptr<TextBlock> deserialize(serialization::BufferedFileReader& in, BuildArena* scratch = nullptr);
 };

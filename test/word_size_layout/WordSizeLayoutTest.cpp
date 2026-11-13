@@ -193,7 +193,8 @@ TEST(WordSizeSerialization, RoundTripsMixedSizes) {
   }
   ASSERT_TRUE(file.seek(0));
 
-  const auto restored = TextBlock::deserialize(file);
+  serialization::BufferedFileReader reader(file);
+  const auto restored = TextBlock::deserialize(reader);
   ASSERT_NE(restored, nullptr);
   ASSERT_EQ(restored->wordCount(), 3u);
   ASSERT_TRUE(restored->hasWordSizes());
@@ -221,7 +222,8 @@ TEST(WordSizeSerialization, UniformBlockCostsOneFlagByte) {
   EXPECT_EQ(mixedFile.size(), uniformFile.size() + 2);
 
   ASSERT_TRUE(uniformFile.seek(0));
-  const auto restored = TextBlock::deserialize(uniformFile);
+  serialization::BufferedFileReader uniformReader(uniformFile);
+  const auto restored = TextBlock::deserialize(uniformReader);
   ASSERT_NE(restored, nullptr);
   EXPECT_FALSE(restored->hasWordSizes());
 }
@@ -245,7 +247,8 @@ TEST(WordSizeSerialization, ArenaRoundTripPreservesPerWordFields) {
   }
   ASSERT_TRUE(file.seek(0));
 
-  const auto restored = TextBlock::deserialize(file);
+  serialization::BufferedFileReader reader(file);
+  const auto restored = TextBlock::deserialize(reader);
   ASSERT_NE(restored, nullptr);
   ASSERT_EQ(restored->wordCount(), words.size());
   EXPECT_FALSE(restored->hasWordSizes());
@@ -496,7 +499,8 @@ TEST(WordSizeSerialization, ContinuationFlagRoundTrips) {
   }
   ASSERT_TRUE(file.seek(0));
 
-  const auto restored = TextBlock::deserialize(file);
+  serialization::BufferedFileReader reader(file);
+  const auto restored = TextBlock::deserialize(reader);
   ASSERT_NE(restored, nullptr);
   ASSERT_EQ(restored->wordCount(), words.size());
   EXPECT_FALSE(restored->wordContinues(0));
@@ -520,7 +524,8 @@ TEST(WordSizeSerialization, EmptyStringWordRoundTrips) {
   }
   ASSERT_TRUE(file.seek(0));
 
-  const auto restored = TextBlock::deserialize(file);
+  serialization::BufferedFileReader reader(file);
+  const auto restored = TextBlock::deserialize(reader);
   ASSERT_NE(restored, nullptr);
   ASSERT_EQ(restored->wordCount(), 3u);
   EXPECT_EQ(std::string(restored->wordText(0)), "");
@@ -543,7 +548,8 @@ TEST(WordSizeSerialization, EmptyBlockRoundTrips) {
   }
   ASSERT_TRUE(file.seek(0));
 
-  const auto restored = TextBlock::deserialize(file);
+  serialization::BufferedFileReader reader(file);
+  const auto restored = TextBlock::deserialize(reader);
   ASSERT_NE(restored, nullptr);
   EXPECT_EQ(restored->wordCount(), 0u);
   EXPECT_TRUE(restored->isEmpty());

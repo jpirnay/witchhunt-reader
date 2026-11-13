@@ -63,7 +63,8 @@ std::unique_ptr<Page> roundTrip(const Page& page, const std::string& name) {
   out.close();
   FsFile in;
   if (!Storage.openFileForRead("TST", path, in)) return nullptr;
-  auto loaded = Page::deserialize(in);
+  serialization::BufferedFileReader reader(in);
+  auto loaded = Page::deserialize(reader);
   in.close();
   return loaded;
 }
@@ -151,6 +152,7 @@ TEST(VerticalPage, AFileCutAfterTheElementCountDoesNotLoad) {
   out.close();
   FsFile in;
   ASSERT_TRUE(Storage.openFileForRead("TST", path, in));
-  EXPECT_FALSE(Page::deserialize(in));
+  serialization::BufferedFileReader reader(in);
+  EXPECT_FALSE(Page::deserialize(reader));
   in.close();
 }

@@ -205,7 +205,8 @@ TEST(VerticalTextBlock, TheVerticalBitSurvivesTheCache) {
     FsFile again = HalFile::forReadWrite();
     again.write(bytes.data(), bytes.size());
     ASSERT_TRUE(again.seek(0));
-    const auto restored = TextBlock::deserialize(again);
+    serialization::BufferedFileReader reader(again);
+    const auto restored = TextBlock::deserialize(reader);
     ASSERT_NE(nullptr, restored);
     EXPECT_EQ(vertical, restored->isVertical());
     EXPECT_EQ(2, restored->wordCount());
@@ -231,7 +232,8 @@ TEST(VerticalTextBlock, TheCentredMarksBitSurvivesTheCache) {
     FsFile again = HalFile::forReadWrite();
     again.write(bytes.data(), bytes.size());
     ASSERT_TRUE(again.seek(0));
-    const auto restored = TextBlock::deserialize(again);
+    serialization::BufferedFileReader reader(again);
+    const auto restored = TextBlock::deserialize(reader);
     ASSERT_NE(nullptr, restored);
     EXPECT_EQ(centred, restored->centredMarks());
     EXPECT_TRUE(restored->isVertical());
@@ -316,7 +318,8 @@ TEST(VerticalTextBlock, TheCombineRecordSurvivesTheCache) {
   FsFile again = HalFile::forReadWrite();
   again.write(bytes.data(), bytes.size());
   ASSERT_TRUE(again.seek(0));
-  const auto restored = TextBlock::deserialize(again);
+  serialization::BufferedFileReader reader(again);
+  const auto restored = TextBlock::deserialize(reader);
   ASSERT_NE(nullptr, restored);
   EXPECT_TRUE(restored->isCombined(1));
   EXPECT_FALSE(restored->isCombined(0));

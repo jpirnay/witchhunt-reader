@@ -41,13 +41,13 @@ bool PageLine::serialize(serialization::BufferedFileWriter& out) {
   return block->serialize(out);
 }
 
-std::unique_ptr<PageLine> PageLine::deserialize(FsFile& file, BuildArena* scratch) {
+std::unique_ptr<PageLine> PageLine::deserialize(serialization::BufferedFileReader& in, BuildArena* scratch) {
   int16_t xPos;
   int16_t yPos;
-  serialization::readPod(file, xPos);
-  serialization::readPod(file, yPos);
+  in.readPod(xPos);
+  in.readPod(yPos);
 
-  auto tb = TextBlock::deserialize(file, scratch);
+  auto tb = TextBlock::deserialize(in, scratch);
   if (!tb) {
     LOG_ERR("PGE", "PageLine: TextBlock deserialize failed");
     return nullptr;
@@ -81,21 +81,21 @@ bool PageImage::serialize(serialization::BufferedFileWriter& out) {
   return imageBlock->serialize(out);
 }
 
-std::unique_ptr<PageImage> PageImage::deserialize(FsFile& file) {
+std::unique_ptr<PageImage> PageImage::deserialize(serialization::BufferedFileReader& in) {
   int16_t xPos;
   int16_t yPos;
-  serialization::readPod(file, xPos);
-  serialization::readPod(file, yPos);
+  in.readPod(xPos);
+  in.readPod(yPos);
   uint8_t flags = 0;
-  serialization::readPod(file, flags);
+  in.readPod(flags);
   if ((flags & ~(kInLine | kLinked)) != 0) {
     LOG_ERR("PGE", "PageImage: unknown flags 0x%02X", flags);
     return nullptr;
   }
   uint32_t linkHash = 0;
-  if ((flags & kLinked) != 0) serialization::readPod(file, linkHash);
+  if ((flags & kLinked) != 0) in.readPod(linkHash);
 
-  auto ib = ImageBlock::deserialize(file);
+  auto ib = ImageBlock::deserialize(in);
   if (!ib) {
     LOG_ERR("PGE", "PageImage: ImageBlock deserialize failed");
     return nullptr;
@@ -115,11 +115,11 @@ bool PageHR::serialize(serialization::BufferedFileWriter& out) {
   return true;
 }
 
-std::unique_ptr<PageHR> PageHR::deserialize(FsFile& file) {
+std::unique_ptr<PageHR> PageHR::deserialize(serialization::BufferedFileReader& in) {
   int16_t xPos, yPos, width;
-  serialization::readPod(file, xPos);
-  serialization::readPod(file, yPos);
-  serialization::readPod(file, width);
+  in.readPod(xPos);
+  in.readPod(yPos);
+  in.readPod(width);
   return std::unique_ptr<PageHR>(new PageHR(xPos, yPos, width));
 }
 
@@ -221,28 +221,28 @@ bool PageBox::serialize(serialization::BufferedFileWriter& out) {
   return true;
 }
 
-std::unique_ptr<PageBox> PageBox::deserialize(FsFile& file) {
+std::unique_ptr<PageBox> PageBox::deserialize(serialization::BufferedFileReader& in) {
   int16_t xPos = 0;
   int16_t yPos = 0;
   uint16_t width = 0;
   uint16_t height = 0;
   Edge edges[4];
   bool shaded = false;
-  serialization::readPod(file, xPos);
-  serialization::readPod(file, yPos);
-  serialization::readPod(file, width);
-  serialization::readPod(file, height);
+  in.readPod(xPos);
+  in.readPod(yPos);
+  in.readPod(width);
+  in.readPod(height);
   for (Edge& edge : edges) {
     uint8_t style = 0;
-    serialization::readPod(file, edge.width);
-    serialization::readPod(file, style);
+    in.readPod(edge.width);
+    in.readPod(style);
     if (edge.width > CssBox::kMaxWidthPx || style > static_cast<uint8_t>(CssBorderStyle::Dashed)) {
       LOG_ERR("PGE", "PageBox: invalid edge (width %u, style %u)", edge.width, style);
       return nullptr;
     }
     edge.style = static_cast<CssBorderStyle>(style);
   }
-  serialization::readPod(file, shaded);
+  in.readPod(shaded);
   if (width == 0 || height == 0) {
     LOG_ERR("PGE", "PageBox: empty box %ux%u", width, height);
     return nullptr;
@@ -400,16 +400,17 @@ bool PageTableFragment::serialize(serialization::BufferedFileWriter& out) {
   return true;
 }
 
-std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file, BuildArena* scratch) {
+std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(serialization::BufferedFileReader& in,
+                                                                  BuildArena* scratch) {
   int16_t xPos, yPos;
-  serialization::readPod(file, xPos);
-  serialization::readPod(file, yPos);
+  in.readPod(xPos);
+  in.readPod(yPos);
 
   uint8_t columnCount;
   uint16_t totalWidth, totalHeight;
-  serialization::readPod(file, columnCount);
-  serialization::readPod(file, totalWidth);
-  serialization::readPod(file, totalHeight);
+  in.readPod(columnCount);
+  in.readPod(totalWidth);
+  in.readPod(totalHeight);
 
   if (columnCount == 0 || columnCount > MAX_TABLE_COLS) {
     LOG_ERR("PGE", "TableFragment: invalid columnCount %u", columnCount);
@@ -417,10 +418,10 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file, 
   }
 
   bool hasBorder;
-  serialization::readPod(file, hasBorder);
+  in.readPod(hasBorder);
 
   uint16_t rowCount;
-  serialization::readPod(file, rowCount);
+  in.readPod(rowCount);
   if (rowCount > MAX_TABLE_ROWS) {
     LOG_ERR("PGE", "TableFragment: invalid rowCount %u", rowCount);
     return nullptr;
@@ -430,10 +431,10 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file, 
   rows.reserve(rowCount);
   for (uint16_t r = 0; r < rowCount; r++) {
     TableRow row;
-    serialization::readPod(file, row.height);
-    serialization::readPod(file, row.isHeaderRow);
+    in.readPod(row.height);
+    in.readPod(row.isHeaderRow);
     uint8_t cellCount;
-    serialization::readPod(file, cellCount);
+    in.readPod(cellCount);
     if (cellCount > MAX_TABLE_COLS) {
       LOG_ERR("PGE", "TableFragment: invalid cellCount %u in row %u", cellCount, r);
       return nullptr;
@@ -441,21 +442,21 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file, 
     row.cells.reserve(cellCount);
     for (uint8_t c = 0; c < cellCount; c++) {
       TableCell cell;
-      serialization::readPod(file, cell.isHeader);
-      serialization::readPod(file, cell.colSpan);
+      in.readPod(cell.isHeader);
+      in.readPod(cell.colSpan);
       if (cell.colSpan == 0 || cell.colSpan > columnCount) {
         LOG_ERR("PGE", "TableFragment: invalid colSpan %u at row %u cell %u", cell.colSpan, r, c);
         return nullptr;
       }
       uint8_t lineCount;
-      serialization::readPod(file, lineCount);
+      in.readPod(lineCount);
       if (lineCount > MAX_CELL_LINES) {
         LOG_ERR("PGE", "TableFragment: invalid lineCount %u at row %u cell %u", lineCount, r, c);
         return nullptr;
       }
       cell.lines.reserve(lineCount);
       for (uint8_t l = 0; l < lineCount; l++) {
-        auto tb = TextBlock::deserialize(file, scratch);
+        auto tb = TextBlock::deserialize(in, scratch);
         if (!tb) {
           LOG_ERR("PGE", "TableFragment: TextBlock deserialize failed at row %u cell %u line %u", r, c, l);
           return nullptr;
@@ -463,9 +464,9 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file, 
         cell.lines.push_back(std::move(tb));
       }
       bool hasImage = false;
-      serialization::readPod(file, hasImage);
+      in.readPod(hasImage);
       if (hasImage) {
-        cell.image = ImageBlock::deserialize(file);
+        cell.image = ImageBlock::deserialize(in);
         if (!cell.image) {
           LOG_ERR("PGE", "TableFragment: ImageBlock deserialize failed at row %u cell %u", r, c);
           return nullptr;
@@ -671,11 +672,11 @@ bool Page::serialize(serialization::BufferedFileWriter& out) const {
   return true;
 }
 
-std::unique_ptr<Page> Page::deserialize(FsFile& file, BuildArena* scratch) {
+std::unique_ptr<Page> Page::deserialize(serialization::BufferedFileReader& in, BuildArena* scratch) {
   auto page = std::unique_ptr<Page>(new Page());
 
   uint16_t count = 0;
-  if (file.read(reinterpret_cast<uint8_t*>(&count), sizeof(count)) != sizeof(count)) {
+  if (!in.read(&count, sizeof(count))) {
     LOG_ERR("PGE", "Deserialization failed: missing element count");
     return nullptr;
   }
@@ -688,8 +689,7 @@ std::unique_ptr<Page> Page::deserialize(FsFile& file, BuildArena* scratch) {
     return nullptr;
   }
 
-  if (file.read(reinterpret_cast<uint8_t*>(&page->verticalBlockExtent), sizeof(page->verticalBlockExtent)) !=
-      sizeof(page->verticalBlockExtent)) {
+  if (!in.read(&page->verticalBlockExtent, sizeof(page->verticalBlockExtent))) {
     LOG_ERR("PGE", "Deserialization failed: missing block extent");
     return nullptr;
   }
@@ -697,26 +697,26 @@ std::unique_ptr<Page> Page::deserialize(FsFile& file, BuildArena* scratch) {
   page->elements.reserve(count);
   for (uint16_t i = 0; i < count; i++) {
     uint8_t tag;
-    serialization::readPod(file, tag);
+    in.readPod(tag);
 
     if (tag == TAG_PageLine) {
-      auto pl = PageLine::deserialize(file, scratch);
+      auto pl = PageLine::deserialize(in, scratch);
       if (!pl) return nullptr;
       page->elements.push_back(std::move(pl));
     } else if (tag == TAG_PageImage) {
-      auto pi = PageImage::deserialize(file);
+      auto pi = PageImage::deserialize(in);
       if (!pi) return nullptr;
       page->elements.push_back(std::move(pi));
     } else if (tag == TAG_PageTable) {
-      auto pt = PageTableFragment::deserialize(file, scratch);
+      auto pt = PageTableFragment::deserialize(in, scratch);
       if (!pt) return nullptr;
       page->elements.push_back(std::move(pt));
     } else if (tag == TAG_PageHR) {
-      auto hr = PageHR::deserialize(file);
+      auto hr = PageHR::deserialize(in);
       if (!hr) return nullptr;
       page->elements.push_back(std::move(hr));
     } else if (tag == TAG_PageBox) {
-      auto box = PageBox::deserialize(file);
+      auto box = PageBox::deserialize(in);
       if (!box) return nullptr;
       page->elements.push_back(std::move(box));
     } else {
@@ -727,7 +727,7 @@ std::unique_ptr<Page> Page::deserialize(FsFile& file, BuildArena* scratch) {
 
   // Deserialize footnotes
   uint16_t fnCount;
-  serialization::readPod(file, fnCount);
+  in.readPod(fnCount);
   if (fnCount > MAX_FOOTNOTES_PER_PAGE) {
     LOG_ERR("PGE", "Invalid footnote count %u", fnCount);
     return nullptr;
@@ -744,8 +744,7 @@ std::unique_ptr<Page> Page::deserialize(FsFile& file, BuildArena* scratch) {
   page->footnotes.resize(fnCount);
   for (uint16_t i = 0; i < fnCount; i++) {
     auto& entry = page->footnotes[i];
-    if (file.read(entry.number, sizeof(entry.number)) != sizeof(entry.number) ||
-        file.read(entry.href, sizeof(entry.href)) != sizeof(entry.href)) {
+    if (!in.read(entry.number, sizeof(entry.number)) || !in.read(entry.href, sizeof(entry.href))) {
       LOG_ERR("PGE", "Failed to read footnote %u", i);
       return nullptr;
     }

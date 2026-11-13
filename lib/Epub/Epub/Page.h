@@ -11,7 +11,8 @@
 class BuildArena;  // lib/Memory -- optional storage for TextBlock bytes on deserialize
 namespace serialization {
 class BufferedFileWriter;  // lib/Serialization -- where a block writes itself
-}
+class BufferedFileReader;  // and where it reads itself back
+}  // namespace serialization
 
 #include "FootnoteEntry.h"
 #include "blocks/ImageBlock.h"
@@ -58,7 +59,7 @@ class PageLine final : public PageElement {
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(serialization::BufferedFileWriter& out) override;
   PageElementTag getTag() const override { return TAG_PageLine; }
-  static std::unique_ptr<PageLine> deserialize(FsFile& file, BuildArena* scratch = nullptr);
+  static std::unique_ptr<PageLine> deserialize(serialization::BufferedFileReader& in, BuildArena* scratch = nullptr);
 };
 
 // New PageImage class
@@ -85,7 +86,7 @@ class PageImage final : public PageElement {
   void warmGrayVariant(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoad);
   bool serialize(serialization::BufferedFileWriter& out) override;
   PageElementTag getTag() const override { return TAG_PageImage; }
-  static std::unique_ptr<PageImage> deserialize(FsFile& file);
+  static std::unique_ptr<PageImage> deserialize(serialization::BufferedFileReader& in);
   const ImageBlock& getImageBlock() const { return *imageBlock; }
 };
 
@@ -97,7 +98,7 @@ class PageHR final : public PageElement {
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(serialization::BufferedFileWriter& out) override;
   PageElementTag getTag() const override { return TAG_PageHR; }
-  static std::unique_ptr<PageHR> deserialize(FsFile& file);
+  static std::unique_ptr<PageHR> deserialize(serialization::BufferedFileReader& in);
 };
 
 // What a page's pictures came to on the gray canvas (Page::renderImagesGray8).
@@ -127,7 +128,7 @@ class PageBox final : public PageElement {
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(serialization::BufferedFileWriter& out) override;
   PageElementTag getTag() const override { return TAG_PageBox; }
-  static std::unique_ptr<PageBox> deserialize(FsFile& file);
+  static std::unique_ptr<PageBox> deserialize(serialization::BufferedFileReader& in);
   uint16_t getWidth() const { return width; }
   uint16_t getHeight() const { return height; }
   const Edge& getEdge(const CssBox::Side side) const { return edges[side]; }
@@ -174,7 +175,8 @@ class PageTableFragment final : public PageElement {
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(serialization::BufferedFileWriter& out) override;
-  static std::unique_ptr<PageTableFragment> deserialize(FsFile& file, BuildArena* scratch = nullptr);
+  static std::unique_ptr<PageTableFragment> deserialize(serialization::BufferedFileReader& in,
+                                                        BuildArena* scratch = nullptr);
   PageElementTag getTag() const override { return TAG_PageTable; }
   uint16_t getTotalHeight() const { return totalHeight; }
   uint16_t getTotalWidth() const { return totalWidth; }
@@ -282,7 +284,7 @@ class Page {
   bool serialize(serialization::BufferedFileWriter& out) const;
   // `scratch`: every TextBlock on the page takes its bytes from it when given (see
   // TextBlock::deserialize); the page must then die before the caller's arena block does.
-  static std::unique_ptr<Page> deserialize(FsFile& file, BuildArena* scratch = nullptr);
+  static std::unique_ptr<Page> deserialize(serialization::BufferedFileReader& in, BuildArena* scratch = nullptr);
 
   // Check if page contains any images (used to force full refresh)
   bool hasImages() const {
