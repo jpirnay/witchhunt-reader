@@ -40,4 +40,11 @@ uint32_t computeSeqCrc(uint32_t seq);
 // Returns true on success.
 bool switchTo(const esp_partition_t* dest);
 
+// The app partition an update may be written to, or nullptr when the partition table has none
+// besides the running one. esp_ota_get_next_update_partition() alone is not that answer: on a table
+// with one OTA slot (the BOOX Picco's stock table: `app` ota_0 beside Onyx's `safeboot` factory app)
+// it returns the slot the firmware runs from, and the SD card and web updates write the partition
+// raw (FirmwareFlasher), so they would overwrite the running app. Every update path asks this.
+const esp_partition_t* idleAppPartition();
+
 }  // namespace ota_boot

@@ -283,9 +283,9 @@ Result validateImageFile(const char* sdPath, size_t partitionSize) {
 }
 
 Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, bool alreadyValidated) {
-  const esp_partition_t* dest = esp_ota_get_next_update_partition(nullptr);
+  const esp_partition_t* dest = ota_boot::idleAppPartition();
   if (!dest) {
-    LOG_ERR("FLASH", "no next-update partition");
+    LOG_ERR("FLASH", "no app partition besides the running one");
     return Result::NO_PARTITION;
   }
 

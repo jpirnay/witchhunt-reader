@@ -70,6 +70,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
+#include "network/OtaBootSwitch.h"
 #include "platform/UsbSerialJtagHandoff.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
@@ -1425,7 +1426,8 @@ void setup() {
     // running this firmware at all, so the combo could never fire and the user
     // is left looking at a device that appears dead. See upKeyIsBootStrap().
     const bool upIsStrap = HalCapabilities::upKeyIsBootStrap();
-    if (gpio.isHeldNow(upIsStrap ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP)) {
+    // Not without an app slot to write into (ota_boot::idleAppPartition()): the picker could only fail.
+    if (gpio.isHeldNow(upIsStrap ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP) && ota_boot::idleAppPartition() != nullptr) {
       recoveryFirmwareMode = true;
       LOG_INF("MAIN", "Recovery firmware mode (%s + POWER held at boot)", upIsStrap ? "DOWN" : "UP");
     }
