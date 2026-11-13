@@ -193,12 +193,13 @@ Status: 2026-11-13, branch `feat/picco-support`. A retail unit's flash is dumped
 it on Onyx's table: boot to Home in about 1 s of setup, SSD2677 with an SE0400NQW47 panel, TMA525C reporting two
 contacts, charger configured, RTC and IMU found, the light present (`Frontlight up`), the flash area taken as the
 PSRAM image beside the 512 KB `spiffs`, no System Update rows, the Slide Switch row and double Power = Back as
-defaults (serial log, screenshots, `GET`). Nothing physical has been tried yet. Board notes:
+defaults (serial log, screenshots, `GET`). Tried by hand on the unit: it turns on, the screen is upright, taps work,
+and the slide switch turns the light on and off. Board notes:
 [Board Support](../contributing/board-support.md#onyx-boox-picco).
 
-- **Validate on the device**: the screen upright, touch in all four orientations (the SDK profile sets `swapXY` and
-  `flipY`), Power / Up / Down and the double-Power Back, the slide switch, the light (on, off, warmth, off in deep
-  sleep), the battery reading, USB Drive, deep sleep and wake; then the full install on our table.
+- **Validate on the device**: touch in the other three orientations (the SDK profile sets `swapXY` and `flipY`),
+  Power / Up / Down and the double-Power Back, the light's warmth and that it is off in deep sleep, the battery
+  reading, USB Drive, deep sleep and wake; then the full install on our table.
 - **Two boot-log errors** on that unit, cause not looked at: `i2c_master_transmit_receive failed: ESP_ERR_INVALID_STATE`
   right after `Charger configured` (the IMU is found just after it), and `gpio_isr_handler_remove(): GPIO isr service is
   not installed`.
