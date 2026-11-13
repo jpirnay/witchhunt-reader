@@ -16,7 +16,7 @@ loads, merges one book and saves on reader exit, after the reader's teardown: 43
 the save refused to overwrite, and the session that had just ended was silently lost.
 
 Nothing on the device needs the whole history at once. A book screen needs one book, Home its
-recent books (at most 10, `MAX_RECENT_BOOKS` in RecentBooksStore) and the global pace, the summary a few numbers per book, the list one page.
+recent books (the few it shows, `RecentBooksStore::newestBooks`) and the global pace, the summary a few numbers per book, the list one page.
 So the store stopped holding the history (section 8) and became stateless over the file.
 
 **Then time.** The first streamed form fixed memory (no call holds more than a few KB, whatever the history

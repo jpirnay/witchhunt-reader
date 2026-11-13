@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "RecentBooksStore.h"
 
 // The contents of one directory as the file browser sees them: enumerated, filtered to the
 // types the browser can open, and ordered.
@@ -202,7 +203,7 @@ class FileBrowserModel {
   std::string filterQuery;
   std::vector<uint32_t> matches;
 
-  // Card-wide search results, or the Recents list: paths relative to deepRoot ("/" for Recents).
+  // Card-wide search results, or the Added list: paths relative to deepRoot ("/" for Added).
   // Held only while one is on screen; cleared with everything else in clear() and on any
   // directory change.
   static constexpr size_t MAX_DEEP_RESULTS = 64;
@@ -217,7 +218,21 @@ class FileBrowserModel {
     deepResults.clear();
     deepResults.shrink_to_fit();
     deepRoot.clear();
+    recentCount = 0;
+    recentWindowStart = 0;
+    std::vector<RecentBooksStore::Row>().swap(recentWindow);
   }
+
+  // Recents, streamed from recent-books.bin: a window of kRecentWindow rows at a time (RecentBooksStore::rowsBefore),
+  // so a list of a hundred books holds no more than those. A window starts at a multiple of kRecentWindow; the one
+  // after the window on hand reads on from its last row, any other is walked to from the newest.
+  static constexpr size_t kRecentWindow = 16;
+  size_t recentCount = 0;
+  size_t recentWindowStart = 0;
+  std::vector<RecentBooksStore::Row> recentWindow;
+  [[nodiscard]] bool streamsRecents() const { return mode == Mode::Recents && !deepSearch; }
+  // The window holding row `displayIndex`, read if it is not on hand. False past the list's end.
+  bool ensureRecentRow(size_t displayIndex);
   // entryName() without the filter indirection: what the live backend holds at that row.
   std::string backendEntryName(size_t backendIndex);
 

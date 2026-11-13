@@ -869,41 +869,7 @@ static_assert(std::size(kRecentBookOverrideKeys) == BookReaderOverrides::kLegacy
               "every override recent.json carried has its key; later ones live only in overrides.bin");
 }  // namespace
 
-bool JsonSettingsIO::saveRecentBooks(const RecentBooksStore& store, const char* path) {
-  JsonDocument doc;
-  // Which numbering each book's fontSizeOverride is in. Its own stamp rather than the settings
-  // file's: the two files are written independently, so one can be migrated while the other is
-  // still on the old numbering. See CrossPointSettings::FONT_SIZE_ORDER_VERSION.
-  doc["fontSizeOrderV"] = CrossPointSettings::FONT_SIZE_ORDER_VERSION;
-  // The same for each book's lineSpacingOverride. See LINE_SPACING_ORDER_VERSION (Epub/LineSpacing.h).
-  doc["lineSpacingOrderV"] = LINE_SPACING_ORDER_VERSION;
-  JsonArray arr = doc["books"].to<JsonArray>();
-  for (const auto& book : store.getBooks()) {
-    JsonObject obj = arr.add<JsonObject>();
-    obj["path"] = book.path;
-    obj["title"] = book.title;
-    obj["author"] = book.author;
-    obj["series"] = book.series;
-    obj["coverBmpPath"] = book.coverBmpPath;
-    obj["metadataStamp"] = book.metadataStamp;
-    // A book's own settings live in its folder now (BookReaderOverridesFile). A row keeps writing the ones it was
-    // loaded with only until its book's next open moves them there, so none is lost before then.
-    if (book.legacyOverrides.any()) {
-      for (const OverrideKey& entry : kRecentBookOverrideKeys) {
-        obj[entry.key] = book.legacyOverrides.get(entry.field);
-      }
-      if (!book.legacyOverrides.sdFontFamilyOverride.empty()) {
-        obj["sdFontFamilyOverride"] = book.legacyOverrides.sdFontFamilyOverride;
-      }
-    }
-  }
-
-  String json;
-  serializeJson(doc, json);
-  return Storage.writeFile(path, json);
-}
-
-RecentBooksLoad JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) {
+RecentBooksLoad JsonSettingsIO::loadRecentBooks(std::vector<LegacyRecentBook>& out, const char* json) {
   JsonDocument doc;
   auto error = deserializeJson(doc, json);
   if (error == DeserializationError::NoMemory) {
@@ -915,20 +881,21 @@ RecentBooksLoad JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const c
     return RecentBooksLoad::Broken;
   }
 
-  store.recentBooks.clear();
+  out.clear();
   JsonArray arr = doc["books"].as<JsonArray>();
-  // The list and every entry's strings come from the throwing operator new, which aborts the device on a short heap
-  // (a book opened at the memory ladder's lowest, 2026-10): the list asked for in one block, and the strings, at most
-  // the file's own text and their block headers, against what is free. Short, nothing is read.
+  // The rows and every row's strings come from the throwing operator new, which aborts the device on a short heap
+  // (a book opened at the memory ladder's lowest, 2026-10): the rows asked for in one block, and the strings, at most
+  // the file's own text and their block headers, against what is free. Short, nothing is read. recent.json never held
+  // more than 10 rows.
   constexpr size_t kMaxBooks = 10;
-  constexpr size_t kStringOverhead = 6 * 16;  // a heap block header for each of an entry's strings
+  constexpr size_t kStringOverhead = 6 * 16;  // a heap block header for each of a row's strings
   const size_t count = std::min<size_t>(arr.size(), kMaxBooks);
-  if (!heapHasBlockFor(count * sizeof(RecentBook)) ||
-      !heapHasFree(count * (sizeof(RecentBook) + kStringOverhead) + strlen(json))) {
+  if (!heapHasBlockFor(count * sizeof(LegacyRecentBook)) ||
+      !heapHasFree(count * (sizeof(LegacyRecentBook) + kStringOverhead) + strlen(json))) {
     LOG_ERR("RBS", "No memory to read %u recent books", static_cast<unsigned>(count));
     return RecentBooksLoad::ShortOfMemory;
   }
-  store.recentBooks.reserve(count);
+  out.reserve(count);
   // Which meaning the per-book size overrides in this file carry (point sizes since version 2).
   // Absent (0) is every file written before the sizes were put in pixel order.
   const auto fontSizeOrderV = static_cast<uint8_t>(doc["fontSizeOrderV"].as<int>());
@@ -936,10 +903,9 @@ RecentBooksLoad JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const c
   const auto lineSpacingOrderV = static_cast<uint8_t>(doc["lineSpacingOrderV"].as<int>());
 
   for (JsonObject obj : arr) {
-    // The list as filled so far, not getCount(): that asks ensureLoaded(), and the store is not loaded until this
-    // returns.
-    if (store.recentBooks.size() >= kMaxBooks) break;
-    RecentBook book;
+    if (out.size() >= kMaxBooks) break;
+    LegacyRecentBook row;
+    RecentBook& book = row.book;
     book.path = obj["path"] | std::string("");
     book.title = obj["title"] | std::string("");
     book.author = obj["author"] | std::string("");
@@ -949,14 +915,14 @@ RecentBooksLoad JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const c
     // a sidecar is refreshed once.
     book.metadataStamp = obj["metadataStamp"].as<unsigned>();
     const BookReaderOverrides::Numbering numbering{fontSizeOrderV, lineSpacingOrderV};
-    book.legacyOverrides.setSdFontFamilyFromStored(obj["sdFontFamilyOverride"] | std::string(""));
+    row.overrides.setSdFontFamilyFromStored(obj["sdFontFamilyOverride"] | std::string(""));
     for (const OverrideKey& entry : kRecentBookOverrideKeys) {
-      book.legacyOverrides.setFromStored(entry.field, obj[entry.key] | -1, numbering);
+      row.overrides.setFromStored(entry.field, obj[entry.key] | -1, numbering);
     }
-    store.recentBooks.push_back(std::move(book));
+    out.push_back(std::move(row));
   }
 
-  LOG_DBG("RBS", "Recent books loaded from file (%u entries)", static_cast<unsigned>(store.recentBooks.size()));
+  LOG_DBG("RBS", "recent.json read (%u rows)", static_cast<unsigned>(out.size()));
   return RecentBooksLoad::Loaded;
 }
 

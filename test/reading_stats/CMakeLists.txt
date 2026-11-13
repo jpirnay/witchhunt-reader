@@ -17,6 +17,7 @@ target_include_directories(ReadingStatsTest PRIVATE
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/JsonParser
   ${REPO_ROOT}/lib/Memory
+  ${REPO_ROOT}/lib/FsHelpers
 )
 
 # localDayIndexFromEpoch() calls localtime_r, which MinGW's <time.h> declares only on request.
@@ -50,6 +51,7 @@ target_include_directories(ReadingStatsStoreTest PRIVATE
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/JsonParser
   ${REPO_ROOT}/lib/Memory
+  ${REPO_ROOT}/lib/FsHelpers
 )
 
 if(MINGW)
@@ -78,6 +80,7 @@ target_include_directories(ReadingStatsSlotFileTest PRIVATE
   ${REPO_ROOT}/lib/hal
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/Memory
+  ${REPO_ROOT}/lib/FsHelpers
 )
 
 target_link_libraries(ReadingStatsSlotFileTest PRIVATE

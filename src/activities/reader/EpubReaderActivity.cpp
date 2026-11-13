@@ -773,16 +773,9 @@ void EpubReaderActivity::onEnter() {
   if (!series.empty() && !epub->getSeriesIndex().empty()) {
     series += " #" + epub->getSeriesIndex();
   }
-  BookReaderOverrides saved;
-  {
-    // One load of the list for both: the add and the read of this book's overrides. Released
-    // again before the reader allocates anything of its own.
-    const RecentBooksStore::Hold recents;
-    RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), series,
-                         ReaderActivity::coverThumbPlaceholder(epub->getPath()));
-    saved = RECENT_BOOKS.moveReaderOverridesToBook(epub->getPath());
-  }
-  setBookOverrides(saved);
+  RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), series,
+                       ReaderActivity::coverThumbPlaceholder(epub->getPath()));
+  setBookOverrides(RECENT_BOOKS.readerOverrides(epub->getPath()));
   renderer.setTextDarkness(getEffectiveTextDarkness());
   // Measured at the open that compiled the book's CSS (ReaderActivity); taken into account with Normalize Font Size and
   // the book's style on (makeSectionBuildParams).
