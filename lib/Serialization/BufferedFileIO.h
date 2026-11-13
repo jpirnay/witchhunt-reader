@@ -164,6 +164,9 @@ class BufferedFileWriter {
   // the destructor flush is a best-effort backstop only.
   ~BufferedFileWriter() { flush(); }
 
+  // False when the buffer could not be had: every write then goes straight to the file.
+  bool buffered() const { return cap_ > 0; }
+
   // Logical write position (== what FsFile::position() would report after a flush).
   uint32_t position() const { return base_ + static_cast<uint32_t>(fill_); }
 
@@ -177,7 +180,10 @@ class BufferedFileWriter {
       base_ += static_cast<uint32_t>(wrote);
       return wrote == n;
     }
-    if (fill_ + n > cap_ && !flush()) return false;
+    if (fill_ + n > cap_) {
+      if (!writeWholeSectors()) return false;
+      if (fill_ + n > cap_ && !flush()) return false;
+    }
     memcpy(bufferBase() + fill_, in, n);
     fill_ += n;
     return true;
@@ -202,7 +208,34 @@ class BufferedFileWriter {
     return ok;
   }
 
+  // Drops what is buffered, for a file about to be removed: the destructor's flush would write it
+  // into a handle that is closed by then.
+  void discard() { fill_ = 0; }
+
  private:
+  static constexpr size_t CARD_SECTOR_BYTES = 512;
+
+  // A full buffer goes out up to the last sector boundary of the FILE, and the bytes past it stay
+  // for the next write, so every write but a flush() reaches the card in whole sectors. SdFat
+  // takes a write that starts or ends inside a sector through its one-sector cache and puts that
+  // sector on the card the moment it fills, one command a sector; whole sectors go out as one
+  // multi-sector command, which costs the card about what one sector does. Measured 2026-11-13 on
+  // the section build's page writes: 5 to 10 ms a command on the X4 Pro's card, 2.3 ms on the
+  // T5S3's. With no whole sector in the buffer (a buffer smaller than two sectors), nothing goes.
+  bool writeWholeSectors() {
+    const size_t pastBoundary = (base_ + fill_) % CARD_SECTOR_BYTES;
+    if (fill_ <= pastBoundary) return true;
+    const size_t whole = fill_ - pastBoundary;
+    const size_t wrote = file_.write(bufferBase(), whole);
+    base_ += static_cast<uint32_t>(wrote);
+    if (wrote != whole) {
+      fill_ = 0;  // as flush(): what the file refused is gone either way
+      return false;
+    }
+    memmove(bufferBase(), bufferBase() + whole, pastBoundary);
+    fill_ = pastBoundary;
+    return true;
+  }
   // Owned or borrowed, never both: the owning constructor leaves external_ null and vice versa.
   uint8_t* bufferBase() const { return external_ ? external_ : buf_.get(); }
 

@@ -229,3 +229,46 @@ TEST(BufferedFileIO, ReadStringAtLeavesTheSequentialReadAsItWas) {
     EXPECT_EQ(s, makeString(5 + i % 11, static_cast<char>(i))) << "record " << i;
   }
 }
+
+TEST(BufferedFileIO, WriterSendsWholeSectorsUntilTheFlush) {
+  // The card takes a part-filled sector as a command of its own (BufferedFileWriter::writeWholeSectors), so every
+  // write but the flush must end on a sector boundary of the file. A header written straight to the file first leaves
+  // the writer starting inside a sector, as the section file's does.
+  constexpr size_t kSector = 512;
+  FsFile file = HalFile::forReadWrite();
+  const std::string header(37, 'h');
+  file.write(header.data(), header.size());
+  std::string expected = header;
+  {
+    serialization::BufferedFileWriter writer(file, 2048);
+    for (int i = 0; i < 1500; ++i) {
+      const std::string field = makeString(1 + i % 13, static_cast<char>(i));  // fields of 1 to 13 bytes, as a page's
+      ASSERT_TRUE(writer.write(field.data(), field.size()));
+      expected += field;
+    }
+    EXPECT_EQ(writer.position(), expected.size());
+    ASSERT_TRUE(writer.flush());
+  }
+
+  const auto& calls = file.writeCalls();
+  ASSERT_GE(calls.size(), 4u);  // the header, writes of the full buffer, the flush
+  for (size_t i = 1; i + 1 < calls.size(); ++i) {
+    EXPECT_EQ((calls[i].offset + calls[i].bytes) % kSector, 0u) << "write " << i;
+    EXPECT_GE(calls[i].bytes, kSector) << "write " << i;
+  }
+  ASSERT_TRUE(file.seek(0));
+  std::string bytes(file.size(), '\0');
+  file.read(bytes.data(), bytes.size());
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(BufferedFileIO, DiscardDropsWhatIsBuffered) {
+  FsFile file = HalFile::forReadWrite();
+  {
+    serialization::BufferedFileWriter writer(file, 64);
+    writer.writePod(static_cast<uint32_t>(7));
+    writer.discard();
+  }  // the destructor's flush has nothing left to write
+  EXPECT_EQ(file.size(), 0u);
+  EXPECT_TRUE(file.writeCalls().empty());
+}

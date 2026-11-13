@@ -85,6 +85,7 @@ class HalFile : public Print {
   uint64_t position64() const { return pos_; }
   size_t write(const void* buf, size_t n) {
     if (!writable_) return 0;
+    writeCalls_.push_back({pos_, n});
     const auto* bytes = static_cast<const char*>(buf);
     if (pos_ < backing_.size()) {
       const size_t overlap = std::min(n, backing_.size() - pos_);
@@ -116,7 +117,16 @@ class HalFile : public Print {
   bool isOpen() const { return hasData_; }
   operator bool() const { return hasData_; }
 
+  // Every write() a read/write handle took, as where it started and how long it was: how a writer
+  // chunked what it sent (test/buffered_io).
+  struct WriteCall {
+    size_t offset;
+    size_t bytes;
+  };
+  const std::vector<WriteCall>& writeCalls() const { return writeCalls_; }
+
  private:
+  std::vector<WriteCall> writeCalls_;
   std::string backing_;
   size_t pos_ = 0;
   bool hasData_ = false;
