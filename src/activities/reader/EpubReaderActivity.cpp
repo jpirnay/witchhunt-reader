@@ -2749,6 +2749,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   bgCounters_.cCompletes++;
 #endif
   LOG_INF("ERS", "Background-C spine=%d complete: %u pages", currentSpineIndex, section->pageCount);
+  noteLiveLayoutBuilt();
   SerialTestApi::noteBuildDone(currentSpineIndex, section->pageCount);
   readerPhase_ = ReaderPhase::READING;
 
@@ -8160,6 +8161,7 @@ void EpubReaderActivity::openReaderBars() {
       liveBarsPageOwed_ = false;
       liveBarsRedrawWhenBuilt_ = section && section->hasActiveBuild();
       liveBarsStale_ = true;
+      noteLiveLayoutBuilt();
     }
     requestUpdate();
     return;
@@ -8210,6 +8212,13 @@ void EpubReaderActivity::serviceLiveBars() {
       return;
     case ReaderBarsController::Event::Redraw:
     case ReaderBarsController::Event::LayoutChanged: {
+      // A layout this chapter already has on the card goes in at once: its page loads in a moment and comes with the
+      // bars in one refresh. Painting the bars first held that page behind their own refresh, 0.3 s (X4 Pro).
+      if (event == ReaderBarsController::Event::LayoutChanged && liveLayoutChangeIsBuilt()) {
+        liveLayoutOwed_ = false;
+        applyLiveLayout();
+        return;
+      }
       RenderLock lock(*this);
       liveBarsStale_ = true;
     }
@@ -8260,6 +8269,29 @@ void EpubReaderActivity::dismissLiveBars() {
   liveBarsRedrawWhenBuilt_ = false;
   liveBarsStale_ = false;
   liveLayoutOwed_ = false;
+  builtLiveLayouts_ = {};
+  builtLiveLayoutsNext_ = 0;
+}
+
+void EpubReaderActivity::noteLiveLayoutBuilt() {
+  if (!liveBarsOpen() || !section || section->hasActiveBuild() || section->pageCount == 0) return;
+  const ReaderLayoutValues values = effectiveLayoutValues();
+  for (const BuiltLiveLayout& built : builtLiveLayouts_) {
+    if (built.spine == currentSpineIndex && !ReaderLayout::laysOutDifferently(built.values, values)) return;
+  }
+  builtLiveLayouts_[builtLiveLayoutsNext_] = {values, currentSpineIndex};
+  builtLiveLayoutsNext_ = static_cast<uint8_t>((builtLiveLayoutsNext_ + 1) % builtLiveLayouts_.size());
+}
+
+bool EpubReaderActivity::liveLayoutChangeIsBuilt() {
+  const ReaderLayoutValues wanted = liveBars_->layoutValues();
+  // A change the page shows without a new layout (the darkness, This book only) is not one: its bars repaint alone.
+  if (!ReaderLayout::laysOutDifferently(effectiveLayoutValues(), wanted)) return false;
+  RenderLock lock(*this);
+  for (const BuiltLiveLayout& built : builtLiveLayouts_) {
+    if (built.spine == currentSpineIndex && !ReaderLayout::laysOutDifferently(built.values, wanted)) return true;
+  }
+  return false;
 }
 
 bool EpubReaderActivity::liveBarsOpen() const { return HalCapabilities::laysOutReaderLive() && liveBars_ != nullptr; }
@@ -8310,6 +8342,7 @@ void EpubReaderActivity::drawLiveBarsOverPage(const bool redrawWhenBuilt) {
   liveBarsStale_ = false;
   liveBarsPageOwed_ = false;
   liveBarsRedrawWhenBuilt_ = redrawWhenBuilt;
+  noteLiveLayoutBuilt();
 }
 
 void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
