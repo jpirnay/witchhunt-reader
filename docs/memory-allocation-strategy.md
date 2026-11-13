@@ -146,6 +146,10 @@ restarted. That pass now borrows (§9.3).
 - During a build: the parser's reused `ParsedText` vectors and layout scratch (6–8 KB), given back
   at every slice yield (`ParsedText::releaseLayoutScratch`) because a mid-build page draw can run
   there.
+- During a build: the page writer's buffer (`Section::BuildState::pageWriter`, 2 KB on the C3s,
+  4 KB on the PSRAM boards), taken in the build's setup and freed at its finalize, held across
+  slices. On the heap rather than in the build arena, so writing the pages does not depend on what
+  the arena is lent from. Without the block the pages go out field by field, as before.
 
 ### Class C — phase-scoped (arena)
 

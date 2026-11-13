@@ -1,6 +1,7 @@
 // Boxes: CSS borders and background shades, drawn as a PageBox element around a block's slice of a page.
 //
 // PageBox: what it draws in each pass, and that it survives the section file. Then the parser's box scope.
+#include <BufferedFileIO.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
 
@@ -113,7 +114,11 @@ TEST(PageBox, SurvivesTheSectionFile) {
     page.elements.push_back(std::make_unique<PageBox>(12, 34, 300, 120, edges, true));
     FsFile out;
     ASSERT_TRUE(Storage.openFileForWrite("TST", path, out));
-    ASSERT_TRUE(page.serialize(out));
+    {
+      serialization::BufferedFileWriter writer(out);
+      ASSERT_TRUE(page.serialize(writer));
+      ASSERT_TRUE(writer.flush());
+    }
     out.close();
   }
   FsFile in;

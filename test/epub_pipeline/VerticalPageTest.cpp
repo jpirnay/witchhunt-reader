@@ -1,5 +1,6 @@
 // A page of a vertical-rl section draws in the turned frame (spec 5.2) and gives the reader's frame back on every exit.
 // Against the pipeline shim: em 16 for a CJK character, ascender 18, a 480 px wide Portrait screen.
+#include <BufferedFileIO.h>
 #include <CooperativeAbort.h>
 #include <GfxRenderer.h>
 #include <Serialization.h>
@@ -54,7 +55,11 @@ std::string tempPath(const std::string& name) {
 std::unique_ptr<Page> roundTrip(const Page& page, const std::string& name) {
   const std::string path = tempPath(name);
   FsFile out;
-  if (!Storage.openFileForWrite("TST", path, out) || !page.serialize(out)) return nullptr;
+  if (!Storage.openFileForWrite("TST", path, out)) return nullptr;
+  {
+    serialization::BufferedFileWriter writer(out);
+    if (!page.serialize(writer) || !writer.flush()) return nullptr;
+  }
   out.close();
   FsFile in;
   if (!Storage.openFileForRead("TST", path, in)) return nullptr;

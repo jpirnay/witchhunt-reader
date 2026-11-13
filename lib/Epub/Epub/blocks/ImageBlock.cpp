@@ -1,6 +1,7 @@
 #include "ImageBlock.h"
 
-#include <Arduino.h>     // ESP.getFreeHeap(), as the decoders ask it
+#include <Arduino.h>  // ESP.getFreeHeap(), as the decoders ask it
+#include <BufferedFileIO.h>
 #include <BuildArena.h>  // image_scratch::canServe needs the complete type
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -881,16 +882,16 @@ void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, 
   }
 }
 
-bool ImageBlock::serialize(FsFile& file) {
-  serialization::writeString(file, imagePath);
-  serialization::writePod(file, width);
-  serialization::writePod(file, height);
-  serialization::writeString(file, altText);
-  serialization::writeString(file, epubFilePath_);
-  serialization::writeString(file, epubEntryPath_);
-  serialization::writePod(file, srcYOffset_);
-  serialization::writePod(file, srcHeight_);
-  serialization::writePod(file, static_cast<uint8_t>(turned_ ? 1 : 0));  // flags: bit 0 turned
+bool ImageBlock::serialize(serialization::BufferedFileWriter& out) {
+  out.writeString(imagePath);
+  out.writePod(width);
+  out.writePod(height);
+  out.writeString(altText);
+  out.writeString(epubFilePath_);
+  out.writeString(epubEntryPath_);
+  out.writePod(srcYOffset_);
+  out.writePod(srcHeight_);
+  out.writePod(static_cast<uint8_t>(turned_ ? 1 : 0));  // flags: bit 0 turned
   return true;
 }
 

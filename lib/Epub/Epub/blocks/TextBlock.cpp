@@ -1,5 +1,6 @@
 #include "TextBlock.h"
 
+#include <BufferedFileIO.h>
 #include <BuildArena.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
@@ -1067,7 +1068,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   }
 }
 
-bool TextBlock::serialize(FsFile& file) const {
+bool TextBlock::serialize(serialization::BufferedFileWriter& out) const {
   if (!isValid) {
     LOG_ERR("TXB", "Serialization failed: invalid block");
     return false;
@@ -1080,16 +1081,15 @@ bool TextBlock::serialize(FsFile& file) const {
   // bit 3 that its marks are centred, and the word-font count in bits 4-7: a line without word fonts or annotations
   // writes the 0 or 1 it always did. The flags byte is full, so the word count's top bit (a line holds at most 10,000
   // words) says the line has a bidi region: u16 bidiBytes follows the annotation size.
-  serialization::writePod(file, static_cast<uint16_t>(numWords | (bidiBytes_ != 0 ? kBidiWordCountBit : 0)));
-  serialization::writePod(
-      file, static_cast<uint8_t>((sizesPresent ? 1 : 0) | (annotationBytes_ != 0 ? 2 : 0) | (vertical_ ? 4 : 0) |
-                                 (centredMarks_ ? 8 : 0) | wordFontCount << 4));
-  serialization::writePod(file, textBytes);
-  if (annotationBytes_ != 0) serialization::writePod(file, annotationBytes_);
-  if (bidiBytes_ != 0) serialization::writePod(file, bidiBytes_);
+  out.writePod(static_cast<uint16_t>(numWords | (bidiBytes_ != 0 ? kBidiWordCountBit : 0)));
+  out.writePod(static_cast<uint8_t>((sizesPresent ? 1 : 0) | (annotationBytes_ != 0 ? 2 : 0) | (vertical_ ? 4 : 0) |
+                                    (centredMarks_ ? 8 : 0) | wordFontCount << 4));
+  out.writePod(textBytes);
+  if (annotationBytes_ != 0) out.writePod(annotationBytes_);
+  if (bidiBytes_ != 0) out.writePod(bidiBytes_);
   if (numWords > 0) {
     const size_t size = arenaSize(numWords, sizesPresent, wordFontCount, textBytes, annotationBytes_, bidiBytes_);
-    if (file.write(arena, size) != size) {
+    if (!out.write(arena, size)) {
       LOG_ERR("TXB", "Serialization failed: arena write (%u bytes)", static_cast<uint32_t>(size));
       return false;
     }
@@ -1101,9 +1101,9 @@ bool TextBlock::serialize(FsFile& file) const {
   // them back -- so they were 19 dead bytes per line on disk as well as in RAM.
   // Dropping them is a format change; SECTION_FILE_VERSION is bumped so stale
   // caches are rejected and rebuilt.
-  serialization::writePod(file, renderStyle.alignment);
-  serialization::writePod(file, renderStyle.fontSizeMultiplier);
-  serialization::writePod(file, renderStyle.headingFontId);
+  out.writePod(renderStyle.alignment);
+  out.writePod(renderStyle.fontSizeMultiplier);
+  out.writePod(renderStyle.headingFontId);
 
   return true;
 }
