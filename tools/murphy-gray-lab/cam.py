@@ -31,7 +31,7 @@ def _camera_name(device="/dev/video0"):
 # MJPEG at 4K; region means average the compression away. The earlier webcam gave YUY2 at 1080p.
 MJPEG = "AC310" in _camera_name()
 CAM_W, CAM_H = (3840, 2160) if MJPEG else (1920, 1080)
-PANEL_W, PANEL_H = {"x3": (792, 528), "x4": (800, 480), "picco": (800, 480)}.get(os.environ.get("LAB_BOARD", "murphy"), (240, 416))
+PANEL_W, PANEL_H = {"x3": (792, 528), "x4": (800, 480), "x4pro": (800, 480), "picco": (800, 480)}.get(os.environ.get("LAB_BOARD", "murphy"), (240, 416))
 SCALE = 2  # rectified shots are this many pixels per panel pixel
 
 VIDIOC_S_CTRL = 0xC008561C

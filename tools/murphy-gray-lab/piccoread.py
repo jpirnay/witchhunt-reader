@@ -4,7 +4,7 @@
   ./piccoread.py <tag> --book /path.epub --at 3:1 --pages 150
 
 Opens the book at a fixed position with text anti-aliasing and one-pass text on, turns `--pages` pages
-(BTN:RIGHT, then IDLE:SCREEN), and logs each turn from the key to the finished frame. Then leaves the reader,
+(BTN:RIGHT or --button, then IDLE:SCREEN), and logs each turn from the key to the finished frame. Then leaves the reader,
 runs two full white refreshes through CMD:LAB and takes `<tag>-white` (cam.py, LAB_BOARD=picco), then
 `<tag>-white-10` ten minutes later. The device log goes to runs/<tag>.log.
 """
@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--pages", type=int, default=150)
     parser.add_argument("--one-pass", type=int, default=1, choices=(0, 1))
     parser.add_argument("--wait-minutes", type=int, default=10)
+    parser.add_argument("--button", default="RIGHT", help="the page-forward key (DOWN on the X4 Pro)")
     args = parser.parse_args()
     RUNS.mkdir(parents=True, exist_ok=True)
     device = devctl.Device(os.environ["MURPHY_PORT"], log_path=str(RUNS / f"{args.tag}.log"))
@@ -54,7 +55,7 @@ def main():
     times = []
     for page in range(args.pages):
         started = time.monotonic()
-        cmd("BTN:RIGHT")
+        cmd(f"BTN:{args.button}")
         cmd("IDLE:30000:SCREEN")
         times.append(round((time.monotonic() - started) * 1000))
     state = cmd("STATE")
