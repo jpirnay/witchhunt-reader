@@ -106,18 +106,19 @@ All three need text anti-aliasing on and a resident, non-degraded secondary
 ### One-pass text (X4 Pro with UC8179, Murphy M3, X3, X4)
 
 The One-Pass Anti-Aliasing setting puts this panel on the single push for text pages. Each pixel gets
-one of four waveforms in one refresh: black, one gray, hold or white. Hold is a one-frame nudge for a
-pixel that stays white. A charge map tracks each pixel's net drive and turns a held pixel into a real
-white drive when it has drifted. The point is that nothing visibly changes once the page is up. It is
-no faster: the finished page lands about when today's B/W page does.
+one of four waveforms in one refresh: rest, to white, to black, or one gray. A pixel the glass already
+shows at its target rests, so text that stays put is not driven again; the others are driven to the
+page. The rule is one SDK helper, `RestTextCodes.h`, shared by the X4 Pro, the Murphy M3 and the Picco;
+each driver maps the four drives onto its own controller's planes. The point is that nothing visibly
+changes once the page is up. It is no faster: the finished page lands about when today's B/W page does.
 
 `display.supportsOnePassText()` offers the setting. `ReaderUtils::OnePassTextScope` holds the mode for
 one page's render, pre-render or display, because while it is on `copyGrayscale*Buffers()` stage planes
 instead of uploading them. Everything outside those three calls, a menu, a sleep image, the BMP viewer,
 the TXT, MD and XTC readers, finds it off and runs as before. A page with images stays off too: the
-capture rides the glyph blit and records no image greys. The driver's block is 576 KB of PSRAM,
-allocated at the first one-pass page. The Murphy M3 does the same with its own waveform and no charge map: a
-pixel that already shows its target rests.
+capture rides the glyph blit and records no image greys. The X4 Pro's block is 288 KB of PSRAM,
+allocated at the first one-pass page. The Murphy M3 does the same with its own waveform and three planes of
+12.5 KB, and gives gray the gray drive on every page, as its text bank was tuned.
 
 The X3 and the X4 have no memory for either, so the planes are composed in the two frame buffers
 (`renderer.composesOnePassText()`). `beginOnePassMask()` turns the buffer holding the frame on screen into
@@ -193,18 +194,53 @@ pass finishes. It is not faster.
 `fix-display-updates` at `8739c86f6` ("Direct AA"), which pins that same SDK tip. Only the slice for the X4 Pro's
 controller came over: a full merge conflicts widely with `witchhunt`, and most of the branch's churn is Picco work.
 
-### X4 Pro with UC8179: a charge map in PSRAM
+### X4 Pro with UC8179: a pixel at its target rests
 
-Today a page takes a B/W refresh and then an AA overlay refresh. One-pass composes both into one refresh, where each
-pixel gets one of four waveforms: black, gray, hold, white. Hold is a one-frame nudge for a pixel that stays white,
+Since 2026-11-14 the X4 Pro composes like the Murphy and the Picco. `RestTextAa` (SDK `RestTextAa.h`) codes each
+pixel from what the glass holds to the page with the shared rule (`RestTextCodes.h`), and one 18-frame table drives
+all four codes (`kRestTextUc8179` in `Uc8179Driver.cpp`):
+
+| Code | Drive |
+|---|---|
+| Rest | none |
+| To white | white 16 frames |
+| Gray | white 8, black 4, idle 4, white 2 |
+| To black | black 12 frames |
+
+- **Memory:** six planes, 288 KB of PSRAM (the page, two staging planes, its gray, the glass in B/W and its gray),
+  allocated at the first one-pass page. S3 only.
+- **What the glass holds:** after a clean refresh it is the page in B/W, so only the gray moves. After any other B/W
+  frame, a menu say, it is not known, and every pixel of the next page is driven to its target once.
+- `FREEINK_UC8179_TEXT_REST=0` builds the charge-map pass described below.
+
+**Measured on one X4 Pro, gray lab (2026-11-14, `tools/murphy-gray-lab/x4prolab.py`).** Reader runs: 150 pages each,
+key to finished frame over serial, one-pass on, a HALF every 30 pages. Levels: % of white from the webcam, 0 = black.
+
+| | Charge map (until 2026-11-14) | Rest |
+|---|---|---|
+| Page turn, median / p90 | 1,390 / 1,459 ms | 1,262 / 1,333 ms |
+| Gray, from white / from black | 31 % / 0 % | 65 % / 63 % |
+| PSRAM | 576 KB | 288 KB |
+| Waveform | 23 frames | 18 frames |
+
+- **Gray:** the charge-map gray (white 4, black 3) depends on the start: 31 % from white, black from black. The rest
+  gray drives white first and lands 2 points apart from either start.
+- **Ghosting (Test 11):** bands held black for 50, 200 and 500 pages, then turned white, came back within 2.1 points
+  of a band held for one page, for rest as for re-drive. Black held at rest did not fade within 8.5 minutes.
+- **After reading:** 150 pages left no structure on a white frame that the camera resolves.
+
+#### Before: the charge map (until 2026-11-14)
+
+Without one-pass a page takes a B/W refresh and then an AA overlay refresh. The first one-pass port composed both into
+one refresh, where each pixel gets one of four waveforms: black, gray, hold, white. Hold is a one-frame nudge for a pixel that stays white,
 which covers about 80% of the panel on a text page. A charge map (one byte per pixel) tracks each pixel's net drive, and
 releases a held pixel into a real white drive once it has drifted too far.
 
 - **Memory:** `X4ProTextAa` needs 576 KB of PSRAM (`SIZE*12`), so it is S3 only.
 - **Tones:** all overlay grays collapse to one gray, so a page has three tones instead of four.
 - **Waveforms:** fixed external LUTs for SSD1677, UC8179 and UC8279. The branch cites stock firmware 26110201 for them.
-- **Who enables it:** nothing in the SDK calls `setReaderRefresh`. Upstream's firmware branch does, through
-  `ReaderRefreshScope` in the EPUB and XTC page render.
+- **Who enables it:** upstream's firmware, through `ReaderRefreshScope`. Ours switches it per page with
+  `setOnePassText()` (`ReaderUtils::OnePassTextScope`).
 
 **Measured on an X4 Pro with UC8179.** Test port on our pin, one image with a runtime toggle, same book and start page.
 Literata 14, AA on, refresh every 30 pages. 74 one-pass pages: no panic, no compose failure, no stuck BUSY.
@@ -240,7 +276,8 @@ darkness Lighter shows roughly how one gray looks.
 Its own waveform, not the X4 Pro's: `MURPHY_LUT_2x_TEXT` in `Uc8253MurphyLuts.h`, chosen by
 `Uc8253MurphyDriver::displayGrayFrame()` from the page and the record it keeps of the glass. No charge map: a pixel
 that already shows its target rests, which adds no drive, so a page needs only the planes the driver already had plus
-three of 12.5 KB.
+three of 12.5 KB. The rule is the shared `RestTextCodes.h` with `grayRests = false`: unlike the X4 Pro and the Picco,
+gray that stays gray takes the gray drive again on every page.
 
 | Slot | Waveform | Why |
 |---|---|---|
