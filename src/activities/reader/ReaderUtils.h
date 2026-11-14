@@ -83,8 +83,8 @@ inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {
 // reaches the panel, a menu or a sleep image, has to find it off: gray planes are staged rather than
 // uploaded while it is on.
 struct OnePassTextScope {
-  explicit OnePassTextScope(const bool on) { display.setReaderRefresh(on); }
-  ~OnePassTextScope() { display.setReaderRefresh(false); }
+  explicit OnePassTextScope(const bool on) { display.setOnePassText(on); }
+  ~OnePassTextScope() { display.setOnePassText(false); }
   OnePassTextScope(const OnePassTextScope&) = delete;
   OnePassTextScope& operator=(const OnePassTextScope&) = delete;
 };

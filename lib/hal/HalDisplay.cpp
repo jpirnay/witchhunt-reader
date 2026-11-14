@@ -562,7 +562,9 @@ bool HalDisplay::supportsGrayFrame() const { return einkDisplay.supportsGrayFram
 
 bool HalDisplay::supportsOnePassText() const { return einkDisplay.supportsOnePassText(); }
 
-// No bus lock: this sets a flag, and a refresh in flight must not hold up the page that follows it.
+// No bus lock on either: each sets a flag, and a refresh in flight must not hold up the page that follows it.
+void HalDisplay::setOnePassText(const bool on) { einkDisplay.setOnePassText(on); }
+
 void HalDisplay::setReaderRefresh(const bool reading) { einkDisplay.setReaderRefresh(reading); }
 
 bool HalDisplay::composesOnePassText() const { return einkDisplay.composesOnePassText(); }
