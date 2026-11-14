@@ -1,5 +1,5 @@
-# The hyphenation pack path: the CPHY v1 header, the flash store over a simulated chip, and the registry with every
-# language but English served from the store. Without HYPHENATION_ALL_BUILTIN, as the firmware builds it.
+# The hyphenation pack path: the CPHY v1 header, the flash store over a simulated chip, the registry with every
+# language but English served from the store, and the trie read in place from its pack file (PagedTrieReader). Without HYPHENATION_ALL_BUILTIN, as the firmware builds it.
 get_directory_property(HYPH_STORE_DEFS COMPILE_DEFINITIONS)
 list(REMOVE_ITEM HYPH_STORE_DEFS HYPHENATION_ALL_BUILTIN)
 set_directory_properties(PROPERTIES COMPILE_DEFINITIONS "${HYPH_STORE_DEFS}")
@@ -10,6 +10,7 @@ set(HYPH_PACK_DIR "${REPO_ROOT}/assets/sd-fonts")
 
 add_executable(HyphenationStoreTest
   HyphenationStoreTest.cpp
+  PagedTrieReaderTest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/HyphenationPack.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/HyphenationStore.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/Hyphenator.cpp
