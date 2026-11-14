@@ -63,6 +63,10 @@ inline bool retryUnverified(const TlsPlan& plan, const VerifiedConnectFailure fa
 // a request to https://example.org/ and a redirect to https://example.org:443/ name one server.
 std::string tlsPeer(std::string_view host, uint16_t port);
 
+// tlsPeer() of the server a URL names: "https://user:pw@example.org/x" is "example.org:443". The user info is
+// dropped, so the name is safe to log; the port is the scheme's (443, or 80 for http) unless the URL gives one.
+std::string urlPeer(std::string_view url);
+
 // The servers whose certificate could not be verified this session, for VerifiedThenUnverified: a
 // later hop to one skips the verify it would fail, about 3 s of a handshake on this chip (planHop()).
 // Checked and filled by SecureHttpClient at each https connect, under the server's tlsPeer() name.
