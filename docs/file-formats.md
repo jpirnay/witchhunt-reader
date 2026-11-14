@@ -103,7 +103,8 @@ fonts need.
 
 On the X3 and X4 the 384 KB below the language slot (`FlashFontPartition::HYPH_RESERVED_BYTES`) are taken from the font
 area for the hyphenation store, `WHHS`: [below](#hyphenation-packs-cphy-and-the-store-whhs). The S3 boards keep the
-whole area for fonts and read a book's pack into PSRAM.
+whole area for fonts and read a book's pack into PSRAM. A C3 whose area has no room for the store reads the book's trie
+from its pack on the card, a page at a time.
 
 ## `book.bin`
 
@@ -584,6 +585,11 @@ a 16-byte trailer at byte 384: magic `WHHS`, version 1, the entry count, the gen
 payload is written and read back before a header names it; room is made by dropping the oldest entries in a header of
 their own first. A region that holds no valid header copy is an empty store: anything it lost is copied again from
 the card.
+
+Without the region (a partition table whose flash area is missing or 512 KB or less) the X3 and X4 read the book's
+trie in place from the pack file, through eight 512-byte pages aligned to the file's sectors (`PagedTrieReader.h`).
+The pack is not copied or changed; its payload CRC is not checked then, the Font Manager having checked the file at
+install.
 
 ## The TTF glyph store (`CPTT`)
 

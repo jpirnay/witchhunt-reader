@@ -14,7 +14,10 @@
 // - Without PSRAM (X3, X4): a pack's trie is copied into the flash store (HyphenationStore.h, the region below the UI
 //   language slot) when the Font Manager installs it, or at the first book that needs it, and read in place through a
 //   mapping, as the image's own tries were: the same bytes, the same flash cache, no RAM. German's copy takes about a
-//   second, once.
+//   second, once. Where the flash area has no room for the store (a partition table another firmware left: no
+//   `spiffs` partition, or one of 512 KB or less), the trie is read from the pack file on the card instead, a 512 B
+//   page at a time (PagedTrieReader, 4 KB of pages while a book in the language is open): the same breaks, card
+//   reads during section builds.
 // - With PSRAM (Murphy, T5S3, X4 Pro): the book's trie is read from its pack into PSRAM at book open.
 namespace HyphenationPacks {
 

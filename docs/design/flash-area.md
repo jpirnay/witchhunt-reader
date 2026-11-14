@@ -77,7 +77,7 @@ use a `FlashAreaRegion`; `SystemStatus` asks `FlashFontPartition::cachedBytes()`
 |---|---|---|---|
 | .cpfont cache | yes | yes | no: `SdCardFont` reads the card (the existing fallback, its tables on the heap) |
 | TTF glyph store | yes | yes | **no**: the store needs a mapping; TTF families cannot load |
-| hyphenation | C3 region | not used (tries go to PSRAM already) | not used |
+| hyphenation | C3 region; with no room for it (an area of 512 KB or less) a book's trie is read from its pack on the card | not used (tries go to PSRAM already) | C3: a book's trie is read from its pack on the card (`PagedTrieReader`) |
 | UI language | yes | yes | **no**: the slot must hand out pointers; the UI stays English |
 | Mapping budget | the MMU's free pages (C3 ~31) | the whole image | none |
 | Internal RAM | the handle table (C3 +48 B static); on S3 also the 512 B bounce buffer, static now, which the TTF family set used to hold on the heap | the image in PSRAM; +64 B static, 112 B of bitmaps | none |
@@ -145,6 +145,17 @@ glyph store would need a different design (strings in heap RAM, ~30 KB, rejected
 a glyph store reading its index and log through the card), so on such a board the UI stays English and TTF families do
 not load. No board we know of is in that case: the S3 boards have 8 MB of PSRAM, and the C3 boards' tables have a
 large enough `spiffs` partition. The boot log says so (`[FLA] no flash area: ...`).
+
+Hyphenation does not stop: a C3 without the hyphenation region (no area, or one of 512 KB or less, so that
+`FlashFontPartition::hyphRegionOffset()` is 0) reads the open book's trie in place from its pack file on the card,
+through eight 512-byte pages of it (`PagedTrieReader`, 4 KB of heap with the open file while a book in the language is
+open; `src/HyphenationPacks.cpp`). The same happens for a language whose copy into a mounted store failed with
+`NoSpace` or `FlashFailed`. Breaks are the same as from the store (host test `PagedTrieReader.*` over every hosted
+pack). The cost is card reads during section builds, for the word at a line's end: measured on the host over the
+test word lists, a German or Russian word needs about 25 page reads, Swedish, Dutch, Czech, Ukrainian and Hungarian
+16 to 21, Spanish 9, French, Polish and the smaller Latin tries 3 to 5, and a trie of 4 KB or less (Belarusian, Italian,
+Portuguese, Catalan, Finnish, Turkish, the Indic languages) none once read. The boot log says
+`[HYP] no hyphenation store: the tries of books in other languages are read from the card`.
 
 **What shows it.** System Information's Flash section has a **Flash area** row ("spiffs 3.4 MB"; "PSRAM + card" or
 "-", then on the next line what the table holds: "spiffs 80.0 KB", "spiffs -") and a **Language** row: the language's code, and
