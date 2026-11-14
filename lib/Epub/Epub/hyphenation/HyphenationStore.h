@@ -7,17 +7,6 @@
 #include "HyphenationPack.h"
 #include "SerializedHyphenationTrie.h"
 
-// Where a pack's bytes come from when the store copies it in: the .cphyph file on the SD card on the device, a
-// buffer in tests. Offsets are from the start of the file, header included.
-class HyphenationPackSource {
- public:
-  virtual uint32_t size() const = 0;
-  virtual bool read(uint32_t offset, void* dst, uint32_t len) = 0;
-
- protected:
-  ~HyphenationPackSource() = default;
-};
-
 // Reads and checks a pack's header: a CPHY v1 header whose payload is exactly the rest of the source.
 bool readPackHeader(HyphenationPackSource& src, hyphpack::Header& out);
 

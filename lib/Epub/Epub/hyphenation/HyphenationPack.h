@@ -50,3 +50,15 @@ bool parseHeader(const uint8_t* bytes, Header& out);
 void writeHeader(const Header& h, uint8_t* out);
 
 }  // namespace hyphpack
+
+// Where a pack's bytes come from: the .cphyph file on the SD card on the device, a buffer in tests. The store copies
+// a pack in from one (HyphenationStore::fill), and a C3 without the store reads the trie through one in place
+// (PagedTrieReader). Offsets are from the start of the file, header included.
+class HyphenationPackSource {
+ public:
+  virtual uint32_t size() const = 0;
+  virtual bool read(uint32_t offset, void* dst, uint32_t len) = 0;
+
+ protected:
+  ~HyphenationPackSource() = default;
+};
