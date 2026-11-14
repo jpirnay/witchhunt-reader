@@ -205,6 +205,9 @@ class HalDisplay {
   // answers yes and copyGrayscale*Buffers() stage planes instead of uploading them, so hold it only around
   // a page that goes out through a gray frame: see ReaderUtils::OnePassTextScope.
   bool supportsOnePassText() const;
+  void setOnePassText(bool on);
+  // True while a book page is rendered and shown: panels with a reading waveform (the Picco's) use it. It does
+  // not switch one-pass text on. See ReaderUtils::ReaderRefreshScope.
   void setReaderRefresh(bool reading);
   // One-pass text on a board without the memory to stage planes (the X3, the X4): see
   // FreeInkDisplay::beginOnePassMask(). The mask is the buffer that held the frame on screen; null sends the

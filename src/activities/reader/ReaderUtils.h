@@ -83,10 +83,20 @@ inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {
 // reaches the panel, a menu or a sleep image, has to find it off: gray planes are staged rather than
 // uploaded while it is on.
 struct OnePassTextScope {
-  explicit OnePassTextScope(const bool on) { display.setReaderRefresh(on); }
-  ~OnePassTextScope() { display.setReaderRefresh(false); }
+  explicit OnePassTextScope(const bool on) { display.setOnePassText(on); }
+  ~OnePassTextScope() { display.setOnePassText(false); }
   OnePassTextScope(const OnePassTextScope&) = delete;
   OnePassTextScope& operator=(const OnePassTextScope&) = delete;
+};
+
+// Holds the panel's book-page hint for one page's render and display: a panel with a reading waveform (the
+// Picco's) shows the page with it, one-pass text on or off. It switches nothing else on.
+// From CrossPoint Reader's ReaderRefreshScope (crosspoint-reader PR #4362, Justin Mitchell).
+struct ReaderRefreshScope {
+  ReaderRefreshScope() { display.setReaderRefresh(true); }
+  ~ReaderRefreshScope() { display.setReaderRefresh(false); }
+  ReaderRefreshScope(const ReaderRefreshScope&) = delete;
+  ReaderRefreshScope& operator=(const ReaderRefreshScope&) = delete;
 };
 
 struct InputDrainGuard {
