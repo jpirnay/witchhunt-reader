@@ -6057,6 +6057,7 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
 void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
+  const ReaderUtils::ReaderRefreshScope readerRefresh;
   // Under the live bars or a search's strip the page goes out in black and white (aaEnabledForThisRender below).
   const ReaderUtils::OnePassTextScope onePassText(onePassTextFor(*page) && !uiOverPage());
   const auto t0 = millis();
@@ -6715,6 +6716,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
 
 void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout,
                                           BuildArena::Block* drawBlock) {
+  const ReaderUtils::ReaderRefreshScope readerRefresh;
   pinPageProgression();
   grayCanvasOnScreen_ = false;
   // Draws one page from an in-progress Background-C build: a plain BW render + status bar, no
@@ -6919,6 +6921,7 @@ bool EpubReaderActivity::aaPreemptedByNavigation() const {
 void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orientedMarginTop,
                                                 const int orientedMarginRight, const int orientedMarginBottom,
                                                 const int orientedMarginLeft) {
+  const ReaderUtils::ReaderRefreshScope readerRefresh;
   const int viewportHeight = std::max(0, renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom);
   const int contentTop = orientedMarginTop + ReaderPageLayout::imageOnlyPageYOffset(page, viewportHeight);
 

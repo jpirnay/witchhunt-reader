@@ -922,6 +922,7 @@ int MdReaderActivity::drawSpanAt(const int x, const int y, const MdParser::Span&
 }
 
 void MdReaderActivity::renderPage() {
+  const ReaderUtils::ReaderRefreshScope readerRefresh;
   const int lineHeight = renderer.getLineHeight(cachedFontId);
 
   std::function<void()> renderLines = [&]() {

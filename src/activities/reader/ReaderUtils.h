@@ -89,6 +89,16 @@ struct OnePassTextScope {
   OnePassTextScope& operator=(const OnePassTextScope&) = delete;
 };
 
+// Holds the panel's book-page hint for one page's render and display: a panel with a reading waveform (the
+// Picco's) shows the page with it, one-pass text on or off. It switches nothing else on.
+// From CrossPoint Reader's ReaderRefreshScope (crosspoint-reader PR #4362, Justin Mitchell).
+struct ReaderRefreshScope {
+  ReaderRefreshScope() { display.setReaderRefresh(true); }
+  ~ReaderRefreshScope() { display.setReaderRefresh(false); }
+  ReaderRefreshScope(const ReaderRefreshScope&) = delete;
+  ReaderRefreshScope& operator=(const ReaderRefreshScope&) = delete;
+};
+
 struct InputDrainGuard {
   bool active = false;
 
