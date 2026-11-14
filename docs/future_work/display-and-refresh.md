@@ -409,7 +409,8 @@ released. The reader goes on with a null frame.
 [grayscale-aa-rendering.md](../grayscale-aa-rendering.md#one-pass-text-aa-board-by-board).
 
 **Next.**
-1. Run a long read on the X4 Pro with the option on: ghosting over many pages, and in the cold.
+1. The X4 Pro rests since 2026-11-14: Test 11 held black for 500 pages with no ghost and a 150-page read left
+   nothing on white. Untried: a long read by eye, and the cold.
 2. The same on the Murphy M3 and the X3, by eye first. The Murphy also needs a long read for how it reads.
 3. The X4 (SSD1677) by eye, and whether its hold row should rest. The hold row nudges the background 2 frames of VSL
    every page; whether rest looks better is untried, but testable: since #655 (2026-11-08) `x4lab.py` drives frames
