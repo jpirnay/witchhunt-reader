@@ -639,7 +639,8 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 
 These updates replace the firmware only. The device's boot loader and partition table stay as they are. If the
 interface stays in English although your language's pack is on the card (an X4 Pro updated from its original
-firmware), or to give an X3 or X4 the faster-waking boot loader, use the **Full install** of the
+firmware), when an X3 or X4 says it runs in [emergency mode](#8-troubleshooting-issues--escaping-bootloop), or to give
+an X3 or X4 the faster-waking boot loader, use the **Full install** of the
 [Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/) once, from a computer. It keeps the SD card. The
 page lists what it resets in the device's own memory.
 
@@ -1281,6 +1282,8 @@ pio device monitor
 If the device is stuck in a bootloop, press and release the Reset button. Then, press and hold on to the configured Back button and the Power Button to boot to the Home Screen.
 
 **The interface is in English after an update or on another card:** every interface language but English reads its pack from the card (`/.crosspoint/lang/`). Pick your language again under **Language** (Settings → System) to download it, or copy it there by hand (see **[Interface languages](#interface-languages)**). If the pack is there and the interface stays English, look at **System Information**, in its Flash section: **Language** shows the language's code and, when its pack is not in use, why (`no pack`, `bad pack`, `no flash area`, `area too small`, `build`, `mmap`, `CRC`), and **Flash area** where the reader keeps it ("spiffs 3.4 MB" as flashed by us; "PSRAM + card" or "-" when the partition table has no room for it, with the table's `spiffs` partition on the line below; see the X4 Pro note under **[Interface languages](#interface-languages)**). Please quote both rows in a report; the serial log names the same in lines starting `[FLA]`, `[FLP]` and `[I18N]`.
+
+**"Emergency mode" on the way to Home (X3, X4):** the device kept the partition table of the firmware it had before (an install over its original firmware, or an SD card or OTA update from another firmware), and that table has no `spiffs` partition for Witch Reader's flash area, or a smaller one than ours (3.4 MB; the X3's original table has 1 MB). The reader keeps its fonts, the interface language and hyphenation patterns there. It still works, but TrueType fonts may not load and more is read from the SD card. We strongly recommend a **Full install** with the [Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/): it writes our partition table, and the SD card keeps everything. A device that cannot be flashed over USB keeps working as it is. The notice is shown once per layout; **System Information** shows "Emergency mode" in its Flash section until the table is ours. The X4 Pro, T5 S3, Murphy M3 and BOOX Picco keep the area in their PSRAM instead (see **[Language packs](#language-packs)**) and never run in emergency mode.
 
 **Books are no longer hyphenated after an update:** every language but English now hyphenates with a downloadable pack. With **Hyphenation** on, opening such a book offers its pack; if you answered **No**, install it from its row in the Font Manager (**Hyphenation-German** and so on) (see **[Hyphenation packs](#hyphenation-packs)**).
 
