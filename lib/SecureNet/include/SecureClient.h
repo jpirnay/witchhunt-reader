@@ -57,8 +57,9 @@ class SecureClient : public Client {
   // Keep CA-chain, signature, and hostname verification enabled, but tolerate certificate
   // notBefore/notAfter errors because the device has no trustworthy wall clock. Unlike the
   // insecure fallback this waives exactly one property: every non-date verification failure
-  // stays fatal. Off by default — callers turn it on only after HalClock::ensureUsableForTls()
-  // has failed, i.e. when full date validation is genuinely unobtainable.
+  // stays fatal. Off by default — callers turn it on when the clock is not authoritative
+  // (HalClock::waiveCertificateDates(): not NTP in this boot, not a hardware RTC), since a clock
+  // restored from NVS can be days behind a server's renewed certificate (issue #766).
   //
   // This has to act in TWO places, which is easy to get wrong:
   //   1. loading the trust store. wolfSSL_CTX_load_verify_buffer() date-checks the ROOTS as it

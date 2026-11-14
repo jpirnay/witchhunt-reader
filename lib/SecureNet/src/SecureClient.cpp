@@ -163,8 +163,9 @@ int verifyCallback(int preverify, WOLFSSL_X509_STORE_CTX* store) {
 
   if (g_allowCertificateDateErrors && preverify == 0 && store != nullptr &&
       (store->error == ASN_BEFORE_DATE_E || store->error == ASN_AFTER_DATE_E)) {
-    LOG_INF("TLS", "Ignoring certificate date error %d (no trusted clock); chain and hostname still verified",
-            store->error);
+    LOG_INF("TLS",
+            "Ignoring certificate date error %d at epoch %lld (no trusted clock); chain and hostname still verified",
+            store->error, static_cast<long long>(time(nullptr)));
     return 1;
   }
   // Name the link that failed: depth 0 is the leaf, higher depths walk up towards the root, so a

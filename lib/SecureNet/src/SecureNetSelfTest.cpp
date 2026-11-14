@@ -11,6 +11,7 @@
 
 #include "CrossPointRoots.h"
 #include "SecureHttpClient.h"
+#include "TlsPolicy.h"
 
 namespace crosspoint {
 
@@ -43,7 +44,9 @@ void secureNetSelfTest() {
   for (const char* url : kHosts) {
     SecureHttpClient http;
     http.setCACert(CROSSPOINT_ROOTS_PEM);
-    http.setAllowCertificateDateErrors(!clockReady);
+    // As the shipping clients decide it (HttpDownloader, KOReaderSyncClient): dates checked against an
+    // authoritative clock only.
+    http.setAllowCertificateDateErrors(HalClock::waiveCertificateDates(urlPeer(url).c_str()));
     http.setTimeout(15000);
     const int status = http.GET(url);
     LOG_INF("SNTST", "GET %s -> status=%d insecure=%d bodyLen=%u", url, status,
