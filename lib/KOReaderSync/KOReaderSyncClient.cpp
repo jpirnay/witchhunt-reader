@@ -6,6 +6,7 @@
 #include <HalClock.h>
 #include <Logging.h>
 #include <SecureHttpClient.h>
+#include <TlsPolicy.h>
 #include <WiFi.h>
 #include <esp_err.h>
 #include <esp_heap_caps.h>
@@ -337,13 +338,17 @@ esp_err_t performKoRequest(const char* method, const std::string& url, const cha
   // what a self-hosted server with a private CA needs.
   http->setCACert(g_skipTlsValidation ? nullptr : CROSSPOINT_ROOTS_PEM);
   http->setAllowInsecureFallback(false);
-  // Last-resort clock guard. The activities are expected to have run
-  // HalClock::ensureUsableForTls() once WiFi came up (they have SETTINGS and therefore the
-  // configured NTP server; this library does not). Asking here as well means a caller that
-  // forgets does not get the old failure mode — a trust store that refuses to load, reported as
-  // a bare "connect failed" with no verification error behind it. Chain, signature and hostname
-  // stay fully enforced either way; only the validity window is waived.
-  http->setAllowCertificateDateErrors(!HalClock::isPlausibleForTls());
+  // The certificate dates are checked only against a clock that is authoritative: NTP in this
+  // boot or a hardware RTC. Any other clock -- 1970 after a cold boot with nothing saved, which
+  // would keep the trust store from loading at all, or a plausible one restored from NVS or
+  // estimated over a sleep, which can be days behind a server's renewed certificate (issue #766)
+  // -- has them waived. Chain, signature and hostname stay fully enforced either way, so the
+  // password never goes to a peer that could not prove its name. An http URL only needs it for a
+  // redirect to https, and says nothing in the log.
+  http->setAllowCertificateDateErrors(!g_skipTlsValidation &&
+                                      (crosspoint::SecureHttpClient::isHttps(url)
+                                           ? HalClock::waiveCertificateDates(crosspoint::urlPeer(url).c_str())
+                                           : !HalClock::datesAuthoritativeForTls()));
   http->setTimeout(5000);
   // Sync replies are a few hundred bytes of JSON. A wrong server URL can answer with a whole web
   // page (a Booklore root serves its app's index.html with 200), and buffering all of it grew one

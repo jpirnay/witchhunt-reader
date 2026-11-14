@@ -51,7 +51,9 @@ void KOReaderAuthActivity::onWifiSelectionComplete(const bool success) {
   // and on these RTC-less boards a cold boot that discarded a stale NVS epoch is sitting at
   // 1970 — which puts every curated root's notBefore in the future and makes the trust store
   // fail to LOAD, long before any certificate is seen. Not fatal if it fails: SecureClient then
-  // waives certificate dates only, keeping chain/signature/hostname checks intact.
+  // waives certificate dates only, keeping chain/signature/hostname checks intact. A plausible clock
+  // restored from NVS or estimated over a sleep is synced as well (issue #766).
+  HalClock::syncNtpIfSoftwareClock(SETTINGS.ntpServer);
   HalClock::ensureUsableForTls(SETTINGS.ntpServer);
   // Same escape hatch as the sync path: a self-hosted server with a private CA.
   KOReaderSyncClient::setSkipTlsValidation(SETTINGS.skipHttpsValidation != 0);

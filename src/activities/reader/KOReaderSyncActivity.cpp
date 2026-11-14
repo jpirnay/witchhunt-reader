@@ -60,21 +60,18 @@ void logSyncMemSnapshot(const char* stage) {
 // What it is actually for is the device clock everything ELSE reads -- the status bar, reading
 // stats, cache ages -- for which a network session is simply the only chance to correct it. That
 // is worth keeping while HalClock::syncNtp()'s fast path costs ~20 ms; it would not be worth a
-// multi-second stall. Note the two guards answer different questions: an unset clock reads as
-// `now <= 0` here, but it is ensureUsableForTls() that makes the handshake possible at all, so
-// this must never be the only guard before a TLS call.
+// multi-second stall. Note the two guards answer different questions: this one is for the clock,
+// but it is ensureUsableForTls() that makes the handshake possible at all, so this must never be
+// the only guard before a TLS call.
+//
+// A clock that is not authoritative (restored from NVS or estimated over a sleep on a board with
+// no RTC) is synced whatever its age says: the age is measured against that clock itself, which
+// can be days behind while reading "synced a few minutes ago" (issue #766). Not again within
+// 10 minutes of a failed sync; the certificate dates are waived for such a clock meanwhile.
 bool shouldSyncNtpNow() {
-  const time_t lastSync = HalClock::lastSyncTime();
-  const time_t now = HalClock::now();
-  if (lastSync <= 0 || now <= 0) {
-    return true;
-  }
-
-  const time_t age = now - lastSync;
-  if (age < 0) {
-    return true;
-  }
-  return age >= NTP_RESYNC_MIN_INTERVAL_SEC;
+  return clock_authority::ntpDueBeforeSync(HalClock::source(), time(nullptr), HalClock::lastSyncTime(),
+                                           NTP_RESYNC_MIN_INTERVAL_SEC,
+                                           HalClock::ntpFailedWithin(clock_authority::kRetryAfterFailureMs));
 }
 }  // namespace
 
