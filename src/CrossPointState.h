@@ -173,6 +173,9 @@ class CrossPointState {
   // The reading fonts a book's open offered and was told no (BookPackOffer), by their script, comma-separated, empty
   // when none: "Devanagari,JP". A book in the script is not asked again; the Font Manager still has them.
   std::string fontOffersDeclined;
+  // The layout the emergency-mode notice was last shown for (FlashLayoutNotice::layoutMark(): the `spiffs` partition's
+  // size in KB plus 1), 0 when never: shown once per layout, and again only for another one.
+  uint32_t flashLayoutNoticeFor = 0;
   KOReaderSyncSessionState koReaderSyncSession;
   PendingBookmarkJumpState pendingBookmarkJump;
 #if SERIAL_TEST_API

@@ -203,6 +203,7 @@ class ActivityManager {
   void goToSleep(bool fromTimeout = false);
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
+  void goToFlashLayoutNotice();  // the emergency-mode notice (FlashLayoutNotice); it goes Home when read
   void goToWeather();
   void goToReadingStats();
   void goToHomeMore();

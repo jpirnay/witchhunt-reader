@@ -17,6 +17,7 @@
 #include "CrossPointState.h"
 #include "DarkMode.h"
 #include "DarkModeNow.h"
+#include "FlashLayoutNotice.h"
 #include "OpdsServerStore.h"
 #include "SdCardFontGlobals.h"
 #include "SettingsList.h"
@@ -43,6 +44,7 @@
 #include "settings/ReadingStatsActivity.h"
 #include "settings/SettingsActivity.h"
 #include "settings/SettingsSubmenuActivity.h"
+#include "util/FlashLayoutNoticeActivity.h"
 #include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
 #include "util/SerialCommandGrammar.h"
@@ -691,6 +693,10 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
   replaceActivity(std::make_unique<FullScreenMessageActivity>(renderer, mappedInput, std::move(message), style));
 }
 
+void ActivityManager::goToFlashLayoutNotice() {
+  replaceActivity(std::make_unique<FlashLayoutNoticeActivity>(renderer, mappedInput));
+}
+
 void ActivityManager::goToWeather() { replaceActivity(std::make_unique<WeatherActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToReadingStats() {
@@ -727,6 +733,11 @@ void ActivityManager::goToHomeMenuAction(const HomeMenuAction action) {
 
 void ActivityManager::goHome(std::string focusBookPath, int focusSelectorIndex) {
   hasReturnHint = false;
+  // A board left with another firmware's partition table runs in emergency mode: said once, on the way Home.
+  if (FlashLayoutNotice::due()) {
+    goToFlashLayoutNotice();
+    return;
+  }
   replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInput, std::move(focusBookPath), focusSelectorIndex));
 }
 
