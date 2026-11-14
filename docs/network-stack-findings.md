@@ -160,6 +160,22 @@ callback behaviour, not just the logging.
 - **`rc=-4` is `ERR_TIMEOUT` from `readHeaders()`** — the request was sent and no status line
   arrived within the 5 s budget. The following retry's `tcp+dns=2831 ms` is the textbook
   1 s + 2 s SYN-retransmit shape, i.e. the first SYN went unanswered too.
+- **Certificate dates are checked only against an authoritative clock.** A clock inside the roots'
+  window (2025-2037) loads the trust store, but that says nothing about a server's own certificate,
+  which may be days old. The X4 has no RTC: after a cold boot its clock is the epoch saved in NVS,
+  after a wake or restart that epoch plus the LP timer's count, and either can be days behind.
+  KOReader sync, which never falls back unverified, then reads a freshly renewed certificate as not
+  yet valid: `sync.crosspointreader.com`'s current one has notBefore 2026-11-12 01:09 UTC, and
+  issue #766 (X4 only, "connect failed" with 55 KB contiguous heap, from 2026-11-13, cured by a full
+  install, which erases NVS) fits that; not yet reproduced on a device. Its NTP freshness check did
+  not help, since it measured the time since the last sync against that same clock. So every
+  verified request (KOReader sync and HttpDownloader alike) waives notBefore/notAfter, and nothing
+  else, unless the clock came from NTP in this boot or a hardware RTC
+  (`clock_authority::datesAuthoritative()`, `HalClock::waiveCertificateDates()`), and the KOReader
+  paths run SNTP first for such a clock (`HalClock::syncNtpIfSoftwareClock()`; not again within
+  10 minutes of a failure). The release log says so once per server and clock source:
+  `[CLK] TLS host:443: certificate dates not checked (chain and name are): the clock, epoch N, is
+  restored from NVS`; `[TLS] Ignoring certificate date error -150 at epoch N` when it mattered.
 
 ## Retired hypotheses
 
