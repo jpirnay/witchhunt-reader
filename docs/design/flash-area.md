@@ -167,8 +167,9 @@ The firmware then runs on what the area's consumers do without it (the backends 
   `FlashLayoutNoticeActivity`) that it runs in emergency mode, that some features are slower or missing, and that a
   Full install from the web flasher (its address and QR code) is strongly recommended; the SD card keeps everything.
   `state.json`'s `flashLayoutNoticeFor` remembers the layout it was shown for (the partition's KB plus 1), so a
-  different layout later shows it again. Its strings are English only: on a board with no area the interface could
-  not be anything else, and the Cyrillic packs are within 2 KB of the slot's 15-bit offsets;
+  different layout later shows it again. Its strings are English only: the notice must read even when the language
+  pack cannot be loaded, which is likely on such a board, and the Cyrillic packs are within 2 KB of the slot's 15-bit
+  offsets;
 - System Information's Flash section, an "Emergency mode" row.
 
 A full install writes our table and ends it. A board that cannot be flashed over USB keeps working as it is.
