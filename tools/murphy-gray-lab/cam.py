@@ -248,8 +248,22 @@ def level(image, white, black, box):
     return 100 * (region_mean(image, box) - low) / (high - low)
 
 
+# CAM_REFERENCE="x0,y0,x1,y1": a white card beside the panel, in camera pixels. The AC310 keeps exposing
+# automatically whatever exposure it is given (a black panel brightened the scene by a fifth, 2026-11-14), so
+# each shot is scaled until that card matches its brightness in baseline-white.
+_REFERENCE = tuple(int(v) for v in os.environ["CAM_REFERENCE"].split(",")) if os.environ.get("CAM_REFERENCE") else None
+
+
+def _reference_mean(image):
+    return ImageStat.Stat(image.crop(_REFERENCE)).mean[0]
+
+
 def load_rectified(name, camera):
-    return rectify(Image.open(SHOTS / f"{name}.png").convert("L"), camera)
+    image = Image.open(SHOTS / f"{name}.png").convert("L")
+    if _REFERENCE:
+        gain = _reference_mean(Image.open(SHOTS / "baseline-white.png").convert("L")) / _reference_mean(image)
+        image = image.point(lambda value: min(255, value * gain))
+    return rectify(image, camera)
 
 
 def inset(box, margin):
