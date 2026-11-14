@@ -1480,6 +1480,13 @@ void setup() {
   // The flash area before anything uses it, so every boot says in its log where the area is, or that it has none, and
   // a board without the `spiffs` partition takes its PSRAM image while the PSRAM is still one block.
   FlashArea::get();
+  if (!FlashArea::asExpected()) {
+    LOG_ERR("FLA",
+            "emergency mode: another firmware's partition table (`spiffs` %u KB, ours %u KB); a full install "
+            "from the web flasher writes ours",
+            static_cast<unsigned>(FlashArea::partitionBytes() / 1024),
+            static_cast<unsigned>(FlashArea::kExpectedBytes / 1024));
+  }
   // A CJK language's pack carries its CJK UI faces, so the faces are read straight from flash
   // instead of decoded per glyph (CjkUiFonts.h). Registered before the first pack is resolved.
   I18N.setPackExtension(&CjkUiFonts::packExtension());
