@@ -12,7 +12,7 @@ namespace FlashArea {
 
 /// Where the area lives.
 enum class Backend : uint8_t {
-  None,        // no area: the UI stays English, TTF families do not load, .cpfont fonts are read from the card
+  None,        // no area: UI strings and .cpfont fonts are read from the card, TTF families do not load
   Partition,   // the `spiffs` partition
   PsramImage,  // an image in PSRAM, saved to the card: the partition table has no usable `spiffs` partition
 };
