@@ -3,7 +3,7 @@
 # esp_heap_caps.h for the PSRAM, and test/shims' HalStorage for the card (which holds no file).
 # scenario;FLASH_AREA_PSRAM_IMAGE. An image of "spiram" leaves FLASH_AREA_PSRAM_IMAGE to FlashArea.cpp's default and
 # builds as a board with PSRAM does (CONFIG_SPIRAM=1): the S3 boards.
-foreach(case "0;0" "1;1" "2;1" "3;1" "4;2" "5;1" "6;0" "8;0" "9;spiram" "10;spiram")
+foreach(case "0;0" "1;1" "2;1" "3;1" "4;2" "5;1" "6;0" "8;0" "9;spiram" "10;spiram" "11;spiram" "12;spiram")
   list(GET case 0 scenario)
   list(GET case 1 image)
   set(target FlashAreaSelectTest${scenario})

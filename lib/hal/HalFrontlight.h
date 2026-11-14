@@ -39,8 +39,10 @@ class HalFrontlight {
   // zero duty but leaves the pad owned by LEDC, and sleep entry then floats it —
   // what the light does after that is a board-layout question. This drives and
   // latches the inactive level instead. begin() releases the hold on the next
-  // boot. No-op on boards without a light.
-  void prepareForDeepSleep() { manager.prepareForDeepSleep(); }
+  // boot. An LED driver on the I2C bus (BOOX Picco) has no pad to park and keeps
+  // its output through the chip's deep sleep, so it is switched off over the bus.
+  // No-op on boards without a light.
+  void prepareForDeepSleep();
 
   uint8_t brightness() const { return lastBrightness; }
   uint8_t warmth() const { return manager.colorTemperature(); }

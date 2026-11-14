@@ -29,6 +29,8 @@
 #define CROSSPOINT_BOARD_NAME "m5"
 #elif FREEINK_DEVICE_MURPHY
 #define CROSSPOINT_BOARD_NAME "murphy"
+#elif FREEINK_DEVICE_PICCO
+#define CROSSPOINT_BOARD_NAME "picco"
 #elif FREEINK_DEVICE_SILKSCREEN  // formerly de-link; the SDK maps FREEINK_DEVICE_DELINK onto it
 #define CROSSPOINT_BOARD_NAME "silkscreen"
 #else

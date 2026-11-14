@@ -1,6 +1,7 @@
 #include "OtaBootSwitch.h"
 
 #include <Logging.h>
+#include <esp_ota_ops.h>
 #include <esp_rom_crc.h>
 #include <spi_flash_mmap.h>
 #include <string.h>
@@ -9,6 +10,13 @@ namespace ota_boot {
 
 uint32_t computeSeqCrc(uint32_t seq) {
   return esp_rom_crc32_le(UINT32_MAX, reinterpret_cast<const uint8_t*>(&seq), kOtaSeqCrcLen);
+}
+
+const esp_partition_t* idleAppPartition() {
+  const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  if (next == nullptr || (running != nullptr && next->address == running->address)) return nullptr;
+  return next;
 }
 
 bool switchTo(const esp_partition_t* dest) {

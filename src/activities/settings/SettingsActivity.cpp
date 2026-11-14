@@ -17,6 +17,7 @@
 #include "UiFontScale.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/OtaBootSwitch.h"
 
 namespace fui = freeink::ui;
 
@@ -202,20 +203,27 @@ void SettingsActivity::buildRows() {
   addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_SCREEN_REPAIR, SettingAction::ScreenRepair)
                                            .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
 
-  addToMoved(systemSettings,
-             std::move(SettingInfo::Separator(StrId::STR_SYSTEM_UPDATE_TYPE1).withSubmenu(StrId::STR_SYSTEM_UPDATE)));
-  addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates)
-                                           .withSubmenu(StrId::STR_SYSTEM_UPDATE)));
-  if (sawIncludeBetaUpdates) {
-    addToMoved(systemSettings, std::move(includeBetaUpdatesSetting.withSubmenu(StrId::STR_SYSTEM_UPDATE)));
+  // A partition table with one app slot (a BOOX Picco on Onyx's stock table) has nowhere to write
+  // an update but over the running app, so the System Update submenu does not exist there.
+  const bool canSelfUpdate = ota_boot::idleAppPartition() != nullptr;
+  if (canSelfUpdate) {
+    addToMoved(systemSettings,
+               std::move(SettingInfo::Separator(StrId::STR_SYSTEM_UPDATE_TYPE1).withSubmenu(StrId::STR_SYSTEM_UPDATE)));
+    addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates)
+                                             .withSubmenu(StrId::STR_SYSTEM_UPDATE)));
+    if (sawIncludeBetaUpdates) {
+      addToMoved(systemSettings, std::move(includeBetaUpdatesSetting.withSubmenu(StrId::STR_SYSTEM_UPDATE)));
+    }
+    addToMoved(systemSettings,
+               std::move(SettingInfo::Separator(StrId::STR_SYSTEM_UPDATE_TYPE2).withSubmenu(StrId::STR_SYSTEM_UPDATE)));
   }
-  addToMoved(systemSettings,
-             std::move(SettingInfo::Separator(StrId::STR_SYSTEM_UPDATE_TYPE2).withSubmenu(StrId::STR_SYSTEM_UPDATE)));
   addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_READING_STATS, SettingAction::ReadingStats)
                                            .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
-  addToMoved(systemSettings,
-             std::move(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate)
-                           .withSubmenu(StrId::STR_SYSTEM_UPDATE)));
+  if (canSelfUpdate) {
+    addToMoved(systemSettings,
+               std::move(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate)
+                             .withSubmenu(StrId::STR_SYSTEM_UPDATE)));
+  }
   // addToMoved(systemSettings,
   //            std::move(SettingInfo::Action(StrId::STR_SWITCH_TO_USB_DRIVE, SettingAction::SwitchToUsbDrive)
   //                          .withSubmenu(StrId::STR_SYSTEM_UPDATE)));

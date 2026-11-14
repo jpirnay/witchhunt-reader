@@ -440,6 +440,13 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
           s.*field = fieldDefault;
           return;
         }
+        if (storedButtonActions < 3 && std::strcmp(info.key, "btnShortPower") == 0 &&
+            v == CrossPointSettings::BTN_DEFAULT) {
+          // Built-in short Power did nothing before version 3; on a board with no Back or Home key it is Confirm
+          // now (applyDeviceButtonDefaults). Everywhere else the default is still Built-in, so this changes nothing.
+          s.*field = fieldDefault;
+          return;
+        }
 
         // Actions inserted before the board-gated light actions since the file was written: shift what it stored
         // after them so it keeps its meaning.

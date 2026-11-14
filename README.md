@@ -2,7 +2,7 @@
 
 # Witch(hunt) Reader
 
-E-reader firmware for the Xteink X3, X4 and X4 Pro, the LilyGo T5S3 Pro and the Murphy M3, based on
+E-reader firmware for the Xteink X3, X4 and X4 Pro, the LilyGo T5S3 Pro, the Murphy M3 and the BOOX Picco, based on
 [crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader), a great piece of software by Dave Allie and
 others. It reads EPUB, TXT, Markdown and XTC books, lays out their CSS properly, and sets text in Latin, Cyrillic,
 Greek, Hebrew, Arabic, ten Indic scripts, Burmese, Chinese, Japanese and Korean, right to left and top to bottom
@@ -19,6 +19,7 @@ included.
 | Xteink X4 Pro | ESP32-S3 | yes | PSRAM, clock chip, reading light |
 | LilyGo T5S3 Pro | ESP32-S3 | yes | PSRAM, clock chip, reading light |
 | Murphy M3 | ESP32-S3 | yes | PSRAM, clock chip, reading light |
+| BOOX Picco | ESP32-S3 | yes | PSRAM, clock chip, reading light, slide switch |
 
 **Everything runs on the X3 and X4 as well.** The two ESP32-C3 boards have no PSRAM, and still get the whole reader:
 TrueType and OpenType fonts, every script below with OpenType shaping and bidi, vertical Chinese, Japanese and Korean,
@@ -56,6 +57,13 @@ The [CrossPoint flash tools](https://crosspointreader.com/#flash-tools) install 
 choose **Custom .bin** and upload the `firmware*.bin` from the [latest release](../../releases/latest). On an X4 Pro
 they write the firmware only and keep the device's partition table, so an X4 Pro that still has its original table
 needs the **Full install** above. The Murphy M3 is not listed there.
+
+**BOOX Picco.** On its original firmware the Picco shows up as a USB drive with no port for the flasher: hold Power
+and Volume Up (+) for more than 10 seconds, and it restarts into Onyx's recovery, which has one. **Back up the whole
+flash first** (`esptool read-flash 0 ALL picco-backup.bin`): Onyx's firmware cannot be downloaded anywhere, and that
+backup is the only way back to it. The **Full install** gives the Picco Witch Reader's partition table, with updates
+over Wi-Fi and from the card. Witch Reader also runs on Onyx's own table, as CrossPoint installs it (the firmware at
+0xE0000, which keeps Onyx's recovery); there it cannot update itself, and an update goes over USB again.
 
 For everything the reader does and how to use it, see the **[User Guide](USER_GUIDE.md)**. How it compares with
 CrossPoint, feature by feature: **[Feature comparison](docs/feature-comparison.md)**.

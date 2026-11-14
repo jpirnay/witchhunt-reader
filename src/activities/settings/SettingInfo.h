@@ -55,6 +55,8 @@ enum class SettingRequires : uint8_t {
   // and the enclosure: boards around the same controllers differ, so there is
   // nothing to derive it from and nothing to probe.
   SunlightFadingPanel,
+  // A two-position slide switch (BoardConfig input.toggleSwitch), BOOX Picco.
+  SlideSwitch,
 };
 
 enum class SettingAction {

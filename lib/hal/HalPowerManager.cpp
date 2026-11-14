@@ -73,6 +73,13 @@ void HalPowerManager::begin() {
   } else if (HalCapabilities::hasAdcBattery()) {
     pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
   }
+  // A charger IC the firmware must set up, as the stock firmware does at boot: the BOOX Picco's SGM41562 (4.35 V charge
+  // voltage for its cell, and the stock limits). The SDK returns false without a transfer on a board with no such
+  // charger. Based on crosspoint-reader PR #3947 (Justin Mitchell).
+  {
+    const HalI2cBus::Lock i2cLock;
+    if (BatteryMonitor::configureCharger()) LOG_INF("PWR", "Charger configured");
+  }
   normalFreq = getCpuFrequencyMhz();
   modeMutex = xSemaphoreCreateMutex();
   assert(modeMutex != nullptr);

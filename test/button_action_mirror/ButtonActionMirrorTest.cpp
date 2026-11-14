@@ -22,9 +22,9 @@ TEST(ButtonActionMirror, AMirrorOfAMirrorIsTheAction) {
 }
 
 TEST(ButtonActionMirror, OtherActionsAreUnchanged) {
-  for (const uint8_t a :
-       {S::BTN_DEFAULT, S::BTN_GO_HOME, S::BTN_OPEN_TOC, S::BTN_READER_MENU, S::BTN_READER_BARS, S::BTN_IGNORE,
-        S::BTN_FONT_SIZE_SMALLER, S::BTN_FONT_SIZE_LARGER, S::BTN_CYCLE_ORIENTATION, S::BTN_CYCLE_ORIENTATION_BACK}) {
+  for (const uint8_t a : {S::BTN_DEFAULT, S::BTN_GO_HOME, S::BTN_OPEN_TOC, S::BTN_READER_MENU, S::BTN_READER_BARS,
+                          S::BTN_CONFIRM, S::BTN_IGNORE, S::BTN_FONT_SIZE_SMALLER, S::BTN_FONT_SIZE_LARGER,
+                          S::BTN_CYCLE_ORIENTATION, S::BTN_CYCLE_ORIENTATION_BACK}) {
     EXPECT_EQ(a, S::mirroredDirection(a)) << int(a);
   }
 }
@@ -36,15 +36,17 @@ TEST(StoredButtonAction, TheLightActionsKeepTheirMeaningFromEveryVersion) {
   for (uint8_t light = 0; light < S::BUTTON_ACTION_COUNT - S::BTN_LIGHT_TOGGLE; ++light) {
     EXPECT_EQ(S::BTN_LIGHT_TOGGLE + light, S::upgradeStoredAction(S::BTN_BACK + light, 0)) << int(light);
     EXPECT_EQ(S::BTN_LIGHT_TOGGLE + light, S::upgradeStoredAction(S::BTN_READER_BARS + light, 1)) << int(light);
-    EXPECT_EQ(S::BTN_LIGHT_TOGGLE + light, S::upgradeStoredAction(S::BTN_LIGHT_TOGGLE + light, 2)) << int(light);
+    EXPECT_EQ(S::BTN_LIGHT_TOGGLE + light, S::upgradeStoredAction(S::BTN_CONFIRM + light, 2)) << int(light);
+    EXPECT_EQ(S::BTN_LIGHT_TOGGLE + light, S::upgradeStoredAction(S::BTN_LIGHT_TOGGLE + light, 3)) << int(light);
   }
-  // Version 1 had Back; it stays.
+  // Version 1 had Back, version 2 Reader Bars; they stay.
   EXPECT_EQ(S::BTN_BACK, S::upgradeStoredAction(S::BTN_BACK, 1));
+  EXPECT_EQ(S::BTN_READER_BARS, S::upgradeStoredAction(S::BTN_READER_BARS, 2));
 }
 
 TEST(StoredButtonAction, TheActionsBeforeTheInsertionsStay) {
   for (uint8_t action = 0; action < S::BTN_BACK; ++action) {
-    for (const int version : {0, 1, 2}) {
+    for (const int version : {0, 1, 2, 3}) {
       EXPECT_EQ(action, S::upgradeStoredAction(action, version)) << int(action) << " v" << version;
     }
   }

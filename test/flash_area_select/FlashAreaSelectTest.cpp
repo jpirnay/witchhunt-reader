@@ -18,6 +18,8 @@ constexpr uint32_t kImagePages = 0x360000 / NorFlash::kMapPageBytes;
 // The X4 Pro's factory-compatible table, as CrossPoint's web flasher has it: an 80 KB `spiffs` partition, smaller than
 // the language slot (2.40's 64 KB slot fitted into it).
 constexpr uint32_t kX4ProFactoryBytes = 0x14000;
+// Onyx's stock BOOX Picco table: a 512 KB `spiffs` partition holding the stock firmware's data.
+constexpr uint32_t kPiccoStockBytes = 0x80000;
 
 using FlashArea::Backend;
 }  // namespace
@@ -124,5 +126,26 @@ TEST(FlashAreaSelect, ABoardWithPsramAndThePartitionKeepsThePartition) {
   ASSERT_NE(nullptr, FlashArea::get());
   EXPECT_EQ(Backend::Partition, FlashArea::backend());
   EXPECT_EQ(0, g_psramAllocs);
+}
+#elif FLASH_AREA_SCENARIO == 11
+TEST(FlashAreaSelect, ABoardWithPsramLeavesAPartitionSmallerThanTheAreaAlone) {
+  // A BOOX Picco on Onyx's stock table.
+  fake_flash::reset(kPiccoStockBytes);
+  NorFlash* const area = FlashArea::get();
+  ASSERT_NE(nullptr, area);
+  EXPECT_EQ(Backend::PsramImage, FlashArea::backend());
+  EXPECT_EQ(kPartitionBytes, area->size()) << "the whole area, not what fits beside the language slot";
+  EXPECT_EQ(kPiccoStockBytes, FlashArea::partitionBytes()) << "System Information names it";
+  ASSERT_TRUE(area->erase(0, NorFlash::kSectorBytes));
+  EXPECT_EQ(0, fake_flash::chip().erases + fake_flash::chip().writes) << "the stock firmware's data stays";
+}
+#elif FLASH_AREA_SCENARIO == 12
+TEST(FlashAreaSelect, APartitionSmallerThanTheAreaIsUsedWhenNoImageFits) {
+  fake_flash::reset(kPiccoStockBytes);
+  g_hostHasPsram = false;
+  NorFlash* const area = FlashArea::get();
+  ASSERT_NE(nullptr, area);
+  EXPECT_EQ(Backend::Partition, FlashArea::backend());
+  EXPECT_EQ(kPiccoStockBytes, area->size());
 }
 #endif

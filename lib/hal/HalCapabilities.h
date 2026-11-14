@@ -249,18 +249,17 @@ bool defersLiveFontChange();
 inline bool defersLiveFontChange() { return !keepsSecondaryBuffer(); }
 #endif
 
-// A frontlight is present (PWM or PM1-driven).
-inline bool hasFrontlight() { return BoardConfig::hasPwmFrontlight(); }
+// A frontlight is present: PWM (LEDC or PM1-driven), or an LED driver on the I2C bus (the BOOX Picco's).
+inline bool hasFrontlight() { return BoardConfig::hasPwmFrontlight() || BoardConfig::hasI2cFrontlight(); }
 
 // A frontlight on a board whose hardware RTC keeps the time of day through sleep: what Dark Mode's night hours need.
-// Every frontlit board this firmware builds for has the clock too (X4 Pro BM8563, T5S3 PCF8563, Murphy M3 RX8010).
+// Every frontlit board this firmware builds for has the clock too (X4 Pro BM8563, T5S3 PCF8563, Murphy M3 RX8010,
+// Picco PCF8563-class).
 inline bool hasFrontlightAndRtc() { return hasFrontlight() && hasHardwareRtc(); }
 
 // The frontlight has a second (warm) channel, so colour temperature is
 // adjustable rather than brightness-only.
-inline bool hasColorTemperature() {
-  return hasFrontlight() && BoardConfig::ACTIVE.frontlight.gpioWarm != BoardConfig::PIN_UNASSIGNED;
-}
+inline bool hasColorTemperature() { return hasFrontlight() && BoardConfig::hasColorTemperatureFrontlight(); }
 
 // Human-readable board name for the UI. The profile's own `name` is a build
 // slug ("xteink_x4", "lilygo_t5s3") and would read badly on screen, so the
@@ -297,6 +296,8 @@ inline const char* boardDisplayName(BoardConfig::Board board) {
       return "Paper Mono";
     case BoardConfig::Board::M5PaperS3:
       return "M5Paper S3";
+    case BoardConfig::Board::Picco:
+      return "Picco";
   }
   return "Unknown";
 }

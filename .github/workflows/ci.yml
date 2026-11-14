@@ -176,6 +176,9 @@ jobs:
           - env: murphy
             label: Murphy M3
             asset: firmware-murphy.bin
+          - env: picco
+            label: BOOX Picco
+            asset: firmware-picco.bin
     steps:
       - uses: actions/checkout@v6
         with:

@@ -17,6 +17,7 @@
 #include "FirmwareBoardTag.h"
 #include "FirmwareFlasher.h"
 #include "HttpDownloader.h"
+#include "OtaBootSwitch.h"
 #include <bootloader_common.h>
 #include <esp_flash_partitions.h>
 #include <esp_heap_caps.h>
@@ -267,9 +268,9 @@ OtaUpdater::OtaUpdaterError OtaUpdater::beginInstallUpdate() {
   // Open the next OTA partition for streaming writes. The actual firmware
   // download runs in performInstallUpdateStep() via the wolfSSL HttpDownloader,
   // so no mbedtls esp_https_ota is involved.
-  const esp_partition_t* updatePartition = esp_ota_get_next_update_partition(nullptr);
+  const esp_partition_t* updatePartition = ota_boot::idleAppPartition();
   if (updatePartition == nullptr) {
-    LOG_ERR("OTA", "no next OTA partition");
+    LOG_ERR("OTA", "no app partition besides the running one");
     return INTERNAL_UPDATE_ERROR;
   }
 
@@ -292,7 +293,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::beginInstallUpdate() {
  * ESP_ERR_OTA_VALIDATE_FAILED on unsigned Arduino builds (boot_comm efuse
  * revision check false-positive). */
 int OtaUpdater::forceSetOtaBootPartition() {
-  const esp_partition_t* newPartition = esp_ota_get_next_update_partition(nullptr);
+  const esp_partition_t* newPartition = ota_boot::idleAppPartition();
   if (newPartition == nullptr) {
     LOG_ERR("OTA", "force boot partition: next update partition not found");
     return ESP_ERR_NOT_FOUND;
@@ -412,7 +413,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::performInstallUpdateStep() {
     LOG_INF("OTA", "restarting the image from byte 0 (%zu B written)", processedSize);
     esp_ota_abort(handle);
     otaWriteHandle = nullptr;
-    const esp_partition_t* partition = esp_ota_get_next_update_partition(nullptr);
+    const esp_partition_t* partition = ota_boot::idleAppPartition();
     if (partition == nullptr || esp_ota_begin(partition, OTA_SIZE_UNKNOWN, &handle) != ESP_OK) {
       restartFailed = true;
       return false;
@@ -536,7 +537,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::performInstallUpdateStep() {
   // Set the new partition as boot. Arduino unsigned builds fail image_validate()
   // in esp_ota_set_boot_partition (and esp_ota_end returns VALIDATE_FAILED), so
   // fall back to writing otadata directly — same bypass as before.
-  const esp_partition_t* updatePartition = esp_ota_get_next_update_partition(nullptr);
+  const esp_partition_t* updatePartition = ota_boot::idleAppPartition();
   esp_err_t boot_err = (finish_err == ESP_ERR_OTA_VALIDATE_FAILED) ? ESP_ERR_OTA_VALIDATE_FAILED
                                                                    : esp_ota_set_boot_partition(updatePartition);
   if (boot_err == ESP_ERR_OTA_VALIDATE_FAILED) {

@@ -603,6 +603,15 @@ class CrossPointSettings {
   // Whether waking restores the light. Off by default so a device that wakes in
   // a dark bag does not light up; brightness/warmth are always restored.
   uint8_t frontlightRestoreOnWake = 1;
+  // What a board's slide switch (BOOX Picco) controls. Its position sets that at boot and on every move; the setting
+  // itself stays free to change in between. Persisted as a number: append only.
+  enum SLIDE_SWITCH_ACTION : uint8_t {
+    SLIDE_SWITCH_READING_LIGHT = 0,
+    SLIDE_SWITCH_DARK_MODE = 1,
+    SLIDE_SWITCH_NOTHING = 2,
+    SLIDE_SWITCH_ACTION_COUNT
+  };
+  uint8_t slideSwitchAction = SLIDE_SWITCH_READING_LIGHT;
   // Use book's embedded CSS styles for EPUB rendering (1 = enabled, 0 = disabled)
   uint8_t embeddedStyle = 1;
   // Publisher Fonts (PUBLISHER_FONTS; BookFonts). Off by default: opening a book in its own font installs its family
@@ -674,7 +683,9 @@ class CrossPointSettings {
   //    explicit custom actions, while old built-in Confirm double/long entries
   //    inherit Murphy's Back/Sleep defaults.
   // 2: BTN_READER_BARS inserted after BTN_BACK.
-  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 2;
+  // 3: BTN_CONFIRM inserted after BTN_READER_BARS. A stored built-in short Power takes the board's
+  //    default, Confirm on a board with no Back or Home key (BOOX Picco), in place of nothing.
+  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 3;
 
   // --- Gesture actions (touch boards) ---------------------------------------
   // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
@@ -907,6 +918,9 @@ class CrossPointSettings {
     // press, a gesture) or a board whose Confirm sits awkwardly. A reader without bars (XTC, TXT)
     // opens what its Confirm opens.
     BTN_READER_BARS,
+    // Send a normal Confirm press to the current activity, as BTN_BACK sends Back. On a board with no
+    // Back or Home key (BOOX Picco) a short press of Power carries it by default.
+    BTN_CONFIRM,
     // --- Board-gated actions MUST stay at the end of this enum ---------------
     // SettingsList builds each button's option list positionally: index i in the
     // list is action value i. Actions it drops on boards that cannot perform them
@@ -1080,6 +1094,7 @@ class CrossPointSettings {
   static constexpr uint8_t upgradeStoredAction(uint8_t action, const int fromVersion) {
     if (fromVersion < 1 && action >= BTN_BACK) ++action;
     if (fromVersion < 2 && action >= BTN_READER_BARS) ++action;
+    if (fromVersion < 3 && action >= BTN_CONFIRM) ++action;
     return action;
   }
 

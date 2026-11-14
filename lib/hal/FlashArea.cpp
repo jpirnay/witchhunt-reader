@@ -101,6 +101,21 @@ NorFlash* pick() {
     return image;
   }
 #endif
+#if FLASH_AREA_PSRAM_IMAGE == 1
+  // A partition smaller than the area loses to the image on a board that can hold one: every cache would have less
+  // room in it, and such a partition is another firmware's. Onyx's stock BOOX Picco table has a 512 KB `spiffs`
+  // partition with the stock firmware's data in it (247 KB on a retail unit, 2026-11-13), which the stock app would
+  // find overwritten after a return to it.
+  if (usable && foundPartitionBytes < FLASH_AREA_PSRAM_BYTES) {
+    LOG_INF("FLA", "the `spiffs` partition is %u KB, smaller than the %u KB area: left alone",
+            static_cast<unsigned>(foundPartitionBytes / 1024), static_cast<unsigned>(FLASH_AREA_PSRAM_BYTES / 1024));
+    if (NorFlash* const image = psramImage()) {
+      LOG_INF("FLA", "the flash area is a PSRAM image instead, kept on the card as /.crosspoint/flash-area.img");
+      chosenBackend = Backend::PsramImage;
+      return image;
+    }
+  }
+#endif
   if (usable) {
     chosenBackend = Backend::Partition;
     return &partitionArea;

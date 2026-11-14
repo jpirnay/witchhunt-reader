@@ -55,6 +55,10 @@ jobs:
             label: Murphy M3
             asset: firmware-murphy.bin
             full: full-install-murphy.bin
+          - env: picco_gh_release
+            label: BOOX Picco
+            asset: firmware-picco.bin
+            full: full-install-picco.bin
     steps:
       - uses: actions/checkout@v6
         with:

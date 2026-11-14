@@ -1,6 +1,6 @@
 # Board Support
 
-The firmware builds for four boards from one source tree. The SDK (`freeink-sdk`, a git
+The firmware builds for six boards, in five binaries, from one source tree. The SDK (`freeink-sdk`, a git
 submodule) describes each board in a `BoardProfile` in `BoardConfig.h`. The firmware reads the
 active profile through `BoardConfig::ACTIVE` and does not hardcode pins.
 
@@ -10,6 +10,8 @@ active profile through `BoardConfig::ACTIVE` and does not hardcode pins.
 | Xteink X4 | ESP32-C3 | SSD1677, 800x480 | ADC button ladder | `default` |
 | Xteink X4 Pro | ESP32-S3, 8 MB PSRAM | SSD1677, UC8179 or UC8279 depending on batch, 800x480 | GT911 touch, capacitive Home key, two nav keys | `x4pro` |
 | LilyGo T5S3 Pro | ESP32-S3, 8 MB PSRAM | 4.7" 960x540 parallel panel, driven through LovyanGFX | GT911 touch, capacitive Home key, one user key | `lilygo_t5s3` |
+| Murphy M3 | ESP32-S3, 8 MB PSRAM | UC8253, 416x240 | CHSC6x touch, Up, Down, Confirm | `murphy` |
+| Onyx BOOX Picco | ESP32-S3, 8 MB PSRAM | SSD1677 or SSD2677 (the driver probes), 800x480 | TMA525C touch, Power, Up, Down, slide switch | `picco`, `picco_stock` |
 
 X3 and X4 share one binary and are told apart at boot (`HalGPIO::begin()`,
 `BoardConfig::selectDevice()`). The release env names are in
@@ -234,6 +236,50 @@ chosen; without it a UC81xx unit is sent SSD1677 command streams and shows no im
 - Frontlight: one channel, a PT4103 boost enable on GPIO11, 1 kHz and 12-bit. The SDK profile
   explains why not 5 kHz.
 
+## Onyx BOOX Picco
+
+Profile `PICCO` in the SDK, recovered from the retail firmware by upstream; the board was brought up in CrossPoint
+(PR #3947, Justin Mitchell). Read from a retail unit here (2026-11-13): ESP32-S3 rev v0.2 with 8 MB embedded octal
+PSRAM (eFuse vendor AP_3v3), 16 MB GigaDevice quad flash, no secure boot, no flash encryption, download mode enabled.
+Its panel is an SE0400NQW47 on an SSD2677 (the driver's probe, boot log).
+
+- Keys: Power on GPIO2 (the deep-sleep wake), Up GPIO21, Down GPIO9, all active-low. The SDK carries GPIO5 as
+  Confirm; what drives it on the device is not known. There is no Back key and no Home key, so a press of Power
+  defaults to Confirm and a double press to Back (`CrossPointSettings::applyDeviceButtonDefaults()`, actions
+  `BTN_CONFIRM` and `BTN_BACK`); touch and the hint boxes do the rest.
+- Slide switch on GPIO6, read and debounced by the SDK (`InputManager::isToggleSwitchOn()`). The **Slide Switch**
+  setting binds it to the reading light (default), Dark Mode or nothing; `applySlideSwitch()` in `main.cpp` sets the
+  bound function at the first loop pass, when the switch moves and when the binding changes.
+- I2C bus SDA7/SCL8, shared: TMA525C touch (0x24), the warm/cool LED driver of the light (0x38), PCF8563-class RTC
+  (0x51), QMI8658 IMU (0x6A) and the SGM41562 charger (0x03). The light is the SDK's `PiccoDualLed` backend: it is
+  present only once `begin()` found it on the bus, every write holds `HalI2cBus::Lock` (the input sampler polls touch
+  on that bus), and it keeps its output through deep sleep, so `HalFrontlight::prepareForDeepSleep()` switches it off.
+  `HalPowerManager::begin()` sets up the charger as the stock firmware does (4.35 V charge voltage).
+- Battery on the ADC (GPIO1, divider 2); no fuel gauge. No USB detect pin, so USB presence comes from the host link
+  only: a wall charger does not show the charging bolt.
+- SD card: native SDMMC, 4-bit. GPIO0 is a peripheral power rail (active low), not a boot key.
+- USB: the stock firmware enumerates as a TinyUSB mass-storage device with no serial port. Holding Power and Volume
+  Up (+) for more than 10 s makes it erase otadata and restart into Onyx's recovery (`safeboot`, "Recovery v1.0"),
+  which brings up USB Serial/JTAG; esptool's default reset then reaches the ROM loader (`--before no-reset` does not,
+  recovery is running). Witch Reader keeps USB Serial/JTAG as its USB personality (`ARDUINO_USB_MODE=1`, as on the
+  X4 Pro) and switches the PHY to TinyUSB only for USB Drive.
+
+### Two partition tables
+
+One `firmware.bin` runs under either; an app image does not depend on the slot it is in.
+
+| | `partitions.csv` (ours) | Onyx's stock table (`partitions_picco.csv`) |
+|---|---|---|
+| Install | `pio run -e picco -t upload`, or `full-install-picco.bin` / the flasher's Full install | `pio run -e picco_stock -t upload`: the app at 0xE0000 and otadata at 0x15000 (`scripts/stock_table_upload.py`), or CrossPoint's flash tools |
+| Kept | nothing of Onyx's | Onyx's bootloader, NVS, `safeboot` recovery (0x20000) and spiffs |
+| Updates | OTA, SD Firmware Update, Up + Power recovery boot | none: one app slot, so `ota_boot::idleAppPartition()` is null and the System Update rows and the recovery boot are not offered |
+| Flash area | the `spiffs` partition | the PSRAM image on the card: the stock 512 KB `spiffs` holds the stock firmware's data and is left alone (`FlashArea.cpp`) |
+
+The stock boot chain: the stock `app` (ota_0) normally runs. Blank otadata makes the bootloader start `safeboot`, which
+offers an SD-card install of `/update/firmware.bin` and a Restart that selects the app again. A full stock image can
+only come from a dump of the unit itself: Onyx's firmware cannot be downloaded anywhere. Take one before the first
+install (`esptool --no-stub read-flash 0 ALL`, then `verify-flash` against it); restore with `write-flash 0x0`.
+
 ## Gotchas
 
 - A `platformio.local.ini` (gitignored, loaded through `extra_configs`) whose env builds on
@@ -277,9 +323,11 @@ chosen; without it a UC81xx unit is sent SSD1677 command streams and shows no im
 pio run -e default       # X3 and X4, the regression gate
 pio run -e x4pro
 pio run -e lilygo_t5s3
+pio run -e murphy
+pio run -e picco
 ```
 
-CI builds the same three envs (`.github/workflows/ci.yml`).
+CI builds the same five envs (`.github/workflows/ci.yml`).
 
 - A change meant for the S3 boards only, or a new capability predicate, should leave the
   `default` build byte-identical. Compare its `RAM:` and `Flash:` lines with and without the
@@ -298,7 +346,10 @@ CI builds the same three envs (`.github/workflows/ci.yml`).
 
 - SDK board notes, in our SDK fork:
   [X4 Pro](https://github.com/jpirnay/freeink-sdk/blob/witchhunt/docs/xteink-x4pro-support.md)
-  and [LilyGo T5S3](https://github.com/jpirnay/freeink-sdk/blob/witchhunt/docs/lilygo-t5s3-support.md).
+  and [LilyGo T5S3](https://github.com/jpirnay/freeink-sdk/blob/witchhunt/docs/lilygo-t5s3-support.md). The Picco has
+  no SDK note; its evidence is in the comments on `PICCO` in `BoardConfig.h`.
+- BOOX Picco in CrossPoint: [PR #3947](https://github.com/crosspoint-reader/crosspoint-reader/pull/3947) and the
+  slide-switch follow-up #4234.
 - Board profiles: `libs/hardware/BoardConfig/include/BoardConfig.h` in the SDK.
 - LilyGo T5S3 vendor repository,
   [`Xinyuan-LilyGO/T5S3-4.7-e-paper-PRO`](https://github.com/Xinyuan-LilyGO/T5S3-4.7-e-paper-PRO).
