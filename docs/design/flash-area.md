@@ -2,7 +2,8 @@
 
 > **Status.** Step 1 (one interface, the partition behind it) and step 2 (the PSRAM image) are implemented. Every
 > build with PSRAM (the S3 boards) takes the image, saved to the card, when its partition table has no usable
-> `spiffs` partition (issue #733: an X4 Pro that kept its stock table). The SD-only case is design only. Code:
+> `spiffs` partition (issue #733: an X4 Pro that kept its stock table). In the SD-only case the interface language is read
+from the card (card mode); the rest of it is design only. Code:
 > `lib/hal/FlashArea.*` (the choice), `lib/hal/EspPartitionFlash.*` (backend a), `lib/hal/PsramImageFlash.*` and
 > `lib/hal/CardImageFile.*` (backend b), `lib/hal/FlashAreaRegion.*` (a window for the glyph and hyphenation stores).
 > Tests: `test/flash_area/` (every consumer over a simulated area, the PSRAM backend with power cuts),
@@ -78,7 +79,7 @@ use a `FlashAreaRegion`; `SystemStatus` asks `FlashFontPartition::cachedBytes()`
 | .cpfont cache | yes | yes | no: `SdCardFont` reads the card (the existing fallback, its tables on the heap) |
 | TTF glyph store | yes | yes | **no**: the store needs a mapping; TTF families cannot load |
 | hyphenation | C3 region | not used (tries go to PSRAM already) | not used |
-| UI language | yes | yes | **no**: the slot must hand out pointers; the UI stays English |
+| UI language | yes | yes | from the card a string at a time (card mode, `lib/I18n/LangCardStrings.*`) |
 | Mapping budget | the MMU's free pages (C3 ~31) | the whole image | none |
 | Internal RAM | the handle table (C3 +48 B static); on S3 also the 512 B bounce buffer, static now, which the TTF family set used to hold on the heap | the image in PSRAM; +64 B static, 112 B of bitmaps | none |
 
@@ -140,15 +141,20 @@ use a `FlashAreaRegion`; `SystemStatus` asks `FlashFontPartition::cachedBytes()`
 ### (c) SD only
 
 What a board without the partition and without PSRAM (or whose image cannot be allocated) gets: `FlashArea::get()` is
-`nullptr`. The .cpfont cache is skipped and fonts load from the card, which works today. The language slot and the
-glyph store would need a different design (strings in heap RAM, ~30 KB, rejected for the C3 in `FlashLangPartition.h`;
-a glyph store reading its index and log through the card), so on such a board the UI stays English and TTF families do
-not load. No board we know of is in that case: the S3 boards have 8 MB of PSRAM, and the C3 boards' tables have a
+`nullptr`. The .cpfont cache is skipped and fonts load from the card, which works today. The interface language comes
+from the card in **card mode** (`I18n`, `langcard::CardStrings`, docs/i18n.md): the pack is unpacked once to
+`/.crosspoint/lang/strings.bin`, and a key's string is read from it the first time it is asked for, into a heap arena
+that only grows (1 KB chunks, only while the heap keeps a 32 KB block beside them; the handles cost 2 B a key). A
+session that draws Home, the Library, the reader and every Settings row holds ~5.9 KB of German; a resident copy of the
+pack (17-31 KB, rejected for the C3 in `FlashLangPartition.h`) is never made. A CJK language's UI faces decode per
+glyph there. The glyph store would need a different design (a store reading its index and log through the card), so
+TTF families do not load. No board we know of is in that case: the S3 boards have 8 MB of PSRAM, and the C3 boards' tables have a
 large enough `spiffs` partition. The boot log says so (`[FLA] no flash area: ...`).
 
 **What shows it.** System Information's Flash section has a **Flash area** row ("spiffs 3.4 MB"; "PSRAM + card" or
 "-", then on the next line what the table holds: "spiffs 80.0 KB", "spiffs -") and a **Language** row: the language's code, and
-when its pack is not in use, why: `no pack`, `bad pack` (I18n), or the slot's `FlashLangPartition::lastFailure()`:
+when its pack is not in use, why: `no pack`, `bad pack` (I18n), `card` (in use, in card mode), or the slot's
+`FlashLangPartition::lastFailure()`:
 `no flash area`, `area too small`, `build`, `mmap`, `CRC`. A slot that does not start on a 64 KB page is not a failure:
 `esp_partition_mmap` maps from the page below and hands out the pointer advanced to the offset.
 
