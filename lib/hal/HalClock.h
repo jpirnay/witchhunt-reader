@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <ctime>
 
+#include "ClockAuthority.h"
+
 /// Lightweight wall-clock facade.
 ///
 /// The ESP32-C3 has no battery-backed RTC, so wall-clock time is lost on every
@@ -109,10 +111,39 @@ bool isStaleRestore();
 /// stale NVS epoch rather than trusting it), which puts every curated root's
 /// notBefore in the future and makes the whole trust store fail to load.
 ///
-/// "Approximate" is fine here: an NVS-restored clock that is merely a few hours
-/// off still lands inside every root's validity window, so it verifies fine.
-/// Only genuinely unset or wildly-wrong clocks matter.
+/// An NVS-restored clock that is merely a few hours off lands inside every
+/// root's validity window, so the roots load. It is not enough for a server's
+/// own certificate, which may be days old: whether those dates are checked is
+/// datesAuthoritativeForTls().
 bool isPlausibleForTls();
+
+/// Where the clock's value came from (restore(), syncNtp(), applyClientTime()).
+clock_authority::Source source();
+
+/// Whether TLS may check a certificate's notBefore and notAfter against this
+/// clock: it came from NTP in this boot or from a hardware RTC, and is
+/// plausible (clock_authority::datesAuthoritative()). On an RTC-less board
+/// (the X4) a clock restored from NVS or estimated over a sleep can be days
+/// behind and still plausible, and a renewed server certificate then reads as
+/// not yet valid (issue #766).
+bool datesAuthoritativeForTls();
+
+/// What a TLS connect to `peer` ("host:port", for the log) passes to
+/// setAllowCertificateDateErrors(): true when the clock is not authoritative,
+/// which waives the certificate dates and only them (chain, signature and
+/// hostname stay checked). Logs the waiver with the peer, the epoch and where
+/// the clock came from, once per peer and clock source.
+bool waiveCertificateDates(const char* peer);
+
+/// One SNTP attempt before a network flow's first TLS connect when the clock is
+/// not authoritative, however plausible it looks; none while an attempt failed
+/// in the last 10 minutes. Call it once WiFi is up. TLS does not depend on it
+/// (waiveCertificateDates()); it corrects the clock everything else reads.
+/// Returns whether the clock is authoritative afterwards.
+bool syncNtpIfSoftwareClock(const char* preferredServer = nullptr);
+
+/// True when an NTP sync failed in the last `withinMs` milliseconds.
+bool ntpFailedWithin(uint32_t withinMs);
 
 /// Make the clock usable for TLS: a no-op returning true when it already is,
 /// otherwise one SNTP attempt against `preferredServer`. Returns whether the
