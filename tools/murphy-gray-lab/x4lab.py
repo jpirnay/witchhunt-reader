@@ -99,8 +99,8 @@ class X4:
         self.device = devctl.Device(port)
         self.lut = None
 
-    def command(self, text, timeout=30):
-        reply = self.device.command(text, timeout=timeout, until=re.compile(r"^LAB_(OK|ERROR)"))
+    def command(self, text):
+        reply = self.device.command(text, until=re.compile(r"^LAB_(OK|ERROR)"))
         if reply is None or not reply.startswith("LAB_OK"):
             raise SystemExit(f"STOP: {text[:40]}...: {reply}")
         return reply
