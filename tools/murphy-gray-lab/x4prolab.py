@@ -11,6 +11,7 @@ The lab's pixel code is RED * 2 + BW, with RED in DTM1 and BW in DTM2. Which tab
 controller's business: `map` measures it, and CODE_TO_TABLE holds the result.
 
   ./x4prolab.py white | black | marks       a normal full refresh, for cam.py's baselines and calibration
+  ./x4prolab.py grid                         squares for `cam.py mesh` (shot "grid"), after `cam.py calibrate`
   ./x4prolab.py map                          one refresh from white: table 0x21 black 23, 0x22 black 6,
                                              0x23 black 2, 0x24 nothing; bands for codes 0, 1, 2, 3
   ./x4prolab.py wedge [--start black] [--reverse]
@@ -279,7 +280,7 @@ def cancel(x4, upto=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("step", choices=("white", "black", "marks", "map", "t11", "t11-cancel", "check", "wedge",
+    parser.add_argument("step", choices=("white", "black", "marks", "grid", "map", "t11", "t11-cancel", "check", "wedge",
                                          "gray", "timing"))
     parser.add_argument("--pages", type=int)
     parser.add_argument("--timing", help="phase lengths per group, groups split by '/': e.g. 1,3,2,1/6,8,2,0")
@@ -308,6 +309,9 @@ def main():
     elif args.step == "marks":
         size = cam.CALIB_SIZE
         print(x4.full(3, [(x, y, size, size, 0) for x, y in (*cam.CALIB_MARKS, cam.CALIB_ORIENT)]))
+    elif args.step == "grid":
+        half, size = cam.GRID_SIZE // 2, cam.GRID_SIZE
+        print(x4.full(3, [(x - half, y - half, size, size, 0) for y in cam.GRID_YS for x in cam.GRID_XS]))
     elif args.step == "map":
         map_codes(x4)
     elif args.step == "t11":

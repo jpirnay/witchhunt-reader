@@ -27,10 +27,17 @@ def _camera_name(device="/dev/video0"):
         return ""
 
 
-# The XIFT AC310 (on the stand since 2026-11-12) gives raw YUY2 only up to 1280x720, so it is read as
-# MJPEG at 4K; region means average the compression away. The earlier webcam gave YUY2 at 1080p.
-MJPEG = "AC310" in _camera_name()
-CAM_W, CAM_H = (3840, 2160) if MJPEG else (1920, 1080)
+# The Global Shutter Camera (OV9281, mono, on the stand since 2026-11-14) gives raw YUY2 at its full 1280x800.
+# Its exposure is not continuous: it sits on plateaus and wraps (at gain 64 on a white panel, 80-150 read darker
+# than 40-70), and only values from 800 up averaged out the room's 100 Hz flicker. So the exposure stays on one
+# plateau and the gain (16-255, smooth) sets the brightness: 900 and 128 put a white X4 Pro panel at 182-189,
+# with the sensor clipping near 240 (2026-11-14). The XIFT AC310 (2026-11-12) gives raw YUY2 only up to
+# 1280x720, so it is read as MJPEG at 4K; region means average the compression away. The earlier webcam gave
+# YUY2 at 1080p.
+_NAME = _camera_name()
+GLOBAL_SHUTTER = "Global Shutter" in _NAME
+MJPEG = "AC310" in _NAME
+CAM_W, CAM_H = (1280, 800) if GLOBAL_SHUTTER else (3840, 2160) if MJPEG else (1920, 1080)
 PANEL_W, PANEL_H = {"x3": (792, 528), "x4": (800, 480), "x4pro": (800, 480), "picco": (800, 480)}.get(os.environ.get("LAB_BOARD", "murphy"), (240, 416))
 SCALE = 2  # rectified shots are this many pixels per panel pixel
 
@@ -39,6 +46,7 @@ VIDIOC_G_CTRL = 0xC008561B
 CTRL_WB_AUTO = 0x0098090C
 CTRL_WB_TEMP = 0x0098091A
 CTRL_GAIN = 0x00980913
+CTRL_GAMMA = 0x00980910
 CTRL_POWER_LINE = 0x00980918
 CTRL_SHARPNESS = 0x0098091B
 CTRL_BACKLIGHT = 0x0098091C
@@ -49,7 +57,8 @@ AUTO_EXPOSURE_MANUAL = 1
 AUTO_EXPOSURE_APERTURE = 3
 POWER_LINE_50HZ = 1
 
-EXPOSURE = int(os.environ.get("MURPHY_EXPOSURE", "1000"))
+EXPOSURE = int(os.environ.get("MURPHY_EXPOSURE", "900" if GLOBAL_SHUTTER else "1000"))
+GAIN = int(os.environ.get("CAM_GAIN", "128" if GLOBAL_SHUTTER else "0"))
 STATE = Path(os.path.expanduser("~/.local/state/murphy-gray-lab"))
 # Each board sits on the stand in its own place, so it keeps its own calibration and shots.
 _SUFFIX = "" if os.environ.get("LAB_BOARD", "murphy") == "murphy" else "-" + os.environ["LAB_BOARD"]
@@ -71,11 +80,11 @@ def get_control(fd, control):
     return struct.unpack_from("<i", buffer, 4)[0]
 
 
-def lock(device, exposure):
-    """Everything automatic off. The exposure unit is 100 us: multiples of 100 sit on the 100 Hz
-    flicker of mains lighting. Order matters, because manual values are refused while auto is on. After
-    the camera powers up it ignores the exposure value until the mode has been switched away from manual
-    and back (seen after a reboot, 2026-11-08), so the mode is toggled first."""
+def lock(device, exposure, gain=GAIN):
+    """Everything automatic off. On the earlier webcams the exposure unit is 100 us: multiples of 100 sit
+    on the 100 Hz flicker of mains lighting. Order matters, because manual values are refused while auto is
+    on. After the camera powers up it ignores the exposure value until the mode has been switched away from
+    manual and back (seen after a reboot, 2026-11-08), so the mode is toggled first."""
     fd = os.open(device, os.O_RDWR)
     try:
         set_control(fd, CTRL_AUTO_EXPOSURE, AUTO_EXPOSURE_APERTURE, required=False)
@@ -84,9 +93,11 @@ def lock(device, exposure):
         set_control(fd, CTRL_EXPOSURE, exposure)
         set_control(fd, CTRL_WB_AUTO, 0)
         set_control(fd, CTRL_WB_TEMP, 4 if MJPEG else 4600)  # the AC310 takes a preset, 1-5
-        set_control(fd, CTRL_GAIN, 0)
+        set_control(fd, CTRL_GAIN, gain)
         set_control(fd, CTRL_SHARPNESS, 0)
-        set_control(fd, CTRL_BACKLIGHT, 0, required=False)
+        if GLOBAL_SHUTTER:
+            set_control(fd, CTRL_GAMMA, 100)  # its lowest: higher lifts the mids and clips the lamp
+        set_control(fd, CTRL_BACKLIGHT, 32 if GLOBAL_SHUTTER else 0, required=False)  # 32 is its lowest
         set_control(fd, CTRL_POWER_LINE, POWER_LINE_50HZ, required=False)
         return get_control(fd, CTRL_EXPOSURE)
     finally:
@@ -228,8 +239,130 @@ def load_camera():
     return json.loads(CAMERA_FILE.read_text())
 
 
+def panel_bounds():
+    """The box through the calibrated mark centres, in camera pixels, or None before a calibration."""
+    if not CAMERA_FILE.exists():
+        return None
+    xs, ys = zip(*load_camera()["marks"])
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def outside_panel():
+    """Camera boxes that hold no part of the device, for `still`. Without a calibration, the frame of the
+    1080p webcam's stand, scaled to this camera."""
+    bounds = panel_bounds()
+    if bounds is None:
+        sx, sy = CAM_W / 1920, CAM_H / 1080
+        x0, y0, x1, y1 = round(560 * sx), round(90 * sy), round(1360 * sx), round(950 * sy)
+    else:
+        # The marks sit inside the panel; a third of the panel's size each way also covers the bezel.
+        left, top, right, bottom = bounds
+        dx, dy = (right - left) / 3, (bottom - top) / 3
+        x0, y0 = max(0, round(left - dx)), max(0, round(top - dy))
+        x1, y1 = min(CAM_W, round(right + dx)), min(CAM_H, round(bottom + dy))
+    boxes = [(0, 0, CAM_W, y0), (0, y0, x0, CAM_H), (x1, y0, CAM_W, CAM_H), (x0, y1, x1, CAM_H)]
+    return [box for box in boxes if box[2] - box[0] >= 16 and box[3] - box[1] >= 16]
+
+
+def scene_shift(reference, image, boxes, reach=2, step=0.25):
+    """The translation (dx, dy) in camera pixels that lays `image` best onto `reference` inside the boxes, and
+    how much lighter `image` is there. A plain difference cannot tell: at gain 128 the global-shutter camera's
+    noise alone reads 1.5-2.7 between two shots of a still scene, while a 1-pixel drift reads about the same
+    (2026-11-14). Each box's mean is taken out first, so a change in room light is not taken for a move."""
+    pad = reach + 1
+    pieces, light = [], []
+    for x0, y0, x1, y1 in boxes:
+        if x1 - x0 <= 2 * pad or y1 - y0 <= 2 * pad:
+            continue
+        core = (pad, pad, x1 - x0 - pad, y1 - y0 - pad)
+        ref, moving = reference.crop((x0, y0, x1, y1)), image.crop((x0, y0, x1, y1))
+        offset = ImageStat.Stat(ref.crop(core)).mean[0] - ImageStat.Stat(moving.crop(core)).mean[0]
+        light.append(-offset)
+        moving = moving.point(lambda value, offset=offset: max(0, min(255, round(value + offset))))
+        pieces.append((ref.crop(core), moving, core))
+    best = None
+    shifts = [i * step for i in range(-round(reach / step), round(reach / step) + 1)]
+    for dy in shifts:
+        for dx in shifts:
+            error = 0.0
+            for ref, moving, core in pieces:
+                shifted = moving.transform(moving.size, Image.Transform.AFFINE, (1, 0, dx, 0, 1, dy),
+                                           Image.Resampling.BILINEAR).crop(core)  # fmt: skip
+                error += ImageStat.Stat(ImageChops.difference(ref, shifted)).mean[0]
+            if best is None or error < best[0]:
+                best = (error, dx, dy)
+    return best[1], best[2], statistics.mean(light)
+
+
+# Squares drawn by a lab driver's `grid` step, for `cam.py mesh`: their centres, in panel pixels.
+GRID_SIZE = 12 if PANEL_W < 400 else 24
+_COLUMNS, _ROWS = (9, 5) if PANEL_W >= PANEL_H else (5, 9)
+GRID_XS = tuple(round(GRID_SIZE + i * (PANEL_W - 2 * GRID_SIZE) / (_COLUMNS - 1)) for i in range(_COLUMNS))
+GRID_YS = tuple(round(GRID_SIZE + j * (PANEL_H - 2 * GRID_SIZE) / (_ROWS - 1)) for j in range(_ROWS))
+
+
+def perspective_point(coefficients, x, y):
+    """Where the four-mark fit puts panel point (x, y) in the camera."""
+    a, b, c, d, e, f, g, h = coefficients
+    k = g * x + h * y + 1
+    return (a * x + b * y + c) / k, (d * x + e * y + f) / k
+
+
+def measure_grid(white, grid, camera):
+    """Camera position of each grid square, row by row. The four-mark fit says where to look; on the wide
+    lens of the global-shutter camera it was off by up to 6.1 camera pixels inside the corners (2026-11-14)."""
+    found = blobs(ImageChops.subtract(white, grid).point(lambda value: 255 if value > 40 else 0), step=1,
+                  minimum=GRID_SIZE)  # fmt: skip
+    reach = min(GRID_XS[1] - GRID_XS[0], GRID_YS[1] - GRID_YS[0]) / 3
+    points = []
+    for y in GRID_YS:
+        for x in GRID_XS:
+            u, v = perspective_point(camera["coefficients"], x, y)
+            nearest = min(found, key=lambda blob: (blob[0] - u) ** 2 + (blob[1] - v) ** 2)
+            # Compared in panel pixels, through the fit's own scale at this point.
+            step = perspective_point(camera["coefficients"], x + 1, y)
+            scale = ((step[0] - u) ** 2 + (step[1] - v) ** 2) ** 0.5
+            if ((nearest[0] - u) ** 2 + (nearest[1] - v) ** 2) ** 0.5 / scale > reach:
+                raise SystemExit(f"no grid square near panel ({x}, {y}): nearest at {nearest[:2]}, "
+                                 f"expected ({u:.0f}, {v:.0f})")
+            points.append(nearest[:2])
+    return points
+
+
+def _segment(lines, value):
+    """Index of the grid cell along one axis that holds value; the outer cells extend past the grid."""
+    for index in range(len(lines) - 2):
+        if value < lines[index + 1]:
+            return index
+    return len(lines) - 2
+
+
+def mesh_point(camera, x, y):
+    """Panel point (x, y) in the camera, bilinear between the measured grid points."""
+    mesh = camera["mesh"]
+    xs, ys, points = mesh["xs"], mesh["ys"], mesh["points"]
+    i, j = _segment(xs, x), _segment(ys, y)
+    s = (x - xs[i]) / (xs[i + 1] - xs[i])
+    t = (y - ys[j]) / (ys[j + 1] - ys[j])
+    corner = lambda di, dj: points[(j + dj) * len(xs) + i + di]  # noqa: E731
+    return tuple((1 - s) * (1 - t) * corner(0, 0)[k] + s * (1 - t) * corner(1, 0)[k] + (1 - s) * t * corner(0, 1)[k]
+                 + s * t * corner(1, 1)[k] for k in (0, 1))  # fmt: skip
+
+
 def rectify(image, camera):
     """The camera image in panel coordinates, SCALE pixels to a panel pixel."""
+    if "mesh" in camera:
+        # One quad per grid cell, out to the panel edge, so the lens's bending is followed cell by cell.
+        lines_x = (0, *camera["mesh"]["xs"][1:-1], PANEL_W)
+        lines_y = (0, *camera["mesh"]["ys"][1:-1], PANEL_H)
+        data = []
+        for y0, y1 in zip(lines_y, lines_y[1:]):
+            for x0, x1 in zip(lines_x, lines_x[1:]):
+                quad = (*mesh_point(camera, x0, y0), *mesh_point(camera, x0, y1), *mesh_point(camera, x1, y1),
+                        *mesh_point(camera, x1, y0))  # fmt: skip
+                data.append(((x0 * SCALE, y0 * SCALE, x1 * SCALE, y1 * SCALE), quad))
+        return image.transform((PANEL_W * SCALE, PANEL_H * SCALE), Image.Transform.MESH, data,
+                               Image.Resampling.BICUBIC)  # fmt: skip
     a, b, c, d, e, f, g, h = camera["coefficients"]
     k = 1 / SCALE
     coefficients = (a * k, b * k, c, d * k, e * k, f, g * k, h * k)
@@ -280,6 +413,7 @@ def main():
     shoot = steps.add_parser("shot", help="capture and save a shot")
     shoot.add_argument("name")
     steps.add_parser("calibrate", help="find the panel, from shots baseline-white and marks")
+    steps.add_parser("mesh", help="after calibrate: follow the lens between the marks, from shot grid")
     still = steps.add_parser("still", help="has the scene moved since a shot? Exits 1 if it has")
     still.add_argument("reference")
     still.add_argument("name")
@@ -300,12 +434,20 @@ def main():
     args = parser.parse_args()
 
     if args.step == "sweep":
-        for exposure in (100, 200, 300, 400, 500, 600, 800, 1000):
-            got = lock(args.device, exposure)
-            frame = average(grab(args.device, frames=2, warmup=4))
+        bounds = panel_bounds()
+        if bounds:
+            box = tuple(round(v) for v in bounds)
+        else:
             box = (CAM_W // 2 - 150, CAM_H // 2 - 300, CAM_W // 2 + 100, CAM_H // 2 + 300)
+        # On the global-shutter camera the exposure jumps between plateaus, so gain is the knob to sweep.
+        settings = ([(args.exposure, gain) for gain in (32, 64, 96, 128, 160, 192, 224, 255)] if GLOBAL_SHUTTER
+                    else [(exposure, GAIN) for exposure in (100, 200, 300, 400, 500, 600, 800, 1000)])  # fmt: skip
+        for exposure, gain in settings:
+            got = lock(args.device, exposure, gain)
+            frame = average(grab(args.device, frames=2, warmup=4))
             stat = ImageStat.Stat(frame.crop(box))
-            print(f"exposure {exposure} (reads {got}): panel mean {stat.mean[0]:.1f}, max {stat.extrema[0][1]}")
+            print(f"exposure {exposure} (reads {got}) gain {gain}: panel mean {stat.mean[0]:.1f}, "
+                  f"max {stat.extrema[0][1]}")
     elif args.step == "shot":
         image, path = shot(args.device, args.name, args.exposure)
         print(f"{path}: mean {ImageStat.Stat(image).mean[0]:.1f}")
@@ -315,6 +457,16 @@ def main():
         camera = calibrate(white, marks)
         CAMERA_FILE.write_text(json.dumps(camera))
         print("marks at", [tuple(round(v) for v in point) for point in camera["marks"]])
+    elif args.step == "mesh":
+        camera = load_camera()
+        white = Image.open(SHOTS / "baseline-white.png").convert("L")
+        grid = Image.open(SHOTS / "grid.png").convert("L")
+        points = measure_grid(white, grid, camera)
+        fitted = [perspective_point(camera["coefficients"], x, y) for y in GRID_YS for x in GRID_XS]
+        shifts = [((u - p[0]) ** 2 + (v - p[1]) ** 2) ** 0.5 for (u, v), p in zip(points, fitted)]
+        camera["mesh"] = {"xs": GRID_XS, "ys": GRID_YS, "points": points}
+        CAMERA_FILE.write_text(json.dumps(camera))
+        print(f"{len(points)} grid squares; off the four-mark fit by up to {max(shifts):.1f} camera px")
     elif args.step == "fine":
         camera = load_camera()
         white, black = load_rectified("baseline-white", camera), load_rectified("baseline-black", camera)
@@ -339,12 +491,19 @@ def main():
         # frame, and it silently turns each later number into a reading of the wrong region.
         one = Image.open(SHOTS / f"{args.reference}.png").convert("L")
         two = Image.open(SHOTS / f"{args.name}.png").convert("L")
-        k = CAM_W // 1920
-        frame = [(0, 0, CAM_W, 90 * k), (0, 90 * k, 560 * k, CAM_H), (1360 * k, 90 * k, CAM_W, CAM_H),
-                 (560 * k, 950 * k, 1360 * k, CAM_H)]  # fmt: skip
-        moved = max(ImageStat.Stat(ImageChops.difference(one.crop(b), two.crop(b))).mean[0] for b in frame)
-        print(f"scene difference outside the panel: {moved:.2f} ({'moved' if moved > 1.5 else 'still'})")
-        return 1 if moved > 1.5 else 0
+        dx, dy, light = scene_shift(one, two, outside_panel())
+        camera_px = (dx * dx + dy * dy) ** 0.5
+        if CAMERA_FILE.exists():
+            coefficients = load_camera()["coefficients"]
+            u0, v0 = perspective_point(coefficients, PANEL_W / 2, PANEL_H / 2)
+            u1, v1 = perspective_point(coefficients, PANEL_W / 2 + 1, PANEL_H / 2)
+            panel_px = camera_px / ((u1 - u0) ** 2 + (v1 - v0) ** 2) ** 0.5
+        else:
+            panel_px = camera_px
+        moved = panel_px > 1.0
+        print(f"scene shift outside the panel: dx {dx:+.2f} dy {dy:+.2f} camera px = {panel_px:.1f} panel px, "
+              f"light {light:+.1f} ({'moved' if moved else 'still'})")
+        return 1 if moved else 0
     elif args.step == "strip":
         camera = load_camera()
         white, black = load_rectified("baseline-white", camera), load_rectified("baseline-black", camera)

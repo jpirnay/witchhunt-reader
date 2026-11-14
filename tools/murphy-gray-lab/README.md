@@ -74,6 +74,14 @@ light cancel: 0 % is black, 100 % is white, on a scale close to perceived lightn
 A webcam at this distance gives about 2.25 camera pixels per panel pixel. That is plenty for levels
 and for the mean of a fine pattern, but it cannot judge text: that needs eyes.
 
+The global-shutter camera (OV9281, mono, raw 1280×800, on the stand since 2026-11-14) is recognised by
+its name. Its exposure jumps between plateaus, so it stays at 900 and `sweep` steps the gain instead
+(`CAM_GAIN`, 128 by default). Its lens is wide: on the X4 Pro the four-mark fit was up to 8 panel pixels
+off between the marks, more than a band's inset. After `calibrate`, draw the driver's grid and fit the
+lens (`./x4prolab.py grid; ./cam.py shot grid; ./cam.py mesh`); checked halfway between the grid squares,
+the mesh was at most 1.3 panel pixels off. A new `calibrate` drops the mesh. At 0.78 camera pixels per
+X4 Pro panel pixel it reads region levels, not single pixels.
+
 ## The tests
 
 `--dry-run` shows what a step would send without touching a port. Each test decides whether the next
@@ -398,6 +406,7 @@ black driven repeatedly lifts several points less than the Test 2 table says.
 white through FAST beside a strip that never changes, and `./cam.py strip` reports the difference.
 `--settled` draws the black with a full refresh first, which is what UI black is, and `--dwell` leaves
 it up. Check `./cam.py still baseline-white <shot>` after each run: a bumped camera reads as a result.
+`still` reports how far the scene outside the panel has shifted, in panel pixels, and fails above one.
 `./ui_ghost.py <tag> --port <port>` measures the same thing on a real Settings list with the reader on
 the device.
 
