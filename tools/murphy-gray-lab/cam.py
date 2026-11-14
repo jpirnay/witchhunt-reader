@@ -20,8 +20,18 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageStat
 
-CAM_W, CAM_H = 1920, 1080
-PANEL_W, PANEL_H = {"x3": (792, 528), "x4": (800, 480)}.get(os.environ.get("LAB_BOARD", "murphy"), (240, 416))
+def _camera_name(device="/dev/video0"):
+    try:
+        return Path(f"/sys/class/video4linux/{Path(device).name}/name").read_text().strip()
+    except OSError:
+        return ""
+
+
+# The XIFT AC310 (on the stand since 2026-11-12) gives raw YUY2 only up to 1280x720, so it is read as
+# MJPEG at 4K; region means average the compression away. The earlier webcam gave YUY2 at 1080p.
+MJPEG = "AC310" in _camera_name()
+CAM_W, CAM_H = (3840, 2160) if MJPEG else (1920, 1080)
+PANEL_W, PANEL_H = {"x3": (792, 528), "x4": (800, 480), "picco": (800, 480)}.get(os.environ.get("LAB_BOARD", "murphy"), (240, 416))
 SCALE = 2  # rectified shots are this many pixels per panel pixel
 
 VIDIOC_S_CTRL = 0xC008561C
@@ -47,8 +57,12 @@ SHOTS = STATE / ("shots" + _SUFFIX)
 CAMERA_FILE = STATE / ("camera" + _SUFFIX + ".json")
 
 
-def set_control(fd, control, value):
-    fcntl.ioctl(fd, VIDIOC_S_CTRL, bytearray(struct.pack("<Ii", control, value)))
+def set_control(fd, control, value, required=True):
+    try:
+        fcntl.ioctl(fd, VIDIOC_S_CTRL, bytearray(struct.pack("<Ii", control, value)))
+    except OSError:
+        if required:
+            raise  # a camera without this control (the AC310 has no auto exposure, backlight or flicker setting)
 
 
 def get_control(fd, control):
@@ -64,16 +78,16 @@ def lock(device, exposure):
     and back (seen after a reboot, 2026-11-08), so the mode is toggled first."""
     fd = os.open(device, os.O_RDWR)
     try:
-        set_control(fd, CTRL_AUTO_EXPOSURE, AUTO_EXPOSURE_APERTURE)
+        set_control(fd, CTRL_AUTO_EXPOSURE, AUTO_EXPOSURE_APERTURE, required=False)
         set_control(fd, CTRL_AUTO_EXPOSURE, AUTO_EXPOSURE_MANUAL)
-        set_control(fd, CTRL_DYNAMIC_RATE, 0)
+        set_control(fd, CTRL_DYNAMIC_RATE, 0, required=False)
         set_control(fd, CTRL_EXPOSURE, exposure)
         set_control(fd, CTRL_WB_AUTO, 0)
-        set_control(fd, CTRL_WB_TEMP, 4600)
+        set_control(fd, CTRL_WB_TEMP, 4 if MJPEG else 4600)  # the AC310 takes a preset, 1-5
         set_control(fd, CTRL_GAIN, 0)
         set_control(fd, CTRL_SHARPNESS, 0)
-        set_control(fd, CTRL_BACKLIGHT, 0)
-        set_control(fd, CTRL_POWER_LINE, POWER_LINE_50HZ)
+        set_control(fd, CTRL_BACKLIGHT, 0, required=False)
+        set_control(fd, CTRL_POWER_LINE, POWER_LINE_50HZ, required=False)
         return get_control(fd, CTRL_EXPOSURE)
     finally:
         os.close(fd)
@@ -81,6 +95,15 @@ def lock(device, exposure):
 
 def grab(device, frames=6, warmup=4):
     """Luma of `frames` frames, after dropping the first few while the sensor settles."""
+    if MJPEG:
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(
+                ["gst-launch-1.0", "-q", "v4l2src", f"device={device}", f"num-buffers={frames + warmup}", "!",
+                 f"image/jpeg,width={CAM_W},height={CAM_H}", "!", "multifilesink", f"location={tmp}/f%03d.jpg"],
+                check=True, timeout=90, stdout=subprocess.DEVNULL,
+            )  # fmt: skip
+            names = sorted(Path(tmp).glob("f*.jpg"))
+            return [Image.open(name).convert("L") for name in names[warmup:]]
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "raw.yuy2"
         subprocess.run(
@@ -302,7 +325,9 @@ def main():
         # frame, and it silently turns each later number into a reading of the wrong region.
         one = Image.open(SHOTS / f"{args.reference}.png").convert("L")
         two = Image.open(SHOTS / f"{args.name}.png").convert("L")
-        frame = [(0, 0, CAM_W, 90), (0, 90, 560, CAM_H), (1360, 90, CAM_W, CAM_H), (560, 950, 1360, CAM_H)]
+        k = CAM_W // 1920
+        frame = [(0, 0, CAM_W, 90 * k), (0, 90 * k, 560 * k, CAM_H), (1360 * k, 90 * k, CAM_W, CAM_H),
+                 (560 * k, 950 * k, 1360 * k, CAM_H)]  # fmt: skip
         moved = max(ImageStat.Stat(ImageChops.difference(one.crop(b), two.crop(b))).mean[0] for b in frame)
         print(f"scene difference outside the panel: {moved:.2f} ({'moved' if moved > 1.5 else 'still'})")
         return 1 if moved > 1.5 else 0

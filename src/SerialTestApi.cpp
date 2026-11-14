@@ -1882,13 +1882,14 @@ void cmdFs(const std::string_view arg) {
 
 // ---- Power ----------------------------------------------------------------------------------
 
-// CMD:LAB, development builds only: frames for the gray lab's X4 tests (tools/murphy-gray-lab/x4lab.py).
+// CMD:LAB, development builds only: frames for the gray lab's X4 and Picco tests (tools/murphy-gray-lab/x4lab.py).
 //   LAB:LUT:<hex>   the external LUT that LAB:DRAW:LUT sends, in the panel driver's own layout
+//   LAB:LUT+:<hex>  more of it: a command line holds 1024 bytes, the SSD2677's LUT is 535
 //   LAB:DRAW:<FULL|LUT>:<bg>:<x>,<y>,<w>,<h>,<c>;...   both planes from rectangles in panel RAM
 //                   coordinates, each code c (and the background bg) being RED * 2 + BW. FULL draws the BW
 //                   bit and runs a normal full refresh; LUT sends both planes with the LUT. LAB_OK:<ms>.
 namespace lab {
-uint8_t lut[128];
+uint8_t lut[544];  // the largest external LUT: the SSD2677 takes 535 bytes
 size_t lutLength = 0;
 
 int hexDigit(const char c) {
@@ -1928,16 +1929,21 @@ void fill(uint8_t* bw, uint8_t* red, const uint16_t width, const uint16_t height
 }  // namespace lab
 
 void cmdLab(std::string_view arg) {
-  if (arg.substr(0, 4) == "LUT:") {
-    const std::string_view hex = arg.substr(4);
-    if (hex.empty() || hex.size() % 2 != 0 || hex.size() / 2 > sizeof(lab::lut))
+  const bool more = arg.substr(0, 5) == "LUT+:";
+  if (more || arg.substr(0, 4) == "LUT:") {
+    const std::string_view hex = arg.substr(more ? 5 : 4);
+    const size_t at = more ? lab::lutLength : 0;
+    if (hex.empty() || hex.size() % 2 != 0 || at + hex.size() / 2 > sizeof(lab::lut))
       return static_cast<void>(reply("LAB_ERROR:bad lut"));
     for (size_t i = 0; i < hex.size() / 2; ++i) {
       const int high = lab::hexDigit(hex[2 * i]), low = lab::hexDigit(hex[2 * i + 1]);
-      if (high < 0 || low < 0) return static_cast<void>(reply("LAB_ERROR:bad lut"));
-      lab::lut[i] = static_cast<uint8_t>(high << 4 | low);
+      if (high < 0 || low < 0) {
+        lab::lutLength = 0;  // never send a table that is half old, half new
+        return static_cast<void>(reply("LAB_ERROR:bad lut"));
+      }
+      lab::lut[at + i] = static_cast<uint8_t>(high << 4 | low);
     }
-    lab::lutLength = hex.size() / 2;
+    lab::lutLength = at + hex.size() / 2;
     return static_cast<void>(replyf("LAB_OK:lut %u", static_cast<unsigned>(lab::lutLength)));
   }
   if (arg.substr(0, 5) != "DRAW:") return static_cast<void>(reply("LAB_ERROR:LUT or DRAW"));
