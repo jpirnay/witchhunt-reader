@@ -26,7 +26,9 @@ namespace {
 //      landmarks); a v15 cache holds a title banner, a logo or no cover for such books
 // v17: a spine record carries its item's ZIP stat (BOOK_SPINE_STAT_BYTES); a v16 record ends at tocIndex
 // v18: the spine's page-progression-direction (a byte after the description); a v17 cache does not have it
-constexpr uint8_t BOOK_CACHE_VERSION = 18;
+// v19: NCX links resolve against the NCX's folder, not the OPF's; a v18 cache holds an NCX in a subfolder's TOC
+//      entries unmapped (-1). Layout unchanged.
+constexpr uint8_t BOOK_CACHE_VERSION = 19;
 constexpr char bookBinFile[] = "/book.bin";
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";
