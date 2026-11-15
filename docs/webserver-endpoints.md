@@ -584,8 +584,9 @@ endpoints and WebDAV. The rules are in
   and spaces are dropped, so `/ .crosspoint` and `/.crosspoint.` are
   `/.crosspoint`. Matching ignores case.
 - A path that names an entry by its 8.3 short alias rather than its real name, such
-  as `/CROSSP~1` for `/.crosspoint`, is refused. A file whose real name happens to
-  look like an alias stays reachable.
+  as `/CROSSP~1` for `/.crosspoint`, is refused. So is the hashed form the SD library
+  gives a name whose `~1` is taken, such as `/CRO~A3F2`. A file whose real name happens
+  to look like an alias stays reachable.
 
 ---
 

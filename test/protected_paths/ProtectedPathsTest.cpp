@@ -98,6 +98,51 @@ TEST(ProtectedPaths, AliasShapes) {
   EXPECT_FALSE(looksLikeShortAlias("novel.epub"));
 }
 
+// The alias SdFat gives a long name whose ~1 is taken (FatFile::makeUniqueSfn): the base cut to at most three
+// characters, then '~' and four hex digits, high nibble first.
+std::string sdFatHashedAlias(const std::string& base, unsigned hex, const std::string& ext) {
+  std::string alias = base.substr(0, 3) + "~0000";
+  for (size_t i = alias.size() - 1; i > alias.size() - 5; i--) {
+    const unsigned h = hex & 0xF;
+    alias[i] = static_cast<char>(h < 10 ? '0' + h : 'A' + h - 10);
+    hex >>= 4;
+  }
+  return ext.empty() ? alias : alias + "." + ext;
+}
+
+// Most of those start with a letter, and were never resolved on the card: /CRO~A3F2/wifi.json, on a card where
+// /.crosspoint was made while another entry held CROSSP~1, passed as an ordinary path.
+TEST(ProtectedPaths, SdFatHashedAliasShapes) {
+  using ProtectedPaths::looksLikeShortAlias;
+  for (unsigned hex = 0; hex <= 0xFFFF; hex++) {
+    ASSERT_TRUE(looksLikeShortAlias(sdFatHashedAlias("CROSSP", hex, ""))) << sdFatHashedAlias("CROSSP", hex, "");
+    ASSERT_TRUE(looksLikeShortAlias(sdFatHashedAlias("WIFI", hex, "JSO"))) << sdFatHashedAlias("WIFI", hex, "JSO");
+  }
+  EXPECT_TRUE(looksLikeShortAlias("cro~fabc"));   // FAT matches the alias without case
+  EXPECT_TRUE(looksLikeShortAlias("AB~CDEF"));    // a base shorter than three keeps the tail right after it
+  EXPECT_FALSE(looksLikeShortAlias("CRO~A3G2"));  // not hex
+  EXPECT_FALSE(looksLikeShortAlias("CR~ABC"));    // three digits: SdFat writes four
+  EXPECT_FALSE(looksLikeShortAlias("C~ABCDE"));   // five
+  EXPECT_FALSE(looksLikeShortAlias("C~ABCD_"));   // the digits do not end the base
+}
+
+// The tail is the alias's last tilde; a long name's own '~' stays in its alias before it.
+TEST(ProtectedPaths, AliasTailAfterAnotherTilde) {
+  using ProtectedPaths::looksLikeShortAlias;
+  EXPECT_TRUE(looksLikeShortAlias("~LOCK_~1.ODT"));  // .~lock.novel.odt#, LibreOffice's lock file
+  EXPECT_TRUE(looksLikeShortAlias("A~B~1"));
+  EXPECT_FALSE(looksLikeShortAlias("A~B~C.TXT"));
+}
+
+TEST(ProtectedPaths, HashedAliasSpellingIsRefused) {
+  auto aliasOfCrosspoint = [](const std::string_view, const std::string_view name) {
+    return ProtectedPaths::equalsIgnoreCase(name, "CRO~A3F2");
+  };
+  EXPECT_TRUE(ProtectedPaths::isProtectedPath("/CRO~A3F2/wifi.json", Target::Item, true, aliasOfCrosspoint));
+  EXPECT_TRUE(ProtectedPaths::isProtectedPath("/cro~a3f2/opds.json", Target::Item, true, aliasOfCrosspoint));
+  EXPECT_TRUE(ProtectedPaths::isProtectedPath("/CRO~A3F2", Target::Directory, false, aliasOfCrosspoint));
+}
+
 // The request names an entry by its alias: refused, wherever it points.
 TEST(ProtectedPaths, AliasSpellingIsRefused) {
   std::vector<std::string> asked;

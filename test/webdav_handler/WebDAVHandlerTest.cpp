@@ -131,6 +131,34 @@ TEST_F(WebDAVHandlerTest, GetRefusesTheCredentialStores) {
   EXPECT_EQ(streamed(), "");
 }
 
+// On a card where another entry held CROSSP~1 when /.crosspoint was made, SdFat gave it a hashed alias, as often as
+// not with a letter after the tilde. That spelling used to pass as an ordinary name.
+TEST_F(WebDAVHandlerTest, HashedAliasIsRefused) {
+  Storage.aliases.clear();
+  Storage.alias("/CRO~A3F2", "/.crosspoint");
+  for (const char* uri : {"/CRO~A3F2/wifi.json", "/cro~a3f2/opds.json"}) {
+    EXPECT_EQ(request(HTTP_GET, uri).code, 403) << uri;
+  }
+  EXPECT_EQ(streamed(), "");
+  EXPECT_EQ(request(HTTP_PROPFIND, "/CRO~A3F2", "1").code, 403);
+  EXPECT_EQ(server.body.find("wifi.json"), std::string::npos);
+}
+
+// A dot-named file whose own name has a tilde keeps it in its alias, before the tail.
+TEST_F(WebDAVHandlerTest, AliasOfADotFileIsRefused) {
+  Storage.put("/Books/.~lock.novel.odt#", "lock");
+  Storage.alias("/Books/~LOCK_~1.ODT", "/Books/.~lock.novel.odt#");
+  EXPECT_EQ(request(HTTP_GET, "/Books/~LOCK_~1.ODT").code, 403);
+  EXPECT_EQ(streamed(), "");
+}
+
+// Resolution on the card still decides: a file really named like an alias is its own long name.
+TEST_F(WebDAVHandlerTest, RealAliasShapedNamesStayReachable) {
+  Storage.put("/Books/AB~C0DE.txt", "plain");
+  EXPECT_EQ(request(HTTP_GET, "/Books/AB~C0DE.txt").code, 200);
+  EXPECT_EQ(streamed(), "plain");
+}
+
 // ── COPY ────────────────────────────────────────────────────────────────────
 
 TEST_F(WebDAVHandlerTest, CopyMakesAFullCopy) {
