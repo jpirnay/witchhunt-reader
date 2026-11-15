@@ -679,6 +679,15 @@ class EpubReaderActivity final : public Activity {
     }
   };
   StarsSettled starsSettledFor_;
+  // The page on screen whose star changed while input was waiting (stepStarredPages): redrawn once input is idle, if
+  // nothing has been drawn since. The page a turn lands on draws its own star.
+  struct StarMarkerRedraw {
+    bool owed = false;
+    int spine = -1;
+    int page = 0;
+    unsigned long drawnAt = 0UL;  // lastPageOnScreenMs_ of the page it is owed to
+  };
+  StarMarkerRedraw starMarkerRedraw_;
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;
