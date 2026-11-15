@@ -2,7 +2,9 @@
 
 #include <FlashLangPartition.h>
 #include <HalStorage.h>
+#include <HeapFit.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 
 #include <cstdio>
@@ -11,7 +13,9 @@
 #include <new>
 #include <string>
 
+#include "CardStringsFile.h"
 #include "I18nStrings.h"
+#include "LangCardStrings.h"
 #include "LangPack.h"
 #include "LangPackConvert.h"
 
@@ -26,6 +30,23 @@ static_assert(langpack::WINDOW_BYTES == FlashLangPartition::INFLATE_RING_BYTES, 
 static_assert(langpack::WINDOW_BYTES + langpack::IO_BYTES <= FlashLangPartition::SCRATCH_BYTES,
               "a pack inflates in the scratch the slot builder lends");
 
+// Card mode's file: the active language's strings unpacked, beside the packs (a small folder, so an open of it does not
+// scan /.crosspoint's cache folders for long).
+static constexpr const char* CARD_STRINGS_FILE = "/.crosspoint/lang/strings.bin";
+
+// Card mode takes a 1 KB chunk for its strings only while the heap keeps a block this large beside it. Measured on the
+// X3 (2026-11-13): 47 KB is the largest block at Home and with the reader's Layout sheet open, and a section build
+// takes it down to ~21-25 KB (Pride and Prejudice's front matter: ~21 KB, where a 4.6 KB hold tipped the build into an
+// abort). So the arena grows in the menus and over a page at rest, and not while a build needs the heap: a key asked
+// for then reads as English, and is read again a second later.
+static constexpr size_t CARD_STRINGS_HEAP_FLOOR = 32 * 1024;
+
+struct I18n::CardMode {
+  CardStringsFile file{CARD_STRINGS_FILE};
+  langcard::CardStrings strings{file,
+                                [](const size_t bytes) { return heapHasBlockFor(bytes + CARD_STRINGS_HEAP_FLOOR); }};
+};
+
 I18n& I18n::getInstance() {
   static I18n instance;
   return instance;
@@ -35,6 +56,12 @@ const char* I18n::get(StrId id) const {
   const auto index = static_cast<size_t>(id);
   if (index >= static_cast<size_t>(StrId::_COUNT)) {
     return "???";
+  }
+
+  // Card mode: the string read from the card the first time a key is asked for; English until it can be.
+  if (_card) {
+    if (const char* s = _card->strings.get(static_cast<uint16_t>(index))) return s;
+    return STRINGS_EN_DATA + OFFSETS_EN[index];
   }
 
   // FALLBACK: the language pack has no string for this key, so it reads as English. English itself
@@ -190,6 +217,9 @@ void I18n::refreshActiveStrings() {
   _active = englishStrings();
   _packState = PackState::English;
   if (_ext) _ext->attach(_language, nullptr, 0);
+  // Card mode's strings go with it, the pointers into its arena included.
+  delete _card;
+  _card = nullptr;
 
   char path[48];
   if (!packPath(_language, path, sizeof(path))) return;  // English
@@ -242,12 +272,22 @@ void I18n::refreshActiveStrings() {
   FlashLangPartition::Mapped mapped;
   const bool ok =
       FlashLangPartition::acquire(langIndex, stamp, KEY_COUNT, strings, extBytes ? &extension : nullptr, &mapped);
-  pack.file.close();
   if (!ok) {
+    const FlashLangPartition::Failure why = FlashLangPartition::lastFailure();
+    // No room for the slot in flash at all (a partition table without a usable `spiffs` partition, on a board without
+    // PSRAM for the area's image): the pack's strings from the card instead, a key's the first time it is asked for.
+    // Without the slot's extension: a CJK language's UI faces decode per glyph (CjkUiFonts), slower and never wrong.
+    if ((why == FlashLangPartition::Failure::NoArea || why == FlashLangPartition::Failure::SlotTooSmall) &&
+        openCardStrings(langIndex, langpack::slotStamp(pack.header, KEY_LAYOUT_STAMP), strings, codeBuf)) {
+      pack.file.close();
+      return;
+    }
+    pack.file.close();
     LOG_ERR("I18N", "language pack %s could not be built or mapped - staying on English", codeBuf);
     _packState = PackState::SlotFailed;
     return;
   }
+  pack.file.close();
 
   _active = {mapped.data, mapped.offsets};
   _packState = PackState::Active;
@@ -257,6 +297,24 @@ void I18n::refreshActiveStrings() {
   // without it. One that failed to build or to verify is built again by the next refresh; one the
   // MMU had no page for is not, since a rebuild would not change that.
   if (_ext && mapped.ext && mapped.extLen == extBytes) _ext->attach(_language, mapped.ext, mapped.extLen);
+}
+
+bool I18n::openCardStrings(const uint8_t langIndex, const uint32_t stamp, const FlashLangPartition::Strings& strings,
+                           const char* code) {
+  auto card = makeUniqueNoThrow<CardMode>();
+  if (!card) {
+    LOG_ERR("I18N", "language pack %s: no memory to read it from the card", code);
+    return false;
+  }
+  if (!card->strings.open(langIndex, stamp, KEY_COUNT, strings)) {
+    LOG_ERR("I18N", "language pack %s cannot be read from the card either", code);
+    return false;
+  }
+  _card = card.release();
+  _packState = PackState::Card;
+  LOG_INF("I18N", "language pack %s active, read from the card a string at a time (%s): the flash area has no slot",
+          code, _card->strings.built() ? "unpacked now" : "unpacked before");
+  return true;
 }
 
 void I18n::setLanguage(Language lang) {

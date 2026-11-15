@@ -183,8 +183,8 @@ NorFlash* pick() {
   }
 #endif
   LOG_ERR("FLA",
-          "no flash area: the interface stays English, TrueType fonts cannot load, .cpfont fonts are read from "
-          "the card. A flasher that writes the partition table gives the reader its `spiffs` partition");
+          "no flash area: the interface language and .cpfont fonts are read from the card, TrueType fonts cannot "
+          "load. A flasher that writes the partition table gives the reader its `spiffs` partition");
   return nullptr;
 }
 

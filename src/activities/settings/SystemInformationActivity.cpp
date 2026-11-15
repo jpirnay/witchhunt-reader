@@ -71,7 +71,8 @@ static std::string spiffsValue(const SystemStatus& status) {
   return "spiffs " + (status.flashPartitionBytes > 0 ? formatBytes(status.flashPartitionBytes) : std::string("-"));
 }
 
-// The interface language's code, and when its pack is not in use, why: a code for a report rather than prose.
+// The interface language's code, and when its pack is not in use, why: a code for a report rather than prose. "card":
+// the pack is in use, read from the card a string at a time, since the flash area has no room for its slot.
 static std::string languageValue() {
   std::string value = I18N.getLanguageCode(I18N.getLanguage());
   const char* why = nullptr;
@@ -84,6 +85,9 @@ static std::string languageValue() {
       break;
     case I18n::PackState::BadPack:
       why = "bad pack";
+      break;
+    case I18n::PackState::Card:
+      why = "card";
       break;
     case I18n::PackState::SlotFailed:
       switch (FlashLangPartition::lastFailure()) {

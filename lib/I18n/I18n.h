@@ -7,7 +7,8 @@
 
 namespace FlashLangPartition {
 class SlotWriter;
-}
+struct Strings;
+}  // namespace FlashLangPartition
 
 /// Bytes a language's flash pack carries after its strings, built, erased and mapped with them
 /// (FlashLangPartition). CjkUiFonts keeps the active CJK language's UI faces there. One may be
@@ -75,6 +76,7 @@ class I18n {
     NoPack,      // no pack on the card: English
     BadPack,     // a pack that does not read as one: English
     SlotFailed,  // the slot could not be had (FlashLangPartition::lastFailure() says why): English
+    Card,        // the language's pack, read from the card a string at a time: the flash area has no room for the slot
   };
   PackState packState() const { return _packState; }
 
@@ -85,14 +87,20 @@ class I18n {
  private:
   I18n() : _language(Language::EN), _active(englishStrings()) {}
 
+  // The language read from the card (langcard::CardStrings and its file), while the flash area has no slot for it.
+  struct CardMode;
+
   // Read the stored language code. Does not resolve the strings for it.
   void loadLanguageSetting();
 
   // Point _active at the strings for _language: English straight from rodata,
   // anything else from the flash language slot — built first from the language's
   // pack on the card when the slot does not already hold that pack for this
-  // firmware's keys. Falls back to English on any failure, a pack missing from the
-  // card included, so the reader degrades to readable English rather than to blank rows.
+  // firmware's keys. When the flash area has no room for the slot, from the card a
+  // string at a time instead (card mode). Falls back to English on any failure, a pack
+  // missing from the card included, so the reader degrades to readable English rather
+  // than to blank rows. Callers hold RenderLock (UiLanguage::apply), as for the slot:
+  // the strings handed out before go.
   void refreshActiveStrings();
 
   // After an update from a firmware that kept its languages in the image (2.40, 2.41RC): when the
@@ -101,6 +109,10 @@ class I18n {
   // there is no such slot, it holds another language or a CJK language's faces, or the card refused
   // the file.
   bool convertLegacySlot(const char* code, const char* path);
+
+  // Card mode for the pack of `langIndex`: its strings unpacked to the card (when the file there holds another pack)
+  // and read from it as they are asked for. False, leaving _card empty, when the card or the heap refuses.
+  bool openCardStrings(uint8_t langIndex, uint32_t stamp, const FlashLangPartition::Strings& strings, const char* code);
 
   Language _language;
 
@@ -114,6 +126,10 @@ class I18n {
 
   LanguagePackExtension* _ext = nullptr;
   PackState _packState = PackState::English;
+  // Set only in card mode (PackState::Card), owned, and deleted by refreshActiveStrings(): get() asks it first, and
+  // reads English where it has no string yet. A plain pointer, so the constructor stays inline for the host tests that
+  // stand in for I18n.cpp.
+  CardMode* _card = nullptr;
 };
 
 // Convenience macros
