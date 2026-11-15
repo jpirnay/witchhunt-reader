@@ -97,3 +97,6 @@ TEST_F(LayoutFingerprint, ASectionWithoutPagesHasNone) {
   ASSERT_TRUE(section.clearCache());
   EXPECT_EQ(section.layoutFingerprint(), 0u);
 }
+
+// A layout's fingerprint carries the format; formatVersion() names it on its own, for what outlives a layout.
+TEST(SectionFormatVersion, IsNeverZero) { EXPECT_NE(Section::formatVersion(), 0u); }

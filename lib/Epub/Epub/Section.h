@@ -216,6 +216,10 @@ class Section {
   uint32_t layoutFingerprint() const { return layoutFingerprint_; }
   // The fingerprint a section loaded or built from `p` gets, short of the no-CSS fallback only a load finds out about.
   static uint32_t layoutFingerprintFor(const BuildParams& p);
+  // The section file format (SECTION_FILE_VERSION). What its offset table counts (VisibleText.h) is the book's source,
+  // whatever the layout; a firmware with another format may count it otherwise, so a visible-text offset saved for
+  // later (a starred page's, BookmarkStore) is good while this is the format it was counted under.
+  static uint8_t formatVersion();
 
   // Render parameters that determine a section-cache variant. Bundles the long argument
   // list shared by loadSectionFile / createSectionFile / stepSectionBuild so a resumable
