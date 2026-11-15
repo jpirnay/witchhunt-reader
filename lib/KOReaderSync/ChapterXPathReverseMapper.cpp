@@ -231,7 +231,7 @@ struct ReverseState : StackState {
 
 bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int spineIndex, const std::string& xpath,
                                   float& outIntraSpineProgress, bool& outExactMatch, uint16_t* outListItemIndex,
-                                  uint32_t* outVisibleOffset, bool* outIsTextPoint) {
+                                  uint32_t* outVisibleOffset, bool* outIsTextPoint, BuildArena* const scratch) {
   outIntraSpineProgress = 0.0f;
   outExactMatch = false;
   if (outListItemIndex) {
@@ -249,13 +249,15 @@ bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int s
   }
 
   ReverseState state(spineIndex, xpath);
+  const PassScratch pass(scratch);
   SaxParser saxParser;
+  pass.placeState(saxParser);
   if (!saxParser.init(&state, parserStartCb<ReverseState>, parserEndCb<ReverseState>, parserCharCb<ReverseState>,
                       parserDefaultCb<ReverseState>, /*htmlVoidTagRepair=*/true, SaxParser::Profile::Lean)) {
     return false;
   }
 
-  const bool parseOk = streamSpine(epub, spineIndex, saxParser);
+  const bool parseOk = streamSpine(epub, spineIndex, saxParser, pass.arena());
 
   if (!parseOk) {
     LOG_ERR("KOX", "XPath parse failed for spine=%d at line %d: %s", spineIndex, saxParser.errorLine(),

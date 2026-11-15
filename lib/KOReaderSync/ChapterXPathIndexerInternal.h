@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BuildArena.h>
 #include <Epub.h>
 #include <SaxParser/SaxParser.h>
 
@@ -46,8 +47,38 @@ int pathDepth(const std::string& xpath);
 bool isAncestorPath(const std::string& prefix, const std::string& path);
 
 // Inflate the spine item straight into `saxParser`. True when the parse completed or the parser
-// stopped itself; false on a missing item or a parse error.
-bool streamSpine(const std::shared_ptr<Epub>& epub, int spineIndex, SaxParser& saxParser);
+// stopped itself; false on a missing item or a parse error. `scratch`: see PassScratch.
+bool streamSpine(const std::shared_ptr<Epub>& epub, int spineIndex, SaxParser& saxParser,
+                 BuildArena* scratch = nullptr);
+
+// One pass's working memory in a lent region (the secondary framebuffer, for a caller that must keep the heap free):
+// the parser's state, placed as BookSearch places it, and the read buffer and inflate ring that
+// Epub::readItemContentsToStream takes from the region when it has room. All of it is given back when the pass ends,
+// so a second pass finds the region as the first did. Without a region, or with too little room, the heap as before.
+// Declare it before the parser, so the parser is gone before its state is given back.
+class PassScratch {
+ public:
+  explicit PassScratch(BuildArena* scratch) : arena_(scratch != nullptr && scratch->valid() ? scratch : nullptr) {
+    if (arena_) block_ = arena_->reserveBlock();
+  }
+  ~PassScratch() {
+    if (arena_) arena_->release(block_);
+  }
+  PassScratch(const PassScratch&) = delete;
+  PassScratch& operator=(const PassScratch&) = delete;
+
+  // Call before parser.init().
+  void placeState(SaxParser& parser) const {
+    if (!arena_) return;
+    const size_t bytes = SaxParser::stateBytes(SaxParser::Profile::Lean);
+    if (void* const storage = arena_->alloc(bytes)) parser.setExternalState(storage, bytes);
+  }
+  BuildArena* arena() const { return arena_; }
+
+ private:
+  BuildArena* arena_;
+  BuildArena::Block block_;
+};
 bool isEntityRef(const char* text, int len);
 // Visible text bytes in the spine item; nullopt when it could not be read or parsed (distinct from
 // a chapter with no text, which is 0), so callers can avoid caching a transient failure.

@@ -5,7 +5,9 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "BuildArena.h"
 #include "Epub.h"
 #include "KOReaderSync/ChapterXPathIndexer.h"
 #include "KOReaderSync/ChapterXPathIndexerInternal.h"
@@ -98,4 +100,37 @@ TEST_F(StreamedParseFixture, AnUnreadableChapterYieldsNoXPathRatherThanTheBaseOn
   // "" (uncached, so the next push retries) rather than the chapter-start xpath.
   EXPECT_EQ(ChapterXPathIndexer::findXPathForProgress(epub, 99, 0.5f), "");
   EXPECT_EQ(ChapterXPathIndexer::findXPathForProgress(epub, 99, 0.5f), "");
+}
+
+// Lent a region (the secondary framebuffer, on the X3 the one block a chapter's inflate ring fits in), both mappings
+// work in it: the same answers, the parser's state, read buffer and inflate ring taken from it, and all of it given
+// back, so the two passes of a push at the chapter's end, or the next mapping, find it as the first did.
+TEST_F(StreamedParseFixture, BothMappingsWorkInALentRegionAndGiveItBack) {
+  std::vector<uint8_t> region(48000);  // an X4's 800 x 480 framebuffer
+  BuildArena arena(region.data(), region.size());
+  const auto total = ChapterXPathIndexerInternal::countTotalTextBytes(epub, kAppendixSpine);
+  ASSERT_TRUE(total.has_value());
+  for (const uint32_t offset : {0u, static_cast<uint32_t>(*total / 2), static_cast<uint32_t>(*total)}) {
+    const std::string onHeap = ChapterXPathIndexer::findXPathForVisibleOffset(epub, kAppendixSpine, offset);
+    const std::string lent = ChapterXPathIndexer::findXPathForVisibleOffset(epub, kAppendixSpine, offset, &arena);
+    ASSERT_FALSE(onHeap.empty()) << "offset " << offset;
+    EXPECT_EQ(lent, onHeap) << "offset " << offset;
+    EXPECT_EQ(arena.used(), 0u) << "offset " << offset;
+
+    float intra = 0.0f;
+    bool exact = false;
+    uint32_t back = 0;
+    bool textPoint = false;
+    ASSERT_TRUE(ChapterXPathIndexer::findProgressForXPath(epub, kAppendixSpine, lent, intra, exact, nullptr, &back,
+                                                          &textPoint, &arena));
+    EXPECT_EQ(arena.used(), 0u);
+    float heapIntra = 0.0f;
+    bool heapExact = false;
+    uint32_t heapBack = 0;
+    ASSERT_TRUE(ChapterXPathIndexer::findProgressForXPath(epub, kAppendixSpine, lent, heapIntra, heapExact, nullptr,
+                                                          &heapBack));
+    EXPECT_EQ(back, heapBack);
+  }
+  // The state and the read buffer at least; the ring too (the chapter's 14 KB of XHTML).
+  EXPECT_GE(arena.highWater(), SaxParser::stateBytes(SaxParser::Profile::Lean) + 1024 + 14000);
 }
