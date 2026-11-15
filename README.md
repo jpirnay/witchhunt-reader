@@ -105,11 +105,15 @@ Hebrew, Arabic and Greek layouts. StarDict dictionaries look words up in horizon
 - **Fonts:** the Font Manager downloads TrueType, OpenType and `.cpfont` families over Wi-Fi; a book's own fonts can be
   used (Publisher Fonts); large-print sizes up to 26 pt.
 - **Library:** Books, Recent, New and Authors tabs, as file names, details or a cover grid; a cover carousel on Home;
-  a book information screen; global bookmarks and named starred pages; reading statistics.
+  a book information screen; bookmarks you can name, per book and across all books, that stay with their text when the
+  layout changes; reading statistics.
 - **Sync and network:** KOReader sync that lands on the exact page in both directions, OPDS catalogs, Calibre, a web
   interface with file manager and settings, WebDAV, captive-portal login, weather.
-- **Device:** a clock on every board, sleep screens with an information overlay or a transparent picture over the page,
-  user-defined actions for each button's single, double and long press, touch gestures on the X4 Pro, T5S3 and Murphy.
+- **Reading:** reader bars over the page with a Layout sheet that lays the page out again as you change the font, size,
+  spacing or margins; a search through the whole book that finds *café* when you type *cafe*.
+- **Device:** a clock on every board, Dark Mode (on a schedule on the boards with a reading light), sleep screens with an
+  information overlay, a transparent picture over the page or the weather forecast, user-defined actions for each
+  button's single, double and long press, touch gestures on the X4 Pro, T5S3, Murphy and Picco.
 
 ## What this reader doesn't
 
