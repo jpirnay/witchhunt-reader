@@ -15,15 +15,15 @@
 // another layout from the XPath, as a pull does (ChapterXPathIndexer::findProgressForXPath, then
 // Section::getPageForVisibleTextOffset). No mapping of its own: both directions are the sync's mappers.
 //
-// Each mapping parses the chapter's XHTML once, which is idle-time work on the X3 (step()). What they turn into, the
-// visible-text offset of the page's start, is kept for the session (StarAnchor::offset), so a second relayout in the
-// same session, or a jump to a star already settled, parses nothing. `scratch`, where given, is a lent region the
-// parse works in instead of the heap (ChapterXPathIndexer): the reader on the X3 has been measured with less
-// contiguous heap than the inflate ring's 32 KB.
+// Each mapping parses the chapter's XHTML once, which is idle-time work on the X3 (the reader's stepStarredPages()).
+// What they turn into, the visible-text offset of the page's start, is kept for the session (StarAnchor::offset), so a
+// second relayout in the same session, or a jump to a star already settled, parses nothing. `scratch`, where given, is
+// a lent region the parse works in instead of the heap (ChapterXPathIndexer): the reader on the X3 has been measured
+// with less contiguous heap than the inflate ring's 32 KB.
 namespace StarAnchoring {
 
 // The anchor a new star on `page` of `section` gets: the section's layout, its page count once the build is done (0
-// while it runs), and where the page's text starts when the section's table says. The XPath is left to step().
+// while it runs), and where the page's text starts when the section's table says. The XPath is left to parseNext().
 StarAnchor forPage(const Section& section, int page);
 
 enum class Work : uint8_t {
@@ -32,16 +32,25 @@ enum class Work : uint8_t {
   Parsed,  // one chapter parsed; more may be owed, for a later call
 };
 
-// Does what `store` owes: when `section` is given (complete, no build running, of spine `spineIndex`), moves that
-// spine's stars counted in another layout onto the page holding their text, resolving at most one XPath; then, if
-// nothing was parsed yet, names one new star's text. At most one chapter parse a call. A star without an anchor (TXT,
-// older firmware) is left as it is.
+// The part that parses nothing: `section`'s spine's stars counted in another layout whose text offset this session
+// knows (or, for a star made while that layout was being built, the table gives) move onto the page holding it. True
+// when anything changed. `section` must be complete: loaded, or built to the end.
+bool settleKnown(BookmarkStore& store, const Section& section, int spineIndex);
+
+// Whether parseNext() has a chapter to parse: a star of `spineIndex` counted in another layout than `section` (when
+// given) with only its XPath to go by, or a new star's text to name. Looks at the store only, so a caller lends memory
+// for a parse only when one is coming.
+bool parseOwed(const BookmarkStore& store, const Section* section, int spineIndex);
+
+// One chapter parse, the first owed: such a star's XPath resolved and the star moved, else a new star's text named.
+// None when nothing is owed. A failed mapping is not tried again this session.
+Work parseNext(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section* section, int spineIndex,
+               BuildArena* scratch = nullptr);
+
+// settleKnown() when `section` is given, and when it had nothing to do, parseNext(). For the tests, and for a caller
+// that need not choose where a parse works.
 Work step(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section* section, int spineIndex,
           BuildArena* scratch = nullptr);
-
-// Whether step() would parse a chapter: a star of `spineIndex` to resolve against `section` (when given), or a new
-// star's text to name. Looks at the store only, so a caller lends memory for a parse only when one is coming.
-bool parseOwed(const BookmarkStore& store, const Section* section, int spineIndex);
 
 // Where star `index`'s text starts, for a jump to it: what this session knows, else its XPath resolved (one chapter
 // parse). nullopt: no XPath, or it did not resolve; the jump then goes by the page number.

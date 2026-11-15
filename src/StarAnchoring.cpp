@@ -42,12 +42,37 @@ std::optional<uint16_t> pageHolding(const Section& section, const uint16_t page,
   return section.getPageForVisibleTextOffset(offset);
 }
 
+// A section whose page numbers are final: loaded, or built to the end.
+bool completeLayout(const Section& section) { return !section.hasActiveBuild() && section.layoutFingerprint() != 0; }
+
+// The star's page number is one of `section`'s: counted in its layout, which lays the chapter out in as many pages.
+bool standsIn(const StarAnchor& anchor, const Section& section) {
+  return anchor.layout == section.layoutFingerprint() && anchor.pageCount == section.pageCount;
+}
+
+// Moves star `index`, whose offset is known, onto the page of `section` holding it, and counts it in that layout.
+void settle(BookmarkStore& store, const size_t index, const Section& section, const int spineIndex) {
+  const Bookmark& star = store.getAll()[index];
+  const uint32_t offset = store.getAnchors()[index].offset;
+  const auto page = pageHolding(section, star.pageNumber, offset);
+  if (!page) {
+    LOG_ERR("STAR", "Spine %d: no page holds offset %u", spineIndex, static_cast<unsigned>(offset));
+    store.noteMappingFailed(index);
+    return;
+  }
+  if (*page != star.pageNumber) {
+    LOG_INF("STAR", "Spine %d: star on page %u moves to page %u", spineIndex, static_cast<unsigned>(star.pageNumber),
+            static_cast<unsigned>(*page));
+  }
+  store.movePage(index, *page, section.layoutFingerprint(), section.pageCount);
+}
+
 }  // namespace
 
 bool parseOwed(const BookmarkStore& store, const Section* section, const int spineIndex) {
   const auto& stars = store.getAll();
   const auto& anchors = store.getAnchors();
-  const bool settling = section != nullptr && !section->hasActiveBuild() && section->layoutFingerprint() != 0;
+  const bool settling = section != nullptr && completeLayout(*section);
   for (size_t i = 0; i < stars.size(); i++) {
     const StarAnchor& anchor = anchors[i];
     if (anchor.layout == 0 || anchor.mappingFailed) continue;
@@ -55,8 +80,7 @@ bool parseOwed(const BookmarkStore& store, const Section* section, const int spi
       if (anchor.offset != kNoOffset) return true;  // a new star's text to name
       continue;
     }
-    if (settling && stars[i].spineIndex == spineIndex && anchor.offset == kNoOffset &&
-        (anchor.layout != section->layoutFingerprint() || anchor.pageCount != section->pageCount)) {
+    if (settling && stars[i].spineIndex == spineIndex && anchor.offset == kNoOffset && !standsIn(anchor, *section)) {
       return true;  // counted in another layout, and only its XPath says where its text is
     }
   }
@@ -66,64 +90,58 @@ bool parseOwed(const BookmarkStore& store, const Section* section, const int spi
 StarAnchor forPage(const Section& section, const int page) {
   StarAnchor anchor;
   anchor.layout = section.layoutFingerprint();
-  anchor.pageCount = section.hasActiveBuild() ? 0 : section.pageCount;
-  if (page >= 0) {
-    if (const auto offset = section.getVisibleTextOffsetForPage(static_cast<uint16_t>(page))) anchor.offset = *offset;
-  }
+  // While the build runs, its file has no offset table yet: settleKnown() takes it from there once the build is done.
+  if (section.hasActiveBuild() || page < 0) return anchor;
+  anchor.pageCount = section.pageCount;
+  if (const auto offset = section.getVisibleTextOffsetForPage(static_cast<uint16_t>(page))) anchor.offset = *offset;
   return anchor;
 }
 
-Work step(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section* section, const int spineIndex,
-          BuildArena* const scratch) {
-  Work done = Work::None;
+bool settleKnown(BookmarkStore& store, const Section& section, const int spineIndex) {
+  if (!completeLayout(section)) return false;
+  const auto& stars = store.getAll();
+  const auto& anchors = store.getAnchors();
+  bool changed = false;
+  for (size_t i = 0; i < stars.size(); i++) {
+    const StarAnchor& anchor = anchors[i];
+    if (stars[i].spineIndex != spineIndex || anchor.layout == 0 || anchor.mappingFailed) continue;
+    if (standsIn(anchor, section)) continue;
+    if (anchor.offset == kNoOffset) {
+      if (anchor.layout != section.layoutFingerprint() || !anchor.xpath.empty()) continue;  // for parseNext()
+      // Starred while this layout was still being built, before the page had an offset in the table.
+      if (const auto offset = section.getVisibleTextOffsetForPage(stars[i].pageNumber)) {
+        store.noteOffset(i, *offset);
+      } else {
+        store.noteMappingFailed(i);
+        changed = true;
+        continue;
+      }
+    }
+    settle(store, i, section, spineIndex);
+    changed = true;
+  }
+  return changed;
+}
+
+Work parseNext(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section* section, const int spineIndex,
+               BuildArena* const scratch) {
   const auto& stars = store.getAll();
   const auto& anchors = store.getAnchors();
 
-  if (section != nullptr && !section->hasActiveBuild() && section->layoutFingerprint() != 0) {
-    const uint32_t layout = section->layoutFingerprint();
-    const uint16_t pageCount = section->pageCount;
+  if (section != nullptr && completeLayout(*section)) {
     for (size_t i = 0; i < stars.size(); i++) {
       const StarAnchor& anchor = anchors[i];
       if (stars[i].spineIndex != spineIndex || anchor.layout == 0 || anchor.mappingFailed) continue;
-      if (anchor.layout == layout && anchor.pageCount == pageCount) continue;  // its page stands
-
-      if (anchor.offset == kNoOffset) {
-        if (anchor.layout == layout && anchor.xpath.empty()) {
-          // Starred while this layout was still being built, before the page had an offset in the table.
-          if (const auto offset = section->getVisibleTextOffsetForPage(stars[i].pageNumber)) {
-            store.noteOffset(i, *offset);
-          } else {
-            store.noteMappingFailed(i);
-            continue;
-          }
-        } else if (!anchor.xpath.empty() && done != Work::Parsed) {
-          done = Work::Parsed;
-          if (const auto offset = resolveXPath(epub, spineIndex, anchor.xpath, scratch)) {
-            store.noteOffset(i, *offset);
-          } else {
-            store.noteMappingFailed(i);
-            continue;
-          }
-        } else {
-          continue;  // nothing to find it by, or this call has parsed once already
-        }
-      }
-
-      const auto page = pageHolding(*section, stars[i].pageNumber, anchor.offset);
-      if (!page) {
-        LOG_ERR("STAR", "Spine %d: no page holds offset %u", spineIndex, static_cast<unsigned>(anchor.offset));
+      if (standsIn(anchor, *section) || anchor.offset != kNoOffset || anchor.xpath.empty()) continue;
+      if (const auto offset = resolveXPath(epub, spineIndex, anchor.xpath, scratch)) {
+        store.noteOffset(i, *offset);
+        settle(store, i, *section, spineIndex);
+      } else {
         store.noteMappingFailed(i);
-        continue;
       }
-      if (*page != stars[i].pageNumber) {
-        LOG_INF("STAR", "Spine %d: star on page %u moves to page %u", spineIndex,
-                static_cast<unsigned>(stars[i].pageNumber), static_cast<unsigned>(*page));
-      }
-      store.movePage(i, *page, layout, pageCount);
-      if (done == Work::None) done = Work::Cheap;
+      return Work::Parsed;
     }
   }
-  if (done == Work::Parsed) return done;
 
   for (size_t i = 0; i < stars.size(); i++) {
     const StarAnchor& anchor = anchors[i];
@@ -143,7 +161,13 @@ Work step(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section
     }
     return Work::Parsed;
   }
-  return done;
+  return Work::None;
+}
+
+Work step(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section* section, const int spineIndex,
+          BuildArena* const scratch) {
+  if (section != nullptr && settleKnown(store, *section, spineIndex)) return Work::Cheap;
+  return parseNext(store, epub, section, spineIndex, scratch);
 }
 
 std::optional<uint32_t> textOffset(BookmarkStore& store, const size_t index, const std::shared_ptr<Epub>& epub,

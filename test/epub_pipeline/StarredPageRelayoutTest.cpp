@@ -329,6 +329,37 @@ TEST_P(StarredPageRelayout, TheMappingsWorkInALentRegion) {
   EXPECT_GT(arena.highWater(), SaxParser::stateBytes(SaxParser::Profile::Lean));
 }
 
+// A page starred while its chapter was still being built: the build's file has no offset table yet, so the star has
+// its layout and page only. Once the build is done, the table gives its offset, its text is named, and it counts.
+TEST(StarredPageDuringABuild, GetsItsTextOnceTheBuildIsDone) {
+  const auto work = fs::temp_directory_path() / ("starred_page_building_" + std::to_string(::getpid()));
+  fs::remove_all(work);
+  fs::create_directories(work);
+  auto epub = std::make_shared<Epub>(std::string(CORPUS_DIR) + "/test_wrapped_paragraphs.epub", work.string());
+  ASSERT_TRUE(epub->load(true));
+  epub->setupCacheDir();
+  GfxRenderer renderer;
+  constexpr int kSpine = 1;
+  Section section(epub, kSpine, renderer);
+  ASSERT_TRUE(section.createSectionFile(layoutA(), {}, true));
+  ASSERT_TRUE(section.loadSectionFile(layoutA()));
+  ASSERT_GT(section.pageCount, 1);
+  const auto page = static_cast<uint16_t>(section.pageCount - 1);
+
+  StarAnchor building;  // what StarAnchoring::forPage() gives while the build runs
+  building.layout = section.layoutFingerprint();
+  BookmarkStore store;
+  ASSERT_TRUE(store.toggle(kSpine, page, building));
+  ASSERT_TRUE(StarAnchoring::parseOwed(store, &section, kSpine) == false) << "the offset comes from the table";
+  while (StarAnchoring::step(store, epub, &section, kSpine) != StarAnchoring::Work::None) {
+  }
+  EXPECT_EQ(store.getAll()[0].pageNumber, page);
+  EXPECT_EQ(store.getAnchors()[0].offset, section.getVisibleTextOffsetForPage(page));
+  EXPECT_FALSE(store.getAnchors()[0].xpath.empty());
+  EXPECT_EQ(store.getAnchors()[0].pageCount, section.pageCount);
+  fs::remove_all(work);
+}
+
 // Stars made under other layouts can come to rest on one page: unstarring it takes them all.
 TEST(StarredPageStore, UnstarringAPageTakesEveryStarOnIt) {
   BookmarkStore store;
