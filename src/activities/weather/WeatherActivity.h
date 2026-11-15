@@ -8,11 +8,8 @@
 #include "util/ButtonNavigator.h"
 
 /**
- * Weather forecast display activity.
- * Renders in landscape mode (800x480) with:
- * - Current conditions (left panel)
- * - Daily forecast cards (center)
- * - 48-hour temperature + precipitation graph (bottom)
+ * Weather forecast display activity, in landscape: the current temperature large with its icon, the place and date,
+ * a strip of forecast days, today's details, and a 24-hour graph of temperature and chance of rain (drawForecast()).
  *
  * On enter: loads cache -> if stale, connects WiFi -> fetches data -> displays.
  * Each successful fetch also saves the forecast to SLEEP_IMAGE_PATH for the sleep screen.
@@ -52,11 +49,13 @@ class WeatherActivity final : public Activity {
   void triggerRefresh(bool showPopup);
   void saveSleepImage();
 
-  // Render sub-sections (landscape 800x480)
-  void drawForecast();
-  void renderCurrentConditions(int x, int y, int w, int h);
-  void renderDailyForecast(int x, int y, int w, int h);
-  void renderHourlyGraph(int x, int y, int w, int h);
+  // The forecast from `left` to the right edge: the screen passes the button hints' width, the sleep image a margin.
+  void drawForecast(int left);
+  int drawCurrentConditions(int left, int right);
+  int drawPlaceAndDate(int left, int right, int placeFontId);
+  int drawDays(int left, int right, int top);
+  void drawDetails(int x, int y, int w, int h);
+  void drawHourlyGraph(int x, int y, int w, int h);
 
   bool preventAutoSleep() override { return true; }
 };
