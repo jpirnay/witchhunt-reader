@@ -2,10 +2,21 @@
 
 // In-memory FAT card for WebDAVHandlerTest. Shadows test/shims/HalStorage.h, which has no folders and no files.
 //
-// It opens names the way SdFat does where the handler's protection depends on it: without regard to case, after
-// dropping leading spaces and trailing dots and spaces, and through an entry's 8.3 alias (alias()), as FatFile::open
-// compares a name with the short entry when no long name matches. getName() gives the long name. A file's reads can
-// be made to fail from an offset on (failReadsFrom()), as a card read error does.
+// It opens names the way SdFat 2.3.1 does where the handler's protection depends on it: without regard to case,
+// after dropping leading spaces and trailing dots and spaces, and through an entry's 8.3 alias (alias()).
+//
+// What a handle knows of its name depends on how it was opened, exactly as in SdFat:
+//  - Opened by its long name, or from openNextFile() on its folder, getName() gives the long name. FatFile::openNext
+//    keeps the order of the long-name entries before the short one (FatFile.cpp:671-677).
+//  - Opened by its 8.3 alias, getName() gives the alias. FatFile::open compares the requested name with each long
+//    name first; for "CROSSP~1" that fails and lfnOrd goes back to 0 (FatFileLFN.cpp:340-341). The short-entry compare
+//    then matches (:352) and the entry opens with lfnOrd 0 (:447, FatFile.cpp:557), so isLFN() is false and getName()
+//    falls back to getSFN() (FatName.cpp, getName8). The alias prints in capitals: a generated one has no case bits.
+// dirIndex() is the index of the entry's short entry in its folder, the same for both handles. A model that gave the
+// long name to an alias-opened handle hid a real hole in the path guard (it read "CROSSP~1" back and let it pass).
+//
+// A file's reads can be made to fail from an offset on (failReadsFrom()), as a card read error does, and an open or a
+// folder walk can be made to fail (failOpen(), failListing()).
 
 #include <WString.h>
 
@@ -16,6 +27,7 @@
 #include <cstring>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -25,6 +37,7 @@ class HalFile {
   HalFile(HalFile&& other) noexcept { *this = std::move(other); }
   HalFile& operator=(HalFile&& other) noexcept {
     key_ = std::move(other.key_);
+    sfn_ = std::move(other.sfn_);
     open_ = other.open_;
     position_ = other.position_;
     nextChild_ = other.nextChild_;
@@ -41,6 +54,7 @@ class HalFile {
   int read(void* buffer, size_t bytes);
   size_t write(const uint8_t* buffer, size_t bytes);
   size_t getName(char* name, size_t len) const;
+  uint32_t dirIndex() const;
   HalFile openNextFile();
   // Device parity: the HAL asserts on closing a handle nothing opened.
   bool close() {
@@ -55,6 +69,7 @@ class HalFile {
  private:
   friend class HalStorage;
   std::string key_;  // the entry, by HalStorage::key; empty when nothing was opened
+  std::string sfn_;  // the alias it was opened by; empty when opened by its long name or from a folder walk
   bool open_ = false;
   size_t position_ = 0;
   size_t nextChild_ = 0;
@@ -103,6 +118,8 @@ class HalStorage {
   void reset() {
     entries.clear();
     aliases.clear();
+    failedOpens.clear();
+    failedListings.clear();
     made_ = 0;
   }
   // Makes the folders on the way as needed.
@@ -112,8 +129,14 @@ class HalStorage {
   void alias(const std::string& aliasPath, const std::string& realPath) {
     const auto real = find(realPath);
     if (!real) std::abort();
-    aliases[key(aliasPath)] = *real;
+    std::string sfn = lastName(aliasPath);
+    for (char& c : sfn) {
+      if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+    }
+    aliases[key(aliasPath)] = Alias{*real, sfn};
   }
+  void failOpen(const std::string& path) { failedOpens.insert(key(path)); }
+  void failListing(const std::string& path) { failedListings.insert(key(path)); }
   void failReadsFrom(const std::string& path, const long offset) { entry(path).failReadsFrom = offset; }
   // Content of the file at `path`; "<none>" when there is none.
   std::string content(const std::string& path) const {
@@ -121,18 +144,22 @@ class HalStorage {
     return found ? entries.at(*found).content : "<none>";
   }
 
-  // The key of the entry `path` opens, if any: each name matched as SdFat matches it, long name or alias.
-  std::optional<std::string> find(const std::string& path) const {
+  // The key of the entry `path` opens, if any: each name matched as SdFat matches it, long name or alias. `sfn`, when
+  // given, is set to the alias the last name matched through, and left empty when it matched a long name.
+  std::optional<std::string> find(const std::string& path, std::string* sfn = nullptr) const {
     std::string at = "/";
+    if (sfn) sfn->clear();
     for (const std::string& name : segments(path)) {
       const std::string next = join(at, name);
+      if (sfn) sfn->clear();
       if (entries.count(next) != 0) {
         at = next;
         continue;
       }
       const auto alias = aliases.find(next);
       if (alias == aliases.end()) return std::nullopt;
-      at = alias->second;
+      at = alias->second.key;
+      if (sfn) *sfn = alias->second.sfn;
     }
     return at;
   }
@@ -141,10 +168,12 @@ class HalStorage {
   HalFile open(const char* path, int = 0) {
     HalFile file;
     file.key_ = "?";  // tried, like the HAL's handle on a failed open: close() is legal on it
-    const auto found = find(path);
-    if (found) {
+    std::string sfn;
+    const auto found = find(path, &sfn);
+    if (found && failedOpens.count(key(path)) == 0) {
       file.key_ = *found;
       file.open_ = true;
+      file.sfn_ = sfn;
     }
     return file;
   }
@@ -239,8 +268,14 @@ class HalStorage {
     return instance;
   }
 
-  std::map<std::string, Entry> entries;        // by key: the real path, folded
-  std::map<std::string, std::string> aliases;  // folded alias path -> key it opens
+  struct Alias {
+    std::string key;  // of the entry it opens
+    std::string sfn;  // as SdFat prints it
+  };
+  std::map<std::string, Entry> entries;  // by key: the real path, folded
+  std::map<std::string, Alias> aliases;  // by folded alias path
+  std::set<std::string> failedOpens;     // folded paths whose open() fails
+  std::set<std::string> failedListings;  // keys of folders whose openNextFile() finds nothing
 
  private:
   static std::string key(const std::string& path) {
@@ -300,7 +335,7 @@ inline size_t HalFile::write(const uint8_t* buffer, const size_t bytes) {
   return bytes;
 }
 inline size_t HalFile::getName(char* name, const size_t len) const {
-  const std::string real = key_ == "/" ? "/" : Storage.entries.at(key_).name;
+  const std::string real = key_ == "/" ? "/" : !sfn_.empty() ? sfn_ : Storage.entries.at(key_).name;
   if (!open_ || real.size() + 1 > len) {
     if (len > 0) name[0] = '\0';
     return 0;
@@ -308,10 +343,13 @@ inline size_t HalFile::getName(char* name, const size_t len) const {
   std::memcpy(name, real.c_str(), real.size() + 1);
   return real.size();
 }
+inline uint32_t HalFile::dirIndex() const {
+  return open_ && key_ != "/" ? static_cast<uint32_t>(Storage.entries.at(key_).made) : 0;
+}
 inline HalFile HalFile::openNextFile() {
   HalFile next;
   next.key_ = "?";
-  if (!open_ || !isDirectory()) return next;
+  if (!open_ || !isDirectory() || Storage.failedListings.count(key_) != 0) return next;
   const std::vector<std::string> children = Storage.childrenOf(key_);
   if (nextChild_ >= children.size()) return next;
   next.key_ = children[nextChild_++];

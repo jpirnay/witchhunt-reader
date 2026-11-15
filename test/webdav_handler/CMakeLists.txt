@@ -1,6 +1,7 @@
 add_executable(WebDAVHandlerTest
   WebDAVHandlerTest.cpp
   BookCacheResetTest.cpp
+  WebPathGuardTest.cpp
   stubs/BookRelocation.cpp
   ${REPO_ROOT}/src/network/WebDAVHandler.cpp
   ${REPO_ROOT}/src/network/WebPathGuard.cpp
