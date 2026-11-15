@@ -44,6 +44,25 @@ std::optional<uint16_t> pageHolding(const Section& section, const uint16_t page,
 
 }  // namespace
 
+bool parseOwed(const BookmarkStore& store, const Section* section, const int spineIndex) {
+  const auto& stars = store.getAll();
+  const auto& anchors = store.getAnchors();
+  const bool settling = section != nullptr && !section->hasActiveBuild() && section->layoutFingerprint() != 0;
+  for (size_t i = 0; i < stars.size(); i++) {
+    const StarAnchor& anchor = anchors[i];
+    if (anchor.layout == 0 || anchor.mappingFailed) continue;
+    if (anchor.xpath.empty()) {
+      if (anchor.offset != kNoOffset) return true;  // a new star's text to name
+      continue;
+    }
+    if (settling && stars[i].spineIndex == spineIndex && anchor.offset == kNoOffset &&
+        (anchor.layout != section->layoutFingerprint() || anchor.pageCount != section->pageCount)) {
+      return true;  // counted in another layout, and only its XPath says where its text is
+    }
+  }
+  return false;
+}
+
 StarAnchor forPage(const Section& section, const int page) {
   StarAnchor anchor;
   anchor.layout = section.layoutFingerprint();

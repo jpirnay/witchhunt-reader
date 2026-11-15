@@ -126,8 +126,10 @@ struct StarredPageRelayout : testing::TestWithParam<std::string> {
         starred.push_back({static_cast<uint16_t>(spine), static_cast<uint16_t>(page), anchor.offset, false});
       }
     }
+    EXPECT_EQ(StarAnchoring::parseOwed(store, nullptr, -1), !starred.empty()) << "every new star's text to name";
     while (StarAnchoring::step(store, epub, nullptr, -1) == StarAnchoring::Work::Parsed) {
     }
+    EXPECT_FALSE(StarAnchoring::parseOwed(store, nullptr, -1));
     for (size_t i = 0; i < starred.size(); ++i) {
       starred[i].named = !store.getAnchors()[i].xpath.empty();
       if (!starred[i].named) {
@@ -168,7 +170,11 @@ TEST_P(StarredPageRelayout, EveryStarredPageFindsItsTextInAnotherLayout) {
   int moved = 0;
   for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
     const auto section = build(spine, layoutB());
+    const bool named = std::any_of(starred.begin(), starred.end(),
+                                   [spine](const Starred& star) { return star.spine == spine && star.named; });
+    EXPECT_EQ(StarAnchoring::parseOwed(store, section.get(), spine), named) << "spine " << spine;
     settle(store, epub, *section, spine);
+    EXPECT_FALSE(StarAnchoring::parseOwed(store, section.get(), spine)) << "spine " << spine;
     for (size_t i = 0; i < starred.size(); ++i) {
       if (starred[i].spine != spine) continue;
       const uint16_t page = store.getAll()[i].pageNumber;

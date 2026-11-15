@@ -39,6 +39,10 @@ enum class Work : uint8_t {
 Work step(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section* section, int spineIndex,
           BuildArena* scratch = nullptr);
 
+// Whether step() would parse a chapter: a star of `spineIndex` to resolve against `section` (when given), or a new
+// star's text to name. Looks at the store only, so a caller lends memory for a parse only when one is coming.
+bool parseOwed(const BookmarkStore& store, const Section* section, int spineIndex);
+
 // Where star `index`'s text starts, for a jump to it: what this session knows, else its XPath resolved (one chapter
 // parse). nullopt: no XPath, or it did not resolve; the jump then goes by the page number.
 std::optional<uint32_t> textOffset(BookmarkStore& store, size_t index, const std::shared_ptr<Epub>& epub,
