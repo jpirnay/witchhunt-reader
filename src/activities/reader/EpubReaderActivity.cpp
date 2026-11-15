@@ -762,8 +762,9 @@ void EpubReaderActivity::onEnter() {
 
   // Load bookmarks for this book
   bookmarkStore.load(epub->getCachePath());
-  // A jump from the global bookmarks screen goes by the star's text, not by a page number of a layout that may be gone.
-  // The layout the chapter will be shown in is not known before the first render, so a star with an XPath is resolved.
+  // A jump from the global bookmarks screen goes by the star's text, not by a page number of a layout that may be gone:
+  // its stored offset, or, with none to trust, its XPath (the layout the chapter will be shown in is not known before
+  // the first render).
   if (bookmarkJumpApplied && navTarget.kind == NavigationTarget::Kind::Page && navTarget.page >= 0 &&
       navTarget.cachedSpineIdx == currentSpineIndex) {
     RenderLock lock(*this);
@@ -3342,18 +3343,18 @@ EpubReaderActivity::NavigationTarget EpubReaderActivity::starJumpTarget(const ui
   if (!index) return target;
   const StarAnchor& anchor = bookmarkStore.getAnchors()[*index];
   if (anchor.layout == 0) return target;
-  // The common case, no parse: the star was counted in the layout the chapter will be shown in.
-  if (anchor.offset == StarAnchor::kNoOffset && expectedLayout != 0 && anchor.layout == expectedLayout) return target;
-  std::optional<uint32_t> offset;
-  if (anchor.offset != StarAnchor::kNoOffset) {
-    offset = anchor.offset;
-  } else if (!anchor.xpath.empty() && !anchor.mappingFailed) {
-    // The parse in the secondary framebuffer, as stepStarredPages() does. The page drawn next is the one jumped to, not
-    // one patched over the page on screen.
+  // The text's offset, counted under this section format: no parse, whatever the layout, and from Global Bookmarks too.
+  std::optional<uint32_t> offset = StarAnchoring::knownOffset(anchor);
+  if (!offset) {
+    // Without one, the star's page while it was counted in the layout the chapter will be shown in, no parse either.
+    if (expectedLayout != 0 && anchor.layout == expectedLayout) return target;
+    if (anchor.xpath.empty() || anchor.mappingFailed) return target;
+    // Else its XPath, in the secondary framebuffer, as stepStarredPages() parses. The page drawn next is the one
+    // jumped to, not one patched over the page on screen.
     LentSecondary lend(renderer);
     offset = StarAnchoring::textOffset(bookmarkStore, *index, epub, lend.arena());
+    if (!offset) return target;
   }
-  if (!offset) return target;
   starsSettledFor_ = {};  // the star's text is known now: it settles without a parse
   // The page stands while it still starts on that text; otherwise the page holding it (EpubNavigationTarget). No page
   // count: the one it was counted in says nothing about the layout it lands in.

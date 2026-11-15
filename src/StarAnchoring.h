@@ -22,6 +22,10 @@
 // with less contiguous heap than the inflate ring's 32 KB.
 namespace StarAnchoring {
 
+// The star's text offset while it can be trusted: counted under the section format this firmware has. Under another
+// format the count may differ, and the XPath finds the text again (parseNext(), textOffset()), which refreshes it.
+std::optional<uint32_t> knownOffset(const StarAnchor& anchor);
+
 // The anchor a new star on `page` of `section` gets: the section's layout, its page count once the build is done (0
 // while it runs), and where the page's text starts when the section's table says. The XPath is left to parseNext().
 StarAnchor forPage(const Section& section, int page);

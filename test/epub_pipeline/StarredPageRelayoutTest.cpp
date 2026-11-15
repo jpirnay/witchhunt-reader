@@ -151,6 +151,19 @@ struct StarredPageRelayout : testing::TestWithParam<std::string> {
     store.save();
   }
 
+  // The book's stars as another firmware's section format would leave them: offsets counted under a format this one
+  // does not have, and wrong under this one (`wrongBy` off), so a test can tell a stale offset trusted from one
+  // resolved again.
+  void staleOffsets(const uint32_t wrongBy) const {
+    BookmarkStore store;
+    store.load(epub->getCachePath());
+    for (size_t i = 0; i < store.getAll().size(); ++i) {
+      const StarAnchor& anchor = store.getAnchors()[i];
+      store.setOffset(i, anchor.offset + wrongBy, static_cast<uint8_t>(Section::formatVersion() + 1));
+    }
+    store.save();
+  }
+
   // Settles the spine's stars in `section` as the reader's idle time does.
   static void settle(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section& section, const int spine) {
     for (int calls = 0; StarAnchoring::step(store, epub, &section, spine) != StarAnchoring::Work::None; ++calls) {
@@ -219,6 +232,20 @@ TEST_P(StarredPageRelayout, EveryStarredPageFindsItsTextInAnotherLayoutWithoutAP
   const std::vector<Starred> starred = starEveryPage();
   if (starred.empty()) GTEST_SKIP() << "no page with text";
   reopenUnderAnotherLayout(starred, /*offsetsKept=*/true);
+}
+
+// An offset counted under another section format is not trusted: the XPath finds the text and the offset is counted
+// again, under this format. A star with no XPath keeps its page rather than follow such an offset.
+TEST_P(StarredPageRelayout, AnOffsetOfAnotherSectionFormatGivesWayToTheXPath) {
+  const std::vector<Starred> starred = starEveryPage();
+  if (starred.empty()) GTEST_SKIP() << "no page with text";
+  staleOffsets(/*wrongBy=*/7);
+  {
+    BookmarkStore store;
+    store.load(epub->getCachePath());
+    for (const StarAnchor& anchor : store.getAnchors()) EXPECT_FALSE(StarAnchoring::knownOffset(anchor).has_value());
+  }
+  reopenUnderAnotherLayout(starred, /*offsetsKept=*/false);
 }
 
 TEST_P(StarredPageRelayout, WithoutItsOffsetAStarFindsItsTextByItsXPath) {
