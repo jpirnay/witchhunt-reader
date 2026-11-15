@@ -2726,6 +2726,8 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
         merged.floatZones[zi] = prevStyle.floatZones[zi];
       }
       currentTextBlock->setBlockStyle(merged);
+      // The empty block may have been opened on the other side of a heading's start or end tag.
+      currentTextBlock->setHyphenationEnabled(blockHyphenates());
 
       // Whatever came before is laid out already: the block is empty.
       applyPendingPageBreak();
@@ -2776,11 +2778,12 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   if (currentTextBlock) {
     currentTextBlock->reset(blockStyleWithIndent);
   } else {
-    currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled,
-                                                         blockStyleWithIndent, bionicReadingEnabled));
+    currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, blockHyphenates(), blockStyleWithIndent,
+                                                         bionicReadingEnabled));
     if (currentTextBlock) currentTextBlock->lendLayoutScratch(&layoutScratch_);
   }
   if (currentTextBlock) {
+    currentTextBlock->setHyphenationEnabled(blockHyphenates());  // the reused block's, too
     currentTextBlock->setTypography(typography_);
     currentTextBlock->setShapingLatch(&shapingDegradedAny_);
     currentTextBlock->setVertical(vertical_);

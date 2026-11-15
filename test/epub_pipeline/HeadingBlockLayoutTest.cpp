@@ -19,6 +19,8 @@
 //   4. Its font size is applied once, by its block, not again per word.
 //   5. Text after it in the same element resumes on a new line, in that element's style.
 //   6. A <span> styled display:inline (or inline-block) stays inline.
+//   7. With Hyphenation on, no heading line ends in a hyphen, however its blocks start; the
+//      paragraphs around it still hyphenate.
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -83,15 +85,17 @@ struct HeadingBlockLayoutFixture : testing::Test {
 
   // Every text line of the chapter, in page order. `paragraphAlignment` is the reader setting:
   // 0 = Justified (the default), 4 = the book's own alignment.
-  std::vector<Line> layout(const std::string& css, const std::string& body, const uint8_t paragraphAlignment = 0) {
+  std::vector<Line> layout(const std::string& css, const std::string& body, const uint8_t paragraphAlignment = 0,
+                           const bool hyphenation = false, const uint16_t viewportWidth = 480) {
     auto epub = std::make_shared<Epub>(makeBook(css, body), (work / "cache").string());
     EXPECT_TRUE(epub->load(true));
     Section::BuildParams params;
-    params.viewportWidth = 480;
+    params.viewportWidth = viewportWidth;
     params.viewportHeight = 800;
     params.lineCompression = 1.0f;
     params.embeddedStyle = true;
     params.paragraphAlignment = paragraphAlignment;
+    params.hyphenationEnabled = hyphenation;
     GfxRenderer renderer;
     Section section(epub, 0, renderer);
     EXPECT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
@@ -249,4 +253,36 @@ TEST_F(HeadingBlockLayoutFixture, InlineSpanStaysInline) {
                             "<p>One <span class=\"a\">two</span> <span class=\"b\">three</span> four</p>");
   ASSERT_EQ(lines.size(), 1u);
   EXPECT_EQ(lines[0].text, "One two three four");
+}
+
+// A title split mid-word reads badly: headings are never hyphenated, whichever way their blocks
+// start (the heading's own, one it merges into from an enclosing <div>, one after a <br/> in it, a
+// block inside it). The paragraphs before and after it hyphenate as before. Ported from
+// crosspoint-reader PR #4442 (kanavnet).
+TEST_F(HeadingBlockLayoutFixture, HeadingsAreNotHyphenatedButTheTextAroundThemIs) {
+  const std::string words =
+      "Incomprehensibilities notwithstanding, extraordinarily characteristically "
+      "internationalization uncharacteristically";
+  const auto lines = layout("",
+                            "<p>" + words + "</p>\n<h2>" + words + "</h2>\n<div><h2>" + words + "<br/>" + words +
+                                "<div>" + words + "</div></h2></div>\n<p>" + words + "</p>",
+                            /*paragraphAlignment=*/0, /*hyphenation=*/true, /*viewportWidth=*/400);
+  int paragraphHyphens = 0;
+  int headingLines = 0;
+  bool afterHeading = false;
+  int hyphensAfterHeading = 0;
+  for (const Line& line : lines) {
+    const bool hyphenated = !line.text.empty() && line.text.back() == '-';
+    if (line.align == CssTextAlign::Center) {
+      ++headingLines;
+      afterHeading = true;
+      EXPECT_FALSE(hyphenated) << "heading line hyphenated: " << line.text;
+    } else {
+      paragraphHyphens += hyphenated ? 1 : 0;
+      if (afterHeading) hyphensAfterHeading += hyphenated ? 1 : 0;
+    }
+  }
+  EXPECT_GT(headingLines, 8);
+  EXPECT_GT(paragraphHyphens, 0) << "the paragraphs must hyphenate, or the test proves nothing";
+  EXPECT_GT(hyphensAfterHeading, 0) << "the paragraph after a heading hyphenates again";
 }
