@@ -7790,15 +7790,8 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
     anchor = hrefStr.substr(hashPos + 1);
   }
 
-  // Check for same-file anchor reference (#anchor only)
-  bool sameFile = !hrefStr.empty() && hrefStr[0] == '#';
-
-  int targetSpineIndex;
-  if (sameFile) {
-    targetSpineIndex = sourceSpineIndex;
-  } else {
-    targetSpineIndex = epub->resolveHrefToSpineIndex(hrefStr);
-  }
+  // The link is relative to the chapter that holds it: every href reaching here is one on the current page.
+  const int targetSpineIndex = epub->resolveLinkToSpineIndex(hrefStr, sourceSpineIndex);
 
   if (targetSpineIndex < 0) {
     LOG_DBG("ERS", "Could not resolve href: %s", hrefStr.c_str());

@@ -6446,8 +6446,8 @@ bool ChapterHtmlSlimParser::linkLeadsToDocument(const char* href) const {
     return ext.size() == strlen(name) && strncasecmp(ext.data(), name, ext.size()) == 0;
   };
   if (!is("xhtml") && !is("html") && !is("htm") && !is("xht")) return false;
-  // A walk of the spine in book.bin, once a link (currentFootnoteLeadsToDocument_).
-  return epub->resolveHrefToSpineIndex(href) >= 0;
+  // A walk of the spine in book.bin, once a link (currentFootnoteLeadsToDocument_). Relative to this document's folder.
+  return epub->resolveHrefToSpineIndex(href, contentBase) >= 0;
 }
 
 uint32_t ChapterHtmlSlimParser::imageLinkHash(const int width, const int height) {

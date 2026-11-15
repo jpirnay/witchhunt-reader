@@ -26,7 +26,9 @@ namespace {
 //      landmarks); a v15 cache holds a title banner, a logo or no cover for such books
 // v17: a spine record carries its item's ZIP stat (BOOK_SPINE_STAT_BYTES); a v16 record ends at tocIndex
 // v18: the spine's page-progression-direction (a byte after the description); a v17 cache does not have it
-constexpr uint8_t BOOK_CACHE_VERSION = 18;
+// v19: NCX links resolve against the NCX's folder, not the OPF's; a v18 cache holds an NCX in a subfolder's TOC
+//      entries unmapped (-1). Layout unchanged.
+constexpr uint8_t BOOK_CACHE_VERSION = 19;
 constexpr char bookBinFile[] = "/book.bin";
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";
@@ -810,7 +812,8 @@ BookMetadataCache::SpineEntry BookMetadataCache::getSpineEntry(const int index) 
   return readSpineEntry(bookFile);
 }
 
-int BookMetadataCache::findSpineIndexByHref(const std::string_view target, const bool byFilename) {
+int BookMetadataCache::findSpineIndexByHref(const std::string_view target, const bool byFilename,
+                                            const std::string_view alternate) {
   if (!loaded || spineCount == 0 || target.empty()) return -1;
   // The records follow each other in spine order from the first one's LUT entry.
   bookFile.seek(lutOffset);
@@ -823,16 +826,18 @@ int BookMetadataCache::findSpineIndexByHref(const std::string_view target, const
   // link to Text/b/ch01.xhtml must not open an earlier Text/a/ch01.xhtml. Still one pass; it reads
   // to the end only when no item matches exactly. Ported from crosspoint-reader PR #4472 by Justin
   // Mitchell.
+  int alternateMatch = -1;
   int filenameMatch = -1;
   for (int i = 0; i < static_cast<int>(spineCount); i++) {
     if (!in.readString(href)) return -1;
     in.seek(in.position() + BOOK_SPINE_FIXED_BYTES);
     if (href == target) return i;
+    if (alternateMatch < 0 && !alternate.empty() && href == alternate) alternateMatch = i;
     if (byFilename && filenameMatch < 0 && spine_href::match(target, href) == SpineHrefMatch::Filename) {
       filenameMatch = i;
     }
   }
-  return filenameMatch;
+  return alternateMatch >= 0 ? alternateMatch : filenameMatch;
 }
 
 int BookMetadataCache::largestSpineIndex() {

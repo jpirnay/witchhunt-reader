@@ -407,7 +407,9 @@ bool Epub::parseTocNcxFile(const bool writePageList) const {
   // blow the X3 heap when accumulated in a std::vector — see PageListSink).
   std::optional<PageListSink> ncxPageListSink;
   if (writePageList) ncxPageListSink.emplace(getCachePath());
-  TocNcxParser ncxParser(contentBasePath, ncxSize, bookMetadataCache.get(),
+  // Relative to the NCX, as the nav's are to the nav (below): an NCX in another folder than the OPF linked one up.
+  const std::string ncxContentBasePath = tocNcxItem.substr(0, tocNcxItem.find_last_of('/') + 1);
+  TocNcxParser ncxParser(ncxContentBasePath, ncxSize, bookMetadataCache.get(),
                          ncxPageListSink ? &*ncxPageListSink : nullptr);
 
   if (!ncxParser.setup()) {
@@ -2633,18 +2635,34 @@ std::optional<Epub::PrintedPageEntry> Epub::findPrintedPageByLabel(int target) c
   return match;
 }
 
-int Epub::resolveHrefToSpineIndex(const std::string& href) const {
+int Epub::resolveLinkToSpineIndex(const std::string& href, const int fromSpineIndex) const {
+  if (!href.empty() && href[0] == '#') return fromSpineIndex;
+  // The folder of the document holding the link, as the section build derives it for the image srcs (contentBase).
+  std::string base;
+  if (fromSpineIndex >= 0 && fromSpineIndex < getSpineItemsCount()) {
+    base = getSpineItem(fromSpineIndex).href;
+    const size_t slash = base.find_last_of('/');
+    base.resize(slash != std::string::npos ? slash + 1 : 0);
+  }
+  return resolveHrefToSpineIndex(href, base);
+}
+
+int Epub::resolveHrefToSpineIndex(const std::string& href, const std::string_view linkBase) const {
   if (!bookMetadataCache || !bookMetadataCache->isLoaded()) return -1;
 
   // Split before decoding so escaped '#' characters in filenames stay part of the path.
   const size_t hashPos = href.find('#');
   const std::string rawTarget = hashPos != std::string::npos ? href.substr(0, hashPos) : href;
-  const std::string target = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(rawTarget));
+  const std::string asWritten = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(rawTarget));
 
   // Same-file reference (anchor-only)
-  if (target.empty()) return -1;
+  if (asWritten.empty()) return -1;
+  if (linkBase.empty()) return bookMetadataCache->findSpineIndexByHref(asWritten, true);
 
-  // The spine item at this path, else the first one with its filename: in-book links are kept as
-  // written, relative to their own document.
-  return bookMetadataCache->findSpineIndexByHref(target, true);
+  // The href within its document's folder, as the parser resolves an image's src. A spine href is a path from the
+  // zip root, the OPF's folder included, as the folder is. "../b/ch.xhtml" in OEBPS/a/ch.xhtml once normalised to
+  // "b/ch.xhtml", which names no spine item under OEBPS/, and the first ch.xhtml of the spine (OEBPS/a/'s) won.
+  const std::string target =
+      FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(std::string(linkBase).append(rawTarget)));
+  return bookMetadataCache->findSpineIndexByHref(target, true, asWritten);
 }
