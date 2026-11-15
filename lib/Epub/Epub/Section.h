@@ -131,9 +131,6 @@ class Section {
   std::array<uint16_t, kPagesWithoutPicturesKept> pagesWithoutPictures_{};
   uint8_t pagesWithoutPicturesNext_ = 0;
   void forgetPagesWithoutPictures();
-  // The live build's arena (nullptr when no build is live, or it has none): read by the per-page
-  // heap trace, which sits above BuildState's definition in Section.cpp.
-  const BuildArena* activeBuildArena() const;
   // See setExternalBuildScratch. Not owned; must outlive any active build.
   BuildArena* externalScratch_ = nullptr;
   // Outcome of one phase method. Mostly maps to BuildStep: More means the phase yielded
@@ -317,6 +314,15 @@ class Section {
   // external region arrives, it restarts the build so the region is actually used. See the
   // definition in Section.cpp.
   void setExternalBuildScratch(BuildArena* scratch);
+  // A build given no external scratch takes a region of this many bytes from the heap and uses it as it would a lent
+  // one (the parser state, the CSS rules, the inflate ring and the word cache in it); 0, the default, keeps the 10 KB
+  // parse arena. For the boards with PSRAM, where the heap puts the block (HalCapabilities::keepsSecondaryBuffer()):
+  // the X4 Pro builds the chapter it opens without lending its secondary buffer, and on the 10 KB arena laid out 75
+  // ms a page, against 32 ms a page in the lent PSRAM arena on the same chapter run (2026-11-15). Falls back to the
+  // 10 KB arena when the heap has no such block.
+  static void setOwnedBuildRegionBytes(size_t bytes);
+  // The live build's arena (nullptr when no build is live): read by the per-page heap trace, and by the tests.
+  const BuildArena* activeBuildArena() const;
   // Percent of the spine XHTML consumed by the in-flight build (0–100; 100 once the
   // stream is exhausted and only Finalize remains). 0 when no build is live. Feeds the
   // DEBUG_BACKGROUND_WORK overlay.

@@ -162,6 +162,7 @@ add_executable(EpubPipelineTest
   FontFamilyLayoutTest.cpp
   SpineCacheLayoutTest.cpp
   SaxStateInArenaTest.cpp
+  OwnedBuildRegionTest.cpp
   JpegDownscaleTest.cpp
   CompanionCacheTest.cpp
   ImageParkTest.cpp
