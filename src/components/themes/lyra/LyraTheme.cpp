@@ -796,10 +796,25 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
 
 void LyraTheme::drawEmptyRecents(const GfxRenderer& renderer, const Rect rect) const {
   constexpr int padding = 48;
-  renderer.drawText(UI_12_FONT_ID, rect.x + padding,
-                    rect.y + rect.height / 2 - renderer.getLineHeight(UI_12_FONT_ID) - 2, tr(STR_NO_OPEN_BOOK), true,
-                    EpdFontFamily::BOLD);
-  renderer.drawText(UI_10_FONT_ID, rect.x + padding, rect.y + rect.height / 2 + 2, tr(STR_START_READING), true);
+  // Fitted to the tile as Classic's card is (BaseTheme::fitMessage). Drawn with no width limit, a
+  // translation longer than the tile ran past its edge.
+  const int textWidth = rect.width - 2 * padding;
+  const FittedMessage title =
+      fitMessage(renderer, tr(STR_NO_OPEN_BOOK), UI_12_FONT_ID, UI_10_FONT_ID, textWidth, 2, /*bold=*/true);
+  const FittedMessage hint = fitMessage(renderer, tr(STR_START_READING), UI_10_FONT_ID, SMALL_FONT_ID, textWidth, 2);
+  const int titleLineHeight = renderer.getLineHeight(title.fontId);
+  const int hintLineHeight = renderer.getLineHeight(hint.fontId);
+  // The title ends just above the tile's middle and the hint starts just below it, as before.
+  int y = rect.y + rect.height / 2 - static_cast<int>(title.lines.size()) * titleLineHeight - 2;
+  for (const auto& line : title.lines) {
+    renderer.drawText(title.fontId, rect.x + padding, y, line.c_str(), true, EpdFontFamily::BOLD);
+    y += titleLineHeight;
+  }
+  y = rect.y + rect.height / 2 + 2;
+  for (const auto& line : hint.lines) {
+    renderer.drawText(hint.fontId, rect.x + padding, y, line.c_str(), true);
+    y += hintLineHeight;
+  }
 }
 
 void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
