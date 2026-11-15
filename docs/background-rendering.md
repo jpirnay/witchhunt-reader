@@ -63,7 +63,9 @@ if (section && section->hasActiveBuild()) {  // 2. the page on screen's images, 
   if (!stepImageLaneDuringBuild()) stepCurrentSectionBuild();
   return;
 }
-stepBackgroundSectionBuild();                // 3. Background A re-arm, the image lane, then Background B
+if (stepGlyphStoreRoom()) return;            // 3. room in the TrueType glyph store
+if (stepStarredPages()) return;              // 4. starred pages' upkeep (below)
+stepBackgroundSectionBuild();                // 5. Background A re-arm, the image lane, then Background B
 ```
 
 Rationale: deferred AA finishes the current page's quality; **C** unblocks reading (you can't
@@ -71,6 +73,15 @@ read until it produces pages); **A**, the image lane and **B** are speculative l
 matter once the current page/section is settled. Of those, the pictures a few pages ahead come
 before a chapter fifty pages away: the image lane runs before B, and B takes the secondary buffer only
 once the lane has nothing left to decode (`LaneBeforeBuild.h`, see the image lane below).
+
+**Starred pages** (`stepStarredPages()`, `StarAnchoring`): a star keeps the KOReader XPath of its page's first text
+and the layout its page number was counted in. Once the chapter on screen is complete, its stars counted in another
+layout move onto the page holding their text, and a new star's text gets its XPath. Each is one parse of the chapter
+by the KOReader sync's mappers, which cannot be aborted: the step waits for what the glyph-store step waits for (the
+look-ahead gates and `BG_BUILD_BORROW_QUIET_MS` since the last page landed), parses at most once a tick, and does it in
+the lent secondary framebuffer, never on the heap. A jump to a star counted in another layout resolves its XPath on the
+spot. What a mapping turns into, the page's visible-text offset, is kept for the session, so a second relayout parses
+nothing. Each parse logs `STAR` at INF with its time.
 
 ---
 

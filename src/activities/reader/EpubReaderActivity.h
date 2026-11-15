@@ -668,6 +668,17 @@ class EpubReaderActivity final : public Activity {
 
   // Bookmarks (starred pages)
   BookmarkStore bookmarkStore;
+  // The chapter layout whose stars stepStarredPages() last found nothing owed for: spine, Section::layoutFingerprint()
+  // and page count. Forgotten when a star is made or a jump learns where one's text is.
+  struct StarsSettled {
+    int spine = -1;
+    uint32_t layout = 0;
+    uint16_t pageCount = 0;
+    bool operator==(const StarsSettled& o) const {
+      return spine == o.spine && layout == o.layout && pageCount == o.pageCount;
+    }
+  };
+  StarsSettled starsSettledFor_;
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;
@@ -819,6 +830,18 @@ class EpubReaderActivity final : public Activity {
   // One step of making room in the TrueType glyph store (a segment reclaimed or the index rebuilt), under a Try
   // RenderLock. True when it did work; the tick then yields to the loop.
   bool stepGlyphStoreRoom();
+  // One step of the starred pages' upkeep (StarAnchoring): the chapter on screen's stars counted in another layout
+  // moved onto their text, or a new star's text named. At most one chapter parse, in the lent secondary framebuffer,
+  // under a Try RenderLock, at the glyph-store step's moments. True when it did work; the tick then yields to the loop.
+  bool stepStarredPages();
+  // Stars or unstars the page on screen; a new star keeps what finds its text again (StarAnchoring::forPage). The
+  // caller holds the render lock.
+  void toggleStarOnCurrentPage();
+  // Where a jump to the star on (spine, page) lands: that page while the star was counted in `expectedLayout`, the
+  // layout the chapter will be shown in; else the page holding its text, from what the session knows or from its XPath
+  // (a chapter parse). 0: the layout is not known yet, and a star with an XPath goes by its text. A star without an
+  // anchor goes by its page. The caller holds the render lock.
+  NavigationTarget starJumpTarget(uint16_t spine, uint16_t page, uint32_t expectedLayout);
   // The gates Background-B and the idle glyph-store step share: a section on screen in the READING phase, background
   // work not suspended, and no pre-render, pre-rendered page, display refresh or image decode pending.
   bool lookAheadMayRun() const;
@@ -1102,8 +1125,9 @@ class EpubReaderActivity final : public Activity {
   void applyPendingSyncSession();
   // Consume a persisted bookmark-jump request (from GlobalBookmarksActivity) for
   // this book. Rewrites progress.bin to the bookmarked position before the normal
-  // reader startup path reads it.
-  void applyPendingBookmarkJump();
+  // reader startup path reads it. True when it applied one: onEnter() then lets the
+  // star's text decide the page, once the book's stars are loaded (starJumpTarget).
+  bool applyPendingBookmarkJump();
 #if SERIAL_TEST_API
   // Opens at APP_STATE.pendingPercentJump (set by the serial CMD:ACT:READER:<path>@<n>%).
   void applyPendingPercentJump();
