@@ -104,6 +104,19 @@ static bool clockApproximate = true;
 // Cleared by a successful NTP sync.
 static bool clockStaleRestore = false;
 
+// Where the clock's value came from: whether TLS checks certificate dates against it (datesAuthoritativeForTls()).
+static clock_authority::Source clockSource = clock_authority::Source::Unset;
+
+// The last failed NTP sync (millis()), shared by ensureUsableForTls()'s and syncNtpIfSoftwareClock()'s backoffs, so
+// one failure is not followed at once by another attempt from the next caller.
+static bool ntpFailureSeen = false;
+static unsigned long lastNtpFailureMs = 0;
+
+static void noteNtpFailure() {
+  ntpFailureSeen = true;
+  lastNtpFailureMs = millis();
+}
+
 // How long the deep sleep that this boot woke from lasted, in seconds; 0 when it
 // cannot be established. Set once by restore(), reported on the System Information
 // screen. Only the two authoritative restore paths can produce it: the DS3231 and
@@ -711,6 +724,7 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
       snprintf(errorBuf, errorBufSize, "WiFi disconnected");
     }
     LOG_ERR("CLK", "NTP sync failed: WiFi disconnected");
+    noteNtpFailure();
     return false;
   }
 
@@ -800,6 +814,7 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
       // Stop SNTP on the failure path so a later applyClientTime() (which
       // refuses while SNTP is enabled) isn't blocked by a dangling instance.
       esp_sntp_stop();
+      noteNtpFailure();
       return false;
     }
   }
@@ -807,6 +822,8 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
   // NTP sync yields authoritative time.
   clockApproximate = false;
   clockStaleRestore = false;
+  clockSource = clock_authority::Source::Ntp;
+  ntpFailureSeen = false;
   // true, not false: nothing is going to sleep here. What follows a sync is either a reboot --
   // across which the RTC domain and the LP timer keep running, so restore() can and should apply
   // the elapsed correction -- or a deep sleep, which re-captures through saveBeforeSleep() with
@@ -917,6 +934,7 @@ void restore() {
       setSystemClock(rtcTime);
       rtcEpoch = rtcTime;
       clockApproximate = false;
+      clockSource = clock_authority::Source::HardwareRtc;
       LOG_INF("CLK", "Got time from hardware RTC. Last deep sleep %us", lastSleepSec);
       return;
     }
@@ -973,6 +991,7 @@ void restore() {
     rtcTemperatureC = readChipTemperatureC();
     rtcStateChecksum = computeRtcStateChecksum();
     clockApproximate = true;
+    clockSource = clock_authority::Source::SleepEstimate;
     LOG_INF("CLK", "Restored from RTC + LP timer, epoch %lld", (long long)estimated);
     return;
   }
@@ -1010,6 +1029,7 @@ void restore() {
     rtcClockFlags = 0;
     rtcStateChecksum = computeRtcStateChecksum();
     clockApproximate = true;
+    clockSource = stale ? clock_authority::Source::NvsStaleRestore : clock_authority::Source::NvsRestore;
     LOG_INF("CLK", "Restored from NVS, epoch %lld (no elapsed correction)", (long long)epoch);
   }
 }
@@ -1096,10 +1116,40 @@ bool isPlausibleForTls() {
   // past it satisfies every one of them. Upper bound: the curated set's latest notAfter is
   // 2038, so cap below that — a wildly-wrong FUTURE clock breaks notAfter just as effectively
   // as 1970 breaks notBefore, and must also be treated as "needs SNTP".
-  constexpr time_t MIN_PLAUSIBLE_EPOCH = 1735689600;  // 2025-01-01 00:00:00 UTC
-  constexpr time_t MAX_PLAUSIBLE_EPOCH = 2114380800;  // 2037-01-01 00:00:00 UTC
-  const time_t nowEpoch = time(nullptr);
-  return nowEpoch >= MIN_PLAUSIBLE_EPOCH && nowEpoch < MAX_PLAUSIBLE_EPOCH;
+  return clock_authority::plausibleForTls(time(nullptr));
+}
+
+clock_authority::Source source() { return clockSource; }
+
+bool datesAuthoritativeForTls() { return clock_authority::datesAuthoritative(clockSource, time(nullptr)); }
+
+bool waiveCertificateDates(const char* peer) {
+  if (datesAuthoritativeForTls()) return false;
+  // One line per peer and clock source: a download in ranges connects once per range.
+  static uint32_t lastLogged = 0;
+  uint32_t key = 2166136261u ^ static_cast<uint8_t>(clockSource);
+  for (const char* c = peer ? peer : ""; *c; ++c) {
+    key = (key ^ static_cast<uint8_t>(*c)) * 16777619u;
+  }
+  if (key != lastLogged) {
+    lastLogged = key;
+    LOG_INF("CLK", "TLS %s: certificate dates not checked (chain and name are): the clock, epoch %lld, is %s",
+            peer ? peer : "?", static_cast<long long>(time(nullptr)), clock_authority::describe(clockSource));
+  }
+  return true;
+}
+
+bool ntpFailedWithin(const uint32_t withinMs) { return ntpFailureSeen && millis() - lastNtpFailureMs < withinMs; }
+
+bool syncNtpIfSoftwareClock(const char* preferredServer) {
+  if (!clock_authority::softwareClockNtpDue(clockSource, time(nullptr),
+                                            ntpFailedWithin(clock_authority::kRetryAfterFailureMs))) {
+    return datesAuthoritativeForTls();
+  }
+  LOG_INF("CLK", "The clock is %s (epoch %lld): running SNTP before the first TLS connect",
+          clock_authority::describe(clockSource), static_cast<long long>(time(nullptr)));
+  syncNtp(preferredServer);
+  return datesAuthoritativeForTls();
 }
 
 bool ensureUsableForTls(const char* preferredServer) {
@@ -1115,15 +1165,12 @@ bool ensureUsableForTls(const char* preferredServer) {
   // Rate-limit FAILED attempts instead of latching "attempted" forever. A one-shot latch means
   // a single call made before the radio was ready disables the sync for the rest of the
   // session, and every later TLS connect then fails to load its trust store with no way back.
-  constexpr unsigned long RETRY_MIN_INTERVAL_MS = 30000;
-  static unsigned long lastAttemptMs = 0;
-  static bool everAttempted = false;
-  const unsigned long nowMs = millis();
-  if (everAttempted && (nowMs - lastAttemptMs) < RETRY_MIN_INTERVAL_MS) {
+  // Any failed sync counts, syncNtpIfSoftwareClock()'s included, so the two do not run the
+  // timeout back to back.
+  constexpr uint32_t RETRY_MIN_INTERVAL_MS = 30000;
+  if (ntpFailedWithin(RETRY_MIN_INTERVAL_MS)) {
     return false;
   }
-  everAttempted = true;
-  lastAttemptMs = nowMs;
 
   LOG_INF("CLK", "Clock unset/implausible for TLS (epoch %lld); running SNTP before the handshake",
           static_cast<long long>(time(nullptr)));
@@ -1216,6 +1263,7 @@ bool applyClientTime(time_t timestamp) {
 
   setSystemClock(timestamp);
   clockApproximate = false;
+  clockSource = clock_authority::Source::Client;
   rtcEpoch = timestamp;
   LOG_INF("CLK", "Applied client time: %lld", (long long)timestamp);
 
