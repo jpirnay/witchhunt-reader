@@ -39,6 +39,8 @@ const char* const kBody =
 struct Built {
   std::map<std::string, uint8_t> styles;  // bold/italic bits of each word (every word is unique)
   int images = 0;
+  bool degradedAfterBuild = false;  // Section::isImageHeaderDegraded() right after the build
+  bool degradedOnLoad = false;      // and as the cached file's status byte gives it back
 };
 
 // Restores "never refuse" however the test ends.
@@ -75,8 +77,10 @@ struct BlockImageHeap : testing::Test {
       const BlockImagesLeft guard(imagesAllowed);
       EXPECT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
     }
-    EXPECT_TRUE(section.loadSectionFile(params));
     Built out;
+    out.degradedAfterBuild = section.isImageHeaderDegraded();
+    EXPECT_TRUE(section.loadSectionFile(params));
+    out.degradedOnLoad = section.isImageHeaderDegraded();
     for (uint16_t p = 0; p < section.pageCount; ++p) {
       section.currentPage = p;
       const auto page = section.loadPageFromSectionFile();
@@ -112,6 +116,8 @@ void expectStyles(const Built& built) {
 TEST_F(BlockImageHeap, ThePlacedImageLeavesEveryStyleScopeAsTheBookSetsIt) {
   const Built built = build(SIZE_MAX);
   EXPECT_EQ(built.images, 1);
+  EXPECT_FALSE(built.degradedAfterBuild);
+  EXPECT_FALSE(built.degradedOnLoad);
   expectStyles(built);
 }
 
@@ -119,4 +125,13 @@ TEST_F(BlockImageHeap, AnImageTheHeapCannotPlaceLeavesTheStylesAroundItAlone) {
   const Built built = build(0);
   EXPECT_EQ(built.images, 0) << "the refused image is dropped";
   expectStyles(built);
+}
+
+// The chapter without its picture is the heap's doing, not the book's: the build says so, as for a refused header
+// read, and the cached file keeps saying so, so the reader rebuilds it once with more headroom instead of keeping it
+// image-less for good.
+TEST_F(BlockImageHeap, AnImageTheHeapCannotPlaceMarksTheSectionForARebuild) {
+  const Built built = build(0);
+  EXPECT_TRUE(built.degradedAfterBuild);
+  EXPECT_TRUE(built.degradedOnLoad);
 }

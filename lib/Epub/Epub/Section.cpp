@@ -233,9 +233,9 @@ constexpr uint32_t kSize = kParagraphLut + sizeof(uint32_t);
 // The byte at header::kParseComplete. It was a bool, so files written before the flags existed
 // read as "complete / not degraded" or "truncated" exactly as before -- no version bump.
 //   kStatusImageHeaderDegraded: an image was laid out as alt text because the heap could not
-//   size it right then (see Section::isImageHeaderDegraded). Persisted so a later open -- with
-//   the fresh heap the build lacked -- can rebuild the chapter instead of caching it image-less
-//   for good.
+//   size it right then, or dropped because the heap could not hold its page element (see
+//   Section::isImageHeaderDegraded). Persisted so a later open -- with the fresh heap the build
+//   lacked -- can rebuild the chapter instead of caching it image-less for good.
 //   kStatusTableRowDegraded / kStatusCssDegraded: a table row was written as paragraphs, or
 //   the CSS resolver skipped lookups, because of the heap at build time (memory audit 2026-09,
 //   F3: "four refusals bake a degraded result into a cache with nothing to trigger a rebuild").

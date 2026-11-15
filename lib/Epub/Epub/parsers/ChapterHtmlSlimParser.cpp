@@ -2302,6 +2302,7 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
                                   : nullptr;
   if (!pageImage) {
     LOG_ERR("EHP", "Float image dropped: allocation failed");
+    noteImageDroppedForHeap();
     return;
   }
   // The page owns it from here; this is a borrowed pointer purely so the first line of
@@ -6193,6 +6194,11 @@ std::unique_ptr<ImageBlock> ChapterHtmlSlimParser::buildImageFromEpubPath(
 
   auto image = makeUniqueNoThrow<ImageBlock>(cachedPath, static_cast<int16_t>(displayWidth),
                                              static_cast<int16_t>(displayHeight), alt, epub->getPath(), resolvedPath);
+  if (!image) {
+    LOG_ERR("EHP", "Image dropped: ImageBlock allocation failed");
+    noteImageDroppedForHeap();
+    return nullptr;
+  }
   turnIfVertical(image.get());
   return image;
 }
@@ -6287,12 +6293,14 @@ bool ChapterHtmlSlimParser::placeImageWithBlockSpacing(const std::string& cached
     emitPage();
     if (!currentPage) {
       LOG_ERR("EHP", "Failed to create new page");
+      noteImageDroppedForHeap();
       return false;
     }
   } else if (!currentPage) {
     currentPage.reset(new Page());
     if (!currentPage) {
       LOG_ERR("EHP", "Failed to create initial page");
+      noteImageDroppedForHeap();
       return false;
     }
     currentPageNextY = 0;
@@ -6314,6 +6322,7 @@ bool ChapterHtmlSlimParser::placeImageWithBlockSpacing(const std::string& cached
 #endif
   if (!imageBlock) {
     LOG_ERR("EHP", "Failed to create ImageBlock");
+    noteImageDroppedForHeap();
     return false;
   }
   turnIfVertical(imageBlock.get());
@@ -6322,6 +6331,7 @@ bool ChapterHtmlSlimParser::placeImageWithBlockSpacing(const std::string& cached
   auto pageImage = makeUniqueNoThrow<PageImage>(std::move(imageBlock), xPos, yPos, /*inLine=*/false, linkHash);
   if (!pageImage) {
     LOG_ERR("EHP", "Failed to create PageImage");
+    noteImageDroppedForHeap();
     return false;
   }
   noteElementOnPage(visibleOffset);
@@ -6535,6 +6545,7 @@ void ChapterHtmlSlimParser::placeLineImages(const std::span<const ParsedText::Li
       ++lineImagesOnPage_;
     } else {
       LOG_ERR("EHP", "Inline image %u dropped: no memory for its block", object.id);
+      noteImageDroppedForHeap();
     }
     pendingLineImages_.erase(it);
   }
@@ -6590,6 +6601,7 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
     auto pageImage = makeUniqueNoThrow<PageImage>(std::move(image), xPos, currentPageNextY);
     if (!pageImage) {
       LOG_ERR("EHP", "Image dropped: PageImage allocation failed");
+      noteImageDroppedForHeap();
       return;
     }
     noteElementOnPage(placementOffset());
@@ -6622,6 +6634,7 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
     auto slice = makeUniqueNoThrow<PageImage>(std::move(crop), xPos, currentPageNextY);
     if (!slice) {
       LOG_ERR("EHP", "Image slice dropped: PageImage allocation failed");
+      noteImageDroppedForHeap();
       return;
     }
     noteElementOnPage(placementOffset());

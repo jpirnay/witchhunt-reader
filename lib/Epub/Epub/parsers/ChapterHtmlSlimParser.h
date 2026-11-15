@@ -860,7 +860,8 @@ class ChapterHtmlSlimParser final : public Print {
   int progressStepPercent = 0;
   bool progressUiEnabled = true;
   bool streamFailed = false;
-  // Set when the heap gate refused an image-header read (see imageHeaderDegraded()).
+  // Set when the heap gate refused an image-header read, or an image was dropped because its page element could not be
+  // had (see imageHeaderDegraded(), noteImageDroppedForHeap()).
   bool imageHeaderSkippedForHeap = false;
   // Set when any table row was demoted to paragraphs (degradeRow), for any reason: the pages
   // are usable but the cache holds a layout the heap chose, not the book. See tableRowDegraded().
@@ -1233,6 +1234,11 @@ class ChapterHtmlSlimParser final : public Print {
   void placeBackgroundImage(const std::string& resolvedPath, int elementDepth);
   // Place an already-built ImageBlock as a centered, full-width block element, page-breaking if needed.
   void placeImageBlockAsBlock(std::unique_ptr<ImageBlock> image);
+  // An image whose page element (ImageBlock, PageImage, the page) the heap could not hold is dropped. That says no more
+  // about the image than a refused header read does: the same chapter built with more headroom places it. So it takes
+  // the same latch, and the section is rebuilt as for a refused header (imageHeaderDegraded()) instead of being cached
+  // without the image for good.
+  void noteImageDroppedForHeap() { imageHeaderSkippedForHeap = true; }
   // An image of the flow on a line of its own, centred, with the spacing of the empty block it stands in (a figure's or
   // a paragraph's margins), which it uses up: the block's style is reset for the text after it. A page break pending
   // goes first, and a page that has no room for it ends. False when no page or image could be had.
@@ -1372,9 +1378,10 @@ class ChapterHtmlSlimParser final : public Print {
   bool finalize();
   [[nodiscard]] bool streamSucceeded() const { return !streamFailed; }
   // True when at least one image was dropped to alt text because the heap gate refused its
-  // header read — a transient condition, unlike an unreadable or unsupported image. The pages
-  // are usable but incomplete, and the caller must not keep them: see the latch site in
-  // startElement's image branch.
+  // header read, or dropped because the heap could not hold its page element — a transient
+  // condition, unlike an unreadable or unsupported image. The pages are usable but incomplete,
+  // and the caller must not keep them: see the latch site in startElement's image branch and
+  // noteImageDroppedForHeap().
   [[nodiscard]] bool imageHeaderDegraded() const { return imageHeaderSkippedForHeap; }
   // True when at least one table row was emitted as paragraphs instead of a grid (heap gate,
   // row byte budget, an open-cell overflow). Latched into the section status byte so the
