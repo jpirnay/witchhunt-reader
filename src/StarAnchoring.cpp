@@ -77,7 +77,7 @@ bool parseOwed(const BookmarkStore& store, const Section* section, const int spi
     const StarAnchor& anchor = anchors[i];
     if (anchor.layout == 0 || anchor.mappingFailed) continue;
     if (anchor.xpath.empty()) {
-      if (anchor.offset != kNoOffset) return true;  // a new star's text to name
+      if (anchor.nameOwed && anchor.offset != kNoOffset) return true;  // a new star's text to name
       continue;
     }
     if (settling && stars[i].spineIndex == spineIndex && anchor.offset == kNoOffset && !standsIn(anchor, *section)) {
@@ -90,10 +90,14 @@ bool parseOwed(const BookmarkStore& store, const Section* section, const int spi
 StarAnchor forPage(const Section& section, const int page) {
   StarAnchor anchor;
   anchor.layout = section.layoutFingerprint();
+  anchor.nameOwed = true;
   // While the build runs, its file has no offset table yet: settleKnown() takes it from there once the build is done.
   if (section.hasActiveBuild() || page < 0) return anchor;
   anchor.pageCount = section.pageCount;
-  if (const auto offset = section.getVisibleTextOffsetForPage(static_cast<uint16_t>(page))) anchor.offset = *offset;
+  if (const auto offset = section.getVisibleTextOffsetForPage(static_cast<uint16_t>(page))) {
+    anchor.offset = *offset;
+    anchor.offsetFormat = Section::formatVersion();
+  }
   return anchor;
 }
 
@@ -110,7 +114,7 @@ bool settleKnown(BookmarkStore& store, const Section& section, const int spineIn
       if (anchor.layout != section.layoutFingerprint() || !anchor.xpath.empty()) continue;  // for parseNext()
       // Starred while this layout was still being built, before the page had an offset in the table.
       if (const auto offset = section.getVisibleTextOffsetForPage(stars[i].pageNumber)) {
-        store.noteOffset(i, *offset);
+        store.setOffset(i, *offset, Section::formatVersion());
       } else {
         store.noteMappingFailed(i);
         changed = true;
@@ -134,7 +138,7 @@ Work parseNext(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Se
       if (stars[i].spineIndex != spineIndex || anchor.layout == 0 || anchor.mappingFailed) continue;
       if (standsIn(anchor, *section) || anchor.offset != kNoOffset || anchor.xpath.empty()) continue;
       if (const auto offset = resolveXPath(epub, spineIndex, anchor.xpath, scratch)) {
-        store.noteOffset(i, *offset);
+        store.setOffset(i, *offset, Section::formatVersion());
         settle(store, i, *section, spineIndex);
       } else {
         store.noteMappingFailed(i);
@@ -145,15 +149,16 @@ Work parseNext(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Se
 
   for (size_t i = 0; i < stars.size(); i++) {
     const StarAnchor& anchor = anchors[i];
-    if (anchor.layout == 0 || anchor.mappingFailed || !anchor.xpath.empty() || anchor.offset == kNoOffset) continue;
+    if (!anchor.nameOwed || anchor.mappingFailed || anchor.offset == kNoOffset) continue;
+    store.noteNameTried(i);
     const unsigned long start = millis();
     std::string xpath =
         ChapterXPathIndexer::findXPathForVisibleOffset(epub, stars[i].spineIndex, anchor.offset, scratch);
     const unsigned long took = millis() - start;
     if (xpath.empty() || xpath.size() > bookmark_file::kMaxXPathBytes) {
+      // Not a failed mapping: the offset still finds the text, so the star still settles by it.
       LOG_INF("STAR", "Spine %u: no XPath for offset %u (%lu ms)", static_cast<unsigned>(stars[i].spineIndex),
               static_cast<unsigned>(anchor.offset), took);
-      store.noteMappingFailed(i);
     } else {
       LOG_INF("STAR", "Spine %u: offset %u named %s (%lu ms)", static_cast<unsigned>(stars[i].spineIndex),
               static_cast<unsigned>(anchor.offset), xpath.c_str(), took);
@@ -178,7 +183,7 @@ std::optional<uint32_t> textOffset(BookmarkStore& store, const size_t index, con
   if (anchor.xpath.empty() || anchor.mappingFailed) return std::nullopt;
   const auto offset = resolveXPath(epub, store.getAll()[index].spineIndex, anchor.xpath, scratch);
   if (offset) {
-    store.noteOffset(index, *offset);
+    store.setOffset(index, *offset, Section::formatVersion());
   } else {
     store.noteMappingFailed(index);
   }

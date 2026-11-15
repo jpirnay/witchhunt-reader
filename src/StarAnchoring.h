@@ -16,8 +16,8 @@
 // Section::getPageForVisibleTextOffset). No mapping of its own: both directions are the sync's mappers.
 //
 // Each mapping parses the chapter's XHTML once, which is idle-time work on the X3 (the reader's stepStarredPages()).
-// What they turn into, the visible-text offset of the page's start, is kept for the session (StarAnchor::offset), so a
-// second relayout in the same session, or a jump to a star already settled, parses nothing. `scratch`, where given, is
+// What they turn into, the visible-text offset of the page's start, is kept with the star (StarAnchor::offset), so a
+// relayout or a jump parses nothing while the section format it was counted under stands. `scratch`, where given, is
 // a lent region the parse works in instead of the heap (ChapterXPathIndexer): the reader on the X3 has been measured
 // with less contiguous heap than the inflate ring's 32 KB.
 namespace StarAnchoring {

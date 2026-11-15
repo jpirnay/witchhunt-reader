@@ -141,6 +141,16 @@ struct StarredPageRelayout : testing::TestWithParam<std::string> {
     return starred;
   }
 
+  void reopenUnderAnotherLayout(const std::vector<Starred>& starred, bool offsetsKept);
+
+  // The book's stars as a version 3 file has them: no offset, the XPath alone.
+  void forgetOffsets() const {
+    BookmarkStore store;
+    store.load(epub->getCachePath());
+    for (size_t i = 0; i < store.getAll().size(); ++i) store.setOffset(i, StarAnchor::kNoOffset, 0);
+    store.save();
+  }
+
   // Settles the spine's stars in `section` as the reader's idle time does.
   static void settle(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section& section, const int spine) {
     for (int calls = 0; StarAnchoring::step(store, epub, &section, spine) != StarAnchoring::Work::None; ++calls) {
@@ -159,26 +169,29 @@ bool pageHolds(const Section& section, const uint16_t page, const uint32_t offse
 
 }  // namespace
 
-TEST_P(StarredPageRelayout, EveryStarredPageFindsItsTextInAnotherLayout) {
-  const std::vector<Starred> starred = starEveryPage();
-  if (starred.empty()) GTEST_SKIP() << "no page with text";
-
-  // The book opened again under layout B: only what the file keeps.
+// The book opened again under layout B with what the file keeps: every star on the page holding its text. With the
+// offsets kept (`offsetsKept`), not one chapter is parsed for it; without them (a version 3 file, or an offset of
+// another section format) each named star's XPath is resolved once, and a star with no name keeps its page.
+void StarredPageRelayout::reopenUnderAnotherLayout(const std::vector<Starred>& starred, const bool offsetsKept) {
   BookmarkStore store;
   store.load(epub->getCachePath());
   ASSERT_EQ(store.getAll().size(), starred.size());
-  int moved = 0;
   for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
     const auto section = build(spine, layoutB());
     const bool named = std::any_of(starred.begin(), starred.end(),
                                    [spine](const Starred& star) { return star.spine == spine && star.named; });
-    EXPECT_EQ(StarAnchoring::parseOwed(store, section.get(), spine), named) << "spine " << spine;
-    settle(store, epub, *section, spine);
+    EXPECT_EQ(StarAnchoring::parseOwed(store, section.get(), spine), named && !offsetsKept) << "spine " << spine;
+    for (int calls = 0;; ++calls) {
+      ASSERT_LT(calls, 100000);
+      const StarAnchoring::Work work = StarAnchoring::step(store, epub, section.get(), spine);
+      if (work == StarAnchoring::Work::None) break;
+      if (offsetsKept) EXPECT_EQ(work, StarAnchoring::Work::Cheap) << "spine " << spine << ": parsed";
+    }
     EXPECT_FALSE(StarAnchoring::parseOwed(store, section.get(), spine)) << "spine " << spine;
     for (size_t i = 0; i < starred.size(); ++i) {
       if (starred[i].spine != spine) continue;
       const uint16_t page = store.getAll()[i].pageNumber;
-      if (!starred[i].named) {
+      if (!starred[i].named && !offsetsKept) {
         EXPECT_EQ(page, starred[i].page) << "spine " << spine << ": nothing to find it by, so its page stands";
         continue;
       }
@@ -187,7 +200,8 @@ TEST_P(StarredPageRelayout, EveryStarredPageFindsItsTextInAnotherLayout) {
           << ") is on page " << page << "/" << section->pageCount << " via " << store.getAnchors()[i].xpath;
       EXPECT_EQ(store.getAnchors()[i].layout, section->layoutFingerprint());
       EXPECT_EQ(store.getAnchors()[i].pageCount, section->pageCount);
-      if (page != starred[i].page) moved++;
+      EXPECT_EQ(store.getAnchors()[i].offset, starred[i].offset);
+      EXPECT_EQ(store.getAnchors()[i].offsetFormat, Section::formatVersion());
     }
   }
   // Saved, it stands under B on the next open: nothing left to do.
@@ -199,7 +213,19 @@ TEST_P(StarredPageRelayout, EveryStarredPageFindsItsTextInAnotherLayout) {
     ASSERT_TRUE(section.loadSectionFile(layoutB()));
     EXPECT_EQ(StarAnchoring::step(again, epub, &section, spine), StarAnchoring::Work::None) << "spine " << spine;
   }
-  RecordProperty("moved", moved);
+}
+
+TEST_P(StarredPageRelayout, EveryStarredPageFindsItsTextInAnotherLayoutWithoutAParse) {
+  const std::vector<Starred> starred = starEveryPage();
+  if (starred.empty()) GTEST_SKIP() << "no page with text";
+  reopenUnderAnotherLayout(starred, /*offsetsKept=*/true);
+}
+
+TEST_P(StarredPageRelayout, WithoutItsOffsetAStarFindsItsTextByItsXPath) {
+  const std::vector<Starred> starred = starEveryPage();
+  if (starred.empty()) GTEST_SKIP() << "no page with text";
+  forgetOffsets();
+  reopenUnderAnotherLayout(starred, /*offsetsKept=*/false);
 }
 
 // The drift the anchor is for: on the corpus's longer chapters a page number names other text in layout B.
@@ -264,29 +290,34 @@ TEST_P(StarredPageRelayout, ASecondRelayoutInOneSessionParsesNothing) {
   }
 }
 
-// A jump to a star of a chapter not laid out yet goes by its text: the XPath resolved once, then known.
-TEST_P(StarredPageRelayout, AJumpFindsTheTextFromTheXPath) {
+// A jump to a star of a chapter not laid out yet goes by its text: the offset the file keeps, without a parse; without
+// one, the XPath resolved once, and known from then on.
+TEST_P(StarredPageRelayout, AJumpFindsTheText) {
   const std::vector<Starred> starred = starEveryPage();
   if (starred.empty()) GTEST_SKIP() << "no page with text";
-  BookmarkStore store;
-  store.load(epub->getCachePath());
-  for (size_t i = 0; i < starred.size(); ++i) {
-    const auto offset = StarAnchoring::textOffset(store, i, epub);
-    if (!starred[i].named) {
-      EXPECT_FALSE(offset.has_value());
-      continue;
-    }
-    ASSERT_TRUE(offset.has_value()) << "spine " << starred[i].spine << " page " << starred[i].page;
-    EXPECT_EQ(store.getAnchors()[i].offset, *offset);
-  }
-  // What the jump lands on, in layout B, is the page holding that text.
-  for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
-    const auto section = build(spine, layoutB());
+  for (const bool offsetsKept : {true, false}) {
+    if (!offsetsKept) forgetOffsets();
+    BookmarkStore store;
+    store.load(epub->getCachePath());
     for (size_t i = 0; i < starred.size(); ++i) {
-      if (starred[i].spine != spine || !starred[i].named) continue;
-      const auto page = section->getPageForVisibleTextOffset(store.getAnchors()[i].offset);
-      ASSERT_TRUE(page.has_value());
-      EXPECT_TRUE(pageHolds(*section, *page, starred[i].offset)) << "spine " << spine << " page " << starred[i].page;
+      if (offsetsKept) EXPECT_EQ(store.getAnchors()[i].offset, starred[i].offset);
+      const auto offset = StarAnchoring::textOffset(store, i, epub);
+      if (!starred[i].named && !offsetsKept) {
+        EXPECT_FALSE(offset.has_value());
+        continue;
+      }
+      ASSERT_TRUE(offset.has_value()) << "spine " << starred[i].spine << " page " << starred[i].page;
+      EXPECT_EQ(*offset, starred[i].offset);
+    }
+    // What the jump lands on, in layout B, is the page holding that text.
+    for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
+      const auto section = build(spine, layoutB());
+      for (size_t i = 0; i < starred.size(); ++i) {
+        if (starred[i].spine != spine || (!starred[i].named && !offsetsKept)) continue;
+        const auto page = section->getPageForVisibleTextOffset(starred[i].offset);
+        ASSERT_TRUE(page.has_value());
+        EXPECT_TRUE(pageHolds(*section, *page, starred[i].offset)) << "spine " << spine << " page " << starred[i].page;
+      }
     }
   }
 }
@@ -348,6 +379,7 @@ TEST(StarredPageDuringABuild, GetsItsTextOnceTheBuildIsDone) {
 
   StarAnchor building;  // what StarAnchoring::forPage() gives while the build runs
   building.layout = section.layoutFingerprint();
+  building.nameOwed = true;
   BookmarkStore store;
   ASSERT_TRUE(store.toggle(kSpine, page, building));
   ASSERT_TRUE(StarAnchoring::parseOwed(store, &section, kSpine) == false) << "the offset comes from the table";
