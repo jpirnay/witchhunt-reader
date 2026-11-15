@@ -108,6 +108,15 @@ side hints say so. Settings and the reader menu also offer Confirm on a focused 
 button-only boards still miss the tabs, give the browser a bar focus position, which means moving its
 input onto `ListController` (see `list-input-harmonization.md`, the file browser item).
 
+## Cover thumbnails' midtones (matcha-reader #487): decide
+
+1-bit cover thumbnails are dithered (Atkinson) with gamma off and contrast 1.15
+(`lib/GfxRenderer/BitmapHelpers.cpp:11-14`). matcha lifts the midtones (gamma 0.75) before dithering, which makes dark
+covers lighter in the 1-bit thumbs. A taste choice: here it would need a thumb-only flag, since the same
+`Atkinson1BitDitherer` also dithers page images (`JpegToFramebufferConverter.cpp`); old thumbs stay until they are made
+again; a 256-byte flash table. matcha-reader #487, Eszter
+Schuffert (eszter007).
+
 ## Tests
 
 - The Home-entry migration in `JsonSettingsIO::loadSettings` (old `showBrowseFilesOnHome` /

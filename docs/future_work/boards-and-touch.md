@@ -1,6 +1,6 @@
 # Boards and touch
 
-Status: open items as of 2026-10-07. Collected from multiboard-bringup-handover-2026-08-15.md, multi-board-bringup-2026-08-14.md, x4pro_support.md and touch-input-migration-2026-08-14.md.
+Status: open items as of 2026-10-07; the last three sections added 2026-11-15, from the upstream triage. Collected from multiboard-bringup-handover-2026-08-15.md, multi-board-bringup-2026-08-14.md, x4pro_support.md and touch-input-migration-2026-08-14.md.
 
 Background for all of these is in [Board Support](../contributing/board-support.md) and
 [Touch Architecture](../contributing/touch-architecture.md). Display items from the same sources
@@ -113,9 +113,9 @@ Device checks still owed for the 2026-10-21 PRs (all X3-only):
   Keep/Reset of the cache clear (#538), the held-key steps of the password editor (#537).
 - X4: Base's portrait side-box gap and the X4 keyboard in landscape (#543).
 
-Test API gaps that block some of these: no level-holding button command (a `CMD:BTN:<key>:HOLD:<ms>`
-that keeps the key down, for the keyboard's held Up, Right and DEL), and no `CMD:HEAP:REFUSE` field
-that refuses the secondary-buffer realloc (it would make the fragmented-heap restart reachable).
+Test API gap that blocks some of these: no `CMD:HEAP:REFUSE` field that refuses the secondary-buffer
+realloc (it would make the fragmented-heap restart reachable). Held keys are there since #741
+(`CMD:BTN:<key>:<ms>`, [Serial Test API](../serial-test-api.md)).
 
 ## Localized tap flash
 
@@ -189,7 +189,9 @@ Next: apply the browser's "short / long" form wherever a screen has a hold-only 
 
 ## BOOX Picco: after the first build
 
-Status: 2026-11-13, branch `feat/picco-support`. A retail unit's flash is dumped, and the `picco_stock` build runs on
+Status: merged as #769 (2026-11-14), on the SDK pin of the #771 resync, which brought Free-Ink main's Picco display
+fixes (grayscale LUTs, SSD2677 night mode, dark AA pixels on the SE0400NQW47, first-paint clearing, inverted gray
+overlay). Notes from 2026-11-13: a retail unit's flash is dumped, and the `picco_stock` build runs on
 it on Onyx's table: boot to Home in about 1 s of setup, SSD2677 with an SE0400NQW47 panel, TMA525C reporting two
 contacts, charger configured, RTC and IMU found, the light present (`Frontlight up`), the flash area taken as the
 PSRAM image beside the 512 KB `spiffs`, no System Update rows, the Slide Switch row and double Power = Back as
@@ -203,10 +205,6 @@ and the slide switch turns the light on and off. Board notes:
 - **Two boot-log errors** on that unit, cause not looked at: `i2c_master_transmit_receive failed: ESP_ERR_INVALID_STATE`
   right after `Charger configured` (the IMU is found just after it), and `gpio_isr_handler_remove(): GPIO isr service is
   not installed`.
-- **SDK resync.** Free-Ink main has Picco display fixes the pin lacks: grayscale LUTs for the SSD1677 panels
-  (7ca5f5c), SSD2677 night-mode refresh (5c40622), dark AA pixels on the SE0400NQW47 (df3f41e), no two-pass clearing
-  on the first paint (d73c852), grayscale overlay in inverted mode (99809a0). Several commits of that range change the
-  X4 and X4 Pro refresh code too, so it is its own change, validated on every board.
 - **Updates on the stock table.** Onyx's recovery installs `/update/firmware.bin` from the card. An action that erases
   otadata and restarts would hand the stock-table Picco to it, the way the stock app's Power + Volume Up does.
 - **USB presence from the charger.** No detect pin, so a wall charger shows no charging bolt. Upstream asks
@@ -220,3 +218,30 @@ and the slide switch turns the light on and off. Board notes:
   a remembered mode.
 - **Multi-touch.** The TMA525C reports more than one contact when its GET_SYSINFO says so, but
   `HalCapabilities::hasMultiTouch()` (which decides the persisted rows) names only the GT911.
+
+## USB attach during light sleep on the X4 (CrossPoint #3082)
+
+Open, unproven here: upstream reports an X4 that freezes when USB is plugged in while it idles in light sleep, and
+reverted its light sleep; ours still sleeps in slices. `HalPowerManager::lightSleep()` arms only the timer and the
+power button (`lib/hal/HalPowerManager.cpp:277-283`, no `usbDetect` wake) and keeps the GPIO13 hold on while running,
+on purpose (the comment at `:285-298`: a release between slices can drop the pad).
+
+Next: a device test first: plug USB into an idle X4 at a reader page, ten times. If it ever freezes, take only the PR's
+second commit (arm `BoardConfig::ACTIVE.usbDetect` as a level wake, disarm after); its first commit, dropping the hold
+after wake, contradicts our documented reason. crosspoint-reader #3082, Brian Pugh (@BrianPugh); its author had no X4.
+
+## Symbolized crash traces (CrossPoint #4477)
+
+Open: `/crash_report.txt` (written at the boot after a captured panic, `HalSystem::checkPanic()`,
+`lib/hal/HalSystem.cpp:185`) holds the stack as raw hex words, which need the build's ELF to read. Upstream writes
+human-readable stack traces from a compressed symbol table in the image.
+
+Constraint: the table's flash cost is unknown, and on the C3 each 64 KB of app growth costs the font cache one MMU
+page. Next: measure the table for `default` before porting. crosspoint-reader #4477, David Boring (@david-boring).
+
+## Button cursor on touch boards (matcha-reader #719): decide
+
+Lists always draw the selected row (`UiListActivity`), also on the touch boards (X4 Pro, T5S3, Murphy, Picco). matcha
+hides the list and tab cursor until a button is pressed, and again on the next touch (one static flag in
+`MappedInputManager`; its #791 keeps the list from jumping without a cursor). UX taste, no bug. Decide whether to take
+it. matcha-reader #719, Eszter Schuffert (eszter007).
