@@ -137,3 +137,31 @@ TEST(TlsPeer, IsTheHostAndAlwaysThePort) {
   EXPECT_EQ(crosspoint::tlsPeer("192.168.0.113", 8443), "192.168.0.113:8443");
   EXPECT_EQ(crosspoint::tlsPeer("opds.example", 80), "opds.example:80");
 }
+
+// --- urlPeer -------------------------------------------------------------------------------------
+
+// The certificate-date waiver line names the server a request goes to, never the credentials in its URL.
+TEST(UrlPeer, NamesTheServerWithItsSchemesPort) {
+  EXPECT_EQ(crosspoint::urlPeer("https://sync.crosspointreader.com/users/auth"), "sync.crosspointreader.com:443");
+  EXPECT_EQ(crosspoint::urlPeer("https://sync.crosspointreader.com"), "sync.crosspointreader.com:443");
+  EXPECT_EQ(crosspoint::urlPeer("http://192.168.0.113/opds?q=x#top"), "192.168.0.113:80");
+  EXPECT_EQ(crosspoint::urlPeer("https://kosync.example:8443/syncs/progress"), "kosync.example:8443");
+  EXPECT_EQ(crosspoint::urlPeer("https://opds.example?token=secret"), "opds.example:443");
+}
+
+TEST(UrlPeer, DropsTheUserInfo) {
+  EXPECT_EQ(crosspoint::urlPeer("https://alice:p%40ss@calibre.example:8080/opds"), "calibre.example:8080");
+  EXPECT_EQ(crosspoint::urlPeer("https://bob@calibre.example/"), "calibre.example:443");
+}
+
+TEST(UrlPeer, KeepsAnIpv6LiteralWhole) {
+  EXPECT_EQ(crosspoint::urlPeer("https://[fd00::1]:8443/x"), "[fd00::1]:8443");
+  EXPECT_EQ(crosspoint::urlPeer("http://[fd00::1]/x"), "[fd00::1]:80");
+}
+
+TEST(UrlPeer, IgnoresAPortThatIsNotOne) {
+  EXPECT_EQ(crosspoint::urlPeer("https://example.org:99999/"), "example.org:443");
+  EXPECT_EQ(crosspoint::urlPeer("https://example.org:http/"), "example.org:443");
+  EXPECT_EQ(crosspoint::urlPeer("https://example.org:/"), "example.org:443");
+  EXPECT_EQ(crosspoint::urlPeer("example.org/path"), "example.org:443");
+}

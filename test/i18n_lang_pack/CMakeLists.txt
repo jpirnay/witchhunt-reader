@@ -89,6 +89,29 @@ target_link_libraries(LangPackConvertTest PRIVATE
 )
 gtest_discover_tests(LangPackConvertTest)
 
+# The language from the card a string at a time (LangCardStrings.cpp), for a board whose flash area has no room for the
+# slot, read key for key against the slot the real FlashLangPartition builds on the C3's in-memory partition.
+add_executable(LangCardStringsTest
+  LangCardStringsTest.cpp
+  ${REPO_ROOT}/lib/I18n/LangCardStrings.cpp
+  ${REPO_ROOT}/lib/I18n/LangPack.cpp
+  ${REPO_ROOT}/lib/hal/EspPartitionFlash.cpp
+  ${REPO_ROOT}/lib/hal/FlashArea.cpp
+  ${REPO_ROOT}/lib/hal/FlashLangPartition.cpp
+  ${REPO_ROOT}/lib/InflateReader/InflateReader.cpp
+  ${REPO_ROOT}/test/uzlib_lzcopy/UzlibChksumStubs.cpp
+  ${I18N_GENERATED_STRINGS}
+)
+target_include_directories(LangCardStringsTest PRIVATE ${LANG_PACK_INCLUDES} ${REPO_ROOT}/lib/Memory)
+target_compile_definitions(LangCardStringsTest PRIVATE LANG_PACKS_DIR="${LANG_PACKS_DIR}")
+add_dependencies(LangCardStringsTest i18n_generated i18n_lang_packs)
+target_link_libraries(LangCardStringsTest PRIVATE
+  crosspoint_test_common
+  uzlib_font_ring
+  GTest::gtest_main
+)
+gtest_discover_tests(LangCardStringsTest)
+
 # Issue #733: the language slot from a card pack without a usable `spiffs` partition, in the PSRAM image the S3 boards
 # take then (FlashArea.cpp as they build it): with none, and with the 80 KB one of the X4 Pro's factory-compatible
 # table. Its card file goes to test/shims' HalStorage, which keeps nothing.

@@ -118,6 +118,9 @@ void runJob(KOReaderSyncJob& job) {
 
   KOReaderSyncClient::setSkipTlsValidation(SETTINGS.skipHttpsValidation != 0);
 
+  // A clock restored from NVS or estimated over a sleep is synced first, however plausible it looks
+  // (issue #766); the certificate dates are waived for it if that fails.
+  HalClock::syncNtpIfSoftwareClock(SETTINGS.ntpServer);
   HalClock::ensureUsableForTls(SETTINGS.ntpServer);
 
   switch (job.kind) {

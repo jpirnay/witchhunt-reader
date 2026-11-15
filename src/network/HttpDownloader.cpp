@@ -7,6 +7,7 @@
 #include <Logging.h>
 #include <RangeDownload.h>
 #include <SecureHttpClient.h>
+#include <TlsPolicy.h>
 #include <base64.h>
 #include <esp_heap_caps.h>
 #include <esp_wifi.h>
@@ -30,10 +31,21 @@ namespace {
 
 // Clock guard for TLS. The plausibility window and the SNTP retry policy now live in
 // HalClock (isPlausibleForTls / ensureUsableForTls) so every TLS entry point shares one rule —
-// this used to be a private copy here, which is why the KOReader paths never got it. Returns
-// whether full certificate date validation is possible; false means the caller should tolerate
-// date errors (and only date errors) for this request.
-bool ensureClockForTls() { return HalClock::ensureUsableForTls(SETTINGS.ntpServer); }
+// this used to be a private copy here, which is why the KOReader paths never got it. Runs SNTP
+// for a clock outside the roots' validity window.
+void ensureClockForTls() { HalClock::ensureUsableForTls(SETTINGS.ntpServer); }
+
+// Whether the request tolerates certificate date errors, and only those. The dates are checked
+// only against an authoritative clock (HalClock::datesAuthoritativeForTls(): NTP in this boot or a
+// hardware RTC); a plausible clock restored from NVS or estimated over a sleep can be days behind a
+// server's renewed certificate (issue #766), and a request with no verify (no roots) has none to
+// check. Only a verified https request says so in the log; a plain one needs it only for a
+// redirect to https.
+bool waiveCertificateDates(const std::string& url, const crosspoint::TlsPlan& plan) {
+  if (!plan.verify) return false;
+  if (url.compare(0, 8, "https://") == 0) return HalClock::waiveCertificateDates(crosspoint::urlPeer(url).c_str());
+  return !HalClock::datesAuthoritativeForTls();
+}
 
 // Per-request timeout handed to SecureHttpClient::setTimeout(). 60s gives slow
 // servers room to send their first headers; SecureHttpClient reuses it as the
@@ -58,13 +70,13 @@ bool isAuthRefusal(int status) { return status == 401 || status == 403; }
 // heap stats and ensures the wall clock is set so TLS cert-date validation
 // can succeed. Shared by both TLS backends. Returns false when https was requested and the
 // clock could not be established — the caller then permits date errors alone.
-bool logPreCallContext(const std::string& url) {
+void logPreCallContext(const std::string& url) {
   LOG_DBG("HTTP", "Heap free: %u, largest block: %u", esp_get_free_heap_size(),
           heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
   if (url.compare(0, 8, "https://") == 0) {
-    return ensureClockForTls();
+    // Its verdict is not needed here: waiveCertificateDates() asks the clock after it.
+    ensureClockForTls();
   }
-  return true;
 }
 
 // The servers whose certificate could not be verified this session (VerifiedThenUnverified): a later
@@ -115,7 +127,7 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
                                            const std::string& password, Sink& sink, HttpDownloader::TlsPolicy tls,
                                            const HttpDownloader::RedirectFilter& redirectAllowed) {
   const WifiPowerSaveGuard psGuard;
-  const bool clockReady = logPreCallContext(url);
+  logPreCallContext(url);
   const unsigned long startMs = millis();
   LOG_DBG("HTTP", "Phase start @%lums heap=%u largest=%u", millis() - startMs, esp_get_free_heap_size(),
           heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
@@ -128,7 +140,7 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
   // Never retry unverified behind the caller's back: only the policy that says so does.
   http.setAllowInsecureFallback(plan.fallbackOnVerifyError);
   http.setUnverifiableHosts(&g_unverifiableHosts);
-  http.setAllowCertificateDateErrors(!clockReady);
+  http.setAllowCertificateDateErrors(waiveCertificateDates(url, plan));
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.setUserAgent("WitchReader-ESP32-" CROSSPOINT_VERSION);
   if (!username.empty() && !password.empty()) {
@@ -214,7 +226,7 @@ HttpDownloader::DownloadError runGetSecureOnSession(HttpDownloader::Session& ses
   auto* impl = session.impl();
   // Evaluated on every call, not just when the session is created: a session opened before the
   // clock was set must not keep that verdict for the rest of its life (nor the reverse).
-  const bool clockReady = logPreCallContext(url);
+  logPreCallContext(url);
   if (!impl->http) {
     impl->http = std::make_unique<crosspoint::SecureHttpClient>();
     impl->http->setTimeout(HTTP_TIMEOUT_MS);
@@ -226,7 +238,7 @@ HttpDownloader::DownloadError runGetSecureOnSession(HttpDownloader::Session& ses
   impl->http->setCACert(plan.verify ? CROSSPOINT_ROOTS_PEM : nullptr);
   impl->http->setAllowInsecureFallback(plan.fallbackOnVerifyError);
   impl->http->setUnverifiableHosts(&g_unverifiableHosts);
-  impl->http->setAllowCertificateDateErrors(!clockReady);
+  impl->http->setAllowCertificateDateErrors(waiveCertificateDates(url, plan));
   impl->http->clearHeaders();
   // Unconditionally, so a file without credentials does not inherit the previous one's
   // (sendRequest() leaves basic auth out unless both are set).

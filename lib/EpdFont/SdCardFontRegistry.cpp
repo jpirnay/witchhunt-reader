@@ -130,7 +130,7 @@ void SdCardFontRegistry::addTtfFiles(const char* dirPath, const std::vector<std:
     sdBytes[styleCount++] = probes[static_cast<size_t>(file)].sdBytes;
   }
   if (ttfFits_ && !ttfFits_(fileBytes, sdBytes, styleCount)) {
-    LOG_INF("SDREG", "TTF family in %s is too large for the font partition; not listed", dirPath);
+    LOG_INF("SDREG", "TTF family in %s does not fit the flash area, or there is none; not listed", dirPath);
     return;
   }
   for (uint8_t style = 0; style < 4; ++style) {

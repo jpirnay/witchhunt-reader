@@ -2,7 +2,8 @@
 
 > **Status.** Step 1 (one interface, the partition behind it) and step 2 (the PSRAM image) are implemented. Every
 > build with PSRAM (the S3 boards) takes the image, saved to the card, when its partition table has no usable
-> `spiffs` partition (issue #733: an X4 Pro that kept its stock table). The SD-only case is design only. Code:
+> `spiffs` partition (issue #733: an X4 Pro that kept its stock table). In the SD-only case the interface language is read
+from the card (card mode); the rest of it is design only. Code:
 > `lib/hal/FlashArea.*` (the choice), `lib/hal/EspPartitionFlash.*` (backend a), `lib/hal/PsramImageFlash.*` and
 > `lib/hal/CardImageFile.*` (backend b), `lib/hal/FlashAreaRegion.*` (a window for the glyph and hyphenation stores).
 > Tests: `test/flash_area/` (every consumer over a simulated area, the PSRAM backend with power cuts),
@@ -78,7 +79,7 @@ use a `FlashAreaRegion`; `SystemStatus` asks `FlashFontPartition::cachedBytes()`
 | .cpfont cache | yes | yes | no: `SdCardFont` reads the card (the existing fallback, its tables on the heap) |
 | TTF glyph store | yes | yes | **no**: the store needs a mapping; TTF families cannot load |
 | hyphenation | C3 region; with no room for it (an area of 512 KB or less) a book's trie is read from its pack on the card | not used (tries go to PSRAM already) | C3: a book's trie is read from its pack on the card (`PagedTrieReader`) |
-| UI language | yes | yes | **no**: the slot must hand out pointers; the UI stays English |
+| UI language | yes | yes | from the card a string at a time (card mode, `lib/I18n/LangCardStrings.*`) |
 | Mapping budget | the MMU's free pages (C3 ~31) | the whole image | none |
 | Internal RAM | the handle table (C3 +48 B static); on S3 also the 512 B bounce buffer, static now, which the TTF family set used to hold on the heap | the image in PSRAM; +64 B static, 112 B of bitmaps | none |
 
@@ -140,10 +141,14 @@ use a `FlashAreaRegion`; `SystemStatus` asks `FlashFontPartition::cachedBytes()`
 ### (c) SD only
 
 What a board without the partition and without PSRAM (or whose image cannot be allocated) gets: `FlashArea::get()` is
-`nullptr`. The .cpfont cache is skipped and fonts load from the card, which works today. The language slot and the
-glyph store would need a different design (strings in heap RAM, ~30 KB, rejected for the C3 in `FlashLangPartition.h`;
-a glyph store reading its index and log through the card), so on such a board the UI stays English and TTF families do
-not load. No board we know of is in that case: the S3 boards have 8 MB of PSRAM, and the C3 boards' tables have a
+`nullptr`. The .cpfont cache is skipped and fonts load from the card, which works today. The interface language comes
+from the card in **card mode** (`I18n`, `langcard::CardStrings`, docs/i18n.md): the pack is unpacked once to
+`/.crosspoint/lang/strings.bin`, and a key's string is read from it the first time it is asked for, into a heap arena
+that only grows (1 KB chunks, only while the heap keeps a 32 KB block beside them; the handles cost 2 B a key). A
+session that draws Home, the Library, the reader and every Settings row holds ~5.9 KB of German; a resident copy of the
+pack (17-31 KB, rejected for the C3 in `FlashLangPartition.h`) is never made. A CJK language's UI faces decode per
+glyph there. The glyph store would need a different design (a store reading its index and log through the card), so
+TTF families do not load. No board we know of is in that case: the S3 boards have 8 MB of PSRAM, and the C3 boards' tables have a
 large enough `spiffs` partition. The boot log says so (`[FLA] no flash area: ...`).
 
 Hyphenation does not stop: a C3 without the hyphenation region (no area, or one of 512 KB or less, so that
@@ -159,9 +164,32 @@ Portuguese, Catalan, Finnish, Turkish, the Indic languages) none once read. The 
 
 **What shows it.** System Information's Flash section has a **Flash area** row ("spiffs 3.4 MB"; "PSRAM + card" or
 "-", then on the next line what the table holds: "spiffs 80.0 KB", "spiffs -") and a **Language** row: the language's code, and
-when its pack is not in use, why: `no pack`, `bad pack` (I18n), or the slot's `FlashLangPartition::lastFailure()`:
+when its pack is not in use, why: `no pack`, `bad pack` (I18n), `card` (in use, in card mode), or the slot's
+`FlashLangPartition::lastFailure()`:
 `no flash area`, `area too small`, `build`, `mmap`, `CRC`. A slot that does not start on a 64 KB page is not a failure:
 `esp_partition_mmap` maps from the page below and hands out the pointer advanced to the offset.
+
+## Emergency mode
+
+`FlashArea::asExpected()` is false when a board runs without the area it was made for: no `spiffs` partition, or one
+smaller than ours (`FlashArea::kExpectedBytes`, 3,456 KB), and no PSRAM image standing in. That is a C3 board (X3, X4)
+left with another firmware's partition table by an install that wrote only the app: the X3's original table has a
+1 MB `spiffs` partition, other firmwares' tables may have none. The S3 boards take the PSRAM image, which is as good,
+and are never in emergency mode.
+
+The firmware then runs on what the area's consumers do without it (the backends table above), and says so:
+
+- the boot log: `[FLA] emergency mode: another firmware's partition table (...)`;
+- once per layout, on the way to Home (`ActivityManager::goHome()`), a notice (`FlashLayoutNotice`,
+  `FlashLayoutNoticeActivity`) that it runs in emergency mode, that some features are slower or missing, and that a
+  Full install from the web flasher (its address and QR code) is strongly recommended; the SD card keeps everything.
+  `state.json`'s `flashLayoutNoticeFor` remembers the layout it was shown for (the partition's KB plus 1), so a
+  different layout later shows it again. Its strings are English only: the notice must read even when the language
+  pack cannot be loaded, which is likely on such a board, and the Cyrillic packs are within 2 KB of the slot's 15-bit
+  offsets;
+- System Information's Flash section, an "Emergency mode" row.
+
+A full install writes our table and ends it. A board that cannot be flashed over USB keeps working as it is.
 
 ## How a board chooses
 
@@ -186,6 +214,12 @@ while the PSRAM is still one free block.
 The flag only decides whether the PSRAM backend is in the build and whether it beats the partition; the partition's
 presence and the chip's PSRAM are asked at runtime (`esp_partition_find_first`, `heap_caps_malloc(MALLOC_CAP_SPIRAM)`).
 `FLASH_AREA_PSRAM_BYTES` sets the image's size (default `0x360000`, the partition's).
+
+To run a board flashed with our table in emergency mode: `PLATFORMIO_BUILD_FLAGS="-DFLASH_AREA_TEST_PARTITION_KB=0"`
+(no `spiffs` partition; nothing in the area is touched) or `=1024` (the X3's original 1 MB, as the partition's first
+1 MB, a multiple of 64 KB). A window erases the font area's first sector at every boot, so neither build later trusts a
+.cpfont index or glyph store header over bytes the other wrote; the font cache and a TrueType family are rebuilt after
+each boot of such a build.
 
 To try the backend on an S3 board without touching its partition:
 `PLATFORMIO_BUILD_FLAGS="-DFLASH_AREA_PSRAM_IMAGE=2" pio run -e x4pro -t upload`. The partition keeps what it held,

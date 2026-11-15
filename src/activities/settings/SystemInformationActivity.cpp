@@ -71,7 +71,8 @@ static std::string spiffsValue(const SystemStatus& status) {
   return "spiffs " + (status.flashPartitionBytes > 0 ? formatBytes(status.flashPartitionBytes) : std::string("-"));
 }
 
-// The interface language's code, and when its pack is not in use, why: a code for a report rather than prose.
+// The interface language's code, and when its pack is not in use, why: a code for a report rather than prose. "card":
+// the pack is in use, read from the card a string at a time, since the flash area has no room for its slot.
 static std::string languageValue() {
   std::string value = I18N.getLanguageCode(I18N.getLanguage());
   const char* why = nullptr;
@@ -84,6 +85,9 @@ static std::string languageValue() {
       break;
     case I18n::PackState::BadPack:
       why = "bad pack";
+      break;
+    case I18n::PackState::Card:
+      why = "card";
       break;
     case I18n::PackState::SlotFailed:
       switch (FlashLangPartition::lastFailure()) {
@@ -276,13 +280,15 @@ void SystemInformationActivity::render(RenderLock&&) {
 
   const bool hasArea = status.flashArea != FlashArea::Backend::None;
   const bool onPartition = status.flashArea == FlashArea::Backend::Partition;
-  drawSection(tr(STR_SEC_FLASH), 4 + (hasArea ? 1 : 0) + (onPartition ? 0 : 1));
+  const bool emergency = !FlashArea::asExpected();  // a smaller partition than ours too, though it is the area
+  drawSection(tr(STR_SEC_FLASH), 4 + (hasArea ? 1 : 0) + (onPartition ? 0 : 1) + (emergency ? 1 : 0));
   drawRow(tr(STR_APP_PARTITION), formatBytes(status.flashAppPartitionSize));
   drawRow(tr(STR_FLASH_TOTAL), formatBytes(status.flashBytes));
   // What a report of an English interface (with its pack on the card) or of TrueType fonts that do not load needs
   // first: where the flash area is, the partition table's `spiffs` partition, and why the language pack is not in use.
   drawRow(tr(STR_FLASH_AREA), flashAreaValue(status));
   if (!onPartition) drawRow("", spiffsValue(status));  // a continuation row: the value column is half the screen
+  if (emergency) drawRow("", tr(STR_FLASH_EMERGENCY_TITLE));
   if (hasArea) {
     drawRow(tr(STR_FONT_CACHE), (status.fontCacheUsedBytes > 0 ? formatBytes(status.fontCacheUsedBytes) : "-") +
                                     std::string(" / ") + formatBytes(status.fontCacheTotalBytes));

@@ -4,6 +4,7 @@
 #include <BuildArena.h>
 #include <Epub/BookFonts.h>
 #include <Epub/LanguageTag.h>
+#include <FlashArea.h>
 #include <FlashAreaRegion.h>
 #include <GfxRenderer.h>
 #include <GlyphProvider.h>
@@ -89,6 +90,9 @@ void ttfPassEnded() {
 bool ttfFamilyFits(const uint32_t* fileBytes, const uint32_t* sdBytes, const uint8_t count) {
   // While the store is open its mappings hide the budget an install would get: the load decides then.
   if (FlashAreaRegion::liveFontAreaMappings() != 0) return true;
+  // No area (emergency mode): no family fits. The boot log said so once ([FLA]); FlashAreaRegion::begin() would log
+  // an error for every TTF family on the card, at every boot.
+  if (!FlashArea::get()) return false;
   FlashAreaRegion flash;
   return flash.begin() && ttf::fitsStore(fileBytes, sdBytes, count, flash.size(), flash.freeMapPages());
 }
