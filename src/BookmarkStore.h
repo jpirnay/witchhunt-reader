@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,7 +17,7 @@
 // Persisted as a binary file on SD card within the book's cache directory.
 //
 // Each bookmark has a StarAnchor at the same index (getAnchors()): what finds an EPUB page's text again after a
-// relayout. The two lists change together, through this class only.
+// relayout (StarAnchoring.h). The two lists change together, through this class only.
 class BookmarkStore {
  public:
   using Bookmark = ::Bookmark;
@@ -133,19 +134,21 @@ class BookmarkStore {
   // number is all there is to find it by.
   bool toggle(uint16_t spineIndex, uint16_t pageNumber) { return toggle(spineIndex, pageNumber, StarAnchor{}); }
 
-  // An EPUB page: a new star keeps `anchor`, what finds its text after a relayout.
+  // An EPUB page: a new star keeps `anchor`, what finds its text after a relayout (StarAnchoring::forPage).
+  // Unstarring takes every star on the page: stars made under other layouts can come to rest on one page.
   // Returns true if the page is now starred; false when it was unstarred, or the heap had no room for one more.
   bool toggle(uint16_t spineIndex, uint16_t pageNumber, StarAnchor anchor) {
-    for (size_t i = 0; i < bookmarks.size(); i++) {
-      if (bookmarks[i].spineIndex == spineIndex && bookmarks[i].pageNumber == pageNumber) {
-        eraseAt(i);
-        dirty = true;
-        return false;
-      }
+    const size_t before = bookmarks.size();
+    for (size_t i = before; i-- > 0;) {
+      if (bookmarks[i].spineIndex == spineIndex && bookmarks[i].pageNumber == pageNumber) eraseAt(i);
+    }
+    if (bookmarks.size() != before) {
+      dirty = true;
+      return false;
     }
     // The count is the reader's own doing, but the growth asks through the throwing operator new.
     if (!heapReserveFor(bookmarks, 1) || !heapReserveFor(anchors, 1)) {
-      LOG_ERR("BKM", "Not enough memory for bookmark %u", static_cast<unsigned>(bookmarks.size() + 1));
+      LOG_ERR("BKM", "Not enough memory for bookmark %u", static_cast<unsigned>(before + 1));
       return false;
     }
     bookmarks.push_back(Bookmark{spineIndex, pageNumber, {}});
@@ -161,11 +164,42 @@ class BookmarkStore {
     });
   }
 
+  // The first star on the page, if any.
+  [[nodiscard]] std::optional<size_t> indexOf(uint16_t spineIndex, uint16_t pageNumber) const {
+    for (size_t i = 0; i < bookmarks.size(); i++) {
+      if (bookmarks[i].spineIndex == spineIndex && bookmarks[i].pageNumber == pageNumber) return i;
+    }
+    return std::nullopt;
+  }
+
   [[nodiscard]] const std::vector<Bookmark>& getAll() const { return bookmarks; }
   // Parallel to getAll().
   [[nodiscard]] const std::vector<StarAnchor>& getAnchors() const { return anchors; }
   [[nodiscard]] bool isEmpty() const { return bookmarks.empty(); }
   void markDirty() { dirty = true; }
+
+  // The star's text is on `pageNumber` of the layout `layout`, which lays its chapter out in `pageCount` pages.
+  void movePage(size_t index, uint16_t pageNumber, uint32_t layout, uint16_t pageCount) {
+    if (index >= bookmarks.size()) return;
+    bookmarks[index].pageNumber = pageNumber;
+    anchors[index].layout = layout;
+    anchors[index].pageCount = pageCount;
+    dirty = true;
+  }
+
+  void setXPath(size_t index, std::string xpath) {
+    if (index >= anchors.size()) return;
+    anchors[index].xpath = std::move(xpath);
+    dirty = true;
+  }
+
+  // Session-only state (StarAnchor): nothing to save.
+  void noteOffset(size_t index, uint32_t offset) {
+    if (index < anchors.size()) anchors[index].offset = offset;
+  }
+  void noteMappingFailed(size_t index) {
+    if (index < anchors.size()) anchors[index].mappingFailed = true;
+  }
 
   // Set or clear the name for the bookmark at index. Empty name reverts to default label.
   void rename(size_t index, std::string name) {
