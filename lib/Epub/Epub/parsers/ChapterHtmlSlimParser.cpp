@@ -3646,20 +3646,24 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
                 // Block image path (existing behaviour) — flush text before placing image
                 // Flush any pending text block so it appears before the image
-                if (self->partWordBufferIndex > 0) {
-                  if (!self->flushPartWordBuffer()) return;
+                //
+                // Every return from here counts the <img> as open: its endElement takes the depth
+                // back down whether or not the image was placed. A return that skipped it (out of
+                // memory placing the image) left every bold, italic and alignment scope off by one
+                // for the rest of the chapter. Ported from crosspoint-reader PR #4472 by Justin
+                // Mitchell.
+                if (self->partWordBufferIndex > 0 && !self->flushPartWordBuffer()) {
+                  self->depth += 1;
+                  return;
                 }
                 self->dropHeldBidiControls();  // the paragraph before the image ends here
                 if (self->currentTextBlock && !self->currentTextBlock->isEmpty()) {
                   const BlockStyle parentBlockStyle = self->currentTextBlock->getBlockStyle();
                   self->startNewTextBlock(parentBlockStyle);
                 }
-                if (!self->placeImageWithBlockSpacing(cachedImagePath, resolvedPath, alt, displayWidth, displayHeight,
-                                                      self->visibleTextOffset_,
-                                                      self->imageLinkHash(displayWidth, displayHeight))) {
-                  return;
-                }
-
+                self->placeImageWithBlockSpacing(cachedImagePath, resolvedPath, alt, displayWidth, displayHeight,
+                                                 self->visibleTextOffset_,
+                                                 self->imageLinkHash(displayWidth, displayHeight));
                 self->depth += 1;
                 return;
               }  // layout geometry block
@@ -6301,6 +6305,13 @@ bool ChapterHtmlSlimParser::placeImageWithBlockSpacing(const std::string& cached
   // from the EPUB at first render time by ImageBlock::ensureExtracted().
   auto imageBlock =
       makeUniqueNoThrow<ImageBlock>(cachedImagePath, displayWidth, displayHeight, alt, epub->getPath(), entryPath);
+#ifdef BLOCK_IMAGE_FAULT_INJECTION
+  if (blockImagesLeft() == 0) {
+    imageBlock.reset();
+  } else if (blockImagesLeft() != SIZE_MAX) {
+    --blockImagesLeft();
+  }
+#endif
   if (!imageBlock) {
     LOG_ERR("EHP", "Failed to create ImageBlock");
     return false;

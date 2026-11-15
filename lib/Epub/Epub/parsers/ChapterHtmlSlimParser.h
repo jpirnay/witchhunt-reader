@@ -84,6 +84,15 @@ inline size_t& tableCellTextsLeft() {
 }
 #endif
 
+#ifdef BLOCK_IMAGE_FAULT_INJECTION
+// Host tests only (firmware never defines it): how many more block images may get their ImageBlock before each one is
+// refused as if the heap were out. SIZE_MAX = never refuse. Drives placeImageWithBlockSpacing's out-of-memory path.
+inline size_t& blockImagesLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+#endif
+
 class ChapterHtmlSlimParser final : public Print {
   std::shared_ptr<Epub> epub;
   GfxRenderer& renderer;
