@@ -16,11 +16,15 @@
 // Section::getPageForVisibleTextOffset). No mapping of its own: both directions are the sync's mappers.
 //
 // Each mapping parses the chapter's XHTML once, which is idle-time work on the X3 (the reader's stepStarredPages()).
-// What they turn into, the visible-text offset of the page's start, is kept for the session (StarAnchor::offset), so a
-// second relayout in the same session, or a jump to a star already settled, parses nothing. `scratch`, where given, is
+// What they turn into, the visible-text offset of the page's start, is kept with the star (StarAnchor::offset), so a
+// relayout or a jump parses nothing while the section format it was counted under stands. `scratch`, where given, is
 // a lent region the parse works in instead of the heap (ChapterXPathIndexer): the reader on the X3 has been measured
 // with less contiguous heap than the inflate ring's 32 KB.
 namespace StarAnchoring {
+
+// The star's text offset while it can be trusted: counted under the section format this firmware has. Under another
+// format the count may differ, and the XPath finds the text again (parseNext(), textOffset()), which refreshes it.
+std::optional<uint32_t> knownOffset(const StarAnchor& anchor);
 
 // The anchor a new star on `page` of `section` gets: the section's layout, its page count once the build is done (0
 // while it runs), and where the page's text starts when the section's table says. The XPath is left to parseNext().

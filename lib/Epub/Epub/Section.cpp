@@ -442,6 +442,8 @@ uint32_t layoutFingerprintOf(const uint32_t propertyHash) {
 
 uint32_t Section::layoutFingerprintFor(const BuildParams& p) { return layoutFingerprintOf(calculatePropertyHash(p)); }
 
+uint8_t Section::formatVersion() { return SECTION_FILE_VERSION; }
+
 uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   uint8_t buffer[104];
   static_assert(sizeof(buffer) >= 23 + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) +

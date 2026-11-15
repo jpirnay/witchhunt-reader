@@ -846,10 +846,10 @@ class EpubReaderActivity final : public Activity {
   // Stars or unstars the page on screen; a new star keeps what finds its text again (StarAnchoring::forPage). The
   // caller holds the render lock.
   void toggleStarOnCurrentPage();
-  // Where a jump to the star on (spine, page) lands: that page while the star was counted in `expectedLayout`, the
-  // layout the chapter will be shown in; else the page holding its text, from what the session knows or from its XPath
-  // (a chapter parse). 0: the layout is not known yet, and a star with an XPath goes by its text. A star without an
-  // anchor goes by its page. The caller holds the render lock.
+  // Where a jump to the star on (spine, page) lands: the page holding its text, by the offset it keeps while that was
+  // counted under this section format (StarAnchoring::knownOffset). Without one, that page while the star was counted
+  // in `expectedLayout`, the layout the chapter will be shown in (0: not known yet), else by its XPath (a chapter
+  // parse). A star without an anchor goes by its page. The caller holds the render lock.
   NavigationTarget starJumpTarget(uint16_t spine, uint16_t page, uint32_t expectedLayout);
   // The gates Background-B and the idle glyph-store step share: a section on screen in the READING phase, background
   // work not suspended, and no pre-render, pre-rendered page, display refresh or image decode pending.

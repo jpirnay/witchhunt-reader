@@ -57,8 +57,11 @@ class BookmarkStore {
     // A count the file cannot hold is damage, and what it can hold is all there is to read.
     const bool named = version >= 2;
     const bool anchored = version >= 3;
-    const size_t recordBytes = (named ? bookmark_file::kMinRecordBytes : 2 * sizeof(uint16_t)) +
-                               (anchored ? bookmark_file::kMinAnchorBytes : 0);
+    const bool withOffset = version >= 4;
+    const size_t recordBytes =
+        (named ? bookmark_file::kMinRecordBytes : 2 * sizeof(uint16_t)) + (withOffset ? bookmark_file::kMinAnchorBytes
+                                                                           : anchored ? bookmark_file::kMinAnchorBytesV3
+                                                                                      : 0);
     const size_t fits = std::min<size_t>(count, static_cast<size_t>(f.available()) / recordBytes);
     const auto refuse = [this, &f] {
       std::vector<Bookmark>().swap(bookmarks);
@@ -81,7 +84,7 @@ class BookmarkStore {
       Bookmark bm;
       StarAnchor anchor;
       ReadResult result = bookmark_file::readBookmark(f, bm, named);
-      if (result == ReadResult::Ok && anchored) result = bookmark_file::readStarAnchor(f, anchor);
+      if (result == ReadResult::Ok && anchored) result = bookmark_file::readStarAnchor(f, anchor, withOffset);
       if (result == ReadResult::NoMemory) {
         LOG_ERR("BKM", "Not enough memory at entry %u", static_cast<unsigned>(i));
         return refuse();
@@ -193,9 +196,18 @@ class BookmarkStore {
     dirty = true;
   }
 
+  // Where the star's text starts, counted under section format `format` (StarAnchor::offset).
+  void setOffset(size_t index, uint32_t offset, uint8_t format) {
+    if (index >= anchors.size()) return;
+    StarAnchor& anchor = anchors[index];
+    if (anchor.offset == offset && anchor.offsetFormat == format) return;
+    anchor.offset = offset;
+    anchor.offsetFormat = format;
+    dirty = true;
+  }
   // Session-only state (StarAnchor): nothing to save.
-  void noteOffset(size_t index, uint32_t offset) {
-    if (index < anchors.size()) anchors[index].offset = offset;
+  void noteNameTried(size_t index) {
+    if (index < anchors.size()) anchors[index].nameOwed = false;
   }
   void noteMappingFailed(size_t index) {
     if (index < anchors.size()) anchors[index].mappingFailed = true;
@@ -218,8 +230,9 @@ class BookmarkStore {
   static constexpr uint16_t MAX_NAME_LENGTH = bookmark_file::kMaxNameBytes;
 
  private:
-  // 3: a StarAnchor after each bookmark (layout, page count, XPath). 2: names. 1: spine and page.
-  static constexpr uint8_t FILE_VERSION = 3;
+  // 4: the anchor's offset and its format. 3: a StarAnchor after each bookmark (layout, page count, XPath). 2: names.
+  // 1: spine and page.
+  static constexpr uint8_t FILE_VERSION = 4;
   static constexpr uint16_t MAX_BOOKMARKS = 1000;
 
   std::vector<Bookmark> bookmarks;
