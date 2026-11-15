@@ -351,6 +351,7 @@ void ActivityManager::loop() {
       exitActivity(lock);
       pendingAction = PendingAction::None;
 
+      sdFontSystem.releaseFamilyList();  // see the Replace path
       if (stackActivities.empty()) {
         LOG_DBG("ACT", "No more activities on stack, returning from child");
         if (exitingReader) {
@@ -443,6 +444,11 @@ void ActivityManager::loop() {
         LOG_DBG("ACT", "Pushed to activity stack, new size = %zu", stackActivities.size());
 #endif
       }
+      // The SD font list goes at every screen change (~12 KB on the X3): a book reads only the families it draws, the
+      // option rows only the names, and a screen that shows the families reads the list again. Read late, it splits the
+      // largest block while it is held: on the X3 Home had a 20,468 B one after the font picker, against 61,428 B
+      // (2026-11-16). Nothing holds a family of it across this, and nothing draws.
+      sdFontSystem.releaseFamilyList();
       pendingAction = PendingAction::None;
       currentActivity = std::move(pendingActivity);
       refreshWifiActivityFlag();

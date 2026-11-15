@@ -50,13 +50,9 @@ std::string defaultFontFamilyLabel(const SettingInfo& item) {
   // A CJK or Indic book draws the default in a Noto family: the one that stands in for a font without its script, or
   // the regional sibling of a Noto CJK default (SdCardFontSystem, set for this book at its open).
   if (sdFontSystem.languageFamily()[0] != '\0') return sdFontSystem.languageFamily();
-  if (SETTINGS.sdFontFamilyName[0] != '\0') {
-    const auto& families = sdFontSystem.registry().getFamilies();
-    const auto it = std::find_if(families.begin(), families.end(),
-                                 [](const auto& family) { return family.name == SETTINGS.sdFontFamilyName; });
-    if (it != families.end()) {
-      return sdFontSystem.effectiveReaderFamily(SETTINGS.sdFontFamilyName);
-    }
+  // Asked by name, not from the family list: the menu would read the whole list from the card at every open.
+  if (SETTINGS.sdFontFamilyName[0] != '\0' && sdFontSystem.hasFamily(SETTINGS.sdFontFamilyName)) {
+    return sdFontSystem.effectiveReaderFamily(SETTINGS.sdFontFamilyName);
   }
   // Built-in: index 0 is the "Default" entry, [1..] are built-in families
   // in CrossPointSettings::FONT_FAMILY order.

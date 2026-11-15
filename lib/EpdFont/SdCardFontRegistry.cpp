@@ -180,7 +180,7 @@ void forEachFontFile(const char* dirPath, void (*visit)(void* ctx, const char* n
 
 }  // namespace
 
-void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo& family) {
+void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo& family) const {
   struct Scan {
     const char* dirPath;
     SdCardFontFamilyInfo& family;
@@ -236,84 +236,94 @@ bool SdCardFontRegistry::drawsOutlineFile(const char* path) {
   return probe.style >= 0;
 }
 
-void SdCardFontRegistry::scanRoot(const char* rootPath) {
+namespace {
+
+// Whether the folder `name` in a fonts root is read as a family.
+bool readsAsFamilyFolder(const char* name) {
+  // Hidden and system folders (macOS ._*, .Trashes, ...).
+  if (name[0] == '\0' || name[0] == '.' || name[0] == '_') return false;
+  // The CJK UI packs draw the interface's CJK (src/CjkUiPack.cpp): no reading fonts.
+  if (cjk_ui_pack::isFamily(name)) return false;
+  // In-flight install and rollback folders (Bookerly__staging, Bookerly__backup, ...) may hold valid-looking .cpfont
+  // files during a resumable download, but must not be offered as families.
+  const size_t nameLen = strlen(name);
+  for (const char* suffix : {"__staging", "__backup"}) {
+    const size_t suffixLen = strlen(suffix);
+    if (nameLen > suffixLen && strcmp(name + nameLen - suffixLen, suffix) == 0) return false;
+  }
+  return true;
+}
+
+// Calls `visit(ctx, name)` for each folder of the root `rootPath` read as a family, until it returns false; false then.
+// A missing root is logged by the read of the list only: a book's lookups would log it at every open.
+bool forEachFolderIn(const char* rootPath, bool (*visit)(void* ctx, const char* name), void* ctx,
+                     const bool logMissing = false) {
   FsFile root = Storage.open(rootPath);
   if (!root) {
-    LOG_DBG("SDREG", "Fonts directory not found: %s", rootPath);
-    return;
+    if (logMissing) {
+      LOG_DBG("SDREG", "Fonts directory not found: %s", rootPath);
+    }
+    return true;
   }
   if (!root.isDirectory()) {
     LOG_ERR("SDREG", "Fonts path is not a directory: %s", rootPath);
     root.close();
-    return;
+    return true;
   }
-
   char nameBuffer[128];
-  while (true) {
+  bool more = true;
+  while (more) {
     FsFile entry = root.openNextFile();
     if (!entry) break;
-    if (entry.isDirectory()) {
-      // Subdirectory = font family
-      entry.getName(nameBuffer, sizeof(nameBuffer));
-      entry.close();
-
-      // Skip hidden/system directories (macOS ._*, .Trashes, etc.)
-      if (nameBuffer[0] == '.' || nameBuffer[0] == '_') continue;
-      // The CJK UI packs draw the interface's CJK (src/CjkUiPack.cpp): no reading fonts.
-      if (cjk_ui_pack::isFamily(nameBuffer)) continue;
-
-      // Skip in-flight install/rollback dirs (Bookerly__staging, Bookerly__backup, ...)
-      // — these may contain valid-looking .cpfont files during a resumable
-      // download but must not be exposed as installable families.
-      const size_t nameLen = strlen(nameBuffer);
-      static constexpr const char* kStagingSuffix = "__staging";
-      static constexpr const char* kBackupSuffix = "__backup";
-      const size_t stagingLen = strlen(kStagingSuffix);
-      const size_t backupLen = strlen(kBackupSuffix);
-      if ((nameLen > stagingLen && strcmp(nameBuffer + nameLen - stagingLen, kStagingSuffix) == 0) ||
-          (nameLen > backupLen && strcmp(nameBuffer + nameLen - backupLen, kBackupSuffix) == 0)) {
-        continue;
-      }
-
-      // Primary wins: skip if the family was already discovered in an earlier root.
-      bool alreadyKnown = false;
-      for (const auto& f : families_) {
-        if (f.name == nameBuffer) {
-          alreadyKnown = true;
-          break;
-        }
-      }
-      if (alreadyKnown) {
-        LOG_DBG("SDREG", "Skipping duplicate family %s in %s (primary wins)", nameBuffer, rootPath);
-        continue;
-      }
-
-      SdCardFontFamilyInfo family;
-      family.name = nameBuffer;
-      std::string subDirPath = std::string(rootPath) + "/" + nameBuffer;
-      scanDirectory(subDirPath.c_str(), family);
-
-      if (!family.files.empty()) {
-        families_.push_back(std::move(family));
-        LOG_DBG("SDREG", "Found %s family: %s (%d files) in %s", families_.back().ttf() ? "TTF" : ".cpfont",
-                families_.back().name.c_str(), static_cast<int>(families_.back().files.size()), rootPath);
-      }
-    } else {
-      entry.close();
-    }
+    const bool isDirectory = entry.isDirectory();
+    if (isDirectory) entry.getName(nameBuffer, sizeof(nameBuffer));
+    entry.close();
+    if (isDirectory && readsAsFamilyFolder(nameBuffer)) more = visit(ctx, nameBuffer);
   }
   root.close();
+  return more;
 }
 
-bool SdCardFontRegistry::discover() {
+}  // namespace
+
+void SdCardFontRegistry::scanRoot(const char* rootPath) const {
+  struct Scan {
+    const SdCardFontRegistry& registry;
+    const char* rootPath;
+  } scan{*this, rootPath};
+  forEachFolderIn(
+      rootPath,
+      [](void* ctx, const char* name) {
+        const Scan& scan = *static_cast<const Scan*>(ctx);
+        auto& families = scan.registry.families_;
+        // Primary wins: a family an earlier root holds is not read again.
+        for (const auto& f : families) {
+          if (f.name == name) {
+            LOG_DBG("SDREG", "Skipping duplicate family %s in %s (primary wins)", name, scan.rootPath);
+            return true;
+          }
+        }
+        SdCardFontFamilyInfo family;
+        family.name = name;
+        const std::string subDirPath = std::string(scan.rootPath) + "/" + name;
+        scan.registry.scanDirectory(subDirPath.c_str(), family);
+        if (!family.files.empty()) {
+          families.push_back(std::move(family));
+          LOG_DBG("SDREG", "Found %s family: %s (%d files) in %s", families.back().ttf() ? "TTF" : ".cpfont",
+                  families.back().name.c_str(), static_cast<int>(families.back().files.size()), scan.rootPath);
+        }
+        return true;
+      },
+      &scan, /*logMissing=*/true);
+}
+
+void SdCardFontRegistry::readList(const bool keep, const bool rename) const {
   families_.clear();
   families_.reserve(MAX_SD_FAMILIES);
 
   // Primary first so it wins on family-name conflicts; the upstream roots are
   // read-only fallbacks — installers/deleters always target only the primary.
-  scanRoot(FONTS_DIR);
-  scanRoot(FONTS_DIR_UPSTREAM_HIDDEN);
-  scanRoot(FONTS_DIR_UPSTREAM_VISIBLE);
+  for (uint8_t r = 0; r < rootCount_; ++r) scanRoot(roots_[r]);
 
   // Sort families alphabetically
   std::sort(families_.begin(), families_.end(),
@@ -324,20 +334,108 @@ bool SdCardFontRegistry::discover() {
     families_.resize(MAX_SD_FAMILIES);
   }
 
-  LOG_DBG("SDREG", "Discovery complete: %d families", static_cast<int>(families_.size()));
+  // Kept otherwise: a name() handed out stays valid across a read on first use. Written in place, into the room
+  // reserveNames() took at boot.
+  if (rename || !named_.load(std::memory_order_relaxed)) {
+    names_.clear();
+    nameOffsets_.clear();
+    for (const auto& family : families_) {
+      nameOffsets_.push_back(static_cast<uint16_t>(names_.size()));
+      names_.append(family.name.c_str(), family.name.size() + 1);
+    }
+    named_.store(true, std::memory_order_release);
+  }
+
+  LOG_DBG("SDREG", "Discovery complete: %d families%s", static_cast<int>(families_.size()), keep ? "" : ", names kept");
+  if (keep) {
+    listed_.store(true, std::memory_order_release);
+  } else {
+    std::vector<SdCardFontFamilyInfo>().swap(families_);
+  }
+}
+
+bool SdCardFontRegistry::discover() {
+  const std::lock_guard<std::mutex> guard(mutex_);
+  readList(/*keep=*/true, /*rename=*/true);
+  generation_.fetch_add(1, std::memory_order_acq_rel);
   return !families_.empty();
 }
 
+void SdCardFontRegistry::ensureListed() const {
+  if (listed()) return;
+  const std::lock_guard<std::mutex> guard(mutex_);
+  if (!listed()) readList(/*keep=*/true, /*rename=*/false);
+}
+
+void SdCardFontRegistry::readNames() const {
+  const std::lock_guard<std::mutex> guard(mutex_);
+  if (!named_.load(std::memory_order_relaxed)) readList(/*keep=*/listed(), /*rename=*/true);
+}
+
+void SdCardFontRegistry::release() {
+  const std::lock_guard<std::mutex> guard(mutex_);
+  if (!listed()) return;
+  listed_.store(false, std::memory_order_release);
+  std::vector<SdCardFontFamilyInfo>().swap(families_);  // shrink_to_fit() frees nothing under -fno-exceptions
+  LOG_DBG("SDREG", "Family list released");
+}
+
+bool SdCardFontRegistry::findOnCard(const char* name, SdCardFontFamilyInfo& family) const {
+  family.name.clear();
+  std::vector<SdCardFontFileInfo>().swap(family.files);
+  if (!name || !readsAsFamilyFolder(name)) return false;
+  for (uint8_t r = 0; r < rootCount_; ++r) {
+    // The root's own entry for the name, as the list reads it: an open by path would also take a folder whose name
+    // differs in case, which the list, comparing names exactly, never offers.
+    struct Find {
+      const char* name;
+      bool found;
+    } find{name, false};
+    forEachFolderIn(
+        roots_[r],
+        [](void* ctx, const char* folder) {
+          Find& find = *static_cast<Find*>(ctx);
+          find.found = strcmp(folder, find.name) == 0;
+          return !find.found;
+        },
+        &find);
+    if (!find.found) continue;
+    const std::string dir = std::string(roots_[r]) + "/" + name;
+    scanDirectory(dir.c_str(), family);
+    if (!family.files.empty()) {
+      family.name = name;
+      return true;
+    }
+  }
+  return false;
+}
+
+void SdCardFontRegistry::forEachFamilyFolder(bool (*visit)(void* ctx, const char* name), void* ctx) const {
+  for (uint8_t r = 0; r < rootCount_; ++r) {
+    if (!forEachFolderIn(roots_[r], visit, ctx)) return;
+  }
+}
+
 const SdCardFontFamilyInfo* SdCardFontRegistry::findFamily(const std::string& name) const {
-  for (const auto& f : families_) {
+  for (const auto& f : getFamilies()) {
     if (f.name == name) return &f;
   }
   return nullptr;
 }
 
+int SdCardFontRegistry::nameIndex(const char* const name) const {
+  if (!name) return -1;
+  const uint8_t count = nameCount();
+  for (uint8_t i = 0; i < count; ++i) {
+    if (strcmp(names_.c_str() + nameOffsets_[i], name) == 0) return i;
+  }
+  return -1;
+}
+
 int SdCardFontRegistry::getFamilyIndex(const std::string& name) const {
-  for (int i = 0; i < static_cast<int>(families_.size()); i++) {
-    if (families_[i].name == name) return i;
+  const auto& families = getFamilies();
+  for (int i = 0; i < static_cast<int>(families.size()); i++) {
+    if (families[i].name == name) return i;
   }
   return -1;
 }
