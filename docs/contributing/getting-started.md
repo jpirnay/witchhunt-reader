@@ -48,7 +48,7 @@ git clone --recursive https://github.com/jpirnay/witchhunt-reader
 cd witchhunt-reader
 ```
 
-The `freeink-sdk` submodule points at our SDK fork, `https://github.com/jpirnay/freeink-sdk` (branch `witchhunt`, see `.gitmodules`). A build against the upstream `Free-Ink/freeink-sdk` main does not compile. SDK commits land on `witchhunt` before a firmware branch pins them; CI fails a pin that is not on it (`scripts/check_sdk_pin.sh`).
+The `freeink-sdk` submodule points at our SDK fork, `https://github.com/jpirnay/freeink-sdk` (branch `witchhunt`, see `.gitmodules`). A build against the upstream `Free-Ink/freeink-sdk` main does not compile. SDK commits land on `witchhunt` before a pin reaches master; CI fails such a pin on master (`scripts/check_sdk_pin.sh`). In a pull request, a pin that a pushed fork branch holds passes with a warning: fast-forward or merge `witchhunt` to it before the pull request merges.
 
 If you already cloned without submodules:
 
