@@ -1068,7 +1068,7 @@ curl -X PROPFIND -H "Depth: 1" http://crosspoint.local/Books/
 | `DELETE`         | Removes a file or an **empty** folder (`409` otherwise). `204`. A deleted book's layout cache is cleared; sidecars are not removed |
 | `MKCOL`          | Creates a folder. `201`; `405` if it exists; `409` if the parent is missing; `415` if the request has a body |
 | `MOVE`           | Needs a `Destination` header; `Overwrite: F` is honoured (`412`). `201` or `204`           |
-| `COPY`           | As `MOVE`, but files only: copying a folder answers `403`                                  |
+| `COPY`           | As `MOVE`, but files only: copying a folder answers `403`. The copy takes the destination's place only once complete: one that fails part-way, a read error included, answers `500` and leaves the destination as it was |
 | `LOCK`, `UNLOCK` | Dummy: returns a fixed token so clients that insist on locking keep working. Nothing is locked |
 
 For `PROPFIND`, `GET`, `HEAD`, `PUT`, `DELETE` and `MKCOL`, and for both ends of `MOVE` and

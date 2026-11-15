@@ -655,7 +655,14 @@ void WebDAVHandler::handleCopy(WebServer& s) {
   while (srcFile.available()) {
     HalSystem::feedWatchdog();
     int bytesRead = srcFile.read(buf, sizeof(buf));
-    if (bytesRead <= 0) break;
+    if (bytesRead <= 0) {
+      // available() said there was more, so this is a failed read, not the end of the file. It
+      // used to end the copy as a success, and the cut-short copy replaced the destination.
+      // Ported from crosspoint-reader PR #4472 by Justin Mitchell (@itsthisjustin).
+      LOG_ERR("DAV", "COPY %s: read failed", srcPath.c_str());
+      copyOk = false;
+      break;
+    }
     size_t written = dstFile.write(buf, bytesRead);
     if (written != (size_t)bytesRead) {
       copyOk = false;

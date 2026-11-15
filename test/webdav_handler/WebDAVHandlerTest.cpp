@@ -170,6 +170,25 @@ TEST_F(WebDAVHandlerTest, CopyMakesAFullCopy) {
   EXPECT_FALSE(Storage.exists("/Books/copy.epub.davtmp"));
 }
 
+// A read error part-way through ended the copy as if the source had run out: the cut-short copy took the
+// destination's place and the client was told it was done.
+TEST_F(WebDAVHandlerTest, CopyFailsOnAReadError) {
+  Storage.put("/Books/big.epub", std::string(10000, 'x'));
+  Storage.failReadsFrom("/Books/big.epub", 4096);
+  EXPECT_EQ(request(HTTP_COPY, "/Books/big.epub", nullptr, "http://reader.local/Books/copy.epub").code, 500);
+  EXPECT_FALSE(Storage.exists("/Books/copy.epub"));
+  EXPECT_FALSE(Storage.exists("/Books/copy.epub.davtmp"));
+}
+
+TEST_F(WebDAVHandlerTest, CopyFailingOverAFileKeepsIt) {
+  Storage.put("/Books/big.epub", std::string(10000, 'x'));
+  Storage.failReadsFrom("/Books/big.epub", 4096);
+  Storage.put("/Books/old.epub", "old book");
+  EXPECT_EQ(request(HTTP_COPY, "/Books/big.epub", nullptr, "http://reader.local/Books/old.epub").code, 500);
+  EXPECT_EQ(Storage.content("/Books/old.epub"), "old book");
+  EXPECT_FALSE(Storage.exists("/Books/old.epub.davtmp"));
+}
+
 TEST_F(WebDAVHandlerTest, CopyRefusesProtectedEnds) {
   EXPECT_EQ(request(HTTP_COPY, "/.crosspoint/wifi.json", nullptr, "http://reader.local/Books/wifi.json").code, 403);
   EXPECT_EQ(request(HTTP_COPY, "/Books/novel.epub", nullptr, "http://reader.local/.crosspoint/wifi.json").code, 403);
