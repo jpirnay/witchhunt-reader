@@ -36,6 +36,14 @@ distances grow to 2 or 3 bytes. The runtime walks the transitions with a simple
 linear scan and materializes the absolute address by adding the decoded delta
 to the current node’s base.
 
+The walk (`LiangHyphenation.cpp`) reads the blob through a byte accessor: in
+place (the image, a flash mapping, PSRAM), or, on an X3 or X4 without the flash
+store, through a few pages of the pack file on the card (`PagedTrieReader.h`).
+Every address it reads is checked against the blob's size first, the levels
+offset included (an offset below 4 would point before the blob), so a damaged
+blob gives wrong breaks, never a read outside it; a card read that fails costs
+the word its breaks.
+
 ## Embedding blobs into the firmware
 
 The helper script `scripts/generate_hyphenation_trie.py` acts as a thin

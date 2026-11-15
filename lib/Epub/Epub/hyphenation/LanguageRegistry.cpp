@@ -102,7 +102,7 @@ static_assert(kEntryCount <= 32, "a bit per language");  // 32 now: the next lan
 bool askProvider(const LanguageEntry& entry, SerializedHyphenationPatterns& out, uint32_t& crc) {
   const uint32_t bit = 1u << static_cast<uint32_t>(&entry - kEntries);
   if (!packProvider || (packMissing & bit) != 0) return false;
-  if (packProvider(entry.primaryTag, out, crc) && out.data && out.size > 0) return true;
+  if (packProvider(entry.primaryTag, out, crc) && out.available()) return true;
   packMissing |= bit;
   return false;
 }

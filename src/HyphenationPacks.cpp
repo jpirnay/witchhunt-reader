@@ -15,12 +15,14 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <memory>
 
 #include "CrossPointState.h"
 
 #if CONFIG_SPIRAM
 #include <esp_heap_caps.h>
 #else
+#include <Epub/hyphenation/PagedTrieReader.h>
 #include <FlashAreaRegion.h>
 #include <FlashFontPartition.h>
 #endif
@@ -186,15 +188,85 @@ bool mounted = false;
 // measurements), so 1 KB pieces add ~17 ms to German's copy over 4 KB ones, and hold 3 KB less while a book opens.
 constexpr uint32_t kScratchBytes = 1024;
 
+// A trie read in place from its pack on the card, a page at a time (PagedTrieReader), where the flash store cannot hold
+// it: every pack language's when the store is not mounted (a partition table whose flash area has no room for the
+// region: FlashFontPartition::hyphRegionOffset()), and a language's whose copy failed for a reason the next book open
+// would meet again (copyFailed). Its pages and the open pack file are held while the language is hyphenated, and go
+// with the patterns (unmapAll()).
+//
+// The payload's CRC is not checked here, where the store and the PSRAM load check it: that would be one read of the
+// whole trie (German's: 206 KB) at the first book open after every wake, as a wake is a boot. The Font
+// Manager checked the file against its manifest's CRC when it installed it, the header must describe exactly the
+// file's size, and the walk checks every address, so a pack that went bad on the card since gives wrong breaks, never
+// a read outside the trie.
+struct CardTrie {
+  explicit CardTrie(const char* code)
+      : found(openPack(code, src, header)), reader(src, hyphpack::kHeaderBytes, found ? header.payloadSize : 0) {}
+  SdPackSource src;
+  hyphpack::Header header;
+  bool found;
+  PagedTrieReader reader;
+};
+
+// As many languages as the registry hyphenates at once: the open book's, and one more.
+std::unique_ptr<CardTrie> cardTries[HyphenationStore::kMaxMapped];
+
+// The languages read from the card although the store is mounted: their copy into it failed with NoSpace or
+// FlashFailed (a bit per registry entry). Cleared when a copy succeeds.
+uint32_t copyFailed = 0;
+
+bool readsCard(const char* code) { return !mounted || (copyFailed & bitOf(findLanguageEntry(code))) != 0; }
+
+void releaseCardTries() {
+  for (auto& trie : cardTries) trie.reset();
+}
+
+// The trie of `code` on the card: held already, or opened into a free slot. Null when the card has no pack for it,
+// there is no memory, or both slots hold other languages (until the next book open frees them).
+CardTrie* cardTrie(const char* code) {
+  std::unique_ptr<CardTrie>* slot = nullptr;
+  for (auto& trie : cardTries) {
+    if (trie && trie->header.code[0] == code[0] && trie->header.code[1] == code[1]) return trie.get();
+    if (!trie && !slot) slot = &trie;
+  }
+  if (!slot) {
+    LOG_ERR("HYP", "%s: two languages read from the card already", code);
+    return nullptr;
+  }
+  auto trie = makeUniqueNoThrow<CardTrie>(code);
+  if (!trie) {
+    LOG_ERR("HYP", "%s: no %u B to read the trie from the card", code, static_cast<unsigned>(sizeof(CardTrie)));
+    return nullptr;
+  }
+  markOnCard(code, trie->found);
+  if (!trie->found) {
+    LOG_INF("HYP", "%s: no hyphenation pack on the card", code);
+    return nullptr;
+  }
+  LOG_INF("HYP", "%s: its %u B trie is read from the pack on the card, through %u pages of %u B", code,
+          static_cast<unsigned>(trie->header.payloadSize), static_cast<unsigned>(PagedTrieReader::kPages),
+          static_cast<unsigned>(PagedTrieReader::kPageBytes));
+  *slot = std::move(trie);
+  return slot->get();
+}
+
 bool provide(const char* code, SerializedHyphenationPatterns& out, uint32_t& crc32) {
-  return mounted && !knownMissing(code) && store.map(code, out, &crc32);
+  if (knownMissing(code)) return false;
+  if (!readsCard(code)) return store.map(code, out, &crc32);
+  CardTrie* trie = cardTrie(code);
+  if (!trie) return false;
+  out = SerializedHyphenationPatterns{trie->header.rootOffset, nullptr, trie->header.payloadSize, &trie->reader};
+  crc32 = trie->header.crc32;
+  return true;
 }
 
 // Every language's patterns taken back and unmapped, while no build holds them: their MMU pages return to the font
-// cache, and the next lookup of a language maps it again.
+// cache, the tries read from the card close their files and free their pages, and the next lookup of a language
+// maps or opens it again.
 void unmapAll() {
   forgetPackPatterns();
   store.unmapAll();
+  releaseCardTries();
 }
 
 const char* fillName(const HyphenationStore::Fill result) {
@@ -224,9 +296,11 @@ void ensureStored(const char* code, const bool mayDrop, const std::function<void
     LOG_INF("HYP", "%s: no hyphenation pack on the card", code);
     return;
   }
+  const uint32_t bit = bitOf(findLanguageEntry(code));
   HyphenationStore::Entry stored;
   if (store.find(code, stored) && stored.crc32 == header.crc32 && stored.size == header.payloadSize &&
       stored.rootOffset == header.rootOffset) {
+    copyFailed &= ~bit;
     return;
   }
   auto scratch = makeUniqueNoThrow<uint8_t[]>(kScratchBytes);
@@ -241,6 +315,20 @@ void ensureStored(const char* code, const bool mayDrop, const std::function<void
   const HyphenationStore::Fill result = store.fill(src, header, scratch.get(), kScratchBytes, mayDrop);
   LOG_INF("HYP", "%s: %u B into the flash store: %s in %lu ms", code, static_cast<unsigned>(header.payloadSize),
           fillName(result), static_cast<unsigned long>(millis() - start));
+  switch (result) {
+    case HyphenationStore::Fill::Stored:
+    case HyphenationStore::Fill::Unchanged:
+    case HyphenationStore::Fill::BadSource:  // the pack fails its CRC: not hyphenated, from the card either
+      copyFailed &= ~bit;
+      break;
+    case HyphenationStore::Fill::NoSpace:
+    case HyphenationStore::Fill::FlashFailed:
+      LOG_INF("HYP", "%s: its trie is read from the card instead", code);
+      copyFailed |= bit;
+      break;
+    case HyphenationStore::Fill::WouldDrop:  // the next book open copies it, dropping another language if it must
+      break;
+  }
 }
 
 #endif
@@ -252,7 +340,7 @@ void begin() {
   const size_t base = FlashFontPartition::hyphRegionOffset();
   mounted = base != 0 && flash.beginRegion(static_cast<uint32_t>(base), FlashFontPartition::HYPH_RESERVED_BYTES) &&
             store.mount();
-  if (!mounted) LOG_ERR("HYP", "no hyphenation store: books in languages other than English are not hyphenated");
+  if (!mounted) LOG_ERR("HYP", "no hyphenation store: the tries of books in other languages are read from the card");
 #endif
   setHyphenationPatternProvider(provide);
 }
@@ -272,8 +360,10 @@ void prepareForBook(const std::string& languageTag, const std::function<void()>&
 #else
   // Every language's mapping goes: only the open book's is mapped again (on its first lookup).
   unmapAll();
-  if (!mounted || !entry || entry->builtIn) return;
-  ensureStored(code, /*mayDrop=*/true, beforeCopy);
+  if (!entry || entry->builtIn) return;
+  if (mounted) ensureStored(code, /*mayDrop=*/true, beforeCopy);
+  // A trie read from the card is opened now, while the book opens, rather than at its first line-end word in a build.
+  if (readsCard(code)) cardTrie(code);
 #endif
 }
 
@@ -284,7 +374,7 @@ void bookClosed() {
 #else
   const uint32_t before = flash.freeMapPages();
   unmapAll();
-  LOG_DBG("HYP", "book closed: tries unmapped, MMU pages free %u -> %u", static_cast<unsigned>(before),
+  LOG_DBG("HYP", "book closed: tries unmapped or closed, MMU pages free %u -> %u", static_cast<unsigned>(before),
           static_cast<unsigned>(flash.freeMapPages()));
 #endif
 }
@@ -309,6 +399,8 @@ void packInstalled(const char* code) {
   // The next book in this language reads the new pack.
   if (isLoaded(code)) release();
 #else
+  // A trie read from the card holds the file the Font Manager just replaced.
+  releaseCardTries();
   if (mounted) ensureStored(code, /*mayDrop=*/false, nullptr);
 #endif
 }
@@ -378,6 +470,8 @@ void packRemoved(const char* code) {
   forgetPackPatterns();
 #if CONFIG_SPIRAM
   if (isLoaded(code)) release();
+#else
+  releaseCardTries();
 #endif
 }
 

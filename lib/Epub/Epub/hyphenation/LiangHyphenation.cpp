@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <vector>
 
+#include "PagedTrieReader.h"
+
 /*
  * Liang hyphenation pipeline overview (Typst-style binary trie variant)
  * --------------------------------------------------------------------
@@ -22,10 +24,10 @@
  *       Typst's binary tries. The first 4 bytes contain the root offset. Each
  *       node packs transitions, variable-stride relative offsets to child
  *       nodes, and an optional pointer into a shared "levels" list. We parse
- *       that layout lazily via decodeState/transition, keeping everything in
- *       flash memory; no heap allocations besides the stack-local AutomatonState
- *       structs. getAutomaton caches parseAutomaton results per blob pointer so
- *       multiple words hitting the same language only pay the cost once.
+ *       that layout lazily via decodeState/transition, reading the blob where it
+ *       lies (the image, a flash mapping, PSRAM) or, on a C3 without the flash
+ *       store, through a few pages of its pack file (PagedTrieReader); no heap
+ *       allocations besides the stack-local AutomatonState structs.
  *
  * 3.  Pattern application
  *     - We walk the augmented bytes left-to-right. For each starting byte we
@@ -67,8 +69,6 @@
  */
 
 namespace {
-
-using EmbeddedAutomaton = SerializedHyphenationPatterns;
 
 // Upper bounds for the fixed word buffers. Sized for German (longest known word
 // ≈63 codepoints × 2 UTF-8 bytes + 2 sentinel dots = 128 bytes). Words that
@@ -181,36 +181,52 @@ bool buildAugmentedWord(AugmentedWord& word, const std::vector<CodepointInfo>& c
   return true;
 }
 
-// Decoded view of a single trie node pulled straight out of the serialized blob.
-// - transitions: contiguous list of next-byte values
-// - targets: packed relative offsets (1/2/3 bytes) for each transition
-// - levels: optional pointer into the global levels list with packed dist/level pairs
-struct AutomatonState {
-  const uint8_t* data = nullptr;
-  size_t size = 0;
-  size_t addr = 0;
-  uint8_t stride = 1;
-  size_t childCount = 0;
-  const uint8_t* transitions = nullptr;
-  const uint8_t* targets = nullptr;
-  const uint8_t* levels = nullptr;
-  size_t levelsLen = 0;
-
-  bool valid() const { return data != nullptr; }
+// How the walk reads the trie's bytes: in place (the image, a flash mapping, PSRAM), which every board but a C3 without
+// the hyphenation store reads, or through the pages of its pack file on the card (PagedTrieReader). The walk is a
+// template over the two, so the in-place one compiles to plain loads as it always did.
+struct InPlaceBytes {
+  const uint8_t* data;
+  uint8_t at(const size_t addr) const { return data[addr]; }
+  static constexpr bool kMayFail = false;
+  bool failed() const { return false; }
 };
 
-// Interpret the node located at `addr`, returning transition metadata.
-AutomatonState decodeState(const EmbeddedAutomaton& automaton, size_t addr) {
+struct PagedBytes {
+  PagedTrieReader* reader;
+  uint8_t at(const size_t addr) const { return reader->at(static_cast<uint32_t>(addr)); }
+  static constexpr bool kMayFail = true;
+  bool failed() const { return reader->failed(); }
+};
+
+// Decoded view of a single trie node, as offsets into the serialized blob:
+// - transitions: contiguous list of next-byte values
+// - targets: packed relative offsets (1/2/3 bytes) for each transition
+// - levels: optional offset into the global levels list with packed dist/level pairs
+struct AutomatonState {
+  bool isValid = false;
+  uint8_t stride = 1;
+  size_t addr = 0;
+  size_t childCount = 0;
+  size_t transitions = 0;
+  size_t targets = 0;
+  size_t levels = 0;
+  size_t levelsLen = 0;
+
+  bool valid() const { return isValid; }
+};
+
+// Interpret the node located at `addr`, returning transition metadata. Every byte it names lies inside the blob.
+template <typename Bytes>
+AutomatonState decodeState(const Bytes& bytes, const size_t size, const size_t addr) {
   AutomatonState state;
-  if (addr >= automaton.size) {
+  if (addr >= size) {
     return state;
   }
 
-  const uint8_t* base = automaton.data + addr;
-  size_t remaining = automaton.size - addr;
+  const size_t remaining = size - addr;
   size_t pos = 0;
 
-  const uint8_t header = base[pos++];
+  const uint8_t header = bytes.at(addr + pos++);
   // Header layout (bits):
   //   7        - hasLevels flag
   //   6..5     - stride selector (0 -> 1 byte, otherwise 1|2|3)
@@ -225,66 +241,67 @@ AutomatonState decodeState(const EmbeddedAutomaton& automaton, size_t addr) {
     if (pos >= remaining) {
       return AutomatonState{};
     }
-    childCount = base[pos++];
+    childCount = bytes.at(addr + pos++);
   }
 
-  const uint8_t* levelsPtr = nullptr;
+  size_t levels = 0;
   size_t levelsLen = 0;
   if (hasLevels) {
     if (pos + 1 >= remaining) {
       return AutomatonState{};
     }
-    const uint8_t offsetHi = base[pos++];
-    const uint8_t offsetLoLen = base[pos++];
-    // The 12-bit offset (hi<<4 | top nibble) points into the blob-level levels list.
-    // The bottom nibble stores how many packed entries belong to this node.
+    const uint8_t offsetHi = bytes.at(addr + pos++);
+    const uint8_t offsetLoLen = bytes.at(addr + pos++);
+    // The 12-bit offset (hi<<4 | top nibble) points into the blob-level levels list, counted from before the 4-byte
+    // root prefix the blob was stored without. The bottom nibble stores how many packed entries belong to this node.
     const size_t offset = (static_cast<size_t>(offsetHi) << 4) | (offsetLoLen >> 4);
     levelsLen = offsetLoLen & 0x0Fu;
-    if (offset + levelsLen > automaton.size) {
+    if (offset < 4u || offset + levelsLen > size) {
       return AutomatonState{};
     }
-    levelsPtr = automaton.data + offset - 4u;
+    levels = offset - 4u;
   }
 
   if (pos + childCount > remaining) {
     return AutomatonState{};
   }
-  const uint8_t* transitions = base + pos;
+  const size_t transitions = addr + pos;
   pos += childCount;
 
   const size_t targetsBytes = childCount * stride;
   if (pos + targetsBytes > remaining) {
     return AutomatonState{};
   }
-  const uint8_t* targets = base + pos;
 
-  state.data = automaton.data;
-  state.size = automaton.size;
+  state.isValid = true;
   state.addr = addr;
   state.stride = stride;
   state.childCount = childCount;
   state.transitions = transitions;
-  state.targets = targets;
-  state.levels = levelsPtr;
+  state.targets = addr + pos;
+  state.levels = levels;
   state.levelsLen = levelsLen;
   return state;
 }
 
-// Convert the packed stride-sized delta back into a signed offset.
-int32_t decodeDelta(const uint8_t* buf, uint8_t stride) {
+// Convert the packed stride-sized delta at `at` back into a signed offset.
+template <typename Bytes>
+int32_t decodeDelta(const Bytes& bytes, const size_t at, const uint8_t stride) {
   if (stride == 1) {
-    return static_cast<int8_t>(buf[0]);
+    return static_cast<int8_t>(bytes.at(at));
   }
   if (stride == 2) {
-    return static_cast<int16_t>((static_cast<uint16_t>(buf[0]) << 8) | static_cast<uint16_t>(buf[1]));
+    return static_cast<int16_t>((static_cast<uint16_t>(bytes.at(at)) << 8) | static_cast<uint16_t>(bytes.at(at + 1)));
   }
-  const int32_t unsignedVal =
-      (static_cast<int32_t>(buf[0]) << 16) | (static_cast<int32_t>(buf[1]) << 8) | static_cast<int32_t>(buf[2]);
+  const int32_t unsignedVal = (static_cast<int32_t>(bytes.at(at)) << 16) |
+                              (static_cast<int32_t>(bytes.at(at + 1)) << 8) | static_cast<int32_t>(bytes.at(at + 2));
   return unsignedVal - (1 << 23);
 }
 
 // Follow a single byte transition from `state`, decoding the child node on success.
-bool transition(const EmbeddedAutomaton& automaton, const AutomatonState& state, uint8_t letter, AutomatonState& out) {
+template <typename Bytes>
+bool transition(const Bytes& bytes, const size_t size, const AutomatonState& state, const uint8_t letter,
+                AutomatonState& out) {
   if (!state.valid()) {
     return false;
   }
@@ -292,21 +309,83 @@ bool transition(const EmbeddedAutomaton& automaton, const AutomatonState& state,
   // Children remain sorted by letter in the serialized blob, but the lists are
   // short enough that a linear scan keeps code size down compared to binary search.
   for (size_t idx = 0; idx < state.childCount; ++idx) {
-    if (state.transitions[idx] != letter) {
+    if (bytes.at(state.transitions + idx) != letter) {
       continue;
     }
-    const uint8_t* deltaPtr = state.targets + idx * state.stride;
-    const int32_t delta = decodeDelta(deltaPtr, state.stride);
+    const int32_t delta = decodeDelta(bytes, state.targets + idx * state.stride, state.stride);
     // Deltas are relative to the current node's address, allowing us to keep all
     // targets within 24 bits while still referencing further nodes in the blob.
     const int64_t nextAddr = static_cast<int64_t>(state.addr) + delta;
-    if (nextAddr < 0 || static_cast<size_t>(nextAddr) >= automaton.size) {
+    if (nextAddr < 0 || static_cast<size_t>(nextAddr) >= size) {
       return false;
     }
-    out = decodeState(automaton, static_cast<size_t>(nextAddr));
+    out = decodeState(bytes, size, static_cast<size_t>(nextAddr));
     return out.valid();
   }
   return false;
+}
+
+// Liang scores for `augmented` from the trie, into `scores` (one per augmented char). False when the trie could not
+// be read whole (a card error): the word then gets no breaks rather than some from bytes that were not read.
+template <typename Bytes>
+bool scoreWord(const Bytes& bytes, const size_t size, const size_t rootOffset, const AugmentedWord& augmented,
+               uint8_t* scores) {
+  const AutomatonState root = decodeState(bytes, size, rootOffset);
+  if (!root.valid()) {
+    return false;
+  }
+
+  // Walk every starting character position and stream bytes through the trie.
+  for (size_t charStart = 0; charStart < augmented.charCount_; ++charStart) {
+    const size_t byteStart = augmented.charByteOffsets[charStart];
+    AutomatonState state = root;
+
+    for (size_t cursor = byteStart; cursor < augmented.byteLen; ++cursor) {
+      AutomatonState next;
+      if (!transition(bytes, size, state, augmented.bytes[cursor], next)) {
+        break;  // No more matches for this prefix.
+      }
+      state = next;
+
+      if (state.levelsLen > 0) {
+        size_t offset = 0;
+        // Each packed byte stores the byte-distance delta and the Liang level digit.
+        for (size_t i = 0; i < state.levelsLen; ++i) {
+          const uint8_t packed = bytes.at(state.levels + i);
+          const size_t dist = static_cast<size_t>(packed / 10);
+          const uint8_t level = static_cast<uint8_t>(packed % 10);
+
+          offset += dist;
+          const size_t splitByte = byteStart + offset;
+          if (splitByte >= augmented.byteLen) {
+            continue;
+          }
+
+          const int32_t boundary = augmented.byteToCharIndex[splitByte];
+          if (boundary < 0) {
+            continue;  // Mid-codepoint byte, wait for the next one.
+          }
+          if (boundary < 2 || boundary + 2 > static_cast<int32_t>(augmented.charCount_)) {
+            continue;  // Skip splits that land in the leading/trailing sentinels.
+          }
+
+          const size_t idx = static_cast<size_t>(boundary);
+          if (idx >= augmented.charCount_) {
+            continue;
+          }
+          scores[idx] = std::max(scores[idx], level);
+        }
+      }
+      // A failed card read makes every later byte 0: the word is lost, so stop walking it.
+      if constexpr (Bytes::kMayFail) {
+        if (bytes.failed()) return false;
+      }
+    }
+    if constexpr (Bytes::kMayFail) {
+      if (bytes.failed()) return false;
+    }
+  }
+  return true;
 }
 
 // Converts odd score positions back into codepoint indexes, honoring min prefix/suffix constraints.
@@ -347,17 +426,13 @@ void collectBreakIndexes(const std::vector<CodepointInfo>& cps, const uint8_t* s
 void liangBreakIndexes(const std::vector<CodepointInfo>& cps, const SerializedHyphenationPatterns& patterns,
                        const LiangWordConfig& config, std::vector<size_t>& out) {
   out.clear();
+  if (!patterns.available()) {
+    return;
+  }
   // AugmentedWord uses fixed-size C arrays (no heap allocation) to avoid
   // fragmenting the heap across hundreds of words during page layout.
   AugmentedWord augmented;
   if (!buildAugmentedWord(augmented, cps, config)) {
-    return;
-  }
-
-  const EmbeddedAutomaton& automaton = patterns;
-
-  const AutomatonState root = decodeState(automaton, automaton.rootOffset);
-  if (!root.valid()) {
     return;
   }
 
@@ -368,48 +443,17 @@ void liangBreakIndexes(const std::vector<CodepointInfo>& cps, const SerializedHy
     scores[i] = 0;
   }
 
-  // Walk every starting character position and stream bytes through the trie.
-  for (size_t charStart = 0; charStart < augmented.charCount_; ++charStart) {
-    const size_t byteStart = augmented.charByteOffsets[charStart];
-    AutomatonState state = root;
-
-    for (size_t cursor = byteStart; cursor < augmented.byteLen; ++cursor) {
-      AutomatonState next;
-      if (!transition(automaton, state, augmented.bytes[cursor], next)) {
-        break;  // No more matches for this prefix.
-      }
-      state = next;
-
-      if (state.levels && state.levelsLen > 0) {
-        size_t offset = 0;
-        // Each packed byte stores the byte-distance delta and the Liang level digit.
-        for (size_t i = 0; i < state.levelsLen; ++i) {
-          const uint8_t packed = state.levels[i];
-          const size_t dist = static_cast<size_t>(packed / 10);
-          const uint8_t level = static_cast<uint8_t>(packed % 10);
-
-          offset += dist;
-          const size_t splitByte = byteStart + offset;
-          if (splitByte >= augmented.byteLen) {
-            continue;
-          }
-
-          const int32_t boundary = augmented.byteToCharIndex[splitByte];
-          if (boundary < 0) {
-            continue;  // Mid-codepoint byte, wait for the next one.
-          }
-          if (boundary < 2 || boundary + 2 > static_cast<int32_t>(augmented.charCount_)) {
-            continue;  // Skip splits that land in the leading/trailing sentinels.
-          }
-
-          const size_t idx = static_cast<size_t>(boundary);
-          if (idx >= augmented.charCount_) {
-            continue;
-          }
-          scores[idx] = std::max(scores[idx], level);
-        }
-      }
-    }
+  bool scored = false;
+  if (patterns.data) {
+    scored = scoreWord(InPlaceBytes{patterns.data}, patterns.size, patterns.rootOffset, augmented, scores);
+  } else {
+    // A failure is the word's alone: the next word reads the card again.
+    patterns.reader->clearFailure();
+    scored = scoreWord(PagedBytes{patterns.reader}, patterns.size, patterns.rootOffset, augmented, scores);
+    patterns.reader->clearFailure();
+  }
+  if (!scored) {
+    return;
   }
 
   collectBreakIndexes(cps, scores, augmented.charCount_, config.minPrefix, config.minSuffix, out);
