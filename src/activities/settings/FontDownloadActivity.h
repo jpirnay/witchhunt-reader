@@ -26,12 +26,14 @@ class FontDownloadActivity final : public UiListActivity {
     char family[FontInstaller::MAX_FAMILY_NAME_LEN + 1] = {};
     bool packUpdates = false;
   };
-  // Where leaving restarts: Home; the open book (APP_STATE.openEpubPath), for a book's offer; Settings, for the offer
-  // a picked interface language makes.
+  // Where leaving restarts: Home, for Home's offer; the open book (APP_STATE.openEpubPath), for a book's offer;
+  // Settings, for the plain Font Manager and the offers made there (a picked interface language, Check for updates).
   enum class ReturnTo : uint8_t { Home, Book, Settings };
   FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const Wanted& wanted, ReturnTo returnTo);
+  // The plain Font Manager, opened from Settings, where Back leads: also after a join backed out of, it used to
+  // restart to Home.
   explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : FontDownloadActivity(renderer, mappedInput, Wanted{}, ReturnTo::Home) {}
+      : FontDownloadActivity(renderer, mappedInput, Wanted{}, ReturnTo::Settings) {}
 
   // The online manifest, read into `out` with each family marked as the card holds it: installed, with an update
   // (FontInstaller::hasUpdate), or with an interrupted download to resume. The Font Manager's list, and what Check for

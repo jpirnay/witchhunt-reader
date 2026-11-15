@@ -171,7 +171,13 @@ void DetectTimezoneActivity::onWifiSelectionComplete(bool success) {
   performDetect();
 }
 
-void DetectTimezoneActivity::onWifiSelectionCancelled() { finish(); }
+// The join screen brought the radio up (station mode, a scan) before it was backed out of. That
+// is a WiFi session like any other, so onExit() restarts into Clock settings, where Back leads,
+// instead of turning the radio off and carrying on.
+void DetectTimezoneActivity::onWifiSelectionCancelled() {
+  wifiWasUsed_ = true;
+  finish();
+}
 
 void DetectTimezoneActivity::performDetect() {
   wifiWasUsed_ = true;

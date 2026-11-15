@@ -5,6 +5,7 @@
 #include <WiFi.h>
 
 #include "MappedInputManager.h"
+#include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
 #include "activities/network/SignalStrengthWidget.h"
 #include "components/TouchExitButton.h"
@@ -65,12 +66,20 @@ void CalibreConnectActivity::onEnter() {
 
 void CalibreConnectActivity::onExit() {
   Activity::onExit();
-  session.end();
+  // Back leads to the File Transfer list (CrossPointWebServerActivity opens it again), so the
+  // restart lands there, on this row; it used to land on Home, also after a join backed out of.
+  // Any other way out (Home, a global action) replaces the stack and goes Home.
+  session.end(leavingToFileTransfer ? silentRestartToFileTransferCalibre : silentRestart);
+}
+
+void CalibreConnectActivity::leaveToFileTransfer() {
+  leavingToFileTransfer = true;
+  finish();
 }
 
 void CalibreConnectActivity::onWifiSelectionComplete(const bool connected) {
   if (!connected) {
-    finish();
+    leaveToFileTransfer();
     return;
   }
 
@@ -93,7 +102,7 @@ void CalibreConnectActivity::loop() {
   // Fewer rounds per pass than File Transfer: this screen shows the transfer's progress, which the
   // code below keeps up to date between passes.
   if (!session.serve(80)) {
-    finish();
+    leaveToFileTransfer();
     return;
   }
 

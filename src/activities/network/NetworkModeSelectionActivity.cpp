@@ -3,11 +3,14 @@
 #include <BoardConfig.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Logging.h>
+#include <WiFi.h>
 
 #include <iterator>
 
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
+#include "SilentRestart.h"
 #include "components/icons/networkModeIcons.h"
 
 namespace fui = freeink::ui;
@@ -48,6 +51,49 @@ static_assert(std::size(kRows) == NetworkModeSelectionActivity::MAX_ROWS);
 // The OPDS browser has nothing to open until a server is configured (Settings > System > OPDS
 // Servers, or the web settings page).
 bool isListed(const ModeRow& row) { return row.mode != NetworkMode::OPDS_BROWSER || OPDS_STORE.hasServers(); }
+
+// Opens a mode that has a screen of its own (activateIndex()).
+//
+// A Join Network the user backed out of (Back while scanning, connecting or at the list) leaves the
+// radio up: CrossPointWebServerActivity starts it before the join and takes it down only in its
+// onExit(), whose ServerSession::end() restarts to Home. Replacing the stack runs that onExit(), so
+// the choice was lost to a restart to Home. Every WiFi session ends in a restart; with the radio up,
+// this one restarts into the choice. A silentRestart*() returns only while a deep sleep supersedes it.
+void handOff(const NetworkMode mode) {
+  const bool radioUp = WiFi.getMode() != WIFI_MODE_NULL;
+  if (radioUp) {
+    LOG_DBG("NETMODE", "Radio left up by a cancelled join; restarting into the choice");
+    WiFi.disconnect(false);
+    delay(30);
+  }
+  switch (mode) {
+    case NetworkMode::OPDS_BROWSER:
+      if (radioUp) {
+        silentRestartToOpdsBrowser();
+      } else {
+        activityManager.goToBrowser();
+      }
+      return;
+    case NetworkMode::USB_SERIAL:
+      if (radioUp) {
+        silentRestartToSerialTransfer();
+      } else {
+        activityManager.goToSerialTransfer();
+      }
+      return;
+    case NetworkMode::USB_DRIVE:
+      if (radioUp) {
+        silentRestartToUsbDrive();
+      } else {
+        activityManager.goToUsbDrive();
+      }
+      return;
+    case NetworkMode::JOIN_NETWORK:
+    case NetworkMode::CONNECT_CALIBRE:
+    case NetworkMode::CREATE_HOTSPOT:
+      return;  // not hand-offs: these go back to CrossPointWebServerActivity
+  }
+}
 
 // A 32 px icon from networkModeIcons.h as the bitmap a list row draws (Mask1: bit 0 = ink).
 fui::BitmapRef rowIcon(const uint8_t* bits) {
@@ -101,19 +147,18 @@ void NetworkModeSelectionActivity::activateIndex(const int index) {
   // CrossPointWebServerActivity. The OPDS browser does need WiFi, but brings it up
   // itself and reboots on exit, so it is handed off the same way. The web server
   // modes still return to that owner.
-  if (mode == NetworkMode::OPDS_BROWSER) {
-    activityManager.goToBrowser();
-    return;
+  switch (mode) {
+    case NetworkMode::OPDS_BROWSER:
+    case NetworkMode::USB_SERIAL:
+    case NetworkMode::USB_DRIVE:
+      handOff(mode);
+      return;
+    case NetworkMode::JOIN_NETWORK:
+    case NetworkMode::CONNECT_CALIBRE:
+    case NetworkMode::CREATE_HOTSPOT:
+      onModeSelected(mode);
+      return;
   }
-  if (mode == NetworkMode::USB_SERIAL) {
-    activityManager.goToSerialTransfer();
-    return;
-  }
-  if (mode == NetworkMode::USB_DRIVE) {
-    activityManager.goToUsbDrive();
-    return;
-  }
-  onModeSelected(mode);
 }
 
 void NetworkModeSelectionActivity::buildScreen(UiScreen& screen) {

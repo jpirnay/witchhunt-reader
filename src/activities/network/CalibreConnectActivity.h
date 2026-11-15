@@ -39,8 +39,13 @@ class CalibreConnectActivity final : public Activity {
 
   void renderServerRunning() const;
 
+  // Set by Back (and the touch Exit button), whose way out is the File Transfer list; onExit()
+  // restarts there instead of Home.
+  bool leavingToFileTransfer = false;
+
   void onWifiSelectionComplete(bool connected);
   void startWebServer();
+  void leaveToFileTransfer();
 
  public:
   explicit CalibreConnectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)

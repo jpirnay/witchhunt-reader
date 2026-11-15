@@ -1,5 +1,6 @@
 # The download loop, and where SecureHttpClient sends credentials, over a scripted network; its
-# https test (HttpsSchemeTest.cpp); and response header lines past its line cap (LongHeaderTest.cpp).
+# https test (HttpsSchemeTest.cpp); response header lines past its line cap (LongHeaderTest.cpp); and
+# responses that carry no body (BodilessReplyTest.cpp).
 # The stubs (Arduino, Client, WiFiClient, WiFi, base64, Logging) come first on the include path; the
 # stub SecureClient is in RangeDownloadTest.cpp.
 add_executable(RangeDownloadTest
@@ -10,6 +11,7 @@ add_executable(RangeDownloadTest
   HttpsSchemeTest.cpp
   TlsHopTest.cpp
   LongHeaderTest.cpp
+  BodilessReplyTest.cpp
   ${REPO_ROOT}/lib/SecureNet/src/RangeDownload.cpp
   ${REPO_ROOT}/lib/SecureNet/src/SecureHttpClient.cpp
   ${REPO_ROOT}/lib/SecureNet/src/HttpRange.cpp

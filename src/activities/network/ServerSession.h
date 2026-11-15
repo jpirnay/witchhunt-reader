@@ -17,7 +17,8 @@ class MappedInputManager;
 //   start()         once the network is up: mDNS, the server, Back during an upload, the link watch
 //   serve()         every loop: requests, Back and the touch Exit button
 //   link()          joined networks: whether the link is up, reconnecting, or gone
-//   end()           from onExit(): everything down, then the restart every network session ends in
+//   end()           from onExit(): everything down, then the restart every network session ends in,
+//                   into where the screen was left for
 class ServerSession {
  public:
   // The name the reader answers to on the network: http://crosspoint.local/.
@@ -48,10 +49,10 @@ class ServerSession {
   bool running() const { return server && server->isRunning(); }
   CrossPointWebServer* webServer() const { return server.get(); }
 
-  // Stops the server, mDNS and the link watch. If WiFi was brought up, disconnects it and restarts
-  // to Home, and does not return. Anything of the caller's own on the network (the hotspot's DNS
-  // server) goes before this.
-  void end();
+  // Stops the server, mDNS and the link watch. If WiFi was brought up, disconnects it and calls
+  // `restart`, a silentRestart*() that does not return: the restart lands where the screen was left
+  // for. Anything of the caller's own on the network (the hotspot's DNS server) goes before this.
+  void end(void (*restart)());
 
  private:
   GfxRenderer& renderer;
