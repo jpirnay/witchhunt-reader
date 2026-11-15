@@ -234,10 +234,14 @@ constexpr uint32_t SILENT_REBOOT_TARGET_FILE_TRANSFER_OPDS = 8;
 // ends the WiFi session. USB Transfer uses SILENT_REBOOT_TARGET_SERIAL_TRANSFER.
 constexpr uint32_t SILENT_REBOOT_TARGET_OPDS_BROWSER = 9;
 constexpr uint32_t SILENT_REBOOT_TARGET_USB_DRIVE = 10;
+// Boot into File Transfer, on its Calibre Wireless row, after Back left a Calibre
+// session (or the join it starts with), as SILENT_REBOOT_TARGET_FILE_TRANSFER_OPDS does
+// for the OPDS browser.
+constexpr uint32_t SILENT_REBOOT_TARGET_FILE_TRANSFER_CALIBRE = 11;
 // Upper bound for the cold-boot sanity check on silentRebootTarget (RTC_NOINIT is
 // uninitialized on power-up). Must equal the highest target above — keep it in
 // sync when adding one, or the new target silently reads as HOME.
-constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_USB_DRIVE;
+constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_FILE_TRANSFER_CALIBRE;
 constexpr uint32_t HEAP_RECOVERY_RESTART_LATCH_MAGIC = 0x48EA9C01;
 
 // How the device is coming back to life, resolved once at boot. Both resume
@@ -327,6 +331,14 @@ void silentRestartToFileTransferOpds() {
   globalReadingSessionTracker().end();
   armSilentReboot(SILENT_REBOOT_TARGET_FILE_TRANSFER_OPDS);
   LOG_DBG("MAIN", "Silent restart (target=file-transfer-opds)");
+  restartKeepingFlashArea();
+}
+
+void silentRestartToFileTransferCalibre() {
+  if (deepSleepInProgress) return;
+  globalReadingSessionTracker().end();
+  armSilentReboot(SILENT_REBOOT_TARGET_FILE_TRANSFER_CALIBRE);
+  LOG_DBG("MAIN", "Silent restart (target=file-transfer-calibre)");
   restartKeepingFlashArea();
 }
 
@@ -1711,6 +1723,8 @@ void setup() {
     activityManager.goToSettings();
   } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_FILE_TRANSFER_OPDS) {
     activityManager.goToFileTransfer(NetworkMode::OPDS_BROWSER);
+  } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_FILE_TRANSFER_CALIBRE) {
+    activityManager.goToFileTransfer(NetworkMode::CONNECT_CALIBRE);
   } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_OPDS_BROWSER) {
     activityManager.goToBrowser();
   } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_USB_DRIVE) {

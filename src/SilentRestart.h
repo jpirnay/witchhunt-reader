@@ -22,6 +22,8 @@ void silentRestartToFileTransferOpds();  // File Transfer, on its OPDS Browser r
 void silentRestartToOpdsBrowser();
 void silentRestartToSerialTransfer();
 void silentRestartToUsbDrive();
+// File Transfer, on its Calibre Wireless row: where Back from Calibre Wireless leads.
+void silentRestartToFileTransferCalibre();
 
 // One-shot guarded variant for heap-fragmentation recovery: allows only one
 // restart attempt across consecutive silent boots until a non-silent boot

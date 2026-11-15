@@ -12,6 +12,7 @@
 
 #include "MappedInputManager.h"
 #include "NetworkModeSelectionActivity.h"
+#include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
 #include "activities/network/SignalStrengthWidget.h"
@@ -79,7 +80,8 @@ void CrossPointWebServerActivity::onExit() {
 
   state = WebServerActivityState::SHUTTING_DOWN;
   stopDnsServer();
-  session.end();
+  // Every way out of File Transfer's own screens leads Home.
+  session.end(silentRestart);
 }
 
 void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) {

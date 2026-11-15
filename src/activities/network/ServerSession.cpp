@@ -10,7 +10,6 @@
 
 #include "MappedInputManager.h"
 #include "SdCardFontGlobals.h"
-#include "SilentRestart.h"
 #include "activities/NetworkMemoryTrim.h"
 #include "components/TouchExitButton.h"
 
@@ -98,7 +97,7 @@ bool ServerSession::serve(const int rounds) {
   return true;
 }
 
-void ServerSession::end() {
+void ServerSession::end(void (*const restart)()) {
   linkWatch.stop();  // before the disconnect below, a drop of our own making
   server.reset();    // its destructor stops it
   MDNS.end();
@@ -112,5 +111,5 @@ void ServerSession::end() {
     WiFi.disconnect(false);
   }
   delay(30);
-  silentRestart();
+  restart();
 }
