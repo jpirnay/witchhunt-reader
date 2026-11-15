@@ -63,7 +63,7 @@ needs the **Full install** above. The Murphy M3 is not listed there.
 and Volume Up (+) for more than 10 seconds, and it restarts into Onyx's recovery, which has one. **Back up the whole
 flash first** (`esptool read-flash 0 ALL picco-backup.bin`): Onyx's firmware cannot be downloaded anywhere, and that
 backup is the only way back to it. The **Full install** gives the Picco Witch Reader's partition table, with updates
-over Wi-Fi and from the card. Witch Reader also runs on Onyx's own table, as CrossPoint installs it (the firmware at
+over Wi-Fi and from the card, and replaces Onyx's boot loader and recovery. Witch Reader also runs on Onyx's own table, as CrossPoint installs it (the firmware at
 0xE0000, which keeps Onyx's recovery); there it cannot update itself, and an update goes over USB again.
 
 For everything the reader does and how to use it, see the **[User Guide](USER_GUIDE.md)**. How it compares with

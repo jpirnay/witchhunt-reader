@@ -307,7 +307,17 @@ function refresh() {
       const t = state.tableKind;
       const layout = lib.layoutNote(t, state.chip);
       if (layout) {
-        note(dev, layout.level, layout.text);
+        const parts = [layout.text];
+        if (layout.choices) {
+          const list = document.createElement("ul");
+          for (const choice of layout.choices) {
+            const item = document.createElement("li");
+            item.textContent = choice;
+            list.append(item);
+          }
+          parts.push(list);
+        }
+        note(dev, layout.level, ...parts);
       } else if (state.table === undefined) {
         note(dev, "warn", `Partition table: unknown, because ${t.why}. Use the full install.`);
       } else {
@@ -452,6 +462,10 @@ function confirmText(mode, plan) {
       lines.push("", "This replaces the firmware that is on it now. Anything the old firmware kept in the device's " +
         "memory (on original firmware: its Wi-Fi passwords and settings) is lost; the SD card is not touched. " +
         "There is no way back without a backup of the whole flash.");
+      if (state.tableKind.onyx) {
+        lines.push("", "On this Picco that includes Onyx's boot loader and its recovery. Witch Reader then updates " +
+          "itself, over Wi-Fi and from the SD card.");
+      }
     } else {
       lines.push("", "The SD card is not touched.");
     }

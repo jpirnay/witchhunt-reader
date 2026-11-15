@@ -7,7 +7,10 @@
 //   * tables are written as the chip holds them (32-byte entries and the MD5 entry) and read back with
 //     parseTable, then classified against our table;
 //   * an X3/X4 table with a small or no `spiffs` partition is named emergency mode with the device
-//     notice's sizes; the same table on an S3 board is not, since those boards use PSRAM instead.
+//     notice's sizes; the same table on an S3 board is not, since those boards use PSRAM instead;
+//   * Onyx's Picco table (partitions_picco.csv) is recognised, and its note sets out the two choices:
+//     the full install (Onyx's boot loader and recovery replaced, self-updates) or keeping the table
+//     (no self-update, updates over USB).
 //
 //   node test/web/flasher_lib_test.mjs [deps dir]
 // (CI passes the folder with the web tests' libraries; this test needs none.) Exit status 0: every
@@ -30,7 +33,9 @@ function check(ok, what) {
 // ---- Tables -------------------------------------------------------------------------------------
 
 const TYPES = { app: 0x00, data: 0x01 };
-const SUBTYPES = { nvs: 0x02, ota: 0x00, ota_0: 0x10, ota_1: 0x11, spiffs: 0x82, littlefs: 0x83, coredump: 0x03 };
+const SUBTYPES = {
+  nvs: 0x02, ota: 0x00, factory: 0x00, ota_0: 0x10, ota_1: 0x11, spiffs: 0x82, littlefs: 0x83, coredump: 0x03,
+};
 
 // Entries of a partitions.csv-style text.
 function csvEntries(text) {
@@ -107,6 +112,11 @@ check(littlefs.areaBytes === 0, 'a littlefs partition labelled "spiffs" is not t
 const otherApps = k(read(ours.map((e) => (e.label === 'app1' ? { ...e, size: 0x500000 } : e))));
 check(otherApps.kind === 'foreign' && otherApps.areaBytes === lib.AREA_BYTES,
   'other app slots, our area size: foreign');
+const onyx = k(read(csvEntries(fs.readFileSync(path.join(ROOT, 'partitions_picco.csv'), 'utf8'))));
+check(onyx.kind === 'foreign' && onyx.onyx && onyx.areaBytes === 0x80000,
+  "Onyx's Picco table (partitions_picco.csv): foreign, Onyx's, 512 KB of area");
+check(![oursRead, read(withArea(0x100000)), read(withoutArea)].some((t) => k(t).onyx),
+  "neither ours nor the X3/X4 tables read as Onyx's");
 
 // ---- sizeText -----------------------------------------------------------------------------------
 
@@ -138,6 +148,17 @@ for (const [name, note] of [['1 MB', lib.layoutNote(x3, S3)], ['no spiffs', lib.
 const otherAppsOnC3 = lib.layoutNote(otherApps, C3);
 check(has(otherAppsOnC3, 'not Witch Reader', 'Use the full install') && !otherAppsOnC3.text.includes('emergency'),
   'X3/X4, our area size but other app slots: the full install, no emergency mode');
+const onyxNote = lib.layoutNote(onyx, S3);
+check(has(onyxNote, "Onyx's") && onyxNote.choices && onyxNote.choices.length === 2,
+  "Onyx's table: the note sets out two choices");
+check(onyxNote.choices[0].startsWith('Full install') &&
+  ['boot loader', 'recovery', 'over Wi-Fi', 'backup'].every((p) => onyxNote.choices[0].includes(p)),
+  'full install: boot loader and recovery replaced, Wi-Fi updates, the backup as the way back');
+check(onyxNote.choices[1].startsWith("Keeping Onyx's table") &&
+  ['one app slot', 'cannot update itself', 'over USB'].every((p) => onyxNote.choices[1].includes(p)),
+  "keeping Onyx's table: one slot, no self-update, updates over USB");
+check(!onyxNote.text.includes('emergency') && !onyxNote.choices.join(' ').includes('emergency'),
+  "Onyx's table: no emergency mode");
 check(![x3OnC3, noneOnC3, otherAppsOnC3].some((n) => n.text.includes('English')),
   'no note claims the interface stays in English');
 

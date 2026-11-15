@@ -77,10 +77,18 @@ const sameEntry = (a, b) =>
 export const AREA_BYTES = 0x360000;
 const isArea = (e) => e.type === 0x01 && e.subtype === 0x82 && e.label === "spiffs";
 
+// Onyx's BOOX Picco table (partitions_picco.csv): its `safeboot` recovery as the factory app and one
+// OTA slot at 0xE0000. Witch Reader runs on it too ([env:picco_stock]), but cannot update itself there.
+export const ONYX_APP_OFFSET = 0xe0000;
+const isOnyxTable = (entries) =>
+  entries.some((e) => e.type === 0x00 && e.subtype === 0x00 && e.label === "safeboot") &&
+  entries.some((e) => e.type === 0x00 && e.subtype === 0x10 && e.offset === ONYX_APP_OFFSET);
+
 // What the device's table means for an install:
 //   ours:    exactly `ours`, the release's table, which Update only keeps;
 //   foreign: any other valid table: another firmware's, or an old layout of this one. `areaBytes` is
-//            the size of its area partition, 0 when it has none (a stock X4 Pro, issue #733);
+//            the size of its area partition, 0 when it has none (a stock X4 Pro, issue #733); `onyx`
+//            when it is the Picco's stock table;
 //   unknown: no valid table.
 export function classifyTable(entries, ours) {
   if (!entries) return { kind: "unknown", why: "no valid partition table at 0x8000 (empty or foreign flash)" };
@@ -88,7 +96,7 @@ export function classifyTable(entries, ours) {
     return { kind: "ours", why: "Witch Reader's partition table" };
   }
   const area = entries.find(isArea);
-  return { kind: "foreign", why: "not Witch Reader's", areaBytes: area ? area.size : 0 };
+  return { kind: "foreign", why: "not Witch Reader's", areaBytes: area ? area.size : 0, onyx: isOnyxTable(entries) };
 }
 
 // Sizes as the device's emergency notice writes them (FlashLayoutNotice::sizeText): "80 KB", "1.0 MB".
@@ -97,15 +105,33 @@ export function sizeText(bytes) {
 }
 
 // The note on a classified table, or null for an unknown one (the page says why it could not tell).
+// `choices`, when present, are list items that follow `text`.
 // A table with less than AREA_BYTES puts an X3 or X4 (ESP32-C3, no PSRAM) in emergency mode, which
 // the page names in the device notice's words (STR_FLASH_EMERGENCY_*), so that a reader who scanned
 // that notice's QR code finds it here. The S3 boards hold the area in PSRAM instead
-// (lib/hal/FlashArea.cpp) and are never in emergency mode.
+// (lib/hal/FlashArea.cpp) and are never in emergency mode. Onyx's Picco table is a choice rather than
+// a fault: the note sets out what each table means for updates (docs/contributing/board-support.md,
+// "Two partition tables").
 export function layoutNote(tableKind, chip) {
   if (tableKind.kind === "ours") {
     return { level: "ok", text: "Partition table: Witch Reader's. Full install or update only." };
   }
   if (tableKind.kind !== "foreign") return null;
+  if (tableKind.onyx) {
+    return {
+      level: "warn",
+      text: "Partition table: Onyx's, as the Picco comes. Witch Reader runs on it and on its own; Onyx's firmware " +
+        "is replaced either way. What differs is how Witch Reader is updated afterwards:",
+      choices: [
+        "Full install, Witch Reader's table: it updates itself over Wi-Fi and from the SD card, and this page's " +
+          "Update only works. Onyx's boot loader and its recovery, which installs updates from the SD card, are " +
+          "replaced. Only a backup of the whole flash brings them back.",
+        "Keeping Onyx's table: Onyx's boot loader and recovery stay. The table has one app slot, so Witch Reader " +
+          "cannot update itself on it: no update over Wi-Fi or from the SD card. Every update goes over USB again, " +
+          "with an install that writes only the firmware into Onyx's slot; this page does not offer one yet.",
+      ],
+    };
+  }
   const writes = "the full install: it writes Witch Reader's table. Update only would keep this one, so it is not " +
     "offered.";
   if (tableKind.areaBytes >= AREA_BYTES) {
