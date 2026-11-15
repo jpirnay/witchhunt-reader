@@ -490,7 +490,8 @@ async function backup() {
     const a = link(state.backup.url, name);
     a.download = name;
     note(result, "ok", "Saved the whole flash (" + state.flashSize + ", every piece checked against the chip) as ", a,
-      `. SHA-256 ${sha}. Keep it somewhere safe; if the download did not start, save it from that link.`);
+      `. SHA-256 ${sha}. Keep it somewhere safe; if the download did not start, save it from that link. To leave ` +
+      "without writing, press Disconnect: it restarts the device.");
     a.click();
   } catch (e) {
     log("backup: " + (e && e.message ? e.message : e));
@@ -791,10 +792,14 @@ async function start() {
   }
   await loadManifest();
   $("connect").addEventListener("click", connect);
+  // Connected, the device waits in its ROM loader: after a backup, or a look at its table, it
+  // would sit there until reset by hand.
   $("disconnect").addEventListener("click", async () => {
+    setBusy(true);
+    if (state.loader) await restart();
     await dropConnection();
     $("device").replaceChildren();
-    refresh();
+    setBusy(false);
   });
   $("write").addEventListener("click", write);
   $("backup").addEventListener("click", backup);
