@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BuildArena.h>
 #include <Epub.h>
 
 #include <memory>
@@ -38,9 +39,11 @@ class ChapterXPathIndexer {
    * to the codepoint (/text()[N].M) in a block element or inside inline elements; stray text in
    * table rows by its element. Never an image: an offset before one names the text after it, and
    * the chapter's total names the end of its last text node. Empty on failure.
+   * `scratch`, when given, is a lent region (the secondary framebuffer) the parse works in instead of the heap: the
+   * parser's state, the read buffer and the inflate ring, all given back when it returns.
    */
   static std::string findXPathForVisibleOffset(const std::shared_ptr<Epub>& epub, int spineIndex,
-                                               uint32_t visibleOffset);
+                                               uint32_t visibleOffset, BuildArena* scratch = nullptr);
 
   /**
    * Resolve a KOReader XPath to an intra-spine progress ratio.
@@ -67,12 +70,13 @@ class ChapterXPathIndexer {
    *                 /text()[N].M point resolved to the codepoint. An element match, exact or
    *                 not, is anchored at its first direct text or, lacking any, at its END tag
    *                 (a Calibre <p><span>text</span></p>), which is no page start.
+   * @param scratch Optional. A lent region for the parse, as for findXPathForVisibleOffset.
    * @return true if any match was resolved; false means caller should fallback
    */
   static bool findProgressForXPath(const std::shared_ptr<Epub>& epub, int spineIndex, const std::string& xpath,
                                    float& outIntraSpineProgress, bool& outExactMatch,
                                    uint16_t* outListItemIndex = nullptr, uint32_t* outVisibleOffset = nullptr,
-                                   bool* outIsTextPoint = nullptr);
+                                   bool* outIsTextPoint = nullptr, BuildArena* scratch = nullptr);
 
   /**
    * Parse DocFragment index from KOReader-style path segment:

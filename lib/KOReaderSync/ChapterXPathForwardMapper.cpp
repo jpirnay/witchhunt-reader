@@ -190,18 +190,20 @@ namespace {
 // instead of the one that contains it. `atChapterEnd` reports a pass that found nothing because
 // the target is the chapter's own total: the parse completed and counted exactly that many bytes.
 std::string visibleOffsetPass(const std::shared_ptr<Epub>& epub, const int spineIndex, const uint32_t visibleOffset,
-                              const bool inclusive, bool& atChapterEnd) {
+                              const bool inclusive, bool& atChapterEnd, BuildArena* const scratch) {
   atChapterEnd = false;
   ForwardState state(spineIndex, visibleOffset);
   state.inclusive = inclusive;
   state.textPointsInBlocks = true;
+  const PassScratch pass(scratch);
   SaxParser saxParser;
+  pass.placeState(saxParser);
   if (!saxParser.init(&state, parserStartCb<ForwardState>, parserEndCb<ForwardState>, parserCharCb<ForwardState>,
                       parserDefaultCb<ForwardState>, /*htmlVoidTagRepair=*/true, SaxParser::Profile::Lean)) {
     return "";
   }
   state.saxParser = &saxParser;
-  const bool completed = streamSpine(epub, spineIndex, saxParser);
+  const bool completed = streamSpine(epub, spineIndex, saxParser, pass.arena());
   atChapterEnd = completed && state.result.empty() && state.totalTextBytes == visibleOffset;
   return state.result;
 }
@@ -209,16 +211,16 @@ std::string visibleOffsetPass(const std::shared_ptr<Epub>& epub, const int spine
 }  // namespace
 
 std::string findXPathForVisibleOffsetInternal(const std::shared_ptr<Epub>& epub, const int spineIndex,
-                                              const uint32_t visibleOffset) {
+                                              const uint32_t visibleOffset, BuildArena* const scratch) {
   bool atChapterEnd = false;
-  std::string result = visibleOffsetPass(epub, spineIndex, visibleOffset, /*inclusive=*/false, atChapterEnd);
+  std::string result = visibleOffsetPass(epub, spineIndex, visibleOffset, /*inclusive=*/false, atChapterEnd, scratch);
   // A page that starts at the chapter's total (a last page holding only an image or spacing) has no
   // text at or after its start, and the fraction fallback would land early. Name the end of the
   // last text node instead: the inclusive pass picks the chunk that ends there, and one past its
   // last visible byte is its collapsed count. The passes run one after the other, never together.
   if (result.empty() && atChapterEnd && visibleOffset > 0) {
     bool unused = false;
-    result = visibleOffsetPass(epub, spineIndex, visibleOffset, /*inclusive=*/true, unused);
+    result = visibleOffsetPass(epub, spineIndex, visibleOffset, /*inclusive=*/true, unused, scratch);
   }
   LOG_DBG("KOX", "Forward: spine=%d offset=%u -> %s", spineIndex, visibleOffset,
           result.empty() ? "(not found)" : result.c_str());
