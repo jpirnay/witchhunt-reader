@@ -4,7 +4,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <string>
+#include <vector>
 
 #include "BookCacheLog.h"
 #include "BookRelocation.h"
@@ -187,6 +189,42 @@ TEST_F(WebDAVHandlerTest, CopyFailingOverAFileKeepsIt) {
   EXPECT_EQ(request(HTTP_COPY, "/Books/big.epub", nullptr, "http://reader.local/Books/old.epub").code, 500);
   EXPECT_EQ(Storage.content("/Books/old.epub"), "old book");
   EXPECT_FALSE(Storage.exists("/Books/old.epub.davtmp"));
+  EXPECT_TRUE(clearedBookCaches().empty());  // the book that stays keeps its cache
+}
+
+// A book copied over another kept the other's cache: its position, bookmarks and laid-out chapters, for different
+// bytes. A PUT clears what was kept for the path it writes, and so does a COPY now.
+TEST_F(WebDAVHandlerTest, CopyOverABookClearsItsCache) {
+  Storage.put("/Books/old.epub", "old book");
+  EXPECT_EQ(request(HTTP_COPY, "/Books/novel.epub", nullptr, "http://reader.local/Books/old.epub").code, 204);
+  EXPECT_EQ(Storage.content("/Books/old.epub"), "novel bytes");
+  EXPECT_EQ(clearedBookCaches(), std::vector<std::string>{"/Books/old.epub"});  // the source keeps its own
+}
+
+TEST_F(WebDAVHandlerTest, CopyClearsWhatWasKeptForANewPath) {
+  EXPECT_EQ(request(HTTP_COPY, "/Books/novel.epub", nullptr, "http://reader.local/Books/copy.epub").code, 201);
+  EXPECT_EQ(clearedBookCaches(), std::vector<std::string>{"/Books/copy.epub"});
+}
+
+// What COPY now matches.
+TEST_F(WebDAVHandlerTest, PutClearsTheBookCache) {
+  for (const char* uri : {"/Books/novel.epub", "/Books/new.epub"}) {
+    clearedBookCaches().clear();
+    server.setRequest(HTTP_PUT, uri);
+    HTTPRaw raw;
+    raw.status = RAW_START;
+    handler.raw(server, server.uri(), raw);
+    raw.status = RAW_WRITE;
+    raw.currentSize = 3;
+    std::memcpy(raw.buf, "new", 3);
+    handler.raw(server, server.uri(), raw);
+    raw.status = RAW_END;
+    handler.raw(server, server.uri(), raw);
+    handler.handle(server, HTTP_PUT, server.uri());
+    EXPECT_EQ(server.code / 100, 2) << uri;
+    EXPECT_EQ(Storage.content(uri), "new") << uri;
+    EXPECT_EQ(clearedBookCaches(), std::vector<std::string>{uri}) << uri;
+  }
 }
 
 TEST_F(WebDAVHandlerTest, CopyRefusesProtectedEnds) {

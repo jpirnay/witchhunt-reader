@@ -674,6 +674,10 @@ void WebDAVHandler::handleCopy(WebServer& s) {
   if (!dstFile.close()) copyOk = false;
 
   if (copyOk && FileReplace::replace(tempPath.c_str(), dstPath.c_str())) {
+    // As after a PUT: what the reader kept for a book at this path (position, bookmarks, laid-out
+    // chapters) is not about these bytes. A book copied over another used to keep the other's.
+    // Ported from crosspoint-reader PR #4472 by Justin Mitchell (@itsthisjustin).
+    clearEpubCacheIfNeeded(dstPath);
     s.send(dstExists ? 204 : 201);
   } else {
     Storage.remove(tempPath.c_str());
