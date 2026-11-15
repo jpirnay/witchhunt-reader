@@ -94,7 +94,13 @@ void SyncTimeActivity::onWifiSelectionComplete(bool success) {
   performSync();
 }
 
-void SyncTimeActivity::onWifiSelectionCancelled() { finish(); }
+// The join screen brought the radio up (station mode, a scan) before it was backed out of. That
+// is a WiFi session like any other, so onExit() restarts into Clock settings, where Back leads,
+// instead of turning the radio off and carrying on.
+void SyncTimeActivity::onWifiSelectionCancelled() {
+  wifiWasUsed_ = true;
+  finish();
+}
 
 void SyncTimeActivity::performSync() {
   wifiWasUsed_ = true;

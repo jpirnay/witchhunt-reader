@@ -232,11 +232,17 @@ class SecureHttpClient {
   // Send the request line + headers (+ body for POST/PUT), with the credentials only when told to.
   // Returns false on write failure.
   bool sendRequest(const char* method, const Url& u, const uint8_t* body, size_t bodyLen, bool credentials);
-  // Read status line + headers into meta (status, body framing, Location, Content-Range).
+  // Read status line + headers into meta (status, body framing, Location, Content-Range), of the
+  // final response: interim ones (1xx but 101) before it are read past.
   bool readHeaders(ResponseMeta& meta);
+  // One response's status line and header block, by `deadline`.
+  bool readResponseHead(ResponseMeta& meta, uint32_t deadline);
   // Stream the body per framing to sink (with progress). Returns 0 on success,
   // or a negative SecureHttpError.
   int readBody(const BodySink& sink, const ProgressFn& progress, long contentLength, bool chunked, bool keepAlive);
+  // A response that carries no body (hasNoBody() in the .cpp) is over with its headers: keeps or
+  // closes the connection as for a read body, and returns the status.
+  int endBodiless(const ResponseMeta& meta);
 
   // How a readLine() ended. Overlong: the line ended, but only its first MAX_LINE bytes are in `line`
   // and the rest was read past. Kept apart from Complete so each caller decides whether a cut line

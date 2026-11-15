@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <HalStorage.h>
+#include <JsonFile.h>
 #include <Logging.h>
 
 WeatherSettingsStore WeatherSettingsStore::instance;
@@ -23,9 +24,7 @@ bool WeatherSettingsStore::saveToFile() const {
   doc["precipUnit"] = static_cast<uint8_t>(precipUnit);
   doc["forecastDays"] = forecastDays;
 
-  String json;
-  serializeJson(doc, json);
-  return Storage.writeFile(WEATHER_SETTINGS_FILE, json);
+  return JsonFile::save("WEA", WEATHER_SETTINGS_FILE, doc);
 }
 
 bool WeatherSettingsStore::loadFromFile() {

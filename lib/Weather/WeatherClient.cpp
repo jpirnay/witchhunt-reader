@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <HalStorage.h>
+#include <JsonFile.h>
 #include <Logging.h>
 #include <TlsPolicy.h>  // for HttpDownloader.h below: names lib/SecureNet to PlatformIO's LDF
 
@@ -276,9 +277,7 @@ bool WeatherClient::saveCache(const WeatherData& data) {
     h["isDay"] = hour.isDay;
   }
 
-  String json;
-  serializeJson(doc, json);
-  return Storage.writeFile(WEATHER_CACHE_FILE, json);
+  return JsonFile::save("WEA", WEATHER_CACHE_FILE, doc);
 }
 
 bool WeatherClient::loadCache(WeatherData& data) {

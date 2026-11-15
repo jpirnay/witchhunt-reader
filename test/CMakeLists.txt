@@ -343,6 +343,8 @@ add_subdirectory(file_browser_model)
 add_subdirectory(bitmap_rows)
 add_subdirectory(progress_comparison)
 add_subdirectory(kosync_progress_reply)
+# After kosync_progress_reply: links the ArduinoJson target it fetches.
+add_subdirectory(json_file)
 add_subdirectory(library_index)
 add_subdirectory(xtc_parser)
 add_subdirectory(usb_link_debounce)

@@ -6,6 +6,7 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <JpegToBmpConverter.h>
+#include <JsonFile.h>
 #include <Logging.h>
 #include <OpdsStream.h>
 #include <OpenSearchDescription.h>
@@ -238,10 +239,8 @@ void saveOpdsDiscovery(const std::string& serverUrl, const std::string& searchTe
     obj["h"] = href;
   }
 
-  String json;
-  serializeJson(doc, json);
   const std::string path = opdsDiscoveryPath(serverUrl);
-  if (!Storage.writeFile(path.c_str(), json)) {
+  if (!JsonFile::save("OPDS", path.c_str(), doc)) {
     LOG_ERR("OPDS", "Failed to save discovery cache: %s", path.c_str());
   } else {
     LOG_DBG("OPDS", "Saved discovery cache: %zu nav entries, search=%s", navEntries.size(),
