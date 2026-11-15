@@ -635,6 +635,7 @@ bool HalFile::getCreateDateTime(uint16_t* pdate, uint16_t* ptime) {
   HAL_FILE_WRAPPED_CALL(getCreateDateTime, pdate, ptime);
 }
 bool HalFile::isDirectory() const { HAL_FILE_FORWARD_CALL(isDirectory, ); }  // already thread-safe, no need to wrap
+uint32_t HalFile::dirIndex() const { HAL_FILE_WRAPPED_CALL(dirIndex, ); }
 void HalFile::rewindDirectory() { HAL_FILE_WRAPPED_CALL(rewindDirectory, ); }
 bool HalFile::close() { HAL_FILE_WRAPPED_CALL(close, ); }
 bool HalFile::detectContiguous() { HAL_FILE_WRAPPED_CALL(contiguousRange, nullptr, nullptr); }
