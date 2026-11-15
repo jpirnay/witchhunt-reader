@@ -52,6 +52,17 @@ constexpr bool ntpDueBeforeSync(const Source source, const time_t now, const tim
   return age < 0 || age >= minInterval;
 }
 
+/// Whether a stamp taken at `stampedAt` is known to be less than `maxAge` old: the clock is authoritative now and the
+/// age is in [0, maxAge). A software clock measures the age against itself, and after a cold boot it comes back from
+/// NVS at the epoch saved before power-off, so a stamp hours old reads as minutes old. A stamp from a clock that was
+/// behind (an NVS restore is a lower bound) only makes the age look larger. Unknown (0) and future stamps are not
+/// fresh.
+constexpr bool knownFresh(const Source source, const time_t now, const time_t stampedAt, const time_t maxAge) {
+  if (!datesAuthoritative(source, now) || stampedAt <= 0) return false;
+  const time_t age = now - stampedAt;
+  return age >= 0 && age < maxAge;
+}
+
 /// For the log: "restored from NVS".
 constexpr const char* describe(const Source source) {
   switch (source) {

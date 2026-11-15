@@ -1,6 +1,7 @@
 #include "WeatherActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <WeatherClient.h>
@@ -234,8 +235,6 @@ void WeatherActivity::onExit() {
 }
 
 void WeatherActivity::loadAndDisplay() {
-  constexpr long CACHE_REFRESH_AGE_SECONDS = 30L * 60L;
-
   if (!WEATHER_SETTINGS.hasLocation()) {
     state = State::ERROR;
     errorMessage = tr(STR_WEATHER_NO_LOCATION);
@@ -246,16 +245,17 @@ void WeatherActivity::loadAndDisplay() {
   // Try cache first
   WeatherData cached = WeatherClient::getWeather(WEATHER_SETTINGS, forceRefresh);
   if (cached.valid) {
+    // Skip the WiFi round only when the clock can vouch for the age (issue #212): on a board without an RTC the
+    // clock may have come back from NVS hours behind, and an old forecast would read as minutes old.
     const time_t now = time(nullptr);
-    const long age = (cached.fetchedAt > 0) ? static_cast<long>(now - cached.fetchedAt) : -1;
-    const bool cacheIsStale = (age >= 0 && age > CACHE_REFRESH_AGE_SECONDS) || age < 0;
-    const bool shouldBackgroundRefresh = forceRefresh || cacheIsStale;
+    const auto clockSource = HalClock::source();
+    const bool cacheIsFresh =
+        clock_authority::knownFresh(clockSource, now, cached.fetchedAt, WeatherClient::CACHE_TTL_SECONDS);
+    const bool shouldBackgroundRefresh = forceRefresh || !cacheIsFresh;
 
-    if (cacheIsStale) {
-      LOG_DBG("WEA", "Displayed stale cache (age=%ld s); scheduling refresh", age);
-    } else {
-      LOG_DBG("WEA", "Displayed fresh cache (age=%ld s); skip auto-refresh", age);
-    }
+    LOG_DBG("WEA", "Displayed %s cache (age=%ld s, clock %s); %s", cacheIsFresh ? "fresh" : "stale",
+            static_cast<long>(now - cached.fetchedAt), clock_authority::describe(clockSource),
+            shouldBackgroundRefresh ? "scheduling refresh" : "skip auto-refresh");
 
     weatherData = std::move(cached);
     state = State::WEATHER_DISPLAY;

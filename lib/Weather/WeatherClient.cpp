@@ -91,15 +91,7 @@ WeatherData WeatherClient::getWeather(const WeatherSettingsStore& settings, bool
         LOG_DBG("WEA", "Ignoring cache with mismatched request signature");
         Storage.remove(WEATHER_CACHE_FILE);
       } else {
-        time_t now;
-        time(&now);
-        if (now - cached.fetchedAt < CACHE_TTL_SECONDS) {
-          LOG_DBG("WEA", "Using cached weather data (age: %ld s)", (long)(now - cached.fetchedAt));
-          return cached;
-        }
-        LOG_DBG("WEA", "Cache expired (age: %ld s)", (long)(now - cached.fetchedAt));
-        // Cache-first behavior: return stale cache and let the caller decide
-        // whether/when to perform a network refresh.
+        // Cache-first: the caller judges the age, because only it knows whether the clock can be trusted.
         return cached;
       }
     }
