@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -54,9 +56,32 @@ class SdCardFontRegistry {
   // scanned after the primary; primary wins on family-name conflicts.
   static constexpr const char* FONTS_DIR_UPSTREAM_HIDDEN = "/.fonts";
   static constexpr const char* FONTS_DIR_UPSTREAM_VISIBLE = "/fonts";
+  static constexpr const char* const kRoots[] = {FONTS_DIR, FONTS_DIR_UPSTREAM_HIDDEN, FONTS_DIR_UPSTREAM_VISIBLE};
 
-  // Scan SD card, populate families_. Returns true if any families found.
+  // Reads its families from `roots`, in that order: the card's three by default, a folder of their own in host tests.
+  explicit SdCardFontRegistry(const char* const* roots = kRoots, uint8_t rootCount = 3)
+      : roots_(roots), rootCount_(rootCount) {}
+  SdCardFontRegistry(const SdCardFontRegistry&) = delete;
+  SdCardFontRegistry& operator=(const SdCardFontRegistry&) = delete;
+
+  // Reads the list from the card again. True if it holds any family.
   bool discover();
+  // The list is read when first asked for (getFamilies(), findFamily(), getFamilyIndex(), getFamilyCount()) and kept
+  // until release(). It cost the X3 ~12 KB of heap and 0.75 s of its boot for 23 families (2026-11-15), and a book
+  // needs only the families it draws: SdCardFontSystem reads those one at a time (findOnCard) and drops the list at
+  // each activity change. Under the render lock with no other task in the list, as at an activity change.
+  void release();
+  // The list is in memory: asking for it reads nothing.
+  bool listed() const { return listed_.load(std::memory_order_acquire); }
+  // Rises at each discover(), the read an install or a removal asks for: a family read from the card before a rise may
+  // be out of date. The read on first use leaves it.
+  uint32_t generation() const { return generation_.load(std::memory_order_acquire); }
+  // The family `name` as the list would hold it, read from its folder alone: the first root with a family of that
+  // name, by the rules the list is read by. False, `family` emptied, when the list would have none of that name.
+  bool findOnCard(const char* name, SdCardFontFamilyInfo& family) const;
+  // Calls `visit(ctx, name)` for each folder the list is read from, until it returns false, and reads no file: a folder
+  // that holds no font the reader draws is visited too. A name more than one root holds comes once per root.
+  void forEachFamilyFolder(bool (*visit)(void* ctx, const char* name), void* ctx) const;
 
   // Asked at discovery whether a TTF family with these styles can be installed, from their file sizes and their
   // SD-mode blocks' (ttf::FileProbe::sdBytes); one that cannot is not listed, since picking it would only fall back to
@@ -66,7 +91,7 @@ class SdCardFontRegistry {
 
   // One family directory outside the fonts roots (a book's embedded fonts, see BookFonts), read as discover()
   // reads one; `family.name` is left to the caller. False when it holds no family the reader can draw.
-  bool scanFamily(const char* dirPath, SdCardFontFamilyInfo& family) {
+  bool scanFamily(const char* dirPath, SdCardFontFamilyInfo& family) const {
     family.files.clear();
     scanDirectory(dirPath, family);
     return !family.files.empty();
@@ -84,18 +109,63 @@ class SdCardFontRegistry {
   // draws. The web upload asks before an uploaded file replaces one.
   static bool drawsOutlineFile(const char* path);
 
-  const std::vector<SdCardFontFamilyInfo>& getFamilies() const { return families_; }
+  const std::vector<SdCardFontFamilyInfo>& getFamilies() const {
+    ensureListed();
+    return families_;
+  }
   const SdCardFontFamilyInfo* findFamily(const std::string& name) const;
   int getFamilyIndex(const std::string& name) const;
-  int getFamilyCount() const { return static_cast<int>(families_.size()); }
+  int getFamilyCount() const { return static_cast<int>(getFamilies().size()); }
+
+  // The families' names in the list's order, kept past release(): the settings rows, the reader menu and the reader
+  // bars count and label their font options by them alone (~0.4 KB for 23 families, against ~12 KB for the list), so a
+  // menu opened in a book does not read the list again. Read with the list, and again with each read of it; asked for
+  // first, the list is read for them and not kept.
+  uint8_t nameCount() const {
+    ensureNamed();
+    return static_cast<uint8_t>(nameOffsets_.size());
+  }
+  // Family `i`'s name, "" past the end. Valid until discover(): a read of the list on first use keeps the names it
+  // finds, which are the same while the card is.
+  const char* name(uint8_t i) const {
+    ensureNamed();
+    return i < nameOffsets_.size() ? names_.c_str() + nameOffsets_[i] : "";
+  }
+  // The index of the family called `name`, -1 when there is none.
+  int nameIndex(const char* name) const;
+  // Takes the names' room now, at boot: read later into blocks of their own, they split the largest free block for
+  // good (X3: Home's 61,428 B one fell to 49,140 B after a visit to the font picker, 2026-11-16). More names than it
+  // holds grow it then.
+  void reserveNames(size_t bytes, size_t count) const {
+    names_.reserve(bytes);
+    nameOffsets_.reserve(count);
+  }
 
  private:
-  std::vector<SdCardFontFamilyInfo> families_;  // sorted alphabetically
+  const char* const* roots_;
+  uint8_t rootCount_;
+  // Read on first use, so mutable: the list is what the card holds, whoever asks first.
+  mutable std::vector<SdCardFontFamilyInfo> families_;  // sorted alphabetically
+  mutable std::atomic<bool> listed_{false};
+  mutable std::atomic<uint32_t> generation_{0};
+  mutable std::mutex mutex_;  // the first use, from the loop or the render task
+  // name(): the names one after another, each with its NUL, and where each starts.
+  mutable std::string names_;
+  mutable std::vector<uint16_t> nameOffsets_;
+  mutable std::atomic<bool> named_{false};
 
+  void ensureListed() const;
+  void ensureNamed() const {
+    if (!named_.load(std::memory_order_acquire)) readNames();
+  }
+  void readNames() const;
+  // With mutex_ held: families_ read from the card, and the names when there are none yet or `rename` (discover()).
+  // `keep`: the list is in memory from here (listed()), else families_ is emptied again before anyone else may look.
+  void readList(bool keep, bool rename) const;
   static bool parseFilename(const char* filename, uint8_t& size, uint8_t& style);
-  void scanDirectory(const char* dirPath, SdCardFontFamilyInfo& family);
+  void scanDirectory(const char* dirPath, SdCardFontFamilyInfo& family) const;
   void addTtfFiles(const char* dirPath, const std::vector<std::string>& names, const std::vector<uint32_t>& bytes,
                    SdCardFontFamilyInfo& family) const;
   TtfFits ttfFits_ = nullptr;
-  void scanRoot(const char* rootPath);
+  void scanRoot(const char* rootPath) const;
 };

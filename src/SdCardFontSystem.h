@@ -4,7 +4,9 @@
 #include <SdCardFontManager.h>
 #include <SdCardFontRegistry.h>
 
+#include <atomic>
 #include <functional>
+#include <mutex>
 #include <string>
 
 #include "ReaderFontSizes.h"
@@ -22,13 +24,20 @@ class SdCardFontSystem {
   SdCardFontSystem() = default;
   SdCardFontSystem(const SdCardFontSystem&) = delete;
   SdCardFontSystem& operator=(const SdCardFontSystem&) = delete;
-  /// begin() has run: the SD families are known. The boot straight into USB Transfer skips it.
-  bool discovered() const { return discovered_; }
-  /// Discover SD card fonts only. Call once during setup.
+  /// begin() has run: the SD families can be read from the card. The boot straight into USB Transfer skips it.
+  bool ready() const { return ready_; }
+  /// Installs the hooks the fonts need. Call once during setup. It reads nothing from the card: the family list is read
+  /// when first asked for (registry()), and a book reads only the families it draws (findFamily()).
   ///
   /// SD font payloads are loaded lazily on reader entry (ensureLoaded*) and
   /// should be unloaded when leaving reader activities.
   void begin(GfxRenderer& renderer);
+  /// Drops the family list at an activity change, under its exclusive render lock: a screen that shows the families
+  /// reads it again. The families a book read one at a time stay, unless an install has changed the card since or there
+  /// is no room for another.
+  void releaseFamilyList();
+  /// A family of that name is on the card, or the open book's (see findFamily()).
+  bool hasFamily(const char* name) const { return findFamily(name) != nullptr; }
 
   /// Ensure the correct SD font family is loaded for the current settings.
   /// Call before entering the reader or after settings change.
@@ -174,14 +183,27 @@ class SdCardFontSystem {
   /// blocks out in them (Accents, All Text); else nullptr.
   const BookFonts::Families* bookFontFamiliesFor(const std::string& cachePath) const;
 
-  /// Access the registry (e.g. for settings UI to enumerate available fonts).
+  /// Access the registry (e.g. for settings UI to enumerate available fonts). Its list is read from the card when first
+  /// asked for and dropped by releaseFamilyList().
   SdCardFontRegistry& registry() { return registry_; }
   const SdCardFontRegistry& registry() const { return registry_; }
 
  private:
-  bool discovered_ = false;
-  // A family on the card, or one of the book's.
+  bool ready_ = false;
+  // A family on the card, or one of the book's. With the family list in memory its record; else lookUp().
   const SdCardFontFamilyInfo* findFamily(const char* name) const;
+  // The family `name` from lookedUp_, read from the card the first time it is asked for (registry_.findOnCard).
+  const SdCardFontFamilyInfo* lookUp(const char* name) const;
+
+  // The families findFamily() read from the card while the list was not in memory: a book's font, the TXT font, a
+  // regional sibling, the Noto family of a script, and the names asked for and not found there (no files). Kept across
+  // books, so a folder is read once and not at every open. Never moved, so what findFamily() returned stays valid until
+  // releaseFamilyList() empties them. Eight cover a book's names; with all taken, the list answers.
+  static constexpr uint8_t kLookedUp = 8;
+  mutable SdCardFontFamilyInfo lookedUp_[kLookedUp];
+  mutable std::atomic<uint8_t> lookedUpCount_{0};
+  mutable uint32_t lookedUpGeneration_ = 0;  // the list's generation they were read at
+  mutable std::mutex lookedUpMutex_;         // a read from the loop or the render task
   // Reads a book family's directory as a family directory on the card, named "book:<name>"; else empties `family`.
   void scanBookFamily(SdCardFontFamilyInfo& family, const std::string& name, const std::string& dir);
 

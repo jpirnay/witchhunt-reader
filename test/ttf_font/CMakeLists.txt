@@ -4,6 +4,7 @@ add_executable(TtfFontTest
   TtfFamilyTest.cpp
   TtfFontTest.cpp
   TtfRegistryTest.cpp
+  RegistryOnDemandTest.cpp
   TtfOpenTypeTest.cpp
   TtfMapsCodepointTest.cpp
   TtfShapingTest.cpp

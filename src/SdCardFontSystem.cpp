@@ -141,15 +141,14 @@ int resolveSdCardFontId(const char* familyName, uint8_t pointSize) {
 // consult sdFontSystem at every call. enumLabels is enriched lazily by the
 // consumers (SettingsActivity, CrossPointWebServer) before each iteration.
 
+// The options are counted and labelled by the families' names alone (SdCardFontRegistry::name()), which outlast the
+// family list: the reader menu and the reader bars build their font rows at every open.
 namespace {
 // The option of the SD family called `name`, or -1 when there is none of that name on the card (removed?).
 int sdFamilyOption(const char* name) {
   if (!name || name[0] == '\0') return -1;
-  const auto& families = sdFontSystem.registry().getFamilies();
-  for (size_t i = 0; i < families.size(); i++) {
-    if (families[i].name == name) return static_cast<int>(CrossPointSettings::BUILTIN_FONT_COUNT + i);
-  }
-  return -1;
+  const int index = sdFontSystem.registry().nameIndex(name);
+  return index < 0 ? -1 : CrossPointSettings::BUILTIN_FONT_COUNT + index;
 }
 }  // namespace
 
@@ -171,16 +170,12 @@ void fontFamilyOverridesForOption(const uint8_t value, int8_t& builtinOverride, 
     builtinOverride = static_cast<int8_t>(value);
     return;
   }
-  const auto& families = sdFontSystem.registry().getFamilies();
-  const size_t sdIdx = value - CrossPointSettings::BUILTIN_FONT_COUNT;
-  if (sdIdx < families.size()) sdOverride = families[sdIdx].name;
+  sdOverride = sdFontSystem.registry().name(static_cast<uint8_t>(value - CrossPointSettings::BUILTIN_FONT_COUNT));
 }
 
 const char* fontFamilyOptionSdName(const uint8_t value) {
-  const auto& families = sdFontSystem.registry().getFamilies();
-  const size_t sdIdx =
-      value < CrossPointSettings::BUILTIN_FONT_COUNT ? families.size() : value - CrossPointSettings::BUILTIN_FONT_COUNT;
-  return sdIdx < families.size() ? families[sdIdx].name.c_str() : "";
+  if (value < CrossPointSettings::BUILTIN_FONT_COUNT) return "";
+  return sdFontSystem.registry().name(static_cast<uint8_t>(value - CrossPointSettings::BUILTIN_FONT_COUNT));
 }
 
 void fontFamilyDynamicSetter(void* /*ctx*/, uint8_t value) {
@@ -189,10 +184,9 @@ void fontFamilyDynamicSetter(void* /*ctx*/, uint8_t value) {
     SETTINGS.sdFontFamilyName[0] = '\0';
     return;
   }
-  const auto& families = sdFontSystem.registry().getFamilies();
-  uint8_t sdIdx = value - CrossPointSettings::BUILTIN_FONT_COUNT;
-  if (sdIdx < families.size()) {
-    strncpy(SETTINGS.sdFontFamilyName, families[sdIdx].name.c_str(), sizeof(SETTINGS.sdFontFamilyName) - 1);
+  const uint8_t sdIdx = value - CrossPointSettings::BUILTIN_FONT_COUNT;
+  if (sdIdx < sdFontSystem.registry().nameCount()) {
+    strncpy(SETTINGS.sdFontFamilyName, sdFontSystem.registry().name(sdIdx), sizeof(SETTINGS.sdFontFamilyName) - 1);
     SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
   }
 }
@@ -210,28 +204,26 @@ void txtFontFamilyDynamicSetter(void* /*ctx*/, uint8_t value) {
     SETTINGS.txtSdFontFamilyName[0] = '\0';
     return;
   }
-  const auto& families = sdFontSystem.registry().getFamilies();
-  uint8_t sdIdx = value - CrossPointSettings::BUILTIN_FONT_COUNT;
-  if (sdIdx < families.size()) {
-    strncpy(SETTINGS.txtSdFontFamilyName, families[sdIdx].name.c_str(), sizeof(SETTINGS.txtSdFontFamilyName) - 1);
+  const uint8_t sdIdx = value - CrossPointSettings::BUILTIN_FONT_COUNT;
+  if (sdIdx < sdFontSystem.registry().nameCount()) {
+    strncpy(SETTINGS.txtSdFontFamilyName, sdFontSystem.registry().name(sdIdx),
+            sizeof(SETTINGS.txtSdFontFamilyName) - 1);
     SETTINGS.txtSdFontFamilyName[sizeof(SETTINGS.txtSdFontFamilyName) - 1] = '\0';
   }
 }
 
 uint8_t fontFamilyOptionCount() {
-  return static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + sdFontSystem.registry().getFamilies().size());
+  return static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + sdFontSystem.registry().nameCount());
 }
 
-bool fontFamilyOptionsKnown() { return sdFontSystem.discovered(); }
+bool fontFamilyOptionsKnown() { return sdFontSystem.ready(); }
 
 std::string fontFamilyOptionLabel(uint8_t i) {
   if (i < CrossPointSettings::BUILTIN_FONT_COUNT) {
     static const StrId BUILTIN_LABELS[] = {StrId::STR_SERIF, StrId::STR_NOTO_SANS};
     return I18N.get(BUILTIN_LABELS[i]);
   }
-  const auto& families = sdFontSystem.registry().getFamilies();
-  uint8_t sdIdx = i - CrossPointSettings::BUILTIN_FONT_COUNT;
-  return sdIdx < families.size() ? families[sdIdx].name : std::string();
+  return sdFontSystem.registry().name(static_cast<uint8_t>(i - CrossPointSettings::BUILTIN_FONT_COUNT));
 }
 
 // --- Font-size dynamic SettingInfo trampolines ---
@@ -298,12 +290,56 @@ const SdCardFontFamilyInfo* SdCardFontSystem::findFamily(const char* name) const
   for (const SdCardFontFamilyInfo& accent : bookAccents_) {
     if (accent.name == name) return &accent;
   }
+  if (!registry_.listed()) return lookUp(name);
   // Names compared in place: the registry's findFamily() takes a std::string, and this runs while pages are
   // laid out, where building one for a long family name would allocate.
   for (const auto& family : registry_.getFamilies()) {
     if (family.name == name) return &family;
   }
   return nullptr;
+}
+
+const SdCardFontFamilyInfo* SdCardFontSystem::lookUp(const char* name) const {
+  const auto known = [this, name](const uint8_t count, const SdCardFontFamilyInfo*& family) {
+    for (uint8_t i = 0; i < count; ++i) {
+      if (lookedUp_[i].name != name) continue;
+      family = lookedUp_[i].files.empty() ? nullptr : &lookedUp_[i];
+      return true;
+    }
+    return false;
+  };
+  const SdCardFontFamilyInfo* family = nullptr;
+  if (known(lookedUpCount_.load(std::memory_order_acquire), family)) return family;
+  const std::lock_guard<std::mutex> guard(lookedUpMutex_);
+  const uint8_t count = lookedUpCount_.load(std::memory_order_relaxed);
+  if (known(count, family)) return family;  // read meanwhile by the other task
+  if (count == kLookedUp) {
+    LOG_DBG("SDFS", "%u families read one at a time; the list answers for %s", static_cast<unsigned>(kLookedUp), name);
+    return registry_.findFamily(name);
+  }
+  SdCardFontFamilyInfo& slot = lookedUp_[count];
+  const unsigned long startMs = millis();
+  const bool found = registry_.findOnCard(name, slot);
+  slot.name = name;  // a name not on the card is kept too, with no files: it is not looked for again
+  lookedUpCount_.store(static_cast<uint8_t>(count + 1), std::memory_order_release);
+  LOG_DBG("SDFS", "Family %s read from the card: %u files, %lu ms", name, static_cast<unsigned>(slot.files.size()),
+          millis() - startMs);
+  return found ? &slot : nullptr;
+}
+
+void SdCardFontSystem::releaseFamilyList() {
+  registry_.release();
+  const std::lock_guard<std::mutex> guard(lookedUpMutex_);
+  const uint8_t count = lookedUpCount_.load(std::memory_order_relaxed);
+  // An install since they were read may have changed a family (FontInstaller reads the list again); with all taken,
+  // the families of the next book find room.
+  if (count < kLookedUp && lookedUpGeneration_ == registry_.generation()) return;
+  for (uint8_t i = 0; i < count; ++i) {
+    lookedUp_[i].name.clear();
+    std::vector<SdCardFontFileInfo>().swap(lookedUp_[i].files);
+  }
+  lookedUpCount_.store(0, std::memory_order_release);
+  lookedUpGeneration_ = registry_.generation();
 }
 
 void SdCardFontSystem::scanBookFamily(SdCardFontFamilyInfo& family, const std::string& name, const std::string& dir) {
@@ -470,16 +506,20 @@ void SdCardFontSystem::setReaderLanguagePending() {
 bool SdCardFontSystem::waitsForReaderLanguage() const {
   if (readerCjkRegion_ != ReaderCjkRegion::Pending) return false;
   // The language may give the book a regional sibling, or a Noto CJK family in place of a font without its script,
-  // whenever one is installed.
-  std::string stem;
-  for (const auto& installed : registry_.getFamilies()) {
-    if (familyRegion(installed.name, stem) != ReaderCjkRegion::None) return true;
-    if (isIndicFamily(installed.name) || isArabicFamily(installed.name) || isHebrewFamily(installed.name) ||
-        isMyanmarFamily(installed.name)) {
-      return true;
-    }
-  }
-  return false;
+  // whenever one is installed. The folders' names tell, with no font file read and no list held: a folder with no font
+  // the reader draws in it only makes a first open wait for its language.
+  bool installed = false;
+  registry_.forEachFamilyFolder(
+      [](void* ctx, const char* folder) {
+        const std::string name(folder);
+        std::string stem;
+        const bool languageFamily = familyRegion(name, stem) != ReaderCjkRegion::None || isIndicFamily(name) ||
+                                    isArabicFamily(name) || isHebrewFamily(name) || isMyanmarFamily(name);
+        *static_cast<bool*>(ctx) = languageFamily;
+        return !languageFamily;
+      },
+      &installed);
+  return installed;
 }
 
 bool SdCardFontSystem::familyMapsCodepoint(const SdCardFontFamilyInfo& family, const uint32_t codepoint) {
@@ -709,7 +749,7 @@ std::string SdCardFontSystem::effectiveReaderFamily(const char* configuredFamily
   }
 
   const std::string candidate = stem + targetSuffix;
-  if (!registry_.findFamily(candidate)) {
+  if (!findFamily(candidate.c_str())) {
     LOG_DBG("SDFS", "Regional CJK sibling %s not installed; keeping %s", candidate.c_str(), configured.c_str());
     return configured;
   }
@@ -728,12 +768,13 @@ void SdCardFontSystem::begin(GfxRenderer& renderer) {
   // RenderLock, and a page drawn from the glyph store needs none of it (TtfFontSet::releaseMissMemory).
   RenderLock::setReleaseHook(&ttfPassEnded);
   registry_.setTtfFits(&ttfFamilyFits);
-  registry_.discover();
-  discovered_ = true;
+  // 23 families took 297 B of names on the X3's card (2026-11-16).
+  registry_.reserveNames(512, 64);
+  ready_ = true;
 
-  // Startup is discovery-only. SD font payloads are loaded lazily on reader
-  // entry via ensureLoaded/ensureLoadedForPath and unloaded on reader exit.
-  LOG_DBG("SDFS", "SD font system ready (discovery-only, %d families)", registry_.getFamilyCount());
+  // Nothing is read here: the family list when a font list is shown, a book's families at its open. SD font payloads
+  // are loaded lazily on reader entry via ensureLoaded/ensureLoadedForPath and unloaded on reader exit.
+  LOG_DBG("SDFS", "SD font system ready (families read when first asked for)");
 }
 
 void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
