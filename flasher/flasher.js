@@ -370,9 +370,11 @@ function refresh() {
     (firstFree || document.querySelector('input[name="mode"][value="custom"]')).checked = true;
     return refresh();
   }
-  $("erase").disabled = state.sdm || !isFullWrite(mode);
+  // A copy of the whole flash covers all of it, and brings back firmware this release's pages may not fit.
+  const restore = mode === "custom" && state.custom && state.custom.whole;
+  $("erase").disabled = state.sdm || !isFullWrite(mode) || restore;
   if ($("erase").disabled) $("erase").checked = false;
-  $("web").disabled = !webBundleFor(mode);
+  $("web").disabled = !webBundleFor(mode) || restore;
   if ($("web").disabled) $("web").checked = false;
 
   $("backup-box").hidden = !state.loader;
@@ -411,6 +413,19 @@ function writeProblem(mode) {
     const info = state.custom.info;
     if (info.kind === "unknown") return `That file is ${info.why}.`;
     if (info.chip !== state.chip) return `That file is built for an ${info.chip}, this device is an ${state.chip}.`;
+    if (state.custom.whole) {
+      const from = state.custom.backupOf;
+      if (from && from.board !== state.board.id) {
+        return `That copy was saved from a ${boardLabel(from.board)}; the device picked above is the ` +
+          `${state.board.label}.`;
+      }
+      const flash = lib.flashSizeBytes(state.flashSize);
+      if (flash && flash !== state.custom.bytes.length) {
+        const size = lib.sizeText(state.custom.bytes.length);
+        return `That copy is of a ${size} flash; this device has ${state.flashSize}.`;
+      }
+      return null;
+    }
     if (info.kind === "app" && !appTarget()) {
       return "A firmware image alone needs this reader's partition table on the device, or Onyx's on a BOOX " +
         "Picco, which it does not have (or which could not be read). Use a full image.";
@@ -431,8 +446,17 @@ async function chooseCustom(file) {
   if (file) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const detected = lib.detectImage(bytes);
-    state.custom = { bytes, info: detected, name: file.name };
-    if (detected.kind === "full") {
+    const whole = lib.isWholeFlashImage(detected, bytes.length);
+    const backupOf = whole ? lib.parseBackupName(file.name) : null;
+    state.custom = { bytes, info: detected, name: file.name, whole, backupOf };
+    if (whole) {
+      const from = state.custom.backupOf;
+      info.textContent = `${file.name}: a copy of a whole ${lib.sizeText(bytes.length)} flash for the ` +
+        `${detected.chip}` + (from ? `, saved from the ${boardLabel(from.board)} ${from.mac} on ${from.date}` : "") +
+        ". It is not an install: written, it puts back everything the copy holds, boot loader, partition table, " +
+        "firmware and the device's own data, over everything on the device. The web interface is not installed " +
+        "afterwards.";
+    } else if (detected.kind === "full") {
       info.textContent = `${file.name}: a full image for the ${detected.chip}, ${bytes.length} bytes, written from 0x0.`;
     } else if (detected.kind === "app") {
       info.textContent = `${file.name}: a firmware image for the ${detected.chip}, ${bytes.length} bytes, ` +
@@ -505,6 +529,30 @@ async function backup() {
 
 // ---- Write --------------------------------------------------------------------------------------
 
+const boardLabel = (id) => (lib.BOARDS.find((b) => b.id === id) || { label: id }).label;
+
+// The confirmation for a copy of the whole flash: it is not an install, and it may be another unit's.
+function restoreText() {
+  const { name, backupOf: from } = state.custom;
+  const lines = [`Write ${name} over the whole flash of the ${state.board.label}?`, "",
+    "This is a copy of a whole flash, not an install. It replaces everything on the device: the boot loader, the " +
+    "partition table, the firmware and the data in the device's own memory (settings, Wi-Fi passwords, " +
+    "calibration), with what the copy holds" + (from ? `, as it was on ${from.date}` : "") + ". The SD card is not " +
+    "touched."];
+  if (from && state.mac && from.mac !== state.mac) {
+    lines.push("", `The copy was saved from another device (${from.mac}), not from this one (${state.mac}). This ` +
+      "one would take over that device's own data. Write it only if that is what you want.");
+  } else if (from && state.mac) {
+    lines.push("", "The copy was saved from this device.");
+  }
+  if (state.backup && state.mac && state.backup.mac === state.mac && state.backup.name !== name) {
+    lines.push("", `What the device holds now was saved on this page as ${state.backup.name}.`);
+  } else if (!(state.backup && state.mac && state.backup.mac === state.mac)) {
+    lines.push("", "What the device holds now was not saved on this page; it is lost unless you have a copy.");
+  }
+  return lines.join("\n");
+}
+
 async function buildPlan(mode) {
   const imgs = boardImages();
   const ourOtadata = async () =>
@@ -537,6 +585,7 @@ async function buildPlan(mode) {
 }
 
 function confirmText(mode, plan) {
+  if (mode === "custom" && state.custom.whole) return restoreText();
   const lines = [`Write ${plan.what} to the ${state.board.label}?`];
   const onyxApp = !isFullWrite(mode) && appTarget() && appTarget().onyx;
   const replacesOther = (isFullWrite(mode) && state.tableKind && state.tableKind.kind !== "ours") || onyxApp;
@@ -633,7 +682,9 @@ async function write() {
   if (bundle) {
     await installBundle(bundle);
   } else {
-    note(after, "ok", "Done. The device starts the new firmware now.");
+    note(after, "ok", mode === "custom" && state.custom && state.custom.whole
+      ? "Done. The device starts what the copy holds now."
+      : "Done. The device starts the new firmware now.");
     status("");
   }
   setBusy(false);

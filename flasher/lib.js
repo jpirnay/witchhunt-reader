@@ -218,6 +218,20 @@ export function backupFileName(boardId, mac, date) {
   return `${boardId}-flash-${(mac || "unknown").replace(/:/g, "").toLowerCase()}-${day.join("-")}.bin`;
 }
 
+// What a backup's file name (backupFileName) says: board id, MAC as esptool-js writes it, day; null
+// for any other name. A browser names a second download of the same file "... (1).bin".
+export function parseBackupName(name) {
+  const m = /^([a-z0-9]+)-flash-([0-9a-f]{12})-(\d{4}-\d{2}-\d{2})(?: \(\d+\))?\.bin$/i.exec(name || "");
+  return m ? { board: m[1].toLowerCase(), mac: m[2].toLowerCase().match(/../g).join(":"), date: m[3] } : null;
+}
+
+// A full image as large as a whole flash chip (a power of two, 1 MB or more) is a copy of a device's
+// flash, a backup: written back, it replaces everything, the device's own data too. An install image
+// ends after the firmware, a few MB into a 16 MB chip.
+export function isWholeFlashImage(info, length) {
+  return info.kind === "full" && length >= 0x100000 && (length & (length - 1)) === 0;
+}
+
 // The whole flash, `size` bytes from 0: each piece read with `read(addr, len)` and compared with
 // `chipMd5(addr, len)`, the chip's own MD5 of that range; a piece that fails or differs is read
 // again, `tries` times in all, and the backup fails rather than keep it. `onRetry(addr, error)` and

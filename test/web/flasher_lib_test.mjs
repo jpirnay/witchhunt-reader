@@ -212,6 +212,17 @@ check(lib.flashSizeBytes('16MB') === 16 * 1024 * 1024 && lib.flashSizeBytes('4MB
 check(lib.backupFileName('picco', '9C:96:D5:E1:D8:2C', new Date(2026, 10, 5)) ===
   'picco-flash-9c96d5e1d82c-2026-11-05.bin', 'backupFileName: board, MAC, date');
 
+const named = lib.parseBackupName('murphy-flash-9c96d5e1d82c-2026-11-15 (1).bin');
+check(named && named.board === 'murphy' && named.mac === '9c:96:d5:e1:d8:2c' && named.date === '2026-11-15',
+  "parseBackupName: board, MAC, day, also for a browser's second download");
+check(lib.parseBackupName('firmware-picco.bin') === null && lib.parseBackupName('full-install-picco.bin') === null,
+  'parseBackupName: release images are no backups');
+const full = { kind: 'full' };
+check(lib.isWholeFlashImage(full, 16 * 1024 * 1024) && lib.isWholeFlashImage(full, 4 * 1024 * 1024),
+  'a full image of 16 MB or 4 MB is a copy of a whole flash');
+check(!lib.isWholeFlashImage(full, 5775312 + 0x10000) && !lib.isWholeFlashImage({ kind: 'app' }, 16 * 1024 * 1024),
+  'an install image (ends after the firmware) and an app image are not');
+
 // A fake chip: `flash` bytes, a read that can be spoiled per call, and its MD5 of a range.
 function fakeChip(size, spoil = () => null) {
   const flash = new Uint8Array(size);
