@@ -16,6 +16,17 @@ namespace {
 bool isRedirect(int status) {
   return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
 }
+// 100 Continue, 103 Early Hints and the like come before the final response and say nothing about
+// it (RFC 9110 §15.2). 101 is final: the connection has switched to another protocol.
+bool isInterim(const int status) { return status >= 100 && status < 200 && status != 101; }
+// RFC 9112 §6.3: these end with their header block, whatever Content-Length or Transfer-Encoding
+// they carry (a 304, and a reply to HEAD, repeat the headers of the full response). Read as a body,
+// one without a length waited out the timeout on a kept-alive connection for a close that never
+// came, and the request failed: a KOSync server's 204 (BookLore/grimmory) did.
+// From Free-Ink PR #65 by Dr. Foulad (1xx, 204, 304) and Free-Ink PR #212 by Justin Mitchell (HEAD).
+bool hasNoBody(const char* method, const int status) {
+  return (status >= 100 && status < 200) || status == 204 || status == 304 || strcmp(method, "HEAD") == 0;
+}
 std::string toLowerAscii(const std::string& s) {
   std::string r(s);
   for (char& c : r) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
@@ -335,6 +346,15 @@ SecureHttpClient::LineRead SecureHttpClient::readLine(std::string& line, uint32_
 }
 
 bool SecureHttpClient::readHeaders(ResponseMeta& meta) {
+  const uint32_t deadline = millis() + _timeoutMs;
+  // Past any interim responses to the final one, all within the one deadline.
+  do {
+    if (!readResponseHead(meta, deadline)) return false;
+  } while (isInterim(meta.status));
+  return true;
+}
+
+bool SecureHttpClient::readResponseHead(ResponseMeta& meta, const uint32_t deadline) {
   meta = ResponseMeta{};  // HTTP/1.1 defaults: keep-alive, no length, not chunked
   int& status = meta.status;
   long& contentLength = meta.contentLength;
@@ -342,7 +362,6 @@ bool SecureHttpClient::readHeaders(ResponseMeta& meta) {
   bool& keepAlive = meta.keepAlive;
   std::string& location = meta.location;
 
-  const uint32_t deadline = millis() + _timeoutMs;
   std::string line;
   if (readLine(line, deadline) != LineRead::Complete) return false;
   // "HTTP/1.1 200 OK" -> code at offset 9
@@ -477,6 +496,13 @@ int SecureHttpClient::readBody(const BodySink& sink, const ProgressFn& progress,
   }
 }
 
+int SecureHttpClient::endBodiless(const ResponseMeta& meta) {
+  // The response is complete, and the connection ready for the next request as far as the server
+  // keeps it. After a 101 it speaks another protocol, which this client does not.
+  if (!meta.keepAlive || meta.status == 101) close();
+  return meta.status;
+}
+
 int SecureHttpClient::get(const std::string& url, const BodySink& sink, const ProgressFn& progress) {
   std::string current = url;
   Url scope;  // the origin the credentials belong to, set at the first hop
@@ -504,6 +530,7 @@ int SecureHttpClient::get(const std::string& url, const BodySink& sink, const Pr
       continue;
     }
 
+    if (hasNoBody("GET", meta.status)) return endBodiless(meta);
     const int rc = readBody(sink, progress, meta.contentLength, meta.chunked, meta.keepAlive);
     if (rc < 0) {
       // Undrained body bytes would poison the kept-alive socket: the next
@@ -546,10 +573,14 @@ int SecureHttpClient::request(const char* method, const std::string& url, const 
                  activeBody.size(), credentials, meta);
     if (trc < 0) return trc;
     noteResponse(meta, current);
+    const bool bodiless = hasNoBody(activeMethod.c_str(), meta.status);
 
     if (isRedirect(meta.status) && !meta.location.empty()) {
       // See get(): drain to keep the socket usable, close on a failed drain.
-      if (readBody(nullptr, nullptr, meta.contentLength, meta.chunked, meta.keepAlive) < 0 || !meta.keepAlive) close();
+      if ((!bodiless && readBody(nullptr, nullptr, meta.contentLength, meta.chunked, meta.keepAlive) < 0) ||
+          !meta.keepAlive) {
+        close();
+      }
       current = resolveRedirect(u, meta.location);
       // Refuse to drop TLS silently: stop following a https -> http downgrade
       // and surface the 3xx to the caller (setAllowRedirectDowngrade opts in).
@@ -558,7 +589,8 @@ int SecureHttpClient::request(const char* method, const std::string& url, const 
       if (_redirectFilter && !_redirectFilter(current)) return meta.status;
       // 303 always -> GET; 301/302 commonly downgrade POST->GET too. 307/308
       // preserve method + body. When downgrading to GET, drop the request body.
-      if (meta.status == 303 || meta.status == 301 || meta.status == 302) {
+      // HEAD stays HEAD (RFC 9110 §15.4): it asks for no body, wherever it lands.
+      if (activeMethod != "HEAD" && (meta.status == 303 || meta.status == 301 || meta.status == 302)) {
         activeMethod = "GET";
         activeBody.clear();
       }
@@ -566,6 +598,7 @@ int SecureHttpClient::request(const char* method, const std::string& url, const 
       continue;
     }
 
+    if (bodiless) return endBodiless(meta);
     const int rc = readBody(sink, nullptr, meta.contentLength, meta.chunked, meta.keepAlive);
     if (rc < 0) {
       // Undrained body bytes would poison the kept-alive socket: the next
