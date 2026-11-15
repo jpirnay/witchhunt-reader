@@ -229,10 +229,15 @@ constexpr uint32_t SILENT_REBOOT_TARGET_SETTINGS = 7;
 // Boot into File Transfer, on its OPDS Browser row, after Back left an OPDS catalog
 // session, so the user lands where they opened the browser instead of on Home.
 constexpr uint32_t SILENT_REBOOT_TARGET_FILE_TRANSFER_OPDS = 8;
+// Boot into the OPDS browser or USB Drive, picked in File Transfer while the radio was
+// up (a Join Network the user backed out of), so the choice survives the restart that
+// ends the WiFi session. USB Transfer uses SILENT_REBOOT_TARGET_SERIAL_TRANSFER.
+constexpr uint32_t SILENT_REBOOT_TARGET_OPDS_BROWSER = 9;
+constexpr uint32_t SILENT_REBOOT_TARGET_USB_DRIVE = 10;
 // Upper bound for the cold-boot sanity check on silentRebootTarget (RTC_NOINIT is
 // uninitialized on power-up). Must equal the highest target above — keep it in
 // sync when adding one, or the new target silently reads as HOME.
-constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_FILE_TRANSFER_OPDS;
+constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_USB_DRIVE;
 constexpr uint32_t HEAP_RECOVERY_RESTART_LATCH_MAGIC = 0x48EA9C01;
 
 // How the device is coming back to life, resolved once at boot. Both resume
@@ -322,6 +327,30 @@ void silentRestartToFileTransferOpds() {
   globalReadingSessionTracker().end();
   armSilentReboot(SILENT_REBOOT_TARGET_FILE_TRANSFER_OPDS);
   LOG_DBG("MAIN", "Silent restart (target=file-transfer-opds)");
+  restartKeepingFlashArea();
+}
+
+void silentRestartToOpdsBrowser() {
+  if (deepSleepInProgress) return;
+  globalReadingSessionTracker().end();
+  armSilentReboot(SILENT_REBOOT_TARGET_OPDS_BROWSER);
+  LOG_DBG("MAIN", "Silent restart (target=opds-browser)");
+  restartKeepingFlashArea();
+}
+
+void silentRestartToSerialTransfer() {
+  if (deepSleepInProgress) return;
+  globalReadingSessionTracker().end();
+  armSilentReboot(SILENT_REBOOT_TARGET_SERIAL_TRANSFER);
+  LOG_DBG("MAIN", "Silent restart (target=serial-transfer)");
+  restartKeepingFlashArea();
+}
+
+void silentRestartToUsbDrive() {
+  if (deepSleepInProgress) return;
+  globalReadingSessionTracker().end();
+  armSilentReboot(SILENT_REBOOT_TARGET_USB_DRIVE);
+  LOG_DBG("MAIN", "Silent restart (target=usb-drive)");
   restartKeepingFlashArea();
 }
 
@@ -1682,6 +1711,10 @@ void setup() {
     activityManager.goToSettings();
   } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_FILE_TRANSFER_OPDS) {
     activityManager.goToFileTransfer(NetworkMode::OPDS_BROWSER);
+  } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_OPDS_BROWSER) {
+    activityManager.goToBrowser();
+  } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_USB_DRIVE) {
+    activityManager.goToUsbDrive();
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
     // through to the sleep-wake "resume reader" logic, which fires on stale

@@ -17,6 +17,11 @@ void silentRestartToClockSettings();     // clock / time settings screen
 void silentRestartToKOReaderSettings();  // KOReader sync settings screen
 void silentRestartToSettings();          // Settings screen
 void silentRestartToFileTransferOpds();  // File Transfer, on its OPDS Browser row
+// File Transfer's choices that open a screen of their own, for a choice made while the radio was up
+// (NetworkModeSelectionActivity): the OPDS browser, USB Transfer, USB Drive.
+void silentRestartToOpdsBrowser();
+void silentRestartToSerialTransfer();
+void silentRestartToUsbDrive();
 
 // One-shot guarded variant for heap-fragmentation recovery: allows only one
 // restart attempt across consecutive silent boots until a non-silent boot
