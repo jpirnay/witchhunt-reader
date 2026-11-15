@@ -23,6 +23,7 @@
 #include <cassert>
 #include <cstring>
 
+#include "BitmapRowTarget.h"
 #include "FontCacheManager.h"
 #include "GlyphRun.h"
 #include "Gray8Compose.h"
@@ -2788,18 +2789,17 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   // the pass waits on.
   const bool absolutePlanes = renderModeSnapshot != BW && getAbsoluteGrayPlanes();
 
+  const int screenHeight = getScreenHeight();
   for (int bmpY = 0; bmpY < (bitmap.getHeight() - cropPixY); bmpY++) {
     // The BMP's (0, 0) is the bottom-left corner (if the height is positive, top-left if negative).
     // Screen's (0, 0) is the top-left corner.
-    int screenY = -cropPixY + (bitmap.isTopDown() ? bmpY : bitmap.getHeight() - 1 - bmpY);
-    if (isScaled) {
-      screenY = std::floor(screenY * scale);
-    }
-    screenY += y;  // the offset should not be scaled
-    if (screenY >= getScreenHeight()) {
+    const auto target = bitmap_rows::rowTarget(bmpY, bitmap.getHeight(), bitmap.isTopDown(), cropPixY, isScaled, scale,
+                                               y, screenHeight);
+    if (target.fate == bitmap_rows::RowFate::Stop) {
       break;
     }
 
+    // Rows are read in file order, so one left off the screen is read all the same.
     if (bitmap.readNextRow(outputRow, rowBytes, gray8Row) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
       free(outputRow);
@@ -2808,14 +2808,10 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       return;
     }
 
-    if (screenY < 0) {
+    if (target.fate == bitmap_rows::RowFate::Skip) {
       continue;
     }
-
-    if (bmpY < cropPixY) {
-      // Skip the row if it's outside the crop area
-      continue;
-    }
+    const int screenY = target.screenY;
 
     if (!gray8 && !isScaled && !absolutePlanes && drawMask != 0x00) {
       // Fast path: write up to 8 pixels per call directly to the framebuffer.
