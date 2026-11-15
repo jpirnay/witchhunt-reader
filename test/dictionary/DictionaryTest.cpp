@@ -628,6 +628,64 @@ TEST_F(DictionaryTest, FrenchElisionsFallBackToTheWordAfterTheApostrophe) {
   EXPECT_EQ(result, Dictionary::LookupResult::NotFound);
 }
 
+// Pointed Hebrew (niqqud) and vowelled Arabic (harakat) as books print them: most dictionaries list the bare letters.
+// The spelling as written is tried first, then without its vowel marks. Shaddah, maddah and hamza change the word and
+// stay. From crosspoint-reader PR #4396 (Uri Tauber) and CrossInk cd40105b (Julia Nguyen).
+TEST_F(DictionaryTest, PointedHebrewAndVowelledArabicFindTheirBareHeadword) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("Pointed",
+                                          {{"\u05E9\u05DC\u05D5\u05DD", "peace"},   // שלום
+                                           {"\u05D1\u05E8\u05D0", "created"},       // ברא
+                                           {"\u0634\u0643\u0644", "shape"},         // شكل
+                                           {"\u0634\u0643\u0651\u0644", "formed"},  // شكّل
+                                           {"\u0643\u062A\u0628", "wrote"}},        // كتب
+                                          {{"\u05E9\u05DC\u05D5\u05DE\u05D5\u05EA", "\u05E9\u05DC\u05D5\u05DD"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "Pointed"));
+
+  // שָׁלוֹם, and with the cantillation of a Bible text: בָּרָ֣א
+  expectHit(dict, "\u05E9\u05B8\u05C1\u05DC\u05D5\u05B9\u05DD", "\u05E9\u05DC\u05D5\u05DD", "peace");
+  expectHit(dict, "\u05D1\u05BC\u05B8\u05E8\u05B8\u05A3\u05D0", "\u05D1\u05E8\u05D0", "created");
+  // A mark at an edge hid the punctuation there: the stripped word is cleaned again.
+  expectHit(dict, "\u0591\u201C\u05E9\u05B8\u05C1\u05DC\u05D5\u05B9\u05DD!\u201D\u05B0", "\u05E9\u05DC\u05D5\u05DD",
+            "peace");
+  // The synonyms are probed again without the marks too: שְׁלוֹמוֹת
+  expectHit(dict, "\u05E9\u05B0\u05C1\u05DC\u05D5\u05B9\u05DE\u05D5\u05B9\u05EA", "\u05E9\u05DC\u05D5\u05DD", "peace");
+
+  // كَتَبَ; شَكَّلَ keeps its shaddah, شَكَلَ has none.
+  expectHit(dict, "\u0643\u064E\u062A\u064E\u0628\u064E", "\u0643\u062A\u0628", "wrote");
+  expectHit(dict, "\u0634\u064E\u0643\u0651\u064E\u0644\u064E", "\u0634\u0643\u0651\u0644", "formed");
+  expectHit(dict, "\u0634\u064E\u0643\u064E\u0644\u064E", "\u0634\u0643\u0644", "shape");
+}
+
+TEST_F(DictionaryTest, APointedHeadwordKeepsItsExactHit) {
+  // A dictionary that lists both spellings: the pointed one is found as written, and a word pointed otherwise falls
+  // back to the bare letters, never to a guess among pointed entries.
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("BothSpellings", {{"\u05E9\u05B8\u05C1\u05DC\u05D5\u05B9\u05DD", "pointed"},
+                                                            {"\u05E9\u05DC\u05D5\u05DD", "bare"},
+                                                            {"\u05E9\u05B6\u05C1\u05DC\u05D5\u05B9\u05DD", "other"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "BothSpellings"));
+  expectHit(dict, "\u05E9\u05B8\u05C1\u05DC\u05D5\u05B9\u05DD", "\u05E9\u05B8\u05C1\u05DC\u05D5\u05B9\u05DD",
+            "pointed");
+  expectHit(dict, "\u05E9\u05DC\u05D5\u05DD", "\u05E9\u05DC\u05D5\u05DD", "bare");
+  expectHit(dict, "\u05E9\u05BB\u05C1\u05DC\u05D5\u05B9\u05DD", "\u05E9\u05DC\u05D5\u05DD", "bare");  // שֻׁלוֹם
+
+  // Shaddah and hamza are letters' parts, not vowels: without a headword that has them, nothing is found.
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("NoShaddah", {{"\u0634\u0643\u0644", "shape"}, {"\u0627", "alef"}}));
+  Dictionary bare;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(bare, "NoShaddah"));
+  std::string definition;
+  std::string headword;
+  Dictionary::LookupResult result = Dictionary::LookupResult::Found;
+  EXPECT_FALSE(bare.lookup("\u0634\u064E\u0643\u0651\u064E\u0644\u064E", definition, headword, &result));
+  EXPECT_EQ(result, Dictionary::LookupResult::NotFound);
+  EXPECT_FALSE(bare.lookup("\u0627\u0654\u064E", definition, headword, &result));  // alef, hamza above, fatha
+  EXPECT_EQ(result, Dictionary::LookupResult::NotFound);
+  // Marks alone are no word.
+  EXPECT_FALSE(bare.lookup("\u0591\u05B0", definition, headword, &result));
+  EXPECT_EQ(result, Dictionary::LookupResult::NotFound);
+}
+
 TEST_F(DictionaryTest, ResolveFindsTheLocationWithoutReadingIt) {
   const std::string folder = provision("plain", "Resolving");
   Dictionary dict;
