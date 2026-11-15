@@ -126,9 +126,9 @@ export function layoutNote(tableKind, chip) {
         "Full install, Witch Reader's table: it updates itself over Wi-Fi and from the SD card, and this page's " +
           "Update only works. Onyx's boot loader and its recovery, which installs updates from the SD card, are " +
           "replaced. Only a backup of the whole flash brings them back.",
-        "Keeping Onyx's table: Onyx's boot loader and recovery stay. The table has one app slot, so Witch Reader " +
-          "cannot update itself on it: no update over Wi-Fi or from the SD card. Every update goes over USB again, " +
-          "with an install that writes only the firmware into Onyx's slot; this page does not offer one yet.",
+        "Update only, Onyx's table kept: the firmware goes into Onyx's app slot, and Onyx's boot loader and " +
+          "recovery stay. The table has one app slot, so Witch Reader cannot update itself on it: no update over " +
+          "Wi-Fi or from the SD card. Every later update comes from this page's Update only again.",
       ],
     };
   }
@@ -159,6 +159,44 @@ export function describeTable(entries) {
     .map((e) => `${e.label.padEnd(9)} ${typeName(e.type)}/0x${e.subtype.toString(16).padStart(2, "0")} ` +
       `0x${e.offset.toString(16).padStart(6, "0")} +0x${e.size.toString(16)}`)
     .join("\n");
+}
+
+// ---- Firmware image alone -----------------------------------------------------------------------
+
+// Where a firmware image alone goes, taken from the device's own table: its ota_0 slot and its
+// otadata. Only on our table (0x10000, otadata 0xE000) and on Onyx's Picco table (0xE0000, otadata
+// 0x15000), where Witch Reader runs as it is (docs/contributing/board-support.md, "Two partition
+// tables"); any other table gets the full install. Null when there is no such target.
+export function appTarget(tableKind, entries) {
+  if (!entries || !(tableKind.kind === "ours" || tableKind.onyx)) return null;
+  const slot = entries.find((e) => e.type === 0x00 && e.subtype === 0x10);
+  const otadata = entries.find((e) => e.type === 0x01 && e.subtype === 0x00);
+  if (!slot || !otadata || otadata.size !== OTADATA_SIZE) return null;
+  return { app: slot.offset, appBytes: slot.size, otadata: otadata.offset, onyx: !!tableKind.onyx };
+}
+
+// otadata whose first sector selects ota_0 (sequence 1), byte for byte the boot_app0.bin that
+// Arduino-ESP32 ships and that [env:picco_stock] writes at 0x15000 (scripts/stock_table_upload.py),
+// with which the Picco booted Witch Reader. Onyx's table needs it written: there a blank otadata
+// starts Onyx's recovery, which is how a stock Picco reaches a USB port in the first place.
+// The CRC is esp_rom_crc32_le(UINT32_MAX, &seq, 4), as in ota_boot::computeSeqCrc().
+export function otadataSelectingFirstSlot() {
+  const data = new Uint8Array(OTADATA_SIZE).fill(0xff);
+  const seq = new Uint8Array([1, 0, 0, 0]);
+  data.set(seq, 0);
+  new DataView(data.buffer).setUint32(28, crc32(seq, 0xffffffff), true);
+  data.set([0, 0, 0, 0], 0x1000); // boot_app0.bin's second sector: sequence 0 under an erased CRC, no entry
+  return data;
+}
+
+// The writes for a firmware image alone: the image into the target's slot, then otadata. The image
+// goes first, so a write that stops leaves the boot selection as it was. `error` when the image does
+// not fit the slot.
+export function appWritePlan(target, app, otadata) {
+  if (app.length > target.appBytes) {
+    return { error: `the firmware is ${app.length} bytes, more than the device's app slot (${target.appBytes})` };
+  }
+  return { files: [{ data: app, address: target.app }, { data: otadata, address: target.otadata }] };
 }
 
 // ---- Image files --------------------------------------------------------------------------------

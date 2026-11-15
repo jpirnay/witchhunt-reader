@@ -54,7 +54,7 @@
     <label class="choice"><input type="radio" name="mode" value="update">
       <strong>Update only</strong>
       <small id="update-info">Just the firmware. Only for a device that already has this reader's partition
-        table.</small></label>
+        table, or a BOOX Picco on Onyx's partition table.</small></label>
     <label class="choice"><input type="radio" name="mode" value="custom">
       <strong>Custom file</strong>
       <small>A .bin of your own, for example a test build from a pull request: a full image is written from the
@@ -104,10 +104,10 @@
       one first, for example with esptool: <code>esptool read-flash 0 ALL backup.bin</code>.</p>
     <p><strong>On a BOOX Picco with Onyx's partition table</strong>, a full install also replaces Onyx's boot loader
       and its recovery, which installs updates from the SD card; Witch Reader then updates itself over Wi-Fi and from
-      the card. Witch Reader runs on Onyx's table too, with its firmware in Onyx's app slot and Onyx's boot loader and
-      recovery kept. That table has one app slot, though, so Witch Reader cannot update itself on it: every update
-      goes over USB again, with an install that writes only the firmware into that slot, which this page does not
-      offer yet.</p>
+      the card. <strong>Update only</strong> keeps Onyx's table instead: the firmware goes into Onyx's app slot, and
+      Onyx's boot loader and recovery stay. That table has one app slot, though, so Witch Reader cannot update itself
+      on it: every later update comes from this page's Update only again. Either way, Onyx's own firmware is
+      replaced.</p>
     <p><strong>Leftovers.</strong> Without <em>Erase the whole flash first</em>, parts of the flash that Witch
       Reader has not used yet keep their old bytes until it does; it never reads them as its own data. On a device
       that had its original firmware, that can include what the old firmware stored. Erase first if you pass the

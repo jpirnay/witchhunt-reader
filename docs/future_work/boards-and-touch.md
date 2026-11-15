@@ -207,9 +207,6 @@ and the slide switch turns the light on and off. Board notes:
   (7ca5f5c), SSD2677 night-mode refresh (5c40622), dark AA pixels on the SE0400NQW47 (df3f41e), no two-pass clearing
   on the first paint (d73c852), grayscale overlay in inverted mode (99809a0). Several commits of that range change the
   X4 and X4 Pro refresh code too, so it is its own change, validated on every board.
-- **Stock-table installs in the flasher.** It recognises Onyx's table and sets out what the full install replaces and
-  what keeping the table costs (`layoutNote()` in `flasher/lib.js`), but offers only the full install. An update mode
-  for it would write the app at 0xE0000 and otadata at 0x15000, as `scripts/stock_table_upload.py` does.
 - **Updates on the stock table.** Onyx's recovery installs `/update/firmware.bin` from the card. An action that erases
   otadata and restarts would hand the stock-table Picco to it, the way the stock app's Power + Volume Up does.
 - **USB presence from the charger.** No detect pin, so a wall charger shows no charging bolt. Upstream asks

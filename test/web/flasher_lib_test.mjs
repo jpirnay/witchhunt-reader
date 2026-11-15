@@ -9,8 +9,11 @@
 //   * an X3/X4 table with a small or no `spiffs` partition is named emergency mode with the device
 //     notice's sizes; the same table on an S3 board is not, since those boards use PSRAM instead;
 //   * Onyx's Picco table (partitions_picco.csv) is recognised, and its note sets out the two choices:
-//     the full install (Onyx's boot loader and recovery replaced, self-updates) or keeping the table
-//     (no self-update, updates over USB).
+//     the full install (Onyx's boot loader and recovery replaced, self-updates) or Update only into
+//     Onyx's slot (table kept, no self-update);
+//   * a firmware image alone goes into the device's own ota_0 slot with its otadata: 0x10000 and
+//     0xE000 on ours, 0xE0000 and 0x15000 on Onyx's, nowhere on any other table; image first, and on
+//     Onyx's table with otadata byte for byte Arduino-ESP32's boot_app0.bin.
 //
 //   node test/web/flasher_lib_test.mjs [deps dir]
 // (CI passes the folder with the web tests' libraries; this test needs none.) Exit status 0: every
@@ -154,13 +157,50 @@ check(has(onyxNote, "Onyx's") && onyxNote.choices && onyxNote.choices.length ===
 check(onyxNote.choices[0].startsWith('Full install') &&
   ['boot loader', 'recovery', 'over Wi-Fi', 'backup'].every((p) => onyxNote.choices[0].includes(p)),
   'full install: boot loader and recovery replaced, Wi-Fi updates, the backup as the way back');
-check(onyxNote.choices[1].startsWith("Keeping Onyx's table") &&
-  ['one app slot', 'cannot update itself', 'over USB'].every((p) => onyxNote.choices[1].includes(p)),
-  "keeping Onyx's table: one slot, no self-update, updates over USB");
+check(onyxNote.choices[1].startsWith("Update only, Onyx's table kept") &&
+  ['one app slot', 'cannot update itself', 'Update only again'].every((p) => onyxNote.choices[1].includes(p)),
+  "Update only on Onyx's table: one slot, no self-update, later updates from this page");
 check(!onyxNote.text.includes('emergency') && !onyxNote.choices.join(' ').includes('emergency'),
   "Onyx's table: no emergency mode");
 check(![x3OnC3, noneOnC3, otherAppsOnC3].some((n) => n.text.includes('English')),
   'no note claims the interface stays in English');
+
+// ---- Firmware image alone ----------------------------------------------------------------------
+
+const target = (entries) => lib.appTarget(k(entries), entries);
+const oursTarget = target(oursRead);
+check(oursTarget && oursTarget.app === 0x10000 && oursTarget.otadata === 0xe000 && oursTarget.appBytes === 0x640000 &&
+  !oursTarget.onyx, 'our table: app0 at 0x10000 (6.25 MB), otadata at 0xE000');
+const onyxEntries = read(csvEntries(fs.readFileSync(path.join(ROOT, 'partitions_picco.csv'), 'utf8')));
+const onyxTarget = target(onyxEntries);
+check(onyxTarget && onyxTarget.app === lib.ONYX_APP_OFFSET && onyxTarget.appBytes === 0xe70000 &&
+  onyxTarget.otadata === 0x15000 && onyxTarget.onyx, "Onyx's table: its app slot at 0xE0000, otadata at 0x15000");
+for (const [name, entries] of [['the X3 table (1 MB)', read(withArea(0x100000))], ['no spiffs', read(withoutArea)],
+  ['other app slots', read(ours.map((e) => (e.label === 'app1' ? { ...e, size: 0x500000 } : e)))]]) {
+  check(target(entries) === null, `${name}: no firmware image alone, the full install only`);
+}
+check(lib.appTarget(k(null), null) === null, 'no table: no firmware image alone');
+
+// boot_app0.bin (framework-arduinoespressif32/tools/partitions), written out: sequence 1, an erased
+// label and state, CRC 0x4743989A; the second sector starts with sequence 0 and nothing else.
+const bootApp0 = new Uint8Array(lib.OTADATA_SIZE).fill(0xff);
+bootApp0.set([0x01, 0x00, 0x00, 0x00], 0);
+bootApp0.set([0x9a, 0x98, 0x43, 0x47], 28);
+bootApp0.set([0x00, 0x00, 0x00, 0x00], 0x1000);
+const otadata = lib.otadataSelectingFirstSlot();
+check(otadata.length === bootApp0.length && otadata.every((b, i) => b === bootApp0[i]),
+  "otadataSelectingFirstSlot() is boot_app0.bin, byte for byte");
+
+const app = new Uint8Array(0x1000).fill(0xe9);
+const onyxPlan = lib.appWritePlan(onyxTarget, app, otadata);
+check(!onyxPlan.error && onyxPlan.files.length === 2 && onyxPlan.files[0].address === 0xe0000 &&
+  onyxPlan.files[0].data === app && onyxPlan.files[1].address === 0x15000 && onyxPlan.files[1].data === otadata,
+  "Onyx's table: the image at 0xE0000 first, then otadata at 0x15000");
+const oursPlan = lib.appWritePlan(oursTarget, app, otadata);
+check(!oursPlan.error && oursPlan.files[0].address === 0x10000 && oursPlan.files[1].address === 0xe000,
+  'our table: the image at 0x10000 first, then otadata at 0xE000');
+check(!!lib.appWritePlan(oursTarget, new Uint8Array(0x640001), otadata).error,
+  'an image larger than the slot is refused');
 
 if (failures) {
   console.error(`${failures} check(s) failed`);

@@ -43,7 +43,8 @@ Flashing is done from the browser — no toolchain or driver install needed. Use
      too little room for fonts, interface language and hyphenation, and the page says how much. It also gives an X3
      or X4 the faster-waking boot loader. It replaces the original firmware for good: keep a backup if you may want
      it back.
-   - **Update only**: just the firmware, on a device that already has Witch Reader's partition table.
+   - **Update only**: just the firmware, on a device that already has Witch Reader's partition table, or on a BOOX
+     Picco that keeps Onyx's (see below).
 4. Leave **Install the web interface over USB afterwards** on, so the web pages work without Wi-Fi setup.
 
 Everything on the SD card stays: books, progress, settings, Wi-Fi networks, fonts. The page says what a full install
@@ -63,8 +64,9 @@ needs the **Full install** above. The Murphy M3 is not listed there.
 and Volume Up (+) for more than 10 seconds, and it restarts into Onyx's recovery, which has one. **Back up the whole
 flash first** (`esptool read-flash 0 ALL picco-backup.bin`): Onyx's firmware cannot be downloaded anywhere, and that
 backup is the only way back to it. The **Full install** gives the Picco Witch Reader's partition table, with updates
-over Wi-Fi and from the card, and replaces Onyx's boot loader and recovery. Witch Reader also runs on Onyx's own table, as CrossPoint installs it (the firmware at
-0xE0000, which keeps Onyx's recovery); there it cannot update itself, and an update goes over USB again.
+over Wi-Fi and from the card, and replaces Onyx's boot loader and recovery. **Update only** keeps Onyx's table, boot
+loader and recovery and writes the firmware into Onyx's app slot (0xE0000); Witch Reader cannot update itself there,
+so every later update comes from the flasher's Update only again. Either way, Onyx's own firmware is replaced.
 
 For everything the reader does and how to use it, see the **[User Guide](USER_GUIDE.md)**. How it compares with
 CrossPoint, feature by feature: **[Feature comparison](docs/feature-comparison.md)**.

@@ -270,9 +270,9 @@ One `firmware.bin` runs under either; an app image does not depend on the slot i
 
 | | `partitions.csv` (ours) | Onyx's stock table (`partitions_picco.csv`) |
 |---|---|---|
-| Install | `pio run -e picco -t upload`, or `full-install-picco.bin` / the flasher's Full install | `pio run -e picco_stock -t upload`: the app at 0xE0000 and otadata at 0x15000 (`scripts/stock_table_upload.py`), or CrossPoint's flash tools |
+| Install | `pio run -e picco -t upload`, or `full-install-picco.bin` / the flasher's Full install | `pio run -e picco_stock -t upload`: the app at 0xE0000 and otadata at 0x15000 (`scripts/stock_table_upload.py`), or the flasher's Update only, which writes the same (`appTarget()`, `otadataSelectingFirstSlot()` in `flasher/lib.js`) |
 | Kept | nothing of Onyx's | Onyx's bootloader, NVS, `safeboot` recovery (0x20000) and spiffs |
-| Updates | OTA, SD Firmware Update, Up + Power recovery boot | none: one app slot, so `ota_boot::idleAppPartition()` is null and the System Update rows and the recovery boot are not offered |
+| Updates | OTA, SD Firmware Update, Up + Power recovery boot | none from the device: one app slot, so `ota_boot::idleAppPartition()` is null and the System Update rows and the recovery boot are not offered. Over USB, as installed |
 | Flash area | the `spiffs` partition | the PSRAM image on the card: the stock 512 KB `spiffs` holds the stock firmware's data and is left alone (`FlashArea.cpp`) |
 
 The stock boot chain: the stock `app` (ota_0) normally runs. Blank otadata makes the bootloader start `safeboot`, which

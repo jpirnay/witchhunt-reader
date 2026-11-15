@@ -258,6 +258,11 @@ async function readFlashLayout() {
   }
 }
 
+// Where a firmware image alone goes on the connected device: our table or Onyx's Picco table.
+function appTarget() {
+  return state.tableKind && state.table ? lib.appTarget(state.tableKind, state.table) : null;
+}
+
 // The release's table, or the one in a chosen custom full image.
 function oursTable() {
   if (state.manifest && state.manifest.table) return state.manifest.table;
@@ -339,12 +344,16 @@ function refresh() {
       "Emergency mode."
     : "This release has no full-install image for this device. Use update only on a device that already runs " +
       "Witch Reader, or a custom file.";
-  const ours = state.tableKind && state.tableKind.kind === "ours";
-  updateInput.disabled = !imgs.app || (state.loader && !ours);
+  const target = appTarget();
+  updateInput.disabled = !imgs.app || (state.loader && !target);
   $("update-info").textContent = !imgs.app
     ? "This release has no firmware image for this device."
-    : "Just the firmware. Only for a device that already has this reader's partition table" +
-      (state.loader && !ours ? ": this one does not." : ".");
+    : target && target.onyx
+      ? "Just the firmware, into Onyx's app slot, with the boot selection pointing at it. Onyx's boot loader, " +
+        "recovery and partition table stay. Witch Reader cannot update itself on that table, so its later updates " +
+        "come from here too."
+      : "Just the firmware. Only for a device that already has this reader's partition table, or a BOOX Picco on " +
+        "Onyx's partition table" + (state.loader && !target ? ": this one has neither." : ".");
   if (document.querySelector('input[name="mode"]:checked').disabled) {
     const firstFree = [fullInput, updateInput].find((i) => !i.disabled);
     (firstFree || document.querySelector('input[name="mode"][value="custom"]')).checked = true;
@@ -374,14 +383,17 @@ function writeProblem(mode) {
   if (!state.loader) return "Connect the device first.";
   if (state.chip !== state.board.chip) return "The connected chip does not match the device picked above.";
   if (state.locked) return "This device is locked; update it from the SD card.";
+  if (state.tableKind && state.tableKind.onyx && state.board.id !== "picco") {
+    return "This device has the BOOX Picco's partition table: pick the BOOX Picco above.";
+  }
   if (mode === "custom") {
     if (!state.custom) return "Choose a .bin file.";
     const info = state.custom.info;
     if (info.kind === "unknown") return `That file is ${info.why}.`;
     if (info.chip !== state.chip) return `That file is built for an ${info.chip}, this device is an ${state.chip}.`;
-    if (info.kind === "app" && !(state.tableKind && state.tableKind.kind === "ours")) {
-      return "A firmware image alone needs this reader's partition table on the device, which it does not have " +
-        "(or which could not be read). Use a full image.";
+    if (info.kind === "app" && !appTarget()) {
+      return "A firmware image alone needs this reader's partition table on the device, or Onyx's on a BOOX " +
+        "Picco, which it does not have (or which could not be read). Use a full image.";
     }
   }
   if (isFullWrite(mode) && state.flashSize && state.flashSize !== "16MB") {
@@ -404,7 +416,7 @@ async function chooseCustom(file) {
       info.textContent = `${file.name}: a full image for the ${detected.chip}, ${bytes.length} bytes, written from 0x0.`;
     } else if (detected.kind === "app") {
       info.textContent = `${file.name}: a firmware image for the ${detected.chip}, ${bytes.length} bytes, ` +
-        "written at 0x10000 with the boot selection reset.";
+        "written into the device's app slot, with the boot selection pointing at it.";
     } else {
       info.textContent = `${file.name}: ${detected.why}.`;
     }
@@ -428,10 +440,18 @@ async function chooseCustomWeb(file) {
 
 async function buildPlan(mode) {
   const imgs = boardImages();
-  const otadata = async () =>
+  const ourOtadata = async () =>
     state.manifest && state.manifest.otadata
       ? fetchImage(state.manifest.otadata)
-      : new Uint8Array(lib.OTADATA_SIZE).fill(0xff); // erased otadata also boots app0
+      : new Uint8Array(lib.OTADATA_SIZE).fill(0xff); // erased otadata also boots app0 on our table
+  const appWrite = async (data) => {
+    const target = appTarget();
+    if (!target) throw new Error("the device's partition table takes no firmware image alone");
+    // On Onyx's table an erased otadata starts Onyx's recovery, so the selection is always written.
+    const plan = lib.appWritePlan(target, data, target.onyx ? lib.otadataSelectingFirstSlot() : await ourOtadata());
+    if (plan.error) throw new Error(plan.error);
+    return plan.files;
+  };
   if (mode === "full") {
     const data = await fetchImage(imgs.full);
     const info = lib.detectImage(data);
@@ -442,17 +462,11 @@ async function buildPlan(mode) {
     const data = await fetchImage(imgs.app);
     const info = lib.detectImage(data);
     if (info.kind !== "app" || info.chip !== state.chip) throw new Error("the firmware image does not match this device");
-    return {
-      files: [{ data, address: lib.APP_OFFSET }, { data: await otadata(), address: lib.OTADATA_OFFSET }],
-      what: `the firmware of ${state.manifest.name}`,
-    };
+    return { files: await appWrite(data), what: `the firmware of ${state.manifest.name}` };
   }
   const { bytes, info, name } = state.custom;
   if (info.kind === "full") return { files: [{ data: bytes, address: 0 }], what: name };
-  return {
-    files: [{ data: bytes, address: lib.APP_OFFSET }, { data: await otadata(), address: lib.OTADATA_OFFSET }],
-    what: name,
-  };
+  return { files: await appWrite(bytes), what: name };
 }
 
 function confirmText(mode, plan) {
@@ -470,6 +484,10 @@ function confirmText(mode, plan) {
       lines.push("", "The SD card is not touched.");
     }
     if ($("erase").checked) lines.push("", "The whole flash is erased first.");
+  } else if (appTarget() && appTarget().onyx) {
+    lines.push("", "It goes into Onyx's app slot. Onyx's boot loader, recovery and partition table stay. The firmware " +
+      "in that slot is replaced: if that is still Onyx's own, only a backup of the whole flash brings it back.",
+    "", "Witch Reader cannot update itself on this table: update it from this page again.");
   }
   return lines.join("\n");
 }
