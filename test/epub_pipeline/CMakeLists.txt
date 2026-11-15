@@ -113,6 +113,7 @@ add_executable(EpubPipelineTest
   FingerprintTest.cpp
   LostTocRetryTest.cpp
   TocSourceTest.cpp
+  LinkTargetTest.cpp
   PageListSinkTest.cpp
   MetadataSidecarTest.cpp
   SidecarFilesTest.cpp

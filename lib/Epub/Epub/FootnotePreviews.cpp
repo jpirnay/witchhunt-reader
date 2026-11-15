@@ -242,8 +242,7 @@ class LinkScanner {
       const char* hash = strchr(self->href_, '#');
       const char* fragment = hash + 1;  // '#' presence checked at startElement
       if (*fragment != '\0') {
-        const int targetSpine =
-            self->href_[0] == '#' ? self->spineIndex_ : self->epub_.resolveHrefToSpineIndex(self->href_);
+        const int targetSpine = self->epub_.resolveLinkToSpineIndex(self->href_, self->spineIndex_);
         if (targetSpine >= 0) {
           const uint32_t keyHash = makeKeyHash(targetSpine, fragment);
           const bool seen = std::any_of(self->targets_.begin(), self->targets_.end(),
@@ -1300,7 +1299,8 @@ int Lookup::resolveTargetSpine(const char* href, const size_t pathLen) {
   if (memoable && lastPathLen_ == pathLen && memcmp(lastPath_, href, pathLen) == 0) {
     return lastPathSpine_;
   }
-  const int spine = epub_->resolveHrefToSpineIndex(href);
+  // Relative to the chapter the lookup serves, which holds the link; the memo is per open store, so per chapter.
+  const int spine = epub_->resolveLinkToSpineIndex(href, currentSpineIndex_);
   if (memoable) {
     memcpy(lastPath_, href, pathLen);
     lastPathLen_ = pathLen;
