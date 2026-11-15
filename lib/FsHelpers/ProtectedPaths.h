@@ -101,19 +101,33 @@ inline bool holdsNoBooks(const std::string_view name) {
   return isSystemName(name) || equalsIgnoreCase(name, ".crosspoint");
 }
 
-// Shaped like a generated 8.3 alias: a '~' followed by a digit, in a name that fits
-// 8.3. Only a filter for which segments are worth resolving on the card -- a real file
-// may be named like this, and resolution is what tells the two apart.
+inline bool isHexDigit(const char c) {
+  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+}
+
+// Shaped like a generated 8.3 alias, in a name that fits 8.3: a '~' followed by a digit
+// (the ~1, ~2, ... that Windows, Linux and SdFat try first), or by exactly four hex
+// digits that end the base. SdFat gives a name whose ~1 is taken "CRO~A3F2", high nibble
+// first (FatFile::makeUniqueSfn), so 6 in 16 such tails start with a letter. Every tilde
+// counts, not just the first: a long name's own '~' stays in its alias, before the tail
+// (".~lock.novel.odt#" is "~LOCK_~1.ODT"). Only a filter for which segments are worth
+// resolving on the card -- a real file may be named like this, and resolution is what
+// tells the two apart.
+// The hex tail is from CrossInk cd40105b by Julia Nguyen (@uxjulia).
 inline bool looksLikeShortAlias(const std::string_view name) {
-  const size_t tilde = name.find('~');
-  if (tilde == std::string_view::npos || tilde + 1 >= name.size() || name[tilde + 1] < '0' || name[tilde + 1] > '9') {
-    return false;
-  }
   const size_t dot = name.find('.');
   if (dot != std::string_view::npos && name.find('.', dot + 1) != std::string_view::npos) return false;
   const size_t base = dot == std::string_view::npos ? name.size() : dot;
   const size_t ext = dot == std::string_view::npos ? 0 : name.size() - dot - 1;
-  return base <= 8 && ext <= 3;
+  if (base > 8 || ext > 3) return false;
+  for (size_t tilde = name.find('~'); tilde != std::string_view::npos; tilde = name.find('~', tilde + 1)) {
+    if (tilde + 1 < name.size() && name[tilde + 1] >= '0' && name[tilde + 1] <= '9') return true;
+    if (tilde + 5 == base && isHexDigit(name[tilde + 1]) && isHexDigit(name[tilde + 2]) &&
+        isHexDigit(name[tilde + 3]) && isHexDigit(name[tilde + 4])) {
+      return true;
+    }
+  }
+  return false;
 }
 
 inline bool isCredentialPath(const std::string_view canonical) {

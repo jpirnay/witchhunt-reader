@@ -203,6 +203,10 @@ class HalFile : public Print {
   bool getModifyDateTime(uint16_t* pdate, uint16_t* ptime);
   bool getCreateDateTime(uint16_t* pdate, uint16_t* ptime);
   bool isDirectory() const;
+  // Where the entry sits in its folder: two handles in one folder with the same index are the same entry, however
+  // each was opened. One opened through an 8.3 alias does not know its long name (getName() gives the alias back),
+  // while one from openNextFile() on the folder does, so this is how the long name behind an alias is found.
+  uint32_t dirIndex() const;
   void rewindDirectory();
   bool close();
   // Whether the file is one run of clusters. On FAT32 SdFat walks the file's cluster chain once to find out and, when

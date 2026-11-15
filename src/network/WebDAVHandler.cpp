@@ -1,15 +1,13 @@
 #include "WebDAVHandler.h"
 
-#include <Epub.h>
 #include <FileReplace.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <HalSystem.h>  // feedWatchdog()
 #include <Logging.h>
 #include <Memory.h>
-#include <Txt.h>
-#include <Xtc.h>
 
+#include "BookCacheReset.h"
 #include "BookRelocation.h"
 #include "ChunkedResponse.h"
 #include "HttpFileStreamer.h"
@@ -195,6 +193,15 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
   int depth = getDepth(s);
 
   LOG_DBG("DAV", "PROPFIND %s depth=%d", path.c_str(), depth);
+
+  // As for every other method. Without it a listing of /.crosspoint (or CROSSP~1) named the
+  // credential stores and gave their sizes. The children of a folder that passes need no more than
+  // the name filter below: the credential stores live only under /.crosspoint.
+  // Ported from crosspoint-reader PR #4263 by John Stader (@jstader).
+  if (isProtectedPath(path)) {
+    s.send(403, "text/plain", "Forbidden");
+    return;
+  }
 
   // Check if path exists
   if (!Storage.exists(path.c_str()) && path != "/") {
@@ -403,7 +410,7 @@ void WebDAVHandler::handlePut(WebServer& s) {
     return;
   }
 
-  clearEpubCacheIfNeeded(path);
+  clearBookCacheIfNeeded(path);
   s.send(_putExisted ? 204 : 201);
   LOG_DBG("DAV", "PUT complete: %s", path.c_str());
 }
@@ -453,7 +460,7 @@ void WebDAVHandler::handleDelete(WebServer& s) {
   } else {
     file.close();
     if (Storage.remove(path.c_str())) {
-      clearEpubCacheIfNeeded(path);  // where the book was left goes only with the book
+      clearBookCacheIfNeeded(path);  // where the book was left goes only with the book
       s.send(204);
     } else {
       s.send(500, "text/plain", "Failed to delete file");
@@ -558,7 +565,7 @@ void WebDAVHandler::handleMove(WebServer& s) {
 
   if (success) {
     // The book replaced takes its reading state with it, once it really is gone.
-    if (dstExists) clearEpubCacheIfNeeded(dstPath);
+    if (dstExists) clearBookCacheIfNeeded(dstPath);
     // Like a move in the File Manager: the book keeps its position, bookmarks and stats.
     BookRelocation::moved(srcPath.c_str(), dstPath.c_str());
     s.send(dstExists ? 204 : 201);
@@ -646,7 +653,14 @@ void WebDAVHandler::handleCopy(WebServer& s) {
   while (srcFile.available()) {
     HalSystem::feedWatchdog();
     int bytesRead = srcFile.read(buf, sizeof(buf));
-    if (bytesRead <= 0) break;
+    if (bytesRead <= 0) {
+      // available() said there was more, so this is a failed read, not the end of the file. It
+      // used to end the copy as a success, and the cut-short copy replaced the destination.
+      // Ported from crosspoint-reader PR #4472 by Justin Mitchell (@itsthisjustin).
+      LOG_ERR("DAV", "COPY %s: read failed", srcPath.c_str());
+      copyOk = false;
+      break;
+    }
     size_t written = dstFile.write(buf, bytesRead);
     if (written != (size_t)bytesRead) {
       copyOk = false;
@@ -658,6 +672,10 @@ void WebDAVHandler::handleCopy(WebServer& s) {
   if (!dstFile.close()) copyOk = false;
 
   if (copyOk && FileReplace::replace(tempPath.c_str(), dstPath.c_str())) {
+    // As after a PUT: what the reader kept for a book at this path (position, bookmarks, laid-out
+    // chapters) is not about these bytes. A book copied over another used to keep the other's.
+    // Ported from crosspoint-reader PR #4472 by Justin Mitchell (@itsthisjustin).
+    clearBookCacheIfNeeded(dstPath);
     s.send(dstExists ? 204 : 201);
   } else {
     Storage.remove(tempPath.c_str());
@@ -794,23 +812,6 @@ bool WebDAVHandler::getOverwrite(WebServer& s) const {
   String ow = s.header("Overwrite");
   if (ow == "F" || ow == "f") return false;
   return true;  // Default is T
-}
-
-void WebDAVHandler::clearEpubCacheIfNeeded(const String& path) const {
-  if (FsHelpers::hasEpubExtension(path)) {
-    Epub(path.c_str(), "/.crosspoint").clearCache();
-    LOG_DBG("DAV", "Cleared epub cache for: %s", path.c_str());
-  } else if (FsHelpers::hasXtcExtension(path)) {
-    Xtc(path.c_str(), "/.crosspoint").clearCache();
-    LOG_DBG("DAV", "Cleared xtc cache for: %s", path.c_str());
-  } else if (FsHelpers::hasTxtExtension(path) || FsHelpers::hasMarkdownExtension(path)) {
-    const Txt txt(path.c_str(), "/.crosspoint");
-    const String cachePath = txt.getCachePath().c_str();
-    if (Storage.exists(cachePath.c_str())) {
-      Storage.removeDir(cachePath.c_str());
-      LOG_DBG("DAV", "Cleared txt cache for: %s", path.c_str());
-    }
-  }
 }
 
 String WebDAVHandler::getMimeType(const String& path) const {

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <BookCache.h>
 #include <BuildArena.h>
 #include <FileIndex.h>
 
@@ -32,7 +31,6 @@ class FileBrowserActivity final : public UiListActivity {
   using Mode = FileBrowserModel::Mode;
 
  private:
-  void clearFileMetadata(const std::string& fullPath, BookCache::Keep keep = BookCache::Keep::Nothing);
   bool removeDirRecursive(const std::string& fullPath);
   void openContextMenu();
   void handleContextMenuAction(int action, const std::string& fullPath, const std::string& entry,
