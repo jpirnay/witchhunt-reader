@@ -795,7 +795,7 @@ void ReaderActivity::goToLibrary(const std::string& fromBookPath) {
   activityManager.goToLibrary(LibraryTab::Books, std::move(initialPath));
 }
 
-void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub) {
+void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub, const std::optional<ShownIndexingPopup> popup) {
   const auto epubPath = epub->getPath();
   currentBookPath = epubPath;
 
@@ -836,7 +836,9 @@ void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub) {
   }
 
   logReaderLaunchMemSnapshot("before_replace_epub_reader");
-  activityManager.replaceActivity(std::make_unique<EpubReaderActivity>(renderer, mappedInput, std::move(epub)));
+  auto reader = std::make_unique<EpubReaderActivity>(renderer, mappedInput, std::move(epub));
+  if (popup) reader->noteIndexingPopupOnScreen(popup->frame, popup->orientation);
+  activityManager.replaceActivity(std::move(reader));
 }
 
 void ReaderActivity::onGoToBmpViewer(const std::string& path) {
@@ -969,12 +971,16 @@ void ReaderActivity::onEnter() {
       indexingPopup = GUI.drawPopup(renderer, tr(STR_INDEXING));
     }
     // The popup's progress bar, for a build long enough to want one (IndexingProgressGate): drawn
-    // at the end of a build phase over the frame on screen, a FAST refresh each.
+    // at the end of a build phase over the frame on screen, a FAST refresh each. `shownFrame` follows
+    // the frames the popup is shown in, for the reader that keeps it on screen (ShownIndexingPopup).
     struct IndexingProgress {
       const GfxRenderer& renderer;
       Rect popup;
       IndexingProgressGate gate;
-    } indexingProgress{renderer, indexingPopup, IndexingProgressGate(millis())};
+      uint32_t shownFrame;
+      GfxRenderer::Orientation orientation;
+    } indexingProgress{renderer, indexingPopup, IndexingProgressGate(millis()), renderer.framesShipped(),
+                       renderer.getHeldOrientation()};
     const auto onBuildProgress = [](void* ctx, const uint8_t percent) {
       auto* p = static_cast<IndexingProgress*>(ctx);
       if (!p->gate.shouldDraw(millis(), percent)) return;
@@ -982,6 +988,7 @@ void ReaderActivity::onEnter() {
       // A refresh swaps the buffers where the secondary was not lent: draw over what is shown.
       p->renderer.syncWriteBufferFromDisplayed();
       GUI.fillPopupProgress(p->renderer, p->popup, percent);
+      p->shownFrame = p->renderer.framesShipped();
       LOG_DBG("READER", "Indexing progress %u%%", static_cast<unsigned>(percent));
     };
     // First-open indexing allocates per-spine transient state — the batch-size-lookup vectors
@@ -1055,7 +1062,9 @@ void ReaderActivity::onEnter() {
     // Stamped after every load path above (warm cache, first-open index build, and the
     // drop-and-reload retry) so `book` is the true cost of getting a usable Epub.
     WakeTrace::mark(WakeTrace::Phase::BookLoaded);
-    onGoToEpubReader(std::move(epub));
+    std::optional<ShownIndexingPopup> shownPopup;
+    if (indexing) shownPopup = ShownIndexingPopup{indexingProgress.shownFrame, indexingProgress.orientation};
+    onGoToEpubReader(std::move(epub), shownPopup);
   }
 }
 

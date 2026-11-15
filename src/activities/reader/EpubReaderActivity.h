@@ -501,6 +501,16 @@ class EpubReaderActivity final : public Activity {
     int contentTop = 0;
   };
   BuildPageOnScreen buildPageOnScreen_;
+  // The first open's Indexing popup, drawn by ReaderActivity before the book was indexed: the panel's frame count with
+  // it on screen, and the orientation it was drawn in. The chapter build that follows leaves it there rather than paint
+  // the same popup again, while nothing else has been drawn since (indexingPopupStillShown).
+  struct IndexingPopupOnScreen {
+    bool set = false;
+    uint32_t frame = 0;
+    GfxRenderer::Orientation orientation = GfxRenderer::Portrait;
+  };
+  IndexingPopupOnScreen indexingPopupOnScreen_;
+  bool indexingPopupStillShown() const;
   // keepBuildPageOnScreen() owes the page's AA pass on a panel that otherwise draws AA inline: the pass asks for the
   // next page's pre-render once it is done, as it does on the deferred-AA panels.
   bool preRenderAfterAa_ = false;
@@ -1403,6 +1413,12 @@ class EpubReaderActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&& lock) override;
+
+  // ReaderActivity's Indexing popup is the frame on the panel: framesShipped() was `frame` with it shown, in
+  // `orientation`. Set before the activity starts.
+  void noteIndexingPopupOnScreen(const uint32_t frame, const GfxRenderer::Orientation orientation) {
+    indexingPopupOnScreen_ = {true, frame, orientation};
+  }
 
   // Hands Background-B's borrow back before a child activity (the reader menu and everything
   // reachable from it) is pushed on top.

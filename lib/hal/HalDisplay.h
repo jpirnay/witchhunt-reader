@@ -67,6 +67,9 @@ class HalDisplay {
   bool isRedRamSynced() const;
   // Diagnostics: effective refresh mode of the last refresh (after any downgrade).
   RefreshMode getLastRefreshMode() const;
+  // Frames shipped to the panel since boot, every refresh path counted. Unchanged between two reads: nothing has been
+  // drawn on the panel in between.
+  uint32_t framesShipped() const;
   // Measured duration of the last FAST refresh, 0 if none has run yet. See lastFastRefreshMs.
   uint16_t getLastFastRefreshMs() const { return lastFastRefreshMs; }
   // Seed the measurement from persisted storage so the first decision after a boot is as good as

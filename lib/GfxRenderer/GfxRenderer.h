@@ -581,6 +581,8 @@ class GfxRenderer {
   bool isRedRamSynced() const { return display.isRedRamSynced(); }
   // Diagnostics: effective refresh mode of the last refresh (after any downgrade).
   HalDisplay::RefreshMode getLastRefreshMode() const { return display.getLastRefreshMode(); }
+  // See HalDisplay::framesShipped().
+  uint32_t framesShipped() const { return display.framesShipped(); }
   // Diagnostics: last X4 displayMode byte (0x0C fast / 0x1C OTP-flash / 0xD4 half / 0x34 full).
   uint8_t getLastDisplayModeByte() const { return display.getLastDisplayModeByte(); }
   void displayWindow(int x, int y, int width, int height, bool turnOffScreen = false) const;

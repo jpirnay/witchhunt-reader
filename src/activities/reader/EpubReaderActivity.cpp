@@ -5586,6 +5586,14 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       buildDisplayedPage_ = -1;
       buildPageOnScreen_ = {};
       buildingPopupShown_ = popupBeforeBuild;
+      // The first open's Indexing popup is still the frame on the panel: the deferred popup would paint the same box
+      // over it, a FAST refresh the build waits out (X4 Pro, 2026-11-15: 1,061 ms, the first page that much later).
+      // The popup on screen is then this build's, with the HALF owed to the first content page as for one it drew.
+      if (!popupBeforeBuild && indexingPopupStillShown()) {
+        buildingPopupShown_ = true;
+        LOG_INF("ERS", "Background-C: spine %d keeps the first open's Indexing popup", currentSpineIndex);
+      }
+      indexingPopupOnScreen_.set = false;
       // Kick the build off so hasActiveBuild() is true (a resumed B build already is). One slice
       // may already finish a tiny section, in which case we fall through to a normal render.
       Section::BuildStep step = Section::BuildStep::More;
@@ -5896,6 +5904,11 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
 
 void EpubReaderActivity::pinPageProgression() {
   pageProgressionRtl_.store(section ? section->flowContext().pageProgressionRtl : false);
+}
+
+bool EpubReaderActivity::indexingPopupStillShown() const {
+  return indexingPopupOnScreen_.set && indexingPopupOnScreen_.frame == renderer.framesShipped() &&
+         indexingPopupOnScreen_.orientation == renderer.getHeldOrientation();
 }
 
 void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const RenderLayout& layout) {
