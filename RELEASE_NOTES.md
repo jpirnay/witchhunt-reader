@@ -70,7 +70,8 @@ Read the upgrade notes at the end of this section before you update.
 - **Check for updates on 2.51 installs 2.52.** On 2.38 to 2.50, install once by hand, as under 2.51.
 - **Each book is indexed and laid out once more** on first open. Progress, bookmarks and settings are kept.
 - **Confirm opens the reader bars**, not the menu. For the old way, bind Reader Menu under Controls → Button Actions.
-- **Bookmarks** use a new file format; older files load, and older bookmarks keep their page number.
+- **Bookmarks** use a new file format; older files load, and older bookmarks are anchored to their text the first
+  time their chapter is opened.
 - **Delete Book Cache** with Reset now also resets the book's own settings.
 - **Going back to 2.51** empties the recent list, ignores books' own settings and hides bookmarks changed on 2.52.
 - **The web interface installs its pages again** on your first visit; for hotspot mode, have `web-….bin` ready.
