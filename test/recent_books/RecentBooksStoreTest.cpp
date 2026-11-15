@@ -160,6 +160,32 @@ TEST_F(RecentBooksStoreTest, HomePassesOverAGoneBookAndTheLibraryDropsIt) {
   EXPECT_EQ(2u, RECENT_BOOKS.count()) << "the Library's page drops it";
 }
 
+// The crash report opens in the text reader, from Browse Files, but is not a book: it stays off Home and the Library's
+// Recent tab (FirmwareFiles).
+TEST_F(RecentBooksStoreTest, TheCrashReportIsNotARecentBook) {
+  open("a");
+  RECENT_BOOKS.addBook("/crash_report.txt", "crash_report.txt", "", "", "");
+  RECENT_BOOKS.addBook("/fonts/Inter/OFL.txt", "OFL.txt", "", "", "");
+  EXPECT_EQ(1u, RECENT_BOOKS.count());
+  EXPECT_TRUE(RECENT_BOOKS.getBookByPath("/crash_report.txt").path.empty());
+}
+
+// One opened before addBook() left it out is dropped the first time Home or the Library reads past it.
+TEST_F(RecentBooksStoreTest, ACrashReportAlreadyListedIsDropped) {
+  std::ofstream(jsonPath) << R"({"books":[]})";
+  LegacyRecentBook report;
+  report.book.path = "/crash_report.txt";
+  report.book.title = "T crash";
+  LegacyRecentBook book;
+  book.book.path = bookAt("kept");
+  book.book.title = "T kept";
+  g_legacy = {report, book};
+
+  EXPECT_EQ((std::vector<std::string>{"kept"}), homeNames());
+  EXPECT_EQ(1u, RECENT_BOOKS.count()) << "Home drops it, where a book merely gone from the card keeps its row";
+  EXPECT_EQ((std::vector<std::string>{"kept"}), pageNames(RecentBooksStore::kNewest, 10));
+}
+
 TEST_F(RecentBooksStoreTest, TheLibraryPagesThroughTheListByTheSeqAPageEndedOn) {
   for (int i = 0; i < 25; ++i) open("p" + std::to_string(i));
   uint32_t last = 0;

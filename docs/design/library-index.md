@@ -69,7 +69,10 @@ the walk needs the lent secondary framebuffer, one phase at a time. Working file
 
 1. **Walk.** Depth first, at most 8 levels, by the Books tab's rules (books only; hidden entries only
    when shown; never `.crosspoint`, `System Volume Information` or `XTCache`, at any depth and
-   whatever the hidden setting: `ProtectedPaths::holdsNoBooks`). Each folder is listed twice: first
+   whatever the hidden setting: `ProtectedPaths::holdsNoBooks`). At the root it also leaves out what
+   the firmware keeps there for itself, which the Books tab still lists: the folders `fonts`,
+   `dictionaries`, `plugins` (and their dot spellings), `sleep`, `.sleep` and `screenshots`, and
+   `crash_report.txt` (`FirmwareFiles`). Each folder is listed twice: first
    its `.opf` sidecars into a table of 128 per folder, then its books, staged with identity, date,
    sidecar signature and path.
    At most 2,000 books (`library::MAX_BOOKS`); past that the index is marked partial.
@@ -109,7 +112,8 @@ brings its own -- and built again only for a reason (`LibraryStaleness::rebuildN
   lists a book or folder dated later than the header's `newestDate` -- the newest book or folder the
   walk saw -- it is not in the index, and is counted as a change (`LibraryFreshness::checkListedEntry`,
   `HalStorage::noteFoundChange`). Folders count too, so a folder made on the device after its books is
-  no false alarm. Not checked below the walk's depth, nor against a partial index. A copy that keeps an
+  no false alarm. Not checked below the walk's depth, nor against a partial index, nor for the
+  firmware's own files, which the walk leaves out. A copy that keeps an
   old date, or a book removed where the firmware did not see it, is not caught this way: New drops a
   missing book on load, and **Refresh library** (Options on New and Authors,
   `FileBrowserActivity::refreshLibrary`) builds the index again whatever the marker says, resolving

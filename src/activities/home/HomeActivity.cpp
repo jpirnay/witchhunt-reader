@@ -573,6 +573,7 @@ bool HomeActivity::storeCoverBuffer() {
     return false;
   }
   coverBufferSize = needed;
+  coverBufferInverted = renderer.isOutputInverted();
   if (!renderer.copyRegionToBuffer(coverRectX, coverRectY, coverRectW, coverRectH, coverBuffer, coverBufferSize)) {
     free(coverBuffer);
     coverBuffer = nullptr;
@@ -762,6 +763,13 @@ void HomeActivity::render(RenderLock&&) {
   }
 
   renderer.clearScreen();
+  // Dark Mode turned on or off over Home (the light drawer, the slide switch, a Scheduled boundary):
+  // the snapshot holds the cover inverted for the other polarity. Ported from crosspoint-reader PR
+  // #4329 (Mikalai Kryvusha).
+  if (coverBufferStored && coverBufferInverted != renderer.isOutputInverted()) {
+    freeCoverBuffer();
+    coverRendered = false;
+  }
   // Only while coverRendered still vouches for the stored pixels. A cover decoded since they were
   // stored clears it (yieldAfterDecode) but leaves the buffer, which still holds the placeholder:
   // restored, its edge showed through the new cover, whose white pixels do not overwrite.

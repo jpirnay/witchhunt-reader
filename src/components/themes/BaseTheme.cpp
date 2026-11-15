@@ -226,6 +226,15 @@ BaseTheme::FittedHintLabel BaseTheme::fitHintLabel(const GfxRenderer& renderer, 
   return {fitted, renderer.truncatedText(fitted, label, maxWidth)};
 }
 
+BaseTheme::FittedMessage BaseTheme::fitMessage(const GfxRenderer& renderer, const char* text, const int fontId,
+                                               const int smallerFontId, const int maxWidth, const int maxLines,
+                                               const bool bold) {
+  const EpdFontFamily::Style style = bold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
+  const int width = std::max(1, maxWidth);
+  const int fitted = renderer.getTextWidth(fontId, text, style) <= width ? fontId : smallerFontId;
+  return {fitted, renderer.wrappedText(fitted, text, width, maxLines, style)};
+}
+
 void BaseTheme::layOutButtonHints(const GfxRenderer& renderer, const int fontId, const int base, const int (&tuned)[4],
                                   const char* const (&labels)[4], int (&x)[4], int (&width)[4]) {
   const int maxWidth = HintLayout::bottomMaxWidth(renderer.getScreenWidth(), base, tuned);
@@ -966,11 +975,25 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
       renderer.drawCenteredText(UI_10_FONT_ID, continueY, tr(STR_CONTINUE_READING), !bookSelected);
     }
   } else {
-    // No book to continue reading
-    const int y =
-        bookY + (bookHeight - renderer.getLineHeight(UI_12_FONT_ID) - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
-    renderer.drawCenteredText(UI_12_FONT_ID, y, "No open book");
-    renderer.drawCenteredText(UI_10_FONT_ID, y + renderer.getLineHeight(UI_12_FONT_ID), "Start reading below");
+    // No book to continue reading. Each line stays inside the card: a size smaller when it does not
+    // fit, wrapped only when even that does not. German's "Aktuell kein Buch geöffnet" is twice
+    // the length of "No open book". Ported from crosspoint-reader PR #4330 (Mikalai Kryvusha).
+    const int textWidth = bookWidth - 16;
+    const FittedMessage title = fitMessage(renderer, tr(STR_NO_OPEN_BOOK), UI_12_FONT_ID, UI_10_FONT_ID, textWidth, 3);
+    const FittedMessage hint = fitMessage(renderer, tr(STR_START_READING), UI_10_FONT_ID, SMALL_FONT_ID, textWidth, 3);
+    const int titleLineHeight = renderer.getLineHeight(title.fontId);
+    const int hintLineHeight = renderer.getLineHeight(hint.fontId);
+    const int blockHeight =
+        static_cast<int>(title.lines.size()) * titleLineHeight + static_cast<int>(hint.lines.size()) * hintLineHeight;
+    int y = bookY + (bookHeight - blockHeight) / 2;
+    for (const auto& line : title.lines) {
+      renderer.drawCenteredText(title.fontId, y, line.c_str());
+      y += titleLineHeight;
+    }
+    for (const auto& line : hint.lines) {
+      renderer.drawCenteredText(hint.fontId, y, line.c_str());
+      y += hintLineHeight;
+    }
   }
 }
 

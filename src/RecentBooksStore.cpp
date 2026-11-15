@@ -1,5 +1,6 @@
 #include "RecentBooksStore.h"
 
+#include <FirmwareFiles.h>
 #include <HalStorage.h>
 #include <HeapFit.h>
 #include <Logging.h>
@@ -206,6 +207,8 @@ bool openList(File& file, const char* const binPathSet, const char* const jsonPa
 void RecentBooksStore::addBook(const std::string& path, const std::string& title, const std::string& author,
                                const std::string& series, const std::string& coverBmpPath) {
   if (SerialTestApi::isTestBook(path)) return;  // a device test's book takes no reader's book's place
+  // The crash report opens in the text reader, from Browse Files, but is not a book: it stays off Home.
+  if (FirmwareFiles::isFirmwareFile(path)) return;
   RecentBook book{path, title, author, series, coverBmpPath};
   // Stamped with the sidecar its metadata came from, so newestBooks() does not redo it.
   book.metadataStamp = RecentBookMetadata::openStamp(path);
@@ -291,7 +294,13 @@ std::vector<RecentBook> RecentBooksStore::newestBooks(const size_t max) {
     for (uint8_t i = 0; i < picked && out.size() < max; ++i) {
       before = picks[i].entry.seq;
       RecentBook book;
-      if (!readRow(file, picks[i], book) || isMissing(book)) continue;
+      if (!readRow(file, picks[i], book)) continue;
+      if (FirmwareFiles::isFirmwareFile(book.path)) {
+        // Opened before addBook() left such files out: off the list for good.
+        file.writeEntry(picks[i].slot, Entry{});
+        continue;
+      }
+      if (isMissing(book)) continue;
       if (std::any_of(out.begin(), out.end(), [&](const RecentBook& seen) { return seen.path == book.path; })) continue;
       if (RecentBookMetadata::refreshFromSidecar(book)) file.writeSlot(picks[i].slot, book);
       out.push_back(std::move(book));
@@ -313,8 +322,9 @@ void RecentBooksStore::rowsBefore(const uint32_t before, const size_t max, std::
       cursor = picks[i].entry.seq;
       RecentBook book;
       if (!readRow(file, picks[i], book)) continue;
-      if (isMissing(book)) {
-        // Gone from the card: off the list for good, as the Library's Recent tab always took them.
+      if (isMissing(book) || FirmwareFiles::isFirmwareFile(book.path)) {
+        // Gone from the card: off the list for good, as the Library's Recent tab always took them. The
+        // firmware's own files the same: opened before addBook() left them out.
         file.writeEntry(picks[i].slot, Entry{});
         continue;
       }

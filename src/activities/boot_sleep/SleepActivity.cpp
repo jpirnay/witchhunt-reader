@@ -28,6 +28,7 @@
 #include "../reader/XtcReaderActivity.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "SleepImagePlacement.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/Logo120.h"
@@ -763,46 +764,18 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
 }
 
 void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOverlayInfo& overlayInfo) const {
-  int x, y;
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
-  float cropX = 0, cropY = 0;
+  const auto placement =
+      SleepImagePlacement::place(bitmap.getWidth(), bitmap.getHeight(), pageWidth, pageHeight,
+                                 SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP);
+  const int x = placement.x;
+  const int y = placement.y;
+  const float cropX = placement.cropX;
+  const float cropY = placement.cropY;
 
-  LOG_DBG("SLP", "bitmap %d x %d, screen %d x %d", bitmap.getWidth(), bitmap.getHeight(), pageWidth, pageHeight);
-  if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
-    // image will scale, make sure placement is right
-    float ratio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
-    const float screenRatio = static_cast<float>(pageWidth) / static_cast<float>(pageHeight);
-
-    LOG_DBG("SLP", "bitmap ratio: %f, screen ratio: %f", ratio, screenRatio);
-    if (ratio > screenRatio) {
-      // image wider than viewport ratio, scaled down image needs to be centered vertically
-      if (SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP) {
-        cropX = 1.0f - (screenRatio / ratio);
-        LOG_DBG("SLP", "Cropping bitmap x: %f", cropX);
-        ratio = (1.0f - cropX) * static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
-      }
-      x = 0;
-      y = std::round((static_cast<float>(pageHeight) - static_cast<float>(pageWidth) / ratio) / 2);
-      LOG_DBG("SLP", "Centering with ratio %f to y=%d", ratio, y);
-    } else {
-      // image taller than viewport ratio, scaled down image needs to be centered horizontally
-      if (SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP) {
-        cropY = 1.0f - (ratio / screenRatio);
-        LOG_DBG("SLP", "Cropping bitmap y: %f", cropY);
-        ratio = static_cast<float>(bitmap.getWidth()) / ((1.0f - cropY) * static_cast<float>(bitmap.getHeight()));
-      }
-      x = std::round((static_cast<float>(pageWidth) - static_cast<float>(pageHeight) * ratio) / 2);
-      y = 0;
-      LOG_DBG("SLP", "Centering with ratio %f to x=%d", ratio, x);
-    }
-  } else {
-    // center the image
-    x = (pageWidth - bitmap.getWidth()) / 2;
-    y = (pageHeight - bitmap.getHeight()) / 2;
-  }
-
-  LOG_DBG("SLP", "drawing to %d x %d", x, y);
+  LOG_DBG("SLP", "bitmap %d x %d, screen %d x %d: drawing to %d x %d, crop %f x %f", bitmap.getWidth(),
+          bitmap.getHeight(), pageWidth, pageHeight, x, y, cropX, cropY);
   renderer.clearScreen();
 
   // The tone filters are greyscale modes too: they change how levels are derived, not
@@ -1152,25 +1125,11 @@ void SleepActivity::renderOverlaySleepScreen() const {
       return false;
     }
 
-    int x, y;
-    float cropX = 0, cropY = 0;
-    if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
-      float ratio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
-      const float screenRatio = static_cast<float>(pageWidth) / static_cast<float>(pageHeight);
-      if (ratio > screenRatio) {
-        x = 0;
-        y = std::round((static_cast<float>(pageHeight) - static_cast<float>(pageWidth) / ratio) / 2);
-      } else {
-        x = std::round((static_cast<float>(pageWidth) - static_cast<float>(pageHeight) * ratio) / 2);
-        y = 0;
-      }
-    } else {
-      x = (pageWidth - bitmap.getWidth()) / 2;
-      y = (pageHeight - bitmap.getHeight()) / 2;
-    }
+    const auto placement =
+        SleepImagePlacement::place(bitmap.getWidth(), bitmap.getHeight(), pageWidth, pageHeight, /*crop=*/false);
 
     // Draw without clearScreen so the reader page remains in the frame buffer beneath
-    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+    renderer.drawBitmap(bitmap, placement.x, placement.y, pageWidth, pageHeight, 0, 0);
     file.close();
     return true;
   };

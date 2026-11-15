@@ -302,6 +302,16 @@ class BaseTheme {
   };
   static FittedHintLabel fitHintLabel(const GfxRenderer& renderer, int fontId, const char* label, int maxWidth);
 
+  // A short message on a card `maxWidth` wide, the empty recent-book card's: in `fontId` when it
+  // fits on one line, else in `smallerFontId`, wrapped over at most `maxLines` lines when even that
+  // does not. A translation can run well past the English the card was drawn around.
+  struct FittedMessage {
+    int fontId;
+    std::vector<std::string> lines;
+  };
+  static FittedMessage fitMessage(const GfxRenderer& renderer, const char* text, int fontId, int smallerFontId,
+                                  int maxWidth, int maxLines, bool bold = false);
+
   // Where each bottom box goes and how wide it is: as wide as its label needs in `fontId`, up to
   // a fair quarter of the panel, laid out around the `tuned` positions. Empty labels keep `base`.
   static void layOutButtonHints(const GfxRenderer& renderer, int fontId, int base, const int (&tuned)[4],
