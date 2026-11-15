@@ -490,6 +490,21 @@ class EpubReaderActivity final : public Activity {
   // Page last drawn by the SectionBuilding pass (-1 = none yet / popup showing). Stops the
   // pass redrawing the same page every idle tick.
   int buildDisplayedPage_ = -1;
+  // The page displayBuildPage() last put on the panel, where it drew it (spine -1: none, or the popup since). When the
+  // build ends on it, it stays there with its provisional page count instead of being drawn again
+  // (keepBuildPageOnScreen).
+  struct BuildPageOnScreen {
+    int spine = -1;
+    int page = -1;
+    bool hasImages = false;
+    int marginLeft = 0;
+    int contentTop = 0;
+  };
+  BuildPageOnScreen buildPageOnScreen_;
+  // keepBuildPageOnScreen() owes the page's AA pass on a panel that otherwise draws AA inline: the pass asks for the
+  // next page's pre-render once it is done, as it does on the deferred-AA panels.
+  bool preRenderAfterAa_ = false;
+  bool keepBuildPageOnScreen();
   // The text a relayout or a sync landed on (noteLandedText). Cleared by a page turn.
   struct LandedText {
     int spine = -1;
