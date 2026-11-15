@@ -65,6 +65,26 @@ void settle(BookmarkStore& store, const size_t index, const Section& section, co
   store.movePage(index, *page, section.layoutFingerprint(), section.pageCount);
 }
 
+// A bookmark from older firmware (no anchor: layout 0, no XPath) whose chapter is shown complete for the first time:
+// its page is taken as counted in this layout, and its text is named from there as a new bookmark's is (parseNext()).
+// A page past the chapter's end is left as it is: this layout has no such page, and one that has it takes it later.
+// True when anything changed.
+bool anchorOlder(BookmarkStore& store, const size_t index, const Section& section, const int spineIndex) {
+  const uint16_t page = store.getAll()[index].pageNumber;
+  if (page >= section.pageCount) return false;
+  const auto offset = section.getVisibleTextOffsetForPage(page);
+  if (!offset) {
+    store.noteMappingFailed(index);
+    return true;
+  }
+  store.setOffset(index, *offset, Section::formatVersion());
+  store.movePage(index, page, section.layoutFingerprint(), section.pageCount);
+  store.noteNameOwed(index);
+  LOG_INF("STAR", "Spine %d: older bookmark on page %u anchored at offset %u", spineIndex, static_cast<unsigned>(page),
+          static_cast<unsigned>(*offset));
+  return true;
+}
+
 }  // namespace
 
 std::optional<uint32_t> knownOffset(const StarAnchor& anchor) {
@@ -111,7 +131,11 @@ bool settleKnown(BookmarkStore& store, const Section& section, const int spineIn
   bool changed = false;
   for (size_t i = 0; i < stars.size(); i++) {
     const StarAnchor& anchor = anchors[i];
-    if (stars[i].spineIndex != spineIndex || anchor.layout == 0 || anchor.mappingFailed) continue;
+    if (stars[i].spineIndex != spineIndex || anchor.mappingFailed) continue;
+    if (anchor.layout == 0) {
+      if (anchor.xpath.empty() && anchorOlder(store, i, section, spineIndex)) changed = true;
+      continue;
+    }
     if (standsIn(anchor, section)) continue;
     if (!knownOffset(anchor)) {
       if (anchor.layout != section.layoutFingerprint() || !anchor.xpath.empty()) continue;  // for parseNext()
