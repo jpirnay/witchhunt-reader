@@ -2644,7 +2644,7 @@ int Epub::resolveHrefToSpineIndex(const std::string& href) const {
   // Same-file reference (anchor-only)
   if (target.empty()) return -1;
 
-  // The first spine item that matches exactly or by filename alone: in-book links are kept as
+  // The spine item at this path, else the first one with its filename: in-book links are kept as
   // written, relative to their own document.
   return bookMetadataCache->findSpineIndexByHref(target, true);
 }

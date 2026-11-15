@@ -301,3 +301,21 @@ TEST_F(TocSource, InBookLinksStillResolveByFilename) {
   EXPECT_EQ(epub->resolveHrefToSpineIndex("nowhere.xhtml"), -1);
   EXPECT_EQ(epub->resolveHrefToSpineIndex("#same-file"), -1);
 }
+
+// Two spine items with one filename in different folders: a link to the later one by its full path
+// opened the earlier one, which matched first by filename. From crosspoint-reader PR #4472 (Justin
+// Mitchell).
+TEST_F(TocSource, AnExactPathWinsOverAnEarlierItemWithTheSameFilename) {
+  BookShape shape;
+  shape.spine = chapters(2);
+  shape.spine.push_back("text/a/ch01.xhtml");  // 2
+  shape.spine.push_back("text/b/ch01.xhtml");  // 3
+  shape.nav = links({0, 1}, "Chapter");
+  writeBook(shape);
+
+  const auto epub = open();
+  EXPECT_EQ(epub->resolveHrefToSpineIndex("OEBPS/text/b/ch01.xhtml#note"), 3);
+  EXPECT_EQ(epub->resolveHrefToSpineIndex("OEBPS/text/a/ch01.xhtml"), 2);
+  // No item at that path: the first with the filename, as before.
+  EXPECT_EQ(epub->resolveHrefToSpineIndex("OEBPS/ch01.xhtml"), 2);
+}

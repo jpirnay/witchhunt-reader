@@ -819,13 +819,20 @@ int BookMetadataCache::findSpineIndexByHref(const std::string_view target, const
   bookFile.seek(firstRecord);
   serialization::BufferedFileReader in(bookFile, SPINE_SCAN_WINDOW_BYTES);
   std::string href;
+  // An exact path anywhere in the spine wins over the first item that only shares the filename: a
+  // link to Text/b/ch01.xhtml must not open an earlier Text/a/ch01.xhtml. Still one pass; it reads
+  // to the end only when no item matches exactly. Ported from crosspoint-reader PR #4472 by Justin
+  // Mitchell.
+  int filenameMatch = -1;
   for (int i = 0; i < static_cast<int>(spineCount); i++) {
     if (!in.readString(href)) return -1;
     in.seek(in.position() + BOOK_SPINE_FIXED_BYTES);
-    const bool found = byFilename ? spine_href::match(target, href) != SpineHrefMatch::None : href == target;
-    if (found) return i;
+    if (href == target) return i;
+    if (byFilename && filenameMatch < 0 && spine_href::match(target, href) == SpineHrefMatch::Filename) {
+      filenameMatch = i;
+    }
   }
-  return -1;
+  return filenameMatch;
 }
 
 int BookMetadataCache::largestSpineIndex() {
