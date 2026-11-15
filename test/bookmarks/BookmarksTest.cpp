@@ -7,6 +7,7 @@
 #include <esp_heap_caps.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <new>
@@ -65,11 +66,34 @@ std::string indexFile(const uint16_t count, const std::string& body) {
   put16(out, count);
   return out + body;
 }
-std::string storeFile(const uint16_t count, const std::string& body) {
-  std::string out(1, '\x02');
+std::string storeFile(const uint16_t count, const std::string& body, const char version = '\x02') {
+  std::string out(1, version);
   put16(out, count);
   return out + body;
 }
+void put32(std::string& out, const uint32_t v) {
+  put16(out, static_cast<uint16_t>(v & 0xFFFF));
+  put16(out, static_cast<uint16_t>(v >> 16));
+}
+// What follows a bookmark from version 3 on.
+void putAnchor(std::string& out, const uint32_t layout, const uint16_t pageCount, const std::string& xpath) {
+  put32(out, layout);
+  put16(out, pageCount);
+  putString(out, xpath);
+}
+StarAnchor anchorOf(const uint32_t layout, const uint16_t pageCount, std::string xpath) {
+  StarAnchor anchor;
+  anchor.layout = layout;
+  anchor.pageCount = pageCount;
+  anchor.xpath = std::move(xpath);
+  return anchor;
+}
+// What version 4 adds after the XPath.
+void putOffset(std::string& out, const uint8_t format, const uint32_t offset) {
+  out.push_back(static_cast<char>(format));
+  put32(out, offset);
+}
+constexpr char kXPath[] = "/body/DocFragment[6]/body/p[31]/text()[1].851";
 
 std::vector<BookmarkStore::Bookmark> oneBookmark() { return {{3, 4, "mine"}}; }
 
@@ -311,4 +335,223 @@ TEST_F(Bookmarks, AFailedStoreSaveKeepsTheFileItWouldHaveReplaced) {
   store.save();
   EXPECT_EQ(Storage.content(kStorePath), file);
   EXPECT_FALSE(Storage.exists("/.crosspoint/epub_1/bookmarks.bin.part"));
+}
+
+// ---- What finds a starred page's text again (version 3)
+
+TEST_F(Bookmarks, AStoreKeepsEachStarsAnchor) {
+  BookmarkStore store;
+  store.load(kCache);
+  ASSERT_TRUE(store.toggle(5, 6, anchorOf(0xC0FFEEu, 41, kXPath)));
+  store.toggle(7, 8);  // a TXT-style star: nothing to find it by but its page
+  store.save();
+  BookmarkStore again;
+  again.load(kCache);
+  ASSERT_EQ(again.getAll().size(), 2u);
+  ASSERT_EQ(again.getAnchors().size(), 2u);
+  EXPECT_EQ(again.getAnchors()[0].layout, 0xC0FFEEu);
+  EXPECT_EQ(again.getAnchors()[0].pageCount, 41);
+  EXPECT_EQ(again.getAnchors()[0].xpath, kXPath);
+  EXPECT_EQ(again.getAnchors()[1].layout, 0u);
+  EXPECT_TRUE(again.getAnchors()[1].xpath.empty());
+}
+
+TEST_F(Bookmarks, AStoreFromTheSecondFormatReadsWithoutAnchorsAndKeepsItsNames) {
+  std::string body;
+  putBookmark(body, 1, 2, "first");
+  putBookmark(body, 3, 4, "second");
+  Storage.put(kStorePath, storeFile(2, body));
+  BookmarkStore store;
+  store.load(kCache);
+  ASSERT_EQ(store.getAll().size(), 2u);
+  ASSERT_EQ(store.getAnchors().size(), 2u);
+  EXPECT_EQ(store.getAll()[1].name, "second");
+  EXPECT_EQ(store.getAnchors()[1].layout, 0u);
+  EXPECT_TRUE(store.getAnchors()[1].xpath.empty());
+
+  // Written back in the new format, and still the same two.
+  store.markDirty();
+  store.save();
+  EXPECT_EQ(Storage.content(kStorePath)[0], '\x04');
+  BookmarkStore again;
+  again.load(kCache);
+  ASSERT_EQ(again.getAll().size(), 2u);
+  EXPECT_EQ(again.getAll()[0].name, "first");
+}
+
+TEST_F(Bookmarks, AStoreOfTheThirdFormatReads) {
+  std::string body;
+  putBookmark(body, 1, 2, "x");
+  putAnchor(body, 7, 30, kXPath);
+  Storage.put(kStorePath, storeFile(1, body, '\x03'));
+  BookmarkStore store;
+  store.load(kCache);
+  ASSERT_EQ(store.getAnchors().size(), 1u);
+  EXPECT_EQ(store.getAnchors()[0].layout, 7u);
+  EXPECT_EQ(store.getAnchors()[0].xpath, kXPath);
+}
+
+TEST_F(Bookmarks, AnAnchorCutOffKeepsTheBookmarksBeforeIt) {
+  std::string body;
+  putBookmark(body, 1, 2, "kept");
+  putAnchor(body, 7, 30, kXPath);
+  putBookmark(body, 3, 4, "lost");
+  putAnchor(body, 7, 30, kXPath);
+  body.resize(body.size() - 5);  // into the second XPath
+  Storage.put(kStorePath, storeFile(2, body, '\x03'));
+  BookmarkStore store;
+  store.load(kCache);
+  ASSERT_EQ(store.getAll().size(), 1u);
+  EXPECT_EQ(store.getAll()[0].name, "kept");
+  EXPECT_EQ(store.getAnchors()[0].xpath, kXPath);
+}
+
+TEST_F(Bookmarks, AnXPathLengthBeyondTheFileIsDamageNotAnAllocation) {
+  std::string body;
+  putBookmark(body, 1, 2, "x");
+  put32(body, 7);
+  put16(body, 30);
+  put16(body, 60000);  // an XPath of 60000 bytes, in a file of a few
+  body += "/body";
+  Storage.put(kStorePath, storeFile(1, body, '\x03'));
+  BookmarkStore store;
+  store.load(kCache);
+  EXPECT_LT(g_largestRequest, 4096u);
+  EXPECT_TRUE(store.getAll().empty());
+}
+
+TEST_F(Bookmarks, AnXPathTooLongToKeepIsWrittenAsNoneNeverCut) {
+  BookmarkStore store;
+  store.load(kCache);
+  ASSERT_TRUE(store.toggle(1, 2, anchorOf(7, 30, std::string(bookmark_file::kMaxXPathBytes + 1, 'p'))));
+  store.save();
+  BookmarkStore again;
+  again.load(kCache);
+  ASSERT_EQ(again.getAnchors().size(), 1u);
+  EXPECT_EQ(again.getAnchors()[0].layout, 7u);
+  EXPECT_TRUE(again.getAnchors()[0].xpath.empty());
+}
+
+TEST_F(Bookmarks, AStoreWhoseXPathTheHeapCannotTakeIsNotSavedOver) {
+  const std::string xpath = std::string(kXPath) + std::string(60, '0');
+  std::string body;
+  putBookmark(body, 1, 2, "mine");
+  putAnchor(body, 7, 30, xpath);
+  const std::string file = storeFile(1, body, '\x03');
+  Storage.put(kStorePath, file);
+  BookmarkStore store;
+  {
+    // A block for the lists of one, not for the XPath (heapHasBlockFor keeps 64 bytes of slack).
+    const HostLargestFreeBlock tight(64 + std::max(sizeof(Bookmark), sizeof(StarAnchor)));
+    store.load(kCache);
+  }
+  EXPECT_TRUE(store.getAll().empty());
+  store.toggle(9, 9);
+  store.save();
+  EXPECT_EQ(Storage.content(kStorePath), file);
+}
+
+// The anchors stay in the book's own file: the index, held in RAM for every book at once, keeps its format.
+TEST_F(Bookmarks, TheIndexKeepsNoAnchors) {
+  BookmarkStore store;
+  store.load(kCache);
+  ASSERT_TRUE(store.toggle(1, 0, anchorOf(7, 30, kXPath)));
+  store.rename(0, "x");
+  GLOBAL_BOOKMARKS.syncFromStore(store, "/a.epub", kCache, "Title of /a.epub", false);
+  EXPECT_EQ(Storage.content(kIndexPath), indexFile(1, indexEntry("/a.epub", {"x"})));
+}
+
+// What the bookmark screens do to a book's stars (StarredPagesActivity, GlobalBookmarksActivity::mutateBook): each
+// star keeps its own anchor through a delete and a rename, and a load and save in between.
+TEST_F(Bookmarks, EachStarKeepsItsAnchorThroughADeleteAndARename) {
+  BookmarkStore store;
+  store.load(kCache);
+  ASSERT_TRUE(store.toggle(1, 1, anchorOf(11, 10, "/body/DocFragment[2]/body/p[1]/text()[1].0")));
+  ASSERT_TRUE(store.toggle(2, 2, anchorOf(22, 20, "/body/DocFragment[3]/body/p[2]/text()[1].0")));
+  ASSERT_TRUE(store.toggle(3, 3, anchorOf(33, 30, "/body/DocFragment[4]/body/p[3]/text()[1].0")));
+  store.save();
+
+  BookmarkStore screen;
+  screen.load(kCache);
+  screen.removeAt(1);
+  screen.rename(1, "third");
+  screen.save();
+
+  BookmarkStore again;
+  again.load(kCache);
+  ASSERT_EQ(again.getAll().size(), 2u);
+  EXPECT_EQ(again.getAll()[1].spineIndex, 3);
+  EXPECT_EQ(again.getAll()[1].name, "third");
+  EXPECT_EQ(again.getAnchors()[0].layout, 11u);
+  EXPECT_EQ(again.getAnchors()[1].layout, 33u);
+  EXPECT_EQ(again.getAnchors()[1].xpath, "/body/DocFragment[4]/body/p[3]/text()[1].0");
+}
+
+// ---- The text's offset and the format it was counted under (version 4)
+
+TEST_F(Bookmarks, AStoreKeepsEachStarsOffsetAndItsFormat) {
+  BookmarkStore store;
+  store.load(kCache);
+  StarAnchor anchor = anchorOf(7, 30, kXPath);
+  anchor.offset = 12345;
+  anchor.offsetFormat = 123;
+  ASSERT_TRUE(store.toggle(1, 2, anchor));
+  store.toggle(3, 4);  // a TXT-style star: no offset
+  store.save();
+  BookmarkStore again;
+  again.load(kCache);
+  ASSERT_EQ(again.getAnchors().size(), 2u);
+  EXPECT_EQ(again.getAnchors()[0].offset, 12345u);
+  EXPECT_EQ(again.getAnchors()[0].offsetFormat, 123);
+  EXPECT_EQ(again.getAnchors()[1].offset, StarAnchor::kNoOffset);
+  EXPECT_EQ(again.getAnchors()[1].offsetFormat, 0);
+}
+
+// Version 3 never left the test devices: its stars read, with no offset, and their XPath finds the text once.
+TEST_F(Bookmarks, AThirdFormatStarReadsWithoutAnOffset) {
+  std::string body;
+  putBookmark(body, 1, 2, "x");
+  putAnchor(body, 7, 30, kXPath);
+  putBookmark(body, 3, 4, "y");
+  putAnchor(body, 7, 30, kXPath);
+  Storage.put(kStorePath, storeFile(2, body, '\x03'));
+  BookmarkStore store;
+  store.load(kCache);
+  ASSERT_EQ(store.getAll().size(), 2u);
+  EXPECT_EQ(store.getAll()[1].name, "y");
+  EXPECT_EQ(store.getAnchors()[1].xpath, kXPath);
+  EXPECT_EQ(store.getAnchors()[1].offset, StarAnchor::kNoOffset);
+  EXPECT_EQ(store.getAnchors()[1].offsetFormat, 0);
+}
+
+TEST_F(Bookmarks, AnOffsetCutOffKeepsTheBookmarksBeforeIt) {
+  std::string body;
+  putBookmark(body, 1, 2, "kept");
+  putAnchor(body, 7, 30, kXPath);
+  putOffset(body, 123, 99);
+  putBookmark(body, 3, 4, "lost");
+  putAnchor(body, 7, 30, kXPath);
+  putOffset(body, 123, 99);
+  body.resize(body.size() - 2);  // into the second offset
+  Storage.put(kStorePath, storeFile(2, body, '\x04'));
+  BookmarkStore store;
+  store.load(kCache);
+  ASSERT_EQ(store.getAll().size(), 1u);
+  EXPECT_EQ(store.getAll()[0].name, "kept");
+  EXPECT_EQ(store.getAnchors()[0].offset, 99u);
+}
+
+TEST_F(Bookmarks, SettingTheSameOffsetAgainSavesNothing) {
+  BookmarkStore store;
+  store.load(kCache);
+  ASSERT_TRUE(store.toggle(1, 2, anchorOf(7, 30, kXPath)));
+  store.setOffset(0, 5, 123);
+  store.save();
+  Storage.put(kStorePath, "sentinel");  // a save would write over it
+  store.setOffset(0, 5, 123);
+  store.save();
+  EXPECT_EQ(Storage.content(kStorePath), "sentinel");
+  store.setOffset(0, 6, 123);
+  store.save();
+  EXPECT_NE(Storage.content(kStorePath), "sentinel");
 }

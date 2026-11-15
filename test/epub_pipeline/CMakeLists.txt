@@ -125,6 +125,8 @@ add_executable(EpubPipelineTest
   ParagraphAnchorTest.cpp
   SavedPositionRestoreTest.cpp
   KeptReadingStateTest.cpp
+  LayoutFingerprintTest.cpp
+  StarredPageRelayoutTest.cpp
   PagesWithoutPicturesTest.cpp
   EpubMetadataMemoTest.cpp
   ParsedTextOffsetTest.cpp
@@ -204,6 +206,8 @@ add_executable(EpubPipelineTest
   ${REPO_ROOT}/lib/Epub/Epub/BookFonts.cpp
   # The reader's navigation target: resolves a saved position against a built Section.
   ${REPO_ROOT}/src/activities/reader/EpubNavigationTarget.cpp
+  # Starred pages through a relayout, by the KOReader mappers below.
+  ${REPO_ROOT}/src/StarAnchoring.cpp
   # lib/KOReaderSync position mapping: needs only the Epub and the SAX parser, not the network.
   ${REPO_ROOT}/lib/KOReaderSync/ProgressMapper.cpp
   ${REPO_ROOT}/lib/KOReaderSync/ChapterXPathIndexer.cpp
@@ -219,7 +223,9 @@ add_executable(EpubPipelineTest
   ${REPO_ROOT}/test/book_metadata_cache/AllocationRefusal.cpp
   ${PIPELINE_SOURCES}
 )
-target_include_directories(EpubPipelineTest PRIVATE ${PIPELINE_INCLUDES})
+target_include_directories(EpubPipelineTest PRIVATE ${PIPELINE_INCLUDES}
+  # src/StarAnchoring.cpp names the mappers as the firmware does, without the lib/ prefix.
+  ${REPO_ROOT}/lib/KOReaderSync)
 target_compile_definitions(EpubPipelineTest PRIVATE
   CORPUS_DIR="${REPO_ROOT}/test/epubs"
   GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/goldens"

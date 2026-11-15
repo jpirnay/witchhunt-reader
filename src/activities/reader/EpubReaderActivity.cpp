@@ -88,6 +88,7 @@
 #include "SdCardFontSystem.h"
 #include "SerialTestApi.h"
 #include "SilentRestart.h"
+#include "StarAnchoring.h"
 #include "StarredPagesActivity.h"
 #include "WordOutline.h"
 #include "activities/home/BookInfoActivity.h"
@@ -737,7 +738,7 @@ void EpubReaderActivity::onEnter() {
   }
 
   applyPendingSyncSession();
-  applyPendingBookmarkJump();
+  const bool bookmarkJumpApplied = applyPendingBookmarkJump();
 #if SERIAL_TEST_API
   applyPendingPercentJump();
 #endif
@@ -761,6 +762,14 @@ void EpubReaderActivity::onEnter() {
 
   // Load bookmarks for this book
   bookmarkStore.load(epub->getCachePath());
+  // A jump from the global bookmarks screen goes by the star's text, not by a page number of a layout that may be gone:
+  // its stored offset, or, with none to trust, its XPath (the layout the chapter will be shown in is not known before
+  // the first render).
+  if (bookmarkJumpApplied && navTarget.kind == NavigationTarget::Kind::Page && navTarget.page >= 0 &&
+      navTarget.cachedSpineIdx == currentSpineIndex) {
+    RenderLock lock(*this);
+    navTarget = starJumpTarget(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(navTarget.page), 0);
+  }
   logReaderMemSnapshot("onEnter_after_bookmarks_loaded");
   loadLinkBackStack();
 
@@ -912,6 +921,15 @@ void EpubReaderActivity::onExit() {
     writeOwedPageSave();
   }
 
+  // A star made since the reader was last idle has no XPath yet: name its text now, or a relayout before the next open
+  // would leave it on its page number (StarAnchoring). One chapter parse a star, and there is rarely more than one.
+  // In the secondary framebuffer when it can be lent (the page is back in the framebuffer, which seeds it on return),
+  // else on the heap: the last chance before the book closes.
+  if (epub && StarAnchoring::parseOwed(bookmarkStore, nullptr, -1)) {
+    LentSecondary lend(renderer);
+    while (StarAnchoring::parseNext(bookmarkStore, epub, nullptr, -1, lend.arena()) == StarAnchoring::Work::Parsed) {
+    }
+  }
   // Save bookmarks before exit
   bookmarkStore.save();
   saveLinkBackStack();
@@ -1351,6 +1369,7 @@ void EpubReaderActivity::serviceBackgroundWork() {
   // Room in the glyph store comes before Background-B's look-ahead; the section the reader waits on and the AA pass
   // keep priority.
   if (stepGlyphStoreRoom()) return;
+  if (stepStarredPages()) return;
   stepBackgroundSectionBuild();
 }
 
@@ -1370,6 +1389,63 @@ bool EpubReaderActivity::stepGlyphStoreRoom() {
   RenderLock lock(RenderLock::Mode::Try);
   if (!lock.ownsLock() || !lookAheadMayRun()) return false;
   return sdFontSystem.makeTtfRoom(FlashGlyphStore::Budget::Idle, {});
+}
+
+bool EpubReaderActivity::stepStarredPages() {
+  // A chapter parse cannot be aborted, and holds the render lock and this loop: it waits for what the glyph-store step
+  // waits for, and for no gesture in flight, as the image lane does (imageLaneMustWait): the abort hook fires on new
+  // edges only, and a tap already released but still inside the double-click window would sit out the parse. Most
+  // books have no stars, and then this is one test.
+  const auto inputWaits = [this] {
+    return CooperativeAbort::shouldAbortLongTask() || buttonEvents.isGestureInFlight();
+  };
+  if (bookmarkStore.isEmpty() || !lookAheadMayRun() || inputWaits() ||
+      (millis() - std::max(lastPageTurnTime, lastPageOnScreenMs_)) < BG_BUILD_BORROW_QUIET_MS) {
+    return false;
+  }
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock() || !lookAheadMayRun() || section->hasActiveBuild()) return false;
+  if (starMarkerRedraw_.owed) {
+    const bool stillOnScreen = starMarkerRedraw_.spine == lastRenderedSpineIndex_ &&
+                               starMarkerRedraw_.page == lastRenderedPageIndex_ &&
+                               starMarkerRedraw_.drawnAt == lastPageOnScreenMs_;
+    starMarkerRedraw_ = {};
+    if (stillOnScreen) {
+      requestUpdate();
+      return true;
+    }
+  }
+  const StarsSettled settled{currentSpineIndex, section->layoutFingerprint(), section->pageCount};
+  if (settled == starsSettledFor_) return false;
+  const auto spine = static_cast<uint16_t>(currentSpineIndex);
+  const auto page = static_cast<uint16_t>(section->currentPage);
+  const bool wasStarred = bookmarkStore.has(spine, page);
+  if (!StarAnchoring::settleKnown(bookmarkStore, *section, currentSpineIndex)) {
+    if (!StarAnchoring::parseOwed(bookmarkStore, section.get(), currentSpineIndex)) {
+      starsSettledFor_ = settled;
+      return false;
+    }
+    // A parse works in the secondary framebuffer, as the image lane's decodes do, never in the heap: the reader on the
+    // X3 has been measured with less contiguous heap than the inflate ring's 32 KB. Out with Background-B, or
+    // released, the buffer is waited for. Lent only for a parse: a lend is not free (the buffer comes back seeded from
+    // the framebuffer).
+    LentSecondary lend(renderer);
+    if (!lend.arena()) return false;
+    HalPowerManager::Lock powerLock;  // full clock, as for the image lane's decodes
+    StarAnchoring::parseNext(bookmarkStore, epub, section.get(), currentSpineIndex, lend.arena());
+  }
+  // A star settled onto the page on screen, or off it: the status bar's star changes. Not while input waits: a turn
+  // pressed during the parse waited out a whole refresh of the page it was leaving (Murphy: 1.88 s from press to page
+  // against ~1.15 s, the redraw "superseded during its display"). Owed instead, until input is idle and only if that
+  // page is still the one on screen; the page a turn lands on draws its own star.
+  if (bookmarkStore.has(spine, page) != wasStarred) {
+    if (inputWaits()) {
+      starMarkerRedraw_ = {true, lastRenderedSpineIndex_, lastRenderedPageIndex_, lastPageOnScreenMs_};
+    } else {
+      requestUpdate();
+    }
+  }
+  return true;
 }
 
 void EpubReaderActivity::serviceBackgroundDebugLog() {
@@ -3086,10 +3162,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     case EpubReaderMenuActivity::MenuAction::STAR_PAGE: {
       {
         RenderLock lock(*this);
-        if (section && section->currentPage >= 0 && section->currentPage < section->pageCount) {
-          bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
-          requestUpdate();
-        }
+        toggleStarOnCurrentPage();
       }
       break;
     }
@@ -3101,8 +3174,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
               const auto& starred = std::get<StarredPageResult>(result.data);
               RenderLock lock(*this);
               if (currentSpineIndex != starred.spineIndex || !section || section->currentPage != starred.pageNumber) {
+                navTarget =
+                    starJumpTarget(static_cast<uint16_t>(starred.spineIndex), static_cast<uint16_t>(starred.pageNumber),
+                                   Section::layoutFingerprintFor(makeSectionBuildParams()));
                 currentSpineIndex = starred.spineIndex;
-                navTarget = NavigationTarget::makePage(starred.pageNumber);
                 section.reset();
               }
             }
@@ -3227,10 +3302,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
   }
 }
 
-void EpubReaderActivity::applyPendingBookmarkJump() {
+bool EpubReaderActivity::applyPendingBookmarkJump() {
   auto& jump = APP_STATE.pendingBookmarkJump;
   if (!jump.active || !epub || jump.bookPath != epub->getPath()) {
-    return;
+    return false;
   }
   LOG_DBG("ERS", "Applying pending bookmark jump: spine=%u page=%u", jump.spineIndex, jump.pageNumber);
   if (jump.spineIndex >= static_cast<uint16_t>(epub->getSpineItemsCount())) {
@@ -3248,6 +3323,42 @@ void EpubReaderActivity::applyPendingBookmarkJump() {
   }
   jump.clear();
   APP_STATE.saveToFile();
+  return true;
+}
+
+void EpubReaderActivity::toggleStarOnCurrentPage() {
+  if (!section || section->currentPage < 0 || section->currentPage >= section->pageCount) return;
+  const int page = section->currentPage;
+  bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(page),
+                       StarAnchoring::forPage(*section, page));
+  starsSettledFor_ = {};  // its text is to be named
+  requestUpdate();
+}
+
+EpubReaderActivity::NavigationTarget EpubReaderActivity::starJumpTarget(const uint16_t spine, const uint16_t page,
+                                                                        const uint32_t expectedLayout) {
+  NavigationTarget target = NavigationTarget::makePage(page);
+  target.cachedSpineIdx = spine;
+  const auto index = bookmarkStore.indexOf(spine, page);
+  if (!index) return target;
+  const StarAnchor& anchor = bookmarkStore.getAnchors()[*index];
+  if (anchor.layout == 0) return target;
+  // The text's offset, counted under this section format: no parse, whatever the layout, and from Global Bookmarks too.
+  std::optional<uint32_t> offset = StarAnchoring::knownOffset(anchor);
+  if (!offset) {
+    // Without one, the star's page while it was counted in the layout the chapter will be shown in, no parse either.
+    if (expectedLayout != 0 && anchor.layout == expectedLayout) return target;
+    if (anchor.xpath.empty() || anchor.mappingFailed) return target;
+    // Else its XPath, in the secondary framebuffer, as stepStarredPages() parses. The page drawn next is the one
+    // jumped to, not one patched over the page on screen.
+    LentSecondary lend(renderer);
+    offset = StarAnchoring::textOffset(bookmarkStore, *index, epub, lend.arena());
+    if (!offset) return target;
+  }
+  starsSettledFor_ = {};  // the star's text is known now: it settles without a parse
+  // The page stands while it still starts on that text; otherwise the page holding it (EpubNavigationTarget). No page
+  // count: the one it was counted in says nothing about the layout it lands in.
+  return NavigationTarget::makeSavedPage(spine, page, /*pageCount=*/0, /*paragraph=*/0, *offset);
 }
 
 #if SERIAL_TEST_API
@@ -8762,10 +8873,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       break;
     case BA::BTN_STAR_PAGE: {
       RenderLock lock(*this);
-      if (section) {
-        bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
-        requestUpdate();
-      }
+      toggleStarOnCurrentPage();
     } break;
     case BA::BTN_DICTIONARY:
       openDictionary();

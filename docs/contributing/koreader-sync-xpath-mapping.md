@@ -217,6 +217,16 @@ The paragraph counter in `ChapterHtmlSlimParser` counts **all** `<p>` elements a
 level, including `display:none` elements. This matches `ChapterXPathIndexer` and crengine's
 standard XPath same-name sibling counting.
 
+## Starred pages
+
+A starred page (`bookmarks.bin` version 3, `StarAnchoring`) finds its text again after a relayout by these same
+mappers. When a page is starred, its content offset names its first text the way a push does
+(`findXPathForVisibleOffset`), and the XPath is kept with the star beside the layout its page number was counted in
+(`Section::layoutFingerprint()`). A chapter shown in another layout resolves the XPath the way a pull does
+(`findProgressForXPath`, a text point or an exact match only) and the star moves to the page holding that offset. Both
+directions take an optional lent region, so the reader runs them in its secondary framebuffer instead of the heap. A
+chapter with no text has no XPath to name, and its stars keep their page.
+
 ## Known Limitations
 
 - On reverse mapping, the page is an estimate where the position carries no text point (renderer

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BuildArena.h>
 #include <Epub.h>
 
 #include <memory>
@@ -15,9 +16,10 @@ namespace ChapterXPathIndexerInternal {
 // outIsTextPoint (when non-null) is true only when the match is a /text()[N].M point resolved to
 // the codepoint: the one case where outVisibleOffset is a position. An element match, exact or
 // not, is anchored at its first direct text or, lacking any, at its END tag.
+// scratch: see PassScratch.
 bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, int spineIndex, const std::string& xpath,
                                   float& outIntraSpineProgress, bool& outExactMatch,
                                   uint16_t* outListItemIndex = nullptr, uint32_t* outVisibleOffset = nullptr,
-                                  bool* outIsTextPoint = nullptr);
+                                  bool* outIsTextPoint = nullptr, BuildArena* scratch = nullptr);
 
 }  // namespace ChapterXPathIndexerInternal

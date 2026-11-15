@@ -291,7 +291,8 @@ bool isAncestorPath(const std::string& prefix, const std::string& path) {
   return path.size() > prefix.size() && path.compare(0, prefix.size(), prefix) == 0 && path[prefix.size()] == '/';
 }
 
-bool streamSpine(const std::shared_ptr<Epub>& epub, const int spineIndex, SaxParser& saxParser) {
+bool streamSpine(const std::shared_ptr<Epub>& epub, const int spineIndex, SaxParser& saxParser,
+                 BuildArena* const scratch) {
   if (!epub || spineIndex < 0 || spineIndex >= epub->getSpineItemsCount()) {
     return false;
   }
@@ -300,7 +301,7 @@ bool streamSpine(const std::shared_ptr<Epub>& epub, const int spineIndex, SaxPar
     return false;
   }
   SaxFeedSink sink(saxParser);
-  if (!epub->readItemContentsToStream(href, sink, 1024, sink.stopFlag())) {
+  if (!epub->readItemContentsToStream(href, sink, 1024, sink.stopFlag(), scratch)) {
     LOG_ERR("KOX", "Failed to stream spine=%d", spineIndex);
     return false;
   }

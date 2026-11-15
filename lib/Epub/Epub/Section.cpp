@@ -428,7 +428,21 @@ uint32_t fnv1a(const uint8_t* data, size_t length) {
   }
   return hash;
 }
+
+// A cache variant's property hash under this section format: what a page number is counted in. Never 0, which says
+// "not known".
+uint32_t layoutFingerprintOf(const uint32_t propertyHash) {
+  uint8_t bytes[sizeof(propertyHash) + sizeof(SECTION_FILE_VERSION)];
+  memcpy(bytes, &propertyHash, sizeof(propertyHash));
+  memcpy(bytes + sizeof(propertyHash), &SECTION_FILE_VERSION, sizeof(SECTION_FILE_VERSION));
+  const uint32_t fingerprint = fnv1a(bytes, sizeof(bytes));
+  return fingerprint != 0 ? fingerprint : 1;
+}
 }  // namespace
+
+uint32_t Section::layoutFingerprintFor(const BuildParams& p) { return layoutFingerprintOf(calculatePropertyHash(p)); }
+
+uint8_t Section::formatVersion() { return SECTION_FILE_VERSION; }
 
 uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   uint8_t buffer[104];
@@ -768,6 +782,9 @@ bool Section::loadSectionFile(const BuildParams& p) {
   embeddedStyleFallback = false;
   uint32_t propertyHash = calculatePropertyHash(p);
   filePath = getSectionFilePath(propertyHash);
+  // The variant actually opened: the requested one, or the no-CSS one it falls back to.
+  uint32_t openedHash = propertyHash;
+  layoutFingerprint_ = 0;
   // A cache that does not load is removed; clearCache() leaves a fresh section's request, so this one's is put back.
   const auto refuse = [this, &p] {
     clearCache();  // closes file before removal
@@ -785,6 +802,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
       const std::string fallbackPath = getSectionFilePath(fallbackHash);
       if (Storage.openFileForRead("SCT", fallbackPath, file)) {
         filePath = fallbackPath;
+        openedHash = fallbackHash;
         usingEmbeddedStyleFallback = true;
         embeddedStyleFallback = true;
         LOG_INF("SCT", "Using no-CSS section cache fallback: %s", filePath.c_str());
@@ -795,6 +813,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
       return false;
     }
   }
+  layoutFingerprint_ = layoutFingerprintOf(openedHash);
 
   // Match parameters
   {
@@ -936,6 +955,7 @@ bool Section::clearCache() {
   tocBoundaries.clear();
   pageCount = 0;
   currentPage = 0;
+  layoutFingerprint_ = 0;
   truncatedCache = false;
   imageHeaderDegraded_ = false;
   tableRowDegraded_ = false;
@@ -1258,6 +1278,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   const BuildParams& p = st.params;
   st.propertyHash = calculatePropertyHash(p);
   filePath = getSectionFilePath(st.propertyHash);
+  layoutFingerprint_ = layoutFingerprintOf(st.propertyHash);
 
   st.localPath = epub->getSpineItem(spineIndex).href;
   SCT_TRACE_HEAP(spineIndex, "build_start");
