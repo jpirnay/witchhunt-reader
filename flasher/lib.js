@@ -70,20 +70,61 @@ export function parseTable(blob) {
 const sameEntry = (a, b) =>
   a.label === b.label && a.type === b.type && a.subtype === b.subtype && a.offset === b.offset && a.size === b.size;
 
-export const hasSpiffs = (entries) => entries.some((e) => e.type === 0x01 && e.subtype === 0x82);
+// The flash area the firmware takes from a table is the data partition of subtype spiffs labelled
+// "spiffs" (lib/hal/EspPartitionFlash.cpp). AREA_BYTES is its size in partitions.csv
+// (FlashArea::kExpectedBytes): an X3 or X4 whose table has less runs in emergency mode
+// (docs/design/flash-area.md).
+export const AREA_BYTES = 0x360000;
+const isArea = (e) => e.type === 0x01 && e.subtype === 0x82 && e.label === "spiffs";
 
-// "ours" when the table is exactly `ours` (the release's), "stock" when it has an app at 0x10000 and
-// no spiffs partition (a stock X4 Pro has none, which is issue #733), "unknown" otherwise.
+// What the device's table means for an install:
+//   ours:    exactly `ours`, the release's table, which Update only keeps;
+//   foreign: any other valid table: another firmware's, or an old layout of this one. `areaBytes` is
+//            the size of its area partition, 0 when it has none (a stock X4 Pro, issue #733);
+//   unknown: no valid table.
 export function classifyTable(entries, ours) {
   if (!entries) return { kind: "unknown", why: "no valid partition table at 0x8000 (empty or foreign flash)" };
   if (ours && entries.length === ours.length && entries.every((e, i) => sameEntry(e, ours[i]))) {
     return { kind: "ours", why: "Witch Reader's partition table" };
   }
-  const app0 = entries.find((e) => e.type === 0x00 && e.offset === APP_OFFSET);
-  if (app0 && !hasSpiffs(entries)) {
-    return { kind: "stock", why: "a table without the spiffs area (stock firmware, or an old layout)" };
+  const area = entries.find(isArea);
+  return { kind: "foreign", why: "not Witch Reader's", areaBytes: area ? area.size : 0 };
+}
+
+// Sizes as the device's emergency notice writes them (FlashLayoutNotice::sizeText): "80 KB", "1.0 MB".
+export function sizeText(bytes) {
+  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.floor(bytes / 1024)} KB`;
+}
+
+// The note on a classified table, or null for an unknown one (the page says why it could not tell).
+// A table with less than AREA_BYTES puts an X3 or X4 (ESP32-C3, no PSRAM) in emergency mode, which
+// the page names in the device notice's words (STR_FLASH_EMERGENCY_*), so that a reader who scanned
+// that notice's QR code finds it here. The S3 boards hold the area in PSRAM instead
+// (lib/hal/FlashArea.cpp) and are never in emergency mode.
+export function layoutNote(tableKind, chip) {
+  if (tableKind.kind === "ours") {
+    return { level: "ok", text: "Partition table: Witch Reader's. Full install or update only." };
   }
-  return { kind: "unknown", why: "a partition table that is not Witch Reader's" };
+  if (tableKind.kind !== "foreign") return null;
+  const writes = "the full install: it writes Witch Reader's table. Update only would keep this one, so it is not " +
+    "offered.";
+  if (tableKind.areaBytes >= AREA_BYTES) {
+    return { level: "warn", text: `Partition table: ${tableKind.why}. Use ${writes}` };
+  }
+  const has = tableKind.areaBytes ? sizeText(tableKind.areaBytes) : "no space";
+  const lead = `Partition table: ${tableKind.why}. It has ${has} for fonts, interface language and hyphenation, ` +
+    `where Witch Reader needs ${sizeText(AREA_BYTES)}.`;
+  if (chip === "ESP32-C3") {
+    return {
+      level: "warn",
+      text: `${lead} On it, Witch Reader runs only in emergency mode: some features are slower or missing, such as ` +
+        `TrueType fonts. We strongly recommend ${writes}`,
+    };
+  }
+  return {
+    level: "warn",
+    text: `${lead} Witch Reader keeps them in PSRAM instead, saved to the SD card. Use ${writes}`,
+  };
 }
 
 export function describeTable(entries) {

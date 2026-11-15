@@ -35,13 +35,14 @@ Flashing is done from the browser — no toolchain or driver install needed. Use
 
 1. Open the **[Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/)**. It carries the latest release.
 2. Pick your device, connect it over USB and press **Connect**. The page reads the device's partition table and
-   says whether it is Witch Reader's, the original firmware's or unknown.
+   says whether it is Witch Reader's. If it is not, it says how much room the table leaves Witch Reader.
 3. Choose what to write:
    - **Full install** (recommended): boot loader, partition table and firmware. Use it the first time, coming from
-     the original firmware or CrossPoint, and whenever the page does not find Witch Reader's partition table. It
-     fixes an X4 Pro whose interface stays in English after an update from its original firmware, and gives an X3 or
-     X4 the faster-waking boot loader. It replaces the original firmware for good: keep a backup if you may want it
-     back.
+     the original firmware or CrossPoint, and whenever the page does not find Witch Reader's partition table. It is
+     the fix when an X3 or X4 shows **Emergency mode**: the partition table it kept from its previous firmware has
+     too little room for fonts, interface language and hyphenation, and the page says how much. It also gives an X3
+     or X4 the faster-waking boot loader. It replaces the original firmware for good: keep a backup if you may want
+     it back.
    - **Update only**: just the firmware, on a device that already has Witch Reader's partition table.
 4. Leave **Install the web interface over USB afterwards** on, so the web pages work without Wi-Fi setup.
 

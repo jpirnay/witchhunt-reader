@@ -305,13 +305,11 @@ function refresh() {
     }
     if (state.tableKind) {
       const t = state.tableKind;
-      if (state.table === undefined && t.kind === "unknown") {
+      const layout = lib.layoutNote(t, state.chip);
+      if (layout) {
+        note(dev, layout.level, layout.text);
+      } else if (state.table === undefined) {
         note(dev, "warn", `Partition table: unknown, because ${t.why}. Use the full install.`);
-      } else if (t.kind === "ours") {
-        note(dev, "ok", "Partition table: Witch Reader's. Full install or update only.");
-      } else if (t.kind === "stock") {
-        note(dev, "warn", `Partition table: ${t.why}. This is the case where the interface stays in English; ` +
-          "the full install fixes it. The update alone would not.");
       } else {
         note(dev, "warn", `Partition table: ${t.why}. Use the full install.`);
       }
@@ -327,7 +325,8 @@ function refresh() {
   fullInput.disabled = !imgs.full;
   $("full-info").textContent = imgs.full
     ? "The boot loader, the partition table and the firmware, written from the start of the flash. Needed when " +
-      "the device runs other firmware, or an old layout of this one."
+      "the device runs other firmware, or an old layout of this one, and the fix when Witch Reader shows " +
+      "Emergency mode."
     : "This release has no full-install image for this device. Use update only on a device that already runs " +
       "Witch Reader, or a custom file.";
   const ours = state.tableKind && state.tableKind.kind === "ours";
