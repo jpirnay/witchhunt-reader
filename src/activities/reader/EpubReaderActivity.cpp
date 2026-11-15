@@ -1392,13 +1392,28 @@ bool EpubReaderActivity::stepGlyphStoreRoom() {
 
 bool EpubReaderActivity::stepStarredPages() {
   // A chapter parse cannot be aborted, and holds the render lock and this loop: it waits for what the glyph-store step
-  // waits for. Most books have no stars, and then this is one test.
-  if (bookmarkStore.isEmpty() || !lookAheadMayRun() || CooperativeAbort::shouldAbortLongTask() ||
+  // waits for, and for no gesture in flight, as the image lane does (imageLaneMustWait): the abort hook fires on new
+  // edges only, and a tap already released but still inside the double-click window would sit out the parse. Most
+  // books have no stars, and then this is one test.
+  const auto inputWaits = [this] {
+    return CooperativeAbort::shouldAbortLongTask() || buttonEvents.isGestureInFlight();
+  };
+  if (bookmarkStore.isEmpty() || !lookAheadMayRun() || inputWaits() ||
       (millis() - std::max(lastPageTurnTime, lastPageOnScreenMs_)) < BG_BUILD_BORROW_QUIET_MS) {
     return false;
   }
   RenderLock lock(RenderLock::Mode::Try);
   if (!lock.ownsLock() || !lookAheadMayRun() || section->hasActiveBuild()) return false;
+  if (starMarkerRedraw_.owed) {
+    const bool stillOnScreen = starMarkerRedraw_.spine == lastRenderedSpineIndex_ &&
+                               starMarkerRedraw_.page == lastRenderedPageIndex_ &&
+                               starMarkerRedraw_.drawnAt == lastPageOnScreenMs_;
+    starMarkerRedraw_ = {};
+    if (stillOnScreen) {
+      requestUpdate();
+      return true;
+    }
+  }
   const StarsSettled settled{currentSpineIndex, section->layoutFingerprint(), section->pageCount};
   if (settled == starsSettledFor_) return false;
   const auto spine = static_cast<uint16_t>(currentSpineIndex);
@@ -1418,8 +1433,17 @@ bool EpubReaderActivity::stepStarredPages() {
     HalPowerManager::Lock powerLock;  // full clock, as for the image lane's decodes
     StarAnchoring::parseNext(bookmarkStore, epub, section.get(), currentSpineIndex, lend.arena());
   }
-  // A star settled onto the page on screen, or off it: the status bar's star changes.
-  if (bookmarkStore.has(spine, page) != wasStarred) requestUpdate();
+  // A star settled onto the page on screen, or off it: the status bar's star changes. Not while input waits: a turn
+  // pressed during the parse waited out a whole refresh of the page it was leaving (Murphy: 1.88 s from press to page
+  // against ~1.15 s, the redraw "superseded during its display"). Owed instead, until input is idle and only if that
+  // page is still the one on screen; the page a turn lands on draws its own star.
+  if (bookmarkStore.has(spine, page) != wasStarred) {
+    if (inputWaits()) {
+      starMarkerRedraw_ = {true, lastRenderedSpineIndex_, lastRenderedPageIndex_, lastPageOnScreenMs_};
+    } else {
+      requestUpdate();
+    }
+  }
   return true;
 }
 
