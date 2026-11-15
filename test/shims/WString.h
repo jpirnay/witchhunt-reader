@@ -41,6 +41,19 @@ class String {
     _buf += s ? s : "";
     return *this;
   }
+  // Arduino's concat(): false, and the String as it was, when it cannot grow. ArduinoJson's String
+  // writer appends through it. growLimit() stands in for a heap with no block big enough.
+  bool concat(const char* s) {
+    const size_t n = s ? std::strlen(s) : 0;
+    if (_buf.size() + n > growLimit()) return false;
+    _buf.append(s ? s : "", n);
+    return true;
+  }
+  // The longest a String may grow to through concat(); no limit unless a test sets one.
+  static size_t& growLimit() {
+    static size_t limit = static_cast<size_t>(-1);
+    return limit;
+  }
   bool operator==(const String& o) const { return _buf == o._buf; }
   bool operator!=(const String& o) const { return _buf != o._buf; }
   bool startsWith(const char* prefix) const { return _buf.rfind(prefix, 0) == 0; }

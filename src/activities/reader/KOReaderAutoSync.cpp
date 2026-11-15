@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HalStorage.h>
+#include <JsonFile.h>
 #include <Logging.h>
 #include <esp_heap_caps.h>
 
@@ -60,10 +61,8 @@ bool AutoSyncState::saveToFile() {
   doc["lastSeenPage"] = lastSeenPage;
   doc["turnsSincePush"] = turnsSincePush;
 
-  String json;
-  serializeJson(doc, json);
   Storage.mkdir("/.crosspoint");
-  const bool written = Storage.writeFile(AUTOSYNC_FILE_JSON, json);
+  const bool written = JsonFile::save("AutoSync", AUTOSYNC_FILE_JSON, doc);
   if (written) {
     dirty = false;
   }
