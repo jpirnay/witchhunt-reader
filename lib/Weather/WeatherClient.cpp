@@ -29,8 +29,8 @@ std::string buildForecastUrl(const WeatherSettingsStore& settings) {
   url += std::string("&wind_speed_unit=") + settings.getWindUnitParam();
   url += std::string("&precipitation_unit=") + settings.getPrecipUnitParam();
   url += "&forecast_days=" + std::to_string(settings.getForecastDays());
-  // Request 48 hours of hourly data
-  url += "&forecast_hours=48";
+  // The screen graphs 24 hours; the forecast strip covers the days after.
+  url += "&forecast_hours=24";
   return url;
 }
 

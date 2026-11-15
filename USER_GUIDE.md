@@ -36,6 +36,7 @@ Welcome to **Witch Reader** firmware. This guide outlines the hardware controls,
       - [3.7.6 Web Settings (WiFi + OPDS)](#376-web-settings-wifi--opds)
       - [3.7.7 KOReader Sync Quick Setup](#377-koreader-sync-quick-setup)
     - [3.8 Sleep Screen](#38-sleep-screen)
+    - [3.9 Weather Screen](#39-weather-screen)
   - [4. Reading Mode](#4-reading-mode)
     - [Page Turning](#page-turning)
     - [Chapter Navigation](#chapter-navigation)
@@ -622,7 +623,7 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
   - **Timezone**: Pick your timezone from a full-screen list of 86: named places and regions that follow their own daylight-saving rules, fixed UTC offsets for anywhere the list misses, and plain UTC.
   - **Detect Timezone**: Auto-detect timezone via IP geolocation (requires WiFi).
   - **Sync Time**: Sync the clock via NTP (requires WiFi). Afterwards the device restarts quickly and returns to Clock Settings, like every other screen that uses WiFi.
-- **Weather Settings**: Configure the Open-Meteo weather panel shown on the Home Screen. **Location** searches for a city: pick one of the matches with **Confirm**, or press **Back** to keep the current location. A search with no matches says so instead of returning silently.
+- **Weather Settings**: Configure the Open-Meteo weather panel shown on the Home Screen and the [Weather screen](#39-weather-screen). **Location** searches for a city: pick one of the matches with **Confirm**, or press **Back** to keep the current location. A search with no matches says so instead of returning silently.
 - **All Files**: Browse every file on the SD card, not just books: images, cover and `.opf` files, firmware images and anything else. It works like the Library's [Books](#33-library-screen) tab: **Confirm** opens a book or image, and on any other file it opens the menu, where you can **Move to folder** or **Remove** it. Images offer **Set Sleep**, which makes the image your sleep screen. Moving or removing a book here moves or removes that file only, not the cover and `.opf` beside it. **Back** at the top folder returns to Settings.
 
 **System**:
@@ -811,6 +812,24 @@ If the picked image cannot be shown, for example a damaged PNG, the next one in 
 > For best results:
 > - Use PNG (with alpha channel for Page Overlay mode) or uncompressed BMP files with 24-bit color depth.
 > - Use a resolution of 480×800 pixels to match the device's screen resolution.
+
+### 3.9 Weather Screen
+
+<img src="docs/images/weather/weather-screen.png" width="560" alt="The Weather screen on an Xteink X3, held sideways. Top left: a cloud icon, 18 °C in large digits and Feels like 18°. Top right: Lisbon, Portugal, the date, and five days, each with a rain icon and its high and low. Bottom left: sunrise 07:18, sunset 17:23, wind 12 km/h SW, humidity 84 %, UV index 1 and precipitation 1.8 mm. Bottom right: a graph of the next 24 hours, the temperature as a line over bars for the chance of rain, with Monday marked at midnight. Updated 10:51 in the bottom corner, and the button hints down the left edge.">
+
+**Weather** on the Home screen (or under **More**, if you moved it there) shows the forecast from [Open-Meteo](https://open-meteo.com) for the place set in **Settings → System → [Weather Settings](#374-system)**. The screen is held sideways:
+
+- **Now**: the current weather's icon, the temperature, and what it feels like.
+- **The days ahead**: the place and the date, then one column per day with its icon and its high and low. Three days by default; `forecastDays` in `/.crosspoint/weather_settings.json` takes 1 to 5.
+- **Today**: sunrise, sunset, wind speed and direction, humidity, UV index, and the day's precipitation.
+- **The next 24 hours**: the temperature as a line (scale on the left) over the chance of rain as bars (0–100 %, scale on the right). A line marks midnight.
+- **Updated**: when the forecast was fetched. Every time on this screen is the place's own, so it differs from the device's clock when the place is in another time zone.
+
+**Back** returns to Home, **Confirm** opens Weather Settings, and **Left** or **Right** fetches a new forecast.
+
+The screen opens on the last forecast fetched. It connects to WiFi for a new one when that forecast is 30 minutes old or more, or when the device cannot be sure of its age: that takes the time from a clock chip, or from the network since the device last started (waking from sleep is a start). The Xteink X4 has no clock chip, so after a sleep or a restart it fetches every time.
+
+Each fetch also saves the screen as a [custom sleep image](#custom-images), `sleep/weather.bmp`.
 
 ---
 
