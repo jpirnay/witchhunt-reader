@@ -50,6 +50,8 @@ class Section {
   // each was a card call of its own: ~180 reads, 2.8 ms a load on the X3, three loads a turn. One sector, kept with the
   // section rather than taken per load; both loads run under the render lock, which `file` needs anyway.
   uint8_t pageReadWindow_[512]{};
+  // See layoutFingerprint(). 0 until a load or a build names the variant, and again once the cache is cleared.
+  uint32_t layoutFingerprint_ = 0;
   bool truncatedCache = false;
   bool embeddedStyleFallback = false;
   // Set by the last build when CssParser hit its own low-heap mode mid-parse
@@ -205,6 +207,15 @@ class Section {
 
   uint16_t pageCount = 0;
   int currentPage = 0;
+
+  // What this section's page numbers are counted in: the cache variant it was loaded or is built as (the no-CSS one
+  // when it fell back to that), under this section format. Two sections of a chapter with the same fingerprint lay
+  // its pages out alike, so a page number saved with it (a starred page, BookmarkStore) stands while it is
+  // unchanged. 0 while the section has neither loaded nor started a build. The page count is not part of it: a
+  // build in progress knows it only at the end.
+  uint32_t layoutFingerprint() const { return layoutFingerprint_; }
+  // The fingerprint a section loaded or built from `p` gets, short of the no-CSS fallback only a load finds out about.
+  static uint32_t layoutFingerprintFor(const BuildParams& p);
 
   // Render parameters that determine a section-cache variant. Bundles the long argument
   // list shared by loadSectionFile / createSectionFile / stepSectionBuild so a resumable
