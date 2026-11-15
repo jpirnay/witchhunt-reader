@@ -1743,8 +1743,8 @@
       "files": [
         {
           "name": "Language-Belarusian/be.cplang",
-          "size": 14573,
-          "crc32": 78154669
+          "size": 14084,
+          "crc32": 4130137687
         }
       ]
     },
@@ -1925,8 +1925,8 @@
       "files": [
         {
           "name": "Language-Kazakh/kk.cplang",
-          "size": 14348,
-          "crc32": 551493141
+          "size": 13819,
+          "crc32": 1200665110
         }
       ]
     },
@@ -1967,8 +1967,8 @@
       "files": [
         {
           "name": "Language-Persian/fa.cplang",
-          "size": 13198,
-          "crc32": 753928686
+          "size": 12855,
+          "crc32": 3137303277
         }
       ]
     },
@@ -2037,8 +2037,8 @@
       "files": [
         {
           "name": "Language-Russian/ru.cplang",
-          "size": 14510,
-          "crc32": 522491347
+          "size": 13972,
+          "crc32": 1516093094
         }
       ]
     },
@@ -2107,8 +2107,8 @@
       "files": [
         {
           "name": "Language-Ukrainian/uk.cplang",
-          "size": 14681,
-          "crc32": 4294273556
+          "size": 13947,
+          "crc32": 4138711020
         }
       ]
     },
