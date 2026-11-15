@@ -11,6 +11,8 @@ sees and does on the device.
 > **Updated 2026-11-11** for line and word spacing, character spacing, paragraph indent, margins, CSS
 > `white-space` and `initial-letter`, boxed text, images inside a line and the image modes, checked against
 > crosspoint-reader develop `fd4dbe41b`.
+> **Updated 2026-11-15** on the Witch Reader side for release 2.52: Dark Mode and the Onyx BOOX Picco. The CrossPoint
+> column was not checked again.
 
 ## At a glance
 
@@ -26,11 +28,11 @@ bookmarks across books and printed page numbers, syncs KOReader progress automat
 press be reassigned, keeps a clock on the X4, shows the weather, logs into Wi-Fi login pages and
 transfers books over the USB cable. It runs on the LilyGo T5 S3 Pro and the Murphy M3.
 
-**CrossPoint is ahead on** highlights and clippings, Bluetooth page-turn remotes, night mode, library
+**CrossPoint is ahead on** highlights and clippings, Bluetooth page-turn remotes, library
 loans (LCP) and OPDS 2 catalogs, plugins on the device, indexed title and author search, word and
-character spacing, file rename and multi-delete on the device, 34 interface languages. It runs on six
+character spacing, file rename and multi-delete on the device, 34 interface languages. It runs on five
 boards Witch Reader does not support: the Xteink X4 Classic, Seeed reTerminal Sticky, M5Stack PaperMono,
-Metalio E-Ink 4, EEGOREAD A4 and Onyx BOOX Picco.
+Metalio E-Ink 4 and EEGOREAD A4.
 
 **Since June, CrossPoint has caught up on** small caps, strikethrough, CSS font sizes and headings, drop
 caps, grid tables, GIF images, transparent sleep overlays, named bookmarks, KOReader sign-up on the
@@ -143,7 +145,7 @@ and TXT books, a configurable status bar, a Quick Resume sleep screen.
 | Button actions | ✅ short, double and long press on every button, from one list of actions | ⚠️ front-button remap, a few long-press and Power choices |
 | Touch on the reading page | ✅ every zone and gesture assignable; pinch, rotate, corner holds | ✅ tap or swipe page turns, tap links, hold to select text |
 | Bluetooth page-turn remotes | ❌ | ✅ on the X3/X4 only inside a book |
-| Night mode (white on black) | ❌ | ✅ |
+| Night mode (white on black) | ✅ Dark Mode, in the reader and every menu; on a schedule, from the light panel or the Picco's slide switch on the boards with a reading light | ✅ |
 | Clock on boards without a clock chip (X4) | ✅ software clock | ❌ boards with a clock chip only |
 | Time zone | ✅ list of 86, or detected from the IP address | ⚠️ list with automatic daylight saving, no detection |
 | Weather panel (Open-Meteo forecast) | ✅ | ❌ |
@@ -184,15 +186,15 @@ information screen, settings grouped in categories.
 | M5Stack PaperMono (ESP32-S3) | ❌ | ✅ |
 | Metalio E-Ink 4 (ESP32-S3) | ❌ | ✅ |
 | EEGOREAD A4 (ESP32-S3) | ❌ | ✅ |
-| Onyx BOOX Picco (ESP32-S3) | ❌ | ✅ |
-| Touch screen | ✅ X4 Pro, T5 S3 Pro, Murphy M3 | ✅ X4 Pro, Sticky, PaperMono and others |
+| Onyx BOOX Picco (ESP32-S3) | ✅ on Witch Reader's partition table or Onyx's | ✅ |
+| Touch screen | ✅ X4 Pro, T5 S3 Pro, Murphy M3, BOOX Picco | ✅ X4 Pro, Sticky, PaperMono and others |
 
 Want your device supported? Consider donating one: support for a board needs the board on the desk. [Open an issue](https://github.com/jpirnay/witchhunt-reader/issues) to arrange it.
 
 ## ESP32-C3 boards (X3, X4)
 
-The Xteink X3 and X4 run on an ESP32-C3 with about 380 KB of RAM and no PSRAM; the X4 Pro, T5 S3 Pro and Murphy M3
-have an ESP32-S3 with PSRAM. In Witch Reader the reading features are the same code on both chips: TrueType fonts,
+The Xteink X3 and X4 run on an ESP32-C3 with about 380 KB of RAM and no PSRAM; the X4 Pro, T5 S3 Pro, Murphy M3 and
+BOOX Picco have an ESP32-S3 with PSRAM. In Witch Reader the reading features are the same code on both chips: TrueType fonts,
 Publisher Fonts, every script with its shaping and bidi, vertical CJK and all 32 hyphenation languages work on the X3
 and X4, and the screenshots in the README come from an X3. What the C3 boards miss is mostly hardware: no touch
 screen, no reading light, no USB drive (the C3 has no USB OTG) and, on the X4, no clock chip. One feature is left out

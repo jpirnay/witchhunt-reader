@@ -78,8 +78,10 @@ once the lane has nothing left to decode (`LaneBeforeBuild.h`, see the image lan
 and the layout its page number was counted in. Once the chapter on screen is complete, its stars counted in another
 layout move onto the page holding their text, and a new star's text gets its XPath. Each is one parse of the chapter
 by the KOReader sync's mappers, which cannot be aborted: the step waits for what the glyph-store step waits for (the
-look-ahead gates and `BG_BUILD_BORROW_QUIET_MS` since the last page landed), parses at most once a tick, and does it in
-the lent secondary framebuffer, never on the heap. A jump to a star counted in another layout resolves its XPath on the
+look-ahead gates and `BG_BUILD_BORROW_QUIET_MS` since the last page landed) and for no gesture in flight, parses at most
+once a tick, and does it in the lent secondary framebuffer, never on the heap. A star moving onto or off the page on
+screen redraws its status-bar marker; one found while input waited (`starMarkerRedraw_`) is redrawn by the step once
+input is idle, if that page is still on screen. A jump to a star counted in another layout resolves its XPath on the
 spot. What a mapping turns into, the page's visible-text offset, is kept for the session, so a second relayout parses
 nothing. Each parse logs `STAR` at INF with its time.
 

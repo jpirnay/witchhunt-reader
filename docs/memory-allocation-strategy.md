@@ -225,6 +225,8 @@ Arena instances:
 | Library index build | lent framebuffer | the framebuffer size | one build step | `LibraryBuilder::step` (join, publish, author lookup), `LibraryOrder::sortBySeries` |
 | Font selector previews | lent framebuffer | the framebuffer size | one preview font | `FontSelectionActivity::lendPreviewArena`, `SdCardFont::useArena` |
 | Dictzip lookup | lent framebuffer | the framebuffer size | one dictionary lookup | `LentLookupScratch` (`DictionaryWordSelectActivity`), `Dictionary::useInflateArena` |
+| Book search | lent framebuffer | the framebuffer size | one chapter | `BookSearchActivity` (`BookSearch::ChapterSearch`) |
+| Bookmark text anchors | lent framebuffer | the framebuffer size | one chapter parse | `LentSecondary` in `EpubReaderActivity`, `StarAnchoring::parseNext` / `textOffset` (`ChapterXPathIndexer`) |
 | TrueType miss memory | a build's arena, lent | the scratch block and page cache (§9.7) | one glyph lookup | `glyph_miss::Scope`: `Section::stepSectionBuild`, `EpubReaderActivity::displayBuildPage`, the ladder's light relief |
 | Word-shaping cache | the free tail of a lent build arena | `WordShapeCache::kWordCacheBytes` (16 KB), 128 sets of two 64 B ways; 128 KB on the S3 boards' 256 KB PSRAM arena (`kLargeWordCacheBytes`) | one parse, emptied whenever an allocation reaches it | `WordShapeCache`, owned by `ChapterHtmlSlimParser` |
 
@@ -306,7 +308,9 @@ What a bump arena is for, and what it is not:
    (`kStatusImageHeaderDegraded`, `kStatusTableRowDegraded`, `kStatusShapingDegraded` and
    `kStatusCssDegraded` earn the spine one rebuild per session; `kStatusSimplified` is deterministic
    and only logged), or
-   `PixelCache::PXC_MAGIC_COARSE` in a `.pxc`.
+   `PixelCache::PXC_MAGIC_COARSE` in a `.pxc`. `kStatusImageHeaderDegraded` covers every image the
+   heap drops, not only a refused header read: an image whose page element (`ImageBlock`, `PageImage`,
+   the page) could not be had takes the same latch (`ChapterHtmlSlimParser::noteImageDroppedForHeap`).
 7. Every fixed capacity has a defined behaviour past it: provably above any input, with the bound
    written next to it; or logged once at ERR and latched (`ChapterHtmlSlimParser::noteCapOverflow`
    sets `kStatusSimplified`); or replaced by a nothrow-growing or SD-backed structure. The build
@@ -588,6 +592,13 @@ Borrow (the lent region becomes an arena):
   mode), lent once the busy popup is drawn and given back before the definition draws. The chunk
   table is parsed again for every lookup. With nothing to lend, or a region too small for the
   table, they take the heap for the dictionary session as before.
+- Book search (`BookSearchActivity`): each chapter's pass, its inflate window and parser state
+  (`BookSearch::ChapterSearch`), under the render lock, given back before the list draws. With
+  nothing to lend, the chapter is searched on the heap.
+- The bookmarks' text anchors (`StarAnchoring`, `EpubReaderActivity::stepStarredPages`): the
+  KOReader XPath mappers (`ChapterXPathIndexer`) parse a chapter in the lent region (`LentSecondary`),
+  at most one chapter per idle step. The mappers take the region as an option; KOReader sync's own
+  push and pull still map on the heap.
 
 Release (the block goes back to the heap):
 
@@ -699,6 +710,12 @@ the throwing `operator new`: a chapter of a book that is one XHTML file aborted 
 and again at the same page on every reopen (crosspoint-reader PR #3027, a 1,300-page chapter). A
 refused chunk stops the build at that page (`ChapterHtmlSlimParser::stopOnFullPageTable`) and the
 pages before it are kept as a truncated section, the same exit as a low-heap stop.
+
+The page itself is taken the same way: every parser site gets its `Page` from
+`ChapterHtmlSlimParser::ensurePage()`, a nothrow `new`, and a refusal stops the build through
+`stopForHeap()` (`streamFailed`, `layoutFailed`, the parser stopped), the pages so far kept and the
+section truncated. A bare `new Page()` aborted mid-build, and the next open of the chapter rebuilt
+into the same abort.
 
 What would otherwise grow without bound is not held in memory: anchors stream to a spill file
 during the parse (`Section::getAnchorSpillPath`) and are copied into the section file at the end,

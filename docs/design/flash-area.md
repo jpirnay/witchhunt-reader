@@ -190,7 +190,8 @@ The firmware then runs on what the area's consumers do without it (the backends 
 - System Information's Flash section, an "Emergency mode" row;
 - the web flasher, when it reads such a table from an X3 or X4 (`flasher/lib.js`, `layoutNote()`): the notice's
   words and sizes, and the Full install strongly recommended. Update only stays off, as for any table that is not
-  ours. On an S3 board the note says the area is in PSRAM instead.
+  ours except Onyx's BOOX Picco table (`appTarget()`; [board-support.md](../contributing/board-support.md), "Two
+  partition tables"). On an S3 board the note says the area is in PSRAM instead.
 
 A full install writes our table and ends it. A board that cannot be flashed over USB keeps working as it is.
 

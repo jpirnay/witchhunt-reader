@@ -37,6 +37,12 @@ truncates the file in place.
 | `opds_<hash>_disc.json` | `saveOpdsDiscovery` | `"v"` (`OPDS_DISCOVERY_VERSION`, 2) | An OPDS server's navigation entries and search template; `<hash>` is FNV-1a of the server's URL. Version 2: a template from an OpenSearch description is its Atom one |
 | `epub_<hash>/`, `xtc_<hash>/`, `txt_<hash>/` | | | One per book: next table |
 
+The JSON files above but `state.json` (`settings.json`, the three credential stores, `autosync.json`, both weather
+files, `opds_<hash>_disc.json`) go through `JsonFile::save()` (`lib/Serialization/JsonFile.h`): written whole or not
+at all. A document that ran out of memory as it was built, or a text shorter than `measureJson()` says (ArduinoJson's
+String writer stops appending, without an error, when the String cannot grow), is refused and logged, and the file on
+the card stays as it was. `state.json` is streamed to its file and checked against `measureJson()` the same way.
+
 ### Per book
 
 `<hash>` is `std::hash` of the book's path, so a book moved or renamed gets a new directory (the
@@ -88,7 +94,7 @@ CSS pass), `spines/<n>/anchors_<spine>.tmp` (a section's anchor map), `footnotes
 | `/.tmp_opds_cache.dat`, `/.tmp_opds_cover.*` | `OpdsBookBrowserActivity` | The OPDS browser's entries and the cover being shown; removed when it closes, and the cover files also when it opens (a power cut or a crash leaves them) |
 | `/sleep.bmp` | `BmpViewerActivity` | An image set as the sleep screen. A rendered one goes through `/sleep.bmp.tmp`, the old file kept as `/sleep.bmp.bak` until the swap is done |
 | `/sleep/weather.bmp` | `WeatherActivity` | The last fetched forecast as a custom sleep image, the panel's pixels in portrait as `ScreenshotUtil` writes them. Goes through `/sleep/weather.bmp.tmp` and `FileReplace` |
-| `/crash_report.txt` | `HalSystem` | The last panic. Browse Files lists it; the Library, Recent books and the next-book suggestion leave it out (`FirmwareFiles`) |
+| `/crash_report.txt` | `HalSystem::checkPanic` | The last panic, written at the first boot after it: the firmware version, the panic reason, the last log lines and the stack. A watchdog reset writes one only when the panic handler ran first (`PanicReboot::isFromPanic()`). The Library's Books tab and All Files list it; New and Authors, Recent books and the next-book suggestion leave it out (`FirmwareFiles`) |
 | `/screenshots/*.bmp` | `ScreenshotUtil` | Screenshots |
 | `<dictionary>.qidx`, `.sidx` | `Dictionary` | Lookup indexes beside a dictionary's `.idx` and `.syn`, `SIDECAR_VERSION` (2): [dictionary.md](dictionary.md) |
 
@@ -119,7 +125,7 @@ import std.string;
 import std.core;
 
 // === Configuration ===
-#define EXPECTED_VERSION 18
+#define EXPECTED_VERSION 19
 #define MAX_STRING_LENGTH 65535
 
 // === String Structure ===
@@ -355,7 +361,7 @@ The book's inline footnote previews (`lib/Epub/Epub/FootnotePreviews.*`), filled
 
 ```text
 u32 magic               'FNP1'
-u16 version             CACHE_VERSION in FootnotePreviews.cpp (3)
+u16 version             CACHE_VERSION in FootnotePreviews.cpp (4)
 u16 count               at most FootnotePreviews::MAX_ENTRIES (2048)
 u32 indexOffset
 u8  resolved[64]        one bit per spine item whose links are scanned and whose notes are all stored

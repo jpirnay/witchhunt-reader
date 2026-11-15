@@ -57,16 +57,16 @@ web settings page. A test therefore exercises the real code paths, not a back do
 
 ## Which builds have it
 
-The development builds (`pio run -e default`, `-e x4pro`, `-e lilygo_t5s3`) are compiled with
-`-DSERIAL_TEST_API=1` and have everything on this page. The release builds (`gh_release`,
-`gh_release_rc` and their X4 Pro, LilyGo and Murphy twins) and `slim` leave the flag off and keep
-only these:
+The development builds (`pio run -e default`, `-e x4pro`, `-e lilygo_t5s3`, `-e murphy`, `-e picco`,
+`-e picco_stock`) are compiled with `-DSERIAL_TEST_API=1` and have everything on this page. The release builds
+(`gh_release`, `gh_release_rc` and their X4 Pro, LilyGo, Murphy and Picco twins) and `slim` leave the flag off and
+keep only these:
 
 | Command | In a release build |
 | --- | --- |
 | `BTN` | the six front and side keys, `:LONG` |
 | `ACT` | `HOME`, `READER:<path>`, `SETTINGS`, `BOOKMARKS`, `FILES`, `LIBRARY`, `USB_TRANSFER` |
-| `STATE` | screen, stack, the reader's book, spine and page |
+| `STATE` | screen, stack, the reader's book, spine and page, and the reader bars' focus |
 | `WEB` | all of it ([The web bundle](#the-web-bundle-web)) |
 | `SCREENSHOT`, `BOOTLOG`, `HELP` | all of it |
 
@@ -258,10 +258,13 @@ Reply: one line, `STATE:` followed by `key=value` pairs.
 | `font`, `font_pt` | EPUB reader | the font family and point size the book is set in |
 | `chapter`, `chapter_page`, `percent` | EPUB reader | what the status bar shows: the TOC chapter title, the page within the whole chapter, which can span several spine items (`~` when the total is still an estimate), the book percentage |
 | `flow`, `progression`, `input_progression` | EPUB reader, with a section open | how the section on screen runs and which way its pages turn: `horizontal` or `vertical-rl`; `ltr` or `rtl`; `input_progression` is the direction the buttons, taps and bar use, which equals `progression` once the section's first build pass or page has been drawn (while a cold section's "Indexing" popup is up, about 1 s, it still holds the previous section's direction, or `ltr` in a book just opened) |
+| `bars`, `focus`, `tab`, `panel`, `row`, `starred` | EPUB reader, while the reader bars are open | `bars=live`; what has the key focus (`none`, `exit`, `star`, `tabs`, `prev`, `goto`, `next`, `layout`, `title`, `pull`, `push`, `list`); the tab it is on (`navigation`, `progress`, `layout`, `orientation`, `more`); the panel open above the tabs (`none`, `progress`, `layout`, `navigation`, `orientation`); with `focus=list`, the list row (0-based); `1` when the page on screen has a bookmark (`ReaderBarsController::appendDebugState`) |
+| `target`, `own`, `size`, `lines`, `margin`, `darkness`, `paragraphs`, `align`, `hyphens`, `bookstyle` | the reader bars' Layout panel | the control with the focus (an index), **This book only** (`1`/`0`), then the values the sheet shows in the settings' numbering: font size in points, the line-spacing step, the left and right margin in pixels, the text-darkness index, extra paragraph spacing, the paragraph-alignment index, hyphenation and Book style (each `1`/`0`) |
 | `btn_dropped` | when not 0 | held presses (`BTN:<key>:<ms>`) that failed: the press or its release was not taken in |
 | `heap`, `maxblock` | always | free heap and the largest free block, in bytes |
 
-Everything but `activity`, `stack`, `book`, `spine` and `page` needs the full API. A popup counts as
+Everything but `activity`, `stack`, `book`, `spine`, `page` and the reader bars' `bars`, `focus`, `tab`, `panel`,
+`row` and `starred` needs the full API. A popup counts as
 on screen until the screen is redrawn (the dictionary's "Not found" is up for 1.5 s). Lists report the row of the list drawn last on the current screen. Screens that draw their
 own lists without the shared list code (a few older pickers) report no `sel`.
 

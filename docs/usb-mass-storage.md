@@ -33,6 +33,8 @@ device. The second requirement is the one that catches people out.
 | Xteink X3 / X4 | ESP32-C3 | USB Serial/JTAG only — **the C3 has no OTG peripheral** | SPI | ✗ |
 | Xteink X4 Pro | ESP32-S3 | native OTG | SDMMC 1-bit | ✓ |
 | LilyGo T5 S3 | ESP32-S3 | native OTG (GPIO19/20 → connector) | SPI | ✓ |
+| Murphy M3 | ESP32-S3 | native OTG | SDMMC 4-bit | ✓ |
+| BOOX Picco | ESP32-S3 | native OTG (USB Serial/JTAG until USB Drive switches the PHY to TinyUSB) | SDMMC 4-bit | ✓ |
 | Seeed reTerminal Sticky | ESP32-S3 | **CH343P USB-UART bridge** | SPI | ✗ |
 
 The C3 is a hard no: `SOC_USB_OTG_SUPPORTED` is 0, so `USBMSC` does not even
