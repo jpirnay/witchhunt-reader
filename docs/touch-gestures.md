@@ -97,8 +97,9 @@ means *back*, so a tap there goes back one page and a flick the same way goes ba
 
 ### Two fingers
 
-Only on devices whose touch controller reports more than one finger (the GT911, in the
-X4 Pro and the T5S3; `HalCapabilities::hasMultiTouch()`). The Murphy M3 and the BOOX Picco have none.
+Only on devices whose touch controller reports more than one finger: the X4 Pro and the T5S3
+(GT911) and the BOOX Picco (TMA525C, whose finger limit the firmware reads from the controller at
+boot; `HalGPIO::supportsMultiTouch()`). The Murphy M3's CHSC6x reports one finger.
 
 | Gesture | Default |
 | --- | --- |
@@ -145,7 +146,7 @@ button, and it works on every screen.
 | Right edge, swipe up/down | Light warmer / cooler | *(free — single-channel light)* | *(free — single-channel light)* | Light warmer / cooler |
 | Physical keys | Up, Down, Power | Down, Power | Confirm, Up, Down | Up, Down, Power, slide switch |
 | Back / Confirm | Home key: hold / tap | Home key: hold / tap | Confirm key: press twice / press | Power: press twice / press |
-| Two fingers | Yes | Yes | No | No |
+| Two fingers | Yes | Yes | No | Yes |
 
 On a touchscreen board **without** a reading light the two vertical edges swap roles:
 the top edge becomes the reader bars (there being no light panel to put there) and the
