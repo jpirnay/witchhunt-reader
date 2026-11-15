@@ -178,15 +178,35 @@ void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, con
   }
 }
 
-// The size of the book's running text, measured as the reader does at the open that compiled its CSS
-// (ReaderActivity), in the region lent to the builds when there is one, as the reader lends the framebuffer there, and
-// taken into account as it does (EpubReaderActivity::makeSectionBuildParams): with font-size normalization and the
-// book's style on.
-uint8_t bodySizeFor(const Epub& epub, const Profile& profile, GfxRenderer& renderer, BuildArena* lent) {
+Section::BuildParams buildParams(const Profile& profile, uint8_t bodySizePct);
+
+// The size of the book's running text as the reader comes to it, taken into account as it does
+// (EpubReaderActivity::makeSectionBuildParams): with font-size normalization and the book's style on. While it is not
+// known, every build counts its running text, and the first with BodySize::kDecideChars of it decides
+// (EpubReaderActivity::adoptBuiltBodySize). The spines are built at 100 % in reading order until one does, in the
+// region lent to the builds when there is one, as the reader lends the framebuffer there; the caller then builds them
+// all at the size found, as the reader lays out again the chapters it built before. 100 when no spine has the text to
+// decide.
+uint8_t bodySizeFor(const std::shared_ptr<Epub>& epub, const Profile& profile, GfxRenderer& renderer,
+                    BuildArena* lent) {
   if (!profile.fontSizeNormalization || !profile.embeddedStyle) return 100;
-  uint8_t pct = BodySize::read(epub.getCachePath());
-  if (pct == 0) pct = BodySize::prepare(epub, renderer, profile.fontId, lent);
-  return pct != 0 ? pct : 100;
+  const std::string& cachePath = epub->getCachePath();
+  if (const uint8_t known = BodySize::read(cachePath); known != 0) return known;
+  Section::BuildParams p = buildParams(profile, 100);
+  p.measureBodySize = true;
+  for (int i = 0; i < epub->getSpineItemsCount(); ++i) {
+    Section section(epub, i, renderer);
+    if (lent) {
+      lent->reset();
+      section.setExternalBuildScratch(lent);
+    }
+    if (!section.createSectionFile(p, {}, /*skipEviction=*/true)) continue;
+    if (const uint8_t pct = section.bodySizeSample().pct; pct != 0) {
+      BodySize::record(cachePath, pct);
+      return pct;
+    }
+  }
+  return 100;
 }
 
 // The section-cache variant `profile` names, for a book whose running text is at `bodySizePct`.
@@ -261,10 +281,10 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
   if (epub->pageProgression() == PageProgression::Ltr) out << " ppd=ltr";
   out << "\n";
 
-  const uint8_t bodySizePct = bodySizeFor(*epub, profile, renderer, lentArena.get());
+  const uint8_t bodySizePct = bodySizeFor(epub, profile, renderer, lentArena.get());
   if (lentArena) {
-    // A fresh region for the builds, freed first so the heap never holds two: the open's census is no build, and its
-    // high water must not stand in the first spine's arena figure.
+    // A fresh region for the builds, freed first so the heap never holds two: the builds that measured the body size
+    // are not the dump's, and their high water must not stand in the first spine's arena figure.
     lentArena.reset();
     lentArena = std::make_unique<BuildArena>(profile.lentArenaBytes);
     if (!lentArena->valid()) {
@@ -344,7 +364,7 @@ bool forEachPage(const std::string& epubPath, const std::string& cacheDir, const
   auto epub = std::make_shared<Epub>(epubPath, cacheDir);
   if (!epub->load(true)) return false;
   epub->loadImageManifest();
-  const Section::BuildParams p = buildParams(profile, bodySizeFor(*epub, profile, renderer, nullptr));
+  const Section::BuildParams p = buildParams(profile, bodySizeFor(epub, profile, renderer, nullptr));
   for (int i = 0; i < epub->getSpineItemsCount(); ++i) {
     Section section(epub, i, renderer);
     if (!section.createSectionFile(p, {}, /*skipEviction=*/true)) return false;

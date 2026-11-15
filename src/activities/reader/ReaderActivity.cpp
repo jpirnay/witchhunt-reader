@@ -19,7 +19,6 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "Epub.h"
-#include "Epub/BodySize.h"
 #include "Epub/BookFonts.h"
 #include "Epub/CoverThumbSession.h"
 #include "EpubReaderActivity.h"
@@ -958,11 +957,9 @@ void ReaderActivity::onEnter() {
     // Publisher Fonts: the book's embedded fonts are examined once, here, with the same popup and lent buffer.
     // onEnter() left the loaded font alone until then (ensureSdFontLoadedForPath).
     const bool bookFontsPending = bookFontsPendingForPath(initialBookPath.c_str());
-    // Normalize Font Size: the size of the book's running text is measured once its CSS is compiled (BodySize), with
-    // the same popup and lent buffer. A book indexed by an older firmware is measured at this open.
-    const bool bodySizePending =
-        SETTINGS.embeddedStyle != 0 && BodySize::read(Epub::cachePathFor(initialBookPath, "/.crosspoint")) == 0;
-    const bool indexing = firstOpenIndexing || bookFontsPending || bodySizePending;
+    // The size of the book's running text (Normalize Font Size) is not measured here: the chapter builds count it from
+    // the text they lay out (BodySize).
+    const bool indexing = firstOpenIndexing || bookFontsPending;
     Rect indexingPopup;
     if (indexing) {
       RenderLock lock;
@@ -1035,11 +1032,6 @@ void ReaderActivity::onEnter() {
     if (epub && bookFontsPending) {
       // load() left nothing in the region: its rings were scoped to each read.
       BookFonts::prepare(*epub, indexingScratch.valid() ? &indexingScratch : nullptr);
-    }
-    // After load(): a CSS compiled again there forgot the book's body size. Neither leaves anything in the region. The
-    // UI font only serves the parser's metrics, which no size depends on.
-    if (epub && SETTINGS.embeddedStyle != 0 && BodySize::read(epub->getCachePath()) == 0) {
-      BodySize::prepare(*epub, renderer, UI_10_FONT_ID, indexingScratch.valid() ? &indexingScratch : nullptr);
     }
     if (lentForIndexing) {
       RenderLock lock;

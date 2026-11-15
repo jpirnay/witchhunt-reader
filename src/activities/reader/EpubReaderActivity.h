@@ -201,9 +201,9 @@ class EpubReaderActivity final : public Activity {
   int glyphStarvedSpine_ = -1;
   int glyphStarvedPage_ = -1;
   bool glyphStarvedRedraw_ = false;  // that redraw is owed by the pass that found the gap
-  // The ladder left an accent family out (or found no font it could load): the next render lays the chapter out again
-  // with the fonts loaded now, at the same position.
-  bool fontRelayoutPending_ = false;
+  // The next render lays the chapter out again at the same position: the ladder left an accent family out (or found no
+  // font it could load), or a build decided the book's body size (adoptBuiltBodySize).
+  bool relayoutPending_ = false;
   // Arms forceHalfRefreshAfterPopup_ for the NEXT incremental section build, marking that build's
   // popup -> content transition as "dramatic" and worth a clean HALF baseline (vs. the routine,
   // frequent forward-reading crossing into a still-building Background-B section, where forcing
@@ -959,6 +959,12 @@ class EpubReaderActivity final : public Activity {
   mutable BlockFontFamilies bookFontFamilies_;
   // The size of the book's running text (BodySize), read once at open: 100 until it has been measured.
   uint8_t bookBodySizePct_ = 100;
+  // Not measured yet (BodySize::read gave 0): the builds count their running text (BuildParams::measureBodySize) until
+  // one decides it (adoptBuiltBodySize).
+  bool bodySizeUndecided_ = false;
+  // Takes the body size `built` decided, if it is the first to: keeps it for the book, and returns true when it is not
+  // the size the chapters were laid out at so far, so the chapter on screen is to be laid out again (relayoutPending_).
+  bool adoptBuiltBodySize(const Section& built);
   // Drop all Background-B state (aborting a partial build and deleting its partial cache
   // file via ~Section). Resets the overlay percent.
   void resetBackgroundBuild();

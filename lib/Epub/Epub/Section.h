@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "BlockFontFamilies.h"
+#include "BodySize.h"
 #include "Epub.h"
 #include "FlowContext.h"
 #include "FontSizeLadder.h"
@@ -69,6 +70,8 @@ class Section {
   // Set by the last build when a shaped-script run was laid out unshaped
   // (ChapterHtmlSlimParser::shapingDegraded). Same persistence and rebuild policy as the table-row flag.
   bool shapingDegraded_ = false;
+  // What the last build counted for the book's body size (bodySizeSample).
+  BodySize::Sample bodySizeSample_;
   // Set by the last build when a fixed-capacity limit changed its output (ChapterHtmlSlimParser::
   // capOverflowFlags, or a page past Page::MAX_ELEMENTS). Deterministic -- a rebuild would hit
   // the same limit -- so it is persisted (kStatusSimplified) for the reader to say so, not to
@@ -251,6 +254,9 @@ class Section {
     // and embeddedStyle on, the book's sizes are taken relative to it (ChapterHtmlSlimParser::setBodySizePct).
     // Hashed only when it does that, so a book whose text is at the reader's size keeps its key.
     uint8_t bodySizePct = 100;
+    // The book's body size is not known yet (BodySize::read gives 0): with fontSizeNormalization and embeddedStyle on,
+    // the build also counts its running text by size, for bodySizeSample(). Not hashed: it changes no layout.
+    bool measureBodySize = false;
     bool embeddedStyle = false;
     bool bionicReadingEnabled = false;
     bool inlineFootnotePreviews = false;
@@ -402,6 +408,9 @@ class Section {
   // True when the last build laid a shaped-script run out unshaped, or the loaded cache was written by such a build.
   // Rebuilt once per spine per session on entry, as for the table-row flag.
   bool isShapingDegraded() const { return shapingDegraded_; }
+  // What the last build counted of its running text with BuildParams::measureBodySize, and the body size that decides
+  // (BodySize::sampleOf); nothing (0 characters) for a build that did not count, or did not complete its parse.
+  const BodySize::Sample& bodySizeSample() const { return bodySizeSample_; }
   // True when the build (or the loaded cache's build) exceeded a fixed-capacity limit and shows
   // less than the book: see ChapterHtmlSlimParser::CapOverflow.
   bool isSimplified() const { return simplified_; }

@@ -791,10 +791,13 @@ void EpubReaderActivity::onEnter() {
                        ReaderActivity::coverThumbPlaceholder(epub->getPath()));
   setBookOverrides(RECENT_BOOKS.readerOverrides(epub->getPath()));
   renderer.setTextDarkness(getEffectiveTextDarkness());
-  // Measured at the open that compiled the book's CSS (ReaderActivity); taken into account with Normalize Font Size and
-  // the book's style on (makeSectionBuildParams).
-  if (const uint8_t bodySize = BodySize::read(epub->getCachePath()); bodySize != 0) bookBodySizePct_ = bodySize;
-  LOG_INF("ERS", "Body size %u%%", static_cast<unsigned>(bookBodySizePct_));
+  // Found by the builds (adoptBuiltBodySize); taken into account with Normalize Font Size and the book's style on
+  // (makeSectionBuildParams).
+  const uint8_t bodySize = BodySize::read(epub->getCachePath());
+  if (bodySize != 0) bookBodySizePct_ = bodySize;
+  bodySizeUndecided_ = bodySize == 0;
+  LOG_INF("ERS", "Body size %u%%%s", static_cast<unsigned>(bookBodySizePct_),
+          bodySizeUndecided_ ? " (to measure)" : "");
   // The book's hyphenation patterns, from its language's pack, before the first lookup of them below and before any
   // build. A pack not yet in the flash store is copied in here, once (German: about a second), under a popup. Its
   // displayBuffer() consumes any pending HALF override, so on a panel that diffs against a host frame the first page
@@ -1615,7 +1618,10 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.widowOrphanControl = SETTINGS.widowOrphanControl != 0;
   p.fontSizeNormalization = getEffectiveFontSizeNormalization();
   p.embeddedStyle = lastRenderStats.embeddedStyle;
-  if (p.fontSizeNormalization && p.embeddedStyle) p.bodySizePct = bookBodySizePct_;
+  if (p.fontSizeNormalization && p.embeddedStyle) {
+    p.bodySizePct = bookBodySizePct_;
+    p.measureBodySize = bodySizeUndecided_;
+  }
   p.bionicReadingEnabled = getEffectiveBionicReading();
   // The SETTING, nothing else. Availability is guaranteed by construction: a preview-enabled
   // build resolves the note text its own spine needs before it lays out a single line (see
@@ -1633,6 +1639,27 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
     p.fontFamilies = &bookFontFamilies_;
   }
   return p;
+}
+
+bool EpubReaderActivity::adoptBuiltBodySize(const Section& built) {
+  if (!bodySizeUndecided_ || !epub) return false;
+  const BodySize::Sample& sample = built.bodySizeSample();
+  if (sample.pct == 0) {
+    if (sample.chars != 0) {
+      LOG_DBG("ERS", "Body size: %lu characters of running text in this build, too few to decide",
+              static_cast<unsigned long>(sample.chars));
+    }
+    return false;
+  }
+  BodySize::record(epub->getCachePath(), sample.pct);
+  bodySizeUndecided_ = false;
+  LOG_INF("ERS", "Body size %u%%, decided by a build of %lu characters of running text",
+          static_cast<unsigned>(sample.pct), static_cast<unsigned long>(sample.chars));
+  if (sample.pct == bookBodySizePct_) return false;
+  // The chapters so far were laid out at the old size; their caches miss now (the size is in their key), and the one
+  // on screen is laid out again.
+  bookBodySizePct_ = sample.pct;
+  return true;
 }
 
 void EpubReaderActivity::startActivityForResult(std::unique_ptr<Activity>&& activity,
@@ -2182,6 +2209,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
           backgroundWindowPagesBuilt_ += backgroundSection_->pageCount;  // count this section toward the page budget
           LOG_INF("ERS", "Background build spine=%d complete: %u pages", targetSpine, backgroundSection_->pageCount);
           SerialTestApi::noteBuildDone(targetSpine, backgroundSection_->pageCount);
+          // The look-ahead found the book's body size, and the chapter on screen was laid out at another: laid out
+          // again at its text. This build's own cache misses when the reader gets there, as the size is in its key.
+          if (adoptBuiltBodySize(*backgroundSection_)) {
+            relayoutPending_ = true;
+            preRenderedPage = {};
+            requestUpdate();
+          }
           // The build recorded its page count (SpinePageIndex). If that firms up the chapter
           // counter on screen, redraw it now rather than at the next page turn:
           // endBackgroundBorrow() below requests the deferred status refresh.
@@ -2628,7 +2662,7 @@ bool EpubReaderActivity::finishLadder(const ImageMemoryLadder::Action action) {
   // with them at the next render.
   ensureSdFontLoadedForPath(epub->getPath().c_str());
   preRenderedPage = {};  // a font popup may have drawn over it
-  fontRelayoutPending_ = true;
+  relayoutPending_ = true;
   requestUpdate();
   return true;
 }
@@ -2837,6 +2871,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   bgCounters_.cCompletes++;
 #endif
   LOG_INF("ERS", "Background-C spine=%d complete: %u pages", currentSpineIndex, section->pageCount);
+  const bool bodySizeChanged = adoptBuiltBodySize(*section);
   noteLiveLayoutBuilt();
   SerialTestApi::noteBuildDone(currentSpineIndex, section->pageCount);
   readerPhase_ = ReaderPhase::READING;
@@ -2877,9 +2912,15 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   forceLoadLargeImages = false;
   pageHasPlaceholders = false;
   buildingPopupShown_ = false;
-  const bool builtPageOnScreen = buildDisplayedPage_ >= 0 && buildDisplayedPage_ == section->currentPage;
+  const bool builtPageOnScreen = section && buildDisplayedPage_ >= 0 && buildDisplayedPage_ == section->currentPage;
   buildDisplayedPage_ = -1;
-  if (builtPageOnScreen && keepBuildPageOnScreen()) return;
+  if (bodySizeChanged) {
+    // This build found the book's body size, and it is not the one the chapter was laid out at: laid out again.
+    relayoutPending_ = true;
+    preRenderedPage = {};
+  } else if (builtPageOnScreen && keepBuildPageOnScreen()) {
+    return;
+  }
   requestUpdate();  // -> Normal pass renders the resolved page (with AA)
 }
 
@@ -5095,6 +5136,13 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
       checkHeapIntegrity("after_createSectionFile_image_rebuild");
     }
   }
+  // The build found the book's body size, another than the one it laid the chapter out at: the next render lays it out
+  // again.
+  if (createOk && adoptBuiltBodySize(*section)) {
+    relayoutPending_ = true;
+    preRenderedPage = {};
+    requestUpdate();
+  }
 
   // No eager image pre-decode here. Only the dimensions are needed to lay a section out, and
   // those come from the ZIP entry header at parse time (ImageDecoderFactory::getDimensions-
@@ -5920,9 +5968,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // this one (cleared before recoverSecondaryBufferIfNeeded, which may end B's borrow).
   statusRefreshDeferred_ = false;
   recoverSecondaryBufferIfNeeded();
-  if (fontRelayoutPending_) {
-    // The memory ladder changed the book's fonts (finishLadder): the chapter is laid out again with them.
-    fontRelayoutPending_ = false;
+  if (relayoutPending_) {
+    // The memory ladder changed the book's fonts (finishLadder), or a build found the book's body size
+    // (adoptBuiltBodySize): the chapter is laid out again with them.
+    relayoutPending_ = false;
     resetSectionKeepingPosition();
   }
 

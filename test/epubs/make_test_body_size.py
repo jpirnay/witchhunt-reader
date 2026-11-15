@@ -7,9 +7,10 @@ Modelled on "Die Buecherdiebin" (Markus Zusak): every paragraph carries a class 
 `x-small`. With the CSS Fonts 4 keywords small is 8/9 of medium, so without normalization the
 whole book reads at 89 % of the reader's size, outside the +/-10 % band that snaps near-body sizes.
 
-The body size is found in the largest spine item (chapter1.xhtml), not the title page before it,
-whose few words are set much larger. With Normalize Font Size on, the sizes are taken relative to
-it (89 %):
+The body size is found by the first chapter build with BodySize::kDecideChars (8,000) characters of
+running text: chapter1.xhtml, whose six paragraphs come ten times over, not the title page before it,
+whose few words are set much larger and are too few to decide. With Normalize Font Size on, the
+sizes are taken relative to it (89 %):
 
   * .tx  small    8/9  -> body, 100 %
   * h1   large    6/5  -> 135 %
@@ -122,11 +123,14 @@ PARAGRAPHS = [
     "hierarchy the publisher drew is kept, only its scale is the reader's.",
 ]
 
+# Ten times over: about 9,000 characters of running text, past the 8,000 a build needs to decide the body size.
+REPEATS = 10
+
 CHAPTER = document("Chapter One", """  <h1 class="ct">Chapter One</h1>
   <p class="sub">In which the type is small</p>
 %s
   <p class="note">Small print: set in x-small, three quarters of medium.</p>""" % "\n".join(
-    '  <p class="tx">%s</p>' % p for p in PARAGRAPHS))
+    '  <p class="tx">%s</p>' % p for p in PARAGRAPHS * REPEATS))
 
 
 def main():

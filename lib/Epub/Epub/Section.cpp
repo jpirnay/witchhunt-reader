@@ -1034,6 +1034,8 @@ struct Section::BuildState {
   // The owned arena is a region of setOwnedBuildRegionBytes(), not the 10 KB parse arena: the build uses it as it would
   // a lent one.
   bool ownedIsRegion = false;
+  // The running text counted for the book's body size (BuildParams::measureBodySize), ~1 KB for the build's length.
+  std::unique_ptr<BodySize::Census> bodySizeCensus;
   // External region is large enough to also host the reader's readBuf + ring
   // directly (no separate entry-sized zipArena needed).
   bool sharedZipScope = false;
@@ -1455,6 +1457,15 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   st.visitor->setWidowOrphanControl(p.widowOrphanControl);
   st.visitor->setParagraphIndent(p.paragraphIndent);
   if (p.embeddedStyle) st.visitor->setBodySizePct(p.bodySizePct);
+  // Counted afresh by each setup: one build's text is the sample, and a setup run again (a retry without the book's
+  // style) counts nothing, its sizes not being the book's. Without the memory the build lays out as ever and counts
+  // nothing; the next one counts.
+  st.bodySizeCensus.reset();
+  if (p.measureBodySize && p.embeddedStyle && p.fontSizeNormalization) {
+    st.bodySizeCensus = makeUniqueNoThrow<BodySize::Census>();
+    if (!st.bodySizeCensus) LOG_ERR("SCT", "spine=%d: no memory for the body size census", spineIndex);
+  }
+  st.visitor->setBuildCensus(st.bodySizeCensus.get());
   if (p.embeddedStyle && p.fontFamilies) st.visitor->setFontFamilies(*p.fontFamilies);
   // Anchors stream to SD as they are found rather than accumulating in the parser; the
   // finalizer below copies the spill into the section file's anchor map. Set before setup(),
@@ -2097,6 +2108,11 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   file = HalFile();
   truncatedCache = !parseComplete;
   this->lut = std::move(st.lut);
+  // A parse cut short counted part of the chapter, and one whose CSS lookups were skipped for lack of heap counted text
+  // at sizes it was not given: no sample from either.
+  if (st.bodySizeCensus && parseComplete && !cssLowHeapDegraded_) {
+    bodySizeSample_ = BodySize::sampleOf(*st.bodySizeCensus);
+  }
   const uint32_t finalizeMs = millis() - phaseFinalizeStart;
   const uint32_t totalMs = millis() - st.totalStartMs;
   LOG_INF("SCT",
@@ -2207,6 +2223,7 @@ bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount, const bool aren
 bool Section::startBuild(const BuildParams& params, const std::function<void(int)>& progressFn,
                          const uint32_t requestedHash) {
   BuildParams p = params;
+  bodySizeSample_ = {};
   const CssParser* css = epub->getCssParser();
   // Same predicate runBuildSetup() uses to decide setIndexArena(): an external scratch region
   // (the borrowed framebuffer) means the ruleset lands in the arena, not the heap.

@@ -540,6 +540,9 @@ class ChapterHtmlSlimParser final : public Print {
   // Body size census (setSizeCensus): the running text's characters are counted here by their size, and nothing is
   // laid out. Null for a build.
   BodySize::Census* census_ = nullptr;
+  // The build's sample of the book's body size (setBuildCensus): the running text it lays out is counted here as the
+  // census counts it. Null when the body size is known.
+  BodySize::Census* buildCensus_ = nullptr;
   // The book's body size as a factor (setBodySizePct): the sizes on the text's scale are taken relative to it
   // (normalizeFontSizeForElement). 1 when it is the reader's size, or normalization is off.
   float bodyScale_ = 1.0f;
@@ -598,8 +601,8 @@ class ChapterHtmlSlimParser final : public Print {
   bool effectiveSizeFromRoot_ = false;
   // The current block's font size in percent of the body's, resolved or not; 100 without a block.
   int currentBlockSizePct() const;
-  // Census mode: counts the word in partWordBuffer at its size (see setSizeCensus).
-  void countCensusWord();
+  // Counts the word in partWordBuffer into `census` at its size (setSizeCensus, setBuildCensus).
+  void countCensusWord(BodySize::Census& census);
   // Streaming table model. A row is buffered only until its </tr>, where it is laid out, packed
   // into the pending fragment and freed. The whole table was buffered until </table> once, because
   // grid layout needs the column count before the first row can be placed -- but our columns are
@@ -1522,6 +1525,9 @@ class ChapterHtmlSlimParser final : public Print {
   // countCensusWord), and lays nothing out: no line, no page, no image, no table. A block keeps its first word only,
   // so it is empty or not as in a build, which is what the next block's style depends on (startNewTextBlock's merge).
   void setSizeCensus(BodySize::Census* census) { census_ = census; }
+  // For a build, set before setup(): the running text it lays out is also counted into `census`, by the rules of the
+  // census above (countCensusWord), for the book's body size while it is not known (BodySize, Section::bodySizeSample).
+  void setBuildCensus(BodySize::Census* census) { buildCensus_ = census; }
   // The size of the book's running text in percent of the reader's (BodySize::read), set before setup(). With
   // font-size normalization on, the book's sizes are taken relative to it, so that text reads at the reader's size;
   // off, or 100, nothing changes. Only the book's own CSS has sizes to take it out of.
