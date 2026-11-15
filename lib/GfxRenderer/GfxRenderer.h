@@ -531,6 +531,7 @@ class GfxRenderer {
     return lent;
   }
   bool lendsDuringRefresh() const { return display.lendsDuringRefresh(); }
+  bool lendsPsramArena() const { return display.lendsPsramArena(); }
   // Keep fast differential alive (X4) after releaseSecondaryBuffer() by diffing
   // against the controller's retained baseline. See HalDisplay::setSingleBufferFastDiff.
   void setSingleBufferFastDiff(bool enabled) const { display.setSingleBufferFastDiff(enabled); }

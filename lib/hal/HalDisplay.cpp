@@ -396,7 +396,16 @@ namespace {
 constexpr size_t PSRAM_ARENA_BYTES = 256 * 1024;
 // Atomic, not behind the SPI bus lock: lending the arena must not wait for a refresh (see below).
 std::atomic<bool> psramArenaLent{false};
+// Allocated on first use and kept: PSRAM has the room, and a block that never goes back to the heap cannot fragment it.
+// Null where it cannot be had; the framebuffer is then lent instead.
+uint8_t* psramArena() {
+  static uint8_t* const arena =
+      static_cast<uint8_t*>(heap_caps_malloc(PSRAM_ARENA_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  return arena;
+}
 }  // namespace
+
+bool HalDisplay::lendsPsramArena() const { return HalCapabilities::keepsSecondaryBuffer() && psramArena() != nullptr; }
 
 // False while the PSRAM arena is out, though the display's own buffer is still there. "No secondary
 // buffer" is how every borrower tells a lend is in progress: the reader's recovery only gives the
@@ -426,11 +435,8 @@ bool HalDisplay::keepsPreviousFrame() const { return einkDisplay.hasSecondaryBuf
 uint8_t* HalDisplay::borrowSecondaryBuffer(size_t* size) {
   // The PSRAM arena touches no bus, so it does not wait for one: the refresh in flight holds it.
   if (HalCapabilities::keepsSecondaryBuffer()) {
-    // Allocated on first use and kept: PSRAM has the room, and a block that never goes back to the
-    // heap cannot fragment it. If it cannot be had, the framebuffer below is still a valid answer.
-    static uint8_t* const arena =
-        static_cast<uint8_t*>(heap_caps_malloc(PSRAM_ARENA_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (arena) {
+    // If the arena cannot be had, the framebuffer below is still a valid answer.
+    if (uint8_t* const arena = psramArena()) {
       if (psramArenaLent.exchange(true)) return nullptr;  // one borrower at a time, as with the framebuffer
       if (size) *size = PSRAM_ARENA_BYTES;
       LOG_INF("FBUF", "borrowSecondary -> PSRAM arena (size=%lu)", static_cast<unsigned long>(PSRAM_ARENA_BYTES));

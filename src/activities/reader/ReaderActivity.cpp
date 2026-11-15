@@ -962,13 +962,19 @@ void ReaderActivity::onEnter() {
     // The size of the book's running text (Normalize Font Size) is not measured here: the chapter builds count it from
     // the text they lay out (BodySize).
     const bool indexing = firstOpenIndexing || bookFontsPending;
+    // Where the lend below is the PSRAM arena, which leaves both frames alone and waits for no refresh, the popup ships
+    // async and the book is indexed while it paints: the indexing used to wait out its FAST refresh first (X4 Pro,
+    // 2026-11-15: 667 ms). RED is seeded from the frame on screen once that refresh is finished, after the load.
+    const bool indexWhilePopupPaints =
+        indexing && renderer.hasSecondaryBuffer() && renderer.lendsPsramArena() && renderer.supportsAsyncRefresh();
     Rect indexingPopup;
     if (indexing) {
       RenderLock lock;
       // drawPopup() overlays the indexing box on the displayed frame (it resyncs the write buffer
       // from the screen first), so the box lands on the launcher screen — e.g. the recent-books grid
       // — without the stale-buffer diff toggling the old/new selection cells before the popup appears.
-      indexingPopup = GUI.drawPopup(renderer, tr(STR_INDEXING));
+      indexingPopup = GUI.drawPopup(renderer, tr(STR_INDEXING), /*overlayDisplayedFrame=*/true,
+                                    indexWhilePopupPaints ? PopupShip::Async : PopupShip::Blocking);
     }
     // The popup's progress bar, for a build long enough to want one (IndexingProgressGate): drawn
     // at the end of a build phase over the frame on screen, a FAST refresh each. `shownFrame` follows
@@ -985,6 +991,7 @@ void ReaderActivity::onEnter() {
       auto* p = static_cast<IndexingProgress*>(ctx);
       if (!p->gate.shouldDraw(millis(), percent)) return;
       RenderLock lock;
+      p->renderer.finishDisplayAsync();  // the popup's own refresh, where it ships async; else nothing
       // A refresh swaps the buffers where the secondary was not lent: draw over what is shown.
       p->renderer.syncWriteBufferFromDisplayed();
       GUI.fillPopupProgress(p->renderer, p->popup, percent);
@@ -1022,8 +1029,9 @@ void ReaderActivity::onEnter() {
       renderer.syncWriteBufferFromDisplayed();
       // The popup's FAST loaded RED RAM with the pre-popup frame, not the popup, and the first
       // FAST after the return below diffs against RED. Seed it with the displayed frame while the
-      // secondary still holds it, as the X4's single-buffer fast diff requires (no-op on X3).
-      renderer.syncRedRamFromFrameBuffer();
+      // secondary still holds it, as the X4's single-buffer fast diff requires (no-op on X3). The
+      // seed waits out a refresh in flight: with the popup still painting it comes after the load.
+      if (!indexWhilePopupPaints) renderer.syncRedRamFromFrameBuffer();
       lentForIndexing = renderer.borrowSecondaryBuffer(&lentSize);
       if (lentForIndexing) {
         renderer.setSingleBufferFastDiff(true);
@@ -1039,6 +1047,11 @@ void ReaderActivity::onEnter() {
     if (epub && bookFontsPending) {
       // load() left nothing in the region: its rings were scoped to each read.
       BookFonts::prepare(*epub, indexingScratch.valid() ? &indexingScratch : nullptr);
+    }
+    if (indexWhilePopupPaints) {
+      RenderLock lock;
+      renderer.finishDisplayAsync();
+      renderer.syncRedRamFromFrameBuffer();
     }
     if (lentForIndexing) {
       RenderLock lock;
