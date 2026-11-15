@@ -27,7 +27,9 @@ constexpr uint32_t CACHE_MAGIC = 0x31504E46;  // "FNP1"
 // rebuilds a spine at a time as the reader moves, so there is nothing to preserve.
 // 3: Unicode spaces at a note's edges are trimmed, and a note of nothing else is not stored. A v2
 // store holds "notes" made of U+2005 alone (The Sea Captain's Wife, #388).
-constexpr uint16_t CACHE_VERSION = 3;
+// 4: a caller's href resolves against its chapter's folder. A v3 store can hold, for a book with same-named note files
+// in two folders, the other folder's note under a caller's key.
+constexpr uint16_t CACHE_VERSION = 4;
 constexpr size_t STREAM_CHUNK_BYTES = 1024;
 constexpr size_t MAX_HREF_BYTES = 191;
 constexpr uint32_t HEADER_BYTES = 12;    // magic + version + count + indexOffset
