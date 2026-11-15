@@ -220,6 +220,38 @@ uint32_t decodeInlineEntry(char* const entry, const uint32_t size, const bool cu
   return written;
 }
 
+// The vowel marks a lookup may do without: Hebrew points and cantillation (niqqud, te'amim, the Judeo-Spanish varika)
+// and the Arabic short vowels (fathatan to kasra, sukun, the superscript alef). Not shaddah (U+0651), maddah (U+0653)
+// or hamza (U+0654, U+0655): those change the word. From crosspoint-reader PR #4396 by Uri Tauber, and CrossInk
+// cd40105b by Julia Nguyen, whose set this is.
+bool isLookupVowelMark(const uint32_t cp) {
+  const bool hebrew = (cp >= 0x0591 && cp <= 0x05BD) || cp == 0x05BF || (cp >= 0x05C1 && cp <= 0x05C2) ||
+                      (cp >= 0x05C4 && cp <= 0x05C5) || (cp >= 0x05C7 && cp <= 0x05C9) || cp == 0xFB1E;
+  return hebrew || (cp >= 0x064B && cp <= 0x0650) || cp == 0x0652 || cp == 0x0670;
+}
+
+// `word` without its vowel marks, or "" when it has none: a word without them costs no allocation.
+std::string withoutVowelMarks(const std::string& word) {
+  const auto* const begin = reinterpret_cast<const unsigned char*>(word.c_str());
+  const auto* cursor = begin;
+  std::string stripped;
+  bool changed = false;
+  while (*cursor) {
+    const auto* const start = cursor;
+    const uint32_t cp = utf8NextCodepoint(&cursor);
+    if (isLookupVowelMark(cp)) {
+      if (!changed) {
+        stripped.reserve(word.size());
+        stripped.assign(word.data(), static_cast<size_t>(start - begin));
+        changed = true;
+      }
+    } else if (changed) {
+      stripped.append(reinterpret_cast<const char*>(start), static_cast<size_t>(cursor - start));
+    }
+  }
+  return stripped;
+}
+
 }  // namespace
 
 // --- ScanReader -------------------------------------------------------------
@@ -1139,7 +1171,24 @@ bool Dictionary::resolve(const char* word, DictEntries& entriesOut, std::string&
       return found;
     };
 
-    entries = probeCased(cleaned);
+    // Pointed Hebrew (niqqud) and vowelled Arabic (harakat) are no headwords in most dictionaries, which list the
+    // bare letters. The spelling as written goes first, so a dictionary that does list pointed headwords keeps its
+    // exact hit; on a miss the vowel marks go and the whole probe runs again, synonyms included. Stripped from the
+    // query only, never from the index: its order is the marked words'. The marks could hide punctuation at an edge
+    // ("\u0591“שָׁלוֹם!”"), so the stripped word is cleaned again.
+    const auto probeWord = [&](const std::string& target) {
+      DictEntries found = probeCased(target);
+      if (!found.location.found) {
+        const std::string stripped = withoutVowelMarks(target);
+        if (!stripped.empty()) {
+          const std::string bareLetters = cleanWord(stripped.c_str());
+          if (!bareLetters.empty() && bareLetters != target) found = probeCased(bareLetters);
+        }
+      }
+      return found;
+    };
+
+    entries = probeWord(cleaned);
 
     // A French elision ("l'histoire", "qu’après") is no headword, the word
     // after its apostrophe is. Tried after the whole word, which some
@@ -1149,7 +1198,7 @@ bool Dictionary::resolve(const char* word, DictEntries& entriesOut, std::string&
     std::string bare;
     if (!entries.location.found) {
       bare = elisionRemainder(cleaned);
-      if (!bare.empty()) entries = probeCased(bare);
+      if (!bare.empty()) entries = probeWord(bare);
     }
 
     // Still nothing, and the word is a hyphenated compound: look up its parts.
@@ -1160,7 +1209,7 @@ bool Dictionary::resolve(const char* word, DictEntries& entriesOut, std::string&
       std::vector<std::string> parts;
       hyphenParts(bare.empty() ? cleaned : bare, parts);
       for (const auto& part : parts) {
-        entries = probeCased(part);
+        entries = probeWord(part);
         if (entries.location.found) break;
       }
     }

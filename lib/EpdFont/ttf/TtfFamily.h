@@ -36,6 +36,14 @@ FileSource fileSource(File& file, const uint32_t size, const uint32_t stamp = 0)
 /// True for a name ending in ".ttf" or ".otf", in any case. In-progress copies ("x.ttf.tmp") do not count.
 bool isOutlineFontFileName(const char* name);
 
+/// The style a font file's name gives, bit 0 bold and bit 1 italic as FileProbe::style, for the files whose tables
+/// leave a style bit out (OpenDyslexic's Italic, commercial and Kindle fonts: macStyle and fsSelection say regular),
+/// which discovery ORs into the probe's. Read from the words after the family's: past the first '-' or '_', or without
+/// one, past the first word ("LatoBold"). A word ending in "bold" is bold (SemiBold, ExtraBold); one ending in
+/// "italic" or "oblique", or a last word "It" (Adobe's "-It", "-BoldIt"), is italic. "Lato-BoldItalic.ttf" 3,
+/// "Inter-SemiBold.ttf" 1, "Kobold-Regular.ttf" 0. From crosspoint-reader PR #4325 by Georg Kaindl.
+int fileNameStyle(const char* name);
+
 /// The CPac table (the lookup filters ot::FilterTableWriter writes) is left out for a GSUB or GPOS past these: lookups
 /// (MAX_PLANNED_LOOKUPS) or declared subtables, summed over its lookups. Counted and capped here, so no hostile table
 /// makes the probe reserve gigabytes. The same figures as ot::FilterTableWriter::kMaxLookups and kMaxSubtables.
@@ -89,7 +97,8 @@ bool filterTableBytes(const FileSource& file, uint32_t* bytes);
 
 /// What discovery learns from a TrueType or OpenType CFF file, in a few small reads.
 struct FileProbe {
-  /// head.macStyle: bit 0 bold, bit 1 italic, as EpdFontFamily::Style. -1 when it is not a font the engine
+  /// head.macStyle: bit 0 bold, bit 1 italic, as EpdFontFamily::Style, with OS/2 fsSelection's BOLD, ITALIC and
+  /// OBLIQUE bits ORed in (FreeType reads a face's style from either). -1 when it is not a font the engine
   /// draws: not TrueType or OpenType CFF (a collection, variable CFF2), a table it needs missing or outside the file,
   /// anything else parseFace() refuses (no Unicode cmap of format 4 or 12, unitsPerEm outside 16..16384, no
   /// horizontal metrics, a maxp version or loca format it does not read), or a read error.

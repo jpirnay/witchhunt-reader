@@ -664,8 +664,8 @@ bool ImageBlock::decodeGray8(GfxRenderer& renderer, const RenderConfig& config) 
 
 // A turned image is never sliced (placeImageBlockAsBlock places it whole), so the copied turned_ is unreachable today.
 std::unique_ptr<ImageBlock> ImageBlock::makeCrop(const int16_t srcYOffset, const int16_t srcHeight) const {
-  auto crop =
-      std::unique_ptr<ImageBlock>(new ImageBlock(imagePath, width, height, altText, epubFilePath_, epubEntryPath_));
+  auto crop = makeUniqueNoThrow<ImageBlock>(imagePath, width, height, altText, epubFilePath_, epubEntryPath_);
+  if (!crop) return nullptr;
   crop->srcYOffset_ = srcYOffset;
   crop->srcHeight_ = srcHeight;
   crop->turned_ = turned_;

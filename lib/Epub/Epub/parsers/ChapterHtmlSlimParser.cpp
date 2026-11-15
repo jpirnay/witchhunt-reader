@@ -1851,8 +1851,8 @@ void ChapterHtmlSlimParser::emitPage() {
     layoutFailed = true;
     saxParser_.stop();
   }
-  currentPage.reset(new (std::nothrow) Page());
-  if (currentPage) currentPage->elements.reserve(Page::TYPICAL_ELEMENTS);
+  currentPage.reset();
+  if (ensurePage()) heapReserveFor(currentPage->elements, Page::TYPICAL_ELEMENTS);  // a hint: push_back asks again
   currentPageNextY = 0;
   lastBlockMarginBottom = 0;
   paragraphLinesOnPage_ = 0;
@@ -1925,10 +1925,8 @@ void ChapterHtmlSlimParser::openBox(BoxScope box) {
     return;
   }
   if (!currentPage) {
-    currentPage.reset(new (std::nothrow) Page());
-    if (!currentPage) return;
-    currentPage->elements.reserve(Page::TYPICAL_ELEMENTS);
-    currentPageNextY = 0;
+    if (!ensurePage()) return;
+    heapReserveFor(currentPage->elements, Page::TYPICAL_ELEMENTS);
   }
   // What the empty block holds of the element's top spacing (and of the wrappers around it) is the margin above the
   // frame: placed now, as applyBlockTopSpacing would, so a child's margin stays inside the frame instead of collapsing
@@ -1958,12 +1956,10 @@ void ChapterHtmlSlimParser::closeBox() {
   }
   BoxScope& box = boxScopes_.back();
   if (!currentPage) {
-    currentPage.reset(new (std::nothrow) Page());
-    if (!currentPage) {
+    if (!ensurePage()) {
       boxScopes_.pop_back();
       return;
     }
-    currentPageNextY = 0;
     box.top = 0;
   }
   {
@@ -2064,6 +2060,34 @@ int16_t ChapterHtmlSlimParser::blockPictureX(const int width) const {
 
 // Based on crosspoint-reader PR #3891 (Justin Mitchell, @itsthisjustin; the deferral is Uri
 // Tauber's), reworked for our parser, which has no block-style stack to carry the flags on.
+bool ChapterHtmlSlimParser::ensurePage() {
+  if (currentPage) return true;
+  currentPage.reset(new (std::nothrow) Page());
+#ifdef PAGE_FAULT_INJECTION
+  if (pagesLeft() == 0) {
+    currentPage.reset();
+  } else if (pagesLeft() != SIZE_MAX) {
+    --pagesLeft();
+  }
+#endif
+  if (!currentPage) {
+    stopForHeap("a page", sizeof(Page));
+    return false;
+  }
+  currentPageNextY = 0;
+  return true;
+}
+
+void ChapterHtmlSlimParser::stopForHeap(const char* what, const size_t bytes) {
+  if (!streamFailed) {
+    LOG_ERR("EHP", "No heap for %s (%u B; %u free, %u max alloc); stopping the parse", what,
+            static_cast<unsigned>(bytes), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  }
+  streamFailed = true;
+  layoutFailed = true;
+  saxParser_.stop();
+}
+
 void ChapterHtmlSlimParser::applyPendingPageBreak() {
   if (!pageBreakPending_) return;
   pageBreakPending_ = false;
@@ -2271,7 +2295,7 @@ void ChapterHtmlSlimParser::endExternalPageBreakAnchors() {
 
 void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
   if (!pendingInlineImage_.active) return;
-  if (!currentPage) currentPage.reset(new (std::nothrow) Page());
+  if (!ensurePage()) return;
 
   const int16_t imgH = pendingInlineImage_.height;
   const int16_t imgW = pendingInlineImage_.width;
@@ -2282,8 +2306,9 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
   // its height is capped at one viewport by the float gate, so a fresh page always
   // has room. This avoids the fragile cross-page tile/continuation path entirely and
   // lets the whole image (with text wrapping beside it) live on a single page.
-  if (imgH > static_cast<int16_t>(viewportHeight - currentPageNextY) && currentPage && !currentPage->elements.empty()) {
-    emitPage();  // resets currentPage + currentPageNextY=0, clears stale float state
+  if (imgH > static_cast<int16_t>(viewportHeight - currentPageNextY) && !currentPage->elements.empty()) {
+    emitPage();                // resets currentPage + currentPageNextY=0, clears stale float state
+    if (!currentPage) return;  // no heap for the next page: emitPage stopped the build
   }
 
   // At the page's edge; in a box, at the edge of the paragraph's column, which the text beside it starts from.
@@ -2302,6 +2327,7 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
                                   : nullptr;
   if (!pageImage) {
     LOG_ERR("EHP", "Float image dropped: allocation failed");
+    noteImageDroppedForHeap();
     return;
   }
   // The page owns it from here; this is a borrowed pointer purely so the first line of
@@ -2526,13 +2552,11 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   // Zone spans from the first line's top to just below the cap's ink bottom.
   const int zoneHeight = bodyLeading + capInkHeightScaled + 2 + sinkShift;
 
-  if (!currentPage) {
-    currentPage.reset(new (std::nothrow) Page());
-    currentPageNextY = 0;
-  }
+  if (!ensurePage()) return;
   // A drop cap never crosses a page boundary — break first if it would not fit.
-  if (raise + zoneHeight > viewportHeight - currentPageNextY && currentPage && !currentPage->elements.empty()) {
+  if (raise + zoneHeight > viewportHeight - currentPageNextY && !currentPage->elements.empty()) {
     emitPage();
+    if (!currentPage) return;  // no heap for the next page: emitPage stopped the build
   }
 
   BlockStyle capBlockStyle;
@@ -2725,6 +2749,8 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
         merged.floatZones[zi] = prevStyle.floatZones[zi];
       }
       currentTextBlock->setBlockStyle(merged);
+      // The empty block may have been opened on the other side of a heading's start or end tag.
+      currentTextBlock->setHyphenationEnabled(blockHyphenates());
 
       // Whatever came before is laid out already: the block is empty.
       applyPendingPageBreak();
@@ -2775,11 +2801,12 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   if (currentTextBlock) {
     currentTextBlock->reset(blockStyleWithIndent);
   } else {
-    currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled,
-                                                         blockStyleWithIndent, bionicReadingEnabled));
+    currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, blockHyphenates(), blockStyleWithIndent,
+                                                         bionicReadingEnabled));
     if (currentTextBlock) currentTextBlock->lendLayoutScratch(&layoutScratch_);
   }
   if (currentTextBlock) {
+    currentTextBlock->setHyphenationEnabled(blockHyphenates());  // the reused block's, too
     currentTextBlock->setTypography(typography_);
     currentTextBlock->setShapingLatch(&shapingDegradedAny_);
     currentTextBlock->setVertical(vertical_);
@@ -3146,7 +3173,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     // its word arrays back now (swapped out, as at a slice yield) rather than hold a paragraph's capacity through the
     // table; the paragraph after the table grows them again.
     if (self->currentTextBlock && self->currentTextBlock->isEmpty()) self->currentTextBlock->releaseLayoutScratch();
-    self->currentTable = std::unique_ptr<BufferedTable>(new BufferedTable());
+    self->currentTable = makeUniqueNoThrow<BufferedTable>();
+    if (!self->currentTable) {
+      self->stopForHeap("a table", sizeof(BufferedTable));
+      return;
+    }
     self->currentTable->depth = 1;
     self->currentTable->rtl = self->startSideIsRight();
     if (atts != nullptr) {
@@ -3646,20 +3677,24 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
                 // Block image path (existing behaviour) — flush text before placing image
                 // Flush any pending text block so it appears before the image
-                if (self->partWordBufferIndex > 0) {
-                  if (!self->flushPartWordBuffer()) return;
+                //
+                // Every return from here counts the <img> as open: its endElement takes the depth
+                // back down whether or not the image was placed. A return that skipped it (out of
+                // memory placing the image) left every bold, italic and alignment scope off by one
+                // for the rest of the chapter. Ported from crosspoint-reader PR #4472 by Justin
+                // Mitchell.
+                if (self->partWordBufferIndex > 0 && !self->flushPartWordBuffer()) {
+                  self->depth += 1;
+                  return;
                 }
                 self->dropHeldBidiControls();  // the paragraph before the image ends here
                 if (self->currentTextBlock && !self->currentTextBlock->isEmpty()) {
                   const BlockStyle parentBlockStyle = self->currentTextBlock->getBlockStyle();
                   self->startNewTextBlock(parentBlockStyle);
                 }
-                if (!self->placeImageWithBlockSpacing(cachedImagePath, resolvedPath, alt, displayWidth, displayHeight,
-                                                      self->visibleTextOffset_,
-                                                      self->imageLinkHash(displayWidth, displayHeight))) {
-                  return;
-                }
-
+                self->placeImageWithBlockSpacing(cachedImagePath, resolvedPath, alt, displayWidth, displayHeight,
+                                                 self->visibleTextOffset_,
+                                                 self->imageLinkHash(displayWidth, displayHeight));
                 self->depth += 1;
                 return;
               }  // layout geometry block
@@ -4094,20 +4129,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     // A rule the book leaves nothing to draw of only ends the block: a section break that is a centred dash, with the
     // <hr> kept for the structure, has no line and takes no room.
     if (!self->embeddedStyle || !cssStyle.hidesRule()) {
-      if (!self->currentPage) {
-        self->currentPage.reset(new Page());
-        self->currentPageNextY = 0;
-      }
+      if (!self->ensurePage()) return;
       const int lineHeight =
           static_cast<int>(self->renderer.getLineHeight(self->fontId) * self->lineCompression + 0.5f);
       const int16_t marginV = static_cast<int16_t>(lineHeight / 2);
       self->currentPageNextY += marginV;
       if (self->currentPageNextY + 1 + marginV > self->viewportHeight) {
-        self->emitPage();  // a fresh page, its y below any open box's top padding
-        if (!self->currentPage) {
-          self->currentPage.reset(new Page());
-          self->currentPageNextY = 0;
-        }
+        self->emitPage();                // a fresh page, its y below any open box's top padding
+        if (!self->currentPage) return;  // no heap for it: emitPage stopped the build
       }
       // Render the rule centered at 50% width (25%→75%) rather than edge-to-edge, matching
       // the conventional reader default. Books rarely set hr width in their own CSS. In a box, of the box's width.
@@ -5576,14 +5605,13 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
   const LineImageBox box = images.empty() ? LineImageBox{lineHeight, 0} : lineImageBox(text, images);
   lineHeight = box.height;
 
-  if (!currentPage) {
-    currentPage.reset(new Page());
-    currentPageNextY = 0;
-  }
+  // No page to put it on: the build has stopped (ensurePage, emitPage), and the line goes as a refused PageLine does.
+  if (!ensurePage()) return ParsedText::LineProcessResult::Accepted;
 
   if (currentPageNextY + lineHeight > viewportHeight || keepTogetherBreak(lineHeight) ||
       lineImagesFillPage(images.size())) {
     emitPage();
+    if (!currentPage) return ParsedText::LineProcessResult::Accepted;
   }
 
   // The page's last line must not end in a hyphenated word: also when the page ends early, before
@@ -5913,14 +5941,8 @@ bool ChapterHtmlSlimParser::applyBlockTopSpacing() {
   // The spacing is an offset into the current page, so the page has to exist first: left to
   // addLineToPage(), the first line would create it and restart y at 0, dropping the spacing.
   if (!currentPage) {
-    currentPage.reset(new (std::nothrow) Page());
-    if (!currentPage) {
-      LOG_ERR("EHP", "OOM: page object");
-      layoutFailed = true;
-      return false;
-    }
-    currentPage->elements.reserve(Page::TYPICAL_ELEMENTS);
-    currentPageNextY = 0;
+    if (!ensurePage()) return false;
+    heapReserveFor(currentPage->elements, Page::TYPICAL_ELEMENTS);
   }
 
   // A paragraph over 96 words is laid out in chunks (flushPartWordBuffer), and every chunk after
@@ -6033,9 +6055,9 @@ void ChapterHtmlSlimParser::commitPendingRow() {
     flushTableFragment(t.packer);
   };
 
-  if (!currentPage) {
-    currentPage.reset(new Page());
-    currentPageNextY = 0;
+  if (!ensurePage()) {
+    dropRowLayout();
+    return;
   }
 
   // A change in column count requires a new fragment; each PageTableFragment carries exactly one.
@@ -6077,6 +6099,7 @@ void ChapterHtmlSlimParser::commitPendingRow() {
       currentPageNextY + headerContrib + rowContrib + closingBorder > viewportHeight) {
     dropRowLayout();  // its bytes were in the page about to be emitted
     emitPage();
+    if (!currentPage) return;  // no heap for the next page: emitPage stopped the build
     ensurePageBlock();
     if (buildArena_) rowBlock = buildArena_->reserveBlock();
     if (!layoutTableRow(t.pendingRow, columnCount, lr)) {
@@ -6189,6 +6212,11 @@ std::unique_ptr<ImageBlock> ChapterHtmlSlimParser::buildImageFromEpubPath(
 
   auto image = makeUniqueNoThrow<ImageBlock>(cachedPath, static_cast<int16_t>(displayWidth),
                                              static_cast<int16_t>(displayHeight), alt, epub->getPath(), resolvedPath);
+  if (!image) {
+    LOG_ERR("EHP", "Image dropped: ImageBlock allocation failed");
+    noteImageDroppedForHeap();
+    return nullptr;
+  }
   turnIfVertical(image.get());
   return image;
 }
@@ -6281,17 +6309,9 @@ bool ChapterHtmlSlimParser::placeImageWithBlockSpacing(const std::string& cached
     LOG_TRC("EHP", "Image page break: currentY=%d needed=%d viewportH=%d", currentPageNextY,
             totalImageHeightWithSpacing, viewportHeight);
     emitPage();
-    if (!currentPage) {
-      LOG_ERR("EHP", "Failed to create new page");
-      return false;
-    }
-  } else if (!currentPage) {
-    currentPage.reset(new Page());
-    if (!currentPage) {
-      LOG_ERR("EHP", "Failed to create initial page");
-      return false;
-    }
-    currentPageNextY = 0;
+    if (!currentPage) return false;  // no heap for the next page: emitPage stopped the build
+  } else if (!ensurePage()) {
+    return false;
   }
 
   currentPageNextY += imageSpacingTop;
@@ -6301,8 +6321,16 @@ bool ChapterHtmlSlimParser::placeImageWithBlockSpacing(const std::string& cached
   // from the EPUB at first render time by ImageBlock::ensureExtracted().
   auto imageBlock =
       makeUniqueNoThrow<ImageBlock>(cachedImagePath, displayWidth, displayHeight, alt, epub->getPath(), entryPath);
+#ifdef BLOCK_IMAGE_FAULT_INJECTION
+  if (blockImagesLeft() == 0) {
+    imageBlock.reset();
+  } else if (blockImagesLeft() != SIZE_MAX) {
+    --blockImagesLeft();
+  }
+#endif
   if (!imageBlock) {
     LOG_ERR("EHP", "Failed to create ImageBlock");
+    noteImageDroppedForHeap();
     return false;
   }
   turnIfVertical(imageBlock.get());
@@ -6311,6 +6339,7 @@ bool ChapterHtmlSlimParser::placeImageWithBlockSpacing(const std::string& cached
   auto pageImage = makeUniqueNoThrow<PageImage>(std::move(imageBlock), xPos, yPos, /*inLine=*/false, linkHash);
   if (!pageImage) {
     LOG_ERR("EHP", "Failed to create PageImage");
+    noteImageDroppedForHeap();
     return false;
   }
   noteElementOnPage(visibleOffset);
@@ -6524,6 +6553,7 @@ void ChapterHtmlSlimParser::placeLineImages(const std::span<const ParsedText::Li
       ++lineImagesOnPage_;
     } else {
       LOG_ERR("EHP", "Inline image %u dropped: no memory for its block", object.id);
+      noteImageDroppedForHeap();
     }
     pendingLineImages_.erase(it);
   }
@@ -6560,16 +6590,10 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
   const int displayWidth = image->getWidth();
   const int displayHeight = image->getRenderedHeight();
 
-  if (!currentPage) {
-    currentPage.reset(new Page());
-    currentPageNextY = 0;
-  }
+  if (!ensurePage()) return;
   if (!currentPage->elements.empty() && currentPageNextY + displayHeight > viewportHeight) {
     emitPage();
-    if (!currentPage) {
-      currentPage.reset(new Page());
-      currentPageNextY = 0;
-    }
+    if (!currentPage) return;  // no heap for the next page: emitPage stopped the build
   }
 
   const int xPos = blockPictureX(displayWidth);
@@ -6579,6 +6603,7 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
     auto pageImage = makeUniqueNoThrow<PageImage>(std::move(image), xPos, currentPageNextY);
     if (!pageImage) {
       LOG_ERR("EHP", "Image dropped: PageImage allocation failed");
+      noteImageDroppedForHeap();
       return;
     }
     noteElementOnPage(placementOffset());
@@ -6604,13 +6629,16 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
       sliceH -= (kMinImageSliceH - leftover);
     }
     auto crop = image->makeCrop(static_cast<int16_t>(srcOffset), static_cast<int16_t>(sliceH));
-    if (!currentPage) {
-      currentPage.reset(new Page());
-      currentPageNextY = 0;
+    if (!crop) {
+      LOG_ERR("EHP", "Image slice dropped: ImageBlock allocation failed");
+      noteImageDroppedForHeap();
+      return;
     }
+    if (!ensurePage()) return;
     auto slice = makeUniqueNoThrow<PageImage>(std::move(crop), xPos, currentPageNextY);
     if (!slice) {
       LOG_ERR("EHP", "Image slice dropped: PageImage allocation failed");
+      noteImageDroppedForHeap();
       return;
     }
     noteElementOnPage(placementOffset());
@@ -6729,11 +6757,7 @@ std::unique_ptr<ParsedText> ChapterHtmlSlimParser::makeCellText() {
   auto text = makeUniqueNoThrow<ParsedText>(false, false);
 #endif
   if (!text) {
-    LOG_ERR("EHP", "No heap for a table cell's text (%u B; %u free, %u max alloc); stopping the parse",
-            static_cast<unsigned>(sizeof(ParsedText)), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-    streamFailed = true;
-    layoutFailed = true;
-    saxParser_.stop();
+    stopForHeap("a table cell's text", sizeof(ParsedText));
     return nullptr;
   }
   text->setTypography(typography_);
@@ -6890,6 +6914,7 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
   const bool pageHasContent = currentPageNextY > 0 && (boxScopes_.empty() || !currentPage->elements.empty());
   if (currentPageNextY + fragTotalHeight > viewportHeight && pageHasContent) {
     emitPage();
+    if (!currentPage) return;  // no heap for the next page: emitPage stopped the build
   }
 
   if (auto fragment = makeUniqueNoThrow<PageTableFragment>(
