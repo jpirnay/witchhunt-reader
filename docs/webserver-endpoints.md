@@ -565,7 +565,7 @@ The 500 body lists each failure as `<path> (<reason>)`, where the reason is one 
 
 Every path a request names is checked segment by segment, before the card is touched,
 by the file endpoints above, `/upload`, the WebSocket upload, the plugin write
-endpoints and WebDAV (except `PROPFIND`; see [WebDAV](#webdav)). The rules are in
+endpoints and WebDAV. The rules are in
 `ProtectedPaths` (`lib/FsHelpers/ProtectedPaths.h`); `isProtectedWebPath()`
 (`src/network/WebPathGuard.cpp`) applies them with the on-card alias lookup described below.
 
@@ -1061,7 +1061,7 @@ curl -X PROPFIND -H "Depth: 1" http://crosspoint.local/Books/
 | Method           | Behaviour                                                                                  |
 | ---------------- | ------------------------------------------------------------------------------------------ |
 | `OPTIONS`        | Returns `DAV: 1` and the `Allow` list                                                      |
-| `PROPFIND`       | Lists a file or folder. `Depth` 0 or 1 (anything else counts as 1). Children whose names start with `.`, and the system folders, are left out. `207` multistatus; `404` if absent |
+| `PROPFIND`       | Lists a file or folder. `Depth` 0 or 1 (anything else counts as 1). Children whose names start with `.`, and the system folders, are left out. `207` multistatus; `403` on a protected path; `404` if absent |
 | `GET`, `HEAD`    | Streams a file. A folder answers `405`                                                     |
 | `PUT`            | Writes `<name>.davtmp`, then renames it over the target, so a failed upload keeps the old file. The parent folder must exist. `201` new, `204` replaced |
 | `DELETE`         | Removes a file or an **empty** folder (`409` otherwise). `204`. A deleted book's layout cache is cleared; sidecars are not removed |
@@ -1070,14 +1070,13 @@ curl -X PROPFIND -H "Depth: 1" http://crosspoint.local/Books/
 | `COPY`           | As `MOVE`, but files only: copying a folder answers `403`                                  |
 | `LOCK`, `UNLOCK` | Dummy: returns a fixed token so clients that insist on locking keep working. Nothing is locked |
 
-For `GET`, `HEAD`, `PUT`, `DELETE` and `MKCOL`, and for both ends of `MOVE` and `COPY`, a
-path with a hidden segment (starting with `.`) or inside `System Volume Information` or
-`XTCache` answers `403`, at any depth, including spellings the SD library maps onto one
+For `PROPFIND`, `GET`, `HEAD`, `PUT`, `DELETE` and `MKCOL`, and for both ends of `MOVE` and
+`COPY`, a path with a hidden segment (starting with `.`) or inside `System Volume Information`
+or `XTCache` answers `403`, at any depth, including spellings the SD library maps onto one
 (see [Protected paths](#protected-paths)). WebDAV refuses dot segments whatever **Show
-Hidden Files** says (`WebDAVHandler::isProtectedPath()`). `PROPFIND` does not judge the path
-it is asked about: pointed at a protected folder, it lists that folder's entries (names and
-sizes, not contents), leaving out only the dot-named and system ones. The root cannot be
-deleted or moved.
+Hidden Files** says (`WebDAVHandler::isProtectedPath()`). So `/.crosspoint` cannot be listed,
+and the listing of any other folder leaves out its dot-named and system entries. The root
+cannot be deleted or moved.
 
 Pressing **Back** on the device does not interrupt a `PUT`: the body is read whole inside one
 request, and File Transfer is left once it has arrived.

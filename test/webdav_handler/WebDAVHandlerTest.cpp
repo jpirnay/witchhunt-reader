@@ -90,6 +90,28 @@ TEST_F(WebDAVHandlerTest, FolderListingNamesItsBooks) {
   EXPECT_EQ(s.body.find("hidden"), std::string::npos);
 }
 
+// PROPFIND judged no path at all: a listing of /.crosspoint, under any spelling SdFat opens it by, named the
+// credential stores and gave their sizes. It answers as the other methods do.
+TEST_F(WebDAVHandlerTest, PropfindRefusesProtectedFolders) {
+  for (const char* uri : {"/.crosspoint", "/CROSSP~1", "/crossp~1", "/%20.crosspoint", "/.crosspoint.",
+                          "/System%20Volume%20Information"}) {
+    for (const char* depth : {"0", "1"}) {
+      const WebServer& s = request(HTTP_PROPFIND, uri, depth);
+      EXPECT_EQ(s.code, 403) << uri << " Depth " << depth;
+      EXPECT_EQ(s.body.find("wifi.json"), std::string::npos) << uri << " Depth " << depth;
+    }
+  }
+}
+
+TEST_F(WebDAVHandlerTest, PropfindRefusesProtectedItems) {
+  for (const char* uri :
+       {"/.crosspoint/wifi.json", "/CROSSP~1/wifi.json", "/.crosspoint/epub_1234", "/Books/.hidden.epub"}) {
+    const WebServer& s = request(HTTP_PROPFIND, uri, "0");
+    EXPECT_EQ(s.code, 403) << uri;
+    EXPECT_EQ(s.body.find("getcontentlength"), std::string::npos) << uri;
+  }
+}
+
 TEST_F(WebDAVHandlerTest, PropfindOfAMissingPathIsNotFound) {
   EXPECT_EQ(request(HTTP_PROPFIND, "/Books/missing.epub", "0").code, 404);
 }

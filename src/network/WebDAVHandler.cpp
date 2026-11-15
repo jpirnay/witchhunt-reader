@@ -196,6 +196,15 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
 
   LOG_DBG("DAV", "PROPFIND %s depth=%d", path.c_str(), depth);
 
+  // As for every other method. Without it a listing of /.crosspoint (or CROSSP~1) named the
+  // credential stores and gave their sizes. The children of a folder that passes need no more than
+  // the name filter below: the credential stores live only under /.crosspoint.
+  // Ported from crosspoint-reader PR #4263 by John Stader (@jstader).
+  if (isProtectedPath(path)) {
+    s.send(403, "text/plain", "Forbidden");
+    return;
+  }
+
   // Check if path exists
   if (!Storage.exists(path.c_str()) && path != "/") {
     s.send(404, "text/plain", "Not Found");
