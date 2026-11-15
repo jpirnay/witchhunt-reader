@@ -2,7 +2,7 @@
 
 User-facing changes only. Full commit history is in git log.
 
-## 2.52 — YYYY-MM-DD
+## 2.52 — 2026-11-15
 
 **A sixth device, reader bars, search, Dark Mode and a new Weather screen.** The Onyx BOOX Picco joins the list, books
 get reader bars with live layout settings and a full-text search, bookmarks stay on their text, and the recent list
