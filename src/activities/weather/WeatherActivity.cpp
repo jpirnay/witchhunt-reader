@@ -1,6 +1,9 @@
 #include "WeatherActivity.h"
 
+#include <FileReplace.h>
 #include <GfxRenderer.h>
+#include <HalClock.h>
+#include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <WeatherClient.h>
@@ -22,6 +25,7 @@
 #include "components/UITheme.h"
 #include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
+#include "util/ScreenshotUtil.h"
 
 namespace {
 inline bool getBitmapBit(const uint8_t* bitmap, const int size, const int x, const int y) {
@@ -234,8 +238,6 @@ void WeatherActivity::onExit() {
 }
 
 void WeatherActivity::loadAndDisplay() {
-  constexpr long CACHE_REFRESH_AGE_SECONDS = 30L * 60L;
-
   if (!WEATHER_SETTINGS.hasLocation()) {
     state = State::ERROR;
     errorMessage = tr(STR_WEATHER_NO_LOCATION);
@@ -246,16 +248,17 @@ void WeatherActivity::loadAndDisplay() {
   // Try cache first
   WeatherData cached = WeatherClient::getWeather(WEATHER_SETTINGS, forceRefresh);
   if (cached.valid) {
+    // Skip the WiFi round only when the clock can vouch for the age (issue #212): on a board without an RTC the
+    // clock may have come back from NVS hours behind, and an old forecast would read as minutes old.
     const time_t now = time(nullptr);
-    const long age = (cached.fetchedAt > 0) ? static_cast<long>(now - cached.fetchedAt) : -1;
-    const bool cacheIsStale = (age >= 0 && age > CACHE_REFRESH_AGE_SECONDS) || age < 0;
-    const bool shouldBackgroundRefresh = forceRefresh || cacheIsStale;
+    const auto clockSource = HalClock::source();
+    const bool cacheIsFresh =
+        clock_authority::knownFresh(clockSource, now, cached.fetchedAt, WeatherClient::CACHE_TTL_SECONDS);
+    const bool shouldBackgroundRefresh = forceRefresh || !cacheIsFresh;
 
-    if (cacheIsStale) {
-      LOG_DBG("WEA", "Displayed stale cache (age=%ld s); scheduling refresh", age);
-    } else {
-      LOG_DBG("WEA", "Displayed fresh cache (age=%ld s); skip auto-refresh", age);
-    }
+    LOG_DBG("WEA", "Displayed %s cache (age=%ld s, clock %s); %s", cacheIsFresh ? "fresh" : "stale",
+            static_cast<long>(now - cached.fetchedAt), clock_authority::describe(clockSource),
+            shouldBackgroundRefresh ? "scheduling refresh" : "skip auto-refresh");
 
     weatherData = std::move(cached);
     state = State::WEATHER_DISPLAY;
@@ -330,12 +333,36 @@ void WeatherActivity::fetchWeather() {
   LOG_DBG("WEA", "fetchWeather[4] WeatherClient::getWeather after valid=%d", weatherData.valid ? 1 : 0);
   if (weatherData.valid) {
     state = State::WEATHER_DISPLAY;
+    saveSleepImage();
   } else {
     state = State::ERROR;
     errorMessage = weatherData.errorMessage.empty() ? tr(STR_WEATHER_FETCH_FAILED) : weatherData.errorMessage.c_str();
   }
   showRefreshPopup = false;
   requestUpdate();
+}
+
+// Issue #212: the forecast as a picture in the sleep screen's image folder, rewritten on every fetch. Drawn into the
+// write buffer before the screen's own render, which clears it again, so the frame on the panel is not touched. The
+// BMP is the panel's pixels in portrait (ScreenshotUtil), so the sleep screen shows it the way the panel did.
+void WeatherActivity::saveSleepImage() {
+  static constexpr char kTmpPath[] = "/sleep/weather.bmp.tmp";  // not a .bmp: the sleep screen never picks it
+
+  // Held across the card write, as ScreenshotUtil::service() holds it: the render task would draw over the frame.
+  RenderLock lock(*this);
+  renderer.clearScreen();
+  drawForecast();  // without the button hints: there are no buttons to press on a sleep screen
+  if (!ScreenshotUtil::saveFramebufferAsBmp(kTmpPath, renderer.getFrameBuffer(), renderer.getDisplayWidth(),
+                                            renderer.getDisplayHeight())) {
+    LOG_ERR("WEA", "Could not write %s", kTmpPath);
+    return;
+  }
+  if (!FileReplace::replace(kTmpPath, SLEEP_IMAGE_PATH)) {
+    LOG_ERR("WEA", "Could not replace %s", SLEEP_IMAGE_PATH);
+    Storage.remove(kTmpPath);
+    return;
+  }
+  LOG_DBG("WEA", "Forecast saved to %s", SLEEP_IMAGE_PATH);
 }
 
 void WeatherActivity::openSettingsActivity() {
@@ -428,7 +455,6 @@ void WeatherActivity::loop() {
 void WeatherActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  const auto pageWidth = renderer.getScreenWidth();    // 800 in landscape
   const auto pageHeight = renderer.getScreenHeight();  // 480 in landscape
 
   if (state == State::LOADING_CACHE || (state == State::FETCHING && (!showRefreshPopup || !weatherData.valid))) {
@@ -449,7 +475,25 @@ void WeatherActivity::render(RenderLock&&) {
     return;
   }
 
-  // DISPLAY state - Landscape layout (800x480 logical)
+  drawForecast();
+
+  // Button hints
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_WEATHER_SETTINGS_SHORT), tr(STR_WEATHER_REFRESH), "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+
+  if (state == State::FETCHING && showRefreshPopup) {
+    // Full weather frame already composed into the write buffer above; overlay the popup on it.
+    GUI.drawPopup(renderer, tr(STR_LOADING_POPUP), /*overlayDisplayedFrame=*/false);
+  } else {
+    renderer.displayBuffer();
+  }
+}
+
+void WeatherActivity::drawForecast() {
+  const auto pageWidth = renderer.getScreenWidth();    // 800 in landscape
+  const auto pageHeight = renderer.getScreenHeight();  // 480 in landscape
+
+  // Landscape layout (800x480 logical). The button hints are render()'s, so the sleep image has none.
   //
   // +------------------+------------------------------------+
   // |  Current weather  |    Daily forecast cards            |
@@ -485,17 +529,6 @@ void WeatherActivity::render(RenderLock&&) {
 
     // Draw hourly graph
     renderHourlyGraph(contentX, topSectionHeight + 1, contentWidth, graphHeight - 1);
-  }
-
-  // Button hints
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_WEATHER_SETTINGS_SHORT), tr(STR_WEATHER_REFRESH), "");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-
-  if (state == State::FETCHING && showRefreshPopup) {
-    // Full weather frame already composed into the write buffer above; overlay the popup on it.
-    GUI.drawPopup(renderer, tr(STR_LOADING_POPUP), /*overlayDisplayedFrame=*/false);
-  } else {
-    renderer.displayBuffer();
   }
 }
 

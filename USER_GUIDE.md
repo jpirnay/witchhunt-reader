@@ -803,6 +803,7 @@ To use custom sleep images, set the sleep screen mode to **Custom** or **Cover +
 
 - **Multiple Images (recommended):** Create a `.sleep` directory in the root of the SD card and place any number of `.bmp` or `.png` images inside. (A directory named `sleep` is also accepted as a fallback.)
 - **Single Image:** Place a file named `sleep.bmp` or `sleep.png` in the root directory. While it is there, it is shown instead of the images in the `.sleep`/`sleep` directory.
+- **Weather forecast:** Each time the **Weather** screen fetches a forecast, it saves the screen, without its button hints, as `sleep/weather.bmp`, so it joins the custom images. It shows sideways, as the Weather screen does. Deleting the file only lasts until the next fetch.
 
 If the picked image cannot be shown, for example a damaged PNG, the next one in the folder is tried, up to three in all, before the default sleep screen is shown.
 

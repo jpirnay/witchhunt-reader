@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 using clock_authority::datesAuthoritative;
+using clock_authority::knownFresh;
 using clock_authority::ntpDueBeforeSync;
 using clock_authority::plausibleForTls;
 using clock_authority::softwareClockNtpDue;
@@ -80,6 +81,24 @@ TEST(ClockAuthority, AnAuthoritativeClockKeepsTheFreshnessRule) {
     EXPECT_TRUE(ntpDueBeforeSync(source, kNov2026, kNov2026 + 3600, kInterval, !kRecentFailure));  // in the future
     // A recent failure does not hold back the freshness rule, as before.
     EXPECT_TRUE(ntpDueBeforeSync(source, kNov2026, kNov2026 - kInterval, kInterval, kRecentFailure));
+  }
+}
+
+// The weather panel's rule (issue #212): a cache is fresh only when an authoritative clock says so.
+TEST(ClockAuthority, AStampIsFreshOnlyByAnAuthoritativeClock) {
+  constexpr time_t kTtl = 30 * 60;
+  const time_t tenMinutesAgo = kNov2026 - 10 * 60;
+  for (const Source source : kAll) {
+    // An X4 cold boot: the NVS epoch reads "10 minutes after the fetch" whatever the real gap was.
+    EXPECT_EQ(knownFresh(source, kNov2026, tenMinutesAgo, kTtl), datesAuthoritative(source, kNov2026));
+  }
+  for (const Source source : {Source::Ntp, Source::HardwareRtc}) {
+    EXPECT_TRUE(knownFresh(source, kNov2026, kNov2026, kTtl));             // just fetched
+    EXPECT_TRUE(knownFresh(source, kNov2026, kNov2026 - kTtl + 1, kTtl));  // one second inside
+    EXPECT_FALSE(knownFresh(source, kNov2026, kNov2026 - kTtl, kTtl));     // at the TTL
+    EXPECT_FALSE(knownFresh(source, kNov2026, kNov2026 + 60, kTtl));       // stamped in the future
+    EXPECT_FALSE(knownFresh(source, kNov2026, 0, kTtl));                   // never stamped
+    EXPECT_FALSE(knownFresh(source, k2040, k2040 - 60, kTtl));             // an implausible RTC value
   }
 }
 
