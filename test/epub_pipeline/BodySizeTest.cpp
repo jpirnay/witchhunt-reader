@@ -1,6 +1,8 @@
-// The size of a book's running text (BodySize, for Normalize Font Size): the chapter parser styles the book's largest
-// spine item without laying it out, and the size most of its characters are set at, headings left out, is the body
-// size; it is kept in the book's cache and forgotten when the CSS is compiled again.
+// The size of a book's running text (BodySize, for Normalize Font Size): the size most of its characters are set at,
+// headings left out, is the body size. A chapter build counts it from the text it lays out while the book's is not
+// known (Section::BuildParams::measureBodySize), and the first with enough of it decides; detect() is the census on its
+// own, which styles the book's largest spine item without laying it out, and which the builds' counts are checked
+// against. The size is kept in the book's cache and forgotten when the CSS is compiled again.
 #include <gtest/gtest.h>
 #include <unistd.h>
 
@@ -77,6 +79,22 @@ struct BodySizeTest : testing::Test {
 
   BodySize::Detected detect(const Epub& epub, BuildArena* scratch = nullptr) {
     return BodySize::detect(epub, renderer, kFontId, scratch);
+  }
+
+  // What a build of spine `spine` counts for the body size, laid out as the reader lays a book out while its body size
+  // is not known: at 100 %, its style and Normalize Font Size on.
+  BodySize::Sample buildSample(const std::shared_ptr<Epub>& epub, const int spine, const bool embeddedStyle = true) {
+    Section::BuildParams params;
+    params.fontId = kFontId;
+    params.viewportWidth = 480;
+    params.viewportHeight = 800;
+    params.fontSizeNormalization = true;
+    params.embeddedStyle = embeddedStyle;
+    params.measureBodySize = true;
+    Section section(epub, spine, renderer);
+    section.clearCache();
+    EXPECT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
+    return section.bodySizeSample();
   }
 
   // `n` paragraphs of `cls` holding `text`.
@@ -246,12 +264,14 @@ TEST_F(BodySizeTest, ALentRegionGivesTheSameAnswer) {
   EXPECT_GT(lent.highWater(), 0u) << "the census did not use the region";
 }
 
-// Measured once and kept: prepare() writes it, read() gives it back, a CSS compiled again forgets it.
+// Decided once and kept: record() writes it, read() gives it back, a CSS compiled again forgets it.
 TEST_F(BodySizeTest, KeptUntilTheCssIsCompiledAgain) {
   auto epub = book(".tx { font-size: small }", {paragraphs("tx", kProse, 6)});
   const std::string cache = epub->getCachePath();
   EXPECT_EQ(0, BodySize::read(cache)) << "not measured yet";
-  EXPECT_EQ(89, BodySize::prepare(*epub, renderer, kFontId, nullptr));
+  BodySize::record(cache, 0);  // nothing decided: nothing written
+  EXPECT_EQ(0, BodySize::read(cache));
+  BodySize::record(cache, 89);
   EXPECT_EQ(89, BodySize::read(cache));
   // A reopened book reads it back.
   {
@@ -265,27 +285,115 @@ TEST_F(BodySizeTest, KeptUntilTheCssIsCompiledAgain) {
   ASSERT_TRUE(reopened.load(true));
   EXPECT_EQ(0, BodySize::read(cache));
   BodySize::forget(cache);  // nothing there: no harm
-  EXPECT_EQ(89, BodySize::prepare(reopened, renderer, kFontId, nullptr));
+  BodySize::record(cache, 89);
   BodySize::forget(cache);
   EXPECT_EQ(0, BodySize::read(cache));
 }
 
-// Without its compiled CSS (the book's style off when it was opened) nothing is measured, and nothing is written.
-TEST_F(BodySizeTest, NothingWithoutTheCompiledCss) {
-  auto epub = book(".tx { font-size: small }", {paragraphs("tx", kProse, 6)});
-  const std::string cache = epub->getCachePath();
-  Epub unstyled(epub->getPath(), (work / "cache").string());
-  ASSERT_TRUE(fs::remove(cache + "/css_rules.cache"));
-  ASSERT_TRUE(unstyled.load(true, /*skipLoadingCss=*/true));
-  EXPECT_EQ(0, BodySize::prepare(unstyled, renderer, kFontId, nullptr));
-  EXPECT_FALSE(fs::exists(cache + "/bodysize.bin"));
+// ---- Counted by the builds ----------------------------------------------------------------------------------------
+
+// A build counts the running text it lays out as the census counts it: the same characters on the books above, each
+// rule of theirs in play (headings, kept spaces, tables and images, spans of every kind, many notes or few paragraphs).
+TEST_F(BodySizeTest, ABuildCountsAsTheCensusDoes) {
+  std::string longHeading;
+  for (int i = 0; i < 12; ++i) longHeading += "A Very Long Chapter Title That Goes On ";
+  std::string code;
+  for (int i = 0; i < 40; ++i) code += "        x = y;\n\t\tz();\n";
+  std::string table = "<table>";
+  for (int i = 0; i < 20; ++i) table += "<tr><td class=\"big\">" + kProse + "</td><td>" + kProse + "</td></tr>";
+  table += "</table>";
+  const std::string css =
+      ".tx { font-size: small } .xs { font-size: x-small } .big { font-size: x-large } "
+      "h1 { font-size: large } pre { font-size: small } .s { font-size: small } "
+      ".e { font-size: 0.8em } .q { font-size: 0.75em }";
+  const std::vector<std::string> bodies = {
+      "<h1>" + longHeading + "</h1><h2>" + longHeading + "</h2>" + paragraphs("tx", kProse, 3),
+      paragraphs("tx", kProse, 3) + "<pre>" + code + "</pre>",
+      paragraphs("xs", "Note.", 40) + paragraphs("tx", kProse, 4),
+      paragraphs("tx", kProse, 3) + table,
+      paragraphs("x", "<span class=\"s\">" + kProse + "</span>", 6),
+      paragraphs("x", "<span class=\"e\">" + kProse + "</span>", 6),
+      paragraphs("tx", "<span class=\"q\">" + kProse + "</span>", 6),
+  };
+  for (const std::string& body : bodies) {
+    auto epub = book(css, {body});
+    const BodySize::Detected found = detect(*epub);
+    ASSERT_FALSE(found.failed);
+    const BodySize::Sample sample = buildSample(epub, 0);
+    EXPECT_EQ(found.chars, sample.chars) << body.substr(0, 80);
+    EXPECT_EQ(0, sample.pct) << "fewer than kDecideChars decide nothing";
+  }
+}
+
+// With enough of it the build decides, as the census would; with less, nothing, and the next build counts again.
+TEST_F(BodySizeTest, ABuildDecidesOnlyWithEnoughText) {
+  auto enough = book(".tx { font-size: small }", {paragraphs("tx", kProse, 60)});
+  const BodySize::Sample decided = buildSample(enough, 0);
+  EXPECT_GE(decided.chars, BodySize::kDecideChars);
+  EXPECT_EQ(89, decided.pct);
+  EXPECT_EQ(detect(*enough).pct, decided.pct);
+
+  auto few = book(".tx { font-size: small }", {paragraphs("tx", kProse, 6)});
+  const BodySize::Sample undecided = buildSample(few, 0);
+  EXPECT_EQ(6 * proseChars(kProse), undecided.chars);
+  EXPECT_EQ(0, undecided.pct);
+  EXPECT_EQ(89, detect(*few).pct) << "the census alone decides from far less";
+}
+
+// The corpus book: the title page is too short to decide, the chapter decides 89 %.
+TEST_F(BodySizeTest, TheChapterDecidesNotTheTitlePage) {
+  auto epub = std::make_shared<Epub>(CORPUS_DIR "/test_body_size.epub", (work / "cache").string());
+  ASSERT_TRUE(epub->load(true));
+  const BodySize::Sample title = buildSample(epub, 0);
+  EXPECT_LT(title.chars, BodySize::kDecideChars);
+  EXPECT_EQ(0, title.pct);
+  const BodySize::Sample chapter = buildSample(epub, 1);
+  EXPECT_GE(chapter.chars, BodySize::kDecideChars);
+  EXPECT_EQ(89, chapter.pct);
+}
+
+// Without the book's style there are no sizes of the book's to count, and a build without Normalize Font Size needs
+// none: neither counts.
+TEST_F(BodySizeTest, NothingWithoutTheBooksStyle) {
+  auto epub = book(".tx { font-size: small }", {paragraphs("tx", kProse, 60)});
+  EXPECT_EQ(0u, buildSample(epub, 0, /*embeddedStyle=*/false).chars);
+  Section::BuildParams params;
+  params.fontId = kFontId;
+  params.viewportWidth = 480;
+  params.viewportHeight = 800;
+  params.fontSizeNormalization = false;
+  params.embeddedStyle = true;
+  params.measureBodySize = true;
+  Section section(epub, 0, renderer);
+  section.clearCache();
+  ASSERT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
+  EXPECT_EQ(0u, section.bodySizeSample().chars);
+}
+
+// Every corpus book with a chapter long enough: the build of its largest spine item decides what the census decides.
+TEST_F(BodySizeTest, OnTheCorpusABuildDecidesAsTheCensus) {
+  int compared = 0;
+  for (const auto& entry : fs::directory_iterator(CORPUS_DIR)) {
+    if (entry.path().extension() != ".epub") continue;
+    const fs::path cache = work / ("corpus_" + entry.path().stem().string());
+    auto epub = std::make_shared<Epub>(entry.path().string(), cache.string());
+    if (!epub->load(true) || !epub->getCssParser() || !epub->getCssParser()->cacheIsCurrent()) continue;
+    const BodySize::Detected found = detect(*epub);
+    if (found.failed || found.spineIndex < 0 || found.chars < BodySize::kDecideChars) continue;
+    const BodySize::Sample sample = buildSample(epub, found.spineIndex);
+    if (sample.chars < BodySize::kDecideChars) continue;
+    EXPECT_EQ(found.pct, sample.pct) << entry.path().filename().string();
+    ++compared;
+  }
+  std::printf("compared %d corpus books\n", compared);
+  EXPECT_GE(compared, 3) << "too few corpus books with a long chapter to compare";
 }
 
 // ---- Laid out relative to it (Normalize Font Size) ---------------------------------------------------------------
 
 // The size each line of `epubPath`'s spine `spine` is set at, by the line's first word, laid out into `cache` as the
-// reader does (the harness measures the body size as the reader's open does): the line's block size (no size ladder
-// in the harness, so the multiplier is the whole size) times its first word's.
+// reader does (the harness finds the body size as the reader's builds do): the line's block size (no size ladder in the
+// harness, so the multiplier is the whole size) times its first word's.
 std::map<std::string, float> lineSizes(const std::string& epubPath, const fs::path& cache, const bool normalization,
                                        const int spine) {
   pipeline_harness::Profile profile;
@@ -336,7 +444,7 @@ TEST_F(BodySizeTest, OffTheBooksSizesStand) {
 // A book whose running text is the reader's size already is laid out as before: its body size is 100.
 TEST_F(BodySizeTest, PlainBodyTextIsUnchanged) {
   auto epub = book(".note { font-size: x-small } h1 { font-size: large }",
-                   {"<h1>Title</h1>" + paragraphs("x", kProse, 6) + paragraphs("note", "A note.", 2)});
+                   {"<h1>Title</h1>" + paragraphs("x", kProse, 60) + paragraphs("note", "A note.", 2)});
   const auto sizes = lineSizes(epub->getPath(), work / "plain", true, 0);
   EXPECT_EQ(100, BodySize::read(Epub::cachePathFor(epub->getPath(), (work / "plain").string())));
   ASSERT_EQ(1u, sizes.count("Title"));

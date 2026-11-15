@@ -733,7 +733,7 @@ int ChapterHtmlSlimParser::currentBlockSizePct() const {
                   static_cast<int>(fontSizeLadder_.scaleOf(bs.headingFontId) * bs.fontSizeMultiplier * 100.0f + 0.5f));
 }
 
-void ChapterHtmlSlimParser::countCensusWord() {
+void ChapterHtmlSlimParser::countCensusWord(BodySize::Census& census) {
   // Running text only: a heading is set apart from it, and a short chapter's titles could outweigh its prose.
   if (depth > headingDepth_) return;
   uint32_t chars = 0;
@@ -748,7 +748,7 @@ void ChapterHtmlSlimParser::countCensusWord() {
   // sizes only (normalizeFontSizeForElement), so such text would stay as it is while the headings around it grew.
   const int blockPct = currentBlockSizePct();
   const int pct = blockPct != 100 || effectiveSizeFromRoot_ ? (blockPct * effectiveSizePct + 50) / 100 : 100;
-  census_->add(pct, chars);
+  census.add(pct, chars);
 }
 
 void ChapterHtmlSlimParser::applyCssFontSizeToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) {
@@ -1441,12 +1441,15 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     // Counted, and kept only as the block's first word: what follows depends on whether the block is empty, never on
     // its words, and a block that is never laid out must not grow with its paragraph. A run of kept spaces is no text:
     // a book's code would weigh its spaces into the body size.
-    if (!keptSpaces || partWordBuffer[partWordTextBegin_] != ' ') countCensusWord();
+    if (!keptSpaces || partWordBuffer[partWordTextBegin_] != ' ') countCensusWord(*census_);
     if (currentTextBlock->isEmpty()) {
       currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct,
                                 partWordVisibleOffset_);
     }
   } else if (currentTextBlock) {
+    // The build's sample of the book's body size (setBuildCensus): the word as the census counts it, set as it is laid
+    // out here, before the block's font is resolved, as there.
+    if (buildCensus_ && (!keptSpaces || partWordBuffer[partWordTextBegin_] != ' ')) countCensusWord(*buildCensus_);
     // If a float image is pending and the block is still empty, attach it now so the
     // first word (and all subsequent words) are laid out beside the image.
     // This handles <p><img style="float:left"/>text...</p>: pendingInlineImage_ is set

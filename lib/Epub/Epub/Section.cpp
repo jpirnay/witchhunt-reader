@@ -409,6 +409,9 @@ constexpr size_t EXTRACT_CHUNK_BYTES = 8192;
 // (PARSE_CHUNK_BYTES base + EXTRACT_CHUNK_BYTES extraction scope) + alignment.
 constexpr size_t SCT_PARSE_ARENA_BYTES = 10 * 1024;
 
+// Section::setOwnedBuildRegionBytes(): 0 builds on SCT_PARSE_ARENA_BYTES.
+static size_t g_ownedBuildRegionBytes = 0;
+
 // Size of the heap-backed arena that hosts the EntryReader's readBuf + inflate ring for an entry
 // of `inflatedSize` bytes, when the main arena cannot (see runBuildParse).
 static size_t zipArenaBytesFor(const size_t inflatedSize) {
@@ -1028,6 +1031,11 @@ struct Section::BuildState {
   // teardown releases into the arena, so owned storage must outlive both.
   std::unique_ptr<BuildArena> ownedArena;
   BuildArena* arena = nullptr;
+  // The owned arena is a region of setOwnedBuildRegionBytes(), not the 10 KB parse arena: the build uses it as it would
+  // a lent one.
+  bool ownedIsRegion = false;
+  // The running text counted for the book's body size (BuildParams::measureBodySize), ~1 KB for the build's length.
+  std::unique_ptr<BodySize::Census> bodySizeCensus;
   // External region is large enough to also host the reader's readBuf + ring
   // directly (no separate entry-sized zipArena needed).
   bool sharedZipScope = false;
@@ -1036,12 +1044,23 @@ struct Section::BuildState {
       external->reset();  // fresh build: reclaim any previous build's cursor
       arena = external;
     } else {
-      ownedArena = makeUniqueNoThrow<BuildArena>(SCT_PARSE_ARENA_BYTES);
+      if (g_ownedBuildRegionBytes != 0) {
+        ownedArena = makeUniqueNoThrow<BuildArena>(g_ownedBuildRegionBytes);
+        ownedIsRegion = ownedArena && ownedArena->valid();
+        if (!ownedIsRegion) {
+          LOG_ERR("SCT", "No %u-byte build region; building on the %u-byte arena",
+                  static_cast<unsigned>(g_ownedBuildRegionBytes), static_cast<unsigned>(SCT_PARSE_ARENA_BYTES));
+        }
+      }
+      if (!ownedIsRegion) ownedArena = makeUniqueNoThrow<BuildArena>(SCT_PARSE_ARENA_BYTES);
       if (!ownedArena || !ownedArena->valid()) return false;
       arena = ownedArena.get();
     }
     return true;
   }
+  // The region the build may keep its parser state, rules, ring and word cache in: a lent one, or an owned region.
+  // nullptr on the 10 KB parse arena, which has no room for them.
+  BuildArena* region() const { return arena && (arena != ownedArena.get() || ownedIsRegion) ? arena : nullptr; }
   // Entry-sized arena hosting the EntryReader's readBuf + inflate ring during
   // phase (a) only, when the main arena is too small to host them (heap-backed
   // resident builds). Created at reader-open time — the ring is entry-sized, so
@@ -1189,6 +1208,8 @@ struct Section::BuildState {
 
 const BuildArena* Section::activeBuildArena() const { return buildState_ ? buildState_->arena : nullptr; }
 
+void Section::setOwnedBuildRegionBytes(const size_t bytes) { g_ownedBuildRegionBytes = bytes; }
+
 // Out-of-line (see header): both need the complete BuildState type, and the dtor must
 // not leave a partially written cache file behind when a Section dies with a build in
 // flight (book close, activity exit) — its header was never patched with offsets.
@@ -1218,7 +1239,7 @@ bool Section::beginInlineFootnotePreviewResolve(BuildState& st) {
     return false;
   }
   const std::string banked = st.useTempExtract ? st.tempPath : std::string();
-  BuildArena* const external = (st.arena && st.arena != st.ownedArena.get()) ? st.arena : nullptr;
+  BuildArena* const external = st.region();
   if (!st.previewResolver->begin(*epub, spineIndex, banked, external)) {
     st.previewResolver.reset();
     return false;
@@ -1351,8 +1372,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
       // hot cache off and a lower floor, so the resolver doesn't self-degrade and force a
       // released rebuild. Set deterministically (not just when external) so the shared per-epub
       // parser never carries a stale lean flag into an owned/heap-backed build.
-      const bool externalArena = st.arena && st.arena != st.ownedArena.get();
-      st.cssParser->setIndexArena(externalArena ? st.arena : nullptr);
+      st.cssParser->setIndexArena(st.region());
       // Lean resolve unconditionally, not just for arena builds. It does exactly two things:
       // skip the hot-rule LRU, and drop the resolver's self-protection floor from
       // MIN_FREE_HEAP_FOR_CSS (40 KB) to LEAN_MIN_FREE_HEAP_FOR_CSS (24 KB).
@@ -1437,6 +1457,15 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   st.visitor->setWidowOrphanControl(p.widowOrphanControl);
   st.visitor->setParagraphIndent(p.paragraphIndent);
   if (p.embeddedStyle) st.visitor->setBodySizePct(p.bodySizePct);
+  // Counted afresh by each setup: one build's text is the sample, and a setup run again (a retry without the book's
+  // style) counts nothing, its sizes not being the book's. Without the memory the build lays out as ever and counts
+  // nothing; the next one counts.
+  st.bodySizeCensus.reset();
+  if (p.measureBodySize && p.embeddedStyle && p.fontSizeNormalization) {
+    st.bodySizeCensus = makeUniqueNoThrow<BodySize::Census>();
+    if (!st.bodySizeCensus) LOG_ERR("SCT", "spine=%d: no memory for the body size census", spineIndex);
+  }
+  st.visitor->setBuildCensus(st.bodySizeCensus.get());
   if (p.embeddedStyle && p.fontFamilies) st.visitor->setFontFamilies(*p.fontFamilies);
   // Anchors stream to SD as they are found rather than accumulating in the parser; the
   // finalizer below copies the spill into the section file's anchor map. Set before setup(),
@@ -1444,7 +1473,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   st.visitor->setAnchorSpillPath(getAnchorSpillPath());
   // Only the lent framebuffer region has room for the parser's SAX state (~10 KB) on top of the
   // build's own use; the owned heap arena is 10 KB in total and would just move the block.
-  if (st.arena && st.arena != st.ownedArena.get()) st.visitor->setBuildArena(st.arena);
+  if (st.region()) st.visitor->setBuildArena(st.region());
   // The book's language decides its typography (TypographyProfile.h): hyphenation patterns, CJK punctuation widths,
   // the CJK grid.
   const TypographyProfile typography = TypographyProfile::forLanguage(epub->getLanguage());
@@ -1527,8 +1556,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         // External region (borrowed framebuffer) with room for the ZIP scope:
         // host readBuf + ring directly in the main arena — the whole extract
         // phase then touches the heap not at all.
-        if (st.arena && st.arena != st.ownedArena.get() &&
-            st.arena->capacity() - st.arena->used() >= zipArenaBytes + EXTRACT_CHUNK_BYTES) {
+        if (st.region() && st.arena->capacity() - st.arena->used() >= zipArenaBytes + EXTRACT_CHUNK_BYTES) {
           st.sharedZipScope = true;
           st.reader.reset(new (std::nothrow) ZipFile::EntryReader(*st.zip, PARSE_CHUNK_BYTES, st.arena));
         } else {
@@ -2080,6 +2108,11 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   file = HalFile();
   truncatedCache = !parseComplete;
   this->lut = std::move(st.lut);
+  // A parse cut short counted part of the chapter, and one whose CSS lookups were skipped for lack of heap counted text
+  // at sizes it was not given: no sample from either.
+  if (st.bodySizeCensus && parseComplete && !cssLowHeapDegraded_) {
+    bodySizeSample_ = BodySize::sampleOf(*st.bodySizeCensus);
+  }
   const uint32_t finalizeMs = millis() - phaseFinalizeStart;
   const uint32_t totalMs = millis() - st.totalStartMs;
   LOG_INF("SCT",
@@ -2148,7 +2181,7 @@ void Section::setExternalBuildScratch(BuildArena* scratch) {
   // Restart instead. Cheap: abortSectionBuild() deliberately keeps the inflated-HTML cache, so
   // the restart skips re-inflation and only redoes setup.
   const bool upgradesArena = scratch != nullptr && scratch->valid() && buildState_ && buildState_->arena != nullptr &&
-                             buildState_->arena == buildState_->ownedArena.get();
+                             buildState_->arena == buildState_->ownedArena.get() && !buildState_->ownedIsRegion;
   externalScratch_ = scratch;
   if (upgradesArena) {
     LOG_INF("SCT", "spine=%d: build scratch arrived mid-build (%u bytes); restarting to use it", spineIndex,
@@ -2190,10 +2223,11 @@ bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount, const bool aren
 bool Section::startBuild(const BuildParams& params, const std::function<void(int)>& progressFn,
                          const uint32_t requestedHash) {
   BuildParams p = params;
+  bodySizeSample_ = {};
   const CssParser* css = epub->getCssParser();
   // Same predicate runBuildSetup() uses to decide setIndexArena(): an external scratch region
   // (the borrowed framebuffer) means the ruleset lands in the arena, not the heap.
-  const bool arenaBacked = externalScratch_ && externalScratch_->valid();
+  const bool arenaBacked = (externalScratch_ && externalScratch_->valid()) || g_ownedBuildRegionBytes != 0;
   if (p.embeddedStyle && !heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0, arenaBacked)) {
     // Report the floors, not just the heap state: this gate silently downgrades a book to a
     // no-CSS section cache (different layout, different cache key), and the X3 trace showed it
@@ -2282,7 +2316,7 @@ Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const ui
   // A glyph the layout measures and the glyph store does not hold yet is drawn in the lent region rather than on the
   // heap (glyph_miss). One that found no memory at all was measured as missing: the layout is not kept, and the build
   // fails as a heap-short one does, so it runs again with more memory (released, or at a quieter moment).
-  const glyph_miss::Scope misses(buildState_->arena != buildState_->ownedArena.get() ? buildState_->arena : nullptr);
+  const glyph_miss::Scope misses(buildState_->region());
   const auto starved = [&] {
     if (!misses.starved()) return false;
     LOG_ERR("SCT", "stepSectionBuild spine=%d: a glyph found no memory to be drawn in; the build is not kept",

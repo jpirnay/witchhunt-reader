@@ -201,9 +201,9 @@ class EpubReaderActivity final : public Activity {
   int glyphStarvedSpine_ = -1;
   int glyphStarvedPage_ = -1;
   bool glyphStarvedRedraw_ = false;  // that redraw is owed by the pass that found the gap
-  // The ladder left an accent family out (or found no font it could load): the next render lays the chapter out again
-  // with the fonts loaded now, at the same position.
-  bool fontRelayoutPending_ = false;
+  // The next render lays the chapter out again at the same position: the ladder left an accent family out (or found no
+  // font it could load), or a build decided the book's body size (adoptBuiltBodySize).
+  bool relayoutPending_ = false;
   // Arms forceHalfRefreshAfterPopup_ for the NEXT incremental section build, marking that build's
   // popup -> content transition as "dramatic" and worth a clean HALF baseline (vs. the routine,
   // frequent forward-reading crossing into a still-building Background-B section, where forcing
@@ -490,6 +490,21 @@ class EpubReaderActivity final : public Activity {
   // Page last drawn by the SectionBuilding pass (-1 = none yet / popup showing). Stops the
   // pass redrawing the same page every idle tick.
   int buildDisplayedPage_ = -1;
+  // The page displayBuildPage() last put on the panel, where it drew it (spine -1: none, or the popup since). When the
+  // build ends on it, it stays there with its provisional page count instead of being drawn again
+  // (keepBuildPageOnScreen).
+  struct BuildPageOnScreen {
+    int spine = -1;
+    int page = -1;
+    bool hasImages = false;
+    int marginLeft = 0;
+    int contentTop = 0;
+  };
+  BuildPageOnScreen buildPageOnScreen_;
+  // keepBuildPageOnScreen() owes the page's AA pass on a panel that otherwise draws AA inline: the pass asks for the
+  // next page's pre-render once it is done, as it does on the deferred-AA panels.
+  bool preRenderAfterAa_ = false;
+  bool keepBuildPageOnScreen();
   // The text a relayout or a sync landed on (noteLandedText). Cleared by a page turn.
   struct LandedText {
     int spine = -1;
@@ -944,6 +959,12 @@ class EpubReaderActivity final : public Activity {
   mutable BlockFontFamilies bookFontFamilies_;
   // The size of the book's running text (BodySize), read once at open: 100 until it has been measured.
   uint8_t bookBodySizePct_ = 100;
+  // Not measured yet (BodySize::read gave 0): the builds count their running text (BuildParams::measureBodySize) until
+  // one decides it (adoptBuiltBodySize).
+  bool bodySizeUndecided_ = false;
+  // Takes the body size `built` decided, if it is the first to: keeps it for the book, and returns true when it is not
+  // the size the chapters were laid out at so far, so the chapter on screen is to be laid out again (relayoutPending_).
+  bool adoptBuiltBodySize(const Section& built);
   // Drop all Background-B state (aborting a partial build and deleting its partial cache
   // file via ~Section). Resets the overlay percent.
   void resetBackgroundBuild();

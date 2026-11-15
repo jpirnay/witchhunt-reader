@@ -791,10 +791,13 @@ void EpubReaderActivity::onEnter() {
                        ReaderActivity::coverThumbPlaceholder(epub->getPath()));
   setBookOverrides(RECENT_BOOKS.readerOverrides(epub->getPath()));
   renderer.setTextDarkness(getEffectiveTextDarkness());
-  // Measured at the open that compiled the book's CSS (ReaderActivity); taken into account with Normalize Font Size and
-  // the book's style on (makeSectionBuildParams).
-  if (const uint8_t bodySize = BodySize::read(epub->getCachePath()); bodySize != 0) bookBodySizePct_ = bodySize;
-  LOG_INF("ERS", "Body size %u%%", static_cast<unsigned>(bookBodySizePct_));
+  // Found by the builds (adoptBuiltBodySize); taken into account with Normalize Font Size and the book's style on
+  // (makeSectionBuildParams).
+  const uint8_t bodySize = BodySize::read(epub->getCachePath());
+  if (bodySize != 0) bookBodySizePct_ = bodySize;
+  bodySizeUndecided_ = bodySize == 0;
+  LOG_INF("ERS", "Body size %u%%%s", static_cast<unsigned>(bookBodySizePct_),
+          bodySizeUndecided_ ? " (to measure)" : "");
   // The book's hyphenation patterns, from its language's pack, before the first lookup of them below and before any
   // build. A pack not yet in the flash store is copied in here, once (German: about a second), under a popup. Its
   // displayBuffer() consumes any pending HALF override, so on a panel that diffs against a host frame the first page
@@ -1555,9 +1558,10 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   // A panel that runs AA inline never holds off the pre-render, so this re-request
   // would just be a redundant trigger there — skip it to keep that refresh sequence
   // unchanged.
-  if (usesDeferredAa() && pendingPreRender) {
+  if ((usesDeferredAa() || preRenderAfterAa_) && pendingPreRender) {
     requestUpdate();
   }
+  preRenderAfterAa_ = false;
 }
 
 uint32_t EpubReaderActivity::preRenderMinFreeHeap(const bool inkOnly) const {
@@ -1614,7 +1618,10 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.widowOrphanControl = SETTINGS.widowOrphanControl != 0;
   p.fontSizeNormalization = getEffectiveFontSizeNormalization();
   p.embeddedStyle = lastRenderStats.embeddedStyle;
-  if (p.fontSizeNormalization && p.embeddedStyle) p.bodySizePct = bookBodySizePct_;
+  if (p.fontSizeNormalization && p.embeddedStyle) {
+    p.bodySizePct = bookBodySizePct_;
+    p.measureBodySize = bodySizeUndecided_;
+  }
   p.bionicReadingEnabled = getEffectiveBionicReading();
   // The SETTING, nothing else. Availability is guaranteed by construction: a preview-enabled
   // build resolves the note text its own spine needs before it lays out a single line (see
@@ -1632,6 +1639,27 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
     p.fontFamilies = &bookFontFamilies_;
   }
   return p;
+}
+
+bool EpubReaderActivity::adoptBuiltBodySize(const Section& built) {
+  if (!bodySizeUndecided_ || !epub) return false;
+  const BodySize::Sample& sample = built.bodySizeSample();
+  if (sample.pct == 0) {
+    if (sample.chars != 0) {
+      LOG_DBG("ERS", "Body size: %lu characters of running text in this build, too few to decide",
+              static_cast<unsigned long>(sample.chars));
+    }
+    return false;
+  }
+  BodySize::record(epub->getCachePath(), sample.pct);
+  bodySizeUndecided_ = false;
+  LOG_INF("ERS", "Body size %u%%, decided by a build of %lu characters of running text",
+          static_cast<unsigned>(sample.pct), static_cast<unsigned long>(sample.chars));
+  if (sample.pct == bookBodySizePct_) return false;
+  // The chapters so far were laid out at the old size; their caches miss now (the size is in their key), and the one
+  // on screen is laid out again.
+  bookBodySizePct_ = sample.pct;
+  return true;
 }
 
 void EpubReaderActivity::startActivityForResult(std::unique_ptr<Activity>&& activity,
@@ -2181,6 +2209,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
           backgroundWindowPagesBuilt_ += backgroundSection_->pageCount;  // count this section toward the page budget
           LOG_INF("ERS", "Background build spine=%d complete: %u pages", targetSpine, backgroundSection_->pageCount);
           SerialTestApi::noteBuildDone(targetSpine, backgroundSection_->pageCount);
+          // The look-ahead found the book's body size, and the chapter on screen was laid out at another: laid out
+          // again at its text. This build's own cache misses when the reader gets there, as the size is in its key.
+          if (adoptBuiltBodySize(*backgroundSection_)) {
+            relayoutPending_ = true;
+            preRenderedPage = {};
+            requestUpdate();
+          }
           // The build recorded its page count (SpinePageIndex). If that firms up the chapter
           // counter on screen, redraw it now rather than at the next page turn:
           // endBackgroundBorrow() below requests the deferred status refresh.
@@ -2627,7 +2662,7 @@ bool EpubReaderActivity::finishLadder(const ImageMemoryLadder::Action action) {
   // with them at the next render.
   ensureSdFontLoadedForPath(epub->getPath().c_str());
   preRenderedPage = {};  // a font popup may have drawn over it
-  fontRelayoutPending_ = true;
+  relayoutPending_ = true;
   requestUpdate();
   return true;
 }
@@ -2836,6 +2871,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   bgCounters_.cCompletes++;
 #endif
   LOG_INF("ERS", "Background-C spine=%d complete: %u pages", currentSpineIndex, section->pageCount);
+  const bool bodySizeChanged = adoptBuiltBodySize(*section);
   noteLiveLayoutBuilt();
   SerialTestApi::noteBuildDone(currentSpineIndex, section->pageCount);
   readerPhase_ = ReaderPhase::READING;
@@ -2876,8 +2912,72 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   forceLoadLargeImages = false;
   pageHasPlaceholders = false;
   buildingPopupShown_ = false;
+  const bool builtPageOnScreen = section && buildDisplayedPage_ >= 0 && buildDisplayedPage_ == section->currentPage;
   buildDisplayedPage_ = -1;
+  if (bodySizeChanged) {
+    // This build found the book's body size, and it is not the one the chapter was laid out at: laid out again.
+    relayoutPending_ = true;
+    preRenderedPage = {};
+  } else if (builtPageOnScreen && keepBuildPageOnScreen()) {
+    return;
+  }
   requestUpdate();  // -> Normal pass renders the resolved page (with AA)
+}
+
+bool EpubReaderActivity::keepBuildPageOnScreen() {
+  // The page the build drew is the one the reader lands on, a page of text with nothing over it: it stays as it is, its
+  // page count still the build's estimate ("~"), until the next turn (user, 2026-11-15). Drawing it again cost a
+  // refresh of the same text, 0.5 s on the X3 and 0.7 s on the X4 Pro after a cold open. A page with pictures shows
+  // their placeholders and is drawn again.
+  const BuildPageOnScreen shown = buildPageOnScreen_;
+  buildPageOnScreen_ = {};
+  if (!section || shown.spine != currentSpineIndex || shown.page != section->currentPage || shown.hasImages ||
+      uiOverPage() || liveBarsOpen()) {
+    return false;
+  }
+  // What the render would have done first: the build is over, so its borrowed buffer goes back (the AA pass needs it).
+  recoverSecondaryBufferIfNeeded();
+  lastRenderedSpineIndex_ = currentSpineIndex;
+  lastRenderedPageIndex_ = section->currentPage;
+  lastRenderedPageCount_ = section->pageCount;
+  // The build drew it in black and white: its AA comes as the pass a turn defers it to, over the page as it is.
+  bool aaOwed = false;
+  if (getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer()) {
+    std::unique_ptr<Page> page = section->loadPageFromSectionFile();
+    if (page) {
+      // The page's glyphs, as a render leaves them for its deferred pass: the build's draw gave its slots back for the
+      // rest of the build, and the pass without them took 1,458 ms of planes on the X3 (920 on the X4 Pro) against
+      // 116-149 ms after a turn (2026-11-15). The pass releases them (releasePageGlyphArena). As in renderContents(),
+      // the misses and the built-in fonts' ring take their scratch from the secondary buffer; given back seeded from
+      // the write buffer, which holds the page on screen, so it is still that page's frame for the pass's restore.
+      {
+        std::optional<LentSecondary> prewarmLend;
+        if (renderer.hasSecondaryBuffer()) prewarmLend.emplace(renderer);
+        const glyph_miss::Scope misses(prewarmLend ? prewarmLend->arena() : nullptr);
+        prewarmPageFonts(*page, shown.marginLeft, shown.contentTop);
+      }
+      sdFontSystem.releaseTtfMissMemory();
+      pendingGrayscale_.active = true;
+      pendingGrayscale_.page = std::move(page);
+      pendingGrayscale_.imagesGray = false;
+      pendingGrayscale_.fontId = getEffectiveReaderFontId();
+      pendingGrayscale_.marginLeft = shown.marginLeft;
+      pendingGrayscale_.contentTop = shown.contentTop;
+      markStagedForCurrentPage();
+      aaOwed = true;
+      preRenderAfterAa_ = !usesDeferredAa();
+    }
+  }
+  // And the next page's pre-render, which the AA pass asks for once it is done (an update asked for now would read to
+  // the pass as a turn away from the page, and abort it).
+  if (section->currentPage + 1 < section->pageCount && !backgroundBuildThrough_) {
+    pendingPreRender = true;
+    markStagedForCurrentPage();
+    if (!aaOwed) requestUpdate();
+  }
+  LOG_INF("ERS", "Page %d of spine %d kept on screen after its build (AA %s)", section->currentPage + 1,
+          currentSpineIndex, aaOwed ? "owed" : "off");
+  return true;
 }
 
 // Translate an absolute percent into a spine index plus a normalized position
@@ -5048,6 +5148,13 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
       checkHeapIntegrity("after_createSectionFile_image_rebuild");
     }
   }
+  // The build found the book's body size, another than the one it laid the chapter out at: the next render lays it out
+  // again.
+  if (createOk && adoptBuiltBodySize(*section)) {
+    relayoutPending_ = true;
+    preRenderedPage = {};
+    requestUpdate();
+  }
 
   // No eager image pre-decode here. Only the dimensions are needed to lay a section out, and
   // those come from the ZIP entry header at parse time (ImageDecoderFactory::getDimensions-
@@ -5477,6 +5584,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       // build completes and the position is resolved, so the exact value doesn't matter there.
       section->currentPage = (navTarget.kind == NavigationTarget::Kind::Page) ? navTarget.page : 0;
       buildDisplayedPage_ = -1;
+      buildPageOnScreen_ = {};
       buildingPopupShown_ = popupBeforeBuild;
       // Kick the build off so hasActiveBuild() is true (a resumed B build already is). One slice
       // may already finish a tiny section, in which case we fall through to a normal render.
@@ -5858,6 +5966,7 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
     TapTargets::readerLinks().invalidate();
     GUI.drawPopup(renderer, tr(STR_INDEXING));
     buildingPopupShown_ = true;
+    buildPageOnScreen_ = {};
   }
 }
 
@@ -5871,9 +5980,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // this one (cleared before recoverSecondaryBufferIfNeeded, which may end B's borrow).
   statusRefreshDeferred_ = false;
   recoverSecondaryBufferIfNeeded();
-  if (fontRelayoutPending_) {
-    // The memory ladder changed the book's fonts (finishLadder): the chapter is laid out again with them.
-    fontRelayoutPending_ = false;
+  if (relayoutPending_) {
+    // The memory ladder changed the book's fonts (finishLadder), or a build found the book's body size
+    // (adoptBuiltBodySize): the chapter is laid out again with them.
+    relayoutPending_ = false;
     resetSectionKeepingPosition();
   }
 
@@ -5949,8 +6059,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // A navigation that skipped pageTurn()'s hand-off leaves the AA and pre-render of the page it
   // left: drop them first, so the guard below cannot shelve this pass as that page's pre-render.
   dropStagedWorkIfPositionMoved("render");
-  if (usesDeferredAa() && pendingGrayscale_.active && pendingPreRender && !usePreRenderedBuffer &&
-      classifyRenderPass() == RenderPass::PreRender) {
+  if ((usesDeferredAa() || preRenderAfterAa_) && pendingGrayscale_.active && pendingPreRender &&
+      !usePreRenderedBuffer && classifyRenderPass() == RenderPass::PreRender) {
     // Logged so the pre-render chain has no silent link left: a deferred pass that is
     // held here and then never re-kicked is otherwise indistinguishable from one that was
     // never armed. Fires at most once or twice per page, on deferred-AA panels only.
@@ -6875,6 +6985,7 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
     drawBookSearchOverlay(page, layout.marginLeft, contentTop);
     // A page with pictures is drawn again once the build is done, with them; a page of text would come out the same.
     drawLiveBarsOverPage(/*redrawWhenBuilt=*/page.hasImages());
+    buildPageOnScreen_ = {currentSpineIndex, section->currentPage, page.hasImages(), layout.marginLeft, contentTop};
     if (forceHalfRefreshAfterPopup_) {
       // First real page after the indexing popup: establish a clean baseline (see
       // forceHalfRefreshAfterPopup_) instead of compounding onto the popup's FAST refresh.

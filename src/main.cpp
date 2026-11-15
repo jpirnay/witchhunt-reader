@@ -5,6 +5,8 @@
 #include <Epub/BookFonts.h>
 #include <Epub/BookMetadataCache.h>
 #include <Epub/CjkLineBreak.h>
+#include <Epub/Section.h>
+#include <Epub/WordShapeCache.h>
 #include <FlashArea.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -1617,6 +1619,9 @@ void setup() {
   setupDisplayAndFonts(resume != BootResume::Splash, bootToSerialTransfer);
   BootDiag::markPhase(BootPhase::DisplayFonts);
   logStartupMemory("after_display_fonts");
+  // A chapter build with nothing lent takes a region of PSRAM, as large as the block the board lends instead of its
+  // framebuffer, rather than the 10 KB parse arena: the X4 Pro's resident builds laid out at less than half the speed.
+  if (HalCapabilities::keepsSecondaryBuffer()) Section::setOwnedBuildRegionBytes(WordShapeCache::kLargeArenaBytes);
 
   switch (resume) {
     case BootResume::Silent:

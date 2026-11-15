@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "BlockFontFamilies.h"
+#include "BodySize.h"
 #include "Epub.h"
 #include "FlowContext.h"
 #include "FontSizeLadder.h"
@@ -69,6 +70,8 @@ class Section {
   // Set by the last build when a shaped-script run was laid out unshaped
   // (ChapterHtmlSlimParser::shapingDegraded). Same persistence and rebuild policy as the table-row flag.
   bool shapingDegraded_ = false;
+  // What the last build counted for the book's body size (bodySizeSample).
+  BodySize::Sample bodySizeSample_;
   // Set by the last build when a fixed-capacity limit changed its output (ChapterHtmlSlimParser::
   // capOverflowFlags, or a page past Page::MAX_ELEMENTS). Deterministic -- a rebuild would hit
   // the same limit -- so it is persisted (kStatusSimplified) for the reader to say so, not to
@@ -131,9 +134,6 @@ class Section {
   std::array<uint16_t, kPagesWithoutPicturesKept> pagesWithoutPictures_{};
   uint8_t pagesWithoutPicturesNext_ = 0;
   void forgetPagesWithoutPictures();
-  // The live build's arena (nullptr when no build is live, or it has none): read by the per-page
-  // heap trace, which sits above BuildState's definition in Section.cpp.
-  const BuildArena* activeBuildArena() const;
   // See setExternalBuildScratch. Not owned; must outlive any active build.
   BuildArena* externalScratch_ = nullptr;
   // Outcome of one phase method. Mostly maps to BuildStep: More means the phase yielded
@@ -254,6 +254,9 @@ class Section {
     // and embeddedStyle on, the book's sizes are taken relative to it (ChapterHtmlSlimParser::setBodySizePct).
     // Hashed only when it does that, so a book whose text is at the reader's size keeps its key.
     uint8_t bodySizePct = 100;
+    // The book's body size is not known yet (BodySize::read gives 0): with fontSizeNormalization and embeddedStyle on,
+    // the build also counts its running text by size, for bodySizeSample(). Not hashed: it changes no layout.
+    bool measureBodySize = false;
     bool embeddedStyle = false;
     bool bionicReadingEnabled = false;
     bool inlineFootnotePreviews = false;
@@ -317,6 +320,15 @@ class Section {
   // external region arrives, it restarts the build so the region is actually used. See the
   // definition in Section.cpp.
   void setExternalBuildScratch(BuildArena* scratch);
+  // A build given no external scratch takes a region of this many bytes from the heap and uses it as it would a lent
+  // one (the parser state, the CSS rules, the inflate ring and the word cache in it); 0, the default, keeps the 10 KB
+  // parse arena. For the boards with PSRAM, where the heap puts the block (HalCapabilities::keepsSecondaryBuffer()):
+  // the X4 Pro builds the chapter it opens without lending its secondary buffer, and on the 10 KB arena laid out 75
+  // ms a page, against 32 ms a page in the lent PSRAM arena on the same chapter run (2026-11-15). Falls back to the
+  // 10 KB arena when the heap has no such block.
+  static void setOwnedBuildRegionBytes(size_t bytes);
+  // The live build's arena (nullptr when no build is live): read by the per-page heap trace, and by the tests.
+  const BuildArena* activeBuildArena() const;
   // Percent of the spine XHTML consumed by the in-flight build (0–100; 100 once the
   // stream is exhausted and only Finalize remains). 0 when no build is live. Feeds the
   // DEBUG_BACKGROUND_WORK overlay.
@@ -396,6 +408,9 @@ class Section {
   // True when the last build laid a shaped-script run out unshaped, or the loaded cache was written by such a build.
   // Rebuilt once per spine per session on entry, as for the table-row flag.
   bool isShapingDegraded() const { return shapingDegraded_; }
+  // What the last build counted of its running text with BuildParams::measureBodySize, and the body size that decides
+  // (BodySize::sampleOf); nothing (0 characters) for a build that did not count, or did not complete its parse.
+  const BodySize::Sample& bodySizeSample() const { return bodySizeSample_; }
   // True when the build (or the loaded cache's build) exceeded a fixed-capacity limit and shows
   // less than the book: see ChapterHtmlSlimParser::CapOverflow.
   bool isSimplified() const { return simplified_; }

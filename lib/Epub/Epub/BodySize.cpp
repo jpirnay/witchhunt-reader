@@ -18,7 +18,8 @@
 namespace BodySize {
 namespace {
 
-// kVersion, the body size in percent (0: the last attempt failed), the failed attempts so far.
+// kVersion, the body size in percent (0: the last attempt failed), the failed attempts so far. The builds write only a
+// size they decided (record); a failed attempt is what an older firmware's census at the open wrote.
 constexpr char kFile[] = "/bodysize.bin";
 constexpr size_t kFileBytes = 3;
 // A read is halved to leave its inflate ring room in the lent region beside the rules, down to this.
@@ -31,18 +32,18 @@ struct Record {
 };
 
 Record readRecord(const std::string& cachePath) {
-  Record record;
+  Record rec;
   const std::string path = cachePath + kFile;
   std::string bytes;
   // Checked first: a book not measured yet has none, and a failed open logs.
   if (!Storage.exists(path.c_str()) || !Storage.readFileToString("BSZ", path, kFileBytes, bytes) ||
       bytes.size() != kFileBytes || bytes[0] != static_cast<char>(kVersion)) {
-    return record;
+    return rec;
   }
-  record.present = true;
-  record.pct = static_cast<uint8_t>(bytes[1]);
-  record.attempts = static_cast<uint8_t>(bytes[2]);
-  return record;
+  rec.present = true;
+  rec.pct = static_cast<uint8_t>(bytes[1]);
+  rec.attempts = static_cast<uint8_t>(bytes[2]);
+  return rec;
 }
 
 void writeRecord(const std::string& cachePath, const uint8_t pct, const uint8_t attempts) {
@@ -84,10 +85,10 @@ uint8_t bodySizeOf(const Census& census) {
 }
 
 uint8_t read(const std::string& cachePath) {
-  const Record record = readRecord(cachePath);
-  if (!record.present) return 0;
-  if (record.pct != 0) return record.pct;
-  return record.attempts >= kMaxAttempts ? 100 : 0;
+  const Record rec = readRecord(cachePath);
+  if (!rec.present) return 0;
+  if (rec.pct != 0) return rec.pct;
+  return rec.attempts >= kMaxAttempts ? 100 : 0;
 }
 
 void forget(const std::string& cachePath) {
@@ -195,25 +196,15 @@ Detected detect(const Epub& epub, GfxRenderer& renderer, const int fontId, Build
   return found;
 }
 
-uint8_t prepare(const Epub& epub, GfxRenderer& renderer, const int fontId, BuildArena* scratch) {
-  const std::string& cachePath = epub.getCachePath();
-  // The CSS was not loaded, or did not compile: nothing to measure from yet.
-  if (!epub.getCssParser() || !epub.getCssParser()->cacheIsCurrent()) return read(cachePath);
-  const Record last = readRecord(cachePath);
-  const uint8_t attempts = last.present && last.pct == 0 ? last.attempts : 0;
-  const Detected found = detect(epub, renderer, fontId, scratch);
-  if (found.failed) {
-    LOG_ERR("BSZ", "Body size not measured (attempt %u of %u)", static_cast<unsigned>(attempts + 1),
-            static_cast<unsigned>(kMaxAttempts));
-    writeRecord(cachePath, 0, static_cast<uint8_t>(attempts + 1));
-  } else {
-    LOG_INF("BSZ", "Body size %u%%: spine %d, %lu of %lu characters at %d%%, %u bytes read, %lu ms",
-            static_cast<unsigned>(found.pct), found.spineIndex, static_cast<unsigned long>(found.bodyChars),
-            static_cast<unsigned long>(found.chars), found.topPct, static_cast<unsigned>(found.bytesRead),
-            static_cast<unsigned long>(found.ms));
-    writeRecord(cachePath, found.pct, 0);
-  }
-  return read(cachePath);
+Sample sampleOf(const Census& census) {
+  Sample sample;
+  sample.chars = census.total;
+  if (census.total >= kDecideChars) sample.pct = bodySizeOf(census);
+  return sample;
+}
+
+void record(const std::string& cachePath, const uint8_t pct) {
+  if (pct != 0) writeRecord(cachePath, pct, 0);
 }
 
 }  // namespace BodySize
