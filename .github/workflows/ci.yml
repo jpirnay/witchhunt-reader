@@ -405,8 +405,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Test the pin check
+        run: test/scripts/check_sdk_pin_test.sh
+
+      # A pull request may pin SDK commits that are still on a pushed fork branch (warning); master may not.
       - name: Check the SDK pin is on the fork's long-lived branch
-        run: scripts/check_sdk_pin.sh
+        run: scripts/check_sdk_pin.sh ${{ github.event_name == 'pull_request' && '--allow-pending' || '' }}
 
   # This job is used as the PR required actions check, allows for changes to other steps in the future without breaking
   # PR requirements.

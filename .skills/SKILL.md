@@ -264,8 +264,9 @@ bin/clang-format-fix -g               # needs clang-format 21+; formats modified
   PR against `master` after the first merges. Before pushing to an existing PR branch, check that the PR
   is still open (`gh pr view N --json state`).
 - The SDK submodule pins commits from the fork's long-lived `witchhunt` branch
-  (`.gitmodules` → `jpirnay/freeink-sdk`). Land SDK commits there before pinning them; CI's `sdk-pin`
-  job checks this (`scripts/check_sdk_pin.sh`). Resyncs merge upstream into `witchhunt` and never rebase.
+  (`.gitmodules` → `jpirnay/freeink-sdk`). Land SDK commits there before a pin reaches master; CI's
+  `sdk-pin` job checks this (`scripts/check_sdk_pin.sh`). In a pull request a pin on a pushed fork branch
+  passes with a warning until `witchhunt` takes it. Resyncs merge upstream into `witchhunt` and never rebase.
 
 ## Scope
 
