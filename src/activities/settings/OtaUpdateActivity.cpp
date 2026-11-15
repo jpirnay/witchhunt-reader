@@ -221,10 +221,13 @@ void OtaUpdateActivity::onExit() {
 
   // Handed over to the Font Manager: the radio is its now, and it restarts when left.
   if (handingOver) return;
+  // Back to Settings, where this screen is opened and where Back leads, also after a join backed
+  // out of; it used to restart to Home. Settings below cannot be shown again anyway (onEnter()
+  // released its rows).
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
     delay(30);
-    silentRestart();
+    silentRestartToSettings();
   }
 }
 
