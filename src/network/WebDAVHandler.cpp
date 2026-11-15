@@ -7,11 +7,11 @@
 #include <Logging.h>
 #include <Memory.h>
 
+#include "BookCacheReset.h"
 #include "BookRelocation.h"
 #include "ChunkedResponse.h"
 #include "HttpFileStreamer.h"
 #include "UploadStallTolerance.h"
-#include "WebBookCache.h"
 #include "WebPathGuard.h"
 
 namespace {

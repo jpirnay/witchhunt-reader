@@ -28,6 +28,7 @@
 #include <cstring>
 #include <optional>
 
+#include "BookCacheReset.h"
 #include "BookRelocation.h"
 #include "BootDiagnostics.h"
 #include "ChunkedResponse.h"
@@ -47,7 +48,6 @@
 #include "UiLanguagePacks.h"
 #include "UploadStallTolerance.h"
 #include "WebAssets.h"
-#include "WebBookCache.h"
 #include "WebDAVHandler.h"
 #include "WebPathGuard.h"
 #include "WifiCredentialStore.h"

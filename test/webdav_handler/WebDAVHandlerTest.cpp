@@ -1,7 +1,7 @@
 // WebDAVHandler on an in-memory FAT card (stubs/HalStorage.h): the requests a desktop client sends, and what they
-// may reach. The handler, the path guard (WebPathGuard, ProtectedPaths), the book-cache helper (WebBookCache),
-// FileReplace and FsHelpers are the firmware's own; only the framework's WebServer, the card and the book caches
-// are stand-ins.
+// may reach. The handler, the path guard (WebPathGuard, ProtectedPaths), the book-cache helper (BookCacheReset,
+// BookCache), FileReplace and FsHelpers are the firmware's own; only the framework's WebServer, the card and where
+// a book's cache folder is (BookRelocation::cacheDirFor) are stand-ins.
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "BookCacheLog.h"
+#include "BookCacheReset.h"
 #include "BookRelocation.h"
 #include "HalStorage.h"
 #include "HttpFileStreamer.h"
@@ -39,8 +39,6 @@ class WebDAVHandlerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     Storage.reset();
-    clearedBookCaches().clear();
-    BookRelocation::movesSeen().clear();
     streamed().clear();
 
     // The firmware makes /.crosspoint, so SdFat gives it the alias: CROSSP~1, or ~HHHH when that is taken.
@@ -62,6 +60,31 @@ class WebDAVHandlerTest : public ::testing::Test {
     if (depth) server.setHeader("Depth", depth);
     if (destination) server.setHeader("Destination", destination);
     handler.handle(server, method, server.uri());
+    return server;
+  }
+
+  // Puts what the reader keeps for the book at `path` on the card: a cache folder with a position in it.
+  static std::string makeCache(const std::string& path) {
+    const std::string dir = BookRelocation::cacheDirFor(path);
+    Storage.putFolder(dir);
+    Storage.put(dir + "/progress.bin", "where " + path + " was left");
+    return dir;
+  }
+  static bool hasCache(const std::string& path) { return Storage.exists(BookRelocation::cacheDirFor(path).c_str()); }
+
+  // A PUT of `bytes` to `uri`, as the server hands it to the handler: the body in raw() calls, then handle().
+  WebServer& put(const char* uri, const char* bytes) {
+    server.setRequest(HTTP_PUT, uri);
+    HTTPRaw raw;
+    raw.status = RAW_START;
+    handler.raw(server, server.uri(), raw);
+    raw.status = RAW_WRITE;
+    raw.currentSize = std::strlen(bytes);
+    std::memcpy(raw.buf, bytes, raw.currentSize);
+    handler.raw(server, server.uri(), raw);
+    raw.status = RAW_END;
+    handler.raw(server, server.uri(), raw);
+    handler.handle(server, HTTP_PUT, server.uri());
     return server;
   }
 
@@ -187,24 +210,30 @@ TEST_F(WebDAVHandlerTest, CopyFailingOverAFileKeepsIt) {
   Storage.put("/Books/big.epub", std::string(10000, 'x'));
   Storage.failReadsFrom("/Books/big.epub", 4096);
   Storage.put("/Books/old.epub", "old book");
+  makeCache("/Books/old.epub");
   EXPECT_EQ(request(HTTP_COPY, "/Books/big.epub", nullptr, "http://reader.local/Books/old.epub").code, 500);
   EXPECT_EQ(Storage.content("/Books/old.epub"), "old book");
   EXPECT_FALSE(Storage.exists("/Books/old.epub.davtmp"));
-  EXPECT_TRUE(clearedBookCaches().empty());  // the book that stays keeps its cache
+  EXPECT_TRUE(hasCache("/Books/old.epub"));  // the book that stays keeps its cache
 }
 
 // A book copied over another kept the other's cache: its position, bookmarks and laid-out chapters, for different
 // bytes. A PUT clears what was kept for the path it writes, and so does a COPY now.
 TEST_F(WebDAVHandlerTest, CopyOverABookClearsItsCache) {
   Storage.put("/Books/old.epub", "old book");
+  makeCache("/Books/old.epub");
+  makeCache("/Books/novel.epub");
   EXPECT_EQ(request(HTTP_COPY, "/Books/novel.epub", nullptr, "http://reader.local/Books/old.epub").code, 204);
   EXPECT_EQ(Storage.content("/Books/old.epub"), "novel bytes");
-  EXPECT_EQ(clearedBookCaches(), std::vector<std::string>{"/Books/old.epub"});  // the source keeps its own
+  EXPECT_FALSE(hasCache("/Books/old.epub"));
+  EXPECT_TRUE(hasCache("/Books/novel.epub"));  // the source keeps its own
 }
 
+// What was kept for a book deleted from that path outside the reader.
 TEST_F(WebDAVHandlerTest, CopyClearsWhatWasKeptForANewPath) {
+  makeCache("/Books/copy.epub");
   EXPECT_EQ(request(HTTP_COPY, "/Books/novel.epub", nullptr, "http://reader.local/Books/copy.epub").code, 201);
-  EXPECT_EQ(clearedBookCaches(), std::vector<std::string>{"/Books/copy.epub"});
+  EXPECT_FALSE(hasCache("/Books/copy.epub"));
 }
 
 // A cover written next to a book (novel.jpg beside novel.epub) makes that book's cached covers and thumbnails
@@ -239,18 +268,7 @@ TEST_F(WebDAVCoverTest, CopyOfANewCoverDropsTheBooksThumbnails) {
 }
 
 TEST_F(WebDAVCoverTest, PutOfANewCoverDropsTheBooksThumbnails) {
-  server.setRequest(HTTP_PUT, "/Books/novel.jpg");
-  HTTPRaw raw;
-  raw.status = RAW_START;
-  handler.raw(server, server.uri(), raw);
-  raw.status = RAW_WRITE;
-  raw.currentSize = 3;
-  std::memcpy(raw.buf, "new", 3);
-  handler.raw(server, server.uri(), raw);
-  raw.status = RAW_END;
-  handler.raw(server, server.uri(), raw);
-  handler.handle(server, HTTP_PUT, server.uri());
-  EXPECT_EQ(server.code, 204);
+  EXPECT_EQ(put("/Books/novel.jpg", "new").code, 204);
   EXPECT_EQ(Storage.content("/Books/novel.jpg"), "new");
   expectCoverDropped();
 }
@@ -258,21 +276,10 @@ TEST_F(WebDAVCoverTest, PutOfANewCoverDropsTheBooksThumbnails) {
 // What COPY now matches.
 TEST_F(WebDAVHandlerTest, PutClearsTheBookCache) {
   for (const char* uri : {"/Books/novel.epub", "/Books/new.epub"}) {
-    clearedBookCaches().clear();
-    server.setRequest(HTTP_PUT, uri);
-    HTTPRaw raw;
-    raw.status = RAW_START;
-    handler.raw(server, server.uri(), raw);
-    raw.status = RAW_WRITE;
-    raw.currentSize = 3;
-    std::memcpy(raw.buf, "new", 3);
-    handler.raw(server, server.uri(), raw);
-    raw.status = RAW_END;
-    handler.raw(server, server.uri(), raw);
-    handler.handle(server, HTTP_PUT, server.uri());
-    EXPECT_EQ(server.code / 100, 2) << uri;
+    makeCache(uri);
+    EXPECT_EQ(put(uri, "new").code / 100, 2) << uri;
     EXPECT_EQ(Storage.content(uri), "new") << uri;
-    EXPECT_EQ(clearedBookCaches(), std::vector<std::string>{uri}) << uri;
+    EXPECT_FALSE(hasCache(uri)) << uri;
   }
 }
 
