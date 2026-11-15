@@ -84,6 +84,15 @@ inline size_t& tableCellTextsLeft() {
 }
 #endif
 
+#ifdef PAGE_FAULT_INJECTION
+// Host tests only (firmware never defines it): how many more pages the build may get before each one is refused as if
+// the heap were out. SIZE_MAX = never refuse. Drives ensurePage's out-of-memory path.
+inline size_t& pagesLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+#endif
+
 #ifdef BLOCK_IMAGE_FAULT_INJECTION
 // Host tests only (firmware never defines it): how many more block images may get their ImageBlock before each one is
 // refused as if the heap were out. SIZE_MAX = never refuse. Drives placeImageWithBlockSpacing's out-of-memory path.
@@ -1298,6 +1307,14 @@ class ChapterHtmlSlimParser final : public Print {
   // in lockstep. Every page break MUST go through this helper; open-coded completePageFn
   // calls risk desynchronising paragraphLutPerPage and failing the size check in Section.cpp.
   void emitPage();
+  // The page the next element goes on: the current one, else a new one at y 0. False when the heap holds no Page: the
+  // build then stops as any build the heap refuses stops (streamFailed, layoutFailed, the parser stopped), the pages
+  // so far kept and the section marked truncated, and the caller places nothing. A bare `new Page()` aborted the
+  // firmware there (-fno-exceptions), mid-build, and the next open of the chapter rebuilt into the same abort.
+  [[nodiscard]] bool ensurePage();
+  // The heap refused `bytes` for `what`, which the build cannot go on without: stop it as every such refusal does
+  // (streamFailed, layoutFailed, the parser stopped). The pages so far are kept, the section marked truncated.
+  void stopForHeap(const char* what, size_t bytes);
   // Take a pending page break (pageBreakPending_): emit the page if anything is on it. Called
   // where the content before the break has been laid out and the next is about to be placed.
   void applyPendingPageBreak();

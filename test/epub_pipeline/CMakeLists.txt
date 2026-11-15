@@ -131,6 +131,7 @@ add_executable(EpubPipelineTest
   LongChapterPageTablesTest.cpp
   TableCellTextHeapTest.cpp
   BlockImageHeapTest.cpp
+  PageHeapTest.cpp
   TableRowFallbackArenaTest.cpp
   AnchorMapTest.cpp
   AnchorPageAccuracyTest.cpp
@@ -233,6 +234,8 @@ target_compile_definitions(EpubPipelineTest PRIVATE
   TABLE_CELL_FAULT_INJECTION
   # BlockImageHeapTest refuses block images their ImageBlock (ChapterHtmlSlimParser::placeImageWithBlockSpacing).
   BLOCK_IMAGE_FAULT_INJECTION
+  # PageHeapTest refuses the build its pages (ChapterHtmlSlimParser::ensurePage). Inert otherwise.
+  PAGE_FAULT_INJECTION
   # Central-directory walk counters (ZipFile.h), for the tests that bound them. Inert otherwise.
   ZIP_FILE_SCAN_STATS
 )

@@ -136,7 +136,7 @@ class ImageBlock final : public Block {
   // Return a new ImageBlock that renders a vertical crop of this image.
   // srcYOffset: first source row to render; srcHeight: number of rows (must be > 0).
   // The new block shares the same imagePath and size (and thus the same decoded cache file);
-  // only the rendering window differs.
+  // only the rendering window differs. Null when the heap has no room for it.
   std::unique_ptr<ImageBlock> makeCrop(int16_t srcYOffset, int16_t srcHeight) const;
 
   const std::string& getImagePath() const { return imagePath; }
