@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BuildArena.h>
 #include <Epub.h>
 #include <Epub/Section.h>
 
@@ -16,7 +17,9 @@
 //
 // Each mapping parses the chapter's XHTML once, which is idle-time work on the X3 (step()). What they turn into, the
 // visible-text offset of the page's start, is kept for the session (StarAnchor::offset), so a second relayout in the
-// same session, or a jump to a star already settled, parses nothing.
+// same session, or a jump to a star already settled, parses nothing. `scratch`, where given, is a lent region the
+// parse works in instead of the heap (ChapterXPathIndexer): the reader on the X3 has been measured with less
+// contiguous heap than the inflate ring's 32 KB.
 namespace StarAnchoring {
 
 // The anchor a new star on `page` of `section` gets: the section's layout, its page count once the build is done (0
@@ -33,10 +36,12 @@ enum class Work : uint8_t {
 // spine's stars counted in another layout onto the page holding their text, resolving at most one XPath; then, if
 // nothing was parsed yet, names one new star's text. At most one chapter parse a call. A star without an anchor (TXT,
 // older firmware) is left as it is.
-Work step(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section* section, int spineIndex);
+Work step(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section* section, int spineIndex,
+          BuildArena* scratch = nullptr);
 
 // Where star `index`'s text starts, for a jump to it: what this session knows, else its XPath resolved (one chapter
 // parse). nullopt: no XPath, or it did not resolve; the jump then goes by the page number.
-std::optional<uint32_t> textOffset(BookmarkStore& store, size_t index, const std::shared_ptr<Epub>& epub);
+std::optional<uint32_t> textOffset(BookmarkStore& store, size_t index, const std::shared_ptr<Epub>& epub,
+                                   BuildArena* scratch = nullptr);
 
 }  // namespace StarAnchoring

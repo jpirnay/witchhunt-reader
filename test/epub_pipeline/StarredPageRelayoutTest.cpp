@@ -20,10 +20,12 @@
 #include <string>
 #include <vector>
 
+#include "BuildArena.h"
 #include "Epub.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
 #include "KOReaderSync/ChapterXPathIndexer.h"
+#include "SaxParser/SaxParser.h"
 #include "src/BookmarkStore.h"
 #include "src/StarAnchoring.h"
 
@@ -281,6 +283,44 @@ TEST_P(StarredPageRelayout, AJumpFindsTheTextFromTheXPath) {
       EXPECT_TRUE(pageHolds(*section, *page, starred[i].offset)) << "spine " << spine << " page " << starred[i].page;
     }
   }
+}
+
+// The reader lends the secondary framebuffer for these parses: the same stars, the same pages, and the region given
+// back after each.
+TEST_P(StarredPageRelayout, TheMappingsWorkInALentRegion) {
+  std::vector<uint8_t> region(48000);  // an X4's 800 x 480 framebuffer
+  BuildArena arena(region.data(), region.size());
+  BookmarkStore store;
+  store.load(epub->getCachePath());
+  std::vector<Starred> starred;
+  for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
+    const auto section = build(spine, layoutA());
+    for (int page = 0; page < section->pageCount; ++page) {
+      const StarAnchor anchor = StarAnchoring::forPage(*section, page);
+      if (anchor.offset == StarAnchor::kNoOffset) continue;
+      ASSERT_TRUE(store.toggle(static_cast<uint16_t>(spine), static_cast<uint16_t>(page), anchor));
+      starred.push_back({static_cast<uint16_t>(spine), static_cast<uint16_t>(page), anchor.offset, false});
+    }
+  }
+  if (starred.empty()) GTEST_SKIP() << "no page with text";
+  while (StarAnchoring::step(store, epub, nullptr, -1, &arena) == StarAnchoring::Work::Parsed) {
+    ASSERT_EQ(arena.used(), 0u);
+  }
+  store.save();
+  BookmarkStore reopened;
+  reopened.load(epub->getCachePath());
+  for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
+    const auto section = build(spine, layoutB());
+    while (StarAnchoring::step(reopened, epub, section.get(), spine, &arena) != StarAnchoring::Work::None) {
+      ASSERT_EQ(arena.used(), 0u);
+    }
+    for (size_t i = 0; i < starred.size(); ++i) {
+      if (starred[i].spine != spine || reopened.getAnchors()[i].xpath.empty()) continue;
+      EXPECT_TRUE(pageHolds(*section, reopened.getAll()[i].pageNumber, starred[i].offset))
+          << "spine " << spine << " page " << starred[i].page;
+    }
+  }
+  EXPECT_GT(arena.highWater(), SaxParser::stateBytes(SaxParser::Profile::Lean));
 }
 
 // Stars made under other layouts can come to rest on one page: unstarring it takes them all.

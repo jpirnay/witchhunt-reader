@@ -17,15 +17,15 @@ constexpr uint32_t kNoOffset = StarAnchor::kNoOffset;
 // The pull's reverse mapping, as far as a star needs it: the offset of the text the XPath names. Our own push names
 // text to the codepoint (/text()[N].M); only stray text in a table row is named by its element, which an exact match
 // anchors at that text. Anything else is a stand-in (an ancestor, a sibling) and lands nowhere a page starts.
-std::optional<uint32_t> resolveXPath(const std::shared_ptr<Epub>& epub, const int spineIndex,
-                                     const std::string& xpath) {
+std::optional<uint32_t> resolveXPath(const std::shared_ptr<Epub>& epub, const int spineIndex, const std::string& xpath,
+                                     BuildArena* const scratch) {
   float intra = 0.0f;
   bool exact = false;
   uint32_t offset = 0;
   bool textPoint = false;
   const unsigned long start = millis();
-  const bool found =
-      ChapterXPathIndexer::findProgressForXPath(epub, spineIndex, xpath, intra, exact, nullptr, &offset, &textPoint);
+  const bool found = ChapterXPathIndexer::findProgressForXPath(epub, spineIndex, xpath, intra, exact, nullptr, &offset,
+                                                               &textPoint, scratch);
   const unsigned long took = millis() - start;
   if (!found || (!textPoint && !exact)) {
     LOG_INF("STAR", "Spine %d: %s did not resolve (%lu ms)", spineIndex, xpath.c_str(), took);
@@ -54,7 +54,8 @@ StarAnchor forPage(const Section& section, const int page) {
   return anchor;
 }
 
-Work step(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section* section, const int spineIndex) {
+Work step(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section* section, const int spineIndex,
+          BuildArena* const scratch) {
   Work done = Work::None;
   const auto& stars = store.getAll();
   const auto& anchors = store.getAnchors();
@@ -78,7 +79,7 @@ Work step(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section
           }
         } else if (!anchor.xpath.empty() && done != Work::Parsed) {
           done = Work::Parsed;
-          if (const auto offset = resolveXPath(epub, spineIndex, anchor.xpath)) {
+          if (const auto offset = resolveXPath(epub, spineIndex, anchor.xpath, scratch)) {
             store.noteOffset(i, *offset);
           } else {
             store.noteMappingFailed(i);
@@ -109,7 +110,8 @@ Work step(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section
     const StarAnchor& anchor = anchors[i];
     if (anchor.layout == 0 || anchor.mappingFailed || !anchor.xpath.empty() || anchor.offset == kNoOffset) continue;
     const unsigned long start = millis();
-    std::string xpath = ChapterXPathIndexer::findXPathForVisibleOffset(epub, stars[i].spineIndex, anchor.offset);
+    std::string xpath =
+        ChapterXPathIndexer::findXPathForVisibleOffset(epub, stars[i].spineIndex, anchor.offset, scratch);
     const unsigned long took = millis() - start;
     if (xpath.empty() || xpath.size() > bookmark_file::kMaxXPathBytes) {
       LOG_INF("STAR", "Spine %u: no XPath for offset %u (%lu ms)", static_cast<unsigned>(stars[i].spineIndex),
@@ -125,12 +127,13 @@ Work step(BookmarkStore& store, const std::shared_ptr<Epub>& epub, const Section
   return done;
 }
 
-std::optional<uint32_t> textOffset(BookmarkStore& store, const size_t index, const std::shared_ptr<Epub>& epub) {
+std::optional<uint32_t> textOffset(BookmarkStore& store, const size_t index, const std::shared_ptr<Epub>& epub,
+                                   BuildArena* const scratch) {
   if (index >= store.getAll().size()) return std::nullopt;
   const StarAnchor& anchor = store.getAnchors()[index];
   if (anchor.offset != kNoOffset) return anchor.offset;
   if (anchor.xpath.empty() || anchor.mappingFailed) return std::nullopt;
-  const auto offset = resolveXPath(epub, store.getAll()[index].spineIndex, anchor.xpath);
+  const auto offset = resolveXPath(epub, store.getAll()[index].spineIndex, anchor.xpath, scratch);
   if (offset) {
     store.noteOffset(index, *offset);
   } else {
