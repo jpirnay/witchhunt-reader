@@ -180,6 +180,8 @@ void begin() {
 void checkPanic() {
   if (isRebootFromPanic()) {
     auto panicInfo = getPanicInfo(true);
+    // FirmwareFiles::CRASH_REPORT_PATH (lib/FsHelpers) keeps this path out of the book listings: the
+    // two change together. Not included here, as lib/hal does not depend on FsHelpers.
     auto file = Storage.open("/crash_report.txt", O_WRITE | O_CREAT | O_TRUNC);
     if (file) {
       file.write(panicInfo.c_str(), panicInfo.size());

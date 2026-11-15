@@ -79,7 +79,9 @@ class LibraryBuilder {
   std::string work(const char* name) const;
   bool startWalk();
   void walkStep();
-  bool listable(const char* name) const;
+  // Whether the walk takes an entry: by the Books tab's rules, and never the firmware's own files at
+  // the walk's root (FirmwareFiles).
+  bool listable(const char* name, bool isDir, bool atRoot) const;
   void noteSidecar(Level& level, HalFile& entry);
   uint32_t sidecarFor(const Level& level) const;
   bool stageBook(const Level& level, HalFile& entry);

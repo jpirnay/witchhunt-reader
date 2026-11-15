@@ -1,5 +1,6 @@
 #include "LibraryBuilder.h"
 
+#include <FirmwareFiles.h>
 #include <Logging.h>
 #include <ProtectedPaths.h>
 
@@ -109,8 +110,9 @@ bool LibraryBuilder::startWalk() {
   return true;
 }
 
-bool LibraryBuilder::listable(const char* name) const {
+bool LibraryBuilder::listable(const char* name, const bool isDir, const bool atRoot) const {
   if (name[0] == '.' && !config_.showHidden) return false;
+  if (atRoot && FirmwareFiles::isRootEntry(name, isDir)) return false;
   return !ProtectedPaths::holdsNoBooks(name);
 }
 
@@ -162,7 +164,7 @@ void LibraryBuilder::walkStep() {
     }
     entry.getName(name_, sizeof(name_));
     const bool isDir = entry.isDirectory();
-    if (!listable(name_)) continue;
+    if (!listable(name_, isDir, /*atRoot=*/levels_.size() == 1)) continue;
     if (!level.booksPass) {
       if (!isDir && isMetadataSidecar(name_)) noteSidecar(level, entry);
       continue;
