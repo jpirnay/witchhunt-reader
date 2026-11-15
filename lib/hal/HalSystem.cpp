@@ -5,6 +5,7 @@
 #include "Arduino.h"
 #include "HalStorage.h"
 #include "Logging.h"
+#include "PanicReboot.h"
 #include "esp_debug_helpers.h"
 #include "esp_private/esp_cpu_internal.h"
 #include "esp_private/esp_system_attr.h"
@@ -15,6 +16,13 @@
 
 RTC_NOINIT_ATTR char panicMessage[256];
 RTC_NOINIT_ATTR HalSystem::StackFrame panicStack[MAX_PANIC_STACK_DEPTH];
+
+// Set by the panic hooks below and cleared by clearPanic(), so a watchdog reset counts as a crash
+// only when the panic handler ran before it (PanicReboot.h). RTC_NOINIT memory holds garbage after a
+// power-on, so only this exact value counts. Volatile: the store in a panic hook is followed only by
+// a call that does not return. From crosspoint-reader PR #2968 (Julia), a port of CrossInk c96d4275.
+static constexpr uint32_t PANIC_CAPTURE_MAGIC = 0x50414E49u;
+RTC_NOINIT_ATTR static volatile uint32_t panicCaptureMarker;
 
 extern "C" {
 
@@ -45,6 +53,7 @@ static size_t IRAM_ATTR appendPanicHex(size_t at, const uint32_t value) {
 void IRAM_ATTR __wrap_panic_abort(const char* message) {
   if (!message) message = PANIC_REASON_UNKNOWN;
   appendPanicText(0, message);
+  panicCaptureMarker = PANIC_CAPTURE_MAGIC;
 
   __real_panic_abort(message);
 }
@@ -74,6 +83,10 @@ static DRAM_ATTR const char PANIC_FAULT_LABEL[] = ", EXCVADDR 0x";
 // defines a wrap of it (esp32-hal-misc.c) that this build does not enable, and a second one would
 // not link.
 static void IRAM_ATTR recordPanicReason(const void* frame, const panic_info_t* info, const bool cpuFault) {
+  // Every panic passes here before the handler prints anything (frame_to_panic_info in IDF's
+  // port/panic_handler.c), a task watchdog's too. That one records no reason below: IDF's
+  // task_wdt_timeout_abort() sets g_panic_abort without going through panic_abort().
+  panicCaptureMarker = PANIC_CAPTURE_MAGIC;
   if (g_panic_abort || !info) return;
   size_t at = appendPanicText(0, info->reason ? info->reason : PANIC_REASON_UNKNOWN);
   at = appendPanicText(at, PANIC_PC_LABEL);
@@ -179,6 +192,7 @@ void checkPanic() {
 }
 
 void clearPanic() {
+  panicCaptureMarker = 0;
   panicMessage[0] = '\0';
   for (size_t i = 0; i < MAX_PANIC_STACK_DEPTH; i++) {
     panicStack[i].sp = 0;
@@ -218,13 +232,9 @@ std::string getPanicInfo(bool full) {
 }
 
 bool isRebootFromPanic() {
-  const auto resetReason = esp_reset_reason();
-  // Watchdog resets count as panics here: both watchdogs panic on timeout in this
-  // build (CONFIG_ESP_TASK_WDT_PANIC, CONFIG_ESP_INT_WDT), so they preserve the same
-  // panic info and deserve the same crash report. Without these a wedged task just
-  // rebooted silently to Home with no diagnostic trail.
-  return resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP || resetReason == ESP_RST_INT_WDT ||
-         resetReason == ESP_RST_TASK_WDT || resetReason == ESP_RST_WDT;
+  // A watchdog panic (CONFIG_ESP_TASK_WDT_PANIC, CONFIG_ESP_INT_WDT) still counts: it sets the marker
+  // on its way through the panic handler. Without that a wedged task rebooted silently to Home.
+  return PanicReboot::isFromPanic(esp_reset_reason(), panicCaptureMarker == PANIC_CAPTURE_MAGIC);
 }
 
 void feedWatchdog() {
