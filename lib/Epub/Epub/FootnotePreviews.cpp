@@ -27,7 +27,9 @@ constexpr uint32_t CACHE_MAGIC = 0x31504E46;  // "FNP1"
 // rebuilds a spine at a time as the reader moves, so there is nothing to preserve.
 // 3: Unicode spaces at a note's edges are trimmed, and a note of nothing else is not stored. A v2
 // store holds "notes" made of U+2005 alone (The Sea Captain's Wife, #388).
-constexpr uint16_t CACHE_VERSION = 3;
+// 4: a caller's href resolves against its chapter's folder. A v3 store can hold, for a book with same-named note files
+// in two folders, the other folder's note under a caller's key.
+constexpr uint16_t CACHE_VERSION = 4;
 constexpr size_t STREAM_CHUNK_BYTES = 1024;
 constexpr size_t MAX_HREF_BYTES = 191;
 constexpr uint32_t HEADER_BYTES = 12;    // magic + version + count + indexOffset
@@ -242,8 +244,7 @@ class LinkScanner {
       const char* hash = strchr(self->href_, '#');
       const char* fragment = hash + 1;  // '#' presence checked at startElement
       if (*fragment != '\0') {
-        const int targetSpine =
-            self->href_[0] == '#' ? self->spineIndex_ : self->epub_.resolveHrefToSpineIndex(self->href_);
+        const int targetSpine = self->epub_.resolveLinkToSpineIndex(self->href_, self->spineIndex_);
         if (targetSpine >= 0) {
           const uint32_t keyHash = makeKeyHash(targetSpine, fragment);
           const bool seen = std::any_of(self->targets_.begin(), self->targets_.end(),
@@ -1300,7 +1301,8 @@ int Lookup::resolveTargetSpine(const char* href, const size_t pathLen) {
   if (memoable && lastPathLen_ == pathLen && memcmp(lastPath_, href, pathLen) == 0) {
     return lastPathSpine_;
   }
-  const int spine = epub_->resolveHrefToSpineIndex(href);
+  // Relative to the chapter the lookup serves, which holds the link; the memo is per open store, so per chapter.
+  const int spine = epub_->resolveLinkToSpineIndex(href, currentSpineIndex_);
   if (memoable) {
     memcpy(lastPath_, href, pathLen);
     lastPathLen_ = pathLen;

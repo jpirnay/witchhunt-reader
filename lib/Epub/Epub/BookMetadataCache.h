@@ -223,10 +223,12 @@ class BookMetadataCache {
   // Reading phase (read mode)
   bool load();
   SpineEntry getSpineEntry(int index);
-  // The first spine item, in spine order, whose href is `target` (or, with `byFilename`, names the
-  // same file: spine_href::match); -1 if none. The spine records are read in order through a
-  // window: getSpineEntry() for each was half a dozen card calls a spine item. Read mode only.
-  int findSpineIndexByHref(std::string_view target, bool byFilename);
+  // The first spine item, in spine order, whose href is `target`; failing that, the first whose href
+  // is `alternate` (when given); with `byFilename`, failing both, the first that names the same file
+  // as `target` (spine_href::match); -1 if none. One pass: the spine records are read in order
+  // through a window (getSpineEntry() for each was half a dozen card calls a spine item). Read mode
+  // only.
+  int findSpineIndexByHref(std::string_view target, bool byFilename, std::string_view alternate = {});
   // The spine item with the most inflated bytes (the first of equals), from the cumulative sizes, in one pass through a
   // window; -1 when there is none or every size is 0. Read mode only.
   int largestSpineIndex();

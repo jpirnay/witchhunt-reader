@@ -39,7 +39,8 @@ add_executable(TtfFontTest
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
 )
 
-# test/shims before lib/hal: the host HalStorage, but the real NorFlash.h.
+# test/shims before lib/hal: the host HalStorage, but the real NorFlash.h. The stdio-backed HalStorage.h of
+# test/zip_entry_reader shadows the shims' stub, so TtfRegistryTest scans a family folder as discovery does.
 target_include_directories(TtfFontTest PRIVATE
   ${BIDI_MARK_INCLUDES}
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -48,6 +49,7 @@ target_include_directories(TtfFontTest PRIVATE
   ${REPO_ROOT}/test/ot_shaper_port
   ${REPO_ROOT}/test/complex_shaper
   ${REPO_ROOT}/test/text_shaping  # FixtureShapingFace.h
+  ${REPO_ROOT}/test/zip_entry_reader
   ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/lib/hal
   ${REPO_ROOT}/lib/EpdFont

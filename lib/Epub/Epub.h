@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -439,7 +440,15 @@ class Epub {
     imageManifest->persistIfDirty();
     return resolvedDeferred;
   }
-  int resolveHrefToSpineIndex(const std::string& href) const;
+  // The spine item a href leads to. `href` is relative to `linkBase`, the folder (a book path ending in '/') of the
+  // document that holds the link; empty for a href that is a book path already, as the TOC and page lists store
+  // theirs. The item at the path the href names wins, then the item at the href as written (a link that names a book
+  // path, against the spec), then the first item with its filename (a nav document linking relative to another
+  // folder). -1 for none, and for an anchor-only href.
+  int resolveHrefToSpineIndex(const std::string& href, std::string_view linkBase = {}) const;
+  // The spine item a link in spine item `fromSpineIndex` leads to: that item for an anchor-only href ("#n1"), else
+  // resolveHrefToSpineIndex against that item's folder. What the reader follows a tapped or listed link with.
+  int resolveLinkToSpineIndex(const std::string& href, int fromSpineIndex) const;
 
   // Printed-page list (from NCX <pageList> / EPUB 3 nav page-list / EPUB 2.01 page-map.xml).
   // One entry per printed-page anchor: spine href + fragment id + visible label.

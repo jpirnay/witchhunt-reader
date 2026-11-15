@@ -699,6 +699,10 @@ class ParsedText {
   // The reader's Paragraph Indent, a stored ParagraphIndent. Survives reset(): it is the section's. A table cell's
   // text never takes it, so a cell keeps Book's Style.
   void setParagraphIndent(const uint8_t indent) { paragraphIndent_ = indent; }
+  // Whether the line breaker may split this block's words at hyphenation points. Per block, not per book: a heading
+  // never hyphenates. Survives reset(); the parser sets it for every block it starts (ChapterHtmlSlimParser::
+  // blockHyphenates).
+  void setHyphenationEnabled(const bool enabled) { hyphenationEnabled = enabled; }
   // See lineArena_ / beforeLine_. Both survive reset().
   void setLineArena(BuildArena* arena) { lineArena_ = arena; }
   // A run laid out as its code points because it could not be shaped (no memory, or the font failed it) sets *latch

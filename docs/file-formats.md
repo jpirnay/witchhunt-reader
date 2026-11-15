@@ -55,14 +55,14 @@ directory whole.
 | `details.bin` | all | `BookDetailsCache` `VERSION` (3) | What the Library's lists show: [below](#detailsbin) |
 | `thumb_*.bmp` | all | in the name | Cover thumbnails: [below](#cover-thumbnails) |
 | `cover.bmp` | all | none | The sleep screen's cover (`cover_crop.bmp` for an EPUB's cropped one) |
-| `book.bin` | EPUB | `BOOK_CACHE_VERSION` (18) | Metadata, spine and TOC: [below](#bookbin) |
+| `book.bin` | EPUB | `BOOK_CACHE_VERSION` (19) | Metadata, spine and TOC: [below](#bookbin) |
 | `fingerprint.bin`, `toc.retry` | EPUB | none | [below](#fingerprintbin-and-tocretry) |
 | `pagelist.bin` | EPUB | none | The printed-page list: [below](#pagelistbin) |
 | `css_rules.cache`, `css_bg.bin`, `css_fonts.bin` | EPUB | `CSS_CACHE_VERSION` (34), `BACKGROUND_IMAGES_FILE_VERSION` (1) | [below](#css_rulescache-css_bgbin-and-css_fontsbin) |
 | `spines/<n>/<spine>_<hash>.bin` | EPUB | `SECTION_FILE_VERSION` | Laid-out pages: [`section.bin`](#sectionbin) |
 | `spines/<n>/html_<spine>.bin` | EPUB | none | The spine item's inflated XHTML, banked by its build for the footnote pass and later builds; checked against the inflated size |
 | `pages.bin` | EPUB | `kFormatVersion` (1) in `SpinePageIndex.cpp`, plus the section version and property hash | Each spine item's page count and size under one render variant (`SpinePageIndex`), to count pages across a chapter split over several files |
-| `footnotes.bin` | EPUB | `CACHE_VERSION` (3) | Inline footnote previews: [below](#footnotesbin) |
+| `footnotes.bin` | EPUB | `CACHE_VERSION` (4) | Inline footnote previews: [below](#footnotesbin) |
 | `images.bin`, `images.pending` | EPUB | `EpubImageManifest::VERSION` (5) | Image sizes, 12 B per image (FNV-1a 64 of its path in the EPUB, width, height), and the queue of images whose size is still to be read |
 | `img_<hash><ext>`, `<image>.1bit.pxc`, `<image>.bayer.pxc` | EPUB | `PixelCache::PXC_MAGIC` | Images extracted from the book (`<hash>` is FNV-1a 64 of the entry), and their dithered pixel caches: `u16` magic, `u16` width, `u16` height, 2-bit pixels |
 | `cover.img` | EPUB | none | The cover image's bytes, extracted once (or copied from a cover sidecar) |
@@ -109,7 +109,7 @@ from its pack on the card, a page at a time.
 
 ## `book.bin`
 
-Written by `BookMetadataCache`. The version byte is `BOOK_CACHE_VERSION` in `lib/Epub/Epub/BookMetadataCache.cpp`; it is bumped when the layout changes, and an older cache is rebuilt on the next open. The pattern below matches version 18.
+Written by `BookMetadataCache`. The version byte is `BOOK_CACHE_VERSION` in `lib/Epub/Epub/BookMetadataCache.cpp`; it is bumped when the layout or what it resolves changes, and an older cache is rebuilt on the next open. The pattern below matches version 19 (whose layout is version 18's).
 
 ImHex Pattern:
 
@@ -363,7 +363,7 @@ blob                    count x { u16 textLen, text }, at most 240 bytes of text
 index (at indexOffset)  count x { u32 keyHash, u32 blobOffset }, sorted by keyHash
 ```
 
-The key is FNV-1a (32-bit) of `"<targetSpineIndex>#<fragment>"`. Each pass writes its notes over the old index and a merged index after them; while it runs, the old index is parked in `footnotes.bin.idx`. A store with another magic or version, or whose index does not end the file, is deleted and started again. Version 3 trims Unicode spaces at a note's edges and stores no note made of nothing else.
+The key is FNV-1a (32-bit) of `"<targetSpineIndex>#<fragment>"`. Each pass writes its notes over the old index and a merged index after them; while it runs, the old index is parked in `footnotes.bin.idx`. A store with another magic or version, or whose index does not end the file, is deleted and started again. Version 3 trims Unicode spaces at a note's edges and stores no note made of nothing else; version 4 resolves a caller's href against its chapter's folder.
 
 ## `progress.bin`
 
