@@ -70,20 +70,87 @@ export function parseTable(blob) {
 const sameEntry = (a, b) =>
   a.label === b.label && a.type === b.type && a.subtype === b.subtype && a.offset === b.offset && a.size === b.size;
 
-export const hasSpiffs = (entries) => entries.some((e) => e.type === 0x01 && e.subtype === 0x82);
+// The flash area the firmware takes from a table is the data partition of subtype spiffs labelled
+// "spiffs" (lib/hal/EspPartitionFlash.cpp). AREA_BYTES is its size in partitions.csv
+// (FlashArea::kExpectedBytes): an X3 or X4 whose table has less runs in emergency mode
+// (docs/design/flash-area.md).
+export const AREA_BYTES = 0x360000;
+const isArea = (e) => e.type === 0x01 && e.subtype === 0x82 && e.label === "spiffs";
 
-// "ours" when the table is exactly `ours` (the release's), "stock" when it has an app at 0x10000 and
-// no spiffs partition (a stock X4 Pro has none, which is issue #733), "unknown" otherwise.
+// Onyx's BOOX Picco table (partitions_picco.csv): its `safeboot` recovery as the factory app and one
+// OTA slot at 0xE0000. Witch Reader runs on it too ([env:picco_stock]), but cannot update itself there.
+export const ONYX_APP_OFFSET = 0xe0000;
+const isOnyxTable = (entries) =>
+  entries.some((e) => e.type === 0x00 && e.subtype === 0x00 && e.label === "safeboot") &&
+  entries.some((e) => e.type === 0x00 && e.subtype === 0x10 && e.offset === ONYX_APP_OFFSET);
+
+// What the device's table means for an install:
+//   ours:    exactly `ours`, the release's table, which Update only keeps;
+//   foreign: any other valid table: another firmware's, or an old layout of this one. `areaBytes` is
+//            the size of its area partition, 0 when it has none (a stock X4 Pro, issue #733); `onyx`
+//            when it is the Picco's stock table;
+//   unknown: no valid table.
 export function classifyTable(entries, ours) {
   if (!entries) return { kind: "unknown", why: "no valid partition table at 0x8000 (empty or foreign flash)" };
   if (ours && entries.length === ours.length && entries.every((e, i) => sameEntry(e, ours[i]))) {
     return { kind: "ours", why: "Witch Reader's partition table" };
   }
-  const app0 = entries.find((e) => e.type === 0x00 && e.offset === APP_OFFSET);
-  if (app0 && !hasSpiffs(entries)) {
-    return { kind: "stock", why: "a table without the spiffs area (stock firmware, or an old layout)" };
+  const area = entries.find(isArea);
+  return { kind: "foreign", why: "not Witch Reader's", areaBytes: area ? area.size : 0, onyx: isOnyxTable(entries) };
+}
+
+// Sizes as the device's emergency notice writes them (FlashLayoutNotice::sizeText): "80 KB", "1.0 MB".
+export function sizeText(bytes) {
+  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.floor(bytes / 1024)} KB`;
+}
+
+// The note on a classified table, or null for an unknown one (the page says why it could not tell).
+// `choices`, when present, are list items that follow `text`.
+// A table with less than AREA_BYTES puts an X3 or X4 (ESP32-C3, no PSRAM) in emergency mode, which
+// the page names in the device notice's words (STR_FLASH_EMERGENCY_*), so that a reader who scanned
+// that notice's QR code finds it here. The S3 boards hold the area in PSRAM instead
+// (lib/hal/FlashArea.cpp) and are never in emergency mode. Onyx's Picco table is a choice rather than
+// a fault: the note sets out what each table means for updates (docs/contributing/board-support.md,
+// "Two partition tables").
+export function layoutNote(tableKind, chip) {
+  if (tableKind.kind === "ours") {
+    return { level: "ok", text: "Partition table: Witch Reader's. Full install or update only." };
   }
-  return { kind: "unknown", why: "a partition table that is not Witch Reader's" };
+  if (tableKind.kind !== "foreign") return null;
+  if (tableKind.onyx) {
+    return {
+      level: "warn",
+      text: "Partition table: Onyx's, as the Picco comes. Witch Reader runs on it and on its own; Onyx's firmware " +
+        "is replaced either way. What differs is how Witch Reader is updated afterwards:",
+      choices: [
+        "Full install, Witch Reader's table: it updates itself over Wi-Fi and from the SD card, and this page's " +
+          "Update only works. Onyx's boot loader and its recovery, which installs updates from the SD card, are " +
+          "replaced. Only a backup of the whole flash brings them back.",
+        "Update only, Onyx's table kept: the firmware goes into Onyx's app slot, and Onyx's boot loader and " +
+          "recovery stay. The table has one app slot, so Witch Reader cannot update itself on it: no update over " +
+          "Wi-Fi or from the SD card. Every later update comes from this page's Update only again.",
+      ],
+    };
+  }
+  const writes = "the full install: it writes Witch Reader's table. Update only would keep this one, so it is not " +
+    "offered.";
+  if (tableKind.areaBytes >= AREA_BYTES) {
+    return { level: "warn", text: `Partition table: ${tableKind.why}. Use ${writes}` };
+  }
+  const has = tableKind.areaBytes ? sizeText(tableKind.areaBytes) : "no space";
+  const lead = `Partition table: ${tableKind.why}. It has ${has} for fonts, interface language and hyphenation, ` +
+    `where Witch Reader needs ${sizeText(AREA_BYTES)}.`;
+  if (chip === "ESP32-C3") {
+    return {
+      level: "warn",
+      text: `${lead} On it, Witch Reader runs only in emergency mode: some features are slower or missing, such as ` +
+        `TrueType fonts. We strongly recommend ${writes}`,
+    };
+  }
+  return {
+    level: "warn",
+    text: `${lead} Witch Reader keeps them in PSRAM instead, saved to the SD card. Use ${writes}`,
+  };
 }
 
 export function describeTable(entries) {
@@ -92,6 +159,106 @@ export function describeTable(entries) {
     .map((e) => `${e.label.padEnd(9)} ${typeName(e.type)}/0x${e.subtype.toString(16).padStart(2, "0")} ` +
       `0x${e.offset.toString(16).padStart(6, "0")} +0x${e.size.toString(16)}`)
     .join("\n");
+}
+
+// ---- Firmware image alone -----------------------------------------------------------------------
+
+// Where a firmware image alone goes, taken from the device's own table: its ota_0 slot and its
+// otadata. Only on our table (0x10000, otadata 0xE000) and on Onyx's Picco table (0xE0000, otadata
+// 0x15000), where Witch Reader runs as it is (docs/contributing/board-support.md, "Two partition
+// tables"); any other table gets the full install. Null when there is no such target.
+export function appTarget(tableKind, entries) {
+  if (!entries || !(tableKind.kind === "ours" || tableKind.onyx)) return null;
+  const slot = entries.find((e) => e.type === 0x00 && e.subtype === 0x10);
+  const otadata = entries.find((e) => e.type === 0x01 && e.subtype === 0x00);
+  if (!slot || !otadata || otadata.size !== OTADATA_SIZE) return null;
+  return { app: slot.offset, appBytes: slot.size, otadata: otadata.offset, onyx: !!tableKind.onyx };
+}
+
+// otadata whose first sector selects ota_0 (sequence 1), byte for byte the boot_app0.bin that
+// Arduino-ESP32 ships and that [env:picco_stock] writes at 0x15000 (scripts/stock_table_upload.py),
+// with which the Picco booted Witch Reader. Onyx's table needs it written: there a blank otadata
+// starts Onyx's recovery, which is how a stock Picco reaches a USB port in the first place.
+// The CRC is esp_rom_crc32_le(UINT32_MAX, &seq, 4), as in ota_boot::computeSeqCrc().
+export function otadataSelectingFirstSlot() {
+  const data = new Uint8Array(OTADATA_SIZE).fill(0xff);
+  const seq = new Uint8Array([1, 0, 0, 0]);
+  data.set(seq, 0);
+  new DataView(data.buffer).setUint32(28, crc32(seq, 0xffffffff), true);
+  data.set([0, 0, 0, 0], 0x1000); // boot_app0.bin's second sector: sequence 0 under an erased CRC, no entry
+  return data;
+}
+
+// The writes for a firmware image alone: the image into the target's slot, then otadata. The image
+// goes first, so a write that stops leaves the boot selection as it was. `error` when the image does
+// not fit the slot.
+export function appWritePlan(target, app, otadata) {
+  if (app.length > target.appBytes) {
+    return { error: `the firmware is ${app.length} bytes, more than the device's app slot (${target.appBytes})` };
+  }
+  return { files: [{ data: app, address: target.app }, { data: otadata, address: target.otadata }] };
+}
+
+// ---- Backup -------------------------------------------------------------------------------------
+
+// A backup reads the flash in pieces of BACKUP_CHUNK. esptool-js 0.7.0's readFlash grows its result
+// by one copy per 4 KB packet, so a single read of 16 MB would copy gigabytes; and it does not read
+// the MD5 the stub sends after the data, so each piece is checked against the chip here.
+export const BACKUP_CHUNK = 0x40000;
+
+// Bytes of an esptool-js flash size name ("16MB"), or null.
+export function flashSizeBytes(name) {
+  const m = /^(\d+)(KB|MB)$/.exec(name || "");
+  return m ? Number(m[1]) * (m[2] === "MB" ? 1024 * 1024 : 1024) : null;
+}
+
+// "picco-flash-9c96d5e1d82c-2026-11-15.bin": which board, which unit, which day.
+export function backupFileName(boardId, mac, date) {
+  const day = [date.getFullYear(), date.getMonth() + 1, date.getDate()].map((n) => String(n).padStart(2, "0"));
+  return `${boardId}-flash-${(mac || "unknown").replace(/:/g, "").toLowerCase()}-${day.join("-")}.bin`;
+}
+
+// What a backup's file name (backupFileName) says: board id, MAC as esptool-js writes it, day; null
+// for any other name. A browser names a second download of the same file "... (1).bin".
+export function parseBackupName(name) {
+  const m = /^([a-z0-9]+)-flash-([0-9a-f]{12})-(\d{4}-\d{2}-\d{2})(?: \(\d+\))?\.bin$/i.exec(name || "");
+  return m ? { board: m[1].toLowerCase(), mac: m[2].toLowerCase().match(/../g).join(":"), date: m[3] } : null;
+}
+
+// A full image as large as a whole flash chip (a power of two, 1 MB or more) is a copy of a device's
+// flash, a backup: written back, it replaces everything, the device's own data too. An install image
+// ends after the firmware, a few MB into a 16 MB chip.
+export function isWholeFlashImage(info, length) {
+  return info.kind === "full" && length >= 0x100000 && (length & (length - 1)) === 0;
+}
+
+// The whole flash, `size` bytes from 0: each piece read with `read(addr, len)` and compared with
+// `chipMd5(addr, len)`, the chip's own MD5 of that range; a piece that fails or differs is read
+// again, `tries` times in all, and the backup fails rather than keep it. `onRetry(addr, error)` and
+// `onProgress(done, size)` report.
+export async function readWholeFlash({ size, read, chipMd5, chunk = BACKUP_CHUNK, tries = 3, onRetry, onProgress }) {
+  const image = new Uint8Array(size);
+  for (let addr = 0; addr < size; addr += chunk) {
+    const len = Math.min(chunk, size - addr);
+    let error = null;
+    for (let attempt = 1; attempt <= tries; attempt++) {
+      try {
+        const data = await read(addr, len);
+        if (data.length !== len) throw new Error(`got ${data.length} of ${len} bytes`);
+        const want = String(await chipMd5(addr, len)).toLowerCase();
+        if (md5Hex(data) !== want) throw new Error("the bytes read differ from the chip's checksum");
+        image.set(data, addr);
+        error = null;
+        break;
+      } catch (e) {
+        error = e;
+        if (onRetry) onRetry(addr, e);
+      }
+    }
+    if (error) throw new Error(`at 0x${addr.toString(16)}: ${error.message || error}`);
+    if (onProgress) onProgress(addr + len, size);
+  }
+  return image;
 }
 
 // ---- Image files --------------------------------------------------------------------------------

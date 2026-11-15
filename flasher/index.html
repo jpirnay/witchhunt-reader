@@ -42,6 +42,17 @@
       <button id="disconnect" type="button" class="secondary" hidden>Disconnect</button>
     </div>
     <div id="device"></div>
+    <div id="backup-box" hidden>
+      <div class="row">
+        <button id="backup" type="button" class="secondary">Back up the whole flash</button>
+      </div>
+      <p id="backup-info" class="muted">Saves everything on the device's flash as a file on this computer, read in
+        pieces, each checked against the chip. Written back with <em>Custom file</em>, it returns the device to what
+        it holds now. Make one before the first install over another firmware: original firmware often cannot be
+        downloaded anywhere.</p>
+      <progress id="backup-progress" max="100" value="0" hidden></progress>
+      <div id="backup-result"></div>
+    </div>
   </section>
 
   <section>
@@ -49,11 +60,12 @@
     <label class="choice"><input type="radio" name="mode" value="full" checked>
       <strong>Full install</strong> (recommended)
       <small id="full-info">The boot loader, the partition table and the firmware, written from the start of the
-        flash. Needed when the device runs other firmware, or an old layout of this one.</small></label>
+        flash. Needed when the device runs other firmware, or an old layout of this one, and the fix when Witch
+        Reader shows Emergency mode.</small></label>
     <label class="choice"><input type="radio" name="mode" value="update">
       <strong>Update only</strong>
       <small id="update-info">Just the firmware. Only for a device that already has this reader's partition
-        table.</small></label>
+        table, or a BOOX Picco on Onyx's partition table.</small></label>
     <label class="choice"><input type="radio" name="mode" value="custom">
       <strong>Custom file</strong>
       <small>A .bin of your own, for example a test build from a pull request: a full image is written from the
@@ -100,7 +112,14 @@
     <p><strong>On a device with its original firmware</strong> (for example a new X4 Pro), a full install
       replaces that firmware, and what it kept in the device's memory, such as its Wi-Fi passwords, is lost with
       it. There is no way back unless you have a backup of the whole flash. If you may want to return to it, make
-      one first, for example with esptool: <code>esptool read-flash 0 ALL backup.bin</code>.</p>
+      one first with <strong>Back up the whole flash</strong> under step 2, or with esptool:
+      <code>esptool read-flash 0 ALL backup.bin</code>. To return to it, write that file with <em>Custom file</em>.</p>
+    <p><strong>On a BOOX Picco with Onyx's partition table</strong>, a full install also replaces Onyx's boot loader
+      and its recovery, which installs updates from the SD card; Witch Reader then updates itself over Wi-Fi and from
+      the card. <strong>Update only</strong> keeps Onyx's table instead: the firmware goes into Onyx's app slot, and
+      Onyx's boot loader and recovery stay. That table has one app slot, though, so Witch Reader cannot update itself
+      on it: every later update comes from this page's Update only again. Either way, Onyx's own firmware is
+      replaced.</p>
     <p><strong>Leftovers.</strong> Without <em>Erase the whole flash first</em>, parts of the flash that Witch
       Reader has not used yet keep their old bytes until it does; it never reads them as its own data. On a device
       that had its original firmware, that can include what the old firmware stored. Erase first if you pass the
@@ -125,7 +144,8 @@
       that uses the port (a serial monitor, another flasher tab).</p>
     <p><strong>A BOOX Picco on its original firmware</strong> shows up as a USB drive with no port. Hold Power and
       Volume Up (+) together for more than 10 seconds: it restarts into Onyx's recovery, which has the port. Back
-      up the whole flash before the first install; Onyx's firmware cannot be downloaded anywhere.</p>
+      up the whole flash before the first install (step 2); Onyx's firmware cannot be downloaded anywhere. A backup
+      made from the recovery restores into it: its Restart then starts Onyx's firmware.</p>
   </details>
 
   <details>

@@ -32,6 +32,8 @@ const state = {
   sdm: false, // Secure Download Mode: writes only, no reads, no stub
   locked: null, // why writing would leave the device unbootable, if it would
   flashSize: null,
+  mac: null, // the connected chip's, to tell whether `backup` is of this device
+  backup: null, // { name, mac, url } of the whole-flash backup saved on this page
   table: undefined, // entries read at 0x8000; null when there is no valid table
   tableKind: null,
   custom: null, // { bytes, info } of the chosen local .bin
@@ -207,6 +209,14 @@ async function connect() {
   }
   state.chip = state.loader.chip.CHIP_NAME;
   state.sdm = !!state.loader.secureDownloadMode;
+  state.mac = null;
+  if (!state.sdm) {
+    try {
+      state.mac = await state.loader.chip.readMac(state.loader);
+    } catch (e) {
+      log("MAC: not available (" + (e && e.message ? e.message : e) + ")");
+    }
+  }
   await readSecurity();
   await readFlashLayout();
   $("connect").hidden = true;
@@ -258,6 +268,11 @@ async function readFlashLayout() {
   }
 }
 
+// Where a firmware image alone goes on the connected device: our table or Onyx's Picco table.
+function appTarget() {
+  return state.tableKind && state.table ? lib.appTarget(state.tableKind, state.table) : null;
+}
+
 // The release's table, or the one in a chosen custom full image.
 function oursTable() {
   if (state.manifest && state.manifest.table) return state.manifest.table;
@@ -274,6 +289,7 @@ async function dropConnection() {
   state.transport = null;
   state.loader = null;
   state.chip = null;
+  state.mac = null;
   state.table = undefined;
   state.tableKind = null;
   $("connect").hidden = false;
@@ -305,13 +321,21 @@ function refresh() {
     }
     if (state.tableKind) {
       const t = state.tableKind;
-      if (state.table === undefined && t.kind === "unknown") {
+      const layout = lib.layoutNote(t, state.chip);
+      if (layout) {
+        const parts = [layout.text];
+        if (layout.choices) {
+          const list = document.createElement("ul");
+          for (const choice of layout.choices) {
+            const item = document.createElement("li");
+            item.textContent = choice;
+            list.append(item);
+          }
+          parts.push(list);
+        }
+        note(dev, layout.level, ...parts);
+      } else if (state.table === undefined) {
         note(dev, "warn", `Partition table: unknown, because ${t.why}. Use the full install.`);
-      } else if (t.kind === "ours") {
-        note(dev, "ok", "Partition table: Witch Reader's. Full install or update only.");
-      } else if (t.kind === "stock") {
-        note(dev, "warn", `Partition table: ${t.why}. This is the case where the interface stays in English; ` +
-          "the full install fixes it. The update alone would not.");
       } else {
         note(dev, "warn", `Partition table: ${t.why}. Use the full install.`);
       }
@@ -327,24 +351,40 @@ function refresh() {
   fullInput.disabled = !imgs.full;
   $("full-info").textContent = imgs.full
     ? "The boot loader, the partition table and the firmware, written from the start of the flash. Needed when " +
-      "the device runs other firmware, or an old layout of this one."
+      "the device runs other firmware, or an old layout of this one, and the fix when Witch Reader shows " +
+      "Emergency mode."
     : "This release has no full-install image for this device. Use update only on a device that already runs " +
       "Witch Reader, or a custom file.";
-  const ours = state.tableKind && state.tableKind.kind === "ours";
-  updateInput.disabled = !imgs.app || (state.loader && !ours);
+  const target = appTarget();
+  updateInput.disabled = !imgs.app || (state.loader && !target);
   $("update-info").textContent = !imgs.app
     ? "This release has no firmware image for this device."
-    : "Just the firmware. Only for a device that already has this reader's partition table" +
-      (state.loader && !ours ? ": this one does not." : ".");
+    : target && target.onyx
+      ? "Just the firmware, into Onyx's app slot, with the boot selection pointing at it. Onyx's boot loader, " +
+        "recovery and partition table stay. Witch Reader cannot update itself on that table, so its later updates " +
+        "come from here too."
+      : "Just the firmware. Only for a device that already has this reader's partition table, or a BOOX Picco on " +
+        "Onyx's partition table" + (state.loader && !target ? ": this one has neither." : ".");
   if (document.querySelector('input[name="mode"]:checked').disabled) {
     const firstFree = [fullInput, updateInput].find((i) => !i.disabled);
     (firstFree || document.querySelector('input[name="mode"][value="custom"]')).checked = true;
     return refresh();
   }
-  $("erase").disabled = state.sdm || !isFullWrite(mode);
+  // A copy of the whole flash covers all of it, and brings back firmware this release's pages may not fit.
+  const restore = mode === "custom" && state.custom && state.custom.whole;
+  $("erase").disabled = state.sdm || !isFullWrite(mode) || restore;
   if ($("erase").disabled) $("erase").checked = false;
-  $("web").disabled = !webBundleFor(mode);
+  $("web").disabled = !webBundleFor(mode) || restore;
   if ($("web").disabled) $("web").checked = false;
+
+  $("backup-box").hidden = !state.loader;
+  const backupBlocked = state.sdm
+    ? "Secure Download Mode takes writes but refuses reads, so this device cannot be backed up over USB."
+    : !lib.flashSizeBytes(state.flashSize)
+      ? "The device did not report its flash size, so the page does not know how much to read."
+      : null;
+  $("backup").disabled = !!backupBlocked;
+  if (backupBlocked) $("backup-info").textContent = backupBlocked;
 
   const problem = writeProblem(mode);
   if (problem) note(plan, "warn", problem);
@@ -365,14 +405,30 @@ function writeProblem(mode) {
   if (!state.loader) return "Connect the device first.";
   if (state.chip !== state.board.chip) return "The connected chip does not match the device picked above.";
   if (state.locked) return "This device is locked; update it from the SD card.";
+  if (state.tableKind && state.tableKind.onyx && state.board.id !== "picco") {
+    return "This device has the BOOX Picco's partition table: pick the BOOX Picco above.";
+  }
   if (mode === "custom") {
     if (!state.custom) return "Choose a .bin file.";
     const info = state.custom.info;
     if (info.kind === "unknown") return `That file is ${info.why}.`;
     if (info.chip !== state.chip) return `That file is built for an ${info.chip}, this device is an ${state.chip}.`;
-    if (info.kind === "app" && !(state.tableKind && state.tableKind.kind === "ours")) {
-      return "A firmware image alone needs this reader's partition table on the device, which it does not have " +
-        "(or which could not be read). Use a full image.";
+    if (state.custom.whole) {
+      const from = state.custom.backupOf;
+      if (from && from.board !== state.board.id) {
+        return `That copy was saved from a ${boardLabel(from.board)}; the device picked above is the ` +
+          `${state.board.label}.`;
+      }
+      const flash = lib.flashSizeBytes(state.flashSize);
+      if (flash && flash !== state.custom.bytes.length) {
+        const size = lib.sizeText(state.custom.bytes.length);
+        return `That copy is of a ${size} flash; this device has ${state.flashSize}.`;
+      }
+      return null;
+    }
+    if (info.kind === "app" && !appTarget()) {
+      return "A firmware image alone needs this reader's partition table on the device, or Onyx's on a BOOX " +
+        "Picco, which it does not have (or which could not be read). Use a full image.";
     }
   }
   if (isFullWrite(mode) && state.flashSize && state.flashSize !== "16MB") {
@@ -390,12 +446,21 @@ async function chooseCustom(file) {
   if (file) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const detected = lib.detectImage(bytes);
-    state.custom = { bytes, info: detected, name: file.name };
-    if (detected.kind === "full") {
+    const whole = lib.isWholeFlashImage(detected, bytes.length);
+    const backupOf = whole ? lib.parseBackupName(file.name) : null;
+    state.custom = { bytes, info: detected, name: file.name, whole, backupOf };
+    if (whole) {
+      const from = state.custom.backupOf;
+      info.textContent = `${file.name}: a copy of a whole ${lib.sizeText(bytes.length)} flash for the ` +
+        `${detected.chip}` + (from ? `, saved from the ${boardLabel(from.board)} ${from.mac} on ${from.date}` : "") +
+        ". It is not an install: written, it puts back everything the copy holds, boot loader, partition table, " +
+        "firmware and the device's own data, over everything on the device. The web interface is not installed " +
+        "afterwards.";
+    } else if (detected.kind === "full") {
       info.textContent = `${file.name}: a full image for the ${detected.chip}, ${bytes.length} bytes, written from 0x0.`;
     } else if (detected.kind === "app") {
       info.textContent = `${file.name}: a firmware image for the ${detected.chip}, ${bytes.length} bytes, ` +
-        "written at 0x10000 with the boot selection reset.";
+        "written into the device's app slot, with the boot selection pointing at it.";
     } else {
       info.textContent = `${file.name}: ${detected.why}.`;
     }
@@ -415,14 +480,93 @@ async function chooseCustomWeb(file) {
   refresh();
 }
 
+// ---- Backup -------------------------------------------------------------------------------------
+
+// The whole flash as a file on this computer, every piece checked against the chip's own MD5
+// (lib.readWholeFlash). Written back with Custom file it is a full image like any other, so the
+// device returns to what it holds now.
+async function backup() {
+  const size = lib.flashSizeBytes(state.flashSize);
+  const result = $("backup-result");
+  const progress = $("backup-progress");
+  result.replaceChildren();
+  if (!state.loader || !size) return;
+  setBusy(true);
+  progress.value = 0;
+  progress.hidden = false;
+  const started = Date.now();
+  try {
+    const image = await lib.readWholeFlash({
+      size,
+      read: (addr, len) => state.loader.readFlash(addr, len),
+      chipMd5: (addr, len) => state.loader.flashMd5sum(addr, len),
+      onRetry: (addr, e) => log(`backup: 0x${addr.toString(16)} read again (${e && e.message ? e.message : e})`),
+      onProgress: (done, total) => {
+        progress.value = (100 * done) / total;
+      },
+    });
+    const sha = lib.toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", image)));
+    const name = lib.backupFileName(state.board.id, state.mac, new Date());
+    if (state.backup) URL.revokeObjectURL(state.backup.url);
+    state.backup = { name, mac: state.mac, url: URL.createObjectURL(new Blob([image])) };
+    const seconds = Math.round((Date.now() - started) / 1000);
+    log(`backup: ${name}, ${size} bytes in ${seconds} s, md5 ${lib.md5Hex(image)}, sha256 ${sha}`);
+    const a = link(state.backup.url, name);
+    a.download = name;
+    note(result, "ok", "Saved the whole flash (" + state.flashSize + ", every piece checked against the chip) as ", a,
+      `. SHA-256 ${sha}. Keep it somewhere safe; if the download did not start, save it from that link. To leave ` +
+      "without writing, press Disconnect: it restarts the device.");
+    a.click();
+  } catch (e) {
+    log("backup: " + (e && e.message ? e.message : e));
+    note(result, "bad", "The backup failed (" + (e && e.message ? e.message : e) + "); nothing was saved. " +
+      "Reconnect and try again.");
+  } finally {
+    progress.hidden = true;
+    setBusy(false);
+  }
+}
+
 // ---- Write --------------------------------------------------------------------------------------
+
+const boardLabel = (id) => (lib.BOARDS.find((b) => b.id === id) || { label: id }).label;
+
+// The confirmation for a copy of the whole flash: it is not an install, and it may be another unit's.
+function restoreText() {
+  const { name, backupOf: from } = state.custom;
+  const lines = [`Write ${name} over the whole flash of the ${state.board.label}?`, "",
+    "This is a copy of a whole flash, not an install. It replaces everything on the device: the boot loader, the " +
+    "partition table, the firmware and the data in the device's own memory (settings, Wi-Fi passwords, " +
+    "calibration), with what the copy holds" + (from ? `, as it was on ${from.date}` : "") + ". The SD card is not " +
+    "touched."];
+  if (from && state.mac && from.mac !== state.mac) {
+    lines.push("", `The copy was saved from another device (${from.mac}), not from this one (${state.mac}). This ` +
+      "one would take over that device's own data. Write it only if that is what you want.");
+  } else if (from && state.mac) {
+    lines.push("", "The copy was saved from this device.");
+  }
+  if (state.backup && state.mac && state.backup.mac === state.mac && state.backup.name !== name) {
+    lines.push("", `What the device holds now was saved on this page as ${state.backup.name}.`);
+  } else if (!(state.backup && state.mac && state.backup.mac === state.mac)) {
+    lines.push("", "What the device holds now was not saved on this page; it is lost unless you have a copy.");
+  }
+  return lines.join("\n");
+}
 
 async function buildPlan(mode) {
   const imgs = boardImages();
-  const otadata = async () =>
+  const ourOtadata = async () =>
     state.manifest && state.manifest.otadata
       ? fetchImage(state.manifest.otadata)
-      : new Uint8Array(lib.OTADATA_SIZE).fill(0xff); // erased otadata also boots app0
+      : new Uint8Array(lib.OTADATA_SIZE).fill(0xff); // erased otadata also boots app0 on our table
+  const appWrite = async (data) => {
+    const target = appTarget();
+    if (!target) throw new Error("the device's partition table takes no firmware image alone");
+    // On Onyx's table an erased otadata starts Onyx's recovery, so the selection is always written.
+    const plan = lib.appWritePlan(target, data, target.onyx ? lib.otadataSelectingFirstSlot() : await ourOtadata());
+    if (plan.error) throw new Error(plan.error);
+    return plan.files;
+  };
   if (mode === "full") {
     const data = await fetchImage(imgs.full);
     const info = lib.detectImage(data);
@@ -433,30 +577,44 @@ async function buildPlan(mode) {
     const data = await fetchImage(imgs.app);
     const info = lib.detectImage(data);
     if (info.kind !== "app" || info.chip !== state.chip) throw new Error("the firmware image does not match this device");
-    return {
-      files: [{ data, address: lib.APP_OFFSET }, { data: await otadata(), address: lib.OTADATA_OFFSET }],
-      what: `the firmware of ${state.manifest.name}`,
-    };
+    return { files: await appWrite(data), what: `the firmware of ${state.manifest.name}` };
   }
   const { bytes, info, name } = state.custom;
   if (info.kind === "full") return { files: [{ data: bytes, address: 0 }], what: name };
-  return {
-    files: [{ data: bytes, address: lib.APP_OFFSET }, { data: await otadata(), address: lib.OTADATA_OFFSET }],
-    what: name,
-  };
+  return { files: await appWrite(bytes), what: name };
 }
 
 function confirmText(mode, plan) {
+  if (mode === "custom" && state.custom.whole) return restoreText();
   const lines = [`Write ${plan.what} to the ${state.board.label}?`];
+  const onyxApp = !isFullWrite(mode) && appTarget() && appTarget().onyx;
+  const replacesOther = (isFullWrite(mode) && state.tableKind && state.tableKind.kind !== "ours") || onyxApp;
   if (isFullWrite(mode)) {
     if (state.tableKind && state.tableKind.kind !== "ours") {
       lines.push("", "This replaces the firmware that is on it now. Anything the old firmware kept in the device's " +
         "memory (on original firmware: its Wi-Fi passwords and settings) is lost; the SD card is not touched. " +
         "There is no way back without a backup of the whole flash.");
+      if (state.tableKind.onyx && mode === "full") {
+        lines.push("", "On this Picco that includes Onyx's boot loader and its recovery. Witch Reader then updates " +
+          "itself, over Wi-Fi and from the SD card.");
+      }
     } else {
       lines.push("", "The SD card is not touched.");
     }
     if ($("erase").checked) lines.push("", "The whole flash is erased first.");
+  } else if (onyxApp) {
+    lines.push("", "It goes into Onyx's app slot. Onyx's boot loader, recovery and partition table stay. The " +
+      "firmware in that slot is replaced: if that is still Onyx's own, only a backup of the whole flash brings it " +
+      "back.",
+    "", "Witch Reader cannot update itself on this table: update it from this page again.");
+  }
+  if (replacesOther) {
+    if (state.backup && state.mac && state.backup.mac === state.mac) {
+      lines.push("", `This device's whole flash was saved on this page as ${state.backup.name}.`);
+    } else {
+      lines.push("", "No backup of this device's whole flash was saved on this page. If you may want what is on it " +
+        "now back, cancel and use Back up the whole flash (step 2) first.");
+    }
   }
   return lines.join("\n");
 }
@@ -524,7 +682,9 @@ async function write() {
   if (bundle) {
     await installBundle(bundle);
   } else {
-    note(after, "ok", "Done. The device starts the new firmware now.");
+    note(after, "ok", mode === "custom" && state.custom && state.custom.whole
+      ? "Done. The device starts what the copy holds now."
+      : "Done. The device starts the new firmware now.");
     status("");
   }
   setBusy(false);
@@ -683,12 +843,17 @@ async function start() {
   }
   await loadManifest();
   $("connect").addEventListener("click", connect);
+  // Connected, the device waits in its ROM loader: after a backup, or a look at its table, it
+  // would sit there until reset by hand.
   $("disconnect").addEventListener("click", async () => {
+    setBusy(true);
+    if (state.loader) await restart();
     await dropConnection();
     $("device").replaceChildren();
-    refresh();
+    setBusy(false);
   });
   $("write").addEventListener("click", write);
+  $("backup").addEventListener("click", backup);
   $("reconnect").addEventListener("click", reconnect);
   $("custom-file").addEventListener("change", (e) => chooseCustom(e.target.files[0]));
   $("custom-web").addEventListener("change", (e) => chooseCustomWeb(e.target.files[0]));
