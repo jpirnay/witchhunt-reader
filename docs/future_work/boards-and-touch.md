@@ -216,8 +216,6 @@ and the slide switch turns the light on and off. Board notes:
 - **GPIO5.** The SDK carries it as Confirm; what drives it on the device is not known.
 - **Slide switch and touch page turns.** Upstream's third binding. Here Touch Page Turn has four values, so "on" needs
   a remembered mode.
-- **Multi-touch.** The TMA525C reports more than one contact when its GET_SYSINFO says so, but
-  `HalCapabilities::hasMultiTouch()` (which decides the persisted rows) names only the GT911.
 
 ## USB attach during light sleep on the X4 (CrossPoint #3082)
 
