@@ -2945,6 +2945,18 @@ bool EpubReaderActivity::keepBuildPageOnScreen() {
   if (getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer()) {
     std::unique_ptr<Page> page = section->loadPageFromSectionFile();
     if (page) {
+      // The page's glyphs, as a render leaves them for its deferred pass: the build's draw gave its slots back for the
+      // rest of the build, and the pass without them took 1,458 ms of planes on the X3 (920 on the X4 Pro) against
+      // 116-149 ms after a turn (2026-11-15). The pass releases them (releasePageGlyphArena). As in renderContents(),
+      // the misses and the built-in fonts' ring take their scratch from the secondary buffer; given back seeded from
+      // the write buffer, which holds the page on screen, so it is still that page's frame for the pass's restore.
+      {
+        std::optional<LentSecondary> prewarmLend;
+        if (renderer.hasSecondaryBuffer()) prewarmLend.emplace(renderer);
+        const glyph_miss::Scope misses(prewarmLend ? prewarmLend->arena() : nullptr);
+        prewarmPageFonts(*page, shown.marginLeft, shown.contentTop);
+      }
+      sdFontSystem.releaseTtfMissMemory();
       pendingGrayscale_.active = true;
       pendingGrayscale_.page = std::move(page);
       pendingGrayscale_.imagesGray = false;
