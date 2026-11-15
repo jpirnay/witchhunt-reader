@@ -4,8 +4,8 @@ title: Touch Gestures
 
 # Touch Gestures
 
-For readers with a touchscreen — the **Xteink X4 Pro** and the **LilyGo T5S3**. The
-X3 and X4 have no digitiser and none of this applies to them.
+For readers with a touchscreen — the **Xteink X4 Pro**, the **LilyGo T5S3**, the **Murphy M3** and the
+**BOOX Picco**. The X3 and X4 have no digitiser and none of this applies to them.
 
 Everything here can be changed. The zones are fixed, but what each one *does* is a
 setting: **Settings → Controls → Gesture actions**. To see the zones and your own
@@ -45,7 +45,7 @@ the grid and answer only to a **hold**, never a tap — so no tap changes meanin
 | Tap top / bottom | *(nothing — reserved for vertical gestures)* |
 | Hold left / right column | Previous / Next chapter |
 | Hold centre | Dictionary |
-| Hold bottom | Star page |
+| Hold bottom | Toggle bookmark |
 | Hold top | *(nothing)* |
 | **Hold top-left corner** | **Toggle reading light** |
 | Hold other three corners | *(nothing — free for you to assign)* |
@@ -97,8 +97,8 @@ means *back*, so a tap there goes back one page and a flick the same way goes ba
 
 ### Two fingers
 
-Only on devices whose touch controller reports more than one finger (the GT911, in both
-the X4 Pro and the T5S3).
+Only on devices whose touch controller reports more than one finger (the GT911, in the
+X4 Pro and the T5S3; `HalCapabilities::hasMultiTouch()`). The Murphy M3 and the BOOX Picco have none.
 
 | Gesture | Default |
 | --- | --- |
@@ -138,13 +138,14 @@ button, and it works on every screen.
 
 ## 3. Per-board differences
 
-| | X4 Pro | T5S3 |
-| --- | --- | --- |
-| Top edge, swipe down | Reading light | Reading light |
-| Bottom edge, swipe up | Reader bars | Reader bars |
-| Right edge, swipe up/down | Light warmer / cooler | *(free — single-channel light)* |
-| Physical keys | Up, Down, Power | Down, Power |
-| Back / Confirm | Home key: hold / tap | Home key: hold / tap |
+| | X4 Pro | T5S3 | Murphy M3 | BOOX Picco |
+| --- | --- | --- | --- | --- |
+| Top edge, swipe down | Reading light | Reading light | Reading light | Reading light |
+| Bottom edge, swipe up | Reader bars | Reader bars | Reader bars | Reader bars |
+| Right edge, swipe up/down | Light warmer / cooler | *(free — single-channel light)* | *(free — single-channel light)* | Light warmer / cooler |
+| Physical keys | Up, Down, Power | Down, Power | Confirm, Up, Down | Up, Down, Power, slide switch |
+| Back / Confirm | Home key: hold / tap | Home key: hold / tap | Confirm key: press twice / press | Power: press twice / press |
+| Two fingers | Yes | Yes | No | No |
 
 On a touchscreen board **without** a reading light the two vertical edges swap roles:
 the top edge becomes the reader bars (there being no light panel to put there) and the

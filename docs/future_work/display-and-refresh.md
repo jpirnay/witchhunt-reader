@@ -1,6 +1,6 @@
 # Display and refresh
 
-Status: open items as of 2026-10-07. Collected from display-baseline-audit-2026-09-23.md, display-capability-audit-2026-08-17.md, framebuffer-content-audit-2026-09-23.md, x3-sleep-ghosting-hypotheses.md, superpowers/specs/2026-09-23-framebuffer-contract-design.md, busy-indicator-handover-2026-09-21.md, background-rendering.md and grayscale-aa-rendering.md (the audits and handovers were removed in the 2026-10-07 docs cleanup; they are in git history).
+Status: open items as of 2026-10-07; the last three sections (sleep-image upscaling, landscape screenshots, the next SDK resync) added 2026-11-15, from the upstream triage. Collected from display-baseline-audit-2026-09-23.md, display-capability-audit-2026-08-17.md, framebuffer-content-audit-2026-09-23.md, x3-sleep-ghosting-hypotheses.md, superpowers/specs/2026-09-23-framebuffer-contract-design.md, busy-indicator-handover-2026-09-21.md, background-rendering.md and grayscale-aa-rendering.md (the audits and handovers were removed in the 2026-10-07 docs cleanup; they are in git history).
 
 Background for every item: [secondary-buffer-management.md](../secondary-buffer-management.md) (what each
 framebuffer holds, and where each controller keeps its previous frame).
@@ -462,3 +462,34 @@ controller has no temperature ranges to fall back on, and the driver does not re
 
 **Upstream.** The lent block is offered as Free-Ink/freeink-sdk#175, still open, and not in use here: the firmware
 still lends its block from `HalDisplay`. The Murphy's one-pass text is Free-Ink #183, open.
+
+## Custom sleep images are never scaled up (CrossPoint #4185, CrossInk e36b25b1)
+
+**Open.** `GfxRenderer::drawBitmap()` only scales down (`lib/GfxRenderer/GfxRenderer.cpp:2727`, `fitScale < 1.0f`),
+so a custom sleep BMP smaller than the screen is drawn at its own size. 2.52 fixed the placement of one larger on one
+side (`SleepImagePlacement::place`, centred, only the overflow cut); the upscaling in that CrossInk fix was not taken.
+Both upstreams scale through a cached screen-sized BMP (a converter of about 180 lines, a C3 flash cost, no section
+bump). Prefer CrossInk's version if it is ported: a cache key hashed from the whole file (FAT times do not change on a
+board without a clock; one full SD read per sleep), an explicit target size, 1-bit sources kept 1-bit for the B/W
+refresh, and a direct-draw fallback. crosspoint-reader #4185, Justin Mitchell (@itsthisjustin); CrossInk e36b25b1,
+Julia Nguyen (@uxjulia).
+
+## Screenshots in landscape come out sideways (CrossPoint #4457)
+
+**Open.** `ScreenshotUtil::saveFramebufferAsBmp()` always writes the portrait rotation
+(`src/util/ScreenshotUtil.cpp:96-160`), and the "taken" border uses the display's width and height as the logical size,
+so it is wrong in landscape too. Keep a portrait-form writer for the two callers that write sleep BMPs through it
+(`WeatherActivity.cpp:274`, `BmpViewerActivity.cpp:416`). crosspoint-reader #4457 (merged), Uri Tauber (@Uri-Tauber).
+
+## For the next SDK resync
+
+Two open Free-Ink PRs would break this firmware silently if they land as they are:
+
+- **Free-Ink #196** (Murphy M4) inserts `windowRefreshUsesHalfTemp` mid-way into `Ssd1677Config`
+  (`freeink-sdk/libs/display/FreeInkDisplay/src/driver/Ssd1677Driver.h:21`): a positional initialiser of ours that the
+  PR does not edit would shift by one field without an error. It also adds `RtcType::Rx8010`, which our pin already
+  has (Free-Ink #179).
+- **Free-Ink #80** (UC8179/GDEY075T7, reTerminal E1001) makes `PanelDriver::supportsGrayscale()` default to false and
+  gates every gray entry point on it, and `displayGray()`'s default loses its black-and-white fallback.
+
+Check both against our board configs and drivers when a resync brings them.

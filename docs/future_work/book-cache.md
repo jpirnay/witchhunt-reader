@@ -1,8 +1,10 @@
 # Book cache
 
-Status: open items as of 2026-10-21, from the cache-clear work (PR #538). `lib/FsHelpers/BookCache`
-decides what a clear keeps (`BookCache::Keep::ReadingState` keeps `progress.bin`, `bookmarks.bin`,
-`linkstack.bin`, `koreader_syncmethod.txt`); the paths below do not use it yet.
+Status: open items as of 2026-10-21, from the cache-clear work (PR #538); checked again 2026-11-15.
+`lib/FsHelpers/BookCache` decides what a clear keeps (`BookCache::Keep::ReadingState` keeps `progress.bin`,
+`bookmarks.bin`, `linkstack.bin`, `koreader_syncmethod.txt`); the paths below do not use it yet. The file browser,
+the web file manager and WebDAV clear a book's cache through one helper, `clearBookCacheIfNeeded()`
+(`src/BookCacheReset.h`, 2.52).
 
 ## Replacing a book still wipes its reading state
 
@@ -21,13 +23,13 @@ optimised copy of the same book: yes; a different book under the same name: no),
 
 - There is no per-book Delete Book Cache for TXT/MD (the Library offers it for EPUB and XTC only);
   Settings → Clear Reading Cache covers them.
-- Their `txt_`/`md_` folders are left behind when the file browser's Remove or a serial-transfer
-  `rm` deletes the book.
+- A serial-transfer `rm` leaves the book's cache folder behind, for every format
+  (`SerialTransferDevice::removeFile`, `src/SerialTransferDevice.cpp:342-346`, does not call
+  `clearBookCacheIfNeeded()`). A new file at that path then opens at the old position.
 
 ## Inconsistencies
 
-- Web `/delete` and WebDAV DELETE clear the cache even when deleting the book fails.
-- WebDAV COPY over a book leaves the old cache in place.
-- `BookRelocation` and the web/WebDAV TXT clears call `removeDir` directly instead of `BookCache`.
-- `clearBookCachesInDirectory()` in `CrossPointWebServer.cpp` is dead code.
+- `BookRelocation::bookMoved` calls `removeDir` directly instead of `BookCache`
+  (`src/BookRelocation.cpp:52,61`).
+- `clearBookCachesInDirectory()` (`src/network/CrossPointWebServer.cpp:148`) is dead code: only it calls itself.
 - Clear Reading Cache's "N items removed" also counts folders whose reading state was kept.

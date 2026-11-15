@@ -1,6 +1,6 @@
 # CJK support
 
-Status: open items as of 2026-10-29.
+Status: open items as of 2026-10-29; the matcha-reader decisions added 2026-11-15.
 
 Line breaking for Chinese, Japanese and Korean is done, and so is the typography: punctuation widths, flush
 justification and the whole-em grid (A3a), push-in and the CJK–Latin gap (A3b), ruby (B1) and emphasis dots (B2).
@@ -344,6 +344,23 @@ None of these is visible in the test books. Each is a one-line note of the case 
 - `addWord` cases: a single CJK character, an all-punctuation word, and the heap-gate refusal.
 - A Hangul word next to the new quote entries.
 - The `CjkBlockSeams` dl and figure assertions run only when both words share a line.
+
+## Decisions from the matcha-reader triage (2026-11-15)
+
+matcha-reader (MIT; credit Eszter Schuffert) has CJK features we do not. Each needs a decision before any work:
+
+- **Furigana on and off** (named Pinyin/Zhuyin for Chinese), with tighter line spacing when off (matcha #64, #391).
+  Ruby is always drawn here (`lib/Epub/Epub/blocks/TextBlock.cpp:958`), and there is no setting. A layout input, so a
+  section-header field and a `SECTION_FILE_VERSION` bump. Size S-M.
+- **Text settings per script** (matcha #428, #608): separate Latin and CJK profiles. We pick typography by the book's
+  language (`lib/Epub/Epub/TypographyProfile.h`); there are no per-script user settings.
+- **Japanese deinflection from matcha's table** (#5, #6, #691). Ours has none, by decision (see the Deinflection item
+  under [Dictionary on CJK pages](#dictionary-on-cjk-pages): a clean-room table, reviewed by a Japanese reader).
+  matcha's `lib/Dict/Deinflector.cpp` is MIT under its licence but names no source for its rule table, which has the
+  shape of Yomichan-style tables (Yomitan is GPL-3.0). Ask before taking it as the clean-room table.
+- **Manga** (#659, #733 and matcha's converter): `.matcha` volumes, Mokuro import, an offline CBZ/webtoon-to-EPUB
+  converter, panel zoom. We have no comic reader or CBZ; the converter's output, EPUBs of image pages, opens already.
+  [SCOPE.md](../../SCOPE.md) names no comics: a scope question first.
 
 ## Out of scope so far
 

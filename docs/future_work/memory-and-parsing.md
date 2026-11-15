@@ -1,6 +1,6 @@
 # Memory and parsing
 
-Status: open items as of 2026-10-07. Collected from the heap-work handover (2026-08), the memory audit (2026-09) and the earlier memory-allocation-strategy.md (removed or trimmed in the 2026-10-07 docs cleanup; in git history).
+Status: open items as of 2026-10-07; the items from "Throwing allocations" on added 2026-11-15. Collected from the heap-work handover (2026-08), the memory audit (2026-09) and the earlier memory-allocation-strategy.md (removed or trimmed in the 2026-10-07 docs cleanup; in git history).
 
 The rules and measurements these items refer to are in [Memory Allocation Strategy](../memory-allocation-strategy.md).
 
@@ -117,3 +117,72 @@ What changed: a render lends the secondary buffer to the prewarm's TrueType miss
 **Tried.** A heap pool for table line storage was reverted: its reservation pushed contig below the framebuffer ([Memory Allocation Strategy §8.4a](../memory-allocation-strategy.md#84a-table-layout-and-the-ab-harness)). Moving the line bytes into the arena is done.
 
 **Next step.** Placement-construct the objects in the page or row block, with an arena-aware deleter behind `Page::elements` (about 30 call sites). Measure allocation counts and `HeapPeakRegression` on the host first, then a table chapter on the X3 with `SCT_HEAP_TRACE=1`. Budget for the image-header walk: on the X4 a 32 KB walk stage leaves 64 B of the lent region free, so objects of a page that holds a late image could push the walk out of the arena.
+
+## Throwing allocations left on the section-build path
+
+**Open.** 2.52 sent every `Page` allocation through `ensurePage()`, which stops the build like the other heap
+refusals instead of aborting. These still allocate through the throwing `operator new`, so a refusal there aborts and
+reboots (`-fno-exceptions`):
+
+- the parser itself: `st.visitor = std::make_unique<ChapterHtmlSlimParser>(...)` (`lib/Epub/Epub/Section.cpp:1392`);
+- `Page::elements` past its reserve: the parser reserves `Page::TYPICAL_ELEMENTS` (32) through `heapReserveFor`
+  (`ChapterHtmlSlimParser.cpp:1855`, `Page.h:212`), and a denser page grows by `push_back` (`:2338`, `:2596`,
+  `:4154`, `:5671`, `:6346`);
+- the style stack, `std::vector<StyleStackEntry> inlineStyleStack` (`ChapterHtmlSlimParser.h:581`; pushes at
+  `ChapterHtmlSlimParser.cpp:826`, `:3847`, `:4208` and four more);
+- a table's packed rows, `t.packer.rows.push_back` (`:6149`, `:6159`);
+- a row's cells: `pendingRow.cells` (`:3274`, `:6735`) and a laid-out row's `out.cells` (`:6888`, `:6893`);
+- `std::string` growth during the parse, for example the ruby text (`rubyText_`, `:4460-4462`).
+
+**Next step.** Ask `HeapFit` before each growth (`heapReserveFor`, as the elements reserve does) and stop the build on
+a refusal (`stopForHeap`), or move the table to the build's arena or a `ChunkedVector`. Each site needs a host
+fault-injection test, as `PageHeap.*` (`PAGE_FAULT_INJECTION`) does for pages.
+
+## `shrink_to_fit()` sweep
+
+**Open.** `std::vector::shrink_to_fit()` frees nothing under `-fno-exceptions` (libstdc++ compiles its reallocation
+out); the rule is `std::vector<T>().swap(v)`. Fourteen vector calls remain: `SerialTransferDevice.cpp:215`,
+`FileBrowserActivity.cpp:167`, `FileBrowserModel.h:219`, `FileBrowserModel.cpp:242,244,246,545,818,823,905`,
+`BookRowResolver.cpp:163`, `EpubReaderActivity.cpp:998` and `ChapterHtmlSlimParser.cpp:6690`.
+
+A `std::string` differs: with the toolchains' GCC 14.2 libstdc++, `shrink_to_fit()` calls `reserve()`, which moves a
+string of at most 15 characters into its local buffer and frees the heap block; a longer string's shrink is compiled
+out like the vector's. So the calls right after `clear()` do free: `CssParser.cpp:2271` and `:2430`
+(`fontFaces_`), `DictionaryDefinitionActivity.cpp:57,97`, `ChapterHtmlSlimParser.cpp:6984,6986` and
+`ContentOpfParser.cpp:1013`. The two on kept text do nothing past 15 characters: `ChapterHtmlSlimParser.cpp:2288`
+(the external page-break anchor pool) and `XtcParser.cpp:72-73` (title and author).
+
+**Next step.** Replace the vector calls with the swap. Leave the string calls after `clear()`, or write them as a swap
+for one idiom; the two on kept text need `std::string(s).swap(s)` behind a `HeapFit` check, as `:2288` already asks
+for the block. Count the frees on the host before and after.
+
+## CSS in a chapter's `<style>` blocks is never applied (matcha-reader #627)
+
+**Open.** `isNonVisibleTag()` treats `<style>` as invisible (`lib/Epub/Epub/VisibleText.h:33`) and nothing parses
+its rules: only linked stylesheets and `style=""` attributes reach the layout. A book whose only CSS is a `<style>`
+block in each chapter lays out unstyled. matcha copies the block to a temp file (max 16 KB) and loads it like a linked
+sheet. First confirm with such an EPUB. Size M, with a `SECTION_FILE_VERSION` bump.
+
+## Every manifest stylesheet applies to every chapter (matcha-reader #453)
+
+**Open.** `Epub::parseCssFiles()` (`lib/Epub/Epub.cpp:727`) merges every stylesheet in the manifest into one rule set;
+there is no filter by the `<link>`s a chapter has. A `body{text-align:center}` in a sheet that no text chapter links
+(matcha's case: `vertical_image.css`) centres every chapter, horizontal books too. Our `CssParser` is the
+arena-resident compressed design, so this is a re-implementation, not a port: a CSS rule-cache format change (version
+bump) plus a section-cache bump, and a 4 KB head scan per chapter build. matcha-reader #453, Eszter Schuffert
+(eszter007).
+
+## An inline anchor lands a page off (CrossPoint #4328)
+
+**Open.** A block's anchor waits for its first line, but an `id` on an inline element is placed approximately: an
+`<a id>` inside a paragraph is recorded with the next block, a `<span id>` with its block's first line. A link to it
+(a backlink to a noteref) can land a page off; the link Back stack already allows for that
+(`EpubLinkBackStack.h:72-74`). Take the inline-anchor part only: record such an id at the page of its own line. Needs a
+`SECTION_FILE_VERSION` bump. crosspoint-reader #4328, Mikalai Kryvusha (@MikalaiKryvusha).
+
+## JPEG source reads of 512 bytes (matcha-reader #245)
+
+**Open.** TJpgDec reads its input through `tjpgBmpInput` (`lib/JpegToBmpConverter/JpegToBmpConverter.cpp:57-67`), one
+`HalFile` read of `JD_SZBUF` (512 B) per call. matcha measured about 2 ms fixed per read and cut a cold decode by 22 %
+with an 8 KB read-ahead. Profile on the X3 and X4 first (#220 found the same per-call cost on writes). matcha-reader
+#245, Eszter Schuffert (eszter007).

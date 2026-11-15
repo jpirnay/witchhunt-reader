@@ -83,7 +83,6 @@ side column (`BaseTheme.h`, `forPanel`).
 |---|---|---|---|---|
 | S2 | `BaseTheme.cpp:528,566-569` | `- (rowValue ? 60 : 0)`, value untruncated | Classic: row text 97 px at width 202, and a value over 60 px overprints the title. | Local truncate (R1 done) |
 | S3 | `LyraTheme.cpp:50,336` and `LyraCarouselTheme.cpp` `maxValWidth` | `maxListValueWidth = 200` | Larger than the whole row text area (183 at 240). A value over about 170 px drives `rowTextWidth` <= 0, `truncatedText` returns "", and the title disappears. Only `ButtonRemapActivity` and Wi-Fi pass values, and remap's are short, so low exposure today. | Local: `min(200, rect.width/2)` |
-| S3 | `LyraTheme.cpp:798` | `padding = 48`, no truncation | "No open book": en ends at 188, fine. de 270 px runs off. | Truncate (R1 done) |
 
 ## 4. Home
 
@@ -128,13 +127,7 @@ Default menu on Murphy is 5 rows (Library, Stats, File Transfer, Weather, Settin
 | S3 | `SettingsList.h:407` | `screenMargin {5, 40, 5}` (now `screenMarginHorizontal`) | At 40 the column is 160 px: 10 chars at 14 pt. | Murphy: cap at 20 |
 | S3 | `EpubReaderActivity.cpp:6053-6065` | hint box height 44, `hintY2 = +20` | Truncated-section hint fits on Murphy; numbers were tuned for a larger line height. | Accept |
 
-## 8. Weather
-
-| Sev | File:line | Constant / expression | What happens at 416x240 (forced) | Fix |
-|---|---|---|---|---|
-| S2 | `WeatherActivity.cpp:469` | `contentX = metrics.buttonHintsHeight` | Ignores the 8 px hint gap in `getContentRect`; panel touches the strip. | Local |
-
-## 9. Assets, buffers, sizes
+## 8. Assets, buffers, sizes
 
 | Sev | File:line | Constant / expression | What happens | Fix |
 |---|---|---|---|---|
@@ -147,7 +140,7 @@ Two rows are gone since gray landed: the reader's AA planes now reach the panel,
 
 **The lent buffer is no longer Murphy's 12,480 B framebuffer.** Murphy lends a 256 KB PSRAM arena instead since #605, and every S3 board does since #614 (2026-11-05; `HalDisplay.cpp:375`, `404-416`).
 
-## 10. QR constants left outside the two excluded files
+## 9. QR constants left outside the two excluded files
 
 - `QrUtils.cpp:103-104`: scale logic, see section 7.
 - `QrDisplayActivity.cpp:39`: `truncNoticeHeight = 16`, fine.

@@ -160,6 +160,12 @@ callback behaviour, not just the logging.
 - **`rc=-4` is `ERR_TIMEOUT` from `readHeaders()`** — the request was sent and no status line
   arrived within the 5 s budget. The following retry's `tcp+dns=2831 ms` is the textbook
   1 s + 2 s SYN-retransmit shape, i.e. the first SYN went unanswered too.
+- **A bodiless reply ends with its headers.** A 1xx, 204 or 304, and any reply to HEAD, carry no body (RFC 9112
+  §6.3). `SecureHttpClient` read one as a body: with no Content-Length that meant reading until the server closed,
+  which on our kept-alive connection waited out the 15 s timeout and returned `ERR_TIMEOUT`. KOSync servers built on
+  Spring (BookLore, grimmory) answer with exactly that 204, so a sync that worked was reported as a network
+  error. The status now returns at once with an empty body and the connection stays usable; interim 1xx replies are
+  read past to the final one (`hasNoBody()`, `isInterim()` in `SecureHttpClient.cpp`; Free-Ink PRs #65 and #212).
 - **Certificate dates are checked only against an authoritative clock.** A clock inside the roots'
   window (2025-2037) loads the trust store, but that says nothing about a server's own certificate,
   which may be days old. The X4 has no RTC: after a cold boot its clock is the epoch saved in NVS,

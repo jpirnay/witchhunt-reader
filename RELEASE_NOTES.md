@@ -2,6 +2,94 @@
 
 User-facing changes only. Full commit history is in git log.
 
+## 2.52 — 2026-11-15
+
+**A sixth device, reader bars, search, Dark Mode and a new Weather screen.** The Onyx BOOX Picco joins the list, books
+get reader bars with live layout settings and a full-text search, bookmarks stay on their text, and the recent list
+holds 100 books.
+
+Read the upgrade notes at the end of this section before you update.
+
+### New device: Onyx BOOX Picco
+
+- **Witch Reader runs on the BOOX Picco.** Power is Confirm, a double press is Back; the slide switch works the light
+  or Dark Mode.
+- **To install**, hold Power and Up (+) for 10 s, then use the [flasher](https://jpirnay.github.io/witchhunt-reader/).
+  **Back up the whole flash first**: it is the only way back to Onyx's firmware. **Full install** lets Witch Reader
+  update itself; **Update only** keeps Onyx's table, and every later update comes from the flasher again.
+
+### Emergency mode and the flasher
+
+- **An X3 or X4 that kept another firmware's partition table now says it runs in emergency mode**, where some features
+  are slower or missing. Check for updates and SD-card updates keep that table. The interface language and
+  hyphenation now work there too, read from the card.
+- **A Full install with the [flasher](https://jpirnay.github.io/witchhunt-reader/) fixes it.** The SD card keeps
+  everything: books, progress, bookmarks, settings, Wi-Fi networks, fonts.
+- The flasher can back up a device's whole flash and write it back.
+
+### Reading
+
+- **Reader bars:** Confirm or a tap in the middle opens navigation, progress (with KOReader Pull and Push), layout,
+  orientation and the reader menu.
+- **Layout settings re-lay the page under the bars**, for this book only or for all books.
+- **Search the book**, with whole-word matching, from the bars or the reader menu.
+- **Bookmarks stay on their text after a font or layout change.** What the menus called starred pages is now called
+  bookmarks everywhere.
+- A book's own settings no longer vanish after you open ten other books.
+- Chapters build and pages turn faster. Headings are no longer hyphenated.
+- Fix: links to a chapter whose file name occurs in two folders, TrueType italics set as body text, pointed Hebrew and
+  Arabic dictionary lookups.
+- Fix: a chapter with many links could restart the X3; a picture dropped for lack of memory could upset the styles after
+  it.
+
+### Display and sleep
+
+- **Dark Mode** (Settings → Display), with a schedule on boards with a light and a clock, and a moon button in the
+  light drawer.
+- **Weather, redesigned**, and each fetch saved as a picture for the Custom sleep screen.
+- **X4 Pro:** faster page turns with One-Pass Anti-Aliasing. **LilyGo T5 S3:** no trace of the last screen.
+- Fix: Crop sleep images that stayed blank or sat in a corner, the Home cover in Dark Mode, and sleep from a Dark Mode
+  page.
+- Fix: the Murphy's light drawer had no brightness slider; the empty "no open book" card was always in English.
+
+### Library, File Transfer and sync
+
+- **The recent list holds 100 books**, not 10. The Library no longer lists the firmware's own files.
+- Fix: while File Transfer ran, a device on the same network could read the saved Wi-Fi, KOReader sync and OPDS
+  passwords through the card's short folder name. If you used File Transfer on a shared network (hotel, office, café),
+  consider changing those passwords.
+- Fix: read-only books can be removed, and a failed delete keeps the book's position.
+- Fix: a book copied over another with WebDAV, or a TXT deleted and added again, kept the old position.
+- Fix: saved Wi-Fi networks and settings files are no longer cut short when memory is low.
+- Fix: KOReader sync with BookLore or grimmory servers, and on an X4 whose clock is behind (#766).
+- Backing out of joining a network returns to the screen you came from, not Home.
+- Fix: an empty crash report after a restart without a crash.
+
+### Upgrade notes
+
+- **Check for updates on 2.51 installs 2.52.** On 2.38 to 2.50, install once by hand, as under 2.51.
+- **Each book is indexed and laid out once more** on first open. Progress, bookmarks and settings are kept.
+- **Confirm opens the reader bars**, not the menu. For the old way, bind Reader Menu under Controls → Button Actions.
+- **Bookmarks** use a new file format; older files load, and older bookmarks are anchored to their text the first
+  time their chapter is opened.
+- **Delete Book Cache** with Reset now also resets the book's own settings.
+- **Going back to 2.51** empties the recent list, ignores books' own settings and hides bookmarks changed on 2.52.
+- **The web interface installs its pages again** on your first visit; for hotspot mode, have `web-….bin` ready.
+- **Languages:** the new labels exist in every language and arrive with the language-pack update Check for updates
+  offers; until then they show in English.
+- **Which file:** `firmware.bin` (X3, X4) or `firmware-<device>.bin` for the card, `full-install-<device>.bin` at 0x0.
+
+### With thanks to
+
+- **Justin Mitchell** (crosspoint-reader #2705, #3947, #4472; Free-Ink #212, Picco display work #213), **Uri Tauber**
+  (#3947, #4234, #4396), **Julia Nguyen** (#2968, CrossInk cd40105b), **Georg Kaindl** (#4325, #4373, #4471),
+  **Eszter Schuffert** (matcha-reader #315, #508, #783, #802), **kanavnet** (#4442), **Mikalai Kryvusha** (#4329,
+  #4330), **John Stader** (#4263), **Dr. Foulad** (Free-Ink #65), **Arthur Tazhitdinov** (#4216).
+- **thegravityplan3-lab** (#212), **vntraam** (#221), **mirwena** (#750), **AMiniLegend** (#766) and
+  **Plastic-armyman** (#736), for their reports.
+
+Source-level credits remain in the relevant files.
+
 ## 2.51 — 2026-11-11
 
 > **On 2.38 to 2.50, install 2.51 once by hand.** On those versions **Check for updates** finds 2.51 but cannot

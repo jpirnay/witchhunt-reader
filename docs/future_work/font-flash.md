@@ -1,6 +1,6 @@
 # Font flash and glyph-path speed
 
-Status: open items as of 2026-10-19. Collected from the font-flash analysis of 2026-09-19 (removed in the 2026-10-07 docs cleanup; in git history).
+Status: open items as of 2026-10-19; the last two added 2026-11-15, from the upstream triage. Collected from the font-flash analysis of 2026-09-19 (removed in the 2026-10-07 docs cleanup; in git history).
 
 Fonts are the largest part of the firmware image, so they are where flash headroom comes from. Every lever below except the first trades bytes for glyph-path CPU or RAM; measure that trade before changing a format (last item).
 
@@ -79,3 +79,26 @@ Already shipped, so nobody redoes it: the built-in glyph record went from 16 to 
 **Baselines.** X3 only: the 2026-09-19 capture before the repack, and the after-repack numbers in the message of `f66c1a467`. No X4 or S3 numbers.
 
 **Next step.** Before starting any lever here, run `env:bench_font` on the X3 and the X4 at current master and put the numbers in the PR next to the after-change run, together with Home and Settings compose times.
+
+## Glyph advances rounded twice (CrossPoint #4431)
+
+**Open.** The TTF engine rounds a 16.16 advance to 12.4 to the nearest step (`(linear + (1 << 11)) >> 12`,
+`lib/EpdFont/ttf/TtfFace.cpp:322`), and the renderer snaps each advance-plus-kern step to a pixel on its own. An
+advance whose fraction lies in [15/32, 1/2) px therefore steps one pixel too wide every time: about 3 % of glyph and
+size pairs. Ours matches the converter on purpose (`lib/EpdFont/scripts/fontconvert.py:186-188`, the same rounding),
+and the embolden path rounds the same way. Upstream changed only its FreeType runtime path.
+
+**Next step.** Fix both together (truncate; the result stays float-free) and regenerate the built-in fonts, or leave
+both alone. Either way one `SECTION_FILE_VERSION` bump. crosspoint-reader #4431, Georg Kaindl (@gkaindl).
+
+## The C3 sdkconfig trim (CrossPoint #4212): decide
+
+**Open.** Upstream's draft compiles out unused network and crypto features on the C3: about -145 KB of flash (about two
+font-cache MMU pages) and -2.7 KB of static RAM. IPv6, 802.11k/v/r, PPP and NAPT, SoftAP WPA3 and some mbedTLS curves
+go; HTTPS is unaffected (TLS is wolfSSL here), and the WPA3 client stays. Our `[firmware_tuned]` block spells the
+option `custom_sdk_config`, so it is inert, by a recorded decision (`platformio.ini:218-225`; the option pioarduino
+reads is `custom_sdkconfig`).
+
+**Next step.** Decide whether to switch on the from-source C3 sdkconfig (and fix the name): it costs a core rebuild in
+every build and a Wi-Fi, hotspot and TLS pass on a device. crosspoint-reader #4212 (draft), Arthur Tazhitdinov
+(@osteotek).

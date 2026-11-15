@@ -10,13 +10,14 @@ Every supported board logs over the chip's own USB port, not through a separate 
 | ---------------------------- | -------- | ------------------------------------------------------ |
 | Xteink X3, X4                | ESP32-C3 | Built-in USB Serial/JTAG                               |
 | Xteink X4 Pro, LilyGo T5 S3  | ESP32-S3 | Built-in USB Serial/JTAG (native USB CDC on pins 19/20) |
+| Murphy M3, BOOX Picco        | ESP32-S3 | Built-in USB Serial/JTAG                               |
 
 What that means in practice:
 
 * **The baud rate is ignored.** The data travels as USB packets. `115200` is the conventional value to type in; any value works.
 * **No CH340 or CP210x driver is involved.** Windows lists the device as `USB Serial Device` or `USB JTAG/serial debug unit`; Linux as `/dev/ttyACM*`; macOS as `/dev/tty.usbmodem*`. If a port named `CH340` or `CP210x` shows up, it is not this device.
 * **The port disappears and returns when the chip resets.** Re-select it in your terminal after a reboot if the session drops. To catch the boot log, open the port first, then press Reset.
-* **The USB transfer screens keep the log off the port.** On the X3 and X4, **USB Transfer** holds log lines back from the port for the whole session so they cannot corrupt the transfer. The X4 Pro and T5 S3 hand the USB port to **USB Drive** while it runs. Either way, leaving the screen restarts the reader; reopen the port to pick the log up again.
+* **The USB transfer screens keep the log off the port.** On the X3 and X4, **USB Transfer** holds log lines back from the port for the whole session so they cannot corrupt the transfer. The X4 Pro, T5 S3, Murphy M3 and BOOX Picco hand the USB port to **USB Drive** while it runs. Either way, leaving the screen restarts the reader; reopen the port to pick the log up again.
 * **Only builds with serial logging print anything.** The release and development builds do; the `slim` build does not.
 
 Below are step-by-step instructions for Windows, macOS, Linux, and Web Browsers. Choose the method that best matches your setup.

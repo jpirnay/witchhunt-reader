@@ -586,7 +586,10 @@ endpoints and WebDAV. The rules are in
 - A path that names an entry by its 8.3 short alias rather than its real name, such
   as `/CROSSP~1` for `/.crosspoint`, is refused. So is the hashed form the SD library
   gives a name whose `~1` is taken, such as `/CRO~A3F2`. A file whose real name happens
-  to look like an alias stays reachable.
+  to look like an alias stays reachable. The handle an alias opens names itself by the alias, so
+  the guard looks the entry up in a walk of its parent folder, by its directory index, to read its
+  real name; a walk that cannot be done counts as an alias (`spelledByAlias()` in
+  `WebPathGuard.cpp`).
 
 ---
 
