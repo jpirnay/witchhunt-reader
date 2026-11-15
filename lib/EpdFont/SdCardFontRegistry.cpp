@@ -97,9 +97,10 @@ bool SdCardFontRegistry::parseFilename(const char* filename, uint8_t& size, uint
   return true;
 }
 
-// A directory of .ttf and .otf files: each file's style and weight come from its head and OS/2 tables, and the file of
-// each style nearest the regular or bold weight serves it (ttf::assignStyles; without a regular file, its nearest
-// style serves as the regular). Only a directory with a file the engine draws becomes a family.
+// A directory of .ttf and .otf files: each file's style and weight come from its head and OS/2 tables, a style bit
+// they leave out from its name (ttf::fileNameStyle), and the file of each style nearest the regular or bold weight
+// serves it (ttf::assignStyles; without a regular file, its nearest style serves as the regular). Only a directory
+// with a file the engine draws becomes a family.
 void SdCardFontRegistry::addTtfFiles(const char* dirPath, const std::vector<std::string>& names,
                                      const std::vector<uint32_t>& bytes, SdCardFontFamilyInfo& family) const {
   std::vector<size_t> order(names.size());
@@ -113,6 +114,14 @@ void SdCardFontRegistry::addTtfFiles(const char* dirPath, const std::vector<std:
     probes[i] = ttf::probeFile(ttf::fileSource(file, bytes[order[i]]));
     if (probes[i].style < 0) {
       LOG_DBG("SDREG", "Not an outline font the reader draws: %s", path.c_str());
+      continue;
+    }
+    // A style bit the file's tables leave out, its name may give: an Italic that declares itself regular would
+    // otherwise tie with the Regular and, sorting first, serve as the body text's face.
+    const int named = probes[i].style | ttf::fileNameStyle(names[order[i]].c_str());
+    if (named != probes[i].style) {
+      LOG_DBG("SDREG", "Style %d of %s from its name (its tables say %d)", named, path.c_str(), probes[i].style);
+      probes[i].style = named;
     }
   }
   int chosen[4];

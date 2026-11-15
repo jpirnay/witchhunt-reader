@@ -80,7 +80,11 @@ constexpr uint16_t kMaxDirectory = 256;  // real fonts have under 40 tables; thi
 constexpr uint32_t kHeadBytes = 54;
 constexpr uint32_t kHeadMagic = 0x5F0F3CF5;
 constexpr uint32_t kMacStyleOffset = 44;
-constexpr uint32_t kWeightClassOffset = 4;  // OS/2 usWeightClass
+constexpr uint32_t kWeightClassOffset = 4;   // OS/2 usWeightClass
+constexpr uint32_t kFsSelectionOffset = 62;  // OS/2 fsSelection: bit 0 ITALIC, 5 BOLD, 9 OBLIQUE
+constexpr uint16_t kFsSelectionItalic = 1u << 0;
+constexpr uint16_t kFsSelectionBold = 1u << 5;
+constexpr uint16_t kFsSelectionOblique = 1u << 9;
 
 void putLe(uint8_t* out, const uint32_t value, const int bytes) {
   for (int i = 0; i < bytes; ++i) out[i] = static_cast<uint8_t>(value >> (8 * i));
@@ -134,6 +138,73 @@ bool isOutlineFontFileName(const char* name) {
   const char* ext = name + len - 3;
   const int first = ext[0] | 0x20;
   return (first == 't' || first == 'o') && (ext[1] | 0x20) == 't' && (ext[2] | 0x20) == 'f';
+}
+
+namespace {
+
+bool isAsciiUpper(const char c) { return c >= 'A' && c <= 'Z'; }
+bool isAsciiLower(const char c) { return c >= 'a' && c <= 'z'; }
+// A letter or digit of a word in a file name. Bytes of a UTF-8 sequence count as letters without a case.
+bool isNameWordByte(const char c) {
+  return isAsciiUpper(c) || isAsciiLower(c) || (c >= '0' && c <= '9') || static_cast<unsigned char>(c) >= 0x80;
+}
+
+// Whether name[begin, end) ends in `suffix` (lowercase ASCII), in any case.
+bool endsWithNoCase(const char* name, const size_t begin, const size_t end, const char* suffix) {
+  const size_t len = std::strlen(suffix);
+  if (end - begin < len) return false;
+  for (size_t i = 0; i < len; ++i) {
+    if ((name[end - len + i] | 0x20) != suffix[i]) return false;
+  }
+  return true;
+}
+
+}  // namespace
+
+int fileNameStyle(const char* name) {
+  const char* dot = std::strrchr(name, '.');
+  const size_t len = dot ? static_cast<size_t>(dot - name) : std::strlen(name);
+  // The words are cut at every other byte and where a lowercase letter meets an uppercase one ("BoldItalic").
+  const auto wordEnd = [&](size_t at) {
+    while (at < len && isNameWordByte(name[at]) &&
+           !(at > 0 && isAsciiUpper(name[at]) && isAsciiLower(name[at - 1]) && isNameWordByte(name[at - 1]))) {
+      ++at;
+    }
+    return at;
+  };
+  // The family's words are not read: a family named "Kobold" is not bold.
+  size_t at = 0;
+  const char* sep = static_cast<const char*>(std::memchr(name, '-', len));
+  const char* underscore = static_cast<const char*>(std::memchr(name, '_', len));
+  if (underscore && (!sep || underscore < sep)) sep = underscore;
+  if (sep) {
+    at = static_cast<size_t>(sep - name) + 1;
+  } else {
+    while (at < len && !isNameWordByte(name[at])) ++at;
+    if (at < len) at = wordEnd(at + 1);
+  }
+  int style = 0;
+  bool lastWordIt = false;
+  while (at < len) {
+    if (!isNameWordByte(name[at])) {
+      ++at;
+      continue;
+    }
+    const size_t begin = at;
+    size_t end = wordEnd(at + 1);
+    at = end;
+    lastWordIt = end - begin == 2 && endsWithNoCase(name, begin, end, "it");
+    if (endsWithNoCase(name, begin, end, "italic")) {
+      style |= 2;
+      end -= 6;
+    } else if (endsWithNoCase(name, begin, end, "oblique")) {
+      style |= 2;
+      end -= 7;
+    }
+    if (endsWithNoCase(name, begin, end, "bold")) style |= 1;
+  }
+  if (lastWordIt) style |= 2;
+  return style;
 }
 
 namespace {
@@ -418,6 +489,7 @@ FileProbe probeFile(const FileSource& file) {
     uint32_t found = 0;
     uint32_t headOffset = 0;
     uint32_t os2Offset = 0;
+    uint32_t os2Length = 0;
     bool hasOs2Weight = false;
     bool cff2 = false;
     uint16_t sdSeen = 0;
@@ -442,6 +514,7 @@ FileProbe probeFile(const FileSource& file) {
     }
     if (record.tag == tag("OS/2") && inFile(scan.file, record.offset, record.length) && record.length >= 6) {
       scan.os2Offset = record.offset;
+      scan.os2Length = record.length;
       scan.hasOs2Weight = true;
     }
     for (uint32_t k = 0; k < sizeof kRequired / sizeof kRequired[0]; ++k) {
@@ -476,12 +549,20 @@ FileProbe probeFile(const FileSource& file) {
     probe.sdBytes = sdBytes < kSdBytesUnknown ? static_cast<uint32_t>(sdBytes) : UINT32_MAX;
   }
   probe.style = be16(head + kMacStyleOffset) & 3;
-  probe.weight = (probe.style & 1) ? 700 : 400;
-  uint8_t weight[2];
-  if (scan.hasOs2Weight && file.read(file.ctx, scan.os2Offset + kWeightClassOffset, weight, sizeof weight) &&
-      be16(weight) != 0) {
-    probe.weight = be16(weight);
+  // OS/2 from usWeightClass through fsSelection, in one read. A face whose macStyle leaves a bit out may still set it
+  // in fsSelection, as FreeType reads the style when the face has an OS/2 table. A read failing here leaves macStyle's
+  // bits and the default weight.
+  uint8_t os2[kFsSelectionOffset + 2 - kWeightClassOffset];
+  const bool hasSelection = scan.os2Length >= kFsSelectionOffset + 2;
+  const bool os2Read =
+      scan.hasOs2Weight && file.read(file.ctx, scan.os2Offset + kWeightClassOffset, os2, hasSelection ? sizeof os2 : 2);
+  if (os2Read && hasSelection) {
+    const uint16_t bits = be16(os2 + kFsSelectionOffset - kWeightClassOffset);
+    if (bits & (kFsSelectionItalic | kFsSelectionOblique)) probe.style |= 2;
+    if (bits & kFsSelectionBold) probe.style |= 1;
   }
+  probe.weight = (probe.style & 1) ? 700 : 400;
+  if (os2Read && be16(os2) != 0) probe.weight = be16(os2);
   bool parsed = false;
   if (cff) {
     // The rebuilt CFF table's size takes reading the table: the block planned as an install plans it. Without the

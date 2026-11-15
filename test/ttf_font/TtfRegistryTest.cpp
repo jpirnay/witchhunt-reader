@@ -1,6 +1,9 @@
 // How the font registry lists a TrueType family. Directory scanning needs a card; these are the decisions it uses.
 #include <gtest/gtest.h>
+#include <unistd.h>
 
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -102,4 +105,72 @@ TEST(TtfRegistry, AnOtfFileIsListedAndACff2FileIsNot) {
   const ttf::FileProbe cff2[] = {probeOf(bytes)};
   EXPECT_EQ(-1, cff2[0].style);
   EXPECT_FALSE(ttf::assignStyles(cff2, 1, chosen));
+}
+
+// --- A family folder on the card, scanned as discovery scans it ---
+//
+// OpenDyslexic's Italic declares itself regular in head.macStyle and OS/2 fsSelection alike. It tied with the
+// Regular for the regular slot, and sorting first by name it won: every page of the book was set in italic. The
+// name now gives the bit the tables leave out. Ported from crosspoint-reader PR #4325 (Georg Kaindl).
+
+namespace {
+
+namespace fs = std::filesystem;
+
+struct FamilyFolder {
+  fs::path dir;
+  explicit FamilyFolder(const std::string& tag) {
+    dir = fs::temp_directory_path() / ("ttf_registry_" + std::to_string(static_cast<long>(getpid())) + "_" + tag);
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+  }
+  ~FamilyFolder() { fs::remove_all(dir); }
+  void add(const std::string& name, const std::vector<uint8_t>& bytes) const {
+    std::ofstream out(dir / name, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  }
+};
+
+// The file that serves `style`, by name; "" when none does.
+std::string servedBy(const SdCardFontFamilyInfo& family, const uint8_t style) {
+  const SdCardFontFileInfo* file = family.findFile(0, style);
+  return file ? fs::path(file->path).filename().string() : "";
+}
+
+}  // namespace
+
+TEST(TtfRegistry, AnItalicThatDeclaresItselfRegularDoesNotServeTheBodyText) {
+  const FamilyFolder folder("opendyslexic");
+  for (const char* style : {"Regular", "Bold", "Italic", "BoldItalic"}) {
+    const std::string name = std::string("OpenDyslexic-") + style + ".otf";
+    folder.add(name, ttf_test::readFont("OpenDyslexic/" + name));
+  }
+  SdCardFontRegistry registry;
+  SdCardFontFamilyInfo family;
+  ASSERT_TRUE(registry.scanFamily(folder.dir.string().c_str(), family));
+  EXPECT_EQ("OpenDyslexic-Regular.otf", servedBy(family, 0));
+  EXPECT_EQ("OpenDyslexic-Bold.otf", servedBy(family, 1));
+  EXPECT_EQ("OpenDyslexic-Italic.otf", servedBy(family, 2));
+  EXPECT_EQ("OpenDyslexic-BoldItalic.otf", servedBy(family, 3));
+}
+
+TEST(TtfRegistry, AFamilyWithoutStyleBitsOrWeightsIsSortedOutByItsNames) {
+  // Every file says regular at weight 400: only the names tell them apart.
+  ttf_test::Font font;
+  font.os2 = true;
+  font.os2Selection = 0x40;  // REGULAR
+  font.glyphs.resize(1);
+  font.glyphs[0].contours = {ttf_test::rect(0, 0, 64, 64)};
+  const std::vector<uint8_t> bytes = ttf_test::buildFont(font);
+  const FamilyFolder folder("unmarked");
+  for (const char* name : {"Face-Bold.ttf", "Face-BoldItalic.ttf", "Face-Italic.ttf", "Face-Regular.ttf"}) {
+    folder.add(name, bytes);
+  }
+  SdCardFontRegistry registry;
+  SdCardFontFamilyInfo family;
+  ASSERT_TRUE(registry.scanFamily(folder.dir.string().c_str(), family));
+  EXPECT_EQ("Face-Regular.ttf", servedBy(family, 0));
+  EXPECT_EQ("Face-Bold.ttf", servedBy(family, 1));
+  EXPECT_EQ("Face-Italic.ttf", servedBy(family, 2));
+  EXPECT_EQ("Face-BoldItalic.ttf", servedBy(family, 3));
 }

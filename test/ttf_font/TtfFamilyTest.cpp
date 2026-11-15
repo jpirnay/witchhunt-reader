@@ -79,6 +79,67 @@ TEST(TtfFamily, TheStyleIsTheLowTwoBitsOfMacStyle) {
   EXPECT_EQ(3, probe(builtFont(3 | 0x40)));  // other macStyle bits (condensed, ...) do not matter
 }
 
+TEST(TtfFamily, TheStyleTakesFsSelectionsBitsToo) {
+  // A face whose macStyle leaves a bit out may set it in OS/2 fsSelection, as FreeType reads the style.
+  const auto withSelection = [](const uint16_t macStyle, const uint16_t selection, const uint16_t os2Bytes = 78) {
+    Font font;
+    font.macStyle = macStyle;
+    font.os2 = true;
+    font.os2Selection = selection;
+    font.os2Bytes = os2Bytes;
+    font.glyphs.resize(1);
+    font.glyphs[0].contours = {rect(0, 0, 64, 64)};
+    return buildFont(font);
+  };
+  EXPECT_EQ(0, probe(withSelection(0, 0x40)));      // REGULAR
+  EXPECT_EQ(2, probe(withSelection(0, 0x01)));      // ITALIC
+  EXPECT_EQ(2, probe(withSelection(0, 0x200)));     // OBLIQUE
+  EXPECT_EQ(1, probe(withSelection(0, 0x20)));      // BOLD
+  EXPECT_EQ(3, probe(withSelection(1, 0x01)));      // bold in macStyle, italic in fsSelection
+  EXPECT_EQ(2, probe(withSelection(2, 0x40)));      // a bit either sets stands
+  EXPECT_EQ(0, probe(withSelection(0, 0x01, 62)));  // an OS/2 table too short to hold fsSelection
+}
+
+TEST(TtfFamily, TheFileNameGivesTheStyleItsTablesLeaveOut) {
+  struct Case {
+    const char* name;
+    int style;
+  };
+  const Case cases[] = {
+      {"OpenDyslexic-Regular.otf", 0},
+      {"OpenDyslexic-Italic.otf", 2},
+      {"OpenDyslexic-Bold.otf", 1},
+      {"OpenDyslexic-BoldItalic.otf", 3},
+      {"Lato-Bolditalic.ttf", 3},
+      {"Lato-BOLDITALIC.TTF", 3},
+      {"Font_Bold_Italic.ttf", 3},
+      {"Font-ItalicBold.ttf", 3},
+      {"Inter-SemiBold.ttf", 1},
+      {"Inter-Semibold.ttf", 1},
+      {"Inter-ExtraBoldItalic.ttf", 3},
+      {"Inter-LightItalic.ttf", 2},
+      {"Inter-Black.ttf", 0},  // a heavy weight is the weight class's to say
+      {"SourceSerif4Caption-It.ttf", 2},
+      {"SourceSerif4Caption-BoldIt.ttf", 3},
+      {"NotoSans-Italic[wght].ttf", 2},
+      {"Font-Oblique.otf", 2},
+      {"Caecilia LT 76 Bold Italic.ttf", 3},
+      {"MyFontItalic.ttf", 2},
+      {"LatoBold.ttf", 1},
+      // The family's own words are not read.
+      {"Kobold-Regular.ttf", 0},
+      {"Kobold.ttf", 0},
+      {"Boldonse-Regular.ttf", 0},
+      {"Say It Sans-Regular.ttf", 0},
+      {"Say It Sans.ttf", 0},  // "It" only counts as the last word
+      {"Itim-Regular.ttf", 0},
+      {"Font-Roman.ttf", 0},
+      {"0.ttf", 0},  // a book's embedded font, named by its index
+      {"", 0},
+  };
+  for (const Case& c : cases) EXPECT_EQ(c.style, ttf::fileNameStyle(c.name)) << c.name;
+}
+
 TEST(TtfFamily, ACffFontIsAFamilyAndACollectionIsNot) {
   // The style is head.macStyle's; OpenDyslexic's Italic leaves it clear.
   const char* const names[] = {"Regular", "Bold", "Italic", "BoldItalic"};
