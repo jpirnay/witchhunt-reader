@@ -15,9 +15,11 @@
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "BuildArena.h"
@@ -174,6 +176,23 @@ struct StarredPageRelayout : testing::TestWithParam<std::string> {
 
 // Whether `page` of `section` holds the text at `offset`: its start is at or before it, and the next page that starts
 // further on starts after it.
+// A bookmarks.bin as firmware before the anchors wrote it (version 2): spine, page and an empty name each.
+void writeVersion2(const std::string& cacheDir, const std::vector<std::pair<uint16_t, uint16_t>>& bookmarks) {
+  std::string out(1, '\x02');
+  const auto put16 = [&out](const uint16_t v) {
+    out.push_back(static_cast<char>(v & 0xFF));
+    out.push_back(static_cast<char>(v >> 8));
+  };
+  put16(static_cast<uint16_t>(bookmarks.size()));
+  for (const auto& [spine, page] : bookmarks) {
+    put16(spine);
+    put16(page);
+    put16(0);
+  }
+  std::ofstream(cacheDir + "/bookmarks.bin", std::ios::binary)
+      .write(out.data(), static_cast<std::streamsize>(out.size()));
+}
+
 bool pageHolds(const Section& section, const uint16_t page, const uint32_t offset) {
   const auto start = section.getVisibleTextOffsetForPage(page);
   if (!start || *start > offset) return false;
@@ -282,17 +301,84 @@ TEST(StarredPageRelayoutDrift, APageNumberAloneNamesOtherTextAfterARelayout) {
   fs::remove_all(work);
 }
 
-TEST_P(StarredPageRelayout, AStarWithoutAnAnchorKeepsItsPage) {
-  // As older firmware and the TXT reader make them.
+// A bookmark from firmware before the anchors (bookmarks.bin version 2) is anchored the first time its chapter is
+// shown complete: its page taken as counted in that layout, its text named as a new bookmark's is. From then on it
+// follows its text like any other, and a second open parses nothing.
+TEST_P(StarredPageRelayout, AnOlderBookmarkIsAnchoredOnFirstOpenAndThenFollowsItsText) {
+  struct Older {
+    uint16_t spine;
+    uint16_t page;
+    uint32_t offset;
+    bool nameable;
+  };
+  std::vector<Older> older;
+  for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
+    const auto section = build(spine, layoutA());
+    for (int page = 0; page < section->pageCount; ++page) {
+      const auto offset = section->getVisibleTextOffsetForPage(static_cast<uint16_t>(page));
+      if (!offset) continue;
+      const bool nameable = !ChapterXPathIndexer::findXPathForVisibleOffset(epub, spine, *offset).empty();
+      older.push_back({static_cast<uint16_t>(spine), static_cast<uint16_t>(page), *offset, nameable});
+    }
+  }
+  if (older.empty()) GTEST_SKIP() << "no page with text";
+  std::vector<std::pair<uint16_t, uint16_t>> pages;
+  for (const Older& bookmark : older) pages.emplace_back(bookmark.spine, bookmark.page);
+  writeVersion2(epub->getCachePath(), pages);
+
+  // The first open, in layout A: one naming parse a bookmark, nothing else.
+  {
+    BookmarkStore store;
+    store.load(epub->getCachePath());
+    ASSERT_EQ(store.getAll().size(), older.size());
+    for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
+      const auto section = build(spine, layoutA());
+      const auto inSpine = static_cast<int>(std::count_if(
+          older.begin(), older.end(), [spine](const Older& bookmark) { return bookmark.spine == spine; }));
+      int parses = 0;
+      for (StarAnchoring::Work work;
+           (work = StarAnchoring::step(store, epub, section.get(), spine)) != StarAnchoring::Work::None;) {
+        if (work == StarAnchoring::Work::Parsed) ++parses;
+        ASSERT_LE(parses, inSpine) << "spine " << spine;
+      }
+      EXPECT_EQ(parses, inSpine) << "spine " << spine << ": one naming parse a bookmark";
+      for (size_t i = 0; i < older.size(); ++i) {
+        if (older[i].spine != spine) continue;
+        const StarAnchor& anchor = store.getAnchors()[i];
+        EXPECT_EQ(store.getAll()[i].pageNumber, older[i].page);
+        EXPECT_EQ(anchor.layout, section->layoutFingerprint());
+        EXPECT_EQ(StarAnchoring::knownOffset(anchor), older[i].offset);
+        EXPECT_EQ(anchor.xpath.empty(), !older[i].nameable) << "spine " << spine << " page " << older[i].page;
+      }
+    }
+    store.save();
+  }
+  // A second open in layout A: nothing to do.
+  {
+    BookmarkStore store;
+    store.load(epub->getCachePath());
+    for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
+      Section section(epub, spine, renderer);
+      ASSERT_TRUE(section.loadSectionFile(layoutA()));
+      EXPECT_EQ(StarAnchoring::step(store, epub, &section, spine), StarAnchoring::Work::None) << "spine " << spine;
+    }
+  }
+  // Layout B: every bookmark on its text, with no parse.
   BookmarkStore store;
   store.load(epub->getCachePath());
-  ASSERT_TRUE(store.toggle(0, 0));
-  store.save();
-  store.load(epub->getCachePath());
-  const auto section = build(0, layoutB());
-  EXPECT_EQ(StarAnchoring::step(store, epub, section.get(), 0), StarAnchoring::Work::None);
-  EXPECT_EQ(store.getAll()[0].pageNumber, 0);
-  EXPECT_EQ(store.getAnchors()[0].layout, 0u);
+  for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
+    const auto section = build(spine, layoutB());
+    for (StarAnchoring::Work work;
+         (work = StarAnchoring::step(store, epub, section.get(), spine)) != StarAnchoring::Work::None;) {
+      ASSERT_EQ(work, StarAnchoring::Work::Cheap) << "spine " << spine << ": parsed";
+    }
+    for (size_t i = 0; i < older.size(); ++i) {
+      if (older[i].spine != spine) continue;
+      EXPECT_TRUE(pageHolds(*section, store.getAll()[i].pageNumber, older[i].offset))
+          << "spine " << spine << ": the bookmark of page " << older[i].page << " is on page "
+          << store.getAll()[i].pageNumber;
+    }
+  }
 }
 
 // What the first relayout resolved, the session keeps: a second one moves the stars without a parse.
@@ -417,6 +503,85 @@ TEST(StarredPageDuringABuild, GetsItsTextOnceTheBuildIsDone) {
   EXPECT_FALSE(store.getAnchors()[0].xpath.empty());
   EXPECT_EQ(store.getAnchors()[0].pageCount, section.pageCount);
   fs::remove_all(work);
+}
+
+namespace {
+// One book of the corpus opened as the reader opens it, with its cache under a folder of this process's own.
+struct OpenedBook {
+  fs::path work;
+  std::shared_ptr<Epub> epub;
+  explicit OpenedBook(const std::string& name) {
+    work = fs::temp_directory_path() / ("older_bookmark_" + std::to_string(::getpid()) + "_" + name);
+    fs::remove_all(work);
+    fs::create_directories(work);
+    epub = std::make_shared<Epub>(std::string(CORPUS_DIR) + "/" + name, work.string());
+    EXPECT_TRUE(epub->load(true));
+    epub->setupCacheDir();
+  }
+  ~OpenedBook() {
+    epub.reset();
+    fs::remove_all(work);
+  }
+};
+}  // namespace
+
+// A cover has no text to name: the bookmark on it is tried once, on the first open, and goes by its offset from then
+// on. No later open parses it again.
+TEST(OlderBookmark, InAChapterWithNoTextIsTriedOnce) {
+  const OpenedBook book("test_tables.epub");
+  GfxRenderer renderer;
+  constexpr int kCover = 0;
+  Section section(book.epub, kCover, renderer);
+  ASSERT_TRUE(section.createSectionFile(layoutA(), {}, true));
+  ASSERT_TRUE(section.loadSectionFile(layoutA()));
+  const auto offset = section.getVisibleTextOffsetForPage(0);
+  ASSERT_TRUE(offset.has_value());
+  ASSERT_TRUE(ChapterXPathIndexer::findXPathForVisibleOffset(book.epub, kCover, *offset).empty()) << "not a cover";
+  writeVersion2(book.epub->getCachePath(), {{kCover, 0}});
+
+  BookmarkStore store;
+  store.load(book.epub->getCachePath());
+  EXPECT_EQ(StarAnchoring::step(store, book.epub, &section, kCover), StarAnchoring::Work::Cheap);   // anchored
+  EXPECT_EQ(StarAnchoring::step(store, book.epub, &section, kCover), StarAnchoring::Work::Parsed);  // naming tried
+  EXPECT_EQ(StarAnchoring::step(store, book.epub, &section, kCover), StarAnchoring::Work::None);
+  EXPECT_TRUE(store.getAnchors()[0].xpath.empty());
+  EXPECT_NE(store.getAnchors()[0].layout, 0u);
+  store.save();
+
+  BookmarkStore again;
+  again.load(book.epub->getCachePath());
+  EXPECT_FALSE(StarAnchoring::parseOwed(again, &section, kCover));
+  EXPECT_EQ(StarAnchoring::step(again, book.epub, &section, kCover), StarAnchoring::Work::None);
+}
+
+// A page past the chapter's end in the layout it is first shown in is not this layout's page: the bookmark is left as
+// it was, and the first layout that has the page anchors it there.
+TEST(OlderBookmark, PastTheChaptersEndWaitsForALayoutThatHasThePage) {
+  const OpenedBook book("test_wrapped_paragraphs.epub");
+  GfxRenderer renderer;
+  constexpr int kSpine = 1;
+  Section a(book.epub, kSpine, renderer);
+  ASSERT_TRUE(a.createSectionFile(layoutA(), {}, true));
+  ASSERT_TRUE(a.loadSectionFile(layoutA()));
+  Section b(book.epub, kSpine, renderer);
+  ASSERT_TRUE(b.createSectionFile(layoutB(), {}, true));
+  ASSERT_TRUE(b.loadSectionFile(layoutB()));
+  ASSERT_GT(b.pageCount, a.pageCount) << "layout B must lay the chapter out in more pages";
+  const auto page = static_cast<uint16_t>(b.pageCount - 1);
+  writeVersion2(book.epub->getCachePath(), {{kSpine, page}});
+
+  BookmarkStore store;
+  store.load(book.epub->getCachePath());
+  EXPECT_EQ(StarAnchoring::step(store, book.epub, &a, kSpine), StarAnchoring::Work::None);
+  EXPECT_EQ(store.getAll()[0].pageNumber, page);
+  EXPECT_EQ(store.getAnchors()[0].layout, 0u);
+
+  while (StarAnchoring::step(store, book.epub, &b, kSpine) != StarAnchoring::Work::None) {
+  }
+  EXPECT_EQ(store.getAll()[0].pageNumber, page);
+  EXPECT_EQ(store.getAnchors()[0].layout, b.layoutFingerprint());
+  EXPECT_EQ(StarAnchoring::knownOffset(store.getAnchors()[0]), b.getVisibleTextOffsetForPage(page));
+  EXPECT_FALSE(store.getAnchors()[0].xpath.empty());
 }
 
 // Stars made under other layouts can come to rest on one page: unstarring it takes them all.
