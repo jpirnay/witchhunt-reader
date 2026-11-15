@@ -222,7 +222,7 @@ page turns (X3), the Sunlight Fading Fix, and USB Transfer over the serial cable
 
 | Feature | Witch Reader C3 | Witch Reader S3 | CrossPoint C3 | CrossPoint S3 |
 | --- | :---: | :---: | :---: | :---: |
-| Touch screen | ❌ no digitiser | ✅ two fingers on the X4 Pro and T5 S3 | ❌ | ✅ X4 Pro, PaperMono and others |
+| Touch screen | ❌ no digitiser | ✅ two fingers on the X4 Pro, T5 S3 and BOOX Picco | ❌ | ✅ X4 Pro, PaperMono and others |
 | Reading light | ❌ none fitted | ✅ warmth on the X4 Pro | ❌ | ✅ warmth on the X4 Pro |
 | USB Drive | ❌ the C3 has no USB OTG | ✅ | ❌ | ✅ all but the Sticky |
 | USB Transfer over the serial cable | ✅ | ❌ USB Drive instead | ❌ | ❌ |

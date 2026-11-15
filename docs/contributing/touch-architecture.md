@@ -1,14 +1,15 @@
 # Touch Architecture
 
-Two boards have a touch panel: the Xteink X4 Pro and the LilyGo T5S3, both with a GT911
-controller and a capacitive Home key. This page is for contributors changing touch code. What
+Four boards have a touch panel: the Xteink X4 Pro and the LilyGo T5S3 (GT911, with a capacitive
+Home key), the Murphy M3 (CHSC6x, one finger) and the BOOX Picco (TMA525C, as many fingers as its
+GET_SYSINFO reports at boot). This page is for contributors changing touch code. What
 each gesture does for the user is in [Touch Gestures](../touch-gestures.md); board hardware is in
 [Board Support](./board-support.md).
 
 ## Layers
 
 ```
-InputManager (SDK)     GT911 over I2C; classifies tap, swipe, long press, multi-touch
+InputManager (SDK)     GT911, CHSC6x or TMA525C over I2C; classifies tap, swipe, long press, multi-touch
      | normalized 0..1 coordinates, panel-native frame
 HalGPIO                passthrough; latches events across ticks; Home key -> button presses
      | still normalized, still panel-native

@@ -1196,8 +1196,8 @@ single press still puts the device to sleep, so nothing about the button's usual
 on and off.)
 This is the route to reach for in the dark: no overlay can cover a physical button.
 
-Two-finger gestures work on the devices whose touch controller reports more than one finger,
-the X4 Pro and the T5 S3:
+Two-finger gestures work on the devices whose touch controller reports more than one finger:
+the X4 Pro, the T5 S3 and the BOOX Picco.
 
 | Gesture | Default |
 | --- | --- |
@@ -1251,7 +1251,7 @@ Brighter**, **Light Dimmer**, and on a warm/cool device **Light Warmer** and **L
 | Top edge, swipe down | Reading light | Reading light | Reading light | Reading light |
 | Bottom edge, swipe up | Reader bars | Reader bars | Reader bars | Reader bars |
 | Right edge, swipe up/down | Light warmer / cooler | *(free — single-channel light)* | *(free — single-channel light)* | Light warmer / cooler |
-| Two-finger gestures | Yes | Yes | No | No |
+| Two-finger gestures | Yes | Yes | No | Yes |
 
 On a touch device **without** a reading light the two vertical edges swap roles: the top edge
 becomes the reader bars, there being no light panel to put there, and the bottom edge returns

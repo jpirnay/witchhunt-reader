@@ -130,10 +130,28 @@ inline bool panelFadesInSunlight() { return BoardConfig::ACTIVE.panelFadesInSunl
 // consistently with the rest of this header.
 inline bool hasTouch() { return BoardConfig::hasTouch(); }
 
-// The board's touch controller reports more than one contact (GT911), as its profile says.
-// HalGPIO::supportsMultiTouch() answers the same for the controller that answered its probe
-// at this boot.
-inline bool hasMultiTouch() { return BoardConfig::ACTIVE.touch.controller == BoardConfig::TouchController::Gt911; }
+// The board's touch controller can report more than one contact, as its profile says: the
+// controllers InputManager::supportsMultiTouch() can say yes for. HalGPIO::supportsMultiTouch()
+// is the answer for this boot (the TMA525C's own GET_SYSINFO gives its finger limit), and this
+// must stay a superset of it. boardKeeps() persists the two-finger gesture rows by this answer,
+// so a controller missing here gets rows the settings screen offers and settings.json neither
+// saves nor loads: the Picco's TMA525C, from the SDK's multi-touch support (Free-Ink 2264d13)
+// until it was named here.
+inline bool hasMultiTouch() {
+  switch (BoardConfig::ACTIVE.touch.controller) {
+    case BoardConfig::TouchController::Gt911:
+    case BoardConfig::TouchController::Gslx680:
+    case BoardConfig::TouchController::Tma525c:
+      return true;
+    case BoardConfig::TouchController::None:
+    case BoardConfig::TouchController::Chsc6x:
+    case BoardConfig::TouchController::Ft5x06:
+    case BoardConfig::TouchController::Ft6336u:
+    case BoardConfig::TouchController::Cst816s:
+      return false;
+  }
+  return false;
+}
 
 // The touch controller reports a capacitive Home key (X4 Pro). On that board it
 // is the only "back" the hardware has — there is no back button.
