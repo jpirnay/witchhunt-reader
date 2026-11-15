@@ -18,7 +18,8 @@ struct StarAnchor {
   static constexpr uint32_t kNoOffset = UINT32_MAX;
 
   // Section::layoutFingerprint() of the layout pageNumber was counted in, and that layout's page count for the
-  // chapter. 0: not known (a TXT page, a star from older firmware); such a star keeps its page.
+  // chapter. 0: not known: a TXT page, which keeps its page, or a bookmark from older firmware, whose page is taken as
+  // counted in the layout its chapter is first shown complete in (StarAnchoring::settleKnown).
   uint32_t layout = 0;
   uint16_t pageCount = 0;
   // ChapterXPathIndexer's name for the text the page starts with, the one a KOReader push sends: what the text is,
@@ -31,9 +32,9 @@ struct StarAnchor {
   uint32_t offset = kNoOffset;
   uint8_t offsetFormat = 0;
 
-  // This session only, never saved. A star made this session, whose text is still to be named: tried once, whatever
-  // comes of it. A chapter with no text (a cover) has nothing to name, and its star goes by the offset alone; asking
-  // again at every open would parse it every time.
+  // This session only, never saved. A bookmark made or anchored this session, whose text is still to be named: tried
+  // once, whatever comes of it. A chapter with no text (a cover) has nothing to name, and its star goes by the offset
+  // alone; asking again at every open would parse it every time.
   bool nameOwed = false;
   // A mapping failed (no text at the offset, a parse the heap refused, no offset
   // table): nothing more is tried for this star until the book opens again, so idle time does not parse the chapter on

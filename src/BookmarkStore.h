@@ -206,6 +206,9 @@ class BookmarkStore {
     dirty = true;
   }
   // Session-only state (StarAnchor): nothing to save.
+  void noteNameOwed(size_t index) {
+    if (index < anchors.size()) anchors[index].nameOwed = true;
+  }
   void noteNameTried(size_t index) {
     if (index < anchors.size()) anchors[index].nameOwed = false;
   }

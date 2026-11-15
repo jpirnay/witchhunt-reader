@@ -36,9 +36,10 @@ enum class Work : uint8_t {
   Parsed,  // one chapter parsed; more may be owed, for a later call
 };
 
-// The part that parses nothing: `section`'s spine's stars counted in another layout whose text offset this session
-// knows (or, for a star made while that layout was being built, the table gives) move onto the page holding it. True
-// when anything changed. `section` must be complete: loaded, or built to the end.
+// The part that parses nothing: `section`'s spine's stars counted in another layout whose text offset is known (or,
+// for a star made while that layout was being built, the table gives) move onto the page holding it, and bookmarks
+// from older firmware are anchored where they are, their text to be named. True when anything changed. `section` must
+// be complete: loaded, or built to the end.
 bool settleKnown(BookmarkStore& store, const Section& section, int spineIndex);
 
 // Whether parseNext() has a chapter to parse: a star of `spineIndex` counted in another layout than `section` (when

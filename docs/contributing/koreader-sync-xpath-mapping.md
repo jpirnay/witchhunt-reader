@@ -225,7 +225,9 @@ mappers. When a page is starred, its content offset names its first text the way
 (`Section::layoutFingerprint()`). A chapter shown in another layout resolves the XPath the way a pull does
 (`findProgressForXPath`, a text point or an exact match only) and the star moves to the page holding that offset. Both
 directions take an optional lent region, so the reader runs them in its secondary framebuffer instead of the heap. A
-chapter with no text has no XPath to name, and its stars keep their page.
+chapter with no text has no XPath to name, and its bookmarks go by their offset. A bookmark from firmware before the
+anchors is anchored the first time its chapter is shown complete: its page is taken as counted in that layout, and its
+text is named from there.
 
 ## Known Limitations
 
