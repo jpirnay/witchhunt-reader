@@ -78,7 +78,8 @@ once the lane has nothing left to decode (`LaneBeforeBuild.h`, see the image lan
 that text's visible-text offset with the section format it was counted under, and the layout its page number was
 counted in. Once the chapter on screen is complete, its stars counted in another layout move onto the page holding
 their text: by the offset, with no parse, while the format stands; else by resolving the XPath, which counts the
-offset again. A new star's text gets its XPath once, in the session it is made. A parse is one pass over the chapter by
+offset again. A new bookmark's text gets its XPath once, in the session it is made; so does an older bookmark's (one from firmware
+before the anchors), the first time its chapter is shown complete, its page taken as counted in that layout. A parse is one pass over the chapter by
 the KOReader sync's mappers, which cannot be aborted: the step waits for what the glyph-store step waits for (the
 look-ahead gates and `BG_BUILD_BORROW_QUIET_MS` since the last page landed) and for no gesture in flight, parses at
 most once a tick, and does it in the lent secondary framebuffer, never on the heap. A star-marker change found while
