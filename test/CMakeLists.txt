@@ -324,6 +324,7 @@ add_subdirectory(i18n_lang_pack)  # likewise
 add_subdirectory(flash_area)
 add_subdirectory(flash_area_region)
 add_subdirectory(flash_area_select)
+add_subdirectory(flash_layout_notice)
 add_subdirectory(glyph_store)
 add_subdirectory(ttf_rasterizer)
 add_subdirectory(ttf_font)

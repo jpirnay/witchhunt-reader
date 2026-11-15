@@ -30,6 +30,7 @@ TEST(FlashAreaSelect, WithoutTheImageInTheBuildAndWithoutAPartitionThereIsNone) 
   EXPECT_EQ(nullptr, FlashArea::get());
   EXPECT_EQ(Backend::None, FlashArea::backend());
   EXPECT_EQ(0u, FlashArea::partitionBytes());
+  EXPECT_FALSE(FlashArea::asExpected()) << "emergency mode";
 }
 #elif FLASH_AREA_SCENARIO == 1
 TEST(FlashAreaSelect, APartitionComesFirstAndTakesNoPsram) {
@@ -38,6 +39,7 @@ TEST(FlashAreaSelect, APartitionComesFirstAndTakesNoPsram) {
   ASSERT_NE(nullptr, area);
   EXPECT_EQ(Backend::Partition, FlashArea::backend());
   EXPECT_EQ(kPartitionBytes, FlashArea::partitionBytes());
+  EXPECT_TRUE(FlashArea::asExpected());
   EXPECT_EQ(32u, area->freeMapPages()) << "the partition, through the MMU";
   EXPECT_EQ(kPartitionBytes, area->size());
   EXPECT_EQ(area, FlashArea::get()) << "picked once";
@@ -53,6 +55,7 @@ TEST(FlashAreaSelect, WithoutAPartitionThePsramImage) {
   NorFlash* const area = FlashArea::get();
   ASSERT_NE(nullptr, area);
   EXPECT_EQ(Backend::PsramImage, FlashArea::backend());
+  EXPECT_TRUE(FlashArea::asExpected()) << "the image stands in for the partition in full";
   EXPECT_EQ(kPartitionBytes, area->size()) << "the partition's size: every layout constant holds";
   EXPECT_EQ(kImagePages, area->freeMapPages()) << "the image: a mapping costs no MMU page";
   EXPECT_EQ(1, g_psramAllocs);
@@ -66,6 +69,7 @@ TEST(FlashAreaSelect, WithoutAPartitionOrPsramThereIsNone) {
   g_hostHasPsram = false;
   EXPECT_EQ(nullptr, FlashArea::get());
   EXPECT_EQ(Backend::None, FlashArea::backend());
+  EXPECT_FALSE(FlashArea::asExpected());
 }
 #elif FLASH_AREA_SCENARIO == 4
 TEST(FlashAreaSelect, ATestBuildTakesThePsramImageOverThePartition) {
@@ -75,6 +79,7 @@ TEST(FlashAreaSelect, ATestBuildTakesThePsramImageOverThePartition) {
   EXPECT_EQ(Backend::PsramImage, FlashArea::backend());
   EXPECT_EQ(kImagePages, area->freeMapPages());
   EXPECT_EQ(kPartitionBytes, FlashArea::partitionBytes()) << "what the table holds, though not used";
+  EXPECT_TRUE(FlashArea::asExpected());
 }
 #elif FLASH_AREA_SCENARIO == 5
 TEST(FlashAreaSelect, APartitionTooSmallForTheLanguageSlotGivesWayToThePsramImage) {
@@ -83,6 +88,7 @@ TEST(FlashAreaSelect, APartitionTooSmallForTheLanguageSlotGivesWayToThePsramImag
   ASSERT_NE(nullptr, area);
   EXPECT_EQ(Backend::PsramImage, FlashArea::backend());
   EXPECT_EQ(kX4ProFactoryBytes, FlashArea::partitionBytes()) << "System Information names it";
+  EXPECT_TRUE(FlashArea::asExpected()) << "the S3 boards' planned stand-in: no emergency";
   EXPECT_EQ(kPartitionBytes, area->size());
   EXPECT_EQ(0, fake_flash::chip().erases + fake_flash::chip().writes) << "the small partition is left alone";
 }
@@ -92,6 +98,7 @@ TEST(FlashAreaSelect, APartitionTooSmallForTheLanguageSlotIsNoneWithoutTheImage)
   EXPECT_EQ(nullptr, FlashArea::get());
   EXPECT_EQ(Backend::None, FlashArea::backend());
   EXPECT_EQ(FlashFontPartition::LANG_RESERVED_BYTES, FlashArea::partitionBytes());
+  EXPECT_FALSE(FlashArea::asExpected());
   // The language slot then says why it has nothing to hand out.
   struct Never {
     static bool produce(void*, FlashLangPartition::StringsWriter&) { return false; }
@@ -110,6 +117,7 @@ TEST(FlashAreaSelect, AnyPartitionLargerThanTheLanguageSlotIsTheArea) {
   ASSERT_NE(nullptr, area);
   EXPECT_EQ(Backend::Partition, FlashArea::backend());
   EXPECT_EQ(1024u * 1024u, area->size());
+  EXPECT_FALSE(FlashArea::asExpected()) << "smaller than our table's: emergency mode, the notice says so";
 }
 #elif FLASH_AREA_SCENARIO == 9
 TEST(FlashAreaSelect, ABoardWithPsramTakesTheImageWhenItsTableHasNoPartition) {
@@ -119,6 +127,7 @@ TEST(FlashAreaSelect, ABoardWithPsramTakesTheImageWhenItsTableHasNoPartition) {
   ASSERT_NE(nullptr, area);
   EXPECT_EQ(Backend::PsramImage, FlashArea::backend());
   EXPECT_EQ(kPartitionBytes, area->size());
+  EXPECT_TRUE(FlashArea::asExpected());
 }
 #elif FLASH_AREA_SCENARIO == 10
 TEST(FlashAreaSelect, ABoardWithPsramAndThePartitionKeepsThePartition) {
@@ -126,6 +135,7 @@ TEST(FlashAreaSelect, ABoardWithPsramAndThePartitionKeepsThePartition) {
   ASSERT_NE(nullptr, FlashArea::get());
   EXPECT_EQ(Backend::Partition, FlashArea::backend());
   EXPECT_EQ(0, g_psramAllocs);
+  EXPECT_TRUE(FlashArea::asExpected());
 }
 #elif FLASH_AREA_SCENARIO == 11
 TEST(FlashAreaSelect, ABoardWithPsramLeavesAPartitionSmallerThanTheAreaAlone) {
@@ -136,6 +146,7 @@ TEST(FlashAreaSelect, ABoardWithPsramLeavesAPartitionSmallerThanTheAreaAlone) {
   EXPECT_EQ(Backend::PsramImage, FlashArea::backend());
   EXPECT_EQ(kPartitionBytes, area->size()) << "the whole area, not what fits beside the language slot";
   EXPECT_EQ(kPiccoStockBytes, FlashArea::partitionBytes()) << "System Information names it";
+  EXPECT_TRUE(FlashArea::asExpected());
   ASSERT_TRUE(area->erase(0, NorFlash::kSectorBytes));
   EXPECT_EQ(0, fake_flash::chip().erases + fake_flash::chip().writes) << "the stock firmware's data stays";
 }
@@ -147,5 +158,33 @@ TEST(FlashAreaSelect, APartitionSmallerThanTheAreaIsUsedWhenNoImageFits) {
   ASSERT_NE(nullptr, area);
   EXPECT_EQ(Backend::Partition, FlashArea::backend());
   EXPECT_EQ(kPiccoStockBytes, area->size());
+  EXPECT_FALSE(FlashArea::asExpected());
+}
+#elif FLASH_AREA_SCENARIO == 13
+TEST(FlashAreaSelect, ATestBuildTakesThePartitionAway) {
+  // FLASH_AREA_TEST_PARTITION_KB=0 on a board with our table: emergency mode, and the partition is not touched.
+  fake_flash::reset(kPartitionBytes);
+  EXPECT_EQ(nullptr, FlashArea::get());
+  EXPECT_EQ(Backend::None, FlashArea::backend());
+  EXPECT_EQ(0u, FlashArea::partitionBytes());
+  EXPECT_FALSE(FlashArea::asExpected());
+  EXPECT_EQ(0, fake_flash::chip().erases + fake_flash::chip().writes);
+}
+#elif FLASH_AREA_SCENARIO == 14
+TEST(FlashAreaSelect, ATestBuildSeesAWindowOfThePartition) {
+  // FLASH_AREA_TEST_PARTITION_KB=1024: the stock X3 layout's size, as the first 1 MB of our partition.
+  fake_flash::reset(kPartitionBytes);
+  NorFlash* const area = FlashArea::get();
+  ASSERT_NE(nullptr, area);
+  EXPECT_EQ(Backend::Partition, FlashArea::backend());
+  EXPECT_EQ(1024u * 1024u, area->size());
+  EXPECT_EQ(1024u * 1024u, FlashArea::partitionBytes());
+  EXPECT_FALSE(FlashArea::asExpected());
+  EXPECT_EQ(1, fake_flash::chip().erases) << "the font area's header sector, so no index outlives the window";
+  uint8_t byte = 0;
+  EXPECT_TRUE(area->read(area->size() - 1, &byte, 1));
+  EXPECT_FALSE(area->read(area->size(), &byte, 1)) << "nothing past the window";
+  EXPECT_FALSE(area->erase(area->size(), NorFlash::kSectorBytes));
+  EXPECT_EQ(nullptr, area->map(area->size() - 1, 2));
 }
 #endif

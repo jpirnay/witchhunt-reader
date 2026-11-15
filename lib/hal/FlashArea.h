@@ -20,8 +20,17 @@ enum class Backend : uint8_t {
 /// The board's area, chosen at the first call and kept for the run; nullptr when the board has none.
 NorFlash* get();
 
+/// The `spiffs` partition our partition table (partitions.csv) has: the area every layout constant was made for.
+constexpr uint32_t kExpectedBytes = 0x360000;
+
 /// Which backend get() chose (choosing it, at the first call).
 Backend backend();
+
+/// False when the firmware runs in emergency mode: the board was left with another firmware's partition table, whose
+/// `spiffs` partition is missing or smaller than kExpectedBytes, and it has no PSRAM image to stand in for it (the
+/// S3 boards' planned replacement, which is as good). The caches then shrink or move to the card (backend (c) in
+/// docs/design/flash-area.md). A full install, which writes our table, ends it. Chooses the area at the first call.
+bool asExpected();
 
 /// The size of the partition table's `spiffs` partition, whether or not it is the area (one no larger than the
 /// language slot is not); 0 when the table has none. Chooses the area at the first call.

@@ -39,7 +39,48 @@ namespace FlashArea {
 
 namespace {
 
+#ifdef FLASH_AREA_TEST_PARTITION_KB
+// A test build that makes the `spiffs` partition look like another firmware's: FLASH_AREA_TEST_PARTITION_KB KB, a
+// multiple of 64 (0: none). A board flashed with our table then runs in emergency mode, the notice and the fallbacks
+// included, with nothing outside the window written. The window is the partition's first that many KB. The test
+// build erases its first sector (the .cpfont index or the glyph store's header) at every boot, so neither build later
+// trusts an index whose data the other one wrote over; the language slot and the hyphenation store check their own
+// bytes. So the font cache and a TTF family's store are rebuilt after each boot of such a build.
+static_assert(FLASH_AREA_TEST_PARTITION_KB % 64 == 0, "the window ends on a mapping page");
+class TestWindow final : public NorFlash {
+ public:
+  void begin(NorFlash* inner, const uint32_t bytes) {
+    inner_ = inner;
+    size_ = bytes;
+  }
+  uint32_t size() const override { return size_; }
+  bool read(const uint32_t offset, void* dst, const uint32_t len) const override {
+    return inRange(offset, len) && inner_->read(offset, dst, len);
+  }
+  bool program(const uint32_t offset, const void* src, const uint32_t len) override {
+    return inRange(offset, len) && inner_->program(offset, src, len);
+  }
+  bool erase(const uint32_t offset, const uint32_t len) override {
+    return inRange(offset, len) && inner_->erase(offset, len);
+  }
+  const uint8_t* map(const uint32_t offset, const uint32_t len) override {
+    return inRange(offset, len) ? inner_->map(offset, len) : nullptr;
+  }
+  void unmap(const uint8_t* mapped) override { inner_->unmap(mapped); }
+  uint32_t freeMapPages() const override { return inner_->freeMapPages(); }
+  bool sync() override { return inner_->sync(); }
+
+ private:
+  bool inRange(const uint32_t offset, const uint32_t len) const { return offset <= size_ && len <= size_ - offset; }
+
+  NorFlash* inner_ = nullptr;
+  uint32_t size_ = 0;
+};
+TestWindow testWindow;
+#endif
+
 EspPartitionFlash partitionArea;
+NorFlash* partition = &partitionArea;  // the partition as the area: in a test build, a window over it
 NorFlash* chosen = nullptr;
 Backend chosenBackend = Backend::None;
 uint32_t foundPartitionBytes = 0;
@@ -57,9 +98,23 @@ bool partitionUsable() {
     return false;
   }
   foundPartitionBytes = partitionArea.size();
-  if (partitionArea.size() <= FlashFontPartition::LANG_RESERVED_BYTES) {
+#ifdef FLASH_AREA_TEST_PARTITION_KB
+  constexpr uint32_t kTestBytes = FLASH_AREA_TEST_PARTITION_KB * 1024u;
+  if (kTestBytes < foundPartitionBytes) {
+    LOG_ERR("FLA", "a test build (FLASH_AREA_TEST_PARTITION_KB): the `spiffs` partition reads as %u KB",
+            static_cast<unsigned>(kTestBytes / 1024));
+    foundPartitionBytes = kTestBytes;
+    if (kTestBytes == 0) return false;
+    if (kTestBytes > FlashFontPartition::LANG_RESERVED_BYTES) {
+      partitionArea.erase(0, 4096);  // see TestWindow
+      testWindow.begin(&partitionArea, kTestBytes);
+      partition = &testWindow;
+    }
+  }
+#endif
+  if (foundPartitionBytes <= FlashFontPartition::LANG_RESERVED_BYTES) {
     LOG_ERR("FLA", "the `spiffs` partition is %u KB: too small for the flash area (more than %u KB)",
-            static_cast<unsigned>(partitionArea.size() / 1024),
+            static_cast<unsigned>(foundPartitionBytes / 1024),
             static_cast<unsigned>(FlashFontPartition::LANG_RESERVED_BYTES / 1024));
     return false;
   }
@@ -118,7 +173,7 @@ NorFlash* pick() {
 #endif
   if (usable) {
     chosenBackend = Backend::Partition;
-    return &partitionArea;
+    return partition;
   }
 #if FLASH_AREA_PSRAM_IMAGE == 1
   if (NorFlash* const image = psramImage()) {
@@ -151,6 +206,18 @@ Backend backend() {
 uint32_t partitionBytes() {
   get();
   return foundPartitionBytes;
+}
+
+bool asExpected() {
+  switch (backend()) {
+    case Backend::Partition:
+      return foundPartitionBytes >= kExpectedBytes;
+    case Backend::PsramImage:
+      return true;
+    case Backend::None:
+      break;
+  }
+  return false;
 }
 
 bool sync() {
