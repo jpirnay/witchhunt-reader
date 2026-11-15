@@ -32,6 +32,7 @@
 #include "../util/BmpViewerActivity.h"
 #include "../util/ConfirmationActivity.h"
 #include "../util/KeyboardEntryActivity.h"
+#include "BookCacheReset.h"
 #include "BookDetails.h"
 #include "BookInfoActivity.h"
 #include "BookRelocation.h"
@@ -591,16 +592,6 @@ bool FileBrowserActivity::handleCoverTouch() {
   return true;
 }
 
-void FileBrowserActivity::clearFileMetadata(const std::string& fullPath, const BookCache::Keep keep) {
-  if (FsHelpers::hasEpubExtension(fullPath)) {
-    Epub(fullPath, "/.crosspoint").clearCache(keep);
-    LOG_DBG("FileBrowser", "Cleared metadata cache for: %s", fullPath.c_str());
-  } else if (FsHelpers::hasXtcExtension(fullPath)) {
-    Xtc(fullPath, "/.crosspoint").clearCache(keep);
-    LOG_DBG("FileBrowser", "Cleared metadata cache for: %s", fullPath.c_str());
-  }
-}
-
 // Iterative post-order traversal: clear book caches then delete files/dirs.
 // Adapted from upstream PR #1892 (WuTofu) to handle our EPUB+XTC cache clearing.
 bool FileBrowserActivity::removeDirRecursive(const std::string& fullPath) {
@@ -612,7 +603,7 @@ bool FileBrowserActivity::removeDirRecursive(const std::string& fullPath) {
   if (!file.isDirectory()) {
     file.close();
     if (!Storage.remove(fullPath.c_str())) return false;
-    clearFileMetadata(fullPath);
+    clearBookCacheIfNeeded(fullPath);
     return true;
   }
   file.close();
@@ -666,7 +657,7 @@ bool FileBrowserActivity::removeDirRecursive(const std::string& fullPath) {
           dir.close();
           return false;
         }
-        clearFileMetadata(entryPath);
+        clearBookCacheIfNeeded(entryPath);
       }
     }
     dir.close();
@@ -1788,7 +1779,7 @@ void FileBrowserActivity::doDeleteCache(const std::string& fullPath, const std::
   startActivityForResult(std::move(confirmation), [this, fullPath](const ActivityResult& res) {
     if (!res.isCancelled) {
       const BookCache::Keep keep = ClearCacheActivity::keepFor(res);
-      clearFileMetadata(fullPath, keep);
+      clearBookCacheIfNeeded(fullPath, keep);
       // The bookmarks went with the cache: the Bookmarks list forgets them now, not at its next open.
       if (keep == BookCache::Keep::Nothing) GLOBAL_BOOKMARKS.removeBySourcePath(fullPath);
       bookRows.clear();  // its cover went with the cache, and its progress unless it was kept
@@ -1818,7 +1809,7 @@ void FileBrowserActivity::doRemove(const std::string& fullPath, const std::strin
                                // only once the book has.
                                deleted = Storage.remove(fullPath.c_str());
                                if (deleted) {
-                                 clearFileMetadata(fullPath);
+                                 clearBookCacheIfNeeded(fullPath);
                                  if (withSidecars && !SidecarFiles::removeAll(fullPath)) {
                                    LOG_ERR("FBR", "Deleted %s but not all of its sidecars", fullPath.c_str());
                                  }
