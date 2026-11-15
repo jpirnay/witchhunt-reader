@@ -13,7 +13,9 @@
 //     Onyx's slot (table kept, no self-update);
 //   * a firmware image alone goes into the device's own ota_0 slot with its otadata: 0x10000 and
 //     0xE000 on ours, 0xE0000 and 0x15000 on Onyx's, nowhere on any other table; image first, and on
-//     Onyx's table with otadata byte for byte Arduino-ESP32's boot_app0.bin.
+//     Onyx's table with otadata byte for byte Arduino-ESP32's boot_app0.bin;
+//   * the backup reads the whole flash in pieces, each checked against the chip's MD5: a bad or failed
+//     piece is read again, one that stays bad fails the backup instead of reaching the file.
 //
 //   node test/web/flasher_lib_test.mjs [deps dir]
 // (CI passes the folder with the web tests' libraries; this test needs none.) Exit status 0: every
@@ -201,6 +203,63 @@ check(!oursPlan.error && oursPlan.files[0].address === 0x10000 && oursPlan.files
   'our table: the image at 0x10000 first, then otadata at 0xE000');
 check(!!lib.appWritePlan(oursTarget, new Uint8Array(0x640001), otadata).error,
   'an image larger than the slot is refused');
+
+// ---- Backup -------------------------------------------------------------------------------------
+
+check(lib.flashSizeBytes('16MB') === 16 * 1024 * 1024 && lib.flashSizeBytes('4MB') === 4 * 1024 * 1024 &&
+  lib.flashSizeBytes('512KB') === 512 * 1024 && lib.flashSizeBytes(null) === null && lib.flashSizeBytes('16') === null,
+  'flashSizeBytes reads esptool-js size names');
+check(lib.backupFileName('picco', '9C:96:D5:E1:D8:2C', new Date(2026, 10, 5)) ===
+  'picco-flash-9c96d5e1d82c-2026-11-05.bin', 'backupFileName: board, MAC, date');
+
+// A fake chip: `flash` bytes, a read that can be spoiled per call, and its MD5 of a range.
+function fakeChip(size, spoil = () => null) {
+  const flash = new Uint8Array(size);
+  for (let i = 0; i < size; i++) flash[i] = (i * 31 + (i >> 9)) & 0xff;
+  const calls = [];
+  return {
+    flash,
+    calls,
+    read: async (addr, len) => {
+      calls.push(addr);
+      const data = flash.slice(addr, addr + len);
+      const how = spoil(addr, calls.filter((a) => a === addr).length);
+      if (how === 'throw') throw new Error('No serial data received.');
+      if (how === 'flip') data[7] ^= 0x40;
+      if (how === 'short') return data.subarray(0, len - 1);
+      return data;
+    },
+    chipMd5: async (addr, len) => lib.md5Hex(flash.subarray(addr, addr + len)).toUpperCase(),
+  };
+}
+const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+const SIZE = 5 * 4096 + 100; // not a whole number of pieces
+{
+  const chip = fakeChip(SIZE);
+  const done = [];
+  const image = await lib.readWholeFlash({ ...chip, size: SIZE, chunk: 4096, onProgress: (d) => done.push(d) });
+  check(same(image, chip.flash) && chip.calls.length === 6 && done.at(-1) === SIZE,
+    'backup: six pieces, the last one short, the image equals the flash');
+}
+{
+  const retries = [];
+  const spoil = (addr, n) => (addr === 4096 && n === 1 ? 'flip' : addr === 8192 && n < 3 ? 'throw' : null);
+  const chip = fakeChip(SIZE, spoil);
+  const image = await lib.readWholeFlash({ ...chip, size: SIZE, chunk: 4096, onRetry: (a) => retries.push(a) });
+  check(same(image, chip.flash) && retries.join() === '4096,8192,8192',
+    'backup: a flipped bit and two failed reads are read again; the image equals the flash');
+}
+for (const how of ['flip', 'short', 'throw']) {
+  const chip = fakeChip(SIZE, (addr) => (addr === 12288 ? how : null));
+  let error = null;
+  try {
+    await lib.readWholeFlash({ ...chip, size: SIZE, chunk: 4096 });
+  } catch (e) {
+    error = e;
+  }
+  check(error && /0x3000/.test(error.message) && chip.calls.filter((a) => a === 12288).length === 3,
+    `backup: a piece that stays bad (${how}) is tried three times, then the backup fails at its address`);
+}
 
 if (failures) {
   console.error(`${failures} check(s) failed`);

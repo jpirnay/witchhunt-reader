@@ -35,7 +35,10 @@ Flashing is done from the browser — no toolchain or driver install needed. Use
 
 1. Open the **[Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/)**. It carries the latest release.
 2. Pick your device, connect it over USB and press **Connect**. The page reads the device's partition table and
-   says whether it is Witch Reader's. If it is not, it says how much room the table leaves Witch Reader.
+   says whether it is Witch Reader's. If it is not, it says how much room the table leaves Witch Reader. **Back up
+   the whole flash** saves everything on the device as a file first, each piece checked against the chip; written
+   back with **Custom file**, it returns the device to what it holds now. Do it before the first install over
+   another firmware.
 3. Choose what to write:
    - **Full install** (recommended): boot loader, partition table and firmware. Use it the first time, coming from
      the original firmware or CrossPoint, and whenever the page does not find Witch Reader's partition table. It is
@@ -62,11 +65,12 @@ needs the **Full install** above. The Murphy M3 is not listed there.
 
 **BOOX Picco.** On its original firmware the Picco shows up as a USB drive with no port for the flasher: hold Power
 and Volume Up (+) for more than 10 seconds, and it restarts into Onyx's recovery, which has one. **Back up the whole
-flash first** (`esptool read-flash 0 ALL picco-backup.bin`): Onyx's firmware cannot be downloaded anywhere, and that
-backup is the only way back to it. The **Full install** gives the Picco Witch Reader's partition table, with updates
-over Wi-Fi and from the card, and replaces Onyx's boot loader and recovery. **Update only** keeps Onyx's table, boot
-loader and recovery and writes the firmware into Onyx's app slot (0xE0000); Witch Reader cannot update itself there,
-so every later update comes from the flasher's Update only again. Either way, Onyx's own firmware is replaced.
+flash first** (the flasher's **Back up the whole flash**, or `esptool read-flash 0 ALL picco-backup.bin`): Onyx's
+firmware cannot be downloaded anywhere, and that backup is the only way back to it. The **Full install** gives the
+Picco Witch Reader's partition table, with updates over Wi-Fi and from the card, and replaces Onyx's boot loader and
+recovery. **Update only** keeps Onyx's table, boot loader and recovery and writes the firmware into Onyx's app slot
+(0xE0000); Witch Reader cannot update itself there, so every later update comes from the flasher's Update only again.
+Either way, Onyx's own firmware is replaced.
 
 For everything the reader does and how to use it, see the **[User Guide](USER_GUIDE.md)**. How it compares with
 CrossPoint, feature by feature: **[Feature comparison](docs/feature-comparison.md)**.

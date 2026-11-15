@@ -32,6 +32,8 @@ const state = {
   sdm: false, // Secure Download Mode: writes only, no reads, no stub
   locked: null, // why writing would leave the device unbootable, if it would
   flashSize: null,
+  mac: null, // the connected chip's, to tell whether `backup` is of this device
+  backup: null, // { name, mac, url } of the whole-flash backup saved on this page
   table: undefined, // entries read at 0x8000; null when there is no valid table
   tableKind: null,
   custom: null, // { bytes, info } of the chosen local .bin
@@ -207,6 +209,14 @@ async function connect() {
   }
   state.chip = state.loader.chip.CHIP_NAME;
   state.sdm = !!state.loader.secureDownloadMode;
+  state.mac = null;
+  if (!state.sdm) {
+    try {
+      state.mac = await state.loader.chip.readMac(state.loader);
+    } catch (e) {
+      log("MAC: not available (" + (e && e.message ? e.message : e) + ")");
+    }
+  }
   await readSecurity();
   await readFlashLayout();
   $("connect").hidden = true;
@@ -279,6 +289,7 @@ async function dropConnection() {
   state.transport = null;
   state.loader = null;
   state.chip = null;
+  state.mac = null;
   state.table = undefined;
   state.tableKind = null;
   $("connect").hidden = false;
@@ -364,6 +375,15 @@ function refresh() {
   $("web").disabled = !webBundleFor(mode);
   if ($("web").disabled) $("web").checked = false;
 
+  $("backup-box").hidden = !state.loader;
+  const backupBlocked = state.sdm
+    ? "Secure Download Mode takes writes but refuses reads, so this device cannot be backed up over USB."
+    : !lib.flashSizeBytes(state.flashSize)
+      ? "The device did not report its flash size, so the page does not know how much to read."
+      : null;
+  $("backup").disabled = !!backupBlocked;
+  if (backupBlocked) $("backup-info").textContent = backupBlocked;
+
   const problem = writeProblem(mode);
   if (problem) note(plan, "warn", problem);
   $("write").disabled = !!problem;
@@ -436,6 +456,52 @@ async function chooseCustomWeb(file) {
   refresh();
 }
 
+// ---- Backup -------------------------------------------------------------------------------------
+
+// The whole flash as a file on this computer, every piece checked against the chip's own MD5
+// (lib.readWholeFlash). Written back with Custom file it is a full image like any other, so the
+// device returns to what it holds now.
+async function backup() {
+  const size = lib.flashSizeBytes(state.flashSize);
+  const result = $("backup-result");
+  const progress = $("backup-progress");
+  result.replaceChildren();
+  if (!state.loader || !size) return;
+  setBusy(true);
+  progress.value = 0;
+  progress.hidden = false;
+  const started = Date.now();
+  try {
+    const image = await lib.readWholeFlash({
+      size,
+      read: (addr, len) => state.loader.readFlash(addr, len),
+      chipMd5: (addr, len) => state.loader.flashMd5sum(addr, len),
+      onRetry: (addr, e) => log(`backup: 0x${addr.toString(16)} read again (${e && e.message ? e.message : e})`),
+      onProgress: (done, total) => {
+        progress.value = (100 * done) / total;
+      },
+    });
+    const sha = lib.toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", image)));
+    const name = lib.backupFileName(state.board.id, state.mac, new Date());
+    if (state.backup) URL.revokeObjectURL(state.backup.url);
+    state.backup = { name, mac: state.mac, url: URL.createObjectURL(new Blob([image])) };
+    const seconds = Math.round((Date.now() - started) / 1000);
+    log(`backup: ${name}, ${size} bytes in ${seconds} s, md5 ${lib.md5Hex(image)}, sha256 ${sha}`);
+    const a = link(state.backup.url, name);
+    a.download = name;
+    note(result, "ok", "Saved the whole flash (" + state.flashSize + ", every piece checked against the chip) as ", a,
+      `. SHA-256 ${sha}. Keep it somewhere safe; if the download did not start, save it from that link.`);
+    a.click();
+  } catch (e) {
+    log("backup: " + (e && e.message ? e.message : e));
+    note(result, "bad", "The backup failed (" + (e && e.message ? e.message : e) + "); nothing was saved. " +
+      "Reconnect and try again.");
+  } finally {
+    progress.hidden = true;
+    setBusy(false);
+  }
+}
+
 // ---- Write --------------------------------------------------------------------------------------
 
 async function buildPlan(mode) {
@@ -471,12 +537,14 @@ async function buildPlan(mode) {
 
 function confirmText(mode, plan) {
   const lines = [`Write ${plan.what} to the ${state.board.label}?`];
+  const onyxApp = !isFullWrite(mode) && appTarget() && appTarget().onyx;
+  const replacesOther = (isFullWrite(mode) && state.tableKind && state.tableKind.kind !== "ours") || onyxApp;
   if (isFullWrite(mode)) {
     if (state.tableKind && state.tableKind.kind !== "ours") {
       lines.push("", "This replaces the firmware that is on it now. Anything the old firmware kept in the device's " +
         "memory (on original firmware: its Wi-Fi passwords and settings) is lost; the SD card is not touched. " +
         "There is no way back without a backup of the whole flash.");
-      if (state.tableKind.onyx) {
+      if (state.tableKind.onyx && mode === "full") {
         lines.push("", "On this Picco that includes Onyx's boot loader and its recovery. Witch Reader then updates " +
           "itself, over Wi-Fi and from the SD card.");
       }
@@ -484,10 +552,19 @@ function confirmText(mode, plan) {
       lines.push("", "The SD card is not touched.");
     }
     if ($("erase").checked) lines.push("", "The whole flash is erased first.");
-  } else if (appTarget() && appTarget().onyx) {
-    lines.push("", "It goes into Onyx's app slot. Onyx's boot loader, recovery and partition table stay. The firmware " +
-      "in that slot is replaced: if that is still Onyx's own, only a backup of the whole flash brings it back.",
+  } else if (onyxApp) {
+    lines.push("", "It goes into Onyx's app slot. Onyx's boot loader, recovery and partition table stay. The " +
+      "firmware in that slot is replaced: if that is still Onyx's own, only a backup of the whole flash brings it " +
+      "back.",
     "", "Witch Reader cannot update itself on this table: update it from this page again.");
+  }
+  if (replacesOther) {
+    if (state.backup && state.mac && state.backup.mac === state.mac) {
+      lines.push("", `This device's whole flash was saved on this page as ${state.backup.name}.`);
+    } else {
+      lines.push("", "No backup of this device's whole flash was saved on this page. If you may want what is on it " +
+        "now back, cancel and use Back up the whole flash (step 2) first.");
+    }
   }
   return lines.join("\n");
 }
@@ -720,6 +797,7 @@ async function start() {
     refresh();
   });
   $("write").addEventListener("click", write);
+  $("backup").addEventListener("click", backup);
   $("reconnect").addEventListener("click", reconnect);
   $("custom-file").addEventListener("change", (e) => chooseCustom(e.target.files[0]));
   $("custom-web").addEventListener("change", (e) => chooseCustomWeb(e.target.files[0]));

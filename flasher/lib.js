@@ -199,6 +199,54 @@ export function appWritePlan(target, app, otadata) {
   return { files: [{ data: app, address: target.app }, { data: otadata, address: target.otadata }] };
 }
 
+// ---- Backup -------------------------------------------------------------------------------------
+
+// A backup reads the flash in pieces of BACKUP_CHUNK. esptool-js 0.7.0's readFlash grows its result
+// by one copy per 4 KB packet, so a single read of 16 MB would copy gigabytes; and it does not read
+// the MD5 the stub sends after the data, so each piece is checked against the chip here.
+export const BACKUP_CHUNK = 0x40000;
+
+// Bytes of an esptool-js flash size name ("16MB"), or null.
+export function flashSizeBytes(name) {
+  const m = /^(\d+)(KB|MB)$/.exec(name || "");
+  return m ? Number(m[1]) * (m[2] === "MB" ? 1024 * 1024 : 1024) : null;
+}
+
+// "picco-flash-9c96d5e1d82c-2026-11-15.bin": which board, which unit, which day.
+export function backupFileName(boardId, mac, date) {
+  const day = [date.getFullYear(), date.getMonth() + 1, date.getDate()].map((n) => String(n).padStart(2, "0"));
+  return `${boardId}-flash-${(mac || "unknown").replace(/:/g, "").toLowerCase()}-${day.join("-")}.bin`;
+}
+
+// The whole flash, `size` bytes from 0: each piece read with `read(addr, len)` and compared with
+// `chipMd5(addr, len)`, the chip's own MD5 of that range; a piece that fails or differs is read
+// again, `tries` times in all, and the backup fails rather than keep it. `onRetry(addr, error)` and
+// `onProgress(done, size)` report.
+export async function readWholeFlash({ size, read, chipMd5, chunk = BACKUP_CHUNK, tries = 3, onRetry, onProgress }) {
+  const image = new Uint8Array(size);
+  for (let addr = 0; addr < size; addr += chunk) {
+    const len = Math.min(chunk, size - addr);
+    let error = null;
+    for (let attempt = 1; attempt <= tries; attempt++) {
+      try {
+        const data = await read(addr, len);
+        if (data.length !== len) throw new Error(`got ${data.length} of ${len} bytes`);
+        const want = String(await chipMd5(addr, len)).toLowerCase();
+        if (md5Hex(data) !== want) throw new Error("the bytes read differ from the chip's checksum");
+        image.set(data, addr);
+        error = null;
+        break;
+      } catch (e) {
+        error = e;
+        if (onRetry) onRetry(addr, e);
+      }
+    }
+    if (error) throw new Error(`at 0x${addr.toString(16)}: ${error.message || error}`);
+    if (onProgress) onProgress(addr + len, size);
+  }
+  return image;
+}
+
 // ---- Image files --------------------------------------------------------------------------------
 
 // What a .bin is, by its content:

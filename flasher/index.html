@@ -42,6 +42,17 @@
       <button id="disconnect" type="button" class="secondary" hidden>Disconnect</button>
     </div>
     <div id="device"></div>
+    <div id="backup-box" hidden>
+      <div class="row">
+        <button id="backup" type="button" class="secondary">Back up the whole flash</button>
+      </div>
+      <p id="backup-info" class="muted">Saves everything on the device's flash as a file on this computer, read in
+        pieces, each checked against the chip. Written back with <em>Custom file</em>, it returns the device to what
+        it holds now. Make one before the first install over another firmware: original firmware often cannot be
+        downloaded anywhere.</p>
+      <progress id="backup-progress" max="100" value="0" hidden></progress>
+      <div id="backup-result"></div>
+    </div>
   </section>
 
   <section>
@@ -101,7 +112,8 @@
     <p><strong>On a device with its original firmware</strong> (for example a new X4 Pro), a full install
       replaces that firmware, and what it kept in the device's memory, such as its Wi-Fi passwords, is lost with
       it. There is no way back unless you have a backup of the whole flash. If you may want to return to it, make
-      one first, for example with esptool: <code>esptool read-flash 0 ALL backup.bin</code>.</p>
+      one first with <strong>Back up the whole flash</strong> under step 2, or with esptool:
+      <code>esptool read-flash 0 ALL backup.bin</code>. To return to it, write that file with <em>Custom file</em>.</p>
     <p><strong>On a BOOX Picco with Onyx's partition table</strong>, a full install also replaces Onyx's boot loader
       and its recovery, which installs updates from the SD card; Witch Reader then updates itself over Wi-Fi and from
       the card. <strong>Update only</strong> keeps Onyx's table instead: the firmware goes into Onyx's app slot, and
@@ -132,7 +144,8 @@
       that uses the port (a serial monitor, another flasher tab).</p>
     <p><strong>A BOOX Picco on its original firmware</strong> shows up as a USB drive with no port. Hold Power and
       Volume Up (+) together for more than 10 seconds: it restarts into Onyx's recovery, which has the port. Back
-      up the whole flash before the first install; Onyx's firmware cannot be downloaded anywhere.</p>
+      up the whole flash before the first install (step 2); Onyx's firmware cannot be downloaded anywhere. A backup
+      made from the recovery restores into it: its Restart then starts Onyx's firmware.</p>
   </details>
 
   <details>
