@@ -1,6 +1,7 @@
 add_executable(WebDAVHandlerTest
   WebDAVHandlerTest.cpp
   ${REPO_ROOT}/src/network/WebDAVHandler.cpp
+  ${REPO_ROOT}/src/network/WebBookCache.cpp
   ${REPO_ROOT}/src/network/WebPathGuard.cpp
   ${REPO_ROOT}/lib/FsHelpers/FileReplace.cpp
   ${REPO_ROOT}/lib/FsHelpers/FsHelpers.cpp

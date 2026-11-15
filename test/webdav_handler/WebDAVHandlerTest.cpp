@@ -1,6 +1,7 @@
 // WebDAVHandler on an in-memory FAT card (stubs/HalStorage.h): the requests a desktop client sends, and what they
-// may reach. The handler, the path guard (WebPathGuard, ProtectedPaths), FileReplace and FsHelpers are the firmware's
-// own; only the framework's WebServer, the card and the book caches are stand-ins.
+// may reach. The handler, the path guard (WebPathGuard, ProtectedPaths), the book-cache helper (WebBookCache),
+// FileReplace and FsHelpers are the firmware's own; only the framework's WebServer, the card and the book caches
+// are stand-ins.
 
 #include <gtest/gtest.h>
 
@@ -204,6 +205,54 @@ TEST_F(WebDAVHandlerTest, CopyOverABookClearsItsCache) {
 TEST_F(WebDAVHandlerTest, CopyClearsWhatWasKeptForANewPath) {
   EXPECT_EQ(request(HTTP_COPY, "/Books/novel.epub", nullptr, "http://reader.local/Books/copy.epub").code, 201);
   EXPECT_EQ(clearedBookCaches(), std::vector<std::string>{"/Books/copy.epub"});
+}
+
+// A cover written next to a book (novel.jpg beside novel.epub) makes that book's cached covers and thumbnails
+// stale, and Home and the Library would go on drawing the old one. The file manager's upload drops them; WebDAV's
+// PUT and COPY, through a copy of its helper that left this out, did not.
+class WebDAVCoverTest : public WebDAVHandlerTest {
+ protected:
+  void SetUp() override {
+    WebDAVHandlerTest::SetUp();
+    cache = BookRelocation::cacheDirFor("/Books/novel.epub");
+    Storage.putFolder(cache);
+    Storage.put(cache + "/cover.bmp", "old cover");
+    Storage.put(cache + "/thumb_240.bmp", "old thumb");
+    Storage.put(cache + "/progress.bin", "where the book was left");
+    Storage.put("/Books/novel.jpg", "old cover image");
+    Storage.put("/Books/new.jpg", "new cover image");
+  }
+
+  void expectCoverDropped() const {
+    EXPECT_FALSE(Storage.exists((cache + "/cover.bmp").c_str()));
+    EXPECT_FALSE(Storage.exists((cache + "/thumb_240.bmp").c_str()));
+    EXPECT_TRUE(Storage.exists((cache + "/progress.bin").c_str()));  // the reading state stays
+  }
+
+  std::string cache;
+};
+
+TEST_F(WebDAVCoverTest, CopyOfANewCoverDropsTheBooksThumbnails) {
+  EXPECT_EQ(request(HTTP_COPY, "/Books/new.jpg", nullptr, "http://reader.local/Books/novel.jpg").code, 204);
+  EXPECT_EQ(Storage.content("/Books/novel.jpg"), "new cover image");
+  expectCoverDropped();
+}
+
+TEST_F(WebDAVCoverTest, PutOfANewCoverDropsTheBooksThumbnails) {
+  server.setRequest(HTTP_PUT, "/Books/novel.jpg");
+  HTTPRaw raw;
+  raw.status = RAW_START;
+  handler.raw(server, server.uri(), raw);
+  raw.status = RAW_WRITE;
+  raw.currentSize = 3;
+  std::memcpy(raw.buf, "new", 3);
+  handler.raw(server, server.uri(), raw);
+  raw.status = RAW_END;
+  handler.raw(server, server.uri(), raw);
+  handler.handle(server, HTTP_PUT, server.uri());
+  EXPECT_EQ(server.code, 204);
+  EXPECT_EQ(Storage.content("/Books/novel.jpg"), "new");
+  expectCoverDropped();
 }
 
 // What COPY now matches.

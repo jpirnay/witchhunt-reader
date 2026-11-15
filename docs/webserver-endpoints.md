@@ -1079,6 +1079,10 @@ Hidden Files** says (`WebDAVHandler::isProtectedPath()`). So `/.crosspoint` cann
 and the listing of any other folder leaves out its dot-named and system entries. The root
 cannot be deleted or moved.
 
+A `PUT`, `COPY` or `MOVE` that writes a book clears what was kept for it, as an upload does; one that writes a
+cover sidecar (`book.jpg` beside `book.epub`) drops that book's cached covers and thumbnails
+([sidecar-files.md](sidecar-files.md)).
+
 Pressing **Back** on the device does not interrupt a `PUT`: the body is read whole inside one
 request, and File Transfer is left once it has arrived.
 

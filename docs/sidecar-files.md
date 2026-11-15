@@ -26,7 +26,8 @@ The File Manager's **Details** dialog manages this from the web UI: preview the
 current cover, replace it from a local file, paste an image copied from any
 website, search Open Library / Goodreads / Google Books, or remove it. Saving a
 cover there also deletes the book's cached thumbnails, so every view, on any
-clock, draws the new one.
+clock, draws the new one. So does any upload, fetch or WebDAV write (`PUT`, `COPY`,
+`MOVE`) of a cover sidecar (`clearBookCacheIfNeeded()`, `src/network/WebBookCache.cpp`).
 
 **Replacing a cover takes effect on the next load.** The rendered thumbnail is
 cached per book, and `ReaderActivity::ensureCoverThumb()` compares the sidecar's
