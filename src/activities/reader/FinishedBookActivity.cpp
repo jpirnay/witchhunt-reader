@@ -3,6 +3,7 @@
 #include <Bitmap.h>
 #include <BuildArena.h>
 #include <Epub.h>
+#include <FirmwareFiles.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -387,7 +388,8 @@ std::string findSeriesSequel(const std::string& directory, const std::string& cu
     if (isDir) continue;
 
     const std::string fileName = name;
-    if (fileName.empty() || fileName[0] == '.' || !FsHelpers::hasEpubExtension(fileName)) {
+    if (fileName.empty() || fileName[0] == '.' || !FsHelpers::hasEpubExtension(fileName) ||
+        FirmwareFiles::isEntry(directory, fileName, /*isDir=*/false)) {
       continue;
     }
     // The current book is in this directory too; skip it rather than spending a parse on a book that
@@ -455,7 +457,8 @@ std::string findNextAlphabeticalBook(const std::string& directory, const std::st
     if (isDir) continue;
 
     const std::string fileName = name;
-    if (fileName.empty() || fileName[0] == '.' || !isSupportedBookFile(fileName)) {
+    if (fileName.empty() || fileName[0] == '.' || !isSupportedBookFile(fileName) ||
+        FirmwareFiles::isEntry(directory, fileName, /*isDir=*/false)) {
       continue;
     }
     // Strictly after the current book, and the earliest such name seen so far.

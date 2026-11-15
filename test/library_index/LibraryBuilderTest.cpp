@@ -181,6 +181,40 @@ TEST_F(LibraryBuilderTest, FoldersThatHoldNoBooksAreLeftOutAtAnyDepthEvenWhenHid
   EXPECT_EQ(index.header().bookCount, 1);
 }
 
+// What the firmware keeps at the card root for itself is not a book (FirmwareFiles): a font's licence,
+// a dictionary's README, a plugin's notes, the crash report. Folders of those names further down, and
+// books named like them, still are. Hidden files shown, so the dot spellings are walked too.
+TEST_F(LibraryBuilderTest, TheFirmwaresOwnFilesAtTheRootAreLeftOut) {
+  file("crash_report.txt");
+  file("fonts/Inter/OFL.txt");
+  file(".fonts/Inter/OFL.txt");
+  file("DICTIONARIES/en/README.txt");
+  file("plugins/clock/README.md");
+  file("sleep/notes.txt");
+  file("screenshots/notes.txt");
+  file("Books/Mort.epub");
+  file("Books/fonts/Eric.epub");
+  file("Books/crash_report.txt");
+  file("fonts.txt");
+  file("sleeping/Sourcery.epub");
+  auto shown = config();
+  shown.showHidden = true;
+  ASSERT_EQ(build(shown), LibraryBuilder::Phase::Done);
+
+  LibraryIndexReader index;
+  ASSERT_TRUE(index.open(indexPath()));
+  std::set<std::string> paths;
+  for (uint16_t i = 0; i < index.header().bookCount; ++i) {
+    library::BookRecord record{};
+    std::string path;
+    ASSERT_TRUE(index.book(i, record));
+    ASSERT_TRUE(index.blobString(record.pathOff, path));
+    paths.insert(path.substr(card_.size()));
+  }
+  EXPECT_EQ(paths, (std::set<std::string>{"/Books/Mort.epub", "/Books/fonts/Eric.epub", "/Books/crash_report.txt",
+                                          "/fonts.txt", "/sleeping/Sourcery.epub"}));
+}
+
 // A subfolder opened by path is searched for in its parent from the first entry: 27 ms apiece, 40 s
 // in a folder of 1,800. The entry the listing hands out already is that folder.
 TEST_F(LibraryBuilderTest, OnlyTheRootIsOpenedByPath) {

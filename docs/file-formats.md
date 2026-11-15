@@ -88,7 +88,7 @@ CSS pass), `spines/<n>/anchors_<spine>.tmp` (a section's anchor map), `footnotes
 | `/.tmp_opds_cache.dat`, `/.tmp_opds_cover.*` | `OpdsBookBrowserActivity` | The OPDS browser's entries and the cover being shown; removed when it closes, and the cover files also when it opens (a power cut or a crash leaves them) |
 | `/sleep.bmp` | `BmpViewerActivity` | An image set as the sleep screen. A rendered one goes through `/sleep.bmp.tmp`, the old file kept as `/sleep.bmp.bak` until the swap is done |
 | `/sleep/weather.bmp` | `WeatherActivity` | The last fetched forecast as a custom sleep image, the panel's pixels in portrait as `ScreenshotUtil` writes them. Goes through `/sleep/weather.bmp.tmp` and `FileReplace` |
-| `/crash_report.txt` | `HalSystem` | The last panic |
+| `/crash_report.txt` | `HalSystem` | The last panic. Browse Files lists it; the Library, Recent books and the next-book suggestion leave it out (`FirmwareFiles`) |
 | `/screenshots/*.bmp` | `ScreenshotUtil` | Screenshots |
 | `<dictionary>.qidx`, `.sidx` | `Dictionary` | Lookup indexes beside a dictionary's `.idx` and `.syn`, `SIDECAR_VERSION` (2): [dictionary.md](dictionary.md) |
 
@@ -475,7 +475,7 @@ that do not fit the file, make it invalid, and a build replaces it.
 
 | Section | Layout |
 |---|---|
-| Header, 48 B | magic `WLIB`; `u8` version (3); `u8` flags (bit 0: partial, the card held more than 2,000 books); `u8` acceptRules (bit 0: the *Show Hidden Files* setting the walk used; bits 1-7: the revision of the folders the walk always leaves out, now 1); `u8` reserved; `u32` buildGen; `u16` bookCount, authorCount, newCount; `u16` reserved; `u32` offsets of the five sections below; `u32` blob length; `u32` newestDate, the newest date among the books and the folders the walk listed (0 for none) |
+| Header, 48 B | magic `WLIB`; `u8` version (3); `u8` flags (bit 0: partial, the card held more than 2,000 books); `u8` acceptRules (bit 0: the *Show Hidden Files* setting the walk used; bits 1-7: the revision of what the walk always leaves out, now 2: 1 added `holdsNoBooks` at any depth, 2 the firmware's own files at the root); `u8` reserved; `u32` buildGen; `u16` bookCount, authorCount, newCount; `u16` reserved; `u32` offsets of the five sections below; `u32` blob length; `u32` newestDate, the newest date among the books and the folders the walk listed (0 for none) |
 | Records | bookCount × 24 B, **in identity order**: `u32` identity, authorHash, date (FAT `date << 16 \| time`), pathOff, sidecarSig, firstSeen |
 | New | newCount (≤ 10) × `u16` record index, newest first |
 | Authors | authorCount × 12 B, **in sort-key order**: `u32` hash, nameOff; `u16` firstBook, count |

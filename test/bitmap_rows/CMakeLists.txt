@@ -1,5 +1,6 @@
 add_executable(BitmapRowsTest
   BitmapRowsTest.cpp
+  BitmapRowTargetTest.cpp
   ${REPO_ROOT}/lib/GfxRenderer/Bitmap.cpp
   ${REPO_ROOT}/lib/GfxRenderer/BitmapHelpers.cpp
   ${REPO_ROOT}/test/jpeg_decoder/Stubs.cpp

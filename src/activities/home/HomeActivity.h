@@ -74,6 +74,10 @@ class HomeActivity final : public Activity {
 
   uint8_t* coverBuffer = nullptr;
   size_t coverBufferSize = 0;
+  // The output polarity the snapshot was taken in. Dark Mode keeps pictures inverted in the frame
+  // buffer (GfxRenderer::keepsImagePolarity), so a snapshot from the other polarity shows the cover
+  // as a negative.
+  bool coverBufferInverted = false;
   int coverRectX = 0;
   int coverRectY = 0;
   int coverRectW = 0;

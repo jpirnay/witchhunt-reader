@@ -1,5 +1,6 @@
 add_executable(ProtectedPathsTest
   ProtectedPathsTest.cpp
+  FirmwareFilesTest.cpp
 )
 
 target_include_directories(ProtectedPathsTest PRIVATE
