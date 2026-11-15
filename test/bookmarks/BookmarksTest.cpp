@@ -455,3 +455,29 @@ TEST_F(Bookmarks, TheIndexKeepsNoAnchors) {
   GLOBAL_BOOKMARKS.syncFromStore(store, "/a.epub", kCache, "Title of /a.epub", false);
   EXPECT_EQ(Storage.content(kIndexPath), indexFile(1, indexEntry("/a.epub", {"x"})));
 }
+
+// What the bookmark screens do to a book's stars (StarredPagesActivity, GlobalBookmarksActivity::mutateBook): each
+// star keeps its own anchor through a delete and a rename, and a load and save in between.
+TEST_F(Bookmarks, EachStarKeepsItsAnchorThroughADeleteAndARename) {
+  BookmarkStore store;
+  store.load(kCache);
+  ASSERT_TRUE(store.toggle(1, 1, anchorOf(11, 10, "/body/DocFragment[2]/body/p[1]/text()[1].0")));
+  ASSERT_TRUE(store.toggle(2, 2, anchorOf(22, 20, "/body/DocFragment[3]/body/p[2]/text()[1].0")));
+  ASSERT_TRUE(store.toggle(3, 3, anchorOf(33, 30, "/body/DocFragment[4]/body/p[3]/text()[1].0")));
+  store.save();
+
+  BookmarkStore screen;
+  screen.load(kCache);
+  screen.removeAt(1);
+  screen.rename(1, "third");
+  screen.save();
+
+  BookmarkStore again;
+  again.load(kCache);
+  ASSERT_EQ(again.getAll().size(), 2u);
+  EXPECT_EQ(again.getAll()[1].spineIndex, 3);
+  EXPECT_EQ(again.getAll()[1].name, "third");
+  EXPECT_EQ(again.getAnchors()[0].layout, 11u);
+  EXPECT_EQ(again.getAnchors()[1].layout, 33u);
+  EXPECT_EQ(again.getAnchors()[1].xpath, "/body/DocFragment[4]/body/p[3]/text()[1].0");
+}
