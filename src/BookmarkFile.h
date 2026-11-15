@@ -28,6 +28,11 @@ enum class ReadResult : uint8_t {
 inline constexpr size_t kMaxNameBytes = 128;
 // spine, page and the length of an empty name.
 inline constexpr size_t kMinRecordBytes = 3 * sizeof(uint16_t);
+// A KOReader XPath names one text node by its element path. One longer than this is dropped when it is made, never
+// cut: a cut XPath names something else.
+inline constexpr size_t kMaxXPathBytes = 512;
+// A StarAnchor as bookmarks.bin keeps it (version 3): layout, page count and the length of an empty XPath.
+inline constexpr size_t kMinAnchorBytes = sizeof(uint32_t) + 2 * sizeof(uint16_t);
 
 template <typename T>
 bool readPod(FsFile& f, T& value) {
@@ -65,6 +70,19 @@ inline ReadResult readBookmark(FsFile& f, Bookmark& bookmark, const bool named =
 inline bool writeBookmark(FsFile& f, const Bookmark& bookmark) {
   return writePod(f, bookmark.spineIndex) && writePod(f, bookmark.pageNumber) &&
          writeString(f, bookmark.name, kMaxNameBytes);
+}
+
+// What follows each bookmark in a book's bookmarks.bin from version 3 on; the session-only fields are not stored.
+inline ReadResult readStarAnchor(FsFile& f, StarAnchor& anchor) {
+  if (!readPod(f, anchor.layout) || !readPod(f, anchor.pageCount)) return ReadResult::Damaged;
+  return readString(f, anchor.xpath, kMaxXPathBytes);
+}
+
+inline bool writeStarAnchor(FsFile& f, const StarAnchor& anchor) {
+  if (!writePod(f, anchor.layout) || !writePod(f, anchor.pageCount)) return false;
+  // Never cut (kMaxXPathBytes): one too long is written as none.
+  if (anchor.xpath.size() > kMaxXPathBytes) return writePod(f, uint16_t{0});
+  return writeString(f, anchor.xpath, kMaxXPathBytes);
 }
 
 // A replace cut off by a power loss leaves the old file aside (FileReplace.h). Without the new one in place that is the
