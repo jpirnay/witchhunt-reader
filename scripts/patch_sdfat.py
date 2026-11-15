@@ -34,6 +34,13 @@ verbatim apart from the init() hunks:
         hint at the search start (its header half rides in 0003, since one
         patch owns each file).
 
+Two more are ours (see their headers):
+
+  0005  FatFile: a new folder's cluster is zeroed eight sectors a write from a
+        zeroed block, not one sector a write through the cache.
+  0006  ExFatFile: the same for exFAT, whose 128 KB clusters made a new folder
+        256 single-sector writes (X4 Pro: 298 and 636 ms for a first open's two).
+
 Their safety gates come along too: SdFat must be exactly the release the patches were
 reviewed against, and every file a patch touches must hash to that release's bytes or
 to the reviewed patched bytes. Everything is checked before anything is written, and
@@ -106,6 +113,18 @@ PATCHES = (
         "src/FatLib/FatPartition.cpp",
         "36163b3dc4ee985da9a6c6fb99b635fb5b63255d35fa5b3ccc1778db1534c0fe",
         "d50ebd94f6dfc5fc1dfe90352a5bca069fe9f440f5f5b7fe489709b9fa40f6aa",
+    ),
+    (
+        "0005-zero-new-folder-cluster-fat.patch",
+        "src/FatLib/FatFile.cpp",
+        "c1757a57ea134df2aab650d2db109b7d731f66cf309e5a070a9b50667c258948",
+        "ab8864911b054edd59e8eeb427a33cb4379486b55f169fa9c5b7b6409f498616",
+    ),
+    (
+        "0006-zero-new-folder-cluster-exfat.patch",
+        "src/ExFatLib/ExFatFileWrite.cpp",
+        "439e1fe566bc04c8e53962eeb8bdd91c89d5358cfff20bcf8be90c742e683ea4",
+        "ad7adea85952502927ac62c1674a6e5f499efd9ae2b95000be433f231ceb0a4b",
     ),
 )
 
