@@ -6,6 +6,15 @@ Fonts are the largest part of the firmware image, so they are where flash headro
 
 Already shipped, so nobody redoes it: the built-in glyph record went from 16 to 8 bytes by deriving `dataLength` and narrowing `left`/`top` (`f66c1a467`, −384 KB), then to 6 bytes by dropping `dataOffset` (`7779e1936`, −97,716 B); lookups return `EpdGlyphRef` by value and `epdResolveGlyph()` is the one place that tells built-in and `.cpfont` records apart. Size-invariant tables are shared across a family's sizes (`51707caae`, −226,560 B). Kerning is stored sparsely (`b16b4cb28`, −414,710 B) with split class maps (`30a3689e7`). Groups decode through a ring sized to their longest back-reference instead of whole (`bf39ecfcd`, ~4 KB peak for +2.1 % font data). Non-English UI languages ship compressed in a flash language pack (`e06754e18`, −232 KB). `GfxRenderer::truncatedText` truncates in one pass (`8b54d1c78`). The bitmap recompression survey found every alternative but brotli dead: zopfli tuning (−0.2 % for 30× the encode time), lzma2 (+1.7 %), zstd (−0.8 %), shared or trained preset dictionaries (+3.6 % to +6.2 %), byte-delta and bitplane pre-transforms (+32 %, +35 %), and per-glyph DEFLATE at any dictionary size (best case +41 %). The six CJK UI faces ship as 1-bit DEFLATE groups (`compress_ui_face.py`, −78.8 KB of font data, −75,238 B of image), the active UI language's inflated into its language pack slot so no UI screen decodes them (`docs/i18n.md`).
 
+## The font picker reads the card each time it opens
+
+Since #791 (2.53) the boot no longer reads the SD font families: the reader finds the families it draws by name, and
+the option rows keep only the names. The screens that need the full records (the font picker, the web font pages, the
+installer) read the list when they open, and every change of screen drops it again, because a list kept after the
+picker split Home's largest heap block from 61,428 to 20,468 B on the X3. So the picker takes longer to open: on the
+X3 with 23 families, 2.48 s to idle against 1.70 s before (+0.8 s). Next: keep the list on the S3 boards, which have
+the PSRAM for it (`HalCapabilities`), or read only the records the picker's first screen shows.
+
 ## `.cpfont` glyph record 16 → 10 bytes
 
 **Open.** SD-card fonts still store the 16-byte `EpdGlyph` (`CPFONT_VERSION = 4`, `fontconvert_sdcard.py`). The built-in repack's two tricks apply: `dataLength` is derivable and `left`/`top` fit `int8_t`. `dataOffset` cannot shrink to 16 bits, because in a `.cpfont` it is an offset into a per-style bitmap section of up to ~170 KB, so it needs 24 bits.

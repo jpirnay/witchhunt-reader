@@ -424,6 +424,10 @@ unknown and the redraw takes two passes: one second refresh per chapter build. O
 sends the next turn down the two-pass path too (once in 10 slow turns). Fixing it needs the frame on screen kept
 somewhere a borrower does not write.
 
+**The page kept after a cold open gets two passes.** Since #789 the page a chapter build drew stays on the panel when
+the build ends (`keepBuildPageOnScreen()`), and its gray comes as the deferred pass. With One-Pass Anti-Aliasing on,
+that pass is still the two-pass one: one second flicker on the first page of a chapter not yet built.
+
 **Other controllers.** On the X4 Pro the option shows on UC8179 units only, the one we have tested. The branch has
 tables for SSD1677 and UC8279, and UC8279 also writes `0x01` and `0x82` without restoring them, which may affect later
 B/W refreshes. Effect unproven: our unit is a UC8179.

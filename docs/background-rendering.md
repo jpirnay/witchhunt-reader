@@ -309,7 +309,10 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
   resolve at completion.
 - **Finalize (`Done`):** the on-disk LUT is written, the nav target is resolved (a Page target's
   running position is kept; past-the-end crosses to the next spine), then `READING` resumes and the
-  `Normal` pass renders the page with AA.
+  `Normal` pass renders the page with AA. When the build ends on the page `displayBuildPage()` last drew, a page of
+  text with nothing over it (`buildPageOnScreen_`), that page stays on the panel as drawn, its page count still the
+  build's "~" estimate, until the next turn (`keepBuildPageOnScreen()`): its AA comes as the deferred gray pass, which
+  then asks for the next page's pre-render. A page with pictures is drawn again, with them.
 - **Failure (failed / truncated / css-degraded):** discard, latch `forceBlockingBuildSpine_`, and
   fall back to the **blocking** path (which builds with the buffer released for ~52 KB headroom).
 
