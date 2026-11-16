@@ -5537,10 +5537,15 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       // the popup is what makes the replacing page expensive — it is a dark box the content page
       // must then diff against, which is the entire reason for the ~1.7 s HALF armed below.
       const bool popupBeforeBuild = (mode == SectionBuildMode::IncrementalReleased);
+      // The first open's Indexing popup is still the frame on the panel, as in the resident case below: painting the
+      // same box again held the X4's borrowed first-open build behind a FAST refresh (548 ms, 2026-11-16). The write
+      // buffer takes the frame on screen instead, which is what drawPopup() leaves there, for the seed and the lend.
+      const bool keepFirstOpenPopup = popupBeforeBuild && !secondaryBorrowed_ && indexingPopupStillShown();
       // Where the lend below need not wait for the popup's waveform (the X3), the build starts while the popup
       // paints: the popup ships async, the lend takes the frame not being painted, and the kickoff below slices on
       // until the waveform ends. Not for a build B handed over, which holds its block already.
-      bool popupPainting = popupBeforeBuild && !secondaryBorrowed_ && renderer.lendsDuringRefresh();
+      bool popupPainting =
+          popupBeforeBuild && !keepFirstOpenPopup && !secondaryBorrowed_ && renderer.lendsDuringRefresh();
       if (popupBeforeBuild) {
         // X4: the dramatic-transition HALF belongs on the first CONTENT page
         // (forceHalfRefreshAfterPopup_ below), not the popup. The popup is a transient box over the
@@ -5553,9 +5558,14 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         if (halfOnContentPage) {
           renderer.clearRefreshOverride();  // discard the armed HALF -> popup paints FAST
         }
-        // Immediate feedback before the first page lands.
-        GUI.drawPopup(renderer, tr(STR_INDEXING), /*overlayDisplayedFrame=*/true,
-                      popupPainting ? PopupShip::Async : PopupShip::Blocking);
+        if (keepFirstOpenPopup) {
+          renderer.syncWriteBufferFromDisplayed();
+          LOG_INF("ERS", "Background-C: spine %d keeps the first open's Indexing popup", currentSpineIndex);
+        } else {
+          // Immediate feedback before the first page lands.
+          GUI.drawPopup(renderer, tr(STR_INDEXING), /*overlayDisplayedFrame=*/true,
+                        popupPainting ? PopupShip::Async : PopupShip::Blocking);
+        }
 
         // Tight heap: free the secondary buffer (~48–52 KB) for the build. AA is off until the
         // build ends and recoverSecondaryBufferIfNeeded() reallocates it (marked via

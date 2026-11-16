@@ -669,6 +669,10 @@ Beta Updates** and **SD Firmware Update** are not offered, and each update comes
 again. A Picco given Witch Reader's partition table with the **Full install** updates itself like the other devices.
 See the [README](README.md#installation) for the choice between the two.
 
+To go back to an earlier release, pick it under **Release** in the flasher: it offers the latest release and the four
+before it, and under **Show pre-releases** any newer pre-release. Settings added after the release you go back to are
+dropped when it saves the settings, so after the next update they may be back at their defaults.
+
 #### 3.7.5 OPDS Servers (Multiple Libraries)
 
 Witch Reader supports saving multiple OPDS servers and switching between them when browsing catalogs.

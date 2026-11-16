@@ -93,6 +93,8 @@
       const INSTALL_ROOT = '/.crosspoint/plugins';
       const MOUNT_LABELS = { files: 'File Manager', settings: 'Settings' };
       let installed = [];
+      // {"<plugin>": ["host", ...]}: the hosts the user approved when a plugin asked (POST /api/plugins/hosts).
+      let approvals = {};
       let repo = 'jpirnay/witchhunt-reader';
 
       function setStatus(text, kind) {
@@ -109,7 +111,8 @@
       }
 
       function describeReach(hosts) {
-        return hosts && hosts.length ? 'Reaches: ' + hosts.join(', ') : 'No internet access through the reader';
+        return hosts && hosts.length ? 'Reaches: ' + hosts.join(', ')
+                                     : 'Reaches no site unless you approve one when it asks';
       }
 
       async function post(url) {
@@ -131,6 +134,12 @@
           installed = [];
           $('installed').replaceChildren(el('p', { className: 'empty', textContent: 'Could not read the plugin list.' }));
           return;
+        }
+        // After the list, not beside it: the device serves one connection at a time.
+        try {
+          approvals = await (await fetch('/api/plugins/hosts')).json();
+        } catch (e) {
+          approvals = {};
         }
         renderInstalled();
         renderCatalogButtons();
@@ -154,10 +163,21 @@
             describeReach(p.allowedHosts)
           ];
           if (p.root && p.root !== INSTALL_ROOT) meta.push('Copied by hand into ' + p.root + '/' + p.name);
+          const approved = (approvals && approvals[p.name]) || [];
           const info = el('div', { className: 'plugin-info' }, [
             title,
             p.description ? el('div', { textContent: p.description }) : '',
-            ...meta.map((m) => el('div', { className: 'plugin-meta', textContent: m }))
+            ...meta.map((m) => el('div', { className: 'plugin-meta', textContent: m })),
+            approved.length ? el('div', { className: 'plugin-meta' }, [
+              'Approved by you: ',
+              ...approved.map((h) => el('span', { className: 'badge badge-muted' }, [
+                h + ' ',
+                el('button', {
+                  className: 'btn btn-small', textContent: 'Take back', title: 'Stop ' + (p.title || p.name) + ' reaching ' + h,
+                  onclick: () => revokeHost(p, h)
+                })
+              ]))
+            ]) : ''
           ]);
           const toggle = el('button', {
             className: 'btn btn-small',
@@ -177,6 +197,20 @@
           setStatus((p.title || p.name) + (on ? ' is switched on.' : ' is switched off.'), 'ok');
         } catch (e) {
           setStatus('Could not change ' + (p.title || p.name) + ': ' + e.message, 'err');
+        }
+        loadInstalled();
+      }
+
+      async function revokeHost(p, host) {
+        try {
+          const r = await fetch('/api/plugins/hosts', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plugin: p.name, host, allow: false })
+          });
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+          setStatus((p.title || p.name) + ' no longer reaches ' + host + '.', 'ok');
+        } catch (e) {
+          setStatus('Could not take back ' + host + ': ' + e.message, 'err');
         }
         loadInstalled();
       }

@@ -128,6 +128,26 @@ label.choice small {
   margin-left: 1.6rem;
 }
 
+label.inline {
+  cursor: pointer;
+}
+
+select {
+  font: inherit;
+  flex: 1 1 14rem;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--fg);
+}
+
+select:disabled {
+  opacity: 0.55;
+}
+
 button {
   font: inherit;
   padding: 0.5rem 1.1rem;

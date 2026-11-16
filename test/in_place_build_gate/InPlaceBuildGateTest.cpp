@@ -77,6 +77,14 @@ TEST(InPlaceBuildGate, TheRingRaisesTheFloorsOnlyPastTheBases) {
   EXPECT_EQ(0u, admitsResident(request(false, 0, 0, 0)).ringBytes);  // size unknown
 }
 
+// The X4, 2026-11-16, The Odyssey: the first open of BOOK IV was admitted at 85,368 B free and fell under the 30 KB
+// resident-abort floor at its first between-slice check (28,960 B), every time. It borrows from the start now. The
+// crossing into BOOK V, whose HTML an earlier attempt had extracted, built in place in the same run and still does.
+TEST(InPlaceBuildGate, TheX4FirstOpenOfALargeChapterBorrowsFromTheStart) {
+  EXPECT_FALSE(admitsResident(request(/*css=*/true, 45328, 85368, 65524)).resident);
+  EXPECT_TRUE(admitsResident(request(/*css=*/true, 25823, 82432, 65524)).resident);
+}
+
 TEST(InPlaceBuildGate, ACjkBookInATrueTypeSetNeverBuildsInPlace) {
   for (const bool css : {false, true}) {
     for (const size_t inflated : {kSmallChapter, size_t{9602}, kLargeChapter}) {

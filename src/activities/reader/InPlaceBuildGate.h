@@ -49,8 +49,25 @@
 // still builds in place. What it changes is that a whole-book-in-one-spine entry now goes
 // straight to the released path instead of paying ~1.4 s for setup, abort, cache clear and a
 // second setup to get there.
+//
+// 50 -> 54 KB (2026-11-16), device-measured on the X4: every first open of The Odyssey at BOOK IV
+// (spine 7, 45,328 B of XHTML, CSS) passed this floor by 1.4 KB and aborted at the first
+// between-slice check, then repaid the popup and a borrowed rebuild (0.95 s) and set the
+// session's lowest free heap (23 KB). The trace:
+//
+//   gate      free=85368  (floor 83968 = 50 KB + the 32768 ring)
+//   ring      free=49804  -35564  the ring's block (33,824 B: ring + read buffer) and the build state
+//   start     free=38916  -10888  the owned 10 KB arena
+//   setup     free=30744   -8172  CSS index, page writer (2 KB), body-size census (1 KB), parser
+//   check     free=28960   -1784  zip, entry reader and temp file of the first slice: under 30 KB
+//
+// 56,408 B from the gate to the check, 23,640 of them beyond the ring term: 4.7 KB more than the
+// 18.9 KB above, the page writer and the census among them. 23,640 + the 30 KB abort floor =
+// 54,360 B, so 54 KB. The first open is where this binds: it starts the build from more heap
+// (85 KB) than reading leaves (80-82 KB). The crossing measured in the same run, into a chapter
+// whose HTML an earlier attempt had extracted (25,823 B ring, 82,432 free), still builds in place.
 #ifndef IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES
-#define IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES (50 * 1024)
+#define IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES (54 * 1024)
 #endif
 // CSS books need more margin to build in place: the parse resolves embedded styles, and the lean
 // resolver skips lookups below its floor, which yields a css-degraded cache and (since audit R3

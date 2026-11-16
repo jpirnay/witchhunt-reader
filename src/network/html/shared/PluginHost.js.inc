@@ -12,9 +12,17 @@
 // Plugins run in the page with full same-origin authority: they call the web
 // server's endpoints (/api/files, /mkdir, /move, /delete, /upload, /download)
 // directly with fetch(). Beyond the card, the device fetches on a plugin's
-// behalf through relay (GET /api/relay) and fetchToSd (POST /api/fetch), and
+// behalf through relay (/api/relay) and fetchToSd (POST /api/fetch), and
 // writeFile (POST /api/plugin-fs) stores a small file. Both outbound calls reach
-// only the hosts in the plugin's manifest "allowedHosts", redirects included.
+// only the hosts the plugin's manifest lists in "allowedHosts" or the user
+// approved for it (POST /api/plugins/hosts): a refused host is named, and the
+// host asks the user before it tries again.
+//
+// Plugins written for upstream crosspoint-reader run too: api.dir, the
+// relay(method, url, headers, body) form answering {status, headers, body},
+// writeFile(path, base64) and fetchToSd(url, dest, headers, {method, body}) follow
+// its plugin-host.js (#3114, Justin Mitchell, and later PRs). registerAction()
+// only warns: there is no job queue here.
 window.CrossPoint = window.CrossPoint || {
   _pending: null,
   // Called by a plugin at top level; loadPlugins() picks the function up after
@@ -29,7 +37,44 @@ window.CrossPoint = window.CrossPoint || {
 //
 // "crypto" is deliberately absent: the browser's own crypto.subtle covers
 // hashing, HMAC, AES and RSA, so a device-side implementation would duplicate it.
-const PLUGIN_CAPABILITIES = ['relay', 'fetchToSd', 'writeFile', 'pluginFile'];
+const PLUGIN_CAPABILITIES = ['relay', 'fetchToSd', 'writeFile', 'pluginFile', 'dir'];
+
+// Raises the device's error, with its JSON answer (and a refused host's name) attached.
+async function pluginApiError(r, path) {
+  let result = null;
+  try { result = await r.json(); } catch (e) { /* not JSON */ }
+  const err = new Error(path + ' ' + r.status + (result && result.error ? ': ' + result.error : ''));
+  err.status = r.status;
+  if (result) err.result = result;
+  return err;
+}
+
+// Runs request(), and when the device refuses the host, asks the user once whether this plugin may reach it; a yes
+// is stored on the device (per plugin, kept across updates) and the request runs again.
+async function withHostApproval(plugin, request) {
+  let r = await request();
+  if (r.status !== 403) return r;
+  let refused = null;
+  try { refused = await r.clone().json(); } catch (e) { return r; }
+  if (!refused || !refused.host) return r;
+  const label = plugin.title || plugin.name;
+  if (!window.confirm('Allow the plugin "' + label + '" to connect to ' + refused.host + '?\n\n' +
+                      'The device will reach this host on the plugin\'s behalf. You can take this back on the Plugins page.')) {
+    return r;
+  }
+  const saved = await fetch('/api/plugins/hosts', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ plugin: plugin.name, host: refused.host, allow: true })
+  });
+  if (!saved.ok) throw await pluginApiError(saved, '/api/plugins/hosts');
+  return request();
+}
+
+// writeFile() data: a string is base64, as upstream's API defines it; a Blob or ArrayBuffer is sent as it is.
+function pluginFileBody(data) {
+  if (typeof data !== 'string') return data;
+  return new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))]);
+}
 
 function missingCapabilities(plugin) {
   const required = Array.isArray(plugin.requires) ? plugin.requires : [];
@@ -83,31 +128,66 @@ async function loadPlugins(mount) {
       }
       CrossPoint._pending(container, {
         name: p.name,
-        // Fetch a URL the browser cannot reach itself, via the device. GET only,
-        // and only to hosts this plugin's manifest lists in allowedHosts.
-        // Resolves to a Response so callers can pick .blob()/.text()/.json().
-        relay: async (url) => {
-          const r = await fetch('/api/relay?plugin=' + encodeURIComponent(p.name) +
-            '&url=' + encodeURIComponent(url));
-          if (!r.ok) throw new Error('relay ' + r.status + ': ' + (await r.text().catch(() => '')));
-          return r;
+        // The plugin's own folder on the card, where it may keep its settings and token: writeFile() may write there,
+        // and /download?path=<dir>/<file> reads them back.
+        dir: (p.root || '/.crosspoint/plugins') + '/' + p.name,
+        // Fetch a URL the browser cannot reach itself, via the device, from a host this plugin may reach.
+        //   relay(url): GET, redirects followed within those hosts; resolves to a Response.
+        //   relay(method, url, headers, body): upstream's form; resolves to {status, headers: [[name, value]...],
+        //   body} with the body as text, and a 3xx comes back unfollowed. Headers make the request a credentialed
+        //   one: the device verifies the server's certificate.
+        relay: async (...args) => {
+          if (args.length <= 1) {
+            const url = args[0];
+            const r = await withHostApproval(p, () => fetch('/api/relay?plugin=' + encodeURIComponent(p.name) +
+              '&url=' + encodeURIComponent(url)));
+            if (!r.ok) throw new Error('relay ' + r.status + ': ' + (await r.text().catch(() => '')));
+            return r;
+          }
+          const [method, url, headers, body] = args;
+          const r = await withHostApproval(p, () => fetch('/api/relay', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plugin: p.name, method, url, headers: headers || {}, body: body || '' })
+          }));
+          if (!r.ok) throw await pluginApiError(r, '/api/relay');
+          // Header values arrive as Latin-1 code units: re-decode the UTF-8 JSON.
+          const raw = r.headers.get('X-Relay-Headers') || '[]';
+          const list = JSON.parse(new TextDecoder().decode(Uint8Array.from(raw, (c) => c.charCodeAt(0))));
+          let text;
+          try {
+            text = await r.text();
+          } catch (e) {
+            const err = new Error('/api/relay 502: relay failed; large bodies need fetchToSd');
+            err.status = 502;
+            throw err;
+          }
+          return { status: Number(r.headers.get('X-Relay-Status')), headers: list, body: text };
         },
         // Download straight to the card - one transfer instead of relaying
-        // through the browser and uploading the bytes back.
-        fetchToSd: async (url, dest) => {
-          const r = await fetch('/api/fetch?plugin=' + encodeURIComponent(p.name) +
-            '&url=' + encodeURIComponent(url) + '&dest=' + encodeURIComponent(dest),
-            { method: 'POST' });
-          if (!r.ok) throw new Error('fetch ' + r.status + ': ' + (await r.text().catch(() => '')));
+        // through the browser and uploading the bytes back. headers and
+        // {method, body} are upstream's; the answer reports the whole file.
+        fetchToSd: async (url, dest, headers, options) => {
+          const method = ((options && options.method) || 'GET').toUpperCase();
+          const r = await withHostApproval(p, () => fetch('/api/fetch', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plugin: p.name, url, dest, headers: headers || {}, method,
+                                   body: (options && options.body) || '' })
+          }));
+          if (!r.ok) throw await pluginApiError(r, '/api/fetch');
           return r.json();
         },
-        // Write one small file. `data` may be a string, Blob or ArrayBuffer.
+        // Write one small file, in the plugin's own folder or where /upload may write. `data` is base64 when a
+        // string (upstream's API), or a Blob or ArrayBuffer.
         writeFile: async (path, data) => {
           const r = await fetch('/api/plugin-fs?plugin=' + encodeURIComponent(p.name) +
             '&path=' + encodeURIComponent(path),
-            { method: 'POST', body: uploadForm(data) });
-          if (!r.ok) throw new Error('plugin-fs ' + r.status + ': ' + (await r.text().catch(() => '')));
+            { method: 'POST', body: uploadForm(pluginFileBody(data)) });
+          if (!r.ok) throw await pluginApiError(r, '/api/plugin-fs');
           return r.json();
+        },
+        // Upstream's job queue does not exist here; a plugin that registers actions still loads.
+        registerAction: (action) => {
+          console.warn('Plugin ' + p.name + ': registerAction(' + action + ') is not supported on this firmware');
         },
         // Present so a plugin written against the upstream API fails with a
         // sentence rather than "api.crypto is not a function".
