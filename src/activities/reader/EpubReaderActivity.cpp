@@ -1786,6 +1786,19 @@ bool EpubReaderActivity::beginBackgroundBorrow() {
   if (backgroundBorrowActive_ || secondaryBorrowed_ || !backgroundSection_) {
     return false;  // already lent (to B or to C) — never two arenas over one region
   }
+  // The X4 (a FAST refresh diffs against the host's previous frame) keeps that frame in RED while
+  // the buffer is out, and its return arms the SDK's one-shot that makes the next FAST diff against
+  // RED (FreeInkDisplay::returnSecondaryBuffer). But a FAST refresh given its previous frame writes
+  // RED from it at its start and leaves it there (Ssd1677Driver::displayImpl), so after one -- every
+  // pre-rendered page with AA off -- RED holds the frame BEFORE the one on screen, and the page after
+  // a preempted borrow diffed against that. The secondary holds the frame on screen until something
+  // lends it (a pre-render draws into the write buffer and lends nothing): RED is seeded from it
+  // here. Where an image decode has lent and returned it since the page went out, it holds the write
+  // buffer's contents instead, and nothing is seeded, as before. Not the PSRAM arena, which takes no
+  // frame.
+  if (renderer.fastRefreshNeedsHostFrame() && !renderer.lendsPsramArena() && renderer.secondaryHoldsFrameOnScreen()) {
+    renderer.syncRedRamFromFrameBuffer();
+  }
   size_t borrowedSize = 0;
   uint8_t* borrowed = renderer.borrowSecondaryBuffer(&borrowedSize);
   if (!borrowed) {
@@ -1801,17 +1814,10 @@ bool EpubReaderActivity::beginBackgroundBorrow() {
   secondaryBorrowed_ = true;
   backgroundBorrowActive_ = true;
   // Mark AA unavailable while the block is away (renderContents gates on this as well as on
-  // hasSecondaryBuffer). Unlike the Background-C borrow this deliberately does NOT seed RED RAM
-  // or opt in to single-buffer fast differential:
-  //  - No refresh can happen during B's borrow. Every render calls recoverSecondaryBufferIfNeeded()
-  //    first, which hands the block back before the pass draws — so the single-buffer display
-  //    path would never be exercised, and if one ever did slip through, an un-opted-in FAST
-  //    downgrades to HALF (slow, correct) instead of ghosting against a bogus baseline.
-  //  - syncRedRamFromFrameBuffer() would be actively wrong here. C borrows right after drawing
-  //    its popup, so frameBuffer is what's on screen. B borrows during quiet reading, when a
-  //    completed Background-A pre-render usually leaves the NEXT page in frameBuffer — seeding
-  //    RED RAM from that makes the next page turn diff against the frame it is about to draw
-  //    and leaves the page visibly unchanged.
+  // hasSecondaryBuffer). Unlike the Background-C borrow this does NOT opt in to single-buffer fast
+  // differential: no refresh runs during B's borrow, since every render calls
+  // recoverSecondaryBufferIfNeeded() first, which hands the block back before the pass draws; if
+  // one ever did slip through, an un-opted-in FAST downgrades to HALF (slow, correct).
   secondaryBufferDegraded_ = true;
   // What this build will really cost: the heap's low point while it holds the buffer, read back
   // in endBackgroundBorrow(). The allocator tracks it from here (it is a global setting, so the
