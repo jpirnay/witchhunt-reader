@@ -202,9 +202,10 @@ and the slide switch turns the light on and off. Board notes:
 - **Validate on the device**: touch in the other three orientations (the SDK profile sets `swapXY` and `flipY`),
   Power / Up / Down and the double-Power Back, the light's warmth and that it is off in deep sleep, the battery
   reading, USB Drive, deep sleep and wake; then the full install on our table.
-- **Two boot-log errors** on that unit, cause not looked at: `i2c_master_transmit_receive failed: ESP_ERR_INVALID_STATE`
-  right after `Charger configured` (the IMU is found just after it), and `gpio_isr_handler_remove(): GPIO isr service is
-  not installed`.
+- **A boot-log error** on that unit, cause not looked at: `gpio_isr_handler_remove(): GPIO isr service is not
+  installed`. (The other one, `i2c_master_transmit_receive failed: ESP_ERR_INVALID_STATE` right after `Charger
+  configured`, was the tilt driver probing the X3's IMU address 0x6B first; the IDF reports that NACK as
+  INVALID_STATE. Gone since tilt reads through the SDK's `Imu`, which asks the profile's 0x6A first.)
 - **Updates on the stock table.** Onyx's recovery installs `/update/firmware.bin` from the card. An action that erases
   otadata and restarts would hand the stock-table Picco to it, the way the stock app's Power + Volume Up does.
 - **USB presence from the charger.** No detect pin, so a wall charger shows no charging bolt. Upstream asks
