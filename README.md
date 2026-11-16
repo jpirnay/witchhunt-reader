@@ -33,7 +33,8 @@ Want your device supported? Consider donating one: support for a board needs the
 
 Flashing is done from the browser — no toolchain or driver install needed. Use a Chromium-based browser (Chrome, Edge, Opera) or a recent Firefox version (>151); older versions of Firefox and Safari do not support WebSerial.
 
-1. Open the **[Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/)**. It carries the latest release.
+1. Open the **[Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/)**. It offers the latest release, the
+   four before it to go back to and, under **Show pre-releases**, any newer pre-release.
 2. Pick your device, connect it over USB and press **Connect**. The page reads the device's partition table and
    says whether it is Witch Reader's. If it is not, it says how much room the table leaves Witch Reader. **Back up
    the whole flash** saves everything on the device as a file first, each piece checked against the chip; written
