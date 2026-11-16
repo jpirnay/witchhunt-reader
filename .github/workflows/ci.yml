@@ -400,6 +400,9 @@ jobs:
       - name: Check the web bundle's release tag
         run: python test/web/release_tag_test.py
 
+      - name: Check the web flasher's site
+        run: python test/web/flasher_site_test.py
+
   sdk-pin:
     runs-on: ubuntu-latest
     steps:

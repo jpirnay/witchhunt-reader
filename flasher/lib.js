@@ -393,6 +393,54 @@ export class Md5 {
 
 export const md5Hex = (bytes) => new Md5().update(bytes).hex();
 
+// ---- Releases -----------------------------------------------------------------------------------
+
+// The site's releases.json (scripts/stage_flasher_site.py) lists the releases the page offers, newest
+// first: the pre-releases newer than the latest full release, then the last five full releases.
+
+// The release the page selects unless the address names another: the newest full release.
+export function defaultRelease(releases) {
+  return releases.find((r) => !r.prerelease) || releases[0] || null;
+}
+
+// Whether `release` has anything to write to the board: a full install or a firmware image.
+export function releaseHasBoard(release, boardId) {
+  const images = release && release.boards && release.boards[boardId];
+  return !!(images && (images.app || images.full));
+}
+
+// The release the page opens with: the one ?release=<tag> names, else the default. Naming a
+// pre-release lists the pre-releases; a tag the site does not offer comes back as `missing`.
+export function initialRelease(releases, wanted) {
+  const fallback = { release: defaultRelease(releases), showPre: false, missing: null };
+  if (!wanted) return fallback;
+  const release = releases.find((r) => r.tag === wanted);
+  if (!release) return { ...fallback, missing: wanted };
+  return { release, showPre: !!release.prerelease, missing: null };
+}
+
+// "latest" (the default), "older" (a full release before it) or "pre" (a pre-release).
+export function releaseKind(releases, release) {
+  if (release.prerelease) return "pre";
+  return release === defaultRelease(releases) ? "latest" : "older";
+}
+
+// The picker's entries: pre-releases only with `showPre`; one with nothing for the board is disabled.
+export function releaseOptions(releases, { boardId, showPre }) {
+  const latest = defaultRelease(releases);
+  return releases
+    .filter((r) => showPre || !r.prerelease)
+    .map((r) => {
+      const usable = releaseHasBoard(r, boardId);
+      const marks = [];
+      if (r === latest) marks.push("latest");
+      if (r.prerelease) marks.push("pre-release");
+      if (!usable) marks.push("nothing for this device");
+      const text = (r.name || r.tag) + (marks.length ? ` (${marks.join(", ")})` : "");
+      return { tag: r.tag, text, disabled: !usable };
+    });
+}
+
 // ---- The web bundle -----------------------------------------------------------------------------
 
 // web-<hash>.bin is named after the first 12 hex digits of its SHA-256 (scripts/build_html.py), and
