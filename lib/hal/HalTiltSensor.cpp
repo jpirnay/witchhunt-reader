@@ -1,131 +1,83 @@
 #include "HalTiltSensor.h"
 
 #include <HalCapabilities.h>
+#include <HalI2cBus.h>
 #include <Logging.h>
 
 HalTiltSensor halTiltSensor;
 
-bool HalTiltSensor::writeReg(uint8_t reg, uint8_t val) const {
-  Wire.beginTransmission(_i2cAddr);
-  Wire.write(reg);
-  Wire.write(val);
-  return Wire.endTransmission() == 0;
+bool HalTiltSensor::imuRead(Imu::Sample& out) {
+  HalI2cBus::Lock i2cLock;
+  return _imu.read(out);
 }
 
-bool HalTiltSensor::readReg(uint8_t reg, uint8_t* val) const {
-  Wire.beginTransmission(_i2cAddr);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) {
-    return false;
-  }
-  Wire.requestFrom(_i2cAddr, (uint8_t)1);
-  if (Wire.available() < 1) {
-    return false;
-  }
-  *val = Wire.read();
-  return true;
+bool HalTiltSensor::imuSleep() {
+  HalI2cBus::Lock i2cLock;
+  return _imu.sleep();
 }
 
-bool HalTiltSensor::readGyro(float& gx, float& gy, float& gz) const {
-  Wire.beginTransmission(_i2cAddr);
-  Wire.write(REG_GX_L);
-  if (Wire.endTransmission(false) != 0) {
-    return false;
-  }
-
-  Wire.requestFrom(_i2cAddr, (uint8_t)6);
-  if (Wire.available() < 6) {
-    return false;
-  }
-
-  auto readInt16 = [&]() -> int16_t {
-    const uint8_t lo = Wire.read();
-    const uint8_t hi = Wire.read();
-    return static_cast<int16_t>((hi << 8) | lo);
-  };
-
-  constexpr float SCALE = 1.0f / 64.0f;  // ±512 dps full scale: 32768 / 512 = 64 LSB/dps
-  gx = readInt16() * SCALE;
-  gy = readInt16() * SCALE;
-  gz = readInt16() * SCALE;
-  return true;
+bool HalTiltSensor::imuWake() {
+  HalI2cBus::Lock i2cLock;
+  return _imu.wake();
 }
 
 void HalTiltSensor::begin() {
-  // Tilt needs an IMU, not an X3 specifically. X3 carries a QMI8658; X4 and
-  // X4 Pro carry none, so both correctly skip.
+  _available = false;
   if (!HalCapabilities::hasTiltSensor()) {
-    _available = false;
     return;
   }
 
-  uint8_t whoami = 0;
-  _i2cAddr = I2C_ADDR_QMI8658;
-  if (!readReg(QMI8658_WHO_AM_I_REG, &whoami) || whoami != QMI8658_WHO_AM_I_VALUE) {
-    _i2cAddr = I2C_ADDR_QMI8658_ALT;
-    if (!readReg(QMI8658_WHO_AM_I_REG, &whoami) || whoami != QMI8658_WHO_AM_I_VALUE) {
-      LOG_ERR("GYR", "QMI8658 IMU not found");
-      _available = false;
-      return;
-    }
+  bool found = false;
+  {
+    HalI2cBus::Lock i2cLock;
+    found = _imu.begin();
   }
-
-  LOG_INF("GYR", "QMI8658 IMU found at 0x%02X", _i2cAddr);
-
-  if (!writeReg(REG_CTRL7, CTRL7_DISABLE_ALL) || !writeReg(REG_CTRL3, CTRL3_FS_512DPS | CTRL3_ODR_28HZ) ||
-      !writeReg(REG_CTRL1, CTRL1_BASE | CTRL1_SENSOR_DISABLE)) {
-    LOG_ERR("GYR", "QMI8658 register configuration failed");
-    _available = false;
+  if (!found) {
+    LOG_ERR("GYR", "IMU not found");
     return;
   }
-
-  _available = true;
-  _initMs = millis();
-  _sleepMs = millis();
+  // begin() leaves the sensors sampling; stand them by until a reader wakes them, so an IMU nobody
+  // uses does not drain the battery.
+  if (!imuSleep()) {
+    LOG_ERR("GYR", "IMU standby failed");
+  }
+  // Tilt reads the gyro; an accelerometer-only part (SC7A20H) cannot drive it.
+  _available = _imu.hasGyroscope();
+  if (!_available) {
+    LOG_INF("GYR", "IMU has no gyroscope");
+    return;
+  }
   _lastPollMs = millis();
-  LOG_INF("GYR", "QMI8658 gyro initialized and put to sleep");
+  LOG_INF("GYR", "IMU initialized and put to sleep");
 }
 
 bool HalTiltSensor::wake() {
   if (!_available) {
     return false;
   }
-
-  if ((millis() - _sleepMs) < SLEEP_STABILIZE_MS) {
+  if (!imuWake()) {
+    LOG_ERR("GYR", "IMU wake failed");
     return false;
   }
-
-  if (writeReg(REG_CTRL1, CTRL1_BASE) && writeReg(REG_CTRL7, CTRL7_GYRO_ENABLE)) {
-    _lastPollMs = millis();
-    _lastTiltMs = millis();
-    _wakeMs = millis();
-    LOG_INF("GYR", "QMI8658 woke up");
-    return true;
-  } else {
-    LOG_ERR("GYR", "Failed to wake QMI8658");
-    return false;
-  }
+  _lastPollMs = millis();
+  _lastTiltMs = millis();
+  _wakeMs = millis();
+  LOG_INF("GYR", "IMU woke up");
+  return true;
 }
 
 bool HalTiltSensor::deepSleep() {
   if (!_available) {
     return false;
   }
-
-  if ((millis() - _wakeMs) < SLEEP_STABILIZE_MS) {
+  if (!imuSleep()) {
+    LOG_ERR("GYR", "IMU sleep failed");
     return false;
   }
-
-  if (writeReg(REG_CTRL7, CTRL7_DISABLE_ALL) && writeReg(REG_CTRL1, CTRL1_BASE | CTRL1_SENSOR_DISABLE)) {
-    clearPendingEvents();
-    _inTilt = false;
-    _sleepMs = millis();
-    LOG_INF("GYR", "QMI8658 entered sleep mode");
-    return true;
-  } else {
-    LOG_ERR("GYR", "Failed to put QMI8658 to sleep");
-    return false;
-  }
+  clearPendingEvents();
+  _inTilt = false;
+  LOG_INF("GYR", "IMU entered sleep mode");
+  return true;
 }
 
 void HalTiltSensor::update(CrossPointTiltPageTurn::Value mode, CrossPointOrientation::Value orientation,
@@ -156,10 +108,12 @@ void HalTiltSensor::update(CrossPointTiltPageTurn::Value mode, CrossPointOrienta
   }
   _lastPollMs = now;
 
-  float gx, gy, gz;
-  if (!readGyro(gx, gy, gz)) {
+  Imu::Sample sample;
+  if (!imuRead(sample)) {
     return;
   }
+  const float gx = sample.gx;
+  const float gy = sample.gy;
 
   float tiltAxis;
   switch (orientation) {
