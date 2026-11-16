@@ -14,7 +14,7 @@ hold them, and the Picco and the T5 S3 show when they charge from a wall charger
   Book IV with nothing prepared: on the X3 the page shows after 3.8 s instead of 6.2 s, on the X4 Pro after 3.6 s
   instead of 9.2–9.6 s. A page of text is no longer drawn a second time when the rest of the chapter is ready; its
   page count keeps the `~` of an estimate until you turn the page. Page turns, opens and memory against CrossPoint,
-  measured on the X3, the X4 Pro and the BOOX Picco:
+  measured on the X3, the X4, the X4 Pro and the BOOX Picco:
   [Feature comparison](docs/feature-comparison.md#measured-speed-and-memory).
 - **Normalize Font Size no longer reads the book twice on its first open** (about 2 s of *The Odyssey*'s, on the X3
   and the X4 Pro). The size of the book's running text is measured while its chapters are laid out. A book whose text
