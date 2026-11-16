@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -1622,6 +1623,49 @@ TEST_F(ShapedLayout, ALineWhoseTokensTheHeapRefusesIsLaidOutWithoutBidi) {
   EXPECT_EQ(std::string("abc"), line.wordText(2));
   EXPECT_FALSE(latch);
   EXPECT_EQ(0u, text.tokensShaped());
+}
+
+TEST_F(ShapedLayout, ALineWhosePiecesTheHeapRefusesIsLaidOutWithoutBidi) {
+  // formBidiPieces() gives each piece its x and its form in vectors kept across lines; their room is checked before
+  // they grow (ParsedText::layOutBidiLine). A left-to-right paragraph: its Latin first line grows the line pass's own
+  // buffers but takes the plain path, which needs no piece forms. With the heap refused from then on, the second
+  // line's Hebrew fits the line pass's buffers and asks only for the piece vectors: refused, the line is laid out
+  // without bidi, as when its tokens are refused. Unchecked, they would grow, and a growth the heap cannot give aborts
+  // on the device.
+  const std::vector<Word> words = {{"alpha"}, {"bravo"}, {"charlie"}, {"delta"}, {"שלום"}, {"עולם"}};
+  constexpr int kWidth = 240;  // the four Latin words, then the two Hebrew ones
+  const auto layOutRefusingAfterTheFirstLine = [&](ParsedText& text) {
+    Lines lines;
+    std::optional<LargestFreeBlock> refused;
+    text.layoutAndExtractLines(
+        renderer, 1, static_cast<uint16_t>(kWidth),
+        [&](std::unique_ptr<TextBlock> line, bool, bool) {
+          lines.push_back(std::move(line));
+          if (!refused) refused.emplace(0);
+          return ParsedText::LineProcessResult::Accepted;
+        },
+        true);
+    return lines;
+  };
+
+  ParsedText roomy(false, false, noIndentStyle());
+  add(roomy, words);
+  const Lines bidiLines = layOut(roomy, renderer, kWidth);
+  ASSERT_EQ(2u, bidiLines.size());
+  ASSERT_EQ(4u, bidiLines[0]->wordCount());       // the Latin words
+  EXPECT_FALSE(bidiLines[0]->hasLogicalOrder());  // the plain path
+  ASSERT_EQ(2u, bidiLines[1]->wordCount());
+  EXPECT_TRUE(bidiLines[1]->hasLogicalOrder());  // with room, the Hebrew line takes the bidi path
+
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, words);
+  const Lines lines = layOutRefusingAfterTheFirstLine(text);
+  ASSERT_EQ(2u, lines.size());
+  ASSERT_EQ(2u, lines[1]->wordCount());
+  EXPECT_FALSE(lines[1]->hasLogicalOrder());
+  EXPECT_EQ(std::string("שלום"), lines[1]->wordText(0));  // logical order, as laid out without bidi
+  EXPECT_FALSE(latch);
 }
 
 TEST_F(ShapedLayout, ALentArenaHoldsTheLinesTokensForThePass) {

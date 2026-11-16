@@ -671,9 +671,13 @@ produces; a power cut leaves at worst bytes nothing references.
     the last one's `base`, and waits for an open; the hard bound is 3,968 (4,096 less two rings of 64 segments): no
     segment gets an epoch that far past the base until the index is rebuilt, in idle time if need be.
 - **The identity** is FNV-1a over the families' identities in the set's order (`ttf::setIdentity`); a family's is
-  FNV-1a over each style file's name, size and modification time and the engine's render version
-  (`ttf::kRenderVersion`, 4; `ttf::familyIdentity`). A store of another identity, or one whose header fails its
-  check, is installed again.
+  FNV-1a over each style file's name, then its size, FAT date and time and table directory digest (`u32`, `u16`,
+  `u16`, `u32`, little-endian), and the engine's render version (`ttf::kRenderVersion`, 4; `ttf::familyIdentity`).
+  The digest is FNV-1a over the sfnt version and each directory record's tag, checksum, offset and length, all `u32`
+  little-endian (`ttf::tableDirectoryHash`): a file replaced by another of the same name, size and time (the device
+  stamps what it writes 1980-01-01 00:00 while its clock is not set) changes it. A store of another identity, or one
+  whose header fails its check, is installed again, and the family's font IDs, which seed from the identity, change
+  with it, so its laid-out sections are built again.
 
 Version 1 held one family: four style blocks, and a size table of bare ppems with pairs keyed by style alone.
 Version 2 had the mode in the `Geometry`, the store's, and a table map in each `StyleInfo` (1,240 B headers).

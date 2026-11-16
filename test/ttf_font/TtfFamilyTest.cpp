@@ -51,10 +51,18 @@ std::array<uint8_t, glyphstore::kIdentityBytes> identityAt(const ttf::FileStamp 
       hash = glyphstore::fnv1a(&marker, 1, hash);
       if (!file.name) continue;
       hash = glyphstore::fnv1a(file.name, std::strlen(file.name) + 1, hash);
-      const uint8_t fields[8] = {static_cast<uint8_t>(file.size),       static_cast<uint8_t>(file.size >> 8),
-                                 static_cast<uint8_t>(file.size >> 16), static_cast<uint8_t>(file.size >> 24),
-                                 static_cast<uint8_t>(file.date),       static_cast<uint8_t>(file.date >> 8),
-                                 static_cast<uint8_t>(file.time),       static_cast<uint8_t>(file.time >> 8)};
+      const uint8_t fields[12] = {static_cast<uint8_t>(file.size),
+                                  static_cast<uint8_t>(file.size >> 8),
+                                  static_cast<uint8_t>(file.size >> 16),
+                                  static_cast<uint8_t>(file.size >> 24),
+                                  static_cast<uint8_t>(file.date),
+                                  static_cast<uint8_t>(file.date >> 8),
+                                  static_cast<uint8_t>(file.time),
+                                  static_cast<uint8_t>(file.time >> 8),
+                                  static_cast<uint8_t>(file.directory),
+                                  static_cast<uint8_t>(file.directory >> 8),
+                                  static_cast<uint8_t>(file.directory >> 16),
+                                  static_cast<uint8_t>(file.directory >> 24)};
       hash = glyphstore::fnv1a(fields, sizeof fields, hash);
     }
     hash = glyphstore::fnv1a(&version, 1, hash);
@@ -484,11 +492,74 @@ TEST(TtfFamily, TheIdentityChangesWithAnyFileDetail) {
   redated[0].date += 1;
   ttf::FileStamp retimed[4] = {base[0], base[1]};
   retimed[1].time += 2;
+  ttf::FileStamp rewritten[4] = {base[0], base[1]};  // same name, size and time, other tables
+  rewritten[0].directory ^= 1;
   ttf::FileStamp moved[4] = {base[0], {}, base[1]};  // the second file now serves italic, not bold
   ttf::FileStamp fewer[4] = {base[0]};
-  for (const auto* other : {&renamed, &resized, &redated, &retimed, &moved, &fewer}) {
+  for (const auto* other : {&renamed, &resized, &redated, &retimed, &rewritten, &moved, &fewer}) {
     EXPECT_NE(identity, identityOf(*other));
   }
+}
+
+TEST(TtfFamily, TheDirectoryHashIsFnvOverTheVersionAndEachRecord) {
+  MemoryFile file{readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf")};
+  const uint8_t* bytes = file.bytes.data();
+  const auto be32At = [&](const size_t at) {
+    return uint32_t{bytes[at]} << 24 | uint32_t{bytes[at + 1]} << 16 | uint32_t{bytes[at + 2]} << 8 | bytes[at + 3];
+  };
+  const auto le = [](const uint32_t v, uint8_t* out) {
+    for (int b = 0; b < 4; ++b) out[b] = static_cast<uint8_t>(v >> (8 * b));
+  };
+  uint8_t word[4];
+  le(be32At(0), word);
+  uint32_t expected = glyphstore::fnv1a(word, sizeof word);
+  const unsigned numTables = static_cast<unsigned>(bytes[4]) << 8 | bytes[5];
+  ASSERT_GT(numTables, 8u);  // more than one of the walk's eight-record reads
+  for (unsigned i = 0; i < numTables; ++i) {
+    uint8_t fields[16];
+    for (int f = 0; f < 4; ++f) le(be32At(12 + 16 * i + 4 * f), fields + 4 * f);
+    expected = glyphstore::fnv1a(fields, sizeof fields, expected);
+  }
+  uint32_t hash = 0;
+  ASSERT_TRUE(ttf::tableDirectoryHash(file.source(), &hash));
+  EXPECT_EQ(expected, hash);
+}
+
+TEST(TtfFamily, AFileReplacedAtTheSameSizeAndTimeGetsAnotherIdentity) {
+  // The device stamps what it writes 1980-01-01 00:00 while its clock is not set: a font uploaded over another of the
+  // same size keeps its name, size and time. Its tables do not, and the store and the laid-out pages must not stay.
+  MemoryFile before{readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf")};
+  MemoryFile after{before.bytes};
+  after.bytes[12 + 16 * 3 + 4] ^= 0x5A;  // the fourth table's checksum: another build of the font
+  uint32_t was = 0;
+  uint32_t is = 0;
+  ASSERT_TRUE(ttf::tableDirectoryHash(before.source(), &was));
+  ASSERT_TRUE(ttf::tableDirectoryHash(after.source(), &is));
+  EXPECT_NE(was, is);
+  const auto size = static_cast<uint32_t>(before.bytes.size());
+  const ttf::FileStamp oldFamily[4] = {{"Serif-Regular.ttf", size, 0x0021, 0x0000, was}};
+  const ttf::FileStamp newFamily[4] = {{"Serif-Regular.ttf", size, 0x0021, 0x0000, is}};
+  EXPECT_NE(identityOf(oldFamily), identityOf(newFamily));
+
+  uint32_t again = 0;
+  ASSERT_TRUE(ttf::tableDirectoryHash(before.source(), &again));
+  EXPECT_EQ(was, again);  // the same file, the same identity: nothing installed again
+}
+
+TEST(TtfFamily, TheDirectoryHashFailsOnlyOnAReadError) {
+  MemoryFile font{readFont("SourceSerif4Caption/SourceSerif4Caption-Regular.ttf")};
+  uint32_t hash = 0;
+  font.failReads = true;
+  EXPECT_FALSE(ttf::tableDirectoryHash(font.source(), &hash));
+  font.failReads = false;
+  font.readsTo = 12 + 16 * 8;  // the header and the first eight records read, the next eight fail
+  EXPECT_FALSE(ttf::tableDirectoryHash(font.source(), &hash));
+
+  // A collection is no font the engine draws: its load refuses it, and its digest is the version's alone.
+  MemoryFile collection{{'t', 't', 'c', 'f', 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 12}};
+  ASSERT_TRUE(ttf::tableDirectoryHash(collection.source(), &hash));
+  const uint8_t ttcf[4] = {'f', 'c', 't', 't'};  // the tag, little-endian
+  EXPECT_EQ(glyphstore::fnv1a(ttcf, sizeof ttcf), hash);
 }
 
 TEST(TtfFamily, TheIdentityChangesWithTheRenderVersion) {

@@ -215,10 +215,18 @@ struct FileStamp {
   uint32_t size = 0;
   uint16_t date = 0;  ///< FAT modification date and time
   uint16_t time = 0;
+  uint32_t directory = 0;  ///< tableDirectoryHash() of the file
 };
 
-/// The family identity (spec 4.2): FNV-1a over each style's file name, size and modification time, and
-/// kRenderVersion, in four lanes with different seeds. Any change to a file gives a new identity.
+/// FNV-1a over a font file's table directory: the sfnt version, then each record's tag, checksum, offset and length,
+/// little-endian. Name, size and time miss a file replaced by another of the same size: the device stamps every file
+/// it writes 1980-01-01 00:00 while its clock is not set. Its tables differ, and a flash-mode store and the pages laid
+/// out with its glyph IDs must not outlive them. A file that is no sfnt the engine reads (a collection, a directory
+/// that does not fit it) gets the version's hash alone: its load refuses it. False when a read fails.
+bool tableDirectoryHash(const FileSource& file, uint32_t* hash);
+
+/// The family identity (spec 4.2): FNV-1a over each style's file name, size, modification time and table directory,
+/// and kRenderVersion, in four lanes with different seeds. Any change to a file gives a new identity.
 void familyIdentity(const FileStamp (&styles)[4], uint8_t out[glyphstore::kIdentityBytes]);
 
 /// A family set's identity, the glyph store's (spec 11.1): FNV-1a over the families' identities in the set's

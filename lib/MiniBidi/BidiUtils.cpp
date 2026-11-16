@@ -14,11 +14,36 @@ extern "C" {
 #include <cstring>
 #include <mutex>
 
+#if defined(ESP_PLATFORM)
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#endif
+
 // Guards the shared workspace in applyBidiVisual() and
 // computeVisualWordOrder().  The bidi+shaping pipeline is not reentrant;
 // this mutex serialises access so multi-core callers don't corrupt each
 // other's intermediate state.
-static std::mutex bidiMutex;
+#if defined(ESP_PLATFORM)
+// witchhunt: deviation 1 - a FreeRTOS mutex in .bss, as Logging.cpp's logMutex(), not a std::mutex: ESP-IDF makes a
+// std::mutex's pthread mutex and its semaphore on the heap at its first lock (pthread_mutex_init_if_static), which is
+// the end of the first section build of any book, mid-session, and frees neither. crosspoint-reader #3787's
+// shaperMutex() was the same allocation.
+class BidiLock {
+ public:
+  void lock() { xSemaphoreTake(handle(), portMAX_DELAY); }
+  void unlock() { xSemaphoreGive(handle()); }
+
+ private:
+  static SemaphoreHandle_t handle() {
+    static StaticSemaphore_t storage;
+    static SemaphoreHandle_t mutex = xSemaphoreCreateMutexStatic(&storage);
+    return mutex;
+  }
+};
+#else
+using BidiLock = std::mutex;
+#endif
+static BidiLock bidiMutex;
 
 namespace {
 
@@ -127,7 +152,7 @@ struct ShapedBuffer {
 template <bool Shape>
 bool applyBidiVisualImpl(const char* utf8, std::string& out, int paragraphLevel) {
   if (!utf8 || !*utf8) return false;
-  const std::lock_guard<std::mutex> lock(bidiMutex);
+  const std::lock_guard<BidiLock> lock(bidiMutex);
 
   auto* const workspace = getWorkspace();
   if (!workspace) return false;
@@ -361,14 +386,14 @@ size_t arabicUiFormsSource(const std::string& logical, const size_t formedPos) {
 
 // witchhunt: deviation 1 - release the workspace when a section build ends; getWorkspace() reallocates on demand.
 void releaseWorkspace() {
-  const std::lock_guard<std::mutex> lock(bidiMutex);
+  const std::lock_guard<BidiLock> lock(bidiMutex);
   bidiWorkspace.reset();
   boundWorkspace = nullptr;
 }
 
 // witchhunt: deviation 1
 void bindWorkspace(void* buffer) {
-  const std::lock_guard<std::mutex> lock(bidiMutex);
+  const std::lock_guard<BidiLock> lock(bidiMutex);
   boundWorkspace = static_cast<BidiWorkspace*>(buffer);
 }
 
@@ -399,7 +424,7 @@ std::string visualUiLine(const std::string& logical, const int paragraphLevel) {
   const bool formed = applyBidiVisual(logical.c_str(), out, paragraphLevel < 0 ? -1 : (paragraphLevel & 1));
   if (!held) {
     // Only the heap workspace this call made: a bound one stays bound, and one a build made stays for it.
-    const std::lock_guard<std::mutex> lock(bidiMutex);
+    const std::lock_guard<BidiLock> lock(bidiMutex);
     bidiWorkspace.reset();
   }
   return formed ? out : logical;
@@ -409,19 +434,19 @@ bool orderUiLine(const uint32_t* cps, const size_t count, const int paragraphLev
   const bool held = heapWorkspaceHeld();
   const bool ordered = orderLine(cps, count, paragraphLevel, visual, drawn);
   if (!held) {
-    const std::lock_guard<std::mutex> lock(bidiMutex);
+    const std::lock_guard<BidiLock> lock(bidiMutex);
     bidiWorkspace.reset();
   }
   return ordered;
 }
 
 bool workspaceAvailable() {
-  const std::lock_guard<std::mutex> lock(bidiMutex);
+  const std::lock_guard<BidiLock> lock(bidiMutex);
   return getWorkspace() != nullptr;
 }
 
 bool heapWorkspaceHeld() {
-  const std::lock_guard<std::mutex> lock(bidiMutex);
+  const std::lock_guard<BidiLock> lock(bidiMutex);
   return static_cast<bool>(bidiWorkspace);
 }
 
@@ -466,7 +491,7 @@ bool hasRtlClass(const char* utf8, const size_t len) {
 // witchhunt: deviation 11 - re-states applyBidiVisual's marks-after-base rule (L3) over indices.
 bool orderLine(const uint32_t* cps, const size_t count, const int paragraphLevel, uint16_t* visual, uint32_t* drawn) {
   if (!cps || !visual || !drawn || count == 0 || count > kMaxLineCodepoints) return false;
-  const std::lock_guard<std::mutex> lock(bidiMutex);
+  const std::lock_guard<BidiLock> lock(bidiMutex);
 
   auto* const workspace = getWorkspace();
   if (!workspace) return false;
@@ -527,7 +552,7 @@ bool computeVisualWordOrder(const std::string_view* words, const size_t wordCoun
   visualOrder.clear();
   const size_t nWords = wordCount;
   if (nWords <= 1 || nWords > BIDI_MAX_LINE) return false;
-  const std::lock_guard<std::mutex> lock(bidiMutex);
+  const std::lock_guard<BidiLock> lock(bidiMutex);
 
   auto* const workspace = getWorkspace();
   if (!workspace) return false;
