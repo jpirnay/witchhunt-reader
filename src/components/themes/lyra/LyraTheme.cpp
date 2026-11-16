@@ -69,7 +69,7 @@ void drawLyraBatteryIcon(const GfxRenderer& renderer, int x, int y, int battWidt
                          uint16_t percentage) {
   BaseTheme::drawBatteryOutline(renderer, x, y, battWidth, rectHeight);
 
-  const bool charging = gpio.isUsbConnected();
+  const bool charging = powerManager.isExternalPowerPresent();
 
   if (charging) {
     // Draw solid fill when charging so lightning bolt is visible

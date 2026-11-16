@@ -135,8 +135,9 @@ struct SystemStatus {
     s.batteryPercent = powerManager.getBatteryPercentage();
     // Route through the HAL rather than reading UART0_RXD directly: that pin is
     // the X4-only USB detect, and on X3 it is repurposed as I2C SDA, where the
-    // bus pull-ups made this read HIGH (= "charging") permanently.
-    s.charging = gpio.isUsbConnected();
+    // bus pull-ups made this read HIGH (= "charging") permanently. The power
+    // manager also asks a charger IC, which sees a wall charger (Picco, T5S3).
+    s.charging = powerManager.isExternalPowerPresent();
     s.uptimeSeconds = millis() / 1000;
     const auto& sleepStats = powerManager.lightSleepStats();
     s.lightSleepRaw = sleepStats;

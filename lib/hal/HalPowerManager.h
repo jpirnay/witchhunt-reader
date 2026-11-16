@@ -24,8 +24,13 @@ class HalPowerManager {
   mutable int _batteryCachedPercent = 0;         // Last read battery percentage — X3: 0-100, X4: 0-1000 (scaled)
   mutable bool _batterySeeded = false;           // True once the smoothing filter has a first real sample (X4)
   mutable unsigned long _batteryLastPollMs = 0;  // Timestamp of last battery read in milliseconds
-  bool _gaugeCapacityPending = true;             // serviceGaugeCapacityLoad() has steps left
-  unsigned long _gaugeCapacityStartMs = 0;       // first serviceGaugeCapacityLoad() call; 0 = not yet
+  mutable bool _chargerInputPower = false;       // The charger IC's last answer (chargerReportsInputPower boards)
+  mutable unsigned long _chargerLastPollMs = 0;  // When it was asked; 0 = never
+  bool _chargerInputReported = false;            // The answer wasChargerInputChanged() last reported
+  // The charger IC's answer, asked at most once per BATTERY_POLL_MS. False on a board without one.
+  bool chargerInputPower() const;
+  bool _gaugeCapacityPending = true;        // serviceGaugeCapacityLoad() has steps left
+  unsigned long _gaugeCapacityStartMs = 0;  // first serviceGaugeCapacityLoad() call; 0 = not yet
 
   enum LockMode { None, NormalSpeed };
   std::atomic<LockMode> currentLockMode{None};
@@ -170,6 +175,18 @@ class HalPowerManager {
 
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;
+
+  // Power is coming in: what the charging bolt and "Charging" show. A USB host link always counts
+  // (HalGPIO::isUsbConnected()). A wall charger enumerates nothing, so a board whose charger IC reports its input
+  // (HalCapabilities::chargerReportsInputPower()) asks the charger too, at most once per BATTERY_POLL_MS under the
+  // I2C lock: the status bar asks on every draw, from the render task. isUsbConnected() keeps its own meaning, a
+  // link or cable, for the light-sleep, serial-log and wake decisions that hang on it.
+  bool isExternalPowerPresent() const;
+
+  // Loop task: true once each time the charger IC's answer changes, so the battery icon redraws when a wall charger
+  // is plugged in or out, as HalGPIO::wasUsbStateChanged() does it for a USB host. Asks only the charger (never
+  // isUsbConnected(), an I2C read per call on the X3); false on a board without one.
+  bool wasChargerInputChanged();
 
   // Loads the board profile's cell capacity into a BQ27220 that has lost it (X3:
   // 650 mAh against TI's 3000 mAh power-on default). One short step per call over
