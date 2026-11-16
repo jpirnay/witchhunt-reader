@@ -302,6 +302,15 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
   with a pixel cache replays it, any other is drawn as an "indexing" placeholder, so no decode runs
   on the build's heap. The `Normal` render after the build draws the images. Page reads flush the
   writer first so a second handle sees committed bytes.
+- **Through the page's refresh:** `displayBuildPage()` starts the refresh, releases the render lock and waits for the
+  waveform, and the slices go on meanwhile: the HALF a new chapter opens with is 1.7 s on the X4. Where the card has
+  its own bus and the build's arena is PSRAM (`HalCapabilities::decodesThroughRefresh`: X4 Pro) nothing more is needed.
+  Where the card shares the panel's SPI bus the wait itself was in the way: `HalDisplay::completeDisplay()` holds the
+  bus lock for the whole waveform, the build reads the chapter from the card, and the slice therefore sat out every
+  pending refresh. On a panel that needs the bus only to start and to finish a refresh
+  (`HalDisplay::refreshLeavesBusToCard()`: the X4) the waveform is waited for without the lock (`waitRefreshOffBus()`)
+  and the slice runs through that one refresh (`BuildDuringRefresh.h`). The X3 and the T5S3 still wait; a driver that
+  blocks in `triggerDisplay` (Murphy, Picco) leaves nothing to build through.
 - **Navigation during the build:** only for an explicit `Page` target — forward advances
   optimistically (shows the page once C reaches it, popup until then), back works, back past page 0
   leaves the chapter. A chapter-list, anchor or saved-text target resolves as soon as the build has

@@ -55,6 +55,7 @@
 #include "BookPackOffer.h"
 #include "BookRelocation.h"
 #include "BookSearchActivity.h"
+#include "BuildDuringRefresh.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "DarkMode.h"
@@ -2721,8 +2722,14 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   RenderLock lock;
   // A refresh in flight holds the panel's bus. Where the card is on another one and the build's memory is PSRAM, the
   // slice runs through it, as an image decode does (HalCapabilities::decodesThroughRefresh): on the X4 Pro the build
-  // under the live bars sat out 1.3 s of refreshes in a 6.2 s rebuild.
-  const bool refreshBlocks = renderer.isRefreshPending() && !HalCapabilities::decodesThroughRefresh();
+  // under the live bars sat out 1.3 s of refreshes in a 6.2 s rebuild. Where the card shares the bus, it runs through
+  // the refresh of the page the build drew, whose wait has let go of the bus (displayBuildPage).
+  BuildDuringRefresh::Slice slice;
+  slice.refreshPending = renderer.isRefreshPending();
+  // cppcheck-suppress knownConditionTrueFalse ; a constant of each board: false on a C3 build, true on the X4 Pro
+  slice.cardOffPanelBus = HalCapabilities::decodesThroughRefresh();
+  slice.buildPageWaitOffBus = buildPageWaitOffBus_.load(std::memory_order_acquire);
+  const bool refreshBlocks = BuildDuringRefresh::sliceWaits(slice);
   if (!epub || !section || !section->hasActiveBuild() || refreshBlocks || imageProcessingActive_) {
     return;
   }
@@ -7111,8 +7118,18 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   // Release the lock before the (blocking) waveform wait so stepCurrentSectionBuild() can run a
   // build slice on the loop task while the panel refreshes — the same hand-off renderContents()
   // uses for Background-A.
+  //
+  // With the card on the panel's bus that takes one thing more: completeDisplay() holds the bus lock for the whole
+  // waveform, and the build reads the chapter from the card. So the waveform is waited for without the lock, where
+  // the panel needs the bus only for the finish (BuildDuringRefresh.h). The flag tells the loop task's slice that
+  // this pending refresh, and no other, may be built through; set under the render lock, so no slice sees it early.
+  const bool waitOffBus =
+      BuildDuringRefresh::waitsOffBus(renderer.isRefreshPending(), renderer.refreshLeavesBusToCard());
+  buildPageWaitOffBus_.store(waitOffBus, std::memory_order_release);
   lock.unlock();
+  if (waitOffBus) renderer.waitRefreshOffBus();
   renderer.completeDisplay();
+  buildPageWaitOffBus_.store(false, std::memory_order_release);
   // On a cache miss this mid-build page is what the user actually sees first, well before the
   // build completes and renderNormalPass() runs — so the trace has to close here or a miss
   // would report a wake latency that includes the whole rest of the build. After

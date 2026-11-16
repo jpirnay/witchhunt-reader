@@ -534,6 +534,9 @@ class EpubReaderActivity final : public Activity {
   LandedText landedText_;
   // True while pageTurn() waits for the render lock: the one sign the render task can read that a turn is on its way.
   std::atomic<bool> pageTurnWaitingForLock_{false};
+  // True while displayBuildPage() waits for its page's waveform without the bus lock: the loop task's build slice may
+  // run through that pending refresh (BuildDuringRefresh.h). Written by the render task, read by the loop task.
+  std::atomic<bool> buildPageWaitOffBus_{false};
   // True once the "Indexing" popup has been drawn for the current pending page, so the pass
   // doesn't re-flush it every tick. Cleared whenever a real page is drawn or the build ends.
   bool buildingPopupShown_ = false;
