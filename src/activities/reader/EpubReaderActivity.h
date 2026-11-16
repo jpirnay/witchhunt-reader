@@ -22,6 +22,7 @@
 #include "BookReaderOverrides.h"
 #include "BookSearchSession.h"
 #include "BookmarkStore.h"
+#include "BuildThroughGate.h"
 #include "ChapterPageSpan.h"
 #include "CrossPointState.h"
 #include "EpubLinkBackStack.h"
@@ -438,6 +439,15 @@ class EpubReaderActivity final : public Activity {
   // BG_BUILD_THROUGH_PAGES). Those pages draw in BW with no pre-render. Cleared when the buffer
   // goes back or the build passes to the foreground.
   bool backgroundBuildThrough_ = false;
+  // B's borrow seeded the panel's previous-frame plane (RED) from the frame on screen
+  // (beginBackgroundBorrow), at framesShipped() == backgroundSeedFrame_. Only on a panel whose FAST
+  // refresh diffs against the host's previous frame (the X4); what lets its pages draw FAST while B
+  // holds the buffer.
+  bool backgroundRedSeeded_ = false;
+  uint32_t backgroundSeedFrame_ = 0;
+  // A build-through on such a panel turned single-buffer fast differential on for its pages; turned
+  // off when the buffer goes back.
+  bool backgroundBuildThroughFastDiff_ = false;
   // The next chapter, abandoned to BG_BUILD_MAX_PREEMPTIONS while the reader was mid-chapter. It
   // gets one more try once the reader is on its last pages, in build-through mode, instead of
   // being left to the foreground "Indexing". -1 when none; cleared when the reader moves on.
@@ -747,9 +757,14 @@ class EpubReaderActivity final : public Activity {
   // Opportunistically restore the secondary display buffer if a prior OOM degraded it.
   void recoverSecondaryBufferIfNeeded();
   // The reader is within BG_BUILD_THROUGH_PAGES of the end of the chapter on screen, on a panel
-  // that can show pages while Background-B holds the secondary buffer: one whose FAST refresh
-  // needs no host-side previous frame (GfxRenderer::fastRefreshNeedsHostFrame() false, the X3).
+  // that can show pages while Background-B holds the secondary buffer (BuildThroughGate).
   bool nearChapterEndForBuildThrough() const;
+  // What the renderer says for BuildThroughGate.
+  BuildThroughGate::Panel buildThroughPanel() const;
+  // Turns build-through mode on for B's live build: single-buffer fast differential on the X4,
+  // where B's borrow seeded RED with the frame still on screen. False, and nothing changed, where
+  // that seed is not there (BuildThroughGate::mayBegin).
+  bool beginBuildThrough();
   // `spine` is a later file of the TOC chapter on screen, and the status bar shows the chapter page
   // counter, which stays an estimate until that file's page count is recorded (ChapterPageSpan).
   // Background-B builds such a file past the BG_BUILD_LOOKAHEAD_PAGES budget (#580).
