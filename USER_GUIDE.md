@@ -540,6 +540,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 
 - **Reading Orientation**: Screen orientation for reading:
   - "Portrait" (default), "Landscape CW", "Inverted", "Landscape CCW"
+- **Auto-Rotate** *(X3 and BOOX Picco)*: The reader turns to the way you hold the device. Turn it a quarter round, or upside down, and hold it there for a moment: the page follows. Lying flat or held near a diagonal, it keeps its orientation, and the quick flick of **Tilt Page Turn** does not turn it. An orientation you choose by hand stays until you hold the device a new way. Turning between upright and sideways lays the chapter out again; a layout the book has had before comes back at once. EPUB, TXT and Markdown books turn; XTC books are made for one orientation and do not. Also on the reader bars' **Orientation** tab. "OFF" (default) / "ON"
 
 **EPUB Font** (submenu):
 - **Font Family**: Font used for EPUB reading. Includes built-in fonts (Serif, made from Adobe's Source Serif 4, and Noto Sans) plus any TrueType (`.ttf`) or OpenType (`.otf`) fonts and `.cpfont` fonts installed on the SD card. To add a TrueType or OpenType font of your own, use **Upload a font** in the web interface's Font Manager (see the [Web Interface Guide](./docs/webserver.md#7-font-manager)): the reader draws it at every size. A TrueType or OpenType font without a bold file draws bold text emboldened, and without an italic file draws italic text slanted.
@@ -598,10 +599,11 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 - **Gesture actions** *(touch devices only)*: One entry per gesture — the sideways swipes, the four edge swipes (left and right edge columns, up and down), the two ten-page zone swipes, the five tap zones, the same five as long taps, the four corner holds, pinch and rotation — each assigned an action from the same list the buttons offer. See **[Touch Controls](#5-touch-controls)**.
 - **Gesture overview** *(touch devices only)*: A read-only screen drawing the tap, hold and swipe zones with your current assignments in them. Generated from live settings, so it is the authority if the documentation disagrees.
 - **Slide Switch** *(BOOX Picco only)*: What the slide switch turns on and off: "Reading Light" (default), "Dark Mode" or "Nothing". Its position counts at start-up and each time it moves; in between, the light and Dark Mode can still be changed on the screen.
-- **Tilt Page Turn** *(X3 only)*: Use the tilt sensor to turn pages by tilting the device. Sub-settings:
-  - **Enable Tilt Page Turn**: "ON" / "OFF"
-  - **Tilt Right action**: "None", "Next Page", "Prev Page"
-  - **Tilt Left action**: "None", "Next Page", "Prev Page"
+- **Tilt Page Turn** *(X3 and BOOX Picco)*: Turn pages with a quick flick of the device: tilt it and bring it back. Sub-settings:
+  - **Tilt Page Turn**: "ON" / "OFF"
+  - **Tilt Direction**: "Left / Right" (default), a twist that moves the right or the left edge away from you; or "Forward / Back", the top edge tipped away from you (forward) or toward you (back). Both follow the reading orientation.
+  - **Tilt Right / Forward**: what a flick to the right, or forward, does: "None", "Next Page" (default), "Prev Page"
+  - **Tilt Left / Back**: what a flick to the left, or back, does: "None", "Next Page", "Prev Page" (default)
 
 #### 3.7.4 System
 
@@ -879,7 +881,7 @@ This feature can be disabled in the **[Controls Settings](#373-controls)** to he
   - **Navigation** (a list): **Select Chapter** opens the **[Table of Contents](#6-chapter-selection-screen)**, **Bookmarks** the pages you bookmarked, **Go to printed page** a page of the book's print edition (where the book numbers them), **Search** searches the book (**[below](#searching-the-book)**), and **Go Home** closes the book.
   - **Progress** (a dial): how far you are in the book and in the chapter and the time you have spent in the book, with buttons for the previous chapter, **Go to %** and the next chapter. With **[KOReader Sync](#377-koreader-sync-quick-setup)** set up, **Pull** fetches your position from the server and **Push** sends it there. On the Murphy held sideways there is no room for them; the reader menu's **Sync** tab has both.
   - **Layout** (**Aa**): below.
-  - **Orientation** (a turning page): **Portrait**, **Landscape CW**, **Inverted** and **Landscape CCW**, the one you read in marked.
+  - **Orientation** (a turning page): **Portrait**, **Landscape CW**, **Inverted** and **Landscape CCW**, the one you read in marked. On the X3 and BOOX Picco also **Auto-Rotate: On/Off**, which switches in place and takes effect when the bars close.
   - **More** (three dots) opens the reader menu.
 
   With the keys, **Left / Right** move along a row, **Up / Down** between the rows as they lie on screen, **Confirm** chooses, and **Back** (or a tap on the page) closes the bars. Closing a tab (its icon again, or **Back**) closes the bars as well.

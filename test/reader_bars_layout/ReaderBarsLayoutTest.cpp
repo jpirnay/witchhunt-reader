@@ -88,7 +88,8 @@ Laid layOut(const Board& board, const bool sideways, const rb::Panel panel) {
   laid.model.goToLabel = "Go to %";
   laid.model.syncPullLabel = "Pull";
   laid.model.syncPushLabel = "Push";
-  // The longest lists the bars make: Navigation with a printed page, the four orientations, one marked.
+  // The longest lists the bars make: Navigation with a printed page, the four orientations, one marked, and the
+  // Auto-Rotate switch of a board with an IMU.
   if (panel == rb::Panel::Navigation) {
     laid.model.list[0] = {"Select Chapter", rb::Button::Chapters, false};
     laid.model.list[1] = {"Starred Pages", rb::Button::StarredPages, false};
@@ -101,7 +102,8 @@ Laid layOut(const Board& board, const bool sideways, const rb::Panel panel) {
     laid.model.list[1] = {"Landscape CW", rb::Button::LandscapeCw, false};
     laid.model.list[2] = {"Inverted", rb::Button::Inverted, false};
     laid.model.list[3] = {"Landscape CCW", rb::Button::LandscapeCcw, false};
-    laid.model.listCount = 4;
+    laid.model.list[4] = {"Auto-Rotate: Off", rb::Button::AutoRotate, false};
+    laid.model.listCount = 5;
   }
   laid.sheet.font = {"Font", "Literata"};
   laid.sheet.thisBook = {"This book only", "On"};
@@ -326,8 +328,8 @@ TEST(ReaderBarsLayout, EachActionIsThereOnce) {
       EXPECT_EQ(countOf(laid, button), navigation) << "button " << static_cast<int>(button);
     }
     const size_t orientation = laid.model.panel == rb::Panel::Orientation ? 1u : 0u;
-    for (const rb::Button button :
-         {rb::Button::Portrait, rb::Button::LandscapeCw, rb::Button::Inverted, rb::Button::LandscapeCcw}) {
+    for (const rb::Button button : {rb::Button::Portrait, rb::Button::LandscapeCw, rb::Button::Inverted,
+                                    rb::Button::LandscapeCcw, rb::Button::AutoRotate}) {
       EXPECT_EQ(countOf(laid, button), orientation) << "button " << static_cast<int>(button);
     }
     // Three actions in all: FreeInkApp keeps 8 handlers a screen and drops any past that without a sign.

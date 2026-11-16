@@ -155,6 +155,12 @@ void LineReaderActivity::loop() {
   // overlap (outer thirds vs centre), so the order is not load-bearing.
   if (ReaderUtils::isTouchMenuGesture(renderer, mappedInput) && onConfirmShortPress()) return;
 
+  uint8_t heldOrientation = 0;
+  if (ReaderUtils::takeAutoRotation(heldOrientation)) {
+    applyOrientation(heldOrientation);
+    return;
+  }
+
   auto [prevTriggered, nextTriggered] = ReaderUtils::detectTiltPageTurn();
   // Touch page turns join tilt here rather than in the button event queue: both
   // are gesture sources the queue does not carry, and both must lose to an
@@ -168,6 +174,26 @@ void LineReaderActivity::loop() {
   } else if (nextTriggered) {
     goToNextPage();
   }
+}
+
+void LineReaderActivity::applyOrientation(const uint8_t orientation) {
+  if (SETTINGS.orientation == orientation) {
+    return;
+  }
+  SETTINGS.orientation = orientation;
+  SETTINGS.saveToFile();
+  {
+    // This runs on the loop task, while the render task reads the renderer's orientation
+    // and pageOffsets on every pass. Rebuilding the index here, unlocked, cleared and
+    // refilled the vector under a render that was indexing it. The lock covers the two
+    // writes; the rebuild itself is left to render(), which runs initializeReader() under
+    // the lock it already holds whenever `initialized` is false -- so the slow part does
+    // not hold up this task, and nothing reads a half-built index.
+    RenderLock lock(*this);
+    ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+    initialized = false;
+  }
+  requestUpdate();
 }
 
 void LineReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION action) {

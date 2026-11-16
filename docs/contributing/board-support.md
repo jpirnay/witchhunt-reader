@@ -11,7 +11,7 @@ active profile through `BoardConfig::ACTIVE` and does not hardcode pins.
 | Xteink X4 Pro | ESP32-S3, 8 MB PSRAM | SSD1677, UC8179 or UC8279 depending on batch, 800x480 | GT911 touch, capacitive Home key, two nav keys | `x4pro` |
 | LilyGo T5S3 Pro | ESP32-S3, 8 MB PSRAM | 4.7" 960x540 parallel panel, driven through LovyanGFX | GT911 touch, capacitive Home key, one user key | `lilygo_t5s3` |
 | Murphy M3 | ESP32-S3, 8 MB PSRAM | UC8253, 416x240 | CHSC6x touch, Up, Down, Confirm | `murphy` |
-| Onyx BOOX Picco | ESP32-S3, 8 MB PSRAM | SSD1677 or SSD2677 (the driver probes), 800x480 | TMA525C touch, Power, Up, Down, slide switch | `picco`, `picco_stock` |
+| Onyx BOOX Picco | ESP32-S3, 8 MB PSRAM | SSD1677 or SSD2677 (the driver probes), 800x480 | TMA525C touch, Power, Up, Down, slide switch, tilt sensor | `picco`, `picco_stock` |
 
 X3 and X4 share one binary and are told apart at boot (`HalGPIO::begin()`,
 `BoardConfig::selectDevice()`). The release env names are in
@@ -56,6 +56,11 @@ Rules:
   the SDK's load (`BatteryMonitor::loadDesignCapacity()`) one short step at a time over about 8 s,
   holding `HalI2cBus::Lock` for each step. The SDK writes only when the gauge needs it. Only the X3
   profiles set `designCapacityMah` (650 mAh), so every other board returns on the first call.
+- An IMU reads through the SDK's `freeink::Imu` (`HalTiltSensor`), which applies the profile's mount correction
+  (`imuSwapXY`, `imuFlipX`, `imuFlipY`). Tilt page turns (`lib/hal/TiltRate.h`) and auto-rotate
+  (`lib/hal/OrientationTracker.h`) take its axes in the panel's native frame: X along the long side toward native +x,
+  Y toward native +y, Z into the screen. Check a new board with `CMD:IMU` held still in five poses: normally -x, a
+  quarter clockwise +y, upside down +x, a quarter counter-clockwise -y, flat face up -z. Set the flags until it does.
 - On the ADC-ladder boards (X3, X4) the `InputPins` fields hold ladder indices, not GPIO
   numbers. A test that reads them as pins, for presence or against a GPIO number, answers a
   different question there. Check `inputStyle()` first; `upKeyIsBootStrap()` shows the pattern.
@@ -254,6 +259,8 @@ Its panel is an SE0400NQW47 on an SSD2677 (the driver's probe, boot log).
   (0x51), QMI8658 IMU (0x6A) and the SGM41562 charger (0x03). The light is the SDK's `PiccoDualLed` backend: it is
   present only once `begin()` found it on the bus, every write holds `HalI2cBus::Lock` (the input sampler polls touch
   on that bus), and it keeps its output through deep sleep, so `HalFrontlight::prepareForDeepSleep()` switches it off.
+  The IMU needs no mount flags: `CMD:IMU` read the panel's native frame in the poses (2026-11-16), and auto-rotate was
+  checked by hand on the unit in all four orientations.
   `HalPowerManager::begin()` sets up the charger as the stock firmware does (4.35 V charge voltage).
 - Battery on the ADC (GPIO1, divider 2); no fuel gauge. No USB detect pin, so USB presence comes from the host link
   only: a wall charger does not show the charging bolt.
@@ -338,7 +345,7 @@ CI builds the same five envs (`.github/workflows/ci.yml`).
 - A wrong pin is a black screen, not a compile error. After changing how a C3 board sources pins,
   flash an X3 or X4 and check that it boots to Home, the SD card mounts and a book opens, the
   battery reading is sane (gauge over I2C on the X3, ADC on the X4), and Settings shows the same
-  entries as before (tilt only on the X3).
+  entries as before (tilt and auto-rotate only on the X3).
 - Flash every board whose behaviour changed. Builds and host tests cannot see what a screen shows
   or what a thumb can reach.
 

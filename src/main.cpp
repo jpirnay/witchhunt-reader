@@ -1859,7 +1859,8 @@ void loop() {
   serviceBootPowerRelease();
   HalClock::updatePeriodic();
   halTiltSensor.update(static_cast<CrossPointTiltPageTurn::Value>(SETTINGS.tiltPageTurn),
-                       static_cast<CrossPointOrientation::Value>(SETTINGS.orientation),
+                       static_cast<TiltRate::Axis>(SETTINGS.tiltAxis),
+                       static_cast<CrossPointOrientation::Value>(SETTINGS.orientation), SETTINGS.autoRotate != 0,
                        activityManager.isReaderActivity());
   powerManager.serviceGaugeCapacityLoad();
 

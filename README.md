@@ -15,11 +15,11 @@ included.
 | Device | Chip | Touch | Notes |
 | --- | --- | --- | --- |
 | Xteink X4 | ESP32-C3 | no | software clock |
-| Xteink X3 | ESP32-C3 | no | clock chip, tilt sensor |
+| Xteink X3 | ESP32-C3 | no | clock chip, motion sensor (tilt page turns, auto-rotate) |
 | Xteink X4 Pro | ESP32-S3 | yes | PSRAM, clock chip, reading light |
 | LilyGo T5S3 Pro | ESP32-S3 | yes | PSRAM, clock chip, reading light |
 | Murphy M3 | ESP32-S3 | yes | PSRAM, clock chip, reading light |
-| BOOX Picco | ESP32-S3 | yes | PSRAM, clock chip, reading light, slide switch |
+| BOOX Picco | ESP32-S3 | yes | PSRAM, clock chip, reading light, slide switch, motion sensor |
 
 **Everything runs on the X3 and X4 as well.** The two ESP32-C3 boards have no PSRAM, and still get the whole reader:
 TrueType and OpenType fonts, every script below with OpenType shaping and bidi, vertical Chinese, Japanese and Korean,
