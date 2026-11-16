@@ -49,4 +49,19 @@ std::vector<Entry> scanPlugins();
 // Directory of the named plugin ("<root>/<name>"), or "" when absent. The caller
 // must have validated `name` as a single path component.
 std::string findPluginDir(const char* name);
+
+// True when a normalised card path names something inside a plugin folder: "<root>/<name>/<rest>" for one of
+// kRoots, with a plugin name and a non-empty rest. Plugins written for upstream read their own token and settings
+// with /download?path=<dir>/<file>, and the canonical root sits in /.crosspoint, which the file endpoints otherwise
+// refuse: /download serves such a path anyway, and the folders stay out of every listing.
+inline bool isInsidePluginFolder(const std::string& path) {
+  for (const char* root : kRoots) {
+    const std::string prefix = std::string(root) + "/";
+    if (path.compare(0, prefix.size(), prefix) != 0) continue;
+    const size_t slash = path.find('/', prefix.size());
+    if (slash == std::string::npos || slash == prefix.size()) return false;  // the folder itself, or no name
+    return slash + 1 < path.size();
+  }
+  return false;
+}
 }  // namespace PluginLocations

@@ -580,6 +580,10 @@ endpoints and WebDAV. The rules are in
   `/.crosspoint` can be cleaned up. But an item whose own name starts with `.` still
   cannot be read, written, renamed, moved or deleted. WebDAV ignores the setting
   and always refuses dot segments.
+- One exception, for plugins: `/download` reads a file inside a plugin folder
+  (`/.crosspoint/plugins/<name>/...`, and the other plugin roots) at its exact path,
+  whatever the setting, and the plugin write endpoints write inside the calling plugin's own
+  folder. Plugins keep their token and settings there. The folders stay out of every listing.
 - Names are judged as the SD library opens them: leading spaces and trailing dots
   and spaces are dropped, so `/ .crosspoint` and `/.crosspoint.` are
   `/.crosspoint`. Matching ignores case.
@@ -979,6 +983,34 @@ forwarded, so the caller infers the type from what it asked for.
 A transfer that fails or hits the ceiling *after* data has been sent ends as a
 truncated 200; the failure is logged (`[WEB]`).
 
+
+### POST `/api/relay` - Relay a Request for a Plugin (upstream's form)
+
+The relay plugins written for upstream crosspoint-reader use. Body (`application/json` only, see
+[sd-plugins.md](sd-plugins.md#trust)):
+
+```json
+{"plugin": "wallabag", "method": "POST", "url": "https://wallabag.example/oauth/v2/token",
+ "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "body": "grant_type=password&..."}
+```
+
+- `method`: GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS or a WebDAV method (PROPFIND, MKCOL, MOVE, COPY,
+  LOCK, UNLOCK); `headers` an object, or a list of `[name, value]` pairs. Host, Content-Length, Connection and
+  the other framing headers are refused (`400`).
+- The host must be one the plugin may reach (its manifest's `allowedHosts`, or one approved through
+  `/api/plugins/hosts`); otherwise `403 {"error": ..., "host": "<host>"}`.
+- Answer: `200`, the upstream status in `X-Relay-Status`, its headers in `X-Relay-Headers` (a JSON list of
+  `[name, value]` pairs, UTF-8, at most 3 KB: headers past that are left out), the body streamed (at most
+  4 MB). A 3xx is returned as it is, not followed. `502` when the request failed before an answer.
+- With headers the request is a credentialed one: the certificate must verify.
+
+### GET/POST `/api/plugins/hosts` - Hosts Approved for Plugins
+
+`GET` answers `{"<plugin>": ["host", ...]}`. `POST` (`application/json`) with
+`{"plugin": "<name>", "host": "<host>", "allow": true}` approves a host for that plugin (at most 16 a plugin),
+`"allow": false` takes the approval back. Stored in `/.crosspoint/plugin-hosts.json`; removing a plugin drops its
+approvals.
+
 ### POST `/api/fetch` - Download to the SD Card
 
 Downloads a URL straight to the card. Relaying through the browser and uploading
@@ -987,13 +1019,18 @@ memory — tolerable for a cover, prohibitive for a book.
 
 ```bash
 curl -X POST "http://crosspoint.local/api/fetch?plugin=my-plugin&url=https%3A%2F%2Fexample.org%2Fbook.epub&dest=%2FBooks%2Fbook.epub"
-# -> {"ok":true,"dest":"/Books/book.epub"}
+# -> {"ok":true,"complete":true,"status":200,"bytes":523431,"dest":"/Books/book.epub"}
 ```
 
-Same allowlist and redirect rules as `/api/relay`. `dest` is normalised, so `..`
+Upstream's form takes the same fields as an `application/json` body, with optional `headers` (an object),
+`method` and `body`: `{"plugin": ..., "url": ..., "dest": ..., "headers": {"Authorization": "Bearer ..."}}`.
+Headers make the download a credentialed one (the certificate must verify). A GET goes through the same chunked
+download as the query form; another method, or a body, is sent once and its answer written to the file.
+
+Same host rules as `/api/relay`. `dest` is normalised, so `..`
 cannot climb above the card root, must name a file (not `/` and no trailing `/`), and is
-judged as an item under [Protected paths](#protected-paths), as `/upload` judges its target
-(`pluginWriteTarget()`). The book's layout cache is invalidated on success.
+judged as an item under [Protected paths](#protected-paths), as `/upload` judges its target, except that a plugin
+may also write inside its own folder (`pluginWriteTarget()`). The book's layout cache is invalidated on success.
 
 | Status | Cause                                          |
 | ------ | ---------------------------------------------- |
