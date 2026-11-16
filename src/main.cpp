@@ -533,6 +533,28 @@ static void logStartupMemory(const char* stage) {
 // appears at fourteen call sites through setup() and reads better unqualified there.
 using BootDiag::BootPhase;
 
+// The panel's booster powered down once the device has gone idle, and again after each render pass
+// drawn while it stays idle (the minute clock, a cover that finished loading), on the boards whose
+// driver keeps it up after a refresh (HalCapabilities::powersPanelOffWhenIdle). A frame that is
+// still on its way out, or a pass in flight, waits for a later idle tick: the loop never stalls
+// behind a render for this. A frame painted outside render() follows input, which starts a new
+// idle period. Loop task only.
+static void powerOffPanelWhenIdle(const unsigned long lastActivityMs) {
+  if (!HalCapabilities::powersPanelOffWhenIdle()) return;
+  static unsigned long offAfterActivityAt = 0;
+  static uint32_t offAfterPass = 0;
+  static bool off = false;
+  const uint32_t passes = activityManager.renderPassCount();
+  if (off && offAfterActivityAt == lastActivityMs && offAfterPass == passes) return;
+  if (activityManager.busyReason(false) != nullptr) return;
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock()) return;
+  display.powerOffPanelBetweenFrames();
+  offAfterActivityAt = lastActivityMs;
+  offAfterPass = passes;
+  off = true;
+}
+
 // Poll the raw power pin and keep the boot press away from the event system until it has
 // been released for RELEASE_STABLE_MS. See the latch's declaration for why boot no longer
 // blocks on this. Call once per loop tick, after ButtonEventManager has drained the sampler
@@ -2451,10 +2473,12 @@ void loop() {
       // below only serves the pre-sleep 100 Hz polling phase. When lightSleep()
       // declines, the fallback delay() runs at the normal clock too — but that
       // only happens when USB (externally powered), WiFi, or a render Lock (full
-      // speed wanted anyway) is active.
+      // speed wanted anyway) is active, a button is mid-debounce, or the board
+      // has a PWM frontlight.
       powerManager.setPowerSaving(false);
+      powerOffPanelWhenIdle(lastActivityTime);
       if (!powerManager.lightSleep(gpio)) {
-        delay(10);  // declined (render Lock, WiFi, USB, mid-debounce): poll at 100 Hz
+        delay(10);  // declined (render Lock, WiFi, USB, mid-debounce, PWM frontlight): poll at 100 Hz
       }
     } else {
       // Response window after recent input: keep 100 Hz polling for snappy

@@ -307,6 +307,11 @@ void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen
           millis() - refreshStart);
 }
 
+void HalDisplay::powerOffPanelBetweenFrames() {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.powerOffBetweenFrames();
+}
+
 void HalDisplay::deepSleep() {
   HalSpiBus::Lock spiLock;
   einkDisplay.deepSleep();

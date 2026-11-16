@@ -95,6 +95,10 @@ class HalDisplay {
   bool invertsGrayFrame() const;
 
   // Power management
+  // Powers the panel's analog circuits down between frames (HalCapabilities::powersPanelOffWhenIdle),
+  // after any refresh still going onto the panel. RAM and the previous frame stay. Loop task, with
+  // the render lock held and no render pass in flight.
+  void powerOffPanelBetweenFrames();
   void deepSleep();
 
   // Access to frame buffer
