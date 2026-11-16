@@ -23,7 +23,8 @@ extern HalTiltSensor halTiltSensor;
 //
 // SDK backend ported from crosspoint-reader (Justin Mitchell, @itsthisjustin): #2481 and 8fc2b6618.
 class HalTiltSensor {
-  bool _available = false;
+  bool _present = false;    // the IMU answered begin()
+  bool _available = false;  // ... and has a gyro, which tilt page turns need
   Imu _imu;
 
   bool _tiltForwardEvent = false;
@@ -54,6 +55,11 @@ class HalTiltSensor {
   bool deepSleep();
 
   bool isAvailable() const { return _available; }
+
+  // One sample, mount-corrected (serial test API, CMD:IMU). A sleeping IMU is woken for it, given
+  // WAKE_STABILIZE_MS to settle and put back to sleep. Loop task only, like update(). False when no
+  // IMU answered at boot or the read failed.
+  bool readSample(Imu::Sample& out);
 
   void update(CrossPointTiltPageTurn::Value mode, CrossPointOrientation::Value orientation, bool inReader);
 

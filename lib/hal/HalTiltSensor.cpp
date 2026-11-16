@@ -22,6 +22,7 @@ bool HalTiltSensor::imuWake() {
 }
 
 void HalTiltSensor::begin() {
+  _present = false;
   _available = false;
   if (!HalCapabilities::hasTiltSensor()) {
     return;
@@ -36,6 +37,7 @@ void HalTiltSensor::begin() {
     LOG_ERR("GYR", "IMU not found");
     return;
   }
+  _present = true;
   // begin() leaves the sensors sampling; stand them by until a reader wakes them, so an IMU nobody
   // uses does not drain the battery.
   if (!imuSleep()) {
@@ -49,6 +51,22 @@ void HalTiltSensor::begin() {
   }
   _lastPollMs = millis();
   LOG_INF("GYR", "IMU initialized and put to sleep");
+}
+
+bool HalTiltSensor::readSample(Imu::Sample& out) {
+  if (!_present) {
+    return false;
+  }
+  if (_isAwake) {
+    return imuRead(out);
+  }
+  if (!imuWake()) {
+    return false;
+  }
+  delay(WAKE_STABILIZE_MS);
+  const bool ok = imuRead(out);
+  imuSleep();
+  return ok;
 }
 
 bool HalTiltSensor::wake() {

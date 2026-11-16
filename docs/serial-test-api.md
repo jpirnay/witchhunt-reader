@@ -24,6 +24,7 @@ the commands do, how to use them, and how to add one.
   - [Touch: `TOUCH` and `SWIPE`](#touch-touch-and-swipe)
   - [Logging: `LOG`](#logging-log)
   - [Power: `SLEEP` and `REBOOT`](#power-sleep-and-reboot)
+  - [Motion sensor: `IMU`](#motion-sensor-imu)
   - [Heap ballast: `HEAP`](#heap-ballast-heap)
   - [TrueType fonts: `TTF`](#truetype-fonts-ttf)
   - [Files on the card: `FS`](#files-on-the-card-fs)
@@ -668,6 +669,20 @@ Replies: `SLEEP_OK`, `REBOOT_OK`, sent before the device acts.
   is closed, no boot screen. On the ESP32-C3 boards the port stays up through it (the boot log
   arrives on it), so nothing has to be reopened; a command sent right behind `REBOOT` is lost with
   the restart and gets no reply.
+
+### Motion sensor: `IMU`
+
+```
+CMD:IMU
+```
+
+Reply: `IMU:ax=<g> ay=<g> az=<g> gx=<dps> gy=<dps> gz=<dps>`, or `IMU_ERROR:<why>` on a board
+with no IMU (X4, X4 Pro, T5S3, Murphy) or when the read fails.
+
+One sample from the IMU (X3, Picco), in the frame tilt page turns read: the board profile's mount
+correction applied, gyro X the portrait left/right tilt axis and Y the landscape one. A sleeping
+IMU is woken for the read and put back to sleep, which holds the loop about 300 ms. Held still,
+the acceleration is gravity: read it in each pose to measure how a board's IMU is mounted.
 
 ### Heap ballast: `HEAP`
 
