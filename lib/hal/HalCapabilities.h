@@ -95,6 +95,10 @@ constexpr bool usbPresenceFromFuelGauge(const BoardConfig::BoardProfile& p) {
 }
 inline bool usbPresenceFromFuelGauge() { return usbPresenceFromFuelGauge(BoardConfig::ACTIVE); }
 
+// A charger IC reports whether power comes in (the Picco's SGM41562, the T5S3's BQ25896). On these boards it is the
+// only thing that sees a wall charger: no detect pin, and a charger enumerates no USB host link.
+inline bool chargerReportsInputPower() { return BoardConfig::ACTIVE.batteryGauge.chargerAddr != 0; }
+
 // Pinned against the shipped profiles, so an SDK resync that changes any of the
 // fields above fails the build here instead of silently turning the X3's
 // charging indication and USB wake handling off.

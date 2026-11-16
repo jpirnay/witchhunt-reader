@@ -262,8 +262,10 @@ Its panel is an SE0400NQW47 on an SSD2677 (the driver's probe, boot log).
   The IMU needs no mount flags: `CMD:IMU` read the panel's native frame in the poses (2026-11-16), and auto-rotate was
   checked by hand on the unit in all four orientations.
   `HalPowerManager::begin()` sets up the charger as the stock firmware does (4.35 V charge voltage).
-- Battery on the ADC (GPIO1, divider 2); no fuel gauge. No USB detect pin, so USB presence comes from the host link
-  only: a wall charger does not show the charging bolt.
+- Battery on the ADC (GPIO1, divider 2); no fuel gauge. No USB detect pin, so `HalGPIO::isUsbConnected()` sees the
+  host link only. The charging bolt asks `HalPowerManager::isExternalPowerPresent()`, which also reads the charger's
+  input-present bit (SGM41562 REG08 bit 1, as stock), so a wall charger shows it; the T5S3's BQ25896 answers the same
+  way (`HalCapabilities::chargerReportsInputPower()`).
 - SD card: native SDMMC, 4-bit. GPIO0 is a peripheral power rail (active low), not a boot key.
 - USB: the stock firmware enumerates as a TinyUSB mass-storage device with no serial port. Holding Power and Volume
   Up (+) for more than 10 s makes it erase otadata and restart into Onyx's recovery (`safeboot`, "Recovery v1.0"),

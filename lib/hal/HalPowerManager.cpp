@@ -499,20 +499,60 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
   esp_deep_sleep_start();
 }
 
+namespace {
+// One monitor for both backends, built from the WHOLE battery config rather
+// than half of it: the default constructor takes the ADC pin, the divider
+// multiplier AND the charge-status pin (with its per-board polarity) from
+// BoardConfig::ACTIVE. The previous `BatteryMonitor(ACTIVE.batteryAdc)` passed
+// the pin and defaulted the rest, which happens to be identical on X3/X4
+// (divider 2.0, no charge-status pin) but silently drops both on any board
+// that differs -- the X4 Pro's active-high STAT line on GPIO21 among them.
+const BatteryMonitor& batteryMonitor() {
+  static const BatteryMonitor battery;
+  return battery;
+}
+}  // namespace
+
+bool HalPowerManager::isExternalPowerPresent() const { return gpio.isUsbConnected() || chargerInputPower(); }
+
+bool HalPowerManager::wasChargerInputChanged() {
+  const bool now = chargerInputPower();
+  if (now == _chargerInputReported) {
+    return false;
+  }
+  _chargerInputReported = now;
+  return true;
+}
+
+bool HalPowerManager::chargerInputPower() const {
+  if (!HalCapabilities::chargerReportsInputPower()) {
+    return false;
+  }
+  const unsigned long now = millis();
+  if (_chargerLastPollMs == 0 || (now - _chargerLastPollMs) >= BATTERY_POLL_MS) {
+    _chargerLastPollMs = now;
+    bool known = false;
+    bool present = false;
+    {
+      HalI2cBus::Lock i2cLock;
+      present = batteryMonitor().isExternalPowerPresent(&known);
+    }
+    // A failed read keeps the last answer rather than flickering the bolt.
+    if (known && present != _chargerInputPower) {
+      _chargerInputPower = present;
+      LOG_INF("PWR", "Charger input power: %s", present ? "present" : "gone");
+    }
+  }
+  return _chargerInputPower;
+}
+
 uint16_t HalPowerManager::getBatteryPercentage() const {
   // Guard against an X3 board mistakenly taking the ADC path: BAT_GPIO0 is
   // reused as X3_I2C_SCL on X3, so reading it as ADC would collide with the
   // fuel-gauge bus. _batteryUseI2C must match the detected device type.
   assert(_batteryUseI2C == HalCapabilities::hasI2cFuelGauge());
 
-  // One monitor for both backends, built from the WHOLE battery config rather
-  // than half of it: the default constructor takes the ADC pin, the divider
-  // multiplier AND the charge-status pin (with its per-board polarity) from
-  // BoardConfig::ACTIVE. The previous `BatteryMonitor(ACTIVE.batteryAdc)` passed
-  // the pin and defaulted the rest, which happens to be identical on X3/X4
-  // (divider 2.0, no charge-status pin) but silently drops both on any board
-  // that differs -- the X4 Pro's active-high STAT line on GPIO21 among them.
-  static const BatteryMonitor battery;
+  const BatteryMonitor& battery = batteryMonitor();
 
   // One poll per BATTERY_POLL_MS on either backend. The status bar asks several times for one frame, to measure the
   // text and again to draw it, and on the ADC path each call stepped the smoothing filter: the two answers could differ

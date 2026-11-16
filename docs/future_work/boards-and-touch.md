@@ -208,9 +208,10 @@ and the slide switch turns the light on and off. Board notes:
   INVALID_STATE. Gone since tilt reads through the SDK's `Imu`, which asks the profile's 0x6A first.)
 - **Updates on the stock table.** Onyx's recovery installs `/update/firmware.bin` from the card. An action that erases
   otadata and restarts would hand the stock-table Picco to it, the way the stock app's Power + Volume Up does.
-- **USB presence from the charger.** No detect pin, so a wall charger shows no charging bolt. Upstream asks
-  `BatteryMonitor::isExternalPowerPresent()` in `HalGPIO::isUsbConnected()`; that also changes the T5S3 (BQ25896), so
-  test both.
+- **USB presence from the charger.** The charging bolt and "Charging" now ask the charger, so a wall charger shows
+  them (`HalPowerManager::isExternalPowerPresent()`). `HalGPIO::isUsbConnected()` still sees the host link only:
+  upstream asks the charger there too, which would also change light sleep, the serial-log gate and the USB wake on
+  the Picco and the T5S3. Decide with the sleep item below.
 - **Sleep on USB power.** Upstream keeps the Picco in light sleep while USB powers it, with a charge strip on the sleep
   screen, because deep sleep cannot see the charger; and it powers on when a cable is plugged in, since that pulses
   the wake line. Here the wake gate rejects that wake and the device sleeps on. Decide after seeing it.

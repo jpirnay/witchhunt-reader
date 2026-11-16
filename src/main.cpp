@@ -2058,6 +2058,10 @@ void loop() {
 #endif
     activityManager.requestUpdate();
   }
+  // A wall charger enumerates no host, so only the charger IC sees it come and go (Picco, T5S3).
+  if (powerManager.wasChargerInputChanged()) {
+    activityManager.requestUpdate();
+  }
 
   // Dispatch globally-configured button actions before handing control to the activity.
   // Only non-Default actions are intercepted here; Default falls through to the activity.
