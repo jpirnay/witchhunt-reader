@@ -360,6 +360,10 @@ class CrossPointSettings {
     TILT_GESTURE_ACTION_COUNT
   };
 
+  // The tilt that turns pages: a twist about the text's vertical axis (right edge away or toward), or a flip about
+  // its horizontal one (top edge away or toward). TiltRate::Axis in the same order.
+  enum TILT_AXIS { TILT_AXIS_SIDEWAYS = 0, TILT_AXIS_FORWARD_BACK = 1, TILT_AXIS_COUNT };
+
   // Whether touch drives the non-reader screens at all. See touchUiControls.
   enum TOUCH_UI_CONTROLS { TOUCH_UI_OFF = 0, TOUCH_UI_ON = 1, TOUCH_UI_CONTROLS_COUNT };
 
@@ -628,11 +632,12 @@ class CrossPointSettings {
   // Show a placeholder for large images (>800×600 source pixels) instead of decoding immediately.
   // The user can press OK on the placeholder page to decode the image on demand.
   uint8_t largeImagePlaceholder = 1;
-  // Tilt-based page turning (X3 only — requires QMI8658 IMU)
+  // Tilt page turns (boards with an IMU: X3, Picco).
   uint8_t tiltPageTurn = 0;
-  // Action when the computed tilt value crosses the positive threshold.
+  uint8_t tiltAxis = TILT_AXIS_SIDEWAYS;
+  // Action for a tilt to the right (Sideways) or forward (ForwardBack): that edge of the text moves away.
   uint8_t tiltPositiveAction = TILT_ACT_NEXT_PAGE;
-  // Action when the computed tilt value crosses the negative threshold.
+  // Action for a tilt to the left or back.
   uint8_t tiltNegativeAction = TILT_ACT_PREV_PAGE;
   // Touch page turning on the reading surface (touch boards only). Defaults to
   // tap zones, which is what upstream ships; the X4 Pro has no back/confirm

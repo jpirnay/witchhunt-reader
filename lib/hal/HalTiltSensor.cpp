@@ -98,8 +98,8 @@ bool HalTiltSensor::deepSleep() {
   return true;
 }
 
-void HalTiltSensor::update(CrossPointTiltPageTurn::Value mode, CrossPointOrientation::Value orientation,
-                           bool inReader) {
+void HalTiltSensor::update(const CrossPointTiltPageTurn::Value mode, const TiltRate::Axis axis,
+                           const CrossPointOrientation::Value orientation, const bool inReader) {
   if (!_available) {
     return;
   }
@@ -130,26 +130,9 @@ void HalTiltSensor::update(CrossPointTiltPageTurn::Value mode, CrossPointOrienta
   if (!imuRead(sample)) {
     return;
   }
-  const float gx = sample.gx;
-  const float gy = sample.gy;
-
-  float tiltAxis;
-  switch (orientation) {
-    case CrossPointOrientation::PORTRAIT:
-      tiltAxis = mode == CrossPointTiltPageTurn::TILT_INVERTED ? -gx : gx;
-      break;
-    case CrossPointOrientation::INVERTED:
-      tiltAxis = mode == CrossPointTiltPageTurn::TILT_INVERTED ? gx : -gx;
-      break;
-    case CrossPointOrientation::LANDSCAPE_CW:
-      tiltAxis = mode == CrossPointTiltPageTurn::TILT_INVERTED ? gy : -gy;
-      break;
-    case CrossPointOrientation::LANDSCAPE_CCW:
-      tiltAxis = mode == CrossPointTiltPageTurn::TILT_INVERTED ? -gy : gy;
-      break;
-    default:
-      tiltAxis = gx;
-      break;
+  float tiltAxis = TiltRate::rate(sample.gx, sample.gy, orientation, axis);
+  if (mode == CrossPointTiltPageTurn::TILT_INVERTED) {
+    tiltAxis = -tiltAxis;
   }
 
   if (_inTilt) {

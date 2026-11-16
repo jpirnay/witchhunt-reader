@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <Imu.h>
 
+#include "TiltRate.h"
+
 namespace CrossPointOrientation {
 enum Value : uint8_t { PORTRAIT = 0, LANDSCAPE_CW = 1, INVERTED = 2, LANDSCAPE_CCW = 3 };
 }
@@ -61,7 +63,10 @@ class HalTiltSensor {
   // IMU answered at boot or the read failed.
   bool readSample(Imu::Sample& out);
 
-  void update(CrossPointTiltPageTurn::Value mode, CrossPointOrientation::Value orientation, bool inReader);
+  // Once per loop pass. The IMU is awake only in a reader with tilt page turns (`mode`, along `axis`) on; asleep, it
+  // draws nothing worth counting.
+  void update(CrossPointTiltPageTurn::Value mode, TiltRate::Axis axis, CrossPointOrientation::Value orientation,
+              bool inReader);
 
   bool wasTiltedForward();
   bool wasTiltedBack();

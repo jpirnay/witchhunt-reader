@@ -1858,9 +1858,9 @@ void loop() {
   // Must follow the drain above and precede every power consumer below.
   serviceBootPowerRelease();
   HalClock::updatePeriodic();
-  halTiltSensor.update(static_cast<CrossPointTiltPageTurn::Value>(SETTINGS.tiltPageTurn),
-                       static_cast<CrossPointOrientation::Value>(SETTINGS.orientation),
-                       activityManager.isReaderActivity());
+  halTiltSensor.update(
+      static_cast<CrossPointTiltPageTurn::Value>(SETTINGS.tiltPageTurn), static_cast<TiltRate::Axis>(SETTINGS.tiltAxis),
+      static_cast<CrossPointOrientation::Value>(SETTINGS.orientation), activityManager.isReaderActivity());
   powerManager.serviceGaugeCapacityLoad();
 
   renderer.setFadingFix(SETTINGS.fadingFix);

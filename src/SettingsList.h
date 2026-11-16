@@ -607,17 +607,22 @@ inline void buildSettings(const RowSink& emit) {
              .requiring(binding.needsMultiTouch ? SettingRequires::MultiTouchPanel : SettingRequires::TouchPanel));
   }
 #endif  // CP_TOUCH_UI
-  // Tilt page turn (X3-only)
+  // Tilt page turn (boards with an IMU)
   emit(SettingInfo::Toggle(StrId::STR_TILT_PAGE_TURN, &CrossPointSettings::tiltPageTurn, "tiltPageTurn",
                            StrId::STR_CAT_CONTROLS)
            .withSubmenu(StrId::STR_TILT_PAGE_TURN)
            .requiring(SettingRequires::TiltSensor));
-  emit(SettingInfo::Enum(StrId::STR_DIR_RIGHT, &CrossPointSettings::tiltPositiveAction,
+  emit(SettingInfo::Enum(StrId::STR_TILT_AXIS, &CrossPointSettings::tiltAxis,
+                         {StrId::STR_TILT_AXIS_SIDEWAYS, StrId::STR_TILT_AXIS_FORWARD_BACK}, "tiltAxis",
+                         StrId::STR_CAT_CONTROLS)
+           .withSubmenu(StrId::STR_TILT_PAGE_TURN)
+           .requiring(SettingRequires::TiltSensor));
+  emit(SettingInfo::Enum(StrId::STR_TILT_RIGHT_FORWARD, &CrossPointSettings::tiltPositiveAction,
                          {StrId::STR_NONE_OPT, StrId::STR_NEXT_PAGE, StrId::STR_PREV_PAGE}, "tiltPositiveAction",
                          StrId::STR_CAT_CONTROLS)
            .withSubmenu(StrId::STR_TILT_PAGE_TURN)
            .requiring(SettingRequires::TiltSensor));
-  emit(SettingInfo::Enum(StrId::STR_DIR_LEFT, &CrossPointSettings::tiltNegativeAction,
+  emit(SettingInfo::Enum(StrId::STR_TILT_LEFT_BACK, &CrossPointSettings::tiltNegativeAction,
                          {StrId::STR_NONE_OPT, StrId::STR_NEXT_PAGE, StrId::STR_PREV_PAGE}, "tiltNegativeAction",
                          StrId::STR_CAT_CONTROLS)
            .withSubmenu(StrId::STR_TILT_PAGE_TURN)
