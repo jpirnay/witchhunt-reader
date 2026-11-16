@@ -730,6 +730,36 @@ bool SdBlock::readSource(void* ctx, const uint32_t offset, void* dst, const uint
   return static_cast<const SdBlock*>(ctx)->read(offset, static_cast<uint8_t*>(dst), len);
 }
 
+bool tableDirectoryHash(const FileSource& file, uint32_t* hash) {
+  struct Digest {
+    uint32_t version = 0;  ///< forEachTable() sets it before the first record
+    uint32_t hash = 0;
+    bool started = false;
+    void start() {
+      if (started) return;
+      uint8_t sfnt[4];
+      putLe(sfnt, version, 4);
+      hash = glyphstore::fnv1a(sfnt, sizeof sfnt);
+      started = true;
+    }
+  } digest;
+  const auto visit = [](void* ctx, const Record& record) {
+    auto& d = *static_cast<Digest*>(ctx);
+    d.start();
+    uint8_t fields[16];
+    putLe(fields, record.tag, 4);
+    putLe(fields + 4, record.checksum, 4);
+    putLe(fields + 8, record.offset, 4);
+    putLe(fields + 12, record.length, 4);
+    d.hash = glyphstore::fnv1a(fields, sizeof fields, d.hash);
+    return true;
+  };
+  if (forEachTable(file, &digest.version, visit, &digest) == Walk::ReadFailed) return false;
+  digest.start();  // a file refused before its first record
+  *hash = digest.hash;
+  return true;
+}
+
 void familyIdentity(const FileStamp (&styles)[4], uint8_t out[glyphstore::kIdentityBytes]) {
   for (uint32_t lane = 0; lane < glyphstore::kIdentityBytes / 4; ++lane) {
     uint32_t hash = 2166136261u ^ (lane * 0x9E3779B9u);
@@ -739,10 +769,11 @@ void familyIdentity(const FileStamp (&styles)[4], uint8_t out[glyphstore::kIdent
       hash = glyphstore::fnv1a(&marker, 1, hash);
       if (!file.name) continue;
       hash = glyphstore::fnv1a(file.name, std::strlen(file.name) + 1, hash);
-      uint8_t fields[8];
+      uint8_t fields[12];
       putLe(fields, file.size, 4);
       putLe(fields + 4, file.date, 2);
       putLe(fields + 6, file.time, 2);
+      putLe(fields + 8, file.directory, 4);
       hash = glyphstore::fnv1a(fields, sizeof fields, hash);
     }
     hash = glyphstore::fnv1a(&kRenderVersion, 1, hash);

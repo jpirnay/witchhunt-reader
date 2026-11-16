@@ -135,9 +135,11 @@ namespace {
 
 static_assert(SdCardFontManager::kMaxTtfFamilies <= TtfFontSet::kMaxFamilies, "the set holds the manager's families");
 
-// Opens a family's style files, and gives the family's identity from what the card says of them.
-void openTtfFiles(const SdCardFontFamilyInfo& family, HalFile (&files)[4], ttf::FileSource (&sources)[4],
+// Opens a family's style files, and gives the family's identity from what the card says of them and their table
+// directories. False when a directory read failed: an identity without it would install the family again.
+bool openTtfFiles(const SdCardFontFamilyInfo& family, HalFile (&files)[4], ttf::FileSource (&sources)[4],
                   uint8_t (&identity)[glyphstore::kIdentityBytes]) {
+  bool read = true;
   ttf::FileStamp stamps[4];
   for (const auto& file : family.files) {
     if (file.style >= 4) continue;
@@ -155,10 +157,16 @@ void openTtfFiles(const SdCardFontFamilyInfo& family, HalFile (&files)[4], ttf::
     const uint32_t stamp =
         glyphstore::fnv1a(&when, sizeof when, glyphstore::fnv1a(file.path.c_str(), file.path.size()));
     sources[file.style] = ttf::fileSource(handle, size, stamp);
+    uint32_t directory = 0;
+    if (!ttf::tableDirectoryHash(sources[file.style], &directory)) {
+      LOG_ERR("SDMGR", "Cannot read the table directory of %s", file.path.c_str());
+      read = false;
+    }
     const char* slash = std::strrchr(file.path.c_str(), '/');
-    stamps[file.style] = {slash ? slash + 1 : file.path.c_str(), size, date, time};
+    stamps[file.style] = {slash ? slash + 1 : file.path.c_str(), size, date, time, directory};
   }
   ttf::familyIdentity(stamps, identity);
+  return read;
 }
 
 // The first `count` families as one set, under the set's identity; nullptr when they cannot be drawn together.
@@ -219,7 +227,11 @@ bool SdCardFontManager::loadTtf(const SdCardFontFamilyInfo* const* families, uin
     return false;
   }
   for (uint8_t f = 0; f < count; ++f) {
-    openTtfFiles(*families[f], opened->files[f], opened->sources[f], opened->identities[f]);
+    if (!openTtfFiles(*families[f], opened->files[f], opened->sources[f], opened->identities[f])) {
+      // As a card read failing in the load: nothing installed over the set the store holds; the next load tries again.
+      LOG_ERR("SDMGR", "TTF families could not load for now (a card read)");
+      return false;
+    }
   }
   // Exactly these families are a set the store holds already: never installed then (see resumeTtf()).
   const TtfFontSet::Install install =
