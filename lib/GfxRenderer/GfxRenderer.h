@@ -519,6 +519,7 @@ class GfxRenderer {
   bool reallocSecondaryBuffer() const { return display.reallocSecondaryBuffer(); }
   bool hasSecondaryBuffer() const { return display.hasSecondaryBuffer(); }
   bool keepsPreviousFrame() const { return display.keepsPreviousFrame(); }
+  bool secondaryHoldsFrameOnScreen() const { return display.secondaryHoldsFrameOnScreen(); }
   // Borrow/return variant of release/realloc: the block never enters the heap,
   // so nothing can allocate inside it and the return cannot fail. See
   // FreeInkDisplay::borrowSecondaryBuffer.
