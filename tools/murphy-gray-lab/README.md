@@ -82,6 +82,21 @@ lens (`./x4prolab.py grid; ./cam.py shot grid; ./cam.py mesh`); checked halfway 
 the mesh was at most 1.3 panel pixels off. A new `calibrate` drops the mesh. At 0.78 camera pixels per
 X4 Pro panel pixel it reads region levels, not single pixels.
 
+The 20MP U3 camera (colour, raw 5120×3840 at 7.5 fps, on the stand since 2026-11-16) is recognised by its
+name too. Its lens is focused by hand: the focus control does nothing. It runs at exposure 3300 (near
+the top, which the frame time caps at about 3500) and gain 255; `sweep` steps the exposure. On the X4 Pro
+it samples 3.9 camera pixels per panel pixel, so rectified shots keep 4 (`SCALE`), but the lens blurs a
+panel edge over 2.2-2.6 panel pixels (10-90 %) everywhere on the panel and at every capture size: it
+resolves 2-pixel patterns, not 1-pixel ones. The mesh was at most 0.94 panel pixels off halfway between
+grid squares (median 0.62). Mechanically it held within 0.2 camera pixels over nine minutes.
+
+The room's light is now the weak point. Sun through the window raised it about fivefold in a few minutes
+(2026-11-16): the white page clipped at 3300, and the black page read 165 instead of 24, because the
+glossy front mirrors the room. Shade the stand or shoot at night, and take the baselines right before a
+run. The reader also repaints its page over a lab frame when the battery percentage or the clock minute
+changes (it did ~50 s after a draw while charging), so shoot right after each draw, and run long watches
+from a screen that does not repaint.
+
 ## The tests
 
 `--dry-run` shows what a step would send without touching a port. Each test decides whether the next

@@ -27,7 +27,17 @@ def _camera_name(device="/dev/video0"):
         return ""
 
 
-# The Global Shutter Camera (OV9281, mono, on the stand since 2026-11-14) gives raw YUY2 at its full 1280x800.
+# The 20MP U3 Camera (colour, manual-focus lens, on the stand since 2026-11-16) gives raw YUY2 at 5120x3840 and
+# 7.5 fps, about 3.9 camera pixels per X4 Pro panel pixel. Its focus control is accepted but moves nothing: focus is
+# the lens ring. Its exposure is not in 100 us units: below about 900 a white page reads 1 (the camera takes off a
+# pedestal), the page brightens with exposure up to about 3500, where the frame time stops it, and any gain below
+# about 96 reads black. So exposure 3300 and gain 255 put a white X4 Pro page at 138-144 and the black bezel at
+# 15-18 in the room's afternoon light, with brightness, contrast and gamma at their defaults: brightness only adds
+# an offset, more contrast crushes black. Sun on the room raised the light about fivefold within minutes: at 3300
+# the white page clipped and the black page read 165, the glossy front mirroring the room (2026-11-16). The lens,
+# not the sensor, sets the detail: a panel edge rises 10-90 % over 2.2-2.6 panel pixels across the whole panel,
+# and over the same width in every capture size from 5120x3840 down to 2048x1536.
+# The Global Shutter Camera (OV9281, mono, on the stand 2026-11-14 to 2026-11-16) gives raw YUY2 at its full 1280x800.
 # Its exposure is not continuous: it sits on plateaus and wraps (at gain 64 on a white panel, 80-150 read darker
 # than 40-70), and only values from 800 up averaged out the room's 100 Hz flicker. So the exposure stays on one
 # plateau and the gain (16-255, smooth) sets the brightness: 900 and 128 put a white X4 Pro panel at 182-189,
@@ -36,13 +46,21 @@ def _camera_name(device="/dev/video0"):
 # YUY2 at 1080p.
 _NAME = _camera_name()
 GLOBAL_SHUTTER = "Global Shutter" in _NAME
+U3_20MP = "20MP U3" in _NAME
 MJPEG = "AC310" in _NAME
-CAM_W, CAM_H = (1280, 800) if GLOBAL_SHUTTER else (3840, 2160) if MJPEG else (1920, 1080)
+CAM_W, CAM_H = (1280, 800) if GLOBAL_SHUTTER else (5120, 3840) if U3_20MP else (3840, 2160) if MJPEG else (1920, 1080)
 PANEL_W, PANEL_H = {"x3": (792, 528), "x4": (800, 480), "x4pro": (800, 480), "picco": (800, 480)}.get(os.environ.get("LAB_BOARD", "murphy"), (240, 416))
-SCALE = 2  # rectified shots are this many pixels per panel pixel
+# Rectified shots are this many pixels per panel pixel: the 20MP camera samples about 3.9, so it keeps them.
+SCALE = 4 if U3_20MP else 2
+# 20 MP frames are slow to search pixel by pixel in Python: blobs are found on a coarser grid and `still` looks for
+# the shift on a smaller copy. Both stay well under a panel pixel (a cell of 2 is half a camera pixel off at most).
+BLOB_STEP = 2 if U3_20MP else 1
+SHIFT_REDUCE = 4 if U3_20MP else 1
 
 VIDIOC_S_CTRL = 0xC008561C
 VIDIOC_G_CTRL = 0xC008561B
+CTRL_BRIGHTNESS = 0x00980900
+CTRL_CONTRAST = 0x00980901
 CTRL_WB_AUTO = 0x0098090C
 CTRL_WB_TEMP = 0x0098091A
 CTRL_GAIN = 0x00980913
@@ -53,12 +71,13 @@ CTRL_BACKLIGHT = 0x0098091C
 CTRL_AUTO_EXPOSURE = 0x009A0901
 CTRL_EXPOSURE = 0x009A0902
 CTRL_DYNAMIC_RATE = 0x009A0903
+CTRL_FOCUS_AUTO = 0x009A090C
 AUTO_EXPOSURE_MANUAL = 1
 AUTO_EXPOSURE_APERTURE = 3
 POWER_LINE_50HZ = 1
 
-EXPOSURE = int(os.environ.get("MURPHY_EXPOSURE", "900" if GLOBAL_SHUTTER else "1000"))
-GAIN = int(os.environ.get("CAM_GAIN", "128" if GLOBAL_SHUTTER else "0"))
+EXPOSURE = int(os.environ.get("MURPHY_EXPOSURE", "900" if GLOBAL_SHUTTER else "3300" if U3_20MP else "1000"))
+GAIN = int(os.environ.get("CAM_GAIN", "128" if GLOBAL_SHUTTER else "255" if U3_20MP else "0"))
 STATE = Path(os.path.expanduser("~/.local/state/murphy-gray-lab"))
 # Each board sits on the stand in its own place, so it keeps its own calibration and shots.
 _SUFFIX = "" if os.environ.get("LAB_BOARD", "murphy") == "murphy" else "-" + os.environ["LAB_BOARD"]
@@ -97,7 +116,13 @@ def lock(device, exposure, gain=GAIN):
         set_control(fd, CTRL_SHARPNESS, 0)
         if GLOBAL_SHUTTER:
             set_control(fd, CTRL_GAMMA, 100)  # its lowest: higher lifts the mids and clips the lamp
-        set_control(fd, CTRL_BACKLIGHT, 32 if GLOBAL_SHUTTER else 0, required=False)  # 32 is its lowest
+        if U3_20MP:
+            # The camera keeps these across runs until it loses power, so a probe's leftovers are put back.
+            set_control(fd, CTRL_BRIGHTNESS, 128)
+            set_control(fd, CTRL_CONTRAST, 65)
+            set_control(fd, CTRL_GAMMA, 128)
+            set_control(fd, CTRL_FOCUS_AUTO, 0)
+        set_control(fd, CTRL_BACKLIGHT, 32 if GLOBAL_SHUTTER else 16 if U3_20MP else 0, required=False)  # lowest
         set_control(fd, CTRL_POWER_LINE, POWER_LINE_50HZ, required=False)
         return get_control(fd, CTRL_EXPOSURE)
     finally:
@@ -311,7 +336,7 @@ def perspective_point(coefficients, x, y):
 def measure_grid(white, grid, camera):
     """Camera position of each grid square, row by row. The four-mark fit says where to look; on the wide
     lens of the global-shutter camera it was off by up to 6.1 camera pixels inside the corners (2026-11-14)."""
-    found = blobs(ImageChops.subtract(white, grid).point(lambda value: 255 if value > 40 else 0), step=1,
+    found = blobs(ImageChops.subtract(white, grid).point(lambda value: 255 if value > 40 else 0), step=BLOB_STEP,
                   minimum=GRID_SIZE)  # fmt: skip
     reach = min(GRID_XS[1] - GRID_XS[0], GRID_YS[1] - GRID_YS[0]) / 3
     points = []
@@ -440,8 +465,12 @@ def main():
         else:
             box = (CAM_W // 2 - 150, CAM_H // 2 - 300, CAM_W // 2 + 100, CAM_H // 2 + 300)
         # On the global-shutter camera the exposure jumps between plateaus, so gain is the knob to sweep.
-        settings = ([(args.exposure, gain) for gain in (32, 64, 96, 128, 160, 192, 224, 255)] if GLOBAL_SHUTTER
-                    else [(exposure, GAIN) for exposure in (100, 200, 300, 400, 500, 600, 800, 1000)])  # fmt: skip
+        if GLOBAL_SHUTTER:
+            settings = [(args.exposure, gain) for gain in (32, 64, 96, 128, 160, 192, 224, 255)]
+        elif U3_20MP:
+            settings = [(exposure, GAIN) for exposure in (1500, 2000, 2500, 3000, 3300, 3500)]
+        else:
+            settings = [(exposure, GAIN) for exposure in (100, 200, 300, 400, 500, 600, 800, 1000)]
         for exposure, gain in settings:
             got = lock(args.device, exposure, gain)
             frame = average(grab(args.device, frames=2, warmup=4))
@@ -491,7 +520,12 @@ def main():
         # frame, and it silently turns each later number into a reading of the wrong region.
         one = Image.open(SHOTS / f"{args.reference}.png").convert("L")
         two = Image.open(SHOTS / f"{args.name}.png").convert("L")
-        dx, dy, light = scene_shift(one, two, outside_panel())
+        boxes = outside_panel()
+        if SHIFT_REDUCE > 1:
+            one, two = one.reduce(SHIFT_REDUCE), two.reduce(SHIFT_REDUCE)
+            boxes = [tuple(value // SHIFT_REDUCE for value in box) for box in boxes]
+        dx, dy, light = scene_shift(one, two, boxes)
+        dx, dy = dx * SHIFT_REDUCE, dy * SHIFT_REDUCE
         camera_px = (dx * dx + dy * dy) ** 0.5
         if CAMERA_FILE.exists():
             coefficients = load_camera()["coefficients"]
