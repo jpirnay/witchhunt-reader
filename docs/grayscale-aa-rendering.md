@@ -340,6 +340,33 @@ page, but cannot judge the gray. Fast flipping skips AA, as today.
 The X4 re-drives black too (VSH1 17 a page). Measured on 2026-11-08 through the reader's `CMD:LAB` (lab Test 11), it
 behaves like the X3: within half a point after 500 pages, and resting black fades there.
 
+### BOOX Picco (SSD2677): a pixel at its target rests, a clean refresh keeps two passes
+
+`Ssd2677Driver` takes the single push. A text page stages its gray (LSB | MSB) and goes out as one refresh coded
+with the shared `RestTextCodes.h`, gray that stays resting, under one 22-frame table (`lut_picco_se0400_text_rest`):
+to black 20 frames, to white 20, gray white 6, black 10, white 4, rest none. The gray lab on a retail Picco
+(2026-11-14) put that gray at 72-76 % of white from a white or a black start.
+
+A clean refresh (a book open, the periodic HALF, the first page after boot) keeps two passes, as on the Murphy M3:
+the page in B/W, then its gray as two-pass mode sends it, the stock overlay `lut_picco_se0400_gray` (dark 3 frames
+of white, light 4). Until 2026-11-16 the B/W page was followed by the rest pass, whose refresh took 296 ms in the
+reader against the overlay's 119-120. Such a page shows two-pass mode's two grays; the page after it drives that gray
+to the rest gray once, then it rests. Planes: the staged gray, the page, the staged LSB (kept apart for the overlay)
+and the glass's gray, 48,000 bytes each in PSRAM from the first one-pass page.
+
+**Measured on the Picco (2026-11-16):** *The Odyssey*, BOOK IV, the speed comparison's protocol and settings; host
+ms from the command to the screen settled, median (n).
+
+| | Two-pass | One-pass, before | One-pass, since |
+|---|---|---|---|
+| Warm open (5) | 1,726-1,735 | 1,967 | 1,777 |
+| HALF turn (3) | 1,723-1,733 | 1,885 | 1,701 |
+| FAST turn (42) | 1,644-1,645 | 1,134 | 1,130 |
+
+What is left of the open's gap to two-pass is the plane capture before the first refresh and in the next page's
+pre-render: the open's last refresh ends 1,253 ms after the command, two-pass's 1,267. The overlay's gray level on
+this panel was not measured.
+
 ### What carries over to other drivers
 
 What upstream's branch holds beyond the slice we took, and where each piece could work:
