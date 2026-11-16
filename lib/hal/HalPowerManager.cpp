@@ -1,5 +1,6 @@
 #include "HalPowerManager.h"
 
+#include <AudioManager.h>
 #include <BatteryMonitor.h>
 #include <BoardConfig.h>
 #include <HalCapabilities.h>
@@ -79,6 +80,17 @@ void HalPowerManager::begin() {
   {
     const HalI2cBus::Lock i2cLock;
     if (BatteryMonitor::configureCharger()) LOG_INF("PWR", "Charger configured");
+  }
+  // An audio codec on a rail that stays up: the Murphy M3's ES8388 shares the one that keeps touch powered
+  // (PowerConfig latch0, GPIO43). The firmware plays no sound, so the codec is powered down once here instead of
+  // idling as it powered up. Touch has started the bus it sits on (gpio.begin()).
+  if (BoardConfig::ACTIVE.audio.output == BoardConfig::AudioOutput::I2sEs8388) {
+    const HalI2cBus::Lock i2cLock;
+    if (freeink::AudioManager::parkCodec()) {
+      LOG_INF("PWR", "Audio codec powered down");
+    } else {
+      LOG_ERR("PWR", "Audio codec did not take its power-down");
+    }
   }
   normalFreq = getCpuFrequencyMhz();
   modeMutex = xSemaphoreCreateMutex();
