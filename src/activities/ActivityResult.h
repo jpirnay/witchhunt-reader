@@ -150,6 +150,8 @@ struct ReaderBarsResult {
   // Action::Orientation: the one chosen, a CrossPointSettings::ORIENTATION.
   uint8_t orientation = 0;
   bool starToggled = false;
+  // Auto-Rotate was switched an odd number of times on the Orientation tab: the reader flips the setting.
+  bool autoRotateToggled = false;
   // A font that waited for the bars to close (HalCapabilities::defersLiveFontChange): the Layout tab's values to lay
   // the book out with, and whether they are the book's own ("This book only") or the global settings. The reader
   // applies them before it acts on `action`; every other change it applied while the bars were open.

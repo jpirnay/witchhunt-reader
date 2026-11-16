@@ -8408,6 +8408,8 @@ void EpubReaderActivity::openReaderBars() {
   info.sizes = layoutSheetSizes();
   info.hasPrintedPages = epub->hasNumericPrintedPages();
   info.hasSync = KOREADER_STORE.hasCredentials();
+  info.hasAutoRotate = HalCapabilities::hasTiltSensor();
+  info.autoRotate = SETTINGS.autoRotate != 0;
   info.orientation = SETTINGS.orientation;
   // The time spent in the book: what the history holds, and the session under way, which lands there only when the
   // reader closes.
@@ -8624,6 +8626,10 @@ void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
   }
   const auto* bars = std::get_if<ReaderBarsResult>(&result.data);
   if (bars && bars->starToggled) onReaderMenuConfirm(MenuAction::STAR_PAGE);
+  if (bars && bars->autoRotateToggled) {
+    SETTINGS.autoRotate = SETTINGS.autoRotate ? 0 : 1;
+    SETTINGS.saveToFile();
+  }
   // The Layout tab's values before anything else: the book may be laid out again with them, or opened again.
   if (bars && bars->layoutChanged && applyReaderLayout(bars->layout, bars->thisBookOnly)) return;
   // Every path below draws the page afresh, or puts another screen up: the bars covered parts of it and kept no copy.

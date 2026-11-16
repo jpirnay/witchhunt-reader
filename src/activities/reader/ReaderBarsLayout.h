@@ -36,7 +36,7 @@ constexpr fui::ActionId ACTION_TAB = 3;  // the value is the Tab
 
 // The bars' own buttons: the top bar's three (the title opens the book's details), Progress's chapter row and sync row,
 // and the rows of the Navigation and Orientation lists. The four orientations in CrossPointSettings::ORIENTATION's
-// order, from Portrait.
+// order, from Portrait; then Auto-Rotate, on a board with an IMU.
 enum class Button : uint8_t {
   Exit,
   Star,
@@ -55,6 +55,7 @@ enum class Button : uint8_t {
   LandscapeCw,
   Inverted,
   LandscapeCcw,
+  AutoRotate,
 };
 
 enum class Tab : uint8_t { Navigation, Progress, Layout, Orientation, More, Count };
