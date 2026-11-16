@@ -173,7 +173,12 @@ Double and long Confirm can be changed under **Settings → Controls → Button 
 ### BOOX Picco
 
 The Picco has three keys, **Power**, **Up** and **Down**, a slide switch, and a touchscreen. There is no Back or
-Confirm key: **Power** does both jobs, and the boxes at the edge of the screen do the rest.
+Confirm key: **Power** does both jobs, and the boxes at the edge of the screen do the rest. **Power** sits near the
+top of the right edge, with **Up** and **Down**, a double key, below it; the slide switch is near the bottom of the
+left edge.
+
+<img src="docs/images/devices/boox-picco.svg" width="320" alt="BOOX Picco. Right edge, top to bottom: Power, then a double key for Up and Down. Left edge, near the bottom: the slide switch.">
+
 
 | Key | Press | Press twice quickly | Hold |
 | --- | --- | --- | --- |
