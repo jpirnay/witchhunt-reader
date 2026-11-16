@@ -234,17 +234,16 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   lightSleepStats_.attempts++;
   lastSliceEndMs_ = entryMs;  // overwritten with the post-sleep stamp if we do sleep
 
-  // Light sleep stops the LEDC peripheral's clock, so an ESP-driven PWM
-  // frontlight visibly flickers as the idle loop enters slice after slice.
-  // Justin Mitchell (@itsthisjustin) reported this against crosspoint PR #2983
-  // ("feat: Add support for x4pro & papermono devices"), where the guard reads
-  // `Frontlight.present() && Frontlight.isOn()`. This fork has no frontlight
-  // driver, so it cannot ask whether the light is currently lit — decline on any
-  // board that HAS one. That costs nothing today (no board we build has a
-  // frontlight, so this never fires and the counter stays 0) and keeps the X4
-  // Pro correct the moment its profile is selectable. Tighten to
-  // present-and-on once a frontlight HAL exists, so those boards can still
-  // idle-sleep with the light off.
+  // Light sleep stops the LEDC peripheral's clock, so a lit PWM frontlight
+  // visibly flickers as the idle loop enters slice after slice. Justin Mitchell
+  // (@itsthisjustin) reported this against crosspoint PR #2983 ("feat: Add
+  // support for x4pro & papermono devices"), where the guard reads
+  // `Frontlight.present() && Frontlight.isOn()`. This guard declines on any board
+  // that HAS one, lit or not, which keeps the X4 Pro, the T5S3 and the Murphy M3
+  // at full clock whenever they idle. Narrowing it to a lit light is not safe
+  // yet: a 2026-11-16 test build that let the Murphy light-sleep with its light
+  // off restarted twice within 90 minutes, once on an interrupt watchdog while a
+  // flash read waited on CPU1 (docs/future_work/boards-and-touch.md).
   if (BoardConfig::hasPwmFrontlight()) {
     lightSleepStats_.rejFrontlight++;
     return false;

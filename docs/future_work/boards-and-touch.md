@@ -17,7 +17,18 @@ above the guard is stale: it says the fork has no frontlight driver and that no 
 a frontlight. `HalFrontlight` exists, with `present()` and `isOn()`.
 
 Why it matters: idle light sleep is the main idle-power saving, and a dark frontlight needs no
-guard. Light sleep stops the LEDC clock, so only a lit PWM light flickers.
+guard. Light sleep stops the LEDC clock, so only a lit PWM light flickers. On Home with no sleep
+timeout and the light off, a Murphy lost about 40 % of its charge in 10 h (user, 2026-11-16).
+
+Tried and backed out (2026-11-16): narrowing the guard to a lit light on the Murphy, with its
+CHSC6x IRQ armed as a level wake. On battery the test build restarted twice within 90 minutes
+(sleep timeout 0, so not a deep sleep). The second time it was an interrupt watchdog on CPU0
+while `SystemStatus::collectFast()` read the font partition on CPU1 (`esp_partition_read`), a
+minute after the board was plugged back in. The cause is not known. Candidates: light sleep on a
+dual-core S3 with octal PSRAM sharing the bus with flash, or an ISR storm on the touch line,
+whose level wake type was armed with the edge handler still enabled. The patch and the crash
+report are in `~/.local/state/witchhunt-work/idle-power/` on the dev machine. Re-test with a build
+that logs each slice to the crash ring, then the touch wake on its own, then the guard on its own.
 
 Where: `HalPowerManager::lightSleep()`, `HalFrontlight`, `[x4pro_board]` in `platformio.ini`, and
 the SDK's `FrontlightManager` (`FREEINK_FRONTLIGHT_LS`, `park()`, `releaseOnWake()`). The comment
