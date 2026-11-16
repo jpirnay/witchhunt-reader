@@ -2,6 +2,65 @@
 
 User-facing changes only. Full commit history is in git log.
 
+## 2.53 — 2026-11-16
+
+**Faster book opens, Auto-Rotate and forward/back tilt.** A short release before the plugin work begins: books
+you have not opened before show their first page much sooner, the X3 and the BOOX Picco turn the page to the way you
+hold them, and the Picco and the T5 S3 show when they charge from a wall charger.
+
+### Reading
+
+- **A book or chapter opened for the first time shows its page sooner.** Measured with *The Odyssey*, opened at
+  Book IV with nothing prepared: on the X3 the page shows after 3.8 s instead of 6.2 s, on the X4 Pro after 3.6 s
+  instead of 9.2–9.6 s. A page of text is no longer drawn a second time when the rest of the chapter is ready; its
+  page count keeps the `~` of an estimate until you turn the page.
+- **Normalize Font Size no longer reads the book twice on its first open** (about 2 s of *The Odyssey*'s, on the X3
+  and the X4 Pro). The size of the book's running text is measured while its chapters are laid out. A book whose text
+  is set smaller or larger than usual is laid out once more at that moment, keeping your place.
+- **The reader starts faster when the card holds many fonts**, and has more memory to spare. On an X3 with 23 font
+  families on the card: Home after 4.7 s instead of 5.4 s, with about 11 KB more free. The font list is now read when
+  a screen first needs it, so the font picker, and the first font list after a start, take up to a second longer to
+  open.
+- Fix: a Hebrew or Arabic line laid out with little memory left could restart the reader.
+
+### Auto-Rotate and tilt (X3 and BOOX Picco)
+
+<img src="docs/images/motion/orientation-tab.png" width="220" align="right" alt="The reader bars' Orientation tab on an X3: Portrait, Landscape CW, Inverted, Landscape CCW and Auto-Rotate: On.">
+
+- **Auto-Rotate** (Settings → Reader, and the reader bars' **Orientation** tab) turns the page to the way you hold
+  the device: a quarter turn either way, or upside down, held for a moment. Lying flat or a quick flick changes
+  nothing, and an orientation you pick by hand stays until you hold the device a new way. Off by default.
+- **Tilt Direction** for **Tilt Page Turn** (Settings → Controls): **Forward / Back** turns pages by tipping the top
+  edge away from you or toward you, beside the **Left / Right** twist there was before.
+
+<br clear="right">
+
+### Charging and touch
+
+- Fix: on the BOOX Picco and the LilyGo T5 S3, a wall charger now shows the charging bolt, and "Charging" in System
+  Information. Only a computer's USB port did before.
+- Fix: on the BOOX Picco, pinch and rotate gestures you assigned were forgotten at the next start.
+- Fix: a TrueType or OpenType font uploaded over another of the same file size, while the device's clock was not set,
+  went on drawing the old one.
+
+### Upgrade notes
+
+- **Check for updates on 2.51 or 2.52 installs 2.53.** On 2.38 to 2.50, install once by hand, as under 2.51.
+- **Books are not indexed again.** Your place, bookmarks and settings are kept.
+- **TrueType and OpenType fonts install once more**, a few seconds the first time each is used, and books drawn in
+  them are laid out again.
+- **Languages:** the new labels (Auto-Rotate, Tilt Direction) exist in every language and arrive with the
+  language-pack update Check for updates offers; until then they show in English.
+- **Which file:** `firmware.bin` (X3, X4) or `firmware-<device>.bin` for the card, `full-install-<device>.bin` at 0x0.
+
+### With thanks to
+
+- **Justin Mitchell** (the motion-sensor driver, crosspoint-reader #2481) and **Julia Nguyen** (CrossInk's forward
+  and back tilt).
+- The reviewers of **SSafayet**'s crosspoint-reader #3787, whose comments led to the font and right-to-left fixes.
+
+Source-level credits remain in the relevant files.
+
 ## 2.52 — 2026-11-15
 
 **A sixth device, reader bars, search, Dark Mode and a new Weather screen.** The Onyx BOOX Picco joins the list, books
