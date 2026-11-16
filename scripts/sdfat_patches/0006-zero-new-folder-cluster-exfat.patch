@@ -1,0 +1,70 @@
+Subject: [PATCH] ExFatFile: zero a new folder cluster with multi-sector writes
+
+Not from upstream SdFat: written for witchhunt-reader, the exFAT half of
+0005 (one patch owns each file).
+
+ExFatFile::addDirCluster() zeroed the folder's new cluster one sector at
+a time through the data cache: on a card formatted with 128 KB clusters,
+256 single-sector writes for every new folder. Measured on an X4 Pro
+(SDMMC, exFAT): the two folders of a book's first open took 298 ms and
+636 ms, 788 sector writes between them (2026-11-15).
+
+The cluster is now written from a zeroed block of up to eight sectors,
+one multi-sector write each, through cacheSafeWrite(), which drops a
+cached copy of any sector in the run. Without the block (calloc fails)
+it zeroes the cluster as before. The order of the writes on the card is
+unchanged.
+
+---
+--- a/src/ExFatLib/ExFatFileWrite.cpp
++++ b/src/ExFatLib/ExFatFileWrite.cpp
+@@ -24,6 +24,8 @@
+  */
+ #define DBG_FILE "ExFatFileWrite.cpp"
+ #include "../common/DateLib.h"
++#include <stdlib.h>
++
+ #include "../common/DebugMacros.h"
+ #include "ExFatLib.h"
+ //==============================================================================
+@@ -128,14 +130,33 @@
+     goto fail;
+   }
+   sector = m_vol->clusterStartSector(m_curCluster);
+-  for (uint32_t i = 0; i < m_vol->sectorsPerCluster(); i++) {
+-    cache =
+-        m_vol->dataCachePrepare(sector + i, FsCache::CACHE_RESERVE_FOR_WRITE);
+-    if (!cache) {
+-      DBG_FAIL_MACRO;
+-      goto fail;
++  {
++    // Up to eight sectors a write from a zeroed block, one card command each, rather
++    // than one sector a write through the cache. Without the block, as before.
++    const uint32_t spc = m_vol->sectorsPerCluster();
++    const uint32_t run = spc < 8 ? spc : 8;
++    uint8_t* zeros = static_cast<uint8_t*>(calloc(run, m_vol->bytesPerSector()));
++    if (zeros) {
++      bool ok = true;
++      for (uint32_t i = 0; ok && i < spc; i += run) {
++        ok = m_vol->cacheSafeWrite(sector + i, zeros, spc - i < run ? spc - i : run);
++      }
++      free(zeros);
++      if (!ok) {
++        DBG_FAIL_MACRO;
++        goto fail;
++      }
++    } else {
++      for (uint32_t i = 0; i < spc; i++) {
++        cache = m_vol->dataCachePrepare(sector + i,
++                                        FsCache::CACHE_RESERVE_FOR_WRITE);
++        if (!cache) {
++          DBG_FAIL_MACRO;
++          goto fail;
++        }
++        memset(cache, 0, m_vol->bytesPerSector());
++      }
+     }
+-    memset(cache, 0, m_vol->bytesPerSector());
+   }
+   if (!isRoot()) {
+     m_flags |= FILE_FLAG_DIR_DIRTY;

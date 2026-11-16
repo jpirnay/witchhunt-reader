@@ -1,0 +1,70 @@
+Subject: [PATCH] FatFile: zero a new folder cluster with multi-sector writes
+
+Not from upstream SdFat: written for witchhunt-reader.
+
+addDirCluster() zeroed the folder's new cluster one sector at a time
+through the cache, so each of its sectors became its own card write
+command. A book's first open makes its cache folder and the folders its
+chapters go in, and on a card with large clusters that is hundreds of
+single-sector writes per folder.
+
+The cluster is now written from a zeroed block of up to eight sectors,
+one multi-sector write each, through cacheSafeWrite(), which drops a
+cached copy of any sector in the run. Without the block (calloc fails)
+it zeroes the cluster as before. The order of the writes on the card is
+unchanged: the FAT entry first (addCluster), then the cluster's sectors
+in ascending order.
+
+0006 does the same for exFAT.
+
+---
+--- a/src/FatLib/FatFile.cpp
++++ b/src/FatLib/FatFile.cpp
+@@ -24,6 +24,8 @@
+  */
+ #define DBG_FILE "FatFile.cpp"
+ #include "../common/DateLib.h"
++#include <stdlib.h>
++
+ #include "../common/DebugMacros.h"
+ #include "FatLib.h"
+ //------------------------------------------------------------------------------
+@@ -71,13 +73,32 @@
+     goto fail;
+   }
+   sector = m_vol->clusterStartSector(m_curCluster);
+-  for (uint8_t i = 0; i < m_vol->sectorsPerCluster(); i++) {
+-    pc = m_vol->dataCachePrepare(sector + i, FsCache::CACHE_RESERVE_FOR_WRITE);
+-    if (!pc) {
+-      DBG_FAIL_MACRO;
+-      goto fail;
++  {
++    // Up to eight sectors a write from a zeroed block, one card command each, rather
++    // than one sector a write through the cache. Without the block, as before.
++    const uint8_t spc = m_vol->sectorsPerCluster();
++    const uint8_t run = spc < 8 ? spc : 8;
++    uint8_t* zeros = static_cast<uint8_t*>(calloc(run, m_vol->bytesPerSector()));
++    if (zeros) {
++      bool ok = true;
++      for (uint8_t i = 0; ok && i < spc; i += run) {
++        ok = m_vol->cacheSafeWrite(sector + i, zeros, spc - i < run ? spc - i : run);
++      }
++      free(zeros);
++      if (!ok) {
++        DBG_FAIL_MACRO;
++        goto fail;
++      }
++    } else {
++      for (uint8_t i = 0; i < spc; i++) {
++        pc = m_vol->dataCachePrepare(sector + i, FsCache::CACHE_RESERVE_FOR_WRITE);
++        if (!pc) {
++          DBG_FAIL_MACRO;
++          goto fail;
++        }
++        memset(pc, 0, m_vol->bytesPerSector());
++      }
+     }
+-    memset(pc, 0, m_vol->bytesPerSector());
+   }
+   // Set position to EOF to avoid inconsistent curCluster/curPosition.
+   m_curPosition += m_vol->bytesPerCluster();

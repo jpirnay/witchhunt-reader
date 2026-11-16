@@ -221,7 +221,13 @@ bool HalDisplay::invertsGrayFrame() const { return einkDisplay.invertsGrayFrame(
 // invisible extra refresh is exactly what "the menu update appeared twice" and a
 // doubled displayBuffer time look like from the outside. Cheap: one counter and a
 // DBG line per refresh, not per pixel.
-static uint32_t panelSeq = 0;
+//
+// Counted outside the log line, so a build that logs nothing still counts: framesShipped() tells a screen whether the
+// panel still shows a frame it knows (the reader, the first open's Indexing popup).
+static std::atomic<uint32_t> panelSeq{0};
+static unsigned long nextPanelSeq() { return ++panelSeq; }
+
+uint32_t HalDisplay::framesShipped() const { return panelSeq.load(std::memory_order_relaxed); }
 
 void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
@@ -252,7 +258,7 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   }
   const char* const modeName =
       mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL");
-  const unsigned long seq = ++panelSeq;
+  [[maybe_unused]] const unsigned long seq = nextPanelSeq();
 
   // The X4 differential keeps its previous-frame baseline in the host-managed secondary buffer,
   // so a FAST requested without one is promoted to HALF inside the driver
@@ -295,7 +301,8 @@ void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen
 
   const unsigned long refreshStart = millis();
   einkDisplay.refreshDisplay(convertRefreshMode(mode), turnOffScreen);
-  LOG_DBG("DISP", "#%lu refreshDisplay mode=%s took %lu ms", static_cast<unsigned long>(++panelSeq),
+  [[maybe_unused]] const unsigned long seq = nextPanelSeq();
+  LOG_DBG("DISP", "#%lu refreshDisplay mode=%s took %lu ms", seq,
           mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"),
           millis() - refreshStart);
 }
@@ -389,7 +396,16 @@ namespace {
 constexpr size_t PSRAM_ARENA_BYTES = 256 * 1024;
 // Atomic, not behind the SPI bus lock: lending the arena must not wait for a refresh (see below).
 std::atomic<bool> psramArenaLent{false};
+// Allocated on first use and kept: PSRAM has the room, and a block that never goes back to the heap cannot fragment it.
+// Null where it cannot be had; the framebuffer is then lent instead.
+uint8_t* psramArena() {
+  static uint8_t* const arena =
+      static_cast<uint8_t*>(heap_caps_malloc(PSRAM_ARENA_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  return arena;
+}
 }  // namespace
+
+bool HalDisplay::lendsPsramArena() const { return HalCapabilities::keepsSecondaryBuffer() && psramArena() != nullptr; }
 
 // False while the PSRAM arena is out, though the display's own buffer is still there. "No secondary
 // buffer" is how every borrower tells a lend is in progress: the reader's recovery only gives the
@@ -419,11 +435,8 @@ bool HalDisplay::keepsPreviousFrame() const { return einkDisplay.hasSecondaryBuf
 uint8_t* HalDisplay::borrowSecondaryBuffer(size_t* size) {
   // The PSRAM arena touches no bus, so it does not wait for one: the refresh in flight holds it.
   if (HalCapabilities::keepsSecondaryBuffer()) {
-    // Allocated on first use and kept: PSRAM has the room, and a block that never goes back to the
-    // heap cannot fragment it. If it cannot be had, the framebuffer below is still a valid answer.
-    static uint8_t* const arena =
-        static_cast<uint8_t*>(heap_caps_malloc(PSRAM_ARENA_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (arena) {
+    // If the arena cannot be had, the framebuffer below is still a valid answer.
+    if (uint8_t* const arena = psramArena()) {
       if (psramArenaLent.exchange(true)) return nullptr;  // one borrower at a time, as with the framebuffer
       if (size) *size = PSRAM_ARENA_BYTES;
       LOG_INF("FBUF", "borrowSecondary -> PSRAM arena (size=%lu)", static_cast<unsigned long>(PSRAM_ARENA_BYTES));
@@ -480,7 +493,8 @@ void HalDisplay::triggerDisplay(RefreshMode mode, bool turnOffScreen) {
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
 
-  LOG_DBG("DISP", "#%lu triggerDisplay mode=%s", static_cast<unsigned long>(++panelSeq),
+  [[maybe_unused]] const unsigned long seq = nextPanelSeq();
+  LOG_DBG("DISP", "#%lu triggerDisplay mode=%s", seq,
           mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"));
   einkDisplay.triggerDisplay(static_cast<EInkDisplay::RefreshMode>(mode), turnOffScreen);
 }
@@ -503,7 +517,8 @@ void HalDisplay::triggerDisplayAsync(RefreshMode mode, bool turnOffScreen) {
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
 
-  LOG_DBG("DISP", "#%lu triggerDisplayAsync mode=%s", static_cast<unsigned long>(++panelSeq),
+  [[maybe_unused]] const unsigned long seq = nextPanelSeq();
+  LOG_DBG("DISP", "#%lu triggerDisplayAsync mode=%s", seq,
           mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"));
   einkDisplay.triggerDisplayAsync(convertRefreshMode(mode), turnOffScreen);
 }
@@ -578,14 +593,16 @@ void HalDisplay::displayOnePassFrame(const RefreshMode refreshMode, const bool t
   HalSpiBus::Lock spiLock;
   lastRefreshMode = refreshMode;
   lastDisplayModeByte = refreshModeToByte(refreshMode);
+  [[maybe_unused]] const unsigned long seq = nextPanelSeq();
   LOG_DBG(
-      "DISP", "#%lu displayOnePassFrame mode=%s", static_cast<unsigned long>(++panelSeq),
+      "DISP", "#%lu displayOnePassFrame mode=%s", seq,
       refreshMode == RefreshMode::FAST_REFRESH ? "FAST" : (refreshMode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"));
   einkDisplay.displayOnePassFrame(convertRefreshMode(refreshMode), turnOffScreen);
 }
 
 bool HalDisplay::displayLabFrame(const uint8_t* bw, const uint8_t* red, const uint8_t* lut) {
   HalSpiBus::Lock spiLock;
+  nextPanelSeq();
   return einkDisplay.displayLabFrame(bw, red, lut);
 }
 
@@ -602,6 +619,7 @@ bool HalDisplay::beginAbsoluteGrayPass(const RefreshMode fallback, const bool tu
                                         turnOffScreen)) {
     return false;
   }
+  nextPanelSeq();
   lastRefreshMode = fallback;
   lastDisplayModeByte = refreshModeToByte(fallback);
   return true;
@@ -611,14 +629,16 @@ void HalDisplay::triggerGrayscaleFrame(const RefreshMode refreshMode, const bool
   HalSpiBus::Lock spiLock;
   lastRefreshMode = refreshMode;
   lastDisplayModeByte = refreshModeToByte(refreshMode);
+  [[maybe_unused]] const unsigned long seq = nextPanelSeq();
   LOG_DBG(
-      "DISP", "#%lu triggerGrayscaleFrame mode=%s", static_cast<unsigned long>(++panelSeq),
+      "DISP", "#%lu triggerGrayscaleFrame mode=%s", seq,
       refreshMode == RefreshMode::FAST_REFRESH ? "FAST" : (refreshMode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"));
   einkDisplay.triggerGrayscaleFrame(convertRefreshMode(refreshMode), turnOffScreen);
 }
 
 void HalDisplay::displayGrayscaleFrame(const RefreshMode refreshMode, const bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
+  nextPanelSeq();
   einkDisplay.displayGrayscaleFrame(convertRefreshMode(refreshMode), turnOffScreen);
   // Record it like every other display path does. Without this the reader's page
   // summary reports whatever mode the last B/W push used — which on a device log
@@ -637,8 +657,8 @@ uint8_t* HalDisplay::borrowGray8Canvas(uint16_t* stride) {
 
 void HalDisplay::displayGray8Canvas(RefreshMode refreshMode, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
-  LOG_DBG("DISP", "#%lu displayGray8Canvas levels=%u", static_cast<unsigned long>(++panelSeq),
-          static_cast<unsigned>(einkDisplay.grayLevels()));
+  [[maybe_unused]] const unsigned long seq = nextPanelSeq();
+  LOG_DBG("DISP", "#%lu displayGray8Canvas levels=%u", seq, static_cast<unsigned>(einkDisplay.grayLevels()));
   einkDisplay.displayGray8Canvas(convertRefreshMode(refreshMode), turnOffScreen);
   // Record it like every other display path: the driver substitutes a clean-bank
   // refresh, so the page summary must not claim whatever mode the caller asked
@@ -682,12 +702,14 @@ void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
   if (BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::LgfxEpd) {
     einkDisplay.syncWriteBufferFromActive();
   }
+  nextPanelSeq();
   einkDisplay.displayGrayBuffer(turnOffScreen);
 }
 
 void HalDisplay::displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
-  LOG_DBG("DISP", "#%lu displayWindow x=%u y=%u w=%u h=%u", static_cast<unsigned long>(++panelSeq), x, y, w, h);
+  [[maybe_unused]] const unsigned long seq = nextPanelSeq();
+  LOG_DBG("DISP", "#%lu displayWindow x=%u y=%u w=%u h=%u", seq, x, y, w, h);
   einkDisplay.displayWindow(x, y, w, h, turnOffScreen);
 }
 

@@ -67,6 +67,9 @@ class HalDisplay {
   bool isRedRamSynced() const;
   // Diagnostics: effective refresh mode of the last refresh (after any downgrade).
   RefreshMode getLastRefreshMode() const;
+  // Frames shipped to the panel since boot, every refresh path counted. Unchanged between two reads: nothing has been
+  // drawn on the panel in between.
+  uint32_t framesShipped() const;
   // Measured duration of the last FAST refresh, 0 if none has run yet. See lastFastRefreshMs.
   uint16_t getLastFastRefreshMs() const { return lastFastRefreshMs; }
   // Seed the measurement from persisted storage so the first decision after a boot is as good as
@@ -139,6 +142,9 @@ class HalDisplay {
   // single-buffer fast diff) is harmless there, so callers need not ask.
   uint8_t* borrowSecondaryBuffer(size_t* size);
   bool returnSecondaryBuffer();
+  // The lend is that PSRAM block (the arena could be had): it leaves both frames where they are and waits for no
+  // refresh, so a caller may borrow and work while a refresh it started still paints.
+  bool lendsPsramArena() const;
   // borrowSecondaryBuffer() right after starting a refresh. Where lendsDuringRefresh(), the block lent is the frame
   // not being painted, so nothing waits for the waveform, and the caller owes finishDisplayAsync() before it next
   // draws. Elsewhere it is borrowSecondaryBuffer(). See FreeInkDisplay::borrowSecondaryBufferDuringRefresh.

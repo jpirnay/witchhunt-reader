@@ -6,6 +6,7 @@ class BuildArena;  // lib/Memory
 #include <ZipFile.h>
 
 #include <memory>
+#include <optional>
 
 #include "../Activity.h"
 #include "Epub/ThumbResult.h"
@@ -35,7 +36,14 @@ class ReaderActivity final : public Activity {
 
   static std::string extractFolderPath(const std::string& filePath);
   void goToLibrary(const std::string& fromBookPath = "");
-  void onGoToEpubReader(std::unique_ptr<Epub> epub);
+  // The Indexing popup a first open drew, as the panel shows it: its frame count once the popup and its progress bar
+  // were shown (GfxRenderer::framesShipped), and the orientation it was drawn in. The EPUB reader keeps it on screen
+  // for the chapter build that follows (EpubReaderActivity::noteIndexingPopupOnScreen).
+  struct ShownIndexingPopup {
+    uint32_t frame;
+    GfxRenderer::Orientation orientation;
+  };
+  void onGoToEpubReader(std::unique_ptr<Epub> epub, std::optional<ShownIndexingPopup> popup = std::nullopt);
   void onGoToXtcReader(std::unique_ptr<Xtc> xtc);
   void onGoToTxtReader(std::unique_ptr<Txt> txt);
   void onGoToMdReader(std::unique_ptr<Txt> txt);

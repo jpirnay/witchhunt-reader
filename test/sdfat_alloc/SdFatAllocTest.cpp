@@ -40,6 +40,7 @@ class SparseCard final : public FsBlockDeviceInterface {
   Sector_t failWritesOf = ~Sector_t(0);
   Sector_t countWritesOf = ~Sector_t(0);  // its writes are counted in countedWrites, failed ones too
   size_t countedWrites = 0;
+  size_t writeCommands = 0;  // writeSector() and writeSectors() calls: one card command each on the device
 
   bool isBusy() override { return false; }
   bool readSector(const Sector_t sector, uint8_t* dst) override {
@@ -57,18 +58,13 @@ class SparseCard final : public FsBlockDeviceInterface {
   Sector_t sectorCount() override { return sectors_; }
   bool syncDevice() override { return true; }
   bool writeSector(const Sector_t sector, const uint8_t* src) override {
-    if (sector == countWritesOf) ++countedWrites;
-    if (sector == failWritesOf || sector >= sectors_) return false;
-    if (std::all_of(src, src + 512, [](const uint8_t b) { return b == 0; })) {
-      data_.erase(sector);
-    } else {
-      memcpy(data_[sector].data(), src, 512);
-    }
-    return true;
+    ++writeCommands;
+    return store(sector, src);
   }
   bool writeSectors(const Sector_t sector, const uint8_t* src, const size_t count) override {
+    ++writeCommands;
     for (size_t i = 0; i < count; ++i) {
-      if (!writeSector(sector + i, src + 512 * i)) return false;
+      if (!store(sector + i, src + 512 * i)) return false;
     }
     return true;
   }
@@ -82,11 +78,22 @@ class SparseCard final : public FsBlockDeviceInterface {
       memcpy(dst, it->second.data(), 512);
     }
   }
-  void poke(const Sector_t sector, const uint8_t* src) { writeSector(sector, src); }
+  void poke(const Sector_t sector, const uint8_t* src) { store(sector, src); }
 
  private:
   Sector_t sectors_;
   std::unordered_map<Sector_t, std::array<uint8_t, 512>> data_;
+
+  bool store(const Sector_t sector, const uint8_t* src) {
+    if (sector == countWritesOf) ++countedWrites;
+    if (sector == failWritesOf || sector >= sectors_) return false;
+    if (std::all_of(src, src + 512, [](const uint8_t b) { return b == 0; })) {
+      data_.erase(sector);
+    } else {
+      memcpy(data_[sector].data(), src, 512);
+    }
+    return true;
+  }
 };
 
 uint16_t le16(const uint8_t* p) { return p[0] | p[1] << 8; }
@@ -725,6 +732,77 @@ TEST(SdFatAlloc, RandomRoundsKeepTheFatConsistentOnFat32) {
   // Most of the card in one block of books low on it, so the rounds run near full.
   ASSERT_TRUE(card.fill("/ballast.epub", static_cast<uint64_t>(card.lastCluster - 6000) * card.bytesPerCluster));
   runRandomRounds(card, 400, 3886, 1200);
+}
+
+// A new folder's cluster is zeroed whatever its sectors held, eight sectors a write command rather than one
+// (sdfat_patches/0005 and 0006). On the device each command is a card write of ~1 ms: on the X4 Pro's exFAT card a
+// first open's two folders took 298 and 636 ms of single-sector writes (2026-11-15).
+//
+// The clusters the folder may take, past the last one allocated (the free cluster search moves forward), are first
+// filled with junk, as a deleted book leaves them. Returns the write commands the mkdir took; checks the cluster came
+// out zero past its first `keepBytes` (FAT's "." and ".." entries) and lists empty.
+size_t mkdirOverJunk(SparseCard& dev, FsVolume& vol, const uint32_t keepBytes) {
+  FsFile probe = vol.open("/probe.bin", O_RDWR | O_CREAT | O_TRUNC);
+  EXPECT_TRUE(probe && probe.write("x", 1) == 1);
+  const uint32_t probeCluster = probe.firstCluster();
+  EXPECT_TRUE(probe.close());
+  const uint32_t spc = static_cast<uint32_t>(vol.sectorsPerCluster());
+  const auto clusterSector = [&](const uint32_t cluster) { return vol.dataStartSector() + (cluster - 2) * spc; };
+  uint8_t junk[512];
+  memset(junk, 0xA5, sizeof(junk));
+  for (uint32_t c = probeCluster + 1; c <= probeCluster + 8; ++c) {
+    for (uint32_t s = 0; s < spc; ++s) dev.poke(clusterSector(c) + s, junk);
+  }
+
+  const size_t before = dev.writeCommands;
+  EXPECT_TRUE(vol.mkdir("/new"));
+  const size_t commands = dev.writeCommands - before;
+
+  FsFile dir = vol.open("/new", O_RDONLY);
+  EXPECT_TRUE(dir && dir.isDir());
+  const uint32_t cluster = dir.firstCluster();
+  EXPECT_GT(cluster, probeCluster);
+  EXPECT_LE(cluster, probeCluster + 8) << "the folder must take a cluster that held junk";
+  uint8_t sector[512];
+  for (uint32_t s = 0; s < spc; ++s) {
+    dev.peek(clusterSector(cluster) + s, sector);
+    const uint32_t from = s == 0 ? keepBytes : 0;
+    EXPECT_TRUE(std::all_of(sector + from, sector + 512, [](const uint8_t b) { return b == 0; }))
+        << "sector " << s << " of the new folder's cluster";
+  }
+  FsFile entry;
+  EXPECT_FALSE(entry.openNext(&dir, O_RDONLY)) << "the new folder lists empty";
+  return commands;
+}
+
+TEST(SdFatDirCluster, ANewFolderIsZeroedEightSectorsAWriteOnFat32) {
+  Card card(16 * GB);  // 32 KB clusters: 64 sectors
+  ASSERT_EQ(card.fatType, 32);
+  const size_t commands = mkdirOverJunk(card.dev, card.vol, /*keepBytes=*/64);
+  // Sector by sector the cluster alone was 64 commands.
+  EXPECT_LE(commands, 64u / 8 + 8) << commands << " write commands";
+  EXPECT_EQ(card.check(), "");
+}
+
+TEST(SdFatDirCluster, ANewFolderIsZeroedEightSectorsAWriteOnExFat) {
+  SparseCard dev(static_cast<Sector_t>(GB / 512));
+  uint8_t buffer[512];
+  ExFatFormatter formatter;
+  ASSERT_TRUE(formatter.format(&dev, buffer, nullptr));
+  FsVolume vol;
+  ASSERT_TRUE(vol.begin(&dev));
+  ASSERT_EQ(vol.fatType(), FAT_TYPE_EXFAT);
+  ASSERT_EQ(vol.sectorsPerCluster(), 256u);  // 128 KB clusters, as on the X4 Pro's card
+  const size_t commands = mkdirOverJunk(dev, vol, /*keepBytes=*/0);
+  // Sector by sector the cluster alone was 256 commands.
+  EXPECT_LE(commands, 256u / 8 + 8) << commands << " write commands";
+  // The folder survives a remount: it is found and still lists empty.
+  vol.end();
+  ASSERT_TRUE(vol.begin(&dev));
+  FsFile dir = vol.open("/new", O_RDONLY);
+  ASSERT_TRUE(dir && dir.isDir());
+  FsFile entry;
+  EXPECT_FALSE(entry.openNext(&dir, O_RDONLY));
 }
 
 }  // namespace
