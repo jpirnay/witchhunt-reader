@@ -525,6 +525,8 @@ class EpubReaderActivity final : public Activity {
   // next page's pre-render once it is done, as it does on the deferred-AA panels.
   bool preRenderAfterAa_ = false;
   bool keepBuildPageOnScreen();
+  // The deferred gray pass of the page the build drew (`shown`, loaded as `page`), its glyphs warmed first.
+  void armBuildPageGray(const BuildPageOnScreen& shown, std::unique_ptr<Page> page);
   // The text a relayout or a sync landed on (noteLandedText). Cleared by a page turn.
   struct LandedText {
     int spine = -1;
