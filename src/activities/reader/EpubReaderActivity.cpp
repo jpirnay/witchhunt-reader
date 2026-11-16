@@ -1244,6 +1244,15 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  // Auto-rotate: the device was turned and held. The orientation action's path, so the chapter is laid out again from
+  // this page. A pose that settled while the bars or a dialog were up waits in the HAL until here.
+  uint8_t heldOrientation = 0;
+  if (ReaderUtils::takeAutoRotation(heldOrientation) && heldOrientation != SETTINGS.orientation) {
+    applyOrientation(heldOrientation);
+    requestUpdate();
+    return;
+  }
+
   auto [prevTriggered, nextTriggered] = ReaderUtils::detectTiltPageTurn();
   // Touch page turns join tilt here rather than in the button event queue: both
   // are gesture sources the queue does not carry, and both must lose to an

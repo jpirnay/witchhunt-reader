@@ -158,6 +158,15 @@ inline PageTurnResult detectTiltPageTurn() {
   return {tiltPrev, tiltNext};
 }
 
+// Auto-rotate: the orientation the device has settled in, when the setting is on. The reader
+// turns to it through its own orientation path (the same one the orientation action takes);
+// HalTiltSensor reports a pose once, when it settles, so a reader the user turned by hand stays
+// turned until the device is held a new way.
+inline bool takeAutoRotation(uint8_t& orientation) {
+  return halTiltSensor.takeOrientation(orientation) && SETTINGS.autoRotate &&
+         orientation < CrossPointSettings::ORIENTATION_COUNT;
+}
+
 // --- Touch page turning ------------------------------------------------------
 // Ported from upstream/develop; see docs/contributing/touch-architecture.md,
 // "The reader". Header-only and inert on non-touch boards (input.hasTouch() is false

@@ -320,6 +320,8 @@ inline void buildSettings(const RowSink& emit) {
                          {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED, StrId::STR_LANDSCAPE_CCW},
                          "orientation", StrId::STR_CAT_READER)
            .withSelectorActivity());
+  emit(SettingInfo::Toggle(StrId::STR_AUTO_ROTATE, &CrossPointSettings::autoRotate, "autoRotate", StrId::STR_CAT_READER)
+           .requiring(SettingRequires::TiltSensor));
   // EPUB font submenu — family first, then size/AA/darkness.
   // DynamicEnum so SD card font families can be appended at the consumer
   // side (SettingsActivity / CrossPointWebServer enrich enumLabels before

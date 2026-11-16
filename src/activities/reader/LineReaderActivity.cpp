@@ -155,6 +155,12 @@ void LineReaderActivity::loop() {
   // overlap (outer thirds vs centre), so the order is not load-bearing.
   if (ReaderUtils::isTouchMenuGesture(renderer, mappedInput) && onConfirmShortPress()) return;
 
+  uint8_t heldOrientation = 0;
+  if (ReaderUtils::takeAutoRotation(heldOrientation)) {
+    applyOrientation(heldOrientation);
+    return;
+  }
+
   auto [prevTriggered, nextTriggered] = ReaderUtils::detectTiltPageTurn();
   // Touch page turns join tilt here rather than in the button event queue: both
   // are gesture sources the queue does not carry, and both must lose to an

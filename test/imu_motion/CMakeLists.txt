@@ -1,5 +1,7 @@
 add_executable(ImuMotionTest
+  OrientationTrackerTest.cpp
   TiltRateTest.cpp
+  ${REPO_ROOT}/lib/hal/OrientationTracker.cpp
 )
 
 target_include_directories(ImuMotionTest PRIVATE

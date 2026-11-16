@@ -639,6 +639,8 @@ class CrossPointSettings {
   uint8_t tiltPositiveAction = TILT_ACT_NEXT_PAGE;
   // Action for a tilt to the left or back.
   uint8_t tiltNegativeAction = TILT_ACT_PREV_PAGE;
+  // The reader turns to the way the device is held (boards with an IMU).
+  uint8_t autoRotate = 0;
   // Touch page turning on the reading surface (touch boards only). Defaults to
   // tap zones, which is what upstream ships; the X4 Pro has no back/confirm
   // button, so leaving it off would strand the reader.

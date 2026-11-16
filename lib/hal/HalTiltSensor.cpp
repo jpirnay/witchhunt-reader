@@ -70,7 +70,7 @@ bool HalTiltSensor::readSample(Imu::Sample& out) {
 }
 
 bool HalTiltSensor::wake() {
-  if (!_available) {
+  if (!_present) {
     return false;
   }
   if (!imuWake()) {
@@ -80,12 +80,13 @@ bool HalTiltSensor::wake() {
   _lastPollMs = millis();
   _lastTiltMs = millis();
   _wakeMs = millis();
+  _tracker.reset();
   LOG_INF("GYR", "IMU woke up");
   return true;
 }
 
 bool HalTiltSensor::deepSleep() {
-  if (!_available) {
+  if (!_present) {
     return false;
   }
   if (!imuSleep()) {
@@ -94,34 +95,37 @@ bool HalTiltSensor::deepSleep() {
   }
   clearPendingEvents();
   _inTilt = false;
+  _tracker.reset();
+  _orientationEvent = OrientationTracker::kNone;
   LOG_INF("GYR", "IMU entered sleep mode");
   return true;
 }
 
 void HalTiltSensor::update(const CrossPointTiltPageTurn::Value mode, const TiltRate::Axis axis,
-                           const CrossPointOrientation::Value orientation, const bool inReader) {
-  if (!_available) {
+                           const CrossPointOrientation::Value orientation, const bool autoRotate, const bool inReader) {
+  // Tilt page turns read the gyro; auto-rotate only the accelerometer, which every IMU has.
+  const bool tiltOn = _available && inReader && mode != CrossPointTiltPageTurn::TILT_OFF;
+  const bool rotateOn = _present && inReader && autoRotate;
+  const bool wanted = tiltOn || rotateOn;
+  if (wanted != _isAwake) {
+    _isAwake = wanted ? wake() : !deepSleep();
     return;
   }
-
-  if ((mode != CrossPointTiltPageTurn::TILT_OFF && inReader) && !_isAwake) {
-    _isAwake = wake();
-    return;
-  } else if ((mode == CrossPointTiltPageTurn::TILT_OFF || !inReader) && _isAwake) {
-    _isAwake = !deepSleep();
+  if (!wanted) {
     return;
   }
-
-  if ((mode == CrossPointTiltPageTurn::TILT_OFF) || !inReader) {
-    return;
+  if (rotateOn != _rotating) {
+    // Turned on: the first pose to settle counts as new. Turned off: nothing pending survives.
+    _rotating = rotateOn;
+    _tracker.reset();
+    _orientationEvent = OrientationTracker::kNone;
   }
 
   const unsigned long now = millis();
   if ((now - _wakeMs) < WAKE_STABILIZE_MS) {
     return;
   }
-
-  if ((now - _lastPollMs) < POLL_INTERVAL_MS) {
+  if ((now - _lastPollMs) < (tiltOn ? POLL_INTERVAL_MS : ROTATE_POLL_INTERVAL_MS)) {
     return;
   }
   _lastPollMs = now;
@@ -130,6 +134,16 @@ void HalTiltSensor::update(const CrossPointTiltPageTurn::Value mode, const TiltR
   if (!imuRead(sample)) {
     return;
   }
+
+  if (rotateOn && _tracker.update(sample.ax, sample.ay, static_cast<uint32_t>(now))) {
+    _orientationEvent = _tracker.settled();
+    _hadActivity = true;
+    LOG_INF("GYR", "Held as orientation %u (ax=%.2f ay=%.2f)", _orientationEvent, sample.ax, sample.ay);
+  }
+  if (!tiltOn) {
+    return;
+  }
+
   float tiltAxis = TiltRate::rate(sample.gx, sample.gy, orientation, axis);
   if (mode == CrossPointTiltPageTurn::TILT_INVERTED) {
     tiltAxis = -tiltAxis;
@@ -168,6 +182,15 @@ bool HalTiltSensor::wasTiltedBack() {
   const bool val = _tiltBackEvent;
   _tiltBackEvent = false;
   return val;
+}
+
+bool HalTiltSensor::takeOrientation(uint8_t& orientation) {
+  if (_orientationEvent == OrientationTracker::kNone) {
+    return false;
+  }
+  orientation = _orientationEvent;
+  _orientationEvent = OrientationTracker::kNone;
+  return true;
 }
 
 bool HalTiltSensor::hadActivity() {
