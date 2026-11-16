@@ -29,9 +29,9 @@ next page and the next chapters. Its Library shows covers in every tab, and it k
 bookmarks across books and printed page numbers, syncs KOReader progress automatically, lets every button
 press be reassigned, keeps a clock on the X4, shows the weather, logs into Wi-Fi login pages and
 transfers books over the USB cable. It runs on the LilyGo T5 S3 Pro and the Murphy M3. It turns pages faster on the
-X3, the X4 and the X4 Pro and as fast on the BOOX Picco, and on the X3 and the X4 Pro it shows the page of a chapter
-it has not laid out before sooner; CrossPoint opens and reopens chapters sooner on the X4, and reopens them sooner on
-the Picco ([measured](#measured-speed-and-memory)).
+X3, the X4 and the X4 Pro and as fast on the BOOX Picco, and on all four shows the page of a chapter it has not laid
+out before sooner; CrossPoint reopens chapters a little sooner on the X4 and the Picco, and after such an open its
+screen settles sooner on the X3, the X4 and the Picco ([measured](#measured-speed-and-memory)).
 
 **CrossPoint is ahead on** highlights and clippings, Bluetooth page-turn remotes, library
 loans (LCP) and OPDS 2 catalogs, plugins on the device, indexed title and author search, word and
@@ -248,16 +248,16 @@ smaller font area on large CJK books was not measured.
 ## Measured speed and memory
 
 > Measured 2026-11-15 and 2026-11-16 on one Xteink X3, one X4, one X4 Pro and one BOOX Picco: Witch Reader 2.53
-> against CrossPoint develop
-> `36b9430e` (2026-11-15) with its serial test API (PR #4458) and one unmerged fix, both development builds. One script
-> drove both through each firmware's serial test API: a press, then a wait until the screen has settled, which
-> includes a 250 ms quiet window on both. Same book (*The Odyssey*, Book IV, 8,077 words), the same settings as far as
-> both have them: Noto Sans 14 pt (the one built-in font both have), 38 px line pitch, justified, hyphenation on, a
-> full refresh every 15 pages. Medians of 30 page turns and of 3 to 5 opens. On the X3 and the X4 Pro, CrossPoint's
-> opens without a cache and both firmwares' turns into the next chapter ran once each, and Witch Reader's opens and
-> boot were measured on the builds that became 2.53; its page turns and its turn into the next chapter were measured on
-> 2.52, the page turns again after each 2.53 change, within 10 ms each time. On the X4 and the Picco every row ran on
-> 2.53, and the opens without a cache and the turns into the next chapter three times on both firmwares.
+> against CrossPoint develop `36b9430e` (2026-11-15) with its serial test API (PR #4458) and one unmerged fix, both
+> development builds. One script drove both through each firmware's serial test API: a press, then a wait until the
+> screen has settled, which includes a 250 ms quiet window on both. Same book (*The Odyssey*, Book IV, 8,077 words),
+> the same settings as far as both have them: Noto Sans 14 pt (the one built-in font both have), 38 px line pitch,
+> justified, hyphenation on, a full refresh every 15 pages. Medians of 30 page turns and of 3 to 5 opens. On the X3
+> and the X4 Pro, CrossPoint's opens without a cache and both firmwares' turns into the next chapter ran once each,
+> and Witch Reader's opens and boot were measured on the builds that became 2.53; its page turns and its turn into the
+> next chapter were measured on 2.52, the page turns again after each 2.53 change, within 10 ms each time. On the X4
+> and the Picco every row ran on 2.53 (the X4's rows marked † again with two later fixes), and the opens without a
+> cache and the turns into the next chapter three times on both firmwares.
 
 **X3**
 
@@ -296,22 +296,23 @@ point of the same run, CrossPoint had less heap free than Witch Reader.
 | Page turn, no AA | 1.01 s | 1.17 s |
 | Page turn, AA in two passes | 1.29 s | 1.41 s |
 | Page turn, AA in one pass | 1.05 s | ❌ not available on the X4 |
-| Turn into the next chapter, AA in two passes | 3.7 s ³ | 2.0 s |
+| Turn into the next chapter, AA in two passes | 1.96 s † ³ | 2.02 s |
 | Reopen a chapter, cache kept, AA in two passes | 3.2 s | 3.0 s |
-| Open a chapter, cache deleted: page on screen, no AA | 5.0 s | 4.6 s |
-| Open a chapter, cache deleted: screen settled, AA in two passes | 8.2 s | 5.5 s |
+| Open a chapter, cache deleted: page on screen, no AA | 4.2 s † | 4.6 s |
+| Open a chapter, cache deleted: screen settled, AA in two passes | 7.3 s † | 5.5 s |
 | Boot to Home | 3.9 s | 3.9 s |
 | Free heap in the reader at rest (largest block) | 80 KB (66 KB) | 150 KB (115 KB) |
-| Lowest free heap since boot | 23.0 KB | 48.2 KB |
+| Lowest free heap since boot | 53.2 KB † | 48.2 KB |
 
-³ The new chapter's page is on screen after 1.2 s; the screen settles once the chapter is laid out and its AA drawn.
-Into a chapter laid out already: 1.76 s against 1.53 s.
+† Measured again on 2026-11-17 with two fixes the bench led to, which come with the release after 2.53: a first open
+lays its chapter out in the borrowed framebuffer from the start (#802), and the next chapter is laid out while you
+read the last pages of this one (#805). 2.53 itself: 3.7 s, 5.0 s, 8.2 s and 23.0 KB.
+³ The new chapter's page is on screen after 1.0 s. Into a chapter laid out already: 1.76 s against 1.53 s.
 
-On the X4 Witch Reader turns pages faster in every mode, and CrossPoint opens chapters faster. Witch Reader's first
-build of a chapter on the X4 runs short of memory with the framebuffer kept, and starts again with it borrowed: about
-1 s, and the run's lowest free heap. At a page every 2.5 s it did not lay out the next chapter ahead of the reader, as
-it does on the X3, so the turn into it waited for the layout. At rest CrossPoint has more heap free, for the reason
-given under the X3.
+On the X4 Witch Reader turns pages faster in every mode, shows the page of a chapter it has not laid out before
+sooner, and turns into the next chapter as fast. CrossPoint reopens a chapter a little sooner, and after an open
+without a cache its screen settles sooner: it adds the AA once part of the chapter is laid out, Witch Reader once the
+whole chapter is. At rest CrossPoint has more heap free, for the reason given under the X3.
 
 **X4 Pro**
 
