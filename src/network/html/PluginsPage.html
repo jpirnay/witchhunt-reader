@@ -31,6 +31,8 @@
       .plugin-info > div:not(.plugin-meta) { margin-bottom: 4px; }
       .plugin-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
       .plugin.off .plugin-info { opacity: 0.6; }
+      .catalog-source { margin-bottom: 12px; }
+      #community-note { margin: 0 0 12px; }
 
       .upload-form { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
       .upload-form input[type="file"] { flex: 1 1 240px; min-width: 0; max-width: 100%; }
@@ -65,6 +67,14 @@
 
       <section class="card">
         <h2>Available plugins</h2>
+        <div class="segmented catalog-source" role="radiogroup" aria-label="Catalog">
+          <label><input type="radio" name="catalog-source" value="own" checked><span>Witch Reader</span></label>
+          <label><input type="radio" name="catalog-source" value="community"><span>CrossPoint community</span></label>
+        </div>
+        <p id="community-note" class="plugin-meta" hidden>
+          Plugins written for CrossPoint, from its Plugin Hub. Witch Reader has not checked them: like any plugin, one
+          can read and change everything on the card. Each says what of it runs on this firmware.
+        </p>
         <div id="catalog"><p class="empty">Loading the catalog...</p></div>
       </section>
 
@@ -334,20 +344,109 @@
         return 'https://raw.githubusercontent.com/' + repo + '/' + catalogRef + '/plugins/catalog.json';
       }
 
-      // The folder an entry's files are read from.
-      function entryBase(c) {
-        return new URL(c.base || c.name + '/', catalogUrl());
+      // The folder an entry's files are read from, resolved against the catalog it came from.
+      function entryBase(c, fromUrl) {
+        return new URL(c.base || c.name + '/', fromUrl || catalogUrl());
       }
 
       // "From github.com/someone/repo" for a plugin hosted outside this repository, else ''.
-      function describeSource(c) {
-        const base = entryBase(c);
-        if (base.href.startsWith(new URL('./', catalogUrl()).href)) return '';
+      function describeSource(c, fromUrl) {
+        if (c.repository) return 'From github.com/' + c.repository;
+        const base = entryBase(c, fromUrl);
+        if (base.href.startsWith(new URL('./', fromUrl || catalogUrl()).href)) return '';
         const parts = base.pathname.split('/').filter(Boolean);
         const where = base.host === 'raw.githubusercontent.com' ? 'github.com/' + parts.slice(0, 2).join('/')
           : base.host + base.pathname;
         return 'From ' + where;
       }
+
+      // ---- Community catalog ----------------------------------------------------------------------
+      //
+      // CrossPoint's Plugin Hub (crosspoint-reader/crosspoint-plugin-hub): plugins written for upstream
+      // crosspoint-reader, itsthisjustin/sd-plugins' among them, often newer there. Read by the browser
+      // from GitHub, like ours. Neither repository has a license: the page links to their files and the
+      // browser fetches them at install time; nothing of them is in this repository.
+      //
+      // What of an entry runs here is judged from the catalog alone (communityStatus()): its web part
+      // (plugin.js) runs on this firmware's plugin host, which speaks upstream's API; its on-device
+      // screens (device.json) do not, nor does anything needing a capability listed in
+      // compatibility.requires that this firmware lacks.
+      const COMMUNITY_CATALOG_URL =
+        'https://raw.githubusercontent.com/crosspoint-reader/crosspoint-plugin-hub/main/catalog.json';
+      // Plugin stores, which install plugins on the device: this page is the store here.
+      const COMMUNITY_HIDDEN = ['pluginhub', 'plugin-store'];
+      // Known not to run, for a reason the catalog does not state.
+      const COMMUNITY_KNOWN = {
+        'protected-content': 'it needs DRM support (api.crypto and book keys), which this firmware does not have'
+      };
+      // Capabilities from upstream's compatibility.requires this firmware implements. None yet: the
+      // catalog.* ones are upstream's on-device catalog screens.
+      const COMMUNITY_CAPABILITIES = [];
+
+      let communityCatalog = null;
+
+      // {level: 'yes' | 'partial' | 'no', text}: what of a community entry runs on this firmware.
+      function communityStatus(c) {
+        const files = Array.isArray(c.files) ? c.files : [];
+        const compat = c.compatibility || {};
+        if (COMMUNITY_KNOWN[c.name]) return { level: 'no', text: 'Does not run here: ' + COMMUNITY_KNOWN[c.name] };
+        if (compat.firmware_family && compat.firmware_family !== 'crosspoint') {
+          return { level: 'no', text: 'Made for another firmware (' + compat.firmware_family + ')' };
+        }
+        const missing = String(compat.requires || '').split(',').map((r) => r.trim())
+          .filter((r) => r && COMMUNITY_CAPABILITIES.indexOf(r) === -1);
+        if (!files.includes('plugin.js')) {
+          return { level: 'no', text: 'Does not run here yet: it has only a part on the device (screens, events)' };
+        }
+        const beyondScreens = missing.filter((r) => !r.startsWith('catalog.'));
+        if (beyondScreens.length) {
+          return { level: 'no', text: 'Does not run here yet: it needs ' + beyondScreens.join(', ') };
+        }
+        if (files.includes('device.json') || missing.length) {
+          return { level: 'partial', text: 'Its web page runs here; its part on the device (screens, events) does not yet' };
+        }
+        return { level: 'yes', text: 'Runs here' };
+      }
+
+      async function loadCommunityCatalog() {
+        if (communityCatalog) {
+          renderCatalogButtons();
+          return;
+        }
+        $('catalog').replaceChildren(el('p', { className: 'empty', textContent: 'Loading the community catalog...' }));
+        try {
+          const r = await fetch(COMMUNITY_CATALOG_URL, { cache: 'no-cache' });
+          if (!r.ok) throw new Error(r.status + '');
+          communityCatalog = await r.json();
+        } catch (e) {
+          $('catalog').replaceChildren(el('p', {
+            className: 'empty',
+            textContent: 'The community catalog could not be loaded. It comes from GitHub, so this browser needs an ' +
+              'internet connection.'
+          }));
+          return;
+        }
+        renderCatalogButtons();
+      }
+
+      function catalogSource() {
+        const picked = document.querySelector('input[name="catalog-source"]:checked');
+        return picked ? picked.value : 'own';
+      }
+
+      document.querySelectorAll('input[name="catalog-source"]').forEach((input) => {
+        input.addEventListener('change', () => {
+          const community = catalogSource() === 'community';
+          $('community-note').hidden = !community;
+          if (community) {
+            loadCommunityCatalog();
+          } else if (catalog) {
+            renderCatalogButtons();
+          } else {
+            loadCatalog();
+          }
+        });
+      });
 
       async function loadCatalog() {
         try {
@@ -359,6 +458,7 @@
           if (!r.ok) throw new Error(r.status + '');
           catalog = await r.json();
         } catch (e) {
+          if (catalogSource() !== 'own') return;
           $('catalog').replaceChildren(el('p', {
             className: 'empty',
             textContent: 'The catalog could not be loaded. It comes from GitHub, so this browser needs an internet ' +
@@ -370,44 +470,67 @@
       }
 
       function renderCatalogButtons() {
-        if (!catalog) return;
-        const list = (catalog.plugins || []);
+        const community = catalogSource() === 'community';
+        const source = community ? communityCatalog : catalog;
+        if (!source) return;
+        const fromUrl = community ? COMMUNITY_CATALOG_URL : catalogUrl();
+        const list = (source.plugins || []).filter((c) => !community || COMMUNITY_HIDDEN.indexOf(c.name) === -1);
         if (!list.length) {
           $('catalog').replaceChildren(el('p', { className: 'empty', textContent: 'The catalog is empty.' }));
           return;
         }
+        const ownEntries = (catalog && catalog.plugins) || [];
         $('catalog').replaceChildren(...list.map((c) => {
+          const status = community ? communityStatus(c) : null;
           const have = installed.find((p) => p.name === c.name);
           const current = have && (have.version || '') === (c.version || '');
           const button = el('button', {
             className: 'btn btn-small' + (current ? '' : ' btn-primary'),
             textContent: current ? 'Installed' : have ? 'Update' : 'Install',
             disabled: !!current,
-            onclick: () => installFromCatalog(c, button)
+            onclick: () => installFromCatalog(c, button, fromUrl, status)
           });
           const title = el('strong', { textContent: c.title || c.name });
           if (c.version) title.append(el('span', { className: 'badge badge-muted', textContent: 'v' + c.version }));
-          const source = describeSource(c);
-          return el('div', { className: 'plugin' }, [
+          if (status) {
+            title.append(el('span', {
+              className: 'badge' + (status.level === 'yes' ? '' : status.level === 'partial' ? ' badge-warn' : ' badge-muted'),
+              textContent: status.level === 'yes' ? 'runs here' : status.level === 'partial' ? 'web page only' : 'does not run here'
+            }));
+          }
+          const from = describeSource(c, fromUrl);
+          const ownTwin = community && ownEntries.find((o) => o.name === c.name);
+          const meta = [
+            c.author ? 'By ' + c.author : '',
+            from,
+            status ? status.text : 'Adds itself to: ' + (MOUNT_LABELS[c.mount] || c.mount),
+            describeReach(c.allowedHosts),
+            ownTwin ? 'Shares its folder name with Witch Reader\'s ' + (ownTwin.title || ownTwin.name) +
+              ': installing one replaces the other' : ''
+          ].filter(Boolean);
+          return el('div', { className: 'plugin' + (status && status.level === 'no' ? ' off' : '') }, [
             el('div', { className: 'plugin-info' }, [
               title,
               c.description ? el('div', { textContent: c.description }) : '',
-              c.author ? el('div', { className: 'plugin-meta', textContent: 'By ' + c.author }) : '',
-              source ? el('div', { className: 'plugin-meta', textContent: source }) : '',
-              el('div', { className: 'plugin-meta', textContent: 'Adds itself to: ' + (MOUNT_LABELS[c.mount] || c.mount) }),
-              el('div', { className: 'plugin-meta', textContent: describeReach(c.allowedHosts) })
+              ...meta.map((m) => el('div', { className: 'plugin-meta', textContent: m }))
             ]),
-            el('div', { className: 'plugin-actions' }, [button])
+            el('div', { className: 'plugin-actions' }, status && status.level === 'no' ? [] : [button])
           ]);
         }));
       }
 
-      async function installFromCatalog(c, button) {
-        button.disabled = true;
+      async function installFromCatalog(c, button, fromUrl, status) {
         const title = c.title || c.name;
+        if (status && !confirm(title + ' is a community plugin written for CrossPoint, by ' + (c.author || 'its author') +
+            '. Witch Reader has not checked it: like any plugin, it can read and change everything on the card.' +
+            (status.level === 'partial' ? '\n\n' + status.text + '.' : '') + '\n\nInstall it?')) {
+          return;
+        }
+        button.disabled = true;
+        let mount = c.mount;
         try {
           setStatus('Downloading ' + title + '...', 'busy');
-          const base = entryBase(c);
+          const base = entryBase(c, fromUrl);
           const files = await Promise.all((c.files || []).map(async (name) => {
             // A plugin's files sit side by side; the reader refuses anything else as well.
             if (typeof name !== 'string' || !name || name.includes('/')) throw new Error('bad file name in the catalog');
@@ -425,6 +548,7 @@
             } catch (e) {
               throw new Error('its manifest.json is not valid JSON');
             }
+            mount = mount || manifest.mount || 'settings';
             const sites = (list) => (Array.isArray(list) ? list.slice().sort().join(' ') : '');
             if (sites(manifest.allowedHosts) !== sites(c.allowedHosts) &&
                 !confirm(title + ' reaches other sites than the catalog says.\n\n' +
@@ -435,7 +559,7 @@
             }
           }
           await installFiles(c.name, title, files);
-          setStatus(title + ' is installed. Open the ' + (MOUNT_LABELS[c.mount] || 'page') + ' page to use it.', 'ok');
+          setStatus(title + ' is installed. Open the ' + (MOUNT_LABELS[mount] || 'page') + ' page to use it.', 'ok');
         } catch (e) {
           setStatus('Could not install ' + title + ': ' + e.message, 'err');
         }

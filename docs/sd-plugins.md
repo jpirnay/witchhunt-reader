@@ -230,9 +230,28 @@ it is sent:
   gives this repository's plugins a relative one (`find-duplicates/`), so a
   catalog read from another branch installs that branch's files. A plugin hosted
   elsewhere is added to `catalog.json` by hand with an absolute `base`; the
-  script keeps such entries, and the page shows where they come from. The
-  crosspoint-reader catalog itself is not offered: most of its plugins need
-  on-device screens (`device.json`) or a relay this firmware does not have.
+  script keeps such entries, and the page shows where they come from.
+- **From the CrossPoint community catalog**: the page's **CrossPoint community**
+  switch lists CrossPoint's Plugin Hub
+  (`crosspoint-reader/crosspoint-plugin-hub`, `catalog.json`), which carries the
+  `itsthisjustin/sd-plugins` plugins too, often in newer versions. The browser
+  reads it from GitHub when the switch is first chosen. Neither repository has a
+  license, so nothing of them is in this repository: the page links to their
+  files, and an install fetches them. The plugin stores (`pluginhub`,
+  `plugin-store`) are left out; this page is the store here. Each entry says
+  what of it runs on this firmware, judged from the catalog:
+  - **runs here**: a web part (`plugin.js`) and nothing on the device;
+  - **web page only**: a web part, and a part on the device (`device.json`: screens or events) that does not
+    run here yet, or a requirement (`compatibility.requires`) that concerns only upstream's on-device catalogs
+    (`catalog.*`);
+  - **does not run here**: no web part, another `firmware_family`, a requirement this firmware lacks (named),
+    or a reason the catalog does not state (`protected-content` needs DRM support). These have no Install button.
+
+  An entry sharing a folder name with one of ours (`organize-by-author`) says
+  so: installing one replaces the other. A community install asks once, naming
+  the author, and the plugin then reaches the internet only through hosts you
+  approve when it asks (see
+  [Reaching the internet](#reaching-the-internet-allowedhosts-and-approvals)).
 - **From a `.zip`**: the plugin's files side by side, or inside one folder. The
   page shows the manifest's title, description and `allowedHosts` and asks
   before installing.
