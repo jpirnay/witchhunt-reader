@@ -113,6 +113,12 @@ Device checks still owed for the 2026-10-21 PRs (all X3-only):
   Keep/Reset of the cache clear (#538), the held-key steps of the password editor (#537).
 - X4: Base's portrait side-box gap and the X4 keyboard in landscape (#543).
 
+Device checks still owed for the faster cold opens (#789, #792, 2.53; measured on the X3 and the X4 Pro only):
+
+- X4: it builds resident, so it keeps the first open's Indexing popup for the chapter build (#792).
+- T5S3, Murphy M3, BOOX Picco: the PSRAM build region (#789) and the book indexed while the popup paints (#792);
+  on the Murphy and the Picco also the SDK's SDMMC read-ahead (freeink-sdk cf63426).
+
 Test API gap that blocks some of these: no `CMD:HEAP:REFUSE` field that refuses the secondary-buffer
 realloc (it would make the fragmented-heap restart reachable). Held keys are there since #741
 (`CMD:BTN:<key>:<ms>`, [Serial Test API](../serial-test-api.md)).
@@ -218,6 +224,18 @@ and the slide switch turns the light on and off. Board notes:
 - **GPIO5.** The SDK carries it as Confirm; what drives it on the device is not known.
 - **Slide switch and touch page turns.** Upstream's third binding. Here Touch Page Turn has four values, so "on" needs
   a remembered mode.
+
+## Motion sensor: power and the SDK gating
+
+Status: tilt page turns and Auto-Rotate read the IMU through the SDK's `freeink::Imu` since #794 (2.53), on the X3
+and the BOOX Picco.
+
+- **Auto-Rotate keeps the gyroscope awake.** While it is on, the reader keeps the accelerometer and the gyroscope
+  running: the SDK `Imu` has no accelerometer-only mode, and the orientation needs only the accelerometer. The current
+  this draws is not measured. Next: measure it on the X3 with Auto-Rotate on and off; if it matters, add an
+  accelerometer-only mode to the SDK.
+- **The driver gating upstream.** `FREEINK_IMU_<PART>` (SDK pin ef99c6c) compiles only the IMU drivers a build's
+  boards use; without it the C3 image grew by 10.6 KB. Offered to Free-Ink as #217, open.
 
 ## USB attach during light sleep on the X4 (CrossPoint #3082)
 
