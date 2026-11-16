@@ -57,6 +57,12 @@
 
   <section>
     <h2>3. What to write</h2>
+    <div id="release-row" class="row" hidden>
+      <label for="release-select"><strong>Release</strong></label>
+      <select id="release-select"></select>
+      <label id="show-pre-box" class="inline"><input id="show-pre" type="checkbox"> Show pre-releases</label>
+    </div>
+    <div id="release-info"></div>
     <label class="choice"><input type="radio" name="mode" value="full" checked>
       <strong>Full install</strong> (recommended)
       <small id="full-info">The boot loader, the partition table and the firmware, written from the start of the

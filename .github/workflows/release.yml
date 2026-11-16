@@ -19,10 +19,9 @@ name: Compile Release
 # the web flasher. Its name must never match the OTA's firmware*.bin.
 #
 # deploy-flasher then publishes the web flasher (flasher/, taken from master)
-# to GitHub Pages with this run's images, for full releases only: a pre-release
-# keeps the flasher on the last full release. To redeploy between releases
-# (a change to flasher/ on master), re-run that job of the latest release's
-# run; it rebuilds nothing.
+# to GitHub Pages with the last five full releases and any newer pre-releases,
+# downloaded from their release pages (deploy_flasher.yml). To redeploy between
+# releases (a change to flasher/ on master), run "Deploy Flasher" by hand.
 
 on:
   release:
@@ -186,47 +185,12 @@ jobs:
           files: release-assets/*.bin
           fail_on_unmatched_files: true
 
-  # The web flasher on GitHub Pages, with this release's images. Served from Pages because GitHub's
-  # release downloads send no Access-Control-Allow-Origin, so a page cannot fetch them. Full
-  # releases only; see the note at the top for redeploying.
+  # The web flasher on GitHub Pages, with this release among the ones it offers (deploy_flasher.yml).
+  # Pre-releases too: the page lists them only when asked to.
   deploy-flasher:
     needs: publish-release
-    if: ${{ !github.event.release.prerelease }}
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+    uses: ./.github/workflows/deploy_flasher.yml
     permissions:
       contents: read
       pages: write
       id-token: write
-    steps:
-      # The page from master, so a re-run of this job publishes the current flasher; the images are
-      # the release's, from this run's artifacts.
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-
-      - name: Download board binaries
-        uses: actions/download-artifact@v6
-        with:
-          path: release-assets
-          merge-multiple: true
-
-      - name: Stage the flasher site
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          RELEASE_NAME: ${{ github.event.release.name }}
-          RELEASE_URL: ${{ github.event.release.html_url }}
-        run: >-
-          python3 scripts/stage_flasher_site.py --assets release-assets --out "${RUNNER_TEMP}/flasher-site"
-          --tag "$RELEASE_TAG" --name "$RELEASE_NAME" --url "$RELEASE_URL"
-
-      - uses: actions/upload-pages-artifact@v5
-        if: ${{ env.ACT != 'true' }}
-        with:
-          path: ${{ runner.temp }}/flasher-site
-
-      - id: deploy
-        if: ${{ env.ACT != 'true' }}
-        uses: actions/deploy-pages@v5
