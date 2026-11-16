@@ -11,13 +11,14 @@ card on that page. Adding or changing a plugin never needs a firmware build.
 > layout, the `/api/plugins` and `/plugin` contract, the `registerPlugin`
 > handshake and the `mount` convention are his design and are kept compatible: a
 > plugin that only uses the page and these two endpoints runs on both firmwares.
-> The device-side `api` calls are not: upstream has since changed them
-> (`relay(method, url, headers, body)` returning `{status, headers, body}`, a
-> base64 `writeFile`), so a plugin that relays or writes files is written for one
-> firmware or the other. This port takes a subset of that branch: the relay,
-> fetch-to-SD and small-file endpoints are here (with the host allowlist upstream
-> had removed), while its crypto endpoint, job queue, on-device catalog screens
-> and content-protection work are not — see [Trust](#trust) and `allowedHosts`
+> The device-side `api` calls follow upstream's later contract too (its plugin
+> system, #3114, and the PRs after it): `api.dir`,
+> `relay(method, url, headers, body)` answering `{status, headers, body}`, a
+> base64 `writeFile`, and `fetchToSd(url, dest, headers, {method, body})`. Unlike
+> upstream, the device reaches only the hosts a plugin may reach: those its
+> manifest lists, or that you approved when it asked. Upstream's crypto endpoint,
+> job queue, on-device catalog screens and content-protection work are not here —
+> see [Trust](#trust) and [Reaching the internet](#reaching-the-internet-allowedhosts-and-approvals)
 > below.
 
 Plugins extend the **web interface**, not the reader. Nothing runs on the
@@ -72,10 +73,13 @@ heading shows an untitled card.
 |---|---|
 | `name` | the folder name |
 | `title` | `manifest.json`'s title, falling back to `name` — use it if you want the heading to track the manifest rather than hardcoding it |
+| `dir` | the plugin's own folder, e.g. `/.crosspoint/plugins/<name>`. A plugin may keep its settings and token there: `writeFile` writes inside it, and `/download?path=<dir>/<file>` reads a file back, though the folder is hidden from every listing |
 | `pluginFile(filename)` | URL for another file in this plugin's folder |
-| `relay(url)` | GET a URL the browser cannot reach itself; resolves to a `Response`. Allowlisted — see below |
-| `fetchToSd(url, dest)` | download straight to the card, one transfer instead of two |
-| `writeFile(path, data)` | write one small file (≤64KB); `data` may be a string, Blob or ArrayBuffer |
+| `relay(url)` | GET a URL the browser cannot reach itself; resolves to a `Response`, redirects followed within the hosts the plugin may reach. See below |
+| `relay(method, url, headers, body)` | upstream's form: any of GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS and the WebDAV methods; `headers` an object; resolves to `{status, headers: [[name, value], ...], body}` with the body as text. A 3xx comes back unfollowed, with its `Location`. Headers make the request a credentialed one: the server's certificate must verify |
+| `fetchToSd(url, dest, headers, {method, body})` | download straight to the card, one transfer instead of two; `headers`, `method` and `body` optional. Resolves to `{ok, complete, status, bytes, dest}` |
+| `writeFile(path, data)` | write one small file (≤64KB) where `/upload` may write or in the plugin's own folder; `data` is base64 when a string (upstream's API), or a Blob or ArrayBuffer |
+| `registerAction(name, fn)` | accepted and ignored with a console warning: there is no job queue here |
 | `currentPath` | the folder the File Manager is showing. Default to it rather than asking for a path the user has already navigated to; always `/` on Settings |
 
 **`api.crypto` is not provided.** The browser's own `crypto.subtle` covers
@@ -91,7 +95,7 @@ inside its own code:
 { "requires": ["relay", "fetchToSd"] }
 ```
 
-Supported: `relay`, `fetchToSd`, `writeFile`, `pluginFile`.
+Supported: `relay`, `fetchToSd`, `writeFile`, `pluginFile`, `dir`.
 
 Everything else is the web server's own
 same-origin API — a plugin uses `fetch()` against the endpoints in
@@ -104,25 +108,39 @@ Prefer these same-origin endpoints wherever they suffice — they cost the devic
 nothing beyond the request itself. A plugin reaches the SD card through the same
 doors the web UI already opens, so it gains no privilege the page does not have.
 
-Reaching *outward* is different, and is fenced separately: see `allowedHosts`
-below. Where a remote site sends CORS headers, call it directly with `fetch()`
+Reaching *outward* is different, and is fenced separately: see
+[below](#reaching-the-internet-allowedhosts-and-approvals). Where a remote site sends CORS headers, call it directly with `fetch()`
 and leave the device out of it entirely.
 
-### Reaching the internet: `allowedHosts`
+### Reaching the internet: `allowedHosts` and approvals
 
 A plugin runs in a browser page served by the device, so it can only read a
 cross-origin response when the remote site sends CORS headers. Most do not —
 Goodreads and `books.google.com` among them — and an image without CORS taints a
 canvas, so its bytes can be displayed but never saved.
 
-`GET /api/relay?plugin=<name>&url=<url>` fetches on the page's behalf and answers
-same-origin. It is opt-in per plugin: the host must be listed in that plugin's
-own `manifest.json`, so a plugin's reach is readable before you install it.
+The relay (`/api/relay`) fetches on the page's behalf and answers same-origin.
+The device reaches a host for a plugin only when the plugin's own
+`manifest.json` lists it, so its reach is readable before you install it, or
+when you approved that host for that plugin:
+
+- a refused request names the host (`403 {"error": ..., "host": ...}`), and the
+  plugin host asks you "Allow the plugin … to connect to …?"; a yes is stored on
+  the device (`/.crosspoint/plugin-hosts.json`, per plugin, kept across updates)
+  and the request runs again;
+- the Plugins page lists each plugin's approved hosts with a **Take back** button;
+- removing a plugin removes its approvals.
+
+Plugins written for upstream crosspoint-reader declare no `allowedHosts`, so
+this is how they reach their services.
 
 The relay and `/api/fetch` check the server's certificate against the reader's
-roots and, when that fails, go on unverified, as an OPDS catalog without a login
-does. So a relayed response is no more trustworthy than plain http: treat it as
-untrusted input, and never put a token or other secret in a relayed URL.
+roots. A request without headers goes on unverified when that fails, as an OPDS
+catalog without a login does, so such a response is no more trustworthy than
+plain http: treat it as untrusted input, and never put a token or other secret
+in a URL. A request with headers (an `Authorization` header, a cookie) is a
+credentialed one and fails instead; a self-hosted server with a self-signed
+certificate needs Settings' "Skip HTTPS validation".
 
 ```jsonc
 {
@@ -135,10 +153,10 @@ untrusted input, and never put a token or other secret in a relayed URL.
 }
 ```
 
-No list means no access. `GET` only — a plugin cannot make the device POST
-anywhere. A redirect is followed only to a host the list allows too; one to any
-other host fails the request, so add the hosts a service redirects to (a CDN, say)
-to the list.
+No list and no approval means no access. `relay(url)` is a GET, and follows a
+redirect only to a host the plugin may reach too; one to any other host fails
+the request, so add the hosts a service redirects to (a CDN, say) to the list.
+The four-argument form follows no redirect at all.
 The body streams back rather than being buffered, so a large image does not have
 to fit in the device's largest free block.
 
@@ -294,6 +312,14 @@ gap to be closed: the plugin is code you chose to copy onto your own card.
 
 Note also that the web server has no authentication of its own, so it should
 only be enabled on networks you trust — that is true with or without plugins.
+That includes a plugin's own folder: its token and settings can be read with
+`/download` by anyone on the network while File Transfer runs, as on upstream.
+
+The JSON endpoints a plugin drives (`POST /api/relay`, `/api/fetch` in its
+JSON form, `/api/plugins/hosts`) take only an `application/json` body. A
+browser then asks before sending a cross-site request, and the device answers no
+such question, so another website you visit cannot drive them through your
+browser.
 
 ## Limits
 

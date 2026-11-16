@@ -370,6 +370,7 @@ bool SecureHttpClient::readResponseHead(ResponseMeta& meta, const uint32_t deadl
   // HTTP/1.0 peers default to connection-per-request; only an explicit
   // Connection: keep-alive header (parsed below) overrides that.
   if (line.compare(0, 9, "HTTP/1.0 ") == 0) keepAlive = false;
+  const bool deliverHeaders = _headerSink && !isInterim(status);
 
   for (;;) {
     const LineRead lineRead = readLine(line, deadline);
@@ -391,6 +392,7 @@ bool SecureHttpClient::readResponseHead(ResponseMeta& meta, const uint32_t deadl
     }
     std::string value = line.substr(colon + 1);
     while (!value.empty() && value.front() == ' ') value.erase(value.begin());
+    if (deliverHeaders) _headerSink(line.substr(0, colon), value);
     if (name == "content-length") {
       contentLength = strtol(value.c_str(), nullptr, 10);
     } else if (name == "transfer-encoding") {
@@ -548,7 +550,7 @@ int SecureHttpClient::get(const std::string& url, const BodySink& sink, const Pr
 int SecureHttpClient::request(const char* method, const std::string& url, const std::string& body) {
   _body.clear();
   _bodyTruncated = false;
-  auto sink = [this](const uint8_t* d, size_t n) {
+  const auto sink = [this](const uint8_t* d, size_t n) {
     if (_maxBufferedBody > 0 && _body.size() + n > _maxBufferedBody) {
       n = _maxBufferedBody - _body.size();
       _bodyTruncated = true;
@@ -556,7 +558,11 @@ int SecureHttpClient::request(const char* method, const std::string& url, const 
     _body.append(reinterpret_cast<const char*>(d), n);
     return true;
   };
+  return request(method, url, body, sink);
+}
 
+int SecureHttpClient::request(const char* method, const std::string& url, const std::string& body,
+                              const BodySink& sink) {
   std::string current = url;
   std::string activeMethod = method;
   std::string activeBody = body;
