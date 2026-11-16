@@ -3258,9 +3258,19 @@ bool ParsedText::layOutBidiLine(const GfxRenderer& renderer, const int fontId, c
   if (shapes_) cutShapedTokens(renderer, fontId, first, count, tokens);
   BidiLine::Scratch* const scratch = bidiScratchFor(workspace);
   if (scratch == nullptr) return false;
-  if (BidiLine::layoutLine(tokens, count, state.openControls, level_, *scratch, state.line)) return true;
-  LOG_ERR("BIDI", "No workspace for the line pass: line laid out without bidi");
-  return false;
+  if (!BidiLine::layoutLine(tokens, count, state.openControls, level_, *scratch, state.line)) {
+    LOG_ERR("BIDI", "No workspace for the line pass: line laid out without bidi");
+    return false;
+  }
+  // formBidiPieces() gives each piece its x and its form, 2 B and 8 B on the device, in vectors kept across lines: a
+  // line with more pieces than any before grows them. Their room is checked here, where the line can still take the
+  // path without bidi; nothing allocates between this and their reserve().
+  const size_t pieces = state.line.pieces.size();
+  if (!heapAllows(growthBytes(scratch_->lineXPosScratch_, pieces) + growthBytes(state.pieceForms, pieces))) {
+    LOG_ERR("BIDI", "No room for a line's %u pieces: line laid out without bidi", static_cast<unsigned>(pieces));
+    return false;
+  }
+  return true;
 }
 
 void ParsedText::cutShapedTokens(const GfxRenderer& renderer, const int fontId, const size_t first, const size_t count,
