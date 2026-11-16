@@ -630,6 +630,23 @@ class LentSecondary {
   std::optional<BuildArena> arena_;
 };
 
+// The two panel-native planes a page render fills as it draws (GfxRenderer::beginGrayCapture), for a page that goes out
+// with its gray in one push; the capture begins here and the caller ends it. Both or neither: false, with both null,
+// when they cannot be had, and the page goes out without them.
+bool beginGrayCapturePlanes(GfxRenderer& renderer, std::unique_ptr<uint8_t[]>& lsb, std::unique_ptr<uint8_t[]>& msb) {
+  const size_t planeBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
+  lsb = makeUniqueNoThrow<uint8_t[]>(planeBytes);
+  msb = lsb ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
+  if (!msb) {
+    lsb.reset();
+    return false;
+  }
+  memset(lsb.get(), 0, planeBytes);
+  memset(msb.get(), 0, planeBytes);
+  renderer.beginGrayCapture(lsb.get(), msb.get());
+  return true;
+}
+
 // A block on `arena`, released with the scope; nothing without an arena. Declared before what lives in the block.
 class ScopedArenaBlock {
  public:
@@ -6670,19 +6687,8 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // cost of the approach and why it is gated on supportsGrayFrame(). A board
   // that cannot use them keeps the staged path and never allocates; an
   // allocation failure falls back the same way.
-  const size_t capPlaneBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
   std::unique_ptr<uint8_t[]> capLsb, capMsb;
-  if (singlePushAaThisRender) {
-    capLsb = makeUniqueNoThrow<uint8_t[]>(capPlaneBytes);
-    capMsb = capLsb ? makeUniqueNoThrow<uint8_t[]>(capPlaneBytes) : nullptr;
-    if (capMsb) {
-      memset(capLsb.get(), 0, capPlaneBytes);
-      memset(capMsb.get(), 0, capPlaneBytes);
-      renderer.beginGrayCapture(capLsb.get(), capMsb.get());
-    } else {
-      capLsb.reset();  // OOM: the staged path below runs unchanged
-    }
-  }
+  if (singlePushAaThisRender) beginGrayCapturePlanes(renderer, capLsb, capMsb);  // OOM: the staged path runs unchanged
 
   logReaderMemSnapshot("before_bw_render");
   ImageBlock::takeLowMemoryPlaceholders();  // the warm pass's boxes were cleared with the screen
@@ -7153,18 +7159,7 @@ uint16_t EpubReaderActivity::renderPageContentOnly(const Page& page, const int o
   preRenderedPlanesStaged_ = false;
   std::unique_ptr<uint8_t[]> capLsb, capMsb;
   const bool wantCapture = renderer.supportsGrayFrame() && getEffectiveTextAntiAliasing() && !imagesTakeGrayPass(page);
-  if (wantCapture) {
-    const size_t planeBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
-    capLsb = makeUniqueNoThrow<uint8_t[]>(planeBytes);
-    capMsb = capLsb ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
-    if (capMsb) {
-      memset(capLsb.get(), 0, planeBytes);
-      memset(capMsb.get(), 0, planeBytes);
-      renderer.beginGrayCapture(capLsb.get(), capMsb.get());
-    } else {
-      capLsb.reset();
-    }
-  }
+  if (wantCapture) beginGrayCapturePlanes(renderer, capLsb, capMsb);
 
   renderer.clearScreen();
   page.render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
