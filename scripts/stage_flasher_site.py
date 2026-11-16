@@ -233,6 +233,14 @@ def main():
     args = parser.parse_args()
     if args.assets and not args.tag:
         parser.error("--assets needs --tag")
+    # Release runs from before deploy_flasher.yml (#800) have a deploy-flasher job of their own that
+    # checks out master and stages its run's images with --assets. Re-run, it would publish a site
+    # holding that one release (or fail on a second github-pages artifact while the first is kept).
+    if args.assets and os.environ.get("GITHUB_ACTIONS") == "true":
+        print("::error::This stages one release, and deploying it would leave the flasher with only that "
+              "release. Re-running the deploy-flasher job of an older release's run does this. To redeploy "
+              "the flasher, run \"Deploy Flasher\" on master: Actions > Deploy Flasher > Run workflow.")
+        sys.exit(1)
 
     copy_page(args.out)
     if args.github:

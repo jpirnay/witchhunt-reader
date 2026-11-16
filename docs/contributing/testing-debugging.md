@@ -196,8 +196,10 @@ and one `web-<hash>.bin`. Every published release, pre-releases included, then d
 (`deploy_flasher.yml`): the page from master with the last five full releases and the pre-releases published after
 the newest of them, downloaded from their release pages. The page selects the newest full release and lists
 pre-releases only under **Show pre-releases**. To redeploy between releases (a change to `flasher/` on master, or a
-release deleted), run "Deploy Flasher" by hand on master. Under `act` the site is staged from the published releases,
-not from the run's build.
+release deleted), run "Deploy Flasher" by hand on master. Do not re-run the `deploy-flasher` job of the run of 2.53
+or an older release: that is the old job, which stages its own release alone (`--assets`); the script refuses
+`--assets` inside GitHub Actions for this reason. Under `act` the site is staged from the published releases, not from
+the run's build.
 
 ### Prerequisites
 

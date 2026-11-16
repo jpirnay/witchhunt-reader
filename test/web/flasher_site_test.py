@@ -7,7 +7,9 @@ scripts/stage_flasher_site.py stages the site deploy_flasher.yml publishes. Chec
   * stage_release: each release in its own folder, every image listed with its size and SHA-256; the
     otadata and partition table taken from the full images, or the table from the release's
     partitions.csv when it has none; two full images with different tables stop the staging;
-  * releases.json lists the releases as the page reads them, with paths the page can fetch.
+  * releases.json lists the releases as the page reads them, with paths the page can fetch;
+  * --assets (one release) is refused inside GitHub Actions, where only a re-run of an older
+    release's deploy-flasher job uses it, and still stages on a desktop.
 Usage: python test/web/flasher_site_test.py
 """
 
@@ -15,6 +17,7 @@ import hashlib
 import json
 import os
 import struct
+import subprocess
 import sys
 import tempfile
 
@@ -169,6 +172,25 @@ with tempfile.TemporaryDirectory() as tmp:
         check(False, "stage: full images with different tables stop the staging")
     except SystemExit as e:
         check("another partition table" in str(e), "stage: full images with different tables stop the staging")
+
+# ---- --assets in GitHub Actions ----------------------------------------------------------------
+
+SCRIPT = os.path.join(ROOT, "scripts", "stage_flasher_site.py")
+with tempfile.TemporaryDirectory() as tmp:
+    assets = os.path.join(tmp, "assets")
+    os.makedirs(assets)
+    write(assets, "firmware.bin", b"app")
+    out = os.path.join(tmp, "site")
+    args = [sys.executable, SCRIPT, "--assets", assets, "--out", out, "--tag", "2.53"]
+    env = dict(os.environ, GITHUB_ACTIONS="true")
+    run = subprocess.run(args, env=env, capture_output=True, text=True)
+    check(run.returncode != 0 and run.stdout.startswith("::error::") and "Deploy Flasher" in run.stdout
+          and not os.path.exists(out),
+          "--assets in GitHub Actions: refused before staging, with an error naming Deploy Flasher")
+    env = {k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS"}
+    run = subprocess.run(args, env=env, capture_output=True, text=True)
+    check(run.returncode == 0 and os.path.isfile(os.path.join(out, "releases.json")),
+          "--assets on a desktop: stages the release")
 
 if failures:
     print("%d check(s) failed" % len(failures))
