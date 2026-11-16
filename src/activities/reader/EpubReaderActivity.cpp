@@ -7678,6 +7678,11 @@ bool EpubReaderActivity::preventAutoSleep() {
 
 bool EpubReaderActivity::skipLoopDelay() {
   refreshLoopHints();
+  // No build slice runs while a render pass holds the lock (stepCurrentSectionBuild returns at once), so the loop
+  // would only spin on yield(). Where the loop and render tasks share a core at the same priority, that spin halves
+  // the render: the X4 Pro streamed the first page's planes in 183-212 ms each, against 52 ms with the loop idle
+  // (2026-11-16). The loop's short sleep instead costs the build at most one sleep once the pass is done.
+  if (RenderLock::peek()) return false;
   return loopHintCurrentBuild_ || loopHintBackgroundBuild_;
 }
 
