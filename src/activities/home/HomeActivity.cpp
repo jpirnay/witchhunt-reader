@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <ctime>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -27,6 +28,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "GlobalBookmarkIndex.h"
+#include "HomeClockCadence.h"
 #include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
@@ -152,6 +154,14 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
       }
     }
   }
+}
+
+bool HomeActivity::shouldSkipPeriodicUpdate() const {
+  // The minute the clock would show (HalClock::formatTime reads the same local time).
+  const time_t now = time(nullptr);
+  struct tm shown;
+  localtime_r(&now, &shown);
+  return !HomeClockCadence::redraws(millis() - activityManager.lastUserActivityMs(), shown.tm_min);
 }
 
 bool HomeActivity::coverAttemptsExhausted(const std::string& path) const {

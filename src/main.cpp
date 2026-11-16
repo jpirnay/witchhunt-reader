@@ -2007,6 +2007,7 @@ void loop() {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
     sleepTimerStart = lastActivityTime;
+    activityManager.noteUserActivity(lastActivityTime);
   } else if (activityManager.keepAwake()) {
     // Hold off the sleep timeout only. lastActivityTime also drives the idle governor below, so
     // stamping it here would pin the CPU at full speed for as long as the activity stays awake.
