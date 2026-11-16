@@ -170,6 +170,26 @@ void LineReaderActivity::loop() {
   }
 }
 
+void LineReaderActivity::applyOrientation(const uint8_t orientation) {
+  if (SETTINGS.orientation == orientation) {
+    return;
+  }
+  SETTINGS.orientation = orientation;
+  SETTINGS.saveToFile();
+  {
+    // This runs on the loop task, while the render task reads the renderer's orientation
+    // and pageOffsets on every pass. Rebuilding the index here, unlocked, cleared and
+    // refilled the vector under a render that was indexing it. The lock covers the two
+    // writes; the rebuild itself is left to render(), which runs initializeReader() under
+    // the lock it already holds whenever `initialized` is false -- so the slow part does
+    // not hold up this task, and nothing reads a half-built index.
+    RenderLock lock(*this);
+    ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+    initialized = false;
+  }
+  requestUpdate();
+}
+
 void LineReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION action) {
   using BA = CrossPointSettings::BUTTON_ACTION;
   switch (action) {
