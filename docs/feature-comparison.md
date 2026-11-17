@@ -247,47 +247,52 @@ smaller font area on large CJK books was not measured.
 
 ## Measured speed and memory
 
-> Measured 2026-11-15 and 2026-11-16 on one Xteink X3, one X4, one X4 Pro and one BOOX Picco: Witch Reader 2.53
-> against CrossPoint develop `36b9430e` (2026-11-15) with its serial test API (PR #4458) and one unmerged fix, both
-> development builds. One script drove both through each firmware's serial test API: a press, then a wait until the
-> screen has settled, which includes a 250 ms quiet window on both. Same book (*The Odyssey*, Book IV, 8,077 words),
-> the same settings as far as both have them: Noto Sans 14 pt (the one built-in font both have), 38 px line pitch,
-> justified, hyphenation on, a full refresh every 15 pages. Medians of 30 page turns and of 3 to 5 opens. On the X3
-> and the X4 Pro, CrossPoint's opens without a cache and both firmwares' turns into the next chapter ran once each,
-> and Witch Reader's opens and boot were measured on the builds that became 2.53; its page turns and its turn into the
-> next chapter were measured on 2.52, the page turns again after each 2.53 change, within 10 ms each time. On the X4
-> and the Picco every row ran on 2.53 (the X4's rows marked † again with two later fixes), and the opens without a
-> cache and the turns into the next chapter three times on both firmwares.
+> Measured on one Xteink X3, one X4, one X4 Pro and one BOOX Picco against CrossPoint develop `36b9430e`
+> (2026-11-15) with its serial test API (PR #4458) and one unmerged fix, measured 2026-11-15 and 2026-11-16. Witch
+> Reader on the X3: master `fbee8fa6f`, a development build after 2.53, measured 2026-11-17. On the X4, the X4 Pro and
+> the Picco: Witch Reader 2.53, measured 2026-11-15 and 2026-11-16 (the X4's rows marked † again on 2026-11-17 with
+> two later fixes; the X4 Pro's page turns on 2.52 and again after each 2.53 change, within 10 ms each time). All
+> builds are development builds. One script drove both firmwares through their serial test APIs: a press, then a
+> wait until the screen has settled, which includes a 250 ms quiet window on both. Same book (*The Odyssey*, Book IV,
+> 8,077 words), the same settings as far as both have them: Noto Sans 14 pt (the one built-in font both have), 38 px
+> line pitch, justified, hyphenation on, a full refresh every 15 pages. Medians of 30 page turns and of 3 to 5 opens.
+> Opens without a cache and turns into the next chapter ran three times each, except CrossPoint's on the X3 and the
+> X4 Pro and Witch Reader's turns into the next chapter on the X4 Pro (once each). "Page on screen" and "page
+> complete" come from each firmware's log: the panel refresh that shows the page, and the one that puts its AA on the
+> panel; the screen settles 0.4 to 0.6 s later. "Chapter laid out" is when the layout of the whole chapter is done.
 
 **X3**
 
-| | Witch Reader 2.53 | CrossPoint |
+| | Witch Reader | CrossPoint |
 | --- | :---: | :---: |
-| Page turn, no AA | 0.92 s | 1.02 s |
-| Page turn, AA in two passes | 1.36 s | 1.77 s |
+| Page turn, no AA | 0.93 s | 1.02 s |
+| Page turn, AA in two passes | 1.37 s | 1.77 s |
 | Page turn, AA in one pass | 1.08 s | ❌ not available |
-| Turn into the next chapter, AA in two passes | 1.56 s | 1.94 s |
+| Turn into the next chapter, AA in two passes | 1.72 s ¹ | 1.94 s |
 | Reopen a chapter, cache kept, AA in two passes | 2.4 s | 4.4 s |
-| Open a chapter, cache deleted: page on screen, no AA | 3.8 s | 5.1 s |
-| Open a chapter, cache deleted: screen settled, AA in two passes | 7.3 s | 6.6 s |
-| Boot to Home | 4.7 s ¹ | 6.0 s |
-| Free heap in the reader at rest (largest block) | 59 KB (47 KB) ² | 103–143 KB (94–115 KB) |
-| Lowest free heap since boot | 35.8 KB ² | 30.8 KB |
+| Open a chapter, cache deleted: page on screen, no AA | 3.4 s | 5.1 s |
+| Open a chapter, cache deleted: page complete, AA in two passes | 6.6 s | 6.0 s |
+| Open a chapter, cache deleted: chapter laid out | 6.1 s | not measured ² |
+| Boot to Home | 4.6 s ³ | 6.0 s |
+| Free heap in the reader at rest (largest block) | 69 KB (55 KB) | 103–143 KB (94–115 KB) |
+| Lowest free heap since boot | 45.5 KB | 30.8 KB |
 
-¹ With the tester's own settings and 23 font families on the card. 2.52 took 5.4 s there, and 5.2 s with the
-benchmark settings.
-² Measured on 2.52. 2.53 reads the card's font list only when a screen needs it, which leaves about 11 KB more free in
-the reader: 55 → 66 KB after a reopen, largest block 51 → 61 KB, with the tester's own settings.
+¹ The next chapter was already laid out, during the last pages of this one. The turn waited for the layout of the
+chapter after it, which had started 0.3 s before the press. The same turn without that (one page back, then on):
+1.56 s.
+² CrossPoint shows the page once 8 pages are laid out and lays out the rest as the pages are turned to, not while the
+page is up, so its log gives no time for the whole chapter.
+³ With the tester's own settings and 24 font families on the card; 4.4 s with the benchmark settings.
 
-Witch Reader turns pages and reopens books faster in every mode, and shows the page of a chapter it has not laid out
-before 1.3 s sooner without AA. After such an open with AA, CrossPoint's screen settles sooner: it shows the page
-once part of the chapter is laid out, adds the AA, and lays out the rest in the background. Witch Reader lays out the
-whole chapter before it adds the AA to the page on screen.
+Witch Reader turns pages, turns into the next chapter and reopens a chapter faster in every mode, and shows the first
+page of a chapter it has not laid out 1.7 s sooner without AA. With AA, CrossPoint completes that page sooner, by
+0.6 s: it adds the AA as soon as the page is on screen. On the X3 Witch Reader adds the AA to that page once the whole
+chapter is laid out, 0.4 s after the end of the layout.
 
 At rest, CrossPoint has more of the X3's heap free, because Witch Reader keeps a second 52 KB framebuffer. It holds
 the pre-rendered next page and the page under the AA planes, and chapter builds and cover decodes borrow it as
 scratch. CrossPoint runs with one framebuffer and allocates a 48 KB copy of the page for each AA page. At the lowest
-point of the same run, CrossPoint had less heap free than Witch Reader.
+point of its run, CrossPoint had less heap free than Witch Reader.
 
 **X4**
 
@@ -296,7 +301,7 @@ point of the same run, CrossPoint had less heap free than Witch Reader.
 | Page turn, no AA | 1.01 s | 1.17 s |
 | Page turn, AA in two passes | 1.29 s | 1.41 s |
 | Page turn, AA in one pass | 1.05 s | ❌ not available on the X4 |
-| Turn into the next chapter, AA in two passes | 1.96 s † ³ | 2.02 s |
+| Turn into the next chapter, AA in two passes | 1.96 s † ⁴ | 2.02 s |
 | Reopen a chapter, cache kept, AA in two passes | 3.2 s | 3.0 s |
 | Open a chapter, cache deleted: page on screen, no AA | 4.2 s † | 4.6 s |
 | Open a chapter, cache deleted: screen settled, AA in two passes | 7.3 s † | 5.5 s |
@@ -307,7 +312,7 @@ point of the same run, CrossPoint had less heap free than Witch Reader.
 † Measured again on 2026-11-17 with two fixes the bench led to, which come with the release after 2.53: a first open
 lays its chapter out in the borrowed framebuffer from the start (#802), and the next chapter is laid out while you
 read the last pages of this one (#805). 2.53 itself: 3.7 s, 5.0 s, 8.2 s and 23.0 KB.
-³ The new chapter's page is on screen after 1.0 s. Into a chapter laid out already: 1.76 s against 1.53 s.
+⁴ The new chapter's page is on screen after 1.0 s. Into a chapter laid out already: 1.76 s against 1.53 s.
 
 On the X4 Witch Reader turns pages faster in every mode, shows the page of a chapter it has not laid out before
 sooner, and turns into the next chapter as fast. CrossPoint reopens a chapter a little sooner, and after an open
