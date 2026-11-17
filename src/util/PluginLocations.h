@@ -33,12 +33,13 @@ inline constexpr size_t kMaxDirsPerRoot = 64;
 
 // One plugin folder, classified by the marker files it carries.
 struct Entry {
-  std::string name;          // folder name
-  std::string dir;           // "<root>/<name>"
-  bool hasPluginJs = false;  // browser-side plugin (plugin.js)
-  bool hasManifest = false;  // optional card metadata (manifest.json)
-  bool disabled = false;     // a "disabled" marker file: listed, but the pages do not load it
-  const char* root = "";     // the kRoots entry it was found in
+  std::string name;            // folder name
+  std::string dir;             // "<root>/<name>"
+  bool hasPluginJs = false;    // browser-side plugin (plugin.js)
+  bool hasDeviceJson = false;  // upstream's catalog manifest (device.json), run by the Plugins page
+  bool hasManifest = false;    // optional card metadata (manifest.json)
+  bool disabled = false;       // a "disabled" marker file: listed, but the pages do not load it
+  const char* root = "";       // the kRoots entry it was found in
 };
 
 // Scans every root. The earliest root holding a folder name claims it - matching

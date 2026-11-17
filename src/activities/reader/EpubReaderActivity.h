@@ -22,6 +22,7 @@
 #include "BookReaderOverrides.h"
 #include "BookSearchSession.h"
 #include "BookmarkStore.h"
+#include "BuildPageGray.h"
 #include "BuildThroughGate.h"
 #include "ChapterPageSpan.h"
 #include "CrossPointState.h"
@@ -509,6 +510,7 @@ class EpubReaderActivity final : public Activity {
     bool hasImages = false;
     int marginLeft = 0;
     int contentTop = 0;
+    BuildPageGray::Gray gray = BuildPageGray::Gray::None;
   };
   BuildPageOnScreen buildPageOnScreen_;
   // The first open's Indexing popup, drawn by ReaderActivity before the book was indexed: the panel's frame count with
@@ -525,6 +527,16 @@ class EpubReaderActivity final : public Activity {
   // next page's pre-render once it is done, as it does on the deferred-AA panels.
   bool preRenderAfterAa_ = false;
   bool keepBuildPageOnScreen();
+  // The deferred gray pass of the page the build drew (`shown`, loaded as `page`), its glyphs warmed first.
+  void armBuildPageGray(const BuildPageOnScreen& shown, std::unique_ptr<Page> page);
+  // The build keeps out of what the gray of its page needs (BuildPageGray): the S3s.
+  bool buildLeavesFramesAlone() const;
+  // Between two build slices, where the gray comes while the build goes on: arms the deferred gray pass of the page the
+  // build drew, once its refresh is over. True when armed; runDeferredGrayscalePass() runs it before the next slice.
+  bool askBuildPageGray();
+  // displayBuildPage() drew a page whose gray askBuildPageGray() is to ask for. A hint, read without the lock; the
+  // state under the lock decides, and clears it once the page has gone or its pass is asked for.
+  std::atomic<bool> buildPageGrayDue_{false};
   // The text a relayout or a sync landed on (noteLandedText). Cleared by a page turn.
   struct LandedText {
     int spine = -1;
@@ -1005,9 +1017,9 @@ class EpubReaderActivity final : public Activity {
   // decompressor could not find memory for -- they drew nothing, so the page is incomplete.
   uint16_t renderPageContentOnly(const Page& page, int orientedMarginTop, int orientedMarginRight,
                                  int orientedMarginBottom, int orientedMarginLeft);
-  // Draws a single text-only page from an in-progress Background-C build (no AA, no pre-render
-  // arming). Releases the lock before the waveform wait (like renderContents) so a C build
-  // slice can run on the loop task during the refresh.
+  // Draws a single text-only page from an in-progress Background-C build (no pre-render arming; its
+  // AA only where BuildPageGray gives it one). Releases the lock before the waveform wait (like renderContents) so a C
+  // build slice can run on the loop task during the refresh.
   // `drawBlock`: the arena block the page's TextBlock bytes live in, when the caller loaded the
   // page from the build's lent region. Released here, before the lock is, so a build slice that
   // runs during the waveform wait finds the arena cursor where it left it. The page is freed here for the same

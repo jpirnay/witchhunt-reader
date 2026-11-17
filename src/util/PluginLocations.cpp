@@ -41,10 +41,11 @@ std::vector<Entry> scanPlugins() {
       e.name = name;
       e.dir = std::string(kRoots[r]) + "/" + name;
       e.hasPluginJs = Storage.exists((e.dir + "/plugin.js").c_str());
+      e.hasDeviceJson = Storage.exists((e.dir + "/device.json").c_str());
       e.hasManifest = Storage.exists((e.dir + "/manifest.json").c_str());
       e.disabled = Storage.exists((e.dir + "/disabled").c_str());
       e.root = kRoots[r];
-      if (e.hasPluginJs || e.hasManifest) plugins.push_back(std::move(e));
+      if (e.hasPluginJs || e.hasDeviceJson || e.hasManifest) plugins.push_back(std::move(e));
     }
   }
   return plugins;

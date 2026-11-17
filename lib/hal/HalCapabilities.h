@@ -252,6 +252,17 @@ inline bool keepsSecondaryBuffer() {
 #endif
 }
 
+// A chapter build lays out in PSRAM, in a region of its own (Section::setOwnedBuildRegionBytes) or in the arena lent in
+// place of the secondary buffer, so it touches neither frame buffer nor the heap the reader draws from: the page the
+// build shows can get its gray while the build goes on (BuildPageGray.h). Not the C3s, whose build holds the X3's
+// secondary buffer or the X4's heap. cppcheck, which reads one board's build, sees only the declaration and checks both
+// sides (as defersLiveFontChange below).
+#if defined(CPPCHECK_ANALYSIS)
+bool buildsInPsram();
+#else
+inline bool buildsInPsram() { return keepsSecondaryBuffer(); }
+#endif
+
 // True when an image decode can run through a refresh: nothing it needs is on the bus the waveform holds. The card is
 // not (native SDMMC), and neither is the arena it is lent (PSRAM). Seen on the X4 Pro. The Murphy qualifies too, but
 // its driver blocks in triggerDisplay, so a decode follows its refresh anyway.

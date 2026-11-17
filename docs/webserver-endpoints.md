@@ -847,7 +847,7 @@ plugin folders and serves their bytes — plugin code runs in the browser. See
 ### GET `/api/plugins` - List Plugins
 
 Scans `/.crosspoint/plugins`, `/plugins`, and `/.plugins` and returns every
-folder holding a `plugin.js`.
+folder holding a `plugin.js` or a `device.json`.
 
 **Request:**
 ```bash
@@ -857,7 +857,7 @@ curl http://crosspoint.local/api/plugins
 **Response (200 OK):**
 ```json
 [{"name":"organize-by-author","title":"Organize by Author","mount":"files","root":"/.crosspoint/plugins",
-  "disabled":false,"description":"Sorts the EPUBs of one folder ...","version":"1.0.0"}]
+  "disabled":false,"web":true,"device":false,"description":"Sorts the EPUBs of one folder ...","version":"1.0.0"}]
 ```
 
 | Field          | Description                                                              |
@@ -867,6 +867,8 @@ curl http://crosspoint.local/api/plugins
 | `mount`        | `settings` (default) or `files` — which page loads the plugin            |
 | `root`         | The plugins folder it was found in                                       |
 | `disabled`     | Switched off on the Plugins page; the pages do not load it               |
+| `web`          | It has a `plugin.js`, which the Settings or File Manager page loads      |
+| `device`       | It has a `device.json`, a catalog the Plugins page opens                 |
 | `description`, `version`, `requires`, `allowedHosts` | From `manifest.json`, when present |
 
 Always 200 with an array; an unreadable or absent plugins folder yields `[]`.
@@ -922,7 +924,7 @@ component.
 | --- | --- |
 | `POST /api/plugins/begin?name=` | Starts an install: an empty staging folder `<name>.new` |
 | `POST /api/plugins/file?name=&file=` | One file into the staging folder; the file is sent as `multipart/form-data` (binary-safe, at most 512 KB) |
-| `POST /api/plugins/commit?name=` | Replaces the installed plugin with the staging folder in one rename; `400` without a `plugin.js` |
+| `POST /api/plugins/commit?name=` | Replaces the installed plugin with the staging folder in one rename; `400` without a `plugin.js` or a `device.json` |
 | `POST /api/plugins/remove?name=` | Removes the plugin from every plugins folder; `404` if there is none |
 | `POST /api/plugins/enable?name=&on=0` | Switches the plugin off (a `disabled` file in its folder); `on=1` switches it back on |
 
@@ -964,9 +966,11 @@ forwarded, so the caller infers the type from what it asked for.
   `manifest.json` `allowedHosts`. A bare entry matches exactly; one starting
   with a dot matches that suffix. No list, no access.
 - **Redirects stay inside the allowlist.** A redirect is followed only to a host
-  the same `allowedHosts` list allows; one to any other host fails the request
-  (`502`). Following them blindly would mean the host actually fetched was never
-  checked against the allowlist.
+  the same `allowedHosts` list allows, or that the user approved. One to any
+  other host fails the request with the same `403` and `host` as a refused first
+  request, here and in `/api/fetch`, so the page can ask for that host too.
+  Following them blindly would mean the host actually fetched was never checked
+  against the allowlist.
 - **Streamed, not buffered**, with a 4MB ceiling. Nothing large is resident:
   during a web session the largest free block is around 53KB, so a buffered
   response would fail on an ordinary cover image.

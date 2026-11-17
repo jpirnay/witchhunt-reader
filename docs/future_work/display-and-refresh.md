@@ -424,9 +424,11 @@ unknown and the redraw takes two passes: one second refresh per chapter build. O
 sends the next turn down the two-pass path too (once in 10 slow turns). Fixing it needs the frame on screen kept
 somewhere a borrower does not write.
 
-**The page kept after a cold open gets two passes.** Since #789 the page a chapter build drew stays on the panel when
-the build ends (`keepBuildPageOnScreen()`), and its gray comes as the deferred pass. With One-Pass Anti-Aliasing on,
-that pass is still the two-pass one: one second flicker on the first page of a chapter not yet built.
+**The page kept after a cold open gets two passes (X3, X4).** Since #789 the page a chapter build drew stays on the
+panel when the build ends (`keepBuildPageOnScreen()`), and on the C3s its gray comes as the deferred pass. With One-Pass
+Anti-Aliasing on, that pass is still the two-pass one: one second flicker on the first page of a chapter not yet built.
+The S3 boards push such a page with its gray while the build goes on (`BuildPageGray.h`); the C3s cannot, because the
+X3's build holds the secondary buffer and the X4's resident build the heap.
 
 **The Picco's clean refresh shows two-pass gray.** Since 2026-11-16 a HALF page with One-Pass Anti-Aliasing on gets
 the overlay's two grays, and the pages after it the rest table's one. Whether that shows is for the eye: the

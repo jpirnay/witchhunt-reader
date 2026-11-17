@@ -59,8 +59,8 @@ navigated to and have nothing to read yet — so it has the highest priority.
 ```
 runDeferredGrayscalePass();                 // 1. AA of the page just shown (visible quality)
 if (pendingGrayscale_.active) return;        //    AA still owed → nothing else runs
-if (section && section->hasActiveBuild()) {  // 2. the page on screen's images, then Background C
-  if (!stepImageLaneDuringBuild()) stepCurrentSectionBuild();
+if (section && section->hasActiveBuild()) {  // 2. the page on screen's gray (S3) and images, then Background C
+  if (!askBuildPageGray() && !stepImageLaneDuringBuild()) stepCurrentSectionBuild();
   return;
 }
 if (stepGlyphStoreRoom()) return;            // 3. room in the TrueType glyph store
@@ -311,6 +311,28 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
   (`HalDisplay::refreshLeavesBusToCard()`: the X4) the waveform is waited for without the lock (`waitRefreshOffBus()`)
   and the slice runs through that one refresh (`BuildDuringRefresh.h`). The X3 and the T5S3 still wait; a driver that
   blocks in `triggerDisplay` (Murphy, Picco) leaves nothing to build through.
+- **Its gray, on the S3s** (`BuildPageGray.h`): where the build leaves the frame buffers alone
+  (`HalCapabilities::buildsInPsram()`: the build lays out in PSRAM, in its own region or in the arena lent in
+  place of the secondary buffer, and the frame on screen stays in that buffer), a page of text with nothing over it
+  gets its AA while the build goes on. On a panel that puts a page and its gray up in one push (One-Pass
+  Anti-Aliasing, the T5S3) it goes up with the page's own push, its planes captured by the draw as `renderContents()`
+  captures a turn's. Elsewhere `askBuildPageGray()` arms the deferred gray pass once the page's refresh is over, and
+  `runDeferredGrayscalePass()` runs it ahead of the next slice, so the build waits for the pass. A turn drops or
+  preempts it as it does a turn's pass; a preempted one is asked for again at the build's end. The C3s keep the gray
+  for the build's end: the X3's build holds the secondary buffer, and the X4's resident build runs on the heap its
+  low-heap guard watches. The loop's ticks read a hint (`buildPageGrayDue_`) before they take the
+  render lock for this; the lock on every tick made the Picco's build 53-66 ms slower.
+
+  | Picco, *The Odyssey*, n=3, medians, s, before / after | Gray on the panel | Chapter laid out | Settled |
+  |---|---|---|---|
+  | Cold open, two passes | 3.27 / 1.98 | 2.90 / 3.43 | 3.73 / 3.75 |
+  | Cold open, One-Pass | 3.26 / 1.97 | 2.89 / 3.42 | 3.79 / 3.80 |
+  | Turn into a chapter not laid out, two passes | 2.09 / 1.37 | 1.73 / 2.26 | 2.59 / 2.59 |
+  | Turn into a chapter not laid out, One-Pass | 2.10 / 0.86, with the page | 1.74 / 1.76 | 2.65 / 2.19 |
+  | A turn 0.6 s after the first page, two passes (gray: the page turned to) | 4.01 / 3.74 | 3.63 / 4.71 | 4.48 / 5.03 |
+
+  The page itself is on the panel when it was before (1.47 s on a cold open; One-Pass 0.05 s later, the capture). The
+  build waits for each pass: a page left before the build ends has cost it one, as the last row shows.
 - **Navigation during the build:** only for an explicit `Page` target — forward advances
   optimistically (shows the page once C reaches it, popup until then), back works, back past page 0
   leaves the chapter. A chapter-list, anchor or saved-text target resolves as soon as the build has
@@ -321,7 +343,8 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
   `Normal` pass renders the page with AA. When the build ends on the page `displayBuildPage()` last drew, a page of
   text with nothing over it (`buildPageOnScreen_`), that page stays on the panel as drawn, its page count still the
   build's "~" estimate, until the next turn (`keepBuildPageOnScreen()`): its AA comes as the deferred gray pass, which
-  then asks for the next page's pre-render. A page with pictures is drawn again, with them.
+  then asks for the next page's pre-render; a page that got its gray during the build (above) asks for the pre-render
+  at once. A page with pictures is drawn again, with them.
 - **Failure (failed / truncated / css-degraded):** discard, latch `forceBlockingBuildSpine_`, and
   fall back to the **blocking** path (which builds with the buffer released for ~52 KB headroom).
 
