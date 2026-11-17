@@ -114,6 +114,7 @@ Default menu on Murphy is 5 rows (Library, Stats, File Transfer, Weather, Settin
 | S1 | `ReadingStatsBookDetailActivity.cpp:200` | cards stacked, only the spark is guarded | L (opened from the reader menu): body 135 px, summary 55 + time 104 already exceed it. History card off-panel. P: fits. | Local: paging |
 | S2 | `ButtonActionsOverviewActivity.cpp:25` | `kButtonRows`, all 7 keys | Rows name keys Murphy does not have (it has Confirm, Up and Down). The layout fits since R8. | Local: list the board's keys |
 | S3 | `GestureActionsOverviewActivity.cpp` (frame maths) | zones scaled from the screen | Scales correctly, but cell labels get about a third of a roughly 150 px frame, so they are clipped. Read only partly. | Accept |
+| S1 | `SystemInformationActivity.cpp` (`drawRow`) | label and value columns at half the width each | P: labels ("App parti...", "Display S...") and values ("ESP32-S3 re...", the light-sleep decline reasons) end in an ellipsis; the user called the screen unreadable (2026-11-17). Serial screenshots were the only way to read the light-sleep figures. | Local: value under its label on a compact panel |
 
 ## 7. Reader and its overlays
 

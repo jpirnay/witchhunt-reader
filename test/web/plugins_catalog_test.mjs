@@ -85,11 +85,11 @@ const communityCatalog = { name: 'test hub', plugins: [
 
 // The entries' device.json files, by base (unreadable's answers 404).
 const deviceJson = {
-  'https://example.org/b/': { browse: { url: 'https://example.org/api?page={page}' }, auth: { type: 'password' } },
+  'https://example.org/b/': { browse: { url: 'https://example.org/api?page={page}' }, token: { file: '/.crosspoint/both.json' } },
   'https://example.org/c/': { title: 'Catalog only', browse: { url: 'https://example.org/c/all-{page}.json', items: 'items' } },
   'https://example.org/e/': { browse: { url: 'https://example.org/e/list' }, events: { book_finished: { url: 'https://example.org/e/done' } } },
   'https://example.org/k/': { events: { book_finished: { url: 'https://example.org/k/done' } } },
-  'https://example.org/l/': { browse: { format: 'xml', url: 'https://example.org/l/dav/' } }
+  'https://example.org/l/': { browse: { format: 'xml', url: 'https://example.org/l/dav/', item: 'response' } }
 };
 
 const requests = [];
@@ -155,16 +155,16 @@ check(!requests.some((r) => r.url === 'https://example.org/h/device.json'), 'a p
 check(!row('Plugin Hub') && !row('Plugin Store'), 'the plugin stores are left out');
 check(text(row('Web only')).includes('runs here') && hasButton(row('Web only')), 'a web-only plugin runs here');
 check(text(row('Web only')).includes('From github.com/someone/web-only'), 'its source repository is named');
-check(text(row('Both parts')).includes('partly runs here') && text(row('Both parts')).includes('needs a sign-in') &&
-      hasButton(row('Both parts')), 'a plugin whose catalog needs a sign-in installs for its web page');
+check(/runs here/.test(text(row('Both parts'))) && !/partly|does not/.test(text(row('Both parts'))) &&
+      hasButton(row('Both parts')), 'a plugin whose catalog keeps its token outside its folder runs here');
 check(text(row('Catalog only')).includes('runs here') && text(row('Catalog only')).includes('a catalog you open on this page') &&
       hasButton(row('Catalog only')), 'a public catalog alone runs here');
 check(text(row('Needs catalog')).includes('partly runs here') && text(row('Needs catalog')).includes('events') &&
       hasButton(row('Needs catalog')), 'the catalog.* requirements are met; its events are not');
 check(text(row('Events only')).includes('does not run here') && text(row('Events only')).includes('(events)') &&
       !hasButton(row('Events only')), 'a plugin with only device events is not offered for install');
-check(text(row('XML catalog')).includes('partly runs here') && text(row('XML catalog')).includes('XML'),
-      'an XML catalog is named as what does not run');
+check(/runs here/.test(text(row('XML catalog'))) && !/partly|does not/.test(text(row('XML catalog'))) &&
+      text(row('XML catalog')).includes('a card, and a catalog you open on this page'), 'an XML catalog runs here');
 check(text(row('Unreadable')).includes('could not be checked') && !hasButton(row('Unreadable')),
       'a device.json that cannot be read is said so');
 check(text(row('Needs transfer')).includes('transfer.localsend.v1') && !hasButton(row('Needs transfer')),

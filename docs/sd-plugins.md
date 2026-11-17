@@ -252,8 +252,35 @@ What runs:
 - Template variables: the row's `{id}`, `{title}`, `{author}`, `{url}` and
   their `_enc` forms, `{page}`, `{offset}`, `{limit}`, `{firmware_family}`
   (`witchhunt`), `{firmware_version}`, `{plugin_api}` (1),
-  `{plugin_capabilities}`, `{plugin_name}`, and `{cfg.KEY}` from the plugin's
-  `config.file`, whose `dest_dir` overrides the manifest's.
+  `{plugin_capabilities}`, `{plugin_name}`, `{cfg.KEY}` from the plugin's
+  `config.file` (whose `dest_dir` overrides the manifest's), and `{token}`.
+- Sign-in. `{token}` comes from `token.file` at the dotted `token.path`
+  (default `token`). Without one:
+  - `auth.type` `password` mints it: `auth.request`, filled from the config,
+    and the token at `auth.token_path` (default `access_token`). A 401 or 403
+    while browsing, fetching the lists, asking a `url_path` or downloading
+    mints a new one and tries once more.
+  - `auth.type` `device_code` (upstream's default) shows the code from
+    `auth.request` (`code_path`, `verify_url_path`) and a link to the address,
+    then asks `auth.poll` with `{device_code}` every `interval` seconds (at
+    least 3) until it answers a token. `slow_down` adds 5 seconds;
+    `access_denied`, `expired_token` and the code's expiry (`expires_in`, at
+    least 60 seconds) end it. A refused token later starts a new sign-in.
+  - Otherwise the plugin's web card signs in and writes the file; the catalog
+    says so and opens once it has.
+
+  A token is saved as upstream saves it: `token.file` rewritten to hold only
+  the token, nested at `token.path`, through the plugin's `writeFile`.
+- XML catalogs (`browse.format` `xml`, a WebDAV `PROPFIND` listing, say),
+  by the rules of the SDK's `XmlListParser` (Justin Mitchell). Each element
+  named `browse.item` is a row. `fields` are selectors: `elem` (the leading
+  text of the first descendant `<elem>`), `elem@attr` or `@attr`, matched by
+  local name. A row needs a `url`, and a missing `title` is the url's last
+  path segment. `skip_self` drops the listing's own entry, `extensions` keeps
+  only files with those endings, and `resolve_urls` joins a relative href to
+  the server. A row holding a `container_element` is a folder: **Open** lists
+  it, **Up** goes back. No lists or search, as upstream; the download URL
+  defaults to the row's `url`.
 
 The capabilities a catalog may require (`compatibility.requires`, a list's
 `requires`): `catalog.lists`, `catalog.notices`, `catalog.bundle_install`,
@@ -271,8 +298,14 @@ Differences from upstream:
   Hidden Files** is on; without the folder, the download fails.
 - A bundle is written file by file, not staged: one cut off half-way keeps the
   files it got, and downloading it again finishes it.
-- Not yet: sign-in (`auth`, `token`; such a catalog says so and does not open),
-  XML catalogs, Details pages, the `sidecar` file, and `events`.
+- A `token.file`, `token.refresh_file` or `config.file` may sit outside the
+  plugin's folder (`/.crosspoint/lingoblend.json`, say), as upstream allows: the
+  web server lets the plugin read that exact file with `/download` and write it
+  with `writeFile` (`PluginLocations::deviceJsonNames()`). A name with `..` in
+  it names nothing. A credential store, a system folder and a path spelled by its
+  8.3 alias stay refused, as for every request.
+- Not yet: Details pages, the `sidecar` file, `events`, and sign-in types
+  upstream does not define (`refresh`).
 
 ## Installing and managing plugins: the Plugins page
 
@@ -313,8 +346,8 @@ it is sent:
   `device.json`, which the browser reads from GitHub as well:
   - **runs here**: a web part (`plugin.js`), a catalog that opens here
     ([Catalogs](#catalogs-upstreams-devicejson)), or both;
-  - **partly runs here**: one of them runs, and something does not yet: a
-    catalog that needs a sign-in or is XML, or device `events`;
+  - **partly runs here**: one of them runs, and something does not yet: device
+    `events`, say;
   - **does not run here**: nothing of it runs (an events-only `device.json`,
     for example), another `firmware_family`, a requirement this firmware lacks
     (named), a `device.json` that could not be read, or a reason the catalog
@@ -409,8 +442,11 @@ gap to be closed: the plugin is code you chose to copy onto your own card.
 
 Note also that the web server has no authentication of its own, so it should
 only be enabled on networks you trust — that is true with or without plugins.
-That includes a plugin's own folder: its token and settings can be read with
-`/download` by anyone on the network while File Transfer runs, as on upstream.
+That includes a plugin's own folder, and the token and config files its
+`device.json` names elsewhere: anyone on the network can read them with
+`/download` while File Transfer runs, as on upstream. A plugin can also overwrite
+any file its own `device.json` names; only the credential stores, the system
+folders and 8.3 alias spellings are off limits.
 
 The JSON endpoints a plugin drives (`POST /api/relay`, `/api/fetch` in its
 JSON form, `/api/plugins/hosts`) take only an `application/json` body. A

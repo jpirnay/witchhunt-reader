@@ -1,5 +1,6 @@
 #include "HalPowerManager.h"
 
+#include <AudioManager.h>
 #include <BatteryMonitor.h>
 #include <BoardConfig.h>
 #include <HalCapabilities.h>
@@ -8,9 +9,13 @@
 #include <WiFi.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
+#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
+#include <esp_ipc.h>
+#endif
 
 #include <cassert>
 
+#include "HalFrontlight.h"
 #include "HalGPIO.h"
 #include "HalI2cBus.h"
 
@@ -53,6 +58,21 @@ static constexpr bool CPU_SCALING_ALLOWED = false;
 static constexpr bool CPU_SCALING_ALLOWED = true;
 #endif
 
+#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
+namespace {
+// On a dual-core build only core 0 winds pended ticks down: IDF's xTaskResumeAll() skips the unwind on
+// core 1 ("Core 0 is solely responsible for managing tick count", FreeRTOS-Kernel/tasks.c). The loop
+// task runs on core 1, so xTaskCatchUpTicks() there only queues the slept ticks, and they pile up until
+// a task on core 0 next resumes the scheduler. A flash operation does that: spi_flash_op_block_func()
+// parks core 0 and ends in xTaskResumeAll() there, which then winds every tick slept since, one
+// xTaskIncrementTick() at a time inside the kernel's critical section. After a long idle that is
+// millions of ticks with interrupts off on core 0. Both Murphy restarts (2026-11-16 and 11-17) were an
+// interrupt watchdog on CPU0 with CPU1 in esp_partition_read(), on the first flash read (System
+// Information, Boot Diagnostics) after light-sleeping on Home.
+void catchUpTicksOnCore0(void* ticks) { xTaskCatchUpTicks(*static_cast<const TickType_t*>(ticks)); }
+}  // namespace
+#endif
+
 void HalPowerManager::begin() {
   if (HalCapabilities::hasI2cFuelGauge()) {
     // Boards with an I2C fuel gauge read charge over the bus rather than from an
@@ -79,6 +99,17 @@ void HalPowerManager::begin() {
   {
     const HalI2cBus::Lock i2cLock;
     if (BatteryMonitor::configureCharger()) LOG_INF("PWR", "Charger configured");
+  }
+  // An audio codec on a rail that stays up: the Murphy M3's ES8388 shares the one that keeps touch powered
+  // (PowerConfig latch0, GPIO43). The firmware plays no sound, so the codec is powered down once here instead of
+  // idling as it powered up. Touch has started the bus it sits on (gpio.begin()).
+  if (BoardConfig::ACTIVE.audio.output == BoardConfig::AudioOutput::I2sEs8388) {
+    const HalI2cBus::Lock i2cLock;
+    if (freeink::AudioManager::parkCodec()) {
+      LOG_INF("PWR", "Audio codec powered down");
+    } else {
+      LOG_ERR("PWR", "Audio codec did not take its power-down");
+    }
   }
   normalFreq = getCpuFrequencyMhz();
   modeMutex = xSemaphoreCreateMutex();
@@ -213,7 +244,8 @@ void HalPowerManager::exitWaveformWait() {
 // Ported from crosspoint-reader PR #2525 (Brian Pugh / @BrianPugh); the Xteink C3
 // guard on the GPIO13 hold follows PR #2998 (Justin Mitchell / @itsthisjustin).
 // The xTaskCatchUpTicks() correction at the end is this fork's own addition — see
-// the comment there for why our background button sampler needs it.
+// the comment there for why our background button sampler needs it, and
+// catchUpTicksOnCore0() for where it has to run on a dual-core chip.
 bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   const unsigned long entryMs = millis();
   if (lastSliceEndMs_ != 0) {
@@ -222,18 +254,21 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   lightSleepStats_.attempts++;
   lastSliceEndMs_ = entryMs;  // overwritten with the post-sleep stamp if we do sleep
 
-  // Light sleep stops the LEDC peripheral's clock, so an ESP-driven PWM
-  // frontlight visibly flickers as the idle loop enters slice after slice.
-  // Justin Mitchell (@itsthisjustin) reported this against crosspoint PR #2983
-  // ("feat: Add support for x4pro & papermono devices"), where the guard reads
-  // `Frontlight.present() && Frontlight.isOn()`. This fork has no frontlight
-  // driver, so it cannot ask whether the light is currently lit — decline on any
-  // board that HAS one. That costs nothing today (no board we build has a
-  // frontlight, so this never fires and the counter stays 0) and keeps the X4
-  // Pro correct the moment its profile is selectable. Tighten to
-  // present-and-on once a frontlight HAL exists, so those boards can still
-  // idle-sleep with the light off.
-  if (BoardConfig::hasPwmFrontlight()) {
+  // Light sleep stops the LEDC peripheral's clock, so a lit PWM frontlight
+  // visibly flickers as the idle loop enters slice after slice. Justin Mitchell
+  // (@itsthisjustin) reported this against crosspoint PR #2983 ("feat: Add
+  // support for x4pro & papermono devices"), where the guard reads
+  // `Frontlight.present() && Frontlight.isOn()`. A dark light needs no guard.
+  // The SDK's FREEINK_FRONTLIGHT_LS would keep a lit one running through light
+  // sleep; no board here sets it yet, and the Murphy's 25 kHz at 10 bits is more
+  // than the RC_FAST clock it switches to can drive.
+  //
+  // A frontlight board whose touch cannot wake the chip keeps declining: the X4
+  // Pro and the T5S3 poll a GT911 that keeps only its latest frame, so a tap
+  // shorter than a slice would be lost. The Murphy's CHSC6x can wake it
+  // (armTouchPulseWake() below).
+  if (BoardConfig::hasPwmFrontlight() &&
+      (HalFrontlight::getInstance().isOn() || (gpio.hasTouch() && gpio.touchPulseWakePin() < 0))) {
     lightSleepStats_.rejFrontlight++;
     return false;
   }
@@ -281,6 +316,13 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
                        BoardConfig::ACTIVE.input.powerActiveHigh ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
     esp_sleep_enable_gpio_wakeup();
   }
+  // A touch's pulsed data-ready line: the first pulse of a tap wakes the chip. Its edge interrupt only
+  // fires while the chip is awake, so without this wake a Murphy test build (2026-11-17) missed about
+  // every second tap.
+  const bool touchArmed = gpio.armTouchPulseWake();
+  if (touchArmed) {
+    esp_sleep_enable_gpio_wakeup();
+  }
 
   // GPIO13 is rewired as a power control on the Xteink C3 boards: the X4
   // battery-latch MOSFET gate, and the X3 SD-rail enable (BoardConfig's
@@ -324,6 +366,9 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
     gpio_wakeup_disable(static_cast<gpio_num_t>(powerPin));
     gpio_set_intr_type(static_cast<gpio_num_t>(powerPin), GPIO_INTR_DISABLE);
   }
+  if (touchArmed) {
+    gpio.touchPulseWakeDone(err == ESP_OK && esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO);
+  }
 
   if (err != ESP_OK) {
     // e.g. ESP_ERR_SLEEP_REJECT — we did not actually sleep
@@ -352,7 +397,17 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   // Step the tick forward by the measured sleep so blocked tasks come due on
   // wall-clock time. Tasks whose deadline passed are released here, which is why
   // this is xTaskCatchUpTicks() and not vTaskStepTick().
+#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
+  // Wound on core 0, a slice's worth (~50 ticks) at a time; see catchUpTicksOnCore0().
+  TickType_t sleptTicks = pdMS_TO_TICKS(sleptMs);
+  if (xPortGetCoreID() == 0) {
+    xTaskCatchUpTicks(sleptTicks);
+  } else {
+    esp_ipc_call_blocking(0, &catchUpTicksOnCore0, &sleptTicks);
+  }
+#else
   xTaskCatchUpTicks(pdMS_TO_TICKS(sleptMs));
+#endif
   return true;
 }
 

@@ -234,6 +234,13 @@ inline bool clearsGhostsOnEveryScreen() {
   return BoardConfig::isMurphyM3() || BoardConfig::ACTIVE.board == BoardConfig::Board::LilyGoT5S3;
 }
 
+// The panel's booster is powered down once the device is idle, and again after each frame drawn
+// while it stays idle (main.cpp's idle loop, HalDisplay::powerOffPanelBetweenFrames). Its driver
+// keeps the booster up after a refresh unless the Sunlight Fading Fix asks for POF, and the next
+// refresh resets and powers it up anyway. Murphy only so far: the X3's driver has the same habit,
+// but there the refresh after a POF is promoted to HALF, which wants its own look first.
+inline bool powersPanelOffWhenIdle() { return BoardConfig::isMurphyM3(); }
+
 // The panel can show gray at all. Murphy's only can in a build with -DFREEINK_MURPHY_GRAY: without
 // it the UC8253 driver has no gray waveforms and ignores a gray pass
 // (Uc8253MurphyDriver::displayGray), so a setting for one means nothing there.

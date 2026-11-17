@@ -547,6 +547,9 @@ class EpubReaderActivity final : public Activity {
   LandedText landedText_;
   // True while pageTurn() waits for the render lock: the one sign the render task can read that a turn is on its way.
   std::atomic<bool> pageTurnWaitingForLock_{false};
+  // True while displayBuildPage() waits for its page's waveform without the bus lock: the loop task's build slice may
+  // run through that pending refresh (BuildDuringRefresh.h). Written by the render task, read by the loop task.
+  std::atomic<bool> buildPageWaitOffBus_{false};
   // Where a press stands on its way to a turn, for the background work's gate (InputFirst). Loop task.
   InputFirst::Press pressInFlight() const;
   // True once the "Indexing" popup has been drawn for the current pending page, so the pass
@@ -1022,8 +1025,9 @@ class EpubReaderActivity final : public Activity {
   // build slice can run on the loop task during the refresh.
   // `drawBlock`: the arena block the page's TextBlock bytes live in, when the caller loaded the
   // page from the build's lent region. Released here, before the lock is, so a build slice that
-  // runs during the waveform wait finds the arena cursor where it left it.
-  void displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout,
+  // runs during the waveform wait finds the arena cursor where it left it. The page is freed here for the same
+  // reason: the build gets its heap back before it resumes.
+  void displayBuildPage(RenderLock& lock, std::unique_ptr<Page> ownedPage, const RenderLayout& layout,
                         BuildArena::Block* drawBlock = nullptr);
   // Draws the status bar over the current frame buffer and flushes to the display.
   // Handles the refresh cycle and grayscale AA pass. page must be the same page
