@@ -73,19 +73,18 @@ browser: it unwraps each book's key with the account's license key through `api.
      the cover and metadata loads register a protection an earlier open established; `clearCache()` drops it.
 3. Done (34507c5f7 and the web commit): upstream's `<book>.key` (FIBK v2, v1 read) and NVS device secret, ported;
    `POST /api/book-key`; `deviceId` in `/api/status?plugin=`.
-4. The trusted clock. For now a loan with a due date opens only on a clock that is set (`HalClock::isSynced()`),
-   and closes after its date (`BookSession.cpp`, `loanState()`). Still open: a floor that a clock set back cannot undo
-   (an upload's `t` sets it from the browser in hotspot mode, `HalClock::applyClientTime()`); upstream's
-   `TrustedTime` keeps one in NVS.
-5. Done: the key is a sidecar (`SidecarFiles::kKeyExtensions`, `.epub.key`), so moving and removing a book carry it;
-   `BookRelocation::bookMoved()` drops the moving book's protection, which holds its manifest open.
-6. Open: a protected book that cannot be read fails `Epub::load()` like any book that does not open; the reader
-   needs its own message for no key, another device's key, an expired loan and no clock (`tr()`, all UI languages).
-   `Epub::protectionResult()` says which.
-7. Open: a device test with a book encrypted by a script and its key posted through `/api/book-key`, on the X3 and
-   an S3 board; the open-path heap and the first-open time (the size measuring decrypts and inflates the book's text
-   once) on the C3; a host test that runs a protected book through the whole pipeline (`test/epub_pipeline` links a
-   stub of `BookSession` today).
+4. Done (58a4f8539): `HalClock::loanNow()`, the clock but never earlier than the latest plausible time the device
+   has seen, a floor kept in NVS where upstream's `TrustedTime` keeps it (`cptime/floor`), raised at a loan check,
+   after an NTP sync and at the sleep entry. A clock set back (an upload's `t`, `HalClock::applyClientTime()`) cannot
+   reopen an ended loan; the floor lags while the device is off.
+5. Done (7aae79f7b): the key is a sidecar (`SidecarFiles::kKeyExtensions`, `.epub.key`), so moving and removing a
+   book carry it; `BookRelocation::bookMoved()` drops the moving book's protection, which holds its manifest open.
+6. Done (242ef3eac): the reader says why a protected book does not open (no key, another device's key, an ended
+   loan, no clock, unreadable) and goes back. English only so far; the release's translation pass adds the rest.
+7. Host: `EpubProtectedPipelineTest` runs protected copies of three books (text, inline images, JPEGs) through the
+   whole pipeline and gets the plain books' layout dump byte for byte; the refusals too. Device: still open, a book
+   made by `tools/make_protected_epub.py` with its key posted through `/api/book-key`, on the X4 Pro and the X3; the
+   open-path heap and the first-open time (the size measuring decrypts and inflates the book's text once) on the C3.
 
 Cost on the C3 against master (`default`, 2026-11-17): flash +16.3 KB, static RAM +296 bytes.
 

@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "ProtectedEpub.h"
 #include "ProtectionManifest.h"
 #include "TestZip.h"
 #include "ZipFile.h"
@@ -39,28 +40,7 @@ constexpr const char* kAes128 = "http://www.w3.org/2001/04/xmlenc#aes128-cbc";
 constexpr const char* kAes256 = "http://www.w3.org/2001/04/xmlenc#aes256-cbc";
 constexpr const char* kFontObfuscation = "http://www.idpf.org/2008/embedding";
 
-// IV, then AES-CBC of `plain`: PKCS#7 padding, or xmlenc's (fill bytes random, the count last).
-std::string encryptAes(const std::string& plain, const std::vector<uint8_t>& key, const bool xmlenc = false) {
-  std::string padded = plain;
-  const size_t pad = 16 - padded.size() % 16;
-  for (size_t i = 0; i + 1 < pad; ++i) padded.push_back(static_cast<char>(xmlenc ? 0x5A ^ (i * 31) : pad));
-  padded.push_back(static_cast<char>(pad));
-  unsigned char iv[16];
-  for (int i = 0; i < 16; ++i) iv[i] = static_cast<unsigned char>(0xC0 + i * 3);
-  std::string out(reinterpret_cast<const char*>(iv), 16);
-  out.resize(16 + padded.size());
-  EVP_CIPHER_CTX* c = EVP_CIPHER_CTX_new();
-  int produced = 0;
-  EXPECT_EQ(EVP_EncryptInit_ex(c, key.size() == 16 ? EVP_aes_128_cbc() : EVP_aes_256_cbc(), nullptr, key.data(), iv),
-            1);
-  EVP_CIPHER_CTX_set_padding(c, 0);
-  EXPECT_EQ(EVP_EncryptUpdate(c, reinterpret_cast<unsigned char*>(out.data()) + 16, &produced,
-                              reinterpret_cast<const unsigned char*>(padded.data()), static_cast<int>(padded.size())),
-            1);
-  EVP_CIPHER_CTX_free(c);
-  EXPECT_EQ(produced, static_cast<int>(padded.size()));
-  return out;
-}
+using protected_epub::encryptAes;
 
 struct ManifestItem {
   std::string uri;
