@@ -123,8 +123,9 @@ Version 1.0.5 against this firmware (read, not run):
   plugin host throws. The page cannot use `crypto.subtle` instead, as `PluginHost.js.inc` says it can: `SubtleCrypto`
   exists only in a secure context, and the reader serves `http://` on a LAN address. That comment goes with D3.
 - First of all it lists its own folder and `/.crosspoint` (`/api/files`), looking for `content.key` in both (the
-  second is where its earlier versions kept it). Both answer 403 while hidden files are off, and the plugin then
-  cannot start; upstream lists any folder. With hidden files on, both list.
+  second is where its earlier versions kept it). Both answered 403 while hidden files were off, and the plugin then
+  could not start; upstream lists any folder. Owner, 2026-11-17: list like upstream. `/api/files` now lists a dot
+  folder named by its path whatever the setting (names only; system folders and alias spellings stay refused).
 - The rest is in place: the relay (four arguments; a 3xx comes back unfollowed and the plugin follows it), `fetchToSd`
   (http first, then https), `writeFile` of the `.rights` sidecar beside the book (where `/upload` may write) and of its
   account files in its folder, exact reads there, `/delete` with `path`, `deviceId`, and `/api/book-key`, which it
