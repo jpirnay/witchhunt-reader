@@ -802,6 +802,18 @@ class EpubReaderActivity final : public Activity {
   // counter, which stays an estimate until that file's page count is recorded (ChapterPageSpan).
   // Background-B builds such a file past the BG_BUILD_LOOKAHEAD_PAGES budget (#580).
   bool chapterCounterAwaits(int spine) const;
+  // The chapter count's backfill (ChapterBackfill.h): Background-B lays out the files of the chapter on screen that
+  // come before it and have no page count, once the look-ahead has nothing left to do. beginChapterBackfill() makes the
+  // nearest such file B's target, keeping the look-ahead's cursor (false when there is none or it may not);
+  // endChapterBackfill() puts the cursor back. backfillSpine_ is the file B lays out (-1: none); backfillFor_ the spine
+  // on screen that backfillDone_ (none left, or given up) and backfillLastTarget_ refer to.
+  bool beginChapterBackfill();
+  void endChapterBackfill(bool giveUp);
+  int backfillSpine_ = -1;
+  int backfillForwardCursor_ = -1;
+  int backfillFor_ = -1;
+  int backfillLastTarget_ = -1;
+  bool backfillDone_ = false;
   // Realloc the secondary buffer, evicting rebuildable caches (FDC page slots, CSS
   // resolve caches) that a released build may have planted inside the freed hole and
   // retrying once before reporting failure. Shared by the post-build and opportunistic
