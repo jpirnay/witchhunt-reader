@@ -552,11 +552,14 @@ class EpubReaderActivity final : public Activity {
   bool keepBuildPageOnScreen();
   // The deferred gray pass of the page the build drew (`shown`, loaded as `page`), its glyphs warmed first.
   void armBuildPageGray(const BuildPageOnScreen& shown, std::unique_ptr<Page> page);
-  // The build keeps out of what the gray of its page needs (BuildPageGray): the S3s.
-  bool buildLeavesFramesAlone() const;
-  // Between two build slices, where the gray comes while the build goes on: arms the deferred gray pass of the page the
-  // build drew, once its refresh is over. True when armed; runDeferredGrayscalePass() runs it before the next slice.
+  // How the gray of the page the live build draws can come while the build goes on (BuildPageGray::Pass).
+  BuildPageGray::Pass buildPageGrayPass() const;
+  // Between two build slices, where the gray comes while the build goes on, once the page's refresh is over: arms the
+  // deferred gray pass of the page the build drew (Restore; runDeferredGrayscalePass() runs it before the next slice),
+  // or runs it here (Redraw). True when it did either.
   bool askBuildPageGray();
+  // The Redraw pass of the page `shown`, under the render lock, in the build's arena. False when it could not start.
+  bool runBuildPageGrayRedraw(const BuildPageOnScreen& shown);
   // displayBuildPage() drew a page whose gray askBuildPageGray() is to ask for. A hint, read without the lock; the
   // state under the lock decides, and clears it once the page has gone or its pass is asked for.
   std::atomic<bool> buildPageGrayDue_{false};

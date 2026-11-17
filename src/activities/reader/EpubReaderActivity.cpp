@@ -31,6 +31,7 @@
 #include <Epub/hyphenation/Hyphenator.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
+#include <FrameRegion.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <GlyphProvider.h>
@@ -3101,25 +3102,27 @@ void EpubReaderActivity::armBuildPageGray(const BuildPageOnScreen& shown, std::u
   markStagedForCurrentPage();
 }
 
-bool EpubReaderActivity::buildLeavesFramesAlone() const {
-  // keepsPreviousFrame(): the frame on screen is in the secondary buffer, false only where the PSRAM arena could not be
-  // had and the buffer itself was lent.
-  return HalCapabilities::buildsInPsram() && renderer.keepsPreviousFrame();
+BuildPageGray::Pass EpubReaderActivity::buildPageGrayPass() const {
+  // keepsPreviousFrame(): the frame on screen is in the secondary buffer, false on an S3 only where the PSRAM arena
+  // could not be had and the buffer itself was lent. The arena is the live build's: Background-B's is handed back
+  // before a build of the chapter on screen starts, or adopted by it.
+  return BuildPageGray::passFor(HalCapabilities::buildsInPsram(), renderer.keepsPreviousFrame(),
+                                secondaryBorrowed_ && buildScratch_ && buildScratch_->valid());
 }
 
 bool EpubReaderActivity::askBuildPageGray() {
   // The hint is read without the lock, so a tick with nothing due takes none. Taking the lock on every tick made the
   // Picco's chapter build 53-66 ms slower in 2.2-2.9 s (AA off, against a build without this call, n=3, 2026-11-17);
   // with the hint it built within 8 ms of that one.
-  if (!HalCapabilities::buildsInPsram() || !buildPageGrayDue_.load(std::memory_order_acquire) || RenderLock::peek()) {
+  if (!buildPageGrayDue_.load(std::memory_order_acquire) || RenderLock::peek()) {
     return false;
   }
   RenderLock lock;
   const BuildPageOnScreen shown = buildPageOnScreen_;
+  const BuildPageGray::Pass pass = buildPageGrayPass();
   if (!section || !section->hasActiveBuild() || shown.spine != currentSpineIndex ||
       shown.page != section->currentPage ||
-      !BuildPageGray::whileBuilding(buildLeavesFramesAlone(), getEffectiveTextAntiAliasing(), shown.hasImages,
-                                    uiOverPage()) ||
+      !BuildPageGray::whileBuilding(pass, getEffectiveTextAntiAliasing(), shown.hasImages, uiOverPage()) ||
       shown.gray != BuildPageGray::Gray::None) {
     buildPageGrayDue_.store(false, std::memory_order_release);  // the page it was set for has gone, or has its gray
     return false;
@@ -3129,10 +3132,100 @@ bool EpubReaderActivity::askBuildPageGray() {
   }
   buildPageGrayDue_.store(false, std::memory_order_release);
   buildPageOnScreen_.gray = BuildPageGray::Gray::Asked;
+  if (pass == BuildPageGray::Pass::Redraw) return runBuildPageGrayRedraw(shown);
   std::unique_ptr<Page> page = section->loadPageFromActiveBuild(static_cast<uint16_t>(shown.page));
   if (!page) return false;  // the build's end asks again
   armBuildPageGray(shown, std::move(page));
   LOG_INF("ERS", "Page %d of spine %d: AA asked for while the build goes on", shown.page + 1, currentSpineIndex);
+  return true;
+}
+
+bool EpubReaderActivity::runBuildPageGrayRedraw(const BuildPageOnScreen& shown) {
+  // Between two slices of the build, which holds the secondary buffer as its arena: the write buffer holds the page as
+  // it was pushed, and is the only copy of it. Everything the pass needs lives in a block of the arena's free tail, as
+  // displayBuildPage()'s draw does, and goes back with it before the next slice: the page (its text in the block), the
+  // status bar's pixels and the glyph slots. Nothing from the heap but the page's few objects, as that draw takes.
+  BuildArena& arena = *buildScratch_;
+  int bezelTop = 0, bezelRight = 0, bezelBottom = 0, bezelLeft = 0;
+  renderer.getOrientedViewableTRBL(&bezelTop, &bezelRight, &bezelBottom, &bezelLeft);
+  const BuildPageGray::ChromeBands bands =
+      BuildPageGray::chromeBands(renderer.getScreenWidth(), renderer.getScreenHeight(), bezelTop,
+                                 UITheme::getStatusBarTopHeight(automaticPageTurnActive), bezelBottom,
+                                 UITheme::getStatusBarBottomHeight(automaticPageTurnActive));
+  const BuildPageGray::Rect& top = bands.top;
+  const BuildPageGray::Rect& bottom = bands.bottom;
+  const size_t topBytes = renderer.getRegionByteSize(top.x, top.y, top.width, top.height);
+  const size_t bottomBytes = renderer.getRegionByteSize(bottom.x, bottom.y, bottom.width, bottom.height);
+  size_t arenaFree = 0;
+  arena.freeTail(&arenaFree);
+  const auto heapBefore = static_cast<unsigned long>(esp_get_free_heap_size());
+  HalPowerManager::Lock powerLock;  // full clock, as for the deferred pass and the build's slices
+
+  BuildArena::Block block = arena.reserveBlock();
+  std::unique_ptr<Page> page = section->loadPageFromActiveBuild(static_cast<uint16_t>(shown.page), &arena);
+  uint8_t* const kept = page ? arena.allocArray<uint8_t>(topBytes + bottomBytes) : nullptr;
+  if (!kept) {
+    LOG_ERR("ERS",
+            "Page %d of spine %d: its gray waits for the build's end (arena %u B free, status bar %u B, page %s)",
+            shown.page + 1, currentSpineIndex, static_cast<unsigned>(arenaFree),
+            static_cast<unsigned>(topBytes + bottomBytes), page ? "loaded" : "not loaded");
+    page.reset();  // its text is in the block
+    arena.release(block);
+    return false;
+  }
+  // The frame as pushed: its digest, and the status bar's pixels, which are not drawn again (BuildPageGray).
+  const size_t frameBytes = renderer.getBufferSize();
+  const uint32_t pushed = frameregion::digest(renderer.getWriteTarget(), frameBytes);
+  if (topBytes > 0) renderer.copyRegionToBuffer(top.x, top.y, top.width, top.height, kept, topBytes);
+  if (bottomBytes > 0) {
+    renderer.copyRegionToBuffer(bottom.x, bottom.y, bottom.width, bottom.height, kept + topBytes, bottomBytes);
+  }
+
+  const int fontId = getEffectiveReaderFontId();
+  bool planeAborted = false;
+  bool frameKept = false;
+  GfxRenderer::GrayscaleTimings gt;
+  {
+    // The glyphs, as displayBuildPage() draws them: slots and misses in the arena, given back as the scope ends.
+    FontCacheManager::ScopedSlotArena slotArena(*renderer.getFontCacheManager(), &arena);
+    const glyph_miss::Scope misses(&arena);
+    prewarmPageFonts(*page, shown.marginLeft, shown.contentTop);
+    gt = renderer.renderGrayscalePlanesOverFrame(
+        [&](GfxRenderer::RenderMode) {
+          if (!page->renderTextOnly(renderer, fontId, shown.marginLeft, shown.contentTop, /*abortable=*/true)) {
+            planeAborted = true;
+          }
+        },
+        [&] { return planeAborted || aaPreemptedByNavigation(); },
+        [&] {
+          // displayBuildPage()'s draw of the page, without what is drawn over it: the status bar comes back as kept.
+          renderer.clearScreen();
+          {
+            ImageBlock::PlaceholderOnlyScope placeholders;
+            page->render(renderer, fontId, shown.marginLeft, shown.contentTop, /*forceLoadLargeImages=*/false,
+                         /*monochromeOutput=*/true);
+          }
+          if (topBytes > 0) renderer.copyBufferToRegion(top.x, top.y, top.width, top.height, kept, topBytes);
+          if (bottomBytes > 0) {
+            renderer.copyBufferToRegion(bottom.x, bottom.y, bottom.width, bottom.height, kept + topBytes, bottomBytes);
+          }
+          frameKept = frameregion::digest(renderer.getWriteTarget(), frameBytes) == pushed;
+          return frameKept;
+        });
+  }
+  page.reset();
+  if (!arena.release(block)) LOG_ERR("ERS", "Build page AA: arena block could not be released (out of order)");
+  if (!gt.aborted) buildPageOnScreen_.gray = BuildPageGray::Gray::Shown;
+  if (!frameKept) {
+    // Never seen; the driver was told it has no baseline, so the next push is a clean one.
+    LOG_ERR("ERS", "Build page AA: the page drawn again differs from the one pushed");
+  }
+  LOG_INF("ERS",
+          "Deferred AA%s (redraw, during the build): planes=%lums gray=%lums redraw=%lums frame=%s arena=%u+%u "
+          "heap=%lu->%lu",
+          gt.aborted ? " ABORTED" : "", gt.planesMs, gt.displayMs, gt.restoreMs, frameKept ? "same" : "DIFFERS",
+          static_cast<unsigned>(arenaFree), static_cast<unsigned>(topBytes + bottomBytes), heapBefore,
+          static_cast<unsigned long>(esp_get_free_heap_size()));
   return true;
 }
 
@@ -7222,14 +7315,18 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
   const int viewportHeight =
       std::max(0, renderer.getScreenHeight(renderer.getHeldOrientation()) - layout.marginTop - layout.marginBottom);
   const int contentTop = layout.marginTop + ReaderPageLayout::imageOnlyPageYOffset(page, viewportHeight);
-  // Where the build leaves the frame buffers alone, a page of text gets its gray while the build goes on
-  // (BuildPageGray). On a panel that puts a page and its gray up in one push (one-pass text, the T5S3) it goes up with
-  // this push, its planes captured by the render below as a turn's page has them (renderContents()); elsewhere it comes
-  // from the deferred pass once this refresh is over (askBuildPageGray()). The planes live until the push is collected.
-  const bool grayWhileBuilding = BuildPageGray::whileBuilding(buildLeavesFramesAlone(), getEffectiveTextAntiAliasing(),
-                                                              page.hasImages(), uiOverPage());
+  // A page of text gets its gray while the build goes on (BuildPageGray). Where the build leaves the frame buffers
+  // alone (Restore) and the panel puts a page and its gray up in one push (one-pass text, the T5S3), it goes up with
+  // this push, its planes captured by the render below as a turn's page has them (renderContents()); the planes live
+  // until the push is collected. Elsewhere it comes from a pass once this refresh is over (askBuildPageGray()): the
+  // deferred one, or the Redraw pass where the build holds the secondary buffer (the C3s), whose page goes out in black
+  // and white.
+  const BuildPageGray::Pass grayPass = buildPageGrayPass();
+  const bool grayWhileBuilding =
+      BuildPageGray::whileBuilding(grayPass, getEffectiveTextAntiAliasing(), page.hasImages(), uiOverPage());
+  const bool grayWithPush = grayWhileBuilding && grayPass == BuildPageGray::Pass::Restore;
   std::optional<ReaderUtils::OnePassTextScope> onePassText;
-  if (grayWhileBuilding) onePassText.emplace(onePassTextFor(page));
+  if (grayWithPush) onePassText.emplace(onePassTextFor(page));
   std::unique_ptr<uint8_t[]> capLsb, capMsb;
 
   // Everything that touches the build's arena -- the font-slot scope below and the caller's
@@ -7255,7 +7352,7 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
     const glyph_miss::Scope misses(secondaryBorrowed_ ? buildScratch_.get() : nullptr);
     prewarmPageFonts(page, layout.marginLeft, contentTop);
 
-    if (grayWhileBuilding && renderer.supportsGrayFrame()) beginGrayCapturePlanes(renderer, capLsb, capMsb);
+    if (grayWithPush && renderer.supportsGrayFrame()) beginGrayCapturePlanes(renderer, capLsb, capMsb);
     renderer.clearScreen();
     {
       ImageBlock::PlaceholderOnlyScope placeholders;
@@ -7311,8 +7408,8 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
     // Costs nothing: prewarmCache() frees and rebuilds a slot's buffer on every call anyway
     // (FontDecompressor.cpp, "Roll back this slot only"), so no work is thrown away that the next
     // page would not have redone. Safe here because every glyph consumer for this page has already
-    // run — the scan pass, page.render() and renderStatusBar() are all above, and a mid-build draw
-    // has no AA pass to replay later (the borrowed buffer forces secondaryBufferDegraded_).
+    // run — the scan pass, page.render() and renderStatusBar() are all above, and the page's gray
+    // pass, where one comes during the build, loads and warms its glyphs itself (askBuildPageGray).
     renderer.getFontCacheManager()->clearCache();
   }  // slot scope closed
   // The page itself goes back before the build resumes, as the font slots above do: the build's slices run during the
