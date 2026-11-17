@@ -5,9 +5,9 @@
 #include <cstring>
 #include <utility>
 
-// The bytes of the frame buffer a logical rectangle covers, and their copy out and back. GfxRenderer's region helpers
-// (getRegionByteSize, copyRegionToBuffer, copyBufferToRegion) are thin wrappers over this header, kept free of Arduino
-// so the host can test it (test/frame_region).
+// The bytes of the frame buffer a logical rectangle covers, their copy out and back, and a digest of a whole frame.
+// GfxRenderer's region helpers (getRegionByteSize, copyRegionToBuffer, copyBufferToRegion) are thin wrappers over this
+// header, kept free of Arduino so the host can test it (test/frame_region).
 namespace frameregion {
 
 // Mirrors GfxRenderer::Orientation's declared order, as touchtransform does; GfxRenderer.cpp static_asserts it.
@@ -91,6 +91,20 @@ inline void copyIn(uint8_t* frame, const int stride, const Span& span, const uin
     memcpy(frame + static_cast<size_t>(span.row0 + row) * stride + span.byte0,
            in + static_cast<size_t>(row) * span.rowBytes, span.rowBytes);
   }
+}
+
+// FNV-1a over the frame's bytes, a word at a time: what tells a frame drawn again from the one it is to equal. Not a
+// hash for anything adversarial; 13,068 words on the X3's panel.
+inline uint32_t digest(const uint8_t* frame, const size_t size) {
+  uint32_t hash = 2166136261u;
+  size_t i = 0;
+  for (; i + 4 <= size; i += 4) {
+    uint32_t word;
+    memcpy(&word, frame + i, sizeof(word));
+    hash = (hash ^ word) * 16777619u;
+  }
+  for (; i < size; i++) hash = (hash ^ frame[i]) * 16777619u;
+  return hash;
 }
 
 }  // namespace frameregion

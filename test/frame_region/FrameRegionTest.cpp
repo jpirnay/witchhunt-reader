@@ -1,5 +1,5 @@
 // frameregion (lib/GfxRenderer/FrameRegion.h): the bytes of the frame buffer a logical rectangle covers, under
-// GfxRenderer's region helpers (getRegionByteSize, copyRegionToBuffer, copyBufferToRegion).
+// GfxRenderer's region helpers (getRegionByteSize, copyRegionToBuffer, copyBufferToRegion), and a frame's digest.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -108,6 +108,17 @@ TEST(FrameRegion, CopyOutAndInRestoreTheSpanAlone) {
       ASSERT_EQ(frame[i], inSpan ? before[i] : 0xFF) << "row " << row << " byte " << b;
     }
   }
+}
+
+TEST(FrameRegion, TheDigestTellsOneBitApart) {
+  std::vector<uint8_t> frame(52273, 0xFF);  // not a whole number of words
+  const uint32_t white = frameregion::digest(frame.data(), frame.size());
+  EXPECT_EQ(frameregion::digest(frame.data(), frame.size()), white);
+  frame[26000] ^= 0x10;
+  EXPECT_NE(frameregion::digest(frame.data(), frame.size()), white);
+  frame[26000] ^= 0x10;
+  frame.back() ^= 0x01;
+  EXPECT_NE(frameregion::digest(frame.data(), frame.size()), white);
 }
 
 }  // namespace
