@@ -72,6 +72,7 @@
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
+#include "PageComplete.h"
 #include "PreRenderGate.h"
 #include "QrDisplayActivity.h"
 #include "QuickOverridesActivity.h"
@@ -7459,10 +7460,23 @@ void EpubReaderActivity::appendDebugState(std::string& out) const {
 bool EpubReaderActivity::hasPendingScreenWork() {
   RenderLock lock(RenderLock::Mode::Try);
   if (!lock.ownsLock()) return true;  // a render pass or a build slice has it: busy by definition
-  // The section on screen still being built (its pages appear as they are laid out), a page turn
-  // handed to the render task, a deferred anti-aliasing redraw of the page on screen.
-  return !section || readerPhase_ != ReaderPhase::READING || section->hasActiveBuild() || usePreRenderedBuffer ||
-         pendingGrayscale_.active;
+  // The page asked for not on the panel yet, a page turn handed to the render task, the page's gray still to come. A
+  // chapter build whose page is complete is background work (PageComplete).
+  PageComplete::Reader reader;
+  reader.sectionLoaded = section != nullptr;
+  reader.buildLive = section && section->hasActiveBuild();
+  reader.reading = readerPhase_ == ReaderPhase::READING;
+  reader.turnHandedToRender = usePreRenderedBuffer;
+  reader.grayPassOwed = pendingGrayscale_.active;
+  if (reader.buildLive) {
+    const BuildPageOnScreen& shown = buildPageOnScreen_;
+    reader.buildPage.shown = shown.spine == currentSpineIndex && shown.page == section->currentPage;
+    reader.buildPage.hasImages = shown.hasImages;
+    // As keepBuildPageOnScreen() decides at the build's end; under the bars or a search's strip the page stays B/W.
+    reader.buildPage.grayOwed =
+        getEffectiveTextAntiAliasing() && !uiOverPage() && BuildPageGray::owedAtBuildEnd(shown.gray);
+  }
+  return PageComplete::screenWorkPending(reader);
 }
 
 bool EpubReaderActivity::hasPendingBackgroundWork() {

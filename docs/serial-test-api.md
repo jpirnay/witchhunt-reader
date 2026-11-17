@@ -228,8 +228,9 @@ Reply: `ACT_OK`, or `ACT_ERROR:<reason>` (`no such file <path>`, `bad position <
   it also saves that position as the book's progress. `@<percent>%` lands where the reader's own
   "go to percent" lands.
 - The new screen opens on the next loop pass; wait with `CMD:IDLE` before you look at it. Opening a
-  book that has never been opened indexes it first, which can take seconds (a full `CMD:IDLE`
-  waits for that; `IDLE:...:SCREEN` does not).
+  book at a chapter that is not laid out yet shows its page while the layout goes on, which can take
+  seconds: `IDLE:...:SCREEN` answers once that page is complete, a full `CMD:IDLE` once the chapter
+  is laid out (see [`IDLE`](#waiting-idle)).
 
 ```
 > CMD:ACT:READER:/test/The Anarchy - Dalrymple, William.epub@20:5
@@ -384,8 +385,8 @@ book holds.
 
 Errors: `not in the reader` (another screen is on top, the reader's own menu included), `no page`
 (no section loaded, or the page could not be read), `busy` (the section on screen is still being
-built, or a page turn is on its way to the panel: wait with `CMD:IDLE:...:SCREEN`, which waits for
-both), `no memory` (the heap had no 2 KB block for the command's scratch).
+built, or a page turn is on its way to the panel: wait with `CMD:IDLE`, which waits for both;
+`:SCREEN` waits for the turn only), `no memory` (the heap had no 2 KB block for the command's scratch).
 
 How it works: the reader keeps no page in memory between draws, so the command loads the page on
 screen from its section file, as a redraw does, and writes it out element by element; nothing it
@@ -436,12 +437,17 @@ press that changes nothing on screen counts as done 1 s after it was taken in.
 | --- | --- |
 | `transition` | a screen change is queued |
 | `input` | a press (or touch) has not been taken in yet, or is waiting out the double-press window |
-| `render` | a frame is queued, being drawn, or still being refreshed onto the panel; or the screen is about to change by itself (the reader's page still being built, a page turn on its way, the anti-aliasing redraw of the page); or the frame of the last command's effect is still to come |
+| `render` | a frame is queued, being drawn, or still being refreshed onto the panel; or the screen is about to change by itself (the reader's page not on the panel yet, a page turn on its way, the page's anti-aliasing still to come); or the frame of the last command's effect is still to come |
 | `background` | the screen has work of its own to finish: the reader's chapter builds (the current one and the look-ahead), the pre-render of the next page, image decodes, a step of the TrueType glyph store an idle tick would run (room to make: a reclaim or an index rebuild; or its use counts to take); Home's cover loading |
 | `settling` | nothing was busy, but not yet for 250 ms when the timeout came |
 
 With `:SCREEN` it waits only until the screen has settled (everything above but `background`).
-That is what you want before a screenshot after a page turn or after opening a book. A full
+That is what you want before a screenshot after a page turn or after opening a book. In the reader
+it is the complete page (`PageComplete.h`): the page asked for is on the panel, with its gray when
+anti-aliasing is on. A chapter still being laid out behind that page is `background`, so a press
+can be sent while it goes on. Where the page a build shows gets its gray only at the build's end
+(the X3 and the X4 with anti-aliasing on) the page is complete only then; so is a page with
+pictures, which the build's end draws again with them. A full
 `CMD:IDLE` in the reader also waits for the look-ahead builds of the next chapters, which start
 1.5 s after a page appears and can take tens of seconds on a long book, and for a TrueType glyph store that still
 needs room made (a reclaim or an index rebuild, `CMD:TTF`) or still has its use counts to take (their block is
