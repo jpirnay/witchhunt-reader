@@ -549,6 +549,8 @@ class GfxRenderer {
   // panel. Ask this before spending the async gap on work; see
   // HalDisplay::supportsAsyncRefresh.
   bool supportsAsyncRefresh() const { return display.supportsAsyncRefresh(); }
+  // See HalDisplay::keepsDeferredGrayPass.
+  bool keepsDeferredGrayPass() const { return display.keepsDeferredGrayPass(); }
   // What a FAST refresh costs on this panel, measured. 0 until one has run. See HalDisplay.
   uint16_t getLastFastRefreshMs() const { return display.getLastFastRefreshMs(); }
 
