@@ -10,9 +10,10 @@
 // reference for the fields.
 //
 // Runs: JSON catalogs, their four paging modes, static and fetched lists with notices and requirements, search, item
-// compatibility filtering, the template variables ({cfg.*} from the plugin's config file), and downloads of one file
-// (by URL or a url_path answer) or of a bundle. Not yet: sign-in (auth, {token}), XML catalogs, Details pages, the
-// sidecar file.
+// compatibility filtering, the template variables ({cfg.*} from the plugin's config file, {token} from its token
+// file), sign-in by password grant or device code, and downloads of one file (by URL or a url_path answer) or of a
+// bundle. Not yet: XML catalogs, Details pages, the sidecar file, and token or config files outside the plugin's
+// folder.
 //
 // PluginsPage.html loads this on demand; window.PluginCatalog is its interface.
 (function () {
@@ -175,9 +176,46 @@
     return (dir === '/' ? '' : dir) + '/' + name;
   }
 
+  // A file a manifest names (token.file, config.file): a relative one is in the plugin's folder (upstream's inPluginDir).
+  function pluginFile(file, pluginDir) {
+    const f = text(file).trim();
+    return !f ? '' : f.startsWith('/') ? f : pluginDir + '/' + f;
+  }
+
+  // Whether a path is inside the plugin's own folder, the only place the web server lets a plugin keep a file of its
+  // own (pluginWriteTarget(), /download's exact reads). Upstream allows any path but the credential stores.
+  function inPluginFolder(path, pluginDir) {
+    return !!pluginDir && path.startsWith(pluginDir + '/') && !path.split('/').includes('..');
+  }
+
+  // A token file's JSON: the token alone, nested at token.path, as upstream's saveTokenToFile() writes it.
+  function tokenJson(path, value) {
+    const segs = text(path || 'token').split('.').filter(Boolean);
+    const root = {};
+    let node = root;
+    segs.slice(0, -1).forEach((seg) => { node = node[seg] = {}; });
+    node[segs[segs.length - 1] || 'token'] = value;
+    return JSON.stringify(root);
+  }
+
+  // The sign-in a manifest's auth asks for: 'password' or 'device_code' (upstream's default type), '' for none (a token
+  // the plugin's web card writes, or no sign-in), or 'other:<type>' for one upstream does not define.
+  function signInKind(m) {
+    const a = m && m.auth;
+    if (!a || typeof a !== 'object' || !(a.request && a.request.url)) return '';
+    const type = text(a.type || 'device_code');
+    return type === 'password' || type === 'device_code' ? type : 'other:' + type;
+  }
+
+  function signInNeeded(message) {
+    const e = new Error(message);
+    e.signIn = true;
+    return e;
+  }
+
   // What of a device.json runs here: {catalog, reason, events}. catalog: it can be opened on the Plugins page;
   // reason: why not, when it has one that cannot; events: it subscribes to device events, which do not run here yet.
-  function describe(manifest) {
+  function describe(manifest, pluginDir) {
     const m = manifest && typeof manifest === 'object' ? manifest : {};
     const browse = m.browse && typeof m.browse === 'object' ? m.browse : null;
     const out = {
@@ -187,10 +225,15 @@
     if (!browse) return out;
     const lists = Array.isArray(browse.lists) ? browse.lists : [];
     if (!browse.url && !browse.lists_url && !lists.some((l) => l && l.url)) return out;
+    const kind = signInKind(m);
+    const outside = [m.token && m.token.file, m.config && m.config.file].map((f) => text(f).trim())
+      .find((f) => f.startsWith('/') && !inPluginFolder(f, pluginDir));
     if (text(browse.format || 'json') !== 'json') {
       out.reason = 'its catalog is XML, which does not run here yet';
-    } else if (m.auth || m.token) {
-      out.reason = 'its catalog needs a sign-in, which does not run here yet';
+    } else if (kind.startsWith('other:')) {
+      out.reason = 'its sign-in ("' + kind.slice(6) + '") is not one this page knows';
+    } else if (outside) {
+      out.reason = 'it keeps ' + outside + ' outside its own folder, which this firmware does not allow';
     } else {
       out.catalog = true;
     }
@@ -218,6 +261,9 @@
       this.page = 1;
       this.staticRows = null;  // a static answer's compatible rows, paged here
       this.lane = Promise.resolve();
+      this.cancelled = false;  // set to stop a device-code sign-in that is waiting
+      this.wait = io.wait || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+      this.now = io.now || (() => Date.now());
     }
 
     // The device serves one connection at a time, and requests side by side can stall it: a download started while
@@ -246,23 +292,154 @@
           }
         } catch (e) { /* upstream reads an unparsable config as none */ }
       }
+      // A token from a sign-in this visit is kept: one without a token.file lives only here.
+      if (this.vars.token) vars.token = this.vars.token;
       this.vars = vars;
+      await this.ensureToken();
       this.lists = (Array.isArray(this.browse.lists) ? this.browse.lists : [])
         .filter((l) => l && text(l.title) && listAllowed(l.requires));
       if (this.browse.lists_url) {
         try {
-          this.lists = this.lists.concat(await this.fetchLists());
+          this.lists = this.lists.concat(await this.authorized(() => this.fetchLists()));
         } catch (e) {
-          if (!this.lists.length && !this.browse.url) throw e;
+          if (e.signIn || (!this.lists.length && !this.browse.url)) throw e;
         }
       }
       return this.lists;
     }
 
+    // ---- Sign-in (upstream's PluginCatalogActivity: loadToken, refreshCredentialToken, beginAuth, pollAuth) ----
+
+    signInKind() {
+      return signInKind(this.m);
+    }
+
+    tokenFile() {
+      return pluginFile(this.m.token && this.m.token.file, this.dir);
+    }
+
+    // {token} from token.file, which a sign-in here or the plugin's web card wrote. With none, a password grant mints
+    // one; otherwise a sign-in is needed.
+    async ensureToken() {
+      if (!this.tokenFile()) return;
+      if (await this.loadToken()) return;
+      if (this.signInKind() === 'password' && (await this.mintPassword())) return;
+      throw signInNeeded('this catalog needs a sign-in');
+    }
+
+    async loadToken() {
+      const raw = await this.serial(() => this.io.readFile(this.tokenFile()));
+      let token = '';
+      try {
+        token = raw ? text(getPath(JSON.parse(raw), this.m.token.path || 'token')) : '';
+      } catch (e) { /* upstream reads only a JSON token file */ }
+      this.vars.token = token;
+      return !!token;
+    }
+
+    async saveToken(value) {
+      this.vars.token = value;
+      const file = this.tokenFile();
+      if (!file) return;
+      const json = tokenJson(this.m.token.path, value);
+      await this.serial(() => this.api.writeFile(file, new Blob([json], { type: 'application/json' })));
+    }
+
+    // A password grant: auth.request with the config's credentials, the token at auth.token_path. False when the
+    // service turns it down or answers no token.
+    async mintPassword() {
+      const a = this.m.auth;
+      const r = a.request;
+      let res;
+      try {
+        res = await this.relayRaw((r.method || 'POST').toUpperCase(), resolveTemplate(r.url, this.vars),
+                                  resolveHeaders(r.headers, this.vars), resolveTemplate(r.body || '', this.vars));
+      } catch (e) {
+        if (e && e.result && e.result.host) throw e;  // a host the user did not allow
+        return false;
+      }
+      if (res.status < 200 || res.status >= 300) return false;
+      let token = '';
+      try {
+        token = text(getPath(JSON.parse(res.body), a.token_path || 'access_token'));
+      } catch (e) {
+        return false;
+      }
+      if (!token) return false;
+      await this.saveToken(token);
+      return true;
+    }
+
+    // Runs request(); when it is refused for its sign-in and the catalog has a password grant, mints a new token and
+    // runs it once more. request() must fill its templates when called, so the retry carries the new token.
+    async authorized(request) {
+      try {
+        return await request();
+      } catch (e) {
+        if (!e.signIn || this.signInKind() !== 'password' || !(await this.mintPassword())) throw e;
+        return request();
+      }
+    }
+
+    // A device-code sign-in: auth.request answers a code to enter at a web address; auth.poll, with {device_code}, is
+    // asked every interval seconds (at least 3, 5 when unsaid) until it answers a token, which is saved to token.file.
+    // slow_down adds 5 s; access_denied, expired_token and the code's own expiry (at least 60 s, 900 when unsaid) end
+    // it. show({code, url}) is called once the code is known.
+    async deviceSignIn(show) {
+      const a = this.m.auth;
+      const r = a.request;
+      const res = await this.relayRaw((r.method || 'POST').toUpperCase(), resolveTemplate(r.url, this.vars),
+                                      resolveHeaders(r.headers, this.vars), resolveTemplate(r.body || '', this.vars));
+      let json = null;
+      try {
+        json = JSON.parse(res.body);
+      } catch (e) { /* below */ }
+      if (res.status < 200 || res.status >= 300 || !json) throw new Error('the sign-in service answered ' + res.status);
+      const code = text(getPath(json, a.code_path || 'user_code'));
+      const url = text(getPath(json, a.verify_url_path || 'verification_uri'));
+      const device = text(getPath(json, a.device_code_path || 'device_code'));
+      if (!code || !device) throw new Error('the sign-in service gave no code');
+      let interval = Math.max(3, Number(getPath(json, a.interval_path || 'interval')) || 5) * 1000;
+      const deadline = this.now() + Math.max(60, Number(getPath(json, a.expires_path || 'expires_in')) || 900) * 1000;
+      this.cancelled = false;
+      show({ code, url });
+      const p = a.poll || {};
+      for (;;) {
+        await this.wait(interval);
+        if (this.cancelled) throw new Error('the sign-in was cancelled');
+        if (this.now() >= deadline) throw new Error('the code expired; sign in again');
+        const v = Object.assign({}, this.vars, { device_code: device });
+        let answer;
+        try {
+          answer = await this.relayRaw((p.method || 'POST').toUpperCase(), resolveTemplate(p.url, v), resolveHeaders(p.headers, v),
+                                       resolveTemplate(p.body || '', v));
+        } catch (e) {
+          if (e && e.result && e.result.host) throw e;  // a host the user did not allow
+          continue;  // the device could not reach the service this time: keep asking
+        }
+        let reply = null;
+        try {
+          reply = JSON.parse(answer.body);
+        } catch (e) {
+          continue;
+        }
+        const token = text(getPath(reply, a.token_path || 'access_token'));
+        if (token) {
+          await this.saveToken(token);
+          return;
+        }
+        const error = text(getPath(reply, a.error_path || 'error'));
+        if (error === 'slow_down') interval += 5000;
+        if (error === 'access_denied') throw new Error('the sign-in was declined');
+        if (error === 'expired_token') throw new Error('the code expired; sign in again');
+        // authorization_pending, or anything else: keep asking
+      }
+    }
+
     // One catalog request, redirects followed: the relay answers a 3xx as it is (upstream's contract for plugins),
     // where upstream's own catalog screen follows it. A hop to another site drops the headers; a host the plugin may
     // not reach yet is asked about, as any is.
-    async relay(method, url, headers, body) {
+    async relayRaw(method, url, headers, body) {
       let res;
       for (let hops = 0; ; hops++) {
         const request = { method, url: escapeUrl(url), headers, body };
@@ -277,8 +454,14 @@
         }
         url = next.href;
       }
+      return res;
+    }
+
+    // relayRaw() for a JSON answer: a 401 or 403 is a sign-in error, any other non-2xx an error.
+    async relay(method, url, headers, body) {
+      const res = await this.relayRaw(method, url, headers, body);
       if (res.status === 401 || res.status === 403) {
-        throw new Error('the catalog refused the request (' + res.status + '): it may need a sign-in');
+        throw signInNeeded('the catalog refused the request (' + res.status + ')');
       }
       if (res.status < 200 || res.status >= 300) throw new Error('the catalog answered ' + res.status);
       try {
@@ -380,13 +563,15 @@
       const shown = (r) => r.title && compatible(r.raw, this.browse.compatibility);
       if (mode === 'static' && this.staticRows) return this.window(this.staticRows, size);
 
-      const vars = Object.assign({}, this.vars, this.listVars(), {
-        page: this.page, offset: (this.page - 1) * size, limit: mode === 'page-limit' ? size : size + 1,
-        query: enc(this.query), query_raw: this.query
-      });
       const body = req.body === undefined ? '' : typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-      const json = await this.relay(req.method, resolveTemplate(req.url, vars), resolveHeaders(req.headers, vars),
-                                    resolveTemplate(body, vars));
+      const json = await this.authorized(() => {
+        const vars = Object.assign({}, this.vars, this.listVars(), {
+          page: this.page, offset: (this.page - 1) * size, limit: mode === 'page-limit' ? size : size + 1,
+          query: enc(this.query), query_raw: this.query
+        });
+        return this.relay(req.method, resolveTemplate(req.url, vars), resolveHeaders(req.headers, vars),
+                          resolveTemplate(body, vars));
+      });
       const array = getPath(json, this.browse.items || '');
       const rows = (Array.isArray(array) ? array : []).map((r) => this.rowOf(r));
       if (mode === 'static') {
@@ -444,20 +629,27 @@
       const files = bundle ? getPath(row.raw, bundle.files) : null;
       if (bundle && Array.isArray(files) && files.length) return this.downloadBundle(row, bundle, files, dir, vars);
 
-      const headers = resolveHeaders(dl.headers, vars);
-      if (dl.username || dl.password) {
-        const pair = utf8(resolveTemplate(dl.username || '', vars) + ':' + resolveTemplate(dl.password || '', vars));
-        headers.Authorization = 'Basic ' + btoa(String.fromCharCode(...pair));
-      }
+      // Filled for each attempt, so a retry after a new sign-in carries the new token.
+      const headersNow = () => {
+        const v = this.itemVars(row);
+        const headers = resolveHeaders(dl.headers, v);
+        if (dl.username || dl.password) {
+          const pair = utf8(resolveTemplate(dl.username || '', v) + ':' + resolveTemplate(dl.password || '', v));
+          headers.Authorization = 'Basic ' + btoa(String.fromCharCode(...pair));
+        }
+        return headers;
+      };
       let url = resolveTemplate(dl.url || '{url}', vars);
       let method = (dl.method || 'GET').toUpperCase();
       let body = dl.body === undefined ? '' : resolveTemplate(dl.body, vars);
-      let fileHeaders = headers;
+      let sendHeaders = true;
       if (dl.url_path) {
-        const answer = text(getPath(await this.relay(method, url, headers, body), dl.url_path));
+        const apiUrl = url;
+        const apiBody = body;
+        const answer = text(getPath(await this.authorized(() => this.relay(method, apiUrl, headersNow(), apiBody)), dl.url_path));
         if (!answer) throw new Error('the catalog named no file to download');
         // A server path is on the API's host and gets the headers; a full URL may be pre-signed and gets none.
-        if (!answer.startsWith('/') || answer.startsWith('//')) fileHeaders = {};
+        sendHeaders = answer.startsWith('/') && !answer.startsWith('//');
         url = joinServerPath(answer, url);
         method = 'GET';
         body = '';
@@ -471,8 +663,21 @@
       if (name.includes('..')) throw new Error('the catalog names an unsafe file: ' + name);
       await this.ensureFolder(dir);
       const dest = joinPath(dir, name);
-      await this.serial(() => this.api.fetchToSd(escapeUrl(url), dest, fileHeaders, { method, body }));
+      await this.authorized(() => this.fetchFile(url, dest, sendHeaders ? headersNow() : {}, { method, body }));
       return [dest];
+    }
+
+    // fetchToSd, with the file server's 401 or 403 (which /api/fetch reports) as a sign-in error.
+    async fetchFile(url, dest, headers, options) {
+      try {
+        return await this.serial(() => this.api.fetchToSd(escapeUrl(url), dest, headers, options));
+      } catch (e) {
+        const r = e && e.result;
+        if (r && !r.host && (r.unauthorized || r.status === 401 || r.status === 403)) {
+          throw signInNeeded('the server refused the request' + (r.status ? ' (' + r.status + ')' : ''));
+        }
+        throw e;
+      }
     }
 
     // Upstream's downloadBundle(): relative files under base, into a subfolder named by bundle.subdir.
@@ -496,7 +701,7 @@
       for (const f of plan) {
         await this.ensureFolder(f.dest.slice(0, f.dest.lastIndexOf('/')));
         try {
-          await this.serial(() => this.api.fetchToSd(escapeUrl(f.url), f.dest));
+          await this.fetchFile(f.url, f.dest);
         } catch (e) {
           const err = new Error(((e && e.message) || e) + (written.length ? ' (' + written.length + ' of ' + plan.length +
                                 ' files saved; download it again to finish)' : ''));
@@ -521,6 +726,7 @@
   // Opens a catalog in host. Resolves to the Catalog once its first page shows (or its error does).
   async function open(host, plugin, manifest, api, io, onClose) {
     const catalog = new Catalog(plugin, manifest, api, io);
+    const signInBox = el('div', { className: 'catalog-signin' });
     const status = el('p', { className: 'catalog-status', role: 'status' });
     const controls = el('div', { className: 'catalog-controls' });
     const rows = el('div', { className: 'catalog-rows' });
@@ -528,15 +734,63 @@
     host.replaceChildren(
       el('div', { className: 'catalog-head' }, [
         el('h2', { textContent: text(manifest.title) || plugin.title || plugin.name }),
-        el('button', { className: 'btn btn-small', textContent: 'Close', onclick: () => onClose && onClose() })
+        el('button', {
+          className: 'btn btn-small', textContent: 'Close',
+          onclick: () => { catalog.cancelled = true; if (onClose) onClose(); }
+        })
       ]),
       text(manifest.description) ? el('p', { className: 'card-intro', textContent: manifest.description }) : '',
-      controls, rows, pager, status);
+      signInBox, controls, rows, pager, status);
     const say = (message, kind) => {
       status.textContent = message || '';
       status.className = 'catalog-status' + (kind ? ' status-' + kind : '');
     };
     const failure = (e) => ((e && e.message) || String(e)).replace(/^./, (c) => c.toUpperCase());
+
+    // What a sign-in error calls for: a device-code sign-in runs here; anything else is the plugin's web card's to do.
+    // Resolves true once signed in. A catalog gets two sign-ins per opening, so a token the service keeps refusing
+    // ends in a message, not a loop.
+    let signIns = 0;
+    const MOUNTS = { files: 'File Manager', settings: 'Settings' };
+    const signIn = async (e) => {
+      const why = failure(e);
+      const kind = catalog.signInKind();
+      if (kind === 'password') {
+        say(why + '. Check the account details on its card on the ' + (MOUNTS[plugin.mount] || 'Settings') + ' page.', 'err');
+        return false;
+      }
+      if (kind !== 'device_code') {
+        if (!catalog.tokenFile()) {
+          say(why + '.', 'err');  // a catalog without a sign-in: nothing to offer
+          return false;
+        }
+        say(why + '. ' + (plugin.web === false ? 'Nothing on this page can sign it in.'
+          : 'Sign in on its card on the ' + (MOUNTS[plugin.mount] || 'Settings') + ' page, then open the catalog again.'), 'err');
+        return false;
+      }
+      if (++signIns > 2) {
+        say(why + '.', 'err');
+        return false;
+      }
+      say(why + '. Asking for a sign-in code...', 'busy');
+      try {
+        await catalog.deviceSignIn(({ code, url }) => {
+          const link = /^https?:\/\//i.test(url) ? el('a', { href: url, target: '_blank', rel: 'noopener', textContent: url }) : '';
+          signInBox.replaceChildren(
+            el('p', {}, ['To sign in, open ', link || 'the service\'s sign-in page', ' and enter this code:']),
+            el('p', { className: 'catalog-code', textContent: code }),
+            el('button', { className: 'btn btn-small', textContent: 'Cancel', onclick: () => { catalog.cancelled = true; } }));
+          say('Waiting for the sign-in...', 'busy');
+        });
+      } catch (err) {
+        signInBox.replaceChildren();
+        say(failure(err), 'err');
+        return false;
+      }
+      signInBox.replaceChildren();
+      say('Signed in.', 'ok');
+      return true;
+    };
 
     let loading = 0;
     const showPage = async () => {
@@ -548,7 +802,12 @@
       try {
         page = await catalog.load();
       } catch (e) {
-        if (ticket === loading) say(failure(e), 'err');
+        if (ticket !== loading) return;
+        if (e.signIn && (await signIn(e))) {
+          showPage();
+          return;
+        }
+        if (!e.signIn) say(failure(e), 'err');
         return;
       }
       if (ticket !== loading) return;  // the user picked another list or page meanwhile
@@ -571,7 +830,11 @@
           say(written.length === 1 ? 'Saved ' + written[0]
             : 'Saved ' + written.length + ' files in ' + written[0].slice(0, written[0].lastIndexOf('/')), 'ok');
         } catch (e) {
-          say('Could not download ' + row.title + ': ' + ((e && e.message) || e), 'err');
+          if (e.signIn && (await signIn(e))) {
+            say('Signed in. Download ' + row.title + ' again.', 'ok');
+          } else if (!e.signIn) {
+            say('Could not download ' + row.title + ': ' + ((e && e.message) || e), 'err');
+          }
         }
         button.disabled = false;
       };
@@ -615,12 +878,16 @@
       controls.replaceChildren(...out);
     };
 
-    say('Opening...', 'busy');
-    try {
-      await catalog.start();
-    } catch (e) {
-      say(failure(e), 'err');
-      return catalog;
+    for (;;) {
+      say('Opening...', 'busy');
+      try {
+        await catalog.start();
+        break;
+      } catch (e) {
+        if (e.signIn && (await signIn(e))) continue;
+        if (!e.signIn) say(failure(e), 'err');
+        return catalog;
+      }
     }
     // Upstream opens a single list at once, after its notice, and shows a picker over several. Here the picker is a
     // row of buttons, so the first of several opens too unless it asks first. No lists: browse.url is the catalog.
@@ -645,7 +912,7 @@
     // For the tests.
     _internal: {
       getPath, enc, escapeUrl, resolveTemplate, pagingMode, pageSize, compatible, listAllowed, sanitizeFilename,
-      cardFolder, joinServerPath
+      cardFolder, joinServerPath, tokenJson, signInKind
     }
   };
 })();

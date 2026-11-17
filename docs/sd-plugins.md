@@ -252,8 +252,25 @@ What runs:
 - Template variables: the row's `{id}`, `{title}`, `{author}`, `{url}` and
   their `_enc` forms, `{page}`, `{offset}`, `{limit}`, `{firmware_family}`
   (`witchhunt`), `{firmware_version}`, `{plugin_api}` (1),
-  `{plugin_capabilities}`, `{plugin_name}`, and `{cfg.KEY}` from the plugin's
-  `config.file`, whose `dest_dir` overrides the manifest's.
+  `{plugin_capabilities}`, `{plugin_name}`, `{cfg.KEY}` from the plugin's
+  `config.file` (whose `dest_dir` overrides the manifest's), and `{token}`.
+- Sign-in. `{token}` comes from `token.file` at the dotted `token.path`
+  (default `token`). Without one:
+  - `auth.type` `password` mints it: `auth.request`, filled from the config,
+    and the token at `auth.token_path` (default `access_token`). A 401 or 403
+    while browsing, fetching the lists, asking a `url_path` or downloading
+    mints a new one and tries once more.
+  - `auth.type` `device_code` (upstream's default) shows the code from
+    `auth.request` (`code_path`, `verify_url_path`) and a link to the address,
+    then asks `auth.poll` with `{device_code}` every `interval` seconds (at
+    least 3) until it answers a token. `slow_down` adds 5 seconds;
+    `access_denied`, `expired_token` and the code's expiry (`expires_in`, at
+    least 60 seconds) end it. A refused token later starts a new sign-in.
+  - Otherwise the plugin's web card signs in and writes the file; the catalog
+    says so and opens once it has.
+
+  A token is saved as upstream saves it: `token.file` rewritten to hold only
+  the token, nested at `token.path`, through the plugin's `writeFile`.
 
 The capabilities a catalog may require (`compatibility.requires`, a list's
 `requires`): `catalog.lists`, `catalog.notices`, `catalog.bundle_install`,
@@ -271,8 +288,12 @@ Differences from upstream:
   Hidden Files** is on; without the folder, the download fails.
 - A bundle is written file by file, not staged: one cut off half-way keeps the
   files it got, and downloading it again finishes it.
-- Not yet: sign-in (`auth`, `token`; such a catalog says so and does not open),
-  XML catalogs, Details pages, the `sidecar` file, and `events`.
+- A `token.file` or `config.file` outside the plugin's own folder
+  (`/.crosspoint/lingoblend.json`, say) is refused here: the web server lets a
+  plugin keep files only in its folder. Upstream allows any path but the
+  credential stores. Such a catalog says so and does not open.
+- Not yet: XML catalogs, Details pages, the `sidecar` file, `events`, and
+  sign-in types upstream does not define (`refresh`).
 
 ## Installing and managing plugins: the Plugins page
 
@@ -314,7 +335,8 @@ it is sent:
   - **runs here**: a web part (`plugin.js`), a catalog that opens here
     ([Catalogs](#catalogs-upstreams-devicejson)), or both;
   - **partly runs here**: one of them runs, and something does not yet: a
-    catalog that needs a sign-in or is XML, or device `events`;
+    catalog that is XML or keeps its token or config outside its folder, or
+    device `events`;
   - **does not run here**: nothing of it runs (an events-only `device.json`,
     for example), another `firmware_family`, a requirement this firmware lacks
     (named), a `device.json` that could not be read, or a reason the catalog

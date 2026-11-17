@@ -55,6 +55,8 @@
       .catalog-status:empty { display: none; }
       .catalog-status.status-ok { color: var(--ok-text); }
       .catalog-status.status-err { color: var(--danger); }
+      .catalog-signin p { margin: 12px 0 8px; }
+      .catalog-code { font: 600 1.5rem/1.2 ui-monospace, monospace; letter-spacing: 0.12em; color: var(--text-strong); }
     </style>
   </head>
   <body>
@@ -326,7 +328,7 @@
           setStatus('Could not open ' + title + ': ' + e.message, 'err');
           return;
         }
-        const what = PluginCatalog.describe(manifest);
+        const what = PluginCatalog.describe(manifest, makePluginApi(p).dir);
         if (!what.catalog) {
           setStatus('Cannot open ' + title + ': ' + (what.reason ||
             'it has no catalog; its part on the device (' + (what.events ? 'events' : 'screens') + ') does not run here yet') + '.', 'err');
@@ -532,7 +534,7 @@
           try {
             const r = await fetch(new URL('device.json', entryBase(c, COMMUNITY_CATALOG_URL)), { cache: 'no-cache' });
             if (!r.ok) throw new Error(r.status + '');
-            communityDevice[c.name] = PluginCatalog.describe(await r.json());
+            communityDevice[c.name] = PluginCatalog.describe(await r.json(), INSTALL_ROOT + '/' + c.name);
           } catch (e) {
             communityDevice[c.name] = null;
           }
