@@ -1392,20 +1392,35 @@ void EpubReaderActivity::serviceBackgroundWork() {
   // the user has nothing to read until it produces pages. A/B are look-ahead work for a section
   // that is already displayed, so they only matter once the current section is built.
   bool currentSectionBuildActive = false;
+  bool askedPageDrawn = false;
   {
     RenderLock lock;
     currentSectionBuildActive = section && section->hasActiveBuild();
+    askedPageDrawn =
+        currentSectionBuildActive && buildDisplayedPage_ >= 0 && buildDisplayedPage_ == section->currentPage;
   }
+  // Input first (InputFirst.h): a pass that found no event still has a press on its way to one.
+  const InputFirst::Press press = pressInFlight();
   if (currentSectionBuildActive) {
+    if (!InputFirst::mayRunSlice(InputFirst::chapterWork(askedPageDrawn), press)) return;
     // The page being read outranks the pages after it: its gray (BuildPageGray), a picture on it (LaneBeforeBuild).
     if (!askBuildPageGray() && !stepImageLaneDuringBuild()) stepCurrentSectionBuild();
     return;
   }
+  if (!InputFirst::mayRunSlice(InputFirst::Work::LookAhead, press)) return;
   // Room in the glyph store comes before Background-B's look-ahead; the section the reader waits on and the AA pass
   // keep priority.
   if (stepGlyphStoreRoom()) return;
   if (stepStarredPages()) return;
   stepBackgroundSectionBuild();
+}
+
+InputFirst::Press EpubReaderActivity::pressInFlight() const {
+  InputFirst::Press press;
+  press.down = CooperativeAbort::shouldAbortLongTask();
+  press.gestureOpen = buttonEvents.isGestureInFlight();
+  press.turnWaiting = pageTurnWaitingForLock_.load(std::memory_order_acquire);
+  return press;
 }
 
 bool EpubReaderActivity::lookAheadMayRun() const {
@@ -7914,6 +7929,8 @@ void EpubReaderActivity::refreshLoopHints() {
     return;
   }
   loopHintCurrentBuild_ = section && section->hasActiveBuild();
+  loopHintAskedPageDrawn_ =
+      loopHintCurrentBuild_ && buildDisplayedPage_ >= 0 && buildDisplayedPage_ == section->currentPage;
   loopHintBackgroundBuild_ = backgroundBuildState_ == BackgroundBuildState::Building;
 }
 
@@ -7929,7 +7946,14 @@ bool EpubReaderActivity::skipLoopDelay() {
   // the render: the X4 Pro streamed the first page's planes in 183-212 ms each, against 52 ms with the loop idle
   // (2026-11-16). The loop's short sleep instead costs the build at most one sleep once the pass is done.
   if (RenderLock::peek()) return false;
-  return loopHintCurrentBuild_ || loopHintBackgroundBuild_;
+  // Nor while a press holds the slices back (InputFirst): every pass would find the gate shut. X3, 2026-11-17, a
+  // press during the chapter's build: about three passes a millisecond until the key was let go. The loop's short
+  // sleep is also the pace a key is read at with nothing building.
+  const InputFirst::Press press = pressInFlight();
+  if (loopHintCurrentBuild_) {
+    return InputFirst::mayRunSlice(InputFirst::chapterWork(loopHintAskedPageDrawn_), press);
+  }
+  return loopHintBackgroundBuild_ && InputFirst::mayRunSlice(InputFirst::Work::LookAhead, press);
 }
 
 bool EpubReaderActivity::shouldSkipPeriodicUpdate() const {
