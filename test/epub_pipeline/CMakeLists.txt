@@ -165,6 +165,7 @@ add_executable(EpubPipelineTest
   CacheFileIdentityTest.cpp
   HeadingCarryTest.cpp
   CarriedDocumentTest.cpp
+  HeadingJoinTest.cpp
   SaxStateInArenaTest.cpp
   OwnedBuildRegionTest.cpp
   JpegDownscaleTest.cpp

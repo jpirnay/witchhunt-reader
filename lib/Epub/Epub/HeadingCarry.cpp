@@ -59,6 +59,15 @@ void Scanner::feed(const uint8_t* data, const size_t len) {
   if (pos_ > kMaxFileBytes) rejected_ = true;
 }
 
+size_t Scanner::feedThroughBodyStart(const uint8_t* data, const size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    if (inBody_) return i;
+    step(static_cast<char>(data[i]));
+    ++pos_;
+  }
+  return len;
+}
+
 void Scanner::textByte(const char c) {
   if (!inBody_ || afterBody_ || skip_ > 0 || isSpace(c)) return;
   if (heading_ > 0) {

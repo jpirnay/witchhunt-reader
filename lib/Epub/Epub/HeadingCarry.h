@@ -42,6 +42,10 @@ class Scanner {
   // Valid when finish() is not Other.
   uint32_t bodyBegin() const { return bodyBegin_; }
   uint32_t bodyEnd() const { return bodyEnd_; }
+  // For a file of any size (the one a heading file is carried into): consumes `data` up to and including the '>' of
+  // its <body ...> start tag and returns how many bytes that took, all of `len` while the tag has not come.
+  size_t feedThroughBodyStart(const uint8_t* data, size_t len);
+  bool bodyStarted() const { return inBody_; }
 
  private:
   enum class State : uint8_t { Text, Open, Name, Attrs, AttrName, AttrValue, Comment, Bang, Cdata, Pi };

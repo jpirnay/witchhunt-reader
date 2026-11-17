@@ -30,6 +30,7 @@
 #include "BidiLine.h"
 #include "Epub/css/CssParser.h"
 #include "FootnotePreviews.h"
+#include "HeadingCarry.h"
 #include "Page.h"
 #include "ShapingHeapCheck.h"
 #include "TypographyProfile.h"
@@ -441,11 +442,56 @@ uint32_t layoutFingerprintOf(const uint32_t propertyHash) {
   const uint32_t fingerprint = fnv1a(bytes, sizeof(bytes));
   return fingerprint != 0 ? fingerprint : 1;
 }
+
+// Bump when what a carried heading file adds to a layout changes (HeadingCarry, ChapterHtmlSlimParser::beginCarried):
+// the layouts that carry one get new file names, and no other layout's changes.
+constexpr uint8_t HEADING_CARRY_LAYOUT_VERSION = 1;
+
+// The file key of a layout that carries the heading file before it: never the key of the same settings without it,
+// which older firmware wrote, reads, and must not find laid out with a heading it shows on a page of its own.
+uint32_t carryingHash(const uint32_t propertyHash) {
+  uint8_t bytes[sizeof(propertyHash) + 2];
+  memcpy(bytes, &propertyHash, sizeof(propertyHash));
+  bytes[sizeof(propertyHash)] = 'C';
+  bytes[sizeof(propertyHash) + 1] = HEADING_CARRY_LAYOUT_VERSION;
+  return fnv1a(bytes, sizeof(bytes));
+}
 }  // namespace
 
 uint32_t Section::layoutFingerprintFor(const BuildParams& p) { return layoutFingerprintOf(calculatePropertyHash(p)); }
 
 uint8_t Section::formatVersion() { return SECTION_FILE_VERSION; }
+
+bool Section::carriesPreviousOf(const Epub& epub, const int spineIndex, const BuildParams& p) {
+  return p.verticalText == VerticalText::Off && spineIndex > 0 && epub.isCarriedSpine(spineIndex - 1);
+}
+
+bool Section::carriedAway(const BuildParams& p) const {
+  return p.verticalText == VerticalText::Off && epub->isCarriedSpine(spineIndex);
+}
+
+uint32_t Section::layoutFingerprintFor(const Epub& epub, const int spineIndex, const BuildParams& p) {
+  const uint32_t hash = calculatePropertyHash(p);
+  return layoutFingerprintOf(carriesPreviousOf(epub, spineIndex, p) ? carryingHash(hash) : hash);
+}
+
+void Section::becomeCarried(const BuildParams& p) {
+  if (file) file.close();
+  forgetPagesWithoutPictures();
+  lut.clear();
+  lutFileOffset_ = 0;
+  tocBoundaries.clear();
+  filePath.clear();
+  pageCount = 0;
+  currentPage = 0;
+  request_ = p.verticalText;
+  vertical_ = false;
+  const uint32_t propertyHash = calculatePropertyHash(p);
+  layoutFingerprint_ = layoutFingerprintOf(propertyHash);
+  SpinePageIndex::recordCarried(epub->getCachePath(), {propertyHash, SECTION_FILE_VERSION}, epub->getSpineItemsCount(),
+                                spineIndex);
+  LOG_DBG("SCT", "Spine %d holds only its chapter's heading; laid out with spine %d", spineIndex, spineIndex + 1);
+}
 
 uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   uint8_t buffer[104];
@@ -783,10 +829,18 @@ bool Section::loadSectionFile(const BuildParams& p) {
   request_ = p.verticalText;
   vertical_ = false;
   embeddedStyleFallback = false;
-  uint32_t propertyHash = calculatePropertyHash(p);
-  filePath = getSectionFilePath(propertyHash);
+  if (carriedAway(p)) {
+    becomeCarried(p);
+    return true;
+  }
+  // The variant's key, which the SpinePageIndex is kept under, and the key of its file: another one when this layout
+  // carries the heading file before it.
+  const uint32_t propertyHash = calculatePropertyHash(p);
+  const bool carries = carriesPrevious(p);
+  const auto fileKey = [carries](const uint32_t hash) { return carries ? carryingHash(hash) : hash; };
+  filePath = getSectionFilePath(fileKey(propertyHash));
   // The variant actually opened: the requested one, or the no-CSS one it falls back to.
-  uint32_t openedHash = propertyHash;
+  uint32_t openedHash = fileKey(propertyHash);
   layoutFingerprint_ = 0;
   // A cache that does not load is removed; clearCache() leaves a fresh section's request, so this one's is put back.
   const auto refuse = [this, &p] {
@@ -801,7 +855,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
     if (p.embeddedStyle) {
       BuildParams noCss = p;
       noCss.embeddedStyle = false;
-      const uint32_t fallbackHash = calculatePropertyHash(noCss);
+      const uint32_t fallbackHash = fileKey(calculatePropertyHash(noCss));
       const std::string fallbackPath = getSectionFilePath(fallbackHash);
       if (Storage.openFileForRead("SCT", fallbackPath, file)) {
         filePath = fallbackPath;
@@ -922,6 +976,10 @@ bool Section::loadSectionFile(const BuildParams& p) {
   // Under the hash the reader asked for, even when the no-CSS fallback answered: these are the
   // pages it will show for this spine.
   recordPageCount(propertyHash);
+  if (carries) {
+    SpinePageIndex::recordCarried(epub->getCachePath(), {propertyHash, SECTION_FILE_VERSION},
+                                  epub->getSpineItemsCount(), spineIndex - 1);
+  }
 
   // File is intentionally left open; subsequent loadPageFromSectionFile() calls
   // seek within this handle instead of re-opening the file each time.
@@ -1005,6 +1063,22 @@ struct Section::BuildState {
   std::function<void(int)> progressFn;
   uint32_t propertyHash = 0;
   std::string localPath;
+  // The heading file this build lays out first (carriesPrevious): its spine item (-1: none), its href and XHTML size,
+  // where its body's content lies in its banked copy (prepareCarry), and the feed's place in the splice: this file up
+  // to its <body ...> start tag, the heading file's body content, the rest of this file (runBuildParse).
+  struct Carry {
+    enum class Stage : uint8_t { Prefix, Carried, Rest };
+    int spine = -1;
+    std::string href;
+    size_t inflatedSize = 0;
+    uint32_t begin = 0;
+    uint32_t end = 0;
+    uint32_t fed = 0;
+    bool ready = false;
+    Stage stage = Stage::Prefix;
+    HeadingCarry::Scanner bodyStart;
+    FsFile file;
+  } carry;
   std::string contentBase;
   std::string imageBasePath;
   size_t inflatedSize = 0;
@@ -1298,8 +1372,15 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   forgetPagesWithoutPictures();
   const BuildParams& p = st.params;
   st.propertyHash = calculatePropertyHash(p);
-  filePath = getSectionFilePath(st.propertyHash);
-  layoutFingerprint_ = layoutFingerprintOf(st.propertyHash);
+  if (carriesPrevious(p)) {
+    const BookMetadataCache::SpineEntry heading = epub->getSpineItem(spineIndex - 1);
+    st.carry.spine = spineIndex - 1;
+    st.carry.href = heading.href;
+    st.carry.inflatedSize = heading.zipUncompressedSize;
+  }
+  const uint32_t fileHash = st.carry.spine >= 0 ? carryingHash(st.propertyHash) : st.propertyHash;
+  filePath = getSectionFilePath(fileHash);
+  layoutFingerprint_ = layoutFingerprintOf(fileHash);
 
   st.localPath = epub->getSpineItem(spineIndex).href;
   SCT_TRACE_HEAP(spineIndex, "build_start");
@@ -1444,7 +1525,8 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
       std::string href, anchor, label;  // reused across entries
       for (uint16_t i = 0; i < count; i++) {
         if (!in.readString(href) || !in.readString(anchor) || !in.readString(label)) break;
-        if (href == st.localPath) {
+        // The carried heading file's printed pages too: they land on its heading, at the top of the first page.
+        if (href == st.localPath || (st.carry.spine >= 0 && href == st.carry.href)) {
           st.visitor->addExternalPageBreakAnchor(anchor, label);
         }
       }
@@ -1495,6 +1577,81 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   LOG_INF("SCT", "createSectionFile spine=%d setup done: %ums (inflatedSize=%u free=%lu)", spineIndex, st.setupMs,
           static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
   return BuildPhaseResult::Ok;
+}
+
+bool Section::prepareCarry(BuildState& st) {
+  BuildState::Carry& carry = st.carry;
+  const std::string banked = sectionHtmlCachePath(epub->getCachePath(), carry.spine);
+  bool whole = false;
+  if (Storage.exists(banked.c_str()) && Storage.openFileForRead("SCT", banked, carry.file)) {
+    whole = carry.file.size() == carry.inflatedSize;
+    carry.file.close();
+  }
+  if (!whole) {
+    // Inflated here, as its own build would: the ring is the file's size, from the region when it has room, else
+    // from the heap for the time of the call.
+    Storage.mkdir(Epub::spineCacheDir(epub->getCachePath(), carry.spine).c_str());
+    ZipFile::FileStatSlim stat = {};
+    if (!epub->getSpineItemStat(carry.spine, &stat)) {
+      LOG_ERR("SCT", "createSectionFile spine=%d: no entry for the heading file %d", spineIndex, carry.spine);
+      return false;
+    }
+    const size_t arenaBytes = zipArenaBytesFor(carry.inflatedSize);
+    std::unique_ptr<BuildArena> own;
+    BuildArena* arena = nullptr;
+    if (st.region() && st.arena->capacity() - st.arena->used() >= arenaBytes) {
+      arena = st.arena;
+    } else {
+      own = makeUniqueNoThrow<BuildArena>(arenaBytes);
+      if (!own || !own->valid()) {
+        LOG_ERR("SCT", "createSectionFile spine=%d: no %u bytes to inflate the heading file", spineIndex,
+                static_cast<unsigned>(arenaBytes));
+        return false;
+      }
+      arena = own.get();
+    }
+    ZipFile zip(epub->getPath());
+    epub->primeZip(zip);
+    bool ok = false;
+    {
+      ZipFile::EntryReader reader(zip, PARSE_CHUNK_BYTES, arena);
+      FsFile out;
+      if (reader.open(stat) && Storage.openFileForWrite("SCT", banked, out)) {
+        ok = true;
+        for (bool done = false; ok && !done;) {
+          size_t produced = 0;
+          ok = reader.step(st.chunkBuf, PARSE_CHUNK_BYTES, &produced, &done) &&
+               (produced == 0 || out.write(st.chunkBuf, produced) == produced);
+        }
+        ok = ok && reader.bytesProduced() == carry.inflatedSize;
+        out.close();
+      }
+    }
+    epub->adoptZipDetails(zip);
+    if (!ok) {
+      Storage.remove(banked.c_str());
+      LOG_ERR("SCT", "createSectionFile spine=%d: could not bank the heading file %d", spineIndex, carry.spine);
+      return false;
+    }
+  }
+  // Where its body's content lies: what the parse is fed between this file's <body> start tag and the rest.
+  if (!Storage.openFileForRead("SCT", banked, carry.file)) return false;
+  HeadingCarry::Scanner scan;
+  for (int n = carry.file.read(st.chunkBuf, PARSE_CHUNK_BYTES); n > 0;
+       n = carry.file.read(st.chunkBuf, PARSE_CHUNK_BYTES)) {
+    scan.feed(st.chunkBuf, static_cast<size_t>(n));
+  }
+  carry.file.close();
+  if (scan.finish() == HeadingCarry::Shape::Other) {
+    LOG_ERR("SCT", "createSectionFile spine=%d: the heading file %d is no longer one", spineIndex, carry.spine);
+    return false;
+  }
+  carry.begin = scan.bodyBegin();
+  carry.end = scan.bodyEnd();
+  carry.ready = true;
+  LOG_INF("SCT", "createSectionFile spine=%d carries the heading of spine %d (%u bytes)", spineIndex, carry.spine,
+          static_cast<unsigned>(carry.end - carry.begin));
+  return true;
 }
 
 Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t budgetMs) {
@@ -1676,6 +1833,11 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     }
   }
 
+  // The heading file this one carries: banked and found once, before the parse. A few KB, so within one slice.
+  if (!streamFailed && st.extractDone && st.carry.spine >= 0 && !st.carry.ready && !prepareCarry(st)) {
+    streamFailed = true;
+  }
+
   // The gap between the phases: the whole document is on SD, and ALL ZIP state was just
   // released, so this is both the only moment the note text can be resolved from a local file
   // and the widest the heap gets during a build. Preview text is a layout input — it changes
@@ -1750,11 +1912,34 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
 #ifdef BENCH_EXTRACT_PROFILE
       uint32_t sdReadUs = 0, visitorUs = 0;
 #endif
+      using CarryStage = BuildState::Carry::Stage;
+      BuildState::Carry& carry = st.carry;
       while (true) {
+        if (carry.stage == CarryStage::Carried) {
+          // The heading file's body content, fed as this file's first (ChapterHtmlSlimParser::beginCarried).
+          const uint32_t left = carry.end - carry.begin - carry.fed;
+          if (left == 0) {
+            carry.file.close();
+            st.visitor->endCarried();
+            carry.stage = CarryStage::Rest;
+            continue;
+          }
+          const int got = carry.file.read(st.chunkBuf, std::min<size_t>(left, PARSE_CHUNK_BYTES));
+          if (got <= 0 || st.visitor->write(st.chunkBuf, static_cast<size_t>(got)) != static_cast<size_t>(got)) {
+            LOG_ERR("SCT", "createSectionFile spine=%d: feeding the heading file %d failed", spineIndex, carry.spine);
+            streamFailed = true;
+            break;
+          }
+          carry.fed += static_cast<uint32_t>(got);
+          if (overBudget()) {
+            return yieldSlice();
+          }
+          continue;
+        }
 #ifdef BENCH_EXTRACT_PROFILE
         const int64_t tr = esp_timer_get_time();
 #endif
-        const int n = st.tempFile.read(st.chunkBuf, PARSE_CHUNK_BYTES);
+        int n = st.tempFile.read(st.chunkBuf, PARSE_CHUNK_BYTES);
 #ifdef BENCH_EXTRACT_PROFILE
         sdReadUs += static_cast<uint32_t>(esp_timer_get_time() - tr);
 #endif
@@ -1764,7 +1949,28 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
           break;
         }
         if (n == 0) {
+          if (carry.spine >= 0 && carry.stage != CarryStage::Rest) {
+            LOG_ERR("SCT", "createSectionFile spine=%d: no <body> to carry the heading file %d into", spineIndex,
+                    carry.spine);
+            streamFailed = true;
+          }
           break;
+        }
+        bool startCarry = false;
+        if (carry.spine >= 0 && carry.stage == CarryStage::Prefix) {
+          // Up to this file's <body ...> start tag; what follows it is read again once the heading file is in.
+          const size_t through = carry.bodyStart.feedThroughBodyStart(st.chunkBuf, static_cast<size_t>(n));
+          if (carry.bodyStart.bodyStarted()) {
+            n = static_cast<int>(through);
+            const std::string banked = sectionHtmlCachePath(epub->getCachePath(), carry.spine);
+            if (!st.tempFile.seek(st.tempBytesFed + through) || !Storage.openFileForRead("SCT", banked, carry.file) ||
+                !carry.file.seek(carry.begin)) {
+              LOG_ERR("SCT", "createSectionFile spine=%d: could not open the heading file %d", spineIndex, carry.spine);
+              streamFailed = true;
+              break;
+            }
+            startCarry = true;
+          }
         }
         st.tempBytesFed += static_cast<size_t>(n);
         // A short write means the parser failed mid-stream (it returns 0 after an
@@ -1773,6 +1979,10 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         const int64_t tv = esp_timer_get_time();
 #endif
         const size_t wrote = st.visitor->write(st.chunkBuf, static_cast<size_t>(n));
+        if (startCarry && wrote == static_cast<size_t>(n)) {
+          st.visitor->beginCarried();
+          carry.stage = CarryStage::Carried;
+        }
 #if SCT_HEAP_TRACE
         // Sample AFTER the write: the allocation we are hunting happens inside the parser while
         // it consumes this chunk, and by here it is either still held or already released — a
@@ -2305,6 +2515,10 @@ Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const ui
   }
 
   if (!buildState_) {
+    if (carriedAway(params)) {
+      becomeCarried(params);
+      return BuildStep::Done;
+    }
     if (!skipEviction) {
       evictOldVariants();
     }
@@ -2351,8 +2565,13 @@ Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const ui
       continue;
     }
 
+    const int carried = buildState_->carry.spine;
     buildState_.reset();
     if (fin != BuildPhaseResult::Done) return BuildStep::Failed;
+    if (carried >= 0) {
+      SpinePageIndex::recordCarried(epub->getCachePath(), {requestedHash, SECTION_FILE_VERSION},
+                                    epub->getSpineItemsCount(), carried);
+    }
     // Recorded under the variant the reader asked for (requestedHash), also when the no-CSS
     // restart above produced it. A degraded build is left out: Background-B discards those for a
     // clean rebuild, and one the reader keeps is recorded when it is next loaded.

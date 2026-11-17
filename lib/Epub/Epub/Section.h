@@ -91,6 +91,15 @@ class Section {
   // Records this spine's page count in the book's SpinePageIndex under `requestedHash`. No-op for
   // a truncated or empty section.
   void recordPageCount(uint32_t requestedHash) const;
+  // HeadingCarry: the spine item before this one holds only its chapter's heading, which this section's layout takes in
+  // at the top of its first page; or this item is such a file, and has no page of its own. Never under a vertical
+  // request (`p`). The Epub decides (isCarriedSpine) and remembers its answers.
+  static bool carriesPreviousOf(const Epub& epub, int spineIndex, const BuildParams& p);
+  bool carriesPrevious(const BuildParams& p) const { return carriesPreviousOf(*epub, spineIndex, p); }
+  bool carriedAway(const BuildParams& p) const;
+  // A carried item: no page and no file, its SpinePageIndex entry marked (recordCarried). What loadSectionFile and a
+  // build make of it.
+  void becomeCarried(const BuildParams& p);
   void writeSectionFileHeader(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
                               bool embeddedStyle, bool bionicReadingEnabled, uint8_t imageRendering,
@@ -158,6 +167,9 @@ class Section {
   // live state retained in BuildState for the next call.
   BuildPhaseResult runBuildParse(BuildState& st, uint32_t budgetMs);
   BuildPhaseResult runBuildFinalize(BuildState& st);
+  // The carried heading file's XHTML banked beside its own spine's, as its build would leave it, and where its body's
+  // content lies in that copy (BuildState::Carry). Between the extraction and the parse; the file is a few KB at most.
+  bool prepareCarry(BuildState& st);
   // Runs between the parse phases, once the spine's inflated XHTML is on SD and no ZIP state is
   // live: makes sure every note this spine references has its text in the book's preview store,
   // then points the visitor at it. Never fails the build — see the definition.
@@ -209,13 +221,15 @@ class Section {
   int currentPage = 0;
 
   // What this section's page numbers are counted in: the cache variant it was loaded or is built as (the no-CSS one
-  // when it fell back to that), under this section format. Two sections of a chapter with the same fingerprint lay
-  // its pages out alike, so a page number saved with it (a starred page, BookmarkStore) stands while it is
-  // unchanged. 0 while the section has neither loaded nor started a build. The page count is not part of it: a
-  // build in progress knows it only at the end.
+  // when it fell back to that, the one carrying the heading file before it when it does), under this section format.
+  // Two sections of a chapter with the same fingerprint lay its pages out alike, so a page number saved with it (a
+  // starred page, BookmarkStore) stands while it is unchanged. 0 while the section has neither loaded nor started a
+  // build. The page count is not part of it: a build in progress knows it only at the end.
   uint32_t layoutFingerprint() const { return layoutFingerprint_; }
   // The fingerprint a section loaded or built from `p` gets, short of the no-CSS fallback only a load finds out about.
   static uint32_t layoutFingerprintFor(const BuildParams& p);
+  // The same for spine item `spineIndex` of `epub`, which may carry the heading file before it (HeadingCarry).
+  static uint32_t layoutFingerprintFor(const Epub& epub, int spineIndex, const BuildParams& p);
   // The section file format (SECTION_FILE_VERSION). What its offset table counts (VisibleText.h) is the book's source,
   // whatever the layout; a firmware with another format may count it otherwise, so a visible-text offset saved for
   // later (a starred page's, BookmarkStore) is good while this is the format it was counted under.
