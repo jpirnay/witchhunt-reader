@@ -1039,8 +1039,8 @@ may also write inside its own folder (`pluginWriteTarget()`). The book's layout 
 | Status | Cause                                          |
 | ------ | ---------------------------------------------- |
 | 400    | Missing `plugin`/`url`/`dest`, bad scheme, or a refused destination |
-| 403    | Host not in the plugin's `allowedHosts`        |
-| 502    | Download failed                                 |
+| 403    | Host not in the plugin's `allowedHosts` (`host` names it)          |
+| 502    | Download failed. `"unauthorized": true` when the file's server answered 401 or 403; `status` holds the answer's code for a request with a method or body |
 
 ### POST `/api/plugin-fs` - Write a Small File
 
