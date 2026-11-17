@@ -470,9 +470,7 @@ uint8_t* HalDisplay::borrowSecondaryBufferDuringRefresh(size_t* size) {
   return buf;
 }
 
-bool HalDisplay::lendsDuringRefresh() const {
-  return !HalCapabilities::keepsSecondaryBuffer() && einkDisplay.asyncRefreshHoldsFrameBuffer();
-}
+bool HalDisplay::lendsDuringRefresh() const { return !HalCapabilities::keepsSecondaryBuffer(); }
 
 bool HalDisplay::returnSecondaryBuffer() {
   if (psramArenaLent.exchange(false)) {

@@ -170,8 +170,10 @@ class HalDisplay {
   // not being painted, so nothing waits for the waveform, and the caller owes finishDisplayAsync() before it next
   // draws. Elsewhere it is borrowSecondaryBuffer(). See FreeInkDisplay::borrowSecondaryBufferDuringRefresh.
   uint8_t* borrowSecondaryBufferDuringRefresh(size_t* size);
-  // The X3's framebuffer lend: its pending refresh re-reads only the frame it paints. Not the PSRAM arena boards, whose
-  // lend never waited, but whose popup ships blocking until a device run says otherwise.
+  // The framebuffer lend (the C3s): a pending refresh's finish reads only the frame it paints, if anything, so the lend
+  // takes the other one without waiting (FreeInkDisplay::borrowSecondaryBufferDuringRefresh, every panel since SDK
+  // a0e2025). Not the PSRAM arena boards, whose lend never waits (lendsPsramArena). How the reader's Indexing popups
+  // use either: IndexingPopupGate.h.
   bool lendsDuringRefresh() const;
 
   // Allow fast differential refresh to continue (X4) after the secondary buffer
