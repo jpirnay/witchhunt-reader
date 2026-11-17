@@ -19,6 +19,7 @@
 #include <atomic>
 #include <optional>
 
+#include "AaSettle.h"
 #include "BookReaderOverrides.h"
 #include "BookSearchSession.h"
 #include "BookmarkStore.h"
@@ -152,6 +153,15 @@ class EpubReaderActivity final : public Activity {
       1;  // initialized to freq in onEnter(); 1 triggers HALF on first render if somehow not reset
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
+  // The reader's pace, for the wait before an inline gray pass (AaSettle). turnGapMs_: how long after the turn before
+  // it the last page turn was asked for, until the render pass that answers it takes it as passTurnGapMs_; kNoTurn for
+  // a pass no page turn asked for. turnAskedMs_: when loop() read the turn it is about to make (0: none), and
+  // lastTurnAskedMs_ the turn before. inlineGrayTailMs_: how long the last inline pass ran past its last abort point.
+  unsigned long turnAskedMs_ = 0UL;
+  unsigned long lastTurnAskedMs_ = 0UL;
+  uint32_t turnGapMs_ = AaSettle::kNoTurn;
+  uint32_t passTurnGapMs_ = AaSettle::kNoTurn;
+  uint32_t inlineGrayTailMs_ = AaSettle::kMaxWaitMs;
   // When the reader last put a page on screen, for ANY reason — a turn, the first page of a
   // freshly opened book, a jump, a rebuild. Background-B's borrow quiet period measures from
   // here rather than from lastPageTurnTime, which is only stamped by actual page turns and so
