@@ -5,6 +5,7 @@
 
 namespace {
 
+using IndexingPopupGate::adoptedLend;
 using IndexingPopupGate::buildsThroughPopup;
 using IndexingPopupGate::cardReadsDuringRefresh;
 using IndexingPopupGate::chapterLend;
@@ -116,6 +117,19 @@ TEST(IndexingPopupGate, ChapterBlocksInDarkModeAndWithTheArenaOut) {
   Panel arenaOut = sdmmcS3();
   arenaOut.hasSecondaryBuffer = false;
   EXPECT_EQ(chapterLend(arenaOut), Lend::Blocking);
+}
+
+// A build handed over by the look-ahead holds its block: the popup ships async wherever the card can be read meanwhile,
+// with the secondary lent already (hasSecondaryBuffer false).
+TEST(IndexingPopupGate, AdoptedBuildStartsWhileThePopupPaintsWhereTheCardCanBeRead) {
+  for (Panel p : {x3(), x4(), sdmmcS3()}) {
+    p.hasSecondaryBuffer = false;
+    EXPECT_EQ(adoptedLend(p), Lend::Held);
+    EXPECT_EQ(adoptedLend(darkMode(p)), Lend::Blocking);
+  }
+  Panel t = t5s3();
+  t.hasSecondaryBuffer = false;
+  EXPECT_EQ(adoptedLend(t), Lend::Blocking);
 }
 
 // The SectionBuilding pass's popup: async only where the loop task's slice runs through its refresh.

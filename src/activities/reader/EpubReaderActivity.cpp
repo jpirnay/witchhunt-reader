@@ -5658,12 +5658,14 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       // buffer takes the frame on screen instead, which is what drawPopup() leaves there, for the seed and the lend.
       const bool keepFirstOpenPopup = popupBeforeBuild && !secondaryBorrowed_ && indexingPopupStillShown();
       // Where the lend below need not wait for the popup's waveform, the build starts while the popup paints: the
-      // popup ships async, and the kickoff below slices on until the waveform ends (IndexingPopupGate::chapterLend).
-      // Not for a build B handed over, which holds its block already.
+      // popup ships async, and the kickoff below slices on until the waveform ends (IndexingPopupGate::chapterLend). A
+      // build B handed over holds its block already and needs no lend (IndexingPopupGate::adoptedLend).
       using IndexingPopupGate::Lend;
-      Lend lend = popupBeforeBuild && !keepFirstOpenPopup && !secondaryBorrowed_
-                      ? IndexingPopupGate::chapterLend(ReaderUtils::indexingPopupPanel(renderer))
-                      : Lend::Blocking;
+      Lend lend = Lend::Blocking;
+      if (popupBeforeBuild && !keepFirstOpenPopup) {
+        const IndexingPopupGate::Panel panel = ReaderUtils::indexingPopupPanel(renderer);
+        lend = secondaryBorrowed_ ? IndexingPopupGate::adoptedLend(panel) : IndexingPopupGate::chapterLend(panel);
+      }
       if (popupBeforeBuild) {
         // X4: the dramatic-transition HALF belongs on the first CONTENT page
         // (forceHalfRefreshAfterPopup_ below), not the popup. The popup is a transient box over the
@@ -5711,7 +5713,8 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
           // never refreshes while borrowing) C drives FAST refreshes for every mid-build page.
           // drawPopup() above just painted frameBuffer with what is now on screen, so this is
           // the correct baseline — the same frame the non-transferred branch below syncs from.
-          renderer.syncRedRamFromFrameBuffer();
+          // The seed waits out a refresh in flight: with the popup still painting it comes after the kickoff (below).
+          if (lend == Lend::Blocking) renderer.syncRedRamFromFrameBuffer();
           renderer.setSingleBufferFastDiff(true);
           secondaryBufferDegraded_ = true;
           LOG_INF("ERS", "Background-C: building spine %d incrementally, secondary buffer already BORROWED (free=%lu)",

@@ -67,6 +67,10 @@ enum class Lend : uint8_t {
   // against a host frame (the X4), RED is seeded from the popup once it is finished, as the blocking order seeded it
   // before its lend: the popup's start took the frame before it into RED.
   DuringRefresh,
+  // The popup ships async; nothing is lent: the build was handed over by the look-ahead (Background-B) with the block
+  // it
+  // holds already, and lays out in it. RED is seeded from the popup once it is finished, as after a lend.
+  Held,
 };
 
 // The chapter build that starts with its popup (EpubReaderActivity::buildSection, a released build: a crossing into a
@@ -77,6 +81,12 @@ constexpr Lend chapterLend(const Panel& p) {
   if (p.lendsPsramArena) return Lend::PsramArena;
   if (p.lendsDuringRefresh) return Lend::DuringRefresh;
   return Lend::Blocking;
+}
+
+// A chapter build adopted from the look-ahead with its block (a turn into the chapter Background-B was laying out):
+// nothing to lend, so only the card decides.
+constexpr Lend adoptedLend(const Panel& p) {
+  return p.asyncRefresh && cardReadsDuringRefresh(p) ? Lend::Held : Lend::Blocking;
 }
 
 // The first open's indexing (ReaderActivity::onEnter). As the chapter, except that every PSRAM board indexes while the
