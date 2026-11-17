@@ -142,6 +142,9 @@ class HomeActivity final : public Activity {
   // the CPU to 10 MHz mid-burst and the next decode tick would crawl (observed: a ~1.5 s
   // cover decode taking ~25 s). Hold full speed until every recent cover is resolved.
   bool skipLoopDelay() override { return (firstRenderDone && !recentsLoaded) || recentsLoading || coverLoader.busy(); }
+  // The clock's minute tick redraws Home every minute while it is in use and every ten once it has
+  // been left alone for ten (HomeClockCadence).
+  bool shouldSkipPeriodicUpdate() const override;
 #if SERIAL_TEST_API
   // The covers still to load are the work CMD:IDLE waits for: the same answer as above.
   bool hasPendingBackgroundWork() override { return skipLoopDelay(); }

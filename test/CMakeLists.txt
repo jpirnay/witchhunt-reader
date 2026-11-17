@@ -180,6 +180,7 @@ add_subdirectory(${REPO_ROOT}/lib/SaxParser ${CMAKE_CURRENT_BINARY_DIR}/SaxParse
 
 add_subdirectory(buffered_io)
 add_subdirectory(natural_sort)
+add_subdirectory(home_clock_cadence)
 add_subdirectory(sidecar_files)
 add_subdirectory(book_cache)
 add_subdirectory(book_reader_overrides)

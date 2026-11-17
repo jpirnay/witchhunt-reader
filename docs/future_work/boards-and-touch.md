@@ -9,33 +9,43 @@ AA pass, the PanelSel/baseline-model split) are in [Display and refresh](display
 
 ## Light sleep with the frontlight
 
-Open: `HalPowerManager::lightSleep()` refuses to sleep on any board with a PWM frontlight
-(`BoardConfig::hasPwmFrontlight()`, counted in `rejFrontlight`), whether the light is on or not.
-All three touch boards have one, so the X4 Pro, the T5S3 and the Murphy M3 (`{48, 25000, 10, true}` in
-`MURPHY_M3`) never take idle light sleep. The comment
-above the guard is stale: it says the fork has no frontlight driver and that no board we build has
-a frontlight. `HalFrontlight` exists, with `present()` and `isOn()`.
+Open: the X4 Pro and the T5S3 never take idle light sleep. `HalPowerManager::lightSleep()` declines on
+a board with a PWM frontlight while the light is lit, or while its touch cannot wake the chip (counted in
+`rejFrontlight`). Their GT911 is polled and keeps only its latest frame, so a tap shorter than a 50 ms
+slice would be lost asleep.
 
-Why it matters: idle light sleep is the main idle-power saving, and a dark frontlight needs no
-guard. Light sleep stops the LEDC clock, so only a lit PWM light flickers.
+Why it matters: idle light sleep is the main idle-power saving. On Home with no sleep timeout and the
+light off, a Murphy that could not light-sleep lost about 40 % of its charge in 10 h (user, 2026-11-16).
 
-Where: `HalPowerManager::lightSleep()`, `HalFrontlight`, `[x4pro_board]` in `platformio.ini`, and
-the SDK's `FrontlightManager` (`FREEINK_FRONTLIGHT_LS`, `park()`, `releaseOnWake()`). The comment
-beside the `lightSleep()` fallback in `main.cpp`'s idle loop lists the reasons it declines without
-the frontlight.
+Done (2026-11-17, Murphy M3): with its light off the Murphy light-sleeps. Its CHSC6x data-ready line is
+armed as a low-level wake (`InputManager::armTouchPulseWake()` in the SDK), with the pin's edge
+interrupt switched off while the level type is set. Without that wake a test build missed about every
+second tap. On battery, Home, light off: light sleep 26 min 11 s of 27 min 17 s (96 %); the battery drain
+per hour was not measured.
 
-Ruled out: porting upstream's exclusion as the design. crosspoint-reader
-[PR #3032](https://github.com/crosspoint-reader/crosspoint-reader/pull/3032), with
-[Free-Ink/freeink-sdk#39](https://github.com/Free-Ink/freeink-sdk/pull/39), clocks the frontlight
-LEDC from RC_FAST with KEEP_ALIVE so the PWM survives light sleep; under `FREEINK_FRONTLIGHT_LS`
-the lit-light clause compiles out. The submitter measured 92 % light-sleep residency with the
-light on (X4 Pro). Our SDK carries the driver half; the app half is not ported.
+The 2026-11-16 restarts were not the touch line. The idle loop runs on core 1, and IDF's dual-core
+FreeRTOS winds pended ticks down only on core 0, so the ticks each slice handed to `xTaskCatchUpTicks()`
+piled up until core 0 next resumed its scheduler. A flash operation does that
+(`spi_flash_op_block_func()`), and then wound every tick since in one critical section: an interrupt
+watchdog on CPU0 with CPU1 in `esp_partition_read()`, twice, each time on the first flash read after
+light-sleeping (System Information, Boot Diagnostics). `catchUpTicksOnCore0()` now hands the ticks to
+core 0 each slice. The Picco takes the same path (dual-core S3, no PWM light), so by the code it had
+the same latent bug; no Picco restart was traced to it.
 
-Next: (1) tighten the guard to `Frontlight.present() && Frontlight.isOn()` and rewrite the
-comment; (2) port the app half for the X4 Pro: set `FREEINK_FRONTLIGHT_LS` in `[x4pro_board]`,
-call `park()` on the way into deep sleep and `releaseOnWake()` before `Frontlight.begin()`, then
-compare `rejFrontlight` and the light-sleep residency with the light on and off. The flag is
-untested on the T5S3.
+Next: (1) the X4 Pro and T5S3 need a touch wake first; the SDK's GT911 INT wake
+(`FREEINK_GT911_INT_WAKE`, `InputManager::touchWakeIrqPin()`) is the candidate. (2) A lit light:
+crosspoint-reader [PR #3032](https://github.com/crosspoint-reader/crosspoint-reader/pull/3032), with
+[Free-Ink/freeink-sdk#39](https://github.com/Free-Ink/freeink-sdk/pull/39), clocks the frontlight LEDC
+from RC_FAST with KEEP_ALIVE so the PWM survives light sleep (`FREEINK_FRONTLIGHT_LS`; the submitter
+measured 92 % residency with the light on, X4 Pro). Our SDK carries the driver half. CrossPoint later
+reverted its idle light sleep (#3077) and dropped the flag from the X4 Pro (#3289). RC_FAST (~17.5 MHz)
+cannot drive the Murphy's 25 kHz at 10 bits, so the Murphy needs about 17 kHz or 9 bits first, or the
+light stays dark. Setting the flag also needs `park()` before deep sleep and `releaseOnWake()` before
+`Frontlight.begin()`.
+
+Where: `HalPowerManager::lightSleep()`, `HalFrontlight`, the SDK's `InputManager` (touch wakes) and
+`FrontlightManager`. The comment beside the `lightSleep()` fallback in `main.cpp`'s idle loop lists the
+reasons it declines.
 
 ## SD clock on the T5S3
 

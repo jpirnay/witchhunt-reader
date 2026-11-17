@@ -123,6 +123,8 @@ class ActivityManager {
   // next pass has redrawn the screen, which is how the serial CMD:STATE tells a popup on screen
   // from one that was.
   std::atomic<uint32_t> renderPassesStarted{0};
+  // millis() of the last user activity, as main.cpp's idle governor stamps it (noteUserActivity).
+  unsigned long lastUserActivityMs_ = 0;
 
   // Whether to trigger a render after the current loop()
   // This variable must only be set by the main loop, to avoid race conditions
@@ -286,6 +288,11 @@ class ActivityManager {
   // For the serial test interface (SerialTestApi): see activityChanges.
   uint32_t activityChangeCount() const { return activityChanges.load(std::memory_order_relaxed); }
   uint32_t renderPassCount() const { return renderPassesStarted.load(std::memory_order_relaxed); }
+  // The last user activity: a press or release, a held key, a touch, a serial command, what main.cpp's
+  // idle governor counts as such (its lastActivityTime). Loop task only, written and read there: a
+  // screen's shouldSkipPeriodicUpdate() asks how long the device has been left alone.
+  void noteUserActivity(const unsigned long ms) { lastUserActivityMs_ = ms; }
+  unsigned long lastUserActivityMs() const { return lastUserActivityMs_; }
   // The name of the activity on top, or "none". Loop task only.
   const char* currentActivityName() const;
   // What keeps the device from being idle, or nullptr when nothing does: "transition" (an
