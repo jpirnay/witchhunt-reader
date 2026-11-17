@@ -350,6 +350,12 @@ class HalGPIO {
   // already guarded inside the SDK and compiles to an inert false/0 on non-touch
   // boards, so the C3 pays nothing for these.
   bool hasTouch() const;
+  // The touch controller's pulsed data-ready line as a light-sleep wake (the SDK's
+  // InputManager::touchPulseWakePin, armTouchPulseWake, touchPulseWakeDone): -1 / false where
+  // there is none. After an arm that returned true, touchPulseWakeDone() once the sleep call returns.
+  int8_t touchPulseWakePin() const;
+  bool armTouchPulseWake() const;
+  void touchPulseWakeDone(bool gpioWake) const;
   // True only on a controller that reports more than one contact (GT911). Gates
   // the two-finger gestures out of the settings screen on single-contact panels,
   // where they could never fire.

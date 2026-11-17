@@ -2475,11 +2475,11 @@ void loop() {
       // declines, the fallback delay() runs at the normal clock too — but that
       // only happens when USB (externally powered), WiFi, or a render Lock (full
       // speed wanted anyway) is active, a button is mid-debounce, or the board
-      // has a PWM frontlight.
+      // has a PWM frontlight that is lit or whose touch cannot wake the chip.
       powerManager.setPowerSaving(false);
       powerOffPanelWhenIdle(lastActivityTime);
       if (!powerManager.lightSleep(gpio)) {
-        delay(10);  // declined (render Lock, WiFi, USB, mid-debounce, PWM frontlight): poll at 100 Hz
+        delay(10);  // declined (render Lock, WiFi, USB, mid-debounce, frontlight): poll at 100 Hz
       }
     } else {
       // Response window after recent input: keep 100 Hz polling for snappy

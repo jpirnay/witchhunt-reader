@@ -65,7 +65,7 @@ class HalPowerManager {
     uint32_t rejLock = 0;        // declined: a render Lock was held
     uint32_t rejWifi = 0;        // declined: WiFi up
     uint32_t rejUsb = 0;         // declined: host attached
-    uint32_t rejFrontlight = 0;  // declined: board has a PWM frontlight
+    uint32_t rejFrontlight = 0;  // declined: a PWM frontlight is lit, or touch cannot wake the chip
     uint32_t rejDebounce = 0;    // declined: button change mid-debounce
     uint32_t rejIdf = 0;         // esp_light_sleep_start() returned non-OK
   };

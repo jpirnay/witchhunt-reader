@@ -15,6 +15,7 @@
 
 #include <cassert>
 
+#include "HalFrontlight.h"
 #include "HalGPIO.h"
 #include "HalI2cBus.h"
 
@@ -257,13 +258,17 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   // visibly flickers as the idle loop enters slice after slice. Justin Mitchell
   // (@itsthisjustin) reported this against crosspoint PR #2983 ("feat: Add
   // support for x4pro & papermono devices"), where the guard reads
-  // `Frontlight.present() && Frontlight.isOn()`. This guard declines on any board
-  // that HAS one, lit or not, which keeps the X4 Pro, the T5S3 and the Murphy M3
-  // at full clock whenever they idle. Narrowing it to a lit light is not safe
-  // yet: a 2026-11-16 test build that let the Murphy light-sleep with its light
-  // off restarted twice within 90 minutes, once on an interrupt watchdog while a
-  // flash read waited on CPU1 (docs/future_work/boards-and-touch.md).
-  if (BoardConfig::hasPwmFrontlight()) {
+  // `Frontlight.present() && Frontlight.isOn()`. A dark light needs no guard.
+  // The SDK's FREEINK_FRONTLIGHT_LS would keep a lit one running through light
+  // sleep; no board here sets it yet, and the Murphy's 25 kHz at 10 bits is more
+  // than the RC_FAST clock it switches to can drive.
+  //
+  // A frontlight board whose touch cannot wake the chip keeps declining: the X4
+  // Pro and the T5S3 poll a GT911 that keeps only its latest frame, so a tap
+  // shorter than a slice would be lost. The Murphy's CHSC6x can wake it
+  // (armTouchPulseWake() below).
+  if (BoardConfig::hasPwmFrontlight() &&
+      (HalFrontlight::getInstance().isOn() || (gpio.hasTouch() && gpio.touchPulseWakePin() < 0))) {
     lightSleepStats_.rejFrontlight++;
     return false;
   }
@@ -311,6 +316,13 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
                        BoardConfig::ACTIVE.input.powerActiveHigh ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
     esp_sleep_enable_gpio_wakeup();
   }
+  // A touch's pulsed data-ready line: the first pulse of a tap wakes the chip. Its edge interrupt only
+  // fires while the chip is awake, so without this wake a Murphy test build (2026-11-17) missed about
+  // every second tap.
+  const bool touchArmed = gpio.armTouchPulseWake();
+  if (touchArmed) {
+    esp_sleep_enable_gpio_wakeup();
+  }
 
   // GPIO13 is rewired as a power control on the Xteink C3 boards: the X4
   // battery-latch MOSFET gate, and the X3 SD-rail enable (BoardConfig's
@@ -353,6 +365,9 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   if (powerPin >= 0) {
     gpio_wakeup_disable(static_cast<gpio_num_t>(powerPin));
     gpio_set_intr_type(static_cast<gpio_num_t>(powerPin), GPIO_INTR_DISABLE);
+  }
+  if (touchArmed) {
+    gpio.touchPulseWakeDone(err == ESP_OK && esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO);
   }
 
   if (err != ESP_OK) {
