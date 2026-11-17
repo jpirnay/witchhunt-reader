@@ -1,6 +1,7 @@
 #include "ReaderActivity.h"
 
 #include <Bitmap.h>
+#include <BookSession.h>
 #include <BuildArena.h>
 #include <CooperativeAbort.h>
 #include <FsHelpers.h>
@@ -31,6 +32,7 @@
 #include "Xtc.h"
 #include "XtcReaderActivity.h"
 #include "activities/util/BmpViewerActivity.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "activities/util/FullScreenMessageActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -733,7 +735,7 @@ std::unique_ptr<PngDecodeSession> ReaderActivity::beginPngThumbSession(const std
 
 std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path, BuildArena* scratch,
                                                void (*progress)(void* ctx, uint8_t percent), void* progressCtx,
-                                               std::unique_ptr<Epub> probed) {
+                                               std::unique_ptr<Epub> probed, book_protection::OpenResult* protection) {
   if (!Storage.exists(path.c_str())) {
     LOG_ERR("READER", "File does not exist: %s", path.c_str());
     return nullptr;
@@ -751,6 +753,7 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path, BuildAre
     return epub;
   }
 
+  if (protection != nullptr) *protection = epub->protectionResult();
   if (const std::string sidecar = sidecarCoverPath(path); !sidecar.empty()) {
     LOG_INF("READER", "EPUB load failed but sidecar cover exists: %s", sidecar.c_str());
   }
@@ -1041,9 +1044,10 @@ void ReaderActivity::onEnter() {
     }
     BuildArena indexingScratch(lentForIndexing, lentSize);
     const bool showsProgress = firstOpenIndexing || bookFontsPending;
+    auto protection = book_protection::OpenResult::Plain;
     auto epub = loadEpub(initialBookPath, indexingScratch.valid() ? &indexingScratch : nullptr,
                          showsProgress ? +onBuildProgress : nullptr, showsProgress ? &indexingProgress : nullptr,
-                         std::move(probedEpub));
+                         std::move(probedEpub), &protection);
     if (epub && bookFontsPending) {
       // load() left nothing in the region: its rings were scoped to each read.
       BookFonts::prepare(*epub, indexingScratch.valid() ? &indexingScratch : nullptr);
@@ -1062,7 +1066,7 @@ void ReaderActivity::onEnter() {
               static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
     }
     if (!epub) {
-      onGoBack();
+      if (!showProtectionNotice(protection)) onGoBack();
       return;
     }
     // load() also applies the book's metadata sidecar, whose language book.bin does not keep.
@@ -1082,3 +1086,34 @@ void ReaderActivity::onEnter() {
 }
 
 void ReaderActivity::onGoBack() { finish(); }
+
+bool ReaderActivity::showProtectionNotice(const book_protection::OpenResult result) {
+  StrId message = StrId::STR_PROTECTED_UNREADABLE;
+  switch (result) {
+    case book_protection::OpenResult::Plain:
+    case book_protection::OpenResult::Protected:
+      return false;
+    case book_protection::OpenResult::NoKey:
+      message = StrId::STR_PROTECTED_NO_KEY;
+      break;
+    case book_protection::OpenResult::OtherDevice:
+      message = StrId::STR_PROTECTED_OTHER_DEVICE;
+      break;
+    case book_protection::OpenResult::Expired:
+      message = StrId::STR_PROTECTED_EXPIRED;
+      break;
+    case book_protection::OpenResult::NeedsTime:
+      message = StrId::STR_PROTECTED_NEEDS_TIME;
+      break;
+    case book_protection::OpenResult::Unreadable:
+      break;
+  }
+  ConfirmationActivity::Question question;
+  question.headline = tr(STR_PROTECTED_BOOK);
+  question.message = I18N.get(message);
+  question.cancelLabel = StrId::STR_BACK;
+  question.acceptLabel = StrId::STR_OK_BUTTON;
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, std::move(question)),
+                         [this](const ActivityResult&) { onGoBack(); });
+  return true;
+}
