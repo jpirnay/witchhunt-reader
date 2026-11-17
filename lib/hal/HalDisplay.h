@@ -67,9 +67,9 @@ class HalDisplay {
   //  - the Picco's SE0400 (SSD2677), whose driver defers a refresh (freeink-sdk, Ssd2677Driver::displayStart). With
   //    that driver its two-pass pages took the deferred pass on the device, none the inline one (2026-11-17); it
   //    has not been run inline.
-  //  - the Murphy's UC8253, whose driver still blocks at this SDK pin. A deferring one is written and host-tested
-  //    on the SDK fork (0b0c9ce) and waits for a Murphy to run it. Named now so that its gray pass does not move
-  //    with it.
+  //  - the Murphy's UC8253, whose driver defers as well (Uc8253MurphyDriver::displayStart). With that driver its
+  //    two-pass pages took the deferred pass on the device, none the inline one (2026-11-17); it has not been run
+  //    inline.
   // By the SDK's controller identity, so a Picco with an SSD1677 panel keeps the inline pass it has. The X3's UC8253
   // answers true as well, which changes nothing there: it defers for asyncRefreshHoldsFrameBuffer().
   bool keepsDeferredGrayPass() const;
