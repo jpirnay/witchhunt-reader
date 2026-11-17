@@ -273,3 +273,42 @@ Lists always draw the selected row (`UiListActivity`), also on the touch boards 
 hides the list and tab cursor until a button is pressed, and again on the next touch (one static flag in
 `MappedInputManager`; its #791 keeps the list from jumping without a cursor). UX taste, no bug. Decide whether to take
 it. matcha-reader #719, Eszter Schuffert (eszter007).
+
+## BOOX Picco: the Free-Ink picks (2026-11-17)
+
+Branch `chore/sdk-picco-upstream-picks` (5967d2170, master d81e79e07 merged) pins SDK 18d3bfe, which is on
+`witchhunt`. No PR yet; the body is drafted (maintainer's `witchhunt-work/picco-picks/pr.md`). It takes from Free-Ink:
+
+- fcadb76 + 5793627 (#221, Eszter Schuffert): on wake the Picco's held power pins are driven before their hold is
+  released (`BoardConfig::driveReleasingHold()`); other boards keep the old order.
+- 10b7ae5 (Julia Nguyen): SSD2677 transfers pack four pixels at a time; same bytes to the panel.
+- 77ae8c7 (Justin Mitchell), tuned: light gray in pictures (`lut_picco_se0400_image`, table 3, second group). Stock
+  ends it 9 net black frames after the clear, one frame from dark gray; upstream 6. Compared by the owner on the
+  sleep cover: 6 washed out, 9 too dark, 8 dithers visibly, 7 chosen (ea9883e: phase 5 drives white, phase 2 not).
+  These are the only steps that table's second group offers; a finer step means changing a phase length.
+
+Owner's checks: unplugged sleep and wake resumes the book; the cover as above. Flash −4 to +66 B.
+
+Give back upstream: Free-Ink's host suites that compile the Picco profile lack a `gpio_set_level` stub since
+fcadb76 and stop compiling (ours: XteinkDetect's stubs for the battery suite, FrontlightManager, InputManager's
+picco stubs). Run every SDK suite in `freeink-sdk/docs/testing.md` after a `BoardConfig.h` change;
+the FrontlightManager one was missed at first.
+
+## X3: serial stalls and a sector esptool cannot read
+
+- **Serial stalls.** The X3's USB serial output went silent for minutes while the device kept running: twice in a
+  49-minute soak on master, once more on 2026-11-17 around 19:10. Some lined up with the owner switching a KVM; the
+  rest are unexplained (no USB event in the host log). A dev build's test API also holds the loop up to about 2 s
+  per reply when the host does not read; a release build's log write gives up after about 19 ms. Idea, not built:
+  the same bounded write in the test API.
+- **One flash sector reads back badly over USB.** Dumping the X3's app0 failed at 0x3e3000 every time ("Packet content
+  transfer stopped"); every other sector matched the image, and the chip's own MD5 of the whole slot equalled the
+  image. The data is fine; the read path is not. Watch for it in backups, and verify dumps with the chip's MD5.
+
+## The CrossPoint comparison: boards still on 2.53
+
+[Feature comparison](../feature-comparison.md#measured-speed-and-memory) (#798) has the X3 and the BOOX Picco on
+master fbee8fa6f; the X4 and the X4 Pro keep their 2.53 figures (the X4's † rows with #802 and #805), because neither
+board was free for the re-run. Next: the same protocol on master on both (the maintainer's
+`bench-2.53/remeasure/` scripts; CrossPoint's split values for both are taken already), and the X3's "page complete"
+row again once #823 lands (4.08 s on the branch against 6.56 s).

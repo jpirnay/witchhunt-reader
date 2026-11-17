@@ -505,3 +505,10 @@ Two open Free-Ink PRs would break this firmware silently if they land as they ar
   gates every gray entry point on it, and `displayGray()`'s default loses its black-and-white fallback.
 
 Check both against our board configs and drivers when a resync brings them.
+
+## Indexing popups that still block
+
+#819 made the Indexing popup's work run during the popup's refresh wherever the card can be read during it. Still
+blocking: the X3's "still building" popup (needs an off-bus wait on the X3 and a run), every popup on the T5S3 (card
+traffic beside the LovyanGFX waveform not proven; the first open does it since #792), every popup in Dark Mode, and
+the `compileSectionCache` fallback. Next: the X3 one first; it is the most common of these.

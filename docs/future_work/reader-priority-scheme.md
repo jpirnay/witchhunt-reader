@@ -378,3 +378,40 @@ Protocol: the 2.53 bench (`bench.py`, *The Odyssey*, BOOK IV, n >= 3, AA off / t
 | D8 | The 400 ms settle before an inline gray, which One-Pass keeps on HALF pages | A: keep. B: drop it where no press is pending at the HALF's end. C: measure the abort rate first | C |
 | D9 | Order with the open work | #808 before step 5; fixes 5 and 6 independent | as stated |
 | D10 | The S3's second core | A: nothing now, one measurement of a picture page during a build. B: a decode worker for the page on screen. C: the build on core 0 | A; B only if the measurement shows seconds; not C |
+
+---
+
+## 9. Open after the 2026-11-17 runs
+
+Handover, 2026-11-17. Steps 1-3 are merged (#815, #818, #817), the adaptive settle too (#816). What is left, with
+the evidence from the X3 bench on master `fbee8fa6f` (comparison re-run, #798) and the branch runs that followed:
+
+- **Step 5 (c): PR #823** (`perf/c3-build-page-gray`). The page a borrowed C3 build draws gets its gray once its own
+  refresh is over: X3 cold open, gray on the panel 6.58 → 4.08 s, a turn 0.6 s after page 1 gets its gray 1.19 s after
+  the press instead of 2.97 s; the chapter is laid out 0.5 s later per pass (class 3 waits). Still open from step 5:
+  the X4's resident build (`Pass::AtBuildEnd`: the page and glyphs would come from the heap its low-heap guard
+  watches), the build-through pages (V3), the abort path (only a real key press within the ~120 ms of plane
+  rendering reaches it; serial `CMD:BTN` waits for the pass), and any run on the X4.
+- **The count backfill** (`feat/chapter-count-backfill`, 356edd799, no PR yet). Reworked under R0/R3/R6: a file starts
+  only when its estimated build (per-KB rate of B's last finished build) ends before the next turn at the reader's
+  pace, or after a pause; one preemption ends it for the chapter until the next pause. X3, five turns at a 2 s pace:
+  identical to master (the first version lost 0.22-0.26 s on two of them). Left alone, the count goes exact
+  (73/108~ → 71/106). The branch was built on the heading join; #822 is merged now: merge master into it, then open
+  its PR (body drafted by the maintainer). Two limits it documents:
+  - With One-Pass on, the C3 lays out no backfill file: `FreeInkDisplay::borrowSecondaryBuffer()` marks the copy of
+    the page on screen lost, so the next turn would lose its composed one-pass. The count stays "~" there. Step 4
+    lifts this.
+  - On the S3 boards a turn still throws away a live B build: every render ends B's borrow at its start
+    (`recoverSecondaryBufferIfNeeded()` → `endBackgroundBorrow()`), and the page's AA gates read
+    `hasSecondaryBuffer()`, which is false while the PSRAM arena is lent. Not narrow; not changed.
+- **A look-ahead that starts just before a press costs that turn.** X3, turn into BOOK V with AA off or two-pass:
+  1.72 s, against 1.56 s for the same turn after one page back. BOOK V was laid out already in 9 of 9 runs; the
+  look-ahead for BOOK VI had restarted 0.26-0.3 s before the press, and the turn was seen after about 240 ms instead
+  of 114 ms (bench-2.53/remeasure/RESULTS-x3.md). Next: the backfill's pace gate for look-ahead starts too, or a
+  look-ahead slice that ends within R0's one slice when a press arrives.
+- **Step 4 (d)**, unchanged and next: an SDK lend that keeps the frame on screen, so B, the lane and the bookmark parse
+  take the write buffer. It removes V2 and the One-Pass limit of the backfill above.
+- **Steps 6 and 7**, unchanged: the X4's RED reseed after a deferred single-buffer FAST; a byte-precise count estimate.
+- **Flash on the C3.** After #822, master keeps about 4.2 KB in its 49th code page. #823 takes 1,770 B of code and the
+  backfill 1,380 B: together about 1 KB left (added from deltas, not a build of all three). The next C3 feature of
+  any size opens a 94th MMU page, which the font cache pays for ([Font flash](font-flash.md)).

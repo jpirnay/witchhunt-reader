@@ -111,3 +111,11 @@ reads is `custom_sdkconfig`).
 **Next step.** Decide whether to switch on the from-source C3 sdkconfig (and fix the name): it costs a core rebuild in
 every build and a Wi-Fi, hotspot and TLS pass on a device. crosspoint-reader #4212 (draft), Arthur Tazhitdinov
 (@osteotek).
+
+## C3 code-page headroom is nearly used up
+
+The C3 maps code and rodata in 64 KB MMU pages, counted apart from the ELF's `_reserved_` symbols; master after #822:
+49 code + 44 rodata = 93 pages, about 4.2 KB free in the last code page. The open #823 (C3 gray during a build) adds
+1,770 B of code and the count backfill 1,380 B: about 1 KB left together (sum of deltas, not one build). The next C3
+feature of any size opens a 94th page, and each page costs the font cache one MMU map page. Next: find code to trim
+on the C3 before that (the sdkconfig trim above is one candidate), and measure the three branches built together.

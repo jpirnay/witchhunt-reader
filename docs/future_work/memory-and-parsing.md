@@ -186,3 +186,24 @@ bump) plus a section-cache bump, and a 4 KB head scan per chapter build. matcha-
 `HalFile` read of `JD_SZBUF` (512 B) per call. matcha measured about 2 ms fixed per read and cut a cold decode by 22 %
 with an 8 KB read-ahead. Profile on the X3 and X4 first (#220 found the same per-call cost on writes). matcha-reader
 #245, Eszter Schuffert (eszter007).
+
+## The X3's Home dips to 15.9 KB free at boot with the Lyra Carousel
+
+The 2026-11-17 bench boots on the X3 with the owner's settings (Lyra Carousel) logged `[MEM] Min Free` 15.9 KB on
+Home, while the carousel loaded its covers. Not looked at: which allocation sets the low, and whether a cover decode
+there can fail on a fragmented heap. Next: a boot with `CMD:HEAP` polls and the carousel's cover log, against the
+Lyra theme without the carousel.
+
+## Heading join (#822): follow-ups
+
+- A TOC that lists parts only joins a "Part One" title file with the chapter after it (the trigger takes the TOC as
+  proof that both are one chapter).
+- The sleep screen's printed-page fallback may read the old, unjoined section file until it is evicted.
+
+## Nested boxes take the inner box's trailing gap
+
+Found with #820: with Extra Paragraph Spacing on, `closeBox()` puts an inner box's trailing spacing back below the
+inner frame but does not mark it again, so an outer box that closes right after takes that spacing into its own
+frame, and no spacing follows the outer frame (host check: inner bottom 39, outer bottom 56 = 39 + 12 + 4 + 1).
+Already the behaviour before #820; not changed there. Next: a BoxLayout test for nested framed boxes, then set
+`extraGapEnd_` again after the inner box's trailing gap.
