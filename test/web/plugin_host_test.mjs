@@ -134,7 +134,7 @@ requests.length = 0;
 confirmed.length = 0;
 confirmAnswer = true;
 let approved = false;
-answer = (req) => {
+const wallabag = (req) => {
   if (req.url === '/api/plugins/hosts') {
     approved = true;
     return new FakeResponse(200, { ok: true });
@@ -145,6 +145,7 @@ answer = (req) => {
   }
   return new FakeResponse(404, {});
 };
+answer = wallabag;
 const retried = await api.relay('GET', 'https://wallabag.home/api/entries', {}, '');
 check(confirmed.length === 1 && confirmed[0].includes('wallabag.home') && confirmed[0].includes('Upstream plugin'),
       'a refused host is put to the user, naming plugin and host');
@@ -153,6 +154,35 @@ check(approval && approval.json.plugin === 'up' && approval.json.host === 'walla
       approval.options.headers['Content-Type'] === 'application/json', 'a yes stores the approval for that plugin');
 check(requests.filter((r) => r.url === '/api/relay').length === 2 && retried.status === 200,
       'the request runs again after the approval');
+
+// A redirect to a host not approved yet: the device names it, and it is asked about in turn.
+requests.length = 0;
+confirmed.length = 0;
+const allowed = [];
+answer = (req) => {
+  if (req.url === '/api/plugins/hosts') {
+    allowed.push(req.json.host);
+    return new FakeResponse(200, { ok: true });
+  }
+  if (req.url === '/api/fetch') {
+    if (!allowed.includes('github.com')) return new FakeResponse(403, { error: 'host not allowed', host: 'github.com' });
+    if (!allowed.includes('cdn.example.net')) return new FakeResponse(403, { error: 'host not allowed', host: 'cdn.example.net' });
+    return new FakeResponse(200, { ok: true, bytes: 127 });
+  }
+  return new FakeResponse(404, {});
+};
+const chained = await api.fetchToSd('https://github.com/o/r/releases/download/t/a.ifo', '/dictionaries/a/a.ifo');
+check(confirmed.length === 2 && confirmed[1].includes('cdn.example.net') && confirmed[1].includes('redirected'),
+      'a host the request is redirected to is asked about next');
+check(allowed.join(',') === 'github.com,cdn.example.net' && chained.bytes === 127, 'both are stored and the download runs');
+requests.length = 0;
+confirmed.length = 0;
+answer = (req) => (req.url === '/api/plugins/hosts' ? new FakeResponse(200, { ok: true })
+  : new FakeResponse(403, { error: 'host not allowed', host: 'stuck.example' }));
+let stuck = null;
+try { await api.fetchToSd('https://stuck.example/a', '/a'); } catch (e) { stuck = e; }
+check(confirmed.length === 1 && stuck && stuck.status === 403, 'a host still refused after its approval is not asked again');
+answer = wallabag;
 
 requests.length = 0;
 confirmed.length = 0;

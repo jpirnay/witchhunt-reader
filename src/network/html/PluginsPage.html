@@ -44,6 +44,17 @@
       #status.status-ok { display: block; background: var(--accent-soft); color: var(--ok-text); }
       #status.status-err { display: block; background: var(--danger-soft); color: var(--danger); }
       #status.status-busy { display: block; background: var(--surface-2); border-color: var(--border); }
+
+      /* An open device.json catalog (js/plugin-catalog.js): lists and search above its rows, pages below. */
+      .catalog-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+      .catalog-head h2 { margin: 0; }
+      .catalog-lists, .catalog-search, .catalog-pager { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+      .catalog-search input { flex: 1 1 200px; min-width: 0; }
+      .catalog-pager:empty { display: none; }
+      .catalog-status { margin: 12px 0 0; color: var(--text-muted); overflow-wrap: anywhere; }
+      .catalog-status:empty { display: none; }
+      .catalog-status.status-ok { color: var(--ok-text); }
+      .catalog-status.status-err { color: var(--danger); }
     </style>
   </head>
   <body>
@@ -52,7 +63,7 @@
     <main class="page page-narrow">
       <div class="page-head">
         <h1>Plugins</h1>
-        <p class="page-intro">Plugins add cards to the File Manager or Settings page.</p>
+        <p class="page-intro">Plugins add cards to the File Manager or Settings page, or catalogs you open here.</p>
       </div>
 
       <section class="card">
@@ -64,6 +75,8 @@
         <div id="installed"><p class="empty">Loading...</p></div>
         <div id="status" role="status"></div>
       </section>
+
+      <section class="card" id="catalog-view" hidden></section>
 
       <section class="card">
         <h2>Available plugins</h2>
@@ -90,14 +103,15 @@
           <button type="submit" class="btn btn-primary">Install</button>
         </form>
         <p class="plugin-meta">
-          A <code>.zip</code> holding a plugin folder: <code>plugin.js</code>, usually a
-          <code>manifest.json</code>, and any files they use, all side by side.
+          A <code>.zip</code> holding a plugin folder: <code>plugin.js</code> or <code>device.json</code> (a
+          catalog) or both, usually a <code>manifest.json</code>, and any files they use, all side by side.
         </p>
       </section>
     </main>
 
     <script>
 <!--#include file="shared/FileNames.js.inc" -->
+<!--#include file="shared/PluginHost.js.inc" -->
 
       const $ = (id) => document.getElementById(id);
       const INSTALL_ROOT = '/.crosspoint/plugins';
@@ -118,6 +132,15 @@
         Object.assign(node, props || {});
         (children || []).forEach((c) => node.append(c));
         return node;
+      }
+
+      // What a plugin adds: a card (plugin.js, on the page its manifest's mount names), a catalog (device.json, opened
+      // on this page), or both.
+      function describeParts(web, device, mount) {
+        const parts = [];
+        if (web) parts.push('a card on the ' + (MOUNT_LABELS[mount || 'settings'] || mount) + ' page');
+        if (device) parts.push('a catalog you open here');
+        return 'Adds ' + parts.join(' and ');
       }
 
       function describeReach(hosts) {
@@ -168,10 +191,7 @@
           const title = el('strong', { textContent: p.title || p.name });
           if (p.version) title.append(el('span', { className: 'badge badge-muted', textContent: 'v' + p.version }));
           if (p.disabled) title.append(el('span', { className: 'badge badge-warn', textContent: 'switched off' }));
-          const meta = [
-            'Adds itself to: ' + (MOUNT_LABELS[p.mount] || p.mount),
-            describeReach(p.allowedHosts)
-          ];
+          const meta = [describeParts(p.web !== false, !!p.device, p.mount), describeReach(p.allowedHosts)];
           if (p.root && p.root !== INSTALL_ROOT) meta.push('Copied by hand into ' + p.root + '/' + p.name);
           const approved = (approvals && approvals[p.name]) || [];
           const info = el('div', { className: 'plugin-info' }, [
@@ -195,8 +215,12 @@
             onclick: () => setEnabled(p, p.disabled)
           });
           const remove = el('button', { className: 'btn btn-danger btn-small', textContent: 'Remove', onclick: () => removePlugin(p) });
+          const actions = [toggle, remove];
+          if (p.device && !p.disabled) {
+            actions.unshift(el('button', { className: 'btn btn-small btn-primary', textContent: 'Open catalog', onclick: () => openCatalog(p) }));
+          }
           return el('div', { className: 'plugin' + (p.disabled ? ' off' : '') }, [
-            info, el('div', { className: 'plugin-actions' }, [toggle, remove])
+            info, el('div', { className: 'plugin-actions' }, actions)
           ]);
         }));
       }
@@ -236,6 +260,85 @@
         loadInstalled();
       }
 
+      // ---- Catalogs (device.json) ------------------------------------------------------------------
+      //
+      // Upstream's on-device catalog screens, run in the browser by js/plugin-catalog.js: the device fetches for it
+      // through the plugin's relay (makePluginApi() in shared/PluginHost.js.inc), so the plugin's hosts and the
+      // user's approvals apply as they do to a plugin.js.
+
+      function loadScript(src, globalName) {
+        if (window[globalName]) return Promise.resolve();
+        return new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = src;
+          s.onload = resolve;
+          s.onerror = () => reject(new Error('could not load ' + src));
+          document.head.appendChild(s);
+        });
+      }
+
+      let firmwareVersion = null;
+
+      // What the catalog runner may do on the device, besides the plugin's own api.
+      function catalogIo() {
+        return {
+          firmwareVersion,
+          readFile: async (path) => {
+            const r = await fetch('/download?path=' + encodeURIComponent(path));
+            return r.ok ? r.text() : null;
+          },
+          mkdir: async (parent, name) => {
+            const form = new FormData();
+            form.append('name', name);
+            form.append('path', parent);
+            await fetch('/mkdir', { method: 'POST', body: form });
+          },
+          confirm: async (message) => confirm(message),
+          remember: {
+            get: (key) => { try { return localStorage.getItem(key); } catch (e) { return null; } },
+            set: (key, value) => { try { localStorage.setItem(key, value); } catch (e) { /* this visit only */ } }
+          }
+        };
+      }
+
+      function closeCatalog() {
+        $('catalog-view').hidden = true;
+        $('catalog-view').replaceChildren();
+      }
+
+      async function openCatalog(p) {
+        const title = p.title || p.name;
+        setStatus('Opening ' + title + '...', 'busy');
+        let manifest;
+        try {
+          await loadScript('/js/plugin-catalog.js', 'PluginCatalog');
+          const r = await fetch('/plugin?name=' + encodeURIComponent(p.name) + '&file=device.json');
+          if (!r.ok) throw new Error('could not read its device.json (' + r.status + ')');
+          try {
+            manifest = await r.json();
+          } catch (e) {
+            throw new Error('its device.json is not valid JSON');
+          }
+          if (firmwareVersion === null) {
+            try { firmwareVersion = (await (await fetch('/api/status')).json()).version || ''; } catch (e) { firmwareVersion = ''; }
+          }
+        } catch (e) {
+          setStatus('Could not open ' + title + ': ' + e.message, 'err');
+          return;
+        }
+        const what = PluginCatalog.describe(manifest);
+        if (!what.catalog) {
+          setStatus('Cannot open ' + title + ': ' + (what.reason ||
+            'it has no catalog; its part on the device (' + (what.events ? 'events' : 'screens') + ') does not run here yet') + '.', 'err');
+          return;
+        }
+        setStatus('', '');
+        const view = $('catalog-view');
+        view.hidden = false;
+        view.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        await PluginCatalog.open(view, p, manifest, makePluginApi(p), catalogIo(), closeCatalog);
+      }
+
       // ---- Installing -----------------------------------------------------------------------------
 
       // `files` is [{ name, data }] with data a Blob or ArrayBuffer. Staged on the reader and switched in
@@ -258,20 +361,18 @@
         await post('/api/plugins/commit?name=' + encodeURIComponent(name));
       }
 
+      function installedMessage(title, web, mount) {
+        return title + ' is installed. ' + (web ? 'Open the ' + (MOUNT_LABELS[mount || 'settings'] || 'page') + ' page to use it.'
+                                                : 'Open its catalog above.');
+      }
+
       function safeName(name) {
         const cleaned = (name || '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+|[.-]+$/g, '');
         return cleaned.endsWith('.new') ? cleaned.slice(0, -4) : cleaned;
       }
 
       function loadJsZip() {
-        if (window.JSZip) return Promise.resolve();
-        return new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = '/js/jszip.min.js';
-          s.onload = resolve;
-          s.onerror = () => reject(new Error('could not load the zip reader'));
-          document.head.appendChild(s);
-        });
+        return loadScript('/js/jszip.min.js', 'JSZip').catch(() => { throw new Error('could not load the zip reader'); });
       }
 
       async function installFromZip(file) {
@@ -290,7 +391,9 @@
         const files = await Promise.all(entries.map(async (e) => ({
           name: e.name.split('/').pop(), data: await e.async('arraybuffer')
         })));
-        if (!files.some((f) => f.name === 'plugin.js')) throw new Error('there is no plugin.js in the zip');
+        const web = files.some((f) => f.name === 'plugin.js');
+        const device = files.some((f) => f.name === 'device.json');
+        if (!web && !device) throw new Error('there is no plugin.js or device.json in the zip');
 
         let manifest = {};
         const manifestFile = files.find((f) => f.name === 'manifest.json');
@@ -304,13 +407,12 @@
         const title = manifest.title || name;
         const question = 'Install ' + title + (manifest.version ? ' ' + manifest.version : '') + '?\n\n' +
           (manifest.description ? manifest.description + '\n\n' : '') +
-          'Adds itself to: ' + (MOUNT_LABELS[manifest.mount || 'settings'] || manifest.mount) + '\n' +
+          describeParts(web, device, manifest.mount) + '\n' +
           describeReach(manifest.allowedHosts) +
           (installed.some((p) => p.name === name) ? '\n\nThis replaces the installed ' + name + '.' : '');
         if (!confirm(question)) return;
         await installFiles(name, title, files);
-        setStatus(title + ' is installed. Open the ' + (MOUNT_LABELS[manifest.mount || 'settings'] || 'page') +
-          ' page to use it.', 'ok');
+        setStatus(installedMessage(title, web, manifest.mount), 'ok');
       }
 
       $('zipForm').addEventListener('submit', async (e) => {
@@ -367,10 +469,11 @@
       // from GitHub, like ours. Neither repository has a license: the page links to their files and the
       // browser fetches them at install time; nothing of them is in this repository.
       //
-      // What of an entry runs here is judged from the catalog alone (communityStatus()): its web part
-      // (plugin.js) runs on this firmware's plugin host, which speaks upstream's API; its on-device
-      // screens (device.json) do not, nor does anything needing a capability listed in
-      // compatibility.requires that this firmware lacks.
+      // What of an entry runs here (communityStatus()) is judged from the catalog and the entry's device.json,
+      // which the browser reads from GitHub too: its web part (plugin.js) runs on this firmware's plugin host,
+      // which speaks upstream's API; a device.json catalog opens on this page (js/plugin-catalog.js) unless
+      // it is XML or needs a sign-in; device events do not run yet, nor does anything needing a capability
+      // in compatibility.requires that this firmware lacks.
       const COMMUNITY_CATALOG_URL =
         'https://raw.githubusercontent.com/crosspoint-reader/crosspoint-plugin-hub/main/catalog.json';
       // Plugin stores, which install plugins on the device: this page is the store here.
@@ -379,33 +482,61 @@
       const COMMUNITY_KNOWN = {
         'protected-content': 'it needs DRM support (api.crypto and book keys), which this firmware does not have'
       };
-      // Capabilities from upstream's compatibility.requires this firmware implements. None yet: the
-      // catalog.* ones are upstream's on-device catalog screens.
-      const COMMUNITY_CAPABILITIES = [];
-
       let communityCatalog = null;
+      // {"<entry>": PluginCatalog.describe() of its device.json, or null when it could not be read}.
+      let communityDevice = {};
 
-      // {level: 'yes' | 'partial' | 'no', text}: what of a community entry runs on this firmware.
-      function communityStatus(c) {
+      // {level: 'yes' | 'partial' | 'no', text}: what of a community entry runs on this firmware. device: the
+      // entry's communityDevice value.
+      function communityStatus(c, device) {
         const files = Array.isArray(c.files) ? c.files : [];
         const compat = c.compatibility || {};
         if (COMMUNITY_KNOWN[c.name]) return { level: 'no', text: 'Does not run here: ' + COMMUNITY_KNOWN[c.name] };
         if (compat.firmware_family && compat.firmware_family !== 'crosspoint') {
           return { level: 'no', text: 'Made for another firmware (' + compat.firmware_family + ')' };
         }
+        const capabilities = window.PluginCatalog ? PluginCatalog.CAPABILITIES : [];
         const missing = String(compat.requires || '').split(',').map((r) => r.trim())
-          .filter((r) => r && COMMUNITY_CAPABILITIES.indexOf(r) === -1);
-        if (!files.includes('plugin.js')) {
-          return { level: 'no', text: 'Does not run here yet: it has only a part on the device (screens, events)' };
+          .filter((r) => r && capabilities.indexOf(r) === -1);
+        if (missing.length) return { level: 'no', text: 'Does not run here yet: it needs ' + missing.join(', ') };
+        const web = files.includes('plugin.js');
+        if (!files.includes('device.json')) {
+          return web ? { level: 'yes', text: 'Runs here' } : { level: 'no', text: 'Does not run here: it has no part this firmware runs' };
         }
-        const beyondScreens = missing.filter((r) => !r.startsWith('catalog.'));
-        if (beyondScreens.length) {
-          return { level: 'no', text: 'Does not run here yet: it needs ' + beyondScreens.join(', ') };
+        if (!device) {
+          return { level: web ? 'partial' : 'no', text: (web ? 'Its web page runs here; its' : 'Its') +
+                   ' part on the device could not be checked' };
         }
-        if (files.includes('device.json') || missing.length) {
-          return { level: 'partial', text: 'Its web page runs here; its part on the device (screens, events) does not yet' };
+        if (device.catalog) {
+          const runs = web ? 'Its web page and its catalog run here' : 'Its catalog runs here, on this page';
+          return device.events ? { level: 'partial', text: runs + '; its events on the device do not yet' }
+            : { level: 'yes', text: 'Runs here: ' + (web ? 'a card, and a catalog you open on this page' : 'a catalog you open on this page') };
         }
-        return { level: 'yes', text: 'Runs here' };
+        const notHere = device.reason || 'its part on the device (' + (device.events ? 'events' : 'screens') + ') does not run here yet';
+        return web ? { level: 'partial', text: 'Its web page runs here; ' + notHere }
+          : { level: 'no', text: 'Does not run here: ' + notHere };
+      }
+
+      // Reads each entry's device.json from where the entry's files are, all at once: that is GitHub, not the
+      // reader, so the one-connection limit does not apply.
+      async function loadCommunityDevices(entries) {
+        try {
+          await loadScript('/js/plugin-catalog.js', 'PluginCatalog');
+        } catch (e) {
+          return;  // every device.json then counts as unread
+        }
+        communityDevice = {};
+        const read = entries.filter((c) => COMMUNITY_HIDDEN.indexOf(c.name) === -1 && !COMMUNITY_KNOWN[c.name] &&
+                                         Array.isArray(c.files) && c.files.includes('device.json'));
+        await Promise.all(read.map(async (c) => {
+          try {
+            const r = await fetch(new URL('device.json', entryBase(c, COMMUNITY_CATALOG_URL)), { cache: 'no-cache' });
+            if (!r.ok) throw new Error(r.status + '');
+            communityDevice[c.name] = PluginCatalog.describe(await r.json());
+          } catch (e) {
+            communityDevice[c.name] = null;
+          }
+        }));
       }
 
       async function loadCommunityCatalog() {
@@ -417,7 +548,9 @@
         try {
           const r = await fetch(COMMUNITY_CATALOG_URL, { cache: 'no-cache' });
           if (!r.ok) throw new Error(r.status + '');
-          communityCatalog = await r.json();
+          const loaded = await r.json();
+          await loadCommunityDevices(loaded.plugins || []);
+          communityCatalog = loaded;
         } catch (e) {
           $('catalog').replaceChildren(el('p', {
             className: 'empty',
@@ -481,7 +614,7 @@
         }
         const ownEntries = (catalog && catalog.plugins) || [];
         $('catalog').replaceChildren(...list.map((c) => {
-          const status = community ? communityStatus(c) : null;
+          const status = community ? communityStatus(c, communityDevice[c.name]) : null;
           const have = installed.find((p) => p.name === c.name);
           const current = have && (have.version || '') === (c.version || '');
           const button = el('button', {
@@ -495,7 +628,7 @@
           if (status) {
             title.append(el('span', {
               className: 'badge' + (status.level === 'yes' ? '' : status.level === 'partial' ? ' badge-warn' : ' badge-muted'),
-              textContent: status.level === 'yes' ? 'runs here' : status.level === 'partial' ? 'web page only' : 'does not run here'
+              textContent: status.level === 'yes' ? 'runs here' : status.level === 'partial' ? 'partly runs here' : 'does not run here'
             }));
           }
           const from = describeSource(c, fromUrl);
@@ -531,8 +664,12 @@
         try {
           setStatus('Downloading ' + title + '...', 'busy');
           const base = entryBase(c, fromUrl);
-          const files = await Promise.all((c.files || []).map(async (name) => {
-            // A plugin's files sit side by side; the reader refuses anything else as well.
+          const names = c.files || [];
+          // A plugin's files sit side by side here, and the reader serves no subfolders (/plugin). An upstream
+          // plugin may list some anyway - the dictionaries catalog's own pages, which it reads from GitHub - so a
+          // community install leaves them out; this repository's catalog has none.
+          const flat = status ? names.filter((n) => typeof n !== 'string' || !n.includes('/')) : names;
+          const files = await Promise.all(flat.map(async (name) => {
             if (typeof name !== 'string' || !name || name.includes('/')) throw new Error('bad file name in the catalog');
             const r = await fetch(new URL(name, base), { cache: 'no-cache' });
             if (!r.ok) throw new Error(name + ': ' + r.status);
@@ -559,7 +696,9 @@
             }
           }
           await installFiles(c.name, title, files);
-          setStatus(title + ' is installed. Open the ' + (MOUNT_LABELS[mount] || 'page') + ' page to use it.', 'ok');
+          const left = names.length - flat.length;
+          setStatus(installedMessage(title, flat.includes('plugin.js'), mount) +
+                    (left ? ' Left out ' + left + (left === 1 ? ' file' : ' files') + ' in subfolders, which this firmware does not use.' : ''), 'ok');
         } catch (e) {
           setStatus('Could not install ' + title + ': ' + e.message, 'err');
         }
