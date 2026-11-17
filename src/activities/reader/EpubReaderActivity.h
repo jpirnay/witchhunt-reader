@@ -25,6 +25,7 @@
 #include "BookmarkStore.h"
 #include "BuildPageGray.h"
 #include "BuildThroughGate.h"
+#include "ChapterBackfill.h"
 #include "ChapterPageSpan.h"
 #include "CrossPointState.h"
 #include "EpubLinkBackStack.h"
@@ -824,14 +825,26 @@ class EpubReaderActivity final : public Activity {
   // come before it and have no page count, once the look-ahead has nothing left to do. beginChapterBackfill() makes the
   // nearest such file B's target, keeping the look-ahead's cursor (false when there is none or it may not);
   // endChapterBackfill() puts the cursor back. backfillSpine_ is the file B lays out (-1: none); backfillFor_ the spine
-  // on screen that backfillDone_ (none left, or given up) and backfillLastTarget_ refer to.
+  // on screen that backfillDone_ (none left, or a build of one failed) and backfillLastTarget_ (laid out last) refer
+  // to.
   bool beginChapterBackfill();
-  void endChapterBackfill(bool giveUp);
+  void endChapterBackfill();
+  // Whether B may lay out `spine` for the count now, at the reader's pace (ChapterBackfill::mayStart).
+  bool backfillMayBorrow(int spine) const;
   int backfillSpine_ = -1;
   int backfillForwardCursor_ = -1;
   int backfillFor_ = -1;
   int backfillLastTarget_ = -1;
+  // The file the page index named for the spine on screen; -2 until it is read, after each file laid out.
+  int backfillTarget_ = -2;
+  // How long the page was up when a turn took a backfill build away in this chapter (0: none).
+  uint32_t backfillPreemptedStayMs_ = 0;
   bool backfillDone_ = false;
+  // The reader's pace: from the turn before the last to the last (turnGapMs_ goes to the render that answers a turn).
+  uint32_t lastTurnGapMs_ = ChapterBackfill::kNoPace;
+  // How long B's builds hold their buffer per KB of XHTML on this device, from the last one that finished.
+  uint32_t buildMsPerKb_ = ChapterBackfill::kDefaultMsPerKb;
+  unsigned long backgroundBorrowStartMs_ = 0;
   // Realloc the secondary buffer, evicting rebuildable caches (FDC page slots, CSS
   // resolve caches) that a released build may have planted inside the freed hole and
   // retrying once before reporting failure. Shared by the post-build and opportunistic

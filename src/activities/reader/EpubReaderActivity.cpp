@@ -58,7 +58,6 @@
 #include "BookSearchActivity.h"
 #include "BuildDuringRefresh.h"
 #include "CarriedSpineNav.h"
-#include "ChapterBackfill.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "DarkMode.h"
@@ -126,6 +125,12 @@ bool chapterCounterShown() {
   return SETTINGS.statusBarChapterPageCount ||
          SETTINGS.statusBarUpperProgressBar == CrossPointSettings::STATUS_BAR_PROGRESS_BAR::CHAPTER_PROGRESS ||
          SETTINGS.statusBarLowerProgressBar == CrossPointSettings::STATUS_BAR_PROGRESS_BAR::CHAPTER_PROGRESS;
+}
+
+// A spine item's XHTML, inflated: what its build lays out (BookMetadataCache keeps the running sum).
+uint32_t spineItemBytes(const Epub& epub, const int spine) {
+  const size_t before = spine > 0 ? epub.getCumulativeSpineItemSize(spine - 1) : 0;
+  return static_cast<uint32_t>(epub.getCumulativeSpineItemSize(spine) - before);
 }
 
 // Human-readable effective refresh mode for the page-summary diagnostic log.
@@ -1870,6 +1875,7 @@ bool EpubReaderActivity::beginBackgroundBorrow() {
   // in endBackgroundBorrow(). The allocator tracks it from here (it is a global setting, so the
   // [MEM] ticks' "Min Free" shows the same local low until the buffer goes back).
   backgroundBorrowFreeAtStart_ = static_cast<uint32_t>(esp_get_free_heap_size());
+  backgroundBorrowStartMs_ = millis();
   backgroundHeapLowTracked_ = heap_caps_monitor_local_minimum_free_size_start() == ESP_OK;
   LOG_INF("ERS", "Background-B: borrowed secondary buffer for spine %d build (%u bytes, free=%lu contig=%lu)",
           backgroundBuildSpineIndex_, static_cast<uint32_t>(borrowedSize),
@@ -2038,6 +2044,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
     backgroundAbandonedSpine_ = -1;
     backgroundWindowPagesBuilt_ = 0;
   }
+  // A turn took a file for the count away: the look-ahead gets its cursor back without probing that file again, and
+  // the file waits for a pause (ChapterBackfill).
+  if (backfillSpine_ >= 0 && backgroundPreemptCount_ > 0) {
+    backfillPreemptedStayMs_ = std::max(backfillPreemptedStayMs_, backgroundPreemptedStayMs_);
+    endChapterBackfill();
+    return;
+  }
   // Walk forward from currentSpineIndex+1 to the book end. The cursor advances as each target
   // settles (Settled case below); already-cached spines settle for free in Probe.
   // Once it has nothing left to do, the chapter's earlier files that have no page count (ChapterBackfill).
@@ -2073,8 +2086,11 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
 
   switch (backgroundBuildState_) {
     case BackgroundBuildState::Settled: {
+      // Laid out, or found laid out already: the page index names the next file for the count.
       if (backfillSpine_ >= 0) {
-        endChapterBackfill(/*giveUp=*/false);
+        backfillLastTarget_ = targetSpine;
+        backfillTarget_ = -2;
+        endChapterBackfill();
         return;
       }
       // Target indexed (freshly built or already cached): advance the cursor to the next
@@ -2123,19 +2139,17 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         return;
       }
       backgroundBuildGateCheckMs_ = now;
+      // A file for the count waits for the reader's pace and for a buffer whose loss costs the next turn nothing; until
+      // then the look-ahead has its cursor back.
+      if (backfillSpine_ >= 0 && !backfillMayBorrow(backfillSpine_)) {
+        endChapterBackfill();
+        return;
+      }
       // Give-up latch: this target has already burned its retry budget being preempted. Leave it
       // to Background-C (the reader gets the popup, exactly as before this feature), and stop: the
       // reader turns faster than a chapter builds, so the chapters after it would lose the same race,
       // each at the cost of a turn's one-pass refresh (LookAheadPause). The cursor stays here until the
       // reader pauses, or moves it by entering another chapter.
-      if (backgroundPreemptCount_ >= BG_BUILD_MAX_PREEMPTIONS && backfillSpine_ >= 0) {
-        // The reader turns faster than the file builds: the count stays an estimate in this chapter. The look-ahead
-        // is not stopped for it, as it is for a file the reader is about to reach.
-        LOG_INF("ERS", "Background-B: spine %d abandoned after %u preemptions; the chapter's count stays an estimate",
-                targetSpine, static_cast<unsigned>(backgroundPreemptCount_));
-        endChapterBackfill(/*giveUp=*/true);
-        return;
-      }
       if (backgroundPreemptCount_ >= BG_BUILD_MAX_PREEMPTIONS) {
         if (!backgroundStoppedAfterAbandon_) {
           backgroundStoppedAfterAbandon_ = true;
@@ -2325,6 +2339,8 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
 #if DEBUG_BACKGROUND_WORK
           bgCounters_.bCompletes++;
 #endif
+          buildMsPerKb_ = ChapterBackfill::msPerKb(static_cast<uint32_t>(millis() - backgroundBorrowStartMs_),
+                                                   spineItemBytes(*epub, targetSpine), buildMsPerKb_);
           // A file behind the reader is no runway: only the look-ahead's count toward the page budget.
           if (backfillSpine_ < 0) backgroundWindowPagesBuilt_ += backgroundSection_->pageCount;
           LOG_INF("ERS", "Background build spine=%d complete: %u pages", targetSpine, backgroundSection_->pageCount);
@@ -4415,6 +4431,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   const unsigned long askedMs = turnAskedMs_ != 0 ? turnAskedMs_ : millis();
   turnAskedMs_ = 0;
   turnGapMs_ = static_cast<uint32_t>(askedMs - lastTurnAskedMs_);
+  lastTurnGapMs_ = lastTurnAskedMs_ != 0 ? turnGapMs_ : ChapterBackfill::kNoPace;
   lastTurnAskedMs_ = askedMs;
 
   // Cancel any pending deferred AA pass — it belongs to the page we're leaving.
@@ -4695,6 +4712,8 @@ bool EpubReaderActivity::beginChapterBackfill() {
     backfillFor_ = currentSpineIndex;
     backfillDone_ = false;
     backfillLastTarget_ = -1;
+    backfillTarget_ = -2;
+    backfillPreemptedStayMs_ = 0;
   }
   ChapterBackfill::State state;
   state.counterShown = chapterCounterShown();
@@ -4703,37 +4722,50 @@ bool EpubReaderActivity::beginChapterBackfill() {
   state.doneForSpine = backfillDone_;
   state.backfilling = backfillSpine_ >= 0;
   if (!epub || !section || !ChapterBackfill::mayLook(state)) return false;
-  if (chapterSpanSpine_ != currentSpineIndex) refreshChapterSpan();  // resolves chapterBounds_ for the spine on screen
-  const int first = chapterBounds_.first;
-  // One read of the book's page index: the chapter's files before the one on screen.
-  const int target = first >= 0 && first < currentSpineIndex
-                         ? Section::lastUnindexedSpine(epub->getCachePath(), makeSectionBuildParams(),
-                                                       epub->getSpineItemsCount(), first, currentSpineIndex - 1)
-                         : -1;
+  // One read of the book's page index per file laid out: the chapter's nearest file before the one on screen.
+  if (backfillTarget_ == -2) {
+    // chapterBounds_ for the spine on screen.
+    if (chapterSpanSpine_ != currentSpineIndex) refreshChapterSpan();
+    const int first = chapterBounds_.first;
+    backfillTarget_ = first >= 0 && first < currentSpineIndex
+                          ? Section::lastUnindexedSpine(epub->getCachePath(), makeSectionBuildParams(),
+                                                        epub->getSpineItemsCount(), first, currentSpineIndex - 1)
+                          : -1;
+  }
+  const int target = backfillTarget_;
   if (!ChapterBackfill::takes(target, backfillLastTarget_)) {
     backfillDone_ = true;
     return false;
   }
+  if (!backfillMayBorrow(target)) return false;
   const int cursor = backgroundBuildSpineIndex_;
   resetBackgroundBuild();
   backfillForwardCursor_ = cursor;
   backgroundBuildSpineIndex_ = target;
   backfillSpine_ = target;
-  backfillLastTarget_ = target;
-  LOG_INF("ERS", "Background-B: laying out spine %d for the chapter's page count (chapter spines %d-%d)", target, first,
-          chapterBounds_.last);
+  LOG_INF("ERS", "Background-B: laying out spine %d for the chapter's page count (chapter spines %d-%d)", target,
+          chapterBounds_.first, chapterBounds_.last);
   return true;
 }
 
-void EpubReaderActivity::endChapterBackfill(const bool giveUp) {
+void EpubReaderActivity::endChapterBackfill() {
   const int cursor = backfillForwardCursor_;
   backfillSpine_ = -1;
   backfillForwardCursor_ = -1;
-  if (giveUp) backfillDone_ = true;
   resetBackgroundBuild();  // the file is behind the reader: its Section is not kept for adoption
   backgroundBuildSpineIndex_ = cursor;
   // Read again by the next draw that happens anyway (ChapterBackfill, R6): nothing is redrawn for the count alone.
   chapterSpanSpine_ = -1;
+}
+
+bool EpubReaderActivity::backfillMayBorrow(const int spine) const {
+  const unsigned long activityMs = std::max(lastPageTurnTime, lastPageOnScreenMs_);
+  // The borrow waits for the quiet period in any case: the build starts then at the earliest.
+  const unsigned long startMs = std::max<unsigned long>(millis(), activityMs + BG_BUILD_BORROW_QUIET_MS);
+  return ChapterBackfill::mayStart(ChapterBackfill::buildMs(spineItemBytes(*epub, spine), buildMsPerKb_),
+                                   static_cast<uint32_t>(startMs - lastTurnAskedMs_), lastTurnGapMs_,
+                                   static_cast<uint32_t>(startMs - activityMs), backfillPreemptedStayMs_,
+                                   BG_BUILD_BORROW_QUIET_MS);
 }
 
 bool EpubReaderActivity::chapterCounterAwaits(const int spine) const {
