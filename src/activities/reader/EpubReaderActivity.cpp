@@ -6028,8 +6028,8 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
       // footnote list and the menu's "has footnotes" flag kept describing whatever page was
       // displayed BEFORE the build started — the reader can open both while a build runs.
       currentPageFootnotes = std::move(page->footnotes);
-      displayBuildPage(lock, *page, layout, drawBlock.valid() ? &drawBlock : nullptr);
-      return;  // the lock is already released; the page goes out of scope here
+      displayBuildPage(lock, std::move(page), layout, drawBlock.valid() ? &drawBlock : nullptr);
+      return;  // the lock is already released, and the page freed before that
     }
     // Image page or load failure: fall through to the popup until the build completes. The
     // page (and its bytes in the block) go first, then the block.
@@ -7021,8 +7021,9 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   WakeTrace::logSummary();
 }
 
-void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout,
+void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page> ownedPage, const RenderLayout& layout,
                                           BuildArena::Block* drawBlock) {
+  const Page& page = *ownedPage;  // freed below, before the lock is released: not read past that point
   const ReaderUtils::ReaderRefreshScope readerRefresh;
   pinPageProgression();
   grayCanvasOnScreen_ = false;
@@ -7107,9 +7108,14 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
     // has no AA pass to replay later (the borrowed buffer forces secondaryBufferDegraded_).
     renderer.getFontCacheManager()->clearCache();
   }  // slot scope closed
+  // The page itself goes back before the build resumes, as the font slots above do: the build's slices run during the
+  // waveform wait below, and a page left alive through it was heap the build had on master, where it sat the wait
+  // out. X4, 2026-11-17, with the page kept: the lowest free heap of a resident build 2.3 KB down (37.4 -> 35.0 KB), of
+  // a borrowed one 0.7 KB (the page's text is in the arena block there).
+  ownedPage.reset();
   if (drawBlock != nullptr && drawBlock->valid() && buildScratch_) {
-    // The page's bytes are no longer read (render and link targets are done above); the caller
-    // still owns the object, whose destructor does not touch them.
+    // The page's bytes are no longer read (render and link targets are done above), and its destructor, run just
+    // above, did not touch them.
     if (!buildScratch_->release(*drawBlock)) {
       LOG_ERR("ERS", "Mid-build draw block could not be released (out of order)");
     }

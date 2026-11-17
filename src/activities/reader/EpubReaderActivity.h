@@ -1010,8 +1010,9 @@ class EpubReaderActivity final : public Activity {
   // slice can run on the loop task during the refresh.
   // `drawBlock`: the arena block the page's TextBlock bytes live in, when the caller loaded the
   // page from the build's lent region. Released here, before the lock is, so a build slice that
-  // runs during the waveform wait finds the arena cursor where it left it.
-  void displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout,
+  // runs during the waveform wait finds the arena cursor where it left it. The page is freed here for the same
+  // reason: the build gets its heap back before it resumes.
+  void displayBuildPage(RenderLock& lock, std::unique_ptr<Page> ownedPage, const RenderLayout& layout,
                         BuildArena::Block* drawBlock = nullptr);
   // Draws the status bar over the current frame buffer and flushes to the display.
   // Handles the refresh cycle and grayscale AA pass. page must be the same page
