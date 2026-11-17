@@ -68,6 +68,12 @@ Cost to measure on the C3 against master: flash and the open-path heap.
 
 ## D2: the cache at rest
 
+Owner rule (2026-11-17): the cipher must be the fastest and leanest available and must not change how reading feels.
+Measure first, on the C3: a page turn and a chapter build of a protected book against the same book unprotected, plus
+flash. If even the fastest cipher is noticeable, fall back to a cheap obfuscation (a keyed XOR stream, say) or leave
+the cache plain, and say which in the release notes. The September numbers are the starting point: ChaCha20 through
+wolfSSL 4.6 MB/s, a portable ChaCha20 1.8 MB/s, AES-128-CBC 1.5 MB/s; a 4 KB page record 1.1 ms.
+
 Carry over Phase 0 from `feat/protected-content-phase0` by hand (the branch is 3,345 commits behind and conflicts in
 12 files): `lib/CacheCipher` (ChaCha20 through wolfSSL, 4.6 MB/s on the C3, length-preserving and addressable by
 offset), the storage scope that enciphers a protected book's cache files, and its host tests. Its keys come from
