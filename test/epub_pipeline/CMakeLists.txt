@@ -164,6 +164,7 @@ add_executable(EpubPipelineTest
   SpineCacheLayoutTest.cpp
   CacheFileIdentityTest.cpp
   HeadingCarryTest.cpp
+  CarriedDocumentTest.cpp
   SaxStateInArenaTest.cpp
   OwnedBuildRegionTest.cpp
   JpegDownscaleTest.cpp
