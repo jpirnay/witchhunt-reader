@@ -434,6 +434,7 @@ check(P.tokenJson('auth.token', 'x') === '{"auth":{"token":"x"}}' && P.tokenJson
 check(P.signInKind({ auth: { request: { url: 'u' } } }) === 'device_code' &&
       P.signInKind({ auth: { type: 'password', request: { url: 'u' } } }) === 'password' &&
       P.signInKind({ auth: { type: 'refresh', request: { url: 'u' } } }) === 'other:refresh' &&
+      P.signInKind({ auth: { type: 'refresh', refresh: { url: 'u' } } }) === 'other:refresh' &&
       P.signInKind({ auth: { type: 'password' } }) === '', 'the sign-in kinds, device_code by default, none without a request');
 check(P.urlDecodePath('/a%20b+c/%C3%BC') === '/a b+c/ü' && P.urlEncodePath('/a b/ü~') === '/a%20b/%C3%BC~',
       'XML hrefs: decoded with "+" kept, encoded back with "/" kept');

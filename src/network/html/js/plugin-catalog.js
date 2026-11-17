@@ -202,9 +202,10 @@
   // the plugin's web card writes, or no sign-in), or 'other:<type>' for one upstream does not define.
   function signInKind(m) {
     const a = m && m.auth;
-    if (!a || typeof a !== 'object' || !(a.request && a.request.url)) return '';
+    if (!a || typeof a !== 'object') return '';
     const type = text(a.type || 'device_code');
-    return type === 'password' || type === 'device_code' ? type : 'other:' + type;
+    if (type !== 'password' && type !== 'device_code') return 'other:' + type;  // dropbox's "refresh", from another fork
+    return a.request && a.request.url ? type : '';
   }
 
   function signInNeeded(message) {
