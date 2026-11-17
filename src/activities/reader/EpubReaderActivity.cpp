@@ -7185,9 +7185,9 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
     renderer.getFontCacheManager()->clearCache();
   }  // slot scope closed
   // The page itself goes back before the build resumes, as the font slots above do: the build's slices run during the
-  // waveform wait below, and a page left alive through it was heap the build had on master, where it sat the wait
-  // out. X4, 2026-11-17, with the page kept: the lowest free heap of a resident build 2.3 KB down (37.4 -> 35.0 KB), of
-  // a borrowed one 0.7 KB (the page's text is in the arena block there).
+  // waveform wait below, and a page left alive through it is heap the build had while it still sat that wait out.
+  // X4, 2026-11-17, with the page kept: the lowest free heap of a resident build 2.3 KB down (37.4 -> 35.0 KB), of a
+  // borrowed one 0.7 KB (the page's text is in the arena block there).
   ownedPage.reset();
   if (drawBlock != nullptr && drawBlock->valid() && buildScratch_) {
     // The page's bytes are no longer read (render and link targets are done above), and its destructor, run just
