@@ -5,10 +5,11 @@
 // cache as it was, and the books here have no such file: test_heading_near_miss.epub holds the files that come
 // closest to one.
 //
-// The books are built in two cache directories and must agree, as the layout goldens are. Bytes that name where the
-// test ran are normalised: a serialized String (u32 length, then its bytes) that starts with the book's cache
-// directory or with the book's own path is hashed as if it started with "<cache>" or "<book>" (an image's path and
-// its book, ImageBlock::serialize).
+// The books are built in two cache directories and must agree, as the layout goldens are. Their caches name no path:
+// a page with a picture stores the picture's and the book's absolute paths (ImageBlock::serialize), and their length
+// moves every offset after them, so no normalisation makes such a file the same on another machine. The books here
+// have no picture. A serialized String (u32 length, then its bytes) that starts with the book's cache directory or
+// with the book's own path is still hashed as if it started with "<cache>" or "<book>", should one appear.
 #include <gtest/gtest.h>
 #include <unistd.h>
 
@@ -147,7 +148,7 @@ TEST_P(CacheFileIdentityTest, MatchesPinnedFiles) {
 
 const Case kCases[] = {
     {"test_heading_near_miss.epub", "default"}, {"test_heading_near_miss.epub", "murphy"},
-    {"test_display_none.epub", "default"},      {"test_display_none.epub", "murphy"},
+    {"test_split_footnotes.epub", "default"},   {"test_split_footnotes.epub", "murphy"},
     {"test_keep_together.epub", "default"},     {"test_keep_together.epub", "murphy"},
 };
 
