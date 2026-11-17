@@ -31,6 +31,7 @@
 #include "Epub/CoverImageRefScanner.h"
 #include "Epub/CoverThumbSession.h"
 #include "Epub/HashUtils.h"
+#include "Epub/HeadingCarry.h"
 #include "Epub/ImageFormatDetector.h"
 #include "Epub/MetadataSidecar.h"
 #include "Epub/NavCoverScanner.h"
@@ -2440,6 +2441,8 @@ void Epub::forgetMetadataMemos() const {
   tocForSpineMemoToc_ = -1;
   tocEntryMemoIndex_ = -1;
   tocEntryMemo_ = {};
+  for (CarryMemo& memo : carryMemo_) memo = {};
+  carryMemoNext_ = 0;
 }
 
 BookMetadataCache::SpineEntry Epub::getSpineItem(const int spineIndex) const {
@@ -2543,6 +2546,19 @@ bool Epub::hasReliableToc() const {
   const bool reliable = bookMetadataCache->isTocReliable();
   tocReliability = reliable ? TocReliability::Reliable : TocReliability::Unreliable;
   return reliable;
+}
+
+bool Epub::isCarriedSpine(const int spine, BuildArena* scratch) const {
+  if (spine < 0) return false;
+  for (const CarryMemo& memo : carryMemo_) {
+    if (memo.spine == spine) return memo.carried;
+  }
+  const HeadingCarry::Verdict verdict = HeadingCarry::decide(*this, spine, scratch);
+  if (verdict == HeadingCarry::Verdict::Unknown) return false;
+  const bool carried = verdict == HeadingCarry::Verdict::Yes;
+  carryMemo_[carryMemoNext_] = {spine, carried};
+  carryMemoNext_ = static_cast<uint8_t>((carryMemoNext_ + 1) % std::size(carryMemo_));
+  return carried;
 }
 
 int Epub::getTocIndexForSpineIndex(const int spineIndex) const {

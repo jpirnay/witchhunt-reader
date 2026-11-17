@@ -247,7 +247,10 @@ cache hit, not a blocking parse. `stepBackgroundSectionBuild()`, one bounded sli
   ahead of the reading position, counting the current section's unread tail plus the sections
   built so far. Whole spines are built until the budget is covered, so many tiny front-matter
   spines get several built while one big chapter covers it alone. The cursor walks forward as each
-  settles and re-anchors on any navigation.
+  settles and re-anchors on any navigation. A spine item that holds only its chapter's heading
+  (HeadingCarry) settles in `Probe` as a section of no pages: the next item's build lays it out.
+  Where B, build-through and the image lane mean "the next chapter" they go by
+  `nextReadingSpine()`, which steps over such an item.
 - **State machine:** `Probe` (cache check; a cached spine settles at once) → `WaitHeap` (gates,
   re-checked at most once a second) → `Building` (`BG_BUILD_BUDGET_MS` = 40 ms slices) → `Settled`.
 - **Builds only inside the borrowed secondary buffer.** `beginBackgroundBorrow()` lends the block as
