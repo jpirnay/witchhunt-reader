@@ -630,6 +630,23 @@ class LentSecondary {
   std::optional<BuildArena> arena_;
 };
 
+// The two panel-native planes a page render fills as it draws (GfxRenderer::beginGrayCapture), for a page that goes out
+// with its gray in one push; the capture begins here and the caller ends it. Both or neither: false, with both null,
+// when they cannot be had, and the page goes out without them.
+bool beginGrayCapturePlanes(GfxRenderer& renderer, std::unique_ptr<uint8_t[]>& lsb, std::unique_ptr<uint8_t[]>& msb) {
+  const size_t planeBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
+  lsb = makeUniqueNoThrow<uint8_t[]>(planeBytes);
+  msb = lsb ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
+  if (!msb) {
+    lsb.reset();
+    return false;
+  }
+  memset(lsb.get(), 0, planeBytes);
+  memset(msb.get(), 0, planeBytes);
+  renderer.beginGrayCapture(lsb.get(), msb.get());
+  return true;
+}
+
 // A block on `arena`, released with the scope; nothing without an arena. Declared before what lives in the block.
 class ScopedArenaBlock {
  public:
@@ -1379,8 +1396,8 @@ void EpubReaderActivity::serviceBackgroundWork() {
     currentSectionBuildActive = section && section->hasActiveBuild();
   }
   if (currentSectionBuildActive) {
-    // A picture on the page being read outranks the pages after it (LaneBeforeBuild).
-    if (!stepImageLaneDuringBuild()) stepCurrentSectionBuild();
+    // The page being read outranks the pages after it: its gray (BuildPageGray), a picture on it (LaneBeforeBuild).
+    if (!askBuildPageGray() && !stepImageLaneDuringBuild()) stepCurrentSectionBuild();
     return;
   }
   // Room in the glyph store comes before Background-B's look-ahead; the section the reader waits on and the AA pass
@@ -1561,6 +1578,10 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   logReaderMemSnapshot("aa_end");
   LOG_DBG("ERS", "Deferred AA%s: planes=%lums gray=%lums restore=%lums", gt.aborted ? " ABORTED" : "", gt.planesMs,
           gt.displayMs, gt.restoreMs);
+  // The page a build drew has its gray, asked for while the build goes on: the build's end leaves it as it is.
+  if (!gt.aborted && buildPageOnScreen_.gray == BuildPageGray::Gray::Asked) {
+    buildPageOnScreen_.gray = BuildPageGray::Gray::Shown;
+  }
   checkHeapIntegrity("after_deferred_aa");
   // The page is on the panel with its grey levels: nothing reads its glyphs until the next render,
   // which prewarms them again. Freed before the pre-render below is requested, so it can start.
@@ -2971,30 +2992,14 @@ bool EpubReaderActivity::keepBuildPageOnScreen() {
   lastRenderedSpineIndex_ = currentSpineIndex;
   lastRenderedPageIndex_ = section->currentPage;
   lastRenderedPageCount_ = section->pageCount;
-  // The build drew it in black and white: its AA comes as the pass a turn defers it to, over the page as it is.
+  // The build drew it in black and white: its AA comes as the pass a turn defers it to, over the page as it is. Unless
+  // it came while the build went on (BuildPageGray).
+  const bool grayOnScreen = !BuildPageGray::owedAtBuildEnd(shown.gray);
   bool aaOwed = false;
-  if (getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer()) {
+  if (!grayOnScreen && getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer()) {
     std::unique_ptr<Page> page = section->loadPageFromSectionFile();
     if (page) {
-      // The page's glyphs, as a render leaves them for its deferred pass: the build's draw gave its slots back for the
-      // rest of the build, and the pass without them took 1,458 ms of planes on the X3 (920 on the X4 Pro) against
-      // 116-149 ms after a turn (2026-11-15). The pass releases them (releasePageGlyphArena). As in renderContents(),
-      // the misses and the built-in fonts' ring take their scratch from the secondary buffer; given back seeded from
-      // the write buffer, which holds the page on screen, so it is still that page's frame for the pass's restore.
-      {
-        std::optional<LentSecondary> prewarmLend;
-        if (renderer.hasSecondaryBuffer()) prewarmLend.emplace(renderer);
-        const glyph_miss::Scope misses(prewarmLend ? prewarmLend->arena() : nullptr);
-        prewarmPageFonts(*page, shown.marginLeft, shown.contentTop);
-      }
-      sdFontSystem.releaseTtfMissMemory();
-      pendingGrayscale_.active = true;
-      pendingGrayscale_.page = std::move(page);
-      pendingGrayscale_.imagesGray = false;
-      pendingGrayscale_.fontId = getEffectiveReaderFontId();
-      pendingGrayscale_.marginLeft = shown.marginLeft;
-      pendingGrayscale_.contentTop = shown.contentTop;
-      markStagedForCurrentPage();
+      armBuildPageGray(shown, std::move(page));
       aaOwed = true;
       preRenderAfterAa_ = !usesDeferredAa();
     }
@@ -3007,7 +3012,67 @@ bool EpubReaderActivity::keepBuildPageOnScreen() {
     if (!aaOwed) requestUpdate();
   }
   LOG_INF("ERS", "Page %d of spine %d kept on screen after its build (AA %s)", section->currentPage + 1,
-          currentSpineIndex, aaOwed ? "owed" : "off");
+          currentSpineIndex,
+          aaOwed         ? "owed"
+          : grayOnScreen ? "on screen"
+                         : "off");
+  return true;
+}
+
+void EpubReaderActivity::armBuildPageGray(const BuildPageOnScreen& shown, std::unique_ptr<Page> page) {
+  // The page's glyphs, as a render leaves them for its deferred pass: the build's draw gave its slots back for the
+  // rest of the build, and the pass without them took 1,458 ms of planes on the X3 (920 on the X4 Pro) against
+  // 116-149 ms after a turn (2026-11-15). The pass releases them (releasePageGlyphArena). As in renderContents(),
+  // the misses and the built-in fonts' ring take their scratch from the secondary buffer; given back seeded from
+  // the write buffer, which holds the page on screen, so it is still that page's frame for the pass's restore.
+  {
+    std::optional<LentSecondary> prewarmLend;
+    if (renderer.hasSecondaryBuffer()) prewarmLend.emplace(renderer);
+    const glyph_miss::Scope misses(prewarmLend ? prewarmLend->arena() : nullptr);
+    prewarmPageFonts(*page, shown.marginLeft, shown.contentTop);
+  }
+  sdFontSystem.releaseTtfMissMemory();
+  pendingGrayscale_.active = true;
+  pendingGrayscale_.page = std::move(page);
+  pendingGrayscale_.imagesGray = false;
+  pendingGrayscale_.fontId = getEffectiveReaderFontId();
+  pendingGrayscale_.marginLeft = shown.marginLeft;
+  pendingGrayscale_.contentTop = shown.contentTop;
+  markStagedForCurrentPage();
+}
+
+bool EpubReaderActivity::buildLeavesFramesAlone() const {
+  // keepsPreviousFrame(): the frame on screen is in the secondary buffer, false only where the PSRAM arena could not be
+  // had and the buffer itself was lent.
+  return HalCapabilities::buildsInPsram() && renderer.keepsPreviousFrame();
+}
+
+bool EpubReaderActivity::askBuildPageGray() {
+  // The hint is read without the lock, so a tick with nothing due takes none. Taking the lock on every tick made the
+  // Picco's chapter build 53-66 ms slower in 2.2-2.9 s (AA off, against a build without this call, n=3, 2026-11-17);
+  // with the hint it built within 8 ms of that one.
+  if (!HalCapabilities::buildsInPsram() || !buildPageGrayDue_.load(std::memory_order_acquire) || RenderLock::peek()) {
+    return false;
+  }
+  RenderLock lock;
+  const BuildPageOnScreen shown = buildPageOnScreen_;
+  if (!section || !section->hasActiveBuild() || shown.spine != currentSpineIndex ||
+      shown.page != section->currentPage ||
+      !BuildPageGray::whileBuilding(buildLeavesFramesAlone(), getEffectiveTextAntiAliasing(), shown.hasImages,
+                                    uiOverPage()) ||
+      shown.gray != BuildPageGray::Gray::None) {
+    buildPageGrayDue_.store(false, std::memory_order_release);  // the page it was set for has gone, or has its gray
+    return false;
+  }
+  if (!BuildPageGray::asksPassNow(shown.gray, renderer.isRefreshPending(), pendingGrayscale_.active)) {
+    return false;  // a later tick
+  }
+  buildPageGrayDue_.store(false, std::memory_order_release);
+  buildPageOnScreen_.gray = BuildPageGray::Gray::Asked;
+  std::unique_ptr<Page> page = section->loadPageFromActiveBuild(static_cast<uint16_t>(shown.page));
+  if (!page) return false;  // the build's end asks again
+  armBuildPageGray(shown, std::move(page));
+  LOG_INF("ERS", "Page %d of spine %d: AA asked for while the build goes on", shown.page + 1, currentSpineIndex);
   return true;
 }
 
@@ -6666,19 +6731,8 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // cost of the approach and why it is gated on supportsGrayFrame(). A board
   // that cannot use them keeps the staged path and never allocates; an
   // allocation failure falls back the same way.
-  const size_t capPlaneBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
   std::unique_ptr<uint8_t[]> capLsb, capMsb;
-  if (singlePushAaThisRender) {
-    capLsb = makeUniqueNoThrow<uint8_t[]>(capPlaneBytes);
-    capMsb = capLsb ? makeUniqueNoThrow<uint8_t[]>(capPlaneBytes) : nullptr;
-    if (capMsb) {
-      memset(capLsb.get(), 0, capPlaneBytes);
-      memset(capMsb.get(), 0, capPlaneBytes);
-      renderer.beginGrayCapture(capLsb.get(), capMsb.get());
-    } else {
-      capLsb.reset();  // OOM: the staged path below runs unchanged
-    }
-  }
+  if (singlePushAaThisRender) beginGrayCapturePlanes(renderer, capLsb, capMsb);  // OOM: the staged path runs unchanged
 
   logReaderMemSnapshot("before_bw_render");
   ImageBlock::takeLowMemoryPlaceholders();  // the warm pass's boxes were cleared with the screen
@@ -7020,7 +7074,7 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   pinPageProgression();
   grayCanvasOnScreen_ = false;
   // Draws one page from an in-progress Background-C build: a plain BW render + status bar, no
-  // AA and no pre-render arming (those belong to the steady reading state set up by
+  // pre-render arming (that belongs to the steady reading state set up by
   // renderNormalPass() once the build completes). Images come from their pixel cache when they
   // have one and are drawn as "indexing" placeholders otherwise (ImageBlock::PlaceholderOnlyScope
   // below), so no decode runs on the build's heap and no secondary-buffer release is needed. The lock is released
@@ -7029,6 +7083,15 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   const int viewportHeight =
       std::max(0, renderer.getScreenHeight(renderer.getHeldOrientation()) - layout.marginTop - layout.marginBottom);
   const int contentTop = layout.marginTop + ReaderPageLayout::imageOnlyPageYOffset(page, viewportHeight);
+  // Where the build leaves the frame buffers alone, a page of text gets its gray while the build goes on
+  // (BuildPageGray). On a panel that puts a page and its gray up in one push (one-pass text, the T5S3) it goes up with
+  // this push, its planes captured by the render below as a turn's page has them (renderContents()); elsewhere it comes
+  // from the deferred pass once this refresh is over (askBuildPageGray()). The planes live until the push is collected.
+  const bool grayWhileBuilding = BuildPageGray::whileBuilding(buildLeavesFramesAlone(), getEffectiveTextAntiAliasing(),
+                                                              page.hasImages(), uiOverPage());
+  std::optional<ReaderUtils::OnePassTextScope> onePassText;
+  if (grayWhileBuilding) onePassText.emplace(onePassTextFor(page));
+  std::unique_ptr<uint8_t[]> capLsb, capMsb;
 
   // Everything that touches the build's arena -- the font-slot scope below and the caller's
   // page block -- ends inside this brace, BEFORE lock.unlock(): a build slice runs on the loop
@@ -7053,6 +7116,7 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
     const glyph_miss::Scope misses(secondaryBorrowed_ ? buildScratch_.get() : nullptr);
     prewarmPageFonts(page, layout.marginLeft, contentTop);
 
+    if (grayWhileBuilding && renderer.supportsGrayFrame()) beginGrayCapturePlanes(renderer, capLsb, capMsb);
     renderer.clearScreen();
     {
       ImageBlock::PlaceholderOnlyScope placeholders;
@@ -7064,15 +7128,27 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
     drawBookSearchOverlay(page, layout.marginLeft, contentTop);
     // A page with pictures is drawn again once the build is done, with them; a page of text would come out the same.
     drawLiveBarsOverPage(/*redrawWhenBuilt=*/page.hasImages());
+    if (capLsb) renderer.endGrayCapture();
     buildPageOnScreen_ = {currentSpineIndex, section->currentPage, page.hasImages(), layout.marginLeft, contentTop};
+    if (capLsb) buildPageOnScreen_.gray = BuildPageGray::Gray::Shown;
+    if (grayWhileBuilding && !capLsb) buildPageGrayDue_.store(true, std::memory_order_release);
+    HalDisplay::RefreshMode refreshMode;
     if (forceHalfRefreshAfterPopup_) {
       // First real page after the indexing popup: establish a clean baseline (see
       // forceHalfRefreshAfterPopup_) instead of compounding onto the popup's FAST refresh.
       forceHalfRefreshAfterPopup_ = false;
-      renderer.triggerDisplay(HalDisplay::HALF_REFRESH);
+      refreshMode = HalDisplay::HALF_REFRESH;
       pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
     } else {
-      ReaderUtils::triggerWithRefreshCycle(renderer, pagesUntilFullRefresh);
+      refreshMode = ReaderUtils::nextRefreshCycleMode(pagesUntilFullRefresh);
+    }
+    if (capLsb) {
+      renderer.copyGrayscaleLsbBuffers(capLsb.get());
+      renderer.copyGrayscaleMsbBuffers(capMsb.get());
+      renderer.triggerGrayscaleFrame(refreshMode);
+      LOG_DBG("ERS", "Single-push AA (build page)");
+    } else {
+      renderer.triggerDisplay(refreshMode);
     }
     // Hand the font page slots back before the build resumes. This is THE allocation that makes a
     // mid-build draw expensive, and it is expensive because of where it lands, not what it costs:
@@ -7149,18 +7225,7 @@ uint16_t EpubReaderActivity::renderPageContentOnly(const Page& page, const int o
   preRenderedPlanesStaged_ = false;
   std::unique_ptr<uint8_t[]> capLsb, capMsb;
   const bool wantCapture = renderer.supportsGrayFrame() && getEffectiveTextAntiAliasing() && !imagesTakeGrayPass(page);
-  if (wantCapture) {
-    const size_t planeBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
-    capLsb = makeUniqueNoThrow<uint8_t[]>(planeBytes);
-    capMsb = capLsb ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
-    if (capMsb) {
-      memset(capLsb.get(), 0, planeBytes);
-      memset(capMsb.get(), 0, planeBytes);
-      renderer.beginGrayCapture(capLsb.get(), capMsb.get());
-    } else {
-      capLsb.reset();
-    }
-  }
+  if (wantCapture) beginGrayCapturePlanes(renderer, capLsb, capMsb);
 
   renderer.clearScreen();
   page.render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
