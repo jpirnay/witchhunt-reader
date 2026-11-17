@@ -158,10 +158,12 @@ certificate needs Settings' "Skip HTTPS validation".
 }
 ```
 
-No list and no approval means no access. `relay(url)` is a GET, and follows a
-redirect only to a host the plugin may reach too; one to any other host fails
-the request, so add the hosts a service redirects to (a CDN, say) to the list.
-The four-argument form follows no redirect at all.
+No list and no approval means no access. `relay(url)` and `fetchToSd` follow a
+redirect only to a host the plugin may reach too. One to any other host is
+refused like a first request, naming the host, so the page asks for it as well
+(a GitHub release file redirects to GitHub's CDN); list the hosts a service
+redirects to in `allowedHosts` to skip the question. The four-argument relay
+follows no redirect at all.
 The body streams back rather than being buffered, so a large image does not have
 to fit in the device's largest free block.
 

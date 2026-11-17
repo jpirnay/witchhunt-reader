@@ -265,11 +265,14 @@ bool relayHostAllowed(const String& plugin, const std::string& url);
 
 // The redirect check for the relay and fetch-to-SD: a redirect is followed only to a host the
 // plugin's manifest allows as well, so the allowlist decides where the device actually connects
-// and not merely where the first request went.
-HttpDownloader::RedirectFilter redirectsWithinAllowlist(const String& plugin) {
-  return [plugin](const std::string& next) {
+// and not merely where the first request went. A refused host goes to *refused, so the answer can
+// name it and the page ask for it, as for the first request: a GitHub release file redirects to
+// its CDN.
+HttpDownloader::RedirectFilter redirectsWithinAllowlist(const String& plugin, std::string* refused) {
+  return [plugin, refused](const std::string& next) {
     if (relayHostAllowed(plugin, next)) return true;
     LOG_DBG("WEB", "Redirect refused for %s: %s not in allowedHosts", plugin.c_str(), urlHost(next).c_str());
+    if (refused) *refused = urlHost(next);
     return false;
   };
 }
@@ -352,12 +355,14 @@ bool relayHostAllowed(const String& plugin, const std::string& url) {
 }
 
 // A refused host, named so the page can ask the user to approve it (POST /api/plugins/hosts).
-void sendHostRefused(WebServer* server, const std::string& url) {
+void sendRefusedHost(WebServer* server, const std::string& host) {
   std::string body = "{\"error\":\"host not allowed for this plugin\",\"host\":";
-  PluginRelay::appendJsonString(body, urlHost(url));
+  PluginRelay::appendJsonString(body, host);
   body += '}';
   server->send(403, "application/json", body.c_str());
 }
+
+void sendHostRefused(WebServer* server, const std::string& url) { sendRefusedHost(server, urlHost(url)); }
 
 // A plugin's request headers, as upstream passes them (an object) or as a list of [name, value] pairs (for a header
 // named twice). False when one is not allowed (PluginRelay::requestHeaderAllowed()).
@@ -3534,6 +3539,7 @@ void CrossPointWebServer::handleRelay() {
   bool headerSent = false;
   bool overLimit = false;
   size_t total = 0;
+  std::string refusedHost;
 
   const bool ok = HttpDownloader::fetchUrl(
       url,
@@ -3554,8 +3560,13 @@ void CrossPointWebServer::handleRelay() {
         total += len;
         return true;
       },
-      false, "", "", redirectsWithinAllowlist(plugin));
+      false, "", "", redirectsWithinAllowlist(plugin, &refusedHost));
 
+  // cppcheck-suppress knownConditionTrueFalse ; the redirect filter sets refusedHost through its pointer
+  if (!headerSent && !refusedHost.empty()) {
+    sendRefusedHost(server.get(), refusedHost);
+    return;
+  }
   if (!headerSent) {
     server->send(502, "application/json", "{\"error\":\"fetch failed\"}");
     return;
@@ -3742,10 +3753,11 @@ void CrossPointWebServer::fetchToSd(const String& plugin, const std::string& url
   int status = 0;
   size_t bytes = 0;
   bool ok = false;
+  std::string refusedHost;
   if (method == "GET" && body.empty()) {
     ok = HttpDownloader::downloadToFile(url, dest.c_str(), nullptr, "", "",
                                         HttpDownloader::TlsPolicy::VerifiedThenUnverified,
-                                        redirectsWithinAllowlist(plugin), headers) == HttpDownloader::OK;
+                                        redirectsWithinAllowlist(plugin, &refusedHost), headers) == HttpDownloader::OK;
     if (ok) {
       status = 200;
       HalFile f = Storage.open(dest.c_str());
@@ -3776,6 +3788,11 @@ void CrossPointWebServer::fetchToSd(const String& plugin, const std::string& url
     if (!ok) Storage.remove(temp.c_str());
   }
 
+  // cppcheck-suppress knownConditionTrueFalse ; the redirect filter sets refusedHost through its pointer
+  if (!ok && !refusedHost.empty()) {
+    sendRefusedHost(server.get(), refusedHost);
+    return;
+  }
   JsonDocument doc;
   doc["ok"] = ok;
   doc["complete"] = ok;
