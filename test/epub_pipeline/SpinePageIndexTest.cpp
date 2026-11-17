@@ -83,6 +83,43 @@ TEST(SpinePageIndex, ReRecordingOverwritesTheEntry) {
   EXPECT_EQ(11u, SpinePageIndex::sumRange(dir, kVariant, 40, 3, 3, -1).pagesAfter);
 }
 
+// Background-B lays out a chapter's earlier files for its page count (the reader entered the chapter past them): the
+// nearest one before the reader with no count, from one read of the table.
+TEST(SpinePageIndex, FindsTheLastFileWithNoCount) {
+  const std::string dir = freshDir("unrecorded");
+  SpinePageIndex::record(dir, kVariant, 1700, 20, 9, 18000);
+  SpinePageIndex::record(dir, kVariant, 1700, 22, 1, 865);
+  EXPECT_EQ(21, SpinePageIndex::lastUnrecorded(dir, kVariant, 1700, 19, 22));
+  EXPECT_EQ(19, SpinePageIndex::lastUnrecorded(dir, kVariant, 1700, 19, 20));
+  EXPECT_EQ(-1, SpinePageIndex::lastUnrecorded(dir, kVariant, 1700, 20, 20));
+  SpinePageIndex::record(dir, kVariant, 1700, 21, 4, 9000);
+  SpinePageIndex::record(dir, kVariant, 1700, 19, 2, 3000);
+  EXPECT_EQ(-1, SpinePageIndex::lastUnrecorded(dir, kVariant, 1700, 19, 22));
+  // Over more than one chunk of entries.
+  EXPECT_EQ(199, SpinePageIndex::lastUnrecorded(dir, kVariant, 1700, 100, 199));
+  for (int spine = 100; spine < 200; ++spine) {
+    if (spine != 123) SpinePageIndex::record(dir, kVariant, 1700, spine, 2, 1000);
+  }
+  EXPECT_EQ(123, SpinePageIndex::lastUnrecorded(dir, kVariant, 1700, 100, 199));
+}
+
+TEST(SpinePageIndex, AFileRecordedWithNoPagesIsKnown) {
+  const std::string dir = freshDir("no_pages");
+  SpinePageIndex::record(dir, kVariant, 40, 5, 9, 18000);
+  SpinePageIndex::record(dir, kVariant, 40, 4, 0, UINT32_MAX);
+  EXPECT_EQ(3, SpinePageIndex::lastUnrecorded(dir, kVariant, 40, 3, 5));
+  EXPECT_EQ(-1, SpinePageIndex::lastUnrecorded(dir, kVariant, 40, 4, 5));
+}
+
+TEST(SpinePageIndex, WithoutATableEveryFileIsUnrecorded) {
+  const std::string dir = freshDir("no_table");
+  EXPECT_EQ(7, SpinePageIndex::lastUnrecorded(dir, kVariant, 40, 3, 7));
+  SpinePageIndex::record(dir, kVariant, 40, 5, 9, 18000);
+  const SpinePageIndex::Variant other{0x9abcdef0u, 7};
+  EXPECT_EQ(7, SpinePageIndex::lastUnrecorded(dir, other, 40, 3, 7)) << "another variant's counts say nothing";
+  EXPECT_EQ(-1, SpinePageIndex::lastUnrecorded(dir, kVariant, 40, 3, 70)) << "a range past the spine";
+}
+
 TEST(SpinePageIndex, AnotherVariantStartsTheTableOver) {
   const std::string dir = freshDir("variant");
   SpinePageIndex::record(dir, kVariant, 40, 3, 9, 18000);

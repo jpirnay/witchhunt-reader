@@ -38,6 +38,11 @@ struct Totals {
 // All zero when there is no table for `variant`.
 Totals sumRange(const std::string& bookCachePath, Variant variant, int spineCount, int first, int last, int current);
 
+// The last spine item in [first, last] with no entry under `variant` (all of `last` when there is no table for it),
+// or -1 when every one has an entry. An entry is unrecorded only while it is all zero: one written with no pages is a
+// file known to have none. One open and one sequential read, whatever the range.
+int lastUnrecorded(const std::string& bookCachePath, Variant variant, int spineCount, int first, int last);
+
 // Drops the table, for a layout change the variant cannot see: a TOC recovered after the book was
 // read without one starts new pages at its chapter anchors.
 void discard(const std::string& bookCachePath);

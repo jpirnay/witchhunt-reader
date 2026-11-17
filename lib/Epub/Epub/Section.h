@@ -204,6 +204,9 @@ class Section {
   // reader can count a chapter split over several spine items without opening their caches.
   static SpinePageIndex::Totals indexedPageTotals(const std::string& bookCachePath, const BuildParams& p,
                                                   int spineCount, int first, int last, int current);
+  // The last spine item in [first, last] with no page count recorded under `p` (SpinePageIndex::lastUnrecorded), or -1.
+  static int lastUnindexedSpine(const std::string& bookCachePath, const BuildParams& p, int spineCount, int first,
+                                int last);
 
   uint16_t pageCount = 0;
   int currentPage = 0;

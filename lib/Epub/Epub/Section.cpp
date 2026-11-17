@@ -538,6 +538,12 @@ SpinePageIndex::Totals Section::indexedPageTotals(const std::string& bookCachePa
                                   last, current);
 }
 
+int Section::lastUnindexedSpine(const std::string& bookCachePath, const BuildParams& p, const int spineCount,
+                                const int first, const int last) {
+  return SpinePageIndex::lastUnrecorded(bookCachePath, {calculatePropertyHash(p), SECTION_FILE_VERSION}, spineCount,
+                                        first, last);
+}
+
 std::string Section::sectionHtmlCachePath(const std::string& bookCachePath, const int spineIndex) {
   char buf[32];
   snprintf(buf, sizeof(buf), "/html_%d.bin", spineIndex);

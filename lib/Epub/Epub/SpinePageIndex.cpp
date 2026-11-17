@@ -136,6 +136,31 @@ Totals sumRange(const std::string& bookCachePath, const Variant variant, const i
   return totals;
 }
 
+int lastUnrecorded(const std::string& bookCachePath, const Variant variant, const int spineCount, const int first,
+                   const int last) {
+  if (spineCount <= 0 || spineCount > UINT16_MAX || first < 0 || last < first || last >= spineCount) return -1;
+  FsFile f = Storage.open(indexPath(bookCachePath).c_str());
+  if (!f) return last;
+  if (!holdsVariant(f, variant, static_cast<uint16_t>(spineCount))) {
+    f.close();
+    return last;
+  }
+  int found = -1;
+  if (f.seek(kHeaderSize + static_cast<size_t>(first) * kEntrySize)) {
+    uint8_t chunk[kChunkEntries * kEntrySize];
+    for (int spine = first; spine <= last;) {
+      const size_t n = std::min(static_cast<size_t>(last - spine + 1), kChunkEntries);
+      if (f.read(chunk, n * kEntrySize) != static_cast<int>(n * kEntrySize)) break;
+      for (size_t i = 0; i < n; ++i, ++spine) {
+        static constexpr uint8_t kNone[kEntrySize] = {};
+        if (memcmp(chunk + i * kEntrySize, kNone, kEntrySize) == 0) found = spine;
+      }
+    }
+  }
+  f.close();
+  return found;
+}
+
 void discard(const std::string& bookCachePath) {
   const std::string path = indexPath(bookCachePath);
   if (Storage.exists(path.c_str())) Storage.remove(path.c_str());
