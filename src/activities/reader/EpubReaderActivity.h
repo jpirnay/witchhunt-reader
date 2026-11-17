@@ -19,6 +19,7 @@
 #include <atomic>
 #include <optional>
 
+#include "AaSettle.h"
 #include "BookReaderOverrides.h"
 #include "BookSearchSession.h"
 #include "BookmarkStore.h"
@@ -34,6 +35,7 @@
 #include "KOReaderAutoSync.h"
 #include "KOReaderSyncWorker.h"
 #include "LaneBeforeBuild.h"
+#include "LookAheadPause.h"
 #include "PackOffer.h"
 #include "ProgressMapper.h"
 #include "ReaderUtils.h"
@@ -152,6 +154,15 @@ class EpubReaderActivity final : public Activity {
       1;  // initialized to freq in onEnter(); 1 triggers HALF on first render if somehow not reset
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
+  // The reader's pace, for the wait before an inline gray pass (AaSettle). turnGapMs_: how long after the turn before
+  // it the last page turn was asked for, until the render pass that answers it takes it as passTurnGapMs_; kNoTurn for
+  // a pass no page turn asked for. turnAskedMs_: when loop() read the turn it is about to make (0: none), and
+  // lastTurnAskedMs_ the turn before. inlineGrayTailMs_: how long the last inline pass ran past its last abort point.
+  unsigned long turnAskedMs_ = 0UL;
+  unsigned long lastTurnAskedMs_ = 0UL;
+  uint32_t turnGapMs_ = AaSettle::kNoTurn;
+  uint32_t passTurnGapMs_ = AaSettle::kNoTurn;
+  uint32_t inlineGrayTailMs_ = AaSettle::kMaxWaitMs;
   // When the reader last put a page on screen, for ANY reason — a turn, the first page of a
   // freshly opened book, a jump, a rebuild. Background-B's borrow quiet period measures from
   // here rather than from lastPageTurnTime, which is only stamped by actual page turns and so
@@ -418,8 +429,15 @@ class EpubReaderActivity final : public Activity {
   // buffer back) before reaching Done. Bounds the retry loop: a spine whose parse cannot fit
   // between two page turns would otherwise re-inflate and re-parse forever, burning CPU, SD
   // writes and battery for a cache it never finishes. After BG_BUILD_MAX_PREEMPTIONS the
-  // target is abandoned to Background-C and the cursor moves on. Reset per target.
+  // target is abandoned to Background-C and the look-ahead stops (below). Reset per target.
   uint8_t backgroundPreemptCount_ = 0;
+  // B abandoned backgroundBuildSpineIndex_ and starts no build until the reader pauses or enters another chapter
+  // (LookAheadPause). Reset per target.
+  bool backgroundStoppedAfterAbandon_ = false;
+  // What a pause has to outlast: the longest a page had been up when a turn took a build of this target away, counted
+  // from the quiet rule's clock as it read when B took the buffer. Reset per target.
+  unsigned long backgroundBorrowActivityMs_ = 0;
+  uint32_t backgroundPreemptedStayMs_ = 0;
   // Times B gave the buffer back to an image decode for backgroundBuildSpineIndex_ (LaneBeforeBuild): bounded by
   // LaneBeforeBuild::kMaxYields, after which the images wait for B. Kept apart from backgroundPreemptCount_, which
   // abandons the chapter to the foreground. Reset per target.

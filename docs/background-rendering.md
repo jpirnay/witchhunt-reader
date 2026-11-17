@@ -272,6 +272,13 @@ cache hit, not a blocking parse. `stepBackgroundSectionBuild()`, one bounded sli
     but the inflated XHTML from phase (a) stays on the card (`Section::abortSectionBuild()` keys on
     `extractDone`), so the retry is the cheap one. After `BG_BUILD_MAX_PREEMPTIONS` (2) the spine is
     left to C; a next-chapter spine abandoned mid-chapter is retried on the chapter's last pages.
+  - **After an abandon the look-ahead stops** (`LookAheadPause.h`): the reader turns faster than a chapter
+    builds, so B does not walk on to the spines after it. Each would lose the same race, and every borrow
+    that a turn takes back costs that turn its one-pass refresh (X4, a page every 2.5 s: 20 spines abandoned
+    and 45 builds thrown away in half a chapter, 43 of 71 turns in two passes). The abandoned spine stays
+    the target until the reader pauses or enters another chapter. A pause is a page that stays up longer, by
+    the quiet period, than the longest-standing page whose turn took a build of that spine away; the spine
+    then has its two attempts again. While it waits B counts as pending for `CMD:IDLE`.
     Neither an overlay opening nor a yield to an image decode counts (`endBackgroundBorrow(false)`):
     they say nothing about whether the parse fits between two turns.
 - **Lean CSS resolver:** every build uses the disk-backed resolver (`setLeanResolve`). The hot-rule
@@ -402,8 +409,10 @@ the first render after the build ends. `onExit()` restores it too if the reader 
   the healthy case; a release means there was none to lend.
 - **B borrow** (`INF`): `Background-B: borrowed secondary buffer for spine N …` /
   `Background-B: returned secondary buffer (spine N, build discarded|no build live,
-  preemptions=K; heap … at start, … lowest)`. Repeated `build discarded` at `preemptions=2` means B
-  keeps losing the race to page turns on that spine and is handing it to C.
+  preemptions=K; heap … at start, … lowest)`. `build discarded` at `preemptions=2` means B lost the
+  race to page turns on that spine twice: `Background build spine=N abandoned after 2 preemptions;
+  look-ahead stopped until a page stays up M ms or the chapter changes` follows, once a chapter at a
+  steady pace, and `Background-B: page up for M ms, trying spine N again` when the reader has paused.
   `Background-B: giving the buffer back to the image lane|the page render (spine N, yield K of 4)`
   precedes a discard that is a yield; `Page N: images drawn as placeholders until Background-B's
   build is done` means B had no yields left.
