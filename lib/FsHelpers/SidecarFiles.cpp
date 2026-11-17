@@ -80,9 +80,19 @@ std::vector<const char*> existingExtensions(const std::string& bookPath) {
   const std::string base = basePath(bookPath);
   if (base.empty()) return found;
 
+  struct Table {
+    const char* const* extensions;
+    size_t count;
+  };
+  constexpr Table tables[] = {
+      {kCoverExtensions, sizeof(kCoverExtensions) / sizeof(kCoverExtensions[0])},
+      {kMetadataExtensions, sizeof(kMetadataExtensions) / sizeof(kMetadataExtensions[0])},
+      {kKeyExtensions, sizeof(kKeyExtensions) / sizeof(kKeyExtensions[0])},
+  };
   // Small and bounded by the tables above; reserve once rather than grow.
-  found.reserve(sizeof(kCoverExtensions) / sizeof(kCoverExtensions[0]) +
-                sizeof(kMetadataExtensions) / sizeof(kMetadataExtensions[0]));
+  size_t total = 0;
+  for (const Table& table : tables) total += table.count;
+  found.reserve(total);
 
   // The tables list each extension in both cases, but the SD card is FAT/exFAT
   // and answers to either - so "book.jpg" matches ".jpg" AND ".JPG", and
@@ -97,11 +107,9 @@ std::vector<const char*> existingExtensions(const std::string& bookPath) {
     return false;
   };
 
-  for (const char* const* table : {kCoverExtensions, kMetadataExtensions}) {
-    const size_t count = (table == kCoverExtensions) ? sizeof(kCoverExtensions) / sizeof(kCoverExtensions[0])
-                                                     : sizeof(kMetadataExtensions) / sizeof(kMetadataExtensions[0]);
-    for (size_t i = 0; i < count; i++) {
-      const char* ext = table[i];
+  for (const Table& table : tables) {
+    for (size_t i = 0; i < table.count; i++) {
+      const char* ext = table.extensions[i];
       if (alreadyMatched(ext)) continue;
       if (Storage.exists((base + ext).c_str())) found.push_back(ext);
     }

@@ -95,6 +95,8 @@ add_library(crosspoint_test_common INTERFACE)
 target_include_directories(crosspoint_test_common INTERFACE
   ${REPO_ROOT}
   ${REPO_ROOT}/lib
+  # Header-only: lib/ZipFile takes its registry's lock from it.
+  ${REPO_ROOT}/lib/BssMutex
 )
 target_compile_options(crosspoint_test_common INTERFACE
   -Wall
@@ -231,6 +233,7 @@ add_subdirectory(cjk_line_break)
 add_subdirectory(cjk_layout)
 add_subdirectory(typography)
 add_subdirectory(zip_entry_reader)
+add_subdirectory(book_protection)
 add_subdirectory(koreader_document_id)
 # After zip_entry_reader: reuses its inflate_reader_host target.
 add_subdirectory(png_decoder)
@@ -282,6 +285,8 @@ add_subdirectory(chapter_page_span)
 add_subdirectory(image_memory_ladder)
 add_subdirectory(pre_render_gate)
 add_subdirectory(refresh_build_gate)
+add_subdirectory(indexing_popup_gate)
+add_subdirectory(popup_probe)
 add_subdirectory(in_place_build_gate)
 add_subdirectory(lookahead_build_through)
 add_subdirectory(lookahead_pause)

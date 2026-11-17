@@ -1,6 +1,7 @@
 #include "SerialTestApi.h"
 
 #include <Arduino.h>
+#include <HalDisplay.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
@@ -21,6 +22,7 @@
 #include "activities/home/LibraryTab.h"
 #include "network/WebAssets.h"
 #include "util/ButtonPressQueue.h"
+#include "util/PopupProbe.h"
 #include "util/ScreenshotUtil.h"
 #include "util/SerialCommandGrammar.h"
 
@@ -196,6 +198,7 @@ struct TextProbe {
   uint32_t activity = 0;
   uint32_t renderPass = 0;
   uint32_t atMs = 0;
+  uint32_t frames = 0;    // HalDisplay::framesShipped() when noted (PopupProbe)
   uint32_t sequence = 0;  // counts notes, so a host-side change detector sees a repeat too
   bool set = false;
 };
@@ -205,6 +208,7 @@ TextProbe selectionProbe;
 void noteText(TextProbe& probe, const int index, const char* text) {
   const uint32_t activity = activityManager.activityChangeCount();
   const uint32_t renderPass = activityManager.renderPassCount();
+  const uint32_t frames = display.framesShipped();
   const uint32_t now = millis();
   portENTER_CRITICAL(&probeMux);
   size_t i = 0;
@@ -222,6 +226,7 @@ void noteText(TextProbe& probe, const int index, const char* text) {
   probe.activity = activity;
   probe.renderPass = renderPass;
   probe.atMs = now;
+  probe.frames = frames;
   probe.sequence++;
   probe.set = true;
   portEXIT_CRITICAL(&probeMux);
@@ -639,7 +644,8 @@ void cmdState(std::string_view /*arg*/) {
     if (selection.text[0] != '\0') appendField(state, "label", selection.text);
   }
   const TextProbe popup = readProbe(popupProbe);
-  if (popup.set && popup.activity == activity && popup.renderPass == activityManager.renderPassCount()) {
+  if (popup.set && PopupProbe::onScreen({popup.activity, popup.renderPass, popup.frames},
+                                        {activity, activityManager.renderPassCount(), display.framesShipped()})) {
     appendField(state, "popup", popup.text);
     appendField(state, "popup_ms", static_cast<long>(millis() - popup.atMs));
   }
@@ -2276,6 +2282,13 @@ void service() {
 bool commandPending() { return idleGate.active(); }
 
 void notePopup(const char* text) { noteText(popupProbe, -1, text); }
+
+void notePopupContinued() {
+  const uint32_t frames = display.framesShipped();
+  portENTER_CRITICAL(&probeMux);
+  if (popupProbe.set && frames > 0) popupProbe.frames = frames - 1;  // the frame just shipped is the popup's own
+  portEXIT_CRITICAL(&probeMux);
+}
 
 void noteSelection(const int index, const char* label) { noteText(selectionProbe, index, label); }
 

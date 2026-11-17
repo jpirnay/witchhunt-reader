@@ -75,6 +75,13 @@ time_t now();
 /// True if the clock has been set at least once (NTP or restore).
 bool isSynced();
 
+/// Epoch seconds to hold a loan's due date against (lib/BookProtection): the clock, but never
+/// earlier than the latest plausible time this device has seen, which NVS keeps across power-off
+/// and which only the NTP sync, the sleep entry and this call raise. A clock set back (an upload's
+/// browser time in hotspot mode) cannot reopen an ended loan; the floor can lag while the device
+/// is off. 0 when no plausible time has ever been seen: a loan's date cannot be judged.
+int64_t loanNow();
+
 /// Periodic callback (called from main loop) to compensate temperature-induced
 /// RTC drift while the device is awake.  Runs at a 10-minute interval.
 /// Computes the drift delta since the last baseline using the temperature

@@ -166,7 +166,13 @@ can take tens of seconds on large cards.
 curl http://crosspoint.local/api/status
 # Include SD usage stats (slow):
 curl "http://crosspoint.local/api/status?phase=full"
+# A device ID for a plugin (deviceId):
+curl "http://crosspoint.local/api/status?plugin=protected-content"
 ```
+
+`?plugin=<name>` adds `deviceId`: the hex SHA-256 of the device secret (32 random bytes in NVS, made on
+first use) and the name in lower case. It is stable across card swaps, differs per plugin, and reveals no
+hardware ID; the Adobe plugin activates with it. As upstream answers it.
 
 **Query Parameters:**
 
@@ -1046,6 +1052,27 @@ layout cache is invalidated on success.
 | 400    | Missing `plugin`/`url`/`dest`, bad scheme, or a refused destination |
 | 403    | Host not in the plugin's `allowedHosts` (`host` names it)          |
 | 502    | Download failed. `"unauthorized": true` when the file's server answered 401 or 403; `status` holds the answer's code for a request with a method or body |
+
+### POST `/api/book-key` - Store a Protected Book's Content Key
+
+Stores the content key of a protected EPUB, from the plugin that fulfilled it, wrapped to this device
+(AES-256-GCM under a key derived from the device secret) as `<path>.key` beside the book. The reader opens the
+book with it ([protected-content.md](future_work/protected-content.md)); a copied card does not open on another
+reader. Upstream's endpoint and file format.
+
+```bash
+curl -X POST http://crosspoint.local/api/book-key -H "Content-Type: application/json" \
+  -d '{"path": "/Books/Loan.epub", "key": "<base64 of 16 or 32 bytes>", "expires": 1893456000}'
+# -> {"ok":true}
+```
+
+`expires`: the loan's due date in epoch seconds, 0 or absent for none. `path` must name an `.epub` that a web
+request may reach ([Protected paths](#protected-paths)).
+
+| Status | Cause                                                   |
+| ------ | ------------------------------------------------------- |
+| 400    | Not JSON, a refused path, a key that is not 16 or 32 bytes of base64, an `expires` that is negative or not a whole number |
+| 500    | The key could not be wrapped or written                  |
 
 ### POST `/api/plugin-fs` - Write a Small File
 

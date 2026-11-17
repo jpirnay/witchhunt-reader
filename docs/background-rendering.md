@@ -318,6 +318,33 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
 
 - **Start:** `buildSection()` detects the cache miss, picks a mode (below), draws the "Indexing"
   popup, kicks off the build so `hasActiveBuild()` is true, and returns — handing off.
+- **The Indexing popup** (`IndexingPopupGate.h`): the work it announces starts while it paints, where the card can be
+  read during the refresh (a card on its own bus; the X4, `refreshLeavesBusToCard`; the X3) and the output is not
+  inverted. A build that starts with its popup (a released build, or one adopted from Background-B) ships it async and
+  slices on the render task until the waveform ends; its lend waits for nothing: the C3s lend the frame not being
+  painted (`borrowSecondaryBufferDuringRefresh`; on the X4 RED is seeded from the popup after its finish), the S3s the
+  PSRAM arena. The SectionBuilding pass's popup (a resident build's, a turn ahead of the build, a percent target)
+  ships async where the loop task's slice can run through it (the S3s with the card on SDMMC, the X4 waiting off the
+  bus) and is waited for as a build page is (`waitForBuildRefreshUnlocked`). The first open indexes through its popup
+  on every board, a TXT or Markdown index through its own. Blocking still: Dark Mode, the T5S3's chapter and TXT
+  popups (card traffic beside its waveform not tried for a build), the X3's SectionBuilding popup (its slice waits
+  for a pending refresh), `compileSectionCache()`'s (the blocking fallback build). The first page of a chapter still
+  goes out after the popup's waveform: one refresh at a time. What the overlap buys is the build's head start.
+
+  | n=3, medians, s from the action, before / after | First open: work starts | Page | Chapter laid out |
+  |---|---|---|---|
+  | X4, cold open | 0.67 / 0.13 | 4.17 / 3.69 | 4.92 / 4.47 |
+  | X4, crossing (B's build adopted) | | 1.13 / 1.17 (page out) | 2.36 / 1.93 |
+  | X4, percent jump | | 5.32 / 4.82 | 3.49 / 2.99 |
+  | X4 Pro, crossing | | 1.86 / 1.83 (page on panel) | 2.61 / 2.05 |
+  | X4 Pro, percent jump | | 4.48 / 3.93 | 2.73 / 2.18 |
+  | Picco, percent jump | | 2.50 / 2.01 | 1.71 / 1.21 |
+  | Murphy (Bitter 8 pt), crossing | | 2.05 / 2.00 (page on panel) | 2.87 / 2.41 |
+  | Murphy, percent jump | | 3.92 / 3.47 | 2.57 / 2.12 |
+  | TXT, 40 KB, first open: X4 / X4 Pro / Picco / Murphy | | 6.80 / 6.25, 6.22 / 5.72, 3.56 / 3.40, 7.32 / 6.84 | |
+
+  AA off, the 2.53 bench book and profile (the Murphy at its owner's settings). The files the work wrote (book.bin, the
+  chapters, the TXT index) are byte-identical to master's on the X4, whose card shares the panel's bus, and the X4 Pro.
 - **Build:** `stepCurrentSectionBuild()` on the loop task, 40 ms slices, highest reader-build
   priority. On a newly-written target page it `requestUpdate()`s so the render task draws it.
 - **Draw:** the `SectionBuilding` pass (`renderSectionBuildingPass`) shows the requested page from

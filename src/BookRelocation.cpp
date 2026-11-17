@@ -8,6 +8,7 @@
 #include <Logging.h>
 #include <Txt.h>
 #include <Xtc.h>
+#include <ZipFile.h>
 
 #include "CrossPointState.h"
 #include "GlobalBookmarkIndex.h"
@@ -43,6 +44,8 @@ std::string cacheDirFor(const std::string& path) {
 }
 
 void bookMoved(const std::string& oldPath, const std::string& newPath) {
+  // A protected book's protection holds the manifest in its cache open, and the cache moves.
+  ZipFile::unprotect(oldPath);
   const std::string oldCache = cacheDirFor(oldPath);
   if (oldCache.empty()) return;
   const std::string newCache = cacheDirFor(newPath);

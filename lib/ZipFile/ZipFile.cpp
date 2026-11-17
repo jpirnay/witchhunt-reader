@@ -1,5 +1,6 @@
 #include "ZipFile.h"
 
+#include <BssMutex.h>
 #include <BufferedFileIO.h>
 #include <BuildArena.h>
 #include <HalStorage.h>
@@ -8,9 +9,232 @@
 #include <Memory.h>
 
 #include <algorithm>
+#include <atomic>
+#include <cstddef>
 #include <cstring>
+#include <mutex>
 
 #include "../Epub/Epub/HashUtils.h"
+
+namespace {
+constexpr uint16_t ZIP_METHOD_STORED = 0;
+constexpr uint16_t ZIP_METHOD_DEFLATED = 8;
+constexpr size_t CIPHER_BLOCK = 16;
+// The low byte of an encrypted stat whose data cannot be read: not stored in the archive, or not
+// an IV and whole cipher blocks.
+constexpr uint16_t ENCRYPTED_UNREADABLE = 0xFF;
+// An estimated plaintext size is never below this (ZipFile::METHOD_SIZE_ESTIMATED).
+constexpr uint32_t FULL_INFLATE_WINDOW = 32768;
+
+uint16_t plainMethod(const ZipFile::FileStatSlim& stat) {
+  return ZipFile::isEncrypted(stat) ? static_cast<uint16_t>(stat.method & 0xFF) : stat.method;
+}
+
+// ---- Protected archives ----
+// The archives registered with ZipFile::protect(), oldest first, empty slots last. Every call into
+// a Protection happens under g_protectionLock, so replacing one never pulls it from under a caller.
+struct ProtectedArchive {
+  std::string path;
+  std::unique_ptr<ZipFile::Protection> protection;
+};
+BssMutex g_protectionLock;
+ProtectedArchive g_protectedArchives[ZipFile::PROTECTED_ARCHIVES];
+// How many are registered: while none is, a plain book's lookups and reads never take the lock.
+std::atomic<uint8_t> g_protectedCount{0};
+
+// The caller holds g_protectionLock.
+ZipFile::Protection* protectionFor(const std::string& path) {
+  for (auto& archive : g_protectedArchives) {
+    if (archive.protection && archive.path == path) return archive.protection.get();
+  }
+  return nullptr;
+}
+
+void wipe(void* data, const size_t len) {
+  volatile auto* p = static_cast<volatile uint8_t*>(data);
+  for (size_t i = 0; i < len; ++i) p[i] = 0;
+}
+
+// One encrypted entry's decryption: the key schedule and the CBC chain, on the heap (a few hundred
+// bytes that no caller's arena budget counts), set up from the archive's protection when the read
+// opens and needing nothing of it afterwards.
+class EntryCipher {
+ public:
+  EntryCipher() = default;
+  ~EntryCipher() { reset(); }
+  EntryCipher(const EntryCipher&) = delete;
+  EntryCipher& operator=(const EntryCipher&) = delete;
+
+  // Reads the entry's IV from `file`, positioned at the entry's data, and starts the chain with the
+  // content key of the archive at `archivePath`. False, logged, when no protection is registered
+  // for that archive or the state cannot be allocated.
+  bool begin(const std::string& archivePath, FsFile& file) {
+    reset();
+    uint8_t key[32];
+    size_t keyLen = 0;
+    const ZipFile::CipherOps* ops = nullptr;
+    {
+      std::lock_guard<BssMutex> hold(g_protectionLock);
+      if (const ZipFile::Protection* protection = protectionFor(archivePath)) {
+        keyLen = protection->key(key);
+        ops = &protection->cipher();
+      }
+    }
+    bool ok = false;
+    if (ops == nullptr) {
+      LOG_ERR("ZIP", "Encrypted entry, but no key for %s", archivePath.c_str());
+    } else if (keyLen != 16 && keyLen != 32) {
+      LOG_ERR("ZIP", "Content key of %zu bytes for %s", keyLen, archivePath.c_str());
+    } else {
+      ok = startChain(*ops, key, keyLen, file);
+    }
+    wipe(key, sizeof(key));
+    return ok;
+  }
+
+  bool decrypt(uint8_t* data, const size_t len) { return ops_->decrypt(state_.get(), data, len); }
+
+  // The plaintext length of the entry's last chunk, its padding taken off: PKCS#7 for a 16-byte key,
+  // left on when it does not check out; for a 32-byte key xmlenc's, whose fill bytes are random and
+  // only the count is meaningful (Readium LCP). The rules of Free-Ink's ProtectedBook.
+  size_t unpad(const uint8_t* data, const size_t len) const {
+    if (len == 0) return 0;
+    const uint8_t pad = data[len - 1];
+    if (pad < 1 || pad > CIPHER_BLOCK || pad > len) return len;
+    if (!xmlencPadding_) {
+      for (size_t i = len - pad; i < len; ++i) {
+        if (data[i] != pad) return len;
+      }
+    }
+    return len - pad;
+  }
+
+  void reset() {
+    if (ops_ != nullptr && state_) ops_->end(state_.get());
+    state_.reset();
+    ops_ = nullptr;
+  }
+
+ private:
+  bool startChain(const ZipFile::CipherOps& ops, const uint8_t* key, const size_t keyLen, FsFile& file) {
+    uint8_t iv[CIPHER_BLOCK];
+    if (file.read(iv, sizeof(iv)) != static_cast<int>(sizeof(iv))) {
+      LOG_ERR("ZIP", "Failed to read an encrypted entry's IV");
+      return false;
+    }
+    const size_t words = (ops.stateBytes + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t);
+    state_ = makeUniqueNoThrow<std::max_align_t[]>(words > 0 ? words : 1);
+    if (!state_) {
+      LOG_ERR("ZIP", "Out of memory for an entry's cipher state (%zu bytes)", ops.stateBytes);
+      return false;
+    }
+    if (!ops.begin(state_.get(), key, keyLen, iv)) {
+      LOG_ERR("ZIP", "Cipher setup failed");
+      state_.reset();
+      return false;
+    }
+    ops_ = &ops;
+    xmlencPadding_ = keyLen == 32;
+    return true;
+  }
+
+  const ZipFile::CipherOps* ops_ = nullptr;
+  std::unique_ptr<std::max_align_t[]> state_;
+  bool xmlencPadding_ = false;
+};
+
+// The next piece of an entry's data, into `buf`: up to `cap` bytes straight from the file, or for
+// an encrypted entry (`cipher`) whole blocks, decrypted, the padding taken off the last. Returns the
+// piece's length, 0 at the end of the data (also when the last block was all padding), or -1 on a
+// read or decrypt error, logged.
+int readEntryChunk(FsFile& file, size_t& remaining, uint8_t* buf, const size_t cap, EntryCipher* cipher) {
+  if (remaining == 0) return 0;
+  size_t toRead = std::min(remaining, cap);
+  if (cipher != nullptr) toRead -= toRead % CIPHER_BLOCK;
+  if (toRead == 0) {
+    LOG_ERR("ZIP", "Read buffer of %zu bytes holds no cipher block", cap);
+    return -1;
+  }
+  // HalFile::read() reports errors as a negative int. Assigned straight to a size_t, that
+  // underflowed the remaining count and made a huge read length: uzlib's source_limit went far
+  // past the end of the buffer and it inflated out of bounds (ported from crosspoint-reader PR
+  // #3244, Foulad / @sfoulad), and a STORED stream handed its sink a 4 GB write out of the buffer
+  // (PR #3979, phucisstupid).
+  const int result = file.read(buf, toRead);
+  if (result < 0) {
+    LOG_ERR("ZIP", "Failed to read compressed data: %d", result);
+    return -1;
+  }
+  size_t got = static_cast<size_t>(result);
+  if (got == 0 || (cipher != nullptr && got != toRead)) {
+    LOG_ERR("ZIP", "Entry data ends early: %zu of %zu bytes", got, toRead);
+    return -1;
+  }
+  remaining -= got;
+  if (cipher != nullptr) {
+    if (!cipher->decrypt(buf, got)) {
+      LOG_ERR("ZIP", "Decryption failed");
+      return -1;
+    }
+    if (remaining == 0) got = cipher->unpad(buf, got);
+  }
+  return static_cast<int>(got);
+}
+
+// Up to `want` bytes of an encrypted STORED entry's plaintext into `out`: whole blocks decrypted
+// where they land, a last partial one through a block on the stack. Returns the count.
+size_t readDecryptedPrefix(FsFile& file, size_t& remaining, EntryCipher& cipher, uint8_t* out, const size_t want) {
+  size_t got = 0;
+  while (got < want) {
+    const size_t room = want - got;
+    if (room >= CIPHER_BLOCK) {
+      const int n = readEntryChunk(file, remaining, out + got, room, &cipher);
+      if (n <= 0) break;
+      got += static_cast<size_t>(n);
+      continue;
+    }
+    uint8_t block[CIPHER_BLOCK];
+    const int n = readEntryChunk(file, remaining, block, sizeof(block), &cipher);
+    if (n > 0) {
+      const size_t take = std::min(room, static_cast<size_t>(n));
+      memcpy(out + got, block, take);
+      got += take;
+    }
+    break;
+  }
+  return got;
+}
+
+// Logs and refuses an encrypted entry whose data is not an IV and whole cipher blocks stored in the
+// archive.
+bool encryptedLayoutReadable(const ZipFile::FileStatSlim& stat) {
+  if (!ZipFile::isEncrypted(stat) || plainMethod(stat) != ENCRYPTED_UNREADABLE) return true;
+  LOG_ERR("ZIP", "Encrypted entry at %lu is not stored as IV and cipher blocks",
+          static_cast<unsigned long>(stat.localHeaderOffset));
+  return false;
+}
+
+// A Print into a caller's buffer that refuses more than the buffer holds; with no buffer, it counts.
+class MemoryPrint final : public Print {
+ public:
+  MemoryPrint(uint8_t* data, const size_t capacity) : data_(data), capacity_(capacity) {}
+  size_t write(const uint8_t b) override { return write(&b, 1); }
+  size_t write(const uint8_t* buf, const size_t n) override {
+    if (data_ != nullptr) {
+      if (n > capacity_ - written_) return 0;
+      memcpy(data_ + written_, buf, n);
+    }
+    written_ += n;
+    return n;
+  }
+  size_t written() const { return written_; }
+
+ private:
+  uint8_t* data_;
+  size_t capacity_;
+  size_t written_ = 0;
+};
+}  // namespace
 
 struct ZipInflateCtx {
   InflateReader reader;  // Must be first — callback casts uzlib_uncomp* to ZipInflateCtx*
@@ -18,40 +242,109 @@ struct ZipInflateCtx {
   size_t fileRemaining = 0;
   uint8_t* readBuf = nullptr;
   size_t readBufSize = 0;
+  EntryCipher* cipher = nullptr;  // an encrypted entry's; null for a plain one
 };
 
 namespace {
-constexpr uint16_t ZIP_METHOD_STORED = 0;
-constexpr uint16_t ZIP_METHOD_DEFLATED = 8;
-
+// A uzlib READ callback: it returns the next byte, so 0 is data and -1 is the only way to say "no
+// more" (crosspoint-reader's fill callback returns a byte count, where `return 0` says the same).
 int zipReadCallback(uzlib_uncomp* uncomp) {
   auto* ctx = reinterpret_cast<ZipInflateCtx*>(uncomp);
-  if (ctx->fileRemaining == 0) return -1;
-
-  const size_t toRead = ctx->fileRemaining < ctx->readBufSize ? ctx->fileRemaining : ctx->readBufSize;
-  // Ported from crosspoint-reader PR #3244 ("prevent size_t underflow on ZipFile read errors",
-  // Foulad / @sfoulad). The defect and the fix are theirs; the end-of-stream signal differs
-  // because this is a uzlib READ callback -- it returns the next byte, so 0 is data and -1 is
-  // the only way to say "no more". Upstream's fill callback returns a byte COUNT, where their
-  // `return 0` is the equivalent signal.
-  const int result = ctx->file->read(ctx->readBuf, toRead);
-  if (result < 0) {
-    // HalFile::read() reports errors as a negative int. Assigning that straight to size_t
-    // underflowed fileRemaining and produced a huge bytesRead, which pushed source_limit far
-    // past the end of readBuf and had uzlib inflate out of bounds.
-    LOG_ERR("ZIP", "Failed to read compressed data: %d", result);
-    return -1;
-  }
-  const size_t bytesRead = static_cast<size_t>(result);
-  ctx->fileRemaining -= bytesRead;
-
-  if (bytesRead == 0) return -1;
-
+  const int got = readEntryChunk(*ctx->file, ctx->fileRemaining, ctx->readBuf, ctx->readBufSize, ctx->cipher);
+  if (got <= 0) return -1;
   uncomp->source = ctx->readBuf + 1;
-  uncomp->source_limit = ctx->readBuf + bytesRead;
+  uncomp->source_limit = ctx->readBuf + got;
   return ctx->readBuf[0];
 }
 }  // namespace
+
+ZipFile::FileStatSlim ZipFile::encryptedStat(const FileStatSlim& raw, const EncryptedEntry& entry) {
+  FileStatSlim stat = raw;
+  if (raw.method != ZIP_METHOD_STORED || raw.compressedSize < 2 * CIPHER_BLOCK ||
+      raw.compressedSize % CIPHER_BLOCK != 0) {
+    stat.method = METHOD_ENCRYPTED | ENCRYPTED_UNREADABLE;
+    return stat;
+  }
+  stat.method = METHOD_ENCRYPTED | (entry.deflated ? ZIP_METHOD_DEFLATED : ZIP_METHOD_STORED);
+  if (entry.sizeKnown) {
+    stat.uncompressedSize = entry.plainSize;
+  } else {
+    stat.method |= METHOD_SIZE_ESTIMATED;
+    stat.uncompressedSize = std::max<uint32_t>(raw.compressedSize - CIPHER_BLOCK, FULL_INFLATE_WINDOW);
+  }
+  return stat;
+}
+
+bool ZipFile::protect(const std::string& path, std::unique_ptr<Protection> protection) {
+  if (!protection) return false;
+  std::unique_ptr<Protection> dropped;  // destroyed once the lock is released
+  {
+    std::lock_guard<BssMutex> hold(g_protectionLock);
+    ProtectedArchive* slot = nullptr;
+    for (auto& archive : g_protectedArchives) {
+      if (archive.protection && archive.path == path) slot = &archive;
+    }
+    if (slot == nullptr) {
+      for (auto& archive : g_protectedArchives) {
+        if (!archive.protection) {
+          slot = &archive;
+          break;
+        }
+      }
+    }
+    if (slot == nullptr) {
+      LOG_INF("ZIP", "Dropping the protection of %s", g_protectedArchives[0].path.c_str());
+      dropped = std::move(g_protectedArchives[0].protection);
+      for (size_t i = 1; i < PROTECTED_ARCHIVES; ++i) {
+        g_protectedArchives[i - 1] = std::move(g_protectedArchives[i]);
+      }
+      slot = &g_protectedArchives[PROTECTED_ARCHIVES - 1];
+    } else {
+      dropped = std::move(slot->protection);
+    }
+    slot->path = path;
+    slot->protection = std::move(protection);
+    uint8_t count = 0;
+    for (const auto& archive : g_protectedArchives) count += archive.protection ? 1 : 0;
+    g_protectedCount.store(count, std::memory_order_release);
+  }
+  return true;
+}
+
+void ZipFile::unprotect(const std::string& path) {
+  std::unique_ptr<Protection> dropped;
+  std::lock_guard<BssMutex> hold(g_protectionLock);
+  size_t kept = 0;
+  for (auto& archive : g_protectedArchives) {
+    if (archive.protection && archive.path == path) {
+      dropped = std::move(archive.protection);
+      archive.path.clear();
+      continue;
+    }
+    if (archive.protection && &g_protectedArchives[kept] != &archive) {
+      g_protectedArchives[kept] = std::move(archive);
+    }
+    if (g_protectedArchives[kept].protection) ++kept;
+  }
+  g_protectedCount.store(static_cast<uint8_t>(kept), std::memory_order_release);
+}
+
+bool ZipFile::isProtected(const std::string& path) {
+  if (g_protectedCount.load(std::memory_order_acquire) == 0) return false;
+  std::lock_guard<BssMutex> hold(g_protectionLock);
+  return protectionFor(path) != nullptr;
+}
+
+void ZipFile::applyProtection(FileStatSlim* stat) const {
+  if (g_protectedCount.load(std::memory_order_acquire) == 0 || isEncrypted(*stat)) return;
+  EncryptedEntry entry;
+  {
+    std::lock_guard<BssMutex> hold(g_protectionLock);
+    Protection* const protection = protectionFor(filePath);
+    if (protection == nullptr || !protection->find(stat->localHeaderOffset, &entry)) return;
+  }
+  *stat = encryptedStat(*stat, entry);
+}
 
 static std::string normalizeZipPath(const char* filename) {
   std::string normalized;
@@ -238,6 +531,7 @@ bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
   if (knownEntries_ != nullptr) {
     if (const FileStatSlim* known = knownEntries_->find(target)) {
       *fileStat = *known;
+      applyProtection(fileStat);
       return true;
     }
   }
@@ -288,7 +582,9 @@ bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
     walkCentralDirectory(in, match, startPos);
   }
 
-  if (!found) {
+  if (found) {
+    applyProtection(fileStat);
+  } else {
     LOG_DBG("ZIP", "loadFileStatSlim: entry not found after scan: %s (normalized=%s)", filename, target.c_str());
   }
 #ifdef BENCH_EXTRACT_PROFILE
@@ -306,6 +602,7 @@ bool ZipFile::getStoredEntryRange(const char* filename, uint32_t* offset, uint32
 
   FileStatSlim fileStat = {};
   if (!loadFileStatSlim(filename, &fileStat)) return false;
+  // An encrypted entry's method is never plain STORED: its ciphertext is never handed out.
   if (fileStat.method != ZIP_METHOD_STORED) return false;
 
   const long dataOffset = getDataOffset(fileStat);
@@ -543,6 +840,16 @@ int ZipFile::fillFileStats(StatTarget* const targets, const size_t count, uint8_
     });
     return matched < static_cast<int>(count);
   });
+  if (matched > 0 && g_protectedCount.load(std::memory_order_acquire) != 0) {
+    for (StatTarget* t = targets; t != targets + count; ++t) {
+      if (!t->found()) continue;
+      FileStatSlim stat = t->stat();
+      applyProtection(&stat);
+      t->method = stat.method;
+      t->compressedSize = stat.compressedSize;
+      t->uncompressedSize = stat.uncompressedSize;
+    }
+  }
   return matched;
 }
 
@@ -568,6 +875,7 @@ uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const boo
 
   FileStatSlim fileStat = {};
   if (!loadFileStatSlim(filename, &fileStat)) return nullptr;
+  if (isEncrypted(fileStat)) return readEncryptedToMemory(fileStat, size, trailingNullByte);
 
   const long fileOffset = getDataOffset(fileStat);
   if (fileOffset < 0) return nullptr;
@@ -646,21 +954,61 @@ uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const boo
   return data;
 }
 
+uint8_t* ZipFile::readEncryptedToMemory(const FileStatSlim& fileStat, size_t* size, const bool trailingNullByte) {
+  // The plaintext's size: the protection's, or when it does not know it, a first pass that counts.
+  size_t plainSize = fileStat.uncompressedSize;
+  if (!hasExactSize(fileStat)) {
+    MemoryPrint counter(nullptr, 0);
+    if (!streamEntry(fileStat, counter, 1024, nullptr)) return nullptr;
+    plainSize = counter.written();
+  }
+  const size_t dataSize = plainSize + (trailingNullByte ? 1 : 0);
+  if (dataSize < plainSize) return nullptr;
+  auto* const data = static_cast<uint8_t*>(malloc(dataSize > 0 ? dataSize : 1));
+  if (data == nullptr) {
+    LOG_ERR("ZIP", "Failed to allocate memory for output buffer (%zu bytes)", dataSize);
+    return nullptr;
+  }
+  MemoryPrint sink(data, plainSize);
+  if (!streamEntry(fileStat, sink, 1024, nullptr) || sink.written() != plainSize) {
+    LOG_ERR("ZIP", "Encrypted entry read %zu of %zu bytes", sink.written(), plainSize);
+    free(data);
+    return nullptr;
+  }
+  if (trailingNullByte) data[plainSize] = '\0';
+  if (size) *size = plainSize;
+  return data;
+}
+
 bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t chunkSize, const bool* stop) {
   const ScopedOpenClose zip{*this};
   if (!zip) return false;
 
   FileStatSlim fileStat = {};
   if (!loadFileStatSlim(filename, &fileStat)) return false;
+  return streamEntry(fileStat, out, chunkSize, stop);
+}
+
+bool ZipFile::streamEntry(const FileStatSlim& fileStat, Print& out, const size_t chunkSize, const bool* stop) {
+  const ScopedOpenClose zip{*this};
+  if (!zip || !encryptedLayoutReadable(fileStat)) return false;
 
   const long fileOffset = getDataOffset(fileStat);
   if (fileOffset < 0) return false;
 
   file.seek(fileOffset);
-  const auto deflatedDataSize = fileStat.compressedSize;
+  const bool encrypted = isEncrypted(fileStat);
+  EntryCipher cipher;
+  if (encrypted && !cipher.begin(filePath, file)) return false;
+  EntryCipher* const decrypt = encrypted ? &cipher : nullptr;
+  // An encrypted entry's data past its IV, which begin() read: whole cipher blocks.
+  const size_t dataSize = encrypted ? fileStat.compressedSize - CIPHER_BLOCK : fileStat.compressedSize;
   const auto inflatedDataSize = fileStat.uncompressedSize;
+  // An estimated size only bounds the ring; the stream's own end is the entry's.
+  const bool exactSize = hasExactSize(fileStat);
+  const uint16_t method = plainMethod(fileStat);
 
-  if (fileStat.method == ZIP_METHOD_STORED) {
+  if (method == ZIP_METHOD_STORED) {
     // no deflation, just read content
     const auto buffer = static_cast<uint8_t*>(malloc(chunkSize));
     if (!buffer) {
@@ -668,33 +1016,41 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
       return false;
     }
 
-    size_t remaining = inflatedDataSize;
-    while (remaining > 0) {
-      // HalFile::read() reports an error as -1. Stored straight into a size_t it became SIZE_MAX,
-      // passed the `== 0` check and went to the sink as the length of a 4 GB write out of this
-      // chunk buffer. Ported from crosspoint-reader PR #3979 (phucisstupid).
-      const int readResult = file.read(buffer, remaining < chunkSize ? remaining : chunkSize);
-      if (readResult <= 0) {
+    size_t remaining = encrypted ? dataSize : inflatedDataSize;
+    size_t produced = 0;
+    bool stopped = false;
+    for (;;) {
+      const int got = readEntryChunk(file, remaining, buffer, chunkSize, decrypt);
+      if (got < 0) {
         LOG_ERR("ZIP", "Could not read more bytes");
         free(buffer);
         return false;
       }
+      if (got == 0) break;
 
-      const size_t dataRead = static_cast<size_t>(readResult);
+      const auto dataRead = static_cast<size_t>(got);
       if (out.write(buffer, dataRead) != dataRead) {
         LOG_ERR("ZIP", "Failed to write all output bytes to stream");
         free(buffer);
         return false;
       }
-      remaining -= dataRead;
-      if (stop && *stop) break;
+      produced += dataRead;
+      if (stop && *stop) {
+        stopped = true;
+        break;
+      }
     }
 
     free(buffer);
+    if (encrypted && exactSize && !stopped && produced != static_cast<size_t>(inflatedDataSize)) {
+      LOG_ERR("ZIP", "Decrypted size mismatch (expected %zu, got %zu)", static_cast<size_t>(inflatedDataSize),
+              produced);
+      return false;
+    }
     return true;
   }
 
-  if (fileStat.method == ZIP_METHOD_DEFLATED) {
+  if (method == ZIP_METHOD_DEFLATED) {
     auto* fileReadBuffer = static_cast<uint8_t*>(malloc(chunkSize));
     if (!fileReadBuffer) {
       LOG_ERR("ZIP", "Failed to allocate memory for zip file read buffer");
@@ -710,9 +1066,10 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
 
     ZipInflateCtx ctx;
     ctx.file = &file;
-    ctx.fileRemaining = deflatedDataSize;
+    ctx.fileRemaining = dataSize;
     ctx.readBuf = fileReadBuffer;
     ctx.readBufSize = chunkSize;
+    ctx.cipher = decrypt;
 
     // Ring sized to the entry (≤32 KB) — frees up to ~29 KB during small-entry streams.
     if (!ctx.reader.init(true, static_cast<size_t>(inflatedDataSize))) {
@@ -731,7 +1088,7 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
       const InflateStatus status = ctx.reader.readAtMost(outputBuffer, chunkSize, &produced);
 
       totalProduced += produced;
-      if (totalProduced > static_cast<size_t>(inflatedDataSize)) {
+      if (exactSize && totalProduced > static_cast<size_t>(inflatedDataSize)) {
         LOG_ERR("ZIP", "Decompressed size exceeds expected (%zu > %zu)", totalProduced,
                 static_cast<size_t>(inflatedDataSize));
         break;
@@ -749,12 +1106,12 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
       }
 
       if (status == InflateStatus::Done) {
-        if (totalProduced != static_cast<size_t>(inflatedDataSize)) {
+        if (exactSize && totalProduced != static_cast<size_t>(inflatedDataSize)) {
           LOG_ERR("ZIP", "Decompressed size mismatch (expected %zu, got %zu)", static_cast<size_t>(inflatedDataSize),
                   totalProduced);
           break;
         }
-        LOG_DBG("ZIP", "Decompressed %d bytes into %d bytes", deflatedDataSize, inflatedDataSize);
+        LOG_DBG("ZIP", "Decompressed %zu bytes into %zu bytes", dataSize, totalProduced);
         success = true;
         break;
       }
@@ -792,20 +1149,28 @@ size_t ZipFile::readBytesFromStat(const FileStatSlim& fileStat, uint8_t* outBuf,
   if (!outBuf || maxBytes == 0) return 0;
 
   const ScopedOpenClose zip{*this};
-  if (!zip) return 0;
+  if (!zip || !encryptedLayoutReadable(fileStat)) return 0;
 
   const long fileOffset = getDataOffset(fileStat);
   if (fileOffset < 0) return 0;
 
   file.seek(fileOffset);
+  const bool encrypted = isEncrypted(fileStat);
+  EntryCipher cipher;
+  if (encrypted && !cipher.begin(filePath, file)) return 0;
+  EntryCipher* const decrypt = encrypted ? &cipher : nullptr;
+  // An encrypted entry's data past its IV, which begin() read: whole cipher blocks.
+  size_t dataRemaining = encrypted ? fileStat.compressedSize - CIPHER_BLOCK : fileStat.compressedSize;
   const size_t wantBytes = std::min(maxBytes, static_cast<size_t>(fileStat.uncompressedSize));
+  const uint16_t method = plainMethod(fileStat);
 
-  if (fileStat.method == ZIP_METHOD_STORED) {
+  if (method == ZIP_METHOD_STORED) {
+    if (encrypted) return readDecryptedPrefix(file, dataRemaining, cipher, outBuf, wantBytes);
     const int n = file.read(outBuf, wantBytes);
     return n > 0 ? static_cast<size_t>(n) : 0;
   }
 
-  if (fileStat.method == ZIP_METHOD_DEFLATED) {
+  if (method == ZIP_METHOD_DEFLATED) {
     // Streaming inflate (32KB ring buffer) is the preferred path.  It can fail
     // if a 32KB ring buffer can't be allocated while another inflate is live
     // (e.g. reading image headers mid-XHTML stream).  In that case fall back to
@@ -842,9 +1207,10 @@ size_t ZipFile::readBytesFromStat(const FileStatSlim& fileStat, uint8_t* outBuf,
 
     ZipInflateCtx ctx;
     ctx.file = &file;
-    ctx.fileRemaining = fileStat.compressedSize;
+    ctx.fileRemaining = dataRemaining;
     ctx.readBuf = readBuf;
     ctx.readBufSize = READ_BUF;
+    ctx.cipher = decrypt;
 
     // Size the ring to what the caller actually wants, not to the 32 KB default.
     //
@@ -880,13 +1246,13 @@ size_t ZipFile::readBytesFromStat(const FileStatSlim& fileStat, uint8_t* outBuf,
     // estimate, capped at the actual compressed size) and decompress in one shot.
     ctx.reader.deinit();
     releaseScratch();
-    const size_t compChunkSize = std::min(static_cast<size_t>(fileStat.compressedSize), wantBytes * 4);
+    // Nothing was read above, so the data is all still to come. At least a cipher block, which is
+    // the least an encrypted entry can be read in.
+    const size_t compChunkSize = std::min(dataRemaining, std::max(wantBytes * 4, CIPHER_BLOCK));
     auto* compBuf = static_cast<uint8_t*>(malloc(compChunkSize));
     if (!compBuf) return 0;
 
-    // Same -1-as-a-length hazard as readFileToStream: SIZE_MAX here would have uzlib inflate far
-    // past the end of compBuf.
-    const int compRead = file.read(compBuf, compChunkSize);
+    const int compRead = readEntryChunk(file, dataRemaining, compBuf, compChunkSize, decrypt);
     if (compRead <= 0) {
       free(compBuf);
       return 0;
@@ -920,7 +1286,8 @@ struct ZipFile::EntryReader::Impl {
   BuildArena* arena = nullptr;
   BuildArena::Block arenaBlock;
 
-  uint16_t method = 0;  // ZIP_METHOD_STORED or ZIP_METHOD_DEFLATED
+  uint16_t method = 0;  // ZIP_METHOD_STORED or ZIP_METHOD_DEFLATED: an encrypted entry's plaintext's
+  bool encrypted = false;
   FsFile file;
   size_t inflatedSize_ = 0;
   size_t bytesProduced_ = 0;
@@ -928,12 +1295,17 @@ struct ZipFile::EntryReader::Impl {
   bool error_ = false;
   bool done_ = false;
 
-  // Stored-entry tracking
+  // Stored-entry tracking: the entry's bytes still in the archive (an encrypted one's cipher blocks).
   size_t storedRemaining = 0;
+  // An encrypted STORED entry's decrypted bytes in readBuf not yet handed out: [plainAt, plainEnd).
+  size_t plainAt = 0;
+  size_t plainEnd = 0;
 
   // Deflated-entry state. ZipInflateCtx.reader must remain first (callback cast).
   ZipInflateCtx ctx = {};
   uint8_t* readBuf = nullptr;
+  // Declared after ctx, which points at it: destroyed before it.
+  EntryCipher cipher;
 
   explicit Impl(ZipFile& zf_, size_t chunkSize_, BuildArena* arena_) : zf(zf_), chunkSize(chunkSize_), arena(arena_) {}
   ~Impl() { reset(); }
@@ -953,14 +1325,29 @@ struct ZipFile::EntryReader::Impl {
     ctx.fileRemaining = 0;
     ctx.readBuf = nullptr;
     ctx.readBufSize = 0;
+    ctx.cipher = nullptr;
+    cipher.reset();
     if (file) file.close();
     inflatedSize_ = 0;
     bytesProduced_ = 0;
     outputCap_ = 0;
     storedRemaining = 0;
+    plainAt = 0;
+    plainEnd = 0;
     method = 0;
+    encrypted = false;
     error_ = false;
     done_ = false;
+  }
+
+  // The read buffer: from the arena (its block reserved here, released in reset()) or the heap.
+  bool allocReadBuf() {
+    if (arena) arenaBlock = arena->reserveBlock();
+    readBuf = arena ? static_cast<uint8_t*>(arena->alloc(chunkSize)) : static_cast<uint8_t*>(malloc(chunkSize));
+    if (readBuf) return true;
+    LOG_ERR("ZIP", "EntryReader::open: OOM allocating read buffer");
+    if (arena && arenaBlock.valid()) arena->release(arenaBlock);
+    return false;
   }
 };
 
@@ -994,6 +1381,7 @@ bool ZipFile::EntryReader::open(const FileStatSlim& fileStat) { return open(file
 bool ZipFile::EntryReader::open(const FileStatSlim& fileStat, const size_t outputCap) {
   if (!impl_) return false;
   impl_->reset();
+  if (!encryptedLayoutReadable(fileStat)) return false;
   impl_->outputCap_ = outputCap;
   // What the ring must cover: the whole entry, or only the prefix the caller will read.
   const size_t expectedOutput =
@@ -1007,32 +1395,48 @@ bool ZipFile::EntryReader::open(const FileStatSlim& fileStat, const size_t outpu
   }
 
   impl_->inflatedSize_ = fileStat.uncompressedSize;
-  impl_->method = fileStat.method;
+  impl_->method = plainMethod(fileStat);
+  impl_->encrypted = isEncrypted(fileStat);
 
   if (!Storage.openFileForRead("ZIP", impl_->zf.filePath, impl_->file)) {
     LOG_ERR("ZIP", "EntryReader::open: failed to open zip file");
     return false;
   }
   impl_->file.seek(static_cast<size_t>(dataOffset));
+  // An encrypted entry's data past its IV, which begin() reads: whole cipher blocks.
+  size_t dataSize = fileStat.compressedSize;
+  if (impl_->encrypted) {
+    if (!impl_->cipher.begin(impl_->zf.filePath, impl_->file)) {
+      impl_->reset();
+      return false;
+    }
+    dataSize -= CIPHER_BLOCK;
+  }
 
-  if (fileStat.method == ZIP_METHOD_STORED) {
-    impl_->storedRemaining = fileStat.uncompressedSize;
+  if (impl_->method == ZIP_METHOD_STORED) {
+    if (!impl_->encrypted) {
+      impl_->storedRemaining = fileStat.uncompressedSize;
+      return true;
+    }
+    // Decrypted a buffer at a time, which step() hands out in pieces of any size.
+    impl_->storedRemaining = dataSize;
+    if (!impl_->allocReadBuf()) {
+      impl_->reset();
+      return false;
+    }
     return true;
   }
 
-  if (fileStat.method == ZIP_METHOD_DEFLATED) {
-    if (impl_->arena) impl_->arenaBlock = impl_->arena->reserveBlock();
-    impl_->readBuf = impl_->arena ? static_cast<uint8_t*>(impl_->arena->alloc(impl_->chunkSize))
-                                  : static_cast<uint8_t*>(malloc(impl_->chunkSize));
-    if (!impl_->readBuf) {
-      LOG_ERR("ZIP", "EntryReader::open: OOM allocating read buffer");
-      impl_->file.close();
+  if (impl_->method == ZIP_METHOD_DEFLATED) {
+    if (!impl_->allocReadBuf()) {
+      impl_->reset();
       return false;
     }
     impl_->ctx.file = &impl_->file;
-    impl_->ctx.fileRemaining = fileStat.compressedSize;
+    impl_->ctx.fileRemaining = dataSize;
     impl_->ctx.readBuf = impl_->readBuf;
     impl_->ctx.readBufSize = impl_->chunkSize;
+    impl_->ctx.cipher = impl_->encrypted ? &impl_->cipher : nullptr;
     // Ring sized to the entry (≤32 KB): small chapters cost a small ring, which is what
     // makes holding the reader across background-build slices affordable.
     bool ringOk;
@@ -1045,12 +1449,7 @@ bool ZipFile::EntryReader::open(const FileStatSlim& fileStat, const size_t outpu
     }
     if (!ringOk) {
       LOG_ERR("ZIP", "EntryReader::open: OOM initialising inflate ring buffer");
-      if (!impl_->arena) free(impl_->readBuf);
-      impl_->readBuf = nullptr;
-      if (impl_->arena && impl_->arenaBlock.valid()) {
-        impl_->arena->release(impl_->arenaBlock);
-      }
-      impl_->file.close();
+      impl_->reset();
       return false;
     }
     impl_->ctx.reader.setReadCallback(zipReadCallback);
@@ -1058,7 +1457,7 @@ bool ZipFile::EntryReader::open(const FileStatSlim& fileStat, const size_t outpu
   }
 
   LOG_ERR("ZIP", "EntryReader::open: unsupported compression method %u", fileStat.method);
-  impl_->file.close();
+  impl_->reset();
   return false;
 }
 
@@ -1082,6 +1481,31 @@ bool ZipFile::EntryReader::step(uint8_t* out, size_t cap, size_t* produced, bool
       return true;
     }
     if (cap > remaining) cap = remaining;
+  }
+
+  if (impl_->method == ZIP_METHOD_STORED && impl_->encrypted) {
+    if (impl_->plainAt == impl_->plainEnd) {
+      const int got =
+          readEntryChunk(impl_->file, impl_->storedRemaining, impl_->readBuf, impl_->chunkSize, &impl_->cipher);
+      if (got < 0) {
+        LOG_ERR("ZIP", "EntryReader::step: encrypted read error");
+        impl_->error_ = true;
+        return false;
+      }
+      impl_->plainAt = 0;
+      impl_->plainEnd = static_cast<size_t>(got);
+    }
+    const size_t n = std::min(cap, impl_->plainEnd - impl_->plainAt);
+    memcpy(out, impl_->readBuf + impl_->plainAt, n);
+    impl_->plainAt += n;
+    impl_->bytesProduced_ += n;
+    *produced = n;
+    if ((impl_->storedRemaining == 0 && impl_->plainAt == impl_->plainEnd) ||
+        (impl_->outputCap_ != 0 && impl_->bytesProduced_ >= impl_->outputCap_)) {
+      impl_->done_ = true;
+      *done = true;
+    }
+    return true;
   }
 
   if (impl_->method == ZIP_METHOD_STORED) {

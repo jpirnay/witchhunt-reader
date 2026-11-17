@@ -198,6 +198,19 @@ EInkDisplay::RefreshMode convertRefreshMode(HalDisplay::RefreshMode mode) {
   }
 }
 
+void HalDisplay::armSettleFor(const RefreshMode mode) {
+  const bool half = HalCapabilities::panelNeedsHalfRefreshSettle() && mode == RefreshMode::HALF_REFRESH;
+  if (half || pendingX3SettlePasses > 0) {
+    // The request is for the refresh about to start. A refresh still pending, shipped async (an Indexing popup), is
+    // finished first: its finish clears the request (Uc8253X3Driver::displayFinish), and the X3's HALF went out without
+    // its full sync and settle passes (TXT first open after the popup: X3_DRF_half 462 ms against X3_DRF_full 938 ms
+    // and two settle passes, 2026-11-17).
+    einkDisplay.finishDisplayAsync();
+    einkDisplay.requestResync(half ? (pendingX3SettlePasses > 1 ? pendingX3SettlePasses : 1) : pendingX3SettlePasses);
+  }
+  pendingX3SettlePasses = 0;
+}
+
 void HalDisplay::requestResync(uint8_t settlePasses) {
   if (HalCapabilities::panelNeedsHalfRefreshSettle() && settlePasses > pendingX3SettlePasses) {
     pendingX3SettlePasses = settlePasses;
@@ -238,12 +251,7 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
 
-  if (HalCapabilities::panelNeedsHalfRefreshSettle() && mode == RefreshMode::HALF_REFRESH) {
-    einkDisplay.requestResync(pendingX3SettlePasses > 1 ? pendingX3SettlePasses : 1);
-  } else if (pendingX3SettlePasses > 0) {
-    einkDisplay.requestResync(pendingX3SettlePasses);
-  }
-  pendingX3SettlePasses = 0;
+  armSettleFor(mode);
 
   // Panel time, measured at the one place every paint funnels through. The boot trace
   // (main.cpp) shows the splash costing seconds; without this the host-side compose and
@@ -295,12 +303,7 @@ void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
 
-  if (HalCapabilities::panelNeedsHalfRefreshSettle() && mode == RefreshMode::HALF_REFRESH) {
-    einkDisplay.requestResync(pendingX3SettlePasses > 1 ? pendingX3SettlePasses : 1);
-  } else if (pendingX3SettlePasses > 0) {
-    einkDisplay.requestResync(pendingX3SettlePasses);
-  }
-  pendingX3SettlePasses = 0;
+  armSettleFor(mode);
 
   const unsigned long refreshStart = millis();
   einkDisplay.refreshDisplay(convertRefreshMode(mode), turnOffScreen);
@@ -470,9 +473,7 @@ uint8_t* HalDisplay::borrowSecondaryBufferDuringRefresh(size_t* size) {
   return buf;
 }
 
-bool HalDisplay::lendsDuringRefresh() const {
-  return !HalCapabilities::keepsSecondaryBuffer() && einkDisplay.asyncRefreshHoldsFrameBuffer();
-}
+bool HalDisplay::lendsDuringRefresh() const { return !HalCapabilities::keepsSecondaryBuffer(); }
 
 bool HalDisplay::returnSecondaryBuffer() {
   if (psramArenaLent.exchange(false)) {
