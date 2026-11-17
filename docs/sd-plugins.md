@@ -1,8 +1,10 @@
 # SD-card web plugins
 
-A plugin is a folder on the SD card holding a `plugin.js`. The web server lists
-it, the Settings or File Manager page loads it, and the script renders into a
-card on that page. Adding or changing a plugin never needs a firmware build.
+A plugin is a folder on the SD card holding a `plugin.js`, a `device.json`, or
+both. The web server lists it; the Settings or File Manager page loads a
+`plugin.js`, which renders into a card on that page, and the Plugins page opens a
+`device.json` catalog (see [Catalogs](#catalogs-upstreams-devicejson)). Adding
+or changing a plugin never needs a firmware build.
 
 > **Provenance.** This system is ported from
 > [crosspoint-reader#2734](https://github.com/crosspoint-reader/crosspoint-reader/pull/2734)
@@ -11,25 +13,29 @@ card on that page. Adding or changing a plugin never needs a firmware build.
 > layout, the `/api/plugins` and `/plugin` contract, the `registerPlugin`
 > handshake and the `mount` convention are his design and are kept compatible: a
 > plugin that only uses the page and these two endpoints runs on both firmwares.
-> The device-side `api` calls are not: upstream has since changed them
-> (`relay(method, url, headers, body)` returning `{status, headers, body}`, a
-> base64 `writeFile`), so a plugin that relays or writes files is written for one
-> firmware or the other. This port takes a subset of that branch: the relay,
-> fetch-to-SD and small-file endpoints are here (with the host allowlist upstream
-> had removed), while its crypto endpoint, job queue, on-device catalog screens
-> and content-protection work are not — see [Trust](#trust) and `allowedHosts`
+> The device-side `api` calls follow upstream's later contract too (its plugin
+> system, #3114, and the PRs after it): `api.dir`,
+> `relay(method, url, headers, body)` answering `{status, headers, body}`, a
+> base64 `writeFile`, and `fetchToSd(url, dest, headers, {method, body})`. Unlike
+> upstream, the device reaches only the hosts a plugin may reach: those its
+> manifest lists, or that you approved when it asked. Upstream's on-device catalog
+> screens (`device.json`) run in the browser here, on the Plugins page. Its crypto
+> endpoint, job queue, device events and content-protection work are not here —
+> see [Trust](#trust) and [Reaching the internet](#reaching-the-internet-allowedhosts-and-approvals)
 > below.
 
 Plugins extend the **web interface**, not the reader. Nothing runs on the
 device: the firmware only enumerates the folders and serves their bytes, and the
-script executes in the browser of whoever opened the page. Cost on the device is
+script, or the catalog, runs in the browser of whoever opened the page. Cost on the device is
 one directory scan per page load and no resident RAM.
 
 ## Layout
 
 ```
 <root>/<name>/
-    plugin.js       the plugin (required - a folder without one is not listed)
+    plugin.js       a web part: a card on Settings or the File Manager
+    device.json     a catalog in upstream's format, opened on the Plugins page
+                    (a folder with neither is not listed)
     manifest.json   optional: { "title": "...", "mount": "settings" | "files" }
     ...assets       optional, served flat via api.pluginFile()
 ```
@@ -72,10 +78,13 @@ heading shows an untitled card.
 |---|---|
 | `name` | the folder name |
 | `title` | `manifest.json`'s title, falling back to `name` — use it if you want the heading to track the manifest rather than hardcoding it |
+| `dir` | the plugin's own folder, e.g. `/.crosspoint/plugins/<name>`. A plugin may keep its settings and token there: `writeFile` writes inside it, and `/download?path=<dir>/<file>` reads a file back, though the folder is hidden from every listing |
 | `pluginFile(filename)` | URL for another file in this plugin's folder |
-| `relay(url)` | GET a URL the browser cannot reach itself; resolves to a `Response`. Allowlisted — see below |
-| `fetchToSd(url, dest)` | download straight to the card, one transfer instead of two |
-| `writeFile(path, data)` | write one small file (≤64KB); `data` may be a string, Blob or ArrayBuffer |
+| `relay(url)` | GET a URL the browser cannot reach itself; resolves to a `Response`, redirects followed within the hosts the plugin may reach. See below |
+| `relay(method, url, headers, body)` | upstream's form: any of GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS and the WebDAV methods; `headers` an object; resolves to `{status, headers: [[name, value], ...], body}` with the body as text. A 3xx comes back unfollowed, with its `Location`. Headers make the request a credentialed one: the server's certificate must verify |
+| `fetchToSd(url, dest, headers, {method, body})` | download straight to the card, one transfer instead of two; `headers`, `method` and `body` optional. Resolves to `{ok, complete, status, bytes, dest}` |
+| `writeFile(path, data)` | write one small file (≤64KB) where `/upload` may write or in the plugin's own folder; `data` is base64 when a string (upstream's API), or a Blob or ArrayBuffer |
+| `registerAction(name, fn)` | accepted and ignored with a console warning: there is no job queue here |
 | `currentPath` | the folder the File Manager is showing. Default to it rather than asking for a path the user has already navigated to; always `/` on Settings |
 
 **`api.crypto` is not provided.** The browser's own `crypto.subtle` covers
@@ -91,7 +100,7 @@ inside its own code:
 { "requires": ["relay", "fetchToSd"] }
 ```
 
-Supported: `relay`, `fetchToSd`, `writeFile`, `pluginFile`.
+Supported: `relay`, `fetchToSd`, `writeFile`, `pluginFile`, `dir`.
 
 Everything else is the web server's own
 same-origin API — a plugin uses `fetch()` against the endpoints in
@@ -104,25 +113,39 @@ Prefer these same-origin endpoints wherever they suffice — they cost the devic
 nothing beyond the request itself. A plugin reaches the SD card through the same
 doors the web UI already opens, so it gains no privilege the page does not have.
 
-Reaching *outward* is different, and is fenced separately: see `allowedHosts`
-below. Where a remote site sends CORS headers, call it directly with `fetch()`
+Reaching *outward* is different, and is fenced separately: see
+[below](#reaching-the-internet-allowedhosts-and-approvals). Where a remote site sends CORS headers, call it directly with `fetch()`
 and leave the device out of it entirely.
 
-### Reaching the internet: `allowedHosts`
+### Reaching the internet: `allowedHosts` and approvals
 
 A plugin runs in a browser page served by the device, so it can only read a
 cross-origin response when the remote site sends CORS headers. Most do not —
 Goodreads and `books.google.com` among them — and an image without CORS taints a
 canvas, so its bytes can be displayed but never saved.
 
-`GET /api/relay?plugin=<name>&url=<url>` fetches on the page's behalf and answers
-same-origin. It is opt-in per plugin: the host must be listed in that plugin's
-own `manifest.json`, so a plugin's reach is readable before you install it.
+The relay (`/api/relay`) fetches on the page's behalf and answers same-origin.
+The device reaches a host for a plugin only when the plugin's own
+`manifest.json` lists it, so its reach is readable before you install it, or
+when you approved that host for that plugin:
+
+- a refused request names the host (`403 {"error": ..., "host": ...}`), and the
+  plugin host asks you "Allow the plugin … to connect to …?"; a yes is stored on
+  the device (`/.crosspoint/plugin-hosts.json`, per plugin, kept across updates)
+  and the request runs again;
+- the Plugins page lists each plugin's approved hosts with a **Take back** button;
+- removing a plugin removes its approvals.
+
+Plugins written for upstream crosspoint-reader declare no `allowedHosts`, so
+this is how they reach their services.
 
 The relay and `/api/fetch` check the server's certificate against the reader's
-roots and, when that fails, go on unverified, as an OPDS catalog without a login
-does. So a relayed response is no more trustworthy than plain http: treat it as
-untrusted input, and never put a token or other secret in a relayed URL.
+roots. A request without headers goes on unverified when that fails, as an OPDS
+catalog without a login does, so such a response is no more trustworthy than
+plain http: treat it as untrusted input, and never put a token or other secret
+in a URL. A request with headers (an `Authorization` header, a cookie) is a
+credentialed one and fails instead; a self-hosted server with a self-signed
+certificate needs Settings' "Skip HTTPS validation".
 
 ```jsonc
 {
@@ -135,10 +158,12 @@ untrusted input, and never put a token or other secret in a relayed URL.
 }
 ```
 
-No list means no access. `GET` only — a plugin cannot make the device POST
-anywhere. A redirect is followed only to a host the list allows too; one to any
-other host fails the request, so add the hosts a service redirects to (a CDN, say)
-to the list.
+No list and no approval means no access. `relay(url)` and `fetchToSd` follow a
+redirect only to a host the plugin may reach too. One to any other host is
+refused like a first request, naming the host, so the page asks for it as well
+(a GitHub release file redirects to GitHub's CDN); list the hosts a service
+redirects to in `allowedHosts` to skip the question. The four-argument relay
+follows no redirect at all.
 The body streams back rather than being buffered, so a large image does not have
 to fit in the device's largest free block.
 
@@ -186,6 +211,69 @@ the title, author and series shown on the device come from `book.opf` when one
 is present, so a plugin writing one changes what the reader displays. See
 [sidecar-files.md](sidecar-files.md) for the device-side rules.
 
+## Catalogs: upstream's `device.json`
+
+Upstream crosspoint-reader describes a catalog of books or files in a plugin's
+`device.json` and browses it on the reader (`PluginCatalogActivity`, #3114 by
+Justin Mitchell, and the PRs after it). Here the Plugins page browses it: an
+installed plugin with a `device.json` has an **Open catalog** button, and the
+catalog opens in a card of its own with its lists, a search field when it has
+one, its rows with a **Download** button each, and page buttons. Upstream's
+[docs/sd-plugins.md](https://github.com/crosspoint-reader/crosspoint-reader/blob/develop/docs/sd-plugins.md),
+"Surface 3", defines the fields; `src/network/html/js/plugin-catalog.js` runs
+them.
+
+Every request goes through the plugin's own `relay` and `fetchToSd` (the same
+`api` a `plugin.js` gets), so the device fetches for it and only reaches the
+hosts its manifest lists or you approve when it asks
+([below](#reaching-the-internet-allowedhosts-and-approvals)). Downloads go
+straight to the card.
+
+What runs:
+
+- JSON catalogs: `browse.url`, `method`, `headers`, `body`, `items`, `fields`
+  (`title`, `author`, `id`, `url`, `description`), `page_size` (1 to 16).
+- The four paging modes, chosen by the variables the request uses: `{offset}`
+  (with one lookahead row), `{page}` with `{limit}` (a full page means another),
+  `{page}` alone (a row beyond `page_size` means another), and neither (one
+  answer, paged in the browser after filtering).
+- `lists` with their own `url`, `body` and `id` (`{list_id}`, `{list_id_enc}`),
+  `notice` (asked before the list opens; `once` with an `id` is remembered in
+  that browser), `requires`; `lists_url` with `lists_headers`, `lists_items` and
+  `lists_fields`, and server paths (`/files/1`) joined to the request's host.
+- `search.url` (and `body`) with `{query}` (encoded) and `{query_raw}`.
+- `browse.compatibility`: rows for another `firmware_family`, a newer
+  `plugin_api_min` or a capability this firmware lacks are left out.
+- Downloads: `download.url` (default `{url}`), `method`, `headers`, `body`,
+  `username`/`password` (HTTP Basic), `url_path` (the file's URL from a first
+  answer; a full URL gets no headers, a server path does), `dest_dir`,
+  `filename` (default `{title}.epub`, sanitized as upstream does), and `bundle`
+  (`base` and `files` from the row, into `dest_dir/<subdir>`, default `{id}`).
+- Template variables: the row's `{id}`, `{title}`, `{author}`, `{url}` and
+  their `_enc` forms, `{page}`, `{offset}`, `{limit}`, `{firmware_family}`
+  (`witchhunt`), `{firmware_version}`, `{plugin_api}` (1),
+  `{plugin_capabilities}`, `{plugin_name}`, and `{cfg.KEY}` from the plugin's
+  `config.file`, whose `dest_dir` overrides the manifest's.
+
+The capabilities a catalog may require (`compatibility.requires`, a list's
+`requires`): `catalog.lists`, `catalog.notices`, `catalog.bundle_install`,
+`catalog.compatibility`, `catalog.encoded_item_fields`,
+`catalog.list_index_mapping`, `catalog.list_requirements`,
+`catalog.server_paths`. A `firmware_family` of `crosspoint` passes as well.
+
+Differences from upstream:
+
+- A `dest_dir` of `/.sleep` or `/.dictionaries` saves to `/sleep` or
+  `/dictionaries`. The firmware reads both spellings, and the web server refuses
+  dot folders while **Show Hidden Files** is off.
+- A relative `dest_dir` is in the plugin's own folder, as upstream's is. In
+  `/.crosspoint/plugins` the page can make a folder there only while **Show
+  Hidden Files** is on; without the folder, the download fails.
+- A bundle is written file by file, not staged: one cut off half-way keeps the
+  files it got, and downloading it again finishes it.
+- Not yet: sign-in (`auth`, `token`; such a catalog says so and does not open),
+  XML catalogs, Details pages, the `sidecar` file, and `events`.
+
 ## Installing and managing plugins: the Plugins page
 
 `/plugins` in the web interface (linked from every page) lists every installed
@@ -212,12 +300,39 @@ it is sent:
   gives this repository's plugins a relative one (`find-duplicates/`), so a
   catalog read from another branch installs that branch's files. A plugin hosted
   elsewhere is added to `catalog.json` by hand with an absolute `base`; the
-  script keeps such entries, and the page shows where they come from. The
-  crosspoint-reader catalog itself is not offered: most of its plugins need
-  on-device screens (`device.json`) or a relay this firmware does not have.
-- **From a `.zip`**: the plugin's files side by side, or inside one folder. The
-  page shows the manifest's title, description and `allowedHosts` and asks
-  before installing.
+  script keeps such entries, and the page shows where they come from.
+- **From the CrossPoint community catalog**: the page's **CrossPoint community**
+  switch lists CrossPoint's Plugin Hub
+  (`crosspoint-reader/crosspoint-plugin-hub`, `catalog.json`), which carries the
+  `itsthisjustin/sd-plugins` plugins too, often in newer versions. The browser
+  reads it from GitHub when the switch is first chosen. Neither repository has a
+  license, so nothing of them is in this repository: the page links to their
+  files, and an install fetches them. The plugin stores (`pluginhub`,
+  `plugin-store`) are left out; this page is the store here. Each entry says
+  what of it runs on this firmware, judged from the catalog and from the entry's
+  `device.json`, which the browser reads from GitHub as well:
+  - **runs here**: a web part (`plugin.js`), a catalog that opens here
+    ([Catalogs](#catalogs-upstreams-devicejson)), or both;
+  - **partly runs here**: one of them runs, and something does not yet: a
+    catalog that needs a sign-in or is XML, or device `events`;
+  - **does not run here**: nothing of it runs (an events-only `device.json`,
+    for example), another `firmware_family`, a requirement this firmware lacks
+    (named), a `device.json` that could not be read, or a reason the catalog
+    does not state (`protected-content` needs DRM support). These have no Install
+    button.
+
+  Files a community entry lists in subfolders (the dictionaries catalog's own
+  pages, which its plugin reads from GitHub) are left out of the install, and the
+  page says how many: plugin folders here are flat.
+
+  An entry sharing a folder name with one of ours (`organize-by-author`) says
+  so: installing one replaces the other. A community install asks once, naming
+  the author, and the plugin then reaches the internet only through hosts you
+  approve when it asks (see
+  [Reaching the internet](#reaching-the-internet-allowedhosts-and-approvals)).
+- **From a `.zip`**: the plugin's files side by side, or inside one folder, with
+  a `plugin.js` or a `device.json`. The page shows the manifest's title,
+  description and `allowedHosts` and asks before installing.
 
 Installs go to `/.crosspoint/plugins/<name>`, through endpoints of their own
 (`/api/plugins/begin`, `/file`, `/commit`; see
@@ -294,6 +409,14 @@ gap to be closed: the plugin is code you chose to copy onto your own card.
 
 Note also that the web server has no authentication of its own, so it should
 only be enabled on networks you trust — that is true with or without plugins.
+That includes a plugin's own folder: its token and settings can be read with
+`/download` by anyone on the network while File Transfer runs, as on upstream.
+
+The JSON endpoints a plugin drives (`POST /api/relay`, `/api/fetch` in its
+JSON form, `/api/plugins/hosts`) take only an `application/json` body. A
+browser then asks before sending a cross-site request, and the device answers no
+such question, so another website you visit cannot drive them through your
+browser.
 
 ## Limits
 
@@ -303,7 +426,7 @@ only be enabled on networks you trust — that is true with or without plugins.
 - A plugin whose listing entry would exceed 1536 bytes of JSON is skipped —
   in practice this means keeping `description` to a sentence or two.
 - At most 64 directories are examined per root. The scan runs inside one
-  request and each candidate costs two SD stats, so an unbounded walk over a
+  request and each candidate costs four SD stats, so an unbounded walk over a
   folder holding hundreds of subdirectories could outlast the task watchdog.
   Hitting the bound logs to serial (`[PLG]`) and ignores the remainder — which
   is why a plugins root should be a dedicated folder, not a general-purpose one.
@@ -317,7 +440,7 @@ only be enabled on networks you trust — that is true with or without plugins.
 1. Copy the folder to `/.crosspoint/plugins/<name>/` on the card.
 2. Open Settings (or the File Manager) and check the card appears.
 3. `GET /api/plugins` shows exactly what the firmware discovered — if a plugin
-   is missing from that list, the folder has no `plugin.js` or a same-named
-   folder in an earlier root shadowed it.
+   is missing from that list, the folder has neither `plugin.js` nor
+   `device.json`, or a same-named folder in an earlier root shadowed it.
 4. Script errors surface in the browser console, not on the device. Watch
    serial (`[WEB]`) only for manifest and file-serving problems.

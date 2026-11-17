@@ -221,9 +221,19 @@ class CrossPointWebServer {
   // GET only, allowlisted per plugin manifest, no redirects, streamed not
   // buffered. See the definition for why each of those is load-bearing.
   void handleRelay();
+  // POST /api/relay {plugin, method, url, headers, body} -> upstream's relay contract: any allowed method, the
+  // answer's status and headers in X-Relay-Status / X-Relay-Headers. Same host fence as the GET form.
+  void handleRelayPost();
   // POST /api/fetch?plugin&url&dest -> download straight to the card, avoiding
   // the double transfer of relaying through the browser and uploading back.
   void handleFetchToSd();
+  // The request headers are HttpDownloader::Headers, spelled out to keep that header out of this one.
+  void fetchToSd(const String& plugin, const std::string& url, const String& dest,
+                 const std::vector<std::pair<std::string, std::string>>& headers, const std::string& method,
+                 const std::string& body);
+  // GET/POST /api/plugins/hosts -> the hosts the user approved for each plugin.
+  void handlePluginHostsList() const;
+  void handlePluginHostsSet() const;
   // POST /api/plugin-fs?plugin&path -> write one small file. /upload already
   // covers this; kept for compatibility with upstream-written plugins.
   void handlePluginFs();

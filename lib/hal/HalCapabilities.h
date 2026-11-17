@@ -95,6 +95,10 @@ constexpr bool usbPresenceFromFuelGauge(const BoardConfig::BoardProfile& p) {
 }
 inline bool usbPresenceFromFuelGauge() { return usbPresenceFromFuelGauge(BoardConfig::ACTIVE); }
 
+// A charger IC reports whether power comes in (the Picco's SGM41562, the T5S3's BQ25896). On these boards it is the
+// only thing that sees a wall charger: no detect pin, and a charger enumerates no USB host link.
+inline bool chargerReportsInputPower() { return BoardConfig::ACTIVE.batteryGauge.chargerAddr != 0; }
+
 // Pinned against the shipped profiles, so an SDK resync that changes any of the
 // fields above fails the build here instead of silently turning the X3's
 // charging indication and USB wake handling off.
@@ -254,6 +258,17 @@ inline bool keepsSecondaryBuffer() {
   return false;
 #endif
 }
+
+// A chapter build lays out in PSRAM, in a region of its own (Section::setOwnedBuildRegionBytes) or in the arena lent in
+// place of the secondary buffer, so it touches neither frame buffer nor the heap the reader draws from: the page the
+// build shows can get its gray while the build goes on (BuildPageGray.h). Not the C3s, whose build holds the X3's
+// secondary buffer or the X4's heap. cppcheck, which reads one board's build, sees only the declaration and checks both
+// sides (as defersLiveFontChange below).
+#if defined(CPPCHECK_ANALYSIS)
+bool buildsInPsram();
+#else
+inline bool buildsInPsram() { return keepsSecondaryBuffer(); }
+#endif
 
 // True when an image decode can run through a refresh: nothing it needs is on the bus the waveform holds. The card is
 // not (native SDMMC), and neither is the arena it is lent (PSRAM). Seen on the X4 Pro. The Murphy qualifies too, but

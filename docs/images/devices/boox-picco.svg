@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" width="480" height="560" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="BOOX Picco: keys">
+<title>BOOX Picco: keys</title>
+<rect width="480" height="560" rx="10" fill="#ffffff"/>
+<rect x="140" y="105" width="200" height="350" rx="20" fill="#eeeeee" stroke="#222222" stroke-width="2"/>
+<rect x="156" y="121" width="168" height="280" rx="3" fill="#ffffff" stroke="#999999"/>
+<text x="240.0" y="265.0" text-anchor="middle" fill="#999999" font-size="15">Screen</text>
+<rect x="339" y="136" width="8" height="20" rx="2" fill="#333333"/>
+<line x1="347" y1="146" x2="364" y2="146" stroke="#333333" stroke-width="1"/>
+<text x="368" y="150" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Power</text>
+<text x="368" y="167" text-anchor="start" fill="#222222" font-size="13">press: Confirm</text>
+<text x="368" y="183" text-anchor="start" fill="#222222" font-size="13">twice: Back</text>
+<text x="368" y="199" text-anchor="start" fill="#222222" font-size="13">hold: on / sleep</text>
+<rect x="339" y="214" width="8" height="30" rx="2" fill="#333333"/>
+<line x1="347" y1="229" x2="364" y2="229" stroke="#333333" stroke-width="1"/>
+<text x="368" y="233" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Up</text>
+<rect x="339" y="245" width="8" height="30" rx="2" fill="#333333"/>
+<line x1="347" y1="260" x2="364" y2="260" stroke="#333333" stroke-width="1"/>
+<text x="368" y="264" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Down</text>
+<rect x="339" y="350" width="5" height="26" rx="1" fill="#666666"/>
+<line x1="344" y1="363" x2="364" y2="363" stroke="#333333" stroke-width="1"/>
+<text x="368" y="367" text-anchor="start" fill="#222222" font-size="13">microSD card</text>
+<rect x="226" y="454" width="28" height="6" rx="3" fill="#666666"/>
+<line x1="240" y1="460" x2="240" y2="478" stroke="#333333" stroke-width="1"/>
+<text x="240" y="494" text-anchor="middle" fill="#222222" font-size="13">USB-C</text>
+<rect x="132" y="322" width="9" height="44" rx="2" fill="#bbbbbb" stroke="#333333" stroke-width="1.5"/>
+<rect x="134" y="326" width="5" height="18" rx="1" fill="#333333"/>
+<line x1="132" y1="344" x2="116" y2="344" stroke="#333333" stroke-width="1"/>
+<text x="112" y="348" text-anchor="end" fill="#222222" font-size="15" font-weight="700">Slide switch</text>
+<text x="112" y="365" text-anchor="end" fill="#222222" font-size="13">light on / off</text>
+</svg>

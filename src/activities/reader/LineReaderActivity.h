@@ -71,6 +71,10 @@ class LineReaderActivity : public Activity {
   // (MD recomputes the current heading here).
   virtual void onPageChanged() {}
 
+  // Turns the reader to `orientation` (a CrossPointSettings::ORIENTATION) and saves it: the
+  // orientation action and auto-rotate. The page index is rebuilt by the next render.
+  void applyOrientation(uint8_t orientation);
+
   // Page-turn helpers used by loop(); going forward past the last page
   // launches the finished-book flow.
   void goToPreviousPage();

@@ -5,6 +5,8 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 /**
  * HTTP client utility for fetching content and downloading files. Built on the
@@ -24,6 +26,14 @@ class HttpDownloader {
   // Asked with each redirect's target URL before it is followed; false fails the transfer at the
   // 3xx (HTTP_ERROR). For fetching on behalf of something whose reach is fenced to an allowlist.
   using RedirectFilter = std::function<bool(const std::string& url)>;
+  // Extra request headers (name, value). Credentials as SecureHttpClient::addHeader() treats them:
+  // sent only to the origin a request starts at, and they make the transfer a credentialed one, so
+  // VerifiedThenUnverified does not fall back to an unverified connection.
+  using Headers = std::vector<std::pair<std::string, std::string>>;
+  // Called with each response header (name as sent, value) before the body.
+  using HeaderCallback = std::function<void(const std::string& name, const std::string& value)>;
+  // A body chunk of request()'s answer, with the answer's status; return false to abort.
+  using ResponseCallback = std::function<bool(int status, const uint8_t* data, size_t len)>;
 
   enum DownloadError {
     OK = 0,
@@ -137,7 +147,17 @@ class HttpDownloader {
                                       ProgressCallback progress = nullptr, const std::string& username = "",
                                       const std::string& password = "",
                                       TlsPolicy tls = TlsPolicy::VerifiedThenUnverified,
-                                      const RedirectFilter& redirectAllowed = {});
+                                      const RedirectFilter& redirectAllowed = {}, const Headers& headers = {});
+
+  /**
+   * One request with any method, for the plugin relay: `headers` and `body` go out with it, the
+   * response's headers reach onHeader and then its body onData, in chunks. No redirect is followed:
+   * a 3xx comes back to the caller with its Location, as a browser's fetch(redirect: "manual") would.
+   * No Range chunking either, so a large body on the C3's tight heap may not fit a TLS record; files
+   * belong to downloadToFile(). Returns the HTTP status, or a negative SecureHttpClient error.
+   */
+  static int request(const char* method, const std::string& url, const Headers& headers, const std::string& body,
+                     const HeaderCallback& onHeader, const ResponseCallback& onData, TlsPolicy tls);
 
   /**
    * Session-based variant. The first call on a fresh session opens the

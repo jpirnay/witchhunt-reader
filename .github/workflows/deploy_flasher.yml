@@ -1,0 +1,53 @@
+name: Deploy Flasher
+
+# The web flasher (flasher/, from master) on GitHub Pages, with the images of the releases it offers:
+# the last five full releases and the pre-releases published after the newest of them
+# (scripts/stage_flasher_site.py). The images are served from Pages because GitHub's release
+# downloads send no Access-Control-Allow-Origin, so a page cannot fetch them. A deploy replaces the
+# whole site, so each one downloads every offered release again (about 60 MB each).
+#
+# release.yml calls this after every published release, pre-releases included: the page selects the
+# newest full release and lists pre-releases only when asked to. Run it by hand (Actions > Deploy
+# Flasher > Run workflow, on master) to publish a change to flasher/ between releases, or after a
+# release was deleted or its assets replaced. The github-pages environment takes deploys from master
+# and from tags matching *.* (a release's run).
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # A release's deploy and a manual one would race for the site: the later one waits.
+    concurrency:
+      group: flasher-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      # The page from master, also in a release's run, so the site always carries the current flasher.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Stage the flasher site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/stage_flasher_site.py --github "${{ github.repository }}"
+          --out "${RUNNER_TEMP}/flasher-site"
+
+      - uses: actions/upload-pages-artifact@v5
+        if: ${{ env.ACT != 'true' }}
+        with:
+          path: ${{ runner.temp }}/flasher-site
+
+      - id: deploy
+        if: ${{ env.ACT != 'true' }}
+        uses: actions/deploy-pages@v5

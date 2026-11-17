@@ -35,6 +35,7 @@
 #include <GlyphProvider.h>
 #include <GlyphRun.h>
 #include <HalSystem.h>
+#include <HalTiltSensor.h>
 #include <IndicScripts.h>
 #include <Memory.h>
 #include <OtShaper.h>
@@ -1927,6 +1928,19 @@ void fill(uint8_t* bw, uint8_t* red, const uint16_t width, const uint16_t height
 }
 }  // namespace lab
 
+// ---- IMU ------------------------------------------------------------------------------------
+// One sample from the board's IMU, mount-corrected as tilt page turns read it: acceleration in g,
+// rotation rate in degrees per second. Held still in a known pose, the acceleration is gravity,
+// which is how a board's mounting is measured.
+void cmdImu(std::string_view /*arg*/) {
+  Imu::Sample s{};
+  if (!halTiltSensor.readSample(s)) {
+    reply("IMU_ERROR:no IMU on this board, or the read failed");
+    return;
+  }
+  replyf("IMU:ax=%.3f ay=%.3f az=%.3f gx=%.1f gy=%.1f gz=%.1f", s.ax, s.ay, s.az, s.gx, s.gy, s.gz);
+}
+
 void cmdLab(std::string_view arg) {
   if (arg.substr(0, 4) == "LUT:") {
     const std::string_view hex = arg.substr(4);
@@ -2055,7 +2069,7 @@ constexpr Command kCommands[] = {
     {"IDLE", &cmdIdle},       {"EVENTS", &cmdEvents}, {"GET", &cmdGet},     {"SET", &cmdSet},
     {"LOG", &cmdLog},         {"TOUCH", &cmdTouch},   {"SWIPE", &cmdSwipe}, {"SLEEP", &cmdSleep},
     {"REBOOT", &cmdReboot},   {"HEAP", &cmdHeap},     {"TTF", &cmdTtf},     {"FS", &cmdFs},
-    {"PAGE", &cmdPage},       {"LAB", &cmdLab},
+    {"PAGE", &cmdPage},       {"LAB", &cmdLab},       {"IMU", &cmdImu},
 #endif
 };
 

@@ -133,6 +133,10 @@ class HalDisplay {
   // The display itself still holds its previous frame, which a PSRAM arena lend leaves in place
   // even though hasSecondaryBuffer() is false. For code that wants that frame, not the lend state.
   bool keepsPreviousFrame() const;
+  // That buffer holds the frame on the glass, so a RED seed taken from it now (syncRedRamFromFrameBuffer) is the frame
+  // on screen. False once a lend has come back: the return seeds it from the write buffer. See
+  // FreeInkDisplay::secondaryHoldsFrameOnScreen.
+  bool secondaryHoldsFrameOnScreen() const;
 
   // Borrow/return variant of release/realloc: the display drops to the same
   // single-buffer mode, but the block stays owned by the display and is lent to

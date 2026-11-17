@@ -103,6 +103,12 @@ class SecureHttpClient {
   // bodyTruncated() says whether anything was dropped. For callers that expect a small reply but
   // may be pointed at a server that sends a large page instead.
   void setMaxBufferedBody(size_t bytes) { _maxBufferedBody = bytes; }
+  // Called with each header (name as sent, value without leading blanks) of every final response
+  // head, before its body: interim 1xx heads are skipped, a followed redirect hop's head is not.
+  // For a caller that hands the headers on (the plugin relay); until clearResponseHeaderSink().
+  using HeaderSink = std::function<void(const std::string& name, const std::string& value)>;
+  void setResponseHeaderSink(HeaderSink sink) { _headerSink = std::move(sink); }
+  void clearResponseHeaderSink() { _headerSink = nullptr; }
 
   // --- requests ---
   // Open the connection for url (or keep the matching kept-alive one) without sending anything, so
@@ -116,6 +122,10 @@ class SecureHttpClient {
   // Buffered request (GET/POST/PUT): full body accumulated into getBody(). Use
   // only for small responses (KOSync JSON). Returns HTTP status or negative error.
   int request(const char* method, const std::string& url, const std::string& body = "");
+  // Streaming request with any method: the body (if any) is sent with the request, the response
+  // body is delivered to sink in chunks. Redirects as in the buffered request(): 303, and 301/302
+  // for anything but HEAD, continue as GET without the body.
+  int request(const char* method, const std::string& url, const std::string& body, const BodySink& sink);
   int GET(const std::string& url) { return request("GET", url); }
   int POST(const std::string& url, const std::string& body) { return request("POST", url, body); }
   int PUT(const std::string& url, const std::string& body) { return request("PUT", url, body); }
@@ -274,6 +284,7 @@ class SecureHttpClient {
   std::string _rangeHeader;  // "bytes=a-b" while a Range is set, else empty
   bool _quietRequests = false;
   size_t _maxBufferedBody = 0;
+  HeaderSink _headerSink;
   int _maxRedirects = 5;
   bool _allowRedirectDowngrade = false;
   RedirectFilter _redirectFilter;

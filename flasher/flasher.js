@@ -3,8 +3,8 @@
 // Writes a release's full-install image (bootloader, partition table, otadata and firmware, from
 // 0x0), or just the firmware at 0x10000 with otadata reset, or a local .bin, over WebSerial with
 // esptool-js (Espressif, Apache-2.0), then optionally installs the web interface over the same
-// cable. The page and its images come from GitHub Pages (scripts/stage_flasher_site.py writes
-// manifest.json); nothing else is fetched.
+// cable. The page and the images of the releases it offers come from GitHub Pages
+// (scripts/stage_flasher_site.py writes releases.json); nothing else is fetched.
 //
 // The two resets that leave the ROM loader are written from Espressif's Technical Reference Manuals,
 // since esptool-js 0.7.0 has no watchdog reset and its hard reset never raises RTS:
@@ -23,7 +23,10 @@ const ESPRESSIF_VID = 0x303a;
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  manifest: null,
+  releases: [], // releases.json's, newest first
+  manifest: null, // the selected one of them
+  showPre: false,
+  releaseNotice: null, // why the page did not open with the release its address named
   board: lib.BOARDS[0],
   port: null,
   transport: null,
@@ -91,34 +94,97 @@ function link(href, text) {
   return a;
 }
 
-// ---- Manifest -----------------------------------------------------------------------------------
+// ---- Releases -----------------------------------------------------------------------------------
 
-async function loadManifest() {
+async function loadReleases() {
   try {
-    const res = await fetch("manifest.json", { cache: "no-cache" });
+    const res = await fetch("releases.json", { cache: "no-cache" });
     if (!res.ok) throw new Error(res.status);
-    state.manifest = await res.json();
+    const index = await res.json();
+    state.releases = Array.isArray(index.releases) ? index.releases : [];
   } catch (e) {
-    state.manifest = null;
+    state.releases = [];
   }
   const rel = $("release");
-  if (!state.manifest) {
+  const latest = lib.defaultRelease(state.releases);
+  if (!latest) {
     rel.textContent = "No release images on this site: only a custom file can be written.";
     return;
   }
+  rel.textContent = "Latest release: ";
+  rel.append(latest.url ? link(latest.url, latest.name) : latest.name);
+  $("release-row").hidden = false;
+  $("show-pre-box").hidden = !state.releases.some((r) => r.prerelease);
+
+  const wanted = new URLSearchParams(location.search).get("release");
+  const start = lib.initialRelease(state.releases, wanted);
+  if (start.missing) {
+    state.releaseNotice = `This page does not offer release ${start.missing}, only the ones listed here.`;
+    log(`?release=${start.missing}: not on this site`);
+  }
+  state.showPre = start.showPre;
+  $("show-pre").checked = start.showPre;
+  selectRelease(start.release);
+}
+
+function selectRelease(release) {
+  state.manifest = release;
+  // Update only keeps the table the device has when it is this release's.
+  if (state.loader && state.table !== undefined) state.tableKind = lib.classifyTable(state.table, oursTable());
+  // The address names the release, for a link to it; the default needs no name.
+  const url = new URL(location.href);
+  if (release === lib.defaultRelease(state.releases)) url.searchParams.delete("release");
+  else url.searchParams.set("release", release.tag);
+  history.replaceState(null, "", url);
+  renderReleases();
+}
+
+function renderReleases() {
+  const select = $("release-select");
+  select.replaceChildren();
+  for (const o of lib.releaseOptions(state.releases, { boardId: state.board.id, showPre: state.showPre })) {
+    const option = document.createElement("option");
+    option.value = o.tag;
+    option.textContent = o.text;
+    option.disabled = o.disabled;
+    select.append(option);
+  }
   const m = state.manifest;
-  rel.textContent = "Release: ";
-  rel.append(m.url ? link(m.url, m.name) : m.name);
+  if (!m) return;
+  select.value = m.tag;
+
+  const info = $("release-info");
+  info.replaceChildren();
+  if (state.releaseNotice) note(info, "warn", state.releaseNotice);
+  const notes = m.url ? [" ", link(m.url, "Release notes"), "."] : [];
+  switch (lib.releaseKind(state.releases, m)) {
+    case "latest":
+      break;
+    case "older":
+      note(info, "warn", "An older release, to go back to when a newer one misbehaves. Settings added since are " +
+        "dropped when it saves the settings, so after the next update they may be back at their defaults. Its " +
+        "update check offers the latest release again.", ...notes);
+      break;
+    case "pre":
+      note(info, "warn", "A pre-release: a test version ahead of the latest release, which may still have bugs.",
+        ...notes);
+      break;
+  }
+  if (!lib.releaseHasBoard(m, state.board.id)) {
+    note(info, "bad", `This release has nothing for the ${state.board.label}: pick another release.`);
+  }
+
   const links = $("app-links");
   links.textContent = "Firmware images of this release: ";
-  lib.BOARDS.forEach((b, i) => {
+  let listed = 0;
+  for (const b of lib.BOARDS) {
     const app = m.boards[b.id] && m.boards[b.id].app;
-    if (!app) return;
-    if (i) links.append(", ");
+    if (!app) continue;
+    if (listed++) links.append(", ");
     const a = link(app.file, b.label);
     a.download = app.file.split("/").pop();
     links.append(a);
-  });
+  }
 }
 
 async function fetchImage(entry) {
@@ -144,6 +210,7 @@ function renderBoards() {
     input.checked = b === state.board;
     input.addEventListener("change", () => {
       state.board = b;
+      if (state.manifest) renderReleases();
       refresh();
     });
     label.append(input, " ", b.label);
@@ -343,6 +410,7 @@ function refresh() {
   }
 
   for (const input of document.querySelectorAll("input")) input.disabled = false;
+  $("release-select").disabled = false;
   $("connect").disabled = !("serial" in navigator);
   $("disconnect").disabled = false;
   $("reconnect").disabled = false;
@@ -390,7 +458,7 @@ function refresh() {
   if (problem) note(plan, "warn", problem);
   $("write").disabled = !!problem;
   if (state.busy) {
-    for (const el of document.querySelectorAll("input, button")) el.disabled = true;
+    for (const el of document.querySelectorAll("input, button, select")) el.disabled = true;
   }
 }
 
@@ -841,7 +909,21 @@ async function start() {
     $("unsupported").hidden = false;
     $("connect").disabled = true;
   }
-  await loadManifest();
+  await loadReleases();
+  $("release-select").addEventListener("change", (e) => {
+    state.releaseNotice = null;
+    selectRelease(state.releases.find((r) => r.tag === e.target.value));
+    refresh();
+  });
+  $("show-pre").addEventListener("change", (e) => {
+    state.showPre = e.target.checked;
+    if (!state.showPre && state.manifest && state.manifest.prerelease) {
+      selectRelease(lib.defaultRelease(state.releases));
+      refresh();
+    } else {
+      renderReleases();
+    }
+  });
   $("connect").addEventListener("click", connect);
   // Connected, the device waits in its ROM loader: after a backup, or a look at its table, it
   // would sit there until reset by hand.

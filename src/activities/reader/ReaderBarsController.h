@@ -20,7 +20,8 @@ class MappedInputManager;
 // tabs open in place, above the tab bar. Navigation: the chapter list, the starred pages, a printed page where the
 // book has them, the book's search, and leaving the book, each handed back to the reader. Progress: where the book and
 // the chapter stand, the time spent in the book, previous chapter / Go to % / next chapter, and KOReader sync's pull
-// and push where it is set up. Orientation: the four ways to hold the device, the current one marked. Layout opens the
+// and push where it is set up. Orientation: the four ways to hold the device, the current one marked, and on a board
+// with an IMU the Auto-Rotate switch, which flips in place and takes effect as the bars close. Layout opens the
 // layout sheet there (ReaderLayoutSheet): the font, size, line spacing, margin, darkness, paragraph spacing, alignment,
 // hyphenation and the book's style, and whether they are this book's own or the global settings. The reader, running
 // under the bars, lays the page out again at each change; on the C3s a new font waits for them to close (`fontWaits`,
@@ -54,6 +55,9 @@ class ReaderBarsController final : private UiAppHost {
     bool hasPrintedPages = false;
     bool hasSync = false;
     uint8_t orientation = 0;
+    // Orientation offers Auto-Rotate (the board has an IMU), and whether it is on.
+    bool hasAutoRotate = false;
+    bool autoRotate = false;
   };
 
   // What one input pass asks of the host: nothing, a redraw, the Layout tab's values applied, or the bars gone,
@@ -89,6 +93,10 @@ class ReaderBarsController final : private UiAppHost {
   Info info;
   bool starred = false;
   bool starToggled = false;
+  bool autoRotate = false;
+  bool autoRotateToggled = false;
+  // The Auto-Rotate row's label with its state ("Auto-Rotate: On"), written under the render lock.
+  char autoRotateLabel[48]{};
   Panel panel = Panel::None;
   Focus focus = Focus::None;
   Tab focusedTab = Tab::Navigation;
@@ -139,6 +147,8 @@ class ReaderBarsController final : private UiAppHost {
   void handleInput(MappedInputManager& mappedInput);
   void close(ReaderBarsResult::Action action);
   void toggleStar();
+  void toggleAutoRotate();
+  void formatAutoRotateLabel();
   void openTab(Tab tab);
   void pressControl(ReaderLayout::Control control, int delta);
   void flipThisBookOnly();

@@ -33,12 +33,13 @@ inline constexpr size_t kMaxDirsPerRoot = 64;
 
 // One plugin folder, classified by the marker files it carries.
 struct Entry {
-  std::string name;          // folder name
-  std::string dir;           // "<root>/<name>"
-  bool hasPluginJs = false;  // browser-side plugin (plugin.js)
-  bool hasManifest = false;  // optional card metadata (manifest.json)
-  bool disabled = false;     // a "disabled" marker file: listed, but the pages do not load it
-  const char* root = "";     // the kRoots entry it was found in
+  std::string name;            // folder name
+  std::string dir;             // "<root>/<name>"
+  bool hasPluginJs = false;    // browser-side plugin (plugin.js)
+  bool hasDeviceJson = false;  // upstream's catalog manifest (device.json), run by the Plugins page
+  bool hasManifest = false;    // optional card metadata (manifest.json)
+  bool disabled = false;       // a "disabled" marker file: listed, but the pages do not load it
+  const char* root = "";       // the kRoots entry it was found in
 };
 
 // Scans every root. The earliest root holding a folder name claims it - matching
@@ -49,4 +50,19 @@ std::vector<Entry> scanPlugins();
 // Directory of the named plugin ("<root>/<name>"), or "" when absent. The caller
 // must have validated `name` as a single path component.
 std::string findPluginDir(const char* name);
+
+// True when a normalised card path names something inside a plugin folder: "<root>/<name>/<rest>" for one of
+// kRoots, with a plugin name and a non-empty rest. Plugins written for upstream read their own token and settings
+// with /download?path=<dir>/<file>, and the canonical root sits in /.crosspoint, which the file endpoints otherwise
+// refuse: /download serves such a path anyway, and the folders stay out of every listing.
+inline bool isInsidePluginFolder(const std::string& path) {
+  for (const char* root : kRoots) {
+    const std::string prefix = std::string(root) + "/";
+    if (path.compare(0, prefix.size(), prefix) != 0) continue;
+    const size_t slash = path.find('/', prefix.size());
+    if (slash == std::string::npos || slash == prefix.size()) return false;  // the folder itself, or no name
+    return slash + 1 < path.size();
+  }
+  return false;
+}
 }  // namespace PluginLocations

@@ -133,6 +133,8 @@ HarfBuzz 14.5. The Indic row counts book words drawn the same as the reference.
 | Dictionary (StarDict) | ✅ installer page in the web interface; works in CJK and vertical text | ✅ looks up a selected phrase; ignores Hebrew and Arabic vowel marks |
 | KOReader progress sync | ✅ exact page, register on the device | ✅ exact text position, sign up on the device, own sync server, syncs clippings |
 | Automatic sync | ✅ on closing a book; also on wake, sleep and while reading on ESP32-S3 boards | ❌ manual (menu or long press) |
+| Auto-rotate | ✅ follows the way the device is held (X3, Picco) | ❌ |
+| Tilt page turn by a forward/back flick | ✅ as well as left/right (X3, Picco) | ❌ left/right |
 
 **Both have:** table of contents, footnotes and links with Back through the last three, go to percent,
 named bookmarks, automatic page turn, tilt page turn on the X3, screenshots, reading orientation, XTC
@@ -199,8 +201,9 @@ Publisher Fonts, every script with its shaping and bidi, vertical CJK and all 32
 and X4, and the screenshots in the README come from an X3. What the C3 boards miss is mostly hardware: no touch
 screen, no reading light, no USB drive (the C3 has no USB OTG) and, on the X4, no clock chip. One feature is left out
 for memory: KOReader sync in the background. CrossPoint keeps TrueType fonts, its Cover Grid home theme and part of
-its clippings and Bluetooth support for boards with PSRAM. The X3 and X4 also have things the S3 boards lack: tilt
-page turns (X3), the Sunlight Fading Fix, and USB Transfer over the serial cable.
+its clippings and Bluetooth support for boards with PSRAM. The X3 and X4 also have things most S3 boards lack: tilt
+page turns and auto-rotate (X3; of the S3 boards only the Picco has the motion sensor), the Sunlight Fading Fix, and USB
+Transfer over the serial cable.
 
 ### The same on the X3 and X4
 

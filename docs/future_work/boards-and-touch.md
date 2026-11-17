@@ -123,6 +123,12 @@ Device checks still owed for the 2026-10-21 PRs (all X3-only):
   Keep/Reset of the cache clear (#538), the held-key steps of the password editor (#537).
 - X4: Base's portrait side-box gap and the X4 keyboard in landscape (#543).
 
+Device checks still owed for the faster cold opens (#789, #792, 2.53; measured on the X3 and the X4 Pro only):
+
+- X4: it builds resident, so it keeps the first open's Indexing popup for the chapter build (#792).
+- T5S3, Murphy M3, BOOX Picco: the PSRAM build region (#789) and the book indexed while the popup paints (#792);
+  on the Murphy and the Picco also the SDK's SDMMC read-ahead (freeink-sdk cf63426).
+
 Test API gap that blocks some of these: no `CMD:HEAP:REFUSE` field that refuses the secondary-buffer
 realloc (it would make the fragmented-heap restart reachable). Held keys are there since #741
 (`CMD:BTN:<key>:<ms>`, [Serial Test API](../serial-test-api.md)).
@@ -212,20 +218,34 @@ and the slide switch turns the light on and off. Board notes:
 - **Validate on the device**: touch in the other three orientations (the SDK profile sets `swapXY` and `flipY`),
   Power / Up / Down and the double-Power Back, the light's warmth and that it is off in deep sleep, the battery
   reading, USB Drive, deep sleep and wake; then the full install on our table.
-- **Two boot-log errors** on that unit, cause not looked at: `i2c_master_transmit_receive failed: ESP_ERR_INVALID_STATE`
-  right after `Charger configured` (the IMU is found just after it), and `gpio_isr_handler_remove(): GPIO isr service is
-  not installed`.
+- **A boot-log error** on that unit, cause not looked at: `gpio_isr_handler_remove(): GPIO isr service is not
+  installed`. (The other one, `i2c_master_transmit_receive failed: ESP_ERR_INVALID_STATE` right after `Charger
+  configured`, was the tilt driver probing the X3's IMU address 0x6B first; the IDF reports that NACK as
+  INVALID_STATE. Gone since tilt reads through the SDK's `Imu`, which asks the profile's 0x6A first.)
 - **Updates on the stock table.** Onyx's recovery installs `/update/firmware.bin` from the card. An action that erases
   otadata and restarts would hand the stock-table Picco to it, the way the stock app's Power + Volume Up does.
-- **USB presence from the charger.** No detect pin, so a wall charger shows no charging bolt. Upstream asks
-  `BatteryMonitor::isExternalPowerPresent()` in `HalGPIO::isUsbConnected()`; that also changes the T5S3 (BQ25896), so
-  test both.
+- **USB presence from the charger.** The charging bolt and "Charging" now ask the charger, so a wall charger shows
+  them (`HalPowerManager::isExternalPowerPresent()`). `HalGPIO::isUsbConnected()` still sees the host link only:
+  upstream asks the charger there too, which would also change light sleep, the serial-log gate and the USB wake on
+  the Picco and the T5S3. Decide with the sleep item below.
 - **Sleep on USB power.** Upstream keeps the Picco in light sleep while USB powers it, with a charge strip on the sleep
   screen, because deep sleep cannot see the charger; and it powers on when a cable is plugged in, since that pulses
   the wake line. Here the wake gate rejects that wake and the device sleeps on. Decide after seeing it.
 - **GPIO5.** The SDK carries it as Confirm; what drives it on the device is not known.
 - **Slide switch and touch page turns.** Upstream's third binding. Here Touch Page Turn has four values, so "on" needs
   a remembered mode.
+
+## Motion sensor: power and the SDK gating
+
+Status: tilt page turns and Auto-Rotate read the IMU through the SDK's `freeink::Imu` since #794 (2.53), on the X3
+and the BOOX Picco.
+
+- **Auto-Rotate keeps the gyroscope awake.** While it is on, the reader keeps the accelerometer and the gyroscope
+  running: the SDK `Imu` has no accelerometer-only mode, and the orientation needs only the accelerometer. The current
+  this draws is not measured. Next: measure it on the X3 with Auto-Rotate on and off; if it matters, add an
+  accelerometer-only mode to the SDK.
+- **The driver gating upstream.** `FREEINK_IMU_<PART>` (SDK pin ef99c6c) compiles only the IMU drivers a build's
+  boards use; without it the C3 image grew by 10.6 KB. Offered to Free-Ink as #217, open.
 
 ## USB attach during light sleep on the X4 (CrossPoint #3082)
 

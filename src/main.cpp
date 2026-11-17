@@ -1881,7 +1881,8 @@ void loop() {
   serviceBootPowerRelease();
   HalClock::updatePeriodic();
   halTiltSensor.update(static_cast<CrossPointTiltPageTurn::Value>(SETTINGS.tiltPageTurn),
-                       static_cast<CrossPointOrientation::Value>(SETTINGS.orientation),
+                       static_cast<TiltRate::Axis>(SETTINGS.tiltAxis),
+                       static_cast<CrossPointOrientation::Value>(SETTINGS.orientation), SETTINGS.autoRotate != 0,
                        activityManager.isReaderActivity());
   powerManager.serviceGaugeCapacityLoad();
 
@@ -2078,6 +2079,10 @@ void loop() {
     // than staying mute until the next reboot. No-op once it is open.
     openSerialLogIfHostPresent();
 #endif
+    activityManager.requestUpdate();
+  }
+  // A wall charger enumerates no host, so only the charger IC sees it come and go (Picco, T5S3).
+  if (powerManager.wasChargerInputChanged()) {
     activityManager.requestUpdate();
   }
 

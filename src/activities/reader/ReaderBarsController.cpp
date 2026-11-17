@@ -47,6 +47,8 @@ ReaderBarsController::ReaderBarsController(GfxRenderer& renderer, Info info)
 void ReaderBarsController::begin(const bool touch, const bool fontWaits) {
   fontWaits_ = fontWaits;
   starred = info.starred;
+  autoRotate = info.autoRotate;
+  formatAutoRotateLabel();
   thisBookOnly = info.thisBookOnly;
   layout = thisBookOnly ? info.bookValues : info.globalValues;
   // Keys show their cursor from the start where they are the only way in; a touch board waits for a key.
@@ -75,6 +77,7 @@ void ReaderBarsController::appendDebugState(std::string& out) const {
   SerialCommandGrammar::appendField(out, "panel", kPanel[static_cast<uint8_t>(panel)]);
   if (focus == Focus::List) SerialCommandGrammar::appendField(out, "row", static_cast<long>(listFocus));
   SerialCommandGrammar::appendField(out, "starred", starred ? 1L : 0L);
+  if (info.hasAutoRotate) SerialCommandGrammar::appendField(out, "autorotate", autoRotate ? 1L : 0L);
 #if SERIAL_TEST_API
   // The Layout tab's values: what a device test checks a press against. Release builds keep the short reply.
   if (panel != Panel::Layout) return;
@@ -137,6 +140,8 @@ void ReaderBarsController::fillList(ReaderBarsLayout::Model& model, const Panel 
       for (uint8_t o = 0; o < CrossPointSettings::ORIENTATION_COUNT; ++o) {
         add(kNames[o], static_cast<Button>(static_cast<uint8_t>(Button::Portrait) + o), o == info.orientation);
       }
+      if (info.hasAutoRotate && count < kMaxListRows)
+        model.list[count++] = {autoRotateLabel, Button::AutoRotate, false};
       break;
     }
     case Panel::None:
@@ -230,6 +235,7 @@ void ReaderBarsController::close(const ReaderBarsResult::Action action) {
   ReaderBarsResult closing;
   closing.action = action;
   closing.starToggled = starToggled;
+  closing.autoRotateToggled = autoRotateToggled;
   // The reader applied every change as it was made: nothing is left to apply but a font that waited.
   closing.layoutChanged = fontPending();
   closing.thisBookOnly = thisBookOnly;
@@ -245,6 +251,20 @@ void ReaderBarsController::toggleStar() {
     starToggled = !starToggled;
   }
   redraw_ = true;
+}
+
+void ReaderBarsController::toggleAutoRotate() {
+  {
+    RenderLock lock;
+    autoRotate = !autoRotate;
+    autoRotateToggled = !autoRotateToggled;
+    formatAutoRotateLabel();
+  }
+  redraw_ = true;
+}
+
+void ReaderBarsController::formatAutoRotateLabel() {
+  snprintf(autoRotateLabel, sizeof(autoRotateLabel), "%s: %s", text(StrId::STR_AUTO_ROTATE), onOff(autoRotate));
 }
 
 void ReaderBarsController::openTab(const Tab tab) {
@@ -383,6 +403,9 @@ void ReaderBarsController::pressButton(const Button button) {
     case Button::LandscapeCcw:
       close(ReaderBarsResult::Action::Orientation);
       result_.orientation = static_cast<uint8_t>(static_cast<uint8_t>(button) - static_cast<uint8_t>(Button::Portrait));
+      return;
+    case Button::AutoRotate:
+      toggleAutoRotate();
       return;
   }
 }

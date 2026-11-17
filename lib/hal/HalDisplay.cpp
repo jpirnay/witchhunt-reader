@@ -418,6 +418,7 @@ bool HalDisplay::lendsPsramArena() const { return HalCapabilities::keepsSecondar
 // care about the buffer itself ask einkDisplay directly.
 bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuffer() && !psramArenaLent; }
 bool HalDisplay::keepsPreviousFrame() const { return einkDisplay.hasSecondaryBuffer(); }
+bool HalDisplay::secondaryHoldsFrameOnScreen() const { return einkDisplay.secondaryHoldsFrameOnScreen(); }
 
 // The four buffer-ownership transitions below all take the SPI bus lock, for two reasons that
 // both trace back to them running on the LOOP task (reader background builds) while the render

@@ -1,183 +1,152 @@
 #include "HalTiltSensor.h"
 
 #include <HalCapabilities.h>
+#include <HalI2cBus.h>
 #include <Logging.h>
 
 HalTiltSensor halTiltSensor;
 
-bool HalTiltSensor::writeReg(uint8_t reg, uint8_t val) const {
-  Wire.beginTransmission(_i2cAddr);
-  Wire.write(reg);
-  Wire.write(val);
-  return Wire.endTransmission() == 0;
+bool HalTiltSensor::imuRead(Imu::Sample& out) {
+  HalI2cBus::Lock i2cLock;
+  return _imu.read(out);
 }
 
-bool HalTiltSensor::readReg(uint8_t reg, uint8_t* val) const {
-  Wire.beginTransmission(_i2cAddr);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) {
-    return false;
-  }
-  Wire.requestFrom(_i2cAddr, (uint8_t)1);
-  if (Wire.available() < 1) {
-    return false;
-  }
-  *val = Wire.read();
-  return true;
+bool HalTiltSensor::imuSleep() {
+  HalI2cBus::Lock i2cLock;
+  return _imu.sleep();
 }
 
-bool HalTiltSensor::readGyro(float& gx, float& gy, float& gz) const {
-  Wire.beginTransmission(_i2cAddr);
-  Wire.write(REG_GX_L);
-  if (Wire.endTransmission(false) != 0) {
-    return false;
-  }
-
-  Wire.requestFrom(_i2cAddr, (uint8_t)6);
-  if (Wire.available() < 6) {
-    return false;
-  }
-
-  auto readInt16 = [&]() -> int16_t {
-    const uint8_t lo = Wire.read();
-    const uint8_t hi = Wire.read();
-    return static_cast<int16_t>((hi << 8) | lo);
-  };
-
-  constexpr float SCALE = 1.0f / 64.0f;  // ±512 dps full scale: 32768 / 512 = 64 LSB/dps
-  gx = readInt16() * SCALE;
-  gy = readInt16() * SCALE;
-  gz = readInt16() * SCALE;
-  return true;
+bool HalTiltSensor::imuWake() {
+  HalI2cBus::Lock i2cLock;
+  return _imu.wake();
 }
 
 void HalTiltSensor::begin() {
-  // Tilt needs an IMU, not an X3 specifically. X3 carries a QMI8658; X4 and
-  // X4 Pro carry none, so both correctly skip.
+  _present = false;
+  _available = false;
   if (!HalCapabilities::hasTiltSensor()) {
-    _available = false;
     return;
   }
 
-  uint8_t whoami = 0;
-  _i2cAddr = I2C_ADDR_QMI8658;
-  if (!readReg(QMI8658_WHO_AM_I_REG, &whoami) || whoami != QMI8658_WHO_AM_I_VALUE) {
-    _i2cAddr = I2C_ADDR_QMI8658_ALT;
-    if (!readReg(QMI8658_WHO_AM_I_REG, &whoami) || whoami != QMI8658_WHO_AM_I_VALUE) {
-      LOG_ERR("GYR", "QMI8658 IMU not found");
-      _available = false;
-      return;
-    }
+  bool found = false;
+  {
+    HalI2cBus::Lock i2cLock;
+    found = _imu.begin();
   }
-
-  LOG_INF("GYR", "QMI8658 IMU found at 0x%02X", _i2cAddr);
-
-  if (!writeReg(REG_CTRL7, CTRL7_DISABLE_ALL) || !writeReg(REG_CTRL3, CTRL3_FS_512DPS | CTRL3_ODR_28HZ) ||
-      !writeReg(REG_CTRL1, CTRL1_BASE | CTRL1_SENSOR_DISABLE)) {
-    LOG_ERR("GYR", "QMI8658 register configuration failed");
-    _available = false;
+  if (!found) {
+    LOG_ERR("GYR", "IMU not found");
     return;
   }
-
-  _available = true;
-  _initMs = millis();
-  _sleepMs = millis();
+  _present = true;
+  // begin() leaves the sensors sampling; stand them by until a reader wakes them, so an IMU nobody
+  // uses does not drain the battery.
+  if (!imuSleep()) {
+    LOG_ERR("GYR", "IMU standby failed");
+  }
+  // Tilt reads the gyro; an accelerometer-only part (SC7A20H) cannot drive it.
+  _available = _imu.hasGyroscope();
+  if (!_available) {
+    LOG_INF("GYR", "IMU has no gyroscope");
+    return;
+  }
   _lastPollMs = millis();
-  LOG_INF("GYR", "QMI8658 gyro initialized and put to sleep");
+  LOG_INF("GYR", "IMU initialized and put to sleep");
+}
+
+bool HalTiltSensor::readSample(Imu::Sample& out) {
+  if (!_present) {
+    return false;
+  }
+  if (_isAwake) {
+    return imuRead(out);
+  }
+  if (!imuWake()) {
+    return false;
+  }
+  delay(WAKE_STABILIZE_MS);
+  const bool ok = imuRead(out);
+  imuSleep();
+  return ok;
 }
 
 bool HalTiltSensor::wake() {
-  if (!_available) {
+  if (!_present) {
     return false;
   }
-
-  if ((millis() - _sleepMs) < SLEEP_STABILIZE_MS) {
+  if (!imuWake()) {
+    LOG_ERR("GYR", "IMU wake failed");
     return false;
   }
-
-  if (writeReg(REG_CTRL1, CTRL1_BASE) && writeReg(REG_CTRL7, CTRL7_GYRO_ENABLE)) {
-    _lastPollMs = millis();
-    _lastTiltMs = millis();
-    _wakeMs = millis();
-    LOG_INF("GYR", "QMI8658 woke up");
-    return true;
-  } else {
-    LOG_ERR("GYR", "Failed to wake QMI8658");
-    return false;
-  }
+  _lastPollMs = millis();
+  _lastTiltMs = millis();
+  _wakeMs = millis();
+  _tracker.reset();
+  LOG_INF("GYR", "IMU woke up");
+  return true;
 }
 
 bool HalTiltSensor::deepSleep() {
-  if (!_available) {
+  if (!_present) {
     return false;
   }
-
-  if ((millis() - _wakeMs) < SLEEP_STABILIZE_MS) {
+  if (!imuSleep()) {
+    LOG_ERR("GYR", "IMU sleep failed");
     return false;
   }
-
-  if (writeReg(REG_CTRL7, CTRL7_DISABLE_ALL) && writeReg(REG_CTRL1, CTRL1_BASE | CTRL1_SENSOR_DISABLE)) {
-    clearPendingEvents();
-    _inTilt = false;
-    _sleepMs = millis();
-    LOG_INF("GYR", "QMI8658 entered sleep mode");
-    return true;
-  } else {
-    LOG_ERR("GYR", "Failed to put QMI8658 to sleep");
-    return false;
-  }
+  clearPendingEvents();
+  _inTilt = false;
+  _tracker.reset();
+  _orientationEvent = OrientationTracker::kNone;
+  LOG_INF("GYR", "IMU entered sleep mode");
+  return true;
 }
 
-void HalTiltSensor::update(CrossPointTiltPageTurn::Value mode, CrossPointOrientation::Value orientation,
-                           bool inReader) {
-  if (!_available) {
+void HalTiltSensor::update(const CrossPointTiltPageTurn::Value mode, const TiltRate::Axis axis,
+                           const CrossPointOrientation::Value orientation, const bool autoRotate, const bool inReader) {
+  // Tilt page turns read the gyro; auto-rotate only the accelerometer, which every IMU has.
+  const bool tiltOn = _available && inReader && mode != CrossPointTiltPageTurn::TILT_OFF;
+  const bool rotateOn = _present && inReader && autoRotate;
+  const bool wanted = tiltOn || rotateOn;
+  if (wanted != _isAwake) {
+    _isAwake = wanted ? wake() : !deepSleep();
     return;
   }
-
-  if ((mode != CrossPointTiltPageTurn::TILT_OFF && inReader) && !_isAwake) {
-    _isAwake = wake();
-    return;
-  } else if ((mode == CrossPointTiltPageTurn::TILT_OFF || !inReader) && _isAwake) {
-    _isAwake = !deepSleep();
+  if (!wanted) {
     return;
   }
-
-  if ((mode == CrossPointTiltPageTurn::TILT_OFF) || !inReader) {
-    return;
+  if (rotateOn != _rotating) {
+    // Turned on: the first pose to settle counts as new. Turned off: nothing pending survives.
+    _rotating = rotateOn;
+    _tracker.reset();
+    _orientationEvent = OrientationTracker::kNone;
   }
 
   const unsigned long now = millis();
   if ((now - _wakeMs) < WAKE_STABILIZE_MS) {
     return;
   }
-
-  if ((now - _lastPollMs) < POLL_INTERVAL_MS) {
+  if ((now - _lastPollMs) < (tiltOn ? POLL_INTERVAL_MS : ROTATE_POLL_INTERVAL_MS)) {
     return;
   }
   _lastPollMs = now;
 
-  float gx, gy, gz;
-  if (!readGyro(gx, gy, gz)) {
+  Imu::Sample sample;
+  if (!imuRead(sample)) {
     return;
   }
 
-  float tiltAxis;
-  switch (orientation) {
-    case CrossPointOrientation::PORTRAIT:
-      tiltAxis = mode == CrossPointTiltPageTurn::TILT_INVERTED ? -gx : gx;
-      break;
-    case CrossPointOrientation::INVERTED:
-      tiltAxis = mode == CrossPointTiltPageTurn::TILT_INVERTED ? gx : -gx;
-      break;
-    case CrossPointOrientation::LANDSCAPE_CW:
-      tiltAxis = mode == CrossPointTiltPageTurn::TILT_INVERTED ? gy : -gy;
-      break;
-    case CrossPointOrientation::LANDSCAPE_CCW:
-      tiltAxis = mode == CrossPointTiltPageTurn::TILT_INVERTED ? -gy : gy;
-      break;
-    default:
-      tiltAxis = gx;
-      break;
+  if (rotateOn && _tracker.update(sample.ax, sample.ay, static_cast<uint32_t>(now))) {
+    _orientationEvent = _tracker.settled();
+    _hadActivity = true;
+    LOG_INF("GYR", "Held as orientation %u (ax=%.2f ay=%.2f)", _orientationEvent, sample.ax, sample.ay);
+  }
+  if (!tiltOn) {
+    return;
+  }
+
+  float tiltAxis = TiltRate::rate(sample.gx, sample.gy, orientation, axis);
+  if (mode == CrossPointTiltPageTurn::TILT_INVERTED) {
+    tiltAxis = -tiltAxis;
   }
 
   if (_inTilt) {
@@ -213,6 +182,15 @@ bool HalTiltSensor::wasTiltedBack() {
   const bool val = _tiltBackEvent;
   _tiltBackEvent = false;
   return val;
+}
+
+bool HalTiltSensor::takeOrientation(uint8_t& orientation) {
+  if (_orientationEvent == OrientationTracker::kNone) {
+    return false;
+  }
+  orientation = _orientationEvent;
+  _orientationEvent = OrientationTracker::kNone;
+  return true;
 }
 
 bool HalTiltSensor::hadActivity() {

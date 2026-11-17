@@ -424,6 +424,18 @@ unknown and the redraw takes two passes: one second refresh per chapter build. O
 sends the next turn down the two-pass path too (once in 10 slow turns). Fixing it needs the frame on screen kept
 somewhere a borrower does not write.
 
+**The page kept after a cold open gets two passes (X3, X4).** Since #789 the page a chapter build drew stays on the
+panel when the build ends (`keepBuildPageOnScreen()`), and on the C3s its gray comes as the deferred pass. With One-Pass
+Anti-Aliasing on, that pass is still the two-pass one: one second flicker on the first page of a chapter not yet built.
+The S3 boards push such a page with its gray while the build goes on (`BuildPageGray.h`); the C3s cannot, because the
+X3's build holds the secondary buffer and the X4's resident build the heap.
+
+**The Picco's clean refresh shows two-pass gray.** Since 2026-11-16 a HALF page with One-Pass Anti-Aliasing on gets
+the overlay's two grays, and the pages after it the rest table's one. Whether that shows is for the eye: the
+overlay's level on this panel was not measured. If it does, the choices are one code for all gray (the overlay's light
+step), the rest pass back on a clean refresh (0.18-0.19 s a HALF page), or a short gray-from-black table tuned in the
+gray lab.
+
 **Other controllers.** On the X4 Pro the option shows on UC8179 units only, the one we have tested. The branch has
 tables for SSD1677 and UC8279, and UC8279 also writes `0x01` and `0x82` without restoring them, which may affect later
 B/W refreshes. Effect unproven: our unit is a UC8179.

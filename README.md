@@ -15,11 +15,11 @@ included.
 | Device | Chip | Touch | Notes |
 | --- | --- | --- | --- |
 | Xteink X4 | ESP32-C3 | no | software clock |
-| Xteink X3 | ESP32-C3 | no | clock chip, tilt sensor |
+| Xteink X3 | ESP32-C3 | no | clock chip, motion sensor (tilt page turns, auto-rotate) |
 | Xteink X4 Pro | ESP32-S3 | yes | PSRAM, clock chip, reading light |
 | LilyGo T5S3 Pro | ESP32-S3 | yes | PSRAM, clock chip, reading light |
 | Murphy M3 | ESP32-S3 | yes | PSRAM, clock chip, reading light |
-| BOOX Picco | ESP32-S3 | yes | PSRAM, clock chip, reading light, slide switch |
+| BOOX Picco | ESP32-S3 | yes | PSRAM, clock chip, reading light, slide switch, motion sensor |
 
 **Everything runs on the X3 and X4 as well.** The two ESP32-C3 boards have no PSRAM, and still get the whole reader:
 TrueType and OpenType fonts, every script below with OpenType shaping and bidi, vertical Chinese, Japanese and Korean,
@@ -33,7 +33,8 @@ Want your device supported? Consider donating one: support for a board needs the
 
 Flashing is done from the browser — no toolchain or driver install needed. Use a Chromium-based browser (Chrome, Edge, Opera) or a recent Firefox version (>151); older versions of Firefox and Safari do not support WebSerial.
 
-1. Open the **[Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/)**. It carries the latest release.
+1. Open the **[Witch Reader flasher](https://jpirnay.github.io/witchhunt-reader/)**. It offers the latest release, the
+   four before it to go back to and, under **Show pre-releases**, any newer pre-release.
 2. Pick your device, connect it over USB and press **Connect**. The page reads the device's partition table and
    says whether it is Witch Reader's. If it is not, it says how much room the table leaves Witch Reader. **Back up
    the whole flash** saves everything on the device as a file first, each piece checked against the chip; written

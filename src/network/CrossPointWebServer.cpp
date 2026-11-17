@@ -38,6 +38,7 @@
 #include "HttpFileStreamer.h"
 #include "MultipartRoute.h"
 #include "OpdsServerStore.h"
+#include "PluginRelay.h"
 #include "ReadingStats.h"
 #include "SdCardFontGlobals.h"
 #include "SdCardFontRegistry.h"
@@ -264,11 +265,14 @@ bool relayHostAllowed(const String& plugin, const std::string& url);
 
 // The redirect check for the relay and fetch-to-SD: a redirect is followed only to a host the
 // plugin's manifest allows as well, so the allowlist decides where the device actually connects
-// and not merely where the first request went.
-HttpDownloader::RedirectFilter redirectsWithinAllowlist(const String& plugin) {
-  return [plugin](const std::string& next) {
+// and not merely where the first request went. A refused host goes to *refused, so the answer can
+// name it and the page ask for it, as for the first request: a GitHub release file redirects to
+// its CDN.
+HttpDownloader::RedirectFilter redirectsWithinAllowlist(const String& plugin, std::string* refused) {
+  return [plugin, refused](const std::string& next) {
     if (relayHostAllowed(plugin, next)) return true;
     LOG_DBG("WEB", "Redirect refused for %s: %s not in allowedHosts", plugin.c_str(), urlHost(next).c_str());
+    if (refused) *refused = urlHost(next);
     return false;
   };
 }
@@ -288,6 +292,43 @@ bool hostMatches(const std::string& host, const std::string& pattern) {
 constexpr char DETAILS_RELAY_SCOPE[] = ":details";
 constexpr const char* DETAILS_RELAY_HOSTS[] = {"www.goodreads.com", ".gr-assets.com", "books.google.com"};
 
+// Hosts the user approved for a plugin on a plugin's request (the Plugins page and the plugin host ask), kept apart
+// from the plugin's folder so an update keeps them and a removal drops them: {"<plugin>": ["host", ...]}. Exact
+// hosts only. Plugins written for upstream declare no allowedHosts, so this is how they reach anything.
+constexpr char PLUGIN_HOSTS_PATH[] = "/.crosspoint/plugin-hosts.json";
+constexpr size_t PLUGIN_HOSTS_MAX_BYTES = 8192;
+constexpr size_t PLUGIN_HOSTS_MAX_PER_PLUGIN = 16;
+
+// The approvals, or an empty object when there are none yet or the file is unreadable.
+void loadPluginHosts(JsonDocument& doc) {
+  std::string text;
+  if (Storage.exists(PLUGIN_HOSTS_PATH) &&
+      Storage.readFileToString("WEB", PLUGIN_HOSTS_PATH, PLUGIN_HOSTS_MAX_BYTES, text) &&
+      deserializeJson(doc, text) == DeserializationError::Ok && doc.is<JsonObject>()) {
+    return;
+  }
+  doc.clear();
+  doc.to<JsonObject>();
+}
+
+bool savePluginHosts(const JsonDocument& doc) {
+  String text;
+  serializeJson(doc, text);
+  if (text.length() > PLUGIN_HOSTS_MAX_BYTES) return false;
+  const std::string temp = std::string(PLUGIN_HOSTS_PATH) + ".tmp";
+  return Storage.writeFile(temp.c_str(), text) && FileReplace::replace(temp.c_str(), PLUGIN_HOSTS_PATH);
+}
+
+bool hostApprovedFor(const String& plugin, const std::string& host) {
+  JsonDocument doc;
+  loadPluginHosts(doc);
+  for (JsonVariantConst entry : doc[plugin.c_str()].as<JsonArrayConst>()) {
+    const char* approved = entry.as<const char*>();
+    if (approved && host == approved) return true;
+  }
+  return false;
+}
+
 bool relayHostAllowed(const String& plugin, const std::string& url) {
   const std::string host = urlHost(url);
   if (host.empty()) return false;
@@ -301,15 +342,59 @@ bool relayHostAllowed(const String& plugin, const std::string& url) {
   if (dir.empty()) return false;
 
   std::string manifest;
-  if (!Storage.readFileToString("WEB", dir + "/manifest.json", PLUGIN_MANIFEST_MAX_BYTES, manifest)) return false;
-
-  JsonDocument m;
-  if (deserializeJson(m, manifest) != DeserializationError::Ok || !m["allowedHosts"].is<JsonArray>()) return false;
-
-  for (JsonVariant entry : m["allowedHosts"].as<JsonArray>()) {
-    const char* pattern = entry.as<const char*>();
-    if (pattern && hostMatches(host, pattern)) return true;
+  if (Storage.readFileToString("WEB", dir + "/manifest.json", PLUGIN_MANIFEST_MAX_BYTES, manifest)) {
+    JsonDocument m;
+    if (deserializeJson(m, manifest) == DeserializationError::Ok && m["allowedHosts"].is<JsonArray>()) {
+      for (JsonVariant entry : m["allowedHosts"].as<JsonArray>()) {
+        const char* pattern = entry.as<const char*>();
+        if (pattern && hostMatches(host, pattern)) return true;
+      }
+    }
   }
+  return hostApprovedFor(plugin, host);
+}
+
+// A refused host, named so the page can ask the user to approve it (POST /api/plugins/hosts).
+void sendRefusedHost(WebServer* server, const std::string& host) {
+  std::string body = "{\"error\":\"host not allowed for this plugin\",\"host\":";
+  PluginRelay::appendJsonString(body, host);
+  body += '}';
+  server->send(403, "application/json", body.c_str());
+}
+
+void sendHostRefused(WebServer* server, const std::string& url) { sendRefusedHost(server, urlHost(url)); }
+
+// A plugin's request headers, as upstream passes them (an object) or as a list of [name, value] pairs (for a header
+// named twice). False when one is not allowed (PluginRelay::requestHeaderAllowed()).
+bool parseRelayHeaders(const JsonVariantConst src, HttpDownloader::Headers& out) {
+  const auto add = [&out](const char* name, const char* value) {
+    if (!name || !value || !PluginRelay::requestHeaderAllowed(name, value)) return false;
+    out.emplace_back(name, value);
+    return true;
+  };
+  if (src.is<JsonObjectConst>()) {
+    for (JsonPairConst kv : src.as<JsonObjectConst>()) {
+      if (!add(kv.key().c_str(), kv.value().as<const char*>())) return false;
+    }
+  } else if (src.is<JsonArrayConst>()) {
+    for (JsonVariantConst pair : src.as<JsonArrayConst>()) {
+      if (!add(pair[0].as<const char*>(), pair[1].as<const char*>())) return false;
+    }
+  }
+  return true;
+}
+
+std::string upperAscii(std::string s) {
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::toupper(c); });
+  return s;
+}
+
+// A JSON POST must say so. A cross-site page may send a "simple" request (text/plain or form data) without the
+// browser asking first; application/json makes the browser ask, and this server answers no such question, so
+// another site cannot drive these endpoints through the user's browser. Upstream's relay parses any body.
+bool requireJsonBody(WebServer* server) {
+  if (server->header("Content-Type").startsWith("application/json") && server->hasArg("plain")) return true;
+  server->send(415, "application/json", "{\"error\":\"expected an application/json body\"}");
   return false;
 }
 
@@ -328,6 +413,19 @@ String pluginWriteTarget(const String& rawPath) {
   if (path.isEmpty() || path == "/" || path.endsWith("/")) return "";
   if (isProtectedWebPath(path, Target::Item, hiddenAllowed())) return "";
   return path;
+}
+
+// For a plugin's own writes: what /upload accepts, and anything inside the plugin's own folder, which for one the
+// Plugins page installed sits in /.crosspoint. Upstream plugins keep their token and settings there.
+String pluginWriteTarget(const String& plugin, const String& rawPath) {
+  const String allowed = pluginWriteTarget(rawPath);
+  if (!allowed.isEmpty() || !isSafePathComponent(plugin)) return allowed;
+  const String path = normalizeWebPath(rawPath);
+  const std::string own = PluginLocations::findPluginDir(plugin.c_str());
+  if (own.empty() || path.endsWith("/")) return "";
+  const std::string p = path.c_str();
+  const std::string prefix = own + "/";
+  return p.size() > prefix.size() && p.compare(0, prefix.size(), prefix) == 0 ? path : String();
 }
 
 // Ceiling on a relayed response. Nothing is buffered (see handleRelay), so this
@@ -501,6 +599,9 @@ void CrossPointWebServer::begin() {
   server->on("/api/plugins", HTTP_GET, [this] { handlePluginList(); });
   server->on("/plugin", HTTP_GET, [this] { handlePluginFile(); });
   server->on("/api/relay", HTTP_GET, [this] { handleRelay(); });
+  server->on("/api/relay", HTTP_POST, [this] { handleRelayPost(); });
+  server->on("/api/plugins/hosts", HTTP_GET, [this] { handlePluginHostsList(); });
+  server->on("/api/plugins/hosts", HTTP_POST, [this] { handlePluginHostsSet(); });
   server->on("/api/fetch", HTTP_POST, [this] { handleFetchToSd(); });
   addMultipartRoute("/api/plugin-fs", [this] { handlePluginFs(); }, [this] { handlePluginFsData(); });
   server->on("/plugins", HTTP_GET, [this] { handlePluginsPage(); });
@@ -521,10 +622,11 @@ void CrossPointWebServer::begin() {
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
 
   // Collect the WebDAV headers, If-None-Match for the bundle's ETags (WebAssets::serve()), Referer
-  // for the upload log and Host for the captive-portal check, then register the handler.
+  // for the upload log, Host for the captive-portal check and Content-Type for the JSON plugin
+  // endpoints (requireJsonBody()), then register the handler.
   // collectHeaders() replaces the list, so it is called once.
-  const char* collectedHeaders[] = {"Depth",   "Destination",   "Overwrite", "If",  "Lock-Token",
-                                    "Timeout", "If-None-Match", "Referer",   "Host"};
+  const char* collectedHeaders[] = {"Depth",   "Destination",   "Overwrite", "If",   "Lock-Token",
+                                    "Timeout", "If-None-Match", "Referer",   "Host", "Content-Type"};
   server->collectHeaders(collectedHeaders, sizeof(collectedHeaders) / sizeof(collectedHeaders[0]));
   // Ownership passes to the WebServer, which deletes the handler when stopped.
   // On OOM the HTTP server still comes up; only WebDAV is unavailable.
@@ -1305,7 +1407,10 @@ void CrossPointWebServer::handleDownload() const {
     server->send(400, "text/plain", "Invalid path");
     return;
   }
-  if (isProtectedWebPath(itemPath, Target::Item, hiddenAllowed())) {
+  // A plugin's own files are readable at their exact path even inside /.crosspoint: plugins written for upstream read
+  // their token and settings this way. The folders stay out of every listing.
+  if (isProtectedWebPath(itemPath, Target::Item, hiddenAllowed()) &&
+      !PluginLocations::isInsidePluginFolder(itemPath.c_str())) {
     server->send(403, "text/plain", "Cannot access protected items");
     return;
   }
@@ -3299,7 +3404,7 @@ void CrossPointWebServer::handlePluginList() const {
   size_t listed = 0;
 
   for (const auto& e : PluginLocations::scanPlugins()) {
-    if (!e.hasPluginJs) continue;
+    if (!e.hasPluginJs && !e.hasDeviceJson) continue;
 
     doc.clear();
     doc["name"] = e.name;
@@ -3307,6 +3412,9 @@ void CrossPointWebServer::handlePluginList() const {
     doc["mount"] = "settings";  // default page
     doc["root"] = e.root;
     doc["disabled"] = e.disabled;
+    // What it has: a web part the pages load (plugin.js), and a catalog manifest the Plugins page runs (device.json).
+    doc["web"] = e.hasPluginJs;
+    doc["device"] = e.hasDeviceJson;
 
     std::string manifest;
     if (e.hasManifest &&
@@ -3421,8 +3529,8 @@ void CrossPointWebServer::handleRelay() {
     return;
   }
   if (!relayHostAllowed(plugin, url)) {
-    LOG_DBG("WEB", "Relay refused for %s: %s not in allowedHosts", plugin.c_str(), urlHost(url).c_str());
-    server->send(403, "application/json", "{\"error\":\"host not allowed by plugin manifest\"}");
+    LOG_DBG("WEB", "Relay refused for %s: %s not allowed", plugin.c_str(), urlHost(url).c_str());
+    sendHostRefused(server.get(), url);
     return;
   }
 
@@ -3431,6 +3539,7 @@ void CrossPointWebServer::handleRelay() {
   bool headerSent = false;
   bool overLimit = false;
   size_t total = 0;
+  std::string refusedHost;
 
   const bool ok = HttpDownloader::fetchUrl(
       url,
@@ -3451,8 +3560,13 @@ void CrossPointWebServer::handleRelay() {
         total += len;
         return true;
       },
-      false, "", "", redirectsWithinAllowlist(plugin));
+      false, "", "", redirectsWithinAllowlist(plugin, &refusedHost));
 
+  // cppcheck-suppress knownConditionTrueFalse ; the redirect filter sets refusedHost through its pointer
+  if (!headerSent && !refusedHost.empty()) {
+    sendRefusedHost(server.get(), refusedHost);
+    return;
+  }
   if (!headerSent) {
     server->send(502, "application/json", "{\"error\":\"fetch failed\"}");
     return;
@@ -3469,21 +3583,154 @@ void CrossPointWebServer::handleRelay() {
   LOG_DBG("WEB", "Relay served %u bytes", static_cast<unsigned>(total));
 }
 
-// POST /api/fetch?plugin=<name>&url=<url>&dest=<sd path>
+// POST /api/relay  {plugin, method, url, headers, body}  (application/json)
 //
-// Downloads straight to the card. Doing this through /api/relay plus /upload
-// would move the file twice over WiFi and hold all of it in browser memory;
-// for a cover that is merely wasteful, for a book it is prohibitive.
-//
-// Same fence as the relay - allowlisted per plugin manifest, redirects only within
-// it - plus the write target must pass the same check /upload applies.
+// The relay's second form, upstream crosspoint-reader's contract (#3114, Justin Mitchell; streaming #4286 and #4289
+// by Arthur Tazhitdinov), so plugins written for upstream run: any method PluginRelay allows, the caller's headers
+// and body, and the answer's status in X-Relay-Status, its headers in X-Relay-Headers (a JSON list of [name, value]
+// pairs) and its body streamed. A 3xx comes back as it is, not followed. Unlike upstream, the host must still be one
+// the plugin may reach (relayHostAllowed: its manifest, or the user's approval), a request carrying headers is a
+// credentialed one (TLS verified, no fallback), and only an application/json POST is taken (requireJsonBody()).
+void CrossPointWebServer::handleRelayPost() {
+  if (rejectIfLowMemory(server.get())) return;
+  if (!requireJsonBody(server.get())) return;
+
+  JsonDocument req;
+  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+    server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
+    return;
+  }
+  const String plugin = req["plugin"] | "";
+  const std::string url = req["url"] | "";
+  const std::string method = upperAscii(req["method"] | "GET");
+  const std::string body = req["body"] | "";
+
+  if (!isSafePathComponent(plugin) || url.empty()) {
+    server->send(400, "application/json", "{\"error\":\"missing plugin or url\"}");
+    return;
+  }
+  if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) {
+    server->send(400, "application/json", "{\"error\":\"only http(s) urls\"}");
+    return;
+  }
+  if (!PluginRelay::methodAllowed(method)) {
+    server->send(400, "application/json", "{\"error\":\"method not allowed\"}");
+    return;
+  }
+  HttpDownloader::Headers headers;
+  if (!parseRelayHeaders(req["headers"], headers)) {
+    server->send(400, "application/json", "{\"error\":\"header not allowed\"}");
+    return;
+  }
+  if (!relayHostAllowed(plugin, url)) {
+    LOG_DBG("WEB", "Relay refused for %s: %s not allowed", plugin.c_str(), urlHost(url).c_str());
+    sendHostRefused(server.get(), url);
+    return;
+  }
+  req.clear();  // the request's JSON is no longer needed while the answer streams
+  LOG_DBG("WEB", "Relay %s %s -> %s", plugin.c_str(), method.c_str(), url.c_str());
+
+  // Bounded: the list rides in one header of this response.
+  PluginRelay::HeaderList responseHeaders(3072);
+  bool headerSent = false;
+  bool overLimit = false;
+  size_t total = 0;
+  int status = 0;
+  const auto sendHead = [&]() {
+    server->sendHeader("X-Relay-Status", String(status));
+    server->sendHeader("X-Relay-Headers", responseHeaders.json().c_str());
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "application/octet-stream", "");
+    headerSent = true;
+  };
+  const int rc = HttpDownloader::request(
+      method.c_str(), url, headers, body,
+      [&](const std::string& name, const std::string& value) { responseHeaders.add(name, value); },
+      [&](const int answerStatus, const uint8_t* data, const size_t len) {
+        if (total + len > MAX_RELAY_BYTES) {
+          overLimit = true;
+          return false;
+        }
+        if (!headerSent) {
+          status = answerStatus;
+          sendHead();
+        }
+        HalSystem::feedWatchdog();
+        server->sendContent(reinterpret_cast<const char*>(data), len);
+        total += len;
+        return true;
+      },
+      HttpDownloader::TlsPolicy::VerifiedThenUnverified);
+
+  if (responseHeaders.dropped() > 0) {
+    LOG_DBG("WEB", "Relay left out %u response headers over the size cap",
+            static_cast<unsigned>(responseHeaders.dropped()));
+  }
+  if (!headerSent) {
+    if (rc <= 0) {
+      LOG_ERR("WEB", "Relay failed (%d): %s", rc, url.c_str());
+      server->send(502, "application/json", "{\"error\":\"relay failed\"}");
+      return;
+    }
+    // An answer without a body: a 204, a 3xx, a reply to HEAD.
+    status = rc;
+    sendHead();
+    server->sendContent("");
+    return;
+  }
+  if (rc < 0 || overLimit) {
+    LOG_ERR("WEB", "Relay truncated after %u bytes%s: %s", static_cast<unsigned>(total),
+            overLimit ? " (size limit)" : "", url.c_str());
+    // No final chunk, so the browser does not take what arrived for the whole body (#4289).
+    server->client().stop();
+    return;
+  }
+  server->sendContent("");
+}
+
+// POST /api/fetch?plugin=<name>&url=<url>&dest=<sd path>, or the same as application/json with headers, method and
+// body (upstream's form): download straight to the card, see fetchToSd().
 void CrossPointWebServer::handleFetchToSd() {
   if (rejectIfLowMemory(server.get())) return;
+  if (!server->header("Content-Type").startsWith("application/json")) {
+    const String plugin = server->arg("plugin");
+    fetchToSd(plugin, server->arg("url").c_str(), pluginWriteTarget(plugin, server->arg("dest")), {}, "GET", "");
+    return;
+  }
+  // POST /api/fetch  {plugin, url, dest, headers, method, body}  (application/json)
+  //
+  // Upstream's form (#4202 by Justin Mitchell added method and body), so plugins written for it run. Its
+  // browser-side segments (offset, maxBytes) only work around mobile browsers dropping long requests: the plugin
+  // host here makes one call, and the answer reports the whole file.
+  JsonDocument req;
+  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+    server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
+    return;
+  }
+  HttpDownloader::Headers headers;
+  if (!parseRelayHeaders(req["headers"], headers)) {
+    server->send(400, "application/json", "{\"error\":\"header not allowed\"}");
+    return;
+  }
+  const String plugin = req["plugin"] | "";
+  const String dest = pluginWriteTarget(plugin, String(req["dest"] | ""));
+  const std::string url = req["url"] | "";
+  const std::string method = upperAscii(req["method"] | "GET");
+  const std::string body = req["body"] | "";
+  req.clear();
+  fetchToSd(plugin, url, dest, headers, method, body);
+}
 
-  const String plugin = server->arg("plugin");
-  const std::string url = server->arg("url").c_str();
-  const String dest = pluginWriteTarget(server->arg("dest"));
-
+// Downloads straight to the card. Doing this through /api/relay plus /upload would move the file twice over WiFi and
+// hold all of it in browser memory; for a cover that is merely wasteful, for a book it is prohibitive.
+//
+// Same fence as the relay - the plugin's allowed hosts, redirects only within them - plus the write target must pass
+// pluginWriteTarget(). Headers make the download a credentialed one (TLS verified, no fallback). A GET goes through
+// downloadToFile(), Range chunks on a tight heap included; another method, or a body, is sent once and its answer
+// streamed to the file.
+void CrossPointWebServer::fetchToSd(const String& plugin, const std::string& url, const String& dest,
+                                    const HttpDownloader::Headers& headers, const std::string& method,
+                                    const std::string& body) {
   if (!isSafePathComponent(plugin) || url.empty() || dest.isEmpty()) {
     server->send(400, "application/json", "{\"error\":\"missing plugin, url or dest\"}");
     return;
@@ -3492,28 +3739,125 @@ void CrossPointWebServer::handleFetchToSd() {
     server->send(400, "application/json", "{\"error\":\"only http(s) urls\"}");
     return;
   }
+  if (!PluginRelay::methodAllowed(method) || method == "HEAD") {
+    server->send(400, "application/json", "{\"error\":\"method not allowed\"}");
+    return;
+  }
   if (!relayHostAllowed(plugin, url)) {
-    LOG_DBG("WEB", "Fetch refused for %s: %s not in allowedHosts", plugin.c_str(), urlHost(url).c_str());
-    server->send(403, "application/json", "{\"error\":\"host not allowed by plugin manifest\"}");
+    LOG_DBG("WEB", "Fetch refused for %s: %s not allowed", plugin.c_str(), urlHost(url).c_str());
+    sendHostRefused(server.get(), url);
     return;
   }
 
-  LOG_DBG("WEB", "Fetch %s -> %s", url.c_str(), dest.c_str());
-  const HttpDownloader::DownloadError result = HttpDownloader::downloadToFile(
-      url, dest.c_str(), nullptr, "", "", HttpDownloader::TlsPolicy::VerifiedThenUnverified,
-      redirectsWithinAllowlist(plugin));
-  if (result != HttpDownloader::OK) {
-    LOG_ERR("WEB", "Fetch to SD failed (%d): %s", static_cast<int>(result), url.c_str());
-    server->send(502, "application/json", "{\"error\":\"download failed\"}");
-    return;
+  LOG_DBG("WEB", "Fetch %s %s -> %s", method.c_str(), url.c_str(), dest.c_str());
+  int status = 0;
+  size_t bytes = 0;
+  bool ok = false;
+  std::string refusedHost;
+  if (method == "GET" && body.empty()) {
+    ok = HttpDownloader::downloadToFile(url, dest.c_str(), nullptr, "", "",
+                                        HttpDownloader::TlsPolicy::VerifiedThenUnverified,
+                                        redirectsWithinAllowlist(plugin, &refusedHost), headers) == HttpDownloader::OK;
+    if (ok) {
+      status = 200;
+      HalFile f = Storage.open(dest.c_str());
+      if (f) bytes = f.size();
+    }
+  } else {
+    const String temp = dest + ".part";
+    FsFile file;
+    if (!Storage.openFileForWrite("WEB", temp.c_str(), file)) {
+      server->send(500, "application/json", "{\"error\":\"could not create file\"}");
+      return;
+    }
+    bool writeFailed = false;
+    status = HttpDownloader::request(
+        method.c_str(), url, headers, body, nullptr,
+        [&](int, const uint8_t* data, const size_t len) {
+          if (file.write(data, len) != len) {
+            writeFailed = true;
+            return false;
+          }
+          bytes += len;
+          HalSystem::feedWatchdog();
+          return true;
+        },
+        HttpDownloader::TlsPolicy::VerifiedThenUnverified);
+    const bool closed = file.close();
+    ok = !writeFailed && closed && status >= 200 && status < 300 && FileReplace::replace(temp.c_str(), dest.c_str());
+    if (!ok) Storage.remove(temp.c_str());
   }
 
+  // cppcheck-suppress knownConditionTrueFalse ; the redirect filter sets refusedHost through its pointer
+  if (!ok && !refusedHost.empty()) {
+    sendRefusedHost(server.get(), refusedHost);
+    return;
+  }
+  JsonDocument doc;
+  doc["ok"] = ok;
+  doc["complete"] = ok;
+  doc["status"] = status;
+  doc["bytes"] = static_cast<uint32_t>(bytes);
+  doc["dest"] = dest.c_str();
+  if (!ok) {
+    LOG_ERR("WEB", "Fetch to SD failed (%d): %s", status, url.c_str());
+    doc["error"] = "download failed";
+    sendJson(server.get(), 502, doc);
+    return;
+  }
   // A downloaded book replaces whatever was cached for that path.
   clearBookCacheIfNeeded(dest);
-  JsonDocument doc;
-  doc["ok"] = true;
-  doc["dest"] = dest.c_str();
   sendJson(server.get(), 200, doc);
+}
+
+// GET /api/plugins/hosts -> {"<plugin>": ["host", ...]}: the hosts the user approved.
+void CrossPointWebServer::handlePluginHostsList() const {
+  JsonDocument doc;
+  loadPluginHosts(doc);
+  sendJson(server.get(), 200, doc);
+}
+
+// POST /api/plugins/hosts  {plugin, host, allow}  (application/json): approve a host for a plugin, or take the
+// approval back. The page asks the user first; the plugin itself never calls this.
+void CrossPointWebServer::handlePluginHostsSet() const {
+  if (!requireJsonBody(server.get())) return;
+  JsonDocument req;
+  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+    server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
+    return;
+  }
+  const String plugin = req["plugin"] | "";
+  String host = req["host"] | "";
+  host.toLowerCase();
+  // Absent means approve. Spelled out: cppcheck takes ArduinoJson's `| true` default for a bitwise or
+  // (badBitmaskCheck).
+  const bool allow = !req["allow"].is<bool>() || req["allow"].as<bool>();
+  if (!isSafePathComponent(plugin) || host.isEmpty() || host.length() > 253 || host.indexOf('/') >= 0 ||
+      host.indexOf(':') >= 0 || host.indexOf('@') >= 0 || PluginLocations::findPluginDir(plugin.c_str()).empty()) {
+    server->send(400, "application/json", "{\"error\":\"invalid plugin or host\"}");
+    return;
+  }
+  JsonDocument doc;
+  loadPluginHosts(doc);
+  JsonArray hosts =
+      doc[plugin.c_str()].is<JsonArray>() ? doc[plugin.c_str()].as<JsonArray>() : doc[plugin.c_str()].to<JsonArray>();
+  for (size_t i = hosts.size(); i-- > 0;) {
+    if (host == hosts[i].as<const char*>()) hosts.remove(i);
+  }
+  if (allow) {
+    if (hosts.size() >= PLUGIN_HOSTS_MAX_PER_PLUGIN) {
+      server->send(400, "application/json", "{\"error\":\"too many hosts for this plugin\"}");
+      return;
+    }
+    hosts.add(host.c_str());
+  }
+  if (hosts.size() == 0) doc.remove(plugin.c_str());
+  if (!savePluginHosts(doc)) {
+    server->send(500, "application/json", "{\"error\":\"could not save\"}");
+    return;
+  }
+  LOG_INF("WEB", "Plugin %s: host %s %s", plugin.c_str(), host.c_str(), allow ? "approved" : "revoked");
+  server->send(200, "application/json", "{\"ok\":true}");
 }
 
 // ---- Files that replace a target once whole --------------------------------------------------------
@@ -3610,7 +3954,7 @@ void CrossPointWebServer::handlePluginFsData() {
   if (up.status == UPLOAD_FILE_START) {
     tolerateUploadStalls(*server);
     const String plugin = server->arg("plugin");
-    stagedUpload.start(isSafePathComponent(plugin) ? pluginWriteTarget(server->arg("path")) : String(),
+    stagedUpload.start(isSafePathComponent(plugin) ? pluginWriteTarget(plugin, server->arg("path")) : String(),
                        PLUGIN_FS_MAX_BYTES);
     return;
   }
@@ -3801,8 +4145,9 @@ void CrossPointWebServer::handlePluginInstallCommit() const {
     return;
   }
   const std::string staging = pluginStagingDir(name);
-  if (!Storage.exists((staging + "/plugin.js").c_str())) {
-    server->send(400, "application/json", "{\"error\":\"no plugin.js was sent\"}");
+  // A plugin is a web part (plugin.js), upstream's catalog manifest (device.json), or both.
+  if (!Storage.exists((staging + "/plugin.js").c_str()) && !Storage.exists((staging + "/device.json").c_str())) {
+    server->send(400, "application/json", "{\"error\":\"no plugin.js or device.json was sent\"}");
     return;
   }
   const std::string live = pluginInstallDir(name);
@@ -3835,6 +4180,13 @@ void CrossPointWebServer::handlePluginRemove() const {
   if (!removed) {
     server->send(404, "application/json", "{\"error\":\"no such plugin\"}");
     return;
+  }
+  // Its approvals go with it: a later plugin of the same name starts without them.
+  JsonDocument hosts;
+  loadPluginHosts(hosts);
+  if (hosts[name.c_str()].is<JsonArray>()) {
+    hosts.remove(name.c_str());
+    if (!savePluginHosts(hosts)) LOG_ERR("WEB", "Could not drop the approved hosts of %s", name.c_str());
   }
   LOG_INF("WEB", "Plugin %s removed", name.c_str());
   server->send(200, "application/json", "{\"ok\":true}");

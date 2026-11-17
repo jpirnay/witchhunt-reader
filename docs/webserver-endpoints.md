@@ -580,6 +580,10 @@ endpoints and WebDAV. The rules are in
   `/.crosspoint` can be cleaned up. But an item whose own name starts with `.` still
   cannot be read, written, renamed, moved or deleted. WebDAV ignores the setting
   and always refuses dot segments.
+- One exception, for plugins: `/download` reads a file inside a plugin folder
+  (`/.crosspoint/plugins/<name>/...`, and the other plugin roots) at its exact path,
+  whatever the setting, and the plugin write endpoints write inside the calling plugin's own
+  folder. Plugins keep their token and settings there. The folders stay out of every listing.
 - Names are judged as the SD library opens them: leading spaces and trailing dots
   and spaces are dropped, so `/ .crosspoint` and `/.crosspoint.` are
   `/.crosspoint`. Matching ignores case.
@@ -843,7 +847,7 @@ plugin folders and serves their bytes — plugin code runs in the browser. See
 ### GET `/api/plugins` - List Plugins
 
 Scans `/.crosspoint/plugins`, `/plugins`, and `/.plugins` and returns every
-folder holding a `plugin.js`.
+folder holding a `plugin.js` or a `device.json`.
 
 **Request:**
 ```bash
@@ -853,7 +857,7 @@ curl http://crosspoint.local/api/plugins
 **Response (200 OK):**
 ```json
 [{"name":"organize-by-author","title":"Organize by Author","mount":"files","root":"/.crosspoint/plugins",
-  "disabled":false,"description":"Sorts the EPUBs of one folder ...","version":"1.0.0"}]
+  "disabled":false,"web":true,"device":false,"description":"Sorts the EPUBs of one folder ...","version":"1.0.0"}]
 ```
 
 | Field          | Description                                                              |
@@ -863,6 +867,8 @@ curl http://crosspoint.local/api/plugins
 | `mount`        | `settings` (default) or `files` — which page loads the plugin            |
 | `root`         | The plugins folder it was found in                                       |
 | `disabled`     | Switched off on the Plugins page; the pages do not load it               |
+| `web`          | It has a `plugin.js`, which the Settings or File Manager page loads      |
+| `device`       | It has a `device.json`, a catalog the Plugins page opens                 |
 | `description`, `version`, `requires`, `allowedHosts` | From `manifest.json`, when present |
 
 Always 200 with an array; an unreadable or absent plugins folder yields `[]`.
@@ -918,7 +924,7 @@ component.
 | --- | --- |
 | `POST /api/plugins/begin?name=` | Starts an install: an empty staging folder `<name>.new` |
 | `POST /api/plugins/file?name=&file=` | One file into the staging folder; the file is sent as `multipart/form-data` (binary-safe, at most 512 KB) |
-| `POST /api/plugins/commit?name=` | Replaces the installed plugin with the staging folder in one rename; `400` without a `plugin.js` |
+| `POST /api/plugins/commit?name=` | Replaces the installed plugin with the staging folder in one rename; `400` without a `plugin.js` or a `device.json` |
 | `POST /api/plugins/remove?name=` | Removes the plugin from every plugins folder; `404` if there is none |
 | `POST /api/plugins/enable?name=&on=0` | Switches the plugin off (a `disabled` file in its folder); `on=1` switches it back on |
 
@@ -960,9 +966,11 @@ forwarded, so the caller infers the type from what it asked for.
   `manifest.json` `allowedHosts`. A bare entry matches exactly; one starting
   with a dot matches that suffix. No list, no access.
 - **Redirects stay inside the allowlist.** A redirect is followed only to a host
-  the same `allowedHosts` list allows; one to any other host fails the request
-  (`502`). Following them blindly would mean the host actually fetched was never
-  checked against the allowlist.
+  the same `allowedHosts` list allows, or that the user approved. One to any
+  other host fails the request with the same `403` and `host` as a refused first
+  request, here and in `/api/fetch`, so the page can ask for that host too.
+  Following them blindly would mean the host actually fetched was never checked
+  against the allowlist.
 - **Streamed, not buffered**, with a 4MB ceiling. Nothing large is resident:
   during a web session the largest free block is around 53KB, so a buffered
   response would fail on an ordinary cover image.
@@ -979,6 +987,34 @@ forwarded, so the caller infers the type from what it asked for.
 A transfer that fails or hits the ceiling *after* data has been sent ends as a
 truncated 200; the failure is logged (`[WEB]`).
 
+
+### POST `/api/relay` - Relay a Request for a Plugin (upstream's form)
+
+The relay plugins written for upstream crosspoint-reader use. Body (`application/json` only, see
+[sd-plugins.md](sd-plugins.md#trust)):
+
+```json
+{"plugin": "wallabag", "method": "POST", "url": "https://wallabag.example/oauth/v2/token",
+ "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "body": "grant_type=password&..."}
+```
+
+- `method`: GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS or a WebDAV method (PROPFIND, MKCOL, MOVE, COPY,
+  LOCK, UNLOCK); `headers` an object, or a list of `[name, value]` pairs. Host, Content-Length, Connection and
+  the other framing headers are refused (`400`).
+- The host must be one the plugin may reach (its manifest's `allowedHosts`, or one approved through
+  `/api/plugins/hosts`); otherwise `403 {"error": ..., "host": "<host>"}`.
+- Answer: `200`, the upstream status in `X-Relay-Status`, its headers in `X-Relay-Headers` (a JSON list of
+  `[name, value]` pairs, UTF-8, at most 3 KB: headers past that are left out), the body streamed (at most
+  4 MB). A 3xx is returned as it is, not followed. `502` when the request failed before an answer.
+- With headers the request is a credentialed one: the certificate must verify.
+
+### GET/POST `/api/plugins/hosts` - Hosts Approved for Plugins
+
+`GET` answers `{"<plugin>": ["host", ...]}`. `POST` (`application/json`) with
+`{"plugin": "<name>", "host": "<host>", "allow": true}` approves a host for that plugin (at most 16 a plugin),
+`"allow": false` takes the approval back. Stored in `/.crosspoint/plugin-hosts.json`; removing a plugin drops its
+approvals.
+
 ### POST `/api/fetch` - Download to the SD Card
 
 Downloads a URL straight to the card. Relaying through the browser and uploading
@@ -987,13 +1023,18 @@ memory — tolerable for a cover, prohibitive for a book.
 
 ```bash
 curl -X POST "http://crosspoint.local/api/fetch?plugin=my-plugin&url=https%3A%2F%2Fexample.org%2Fbook.epub&dest=%2FBooks%2Fbook.epub"
-# -> {"ok":true,"dest":"/Books/book.epub"}
+# -> {"ok":true,"complete":true,"status":200,"bytes":523431,"dest":"/Books/book.epub"}
 ```
 
-Same allowlist and redirect rules as `/api/relay`. `dest` is normalised, so `..`
+Upstream's form takes the same fields as an `application/json` body, with optional `headers` (an object),
+`method` and `body`: `{"plugin": ..., "url": ..., "dest": ..., "headers": {"Authorization": "Bearer ..."}}`.
+Headers make the download a credentialed one (the certificate must verify). A GET goes through the same chunked
+download as the query form; another method, or a body, is sent once and its answer written to the file.
+
+Same host rules as `/api/relay`. `dest` is normalised, so `..`
 cannot climb above the card root, must name a file (not `/` and no trailing `/`), and is
-judged as an item under [Protected paths](#protected-paths), as `/upload` judges its target
-(`pluginWriteTarget()`). The book's layout cache is invalidated on success.
+judged as an item under [Protected paths](#protected-paths), as `/upload` judges its target, except that a plugin
+may also write inside its own folder (`pluginWriteTarget()`). The book's layout cache is invalidated on success.
 
 | Status | Cause                                          |
 | ------ | ---------------------------------------------- |

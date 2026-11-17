@@ -15,7 +15,10 @@
 //     0xE000 on ours, 0xE0000 and 0x15000 on Onyx's, nowhere on any other table; image first, and on
 //     Onyx's table with otadata byte for byte Arduino-ESP32's boot_app0.bin;
 //   * the backup reads the whole flash in pieces, each checked against the chip's MD5: a bad or failed
-//     piece is read again, one that stays bad fails the backup instead of reaching the file.
+//     piece is read again, one that stays bad fails the backup instead of reaching the file;
+//   * of the releases the site offers, the newest full release is selected unless ?release= names
+//     another; pre-releases are listed only when asked for (or named), and a release with nothing for
+//     the board is listed but cannot be picked.
 //
 //   node test/web/flasher_lib_test.mjs [deps dir]
 // (CI passes the folder with the web tests' libraries; this test needs none.) Exit status 0: every
@@ -271,6 +274,56 @@ for (const how of ['flip', 'short', 'throw']) {
   check(error && /0x3000/.test(error.message) && chip.calls.filter((a) => a === 12288).length === 3,
     `backup: a piece that stays bad (${how}) is tried three times, then the backup fails at its address`);
 }
+
+// ---- Releases -----------------------------------------------------------------------------------
+
+// As releases.json lists them: a pre-release newer than the latest full release first, then full
+// releases newest first; an older one without the Picco, and one without any full image.
+const img = { file: 'x', size: 1, sha256: '0' };
+const boards = (ids, full = true) =>
+  Object.fromEntries(lib.BOARDS.map((b) => [b.id, ids.includes(b.id) ? { app: img, full: full ? img : null }
+    : { app: null, full: null }]));
+const ALL = lib.BOARDS.map((b) => b.id);
+const pre = { tag: '2.54RC', name: '2.54 RC', prerelease: true, boards: boards(ALL) };
+const latest = { tag: '2.53', name: '2.53 - Latest', prerelease: false, boards: boards(ALL) };
+const noPicco = { tag: '2.51', name: '2.51', prerelease: false, boards: boards(ALL.filter((id) => id !== 'picco')) };
+const appOnly = { tag: '2.50', name: '', prerelease: false, boards: boards(['x3x4', 'x4pro'], false) };
+const releases = [pre, latest, noPicco, appOnly];
+
+check(lib.defaultRelease(releases) === latest,
+  'releases: the newest full release is the default, not a newer pre-release');
+check(lib.defaultRelease([pre]) === pre, 'releases: a site with only a pre-release selects it');
+check(lib.defaultRelease([]) === null, 'releases: none on the site, none selected');
+
+check(lib.releaseHasBoard(latest, 'picco') && !lib.releaseHasBoard(noPicco, 'picco'),
+  'releases: a release has a board when it carries an image for it');
+check(lib.releaseHasBoard(appOnly, 'x3x4') && !lib.releaseHasBoard(appOnly, 'lilygo'),
+  'releases: a firmware image alone is enough; a board with neither image has nothing');
+
+const opened = (wanted) => lib.initialRelease(releases, wanted);
+check(opened(null).release === latest && !opened(null).showPre && !opened(null).missing,
+  'releases: no ?release= opens the default with pre-releases hidden');
+check(opened('2.51').release === noPicco && !opened('2.51').showPre, 'releases: ?release= opens that full release');
+check(opened('2.54RC').release === pre && opened('2.54RC').showPre,
+  'releases: ?release= of a pre-release lists the pre-releases');
+check(opened('1.0').release === latest && opened('1.0').missing === '1.0',
+  'releases: a tag the site lacks opens the default and says so');
+
+check(lib.releaseKind(releases, latest) === 'latest' && lib.releaseKind(releases, noPicco) === 'older' &&
+  lib.releaseKind(releases, pre) === 'pre', 'releases: latest, older and pre-release are told apart');
+
+const tags = (opts) => lib.releaseOptions(releases, opts).map((o) => o.tag).join(' ');
+check(tags({ boardId: 'x3x4', showPre: false }) === '2.53 2.51 2.50',
+  'releases: pre-releases are not listed unless asked for');
+check(tags({ boardId: 'x3x4', showPre: true }) === '2.54RC 2.53 2.51 2.50',
+  'releases: asked for, pre-releases come first');
+const picco = lib.releaseOptions(releases, { boardId: 'picco', showPre: true });
+check(picco.filter((o) => o.disabled).map((o) => o.tag).join(' ') === '2.51 2.50',
+  'releases: one with nothing for the board is listed, but disabled');
+const text = (tag) => picco.find((o) => o.tag === tag).text;
+check(text('2.53') === '2.53 - Latest (latest)' && text('2.54RC') === '2.54 RC (pre-release)' &&
+  text('2.51') === '2.51 (nothing for this device)' && text('2.50') === '2.50 (nothing for this device)',
+  'releases: entries carry their name (the tag when it has none) and what sets them apart');
 
 if (failures) {
   console.error(`${failures} check(s) failed`);

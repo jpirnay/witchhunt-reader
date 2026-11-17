@@ -173,7 +173,12 @@ Double and long Confirm can be changed under **Settings → Controls → Button 
 ### BOOX Picco
 
 The Picco has three keys, **Power**, **Up** and **Down**, a slide switch, and a touchscreen. There is no Back or
-Confirm key: **Power** does both jobs, and the boxes at the edge of the screen do the rest.
+Confirm key: **Power** does both jobs, and the boxes at the edge of the screen do the rest. **Power** sits near the
+top of the right edge, with **Up** and **Down**, a double key, further down; the microSD slot is low on the same
+edge, the slide switch in the lower part of the left edge, and the USB-C port in the bottom edge.
+
+<img src="docs/images/devices/boox-picco.svg" width="320" alt="BOOX Picco. Right edge, top to bottom: Power, a double key for Up and Down, and lower down the microSD card slot. Left edge, in its lower part: the slide switch. Bottom edge, in the middle: the USB-C port.">
+
 
 | Key | Press | Press twice quickly | Hold |
 | --- | --- | --- | --- |
@@ -315,6 +320,8 @@ In the **[Controls Settings](#373-controls)** you can configure the power button
 The **Murphy M3** has no Power key: hold **Confirm** for about a second to sleep, and hold it briefly to wake.
 
 To reboot the device (for example after a firmware update or if it's frozen), press and release the Reset button, and then quickly press and hold the Power button for a few seconds.
+
+While the device charges, a bolt shows beside the battery level, and the Battery row in **System Information** reads, for example, *80% (Charging)*.
 
 ### First Launch
 
@@ -540,6 +547,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 
 - **Reading Orientation**: Screen orientation for reading:
   - "Portrait" (default), "Landscape CW", "Inverted", "Landscape CCW"
+- **Auto-Rotate** *(X3 and BOOX Picco)*: The reader turns to the way you hold the device. Turn it a quarter round, or upside down, and hold it there for a moment: the page follows. Lying flat or held near a diagonal, it keeps its orientation, and the quick flick of **Tilt Page Turn** does not turn it. An orientation you choose by hand stays until you hold the device a new way. Turning between upright and sideways lays the chapter out again; a layout the book has had before comes back at once. EPUB, TXT and Markdown books turn; XTC books are made for one orientation and do not. Also on the reader bars' **Orientation** tab. "OFF" (default) / "ON"
 
 **EPUB Font** (submenu):
 - **Font Family**: Font used for EPUB reading. Includes built-in fonts (Serif, made from Adobe's Source Serif 4, and Noto Sans) plus any TrueType (`.ttf`) or OpenType (`.otf`) fonts and `.cpfont` fonts installed on the SD card. To add a TrueType or OpenType font of your own, use **Upload a font** in the web interface's Font Manager (see the [Web Interface Guide](./docs/webserver.md#7-font-manager)): the reader draws it at every size. A TrueType or OpenType font without a bold file draws bold text emboldened, and without an italic file draws italic text slanted.
@@ -584,7 +592,7 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 - **Bionic Reading**: Bold the first half of each word to guide the eye. "ON" / "OFF"
 - **Guide Dots**: Draw a small dot centered in the space between words to guide the eye along the line (idea borrowed from [CrossInk](https://github.com/uxjulia/CrossInk)). "ON" / "OFF"
 - **Synthetic TOC Fallback**: Generate a table of contents from headings when the EPUB has an invalid or missing TOC. "ON" / "OFF"
-- **Customise Status Bar**: Opens a submenu to configure every element of the reading status bar individually: upper and lower progress bars (Book / Chapter / Hidden, with thickness), status item position (Top / Bottom), chapter page count, book progress percentage, title display (Book / Chapter / Hidden), battery, and clock. The chapter page count and the Chapter progress bar cover the whole chapter as the table of contents lists it, even when the book splits that chapter into several files (many light novels start a new file at every illustration). A `~` before the total means part of it is still an estimate; it firms up as the rest of the chapter is laid out. On/off items are switches; the others step to their next value with **Confirm**. The preview under the list shows the result.
+- **Customise Status Bar**: Opens a submenu to configure every element of the reading status bar individually: upper and lower progress bars (Book / Chapter / Hidden, with thickness), status item position (Top / Bottom), chapter page count, book progress percentage, title display (Book / Chapter / Hidden), battery, and clock. The chapter page count and the Chapter progress bar cover the whole chapter as the table of contents lists it, even when the book splits that chapter into several files (many light novels start a new file at every illustration). A `~` before the total means part of it is still an estimate; it firms up as the rest of the chapter is laid out. The page a book or chapter opens on is shown before the chapter is laid out to its end; a page of text keeps its `~` until you turn the page. On/off items are switches; the others step to their next value with **Confirm**. The preview under the list shows the result.
 
 #### 3.7.3 Controls
 
@@ -598,10 +606,13 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 - **Gesture actions** *(touch devices only)*: One entry per gesture — the sideways swipes, the four edge swipes (left and right edge columns, up and down), the two ten-page zone swipes, the five tap zones, the same five as long taps, the four corner holds, pinch and rotation — each assigned an action from the same list the buttons offer. See **[Touch Controls](#5-touch-controls)**.
 - **Gesture overview** *(touch devices only)*: A read-only screen drawing the tap, hold and swipe zones with your current assignments in them. Generated from live settings, so it is the authority if the documentation disagrees.
 - **Slide Switch** *(BOOX Picco only)*: What the slide switch turns on and off: "Reading Light" (default), "Dark Mode" or "Nothing". Its position counts at start-up and each time it moves; in between, the light and Dark Mode can still be changed on the screen.
-- **Tilt Page Turn** *(X3 only)*: Use the tilt sensor to turn pages by tilting the device. Sub-settings:
-  - **Enable Tilt Page Turn**: "ON" / "OFF"
-  - **Tilt Right action**: "None", "Next Page", "Prev Page"
-  - **Tilt Left action**: "None", "Next Page", "Prev Page"
+- **Tilt Page Turn** *(X3 and BOOX Picco)*: Turn pages with a quick flick of the device: tilt it and bring it back. Sub-settings:
+  - **Tilt Page Turn**: "ON" / "OFF"
+  - **Tilt Direction**: "Left / Right" (default), a twist that moves the right or the left edge away from you; or "Forward / Back", the top edge tipped away from you (forward) or toward you (back). Both follow the reading orientation.
+  - **Tilt Right / Forward**: what a flick to the right, or forward, does: "None", "Next Page" (default), "Prev Page"
+  - **Tilt Left / Back**: what a flick to the left, or back, does: "None", "Next Page", "Prev Page" (default)
+
+  <img src="docs/images/motion/tilt-page-turn.png" width="360" alt="The Tilt Page Turn settings on an Xteink X3: Tilt Page Turn switched on, Tilt Direction Forward / Back, Tilt Right / Forward Next Page, Tilt Left / Back Previous Page.">
 
 #### 3.7.4 System
 
@@ -657,6 +668,10 @@ firmware only: there is nowhere to put an update while the running one is in use
 Beta Updates** and **SD Firmware Update** are not offered, and each update comes from the flasher's **Update only**
 again. A Picco given Witch Reader's partition table with the **Full install** updates itself like the other devices.
 See the [README](README.md#installation) for the choice between the two.
+
+To go back to an earlier release, pick it under **Release** in the flasher: it offers the latest release and the four
+before it, and under **Show pre-releases** any newer pre-release. Settings added after the release you go back to are
+dropped when it saves the settings, so after the next update they may be back at their defaults.
 
 #### 3.7.5 OPDS Servers (Multiple Libraries)
 
@@ -879,10 +894,12 @@ This feature can be disabled in the **[Controls Settings](#373-controls)** to he
   - **Navigation** (a list): **Select Chapter** opens the **[Table of Contents](#6-chapter-selection-screen)**, **Bookmarks** the pages you bookmarked, **Go to printed page** a page of the book's print edition (where the book numbers them), **Search** searches the book (**[below](#searching-the-book)**), and **Go Home** closes the book.
   - **Progress** (a dial): how far you are in the book and in the chapter and the time you have spent in the book, with buttons for the previous chapter, **Go to %** and the next chapter. With **[KOReader Sync](#377-koreader-sync-quick-setup)** set up, **Pull** fetches your position from the server and **Push** sends it there. On the Murphy held sideways there is no room for them; the reader menu's **Sync** tab has both.
   - **Layout** (**Aa**): below.
-  - **Orientation** (a turning page): **Portrait**, **Landscape CW**, **Inverted** and **Landscape CCW**, the one you read in marked.
+  - **Orientation** (a turning page): **Portrait**, **Landscape CW**, **Inverted** and **Landscape CCW**, the one you read in marked. On the X3 and BOOX Picco also **Auto-Rotate: On/Off**, which switches in place and takes effect when the bars close.
   - **More** (three dots) opens the reader menu.
 
   With the keys, **Left / Right** move along a row, **Up / Down** between the rows as they lie on screen, **Confirm** chooses, and **Back** (or a tap on the page) closes the bars. Closing a tab (its icon again, or **Back**) closes the bars as well.
+
+  <img src="docs/images/motion/orientation-tab.png" width="280" alt="The reader bars on an Xteink X3, held upright, over a page of Pride and Prejudice. The top bar shows a back arrow, the book's title and a star. Above the bottom bar's five tab icons, the Orientation tab is open: Portrait (selected), Landscape CW, Inverted, Landscape CCW, and Auto-Rotate: On.">
 * **Layout:** the font and how the page is laid out, with the page still in view above where the screen leaves room. **Font** goes round the fonts, starting with the book's own (**Book's fonts**, Publisher Fonts' All Text), then the built-in and the card's. **Size**, **Line spacing**, **Margin** (left and right) and **Darkness** step down and up with **-** and **+**; **Paragraph gap**, **Alignment**, **Hyphens** and **Book style** (the book's own CSS) change with one tap. **This book only** decides where the values go: on, they are this book's own and no other book changes; off, they are the global settings, which every book without its own follows, and the sheet shows those. Turning it off gives the book back to the global settings. The page is laid out again under the sheet at each change, in black and white while the bars are open (so **Darkness** shows once they close); a new size or spacing takes a few seconds the first time and is quicker when you step back to one you have used. On the X3 and X4 a new **Font** waits for the bars to close, marked **Font \*** until then, and the page keeps its font meanwhile: each font is first copied into the device's memory, which takes several seconds, and this way it happens once, for the font you end on. On a small screen the sheet takes the whole screen; on the Murphy held sideways there is no room for it, and **Layout** opens the reader menu instead. A key bound to **Open reader menu** under **[Controls](#373-controls)** still opens the menu directly.
 * **Reader Menu:** Reach it through **More** in the reader bars. It includes: **[Table of Contents](#6-chapter-selection-screen)**, bookmarks, sync progress, reading statistics, quick per-book overrides (font, images, hyphenation, bionic reading…), take screenshot, and more. Its entries are grouped into tabs. While the tab bar is selected, **Confirm** moves to the next tab, and its button hint names that tab. **Hold Up / Down** to switch tabs: each opens where you left it. **Hold Back** to close the book as **Go Home** does; changes made in the menu are kept.
 * **Your place is kept by paragraph as well as by page.** If a book is laid out differently the next time you open it, for example after you changed the font size from outside the book or after a firmware update re-indexed it, it opens at the paragraph you were reading rather than at a page number scaled to the new length.

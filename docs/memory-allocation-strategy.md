@@ -234,7 +234,11 @@ In the lent region the CSS ruleset is resident in the arena (`CssParser::setInde
 state is taken there (`ChapterHtmlSlimParser::setBuildArena`), and the ZIP ring shares the main
 arena. On the owned 10 KB arena all three go to the heap. That difference is why the blocking
 build borrows when it can (§9.2). §8.2 shows how full the lent region is at each moment of a
-build.
+build. On the S3 boards a build with nothing lent does not take the 10 KB arena: it takes a
+256 KB region (`Section::setOwnedBuildRegionBytes`, set in `main.cpp` behind
+`HalCapabilities::keepsSecondaryBuffer()`, `WordShapeCache::kLargeArenaBytes`) and uses it as a
+lent one; only when that allocation fails does it fall back to the 10 KB arena. The C3 keeps the
+10 KB arena.
 
 Invariants that hold the arena together; new consumers must not break them:
 

@@ -186,13 +186,20 @@ python3 scripts/full_install_image.py .pio/build/gh_release --app /tmp/firmware.
 ```
 
 To try the flasher, stage a folder of release assets with
-`scripts/stage_flasher_site.py --assets <dir> --out <site> --tag test` and serve it with
-`python3 -m http.server --bind 127.0.0.1` from `<site>` (WebSerial needs `localhost` or HTTPS).
+`scripts/stage_flasher_site.py --assets <dir> --out <site> --tag test` (add `--prerelease` to see it listed as one),
+or the releases the published site offers with `--github jpirnay/witchhunt-reader` (needs `gh`, downloads about
+200 MB), and serve it with `python3 -m http.server --bind 127.0.0.1` from `<site>` (WebSerial needs `localhost` or
+HTTPS). `?release=<tag>` in the address opens a release other than the latest.
 
 A release publishes per board `firmware*.bin` (the app; OTA and SD updates), `full-install-<board>.bin` (from 0x0)
-and one `web-<hash>.bin`. A full release, not a pre-release, also deploys the flasher with them to GitHub Pages. To
-redeploy it between releases (a change to `flasher/` on master), re-run the `deploy-flasher` job of the latest
-release's "Compile Release" run: it takes the page from master and the images from that run.
+and one `web-<hash>.bin`. Every published release, pre-releases included, then deploys the flasher to GitHub Pages
+(`deploy_flasher.yml`): the page from master with the last five full releases and the pre-releases published after
+the newest of them, downloaded from their release pages. The page selects the newest full release and lists
+pre-releases only under **Show pre-releases**. To redeploy between releases (a change to `flasher/` on master, or a
+release deleted), run "Deploy Flasher" by hand on master. Do not re-run the `deploy-flasher` job of the run of 2.53
+or an older release: that is the old job, which stages its own release alone (`--assets`); the script refuses
+`--assets` inside GitHub Actions for this reason. Under `act` the site is staged from the published releases, not from
+the run's build.
 
 ### Prerequisites
 

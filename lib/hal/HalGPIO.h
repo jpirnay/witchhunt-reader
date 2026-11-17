@@ -45,12 +45,6 @@
 // from being read as charging.
 #define USB_CHARGE_CURRENT_MIN_MA 5
 
-// QST QMI8658 IMU I2C
-#define I2C_ADDR_QMI8658 0x6B        // IMU I2C address
-#define I2C_ADDR_QMI8658_ALT 0x6A    // IMU I2C fallback address
-#define QMI8658_WHO_AM_I_REG 0x00    // WHO_AM_I command code
-#define QMI8658_WHO_AM_I_VALUE 0x05  // WHO_AM_I expected value
-
 namespace X3GPIO {
 // Read a 16-bit little-endian I2C register. Returns false on bus error.
 bool readI2CReg16LE(uint8_t addr, uint8_t reg, uint16_t* outValue);
