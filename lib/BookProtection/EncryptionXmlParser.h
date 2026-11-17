@@ -20,7 +20,7 @@
 //
 // Elements are matched by local name, whatever prefix the document binds. Other algorithms (font
 // obfuscation, an EncryptedKey's RSA) are not content encryption and are passed over. Without a
-// Compression element the plaintext is deflated, as Adobe's always is.
+// Compression element the plaintext is deflated, as Adobe's is but for its aes128-cbc-uncompressed.
 class EncryptionXmlParser final : public Print {
  public:
   struct Item {

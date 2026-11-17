@@ -258,6 +258,33 @@ TEST_F(BookProtectionTest, LcpBookReadsBack) {
   EXPECT_EQ(stat.uncompressedSize, notes.size());
 }
 
+// Adobe's aes128-cbc-uncompressed: the bytes themselves under AES-128 and PKCS#7, not inflated when read.
+TEST_F(BookProtectionTest, AdobeUncompressedEntriesReadBack) {
+  constexpr const char* kAes128Uncompressed = "http://ns.adobe.com/adept/xmlenc#aes128-cbc-uncompressed";
+  const std::string clip(3000, 'v');
+  writeBook({{"mimetype", "application/epub+zip"},
+             {"META-INF/encryption.xml", encryptionXml({{"OEBPS/chapter.xhtml", kAes128},
+                                                        {"OEBPS/notes.txt", kAes128Uncompressed},
+                                                        {"OEBPS/clip.jpg", kAes128Uncompressed}})},
+             {"OEBPS/chapter.xhtml", encryptAes(big_.stream, key_)},
+             {"OEBPS/notes.txt", encryptAes(small_.plain, key_)},
+             {"OEBPS/clip.jpg", encryptAes(clip, key_)}});
+  EXPECT_EQ(book_protection::probeManifest(book_).cipherBits, 128);
+  ASSERT_EQ(build(key_), ManifestStatus::Protected);
+  attach(key_);
+  ZipFile zip(book_);
+  EXPECT_EQ(readAll(zip, "OEBPS/chapter.xhtml"), big_.plain);
+  EXPECT_EQ(readAll(zip, "OEBPS/notes.txt"), small_.plain);
+  EXPECT_EQ(readAll(zip, "OEBPS/clip.jpg"), clip);
+  ZipFile::FileStatSlim stat{};
+  ASSERT_TRUE(zip.loadFileStatSlim("OEBPS/notes.txt", &stat));
+  EXPECT_EQ(stat.method, ZipFile::METHOD_ENCRYPTED | 0);
+  EXPECT_EQ(stat.uncompressedSize, small_.plain.size());
+  ASSERT_TRUE(zip.loadFileStatSlim("OEBPS/clip.jpg", &stat));
+  EXPECT_EQ(stat.method & 0xFF, 0);
+  EXPECT_FALSE(ZipFile::hasExactSize(stat));
+}
+
 // More entries than the memory at hand holds: the manifest is built in runs, each sorted, and a
 // lookup searches them all.
 TEST_F(BookProtectionTest, RunsWhenTheTableDoesNotFit) {

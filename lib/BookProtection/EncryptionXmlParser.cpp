@@ -104,6 +104,9 @@ void EncryptionXmlParser::startElement(void* userData, const char* name, const c
     self->cipherBits_ = 0;
     if (algorithm != nullptr && strstr(algorithm, "aes128-cbc") != nullptr) self->cipherBits_ = 128;
     if (algorithm != nullptr && strstr(algorithm, "aes256-cbc") != nullptr) self->cipherBits_ = 256;
+    // Adobe's "http://ns.adobe.com/adept/xmlenc#aes128-cbc-uncompressed" encrypts an entry's bytes as they are, not
+    // their DEFLATE stream (DeDRM's ineptepub.py decrypts it without inflating; it names video files).
+    if (algorithm != nullptr && strstr(algorithm, "aes128-cbc-uncompressed") != nullptr) self->deflated_ = false;
   } else if (strcmp(local, "CipherReference") == 0) {
     const char* uri = attribute(atts, "URI");
     if (uri != nullptr && !decodeUri(uri, self->uri_, sizeof(self->uri_), &self->uriLen_)) {
