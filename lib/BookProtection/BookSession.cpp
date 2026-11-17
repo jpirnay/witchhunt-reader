@@ -14,13 +14,13 @@
 namespace book_protection {
 namespace {
 
-// A loan's state against the device clock. `expires`: epoch seconds, 0 for no due date. A clock
-// never set cannot tell a current loan from an expired one.
+// A loan's state against the loan clock (HalClock::loanNow(), which a clock set back cannot move
+// back). `expires`: epoch seconds, 0 for no due date. A clock never set cannot judge a date.
 OpenResult loanState(const int64_t expires) {
   if (expires == 0) return OpenResult::Protected;
-  const time_t now = HalClock::now();
-  if (now <= 0 || !HalClock::isSynced()) return OpenResult::NeedsTime;
-  return static_cast<int64_t>(now) > expires ? OpenResult::Expired : OpenResult::Protected;
+  const int64_t now = HalClock::loanNow();
+  if (now == 0) return OpenResult::NeedsTime;
+  return now > expires ? OpenResult::Expired : OpenResult::Protected;
 }
 
 const char* describe(const OpenResult result) {

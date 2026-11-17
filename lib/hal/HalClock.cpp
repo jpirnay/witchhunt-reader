@@ -579,6 +579,40 @@ static void capture(bool lpContinuous) {
 
 // ---- public API -----------------------------------------------------------
 
+// ---- The loan clock (loanNow()) ----
+// The latest plausible time the device has seen, kept in NVS where crosspoint-reader's TrustedTime
+// keeps its floor (lib/TrustedTime, PR #3114, Justin Mitchell), so a device that ran it keeps its
+// floor here. The same idea in our clock; not a port. Loop task only: the reader's open, the NTP
+// sync, the sleep entry.
+static constexpr const char* LOAN_FLOOR_NAMESPACE = "cptime";
+static constexpr const char* LOAN_FLOOR_KEY = "floor";
+static constexpr int64_t LOAN_FLOOR_MIN = 1735689600LL;  // 2025-01-01: below it the clock was never set
+static constexpr int64_t LOAN_FLOOR_MAX = 4102444800LL;  // 2100-01-01: past it a clock is a fault, not a date
+// A move of less than this is not written: NVS wear.
+static constexpr int64_t LOAN_FLOOR_WRITE_STEP = 60;
+static int64_t loanFloor = 0;
+static bool loanFloorRead = false;
+
+// Raises the floor to the clock when the clock is plausible and past it.
+static void raiseLoanFloor() {
+  Preferences prefs;
+  if (!loanFloorRead) {
+    if (prefs.begin(LOAN_FLOOR_NAMESPACE, true)) {
+      loanFloor = prefs.getLong64(LOAN_FLOOR_KEY, 0);
+      prefs.end();
+    }
+    loanFloorRead = true;
+  }
+  const auto now = static_cast<int64_t>(time(nullptr));
+  if (now < LOAN_FLOOR_MIN || now > LOAN_FLOOR_MAX || now <= loanFloor) return;
+  const bool write = now - loanFloor >= LOAN_FLOOR_WRITE_STEP;
+  loanFloor = now;
+  if (write && prefs.begin(LOAN_FLOOR_NAMESPACE, false)) {
+    prefs.putLong64(LOAN_FLOOR_KEY, now);
+    prefs.end();
+  }
+}
+
 namespace HalClock {
 
 void applyTimezone(const char* posixTz) {
@@ -849,6 +883,7 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
     writeExternalRTC(rtcEpoch);
   }
   nvsWriteSyncTime(rtcEpoch);
+  raiseLoanFloor();
 
   float currentTemp = rtcTemperatureC;
   if (currentTemp != 0.0f) {
@@ -899,6 +934,7 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
 bool syncNtp(const char* preferredServer) { return syncNtp(nullptr, 0, preferredServer); }
 
 void saveBeforeSleep(bool keepLpAlive) {
+  raiseLoanFloor();
   if (!isSynced()) {
     return;
   }
@@ -1098,6 +1134,11 @@ void updatePeriodic() {
     LOG_DBG("CLK", "Periodic drift nudge: raw=%.3fs corr=%.3fs delta=%.3fs scale=%.3f", rawSec, correctedSec,
             driftDeltaSec, rtcDriftScale);
   }
+}
+
+int64_t loanNow() {
+  raiseLoanFloor();
+  return loanFloor >= LOAN_FLOOR_MIN ? loanFloor : 0;
 }
 
 bool isSynced() {
