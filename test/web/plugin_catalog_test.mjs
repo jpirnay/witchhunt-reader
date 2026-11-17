@@ -69,7 +69,8 @@ const installed = [
   { name: 'static', title: 'Static', root: ROOT, mount: 'settings', web: false, device: true },
   { name: 'signin', title: 'Sign-in', root: ROOT, mount: 'settings', web: false, device: true },
   { name: 'both', title: 'Both', root: ROOT, mount: 'files', web: true, device: true },
-  { name: 'off', title: 'Switched off', root: ROOT, mount: 'settings', web: false, device: true, disabled: true }
+  { name: 'off', title: 'Switched off', root: ROOT, mount: 'settings', web: false, device: true, disabled: true },
+  { name: 'shelves', title: 'Shelves', root: ROOT, mount: 'settings', web: false, device: true }
 ];
 
 const manifests = {
@@ -99,6 +100,15 @@ const manifests = {
     },
     download: { url: '{cfg.server}{url}', dest_dir: '/Ignored' }
   },
+  shelves: {
+    browse: {
+      url: 'https://shelf.test/books?shelf={list_id_enc}&page={page}&limit={limit}', items: 'books', page_size: 2,
+      lists: [{ title: 'Everything' }],
+      lists_url: 'https://shelf.test/api/shelves', lists_headers: { 'X-Lists': 'yes' }, lists_items: 'data.shelves',
+      lists_fields: { title: 'name', id: 'key', url: 'link', requires: 'needs' }
+    },
+    download: { url: '{url}' }
+  },
   signin: {
     token: { file: 'token.json', path: 'token' },
     auth: { type: 'device_code', request: { url: 'https://signin.test/device' } },
@@ -121,6 +131,16 @@ const internet = {
     { title: 'Bad', id: 'bad', base: 'https://dict.test/files/bad/', files: ['../escape.idx'] },
     { title: 'Lookahead', id: 'next' }
   ] },
+  'https://shelf.test/api/shelves': { data: { shelves: [
+    { name: 'Read later', key: 'later & soon' },
+    { name: 'Archive', link: '/books/archive?page={page}&limit={limit}', body: 'x' },
+    { name: 'Future', key: 'f', needs: ['catalog.someday'] },
+    { name: 'Nothing to browse' },
+    { key: 'untitled' }
+  ] } },
+  'https://shelf.test/books?shelf=&page=1&limit=2': { books: [{ title: 'All 1' }, { title: 'All 2' }] },
+  'https://shelf.test/books?shelf=later%20%26%20soon&page=1&limit=2': { books: [{ title: 'Later 1' }] },
+  'https://shelf.test/books/archive?page=1&limit=2': { books: [{ title: 'Old 1' }] },
   'https://static.test/all.json': [
     { name: 'One', id: '1', link: '/books/1.epub' },
     { name: 'Other firmware', id: '2', compat: { family: 'elsewhere' } },
@@ -358,6 +378,27 @@ fetched.length = 0;
 view().querySelectorAll('.catalog-rows .plugin button')[1].click();
 await until(() => catalogStatus().startsWith('Could not'), 'the unsafe bundle');
 check(catalogStatus().includes('unsafe file') && !fetched.length, 'a bundle file that climbs is refused before any download');
+
+// ---- Fetched lists: dotted paths, an id-only list, a server path, requirements --------------------------------------
+
+button(view(), 'Close').click();
+relayed.length = 0;
+button(installedRow('Shelves'), 'Open catalog').click();
+await until(() => titles().join('|') === 'All 1|All 2', 'the shelves catalog');
+const shelfButtons = () => [...view().querySelectorAll('.catalog-lists button')].map((b) => b.textContent);
+check(relayed[0].url === 'https://shelf.test/api/shelves' && relayed[0].headers['X-Lists'] === 'yes' &&
+      relayed[1].headers['X-Lists'] === undefined, 'lists_url is fetched with lists_headers, which browsing does not get');
+check(shelfButtons().join('|') === 'Everything|Read later|Archive',
+      'fetched lists follow the manifest\'s; one needing an unknown capability, or with neither url nor id, or no title, is left out (' +
+      shelfButtons() + ')');
+button(view(), 'Read later').click();
+await until(() => titles().join('|') === 'Later 1', 'the id-only list');
+check(relayed[relayed.length - 1].url === 'https://shelf.test/books?shelf=later%20%26%20soon&page=1&limit=2',
+      'an id-only list browses browse.url with {list_id_enc}');
+button(view(), 'Archive').click();
+await until(() => titles().join('|') === 'Old 1', 'the server-path list');
+check(relayed[relayed.length - 1].url === 'https://shelf.test/books/archive?page=1&limit=2' && relayed[relayed.length - 1].body === 'x',
+      'a fetched server path joins the lists host, and its body is sent');
 
 // ---- A static catalog behind a notice, with a config file -----------------------------------------------------------
 

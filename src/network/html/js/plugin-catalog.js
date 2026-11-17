@@ -288,22 +288,30 @@
       }
     }
 
+    // browse.lists_url's lists, as upstream reads them: title, url and id from the lists_fields paths, requires from
+    // lists_fields.requires (default "requires"), body and notice by those names. An entry needs a title and a url or
+    // an id; one with only an id browses browse.url with {list_id}. No usable entry counts as a failed fetch.
     async fetchLists() {
       const b = this.browse;
       const url = resolveTemplate(b.lists_url, this.vars);
       const json = await this.relay('GET', url, resolveHeaders(b.lists_headers, this.vars), '');
       const array = getPath(json, b.lists_items || 'lists');
-      const f = Object.assign({ title: 'title', url: 'url', id: 'id' }, b.lists_fields || {});
+      const f = Object.assign({ title: 'title', url: 'url', id: 'id', requires: 'requires' }, b.lists_fields || {});
       const lists = [];
       for (const raw of Array.isArray(array) ? array : []) {
         const entry = {
           title: text(getPath(raw, f.title)), url: joinServerPath(getPath(raw, f.url), url), id: text(getPath(raw, f.id)),
-          notice: raw && raw.notice, requires: raw && raw.requires
+          requires: getPath(raw, f.requires)
         };
-        if (!entry.title || !listAllowed(entry.requires)) continue;
+        const body = getPath(raw, 'body');
+        const notice = getPath(raw, 'notice');
+        if (typeof body === 'string') entry.body = body;
+        if (notice && typeof notice === 'object') entry.notice = notice;
+        if (!entry.title || (!entry.url && !entry.id) || !listAllowed(entry.requires)) continue;
         if (!entry.url) delete entry.url;
         lists.push(entry);
       }
+      if (!lists.length) throw new Error('the catalog offered no lists');
       return lists;
     }
 
