@@ -476,6 +476,21 @@ install. A 20.6 s open of a book with a TrueType family not yet installed was an
 > CMD:SCREENSHOT
 ```
 
+**The "page complete" stamp.** Every command `IDLE` follows (`BTN`, `TOUCH`, `SWIPE`, an `ACT` that opens a
+screen) also starts a `:SCREEN` wait of its own, answered in the log instead of on the line:
+
+```
+[INF] [SER] page complete: 913 ms after the press
+```
+
+The time runs from when the device read the command to the first loop pass at which the screen had nothing left
+to do, without the 250 ms the wait then stays quiet (so the line itself comes 250 ms later). A render pass that
+follows the page without a gap counts with it, as it does for `IDLE:SCREEN`: after a page turn that is the
+pre-render of the next page (about 65 ms on the X3). A bench reads
+it per press without sending an `IDLE` between its presses. A command that follows before the frame was complete
+starts the wait again, and that frame gets no stamp; neither does one that is not complete within 60 s. After
+an `ACT` the line says `after the screen change`.
+
 ### Events: `EVENTS`
 
 ```

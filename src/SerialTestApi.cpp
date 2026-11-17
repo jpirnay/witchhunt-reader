@@ -283,10 +283,19 @@ enum class Effect : uint8_t { Input, Screen };
 Effect effect = Effect::Input;
 uint32_t effectActivityBase = 0;
 
+// The "page complete" stamp: every such command starts a screen-only wait of its own, answered in the log instead of
+// on the line, so a bench reads the time from a press or an open to the complete frame without an IDLE between its
+// presses. A command that follows before the frame was complete starts it again: that frame gets no stamp.
+IdleGate pageGate;
+constexpr uint32_t kPageStampTimeoutMs = 60000;
+
 void noteEffect(const Effect kind) {
   effect = kind;
   effectActivityBase = activityManager.activityChangeCount();
   idleGate.noteEffect();
+  pageGate = IdleGate();
+  pageGate.noteEffect();
+  (void)pageGate.begin(millis(), kPageStampTimeoutMs);  // a gate just made is not waiting
 }
 
 bool effectHandled() {
@@ -2169,12 +2178,21 @@ void serviceHeldPresses() {
 void serviceIdle() {
   // Nothing to follow most of the time: then the device is not sampled at all, which keeps the
   // reader's lock attempt in hasPendingBackgroundWork() off the ordinary loop pass.
-  if (!idleGate.active()) return;
+  if (!idleGate.active() && !pageGate.waiting()) return;
   IdleGate::Sample sample;
   sample.nowMs = millis();
-  sample.busy = activityManager.busyReason(/*includeBackground=*/idleGate.waiting() && !idleScreenOnly);
   sample.effectHandled = effectHandled();
   sample.renderPasses = activityManager.renderPassCount();
+  if (pageGate.waiting()) {
+    // Without the dropped presses: a press that failed is CMD:IDLE's to report, and this gate has answered none.
+    sample.busy = activityManager.busyReason(/*includeBackground=*/false);
+    if (pageGate.step(sample) == IdleGate::Verdict::Idle) {
+      LOG_INF("SER", "page complete: %lu ms after the %s", static_cast<unsigned long>(pageGate.quietAfterMs()),
+              effect == Effect::Screen ? "screen change" : "press");
+    }
+  }
+  if (!idleGate.active()) return;
+  sample.busy = activityManager.busyReason(/*includeBackground=*/idleGate.waiting() && !idleScreenOnly);
   sample.droppedPresses = heldPresses.droppedPresses();
   switch (idleGate.step(sample)) {
     case IdleGate::Verdict::Waiting:
