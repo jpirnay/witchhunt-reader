@@ -318,6 +318,8 @@ class HalDisplay {
  private:
   EInkDisplay einkDisplay;
   uint8_t pendingX3SettlePasses = 0;
+  // The UC8253's settle for the refresh displayBuffer() / refreshDisplay() is about to start (requestResync).
+  void armSettleFor(RefreshMode mode);
   RefreshMode lastRefreshMode = RefreshMode::FAST_REFRESH;
 
   // How long this panel's last FAST refresh actually took, in ms. Measured rather than derived
