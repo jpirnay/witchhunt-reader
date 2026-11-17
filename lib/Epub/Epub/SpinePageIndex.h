@@ -26,7 +26,15 @@ struct Variant {
 void record(const std::string& bookCachePath, Variant variant, int spineCount, int spineIndex, uint16_t pages,
             uint32_t bytes);
 
-// The recorded entries of spines [first, last] other than `current`, summed on each side of it.
+// A carried spine item's entry: 0 pages and these bytes. Older firmware reads 0 pages as "not recorded" and estimates
+// the item, as before; this one counts it as a file with no page.
+constexpr uint32_t kCarriedBytes = UINT32_MAX;
+// Records that spine item `spineIndex` has no page of its own: a file holding only its chapter's heading, which the
+// next item's layout takes in (HeadingCarry).
+void recordCarried(const std::string& bookCachePath, Variant variant, int spineCount, int spineIndex);
+
+// The recorded entries of spines [first, last] other than `current`, summed on each side of it. A carried item counts
+// as a file of no pages and no bytes.
 struct Totals {
   uint32_t pagesBefore = 0;
   uint32_t pagesAfter = 0;
