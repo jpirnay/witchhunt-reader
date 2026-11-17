@@ -57,6 +57,7 @@
 #include "BookRelocation.h"
 #include "BookSearchActivity.h"
 #include "BuildDuringRefresh.h"
+#include "CarriedSpineNav.h"
 #include "ChapterBackfill.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -2028,7 +2029,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   // the last pages a page turn no longer discards a build of it (BG_BUILD_THROUGH_PAGES), so it
   // gets one more try there. The window restarts with it: the chapters after it are cached and
   // settle for free, and their pages count against the budget again.
-  if (backfillSpine_ < 0 && backgroundAbandonedSpine_ == currentSpineIndex + 1 &&
+  if (backfillSpine_ < 0 && backgroundAbandonedSpine_ == nextReadingSpine() &&
       backgroundBuildState_ != BackgroundBuildState::Building && nearChapterEndForBuildThrough()) {
     LOG_INF("ERS", "Background-B: retrying spine %d on the last pages, after it was abandoned mid-chapter",
             backgroundAbandonedSpine_);
@@ -2144,7 +2145,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
                   targetSpine, static_cast<unsigned>(backgroundPreemptCount_),
                   static_cast<unsigned long>(
                       LookAheadPause::pauseMs(backgroundPreemptedStayMs_, BG_BUILD_BORROW_QUIET_MS)));
-          if (targetSpine == currentSpineIndex + 1 && !nearChapterEndForBuildThrough()) {
+          if (targetSpine == nextReadingSpine() && !nearChapterEndForBuildThrough()) {
             backgroundAbandonedSpine_ = targetSpine;  // retried on the last pages, see above
           }
           backgroundSection_.reset();
@@ -2194,7 +2195,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       // frame on screen, which the borrow seeds RED from (beginBackgroundBorrow); else it waits as
       // any other build, and the next page put on screen makes it so again.
       const BuildThroughGate::Panel panel = buildThroughPanel();
-      const bool buildThrough = targetSpine == currentSpineIndex + 1 && nearChapterEndForBuildThrough() &&
+      const bool buildThrough = targetSpine == nextReadingSpine() && nearChapterEndForBuildThrough() &&
                                 (!panel.fastRefreshNeedsHostFrame ||
                                  BuildThroughGate::seedsRed(panel, renderer.secondaryHoldsFrameOnScreen()));
       // Either way B waits for the image lane: the pictures about to be read are decoded before the build may take
@@ -2508,7 +2509,7 @@ LaneBeforeBuild::Window EpubReaderActivity::stepImageWarmLocked() {
   // on an illustration, and without this the turn onto it always decoded in the foreground. A
   // no-CSS fallback cache is skipped: the reader rebuilds that one on entry.
   const int spill = windowEnd - lastPage;
-  const int nextSpine = currentSpineIndex + 1;
+  const int nextSpine = nextReadingSpine();
   // Not the section B is building: it has no cache yet, and its file is being written.
   const bool nextBeingBuilt =
       backgroundBuildSpineIndex_ == nextSpine && backgroundSection_ && backgroundSection_->hasActiveBuild();
@@ -3460,7 +3461,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
               if (currentSpineIndex != starred.spineIndex || !section || section->currentPage != starred.pageNumber) {
                 navTarget =
                     starJumpTarget(static_cast<uint16_t>(starred.spineIndex), static_cast<uint16_t>(starred.pageNumber),
-                                   Section::layoutFingerprintFor(makeSectionBuildParams()));
+                                   Section::layoutFingerprintFor(*epub, starred.spineIndex, makeSectionBuildParams()));
                 currentSpineIndex = starred.spineIndex;
                 section.reset();
               }
@@ -3613,8 +3614,11 @@ bool EpubReaderActivity::applyPendingBookmarkJump() {
 void EpubReaderActivity::toggleStarOnCurrentPage() {
   if (!section || section->currentPage < 0 || section->currentPage >= section->pageCount) return;
   const int page = section->currentPage;
-  bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(page),
-                       StarAnchoring::forPage(*section, page));
+  // A star on the heading file this page now holds (set before the join) is this page's: toggled off here.
+  const auto carried = carriedStarHere();
+  bookmarkStore.toggle(carried ? carried->first : static_cast<uint16_t>(currentSpineIndex),
+                       carried ? carried->second : static_cast<uint16_t>(page),
+                       carried ? StarAnchor{} : StarAnchoring::forPage(*section, page));
   starsSettledFor_ = {};  // its text is to be named
   requestUpdate();
 }
@@ -4661,6 +4665,31 @@ bool EpubReaderActivity::beginBuildThrough() {
   return true;
 }
 
+int EpubReaderActivity::nextReadingSpine() const {
+  if (nextReadingFrom_ != currentSpineIndex) {
+    nextReadingFrom_ = currentSpineIndex;
+    nextReadingSpine_ = CarriedSpineNav::nextReadingSpine(
+        currentSpineIndex, Section::carriedAwayOf(*epub, currentSpineIndex + 1, getEffectiveVerticalText()));
+  }
+  return nextReadingSpine_;
+}
+
+std::optional<std::pair<uint16_t, uint16_t>> EpubReaderActivity::carriedStarHere() const {
+  if (!section || section->currentPage != 0 || currentSpineIndex <= 0) return std::nullopt;
+  const auto heading = static_cast<uint16_t>(currentSpineIndex - 1);
+  if (!bookmarkStore.has(heading, 0) ||
+      !Section::carriesPreviousOf(*epub, currentSpineIndex, getEffectiveVerticalText())) {
+    return std::nullopt;
+  }
+  return std::make_pair(heading, static_cast<uint16_t>(0));
+}
+
+bool EpubReaderActivity::pageStarred() const {
+  if (!section) return false;
+  return bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage)) ||
+         carriedStarHere().has_value();
+}
+
 bool EpubReaderActivity::beginChapterBackfill() {
   if (backfillFor_ != currentSpineIndex) {
     backfillFor_ = currentSpineIndex;
@@ -4722,7 +4751,7 @@ void EpubReaderActivity::recoverSecondaryBufferIfNeeded() {
   // Also kept when the reader has just turned INTO that chapter, so buildSection() adopts the
   // live build instead of starting it over. Any other move takes the buffer back as below.
   if (backgroundBorrowActive_ && backgroundSection_ && backgroundSection_->hasActiveBuild()) {
-    const bool nextChapter = backgroundBuildSpineIndex_ == currentSpineIndex + 1;
+    const bool nextChapter = backgroundBuildSpineIndex_ == nextReadingSpine();
     if (!backgroundBuildThrough_ && nextChapter && nearChapterEndForBuildThrough() && beginBuildThrough()) {
       LOG_INF("ERS", "Background-B: page %d of %u reached mid-build; building spine %d through page turns",
               section->currentPage + 1, section->pageCount, backgroundBuildSpineIndex_);
@@ -5517,6 +5546,15 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     automaticPageTurnActive = false;
     requestUpdate();
     return false;
+  }
+  // A file holding only its chapter's heading has no page: the next file's first page shows it (HeadingCarry). Every
+  // way onto it passes here first (a turn, a saved position, a bookmark, the TOC, a link, a search hit, a sync).
+  if (Section::carriedAwayOf(*epub, currentSpineIndex, getEffectiveVerticalText())) {
+    const CarriedSpineNav::Landing landing =
+        CarriedSpineNav::land(currentSpineIndex, navTarget.kind == NavigationTarget::Kind::LastPage);
+    LOG_DBG("ERS", "spine=%d carried; landing on %d", currentSpineIndex, landing.spine);
+    currentSpineIndex = landing.spine;
+    navTarget = landing.lastPage ? NavigationTarget::makeLastPage() : NavigationTarget::makePage(0);
   }
 
   // The render pass holds RenderLock here, before the chapter is laid out or drawn, so no record of the glyph store's
@@ -7802,8 +7840,7 @@ void EpubReaderActivity::renderStatusBar() const {
     title = epub->getTitle();
   }
 
-  const bool isStarred = section && bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex),
-                                                      static_cast<uint16_t>(section->currentPage));
+  const bool isStarred = pageStarred();
   const std::string printedPageLabel = section && SETTINGS.statusBarPrintedPage
                                            ? printedPageLabelFor(static_cast<uint16_t>(section->currentPage))
                                            : std::string();
@@ -8623,8 +8660,7 @@ void EpubReaderActivity::openReaderMenu() {
       const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
       bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
     }
-    isCurrentPageStarred = section && bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex),
-                                                        static_cast<uint16_t>(section->currentPage));
+    isCurrentPageStarred = pageStarred();
   }
   const int bookProgressPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
 
@@ -8732,8 +8768,7 @@ void EpubReaderActivity::openReaderBars() {
   {
     RenderLock lock(*this);
     if (section) {
-      info.starred =
-          bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
+      info.starred = pageStarred();
       // What the status bar counts: the TOC chapter, which can span several spine items (#325).
       const ChapterPageSpan::Display chapter = chapterPageDisplay();
       if (chapter.total > 0) {
