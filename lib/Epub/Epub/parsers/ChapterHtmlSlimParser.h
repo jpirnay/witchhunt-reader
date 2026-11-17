@@ -373,6 +373,10 @@ class ChapterHtmlSlimParser final : public Print {
   static constexpr uint8_t kMaxBreakAfterDepth = 4;
   uint8_t breakAfterCount_ = 0;
   int breakAfterDepths_[kMaxBreakAfterDepth] = {};
+  // See beginCarried(). carriedTop_: the carried blocks are in and this file has shown no text, taken no break and
+  // ended no page yet.
+  bool carried_ = false;
+  bool carriedTop_ = false;
 
   // Inline image beside paragraph text (CSS float context)
   // Fixed-size arrays — no heap allocation. Float nesting > 4 is pathological in practice.
@@ -1529,6 +1533,14 @@ class ChapterHtmlSlimParser final : public Print {
   // For a build, set before setup(): the running text it lays out is also counted into `census`, by the rules of the
   // census above (countCensusWord), for the book's body size while it is not known (BodySize, Section::bodySizeSample).
   void setBuildCensus(BodySize::Census* census) { buildCensus_ = census; }
+  // A carried document (HeadingCarry): the body of a spine file that holds only its chapter's heading, fed between this
+  // file's <body> start tag and its first content (Section). Its blocks are laid out as this file's, at the top of its
+  // first page, and count nothing of this file's source: no visible text (the page LUT's offsets stay this file's own,
+  // which KOReader's positions are counted in), no paragraph or list item (the XPath indices), no anchor (a link to
+  // one names the other file), no word of the build's body-size sample. Its printed-page labels are kept. Its page
+  // breaks are not taken, nor the first one this file asks for before any text of its own: the converter's cut.
+  void beginCarried() { carried_ = true; }
+  void endCarried();
   // The size of the book's running text in percent of the reader's (BodySize::read), set before setup(). With
   // font-size normalization on, the book's sizes are taken relative to it, so that text reads at the reader's size;
   // off, or 100, nothing changes. Only the book's own CSS has sizes to take it out of.

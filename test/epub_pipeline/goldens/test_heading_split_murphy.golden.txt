@@ -1,0 +1,844 @@
+BOOK title=Heading Split lang=en spine=15 toc=8 reliableToc=1
+SPINE 0 href=OEBPS/c00_Chapter_1.xhtml pages=3 truncated=0 cssFallback=0
+ PAGE 0 elements=11 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=1
+   W x=101 s=1 z=100 t=1
+  BOX y=51 x=72 w=70 h=6 edges=0/0,0/0,2/2,0/0 shaded=0
+  LINE y=71 x=0 align=2 mult=1.500 hfid=0 words=2
+   W x=32 s=0 z=100 t=This
+   W x=91 s=0 z=100 t=Summer
+  LINE y=143 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SAME
+   W x=64 s=0 z=100 t=paragraph
+   W x=159 s=0 z=100 t=1
+   W x=173 s=0 z=100 t=goes
+  LINE y=166 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=189 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=212 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=246 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SAME
+   W x=63 s=0 z=100 t=paragraph
+   W x=157 s=0 z=100 t=2
+   W x=171 s=0 z=100 t=goes
+  LINE y=269 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=292 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=315 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+ PAGE 1 elements=14 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SAME
+   W x=63 s=0 z=100 t=paragraph
+   W x=157 s=0 z=100 t=3
+   W x=172 s=0 z=100 t=goes
+  LINE y=23 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=46 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=69 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=103 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SAME
+   W x=63 s=0 z=100 t=paragraph
+   W x=157 s=0 z=100 t=4
+   W x=173 s=0 z=100 t=goes
+  LINE y=126 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=149 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=172 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=206 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SAME
+   W x=62 s=0 z=100 t=paragraph
+   W x=155 s=0 z=100 t=5
+   W x=171 s=0 z=100 t=goes
+  LINE y=229 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=252 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=275 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=309 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SAME
+   W x=62 s=0 z=100 t=paragraph
+   W x=155 s=0 z=100 t=6
+   W x=172 s=0 z=100 t=goes
+  LINE y=332 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+ PAGE 2 elements=2 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=23 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+SPINE 1 href=OEBPS/c01_Chapter_2_split_000.xhtml pages=0 truncated=0 cssFallback=0
+SPINE 2 href=OEBPS/c01_Chapter_2_split_001.xhtml pages=3 truncated=0 cssFallback=0
+ PAGE 0 elements=11 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=1
+   W x=101 s=1 z=100 t=2
+  BOX y=51 x=72 w=70 h=6 edges=0/0,0/0,2/2,0/0 shaded=0
+  LINE y=71 x=0 align=2 mult=1.500 hfid=0 words=2
+   W x=32 s=0 z=100 t=This
+   W x=91 s=0 z=100 t=Summer
+  LINE y=143 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SAME
+   W x=64 s=0 z=100 t=paragraph
+   W x=159 s=0 z=100 t=1
+   W x=173 s=0 z=100 t=goes
+  LINE y=166 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=189 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=212 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=246 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SAME
+   W x=63 s=0 z=100 t=paragraph
+   W x=157 s=0 z=100 t=2
+   W x=171 s=0 z=100 t=goes
+  LINE y=269 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=292 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=315 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+ PAGE 1 elements=14 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SAME
+   W x=63 s=0 z=100 t=paragraph
+   W x=157 s=0 z=100 t=3
+   W x=172 s=0 z=100 t=goes
+  LINE y=23 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=46 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=69 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=103 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SAME
+   W x=63 s=0 z=100 t=paragraph
+   W x=157 s=0 z=100 t=4
+   W x=173 s=0 z=100 t=goes
+  LINE y=126 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=149 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=172 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=206 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SAME
+   W x=62 s=0 z=100 t=paragraph
+   W x=155 s=0 z=100 t=5
+   W x=171 s=0 z=100 t=goes
+  LINE y=229 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=252 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=275 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=309 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SAME
+   W x=62 s=0 z=100 t=paragraph
+   W x=155 s=0 z=100 t=6
+   W x=172 s=0 z=100 t=goes
+  LINE y=332 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+ PAGE 2 elements=2 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=23 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+SPINE 3 href=OEBPS/c03_title.xhtml pages=0 truncated=0 cssFallback=0
+SPINE 4 href=OEBPS/c04_text.xhtml pages=3 truncated=0 cssFallback=0
+ PAGE 0 elements=11 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=1
+   W x=70 s=1 z=100 t=Three
+  BOX y=51 x=72 w=70 h=6 edges=0/0,0/0,2/2,0/0 shaded=0
+  LINE y=71 x=0 align=2 mult=1.500 hfid=0 words=2
+   W x=32 s=0 z=100 t=This
+   W x=91 s=0 z=100 t=Summer
+  LINE y=143 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=THREE
+   W x=94 s=0 z=100 t=paragraph
+   W x=208 s=0 z=100 t=1
+  LINE y=166 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=goes
+   W x=54 s=0 z=100 t=on
+   W x=90 s=0 z=100 t=long
+   W x=146 s=0 z=100 t=enough
+  LINE y=189 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=to
+   W x=32 s=0 z=100 t=take
+   W x=81 s=0 z=100 t=a
+   W x=103 s=0 z=100 t=few
+   W x=138 s=0 z=100 t=lines
+   W x=192 s=0 z=100 t=of
+  LINE y=212 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=the
+   W x=40 s=0 z=100 t=page
+   W x=87 s=0 z=100 t=it
+   W x=112 s=0 z=100 t=is
+   W x=136 s=0 z=100 t=laid
+   W x=180 s=0 z=100 t=out
+  LINE y=235 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=on.
+  LINE y=269 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=THREE
+   W x=93 s=0 z=100 t=paragraph
+   W x=206 s=0 z=100 t=2
+  LINE y=292 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=goes
+   W x=54 s=0 z=100 t=on
+   W x=90 s=0 z=100 t=long
+   W x=146 s=0 z=100 t=enough
+  LINE y=315 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=to
+   W x=32 s=0 z=100 t=take
+   W x=81 s=0 z=100 t=a
+   W x=103 s=0 z=100 t=few
+   W x=138 s=0 z=100 t=lines
+   W x=192 s=0 z=100 t=of
+ PAGE 1 elements=14 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=the
+   W x=40 s=0 z=100 t=page
+   W x=87 s=0 z=100 t=it
+   W x=112 s=0 z=100 t=is
+   W x=136 s=0 z=100 t=laid
+   W x=180 s=0 z=100 t=out
+  LINE y=23 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=on.
+  LINE y=57 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=THREE
+   W x=93 s=0 z=100 t=paragraph
+   W x=206 s=0 z=100 t=3
+  LINE y=80 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=goes
+   W x=54 s=0 z=100 t=on
+   W x=90 s=0 z=100 t=long
+   W x=146 s=0 z=100 t=enough
+  LINE y=103 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=to
+   W x=32 s=0 z=100 t=take
+   W x=81 s=0 z=100 t=a
+   W x=103 s=0 z=100 t=few
+   W x=138 s=0 z=100 t=lines
+   W x=192 s=0 z=100 t=of
+  LINE y=126 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=the
+   W x=40 s=0 z=100 t=page
+   W x=87 s=0 z=100 t=it
+   W x=112 s=0 z=100 t=is
+   W x=136 s=0 z=100 t=laid
+   W x=180 s=0 z=100 t=out
+  LINE y=149 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=on.
+  LINE y=183 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=THREE
+   W x=92 s=0 z=100 t=paragraph
+   W x=204 s=0 z=100 t=4
+  LINE y=206 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=goes
+   W x=54 s=0 z=100 t=on
+   W x=90 s=0 z=100 t=long
+   W x=146 s=0 z=100 t=enough
+  LINE y=229 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=to
+   W x=32 s=0 z=100 t=take
+   W x=81 s=0 z=100 t=a
+   W x=103 s=0 z=100 t=few
+   W x=138 s=0 z=100 t=lines
+   W x=192 s=0 z=100 t=of
+  LINE y=252 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=the
+   W x=40 s=0 z=100 t=page
+   W x=87 s=0 z=100 t=it
+   W x=112 s=0 z=100 t=is
+   W x=136 s=0 z=100 t=laid
+   W x=180 s=0 z=100 t=out
+  LINE y=275 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=on.
+  LINE y=309 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=THREE
+   W x=92 s=0 z=100 t=paragraph
+   W x=204 s=0 z=100 t=5
+  LINE y=332 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=goes
+   W x=54 s=0 z=100 t=on
+   W x=90 s=0 z=100 t=long
+   W x=146 s=0 z=100 t=enough
+ PAGE 2 elements=8 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=to
+   W x=32 s=0 z=100 t=take
+   W x=81 s=0 z=100 t=a
+   W x=103 s=0 z=100 t=few
+   W x=138 s=0 z=100 t=lines
+   W x=192 s=0 z=100 t=of
+  LINE y=23 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=the
+   W x=40 s=0 z=100 t=page
+   W x=87 s=0 z=100 t=it
+   W x=112 s=0 z=100 t=is
+   W x=136 s=0 z=100 t=laid
+   W x=180 s=0 z=100 t=out
+  LINE y=46 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=on.
+  LINE y=80 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=THREE
+   W x=91 s=0 z=100 t=paragraph
+   W x=202 s=0 z=100 t=6
+  LINE y=103 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=goes
+   W x=54 s=0 z=100 t=on
+   W x=90 s=0 z=100 t=long
+   W x=146 s=0 z=100 t=enough
+  LINE y=126 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=to
+   W x=32 s=0 z=100 t=take
+   W x=81 s=0 z=100 t=a
+   W x=103 s=0 z=100 t=few
+   W x=138 s=0 z=100 t=lines
+   W x=192 s=0 z=100 t=of
+  LINE y=149 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=the
+   W x=40 s=0 z=100 t=page
+   W x=87 s=0 z=100 t=it
+   W x=112 s=0 z=100 t=is
+   W x=136 s=0 z=100 t=laid
+   W x=180 s=0 z=100 t=out
+  LINE y=172 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=on.
+SPINE 5 href=OEBPS/c05_split_000.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=1 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=2
+   W x=49 s=1 z=100 t=Part
+   W x=123 s=1 z=100 t=Two
+SPINE 6 href=OEBPS/c05_split_001.xhtml pages=0 truncated=0 cssFallback=0
+SPINE 7 href=OEBPS/c05_split_002.xhtml pages=3 truncated=0 cssFallback=0
+ PAGE 0 elements=11 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=1
+   W x=99 s=1 z=100 t=4
+  BOX y=51 x=72 w=70 h=6 edges=0/0,0/0,2/2,0/0 shaded=0
+  LINE y=71 x=0 align=2 mult=1.500 hfid=0 words=2
+   W x=32 s=0 z=100 t=This
+   W x=91 s=0 z=100 t=Summer
+  LINE y=143 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FOUR
+   W x=60 s=0 z=100 t=paragraph
+   W x=157 s=0 z=100 t=1
+   W x=173 s=0 z=100 t=goes
+  LINE y=166 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=189 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=212 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=246 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FOUR
+   W x=59 s=0 z=100 t=paragraph
+   W x=155 s=0 z=100 t=2
+   W x=171 s=0 z=100 t=goes
+  LINE y=269 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=292 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=315 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+ PAGE 1 elements=14 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FOUR
+   W x=59 s=0 z=100 t=paragraph
+   W x=155 s=0 z=100 t=3
+   W x=172 s=0 z=100 t=goes
+  LINE y=23 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=46 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=69 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=103 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FOUR
+   W x=59 s=0 z=100 t=paragraph
+   W x=155 s=0 z=100 t=4
+   W x=173 s=0 z=100 t=goes
+  LINE y=126 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=149 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=172 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=206 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FOUR
+   W x=58 s=0 z=100 t=paragraph
+   W x=153 s=0 z=100 t=5
+   W x=171 s=0 z=100 t=goes
+  LINE y=229 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=252 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=275 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=309 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FOUR
+   W x=58 s=0 z=100 t=paragraph
+   W x=153 s=0 z=100 t=6
+   W x=172 s=0 z=100 t=goes
+  LINE y=332 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+ PAGE 2 elements=2 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=23 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+SPINE 8 href=OEBPS/c08_head.xhtml pages=0 truncated=0 cssFallback=0
+SPINE 9 href=OEBPS/c09_picture.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=2 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=1
+   W x=98 s=1 z=100 t=5
+  IMG y=51 x=47 w=120 h=60 src=<cache>/epub_<hash>/img_2bf1feda9b4b5c3e.png
+SPINE 10 href=OEBPS/c10_empty.xhtml pages=0 truncated=0 cssFallback=0
+SPINE 11 href=OEBPS/c11_text.xhtml pages=2 truncated=0 cssFallback=0
+ PAGE 0 elements=12 footnotes=0
+  BOX y=0 x=72 w=70 h=6 edges=0/0,0/0,2/2,0/0 shaded=0
+  LINE y=20 x=0 align=2 mult=1.500 hfid=0 words=2
+   W x=32 s=0 z=100 t=This
+   W x=91 s=0 z=100 t=Summer
+  LINE y=92 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SIX
+   W x=59 s=0 z=100 t=paragraph
+   W x=156 s=0 z=100 t=1
+   W x=172 s=0 z=100 t=goes
+  LINE y=115 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=138 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=161 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=195 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SIX
+   W x=59 s=0 z=100 t=paragraph
+   W x=156 s=0 z=100 t=2
+   W x=173 s=0 z=100 t=goes
+  LINE y=218 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=241 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=298 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SIX
+   W x=58 s=0 z=100 t=paragraph
+   W x=154 s=0 z=100 t=3
+   W x=171 s=0 z=100 t=goes
+  LINE y=321 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+ PAGE 1 elements=14 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=23 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=57 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SIX
+   W x=58 s=0 z=100 t=paragraph
+   W x=154 s=0 z=100 t=4
+   W x=172 s=0 z=100 t=goes
+  LINE y=80 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=103 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=126 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=160 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SIX
+   W x=58 s=0 z=100 t=paragraph
+   W x=154 s=0 z=100 t=5
+   W x=173 s=0 z=100 t=goes
+  LINE y=183 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=206 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=229 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+  LINE y=263 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SIX
+   W x=57 s=0 z=100 t=paragraph
+   W x=152 s=0 z=100 t=6
+   W x=171 s=0 z=100 t=goes
+  LINE y=286 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=on
+   W x=43 s=0 z=100 t=long
+   W x=106 s=0 z=100 t=enough
+   W x=192 s=0 z=100 t=to
+  LINE y=309 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=take
+   W x=47 s=0 z=100 t=a
+   W x=67 s=0 z=100 t=few
+   W x=100 s=0 z=100 t=lines
+   W x=152 s=0 z=100 t=of
+   W x=182 s=0 z=100 t=the
+  LINE y=332 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=it
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=laid
+   W x=128 s=0 z=100 t=out
+   W x=167 s=0 z=100 t=on.
+SPINE 12 href=OEBPS/c12_rtl.xhtml pages=0 truncated=0 cssFallback=0
+SPINE 13 href=OEBPS/c13_rtl_text.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=4 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=1
+   W x=86 s=1 z=100 t=שבע
+    WD t=עבש
+  LINE y=51 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=4 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=35 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=66 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=97 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=128 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=159 s=0 z=100 t=1
+   W x=171 s=0 z=100 t=שבע
+    WD t=עבש
+   O order=6,5,4,3,2,1,0
+  LINE y=85 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=3 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=34 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=65 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=96 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=127 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=158 s=0 z=100 t=2
+   W x=171 s=0 z=100 t=שבע
+    WD t=עבש
+   O order=6,5,4,3,2,1,0
+  LINE y=119 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=2 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=33 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=64 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=95 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=126 s=0 z=100 t=שבע
+    WD t=עבש
+   W x=157 s=0 z=100 t=3
+   W x=171 s=0 z=100 t=שבע
+    WD t=עבש
+   O order=6,5,4,3,2,1,0
+SPINE 14 href=OEBPS/c14_last.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=1 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=1
+   W x=81 s=1 z=100 t=End

@@ -131,6 +131,11 @@ TEST_P(RoundTripFixture, EveryPageComesBackOnItself) {
   for (int spine = 0; spine < spineCount; ++spine) {
     const auto section = build(spine);
     const int pages = section->pageCount;
+    // A file holding only its chapter's heading has no page of its own: the next file's first page shows it.
+    if (epub->isCarriedSpine(spine)) {
+      EXPECT_EQ(0, pages) << "spine " << spine;
+      continue;
+    }
     ASSERT_GT(pages, 0) << "spine " << spine;
     for (int page = 0; page < pages; ++page) {
       const auto ko = ProgressMapper::toKOReader(epub, pushOf(spine, page, pages, *section));

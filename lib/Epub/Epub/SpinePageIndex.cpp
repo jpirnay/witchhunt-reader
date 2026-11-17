@@ -96,6 +96,11 @@ void record(const std::string& bookCachePath, const Variant variant, const int s
   f.close();
 }
 
+void recordCarried(const std::string& bookCachePath, const Variant variant, const int spineCount,
+                   const int spineIndex) {
+  record(bookCachePath, variant, spineCount, spineIndex, 0, kCarriedBytes);
+}
+
 Totals sumRange(const std::string& bookCachePath, const Variant variant, const int spineCount, const int first,
                 const int last, const int current) {
   Totals totals;
@@ -120,7 +125,11 @@ Totals sumRange(const std::string& bookCachePath, const Variant variant, const i
       uint32_t bytes;
       memcpy(&pages, chunk + i * kEntrySize, sizeof(pages));
       memcpy(&bytes, chunk + i * kEntrySize + sizeof(pages), sizeof(bytes));
-      if (pages == 0 || spine == current) continue;
+      if (spine == current) continue;
+      if (pages == 0) {
+        if (bytes != kCarriedBytes) continue;  // not recorded
+        bytes = 0;
+      }
       if (spine < current) {
         totals.pagesBefore += pages;
         totals.bytesBefore += bytes;

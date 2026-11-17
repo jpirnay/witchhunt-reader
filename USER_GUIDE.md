@@ -39,6 +39,7 @@ Welcome to **Witch Reader** firmware. This guide outlines the hardware controls,
     - [3.9 Weather Screen](#39-weather-screen)
   - [4. Reading Mode](#4-reading-mode)
     - [Page Turning](#page-turning)
+    - [Chapters cut after their heading](#chapters-cut-after-their-heading)
     - [Chapter Navigation](#chapter-navigation)
     - [System Navigation](#system-navigation)
     - [Bookmarks](#bookmarks)
@@ -879,6 +880,9 @@ If the **Short Power Button Click** setting is set to "Page Turn", you can also 
 
 ### Books that turn right to left
 A book set vertically (**Vertical Text** in the **[Reader settings](#372-reader)**) is read the way a Japanese book is: its pages turn right to left. So are the pages of a book in a right-to-left language (Hebrew, Yiddish, Arabic, Persian, Urdu and the other Arabic-script languages), unless the book itself says its pages turn left to right, and of a book in another language whose publisher says they turn right to left. With **Page Turn Buttons** on "Follow Book" the Left button shows the next page and the Right button the previous one, and the chapter skips on a long press swap with them. Taps and swipes on a touch device follow the same direction (see **[5.3](#53-the-reading-page-taps-and-holds)** and **[5.4](#54-the-reading-page-swipes)**), the progress bars fill from the right, and the jump-to-percent screen moves from the right as well. The dictionary's word screen follows the columns: **Up** and **Down** move along the column, word by word and on into the next column, **Left** moves to the next column (the one to its left) and **Right** to the previous one (see [Dictionary](./docs/dictionary.md#looking-up-a-word)).
+
+### Chapters cut after their heading
+Some books (often ones converted with calibre) keep a chapter's heading, its number say, in a file of its own and the chapter's text in the next one. Every file of a book starts a new page, so such a heading used to stand alone on a page. The reader now shows it at the top of the chapter's first page, as the book's other chapters are, and counts the chapter's pages exactly from its first page. A bookmark you set on such a heading page is on the chapter's first page now. Books laid out vertically are left as they are.
 
 ### Chapter Navigation
 * **Next Chapter:** Press and **hold** the **Right** (or **Down**) button briefly, then release.
