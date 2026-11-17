@@ -123,6 +123,14 @@ class Epub {
   mutable int tocForSpineMemoToc_ = -1;
   mutable int tocEntryMemoIndex_ = -1;
   mutable BookMetadataCache::TocEntry tocEntryMemo_;
+  // isCarriedSpine's last answers. A section load asks about its own spine and the one before it, and the reader
+  // asks again as it enters, steps over or looks ahead of a spine item: a few spines at a time, never the book.
+  struct CarryMemo {
+    int spine = -1;
+    bool carried = false;
+  };
+  mutable CarryMemo carryMemo_[4];
+  mutable uint8_t carryMemoNext_ = 0;
   void forgetMetadataMemos() const;
   // The stat of the entry at the normalised `path`, from the memo or one lookup.
   bool lookupItemStat(ZipFile& zip, const std::string& path, ZipFile::FileStatSlim* out) const;
@@ -408,6 +416,10 @@ class Epub {
   int getTocItemsCount() const;
   int getSpineIndexForTocIndex(int tocIndex) const;
   int getTocIndexForSpineIndex(int spineIndex) const;
+  // True when spine item `spine` holds only its chapter's heading (or nothing), which the next item's layout takes in
+  // at the top of its first page, so it has no page of its own (HeadingCarry). False too while that cannot be told (a
+  // file it must read could not be): the answer is not remembered then, and the next call asks again.
+  bool isCarriedSpine(int spine) const;
   bool hasReliableToc() const;
   void setSyntheticTocFallbackEnabled(bool enabled) { syntheticTocFallbackEnabled = enabled; }
   size_t getCumulativeSpineItemSize(int spineIndex) const;

@@ -11,6 +11,7 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/Epub/Epub.cpp
   ${REPO_ROOT}/lib/Epub/Epub/Section.cpp
   ${REPO_ROOT}/lib/Epub/Epub/SpinePageIndex.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/HeadingCarry.cpp
   ${REPO_ROOT}/lib/Epub/Epub/Page.cpp
   ${REPO_ROOT}/lib/Epub/Epub/CjkLineBreak.cpp
   ${REPO_ROOT}/lib/Epub/Epub/CjkPunctuation.cpp
@@ -162,6 +163,7 @@ add_executable(EpubPipelineTest
   FontFamilyLayoutTest.cpp
   SpineCacheLayoutTest.cpp
   CacheFileIdentityTest.cpp
+  HeadingCarryTest.cpp
   SaxStateInArenaTest.cpp
   OwnedBuildRegionTest.cpp
   JpegDownscaleTest.cpp
