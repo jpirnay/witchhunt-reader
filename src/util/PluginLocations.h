@@ -1,4 +1,7 @@
 #pragma once
+#include <FsHelpers.h>
+#include <ProtectedPaths.h>
+
 #include <string>
 #include <vector>
 
@@ -65,4 +68,16 @@ inline bool isInsidePluginFolder(const std::string& path) {
   }
   return false;
 }
+
+// Whether `path` (normalised) is `named`, a file a plugin's device.json names as its own (token.file,
+// token.refresh_file, config.file). A relative name is in the plugin's folder, as upstream's inPluginDir() reads it;
+// an absolute one is taken as written, then normalised. A name with ".." in it names nothing, as in upstream's
+// isPluginPath(): a relative one could otherwise climb out of the folder. FAT names compare without case.
+inline bool namesPath(const std::string& named, const std::string& pluginDir, const std::string& path) {
+  if (named.empty() || path.empty() || named.find("..") != std::string::npos) return false;
+  const std::string resolved = FsHelpers::normalisePath(named[0] == '/' ? named : pluginDir + "/" + named);
+  if (resolved.empty()) return false;
+  return ProtectedPaths::equalsIgnoreCase(resolved[0] == '/' ? resolved : "/" + resolved, path);
+}
+
 }  // namespace PluginLocations

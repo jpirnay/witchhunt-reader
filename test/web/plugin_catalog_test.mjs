@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Tests the device.json catalog runner (src/network/html/js/plugin-catalog.js) on the Plugins page: its pure helpers
 // (template variables, the four paging modes, filename sanitizing, card folders, compatibility), then whole catalogs
-// opened from the installed list: offset paging with lists and search, a {page} catalog installing a bundle, a static
-// catalog paged after compatibility filtering behind a remembered notice and a config file, and a sign-in catalog that
-// says it cannot open.
+// opened from the installed list: offset paging with lists and search, a {page} catalog installing a bundle, fetched
+// lists, a static catalog paged after compatibility filtering behind a remembered notice and a config file, and the
+// sign-ins: a device code, a password grant renewed after a 401 (browsing and downloading), a token only the plugin's
+// web card writes, and a token file outside the plugin's folder, read from where its device.json names it; and an XML
+// (WebDAV) catalog browsed folder by folder.
 //
 // The page runs in jsdom with its includes resolved, and loads plugin-catalog.js from the source tree. The device
 // (its relay, /api/fetch, /mkdir, /download) and the catalogs' servers are a fake fetch; every manifest and answer is
@@ -68,6 +70,10 @@ const installed = [
   { name: 'dicts', title: 'Dictionaries', root: ROOT, mount: 'settings', web: false, device: true },
   { name: 'static', title: 'Static', root: ROOT, mount: 'settings', web: false, device: true },
   { name: 'signin', title: 'Sign-in', root: ROOT, mount: 'settings', web: false, device: true },
+  { name: 'wallabag', title: 'Wallabag', root: ROOT, mount: 'settings', web: true, device: true },
+  { name: 'webcard', title: 'Web card', root: ROOT, mount: 'files', web: true, device: true },
+  { name: 'outside', title: 'Outside', root: ROOT, mount: 'settings', web: true, device: true },
+  { name: 'dav', title: 'WebDAV', root: ROOT, mount: 'settings', web: true, device: true },
   { name: 'both', title: 'Both', root: ROOT, mount: 'files', web: true, device: true },
   { name: 'off', title: 'Switched off', root: ROOT, mount: 'settings', web: false, device: true, disabled: true },
   { name: 'shelves', title: 'Shelves', root: ROOT, mount: 'settings', web: false, device: true }
@@ -110,13 +116,89 @@ const manifests = {
     download: { url: '{url}' }
   },
   signin: {
-    token: { file: 'token.json', path: 'token' },
-    auth: { type: 'device_code', request: { url: 'https://signin.test/device' } },
+    token: { file: 'token.json', path: 'auth.token' },
+    auth: {
+      type: 'device_code', request: { url: 'https://signin.test/device', body: '{"client":"{plugin_name}"}' },
+      poll: { url: 'https://signin.test/token', body: '{"code":"{device_code}"}' }
+    },
     browse: { url: 'https://signin.test/books?page={page}&limit={limit}', headers: { Authorization: 'Bearer {token}' } }
+  },
+  wallabag: {
+    config: { file: 'config.json' },
+    token: { file: 'token.json', path: 'access_token' },
+    auth: {
+      type: 'password', token_path: 'access_token',
+      request: { url: '{cfg.url}/oauth/v2/token', headers: { 'Content-Type': 'application/json' },
+                 body: '{"username":"{cfg.username}","password":"{cfg.password}"}' }
+    },
+    browse: {
+      url: '{cfg.url}/api/entries?page={page}&perPage={limit}', headers: { Authorization: 'Bearer {token}' },
+      items: '_embedded.items', fields: { title: 'title', id: 'id' }
+    },
+    download: { url: '{cfg.url}/api/entries/{id}/export.epub', headers: { Authorization: 'Bearer {token}' },
+                dest_dir: '/News', filename: '{title}.epub' }
+  },
+  webcard: { token: { file: 'token.json' }, browse: { url: 'https://web.test/list?page={page}' } },
+  outside: { token: { file: '/.crosspoint/outside-token.json', path: 'auth.token' },
+             browse: { url: 'https://x.test/list', headers: { Authorization: 'Bearer {token}' } } },
+  dav: {
+    config: { file: 'config.json' },
+    browse: {
+      format: 'xml', url: '{cfg.url}', method: 'PROPFIND', headers: { Authorization: 'Basic {cfg.auth}', Depth: '1' },
+      body: '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>',
+      item: 'response', fields: { title: 'displayname', url: 'href' }, container_element: 'collection',
+      skip_self: true, resolve_urls: true, extensions: ['.epub'], page_size: 3
+    },
+    download: { username: '{cfg.user}', password: '{cfg.pass}', dest_dir: '/WebDAV', filename: '{title}' }
   }
 };
+const davEntry = (href, name, folder) => '<d:response><d:href>' + href + '</d:href><d:propstat><d:prop>' +
+  (name === null ? '' : '<d:displayname>' + name + '</d:displayname>') +
+  '<d:resourcetype>' + (folder ? '<d:collection/>' : '') + '</d:resourcetype></d:prop></d:propstat></d:response>';
+const davListing = (...entries) => '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">' + entries.join('') + '</d:multistatus>';
 
 // ---- The catalogs' servers, reached through the relay ---------------------------------------------------------------
+
+// Answers that depend on the request: a function of the relayed request, giving {status, body}.
+const polls = [];
+let shownCode = '';
+let shownLink = '';
+let mints = 0;
+const bearer = (req) => (req.headers || {}).Authorization;
+const answers = {
+  'https://signin.test/device': (req) => ({ status: req.body === '{"client":"signin"}' ? 200 : 400, body: {
+    user_code: 'ABCD-1234', verification_uri: 'https://signin.test/activate', device_code: 'dev-1', interval: 2, expires_in: 30
+  } }),
+  'https://signin.test/token': (req) => {
+    const box = doc.querySelector('#catalog-view .catalog-code');
+    if (box) shownCode = box.textContent;
+    const link = doc.querySelector('#catalog-view .catalog-signin a');
+    if (link) shownLink = link.href;
+    polls.push(req.body);
+    if (polls.length === 1) return { status: 400, body: { error: 'authorization_pending' } };
+    if (polls.length === 2) return { status: 400, body: { error: 'slow_down' } };
+    return { status: 200, body: { access_token: 'TOKEN-DC', token_type: 'bearer' } };
+  },
+  'https://signin.test/books?page=1&limit=8': (req) => (bearer(req) === 'Bearer TOKEN-DC'
+    ? { status: 200, body: [{ title: 'DC 1' }] } : { status: 401, body: {} }),
+  'https://x.test/list': (req) => ({ status: bearer(req) === 'Bearer OUTSIDE' ? 200 : 401, body: [{ title: 'Outside 1' }] }),
+  'https://dav.test/files/me/': (req) => ({ status: req.method === 'PROPFIND' ? 207 : 405, body: davListing(
+    davEntry('/files/me/', 'me', true),
+    davEntry('/files/me/Book%20Shelf/', null, true),
+    davEntry('/files/me/A%20Book.epub', 'A Book.epub', false),
+    davEntry('/files/me/notes.md', 'notes.md', false),
+    davEntry('Second.EPUB', null, false)) }),
+  'https://dav.test/files/me/Book%20Shelf/': () => ({ status: 207, body: davListing(
+    davEntry('/files/me/Book%20Shelf/', 'Book Shelf', true),
+    davEntry('/files/me/Book%20Shelf/Deep.epub', 'Deep.epub', false)) }),
+  'https://wb.test/oauth/v2/token': (req) => {
+    mints++;
+    return req.body === '{"username":"me","password":"secret pw"}' ? { status: 200, body: { access_token: 'T' + mints } }
+      : { status: 400, body: { error: 'invalid_grant' } };
+  },
+  'https://wb.test/api/entries?page=1&perPage=8': (req) => (bearer(req) === 'Bearer T2'
+    ? { status: 200, body: { _embedded: { items: [{ title: 'Saved article', id: 7 }] } } } : { status: 401, body: {} })
+};
 
 const hit = (title, id, by) => ({ title, objectID: id, by: by || 'someone', url: 'https://site.test/' + id + ' page' });
 const internet = {
@@ -157,6 +239,20 @@ const relayed = [];
 const fetched = [];
 const folders = [];
 const existing = new Set(['/News']);
+// The card's files the runner reads (/download) and writes (/api/plugin-fs).
+const card = {
+  [ROOT + '/static/config.json']: '{"server":"https://files.test","dest_dir":"Books"}',
+  [ROOT + '/wallabag/config.json']: '{"url":"https://wb.test","username":"me","password":"secret pw"}',
+  '/.crosspoint/outside-token.json': '{"auth":{"token":"OUTSIDE"}}',
+  [ROOT + '/dav/config.json']: '{"url":"https://dav.test/files/me/","auth":"bWU6cHc=","user":"me","pass":"pw"}'
+};
+const written = [];
+let refuseNextDownload = false;
+const blobText = (b) => new Promise((resolve) => {
+  const r = new dom.window.FileReader();
+  r.onload = () => resolve(r.result);
+  r.readAsText(b);
+});
 
 function device(url, options) {
   const method = (options && options.method) || 'GET';
@@ -168,8 +264,18 @@ function device(url, options) {
   if (url === '/api/status') return new FakeResponse(200, { version: '9.9-test' });
   const plugin = /^\/plugin\?name=([^&]+)&file=device\.json$/.exec(url);
   if (plugin) return manifests[plugin[1]] ? new FakeResponse(200, manifests[plugin[1]]) : new FakeResponse(404, 'no');
-  if (url === '/download?path=' + encodeURIComponent(ROOT + '/static/config.json')) {
-    return new FakeResponse(200, '{"server":"https://files.test","dest_dir":"Books"}');
+  if (url.startsWith('/download?path=')) {
+    const file = decodeURIComponent(url.slice('/download?path='.length));
+    return card[file] === undefined ? new FakeResponse(404, 'not found') : new FakeResponse(200, card[file]);
+  }
+  const fsWrite = /^\/api\/plugin-fs\?plugin=([^&]+)&path=(.+)$/.exec(url);
+  if (fsWrite && method === 'POST') {
+    const file = decodeURIComponent(fsWrite[2]);
+    return blobText(options.body.get('file')).then((text) => {
+      card[file] = text;
+      written.push({ plugin: fsWrite[1], file, text });
+      return new FakeResponse(200, { ok: true });
+    });
   }
   if (url === '/mkdir' && method === 'POST') {
     const where = (options.body.get('path') === '/' ? '' : options.body.get('path')) + '/' + options.body.get('name');
@@ -180,6 +286,11 @@ function device(url, options) {
   }
   if (url === '/api/relay' && method === 'POST') {
     relayed.push(json);
+    if (answers[json.url]) {
+      const out = answers[json.url](json);
+      return new FakeResponse(200, typeof out.body === 'string' ? out.body : JSON.stringify(out.body),
+                              { 'X-Relay-Status': String(out.status), 'X-Relay-Headers': '[]' });
+    }
     const answer = internet[json.url];
     if (answer && answer.redirect) {
       return new FakeResponse(200, '', { 'X-Relay-Status': String(answer.redirect),
@@ -190,6 +301,11 @@ function device(url, options) {
   }
   if (url === '/api/fetch' && method === 'POST') {
     fetched.push(json);
+    if (refuseNextDownload) {
+      refuseNextDownload = false;
+      return new FakeResponse(502, { ok: false, complete: false, status: 0, bytes: 0, unauthorized: true,
+                                     error: 'the server refused the request (401 or 403)' });
+    }
     if (!existing.has(json.dest.slice(0, json.dest.lastIndexOf('/')))) return new FakeResponse(502, { error: 'download failed' });
     return new FakeResponse(200, { ok: true, dest: json.dest });
   }
@@ -207,12 +323,22 @@ class Loader extends ResourceLoader {
 
 let confirmAnswer = true;
 const confirmed = [];
+const waits = [];
 const dom = new JSDOM(resolveIncludes(fs.readFileSync(path.join(HTML_DIR, 'PluginsPage.html'), 'utf8')), {
   url: 'http://reader.test/plugins',
   runScripts: 'dangerously',
   resources: new Loader(),
   virtualConsole: new VirtualConsole(),
   beforeParse(w) {
+    // The device-code sign-in waits seconds between polls: those waits are recorded and run at once.
+    const realSetTimeout = w.setTimeout.bind(w);
+    w.setTimeout = (fn, ms, ...args) => {
+      if (ms >= 1000) {
+        waits.push(ms);
+        ms = 0;
+      }
+      return realSetTimeout(fn, ms, ...args);
+    };
     w.TextDecoder = TextDecoder;
     w.TextEncoder = TextEncoder;
     w.Element.prototype.scrollIntoView = () => {};
@@ -238,7 +364,7 @@ const view = () => doc.getElementById('catalog-view');
 const buttons = (root) => [...root.querySelectorAll('button')];
 const button = (root, label) => buttons(root).find((b) => b.textContent === label);
 const titles = () => [...view().querySelectorAll('.catalog-rows strong')].map((s) => s.textContent);
-const catalogStatus = () => view().querySelector('.catalog-status').textContent;
+const catalogStatus = () => (view().querySelector('.catalog-status') || {}).textContent || '';
 const installedRow = (title) => [...doc.querySelectorAll('#installed .plugin')]
   .find((r) => r.querySelector('strong').textContent.startsWith(title));
 const lastRelay = () => relayed[relayed.length - 1];
@@ -254,13 +380,14 @@ check(!!button(installedRow('News'), 'Open catalog'), 'a catalog plugin has an O
 check(!button(installedRow('Switched off'), 'Open catalog'), 'a switched-off one has none');
 check(view().hidden, 'no catalog is open at first');
 
-// ---- Loading the runner, a catalog it cannot open, and the pure helpers ---------------------------------------------
+// ---- Loading the runner, a token outside the plugin's folder, and the pure helpers -----------------------------------
 
-button(installedRow('Sign-in'), 'Open catalog').click();
+button(installedRow('Outside'), 'Open catalog').click();
 await until(() => !!w.PluginCatalog, 'plugin-catalog.js to load');
-await until(() => doc.getElementById('status').textContent.startsWith('Cannot open'), 'the sign-in refusal');
-check(doc.getElementById('status').textContent.includes('needs a sign-in') && view().hidden,
-      'a catalog that needs a sign-in says it cannot open (' + doc.getElementById('status').textContent + ')');
+await until(() => titles().join('|') === 'Outside 1', 'the catalog with its token outside its folder');
+check(requests.some((r) => r.url === '/download?path=' + encodeURIComponent('/.crosspoint/outside-token.json')),
+      'a token file outside the plugin\'s folder is read where device.json names it');
+button(view(), 'Close').click();
 
 const P = w.PluginCatalog._internal;
 check(P.enc('a b/ü~-_.') === 'a%20b%2F%C3%BC~-_.', '{query} and the _enc variables percent-encode all but -_.~');
@@ -306,10 +433,29 @@ check(P.joinServerPath('/files/1', 'https://h.test:8443/api?x=1') === 'https://h
       P.joinServerPath('//cdn.test/a', 'https://h.test/') === '//cdn.test/a' &&
       P.joinServerPath('https://a.test/b', 'https://h.test/') === 'https://a.test/b', 'server paths join the request origin');
 
+check(P.tokenJson('auth.token', 'x') === '{"auth":{"token":"x"}}' && P.tokenJson('', 'x') === '{"token":"x"}',
+      'a token file holds the token alone, nested at token.path');
+check(P.signInKind({ auth: { request: { url: 'u' } } }) === 'device_code' &&
+      P.signInKind({ auth: { type: 'password', request: { url: 'u' } } }) === 'password' &&
+      P.signInKind({ auth: { type: 'refresh', request: { url: 'u' } } }) === 'other:refresh' &&
+      P.signInKind({ auth: { type: 'refresh', refresh: { url: 'u' } } }) === 'other:refresh' &&
+      P.signInKind({ auth: { type: 'password' } }) === '', 'the sign-in kinds, device_code by default, none without a request');
+check(P.urlDecodePath('/a%20b+c/%C3%BC') === '/a b+c/ü' && P.urlEncodePath('/a b/ü~') === '/a%20b/%C3%BC~',
+      'XML hrefs: decoded with "+" kept, encoded back with "/" kept');
 const D = w.PluginCatalog.describe;
 check(D({ browse: { url: 'u' } }).catalog && D({ browse: { lists_url: 'u' } }).catalog, 'a JSON catalog opens');
-check(!D({ browse: { url: 'u', format: 'xml' } }).catalog && D({ browse: { url: 'u', format: 'xml' } }).reason.includes('XML'),
-      'an XML one says why not');
+check(D({ browse: { url: 'u', format: 'xml', item: 'response' } }).catalog &&
+      D({ browse: { url: 'u', format: 'xml' } }).reason.includes('item element') &&
+      D({ browse: { url: 'u', format: 'opds' } }).reason.includes('"opds"'),
+      'an XML catalog opens when it names its item element; an unknown format says why not');
+check(D({ browse: { url: 'u' }, token: { file: 'token.json' }, auth: { type: 'password', request: { url: 'u' } } }).catalog,
+      'a catalog with a sign-in opens');
+check(!D({ browse: { url: 'u' }, auth: { type: 'refresh', request: { url: 'u' } } }).catalog &&
+      D({ browse: { url: 'u' }, auth: { type: 'refresh', request: { url: 'u' } } }).reason.includes('"refresh"'),
+      'one with a sign-in upstream does not define says so');
+check(D({ browse: { url: 'u' }, token: { file: '/p/x/token.json' } }).catalog &&
+      D({ browse: { url: 'u' }, config: { file: '/.app/config.json' } }).catalog,
+      'token and config files may sit anywhere');
 const events = D({ events: { book_finished: {} } });
 check(!events.catalog && events.events && !events.reason, 'an events-only manifest has no catalog');
 
@@ -426,6 +572,88 @@ confirmed.length = 0;
 button(installedRow('Static'), 'Open catalog').click();
 await until(() => titles().length > 0, 'the static catalog again');
 check(confirmed.length === 0, 'a notice with once and an id is not asked again');
+
+// ---- Device-code sign-in -------------------------------------------------------------------------------------------
+
+button(view(), 'Close').click();
+relayed.length = 0;
+waits.length = 0;
+button(installedRow('Sign-in'), 'Open catalog').click();
+await until(() => titles().join('|') === 'DC 1', 'the device-code catalog');
+check(relayed[0].url === 'https://signin.test/device' && relayed[0].method === 'POST',
+      'no token: the device-code request goes first, as a POST');
+check(shownCode === 'ABCD-1234' && /^https:\/\/signin\.test\/activate\/?$/.test(shownLink),
+      'the code and the address to enter it at are shown (' + shownCode + ', ' + shownLink + ')');
+check(polls.length === 3 && polls[0] === '{"code":"dev-1"}', 'the poll carries {device_code} until a token comes');
+check(waits.slice(0, 3).join(',') === '3000,3000,8000', 'polls wait the interval, at least 3 s, and 5 s more after slow_down (' + waits + ')');
+check(card[ROOT + '/signin/token.json'] === '{"auth":{"token":"TOKEN-DC"}}' &&
+      written.some((x) => x.plugin === 'signin' && x.file === ROOT + '/signin/token.json'),
+      'the token is written to token.file, nested at token.path, through the plugin\'s writeFile');
+check(bearer(lastRelay()) === 'Bearer TOKEN-DC', 'browsing then sends {token}');
+check(!view().querySelector('.catalog-code'), 'the code goes once signed in');
+
+button(view(), 'Close').click();
+relayed.length = 0;
+button(installedRow('Sign-in'), 'Open catalog').click();
+await until(() => titles().join('|') === 'DC 1', 'the device-code catalog again');
+check(!relayed.some((r) => r.url === 'https://signin.test/device'), 'a stored token is used: no new sign-in');
+
+// ---- Password grant, renewed after a 401 ----------------------------------------------------------------------------
+
+button(view(), 'Close').click();
+relayed.length = 0;
+button(installedRow('Wallabag'), 'Open catalog').click();
+await until(() => titles().join('|') === 'Saved article', 'the password-grant catalog');
+check(mints === 2, 'no token: one is minted; the browse 401 mints another (' + mints + ' mints)');
+check(relayed[0].url === 'https://wb.test/oauth/v2/token' && relayed[0].body === '{"username":"me","password":"secret pw"}',
+      'the grant carries the config\'s credentials');
+check(card[ROOT + '/wallabag/token.json'] === '{"access_token":"T2"}' && bearer(lastRelay()) === 'Bearer T2',
+      'the new token is saved and the request runs again with it');
+fetched.length = 0;
+refuseNextDownload = true;
+view().querySelector('.catalog-rows .plugin button').click();
+await until(() => /^(Saved|Could not)/.test(catalogStatus()), 'the password-grant download');
+check(catalogStatus() === 'Saved /News/Saved article.epub', 'the download is saved (' + catalogStatus() + ')');
+check(fetched.length === 2 && fetched[0].headers.Authorization === 'Bearer T2' && fetched[1].headers.Authorization === 'Bearer T3' &&
+      mints === 3, 'a download its server refuses mints a new token and runs again with it');
+check(fetched[0].url === 'https://wb.test/api/entries/7/export.epub', 'the download address is filled in');
+
+// ---- An XML (WebDAV) catalog, folder by folder ----------------------------------------------------------------------
+
+button(view(), 'Close').click();
+relayed.length = 0;
+button(installedRow('WebDAV'), 'Open catalog').click();
+await until(() => titles().length === 3, 'the WebDAV listing');
+const propfind = relayed[0];
+check(propfind.method === 'PROPFIND' && propfind.url === 'https://dav.test/files/me/' && propfind.headers.Depth === '1' &&
+      propfind.headers.Authorization === 'Basic bWU6cHc=' && propfind.body.includes('<d:propfind'),
+      'the listing is a PROPFIND with Depth and the config\'s credentials');
+check(titles().join('|') === 'Book Shelf/|A Book.epub|Second.EPUB',
+      'its own entry and a file of another kind are left out; a folder without a name takes its last path segment (' + titles() + ')');
+check(!view().querySelector('.catalog-search') && !view().querySelector('.catalog-lists'), 'no search and no lists at the top');
+fetched.length = 0;
+view().querySelectorAll('.catalog-rows .plugin button')[2].click();
+await until(() => /^(Saved|Could not)/.test(catalogStatus()), 'the relative-href download');
+check(fetched[0] && fetched[0].url === 'https://dav.test/files/me/Second.EPUB' && fetched[0].dest === '/WebDAV/Second.EPUB',
+      'a relative href joins the listing\'s folder (' + (fetched[0] && fetched[0].url) + ')');
+check(fetched[0] && fetched[0].headers.Authorization === 'Basic bWU6cHc=', 'the download sends the config\'s user and password');
+button(view(), 'Open').click();
+await until(() => titles().join('|') === 'Deep.epub', 'the folder');
+check(lastRelay().url === 'https://dav.test/files/me/Book%20Shelf/' && lastRelay().method === 'PROPFIND',
+      'Open lists the folder, its href resolved against the server');
+check(view().querySelector('.catalog-lists').textContent.includes('Book Shelf') && !!button(view(), 'Up'),
+      'the folder\'s path shows, with Up');
+button(view(), 'Up').click();
+await until(() => titles().length === 3, 'the top folder again');
+check(lastRelay().url === 'https://dav.test/files/me/' && !button(view(), 'Up'), 'Up goes back to the top');
+
+// ---- A token only the plugin's web card writes ----------------------------------------------------------------------
+
+button(view(), 'Close').click();
+button(installedRow('Web card'), 'Open catalog').click();
+await until(() => /Sign in/.test(catalogStatus()), 'the web-card sign-in message');
+check(catalogStatus() === 'This catalog needs a sign-in. Sign in on its card on the File Manager page, then open the catalog again.',
+      'without its token, the catalog points to the plugin\'s card (' + catalogStatus() + ')');
 
 dom.window.close();
 console.log(failures ? failures + ' check(s) failed' : 'all checks passed');
