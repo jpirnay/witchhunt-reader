@@ -17,6 +17,10 @@ class CoverThumbSession;  // Epub/CoverThumbSession.h
 class Xtc;
 class Txt;
 
+namespace book_protection {
+enum class OpenResult : uint8_t;  // lib/BookProtection/BookSession.h
+}
+
 class ReaderActivity final : public Activity {
   std::string initialBookPath;
   std::string currentBookPath;  // Track current book path for navigation
@@ -25,9 +29,13 @@ class ReaderActivity final : public Activity {
   // told how far a cache build has got (Epub::setBuildProgress). `probed`: the instance onEnter()
   // asked whether the open needs indexing, loaded instead of a new one so that the ZIP fingerprint
   // it walked the central directory for is not walked for again.
+  // `protection`, when given: what the load made of the book's protection (Epub::protectionResult()), set on failure.
   static std::unique_ptr<Epub> loadEpub(const std::string& path, BuildArena* scratch = nullptr,
                                         void (*progress)(void* ctx, uint8_t percent) = nullptr,
-                                        void* progressCtx = nullptr, std::unique_ptr<Epub> probed = nullptr);
+                                        void* progressCtx = nullptr, std::unique_ptr<Epub> probed = nullptr,
+                                        book_protection::OpenResult* protection = nullptr);
+  // Says why a protected book did not open, then goes back. False for a book whose failure was not its protection's.
+  bool showProtectionNotice(book_protection::OpenResult result);
   static std::unique_ptr<Xtc> loadXtc(const std::string& path);
   static std::unique_ptr<Txt> loadTxt(const std::string& path);
   static bool isXtcFile(const std::string& path);

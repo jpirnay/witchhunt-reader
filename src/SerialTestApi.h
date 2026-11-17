@@ -60,6 +60,9 @@ bool commandPending();
 // heap) for CMD:STATE and the EVT: lines to report later.
 // A popup with this text was just drawn (BaseTheme/LyraTheme drawPopup).
 void notePopup(const char* text);
+// The frame just shipped still shows that popup, grown (the first open's progress bar): it stays reported
+// (PopupProbe).
+void notePopupContinued();
 // A list or menu was drawn with row `index` highlighted, showing `label` (null when unknown). The
 // last list drawn on the current screen wins.
 void noteSelection(int index, const char* label);
@@ -101,6 +104,7 @@ inline void service() {}
 inline PowerRequest takePowerRequest() { return PowerRequest::None; }
 inline bool commandPending() { return false; }
 inline void notePopup(const char*) {}
+inline void notePopupContinued() {}
 inline void noteSelection(int, const char*) {}
 inline void noteBuildDone(int, int) {}
 inline void noteFontInstalled(const char*, bool) {}

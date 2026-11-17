@@ -21,6 +21,9 @@ namespace SidecarFiles {
 inline constexpr const char* kCoverExtensions[] = {".jpg", ".jpeg", ".png", ".bmp", ".JPG", ".JPEG", ".PNG", ".BMP"};
 // Calibre-style metadata OPF.
 inline constexpr const char* kMetadataExtensions[] = {".opf", ".OPF"};
+// A protected EPUB's content key, wrapped to the device (lib/BookProtection/BookKey.h). Its name is
+// the book's whole name and ".key" ("Some Book.epub.key"), the same as an extension of the base.
+inline constexpr const char* kKeyExtensions[] = {".epub.key", ".EPUB.key"};
 // metadataStamp() reads no further than this. It must cover every byte a reader
 // of the sidecar takes in, or an edit past the cap would go unnoticed.
 inline constexpr size_t kMetadataStampBytes = 16384;

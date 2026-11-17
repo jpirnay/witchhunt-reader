@@ -2,12 +2,14 @@
 
 #include <CrossPointSettings.h>
 #include <GfxRenderer.h>
+#include <HalCapabilities.h>
 #include <HalTiltSensor.h>
 #include <Logging.h>
 
 #include <algorithm>
 #include <cstdint>
 
+#include "IndexingPopupGate.h"
 #include "MappedInputManager.h"
 #include "components/TapZones.h"
 #include "components/themes/PanelMetrics.h"
@@ -324,5 +326,20 @@ class BookOpenRefreshHold {
   const GfxRenderer& renderer;
   const bool held;
 };
+
+// What the HAL says about this panel and board, for IndexingPopupGate's decisions on how an "Indexing" popup ships.
+inline IndexingPopupGate::Panel indexingPopupPanel(const GfxRenderer& renderer) {
+  IndexingPopupGate::Panel p;
+  p.asyncRefresh = renderer.supportsAsyncRefresh();
+  p.cardOffPanelBus = !HalCapabilities::sdUsesSpi();
+  // cppcheck-suppress knownConditionTrueFalse ; a constant of each board: false on a C3 build, true on the X4 Pro
+  p.decodesThroughRefresh = HalCapabilities::decodesThroughRefresh();
+  p.refreshLeavesBusToCard = renderer.refreshLeavesBusToCard();
+  p.refreshHoldsFrame = renderer.asyncRefreshHoldsFrameBuffer();
+  p.lendsDuringRefresh = renderer.lendsDuringRefresh();
+  p.lendsPsramArena = renderer.lendsPsramArena();
+  p.hasSecondaryBuffer = renderer.hasSecondaryBuffer();
+  return p;
+}
 
 }  // namespace ReaderUtils
