@@ -835,7 +835,9 @@ void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, 
   if (!epubFilePath_.empty() && !epubEntryPath_.empty()) {
     Epub epub(epubFilePath_, "/.crosspoint");
     size_t entrySize = 0;
-    if (epub.getItemSize(epubEntryPath_, &entrySize) && entrySize != 0 && entrySize != fileSize) {
+    bool sizeExact = true;  // an encrypted image's size can be an estimate (ZipFile::hasExactSize)
+    if (epub.getItemSize(epubEntryPath_, &entrySize, &sizeExact) && sizeExact && entrySize != 0 &&
+        entrySize != fileSize) {
       LOG_ERR("IMG", "Extract is %u bytes, entry is %u: re-extracting %s", static_cast<unsigned>(fileSize),
               static_cast<unsigned>(entrySize), epubEntryPath_.c_str());
       Storage.remove(imagePath.c_str());

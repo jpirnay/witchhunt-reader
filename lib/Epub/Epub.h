@@ -23,6 +23,9 @@
 class ZipFile;
 class BuildArena;         // lib/Memory — optional scratch for the extraction inflate ring
 class CoverThumbSession;  // Epub/CoverThumbSession.h
+namespace book_protection {
+enum class OpenResult : uint8_t;  // lib/BookProtection/BookSession.h
+}
 
 enum class OpfCacheMode { Disabled, Enabled };
 
@@ -106,6 +109,12 @@ class Epub {
   // does not list, take no walk of their own. A cold open of King's Avatar walked its whole
   // central directory for the OPF, the NCX and that search, each. Kept until load() returns.
   mutable std::unique_ptr<ZipFile::KnownEntries> packageEntries_;
+  // What the last load() made of the book's protection (lib/BookProtection): Plain unless its
+  // encryption.xml lists AES-CBC entries. Kept as the raw value of book_protection::OpenResult.
+  uint8_t protection_ = 0;
+  // hasEncryptionManifest()'s answer: -1 not asked yet. The fingerprint walk notes the entry only
+  // the first time it runs for this instance, so a second load() would otherwise walk again.
+  mutable int8_t hasEncryptionXml_ = -1;
   // getSpineIndexForTextReference's answer once looked up; -1 until then.
   mutable int textReferenceSpine_ = -1;
   // book.bin answers the reader asks again for every page it draws, and that do not change while the file is loaded:
@@ -145,6 +154,13 @@ class Epub {
   // Compute (once) the ZIP content fingerprint. False when the archive is
   // unreadable — callers then skip fingerprint-based invalidation entirely.
   bool computeZipFingerprint(uint64_t* out) const;
+  // Whether the archive holds META-INF/encryption.xml: the fingerprint walk's note when it made one.
+  bool hasEncryptionManifest() const;
+  // Registers the book's protection with ZipFile before anything reads it (BookSession.h); false
+  // when the book is protected and cannot be read. `build`: build the manifest on the first open.
+  bool openProtection(bool build);
+  // The cover and metadata loads: registers a protection an earlier open established; never builds.
+  void attachKnownProtection();
   // fingerprint.bin sidecar in the cache dir: the fingerprint the cache was
   // built from. The cache key is path-derived (see the constructor), so this is
   // what detects a different book dropped onto the same path.
@@ -378,7 +394,11 @@ class Epub {
   // come back later than have the ring on the heap now.
   bool extractItemToFile(const std::string& itemHref, const std::string& destPath, BuildArena* arena = nullptr,
                          bool heapRetry = true) const;
-  bool getItemSize(const std::string& itemHref, size_t* size) const;
+  // `exact`, when given: false when the size is the estimate ZipFile gives for an encrypted entry
+  // whose manifest names none (ZipFile::hasExactSize); a caller comparing sizes checks it.
+  bool getItemSize(const std::string& itemHref, size_t* size, bool* exact = nullptr) const;
+  // What the last load() made of the book's protection; Plain for a plain book.
+  book_protection::OpenResult protectionResult() const;
   // Byte range of an item's raw data inside the EPUB, valid ONLY when the ZIP stores that entry
   // uncompressed (method 0). Lets a decoder read the entry in place instead of extracting it to
   // SD first -- worth ~3.4 s on an 857 KB cover, which is pure copying at ~255 KB/s.

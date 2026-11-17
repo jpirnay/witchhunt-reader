@@ -7,6 +7,7 @@ enable_language(C)
 set(PIPELINE_SOURCES
   PipelineRunner.cpp
   LoggingImpl.cpp
+  BookProtectionStub.cpp
   # lib/Epub — the code under test
   ${REPO_ROOT}/lib/Epub/Epub.cpp
   ${REPO_ROOT}/lib/Epub/Epub/Section.cpp
@@ -88,6 +89,7 @@ set(PIPELINE_INCLUDES
   ${REPO_ROOT}/lib/Serialization
   ${REPO_ROOT}/lib/Utf8
   ${REPO_ROOT}/lib/ZipFile
+  ${REPO_ROOT}/lib/BookProtection  # BookSession.h, ProtectionManifest.h: BookProtectionStub.cpp
   ${REPO_ROOT}/lib/InflateReader
   ${REPO_ROOT}/lib/uzlib/src
   ${REPO_ROOT}/lib/FsHelpers
