@@ -7,6 +7,8 @@
 #include <Logging.h>
 #include <XteinkDetect.h>  // applyXteinkDisplayController() — see begin()
 #include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <atomic>
 #include <cstring>
@@ -730,6 +732,24 @@ bool HalDisplay::fastRefreshNeedsHostFrame() const { return einkDisplay.fastRefr
 bool HalDisplay::asyncRefreshHoldsFrameBuffer() const { return einkDisplay.asyncRefreshHoldsFrameBuffer(); }
 
 bool HalDisplay::ghostsUnderFastRefresh() const { return einkDisplay.ghostsUnderFastRefresh(); }
+
+bool HalDisplay::refreshLeavesBusToCard() const {
+  return HalCapabilities::sdUsesSpi() &&
+         BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::LgfxEpd &&
+         !einkDisplay.asyncRefreshHoldsFrameBuffer();
+}
+
+// A waveform is 0.5 to 1.7 s; the finish that follows is up to this much later than the BUSY edge.
+static constexpr uint32_t REFRESH_OFF_BUS_POLL_MS = 5;
+
+void HalDisplay::waitRefreshOffBus() {
+  // Polled, not the driver's wait on the BUSY edge: that one runs inside the finish, under the lock. The poll reads
+  // the BUSY pin and no bus. A task that finishes the refresh meanwhile (any display call drains it first, under the
+  // lock) ends this wait as well: nothing is pending then.
+  while (einkDisplay.refreshBusy()) {
+    vTaskDelay(pdMS_TO_TICKS(REFRESH_OFF_BUS_POLL_MS));
+  }
+}
 
 uint16_t HalDisplay::getDisplayWidth() const { return einkDisplay.getDisplayWidth(); }
 

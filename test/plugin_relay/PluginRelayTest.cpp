@@ -78,3 +78,20 @@ TEST(PluginRelayTest, PluginFoldersAreThoseUnderTheThreeRoots) {
   EXPECT_FALSE(PluginLocations::isInsidePluginFolder("/.crosspoint/settings.json"));
   EXPECT_FALSE(PluginLocations::isInsidePluginFolder("/pluginsx/a/b"));
 }
+
+// The files a plugin's device.json names as its own (token.file, config.file): what the web server lets it read and
+// write outside its folder.
+TEST(PluginRelayTest, DeviceJsonNamesItsOwnFiles) {
+  const std::string dir = "/.crosspoint/plugins/lingo";
+  EXPECT_TRUE(PluginLocations::namesPath("token.json", dir, "/.crosspoint/plugins/lingo/token.json"));
+  EXPECT_TRUE(PluginLocations::namesPath("/.crosspoint/lingoblend.json", dir, "/.crosspoint/lingoblend.json"));
+  EXPECT_TRUE(PluginLocations::namesPath("/.crosspoint/lingoblend.json", dir, "/.CrossPoint/LingoBlend.json"))
+      << "FAT names compare without case";
+  EXPECT_TRUE(PluginLocations::namesPath("//.crosspoint/./lingoblend.json", dir, "/.crosspoint/lingoblend.json"))
+      << "the name is normalised as a request path is";
+  EXPECT_FALSE(PluginLocations::namesPath("/.crosspoint/lingoblend.json", dir, "/.crosspoint/settings.json"));
+  EXPECT_FALSE(PluginLocations::namesPath("", dir, "/.crosspoint/plugins/lingo"));
+  EXPECT_FALSE(PluginLocations::namesPath("../other/token.json", dir, "/.crosspoint/plugins/other/token.json"))
+      << "a name with .. climbs out of the folder: it names nothing";
+  EXPECT_FALSE(PluginLocations::namesPath("/.crosspoint/x/../wifi.json", dir, "/.crosspoint/wifi.json"));
+}

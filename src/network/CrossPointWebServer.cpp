@@ -12,6 +12,7 @@
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <HalSystem.h>  // feedWatchdog()
+#include <HeapFit.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <Txt.h>
@@ -234,6 +235,9 @@ const char* pluginContentType(const String& file) {
 // the handful of fields the format defines.
 constexpr size_t PLUGIN_MANIFEST_MAX_BYTES = 4096;
 
+// A device.json, read only to see which files it names (deviceJsonNames()); the largest in the Plugin Hub is 6.2 KB.
+constexpr size_t PLUGIN_DEVICE_JSON_MAX_BYTES = 8192;
+
 // /api/plugin-fs is the small-file door; anything bigger belongs in /upload,
 // which streams instead of buffering the whole body in the request.
 constexpr size_t PLUGIN_FS_MAX_BYTES = 64u * 1024u;
@@ -262,6 +266,36 @@ std::string urlHost(const std::string& url) {
 // empty list means nothing is allowed - the relay is opt-in per plugin, and a
 // plugin's reach is readable in its own folder before it is installed.
 bool relayHostAllowed(const String& plugin, const std::string& url);
+
+// Whether the device.json in pluginDir names `path` (normalised) as one of its files: token.file,
+// token.refresh_file, config.file (PluginLocations::namesPath()). Upstream lets a plugin keep its token and config at
+// any path but the credential stores (lingoblend: /.crosspoint/lingoblend.json); here a plugin otherwise reaches only
+// its own folder, so the web server lets these exact files through as well, after isProtectedPluginFile(). A
+// device.json is a few KB (6 KB the largest in the Plugin Hub), and this runs only for a request the other rules
+// refused. It is parsed here, beside the manifests, whole: a stream reader or a filter, or the same parse in another
+// file, makes ArduinoJson build a parser of its own, kilobytes of flash.
+bool deviceJsonNames(const std::string& pluginDir, const std::string& path) {
+  // The read takes one block of the file's size from the throwing operator new (-fno-exceptions: a failure aborts).
+  // Without the room, the file counts as not named and the request stays refused. ArduinoJson's own pool allocations
+  // fail softly.
+  if (!heapHasBlockFor(PLUGIN_DEVICE_JSON_MAX_BYTES)) return false;
+  std::string text;
+  if (!Storage.readFileToString("WEB", pluginDir + "/device.json", PLUGIN_DEVICE_JSON_MAX_BYTES, text)) return false;
+  JsonDocument doc;
+  if (deserializeJson(doc, text) != DeserializationError::Ok) return false;
+  const char* named[] = {doc["token"]["file"] | "", doc["token"]["refresh_file"] | "", doc["config"]["file"] | ""};
+  return std::any_of(std::begin(named), std::end(named),
+                     [&](const char* n) { return PluginLocations::namesPath(n, pluginDir, path); });
+}
+
+// Whether any installed plugin's device.json names `path`. Reads every device.json, so it is only asked about a
+// request the other rules already refused.
+bool anyDeviceJsonNames(const std::string& path) {
+  for (const PluginLocations::Entry& e : PluginLocations::scanPlugins()) {
+    if (e.hasDeviceJson && deviceJsonNames(e.dir, path)) return true;
+  }
+  return false;
+}
 
 // The redirect check for the relay and fetch-to-SD: a redirect is followed only to a host the
 // plugin's manifest allows as well, so the allowlist decides where the device actually connects
@@ -415,8 +449,10 @@ String pluginWriteTarget(const String& rawPath) {
   return path;
 }
 
-// For a plugin's own writes: what /upload accepts, and anything inside the plugin's own folder, which for one the
-// Plugins page installed sits in /.crosspoint. Upstream plugins keep their token and settings there.
+// For a plugin's own writes: what /upload accepts, anything inside the plugin's own folder (which for one the Plugins
+// page installed sits in /.crosspoint: upstream plugins keep their token and settings there), and the exact files its
+// device.json names as its own (lingoblend's /.crosspoint/lingoblend.json, say), which upstream allows anywhere but
+// the credential stores.
 String pluginWriteTarget(const String& plugin, const String& rawPath) {
   const String allowed = pluginWriteTarget(rawPath);
   if (!allowed.isEmpty() || !isSafePathComponent(plugin)) return allowed;
@@ -425,7 +461,8 @@ String pluginWriteTarget(const String& plugin, const String& rawPath) {
   if (own.empty() || path.endsWith("/")) return "";
   const std::string p = path.c_str();
   const std::string prefix = own + "/";
-  return p.size() > prefix.size() && p.compare(0, prefix.size(), prefix) == 0 ? path : String();
+  if (p.size() > prefix.size() && p.compare(0, prefix.size(), prefix) == 0) return path;
+  return deviceJsonNames(own, p) && !isProtectedPluginFile(path) ? path : String();
 }
 
 // Ceiling on a relayed response. Nothing is buffered (see handleRelay), so this
@@ -1408,9 +1445,11 @@ void CrossPointWebServer::handleDownload() const {
     return;
   }
   // A plugin's own files are readable at their exact path even inside /.crosspoint: plugins written for upstream read
-  // their token and settings this way. The folders stay out of every listing.
+  // their token and settings this way. So are the files a plugin's device.json names as its own, wherever they are
+  // (upstream allows any path but the credential stores). The folders stay out of every listing.
   if (isProtectedWebPath(itemPath, Target::Item, hiddenAllowed()) &&
-      !PluginLocations::isInsidePluginFolder(itemPath.c_str())) {
+      !PluginLocations::isInsidePluginFolder(itemPath.c_str()) &&
+      (isProtectedPluginFile(itemPath) || !anyDeviceJsonNames(itemPath.c_str()))) {
     server->send(403, "text/plain", "Cannot access protected items");
     return;
   }
@@ -3753,11 +3792,16 @@ void CrossPointWebServer::fetchToSd(const String& plugin, const std::string& url
   int status = 0;
   size_t bytes = 0;
   bool ok = false;
+  bool unauthorized = false;
   std::string refusedHost;
   if (method == "GET" && body.empty()) {
-    ok = HttpDownloader::downloadToFile(url, dest.c_str(), nullptr, "", "",
-                                        HttpDownloader::TlsPolicy::VerifiedThenUnverified,
-                                        redirectsWithinAllowlist(plugin, &refusedHost), headers) == HttpDownloader::OK;
+    const HttpDownloader::DownloadError result = HttpDownloader::downloadToFile(
+        url, dest.c_str(), nullptr, "", "", HttpDownloader::TlsPolicy::VerifiedThenUnverified,
+        redirectsWithinAllowlist(plugin, &refusedHost), headers);
+    ok = result == HttpDownloader::OK;
+    // downloadToFile() keeps no status, but it does tell a 401 or 403 apart: a catalog with a password grant then
+    // mints a new token and tries again, as upstream's does.
+    unauthorized = result == HttpDownloader::AUTH_ERROR;
     if (ok) {
       status = 200;
       HalFile f = Storage.open(dest.c_str());
@@ -3800,8 +3844,9 @@ void CrossPointWebServer::fetchToSd(const String& plugin, const std::string& url
   doc["bytes"] = static_cast<uint32_t>(bytes);
   doc["dest"] = dest.c_str();
   if (!ok) {
-    LOG_ERR("WEB", "Fetch to SD failed (%d): %s", status, url.c_str());
-    doc["error"] = "download failed";
+    LOG_ERR("WEB", "Fetch to SD failed (%d%s): %s", status, unauthorized ? ", 401/403" : "", url.c_str());
+    doc["error"] = unauthorized ? "the server refused the request (401 or 403)" : "download failed";
+    if (unauthorized) doc["unauthorized"] = true;
     sendJson(server.get(), 502, doc);
     return;
   }
