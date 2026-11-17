@@ -261,9 +261,10 @@ inline bool keepsSecondaryBuffer() {
 
 // A chapter build lays out in PSRAM, in a region of its own (Section::setOwnedBuildRegionBytes) or in the arena lent in
 // place of the secondary buffer, so it touches neither frame buffer nor the heap the reader draws from: the page the
-// build shows can get its gray while the build goes on (BuildPageGray.h). Not the C3s, whose build holds the X3's
-// secondary buffer or the X4's heap. cppcheck, which reads one board's build, sees only the declaration and checks both
-// sides (as defersLiveFontChange below).
+// build shows can get its gray while the build goes on, from the secondary buffer (BuildPageGray.h, Pass::Restore). Not
+// the C3s, whose build holds the secondary buffer (Pass::Redraw) or the X4's heap (the gray at the build's end).
+// cppcheck, which reads one board's build, sees only the declaration and checks both sides (as defersLiveFontChange
+// below).
 #if defined(CPPCHECK_ANALYSIS)
 bool buildsInPsram();
 #else
