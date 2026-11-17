@@ -4,6 +4,7 @@
 #include <BatteryMonitor.h>
 #include <BoardConfig.h>
 #include <HalCapabilities.h>
+#include <HalDisplay.h>
 #include <Logging.h>
 #include <PowerManager.h>
 #include <WiFi.h>
@@ -18,6 +19,7 @@
 #include "HalFrontlight.h"
 #include "HalGPIO.h"
 #include "HalI2cBus.h"
+#include "LightSleepGate.h"
 
 HalPowerManager powerManager;  // Singleton instance
 
@@ -278,9 +280,21 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   // like setPowerSaving(): stale in either direction is acceptable — a stale lock
   // delays sleeping by one slice, and a Lock acquired after this check freezes that
   // task for at most one slice (timer wake; RAM and peripheral state are retained).
-  if (currentLockMode.load(std::memory_order_relaxed) != None) {
-    lightSleepStats_.rejLock++;
-    return false;
+  //
+  // A refresh that is still pending declines as well (LightSleepGate.h). The reader's refreshes are finished inside
+  // their render pass, under the Lock; this is for the ones that are not: a popup or the busy indicator shipped
+  // without waiting (PopupShip::Async), Calibre's status screen. Read without the bus lock, as the Lock is read
+  // without its mutex: a refresh that starts after this check is frozen for one slice at most, like such a pass.
+  switch (
+      LightSleepGate::panelHold(currentLockMode.load(std::memory_order_relaxed) != None, display.isRefreshPending())) {
+    case LightSleepGate::PanelHold::RenderLock:
+      lightSleepStats_.rejLock++;
+      return false;
+    case LightSleepGate::PanelHold::RefreshPending:
+      lightSleepStats_.rejRefresh++;
+      return false;
+    case LightSleepGate::PanelHold::None:
+      break;
   }
   // Light sleep drops a WiFi association and kills an enumerated USB-CDC link.
   if (WiFi.getMode() != WIFI_MODE_NULL) {

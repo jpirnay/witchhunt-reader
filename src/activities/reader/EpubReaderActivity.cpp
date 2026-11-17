@@ -7310,8 +7310,10 @@ bool EpubReaderActivity::usesDeferredAa() const {
   // Inline AA hides its LSB plane render inside a running waveform, so it needs a
   // panel that can actually overlap. The X3 can, but defers anyway: its async refresh
   // holds the frame buffer, and stays pending, for the whole waveform (see the header
-  // and the pre-render guards).
-  return !(renderer.supportsAsyncRefresh() && !renderer.asyncRefreshHoldsFrameBuffer());
+  // and the pre-render guards). So do the panels that keep the deferred pass they were checked with
+  // (GfxRenderer::keepsDeferredGrayPass).
+  return !(renderer.supportsAsyncRefresh() && !renderer.asyncRefreshHoldsFrameBuffer()) ||
+         renderer.keepsDeferredGrayPass();
 }
 
 bool EpubReaderActivity::aaPreemptedByNavigation() const {

@@ -11,6 +11,7 @@
 #include <freertos/task.h>
 
 #include <atomic>
+#include <cstring>
 
 #include "HalSpiBus.h"
 
@@ -532,6 +533,11 @@ void HalDisplay::triggerDisplayAsync(RefreshMode mode, bool turnOffScreen) {
 }
 
 bool HalDisplay::supportsAsyncRefresh() const { return einkDisplay.supportsAsyncRefresh(); }
+
+bool HalDisplay::keepsDeferredGrayPass() const {
+  const char* const controller = einkDisplay.getControllerName();
+  return controller != nullptr && (strcmp(controller, "SSD2677") == 0 || strcmp(controller, "UC8253") == 0);
+}
 
 void HalDisplay::finishDisplayAsync() {
   HalSpiBus::Lock spiLock;

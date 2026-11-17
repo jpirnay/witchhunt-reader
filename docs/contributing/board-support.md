@@ -165,7 +165,10 @@ The reader picks its anti-aliasing strategy from what the display path can do, n
 - inline, when `renderer.supportsAsyncRefresh()` and the async refresh frees the frame buffer
   (`!asyncRefreshHoldsFrameBuffer()`): the LSB plane is
   rendered while the B/W waveform runs (X4);
-- deferred: everything else, including the X3 and any panel that cannot overlap a refresh.
+- deferred: everything else, including the X3, any panel that cannot overlap a refresh, and a panel
+  whose driver learned to overlap after its deferred pass was checked on the device
+  (`HalDisplay::keepsDeferredGrayPass()`: the Picco's SE0400, the Murphy's UC8253). A driver that starts to return true from
+  `supportsAsyncDisplay()` would otherwise move its panel to the inline pass by that alone.
 
 `EpubReaderActivity::usesDeferredAa()` holds the inline/deferred split. It used to be
 `!renderer.isX3()`, which sent the T5S3 down the inline path on a driver that cannot overlap, so it
