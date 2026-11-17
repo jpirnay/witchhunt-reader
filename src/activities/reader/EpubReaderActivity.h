@@ -491,6 +491,7 @@ class EpubReaderActivity final : public Activity {
   // lock. Loop task only: main.cpp polls both hooks from there, and refreshLoopHints() is their
   // only writer.
   bool loopHintCurrentBuild_ = false;     // section && section->hasActiveBuild()
+  bool loopHintAskedPageDrawn_ = false;   // and the page asked for is the one that build has drawn
   bool loopHintBackgroundBuild_ = false;  // backgroundBuildState_ == Building
   void refreshLoopHints();
   // --- Background C (incremental build of the CURRENT section while the reader watches) ---
