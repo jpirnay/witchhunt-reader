@@ -1804,6 +1804,8 @@ void EpubReaderActivity::resetBackgroundBuild() {
   backgroundBuildState_ = BackgroundBuildState::Probe;
   backgroundBuildPercent_ = -1;
   backgroundPreemptCount_ = 0;
+  backgroundStoppedAfterAbandon_ = false;
+  backgroundPreemptedStayMs_ = 0;
   backgroundImageYields_ = 0;
   backgroundBuildStarved_ = false;
 }
@@ -1894,7 +1896,11 @@ void EpubReaderActivity::endBackgroundBorrow(const bool preemption) {
   // is deliberately NOT reset here — it is what stops this from looping forever on a spine whose
   // parse cannot fit between two page turns.
   if (buildWasLive) {
-    if (preemption) backgroundPreemptCount_++;
+    if (preemption) {
+      backgroundPreemptCount_++;
+      const auto stayMs = static_cast<uint32_t>(millis() - backgroundBorrowActivityMs_);
+      backgroundPreemptedStayMs_ = std::max(backgroundPreemptedStayMs_, stayMs);
+    }
     backgroundBuildState_ = BackgroundBuildState::Probe;
     backgroundBuildGateCheckMs_ = 0;
   }
@@ -2092,16 +2098,37 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       }
       backgroundBuildGateCheckMs_ = now;
       // Give-up latch: this target has already burned its retry budget being preempted. Leave it
-      // to Background-C (the reader gets the popup, exactly as before this feature) and move the
-      // cursor on, rather than re-losing the same race for the rest of the chapter.
+      // to Background-C (the reader gets the popup, exactly as before this feature), and stop: the
+      // reader turns faster than a chapter builds, so the chapters after it would lose the same race,
+      // each at the cost of a turn's one-pass refresh (LookAheadPause). The cursor stays here until the
+      // reader pauses, or moves it by entering another chapter.
       if (backgroundPreemptCount_ >= BG_BUILD_MAX_PREEMPTIONS) {
-        LOG_INF("ERS", "Background build spine=%d abandoned after %u preemptions; leaving it to foreground",
-                targetSpine, static_cast<unsigned>(backgroundPreemptCount_));
-        if (targetSpine == currentSpineIndex + 1 && !nearChapterEndForBuildThrough()) {
-          backgroundAbandonedSpine_ = targetSpine;  // retried on the last pages, see above
+        if (!backgroundStoppedAfterAbandon_) {
+          backgroundStoppedAfterAbandon_ = true;
+          LOG_INF("ERS",
+                  "Background build spine=%d abandoned after %u preemptions; look-ahead stopped until a page stays "
+                  "up %lu ms or the chapter changes",
+                  targetSpine, static_cast<unsigned>(backgroundPreemptCount_),
+                  static_cast<unsigned long>(
+                      LookAheadPause::pauseMs(backgroundPreemptedStayMs_, BG_BUILD_BORROW_QUIET_MS)));
+          if (targetSpine == currentSpineIndex + 1 && !nearChapterEndForBuildThrough()) {
+            backgroundAbandonedSpine_ = targetSpine;  // retried on the last pages, see above
+          }
+          backgroundSection_.reset();
         }
-        backgroundSection_.reset();
-        backgroundBuildState_ = BackgroundBuildState::Settled;
+        backgroundBuildStarved_ = false;  // it waits for the reader, not for memory: still pending (CMD:IDLE)
+        const auto pageUpForMs = static_cast<uint32_t>(now - std::max(lastPageTurnTime, lastPageOnScreenMs_));
+        if (!LookAheadPause::readerPaused(pageUpForMs, backgroundPreemptedStayMs_, BG_BUILD_BORROW_QUIET_MS,
+                                          CooperativeAbort::shouldAbortLongTask())) {
+          return;
+        }
+        LOG_INF("ERS", "Background-B: page up for %lu ms, trying spine %d again",
+                static_cast<unsigned long>(pageUpForMs), targetSpine);
+        backgroundStoppedAfterAbandon_ = false;
+        backgroundPreemptCount_ = 0;
+        backgroundPreemptedStayMs_ = 0;
+        backgroundBuildState_ = BackgroundBuildState::Probe;  // its Section went with the abandon
+        backgroundBuildGateCheckMs_ = 0;
         return;
       }
       // Preferred path: build inside the BORROWED secondary framebuffer. This is what makes B
@@ -2150,6 +2177,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
           heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) >=
               BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES - LARGEST_FREE_BLOCK_SLACK &&
           beginBackgroundBorrow()) {
+        backgroundBorrowActivityMs_ = lastActivityMs;
         if (buildThrough && beginBuildThrough()) {
           LOG_INF("ERS", "Background-B: building spine %d through page turns (page %d of %u)", targetSpine,
                   section->currentPage + 1, section->pageCount);
