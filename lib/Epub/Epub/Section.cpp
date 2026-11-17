@@ -462,17 +462,23 @@ uint32_t Section::layoutFingerprintFor(const BuildParams& p) { return layoutFing
 
 uint8_t Section::formatVersion() { return SECTION_FILE_VERSION; }
 
-bool Section::carriesPreviousOf(const Epub& epub, const int spineIndex, const BuildParams& p) {
-  return p.verticalText == VerticalText::Off && spineIndex > 0 && epub.isCarriedSpine(spineIndex - 1);
+bool Section::carriedAwayOf(const Epub& epub, const int spineIndex, const VerticalText request) {
+  return request == VerticalText::Off && epub.isCarriedSpine(spineIndex);
 }
 
-bool Section::carriedAway(const BuildParams& p) const {
-  return p.verticalText == VerticalText::Off && epub->isCarriedSpine(spineIndex);
+bool Section::carriesPreviousOf(const Epub& epub, const int spineIndex, const VerticalText request) {
+  return spineIndex > 0 && carriedAwayOf(epub, spineIndex - 1, request);
 }
+
+bool Section::carriesPrevious(const BuildParams& p) const {
+  return carriesPreviousOf(*epub, spineIndex, p.verticalText);
+}
+
+bool Section::carriedAway(const BuildParams& p) const { return carriedAwayOf(*epub, spineIndex, p.verticalText); }
 
 uint32_t Section::layoutFingerprintFor(const Epub& epub, const int spineIndex, const BuildParams& p) {
   const uint32_t hash = calculatePropertyHash(p);
-  return layoutFingerprintOf(carriesPreviousOf(epub, spineIndex, p) ? carryingHash(hash) : hash);
+  return layoutFingerprintOf(carriesPreviousOf(epub, spineIndex, p.verticalText) ? carryingHash(hash) : hash);
 }
 
 void Section::becomeCarried(const BuildParams& p) {
@@ -1377,6 +1383,10 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
     st.carry.spine = spineIndex - 1;
     st.carry.href = heading.href;
     st.carry.inflatedSize = heading.zipUncompressedSize;
+    // A fact about the book, whatever becomes of this build: the chapter counter drawn while it runs already counts
+    // the heading file as no page.
+    SpinePageIndex::recordCarried(epub->getCachePath(), {st.requestedHash, SECTION_FILE_VERSION},
+                                  epub->getSpineItemsCount(), st.carry.spine);
   }
   const uint32_t fileHash = st.carry.spine >= 0 ? carryingHash(st.propertyHash) : st.propertyHash;
   filePath = getSectionFilePath(fileHash);
@@ -2565,13 +2575,8 @@ Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const ui
       continue;
     }
 
-    const int carried = buildState_->carry.spine;
     buildState_.reset();
     if (fin != BuildPhaseResult::Done) return BuildStep::Failed;
-    if (carried >= 0) {
-      SpinePageIndex::recordCarried(epub->getCachePath(), {requestedHash, SECTION_FILE_VERSION},
-                                    epub->getSpineItemsCount(), carried);
-    }
     // Recorded under the variant the reader asked for (requestedHash), also when the no-CSS
     // restart above produced it. A degraded build is left out: Background-B discards those for a
     // clean rebuild, and one the reader keeps is recorded when it is next loaded.

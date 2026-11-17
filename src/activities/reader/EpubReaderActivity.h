@@ -802,6 +802,16 @@ class EpubReaderActivity final : public Activity {
   // counter, which stays an estimate until that file's page count is recorded (ChapterPageSpan).
   // Background-B builds such a file past the BG_BUILD_LOOKAHEAD_PAGES budget (#580).
   bool chapterCounterAwaits(int spine) const;
+  // The spine item the reader enters after the one on screen: the next, or the one after it when the next holds only
+  // its chapter's heading, which that one's first page shows (HeadingCarry). Background-B's next chapter, the image
+  // lane's spill-over and build-through go by it. Looked up once per spine on screen.
+  int nextReadingSpine() const;
+  mutable int nextReadingFrom_ = -1;
+  mutable int nextReadingSpine_ = -1;
+  // The page on screen is starred: on itself, or, on a chapter's first page, on the heading file it now shows (a star
+  // set while that file had a page of its own; carriedStarHere names it).
+  bool pageStarred() const;
+  std::optional<std::pair<uint16_t, uint16_t>> carriedStarHere() const;
   // Realloc the secondary buffer, evicting rebuildable caches (FDC page slots, CSS
   // resolve caches) that a released build may have planted inside the freed hole and
   // retrying once before reporting failure. Shared by the post-build and opportunistic

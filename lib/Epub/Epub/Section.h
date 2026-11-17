@@ -91,11 +91,7 @@ class Section {
   // Records this spine's page count in the book's SpinePageIndex under `requestedHash`. No-op for
   // a truncated or empty section.
   void recordPageCount(uint32_t requestedHash) const;
-  // HeadingCarry: the spine item before this one holds only its chapter's heading, which this section's layout takes in
-  // at the top of its first page; or this item is such a file, and has no page of its own. Never under a vertical
-  // request (`p`). The Epub decides (isCarriedSpine) and remembers its answers.
-  static bool carriesPreviousOf(const Epub& epub, int spineIndex, const BuildParams& p);
-  bool carriesPrevious(const BuildParams& p) const { return carriesPreviousOf(*epub, spineIndex, p); }
+  bool carriesPrevious(const BuildParams& p) const;
   bool carriedAway(const BuildParams& p) const;
   // A carried item: no page and no file, its SpinePageIndex entry marked (recordCarried). What loadSectionFile and a
   // build make of it.
@@ -230,6 +226,12 @@ class Section {
   static uint32_t layoutFingerprintFor(const BuildParams& p);
   // The same for spine item `spineIndex` of `epub`, which may carry the heading file before it (HeadingCarry).
   static uint32_t layoutFingerprintFor(const Epub& epub, int spineIndex, const BuildParams& p);
+  // HeadingCarry under the reader's vertical request (never under one that is not Off): spine item `spineIndex` holds
+  // only its chapter's heading and has no page of its own, the next item's first page showing it (carriedAwayOf); or
+  // the item before it is such a file, which its layout takes in (carriesPreviousOf). The Epub decides
+  // (isCarriedSpine) and remembers its last answers.
+  static bool carriedAwayOf(const Epub& epub, int spineIndex, VerticalText request);
+  static bool carriesPreviousOf(const Epub& epub, int spineIndex, VerticalText request);
   // The section file format (SECTION_FILE_VERSION). What its offset table counts (VisibleText.h) is the book's source,
   // whatever the layout; a firmware with another format may count it otherwise, so a visible-text offset saved for
   // later (a starred page's, BookmarkStore) is good while this is the format it was counted under.

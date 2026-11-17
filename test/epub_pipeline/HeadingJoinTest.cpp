@@ -161,6 +161,21 @@ TEST_F(HeadingJoinTest, TheChapterIsCountedWithoutBuildingTheHeadingFile) {
   EXPECT_EQ(0u, totals.pagesBefore) << "and has no page";
 }
 
+// The counter is drawn while the chapter is still being laid out (Background-C): the heading file must count as known
+// from the build's start, not from its end, which nothing would draw again.
+TEST_F(HeadingJoinTest, TheHeadingFileIsCountedFromTheBuildsStart) {
+  const auto epub = load("count_live");
+  const Section::BuildParams p = params();
+  const host_clock::Ticking tick(1);
+  Section text(epub, 2, renderer);
+  ASSERT_EQ(Section::BuildStep::More, text.stepSectionBuild(p, /*budgetMs=*/1));
+  ASSERT_TRUE(text.hasActiveBuild());
+  const auto totals =
+      Section::indexedPageTotals(epub->getCachePath(), p, epub->getSpineItemsCount(), 1, 2, /*current=*/2);
+  EXPECT_EQ(1, totals.filesBefore);
+  EXPECT_EQ(0u, totals.pagesBefore);
+}
+
 TEST_F(HeadingJoinTest, PositionsInTheJoinedFileAreItsOwn) {
   const auto epub = load("positions");
   const Section::BuildParams p = params();
