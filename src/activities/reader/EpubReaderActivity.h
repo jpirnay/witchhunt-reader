@@ -521,6 +521,9 @@ class EpubReaderActivity final : public Activity {
   // Page last drawn by the SectionBuilding pass (-1 = none yet / popup showing). Stops the
   // pass redrawing the same page every idle tick.
   int buildDisplayedPage_ = -1;
+  // The page stepCurrentSectionBuild() last asked the render task to draw (-1: none since buildDisplayedPage_ was last
+  // reset). Each readable page is asked for once.
+  int buildPageAskedFor_ = -1;
   // The page displayBuildPage() last put on the panel, where it drew it (spine -1: none, or the popup since). When the
   // build ends on it, it stays there with its provisional page count instead of being drawn again
   // (keepBuildPageOnScreen).
@@ -566,8 +569,9 @@ class EpubReaderActivity final : public Activity {
   LandedText landedText_;
   // True while pageTurn() waits for the render lock: the one sign the render task can read that a turn is on its way.
   std::atomic<bool> pageTurnWaitingForLock_{false};
-  // True while displayBuildPage() waits for its page's waveform without the bus lock: the loop task's build slice may
-  // run through that pending refresh (BuildDuringRefresh.h). Written by the render task, read by the loop task.
+  // True while displayBuildPage() waits for its page's waveform without the bus lock (or the SectionBuilding pass for
+  // its Indexing popup's, IndexingPopupGate::buildsThroughPopup): the loop task's build slice may run through that
+  // pending refresh (BuildDuringRefresh.h). Written by the render task, read by the loop task.
   std::atomic<bool> buildPageWaitOffBus_{false};
   // Where a press stands on its way to a turn, for the background work's gate (InputFirst). Loop task.
   InputFirst::Press pressInFlight() const;
@@ -1058,6 +1062,9 @@ class EpubReaderActivity final : public Activity {
   // reason: the build gets its heap back before it resumes.
   void displayBuildPage(RenderLock& lock, std::unique_ptr<Page> ownedPage, const RenderLayout& layout,
                         BuildArena::Block* drawBlock = nullptr);
+  // The end of displayBuildPage(): lets the render lock go and waits for the refresh it started, so that the loop
+  // task's build slices run meanwhile (without the bus lock where BuildDuringRefresh::waitsOffBus says so).
+  void waitForBuildRefreshUnlocked(RenderLock& lock);
   // Draws the status bar over the current frame buffer and flushes to the display.
   // Handles the refresh cycle and grayscale AA pass. page must be the same page
   // that was last rendered into the buffer (needed for image AA re-render).

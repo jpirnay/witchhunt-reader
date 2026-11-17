@@ -151,7 +151,12 @@ void TxtReaderActivity::buildPageIndex() {
 
   LOG_DBG("TRS", "Building page index for %zu bytes...", fileSize);
 
-  GUI.drawPopup(renderer, tr(STR_INDEXING));  // overlays the displayed frame (drawPopup resyncs the write buffer)
+  // Overlays the displayed frame (drawPopup resyncs the write buffer). Where the card can be read while it paints, it
+  // ships async and the index is built through its waveform (IndexingPopupGate::indexesThroughPopup): the page drawn
+  // next goes into the write buffer its swap left free, and the page's refresh finishes the popup's first.
+  const bool indexWhilePopupPaints = IndexingPopupGate::indexesThroughPopup(ReaderUtils::indexingPopupPanel(renderer));
+  GUI.drawPopup(renderer, tr(STR_INDEXING), /*overlayDisplayedFrame=*/true,
+                indexWhilePopupPaints ? PopupShip::Async : PopupShip::Blocking);
 
   while (offset < fileSize) {
     std::vector<std::string> tempLines;

@@ -26,6 +26,7 @@
 #include "MdReaderActivity.h"
 #include "ReaderUtils.h"
 #include "SdCardFontGlobals.h"
+#include "SerialTestApi.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
 #include "Xtc.h"
@@ -962,11 +963,14 @@ void ReaderActivity::onEnter() {
     // The size of the book's running text (Normalize Font Size) is not measured here: the chapter builds count it from
     // the text they lay out (BodySize).
     const bool indexing = firstOpenIndexing || bookFontsPending;
-    // Where the lend below is the PSRAM arena, which leaves both frames alone and waits for no refresh, the popup ships
-    // async and the book is indexed while it paints: the indexing used to wait out its FAST refresh first (X4 Pro,
-    // 2026-11-15: 667 ms). RED is seeded from the frame on screen once that refresh is finished, after the load.
-    const bool indexWhilePopupPaints =
-        indexing && renderer.hasSecondaryBuffer() && renderer.lendsPsramArena() && renderer.supportsAsyncRefresh();
+    // Where the lend below need not wait for the popup's refresh, the popup ships async and the book is indexed while
+    // it paints (IndexingPopupGate::firstOpenLend): the indexing used to wait out that FAST refresh first (X4 Pro,
+    // 2026-11-15: 667 ms; X3 and X4, 2026-11-16: 0.63-0.66 s). RED is seeded from the frame on screen once that refresh
+    // is finished, after the load.
+    using IndexingPopupGate::Lend;
+    const Lend lend =
+        indexing ? IndexingPopupGate::firstOpenLend(ReaderUtils::indexingPopupPanel(renderer)) : Lend::Blocking;
+    const bool indexWhilePopupPaints = lend != Lend::Blocking;
     Rect indexingPopup;
     if (indexing) {
       RenderLock lock;
@@ -985,16 +989,27 @@ void ReaderActivity::onEnter() {
       IndexingProgressGate gate;
       uint32_t shownFrame;
       GfxRenderer::Orientation orientation;
-    } indexingProgress{renderer, indexingPopup, IndexingProgressGate(millis()), renderer.framesShipped(),
-                       renderer.getHeldOrientation()};
+      bool seedRedAfterPopup;
+    } indexingProgress{renderer,
+                       indexingPopup,
+                       IndexingProgressGate(millis()),
+                       renderer.framesShipped(),
+                       renderer.getHeldOrientation(),
+                       lend == Lend::DuringRefresh};
     const auto onBuildProgress = [](void* ctx, const uint8_t percent) {
       auto* p = static_cast<IndexingProgress*>(ctx);
       if (!p->gate.shouldDraw(millis(), percent)) return;
       RenderLock lock;
-      p->renderer.finishDisplayAsync();  // the popup's own refresh, where it ships async; else nothing
+      // The popup's own refresh, where it ships async; else nothing. With the framebuffer lent during it, the bar's
+      // FAST diffs against RED, which the popup's start loaded with the frame before it: RED is seeded from the popup
+      // first.
+      const bool popupPainting = p->renderer.isRefreshPending();
+      p->renderer.finishDisplayAsync();
+      if (popupPainting && p->seedRedAfterPopup) p->renderer.syncRedRamFromFrameBuffer();
       // A refresh swaps the buffers where the secondary was not lent: draw over what is shown.
       p->renderer.syncWriteBufferFromDisplayed();
       GUI.fillPopupProgress(p->renderer, p->popup, percent);
+      SerialTestApi::notePopupContinued();
       p->shownFrame = p->renderer.framesShipped();
       LOG_DBG("READER", "Indexing progress %u%%", static_cast<unsigned>(percent));
     };
@@ -1032,11 +1047,14 @@ void ReaderActivity::onEnter() {
       // secondary still holds it, as the X4's single-buffer fast diff requires (no-op on X3). The
       // seed waits out a refresh in flight: with the popup still painting it comes after the load.
       if (!indexWhilePopupPaints) renderer.syncRedRamFromFrameBuffer();
-      lentForIndexing = renderer.borrowSecondaryBuffer(&lentSize);
+      // The C3s: the frame not being painted, so that nothing waits for the waveform.
+      lentForIndexing = lend == Lend::DuringRefresh ? renderer.borrowSecondaryBufferDuringRefresh(&lentSize)
+                                                    : renderer.borrowSecondaryBuffer(&lentSize);
       if (lentForIndexing) {
         renderer.setSingleBufferFastDiff(true);
-        LOG_INF("READER", "Lent secondary framebuffer for first-open indexing (%u bytes, free=%lu)",
-                static_cast<unsigned>(lentSize), static_cast<unsigned long>(esp_get_free_heap_size()));
+        LOG_INF("READER", "Lent secondary framebuffer for first-open indexing (%u bytes, free=%lu, popup %s)",
+                static_cast<unsigned>(lentSize), static_cast<unsigned long>(esp_get_free_heap_size()),
+                indexWhilePopupPaints ? "painting" : "painted");
       }
     }
     BuildArena indexingScratch(lentForIndexing, lentSize);
