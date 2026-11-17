@@ -9,6 +9,9 @@
 #include <WiFi.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
+#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
+#include <esp_ipc.h>
+#endif
 
 #include <cassert>
 
@@ -52,6 +55,21 @@ static constexpr gpio_num_t GPIO_BATTERY_LATCH = GPIO_NUM_13;
 static constexpr bool CPU_SCALING_ALLOWED = false;
 #else
 static constexpr bool CPU_SCALING_ALLOWED = true;
+#endif
+
+#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
+namespace {
+// On a dual-core build only core 0 winds pended ticks down: IDF's xTaskResumeAll() skips the unwind on
+// core 1 ("Core 0 is solely responsible for managing tick count", FreeRTOS-Kernel/tasks.c). The loop
+// task runs on core 1, so xTaskCatchUpTicks() there only queues the slept ticks, and they pile up until
+// a task on core 0 next resumes the scheduler. A flash operation does that: spi_flash_op_block_func()
+// parks core 0 and ends in xTaskResumeAll() there, which then winds every tick slept since, one
+// xTaskIncrementTick() at a time inside the kernel's critical section. After a long idle that is
+// millions of ticks with interrupts off on core 0. Both Murphy restarts (2026-11-16 and 11-17) were an
+// interrupt watchdog on CPU0 with CPU1 in esp_partition_read(), on the first flash read (System
+// Information, Boot Diagnostics) after light-sleeping on Home.
+void catchUpTicksOnCore0(void* ticks) { xTaskCatchUpTicks(*static_cast<const TickType_t*>(ticks)); }
+}  // namespace
 #endif
 
 void HalPowerManager::begin() {
@@ -225,7 +243,8 @@ void HalPowerManager::exitWaveformWait() {
 // Ported from crosspoint-reader PR #2525 (Brian Pugh / @BrianPugh); the Xteink C3
 // guard on the GPIO13 hold follows PR #2998 (Justin Mitchell / @itsthisjustin).
 // The xTaskCatchUpTicks() correction at the end is this fork's own addition — see
-// the comment there for why our background button sampler needs it.
+// the comment there for why our background button sampler needs it, and
+// catchUpTicksOnCore0() for where it has to run on a dual-core chip.
 bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   const unsigned long entryMs = millis();
   if (lastSliceEndMs_ != 0) {
@@ -363,7 +382,17 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   // Step the tick forward by the measured sleep so blocked tasks come due on
   // wall-clock time. Tasks whose deadline passed are released here, which is why
   // this is xTaskCatchUpTicks() and not vTaskStepTick().
+#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
+  // Wound on core 0, a slice's worth (~50 ticks) at a time; see catchUpTicksOnCore0().
+  TickType_t sleptTicks = pdMS_TO_TICKS(sleptMs);
+  if (xPortGetCoreID() == 0) {
+    xTaskCatchUpTicks(sleptTicks);
+  } else {
+    esp_ipc_call_blocking(0, &catchUpTicksOnCore0, &sleptTicks);
+  }
+#else
   xTaskCatchUpTicks(pdMS_TO_TICKS(sleptMs));
+#endif
   return true;
 }
 
