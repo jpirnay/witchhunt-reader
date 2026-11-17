@@ -32,6 +32,7 @@
 #include "EpubProgressRecord.h"
 #include "EpubReaderMenuActivity.h"
 #include "ImageMemoryLadder.h"
+#include "InputFirst.h"
 #include "KOReaderAutoSync.h"
 #include "KOReaderSyncWorker.h"
 #include "LaneBeforeBuild.h"
@@ -508,6 +509,7 @@ class EpubReaderActivity final : public Activity {
   // lock. Loop task only: main.cpp polls both hooks from there, and refreshLoopHints() is their
   // only writer.
   bool loopHintCurrentBuild_ = false;     // section && section->hasActiveBuild()
+  bool loopHintAskedPageDrawn_ = false;   // and the page asked for is the one that build has drawn
   bool loopHintBackgroundBuild_ = false;  // backgroundBuildState_ == Building
   void refreshLoopHints();
   // --- Background C (incremental build of the CURRENT section while the reader watches) ---
@@ -567,6 +569,8 @@ class EpubReaderActivity final : public Activity {
   // True while displayBuildPage() waits for its page's waveform without the bus lock: the loop task's build slice may
   // run through that pending refresh (BuildDuringRefresh.h). Written by the render task, read by the loop task.
   std::atomic<bool> buildPageWaitOffBus_{false};
+  // Where a press stands on its way to a turn, for the background work's gate (InputFirst). Loop task.
+  InputFirst::Press pressInFlight() const;
   // True once the "Indexing" popup has been drawn for the current pending page, so the pass
   // doesn't re-flush it every tick. Cleared whenever a real page is drawn or the build ends.
   bool buildingPopupShown_ = false;
