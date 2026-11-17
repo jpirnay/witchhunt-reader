@@ -31,6 +31,7 @@
 #include "EpubProgressRecord.h"
 #include "EpubReaderMenuActivity.h"
 #include "ImageMemoryLadder.h"
+#include "InputFirst.h"
 #include "KOReaderAutoSync.h"
 #include "KOReaderSyncWorker.h"
 #include "LaneBeforeBuild.h"
@@ -546,6 +547,8 @@ class EpubReaderActivity final : public Activity {
   LandedText landedText_;
   // True while pageTurn() waits for the render lock: the one sign the render task can read that a turn is on its way.
   std::atomic<bool> pageTurnWaitingForLock_{false};
+  // Where a press stands on its way to a turn, for the background work's gate (InputFirst). Loop task.
+  InputFirst::Press pressInFlight() const;
   // True once the "Indexing" popup has been drawn for the current pending page, so the pass
   // doesn't re-flush it every tick. Cleared whenever a real page is drawn or the build ends.
   bool buildingPopupShown_ = false;

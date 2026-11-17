@@ -1395,16 +1395,28 @@ void EpubReaderActivity::serviceBackgroundWork() {
     RenderLock lock;
     currentSectionBuildActive = section && section->hasActiveBuild();
   }
+  // Input first (InputFirst.h): a pass that found no event still has a press on its way to one.
+  const InputFirst::Press press = pressInFlight();
   if (currentSectionBuildActive) {
+    if (!InputFirst::mayRunSlice(InputFirst::Work::CurrentChapter, press)) return;
     // The page being read outranks the pages after it: its gray (BuildPageGray), a picture on it (LaneBeforeBuild).
     if (!askBuildPageGray() && !stepImageLaneDuringBuild()) stepCurrentSectionBuild();
     return;
   }
+  if (!InputFirst::mayRunSlice(InputFirst::Work::LookAhead, press)) return;
   // Room in the glyph store comes before Background-B's look-ahead; the section the reader waits on and the AA pass
   // keep priority.
   if (stepGlyphStoreRoom()) return;
   if (stepStarredPages()) return;
   stepBackgroundSectionBuild();
+}
+
+InputFirst::Press EpubReaderActivity::pressInFlight() const {
+  InputFirst::Press press;
+  press.down = CooperativeAbort::shouldAbortLongTask();
+  press.gestureOpen = buttonEvents.isGestureInFlight();
+  press.turnWaiting = pageTurnWaitingForLock_.load(std::memory_order_acquire);
+  return press;
 }
 
 bool EpubReaderActivity::lookAheadMayRun() const {

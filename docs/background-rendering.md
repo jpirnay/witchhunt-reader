@@ -74,6 +74,13 @@ matter once the current page/section is settled. Of those, the pictures a few pa
 before a chapter fifty pages away: the image lane runs before B, and B takes the secondary buffer only
 once the lane has nothing left to decode (`LaneBeforeBuild.h`, see the image lane below).
 
+**Input first** (`InputFirst.h`): `loop()` gets here on every pass that found no input *event*, and a press is no
+event until it is released and read. While one is on its way (an edge the loop has not taken in, a button held, a
+release waiting out its double-press window) steps 3 to 5 do not run. Each slice of B's build held the loop for 40 ms
+and a parse chunk, so the press was read three to four slices late: on the X4 the turn was seen 363 ms after the press
+with B building, against 111 ms without (2026-11-16), and the build those slices fed was thrown away by the turn. C
+keeps slicing through a press: the page asked for may be one it has not laid out yet.
+
 **Starred pages** (`stepStarredPages()`, `StarAnchoring`): a star keeps the KOReader XPath of its page's first text,
 that text's visible-text offset with the section format it was counted under, and the layout its page number was
 counted in. Once the chapter on screen is complete, its stars counted in another layout move onto the page holding
