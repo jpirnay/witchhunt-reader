@@ -867,6 +867,12 @@ unsigned long HalGPIO::getHeldTime() const {
 
 bool HalGPIO::hasTouch() const { return inputMgr.hasTouch(); }
 
+int8_t HalGPIO::touchPulseWakePin() const { return inputMgr.touchPulseWakePin(); }
+
+bool HalGPIO::armTouchPulseWake() const { return inputMgr.armTouchPulseWake(); }
+
+void HalGPIO::touchPulseWakeDone(const bool gpioWake) const { inputMgr.touchPulseWakeDone(gpioWake); }
+
 bool HalGPIO::supportsMultiTouch() const { return inputMgr.supportsMultiTouch(); }
 
 bool HalGPIO::hasHomeKey() const { return BoardConfig::hasHomeKey(); }
