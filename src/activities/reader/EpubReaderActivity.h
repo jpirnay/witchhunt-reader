@@ -1044,6 +1044,9 @@ class EpubReaderActivity final : public Activity {
   // reason: the build gets its heap back before it resumes.
   void displayBuildPage(RenderLock& lock, std::unique_ptr<Page> ownedPage, const RenderLayout& layout,
                         BuildArena::Block* drawBlock = nullptr);
+  // The end of displayBuildPage(): lets the render lock go and waits for the refresh it started, so that the loop
+  // task's build slices run meanwhile (without the bus lock where BuildDuringRefresh::waitsOffBus says so).
+  void waitForBuildRefreshUnlocked(RenderLock& lock);
   // Draws the status bar over the current frame buffer and flushes to the display.
   // Handles the refresh cycle and grayscale AA pass. page must be the same page
   // that was last rendered into the buffer (needed for image AA re-render).

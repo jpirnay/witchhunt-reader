@@ -7236,6 +7236,16 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
     }
   }
 
+  waitForBuildRefreshUnlocked(lock);
+  // On a cache miss this mid-build page is what the user actually sees first, well before the
+  // build completes and renderNormalPass() runs — so the trace has to close here or a miss
+  // would report a wake latency that includes the whole rest of the build. After
+  // completeDisplay() for the same reason as renderContents(): the pixels are settled here.
+  WakeTrace::mark(WakeTrace::Phase::PageVisible);
+  WakeTrace::logSummary();
+}
+
+void EpubReaderActivity::waitForBuildRefreshUnlocked(RenderLock& lock) {
   // Release the lock before the (blocking) waveform wait so stepCurrentSectionBuild() can run a
   // build slice on the loop task while the panel refreshes — the same hand-off renderContents()
   // uses for Background-A.
@@ -7251,12 +7261,6 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
   if (waitOffBus) renderer.waitRefreshOffBus();
   renderer.completeDisplay();
   buildPageWaitOffBus_.store(false, std::memory_order_release);
-  // On a cache miss this mid-build page is what the user actually sees first, well before the
-  // build completes and renderNormalPass() runs — so the trace has to close here or a miss
-  // would report a wake latency that includes the whole rest of the build. After
-  // completeDisplay() for the same reason as renderContents(): the pixels are settled here.
-  WakeTrace::mark(WakeTrace::Phase::PageVisible);
-  WakeTrace::logSummary();
 }
 
 uint16_t EpubReaderActivity::renderPageContentOnly(const Page& page, const int orientedMarginTop,
