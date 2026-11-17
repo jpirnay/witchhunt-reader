@@ -26,6 +26,7 @@
 #include "MdReaderActivity.h"
 #include "ReaderUtils.h"
 #include "SdCardFontGlobals.h"
+#include "SerialTestApi.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
 #include "Xtc.h"
@@ -1008,6 +1009,7 @@ void ReaderActivity::onEnter() {
       // A refresh swaps the buffers where the secondary was not lent: draw over what is shown.
       p->renderer.syncWriteBufferFromDisplayed();
       GUI.fillPopupProgress(p->renderer, p->popup, percent);
+      SerialTestApi::notePopupContinued();
       p->shownFrame = p->renderer.framesShipped();
       LOG_DBG("READER", "Indexing progress %u%%", static_cast<unsigned>(percent));
     };
