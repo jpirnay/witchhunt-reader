@@ -272,7 +272,7 @@ smaller font area on large CJK books was not measured.
 | Turn into the next chapter, AA in two passes | 1.72 s ¹ | 1.94 s |
 | Reopen a chapter, cache kept, AA in two passes | 2.4 s | 4.4 s |
 | Open a chapter, cache deleted: page on screen, no AA | 3.4 s | 5.1 s |
-| Open a chapter, cache deleted: page complete, AA in two passes | 6.6 s | 6.0 s |
+| Open a chapter, cache deleted: page complete, AA in two passes | 6.56 s | 6.02 s |
 | Open a chapter, cache deleted: chapter laid out, AA in two passes | 6.1 s | not measured ² |
 | Boot to Home | 4.6 s ³ | 6.0 s |
 | Free heap in the reader at rest (largest block) | 69 KB (55 KB) | 103–143 KB (94–115 KB) |
@@ -287,7 +287,7 @@ not while the page is up, so its log gives no time for the whole chapter.
 
 Witch Reader turns pages, turns into the next chapter and reopens a chapter faster in every mode, and shows the first
 page of a chapter it has not laid out 1.7 s sooner without AA. With AA, CrossPoint completes that page sooner, by
-0.6 s: it adds the AA as soon as the page is on screen. On the X3 Witch Reader adds the AA to that page once the whole
+0.5 s: it adds the AA as soon as the page is on screen. On the X3 Witch Reader adds the AA to that page once the whole
 chapter is laid out, 0.4 s after the end of the layout.
 
 At rest, CrossPoint has more of the X3's heap free, because Witch Reader keeps a second 52 KB framebuffer. It holds
