@@ -4,8 +4,8 @@
 // opened from the installed list: offset paging with lists and search, a {page} catalog installing a bundle, fetched
 // lists, a static catalog paged after compatibility filtering behind a remembered notice and a config file, and the
 // sign-ins: a device code, a password grant renewed after a 401 (browsing and downloading), a token only the plugin's
-// web card writes, and a token file outside the plugin's folder, which does not open; and an XML (WebDAV) catalog
-// browsed folder by folder.
+// web card writes, and a token file outside the plugin's folder, read from where its device.json names it; and an XML
+// (WebDAV) catalog browsed folder by folder.
 //
 // The page runs in jsdom with its includes resolved, and loads plugin-catalog.js from the source tree. The device
 // (its relay, /api/fetch, /mkdir, /download) and the catalogs' servers are a fake fetch; every manifest and answer is
@@ -139,7 +139,8 @@ const manifests = {
                 dest_dir: '/News', filename: '{title}.epub' }
   },
   webcard: { token: { file: 'token.json' }, browse: { url: 'https://web.test/list?page={page}' } },
-  outside: { token: { file: '/.crosspoint/outside-token.json' }, browse: { url: 'https://x.test/list' } },
+  outside: { token: { file: '/.crosspoint/outside-token.json', path: 'auth.token' },
+             browse: { url: 'https://x.test/list', headers: { Authorization: 'Bearer {token}' } } },
   dav: {
     config: { file: 'config.json' },
     browse: {
@@ -180,6 +181,7 @@ const answers = {
   },
   'https://signin.test/books?page=1&limit=8': (req) => (bearer(req) === 'Bearer TOKEN-DC'
     ? { status: 200, body: [{ title: 'DC 1' }] } : { status: 401, body: {} }),
+  'https://x.test/list': (req) => ({ status: bearer(req) === 'Bearer OUTSIDE' ? 200 : 401, body: [{ title: 'Outside 1' }] }),
   'https://dav.test/files/me/': (req) => ({ status: req.method === 'PROPFIND' ? 207 : 405, body: davListing(
     davEntry('/files/me/', 'me', true),
     davEntry('/files/me/Book%20Shelf/', null, true),
@@ -241,6 +243,7 @@ const existing = new Set(['/News']);
 const card = {
   [ROOT + '/static/config.json']: '{"server":"https://files.test","dest_dir":"Books"}',
   [ROOT + '/wallabag/config.json']: '{"url":"https://wb.test","username":"me","password":"secret pw"}',
+  '/.crosspoint/outside-token.json': '{"auth":{"token":"OUTSIDE"}}',
   [ROOT + '/dav/config.json']: '{"url":"https://dav.test/files/me/","auth":"bWU6cHc=","user":"me","pass":"pw"}'
 };
 const written = [];
@@ -377,13 +380,14 @@ check(!!button(installedRow('News'), 'Open catalog'), 'a catalog plugin has an O
 check(!button(installedRow('Switched off'), 'Open catalog'), 'a switched-off one has none');
 check(view().hidden, 'no catalog is open at first');
 
-// ---- Loading the runner, a catalog it cannot open, and the pure helpers ---------------------------------------------
+// ---- Loading the runner, a token outside the plugin's folder, and the pure helpers -----------------------------------
 
 button(installedRow('Outside'), 'Open catalog').click();
 await until(() => !!w.PluginCatalog, 'plugin-catalog.js to load');
-await until(() => doc.getElementById('status').textContent.startsWith('Cannot open'), 'the refusal');
-check(doc.getElementById('status').textContent.includes('/.crosspoint/outside-token.json outside its own folder') && view().hidden,
-      'a token file outside the plugin\'s folder does not open (' + doc.getElementById('status').textContent + ')');
+await until(() => titles().join('|') === 'Outside 1', 'the catalog with its token outside its folder');
+check(requests.some((r) => r.url === '/download?path=' + encodeURIComponent('/.crosspoint/outside-token.json')),
+      'a token file outside the plugin\'s folder is read where device.json names it');
+button(view(), 'Close').click();
 
 const P = w.PluginCatalog._internal;
 check(P.enc('a b/ü~-_.') === 'a%20b%2F%C3%BC~-_.', '{query} and the _enc variables percent-encode all but -_.~');
@@ -444,14 +448,14 @@ check(D({ browse: { url: 'u', format: 'xml', item: 'response' } }).catalog &&
       D({ browse: { url: 'u', format: 'xml' } }).reason.includes('item element') &&
       D({ browse: { url: 'u', format: 'opds' } }).reason.includes('"opds"'),
       'an XML catalog opens when it names its item element; an unknown format says why not');
-check(D({ browse: { url: 'u' }, token: { file: 'token.json' }, auth: { type: 'password', request: { url: 'u' } } }, '/p/x').catalog,
+check(D({ browse: { url: 'u' }, token: { file: 'token.json' }, auth: { type: 'password', request: { url: 'u' } } }).catalog,
       'a catalog with a sign-in opens');
 check(!D({ browse: { url: 'u' }, auth: { type: 'refresh', request: { url: 'u' } } }).catalog &&
       D({ browse: { url: 'u' }, auth: { type: 'refresh', request: { url: 'u' } } }).reason.includes('"refresh"'),
       'one with a sign-in upstream does not define says so');
-check(D({ browse: { url: 'u' }, token: { file: '/p/x/token.json' } }, '/p/x').catalog &&
-      !D({ browse: { url: 'u' }, config: { file: '/.app/config.json' } }, '/p/x').catalog,
-      'an absolute file in the plugin\'s own folder is fine, one elsewhere is not');
+check(D({ browse: { url: 'u' }, token: { file: '/p/x/token.json' } }).catalog &&
+      D({ browse: { url: 'u' }, config: { file: '/.app/config.json' } }).catalog,
+      'token and config files may sit anywhere');
 const events = D({ events: { book_finished: {} } });
 check(!events.catalog && events.events && !events.reason, 'an events-only manifest has no catalog');
 

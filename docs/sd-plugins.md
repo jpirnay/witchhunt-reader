@@ -298,10 +298,12 @@ Differences from upstream:
   Hidden Files** is on; without the folder, the download fails.
 - A bundle is written file by file, not staged: one cut off half-way keeps the
   files it got, and downloading it again finishes it.
-- A `token.file` or `config.file` outside the plugin's own folder
-  (`/.crosspoint/lingoblend.json`, say) is refused here: the web server lets a
-  plugin keep files only in its folder. Upstream allows any path but the
-  credential stores. Such a catalog says so and does not open.
+- A `token.file`, `token.refresh_file` or `config.file` may sit outside the
+  plugin's folder (`/.crosspoint/lingoblend.json`, say), as upstream allows: the
+  web server lets the plugin read that exact file with `/download` and write it
+  with `writeFile` (`PluginLocations::deviceJsonNames()`). A name with `..` in
+  it names nothing. A credential store, a system folder and a path spelled by its
+  8.3 alias stay refused, as for every request.
 - Not yet: Details pages, the `sidecar` file, `events`, and sign-in types
   upstream does not define (`refresh`).
 
@@ -344,9 +346,8 @@ it is sent:
   `device.json`, which the browser reads from GitHub as well:
   - **runs here**: a web part (`plugin.js`), a catalog that opens here
     ([Catalogs](#catalogs-upstreams-devicejson)), or both;
-  - **partly runs here**: one of them runs, and something does not yet: a
-    catalog that keeps its token or config outside its folder, or device
-    `events`;
+  - **partly runs here**: one of them runs, and something does not yet: device
+    `events`, say;
   - **does not run here**: nothing of it runs (an events-only `device.json`,
     for example), another `firmware_family`, a requirement this firmware lacks
     (named), a `device.json` that could not be read, or a reason the catalog
@@ -441,8 +442,11 @@ gap to be closed: the plugin is code you chose to copy onto your own card.
 
 Note also that the web server has no authentication of its own, so it should
 only be enabled on networks you trust — that is true with or without plugins.
-That includes a plugin's own folder: its token and settings can be read with
-`/download` by anyone on the network while File Transfer runs, as on upstream.
+That includes a plugin's own folder, and the token and config files its
+`device.json` names elsewhere: anyone on the network can read them with
+`/download` while File Transfer runs, as on upstream. A plugin can also overwrite
+any file its own `device.json` names; only the credential stores, the system
+folders and 8.3 alias spellings are off limits.
 
 The JSON endpoints a plugin drives (`POST /api/relay`, `/api/fetch` in its
 JSON form, `/api/plugins/hosts`) take only an `application/json` body. A

@@ -328,7 +328,7 @@
           setStatus('Could not open ' + title + ': ' + e.message, 'err');
           return;
         }
-        const what = PluginCatalog.describe(manifest, makePluginApi(p).dir);
+        const what = PluginCatalog.describe(manifest);
         if (!what.catalog) {
           setStatus('Cannot open ' + title + ': ' + (what.reason ||
             'it has no catalog; its part on the device (' + (what.events ? 'events' : 'screens') + ') does not run here yet') + '.', 'err');
@@ -534,7 +534,7 @@
           try {
             const r = await fetch(new URL('device.json', entryBase(c, COMMUNITY_CATALOG_URL)), { cache: 'no-cache' });
             if (!r.ok) throw new Error(r.status + '');
-            communityDevice[c.name] = PluginCatalog.describe(await r.json(), INSTALL_ROOT + '/' + c.name);
+            communityDevice[c.name] = PluginCatalog.describe(await r.json());
           } catch (e) {
             communityDevice[c.name] = null;
           }

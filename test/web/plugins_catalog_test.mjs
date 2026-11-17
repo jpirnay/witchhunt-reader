@@ -155,8 +155,8 @@ check(!requests.some((r) => r.url === 'https://example.org/h/device.json'), 'a p
 check(!row('Plugin Hub') && !row('Plugin Store'), 'the plugin stores are left out');
 check(text(row('Web only')).includes('runs here') && hasButton(row('Web only')), 'a web-only plugin runs here');
 check(text(row('Web only')).includes('From github.com/someone/web-only'), 'its source repository is named');
-check(text(row('Both parts')).includes('partly runs here') && text(row('Both parts')).includes('outside its own folder') &&
-      hasButton(row('Both parts')), 'a plugin whose catalog keeps its token outside its folder installs for its web page');
+check(/runs here/.test(text(row('Both parts'))) && !/partly|does not/.test(text(row('Both parts'))) &&
+      hasButton(row('Both parts')), 'a plugin whose catalog keeps its token outside its folder runs here');
 check(text(row('Catalog only')).includes('runs here') && text(row('Catalog only')).includes('a catalog you open on this page') &&
       hasButton(row('Catalog only')), 'a public catalog alone runs here');
 check(text(row('Needs catalog')).includes('partly runs here') && text(row('Needs catalog')).includes('events') &&

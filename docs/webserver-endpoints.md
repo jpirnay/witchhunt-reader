@@ -584,6 +584,10 @@ endpoints and WebDAV. The rules are in
   (`/.crosspoint/plugins/<name>/...`, and the other plugin roots) at its exact path,
   whatever the setting, and the plugin write endpoints write inside the calling plugin's own
   folder. Plugins keep their token and settings there. The folders stay out of every listing.
+  The same holds for the exact files an installed plugin's `device.json` names as its token
+  or config (`token.file`, `token.refresh_file`, `config.file`), wherever they are, as upstream
+  allows: `/download` reads them and the calling plugin's writes reach them. A credential store,
+  a system folder or an 8.3 alias spelling is refused even then.
 - Names are judged as the SD library opens them: leading spaces and trailing dots
   and spaces are dropped, so `/ .crosspoint` and `/.crosspoint.` are
   `/.crosspoint`. Matching ignores case.
@@ -1034,7 +1038,8 @@ download as the query form; another method, or a body, is sent once and its answ
 Same host rules as `/api/relay`. `dest` is normalised, so `..`
 cannot climb above the card root, must name a file (not `/` and no trailing `/`), and is
 judged as an item under [Protected paths](#protected-paths), as `/upload` judges its target, except that a plugin
-may also write inside its own folder (`pluginWriteTarget()`). The book's layout cache is invalidated on success.
+may also write inside its own folder and to the files its `device.json` names (`pluginWriteTarget()`). The book's
+layout cache is invalidated on success.
 
 | Status | Cause                                          |
 | ------ | ---------------------------------------------- |

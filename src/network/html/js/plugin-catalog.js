@@ -12,8 +12,8 @@
 // Runs: JSON catalogs, their four paging modes, static and fetched lists with notices and requirements, search, item
 // compatibility filtering, the template variables ({cfg.*} from the plugin's config file, {token} from its token
 // file), sign-in by password grant or device code, and downloads of one file (by URL or a url_path answer) or of a
-// bundle; XML catalogs (WebDAV PROPFIND listings) browse folder by folder. Not yet: Details pages, the sidecar file,
-// and token or config files outside the plugin's folder.
+// bundle; XML catalogs (WebDAV PROPFIND listings) browse folder by folder. Not yet: Details pages and the sidecar
+// file.
 //
 // PluginsPage.html loads this on demand; window.PluginCatalog is its interface.
 (function () {
@@ -182,12 +182,6 @@
     return !f ? '' : f.startsWith('/') ? f : pluginDir + '/' + f;
   }
 
-  // Whether a path is inside the plugin's own folder, the only place the web server lets a plugin keep a file of its
-  // own (pluginWriteTarget(), /download's exact reads). Upstream allows any path but the credential stores.
-  function inPluginFolder(path, pluginDir) {
-    return !!pluginDir && path.startsWith(pluginDir + '/') && !path.split('/').includes('..');
-  }
-
   // A token file's JSON: the token alone, nested at token.path, as upstream's saveTokenToFile() writes it.
   function tokenJson(path, value) {
     const segs = text(path || 'token').split('.').filter(Boolean);
@@ -313,7 +307,7 @@
 
   // What of a device.json runs here: {catalog, reason, events}. catalog: it can be opened on the Plugins page;
   // reason: why not, when it has one that cannot; events: it subscribes to device events, which do not run here yet.
-  function describe(manifest, pluginDir) {
+  function describe(manifest) {
     const m = manifest && typeof manifest === 'object' ? manifest : {};
     const browse = m.browse && typeof m.browse === 'object' ? m.browse : null;
     const out = {
@@ -323,9 +317,9 @@
     if (!browse) return out;
     const lists = Array.isArray(browse.lists) ? browse.lists : [];
     if (!browse.url && !browse.lists_url && !lists.some((l) => l && l.url)) return out;
+    // Token and config files may sit anywhere but in the credential stores: the web server lets a plugin read and
+    // write the files its device.json names (PluginLocations::deviceJsonNames), as upstream does.
     const kind = signInKind(m);
-    const outside = [m.token && m.token.file, m.config && m.config.file].map((f) => text(f).trim())
-      .find((f) => f.startsWith('/') && !inPluginFolder(f, pluginDir));
     const format = text(browse.format || 'json');
     if (format !== 'json' && format !== 'xml') {
       out.reason = 'its catalog format ("' + format + '") is not one this page knows';
@@ -333,8 +327,6 @@
       out.reason = 'its XML catalog names no item element';
     } else if (kind.startsWith('other:')) {
       out.reason = 'its sign-in ("' + kind.slice(6) + '") is not one this page knows';
-    } else if (outside) {
-      out.reason = 'it keeps ' + outside + ' outside its own folder, which this firmware does not allow';
     } else {
       out.catalog = true;
     }
