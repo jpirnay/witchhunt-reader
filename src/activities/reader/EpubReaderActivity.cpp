@@ -6162,9 +6162,20 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
     // The popup covers the page, so the links under it must stop answering taps -- following a
     // marker nobody can see would be the phantom-target bug with an extra step.
     TapTargets::readerLinks().invalidate();
-    GUI.drawPopup(renderer, tr(STR_INDEXING));
+    // Where the loop task's slices can run through the popup's refresh, it ships async and is waited for as a page the
+    // build drew is (IndexingPopupGate::buildsThroughPopup): the build used to sit out its waveform behind the lock.
+    const bool buildThrough = IndexingPopupGate::buildsThroughPopup(ReaderUtils::indexingPopupPanel(renderer));
+    GUI.drawPopup(renderer, tr(STR_INDEXING), /*overlayDisplayedFrame=*/true,
+                  buildThrough ? PopupShip::Async : PopupShip::Blocking);
     buildingPopupShown_ = true;
     buildPageOnScreen_ = {};
+    if (buildThrough) {
+      // With the secondary away the popup went out single-buffered, and a deferred FAST resyncs no plane: RED is seeded
+      // from the popup, as the blocking refresh's own resync left it (the X4's next build page diffs against RED).
+      const bool seedRed = renderer.fastRefreshNeedsHostFrame() && !renderer.keepsPreviousFrame();
+      waitForBuildRefreshUnlocked(lock);
+      if (seedRed) renderer.syncRedRamFromFrameBuffer();
+    }
   }
 }
 
