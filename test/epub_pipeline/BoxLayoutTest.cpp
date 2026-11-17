@@ -697,3 +697,114 @@ TEST_F(BoxLayout, ABlockSpanIsFramedAndOneInsideItIsNot) {
   EXPECT_EQ(box.y + 1 + kGap, outer->y);
   EXPECT_EQ(box.x + 1 + kGap, outer->x);
 }
+
+// A rule drawn as the bottom border of an empty block, with the reader's extra paragraph spacing on (its default). The
+// spacing after the block above sits above the rule: the box closing with nothing inside took it for its own trailing
+// spacing, and the rule was drawn nowhere, after a heading or a paragraph alike, while at a page's top it was drawn.
+namespace {
+const char* const kChapterHeadCss =
+    ".wrap, .marker { display: block; margin: 0; padding: 0; }\n"
+    "h1 { margin: 0 0 6px; page-break-after: avoid; text-align: center; }\n"
+    ".rule { display: block; border-bottom: #757575 solid 2px; margin: 0 43%; padding: 0; }\n"
+    ".date { margin: 10px 0 0; text-align: center; }\n";
+// A chapter's head as a converter writes it: a number with a printed-page marker in it, an empty page-break marker
+// block, the rule (whitespace only inside), a date line, then the text.
+const char* const kChapterHead =
+    "<div class=\"wrap\">\n<h1 id=\"c1\"><span epub:type=\"pagebreak\" id=\"page_1\" role=\"doc-pagebreak\" "
+    "title=\"1\"></span>1</h1>\n<div class=\"marker\" id=\"pb0\"></div><div class=\"rule\">\n\t\t\t</div>\n"
+    "<p class=\"date\">Dateline</p>\n<p>text</p></div>";
+
+const BoxView* onlyBox(const std::vector<PageView>& pages) {
+  if (pages.empty() || pages[0].boxes.size() != 1) return nullptr;
+  return &pages[0].boxes[0];
+}
+}  // namespace
+
+TEST_F(BoxLayout, ARuleUnderAHeadingIsDrawnWithTheExtraParagraphSpacing) {
+  const std::string css = std::string(kReset) + kChapterHeadCss;
+  const auto plain = layout(kChapterHead, css);
+  extraParagraphSpacing = true;
+  const auto spaced = layout(kChapterHead, css);
+  const BoxView* rule = onlyBox(spaced);
+  const BoxView* plainRule = onlyBox(plain);
+  ASSERT_TRUE(rule) << "the rule under the heading is drawn";
+  ASSERT_TRUE(plainRule);
+  EXPECT_EQ(2, rule->widths[CssBox::Bottom]);
+  EXPECT_EQ(0, rule->widths[CssBox::Top]);
+  EXPECT_EQ(2 + kGap, rule->h);
+  const LineView* number = spaced[0].lineWith("1");
+  const LineView* date = spaced[0].lineWith("Dateline");
+  const LineView* plainDate = plain[0].lineWith("Dateline");
+  ASSERT_TRUE(number && date && plainDate);
+  EXPECT_LT(number->index, rule->index);
+  EXPECT_LT(rule->index, date->index);
+  EXPECT_GT(rule->y, plainRule->y) << "the spacing after the heading is above the rule";
+  EXPECT_EQ(rule->bottom() + 10, date->y) << "and none of it inside or under the rule";
+  EXPECT_EQ(plainDate->y - plainRule->bottom(), date->y - rule->bottom());
+}
+
+TEST_F(BoxLayout, ARuleAfterAParagraphHasTheParagraphSpacingAboveIt) {
+  extraParagraphSpacing = true;
+  const auto pages = layout("<p>above</p><div class=\"rule\"></div><p>below</p>",
+                            std::string(kReset) + ".rule { border-bottom: 2px solid; }");
+  const BoxView* rule = onlyBox(pages);
+  ASSERT_TRUE(rule);
+  EXPECT_EQ(kLine + kLine / 2, rule->y);
+  EXPECT_EQ(2 + kGap, rule->h);
+  EXPECT_EQ(rule->bottom(), pages[0].lineWith("below")->y);
+}
+
+// At a page's top no spacing is above it: the case that was drawn before.
+TEST_F(BoxLayout, ARuleAtThePageTopIsDrawnWithTheExtraParagraphSpacing) {
+  extraParagraphSpacing = true;
+  const auto pages =
+      layout("<div class=\"wrap\">\n<div class=\"rule\">\n\t\t\t</div>\n<p class=\"date\">Dateline</p></div>",
+             std::string(kReset) + kChapterHeadCss);
+  const BoxView* rule = onlyBox(pages);
+  ASSERT_TRUE(rule);
+  EXPECT_EQ(0, rule->y);
+  EXPECT_EQ(rule->bottom() + 10, pages[0].lineWith("Dateline")->y);
+}
+
+// What the rule's fix leaves as it was. A framed paragraph after a paragraph keeps its own trailing spacing outside its
+// frame; a rule closing a framed box frames no spacing; an empty block with nothing drawn takes no room.
+TEST_F(BoxLayout, ABoxAfterAParagraphKeepsItsSpacingOutsideTheFrame) {
+  extraParagraphSpacing = true;
+  const auto pages = layout("<p>before</p><p class=\"box\">inside</p><p>after</p>",
+                            std::string(kReset) + ".box { border: 1px solid; padding: 3px; }");
+  const BoxView* box = onlyBox(pages);
+  ASSERT_TRUE(box);
+  const LineView* inside = pages[0].lineWith("inside");
+  const LineView* after = pages[0].lineWith("after");
+  ASSERT_TRUE(inside && after);
+  EXPECT_EQ(kLine + kLine / 2, box->y);
+  EXPECT_EQ(inside->y - box->y, box->bottom() - (inside->y + kLine));
+  EXPECT_EQ(box->bottom() + kLine / 2, after->y);
+}
+
+TEST_F(BoxLayout, ARuleClosingAFramedBoxIsInsideItsFrame) {
+  extraParagraphSpacing = true;
+  const auto pages = layout("<div class=\"outer\"><p>inside</p><div class=\"rule\"></div></div><p>after</p>",
+                            std::string(kReset) +
+                                ".outer { border: 1px solid; }\n"
+                                ".rule { border-bottom: 2px solid; }");
+  ASSERT_FALSE(pages.empty());
+  ASSERT_EQ(2u, pages[0].boxes.size());
+  const BoxView& outer = pages[0].boxes[0];
+  const BoxView& rule = pages[0].boxes[1];
+  const LineView* inside = pages[0].lineWith("inside");
+  const LineView* after = pages[0].lineWith("after");
+  ASSERT_TRUE(inside && after);
+  EXPECT_EQ(inside->y + kLine + kLine / 2, rule.y) << "the paragraph's spacing, then the rule";
+  EXPECT_EQ(rule.bottom() + kGap + 1, outer.bottom());
+  EXPECT_EQ(outer.bottom(), after->y);
+}
+
+TEST_F(BoxLayout, AnEmptyBlockWithNothingDrawnTakesNoRoom) {
+  extraParagraphSpacing = true;
+  const auto pages =
+      layout("<p>above</p><div class=\"plain\">\n\t\t\t</div><p>below</p>", std::string(kReset) + ".plain { }");
+  ASSERT_FALSE(pages.empty());
+  EXPECT_TRUE(pages[0].boxes.empty());
+  EXPECT_EQ(kLine + kLine / 2, pages[0].lineWith("below")->y);
+}

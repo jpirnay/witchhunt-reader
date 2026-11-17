@@ -1945,6 +1945,11 @@ void ChapterHtmlSlimParser::openBox(BoxScope box) {
   box.top = std::max(currentPageNextY, lastGlyphBottom_);
   box.firstElement = static_cast<uint16_t>(currentPage->elements.size());
   currentPageNextY = static_cast<int16_t>(box.top + box.padTop);
+  // The extra paragraph spacing the block above added is above the frame, not in it. Left marked, a box with nothing
+  // inside to move the line on (a rule drawn as a bottom border) took it off its own height at closeBox and drew
+  // nothing when the spacing was as tall as the frame: a chapter's rule under its heading was lost, while the same rule
+  // at a page's top was drawn.
+  extraGapEnd_ = -1;
   boxScopes_.push_back(box);
 }
 
