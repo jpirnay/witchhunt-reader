@@ -258,8 +258,13 @@ cache hit, not a blocking parse. `stepBackgroundSectionBuild()`, one bounded sli
   screen that come before it and have no page count (`Section::lastUnindexedSpine`, one read of
   `pages.bin`), the nearest first, keeping its cursor and putting it back after each. Only while the
   status bar shows the chapter count. Class 3: B's gates apply, nothing counts toward the page
-  budget, and a finished file asks for no refresh (the next draw shows the count). A discard, a
-  failure or two preemptions end it for the chapter without pausing the look-ahead.
+  budget, and a finished file asks for no refresh (the next draw shows the count). It never costs a
+  turn: a file starts only when its build, timed by the rate of B's last finished build of 4 KB or
+  more, ends before the next turn at the reader's pace (the gap between the last two turns), or once
+  the reader has paused that pace plus the quiet period. After a turn took one away, only a page up
+  longer than that one plus the quiet period starts the next. And not where B's buffer is the copy
+  of the page on screen that a composed one-pass gray needs (the C3 with one-pass AA on; rule R3).
+  A failed or degraded build ends it for the chapter without pausing the look-ahead.
 - **Builds only inside the borrowed secondary buffer.** `beginBackgroundBorrow()` lends the block as
   the build's arena: the parse working set, the inflate ring and the CSS index bump-allocate inside
   it. The block never enters the heap, so returning it cannot fail. There is no heap-backed B: with
