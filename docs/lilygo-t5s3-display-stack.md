@@ -65,7 +65,10 @@ do **not** transfer. Those are the `Panel_LCD` path. This is `Panel_EPD`, and it
 `waitDisplay()`, not `waitDMA()`.
 
 Measured full-refresh durations, for calibration: FAST ~1329-1559 ms (970-1130 ms since the fast
-bank shrank to `L[15]` rows, 2026-11-11), HALF ~2582-2950 ms. That is
+bank shrank to `L[15]` rows, 2026-11-11), HALF ~2582-2950 ms. Since the net-drive balance
+(2026-11-17, 24 C, Settings): FAST 1.22 s re-driving the whole screen and 0.96-0.98 s for a tab
+change (1.11 s and 0.88-0.90 s before), HALF 2.96 s and 3.09 s behind another clean push
+(2.80-2.81 s and 3.01-3.02 s before). That is
 roughly 2-4x an X4 Pro and 3x an X3, and it is why several things that are affordable elsewhere
 are not affordable here.
 
@@ -100,7 +103,8 @@ design is structurally that `static_from` mode, permanently.** Not an oversight;
 spectrum epdiy spans.
 
 Our generator compensates by making every column self-normalising: saturate at a rail first (which
-erases the arrival state), then walk to the target. `clean_rows()` is `3 x L[15]` frames.
+erases the arrival state), then walk to the target. `clean_rows()` is three phases of about
+`L[15]` frames each (black, white, down); their exact lengths are set by the net drive below.
 
 The DU (fast) path needs no such compromise: DU is exactly `L[15]` frames of full drive, and epdiy's
 published DU phase counts for the same blob are our `L[15]` plus one in every range (epdiy counts a
@@ -136,6 +140,30 @@ other grey level is black. The fast bank is now `L[15]` rows in every range. The
 all: `AA greys at level 13/14 (12 frames up, 3/2 down)`. `tools/test_gen_ed047tc2_waveform.py` in
 the SDK checks the generated tables against the generator.
 
+### Net drive per transition (2026-11-17)
+
+Every frame of net drive stays on a pixel as charge; a rail visit erases its optical history, not
+that. Counted in frames (+ toward white), with LovyanGFX's eraser, which `Panel_EPD` runs ahead of
+every clean drive, indexed by the level the pixel had (it nets +2 for black, -2 for white):
+
+| transition | clean (HALF) before | clean now | fast (FAST) |
+|---|---|---|---|
+| kept black | -19 (-23 behind a clean push) | 0 | not driven |
+| kept white | -2 | 0 | not driven |
+| kept AA grey | -6 (L13), -4 (L14) | 0 | not driven |
+| black -> white | +2 | +4 | +21 |
+| white -> black | -23 | -4 | -21 |
+| any -> AA grey | -7..0 | -1..+4 | +9/+10 before, 0 now |
+
+24..27 C; the other ranges scale with `L[15]`. Each clean column now nets the opposite of the eraser
+for its own level, so a pixel that keeps its level nets 0, and a change nets the eraser's difference,
+at most 4 (`clean_phases()` in the generator). The fast bank's grey columns open with `run - k`
+frames toward black and net 0. What no table can change: a fast rail is +-`L[15]` (balanced over a
+black/white round trip, not per push), a change made by a HALF and undone by a FAST nets about
++-17, and `Panel_EPD` drives pixel PAIRS, so an unchanged pixel next to a changing one takes its own
+rail column again (one-sided +-`L[15]` per FAST). `tools/test_gen_ed047tc2_waveform.py` in the SDK
+(class `NetDrive`) adds the nets up for every range and fails on a kept pixel netting anything.
+
 ### The LUT budget: 128 blocks, all banks together
 
 `blit_dmabuf` reads each pixel's progress word through `(int16_t)` and skips the pixel when it is
@@ -154,7 +182,8 @@ about bank lengths from it.
 
 | blob range | 5 | 6 | 7 | 8 | 9 | 10 | 11 |
 |---|---|---|---|---|---|---|---|
-| ours (`3 x L[15]`) | 72 | 63 | 63 | 63 | 51 | 48 | 42 |
+| ours (`3 x L[15]`, to 2026-11-17) | 72 | 63 | 63 | 63 | 51 | 48 | 42 |
+| ours (balanced, since) | 77 | 67 | 67 | 67 | 54 | 50 | 45 |
 | vendor GC16 phases | 46 | 43 | 40 | 38 | 38 | 44 | **57** |
 | vendor net (`L[15]`) | 24 | 21 | 21 | 21 | 17 | 16 | 14 |
 
@@ -209,15 +238,17 @@ How the driver lives with it:
   An earlier version sent HALF to the fast bank after a clean push; that is row 3 exactly where a
   scrub was wanted (leaving the reader, the screen after Screen Repair).
 - Row 2 is avoided by `normalizeForCleanBank()`. When the previous push also used the clean bank, it
-  first pushes white through the no-drive `epd_fastest` bank, a single `0u` word that `blit_dmabuf`
-  reads as "this pixel is finished". That re-tags every pixel without touching the ink, so the clean
-  push that follows scrubs the whole screen. Measured at 187 ms, against ~1239 ms for the fallback
-  white flash through the fast bank (2026-09-15). It must be `epd_fastest`, not `epd_quality`: the
-  non-fast modes prepend `lut_eraser`, and the pixel would run the eraser's nudge and then stop with
-  nothing driving it home, leaving a half-inverted screen.
+  first re-requests the frame on screen through the no-drive `epd_fastest` bank, a single `0u` word
+  that `blit_dmabuf` reads as "this pixel is finished". That re-tags every pixel without touching the
+  ink, so the clean push that follows scrubs the whole screen, and keeps each pixel's level, which the
+  eraser is indexed by (until 2026-11-17 it pushed white, and every pixel ran the white source's
+  eraser). Measured at 187 ms (2026-09-15) when it pushed white, ~130 ms since; the fallback white
+  flash through the fast bank ~1239 ms. It must be `epd_fastest`, not `epd_quality`: the non-fast
+  modes prepend `lut_eraser`, and the pixel would run the eraser's nudge and then stop with nothing
+  driving it home, leaving a half-inverted screen.
 - Because HALF and FAST alternate banks, the FAST after a HALF is a full-screen DU. It costs no extra
-  time, but DU is not DC-balanced; the periodic clean refresh is the vendor's remedy for that, so
-  keep it running.
+  time; every pixel takes its rail column once more, +-`L[15]` frames of net drive on pixels that did
+  not change.
 - To see which bank each push used, build with `-DLGFX_EPD_PUSH_TRACE=1` (commented out in the
   T5S3 section of `platformio.ini`). Build that variant after any driver change: a broken trace line
   once compiled only because the flag was off. Without it, duration alone identifies the bank
