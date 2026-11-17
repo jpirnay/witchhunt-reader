@@ -62,6 +62,9 @@ class IdleGate {
   uint32_t elapsedMs(const uint32_t nowMs) const { return nowMs - startMs_; }
   // What last kept the device busy; "settling" when nothing did but quiet was not long enough yet.
   const char* reason() const { return lastBusy_; }
+  // After a wait that ended Idle: how long after its start the device went quiet, without the kQuietMs it then had to
+  // stay so. The time of what the wait followed, where elapsedMs() is the time of the answer.
+  uint32_t quietAfterMs() const { return quietSinceMs_ - startMs_; }
 
   // Called every pass, wait or not, so an effect is followed from the command on.
   Verdict step(const Sample& sample) {
