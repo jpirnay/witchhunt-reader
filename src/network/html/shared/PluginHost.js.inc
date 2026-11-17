@@ -49,25 +49,31 @@ async function pluginApiError(r, path) {
   return err;
 }
 
-// Runs request(), and when the device refuses the host, asks the user once whether this plugin may reach it; a yes
-// is stored on the device (per plugin, kept across updates) and the request runs again.
+// Runs request(), and when the device refuses a host, asks the user whether this plugin may reach it; a yes is stored
+// on the device (per plugin, kept across updates) and the request runs again. The retry may be refused for another
+// host, one the first redirects to (a GitHub release file goes on to GitHub's CDN), which is asked about in turn:
+// each host once, a few at most.
 async function withHostApproval(plugin, request) {
-  let r = await request();
-  if (r.status !== 403) return r;
-  let refused = null;
-  try { refused = await r.clone().json(); } catch (e) { return r; }
-  if (!refused || !refused.host) return r;
-  const label = plugin.title || plugin.name;
-  if (!window.confirm('Allow the plugin "' + label + '" to connect to ' + refused.host + '?\n\n' +
-                      'The device will reach this host on the plugin\'s behalf. You can take this back on the Plugins page.')) {
-    return r;
+  const asked = [];
+  for (;;) {
+    const r = await request();
+    if (r.status !== 403) return r;
+    let refused = null;
+    try { refused = await r.clone().json(); } catch (e) { return r; }
+    if (!refused || !refused.host || asked.includes(refused.host) || asked.length >= 4) return r;
+    asked.push(refused.host);
+    const label = plugin.title || plugin.name;
+    if (!window.confirm('Allow the plugin "' + label + '" to connect to ' + refused.host + '?\n\n' +
+                        (asked.length > 1 ? 'Its request is redirected there. ' : '') +
+                        'The device will reach this host on the plugin\'s behalf. You can take this back on the Plugins page.')) {
+      return r;
+    }
+    const saved = await fetch('/api/plugins/hosts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plugin: plugin.name, host: refused.host, allow: true })
+    });
+    if (!saved.ok) throw await pluginApiError(saved, '/api/plugins/hosts');
   }
-  const saved = await fetch('/api/plugins/hosts', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ plugin: plugin.name, host: refused.host, allow: true })
-  });
-  if (!saved.ok) throw await pluginApiError(saved, '/api/plugins/hosts');
-  return request();
 }
 
 // writeFile() data: a string is base64, as upstream's API defines it; a Blob or ArrayBuffer is sent as it is.
