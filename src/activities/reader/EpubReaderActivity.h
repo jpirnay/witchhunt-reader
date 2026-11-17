@@ -34,6 +34,7 @@
 #include "KOReaderAutoSync.h"
 #include "KOReaderSyncWorker.h"
 #include "LaneBeforeBuild.h"
+#include "LookAheadPause.h"
 #include "PackOffer.h"
 #include "ProgressMapper.h"
 #include "ReaderUtils.h"
@@ -418,8 +419,15 @@ class EpubReaderActivity final : public Activity {
   // buffer back) before reaching Done. Bounds the retry loop: a spine whose parse cannot fit
   // between two page turns would otherwise re-inflate and re-parse forever, burning CPU, SD
   // writes and battery for a cache it never finishes. After BG_BUILD_MAX_PREEMPTIONS the
-  // target is abandoned to Background-C and the cursor moves on. Reset per target.
+  // target is abandoned to Background-C and the look-ahead stops (below). Reset per target.
   uint8_t backgroundPreemptCount_ = 0;
+  // B abandoned backgroundBuildSpineIndex_ and starts no build until the reader pauses or enters another chapter
+  // (LookAheadPause). Reset per target.
+  bool backgroundStoppedAfterAbandon_ = false;
+  // What a pause has to outlast: the longest a page had been up when a turn took a build of this target away, counted
+  // from the quiet rule's clock as it read when B took the buffer. Reset per target.
+  unsigned long backgroundBorrowActivityMs_ = 0;
+  uint32_t backgroundPreemptedStayMs_ = 0;
   // Times B gave the buffer back to an image decode for backgroundBuildSpineIndex_ (LaneBeforeBuild): bounded by
   // LaneBeforeBuild::kMaxYields, after which the images wait for B. Kept apart from backgroundPreemptCount_, which
   // abandons the chapter to the foreground. Reset per target.
