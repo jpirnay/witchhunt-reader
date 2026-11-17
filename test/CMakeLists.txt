@@ -233,6 +233,7 @@ add_subdirectory(cjk_line_break)
 add_subdirectory(cjk_layout)
 add_subdirectory(typography)
 add_subdirectory(zip_entry_reader)
+add_subdirectory(book_protection)
 add_subdirectory(koreader_document_id)
 # After zip_entry_reader: reuses its inflate_reader_host target.
 add_subdirectory(png_decoder)

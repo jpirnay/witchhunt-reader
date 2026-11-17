@@ -205,24 +205,6 @@ size_t readDecryptedPrefix(FsFile& file, size_t& remaining, EntryCipher& cipher,
   return got;
 }
 
-// The stat callers see for an encrypted entry (ZipFile::METHOD_ENCRYPTED).
-ZipFile::FileStatSlim encryptedStat(const ZipFile::FileStatSlim& raw, const ZipFile::EncryptedEntry& entry) {
-  ZipFile::FileStatSlim stat = raw;
-  if (raw.method != ZIP_METHOD_STORED || raw.compressedSize < 2 * CIPHER_BLOCK ||
-      raw.compressedSize % CIPHER_BLOCK != 0) {
-    stat.method = ZipFile::METHOD_ENCRYPTED | ENCRYPTED_UNREADABLE;
-    return stat;
-  }
-  stat.method = ZipFile::METHOD_ENCRYPTED | (entry.deflated ? ZIP_METHOD_DEFLATED : ZIP_METHOD_STORED);
-  if (entry.sizeKnown) {
-    stat.uncompressedSize = entry.plainSize;
-  } else {
-    stat.method |= ZipFile::METHOD_SIZE_ESTIMATED;
-    stat.uncompressedSize = std::max<uint32_t>(raw.compressedSize - CIPHER_BLOCK, FULL_INFLATE_WINDOW);
-  }
-  return stat;
-}
-
 // Logs and refuses an encrypted entry whose data is not an IV and whole cipher blocks stored in the
 // archive.
 bool encryptedLayoutReadable(const ZipFile::FileStatSlim& stat) {
@@ -275,6 +257,23 @@ int zipReadCallback(uzlib_uncomp* uncomp) {
   return ctx->readBuf[0];
 }
 }  // namespace
+
+ZipFile::FileStatSlim ZipFile::encryptedStat(const FileStatSlim& raw, const EncryptedEntry& entry) {
+  FileStatSlim stat = raw;
+  if (raw.method != ZIP_METHOD_STORED || raw.compressedSize < 2 * CIPHER_BLOCK ||
+      raw.compressedSize % CIPHER_BLOCK != 0) {
+    stat.method = METHOD_ENCRYPTED | ENCRYPTED_UNREADABLE;
+    return stat;
+  }
+  stat.method = METHOD_ENCRYPTED | (entry.deflated ? ZIP_METHOD_DEFLATED : ZIP_METHOD_STORED);
+  if (entry.sizeKnown) {
+    stat.uncompressedSize = entry.plainSize;
+  } else {
+    stat.method |= METHOD_SIZE_ESTIMATED;
+    stat.uncompressedSize = std::max<uint32_t>(raw.compressedSize - CIPHER_BLOCK, FULL_INFLATE_WINDOW);
+  }
+  return stat;
+}
 
 bool ZipFile::protect(const std::string& path, std::unique_ptr<Protection> protection) {
   if (!protection) return false;

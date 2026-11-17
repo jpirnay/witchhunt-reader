@@ -137,6 +137,9 @@ class ZipFile {
     bool deflated = true;
   };
 
+  // The stat ZipFile hands out for an encrypted entry whose central-directory stat is `raw`.
+  static FileStatSlim encryptedStat(const FileStatSlim& raw, const EncryptedEntry& entry);
+
   // One archive's decryption, registered with protect(). ZipFile calls it only under the
   // registry's lock, so an implementation needs no lock of its own.
   class Protection {

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "BuildArena.h"
+#include "TestZip.h"
 #include "ZipFile.h"
 
 // Entries of an OCF-encrypted archive through every ZipFile read path, once a Protection is
@@ -23,6 +24,10 @@
 #endif
 
 namespace {
+
+using test_zip::DeflatedEntry;
+using test_zip::EntrySpec;
+using test_zip::writeZip;
 
 constexpr const char* kBigChapter = "OEBPS/3308270851576161417_2701-h-0.htm.html";     // 54 KB plain
 constexpr const char* kSmallChapter = "OEBPS/3308270851576161417_2701-h-26.htm.html";  // 2.4 KB plain
@@ -109,125 +114,6 @@ class TestProtection : public ZipFile::Protection {
   int* finds_;
 };
 
-// ---- a STORED-only zip writer ----
-
-void put16(std::string& out, const uint16_t v) {
-  out.push_back(static_cast<char>(v));
-  out.push_back(static_cast<char>(v >> 8));
-}
-void put32(std::string& out, const uint32_t v) {
-  for (int i = 0; i < 4; i++) out.push_back(static_cast<char>(v >> (8 * i)));
-}
-
-struct ZipEntrySpec {
-  std::string name;
-  std::string data;
-  uint16_t method = 0;
-  uint32_t uncompressedSize = 0;  // as the directory claims it; 0: data's size
-};
-
-// Writes the archive and returns each entry's local-header offset.
-std::vector<uint32_t> writeZip(const std::string& path, const std::vector<ZipEntrySpec>& entries) {
-  std::string zip;
-  std::vector<uint32_t> offsets;
-  for (const auto& e : entries) {
-    offsets.push_back(static_cast<uint32_t>(zip.size()));
-    put32(zip, 0x04034b50);
-    put16(zip, 20);
-    put16(zip, 0);
-    put16(zip, e.method);
-    put16(zip, 0);
-    put16(zip, 0);
-    put32(zip, 0);
-    put32(zip, static_cast<uint32_t>(e.data.size()));
-    put32(zip, e.uncompressedSize != 0 ? e.uncompressedSize : static_cast<uint32_t>(e.data.size()));
-    put16(zip, static_cast<uint16_t>(e.name.size()));
-    put16(zip, 0);
-    zip += e.name;
-    zip += e.data;
-  }
-  const auto cdOffset = static_cast<uint32_t>(zip.size());
-  for (size_t i = 0; i < entries.size(); ++i) {
-    const auto& e = entries[i];
-    put32(zip, 0x02014b50);
-    put16(zip, 20);
-    put16(zip, 20);
-    put16(zip, 0);
-    put16(zip, e.method);
-    put16(zip, 0);
-    put16(zip, 0);
-    put32(zip, 0);
-    put32(zip, static_cast<uint32_t>(e.data.size()));
-    put32(zip, e.uncompressedSize != 0 ? e.uncompressedSize : static_cast<uint32_t>(e.data.size()));
-    put16(zip, static_cast<uint16_t>(e.name.size()));
-    put16(zip, 0);
-    put16(zip, 0);
-    put16(zip, 0);
-    put16(zip, 0);
-    put32(zip, 0);
-    put32(zip, offsets[i]);
-    zip += e.name;
-  }
-  const auto cdSize = static_cast<uint32_t>(zip.size()) - cdOffset;
-  put32(zip, 0x06054b50);
-  put16(zip, 0);
-  put16(zip, 0);
-  put16(zip, static_cast<uint16_t>(entries.size()));
-  put16(zip, static_cast<uint16_t>(entries.size()));
-  put32(zip, cdSize);
-  put32(zip, cdOffset);
-  put16(zip, 0);
-  FILE* f = fopen(path.c_str(), "wb");
-  EXPECT_NE(f, nullptr);
-  if (f) {
-    fwrite(zip.data(), 1, zip.size(), f);
-    fclose(f);
-  }
-  return offsets;
-}
-
-class VectorSink : public Print {
- public:
-  std::string data;
-  size_t write(uint8_t b) override {
-    data.push_back(static_cast<char>(b));
-    return 1;
-  }
-  size_t write(const uint8_t* buf, size_t n) override {
-    data.append(reinterpret_cast<const char*>(buf), n);
-    return n;
-  }
-};
-
-// An entry of moby-dick.epub: its DEFLATE stream as stored and its plaintext.
-struct DeflatedEntry {
-  std::string stream;
-  std::string plain;
-};
-
-DeflatedEntry fixtureEntry(const char* name) {
-  DeflatedEntry out;
-  const std::string fixture = FIXTURE_EPUB;
-  ZipFile zip(fixture);
-  VectorSink plain;
-  EXPECT_TRUE(zip.readFileToStream(name, plain, 1024));
-  out.plain = plain.data;
-  ZipFile::FileStatSlim stat{};
-  EXPECT_TRUE(zip.loadFileStatSlim(name, &stat));
-  EXPECT_EQ(stat.method, 8);
-  FILE* f = fopen(fixture.c_str(), "rb");
-  uint8_t header[30];
-  fseek(f, static_cast<long>(stat.localHeaderOffset), SEEK_SET);
-  EXPECT_EQ(fread(header, 1, sizeof(header), f), sizeof(header));
-  const long data =
-      static_cast<long>(stat.localHeaderOffset) + 30 + (header[26] | header[27] << 8) + (header[28] | header[29] << 8);
-  out.stream.resize(stat.compressedSize);
-  fseek(f, data, SEEK_SET);
-  EXPECT_EQ(fread(out.stream.data(), 1, out.stream.size(), f), out.stream.size());
-  fclose(f);
-  return out;
-}
-
 std::string drainReader(ZipFile::EntryReader& reader, const size_t chunk) {
   std::string out;
   std::vector<uint8_t> buf(chunk);
@@ -246,15 +132,15 @@ std::string drainReader(ZipFile::EntryReader& reader, const size_t chunk) {
 class ZipEncryptedEntryTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    big_ = fixtureEntry(kBigChapter);
-    small_ = fixtureEntry(kSmallChapter);
+    big_ = test_zip::deflatedEntry(FIXTURE_EPUB, kBigChapter);
+    small_ = test_zip::deflatedEntry(FIXTURE_EPUB, kSmallChapter);
     ASSERT_GT(big_.plain.size(), 32768u);
     notes_.clear();
     for (int i = 0; i < 1000; ++i) notes_.push_back(static_cast<char>('a' + i % 26));
     path_ = ::testing::TempDir() + "zip_encrypted_" + std::to_string(getpid()) + ".zip";
     // Each entry name says how it is stored. "padblock": 16 bytes of plaintext, so its last block
     // is padding only.
-    const std::vector<ZipEntrySpec> entries = {
+    const std::vector<EntrySpec> entries = {
         {"mimetype", "application/epub+zip"},
         {"big.xhtml", encrypt(big_.stream, key_)},
         {"small.xhtml", encrypt(small_.stream, key_)},
@@ -282,7 +168,7 @@ class ZipEncryptedEntryTest : public ::testing::Test {
   }
 
   std::string streamed(ZipFile& zip, const char* name) {
-    VectorSink sink;
+    test_zip::StringSink sink;
     EXPECT_TRUE(zip.readFileToStream(name, sink, 1024)) << name;
     return sink.data;
   }
@@ -445,7 +331,7 @@ TEST_F(ZipEncryptedEntryTest, UnreadableLayoutRefused) {
   ZipFile::FileStatSlim stat{};
   ASSERT_TRUE(zip.loadFileStatSlim("zipped.xhtml", &stat));
   EXPECT_TRUE(ZipFile::isEncrypted(stat));
-  VectorSink sink;
+  test_zip::StringSink sink;
   EXPECT_FALSE(zip.readFileToStream("zipped.xhtml", sink, 1024));
   EXPECT_EQ(zip.readFileToMemory("zipped.xhtml"), nullptr);
   ZipFile::EntryReader reader(zip);
@@ -511,7 +397,7 @@ TEST_F(ZipEncryptedEntryTest, OtherArchivesUntouched) {
   const int before = finds_;
   const std::string fixture = FIXTURE_EPUB;  // ZipFile keeps a reference to its path
   ZipFile other(fixture);
-  VectorSink sink;
+  test_zip::StringSink sink;
   ASSERT_TRUE(other.readFileToStream(kSmallChapter, sink, 1024));
   EXPECT_EQ(sink.data, small_.plain);
   EXPECT_EQ(finds_, before);
