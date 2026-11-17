@@ -12,8 +12,8 @@
 // Runs: JSON catalogs, their four paging modes, static and fetched lists with notices and requirements, search, item
 // compatibility filtering, the template variables ({cfg.*} from the plugin's config file, {token} from its token
 // file), sign-in by password grant or device code, and downloads of one file (by URL or a url_path answer) or of a
-// bundle. Not yet: XML catalogs, Details pages, the sidecar file, and token or config files outside the plugin's
-// folder.
+// bundle; XML catalogs (WebDAV PROPFIND listings) browse folder by folder. Not yet: Details pages, the sidecar file,
+// and token or config files outside the plugin's folder.
 //
 // PluginsPage.html loads this on demand; window.PluginCatalog is its interface.
 (function () {
@@ -213,6 +213,103 @@
     return e;
   }
 
+  // ---- XML catalogs: the rules of the SDK's XmlListParser (freeink-sdk libs/network/CatalogList), upstream's parser ----
+
+  // Percent-decodes a URL path; '+' stays a '+' (a space only in form encoding, never in a path).
+  function urlDecodePath(s) {
+    const bytes = [];
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === '%' && /^[0-9A-Fa-f]{2}$/.test(s.slice(i + 1, i + 3))) {
+        bytes.push(parseInt(s.slice(i + 1, i + 3), 16));
+        i += 2;
+      } else {
+        bytes.push(...utf8(s[i]));
+      }
+    }
+    return new TextDecoder().decode(Uint8Array.from(bytes));
+  }
+
+  function urlEncodePath(s) {
+    return Array.from(utf8(s), (b) => (/[A-Za-z0-9\-_.~/]/.test(String.fromCharCode(b)) && b < 128
+      ? String.fromCharCode(b) : '%' + b.toString(16).toUpperCase().padStart(2, '0'))).join('');
+  }
+
+  // scheme://host[:port], and the path ("/" when there is none).
+  function splitUrl(url) {
+    const schemeEnd = url.indexOf('://');
+    const hostEnd = url.indexOf('/', schemeEnd < 0 ? 0 : schemeEnd + 3);
+    return hostEnd < 0 ? { origin: url, path: '/' } : { origin: url.slice(0, hostEnd), path: url.slice(hostEnd) };
+  }
+
+  function trimSlashes(s) {
+    let out = s;
+    while (out.length > 1 && out.endsWith('/')) out = out.slice(0, -1);
+    return out;
+  }
+
+  // A field selector: "elem" (the leading text of the first descendant <elem>), "elem@attr" (its attribute), "@attr"
+  // (an attribute of the item element itself). Names match by local name: namespace prefixes do not count.
+  function xmlField(item, selector) {
+    const sel = text(selector);
+    if (!sel) return '';
+    const at = sel.indexOf('@');
+    const elem = at < 0 ? sel : sel.slice(0, at);
+    const attr = at < 0 ? '' : sel.slice(at + 1);
+    const attrOf = (node) => {
+      const a = Array.from(node.attributes).find((x) => x.localName === attr);
+      return a ? a.value : '';
+    };
+    if (!elem) return attrOf(item).trim();
+    const found = Array.from(item.getElementsByTagName('*')).find((e) => e.localName === elem);
+    if (!found) return '';
+    if (attr) return attrOf(found).trim();
+    let lead = '';
+    for (const child of Array.from(found.childNodes)) {
+      if (child.nodeType === 1) break;  // a child element ends the leading text
+      if (child.nodeType === 3 || child.nodeType === 4) lead += child.nodeValue;
+    }
+    return lead.trim();
+  }
+
+  // The rows of an XML listing: one per element named browse.item (not nested in another), with url, title, author
+  // and id from browse.fields. A row without a url is dropped; skip_self drops the listing's own entry; extensions
+  // keep only files with those endings (folders stay); a missing title is the url's last path segment; resolve_urls
+  // joins a relative href to the listing's origin. A row holding a container_element is a folder.
+  function xmlRows(xml, browse, requestUrl) {
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length) throw new Error('the catalog did not answer XML');
+    const itemName = text(browse.item);
+    const container = text(browse.container_element);
+    const f = browse.fields || {};
+    const extensions = (Array.isArray(browse.extensions) ? browse.extensions : []).map((x) => text(x).toLowerCase());
+    const request = splitUrl(requestUrl);
+    const requestPath = urlDecodePath(request.path);
+    const self = trimSlashes(requestPath);
+    const requestDir = requestPath.slice(0, requestPath.lastIndexOf('/') + 1);
+    const items = Array.from(doc.getElementsByTagName('*')).filter((e) => {
+      if (e.localName !== itemName) return false;
+      for (let p = e.parentElement; p; p = p.parentElement) if (p.localName === itemName) return false;
+      return true;
+    });
+    const rows = [];
+    for (const item of items) {
+      let url = xmlField(item, f.url);
+      if (!url) continue;
+      const isDir = !!container && Array.from(item.getElementsByTagName('*')).some((e) => e.localName === container);
+      const absolute = url.includes('://');
+      let decoded = urlDecodePath(absolute ? splitUrl(url).path : url);
+      if (!absolute && !decoded.startsWith('/')) decoded = requestDir + decoded;
+      const trimmed = trimSlashes(decoded);
+      if (browse.skip_self && trimmed === self) continue;
+      if (!isDir && extensions.length && !extensions.some((x) => trimmed.toLowerCase().endsWith(x))) continue;
+      let title = xmlField(item, f.title);
+      if (!title) title = trimmed.slice(trimmed.lastIndexOf('/') + 1);
+      if (browse.resolve_urls && !absolute) url = request.origin + urlEncodePath(decoded);
+      rows.push({ raw: {}, title, author: xmlField(item, f.author), id: xmlField(item, f.id), url, description: '', isDir });
+    }
+    return rows;
+  }
+
   // What of a device.json runs here: {catalog, reason, events}. catalog: it can be opened on the Plugins page;
   // reason: why not, when it has one that cannot; events: it subscribes to device events, which do not run here yet.
   function describe(manifest, pluginDir) {
@@ -228,8 +325,11 @@
     const kind = signInKind(m);
     const outside = [m.token && m.token.file, m.config && m.config.file].map((f) => text(f).trim())
       .find((f) => f.startsWith('/') && !inPluginFolder(f, pluginDir));
-    if (text(browse.format || 'json') !== 'json') {
-      out.reason = 'its catalog is XML, which does not run here yet';
+    const format = text(browse.format || 'json');
+    if (format !== 'json' && format !== 'xml') {
+      out.reason = 'its catalog format ("' + format + '") is not one this page knows';
+    } else if (format === 'xml' && !text(browse.item)) {
+      out.reason = 'its XML catalog names no item element';
     } else if (kind.startsWith('other:')) {
       out.reason = 'its sign-in ("' + kind.slice(6) + '") is not one this page knows';
     } else if (outside) {
@@ -260,6 +360,7 @@
       this.query = '';
       this.page = 1;
       this.staticRows = null;  // a static answer's compatible rows, paged here
+      this.trail = [];  // an XML catalog's folders entered, the last one shown: {url, title}
       this.lane = Promise.resolve();
       this.cancelled = false;  // set to stop a device-code sign-in that is waiting
       this.wait = io.wait || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -296,9 +397,10 @@
       if (this.vars.token) vars.token = this.vars.token;
       this.vars = vars;
       await this.ensureToken();
-      this.lists = (Array.isArray(this.browse.lists) ? this.browse.lists : [])
+      // Lists are for JSON catalogs; an XML one browses folder by folder instead (as upstream's does).
+      this.lists = this.isXml() ? [] : (Array.isArray(this.browse.lists) ? this.browse.lists : [])
         .filter((l) => l && text(l.title) && listAllowed(l.requires));
-      if (this.browse.lists_url) {
+      if (this.browse.lists_url && !this.isXml()) {
         try {
           this.lists = this.lists.concat(await this.authorized(() => this.fetchLists()));
         } catch (e) {
@@ -528,7 +630,44 @@
     }
 
     hasSearch() {
-      return !!(this.browse.search && this.browse.search.url);
+      return !this.isXml() && !!(this.browse.search && this.browse.search.url);
+    }
+
+    isXml() {
+      return text(this.browse.format || 'json') === 'xml';
+    }
+
+    // An XML catalog's folders: enter() one of its rows, leave() for the folder above.
+    enter(row) {
+      this.trail.push({ url: row.url, title: row.title });
+      this.page = 1;
+      this.staticRows = null;
+    }
+
+    leave() {
+      this.trail.pop();
+      this.page = 1;
+      this.staticRows = null;
+    }
+
+    // An XML catalog's folder: browse's request (a WebDAV PROPFIND, say) to browse.url or the folder entered, its rows
+    // paged here. 207 Multi-Status counts as success like any 2xx.
+    async loadXml() {
+      if (!this.staticRows) {
+        const b = this.browse;
+        const body = typeof b.body === 'string' ? b.body : '';
+        this.staticRows = await this.authorized(async () => {
+          const url = this.trail.length ? this.trail[this.trail.length - 1].url : resolveTemplate(b.url, this.vars);
+          const res = await this.relayRaw((b.method || 'GET').toUpperCase(), url, resolveHeaders(b.headers, this.vars),
+                                          resolveTemplate(body, this.vars));
+          if (res.status === 401 || res.status === 403) {
+            throw signInNeeded('the catalog refused the request (' + res.status + ')');
+          }
+          if (res.status < 200 || res.status >= 300) throw new Error('the catalog answered ' + res.status);
+          return xmlRows(res.body, b, url);
+        });
+      }
+      return this.window(this.staticRows, pageSize(this.browse));
     }
 
     // The browse request in force: the search while there is a query, else the open list's, else browse's own.
@@ -557,6 +696,7 @@
 
     // The current page: {rows, hasPrevious, hasNext}.
     async load() {
+      if (this.isXml()) return this.loadXml();
       const req = this.request();
       const mode = pagingMode(req);
       const size = pageSize(this.browse);
@@ -821,6 +961,15 @@
     };
 
     const rowView = (row) => {
+      if (row.isDir) {
+        return el('div', { className: 'plugin' }, [
+          el('div', { className: 'plugin-info' }, [el('strong', { textContent: row.title + '/' })]),
+          el('div', { className: 'plugin-actions' }, [el('button', {
+            className: 'btn btn-small', textContent: 'Open',
+            onclick: () => { catalog.enter(row); renderControls(); showPage(); }
+          })])
+        ]);
+      }
       const button = el('button', { className: 'btn btn-small btn-primary', textContent: 'Download' });
       button.onclick = async () => {
         button.disabled = true;
@@ -850,6 +999,12 @@
 
     const renderControls = () => {
       const out = [];
+      if (catalog.trail.length) {
+        out.push(el('div', { className: 'catalog-lists' }, [
+          el('button', { className: 'btn btn-small', textContent: 'Up', onclick: () => { catalog.leave(); renderControls(); showPage(); } }),
+          el('span', { className: 'plugin-meta', textContent: catalog.trail.map((t) => t.title).join(' / ') })
+        ]));
+      }
       if (catalog.lists.length > 1 || (catalog.lists.length === 1 && !catalog.list)) {
         out.push(el('div', { className: 'catalog-lists' }, catalog.lists.map((l) => el('button', {
           className: 'btn btn-small' + (catalog.list === l && !catalog.query ? ' btn-primary' : ''),
@@ -912,7 +1067,7 @@
     // For the tests.
     _internal: {
       getPath, enc, escapeUrl, resolveTemplate, pagingMode, pageSize, compatible, listAllowed, sanitizeFilename,
-      cardFolder, joinServerPath, tokenJson, signInKind
+      cardFolder, joinServerPath, tokenJson, signInKind, urlDecodePath, urlEncodePath, xmlRows
     }
   };
 })();

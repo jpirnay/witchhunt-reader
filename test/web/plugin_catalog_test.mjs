@@ -4,7 +4,8 @@
 // opened from the installed list: offset paging with lists and search, a {page} catalog installing a bundle, fetched
 // lists, a static catalog paged after compatibility filtering behind a remembered notice and a config file, and the
 // sign-ins: a device code, a password grant renewed after a 401 (browsing and downloading), a token only the plugin's
-// web card writes, and a token file outside the plugin's folder, which does not open.
+// web card writes, and a token file outside the plugin's folder, which does not open; and an XML (WebDAV) catalog
+// browsed folder by folder.
 //
 // The page runs in jsdom with its includes resolved, and loads plugin-catalog.js from the source tree. The device
 // (its relay, /api/fetch, /mkdir, /download) and the catalogs' servers are a fake fetch; every manifest and answer is
@@ -72,6 +73,7 @@ const installed = [
   { name: 'wallabag', title: 'Wallabag', root: ROOT, mount: 'settings', web: true, device: true },
   { name: 'webcard', title: 'Web card', root: ROOT, mount: 'files', web: true, device: true },
   { name: 'outside', title: 'Outside', root: ROOT, mount: 'settings', web: true, device: true },
+  { name: 'dav', title: 'WebDAV', root: ROOT, mount: 'settings', web: true, device: true },
   { name: 'both', title: 'Both', root: ROOT, mount: 'files', web: true, device: true },
   { name: 'off', title: 'Switched off', root: ROOT, mount: 'settings', web: false, device: true, disabled: true },
   { name: 'shelves', title: 'Shelves', root: ROOT, mount: 'settings', web: false, device: true }
@@ -137,8 +139,22 @@ const manifests = {
                 dest_dir: '/News', filename: '{title}.epub' }
   },
   webcard: { token: { file: 'token.json' }, browse: { url: 'https://web.test/list?page={page}' } },
-  outside: { token: { file: '/.crosspoint/outside-token.json' }, browse: { url: 'https://x.test/list' } }
+  outside: { token: { file: '/.crosspoint/outside-token.json' }, browse: { url: 'https://x.test/list' } },
+  dav: {
+    config: { file: 'config.json' },
+    browse: {
+      format: 'xml', url: '{cfg.url}', method: 'PROPFIND', headers: { Authorization: 'Basic {cfg.auth}', Depth: '1' },
+      body: '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>',
+      item: 'response', fields: { title: 'displayname', url: 'href' }, container_element: 'collection',
+      skip_self: true, resolve_urls: true, extensions: ['.epub'], page_size: 3
+    },
+    download: { username: '{cfg.user}', password: '{cfg.pass}', dest_dir: '/WebDAV', filename: '{title}' }
+  }
 };
+const davEntry = (href, name, folder) => '<d:response><d:href>' + href + '</d:href><d:propstat><d:prop>' +
+  (name === null ? '' : '<d:displayname>' + name + '</d:displayname>') +
+  '<d:resourcetype>' + (folder ? '<d:collection/>' : '') + '</d:resourcetype></d:prop></d:propstat></d:response>';
+const davListing = (...entries) => '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">' + entries.join('') + '</d:multistatus>';
 
 // ---- The catalogs' servers, reached through the relay ---------------------------------------------------------------
 
@@ -164,6 +180,15 @@ const answers = {
   },
   'https://signin.test/books?page=1&limit=8': (req) => (bearer(req) === 'Bearer TOKEN-DC'
     ? { status: 200, body: [{ title: 'DC 1' }] } : { status: 401, body: {} }),
+  'https://dav.test/files/me/': (req) => ({ status: req.method === 'PROPFIND' ? 207 : 405, body: davListing(
+    davEntry('/files/me/', 'me', true),
+    davEntry('/files/me/Book%20Shelf/', null, true),
+    davEntry('/files/me/A%20Book.epub', 'A Book.epub', false),
+    davEntry('/files/me/notes.md', 'notes.md', false),
+    davEntry('Second.EPUB', null, false)) }),
+  'https://dav.test/files/me/Book%20Shelf/': () => ({ status: 207, body: davListing(
+    davEntry('/files/me/Book%20Shelf/', 'Book Shelf', true),
+    davEntry('/files/me/Book%20Shelf/Deep.epub', 'Deep.epub', false)) }),
   'https://wb.test/oauth/v2/token': (req) => {
     mints++;
     return req.body === '{"username":"me","password":"secret pw"}' ? { status: 200, body: { access_token: 'T' + mints } }
@@ -215,7 +240,8 @@ const existing = new Set(['/News']);
 // The card's files the runner reads (/download) and writes (/api/plugin-fs).
 const card = {
   [ROOT + '/static/config.json']: '{"server":"https://files.test","dest_dir":"Books"}',
-  [ROOT + '/wallabag/config.json']: '{"url":"https://wb.test","username":"me","password":"secret pw"}'
+  [ROOT + '/wallabag/config.json']: '{"url":"https://wb.test","username":"me","password":"secret pw"}',
+  [ROOT + '/dav/config.json']: '{"url":"https://dav.test/files/me/","auth":"bWU6cHc=","user":"me","pass":"pw"}'
 };
 const written = [];
 let refuseNextDownload = false;
@@ -259,7 +285,8 @@ function device(url, options) {
     relayed.push(json);
     if (answers[json.url]) {
       const out = answers[json.url](json);
-      return new FakeResponse(200, JSON.stringify(out.body), { 'X-Relay-Status': String(out.status), 'X-Relay-Headers': '[]' });
+      return new FakeResponse(200, typeof out.body === 'string' ? out.body : JSON.stringify(out.body),
+                              { 'X-Relay-Status': String(out.status), 'X-Relay-Headers': '[]' });
     }
     const answer = internet[json.url];
     if (answer && answer.redirect) {
@@ -408,10 +435,14 @@ check(P.signInKind({ auth: { request: { url: 'u' } } }) === 'device_code' &&
       P.signInKind({ auth: { type: 'password', request: { url: 'u' } } }) === 'password' &&
       P.signInKind({ auth: { type: 'refresh', request: { url: 'u' } } }) === 'other:refresh' &&
       P.signInKind({ auth: { type: 'password' } }) === '', 'the sign-in kinds, device_code by default, none without a request');
+check(P.urlDecodePath('/a%20b+c/%C3%BC') === '/a b+c/ü' && P.urlEncodePath('/a b/ü~') === '/a%20b/%C3%BC~',
+      'XML hrefs: decoded with "+" kept, encoded back with "/" kept');
 const D = w.PluginCatalog.describe;
 check(D({ browse: { url: 'u' } }).catalog && D({ browse: { lists_url: 'u' } }).catalog, 'a JSON catalog opens');
-check(!D({ browse: { url: 'u', format: 'xml' } }).catalog && D({ browse: { url: 'u', format: 'xml' } }).reason.includes('XML'),
-      'an XML one says why not');
+check(D({ browse: { url: 'u', format: 'xml', item: 'response' } }).catalog &&
+      D({ browse: { url: 'u', format: 'xml' } }).reason.includes('item element') &&
+      D({ browse: { url: 'u', format: 'opds' } }).reason.includes('"opds"'),
+      'an XML catalog opens when it names its item element; an unknown format says why not');
 check(D({ browse: { url: 'u' }, token: { file: 'token.json' }, auth: { type: 'password', request: { url: 'u' } } }, '/p/x').catalog,
       'a catalog with a sign-in opens');
 check(!D({ browse: { url: 'u' }, auth: { type: 'refresh', request: { url: 'u' } } }).catalog &&
@@ -581,6 +612,35 @@ check(catalogStatus() === 'Saved /News/Saved article.epub', 'the download is sav
 check(fetched.length === 2 && fetched[0].headers.Authorization === 'Bearer T2' && fetched[1].headers.Authorization === 'Bearer T3' &&
       mints === 3, 'a download its server refuses mints a new token and runs again with it');
 check(fetched[0].url === 'https://wb.test/api/entries/7/export.epub', 'the download address is filled in');
+
+// ---- An XML (WebDAV) catalog, folder by folder ----------------------------------------------------------------------
+
+button(view(), 'Close').click();
+relayed.length = 0;
+button(installedRow('WebDAV'), 'Open catalog').click();
+await until(() => titles().length === 3, 'the WebDAV listing');
+const propfind = relayed[0];
+check(propfind.method === 'PROPFIND' && propfind.url === 'https://dav.test/files/me/' && propfind.headers.Depth === '1' &&
+      propfind.headers.Authorization === 'Basic bWU6cHc=' && propfind.body.includes('<d:propfind'),
+      'the listing is a PROPFIND with Depth and the config\'s credentials');
+check(titles().join('|') === 'Book Shelf/|A Book.epub|Second.EPUB',
+      'its own entry and a file of another kind are left out; a folder without a name takes its last path segment (' + titles() + ')');
+check(!view().querySelector('.catalog-search') && !view().querySelector('.catalog-lists'), 'no search and no lists at the top');
+fetched.length = 0;
+view().querySelectorAll('.catalog-rows .plugin button')[2].click();
+await until(() => /^(Saved|Could not)/.test(catalogStatus()), 'the relative-href download');
+check(fetched[0] && fetched[0].url === 'https://dav.test/files/me/Second.EPUB' && fetched[0].dest === '/WebDAV/Second.EPUB',
+      'a relative href joins the listing\'s folder (' + (fetched[0] && fetched[0].url) + ')');
+check(fetched[0] && fetched[0].headers.Authorization === 'Basic bWU6cHc=', 'the download sends the config\'s user and password');
+button(view(), 'Open').click();
+await until(() => titles().join('|') === 'Deep.epub', 'the folder');
+check(lastRelay().url === 'https://dav.test/files/me/Book%20Shelf/' && lastRelay().method === 'PROPFIND',
+      'Open lists the folder, its href resolved against the server');
+check(view().querySelector('.catalog-lists').textContent.includes('Book Shelf') && !!button(view(), 'Up'),
+      'the folder\'s path shows, with Up');
+button(view(), 'Up').click();
+await until(() => titles().length === 3, 'the top folder again');
+check(lastRelay().url === 'https://dav.test/files/me/' && !button(view(), 'Up'), 'Up goes back to the top');
 
 // ---- A token only the plugin's web card writes ----------------------------------------------------------------------
 

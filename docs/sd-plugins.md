@@ -271,6 +271,16 @@ What runs:
 
   A token is saved as upstream saves it: `token.file` rewritten to hold only
   the token, nested at `token.path`, through the plugin's `writeFile`.
+- XML catalogs (`browse.format` `xml`, a WebDAV `PROPFIND` listing, say),
+  by the rules of the SDK's `XmlListParser` (Justin Mitchell). Each element
+  named `browse.item` is a row. `fields` are selectors: `elem` (the leading
+  text of the first descendant `<elem>`), `elem@attr` or `@attr`, matched by
+  local name. A row needs a `url`, and a missing `title` is the url's last
+  path segment. `skip_self` drops the listing's own entry, `extensions` keeps
+  only files with those endings, and `resolve_urls` joins a relative href to
+  the server. A row holding a `container_element` is a folder: **Open** lists
+  it, **Up** goes back. No lists or search, as upstream; the download URL
+  defaults to the row's `url`.
 
 The capabilities a catalog may require (`compatibility.requires`, a list's
 `requires`): `catalog.lists`, `catalog.notices`, `catalog.bundle_install`,
@@ -292,8 +302,8 @@ Differences from upstream:
   (`/.crosspoint/lingoblend.json`, say) is refused here: the web server lets a
   plugin keep files only in its folder. Upstream allows any path but the
   credential stores. Such a catalog says so and does not open.
-- Not yet: XML catalogs, Details pages, the `sidecar` file, `events`, and
-  sign-in types upstream does not define (`refresh`).
+- Not yet: Details pages, the `sidecar` file, `events`, and sign-in types
+  upstream does not define (`refresh`).
 
 ## Installing and managing plugins: the Plugins page
 
@@ -335,8 +345,8 @@ it is sent:
   - **runs here**: a web part (`plugin.js`), a catalog that opens here
     ([Catalogs](#catalogs-upstreams-devicejson)), or both;
   - **partly runs here**: one of them runs, and something does not yet: a
-    catalog that is XML or keeps its token or config outside its folder, or
-    device `events`;
+    catalog that keeps its token or config outside its folder, or device
+    `events`;
   - **does not run here**: nothing of it runs (an events-only `device.json`,
     for example), another `firmware_family`, a requirement this firmware lacks
     (named), a `device.json` that could not be read, or a reason the catalog

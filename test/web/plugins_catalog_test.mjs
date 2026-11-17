@@ -89,7 +89,7 @@ const deviceJson = {
   'https://example.org/c/': { title: 'Catalog only', browse: { url: 'https://example.org/c/all-{page}.json', items: 'items' } },
   'https://example.org/e/': { browse: { url: 'https://example.org/e/list' }, events: { book_finished: { url: 'https://example.org/e/done' } } },
   'https://example.org/k/': { events: { book_finished: { url: 'https://example.org/k/done' } } },
-  'https://example.org/l/': { browse: { format: 'xml', url: 'https://example.org/l/dav/' } }
+  'https://example.org/l/': { browse: { format: 'xml', url: 'https://example.org/l/dav/', item: 'response' } }
 };
 
 const requests = [];
@@ -163,8 +163,8 @@ check(text(row('Needs catalog')).includes('partly runs here') && text(row('Needs
       hasButton(row('Needs catalog')), 'the catalog.* requirements are met; its events are not');
 check(text(row('Events only')).includes('does not run here') && text(row('Events only')).includes('(events)') &&
       !hasButton(row('Events only')), 'a plugin with only device events is not offered for install');
-check(text(row('XML catalog')).includes('partly runs here') && text(row('XML catalog')).includes('XML'),
-      'an XML catalog is named as what does not run');
+check(/runs here/.test(text(row('XML catalog'))) && !/partly|does not/.test(text(row('XML catalog'))) &&
+      text(row('XML catalog')).includes('a card, and a catalog you open on this page'), 'an XML catalog runs here');
 check(text(row('Unreadable')).includes('could not be checked') && !hasButton(row('Unreadable')),
       'a device.json that cannot be read is said so');
 check(text(row('Needs transfer')).includes('transfer.localsend.v1') && !hasButton(row('Needs transfer')),
