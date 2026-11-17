@@ -5647,11 +5647,13 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       // same box again held the X4's borrowed first-open build behind a FAST refresh (548 ms, 2026-11-16). The write
       // buffer takes the frame on screen instead, which is what drawPopup() leaves there, for the seed and the lend.
       const bool keepFirstOpenPopup = popupBeforeBuild && !secondaryBorrowed_ && indexingPopupStillShown();
-      // Where the lend below need not wait for the popup's waveform (the X3), the build starts while the popup
-      // paints: the popup ships async, the lend takes the frame not being painted, and the kickoff below slices on
-      // until the waveform ends. Not for a build B handed over, which holds its block already.
-      bool popupPainting =
-          popupBeforeBuild && !keepFirstOpenPopup && !secondaryBorrowed_ && renderer.lendsDuringRefresh();
+      // Where the lend below need not wait for the popup's waveform, the build starts while the popup paints: the
+      // popup ships async, and the kickoff below slices on until the waveform ends (IndexingPopupGate::chapterLend).
+      // Not for a build B handed over, which holds its block already.
+      using IndexingPopupGate::Lend;
+      Lend lend = popupBeforeBuild && !keepFirstOpenPopup && !secondaryBorrowed_
+                      ? IndexingPopupGate::chapterLend(ReaderUtils::indexingPopupPanel(renderer))
+                      : Lend::Blocking;
       if (popupBeforeBuild) {
         // X4: the dramatic-transition HALF belongs on the first CONTENT page
         // (forceHalfRefreshAfterPopup_ below), not the popup. The popup is a transient box over the
@@ -5670,7 +5672,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         } else {
           // Immediate feedback before the first page lands.
           GUI.drawPopup(renderer, tr(STR_INDEXING), /*overlayDisplayedFrame=*/true,
-                        popupPainting ? PopupShip::Async : PopupShip::Blocking);
+                        lend != Lend::Blocking ? PopupShip::Async : PopupShip::Blocking);
         }
 
         // Tight heap: free the secondary buffer (~48–52 KB) for the build. AA is off until the
@@ -5705,22 +5707,29 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
           LOG_INF("ERS", "Background-C: building spine %d incrementally, secondary buffer already BORROWED (free=%lu)",
                   currentSpineIndex, static_cast<unsigned long>(freeBefore));
         } else {
-          renderer.syncRedRamFromFrameBuffer();
+          // The seed waits out a refresh in flight: with the popup still painting it comes after the kickoff (below).
+          if (lend == Lend::Blocking) renderer.syncRedRamFromFrameBuffer();
           // Prefer BORROWING the secondary buffer over freeing it: the lent block never enters
           // the heap, so a survivor can't split it into a fragmented hole and the return cannot
           // fail (the realloc-failure / heap-recovery-restart class of bugs is impossible). The
           // build's arena bump-allocates inside the lent region instead of the heap. Fall back to
           // the legacy release only when there is no secondary buffer to lend.
           size_t borrowedSize = 0;
-          uint8_t* borrowed = popupPainting ? renderer.borrowSecondaryBufferDuringRefresh(&borrowedSize)
-                                            : renderer.borrowSecondaryBuffer(&borrowedSize);
+          uint8_t* borrowed = lend == Lend::DuringRefresh ? renderer.borrowSecondaryBufferDuringRefresh(&borrowedSize)
+                                                          : renderer.borrowSecondaryBuffer(&borrowedSize);
           if (borrowed) {
             buildScratch_ = makeUniqueNoThrow<BuildArena>(borrowed, borrowedSize);
             section->setExternalBuildScratch(buildScratch_ && buildScratch_->valid() ? buildScratch_.get() : nullptr);
             secondaryBorrowed_ = true;
           } else {
-            renderer.releaseSecondaryBuffer();  // drains the popup's refresh first
-            popupPainting = false;
+            if (lend != Lend::Blocking) {
+              // The release does not drain a refresh in flight everywhere (PopupShip::Async), and the blocking
+              // order seeded RED from the popup before it.
+              renderer.finishDisplayAsync();
+              renderer.syncRedRamFromFrameBuffer();
+              lend = Lend::Blocking;
+            }
+            renderer.releaseSecondaryBuffer();
           }
           // Display semantics are identical to a released buffer (single-buffer mode either way).
           renderer.setSingleBufferFastDiff(true);
@@ -5774,10 +5783,10 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         step = section->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
         ++slices;
       }
-      if (popupPainting) {
+      if (lend != Lend::Blocking) {
         // The popup is still painting: build on through its waveform, then finish its refresh, which nothing may
-        // draw before. Here and not on the loop task, whose C step waits out every pending refresh; the render lock
-        // held here keeps every other draw out until the finish. Full clock, as the loop's C slice takes.
+        // draw before. Here and not on the loop task, whose C step waits out a pending refresh on most boards; the
+        // render lock held here keeps every other draw out until the finish. Full clock, as the loop's C slice takes.
         {
           HalPowerManager::Lock powerLock;
           while (step == Section::BuildStep::More && renderer.refreshBusy()) {
@@ -5787,11 +5796,16 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         }
         const unsigned long builtMs = millis() - kickoffMs;
         renderer.finishDisplayAsync();
+        // The seed the blocking order takes before the lend: RED from the popup now on screen (no-op on the X3). On the
+        // X4 the popup's start loaded RED with the frame before it, and the first page the build draws,
+        // single-buffered, diffs against RED.
+        renderer.syncRedRamFromFrameBuffer();
         checkHeapIntegrity("after_popup_slices");
         LOG_INF("ERS",
-                "Background-C: spine %d built %u slices (%lu ms) while the popup painted, %u pages; finish %lu ms",
-                currentSpineIndex, slices, builtMs, static_cast<unsigned>(section->activeBuildPageCount()),
-                millis() - kickoffMs - builtMs);
+                "Background-C: spine %d built %u slices (%lu ms) while the popup painted (lend %u), %u pages; finish "
+                "%lu ms",
+                currentSpineIndex, slices, builtMs, static_cast<unsigned>(lend),
+                static_cast<unsigned>(section->activeBuildPageCount()), millis() - kickoffMs - builtMs);
       }
       if (step == Section::BuildStep::More) {
         // The deferred case, now resolved: the build needs more slices, so a popup IS warranted.
