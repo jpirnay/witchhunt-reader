@@ -302,6 +302,19 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
   with a pixel cache replays it, any other is drawn as an "indexing" placeholder, so no decode runs
   on the build's heap. The `Normal` render after the build draws the images. Page reads flush the
   writer first so a second handle sees committed bytes.
+- **Through the page's refresh:** `displayBuildPage()` starts the refresh, releases the render lock and waits for the
+  waveform, and the slices go on meanwhile: the HALF a new chapter opens with is 1.7 s on the X4. Where the card has
+  its own bus and the build's arena is PSRAM (`HalCapabilities::decodesThroughRefresh`: X4 Pro) nothing more is needed.
+  Where the card shares the panel's SPI bus the wait itself was in the way: `HalDisplay::completeDisplay()` holds the
+  bus lock for the whole waveform, the build reads the chapter from the card, and the slice therefore sat out every
+  pending refresh. On a panel that needs the bus only to start and to finish a refresh
+  (`HalDisplay::refreshLeavesBusToCard()`: the X4) the waveform is waited for without the lock (`waitRefreshOffBus()`)
+  and the slice runs through that one refresh (`BuildDuringRefresh.h`). The X3 and the T5S3 still wait; a driver that
+  blocks in `triggerDisplay` (Murphy, Picco) leaves nothing to build through.
+  X4, *The Odyssey*, cold open of a 45 KB chapter, n=3, medians, before / after: the chapter laid out 6.57 / 4.97 s
+  after the open, the screen settled 7.23 / 5.63 s (two-pass; One-Pass 7.26 / 5.64, AA off 6.97 / 5.36), the page
+  itself on the panel 4.15 / 4.20 s, the lowest free heap unchanged. The page the build drew is freed before the
+  wait, as its font slots are: left alive it was heap the slices no longer had.
 - **Its gray, on the S3s** (`BuildPageGray.h`): where the build leaves the frame buffers alone
   (`HalCapabilities::buildsInPsram()`: the build lays out in PSRAM, in its own region or in the arena lent in
   place of the secondary buffer, and the frame on screen stays in that buffer), a page of text with nothing over it

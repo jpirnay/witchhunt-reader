@@ -580,6 +580,9 @@ class GfxRenderer {
   }
   bool isRefreshPending() const { return display.isRefreshPending(); }
   bool refreshBusy() const { return display.refreshBusy(); }
+  // HalDisplay::refreshLeavesBusToCard, waitRefreshOffBus: the card can be read during a pending refresh's waveform.
+  bool refreshLeavesBusToCard() const { return display.refreshLeavesBusToCard(); }
+  void waitRefreshOffBus() const { display.waitRefreshOffBus(); }
   bool isRedRamSynced() const { return display.isRedRamSynced(); }
   // Diagnostics: effective refresh mode of the last refresh (after any downgrade).
   HalDisplay::RefreshMode getLastRefreshMode() const { return display.getLastRefreshMode(); }
