@@ -95,6 +95,8 @@ add_library(crosspoint_test_common INTERFACE)
 target_include_directories(crosspoint_test_common INTERFACE
   ${REPO_ROOT}
   ${REPO_ROOT}/lib
+  # Header-only: lib/ZipFile takes its registry's lock from it.
+  ${REPO_ROOT}/lib/BssMutex
 )
 target_compile_options(crosspoint_test_common INTERFACE
   -Wall
