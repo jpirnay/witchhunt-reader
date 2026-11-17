@@ -1,0 +1,479 @@
+BOOK title=Heading Near Misses lang=en spine=18 toc=11 reliableToc=1
+SPINE 0 href=OEBPS/c00_whole.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=6 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=185 s=1 z=100 t=Whole
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=WHOLE
+   W x=75 s=0 z=100 t=opens
+   W x=130 s=0 z=100 t=the
+   W x=169 s=0 z=100 t=chapter
+   W x=241 s=0 z=100 t=on
+   W x=272 s=0 z=100 t=the
+   W x=311 s=0 z=100 t=first
+   W x=362 s=0 z=100 t=line
+   W x=405 s=0 z=100 t=of
+   W x=435 s=0 z=100 t=its
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=text,
+   W x=50 s=0 z=100 t=after
+   W x=105 s=0 z=100 t=the
+   W x=142 s=0 z=100 t=heading
+   W x=217 s=0 z=100 t=that
+   W x=267 s=0 z=100 t=names
+   W x=324 s=0 z=100 t=it.
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=WHOLE
+   W x=79 s=0 z=100 t=goes
+   W x=132 s=0 z=100 t=on
+   W x=167 s=0 z=100 t=with
+   W x=213 s=0 z=100 t=a
+   W x=237 s=0 z=100 t=second
+   W x=305 s=0 z=100 t=paragraph,
+   W x=412 s=0 z=100 t=long
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=enough
+   W x=72 s=0 z=100 t=to
+   W x=100 s=0 z=100 t=take
+   W x=145 s=0 z=100 t=more
+   W x=190 s=0 z=100 t=than
+   W x=241 s=0 z=100 t=one
+   W x=279 s=0 z=100 t=line
+   W x=320 s=0 z=100 t=of
+   W x=348 s=0 z=100 t=the
+   W x=385 s=0 z=100 t=page.
+  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=WHOLE
+   W x=73 s=0 z=100 t=closes
+   W x=134 s=0 z=100 t=it.
+SPINE 1 href=OEBPS/c01_head.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=1 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=192 s=1 z=100 t=Owned
+SPINE 2 href=OEBPS/c02_text.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=OWNEDTEXT
+   W x=107 s=0 z=100 t=opens
+   W x=162 s=0 z=100 t=the
+   W x=201 s=0 z=100 t=chapter
+   W x=273 s=0 z=100 t=on
+   W x=304 s=0 z=100 t=the
+   W x=343 s=0 z=100 t=first
+   W x=394 s=0 z=100 t=line
+   W x=437 s=0 z=100 t=of
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=its
+   W x=31 s=0 z=100 t=text,
+   W x=81 s=0 z=100 t=after
+   W x=136 s=0 z=100 t=the
+   W x=173 s=0 z=100 t=heading
+   W x=248 s=0 z=100 t=that
+   W x=298 s=0 z=100 t=names
+   W x=355 s=0 z=100 t=it.
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=OWNEDTEXT
+   W x=107 s=0 z=100 t=goes
+   W x=156 s=0 z=100 t=on
+   W x=187 s=0 z=100 t=with
+   W x=229 s=0 z=100 t=a
+   W x=249 s=0 z=100 t=second
+   W x=313 s=0 z=100 t=paragraph,
+   W x=416 s=0 z=100 t=long
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=enough
+   W x=72 s=0 z=100 t=to
+   W x=100 s=0 z=100 t=take
+   W x=145 s=0 z=100 t=more
+   W x=190 s=0 z=100 t=than
+   W x=241 s=0 z=100 t=one
+   W x=279 s=0 z=100 t=line
+   W x=320 s=0 z=100 t=of
+   W x=348 s=0 z=100 t=the
+   W x=385 s=0 z=100 t=page.
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=OWNEDTEXT
+   W x=105 s=0 z=100 t=closes
+   W x=166 s=0 z=100 t=it.
+SPINE 3 href=OEBPS/c03_split_000.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=2 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=191 s=1 z=100 t=Split
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=SPLITNOTE
+   W x=105 s=0 z=100 t=besides
+   W x=167 s=0 z=100 t=the
+   W x=204 s=0 z=100 t=heading.
+SPINE 4 href=OEBPS/c03_split_001.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=SPLITTEXT
+   W x=108 s=0 z=100 t=opens
+   W x=163 s=0 z=100 t=the
+   W x=202 s=0 z=100 t=chapter
+   W x=274 s=0 z=100 t=on
+   W x=305 s=0 z=100 t=the
+   W x=344 s=0 z=100 t=first
+   W x=395 s=0 z=100 t=line
+   W x=438 s=0 z=100 t=of
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=its
+   W x=31 s=0 z=100 t=text,
+   W x=81 s=0 z=100 t=after
+   W x=136 s=0 z=100 t=the
+   W x=173 s=0 z=100 t=heading
+   W x=248 s=0 z=100 t=that
+   W x=298 s=0 z=100 t=names
+   W x=355 s=0 z=100 t=it.
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=SPLITTEXT
+   W x=108 s=0 z=100 t=goes
+   W x=157 s=0 z=100 t=on
+   W x=188 s=0 z=100 t=with
+   W x=230 s=0 z=100 t=a
+   W x=250 s=0 z=100 t=second
+   W x=314 s=0 z=100 t=paragraph,
+   W x=417 s=0 z=100 t=long
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=enough
+   W x=72 s=0 z=100 t=to
+   W x=100 s=0 z=100 t=take
+   W x=145 s=0 z=100 t=more
+   W x=190 s=0 z=100 t=than
+   W x=241 s=0 z=100 t=one
+   W x=279 s=0 z=100 t=line
+   W x=320 s=0 z=100 t=of
+   W x=348 s=0 z=100 t=the
+   W x=385 s=0 z=100 t=page.
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=SPLITTEXT
+   W x=106 s=0 z=100 t=closes
+   W x=167 s=0 z=100 t=it.
+SPINE 5 href=OEBPS/c05_link.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=1 footnotes=1
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=182 s=5 z=100 t=Linked
+  FN n=Linked href=c00_whole.xhtml
+SPINE 6 href=OEBPS/c06_text.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=LINKTEXT
+   W x=100 s=0 z=100 t=opens
+   W x=156 s=0 z=100 t=the
+   W x=196 s=0 z=100 t=chapter
+   W x=269 s=0 z=100 t=on
+   W x=301 s=0 z=100 t=the
+   W x=341 s=0 z=100 t=first
+   W x=393 s=0 z=100 t=line
+   W x=437 s=0 z=100 t=of
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=its
+   W x=31 s=0 z=100 t=text,
+   W x=81 s=0 z=100 t=after
+   W x=136 s=0 z=100 t=the
+   W x=173 s=0 z=100 t=heading
+   W x=248 s=0 z=100 t=that
+   W x=298 s=0 z=100 t=names
+   W x=355 s=0 z=100 t=it.
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=LINKTEXT
+   W x=100 s=0 z=100 t=goes
+   W x=150 s=0 z=100 t=on
+   W x=182 s=0 z=100 t=with
+   W x=225 s=0 z=100 t=a
+   W x=246 s=0 z=100 t=second
+   W x=311 s=0 z=100 t=paragraph,
+   W x=415 s=0 z=100 t=long
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=enough
+   W x=72 s=0 z=100 t=to
+   W x=100 s=0 z=100 t=take
+   W x=145 s=0 z=100 t=more
+   W x=190 s=0 z=100 t=than
+   W x=241 s=0 z=100 t=one
+   W x=279 s=0 z=100 t=line
+   W x=320 s=0 z=100 t=of
+   W x=348 s=0 z=100 t=the
+   W x=385 s=0 z=100 t=page.
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=LINKTEXT
+   W x=97 s=0 z=100 t=closes
+   W x=158 s=0 z=100 t=it.
+SPINE 7 href=OEBPS/c07_rule.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=2 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=187 s=1 z=100 t=Ruled
+  HR y=50 x=115
+SPINE 8 href=OEBPS/c08_text.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=RULETEXT
+   W x=102 s=0 z=100 t=opens
+   W x=157 s=0 z=100 t=the
+   W x=196 s=0 z=100 t=chapter
+   W x=268 s=0 z=100 t=on
+   W x=299 s=0 z=100 t=the
+   W x=338 s=0 z=100 t=first
+   W x=389 s=0 z=100 t=line
+   W x=432 s=0 z=100 t=of
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=its
+   W x=31 s=0 z=100 t=text,
+   W x=81 s=0 z=100 t=after
+   W x=136 s=0 z=100 t=the
+   W x=173 s=0 z=100 t=heading
+   W x=248 s=0 z=100 t=that
+   W x=298 s=0 z=100 t=names
+   W x=355 s=0 z=100 t=it.
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=RULETEXT
+   W x=102 s=0 z=100 t=goes
+   W x=151 s=0 z=100 t=on
+   W x=182 s=0 z=100 t=with
+   W x=224 s=0 z=100 t=a
+   W x=244 s=0 z=100 t=second
+   W x=308 s=0 z=100 t=paragraph,
+   W x=411 s=0 z=100 t=long
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=enough
+   W x=72 s=0 z=100 t=to
+   W x=100 s=0 z=100 t=take
+   W x=145 s=0 z=100 t=more
+   W x=190 s=0 z=100 t=than
+   W x=241 s=0 z=100 t=one
+   W x=279 s=0 z=100 t=line
+   W x=320 s=0 z=100 t=of
+   W x=348 s=0 z=100 t=the
+   W x=385 s=0 z=100 t=page.
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=RULETEXT
+   W x=100 s=0 z=100 t=closes
+   W x=161 s=0 z=100 t=it.
+SPINE 9 href=OEBPS/c09_long.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=10 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=23 s=1 z=100 t=Longheading
+   W x=235 s=1 z=100 t=Longheading
+  LINE y=38 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=23 s=1 z=100 t=Longheading
+   W x=235 s=1 z=100 t=Longheading
+  LINE y=76 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=23 s=1 z=100 t=Longheading
+   W x=235 s=1 z=100 t=Longheading
+  LINE y=114 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=23 s=1 z=100 t=Longheading
+   W x=235 s=1 z=100 t=Longheading
+  LINE y=152 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=23 s=1 z=100 t=Longheading
+   W x=235 s=1 z=100 t=Longheading
+  LINE y=190 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=23 s=1 z=100 t=Longheading
+   W x=235 s=1 z=100 t=Longheading
+  LINE y=228 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=23 s=1 z=100 t=Longheading
+   W x=235 s=1 z=100 t=Longheading
+  LINE y=266 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=23 s=1 z=100 t=Longheading
+   W x=235 s=1 z=100 t=Longheading
+  LINE y=304 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=23 s=1 z=100 t=Longheading
+   W x=235 s=1 z=100 t=Longheading
+  LINE y=342 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=23 s=1 z=100 t=Longheading
+   W x=235 s=1 z=100 t=Longheading
+SPINE 10 href=OEBPS/c10_text.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=LONGTEXT
+   W x=95 s=0 z=100 t=opens
+   W x=151 s=0 z=100 t=the
+   W x=191 s=0 z=100 t=chapter
+   W x=264 s=0 z=100 t=on
+   W x=296 s=0 z=100 t=the
+   W x=336 s=0 z=100 t=first
+   W x=388 s=0 z=100 t=line
+   W x=432 s=0 z=100 t=of
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=its
+   W x=31 s=0 z=100 t=text,
+   W x=81 s=0 z=100 t=after
+   W x=136 s=0 z=100 t=the
+   W x=173 s=0 z=100 t=heading
+   W x=248 s=0 z=100 t=that
+   W x=298 s=0 z=100 t=names
+   W x=355 s=0 z=100 t=it.
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=LONGTEXT
+   W x=96 s=0 z=100 t=goes
+   W x=147 s=0 z=100 t=on
+   W x=180 s=0 z=100 t=with
+   W x=224 s=0 z=100 t=a
+   W x=246 s=0 z=100 t=second
+   W x=312 s=0 z=100 t=paragraph,
+   W x=417 s=0 z=100 t=long
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=enough
+   W x=72 s=0 z=100 t=to
+   W x=100 s=0 z=100 t=take
+   W x=145 s=0 z=100 t=more
+   W x=190 s=0 z=100 t=than
+   W x=241 s=0 z=100 t=one
+   W x=279 s=0 z=100 t=line
+   W x=320 s=0 z=100 t=of
+   W x=348 s=0 z=100 t=the
+   W x=385 s=0 z=100 t=page.
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=LONGTEXT
+   W x=92 s=0 z=100 t=closes
+   W x=153 s=0 z=100 t=it.
+SPINE 11 href=OEBPS/c11_big.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=1 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=207 s=1 z=100 t=Big
+SPINE 12 href=OEBPS/c12_text.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=BIGTEXT
+   W x=83 s=0 z=100 t=opens
+   W x=136 s=0 z=100 t=the
+   W x=173 s=0 z=100 t=chapter
+   W x=243 s=0 z=100 t=on
+   W x=272 s=0 z=100 t=the
+   W x=309 s=0 z=100 t=first
+   W x=358 s=0 z=100 t=line
+   W x=399 s=0 z=100 t=of
+   W x=427 s=0 z=100 t=its
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=text,
+   W x=50 s=0 z=100 t=after
+   W x=105 s=0 z=100 t=the
+   W x=142 s=0 z=100 t=heading
+   W x=217 s=0 z=100 t=that
+   W x=267 s=0 z=100 t=names
+   W x=324 s=0 z=100 t=it.
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=BIGTEXT
+   W x=88 s=0 z=100 t=goes
+   W x=140 s=0 z=100 t=on
+   W x=174 s=0 z=100 t=with
+   W x=219 s=0 z=100 t=a
+   W x=242 s=0 z=100 t=second
+   W x=309 s=0 z=100 t=paragraph,
+   W x=415 s=0 z=100 t=long
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=enough
+   W x=72 s=0 z=100 t=to
+   W x=100 s=0 z=100 t=take
+   W x=145 s=0 z=100 t=more
+   W x=190 s=0 z=100 t=than
+   W x=241 s=0 z=100 t=one
+   W x=279 s=0 z=100 t=line
+   W x=320 s=0 z=100 t=of
+   W x=348 s=0 z=100 t=the
+   W x=385 s=0 z=100 t=page.
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=BIGTEXT
+   W x=83 s=0 z=100 t=closes
+   W x=144 s=0 z=100 t=it.
+SPINE 13 href=OEBPS/c13_frag.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=1 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=162 s=1 z=100 t=Fragment
+SPINE 14 href=OEBPS/c14_text.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=FRAGTEXT
+   W x=90 s=0 z=100 t=opens
+   W x=143 s=0 z=100 t=the
+   W x=180 s=0 z=100 t=chapter
+   W x=250 s=0 z=100 t=on
+   W x=279 s=0 z=100 t=the
+   W x=316 s=0 z=100 t=first
+   W x=365 s=0 z=100 t=line
+   W x=406 s=0 z=100 t=of
+   W x=434 s=0 z=100 t=its
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=text,
+   W x=50 s=0 z=100 t=after
+   W x=105 s=0 z=100 t=the
+   W x=142 s=0 z=100 t=heading
+   W x=217 s=0 z=100 t=that
+   W x=267 s=0 z=100 t=names
+   W x=324 s=0 z=100 t=it.
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=FRAGTEXT
+   W x=94 s=0 z=100 t=goes
+   W x=145 s=0 z=100 t=on
+   W x=178 s=0 z=100 t=with
+   W x=222 s=0 z=100 t=a
+   W x=244 s=0 z=100 t=second
+   W x=310 s=0 z=100 t=paragraph,
+   W x=415 s=0 z=100 t=long
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=enough
+   W x=72 s=0 z=100 t=to
+   W x=100 s=0 z=100 t=take
+   W x=145 s=0 z=100 t=more
+   W x=190 s=0 z=100 t=than
+   W x=241 s=0 z=100 t=one
+   W x=279 s=0 z=100 t=line
+   W x=320 s=0 z=100 t=of
+   W x=348 s=0 z=100 t=the
+   W x=385 s=0 z=100 t=page.
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=FRAGTEXT
+   W x=90 s=0 z=100 t=closes
+   W x=151 s=0 z=100 t=it.
+SPINE 15 href=OEBPS/c15_bare.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=1 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=196 s=1 z=100 t=Bare
+SPINE 16 href=OEBPS/c16_text.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=BARETEXT
+   W x=101 s=0 z=100 t=opens
+   W x=157 s=0 z=100 t=the
+   W x=197 s=0 z=100 t=chapter
+   W x=270 s=0 z=100 t=on
+   W x=302 s=0 z=100 t=the
+   W x=342 s=0 z=100 t=first
+   W x=394 s=0 z=100 t=line
+   W x=438 s=0 z=100 t=of
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=its
+   W x=31 s=0 z=100 t=text,
+   W x=81 s=0 z=100 t=after
+   W x=136 s=0 z=100 t=the
+   W x=173 s=0 z=100 t=heading
+   W x=248 s=0 z=100 t=that
+   W x=298 s=0 z=100 t=names
+   W x=355 s=0 z=100 t=it.
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=BARETEXT
+   W x=101 s=0 z=100 t=goes
+   W x=151 s=0 z=100 t=on
+   W x=183 s=0 z=100 t=with
+   W x=226 s=0 z=100 t=a
+   W x=247 s=0 z=100 t=second
+   W x=312 s=0 z=100 t=paragraph,
+   W x=416 s=0 z=100 t=long
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=enough
+   W x=72 s=0 z=100 t=to
+   W x=100 s=0 z=100 t=take
+   W x=145 s=0 z=100 t=more
+   W x=190 s=0 z=100 t=than
+   W x=241 s=0 z=100 t=one
+   W x=279 s=0 z=100 t=line
+   W x=320 s=0 z=100 t=of
+   W x=348 s=0 z=100 t=the
+   W x=385 s=0 z=100 t=page.
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=BARETEXT
+   W x=98 s=0 z=100 t=closes
+   W x=159 s=0 z=100 t=it.
+SPINE 17 href=OEBPS/c17_last.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=1 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=192 s=1 z=100 t=Last
