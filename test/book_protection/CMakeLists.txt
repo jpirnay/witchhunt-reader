@@ -9,6 +9,10 @@ endif()
 
 add_executable(BookProtectionTest
   BookProtectionTest.cpp
+  BookKeyTest.cpp
+  ${REPO_ROOT}/lib/BookProtection/BookKey.cpp
+  ${REPO_ROOT}/lib/DeviceSecret/DeviceSecret.cpp
+  ${REPO_ROOT}/lib/FsHelpers/FileReplace.cpp
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
   ${REPO_ROOT}/lib/BookProtection/AesCbcCipher.cpp
   ${REPO_ROOT}/lib/BookProtection/EncryptionXmlParser.cpp
@@ -18,10 +22,13 @@ add_executable(BookProtectionTest
 )
 
 target_include_directories(BookProtectionTest PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/shims       # aes/esp_aes.h
+  # aes/esp_aes.h, wolfssl/wolfcrypt/{aes,hash}.h, nvs.h, esp_random.h: OpenSSL and a map in place
+  # of the chip's AES, wolfCrypt's GCM and SHA-256, NVS and the RNG.
+  ${CMAKE_CURRENT_SOURCE_DIR}/shims
   ${REPO_ROOT}/test/zip_entry_reader      # real stdio-backed HalStorage.h, TestZip.h
   ${REPO_ROOT}/test/epub_pipeline         # esp_heap_caps.h, whose largest block a test can set
   ${REPO_ROOT}/lib/BookProtection
+  ${REPO_ROOT}/lib/DeviceSecret
   ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/lib/FsHelpers
   ${REPO_ROOT}/lib/Serialization
