@@ -51,6 +51,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "BookPackOffer.h"
 #include "BookRelocation.h"
@@ -312,13 +313,8 @@ static_assert(LaneBeforeBuild::kMaxYields >= BG_BUILD_THROUGH_PAGES + 1,
 // suggests 30–50 ms); tune from the DEBUG_BACKGROUND_WORK serial counters.
 constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 
-// How long the B/W page stays up before inline AA commits. Past that point the pass cannot be
-// stopped, and it held every press for its full length: X4 Pro, 2026-11-06, one page per 1.27 s
-// however fast the buttons went, of which the page itself was on screen after 0.65 s. A press
-// answering a page needs a reaction time after the page appears, so the old single check, made
-// the moment the waveform ended, could never see it. The cost is that the greys of a page the
-// reader stays on arrive this much later.
-constexpr uint32_t AA_SETTLE_MS = 400;
+// How long the B/W page stays up before inline AA commits, for a press to arrive that takes the pass
+// away: AaSettle.h. Polled at this interval.
 constexpr uint32_t AA_SETTLE_POLL_MS = 5;
 
 // Background-B keeps a page-budgeted window of layout ready ahead of the reading position rather
@@ -1333,7 +1329,9 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  // This lock is the first the turn waits on, so this is where the AA pass has to hear about it.
+  // This lock is the first the turn waits on, so this is where the AA pass has to hear about it. And where the turn
+  // was asked for: the wait that follows is the pass's, not the reader's pace (AaSettle).
+  turnAskedMs_ = millis();
   pageTurnWaitingForLock_.store(true, std::memory_order_release);
   // No current section, attempt to rerender the book
   {
@@ -4353,6 +4351,13 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   RenderLock lock(*this);
   pageTurnWaitingForLock_.store(false, std::memory_order_release);
   landedText_ = {};
+  // The reader's pace, by which the page this turn lands on waits for a further press before its gray (AaSettle):
+  // from when the turn before it was asked for to when this one was, not to when it got the lock. X4 Pro, a page
+  // back every 1.2 s: the second press waited 0.67 s for the first page's pass, and read as a settled reader's.
+  const unsigned long askedMs = turnAskedMs_ != 0 ? turnAskedMs_ : millis();
+  turnAskedMs_ = 0;
+  turnGapMs_ = static_cast<uint32_t>(askedMs - lastTurnAskedMs_);
+  lastTurnAskedMs_ = askedMs;
 
   // Cancel any pending deferred AA pass — it belongs to the page we're leaving.
   pendingGrayscale_ = {};
@@ -6254,6 +6259,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   WakeTrace::mark(WakeTrace::Phase::RenderStart);
   pendingPreRender = false;
   usePreRenderedBuffer = false;
+  // The pass that answers a page turn takes its pace; any other pass was not asked for by one.
+  passTurnGapMs_ = std::exchange(turnGapMs_, AaSettle::kNoTurn);
   // Any other pass redraws the write framebuffer and flushes/swaps, destroying pre-rendered
   // pixels — so a completed pre-render must be discarded here even when its (spineIndex,
   // pageIndex) still matches the current page. Keeping ready=true across an intervening
@@ -6974,6 +6981,8 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     // still worth setting: latching planeAborted means the pass aborts even if the input signal
     // has been drained by the loop task before the predicate below is evaluated.
     bool planeAborted = false;
+    // Only a reader who is flipping is waited for, and no longer than the pass can still be stopped (AaSettle).
+    const uint32_t settleMs = AaSettle::waitMs(passTurnGapMs_, BG_BUILD_BORROW_QUIET_MS, inlineGrayTailMs_);
     const auto gt = renderer.renderGrayscalePlanesInterleaved(
         [&](GfxRenderer::RenderMode) {
           if (!pagePtr->renderTextOnly(renderer, aaFontId, orientedMarginLeft, contentTop, /*abortable=*/true)) {
@@ -6988,12 +6997,13 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
         [&] { return planeAborted || aaPreemptedByNavigation(); },
         [&] {
           const unsigned long settleStart = millis();
-          while (millis() - settleStart < AA_SETTLE_MS && !aaPreemptedByNavigation()) {
+          while (millis() - settleStart < settleMs && !aaPreemptedByNavigation()) {
             delay(AA_SETTLE_POLL_MS);
           }
         });
-    LOG_DBG("ERS", "Inline AA%s: planes=%lums gray=%lums restore=%lums", gt.aborted ? " ABORTED" : "", gt.planesMs,
-            gt.displayMs, gt.restoreMs);
+    if (!gt.aborted) inlineGrayTailMs_ = static_cast<uint32_t>(gt.displayMs + gt.restoreMs);
+    LOG_DBG("ERS", "Inline AA%s: planes=%lums gray=%lums restore=%lums settle=%lums", gt.aborted ? " ABORTED" : "",
+            gt.planesMs, gt.displayMs, gt.restoreMs, static_cast<unsigned long>(settleMs));
     checkHeapIntegrity("after_inline_aa");
     lastRenderStats.usedGrayscale = !gt.aborted;
     lastRenderStats.textAntiAliasing = !gt.aborted;
