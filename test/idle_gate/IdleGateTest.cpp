@@ -55,6 +55,20 @@ TEST(IdleGate, AQuietDeviceIsIdleAfterTheQuietWindow) {
   EXPECT_LT(d.now - start, IdleGate::kQuietMs + 30);
 }
 
+// The "page complete" stamp (SerialTestApi): when the device went quiet, not when the wait could say so.
+TEST(IdleGate, AnIdleWaitTellsWhenTheDeviceWentQuiet) {
+  Device d;
+  ASSERT_TRUE(d.gate.begin(d.now, 10000));
+  const uint32_t start = d.now;
+  d.busy = "render";
+  for (int i = 0; i < 70; ++i) EXPECT_EQ(d.pass(), Verdict::Waiting);  // a page on its way for 700 ms
+  d.busy = nullptr;
+  EXPECT_EQ(d.runUntilDone(), Verdict::Idle);
+  EXPECT_EQ(d.gate.quietAfterMs(), 710u);  // the first quiet pass
+  EXPECT_GE(d.gate.elapsedMs(d.now), 710u + IdleGate::kQuietMs);
+  EXPECT_EQ(d.now - start, d.gate.elapsedMs(d.now));
+}
+
 TEST(IdleGate, BusyRestartsTheQuietWindow) {
   Device d;
   ASSERT_TRUE(d.gate.begin(d.now, 10000));
