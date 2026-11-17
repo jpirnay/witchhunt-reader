@@ -54,7 +54,21 @@ browser: it unwraps each book's key with the account's license key through `api.
 
 1. SDK, on a fork branch offered to Free-Ink: the injectable inflater and entry lookup in `ProtectedBook`, with its
    host tests passing on both the miniz binding and a test inflater.
+   Done 2026-11-17 on the fork's `feat/content-protection-seams` (36cdcc8, 4e418ce): `Inflate.h` (a pull
+   inflater; the input is handed out from the read path's own buffers, no copy), `EntryIndex.h`
+   (`openWithIndex()`), `MinizInflater` as the default, `CONTENT_NO_DEFAULT_INFLATER` to leave miniz out, and
+   `test_seams`, also built with no miniz linked. Two of its host tests did not build on GCC 15; fixed there too.
 2. `ZipFile` decrypts the entries of a protected book; the in-place readers refuse encrypted entries.
+   - Adapters: a `ByteSource` over `HalFile`, an `Inflater` over `lib/InflateReader` (uzlib pulls through its read
+     callback), an `EntryIndex` over `ZipFile`'s own lookup, a `Crypto` with wolfSSL's AES-CBC only.
+   - A plain book pays nothing: whether a book is protected is decided once, when its `book.bin` is built (one
+     lookup of `META-INF/encryption.xml`), and kept there (`BOOK_CACHE_VERSION` bump).
+   - The whole-entry reads (`readFileToMemory`, `readFileToStream`), the header probes (`readBytesFromEntry`,
+     `readBytesFromStat`) and `getInflatedFileSize` decrypt. `getStoredEntryRange` and `EntryReader` refuse an
+     encrypted entry.
+   - A protected chapter takes the section build's extract-to-file path (`spines/<bucket>/html_<n>.bin`), decrypted
+     once into that file and parsed from there (September's decision: a protected book may be slower). D2
+     enciphers that file.
 3. `BookKey` (the `.key` format above), the device secret, `POST /api/book-key`, `deviceId` in `/api/status`.
 4. The trusted clock: upstream's `TrustedTime` or a floor in `HalClock`, whichever fits our clock code.
 5. `BookRelocation` carries `<book>.key` (and `.rights`) when a book moves.
