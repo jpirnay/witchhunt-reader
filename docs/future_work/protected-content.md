@@ -8,7 +8,7 @@ Owner decisions of 2026-11-17:
   `protected-content` plugin is meant to run here.
 - LCP: Free-Ink is asked whether other firmwares may use `lcp.freeink.org` (see LCP below).
 - No second library: decryption runs on our own `ZipFile` and our own uzlib inflate (`lib/InflateReader`), never on
-  the SDK's vendored miniz or its own zip reader.
+  the SDK's vendored miniz or its own zip reader. (In the end none of the SDK library is linked.)
 - Order: the X3 catalog check of the plugin work, then D1 and D2.
 
 ## The model: upstream's, so the plugins work
@@ -43,42 +43,51 @@ browser: it unwraps each book's key with the account's license key through `api.
 - **In-place readers.** `ZipFile::getStoredEntryRange()`, `Epub::openStoredCoverInPlace()` and `decodePngInPlace`
   hand out the raw bytes of a STORED entry. For an encrypted entry those are ciphertext (LCP stores its resources
   STORED), so they must refuse it and let the caller take the decrypting path.
-- **No per-entry table in RAM.** The SDK's `ZipScan` keeps every zip entry (24 to 32 bytes each); a book with
-  1,700 entries would need 50 KB on the X3. The SDK gets an injectable entry lookup that our `ZipFile` serves from
-  its own walk, as it does for ordinary books.
-- **One inflate.** The SDK's two inflate sites (entry decryption and the `encryption.xml` read) call miniz directly
-  and push input into it. Our uzlib pulls input through a callback, so the SDK gets an injectable pull inflater
-  (begin, read, end). Its miniz binding stays for standalone use and is never linked here. Offered to Free-Ink.
+- **No per-entry table in RAM.** The SDK's `ProtectedBook` keeps every zip entry (`ZipScan`, 24 to 32 bytes each) and
+  every encrypted entry's hash and size; a book with 1,700 entries would need tens of KB on the X3. Here the encrypted
+  entries' facts live on the card (`protect.bin`) and are read in ranges.
+- **Decryption beneath our inflate.** The section build, the image probes and the footnote previews read through
+  `ZipFile::EntryReader`, sliced across loop passes; `ProtectedBook::decryptEntryToSink()` pushes a whole entry in one
+  call and cannot serve them. So `ZipFile` decrypts the raw bytes of an encrypted entry before its own uzlib inflate,
+  in every read path, and nothing of the SDK library is linked. Its format rules (IV prefix, PKCS#7 for AES-128,
+  xmlenc's padding for AES-256, `Compression Method="0"`, `OriginalLength`) are followed.
 
 ## D1: the reader opens protected books
 
-1. SDK, on a fork branch offered to Free-Ink: the injectable inflater and entry lookup in `ProtectedBook`, with its
-   host tests passing on both the miniz binding and a test inflater.
-   Done 2026-11-17 on the fork's `feat/content-protection-seams` (36cdcc8, 4e418ce): `Inflate.h` (a pull
-   inflater; the input is handed out from the read path's own buffers, no copy), `EntryIndex.h`
-   (`openWithIndex()`), `MinizInflater` as the default, `CONTENT_NO_DEFAULT_INFLATER` to leave miniz out, and
-   `test_seams`, also built with no miniz linked. Two of its host tests did not build on GCC 15; fixed there too.
-2. `ZipFile` decrypts the entries of a protected book; the in-place readers refuse encrypted entries.
-   - Adapters: a `ByteSource` over `HalFile`, an `Inflater` over `lib/InflateReader` (uzlib pulls through its read
-     callback), an `EntryIndex` over `ZipFile`'s own lookup, a `Crypto` with wolfSSL's AES-CBC only.
-   - A plain book pays nothing: whether a book is protected is decided once, when its `book.bin` is built (one
-     lookup of `META-INF/encryption.xml`), and kept there (`BOOK_CACHE_VERSION` bump).
-   - The whole-entry reads (`readFileToMemory`, `readFileToStream`), the header probes (`readBytesFromEntry`,
-     `readBytesFromStat`) and `getInflatedFileSize` decrypt. `getStoredEntryRange` and `EntryReader` refuse an
-     encrypted entry.
-   - A protected chapter takes the section build's extract-to-file path (`spines/<bucket>/html_<n>.bin`), decrypted
-     once into that file and parsed from there (September's decision: a protected book may be slower). D2
-     enciphers that file.
-3. `BookKey` (the `.key` format above), the device secret, `POST /api/book-key`, `deviceId` in `/api/status`.
-4. The trusted clock: upstream's `TrustedTime` or a floor in `HalClock`, whichever fits our clock code.
-5. `BookRelocation` carries `<book>.key` (and `.rights`) when a book moves.
-6. Messages for a book with no key, a key for another device, an expired loan, no trusted time (`tr()`, all UI
-   languages).
-7. Tests: host tests on EPUBs encrypted by a script with a known key (AES-128 and AES-256, deflated and STORED
-   entries, encrypted images and cover), the in-place refusals, the `.key` format, the clock floor; a device test
-   on the X3 and an S3 board with the same books.
+1. SDK seams (2026-11-17, fork branch `feat/content-protection-seams`, 36cdcc8 and 4e418ce): an injectable pull
+   inflater and entry index in `ProtectedBook`, with `test_seams`, also built with no miniz linked. Not used here after
+   all (see above) and not pinned; an offer to Free-Ink, with the two GCC 15 test fixes.
+2. Done, host-tested, not yet run on a device:
+   - `ZipFile` (7ae6d69e9): a registry of protected archives (`ZipFile::protect()`, two at a time; while none is
+     registered no read takes the lock). A registered archive's stats carry `METHOD_ENCRYPTED` in their method, so
+     the stats cached in `book.bin` and the image manifest carry it too, and `getStoredEntryRange()` refuses the
+     entry (the in-place cover and PNG decoders then extract). Every read path decrypts beneath the inflate. Adobe
+     gives no plaintext sizes: `METHOD_SIZE_ESTIMATED`, `uncompressedSize` never under a full inflate window, and
+     `hasExactSize()` for callers that compare sizes (the extract check, the image re-extract check).
+   - `lib/BookProtection` (247a42d98): `encryption.xml` through our SAX parser into `<cache>/protect.bin`, records
+     sorted by local-header offset and read through a page of 42, built in runs when the sorting table does not fit.
+     Sizes Adobe does not give are measured at the build (decrypt and inflate once) for all but JPEG, PNG, GIF and
+     WebP. AES-CBC on the chip's AES peripheral (`esp_aes`, already linked by the Wi-Fi stack).
+   - `Epub`: the fingerprint walk notes `encryption.xml`; `load()` registers the protection before anything reads
+     (building `protect.bin` on the first open with a key, and wiping a cache made before the protection was known);
+     the cover and metadata loads register a protection an earlier open established; `clearCache()` drops it.
+3. Done (34507c5f7 and the web commit): upstream's `<book>.key` (FIBK v2, v1 read) and NVS device secret, ported;
+   `POST /api/book-key`; `deviceId` in `/api/status?plugin=`.
+4. The trusted clock. For now a loan with a due date opens only on a clock that is set (`HalClock::isSynced()`),
+   and closes after its date (`BookSession.cpp`, `loanState()`). Still open: a floor that a clock set back cannot undo
+   (an upload's `t` sets it from the browser in hotspot mode, `HalClock::applyClientTime()`); upstream's
+   `TrustedTime` keeps one in NVS.
+5. Done: the key is a sidecar (`SidecarFiles::kKeyExtensions`, `.epub.key`), so moving and removing a book carry it;
+   `BookRelocation::bookMoved()` drops the moving book's protection, which holds its manifest open.
+6. Open: a protected book that cannot be read fails `Epub::load()` like any book that does not open; the reader
+   needs its own message for no key, another device's key, an expired loan and no clock (`tr()`, all UI languages).
+   `Epub::protectionResult()` says which.
+7. Open: a device test with a book encrypted by a script and its key posted through `/api/book-key`, on the X3 and
+   an S3 board; the open-path heap and the first-open time (the size measuring decrypts and inflates the book's text
+   once) on the C3; a host test that runs a protected book through the whole pipeline (`test/epub_pipeline` links a
+   stub of `BookSession` today).
 
-Cost to measure on the C3 against master: flash and the open-path heap.
+Cost on the C3 against master (`default`, 2026-11-17): flash +16.3 KB, static RAM +296 bytes.
 
 ## D2: the cache at rest
 
@@ -111,4 +120,4 @@ work for real loans. Asked of Free-Ink on 2026-11-17: may another firmware's rel
 ## What is lost
 
 The SDK commit the September branch pins (`d66c7a9e`, branch `feat/injectable-inflate`) was never pushed; it is not
-in any clone here. D1 step 1 rewrites it against today's `ProtectedBook.cpp`.
+in any clone here. D1 step 1 rewrote it against today's `ProtectedBook.cpp`, and the firmware then went without it.
