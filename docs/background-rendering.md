@@ -237,6 +237,13 @@ cache hit, not a blocking parse. `stepBackgroundSectionBuild()`, one bounded sli
   settles and re-anchors on any navigation.
 - **State machine:** `Probe` (cache check; a cached spine settles at once) → `WaitHeap` (gates,
   re-checked at most once a second) → `Building` (`BG_BUILD_BUDGET_MS` = 40 ms slices) → `Settled`.
+- **The chapter count's backfill** (`ChapterBackfill.h`): once the look-ahead has nothing left to do
+  (its window is covered or it reached the book's end), B lays out the files of the chapter on
+  screen that come before it and have no page count (`Section::lastUnindexedSpine`, one read of
+  `pages.bin`), the nearest first, keeping its cursor and putting it back after each. Only while the
+  status bar shows the chapter count. Class 3: B's gates apply, nothing counts toward the page
+  budget, and a finished file asks for no refresh (the next draw shows the count). A discard, a
+  failure or two preemptions end it for the chapter without pausing the look-ahead.
 - **Builds only inside the borrowed secondary buffer.** `beginBackgroundBorrow()` lends the block as
   the build's arena: the parse working set, the inflate ring and the CSS index bump-allocate inside
   it. The block never enters the heap, so returning it cannot fail. There is no heap-backed B: with
