@@ -2548,8 +2548,10 @@ bool EpubReaderActivity::warmPageForImageLane(const Page& page, const int spine,
   const bool shownNowCached = shownWasUncached && !page.hasUncachedImages(true, true, false);
   const bool inputWaiting = CooperativeAbort::shouldAbortLongTask();
   const bool redraw = shownNowCached && !inputWaiting;
-  if (building && redraw)
+  if (building && redraw) {
     buildDisplayedPage_ = -1;  // the build's pass draws a page once: this one again, from its caches
+    buildPageAskedFor_ = -1;
+  }
   // The page after the one on screen just became pre-renderable. Its pre-render ran when this
   // page was drawn and skipped it for its uncached images (as did the one re-arm, if it has run
   // since), so nothing would try again before the turn. Keyed on the page actually on screen,
@@ -2842,6 +2844,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
     readerPhase_ = ReaderPhase::READING;
     buildingPopupShown_ = false;
     buildDisplayedPage_ = -1;
+    buildPageAskedFor_ = -1;
     backgroundBuildPercent_ = -1;
     requestUpdate();  // -> BuildSection -> released (incremental or blocking) build
   };
@@ -2905,10 +2908,16 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
         navTarget = NavigationTarget::makePage(*landed);
       }
     }
-    // If the page the user is waiting on just became readable, ask the render task to draw it.
+    // If the page the user is waiting on just became readable, ask the render task to draw it. Once: the pass that
+    // wakes draws it. Asked on every slice until a pass drew it, the requests queued passes behind that one, and one
+    // that ran after the build had ended found no build and drew the page again: on the X4 Pro a crossing whose build
+    // ran through its Indexing popup's refresh, and ended 0.2 s after its page went up, refreshed that page twice,
+    // 3 of 3 (2026-11-17).
     const int want = section->currentPage;
     if (navTarget.kind == NavigationTarget::Kind::Page && want >= 0 &&
-        want < static_cast<int>(section->activeBuildPageCount()) && want != buildDisplayedPage_) {
+        want < static_cast<int>(section->activeBuildPageCount()) && want != buildDisplayedPage_ &&
+        want != buildPageAskedFor_) {
+      buildPageAskedFor_ = want;
       requestUpdate();
     }
     return;
@@ -3000,6 +3009,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   buildingPopupShown_ = false;
   const bool builtPageOnScreen = section && buildDisplayedPage_ >= 0 && buildDisplayedPage_ == section->currentPage;
   buildDisplayedPage_ = -1;
+  buildPageAskedFor_ = -1;
   if (bodySizeChanged) {
     // This build found the book's body size, and it is not the one the chapter was laid out at: laid out again.
     relayoutPending_ = true;
@@ -5764,6 +5774,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       // build completes and the position is resolved, so the exact value doesn't matter there.
       section->currentPage = (navTarget.kind == NavigationTarget::Kind::Page) ? navTarget.page : 0;
       buildDisplayedPage_ = -1;
+      buildPageAskedFor_ = -1;
       buildPageOnScreen_ = {};
       buildingPopupShown_ = popupBeforeBuild;
       // The first open's Indexing popup is still the frame on the panel: the deferred popup would paint the same box
@@ -8851,6 +8862,7 @@ void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
     // the bars stayed on the panel until the build was done.
     RenderLock lock(*this);
     buildDisplayedPage_ = -1;
+    buildPageAskedFor_ = -1;
     buildingPopupShown_ = false;
   }
   const auto* bars = std::get_if<ReaderBarsResult>(&result.data);

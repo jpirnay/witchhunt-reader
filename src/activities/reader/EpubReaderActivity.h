@@ -519,6 +519,9 @@ class EpubReaderActivity final : public Activity {
   // Page last drawn by the SectionBuilding pass (-1 = none yet / popup showing). Stops the
   // pass redrawing the same page every idle tick.
   int buildDisplayedPage_ = -1;
+  // The page stepCurrentSectionBuild() last asked the render task to draw (-1: none since buildDisplayedPage_ was last
+  // reset). Each readable page is asked for once.
+  int buildPageAskedFor_ = -1;
   // The page displayBuildPage() last put on the panel, where it drew it (spine -1: none, or the popup since). When the
   // build ends on it, it stays there with its provisional page count instead of being drawn again
   // (keepBuildPageOnScreen).
