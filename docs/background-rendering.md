@@ -212,8 +212,9 @@ The redraw comes from the build's own pass (`displayBuildPage`), which draws cac
 needs is on the bus a refresh holds (`HalCapabilities::decodesThroughRefresh`: a native SDMMC card and a PSRAM arena), the
 lane does not wait for the refresh that shows the page, a 1.5 s HALF on a new chapter. That shows on the X4 Pro, and
 on the Picco since its SE0400 driver defers a refresh (freeink-sdk `Ssd2677Driver::displayStart`): there the chapter
-build runs through its first page's refresh as well. The Murphy qualifies, and its driver defers with the same SDK
-pin (`Uc8253MurphyDriver::displayStart`); no Murphy has run that yet. The T5S3 does not qualify,
+build runs through its first page's refresh as well. The Murphy qualifies, but its driver still blocks in
+`triggerDisplay`, so the lane follows the refresh; a deferring driver is written and host-tested on the SDK fork and
+waits for a Murphy to run it. The T5S3 does not qualify,
 its card being on SPI; with the wait and without it, its lane started 72 and 74 ms after the refresh ended.
 
 | Board | Scratch beside the build | Picture on screen | Chapter built |
