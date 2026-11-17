@@ -88,7 +88,11 @@ browser: it unwraps each book's key with the account's license key through `api.
    book's 109 pages; the page dumps match the plain book's byte for byte; the covers decrypt in the file browser; a copy
    with no key shows its message and goes back. Timings: the Adobe first open builds the manifest in 2.3 s (it measures
    the text's sizes), LCP's in 0.26 s (sizes given), a cached reopen registers in about 60 ms; chapter 1's build 5.94 s
-   as LCP (decrypting) against 5.88 s plain. Still open: the X3 (the C3's heap and time, software-free AES there too).
+   as LCP (decrypting) against 5.88 s plain. Still open: the X3 (the C3's heap and time, hardware AES there too).
+8. Adobe's `aes128-cbc-uncompressed` (entries encrypted as they are, not deflated) reads as LCP's Method 0 does.
+   Not handled: an `aes128-cbc` entry whose plaintext is not a DEFLATE stream, which DeDRM's `ineptepub.py`
+   takes as it is when inflating fails ("possibly not compressed by zip"). How often real books do this is not
+   known; here such an entry fails the manifest build, or an image, which the build does not measure, its read.
 
 Cost on the C3 against master (`default`, 2026-11-17): flash +16.3 KB, static RAM +296 bytes.
 
@@ -108,10 +112,32 @@ protected" from D1.
 
 ## D3: the Adobe plugin
 
-`api.crypto` in the plugin host (random, sha1, sha256, aesenc/aesdec, rsadec, keygen, pubencrypt, sign, pkcs12) and
-`POST /api/crypto`. This needs wolfSSL's RSA private-key operations and PKCS#12, which `scripts/patch_wolfssl.py`
-removed to save flash (`WOLFSSL_RSA_PUBLIC_ONLY`, `NO_PWDBASED`): measure that cost on the C3 first. Then an end-to-end
-check with a real loan, which needs an Adobe ID and a loan from a library.
+The plugin for library loans (Libby, Onleihe) is the Plugin Hub's `protected-content` (Diirge, 1.0.5, served from
+Railway, no repository). It fulfils the `.acsm` file a loan service hands out: an ADEPT client in the page that
+activates the reader with Adobe's activation service and fetches a loan from the distributor's ACS server. Adobe's
+service is DTS ByteBooks' now: `adeactivate.adobe.com` answers with a `dtsbytebooks.com` certificate that names it, and
+the plugin links there for an account. No other Libby or Onleihe plugin exists (Hub, sd-plugins, GitHub; 2026-11-17).
+Version 1.0.5 against this firmware (read, not run):
+
+- Every step needs `api.crypto` (random, sha1, sha256, aesenc/aesdec, rsadec, keygen, pubencrypt, sign, pkcs12); the
+  plugin host throws. The page cannot use `crypto.subtle` instead, as `PluginHost.js.inc` says it can: `SubtleCrypto`
+  exists only in a secure context, and the reader serves `http://` on a LAN address. That comment goes with D3.
+- First of all it lists its own folder and `/.crosspoint` (`/api/files`), looking for `content.key` in both (the
+  second is where its earlier versions kept it). Both answer 403 while hidden files are off, and the plugin then
+  cannot start; upstream lists any folder. With hidden files on, both list.
+- The rest is in place: the relay (four arguments; a 3xx comes back unfollowed and the plugin follows it), `fetchToSd`
+  (http first, then https), `writeFile` of the `.rights` sidecar beside the book (where `/upload` may write) and of its
+  account files in its folder, exact reads there, `/delete` with `path`, `deviceId`, and `/api/book-key`, which it
+  calls before the download (the endpoint needs no book at that path yet). Adobe's certificate chains to USERTrust RSA,
+  which the bundle carries (the chain has a cross-sign; `WOLFSSL_ALT_CERT_CHAINS` is on). The distributors' ACS hosts
+  are not known until a real `.acsm`. `registerAction` only serves fulfilling and renewing by job.
+- It keeps the account's license private key in plain base64 in `content.key` in its folder and reads it back with
+  `/download`, so while File Transfer runs any client on the network can read it too, as on upstream.
+
+`POST /api/crypto` needs wolfSSL's RSA private-key operations and PKCS#12, which `scripts/patch_wolfssl.py` removed to
+save flash (`WOLFSSL_RSA_PUBLIC_ONLY`, `NO_PWDBASED`): measure that cost on the C3 first. Then an end-to-end check with
+a real loan, which needs an Adobe ID and a loan from a library; the plugin warns that each activation may take one of
+the account's device slots.
 
 ## LCP
 
