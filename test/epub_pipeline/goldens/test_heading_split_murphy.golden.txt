@@ -1,8 +1,9 @@
 BOOK title=Heading Split lang=en spine=15 toc=8 reliableToc=1
 SPINE 0 href=OEBPS/c00_Chapter_1.xhtml pages=3 truncated=0 cssFallback=0
- PAGE 0 elements=10 footnotes=0
+ PAGE 0 elements=11 footnotes=0
   LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=1
    W x=101 s=1 z=100 t=1
+  BOX y=51 x=72 w=70 h=6 edges=0/0,0/0,2/2,0/0 shaded=0
   LINE y=71 x=0 align=2 mult=1.500 hfid=0 words=2
    W x=32 s=0 z=100 t=This
    W x=91 s=0 z=100 t=Summer
@@ -154,9 +155,10 @@ SPINE 0 href=OEBPS/c00_Chapter_1.xhtml pages=3 truncated=0 cssFallback=0
    W x=167 s=0 z=100 t=on.
 SPINE 1 href=OEBPS/c01_Chapter_2_split_000.xhtml pages=0 truncated=0 cssFallback=0
 SPINE 2 href=OEBPS/c01_Chapter_2_split_001.xhtml pages=3 truncated=0 cssFallback=0
- PAGE 0 elements=10 footnotes=0
+ PAGE 0 elements=11 footnotes=0
   LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=1
    W x=101 s=1 z=100 t=2
+  BOX y=51 x=72 w=70 h=6 edges=0/0,0/0,2/2,0/0 shaded=0
   LINE y=71 x=0 align=2 mult=1.500 hfid=0 words=2
    W x=32 s=0 z=100 t=This
    W x=91 s=0 z=100 t=Summer
@@ -308,9 +310,10 @@ SPINE 2 href=OEBPS/c01_Chapter_2_split_001.xhtml pages=3 truncated=0 cssFallback
    W x=167 s=0 z=100 t=on.
 SPINE 3 href=OEBPS/c03_title.xhtml pages=0 truncated=0 cssFallback=0
 SPINE 4 href=OEBPS/c04_text.xhtml pages=3 truncated=0 cssFallback=0
- PAGE 0 elements=10 footnotes=0
+ PAGE 0 elements=11 footnotes=0
   LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=1
    W x=70 s=1 z=100 t=Three
+  BOX y=51 x=72 w=70 h=6 edges=0/0,0/0,2/2,0/0 shaded=0
   LINE y=71 x=0 align=2 mult=1.500 hfid=0 words=2
    W x=32 s=0 z=100 t=This
    W x=91 s=0 z=100 t=Summer
@@ -473,9 +476,10 @@ SPINE 5 href=OEBPS/c05_split_000.xhtml pages=1 truncated=0 cssFallback=0
    W x=123 s=1 z=100 t=Two
 SPINE 6 href=OEBPS/c05_split_001.xhtml pages=0 truncated=0 cssFallback=0
 SPINE 7 href=OEBPS/c05_split_002.xhtml pages=3 truncated=0 cssFallback=0
- PAGE 0 elements=10 footnotes=0
+ PAGE 0 elements=11 footnotes=0
   LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=1
    W x=99 s=1 z=100 t=4
+  BOX y=51 x=72 w=70 h=6 edges=0/0,0/0,2/2,0/0 shaded=0
   LINE y=71 x=0 align=2 mult=1.500 hfid=0 words=2
    W x=32 s=0 z=100 t=This
    W x=91 s=0 z=100 t=Summer
