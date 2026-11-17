@@ -82,9 +82,13 @@ browser: it unwraps each book's key with the account's license key through `api.
 6. Done (242ef3eac): the reader says why a protected book does not open (no key, another device's key, an ended
    loan, no clock, unreadable) and goes back. English only so far; the release's translation pass adds the rest.
 7. Host: `EpubProtectedPipelineTest` runs protected copies of three books (text, inline images, JPEGs) through the
-   whole pipeline and gets the plain books' layout dump byte for byte; the refusals too. Device: still open, a book
-   made by `tools/make_protected_epub.py` with its key posted through `/api/book-key`, on the X4 Pro and the X3; the
-   open-path heap and the first-open time (the size measuring decrypts and inflates the book's text once) on the C3.
+   whole pipeline and gets the plain books' layout dump byte for byte; the refusals too. Device, X4 Pro, 2026-11-17 (a68dfdf1f): moby-dick
+   made by `tools/make_protected_epub.py` (Adobe and LCP shapes), keys posted through `/api/book-key` (bad key length,
+   a system path and a non-EPUB refused; `deviceId` stable and per plugin). Both copies open on chapter 1 with the plain
+   book's 109 pages; the page dumps match the plain book's byte for byte; the covers decrypt in the file browser; a copy
+   with no key shows its message and goes back. Timings: the Adobe first open builds the manifest in 2.3 s (it measures
+   the text's sizes), LCP's in 0.26 s (sizes given), a cached reopen registers in about 60 ms; chapter 1's build 5.94 s
+   as LCP (decrypting) against 5.88 s plain. Still open: the X3 (the C3's heap and time, software-free AES there too).
 
 Cost on the C3 against master (`default`, 2026-11-17): flash +16.3 KB, static RAM +296 bytes.
 
