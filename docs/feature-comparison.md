@@ -249,10 +249,10 @@ smaller font area on large CJK books was not measured.
 
 > Measured on one Xteink X3, one X4, one X4 Pro and one BOOX Picco against CrossPoint develop `36b9430e`
 > (2026-11-15) with its serial test API (PR #4458) and one unmerged fix, measured 2026-11-15 and 2026-11-16. Witch
-> Reader on the X3: master `fbee8fa6f`, a development build after 2.53, measured 2026-11-17. On the X4, the X4 Pro and
-> the Picco: Witch Reader 2.53, measured 2026-11-15 and 2026-11-16 (the X4's rows marked † again on 2026-11-17 with
-> two later fixes; the X4 Pro's page turns on 2.52 and again after each 2.53 change, within 10 ms each time). All
-> builds are development builds. One script drove both firmwares through their serial test APIs: a press, then a
+> Reader on the X3 and the Picco: master `fbee8fa6f`, a development build after 2.53, measured 2026-11-17. On the X4
+> and the X4 Pro: Witch Reader 2.53, measured 2026-11-15 and 2026-11-16 (the X4's rows marked † again on 2026-11-17
+> with two later fixes; the X4 Pro's page turns on 2.52 and again after each 2.53 change, within 10 ms each time).
+> All builds are development builds. One script drove both firmwares through their serial test APIs: a press, then a
 > wait until the screen has settled, which includes a 250 ms quiet window on both. Same book (*The Odyssey*, Book IV,
 > 8,077 words), the same settings as far as both have them: Noto Sans 14 pt (the one built-in font both have), 38 px
 > line pitch, justified, hyphenation on, a full refresh every 15 pages. Medians of 30 page turns and of 3 to 5 opens.
@@ -273,7 +273,7 @@ smaller font area on large CJK books was not measured.
 | Reopen a chapter, cache kept, AA in two passes | 2.4 s | 4.4 s |
 | Open a chapter, cache deleted: page on screen, no AA | 3.4 s | 5.1 s |
 | Open a chapter, cache deleted: page complete, AA in two passes | 6.6 s | 6.0 s |
-| Open a chapter, cache deleted: chapter laid out | 6.1 s | not measured ² |
+| Open a chapter, cache deleted: chapter laid out, AA in two passes | 6.1 s | not measured ² |
 | Boot to Home | 4.6 s ³ | 6.0 s |
 | Free heap in the reader at rest (largest block) | 69 KB (55 KB) | 103–143 KB (94–115 KB) |
 | Lowest free heap since boot | 45.5 KB | 30.8 KB |
@@ -306,7 +306,7 @@ point of its run, CrossPoint had less heap free than Witch Reader.
 | Reopen a chapter, cache kept, AA in two passes | 3.2 s | 3.0 s |
 | Open a chapter, cache deleted: page on screen, no AA | 4.2 s † | 4.6 s |
 | Open a chapter, cache deleted: page complete, AA in two passes | 7.0 s † | 5.0 s |
-| Open a chapter, cache deleted: chapter laid out | 6.6 s † | not measured ² |
+| Open a chapter, cache deleted: chapter laid out, AA in two passes | 6.6 s † | not measured ² |
 | Boot to Home | 3.9 s | 3.9 s |
 | Free heap in the reader at rest (largest block) | 80 KB (66 KB) | 150 KB (115 KB) |
 | Lowest free heap since boot | 53.2 KB † | 48.2 KB |
@@ -331,7 +331,7 @@ out, Witch Reader once the whole chapter is. At rest CrossPoint has more heap fr
 | Reopen a chapter, cache kept, AA (each firmware's default) | 3.5 s | 4.1 s |
 | Open a chapter, cache deleted: page on screen, no AA | 3.7 s | 4.9 s |
 | Open a chapter, cache deleted: page complete, AA | 5.0 s in two passes, 5.0 s in one | 8.7 s |
-| Open a chapter, cache deleted: chapter laid out | 4.5 s | not measured ⁵ |
+| Open a chapter, cache deleted: chapter laid out, AA | 4.5 s | not measured ⁵ |
 
 ⁵ CrossPoint went on laying out the chapter while the page was up; it had 23 pages laid out when the run left the
 reader 1.5 s after the screen had settled, so its log gives no time for the whole chapter.
@@ -345,25 +345,27 @@ press wait out the double-press window (about 0.33 s on the X3); it was set to I
 
 **BOOX Picco**
 
-| | Witch Reader 2.53 | CrossPoint |
+| | Witch Reader | CrossPoint |
 | --- | :---: | :---: |
 | Page turn, no AA | 1.12 s | 1.12 s |
-| Page turn, AA in one pass | 1.13 s | ❌ not available on the Picco |
-| Page turn, AA in two passes | 1.65 s | 1.62 s |
+| Page turn, AA in one pass | 1.14 s | ❌ not available on the Picco |
+| Page turn, AA in two passes | 1.64 s | 1.62 s |
 | Turn into the next chapter, AA in two passes | 1.69 s | 1.61 s |
 | Reopen a chapter, cache kept, AA in two passes | 1.73 s | 1.56 s |
-| Open a chapter, cache deleted: page on screen, no AA | 1.45 s | 1.59 s |
-| Open a chapter, cache deleted: screen settled, AA in two passes | 3.7 s | 2.6 s |
+| Open a chapter, cache deleted: page on screen, no AA | 1.31 s | 1.59 s |
+| Open a chapter, cache deleted: page complete, AA in two passes | 1.84 s | 2.04 s |
+| Open a chapter, cache deleted: chapter laid out, AA in two passes | 2.8 s | 3.9 s |
 | Boot to Home | 3.4 s | 3.3 s |
 | Free internal heap in the reader at rest | 173 KB | 165 KB |
 | Lowest free internal heap since boot | 150 KB | 127 KB |
 
 Both firmwares draw AA in two passes on the Picco by default; Witch Reader's One-Pass Anti-Aliasing is a setting
-there, and CrossPoint has no one-pass path for this panel. The two turn pages alike, with or without AA. CrossPoint
-reopens a chapter sooner, and after an open without a cache its screen settles a second sooner: it shows the page once
-part of the chapter is laid out, adds the AA, and lays out the rest in the background (done 3.4-3.9 s after the open).
-Witch Reader shows that page a little sooner, lays out the whole chapter (done after 2.9 s), then adds the AA. It keeps
-more of the internal heap free.
+there, and CrossPoint has no one-pass path for this panel. The two turn pages alike, with or without AA. After an open
+without a cache Witch Reader shows the page sooner, completes it with its AA sooner and has the whole chapter laid out
+a second sooner: it adds the AA to the page while the rest of the chapter is laid out. CrossPoint shows the page once
+part of the chapter is laid out, adds the AA, and lays out the rest while the page is up. CrossPoint turns into the
+next chapter, reopens a chapter and boots sooner, by 0.08, 0.17 and 0.13 s: on a reopen Witch Reader's page and its AA
+reach the panel 0.13 and 0.16 s later. Witch Reader keeps more of the internal heap free.
 
 ## Rendering comparisons
 
