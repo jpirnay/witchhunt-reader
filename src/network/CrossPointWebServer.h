@@ -227,6 +227,7 @@ class CrossPointWebServer {
   // POST /api/fetch?plugin&url&dest -> download straight to the card, avoiding
   // the double transfer of relaying through the browser and uploading back.
   void handleFetchToSd();
+  void handleBookKey();
   // The request headers are HttpDownloader::Headers, spelled out to keep that header out of this one.
   void fetchToSd(const String& plugin, const std::string& url, const String& dest,
                  const std::vector<std::pair<std::string, std::string>>& headers, const std::string& method,

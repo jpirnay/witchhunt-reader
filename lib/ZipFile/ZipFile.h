@@ -96,6 +96,70 @@ class ZipFile {
     bool overflowed_ = false;
   };
 
+  // ---- Encrypted entries (an OCF container's META-INF/encryption.xml) ----
+  //
+  // An encrypted entry is stored in the archive (zip method 0) as a 16-byte IV and the AES-CBC
+  // ciphertext of its padded plaintext, and that plaintext is raw DEFLATE unless the manifest says
+  // it is stored. Whoever opens such an archive registers its Protection (protect()). From then on
+  // every stat ZipFile hands out for an encrypted entry says so, and every read of one decrypts
+  // beneath the inflate: callers read plaintext as from any other entry. getStoredEntryRange(),
+  // which hands out the raw bytes, refuses one. Without a protection registered the archive reads
+  // as it always did, and a stat that says encrypted cannot be read at all.
+  //
+  // Such a stat's method is METHOD_ENCRYPTED | the plaintext's method (STORED or DEFLATED), its
+  // compressedSize the IV and ciphertext's, its uncompressedSize the plaintext's. When the
+  // protection does not know the plaintext's size (Adobe's manifest gives none),
+  // METHOD_SIZE_ESTIMATED is set too and uncompressedSize is an estimate: the ciphertext's length,
+  // and never less than a full inflate window, so a ring or an arena budget sized by it holds every
+  // back-reference of the stream. A caller that compares sizes asks hasExactSize() first.
+  static constexpr uint16_t METHOD_ENCRYPTED = 0x8000;
+  static constexpr uint16_t METHOD_SIZE_ESTIMATED = 0x4000;
+  static bool isEncrypted(const FileStatSlim& stat) { return (stat.method & METHOD_ENCRYPTED) != 0; }
+  static bool hasExactSize(const FileStatSlim& stat) { return (stat.method & METHOD_SIZE_ESTIMATED) == 0; }
+
+  // The block cipher of a protected archive. Plain functions over caller-held state, so a read
+  // that spans many slices (EntryReader) needs nothing of its protection after it opened.
+  struct CipherOps {
+    size_t stateBytes;
+    // Starts a CBC decryption in `state` (stateBytes, max_align_t-aligned) with the content key
+    // (16 or 32 bytes) and the entry's IV.
+    bool (*begin)(void* state, const uint8_t* key, size_t keyLen, const uint8_t iv[16]);
+    // Decrypts len bytes, a multiple of 16, in place, continuing the chain.
+    bool (*decrypt)(void* state, uint8_t* data, size_t len);
+    // Wipes the state.
+    void (*end)(void* state);
+  };
+
+  // What a protection knows of one encrypted entry.
+  struct EncryptedEntry {
+    uint32_t plainSize = 0;
+    bool sizeKnown = false;
+    bool deflated = true;
+  };
+
+  // The stat ZipFile hands out for an encrypted entry whose central-directory stat is `raw`.
+  static FileStatSlim encryptedStat(const FileStatSlim& raw, const EncryptedEntry& entry);
+
+  // One archive's decryption, registered with protect(). ZipFile calls it only under the
+  // registry's lock, so an implementation needs no lock of its own.
+  class Protection {
+   public:
+    virtual ~Protection() = default;
+    // Whether the entry whose local header sits at `localHeaderOffset` is encrypted, and how.
+    virtual bool find(uint32_t localHeaderOffset, EncryptedEntry* out) = 0;
+    // Copies the content key to `out` and returns its length: 16 (AES-128) or 32 (AES-256).
+    virtual size_t key(uint8_t out[32]) const = 0;
+    virtual const CipherOps& cipher() const = 0;
+  };
+
+  // Registers `protection` for the archive at `path` (the path ZipFiles over it are made with),
+  // replacing one registered for that path before. At most PROTECTED_ARCHIVES at a time:
+  // registering another drops the one registered first. False when `protection` is null.
+  static constexpr size_t PROTECTED_ARCHIVES = 2;
+  static bool protect(const std::string& path, std::unique_ptr<Protection> protection);
+  static void unprotect(const std::string& path);
+  static bool isProtected(const std::string& path);
+
  private:
   const std::string& filePath;
   FsFile file;
@@ -111,6 +175,12 @@ class ZipFile {
 
   long getDataOffset(const FileStatSlim& fileStat);
   bool loadZipDetails();
+  // Turns the central-directory stat of an entry of a registered protected archive into the one
+  // callers see (METHOD_ENCRYPTED). A no-op while no archive is registered.
+  void applyProtection(FileStatSlim* stat) const;
+  // readFileToStream() for an entry already looked up.
+  bool streamEntry(const FileStatSlim& fileStat, Print& out, size_t chunkSize, const bool* stop);
+  uint8_t* readEncryptedToMemory(const FileStatSlim& fileStat, size_t* size, bool trailingNullByte);
 
   // RAII helper: opens the zip if not already open, closes on destruction only if
   // it performed the open. Defined here so template methods in the header can use it.

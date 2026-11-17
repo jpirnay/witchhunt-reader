@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <BoardConfig.h>
 #include <BookCache.h>
+#include <BookKey.h>
 #include <CjkUiPacks.h>
 #include <Epub.h>
 #include <FileReplace.h>
@@ -22,6 +23,8 @@
 #include <esp_sleep.h>
 #include <esp_system.h>
 #include <uri/UriBraces.h>
+#include <wolfssl/wolfcrypt/coding.h>
+#include <wolfssl/wolfcrypt/hash.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -34,6 +37,7 @@
 #include "BootDiagnostics.h"
 #include "ChunkedResponse.h"
 #include "CrossPointSettings.h"
+#include "DeviceSecret.h"
 #include "FontInstaller.h"
 #include "GlobalBookmarkIndex.h"
 #include "HttpFileStreamer.h"
@@ -640,6 +644,7 @@ void CrossPointWebServer::begin() {
   server->on("/api/plugins/hosts", HTTP_GET, [this] { handlePluginHostsList(); });
   server->on("/api/plugins/hosts", HTTP_POST, [this] { handlePluginHostsSet(); });
   server->on("/api/fetch", HTTP_POST, [this] { handleFetchToSd(); });
+  server->on("/api/book-key", HTTP_POST, [this] { handleBookKey(); });
   addMultipartRoute("/api/plugin-fs", [this] { handlePluginFs(); }, [this] { handlePluginFsData(); });
   server->on("/plugins", HTTP_GET, [this] { handlePluginsPage(); });
   server->on("/api/book/opf", HTTP_GET, [this] { handleBookOpf(); });
@@ -1129,6 +1134,25 @@ void CrossPointWebServer::handleStatus() const {
   doc["sdTotal"] = status.sdTotalBytes;
   doc["sdUsed"] = status.sdUsedBytes;
   doc["sdFree"] = status.sdFreeBytes;
+  // ?plugin=<name>: a device ID for that plugin, SHA-256(device secret || name), stable across card
+  // swaps, different per plugin, not reversible to any hardware ID. Adobe's plugin activates with
+  // it. As crosspoint-reader PR #3824 (Justin Mitchell) answers it.
+  String plugin = server->arg("plugin");
+  plugin.toLowerCase();  // FAT folder names ignore case
+  uint8_t secret[32];
+  if (!plugin.isEmpty() && plugin.length() <= 64 && deviceSecret(secret)) {
+    uint8_t input[sizeof(secret) + 64];
+    memcpy(input, secret, sizeof(secret));
+    memcpy(input + sizeof(secret), plugin.c_str(), plugin.length());
+    uint8_t hash[32];
+    if (wc_Sha256Hash(input, sizeof(secret) + plugin.length(), hash) == 0) {
+      char hex[2 * sizeof(hash) + 1];
+      for (size_t i = 0; i < sizeof(hash); i++) snprintf(hex + 2 * i, 3, "%02x", hash[i]);
+      doc["deviceId"] = hex;
+    }
+    memset(secret, 0, sizeof(secret));
+    memset(input, 0, sizeof(input));
+  }
 
   LOG_WEB_MEM("status_exit");
   sendJson(server.get(), 200, doc);
@@ -3729,6 +3753,47 @@ void CrossPointWebServer::handleRelayPost() {
 
 // POST /api/fetch?plugin=<name>&url=<url>&dest=<sd path>, or the same as application/json with headers, method and
 // body (upstream's form): download straight to the card, see fetchToSd().
+// POST /api/book-key {path, key (base64, 16 or 32 bytes), expires?} -> {ok}: a protected book's
+// content key, from the plugin that fulfilled the book, stored wrapped to this device as
+// "<path>.key" (BookKey.h). The endpoint of crosspoint-reader PR #3824 (Justin Mitchell); here the
+// path must name an EPUB a web request may reach.
+void CrossPointWebServer::handleBookKey() {
+  if (rejectIfLowMemory(server.get())) return;
+  if (!requireJsonBody(server.get())) return;
+  JsonDocument req;
+  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+    server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
+    return;
+  }
+  const String path = normalizeWebPath(String(req["path"] | ""));
+  const char* keyB64 = req["key"] | "";
+  // The loan's end in epoch seconds, absent or 0 for none. A value that is not a whole number is refused: read as
+  // 0, it would store a key that never ends.
+  const JsonVariantConst expiresField = req["expires"];
+  const bool expiresValid = expiresField.isNull() || expiresField.is<int64_t>();
+  const int64_t expires = expiresValid && !expiresField.isNull() ? expiresField.as<int64_t>() : 0;
+  // Base64_Decode wants room for every 4 characters' 3 bytes, padding included.
+  uint8_t key[bookkey::MAX_KEY_LEN + 3];
+  word32 keyLen = sizeof(key);
+  const bool decoded =
+      Base64_Decode(reinterpret_cast<const byte*>(keyB64), static_cast<word32>(strlen(keyB64)), key, &keyLen) == 0;
+  if (path.isEmpty() || !FsHelpers::checkFileExtension(path, ".epub") ||
+      isProtectedWebPath(path, Target::Item, false) || !decoded || (keyLen != 16 && keyLen != 32) || !expiresValid ||
+      expires < 0) {
+    memset(key, 0, sizeof(key));
+    server->send(400, "application/json", "{\"error\":\"bad path/key\"}");
+    return;
+  }
+  const bool stored = bookkey::write(path.c_str(), key, keyLen, expires);
+  memset(key, 0, sizeof(key));
+  if (!stored) {
+    server->send(500, "application/json", "{\"error\":\"cannot store key\"}");
+    return;
+  }
+  LOG_INF("WEB", "Stored the content key of %s", path.c_str());
+  server->send(200, "application/json", "{\"ok\":true}");
+}
+
 void CrossPointWebServer::handleFetchToSd() {
   if (rejectIfLowMemory(server.get())) return;
   if (!server->header("Content-Type").startsWith("application/json")) {

@@ -39,7 +39,11 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 124;  // v124: headings (h1-h6 and the blocks inside them) are not
+constexpr uint8_t SECTION_FILE_VERSION = 125;  // v125: with extra paragraph spacing on, an empty box right after a
+                                               // laid-out block (a rule drawn as a border) keeps its frame: it took
+                                               // the spacing above it off its height, and was drawn short or not
+                                               // at all
+                                               // v124: headings (h1-h6 and the blocks inside them) are not
                                                // hyphenated
                                                // v123: CSS white-space: pre, pre-wrap and break-spaces keep runs of
                                                // spaces (a token each) and line feeds, pre-line keeps line feeds;
