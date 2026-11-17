@@ -3399,7 +3399,7 @@ void CrossPointWebServer::handlePluginList() const {
   size_t listed = 0;
 
   for (const auto& e : PluginLocations::scanPlugins()) {
-    if (!e.hasPluginJs) continue;
+    if (!e.hasPluginJs && !e.hasDeviceJson) continue;
 
     doc.clear();
     doc["name"] = e.name;
@@ -3407,6 +3407,9 @@ void CrossPointWebServer::handlePluginList() const {
     doc["mount"] = "settings";  // default page
     doc["root"] = e.root;
     doc["disabled"] = e.disabled;
+    // What it has: a web part the pages load (plugin.js), and a catalog manifest the Plugins page runs (device.json).
+    doc["web"] = e.hasPluginJs;
+    doc["device"] = e.hasDeviceJson;
 
     std::string manifest;
     if (e.hasManifest &&
@@ -4125,8 +4128,9 @@ void CrossPointWebServer::handlePluginInstallCommit() const {
     return;
   }
   const std::string staging = pluginStagingDir(name);
-  if (!Storage.exists((staging + "/plugin.js").c_str())) {
-    server->send(400, "application/json", "{\"error\":\"no plugin.js was sent\"}");
+  // A plugin is a web part (plugin.js), upstream's catalog manifest (device.json), or both.
+  if (!Storage.exists((staging + "/plugin.js").c_str()) && !Storage.exists((staging + "/device.json").c_str())) {
+    server->send(400, "application/json", "{\"error\":\"no plugin.js or device.json was sent\"}");
     return;
   }
   const std::string live = pluginInstallDir(name);

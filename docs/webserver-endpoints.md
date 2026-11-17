@@ -847,7 +847,7 @@ plugin folders and serves their bytes — plugin code runs in the browser. See
 ### GET `/api/plugins` - List Plugins
 
 Scans `/.crosspoint/plugins`, `/plugins`, and `/.plugins` and returns every
-folder holding a `plugin.js`.
+folder holding a `plugin.js` or a `device.json`.
 
 **Request:**
 ```bash
@@ -857,7 +857,7 @@ curl http://crosspoint.local/api/plugins
 **Response (200 OK):**
 ```json
 [{"name":"organize-by-author","title":"Organize by Author","mount":"files","root":"/.crosspoint/plugins",
-  "disabled":false,"description":"Sorts the EPUBs of one folder ...","version":"1.0.0"}]
+  "disabled":false,"web":true,"device":false,"description":"Sorts the EPUBs of one folder ...","version":"1.0.0"}]
 ```
 
 | Field          | Description                                                              |
@@ -867,6 +867,8 @@ curl http://crosspoint.local/api/plugins
 | `mount`        | `settings` (default) or `files` — which page loads the plugin            |
 | `root`         | The plugins folder it was found in                                       |
 | `disabled`     | Switched off on the Plugins page; the pages do not load it               |
+| `web`          | It has a `plugin.js`, which the Settings or File Manager page loads      |
+| `device`       | It has a `device.json`, a catalog the Plugins page opens                 |
 | `description`, `version`, `requires`, `allowedHosts` | From `manifest.json`, when present |
 
 Always 200 with an array; an unreadable or absent plugins folder yields `[]`.
@@ -922,7 +924,7 @@ component.
 | --- | --- |
 | `POST /api/plugins/begin?name=` | Starts an install: an empty staging folder `<name>.new` |
 | `POST /api/plugins/file?name=&file=` | One file into the staging folder; the file is sent as `multipart/form-data` (binary-safe, at most 512 KB) |
-| `POST /api/plugins/commit?name=` | Replaces the installed plugin with the staging folder in one rename; `400` without a `plugin.js` |
+| `POST /api/plugins/commit?name=` | Replaces the installed plugin with the staging folder in one rename; `400` without a `plugin.js` or a `device.json` |
 | `POST /api/plugins/remove?name=` | Removes the plugin from every plugins folder; `404` if there is none |
 | `POST /api/plugins/enable?name=&on=0` | Switches the plugin off (a `disabled` file in its folder); `on=1` switches it back on |
 
