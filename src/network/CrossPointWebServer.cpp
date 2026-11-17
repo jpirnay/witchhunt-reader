@@ -3767,14 +3767,19 @@ void CrossPointWebServer::handleBookKey() {
   }
   const String path = normalizeWebPath(String(req["path"] | ""));
   const char* keyB64 = req["key"] | "";
-  const int64_t expires = req["expires"] | static_cast<int64_t>(0);
+  // The loan's end in epoch seconds, absent or 0 for none. A value that is not a whole number is refused: read as
+  // 0, it would store a key that never ends.
+  const JsonVariantConst expiresField = req["expires"];
+  const bool expiresValid = expiresField.isNull() || expiresField.is<int64_t>();
+  const int64_t expires = expiresValid && !expiresField.isNull() ? expiresField.as<int64_t>() : 0;
   // Base64_Decode wants room for every 4 characters' 3 bytes, padding included.
   uint8_t key[bookkey::MAX_KEY_LEN + 3];
   word32 keyLen = sizeof(key);
   const bool decoded =
       Base64_Decode(reinterpret_cast<const byte*>(keyB64), static_cast<word32>(strlen(keyB64)), key, &keyLen) == 0;
   if (path.isEmpty() || !FsHelpers::checkFileExtension(path, ".epub") ||
-      isProtectedWebPath(path, Target::Item, false) || !decoded || (keyLen != 16 && keyLen != 32) || expires < 0) {
+      isProtectedWebPath(path, Target::Item, false) || !decoded || (keyLen != 16 && keyLen != 32) || !expiresValid ||
+      expires < 0) {
     memset(key, 0, sizeof(key));
     server->send(400, "application/json", "{\"error\":\"bad path/key\"}");
     return;

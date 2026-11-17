@@ -1071,7 +1071,7 @@ request may reach ([Protected paths](#protected-paths)).
 
 | Status | Cause                                                   |
 | ------ | ------------------------------------------------------- |
-| 400    | Not JSON, a refused path, a key that is not 16 or 32 bytes of base64, a negative `expires` |
+| 400    | Not JSON, a refused path, a key that is not 16 or 32 bytes of base64, an `expires` that is negative or not a whole number |
 | 500    | The key could not be wrapped or written                  |
 
 ### POST `/api/plugin-fs` - Write a Small File
