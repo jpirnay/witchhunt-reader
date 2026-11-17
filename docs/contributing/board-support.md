@@ -167,7 +167,7 @@ The reader picks its anti-aliasing strategy from what the display path can do, n
   rendered while the B/W waveform runs (X4);
 - deferred: everything else, including the X3, any panel that cannot overlap a refresh, and a panel
   whose driver learned to overlap after its deferred pass was checked on the device
-  (`HalDisplay::keepsDeferredGrayPass()`: the Picco's SE0400; the Murphy's UC8253 is named ahead of its driver). A driver that starts to return true from
+  (`HalDisplay::keepsDeferredGrayPass()`: the Picco's SE0400, the Murphy's UC8253). A driver that starts to return true from
   `supportsAsyncDisplay()` would otherwise move its panel to the inline pass by that alone.
 
 `EpubReaderActivity::usesDeferredAa()` holds the inline/deferred split. It used to be

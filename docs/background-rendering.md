@@ -212,9 +212,10 @@ The redraw comes from the build's own pass (`displayBuildPage`), which draws cac
 needs is on the bus a refresh holds (`HalCapabilities::decodesThroughRefresh`: a native SDMMC card and a PSRAM arena), the
 lane does not wait for the refresh that shows the page, a 1.5 s HALF on a new chapter. That shows on the X4 Pro, and
 on the Picco since its SE0400 driver defers a refresh (freeink-sdk `Ssd2677Driver::displayStart`): there the chapter
-build runs through its first page's refresh as well. The Murphy qualifies, but its driver still blocks in
-`triggerDisplay`, so the lane follows the refresh; a deferring driver is written and host-tested on the SDK fork and
-waits for a Murphy to run it. The T5S3 does not qualify,
+build runs through its first page's refresh as well. The same holds on the Murphy since its UC8253 driver defers
+(`Uc8253MurphyDriver::displayStart`): there a 277x390 JPEG on a chapter's first page was decoded and its two caches
+written, 0.35 s, inside the 0.97 s HALF waveform that showed the page, which was redrawn with the picture 60 ms after
+the waveform's end. The T5S3 does not qualify,
 its card being on SPI; with the wait and without it, its lane started 72 and 74 ms after the refresh ended.
 
 | Board | Scratch beside the build | Picture on screen | Chapter built |
@@ -307,13 +308,13 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
   writer first so a second handle sees committed bytes.
 - **Through the page's refresh:** `displayBuildPage()` starts the refresh, releases the render lock and waits for the
   waveform, and the slices go on meanwhile: the HALF a new chapter opens with is 1.7 s on the X4. Where the card has
-  its own bus and the build's arena is PSRAM (`HalCapabilities::decodesThroughRefresh`: X4 Pro) nothing more is needed.
+  its own bus and the build's arena is PSRAM (`HalCapabilities::decodesThroughRefresh`: the X4 Pro, and the Picco and
+  the Murphy since their drivers return from `triggerDisplay` with the waveform running) nothing more is needed.
   Where the card shares the panel's SPI bus the wait itself was in the way: `HalDisplay::completeDisplay()` holds the
   bus lock for the whole waveform, the build reads the chapter from the card, and the slice therefore sat out every
   pending refresh. On a panel that needs the bus only to start and to finish a refresh
   (`HalDisplay::refreshLeavesBusToCard()`: the X4) the waveform is waited for without the lock (`waitRefreshOffBus()`)
-  and the slice runs through that one refresh (`BuildDuringRefresh.h`). The X3 and the T5S3 still wait; a driver that
-  blocks in `triggerDisplay` (Murphy, Picco) leaves nothing to build through.
+  and the slice runs through that one refresh (`BuildDuringRefresh.h`). The X3 and the T5S3 still wait.
   X4, *The Odyssey*, cold open of a 45 KB chapter, n=3, medians, before / after: the chapter laid out 6.57 / 4.97 s
   after the open, the screen settled 7.23 / 5.63 s (two-pass; One-Pass 7.26 / 5.64, AA off 6.97 / 5.36), the page
   itself on the panel 4.15 / 4.20 s, the lowest free heap unchanged. The page the build drew is freed before the
