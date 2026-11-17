@@ -161,7 +161,8 @@ class ChapterHtmlSlimParser final : public Print {
   // advance. A box opening under it starts its frame below them. 0 on a fresh page.
   int16_t lastGlyphBottom_ = 0;
   // The extra paragraph spacing (setting) the last laid-out block added, and where it ended: a box closing right there
-  // keeps it out of its frame, which its top does not have either.
+  // keeps it out of its frame, which its top does not have either. Only a block laid out inside the box marks it:
+  // openBox clears what the block above it left.
   int16_t extraGap_ = 0;
   int16_t extraGapEnd_ = -1;
   // Whether `name`, with this style, is drawn as a box, and its plan: the pads, and `style`'s padding with the border
