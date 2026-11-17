@@ -98,7 +98,6 @@ where a resource rule or a gate sits in front of it. Ordered by cost.
 | **V3** | **Build-through pages go out B/W and never get their gray.** On a chapter's last 3 pages B keeps S through the turns | ERA:4524-4526, 6402-6406; nothing re-arms the gray in `endBackgroundBorrow()` ERA:1841-1898 | X4c [18:39:46-50]: `building spine 8 through page turns (page 71 of 74)` 183.339; page 71 shown 185.142, no AA line; build done 185.469; next press 186.775 | up to 3 pages per chapter without gray for their whole time on screen (1 here). X3 the same by code, not measured |
 | **V4** | **A turn onto a page whose picture is not cached decodes first, draws after.** | ERA:6426-6480, before the prewarm and the B/W render | not in this bench. Documented: 1-4 s a decode (docs/background-rendering.md:148-149), 6.3 s once (ERA:2372-2373) | class 2 before class 1 by the decode's length, all boards. During a build and in the pre-render the order is already page first (ERA:7058, 4846) |
 | **V5** | **Inline two-pass waits `AA_SETTLE_MS` = 400 ms before the gray.** | ERA:319, 6899-6904 | X4m [18:45:52-54]: HALF ends 198.871, gray refresh ends 199.454 (146 ms long): 0.44 s gap | X4 and X4 Pro in two-pass mode: every freshly rendered page. With One-Pass on it stays on the X4's HALF pages (open, every 15th turn, after a popup or picture page), which the composed path does not take (ERA:6614-6616) |
-| **V6** | **The first open's Indexing popup blocks on the C3.** Async only where the PSRAM arena is lent | ReaderActivity.cpp:969-977 | X3a [09:13:44]: open 0.313, indexing starts 0.971. X4c [18:36:45]: 1.670 -> 2.346 | 0.63-0.66 s before any open work starts |
 | **V7** | **The build idles through its page's refresh.** | ERA:2725-2727 | X4c: page 0 at 3.974, page 10 at 6.166 around a 1,727 ms HALF. X3a: 3.541 / 4.740. Pw: 1.159 / 2.052 | X4 1.7 s, X3 0.7 s, Picco 0.65 s of build time. Class 3 loses it; it reaches class 1 only through V1. Fix 5 (X4), fix 6 (Picco, Murphy) |
 | **V8** | **`CMD:IDLE:SCREEN` counts the chapter build as screen work.** | ERA:7394-7401 | X3a [09:14:25]: the "turn during the build" case got its idle reply at 7.681, after build (6.850) and gray, and only then pressed (7.706) | bench only: "settled" is not comparable with CrossPoint's, and no log exists of a turn during a C3 build |
 | **V9** | **Page count.** (a) The gray waited for the build's end, whose only product for the page on screen is the final count: all boards until #808, the C3 still (V1). (b) A finished look-ahead build redraws the page on screen to firm up the "~" (ERA:2253-2259 -> 1894-1897): a refresh plus a two-pass gray for one number. (c) The first estimate is coarse: `1/~7` for 66 pages (RESULTS-coldopen.md), from an integer percent (lib/Epub/Epub/Section.cpp:2501-2503) | as left | (b) not in these logs (the bench chapters are one file each) | (b) one extra refresh pair per chapter build in books whose chapters span files |
@@ -119,7 +118,7 @@ where a resource rule or a gate sits in front of it. Ordered by cost.
 | Situation | What happens |
 |---|---|
 | Warm open | X3: holds. X4: the gray waits the 400 ms settle (V5) |
-| Cold open | V1, V6, V7 |
+| Cold open | V1, V7 |
 | Turn within a chapter | holds, one refresh in One-Pass, unless Background-B holds S (V2) |
 | Turn into a built chapter | rendered fresh (no pre-render across chapters). With One-Pass on, after a look-ahead borrow it took the inline two passes and the settle: 1.38 s (X4c [18:45:29-30]: buffer returned 6.612, press 6.763, `Inline AA` 8.138) |
 | Turn into an unbuilt chapter | V1 |
@@ -211,8 +210,7 @@ The bus has no RAM read-back (bus/EpdBus.h: only BUSY is read).
 
 **Held longer than the controller needs today:** S for a whole chapter build, though the page's gray needs only plane
 scratch and the B/W page (V1). The frame on screen, lent to look-ahead work, though the other buffer holds only a
-pre-render that 60 ms rebuild (V2). The bus through the X4's waveform (V7). The popup's refresh before the first-open
-indexing (V6). **Cannot be shortened:** the X3's pushed frame until its DTM1 sync; two frames while a mask is composed.
+pre-render that 60 ms rebuild (V2). The bus through the X4's waveform (V7). **Cannot be shortened:** the X3's pushed frame until its DTM1 sync; two frames while a mask is composed.
 
 ### X4 units with an UltraChip panel (C3, no unit at hand)
 
@@ -291,7 +289,7 @@ Order of work, each step one reviewable change:
 5. **Land #808**, then **(c)**: the build page's gray during the build on the C3; build-through pages the same (V3).
 6. **X4:** reseed RED after a deferred single-buffer FAST (section 4), needed with AA off.
 7. **Count:** byte-precise estimate; no refresh for the count alone (V9).
-8. Later, by decision: placeholder-first pictures (V4), the C3's async first-open popup (V6), strip-composed one-pass,
+8. Later, by decision: placeholder-first pictures (V4), strip-composed one-pass,
    B building through every turn on the S3.
 
 Fix 5 and fix 6 stay as they are: after step 5 they shorten the build, no longer the wait for the gray.

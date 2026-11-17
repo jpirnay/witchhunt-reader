@@ -271,8 +271,11 @@ inline bool buildsInPsram() { return keepsSecondaryBuffer(); }
 #endif
 
 // True when an image decode can run through a refresh: nothing it needs is on the bus the waveform holds. The card is
-// not (native SDMMC), and neither is the arena it is lent (PSRAM). Seen on the X4 Pro. The Murphy qualifies too, but
-// its driver blocks in triggerDisplay, so a decode follows its refresh anyway.
+// not (native SDMMC), and neither is the arena it is lent (PSRAM). Seen on the X4 Pro, and on the Picco since its
+// SE0400 driver defers a refresh: a chapter build laid out its pages 2 to 50 while the first page's single push ran
+// (1.1 s, two waveforms and their power cycles; 2026-11-17). The same on the Murphy since its UC8253 driver defers:
+// a build went from page 1 to page 50 of its chapter's 94 between the trigger of the first page's single push and its
+// end (1.65 s: 0.35 s of reset, init and planes, the HALF waveform, the nudge; 2026-11-17).
 inline bool decodesThroughRefresh() { return !sdUsesSpi() && keepsSecondaryBuffer(); }
 
 // A new font on the reader bars' Layout tab waits for them to close; every other value there is laid out under them at

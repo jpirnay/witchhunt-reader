@@ -74,6 +74,19 @@ matter once the current page/section is settled. Of those, the pictures a few pa
 before a chapter fifty pages away: the image lane runs before B, and B takes the secondary buffer only
 once the lane has nothing left to decode (`LaneBeforeBuild.h`, see the image lane below).
 
+**Input first** (`InputFirst.h`): `loop()` gets here on every pass that found no input *event*, and a press is no
+event until it is released and read. While one is on its way (an edge the loop has not taken in, a button held, a
+release waiting out its double-press window) steps 3 to 5 do not run. Each slice of B's build held the loop for 40 ms
+and a parse chunk, so the press was read three to four slices late: on the X4 the turn was seen 363 ms after the press
+with B building, against 111 ms without (2026-11-16), and the build those slices fed was thrown away by the turn. C
+slices through a press while the page the reader asked for is not drawn yet (it may be one C has not laid out), and
+is held like B once that page is up: a key held on a page pauses the layout of the pages behind it. While a press
+holds the slices, `skipLoopDelay()` is false, so the loop reads the key at its usual 10 ms instead of spinning. X3,
+the test API's press 0.6 s after a cold open's first page: turn seen after 374-446 ms before, 265-274 ms held
+(2026-11-17); what remains over the 110 ms of an idle reader is two slices that run before the key's edge reaches
+the loop. The slices themselves: 40 ms and the parse chunk that crosses them, 58 ms on average, 3 to 6 in 105 over
+100 ms, 184 ms the longest.
+
 **Starred pages** (`stepStarredPages()`, `StarAnchoring`): a star keeps the KOReader XPath of its page's first text,
 that text's visible-text offset with the section format it was counted under, and the layout its page number was
 counted in. Once the chapter on screen is complete, its stars counted in another layout move onto the page holding
@@ -210,8 +223,12 @@ is the same `stepImageWarmLocked()`, called between two slices by `stepImageLane
 
 The redraw comes from the build's own pass (`displayBuildPage`), which draws cached images. Where nothing the decode
 needs is on the bus a refresh holds (`HalCapabilities::decodesThroughRefresh`: a native SDMMC card and a PSRAM arena), the
-lane does not wait for the refresh that shows the page, a 1.5 s HALF on a new chapter. That shows on the X4 Pro. The
-Murphy qualifies, but its driver blocks in `triggerDisplay`, so the lane follows the refresh. The T5S3 does not qualify,
+lane does not wait for the refresh that shows the page, a 1.5 s HALF on a new chapter. That shows on the X4 Pro, and
+on the Picco since its SE0400 driver defers a refresh (freeink-sdk `Ssd2677Driver::displayStart`): there the chapter
+build runs through its first page's refresh as well. The same holds on the Murphy since its UC8253 driver defers
+(`Uc8253MurphyDriver::displayStart`): there a 277x390 JPEG on a chapter's first page was decoded and its two caches
+written, 0.35 s, inside the 0.97 s HALF waveform that showed the page, which was redrawn with the picture 60 ms after
+the waveform's end. The T5S3 does not qualify,
 its card being on SPI; with the wait and without it, its lane started 72 and 74 ms after the refresh ended.
 
 | Board | Scratch beside the build | Picture on screen | Chapter built |
@@ -301,6 +318,33 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
 
 - **Start:** `buildSection()` detects the cache miss, picks a mode (below), draws the "Indexing"
   popup, kicks off the build so `hasActiveBuild()` is true, and returns — handing off.
+- **The Indexing popup** (`IndexingPopupGate.h`): the work it announces starts while it paints, where the card can be
+  read during the refresh (a card on its own bus; the X4, `refreshLeavesBusToCard`; the X3) and the output is not
+  inverted. A build that starts with its popup (a released build, or one adopted from Background-B) ships it async and
+  slices on the render task until the waveform ends; its lend waits for nothing: the C3s lend the frame not being
+  painted (`borrowSecondaryBufferDuringRefresh`; on the X4 RED is seeded from the popup after its finish), the S3s the
+  PSRAM arena. The SectionBuilding pass's popup (a resident build's, a turn ahead of the build, a percent target)
+  ships async where the loop task's slice can run through it (the S3s with the card on SDMMC, the X4 waiting off the
+  bus) and is waited for as a build page is (`waitForBuildRefreshUnlocked`). The first open indexes through its popup
+  on every board, a TXT or Markdown index through its own. Blocking still: Dark Mode, the T5S3's chapter and TXT
+  popups (card traffic beside its waveform not tried for a build), the X3's SectionBuilding popup (its slice waits
+  for a pending refresh), `compileSectionCache()`'s (the blocking fallback build). The first page of a chapter still
+  goes out after the popup's waveform: one refresh at a time. What the overlap buys is the build's head start.
+
+  | n=3, medians, s from the action, before / after | First open: work starts | Page | Chapter laid out |
+  |---|---|---|---|
+  | X4, cold open | 0.67 / 0.13 | 4.17 / 3.69 | 4.92 / 4.47 |
+  | X4, crossing (B's build adopted) | | 1.13 / 1.17 (page out) | 2.36 / 1.93 |
+  | X4, percent jump | | 5.32 / 4.82 | 3.49 / 2.99 |
+  | X4 Pro, crossing | | 1.86 / 1.83 (page on panel) | 2.61 / 2.05 |
+  | X4 Pro, percent jump | | 4.48 / 3.93 | 2.73 / 2.18 |
+  | Picco, percent jump | | 2.50 / 2.01 | 1.71 / 1.21 |
+  | Murphy (Bitter 8 pt), crossing | | 2.05 / 2.00 (page on panel) | 2.87 / 2.41 |
+  | Murphy, percent jump | | 3.92 / 3.47 | 2.57 / 2.12 |
+  | TXT, 40 KB, first open: X4 / X4 Pro / Picco / Murphy | | 6.80 / 6.25, 6.22 / 5.72, 3.56 / 3.40, 7.32 / 6.84 | |
+
+  AA off, the 2.53 bench book and profile (the Murphy at its owner's settings). The files the work wrote (book.bin, the
+  chapters, the TXT index) are byte-identical to master's on the X4, whose card shares the panel's bus, and the X4 Pro.
 - **Build:** `stepCurrentSectionBuild()` on the loop task, 40 ms slices, highest reader-build
   priority. On a newly-written target page it `requestUpdate()`s so the render task draws it.
 - **Draw:** the `SectionBuilding` pass (`renderSectionBuildingPass`) shows the requested page from
@@ -311,13 +355,13 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
   writer first so a second handle sees committed bytes.
 - **Through the page's refresh:** `displayBuildPage()` starts the refresh, releases the render lock and waits for the
   waveform, and the slices go on meanwhile: the HALF a new chapter opens with is 1.7 s on the X4. Where the card has
-  its own bus and the build's arena is PSRAM (`HalCapabilities::decodesThroughRefresh`: X4 Pro) nothing more is needed.
+  its own bus and the build's arena is PSRAM (`HalCapabilities::decodesThroughRefresh`: the X4 Pro, and the Picco and
+  the Murphy since their drivers return from `triggerDisplay` with the waveform running) nothing more is needed.
   Where the card shares the panel's SPI bus the wait itself was in the way: `HalDisplay::completeDisplay()` holds the
   bus lock for the whole waveform, the build reads the chapter from the card, and the slice therefore sat out every
   pending refresh. On a panel that needs the bus only to start and to finish a refresh
   (`HalDisplay::refreshLeavesBusToCard()`: the X4) the waveform is waited for without the lock (`waitRefreshOffBus()`)
-  and the slice runs through that one refresh (`BuildDuringRefresh.h`). The X3 and the T5S3 still wait; a driver that
-  blocks in `triggerDisplay` (Murphy, Picco) leaves nothing to build through.
+  and the slice runs through that one refresh (`BuildDuringRefresh.h`). The X3 and the T5S3 still wait.
   X4, *The Odyssey*, cold open of a 45 KB chapter, n=3, medians, before / after: the chapter laid out 6.57 / 4.97 s
   after the open, the screen settled 7.23 / 5.63 s (two-pass; One-Pass 7.26 / 5.64, AA off 6.97 / 5.36), the page
   itself on the panel 4.15 / 4.20 s, the lowest free heap unchanged. The page the build drew is freed before the
