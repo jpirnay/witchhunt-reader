@@ -32,6 +32,7 @@ TEST(ChapterBackfill, TakesAFileOnlyOnce) {
 }
 
 using ChapterBackfill::buildMs;
+using ChapterBackfill::costsOnePass;
 using ChapterBackfill::mayStart;
 using ChapterBackfill::msPerKb;
 
@@ -72,4 +73,11 @@ TEST(ChapterBackfill, AfterATurnTookOneAwayOnlyALongerPauseStartsAnother) {
   EXPECT_FALSE(mayStart(100, 1600, 60000, 1500, 7000, kQuiet));
   EXPECT_FALSE(mayStart(100, 8500, 3100, 8499, 7000, kQuiet));
   EXPECT_TRUE(mayStart(1640, 8500, 3100, 8500, 7000, kQuiet));
+}
+
+TEST(ChapterBackfill, NeverTakesTheCopyOfThePageAComposedOnePassNeeds) {
+  EXPECT_TRUE(costsOnePass(/*buildTakesDisplayBuffer=*/true, /*onePassComposed=*/true, /*holdsFrame=*/true));
+  EXPECT_FALSE(costsOnePass(false, true, true)) << "the S3 boards build in PSRAM";
+  EXPECT_FALSE(costsOnePass(true, false, true)) << "AA off, or in two passes: the turn needs no old frame";
+  EXPECT_FALSE(costsOnePass(true, true, false)) << "the buffer lost the frame already: the borrow costs nothing more";
 }

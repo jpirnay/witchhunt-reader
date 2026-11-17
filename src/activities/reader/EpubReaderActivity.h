@@ -829,7 +829,8 @@ class EpubReaderActivity final : public Activity {
   // to.
   bool beginChapterBackfill();
   void endChapterBackfill();
-  // Whether B may lay out `spine` for the count now, at the reader's pace (ChapterBackfill::mayStart).
+  // Whether B may lay out `spine` for the count now: at the reader's pace, and not with the copy of the page on screen
+  // a composed one-pass needs (ChapterBackfill::mayStart, costsOnePass).
   bool backfillMayBorrow(int spine) const;
   int backfillSpine_ = -1;
   int backfillForwardCursor_ = -1;

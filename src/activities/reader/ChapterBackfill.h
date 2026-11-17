@@ -67,4 +67,12 @@ constexpr bool mayStart(const uint32_t buildMs, const uint32_t sinceTurnMs, cons
   return preemptedStayMs == 0 && paceMs != kNoPace && uint64_t{sinceTurnMs} + buildMs <= paceMs;
 }
 
+// Rule R3: on a board whose builds take a display buffer (the C3; the S3 boards build in PSRAM), the buffer lent is
+// the copy of the page on screen that the next turn's composed one-pass gray is made from
+// (FreeInkDisplay::beginOnePassMask), and that turn goes out in two passes instead. No file is laid out then.
+constexpr bool costsOnePass(const bool buildTakesDisplayBuffer, const bool onePassComposed,
+                            const bool bufferHoldsFrameOnScreen) {
+  return buildTakesDisplayBuffer && onePassComposed && bufferHoldsFrameOnScreen;
+}
+
 }  // namespace ChapterBackfill

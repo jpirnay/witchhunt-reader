@@ -4762,7 +4762,11 @@ bool EpubReaderActivity::backfillMayBorrow(const int spine) const {
   const unsigned long activityMs = std::max(lastPageTurnTime, lastPageOnScreenMs_);
   // The borrow waits for the quiet period in any case: the build starts then at the earliest.
   const unsigned long startMs = std::max<unsigned long>(millis(), activityMs + BG_BUILD_BORROW_QUIET_MS);
-  return ChapterBackfill::mayStart(ChapterBackfill::buildMs(spineItemBytes(*epub, spine), buildMsPerKb_),
+  const bool onePassComposed =
+      SETTINGS.onePassTextAa != 0 && renderer.composesOnePassText() && getEffectiveTextAntiAliasing();
+  return !ChapterBackfill::costsOnePass(!HalCapabilities::buildsInPsram(), onePassComposed,
+                                        renderer.secondaryHoldsFrameOnScreen()) &&
+         ChapterBackfill::mayStart(ChapterBackfill::buildMs(spineItemBytes(*epub, spine), buildMsPerKb_),
                                    static_cast<uint32_t>(startMs - lastTurnAskedMs_), lastTurnGapMs_,
                                    static_cast<uint32_t>(startMs - activityMs), backfillPreemptedStayMs_,
                                    BG_BUILD_BORROW_QUIET_MS);
