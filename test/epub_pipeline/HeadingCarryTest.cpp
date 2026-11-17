@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "../book_metadata_cache/AllocationRefusal.h"
+#include "BuildArena.h"
 #include "Epub.h"
 #include "Epub/HeadingCarry.h"
 #include "Epub/Section.h"
@@ -261,6 +262,31 @@ TEST_F(HeadingCarryBookTest, AFileThatCannotBeReadIsAskedAgain) {
     EXPECT_FALSE(epub->isCarriedSpine(0));
   }
   EXPECT_TRUE(epub->isCarriedSpine(0));
+}
+
+// A build asks with its lent region: a heading file not banked yet is inflated there, its ring off the heap.
+TEST_F(HeadingCarryBookTest, AScanGivenARegionTakesItsRingFromIt) {
+  const std::string book = std::string(CORPUS_DIR) + "/test_heading_split.epub";  // deflated entries
+  const auto peakOfScan = [&](BuildArena* region, const char* tag) {
+    auto epub = std::make_shared<Epub>(book, (work / tag).string());
+    EXPECT_TRUE(epub->load(true));
+    const size_t bytes = epub->getSpineItem(1).zipUncompressedSize;
+    HeadingCarry::Scanner scanner;
+    resetHeapPeak();
+    const size_t before = heapLiveBytes();
+    EXPECT_TRUE(HeadingCarry::scanSpine(*epub, 1, bytes, scanner, region));
+    EXPECT_EQ(Shape::Heading, scanner.finish());
+    return heapPeakBytes() - before;
+  };
+  BuildArena region(16 * 1024);
+  ASSERT_TRUE(region.valid());
+  const size_t fromRegion = peakOfScan(&region, "region");
+  const size_t fromHeap = peakOfScan(nullptr, "heap");
+  const auto epub = std::make_shared<Epub>(book, (work / "size").string());
+  ASSERT_TRUE(epub->load(true));
+  EXPECT_GE(fromHeap, fromRegion + epub->getSpineItem(1).zipUncompressedSize)
+      << "region " << fromRegion << " B of heap, heap " << fromHeap << " B";
+  EXPECT_EQ(0u, region.used()) << "given back";
 }
 
 TEST_F(HeadingCarryBookTest, TheNearMissesAreNotCarried) {

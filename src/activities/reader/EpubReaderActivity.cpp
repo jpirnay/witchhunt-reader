@@ -3561,12 +3561,10 @@ void EpubReaderActivity::toggleStarOnCurrentPage() {
   if (!section || section->currentPage < 0 || section->currentPage >= section->pageCount) return;
   const int page = section->currentPage;
   // A star on the heading file this page now holds (set before the join) is this page's: toggled off here.
-  if (const auto carried = carriedStarHere()) {
-    bookmarkStore.toggle(carried->first, carried->second);
-  } else {
-    bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(page),
-                         StarAnchoring::forPage(*section, page));
-  }
+  const auto carried = carriedStarHere();
+  bookmarkStore.toggle(carried ? carried->first : static_cast<uint16_t>(currentSpineIndex),
+                       carried ? carried->second : static_cast<uint16_t>(page),
+                       carried ? StarAnchor{} : StarAnchoring::forPage(*section, page));
   starsSettledFor_ = {};  // its text is to be named
   requestUpdate();
 }
@@ -5454,8 +5452,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   if (Section::carriedAwayOf(*epub, currentSpineIndex, getEffectiveVerticalText())) {
     const CarriedSpineNav::Landing landing =
         CarriedSpineNav::land(currentSpineIndex, navTarget.kind == NavigationTarget::Kind::LastPage);
-    LOG_DBG("ERS", "Spine %d is carried by spine %d; landing on spine %d", currentSpineIndex, currentSpineIndex + 1,
-            landing.spine);
+    LOG_DBG("ERS", "spine=%d carried; landing on %d", currentSpineIndex, landing.spine);
     currentSpineIndex = landing.spine;
     navTarget = landing.lastPage ? NavigationTarget::makeLastPage() : NavigationTarget::makePage(0);
   }

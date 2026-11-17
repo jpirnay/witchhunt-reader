@@ -164,7 +164,7 @@ class Section {
   BuildPhaseResult runBuildParse(BuildState& st, uint32_t budgetMs);
   BuildPhaseResult runBuildFinalize(BuildState& st);
   // The carried heading file's XHTML banked beside its own spine's, as its build would leave it, and where its body's
-  // content lies in that copy (BuildState::Carry). Between the extraction and the parse; the file is a few KB at most.
+  // content lies in that copy (BuildState::Carry). Between the extraction and the parse; the file is 4 KB at most.
   bool prepareCarry(BuildState& st);
   // Runs between the parse phases, once the spine's inflated XHTML is on SD and no ZIP state is
   // live: makes sure every note this spine references has its text in the book's preview store,
@@ -230,8 +230,9 @@ class Section {
   // only its chapter's heading and has no page of its own, the next item's first page showing it (carriedAwayOf); or
   // the item before it is such a file, which its layout takes in (carriesPreviousOf). The Epub decides
   // (isCarriedSpine) and remembers its last answers.
-  static bool carriedAwayOf(const Epub& epub, int spineIndex, VerticalText request);
-  static bool carriesPreviousOf(const Epub& epub, int spineIndex, VerticalText request);
+  // `scratch`: where a heading file not banked yet may be inflated for the answer (HeadingCarry::scanSpine).
+  static bool carriedAwayOf(const Epub& epub, int spineIndex, VerticalText request, BuildArena* scratch = nullptr);
+  static bool carriesPreviousOf(const Epub& epub, int spineIndex, VerticalText request, BuildArena* scratch = nullptr);
   // The section file format (SECTION_FILE_VERSION). What its offset table counts (VisibleText.h) is the book's source,
   // whatever the layout; a firmware with another format may count it otherwise, so a visible-text offset saved for
   // later (a starred page's, BookmarkStore) is good while this is the format it was counted under.

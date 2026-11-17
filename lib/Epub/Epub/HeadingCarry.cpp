@@ -249,93 +249,87 @@ Shape Scanner::finish() const {
 }
 
 bool splitSiblings(const std::string_view first, const std::string_view second) {
-  // Splits a path into everything before "_split_", the number after it and the extension.
-  struct Parts {
-    std::string_view stem;
-    std::string_view ext;
-    unsigned long number = 0;
-    bool ok = false;
-  };
-  const auto parse = [](const std::string_view path) {
-    Parts parts;
-    const size_t slash = path.find_last_of('/');
-    const size_t dot = path.find_last_of('.');
-    if (dot == std::string_view::npos || (slash != std::string_view::npos && dot < slash)) return parts;
-    size_t digits = dot;
-    while (digits > 0 && path[digits - 1] >= '0' && path[digits - 1] <= '9') --digits;
-    constexpr std::string_view kSplit = "_split_";
-    if (digits == dot || digits < kSplit.size() || path.substr(digits - kSplit.size(), kSplit.size()) != kSplit) {
-      return parts;
+  constexpr std::string_view kSplit = "_split_";
+  const size_t at = first.rfind(kSplit);
+  if (at == std::string_view::npos) return false;
+  const size_t digits = at + kSplit.size();
+  if (second.substr(0, digits) != first.substr(0, digits)) return false;
+  // The number after "_split_" (calibre writes three digits), then the extension, which both share.
+  const auto number = [digits](const std::string_view path, size_t& end) {
+    unsigned long n = 0;
+    for (end = digits; end < path.size() && end < digits + 6 && path[end] >= '0' && path[end] <= '9'; ++end) {
+      n = n * 10 + static_cast<unsigned long>(path[end] - '0');
     }
-    if (dot - digits > 6) return parts;  // calibre writes three digits
-    for (size_t i = digits; i < dot; ++i) parts.number = parts.number * 10 + static_cast<unsigned long>(path[i] - '0');
-    parts.stem = path.substr(0, digits - kSplit.size());
-    parts.ext = path.substr(dot);
-    parts.ok = true;
-    return parts;
+    return n;
   };
-  const Parts a = parse(first);
-  const Parts b = parse(second);
-  return a.ok && b.ok && a.stem == b.stem && a.ext == b.ext && b.number == a.number + 1;
+  size_t endFirst = 0;
+  size_t endSecond = 0;
+  const unsigned long a = number(first, endFirst);
+  const unsigned long b = number(second, endSecond);
+  const std::string_view ext = first.substr(endFirst);
+  return endFirst > digits && endSecond > digits && b == a + 1 && !ext.empty() && ext[0] == '.' &&
+         ext.find('/') == std::string_view::npos && ext == second.substr(endSecond);
 }
 
-bool scanSpine(const Epub& epub, const int spine, const size_t inflatedSize, Scanner& scanner) {
+bool scanSpine(const Epub& epub, const int spine, const size_t inflatedSize, Scanner& scanner, BuildArena* scratch,
+               const bool bankIt) {
   uint8_t window[256];
-  // The banked copy a build of this spine left: no inflate, no heap.
+  size_t total = 0;
+  // The banked copy a build of this spine left: no inflate, no heap. A plain open: no copy is no error.
   const std::string banked = Section::sectionHtmlCachePath(epub.getCachePath(), spine);
-  if (Storage.exists(banked.c_str())) {
-    FsFile file;
-    if (Storage.openFileForRead("HCA", banked, file)) {
-      if (file.size() == inflatedSize) {
-        size_t total = 0;
-        for (int n = file.read(window, sizeof(window)); n > 0; n = file.read(window, sizeof(window))) {
-          scanner.feed(window, static_cast<size_t>(n));
-          total += static_cast<size_t>(n);
-        }
-        file.close();
-        if (total == inflatedSize) return true;
-        LOG_ERR("HCA", "Spine %d: banked XHTML read short (%u of %u bytes)", spine, static_cast<unsigned>(total),
-                static_cast<unsigned>(inflatedSize));
-        return false;
-      }
-      file.close();
+  FsFile file = Storage.open(banked.c_str());
+  if (file && file.size() == inflatedSize) {
+    for (int n = file.read(window, sizeof(window)); n > 0; n = file.read(window, sizeof(window))) {
+      scanner.feed(window, static_cast<size_t>(n));
+      total += static_cast<size_t>(n);
     }
+    file.close();
+    return total == inflatedSize;
   }
+  if (file) file.close();
 
-  // Else the entry itself. The ring only has to cover the file, which is at most kMaxFileBytes.
+  // Else the entry itself.
   ZipFile::FileStatSlim stat = {};
   if (!epub.getSpineItemStat(spine, &stat)) return false;
   const size_t arenaBytes = sizeof(window) + InflateReader::ringSizeFor(inflatedSize) + 2 * alignof(std::max_align_t);
-  const auto arena = makeUniqueNoThrow<BuildArena>(arenaBytes);
-  if (!arena || !arena->valid()) {
-    LOG_INF("HCA", "Spine %d: no %u bytes to read it; asked again later", spine, static_cast<unsigned>(arenaBytes));
-    return false;
+  std::unique_ptr<BuildArena> own;
+  if (!scratch || scratch->capacity() - scratch->used() < arenaBytes) {
+    own = makeUniqueNoThrow<BuildArena>(arenaBytes);
+    if (!own || !own->valid()) {
+      LOG_INF("HCA", "Spine %d: no %u B to read it", spine, static_cast<unsigned>(arenaBytes));
+      return false;
+    }
+    scratch = own.get();
+  }
+  if (bankIt) {
+    Storage.mkdir(Epub::spineCacheDir(epub.getCachePath(), spine).c_str());
+    if (!Storage.openFileForWrite("HCA", banked, file)) return false;
   }
   ZipFile zip(epub.getPath());
   epub.primeZip(zip);
   bool ok = false;
   {
-    ZipFile::EntryReader reader(zip, sizeof(window), arena.get());
-    if (reader.open(stat)) {
-      bool done = false;
-      ok = true;
-      while (!done) {
-        size_t produced = 0;
-        if (!reader.step(window, sizeof(window), &produced, &done)) {
-          ok = false;
-          break;
-        }
-        scanner.feed(window, produced);
-      }
-      ok = ok && reader.bytesProduced() == inflatedSize;
+    ZipFile::EntryReader reader(zip, sizeof(window), scratch);
+    ok = reader.open(stat);
+    for (bool done = false; ok && !done;) {
+      size_t produced = 0;
+      ok = reader.step(window, sizeof(window), &produced, &done) &&
+           (!file || produced == 0 || file.write(window, produced) == produced);
+      scanner.feed(window, produced);
+      total += produced;
     }
   }
   epub.adoptZipDetails(zip);
-  if (!ok) LOG_ERR("HCA", "Spine %d: could not inflate its XHTML", spine);
+  ok = ok && total == inflatedSize;
+  if (file) {
+    file.close();
+    if (!ok) Storage.remove(banked.c_str());
+  }
+  if (!ok) LOG_ERR("HCA", "Spine %d: XHTML not read", spine);
   return ok;
 }
 
-Verdict decide(const Epub& epub, const int spine) {
+Verdict decide(const Epub& epub, const int spine, BuildArena* scratch) {
   if (spine < 0 || spine + 1 >= epub.getSpineItemsCount()) return Verdict::No;
   const auto head = epub.getSpineItem(spine);
   const size_t headBytes = head.zipUncompressedSize;
@@ -352,14 +346,14 @@ Verdict decide(const Epub& epub, const int spine) {
   if (!oneChapter) return Verdict::No;
 
   Scanner headScan;
-  if (!scanSpine(epub, spine, headBytes, headScan)) return Verdict::Unknown;
+  if (!scanSpine(epub, spine, headBytes, headScan, scratch)) return Verdict::Unknown;
   if (headScan.finish() == Shape::Other) return Verdict::No;
 
   const size_t nextBytes = next.zipUncompressedSize;
   if (nextBytes == 0) return Verdict::No;
   if (nextBytes <= kMaxFileBytes) {
     Scanner nextScan;
-    if (!scanSpine(epub, spine + 1, nextBytes, nextScan)) return Verdict::Unknown;
+    if (!scanSpine(epub, spine + 1, nextBytes, nextScan, scratch)) return Verdict::Unknown;
     if (nextScan.finish() != Shape::Other) return Verdict::No;  // of two heading files only the last is carried
   }
   return Verdict::Yes;

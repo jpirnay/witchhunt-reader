@@ -2476,17 +2476,16 @@ bool Epub::hasReliableToc() const {
   return reliable;
 }
 
-bool Epub::isCarriedSpine(const int spine) const {
+bool Epub::isCarriedSpine(const int spine, BuildArena* scratch) const {
   if (spine < 0) return false;
   for (const CarryMemo& memo : carryMemo_) {
     if (memo.spine == spine) return memo.carried;
   }
-  const HeadingCarry::Verdict verdict = HeadingCarry::decide(*this, spine);
+  const HeadingCarry::Verdict verdict = HeadingCarry::decide(*this, spine, scratch);
   if (verdict == HeadingCarry::Verdict::Unknown) return false;
   const bool carried = verdict == HeadingCarry::Verdict::Yes;
   carryMemo_[carryMemoNext_] = {spine, carried};
   carryMemoNext_ = static_cast<uint8_t>((carryMemoNext_ + 1) % std::size(carryMemo_));
-  if (carried) LOG_DBG("EBP", "Spine %d holds only its chapter's heading: laid out with spine %d", spine, spine + 1);
   return carried;
 }
 

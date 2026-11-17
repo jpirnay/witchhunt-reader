@@ -419,7 +419,8 @@ class Epub {
   // True when spine item `spine` holds only its chapter's heading (or nothing), which the next item's layout takes in
   // at the top of its first page, so it has no page of its own (HeadingCarry). False too while that cannot be told (a
   // file it must read could not be): the answer is not remembered then, and the next call asks again.
-  bool isCarriedSpine(int spine) const;
+  // `scratch`: a region the scan may take its inflate ring from (a build's lent one), else the heap (HeadingCarry).
+  bool isCarriedSpine(int spine, BuildArena* scratch = nullptr) const;
   bool hasReliableToc() const;
   void setSyntheticTocFallbackEnabled(bool enabled) { syntheticTocFallbackEnabled = enabled; }
   size_t getCumulativeSpineItemSize(int spineIndex) const;

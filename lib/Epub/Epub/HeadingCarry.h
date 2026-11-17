@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string_view>
 
+class BuildArena;
 class Epub;
 
 // A converter can leave a chapter's heading in a spine file of its own and its text in the next: calibre's split cuts a
@@ -88,12 +89,15 @@ bool splitSiblings(std::string_view first, std::string_view second);
 enum class Verdict : uint8_t { No, Yes, Unknown };
 
 // The rules above for spine item `spine` of `epub`. Unknown when a file it had to read could not be read (no memory
-// for the inflate, a card error): the caller treats it as No and asks again later.
-Verdict decide(const Epub& epub, int spine);
+// for the inflate, a card error): the caller treats it as No and asks again later. `scratch`: as for scanSpine.
+Verdict decide(const Epub& epub, int spine, BuildArena* scratch = nullptr);
 
 // Feeds spine item `spine`'s XHTML into `scanner`: from its banked copy (Section::sectionHtmlCachePath) when that is
-// whole, else inflated from the book (about 6 KB of heap for the time of the call, for a file of kMaxFileBytes).
-// False when it could not be read.
-bool scanSpine(const Epub& epub, int spine, size_t inflatedSize, Scanner& scanner);
+// whole, through a 256 B window on the stack and nothing else; else inflated from the book, and with `bankIt` banked
+// as it is read. A deflated file needs a ring as long as itself (kMaxFileBytes at most: a back-reference reaches as far
+// back as the bytes produced so far), taken from `scratch` when it has room (a build's lent region), else from the heap
+// for the call; the inflater's own state (EntryReader, about 1.3 KB) is from the heap. False when it could not be read.
+bool scanSpine(const Epub& epub, int spine, size_t inflatedSize, Scanner& scanner, BuildArena* scratch = nullptr,
+               bool bankIt = false);
 
 }  // namespace HeadingCarry
