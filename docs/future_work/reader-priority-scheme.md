@@ -5,8 +5,11 @@ Design study, 2026-11-17. Analysis only: no code changed, no device touched.
 **Status (2026-11-17).** The scheme is the owner's: 1) a complete page, 2) what the page on screen still needs,
 3) everything else, with input above all three; the page count may stay an estimate and never holds back the gray;
 One-Pass Anti-Aliasing is designed for first. The order of work in section 5 is accepted. In work: steps 1-3 and an
-adaptive settle for V5 (the wait depends on whether the reader is flipping). Open: steps 4-7, and the decisions of
-section 8, which stand as recommendations until taken. Delete each item here as it lands.
+adaptive settle for V5 (the wait depends on whether the reader is flipping). Step 5's (c) is in for the page a
+borrowed C3 build draws (`BuildPageGray::Pass::Redraw`; X3 cold open: gray 4.08 s against 6.58 s,
+docs/background-rendering.md), which takes D1 A; still open from step 5: the X4's resident build (the gray stays at
+the build's end) and the build-through pages (V3). Open: steps 4, 6, 7, and the decisions of section 8, which stand as
+recommendations until taken. Delete each item here as it lands.
 
 The logs it quotes are bench logs kept outside the repository (the maintainer's `witchhunt-work` folder); the figures
 are also in the PRs that came out of the 2.53 bench (#789, #792, #802, #805, #808).

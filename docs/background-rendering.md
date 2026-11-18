@@ -369,17 +369,24 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
   after the open, the screen settled 7.23 / 5.63 s (two-pass; One-Pass 7.26 / 5.64, AA off 6.97 / 5.36), the page
   itself on the panel 4.15 / 4.20 s, the lowest free heap unchanged. The page the build drew is freed before the
   wait, as its font slots are: left alive it was heap the slices no longer had.
-- **Its gray, on the S3s** (`BuildPageGray.h`): where the build leaves the frame buffers alone
-  (`HalCapabilities::buildsInPsram()`: the build lays out in PSRAM, in its own region or in the arena lent in
-  place of the secondary buffer, and the frame on screen stays in that buffer), a page of text with nothing over it
-  gets its AA while the build goes on. On a panel that puts a page and its gray up in one push (One-Pass
+- **Its gray** (`BuildPageGray.h`): a page of text with nothing over it gets its AA while the build goes on, by one
+  of two passes. Where the build leaves the frame buffers alone (`HalCapabilities::buildsInPsram()`, the S3s: the
+  build lays out in PSRAM, in its own region or in the arena lent in place of the secondary buffer, and the frame on
+  screen stays in that buffer) it is `Restore`: on a panel that puts a page and its gray up in one push (One-Pass
   Anti-Aliasing, the T5S3) it goes up with the page's own push, its planes captured by the draw as `renderContents()`
-  captures a turn's. Elsewhere `askBuildPageGray()` arms the deferred gray pass once the page's refresh is over, and
-  `runDeferredGrayscalePass()` runs it ahead of the next slice, so the build waits for the pass. A turn drops or
-  preempts it as it does a turn's pass; a preempted one is asked for again at the build's end. The C3s keep the gray
-  for the build's end: the X3's build holds the secondary buffer, and the X4's resident build runs on the heap its
-  low-heap guard watches. The loop's ticks read a hint (`buildPageGrayDue_`) before they take the
-  render lock for this; the lock on every tick made the Picco's build 53-66 ms slower.
+  captures a turn's; elsewhere `askBuildPageGray()` arms the deferred gray pass once the page's refresh is over, and
+  `runDeferredGrayscalePass()` runs it ahead of the next slice. Where the build holds the secondary buffer as its
+  arena (the X3, the X4's borrowed builds) it is `Redraw` (`runBuildPageGrayRedraw()`), between two slices once the
+  page's refresh is over: the page, its glyph slots and the status bar's pixels go into a block of the build's arena,
+  the planes are rendered over the write buffer (the page's only copy), the page is drawn there again with the status
+  bar put back as kept, not drawn again (its battery, clock and "~" count may have moved since the push), and the
+  write buffer goes to the cleanup (`GfxRenderer::renderGrayscalePlanesOverFrame()`). A digest of the frame before
+  and after says whether the redraw is the pushed frame (`frame=same` in the log); if not, the driver is told it has
+  no baseline and the next push is a clean one. The build waits for either pass. A turn drops or preempts it as it
+  does a turn's pass; a preempted one, or a `Redraw` that found no room in the arena, is asked for again at the
+  build's end. The X4's resident build keeps the gray for the build's end: it runs on the heap its low-heap guard
+  watches, which the page and its glyphs would come from. The loop's ticks read a hint (`buildPageGrayDue_`) before
+  they take the render lock for this; the lock on every tick made the Picco's build 53-66 ms slower.
 
   | Picco, *The Odyssey*, n=3, medians, s, before / after | Gray on the panel | Chapter laid out | Settled |
   |---|---|---|---|
@@ -391,6 +398,17 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
 
   The page itself is on the panel when it was before (1.47 s on a cold open; One-Pass 0.05 s later, the capture). The
   build waits for each pass: a page left before the build ends has cost it one, as the last row shows.
+
+  | X3, *The Odyssey* BOOK IV (66 pages), n=3, medians, s, before / after | Gray on the panel | Chapter laid out | Settled |
+  |---|---|---|---|
+  | Cold open, two passes | 6.58 / 4.08 | 6.14 / 6.65 | 7.23 / 7.05 |
+  | Cold open, One-Pass | 6.56 / 4.10 | 6.12 / 6.66 | 7.22 / 7.05 |
+  | A turn 0.6 s after the first page, two passes (from the press: the page turned to) | 2.97 / 1.19 | 6.82 / 7.83 | 7.92 / 8.22 |
+
+  Master d81e79e07 against the `Redraw` pass, 2026-11-17, from the open (the last row's gray from the press). The page
+  itself on the panel at 3.43-3.45 s both. The pass: planes 119 ms, gray 228 ms, redraw and cleanup 78 ms, `frame=same`
+  in every run; 3,168 bytes of status bar kept, 38.9 KB of the arena free. The lowest free heap of a chapter build
+  (8 KB held, `CMD:HEAP:HOLD`) 43,084-43,112 against 43,112 bytes; 30 turns at 2.5 s 1,368 / 1,360 ms median.
 - **Navigation during the build:** only for an explicit `Page` target — forward advances
   optimistically (shows the page once C reaches it, popup until then), back works, back past page 0
   leaves the chapter. A chapter-list, anchor or saved-text target resolves as soon as the build has
