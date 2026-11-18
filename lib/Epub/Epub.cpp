@@ -2,6 +2,7 @@
 
 #include <Bitmap.h>
 #include <BookCache.h>
+#include <BookSession.h>
 #include <BufferedFileIO.h>
 #include <CooperativeAbort.h>
 #include <FsHelpers.h>
@@ -12,6 +13,7 @@
 #include <Logging.h>
 #include <PassTable.h>
 #include <PngToBmpConverter.h>
+#include <ProtectionManifest.h>
 #include <Serialization.h>
 #include <SidecarFiles.h>
 #include <ZipFile.h>
@@ -29,6 +31,7 @@
 #include "Epub/CoverImageRefScanner.h"
 #include "Epub/CoverThumbSession.h"
 #include "Epub/HashUtils.h"
+#include "Epub/HeadingCarry.h"
 #include "Epub/ImageFormatDetector.h"
 #include "Epub/MetadataSidecar.h"
 #include "Epub/NavCoverScanner.h"
@@ -549,11 +552,14 @@ bool Epub::lookupItemStat(ZipFile& zip, const std::string& path, ZipFile::FileSt
 }
 
 namespace {
+// An OCF container's list of encrypted entries: a protected book has one (lib/BookProtection).
+constexpr char ENCRYPTION_XML[] = "META-INF/encryption.xml";
+
 // What a first open reads by name before it knows the names: container.xml names the OPF, the
 // OPF the NCX and the stylesheets. Told apart by name and extension as the fingerprint walk meets
 // them.
 void notePackageDocument(void* const ctx, const std::string_view name, const ZipFile::FileStatSlim& stat) {
-  if (name == "META-INF/container.xml" || FsHelpers::checkFileExtension(name, ".opf") ||
+  if (name == "META-INF/container.xml" || name == ENCRYPTION_XML || FsHelpers::checkFileExtension(name, ".opf") ||
       FsHelpers::checkFileExtension(name, ".ncx") || FsHelpers::hasCssExtension(name)) {
     static_cast<ZipFile::KnownEntries*>(ctx)->add(name, stat);
   }
@@ -575,6 +581,60 @@ bool Epub::computeZipFingerprint(uint64_t* out) const {
   if (!zipFingerprintValid_) return false;
   *out = zipFingerprint_;
   return true;
+}
+
+bool Epub::hasEncryptionManifest() const {
+  if (hasEncryptionXml_ >= 0) return hasEncryptionXml_ != 0;
+  bool found = false;
+  // The walk noted every package document it passed: none noted means none, unless it ran out of room.
+  if (packageEntries_ != nullptr &&
+      (packageEntries_->find(ENCRYPTION_XML) != nullptr || !packageEntries_->overflowed())) {
+    found = packageEntries_->find(ENCRYPTION_XML) != nullptr;
+  } else {
+    ZipFile zip(filepath);
+    primeZip(zip);
+    ZipFile::FileStatSlim stat = {};
+    found = zip.loadFileStatSlim(ENCRYPTION_XML, &stat);
+    adoptZipDetails(zip);
+  }
+  hasEncryptionXml_ = found ? 1 : 0;
+  return found;
+}
+
+bool Epub::openProtection(const bool build) {
+  protection_ = static_cast<uint8_t>(book_protection::OpenResult::Plain);
+  uint64_t fingerprint = 0;
+  if (!hasEncryptionManifest() || !computeZipFingerprint(&fingerprint)) return true;
+  setupCacheDir();
+  if (build && !Storage.exists(book_protection::manifestPath(cachePath).c_str()) &&
+      BookMetadataCache::cacheExists(cachePath) &&
+      book_protection::probeManifest(filepath).status == book_protection::ManifestStatus::Protected) {
+    // A cache made before the book's protection was known is a cache of its ciphertext.
+    LOG_INF("EBP", "Protected book with a cache from before: rebuilding it");
+    clearCache();
+    setupCacheDir();
+  }
+  const auto result = book_protection::openBook(filepath, cachePath, fingerprint, build, loadScratch_);
+  protection_ = static_cast<uint8_t>(result);
+  return result == book_protection::OpenResult::Plain || result == book_protection::OpenResult::Protected;
+}
+
+void Epub::attachKnownProtection() {
+  protection_ = static_cast<uint8_t>(book_protection::OpenResult::Plain);
+  if (ZipFile::isProtected(filepath)) {
+    protection_ = static_cast<uint8_t>(book_protection::OpenResult::Protected);
+    return;
+  }
+  // No manifest: never opened with a key, or plain. Its cover then reads as ciphertext and fails to
+  // decode, which shows the placeholder.
+  if (!Storage.exists(book_protection::manifestPath(cachePath).c_str())) return;
+  uint64_t fingerprint = 0;
+  if (!computeZipFingerprint(&fingerprint)) return;
+  protection_ = static_cast<uint8_t>(book_protection::openBook(filepath, cachePath, fingerprint, false, nullptr));
+}
+
+book_protection::OpenResult Epub::protectionResult() const {
+  return static_cast<book_protection::OpenResult>(protection_);
 }
 
 namespace {
@@ -861,6 +921,11 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss, BuildArena
   cssParser.reset(new CssParser(cachePath));
 
   clearCacheIfContentChanged();
+  // Before anything reads the archive: a protected book's reads decrypt from here on.
+  if (!openProtection(buildIfMissing)) {
+    LOG_ERR("EBP", "Protected book cannot be read: %s", filepath.c_str());
+    return false;
+  }
 
   // An earlier build lost the TOC: rebuild rather than reuse its book.bin, which has no room to
   // take the TOC in afterwards. Only on the reader's open (see setLostTocRetryEnabled()).
@@ -1158,6 +1223,7 @@ bool Epub::loadForCover(BuildArena* scratch) {
     ~ScratchScope() { slot = nullptr; }
   } scratchScope{loadScratch_};
   loadScratch_ = (scratch != nullptr && scratch->valid()) ? scratch : nullptr;
+  attachKnownProtection();
   // Cover-only load: get coverItemHref WITHOUT building the spine/TOC book.bin (which, on a huge
   // book, is both slow and the site of the large manifest-index build). Used by RecentBooks / Home
   // cover thumbnails so showing a thumbnail never triggers a full-book parse.
@@ -1224,6 +1290,7 @@ bool Epub::loadForMetadata(BuildArena* scratch, const bool useBookBin) {
     ~ScratchScope() { slot = nullptr; }
   } scratchScope{loadScratch_};
   loadScratch_ = (scratch != nullptr && scratch->valid()) ? scratch : nullptr;
+  attachKnownProtection();
   bookMetadataCache.reset(new BookMetadataCache(cachePath));
   forgetMetadataMemos();
   cssParser.reset(new CssParser(cachePath));  // constructed for API symmetry; not parsed here
@@ -1248,6 +1315,8 @@ bool Epub::loadForMetadata(BuildArena* scratch, const bool useBookBin) {
 }
 
 bool Epub::clearCache(const BookCache::Keep keep, const bool preserveThumbs) const {
+  // The book's protection holds its manifest open, and the manifest goes with the cache.
+  book_protection::closeBook(filepath);
   // preserveThumbs keeps the thumbnail and cover BMPs and the cached raw cover image, so that Home
   // does not have to make them again (a ZIP inflate and an image conversion).
   if (!BookCache::clear(cachePath, keep, preserveThumbs)) {
@@ -2213,7 +2282,8 @@ bool Epub::extractItemToFileOnce(const std::string& itemHref, const std::string&
   // inflate stops where the DEFLATE stream ends, whatever the entry's size says. A short file
   // would be trusted as the entry on every later visit, like the truncated one above.
   size_t entrySize = 0;
-  if (!getItemSize(itemHref, &entrySize)) {
+  bool sizeExact = true;
+  if (!getItemSize(itemHref, &entrySize, &sizeExact)) {
     LOG_ERR("EBP", "No entry to extract: %s", itemHref.c_str());
     return false;
   }
@@ -2246,7 +2316,9 @@ bool Epub::extractItemToFileOnce(const std::string& itemHref, const std::string&
     // Drain before the file is flushed/closed, and let a failed final write fail the extract:
     // a short file would otherwise pass as a complete one and be decoded as garbage.
     if (!sink.drain()) ok = false;
-    if (ok && sink.accepted() != entrySize) {
+    // An encrypted entry whose size its manifest does not give has only an estimate: there the
+    // stream's own end, which the reader checks, is the entry's.
+    if (ok && sizeExact && sink.accepted() != entrySize) {
       LOG_ERR("EBP", "Extract is %u bytes, entry is %u: %s", static_cast<unsigned>(sink.accepted()),
               static_cast<unsigned>(entrySize), itemHref.c_str());
       ok = false;
@@ -2285,7 +2357,7 @@ bool Epub::extractItemToFile(const std::string& itemHref, const std::string& des
   return extractItemToFileOnce(itemHref, destPath, nullptr);
 }
 
-bool Epub::getItemSize(const std::string& itemHref, size_t* size) const {
+bool Epub::getItemSize(const std::string& itemHref, size_t* size, bool* exact) const {
   const std::string path = FsHelpers::normalisePath(itemHref);
   ZipFile zip(filepath);
   primeZip(zip);
@@ -2293,6 +2365,7 @@ bool Epub::getItemSize(const std::string& itemHref, size_t* size) const {
   const bool ok = lookupItemStat(zip, path, &stat);
   adoptZipDetails(zip);
   if (ok) *size = static_cast<size_t>(stat.uncompressedSize);
+  if (ok && exact != nullptr) *exact = ZipFile::hasExactSize(stat);
   return ok;
 }
 
@@ -2368,6 +2441,8 @@ void Epub::forgetMetadataMemos() const {
   tocForSpineMemoToc_ = -1;
   tocEntryMemoIndex_ = -1;
   tocEntryMemo_ = {};
+  for (CarryMemo& memo : carryMemo_) memo = {};
+  carryMemoNext_ = 0;
 }
 
 BookMetadataCache::SpineEntry Epub::getSpineItem(const int spineIndex) const {
@@ -2471,6 +2546,19 @@ bool Epub::hasReliableToc() const {
   const bool reliable = bookMetadataCache->isTocReliable();
   tocReliability = reliable ? TocReliability::Reliable : TocReliability::Unreliable;
   return reliable;
+}
+
+bool Epub::isCarriedSpine(const int spine, BuildArena* scratch) const {
+  if (spine < 0) return false;
+  for (const CarryMemo& memo : carryMemo_) {
+    if (memo.spine == spine) return memo.carried;
+  }
+  const HeadingCarry::Verdict verdict = HeadingCarry::decide(*this, spine, scratch);
+  if (verdict == HeadingCarry::Verdict::Unknown) return false;
+  const bool carried = verdict == HeadingCarry::Verdict::Yes;
+  carryMemo_[carryMemoNext_] = {spine, carried};
+  carryMemoNext_ = static_cast<uint8_t>((carryMemoNext_ + 1) % std::size(carryMemo_));
+  return carried;
 }
 
 int Epub::getTocIndexForSpineIndex(const int spineIndex) const {

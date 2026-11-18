@@ -31,6 +31,7 @@
 #include <Epub/hyphenation/Hyphenator.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
+#include <FrameRegion.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <GlyphProvider.h>
@@ -51,11 +52,13 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "BookPackOffer.h"
 #include "BookRelocation.h"
 #include "BookSearchActivity.h"
 #include "BuildDuringRefresh.h"
+#include "CarriedSpineNav.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "DarkMode.h"
@@ -73,6 +76,7 @@
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
+#include "PageComplete.h"
 #include "PreRenderGate.h"
 #include "QrDisplayActivity.h"
 #include "QuickOverridesActivity.h"
@@ -311,13 +315,8 @@ static_assert(LaneBeforeBuild::kMaxYields >= BG_BUILD_THROUGH_PAGES + 1,
 // suggests 30–50 ms); tune from the DEBUG_BACKGROUND_WORK serial counters.
 constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 
-// How long the B/W page stays up before inline AA commits. Past that point the pass cannot be
-// stopped, and it held every press for its full length: X4 Pro, 2026-11-06, one page per 1.27 s
-// however fast the buttons went, of which the page itself was on screen after 0.65 s. A press
-// answering a page needs a reaction time after the page appears, so the old single check, made
-// the moment the waveform ended, could never see it. The cost is that the greys of a page the
-// reader stays on arrive this much later.
-constexpr uint32_t AA_SETTLE_MS = 400;
+// How long the B/W page stays up before inline AA commits, for a press to arrive that takes the pass
+// away: AaSettle.h. Polled at this interval.
 constexpr uint32_t AA_SETTLE_POLL_MS = 5;
 
 // Background-B keeps a page-budgeted window of layout ready ahead of the reading position rather
@@ -1332,7 +1331,9 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  // This lock is the first the turn waits on, so this is where the AA pass has to hear about it.
+  // This lock is the first the turn waits on, so this is where the AA pass has to hear about it. And where the turn
+  // was asked for: the wait that follows is the pass's, not the reader's pace (AaSettle).
+  turnAskedMs_ = millis();
   pageTurnWaitingForLock_.store(true, std::memory_order_release);
   // No current section, attempt to rerender the book
   {
@@ -1392,20 +1393,35 @@ void EpubReaderActivity::serviceBackgroundWork() {
   // the user has nothing to read until it produces pages. A/B are look-ahead work for a section
   // that is already displayed, so they only matter once the current section is built.
   bool currentSectionBuildActive = false;
+  bool askedPageDrawn = false;
   {
     RenderLock lock;
     currentSectionBuildActive = section && section->hasActiveBuild();
+    askedPageDrawn =
+        currentSectionBuildActive && buildDisplayedPage_ >= 0 && buildDisplayedPage_ == section->currentPage;
   }
+  // Input first (InputFirst.h): a pass that found no event still has a press on its way to one.
+  const InputFirst::Press press = pressInFlight();
   if (currentSectionBuildActive) {
+    if (!InputFirst::mayRunSlice(InputFirst::chapterWork(askedPageDrawn), press)) return;
     // The page being read outranks the pages after it: its gray (BuildPageGray), a picture on it (LaneBeforeBuild).
     if (!askBuildPageGray() && !stepImageLaneDuringBuild()) stepCurrentSectionBuild();
     return;
   }
+  if (!InputFirst::mayRunSlice(InputFirst::Work::LookAhead, press)) return;
   // Room in the glyph store comes before Background-B's look-ahead; the section the reader waits on and the AA pass
   // keep priority.
   if (stepGlyphStoreRoom()) return;
   if (stepStarredPages()) return;
   stepBackgroundSectionBuild();
+}
+
+InputFirst::Press EpubReaderActivity::pressInFlight() const {
+  InputFirst::Press press;
+  press.down = CooperativeAbort::shouldAbortLongTask();
+  press.gestureOpen = buttonEvents.isGestureInFlight();
+  press.turnWaiting = pageTurnWaitingForLock_.load(std::memory_order_acquire);
+  return press;
 }
 
 bool EpubReaderActivity::lookAheadMayRun() const {
@@ -1805,6 +1821,8 @@ void EpubReaderActivity::resetBackgroundBuild() {
   backgroundBuildState_ = BackgroundBuildState::Probe;
   backgroundBuildPercent_ = -1;
   backgroundPreemptCount_ = 0;
+  backgroundStoppedAfterAbandon_ = false;
+  backgroundPreemptedStayMs_ = 0;
   backgroundImageYields_ = 0;
   backgroundBuildStarved_ = false;
 }
@@ -1895,7 +1913,11 @@ void EpubReaderActivity::endBackgroundBorrow(const bool preemption) {
   // is deliberately NOT reset here — it is what stops this from looping forever on a spine whose
   // parse cannot fit between two page turns.
   if (buildWasLive) {
-    if (preemption) backgroundPreemptCount_++;
+    if (preemption) {
+      backgroundPreemptCount_++;
+      const auto stayMs = static_cast<uint32_t>(millis() - backgroundBorrowActivityMs_);
+      backgroundPreemptedStayMs_ = std::max(backgroundPreemptedStayMs_, stayMs);
+    }
     backgroundBuildState_ = BackgroundBuildState::Probe;
     backgroundBuildGateCheckMs_ = 0;
   }
@@ -2005,7 +2027,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   // the last pages a page turn no longer discards a build of it (BG_BUILD_THROUGH_PAGES), so it
   // gets one more try there. The window restarts with it: the chapters after it are cached and
   // settle for free, and their pages count against the budget again.
-  if (backgroundAbandonedSpine_ == currentSpineIndex + 1 && backgroundBuildState_ != BackgroundBuildState::Building &&
+  if (backgroundAbandonedSpine_ == nextReadingSpine() && backgroundBuildState_ != BackgroundBuildState::Building &&
       nearChapterEndForBuildThrough()) {
     LOG_INF("ERS", "Background-B: retrying spine %d on the last pages, after it was abandoned mid-chapter",
             backgroundAbandonedSpine_);
@@ -2093,16 +2115,37 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       }
       backgroundBuildGateCheckMs_ = now;
       // Give-up latch: this target has already burned its retry budget being preempted. Leave it
-      // to Background-C (the reader gets the popup, exactly as before this feature) and move the
-      // cursor on, rather than re-losing the same race for the rest of the chapter.
+      // to Background-C (the reader gets the popup, exactly as before this feature), and stop: the
+      // reader turns faster than a chapter builds, so the chapters after it would lose the same race,
+      // each at the cost of a turn's one-pass refresh (LookAheadPause). The cursor stays here until the
+      // reader pauses, or moves it by entering another chapter.
       if (backgroundPreemptCount_ >= BG_BUILD_MAX_PREEMPTIONS) {
-        LOG_INF("ERS", "Background build spine=%d abandoned after %u preemptions; leaving it to foreground",
-                targetSpine, static_cast<unsigned>(backgroundPreemptCount_));
-        if (targetSpine == currentSpineIndex + 1 && !nearChapterEndForBuildThrough()) {
-          backgroundAbandonedSpine_ = targetSpine;  // retried on the last pages, see above
+        if (!backgroundStoppedAfterAbandon_) {
+          backgroundStoppedAfterAbandon_ = true;
+          LOG_INF("ERS",
+                  "Background build spine=%d abandoned after %u preemptions; look-ahead stopped until a page stays "
+                  "up %lu ms or the chapter changes",
+                  targetSpine, static_cast<unsigned>(backgroundPreemptCount_),
+                  static_cast<unsigned long>(
+                      LookAheadPause::pauseMs(backgroundPreemptedStayMs_, BG_BUILD_BORROW_QUIET_MS)));
+          if (targetSpine == nextReadingSpine() && !nearChapterEndForBuildThrough()) {
+            backgroundAbandonedSpine_ = targetSpine;  // retried on the last pages, see above
+          }
+          backgroundSection_.reset();
         }
-        backgroundSection_.reset();
-        backgroundBuildState_ = BackgroundBuildState::Settled;
+        backgroundBuildStarved_ = false;  // it waits for the reader, not for memory: still pending (CMD:IDLE)
+        const auto pageUpForMs = static_cast<uint32_t>(now - std::max(lastPageTurnTime, lastPageOnScreenMs_));
+        if (!LookAheadPause::readerPaused(pageUpForMs, backgroundPreemptedStayMs_, BG_BUILD_BORROW_QUIET_MS,
+                                          CooperativeAbort::shouldAbortLongTask())) {
+          return;
+        }
+        LOG_INF("ERS", "Background-B: page up for %lu ms, trying spine %d again",
+                static_cast<unsigned long>(pageUpForMs), targetSpine);
+        backgroundStoppedAfterAbandon_ = false;
+        backgroundPreemptCount_ = 0;
+        backgroundPreemptedStayMs_ = 0;
+        backgroundBuildState_ = BackgroundBuildState::Probe;  // its Section went with the abandon
+        backgroundBuildGateCheckMs_ = 0;
         return;
       }
       // Preferred path: build inside the BORROWED secondary framebuffer. This is what makes B
@@ -2135,7 +2178,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       // frame on screen, which the borrow seeds RED from (beginBackgroundBorrow); else it waits as
       // any other build, and the next page put on screen makes it so again.
       const BuildThroughGate::Panel panel = buildThroughPanel();
-      const bool buildThrough = targetSpine == currentSpineIndex + 1 && nearChapterEndForBuildThrough() &&
+      const bool buildThrough = targetSpine == nextReadingSpine() && nearChapterEndForBuildThrough() &&
                                 (!panel.fastRefreshNeedsHostFrame ||
                                  BuildThroughGate::seedsRed(panel, renderer.secondaryHoldsFrameOnScreen()));
       // Either way B waits for the image lane: the pictures about to be read are decoded before the build may take
@@ -2151,6 +2194,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
           heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) >=
               BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES - LARGEST_FREE_BLOCK_SLACK &&
           beginBackgroundBorrow()) {
+        backgroundBorrowActivityMs_ = lastActivityMs;
         if (buildThrough && beginBuildThrough()) {
           LOG_INF("ERS", "Background-B: building spine %d through page turns (page %d of %u)", targetSpine,
                   section->currentPage + 1, section->pageCount);
@@ -2437,7 +2481,7 @@ LaneBeforeBuild::Window EpubReaderActivity::stepImageWarmLocked() {
   // on an illustration, and without this the turn onto it always decoded in the foreground. A
   // no-CSS fallback cache is skipped: the reader rebuilds that one on entry.
   const int spill = windowEnd - lastPage;
-  const int nextSpine = currentSpineIndex + 1;
+  const int nextSpine = nextReadingSpine();
   // Not the section B is building: it has no cache yet, and its file is being written.
   const bool nextBeingBuilt =
       backgroundBuildSpineIndex_ == nextSpine && backgroundSection_ && backgroundSection_->hasActiveBuild();
@@ -2521,8 +2565,10 @@ bool EpubReaderActivity::warmPageForImageLane(const Page& page, const int spine,
   const bool shownNowCached = shownWasUncached && !page.hasUncachedImages(true, true, false);
   const bool inputWaiting = CooperativeAbort::shouldAbortLongTask();
   const bool redraw = shownNowCached && !inputWaiting;
-  if (building && redraw)
+  if (building && redraw) {
     buildDisplayedPage_ = -1;  // the build's pass draws a page once: this one again, from its caches
+    buildPageAskedFor_ = -1;
+  }
   // The page after the one on screen just became pre-renderable. Its pre-render ran when this
   // page was drawn and skipped it for its uncached images (as did the one re-arm, if it has run
   // since), so nothing would try again before the turn. Keyed on the page actually on screen,
@@ -2815,6 +2861,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
     readerPhase_ = ReaderPhase::READING;
     buildingPopupShown_ = false;
     buildDisplayedPage_ = -1;
+    buildPageAskedFor_ = -1;
     backgroundBuildPercent_ = -1;
     requestUpdate();  // -> BuildSection -> released (incremental or blocking) build
   };
@@ -2878,10 +2925,16 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
         navTarget = NavigationTarget::makePage(*landed);
       }
     }
-    // If the page the user is waiting on just became readable, ask the render task to draw it.
+    // If the page the user is waiting on just became readable, ask the render task to draw it. Once: the pass that
+    // wakes draws it. Asked on every slice until a pass drew it, the requests queued passes behind that one, and one
+    // that ran after the build had ended found no build and drew the page again: on the X4 Pro a crossing whose build
+    // ran through its Indexing popup's refresh, and ended 0.2 s after its page went up, refreshed that page twice,
+    // 3 of 3 (2026-11-17).
     const int want = section->currentPage;
     if (navTarget.kind == NavigationTarget::Kind::Page && want >= 0 &&
-        want < static_cast<int>(section->activeBuildPageCount()) && want != buildDisplayedPage_) {
+        want < static_cast<int>(section->activeBuildPageCount()) && want != buildDisplayedPage_ &&
+        want != buildPageAskedFor_) {
+      buildPageAskedFor_ = want;
       requestUpdate();
     }
     return;
@@ -2973,6 +3026,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   buildingPopupShown_ = false;
   const bool builtPageOnScreen = section && buildDisplayedPage_ >= 0 && buildDisplayedPage_ == section->currentPage;
   buildDisplayedPage_ = -1;
+  buildPageAskedFor_ = -1;
   if (bodySizeChanged) {
     // This build found the book's body size, and it is not the one the chapter was laid out at: laid out again.
     relayoutPending_ = true;
@@ -3048,25 +3102,27 @@ void EpubReaderActivity::armBuildPageGray(const BuildPageOnScreen& shown, std::u
   markStagedForCurrentPage();
 }
 
-bool EpubReaderActivity::buildLeavesFramesAlone() const {
-  // keepsPreviousFrame(): the frame on screen is in the secondary buffer, false only where the PSRAM arena could not be
-  // had and the buffer itself was lent.
-  return HalCapabilities::buildsInPsram() && renderer.keepsPreviousFrame();
+BuildPageGray::Pass EpubReaderActivity::buildPageGrayPass() const {
+  // keepsPreviousFrame(): the frame on screen is in the secondary buffer, false on an S3 only where the PSRAM arena
+  // could not be had and the buffer itself was lent. The arena is the live build's: Background-B's is handed back
+  // before a build of the chapter on screen starts, or adopted by it.
+  return BuildPageGray::passFor(HalCapabilities::buildsInPsram(), renderer.keepsPreviousFrame(),
+                                secondaryBorrowed_ && buildScratch_ && buildScratch_->valid());
 }
 
 bool EpubReaderActivity::askBuildPageGray() {
   // The hint is read without the lock, so a tick with nothing due takes none. Taking the lock on every tick made the
   // Picco's chapter build 53-66 ms slower in 2.2-2.9 s (AA off, against a build without this call, n=3, 2026-11-17);
   // with the hint it built within 8 ms of that one.
-  if (!HalCapabilities::buildsInPsram() || !buildPageGrayDue_.load(std::memory_order_acquire) || RenderLock::peek()) {
+  if (!buildPageGrayDue_.load(std::memory_order_acquire) || RenderLock::peek()) {
     return false;
   }
   RenderLock lock;
   const BuildPageOnScreen shown = buildPageOnScreen_;
+  const BuildPageGray::Pass pass = buildPageGrayPass();
   if (!section || !section->hasActiveBuild() || shown.spine != currentSpineIndex ||
       shown.page != section->currentPage ||
-      !BuildPageGray::whileBuilding(buildLeavesFramesAlone(), getEffectiveTextAntiAliasing(), shown.hasImages,
-                                    uiOverPage()) ||
+      !BuildPageGray::whileBuilding(pass, getEffectiveTextAntiAliasing(), shown.hasImages, uiOverPage()) ||
       shown.gray != BuildPageGray::Gray::None) {
     buildPageGrayDue_.store(false, std::memory_order_release);  // the page it was set for has gone, or has its gray
     return false;
@@ -3076,10 +3132,100 @@ bool EpubReaderActivity::askBuildPageGray() {
   }
   buildPageGrayDue_.store(false, std::memory_order_release);
   buildPageOnScreen_.gray = BuildPageGray::Gray::Asked;
+  if (pass == BuildPageGray::Pass::Redraw) return runBuildPageGrayRedraw(shown);
   std::unique_ptr<Page> page = section->loadPageFromActiveBuild(static_cast<uint16_t>(shown.page));
   if (!page) return false;  // the build's end asks again
   armBuildPageGray(shown, std::move(page));
   LOG_INF("ERS", "Page %d of spine %d: AA asked for while the build goes on", shown.page + 1, currentSpineIndex);
+  return true;
+}
+
+bool EpubReaderActivity::runBuildPageGrayRedraw(const BuildPageOnScreen& shown) {
+  // Between two slices of the build, which holds the secondary buffer as its arena: the write buffer holds the page as
+  // it was pushed, and is the only copy of it. Everything the pass needs lives in a block of the arena's free tail, as
+  // displayBuildPage()'s draw does, and goes back with it before the next slice: the page (its text in the block), the
+  // status bar's pixels and the glyph slots. Nothing from the heap but the page's few objects, as that draw takes.
+  BuildArena& arena = *buildScratch_;
+  int bezelTop = 0, bezelRight = 0, bezelBottom = 0, bezelLeft = 0;
+  renderer.getOrientedViewableTRBL(&bezelTop, &bezelRight, &bezelBottom, &bezelLeft);
+  const BuildPageGray::ChromeBands bands =
+      BuildPageGray::chromeBands(renderer.getScreenWidth(), renderer.getScreenHeight(), bezelTop,
+                                 UITheme::getStatusBarTopHeight(automaticPageTurnActive), bezelBottom,
+                                 UITheme::getStatusBarBottomHeight(automaticPageTurnActive));
+  const BuildPageGray::Rect& top = bands.top;
+  const BuildPageGray::Rect& bottom = bands.bottom;
+  const size_t topBytes = renderer.getRegionByteSize(top.x, top.y, top.width, top.height);
+  const size_t bottomBytes = renderer.getRegionByteSize(bottom.x, bottom.y, bottom.width, bottom.height);
+  size_t arenaFree = 0;
+  arena.freeTail(&arenaFree);
+  const auto heapBefore = static_cast<unsigned long>(esp_get_free_heap_size());
+  HalPowerManager::Lock powerLock;  // full clock, as for the deferred pass and the build's slices
+
+  BuildArena::Block block = arena.reserveBlock();
+  std::unique_ptr<Page> page = section->loadPageFromActiveBuild(static_cast<uint16_t>(shown.page), &arena);
+  uint8_t* const kept = page ? arena.allocArray<uint8_t>(topBytes + bottomBytes) : nullptr;
+  if (!kept) {
+    LOG_ERR("ERS",
+            "Page %d of spine %d: its gray waits for the build's end (arena %u B free, status bar %u B, page %s)",
+            shown.page + 1, currentSpineIndex, static_cast<unsigned>(arenaFree),
+            static_cast<unsigned>(topBytes + bottomBytes), page ? "loaded" : "not loaded");
+    page.reset();  // its text is in the block
+    arena.release(block);
+    return false;
+  }
+  // The frame as pushed: its digest, and the status bar's pixels, which are not drawn again (BuildPageGray).
+  const size_t frameBytes = renderer.getBufferSize();
+  const uint32_t pushed = frameregion::digest(renderer.getWriteTarget(), frameBytes);
+  if (topBytes > 0) renderer.copyRegionToBuffer(top.x, top.y, top.width, top.height, kept, topBytes);
+  if (bottomBytes > 0) {
+    renderer.copyRegionToBuffer(bottom.x, bottom.y, bottom.width, bottom.height, kept + topBytes, bottomBytes);
+  }
+
+  const int fontId = getEffectiveReaderFontId();
+  bool planeAborted = false;
+  bool frameKept = false;
+  GfxRenderer::GrayscaleTimings gt;
+  {
+    // The glyphs, as displayBuildPage() draws them: slots and misses in the arena, given back as the scope ends.
+    FontCacheManager::ScopedSlotArena slotArena(*renderer.getFontCacheManager(), &arena);
+    const glyph_miss::Scope misses(&arena);
+    prewarmPageFonts(*page, shown.marginLeft, shown.contentTop);
+    gt = renderer.renderGrayscalePlanesOverFrame(
+        [&](GfxRenderer::RenderMode) {
+          if (!page->renderTextOnly(renderer, fontId, shown.marginLeft, shown.contentTop, /*abortable=*/true)) {
+            planeAborted = true;
+          }
+        },
+        [&] { return planeAborted || aaPreemptedByNavigation(); },
+        [&] {
+          // displayBuildPage()'s draw of the page, without what is drawn over it: the status bar comes back as kept.
+          renderer.clearScreen();
+          {
+            ImageBlock::PlaceholderOnlyScope placeholders;
+            page->render(renderer, fontId, shown.marginLeft, shown.contentTop, /*forceLoadLargeImages=*/false,
+                         /*monochromeOutput=*/true);
+          }
+          if (topBytes > 0) renderer.copyBufferToRegion(top.x, top.y, top.width, top.height, kept, topBytes);
+          if (bottomBytes > 0) {
+            renderer.copyBufferToRegion(bottom.x, bottom.y, bottom.width, bottom.height, kept + topBytes, bottomBytes);
+          }
+          frameKept = frameregion::digest(renderer.getWriteTarget(), frameBytes) == pushed;
+          return frameKept;
+        });
+  }
+  page.reset();
+  if (!arena.release(block)) LOG_ERR("ERS", "Build page AA: arena block could not be released (out of order)");
+  if (!gt.aborted) buildPageOnScreen_.gray = BuildPageGray::Gray::Shown;
+  if (!frameKept) {
+    // Never seen; the driver was told it has no baseline, so the next push is a clean one.
+    LOG_ERR("ERS", "Build page AA: the page drawn again differs from the one pushed");
+  }
+  LOG_INF("ERS",
+          "Deferred AA%s (redraw, during the build): planes=%lums gray=%lums redraw=%lums frame=%s arena=%u+%u "
+          "heap=%lu->%lu",
+          gt.aborted ? " ABORTED" : "", gt.planesMs, gt.displayMs, gt.restoreMs, frameKept ? "same" : "DIFFERS",
+          static_cast<unsigned>(arenaFree), static_cast<unsigned>(topBytes + bottomBytes), heapBefore,
+          static_cast<unsigned long>(esp_get_free_heap_size()));
   return true;
 }
 
@@ -3379,7 +3525,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
               if (currentSpineIndex != starred.spineIndex || !section || section->currentPage != starred.pageNumber) {
                 navTarget =
                     starJumpTarget(static_cast<uint16_t>(starred.spineIndex), static_cast<uint16_t>(starred.pageNumber),
-                                   Section::layoutFingerprintFor(makeSectionBuildParams()));
+                                   Section::layoutFingerprintFor(*epub, starred.spineIndex, makeSectionBuildParams()));
                 currentSpineIndex = starred.spineIndex;
                 section.reset();
               }
@@ -3532,8 +3678,11 @@ bool EpubReaderActivity::applyPendingBookmarkJump() {
 void EpubReaderActivity::toggleStarOnCurrentPage() {
   if (!section || section->currentPage < 0 || section->currentPage >= section->pageCount) return;
   const int page = section->currentPage;
-  bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(page),
-                       StarAnchoring::forPage(*section, page));
+  // A star on the heading file this page now holds (set before the join) is this page's: toggled off here.
+  const auto carried = carriedStarHere();
+  bookmarkStore.toggle(carried ? carried->first : static_cast<uint16_t>(currentSpineIndex),
+                       carried ? carried->second : static_cast<uint16_t>(page),
+                       carried ? StarAnchor{} : StarAnchoring::forPage(*section, page));
   starsSettledFor_ = {};  // its text is to be named
   requestUpdate();
 }
@@ -4324,6 +4473,13 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   RenderLock lock(*this);
   pageTurnWaitingForLock_.store(false, std::memory_order_release);
   landedText_ = {};
+  // The reader's pace, by which the page this turn lands on waits for a further press before its gray (AaSettle):
+  // from when the turn before it was asked for to when this one was, not to when it got the lock. X4 Pro, a page
+  // back every 1.2 s: the second press waited 0.67 s for the first page's pass, and read as a settled reader's.
+  const unsigned long askedMs = turnAskedMs_ != 0 ? turnAskedMs_ : millis();
+  turnAskedMs_ = 0;
+  turnGapMs_ = static_cast<uint32_t>(askedMs - lastTurnAskedMs_);
+  lastTurnAskedMs_ = askedMs;
 
   // Cancel any pending deferred AA pass — it belongs to the page we're leaving.
   pendingGrayscale_ = {};
@@ -4573,6 +4729,31 @@ bool EpubReaderActivity::beginBuildThrough() {
   return true;
 }
 
+int EpubReaderActivity::nextReadingSpine() const {
+  if (nextReadingFrom_ != currentSpineIndex) {
+    nextReadingFrom_ = currentSpineIndex;
+    nextReadingSpine_ = CarriedSpineNav::nextReadingSpine(
+        currentSpineIndex, Section::carriedAwayOf(*epub, currentSpineIndex + 1, getEffectiveVerticalText()));
+  }
+  return nextReadingSpine_;
+}
+
+std::optional<std::pair<uint16_t, uint16_t>> EpubReaderActivity::carriedStarHere() const {
+  if (!section || section->currentPage != 0 || currentSpineIndex <= 0) return std::nullopt;
+  const auto heading = static_cast<uint16_t>(currentSpineIndex - 1);
+  if (!bookmarkStore.has(heading, 0) ||
+      !Section::carriesPreviousOf(*epub, currentSpineIndex, getEffectiveVerticalText())) {
+    return std::nullopt;
+  }
+  return std::make_pair(heading, static_cast<uint16_t>(0));
+}
+
+bool EpubReaderActivity::pageStarred() const {
+  if (!section) return false;
+  return bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage)) ||
+         carriedStarHere().has_value();
+}
+
 bool EpubReaderActivity::chapterCounterAwaits(const int spine) const {
   if (!epub || !section || spine <= currentSpineIndex || !chapterCounterShown()) return false;
   if (chapterSpanSpine_ != currentSpineIndex) {
@@ -4588,7 +4769,7 @@ void EpubReaderActivity::recoverSecondaryBufferIfNeeded() {
   // Also kept when the reader has just turned INTO that chapter, so buildSection() adopts the
   // live build instead of starting it over. Any other move takes the buffer back as below.
   if (backgroundBorrowActive_ && backgroundSection_ && backgroundSection_->hasActiveBuild()) {
-    const bool nextChapter = backgroundBuildSpineIndex_ == currentSpineIndex + 1;
+    const bool nextChapter = backgroundBuildSpineIndex_ == nextReadingSpine();
     if (!backgroundBuildThrough_ && nextChapter && nearChapterEndForBuildThrough() && beginBuildThrough()) {
       LOG_INF("ERS", "Background-B: page %d of %u reached mid-build; building spine %d through page turns",
               section->currentPage + 1, section->pageCount, backgroundBuildSpineIndex_);
@@ -5384,6 +5565,15 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     requestUpdate();
     return false;
   }
+  // A file holding only its chapter's heading has no page: the next file's first page shows it (HeadingCarry). Every
+  // way onto it passes here first (a turn, a saved position, a bookmark, the TOC, a link, a search hit, a sync).
+  if (Section::carriedAwayOf(*epub, currentSpineIndex, getEffectiveVerticalText())) {
+    const CarriedSpineNav::Landing landing =
+        CarriedSpineNav::land(currentSpineIndex, navTarget.kind == NavigationTarget::Kind::LastPage);
+    LOG_DBG("ERS", "spine=%d carried; landing on %d", currentSpineIndex, landing.spine);
+    currentSpineIndex = landing.spine;
+    navTarget = landing.lastPage ? NavigationTarget::makeLastPage() : NavigationTarget::makePage(0);
+  }
 
   // The render pass holds RenderLock here, before the chapter is laid out or drawn, so no record of the glyph store's
   // log is in use: a segment can be reclaimed or the index rebuilt now.
@@ -5613,11 +5803,15 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       // same box again held the X4's borrowed first-open build behind a FAST refresh (548 ms, 2026-11-16). The write
       // buffer takes the frame on screen instead, which is what drawPopup() leaves there, for the seed and the lend.
       const bool keepFirstOpenPopup = popupBeforeBuild && !secondaryBorrowed_ && indexingPopupStillShown();
-      // Where the lend below need not wait for the popup's waveform (the X3), the build starts while the popup
-      // paints: the popup ships async, the lend takes the frame not being painted, and the kickoff below slices on
-      // until the waveform ends. Not for a build B handed over, which holds its block already.
-      bool popupPainting =
-          popupBeforeBuild && !keepFirstOpenPopup && !secondaryBorrowed_ && renderer.lendsDuringRefresh();
+      // Where the lend below need not wait for the popup's waveform, the build starts while the popup paints: the
+      // popup ships async, and the kickoff below slices on until the waveform ends (IndexingPopupGate::chapterLend). A
+      // build B handed over holds its block already and needs no lend (IndexingPopupGate::adoptedLend).
+      using IndexingPopupGate::Lend;
+      Lend lend = Lend::Blocking;
+      if (popupBeforeBuild && !keepFirstOpenPopup) {
+        const IndexingPopupGate::Panel panel = ReaderUtils::indexingPopupPanel(renderer);
+        lend = secondaryBorrowed_ ? IndexingPopupGate::adoptedLend(panel) : IndexingPopupGate::chapterLend(panel);
+      }
       if (popupBeforeBuild) {
         // X4: the dramatic-transition HALF belongs on the first CONTENT page
         // (forceHalfRefreshAfterPopup_ below), not the popup. The popup is a transient box over the
@@ -5636,7 +5830,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         } else {
           // Immediate feedback before the first page lands.
           GUI.drawPopup(renderer, tr(STR_INDEXING), /*overlayDisplayedFrame=*/true,
-                        popupPainting ? PopupShip::Async : PopupShip::Blocking);
+                        lend != Lend::Blocking ? PopupShip::Async : PopupShip::Blocking);
         }
 
         // Tight heap: free the secondary buffer (~48–52 KB) for the build. AA is off until the
@@ -5665,28 +5859,36 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
           // never refreshes while borrowing) C drives FAST refreshes for every mid-build page.
           // drawPopup() above just painted frameBuffer with what is now on screen, so this is
           // the correct baseline — the same frame the non-transferred branch below syncs from.
-          renderer.syncRedRamFromFrameBuffer();
+          // The seed waits out a refresh in flight: with the popup still painting it comes after the kickoff (below).
+          if (lend == Lend::Blocking) renderer.syncRedRamFromFrameBuffer();
           renderer.setSingleBufferFastDiff(true);
           secondaryBufferDegraded_ = true;
           LOG_INF("ERS", "Background-C: building spine %d incrementally, secondary buffer already BORROWED (free=%lu)",
                   currentSpineIndex, static_cast<unsigned long>(freeBefore));
         } else {
-          renderer.syncRedRamFromFrameBuffer();
+          // The seed waits out a refresh in flight: with the popup still painting it comes after the kickoff (below).
+          if (lend == Lend::Blocking) renderer.syncRedRamFromFrameBuffer();
           // Prefer BORROWING the secondary buffer over freeing it: the lent block never enters
           // the heap, so a survivor can't split it into a fragmented hole and the return cannot
           // fail (the realloc-failure / heap-recovery-restart class of bugs is impossible). The
           // build's arena bump-allocates inside the lent region instead of the heap. Fall back to
           // the legacy release only when there is no secondary buffer to lend.
           size_t borrowedSize = 0;
-          uint8_t* borrowed = popupPainting ? renderer.borrowSecondaryBufferDuringRefresh(&borrowedSize)
-                                            : renderer.borrowSecondaryBuffer(&borrowedSize);
+          uint8_t* borrowed = lend == Lend::DuringRefresh ? renderer.borrowSecondaryBufferDuringRefresh(&borrowedSize)
+                                                          : renderer.borrowSecondaryBuffer(&borrowedSize);
           if (borrowed) {
             buildScratch_ = makeUniqueNoThrow<BuildArena>(borrowed, borrowedSize);
             section->setExternalBuildScratch(buildScratch_ && buildScratch_->valid() ? buildScratch_.get() : nullptr);
             secondaryBorrowed_ = true;
           } else {
-            renderer.releaseSecondaryBuffer();  // drains the popup's refresh first
-            popupPainting = false;
+            if (lend != Lend::Blocking) {
+              // The release does not drain a refresh in flight everywhere (PopupShip::Async), and the blocking
+              // order seeded RED from the popup before it.
+              renderer.finishDisplayAsync();
+              renderer.syncRedRamFromFrameBuffer();
+              lend = Lend::Blocking;
+            }
+            renderer.releaseSecondaryBuffer();
           }
           // Display semantics are identical to a released buffer (single-buffer mode either way).
           renderer.setSingleBufferFastDiff(true);
@@ -5721,6 +5923,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       // build completes and the position is resolved, so the exact value doesn't matter there.
       section->currentPage = (navTarget.kind == NavigationTarget::Kind::Page) ? navTarget.page : 0;
       buildDisplayedPage_ = -1;
+      buildPageAskedFor_ = -1;
       buildPageOnScreen_ = {};
       buildingPopupShown_ = popupBeforeBuild;
       // The first open's Indexing popup is still the frame on the panel: the deferred popup would paint the same box
@@ -5740,10 +5943,10 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         step = section->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
         ++slices;
       }
-      if (popupPainting) {
+      if (lend != Lend::Blocking) {
         // The popup is still painting: build on through its waveform, then finish its refresh, which nothing may
-        // draw before. Here and not on the loop task, whose C step waits out every pending refresh; the render lock
-        // held here keeps every other draw out until the finish. Full clock, as the loop's C slice takes.
+        // draw before. Here and not on the loop task, whose C step waits out a pending refresh on most boards; the
+        // render lock held here keeps every other draw out until the finish. Full clock, as the loop's C slice takes.
         {
           HalPowerManager::Lock powerLock;
           while (step == Section::BuildStep::More && renderer.refreshBusy()) {
@@ -5753,11 +5956,16 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         }
         const unsigned long builtMs = millis() - kickoffMs;
         renderer.finishDisplayAsync();
+        // The seed the blocking order takes before the lend: RED from the popup now on screen (no-op on the X3). On the
+        // X4 the popup's start loaded RED with the frame before it, and the first page the build draws,
+        // single-buffered, diffs against RED.
+        renderer.syncRedRamFromFrameBuffer();
         checkHeapIntegrity("after_popup_slices");
         LOG_INF("ERS",
-                "Background-C: spine %d built %u slices (%lu ms) while the popup painted, %u pages; finish %lu ms",
-                currentSpineIndex, slices, builtMs, static_cast<unsigned>(section->activeBuildPageCount()),
-                millis() - kickoffMs - builtMs);
+                "Background-C: spine %d built %u slices (%lu ms) while the popup painted (lend %u), %u pages; finish "
+                "%lu ms",
+                currentSpineIndex, slices, builtMs, static_cast<unsigned>(lend),
+                static_cast<unsigned>(section->activeBuildPageCount()), millis() - kickoffMs - builtMs);
       }
       if (step == Section::BuildStep::More) {
         // The deferred case, now resolved: the build needs more slices, so a popup IS warranted.
@@ -6114,9 +6322,20 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
     // The popup covers the page, so the links under it must stop answering taps -- following a
     // marker nobody can see would be the phantom-target bug with an extra step.
     TapTargets::readerLinks().invalidate();
-    GUI.drawPopup(renderer, tr(STR_INDEXING));
+    // Where the loop task's slices can run through the popup's refresh, it ships async and is waited for as a page the
+    // build drew is (IndexingPopupGate::buildsThroughPopup): the build used to sit out its waveform behind the lock.
+    const bool buildThrough = IndexingPopupGate::buildsThroughPopup(ReaderUtils::indexingPopupPanel(renderer));
+    GUI.drawPopup(renderer, tr(STR_INDEXING), /*overlayDisplayedFrame=*/true,
+                  buildThrough ? PopupShip::Async : PopupShip::Blocking);
     buildingPopupShown_ = true;
     buildPageOnScreen_ = {};
+    if (buildThrough) {
+      // With the secondary away the popup went out single-buffered, and a deferred FAST resyncs no plane: RED is seeded
+      // from the popup, as the blocking refresh's own resync left it (the X4's next build page diffs against RED).
+      const bool seedRed = renderer.fastRefreshNeedsHostFrame() && !renderer.keepsPreviousFrame();
+      waitForBuildRefreshUnlocked(lock);
+      if (seedRed) renderer.syncRedRamFromFrameBuffer();
+    }
   }
 }
 
@@ -6225,6 +6444,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   WakeTrace::mark(WakeTrace::Phase::RenderStart);
   pendingPreRender = false;
   usePreRenderedBuffer = false;
+  // The pass that answers a page turn takes its pace; any other pass was not asked for by one.
+  passTurnGapMs_ = std::exchange(turnGapMs_, AaSettle::kNoTurn);
   // Any other pass redraws the write framebuffer and flushes/swaps, destroying pre-rendered
   // pixels — so a completed pre-render must be discarded here even when its (spineIndex,
   // pageIndex) still matches the current page. Keeping ready=true across an intervening
@@ -6945,6 +7166,8 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     // still worth setting: latching planeAborted means the pass aborts even if the input signal
     // has been drained by the loop task before the predicate below is evaluated.
     bool planeAborted = false;
+    // Only a reader who is flipping is waited for, and no longer than the pass can still be stopped (AaSettle).
+    const uint32_t settleMs = AaSettle::waitMs(passTurnGapMs_, BG_BUILD_BORROW_QUIET_MS, inlineGrayTailMs_);
     const auto gt = renderer.renderGrayscalePlanesInterleaved(
         [&](GfxRenderer::RenderMode) {
           if (!pagePtr->renderTextOnly(renderer, aaFontId, orientedMarginLeft, contentTop, /*abortable=*/true)) {
@@ -6959,12 +7182,13 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
         [&] { return planeAborted || aaPreemptedByNavigation(); },
         [&] {
           const unsigned long settleStart = millis();
-          while (millis() - settleStart < AA_SETTLE_MS && !aaPreemptedByNavigation()) {
+          while (millis() - settleStart < settleMs && !aaPreemptedByNavigation()) {
             delay(AA_SETTLE_POLL_MS);
           }
         });
-    LOG_DBG("ERS", "Inline AA%s: planes=%lums gray=%lums restore=%lums", gt.aborted ? " ABORTED" : "", gt.planesMs,
-            gt.displayMs, gt.restoreMs);
+    if (!gt.aborted) inlineGrayTailMs_ = static_cast<uint32_t>(gt.displayMs + gt.restoreMs);
+    LOG_DBG("ERS", "Inline AA%s: planes=%lums gray=%lums restore=%lums settle=%lums", gt.aborted ? " ABORTED" : "",
+            gt.planesMs, gt.displayMs, gt.restoreMs, static_cast<unsigned long>(settleMs));
     checkHeapIntegrity("after_inline_aa");
     lastRenderStats.usedGrayscale = !gt.aborted;
     lastRenderStats.textAntiAliasing = !gt.aborted;
@@ -7091,14 +7315,18 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
   const int viewportHeight =
       std::max(0, renderer.getScreenHeight(renderer.getHeldOrientation()) - layout.marginTop - layout.marginBottom);
   const int contentTop = layout.marginTop + ReaderPageLayout::imageOnlyPageYOffset(page, viewportHeight);
-  // Where the build leaves the frame buffers alone, a page of text gets its gray while the build goes on
-  // (BuildPageGray). On a panel that puts a page and its gray up in one push (one-pass text, the T5S3) it goes up with
-  // this push, its planes captured by the render below as a turn's page has them (renderContents()); elsewhere it comes
-  // from the deferred pass once this refresh is over (askBuildPageGray()). The planes live until the push is collected.
-  const bool grayWhileBuilding = BuildPageGray::whileBuilding(buildLeavesFramesAlone(), getEffectiveTextAntiAliasing(),
-                                                              page.hasImages(), uiOverPage());
+  // A page of text gets its gray while the build goes on (BuildPageGray). Where the build leaves the frame buffers
+  // alone (Restore) and the panel puts a page and its gray up in one push (one-pass text, the T5S3), it goes up with
+  // this push, its planes captured by the render below as a turn's page has them (renderContents()); the planes live
+  // until the push is collected. Elsewhere it comes from a pass once this refresh is over (askBuildPageGray()): the
+  // deferred one, or the Redraw pass where the build holds the secondary buffer (the C3s), whose page goes out in black
+  // and white.
+  const BuildPageGray::Pass grayPass = buildPageGrayPass();
+  const bool grayWhileBuilding =
+      BuildPageGray::whileBuilding(grayPass, getEffectiveTextAntiAliasing(), page.hasImages(), uiOverPage());
+  const bool grayWithPush = grayWhileBuilding && grayPass == BuildPageGray::Pass::Restore;
   std::optional<ReaderUtils::OnePassTextScope> onePassText;
-  if (grayWhileBuilding) onePassText.emplace(onePassTextFor(page));
+  if (grayWithPush) onePassText.emplace(onePassTextFor(page));
   std::unique_ptr<uint8_t[]> capLsb, capMsb;
 
   // Everything that touches the build's arena -- the font-slot scope below and the caller's
@@ -7124,7 +7352,7 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
     const glyph_miss::Scope misses(secondaryBorrowed_ ? buildScratch_.get() : nullptr);
     prewarmPageFonts(page, layout.marginLeft, contentTop);
 
-    if (grayWhileBuilding && renderer.supportsGrayFrame()) beginGrayCapturePlanes(renderer, capLsb, capMsb);
+    if (grayWithPush && renderer.supportsGrayFrame()) beginGrayCapturePlanes(renderer, capLsb, capMsb);
     renderer.clearScreen();
     {
       ImageBlock::PlaceholderOnlyScope placeholders;
@@ -7180,8 +7408,8 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
     // Costs nothing: prewarmCache() frees and rebuilds a slot's buffer on every call anyway
     // (FontDecompressor.cpp, "Roll back this slot only"), so no work is thrown away that the next
     // page would not have redone. Safe here because every glyph consumer for this page has already
-    // run — the scan pass, page.render() and renderStatusBar() are all above, and a mid-build draw
-    // has no AA pass to replay later (the borrowed buffer forces secondaryBufferDegraded_).
+    // run — the scan pass, page.render() and renderStatusBar() are all above, and the page's gray
+    // pass, where one comes during the build, loads and warms its glyphs itself (askBuildPageGray).
     renderer.getFontCacheManager()->clearCache();
   }  // slot scope closed
   // The page itself goes back before the build resumes, as the font slots above do: the build's slices run during the
@@ -7197,6 +7425,16 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
     }
   }
 
+  waitForBuildRefreshUnlocked(lock);
+  // On a cache miss this mid-build page is what the user actually sees first, well before the
+  // build completes and renderNormalPass() runs — so the trace has to close here or a miss
+  // would report a wake latency that includes the whole rest of the build. After
+  // completeDisplay() for the same reason as renderContents(): the pixels are settled here.
+  WakeTrace::mark(WakeTrace::Phase::PageVisible);
+  WakeTrace::logSummary();
+}
+
+void EpubReaderActivity::waitForBuildRefreshUnlocked(RenderLock& lock) {
   // Release the lock before the (blocking) waveform wait so stepCurrentSectionBuild() can run a
   // build slice on the loop task while the panel refreshes — the same hand-off renderContents()
   // uses for Background-A.
@@ -7212,12 +7450,6 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
   if (waitOffBus) renderer.waitRefreshOffBus();
   renderer.completeDisplay();
   buildPageWaitOffBus_.store(false, std::memory_order_release);
-  // On a cache miss this mid-build page is what the user actually sees first, well before the
-  // build completes and renderNormalPass() runs — so the trace has to close here or a miss
-  // would report a wake latency that includes the whole rest of the build. After
-  // completeDisplay() for the same reason as renderContents(): the pixels are settled here.
-  WakeTrace::mark(WakeTrace::Phase::PageVisible);
-  WakeTrace::logSummary();
 }
 
 uint16_t EpubReaderActivity::renderPageContentOnly(const Page& page, const int orientedMarginTop,
@@ -7271,8 +7503,10 @@ bool EpubReaderActivity::usesDeferredAa() const {
   // Inline AA hides its LSB plane render inside a running waveform, so it needs a
   // panel that can actually overlap. The X3 can, but defers anyway: its async refresh
   // holds the frame buffer, and stays pending, for the whole waveform (see the header
-  // and the pre-render guards).
-  return !(renderer.supportsAsyncRefresh() && !renderer.asyncRefreshHoldsFrameBuffer());
+  // and the pre-render guards). So do the panels that keep the deferred pass they were checked with
+  // (GfxRenderer::keepsDeferredGrayPass).
+  return !(renderer.supportsAsyncRefresh() && !renderer.asyncRefreshHoldsFrameBuffer()) ||
+         renderer.keepsDeferredGrayPass();
 }
 
 bool EpubReaderActivity::aaPreemptedByNavigation() const {
@@ -7482,10 +7716,23 @@ void EpubReaderActivity::appendDebugState(std::string& out) const {
 bool EpubReaderActivity::hasPendingScreenWork() {
   RenderLock lock(RenderLock::Mode::Try);
   if (!lock.ownsLock()) return true;  // a render pass or a build slice has it: busy by definition
-  // The section on screen still being built (its pages appear as they are laid out), a page turn
-  // handed to the render task, a deferred anti-aliasing redraw of the page on screen.
-  return !section || readerPhase_ != ReaderPhase::READING || section->hasActiveBuild() || usePreRenderedBuffer ||
-         pendingGrayscale_.active;
+  // The page asked for not on the panel yet, a page turn handed to the render task, the page's gray still to come. A
+  // chapter build whose page is complete is background work (PageComplete).
+  PageComplete::Reader reader;
+  reader.sectionLoaded = section != nullptr;
+  reader.buildLive = section && section->hasActiveBuild();
+  reader.reading = readerPhase_ == ReaderPhase::READING;
+  reader.turnHandedToRender = usePreRenderedBuffer;
+  reader.grayPassOwed = pendingGrayscale_.active;
+  if (reader.buildLive) {
+    const BuildPageOnScreen& shown = buildPageOnScreen_;
+    reader.buildPage.shown = shown.spine == currentSpineIndex && shown.page == section->currentPage;
+    reader.buildPage.hasImages = shown.hasImages;
+    // As keepBuildPageOnScreen() decides at the build's end; under the bars or a search's strip the page stays B/W.
+    reader.buildPage.grayOwed =
+        getEffectiveTextAntiAliasing() && !uiOverPage() && BuildPageGray::owedAtBuildEnd(shown.gray);
+  }
+  return PageComplete::screenWorkPending(reader);
 }
 
 bool EpubReaderActivity::hasPendingBackgroundWork() {
@@ -7615,8 +7862,7 @@ void EpubReaderActivity::renderStatusBar() const {
     title = epub->getTitle();
   }
 
-  const bool isStarred = section && bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex),
-                                                      static_cast<uint16_t>(section->currentPage));
+  const bool isStarred = pageStarred();
   const std::string printedPageLabel = section && SETTINGS.statusBarPrintedPage
                                            ? printedPageLabelFor(static_cast<uint16_t>(section->currentPage))
                                            : std::string();
@@ -7823,6 +8069,8 @@ void EpubReaderActivity::refreshLoopHints() {
     return;
   }
   loopHintCurrentBuild_ = section && section->hasActiveBuild();
+  loopHintAskedPageDrawn_ =
+      loopHintCurrentBuild_ && buildDisplayedPage_ >= 0 && buildDisplayedPage_ == section->currentPage;
   loopHintBackgroundBuild_ = backgroundBuildState_ == BackgroundBuildState::Building;
 }
 
@@ -7838,7 +8086,14 @@ bool EpubReaderActivity::skipLoopDelay() {
   // the render: the X4 Pro streamed the first page's planes in 183-212 ms each, against 52 ms with the loop idle
   // (2026-11-16). The loop's short sleep instead costs the build at most one sleep once the pass is done.
   if (RenderLock::peek()) return false;
-  return loopHintCurrentBuild_ || loopHintBackgroundBuild_;
+  // Nor while a press holds the slices back (InputFirst): every pass would find the gate shut. X3, 2026-11-17, a
+  // press during the chapter's build: about three passes a millisecond until the key was let go. The loop's short
+  // sleep is also the pace a key is read at with nothing building.
+  const InputFirst::Press press = pressInFlight();
+  if (loopHintCurrentBuild_) {
+    return InputFirst::mayRunSlice(InputFirst::chapterWork(loopHintAskedPageDrawn_), press);
+  }
+  return loopHintBackgroundBuild_ && InputFirst::mayRunSlice(InputFirst::Work::LookAhead, press);
 }
 
 bool EpubReaderActivity::shouldSkipPeriodicUpdate() const {
@@ -8427,8 +8682,7 @@ void EpubReaderActivity::openReaderMenu() {
       const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
       bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
     }
-    isCurrentPageStarred = section && bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex),
-                                                        static_cast<uint16_t>(section->currentPage));
+    isCurrentPageStarred = pageStarred();
   }
   const int bookProgressPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
 
@@ -8536,8 +8790,7 @@ void EpubReaderActivity::openReaderBars() {
   {
     RenderLock lock(*this);
     if (section) {
-      info.starred =
-          bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
+      info.starred = pageStarred();
       // What the status bar counts: the TOC chapter, which can span several spine items (#325).
       const ChapterPageSpan::Display chapter = chapterPageDisplay();
       if (chapter.total > 0) {
@@ -8768,6 +9021,7 @@ void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
     // the bars stayed on the panel until the build was done.
     RenderLock lock(*this);
     buildDisplayedPage_ = -1;
+    buildPageAskedFor_ = -1;
     buildingPopupShown_ = false;
   }
   const auto* bars = std::get_if<ReaderBarsResult>(&result.data);

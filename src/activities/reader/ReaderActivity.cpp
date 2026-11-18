@@ -1,6 +1,7 @@
 #include "ReaderActivity.h"
 
 #include <Bitmap.h>
+#include <BookSession.h>
 #include <BuildArena.h>
 #include <CooperativeAbort.h>
 #include <FsHelpers.h>
@@ -26,11 +27,13 @@
 #include "MdReaderActivity.h"
 #include "ReaderUtils.h"
 #include "SdCardFontGlobals.h"
+#include "SerialTestApi.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
 #include "Xtc.h"
 #include "XtcReaderActivity.h"
 #include "activities/util/BmpViewerActivity.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "activities/util/FullScreenMessageActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -733,7 +736,7 @@ std::unique_ptr<PngDecodeSession> ReaderActivity::beginPngThumbSession(const std
 
 std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path, BuildArena* scratch,
                                                void (*progress)(void* ctx, uint8_t percent), void* progressCtx,
-                                               std::unique_ptr<Epub> probed) {
+                                               std::unique_ptr<Epub> probed, book_protection::OpenResult* protection) {
   if (!Storage.exists(path.c_str())) {
     LOG_ERR("READER", "File does not exist: %s", path.c_str());
     return nullptr;
@@ -751,6 +754,7 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path, BuildAre
     return epub;
   }
 
+  if (protection != nullptr) *protection = epub->protectionResult();
   if (const std::string sidecar = sidecarCoverPath(path); !sidecar.empty()) {
     LOG_INF("READER", "EPUB load failed but sidecar cover exists: %s", sidecar.c_str());
   }
@@ -962,11 +966,14 @@ void ReaderActivity::onEnter() {
     // The size of the book's running text (Normalize Font Size) is not measured here: the chapter builds count it from
     // the text they lay out (BodySize).
     const bool indexing = firstOpenIndexing || bookFontsPending;
-    // Where the lend below is the PSRAM arena, which leaves both frames alone and waits for no refresh, the popup ships
-    // async and the book is indexed while it paints: the indexing used to wait out its FAST refresh first (X4 Pro,
-    // 2026-11-15: 667 ms). RED is seeded from the frame on screen once that refresh is finished, after the load.
-    const bool indexWhilePopupPaints =
-        indexing && renderer.hasSecondaryBuffer() && renderer.lendsPsramArena() && renderer.supportsAsyncRefresh();
+    // Where the lend below need not wait for the popup's refresh, the popup ships async and the book is indexed while
+    // it paints (IndexingPopupGate::firstOpenLend): the indexing used to wait out that FAST refresh first (X4 Pro,
+    // 2026-11-15: 667 ms; X3 and X4, 2026-11-16: 0.63-0.66 s). RED is seeded from the frame on screen once that refresh
+    // is finished, after the load.
+    using IndexingPopupGate::Lend;
+    const Lend lend =
+        indexing ? IndexingPopupGate::firstOpenLend(ReaderUtils::indexingPopupPanel(renderer)) : Lend::Blocking;
+    const bool indexWhilePopupPaints = lend != Lend::Blocking;
     Rect indexingPopup;
     if (indexing) {
       RenderLock lock;
@@ -985,16 +992,27 @@ void ReaderActivity::onEnter() {
       IndexingProgressGate gate;
       uint32_t shownFrame;
       GfxRenderer::Orientation orientation;
-    } indexingProgress{renderer, indexingPopup, IndexingProgressGate(millis()), renderer.framesShipped(),
-                       renderer.getHeldOrientation()};
+      bool seedRedAfterPopup;
+    } indexingProgress{renderer,
+                       indexingPopup,
+                       IndexingProgressGate(millis()),
+                       renderer.framesShipped(),
+                       renderer.getHeldOrientation(),
+                       lend == Lend::DuringRefresh};
     const auto onBuildProgress = [](void* ctx, const uint8_t percent) {
       auto* p = static_cast<IndexingProgress*>(ctx);
       if (!p->gate.shouldDraw(millis(), percent)) return;
       RenderLock lock;
-      p->renderer.finishDisplayAsync();  // the popup's own refresh, where it ships async; else nothing
+      // The popup's own refresh, where it ships async; else nothing. With the framebuffer lent during it, the bar's
+      // FAST diffs against RED, which the popup's start loaded with the frame before it: RED is seeded from the popup
+      // first.
+      const bool popupPainting = p->renderer.isRefreshPending();
+      p->renderer.finishDisplayAsync();
+      if (popupPainting && p->seedRedAfterPopup) p->renderer.syncRedRamFromFrameBuffer();
       // A refresh swaps the buffers where the secondary was not lent: draw over what is shown.
       p->renderer.syncWriteBufferFromDisplayed();
       GUI.fillPopupProgress(p->renderer, p->popup, percent);
+      SerialTestApi::notePopupContinued();
       p->shownFrame = p->renderer.framesShipped();
       LOG_DBG("READER", "Indexing progress %u%%", static_cast<unsigned>(percent));
     };
@@ -1032,18 +1050,22 @@ void ReaderActivity::onEnter() {
       // secondary still holds it, as the X4's single-buffer fast diff requires (no-op on X3). The
       // seed waits out a refresh in flight: with the popup still painting it comes after the load.
       if (!indexWhilePopupPaints) renderer.syncRedRamFromFrameBuffer();
-      lentForIndexing = renderer.borrowSecondaryBuffer(&lentSize);
+      // The C3s: the frame not being painted, so that nothing waits for the waveform.
+      lentForIndexing = lend == Lend::DuringRefresh ? renderer.borrowSecondaryBufferDuringRefresh(&lentSize)
+                                                    : renderer.borrowSecondaryBuffer(&lentSize);
       if (lentForIndexing) {
         renderer.setSingleBufferFastDiff(true);
-        LOG_INF("READER", "Lent secondary framebuffer for first-open indexing (%u bytes, free=%lu)",
-                static_cast<unsigned>(lentSize), static_cast<unsigned long>(esp_get_free_heap_size()));
+        LOG_INF("READER", "Lent secondary framebuffer for first-open indexing (%u bytes, free=%lu, popup %s)",
+                static_cast<unsigned>(lentSize), static_cast<unsigned long>(esp_get_free_heap_size()),
+                indexWhilePopupPaints ? "painting" : "painted");
       }
     }
     BuildArena indexingScratch(lentForIndexing, lentSize);
     const bool showsProgress = firstOpenIndexing || bookFontsPending;
+    auto protection = book_protection::OpenResult::Plain;
     auto epub = loadEpub(initialBookPath, indexingScratch.valid() ? &indexingScratch : nullptr,
                          showsProgress ? +onBuildProgress : nullptr, showsProgress ? &indexingProgress : nullptr,
-                         std::move(probedEpub));
+                         std::move(probedEpub), &protection);
     if (epub && bookFontsPending) {
       // load() left nothing in the region: its rings were scoped to each read.
       BookFonts::prepare(*epub, indexingScratch.valid() ? &indexingScratch : nullptr);
@@ -1062,7 +1084,7 @@ void ReaderActivity::onEnter() {
               static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
     }
     if (!epub) {
-      onGoBack();
+      if (!showProtectionNotice(protection)) onGoBack();
       return;
     }
     // load() also applies the book's metadata sidecar, whose language book.bin does not keep.
@@ -1082,3 +1104,34 @@ void ReaderActivity::onEnter() {
 }
 
 void ReaderActivity::onGoBack() { finish(); }
+
+bool ReaderActivity::showProtectionNotice(const book_protection::OpenResult result) {
+  StrId message = StrId::STR_PROTECTED_UNREADABLE;
+  switch (result) {
+    case book_protection::OpenResult::Plain:
+    case book_protection::OpenResult::Protected:
+      return false;
+    case book_protection::OpenResult::NoKey:
+      message = StrId::STR_PROTECTED_NO_KEY;
+      break;
+    case book_protection::OpenResult::OtherDevice:
+      message = StrId::STR_PROTECTED_OTHER_DEVICE;
+      break;
+    case book_protection::OpenResult::Expired:
+      message = StrId::STR_PROTECTED_EXPIRED;
+      break;
+    case book_protection::OpenResult::NeedsTime:
+      message = StrId::STR_PROTECTED_NEEDS_TIME;
+      break;
+    case book_protection::OpenResult::Unreadable:
+      break;
+  }
+  ConfirmationActivity::Question question;
+  question.headline = tr(STR_PROTECTED_BOOK);
+  question.message = I18N.get(message);
+  question.cancelLabel = StrId::STR_BACK;
+  question.acceptLabel = StrId::STR_OK_BUTTON;
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, std::move(question)),
+                         [this](const ActivityResult&) { onGoBack(); });
+  return true;
+}

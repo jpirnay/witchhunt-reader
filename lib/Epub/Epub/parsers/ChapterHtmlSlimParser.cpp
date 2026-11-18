@@ -1441,7 +1441,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     // Counted, and kept only as the block's first word: what follows depends on whether the block is empty, never on
     // its words, and a block that is never laid out must not grow with its paragraph. A run of kept spaces is no text:
     // a book's code would weigh its spaces into the body size.
-    if (!keptSpaces || partWordBuffer[partWordTextBegin_] != ' ') countCensusWord(*census_);
+    if (!carried_ && (!keptSpaces || partWordBuffer[partWordTextBegin_] != ' ')) countCensusWord(*census_);
     if (currentTextBlock->isEmpty()) {
       currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct,
                                 partWordVisibleOffset_);
@@ -1449,7 +1449,9 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   } else if (currentTextBlock) {
     // The build's sample of the book's body size (setBuildCensus): the word as the census counts it, set as it is laid
     // out here, before the block's font is resolved, as there.
-    if (buildCensus_ && (!keptSpaces || partWordBuffer[partWordTextBegin_] != ' ')) countCensusWord(*buildCensus_);
+    if (buildCensus_ && !carried_ && (!keptSpaces || partWordBuffer[partWordTextBegin_] != ' ')) {
+      countCensusWord(*buildCensus_);
+    }
     // If a float image is pending and the block is still empty, attach it now so the
     // first word (and all subsequent words) are laid out beside the image.
     // This handles <p><img style="float:left"/>text...</p>: pendingInlineImage_ is set
@@ -1811,6 +1813,7 @@ bool ChapterHtmlSlimParser::lookupVisibleOffsetInActiveBuild(const uint32_t offs
 // Callers must ensure currentPage is non-null and carries content; the helper resets
 // currentPage to a fresh Page and zeroes currentPageNextY so the caller can keep building.
 void ChapterHtmlSlimParser::emitPage() {
+  carriedTop_ = false;
   if (!boxScopes_.empty() && currentPage) sliceBoxesAtPageEnd();
   // A page with no noted element (nothing but spacing) starts where the next element does, which
   // noteElementOnPage fills in. The counter stands in only if no element ever follows; taken now,
@@ -1945,6 +1948,11 @@ void ChapterHtmlSlimParser::openBox(BoxScope box) {
   box.top = std::max(currentPageNextY, lastGlyphBottom_);
   box.firstElement = static_cast<uint16_t>(currentPage->elements.size());
   currentPageNextY = static_cast<int16_t>(box.top + box.padTop);
+  // The extra paragraph spacing the block above added is above the frame, not in it. Left marked, a box with nothing
+  // inside to move the line on (a rule drawn as a bottom border) took it off its own height at closeBox and drew
+  // nothing when the spacing was as tall as the frame: a chapter's rule under its heading was lost, while the same rule
+  // at a page's top was drawn.
+  extraGapEnd_ = -1;
   boxScopes_.push_back(box);
 }
 
@@ -2933,7 +2941,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       label = std::move(externalLabel);
     }
     self->recordPageBreakLabel(label);
-    if (!idAttr.empty()) {
+    if (!idAttr.empty() && !self->carried_) {
       self->recordAnchor(idAttr, static_cast<uint16_t>(self->completedPageCount));
       self->pendingAnchorId = idAttr;
     }
@@ -2946,7 +2954,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // by the thousand, so they have a budget of their own and never count against
   // MAX_ANCHORS_PER_CHAPTER, which the other elements keep whole -- see its definition. TOC
   // anchors bypass both, since they drive page breaks and core navigation.
-  if (!isPageBreakMarker && !idAttr.empty()) {
+  if (!isPageBreakMarker && !idAttr.empty() && !self->carried_) {
     const bool isTocAnchor =
         std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idAttr) != self->tocAnchors.end();
     if (isTocAnchor ||
@@ -3726,7 +3734,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // check so that hidden <p> elements are still counted, matching ChapterXPathIndexer's
   // counting (pure XML, no CSS). This ensures paragraph indices in the section cache LUT
   // align with KOReader's crengine XPath indices.
-  if (self->xpathBodyDepth >= 0 && self->depth == self->xpathBodyDepth + 1) {
+  if (self->xpathBodyDepth >= 0 && self->depth == self->xpathBodyDepth + 1 && !self->carried_) {
     if (strcmp(name, "p") == 0) {
       self->xpathParagraphIndex++;
     }
@@ -3735,7 +3743,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // <li> can appear nested inside <ul>/<ol> at any depth, so count it globally —
   // not at body-child level. The running count must match what the runtime reverse
   // mapper sees so getPageForListItemIndex can snap a KOReader li XPath to a page.
-  if (self->xpathBodyDepth >= 0 && strcmp(name, "li") == 0) {
+  if (self->xpathBodyDepth >= 0 && strcmp(name, "li") == 0 && !self->carried_) {
     self->xpathListItemIndex++;
   }
 
@@ -3967,10 +3975,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // the first content after the end tag. Not inside a table, whose rows are placed as a whole.
   const bool breakableBlock =
       matches(name, HEADER_TAGS, NUM_HEADER_TAGS) || matches(name, BLOCK_TAGS, NUM_BLOCK_TAGS) || opensBlockSpan;
-  if (breakableBlock && !self->currentTable) {
-    if (cssStyle.pageBreakBefore) self->pageBreakPending_ = true;
-    if (cssStyle.pageBreakAfter && self->breakAfterCount_ < ChapterHtmlSlimParser::kMaxBreakAfterDepth) {
-      self->breakAfterDepths_[self->breakAfterCount_++] = self->depth;
+  if (breakableBlock && !self->currentTable && !self->carried_) {
+    if (self->carriedTop_ && (cssStyle.pageBreakBefore || cssStyle.pageBreakAfter)) {
+      self->carriedTop_ = false;  // the converter's cut, dropped (beginCarried)
+    } else {
+      if (cssStyle.pageBreakBefore) self->pageBreakPending_ = true;
+      if (cssStyle.pageBreakAfter && self->breakAfterCount_ < ChapterHtmlSlimParser::kMaxBreakAfterDepth) {
+        self->breakAfterDepths_[self->breakAfterCount_++] = self->depth;
+      }
     }
   }
 
@@ -4367,10 +4379,12 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
 void ChapterHtmlSlimParser::characterData(void* userData, const char* s, int len) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
-  const bool source = self->xpathBodyDepth >= 0 && self->nonVisibleTextDepth_ == 0;
+  const bool source = self->xpathBodyDepth >= 0 && self->nonVisibleTextDepth_ == 0 && !self->carried_;
   uint32_t base = self->visibleTextOffset_;
   if (source) {
-    self->visibleTextOffset_ += static_cast<uint32_t>(VisibleText::visibleBytes(s, len));
+    const auto visible = static_cast<uint32_t>(VisibleText::visibleBytes(s, len));
+    self->visibleTextOffset_ += visible;
+    if (visible > 0) self->carriedTop_ = false;
   }
 
   // A sequence the last chunk ended inside is completed from this one and read whole, so a letter or a joiner
@@ -5384,6 +5398,13 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
     progressFn(0);
   }
   return true;
+}
+
+void ChapterHtmlSlimParser::endCarried() {
+  // A word still waiting for its block's end is placed now, while it counts as carried.
+  if (partWordBufferIndex > 0) flushPartWordBuffer();
+  carried_ = false;
+  carriedTop_ = true;
 }
 
 size_t ChapterHtmlSlimParser::write(const uint8_t data) { return write(&data, 1); }

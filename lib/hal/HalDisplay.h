@@ -60,6 +60,19 @@ class HalDisplay {
   // the reader's inline AA -- must ask this rather than infer it from the board,
   // or they pay the plane/gray/restore cost with no overlap to hide it in.
   bool supportsAsyncRefresh() const;
+  // The gray pass of a two-pass page stays the deferred one on this panel although its refresh can overlap work.
+  // A driver that starts to defer moves its panel to the inline pass by that alone (usesDeferredAa() asks
+  // supportsAsyncRefresh()), which waits AA_SETTLE_MS for a press before its gray and holds the render lock to its
+  // end: the T5S3 lost a ghosting fix that way (docs/lilygo-t5s3-display-stack.md, section 7). Named here:
+  //  - the Picco's SE0400 (SSD2677), whose driver defers a refresh (freeink-sdk, Ssd2677Driver::displayStart). With
+  //    that driver its two-pass pages took the deferred pass on the device, none the inline one (2026-11-17); it
+  //    has not been run inline.
+  //  - the Murphy's UC8253, whose driver defers as well (Uc8253MurphyDriver::displayStart). With that driver its
+  //    two-pass pages took the deferred pass on the device, none the inline one (2026-11-17); it has not been run
+  //    inline.
+  // By the SDK's controller identity, so a Picco with an SSD1677 panel keeps the inline pass it has. The X3's UC8253
+  // answers true as well, which changes nothing there: it defers for asyncRefreshHoldsFrameBuffer().
+  bool keepsDeferredGrayPass() const;
   void finishDisplayAsync();
   bool isRefreshPending() const;
   // The pending refresh's waveform still runs (the panel's BUSY line); its finish is still owed after it ends.
@@ -157,8 +170,10 @@ class HalDisplay {
   // not being painted, so nothing waits for the waveform, and the caller owes finishDisplayAsync() before it next
   // draws. Elsewhere it is borrowSecondaryBuffer(). See FreeInkDisplay::borrowSecondaryBufferDuringRefresh.
   uint8_t* borrowSecondaryBufferDuringRefresh(size_t* size);
-  // The X3's framebuffer lend: its pending refresh re-reads only the frame it paints. Not the PSRAM arena boards, whose
-  // lend never waited, but whose popup ships blocking until a device run says otherwise.
+  // The framebuffer lend (the C3s): a pending refresh's finish reads only the frame it paints, if anything, so the lend
+  // takes the other one without waiting (FreeInkDisplay::borrowSecondaryBufferDuringRefresh, every panel since SDK
+  // a0e2025). Not the PSRAM arena boards, whose lend never waits (lendsPsramArena). How the reader's Indexing popups
+  // use either: IndexingPopupGate.h.
   bool lendsDuringRefresh() const;
 
   // Allow fast differential refresh to continue (X4) after the secondary buffer
@@ -303,6 +318,8 @@ class HalDisplay {
  private:
   EInkDisplay einkDisplay;
   uint8_t pendingX3SettlePasses = 0;
+  // The UC8253's settle for the refresh displayBuffer() / refreshDisplay() is about to start (requestResync).
+  void armSettleFor(RefreshMode mode);
   RefreshMode lastRefreshMode = RefreshMode::FAST_REFRESH;
 
   // How long this panel's last FAST refresh actually took, in ms. Measured rather than derived

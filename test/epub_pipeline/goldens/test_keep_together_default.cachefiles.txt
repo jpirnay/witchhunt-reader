@@ -1,0 +1,17 @@
+book.bin 357 536e254a
+css_rules.cache 217 b1e7aa95
+fingerprint.bin 12 fdc9d5d4
+footnotes.bin 76 c42eb1dd
+pages.bin 46 43d0e4a3
+spines/0/0_9fe217c6.bin 1695 305eb68f
+spines/0/1_9fe217c6.bin 1737 5ef1b046
+spines/0/2_9fe217c6.bin 1520 5eab4bff
+spines/0/3_9fe217c6.bin 1731 f7550faf
+spines/0/4_9fe217c6.bin 1935 26c1b356
+spines/0/5_9fe217c6.bin 7998 4c29135d
+spines/0/html_0.bin 1066 e37ceab2
+spines/0/html_1.bin 1061 e673a6be
+spines/0/html_2.bin 985 7b555afb
+spines/0/html_3.bin 1073 fb9b1b98
+spines/0/html_4.bin 1178 29c54a79
+spines/0/html_5.bin 3782 1579ed9a

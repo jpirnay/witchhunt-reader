@@ -5,6 +5,8 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 
 #include "Epub.h"
@@ -81,6 +83,29 @@ TEST(SpinePageIndex, ReRecordingOverwritesTheEntry) {
   SpinePageIndex::record(dir, kVariant, 40, 3, 9, 18000);
   SpinePageIndex::record(dir, kVariant, 40, 3, 11, 18000);  // a clean rebuild of a degraded one
   EXPECT_EQ(11u, SpinePageIndex::sumRange(dir, kVariant, 40, 3, 3, -1).pagesAfter);
+}
+
+// A heading file the next item's layout takes in has no page of its own: a file of 0 pages that counts as known, so a
+// chapter of it and its text is exact once the text's count is in. Stored as 0 pages, which older firmware reads as
+// "not recorded", as it would have before the file was carried.
+TEST(SpinePageIndex, ACarriedItemCountsAsAFileOfNoPages) {
+  const std::string dir = freshDir("carried");
+  SpinePageIndex::recordCarried(dir, kVariant, 40, 22);
+  SpinePageIndex::record(dir, kVariant, 40, 23, 41, 22926);
+  const auto t = SpinePageIndex::sumRange(dir, kVariant, 40, 22, 23, /*current=*/23);
+  EXPECT_EQ(1, t.filesBefore);
+  EXPECT_EQ(0u, t.pagesBefore);
+  EXPECT_EQ(0u, t.bytesBefore);
+
+  std::ifstream in(fs::path(dir) / "pages.bin", std::ios::binary);
+  std::string table((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  const size_t entry = 10 + 22 * 6;
+  ASSERT_GE(table.size(), entry + 6);
+  EXPECT_EQ(std::string("\0\0\xFF\xFF\xFF\xFF", 6), table.substr(entry, 6));
+
+  // Laid out on its own again (the rule no longer applies, a vertical layout): its count replaces the mark.
+  SpinePageIndex::record(dir, kVariant, 40, 22, 1, 865);
+  EXPECT_EQ(1u, SpinePageIndex::sumRange(dir, kVariant, 40, 22, 23, 23).pagesBefore);
 }
 
 TEST(SpinePageIndex, AnotherVariantStartsTheTableOver) {

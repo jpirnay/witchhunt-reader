@@ -549,6 +549,8 @@ class GfxRenderer {
   // panel. Ask this before spending the async gap on work; see
   // HalDisplay::supportsAsyncRefresh.
   bool supportsAsyncRefresh() const { return display.supportsAsyncRefresh(); }
+  // See HalDisplay::keepsDeferredGrayPass.
+  bool keepsDeferredGrayPass() const { return display.keepsDeferredGrayPass(); }
   // What a FAST refresh costs on this panel, measured. 0 until one has run. See HalDisplay.
   uint16_t getLastFastRefreshMs() const { return display.getLastFastRefreshMs(); }
 
@@ -991,6 +993,49 @@ class GfxRenderer {
     // costs only one SPI write.
     cleanupGrayscaleWithPreviousBuffer();
 
+    t.restoreMs = millis() - t2;
+    return t;
+  }
+
+  // The same planes for a frame whose one copy is the write buffer, the secondary buffer being lent (a C3 chapter
+  // build's arena): they are rendered over that frame, and redrawFn() draws it there again for the cleanup, which
+  // takes it from there (cleanupGrayscaleBuffers(), which reads any buffer). redrawFn() returns false when what it drew
+  // is not the frame on the panel: the driver is then told it has no baseline and takes a clean sync on its next push,
+  // as when the secondary is away in the passes above. An abort before the first plane reaches the controller costs
+  // the redraw alone; after it, the redraw and the cleanup.
+  template <typename RenderFn, typename AbortFn, typename RedrawFn>
+  GrayscaleTimings renderGrayscalePlanesOverFrame(RenderFn renderFn, AbortFn shouldAbort, RedrawFn redrawFn) {
+    GrayscaleTimings t;
+    const unsigned long t0 = millis();
+    bool planeSent = false;
+
+    clearScreen(0x00);
+    setRenderMode(GRAYSCALE_LSB);
+    renderFn(GRAYSCALE_LSB);
+    t.aborted = shouldAbort();
+    if (!t.aborted) {
+      copyGrayscaleLsbBuffers();
+      planeSent = true;
+      clearScreen(0x00);
+      setRenderMode(GRAYSCALE_MSB);
+      renderFn(GRAYSCALE_MSB);
+      t.aborted = shouldAbort();  // before the copy, as in the sequential pass
+    }
+    if (!t.aborted) {
+      copyGrayscaleMsbBuffers();
+      const unsigned long t1 = millis();
+      t.planesMs = t1 - t0;
+      setRenderMode(BW);
+      display.displayGrayBuffer(/*turnOffScreen=*/false);
+      t.displayMs = millis() - t1;
+    } else {
+      t.planesMs = millis() - t0;
+    }
+
+    setRenderMode(BW);
+    const unsigned long t2 = millis();
+    const bool frameOnPanel = redrawFn();
+    if (planeSent) display.cleanupGrayscaleBuffers(frameOnPanel ? frameBuffer : nullptr);
     t.restoreMs = millis() - t2;
     return t;
   }

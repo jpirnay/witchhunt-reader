@@ -19,6 +19,7 @@
 #include <atomic>
 #include <optional>
 
+#include "AaSettle.h"
 #include "BookReaderOverrides.h"
 #include "BookSearchSession.h"
 #include "BookmarkStore.h"
@@ -31,9 +32,11 @@
 #include "EpubProgressRecord.h"
 #include "EpubReaderMenuActivity.h"
 #include "ImageMemoryLadder.h"
+#include "InputFirst.h"
 #include "KOReaderAutoSync.h"
 #include "KOReaderSyncWorker.h"
 #include "LaneBeforeBuild.h"
+#include "LookAheadPause.h"
 #include "PackOffer.h"
 #include "ProgressMapper.h"
 #include "ReaderUtils.h"
@@ -152,6 +155,15 @@ class EpubReaderActivity final : public Activity {
       1;  // initialized to freq in onEnter(); 1 triggers HALF on first render if somehow not reset
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
+  // The reader's pace, for the wait before an inline gray pass (AaSettle). turnGapMs_: how long after the turn before
+  // it the last page turn was asked for, until the render pass that answers it takes it as passTurnGapMs_; kNoTurn for
+  // a pass no page turn asked for. turnAskedMs_: when loop() read the turn it is about to make (0: none), and
+  // lastTurnAskedMs_ the turn before. inlineGrayTailMs_: how long the last inline pass ran past its last abort point.
+  unsigned long turnAskedMs_ = 0UL;
+  unsigned long lastTurnAskedMs_ = 0UL;
+  uint32_t turnGapMs_ = AaSettle::kNoTurn;
+  uint32_t passTurnGapMs_ = AaSettle::kNoTurn;
+  uint32_t inlineGrayTailMs_ = AaSettle::kMaxWaitMs;
   // When the reader last put a page on screen, for ANY reason — a turn, the first page of a
   // freshly opened book, a jump, a rebuild. Background-B's borrow quiet period measures from
   // here rather than from lastPageTurnTime, which is only stamped by actual page turns and so
@@ -418,8 +430,15 @@ class EpubReaderActivity final : public Activity {
   // buffer back) before reaching Done. Bounds the retry loop: a spine whose parse cannot fit
   // between two page turns would otherwise re-inflate and re-parse forever, burning CPU, SD
   // writes and battery for a cache it never finishes. After BG_BUILD_MAX_PREEMPTIONS the
-  // target is abandoned to Background-C and the cursor moves on. Reset per target.
+  // target is abandoned to Background-C and the look-ahead stops (below). Reset per target.
   uint8_t backgroundPreemptCount_ = 0;
+  // B abandoned backgroundBuildSpineIndex_ and starts no build until the reader pauses or enters another chapter
+  // (LookAheadPause). Reset per target.
+  bool backgroundStoppedAfterAbandon_ = false;
+  // What a pause has to outlast: the longest a page had been up when a turn took a build of this target away, counted
+  // from the quiet rule's clock as it read when B took the buffer. Reset per target.
+  unsigned long backgroundBorrowActivityMs_ = 0;
+  uint32_t backgroundPreemptedStayMs_ = 0;
   // Times B gave the buffer back to an image decode for backgroundBuildSpineIndex_ (LaneBeforeBuild): bounded by
   // LaneBeforeBuild::kMaxYields, after which the images wait for B. Kept apart from backgroundPreemptCount_, which
   // abandons the chapter to the foreground. Reset per target.
@@ -490,6 +509,7 @@ class EpubReaderActivity final : public Activity {
   // lock. Loop task only: main.cpp polls both hooks from there, and refreshLoopHints() is their
   // only writer.
   bool loopHintCurrentBuild_ = false;     // section && section->hasActiveBuild()
+  bool loopHintAskedPageDrawn_ = false;   // and the page asked for is the one that build has drawn
   bool loopHintBackgroundBuild_ = false;  // backgroundBuildState_ == Building
   void refreshLoopHints();
   // --- Background C (incremental build of the CURRENT section while the reader watches) ---
@@ -501,6 +521,9 @@ class EpubReaderActivity final : public Activity {
   // Page last drawn by the SectionBuilding pass (-1 = none yet / popup showing). Stops the
   // pass redrawing the same page every idle tick.
   int buildDisplayedPage_ = -1;
+  // The page stepCurrentSectionBuild() last asked the render task to draw (-1: none since buildDisplayedPage_ was last
+  // reset). Each readable page is asked for once.
+  int buildPageAskedFor_ = -1;
   // The page displayBuildPage() last put on the panel, where it drew it (spine -1: none, or the popup since). When the
   // build ends on it, it stays there with its provisional page count instead of being drawn again
   // (keepBuildPageOnScreen).
@@ -529,11 +552,14 @@ class EpubReaderActivity final : public Activity {
   bool keepBuildPageOnScreen();
   // The deferred gray pass of the page the build drew (`shown`, loaded as `page`), its glyphs warmed first.
   void armBuildPageGray(const BuildPageOnScreen& shown, std::unique_ptr<Page> page);
-  // The build keeps out of what the gray of its page needs (BuildPageGray): the S3s.
-  bool buildLeavesFramesAlone() const;
-  // Between two build slices, where the gray comes while the build goes on: arms the deferred gray pass of the page the
-  // build drew, once its refresh is over. True when armed; runDeferredGrayscalePass() runs it before the next slice.
+  // How the gray of the page the live build draws can come while the build goes on (BuildPageGray::Pass).
+  BuildPageGray::Pass buildPageGrayPass() const;
+  // Between two build slices, where the gray comes while the build goes on, once the page's refresh is over: arms the
+  // deferred gray pass of the page the build drew (Restore; runDeferredGrayscalePass() runs it before the next slice),
+  // or runs it here (Redraw). True when it did either.
   bool askBuildPageGray();
+  // The Redraw pass of the page `shown`, under the render lock, in the build's arena. False when it could not start.
+  bool runBuildPageGrayRedraw(const BuildPageOnScreen& shown);
   // displayBuildPage() drew a page whose gray askBuildPageGray() is to ask for. A hint, read without the lock; the
   // state under the lock decides, and clears it once the page has gone or its pass is asked for.
   std::atomic<bool> buildPageGrayDue_{false};
@@ -546,9 +572,12 @@ class EpubReaderActivity final : public Activity {
   LandedText landedText_;
   // True while pageTurn() waits for the render lock: the one sign the render task can read that a turn is on its way.
   std::atomic<bool> pageTurnWaitingForLock_{false};
-  // True while displayBuildPage() waits for its page's waveform without the bus lock: the loop task's build slice may
-  // run through that pending refresh (BuildDuringRefresh.h). Written by the render task, read by the loop task.
+  // True while displayBuildPage() waits for its page's waveform without the bus lock (or the SectionBuilding pass for
+  // its Indexing popup's, IndexingPopupGate::buildsThroughPopup): the loop task's build slice may run through that
+  // pending refresh (BuildDuringRefresh.h). Written by the render task, read by the loop task.
   std::atomic<bool> buildPageWaitOffBus_{false};
+  // Where a press stands on its way to a turn, for the background work's gate (InputFirst). Loop task.
+  InputFirst::Press pressInFlight() const;
   // True once the "Indexing" popup has been drawn for the current pending page, so the pass
   // doesn't re-flush it every tick. Cleared whenever a real page is drawn or the build ends.
   bool buildingPopupShown_ = false;
@@ -784,6 +813,16 @@ class EpubReaderActivity final : public Activity {
   // counter, which stays an estimate until that file's page count is recorded (ChapterPageSpan).
   // Background-B builds such a file past the BG_BUILD_LOOKAHEAD_PAGES budget (#580).
   bool chapterCounterAwaits(int spine) const;
+  // The spine item the reader enters after the one on screen: the next, or the one after it when the next holds only
+  // its chapter's heading, which that one's first page shows (HeadingCarry). Background-B's next chapter, the image
+  // lane's spill-over and build-through go by it. Looked up once per spine on screen.
+  int nextReadingSpine() const;
+  mutable int nextReadingFrom_ = -1;
+  mutable int nextReadingSpine_ = -1;
+  // The page on screen is starred: on itself, or, on a chapter's first page, on the heading file it now shows (a star
+  // set while that file had a page of its own; carriedStarHere names it).
+  bool pageStarred() const;
+  std::optional<std::pair<uint16_t, uint16_t>> carriedStarHere() const;
   // Realloc the secondary buffer, evicting rebuildable caches (FDC page slots, CSS
   // resolve caches) that a released build may have planted inside the freed hole and
   // retrying once before reporting failure. Shared by the post-build and opportunistic
@@ -1026,6 +1065,9 @@ class EpubReaderActivity final : public Activity {
   // reason: the build gets its heap back before it resumes.
   void displayBuildPage(RenderLock& lock, std::unique_ptr<Page> ownedPage, const RenderLayout& layout,
                         BuildArena::Block* drawBlock = nullptr);
+  // The end of displayBuildPage(): lets the render lock go and waits for the refresh it started, so that the loop
+  // task's build slices run meanwhile (without the bus lock where BuildDuringRefresh::waitsOffBus says so).
+  void waitForBuildRefreshUnlocked(RenderLock& lock);
   // Draws the status bar over the current frame buffer and flushes to the display.
   // Handles the refresh cycle and grayscale AA pass. page must be the same page
   // that was last rendered into the buffer (needed for image AA re-render).

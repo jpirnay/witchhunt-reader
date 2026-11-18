@@ -9,7 +9,12 @@ so you can correct a cover or a title without rewriting the EPUB.
     Some Book.epub      the book
     Some Book.jpg       cover sidecar     (optional)
     Some Book.opf       metadata sidecar  (optional)
+    Some Book.epub.key  content key       (a protected book; written by a plugin)
 ```
+
+A content key is not an override: it is what a protected EPUB opens with, wrapped to the device by
+`POST /api/book-key` (see [webserver-endpoints.md](webserver-endpoints.md)). It moves and goes with its book like
+the others.
 
 The rule is the same for both: **a sidecar wins over what is inside the book.**
 
@@ -155,7 +160,7 @@ Who does this today:
 - **The `organize-by-author` plugin** moves sidecars with the book — see
   [sd-plugins.md](sd-plugins.md).
 - **Manual moves** through the web File Manager or a script are your own
-  responsibility: move `book.epub`, `book.jpg` and `book.opf` together.
+  responsibility: move `book.epub`, `book.jpg`, `book.opf` and `book.epub.key` together.
 
 The firmware's sidecar tables are in `lib/FsHelpers/SidecarFiles.h`. Cover
 resolution, metadata resolution and the move, remove and stamp paths all read

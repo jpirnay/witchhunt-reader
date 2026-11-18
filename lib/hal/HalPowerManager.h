@@ -73,6 +73,8 @@ class HalPowerManager {
     uint32_t rejFrontlight = 0;  // declined: a PWM frontlight is lit, or touch cannot wake the chip
     uint32_t rejDebounce = 0;    // declined: button change mid-debounce
     uint32_t rejIdf = 0;         // esp_light_sleep_start() returned non-OK
+    // declined: a display refresh was started and not yet finished (HalDisplay::isRefreshPending)
+    uint32_t rejRefresh = 0;
   };
 
   // The last steps of startDeepSleep(), reported to an optional observer. That

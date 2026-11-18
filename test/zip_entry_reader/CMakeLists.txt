@@ -20,6 +20,7 @@ add_executable(ZipEntryReaderTest
   ZipEntryReaderTest.cpp
   ZipCorruptSizeTest.cpp
   ZipKnownEntriesTest.cpp
+  ZipEncryptedEntryTest.cpp
   LoggingStub.cpp
   ${REPO_ROOT}/lib/ZipFile/ZipFile.cpp
 )
