@@ -23,6 +23,15 @@ may lend its size to the next paragraph.
   6. <br> between heading and text  the same, with the usual blank-line gap
   7. empty heading                  the paragraph after it is body size
 
+A <br> adds a blank line only when the line it ends is empty, as a browser lays
+it out: after text on the same line it ends that line and adds nothing.
+
+  8. trailing <br> in a paragraph   no gap before the next paragraph
+  9. two <br> inside a paragraph    one blank line between the two lines
+ 10. two trailing <br>              one blank line before the next paragraph
+ 11. two <br> between paragraphs    two blank lines (a scene break)
+ 12. <br> after a paragraph, text   one blank line before the text
+
 Regenerate with:  python test/epubs/make_test_br_in_blocks.py
 then refresh goldens: UPDATE_GOLDENS=1 ctest -R EpubPipeline
 """
@@ -128,6 +137,27 @@ CHAPTER = """<?xml version="1.0" encoding="UTF-8"?>
   <p>7. EMPTY HEADING:</p>
   <h3></h3>
   <p>Golf body text</p>
+
+  <p>8. TRAILING BR IN A PARAGRAPH:</p>
+  <p>Hotel top<br/></p>
+  <p>Hotel next paragraph</p>
+
+  <p>9. TWO BR INSIDE A PARAGRAPH:</p>
+  <p>India top<br/><br/>India bottom</p>
+
+  <p>10. TWO TRAILING BR:</p>
+  <p>Juliett top<br/><br/></p>
+  <p>Juliett next paragraph</p>
+
+  <p>11. TWO BR BETWEEN PARAGRAPHS:</p>
+  <p>Kilo top</p>
+  <br/>
+  <br/>
+  <p>Kilo next paragraph</p>
+
+  <p>12. BR AFTER A PARAGRAPH, THEN TEXT:</p>
+  <p>Lima top</p>
+  <br/>Lima loose text
 
 </body>
 </html>

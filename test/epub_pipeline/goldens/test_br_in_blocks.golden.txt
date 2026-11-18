@@ -1,5 +1,5 @@
 BOOK title=BR In Blocks Test lang=en spine=1 toc=1 reliableToc=1
-SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
+SPINE 0 href=OEBPS/chapter1.xhtml pages=3 truncated=0 cssFallback=0
  PAGE 0 elements=25 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=1.
@@ -143,7 +143,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=266 s=0 z=100 t=word89
    W x=329 s=0 z=100 t=word90
    W x=400 s=0 z=100 t=word91
- PAGE 1 elements=12 footnotes=0
+ PAGE 1 elements=24 footnotes=0
   LINE y=0 x=0 align=0 mult=1.200 hfid=0 words=7
    W x=0 s=0 z=100 t=word92
    W x=65 s=0 z=100 t=word93
@@ -200,3 +200,71 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=Golf
    W x=44 s=0 z=100 t=body
    W x=84 s=0 z=100 t=text
+  LINE y=376 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=8.
+   W x=22 s=0 z=100 t=TRAILING
+   W x=97 s=0 z=100 t=BR
+   W x=123 s=0 z=100 t=IN
+   W x=145 s=0 z=100 t=A
+   W x=159 s=0 z=100 t=PARAGRAPH:
+  LINE y=400 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Hotel
+   W x=54 s=0 z=100 t=top
+  LINE y=448 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Hotel
+   W x=54 s=0 z=100 t=next
+   W x=97 s=0 z=100 t=paragraph
+  LINE y=472 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=9.
+   W x=23 s=0 z=100 t=TWO
+   W x=52 s=0 z=100 t=BR
+   W x=78 s=0 z=100 t=INSIDE
+   W x=144 s=0 z=100 t=A
+   W x=158 s=0 z=100 t=PARAGRAPH:
+  LINE y=496 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=India
+   W x=52 s=0 z=100 t=top
+  LINE y=544 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=India
+   W x=52 s=0 z=100 t=bottom
+  LINE y=568 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=10.
+   W x=34 s=0 z=100 t=TWO
+   W x=63 s=0 z=100 t=TRAILING
+   W x=138 s=0 z=100 t=BR:
+  LINE y=592 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Juliett
+   W x=71 s=0 z=100 t=top
+  LINE y=640 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Juliett
+   W x=71 s=0 z=100 t=next
+   W x=114 s=0 z=100 t=paragraph
+  LINE y=664 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=11.
+   W x=28 s=0 z=100 t=TWO
+   W x=57 s=0 z=100 t=BR
+   W x=83 s=0 z=100 t=BETWEEN
+   W x=156 s=0 z=100 t=PARAGRAPHS:
+  LINE y=688 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Kilo
+   W x=44 s=0 z=100 t=top
+  LINE y=736 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Kilo
+   W x=44 s=0 z=100 t=next
+   W x=87 s=0 z=100 t=paragraph
+ PAGE 2 elements=3 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=12.
+   W x=29 s=0 z=100 t=BR
+   W x=55 s=0 z=100 t=AFTER
+   W x=104 s=0 z=100 t=A
+   W x=118 s=0 z=100 t=PARAGRAPH,
+   W x=211 s=0 z=100 t=THEN
+   W x=250 s=0 z=100 t=TEXT:
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Lima
+   W x=46 s=0 z=100 t=top
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Lima
+   W x=46 s=0 z=100 t=loose
+   W x=103 s=0 z=100 t=text
