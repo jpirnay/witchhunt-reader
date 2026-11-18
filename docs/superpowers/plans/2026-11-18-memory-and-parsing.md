@@ -78,3 +78,24 @@ paragraph. No section version bump.
 Branch `feat/css-sheet-ranges`, worktree `C:/tmp/wt-mp-13a`. Track C, first. Spec §13 "13a" (and read §13 whole for
 what 13b will need). First settle the spec's open point: whether the tokenizer follows `@import` anywhere; if it does,
 say so and leave the edges out. Bumps `CSS_CACHE_VERSION`, not `SECTION_FILE_VERSION`.
+
+## Task 8: §3a, the truncated-chapter hint in every language
+
+Branch `fix/truncated-hint-tr`, worktree `C:/tmp/wt-mp-03a`. Track M. Spec §3 "3a"; the owner decided §3 on
+2026-11-18: **no hint for a simplified chapter** (option A).
+
+- `TRUNCATED_SECTION_HINT_LINE_1/2` (`src/activities/reader/EpubReaderActivity.cpp`, near `:355`) become two `STR_*`
+  keys read through `tr()`. Add them to `lib/I18n/translations/english.yaml` and translate them into every other
+  language file. Line 2 names three settings ("No embedded style | No images | AA Off"): in each language use that
+  file's own labels for those settings (find the keys the settings rows use in `src/SettingsList.h`), so the hint
+  names what the reader will see in the menu. Reuse crosspoint-reader's wording where `upstream/develop`'s
+  translation files carry the same English; machine-translate the rest and say so in the report. Use only characters
+  the file already uses (the build fails on a glyph a UI face lacks). Keep each file's line endings.
+- Never run `gen_i18n.py` by hand to regenerate the code tables (a manual run bloats the build by ~31 KB); the
+  language packs are written only by `python scripts/gen_i18n.py --packs assets/sd-fonts` (`docs/i18n.md`): run that
+  and commit the packs it changes.
+- `docs/future_work/memory-and-parsing.md`: delete the "No hint when a chapter was simplified" section (record the
+  owner's decision in the commit message) and add in its place an open item from spec §3 "3b": the page-elements
+  limit (`Page::MAX_ELEMENTS`) drops the tail of a page; fix only with a fixture that reaches it, by ending the page
+  at the limit, not with a hint. Keep its README row true.
+- Test: the host i18n tests that exist (find them under `test/`), and the full suite once before the final commit.
