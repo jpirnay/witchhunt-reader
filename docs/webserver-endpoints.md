@@ -1051,7 +1051,7 @@ layout cache is invalidated on success.
 | ------ | ---------------------------------------------- |
 | 400    | Missing `plugin`/`url`/`dest`, bad scheme, or a refused destination |
 | 403    | Host not in the plugin's `allowedHosts` (`host` names it)          |
-| 502    | Download failed. `"unauthorized": true` when the file's server answered 401 or 403; `status` holds the answer's code for a request with a method or body |
+| 502    | Download failed. `status` holds the file server's answer (0 or less when none came) and `error` names it (`"the server answered 404"`); `"unauthorized": true` when it answered 401 or 403 |
 
 ### POST `/api/book-key` - Store a Protected Book's Content Key
 

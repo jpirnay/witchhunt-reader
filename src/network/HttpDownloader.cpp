@@ -126,7 +126,7 @@ size_t largestFreeBlock() { return heap_caps_get_largest_free_block(MALLOC_CAP_D
 HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::string& username,
                                            const std::string& password, Sink& sink, HttpDownloader::TlsPolicy tls,
                                            const HttpDownloader::RedirectFilter& redirectAllowed,
-                                           const HttpDownloader::Headers& headers) {
+                                           const HttpDownloader::Headers& headers, int* httpStatus) {
   const WifiPowerSaveGuard psGuard;
   logPreCallContext(url);
   const unsigned long startMs = millis();
@@ -170,6 +170,8 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
   LOG_DBG("HTTP", "Phase done @%lums rc=%d downloaded=%zu (insecure=%d) handshakeMinFree=%u handshakeMinLargest=%u",
           millis() - startMs, rc, sink.downloaded, static_cast<int>(http.lastConnectionWasInsecure()),
           static_cast<unsigned>(http.lastHandshakeMinFree()), static_cast<unsigned>(http.lastHandshakeMinLargest()));
+  // A negative rc is the client's own error: no answer came.
+  if (httpStatus) *httpStatus = rc > 0 ? rc : 0;
   if (rc == crosspoint::SecureHttpClient::ERR_ABORTED) {
     return HttpDownloader::ABORTED;
   }
@@ -195,8 +197,8 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
 HttpDownloader::DownloadError runGetDispatch(const std::string& url, const std::string& username,
                                              const std::string& password, Sink& sink, HttpDownloader::TlsPolicy tls,
                                              const HttpDownloader::RedirectFilter& redirectAllowed = {},
-                                             const HttpDownloader::Headers& headers = {}) {
-  return runGetSecure(url, username, password, sink, tls, redirectAllowed, headers);
+                                             const HttpDownloader::Headers& headers = {}, int* httpStatus = nullptr) {
+  return runGetSecure(url, username, password, sink, tls, redirectAllowed, headers, httpStatus);
 }
 }  // namespace
 
@@ -387,9 +389,10 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
                                                              ProgressCallback progress, const std::string& username,
                                                              const std::string& password, TlsPolicy tls,
                                                              const RedirectFilter& redirectAllowed,
-                                                             const Headers& headers) {
+                                                             const Headers& headers, int* httpStatus) {
   LOG_DBG("HTTP", "Downloading: %s", url.c_str());
   LOG_DBG("HTTP", "Destination: %s", destPath.c_str());
+  if (httpStatus) *httpStatus = 0;
 
   const std::string partPath = partPathFor(destPath);
   FsFile file;
@@ -407,7 +410,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
     return Storage.openFileForWrite("HTTP", partPath.c_str(), file);
   };
 
-  const DownloadError result = runGetDispatch(url, username, password, sink, tls, redirectAllowed, headers);
+  const DownloadError result = runGetDispatch(url, username, password, sink, tls, redirectAllowed, headers, httpStatus);
   return finishFileDownload(result, destPath, file, sink.downloaded);
 }
 
