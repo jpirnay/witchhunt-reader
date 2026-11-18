@@ -159,6 +159,7 @@ today's behaviour for a `<br>` after a closed block followed by text and say so 
 ## 3. No hint when a chapter was simplified
 
 **Verdict: owner decision. Recommendation: no on-page hint.** Two small PRs are worth doing whatever is decided.
+**Decided 2026-11-18 by the owner: A, no hint.** 3a is plan Task 8; 3b stays an open item.
 
 **Why not a hint.** Read, the seven limits (`ChapterHtmlSlimParser.h:1426-1432`):
 
