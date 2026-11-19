@@ -1,11 +1,11 @@
 # Memory and parsing
 
-Status: checked against master on 2026-11-18 (5d903ca18): every item is still open, the font prewarm still partly
-done. This pass moved the `file:line` references to the current code, counted the throwing allocations again, and corrected three descriptions: a nested-table
-fixture already exists, a one-pass page's prewarm went back on the heap in 2.50 (not 2.41), and the libjpeg-script item's refills happen only without read
-windows. Items as of 2026-10-07; those from "Throwing allocations" on added 2026-11-15. Collected from the heap-work
-handover (2026-08), the memory audit (2026-09) and the earlier memory-allocation-strategy.md (removed or trimmed in the
-2026-10-07 docs cleanup; in git history).
+Status: checked against master on 2026-11-19 (5d402e9c5), after the first wave of memory-and-parsing PRs (#829, #830,
+#832-#838). Every item is still open, the font prewarm still partly done. This pass moved the `file:line` references to
+the current code, dropped the simplified-chapter hint item (decided against), and added two: the page-elements limit and
+a `<br>` in a degraded table cell. Items as of 2026-10-07; those from "Throwing allocations" on added 2026-11-15. Collected
+from the heap-work handover (2026-08), the memory audit (2026-09) and the earlier memory-allocation-strategy.md (removed or
+trimmed in the 2026-10-07 docs cleanup; in git history).
 
 The rules and measurements these items refer to are in [Memory Allocation Strategy](../memory-allocation-strategy.md).
 
@@ -21,10 +21,10 @@ tables of `test_nested_tables.epub` do the same (FIRSTAFTER at y=344 under the l
 **Why it matters.** A table runs into the text that follows it, against the book's CSS. Nothing is lost; it is spacing.
 
 **Where.** `applyBlockTopSpacing` takes `collapse = min(lastBlockMarginBottom, marginTop)`
-(`ChapterHtmlSlimParser.cpp:6055`), and only `makePages` (`:6013-6015`), `applyBlockTopSpacing` itself (`:6062`),
+(`ChapterHtmlSlimParser.cpp:6136`), and only `makePages` (`:6094-6096`), `applyBlockTopSpacing` itself (`:6143`),
 `emitPage` (`:1862`) and the box code (`:1944`, `:2014`) write `lastBlockMarginBottom`. A table writes nothing there: a
-grid fragment is placed by `flushTableFragment`, and a degraded cell by `emitCellAsParagraph` (`:7051`), which hands
-the cell's lines to `addLineToPage` (`:7081`) without `makePages`. So the paragraph laid out before the table still
+grid fragment is placed by `flushTableFragment`, and a degraded cell by `emitCellAsParagraph` (`:7131`), which hands
+the cell's lines to `addLineToPage` (`:7164`) without `makePages`. So the paragraph laid out before the table still
 holds `lastBlockMarginBottom` when the one after it opens.
 
 **Next step.** Reset `lastBlockMarginBottom` once a table fragment or a degraded cell is placed, and regenerate the
@@ -44,35 +44,53 @@ second picture and go on holding the next.
 loses every picture but the first in each cell.
 
 **Where.** The in-cell branch of the image handler in `ChapterHtmlSlimParser::startElement` keeps one `src` per cell
-("first image per cell wins", `ChapterHtmlSlimParser.cpp:3353`) and returns for the others unless the cell is
+("first image per cell wins", `ChapterHtmlSlimParser.cpp:3384`) and returns for the others unless the cell is
 `streamed`. A grid row sizes the cell for that one picture (`layoutTableRow`, `cell.image = buildCellImage(...)`,
-`:6977`); a degraded cell places it after its text (`emitCellAsParagraph`, `:7093`, or `emitRowImagesAsBlocks`,
-`:6889`).
+`:7057`); a degraded cell places it after its text (`emitCellAsParagraph`, `:7174`, or `emitRowImagesAsBlocks`,
+`:6976`).
 
 **Next step.** In its own PR, place every picture of a cell. A degraded cell can stream the cell so far and go on, as
 a nested table's cell does now; a grid cell needs a decision about how a second picture fits its row's height (stack
 them, or degrade the row).
 
-## No hint when a chapter was simplified
+## The page-elements limit drops the tail of a page
 
-**Open.** When a fixed capacity changes what a chapter shows, `ChapterHtmlSlimParser::noteCapOverflow`
-(`ChapterHtmlSlimParser.cpp:2126`) logs it once per limit and the section stores `kStatusSimplified`
-(`Section.cpp:257`). There are seven such limits (`ChapterHtmlSlimParser.h:1426-1432`): footnote links per page,
-anchors per chapter, page elements, printed-page labels, footnote href length, nesting depth and pages per section; the
-footnote, anchor and label limits also trip when the heap has no block to grow their tables. The reader only logs
-"cached simplified" on a cache hit (`EpubReaderActivity.cpp:5709-5711`); the reader sees less than the book contains
-and is not told. Pages per section is the exception: it also stops the parse with the truncated status
-(`ChapterHtmlSlimParser.cpp:1852-1858`), which shows the truncated-chapter hint.
+**Open.** A page holds at most `Page::MAX_ELEMENTS` elements (1,024, `Page.h:228`). `Page::serialize` writes the first
+1,024 (`Page.cpp:647`), and a page that holds more is cut: `Section::onPageComplete` logs "tail dropped" and marks the
+section simplified (`Section.cpp:730-735`), so the rest of the page is lost. The page is not ended at the limit during
+the build, and `addPageElement` (`ChapterHtmlSlimParser.cpp:2091`) has no such check. It takes 1,025 elements on one
+page, which needs elements without height (a real page is about 28 lines plus images and rules), and no book is known to
+reach it. (`kCapPageElements`, `ChapterHtmlSlimParser.h:1481`, is declared and nothing sets it; the section marks itself.)
 
-**Why it matters.** The cap is deterministic, so a rebuild cannot help; a hint is the only way to tell the reader. It is
-a product decision, not a memory one.
+**Why it matters.** Content after the 1,024th element of a page vanishes, with a log line only. The limit exists so that a
+page that cannot be loaded (`Page.cpp:687`) is never built.
 
-**Where.** `Section::isSimplified` (`Section.h:433`); the truncated-chapter hint is the model to reuse
-(`truncatedSectionHintRendersRemaining`, armed at `EpubReaderActivity.cpp:6052-6056`, drawn at `:7025-7028`). Its
-strings (`TRUNCATED_SECTION_HINT_LINE_1/2`, `:355-356`) are hard-coded English and would need `tr()` keys.
+**Where.** `Page::MAX_ELEMENTS` (`Page.h:228`); the write path `Page::serialize` (`Page.cpp:647`) and
+`Section::onPageComplete` (`Section.cpp:730-735`); the single add site `ChapterHtmlSlimParser::addPageElement`
+(`ChapterHtmlSlimParser.cpp:2091`) and `emitPage` (`:1814`).
 
-**Next step.** Decide whether the hint is wanted. If it is, show it the way the truncated hint is shown, with translated
-strings.
+**Next step.** End the page at the limit: an `emitPage()` from `addPageElement` when the page holds `MAX_ELEMENTS`. Not a
+hint (decided 2026-11-18: no hint for a chapter a fixed limit simplified; 2026-11-19: the truncated-chapter hint stays
+untranslated English). Only with a fixture that reaches the limit, which no book does today.
+
+## A `<br>` inside a degraded table cell does not break the line
+
+**Open.** A degraded (streamed) cell's text is one cell paragraph (`makeCellText`, `ChapterHtmlSlimParser.cpp:6921`), and
+the `<br>` branch in `ChapterHtmlSlimParser::startElement` (`:4143`) only flushes the word into it (`:4158-4160`), so the
+cell's words after a `<br>` continue on the same line. `test/epub_pipeline/goldens/test_br_in_blocks.golden.txt` case 21
+("a run of `<br>` in a nested table's cell", `:362-394`) lays "Uniform a / Uniform b / Uniform c" on one line at the
+cell's inset (`LINE y=386`). Degraded outer cells behaved this way on master before the first wave; nested inner cells
+now match them.
+
+**Why it matters.** A cell whose lines the book breaks with `<br>` runs together on one line, against the
+book's markup. Nothing is lost.
+
+**Where.** `ChapterHtmlSlimParser::startElement`, the `<br>` branch (`ChapterHtmlSlimParser.cpp:4143-4188`);
+`makeCellText` (`:6921`); `emitCellAsParagraph` (`:7131`), which lays the cell's `ParsedText` out as one paragraph.
+
+**Next step.** Have a `<br>` inside a cell end the cell paragraph's line: a forced line break in the cell's
+`ParsedText`. Then check every table golden (`test_br_in_blocks`, `test_table_streaming`, `test_nested_tables`,
+`test_tables`, `test_table_grid_edges`, `test_table_cell_overflow`).
 
 ## The font prewarm sets the session's heap minimum
 
@@ -85,7 +103,7 @@ strings.
 | the same, after | 50.5 KB | 48.7 KB | 50.3 KB |
 | built-in Bookerly | 53.0 KB | 45.0 KB | 49.4 KB |
 
-What changed: a render lends the secondary buffer to the prewarm's TrueType misses as it lends it to an image decode (the glyph store has no glyph yet: a 10.5-14.5 KB scratch block, in SD mode a 4.2 KB page cache, each taken from the lent region and given back per miss), and whatever a miss still made on the heap is freed before the BW render instead of when RenderLock goes back (`renderContents`, `EpubReaderActivity.cpp:6649`; the lend at `:6931`, the release at `:6937`).
+What changed: a render lends the secondary buffer to the prewarm's TrueType misses as it lends it to an image decode (the glyph store has no glyph yet: a 10.5-14.5 KB scratch block, in SD mode a 4.2 KB page cache, each taken from the lent region and given back per miss), and whatever a miss still made on the heap is freed before the BW render instead of when RenderLock goes back (`renderContents`, `EpubReaderActivity.cpp:6652`; the lend at `:6934`, the release at `:6940`).
 
 **Still open.** Two transients remain, neither the session's minimum on these measurements:
 - The built-in fonts' prewarm: 8 KB, of which the page slots (3.5 KB) stay for the BW render and the AA pass, and the
@@ -97,12 +115,12 @@ What changed: a render lends the secondary buffer to the prewarm's TrueType miss
   X3 (#519's test) the prewarm's free low median went from 43,434 to 45,832 B. The pre-render still cannot lend the
   buffer (it holds the page on screen), so most turns, which show a pre-rendered page, are unchanged. Since 2.50
   (029416411) a C3 page that goes out composed one-pass (X3, X4, One-Pass Anti-Aliasing on, FAST, text only) does not
-  lend either (`prewarmKeepsFrameOnScreen`, `EpubReaderActivity.cpp:6910-6911`): the buffer holds the frame on screen
+  lend either (`prewarmKeepsFrameOnScreen`, `EpubReaderActivity.cpp:6913-6914`): the buffer holds the frame on screen
   the one-pass needs, so that page's prewarm is back on the heap (the 43,434 B median for the ring; a TrueType miss's
   10.5-14.5 KB until `releaseTtfMissMemory()` frees it before the BW render). A page whose glyphs starved before
   (`glyphStarvedPage`) still lends, and the S3 boards lend a PSRAM arena and keep the frame either way.
 - A pre-render with TrueType misses (15-26 KB on the X3, `PreRenderGate.h`) cannot lend for the same reason
-  (`renderPreRenderPass`, `EpubReaderActivity.cpp:5018`). Its heap floor already asks for that cost (`:1620`).
+  (`renderPreRenderPass`, `EpubReaderActivity.cpp:5021`). Its heap floor already asks for that cost (`:1623`).
 
 **Next step.** None until a session's minimum is found in a render again. The per-phase lows came from a measurement-only patch (`heap_caps_monitor_local_minimum_free_size_start` restarted at each phase boundary of `renderContents`); a permanent version would cost the same monitor B's borrow uses.
 
@@ -124,7 +142,7 @@ What changed: a render lends the secondary buffer to the prewarm's TrueType miss
 
 **Where.** `JpegToBmpConverter.cpp`: `convertResized` (`:369`, its abort poll `progressiveFullShouldAbort` at `:284`),
 `JpegThumbSession::begin` (`:1095`), which returns no session when `chooseProgressiveShift` (`:785`) leaves the cover to
-the resize (`:1111`); `ProgressiveJpeg::decodeResized` (`ProgressiveJpeg.cpp:1520`).
+the resize (`:1111`); `ProgressiveJpeg::decodeResized` (`ProgressiveJpeg.cpp:1525`).
 
 **Next step.** Make the resized decode steppable in `ProgressiveJpeg`: its resampler state in the session, about 60 lines. Then give `JpegThumbSession` a third mode, with the per-output setup shared with the other two, about 120-150 lines with tests.
 
@@ -136,8 +154,8 @@ the resize (`:1111`); `ProgressiveJpeg::decodeResized` (`ProgressiveJpeg.cpp:152
 
 **Why the rest is parked.** Nobody has reported a damaged JPEG; the cut extracts it was written for came from the extractor itself (fixed in `Epub::extractItemToFile`). And caching damage makes a false detection permanent: a valid file that trips one of the new rules (the strict RSTn sequence, the padding overrun, a TJpgDec format error on an unusual baseline file) would be kept with grey or white areas for good, since `PixelCache::PXC_MAGIC` is not tied to the rules and cover BMPs are never invalidated.
 
-**Where.** `lib/ProgressiveJpeg` (`BitReader`, `ProgressiveJpeg.cpp:665`; `decodeBand`, `:963`; `indexStep`, `:575`);
-`JpegToFramebufferConverter::decodeToFramebuffer` (`JpegToFramebufferConverter.cpp:1506`); `JpegToBmpConverter.cpp`
+**Where.** `lib/ProgressiveJpeg` (`BitReader`, `ProgressiveJpeg.cpp:667`; `decodeBand`, `:965`; `indexStep`, `:575`);
+`JpegToFramebufferConverter::decodeToFramebuffer` (`JpegToFramebufferConverter.cpp:1521`); `JpegToBmpConverter.cpp`
 (`SinkSet`, `:246`; `JpegThumbSession::continueSteps`, `:1154`); `PixelCache::PXC_MAGIC` (`PixelCache.h:93`).
 
 **Tried.** The code and its tests (`test/epub_pipeline/JpegPartialDecodeTest.cpp`, the `prog_420_cut.jpg` fixture) are on the branch `archive/progressive-jpeg` (b623ca5a1). Its review found that once degraded pictures were cached, `Result::Degraded` behaved exactly like `Ok` everywhere, so the completeness tracking that told a file lacking only its EOI from a cut one bought nothing.
@@ -151,14 +169,14 @@ the resize (`:1111`); `ProgressiveJpeg::decodeResized` (`ProgressiveJpeg.cpp:152
 **Why it matters.** Block count, not bytes, is what fragments the heap during a build. On an X3 table chapter the block count rose from about 387 to 700–750 on the table pages while the bytes stayed in the arena (2026-09-26).
 
 **Where.** `ParsedText` (the `TextBlock` it creates per line, `ParsedText.cpp:4405`), `ChapterHtmlSlimParser` (the
-`PageLine` per line in `addLineToPage`, `ChapterHtmlSlimParser.cpp:5689`; a grid cell's lines in `layoutTableRow`,
-`:6812`, kept at `:6866`), `TableCell::lines` (`Page.h:146`), `Page::elements`
+`PageLine` per line in `addLineToPage`, `ChapterHtmlSlimParser.cpp:5836`; a grid cell's lines in `layoutTableRow`,
+`:7027`, kept at `:7034`), `TableCell::lines` (`Page.h:146`), `Page::elements`
 (`std::vector<std::unique_ptr<PageElement>>`, `Page.h:208`).
 
 **Tried.** A heap pool for table line storage was reverted: its reservation pushed contig below the framebuffer ([Memory Allocation Strategy §8.4a](../memory-allocation-strategy.md#84a-table-layout-and-the-ab-harness)). Moving the line bytes into the arena is done.
 
 **Next step.** Placement-construct the objects in the page or row block, with an arena-aware deleter behind
-`Page::elements`: 47 lines in `lib/Epub` and `src` use it, 15 of them add an element (the parser's nine adds, all
+`Page::elements`: 41 lines in `lib/Epub` and `src` use it, 15 of them add an element (the parser's nine adds, all
 through `addPageElement`, and one `insert`, and the five of `Page::deserialize`, `Page.cpp:705-721`). Measure
 allocation counts and `HeapPeakRegression` on the host first, then a table chapter on the X3 with `SCT_HEAP_TRACE=1`.
 Budget for the image-header walk: on the X4 a 32 KB walk stage leaves 64 B of the lent region free, so objects of a
@@ -166,22 +184,23 @@ page that holds a late image could push the walk out of the arena.
 
 ## Throwing allocations left on the section-build path
 
-**Open.** 2.52 sent every `Page` allocation through `ensurePage()` (`ChapterHtmlSlimParser.cpp:2074`), which stops the
+**Open.** 2.52 sent every `Page` allocation through `ensurePage()` (`ChapterHtmlSlimParser.cpp:2073`), which stops the
 build like the other heap refusals instead of aborting. These still allocate through the throwing `operator new`, so a
 refusal there aborts and reboots (`-fno-exceptions`); counted in `ChapterHtmlSlimParser.cpp`:
 
-- the style stack, `std::vector<StyleStackEntry> inlineStyleStack` (`ChapterHtmlSlimParser.h:589`; pushes at
-  `ChapterHtmlSlimParser.cpp:826`, `:3858`, `:4223`, `:4254`, `:4285`, `:4305`, `:4356`);
-- the other per-element stacks: `listStack` (`:3887`), `containerWidthStack_` (`:3150`), `backgroundImageScopes_`
-  (`:6281`), and, capped in count but grown the same way, `heldBottomSpacing_` (`:2650`, 8), `blockInsetStack_`
-  (`:3953`, 8) and `anchorsAwaitingLine_` (`:5196`, 16);
-- a table's packed rows, `t.packer.rows.push_back` (`:6173`, `:6183`; at most `MAX_TABLE_ROWS`, 48, per fragment);
-- a row's cells: `pendingRow.cells` (`:3285`, `:6759`), a laid-out row's `out.cells.reserve(columnCount)` (`:6827`;
-  the pushes at `:6912` and `:6917` stay within it), and a cell's lines (`:6866`, at most `MAX_CELL_LINES`, 64);
-- `std::string` growth during the parse, for example the ruby text (`rubyText_`, `:4475-4479`, up to 255 bytes).
+- the style stack, `std::vector<StyleStackEntry> inlineStyleStack` (`ChapterHtmlSlimParser.h:605`; pushes at
+  `ChapterHtmlSlimParser.cpp:826`, `:3943`, `:4330`, `:4361`, `:4392`, `:4412`, `:4463`);
+- the other per-element stacks: `listStack` (`:3972`), `containerWidthStack_` (`:3180`), `backgroundImageScopes_`
+  (`:6428`), and, capped in count but grown the same way, `heldBottomSpacing_` (`:2688`, 8), `blockInsetStack_`
+  (`:4038`, 8) and `anchorsAwaitingLine_` (`:5343`, 16);
+- a table's packed rows, `t.packer.rows.push_back` (`:6320`, `:6330`; at most `MAX_TABLE_ROWS`, 48, per fragment);
+- a row's cells: `pendingRow.cells` (`:3327`, `:6905`; the streamed nested cell's own `emplace_back`, `:6954`, asks
+  `heapReserveFor` first), a laid-out row's `out.cells.reserve(columnCount)` (`:6995`; the pushes at `:7080` and `:7085` stay within it),
+  and a cell's lines (`:7034`, at most `MAX_CELL_LINES`, 64);
+- `std::string` growth during the parse, for example the ruby text (`rubyText_`, `:4577-4581`, up to 255 bytes).
 
 **Next step.** Ask `HeapFit` before each growth (`heapReserveFor`, as the elements reserve does) and stop the build on
-a refusal (`stopForHeap`, `:2092`), or move the table to the build's arena or a `ChunkedVector`. Each site needs a host
+a refusal (`stopForHeap`, `:2112`), or move the table to the build's arena or a `ChunkedVector`. Each site needs a host
 fault-injection test, as `PageHeapTest.cpp` (`PAGE_FAULT_INJECTION`, `ELEMENT_FAULT_INJECTION`) does for pages and for
 `Page::elements`, which `addPageElement` now covers.
 
@@ -228,8 +247,8 @@ chapter, horizontal books too. matcha-reader #453, Eszter Schuffert (eszter007).
 ## An inline anchor lands a page off (CrossPoint #4328)
 
 **Open.** A block's anchor waits for its first line, but an `id` on an inline element is placed approximately: an
-`<a id>` inside a paragraph is recorded with the next block (`pendingAnchorId`, `ChapterHtmlSlimParser.cpp:2962`), a
-`<span id>` with its block's first line (`recordSpanAnchor`, `:5205`). A link to it (a backlink to a noteref) can land a
+`<a id>` inside a paragraph is recorded with the next block (`pendingAnchorId`, `ChapterHtmlSlimParser.cpp:2992`), a
+`<span id>` with its block's first line (`recordSpanAnchor`, `:5352`). A link to it (a backlink to a noteref) can land a
 page off; the link Back stack already allows for that (`EpubLinkBackStack.h:73-75`). Take the inline-anchor part only:
 record such an id at the page of its own line. Needs a `SECTION_FILE_VERSION` bump. crosspoint-reader #4328, Mikalai
 Kryvusha (@MikalaiKryvusha).
