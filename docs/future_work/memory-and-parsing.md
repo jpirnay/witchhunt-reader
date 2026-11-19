@@ -157,7 +157,13 @@ the resize (`:1111`); `ProgressiveJpeg::decodeResized` (`ProgressiveJpeg.cpp:152
 
 **Tried.** A heap pool for table line storage was reverted: its reservation pushed contig below the framebuffer ([Memory Allocation Strategy §8.4a](../memory-allocation-strategy.md#84a-table-layout-and-the-ab-harness)). Moving the line bytes into the arena is done.
 
-**Next step.** Placement-construct the objects in the page or row block, with an arena-aware deleter behind
+**Done (9a).** A grid cell's lines are collected in one parser member (`cellLineScratch_`, reserved to `MAX_CELL_LINES`
+pointers at the table's first grid row, freed at `</table>`) and moved into `cell.lines` allocated at its exact size, so a
+cell's line list is one allocation. A refusal of either sends the row out as paragraphs. Open: 9b (the `TextBlock` object in
+the line arena) and 9c (the `PageLine` in the page block), which wait for a Linux `epub_pipeline_dump --bench` allocation
+count.
+
+**Next step (9b, 9c).** Placement-construct the objects in the page or row block, with an arena-aware deleter behind
 `Page::elements`: 47 lines in `lib/Epub` and `src` use it, 15 of them add an element (the parser's nine adds, all
 through `addPageElement`, and one `insert`, and the five of `Page::deserialize`, `Page.cpp:705-721`). Measure
 allocation counts and `HeapPeakRegression` on the host first, then a table chapter on the X3 with `SCT_HEAP_TRACE=1`.
@@ -177,7 +183,7 @@ refusal there aborts and reboots (`-fno-exceptions`); counted in `ChapterHtmlSli
   (`:3953`, 8) and `anchorsAwaitingLine_` (`:5196`, 16);
 - a table's packed rows, `t.packer.rows.push_back` (`:6173`, `:6183`; at most `MAX_TABLE_ROWS`, 48, per fragment);
 - a row's cells: `pendingRow.cells` (`:3285`, `:6759`), a laid-out row's `out.cells.reserve(columnCount)` (`:6827`;
-  the pushes at `:6912` and `:6917` stay within it), and a cell's lines (`:6866`, at most `MAX_CELL_LINES`, 64);
+  the pushes at `:6912` and `:6917` stay within it); a grid cell's lines are done (9a: reserved through `heapReserveFor`);
 - `std::string` growth during the parse, for example the ruby text (`rubyText_`, `:4475-4479`, up to 255 bytes).
 
 **Next step.** Ask `HeapFit` before each growth (`heapReserveFor`, as the elements reserve does) and stop the build on
