@@ -39,7 +39,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 127;  // v127: a <br> adds a blank line only on an empty line: none after
+constexpr uint8_t SECTION_FILE_VERSION = 128;  // v128: a chapter's CSS lookups use only the stylesheets it
+                                               // links and what those import (matcha-reader #453)
+                                               // v127: a <br> adds a blank line only on an empty line: none after
                                                // a word or a picture (a contents entry's trailing <br>), one each
                                                // in a run of them, none from a table cell's
                                                // v126: the text of a table inside a table is laid out, a paragraph
@@ -1301,6 +1303,8 @@ struct Section::BuildState {
   }
   ~BuildState() {
     if (pageWriter) pageWriter->discard();  // a build that never reached runBuildFinalize: its file is not read
+    // The chapter's stylesheet scope is the build's (Section::scopeStylesheets), whichever way it ends.
+    if (cssParser) cssParser->clearSheetScope();
     if (extractGrowBlock.valid()) arena->release(extractGrowBlock);
     reader.reset();
     // The note-preview resolver reserves its ring block ABOVE chunkBlock and holds it across
@@ -1702,6 +1706,36 @@ bool Section::prepareCarry(BuildState& st) {
   return true;
 }
 
+bool Section::scopeStylesheets(BuildState& st) {
+  CssParser* const css = st.cssParser;
+  // With one sheet or none every chapter resolves alike, and the head is not read.
+  if (css == nullptr || css->sheetRanges().size() < 2) return true;
+  CssParser::SheetLinks links;
+  css->readSheetLinks(st.tempFile, st.contentBase, links);
+  if (!st.tempFile.seek(0)) {
+    LOG_ERR("SCT", "Failed to read extracted XHTML from %s", st.tempPath.c_str());
+    return false;
+  }
+  // The heading file laid out first is part of the build: its sheets too. One that links none resolves against every
+  // sheet, and so does the build.
+  if (st.carry.spine >= 0 && links.sheets != 0 && !links.unknown) {
+    const std::string href = epub->getSpineItem(st.carry.spine).href;
+    const size_t slash = href.find_last_of('/');
+    CssParser::SheetLinks heading;
+    FsFile carried;
+    if (Storage.openFileForRead("SCT", sectionHtmlCachePath(epub->getCachePath(), st.carry.spine), carried)) {
+      css->readSheetLinks(carried, std::string_view(href).substr(0, slash == std::string::npos ? 0 : slash + 1),
+                          heading);
+    }
+    links.sheets |= heading.sheets;
+    links.unknown = heading.unknown || heading.sheets == 0;
+  }
+  const unsigned sheets = static_cast<unsigned>(css->sheetRanges().size());
+  const unsigned inScope = css->scopeToSheets(links);
+  LOG_INF("SCT", "spine=%d resolves against %u of %u stylesheets", spineIndex, inScope != 0 ? inScope : sheets, sheets);
+  return true;
+}
+
 Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t budgetMs) {
   const uint32_t sliceStart = millis();
   const auto overBudget = [&] { return budgetMs != 0 && millis() - sliceStart >= budgetMs; };
@@ -1938,6 +1972,8 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     }
     st.visitorReady = true;
     finishInlineFootnotePreviewResolve(st);
+    // Before setup(), which makes the first style lookups (the body's font size).
+    if (!scopeStylesheets(st)) streamFailed = true;
     if (!st.visitor->setup(st.inflatedSize)) {
       LOG_ERR("SCT", "Failed to set up chapter parser");
       file.close();

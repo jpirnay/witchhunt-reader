@@ -186,6 +186,9 @@ class Section {
   // The carried heading file's XHTML banked beside its own spine's, as its build would leave it, and where its body's
   // content lies in that copy (BuildState::Carry). Between the extraction and the parse; the file is 4 KB at most.
   bool prepareCarry(BuildState& st);
+  // Scopes the book's CSS to the stylesheets the chapter links (and the carried heading file), from the head of its
+  // XHTML on the card, before the parser's setup makes the first style lookup. False when the file cannot be rewound.
+  bool scopeStylesheets(BuildState& st);
   // Runs between the parse phases, once the spine's inflated XHTML is on SD and no ZIP state is
   // live: makes sure every note this spine references has its text in the book's preview store,
   // then points the visitor at it. Never fails the build — see the definition.

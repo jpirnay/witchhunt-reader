@@ -1,6 +1,6 @@
 // A book's stylesheets each own one contiguous range of rule orders, and the CSS compile records each sheet's range and
-// the sheets its @import rules name at the end of the rules cache (CSS_CACHE_VERSION 36): what a chapter that resolves
-// against only the sheets it links will read (docs/future_work/memory-and-parsing.md). Recording them changes no rule.
+// the sheets its @import rules name at the end of the rules cache (CSS_CACHE_VERSION 36). A chapter resolves against
+// only the sheets its head links and what those import (Section::scopeStylesheets). Recording them changes no rule.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -9,13 +9,17 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "Epub.h"
+#include "Epub/Page.h"
+#include "Epub/Section.h"
 #include "Epub/css/CssParser.h"
+#include "GfxRenderer.h"
 #include "HalStorage.h"
 #include "StoredZipWriter.h"
 
@@ -23,8 +27,8 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// main.css is linked by every chapter and imports base.css. vertical.css is linked by none, and its body rule centres
-// every chapter while every stylesheet applies to every chapter (matcha-reader #453's vertical_image.css).
+// main.css is linked by every chapter and imports base.css. vertical.css is linked by none, as matcha-reader #453's
+// vertical_image.css, whose body rule centred every chapter there.
 constexpr const char* kMain =
     "@charset \"utf-8\";\n@import url(\"base.css\");\np { text-indent: 1em; }\n.note { font-style: italic; }\n"
     "h1, h2 { text-align: center; }\ndiv.poem > p { margin-left: 2em; }\n";
@@ -65,6 +69,44 @@ std::vector<std::pair<std::string, uint16_t>> ruleOrders(const std::string& byte
   }
   std::sort(rules.begin(), rules.end());
   return rules;
+}
+
+// The first line of a paragraph as the build lays it out: its alignment, and whether its first word is italic or bold.
+struct FirstLine {
+  CssTextAlign align = CssTextAlign::None;
+  bool italic = false;
+  bool bold = false;
+};
+
+// The first line of each paragraph of the chapter at `spine`, by its second word, built as the reader builds it under
+// Justified, the default: a book's centre and right stand (BookAlignmentLayoutTest). A paragraph takes its own rules'
+// text-align, not its body's.
+std::map<std::string, FirstLine> firstLines(const std::shared_ptr<Epub>& epub, const int spine) {
+  Section::BuildParams params;
+  params.viewportWidth = 480;
+  params.viewportHeight = 800;
+  params.lineCompression = 1.0f;
+  params.embeddedStyle = true;
+  params.paragraphAlignment = 0;
+  GfxRenderer renderer;
+  Section section(epub, spine, renderer);
+  EXPECT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
+  EXPECT_TRUE(section.loadSectionFile(params));
+  std::map<std::string, FirstLine> lines;
+  for (uint16_t p = 0; p < section.pageCount; ++p) {
+    section.currentPage = p;
+    const auto page = section.loadPageFromSectionFile();
+    if (!page) continue;
+    for (const auto& el : page->elements) {
+      if (el->getTag() != TAG_PageLine) continue;
+      const TextBlock& block = *static_cast<const PageLine&>(*el).getBlock();
+      if (block.wordCount() < 2 || lines.count(block.wordText(1)) != 0) continue;
+      const uint8_t style = block.wordStyle(0);
+      lines[block.wordText(1)] = {block.getRenderStyle().alignment, (style & EpdFontFamily::ITALIC) != 0,
+                                  (style & EpdFontFamily::BOLD) != 0};
+    }
+  }
+  return lines;
 }
 
 struct CssSheetRangesTest : testing::Test {
@@ -119,7 +161,66 @@ struct CssSheetRangesTest : testing::Test {
     EXPECT_TRUE(epub->load(true));
     return epub;
   }
+
+  // A book of `chapters` {file, head, body, TOC label} in spine order with a nav TOC, and `sheets` {file, css}, all in
+  // the package's folder.
+  struct File {
+    std::string name;
+    std::string head;
+    std::string body;
+    std::string tocLabel;
+  };
+  std::shared_ptr<Epub> bookOf(const std::vector<std::pair<std::string, std::string>>& sheets,
+                               const std::vector<File>& chapters) {
+    test_zip::StoredZipWriter zip;
+    zip.add("mimetype", "application/epub+zip");
+    zip.add("META-INF/container.xml",
+            "<?xml version=\"1.0\"?>\n<container version=\"1.0\" "
+            "xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles><rootfile "
+            "full-path=\"content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles></container>\n");
+    std::string manifest =
+        "<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>\n";
+    for (size_t i = 0; i < sheets.size(); ++i) {
+      manifest +=
+          "<item id=\"css" + std::to_string(i) + "\" href=\"" + sheets[i].first + "\" media-type=\"text/css\"/>\n";
+      zip.add(sheets[i].first, sheets[i].second);
+    }
+    std::string spine;
+    std::string toc;
+    for (size_t i = 0; i < chapters.size(); ++i) {
+      const File& c = chapters[i];
+      manifest +=
+          "<item id=\"c" + std::to_string(i) + "\" href=\"" + c.name + "\" media-type=\"application/xhtml+xml\"/>\n";
+      spine += "<itemref idref=\"c" + std::to_string(i) + "\"/>";
+      if (!c.tocLabel.empty()) toc += "<li><a href=\"" + c.name + "\">" + c.tocLabel + "</a></li>\n";
+      zip.add(c.name,
+              "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head>"
+              "<title>T</title>" +
+                  c.head + "</head><body>" + c.body + "</body></html>\n");
+    }
+    zip.add("nav.xhtml",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" "
+            "xmlns:epub=\"http://www.idpf.org/2007/ops\"><head><title>N</title></head><body><nav epub:type=\"toc\">"
+            "<ol>\n" +
+                toc + "</ol></nav></body></html>\n");
+    zip.add("content.opf",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
+            "version=\"3.0\" unique-identifier=\"uid\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+            "<dc:identifier id=\"uid\">sheets-of</dc:identifier><dc:title>Sheets</dc:title>"
+            "<dc:language>en</dc:language></metadata><manifest>" +
+                manifest + "</manifest><spine>" + spine + "</spine></package>\n");
+    const std::string path = (work / "book-of.epub").string();
+    zip.write(path);
+    auto epub = std::make_shared<Epub>(path, (work / "cache").string());
+    EXPECT_TRUE(epub->load(true));
+    epub->setupCacheDir();
+    return epub;
+  }
 };
+
+std::string linkTo(const std::string& href) {
+  return "<link rel=\"stylesheet\" type=\"text/css\" href=\"" + href + "\"/>";
+}
 
 }  // namespace
 
@@ -129,7 +230,7 @@ struct CssSheetRangesTest : testing::Test {
 TEST_F(CssSheetRangesTest, EachSheetOwnsTheOrdersOfItsRules) {
   const auto epub = book();
   CssParser parser(epub->getCachePath());  // a later open
-  ASSERT_TRUE(parser.loadSheetTable());
+  ASSERT_TRUE(parser.loadFromCache());     // the table comes with the index
   const auto ranges = parser.sheetRanges();
   ASSERT_EQ(ranges.size(), 3u);
   EXPECT_EQ(ranges[0].pathHash, CssParser::sheetPathHash("OEBPS/Styles/main.css"));
@@ -177,4 +278,97 @@ TEST_F(CssSheetRangesTest, TheRulesAreTheBytesASheetlessCompileWrites) {
   EXPECT_TRUE(withoutSheetTable(named) == withoutSheetTable(unnamed))
       << named.size() << " bytes named, " << unnamed.size() << " unnamed";
   EXPECT_FALSE(named == unnamed) << "only the table tells the sheets apart";
+}
+
+// matcha-reader #453: a sheet that no chapter links (its vertical_image.css) centred every chapter while every
+// stylesheet applied to every chapter. A chapter resolves against the main.css it links and the base.css main.css
+// imports: its note is italic (main.css) and bold (base.css), and not centred.
+TEST_F(CssSheetRangesTest, ASheetNoChapterLinksStylesNoChapter) {
+  const auto epub = bookOf({{"main.css", "@import \"base.css\";\n.note { font-style: italic; }\n"},
+                            {"base.css", ".note { font-weight: bold; }\n"},
+                            {"vertical.css", "p { text-align: center; }\n"}},
+                           {{"c00.xhtml", linkTo("main.css"), "<p class=\"note\">NOTE text.</p>", "One"}});
+  const auto lines = firstLines(epub, 0);
+  ASSERT_EQ(lines.count("text."), 1u);
+  EXPECT_EQ(lines.at("text.").align, CssTextAlign::Justify);
+  EXPECT_TRUE(lines.at("text.").italic);
+  EXPECT_TRUE(lines.at("text.").bold) << "base.css, through main.css's @import";
+}
+
+// test/epubs/test_css_scoping.epub (make_test_css_scoping.py): each chapter resolves against the sheets it links and
+// what those import; one that links none, or a sheet the book does not have, against every sheet, as every chapter
+// did. Outside a build the book resolves against every sheet: the scope ends with its build.
+TEST_F(CssSheetRangesTest, EachChapterOfTheScopingBookResolvesAgainstItsOwnSheets) {
+  auto epub = std::make_shared<Epub>(std::string(CORPUS_DIR) + "/test_css_scoping.epub", (work / "cache").string());
+  ASSERT_TRUE(epub->load(true));
+  ASSERT_EQ(epub->getSpineItemsCount(), 5);
+  struct Expected {
+    CssTextAlign body;
+    CssTextAlign part;
+    bool importedItalic;
+  };
+  constexpr Expected kEverySheet{CssTextAlign::Center, CssTextAlign::Center, true};
+  const Expected expected[] = {
+      {CssTextAlign::Justify, CssTextAlign::Right, true},  // main.css, and base.css through its @import
+      kEverySheet,                                         // main.css and centre.css
+      kEverySheet,                                         // no link
+      kEverySheet,                                         // main.css and a sheet the book does not have
+      {CssTextAlign::Center, CssTextAlign::Center, false}  // centre.css alone
+  };
+  for (int spine = 0; spine < 5; ++spine) {
+    SCOPED_TRACE("chapter " + std::to_string(spine + 1));
+    const auto lines = firstLines(epub, spine);
+    ASSERT_EQ(lines.size(), 3u);
+    EXPECT_EQ(lines.at("BODY").align, expected[spine].body);
+    EXPECT_FALSE(lines.at("BODY").italic);
+    EXPECT_EQ(lines.at("PART").align, expected[spine].part);
+    EXPECT_EQ(lines.at("IMPORTED").align, expected[spine].body);
+    EXPECT_EQ(lines.at("IMPORTED").italic, expected[spine].importedItalic);
+  }
+  EXPECT_EQ(epub->getCssParser()->resolveStyle("p", "").textAlign, CssTextAlign::Center);
+}
+
+// A heading file laid out with the chapter after it (HeadingCarry) is part of its build: the chapter resolves against
+// the sheets either links. head.css sets the heading, which only the heading file links; other.css, which neither
+// links, does not centre them.
+TEST_F(CssSheetRangesTest, ACarriedHeadingFileBringsItsSheets) {
+  const auto epub = bookOf({{"main.css", "p { font-style: italic; }\n"},
+                            {"head.css", "h1 { text-align: right; }\n"},
+                            {"other.css", "p { text-align: center; }\n"}},
+                           {{"c00.xhtml", linkTo("head.css"), "<h1>HEADING One</h1>", "One"},
+                            {"c01.xhtml", linkTo("main.css"),
+                             "<p>CHAPTER opens the chapter.</p><p>CHAPTER goes on for a second paragraph.</p>", ""}});
+  ASSERT_TRUE(epub->isCarriedSpine(0));
+  const auto lines = firstLines(epub, 1);
+  ASSERT_EQ(lines.count("One"), 1u) << "the heading is laid out in the chapter's build";
+  EXPECT_EQ(lines.at("One").align, CssTextAlign::Right);
+  ASSERT_EQ(lines.count("opens"), 1u);
+  EXPECT_EQ(lines.at("opens").align, CssTextAlign::Justify);
+  EXPECT_TRUE(lines.at("opens").italic);
+}
+
+// A rules cache of this version always ends in its sheet table, written last, so one that does not is damaged (a write
+// cut off, a bad card): the open deletes it and compiles the stylesheets again, rather than resolve every chapter
+// against every sheet for as long as the file lasts.
+TEST_F(CssSheetRangesTest, ARulesCacheWithoutAValidSheetTableIsCompiledAgain) {
+  const auto epub = book();
+  const fs::path cacheFile = fs::path(epub->getCachePath()) / "css_rules.cache";
+  const std::string compiled = readFile(cacheFile);
+  ASSERT_GT(compiled.size(), 2u);
+  const size_t table = u16At(compiled, compiled.size() - 2) + 2u;
+  ASSERT_LT(table, compiled.size());
+  for (const bool cut : {true, false}) {
+    SCOPED_TRACE(cut ? "the table cut off" : "a table that does not add up");
+    std::string damaged = compiled;
+    if (cut) {
+      damaged.resize(compiled.size() - table);
+    } else {
+      damaged[damaged.size() - 2] = static_cast<char>(damaged[damaged.size() - 2] ^ 0x10);
+    }
+    std::ofstream(cacheFile, std::ios::binary | std::ios::trunc) << damaged;
+    auto reopened = std::make_shared<Epub>(epub->getPath(), (work / "cache").string());
+    ASSERT_TRUE(reopened->load(true));
+    EXPECT_TRUE(readFile(cacheFile) == compiled) << "compiled again";
+    EXPECT_EQ(firstLines(reopened, 0).at("0.").align, CssTextAlign::Justify);
+  }
 }
