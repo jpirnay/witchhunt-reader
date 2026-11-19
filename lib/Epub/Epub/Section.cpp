@@ -39,7 +39,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 127;  // v127: a <br> adds a blank line only on an empty line: none after
+constexpr uint8_t SECTION_FILE_VERSION = 128;  // v128: a chapter's CSS lookups use only the stylesheets it
+                                               // links and what those import (matcha-reader #453)
+                                               // v127: a <br> adds a blank line only on an empty line: none after
                                                // a word or a picture (a contents entry's trailing <br>), one each
                                                // in a run of them, none from a table cell's
                                                // v126: the text of a table inside a table is laid out, a paragraph
@@ -1097,6 +1099,7 @@ struct Section::BuildState {
     Stage stage = Stage::Prefix;
     HeadingCarry::Scanner bodyStart;
     FsFile file;
+    CssParser::SheetLinks links;  // the stylesheets its head links (prepareCarry, for scopeStylesheets)
   } carry;
   std::string contentBase;
   std::string imageBasePath;
@@ -1301,6 +1304,8 @@ struct Section::BuildState {
   }
   ~BuildState() {
     if (pageWriter) pageWriter->discard();  // a build that never reached runBuildFinalize: its file is not read
+    // The chapter's stylesheet scope is the build's (Section::scopeStylesheets), whichever way it ends.
+    if (cssParser) cssParser->clearSheetScope();
     if (extractGrowBlock.valid()) arena->release(extractGrowBlock);
     reader.reset();
     // The note-preview resolver reserves its ring block ABOVE chunkBlock and holds it across
@@ -1688,8 +1693,15 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
 
 bool Section::prepareCarry(BuildState& st) {
   BuildState::Carry& carry = st.carry;
-  // Banked as its own build would leave it, if it is not yet; its ring from the region when there is room.
+  // Banked as its own build would leave it, if it is not yet; its ring from the region when there is room. The same
+  // scan reads the stylesheets its head links, resolved against the chapter's folder, which a carried heading file
+  // shares in the books that have one (calibre's split siblings); in another folder a relative link may name a path
+  // the table does not know, and the build then resolves against every sheet.
   HeadingCarry::Scanner scan;
+  char linkValues[256];
+  carry.links = {st.cssParser, st.contentBase};
+  const HeadingCarry::LinkHook hook{&CssParser::addLink, &carry.links, linkValues, sizeof(linkValues)};
+  if (st.cssParser != nullptr) scan.setLinkHook(&hook);
   if (!HeadingCarry::scanSpine(*epub, carry.spine, carry.inflatedSize, scan, st.region(), /*bankIt=*/true) ||
       scan.finish() == HeadingCarry::Shape::Other) {
     LOG_ERR("SCT", "spine=%d: carrying %d failed (%d)", spineIndex, carry.spine, 0);
@@ -1699,6 +1711,35 @@ bool Section::prepareCarry(BuildState& st) {
   carry.end = scan.bodyEnd();
   carry.ready = true;
   LOG_INF("SCT", "spine=%d carries %d", spineIndex, carry.spine);
+  return true;
+}
+
+bool Section::scopeStylesheets(BuildState& st) {
+  CssParser* const css = st.cssParser;
+  // With one sheet or none every chapter resolves alike, and the head is not read.
+  if (css == nullptr || css->sheetRanges().size() < 2) return true;
+  // The head's links, through the scanner the heading carry reads files with (comments, CDATA, quoted values, prefixed
+  // names); their values in a 256 B buffer here, the file through its 256 B window. A head not read whole cannot be
+  // scoped.
+  CssParser::SheetLinks links{css, st.contentBase};
+  char linkValues[256];
+  const HeadingCarry::LinkHook hook{&CssParser::addLink, &links, linkValues, sizeof(linkValues)};
+  HeadingCarry::Scanner scan;
+  scan.setLinkHook(&hook);
+  if (!HeadingCarry::scanHead(st.tempFile, scan)) links.unknown = true;
+  if (!st.tempFile.seek(0)) {
+    LOG_ERR("SCT", "Failed to read extracted XHTML from %s", st.tempPath.c_str());
+    return false;
+  }
+  // The heading file laid out first is part of the build: its sheets too (prepareCarry read them). One that links
+  // none resolves against every sheet, and so does the build.
+  if (st.carry.spine >= 0) {
+    links.sheets |= st.carry.links.sheets;
+    links.unknown = links.unknown || st.carry.links.unknown || st.carry.links.sheets == 0;
+  }
+  const unsigned sheets = static_cast<unsigned>(css->sheetRanges().size());
+  const unsigned inScope = css->scopeToSheets(links);
+  LOG_INF("SCT", "spine=%d resolves against %u of %u stylesheets", spineIndex, inScope != 0 ? inScope : sheets, sheets);
   return true;
 }
 
@@ -1938,18 +1979,24 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     }
     st.visitorReady = true;
     finishInlineFootnotePreviewResolve(st);
-    if (!st.visitor->setup(st.inflatedSize)) {
-      LOG_ERR("SCT", "Failed to set up chapter parser");
-      file.close();
-      Storage.remove(filePath.c_str());
-      if (st.cssParser) {
-        st.cssParser->clear();
+    // Before setup(), which makes the first style lookups (the body's font size). A file that cannot be rewound fails
+    // the stream before the parser is set up, as a failed extraction does.
+    if (!scopeStylesheets(st)) {
+      streamFailed = true;
+    } else {
+      if (!st.visitor->setup(st.inflatedSize)) {
+        LOG_ERR("SCT", "Failed to set up chapter parser");
+        file.close();
+        Storage.remove(filePath.c_str());
+        if (st.cssParser) {
+          st.cssParser->clear();
+        }
+        return BuildPhaseResult::Failed;
       }
-      return BuildPhaseResult::Failed;
-    }
-    if (st.arena) {
-      st.laneResident = static_cast<uint32_t>(st.arena->used());
-      st.arena->beginLane();  // parse lane: page blocks, font slots, the mid-build draw block
+      if (st.arena) {
+        st.laneResident = static_cast<uint32_t>(st.arena->used());
+        st.arena->beginLane();  // parse lane: page blocks, font slots, the mid-build draw block
+      }
     }
   }
 
