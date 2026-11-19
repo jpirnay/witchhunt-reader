@@ -14,7 +14,7 @@ or a run-on paragraph shows in the golden:
                and the outer cell's text before and after it (depth goes up twice, down twice),
                then a plain table that is a grid only if the depth unwound
   3. IMG       an inner cell holding two pictures between runs of text; then an outer cell's text
-               after its inner table, the next outer cell holding a picture alone
+               after its inner table, holding two pictures, the next outer cell a picture alone
   4. RTL       an inner table with dir="rtl", one of its cells holding a dir="ltr" span
   5. TARGET    an inner cell whose id a link targets, between two inner cells, each cell before
                and itself longer than a page (AnchorMapTest: the id names the page of its text)
@@ -155,7 +155,8 @@ the picture. <img src="../images/bar.png" alt="bar"/> IMGEND Text after the seco
 <table>
 <tr><td>TAILINNER The inner cell.</td></tr>
 </table>
-TAILA The outer cell after its inner table.</td>
+TAILA The outer cell after its inner table. <img src="../images/checker.png" alt="checker"/> TAILB Between its
+pictures. <img src="../images/bar.png" alt="bar"/> TAILC After them.</td>
 <td><img src="../images/bar.png" alt="bar"/></td>
 </tr>
 </table>

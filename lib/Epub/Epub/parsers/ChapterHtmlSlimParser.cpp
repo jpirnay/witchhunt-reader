@@ -3353,10 +3353,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       // grid (first image per cell wins). The fragment layout sizes the cell to fit it; the
       // paragraph fallback re-emits it as a block image below the table.
       if (self->currentTableCell && self->currentTable && !src.empty() && self->imageRendering != 2) {
-        if (!self->currentTableCell->imageSrc.empty() && self->currentTable->depth > 1) {
-          // A nested table's cell holds a picture already, and its slot holds one: the cell so far
-          // goes out (its text, then that picture, as at </td>) and goes on holding this one, so
-          // no picture of an inner table is dropped.
+        if (!self->currentTableCell->imageSrc.empty() && self->currentTableCell->streamed) {
+          // A streamed cell (a nested table's, or a cell's rest after one) holds a picture already,
+          // and its slot holds one: the cell so far goes out (its text, then that picture, as at
+          // </td>) and goes on holding this one, so none of its pictures is dropped.
           if (self->partWordBufferIndex > 0 && !self->flushPartWordBuffer()) {
             self->depth += 1;
             return;
@@ -3366,6 +3366,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                                              : CssDirection::Unset;
           const bool isHeader = self->currentTableCell->isHeader;
           self->streamClosedCell(self->currentTable->pendingRow);
+          self->currentTableCell = nullptr;  // popped
           self->openStreamedCell(direction, isHeader);
         }
         if (self->currentTableCell && self->currentTableCell->imageSrc.empty()) {
@@ -6872,6 +6873,7 @@ bool ChapterHtmlSlimParser::openStreamedCell(const CssDirection direction, const
   }
   row.cells.emplace_back();
   row.cells.back().isHeader = isHeader;
+  row.cells.back().streamed = true;
   row.cells.back().text = std::move(text);
   row.cells.back().text->getBlockStyle().direction = direction;
   currentTableCell = &row.cells.back();

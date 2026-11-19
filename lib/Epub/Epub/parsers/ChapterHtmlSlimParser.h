@@ -620,6 +620,9 @@ class ChapterHtmlSlimParser final : public Print {
     std::string imageAlt;
     bool isHeader = false;
     uint8_t colSpan = 1;
+    // Opened by openStreamedCell (a nested table's cell, or a cell's rest after one): never a grid cell, so a second
+    // picture streams the cell so far instead of waiting for the one slot.
+    bool streamed = false;
   };
   struct BufferedTableRow {
     std::vector<BufferedTableCell> cells;

@@ -189,7 +189,7 @@ SPINE 1 href=OEBPS/text/level.xhtml pages=1 truncated=0 cssFallback=0
       W x=18 s=0 z=100 t=LEVELGRIDB
       W x=127 s=0 z=100 t=Grid.
 SPINE 2 href=OEBPS/text/img.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=17 footnotes=0
+ PAGE 0 elements=21 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
    W x=176 s=1 z=100 t=Picture
   LINE y=47 x=0 align=0 mult=1.000 hfid=0 words=7
@@ -270,17 +270,28 @@ SPINE 2 href=OEBPS/text/img.xhtml pages=1 truncated=0 cssFallback=0
    W x=105 s=0 z=100 t=The
    W x=138 s=0 z=100 t=inner
    W x=189 s=0 z=100 t=cell.
-  LINE y=453 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=453 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=TAILA
-   W x=67 s=0 z=100 t=The
-   W x=100 s=0 z=100 t=outer
-   W x=156 s=0 z=100 t=cell
-   W x=196 s=0 z=100 t=after
-   W x=251 s=0 z=100 t=its
-   W x=282 s=0 z=100 t=inner
-   W x=333 s=0 z=100 t=table.
-  IMG y=477 x=170 w=120 h=24 src=<cache>/epub_<hash>/img_2a59aedfafd163cc.png
-  LINE y=501 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=69 s=0 z=100 t=The
+   W x=104 s=0 z=100 t=outer
+   W x=162 s=0 z=100 t=cell
+   W x=204 s=0 z=100 t=after
+   W x=261 s=0 z=100 t=its
+   W x=294 s=0 z=100 t=inner
+   W x=347 s=0 z=100 t=table.
+   W x=411 s=0 z=100 t=TAILB
+  LINE y=477 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Between
+   W x=69 s=0 z=100 t=its
+   W x=100 s=0 z=100 t=pictures.
+  IMG y=501 x=150 w=160 h=100 src=<cache>/epub_<hash>/img_6b023fb8b7c022f2.png
+  LINE y=601 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=TAILC
+   W x=69 s=0 z=100 t=After
+   W x=120 s=0 z=100 t=them.
+  IMG y=625 x=170 w=120 h=24 src=<cache>/epub_<hash>/img_2a59aedfafd163cc.png
+  IMG y=649 x=170 w=120 h=24 src=<cache>/epub_<hash>/img_2a59aedfafd163cc.png
+  LINE y=673 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=IMGAFTERTABLE
    W x=118 s=0 z=100 t=Text
    W x=156 s=0 z=100 t=after
