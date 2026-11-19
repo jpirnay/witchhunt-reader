@@ -1,7 +1,9 @@
 // A table cell whose text the heap cannot hold stops the build the way any low-heap stop does: the pages laid out
 // before it are kept as a truncated section, and nothing aborts. The cell's ParsedText used to be a bare `new`, which
 // aborts the firmware when the heap is out (-fno-exceptions). TABLE_CELL_FAULT_INJECTION refuses the n-th cell its
-// text (ChapterHtmlSlimParser::makeCellText).
+// text (ChapterHtmlSlimParser::makeCellText). The same hook refuses a grid row its line lists, and a table's own
+// growth: the pending row's cell list, a laid-out row's cell list, the fragment's row list and the fragment's
+// allocation.
 #include <gtest/gtest.h>
 #include <unistd.h>
 
@@ -220,22 +222,23 @@ TEST(TableCellLines, ARefusedExactListSendsTheRowOutAsParagraphs) {
 
 namespace {
 
-enum class TableGrowth { RowCells, LayoutCells, PackerRows };
+enum class TableGrowth { RowCells, LayoutCells, PackerRows, FragmentAlloc };
 
 // Restores "never refuse" however the test ends. `asks` successes of `kind`, then `refusals` refused asks (SIZE_MAX:
 // every one from then on).
 struct GrowthHooks {
   GrowthHooks(const TableGrowth kind, const size_t asks, const size_t refusals) {
-    tableRowCellsLeft() = layoutCellsLeft() = packerRowsLeft() = SIZE_MAX;
+    tableRowCellsLeft() = layoutCellsLeft() = packerRowsLeft() = fragmentAllocLeft() = SIZE_MAX;
     size_t& left = kind == TableGrowth::RowCells      ? tableRowCellsLeft()
                    : kind == TableGrowth::LayoutCells ? layoutCellsLeft()
-                                                      : packerRowsLeft();
+                   : kind == TableGrowth::PackerRows  ? packerRowsLeft()
+                                                      : fragmentAllocLeft();
     left = asks;
     tableGrowthRefusals() = refusals;
     tableGrowthRefused() = 0;
   }
   ~GrowthHooks() {
-    tableRowCellsLeft() = layoutCellsLeft() = packerRowsLeft() = SIZE_MAX;
+    tableRowCellsLeft() = layoutCellsLeft() = packerRowsLeft() = fragmentAllocLeft() = SIZE_MAX;
     tableGrowthRefusals() = SIZE_MAX;
   }
   GrowthHooks(const GrowthHooks&) = delete;
@@ -308,6 +311,7 @@ bool buildRefusingGrowth(const TableGrowth kind, const size_t asks, const size_t
       EXPECT_TRUE(built.isTruncatedCache()) << "the heap stayed out: the build stops and says so";
       EXPECT_GE(words.size(), static_cast<size_t>(kLeadParagraphs) / 2);
       EXPECT_LE(words.size(), expected.size());
+      if (words.size() > expected.size()) return true;  // would read past `expected`
       EXPECT_TRUE(std::equal(words.begin(), words.end(), expected.begin())) << "what was kept is a prefix, in order";
     } else {
       EXPECT_FALSE(built.isTruncatedCache()) << "a softer exit: the row goes out as paragraphs";
@@ -355,4 +359,67 @@ TEST(TableRowGrowth, ARefusedFragmentRowListFlushesAndAsksAgain) {
 // Refused twice in a row, the build stops with its pages kept.
 TEST(TableRowGrowth, AFragmentRowListRefusedTwiceStopsTheBuild) {
   walkGrowth(TableGrowth::PackerRows, SIZE_MAX, /*mustStop=*/true);
+}
+
+// A fragment that cannot be allocated is not dropped silently: the build stops and the section says it is truncated.
+TEST(TableRowGrowth, ARefusedFragmentAllocationStopsTheBuildInsteadOfDroppingTheRows) {
+  walkGrowth(TableGrowth::FragmentAlloc, 1, /*mustStop=*/true);
+}
+
+namespace {
+
+constexpr int kManyRows = 120;
+
+// A table with a header row and many body rows: it spans several pages (and, in a tall viewport, hits the 48-row cap).
+std::string manyRowsBody() {
+  std::string out =
+      "<table>"
+      "<thead><tr><th>h0</th><th>h1</th><th>h2</th></tr></thead><tbody>";
+  for (int r = 0; r < kManyRows; ++r) {
+    out += "<tr>";
+    for (int c = 0; c < 3; ++c) out += "<td>r" + std::to_string(r) + "x" + std::to_string(c) + "</td>";
+    out += "</tr>";
+  }
+  out += "</tbody></table><p>after</p>";
+  return out;
+}
+
+// Builds `manyRowsBody()` at `viewportHeight` and counts the pushes onto a full fragment row list.
+void expectNoUnaskedGrowth(const uint16_t viewportHeight, const size_t minFragments) {
+  SCOPED_TRACE("viewport height " + std::to_string(viewportHeight));
+  GfxRenderer renderer;
+  const auto work = freshWorkDir("many_rows_" + std::to_string(viewportHeight));
+  auto epub = syntheticBook(work, 0, manyRowsBody());
+  ASSERT_TRUE(epub);
+  size_t fragments = 0;
+  {
+    Section built(epub, 0, renderer);
+    auto params = pages();
+    params.viewportHeight = viewportHeight;
+    packerGrowthPushes() = 0;
+    ASSERT_TRUE(built.createSectionFile(params, {}, /*skipEviction=*/true));
+    EXPECT_FALSE(built.isTruncatedCache());
+    EXPECT_EQ(packerGrowthPushes(), 0u) << "a push found the fragment's row list full: it grew past its reserve";
+    for (int pg = 0; pg < built.pageCount; ++pg) {
+      built.currentPage = pg;
+      const auto page = built.loadPageFromSectionFile();
+      ASSERT_TRUE(page);
+      for (const auto& el : page->elements) fragments += el->getTag() == TAG_PageTable ? 1 : 0;
+    }
+    const auto words = wordsOfAllPagesAndGrids(built);
+    EXPECT_NE(std::find(words.begin(), words.end(), "r" + std::to_string(kManyRows - 1) + "x2"), words.end());
+    EXPECT_EQ(words.back(), "after");
+  }
+  EXPECT_GE(fragments, minFragments);
+  epub.reset();
+  fs::remove_all(work);
+}
+
+}  // namespace
+
+// The fragment's row list is reserved after the flush that empties it, so a table over several pages (a page break
+// each few rows) and one over the 48-row cap never grow it through the throwing operator new.
+TEST(TableRowGrowth, ATableOverManyPagesNeverGrowsTheFragmentRowListPastItsReserve) {
+  expectNoUnaskedGrowth(96, 10);
+  expectNoUnaskedGrowth(4000, 3);
 }

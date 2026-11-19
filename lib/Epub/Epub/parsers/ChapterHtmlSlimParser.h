@@ -113,6 +113,17 @@ inline size_t& packerRowsLeft() {
   static size_t left = SIZE_MAX;
   return left;
 }
+// ...and the allocation of the PageTableFragment a flush makes of the packed rows.
+inline size_t& fragmentAllocLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// How many pushes onto the fragment's row list found it full (so would have grown it through the throwing operator
+// new, past the reserve); a table's reserve is meant to leave this at zero.
+inline size_t& packerGrowthPushes() {
+  static size_t n = 0;
+  return n;
+}
 // How many asks, once a counter above reaches zero, are refused before the heap "recovers" (SIZE_MAX: all of them),
 // and how many were refused in all.
 inline size_t& tableGrowthRefusals() {

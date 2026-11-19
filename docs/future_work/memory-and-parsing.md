@@ -202,7 +202,7 @@ refusal there aborts and reboots (`-fno-exceptions`); counted in `ChapterHtmlSli
 - `std::string` growth during the parse, for example the ruby text (`rubyText_`, `:4577-4581`, up to 255 bytes).
 
 **Next step.** Ask `HeapFit` before each growth (`heapReserveFor`, as the elements reserve does) and stop the build on
-a refusal (`stopForHeap`, `:2112`), or move the table to the build's arena or a `ChunkedVector`. Each site needs a host
+a refusal (`stopForHeap`, `:2112`), or move the table to a `ChunkedVector`. Each site needs a host
 fault-injection test, as `PageHeapTest.cpp` (`PAGE_FAULT_INJECTION`, `ELEMENT_FAULT_INJECTION`) does for pages and for
 `Page::elements`, which `addPageElement` now covers.
 
