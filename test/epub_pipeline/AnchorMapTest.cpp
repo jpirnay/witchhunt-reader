@@ -41,6 +41,10 @@ constexpr int kNotesSpine = 2;
 const std::string kNestedTablesFixture = std::string(CORPUS_DIR) + "/test_nested_tables.epub";
 constexpr int kNestedTargetSpine = 4;
 
+// test/epubs/make_test_inline_anchors.py: one paragraph of numbered words w001..w700 that crosses pages, with an <a id>
+// before w560, a <span id> before w640 and an <a id> after w700, then a block with its own id.
+const std::string kInlineAnchorsFixture = std::string(CORPUS_DIR) + "/test_inline_anchors.epub";
+
 std::string freshCacheDir(const std::string& tag) {
   const auto dir = fs::temp_directory_path() / "anchor_map_test" / tag;
   fs::remove_all(dir);
@@ -176,4 +180,32 @@ TEST(AnchorMap, NestedTableCellIdNamesThePageOfItsText) {
   const auto anchored = built.section->getPageForAnchor("inner-target");
   ASSERT_TRUE(anchored.has_value()) << "the inner cell's id is missing from the anchor map";
   EXPECT_EQ(static_cast<int>(*anchored), *textPage);
+}
+
+// An id on an inline element names the page of ITS line, not the page the paragraph began on (a <span id> was recorded
+// with the block's first line, an <a id> with the next block), and an id after the block's last word names the page
+// that word is on. A block id keeps its block's first line.
+TEST(AnchorMap, InlineIdNamesThePageOfItsOwnLine) {
+  const auto built = build("inline_ids", 0, kInlineAnchorsFixture);
+  Section& section = *built.section;
+  const auto firstPage = pageWithWord(section, "BLOCKFIRST");
+  const auto linkPage = pageWithWord(section, "w560");
+  const auto spanPage = pageWithWord(section, "w640");
+  const auto lastPage = pageWithWord(section, "w700");
+  const auto nextPage = pageWithWord(section, "NEXTBLOCK");
+  ASSERT_TRUE(firstPage && linkPage && spanPage && lastPage && nextPage);
+  // The fixture has to tell the places apart: each id's own line is a later page than the block's first.
+  ASSERT_LT(*firstPage, *linkPage) << "w560 is on the paragraph's first page: lengthen the fixture";
+  ASSERT_LT(*firstPage, *spanPage);
+
+  const auto expectPage = [&](const char* id, const int page) {
+    const auto anchored = section.getPageForAnchor(id);
+    ASSERT_TRUE(anchored.has_value()) << id << " is missing from the anchor map";
+    EXPECT_EQ(static_cast<int>(*anchored), page) << id;
+  };
+  expectPage("blk-first", *firstPage);
+  expectPage("inl-a", *linkPage);
+  expectPage("inl-s", *spanPage);
+  expectPage("inl-tail", *lastPage);
+  expectPage("blk-next", *nextPage);
 }

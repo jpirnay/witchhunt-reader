@@ -583,6 +583,17 @@ bool isHeaderOrBlock(const char* name) {
 // Block-level, sectioning, and structural elements are always considered navigable.
 bool isNonNavigableInlineElement(const char* name) { return strcmp(name, "span") == 0; }
 
+// Inline elements whose id sits inside the text of the block around them (not elements that open a block of their own,
+// whose id is the block's).
+bool isInlineAnchorHost(const char* name) {
+  static constexpr const char* kNames[] = {"a",   "b",   "i",   "em",   "strong", "u",    "s",    "small",
+                                           "big", "sup", "sub", "code", "cite",   "abbr", "mark", "font"};
+  for (const char* n : kNames) {
+    if (strcmp(name, n) == 0) return true;
+  }
+  return false;
+}
+
 bool isTableStructuralTag(const char* name) {
   return strcmp(name, "table") == 0 || strcmp(name, "tr") == 0 || strcmp(name, "td") == 0 || strcmp(name, "th") == 0;
 }
@@ -2989,7 +3000,16 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     const bool atTocAnchor = self->isTocAnchor(idAttr);
     if (atTocAnchor ||
         (!isNonNavigableInlineElement(name) && self->anchorCount < self->anchorLimit() + self->spanAnchorCount_)) {
-      self->pendingAnchorId = idAttr;
+      // An id on an inline element in the middle of a block waits for the line that reaches its word; any other
+      // waits for the next block's first line.
+      const int wordIndex = (!atTocAnchor && isInlineAnchorHost(name) && self->currentBlockOwnerDepth_ >= 0)
+                                ? self->inlineAnchorWordIndex()
+                                : 0;
+      if (wordIndex > 0) {
+        self->queueAnchorForNextLine(idAttr, wordIndex);
+      } else {
+        self->pendingAnchorId = idAttr;
+      }
     } else if (isNonNavigableInlineElement(name)) {
       self->recordSpanAnchor(idAttr);
     } else {
@@ -5324,14 +5344,53 @@ size_t ChapterHtmlSlimParser::anchorLimit() const {
 }
 
 void ChapterHtmlSlimParser::flushAnchorsAwaitingLine() {
-  if (anchorsAwaitingLine_.empty()) return;
-  for (auto& id : anchorsAwaitingLine_) {
-    recordAnchor(std::move(id), static_cast<uint16_t>(completedPageCount));
+  for (auto& entry : anchorsAwaitingLine_) {
+    recordAnchor(std::move(entry.id), static_cast<uint16_t>(completedPageCount));
   }
   anchorsAwaitingLine_.clear();
 }
 
-void ChapterHtmlSlimParser::queueAnchorForNextLine(std::string id) {
+void ChapterHtmlSlimParser::flushAnchorsReached() {
+  if (anchorsAwaitingLine_.empty()) return;
+  size_t kept = 0;
+  for (size_t i = 0; i < anchorsAwaitingLine_.size(); ++i) {
+    AnchorAwaitingLine& entry = anchorsAwaitingLine_[i];
+    if (entry.wordIndex <= wordsExtractedInBlock) {
+      recordAnchor(std::move(entry.id), static_cast<uint16_t>(completedPageCount));
+    } else {
+      if (kept != i)
+        anchorsAwaitingLine_[kept] = std::move(entry);  // never onto itself: a string's self-move clears it
+      ++kept;
+    }
+  }
+  anchorsAwaitingLine_.erase(anchorsAwaitingLine_.begin() + kept, anchorsAwaitingLine_.end());
+}
+
+void ChapterHtmlSlimParser::flushAnchorsAfterBlock() {
+  if (anchorsAwaitingLine_.empty()) return;
+  size_t kept = 0;
+  for (size_t i = 0; i < anchorsAwaitingLine_.size(); ++i) {
+    AnchorAwaitingLine& entry = anchorsAwaitingLine_[i];
+    if (entry.wordIndex > 0) {
+      recordAnchor(std::move(entry.id), static_cast<uint16_t>(completedPageCount));
+    } else {
+      if (kept != i)
+        anchorsAwaitingLine_[kept] = std::move(entry);  // never onto itself: a string's self-move clears it
+      ++kept;
+    }
+  }
+  anchorsAwaitingLine_.erase(anchorsAwaitingLine_.begin() + kept, anchorsAwaitingLine_.end());
+}
+
+// The next word's index, counted as addLineToPage counts the words a line reaches and as a footnote link counts the
+// word it follows. An id inside a word (the partial word is counted) waits for that word's line.
+int ChapterHtmlSlimParser::inlineAnchorWordIndex() const {
+  if (currentTable || census_) return 0;
+  const int soFar = lineTokensSoFar();
+  return soFar > 0 ? soFar + (partWordHasText() ? 0 : 1) : 0;
+}
+
+void ChapterHtmlSlimParser::queueAnchorForNextLine(std::string id, const int wordIndex) {
   if (id.empty() || census_) return;  // the census places no line for an anchor to wait for
   // Bounded: an id'd element that never produces a line leaves its entry queued, so a run of them
   // would grow this. Past the cap they are recorded at the current page instead -- the behaviour
@@ -5340,7 +5399,7 @@ void ChapterHtmlSlimParser::queueAnchorForNextLine(std::string id) {
     recordAnchor(std::move(id), static_cast<uint16_t>(completedPageCount));
     return;
   }
-  anchorsAwaitingLine_.push_back(std::move(id));
+  anchorsAwaitingLine_.push_back({std::move(id), wordIndex});
 }
 
 // A <span id> used to be left out of the anchor map altogether, to keep converter-injected ids
@@ -5371,7 +5430,9 @@ void ChapterHtmlSlimParser::recordSpanAnchor(const std::string& id) {
     pendingAnchorId = id;
     return;
   }
-  queueAnchorForNextLine(id);
+  // At the word it precedes: a span in the middle of a paragraph that crosses a page is on that line's page.
+  // Idea from crosspoint-reader #4328 (Mikalai Kryvusha, @MikalaiKryvusha), which queues inline ids by word index.
+  queueAnchorForNextLine(id, inlineAnchorWordIndex());
 }
 
 bool ChapterHtmlSlimParser::lookupAnchorInActiveBuild(const std::string& id, uint16_t& page) {
@@ -5797,15 +5858,14 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
     return ParsedText::LineProcessResult::RetryWithoutHyphenation;
   }
 
-  // Every emitPage() that this line could trigger is above, so completedPageCount is now the page
-  // the line is going on: the page any anchor waiting on it should name.
-  flushAnchorsAwaitingLine();
-
   // Capture first-line flag before incrementing wordsExtractedInBlock.
   const bool isFirstLineOfBlock = (wordsExtractedInBlock == 0);
 
   // Track cumulative words to assign footnotes to the page containing their anchor
   wordsExtractedInBlock += lineTokenCount;
+  // Every emitPage() that this line could trigger is above, so completedPageCount is now the page the line is going
+  // on: the page any anchor waiting on a word of it should name.
+  flushAnchorsReached();
   auto footnoteIt = pendingFootnotes.begin();
   while (footnoteIt != pendingFootnotes.end() && footnoteIt->first <= wordsExtractedInBlock) {
     if (!currentPage->addFootnote(footnoteIt->second.number, footnoteIt->second.href)) {
@@ -6087,6 +6147,9 @@ void ChapterHtmlSlimParser::makePages() {
     }
     pendingFootnotes.clear();
   }
+
+  // An id after the block's last word has no later line to reach: it is on the page the last line went to.
+  flushAnchorsAfterBlock();
 
   // Apply bottom spacing after the paragraph (stored in pixels)
   if (blockStyle.marginBottom > 0) {
