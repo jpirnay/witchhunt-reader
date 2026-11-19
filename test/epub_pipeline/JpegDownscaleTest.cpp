@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -353,6 +354,124 @@ TEST_F(JpegDownscaleFixture, ACardErrorIsNotRetriedAtAnEighth) {
   JpegToFramebufferConverter converter;
   EXPECT_TRUE(converter.decodeToFramebuffer(jpg, renderer, config)) << "the placeholder is drawn";
   EXPECT_FALSE(fs::exists(config.cachePath)) << "a decode the card failed is not cached";
+}
+
+// A 1/8 resize reads the first DC scan only (DecodeOptions::firstDcScanOnly), not on to the scan that makes
+// DC final: with libjpeg's default script (prog_full_420.jpg) that is the DC refinement, two thirds into the
+// file. The picture is that of the full DC, less the one bit the refinement adds: at most one quantised DC
+// step, q_dc / 8 grey levels at 1/8 scale. A file whose first DC scan has Al = 2 (prog_420_dc_al2.jpg) loses
+// two bits that way, so it keeps reading to Al = 0.
+struct EighthRun {
+  std::vector<uint8_t> px;  // ceil(w / 8) x ceil(h / 8) gray pixels
+  uint32_t bytesRead = 0;
+};
+
+std::vector<uint8_t> fileBytes(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// The first luma quantiser entry, DC's, of a baseline-precision table.
+int lumaDcQuantiser(const std::vector<uint8_t>& jpg) {
+  for (size_t i = 2; i + 5 < jpg.size(); ++i)
+    if (jpg[i] == 0xFF && jpg[i + 1] == 0xDB) return jpg[i + 5];  // length, then Pq/Tq, then entry 0
+  return -1;
+}
+
+// One past the last byte of the first scan's entropy data.
+size_t firstScanEnd(const std::vector<uint8_t>& jpg) {
+  size_t i = 2;
+  while (i + 3 < jpg.size()) {
+    const size_t end = i + 2 + ((jpg[i + 2] << 8) | jpg[i + 3]);
+    if (jpg[i + 1] == 0xDA) {
+      i = end;
+      while (i + 1 < jpg.size() && !(jpg[i] == 0xFF && jpg[i + 1] != 0x00 && (jpg[i + 1] < 0xD0 || jpg[i + 1] > 0xD7)))
+        ++i;
+      return i;
+    }
+    i = end;
+  }
+  return 0;
+}
+
+struct Bands {
+  std::vector<uint8_t>* px;
+};
+
+// decodeResized() to the 1/8 size itself (one output pixel per block), through the rows' callback.
+EighthRun resizedEighth(const std::string& path) {
+  EighthRun run;
+  FsFile file;
+  EXPECT_TRUE(file.openForRead(path.c_str()));
+  ProgressiveJpeg::ImageInfo info;
+  EXPECT_EQ(ProgressiveJpeg::probe(file, info), ProgressiveJpeg::Result::Ok);
+  const uint16_t w = static_cast<uint16_t>((info.width + 7) / 8);
+  const uint16_t h = static_cast<uint16_t>((info.height + 7) / 8);
+  ProgressiveJpeg::DecodeStats stats;
+  ProgressiveJpeg::DecodeOptions options;
+  options.stats = &stats;
+  EXPECT_EQ(ProgressiveJpeg::decodeResized(
+                file, options, w, h,
+                [](void* user, uint16_t, const uint8_t* gray, uint16_t width) {
+                  auto* px = static_cast<std::vector<uint8_t>*>(user);
+                  px->insert(px->end(), gray, gray + width);
+                  return true;
+                },
+                &run.px),
+            ProgressiveJpeg::Result::Ok);
+  file.close();
+  run.bytesRead = stats.bytesRead;
+  return run;
+}
+
+// The same 1/8 session without the flag: decode() with whole blocks, the index running to Al = 0.
+EighthRun fullDcEighth(const std::string& path) {
+  EighthRun run;
+  FsFile file;
+  EXPECT_TRUE(file.openForRead(path.c_str()));
+  ProgressiveJpeg::DecodeStats stats;
+  ProgressiveJpeg::DecodeOptions options;
+  options.scaleShift = 3;
+  options.wholeBlocks = true;
+  options.stats = &stats;
+  EXPECT_EQ(ProgressiveJpeg::decode(
+                file, options,
+                [](void* user, uint16_t, const uint8_t* gray, uint16_t width, uint16_t rows, uint16_t stride) {
+                  auto* px = static_cast<std::vector<uint8_t>*>(user);
+                  for (uint16_t r = 0; r < rows; ++r)
+                    px->insert(px->end(), gray + r * stride, gray + r * stride + width);
+                  return true;
+                },
+                &run.px),
+            ProgressiveJpeg::Result::Ok);
+  file.close();
+  run.bytesRead = stats.bytesRead;
+  return run;
+}
+
+TEST_F(JpegDownscaleFixture, AnEighthResizeReadsTheFirstDcScanOfLibjpegsScript) {
+  const std::string path = JPEG_FIXTURE_DIR "/prog_full_420.jpg";
+  const std::vector<uint8_t> jpg = fileBytes(path);
+  const EighthRun full = fullDcEighth(path);
+  const EighthRun first = resizedEighth(path);
+  ASSERT_EQ(first.px.size(), full.px.size());
+  EXPECT_GT(full.bytesRead, jpg.size() / 2) << "control: Al = 0 comes with the DC refinement, far into the file";
+  EXPECT_LE(first.bytesRead, 2 * (firstScanEnd(jpg) + 512))
+      << "the first DC scan's extent, the index pass and the band pass each read it, a 512-byte read past it at most";
+  const int qdc = lumaDcQuantiser(jpg);
+  ASSERT_GT(qdc, 0);
+  int worst = 0;
+  for (size_t i = 0; i < full.px.size(); ++i) worst = std::max(worst, std::abs(first.px[i] - full.px[i]));
+  EXPECT_LE(worst, (qdc + 7) / 8) << "one missing DC bit is one quantised DC step, q_dc / 8 levels at 1/8";
+}
+
+TEST_F(JpegDownscaleFixture, AFirstDcScanAtAl2KeepsReadingToTheFinalDc) {
+  const std::string path = JPEG_FIXTURE_DIR "/prog_420_dc_al2.jpg";
+  const EighthRun full = fullDcEighth(path);
+  const EighthRun resized = resizedEighth(path);
+  ASSERT_FALSE(resized.px.empty());
+  EXPECT_EQ(resized.bytesRead, full.bytesRead) << "the old path: on to the refinement to Al = 0";
+  EXPECT_EQ(resized.px, full.px) << "two missing bits are not taken";
 }
 
 // One decode, both caches (RenderConfig::companionCachePath). The reader's BW-primary decode used

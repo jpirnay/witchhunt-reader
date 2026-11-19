@@ -61,6 +61,11 @@ Fixtures:
                      into the file. The same coefficients, so prog_full_420.y.pgm is its reference
                      (asserted below). A 1/8 decode reads it only to the end of that scan.
 
+  prog_420_dc_al2.jpg    prog_full_420.jpg with its DC first scan at Al = 2 and the refinements 2 -> 1 and 1 -> 0
+                     where the DC refinement was: a first DC scan that loses two bits, so a 1/8 decode that
+                     takes only the first DC scan (decodeResized, at Al <= 1) must read on to Al = 0 here.
+                     Same coefficients as prog_full_420.jpg (asserted below).
+
 Progressive cases from the Free-Ink SDK decoder's test matrix (freeink-sdk c51246c8,
 libs/assets/ProgressiveJpeg/test/host/run.py), each with its libjpeg luma as the reference
 (<name>.y.pgm), checked like prog_full_*:
@@ -309,9 +314,9 @@ K3_LUMA_DC = ([0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0], list(range(12)))
 K3_CHROMA_DC = ([0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0], list(range(12)))
 
 
-def merge_dc_scans(data):
-    """The file with its interleaved DC first scan (Al = 1) and DC refinement (Al = 0) as one
-    interleaved DC scan at Al = 0, with the K.3 DC tables. No restart markers."""
+def read_dc_scans(data):
+    """(segments, comps, mcus, order, first, refine, dc): the file's interleaved DC first scan (Al = 1)
+    and DC refinement (Al = 0), and the DC coefficients they hold, in scan order. No restart markers."""
     segments = jpeg_segments(data)
     dc_tables, comps, size, first, refine = {}, None, None, None, None
     for index, (marker, seg) in enumerate(segments):
@@ -352,14 +357,18 @@ def merge_dc_scans(data):
             dc.append(pred[cid])
     reader = EntropyReader(refine[1])
     dc = [(value << 1) | reader.bit() for value in dc]
+    return segments, comps, mcus, order, first, refine, dc
 
+
+def dc_first_scan(comps, mcus, order, dc, al):
+    """A DC first scan at `al` of `dc` (full-precision values) with the K.3 DC tables: (DHT, SOS + data)."""
     k3 = [K3_LUMA_DC, K3_CHROMA_DC]
     encoders = {cid: canonical_codes(*k3[min(k, 1)])[1] for k, (cid, _, _) in enumerate(comps)}
     writer, pred = EntropyWriter(), {c[0]: 0 for c in comps}
     values = iter(dc)
     for _ in range(mcus):
         for cid in order:
-            value = next(values)
+            value = next(values) >> al
             diff, pred[cid] = value - pred[cid], value
             category = abs(diff).bit_length()
             writer.bits(*encoders[cid][category])
@@ -367,15 +376,48 @@ def merge_dc_scans(data):
 
     tables = b"".join(bytes([k]) + bytes(t[0]) + bytes(t[1]) for k, t in enumerate(k3[:min(len(comps), 2)]))
     dht = bytes([0xFF, 0xC4]) + (2 + len(tables)).to_bytes(2, "big") + tables
+    return dht, dc_sos(comps, 0, al) + writer.data()
+
+
+def dc_sos(comps, ah, al):
     header = bytes([len(comps)]) + b"".join(bytes([cid, min(k, 1) << 4]) for k, (cid, _, _) in enumerate(comps))
-    sos = bytes([0xFF, 0xDA]) + (5 + len(header)).to_bytes(2, "big") + header + bytes([0, 0, 0])
+    return bytes([0xFF, 0xDA]) + (5 + len(header)).to_bytes(2, "big") + header + bytes([0, 0, (ah << 4) | al])
+
+
+def dc_refinement(comps, mcus, order, dc, ah, al):
+    """A DC refinement scan Ah -> Al: bit `al` of every block's DC value, MCU by MCU."""
+    writer = EntropyWriter()
+    values = iter(dc)
+    for _ in range(mcus):
+        for _ in order:
+            writer.bits((next(values) >> al) & 1, 1)
+    return dc_sos(comps, ah, al) + writer.data()
+
+
+def rebuilt(data, segments, replacements):
+    """The file with the segments at the given indexes replaced (a list of byte strings each)."""
     out = bytearray(data[:2])
     for index, (_, seg) in enumerate(segments):
-        if index == first[0]:
-            out += dht + sos + writer.data()
-        elif index != refine[0]:
-            out += seg
+        out += b"".join(replacements[index]) if index in replacements else seg
     return bytes(out)
+
+
+def merge_dc_scans(data):
+    """The file with its interleaved DC first scan (Al = 1) and DC refinement (Al = 0) as one
+    interleaved DC scan at Al = 0, with the K.3 DC tables."""
+    segments, comps, mcus, order, first, refine, dc = read_dc_scans(data)
+    dht, scan = dc_first_scan(comps, mcus, order, dc, 0)
+    return rebuilt(data, segments, {first[0]: [dht, scan], refine[0]: []})
+
+
+def split_dc_scans(data):
+    """The file with its DC scans as a first scan at Al = 2 and two refinements, 2 -> 1 and 1 -> 0, where
+    the DC refinement was: the first DC scan loses two bits, which a 1/8 decode must not stop at."""
+    segments, comps, mcus, order, first, refine, dc = read_dc_scans(data)
+    dht, scan = dc_first_scan(comps, mcus, order, dc, 2)
+    return rebuilt(data, segments, {first[0]: [dht, scan],
+                                    refine[0]: [dc_refinement(comps, mcus, order, dc, 2, 1),
+                                                dc_refinement(comps, mcus, order, dc, 1, 0)]})
 
 
 with open(os.path.join(HERE, "prog_full_420.jpg"), "rb") as f:
@@ -384,6 +426,11 @@ with open(os.path.join(HERE, "prog_420_dc_first.jpg"), "wb") as f:
     f.write(merged)
 # The same coefficients: libjpeg decodes the same picture, so prog_full_420.y.pgm is the reference.
 assert (Image.open(os.path.join(HERE, "prog_420_dc_first.jpg")).convert("RGB").tobytes() ==
+        Image.open(os.path.join(HERE, "prog_full_420.jpg")).convert("RGB").tobytes())
+
+with open(os.path.join(HERE, "prog_420_dc_al2.jpg"), "wb") as f:
+    f.write(split_dc_scans(open(os.path.join(HERE, "prog_full_420.jpg"), "rb").read()))
+assert (Image.open(os.path.join(HERE, "prog_420_dc_al2.jpg")).convert("RGB").tobytes() ==
         Image.open(os.path.join(HERE, "prog_full_420.jpg")).convert("RGB").tobytes())
 
 print("Fixtures written to", HERE)

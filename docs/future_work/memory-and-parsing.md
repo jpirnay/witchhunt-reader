@@ -157,32 +157,6 @@ the resize (`:1111`); `ProgressiveJpeg::decodeResized` (`ProgressiveJpeg.cpp:152
 
 **Next step.** Make the resized decode steppable in `ProgressiveJpeg`: its resampler state in the session, about 60 lines. Then give `JpegThumbSession` a third mode, with the per-output setup shared with the other two, about 120-150 lines with tests.
 
-## A 1/8 decode of a file with libjpeg's scan script reads its DC refinement
-
-**Open.** A 1/8 decode (the DC-only session, and with it `ProgressiveJpeg::decodeResized`, the low-heap fallback)
-indexes the file only until luma DC is final. A file whose first scan completes DC, as the real covers measured do, is
-read no further than that scan: about twice the bytes of the DC-only preview this replaced, as the index and the bands
-each read that scan once. A file with libjpeg's default script completes DC only in its DC refinement, 55-80% into the
-file, so its index reads the AC scans before it byte by byte. Without read windows its bands then alternate between the
-two DC scans through the one shared 512-byte buffer, refilling on every switch: 7-15x the preview's card bytes on the
-real files measured, up to 30x on small generated ones (host, through the shared buffer, one 464x670 box: a 530 KB file
-1,098 reads / 539 KB against 100 / 51 KB; 766285819). Both converters take read windows from the lent region when it
-has room (`JpegToBmpConverter.cpp:451-453`, `JpegToFramebufferConverter.cpp:1659`). With them each DC scan reads
-through a window of its own and the index through all of them as one (`ProgressiveJpeg.cpp:57-61`): that ends the
-refills, not the index's read up to the refinement. The host figures above were taken without them.
-
-**Why it matters.** It is the path the reader takes when only 1/8 fits, and covers when no finer scale does (one decode per output box). On the C3 that could be 1-3 s of SD time for such a file against about 0.15 s before; an estimate from host counts, not a device measurement.
-
-**Where.** `indexStep` (`ProgressiveJpeg.cpp:575`; the DC session's early stop at `:610-616`),
-`ProgressiveJpeg::decodeResized` (`:1520`); `convertResized` in `JpegToBmpConverter.cpp` (`:369`); the resized path of
-`JpegToFramebufferConverter::decodeToFramebuffer` (`JpegToFramebufferConverter.cpp:1664`, `:2002`).
-
-**Next step.** Measure on the device first (Home with heavy covers and little heap: the `Progressive cover read N
-times` log, a `LOG_DBG` that also says whether the read windows were held, `JpegToBmpConverter.cpp:359`, and the time
-to the first cover). If it matters, give `decodeResized` a mode, through `DecodeOptions`, that reads the first luma DC
-scan alone and skips its refinements: the preview's exact I/O, at most one level off (mean 0.1-0.9 against the
-preview), while sliced 1/8 decodes and their goldens stay as they are.
-
 ## A cut or corrupt progressive JPEG draws a placeholder
 
 **Open.** A progressive JPEG whose stream is cut short or corrupt fails as soon as a scan's data does not decode, and the reader draws its framed placeholder (a cover is not converted). A baseline file cut short draws nothing and is decoded again on every pass. Work that changes this is written and tested but parked: the decoder stops a scan where its data is unusable and decodes every row from the scans that remain (a DC scan's blocks after the damage mid grey, as libjpeg leaves them), so a cut or corrupt progressive file draws what it holds; a cut baseline file keeps its rows; and a degraded picture is cached once instead of decoded on every visit (X4: 8 decodes, about 14 s, per visit of such a page).
