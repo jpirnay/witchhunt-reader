@@ -254,12 +254,35 @@ an EPUB. Size M, with a `SECTION_FILE_VERSION` bump.
 
 ## Every manifest stylesheet applies to every chapter (matcha-reader #453)
 
-**Open.** `Epub::parseCssFiles()` (`lib/Epub/Epub.cpp:787`) merges every stylesheet in the manifest into one rule set;
-there is no filter by the `<link>`s a chapter has. A `body{text-align:center}` in a sheet that no text chapter links
-(matcha's case: `vertical_image.css`) centres every chapter, horizontal books too. Our `CssParser` is the
-arena-resident compressed design, so this is a re-implementation, not a port: a CSS rule-cache format change (version
-bump) plus a section-cache bump, and a 4 KB head scan per chapter build. matcha-reader #453, Eszter Schuffert
-(eszter007).
+**Open; the record it needs is done (13a), the scoping (13b) is next.** `Epub::parseCssFiles()`
+(`lib/Epub/Epub.cpp:787`) compiles every stylesheet of the book (the manifest's, then any `.css` found only in the
+archive, `discoverCssFilesFromZip`) into one rule set, and every chapter resolves against all of it: a
+`body{text-align:center}` in a sheet that no text chapter links (matcha's case: `vertical_image.css`) centres every
+chapter, horizontal books too. matcha-reader #453, Eszter Schuffert (eszter007).
+
+- **Done (13a, `CSS_CACHE_VERSION` 36).** A rule's order runs on across the sheets in compile order, so each sheet owns
+  one contiguous range of orders. The compile records, at the end of `css_rules.cache`, each sheet's `{path hash, first
+  order, end order}` and its `@import` edges `{importer, imported path hash}` (`CssParser::sheetRanges`,
+  `sheetImports`, `loadSheetTable`; layout in [file-formats.md](../file-formats.md#css_rulescache-css_bgbin-and-css_fontsbin)):
+  8 B a sheet, 5 B an import. At most 64 ranges (a book with more keeps one range, for every chapter, from its 64th
+  sheet on) and 64 imports (past that, an empty table: every sheet applies, as now). `CssParser::resolveStylesheetHref`
+  resolves a reference the way the table's paths are resolved. Nothing reads the table yet, and the rule records and
+  the index are as before but for the merge below.
+- **Found on the way.** Nothing follows `@import` (`CssParser::loadFromStream` drops the at-rule at its `;`, and no
+  other code in `lib/` or `src/` reads one): an imported sheet applies today only because every sheet is compiled, so
+  13b must follow the edges. And a redeclaration merged across a sheet boundary (`existing.order + 1 >= order` in
+  `processRuleBlockWithStyle`, in both stores): a sheet ending in `.x{...}` and the next one starting with `.x{...}` made
+  one record under the second sheet's order that held the first sheet's declarations. It no longer merges there
+  (`sheetFirstOrder_`); the two records resolve as the merged one did.
+- **Next (13b), with a `SECTION_FILE_VERSION` bump.** Scan the chapter's head (`html_<spine>.bin`, up to `</head>`) for
+  its `<link rel="stylesheet">` hrefs, resolve each with `resolveStylesheetHref` against the chapter's folder, find its
+  ranges in the table (a sheet listed twice has two), follow the import edges (they can form a cycle; the folded
+  range's too), and make `lookupRules` and the complex-rule scan skip every rule whose order is outside the chapter's
+  ranges and the folded one. Fail open (every sheet) for a linked sheet the table does not know and for an empty table;
+  a chapter with no `<link>` resolves against none. An import the table does not know names a sheet that was never
+  compiled: nothing to add. The background pictures (`css_bg.bin`) and `@font-face` rules (`css_fonts.bin`) are not
+  ranged and stay book-wide. `loadSheetTable` reads the table from the card (a seek from the file's end); where it is
+  kept during a build is 13b's choice.
 
 ## An inline anchor lands a page off (CrossPoint #4328)
 
