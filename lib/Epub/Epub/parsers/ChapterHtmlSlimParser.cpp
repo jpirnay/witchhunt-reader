@@ -5475,15 +5475,6 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
                          ? CssTextAlign::Justify
                          : static_cast<CssTextAlign>(this->paragraphAlignment);
   paragraphAlignmentBlockStyle.alignment = align;
-  // The per-element stacks start at 16 entries, so a usual chapter never grows one mid-parse (a growth step leaves a
-  // hole). Before the page block opens; a refusal is not fatal, pushOrStop asks again at the first push.
-  heapReserveFor(inlineStyleStack, kStackReserve);
-  heapReserveFor(listStack, kStackReserve);
-  heapReserveFor(containerWidthStack_, kStackReserve);
-  heapReserveFor(backgroundImageScopes_, kStackReserve);
-  heapReserveFor(heldBottomSpacing_, kMaxHeldBottomSpacingDepth);
-  heapReserveFor(blockInsetStack_, kMaxBlockInsetDepth);
-  heapReserveFor(anchorsAwaitingLine_, kStackReserve);
   startNewTextBlock(paragraphAlignmentBlockStyle);
 
   // Handle HTML entities (like &nbsp;) that aren't in XML spec or DTD.

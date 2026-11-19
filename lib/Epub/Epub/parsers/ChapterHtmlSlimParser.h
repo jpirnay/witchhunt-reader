@@ -829,9 +829,6 @@ class ChapterHtmlSlimParser final : public Print {
   // Deeper nesting keeps its spacing on the style, as before: only elements with spacing are
   // pushed, so eight levels of them open at once is already pathological.
   static constexpr size_t kMaxHeldBottomSpacingDepth = 8;
-  // Entries each per-element stack is reserved to at setup (pushOrStop grows past it, asking the heap first); the two
-  // capped at 8 reserve their cap instead.
-  static constexpr size_t kStackReserve = 16;
   std::vector<HeldBottomSpacing> heldBottomSpacing_;
   void holdBottomSpacing(BlockStyle& style, bool floated);
   void applyHeldBottomSpacing(const HeldBottomSpacing& held);
