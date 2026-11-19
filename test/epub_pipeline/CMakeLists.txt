@@ -254,6 +254,8 @@ target_compile_definitions(EpubPipelineTest PRIVATE
   PAGE_FAULT_INJECTION
   # SectionSetupHeapTest refuses the build's setup its parser and its TOC anchor pool (Section::runBuildSetup). Inert otherwise.
   SECTION_SETUP_FAULT_INJECTION
+  # PageHeapTest refuses a page its n-th element (ChapterHtmlSlimParser::addPageElement). Inert otherwise.
+  ELEMENT_FAULT_INJECTION
   # Central-directory walk counters (ZipFile.h), for the tests that bound them. Inert otherwise.
   ZIP_FILE_SCAN_STATS
 )
