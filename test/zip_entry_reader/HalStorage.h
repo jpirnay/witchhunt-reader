@@ -413,7 +413,12 @@ class HalStorage {
     std::error_code ec;
     return recursive ? std::filesystem::create_directories(path, ec) : std::filesystem::create_directory(path, ec);
   }
-  bool remove(const char* path) { return std::filesystem::remove(path); }
+  // A refusal is a false return, as on the device, never a throw: Windows will not remove a file another handle has
+  // open (an aborted build removes its anchor spill before the parser that writes it is gone).
+  bool remove(const char* path) {
+    std::error_code ec;
+    return std::filesystem::remove(path, ec);
+  }
   bool rename(const char* oldPath, const char* newPath) {
     std::error_code ec;
     std::filesystem::rename(oldPath, newPath, ec);

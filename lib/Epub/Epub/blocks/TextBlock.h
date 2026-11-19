@@ -10,6 +10,12 @@
 #include <vector>
 
 class BuildArena;  // lib/Memory -- optional page-scoped storage for the arena bytes
+#ifdef BUILD_ARENA_TRACE
+#include <BuildArena.h>  // the rewind fill a destroyed line checks its bytes against
+
+#include <cstdio>
+#include <cstdlib>
+#endif
 namespace serialization {
 class BufferedFileWriter;  // lib/Serialization -- where a block writes itself
 class BufferedFileReader;  // and where it reads itself back
@@ -295,6 +301,13 @@ class TextBlock final : public Block {
   TextBlock(const WordRange& range, const std::vector<int16_t>& word_xpos, const BlockStyle& blockStyle,
             BuildArena* scratch = nullptr);
   ~TextBlock() override {
+#ifdef BUILD_ARENA_TRACE
+    // Host only: bytes taken from a build arena that read its rewind fill were given back before this line died.
+    if (!arenaOwned_ && buildArenaLooksRewound(arena, arenaBytes())) {
+      std::fprintf(stderr, "TextBlock destroyed after its arena block was rewound\n");
+      std::abort();
+    }
+#endif
     if (arenaOwned_) delete[] arena;
   }
   TextBlock(const TextBlock&) = delete;

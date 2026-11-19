@@ -5315,9 +5315,20 @@ void ChapterHtmlSlimParser::markLineStart() {
 }
 
 ChapterHtmlSlimParser::~ChapterHtmlSlimParser() {
-  // An aborted build can leave a page open. Rewind its block now, while the arena is still the
-  // section's: BuildState tears the parser down before it releases the feed-chunk block below.
+  // An aborted build can leave a page open, and a table's rows packed. Their lines go first (members would go only
+  // after this body), then the block is rewound, while the arena is still the section's: BuildState tears the parser
+  // down before it releases the feed-chunk block below.
+  dropLaidOutLines();
   releasePageBlock();
+}
+
+void ChapterHtmlSlimParser::dropLaidOutLines() {
+  // Both borrow elements of currentPage.
+  deferredPageImage_ = nullptr;
+  deferredDropCapLine_ = nullptr;
+  currentTableCell = nullptr;  // a cell of currentTable's row
+  currentTable.reset();
+  currentPage.reset();
 }
 
 size_t ChapterHtmlSlimParser::anchorLimit() const {
@@ -5641,11 +5652,9 @@ bool ChapterHtmlSlimParser::finalize() {
         emitPage();
       }
     }
-    // Both borrow elements of currentPage, and the layoutFailed / empty-final-page paths
-    // reach here without going through emitPage(), which is the other place they are cleared.
-    deferredPageImage_ = nullptr;
-    deferredDropCapLine_ = nullptr;
-    currentPage.reset();
+    // The layoutFailed / empty-final-page paths reach here without going through emitPage(), and a parse stopped inside
+    // a table leaves its rows packed: what is left goes before its block is rewound.
+    dropLaidOutLines();
     releasePageBlock();
     currentTextBlock.reset();
   }

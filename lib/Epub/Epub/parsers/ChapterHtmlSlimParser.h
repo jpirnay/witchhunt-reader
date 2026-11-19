@@ -1682,4 +1682,8 @@ class ChapterHtmlSlimParser final : public Print {
   uint16_t paragraphLinesOnPage_ = 0;
   void ensurePageBlock();
   void releasePageBlock();
+  // Destroys everything that holds lines laid out in the page block -- the open page and a table's packed rows -- on
+  // the paths that end a parse early (finalize(), the destructor). They must go before releasePageBlock() rewinds the
+  // block: the lines' bytes live there.
+  void dropLaidOutLines();
 };
