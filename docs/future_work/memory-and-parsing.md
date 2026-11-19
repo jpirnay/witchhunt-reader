@@ -22,15 +22,37 @@ tables of `test_nested_tables.epub` do the same (FIRSTAFTER at y=344 under the l
 **Why it matters.** A table runs into the text that follows it, against the book's CSS. Nothing is lost; it is spacing.
 
 **Where.** `applyBlockTopSpacing` takes `collapse = min(lastBlockMarginBottom, marginTop)`
-(`ChapterHtmlSlimParser.cpp:6054`), and only `makePages` (`:6012-6014`), `applyBlockTopSpacing` itself (`:6061`),
+(`ChapterHtmlSlimParser.cpp:6055`), and only `makePages` (`:6013-6015`), `applyBlockTopSpacing` itself (`:6062`),
 `emitPage` (`:1862`) and the box code (`:1944`, `:2014`) write `lastBlockMarginBottom`. A table writes nothing there: a
-grid fragment is placed by `flushTableFragment`, and a degraded cell by `emitCellAsParagraph` (`:7049`), which hands
-the cell's lines to `addLineToPage` (`:7079`) without `makePages`. So the paragraph laid out before the table still
+grid fragment is placed by `flushTableFragment`, and a degraded cell by `emitCellAsParagraph` (`:7051`), which hands
+the cell's lines to `addLineToPage` (`:7081`) without `makePages`. So the paragraph laid out before the table still
 holds `lastBlockMarginBottom` when the one after it opens.
 
 **Next step.** Reset `lastBlockMarginBottom` once a table fragment or a degraded cell is placed, and regenerate the
 goldens that hold a paragraph after a table (`test_table_streaming`, `test_nested_tables`, `test_tables`,
 `test_table_grid_edges`, `test_table_cell_overflow`), checking that each moved line is the paragraph's own margin.
+
+## A table cell keeps only its first picture
+
+**Open.** A cell holding more than one `<img>` shows the first and drops the rest, silently, whether the table is a
+grid or laid out as paragraphs. Probe (2026-11-19, the host dump tool, master 715896630 and this branch alike): a grid
+cell `GRIDA <img checker/> GRIDMID <img bar/> GRIDEND` dumps all three words and one `CELLIMG` (the checker), and the
+same cell in a table a rowspan degrades dumps its words and one block `IMG` (the checker); the bar is in neither.
+Cells of a nested table, and a cell's text after its inner table, are the exception: they stream the cell so far at a
+second picture and go on holding the next.
+
+**Why it matters.** It drops content without a word: an illustrated table (a plate with its legend, a row of icons)
+loses every picture but the first in each cell.
+
+**Where.** The in-cell branch of the image handler in `ChapterHtmlSlimParser::startElement` keeps one `src` per cell
+("first image per cell wins", `ChapterHtmlSlimParser.cpp:3353`) and returns for the others unless the cell is
+`streamed`. A grid row sizes the cell for that one picture (`layoutTableRow`, `cell.image = buildCellImage(...)`,
+`:6977`); a degraded cell places it after its text (`emitCellAsParagraph`, `:7093`, or `emitRowImagesAsBlocks`,
+`:6889`).
+
+**Next step.** In its own PR, place every picture of a cell. A degraded cell can stream the cell so far and go on, as
+a nested table's cell does now; a grid cell needs a decision about how a second picture fits its row's height (stack
+them, or degrade the row).
 
 ## A `<br>` that ends a block adds a blank line
 
