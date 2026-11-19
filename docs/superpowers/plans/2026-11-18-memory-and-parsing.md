@@ -116,3 +116,30 @@ worth it (5d). No cache change.
 Branch `fix/jpeg-failed-placeholder`, worktree `C:/tmp/wt-mp-08a`. Track J, after Task 9 (both touch
 `JpegToFramebufferConverter.cpp`). Spec §8 "8a". The damaged-JPEG item in `docs/future_work/memory-and-parsing.md`
 stays parked; note what 8a changed in it.
+
+## Wave 2 (after wave 1 merged, 2026-11-19)
+
+## Task 11: §9a, a table cell's line list is allocated once
+
+Branch `fix/table-cell-lines-once`, worktree `C:/tmp/wt-mp-09a`. Track T (after §1, #832). Spec §9 "9a". Gate: every
+golden byte-identical. No section version bump. This also settles §10's cell-lines site (`:6866` at the spec's base).
+
+## Task 12: §10c, the per-element stacks grow through one helper
+
+Branch `fix/parser-stack-growth`, worktree `C:/tmp/wt-mp-10c`. Track B (after §2, #834). Spec §10 "10c" and §10's
+fault-injection paragraph (`STACK_FAULT_INJECTION`). No section version bump.
+
+## Task 13: §14, an inline anchor is recorded at its own line
+
+Branch `fix/inline-anchor-page`, worktree `C:/tmp/wt-mp-14`. Track L (after §10b, #836; §9b/§9c wait for a Linux
+bench). Spec §14. Bumps `SECTION_FILE_VERSION` to master's value plus one.
+
+## Task 14: §13b, a chapter's lookups use only the sheets it links
+
+Branch `feat/css-scope-per-chapter`, worktree `C:/tmp/wt-mp-13b`. Track C (after §13a, #835). Spec §13 "13b", and
+the 13a review's notes for this step: write the sheet table after the index patch so a valid table marks a complete
+file, and treat a v36 cache without a valid table as damaged (delete and rebuild, not fail open); load the table with
+the index (in the arena when resident); the 64-import cap drops the whole table (consider 128); `importsOpen` stays
+true after `@namespace`/`@layer`. #835 cost +2,722 B of flash, more than recording a table suggests: find what it
+added (is `loadSheetTable` linked though unused?) and keep 13b's flash small. Bumps `SECTION_FILE_VERSION` to
+master's value plus one (it may collide with Task 13; the controller renumbers at merge).
