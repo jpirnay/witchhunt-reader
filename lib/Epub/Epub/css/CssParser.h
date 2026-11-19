@@ -5,6 +5,7 @@
 #include <list>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -16,7 +17,8 @@
 
 namespace serialization {
 class BufferedFileReader;
-}
+class BufferedFileWriter;
+}  // namespace serialization
 
 class BuildArena;  // lib/Memory — optional backing store for the disk index (Phase 2)
 
@@ -41,7 +43,8 @@ class BuildArena;  // lib/Memory — optional backing store for the disk index (
  *     take, kept apart for the paragraph's drop cap (resolveFirstLetterStyle)
  *   - Media queries (content is skipped)
  *   - @import and the other at-rules; an @supports block is skipped too, unless all it tests is initial-letter
- *     (supportsInitialLetter): its rules are read as if it were not there
+ *     (supportsInitialLetter): its rules are read as if it were not there. An @import is not followed (every
+ *     stylesheet of the book is compiled anyway), but the sheet it names is recorded (sheetImports)
  *
  * @font-face rules are not styles: they are collected into a side file next to the rule cache
  * (fontFaces / loadFontFaces), for the book's embedded fonts.
@@ -137,7 +140,10 @@ class CssParser {
   // v35 also: `initial-letter` (a byte after the flow word) and ::first-letter rules (flags bit 2) are persisted.
   // v35 also: borders and background colours (CssBox, three bytes after the initial-letter byte; the <hr> facts too).
   // v35 also: vertical-align middle, text-top, text-bottom, top, bottom and a length (three vertAlign bytes).
-  static constexpr uint8_t CSS_CACHE_VERSION = 35;
+  // v36: the file ends with the sheet table (each stylesheet's range of rule orders and the sheets its @import rules
+  //      name; see sheetRanges), and a selector redeclared at the start of a sheet no longer merges into the rule that
+  //      ended the sheet before it. Otherwise the rule records and the index are as v35 wrote them.
+  static constexpr uint8_t CSS_CACHE_VERSION = 36;
   // Bytes before the complex-rule table and the sorted offset index: version(1) + ruleCount(2) +
   // totalSelectorCandidates(4) + unsupportedSelectorSkips(4) + flags(1) + complexTableBytes(2).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 14;
@@ -363,7 +369,8 @@ class CssParser {
   // Reads the background declarations of a rule body or a style attribute; the last one wins.
   [[nodiscard]] static BackgroundDeclaration parseBackground(std::string_view declarations);
   // The stylesheet about to be compiled, as a path inside the EPUB: url() resolves against its
-  // directory. Set before each appendCompiledFromStream / loadFromStream.
+  // directory. Set before each appendCompiledFromStream / loadFromStream. It starts the sheet's
+  // range of rule orders (sheetRanges).
   void setStylesheetPath(const std::string& sheetPathInEpub);
   // The background picture of an element as an EPUB path (directory of its sheet + url, not yet
   // normalised or unescaped), or nullptr. Same cascade as resolveStyle for the selectors it keeps
@@ -397,6 +404,42 @@ class CssParser {
   // Takes the first face off `records`. False when none is left (or the rest is damaged).
   static bool nextFontFace(std::string_view& records, FontFace& face);
 
+  // The stylesheet each rule came from (v36), for a chapter to resolve against only the sheets it links
+  // (docs/future_work/memory-and-parsing.md). A rule's order runs on across the book's sheets in the order they are
+  // compiled (nextRuleOrder_), so each sheet owns one contiguous range of orders, which setStylesheetPath starts. The
+  // compile records each sheet's range and the sheets its @import rules name in a table at the end of the rules
+  // cache; loadSheetTable reads it back. No rule changes for it.
+  struct SheetRange {
+    uint32_t pathHash = 0;    // sheetPathHash of the sheet's path in the EPUB; kFoldedSheets for the fold (below)
+    uint16_t firstOrder = 0;  // its rules' orders: firstOrder <= order < endOrder, empty for a sheet without rules
+    uint16_t endOrder = 0;
+  };
+  struct SheetImport {
+    uint32_t importedHash = 0;  // sheetPathHash of the path an @import names, resolved against its sheet's folder
+    uint8_t importer = 0;       // the importing sheet's index in sheetRanges()
+  };
+  // A book with more sheets keeps MAX_SHEETS ranges: the last takes in its 64th sheet and every one after it, and its
+  // path hash becomes kFoldedSheets, a range for every chapter. Past MAX_SHEET_IMPORTS imports, when the orders run
+  // out (nextRuleOrder_ saturates) or when the heap has no block for the table, the compile records an empty table:
+  // every rule applies to every chapter, as before v36.
+  static constexpr size_t MAX_SHEETS = 64;
+  static constexpr size_t MAX_SHEET_IMPORTS = 64;
+  static constexpr uint32_t kFoldedSheets = 0;
+  // A stylesheet's identity in the table: FNV-1a of its path in the EPUB as the book compiles it, unescaped and
+  // normalised (a manifest href joined to the package's folder; resolveStylesheetHref); never kFoldedSheets.
+  [[nodiscard]] static uint32_t sheetPathHash(std::string_view pathInEpub);
+  // A stylesheet reference (an @import's url, a <link>'s href) as the path in the EPUB sheetPathHash takes: joined to
+  // `baseDir` (the referring file's folder, with its trailing slash), or to the EPUB's root when it starts with '/',
+  // then unescaped and normalised; its query and fragment dropped. False for what is not in the book: an empty
+  // reference, a data: URI, a remote one.
+  static bool resolveStylesheetHref(std::string_view baseDir, std::string_view href, std::string& out);
+  // Reads the table at the end of the rules cache into sheetRanges() and sheetImports(), each sized by its count.
+  // False when the cache cannot be read, is of another version or ends in no valid table, or the heap has no block
+  // for it; true with no ranges when the compile recorded none.
+  bool loadSheetTable() const;
+  [[nodiscard]] std::span<const SheetRange> sheetRanges() const { return {sheetRanges_.get(), sheetCount_}; }
+  [[nodiscard]] std::span<const SheetImport> sheetImports() const { return {sheetImports_.get(), importCount_}; }
+
  private:
   // The faces recorded so far, as the side file stores them (see fontFacesFile), and their count.
   std::string fontFaces_;
@@ -427,6 +470,28 @@ class CssParser {
     CssStyle style;
     uint16_t order = 0;
   };
+
+  // The sheet table (see SheetRange): staged while the sheets are compiled, or read back by loadSheetTable. Each
+  // array grows in steps, as the complex-rule table does: a book's few sheets cost a few dozen bytes, 64 sheets and
+  // 64 imports 1 KB. On the heap (makeUniqueNoThrow): the compile has no arena, its lent region reaches only the
+  // finish.
+  mutable std::unique_ptr<SheetRange[]> sheetRanges_;
+  mutable std::unique_ptr<SheetImport[]> sheetImports_;
+  mutable uint8_t sheetCount_ = 0;
+  mutable uint8_t sheetCapacity_ = 0;
+  mutable uint8_t importCount_ = 0;
+  mutable uint8_t importCapacity_ = 0;
+  bool sheetTableDropped_ = false;  // a cap or the heap refused it: the compile writes an empty table
+  // Where the sheet being read starts in the rule order. A redeclaration merges only into a rule of its own sheet, so
+  // that a record's order tells the sheet every one of its declarations came from.
+  uint16_t sheetFirstOrder_ = 0;
+  void beginSheetRange(uint32_t pathHash);
+  // Records the sheet an @import rule's prelude ("import url(x.css) screen") names, for the sheet being read.
+  void noteImport(std::string_view prelude);
+  void dropSheetTable(const char* why);
+  void freeSheetTable() const;
+  // The table as the rules cache ends (v36), after the rule records; false when a write failed.
+  bool writeSheetTable(serialization::BufferedFileWriter& out) const;
 
   // Storage: maps normalized selector -> style properties. A multimap: a selector declared again
   // after other rules is kept as a second entry, because merging it into the first would move the
