@@ -199,10 +199,6 @@ refusal there aborts and reboots (`-fno-exceptions`); counted in `ChapterHtmlSli
 - the other per-element stacks: `listStack` (`:3972`), `containerWidthStack_` (`:3180`), `backgroundImageScopes_`
   (`:6428`), and, capped in count but grown the same way, `heldBottomSpacing_` (`:2688`, 8), `blockInsetStack_`
   (`:4038`, 8) and `anchorsAwaitingLine_` (`:5343`, 16);
-- a table's packed rows, `t.packer.rows.push_back` (`:6320`, `:6330`; at most `MAX_TABLE_ROWS`, 48, per fragment);
-- a row's cells: `pendingRow.cells` (`:3327`, `:6905`; the streamed nested cell's own `emplace_back`, `:6954`, asks
-  `heapReserveFor` first), a laid-out row's `out.cells.reserve(columnCount)` (`:6995`; the pushes at `:7080` and `:7085` stay within it),
-  a grid cell's lines are done (9a: reserved through `heapReserveFor`);
 - `std::string` growth during the parse, for example the ruby text (`rubyText_`, `:4577-4581`, up to 255 bytes).
 
 **Next step.** Ask `HeapFit` before each growth (`heapReserveFor`, as the elements reserve does) and stop the build on

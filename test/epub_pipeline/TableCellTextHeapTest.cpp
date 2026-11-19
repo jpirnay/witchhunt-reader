@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -215,4 +216,143 @@ TEST(TableCellLines, ARefusedExactListSendsTheRowOutAsParagraphs) {
   for (size_t allowed = 0; allowed < static_cast<size_t>(kCols); ++allowed) {
     expectTableKeptAsParagraphs("list_refused_" + std::to_string(allowed), SIZE_MAX, allowed);
   }
+}
+
+namespace {
+
+enum class TableGrowth { RowCells, LayoutCells, PackerRows };
+
+// Restores "never refuse" however the test ends. `asks` successes of `kind`, then `refusals` refused asks (SIZE_MAX:
+// every one from then on).
+struct GrowthHooks {
+  GrowthHooks(const TableGrowth kind, const size_t asks, const size_t refusals) {
+    tableRowCellsLeft() = layoutCellsLeft() = packerRowsLeft() = SIZE_MAX;
+    size_t& left = kind == TableGrowth::RowCells      ? tableRowCellsLeft()
+                   : kind == TableGrowth::LayoutCells ? layoutCellsLeft()
+                                                      : packerRowsLeft();
+    left = asks;
+    tableGrowthRefusals() = refusals;
+    tableGrowthRefused() = 0;
+  }
+  ~GrowthHooks() {
+    tableRowCellsLeft() = layoutCellsLeft() = packerRowsLeft() = SIZE_MAX;
+    tableGrowthRefusals() = SIZE_MAX;
+  }
+  GrowthHooks(const GrowthHooks&) = delete;
+  GrowthHooks& operator=(const GrowthHooks&) = delete;
+};
+
+// The words of every page, a grid row's cells included (wordsOfAllPages sees paragraphs only), in reading order.
+std::vector<std::string> wordsOfAllPagesAndGrids(Section& section) {
+  std::vector<std::string> words;
+  const auto addBlock = [&words](const TextBlock* block) {
+    if (!block || !block->valid()) return;
+    for (uint16_t w = 0; w < block->wordCount(); ++w) words.emplace_back(block->wordText(w));
+  };
+  for (int pg = 0; pg < section.pageCount; ++pg) {
+    section.currentPage = pg;
+    const auto page = section.loadPageFromSectionFile();
+    EXPECT_TRUE(page) << "page " << pg;
+    if (!page) break;
+    for (const auto& el : page->elements) {
+      if (el->getTag() == TAG_PageLine) {
+        addBlock(static_cast<const PageLine&>(*el).getBlock());
+      } else if (el->getTag() == TAG_PageTable) {
+        for (const auto& row : static_cast<const PageTableFragment&>(*el).getRows())
+          for (const auto& cell : row.cells)
+            for (const auto& line : cell.lines) addBlock(line.get());
+      }
+    }
+  }
+  return words;
+}
+
+// Every word the whole chapter holds, in order.
+std::vector<std::string> expectedWords() {
+  std::vector<std::string> out;
+  for (int i = 0; i < kLeadParagraphs; ++i) out.push_back(word(i));
+  for (int r = 0; r < kRows; ++r)
+    for (int c = 0; c < kCols; ++c) out.push_back("c" + std::to_string(r) + std::to_string(c));
+  out.push_back("after");
+  return out;
+}
+
+// Builds `body()` refusing the (`asks`+1)-th ask of `kind`. A refusal the table absorbs leaves the whole chapter, every
+// word in order; one the build cannot absorb stops it with the pages before it kept and nothing lost out of order.
+// Returns whether any ask was refused (false: `asks` is past the table's last ask).
+bool buildRefusingGrowth(const TableGrowth kind, const size_t asks, const size_t refusals, const bool mustStop) {
+  SCOPED_TRACE("kind " + std::to_string(static_cast<int>(kind)) + ", asks allowed " + std::to_string(asks) +
+               ", refusals " + std::to_string(refusals));
+  GfxRenderer renderer;
+  const auto work = freshWorkDir("growth_" + std::to_string(static_cast<int>(kind)) + "_" + std::to_string(asks) + "_" +
+                                 std::to_string(refusals == SIZE_MAX ? 99 : refusals));
+  auto epub = syntheticBook(work, 0, body());
+  EXPECT_TRUE(epub);
+  if (!epub) return false;
+  size_t refused = 0;
+  {
+    Section built(epub, 0, renderer);
+    bool ok = false;
+    {
+      const GrowthHooks guard(kind, asks, refusals);
+      ok = built.createSectionFile(pages(), {}, /*skipEviction=*/true);
+      refused = tableGrowthRefused();
+    }
+    EXPECT_TRUE(ok);
+    const auto words = wordsOfAllPagesAndGrids(built);
+    const auto expected = expectedWords();
+    if (refused == 0) {
+      EXPECT_FALSE(built.isTruncatedCache());
+      EXPECT_EQ(words, expected);
+    } else if (mustStop) {
+      EXPECT_TRUE(built.isTruncatedCache()) << "the heap stayed out: the build stops and says so";
+      EXPECT_GE(words.size(), static_cast<size_t>(kLeadParagraphs) / 2);
+      EXPECT_LE(words.size(), expected.size());
+      EXPECT_TRUE(std::equal(words.begin(), words.end(), expected.begin())) << "what was kept is a prefix, in order";
+    } else {
+      EXPECT_FALSE(built.isTruncatedCache()) << "a softer exit: the row goes out as paragraphs";
+      EXPECT_EQ(words, expected) << "every word of every degraded row, in order";
+    }
+  }
+  epub.reset();
+  fs::remove_all(work);
+  return refused != 0;
+}
+
+// Walks the refusal over every ask of `kind` the fixture makes, until a count that refuses nothing.
+void walkGrowth(const TableGrowth kind, const size_t refusals, const bool mustStop) {
+  size_t asks = 0;
+  while (buildRefusingGrowth(kind, asks, refusals, mustStop)) {
+    ++asks;
+    ASSERT_LT(asks, 64u) << "the walk never ran out of asks";
+  }
+  EXPECT_GT(asks, 0u) << "the fixture made no ask of this kind";
+}
+
+}  // namespace
+
+// A refused cell slot degrades the row it would have joined, keeping its text, and asks once more.
+TEST(TableRowGrowth, ARefusedCellSlotDegradesTheRowAndKeepsItsWords) {
+  walkGrowth(TableGrowth::RowCells, 1, /*mustStop=*/false);
+}
+
+// A second refusal in a row has no row left to degrade: the build stops with its pages kept.
+TEST(TableRowGrowth, ARefusedCellSlotThatStaysRefusedStopsTheBuild) {
+  walkGrowth(TableGrowth::RowCells, SIZE_MAX, /*mustStop=*/true);
+}
+
+// A refused laid-out cell list is the paragraph exit, whether it is one row or every row.
+TEST(TableRowGrowth, ARefusedLayoutCellListSendsTheRowOutAsParagraphs) {
+  walkGrowth(TableGrowth::LayoutCells, 1, /*mustStop=*/false);
+  walkGrowth(TableGrowth::LayoutCells, SIZE_MAX, /*mustStop=*/false);
+}
+
+// A refused fragment row list flushes the fragment and asks once more.
+TEST(TableRowGrowth, ARefusedFragmentRowListFlushesAndAsksAgain) {
+  walkGrowth(TableGrowth::PackerRows, 1, /*mustStop=*/false);
+}
+
+// Refused twice in a row, the build stops with its pages kept.
+TEST(TableRowGrowth, AFragmentRowListRefusedTwiceStopsTheBuild) {
+  walkGrowth(TableGrowth::PackerRows, SIZE_MAX, /*mustStop=*/true);
 }

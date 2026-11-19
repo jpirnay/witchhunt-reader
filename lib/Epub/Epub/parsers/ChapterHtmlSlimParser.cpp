@@ -3324,6 +3324,18 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       return;
     }
     const bool isHeader = (strcmp(name, "th") == 0);
+    // The row's cell list grows only through a block the heap holds. A refusal sends the row out as paragraphs, which
+    // keeps every buffered cell's text and empties the list, and the cell being opened then streams as a degraded
+    // row's does; the second ask is for that one cell, in the capacity the emptied list kept. Refused again, the
+    // build stops with its pages kept.
+    if (!self->reserveRowCell(row)) {
+      self->degradeRow("no heap for the row");
+      if (!self->reserveRowCell(row)) {
+        self->currentTableCell = nullptr;
+        self->stopForHeap("a table row's cells", sizeof(BufferedTableCell));
+        return;
+      }
+    }
     row.cells.emplace_back();
     row.cells.back().isHeader = isHeader;
     row.cells.back().colSpan = colSpan;
@@ -6236,6 +6248,19 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   if (!t.packer.rows.empty() && lr.renderCols != t.packer.cols) {
     flushFragmentBeforeRow();
   }
+  // The fragment's row list takes this row and, on a continuation, the repeated header ahead of it. Asked before the
+  // placement tests below, so a flush here leaves the packer empty for them to place the row against: a flush after
+  // them would move the page position the row's fit was tested at. flushTableFragment empties the list (and a moved
+  // list gives its block to the fragment), so the second ask is for a block the heap may hold again; refused twice,
+  // the build stops with its pages kept.
+  if (!reservePackerRows(t.packer, 2)) {
+    flushFragmentBeforeRow();
+    if (!currentPage || streamFailed || !reservePackerRows(t.packer, 2)) {
+      stopForHeap("a table fragment's rows", 2 * sizeof(TableRow));
+      dropRowLayout();
+      return;
+    }
+  }
   if (t.packer.cols == 0) t.packer.cols = lr.renderCols;
 
   const uint16_t rowContrib = t.packer.hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
@@ -6825,6 +6850,22 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
   }
 }
 
+bool ChapterHtmlSlimParser::reserveRowCell(BufferedTableRow& row) {
+  bool room = heapReserveFor(row.cells, 1);
+#ifdef TABLE_CELL_FAULT_INJECTION
+  if (tableGrowthFault(tableRowCellsLeft())) room = false;
+#endif
+  return room;
+}
+
+bool ChapterHtmlSlimParser::reservePackerRows(TableFragmentPacker& packer, const size_t extra) {
+  bool room = heapReserveFor(packer.rows, extra);
+#ifdef TABLE_CELL_FAULT_INJECTION
+  if (tableGrowthFault(packerRowsLeft())) room = false;
+#endif
+  return room;
+}
+
 void ChapterHtmlSlimParser::degradeRow(const char* reason) {
   if (!currentTable) return;
   auto& t = *currentTable;
@@ -6993,7 +7034,17 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
   out.cells.clear();
   out.isHeaderRow = bufRow.isHeaderRow;
   out.renderCols = columnCount;
-  out.cells.reserve(columnCount);  // spans sum to columnCount, so that is the padded upper bound
+  // Spans sum to columnCount, so that is the padded upper bound: at most MAX_TABLE_COLS cells, asked of the heap. A
+  // refusal is the paragraph exit, like any other row that cannot be laid out as a grid row.
+  bool cellsRefused = !heapReserveFor(out.cells, columnCount);
+#ifdef TABLE_CELL_FAULT_INJECTION
+  if (tableGrowthFault(layoutCellsLeft())) cellsRefused = true;
+#endif
+  if (cellsRefused) {
+    LOG_DBG("EHP", "No heap for a row's %u laid-out cells - falling back to paragraphs",
+            static_cast<unsigned>(columnCount));
+    return false;
+  }
   // The table's first grid row reserves the shared line scratch; later rows find it in place. A refusal sends the row
   // out as paragraphs, like any other grid row that cannot be laid out. Cleared on every way out of this function: a
   // line left in it would outlive the arena block the caller releases.
