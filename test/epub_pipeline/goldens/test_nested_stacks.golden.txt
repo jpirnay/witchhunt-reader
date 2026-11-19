@@ -1,0 +1,463 @@
+BOOK title=Nested Stacks Test lang=en spine=1 toc=1 reliableToc=1
+SPINE 0 href=OEBPS/text/chapter1.xhtml pages=3 truncated=0 cssFallback=0
+ PAGE 0 elements=30 footnotes=13
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=START
+   W x=67 s=0 z=100 t=of
+   W x=95 s=0 z=100 t=the
+   W x=132 s=0 z=100 t=nested
+   W x=194 s=0 z=100 t=stacks.
+  LINE y=24 x=7 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=L00a
+   W x=74 s=1 z=100 t=L00b
+   W x=128 s=2 z=100 t=L00c
+   W x=179 s=2 z=100 t=L00d
+   W x=231 s=1 z=100 t=L00e
+   W x=288 s=4 z=100 t=L00f
+   W x=342 s=8 z=100 t=L00g
+   W x=397 s=16 z=50 t=L00h
+   W x=426 s=32 z=50 t=L00i
+  LINE y=48 x=7 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=80 t=L00j
+   W x=39 s=3 z=100 t=L00k
+   W x=93 s=4 z=100 t=L00l
+   W x=144 s=0 z=100 t=L00z
+  LINE y=72 x=14 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=L01a
+   W x=69 s=1 z=100 t=L01b
+   W x=118 s=2 z=100 t=L01c
+   W x=164 s=2 z=100 t=L01d
+   W x=211 s=1 z=100 t=L01e
+   W x=263 s=4 z=100 t=L01f
+   W x=312 s=8 z=100 t=L01g
+   W x=362 s=16 z=50 t=L01h
+   W x=389 s=32 z=50 t=L01i
+   W x=413 s=0 z=80 t=L01j
+  LINE y=96 x=14 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=3 z=100 t=L01k
+   W x=48 s=4 z=100 t=L01l
+   W x=93 s=0 z=100 t=L01z
+  LINE y=120 x=41 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=1.
+   W x=40 s=0 z=100 t=LI01A
+   W x=93 s=1 z=100 t=LI01B
+  LINE y=144 x=48 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=2.
+   W x=43 s=0 z=100 t=L02a
+   W x=94 s=1 z=100 t=L02b
+   W x=143 s=2 z=100 t=L02c
+   W x=189 s=2 z=100 t=L02d
+   W x=236 s=1 z=100 t=L02e
+   W x=288 s=4 z=100 t=L02f
+   W x=337 s=8 z=100 t=L02g
+   W x=387 s=16 z=50 t=L02h
+  LINE y=168 x=48 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=32 z=50 t=L02i
+   W x=22 s=0 z=80 t=L02j
+   W x=57 s=3 z=100 t=L02k
+   W x=106 s=4 z=100 t=L02l
+   W x=152 s=0 z=100 t=L02z
+  LINE y=192 x=55 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=L03a
+   W x=68 s=1 z=100 t=L03b
+   W x=116 s=2 z=100 t=L03c
+   W x=161 s=2 z=100 t=L03d
+   W x=207 s=1 z=100 t=L03e
+   W x=258 s=4 z=100 t=L03f
+   W x=306 s=8 z=100 t=L03g
+   W x=355 s=16 z=50 t=L03h
+   W x=380 s=32 z=50 t=L03i
+  LINE y=216 x=55 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=80 t=L03j
+   W x=36 s=3 z=100 t=L03k
+   W x=86 s=4 z=100 t=L03l
+   W x=133 s=0 z=100 t=L03z
+  LINE y=240 x=62 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=L04a
+   W x=70 s=1 z=100 t=L04b
+   W x=120 s=2 z=100 t=L04c
+   W x=167 s=2 z=100 t=L04d
+   W x=215 s=1 z=100 t=L04e
+   W x=268 s=4 z=100 t=L04f
+   W x=318 s=8 z=100 t=L04g
+   W x=369 s=16 z=50 t=L04h
+  LINE y=264 x=62 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=32 z=50 t=L04i
+   W x=23 s=0 z=80 t=L04j
+   W x=60 s=3 z=100 t=L04k
+   W x=111 s=4 z=100 t=L04l
+   W x=159 s=0 z=100 t=L04z
+  LINE y=288 x=69 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=L05a
+   W x=74 s=1 z=100 t=L05b
+   W x=128 s=2 z=100 t=L05c
+   W x=179 s=2 z=100 t=L05d
+   W x=231 s=1 z=100 t=L05e
+   W x=288 s=4 z=100 t=L05f
+   W x=342 s=8 z=100 t=L05g
+  LINE y=312 x=69 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=16 z=50 t=L05h
+   W x=26 s=32 z=50 t=L05i
+   W x=49 s=0 z=80 t=L05j
+   W x=87 s=3 z=100 t=L05k
+   W x=139 s=4 z=100 t=L05l
+   W x=188 s=0 z=100 t=L05z
+  LINE y=336 x=72 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=•
+   W x=31 s=0 z=100 t=LI05A
+   W x=88 s=1 z=100 t=LI05B
+  LINE y=360 x=72 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=•
+   W x=31 s=0 z=100 t=L06a
+   W x=84 s=1 z=100 t=L06b
+   W x=135 s=2 z=100 t=L06c
+   W x=183 s=2 z=100 t=L06d
+   W x=232 s=1 z=100 t=L06e
+   W x=286 s=4 z=100 t=L06f
+   W x=337 s=8 z=100 t=L06g
+  LINE y=384 x=72 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=16 z=50 t=L06h
+   W x=27 s=32 z=50 t=L06i
+   W x=51 s=0 z=80 t=L06j
+   W x=90 s=3 z=100 t=L06k
+   W x=143 s=4 z=100 t=L06l
+   W x=193 s=0 z=100 t=L06z
+  LINE y=408 x=72 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=L07a
+   W x=73 s=1 z=100 t=L07b
+   W x=126 s=2 z=100 t=L07c
+   W x=176 s=2 z=100 t=L07d
+   W x=227 s=1 z=100 t=L07e
+   W x=283 s=4 z=100 t=L07f
+   W x=336 s=8 z=100 t=L07g
+  LINE y=432 x=72 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=16 z=50 t=L07h
+   W x=27 s=32 z=50 t=L07i
+   W x=51 s=0 z=80 t=L07j
+   W x=90 s=3 z=100 t=L07k
+   W x=144 s=4 z=100 t=L07l
+   W x=195 s=0 z=100 t=L07z
+  LINE y=456 x=72 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=L08a
+   W x=66 s=1 z=100 t=L08b
+   W x=112 s=2 z=100 t=L08c
+   W x=155 s=2 z=100 t=L08d
+   W x=199 s=1 z=100 t=L08e
+   W x=248 s=4 z=100 t=L08f
+   W x=294 s=8 z=100 t=L08g
+   W x=341 s=16 z=50 t=L08h
+   W x=365 s=32 z=50 t=L08i
+  LINE y=480 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=80 t=L08j
+   W x=35 s=3 z=100 t=L08k
+   W x=83 s=4 z=100 t=L08l
+   W x=128 s=0 z=100 t=L08z
+  LINE y=512 x=72 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=L09a
+   W x=69 s=1 z=100 t=L09b
+   W x=118 s=2 z=100 t=L09c
+   W x=164 s=2 z=100 t=L09d
+   W x=211 s=1 z=100 t=L09e
+   W x=263 s=4 z=100 t=L09f
+   W x=312 s=8 z=100 t=L09g
+   W x=362 s=16 z=50 t=L09h
+  LINE y=536 x=72 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=32 z=50 t=L09i
+   W x=22 s=0 z=80 t=L09j
+   W x=57 s=3 z=100 t=L09k
+   W x=106 s=4 z=100 t=L09l
+   W x=152 s=0 z=100 t=L09z
+  LINE y=568 x=72 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=1.
+   W x=40 s=0 z=100 t=LI09A
+   W x=94 s=1 z=100 t=LI09B
+  LINE y=592 x=72 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=2.
+   W x=41 s=0 z=100 t=L10a
+   W x=89 s=1 z=100 t=L10b
+   W x=135 s=2 z=100 t=L10c
+   W x=178 s=2 z=100 t=L10d
+   W x=222 s=1 z=100 t=L10e
+   W x=271 s=4 z=100 t=L10f
+   W x=317 s=8 z=100 t=L10g
+   W x=364 s=16 z=50 t=L10h
+  LINE y=616 x=72 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=32 z=50 t=L10i
+   W x=21 s=0 z=80 t=L10j
+   W x=56 s=3 z=100 t=L10k
+   W x=104 s=4 z=100 t=L10l
+   W x=149 s=0 z=100 t=L10z
+  LINE y=648 x=72 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=L11a
+   W x=62 s=1 z=100 t=L11b
+   W x=104 s=2 z=100 t=L11c
+   W x=143 s=2 z=100 t=L11d
+   W x=183 s=1 z=100 t=L11e
+   W x=228 s=4 z=100 t=L11f
+   W x=270 s=8 z=100 t=L11g
+   W x=313 s=16 z=50 t=L11h
+   W x=336 s=32 z=50 t=L11i
+   W x=356 s=0 z=80 t=L11j
+  LINE y=672 x=72 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=3 z=100 t=L11k
+   W x=42 s=4 z=100 t=L11l
+   W x=81 s=0 z=100 t=L11z
+  LINE y=704 x=72 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=L12a
+   W x=62 s=1 z=100 t=L12b
+   W x=104 s=2 z=100 t=L12c
+   W x=143 s=2 z=100 t=L12d
+   W x=183 s=1 z=100 t=L12e
+   W x=228 s=4 z=100 t=L12f
+   W x=270 s=8 z=100 t=L12g
+   W x=313 s=16 z=50 t=L12h
+   W x=336 s=32 z=50 t=L12i
+   W x=356 s=0 z=80 t=L12j
+  LINE y=728 x=72 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=3 z=100 t=L12k
+   W x=43 s=4 z=100 t=L12l
+   W x=83 s=0 z=100 t=L12z
+  FN n=L00l href=#d0
+  FN n=L01l href=#d1
+  FN n=L02l href=#d2
+  FN n=L03l href=#d3
+  FN n=L04l href=#d4
+  FN n=L05l href=#d5
+  FN n=L06l href=#d6
+  FN n=L07l href=#d7
+  FN n=L08l href=#d8
+  FN n=L09l href=#d9
+  FN n=L10l href=#d10
+  FN n=L11l href=#d11
+  FN n=L12l href=#d12
+ PAGE 1 elements=29 footnotes=7
+  LINE y=0 x=72 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=L13a
+   W x=62 s=1 z=100 t=L13b
+   W x=104 s=2 z=100 t=L13c
+   W x=143 s=2 z=100 t=L13d
+   W x=183 s=1 z=100 t=L13e
+   W x=228 s=4 z=100 t=L13f
+   W x=270 s=8 z=100 t=L13g
+   W x=313 s=16 z=50 t=L13h
+   W x=335 s=32 z=50 t=L13i
+   W x=354 s=0 z=80 t=L13j
+  LINE y=24 x=72 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=3 z=100 t=L13k
+   W x=44 s=4 z=100 t=L13l
+   W x=85 s=0 z=100 t=L13z
+  LINE y=56 x=72 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=•
+   W x=31 s=0 z=100 t=LI13A
+   W x=80 s=1 z=100 t=LI13B
+  LINE y=80 x=72 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=•
+   W x=32 s=0 z=100 t=L14a
+   W x=78 s=1 z=100 t=L14b
+   W x=122 s=2 z=100 t=L14c
+   W x=163 s=2 z=100 t=L14d
+   W x=205 s=1 z=100 t=L14e
+   W x=252 s=4 z=100 t=L14f
+   W x=296 s=8 z=100 t=L14g
+   W x=341 s=16 z=50 t=L14h
+   W x=365 s=32 z=50 t=L14i
+  LINE y=104 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=80 t=L14j
+   W x=32 s=3 z=100 t=L14k
+   W x=77 s=4 z=100 t=L14l
+   W x=119 s=0 z=100 t=L14z
+  LINE y=136 x=72 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=L15a
+   W x=66 s=1 z=100 t=L15b
+   W x=112 s=2 z=100 t=L15c
+   W x=155 s=2 z=100 t=L15d
+   W x=199 s=1 z=100 t=L15e
+   W x=248 s=4 z=100 t=L15f
+   W x=294 s=8 z=100 t=L15g
+   W x=341 s=16 z=50 t=L15h
+   W x=366 s=32 z=50 t=L15i
+  LINE y=160 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=80 t=L15j
+   W x=33 s=3 z=100 t=L15k
+   W x=79 s=4 z=100 t=L15l
+   W x=122 s=0 z=100 t=L15z
+  LINE y=192 x=72 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=L16a
+   W x=66 s=1 z=100 t=L16b
+   W x=112 s=2 z=100 t=L16c
+   W x=155 s=2 z=100 t=L16d
+   W x=199 s=1 z=100 t=L16e
+   W x=248 s=4 z=100 t=L16f
+   W x=294 s=8 z=100 t=L16g
+   W x=341 s=16 z=50 t=L16h
+   W x=366 s=32 z=50 t=L16i
+  LINE y=216 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=80 t=L16j
+   W x=34 s=3 z=100 t=L16k
+   W x=81 s=4 z=100 t=L16l
+   W x=125 s=0 z=100 t=L16z
+  LINE y=248 x=72 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=L17a
+   W x=66 s=1 z=100 t=L17b
+   W x=112 s=2 z=100 t=L17c
+   W x=155 s=2 z=100 t=L17d
+   W x=199 s=1 z=100 t=L17e
+   W x=248 s=4 z=100 t=L17f
+   W x=294 s=8 z=100 t=L17g
+   W x=341 s=16 z=50 t=L17h
+   W x=365 s=32 z=50 t=L17i
+  LINE y=272 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=80 t=L17j
+   W x=35 s=3 z=100 t=L17k
+   W x=83 s=4 z=100 t=L17l
+   W x=128 s=0 z=100 t=L17z
+  LINE y=304 x=72 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=1.
+   W x=40 s=0 z=100 t=LI17A
+   W x=93 s=1 z=100 t=LI17B
+  LINE y=328 x=72 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=2.
+   W x=44 s=0 z=100 t=L18a
+   W x=89 s=1 z=100 t=L18b
+   W x=132 s=2 z=100 t=L18c
+   W x=172 s=2 z=100 t=L18d
+   W x=213 s=1 z=100 t=L18e
+   W x=259 s=4 z=100 t=L18f
+   W x=302 s=8 z=100 t=L18g
+   W x=346 s=16 z=50 t=L18h
+   W x=370 s=32 z=50 t=L18i
+  LINE y=352 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=80 t=L18j
+   W x=30 s=3 z=100 t=L18k
+   W x=72 s=4 z=100 t=L18l
+   W x=111 s=0 z=100 t=L18z
+  LINE y=384 x=72 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=L19a
+   W x=62 s=1 z=100 t=L19b
+   W x=104 s=2 z=100 t=L19c
+   W x=143 s=2 z=100 t=L19d
+   W x=183 s=1 z=100 t=L19e
+   W x=228 s=4 z=100 t=L19f
+   W x=270 s=8 z=100 t=L19g
+   W x=313 s=16 z=50 t=L19h
+   W x=336 s=32 z=50 t=L19i
+   W x=356 s=0 z=80 t=L19j
+  LINE y=408 x=72 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=3 z=100 t=L19k
+   W x=43 s=4 z=100 t=L19l
+   W x=83 s=0 z=100 t=L19z
+  LINE y=440 x=72 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=INNERMOST
+   W x=102 s=0 z=100 t=text
+   W x=144 s=0 z=100 t=of
+   W x=172 s=0 z=100 t=the
+   W x=209 s=0 z=100 t=deepest
+   W x=275 s=0 z=100 t=level.
+  LINE y=464 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER19
+   W x=80 s=0 z=100 t=the
+   W x=117 s=0 z=100 t=level
+   W x=171 s=0 z=100 t=closed.
+  LINE y=488 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER18
+   W x=79 s=0 z=100 t=the
+   W x=116 s=0 z=100 t=level
+   W x=170 s=0 z=100 t=closed.
+  LINE y=512 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER17
+   W x=85 s=0 z=100 t=the
+   W x=122 s=0 z=100 t=level
+   W x=176 s=0 z=100 t=closed.
+  LINE y=536 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER16
+   W x=84 s=0 z=100 t=the
+   W x=121 s=0 z=100 t=level
+   W x=175 s=0 z=100 t=closed.
+  LINE y=560 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER15
+   W x=83 s=0 z=100 t=the
+   W x=120 s=0 z=100 t=level
+   W x=174 s=0 z=100 t=closed.
+  LINE y=584 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER14
+   W x=82 s=0 z=100 t=the
+   W x=119 s=0 z=100 t=level
+   W x=173 s=0 z=100 t=closed.
+  LINE y=608 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER13
+   W x=81 s=0 z=100 t=the
+   W x=118 s=0 z=100 t=level
+   W x=172 s=0 z=100 t=closed.
+  LINE y=632 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER12
+   W x=80 s=0 z=100 t=the
+   W x=117 s=0 z=100 t=level
+   W x=171 s=0 z=100 t=closed.
+  LINE y=656 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER11
+   W x=79 s=0 z=100 t=the
+   W x=116 s=0 z=100 t=level
+   W x=170 s=0 z=100 t=closed.
+  LINE y=680 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER10
+   W x=85 s=0 z=100 t=the
+   W x=122 s=0 z=100 t=level
+   W x=176 s=0 z=100 t=closed.
+  LINE y=704 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER09
+   W x=86 s=0 z=100 t=the
+   W x=123 s=0 z=100 t=level
+   W x=177 s=0 z=100 t=closed.
+  LINE y=728 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER08
+   W x=85 s=0 z=100 t=the
+   W x=122 s=0 z=100 t=level
+   W x=176 s=0 z=100 t=closed.
+  FN n=L13l href=#d13
+  FN n=L14l href=#d14
+  FN n=L15l href=#d15
+  FN n=L16l href=#d16
+  FN n=L17l href=#d17
+  FN n=L18l href=#d18
+  FN n=L19l href=#d19
+ PAGE 2 elements=8 footnotes=0
+  LINE y=0 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER07
+   W x=91 s=0 z=100 t=the
+   W x=128 s=0 z=100 t=level
+   W x=182 s=0 z=100 t=closed.
+  LINE y=32 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER06
+   W x=90 s=0 z=100 t=the
+   W x=127 s=0 z=100 t=level
+   W x=181 s=0 z=100 t=closed.
+  LINE y=67 x=69 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER05
+   W x=89 s=0 z=100 t=the
+   W x=126 s=0 z=100 t=level
+   W x=180 s=0 z=100 t=closed.
+  LINE y=99 x=62 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER04
+   W x=88 s=0 z=100 t=the
+   W x=125 s=0 z=100 t=level
+   W x=179 s=0 z=100 t=closed.
+  LINE y=131 x=55 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER03
+   W x=87 s=0 z=100 t=the
+   W x=124 s=0 z=100 t=level
+   W x=178 s=0 z=100 t=closed.
+  LINE y=163 x=48 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER02
+   W x=86 s=0 z=100 t=the
+   W x=123 s=0 z=100 t=level
+   W x=177 s=0 z=100 t=closed.
+  LINE y=198 x=14 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER01
+   W x=85 s=0 z=100 t=the
+   W x=122 s=0 z=100 t=level
+   W x=176 s=0 z=100 t=closed.
+  LINE y=230 x=7 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=AFTER00
+   W x=91 s=0 z=100 t=the
+   W x=128 s=0 z=100 t=level
+   W x=182 s=0 z=100 t=closed.
