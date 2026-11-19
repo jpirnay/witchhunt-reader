@@ -28,6 +28,9 @@ constexpr const char* kPendingTempFile = "/images.pending.tmp";
 constexpr size_t kHeaderBufSize = 4 * 1024;
 // Compressed-side read chunk of the streaming walk; the walk's other cost is the inflate ring.
 constexpr size_t kWalkChunkBytes = 512;
+// walkEntry's arena test for the whole-entry stage, at InflateReader's largest ring.
+static_assert(kWalkChunkBytes + 32 * 1024 + 2 * alignof(std::max_align_t) <= EpubImageManifest::kWalkArenaReserve,
+              "the line objects' reserve must hold the walk's largest stage");
 // Largest-free-block readings land a few bytes under the round number (allocator bookkeeping),
 // so the walk gate does not sit exactly on the ring size.
 constexpr size_t kWalkHeapSlack = 64;
@@ -85,6 +88,7 @@ bool EpubImageManifest::load(const std::string& cachePath) {
   count_ = 0;
   capacity_ = 0;
   pendingLive_ = 0;
+  headerMet_ = false;
   cachePath_ = cachePath;
   // Drop any ZipFile bound to a previous book; resolve() lazily recreates it.
   resolveZip_.reset();
@@ -131,9 +135,11 @@ bool EpubImageManifest::load(const std::string& cachePath) {
     ZipFile::FileStatSlim stat = {};
     while (readPending(pf, key, stat)) {
       if (!findRecord(key)) ++pendingLive_;
+      headerMet_ = true;
     }
     pf.close();
   }
+  if (count_ > 0) headerMet_ = true;
   loaded_ = true;
   LOG_DBG("IMF", "Loaded image manifest: %u entries, %u pending", static_cast<unsigned>(count_),
           static_cast<unsigned>(pendingLive_));
@@ -231,6 +237,7 @@ bool EpubImageManifest::openResolveZip(const std::string& epubPath) {
 
 EpubImageManifest::Resolve EpubImageManifest::resolve(const std::string& epubPath, const std::string& epubEntryPath,
                                                       ImageDimensions& out, BuildArena* scratch) {
+  headerMet_ = true;
   const uint64_t key = keyFor(epubEntryPath);
   if (const Record* r = findRecord(key)) {
     out.width = r->width;

@@ -258,6 +258,37 @@ TEST_F(ImageManifestFixture, AJpegShorterThanTheWindowWithNoSofIsUnreadable) {
   EXPECT_FALSE(manifest.hasPending());
 }
 
+// The parser keeps the walk's reserve beside a line's TextBlock once the book has met an image header
+// (memory-and-parsing 9b): sticky for the book, so a reload keeps it, from images.bin or from the queue alone.
+TEST_F(ImageManifestFixture, AnImageHeaderMetIsRememberedForTheBook) {
+  {
+    EpubImageManifest manifest;
+    ASSERT_TRUE(manifest.load(cacheDir));
+    EXPECT_FALSE(manifest.imageHeaderMet()) << "a book that has asked for no image";
+    ImageDimensions entry = {0, 0};
+    ASSERT_EQ(manifest.resolve(kPngBook, kPngEntry, entry), EpubImageManifest::Resolve::Resolved);
+    EXPECT_TRUE(manifest.imageHeaderMet());
+    manifest.persistIfDirty();
+  }
+  EpubImageManifest reloaded;
+  ASSERT_TRUE(reloaded.load(cacheDir));
+  EXPECT_TRUE(reloaded.imageHeaderMet()) << "images.bin holds the image";
+}
+
+TEST_F(ImageManifestFixture, AQueuedImageAloneIsAnImageHeaderMet) {
+  {
+    EpubImageManifest manifest;
+    ASSERT_TRUE(manifest.load(cacheDir));
+    ImageDimensions entry = {0, 0};
+    ASSERT_EQ(manifest.resolve(kBook, kEntry, entry), EpubImageManifest::Resolve::Deferred);
+    EXPECT_TRUE(manifest.imageHeaderMet());
+  }
+  EpubImageManifest reloaded;
+  ASSERT_TRUE(reloaded.load(cacheDir));
+  EXPECT_EQ(0u, reloaded.entryCount());
+  EXPECT_TRUE(reloaded.imageHeaderMet()) << "images.pending holds the image";
+}
+
 TEST_F(ImageManifestFixture, AHeaderWithinTheWindowResolvesInline) {
   EpubImageManifest manifest;
   ASSERT_TRUE(manifest.load(cacheDir));

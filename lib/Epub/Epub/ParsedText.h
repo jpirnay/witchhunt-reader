@@ -176,6 +176,9 @@ class ParsedText {
   // (without the hook: the row is placed as a whole inside a block of its own). A cell laid out
   // as a fallback paragraph keeps the heap.
   BuildArena* lineArena_ = nullptr;
+  // What lineArena_ must still have free after a line's TextBlock object for the object to go there too, beside its
+  // bytes (TextBlock::make); else the object is on the heap. SIZE_MAX, unless the caller says: always the heap.
+  size_t lineObjectKeepFree_ = SIZE_MAX;
   // Called with the line's largest word-size percent, and whether the line carries ruby, just before the line is
   // materialised. The parser uses it to run its page-fit test BEFORE the allocation: a line that does not
   // fit is then allocated from the page it lands on, not from the block of the page it
@@ -703,8 +706,11 @@ class ParsedText {
   // never hyphenates. Survives reset(); the parser sets it for every block it starts (ChapterHtmlSlimParser::
   // blockHyphenates).
   void setHyphenationEnabled(const bool enabled) { hyphenationEnabled = enabled; }
-  // See lineArena_ / beforeLine_. Both survive reset().
-  void setLineArena(BuildArena* arena) { lineArena_ = arena; }
+  // See lineArena_ / lineObjectKeepFree_ / beforeLine_. All survive reset().
+  void setLineArena(BuildArena* arena, const size_t objectKeepFree = SIZE_MAX) {
+    lineArena_ = arena;
+    lineObjectKeepFree_ = objectKeepFree;
+  }
   // A run laid out as its code points because it could not be shaped (no memory, or the font failed it) sets *latch
   // (Section's kStatusShapingDegraded). Survives reset().
   void setShapingLatch(bool* latch) { shapingLatch_ = latch; }

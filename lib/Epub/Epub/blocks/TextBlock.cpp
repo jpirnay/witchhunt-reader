@@ -163,6 +163,23 @@ bool TextBlock::allocArena(const size_t size, BuildArena* scratch) {
   return arena != nullptr;
 }
 
+std::unique_ptr<TextBlock> TextBlock::make(const WordRange& range, const std::vector<int16_t>& word_xpos,
+                                           const BlockStyle& blockStyle, BuildArena* arena, const size_t keepFree) {
+  // The object with the most padding its alignment can take, so what is left after it is never less than `keepFree`.
+  constexpr size_t kObjectRoom = sizeof(TextBlock) + alignof(TextBlock) - 1;
+  if (arena != nullptr && arena->valid()) {
+    const size_t room = arena->capacity() - arena->used();
+    if (room >= kObjectRoom && room - kObjectRoom >= keepFree) {
+      if (void* const at = arena->alloc(sizeof(TextBlock), alignof(TextBlock))) {
+        auto* const block = new (at) TextBlock(range, word_xpos, blockStyle, arena);
+        block->objectInArena_ = true;
+        return std::unique_ptr<TextBlock>(block);
+      }
+    }
+  }
+  return makeUniqueNoThrow<TextBlock>(range, word_xpos, blockStyle, arena);
+}
+
 void TextBlock::bindArenaPointers() {
   const uint8_t* base = arena;
   const ArenaOffsets o = arenaOffsets(numWords, sizesPresent, wordFontCount, textBytes);

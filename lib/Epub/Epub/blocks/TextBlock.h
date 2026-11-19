@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <new>  // std::destroying_delete_t
 #include <string>
 #include <string_view>
 #include <vector>
@@ -157,13 +158,14 @@ class TextBlock final : public Block {
   bool sizesPresent = false;
   bool isValid = true;
   uint8_t wordFontCount = 0;  // the line's word fonts (see WordFont); 0 on a line in the block's font alone
-  // Four bits in the struct's pad byte: a line of a vertical-rl page (see setVertical), whether its 、。 are centred,
-  // whether it has a Ruby or Emphasis record (it reserves the band above its base), and whether the arena is ours to
-  // free (see arena).
+  // Five bits in the struct's pad byte: a line of a vertical-rl page (see setVertical), whether its 、。 are centred,
+  // whether it has a Ruby or Emphasis record (it reserves the band above its base), whether the arena is ours to
+  // free (see arena), and whether the object itself was built in a build arena (make, operator delete).
   bool vertical_ : 1 = false;
   bool centredMarks_ : 1 = false;
   bool annotationBand_ : 1 = false;
   bool arenaOwned_ : 1 = false;
+  bool objectInArena_ : 1 = false;
   // The ONLY allocation. Heap by default (nothrow, so OOM yields an invalid block instead of
   // abort() -- bare new is not nothrow with -fno-exceptions). A section build that lends a
   // scratch region (the borrowed secondary framebuffer) hands it in through the range
@@ -312,6 +314,31 @@ class TextBlock final : public Block {
   }
   TextBlock(const TextBlock&) = delete;
   TextBlock& operator=(const TextBlock&) = delete;
+
+  // A laid-out line, the object where its bytes go (memory-and-parsing 9b): built in `arena` when the arena still has
+  // `keepFree` bytes free after it, else on the heap (new (std::nothrow), as before). Either way the bytes come from
+  // `arena` while it has room for them, else the heap (the range constructor). An object built in the arena lives in
+  // the caller's block of it and must be destroyed before that block is rewound. Null when the heap refuses the object;
+  // check valid() as for the constructor. SIZE_MAX for `keepFree`: always the heap.
+  static std::unique_ptr<TextBlock> make(const WordRange& range, const std::vector<int16_t>& word_xpos,
+                                         const BlockStyle& blockStyle, BuildArena* arena, size_t keepFree);
+  // Every delete of a TextBlock comes here (a C++20 destroying operator delete, so std::unique_ptr<TextBlock> stays the
+  // type everywhere): it runs the destructor, and gives the memory back to the heap only when the heap made the object
+  // (new (std::nothrow)); an arena's goes with its block's rewind. Defined in the class: out of line, GCC 16 takes the
+  // heap path's call for a mismatch with the nothrow new (-Wmismatched-new-delete, a false positive).
+  static void operator delete(TextBlock* const block, std::destroying_delete_t) {
+#ifdef BUILD_ARENA_TRACE
+    // Host only: an object whose own bytes read the rewind fill was destroyed after the arena block it lives in.
+    if (buildArenaLooksRewound(block, sizeof(TextBlock))) {
+      std::fprintf(stderr, "TextBlock destroyed after the arena block it was built in was rewound\n");
+      std::abort();
+    }
+#endif
+    const bool inArena = block->objectInArena_;
+    block->~TextBlock();
+    if (!inArena) ::operator delete(block);
+  }
+  bool objectInArena() const { return objectInArena_; }
 
   const RenderStyle& getRenderStyle() const { return renderStyle; }
   bool isEmpty() override { return numWords == 0; }

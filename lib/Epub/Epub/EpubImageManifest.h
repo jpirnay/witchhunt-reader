@@ -57,6 +57,10 @@ class EpubImageManifest {
 
   // True when at least one image is queued for the walk.
   bool hasPending() const { return pendingLive_ > 0; }
+  // True once the book has had an image header asked for (resolve()), and from load() on when images.bin or
+  // images.pending holds one: sticky for the book. A book without it never walks, so its line objects keep no reserve
+  // (kWalkArenaReserve).
+  bool imageHeaderMet() const { return headerMet_; }
 
   // The walk of a deferred image runs in stages: first over the entry's leading kWalkStageBytes
   // (a ring of that size -- a deflate back-reference never reaches further back than the bytes
@@ -66,6 +70,12 @@ class EpubImageManifest {
   // walk used to demand outright -- the block an X3 reader heap never holds mid-parse -- is
   // now the exception. A stored entry has no ring at all.
   static constexpr size_t kWalkStageBytes = 16 * 1024;
+  // What the walk's largest stage takes from a build arena: the whole-entry ring (32 KB at most), the read chunk and
+  // the alignment padding, 33,312 B, rounded up. In a book that has met an image header (imageHeaderMet), a laid-out
+  // line's TextBlock object goes into the page block only while this much stays free after it (ChapterHtmlSlimParser,
+  // memory-and-parsing 9b), so an image met later on the page still finds its stage in the arena. On the S3s' 256 KB
+  // region it never binds.
+  static constexpr size_t kWalkArenaReserve = 34 * 1024;
   // Heap the cheapest stage of a deferred image's walk takes (read chunk + ring). 0 when the image
   // is not pending. Lets the parser gate the walk on what it will actually allocate.
   size_t deferredWalkBytes(const std::string& epubEntryPath) const;
@@ -139,6 +149,7 @@ class EpubImageManifest {
   // Queued images not yet resolved. A record resolved inline (resolveDeferredNow) stays in the
   // file as a dead entry until resolvePending() next compacts it; this count excludes it.
   uint16_t pendingLive_ = 0;
+  bool headerMet_ = false;  // see imageHeaderMet
 
   std::string pendingPath() const;
   bool reserveRecords(uint16_t wanted);

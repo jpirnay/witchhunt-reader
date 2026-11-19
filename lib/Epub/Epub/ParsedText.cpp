@@ -4402,7 +4402,7 @@ ParsedText::LineProcessResult ParsedText::emitLine(
 
   // TextBlock flattens the range into its arena on construct; on arena OOM the
   // block is invalid, so drop the line rather than render/serialize garbage.
-  auto block = makeUniqueNoThrow<TextBlock>(*line, *xs, blockStyle, lineArena_);
+  auto block = TextBlock::make(*line, *xs, blockStyle, lineArena_, lineObjectKeepFree_);
   if (!block || !block->valid()) {
     LOG_ERR("PTX", "Dropping line: TextBlock arena allocation failed");
     controlsOnlyTokens_ = 0;

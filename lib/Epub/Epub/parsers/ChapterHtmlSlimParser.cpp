@@ -2180,8 +2180,12 @@ void ChapterHtmlSlimParser::wireTextBlock() {
   wireParagraphLines(*currentTextBlock);
 }
 
+size_t ChapterHtmlSlimParser::lineObjectKeepFree() const {
+  return imageManifest != nullptr && imageManifest->imageHeaderMet() ? EpubImageManifest::kWalkArenaReserve : 0;
+}
+
 void ChapterHtmlSlimParser::wireParagraphLines(ParsedText& text) {
-  text.setLineArena(buildArena_);
+  text.setLineArena(buildArena_, lineObjectKeepFree());
   text.setWordCache(&wordCache_);
   if (buildArena_) {
     text.setBeforeLineHook([this](const uint8_t maxSizePct, bool annotated) { beforeLineHook(maxSizePct, annotated); });
@@ -3513,6 +3517,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
               dimsOk = true;
             }
             if (!dimsOk && self->imageManifest) {
+              // The book's first image header: the open paragraph's lines from here on keep the walk's reserve
+              // too (lineObjectKeepFree), as every block wired after it does.
+              if (!self->imageManifest->imageHeaderMet() && self->currentTextBlock) {
+                self->currentTextBlock->setLineArena(self->buildArena_, EpubImageManifest::kWalkArenaReserve);
+              }
               // Resolve + cache on a miss: each image's header is read at most once ever.
               switch (self->imageManifest->resolve(self->epub->getPath(), resolvedPath, dims, self->buildArena_)) {
                 case EpubImageManifest::Resolve::Resolved:
@@ -7058,9 +7067,10 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
         std::vector<std::unique_ptr<TextBlock>>* lines;
         size_t produced;
       } sink{&cellLineScratch_, 0};
-      // Line bytes from the lent region on an arena build. No page-fit hook: the row is placed as
-      // a whole by the caller, inside a block it commits or releases (see the row emission).
-      bufCell.text->setLineArena(buildArena_);
+      // Line bytes, and their objects (lineObjectKeepFree), from the lent region on an arena build. No page-fit hook:
+      // the row is placed as a whole by the caller, inside a block it commits or releases (see the row emission); a
+      // released row's lines are gone by then (lr.cells, and cellLineScratch_ cleared on every return here).
+      bufCell.text->setLineArena(buildArena_, lineObjectKeepFree());
       bufCell.text->setWordCache(&wordCache_);
       bufCell.text->setBeforeLineHook(nullptr);
       bufCell.text->layoutAndExtractLines(
