@@ -128,6 +128,11 @@ inline size_t& stackPushCount() {
   static size_t count = 0;
   return count;
 }
+// The `what` of every push in order, refused or not, so a test can pick the pushes that start a run of one stack.
+inline std::vector<const char*>& stackPushNames() {
+  static std::vector<const char*> names;
+  return names;
+}
 #endif
 
 #ifdef BLOCK_IMAGE_FAULT_INJECTION
@@ -804,7 +809,8 @@ class ChapterHtmlSlimParser final : public Print {
   // Deeper nesting keeps its spacing on the style, as before: only elements with spacing are
   // pushed, so eight levels of them open at once is already pathological.
   static constexpr size_t kMaxHeldBottomSpacingDepth = 8;
-  // Entries each per-element stack is reserved to at setup (pushOrStop grows past it, asking the heap first).
+  // Entries each per-element stack is reserved to at setup (pushOrStop grows past it, asking the heap first); the two
+  // capped at 8 reserve their cap instead.
   static constexpr size_t kStackReserve = 16;
   std::vector<HeldBottomSpacing> heldBottomSpacing_;
   void holdBottomSpacing(BlockStyle& style, bool floated);
@@ -1407,6 +1413,7 @@ class ChapterHtmlSlimParser final : public Print {
     bool room = heapReserveFor(v, 1);
 #ifdef STACK_FAULT_INJECTION
     ++stackPushCount();
+    stackPushNames().push_back(what);
     if (stackPushesLeft() == 0) {
       room = false;
     } else if (stackPushesLeft() != SIZE_MAX) {

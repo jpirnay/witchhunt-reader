@@ -5480,8 +5480,8 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
   heapReserveFor(listStack, kStackReserve);
   heapReserveFor(containerWidthStack_, kStackReserve);
   heapReserveFor(backgroundImageScopes_, kStackReserve);
-  heapReserveFor(heldBottomSpacing_, kStackReserve);
-  heapReserveFor(blockInsetStack_, kStackReserve);
+  heapReserveFor(heldBottomSpacing_, kMaxHeldBottomSpacingDepth);
+  heapReserveFor(blockInsetStack_, kMaxBlockInsetDepth);
   heapReserveFor(anchorsAwaitingLine_, kStackReserve);
   startNewTextBlock(paragraphAlignmentBlockStyle);
 
