@@ -138,6 +138,7 @@ add_executable(EpubPipelineTest
   TableCellTextHeapTest.cpp
   BlockImageHeapTest.cpp
   PageHeapTest.cpp
+  StackHeapTest.cpp
   SectionSetupHeapTest.cpp
   TableRowFallbackArenaTest.cpp
   AnchorMapTest.cpp
@@ -257,6 +258,8 @@ target_compile_definitions(EpubPipelineTest PRIVATE
   SECTION_SETUP_FAULT_INJECTION
   # PageHeapTest refuses a page its n-th element (ChapterHtmlSlimParser::addPageElement). Inert otherwise.
   ELEMENT_FAULT_INJECTION
+  # StackHeapTest refuses the n-th push onto a per-element stack (ChapterHtmlSlimParser::pushOrStop). Inert otherwise.
+  STACK_FAULT_INJECTION
   # Central-directory walk counters (ZipFile.h), for the tests that bound them. Inert otherwise.
   ZIP_FILE_SCAN_STATS
 )

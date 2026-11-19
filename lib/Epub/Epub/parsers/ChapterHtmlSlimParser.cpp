@@ -823,7 +823,7 @@ void ChapterHtmlSlimParser::pushBlockStyleEntry(const CssStyle& cssStyle) {
     return;
   }
   applyCssEmphasisToEntry(entry, cssStyle);
-  inlineStyleStack.push_back(entry);
+  (void)pushOrStop(inlineStyleStack, entry, "the inline style stack");
 }
 
 bool ChapterHtmlSlimParser::applyCssFontFamilyToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) const {
@@ -2685,7 +2685,10 @@ void ChapterHtmlSlimParser::holdBottomSpacing(BlockStyle& style, const bool floa
   const int16_t paddingBottom = std::max<int16_t>(style.paddingBottom, 0);
   if (marginBottom == 0 && paddingBottom == 0) return;
   if (heldBottomSpacing_.size() >= kMaxHeldBottomSpacingDepth) return;
-  heldBottomSpacing_.push_back({depth, marginBottom, paddingBottom});
+  if (!pushOrStop(heldBottomSpacing_, HeldBottomSpacing{depth, marginBottom, paddingBottom},
+                  "the held bottom spacing")) {
+    return;
+  }
   style.marginBottom = 0;
   style.paddingBottom = 0;
 }
@@ -3204,8 +3207,12 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (w >= 1 && w < parentWidth) {
       const bool relative = cssStyle.imageWidth.unit == CssUnit::Percent;
       const int16_t parentFixed = self->containerWidthStack_.empty() ? 0 : self->containerWidthStack_.back().fixedWidth;
-      self->containerWidthStack_.push_back(
-          {self->depth, static_cast<int16_t>(w), relative ? parentFixed : static_cast<int16_t>(w)});
+      if (!self->pushOrStop(self->containerWidthStack_,
+                            ContainerWidthEntry{self->depth, static_cast<int16_t>(w),
+                                                relative ? parentFixed : static_cast<int16_t>(w)},
+                            "the container width stack")) {
+        return;
+      }
     }
   }
 
@@ -3967,7 +3974,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       applyCssTextEmphasisToEntry(entry, cssStyle);
       applyCssTextCombineToEntry(entry, cssStyle);
       applyCssFontSizeToEntry(entry, cssStyle);
-      self->inlineStyleStack.push_back(entry);
+      if (!self->pushOrStop(self->inlineStyleStack, entry, "the inline style stack")) return;
       self->updateEffectiveInlineStyle();
       self->openBidiEdge(cssStyle, /*inlineElement=*/true);
 
@@ -3996,7 +4003,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         if (v > 0) startCounter = v - 1;  // counter is pre-incremented on each <li>
       }
     }
-    self->listStack.push_back({self->depth, name[0] == 'o', startCounter, cssStyle.listStyleNone});
+    if (!self->pushOrStop(self->listStack, ListEntry{self->depth, name[0] == 'o', startCounter, cssStyle.listStyleNone},
+                          "the list stack")) {
+      return;
+    }
   }
 
   const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
@@ -4062,7 +4072,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   if ((ownInsetLeft > 0 || ownInsetRight > 0) &&
       self->blockInsetStack_.size() < ChapterHtmlSlimParser::kMaxBlockInsetDepth &&
       matches(name, INSET_CONTAINER_TAGS, NUM_INSET_CONTAINER_TAGS)) {
-    self->blockInsetStack_.push_back({self->depth, ownInsetLeft, ownInsetRight});
+    if (!self->pushOrStop(self->blockInsetStack_, BlockInsetEntry{self->depth, ownInsetLeft, ownInsetRight},
+                          "the block inset stack")) {
+      return;
+    }
   }
 
   // A <span> the book styles display:block is laid out as a block (#388): St. Martin's chapter
@@ -4354,7 +4367,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     applyCssTextEmphasisToEntry(entry, cssStyle);
     applyCssTextCombineToEntry(entry, cssStyle);
     applyCssFontSizeToEntry(entry, cssStyle);
-    self->inlineStyleStack.push_back(entry);
+    if (!self->pushOrStop(self->inlineStyleStack, entry, "the inline style stack")) return;
     self->updateEffectiveInlineStyle();
   } else if (matches(name, BOLD_TAGS, NUM_BOLD_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
@@ -4385,7 +4398,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     applyCssTextEmphasisToEntry(entry, cssStyle);
     applyCssTextCombineToEntry(entry, cssStyle);
     applyCssFontSizeToEntry(entry, cssStyle);
-    self->inlineStyleStack.push_back(entry);
+    if (!self->pushOrStop(self->inlineStyleStack, entry, "the inline style stack")) return;
     self->updateEffectiveInlineStyle();
   } else if (matches(name, ITALIC_TAGS, NUM_ITALIC_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
@@ -4416,7 +4429,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     applyCssTextEmphasisToEntry(entry, cssStyle);
     applyCssTextCombineToEntry(entry, cssStyle);
     applyCssFontSizeToEntry(entry, cssStyle);
-    self->inlineStyleStack.push_back(entry);
+    if (!self->pushOrStop(self->inlineStyleStack, entry, "the inline style stack")) return;
     self->updateEffectiveInlineStyle();
   } else if (strcmp(name, "sup") == 0 || strcmp(name, "sub") == 0) {
     if (self->partWordHasText()) {
@@ -4436,7 +4449,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     applyCssTextEmphasisToEntry(entry, cssStyle);
     applyCssTextCombineToEntry(entry, cssStyle);
     applyCssFontSizeToEntry(entry, cssStyle);  // explicit CSS font-size overrides the 50% default
-    self->inlineStyleStack.push_back(entry);
+    if (!self->pushOrStop(self->inlineStyleStack, entry, "the inline style stack")) return;
     self->updateEffectiveInlineStyle();
   } else if (strcmp(name, "span") == 0 || !isHeaderOrBlock(name)) {
     // Drop cap: a left-floated span with a large font-size opening an empty paragraph.
@@ -4487,7 +4500,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         entry.hasFontSize = true;
         entry.fontSizePct = isSmallTag ? 80 : 120;
       }
-      self->inlineStyleStack.push_back(entry);
+      if (!self->pushOrStop(self->inlineStyleStack, entry, "the inline style stack")) return;
       self->updateEffectiveInlineStyle();
     }
   }
@@ -5392,7 +5405,7 @@ void ChapterHtmlSlimParser::queueAnchorForNextLine(std::string id, const int wor
     recordAnchor(std::move(id), static_cast<uint16_t>(completedPageCount));
     return;
   }
-  anchorsAwaitingLine_.push_back({std::move(id), wordIndex});
+  (void)pushOrStop(anchorsAwaitingLine_, AnchorAwaitingLine{std::move(id), wordIndex}, "the anchors awaiting a line");
 }
 
 // A <span id> used to be left out of the anchor map altogether, to keep converter-injected ids
@@ -6481,7 +6494,8 @@ void ChapterHtmlSlimParser::noteBackgroundImage(const char* name, const std::str
   if (path.empty()) return;
   std::string resolved = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(path));
   if (!isImageCandidate(resolved)) return;
-  backgroundImageScopes_.push_back({depth, std::move(resolved)});
+  (void)pushOrStop(backgroundImageScopes_, BackgroundImageScope{depth, std::move(resolved)},
+                   "the background picture scopes");
 }
 
 void ChapterHtmlSlimParser::placeBackgroundImage(const std::string& resolvedPath, const int elementDepth) {

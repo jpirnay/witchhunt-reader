@@ -4,6 +4,7 @@
 #include <BuildArena.h>
 #include <ChunkedVector.h>
 #include <HalStorage.h>
+#include <HeapFit.h>
 #include <Print.h>
 #include <SaxParser/SaxParser.h>
 
@@ -18,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "../BlockFontFamilies.h"
@@ -121,6 +123,30 @@ inline size_t& elementsLeft() {
 inline bool& elementRefusalRecovers() {
   static bool recovers = false;
   return recovers;
+}
+#endif
+
+#ifdef STACK_FAULT_INJECTION
+// Host tests only (firmware never defines it): how many more pushes onto the per-element stacks may succeed before each
+// is refused as if the heap were out. SIZE_MAX = never refuse. Drives pushOrStop's out-of-memory path.
+inline size_t& stackPushesLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// The `what` of every refusal since the test cleared it, one name per stack, so a test can show each stack took one.
+inline std::string& stackRefusals() {
+  static std::string refused;
+  return refused;
+}
+// Every push, counted whether it is refused or not: the walk's upper bound.
+inline size_t& stackPushCount() {
+  static size_t count = 0;
+  return count;
+}
+// The `what` of every push in order, refused or not, so a test can pick the pushes that start a run of one stack.
+inline std::vector<const char*>& stackPushNames() {
+  static std::vector<const char*> names;
+  return names;
 }
 #endif
 
@@ -1414,6 +1440,32 @@ class ChapterHtmlSlimParser final : public Print {
   // has stopped through stopForHeap, the element is gone) or when there is no page: the caller places nothing more.
   // A borrowed pointer to the element (deferredPageImage_, deferredDropCapLine_) must be cleared on false.
   [[nodiscard]] bool addPageElement(std::unique_ptr<PageElement> element);
+  // Push onto one of the per-element stacks, asking the heap for its growth first. False when it refuses: the build has
+  // stopped through stopForHeap (streamFailed latches, so startElement and endElementBody return at once and no pop
+  // follows), the entry is gone, and the caller returns as it does when flushPartWordBuffer() refuses.
+  template <typename V, typename T>
+  [[nodiscard]] bool pushOrStop(V& v, T&& x, const char* what) {
+    bool room = heapReserveFor(v, 1);
+#ifdef STACK_FAULT_INJECTION
+    ++stackPushCount();
+    stackPushNames().push_back(what);
+    if (stackPushesLeft() == 0) {
+      room = false;
+    } else if (stackPushesLeft() != SIZE_MAX) {
+      --stackPushesLeft();
+    }
+    if (!room) {
+      stackRefusals() += what;
+      stackRefusals() += ';';
+    }
+#endif
+    if (!room) {
+      stopForHeap(what, 2 * v.capacity() * sizeof(typename V::value_type));
+      return false;
+    }
+    v.push_back(std::forward<T>(x));
+    return true;
+  }
   // Take a pending page break (pageBreakPending_): emit the page if anything is on it. Called
   // where the content before the break has been laid out and the next is about to be placed.
   void applyPendingPageBreak();
