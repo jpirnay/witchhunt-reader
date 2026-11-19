@@ -1103,6 +1103,15 @@ struct Section::BuildState {
   static_assert(PageLut::minMaxSize() >= Page::MAX_PAGES_PER_SECTION, "page LUT smaller than a section may be");
   PageLut lut;
   std::unique_ptr<ChapterHtmlSlimParser> visitor;
+  // The spine's TOC anchors, packed "id\0id\0...", for the build's length: the parser holds a view of it. In the
+  // build's region when that has room for it and it is under a quarter of it (the parse keeps its room), else in
+  // tocAnchorHeap. Taken once, in setup, before the page block opens, so it sits at the bottom of the arena's order.
+  const char* tocAnchorPool = nullptr;
+  size_t tocAnchorPoolBytes = 0;
+  std::unique_ptr<char[]> tocAnchorHeap;
+  // The pool's scope in the arena (the arena rewinds newest-first, and the build gives back everything it took): below
+  // chunkBlock, so released after it.
+  BuildArena::Block tocPoolBlock;
   // Live ZIP-side state of the parse, created on the first runBuildParse call and
   // released the moment the compressed stream is exhausted. zip must outlive reader
   // (reader holds a reference to it). chunkBuf (PARSE_CHUNK_BYTES) is the feed buffer —
@@ -1145,6 +1154,65 @@ struct Section::BuildState {
   // The region the build may keep its parser state, rules, ring and word cache in: a lent one, or an owned region.
   // nullptr on the 10 KB parse arena, which has no room for them.
   BuildArena* region() const { return arena && (arena != ownedArena.get() || ownedIsRegion) ? arena : nullptr; }
+  // Packs the TOC anchors of `spine` into the pool (see tocAnchorPool): two passes over the TOC, the lengths and then
+  // the ids. False when the pool has no room anywhere; tocAnchorPoolBytes then says how big it was to be.
+  bool takeTocAnchorPool(const Epub& epub, const int spine) {
+    tocAnchorPool = nullptr;
+    tocAnchorPoolBytes = 0;
+    tocAnchorHeap.reset();
+    const int first = epub.getTocIndexForSpineIndex(spine);
+    if (first < 0) return true;
+    const int tocCount = epub.getTocItemsCount();
+    size_t bytes = 0;
+    int end = first;
+    for (; end < tocCount; end++) {
+      const auto entry = epub.getTocItem(end);
+      if (entry.spineIndex != spine) break;
+      if (!entry.anchor.empty()) bytes += entry.anchor.size() + 1;
+    }
+    tocAnchorPoolBytes = bytes;
+    if (bytes == 0) return true;
+    char* pool = nullptr;
+    BuildArena* const region = this->region();
+    bool inArena = false;
+#ifdef SECTION_SETUP_FAULT_INJECTION
+    const bool arenaRefused = sectionSetupFaults().refuseTocPoolArena;
+    const bool heapRefused = sectionSetupFaults().refuseTocPoolHeap;
+#else
+    constexpr bool arenaRefused = false;
+    constexpr bool heapRefused = false;
+#endif
+    if (region && !arenaRefused && bytes <= region->capacity() / 4) {
+      tocPoolBlock = region->reserveBlock();
+      pool = static_cast<char*>(region->alloc(bytes, 1));
+      inArena = pool != nullptr;
+      if (!pool) region->release(tocPoolBlock);
+    }
+    if (!pool && !heapRefused) {
+      tocAnchorHeap = makeUniqueNoThrow<char[]>(bytes);
+      pool = tocAnchorHeap.get();
+    }
+    if (!pool) return false;
+    // The second pass writes no further than the first one counted, whatever the TOC does between them.
+    size_t at = 0;
+    for (int i = first; i < end; i++) {
+      const auto entry = epub.getTocItem(i);
+      if (entry.anchor.empty() || at + entry.anchor.size() + 1 > bytes) continue;
+      memcpy(pool + at, entry.anchor.data(), entry.anchor.size());
+      at += entry.anchor.size();
+      pool[at++] = '\0';
+    }
+    tocAnchorPoolBytes = at;
+    tocAnchorPool = pool;
+#ifdef SECTION_SETUP_FAULT_INJECTION
+    sectionSetupFaults().lastPoolSource =
+        inArena ? SectionSetupFaults::PoolSource::Arena : SectionSetupFaults::PoolSource::Heap;
+    sectionSetupFaults().lastPoolBytes = at;
+#else
+    (void)inArena;
+#endif
+    return true;
+  }
   // Entry-sized arena hosting the EntryReader's readBuf + inflate ring during
   // phase (a) only, when the main arena is too small to host them (heap-backed
   // resident builds). Created at reader-open time — the ring is entry-sized, so
@@ -1229,6 +1297,7 @@ struct Section::BuildState {
     // page block (when it holds one) is nested above it: the parser goes first.
     visitor.reset();
     if (chunkBlock.valid()) arena->release(chunkBlock);
+    if (tocPoolBlock.valid()) arena->release(tocPoolBlock);
     // The line pass's memory lives for the build alone (deviation 1): the heap Scratch and workspace are freed, a lent
     // workspace unbound.
     BidiLine::releaseBuildMemory();
@@ -1493,22 +1562,20 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
     }
   }
 
-  // Collect TOC anchors for this spine so the parser can insert page breaks at chapter boundaries
-  std::vector<std::string> tocAnchors;
-  const int startTocIndex = epub->getTocIndexForSpineIndex(spineIndex);
-  if (startTocIndex >= 0) {
-    for (int i = startTocIndex; i < epub->getTocItemsCount(); i++) {
-      auto entry = epub->getTocItem(i);
-      if (entry.spineIndex != spineIndex) break;
-      if (!entry.anchor.empty()) {
-        tocAnchors.push_back(std::move(entry.anchor));
-      }
-    }
+  // The spine's TOC anchors, so the parser can insert page breaks at chapter boundaries, packed "id\0id\0..." in one
+  // block: how many there are is the book's to say (a book that is one XHTML file puts every TOC entry in one spine),
+  // and a vector of strings grew with it. A page break and navigation hang on each, so none is dropped: with no room
+  // for the pool the build does not start. The parser keeps a view of it, so it lives as long as the build does.
+  if (!st.takeTocAnchorPool(*epub, spineIndex)) {
+    LOG_ERR("SCT", "spine=%d: no room for the %u-byte TOC anchor pool; the build does not start", spineIndex,
+            static_cast<unsigned>(st.tocAnchorPoolBytes));
+    abortSectionBuild();  // the section file is open: closes and removes it; `st` is gone
+    return BuildPhaseResult::Failed;
   }
 
   // The visitor's completePageFn captures &st.lut: BuildState lives in a stable unique_ptr,
   // so this reference is valid for the visitor's whole lifetime, including across slices.
-  st.visitor = std::make_unique<ChapterHtmlSlimParser>(
+  st.visitor = makeUniqueNoThrow<ChapterHtmlSlimParser>(
       epub, renderer, p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment, p.viewportWidth,
       p.viewportHeight, p.hyphenationEnabled, p.fontSizeNormalization, p.bionicReadingEnabled,
       [this, &st](std::unique_ptr<Page> page) {
@@ -1522,8 +1589,17 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
         st.lut.back() = this->onPageComplete(std::move(page), *st.pageWriter);
         return true;
       },
-      p.embeddedStyle, st.contentBase, st.imageBasePath, p.imageRendering, std::move(tocAnchors), st.progressFn,
-      st.cssParser, epub->getImageManifest());
+      p.embeddedStyle, st.contentBase, st.imageBasePath, p.imageRendering,
+      std::string_view(st.tocAnchorPool, st.tocAnchorPoolBytes), st.progressFn, st.cssParser, epub->getImageManifest());
+#ifdef SECTION_SETUP_FAULT_INJECTION
+  if (sectionSetupFaults().refuseParser) st.visitor.reset();
+#endif
+  if (!st.visitor) {
+    LOG_ERR("SCT", "spine=%d: no %u bytes for the chapter parser; the build does not start", spineIndex,
+            static_cast<unsigned>(sizeof(ChapterHtmlSlimParser)));
+    abortSectionBuild();  // the section file is open: closes and removes it; `st` is gone
+    return BuildPhaseResult::Failed;
+  }
   // Load printed-page list entries (NCX <pageList> or EPUB 3 nav page-list) for this
   // chapter's href, if any, straight into the parser's packed store (no intermediate vector of
   // string pairs: memory audit 2026-09, build inventory). Format: u16 count, then per entry:

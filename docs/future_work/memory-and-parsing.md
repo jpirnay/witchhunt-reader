@@ -206,8 +206,6 @@ page that holds a late image could push the walk out of the arena.
 build like the other heap refusals instead of aborting. These still allocate through the throwing `operator new`, so a
 refusal there aborts and reboots (`-fno-exceptions`); counted in `Section.cpp` and `ChapterHtmlSlimParser.cpp`:
 
-- the parser itself: `st.visitor = std::make_unique<ChapterHtmlSlimParser>(...)` (`lib/Epub/Epub/Section.cpp:1511`),
-  and the chapter's TOC anchors before it (`tocAnchors.push_back`, `Section.cpp:1504`);
 - `Page::elements` past its reserve: the parser reserves `Page::TYPICAL_ELEMENTS` (32) through `heapReserveFor`
   (`ChapterHtmlSlimParser.cpp:1861`, `:1935`, `:5969`; `Page.h:212`), and a denser page grows by `push_back` at nine
   sites (`:2349`, `:2607`, `:4169`, `:5695`, `:6370`, `:6576`, `:6634`, `:6669`, `:6948`); the one `insert` (`:2041`)

@@ -2269,6 +2269,17 @@ void ChapterHtmlSlimParser::beginExternalPageBreakAnchors() {
   topOfFilePageLabelEmitted = false;
 }
 
+bool ChapterHtmlSlimParser::isTocAnchor(const std::string_view id) const {
+  std::string_view rest = tocAnchorPool;
+  while (!rest.empty()) {
+    const size_t end = rest.find('\0');
+    if (end == std::string_view::npos) break;  // a pool always ends in its NUL
+    if (rest.substr(0, end) == id) return true;
+    rest.remove_prefix(end + 1);
+  }
+  return false;
+}
+
 void ChapterHtmlSlimParser::addExternalPageBreakAnchor(const std::string& id, const std::string& label) {
   if (id.empty()) {
     // NCX pageTarget with no fragment (e.g. "OEBPS/c9_split_000.xhtml") — applies to the
@@ -2766,7 +2777,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
       // Whatever came before is laid out already: the block is empty.
       applyPendingPageBreak();
       if (!pendingAnchorId.empty()) {
-        if (std::find(tocAnchors.begin(), tocAnchors.end(), pendingAnchorId) != tocAnchors.end()) {
+        if (isTocAnchor(pendingAnchorId)) {
           if (currentPage && !currentPage->elements.empty()) {
             emitPage();
           }
@@ -2791,8 +2802,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   applyPendingPageBreak();
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
   // block is flushed so the chapter starts on a fresh page.
-  if (!pendingAnchorId.empty() &&
-      std::find(tocAnchors.begin(), tocAnchors.end(), pendingAnchorId) != tocAnchors.end()) {
+  if (!pendingAnchorId.empty() && isTocAnchor(pendingAnchorId)) {
     if (currentPage && !currentPage->elements.empty()) {
       emitPage();
     }
@@ -2955,9 +2965,8 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // MAX_ANCHORS_PER_CHAPTER, which the other elements keep whole -- see its definition. TOC
   // anchors bypass both, since they drive page breaks and core navigation.
   if (!isPageBreakMarker && !idAttr.empty() && !self->carried_) {
-    const bool isTocAnchor =
-        std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idAttr) != self->tocAnchors.end();
-    if (isTocAnchor ||
+    const bool atTocAnchor = self->isTocAnchor(idAttr);
+    if (atTocAnchor ||
         (!isNonNavigableInlineElement(name) && self->anchorCount < self->anchorLimit() + self->spanAnchorCount_)) {
       self->pendingAnchorId = idAttr;
     } else if (isNonNavigableInlineElement(name)) {
