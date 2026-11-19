@@ -10,32 +10,6 @@ handover (2026-08), the memory audit (2026-09) and the earlier memory-allocation
 
 The rules and measurements these items refer to are in [Memory Allocation Strategy](../memory-allocation-strategy.md).
 
-## Text inside a nested table is dropped
-
-**Open.** `ChapterHtmlSlimParser::consumeText` returns early when `currentTable->depth > 1`
-(`ChapterHtmlSlimParser.cpp:4435`), so every word inside a table nested in another table is discarded. The nested-table
-branch of `ChapterHtmlSlimParser::startElement` (`:3157-3164`) calls `degradeTable("nested table")`, and its comment
-says the inner cells fold into the outer table's stream, but the text never arrives there. `test_table_streaming.epub`
-shows it: its "Nested tables" chapter (spine 2) nests a table in a cell, and its golden
-(`test/epub_pipeline/goldens/test_table_streaming.golden.txt`) holds the outer cells' words and none of the inner
-table's ("Inner cell one" to "Inner cell four").
-
-**Why it matters.** It breaks "never drop content", silently, on any book that nests tables. It does not depend on heap
-state, so it reproduces on the host.
-
-**Where.** The early return in `consumeText` (`:4435`); the nested `<table>` branch in `startElement` (`:3157`); the
-`depth > 1` `</table>` branch in `endElement` (`:4890`); `openBidiEdge`, which treats an element at `depth > 1` as text
-that is not laid out (`:1600`); and every handler that tests `currentTable->depth == 1`: `tr` (`:3221`) and `td`/`th`
-(`:3236`) in `startElement`, `td`/`th` (`:5036`), `caption` (`:5068`), `tr` (`:5076`) and `table` (`:5083`) in
-`endElement`. All of them need auditing, not just the one `return`: a `<tr>` or `<td>` inside the nested table must not
-open rows or cells in the outer one.
-
-**Tried.** Kept out of the streaming table renderer (PR #126) on purpose, as its own change. Nothing since.
-
-**Next step.** Route `depth > 1` text into the degraded outer table's paragraph stream and walk through each `depth`
-branch. The fixture is there: `test_table_streaming.epub`, added with the streaming renderer (55883bd26) and without a
-`make_test_*.py` generator. Its golden then gains the inner words; check the rest of its diff.
-
 ## A `<br>` that ends a block adds a blank line
 
 **Open.** `<p>Alpha<br/></p><p>Bravo</p>` lays out Bravo a whole line below Alpha (y=48 with the host stub, against 24
