@@ -21,6 +21,24 @@ master first); the design is `docs/superpowers/specs/2026-10-28-dictionary-phras
 
 What was considered and not taken is in [docs/dictionary.md](../dictionary.md#what-the-reader-does-not-do).
 
+## Some definitions fall back to plain text
+
+**Open.** A definition laid out through the chapter parser (`buildDictionaryHtmlPages`, `src/util/DictHtmlPages.cpp`,
+after `DictHtmlNormalize`) that fails to parse is shown in the plain-text viewer instead. Every entry of the owner's
+two dictionaries was laid out on the host on 2026-11-19 (master 5d402e9c5, the real normalizer and page builder
+against the `epub_pipeline` host stubs, X4 and X3 body sizes); both builds failed the same entries with "yxml parse
+error":
+- PONS Wörterbuch En-De (104,250 entries): 26 fail, and each of them contains `<mbp:pagebreak/>`, a Mobipocket tag
+  (the tag occurs 26 times in the file).
+- Oxford Dictionary of English (90,602 entries): 23 fail, 22 of them containing `<small>`. `<small>` alone is not
+  the cause: 1,233 entries contain it and most lay out; 52 entries nest a `<small>` inside another.
+
+**Why it matters.** Those entries lose their styling (bold headwords, italics, indents) on the device.
+
+**Next step.** Dump the normalized XHTML of a failing entry from each dictionary and fix `DictHtmlNormalize` (for
+example drop or rewrite a prefixed Mobipocket tag). The host harness that laid the dictionaries out is not in the
+repository; a test should pin the fix with a made-up entry of the same shape.
+
 ## Swipes in a long definition (CrossPoint #4363)
 
 A definition longer than one screen pages by a tap on either half of its text, or by the page buttons
