@@ -6,6 +6,7 @@
 
 class BuildArena;
 class Epub;
+class HalFile;
 
 // A converter can leave a chapter's heading in a spine file of its own and its text in the next: calibre's split cuts a
 // file where the source asked for a page break, so a chapter number ends up alone in `<stem>_split_000` and the text
@@ -32,6 +33,16 @@ enum class Shape : uint8_t {
   Empty,    // no visible text and none of those elements
 };
 
+// The stylesheet links of a document's head, read by the same scan (Section::scopeStylesheets): each <link> start tag
+// before <body>, prefixed or not, its rel and its href, the values in the caller's buffer. `whole` is false when a
+// value did not fit the buffer or was not quoted: what the link names is then not known.
+struct LinkHook {
+  void (*onLink)(void* context, std::string_view rel, std::string_view href, bool whole);
+  void* context;
+  char* buffer;
+  uint16_t capacity;
+};
+
 // What a spine file's <body> holds, from its XHTML fed in pieces. Allocation-free, so it answers the same whatever
 // the heap. Rejects (Other) a link, a picture, a rule, a table, media and forms; text outside a heading; a body whose
 // elements do not close, or that has no end tag; a document past kMaxFileBytes.
@@ -47,6 +58,8 @@ class Scanner {
   // its <body ...> start tag and returns how many bytes that took, all of `len` while the tag has not come.
   size_t feedThroughBodyStart(const uint8_t* data, size_t len);
   bool bodyStarted() const { return inBody_; }
+  // Reports the head's <link> elements to `hook` (nullptr, the default: none). Nothing else of the scan changes.
+  void setLinkHook(const LinkHook* hook) { hook_ = hook; }
 
  private:
   enum class State : uint8_t { Text, Open, Name, Attrs, AttrName, AttrValue, Comment, Bang, Cdata, Pi };
@@ -54,6 +67,20 @@ class Scanner {
   void startTag();
   void endTag();
   void textByte(char c);
+
+  // The <link> being read for hook_: where its rel and href lie in the hook's buffer, which of the two the attribute
+  // being read is (1 rel, 2 href, 0 neither) and whether its value is being kept.
+  const LinkHook* hook_ = nullptr;
+  uint16_t linkUsed_ = 0;
+  uint16_t valueAt_ = 0;
+  uint16_t relAt_ = 0;
+  uint16_t relLen_ = 0;
+  uint16_t hrefAt_ = 0;
+  uint16_t hrefLen_ = 0;
+  uint8_t linkAttr_ = 0;
+  bool inLink_ = false;
+  bool inValue_ = false;
+  bool linkCut_ = false;
 
   State state_ = State::Text;
   uint32_t pos_ = 0;
@@ -99,5 +126,11 @@ Verdict decide(const Epub& epub, int spine, BuildArena* scratch = nullptr);
 // for the call; the inflater's own state (EntryReader, about 1.3 KB) is from the heap. False when it could not be read.
 bool scanSpine(const Epub& epub, int spine, size_t inflatedSize, Scanner& scanner, BuildArena* scratch = nullptr,
                bool bankIt = false);
+
+// Feeds `file`, from its position, into `scanner` up to the '>' of its <body ...> start tag, through a 256 B window on
+// the stack. False when the head was not read whole: a read error, or no <body> within kMaxHeadBytes. A file that ends
+// first was read whole.
+constexpr size_t kMaxHeadBytes = 8 * 1024;
+bool scanHead(HalFile& file, Scanner& scanner);
 
 }  // namespace HeadingCarry
