@@ -330,7 +330,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=4 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=Quebec
    W x=58 s=0 z=100 t=loose
    W x=115 s=0 z=100 t=two
- PAGE 3 elements=21 footnotes=0
+ PAGE 3 elements=22 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=18.
    W x=28 s=0 z=100 t=BR,
@@ -383,40 +383,47 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=4 truncated=0 cssFallback=0
    W x=108 s=0 z=100 t=A
    W x=122 s=0 z=100 t=NESTED
    W x=188 s=0 z=100 t=TABLE:
-  LINE y=386 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=386 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=Uniform
+   W x=88 s=0 z=100 t=a
+   W x=106 s=0 z=100 t=Uniform
+   W x=176 s=0 z=100 t=b
+   W x=188 s=0 z=100 t=Uniform
+   W x=258 s=0 z=100 t=c
+  LINE y=410 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=0 s=0 z=100 t=Uniform
    W x=70 s=0 z=100 t=after
    W x=125 s=0 z=100 t=the
    W x=162 s=0 z=100 t=table
-  LINE y=410 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=434 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=22.
    W x=30 s=0 z=100 t=HIDDEN
    W x=94 s=0 z=100 t=BLOCK
    W x=150 s=0 z=100 t=INSIDE
    W x=216 s=0 z=100 t=THE
    W x=248 s=0 z=100 t=LINE:
-  LINE y=434 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=Victor
-   W x=57 s=0 z=100 t=one
   LINE y=458 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=Victor
+   W x=57 s=0 z=100 t=one
+  LINE y=482 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Victor
    W x=57 s=0 z=100 t=two
-  LINE y=482 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=506 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=23.
    W x=31 s=0 z=100 t=LEADING
    W x=103 s=0 z=100 t=BR:
-  LINE y=530 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=554 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=Whiskey
    W x=67 s=0 z=100 t=two
-  LINE y=554 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=578 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=24.
    W x=32 s=0 z=100 t=BR
    W x=58 s=0 z=100 t=AFTER
    W x=107 s=0 z=100 t=A
    W x=121 s=0 z=100 t=SECTION:
-  LINE y=578 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=602 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=Xray
    W x=62 s=0 z=100 t=one
-  LINE y=626 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=650 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=Xray
    W x=44 s=0 z=100 t=two
