@@ -41,9 +41,16 @@ constexpr int kNotesSpine = 2;
 const std::string kNestedTablesFixture = std::string(CORPUS_DIR) + "/test_nested_tables.epub";
 constexpr int kNestedTargetSpine = 4;
 
-// test/epubs/make_test_inline_anchors.py: one paragraph of numbered words w001..w700 that crosses pages, with an <a id>
-// before w560, a <span id> before w640 and an <a id> after w700, then a block with its own id.
+// test/epubs/make_test_inline_anchors.py: one case of an inline id per chapter, its docstring lists them.
 const std::string kInlineAnchorsFixture = std::string(CORPUS_DIR) + "/test_inline_anchors.epub";
+constexpr int kInlineLongSpine = 0;
+constexpr int kInlineShortSpine = 1;
+constexpr int kInlineBeforeFirstSpine = 2;
+constexpr int kInlineTableSpine = 3;
+constexpr int kInlineHyphenSpine = 4;
+constexpr int kInlineTailSpine = 5;
+constexpr int kInlineWrapSpine = 6;
+constexpr int kInlineBreakSpine = 7;
 
 std::string freshCacheDir(const std::string& tag) {
   const auto dir = fs::temp_directory_path() / "anchor_map_test" / tag;
@@ -52,7 +59,8 @@ std::string freshCacheDir(const std::string& tag) {
   return dir.string();
 }
 
-Section::BuildParams params() {
+// The book's CSS (inline styles too) only where a case forces a page break or sets a margin.
+Section::BuildParams params(const bool hyphenate = false, const bool embeddedStyle = false) {
   Section::BuildParams p;
   p.fontId = 0;
   p.lineCompression = 1.0f;
@@ -60,9 +68,9 @@ Section::BuildParams params() {
   p.paragraphAlignment = 0;
   p.viewportWidth = 480;
   p.viewportHeight = 800;
-  p.hyphenationEnabled = false;
+  p.hyphenationEnabled = hyphenate;
   p.fontSizeNormalization = false;
-  p.embeddedStyle = false;
+  p.embeddedStyle = embeddedStyle;
   p.bionicReadingEnabled = false;
   p.inlineFootnotePreviews = false;
   p.imageRendering = 0;
@@ -74,7 +82,8 @@ struct BuiltSection {
   std::unique_ptr<Section> section;
 };
 
-BuiltSection build(const std::string& tag, int spineIndex, const std::string& fixture = kFixture) {
+BuiltSection build(const std::string& tag, int spineIndex, const std::string& fixture = kFixture,
+                   const bool hyphenate = false, const bool embeddedStyle = false) {
   BuiltSection out;
   out.epub = std::make_shared<Epub>(fixture, freshCacheDir(tag));
   EXPECT_TRUE(out.epub->load(true));
@@ -82,8 +91,8 @@ BuiltSection build(const std::string& tag, int spineIndex, const std::string& fi
 
   GfxRenderer renderer;
   out.section = std::make_unique<Section>(out.epub, spineIndex, renderer);
-  EXPECT_TRUE(out.section->createSectionFile(params(), {}, /*skipEviction=*/true));
-  EXPECT_TRUE(out.section->loadSectionFile(params()));
+  EXPECT_TRUE(out.section->createSectionFile(params(hyphenate, embeddedStyle), {}, /*skipEviction=*/true));
+  EXPECT_TRUE(out.section->loadSectionFile(params(hyphenate, embeddedStyle)));
   return out;
 }
 
@@ -182,30 +191,169 @@ TEST(AnchorMap, NestedTableCellIdNamesThePageOfItsText) {
   EXPECT_EQ(static_cast<int>(*anchored), *textPage);
 }
 
+namespace {
+
+// What the inline-id cases share: the page an id's map entry names against the page of the word it sits before.
+void expectIdOnPageOf(Section& section, const char* id, const char* word) {
+  const auto wordPage = pageWithWord(section, word);
+  ASSERT_TRUE(wordPage.has_value()) << word << " is on no page";
+  const auto anchored = section.getPageForAnchor(id);
+  ASSERT_TRUE(anchored.has_value()) << id << " is missing from the anchor map";
+  EXPECT_EQ(static_cast<int>(*anchored), *wordPage) << id << " should be on the page of " << word;
+}
+
+// The fixture has to put `later` on a later page than `earlier`, or a case cannot tell an id's own line from the next
+// block's.
+void assertLaterPage(Section& section, const char* earlier, const char* later) {
+  const auto first = pageWithWord(section, earlier);
+  const auto second = pageWithWord(section, later);
+  ASSERT_TRUE(first && second) << earlier << " or " << later << " is on no page";
+  ASSERT_LT(*first, *second) << earlier << " and " << later << " share a page: the fixture no longer tells them apart";
+}
+
+}  // namespace
+
 // An id on an inline element names the page of ITS line, not the page the paragraph began on (a <span id> was recorded
 // with the block's first line, an <a id> with the next block), and an id after the block's last word names the page
-// that word is on. A block id keeps its block's first line.
+// that word is on. A block id keeps its block's first line. The paragraph has three pages and the ids sit on the middle
+// one, so the page of the id, of the block's first line and of its last line all differ.
 TEST(AnchorMap, InlineIdNamesThePageOfItsOwnLine) {
-  const auto built = build("inline_ids", 0, kInlineAnchorsFixture);
+  const auto built = build("inline_ids", kInlineLongSpine, kInlineAnchorsFixture);
   Section& section = *built.section;
   const auto firstPage = pageWithWord(section, "BLOCKFIRST");
   const auto linkPage = pageWithWord(section, "w560");
-  const auto spanPage = pageWithWord(section, "w640");
-  const auto lastPage = pageWithWord(section, "w700");
-  const auto nextPage = pageWithWord(section, "NEXTBLOCK");
-  ASSERT_TRUE(firstPage && linkPage && spanPage && lastPage && nextPage);
-  // The fixture has to tell the places apart: each id's own line is a later page than the block's first.
+  const auto spanPage = pageWithWord(section, "w700");
+  const auto lastPage = pageWithWord(section, "w1100");
+  ASSERT_TRUE(firstPage && linkPage && spanPage && lastPage);
   ASSERT_LT(*firstPage, *linkPage) << "w560 is on the paragraph's first page: lengthen the fixture";
-  ASSERT_LT(*firstPage, *spanPage);
+  ASSERT_LT(*linkPage, *lastPage) << "w560 is on the paragraph's last page: the ids no longer tell block end apart";
+  ASSERT_LT(*spanPage, *lastPage);
 
-  const auto expectPage = [&](const char* id, const int page) {
-    const auto anchored = section.getPageForAnchor(id);
+  expectIdOnPageOf(section, "blk-first", "BLOCKFIRST");
+  expectIdOnPageOf(section, "inl-a", "w560");
+  expectIdOnPageOf(section, "inl-dfn", "w600");
+  expectIdOnPageOf(section, "inl-s", "w700");
+  expectIdOnPageOf(section, "inl-tail", "w1100");
+  expectIdOnPageOf(section, "blk-next", "NEXTBLOCK");
+}
+
+// A paragraph of under 96 words (one layout window) that crosses a page: the id in its second half is on the second
+// page. It was recorded with the block's first line.
+TEST(AnchorMap, InlineIdInAShortPageCrossingParagraphNamesItsPage) {
+  const auto built = build("inline_short", kInlineShortSpine, kInlineAnchorsFixture);
+  ASSERT_NO_FATAL_FAILURE(assertLaterPage(*built.section, "s001", "s055"));
+  expectIdOnPageOf(*built.section, "short-s", "s055");
+}
+
+// An id before its block's first word is on that word's line. It used to wait in the single slot for the next block:
+// the next block's id overwrote it (bf1, bf2, bf-h, bf-n, bf-b were lost), or it named the next block's page (bf-solo
+// a page late, and bf-br, after a <br>, the page of the line after the next <br>).
+TEST(AnchorMap, InlineIdsBeforeABlocksFirstWordAreKept) {
+  const auto built = build("inline_before_first", kInlineBeforeFirstSpine, kInlineAnchorsFixture);
+  Section& section = *built.section;
+  ASSERT_NO_FATAL_FAILURE(assertLaterPage(section, "BFWORD", "NEXTA"));
+  ASSERT_NO_FATAL_FAILURE(assertLaterPage(section, "SOLOWORD", "SOLONEXT"));
+  ASSERT_NO_FATAL_FAILURE(assertLaterPage(section, "BRWORD", "BRNEXT"));
+  expectIdOnPageOf(section, "bf1", "BFWORD");
+  expectIdOnPageOf(section, "bf2", "BFWORD");
+  expectIdOnPageOf(section, "bf-p", "BFWORD");
+  expectIdOnPageOf(section, "bf-next", "NEXTA");
+  expectIdOnPageOf(section, "bf-h", "BFTITLE");
+  expectIdOnPageOf(section, "bf-hp", "HPWORD");
+  expectIdOnPageOf(section, "bf-n", "NOTEWORD");
+  expectIdOnPageOf(section, "bf-after", "AFTERN");
+  expectIdOnPageOf(section, "bf-b", "BOLDWORD");
+  expectIdOnPageOf(section, "bf-last", "LASTN");
+  expectIdOnPageOf(section, "bf-solo", "SOLOWORD");
+  expectIdOnPageOf(section, "bf-br", "BRWORD");
+}
+
+// Ids in a table cell are kept, at the row's page (they were lost to the single slot, a later id overwriting them). The
+// row is laid out as a grid, whose words no PageLine holds: the chapter is one page.
+TEST(AnchorMap, InlineIdsInATableCellAreKept) {
+  const auto built = build("inline_cell", kInlineTableSpine, kInlineAnchorsFixture);
+  ASSERT_EQ(built.section->pageCount, 1);
+  for (const char* id : {"cell-1", "cell-2", "cell-after"}) {
+    const auto anchored = built.section->getPageForAnchor(id);
     ASSERT_TRUE(anchored.has_value()) << id << " is missing from the anchor map";
-    EXPECT_EQ(static_cast<int>(*anchored), page) << id;
-  };
-  expectPage("blk-first", *firstPage);
-  expectPage("inl-a", *linkPage);
-  expectPage("inl-s", *spanPage);
-  expectPage("inl-tail", *lastPage);
-  expectPage("blk-next", *nextPage);
+    EXPECT_EQ(static_cast<int>(*anchored), 0) << id;
+  }
+}
+
+// Hyphenation on: ids before each marker word in a paragraph whose long words break across lines. A split adds a token
+// to the lines' count that the parser did not count (ParsedText::hyphenateWordAtIndex), so an id can be recorded a few
+// lines early (docs/future_work/memory-and-parsing.md). Every id is kept, and none is more than a page from its word
+// (the link Back stack's tolerance).
+TEST(AnchorMap, InlineIdsHoldWithHyphenationOn) {
+  const auto built = build("inline_hyph", kInlineHyphenSpine, kInlineAnchorsFixture, /*hyphenate=*/true);
+  ASSERT_GT(built.section->pageCount, 1);
+  int early = 0;
+  int late = 0;
+  for (int i = 1; i < 160; ++i) {
+    char id[16];
+    char word[16];
+    snprintf(id, sizeof(id), "hy%03d", i);
+    snprintf(word, sizeof(word), "M%03d", i);
+    const auto wordPage = pageWithWord(*built.section, word);
+    ASSERT_TRUE(wordPage.has_value()) << word;
+    const auto anchored = built.section->getPageForAnchor(id);
+    ASSERT_TRUE(anchored.has_value()) << id << " is missing from the anchor map";
+    EXPECT_LE(std::abs(static_cast<int>(*anchored) - *wordPage), 1) << id;
+    if (static_cast<int>(*anchored) < *wordPage) ++early;
+    if (static_cast<int>(*anchored) > *wordPage) ++late;
+  }
+  std::printf("[ HYPH-DRIFT ] of 159 ids, %d a page before their word's, %d a page after\n", early, late);
+}
+
+// An id after a paragraph's last word (a space between: no word of the block reaches it) is on the page of that last
+// word when the next block starts a new page. It was on the next block's.
+TEST(AnchorMap, TrailingInlineIdStaysOnTheLastLinesPage) {
+  const auto built = build("inline_tail", kInlineTailSpine, kInlineAnchorsFixture, false, /*embeddedStyle=*/true);
+  ASSERT_NO_FATAL_FAILURE(assertLaterPage(*built.section, "TAILFIRST", "t400"));
+  ASSERT_NO_FATAL_FAILURE(assertLaterPage(*built.section, "t400", "TAILNEXT"));
+  expectIdOnPageOf(*built.section, "tail-id", "t400");
+}
+
+// Ids on elements with no text that end the chapter get no line: they name the last page. Recorded after the last page
+// was emitted, the block's and the span's id named the page past it (and the <a id> too, once queued as inline).
+TEST(AnchorMap, IdsEndingTheChapterNameItsLastPage) {
+  const auto built = build("inline_end", kInlineTailSpine, kInlineAnchorsFixture, false, /*embeddedStyle=*/true);
+  const int lastPage = built.section->pageCount - 1;
+  ASSERT_EQ(pageWithWord(*built.section, "TAILNEXT"), lastPage);
+  for (const char* id : {"end-a", "end-s", "end-p"}) {
+    const auto anchored = built.section->getPageForAnchor(id);
+    ASSERT_TRUE(anchored.has_value()) << id << " is missing from the anchor map";
+    EXPECT_EQ(static_cast<int>(*anchored), lastPage) << id;
+  }
+}
+
+// An <a id> opened after a div's last word that wraps a block names the wrapped block's first line, not the div's last
+// line (a page earlier here).
+TEST(AnchorMap, AnInlineIdWrappingABlockNamesTheBlocksLine) {
+  const auto built = build("inline_wrap", kInlineWrapSpine, kInlineAnchorsFixture, false, /*embeddedStyle=*/true);
+  ASSERT_NO_FATAL_FAILURE(assertLaterPage(*built.section, "x400", "WRAPPED"));
+  expectIdOnPageOf(*built.section, "wrap-id", "WRAPPED");
+}
+
+// An id after a line's last word and before its <br> is on that line's page, where a page ends at the <br>. A <br>
+// splits the paragraph's block, as a block element does inside a div, but the id is not the next line's.
+TEST(AnchorMap, AnInlineIdBeforeABreakStaysOnItsLine) {
+  const auto built = build("inline_br", kInlineBreakSpine, kInlineAnchorsFixture, false, /*embeddedStyle=*/true);
+  Section& section = *built.section;
+  int checked = 0;
+  for (int i = 1; i <= 150; ++i) {
+    char id[16];
+    char left[16];
+    char right[16];
+    snprintf(id, sizeof(id), "br-%03d", i);
+    snprintf(left, sizeof(left), "L%03d", i);
+    snprintf(right, sizeof(right), "R%03d", i);
+    const auto leftPage = pageWithWord(section, left);
+    const auto rightPage = pageWithWord(section, right);
+    ASSERT_TRUE(leftPage && rightPage) << left;
+    if (*leftPage == *rightPage) continue;
+    ++checked;
+    expectIdOnPageOf(section, id, left);
+  }
+  EXPECT_GT(checked, 0) << "no page of the fixture's chapter 7 ends at a <br>: vary its margins";
 }

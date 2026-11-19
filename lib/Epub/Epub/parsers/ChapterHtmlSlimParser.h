@@ -822,26 +822,27 @@ class ChapterHtmlSlimParser final : public Print {
   //
   // Small by construction: an entry lives only from an element's start tag to its line, so it holds
   // more than one only for id'd elements that produce no text at all, or for several ids inside one
-  // paragraph. Past MAX_ANCHORS_AWAITING_LINE the queue is flushed at the current page rather than
-  // grown: the id then lands where it did before the queue held word indexes, and no worse.
+  // paragraph. Past MAX_ANCHORS_AWAITING_LINE an id is recorded at once, at the page reached so far,
+  // rather than queued: approximate, never lost.
   //
   // An id on an inline element in the middle of a block carries the index of the next word (as a
   // footnote link carries the index of the word it follows), so the line that reaches that word
-  // records it, not the block's first line. A block's own id, and an inline id before the block's
-  // first word, carry 0: the block's first line.
+  // records it, not the block's first line. A block's own id, an inline id before the block's
+  // first word and an id in a table cell, carry 0: the block's first line (a table's, the row's page).
+  // Queued by word index after crosspoint-reader #4328 (Mikalai Kryvusha, @MikalaiKryvusha).
   struct AnchorAwaitingLine {
     std::string id;
     int wordIndex;
   };
   std::vector<AnchorAwaitingLine> anchorsAwaitingLine_;
-  // Records the queued anchors whose word the lines placed so far have reached (wordsExtractedInBlock), at
-  // `completedPageCount`. Called once a line has been placed: the page is then known.
-  void flushAnchorsReached();
-  // Records those waiting on a word (index above 0) of the block just laid out: its last line is placed, so an id after
-  // its last word names that page. A block's own id (index 0) waits on for its first line.
-  void flushAnchorsAfterBlock();
-  // Records every queued anchor: at end of parse, for anchors that never got a line, and for a grid row.
-  void flushAnchorsAwaitingLine();
+  // Records the queued anchors whose index lies in [firstIndex, lastIndex] at `completedPageCount`, the rest wait.
+  // After a line is placed: [0, wordsExtractedInBlock], the words its lines have reached (the page is then known).
+  // After a block is laid out: [1, INT_MAX], an id after its last word names the last line's page; a block's own id
+  // (index 0) waits on for its first line. Neither takes -1, an id startNewTextBlock sets aside for the next block.
+  void flushAnchorsInRange(int firstIndex, int lastIndex);
+  // Records every queued anchor at `page`: for a grid row (its page), and at the end of the parse for anchors that
+  // never got a line (the last page).
+  void flushAnchorsAwaitingLine(int page);
   // Holds an anchor until the line that reaches word `wordIndex` of the block settles its page.
   void queueAnchorForNextLine(std::string id, int wordIndex = 0);
   // The index to queue an inline element's id with: that of the next word of the block in progress, or 0 when the

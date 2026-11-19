@@ -250,6 +250,21 @@ Schuffert (eszter007).
 - **Open.** The background pictures (`css_bg.bin`) and the `@font-face` rules (`css_fonts.bin`) are not ranged and stay
   book-wide: a picture or a face from a sheet a chapter does not link still reaches it. Size S each, if a book shows it.
 
+## Inline ids and footnote links drift with hyphenation
+
+**Open.** An inline id waits with the index of the next word of its block, counted as the parser adds tokens
+(`inlineAnchorWordIndex`, `ChapterHtmlSlimParser.cpp:5380`), and is recorded by the line whose running count of tokens
+(`wordsExtractedInBlock`, `:5858`) reaches it. A word that hyphenation splits is one token to the parser and two in the
+lines: the remainder becomes a token of its own (`ParsedText::hyphenateWordAtIndex`, `ParsedText.cpp:3157`, `:3190`),
+which `extractLine` counts (`:3867-3870`). The lines' count runs a token ahead per split, so an id is recorded up to
+that many tokens early; within one layout window only, since `lineTokensSoFar` counts the splits already made when the
+next id is queued. In `AnchorMapTest.InlineIdsHoldWithHyphenationOn` (`test_inline_anchors.epub`, chapter 4: ids
+before marker words in a paragraph of long words) 56 of 159 ids name the page before their word's, none a later one
+or further. A footnote link counts its word the same way (`:5140`) and drifts alike (pre-existing). Next step: count a
+split's remainder as part of its word in `lastLineTokenCount` (a boundary flag, as `merged` counts a merged token's
+parts), then tighten the test to the word's page. Until then it allows one page, the link Back stack's tolerance
+(`EpubLinkBackStack.h:73-76`).
+
 ## JPEG source reads of 512 bytes (matcha-reader #245)
 
 **Open.** TJpgDec reads its input through `tjpgBmpInput` for covers
