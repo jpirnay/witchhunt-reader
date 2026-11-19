@@ -78,6 +78,12 @@ void Scanner::textByte(const char c) {
 }
 
 void Scanner::startTag() {
+  if (inLink_) {
+    inLink_ = false;
+    linkAttr_ = 0;
+    hook_->onLink(hook_->context, std::string_view(hook_->buffer + relAt_, relLen_),
+                  std::string_view(hook_->buffer + hrefAt_, hrefLen_), !linkCut_);
+  }
   const char* name = localName(name_);
   if (!inBody_) {
     if (strcmp(name, "body") == 0) {
@@ -165,9 +171,17 @@ void Scanner::step(const char c) {
         return;
       }
       state_ = State::Attrs;
+      if (hook_ != nullptr && !inBody_ && !closing_ && strcmp(localName(name_), "link") == 0) {
+        inLink_ = true;
+        linkCut_ = false;
+        linkUsed_ = relLen_ = hrefLen_ = 0;
+        linkAttr_ = 0;
+      }
       step(c);
       return;
     case State::Attrs:
+      // A rel or href whose value is not quoted (or missing) is not read.
+      if (linkAttr_ != 0 && c != '"' && c != '\'' && !isSpace(c) && c != '=') linkCut_ = true;
       if (c == '>') {
         if (closing_) {
           endTag();
@@ -180,6 +194,8 @@ void Scanner::step(const char c) {
       } else if (c == '"' || c == '\'') {
         quote_ = c;
         state_ = State::AttrValue;
+        inValue_ = linkAttr_ != 0;
+        valueAt_ = linkUsed_;
       } else if (isNameChar(c)) {
         selfClosing_ = false;
         attrLen_ = 0;
@@ -199,11 +215,27 @@ void Scanner::step(const char c) {
         return;
       }
       if (strcmp(attr_, "href") == 0) hasHref_ = true;
+      if (inLink_) linkAttr_ = strcmp(attr_, "rel") == 0 ? 1 : strcmp(attr_, "href") == 0 ? 2 : 0;
       state_ = State::Attrs;
       step(c);
       return;
     case State::AttrValue:
-      if (c == quote_) state_ = State::Attrs;
+      if (c == quote_) {
+        state_ = State::Attrs;
+        if (inValue_) {
+          const auto length = static_cast<uint16_t>(linkUsed_ - valueAt_);
+          (linkAttr_ == 1 ? relAt_ : hrefAt_) = valueAt_;
+          (linkAttr_ == 1 ? relLen_ : hrefLen_) = length;
+          inValue_ = false;
+          linkAttr_ = 0;
+        }
+      } else if (inValue_) {
+        if (linkUsed_ < hook_->capacity) {
+          hook_->buffer[linkUsed_++] = c;
+        } else {
+          linkCut_ = true;
+        }
+      }
       return;
     case State::Comment:
       if (c == '>' && tail1_ == '-' && tail2_ == '-') state_ = State::Text;
@@ -357,6 +389,17 @@ Verdict decide(const Epub& epub, const int spine, BuildArena* scratch) {
     if (nextScan.finish() != Shape::Other) return Verdict::No;  // of two heading files only the last is carried
   }
   return Verdict::Yes;
+}
+
+bool scanHead(HalFile& file, Scanner& scanner) {
+  uint8_t window[256];
+  for (size_t read = 0; !scanner.bodyStarted(); read += sizeof(window)) {
+    if (read >= kMaxHeadBytes) return false;
+    const int n = file.read(window, sizeof(window));
+    if (n <= 0) return n == 0;
+    scanner.feedThroughBodyStart(window, static_cast<size_t>(n));
+  }
+  return true;
 }
 
 }  // namespace HeadingCarry
