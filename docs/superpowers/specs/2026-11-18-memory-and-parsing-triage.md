@@ -702,3 +702,30 @@ Tracks C, J and M have no parser overlap and start whenever someone is free: §1
 - **§5a's band time, §6's trigger rate and §15's read share** need the device runs their sections name.
 - **§3**: the hint is the owner's decision.
 - **§10's `new_handler` net** is unverified on the device and not recommended.
+
+## Amendments during implementation
+
+Where the code or a measurement disagreed with a design above, the implementation followed the evidence. Each
+amendment names its PR.
+
+- **§1, nested tables (#832).** Laying inner cells out through `currentTextBlock` gave them the reader's paragraph
+  spacing, indent, alignment and hyphenation, so with Extra Paragraph Spacing on (the default) they sat at x=0 with
+  gaps beside degraded outer cells at x=18. Inner cells take the degraded cell's own path instead (`makeCellText`,
+  `openStreamedCell`, `streamClosedCell`), and an outer cell's text after its inner table keeps every picture.
+- **§2, `<br>` (#834).** The table's "Today" column was wrong for two rows: `getCombinedBlockStyle` keeps the larger
+  `marginTop`, so a run of `<br>` gave one line whatever its length. `currentBlockOwnerDepth_` is not set inside
+  `section`, `article`, `aside`, `main`, at body level or for loose text, and an empty text block follows a block
+  picture. The rule as built: the blank line goes in `paddingTop` (paddings add); a line is empty when no word or
+  block picture was put on it since its block began or since the last block-level element closed; a `<br>` inside
+  a table cell leaves the outer flow alone; and the gap a drained block carries is cleared at an `<hr>`.
+  `test_br_section_break` chapter 3 now gives the 2 and 3 blank lines its own text asks for.
+- **§10b, the TOC-anchor pool.** "The arena when the pool is at most a quarter of it" crowded the inflate ring out of
+  the X4's 48 KB lent region for a one-file book (measured, host `--arena=48000`: 200 TOC entries pushed a 33,792 B
+  ring onto the heap; 1 entry, none). §8.2 of the memory allocation strategy admits a build-long block into the
+  arena only beside every peak it coexists with, and the X4's walk margin is 64 B. On the C3 boards the pool is one
+  heap block; the build region takes it only when `HalCapabilities::buildsInPsram()` is true.
+- **§13a, stylesheet ranges (#835).** Nothing follows `@import`, so the edges are recorded. A redeclaration did merge
+  across sheets on master (into the later sheet's order); a merge guard keeps one record per sheet instead of the
+  "+2 order gap", and the table sits at the end of the cache file so the rule bytes stay master's.
+- **§5, §9.** §5b rides in the §5a PR. §9b and §9c wait for a Linux `epub_pipeline_dump --bench` allocation count
+  (their gate): this PC has WSL without a distribution.
