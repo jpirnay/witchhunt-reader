@@ -195,10 +195,8 @@ page that holds a late image could push the walk out of the arena.
 
 **Open.** 2.52 sent every `Page` allocation through `ensurePage()` (`ChapterHtmlSlimParser.cpp:2074`), which stops the
 build like the other heap refusals instead of aborting. These still allocate through the throwing `operator new`, so a
-refusal there aborts and reboots (`-fno-exceptions`); counted in `Section.cpp` and `ChapterHtmlSlimParser.cpp`:
+refusal there aborts and reboots (`-fno-exceptions`); counted in `ChapterHtmlSlimParser.cpp`:
 
-- the parser itself: `st.visitor = std::make_unique<ChapterHtmlSlimParser>(...)` (`lib/Epub/Epub/Section.cpp:1511`),
-  and the chapter's TOC anchors before it (`tocAnchors.push_back`, `Section.cpp:1504`);
 - the style stack, `std::vector<StyleStackEntry> inlineStyleStack` (`ChapterHtmlSlimParser.h:589`; pushes at
   `ChapterHtmlSlimParser.cpp:826`, `:3858`, `:4223`, `:4254`, `:4285`, `:4305`, `:4356`);
 - the other per-element stacks: `listStack` (`:3887`), `containerWidthStack_` (`:3150`), `backgroundImageScopes_`

@@ -16,6 +16,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -831,7 +832,11 @@ class ChapterHtmlSlimParser final : public Print {
   // much smaller resident one when it is not. Defined in the .cpp beside the two constants.
   size_t anchorLimit() const;
   std::string pendingAnchorId;  // deferred until after previous text block is flushed
-  std::vector<std::string> tocAnchors;
+  // The spine's TOC anchors, packed "id\0id\0...", owned by whoever built the parser (Section: the build arena or a
+  // heap block, both outliving the parser). Empty when the spine has none.
+  std::string_view tocAnchorPool;
+  // True when `id` is one of them: a chapter boundary, which starts a page. Walks the pool.
+  bool isTocAnchor(std::string_view id) const;
 
   // External printed-page labels sourced from NCX <pageList> or EPUB 3 nav page-list.
   // Keyed by HTML id (anchor fragment). When the parser encounters an element whose id
@@ -1406,7 +1411,7 @@ class ChapterHtmlSlimParser final : public Print {
                                  const std::function<bool(std::unique_ptr<Page>)>& completePageFn,
                                  const bool embeddedStyle, const std::string& contentBase,
                                  const std::string& imageBasePath, const uint8_t imageRendering = 0,
-                                 std::vector<std::string> tocAnchors = {},
+                                 std::string_view tocAnchorPool = {},
                                  const std::function<void(int)>& progressFn = nullptr,
                                  const CssParser* cssParser = nullptr, EpubImageManifest* imageManifest = nullptr)
 
@@ -1428,7 +1433,7 @@ class ChapterHtmlSlimParser final : public Print {
         imageRendering(imageRendering),
         contentBase(contentBase),
         imageBasePath(imageBasePath),
-        tocAnchors(std::move(tocAnchors)),
+        tocAnchorPool(tocAnchorPool),
         bionicReadingEnabled(bionicReadingEnabled) {}
 
   ~ChapterHtmlSlimParser() override;
