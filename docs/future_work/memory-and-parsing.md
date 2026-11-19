@@ -58,26 +58,18 @@ its paragraph.
 **Next step.** Drop the empty line a single `<br>` leaves at the end of a block, check both goldens (case 5 of
 `test_br_in_blocks` changes, case 6 must not), and compare a calibre book's page count before and after.
 
-## No hint when a chapter was simplified
+## A page past the elements limit loses its tail
 
-**Open.** When a fixed capacity changes what a chapter shows, `ChapterHtmlSlimParser::noteCapOverflow`
-(`ChapterHtmlSlimParser.cpp:2126`) logs it once per limit and the section stores `kStatusSimplified`
-(`Section.cpp:257`). There are seven such limits (`ChapterHtmlSlimParser.h:1426-1432`): footnote links per page,
-anchors per chapter, page elements, printed-page labels, footnote href length, nesting depth and pages per section; the
-footnote, anchor and label limits also trip when the heap has no block to grow their tables. The reader only logs
-"cached simplified" on a cache hit (`EpubReaderActivity.cpp:5709-5711`); the reader sees less than the book contains
-and is not told. Pages per section is the exception: it also stops the parse with the truncated status
-(`ChapterHtmlSlimParser.cpp:1852-1858`), which shows the truncated-chapter hint.
+**Open.** `Page::MAX_ELEMENTS` (`Page.h:228`, 1,024) caps the elements one page writes. `Section.cpp:725-729` finds a page
+over it, logs the count, and `Page::serialize` (`Page.cpp:647`) writes the first 1,024: the rest of that page is lost
+and the section stores `kStatusSimplified` (`kCapPageElements`, `ChapterHtmlSlimParser.h:1428`). It takes 1,025
+elements on one page, which needs elements without height; no book is known to reach it.
 
-**Why it matters.** The cap is deterministic, so a rebuild cannot help; a hint is the only way to tell the reader. It is
-a product decision, not a memory one.
+**Decided (2026-11-18).** The owner chose no on-page hint for a simplified chapter: the other limits lose a link or a
+style the reader cannot act on, and the log line is enough.
 
-**Where.** `Section::isSimplified` (`Section.h:433`); the truncated-chapter hint is the model to reuse
-(`truncatedSectionHintRendersRemaining`, armed at `EpubReaderActivity.cpp:6052-6056`, drawn at `:7025-7028`). Its
-strings (`TRUNCATED_SECTION_HINT_LINE_1/2`, `:355-356`) are hard-coded English and would need `tr()` keys.
-
-**Next step.** Decide whether the hint is wanted. If it is, show it the way the truncated hint is shown, with translated
-strings.
+**Next step.** If a book ever reaches the limit, end the page at the limit (`emitPage()`, the helper the section-split
+work adds) instead of dropping the tail. Do it only with a fixture that reaches the limit, never with a hint.
 
 ## The font prewarm sets the session's heap minimum
 
