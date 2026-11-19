@@ -1604,8 +1604,14 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     jr = jd_prepare(&jdec, tjpgInput, pool->get(), TJPG_WORK_POOL_SIZE, &session);
     if (jr != JDR_OK) {
       LOG_ERR("JPG", "TJpgDec prepare failed (jr=%d): %s", jr, imagePath.c_str());
+      // A file cut inside its headers, or whose headers are damaged or of a kind TJpgDec does not take: the file's
+      // fault, drawn as the progressive equivalents are. A read that stopped short of the end is the card's.
+      const bool headerFault =
+          jr == JDR_FMT1 || jr == JDR_FMT2 || jr == JDR_FMT3 || (jr == JDR_INP && file.position() >= file.size());
       file.close();
-      return false;
+      if (!headerFault) return false;
+      image_scratch::noteDecodeFailed();
+      return framedGap(renderer, config);
     }
     srcWidth = jdec.width;
     srcHeight = jdec.height;
@@ -2066,6 +2072,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   // Check before abort() so a corrupt reading is attributed to the decode itself
   // rather than to the SD-buffer free inside cache cleanup. Runs on both paths.
   jpgCheckHeap("jpg_after_decode");
+  // A read that came up short at the end of the file is a cut file; one that stopped before it is the card's.
+  const bool inputAtEnd = file.position() >= file.size();
   file.close();
 
   if (aborted) {
@@ -2088,12 +2096,22 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     LOG_ERR("JPG", "Progressive JPEG decode failed (%s): %s", ProgressiveJpeg::resultName(progressiveResult),
             imagePath.c_str());
     dropAll();
+    // The file's fault, not the card's, the heap's or an input's: the reader remembers it (ImageBlock::render).
+    // Not after a resume: a stale or torn checkpoint can trip the same errors, and the next fresh decode decides.
+    if (!resuming && (progressiveResult == ProgressiveJpeg::Result::InvalidData ||
+                      progressiveResult == ProgressiveJpeg::Result::Unsupported)) {
+      image_scratch::noteDecodeFailed();
+    }
     return framedGap(renderer, config);
   }
   if (mode == JpegMode::Baseline && jr != JDR_OK) {
     LOG_ERR("JPG", "TJpgDec decode failed (jr=%d): %s", jr, imagePath.c_str());
     dropAll();
-    return false;
+    if (!resuming && (jr == JDR_FMT1 || jr == JDR_FMT2 || jr == JDR_FMT3 || (jr == JDR_INP && inputAtEnd))) {
+      image_scratch::noteDecodeFailed();
+    }
+    // The same framed gap a progressive file gets, rather than an empty space with nothing to say a picture was here.
+    return framedGap(renderer, config);
   }
 
   LOG_DBG("JPG", "JPEG decoding complete - render time: %lu ms%s%s", decodeTime,

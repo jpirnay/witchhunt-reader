@@ -684,6 +684,8 @@ void EpubReaderActivity::onEnter() {
   // reader rather than from millis()==0. Otherwise B's quiet check is satisfied before the book
   // has drawn anything, which is the worst possible moment to take the display buffer.
   lastPageOnScreenMs_ = millis();
+  imageDecodeFailures_.clear();
+  ImageBlock::setDecodeFailures(&imageDecodeFailures_);
   secondaryBufferDegraded_ = !renderer.hasSecondaryBuffer();
   // A panel that shows pictures on its own gray canvas (displayPageOnGrayCanvas) has no use for the Bayer cache the
   // anti-aliasing passes replay: the warms make each picture's 8-bit gray cache in its place.
@@ -893,6 +895,8 @@ void EpubReaderActivity::onExit() {
   // A book's own darkness stays with the book: every other screen draws with the setting.
   renderer.setTextDarkness(SETTINGS.textDarkness);
   logReaderMemSnapshot("onExit_before_release");
+  ImageBlock::setDecodeFailures(nullptr);
+  imageDecodeFailures_.clear();
   if constexpr (HalDisplay::kMayLendGray8Canvas) ImageBlock::setGrayVariant(ImageBlock::GrayVariant::Bayer);
 
   // Leave the panel a clean baseline for whatever screen comes next.

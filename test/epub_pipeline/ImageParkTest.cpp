@@ -502,4 +502,160 @@ TEST(CoarseProgressiveJpeg, WhereTheFinerWorkspaceFitsTheDecodeIsFiner) {
   fs::remove_all(work);
 }
 
+// --- A file that will not decode: its frame, and one attempt a session (DecodeFailures) -------------
+
+// A baseline fixture cut at half its length, in its own folder.
+struct FailedDecodeFixture : testing::Test {
+  fs::path work;
+  GfxRenderer renderer;
+  DecodeFailures failures;
+
+  void SetUp() override {
+    work = fs::temp_directory_path() /
+           (std::string("img_failed_decode_") + testing::UnitTest::GetInstance()->current_test_info()->name());
+    fs::remove_all(work);
+    fs::create_directories(work);
+    CooperativeAbort::setLongTaskAbortPredicate(countedAbort);
+    gPollsLeft = 0;
+    CooperativeAbort::clearAborted();
+    ImageBlock::setDecodeFailures(&failures);
+  }
+  void TearDown() override {
+    ImageBlock::setDecodeFailures(nullptr);
+    CooperativeAbort::setLongTaskAbortPredicate(nullptr);
+    CooperativeAbort::clearAborted();
+    ESP.setFreeHeap(200 * 1024);
+    fs::remove_all(work);
+  }
+
+  std::string cutCopy(const char* fixture, const double keep = 0.5) const {
+    std::ifstream in(std::string(JPEG_FIXTURE_DIR "/") + fixture, std::ios::binary);
+    std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    bytes.resize(static_cast<size_t>(bytes.size() * keep));
+    const fs::path out = work / fixture;
+    std::ofstream(out, std::ios::binary).write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    return out.string();
+  }
+  std::string wholeCopy(const char* fixture) const { return cutCopy(fixture, 1.0); }
+  static RenderConfig boxAt(const std::string& cachePath) {
+    RenderConfig c;
+    c.x = 12;
+    c.y = 30;
+    c.maxWidth = 150;
+    c.maxHeight = 104;
+    c.useExactDimensions = true;
+    c.monochromeOutput = true;
+    c.cachePath = cachePath;
+    return c;
+  }
+};
+
+TEST_F(FailedDecodeFixture, ACutBaselineFileDrawsTheFrameAndCountsAsFailed) {
+  const std::string jpg = cutCopy("prog_full_420_base.jpg");
+  const RenderConfig c = boxAt((work / "bw.pxc").string());
+  const uint32_t before = image_scratch::decodeFailedCount();
+  const int rects = renderer.rectsDrawn;
+  JpegToFramebufferConverter converter;
+  EXPECT_TRUE(converter.decodeToFramebuffer(jpg, renderer, c)) << "the place is taken care of, as a progressive file's";
+  EXPECT_EQ(rects + 1, renderer.rectsDrawn) << "a frame, not an empty space";
+  EXPECT_EQ(before + 1, image_scratch::decodeFailedCount());
+  EXPECT_FALSE(fs::exists(c.cachePath)) << "a cut picture is not cached";
+}
+
+TEST_F(FailedDecodeFixture, ASessionDecodesACutFileOnceAndDrawsItsFrameEveryPass) {
+  const std::string jpg = cutCopy("prog_full_420_base.jpg");
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  const int rects = renderer.rectsDrawn;
+  for (int pass = 0; pass < 5; ++pass) block.render(renderer, 12, 30, /*forceLoad=*/true, /*monochromeOutput=*/true);
+  EXPECT_EQ(before + 1, image_scratch::decodeFailedCount()) << "one decode attempt, not one per pass";
+  EXPECT_EQ(rects + 5, renderer.rectsDrawn) << "the frame on every pass";
+  EXPECT_TRUE(failures.has(DecodeFailures::hashOf(jpg)));
+
+  // A new session (the reader clears the list on exit) decodes it again.
+  failures.clear();
+  block.render(renderer, 12, 30, true, true);
+  EXPECT_EQ(before + 2, image_scratch::decodeFailedCount()) << "cleared: decoded again";
+}
+
+TEST_F(FailedDecodeFixture, WithoutAReaderEveryPassDecodesAsBefore) {
+  ImageBlock::setDecodeFailures(nullptr);
+  const std::string jpg = cutCopy("prog_full_420_base.jpg");
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  for (int pass = 0; pass < 3; ++pass) block.render(renderer, 12, 30, true, true);
+  EXPECT_EQ(before + 3, image_scratch::decodeFailedCount());
+}
+
+TEST_F(FailedDecodeFixture, ACutProgressiveFileIsRememberedToo) {
+  const std::string jpg = cutCopy("prog_full_420.jpg");
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  for (int pass = 0; pass < 3; ++pass) block.render(renderer, 12, 30, true, true);
+  EXPECT_EQ(before + 1, image_scratch::decodeFailedCount());
+}
+
+TEST_F(FailedDecodeFixture, APreemptedDecodeIsNotAFailure) {
+  const std::string jpg = wholeCopy("prog_full_420_base.jpg");
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  gPollsLeft = 2;
+  block.render(renderer, 12, 30, true, true);
+  gPollsLeft = 0;
+  ASSERT_TRUE(CooperativeAbort::consumeAborted()) << "the fixture must be stoppable";
+  EXPECT_EQ(before, image_scratch::decodeFailedCount());
+  EXPECT_FALSE(failures.has(DecodeFailures::hashOf(jpg)));
+  block.render(renderer, 12, 30, true, true);  // input is idle again: the picture decodes
+  EXPECT_TRUE(block.hasPixelCache());
+}
+
+TEST_F(FailedDecodeFixture, AHeapThatRefusesTheDecodeIsNotAFailure) {
+  const std::string jpg = wholeCopy("prog_full_420_base.jpg");
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  ESP.setFreeHeap(4 * 1024);
+  block.render(renderer, 12, 30, true, true);
+  EXPECT_EQ(before, image_scratch::decodeFailedCount());
+  EXPECT_FALSE(failures.has(DecodeFailures::hashOf(jpg)));
+  ESP.setFreeHeap(200 * 1024);
+  block.render(renderer, 12, 30, true, true);
+  EXPECT_TRUE(block.hasPixelCache()) << "decoded once the memory is back";
+}
+
+TEST_F(FailedDecodeFixture, AFileCutInsideItsHeadersDrawsTheFrameAndIsAttemptedOnce) {
+  const std::string jpg = cutCopy("prog_full_420_base.jpg", 0.01);
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  const int rects = renderer.rectsDrawn;
+  for (int pass = 0; pass < 4; ++pass) block.render(renderer, 12, 30, true, true);
+  EXPECT_EQ(before + 1, image_scratch::decodeFailedCount());
+  EXPECT_EQ(rects + 4, renderer.rectsDrawn);
+}
+
+TEST_F(FailedDecodeFixture, TheFrameOfACropThatReachesPastTheScreenIsNotDrawn) {
+  const std::string jpg = cutCopy("prog_full_420_base.jpg");
+  ImageBlock whole(jpg, 150, 104, "");
+  whole.render(renderer, 12, 30, true, true);  // fails, remembered
+  const auto crop = whole.makeCrop(0, 40);
+  ASSERT_TRUE(crop);
+  const int rects = renderer.rectsDrawn;
+  const int y = renderer.getScreenHeight() - 50;  // the 40 rows fit, the whole box's 104 do not
+  crop->render(renderer, 12, y, true, true);
+  EXPECT_EQ(rects, renderer.rectsDrawn);
+}
+
+TEST(DecodeFailuresList, HoldsEightAndEvictsTheOldest) {
+  DecodeFailures list;
+  for (uint32_t h = 100; h < 108; ++h) list.add(h);
+  for (uint32_t h = 100; h < 108; ++h) EXPECT_TRUE(list.has(h));
+  list.add(100);  // already there: no slot used
+  list.add(200);
+  EXPECT_FALSE(list.has(100)) << "the oldest went";
+  EXPECT_TRUE(list.has(200));
+  EXPECT_TRUE(list.has(107));
+  list.clear();
+  EXPECT_FALSE(list.has(107));
+  EXPECT_FALSE(list.has(0)) << "an empty slot is not a hash of 0";
+}
+
 }  // namespace
