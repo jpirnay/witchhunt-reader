@@ -1,6 +1,7 @@
 #include "BmpViewerActivity.h"
 
 #include <Bitmap.h>
+#include <Epub/blocks/ImageBlock.h>
 #include <Epub/converters/ImageDecoderFactory.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -267,12 +268,19 @@ bool BmpViewerActivity::renderDecodedImage(const bool showControls) {
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   };
 
+  // A file the decoder could not read draws a frame in its place (the reader's way); here that is the failure it was,
+  // not a picture to keep, or to set as the sleep screen.
+  const auto decodeChecked = [&]() {
+    const uint32_t failedBefore = image_scratch::decodeFailedCount();
+    return decoder->decodeToFramebuffer(filePath, renderer, config) &&
+           image_scratch::decodeFailedCount() == failedBefore;
+  };
   if (!grayscaleDisplay) {
     // Pure black-and-white path: single decode with 1-bit Atkinson dither.
     config.monochromeOutput = true;
     renderer.setRenderMode(GfxRenderer::BW);
     renderer.clearScreen();
-    if (!decoder->decodeToFramebuffer(filePath, renderer, config)) {
+    if (!decodeChecked()) {
       return false;
     }
     drawHints();
@@ -287,7 +295,7 @@ bool BmpViewerActivity::renderDecodedImage(const bool showControls) {
 
   renderer.setRenderMode(GfxRenderer::BW);
   renderer.clearScreen();
-  if (!decoder->decodeToFramebuffer(filePath, renderer, config)) {
+  if (!decodeChecked()) {
     return false;
   }
   drawHints();
@@ -295,7 +303,7 @@ bool BmpViewerActivity::renderDecodedImage(const bool showControls) {
 
   renderer.clearScreen(0x00);
   renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-  if (!decoder->decodeToFramebuffer(filePath, renderer, config)) {
+  if (!decodeChecked()) {
     renderer.setRenderMode(GfxRenderer::BW);
     return false;
   }
@@ -303,7 +311,7 @@ bool BmpViewerActivity::renderDecodedImage(const bool showControls) {
 
   renderer.clearScreen(0x00);
   renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-  if (!decoder->decodeToFramebuffer(filePath, renderer, config)) {
+  if (!decodeChecked()) {
     renderer.setRenderMode(GfxRenderer::BW);
     return false;
   }

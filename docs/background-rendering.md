@@ -170,7 +170,7 @@ before B; one page per tick.
 - **A picture that will not decode:** the reader keeps the hashes of the pictures whose decode failed
   for the file's own fault this session (`imageDecodeFailures_`, `DecodeFailures`: 8 x 4 B, cleared in
   `onExit`, nothing on the card). `ImageBlock::render` draws such a picture's frame without decoding it,
-  in the foreground render and in the lane alike. A card error, a refusal for memory and a preemption
+  in the foreground render; the lane, which draws nothing, skips the decode (also the gray8 warm). A card error, a refusal for memory and a preemption
   are not failures of the file and are decoded again. This is apart from `imageWarmMisses_`, which
   bounds the lane's tries per page.
 - **Gates:** no C build active; a secondary buffer to lend, or B holding it (below); no queued input

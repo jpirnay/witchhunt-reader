@@ -532,6 +532,28 @@ TEST_F(FailedDecodeFixture, AHeapThatRefusesTheDecodeIsNotAFailure) {
   EXPECT_TRUE(block.hasPixelCache()) << "decoded once the memory is back";
 }
 
+TEST_F(FailedDecodeFixture, AFileCutInsideItsHeadersDrawsTheFrameAndIsAttemptedOnce) {
+  const std::string jpg = cutCopy("prog_full_420_base.jpg", 0.01);
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  const int rects = renderer.rectsDrawn;
+  for (int pass = 0; pass < 4; ++pass) block.render(renderer, 12, 30, true, true);
+  EXPECT_EQ(before + 1, image_scratch::decodeFailedCount());
+  EXPECT_EQ(rects + 4, renderer.rectsDrawn);
+}
+
+TEST_F(FailedDecodeFixture, TheFrameOfACropThatReachesPastTheScreenIsNotDrawn) {
+  const std::string jpg = cutCopy("prog_full_420_base.jpg");
+  ImageBlock whole(jpg, 150, 104, "");
+  whole.render(renderer, 12, 30, true, true);  // fails, remembered
+  const auto crop = whole.makeCrop(0, 40);
+  ASSERT_TRUE(crop);
+  const int rects = renderer.rectsDrawn;
+  const int y = renderer.getScreenHeight() - 50;  // the 40 rows fit, the whole box's 104 do not
+  crop->render(renderer, 12, y, true, true);
+  EXPECT_EQ(rects, renderer.rectsDrawn);
+}
+
 TEST(DecodeFailuresList, HoldsEightAndEvictsTheOldest) {
   DecodeFailures list;
   for (uint32_t h = 100; h < 108; ++h) list.add(h);

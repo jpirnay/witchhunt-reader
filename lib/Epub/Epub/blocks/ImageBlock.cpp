@@ -525,6 +525,8 @@ void ImageBlock::warmGrayVariant(GfxRenderer& renderer, const int x, const int y
 bool ImageBlock::cacheGray8(GfxRenderer& renderer) const {
   if (!HalDisplay::kMayLendGray8Canvas) return false;  // no canvas in this build: none of the decode below
   if (hasGray8Cache()) return true;
+  // A picture that failed to decode in this session is not decoded again by every warm.
+  if (decodeFailures_ != nullptr && decodeFailures_->has(DecodeFailures::hashOf(imagePath))) return false;
   const uint32_t shortBefore = image_scratch::heapShortCount();
   const std::unique_ptr<uint8_t[]> samples = decodeGray8Picture(renderer);
   // Not a picture decoded short of memory (a coarse one among them): a later decode can do better.
@@ -686,6 +688,10 @@ void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int
   constexpr int PADDING = 6;
 
   if (kind == Placeholder::LowMemory && lowMemoryDrawn_ < UINT16_MAX) lowMemoryDrawn_++;
+  // The failed picture's frame is the decoder's (framedGap), which leaves a box past the screen undrawn: so does this.
+  const bool offScreen =
+      x < 0 || y < 0 || x + width > renderer.getScreenWidth() || y + height > renderer.getScreenHeight();
+  if (kind == Placeholder::Failed && offScreen) return;
   renderer.drawRect(x, y, width, height, BORDER, true);
   if (kind == Placeholder::Failed) return;  // as the decoder's own frame for a file it cannot draw (framedGap)
 
