@@ -204,7 +204,7 @@ page that holds a late image could push the walk out of the arena.
 
 **Open.** 2.52 sent every `Page` allocation through `ensurePage()` (`ChapterHtmlSlimParser.cpp:2074`), which stops the
 build like the other heap refusals instead of aborting. These still allocate through the throwing `operator new`, so a
-refusal there aborts and reboots (`-fno-exceptions`); counted in `Section.cpp` and `ChapterHtmlSlimParser.cpp`:
+refusal there aborts and reboots (`-fno-exceptions`); counted in `ChapterHtmlSlimParser.cpp`:
 
 - `Page::elements` past its reserve: the parser reserves `Page::TYPICAL_ELEMENTS` (32) through `heapReserveFor`
   (`ChapterHtmlSlimParser.cpp:1861`, `:1935`, `:5969`; `Page.h:212`), and a denser page grows by `push_back` at nine

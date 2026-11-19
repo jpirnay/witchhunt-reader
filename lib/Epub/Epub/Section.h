@@ -32,6 +32,8 @@ class BufferedFileWriter;
 struct SectionSetupFaults {
   enum class PoolSource { None, Arena, Heap };
   bool refuseParser = false;
+  // Stands in for a board that builds in PSRAM (the pool may then live in the region); the host has no PSRAM macro.
+  bool poolInRegion = false;
   bool refuseTocPoolArena = false;
   bool refuseTocPoolHeap = false;
   PoolSource lastPoolSource = PoolSource::None;

@@ -2,8 +2,9 @@
 // (std::make_unique) and the spine's TOC anchors (a vector of strings, as long as the book makes it: a book that is
 // one XHTML file puts every TOC entry in one spine). Under -fno-exceptions a refusal aborts, and the next open of the
 // chapter built into the same abort. Now the parser is made with nothrow new, the anchors are one packed pool taken
-// from the build's region when it has room (a quarter of it at most) and from the heap otherwise, and a refusal of
-// either ends the build before it starts. SECTION_SETUP_FAULT_INJECTION refuses them (Section.h).
+// from the build's region when the board builds in PSRAM and it has room (a quarter of it at most) and from the heap
+// otherwise (the C3s: the pool would crowd the lent region's peaks), and a refusal of either ends the build before it
+// starts. SECTION_SETUP_FAULT_INJECTION refuses them and lets the host stand in for a PSRAM board (Section.h).
 #include <gtest/gtest.h>
 #include <unistd.h>
 
@@ -88,6 +89,7 @@ TEST_F(SectionSetupHeap, ARefusedParserDoesNotStartTheBuild) {
   sectionSetupFaults().refuseParser = true;
   const Built refused = build();
   EXPECT_FALSE(refused.ok) << "no parser: the build does not start";
+  EXPECT_TRUE(refused.bytes.empty()) << "and leaves no section file behind";
   sectionSetupFaults().refuseParser = false;
   const Built after = build();
   EXPECT_TRUE(after.ok) << "the next build is as any other";
@@ -104,7 +106,8 @@ TEST_F(SectionSetupHeap, ARefusedParserNeverAborts) {
       testing::ExitedWithCode(0), "");
 }
 
-TEST_F(SectionSetupHeap, ThePoolIsTakenFromTheArenaWhenItHasRoom) {
+TEST_F(SectionSetupHeap, ThePoolIsTakenFromTheArenaWhenTheBoardBuildsInPsramAndItHasRoom) {
+  sectionSetupFaults().poolInRegion = true;
   Section::setOwnedBuildRegionBytes(WordShapeCache::kLargeArenaBytes);
   const Built built = build();
   ASSERT_TRUE(built.ok);
@@ -113,6 +116,7 @@ TEST_F(SectionSetupHeap, ThePoolIsTakenFromTheArenaWhenItHasRoom) {
 }
 
 TEST_F(SectionSetupHeap, ThePoolIsTakenFromTheHeapWithoutARegionOrOverAQuarterOfIt) {
+  sectionSetupFaults().poolInRegion = true;
   const Built none = build();  // the 10 KB parse arena has no room for it
   ASSERT_TRUE(none.ok);
   EXPECT_EQ(Source::Heap, sectionSetupFaults().lastPoolSource);
@@ -124,7 +128,22 @@ TEST_F(SectionSetupHeap, ThePoolIsTakenFromTheHeapWithoutARegionOrOverAQuarterOf
   EXPECT_EQ(Source::Heap, sectionSetupFaults().lastPoolSource);
 }
 
+// A C3 board: its lent region has no room for a build-long block beside the extraction ring and the image walk, so
+// the pool is one heap block whatever the region holds, and the ring stays in the region (nothing it asked was
+// refused).
+TEST_F(SectionSetupHeap, WithoutPsramThePoolIsAHeapBlockAndTheRegionKeepsItsRoom) {
+  BuildArena lent(48000);  // the X4's lent region
+  ASSERT_TRUE(lent.valid());
+  const Built built = build(&lent);
+  ASSERT_TRUE(built.ok);
+  EXPECT_EQ(Source::Heap, sectionSetupFaults().lastPoolSource);
+  EXPECT_EQ(0u, lent.failedAllocSize()) << "the region refused nothing the build asked of it";
+  EXPECT_EQ(0u, lent.used());
+  EXPECT_EQ(0u, lent.releaseFailures());
+}
+
 TEST_F(SectionSetupHeap, ARefusedArenaFallsBackToTheHeap) {
+  sectionSetupFaults().poolInRegion = true;
   Section::setOwnedBuildRegionBytes(WordShapeCache::kLargeArenaBytes);
   sectionSetupFaults().refuseTocPoolArena = true;
   const Built built = build();
@@ -133,10 +152,13 @@ TEST_F(SectionSetupHeap, ARefusedArenaFallsBackToTheHeap) {
 }
 
 TEST_F(SectionSetupHeap, ARefusalOfBothDoesNotStartTheBuild) {
+  sectionSetupFaults().poolInRegion = true;
   Section::setOwnedBuildRegionBytes(WordShapeCache::kLargeArenaBytes);
   sectionSetupFaults().refuseTocPoolArena = true;
   sectionSetupFaults().refuseTocPoolHeap = true;
-  EXPECT_FALSE(build().ok);
+  const Built refused = build();
+  EXPECT_FALSE(refused.ok);
+  EXPECT_TRUE(refused.bytes.empty()) << "no section file is left behind";
   EXPECT_EQ(Source::None, sectionSetupFaults().lastPoolSource);
   // And with no region, where the heap is the only source.
   Section::setOwnedBuildRegionBytes(0);
@@ -149,17 +171,19 @@ TEST_F(SectionSetupHeap, WhereThePoolLivesNeverChangesTheLayout) {
   ASSERT_FALSE(heap.bytes.empty());
   ASSERT_EQ(Source::Heap, sectionSetupFaults().lastPoolSource);
   Section::setOwnedBuildRegionBytes(WordShapeCache::kLargeArenaBytes);
+  sectionSetupFaults().poolInRegion = true;
   const Built arena = build();
   ASSERT_TRUE(arena.ok);
   ASSERT_EQ(Source::Arena, sectionSetupFaults().lastPoolSource);
   EXPECT_EQ(heap.pages, arena.pages);
-  EXPECT_GE(heap.pages, 150) << "every TOC anchor starts a page";
+  EXPECT_EQ(150, heap.pages) << "every TOC anchor starts a page, and the two ids that only start like one do not";
   EXPECT_TRUE(heap.bytes == arena.bytes);
 }
 
 // The pool is a block of the lent arena like the others: the build gives back all it took, in order.
 TEST_F(SectionSetupHeap, ALentArenaTakesThePoolAndGetsItBack) {
-  BuildArena lent(52 * 1024);  // the X3's borrowed framebuffer
+  sectionSetupFaults().poolInRegion = true;
+  BuildArena lent(52 * 1024);  // a lent arena
   ASSERT_TRUE(lent.valid());
   const Built built = build(&lent);
   ASSERT_TRUE(built.ok);

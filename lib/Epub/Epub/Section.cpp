@@ -1058,8 +1058,12 @@ bool Section::clearCache() {
 // host tests that build this file do not have.
 #if defined(BOARD_HAS_PSRAM) && BOARD_HAS_PSRAM
 constexpr size_t PAGE_WRITE_BUFFER_BYTES = 4096;
+// The TOC anchor pool may live in the build region: the S3's is 256 KB of PSRAM, with room beside every peak.
+constexpr bool kPoolInRegion = true;
 #else
 constexpr size_t PAGE_WRITE_BUFFER_BYTES = 2048;
+// The C3s' lent region has no room for a build-long block beside the extraction ring and the image walk: the heap.
+constexpr bool kPoolInRegion = false;
 #endif
 
 // Live state of an in-progress section build. Holds exactly the locals that span build
@@ -1102,16 +1106,18 @@ struct Section::BuildState {
   // The parser stops a build at MAX_PAGES_PER_SECTION, so the table must never refuse below it.
   static_assert(PageLut::minMaxSize() >= Page::MAX_PAGES_PER_SECTION, "page LUT smaller than a section may be");
   PageLut lut;
-  std::unique_ptr<ChapterHtmlSlimParser> visitor;
-  // The spine's TOC anchors, packed "id\0id\0...", for the build's length: the parser holds a view of it. In the
-  // build's region when that has room for it and it is under a quarter of it (the parse keeps its room), else in
-  // tocAnchorHeap. Taken once, in setup, before the page block opens, so it sits at the bottom of the arena's order.
+  // The spine's TOC anchors, packed "id\0id\0...", for the build's length: the parser holds a view of it, so these are
+  // declared before the visitor and outlive it. On a board that builds in PSRAM (kPoolInRegion) it is taken from the
+  // build's region when it is under a quarter of it; everywhere else it is one heap block (tocAnchorHeap): on the C3s
+  // the pool would live beside the extraction ring and the image walk's stage, which the lent region leaves a few
+  // hundred bytes at most (docs/memory-allocation-strategy.md 8.2). Taken once, in setup, before the page block opens.
   const char* tocAnchorPool = nullptr;
   size_t tocAnchorPoolBytes = 0;
   std::unique_ptr<char[]> tocAnchorHeap;
-  // The pool's scope in the arena (the arena rewinds newest-first, and the build gives back everything it took): below
-  // chunkBlock, so released after it.
+  // The pool's scope in the arena, when it is there (the arena rewinds newest-first, and the build gives back
+  // everything it took): below chunkBlock, so released after it.
   BuildArena::Block tocPoolBlock;
+  std::unique_ptr<ChapterHtmlSlimParser> visitor;
   // Live ZIP-side state of the parse, created on the first runBuildParse call and
   // released the moment the compressed stream is exhausted. zip must outlive reader
   // (reader holds a reference to it). chunkBuf (PARSE_CHUNK_BYTES) is the feed buffer —
@@ -1175,6 +1181,7 @@ struct Section::BuildState {
     char* pool = nullptr;
     BuildArena* const region = this->region();
     bool inArena = false;
+    bool poolInRegion = kPoolInRegion;
 #ifdef SECTION_SETUP_FAULT_INJECTION
     const bool arenaRefused = sectionSetupFaults().refuseTocPoolArena;
     const bool heapRefused = sectionSetupFaults().refuseTocPoolHeap;
@@ -1182,7 +1189,10 @@ struct Section::BuildState {
     constexpr bool arenaRefused = false;
     constexpr bool heapRefused = false;
 #endif
-    if (region && !arenaRefused && bytes <= region->capacity() / 4) {
+#ifdef SECTION_SETUP_FAULT_INJECTION
+    if (sectionSetupFaults().poolInRegion) poolInRegion = true;  // the host stands in for an S3 board
+#endif
+    if (poolInRegion && region && !arenaRefused && bytes <= region->capacity() / 4) {
       tocPoolBlock = region->reserveBlock();
       pool = static_cast<char*>(region->alloc(bytes, 1));
       inArena = pool != nullptr;
@@ -2529,6 +2539,8 @@ bool Section::startBuild(const BuildParams& params, const std::function<void(int
   buildState_->requestedHash = requestedHash;
   buildState_->totalStartMs = millis();
 
+  // A refusal in setup after the file is open has already torn the state down (abortSectionBuild); reset is then a
+  // no-op.
   if (runBuildSetup(*buildState_) != BuildPhaseResult::Ok) {
     buildState_.reset();
     return false;
