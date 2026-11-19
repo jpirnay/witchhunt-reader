@@ -2,10 +2,12 @@
 // are kept as a truncated section, and nothing aborts. Eight places made their page with a bare `new Page()`, which
 // under -fno-exceptions aborts the firmware mid-build; the next open of the chapter rebuilt into the same abort. The
 // rest made it with nothrow new and carried on with no page, to dereference it a few lines on. PAGE_FAULT_INJECTION
-// refuses the n-th page (ChapterHtmlSlimParser::ensurePage).
+// refuses the n-th page (ChapterHtmlSlimParser::ensurePage). ELEMENT_FAULT_INJECTION does the same for the n-th element
+// a page takes (ChapterHtmlSlimParser::addPageElement): `Page::elements` grew with a bare push_back, which aborts too.
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -62,10 +64,21 @@ struct PagesLeft {
   PagesLeft& operator=(const PagesLeft&) = delete;
 };
 
+// Restores "never refuse" however the test ends.
+struct ElementsLeft {
+  explicit ElementsLeft(const size_t n) { elementsLeft() = n; }
+  ~ElementsLeft() { elementsLeft() = SIZE_MAX; }
+  ElementsLeft(const ElementsLeft&) = delete;
+  ElementsLeft& operator=(const ElementsLeft&) = delete;
+};
+
 struct Built {
   bool ok = false;
   bool truncated = false;
   uint16_t pages = 0;
+  size_t elements = 0;    // over all pages
+  size_t firstPage = 0;   // elements on page 0
+  size_t widestPage = 0;  // most elements on one page
   std::vector<std::string> words;
 };
 
@@ -81,7 +94,8 @@ struct PageHeap : testing::Test {
   }
   void TearDown() override { fs::remove_all(work); }
 
-  Built build(const size_t pagesAllowed, const std::string& chapter = body()) {
+  Built build(const size_t pagesAllowed, const std::string& chapter = body(), const size_t elementsAllowed = SIZE_MAX,
+              const uint16_t viewportHeight = 160) {
     auto epub = syntheticBook(work, books++, chapter,
                               {{"pic.png", "image/png", syntheticPngHeader(300, 120)},
                                {"tall.png", "image/png", syntheticPngHeader(300, 600)}});
@@ -91,7 +105,10 @@ struct PageHeap : testing::Test {
     Built out;
     {
       const PagesLeft guard(pagesAllowed);
-      out.ok = section.createSectionFile(params(), {}, /*skipEviction=*/true);
+      const ElementsLeft elementGuard(elementsAllowed);
+      Section::BuildParams p = params();
+      p.viewportHeight = viewportHeight;
+      out.ok = section.createSectionFile(p, {}, /*skipEviction=*/true);
     }
     if (!out.ok) return out;
     out.truncated = section.isTruncatedCache();
@@ -101,6 +118,9 @@ struct PageHeap : testing::Test {
       const auto page = section.loadPageFromSectionFile();
       EXPECT_NE(nullptr, page) << "page " << p;
       if (!page) break;
+      out.elements += page->elements.size();
+      if (p == 0) out.firstPage = page->elements.size();
+      out.widestPage = std::max(out.widestPage, page->elements.size());
       for (const auto& el : page->elements) {
         if (el->getTag() != TAG_PageLine) continue;
         const TextBlock* block = static_cast<const PageLine&>(*el).getBlock();
@@ -175,4 +195,55 @@ TEST_F(PageHeap, EveryElementThatOpensAChapterTakesTheRefusal) {
       EXPECT_TRUE(cut.truncated);
     }
   }
+}
+
+// A page of more than 32 elements (Page::TYPICAL_ELEMENTS, the reserve each page starts with) makes its table grow by
+// a doubling, and every element kind adds through the same helper. Refuse the n-th element, for every element the whole
+// chapter takes: the build ends, never aborts, keeps the pages before the refusal and says it is truncated.
+namespace {
+// Every count up to the first doubling of the table (32 -> 64) and a little past it, then every ninth: each build takes
+// about half a second.
+// Tall pages, so one page carries lines, a rule, pictures, a slice of a tall one, a table and a float together.
+constexpr uint16_t kTallViewport = 3000;
+
+// body() with enough paragraphs between the rule and the pictures that the one tall page outgrows its 32 elements.
+std::string denseBody() {
+  std::string out = body();
+  for (int i = 0; i < 40; ++i) out += "<p>" + word(1000 + i) + "</p>\n<hr/>\n";
+  return out;
+}
+}  // namespace
+
+TEST_F(PageHeap, ARefusedElementStopsTheBuildAndKeepsThePagesBeforeIt) {
+  const Built whole = build(SIZE_MAX, denseBody(), SIZE_MAX, kTallViewport);
+  ASSERT_TRUE(whole.ok);
+  ASSERT_FALSE(whole.truncated);
+  ASSERT_GT(whole.widestPage, Page::TYPICAL_ELEMENTS) << "a page must outgrow its first reserve";
+  for (size_t allowed = 0; allowed < whole.elements; allowed += allowed < 40 ? 1 : 9) {
+    SCOPED_TRACE("elements allowed: " + std::to_string(allowed));
+    const Built cut = build(SIZE_MAX, denseBody(), allowed, kTallViewport);
+    if (allowed < whole.firstPage) {
+      // The first page never completes: nothing to keep (a page held by emitPage is the section's last, or none).
+      if (!cut.ok) continue;
+    }
+    ASSERT_TRUE(cut.ok) << "the pages before the refusal are kept";
+    EXPECT_TRUE(cut.truncated) << "the chapter stopped early and must say so";
+    ASSERT_LE(cut.words.size(), whole.words.size());
+    for (size_t i = 0; i < cut.words.size(); ++i) ASSERT_EQ(cut.words[i], whole.words[i]) << "word " << i;
+  }
+}
+
+// The same refusal in a child process, which a bare push_back (-fno-exceptions: abort) would kill.
+TEST_F(PageHeap, ARefusedElementNeverAborts) {
+  const Built whole = build(SIZE_MAX, denseBody(), SIZE_MAX, kTallViewport);
+  ASSERT_TRUE(whole.ok);
+  EXPECT_EXIT(
+      {
+        for (size_t allowed = 0; allowed < whole.elements; allowed += allowed < 40 ? 1 : 9) {
+          const Built cut = build(SIZE_MAX, denseBody(), allowed, kTallViewport);
+          if (cut.ok && !cut.truncated) std::exit(1);
+        }
+        std::exit(0);
+      },
+      testing::ExitedWithCode(0), "");
 }
