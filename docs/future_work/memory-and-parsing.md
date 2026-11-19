@@ -194,8 +194,8 @@ preview), while sliced 1/8 decodes and their goldens stay as they are.
 **Tried.** A heap pool for table line storage was reverted: its reservation pushed contig below the framebuffer ([Memory Allocation Strategy §8.4a](../memory-allocation-strategy.md#84a-table-layout-and-the-ab-harness)). Moving the line bytes into the arena is done.
 
 **Next step.** Placement-construct the objects in the page or row block, with an arena-aware deleter behind
-`Page::elements`: 47 lines in `lib/Epub` and `src` use it, 15 of them add an element (the parser's nine `push_back`s
-and one `insert`, listed under the next item, and the five of `Page::deserialize`, `Page.cpp:705-721`). Measure
+`Page::elements`: 47 lines in `lib/Epub` and `src` use it, 15 of them add an element (the parser's nine adds, all
+through `addPageElement`, and one `insert`, and the five of `Page::deserialize`, `Page.cpp:705-721`). Measure
 allocation counts and `HeapPeakRegression` on the host first, then a table chapter on the X3 with `SCT_HEAP_TRACE=1`.
 Budget for the image-header walk: on the X4 a 32 KB walk stage leaves 64 B of the lent region free, so objects of a
 page that holds a late image could push the walk out of the arena.
@@ -208,10 +208,6 @@ refusal there aborts and reboots (`-fno-exceptions`); counted in `Section.cpp` a
 
 - the parser itself: `st.visitor = std::make_unique<ChapterHtmlSlimParser>(...)` (`lib/Epub/Epub/Section.cpp:1511`),
   and the chapter's TOC anchors before it (`tocAnchors.push_back`, `Section.cpp:1504`);
-- `Page::elements` past its reserve: the parser reserves `Page::TYPICAL_ELEMENTS` (32) through `heapReserveFor`
-  (`ChapterHtmlSlimParser.cpp:1861`, `:1935`, `:5969`; `Page.h:212`), and a denser page grows by `push_back` at nine
-  sites (`:2349`, `:2607`, `:4169`, `:5695`, `:6370`, `:6576`, `:6634`, `:6669`, `:6948`); the one `insert` (`:2041`)
-  asks `heapReserveFor` first;
 - the style stack, `std::vector<StyleStackEntry> inlineStyleStack` (`ChapterHtmlSlimParser.h:589`; pushes at
   `ChapterHtmlSlimParser.cpp:826`, `:3858`, `:4223`, `:4254`, `:4285`, `:4305`, `:4356`);
 - the other per-element stacks: `listStack` (`:3887`), `containerWidthStack_` (`:3150`), `backgroundImageScopes_`
@@ -224,7 +220,8 @@ refusal there aborts and reboots (`-fno-exceptions`); counted in `Section.cpp` a
 
 **Next step.** Ask `HeapFit` before each growth (`heapReserveFor`, as the elements reserve does) and stop the build on
 a refusal (`stopForHeap`, `:2092`), or move the table to the build's arena or a `ChunkedVector`. Each site needs a host
-fault-injection test, as `PageHeapTest.cpp` (`PAGE_FAULT_INJECTION`) does for pages.
+fault-injection test, as `PageHeapTest.cpp` (`PAGE_FAULT_INJECTION`, `ELEMENT_FAULT_INJECTION`) does for pages and for
+`Page::elements`, which `addPageElement` now covers.
 
 ## `shrink_to_fit()` sweep
 
