@@ -211,8 +211,7 @@ void SerialTransferDevice::fileEnd(bool keep) {
   // upload cut short.
   if (!uploadFile_.close()) ok = false;
   uploadOpen_ = false;
-  coalesce_.clear();
-  coalesce_.shrink_to_fit();
+  std::vector<uint8_t>().swap(coalesce_);
   const std::string partPath = uploadPartPath(uploadPath_);
   if (ok) ok = FileReplace::replace(partPath.c_str(), uploadPath_.c_str());
 

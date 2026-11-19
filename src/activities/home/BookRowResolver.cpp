@@ -160,5 +160,5 @@ void BookRowResolver::clear() {
 
 void BookRowResolver::release() {
   clear();
-  rows.shrink_to_fit();
+  std::vector<Row>().swap(rows);
 }

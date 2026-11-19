@@ -252,6 +252,8 @@ target_compile_definitions(EpubPipelineTest PRIVATE
   BLOCK_IMAGE_FAULT_INJECTION
   # PageHeapTest refuses the build its pages (ChapterHtmlSlimParser::ensurePage). Inert otherwise.
   PAGE_FAULT_INJECTION
+  # PageHeapTest refuses a page its n-th element (ChapterHtmlSlimParser::addPageElement). Inert otherwise.
+  ELEMENT_FAULT_INJECTION
   # Central-directory walk counters (ZipFile.h), for the tests that bound them. Inert otherwise.
   ZIP_FILE_SCAN_STATS
 )
