@@ -25,6 +25,26 @@ namespace serialization {
 class BufferedFileWriter;
 }
 
+#ifdef SECTION_SETUP_FAULT_INJECTION
+// Host tests only (firmware never defines it): which of the build setup's allocations are refused as if the heap were
+// out (Section::runBuildSetup: the chapter parser, the TOC anchor pool in the arena, the same on the heap), and where
+// the last pool came from. Inert until a test sets a flag.
+struct SectionSetupFaults {
+  enum class PoolSource { None, Arena, Heap };
+  bool refuseParser = false;
+  // Stands in for a board that builds in PSRAM (the pool may then live in the region); the host has no PSRAM macro.
+  bool poolInRegion = false;
+  bool refuseTocPoolArena = false;
+  bool refuseTocPoolHeap = false;
+  PoolSource lastPoolSource = PoolSource::None;
+  size_t lastPoolBytes = 0;
+};
+inline SectionSetupFaults& sectionSetupFaults() {
+  static SectionSetupFaults faults;
+  return faults;
+}
+#endif
+
 class Section {
  public:
   // Forward-declared so the by-reference build/hash API below can name it; defined fully below.

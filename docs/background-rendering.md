@@ -167,6 +167,12 @@ before B; one page per tick.
   next section's first pages when that section's cache exists (not a CSS-fallback cache, which the
   reader rebuilds on entry). A window found clean is remembered (`imageWarmCleanSpine_` /
   `imageWarmCleanPage_`) until the position moves or B completes a section the window reaches into.
+- **A picture that will not decode:** the reader keeps the hashes of the pictures whose decode failed
+  for the file's own fault this session (`imageDecodeFailures_`, `DecodeFailures`: 8 x 4 B, cleared in
+  `onExit`, nothing on the card). `ImageBlock::render` draws such a picture's frame without decoding it,
+  in the foreground render; the lane, which draws nothing, skips the decode (also the gray8 warm). A card error, a refusal for memory and a preemption
+  are not failures of the file and are decoded again. This is apart from `imageWarmMisses_`, which
+  bounds the lane's tries per page.
 - **Gates:** no C build active; a secondary buffer to lend, or B holding it (below); no queued input
   and no gesture in flight; `IMAGE_LANE_SETTLE_MS` (300 ms) since the last turn, the last page on
   screen, or the last preempted decode. The scheduler already runs nothing while the deferred AA is

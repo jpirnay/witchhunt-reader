@@ -101,6 +101,11 @@ struct DecodeOptions {
   // included -- a resampler that maps the picture onto a box wants them all (decodeResized); a
   // caller that wants the scale's own size (floor, as at every scale) leaves it off.
   bool wholeBlocks = false;
+  // At 1/8: index and decode the first luma DC scan alone, when it leaves at most one DC bit to a refinement
+  // (Al <= 1), instead of reading on to the scan that makes DC final -- with libjpeg's script the DC
+  // refinement, 55-80 % into the file. A picture off by at most q_dc / 8 grey levels, for a fraction of the
+  // card bytes. Set only by decodeResized(); a first scan at Al >= 2 keeps reading to Al = 0.
+  bool firstDcScanOnly = false;
 };
 
 // Every failure is reported before the first band is emitted unless the entropy data itself is
@@ -158,6 +163,9 @@ class Decoder {
   // checkpoint does not fit -- another image, scale or firmware layout; the caller starts over.
   Result resume(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user, FsFile& checkpoint);
   uint16_t bandsDone() const;
+  // True while the decoder is still indexing the file (before its first band); a decode that stopped
+  // there resumes there.
+  bool indexing() const;
   uint16_t bandCount() const;
   // Releases the workspace (when the decoder took its own) and rewinds the file to the JPEG's
   // start. Safe to call at any point, and more than once.

@@ -16,6 +16,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -635,6 +636,9 @@ class ChapterHtmlSlimParser final : public Print {
     std::string imageAlt;
     bool isHeader = false;
     uint8_t colSpan = 1;
+    // Opened by openStreamedCell (a nested table's cell, or a cell's rest after one): never a grid cell, so a second
+    // picture streams the cell so far instead of waiting for the one slot.
+    bool streamed = false;
   };
   struct BufferedTableRow {
     std::vector<BufferedTableCell> cells;
@@ -672,7 +676,18 @@ class ChapterHtmlSlimParser final : public Print {
     // divide contentWidth rather than the full viewport, so an indented table stays indented
     // instead of being stretched edge to edge.
     uint16_t contentWidth = 0;
-    int depth = 0;          // nesting depth; > 1 means we're inside a nested table
+    int depth = 0;  // nesting depth; > 1 means we're inside a nested table
+    // Bit d - 2: the table nested at depth d opened inside a cell, whose rest (its text after the
+    // inner table) is a cell of its own. Past the mask, a table is taken to sit in a cell.
+    uint32_t nestedInCellBits = 0;
+    void noteNestedInCell(const bool inCell) {
+      if (depth < 2 || depth - 2 >= 32) return;
+      const uint32_t bit = 1u << (depth - 2);
+      nestedInCellBits = inCell ? (nestedInCellBits | bit) : (nestedInCellBits & ~bit);
+    }
+    [[nodiscard]] bool nestedInCell() const {
+      return depth < 2 || depth - 2 >= 32 || (nestedInCellBits & (1u << (depth - 2))) != 0;
+    }
     bool hasBorder = true;  // false when border="0" on the <table> element
     // The table runs right to left (its element's direction, else the book's): its columns are laid out from the
     // right, the first cell of a row being the rightmost.
@@ -817,7 +832,11 @@ class ChapterHtmlSlimParser final : public Print {
   // much smaller resident one when it is not. Defined in the .cpp beside the two constants.
   size_t anchorLimit() const;
   std::string pendingAnchorId;  // deferred until after previous text block is flushed
-  std::vector<std::string> tocAnchors;
+  // The spine's TOC anchors, packed "id\0id\0...", owned by whoever built the parser (Section: the build arena or a
+  // heap block, both outliving the parser). Empty when the spine has none.
+  std::string_view tocAnchorPool;
+  // True when `id` is one of them: a chapter boundary, which starts a page. Walks the pool.
+  bool isTocAnchor(std::string_view id) const;
 
   // External printed-page labels sourced from NCX <pageList> or EPUB 3 nav page-list.
   // Keyed by HTML id (anchor fragment). When the parser encounters an element whose id
@@ -1033,7 +1052,7 @@ class ChapterHtmlSlimParser final : public Print {
   // Puts the controls the element opening now asks for (CSS Writing Modes 3, 2.4.2: its unicode-bidi and computed
   // direction, elementFlow_) at the start of its text, and pushes the edge with their closers. An inline element takes
   // them all; one laid out as its own block (`inlineElement` false) only an override, as its other values set its
-  // paragraph's direction. Nothing where its text is not laid out (an rt's, a nested table's, a transparent run's).
+  // paragraph's direction. Nothing where its text is not laid out (an rt's, a transparent run's).
   void openBidiEdge(const CssStyle& style, bool inlineElement);
   // At the end tag of the element at `elementDepth`: its closers go in, and those of any edge left deeper.
   void closeBidiEdges(int elementDepth);
@@ -1257,6 +1276,10 @@ class ChapterHtmlSlimParser final : public Print {
   bool degradeRowAtOpenCell(const char* reason);
   // Called on </td> once degraded: emit and release the just-closed cell immediately.
   void streamClosedCell(BufferedTableRow& row);
+  // Opens a cell of the degraded table's stream that no outer <td> opens: a nested table's cell, or the rest of the
+  // cell a nested table sat in. Laid out and freed by streamClosedCell, as a degraded outer cell is. False when the
+  // heap cannot hold it: the parse has stopped, and no cell is open.
+  bool openStreamedCell(CssDirection direction, bool isHeader);
   // A table cell's text: no paragraph spacing, no hyphenation, the block's typography, shaping latch and writing mode.
   // Null when the heap cannot hold it; the parse then stops, as any low-heap stop does (the pages so far are kept).
   std::unique_ptr<ParsedText> makeCellText();
@@ -1399,7 +1422,7 @@ class ChapterHtmlSlimParser final : public Print {
                                  const std::function<bool(std::unique_ptr<Page>)>& completePageFn,
                                  const bool embeddedStyle, const std::string& contentBase,
                                  const std::string& imageBasePath, const uint8_t imageRendering = 0,
-                                 std::vector<std::string> tocAnchors = {},
+                                 std::string_view tocAnchorPool = {},
                                  const std::function<void(int)>& progressFn = nullptr,
                                  const CssParser* cssParser = nullptr, EpubImageManifest* imageManifest = nullptr)
 
@@ -1421,7 +1444,7 @@ class ChapterHtmlSlimParser final : public Print {
         imageRendering(imageRendering),
         contentBase(contentBase),
         imageBasePath(imageBasePath),
-        tocAnchors(std::move(tocAnchors)),
+        tocAnchorPool(tocAnchorPool),
         bionicReadingEnabled(bionicReadingEnabled) {}
 
   ~ChapterHtmlSlimParser() override;

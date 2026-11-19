@@ -138,6 +138,7 @@ add_executable(EpubPipelineTest
   TableCellTextHeapTest.cpp
   BlockImageHeapTest.cpp
   PageHeapTest.cpp
+  SectionSetupHeapTest.cpp
   TableRowFallbackArenaTest.cpp
   AnchorMapTest.cpp
   AnchorPageAccuracyTest.cpp
@@ -204,6 +205,7 @@ add_executable(EpubPipelineTest
   VisibleTextOffsetLutTest.cpp
   TextNodeRulesTest.cpp
   BookFontsTest.cpp
+  CssSheetRangesTest.cpp
   BodySizeTest.cpp
   FirstOpenIndexingTest.cpp
   FirstChapterTest.cpp
@@ -251,6 +253,8 @@ target_compile_definitions(EpubPipelineTest PRIVATE
   BLOCK_IMAGE_FAULT_INJECTION
   # PageHeapTest refuses the build its pages (ChapterHtmlSlimParser::ensurePage). Inert otherwise.
   PAGE_FAULT_INJECTION
+  # SectionSetupHeapTest refuses the build's setup its parser and its TOC anchor pool (Section::runBuildSetup). Inert otherwise.
+  SECTION_SETUP_FAULT_INJECTION
   # PageHeapTest refuses a page its n-th element (ChapterHtmlSlimParser::addPageElement). Inert otherwise.
   ELEMENT_FAULT_INJECTION
   # Central-directory walk counters (ZipFile.h), for the tests that bound them. Inert otherwise.

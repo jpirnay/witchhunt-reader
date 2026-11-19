@@ -1093,11 +1093,26 @@ bool progressiveShouldAbort(void*) {
   return true;
 }
 
+// A resumed decode may not park before it has made progress: loading the page, borrowing the buffer
+// and reading the checkpoint took 118-265 ms (X3, 2026-09-27), and a key press in the window
+// between the lane's input check and the first band would park it where it started, again and
+// again. The gate lets the poll pass until the decoder has finished one band past the resume.
+struct ResumeAbortGate {
+  const ProgressiveJpeg::Decoder* decoder;
+  uint16_t pollFromBand;
+};
+
+// A resumed baseline decode decodes this many MCU rows before it polls (it used to decode one).
+constexpr int kResumeMinRows = 4;
+
 // The full progressive decoder reads the whole file before its first band (emitGrayBlock feeds
 // the watchdog per band, but not before one exists), so its abort hook feeds it too.
 bool fullProgressiveShouldAbort(void* user) {
   HalSystem::feedWatchdog();
-  return progressiveShouldAbort(user);
+  const auto* gate = static_cast<const ResumeAbortGate*>(user);
+  // The guarantee covers the band phase only: an index poll (every 32 KB of a file) passes through.
+  if (gate && !gate->decoder->indexing() && gate->decoder->bandsDone() < gate->pollFromBand) return false;
+  return progressiveShouldAbort(nullptr);
 }
 
 // Fine-scale factors for scaledSrc* -> dst*, and whether the downscale area-averages. Area
@@ -1589,8 +1604,14 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     jr = jd_prepare(&jdec, tjpgInput, pool->get(), TJPG_WORK_POOL_SIZE, &session);
     if (jr != JDR_OK) {
       LOG_ERR("JPG", "TJpgDec prepare failed (jr=%d): %s", jr, imagePath.c_str());
+      // A file cut inside its headers, or whose headers are damaged or of a kind TJpgDec does not take: the file's
+      // fault, drawn as the progressive equivalents are. A read that stopped short of the end is the card's.
+      const bool headerFault =
+          jr == JDR_FMT1 || jr == JDR_FMT2 || jr == JDR_FMT3 || (jr == JDR_INP && file.position() >= file.size());
       file.close();
-      return false;
+      if (!headerFault) return false;
+      image_scratch::noteDecodeFailed();
+      return framedGap(renderer, config);
     }
     srcWidth = jdec.width;
     srcHeight = jdec.height;
@@ -1879,6 +1900,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     progressiveOptions.clock = []() -> uint32_t { return millis(); };
   }
   park::BaselineState baseline{};
+  ResumeAbortGate resumeGate{&progressive, 0};
 
   const unsigned long resumeStart = millis();
   if (resuming) {
@@ -1887,9 +1909,11 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     const uint32_t decoderAt = static_cast<uint32_t>(sizeof(park::Header)) + parked.sinkBytes;
     bool ok = checkpoint.seekSet(decoderAt);
     if (ok && fullProgressive) {
+      progressiveOptions.abortUser = &resumeGate;  // the decoder keeps a copy of its options from here on
       ok = progressive.resume(file, progressiveOptions, fullProgressiveOutput, &progressiveSink, checkpoint) ==
            ProgressiveJpeg::Result::Ok;
       progressiveSink.emitted = true;  // rows exist: a failure from here on is no case for the 1/8 retry
+      if (ok) resumeGate.pollFromBand = static_cast<uint16_t>(progressive.bandsDone() + 1);
     } else if (ok) {
       ok = park::readAll(checkpoint, &baseline, 1);
     }
@@ -2016,9 +2040,13 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     // One MCU row at a time. A checkpointable decode stops between rows for input and parks; any
     // other runs to the end, as TJpgDec always did.
     JDCURSOR& cursor = baseline.cursor;
+    int rowsDone = 0;
     for (;;) {
       jr = jd_decomp_rows(&jdec, tjpgOutput, tjpgScale, &cursor, 1);
+      ++rowsDone;
       if (jr != JDR_OK || cursor.done) break;
+      // A resume decodes kResumeMinRows rows before its first poll; a fresh decode, one.
+      if (resuming && rowsDone < kResumeMinRows) continue;
       if (checkpointable && CooperativeAbort::shouldAbortLongTask()) {
         CooperativeAbort::markAborted();
         aborted = true;
@@ -2044,6 +2072,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   // Check before abort() so a corrupt reading is attributed to the decode itself
   // rather than to the SD-buffer free inside cache cleanup. Runs on both paths.
   jpgCheckHeap("jpg_after_decode");
+  // A read that came up short at the end of the file is a cut file; one that stopped before it is the card's.
+  const bool inputAtEnd = file.position() >= file.size();
   file.close();
 
   if (aborted) {
@@ -2066,12 +2096,22 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     LOG_ERR("JPG", "Progressive JPEG decode failed (%s): %s", ProgressiveJpeg::resultName(progressiveResult),
             imagePath.c_str());
     dropAll();
+    // The file's fault, not the card's, the heap's or an input's: the reader remembers it (ImageBlock::render).
+    // Not after a resume: a stale or torn checkpoint can trip the same errors, and the next fresh decode decides.
+    if (!resuming && (progressiveResult == ProgressiveJpeg::Result::InvalidData ||
+                      progressiveResult == ProgressiveJpeg::Result::Unsupported)) {
+      image_scratch::noteDecodeFailed();
+    }
     return framedGap(renderer, config);
   }
   if (mode == JpegMode::Baseline && jr != JDR_OK) {
     LOG_ERR("JPG", "TJpgDec decode failed (jr=%d): %s", jr, imagePath.c_str());
     dropAll();
-    return false;
+    if (!resuming && (jr == JDR_FMT1 || jr == JDR_FMT2 || jr == JDR_FMT3 || (jr == JDR_INP && inputAtEnd))) {
+      image_scratch::noteDecodeFailed();
+    }
+    // The same framed gap a progressive file gets, rather than an empty space with nothing to say a picture was here.
+    return framedGap(renderer, config);
   }
 
   LOG_DBG("JPG", "JPEG decoding complete - render time: %lu ms%s%s", decodeTime,

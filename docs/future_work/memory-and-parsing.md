@@ -9,31 +9,49 @@ handover (2026-08), the memory audit (2026-09) and the earlier memory-allocation
 
 The rules and measurements these items refer to are in [Memory Allocation Strategy](../memory-allocation-strategy.md).
 
-## Text inside a nested table is dropped
+## The paragraph after a table loses its margin-top
 
-**Open.** `ChapterHtmlSlimParser::consumeText` returns early when `currentTable->depth > 1`
-(`ChapterHtmlSlimParser.cpp:4435`), so every word inside a table nested in another table is discarded. The nested-table
-branch of `ChapterHtmlSlimParser::startElement` (`:3157-3164`) calls `degradeTable("nested table")`, and its comment
-says the inner cells fold into the outer table's stream, but the text never arrives there. `test_table_streaming.epub`
-shows it: its "Nested tables" chapter (spine 2) nests a table in a cell, and its golden
-(`test/epub_pipeline/goldens/test_table_streaming.golden.txt`) holds the outer cells' words and none of the inner
-table's ("Inner cell one" to "Inner cell four").
+**Open.** The paragraph after a table collapses its margin-top against the margin-bottom of the paragraph before the
+table, as if the table were not there. In `test_table_streaming.epub` spine 3 (`p { margin: 1em 0 }`, 18 px), "Now a
+table with more columns than the grid layout supports." sits at y=414, one line under the last cell of the degraded
+rowspan table above it (y=390), and "Closing text after the tables." at y=395, the bottom of the grid fragment above it
+(`TABLE y=324 h=71`; `test/epub_pipeline/goldens/test_table_streaming.golden.txt`). The paragraphs after the nested
+tables of `test_nested_tables.epub` do the same (FIRSTAFTER at y=344 under the last cell at y=320).
 
-**Why it matters.** It breaks "never drop content", silently, on any book that nests tables. It does not depend on heap
-state, so it reproduces on the host.
+**Why it matters.** A table runs into the text that follows it, against the book's CSS. Nothing is lost; it is spacing.
 
-**Where.** The early return in `consumeText` (`:4435`); the nested `<table>` branch in `startElement` (`:3157`); the
-`depth > 1` `</table>` branch in `endElement` (`:4890`); `openBidiEdge`, which treats an element at `depth > 1` as text
-that is not laid out (`:1600`); and every handler that tests `currentTable->depth == 1`: `tr` (`:3221`) and `td`/`th`
-(`:3236`) in `startElement`, `td`/`th` (`:5036`), `caption` (`:5068`), `tr` (`:5076`) and `table` (`:5083`) in
-`endElement`. All of them need auditing, not just the one `return`: a `<tr>` or `<td>` inside the nested table must not
-open rows or cells in the outer one.
+**Where.** `applyBlockTopSpacing` takes `collapse = min(lastBlockMarginBottom, marginTop)`
+(`ChapterHtmlSlimParser.cpp:6055`), and only `makePages` (`:6013-6015`), `applyBlockTopSpacing` itself (`:6062`),
+`emitPage` (`:1862`) and the box code (`:1944`, `:2014`) write `lastBlockMarginBottom`. A table writes nothing there: a
+grid fragment is placed by `flushTableFragment`, and a degraded cell by `emitCellAsParagraph` (`:7051`), which hands
+the cell's lines to `addLineToPage` (`:7081`) without `makePages`. So the paragraph laid out before the table still
+holds `lastBlockMarginBottom` when the one after it opens.
 
-**Tried.** Kept out of the streaming table renderer (PR #126) on purpose, as its own change. Nothing since.
+**Next step.** Reset `lastBlockMarginBottom` once a table fragment or a degraded cell is placed, and regenerate the
+goldens that hold a paragraph after a table (`test_table_streaming`, `test_nested_tables`, `test_tables`,
+`test_table_grid_edges`, `test_table_cell_overflow`), checking that each moved line is the paragraph's own margin.
 
-**Next step.** Route `depth > 1` text into the degraded outer table's paragraph stream and walk through each `depth`
-branch. The fixture is there: `test_table_streaming.epub`, added with the streaming renderer (55883bd26) and without a
-`make_test_*.py` generator. Its golden then gains the inner words; check the rest of its diff.
+## A table cell keeps only its first picture
+
+**Open.** A cell holding more than one `<img>` shows the first and drops the rest, silently, whether the table is a
+grid or laid out as paragraphs. Probe (2026-11-19, the host dump tool, master 715896630 and this branch alike): a grid
+cell `GRIDA <img checker/> GRIDMID <img bar/> GRIDEND` dumps all three words and one `CELLIMG` (the checker), and the
+same cell in a table a rowspan degrades dumps its words and one block `IMG` (the checker); the bar is in neither.
+Cells of a nested table, and a cell's text after its inner table, are the exception: they stream the cell so far at a
+second picture and go on holding the next.
+
+**Why it matters.** It drops content without a word: an illustrated table (a plate with its legend, a row of icons)
+loses every picture but the first in each cell.
+
+**Where.** The in-cell branch of the image handler in `ChapterHtmlSlimParser::startElement` keeps one `src` per cell
+("first image per cell wins", `ChapterHtmlSlimParser.cpp:3353`) and returns for the others unless the cell is
+`streamed`. A grid row sizes the cell for that one picture (`layoutTableRow`, `cell.image = buildCellImage(...)`,
+`:6977`); a degraded cell places it after its text (`emitCellAsParagraph`, `:7093`, or `emitRowImagesAsBlocks`,
+`:6889`).
+
+**Next step.** In its own PR, place every picture of a cell. A degraded cell can stream the cell so far and go on, as
+a nested table's cell does now; a grid cell needs a decision about how a second picture fits its row's height (stack
+them, or degrade the row).
 
 ## No hint when a chapter was simplified
 
@@ -88,22 +106,15 @@ What changed: a render lends the secondary buffer to the prewarm's TrueType miss
 
 **Next step.** None until a session's minimum is found in a render again. The per-phase lows came from a measurement-only patch (`heap_caps_monitor_local_minimum_free_size_start` restarted at each phase boundary of `renderContents`); a permanent version would cost the same monitor B's borrow uses.
 
-## Preempted image decodes still lose work in some cases
+## A page turn waits behind an image extraction
 
-**Open.** A lane decode that a page turn preempts parks if it is a JPEG: its caches keep their finished rows in `.part` files, a checkpoint (`RenderConfig::checkpointPath`) holds the decoder state, and the next warm resumes it. Three cases still lose work (X3, 2026-09-27): the first warm of an image extracts it from the EPUB first, and that extraction cannot be interrupted (1.6 s for a 514 KB JPEG); a resume that meets input at once parks again without progress (118–265 ms each); and PNG images and a progressive JPEG's 1/8 decode resized to its box restart from the beginning. After a preemption the lane waits only the normal `IMAGE_LANE_SETTLE_MS` (300 ms).
+**Open.** A lane decode that a page turn preempts parks if it is a JPEG: its caches keep their finished rows in `.part` files, a checkpoint (`RenderConfig::checkpointPath`) holds the decoder state, and the next warm resumes it. A resume decodes one band (progressive) or `kResumeMinRows` (4) MCU rows (baseline) before it polls for input, so it cannot park again where it started. The first warm of an image extracts it from the EPUB first, and that extraction is not interrupted (1.6 s for a 514 KB JPEG on the X3, 2026-09-27). It loses no work: `ensureExtracted` (`ImageBlock.cpp`) passes `Epub::extractItemToFile` no stop callback, so it runs to its end and renames its `.part` file into place. What the reader pays is latency: the lane holds the `RenderLock`, so a page turn waits for what is left of the extraction. PNG images and a progressive JPEG's 1/8 decode resized to its box restart from the beginning after a preemption; a PNG decode's state is its inflate ring (at most 32 KB) and two scanline buffers (`PNG_ARENA_WORST_CASE_BYTES = 32 * 1024 + 2 * 4096`, `PngToFramebufferConverter.cpp:129`; a small image needs less, `:135-136`). Parking it would mean writing that state to the card, as the JPEG park writes its own; the PNG park does not exist, so that cost is an estimate from the JPEG's, and PNG parking is not planned. The resized decode is the next section's (a cover that fits only at 1/8).
 
 **Why it matters.** At a normal reading pace the lane lost large images to page turns again and again before parking existed: one page was started six times while the reader turned a page every 2 s.
 
-**Where.** `EpubReaderActivity::stepImageWarmLocked` (`EpubReaderActivity.cpp:2396`) and `warmPageForImageLane`
-(`:2515`; `imageWarmPreemptedMs_` is set at `:2561` and counts as activity for the settle at `:2357`;
-`imageWarmMisses_` counts only failures without input, `EpubReaderActivity.h:411-422`); `IMAGE_LANE_SETTLE_MS`
-(`EpubReaderActivity.cpp:305`); the park and resume code in `JpegToFramebufferConverter.cpp` (from `:1126`; what may
-park, `:1834-1835`, leaves out a resized decode); `ImageBlock.cpp:866-867`, which gives only a JPEG a checkpoint path;
-`Epub::extractItemToFile` (`Epub.cpp:2346`), which does not poll for input.
+**Where.** `EpubReaderActivity::stepImageWarmLocked` and `warmPageForImageLane` (`EpubReaderActivity.cpp`; the lane's per-attempt `LOG_INF`); the park and resume code in `JpegToFramebufferConverter.cpp`; `ImageBlock.cpp`, which gives only a JPEG a checkpoint path; `Epub::extractItemToFile` (`Epub.cpp`), which does not poll for input.
 
-**Tried.** Parking (JPEG only). The other candidate, never built: once a page's decode has been preempted twice, retry it only after a longer 1.5 s pause.
-
-**Next step.** From a device log with parking in place, count re-preemptions per page. If parks without progress dominate, require a longer settle after a resume that parks at once. For the extraction, parking the inflate (a 32 KB window) is the candidate.
+**Next step (a device measurement).** On the X3, in a book of large JPEGs, read at one page every 2 s for 50 pages, and count the page turns that waited more than 500 ms behind an extraction, from the lane's per-attempt `LOG_INF` lines. If more than one turn in ten did, stop the extraction at the next inflate chunk and keep it for later: the `.part` file stays, and the state to keep is the ring (up to 32 KB) and `uzlib_uncomp` (about 1.3 KB). The sizes are estimates from the inflate ring's 32 KB window and `uzlib_uncomp`, not measured here. If the state has nowhere to live between slices on the C3 but the card (about 33 KB written per park by that estimate), the park may cost about what finishing costs, in which case the answer there is no; where `HalCapabilities::buildsInPsram()` is true the state could stay in PSRAM. Measure both before choosing.
 
 ## A cover that fits only at 1/8 restarts on every key press
 
@@ -117,37 +128,13 @@ the resize (`:1111`); `ProgressiveJpeg::decodeResized` (`ProgressiveJpeg.cpp:152
 
 **Next step.** Make the resized decode steppable in `ProgressiveJpeg`: its resampler state in the session, about 60 lines. Then give `JpegThumbSession` a third mode, with the per-output setup shared with the other two, about 120-150 lines with tests.
 
-## A 1/8 decode of a file with libjpeg's scan script reads its DC refinement
-
-**Open.** A 1/8 decode (the DC-only session, and with it `ProgressiveJpeg::decodeResized`, the low-heap fallback)
-indexes the file only until luma DC is final. A file whose first scan completes DC, as the real covers measured do, is
-read no further than that scan: about twice the bytes of the DC-only preview this replaced, as the index and the bands
-each read that scan once. A file with libjpeg's default script completes DC only in its DC refinement, 55-80% into the
-file, so its index reads the AC scans before it byte by byte. Without read windows its bands then alternate between the
-two DC scans through the one shared 512-byte buffer, refilling on every switch: 7-15x the preview's card bytes on the
-real files measured, up to 30x on small generated ones (host, through the shared buffer, one 464x670 box: a 530 KB file
-1,098 reads / 539 KB against 100 / 51 KB; 766285819). Both converters take read windows from the lent region when it
-has room (`JpegToBmpConverter.cpp:451-453`, `JpegToFramebufferConverter.cpp:1659`). With them each DC scan reads
-through a window of its own and the index through all of them as one (`ProgressiveJpeg.cpp:57-61`): that ends the
-refills, not the index's read up to the refinement. The host figures above were taken without them.
-
-**Why it matters.** It is the path the reader takes when only 1/8 fits, and covers when no finer scale does (one decode per output box). On the C3 that could be 1-3 s of SD time for such a file against about 0.15 s before; an estimate from host counts, not a device measurement.
-
-**Where.** `indexStep` (`ProgressiveJpeg.cpp:575`; the DC session's early stop at `:610-616`),
-`ProgressiveJpeg::decodeResized` (`:1520`); `convertResized` in `JpegToBmpConverter.cpp` (`:369`); the resized path of
-`JpegToFramebufferConverter::decodeToFramebuffer` (`JpegToFramebufferConverter.cpp:1664`, `:2002`).
-
-**Next step.** Measure on the device first (Home with heavy covers and little heap: the `Progressive cover read N
-times` log, a `LOG_DBG` that also says whether the read windows were held, `JpegToBmpConverter.cpp:359`, and the time
-to the first cover). If it matters, give `decodeResized` a mode, through `DecodeOptions`, that reads the first luma DC
-scan alone and skips its refinements: the preview's exact I/O, at most one level off (mean 0.1-0.9 against the
-preview), while sliced 1/8 decodes and their goldens stay as they are.
-
 ## A cut or corrupt progressive JPEG draws a placeholder
 
-**Open.** A progressive JPEG whose stream is cut short or corrupt fails as soon as a scan's data does not decode, and the reader draws its framed placeholder (a cover is not converted). A baseline file cut short draws nothing and is decoded again on every pass. Work that changes this is written and tested but parked: the decoder stops a scan where its data is unusable and decodes every row from the scans that remain (a DC scan's blocks after the damage mid grey, as libjpeg leaves them), so a cut or corrupt progressive file draws what it holds; a cut baseline file keeps its rows; and a degraded picture is cached once instead of decoded on every visit (X4: 8 decodes, about 14 s, per visit of such a page).
+**Open.** A progressive JPEG whose stream is cut short or corrupt fails as soon as a scan's data does not decode, and the reader draws its framed placeholder (a cover is not converted). Work that changes this is written and tested but parked: the decoder stops a scan where its data is unusable and decodes every row from the scans that remain (a DC scan's blocks after the damage mid grey, as libjpeg leaves them), so a cut or corrupt progressive file draws what it holds, and a cut baseline file keeps its rows.
 
-**Why it is parked.** Nobody has reported a damaged JPEG; the cut extracts it was written for came from the extractor itself (fixed in `Epub::extractItemToFile`). And caching damage makes a false detection permanent: a valid file that trips one of the new rules (the strict RSTn sequence, the padding overrun, a TJpgDec format error on an unusual baseline file) would be kept with grey or white areas for good, since `PixelCache::PXC_MAGIC` is not tied to the rules and cover BMPs are never invalidated.
+**Done (8a).** A baseline JPEG that fails to decode draws the same framed placeholder a progressive one does (it drew nothing). `ImageBlock::render` remembers, per reader session, the pictures whose decode failed for the file's own fault (`DecodeFailures`, 8 x 4 B hashes of the path in `EpubReaderActivity`, cleared on exit, nothing on the card) and draws their frame without decoding again; a render pass no longer decodes a cut file eight times (X4: about 14 s a visit). Only a decode error counts: a progressive `InvalidData` or `Unsupported`, a baseline format error, or a short read at the end of the file; a card error, a refusal for memory and a preemption by input do not. What stays parked is drawing what a damaged file holds, and caching it.
+
+**Why the rest is parked.** Nobody has reported a damaged JPEG; the cut extracts it was written for came from the extractor itself (fixed in `Epub::extractItemToFile`). And caching damage makes a false detection permanent: a valid file that trips one of the new rules (the strict RSTn sequence, the padding overrun, a TJpgDec format error on an unusual baseline file) would be kept with grey or white areas for good, since `PixelCache::PXC_MAGIC` is not tied to the rules and cover BMPs are never invalidated.
 
 **Where.** `lib/ProgressiveJpeg` (`BitReader`, `ProgressiveJpeg.cpp:665`; `decodeBand`, `:963`; `indexStep`, `:575`);
 `JpegToFramebufferConverter::decodeToFramebuffer` (`JpegToFramebufferConverter.cpp:1506`); `JpegToBmpConverter.cpp`
@@ -181,10 +168,8 @@ page that holds a late image could push the walk out of the arena.
 
 **Open.** 2.52 sent every `Page` allocation through `ensurePage()` (`ChapterHtmlSlimParser.cpp:2074`), which stops the
 build like the other heap refusals instead of aborting. These still allocate through the throwing `operator new`, so a
-refusal there aborts and reboots (`-fno-exceptions`); counted in `Section.cpp` and `ChapterHtmlSlimParser.cpp`:
+refusal there aborts and reboots (`-fno-exceptions`); counted in `ChapterHtmlSlimParser.cpp`:
 
-- the parser itself: `st.visitor = std::make_unique<ChapterHtmlSlimParser>(...)` (`lib/Epub/Epub/Section.cpp:1511`),
-  and the chapter's TOC anchors before it (`tocAnchors.push_back`, `Section.cpp:1504`);
 - the style stack, `std::vector<StyleStackEntry> inlineStyleStack` (`ChapterHtmlSlimParser.h:589`; pushes at
   `ChapterHtmlSlimParser.cpp:826`, `:3858`, `:4223`, `:4254`, `:4285`, `:4305`, `:4356`);
 - the other per-element stacks: `listStack` (`:3887`), `containerWidthStack_` (`:3150`), `backgroundImageScopes_`
@@ -210,12 +195,35 @@ an EPUB. Size M, with a `SECTION_FILE_VERSION` bump.
 
 ## Every manifest stylesheet applies to every chapter (matcha-reader #453)
 
-**Open.** `Epub::parseCssFiles()` (`lib/Epub/Epub.cpp:787`) merges every stylesheet in the manifest into one rule set;
-there is no filter by the `<link>`s a chapter has. A `body{text-align:center}` in a sheet that no text chapter links
-(matcha's case: `vertical_image.css`) centres every chapter, horizontal books too. Our `CssParser` is the
-arena-resident compressed design, so this is a re-implementation, not a port: a CSS rule-cache format change (version
-bump) plus a section-cache bump, and a 4 KB head scan per chapter build. matcha-reader #453, Eszter Schuffert
-(eszter007).
+**Open; the record it needs is done (13a), the scoping (13b) is next.** `Epub::parseCssFiles()`
+(`lib/Epub/Epub.cpp:787`) compiles every stylesheet of the book (the manifest's, then any `.css` found only in the
+archive, `discoverCssFilesFromZip`) into one rule set, and every chapter resolves against all of it: a
+`body{text-align:center}` in a sheet that no text chapter links (matcha's case: `vertical_image.css`) centres every
+chapter, horizontal books too. matcha-reader #453, Eszter Schuffert (eszter007).
+
+- **Done (13a, `CSS_CACHE_VERSION` 36).** A rule's order runs on across the sheets in compile order, so each sheet owns
+  one contiguous range of orders. The compile records, at the end of `css_rules.cache`, each sheet's `{path hash, first
+  order, end order}` and its `@import` edges `{importer, imported path hash}` (`CssParser::sheetRanges`,
+  `sheetImports`, `loadSheetTable`; layout in [file-formats.md](../file-formats.md#css_rulescache-css_bgbin-and-css_fontsbin)):
+  8 B a sheet, 5 B an import. At most 64 ranges (a book with more keeps one range, for every chapter, from its 64th
+  sheet on) and 64 imports (past that, an empty table: every sheet applies, as now). `CssParser::resolveStylesheetHref`
+  resolves a reference the way the table's paths are resolved. Nothing reads the table yet, and the rule records and
+  the index are as before but for the merge below.
+- **Found on the way.** Nothing follows `@import` (`CssParser::loadFromStream` drops the at-rule at its `;`, and no
+  other code in `lib/` or `src/` reads one): an imported sheet applies today only because every sheet is compiled, so
+  13b must follow the edges. And a redeclaration merged across a sheet boundary (`existing.order + 1 >= order` in
+  `processRuleBlockWithStyle`, in both stores): a sheet ending in `.x{...}` and the next one starting with `.x{...}` made
+  one record under the second sheet's order that held the first sheet's declarations. It no longer merges there
+  (`sheetFirstOrder_`); the two records resolve as the merged one did.
+- **Next (13b), with a `SECTION_FILE_VERSION` bump.** Scan the chapter's head (`html_<spine>.bin`, up to `</head>`) for
+  its `<link rel="stylesheet">` hrefs, resolve each with `resolveStylesheetHref` against the chapter's folder, find its
+  ranges in the table (a sheet listed twice has two), follow the import edges (they can form a cycle; the folded
+  range's too), and make `lookupRules` and the complex-rule scan skip every rule whose order is outside the chapter's
+  ranges and the folded one. Fail open (every sheet) for a linked sheet the table does not know and for an empty table;
+  a chapter with no `<link>` resolves against none. An import the table does not know names a sheet that was never
+  compiled: nothing to add. The background pictures (`css_bg.bin`) and `@font-face` rules (`css_fonts.bin`) are not
+  ranged and stay book-wide. `loadSheetTable` reads the table from the card (a seek from the file's end); where it is
+  kept during a build is 13b's choice.
 
 ## An inline anchor lands a page off (CrossPoint #4328)
 

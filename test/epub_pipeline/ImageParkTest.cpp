@@ -12,9 +12,12 @@
 #include <esp_heap_caps.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -33,8 +36,12 @@ namespace {
 // Fires on the Nth poll of the abort hook (1-based); 0 never fires.
 int gPollsLeft = 0;
 int gPolls = 0;
+// When set, every poll appends its time: the gap between two polls of an uninterrupted decode is one
+// band (progressive) or one MCU row (baseline) plus the cache write, on this host.
+std::vector<std::chrono::steady_clock::time_point>* gPollStamps = nullptr;
 bool countedAbort() {
   ++gPolls;
+  if (gPollStamps) gPollStamps->push_back(std::chrono::steady_clock::now());
   if (gPollsLeft <= 0) return false;
   return --gPollsLeft == 0;
 }
@@ -141,6 +148,89 @@ TEST_P(ImageParkFixture, RepeatedParksStillEndInTheSameCaches) {
   EXPECT_EQ(read(c.cachePath), read(ref.cachePath));
   EXPECT_EQ(read(c.companionCachePath), read(ref.companionCachePath));
 }
+
+// A key press between the lane's input check and a resume's first poll must not park the resume
+// where it started: after 118-265 ms of setup (X3) that is no progress at all, again and again. A
+// resume decodes one band (progressive) or kResumeMinRows MCU rows (baseline) before it polls.
+// Here the hook fires on the FIRST poll of every call, i.e. input is already waiting. The clock
+// ticks, as the lane's does.
+TEST_P(ImageParkFixture, AResumeWithInputWaitingStillAdvancesBeforeItParks) {
+  const RenderConfig ref = config("ref", 150, 104, false);
+  ASSERT_FALSE(decodeOnce(ref, 0));
+  const RenderConfig c = config("eager");
+  host_clock::Ticking ticking;
+  ASSERT_TRUE(decodeOnce(c, 3)) << "first call parks somewhere past its set-up";
+  size_t lastPart = fs::file_size(PixelCache::partPathFor(c.cachePath));
+  int parks = 0;
+  for (;;) {
+    if (!decodeOnce(c, 1)) break;
+    ++parks;
+    ASSERT_LT(parks, 400) << "a resume that polls first parks at once, forever";
+    ASSERT_TRUE(fs::exists(PixelCache::partPathFor(c.cachePath)));
+    const size_t part = fs::file_size(PixelCache::partPathFor(c.cachePath));
+    EXPECT_GE(part, lastPart);
+    lastPart = part;
+  }
+  EXPECT_GT(parks, 0);
+  EXPECT_EQ(read(c.cachePath), read(ref.cachePath));
+  EXPECT_EQ(read(c.companionCachePath), read(ref.companionCachePath));
+  if (std::string(GetParam()).find("_base") != std::string::npos) {
+    // 203x141 is 9 MCU rows of 16. The first call parked after 3 of them; a resume then decodes
+    // kResumeMinRows (4) before it polls, so the 6 left take 2 resumes and one park in between. A
+    // resume that decoded a single row before polling would park 5 times.
+    EXPECT_LE(parks, 2) << "a baseline resume must decode kResumeMinRows MCU rows before it polls";
+  }
+}
+
+// What a page turn can wait behind, on this host (not the device): the gap between two polls of an
+// uninterrupted, checkpointable decode is one band (progressive) or one MCU row (baseline).
+TEST_P(ImageParkFixture, TheWorstBandOrRowOnThisHost) {
+  std::vector<std::chrono::steady_clock::time_point> stamps;
+  gPollStamps = &stamps;
+  const RenderConfig c = config("timed");
+  EXPECT_FALSE(decodeOnce(c, 0));
+  gPollStamps = nullptr;
+  ASSERT_GT(stamps.size(), 4u);
+  long worstUs = 0;
+  long worstFourUs = 0;
+  for (size_t i = 1; i < stamps.size(); ++i) {
+    const auto us = [&](const size_t a, const size_t b) {
+      return std::chrono::duration_cast<std::chrono::microseconds>(stamps[b] - stamps[a]).count();
+    };
+    worstUs = std::max<long>(worstUs, us(i - 1, i));
+    if (i >= 4) worstFourUs = std::max<long>(worstFourUs, us(i - 4, i));
+  }
+  std::cout << "[ host band ] " << GetParam() << ": " << stamps.size() << " polls, worst gap between two polls "
+            << worstUs << " us, worst four gaps " << worstFourUs << " us (host figures)\n";
+}
+
+// A decode parked in the index scan, which polls every 32 KB of the file, resumes there: the minimum
+// progress after a resume is a band's, and the index has no band. With input waiting at every call,
+// the resumes must park at the index's next poll, not run the index to its end (seconds of card
+// reads for a 2 MB cover) and decode a band.
+struct ImageParkIndexFixture : ImageParkFixture {};
+
+TEST_P(ImageParkIndexFixture, AResumeInTheIndexScanStillStopsAtItsNextPoll) {
+  ASSERT_GT(fs::file_size(image()), 3u * 32 * 1024) << "the fixture must have three index polls";
+  const RenderConfig ref = config("ref", 150, 104, false);
+  ASSERT_FALSE(decodeOnce(ref, 0));
+  const RenderConfig c = config("index");
+  host_clock::Ticking ticking;
+  // The fresh call parks at the first index poll; the two resumes at the second and the third.
+  ASSERT_TRUE(decodeOnce(c, 1));
+  ASSERT_TRUE(fs::exists(c.checkpointPath));
+  const size_t afterFirst = fs::file_size(PixelCache::partPathFor(c.cachePath));
+  ASSERT_TRUE(decodeOnce(c, 1));
+  ASSERT_TRUE(decodeOnce(c, 1));
+  EXPECT_EQ(fs::file_size(PixelCache::partPathFor(c.cachePath)), afterFirst)
+      << "no band was decoded while the index scan was still being resumed";
+  int parks = 3;
+  while (decodeOnce(c, 1)) ASSERT_LT(++parks, 400);
+  EXPECT_EQ(read(c.cachePath), read(ref.cachePath));
+  EXPECT_EQ(read(c.companionCachePath), read(ref.companionCachePath));
+}
+
+INSTANTIATE_TEST_SUITE_P(IndexPolls, ImageParkIndexFixture, testing::Values("prog_noisy_420_index.jpg"));
 
 // A checkpoint only resumes the decode it was taken of: another box starts over, cleanly.
 TEST_P(ImageParkFixture, AChangedConfigurationStartsOver) {
@@ -410,6 +500,162 @@ TEST(CoarseProgressiveJpeg, WhereTheFinerWorkspaceFitsTheDecodeIsFiner) {
             decodeNeed(need.bytes + need.heapFloor).bytes);
   ESP.setFreeHeap(savedHeap);
   fs::remove_all(work);
+}
+
+// --- A file that will not decode: its frame, and one attempt a session (DecodeFailures) -------------
+
+// A baseline fixture cut at half its length, in its own folder.
+struct FailedDecodeFixture : testing::Test {
+  fs::path work;
+  GfxRenderer renderer;
+  DecodeFailures failures;
+
+  void SetUp() override {
+    work = fs::temp_directory_path() /
+           (std::string("img_failed_decode_") + testing::UnitTest::GetInstance()->current_test_info()->name());
+    fs::remove_all(work);
+    fs::create_directories(work);
+    CooperativeAbort::setLongTaskAbortPredicate(countedAbort);
+    gPollsLeft = 0;
+    CooperativeAbort::clearAborted();
+    ImageBlock::setDecodeFailures(&failures);
+  }
+  void TearDown() override {
+    ImageBlock::setDecodeFailures(nullptr);
+    CooperativeAbort::setLongTaskAbortPredicate(nullptr);
+    CooperativeAbort::clearAborted();
+    ESP.setFreeHeap(200 * 1024);
+    fs::remove_all(work);
+  }
+
+  std::string cutCopy(const char* fixture, const double keep = 0.5) const {
+    std::ifstream in(std::string(JPEG_FIXTURE_DIR "/") + fixture, std::ios::binary);
+    std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    bytes.resize(static_cast<size_t>(bytes.size() * keep));
+    const fs::path out = work / fixture;
+    std::ofstream(out, std::ios::binary).write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    return out.string();
+  }
+  std::string wholeCopy(const char* fixture) const { return cutCopy(fixture, 1.0); }
+  static RenderConfig boxAt(const std::string& cachePath) {
+    RenderConfig c;
+    c.x = 12;
+    c.y = 30;
+    c.maxWidth = 150;
+    c.maxHeight = 104;
+    c.useExactDimensions = true;
+    c.monochromeOutput = true;
+    c.cachePath = cachePath;
+    return c;
+  }
+};
+
+TEST_F(FailedDecodeFixture, ACutBaselineFileDrawsTheFrameAndCountsAsFailed) {
+  const std::string jpg = cutCopy("prog_full_420_base.jpg");
+  const RenderConfig c = boxAt((work / "bw.pxc").string());
+  const uint32_t before = image_scratch::decodeFailedCount();
+  const int rects = renderer.rectsDrawn;
+  JpegToFramebufferConverter converter;
+  EXPECT_TRUE(converter.decodeToFramebuffer(jpg, renderer, c)) << "the place is taken care of, as a progressive file's";
+  EXPECT_EQ(rects + 1, renderer.rectsDrawn) << "a frame, not an empty space";
+  EXPECT_EQ(before + 1, image_scratch::decodeFailedCount());
+  EXPECT_FALSE(fs::exists(c.cachePath)) << "a cut picture is not cached";
+}
+
+TEST_F(FailedDecodeFixture, ASessionDecodesACutFileOnceAndDrawsItsFrameEveryPass) {
+  const std::string jpg = cutCopy("prog_full_420_base.jpg");
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  const int rects = renderer.rectsDrawn;
+  for (int pass = 0; pass < 5; ++pass) block.render(renderer, 12, 30, /*forceLoad=*/true, /*monochromeOutput=*/true);
+  EXPECT_EQ(before + 1, image_scratch::decodeFailedCount()) << "one decode attempt, not one per pass";
+  EXPECT_EQ(rects + 5, renderer.rectsDrawn) << "the frame on every pass";
+  EXPECT_TRUE(failures.has(DecodeFailures::hashOf(jpg)));
+
+  // A new session (the reader clears the list on exit) decodes it again.
+  failures.clear();
+  block.render(renderer, 12, 30, true, true);
+  EXPECT_EQ(before + 2, image_scratch::decodeFailedCount()) << "cleared: decoded again";
+}
+
+TEST_F(FailedDecodeFixture, WithoutAReaderEveryPassDecodesAsBefore) {
+  ImageBlock::setDecodeFailures(nullptr);
+  const std::string jpg = cutCopy("prog_full_420_base.jpg");
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  for (int pass = 0; pass < 3; ++pass) block.render(renderer, 12, 30, true, true);
+  EXPECT_EQ(before + 3, image_scratch::decodeFailedCount());
+}
+
+TEST_F(FailedDecodeFixture, ACutProgressiveFileIsRememberedToo) {
+  const std::string jpg = cutCopy("prog_full_420.jpg");
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  for (int pass = 0; pass < 3; ++pass) block.render(renderer, 12, 30, true, true);
+  EXPECT_EQ(before + 1, image_scratch::decodeFailedCount());
+}
+
+TEST_F(FailedDecodeFixture, APreemptedDecodeIsNotAFailure) {
+  const std::string jpg = wholeCopy("prog_full_420_base.jpg");
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  gPollsLeft = 2;
+  block.render(renderer, 12, 30, true, true);
+  gPollsLeft = 0;
+  ASSERT_TRUE(CooperativeAbort::consumeAborted()) << "the fixture must be stoppable";
+  EXPECT_EQ(before, image_scratch::decodeFailedCount());
+  EXPECT_FALSE(failures.has(DecodeFailures::hashOf(jpg)));
+  block.render(renderer, 12, 30, true, true);  // input is idle again: the picture decodes
+  EXPECT_TRUE(block.hasPixelCache());
+}
+
+TEST_F(FailedDecodeFixture, AHeapThatRefusesTheDecodeIsNotAFailure) {
+  const std::string jpg = wholeCopy("prog_full_420_base.jpg");
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  ESP.setFreeHeap(4 * 1024);
+  block.render(renderer, 12, 30, true, true);
+  EXPECT_EQ(before, image_scratch::decodeFailedCount());
+  EXPECT_FALSE(failures.has(DecodeFailures::hashOf(jpg)));
+  ESP.setFreeHeap(200 * 1024);
+  block.render(renderer, 12, 30, true, true);
+  EXPECT_TRUE(block.hasPixelCache()) << "decoded once the memory is back";
+}
+
+TEST_F(FailedDecodeFixture, AFileCutInsideItsHeadersDrawsTheFrameAndIsAttemptedOnce) {
+  const std::string jpg = cutCopy("prog_full_420_base.jpg", 0.01);
+  ImageBlock block(jpg, 150, 104, "");
+  const uint32_t before = image_scratch::decodeFailedCount();
+  const int rects = renderer.rectsDrawn;
+  for (int pass = 0; pass < 4; ++pass) block.render(renderer, 12, 30, true, true);
+  EXPECT_EQ(before + 1, image_scratch::decodeFailedCount());
+  EXPECT_EQ(rects + 4, renderer.rectsDrawn);
+}
+
+TEST_F(FailedDecodeFixture, TheFrameOfACropThatReachesPastTheScreenIsNotDrawn) {
+  const std::string jpg = cutCopy("prog_full_420_base.jpg");
+  ImageBlock whole(jpg, 150, 104, "");
+  whole.render(renderer, 12, 30, true, true);  // fails, remembered
+  const auto crop = whole.makeCrop(0, 40);
+  ASSERT_TRUE(crop);
+  const int rects = renderer.rectsDrawn;
+  const int y = renderer.getScreenHeight() - 50;  // the 40 rows fit, the whole box's 104 do not
+  crop->render(renderer, 12, y, true, true);
+  EXPECT_EQ(rects, renderer.rectsDrawn);
+}
+
+TEST(DecodeFailuresList, HoldsEightAndEvictsTheOldest) {
+  DecodeFailures list;
+  for (uint32_t h = 100; h < 108; ++h) list.add(h);
+  for (uint32_t h = 100; h < 108; ++h) EXPECT_TRUE(list.has(h));
+  list.add(100);  // already there: no slot used
+  list.add(200);
+  EXPECT_FALSE(list.has(100)) << "the oldest went";
+  EXPECT_TRUE(list.has(200));
+  EXPECT_TRUE(list.has(107));
+  list.clear();
+  EXPECT_FALSE(list.has(107));
+  EXPECT_FALSE(list.has(0)) << "an empty slot is not a hash of 0";
 }
 
 }  // namespace

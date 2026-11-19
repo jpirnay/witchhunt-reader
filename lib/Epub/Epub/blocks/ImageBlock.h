@@ -6,6 +6,7 @@
 #include <string>
 
 #include "Block.h"
+#include "DecodeFailures.h"
 
 class BuildArena;     // lib/Memory — optional decode scratch (see image_scratch below)
 struct RenderConfig;  // converters/ImageToFramebufferDecoder.h
@@ -70,6 +71,11 @@ bool canServe(size_t bytes);
 // compares it before and after its decodes.
 void noteHeapShort();
 uint32_t heapShortCount();
+
+// A decode failed because of the file itself (cut, corrupt, a frame no decoder takes), not for the heap, the card or an
+// input that stopped it. A count, as above; the reader then remembers the picture (DecodeFailures).
+void noteDecodeFailed();
+uint32_t decodeFailedCount();
 
 // What the next finer scale of a decode that published a coarse picture for lack of memory would take: a workspace of
 // `bytes`, from the arena, or from the heap with `heapFloor` more left free (PixelCache::PXC_MAGIC_COARSE). 0: none.
@@ -209,6 +215,9 @@ class ImageBlock final : public Block {
   // panels), or its 8-bit gray cache, which a panel's own canvas shows (renderGray8). The reader sets it for its panel;
   // Bayer until then. One for the whole process, as the panel is.
   enum class GrayVariant : uint8_t { Bayer, Gray8 };
+  // The pictures whose decode failed in this reader session, which render() draws as a frame without decoding again.
+  // Null (no reader): every render decodes.
+  static void setDecodeFailures(DecodeFailures* failures) { decodeFailures_ = failures; }
   static void setGrayVariant(const GrayVariant variant) { grayVariant_ = variant; }
   static GrayVariant grayVariant() { return grayVariant_; }
   // Whether the gray variant's cache exists, and the decode that writes it. The Bayer one is render()'s, at (x, y).
@@ -262,8 +271,9 @@ class ImageBlock final : public Block {
 
  public:
   // What a placeholder box says beside the alt text: "large image, press to load", the image is still being
-  // prepared (a mid-build draw), or there was not memory enough to decode it.
-  enum class Placeholder : uint8_t { Large, Loading, LowMemory };
+  // prepared (a mid-build draw), or there was not memory enough to decode it. Failed: the file would not decode; the
+  // bare frame a failed decode draws, with no text.
+  enum class Placeholder : uint8_t { Large, Loading, LowMemory, Failed };
 
   // The LowMemory placeholders drawn since the last call: the reader shows its low-memory indicator while the page
   // on screen has one.
@@ -290,6 +300,7 @@ class ImageBlock final : public Block {
   bool drawGray8FromCache(GfxRenderer& renderer, int x, int y, uint8_t* canvas, uint16_t stride, int firstRow,
                           int rows) const;
   static GrayVariant grayVariant_;
+  static DecodeFailures* decodeFailures_;
   static bool placeholderOnly_;
   static Placeholder placeholderOnlyKind_;
   static uint16_t placeholdersDrawn_;
