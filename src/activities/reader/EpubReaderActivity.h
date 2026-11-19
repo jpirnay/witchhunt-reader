@@ -14,6 +14,7 @@
 #include <Epub/FootnoteEntry.h>
 #include <Epub/LineSpacing.h>
 #include <Epub/Section.h>
+#include <Epub/blocks/DecodeFailures.h>
 
 #include <array>
 #include <atomic>
@@ -421,6 +422,12 @@ class EpubReaderActivity final : public Activity {
   static constexpr uint8_t kImageWarmMaxTries = 2;
   std::array<ImageWarmMiss, 8> imageWarmMisses_{};
   uint8_t imageWarmMissNext_ = 0;
+  // The pictures whose decode failed for the file's own fault (a cut or corrupt JPEG) in this session: a render draws
+  // their frame without decoding them again. 8 x 4 B + 2 B inside the activity, no allocation; ImageBlock reads it
+  // through a pointer set in onEnter and cleared in onExit. Not a stack local (it must outlive every render), not a
+  // static (it is the book's, and a static would need its own reset), not on the card (a false verdict would outlast
+  // the book).
+  DecodeFailures imageDecodeFailures_;
   // When input last preempted a lane decode. Counts as activity for the settle rule: the press
   // that aborted the decode is usually still held (no new edge queued), so without this the lane
   // restarted on the very next tick and was aborted again by the release, delaying the page turn

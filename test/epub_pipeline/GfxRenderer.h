@@ -91,7 +91,9 @@ class GfxRenderer {
   void drawLine(int, int, int, int, bool = true) const {}
   void drawLine(int, int, int, int, int, bool) const {}
   void drawRect(int, int, int, int, bool = true) const {}
-  void drawRect(int, int, int, int, int, bool) const {}
+  void drawRect(int, int, int, int, int, bool) const { ++rectsDrawn; }
+  // Test seam: the bordered drawRect calls so far (a placeholder frame).
+  mutable int rectsDrawn = 0;
   void fillRect(const int x, const int y, const int w, const int h, bool = true) const {
     if (onFill != nullptr) onFill(x, y, w, h, -1);
   }

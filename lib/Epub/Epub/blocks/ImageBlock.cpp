@@ -111,6 +111,7 @@ namespace image_scratch {
 namespace {
 BuildArena* g_arena = nullptr;
 uint32_t g_heapShort = 0;
+uint32_t g_decodeFailed = 0;
 CoarseNeed g_coarseNeed;
 bool g_canWait = false;
 }  // namespace
@@ -120,6 +121,8 @@ bool canWait() { return g_canWait; }
 void setCanWait(const bool canWait) { g_canWait = canWait; }
 void noteHeapShort() { ++g_heapShort; }
 uint32_t heapShortCount() { return g_heapShort; }
+void noteDecodeFailed() { ++g_decodeFailed; }
+uint32_t decodeFailedCount() { return g_decodeFailed; }
 void noteCoarse(const CoarseNeed& need) {
   noteHeapShort();
   if (need.bytes > g_coarseNeed.bytes) g_coarseNeed = need;
@@ -676,6 +679,7 @@ bool ImageBlock::placeholderOnly_ = false;
 ImageBlock::Placeholder ImageBlock::placeholderOnlyKind_ = ImageBlock::Placeholder::Loading;
 uint16_t ImageBlock::placeholdersDrawn_ = 0;
 uint16_t ImageBlock::lowMemoryDrawn_ = 0;
+DecodeFailures* ImageBlock::decodeFailures_ = nullptr;
 
 void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int y, const Placeholder kind) const {
   constexpr int BORDER = 1;
@@ -683,6 +687,7 @@ void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int
 
   if (kind == Placeholder::LowMemory && lowMemoryDrawn_ < UINT16_MAX) lowMemoryDrawn_++;
   renderer.drawRect(x, y, width, height, BORDER, true);
+  if (kind == Placeholder::Failed) return;  // as the decoder's own frame for a file it cannot draw (framedGap)
 
   const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
   const bool hasAlt = !altText.empty();
@@ -758,6 +763,14 @@ void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, 
   if (placeholderOnly_) {
     if (placeholdersDrawn_ < UINT16_MAX) placeholdersDrawn_++;
     renderPlaceholder(renderer, x, y, placeholderOnlyKind_);
+    return;
+  }
+
+  // A picture that failed to decode in this session: its frame, not another decode of the same file. Not in a pass that
+  // writes the caches alone (the image lane, getWriteRows() 0): the framebuffer holds another page there.
+  const uint32_t failureHash = DecodeFailures::hashOf(imagePath);
+  if (decodeFailures_ != nullptr && decodeFailures_->has(failureHash)) {
+    if (renderer.getWriteRows() > 0) renderPlaceholder(renderer, x, y, Placeholder::Failed);
     return;
   }
 
@@ -869,7 +882,12 @@ void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, 
   // A resumed decode draws only the rows after its park; the finished cache has them all.
   const bool resuming = jpeg && Storage.exists(config.checkpointPath.c_str());
   const uint32_t heapShortBefore = image_scratch::heapShortCount();
+  const uint32_t decodeFailedBefore = image_scratch::decodeFailedCount();
   bool success = decoder->decodeToFramebuffer(imagePath, renderer, config);
+  // The decoder drew the frame itself. What it counted as the file's fault is not tried again until the book closes.
+  if (decodeFailures_ != nullptr && image_scratch::decodeFailedCount() != decodeFailedBefore) {
+    decodeFailures_->add(failureHash);
+  }
   if (!success) {
     LOG_ERR("IMG", "Failed to decode image: %s", imagePath.c_str());
     // Short of memory: say so in the image's place rather than leave it blank. Not in a pass that writes the
