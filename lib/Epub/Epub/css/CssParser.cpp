@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <BufferedFileIO.h>
 #include <BuildArena.h>
+#include <FsHelpers.h>
 #include <Logging.h>
 
 #include <algorithm>
@@ -142,6 +143,13 @@ constexpr uint8_t BACKGROUND_IMAGES_FILE_VERSION = 1;
 constexpr char fontFacesFile[] = "/css_fonts.bin";
 constexpr size_t MAX_FONT_FACE_TEXT = 255;  // a name or href longer than this is not recorded
 constexpr char compileTempRulesCache[] = "/css_rules.compile.tmp";
+
+// The sheet table (CssParser::sheetRanges), the end of the rules cache: sheetCount(1) importCount(1), each range
+// pathHash(4) firstOrder(2) endOrder(2), each import importer(1) importedHash(4), and last the table's byte count (2),
+// from which a reader finds where it starts.
+constexpr size_t SHEET_TABLE_HEADER_BYTES = 2;
+constexpr size_t SHEET_RANGE_BYTES = 8;
+constexpr size_t SHEET_IMPORT_BYTES = 5;
 
 // Check if character is CSS whitespace
 bool isCssWhitespace(const char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'; }
@@ -1859,6 +1867,9 @@ void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, 
     // their place: merged, they would take the later position and beat an intervening rule of
     // equal specificity they should lose to (`.a{x} .b{y} .a{z}` on class="a b": y beats x).
     // The adjacency rule is crosspoint-reader PR #3891's (Justin Mitchell, @itsthisjustin).
+    // Nor does a rule merge into one of the sheet before (sheetFirstOrder_): a record's order says
+    // which sheet it came from (sheetRanges), so it must not carry another sheet's declarations. The
+    // two records resolve as the merged one did.
     if (compileModeActive_) {
       if (!compileTempFile_) {
         compileModeFailed_ = true;
@@ -1867,7 +1878,8 @@ void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, 
 
       CssStyle merged = style;
       auto existingIt = compileSelectorOffsets_.find(key);
-      if (existingIt != compileSelectorOffsets_.end() && existingIt->second.order + 1 >= order) {
+      if (existingIt != compileSelectorOffsets_.end() && existingIt->second.order + 1 >= order &&
+          existingIt->second.order >= sheetFirstOrder_) {
         // The earlier declaration is read back through a second handle, which sees only what has
         // reached the card. Synced here and only here: a sync writes the data and the directory
         // entry, a few ms on the device, and one before every rule cost seconds a stylesheet.
@@ -1907,7 +1919,7 @@ void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, 
     for (auto it = range.first; it != range.second; ++it) {
       if (latest == range.second || it->second.order > latest->second.order) latest = it;
     }
-    if (latest != range.second && latest->second.order + 1 >= order) {
+    if (latest != range.second && latest->second.order + 1 >= order && latest->second.order >= sheetFirstOrder_) {
       latest->second.style.applyOver(style);
       latest->second.order = order;
     } else {
@@ -1998,6 +2010,9 @@ bool CssParser::loadFromStream(FsFile& source) {
   // The @supports blocks open whose rules are read as if the block were not there (supportsInitialLetter); the brace
   // that closes one comes where a selector would start.
   int supportsDepth = 0;
+  // An @import counts only at the top of a sheet, before any rule or block (CSS 2.1 §6.3): one further down is
+  // ignored, as a browser ignores it.
+  bool importsOpen = true;
 
   int bodyDepth = 0;
   bool skippingRule = false;
@@ -2023,6 +2038,7 @@ bool CssParser::loadFromStream(FsFile& source) {
     if (inAtRule) {
       if (c == '{') {
         if (++atDepth == 1) {
+          importsOpen = false;
           if (supportsInitialLetter(declBuffer.view())) {
             declBuffer.clear();
             inAtRule = false;
@@ -2042,6 +2058,7 @@ bool CssParser::loadFromStream(FsFile& source) {
           inAtRule = false;
         }
       } else if (c == ';' && atDepth == 0) {
+        if (importsOpen && !declBuffer.overflowed) noteImport(declBuffer.view());
         declBuffer.clear();
         inAtRule = false;
       } else if (atDepth == 0 || (inFontFace && atDepth == 1)) {
@@ -2066,6 +2083,7 @@ bool CssParser::loadFromStream(FsFile& source) {
       }
       if (c == '{') {
         bodyDepth = 1;
+        importsOpen = false;
         currentStyle = CssStyle{};
         ruleBackground = BackgroundDeclaration{};
         ruleBackgroundRepeat = -1;
@@ -2173,6 +2191,8 @@ bool CssParser::loadFromStream(FsFile& source) {
   if (maybeSlash) {
     handleChar('/');
   }
+  // The end of the file ends an @import that has no ';', as it does in a browser.
+  if (inAtRule && atDepth == 0 && importsOpen && !declBuffer.overflowed) noteImport(declBuffer.view());
 
   if (compileModeActive_) {
     LOG_DBG("CSS", "Parsed %zu usable selectors from %zu bytes (compile mode)", compileSelectorOffsets_.size(),
@@ -2229,12 +2249,13 @@ bool CssParser::endCacheCompile(BuildArena* const scratch) {
   // swap, not clear(): clear() frees the nodes but keeps the bucket array, which would sit
   // under the index ensureCacheIndexLoaded() is about to allocate.
   // The complex-rule table is staged in RAM: dropIndex() releases it (written to the cache by
-  // then, or abandoned with the failed compile).
+  // then, or abandoned with the failed compile). So is the sheet table.
   const auto dropStaging = [this] {
     Storage.remove(compileTempPath_.c_str());
     std::unordered_map<std::string, StagedRule>().swap(compileSelectorOffsets_);
     std::vector<uint32_t>().swap(compileRetiredOffsets_);
     dropIndex();
+    freeSheetTable();
   };
 
   if (compileModeFailed_) {
@@ -2356,7 +2377,7 @@ bool CssParser::writeCompiledCache(FsFile& outFile, FsFile& tempFile, BuildArena
     out.write(selectorBuf, selectorLen);
     out.write(tail.data(), tail.size());
   }
-  if (!out.flush()) return false;
+  if (!writeSheetTable(out) || !out.flush()) return false;
 
   // Sort and patch the index placeholder at position 11, in one write.
   std::sort(indexEntries.begin(), indexEntries.end(),
@@ -2436,6 +2457,9 @@ void CssParser::clear() {
   std::unordered_map<std::string, StagedRule>().swap(compileSelectorOffsets_);
   std::vector<uint32_t>().swap(compileRetiredOffsets_);
   nextRuleOrder_ = 0;
+  freeSheetTable();
+  sheetTableDropped_ = false;
+  sheetFirstOrder_ = 0;
   totalSelectorCandidates_ = 0;
   unsupportedSelectorSkips_ = 0;
   // Cleared to FALSE, unlike its conservative default: what follows is either a parse, which
@@ -3972,6 +3996,217 @@ bool CssParser::nextFontFace(std::string_view& records, FontFace& face) {
 void CssParser::setStylesheetPath(const std::string& sheetPathInEpub) {
   const size_t slash = sheetPathInEpub.rfind('/');
   stylesheetDir_ = slash == std::string::npos ? std::string() : sheetPathInEpub.substr(0, slash + 1);
+  sheetFirstOrder_ = nextRuleOrder_;
+  beginSheetRange(sheetPathHash(sheetPathInEpub));
+}
+
+// --- The sheet table (see CssParser.h, sheetRanges) ---
+
+namespace {
+
+// Makes room in a sheet-table array for one more entry, doubling it up to `max`; false when the heap has no block.
+template <typename T>
+bool growSheetArray(std::unique_ptr<T[]>& array, uint8_t& capacity, const uint8_t count, const size_t max) {
+  if (count < capacity) return true;
+  const size_t grown = std::min<size_t>(max, capacity > 0 ? capacity * 2u : 4u);
+  auto bigger = makeUniqueNoThrow<T[]>(grown);
+  if (!bigger) {
+    LOG_ERR("CSS", "No heap for %u bytes of the sheet table", static_cast<unsigned>(grown * sizeof(T)));
+    return false;
+  }
+  std::copy(array.get(), array.get() + count, bigger.get());
+  array = std::move(bigger);
+  capacity = static_cast<uint8_t>(grown);
+  return true;
+}
+
+}  // namespace
+
+uint32_t CssParser::sheetPathHash(const std::string_view pathInEpub) {
+  const uint32_t h = fnv1a32(pathInEpub);
+  return h != kFoldedSheets ? h : kFoldedSheets + 1;
+}
+
+bool CssParser::resolveStylesheetHref(const std::string_view baseDir, std::string_view href, std::string& out) {
+  out.clear();
+  href = trimCss(href);
+  href = href.substr(0, href.find_first_of("?#"));
+  if (href.empty() || findIgnoreCase(href, "data:") == 0 || href.find("://") != std::string_view::npos ||
+      href.substr(0, 2) == "//") {
+    return false;
+  }
+  std::string joined;
+  if (href.front() == '/') {
+    while (!href.empty() && href.front() == '/') href.remove_prefix(1);
+  } else {
+    joined.assign(baseDir);
+  }
+  joined.append(href);
+  FsHelpers::decodeUriEscapes(joined, out);  // as the manifest's hrefs are (ContentOpfParser)
+  FsHelpers::normalisePath(out, joined);
+  out.swap(joined);
+  return !out.empty();
+}
+
+void CssParser::beginSheetRange(const uint32_t pathHash) {
+  if (sheetTableDropped_) return;
+  if (sheetCount_ > 0) sheetRanges_[sheetCount_ - 1].endOrder = nextRuleOrder_;
+  if (sheetCount_ == MAX_SHEETS) {
+    // The 65th sheet: the last range takes it in, and every sheet after it, and with no one path it becomes a range
+    // for every chapter. Its end is where the compile ends.
+    if (sheetRanges_[MAX_SHEETS - 1].pathHash != kFoldedSheets) {
+      LOG_INF("CSS", "More than %zu stylesheets: those from the %zuth on apply to every chapter", MAX_SHEETS,
+              MAX_SHEETS);
+      sheetRanges_[MAX_SHEETS - 1].pathHash = kFoldedSheets;
+    }
+    return;
+  }
+  if (!growSheetArray(sheetRanges_, sheetCapacity_, sheetCount_, MAX_SHEETS)) {
+    dropSheetTable("no heap");
+    return;
+  }
+  sheetRanges_[sheetCount_++] = SheetRange{pathHash, nextRuleOrder_, nextRuleOrder_};
+}
+
+void CssParser::noteImport(const std::string_view prelude) {
+  if (sheetTableDropped_ || sheetCount_ == 0) return;  // no sheet named (setStylesheetPath): nothing imports it
+  constexpr std::string_view kImport = "import";
+  std::string_view rest = trimCss(prelude);
+  if (rest.size() <= kImport.size() || !equalsIgnoreCase(rest.substr(0, kImport.size()), kImport)) return;
+  rest.remove_prefix(kImport.size());
+  if (!isCssWhitespace(rest.front()) && rest.front() != '"' && rest.front() != '\'') return;  // @imports, @import-x
+  rest = trimCss(rest);
+  // `url(x.css)`, `url("x.css")` or a string; a media list after it is not read (every @media block is skipped, but
+  // a sheet imported for print applied before v36 too).
+  std::string_view href;
+  if (rest.size() > 4 && equalsIgnoreCase(rest.substr(0, 4), "url(")) {
+    const size_t close = rest.find(')');
+    if (close == std::string_view::npos) return;
+    href = unquoteCss(rest.substr(4, close - 4));
+  } else if (!rest.empty() && (rest.front() == '"' || rest.front() == '\'')) {
+    const size_t close = rest.find(rest.front(), 1);
+    if (close == std::string_view::npos) return;
+    href = rest.substr(1, close - 1);
+  } else {
+    return;
+  }
+  std::string path;
+  if (!resolveStylesheetHref(stylesheetDir_, href, path)) return;
+  const SheetImport edge{sheetPathHash(path), static_cast<uint8_t>(sheetCount_ - 1)};
+  for (uint8_t i = 0; i < importCount_; ++i) {
+    if (sheetImports_[i].importer == edge.importer && sheetImports_[i].importedHash == edge.importedHash) return;
+  }
+  if (importCount_ == MAX_SHEET_IMPORTS) {
+    dropSheetTable("too many @import rules");
+    return;
+  }
+  if (!growSheetArray(sheetImports_, importCapacity_, importCount_, MAX_SHEET_IMPORTS)) {
+    dropSheetTable("no heap");
+    return;
+  }
+  sheetImports_[importCount_++] = edge;
+}
+
+void CssParser::dropSheetTable([[maybe_unused]] const char* const why) {
+  LOG_ERR("CSS", "No sheet table for this book (%s): every stylesheet will apply to every chapter", why);
+  freeSheetTable();
+  sheetTableDropped_ = true;
+}
+
+void CssParser::freeSheetTable() const {
+  sheetRanges_.reset();
+  sheetImports_.reset();
+  sheetCount_ = 0;
+  sheetCapacity_ = 0;
+  importCount_ = 0;
+  importCapacity_ = 0;
+}
+
+bool CssParser::writeSheetTable(serialization::BufferedFileWriter& out) const {
+  // Orders that ran out tie from the last one on, across sheets: no range can tell those rules apart.
+  const bool saturated = nextRuleOrder_ == UINT16_MAX && sheetCount_ > 0;
+  if (saturated) {
+    LOG_ERR("CSS", "Rule orders ran out: no sheet table, every stylesheet will apply to every chapter");
+  }
+  const uint8_t sheets = saturated ? 0 : sheetCount_;
+  const uint8_t imports = saturated ? 0 : importCount_;
+  bool ok = out.writePod(sheets) && out.writePod(imports);
+  for (uint8_t i = 0; i < sheets; ++i) {
+    const SheetRange& range = sheetRanges_[i];
+    const uint16_t end = i + 1 < sheets ? sheetRanges_[i + 1].firstOrder : nextRuleOrder_;
+    uint8_t record[SHEET_RANGE_BYTES];
+    std::memcpy(record, &range.pathHash, 4);
+    std::memcpy(record + 4, &range.firstOrder, 2);
+    std::memcpy(record + 6, &end, 2);
+    ok = ok && out.write(record, sizeof(record));
+  }
+  for (uint8_t i = 0; i < imports; ++i) {
+    uint8_t record[SHEET_IMPORT_BYTES];
+    record[0] = sheetImports_[i].importer;
+    std::memcpy(record + 1, &sheetImports_[i].importedHash, 4);
+    ok = ok && out.write(record, sizeof(record));
+  }
+  const auto tableBytes =
+      static_cast<uint16_t>(SHEET_TABLE_HEADER_BYTES + sheets * SHEET_RANGE_BYTES + imports * SHEET_IMPORT_BYTES);
+  return ok && out.writePod(tableBytes);
+}
+
+bool CssParser::loadSheetTable() const {
+  freeSheetTable();
+  FsFile file;
+  if (cachePath.empty() || !Storage.openFileForRead("CSS", cachePath + rulesCache, file)) return false;
+  const size_t size = file.size();
+  uint8_t version = 0;
+  uint16_t tableBytes = 0;
+  uint8_t counts[SHEET_TABLE_HEADER_BYTES] = {};
+  const bool found =
+      size >= CSS_CACHE_HEADER_BYTES + SHEET_TABLE_HEADER_BYTES + sizeof(tableBytes) && file.read(&version, 1) == 1 &&
+      version == CSS_CACHE_VERSION && file.seek(size - sizeof(tableBytes)) &&
+      file.read(&tableBytes, sizeof(tableBytes)) == sizeof(tableBytes) && tableBytes >= SHEET_TABLE_HEADER_BYTES &&
+      tableBytes <= size - CSS_CACHE_HEADER_BYTES - sizeof(tableBytes) &&
+      file.seek(size - sizeof(tableBytes) - tableBytes) && file.read(counts, sizeof(counts)) == sizeof(counts) &&
+      counts[0] <= MAX_SHEETS && counts[1] <= MAX_SHEET_IMPORTS &&
+      tableBytes == SHEET_TABLE_HEADER_BYTES + counts[0] * SHEET_RANGE_BYTES + counts[1] * SHEET_IMPORT_BYTES;
+  if (!found) {
+    LOG_ERR("CSS", "The rules cache ends in no sheet table");
+    return false;
+  }
+  if (counts[0] > 0) sheetRanges_ = makeUniqueNoThrow<SheetRange[]>(counts[0]);
+  if (counts[1] > 0) sheetImports_ = makeUniqueNoThrow<SheetImport[]>(counts[1]);
+  if ((counts[0] > 0 && !sheetRanges_) || (counts[1] > 0 && !sheetImports_)) {
+    LOG_ERR("CSS", "No heap for the sheet table (%u bytes)", static_cast<unsigned>(tableBytes));
+    freeSheetTable();
+    return false;
+  }
+  uint8_t window[128];
+  serialization::BufferedFileReader in(file, window, sizeof(window));
+  bool ok = true;
+  for (uint8_t i = 0; ok && i < counts[0]; ++i) {
+    uint8_t record[SHEET_RANGE_BYTES] = {};
+    SheetRange& range = sheetRanges_[i];
+    ok = in.read(record, sizeof(record));
+    std::memcpy(&range.pathHash, record, 4);
+    std::memcpy(&range.firstOrder, record + 4, 2);
+    std::memcpy(&range.endOrder, record + 6, 2);
+    // The ranges follow one another without a gap, as the orders ran.
+    ok = ok && range.firstOrder <= range.endOrder && (i == 0 || range.firstOrder == sheetRanges_[i - 1].endOrder);
+  }
+  for (uint8_t i = 0; ok && i < counts[1]; ++i) {
+    uint8_t record[SHEET_IMPORT_BYTES] = {};
+    SheetImport& edge = sheetImports_[i];
+    ok = in.read(record, sizeof(record));
+    edge.importer = record[0];
+    std::memcpy(&edge.importedHash, record + 1, 4);
+    ok = ok && edge.importer < counts[0];
+  }
+  if (!ok) {
+    LOG_ERR("CSS", "The rules cache's sheet table is damaged");
+    freeSheetTable();
+    return false;
+  }
+  sheetCount_ = sheetCapacity_ = counts[0];
+  importCount_ = importCapacity_ = counts[1];
+  return true;
 }
 
 void CssParser::recordBackgroundImage(const std::string_view selectorGroup, const std::string& path) {
@@ -4128,6 +4363,12 @@ bool CssParser::saveToCache() const {
     const uint32_t ruleOffset = file.position();
     writeRuleRecord(file, pair.first, pair.second.order, pair.second.style);
     indexEntries.push_back({selectorHash(pair.first), ruleOffset});
+  }
+  {
+    uint8_t window[64];
+    serialization::BufferedFileWriter tail(file, window, sizeof(window));
+    writeSheetTable(tail);
+    tail.flush();
   }
 
   // Sort and patch the index placeholder at position 11.

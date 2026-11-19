@@ -1,6 +1,7 @@
 add_executable(CssGapsTest
   CssGapsTest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/css/CssParser.cpp
+  ${REPO_ROOT}/lib/FsHelpers/FsHelpers.cpp
 )
 
 target_include_directories(CssGapsTest PRIVATE
@@ -9,6 +10,7 @@ target_include_directories(CssGapsTest PRIVATE
   ${REPO_ROOT}/lib/hal
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/Memory        # BuildArena.h (CssParser Phase-2 arena mode)
+  ${REPO_ROOT}/lib/FsHelpers     # FsHelpers.h (CssParser resolves an @import's path)
   ${REPO_ROOT}/lib/Serialization # BufferedFileIO.h (the cache compile's windows)
 )
 

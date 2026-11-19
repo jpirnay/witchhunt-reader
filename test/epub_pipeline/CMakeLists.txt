@@ -204,6 +204,7 @@ add_executable(EpubPipelineTest
   VisibleTextOffsetLutTest.cpp
   TextNodeRulesTest.cpp
   BookFontsTest.cpp
+  CssSheetRangesTest.cpp
   BodySizeTest.cpp
   FirstOpenIndexingTest.cpp
   FirstChapterTest.cpp

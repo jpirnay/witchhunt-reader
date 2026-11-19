@@ -8,6 +8,7 @@
 #include <unistd.h>
 #endif
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -16,7 +17,9 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "../../lib/Epub/Epub/css/CssParser.h"
@@ -1537,4 +1540,274 @@ TEST(CssParserSupports, AnInitialLetterBlockIsRead) {
   EXPECT_FALSE(parser.resolveStyle("span", "grid").anyDefined());
   EXPECT_FALSE(parser.resolveStyle("span", "print").anyDefined());
   EXPECT_EQ(CssTextAlign::Center, parser.resolveStyle("p", "after").textAlign);  // the sheet goes on past the blocks
+}
+
+// --- The sheet table (v36): each stylesheet's range of rule orders, and the sheets its @import rules name ---
+
+namespace {
+
+struct NamedSheet {
+  std::string path;  // in the EPUB, as Epub::parseCssFiles names it
+  std::string css;
+};
+
+// Compiles the sheets as Epub::parseCssFiles does: each named (setStylesheetPath) before it is read.
+::testing::AssertionResult compileNamedSheets(CssParser& parser, const std::vector<NamedSheet>& sheets) {
+  if (!parser.beginCacheCompile()) return ::testing::AssertionFailure() << "beginCacheCompile failed";
+  for (const NamedSheet& sheet : sheets) {
+    std::string cssPath;
+    if (!writeTempCssFile(std::vector<uint8_t>(sheet.css.begin(), sheet.css.end()), cssPath)) {
+      parser.abortCacheCompile();
+      return ::testing::AssertionFailure() << "cannot write " << sheet.path;
+    }
+    bool appended = false;
+    {
+      FsFile file;
+      if (Storage.openFileForRead("CSS", cssPath.c_str(), file)) {
+        parser.setStylesheetPath(sheet.path);
+        appended = parser.appendCompiledFromStream(file);
+      }
+    }
+    std::error_code ec;
+    std::filesystem::remove(cssPath, ec);
+    if (!appended) {
+      parser.abortCacheCompile();
+      return ::testing::AssertionFailure() << "cannot compile " << sheet.path;
+    }
+  }
+  if (!parser.endCacheCompile()) return ::testing::AssertionFailure() << "endCacheCompile failed";
+  return ::testing::AssertionSuccess();
+}
+
+uint32_t pathHash(const std::string& path) { return CssParser::sheetPathHash(path); }
+
+::testing::AssertionResult isRange(const CssParser::SheetRange& range, const uint32_t hash, const size_t first,
+                                   const size_t end) {
+  if (range.pathHash == hash && range.firstOrder == first && range.endOrder == end) {
+    return ::testing::AssertionSuccess();
+  }
+  return ::testing::AssertionFailure() << "{" << range.pathHash << ", " << range.firstOrder << ", " << range.endOrder
+                                       << "}, expected {" << hash << ", " << first << ", " << end << "}";
+}
+
+// Every rule record of the cache as {selector, order}, read where the format puts them (docs/file-formats.md), sorted.
+std::vector<std::pair<std::string, uint16_t>> ruleOrders(const std::string& cacheDir) {
+  std::ifstream in(std::filesystem::path(cacheDir) / "css_rules.cache", std::ios::binary);
+  const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  std::vector<std::pair<std::string, uint16_t>> rules;
+  const auto u16 = [&](const size_t at) {
+    uint16_t v = 0;
+    if (at + 2 <= bytes.size()) std::memcpy(&v, bytes.data() + at, 2);
+    return v;
+  };
+  if (bytes.size() < CssParser::CSS_CACHE_HEADER_BYTES) return rules;
+  const size_t index = CssParser::CSS_CACHE_HEADER_BYTES + u16(12);
+  for (uint16_t i = 0; i < u16(1); ++i) {
+    uint32_t offset = 0;
+    if (index + 8 * i + 8 > bytes.size()) break;
+    std::memcpy(&offset, bytes.data() + index + 8 * i + 4, 4);
+    const uint16_t length = u16(offset);
+    if (offset + 2 + length + 2 > bytes.size()) break;
+    rules.emplace_back(bytes.substr(offset + 2, length), u16(offset + 2 + length));
+  }
+  std::sort(rules.begin(), rules.end());
+  return rules;
+}
+
+std::vector<std::pair<uint8_t, uint32_t>> importsOf(const CssParser& parser) {
+  std::vector<std::pair<uint8_t, uint32_t>> imports;
+  for (const CssParser::SheetImport& edge : parser.sheetImports())
+    imports.emplace_back(edge.importer, edge.importedHash);
+  return imports;
+}
+
+}  // namespace
+
+// Each sheet owns the orders of its rules, one range after the other, in the order the sheets are compiled: what a
+// chapter that links only some of them will filter its rules by. A sheet without rules has an empty range.
+TEST(CssSheetTable, EachSheetOwnsTheRangeOfItsRules) {
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+  {
+    CssParser compiler(cacheDir);
+    ASSERT_TRUE(compileNamedSheets(
+        compiler, {{"OEBPS/Styles/a.css", ".a { font-weight: bold }\np { text-indent: 1em }\n"},
+                   {"OEBPS/Styles/empty.css", "/* nothing */\n@media print { p { font-style: italic } }\n"},
+                   {"OEBPS/Styles/c.css", "h1, h2 { text-align: center }\ndiv > p { margin-left: 1em }\n"}}));
+  }
+  CssParser parser(cacheDir);  // a later open
+  ASSERT_TRUE(parser.loadSheetTable());
+  const auto ranges = parser.sheetRanges();
+  ASSERT_EQ(ranges.size(), 3u);
+  EXPECT_TRUE(isRange(ranges[0], pathHash("OEBPS/Styles/a.css"), 0, 2));
+  EXPECT_TRUE(isRange(ranges[1], pathHash("OEBPS/Styles/empty.css"), 2, 2));
+  EXPECT_TRUE(isRange(ranges[2], pathHash("OEBPS/Styles/c.css"), 2, 4));  // div > p, 3, is a complex rule
+  EXPECT_TRUE(parser.sheetImports().empty());
+  const std::vector<std::pair<std::string, uint16_t>> expected = {{".a", 0}, {"h1", 2}, {"h2", 2}, {"p", 1}};
+  EXPECT_EQ(ruleOrders(cacheDir), expected);
+  removePath(cacheDir);
+}
+
+// A selector that ended one sheet and started the next was merged into one record under the second sheet's order,
+// the first sheet's declarations in it: scoped to either sheet, a chapter would resolve it wrong. It is a rule in each
+// sheet now, and the two resolve as the merged one did, from every store.
+TEST(CssSheetTable, ASelectorInTwoSheetsIsARuleInEach) {
+  const std::vector<NamedSheet> sheets = {{"OEBPS/Styles/a.css", ".x { text-align: center }\n"},
+                                          {"OEBPS/Styles/b.css", ".x { font-style: italic }\n"}};
+  const auto expectBoth = [](const CssStyle& style, const char* store) {
+    EXPECT_EQ(style.textAlign, CssTextAlign::Center) << store;
+    EXPECT_EQ(style.fontStyle, CssFontStyle::Italic) << store;
+  };
+
+  CssParser parsed("");
+  for (const NamedSheet& sheet : sheets) {
+    std::string cssPath;
+    ASSERT_TRUE(writeTempCssFile(std::vector<uint8_t>(sheet.css.begin(), sheet.css.end()), cssPath));
+    {
+      FsFile file;
+      ASSERT_TRUE(Storage.openFileForRead("CSS", cssPath.c_str(), file));
+      parsed.setStylesheetPath(sheet.path);
+      ASSERT_TRUE(parsed.loadFromStream(file));
+    }
+    std::error_code ec;
+    std::filesystem::remove(cssPath, ec);
+  }
+  EXPECT_EQ(parsed.ruleCount(), 2u);
+  expectBoth(parsed.resolveStyle("p", "x"), "parsed");
+
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+  CssParser parser(cacheDir);
+  ASSERT_TRUE(compileNamedSheets(parser, sheets));
+  EXPECT_EQ(parser.ruleCount(), 2u) << "a record for each sheet";
+  const std::vector<std::pair<std::string, uint16_t>> expected = {{".x", 0}, {".x", 1}};
+  EXPECT_EQ(ruleOrders(cacheDir), expected);
+  ASSERT_TRUE(parser.loadSheetTable());
+  ASSERT_EQ(parser.sheetRanges().size(), 2u);
+  EXPECT_TRUE(isRange(parser.sheetRanges()[0], pathHash("OEBPS/Styles/a.css"), 0, 1));
+  EXPECT_TRUE(isRange(parser.sheetRanges()[1], pathHash("OEBPS/Styles/b.css"), 1, 2));
+
+  parser.clear();
+  ASSERT_TRUE(parser.loadFromCache());
+  expectBoth(parser.resolveStyle("p", "x"), "heap index");
+  {
+    BuildArena arena(64 * 1024);
+    parser.clear();
+    parser.setIndexArena(&arena);
+    parser.setLeanResolve(true);
+    ASSERT_TRUE(parser.loadFromCache());
+    ASSERT_TRUE(parser.isArenaResident());
+    expectBoth(parser.resolveStyle("p", "x"), "arena resident");
+    parser.clear();
+  }
+  removePath(cacheDir);
+}
+
+// The @import rules at the top of a sheet are recorded as the paths they name, resolved against the sheet's folder as
+// the manifest's hrefs are against the package's. One after a rule is not (CSS ignores it), nor one that names no file
+// in the book; the same path imported twice is one edge. The rules compile as they did.
+TEST(CssSheetTable, TheImportsAtTheTopOfASheetAreRecorded) {
+  const std::string main =
+      "@charset \"utf-8\";\n"
+      "@import url(\"base/common.css\");\n"
+      "@import 'extra.css' screen;\n"
+      "@import url(../Fonts/faces.css);\n"
+      "@import \"my%20sheet.css?v=2#top\";\n"
+      "@IMPORT \"upper.css\";\n"
+      "@import url(\"base/common.css\");\n"
+      "@import url(\"data:,\");\n"
+      "@import url(https://example.com/remote.css);\n"
+      "@importer \"not-an-import.css\";\n"
+      ".a { font-weight: bold }\n"
+      "@import \"late.css\";\n"
+      ".b { font-style: italic }\n";
+  const std::string chapter = "@import \"/OEBPS/Styles/root.css\"";  // from the root, and the file ends without ';'
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+  {
+    CssParser compiler(cacheDir);
+    ASSERT_TRUE(compileNamedSheets(compiler, {{"OEBPS/Styles/main.css", main}, {"OEBPS/Text/chapter.css", chapter}}));
+    EXPECT_EQ(compiler.ruleCount(), 2u);
+    EXPECT_EQ(compiler.resolveStyle("p", "b").fontStyle, CssFontStyle::Italic) << "the rules go on past a late @import";
+  }
+  CssParser parser(cacheDir);
+  ASSERT_TRUE(parser.loadSheetTable());
+  ASSERT_EQ(parser.sheetRanges().size(), 2u);
+  EXPECT_TRUE(isRange(parser.sheetRanges()[0], pathHash("OEBPS/Styles/main.css"), 0, 2));
+  EXPECT_TRUE(isRange(parser.sheetRanges()[1], pathHash("OEBPS/Text/chapter.css"), 2, 2));
+  const std::vector<std::pair<uint8_t, uint32_t>> expected = {
+      {0, pathHash("OEBPS/Styles/base/common.css")}, {0, pathHash("OEBPS/Styles/extra.css")},
+      {0, pathHash("OEBPS/Fonts/faces.css")},        {0, pathHash("OEBPS/Styles/my sheet.css")},
+      {0, pathHash("OEBPS/Styles/upper.css")},       {1, pathHash("OEBPS/Styles/root.css")}};
+  EXPECT_EQ(importsOf(parser), expected);
+  removePath(cacheDir);
+}
+
+// A book with more stylesheets than the table holds keeps the first 63 apart; the last range takes in the 64th and
+// every one after it, and is a range for every chapter (kFoldedSheets). What those sheets import still counts.
+TEST(CssSheetTable, SheetsPastTheCapFoldIntoOneRangeForEveryChapter) {
+  constexpr size_t kSheets = CssParser::MAX_SHEETS + 2;
+  std::vector<NamedSheet> sheets;
+  for (size_t i = 0; i < kSheets; ++i) {
+    std::string css = ".s" + std::to_string(i) + " { font-weight: bold }\n";
+    if (i == CssParser::MAX_SHEETS - 1) css = "@import \"base.css\";\n" + css;
+    if (i == kSheets - 1) css = "@import \"late-base.css\";\n" + css;
+    sheets.push_back({"OEBPS/Styles/s" + std::to_string(i) + ".css", css});
+  }
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+  {
+    CssParser compiler(cacheDir);
+    ASSERT_TRUE(compileNamedSheets(compiler, sheets));
+  }
+  CssParser parser(cacheDir);
+  ASSERT_TRUE(parser.loadSheetTable());
+  const auto ranges = parser.sheetRanges();
+  ASSERT_EQ(ranges.size(), CssParser::MAX_SHEETS);
+  for (size_t i = 0; i + 1 < CssParser::MAX_SHEETS; ++i) {
+    EXPECT_TRUE(isRange(ranges[i], pathHash(sheets[i].path), i, i + 1)) << sheets[i].path;
+  }
+  EXPECT_TRUE(isRange(ranges.back(), CssParser::kFoldedSheets, CssParser::MAX_SHEETS - 1, kSheets));
+  const std::vector<std::pair<uint8_t, uint32_t>> expected = {
+      {static_cast<uint8_t>(CssParser::MAX_SHEETS - 1), pathHash("OEBPS/Styles/base.css")},
+      {static_cast<uint8_t>(CssParser::MAX_SHEETS - 1), pathHash("OEBPS/Styles/late-base.css")}};
+  EXPECT_EQ(importsOf(parser), expected);
+  removePath(cacheDir);
+}
+
+// Past MAX_SHEET_IMPORTS imports the compile keeps no table, and a compile that names no sheet has none to keep:
+// either way the table is empty, and every sheet applies to every chapter as before. The rules compile as ever. A
+// table that does not add up is refused.
+TEST(CssSheetTable, AnEmptyTableWhenThereIsNoneToKeep) {
+  std::string css;
+  for (size_t i = 0; i <= CssParser::MAX_SHEET_IMPORTS; ++i) css += "@import \"i" + std::to_string(i) + ".css\";\n";
+  css += ".a { font-weight: bold }\n";
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+  {
+    CssParser compiler(cacheDir);
+    ASSERT_TRUE(compileNamedSheets(compiler, {{"OEBPS/Styles/many.css", css}}));
+    EXPECT_EQ(compiler.ruleCount(), 1u);
+  }
+  CssParser parser(cacheDir);
+  ASSERT_TRUE(parser.loadSheetTable());
+  EXPECT_TRUE(parser.sheetRanges().empty());
+  EXPECT_TRUE(parser.sheetImports().empty());
+
+  // The table's byte count, the file's last two bytes, made to claim one range more than the table holds.
+  const std::filesystem::path cacheFile = std::filesystem::path(cacheDir) / "css_rules.cache";
+  {
+    std::fstream file(cacheFile, std::ios::binary | std::ios::in | std::ios::out);
+    file.seekp(-2, std::ios::end);
+    const uint16_t claimed = 2 + 8;
+    file.write(reinterpret_cast<const char*>(&claimed), 2);
+  }
+  EXPECT_FALSE(parser.loadSheetTable());
+  EXPECT_TRUE(parser.sheetRanges().empty());
+  removePath(cacheDir);
+
+  CompiledSheet unnamed;
+  ASSERT_TRUE(unnamed.load(".a { font-weight: bold }\n", false));
+  ASSERT_TRUE(unnamed.parser.loadSheetTable());
+  EXPECT_TRUE(unnamed.parser.sheetRanges().empty());
 }
