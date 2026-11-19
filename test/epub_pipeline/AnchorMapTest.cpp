@@ -14,6 +14,9 @@
 #include <Arduino.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -280,29 +283,80 @@ TEST(AnchorMap, InlineIdsInATableCellAreKept) {
   }
 }
 
-// Hyphenation on: ids before each marker word in a paragraph whose long words break across lines. A split adds a token
-// to the lines' count that the parser did not count (ParsedText::hyphenateWordAtIndex), so an id can be recorded a few
-// lines early (docs/future_work/memory-and-parsing.md). Every id is kept, and none is more than a page from its word
-// (the link Back stack's tolerance).
-TEST(AnchorMap, InlineIdsHoldWithHyphenationOn) {
-  const auto built = build("inline_hyph", kInlineHyphenSpine, kInlineAnchorsFixture, /*hyphenate=*/true);
-  ASSERT_GT(built.section->pageCount, 1);
-  int early = 0;
-  int late = 0;
-  for (int i = 1; i < 160; ++i) {
+namespace {
+
+// Chapter 4 of the fixture: an id before every fourth marker word M001..M159 of a paragraph of long words, 8 ids in a
+// layout window of 96 tokens, under the 16 the parser's queue holds (past them an id is recorded at the page reached
+// so far, which an id every third token did reach, and that, not hyphenation, made most of the drift once measured).
+struct HyphenDrift {
+  int ids = 0;
+  int early = 0;  // ids that name a page before their word's
+  int late = 0;   // ids that name a page after it
+  int maxPagesOff = 0;
+  int splitWords = 0;  // words the layout split at a line's end: the first part ends in the hyphen it was given
+};
+
+void measureHyphenDrift(const bool hyphenate, HyphenDrift& out) {
+  const auto built =
+      build(hyphenate ? "inline_hyph_on" : "inline_hyph_off", kInlineHyphenSpine, kInlineAnchorsFixture, hyphenate);
+  Section& section = *built.section;
+  ASSERT_GT(section.pageCount, 1);
+  for (int pg = 0; pg < section.pageCount; ++pg) {
+    section.currentPage = pg;
+    const auto page = section.loadPageFromSectionFile();
+    ASSERT_TRUE(page) << "page " << pg;
+    for (const auto& el : page->elements) {
+      if (el->getTag() != TAG_PageLine) continue;
+      const TextBlock* block = static_cast<const PageLine&>(*el).getBlock();
+      if (!block || !block->valid()) continue;
+      for (uint16_t w = 0; w < block->wordCount(); ++w) {
+        const std::string_view text(block->wordText(w), block->wordTextLen(w));
+        if (text.size() > 1 && text.back() == '-') ++out.splitWords;
+      }
+    }
+  }
+  for (int i = 1; i < 160; i += 4) {
     char id[16];
     char word[16];
-    snprintf(id, sizeof(id), "hy%03d", i);
-    snprintf(word, sizeof(word), "M%03d", i);
-    const auto wordPage = pageWithWord(*built.section, word);
+    std::snprintf(id, sizeof(id), "hy%03d", i);
+    std::snprintf(word, sizeof(word), "M%03d", i);
+    const auto wordPage = pageWithWord(section, word);
     ASSERT_TRUE(wordPage.has_value()) << word;
-    const auto anchored = built.section->getPageForAnchor(id);
+    const auto anchored = section.getPageForAnchor(id);
     ASSERT_TRUE(anchored.has_value()) << id << " is missing from the anchor map";
-    EXPECT_LE(std::abs(static_cast<int>(*anchored) - *wordPage), 1) << id;
-    if (static_cast<int>(*anchored) < *wordPage) ++early;
-    if (static_cast<int>(*anchored) > *wordPage) ++late;
+    const int off = static_cast<int>(*anchored) - *wordPage;
+    ++out.ids;
+    if (off < 0) ++out.early;
+    if (off > 0) ++out.late;
+    out.maxPagesOff = std::max(out.maxPagesOff, std::abs(off));
   }
-  std::printf("[ HYPH-DRIFT ] of 159 ids, %d a page before their word's, %d a page after\n", early, late);
+  std::printf("[ HYPH-DRIFT ] hyphenation %s: %d words split; of %d ids, %d a page before their word's, %d after\n",
+              hyphenate ? "on" : "off", out.splitWords, out.ids, out.early, out.late);
+}
+
+}  // namespace
+
+// Without hyphenation the lines count the parser's tokens exactly: every id names its word's page.
+TEST(AnchorMap, InlineIdsNameTheirWordsPageWithHyphenationOff) {
+  HyphenDrift drift;
+  ASSERT_NO_FATAL_FAILURE(measureHyphenDrift(/*hyphenate=*/false, drift));
+  EXPECT_EQ(drift.ids, 40);
+  EXPECT_EQ(drift.early, 0);
+  EXPECT_EQ(drift.late, 0);
+}
+
+// Hyphenation on, the same paragraph: its long words split at the lines' ends (84 of them in this layout). A split's
+// remainder is a token of its own in the lines' count but not in the parser's (ParsedText::hyphenateWordAtIndex), so
+// the lines run ahead of an id's index and can record it a line or two early: 2 of the 40 ids name the page before
+// their word's here (docs/future_work/memory-and-parsing.md). Never late, never more than a page off (the link Back
+// stack's tolerance); tighten this to the word's page once a split counts as one token.
+TEST(AnchorMap, InlineIdsHoldWithHyphenationOn) {
+  HyphenDrift drift;
+  ASSERT_NO_FATAL_FAILURE(measureHyphenDrift(/*hyphenate=*/true, drift));
+  ASSERT_GT(drift.splitWords, 0) << "no word was split: the case does not test hyphenation";
+  EXPECT_EQ(drift.ids, 40);
+  EXPECT_EQ(drift.late, 0);
+  EXPECT_LE(drift.maxPagesOff, 1);
 }
 
 // An id after a paragraph's last word (a space between: no word of the block reaches it) is on the page of that last

@@ -9,7 +9,7 @@ one case that AnchorMapTest reads (the spine indexes are its constants):
   1  a paragraph of under 96 words (one layout window) that crosses a page, a <span id> in its second half
   2  ids before a block's first word, each followed by a block with an id of its own
   3  ids in a table cell
-  4  ids before words that hyphenate (the test turns hyphenation on)
+  4  ids before words that hyphenate (the test builds it with hyphenation on and off)
   5  an id after a paragraph's last word, the next block forced onto a new page; ids on empty blocks at the end
   6  an <a id> in a div's text that wraps a block forced onto a new page
   7  ids before a <br>, in paragraphs whose varied margins put some <br> at a page's end
@@ -69,9 +69,10 @@ CH3 = """<p>TABLEBEFORE</p>
 <table><tr><td><a id="cell-1"></a>CELLA <a id="cell-2"></a>CELLB</td><td>CELLC</td></tr></table>
 <p id="cell-after">TABLEAFTER</p>"""
 
-# 4: ids before words of a paragraph whose long words break across lines.
-CH4 = "<p>%s</p>" % " ".join('<span id="hy%03d"></span>M%03d internationalization characteristically' % (i, i)
-                            for i in range(1, 160))
+# 4: ids before marker words of a paragraph whose long words break across lines, on every fourth marker: 8 in a layout
+# window of 96 tokens, under the 16 the parser's queue holds, so that no id is recorded early for the cap's sake.
+CH4 = "<p>%s</p>" % " ".join('%sM%03d internationalization characteristically' %
+                             ('<span id="hy%03d"></span>' % i if i % 4 == 1 else "", i) for i in range(1, 160))
 
 # 5: the id follows a space after the last word, so no word of the block reaches it: the block's end records it. The
 # chapter ends with ids on elements that hold no text.
