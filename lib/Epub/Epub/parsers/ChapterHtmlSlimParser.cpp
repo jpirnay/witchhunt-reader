@@ -2090,11 +2090,14 @@ bool ChapterHtmlSlimParser::ensurePage() {
 }
 
 bool ChapterHtmlSlimParser::addPageElement(std::unique_ptr<PageElement> element) {
-  if (!currentPage) return false;
+  // A build the heap refused is over: stopForHeap stops only the SAX parser, and the paragraph being laid out goes on
+  // through its lines, which a page the break in flight emitted would otherwise follow with a hole in it.
+  if (!currentPage || layoutFailed) return false;
   bool room = heapReserveFor(currentPage->elements, 1);
 #ifdef ELEMENT_FAULT_INJECTION
   if (elementsLeft() == 0) {
     room = false;
+    if (elementRefusalRecovers()) elementsLeft() = SIZE_MAX;
   } else if (elementsLeft() != SIZE_MAX) {
     --elementsLeft();
   }
