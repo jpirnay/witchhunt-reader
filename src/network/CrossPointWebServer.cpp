@@ -3854,21 +3854,17 @@ void CrossPointWebServer::fetchToSd(const String& plugin, const std::string& url
   }
 
   LOG_DBG("WEB", "Fetch %s %s -> %s", method.c_str(), url.c_str(), dest.c_str());
+  // The status of the server's answer, 0 or less when none came. A failure reports it (describeFetchFailure).
   int status = 0;
   size_t bytes = 0;
   bool ok = false;
-  bool unauthorized = false;
   std::string refusedHost;
   if (method == "GET" && body.empty()) {
     const HttpDownloader::DownloadError result = HttpDownloader::downloadToFile(
         url, dest.c_str(), nullptr, "", "", HttpDownloader::TlsPolicy::VerifiedThenUnverified,
-        redirectsWithinAllowlist(plugin, &refusedHost), headers);
+        redirectsWithinAllowlist(plugin, &refusedHost), headers, &status);
     ok = result == HttpDownloader::OK;
-    // downloadToFile() keeps no status, but it does tell a 401 or 403 apart: a catalog with a password grant then
-    // mints a new token and tries again, as upstream's does.
-    unauthorized = result == HttpDownloader::AUTH_ERROR;
     if (ok) {
-      status = 200;
       HalFile f = Storage.open(dest.c_str());
       if (f) bytes = f.size();
     }
@@ -3909,9 +3905,10 @@ void CrossPointWebServer::fetchToSd(const String& plugin, const std::string& url
   doc["bytes"] = static_cast<uint32_t>(bytes);
   doc["dest"] = dest.c_str();
   if (!ok) {
-    LOG_ERR("WEB", "Fetch to SD failed (%d%s): %s", status, unauthorized ? ", 401/403" : "", url.c_str());
-    doc["error"] = unauthorized ? "the server refused the request (401 or 403)" : "download failed";
-    if (unauthorized) doc["unauthorized"] = true;
+    const PluginRelay::FetchFailure failure = PluginRelay::describeFetchFailure(status);
+    LOG_ERR("WEB", "Fetch to SD failed (%d): %s", status, url.c_str());
+    doc["error"] = failure.error;
+    if (failure.unauthorized) doc["unauthorized"] = true;
     sendJson(server.get(), 502, doc);
     return;
   }
