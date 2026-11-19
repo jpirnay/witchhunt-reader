@@ -83,6 +83,21 @@ inline size_t& tableCellTextsLeft() {
   static size_t left = SIZE_MAX;
   return left;
 }
+// The same for the grid row's line lists: how many more reserves of the shared line scratch (the table's first grid
+// row) and how many more exact-size `cell.lines` allocations may succeed; SIZE_MAX = never refuse.
+inline size_t& cellLineScratchLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+inline size_t& cellLinesLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// How many `cell.lines` allocations layoutTableRow made (one per cell that has lines).
+inline size_t& cellLinesAllocated() {
+  static size_t n = 0;
+  return n;
+}
 #endif
 
 #ifdef PAGE_FAULT_INJECTION
@@ -375,6 +390,11 @@ class ChapterHtmlSlimParser final : public Print {
   // The layout pass's working memory, one for the build: every ParsedText the parser makes (the main block, each table
   // cell) is lent it, so a row of buffered cells does not carry a set each (ParsedText::LayoutScratch).
   ParsedText::LayoutScratch layoutScratch_;
+  // A grid cell's lines are collected here, then moved into `cell.lines` allocated at its exact size (layoutTableRow),
+  // so a cell's line list is one allocation instead of a growth by doubling. Reserved to MAX_CELL_LINES pointers
+  // (64 x 4 B = 256 B on the C3) by the table's first grid row, freed at </table>; its pointers only live inside one
+  // cell's layout, so it is empty between rows (a TextBlock never outlives the arena block it was laid out in).
+  std::vector<std::unique_ptr<TextBlock>> cellLineScratch_;
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
