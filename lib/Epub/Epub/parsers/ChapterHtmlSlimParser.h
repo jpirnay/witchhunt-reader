@@ -1018,7 +1018,7 @@ class ChapterHtmlSlimParser final : public Print {
   // Puts the controls the element opening now asks for (CSS Writing Modes 3, 2.4.2: its unicode-bidi and computed
   // direction, elementFlow_) at the start of its text, and pushes the edge with their closers. An inline element takes
   // them all; one laid out as its own block (`inlineElement` false) only an override, as its other values set its
-  // paragraph's direction. Nothing where its text is not laid out (an rt's, a nested table's, a transparent run's).
+  // paragraph's direction. Nothing where its text is not laid out (an rt's, a transparent run's).
   void openBidiEdge(const CssStyle& style, bool inlineElement);
   // At the end tag of the element at `elementDepth`: its closers go in, and those of any edge left deeper.
   void closeBidiEdges(int elementDepth);
@@ -1217,6 +1217,12 @@ class ChapterHtmlSlimParser final : public Print {
   // ParsedText before returning. Shared by the row fallback and the degraded path so both
   // produce identical output. Returns false when the heap guard stopped the parse.
   bool emitCellAsParagraph(BufferedTableCell& cell, bool emitImage);
+  // The block a cell laid out as a paragraph starts: no spacing or inset of its own, the reader's alignment. A degraded
+  // cell's (emitCellAsParagraph) and a nested table's cell's, so both are set alike.
+  [[nodiscard]] BlockStyle degradedCellBlockStyle() const;
+  // Starts the page paragraph of a nested table's cell, or of what its enclosing cell holds after it, in that style and
+  // `direction`.
+  void startCellParagraph(CssDirection direction);
   // Give up the grid for the pending ROW: flush whatever is packed so the fragment closes before
   // the paragraphs, then emit the row's buffered cells (text then images) and latch rowDegraded so
   // the rest of the row streams at </td>. The next <tr> clears it and the grid resumes.

@@ -1596,8 +1596,7 @@ void ChapterHtmlSlimParser::appendBidiControl(const uint32_t cp) {
 
 void ChapterHtmlSlimParser::openBidiEdge(const CssStyle& style, const bool inlineElement) {
   // Where the element's text is not laid out, it has no text to bracket.
-  if (skipTextUntilDepth <= depth || rtDepth_ >= 0 || svgDepth > 0 || pendingDropCap_.active ||
-      (currentTable && currentTable->depth > 1)) {
+  if (skipTextUntilDepth <= depth || rtDepth_ >= 0 || svgDepth > 0 || pendingDropCap_.active) {
     return;
   }
   // CSS Writing Modes 3, 2.4.2. `rtl` and `ltr` are the computed direction; isolate's FSI takes auto or none.
@@ -3156,9 +3155,19 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   if (strcmp(name, "table") == 0) {
     if (self->currentTable) {
       // Nested table — grid layout is now impossible for the outer table, and it cannot recover
-      // on the next row either, so the inner table's cells fold into the outer one's stream.
+      // on the next row either, so the inner table's cells fold into the outer one's stream: each
+      // is a paragraph of the page's own (the depth > 1 cell branch below). The open outer cell's
+      // last word goes out with that cell, ahead of the inner table.
+      if (self->partWordBufferIndex > 0 && !self->flushPartWordBuffer()) return;
       self->currentTable->depth += 1;
       self->degradeTable("nested table");
+      // A row degraded already (an inner table earlier in it, the row budget, a column overflow)
+      // is left as it is by degradeRow, its open cell too: what that cell holds so far goes out
+      // here, or the inner table's words would be routed into it and its picture taken by it.
+      if (self->currentTableCell) {
+        self->streamClosedCell(self->currentTable->pendingRow);
+        self->currentTableCell = nullptr;
+      }
       self->depth += 1;
       return;
     }
@@ -3300,6 +3309,17 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     return;
   }
 
+  // A cell or caption of a table inside a table. No cell is open (the nested <table> above
+  // closed it), so its words go to the page's own paragraphs, and it starts one, set as a
+  // degraded outer cell is. An inner <tr> needs nothing: its cells do the breaking.
+  if (self->currentTable && self->currentTable->depth > 1 &&
+      (strcmp(name, "td") == 0 || strcmp(name, "th") == 0 || strcmp(name, "caption") == 0)) {
+    if (self->partWordBufferIndex > 0 && !self->flushPartWordBuffer()) return;
+    self->startCellParagraph(self->blockDirection(cssStyle));
+    self->depth += 1;
+    return;
+  }
+
   if (matches(name, IMAGE_TAGS, NUM_IMAGE_TAGS)) {
     std::string src;
     std::string alt;
@@ -3335,6 +3355,21 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
           self->currentTableCell->imageSrc = src;
           self->currentTableCell->imageAlt = alt;
         }
+        self->depth += 1;
+        return;
+      }
+      // Image inside a table inside a table: no cell holds it, so it goes out as a block below the
+      // text before it, as a degraded cell's image does (emitCellAsParagraph).
+      if (self->currentTable && self->currentTable->depth > 1 && !src.empty() && self->imageRendering != 2) {
+        if (self->partWordBufferIndex > 0 && !self->flushPartWordBuffer()) {
+          self->depth += 1;
+          return;
+        }
+        if (self->currentTextBlock && !self->currentTextBlock->isEmpty()) {
+          const BlockStyle cellStyle = self->currentTextBlock->getBlockStyle();
+          self->startNewTextBlock(cellStyle);
+        }
+        self->placeImageBlockAsBlock(self->buildCellImage(src, alt, self->viewportWidth, self->viewportHeight));
         self->depth += 1;
         return;
       }
@@ -4431,11 +4466,6 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     return;
   }
 
-  // Skip content of nested tables (depth > 1 means we're inside a nested table)
-  if (self->currentTable && self->currentTable->depth > 1) {
-    return;
-  }
-
   // Route character data into the active table cell's ParsedText
   if (self->currentTableCell) {
     // Use the existing partWordBuffer + word-level accumulation logic below,
@@ -4888,10 +4918,12 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
       willPopStyleStack || willClearBold || willClearItalic || willClearUnderline || willClearStrikethrough;
 
   if (self->currentTable && self->currentTable->depth > 1 && strcmp(name, "table") == 0) {
-    self->partWordBufferIndex = 0;
-    self->partWordControlsOnly_ = false;
+    // The inner table's last word goes out with it, and its last paragraph ends here: what the
+    // enclosing cell holds after it is a paragraph of its own.
+    if (self->partWordBufferIndex > 0 && !self->flushPartWordBuffer()) return;
     self->currentTable->depth -= 1;
     self->depth -= 1;
+    self->startCellParagraph(self->directionAround(self->depth));  // the enclosing cell's
     LOG_DBG("EHP", "nested table end, depth now %d", self->currentTable->depth);
     return;
   }
@@ -6957,6 +6989,23 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
   packer.firstVisibleOffset = UINT32_MAX;
 }
 
+BlockStyle ChapterHtmlSlimParser::degradedCellBlockStyle() const {
+  BlockStyle style;
+  style.textAlignDefined = true;
+  style.alignment = readerAlignment();
+  return style;
+}
+
+void ChapterHtmlSlimParser::startCellParagraph(const CssDirection direction) {
+  BlockStyle style = degradedCellBlockStyle();
+  style.direction = direction;
+  // An empty block standing here is spent, not a wrapper: the paragraph before the table, or what
+  // an outer cell's tags left (that cell's own text is laid out apart from it). Merged, it gave the
+  // first inner cell the paragraph's indent and margins.
+  if (currentTextBlock && currentTextBlock->isEmpty()) currentTextBlock->setBlockStyle(style);
+  startNewTextBlock(style);
+}
+
 // Greedily pack laid-out rows into fragments, page-breaking between fragments. A row whose
 // renderCols differs from the pending fragment flushes it first, since each PageTableFragment
 // carries a single fixed column count.
@@ -6972,13 +7021,8 @@ bool ChapterHtmlSlimParser::emitCellAsParagraph(BufferedTableCell& cell, const b
     if (!ensureHeapForTextLayout("table cell paragraph", text.get())) {
       return false;  // parse already stopped; cell text freed on return
     }
-    auto cellBlockStyle = BlockStyle();
-    cellBlockStyle.textAlignDefined = true;
-    cellBlockStyle.alignment = (paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
-                                   ? CssTextAlign::Justify
-                                   : static_cast<CssTextAlign>(paragraphAlignment);
     // Re-use the existing paragraph pipeline by moving the cell text into currentTextBlock
-    startNewTextBlock(cellBlockStyle);
+    startNewTextBlock(degradedCellBlockStyle());
     // Laid out as page paragraphs now, so wired as page paragraphs. layoutTableRow left this text
     // wired for a grid row: lines in the arena with NO page-fit hook, the row being placed whole
     // inside a block of its own. Kept like that here, a line that did not fit was materialised in

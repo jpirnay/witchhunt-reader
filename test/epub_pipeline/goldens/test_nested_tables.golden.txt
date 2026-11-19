@@ -1,6 +1,6 @@
 BOOK title=Nested Tables Test lang=en spine=6 toc=6 reliableToc=1
 SPINE 0 href=OEBPS/text/first.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=9 footnotes=0
+ PAGE 0 elements=14 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
    W x=159 s=1 z=100 t=First
    W x=239 s=1 z=100 t=cell
@@ -21,44 +21,71 @@ SPINE 0 href=OEBPS/text/first.xhtml pages=1 truncated=0 cssFallback=0
    W x=56 s=0 z=100 t=table's
    W x=127 s=0 z=100 t=first
    W x=176 s=0 z=100 t=row.
-  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=FIRSTTAIL
-   W x=89 s=0 z=100 t=The
-   W x=126 s=0 z=100 t=outer
-   W x=186 s=0 z=100 t=cell
-   W x=230 s=0 z=100 t=goes
-   W x=281 s=0 z=100 t=on
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=FIRSTCAP
+   W x=95 s=0 z=100 t=Caption
+   W x=168 s=0 z=100 t=of
+   W x=196 s=0 z=100 t=the
+   W x=233 s=0 z=100 t=inner
+   W x=284 s=0 z=100 t=table.
+  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FIRSTHEAD
+   W x=107 s=0 z=100 t=Inner
+   W x=161 s=0 z=100 t=header
+   W x=225 s=0 z=100 t=cell.
+  LINE y=152 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FIRSTHEAD2
+   W x=114 s=0 z=100 t=Second
+   W x=179 s=0 z=100 t=header
+   W x=243 s=0 z=100 t=cell.
+  LINE y=176 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FIRSTA
+   W x=76 s=0 z=100 t=First
+   W x=121 s=0 z=100 t=inner
+   W x=172 s=0 z=100 t=cell.
+  LINE y=200 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FIRSTB
+   W x=77 s=0 z=100 t=Second
+   W x=142 s=0 z=100 t=inner
+   W x=193 s=0 z=100 t=cell.
+  LINE y=224 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=FIRSTTAIL
+   W x=104 s=0 z=100 t=The
+   W x=138 s=0 z=100 t=outer
+   W x=195 s=0 z=100 t=cell
+   W x=236 s=0 z=100 t=goes
+   W x=284 s=0 z=100 t=on
    W x=314 s=0 z=100 t=after
-   W x=373 s=0 z=100 t=the
-   W x=414 s=0 z=100 t=inner
-  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=370 s=0 z=100 t=the
+   W x=408 s=0 z=100 t=inner
+  LINE y=248 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=table.
-  LINE y=161 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=272 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=18 s=0 z=100 t=FIRSTOUTERB
    W x=121 s=0 z=100 t=The
    W x=154 s=0 z=100 t=second
    W x=216 s=0 z=100 t=outer
    W x=272 s=0 z=100 t=cell.
-  LINE y=185 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=296 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=18 s=0 z=100 t=FIRSTROW2A
    W x=111 s=0 z=100 t=Next
    W x=150 s=0 z=100 t=row,
    W x=190 s=0 z=100 t=first
    W x=239 s=0 z=100 t=cell.
-  LINE y=209 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=320 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=18 s=0 z=100 t=FIRSTROW2B
    W x=112 s=0 z=100 t=Next
    W x=151 s=0 z=100 t=row,
    W x=191 s=0 z=100 t=second
    W x=253 s=0 z=100 t=cell.
-  LINE y=233 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=353 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=FIRSTAFTER
    W x=93 s=0 z=100 t=Text
    W x=131 s=0 z=100 t=after
    W x=186 s=0 z=100 t=the
    W x=223 s=0 z=100 t=table.
 SPINE 1 href=OEBPS/text/level.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=10 footnotes=0
+ PAGE 0 elements=15 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
    W x=157 s=1 z=100 t=Three
    W x=245 s=1 z=100 t=deep
@@ -86,29 +113,60 @@ SPINE 1 href=OEBPS/text/level.xhtml pages=1 truncated=0 cssFallback=0
    W x=285 s=0 z=100 t=middle
    W x=341 s=0 z=100 t=table.
   LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=LEVEL1TAIL
-   W x=103 s=0 z=100 t=Outer
-   W x=155 s=0 z=100 t=text
-   W x=197 s=0 z=100 t=after
-   W x=252 s=0 z=100 t=the
-   W x=289 s=0 z=100 t=middle
-   W x=345 s=0 z=100 t=table.
-  LINE y=161 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=LEVEL2A
+   W x=95 s=0 z=100 t=Middle
+   W x=147 s=0 z=100 t=text
+   W x=189 s=0 z=100 t=before
+   W x=249 s=0 z=100 t=the
+   W x=286 s=0 z=100 t=innermost
+   W x=378 s=0 z=100 t=table.
+  LINE y=152 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=LEVEL3A
+   W x=96 s=0 z=100 t=Innermost
+   W x=191 s=0 z=100 t=cell
+   W x=231 s=0 z=100 t=one.
+  LINE y=176 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=LEVEL3B
+   W x=97 s=0 z=100 t=Innermost
+   W x=192 s=0 z=100 t=cell
+   W x=232 s=0 z=100 t=two.
+  LINE y=200 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=LEVEL2TAIL
+   W x=122 s=0 z=100 t=Middle
+   W x=174 s=0 z=100 t=text
+   W x=216 s=0 z=100 t=after
+   W x=271 s=0 z=100 t=the
+   W x=308 s=0 z=100 t=innermost
+   W x=400 s=0 z=100 t=table.
+  LINE y=224 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=LEVEL2B
+   W x=96 s=0 z=100 t=Second
+   W x=161 s=0 z=100 t=middle
+   W x=217 s=0 z=100 t=cell.
+  LINE y=248 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=LEVEL1TAIL
+   W x=121 s=0 z=100 t=Outer
+   W x=173 s=0 z=100 t=text
+   W x=215 s=0 z=100 t=after
+   W x=270 s=0 z=100 t=the
+   W x=307 s=0 z=100 t=middle
+   W x=363 s=0 z=100 t=table.
+  LINE y=272 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=18 s=0 z=100 t=LEVEL1B
    W x=95 s=0 z=100 t=Second
    W x=160 s=0 z=100 t=outer
    W x=216 s=0 z=100 t=cell.
-  LINE y=185 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=296 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=18 s=0 z=100 t=LEVELROW2A
    W x=123 s=0 z=100 t=Next
    W x=162 s=0 z=100 t=outer
    W x=218 s=0 z=100 t=row.
-  LINE y=209 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=320 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=18 s=0 z=100 t=LEVELROW2B
    W x=124 s=0 z=100 t=Its
    W x=158 s=0 z=100 t=second
    W x=220 s=0 z=100 t=cell.
-  LINE y=233 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=353 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=LEVELAFTER
    W x=110 s=0 z=100 t=Text
    W x=153 s=0 z=100 t=after
@@ -117,11 +175,11 @@ SPINE 1 href=OEBPS/text/level.xhtml pages=1 truncated=0 cssFallback=0
    W x=320 s=0 z=100 t=back
    W x=364 s=0 z=100 t=in
    W x=392 s=0 z=100 t=normal
-  LINE y=257 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=377 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=block
    W x=48 s=0 z=100 t=layout.
 SPINE 2 href=OEBPS/text/img.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=6 footnotes=0
+ PAGE 0 elements=9 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
    W x=176 s=1 z=100 t=Picture
   LINE y=47 x=0 align=0 mult=1.000 hfid=0 words=7
@@ -141,21 +199,38 @@ SPINE 2 href=OEBPS/text/img.xhtml pages=1 truncated=0 cssFallback=0
    W x=279 s=0 z=100 t=the
    W x=316 s=0 z=100 t=inner
    W x=367 s=0 z=100 t=table.
-  IMG y=113 x=150 w=160 h=100 src=<cache>/epub_<hash>/img_6b023fb8b7c022f2.png
-  LINE y=222 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=IMGBEFORE
+   W x=104 s=0 z=100 t=Text
+   W x=142 s=0 z=100 t=before
+   W x=202 s=0 z=100 t=the
+   W x=239 s=0 z=100 t=picture.
+  IMG y=128 x=150 w=160 h=100 src=<cache>/epub_<hash>/img_6b023fb8b7c022f2.png
+  LINE y=228 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=IMGAFTER
+   W x=89 s=0 z=100 t=Text
+   W x=127 s=0 z=100 t=after
+   W x=182 s=0 z=100 t=the
+   W x=219 s=0 z=100 t=picture.
+  LINE y=252 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=IMGB
+   W x=55 s=0 z=100 t=Second
+   W x=120 s=0 z=100 t=inner
+   W x=171 s=0 z=100 t=cell.
+  LINE y=276 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=18 s=0 z=100 t=IMGOUTERB
    W x=99 s=0 z=100 t=The
    W x=132 s=0 z=100 t=second
    W x=194 s=0 z=100 t=outer
    W x=250 s=0 z=100 t=cell.
-  LINE y=246 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=309 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=IMGAFTERTABLE
    W x=118 s=0 z=100 t=Text
    W x=156 s=0 z=100 t=after
    W x=211 s=0 z=100 t=the
    W x=248 s=0 z=100 t=table.
 SPINE 3 href=OEBPS/text/rtl.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=5 footnotes=0
+ PAGE 0 elements=7 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=3
    W x=123 s=1 z=100 t=Right
    W x=221 s=1 z=100 t=to
@@ -178,14 +253,34 @@ SPINE 3 href=OEBPS/text/rtl.xhtml pages=1 truncated=0 cssFallback=0
    W x=286 s=0 z=100 t=the
    W x=323 s=0 z=100 t=inner
    W x=374 s=0 z=100 t=table.
-  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=RTLTAIL
-   W x=70 s=0 z=100 t=The
-   W x=103 s=0 z=100 t=outer
-   W x=159 s=0 z=100 t=cell
-   W x=199 s=0 z=100 t=after
-   W x=254 s=0 z=100 t=it.
-  LINE y=137 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=329 s=0 z=100 t=עולם
+    WD t=םלוע
+   W x=367 s=0 z=100 t=שלום
+    WD t=םולש
+   W x=405 s=0 z=100 t=RTLA
+   O order=2,1,0
+  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=153 s=0 z=100 t=סוף
+    WD t=ףוס
+   W x=181 s=0 z=100 t=⁦RTLSPAN
+    WD t=RTLSPAN
+   W x=252 s=0 z=100 t=left
+   W x=296 s=0 z=100 t=to
+   W x=324 s=0 z=100 t=right⁩
+    WD t=right
+   W x=377 s=0 z=100 t=ספר
+    WD t=רפס
+   W x=404 s=0 z=100 t=RTLB
+   O order=6,2,3,4,5,1,0
+  LINE y=152 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=RTLTAIL
+   W x=88 s=0 z=100 t=The
+   W x=121 s=0 z=100 t=outer
+   W x=177 s=0 z=100 t=cell
+   W x=217 s=0 z=100 t=after
+   W x=272 s=0 z=100 t=it.
+  LINE y=185 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=RTLAFTER
    W x=78 s=0 z=100 t=Text
    W x=116 s=0 z=100 t=after
@@ -739,7 +834,7 @@ SPINE 4 href=OEBPS/text/target.xhtml pages=3 truncated=0 cssFallback=0
    W x=324 s=0 z=100 t=page
    W x=372 s=0 z=100 t=while
    W x=424 s=0 z=100 t=the
- PAGE 2 elements=5 footnotes=0
+ PAGE 2 elements=7 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=rain
    W x=47 s=0 z=100 t=kept
@@ -770,14 +865,26 @@ SPINE 4 href=OEBPS/text/target.xhtml pages=3 truncated=0 cssFallback=0
    W x=307 s=0 z=100 t=the
    W x=344 s=0 z=100 t=inner
    W x=395 s=0 z=100 t=table.
-  LINE y=105 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=105 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=TARGETWORD
+   W x=113 s=0 z=100 t=The
+   W x=146 s=0 z=100 t=cell
+   W x=186 s=0 z=100 t=the
+   W x=223 s=0 z=100 t=link
+   W x=263 s=0 z=100 t=targets.
+  LINE y=129 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=TARGETB
+   W x=83 s=0 z=100 t=Second
+   W x=148 s=0 z=100 t=inner
+   W x=199 s=0 z=100 t=cell.
+  LINE y=162 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=TARGETAFTER
    W x=99 s=0 z=100 t=Text
    W x=137 s=0 z=100 t=after
    W x=192 s=0 z=100 t=the
    W x=229 s=0 z=100 t=table.
 SPINE 5 href=OEBPS/text/same.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=7 footnotes=0
+ PAGE 0 elements=12 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
    W x=164 s=1 z=100 t=Same
    W x=249 s=1 z=100 t=row
@@ -801,23 +908,52 @@ SPINE 5 href=OEBPS/text/same.xhtml pages=1 truncated=0 cssFallback=0
    W x=103 s=0 z=100 t=first
    W x=152 s=0 z=100 t=outer
    W x=208 s=0 z=100 t=cell.
-  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=0 z=100 t=SAMEB
-   W x=72 s=0 z=100 t=The
-   W x=106 s=0 z=100 t=second
-   W x=169 s=0 z=100 t=outer
-   W x=226 s=0 z=100 t=cell.
-   W x=277 s=0 z=100 t=SAMEBTAIL
-   W x=366 s=0 z=100 t=The
-   W x=400 s=0 z=100 t=second
+  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=SAMEA1
+   W x=76 s=0 z=100 t=First
+   W x=121 s=0 z=100 t=inner
+   W x=172 s=0 z=100 t=table,
+   W x=232 s=0 z=100 t=cell
+   W x=272 s=0 z=100 t=one.
   LINE y=152 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=outer
-   W x=56 s=0 z=100 t=cell
-   W x=96 s=0 z=100 t=after
-   W x=151 s=0 z=100 t=its
-   W x=182 s=0 z=100 t=inner
-   W x=233 s=0 z=100 t=table.
+   W x=18 s=0 z=100 t=SAMEA2
+   W x=77 s=0 z=100 t=First
+   W x=122 s=0 z=100 t=inner
+   W x=173 s=0 z=100 t=table,
+   W x=233 s=0 z=100 t=cell
+   W x=273 s=0 z=100 t=two.
   LINE y=176 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=SAMEB
+   W x=71 s=0 z=100 t=The
+   W x=104 s=0 z=100 t=second
+   W x=166 s=0 z=100 t=outer
+   W x=222 s=0 z=100 t=cell.
+  LINE y=200 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=SAMEB1
+   W x=77 s=0 z=100 t=Second
+   W x=142 s=0 z=100 t=inner
+   W x=193 s=0 z=100 t=table,
+   W x=253 s=0 z=100 t=cell
+   W x=293 s=0 z=100 t=one.
+  LINE y=224 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=SAMEB2
+   W x=78 s=0 z=100 t=Second
+   W x=143 s=0 z=100 t=inner
+   W x=194 s=0 z=100 t=table,
+   W x=254 s=0 z=100 t=cell
+   W x=294 s=0 z=100 t=two.
+  LINE y=248 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=SAMEBTAIL
+   W x=110 s=0 z=100 t=The
+   W x=147 s=0 z=100 t=second
+   W x=213 s=0 z=100 t=outer
+   W x=273 s=0 z=100 t=cell
+   W x=317 s=0 z=100 t=after
+   W x=376 s=0 z=100 t=its
+   W x=411 s=0 z=100 t=inner
+  LINE y=272 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=table.
+  LINE y=305 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=SAMEAFTER
    W x=87 s=0 z=100 t=Text
    W x=125 s=0 z=100 t=after

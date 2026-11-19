@@ -16,9 +16,12 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 
 #include "Epub.h"
+#include "Epub/Page.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
 
@@ -32,6 +35,11 @@ const std::string kFixture = std::string(CORPUS_DIR) + "/test_wrapped_paragraphs
 // document, whose single note body is the one anchor in it.
 constexpr int kWrappedSpine = 0;
 constexpr int kNotesSpine = 2;
+
+// test/epubs/make_test_nested_tables.py: its fifth chapter puts a page of text ahead of an inner table whose first
+// cell carries the id "inner-target" and the word TARGETWORD.
+const std::string kNestedTablesFixture = std::string(CORPUS_DIR) + "/test_nested_tables.epub";
+constexpr int kNestedTargetSpine = 4;
 
 std::string freshCacheDir(const std::string& tag) {
   const auto dir = fs::temp_directory_path() / "anchor_map_test" / tag;
@@ -62,9 +70,9 @@ struct BuiltSection {
   std::unique_ptr<Section> section;
 };
 
-BuiltSection build(const std::string& tag, int spineIndex) {
+BuiltSection build(const std::string& tag, int spineIndex, const std::string& fixture = kFixture) {
   BuiltSection out;
-  out.epub = std::make_shared<Epub>(kFixture, freshCacheDir(tag));
+  out.epub = std::make_shared<Epub>(fixture, freshCacheDir(tag));
   EXPECT_TRUE(out.epub->load(true));
   out.epub->setupCacheDir();
 
@@ -73,6 +81,24 @@ BuiltSection build(const std::string& tag, int spineIndex) {
   EXPECT_TRUE(out.section->createSectionFile(params(), {}, /*skipEviction=*/true));
   EXPECT_TRUE(out.section->loadSectionFile(params()));
   return out;
+}
+
+// The first page that holds `word` as a whole token, if any.
+std::optional<int> pageWithWord(Section& section, const std::string_view word) {
+  for (int pg = 0; pg < section.pageCount; ++pg) {
+    section.currentPage = pg;
+    const auto page = section.loadPageFromSectionFile();
+    if (!page) continue;
+    for (const auto& el : page->elements) {
+      if (el->getTag() != TAG_PageLine) continue;
+      const TextBlock* block = static_cast<const PageLine&>(*el).getBlock();
+      if (!block || !block->valid()) continue;
+      for (uint16_t w = 0; w < block->wordCount(); ++w) {
+        if (std::string_view(block->wordText(w), block->wordTextLen(w)) == word) return pg;
+      }
+    }
+  }
+  return std::nullopt;
 }
 
 }  // namespace
@@ -132,4 +158,16 @@ TEST(AnchorMap, SingleAnchorChapter) {
 TEST(AnchorMap, UnknownAnchorMisses) {
   const auto built = build("unknown", kWrappedSpine);
   EXPECT_FALSE(built.section->getPageForAnchor("no_such_id").has_value());
+}
+
+// An id on a cell of a table inside a table names the page that cell's text is on. The inner table's words were dropped
+// once, and its id went with them to whatever paragraph followed.
+TEST(AnchorMap, NestedTableCellIdNamesThePageOfItsText) {
+  const auto built = build("nested_table_cell", kNestedTargetSpine, kNestedTablesFixture);
+  const auto textPage = pageWithWord(*built.section, "TARGETWORD");
+  ASSERT_TRUE(textPage.has_value()) << "the inner cell's text is on no page";
+  EXPECT_GT(*textPage, 0) << "the fixture must put the cell past the chapter's first page to tell pages apart";
+  const auto anchored = built.section->getPageForAnchor("inner-target");
+  ASSERT_TRUE(anchored.has_value()) << "the inner cell's id is missing from the anchor map";
+  EXPECT_EQ(static_cast<int>(*anchored), *textPage);
 }

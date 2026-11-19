@@ -39,7 +39,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 125;  // v125: with extra paragraph spacing on, an empty box right after a
+constexpr uint8_t SECTION_FILE_VERSION = 126;  // v126: the text of a table inside a table is laid out, a paragraph
+                                               // per inner cell; it was dropped
+                                               // v125: with extra paragraph spacing on, an empty box right after a
                                                // laid-out block (a rule drawn as a border) keeps its frame: it took
                                                // the spacing above it off its height, and was drawn short or not
                                                // at all
