@@ -163,8 +163,7 @@ void FileBrowserActivity::onExit() {
   bookRows.release();
   // ActivityManager::exitActivity holds the render lock around onExit().
   returnLentBuffer(/*callerHoldsRenderLock=*/true);
-  coverFailed.clear();
-  coverFailed.shrink_to_fit();
+  std::vector<std::string>().swap(coverFailed);
 }
 
 void FileBrowserActivity::startActivityForResult(std::unique_ptr<Activity>&& activity,

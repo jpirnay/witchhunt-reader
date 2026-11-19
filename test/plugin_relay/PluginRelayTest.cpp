@@ -54,6 +54,28 @@ TEST(PluginRelayTest, HeaderListEscapesWhatWouldBreakTheJsonOrTheHeader) {
   EXPECT_EQ(utf8.json(), "[[\"X-Title\",\"Ünï\"]]");
 }
 
+TEST(PluginRelayTest, FetchFailureNamesTheServersAnswer) {
+  // A missing file, a third party's block and a server error each say what the server answered.
+  EXPECT_EQ(PluginRelay::describeFetchFailure(404).error, "the server answered 404");
+  EXPECT_EQ(PluginRelay::describeFetchFailure(451).error, "the server answered 451");
+  EXPECT_EQ(PluginRelay::describeFetchFailure(503).error, "the server answered 503");
+  // A redirect the download did not follow is an answer too.
+  EXPECT_EQ(PluginRelay::describeFetchFailure(302).error, "the server answered 302");
+  EXPECT_FALSE(PluginRelay::describeFetchFailure(404).unauthorized);
+  // 401 and 403 are marked apart: a catalog with a password grant then signs in again.
+  for (const int status : {401, 403}) {
+    const PluginRelay::FetchFailure f = PluginRelay::describeFetchFailure(status);
+    EXPECT_TRUE(f.unauthorized) << status;
+    EXPECT_EQ(f.error, "the server refused the request (" + std::to_string(status) + ")");
+  }
+  // No answer at all (a transport or TLS error), or a 2xx whose file could not be written: nothing to name.
+  for (const int status : {0, -1, -11, 200, 206}) {
+    const PluginRelay::FetchFailure f = PluginRelay::describeFetchFailure(status);
+    EXPECT_EQ(f.error, "download failed") << status;
+    EXPECT_FALSE(f.unauthorized) << status;
+  }
+}
+
 TEST(PluginRelayTest, HeaderListStaysUnderItsCap) {
   HeaderList list(40);
   list.add("A", "1");                     // [["A","1"]] = 11 bytes

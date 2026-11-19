@@ -93,6 +93,21 @@ inline size_t& pagesLeft() {
 }
 #endif
 
+#ifdef ELEMENT_FAULT_INJECTION
+// Host tests only (firmware never defines it): how many more page elements may be added before each one is refused as
+// if the heap were out. SIZE_MAX = never refuse. Drives addPageElement's out-of-memory path.
+inline size_t& elementsLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// True: the refusal is the one add that finds elementsLeft() at zero, and the heap is back after it (a heap that
+// recovers); false: every add after it is refused too.
+inline bool& elementRefusalRecovers() {
+  static bool recovers = false;
+  return recovers;
+}
+#endif
+
 #ifdef BLOCK_IMAGE_FAULT_INJECTION
 // Host tests only (firmware never defines it): how many more block images may get their ImageBlock before each one is
 // refused as if the heap were out. SIZE_MAX = never refuse. Drives placeImageWithBlockSpacing's out-of-memory path.
@@ -1341,6 +1356,10 @@ class ChapterHtmlSlimParser final : public Print {
   // The heap refused `bytes` for `what`, which the build cannot go on without: stop it as every such refusal does
   // (streamFailed, layoutFailed, the parser stopped). The pages so far are kept, the section marked truncated.
   void stopForHeap(const char* what, size_t bytes);
+  // Put an element on the current page, asking the heap for the table's growth first. False when it refuses (the build
+  // has stopped through stopForHeap, the element is gone) or when there is no page: the caller places nothing more.
+  // A borrowed pointer to the element (deferredPageImage_, deferredDropCapLine_) must be cleared on false.
+  [[nodiscard]] bool addPageElement(std::unique_ptr<PageElement> element);
   // Take a pending page break (pageBreakPending_): emit the page if anything is on it. Called
   // where the content before the break has been laid out and the next is about to be placed.
   void applyPendingPageBreak();
