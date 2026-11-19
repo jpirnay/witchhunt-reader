@@ -28,7 +28,7 @@ SPINE 0 href=OEBPS/text/chapter1.xhtml pages=2 truncated=0 cssFallback=0
       W x=0 s=0 z=100 t=very
       W x=43 s=0 z=100 t=slowly.
   IMG y=84 x=130 w=200 h=260 src=<cache>/epub_<hash>/img_52dca76e320da237.png
-  LINE y=368 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=344 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=CASE2
    W x=80 s=0 z=100 t=A
    W x=101 s=0 z=100 t=boxed
@@ -38,20 +38,20 @@ SPINE 0 href=OEBPS/text/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=339 s=0 z=100 t=left
    W x=390 s=0 z=100 t=for
    W x=433 s=0 z=100 t=its
-  LINE y=392 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=368 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=picture.
-  LINE y=416 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=392 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=18 s=0 z=100 t=BOXED
    W x=74 s=0 z=100 t=The
    W x=107 s=0 z=100 t=text
    W x=149 s=0 z=100 t=of
    W x=177 s=0 z=100 t=the
    W x=214 s=0 z=100 t=box.
-  IMG y=440 x=150 w=160 h=240 src=<cache>/epub_<hash>/img_077f2dab89ad506a.png
-  LINE y=704 x=0 align=0 mult=1.000 hfid=0 words=2
+  IMG y=416 x=150 w=160 h=240 src=<cache>/epub_<hash>/img_077f2dab89ad506a.png
+  LINE y=680 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=CASE3
    W x=74 s=0 z=100 t=BEFORE
-  LINE y=728 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=704 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=INLINE
    W x=80 s=0 z=100 t=A
    W x=94 s=0 z=100 t=paragraph

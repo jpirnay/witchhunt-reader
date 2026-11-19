@@ -39,7 +39,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 125;  // v125: with extra paragraph spacing on, an empty box right after a
+constexpr uint8_t SECTION_FILE_VERSION = 126;  // v126: a <br> adds a blank line only on an empty line: none after
+                                               // a word or a picture (a contents entry's trailing <br>), one each
+                                               // in a run of them, none from a table cell's
+                                               // v125: with extra paragraph spacing on, an empty box right after a
                                                // laid-out block (a rule drawn as a border) keeps its frame: it took
                                                // the spacing above it off its height, and was drawn short or not
                                                // at all

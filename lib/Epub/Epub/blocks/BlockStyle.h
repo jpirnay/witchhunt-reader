@@ -49,9 +49,10 @@ struct BlockStyle {
   // way before the line does: see ParsedText::layoutAndExtractLines.
   bool textIndentYields = false;
   bool textAlignDefined = false;  // true if text-align was explicitly set in CSS
-  // Set when this block was created by a <br> element. Used by startNewTextBlock to inject
-  // a full line-height gap when the <br> block stays empty (section-break use case).
-  // NOT propagated through getCombinedBlockStyle so it can't leak into sibling blocks.
+  // Set when this block was created by a <br> element: text that lands in it is the next line of the paragraph
+  // before it, with no first-line indent (ParsedText::applyParagraphIndent). A blank line the <br> adds is its
+  // paddingTop, decided at the <br>. NOT propagated through getCombinedBlockStyle so it can't leak into sibling
+  // blocks.
   bool fromBrElement = false;
   // Set when a line feed the text keeps (CSS white-space; <pre>) started this block: it is the next line of the
   // paragraph before it, so it takes no first-line indent from the reader. Like fromBrElement, NOT propagated through
@@ -166,8 +167,7 @@ struct BlockStyle {
       combinedBlockStyle.alignment = alignment;
       combinedBlockStyle.textAlignDefined = textAlignDefined;
     }
-    // fromBrElement is never propagated — it is consumed by startNewTextBlock
-    // when the empty <br> block is merged with the following paragraph.
+    // fromBrElement is never propagated: startNewTextBlock sets it on a merge only when a <br> merges in.
     combinedBlockStyle.fromBrElement = false;
     combinedBlockStyle.fromLineFeed = false;
     combinedBlockStyle.keepWithNext = child.keepWithNext;

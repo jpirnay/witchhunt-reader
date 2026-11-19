@@ -1153,6 +1153,13 @@ class ChapterHtmlSlimParser final : public Print {
   // that element has closed. A <br> inside it splits the element into more blocks, which keep its
   // font size; after it has closed, what it leaves behind must not lend that size to a sibling.
   int currentBlockOwnerDepth_ = -1;
+  // The line a <br> ends, for whether it is empty (the <br> branch of startElement): the current block's tokens
+  // that came before it, counted as the lines count them (0 where the block began, and the count at each block-level
+  // element's close, after which loose text starts a line of its own), and whether a picture was placed on it as a
+  // block of its own (<p><img/><br/>Caption</p>), which leaves the text block empty.
+  int lineStartTokens_ = 0;
+  bool pictureOnLine_ = false;
+  int blockTokensSoFar() const;
   // The current block's own font-size is body-relative (rem/px/pt): its size then ignores the
   // sizes of the inline containers it sits in. Set where a block or heading starts, cleared when
   // it ends, as the single block-style slot did before blocks went onto the style stack.

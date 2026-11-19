@@ -143,7 +143,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=3 truncated=0 cssFallback=0
    W x=266 s=0 z=100 t=word89
    W x=329 s=0 z=100 t=word90
    W x=400 s=0 z=100 t=word91
- PAGE 1 elements=24 footnotes=0
+ PAGE 1 elements=25 footnotes=0
   LINE y=0 x=0 align=0 mult=1.200 hfid=0 words=7
    W x=0 s=0 z=100 t=word92
    W x=65 s=0 z=100 t=word93
@@ -177,83 +177,82 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=3 truncated=0 cssFallback=0
   LINE y=140 x=0 align=2 mult=1.400 hfid=0 words=2
    W x=140 s=1 z=100 t=Echo
    W x=214 s=1 z=100 t=heading
-  LINE y=198 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=174 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=Echo
    W x=49 s=0 z=100 t=body
    W x=89 s=0 z=100 t=text
-  LINE y=222 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=198 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=6.
    W x=27 s=0 z=100 t=BR
    W x=53 s=0 z=100 t=BETWEEN:
-  LINE y=246 x=0 align=2 mult=1.400 hfid=0 words=2
+  LINE y=222 x=0 align=2 mult=1.400 hfid=0 words=2
    W x=122 s=1 z=100 t=Foxtrot
    W x=231 s=1 z=100 t=heading
-  LINE y=304 x=0 align=2 mult=1.000 hfid=0 words=3
+  LINE y=280 x=0 align=2 mult=1.000 hfid=0 words=3
    W x=156 s=0 z=100 t=Foxtrot
    W x=227 s=0 z=100 t=body
    W x=267 s=0 z=100 t=text
-  LINE y=328 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=304 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=7.
    W x=28 s=0 z=100 t=EMPTY
    W x=78 s=0 z=100 t=HEADING:
-  LINE y=352 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=328 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=Golf
    W x=44 s=0 z=100 t=body
    W x=84 s=0 z=100 t=text
-  LINE y=376 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=352 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=8.
    W x=22 s=0 z=100 t=TRAILING
    W x=97 s=0 z=100 t=BR
    W x=123 s=0 z=100 t=IN
    W x=145 s=0 z=100 t=A
    W x=159 s=0 z=100 t=PARAGRAPH:
-  LINE y=400 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=376 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=Hotel
    W x=54 s=0 z=100 t=top
-  LINE y=448 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=400 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=Hotel
    W x=54 s=0 z=100 t=next
    W x=97 s=0 z=100 t=paragraph
-  LINE y=472 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=424 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=9.
    W x=23 s=0 z=100 t=TWO
    W x=52 s=0 z=100 t=BR
    W x=78 s=0 z=100 t=INSIDE
    W x=144 s=0 z=100 t=A
    W x=158 s=0 z=100 t=PARAGRAPH:
-  LINE y=496 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=448 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=India
    W x=52 s=0 z=100 t=top
-  LINE y=544 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=496 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=India
    W x=52 s=0 z=100 t=bottom
-  LINE y=568 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=520 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=0 s=0 z=100 t=10.
    W x=34 s=0 z=100 t=TWO
    W x=63 s=0 z=100 t=TRAILING
    W x=138 s=0 z=100 t=BR:
-  LINE y=592 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=544 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=Juliett
    W x=71 s=0 z=100 t=top
-  LINE y=640 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=592 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=Juliett
    W x=71 s=0 z=100 t=next
    W x=114 s=0 z=100 t=paragraph
-  LINE y=664 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=616 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=11.
    W x=28 s=0 z=100 t=TWO
    W x=57 s=0 z=100 t=BR
    W x=83 s=0 z=100 t=BETWEEN
    W x=156 s=0 z=100 t=PARAGRAPHS:
-  LINE y=688 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=640 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=Kilo
    W x=44 s=0 z=100 t=top
-  LINE y=736 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=712 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=Kilo
    W x=44 s=0 z=100 t=next
    W x=87 s=0 z=100 t=paragraph
- PAGE 2 elements=3 footnotes=0
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=736 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=12.
    W x=29 s=0 z=100 t=BR
    W x=55 s=0 z=100 t=AFTER
@@ -261,10 +260,73 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=3 truncated=0 cssFallback=0
    W x=118 s=0 z=100 t=PARAGRAPH,
    W x=211 s=0 z=100 t=THEN
    W x=250 s=0 z=100 t=TEXT:
-  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=2
+ PAGE 2 elements=18 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=Lima
    W x=46 s=0 z=100 t=top
   LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=Lima
    W x=46 s=0 z=100 t=loose
    W x=103 s=0 z=100 t=text
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=13.
+   W x=30 s=0 z=100 t=PICTURE,
+   W x=108 s=0 z=100 t=BR,
+   W x=142 s=0 z=100 t=CAPTION:
+  IMG y=96 x=110 w=240 h=120 src=<cache>/epub_<hash>/img_3be91b65ea681cfc.png
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Mike
+   W x=35 s=0 z=100 t=caption
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=14.
+   W x=31 s=0 z=100 t=PICTURE,
+   W x=109 s=0 z=100 t=TRAILING
+   W x=184 s=0 z=100 t=BR:
+  IMG y=264 x=110 w=240 h=120 src=<cache>/epub_<hash>/img_3be91b65ea681cfc.png
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=November
+   W x=79 s=0 z=100 t=next
+   W x=122 s=0 z=100 t=paragraph
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=15.
+   W x=32 s=0 z=100 t=TEXT,
+   W x=80 s=0 z=100 t=BR,
+   W x=114 s=0 z=100 t=PICTURE,
+   W x=192 s=0 z=100 t=BR,
+   W x=226 s=0 z=100 t=CAPTION:
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Oscar
+   W x=50 s=0 z=100 t=top
+  IMG y=456 x=110 w=240 h=120 src=<cache>/epub_<hash>/img_3be91b65ea681cfc.png
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Oscar
+   W x=50 s=0 z=100 t=caption
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=16.
+   W x=33 s=0 z=100 t=TEXT
+   W x=73 s=0 z=100 t=IN
+   W x=95 s=0 z=100 t=A
+   W x=109 s=0 z=100 t=SECTION:
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=0 z=100 t=Papa
+   W x=63 s=0 z=100 t=one
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Papa
+   W x=45 s=0 z=100 t=two
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=17.
+   W x=34 s=0 z=100 t=TEXT
+   W x=74 s=0 z=100 t=AFTER
+   W x=123 s=0 z=100 t=A
+   W x=137 s=0 z=100 t=CLOSED
+   W x=208 s=0 z=100 t=PARAGRAPH:
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Quebec
+   W x=58 s=0 z=100 t=top
+   W x=92 s=0 z=100 t=Quebec
+   W x=150 s=0 z=100 t=loose
+   W x=207 s=0 z=100 t=one
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Quebec
+   W x=58 s=0 z=100 t=loose
+   W x=115 s=0 z=100 t=two
