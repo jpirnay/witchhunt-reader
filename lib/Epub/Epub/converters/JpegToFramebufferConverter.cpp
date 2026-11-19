@@ -1110,7 +1110,8 @@ constexpr int kResumeMinRows = 4;
 bool fullProgressiveShouldAbort(void* user) {
   HalSystem::feedWatchdog();
   const auto* gate = static_cast<const ResumeAbortGate*>(user);
-  if (gate && gate->decoder->bandsDone() < gate->pollFromBand) return false;
+  // The guarantee covers the band phase only: an index poll (every 32 KB of a file) passes through.
+  if (gate && !gate->decoder->indexing() && gate->decoder->bandsDone() < gate->pollFromBand) return false;
   return progressiveShouldAbort(nullptr);
 }
 

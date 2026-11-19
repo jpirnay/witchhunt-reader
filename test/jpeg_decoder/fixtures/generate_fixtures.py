@@ -68,6 +68,9 @@ libs/assets/ProgressiveJpeg/test/host/run.py), each with its libjpeg luma as the
   prog_420_rst_row.jpg   4:2:0, 133x77, restart marker at every MCU row.
   prog_gray_rst.jpg      Grayscale, 101x63, restart marker every 5 blocks.
   prog_tiny_9x5.jpg      4:2:0, 9x5: smaller than one MCU.
+  prog_noisy_420_index.jpg  Progressive 4:2:0, 400x300 of uniform random noise (about 123 KB): its index
+                     scan polls for input every 32 KB, which no other fixture is large enough to reach. A
+                     decode parked mid-index must keep polling there when it resumes (ImageParkTest).
 """
 import os
 from PIL import Image, ImageDraw
@@ -390,3 +393,18 @@ print("Fixtures written to", HERE)
 for f in sorted(os.listdir(HERE)):
     if f.endswith((".jpg", ".pgm")):
         print(" ", f, os.path.getsize(os.path.join(HERE, f)), "bytes")
+
+# --- prog_noisy_420_index.jpg: large enough for the index scan's 32 KB input poll ---
+def save_noisy_index_fixture():
+    import random
+    rnd = random.Random(11)
+    w, h = 400, 300
+    im = Image.new("RGB", (w, h))
+    px = im.load()
+    for y in range(h):
+        for x in range(w):
+            px[x, y] = (rnd.randrange(256), rnd.randrange(256), rnd.randrange(256))
+    im.save(os.path.join(HERE, "prog_noisy_420_index.jpg"), "JPEG", quality=95, subsampling=2,
+            progressive=True, optimize=True)
+
+save_noisy_index_fixture()

@@ -36,8 +36,12 @@ namespace {
 // Fires on the Nth poll of the abort hook (1-based); 0 never fires.
 int gPollsLeft = 0;
 int gPolls = 0;
+// When set, every poll appends its time: the gap between two polls of an uninterrupted decode is one
+// band (progressive) or one MCU row (baseline) plus the cache write, on this host.
+std::vector<std::chrono::steady_clock::time_point>* gPollStamps = nullptr;
 bool countedAbort() {
   ++gPolls;
+  if (gPollStamps) gPollStamps->push_back(std::chrono::steady_clock::now());
   if (gPollsLeft <= 0) return false;
   return --gPollsLeft == 0;
 }
@@ -149,23 +153,17 @@ TEST_P(ImageParkFixture, RepeatedParksStillEndInTheSameCaches) {
 // where it started: after 118-265 ms of setup (X3) that is no progress at all, again and again. A
 // resume decodes one band (progressive) or kResumeMinRows MCU rows (baseline) before it polls.
 // Here the hook fires on the FIRST poll of every call, i.e. input is already waiting. The clock
-// ticks, as the lane's does; the wall time of the slowest resumed call is what a page turn waits
-// behind the RenderLock beyond the old behaviour.
+// ticks, as the lane's does.
 TEST_P(ImageParkFixture, AResumeWithInputWaitingStillAdvancesBeforeItParks) {
   const RenderConfig ref = config("ref", 150, 104, false);
   ASSERT_FALSE(decodeOnce(ref, 0));
   const RenderConfig c = config("eager");
   host_clock::Ticking ticking;
   ASSERT_TRUE(decodeOnce(c, 3)) << "first call parks somewhere past its set-up";
-  long worstUs = 0;
   size_t lastPart = fs::file_size(PixelCache::partPathFor(c.cachePath));
   int parks = 0;
   for (;;) {
-    const auto t0 = std::chrono::steady_clock::now();
-    const bool stopped = decodeOnce(c, 1);
-    worstUs = std::max<long>(
-        worstUs, std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count());
-    if (!stopped) break;
+    if (!decodeOnce(c, 1)) break;
     ++parks;
     ASSERT_LT(parks, 400) << "a resume that polls first parks at once, forever";
     ASSERT_TRUE(fs::exists(PixelCache::partPathFor(c.cachePath)));
@@ -176,8 +174,63 @@ TEST_P(ImageParkFixture, AResumeWithInputWaitingStillAdvancesBeforeItParks) {
   EXPECT_GT(parks, 0);
   EXPECT_EQ(read(c.cachePath), read(ref.cachePath));
   EXPECT_EQ(read(c.companionCachePath), read(ref.companionCachePath));
-  std::cout << "[ resume ] " << GetParam() << ": " << parks << " parks, slowest resumed call " << worstUs << " us\n";
+  if (std::string(GetParam()).find("_base") != std::string::npos) {
+    // 203x141 is 9 MCU rows of 16. The first call parked after 3 of them; a resume then decodes
+    // kResumeMinRows (4) before it polls, so the 6 left take 2 resumes and one park in between. A
+    // resume that decoded a single row before polling would park 5 times.
+    EXPECT_LE(parks, 2) << "a baseline resume must decode kResumeMinRows MCU rows before it polls";
+  }
 }
+
+// What a page turn can wait behind, on this host (not the device): the gap between two polls of an
+// uninterrupted, checkpointable decode is one band (progressive) or one MCU row (baseline).
+TEST_P(ImageParkFixture, TheWorstBandOrRowOnThisHost) {
+  std::vector<std::chrono::steady_clock::time_point> stamps;
+  gPollStamps = &stamps;
+  const RenderConfig c = config("timed");
+  EXPECT_FALSE(decodeOnce(c, 0));
+  gPollStamps = nullptr;
+  ASSERT_GT(stamps.size(), 4u);
+  long worstUs = 0;
+  long worstFourUs = 0;
+  for (size_t i = 1; i < stamps.size(); ++i) {
+    const auto us = [&](const size_t a, const size_t b) {
+      return std::chrono::duration_cast<std::chrono::microseconds>(stamps[b] - stamps[a]).count();
+    };
+    worstUs = std::max<long>(worstUs, us(i - 1, i));
+    if (i >= 4) worstFourUs = std::max<long>(worstFourUs, us(i - 4, i));
+  }
+  std::cout << "[ host band ] " << GetParam() << ": " << stamps.size() << " polls, worst gap between two polls "
+            << worstUs << " us, worst four gaps " << worstFourUs << " us (host figures)\n";
+}
+
+// A decode parked in the index scan, which polls every 32 KB of the file, resumes there: the minimum
+// progress after a resume is a band's, and the index has no band. With input waiting at every call,
+// the resumes must park at the index's next poll, not run the index to its end (seconds of card
+// reads for a 2 MB cover) and decode a band.
+struct ImageParkIndexFixture : ImageParkFixture {};
+
+TEST_P(ImageParkIndexFixture, AResumeInTheIndexScanStillStopsAtItsNextPoll) {
+  ASSERT_GT(fs::file_size(image()), 3u * 32 * 1024) << "the fixture must have three index polls";
+  const RenderConfig ref = config("ref", 150, 104, false);
+  ASSERT_FALSE(decodeOnce(ref, 0));
+  const RenderConfig c = config("index");
+  host_clock::Ticking ticking;
+  // The fresh call parks at the first index poll; the two resumes at the second and the third.
+  ASSERT_TRUE(decodeOnce(c, 1));
+  ASSERT_TRUE(fs::exists(c.checkpointPath));
+  const size_t afterFirst = fs::file_size(PixelCache::partPathFor(c.cachePath));
+  ASSERT_TRUE(decodeOnce(c, 1));
+  ASSERT_TRUE(decodeOnce(c, 1));
+  EXPECT_EQ(fs::file_size(PixelCache::partPathFor(c.cachePath)), afterFirst)
+      << "no band was decoded while the index scan was still being resumed";
+  int parks = 3;
+  while (decodeOnce(c, 1)) ASSERT_LT(++parks, 400);
+  EXPECT_EQ(read(c.cachePath), read(ref.cachePath));
+  EXPECT_EQ(read(c.companionCachePath), read(ref.companionCachePath));
+}
+
+INSTANTIATE_TEST_SUITE_P(IndexPolls, ImageParkIndexFixture, testing::Values("prog_noisy_420_index.jpg"));
 
 // A checkpoint only resumes the decode it was taken of: another box starts over, cleanly.
 TEST_P(ImageParkFixture, AChangedConfigurationStartsOver) {
