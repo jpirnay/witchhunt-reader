@@ -2089,6 +2089,27 @@ bool ChapterHtmlSlimParser::ensurePage() {
   return true;
 }
 
+bool ChapterHtmlSlimParser::addPageElement(std::unique_ptr<PageElement> element) {
+  // A build the heap refused is over: stopForHeap stops only the SAX parser, and the paragraph being laid out goes on
+  // through its lines, which a page the break in flight emitted would otherwise follow with a hole in it.
+  if (!currentPage || layoutFailed) return false;
+  bool room = heapReserveFor(currentPage->elements, 1);
+#ifdef ELEMENT_FAULT_INJECTION
+  if (elementsLeft() == 0) {
+    room = false;
+    if (elementRefusalRecovers()) elementsLeft() = SIZE_MAX;
+  } else if (elementsLeft() != SIZE_MAX) {
+    --elementsLeft();
+  }
+#endif
+  if (!room) {
+    stopForHeap("a page's element table", 2 * currentPage->elements.capacity() * sizeof(std::unique_ptr<PageElement>));
+    return false;
+  }
+  currentPage->elements.push_back(std::move(element));
+  return true;
+}
+
 void ChapterHtmlSlimParser::stopForHeap(const char* what, const size_t bytes) {
   if (!streamFailed) {
     LOG_ERR("EHP", "No heap for %s (%u B; %u free, %u max alloc); stopping the parse", what,
@@ -2296,7 +2317,8 @@ void ChapterHtmlSlimParser::addExternalPageBreakAnchor(const std::string& id, co
 
 void ChapterHtmlSlimParser::endExternalPageBreakAnchors() {
   // Shrinking is a copy into a block of the exact size, which the heap may not have either.
-  if (heapHasBlockFor(externalPageBreakAnchorPool.size() + 1)) externalPageBreakAnchorPool.shrink_to_fit();
+  if (heapHasBlockFor(externalPageBreakAnchorPool.size() + 1))
+    std::string(externalPageBreakAnchorPool).swap(externalPageBreakAnchorPool);
   // One label per matched anchor plus the top-of-file one: size the record here so it never
   // doubles mid-parse (inline pagebreak markers past this hint still grow it, through
   // recordPageBreakLabel's heap check). Hints: without the blocks the record grows as it goes.
@@ -2346,7 +2368,10 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
   // on, so it never outlives the element it points at.
   deferredPageImage_ = pageImage.get();
   noteElementOnPage(placementOffset());
-  currentPage->elements.push_back(std::move(pageImage));
+  if (!addPageElement(std::move(pageImage))) {
+    deferredPageImage_ = nullptr;  // the refused element is gone
+    return;
+  }
 
   // Attach the float zone to the originating block (the caption/first paragraph).
   // makePages() re-anchors it to the first line and then propagates it to every
@@ -2604,7 +2629,10 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   // Placed at the span's close, after the captured letters were counted: the cap starts at its
   // first letter.
   noteElementOnPage(pendingDropCap_.visibleOffset);
-  currentPage->elements.push_back(std::move(capLine));
+  if (!addPageElement(std::move(capLine))) {
+    deferredDropCapLine_ = nullptr;  // the refused element is gone
+    return;
+  }
 
   BlockStyle& bs = currentTextBlock->getBlockStyle();
   bs.paddingTop = static_cast<int16_t>(bs.paddingTop + raise);
@@ -4166,7 +4194,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       const int16_t hrX = static_cast<int16_t>(areaLeft + areaWidth / 4);
       if (auto hr = makeUniqueNoThrow<PageHR>(hrX, self->currentPageNextY, hrWidth)) {
         self->noteElementOnPage(self->visibleTextOffset_);
-        self->currentPage->elements.push_back(std::move(hr));
+        if (!self->addPageElement(std::move(hr))) return;
       }
       self->noteBoxContent(self->currentPageNextY + 1);
       self->currentPageNextY += 1 + marginV;
@@ -5692,7 +5720,7 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
       LOG_ERR("EHP", "Dropping line: PageLine allocation failed");
       return ParsedText::LineProcessResult::Accepted;
     }
-    currentPage->elements.push_back(std::move(pageLine));
+    if (!addPageElement(std::move(pageLine))) return ParsedText::LineProcessResult::Accepted;
   }
   noteElementOnPage(lineVisibleOffset);
   if (!images.empty()) placeLineImages(images, text, xOffset, currentPageNextY + box.textTop);
@@ -6367,7 +6395,7 @@ bool ChapterHtmlSlimParser::placeImageWithBlockSpacing(const std::string& cached
     return false;
   }
   noteElementOnPage(visibleOffset);
-  currentPage->elements.push_back(std::move(pageImage));
+  if (!addPageElement(std::move(pageImage))) return false;
   currentPageNextY += displayHeight;
   noteBoxContent(currentPageNextY);
   currentPageNextY += imageSpacingBottom;
@@ -6573,7 +6601,7 @@ void ChapterHtmlSlimParser::placeLineImages(const std::span<const ParsedText::Li
           makeUniqueNoThrow<PageImage>(std::move(imageBlock), xOffset + object.x, y, /*inLine=*/true, it->linkHash);
     }
     if (pageImage) {
-      currentPage->elements.push_back(std::move(pageImage));
+      if (!addPageElement(std::move(pageImage))) return;
       ++lineImagesOnPage_;
     } else {
       LOG_ERR("EHP", "Inline image %u dropped: no memory for its block", object.id);
@@ -6631,7 +6659,7 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
       return;
     }
     noteElementOnPage(placementOffset());
-    currentPage->elements.push_back(std::move(pageImage));
+    if (!addPageElement(std::move(pageImage))) return;
     currentPageNextY += displayHeight;
     noteBoxContent(currentPageNextY);
     LOG_TRC("EHP", "Image placed as block: %dx%d", displayWidth, displayHeight);
@@ -6666,7 +6694,7 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
       return;
     }
     noteElementOnPage(placementOffset());
-    currentPage->elements.push_back(std::move(slice));
+    if (!addPageElement(std::move(slice))) return;
     currentPageNextY += sliceH;
     noteBoxContent(currentPageNextY);
     srcOffset += sliceH;
@@ -6711,7 +6739,6 @@ void ChapterHtmlSlimParser::degradeRow(const char* reason) {
   (void)emitRowAsParagraphs(t.pendingRow);
   emitRowImagesAsBlocks(t.pendingRow);
   t.pendingRow.cells.clear();
-  t.pendingRow.cells.shrink_to_fit();
   currentTableCell = nullptr;
 }
 
@@ -6945,7 +6972,7 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
           packer.cols, packer.totalWidth, fragTotalHeight, std::move(packer.rows),
           /*xPos=*/packer.xInset, /*yPos=*/static_cast<int16_t>(currentPageNextY), packer.hasBorder)) {
     noteElementOnPage(packer.firstVisibleOffset != UINT32_MAX ? packer.firstVisibleOffset : placementOffset());
-    currentPage->elements.push_back(std::move(fragment));
+    if (!addPageElement(std::move(fragment))) return;
   } else {
     LOG_ERR("EHP", "Dropping table fragment: allocation failed");
   }

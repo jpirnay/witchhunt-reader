@@ -103,4 +103,20 @@ class HeaderList {
   size_t dropped_ = 0;
 };
 
+// What POST /api/fetch says about a download that failed (CrossPointWebServer::fetchToSd), from the status of the
+// server's answer: its own, or 0 or less when none came (a transport or TLS error). The answer's "status" carries the
+// same number, as upstream's does, so a plugin can tell a missing file from a blocked one from a network failure. A
+// 401 or 403 is marked apart: a catalog with a password grant then mints a new token and tries again.
+struct FetchFailure {
+  std::string error;
+  bool unauthorized = false;
+};
+
+inline FetchFailure describeFetchFailure(const int status) {
+  if (status == 401 || status == 403) return {"the server refused the request (" + std::to_string(status) + ")", true};
+  // No answer, or a 2xx whose file could not be written: the status names nothing.
+  if (status < 300) return {"download failed", false};
+  return {"the server answered " + std::to_string(status), false};
+}
+
 }  // namespace PluginRelay
