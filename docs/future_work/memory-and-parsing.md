@@ -1,9 +1,8 @@
 # Memory and parsing
 
 Status: checked against master on 2026-11-18 (5d903ca18): every item is still open, the font prewarm still partly
-done. This pass moved the `file:line` references to the current code, counted the throwing allocations and the
-`shrink_to_fit()` calls again, and corrected three descriptions: a nested-table fixture already exists, a one-pass
-page's prewarm went back on the heap in 2.50 (not 2.41), and the libjpeg-script item's refills happen only without read
+done. This pass moved the `file:line` references to the current code, counted the throwing allocations again, and corrected three descriptions: a nested-table
+fixture already exists, a one-pass page's prewarm went back on the heap in 2.50 (not 2.41), and the libjpeg-script item's refills happen only without read
 windows. Items as of 2026-10-07; those from "Throwing allocations" on added 2026-11-15. Collected from the heap-work
 handover (2026-08), the memory audit (2026-09) and the earlier memory-allocation-strategy.md (removed or trimmed in the
 2026-10-07 docs cleanup; in git history).
@@ -168,8 +167,8 @@ the resize (`:1111`); `ProgressiveJpeg::decodeResized` (`ProgressiveJpeg.cpp:152
 **Tried.** A heap pool for table line storage was reverted: its reservation pushed contig below the framebuffer ([Memory Allocation Strategy §8.4a](../memory-allocation-strategy.md#84a-table-layout-and-the-ab-harness)). Moving the line bytes into the arena is done.
 
 **Next step.** Placement-construct the objects in the page or row block, with an arena-aware deleter behind
-`Page::elements`: 47 lines in `lib/Epub` and `src` use it, 15 of them add an element (the parser's nine `push_back`s
-and one `insert`, listed under the next item, and the five of `Page::deserialize`, `Page.cpp:705-721`). Measure
+`Page::elements`: 47 lines in `lib/Epub` and `src` use it, 15 of them add an element (the parser's nine adds, all
+through `addPageElement`, and one `insert`, and the five of `Page::deserialize`, `Page.cpp:705-721`). Measure
 allocation counts and `HeapPeakRegression` on the host first, then a table chapter on the X3 with `SCT_HEAP_TRACE=1`.
 Budget for the image-header walk: on the X4 a 32 KB walk stage leaves 64 B of the lent region free, so objects of a
 page that holds a late image could push the walk out of the arena.
@@ -182,10 +181,6 @@ refusal there aborts and reboots (`-fno-exceptions`); counted in `Section.cpp` a
 
 - the parser itself: `st.visitor = std::make_unique<ChapterHtmlSlimParser>(...)` (`lib/Epub/Epub/Section.cpp:1511`),
   and the chapter's TOC anchors before it (`tocAnchors.push_back`, `Section.cpp:1504`);
-- `Page::elements` past its reserve: the parser reserves `Page::TYPICAL_ELEMENTS` (32) through `heapReserveFor`
-  (`ChapterHtmlSlimParser.cpp:1861`, `:1935`, `:5969`; `Page.h:212`), and a denser page grows by `push_back` at nine
-  sites (`:2349`, `:2607`, `:4169`, `:5695`, `:6370`, `:6576`, `:6634`, `:6669`, `:6948`); the one `insert` (`:2041`)
-  asks `heapReserveFor` first;
 - the style stack, `std::vector<StyleStackEntry> inlineStyleStack` (`ChapterHtmlSlimParser.h:589`; pushes at
   `ChapterHtmlSlimParser.cpp:826`, `:3858`, `:4223`, `:4254`, `:4285`, `:4305`, `:4356`);
 - the other per-element stacks: `listStack` (`:3887`), `containerWidthStack_` (`:3150`), `backgroundImageScopes_`
@@ -198,25 +193,8 @@ refusal there aborts and reboots (`-fno-exceptions`); counted in `Section.cpp` a
 
 **Next step.** Ask `HeapFit` before each growth (`heapReserveFor`, as the elements reserve does) and stop the build on
 a refusal (`stopForHeap`, `:2092`), or move the table to the build's arena or a `ChunkedVector`. Each site needs a host
-fault-injection test, as `PageHeapTest.cpp` (`PAGE_FAULT_INJECTION`) does for pages.
-
-## `shrink_to_fit()` sweep
-
-**Open.** `std::vector::shrink_to_fit()` frees nothing under `-fno-exceptions` (libstdc++ compiles its reallocation
-out); the rule is `std::vector<T>().swap(v)`. Fourteen vector calls remain: `SerialTransferDevice.cpp:215`,
-`FileBrowserActivity.cpp:167`, `FileBrowserModel.h:219`, `FileBrowserModel.cpp:242,244,246,545,818,823,905`,
-`BookRowResolver.cpp:163`, `EpubReaderActivity.cpp:1024` and `ChapterHtmlSlimParser.cpp:6714`.
-
-A `std::string` differs: with the toolchains' GCC 14.2 libstdc++, `shrink_to_fit()` calls `reserve()`, which moves a
-string of at most 15 characters into its local buffer and frees the heap block; a longer string's shrink is compiled
-out like the vector's. So the calls right after `clear()` do free: `CssParser.cpp:2271` and `:2430`
-(`fontFaces_`), `DictionaryDefinitionActivity.cpp:57,97`, `ChapterHtmlSlimParser.cpp:7008,7010` and
-`ContentOpfParser.cpp:1013`. The two on kept text do nothing past 15 characters: `ChapterHtmlSlimParser.cpp:2299`
-(the external page-break anchor pool) and `XtcParser.cpp:72-73` (title and author).
-
-**Next step.** Replace the vector calls with the swap. Leave the string calls after `clear()`, or write them as a swap
-for one idiom; the two on kept text need `std::string(s).swap(s)` behind a `HeapFit` check, as `:2299` already asks
-for the block. Count the frees on the host before and after.
+fault-injection test, as `PageHeapTest.cpp` (`PAGE_FAULT_INJECTION`, `ELEMENT_FAULT_INJECTION`) does for pages and for
+`Page::elements`, which `addPageElement` now covers.
 
 ## CSS in a chapter's `<style>` blocks is never applied (matcha-reader #627)
 

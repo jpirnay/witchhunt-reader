@@ -1020,8 +1020,7 @@ void EpubReaderActivity::onExit() {
     if (*clearCacheOnExit_ == BookCache::Keep::Nothing) GLOBAL_BOOKMARKS.removeBySourcePath(epub->getPath());
   }
   epub.reset();
-  currentPageFootnotes.clear();
-  currentPageFootnotes.shrink_to_fit();
+  std::vector<FootnoteEntry>().swap(currentPageFootnotes);
   // The book's hyphenation trie: every build has stopped and the section and book are gone, so nothing lays out its
   // text from here on. On the X3 and X4 its MMU pages go back to the font cache (HyphenationPacks::bookClosed()).
   HyphenationPacks::bookClosed();
