@@ -657,7 +657,18 @@ class ChapterHtmlSlimParser final : public Print {
     // divide contentWidth rather than the full viewport, so an indented table stays indented
     // instead of being stretched edge to edge.
     uint16_t contentWidth = 0;
-    int depth = 0;          // nesting depth; > 1 means we're inside a nested table
+    int depth = 0;  // nesting depth; > 1 means we're inside a nested table
+    // Bit d - 2: the table nested at depth d opened inside a cell, whose rest (its text after the
+    // inner table) is a cell of its own. Past the mask, a table is taken to sit in a cell.
+    uint32_t nestedInCellBits = 0;
+    void noteNestedInCell(const bool inCell) {
+      if (depth < 2 || depth - 2 >= 32) return;
+      const uint32_t bit = 1u << (depth - 2);
+      nestedInCellBits = inCell ? (nestedInCellBits | bit) : (nestedInCellBits & ~bit);
+    }
+    [[nodiscard]] bool nestedInCell() const {
+      return depth < 2 || depth - 2 >= 32 || (nestedInCellBits & (1u << (depth - 2))) != 0;
+    }
     bool hasBorder = true;  // false when border="0" on the <table> element
     // The table runs right to left (its element's direction, else the book's): its columns are laid out from the
     // right, the first cell of a row being the rightmost.
@@ -1217,12 +1228,6 @@ class ChapterHtmlSlimParser final : public Print {
   // ParsedText before returning. Shared by the row fallback and the degraded path so both
   // produce identical output. Returns false when the heap guard stopped the parse.
   bool emitCellAsParagraph(BufferedTableCell& cell, bool emitImage);
-  // The block a cell laid out as a paragraph starts: no spacing or inset of its own, the reader's alignment. A degraded
-  // cell's (emitCellAsParagraph) and a nested table's cell's, so both are set alike.
-  [[nodiscard]] BlockStyle degradedCellBlockStyle() const;
-  // Starts the page paragraph of a nested table's cell, or of what its enclosing cell holds after it, in that style and
-  // `direction`.
-  void startCellParagraph(CssDirection direction);
   // Give up the grid for the pending ROW: flush whatever is packed so the fragment closes before
   // the paragraphs, then emit the row's buffered cells (text then images) and latch rowDegraded so
   // the rest of the row streams at </td>. The next <tr> clears it and the grid resumes.
@@ -1237,6 +1242,10 @@ class ChapterHtmlSlimParser final : public Print {
   bool degradeRowAtOpenCell(const char* reason);
   // Called on </td> once degraded: emit and release the just-closed cell immediately.
   void streamClosedCell(BufferedTableRow& row);
+  // Opens a cell of the degraded table's stream that no outer <td> opens: a nested table's cell, or the rest of the
+  // cell a nested table sat in. Laid out and freed by streamClosedCell, as a degraded outer cell is. False when the
+  // heap cannot hold it: the parse has stopped, and no cell is open.
+  bool openStreamedCell(CssDirection direction, bool isHeader);
   // A table cell's text: no paragraph spacing, no hyphenation, the block's typography, shaping latch and writing mode.
   // Null when the heap cannot hold it; the parse then stops, as any low-heap stop does (the pages so far are kept).
   std::unique_ptr<ParsedText> makeCellText();

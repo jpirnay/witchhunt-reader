@@ -36,8 +36,8 @@ const std::string kFixture = std::string(CORPUS_DIR) + "/test_wrapped_paragraphs
 constexpr int kWrappedSpine = 0;
 constexpr int kNotesSpine = 2;
 
-// test/epubs/make_test_nested_tables.py: its fifth chapter puts a page of text ahead of an inner table whose first
-// cell carries the id "inner-target" and the word TARGETWORD.
+// test/epubs/make_test_nested_tables.py: its fifth chapter's inner table holds TARGETLONG's cell, then the cell with
+// the id "inner-target" and the word TARGETWORD, then TARGETB's; the first two are each longer than a page.
 const std::string kNestedTablesFixture = std::string(CORPUS_DIR) + "/test_nested_tables.epub";
 constexpr int kNestedTargetSpine = 4;
 
@@ -166,7 +166,13 @@ TEST(AnchorMap, NestedTableCellIdNamesThePageOfItsText) {
   const auto built = build("nested_table_cell", kNestedTargetSpine, kNestedTablesFixture);
   const auto textPage = pageWithWord(*built.section, "TARGETWORD");
   ASSERT_TRUE(textPage.has_value()) << "the inner cell's text is on no page";
-  EXPECT_GT(*textPage, 0) << "the fixture must put the cell past the chapter's first page to tell pages apart";
+  // The pages an id taken at the wrong moment would name: the outer cell's line, the inner cell before, the one after,
+  // the paragraph after the table. The fixture must keep each of them off the target's page.
+  for (const char* neighbour : {"TARGETOUTER", "TARGETLONG", "TARGETB", "TARGETAFTER"}) {
+    const auto page = pageWithWord(*built.section, neighbour);
+    ASSERT_TRUE(page.has_value()) << neighbour << " is on no page";
+    EXPECT_NE(*page, *textPage) << neighbour << " shares the target's page: the fixture no longer tells them apart";
+  }
   const auto anchored = built.section->getPageForAnchor("inner-target");
   ASSERT_TRUE(anchored.has_value()) << "the inner cell's id is missing from the anchor map";
   EXPECT_EQ(static_cast<int>(*anchored), *textPage);

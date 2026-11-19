@@ -135,7 +135,7 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
    W x=226 s=0 z=100 t=cell,
    W x=274 s=0 z=100 t=likewise
    W x=342 s=0 z=100 t=streamed.
-  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=534 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=Text
    W x=46 s=0 z=100 t=after
    W x=109 s=0 z=100 t=the
@@ -144,7 +144,7 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
    W x=292 s=0 z=100 t=which
    W x=349 s=0 z=100 t=must
    W x=403 s=0 z=100 t=resume
-  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=558 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=normal
    W x=68 s=0 z=100 t=block
    W x=116 s=0 z=100 t=layout.

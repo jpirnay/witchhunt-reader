@@ -11,11 +11,13 @@ or a run-on paragraph shows in the golden:
   1. FIRST     an inner table in the first row's first cell (nothing buffered before it), with a
                <caption> and a <th>
   2. LEVEL     a table nested two deep: the innermost opens inside an inner cell, with the middle
-               and the outer cell's text before and after it (depth goes up twice, down twice)
-  3. IMG       an inner table holding a picture between two runs of text
+               and the outer cell's text before and after it (depth goes up twice, down twice),
+               then a plain table that is a grid only if the depth unwound
+  3. IMG       an inner cell holding two pictures between runs of text; then an outer cell's text
+               after its inner table, the next outer cell holding a picture alone
   4. RTL       an inner table with dir="rtl", one of its cells holding a dir="ltr" span
-  5. TARGET    an inner table whose first cell carries an id that a link targets, a page of text
-               ahead of it (AnchorMapTest: the id names the page of its text)
+  5. TARGET    an inner cell whose id a link targets, between two inner cells, each cell before
+               and itself longer than a page (AnchorMapTest: the id names the page of its text)
   6. SAME      two outer cells of one row, each holding an inner table: the second opens in a row
                the first has already degraded
 
@@ -51,7 +53,11 @@ def checker(w, h):
     return lambda x, y: ((x // 20 + y // 20) % 2 == 0) or x < 3 or y < 3 or x >= w - 3 or y >= h - 3
 
 
-IMAGES = {"checker.png": (160, 100, checker)}
+def bar(w, h):
+    return lambda x, y: y < 3 or y >= h - 3 or (x // 8) % 2 == 0
+
+
+IMAGES = {"checker.png": (160, 100, checker), "bar.png": (120, 24, bar)}
 
 CONTAINER = """<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
@@ -120,7 +126,10 @@ LEVEL1TAIL Outer text after the middle table.</td>
 </tr>
 <tr><td>LEVELROW2A Next outer row.</td><td>LEVELROW2B Its second cell.</td></tr>
 </table>
-<p>LEVELAFTER Text after the table, back in normal block layout.</p>""",
+<p>LEVELAFTER Text after the table, back in normal block layout.</p>
+<table>
+<tr><td>LEVELGRIDA Grid.</td><td>LEVELGRIDB Grid.</td></tr>
+</table>""",
 )
 
 IMG = xhtml(
@@ -132,13 +141,25 @@ IMG = xhtml(
 <td>IMGOUTER The outer cell before the inner table.
 <table>
 <tr><td>IMGBEFORE Text before the picture. <img src="../images/checker.png" alt="checker"/> IMGAFTER Text after
-the picture.</td><td>IMGB Second inner cell.</td></tr>
+the picture. <img src="../images/bar.png" alt="bar"/> IMGEND Text after the second picture.</td>
+<td>IMGB Second inner cell.</td></tr>
 </table>
 </td>
 <td>IMGOUTERB The second outer cell.</td>
 </tr>
 </table>
-<p>IMGAFTERTABLE Text after the table.</p>""",
+<p>IMGTAILCASE An outer cell's text after its inner table, the next outer cell a picture alone.</p>
+<table>
+<tr>
+<td>TAILOUTER Before the inner table.
+<table>
+<tr><td>TAILINNER The inner cell.</td></tr>
+</table>
+TAILA The outer cell after its inner table.</td>
+<td><img src="../images/bar.png" alt="bar"/></td>
+</tr>
+</table>
+<p>IMGAFTERTABLE Text after the tables.</p>""",
 )
 
 RTL = xhtml(
@@ -165,16 +186,20 @@ def filler(n, count):
     return " ".join(FILLER_WORDS[(n + i) % len(FILLER_WORDS)] for i in range(count))
 
 
+# The cell before the target and the target are each longer than a page: the outer cell's text and the cell before
+# start a page or more ahead of the target, the cell after it and the paragraph after the table a page or more later,
+# so an id that took any of their pages names the wrong one.
 TARGET = xhtml(
     "Link target",
     f"""<h1>Link target</h1>
-<p>CASE5 <a href="#inner-target">The linked cell</a> sits in an inner table a page further on.</p>
-{"".join(f"<p>TARGETFILL{i} {filler(i, 60).capitalize()}.</p>" for i in range(8))}
+<p>CASE5 <a href="#inner-target">The linked cell</a> sits in an inner table further on.</p>
 <table>
 <tr>
 <td>TARGETOUTER The outer cell before the inner table.
 <table>
-<tr><td id="inner-target">TARGETWORD The cell the link targets.</td><td>TARGETB Second inner cell.</td></tr>
+<tr><td>TARGETLONG {filler(1, 380)}.</td>
+<td id="inner-target">TARGETWORD {filler(2, 380)}.</td>
+<td>TARGETB {filler(3, 40)}.</td></tr>
 </table>
 </td>
 </tr>
