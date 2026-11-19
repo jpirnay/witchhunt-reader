@@ -324,7 +324,8 @@ it is sent:
   `?ref=<branch>` on the page reads another branch's catalog, to try plugins
   before they are merged. Regenerate the catalog with
   `scripts/build_plugin_catalog.py` after changing a plugin; CI fails when it is
-  out of date. A manifest with `"catalog": false` stays out of it.
+  out of date. A plugin folder with a `plugin.js`, a `device.json` or both is
+  listed; a manifest with `"catalog": false` stays out of it.
 
   Entries have the shape of crosspoint-reader's plugin catalog: `name`, `title`,
   `description`, `author`, `version`, `base` (the folder the files are read

@@ -2,8 +2,10 @@
 """Write plugins/catalog.json, the list the web interface's Plugins page offers.
 
 The page reads it, and each plugin's files, straight from GitHub (raw.githubusercontent.com
-allows cross-origin reads), so the catalog names every file a plugin needs. A plugin whose
-manifest says "catalog": false (the developer example) is left out.
+allows cross-origin reads), so the catalog names every file a plugin needs. A plugin is a folder
+with a plugin.js (a card on Settings or the File Manager), a device.json (a catalog the Plugins
+page opens), or both. One whose manifest says "catalog": false (the developer example) is left
+out.
 
 The entries have the shape of crosspoint-reader's plugin catalog (name, title, description,
 author, version, base, files), plus this firmware's mount, requires and allowedHosts. `base` is
@@ -47,7 +49,8 @@ def build() -> str:
     entries = []
     for name in sorted(os.listdir(PLUGINS)):
         folder = os.path.join(PLUGINS, name)
-        if not os.path.isdir(folder) or not os.path.isfile(os.path.join(folder, "plugin.js")):
+        has_part = any(os.path.isfile(os.path.join(folder, part)) for part in ("plugin.js", "device.json"))
+        if not os.path.isdir(folder) or not has_part:
             continue
         manifest = {}
         manifest_path = os.path.join(folder, "manifest.json")
