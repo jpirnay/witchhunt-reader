@@ -75,6 +75,9 @@ enum class Variant {
 struct Case {
   std::string epub;
   Variant variant = Variant::Default;
+  // Non-zero: every build is lent a region of this many bytes, as a background build is lent the secondary
+  // framebuffer, and lays its lines out in it. The layout must be the heap build's, byte for byte.
+  size_t lentArenaBytes = 0;
 };
 
 const char* variantName(const Variant v) {
@@ -108,6 +111,7 @@ const char* variantName(const Variant v) {
 // Without this gtest dumps the struct as raw bytes in failure messages.
 void PrintTo(const Case& c, std::ostream* os) {
   *os << fs::path(c.epub).filename().string() << " [" << variantName(c.variant) << "]";
+  if (c.lentArenaBytes != 0) *os << " lent " << c.lentArenaBytes << " B";
 }
 
 std::string stem(const std::string& path) { return fs::path(path).stem().string(); }
@@ -248,6 +252,7 @@ std::string runOnce(const Case& c, const std::string& cacheDir) {
     profile.paragraphIndent = static_cast<uint8_t>(ParagraphIndent::TwoEm);
   }
   if (c.variant != Variant::Unshaped) profile.shapingFontFile = shapingFontOf(stem(c.epub));
+  profile.lentArenaBytes = c.lentArenaBytes;
   std::ostringstream dump;
   const bool ok = pipeline_harness::runAndDump(c.epub, cacheDir, profile, dump);
   EXPECT_TRUE(ok) << "pipeline failed for " << c.epub << " (" << variantName(c.variant) << ")\n" << dump.str();
@@ -256,7 +261,7 @@ std::string runOnce(const Case& c, const std::string& cacheDir) {
 
 // Unique per (book, variant) so the two variants never share a cache dir.
 std::string caseCacheDir(const Case& c, const std::string& tag) {
-  return freshCacheDir(stem(c.epub) + variantSuffix(c) + "_" + tag);
+  return freshCacheDir(stem(c.epub) + variantSuffix(c) + (c.lentArenaBytes != 0 ? "_lent_" : "_") + tag);
 }
 
 bool readFile(const fs::path& path, std::string& out) {
@@ -287,13 +292,17 @@ TEST_P(EpubPipelineWarmTest, RebuildOverWarmBookCacheMatchesColdRun) {
 
 // Built twice, into separate cache dirs: a nondeterministic build (an uninitialised field, a
 // pointer-ordered container) can match the golden once by luck, and must not be allowed to write one.
+// A lent-region case is built once and only compared: the golden is the heap build's.
 TEST_P(EpubPipelineTest, MatchesGolden) {
   const Case c = GetParam();
   const std::string dump = runOnce(c, caseCacheDir(c, "a"));
-  ASSERT_EQ(dump, runOnce(c, caseCacheDir(c, "b"))) << "two cold builds of " << c.epub << " diverged";
+  if (c.lentArenaBytes == 0) {
+    ASSERT_EQ(dump, runOnce(c, caseCacheDir(c, "b"))) << "two cold builds of " << c.epub << " diverged";
+  }
   const fs::path goldenPath = fs::path(GOLDEN_DIR) / (stem(c.epub) + variantSuffix(c) + ".golden.txt");
 
   if (std::getenv("UPDATE_GOLDENS")) {
+    if (c.lentArenaBytes != 0) GTEST_SKIP() << "a lent-region build never writes a golden";
     std::ofstream(goldenPath, std::ios::binary) << dump;
     GTEST_SKIP() << "golden regenerated: " << goldenPath;
   }
@@ -343,6 +352,15 @@ std::vector<Case> corpusCases() {
   return cases;
 }
 
+// Every corpus case again, each build lent a region of the X3's framebuffer size: the lines, their TextBlocks and the
+// pages' blocks then live in the region, which this binary fills when a block is rewound (BUILD_ARENA_TRACE), so a
+// line used or destroyed after its page went shows here. Compared with the heap build's goldens.
+std::vector<Case> lentCases() {
+  std::vector<Case> cases = corpusCases();
+  for (Case& c : cases) c.lentArenaBytes = 52272;
+  return cases;
+}
+
 // The cases whose warm run can differ from their cold one. What the warm run reads back is the book-level cache,
 // which the default layout, normalization (the CSS index's font sizes) and the accent families (its font families)
 // all draw on. Hyphenation, bionic reading, an unshaped layout, a wider page and paragraph spacing draw on none of it:
@@ -368,6 +386,7 @@ std::string caseName(const testing::TestParamInfo<Case>& info) {
 }
 
 INSTANTIATE_TEST_SUITE_P(SyntheticCorpus, EpubPipelineTest, testing::ValuesIn(corpusCases()), caseName);
+INSTANTIATE_TEST_SUITE_P(LentRegion, EpubPipelineTest, testing::ValuesIn(lentCases()), caseName);
 INSTANTIATE_TEST_SUITE_P(SyntheticCorpus, EpubPipelineWarmTest, testing::ValuesIn(warmCases()), caseName);
 
 }  // namespace
