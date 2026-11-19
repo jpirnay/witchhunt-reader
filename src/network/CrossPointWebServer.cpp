@@ -1372,7 +1372,8 @@ void CrossPointWebServer::scanFiles(const char* path, const FileVisitor visitor,
 
     // Dot items only when the user has asked for hidden files; the system folders never.
     // The same rules isProtectedWebPath() enforces, so nothing listed here is refused
-    // when clicked, bar the credential stores.
+    // when clicked, bar the credential stores and, while hidden files are off, what a
+    // dot folder named by its path lists (handleFileListData).
     const std::string_view entryName(fileName.c_str(), fileName.length());
     const bool shouldHide =
         (!hiddenAllowed() && ProtectedPaths::isDotName(entryName)) || ProtectedPaths::isSystemName(entryName);
@@ -1415,7 +1416,11 @@ void CrossPointWebServer::handleFileListData() const {
     currentPath = normalizeWebPath(server->arg("path"));
   }
   LOG_DBG("WEB", "File list request for path: %s", currentPath.c_str());
-  if (isProtectedWebPath(currentPath, Target::Directory, hiddenAllowed())) {
+  // A dot folder named by its path lists whatever the hidden-files setting says, as upstream's does: plugins written
+  // for it look for their files that way (the Plugin Hub's protected-content lists its own folder and /.crosspoint
+  // before anything else). Names only; the listing still leaves out dot entries and system folders, and reading what
+  // it shows follows the usual rules. A system folder or an 8.3 alias spelling stays refused.
+  if (isProtectedWebPath(currentPath, Target::Directory, /*allowHidden=*/true)) {
     server->send(403, "text/plain", "Cannot access protected items");
     return;
   }
