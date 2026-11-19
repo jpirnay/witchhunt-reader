@@ -1093,11 +1093,25 @@ bool progressiveShouldAbort(void*) {
   return true;
 }
 
+// A resumed decode may not park before it has made progress: loading the page, borrowing the buffer
+// and reading the checkpoint took 118-265 ms (X3, 2026-09-27), and a key press in the window
+// between the lane's input check and the first band would park it where it started, again and
+// again. The gate lets the poll pass until the decoder has finished one band past the resume.
+struct ResumeAbortGate {
+  const ProgressiveJpeg::Decoder* decoder;
+  uint16_t pollFromBand;
+};
+
+// A resumed baseline decode decodes this many MCU rows before it polls (it used to decode one).
+constexpr int kResumeMinRows = 4;
+
 // The full progressive decoder reads the whole file before its first band (emitGrayBlock feeds
 // the watchdog per band, but not before one exists), so its abort hook feeds it too.
 bool fullProgressiveShouldAbort(void* user) {
   HalSystem::feedWatchdog();
-  return progressiveShouldAbort(user);
+  const auto* gate = static_cast<const ResumeAbortGate*>(user);
+  if (gate && gate->decoder->bandsDone() < gate->pollFromBand) return false;
+  return progressiveShouldAbort(nullptr);
 }
 
 // Fine-scale factors for scaledSrc* -> dst*, and whether the downscale area-averages. Area
@@ -1879,6 +1893,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     progressiveOptions.clock = []() -> uint32_t { return millis(); };
   }
   park::BaselineState baseline{};
+  ResumeAbortGate resumeGate{&progressive, 0};
 
   const unsigned long resumeStart = millis();
   if (resuming) {
@@ -1887,9 +1902,11 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     const uint32_t decoderAt = static_cast<uint32_t>(sizeof(park::Header)) + parked.sinkBytes;
     bool ok = checkpoint.seekSet(decoderAt);
     if (ok && fullProgressive) {
+      progressiveOptions.abortUser = &resumeGate;  // the decoder keeps a copy of its options from here on
       ok = progressive.resume(file, progressiveOptions, fullProgressiveOutput, &progressiveSink, checkpoint) ==
            ProgressiveJpeg::Result::Ok;
       progressiveSink.emitted = true;  // rows exist: a failure from here on is no case for the 1/8 retry
+      if (ok) resumeGate.pollFromBand = static_cast<uint16_t>(progressive.bandsDone() + 1);
     } else if (ok) {
       ok = park::readAll(checkpoint, &baseline, 1);
     }
@@ -2016,9 +2033,13 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     // One MCU row at a time. A checkpointable decode stops between rows for input and parks; any
     // other runs to the end, as TJpgDec always did.
     JDCURSOR& cursor = baseline.cursor;
+    int rowsDone = 0;
     for (;;) {
       jr = jd_decomp_rows(&jdec, tjpgOutput, tjpgScale, &cursor, 1);
+      ++rowsDone;
       if (jr != JDR_OK || cursor.done) break;
+      // A resume decodes kResumeMinRows rows before its first poll; a fresh decode, one.
+      if (resuming && rowsDone < kResumeMinRows) continue;
       if (checkpointable && CooperativeAbort::shouldAbortLongTask()) {
         CooperativeAbort::markAborted();
         aborted = true;

@@ -111,22 +111,15 @@ What changed: a render lends the secondary buffer to the prewarm's TrueType miss
 
 **Next step.** None until a session's minimum is found in a render again. The per-phase lows came from a measurement-only patch (`heap_caps_monitor_local_minimum_free_size_start` restarted at each phase boundary of `renderContents`); a permanent version would cost the same monitor B's borrow uses.
 
-## Preempted image decodes still lose work in some cases
+## A page turn waits behind an image extraction
 
-**Open.** A lane decode that a page turn preempts parks if it is a JPEG: its caches keep their finished rows in `.part` files, a checkpoint (`RenderConfig::checkpointPath`) holds the decoder state, and the next warm resumes it. Three cases still lose work (X3, 2026-09-27): the first warm of an image extracts it from the EPUB first, and that extraction cannot be interrupted (1.6 s for a 514 KB JPEG); a resume that meets input at once parks again without progress (118–265 ms each); and PNG images and a progressive JPEG's 1/8 decode resized to its box restart from the beginning. After a preemption the lane waits only the normal `IMAGE_LANE_SETTLE_MS` (300 ms).
+**Open.** A lane decode that a page turn preempts parks if it is a JPEG: its caches keep their finished rows in `.part` files, a checkpoint (`RenderConfig::checkpointPath`) holds the decoder state, and the next warm resumes it. A resume decodes one band (progressive) or `kResumeMinRows` (4) MCU rows (baseline) before it polls for input, so it cannot park again where it started. The first warm of an image extracts it from the EPUB first, and that extraction is not interrupted (1.6 s for a 514 KB JPEG on the X3, 2026-09-27). It loses no work: `ensureExtracted` (`ImageBlock.cpp`) passes `Epub::extractItemToFile` no stop callback, so it runs to its end and renames its `.part` file into place. What the reader pays is latency: the lane holds the `RenderLock`, so a page turn waits for what is left of the extraction. PNG images and a progressive JPEG's 1/8 decode resized to its box restart from the beginning after a preemption; a PNG's state is the same 32 KB ring plus two scanlines, with the same card cost, so it is not worth parking, and the resized decode is the next section's (a cover that fits only at 1/8).
 
 **Why it matters.** At a normal reading pace the lane lost large images to page turns again and again before parking existed: one page was started six times while the reader turned a page every 2 s.
 
-**Where.** `EpubReaderActivity::stepImageWarmLocked` (`EpubReaderActivity.cpp:2396`) and `warmPageForImageLane`
-(`:2515`; `imageWarmPreemptedMs_` is set at `:2561` and counts as activity for the settle at `:2357`;
-`imageWarmMisses_` counts only failures without input, `EpubReaderActivity.h:411-422`); `IMAGE_LANE_SETTLE_MS`
-(`EpubReaderActivity.cpp:305`); the park and resume code in `JpegToFramebufferConverter.cpp` (from `:1126`; what may
-park, `:1834-1835`, leaves out a resized decode); `ImageBlock.cpp:866-867`, which gives only a JPEG a checkpoint path;
-`Epub::extractItemToFile` (`Epub.cpp:2346`), which does not poll for input.
+**Where.** `EpubReaderActivity::stepImageWarmLocked` and `warmPageForImageLane` (`EpubReaderActivity.cpp`; the lane's per-attempt `LOG_INF`); the park and resume code in `JpegToFramebufferConverter.cpp`; `ImageBlock.cpp`, which gives only a JPEG a checkpoint path; `Epub::extractItemToFile` (`Epub.cpp`), which does not poll for input.
 
-**Tried.** Parking (JPEG only). The other candidate, never built: once a page's decode has been preempted twice, retry it only after a longer 1.5 s pause.
-
-**Next step.** From a device log with parking in place, count re-preemptions per page. If parks without progress dominate, require a longer settle after a resume that parks at once. For the extraction, parking the inflate (a 32 KB window) is the candidate.
+**Next step (a device measurement).** On the X3, in a book of large JPEGs, read at one page every 2 s for 50 pages, and count the page turns that waited more than 500 ms behind an extraction, from the lane's per-attempt `LOG_INF` lines. If more than one turn in ten did, stop the extraction at the next inflate chunk and keep it for later: the `.part` file stays, and the state to keep is the ring (up to 32 KB) and `uzlib_uncomp` (about 1.3 KB). On the C3 that state has nowhere to live between slices but the card (33 KB written per park), which costs about what finishing costs, so the answer there is probably no; where `HalCapabilities::buildsInPsram()` is true the state can stay in PSRAM.
 
 ## A cover that fits only at 1/8 restarts on every key press
 

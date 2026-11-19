@@ -12,9 +12,12 @@
 #include <esp_heap_caps.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -140,6 +143,40 @@ TEST_P(ImageParkFixture, RepeatedParksStillEndInTheSameCaches) {
   EXPECT_GT(parks, 1);
   EXPECT_EQ(read(c.cachePath), read(ref.cachePath));
   EXPECT_EQ(read(c.companionCachePath), read(ref.companionCachePath));
+}
+
+// A key press between the lane's input check and a resume's first poll must not park the resume
+// where it started: after 118-265 ms of setup (X3) that is no progress at all, again and again. A
+// resume decodes one band (progressive) or kResumeMinRows MCU rows (baseline) before it polls.
+// Here the hook fires on the FIRST poll of every call, i.e. input is already waiting. The clock
+// ticks, as the lane's does; the wall time of the slowest resumed call is what a page turn waits
+// behind the RenderLock beyond the old behaviour.
+TEST_P(ImageParkFixture, AResumeWithInputWaitingStillAdvancesBeforeItParks) {
+  const RenderConfig ref = config("ref", 150, 104, false);
+  ASSERT_FALSE(decodeOnce(ref, 0));
+  const RenderConfig c = config("eager");
+  host_clock::Ticking ticking;
+  ASSERT_TRUE(decodeOnce(c, 3)) << "first call parks somewhere past its set-up";
+  long worstUs = 0;
+  size_t lastPart = fs::file_size(PixelCache::partPathFor(c.cachePath));
+  int parks = 0;
+  for (;;) {
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool stopped = decodeOnce(c, 1);
+    worstUs = std::max<long>(
+        worstUs, std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count());
+    if (!stopped) break;
+    ++parks;
+    ASSERT_LT(parks, 400) << "a resume that polls first parks at once, forever";
+    ASSERT_TRUE(fs::exists(PixelCache::partPathFor(c.cachePath)));
+    const size_t part = fs::file_size(PixelCache::partPathFor(c.cachePath));
+    EXPECT_GE(part, lastPart);
+    lastPart = part;
+  }
+  EXPECT_GT(parks, 0);
+  EXPECT_EQ(read(c.cachePath), read(ref.cachePath));
+  EXPECT_EQ(read(c.companionCachePath), read(ref.companionCachePath));
+  std::cout << "[ resume ] " << GetParam() << ": " << parks << " parks, slowest resumed call " << worstUs << " us\n";
 }
 
 // A checkpoint only resumes the decode it was taken of: another box starts over, cleanly.
