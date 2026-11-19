@@ -9,6 +9,7 @@
 
 #include <FsHelpers.h>
 #include <HalStorage.h>
+#include <HeapFit.h>
 #include <Logging.h>
 
 #include <cstddef>
@@ -69,8 +70,8 @@ XtcError XtcParser::open(const char* filepath) {
       return m_lastError;
     }
     // Trim excess capacity from metadata strings
-    m_title.shrink_to_fit();
-    m_author.shrink_to_fit();
+    if (heapHasBlockFor(m_title.size() + 1)) std::string(m_title).swap(m_title);
+    if (heapHasBlockFor(m_author.size() + 1)) std::string(m_author).swap(m_author);
   }
 
   // Read first page info for default dimensions (no bulk page table allocation)

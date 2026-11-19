@@ -215,8 +215,7 @@ class FileBrowserModel {
   void clearDeepSearch() {
     deepSearch = false;
     deepTruncated = false;
-    deepResults.clear();
-    deepResults.shrink_to_fit();
+    std::vector<std::string>().swap(deepResults);
     deepRoot.clear();
     recentCount = 0;
     recentWindowStart = 0;

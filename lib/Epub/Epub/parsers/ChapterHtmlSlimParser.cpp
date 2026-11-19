@@ -2296,7 +2296,8 @@ void ChapterHtmlSlimParser::addExternalPageBreakAnchor(const std::string& id, co
 
 void ChapterHtmlSlimParser::endExternalPageBreakAnchors() {
   // Shrinking is a copy into a block of the exact size, which the heap may not have either.
-  if (heapHasBlockFor(externalPageBreakAnchorPool.size() + 1)) externalPageBreakAnchorPool.shrink_to_fit();
+  if (heapHasBlockFor(externalPageBreakAnchorPool.size() + 1))
+    std::string(externalPageBreakAnchorPool).swap(externalPageBreakAnchorPool);
   // One label per matched anchor plus the top-of-file one: size the record here so it never
   // doubles mid-parse (inline pagebreak markers past this hint still grow it, through
   // recordPageBreakLabel's heap check). Hints: without the blocks the record grows as it goes.
@@ -6711,7 +6712,6 @@ void ChapterHtmlSlimParser::degradeRow(const char* reason) {
   (void)emitRowAsParagraphs(t.pendingRow);
   emitRowImagesAsBlocks(t.pendingRow);
   t.pendingRow.cells.clear();
-  t.pendingRow.cells.shrink_to_fit();
   currentTableCell = nullptr;
 }
 
