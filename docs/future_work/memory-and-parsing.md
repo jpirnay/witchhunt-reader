@@ -170,11 +170,6 @@ page that holds a late image could push the walk out of the arena.
 build like the other heap refusals instead of aborting. These still allocate through the throwing `operator new`, so a
 refusal there aborts and reboots (`-fno-exceptions`); counted in `ChapterHtmlSlimParser.cpp`:
 
-- the style stack, `std::vector<StyleStackEntry> inlineStyleStack` (`ChapterHtmlSlimParser.h:589`; pushes at
-  `ChapterHtmlSlimParser.cpp:826`, `:3858`, `:4223`, `:4254`, `:4285`, `:4305`, `:4356`);
-- the other per-element stacks: `listStack` (`:3887`), `containerWidthStack_` (`:3150`), `backgroundImageScopes_`
-  (`:6281`), and, capped in count but grown the same way, `heldBottomSpacing_` (`:2650`, 8), `blockInsetStack_`
-  (`:3953`, 8) and `anchorsAwaitingLine_` (`:5196`, 16);
 - a table's packed rows, `t.packer.rows.push_back` (`:6173`, `:6183`; at most `MAX_TABLE_ROWS`, 48, per fragment);
 - a row's cells: `pendingRow.cells` (`:3285`, `:6759`), a laid-out row's `out.cells.reserve(columnCount)` (`:6827`;
   the pushes at `:6912` and `:6917` stay within it), and a cell's lines (`:6866`, at most `MAX_CELL_LINES`, 64);
@@ -183,7 +178,8 @@ refusal there aborts and reboots (`-fno-exceptions`); counted in `ChapterHtmlSli
 **Next step.** Ask `HeapFit` before each growth (`heapReserveFor`, as the elements reserve does) and stop the build on
 a refusal (`stopForHeap`, `:2092`), or move the table to the build's arena or a `ChunkedVector`. Each site needs a host
 fault-injection test, as `PageHeapTest.cpp` (`PAGE_FAULT_INJECTION`, `ELEMENT_FAULT_INJECTION`) does for pages and for
-`Page::elements`, which `addPageElement` now covers.
+`Page::elements`, which `addPageElement` now covers, and `StackHeapTest.cpp` (`STACK_FAULT_INJECTION`) for the
+per-element stacks, which `pushOrStop` now covers.
 
 ## CSS in a chapter's `<style>` blocks is never applied (matcha-reader #627)
 
