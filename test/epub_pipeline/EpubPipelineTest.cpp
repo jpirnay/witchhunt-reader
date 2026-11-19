@@ -67,7 +67,8 @@ enum class Variant {
   Vertical,
   VerticalOn,
   Unshaped,
-  Wide
+  Wide,
+  ParagraphSpacing
 };
 
 // One corpus book under one variant.
@@ -96,6 +97,8 @@ const char* variantName(const Variant v) {
       return "unshaped";
     case Variant::Wide:
       return "viewport1600";
+    case Variant::ParagraphSpacing:
+      return "extraParagraphSpacing";
     case Variant::Default:
       break;
   }
@@ -169,6 +172,10 @@ const char* const kUnshapedBooks[] = {"test_shaped_arabic", "test_shaped_devanag
 // Burmese lines ending between syllables on a line wider than most phrases.
 const char* const kWideBooks[] = {"test_shaped_arabic", "test_shaped_myanmar"};
 
+// Books also laid out with Extra Paragraph Spacing on and a fixed 2 em Paragraph Indent (<book>_spacing.golden.txt):
+// the reader's paragraphs take both, a degraded table's cells neither, a nested table's cells included.
+const char* const kParagraphSpacingBooks[] = {"test_nested_tables"};
+
 // The families as the reader builds them for a 14 pt built-in body (buildBookFontFamilies), with stand-in IDs: the
 // built-in sans-serif's rungs are 2000 + their size, the accent families' native sizes 0x12345600, 0x23456700 and
 // 0x34567800 | px: the book's three accent families (Stage B phase 3) beside the built-in body. All Text sets them
@@ -218,6 +225,8 @@ std::string variantSuffix(const Case& c) {
       return "_unshaped";
     case Variant::Wide:
       return "_1600";
+    case Variant::ParagraphSpacing:
+      return "_spacing";
     case Variant::Default:
       break;
   }
@@ -234,6 +243,10 @@ std::string runOnce(const Case& c, const std::string& cacheDir) {
   if (c.variant == Variant::Vertical) profile.verticalText = VerticalText::Automatic;
   if (c.variant == Variant::VerticalOn) profile.verticalText = VerticalText::On;
   if (c.variant == Variant::Wide) profile.viewportWidth = 1600;
+  if (c.variant == Variant::ParagraphSpacing) {
+    profile.extraParagraphSpacing = true;
+    profile.paragraphIndent = static_cast<uint8_t>(ParagraphIndent::TwoEm);
+  }
   if (c.variant != Variant::Unshaped) profile.shapingFontFile = shapingFontOf(stem(c.epub));
   std::ostringstream dump;
   const bool ok = pipeline_harness::runAndDump(c.epub, cacheDir, profile, dump);
@@ -325,21 +338,23 @@ std::vector<Case> corpusCases() {
     if (listed(kVerticalOnBooks, stem(path))) cases.push_back(Case{path, Variant::VerticalOn});
     if (listed(kUnshapedBooks, stem(path))) cases.push_back(Case{path, Variant::Unshaped});
     if (listed(kWideBooks, stem(path))) cases.push_back(Case{path, Variant::Wide});
+    if (listed(kParagraphSpacingBooks, stem(path))) cases.push_back(Case{path, Variant::ParagraphSpacing});
   }
   return cases;
 }
 
 // The cases whose warm run can differ from their cold one. What the warm run reads back is the book-level cache,
 // which the default layout, normalization (the CSS index's font sizes) and the accent families (its font families)
-// all draw on. Hyphenation, bionic reading, an unshaped layout and a wider page draw on none of it: the language the
-// hyphenator and the shaper need comes from book.bin, which the default warm case of the same book already compares
-// (its BOOK line).
+// all draw on. Hyphenation, bionic reading, an unshaped layout, a wider page and paragraph spacing draw on none of it:
+// the language the hyphenator and the shaper need comes from book.bin, which the default warm case of the same book
+// already compares (its BOOK line).
 std::vector<Case> warmCases() {
   std::vector<Case> cases = corpusCases();
   cases.erase(std::remove_if(cases.begin(), cases.end(),
                              [](const Case& c) {
                                return c.variant == Variant::Hyphenation || c.variant == Variant::Bionic ||
-                                      c.variant == Variant::Unshaped || c.variant == Variant::Wide;
+                                      c.variant == Variant::Unshaped || c.variant == Variant::Wide ||
+                                      c.variant == Variant::ParagraphSpacing;
                              }),
               cases.end());
   return cases;

@@ -1,0 +1,1365 @@
+BOOK title=Nested Tables Test lang=en spine=6 toc=6 reliableToc=1
+SPINE 0 href=OEBPS/text/first.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=14 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=159 s=1 z=100 t=First
+   W x=239 s=1 z=100 t=cell
+  LINE y=47 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=CASE1
+   W x=54 s=0 z=100 t=The
+   W x=87 s=0 z=100 t=inner
+   W x=138 s=0 z=100 t=table
+   W x=190 s=0 z=100 t=opens
+   W x=243 s=0 z=100 t=in
+   W x=266 s=0 z=100 t=the
+   W x=303 s=0 z=100 t=first
+   W x=352 s=0 z=100 t=cell
+   W x=392 s=0 z=100 t=of
+   W x=420 s=0 z=100 t=the
+  LINE y=71 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=outer
+   W x=56 s=0 z=100 t=table's
+   W x=127 s=0 z=100 t=first
+   W x=176 s=0 z=100 t=row.
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=FIRSTCAP
+   W x=95 s=0 z=100 t=Caption
+   W x=168 s=0 z=100 t=of
+   W x=196 s=0 z=100 t=the
+   W x=233 s=0 z=100 t=inner
+   W x=284 s=0 z=100 t=table.
+  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FIRSTHEAD
+   W x=107 s=0 z=100 t=Inner
+   W x=161 s=0 z=100 t=header
+   W x=225 s=0 z=100 t=cell.
+  LINE y=152 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FIRSTHEAD2
+   W x=114 s=0 z=100 t=Second
+   W x=179 s=0 z=100 t=header
+   W x=243 s=0 z=100 t=cell.
+  LINE y=176 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FIRSTA
+   W x=76 s=0 z=100 t=First
+   W x=121 s=0 z=100 t=inner
+   W x=172 s=0 z=100 t=cell.
+  LINE y=200 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=FIRSTB
+   W x=77 s=0 z=100 t=Second
+   W x=142 s=0 z=100 t=inner
+   W x=193 s=0 z=100 t=cell.
+  LINE y=224 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=FIRSTTAIL
+   W x=104 s=0 z=100 t=The
+   W x=138 s=0 z=100 t=outer
+   W x=195 s=0 z=100 t=cell
+   W x=236 s=0 z=100 t=goes
+   W x=284 s=0 z=100 t=on
+   W x=314 s=0 z=100 t=after
+   W x=370 s=0 z=100 t=the
+   W x=408 s=0 z=100 t=inner
+  LINE y=248 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=table.
+  LINE y=272 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=FIRSTOUTERB
+   W x=121 s=0 z=100 t=The
+   W x=154 s=0 z=100 t=second
+   W x=216 s=0 z=100 t=outer
+   W x=272 s=0 z=100 t=cell.
+  LINE y=296 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=FIRSTROW2A
+   W x=111 s=0 z=100 t=Next
+   W x=150 s=0 z=100 t=row,
+   W x=190 s=0 z=100 t=first
+   W x=239 s=0 z=100 t=cell.
+  LINE y=320 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=FIRSTROW2B
+   W x=112 s=0 z=100 t=Next
+   W x=151 s=0 z=100 t=row,
+   W x=191 s=0 z=100 t=second
+   W x=253 s=0 z=100 t=cell.
+  LINE y=344 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=FIRSTAFTER
+   W x=93 s=0 z=100 t=Text
+   W x=131 s=0 z=100 t=after
+   W x=186 s=0 z=100 t=the
+   W x=223 s=0 z=100 t=table.
+SPINE 1 href=OEBPS/text/level.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=16 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=157 s=1 z=100 t=Three
+   W x=245 s=1 z=100 t=deep
+  LINE y=47 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=CASE2
+   W x=57 s=0 z=100 t=A
+   W x=73 s=0 z=100 t=table
+   W x=127 s=0 z=100 t=nested
+   W x=191 s=0 z=100 t=two
+   W x=227 s=0 z=100 t=deep:
+   W x=275 s=0 z=100 t=the
+   W x=314 s=0 z=100 t=innermost
+   W x=408 s=0 z=100 t=opens
+  LINE y=71 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=inside
+   W x=55 s=0 z=100 t=an
+   W x=84 s=0 z=100 t=inner
+   W x=135 s=0 z=100 t=cell.
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=LEVEL1A
+   W x=94 s=0 z=100 t=Outer
+   W x=146 s=0 z=100 t=text
+   W x=188 s=0 z=100 t=before
+   W x=248 s=0 z=100 t=the
+   W x=285 s=0 z=100 t=middle
+   W x=341 s=0 z=100 t=table.
+  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=LEVEL2A
+   W x=95 s=0 z=100 t=Middle
+   W x=147 s=0 z=100 t=text
+   W x=189 s=0 z=100 t=before
+   W x=249 s=0 z=100 t=the
+   W x=286 s=0 z=100 t=innermost
+   W x=378 s=0 z=100 t=table.
+  LINE y=152 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=LEVEL3A
+   W x=96 s=0 z=100 t=Innermost
+   W x=191 s=0 z=100 t=cell
+   W x=231 s=0 z=100 t=one.
+  LINE y=176 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=LEVEL3B
+   W x=97 s=0 z=100 t=Innermost
+   W x=192 s=0 z=100 t=cell
+   W x=232 s=0 z=100 t=two.
+  LINE y=200 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=LEVEL2TAIL
+   W x=122 s=0 z=100 t=Middle
+   W x=174 s=0 z=100 t=text
+   W x=216 s=0 z=100 t=after
+   W x=271 s=0 z=100 t=the
+   W x=308 s=0 z=100 t=innermost
+   W x=400 s=0 z=100 t=table.
+  LINE y=224 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=LEVEL2B
+   W x=96 s=0 z=100 t=Second
+   W x=161 s=0 z=100 t=middle
+   W x=217 s=0 z=100 t=cell.
+  LINE y=248 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=LEVEL1TAIL
+   W x=121 s=0 z=100 t=Outer
+   W x=173 s=0 z=100 t=text
+   W x=215 s=0 z=100 t=after
+   W x=270 s=0 z=100 t=the
+   W x=307 s=0 z=100 t=middle
+   W x=363 s=0 z=100 t=table.
+  LINE y=272 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=LEVEL1B
+   W x=95 s=0 z=100 t=Second
+   W x=160 s=0 z=100 t=outer
+   W x=216 s=0 z=100 t=cell.
+  LINE y=296 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=LEVELROW2A
+   W x=123 s=0 z=100 t=Next
+   W x=162 s=0 z=100 t=outer
+   W x=218 s=0 z=100 t=row.
+  LINE y=320 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=LEVELROW2B
+   W x=124 s=0 z=100 t=Its
+   W x=158 s=0 z=100 t=second
+   W x=220 s=0 z=100 t=cell.
+  LINE y=344 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=LEVELAFTER
+   W x=110 s=0 z=100 t=Text
+   W x=153 s=0 z=100 t=after
+   W x=213 s=0 z=100 t=the
+   W x=255 s=0 z=100 t=table,
+   W x=320 s=0 z=100 t=back
+   W x=364 s=0 z=100 t=in
+   W x=392 s=0 z=100 t=normal
+  LINE y=368 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=block
+   W x=48 s=0 z=100 t=layout.
+  TABLE y=401 x=0 w=460 h=36 cols=2 border=1 rows=1
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=2
+      W x=18 s=0 z=100 t=LEVELGRIDA
+      W x=126 s=0 z=100 t=Grid.
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=2
+      W x=18 s=0 z=100 t=LEVELGRIDB
+      W x=127 s=0 z=100 t=Grid.
+SPINE 2 href=OEBPS/text/img.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=21 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=176 s=1 z=100 t=Picture
+  LINE y=47 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=CASE3
+   W x=56 s=0 z=100 t=An
+   W x=81 s=0 z=100 t=inner
+   W x=132 s=0 z=100 t=table
+   W x=184 s=0 z=100 t=holding
+   W x=259 s=0 z=100 t=a
+   W x=277 s=0 z=100 t=picture.
+  LINE y=80 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=IMGOUTER
+   W x=90 s=0 z=100 t=The
+   W x=123 s=0 z=100 t=outer
+   W x=179 s=0 z=100 t=cell
+   W x=219 s=0 z=100 t=before
+   W x=279 s=0 z=100 t=the
+   W x=316 s=0 z=100 t=inner
+   W x=367 s=0 z=100 t=table.
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=IMGBEFORE
+   W x=111 s=0 z=100 t=Text
+   W x=156 s=0 z=100 t=before
+   W x=223 s=0 z=100 t=the
+   W x=267 s=0 z=100 t=picture.
+   W x=347 s=0 z=100 t=IMGAFTER
+   W x=425 s=0 z=100 t=Text
+  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=after
+   W x=55 s=0 z=100 t=the
+   W x=92 s=0 z=100 t=picture.
+  IMG y=152 x=150 w=160 h=100 src=<cache>/epub_<hash>/img_6b023fb8b7c022f2.png
+  LINE y=252 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=IMGEND
+   W x=76 s=0 z=100 t=Text
+   W x=114 s=0 z=100 t=after
+   W x=169 s=0 z=100 t=the
+   W x=206 s=0 z=100 t=second
+   W x=268 s=0 z=100 t=picture.
+  IMG y=276 x=170 w=120 h=24 src=<cache>/epub_<hash>/img_2a59aedfafd163cc.png
+  LINE y=300 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=IMGB
+   W x=55 s=0 z=100 t=Second
+   W x=120 s=0 z=100 t=inner
+   W x=171 s=0 z=100 t=cell.
+  LINE y=324 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=IMGOUTERB
+   W x=99 s=0 z=100 t=The
+   W x=132 s=0 z=100 t=second
+   W x=194 s=0 z=100 t=outer
+   W x=250 s=0 z=100 t=cell.
+  LINE y=348 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=IMGTAILCASE
+   W x=111 s=0 z=100 t=An
+   W x=142 s=0 z=100 t=outer
+   W x=204 s=0 z=100 t=cell's
+   W x=269 s=0 z=100 t=text
+   W x=317 s=0 z=100 t=after
+   W x=378 s=0 z=100 t=its
+   W x=415 s=0 z=100 t=inner
+  LINE y=372 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=table,
+   W x=60 s=0 z=100 t=the
+   W x=97 s=0 z=100 t=next
+   W x=140 s=0 z=100 t=outer
+   W x=196 s=0 z=100 t=cell
+   W x=236 s=0 z=100 t=a
+   W x=254 s=0 z=100 t=picture
+   W x=317 s=0 z=100 t=alone.
+  LINE y=405 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=TAILOUTER
+   W x=103 s=0 z=100 t=Before
+   W x=166 s=0 z=100 t=the
+   W x=203 s=0 z=100 t=inner
+   W x=254 s=0 z=100 t=table.
+  LINE y=429 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=TAILINNER
+   W x=105 s=0 z=100 t=The
+   W x=138 s=0 z=100 t=inner
+   W x=189 s=0 z=100 t=cell.
+  LINE y=453 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=TAILA
+   W x=69 s=0 z=100 t=The
+   W x=104 s=0 z=100 t=outer
+   W x=162 s=0 z=100 t=cell
+   W x=204 s=0 z=100 t=after
+   W x=261 s=0 z=100 t=its
+   W x=294 s=0 z=100 t=inner
+   W x=347 s=0 z=100 t=table.
+   W x=411 s=0 z=100 t=TAILB
+  LINE y=477 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Between
+   W x=69 s=0 z=100 t=its
+   W x=100 s=0 z=100 t=pictures.
+  IMG y=501 x=150 w=160 h=100 src=<cache>/epub_<hash>/img_6b023fb8b7c022f2.png
+  LINE y=601 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=TAILC
+   W x=69 s=0 z=100 t=After
+   W x=120 s=0 z=100 t=them.
+  IMG y=625 x=170 w=120 h=24 src=<cache>/epub_<hash>/img_2a59aedfafd163cc.png
+  IMG y=649 x=170 w=120 h=24 src=<cache>/epub_<hash>/img_2a59aedfafd163cc.png
+  LINE y=673 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=IMGAFTERTABLE
+   W x=118 s=0 z=100 t=Text
+   W x=156 s=0 z=100 t=after
+   W x=211 s=0 z=100 t=the
+   W x=248 s=0 z=100 t=tables.
+SPINE 3 href=OEBPS/text/rtl.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=7 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=3
+   W x=123 s=1 z=100 t=Right
+   W x=221 s=1 z=100 t=to
+   W x=269 s=1 z=100 t=left
+  LINE y=47 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=CASE4
+   W x=57 s=0 z=100 t=An
+   W x=82 s=0 z=100 t=inner
+   W x=133 s=0 z=100 t=table
+   W x=185 s=0 z=100 t=set
+   W x=219 s=0 z=100 t=right
+   W x=272 s=0 z=100 t=to
+   W x=300 s=0 z=100 t=left.
+  LINE y=80 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=RTLOUTER
+   W x=97 s=0 z=100 t=The
+   W x=130 s=0 z=100 t=outer
+   W x=186 s=0 z=100 t=cell
+   W x=226 s=0 z=100 t=before
+   W x=286 s=0 z=100 t=the
+   W x=323 s=0 z=100 t=inner
+   W x=374 s=0 z=100 t=table.
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=329 s=0 z=100 t=עולם
+    WD t=םלוע
+   W x=367 s=0 z=100 t=שלום
+    WD t=םולש
+   W x=405 s=0 z=100 t=RTLA
+   O order=2,1,0
+  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=153 s=0 z=100 t=סוף
+    WD t=ףוס
+   W x=181 s=0 z=100 t=⁦RTLSPAN
+    WD t=RTLSPAN
+   W x=252 s=0 z=100 t=left
+   W x=296 s=0 z=100 t=to
+   W x=324 s=0 z=100 t=right⁩
+    WD t=right
+   W x=377 s=0 z=100 t=ספר
+    WD t=רפס
+   W x=404 s=0 z=100 t=RTLB
+   O order=6,2,3,4,5,1,0
+  LINE y=152 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=RTLTAIL
+   W x=88 s=0 z=100 t=The
+   W x=121 s=0 z=100 t=outer
+   W x=177 s=0 z=100 t=cell
+   W x=217 s=0 z=100 t=after
+   W x=272 s=0 z=100 t=it.
+  LINE y=176 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=RTLAFTER
+   W x=78 s=0 z=100 t=Text
+   W x=116 s=0 z=100 t=after
+   W x=171 s=0 z=100 t=the
+   W x=208 s=0 z=100 t=table.
+SPINE 4 href=OEBPS/text/target.xhtml pages=4 truncated=0 cssFallback=0
+ PAGE 0 elements=30 footnotes=1
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=139 s=1 z=100 t=Link
+   W x=215 s=1 z=100 t=target
+  LINE y=47 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=CASE5
+   W x=59 s=4 z=100 t=The
+   W x=93 s=4 z=100 t=linked
+   W x=151 s=4 z=100 t=cell
+   W x=192 s=0 z=100 t=sits
+   W x=233 s=0 z=100 t=in
+   W x=257 s=0 z=100 t=an
+   W x=287 s=0 z=100 t=inner
+   W x=339 s=0 z=100 t=table
+   W x=392 s=0 z=100 t=further
+  LINE y=71 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=on.
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=TARGETOUTER
+   W x=118 s=0 z=100 t=The
+   W x=151 s=0 z=100 t=outer
+   W x=207 s=0 z=100 t=cell
+   W x=247 s=0 z=100 t=before
+   W x=307 s=0 z=100 t=the
+   W x=344 s=0 z=100 t=inner
+   W x=395 s=0 z=100 t=table.
+  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=TARGETLONG
+   W x=112 s=0 z=100 t=reader
+   W x=176 s=0 z=100 t=turned
+   W x=243 s=0 z=100 t=another
+   W x=327 s=0 z=100 t=page
+   W x=375 s=0 z=100 t=while
+   W x=427 s=0 z=100 t=the
+  LINE y=152 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=rain
+   W x=47 s=0 z=100 t=kept
+   W x=90 s=0 z=100 t=falling
+   W x=168 s=0 z=100 t=on
+   W x=201 s=0 z=100 t=the
+   W x=242 s=0 z=100 t=old
+   W x=281 s=0 z=100 t=roof
+   W x=333 s=0 z=100 t=and
+   W x=374 s=0 z=100 t=somewhere
+  LINE y=176 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=below
+   W x=58 s=0 z=100 t=a
+   W x=86 s=0 z=100 t=door
+   W x=142 s=0 z=100 t=closed
+   W x=212 s=0 z=100 t=softly
+   W x=286 s=0 z=100 t=the
+   W x=333 s=0 z=100 t=reader
+   W x=403 s=0 z=100 t=turned
+  LINE y=200 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=84 s=0 z=100 t=page
+   W x=132 s=0 z=100 t=while
+   W x=184 s=0 z=100 t=the
+   W x=225 s=0 z=100 t=rain
+   W x=272 s=0 z=100 t=kept
+   W x=315 s=0 z=100 t=falling
+   W x=393 s=0 z=100 t=on
+   W x=426 s=0 z=100 t=the
+  LINE y=224 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=old
+   W x=37 s=0 z=100 t=roof
+   W x=87 s=0 z=100 t=and
+   W x=126 s=0 z=100 t=somewhere
+   W x=218 s=0 z=100 t=below
+   W x=268 s=0 z=100 t=a
+   W x=288 s=0 z=100 t=door
+   W x=336 s=0 z=100 t=closed
+   W x=398 s=0 z=100 t=softly
+  LINE y=248 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=38 s=0 z=100 t=reader
+   W x=99 s=0 z=100 t=turned
+   W x=163 s=0 z=100 t=another
+   W x=244 s=0 z=100 t=page
+   W x=289 s=0 z=100 t=while
+   W x=338 s=0 z=100 t=the
+   W x=376 s=0 z=100 t=rain
+   W x=420 s=0 z=100 t=kept
+  LINE y=272 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=falling
+   W x=80 s=0 z=100 t=on
+   W x=115 s=0 z=100 t=the
+   W x=158 s=0 z=100 t=old
+   W x=199 s=0 z=100 t=roof
+   W x=253 s=0 z=100 t=and
+   W x=296 s=0 z=100 t=somewhere
+   W x=392 s=0 z=100 t=below
+   W x=446 s=0 z=100 t=a
+  LINE y=296 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=door
+   W x=47 s=0 z=100 t=closed
+   W x=108 s=0 z=100 t=softly
+   W x=173 s=0 z=100 t=the
+   W x=211 s=0 z=100 t=reader
+   W x=272 s=0 z=100 t=turned
+   W x=336 s=0 z=100 t=another
+   W x=417 s=0 z=100 t=page
+  LINE y=320 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=while
+   W x=52 s=0 z=100 t=the
+   W x=93 s=0 z=100 t=rain
+   W x=140 s=0 z=100 t=kept
+   W x=183 s=0 z=100 t=falling
+   W x=261 s=0 z=100 t=on
+   W x=294 s=0 z=100 t=the
+   W x=335 s=0 z=100 t=old
+   W x=374 s=0 z=100 t=roof
+   W x=426 s=0 z=100 t=and
+  LINE y=344 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=somewhere
+   W x=96 s=0 z=100 t=below
+   W x=150 s=0 z=100 t=a
+   W x=174 s=0 z=100 t=door
+   W x=226 s=0 z=100 t=closed
+   W x=292 s=0 z=100 t=softly
+   W x=362 s=0 z=100 t=the
+   W x=405 s=0 z=100 t=reader
+  LINE y=368 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=turned
+   W x=68 s=0 z=100 t=another
+   W x=153 s=0 z=100 t=page
+   W x=202 s=0 z=100 t=while
+   W x=255 s=0 z=100 t=the
+   W x=297 s=0 z=100 t=rain
+   W x=345 s=0 z=100 t=kept
+   W x=389 s=0 z=100 t=falling
+  LINE y=392 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=on
+   W x=31 s=0 z=100 t=the
+   W x=70 s=0 z=100 t=old
+   W x=107 s=0 z=100 t=roof
+   W x=157 s=0 z=100 t=and
+   W x=196 s=0 z=100 t=somewhere
+   W x=288 s=0 z=100 t=below
+   W x=338 s=0 z=100 t=a
+   W x=358 s=0 z=100 t=door
+   W x=406 s=0 z=100 t=closed
+  LINE y=416 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=softly
+   W x=68 s=0 z=100 t=the
+   W x=109 s=0 z=100 t=reader
+   W x=173 s=0 z=100 t=turned
+   W x=240 s=0 z=100 t=another
+   W x=324 s=0 z=100 t=page
+   W x=372 s=0 z=100 t=while
+   W x=424 s=0 z=100 t=the
+  LINE y=440 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=rain
+   W x=47 s=0 z=100 t=kept
+   W x=90 s=0 z=100 t=falling
+   W x=168 s=0 z=100 t=on
+   W x=201 s=0 z=100 t=the
+   W x=242 s=0 z=100 t=old
+   W x=281 s=0 z=100 t=roof
+   W x=333 s=0 z=100 t=and
+   W x=374 s=0 z=100 t=somewhere
+  LINE y=464 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=below
+   W x=58 s=0 z=100 t=a
+   W x=86 s=0 z=100 t=door
+   W x=142 s=0 z=100 t=closed
+   W x=212 s=0 z=100 t=softly
+   W x=286 s=0 z=100 t=the
+   W x=333 s=0 z=100 t=reader
+   W x=403 s=0 z=100 t=turned
+  LINE y=488 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=84 s=0 z=100 t=page
+   W x=132 s=0 z=100 t=while
+   W x=184 s=0 z=100 t=the
+   W x=225 s=0 z=100 t=rain
+   W x=272 s=0 z=100 t=kept
+   W x=315 s=0 z=100 t=falling
+   W x=393 s=0 z=100 t=on
+   W x=426 s=0 z=100 t=the
+  LINE y=512 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=old
+   W x=37 s=0 z=100 t=roof
+   W x=87 s=0 z=100 t=and
+   W x=126 s=0 z=100 t=somewhere
+   W x=218 s=0 z=100 t=below
+   W x=268 s=0 z=100 t=a
+   W x=288 s=0 z=100 t=door
+   W x=336 s=0 z=100 t=closed
+   W x=398 s=0 z=100 t=softly
+  LINE y=536 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=38 s=0 z=100 t=reader
+   W x=99 s=0 z=100 t=turned
+   W x=163 s=0 z=100 t=another
+   W x=244 s=0 z=100 t=page
+   W x=289 s=0 z=100 t=while
+   W x=338 s=0 z=100 t=the
+   W x=376 s=0 z=100 t=rain
+   W x=420 s=0 z=100 t=kept
+  LINE y=560 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=falling
+   W x=80 s=0 z=100 t=on
+   W x=115 s=0 z=100 t=the
+   W x=158 s=0 z=100 t=old
+   W x=199 s=0 z=100 t=roof
+   W x=253 s=0 z=100 t=and
+   W x=296 s=0 z=100 t=somewhere
+   W x=392 s=0 z=100 t=below
+   W x=446 s=0 z=100 t=a
+  LINE y=584 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=door
+   W x=47 s=0 z=100 t=closed
+   W x=108 s=0 z=100 t=softly
+   W x=173 s=0 z=100 t=the
+   W x=211 s=0 z=100 t=reader
+   W x=272 s=0 z=100 t=turned
+   W x=336 s=0 z=100 t=another
+   W x=417 s=0 z=100 t=page
+  LINE y=608 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=while
+   W x=52 s=0 z=100 t=the
+   W x=93 s=0 z=100 t=rain
+   W x=140 s=0 z=100 t=kept
+   W x=183 s=0 z=100 t=falling
+   W x=261 s=0 z=100 t=on
+   W x=294 s=0 z=100 t=the
+   W x=335 s=0 z=100 t=old
+   W x=374 s=0 z=100 t=roof
+   W x=426 s=0 z=100 t=and
+  LINE y=632 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=somewhere
+   W x=96 s=0 z=100 t=below
+   W x=150 s=0 z=100 t=a
+   W x=174 s=0 z=100 t=door
+   W x=226 s=0 z=100 t=closed
+   W x=292 s=0 z=100 t=softly
+   W x=362 s=0 z=100 t=the
+   W x=405 s=0 z=100 t=reader
+  LINE y=656 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=turned
+   W x=68 s=0 z=100 t=another
+   W x=153 s=0 z=100 t=page
+   W x=202 s=0 z=100 t=while
+   W x=255 s=0 z=100 t=the
+   W x=297 s=0 z=100 t=rain
+   W x=345 s=0 z=100 t=kept
+   W x=389 s=0 z=100 t=falling
+  LINE y=680 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=on
+   W x=31 s=0 z=100 t=the
+   W x=70 s=0 z=100 t=old
+   W x=107 s=0 z=100 t=roof
+   W x=157 s=0 z=100 t=and
+   W x=196 s=0 z=100 t=somewhere
+   W x=288 s=0 z=100 t=below
+   W x=338 s=0 z=100 t=a
+   W x=358 s=0 z=100 t=door
+   W x=406 s=0 z=100 t=closed
+  LINE y=704 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=softly
+   W x=68 s=0 z=100 t=the
+   W x=109 s=0 z=100 t=reader
+   W x=173 s=0 z=100 t=turned
+   W x=240 s=0 z=100 t=another
+   W x=324 s=0 z=100 t=page
+   W x=372 s=0 z=100 t=while
+   W x=424 s=0 z=100 t=the
+  LINE y=728 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=rain
+   W x=47 s=0 z=100 t=kept
+   W x=90 s=0 z=100 t=falling
+   W x=168 s=0 z=100 t=on
+   W x=201 s=0 z=100 t=the
+   W x=242 s=0 z=100 t=old
+   W x=281 s=0 z=100 t=roof
+   W x=333 s=0 z=100 t=and
+   W x=374 s=0 z=100 t=somewhere
+  FN n=The linked cell href=#inner-target
+ PAGE 1 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=below
+   W x=58 s=0 z=100 t=a
+   W x=86 s=0 z=100 t=door
+   W x=142 s=0 z=100 t=closed
+   W x=212 s=0 z=100 t=softly
+   W x=286 s=0 z=100 t=the
+   W x=333 s=0 z=100 t=reader
+   W x=403 s=0 z=100 t=turned
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=84 s=0 z=100 t=page
+   W x=132 s=0 z=100 t=while
+   W x=184 s=0 z=100 t=the
+   W x=225 s=0 z=100 t=rain
+   W x=272 s=0 z=100 t=kept
+   W x=315 s=0 z=100 t=falling
+   W x=393 s=0 z=100 t=on
+   W x=426 s=0 z=100 t=the
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=old
+   W x=37 s=0 z=100 t=roof
+   W x=87 s=0 z=100 t=and
+   W x=126 s=0 z=100 t=somewhere
+   W x=218 s=0 z=100 t=below
+   W x=268 s=0 z=100 t=a
+   W x=288 s=0 z=100 t=door
+   W x=336 s=0 z=100 t=closed
+   W x=398 s=0 z=100 t=softly
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=38 s=0 z=100 t=reader
+   W x=99 s=0 z=100 t=turned
+   W x=163 s=0 z=100 t=another
+   W x=244 s=0 z=100 t=page
+   W x=289 s=0 z=100 t=while
+   W x=338 s=0 z=100 t=the
+   W x=376 s=0 z=100 t=rain
+   W x=420 s=0 z=100 t=kept
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=falling
+   W x=80 s=0 z=100 t=on
+   W x=115 s=0 z=100 t=the
+   W x=158 s=0 z=100 t=old
+   W x=199 s=0 z=100 t=roof
+   W x=253 s=0 z=100 t=and
+   W x=296 s=0 z=100 t=somewhere
+   W x=392 s=0 z=100 t=below
+   W x=446 s=0 z=100 t=a
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=door
+   W x=47 s=0 z=100 t=closed
+   W x=108 s=0 z=100 t=softly
+   W x=173 s=0 z=100 t=the
+   W x=211 s=0 z=100 t=reader
+   W x=272 s=0 z=100 t=turned
+   W x=336 s=0 z=100 t=another
+   W x=417 s=0 z=100 t=page
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=while
+   W x=52 s=0 z=100 t=the
+   W x=93 s=0 z=100 t=rain
+   W x=140 s=0 z=100 t=kept
+   W x=183 s=0 z=100 t=falling
+   W x=261 s=0 z=100 t=on
+   W x=294 s=0 z=100 t=the
+   W x=335 s=0 z=100 t=old
+   W x=374 s=0 z=100 t=roof
+   W x=426 s=0 z=100 t=and
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=somewhere
+   W x=96 s=0 z=100 t=below
+   W x=150 s=0 z=100 t=a
+   W x=174 s=0 z=100 t=door
+   W x=226 s=0 z=100 t=closed
+   W x=292 s=0 z=100 t=softly
+   W x=362 s=0 z=100 t=the
+   W x=405 s=0 z=100 t=reader
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=turned
+   W x=68 s=0 z=100 t=another
+   W x=153 s=0 z=100 t=page
+   W x=202 s=0 z=100 t=while
+   W x=255 s=0 z=100 t=the
+   W x=297 s=0 z=100 t=rain
+   W x=345 s=0 z=100 t=kept
+   W x=389 s=0 z=100 t=falling
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=on
+   W x=31 s=0 z=100 t=the
+   W x=70 s=0 z=100 t=old
+   W x=107 s=0 z=100 t=roof
+   W x=157 s=0 z=100 t=and
+   W x=196 s=0 z=100 t=somewhere
+   W x=288 s=0 z=100 t=below
+   W x=338 s=0 z=100 t=a
+   W x=358 s=0 z=100 t=door
+   W x=406 s=0 z=100 t=closed
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=softly
+   W x=68 s=0 z=100 t=the
+   W x=109 s=0 z=100 t=reader
+   W x=173 s=0 z=100 t=turned
+   W x=240 s=0 z=100 t=another
+   W x=324 s=0 z=100 t=page
+   W x=372 s=0 z=100 t=while
+   W x=424 s=0 z=100 t=the
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=rain
+   W x=47 s=0 z=100 t=kept
+   W x=90 s=0 z=100 t=falling
+   W x=168 s=0 z=100 t=on
+   W x=201 s=0 z=100 t=the
+   W x=242 s=0 z=100 t=old
+   W x=281 s=0 z=100 t=roof
+   W x=333 s=0 z=100 t=and
+   W x=374 s=0 z=100 t=somewhere
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=below
+   W x=58 s=0 z=100 t=a
+   W x=86 s=0 z=100 t=door
+   W x=142 s=0 z=100 t=closed
+   W x=212 s=0 z=100 t=softly
+   W x=286 s=0 z=100 t=the
+   W x=333 s=0 z=100 t=reader
+   W x=403 s=0 z=100 t=turned
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=84 s=0 z=100 t=page
+   W x=132 s=0 z=100 t=while
+   W x=184 s=0 z=100 t=the
+   W x=225 s=0 z=100 t=rain
+   W x=272 s=0 z=100 t=kept
+   W x=315 s=0 z=100 t=falling
+   W x=393 s=0 z=100 t=on
+   W x=426 s=0 z=100 t=the
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=old
+   W x=37 s=0 z=100 t=roof
+   W x=87 s=0 z=100 t=and
+   W x=126 s=0 z=100 t=somewhere
+   W x=218 s=0 z=100 t=below
+   W x=268 s=0 z=100 t=a
+   W x=288 s=0 z=100 t=door
+   W x=336 s=0 z=100 t=closed
+   W x=398 s=0 z=100 t=softly
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=38 s=0 z=100 t=reader
+   W x=99 s=0 z=100 t=turned
+   W x=163 s=0 z=100 t=another
+   W x=244 s=0 z=100 t=page
+   W x=289 s=0 z=100 t=while
+   W x=338 s=0 z=100 t=the
+   W x=376 s=0 z=100 t=rain
+   W x=420 s=0 z=100 t=kept
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=falling
+   W x=74 s=0 z=100 t=on
+   W x=103 s=0 z=100 t=the
+   W x=140 s=0 z=100 t=old
+   W x=175 s=0 z=100 t=roof
+   W x=223 s=0 z=100 t=and
+   W x=260 s=0 z=100 t=somewhere
+   W x=350 s=0 z=100 t=below
+   W x=398 s=0 z=100 t=a
+   W x=416 s=0 z=100 t=door
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=closed
+   W x=60 s=0 z=100 t=softly
+   W x=124 s=0 z=100 t=the
+   W x=161 s=0 z=100 t=reader
+   W x=221 s=0 z=100 t=turned.
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=TARGETWORD
+   W x=119 s=0 z=100 t=turned
+   W x=188 s=0 z=100 t=another
+   W x=274 s=0 z=100 t=page
+   W x=324 s=0 z=100 t=while
+   W x=378 s=0 z=100 t=the
+   W x=421 s=0 z=100 t=rain
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=kept
+   W x=42 s=0 z=100 t=falling
+   W x=119 s=0 z=100 t=on
+   W x=151 s=0 z=100 t=the
+   W x=191 s=0 z=100 t=old
+   W x=229 s=0 z=100 t=roof
+   W x=280 s=0 z=100 t=and
+   W x=320 s=0 z=100 t=somewhere
+   W x=413 s=0 z=100 t=below
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=a
+   W x=23 s=0 z=100 t=door
+   W x=74 s=0 z=100 t=closed
+   W x=139 s=0 z=100 t=softly
+   W x=208 s=0 z=100 t=the
+   W x=250 s=0 z=100 t=reader
+   W x=315 s=0 z=100 t=turned
+   W x=383 s=0 z=100 t=another
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=page
+   W x=47 s=0 z=100 t=while
+   W x=98 s=0 z=100 t=the
+   W x=138 s=0 z=100 t=rain
+   W x=184 s=0 z=100 t=kept
+   W x=226 s=0 z=100 t=falling
+   W x=303 s=0 z=100 t=on
+   W x=335 s=0 z=100 t=the
+   W x=375 s=0 z=100 t=old
+   W x=413 s=0 z=100 t=roof
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=and
+   W x=37 s=0 z=100 t=somewhere
+   W x=127 s=0 z=100 t=below
+   W x=175 s=0 z=100 t=a
+   W x=193 s=0 z=100 t=door
+   W x=239 s=0 z=100 t=closed
+   W x=299 s=0 z=100 t=softly
+   W x=363 s=0 z=100 t=the
+   W x=400 s=0 z=100 t=reader
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=turned
+   W x=68 s=0 z=100 t=another
+   W x=153 s=0 z=100 t=page
+   W x=202 s=0 z=100 t=while
+   W x=255 s=0 z=100 t=the
+   W x=297 s=0 z=100 t=rain
+   W x=345 s=0 z=100 t=kept
+   W x=389 s=0 z=100 t=falling
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=on
+   W x=31 s=0 z=100 t=the
+   W x=70 s=0 z=100 t=old
+   W x=107 s=0 z=100 t=roof
+   W x=157 s=0 z=100 t=and
+   W x=196 s=0 z=100 t=somewhere
+   W x=288 s=0 z=100 t=below
+   W x=338 s=0 z=100 t=a
+   W x=358 s=0 z=100 t=door
+   W x=406 s=0 z=100 t=closed
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=softly
+   W x=68 s=0 z=100 t=the
+   W x=109 s=0 z=100 t=reader
+   W x=173 s=0 z=100 t=turned
+   W x=240 s=0 z=100 t=another
+   W x=324 s=0 z=100 t=page
+   W x=372 s=0 z=100 t=while
+   W x=424 s=0 z=100 t=the
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=rain
+   W x=47 s=0 z=100 t=kept
+   W x=90 s=0 z=100 t=falling
+   W x=168 s=0 z=100 t=on
+   W x=201 s=0 z=100 t=the
+   W x=242 s=0 z=100 t=old
+   W x=281 s=0 z=100 t=roof
+   W x=333 s=0 z=100 t=and
+   W x=374 s=0 z=100 t=somewhere
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=below
+   W x=58 s=0 z=100 t=a
+   W x=86 s=0 z=100 t=door
+   W x=142 s=0 z=100 t=closed
+   W x=212 s=0 z=100 t=softly
+   W x=286 s=0 z=100 t=the
+   W x=333 s=0 z=100 t=reader
+   W x=403 s=0 z=100 t=turned
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=84 s=0 z=100 t=page
+   W x=132 s=0 z=100 t=while
+   W x=184 s=0 z=100 t=the
+   W x=225 s=0 z=100 t=rain
+   W x=272 s=0 z=100 t=kept
+   W x=315 s=0 z=100 t=falling
+   W x=393 s=0 z=100 t=on
+   W x=426 s=0 z=100 t=the
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=old
+   W x=37 s=0 z=100 t=roof
+   W x=87 s=0 z=100 t=and
+   W x=126 s=0 z=100 t=somewhere
+   W x=218 s=0 z=100 t=below
+   W x=268 s=0 z=100 t=a
+   W x=288 s=0 z=100 t=door
+   W x=336 s=0 z=100 t=closed
+   W x=398 s=0 z=100 t=softly
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=38 s=0 z=100 t=reader
+   W x=99 s=0 z=100 t=turned
+   W x=163 s=0 z=100 t=another
+   W x=244 s=0 z=100 t=page
+   W x=289 s=0 z=100 t=while
+   W x=338 s=0 z=100 t=the
+   W x=376 s=0 z=100 t=rain
+   W x=420 s=0 z=100 t=kept
+ PAGE 2 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=falling
+   W x=80 s=0 z=100 t=on
+   W x=115 s=0 z=100 t=the
+   W x=158 s=0 z=100 t=old
+   W x=199 s=0 z=100 t=roof
+   W x=253 s=0 z=100 t=and
+   W x=296 s=0 z=100 t=somewhere
+   W x=392 s=0 z=100 t=below
+   W x=446 s=0 z=100 t=a
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=door
+   W x=47 s=0 z=100 t=closed
+   W x=108 s=0 z=100 t=softly
+   W x=173 s=0 z=100 t=the
+   W x=211 s=0 z=100 t=reader
+   W x=272 s=0 z=100 t=turned
+   W x=336 s=0 z=100 t=another
+   W x=417 s=0 z=100 t=page
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=while
+   W x=52 s=0 z=100 t=the
+   W x=93 s=0 z=100 t=rain
+   W x=140 s=0 z=100 t=kept
+   W x=183 s=0 z=100 t=falling
+   W x=261 s=0 z=100 t=on
+   W x=294 s=0 z=100 t=the
+   W x=335 s=0 z=100 t=old
+   W x=374 s=0 z=100 t=roof
+   W x=426 s=0 z=100 t=and
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=somewhere
+   W x=96 s=0 z=100 t=below
+   W x=150 s=0 z=100 t=a
+   W x=174 s=0 z=100 t=door
+   W x=226 s=0 z=100 t=closed
+   W x=292 s=0 z=100 t=softly
+   W x=362 s=0 z=100 t=the
+   W x=405 s=0 z=100 t=reader
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=turned
+   W x=68 s=0 z=100 t=another
+   W x=153 s=0 z=100 t=page
+   W x=202 s=0 z=100 t=while
+   W x=255 s=0 z=100 t=the
+   W x=297 s=0 z=100 t=rain
+   W x=345 s=0 z=100 t=kept
+   W x=389 s=0 z=100 t=falling
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=on
+   W x=31 s=0 z=100 t=the
+   W x=70 s=0 z=100 t=old
+   W x=107 s=0 z=100 t=roof
+   W x=157 s=0 z=100 t=and
+   W x=196 s=0 z=100 t=somewhere
+   W x=288 s=0 z=100 t=below
+   W x=338 s=0 z=100 t=a
+   W x=358 s=0 z=100 t=door
+   W x=406 s=0 z=100 t=closed
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=softly
+   W x=68 s=0 z=100 t=the
+   W x=109 s=0 z=100 t=reader
+   W x=173 s=0 z=100 t=turned
+   W x=240 s=0 z=100 t=another
+   W x=324 s=0 z=100 t=page
+   W x=372 s=0 z=100 t=while
+   W x=424 s=0 z=100 t=the
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=rain
+   W x=47 s=0 z=100 t=kept
+   W x=90 s=0 z=100 t=falling
+   W x=168 s=0 z=100 t=on
+   W x=201 s=0 z=100 t=the
+   W x=242 s=0 z=100 t=old
+   W x=281 s=0 z=100 t=roof
+   W x=333 s=0 z=100 t=and
+   W x=374 s=0 z=100 t=somewhere
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=below
+   W x=58 s=0 z=100 t=a
+   W x=86 s=0 z=100 t=door
+   W x=142 s=0 z=100 t=closed
+   W x=212 s=0 z=100 t=softly
+   W x=286 s=0 z=100 t=the
+   W x=333 s=0 z=100 t=reader
+   W x=403 s=0 z=100 t=turned
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=84 s=0 z=100 t=page
+   W x=132 s=0 z=100 t=while
+   W x=184 s=0 z=100 t=the
+   W x=225 s=0 z=100 t=rain
+   W x=272 s=0 z=100 t=kept
+   W x=315 s=0 z=100 t=falling
+   W x=393 s=0 z=100 t=on
+   W x=426 s=0 z=100 t=the
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=old
+   W x=37 s=0 z=100 t=roof
+   W x=87 s=0 z=100 t=and
+   W x=126 s=0 z=100 t=somewhere
+   W x=218 s=0 z=100 t=below
+   W x=268 s=0 z=100 t=a
+   W x=288 s=0 z=100 t=door
+   W x=336 s=0 z=100 t=closed
+   W x=398 s=0 z=100 t=softly
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=38 s=0 z=100 t=reader
+   W x=99 s=0 z=100 t=turned
+   W x=163 s=0 z=100 t=another
+   W x=244 s=0 z=100 t=page
+   W x=289 s=0 z=100 t=while
+   W x=338 s=0 z=100 t=the
+   W x=376 s=0 z=100 t=rain
+   W x=420 s=0 z=100 t=kept
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=falling
+   W x=80 s=0 z=100 t=on
+   W x=115 s=0 z=100 t=the
+   W x=158 s=0 z=100 t=old
+   W x=199 s=0 z=100 t=roof
+   W x=253 s=0 z=100 t=and
+   W x=296 s=0 z=100 t=somewhere
+   W x=392 s=0 z=100 t=below
+   W x=446 s=0 z=100 t=a
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=door
+   W x=47 s=0 z=100 t=closed
+   W x=108 s=0 z=100 t=softly
+   W x=173 s=0 z=100 t=the
+   W x=211 s=0 z=100 t=reader
+   W x=272 s=0 z=100 t=turned
+   W x=336 s=0 z=100 t=another
+   W x=417 s=0 z=100 t=page
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=while
+   W x=52 s=0 z=100 t=the
+   W x=93 s=0 z=100 t=rain
+   W x=140 s=0 z=100 t=kept
+   W x=183 s=0 z=100 t=falling
+   W x=261 s=0 z=100 t=on
+   W x=294 s=0 z=100 t=the
+   W x=335 s=0 z=100 t=old
+   W x=374 s=0 z=100 t=roof
+   W x=426 s=0 z=100 t=and
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=somewhere
+   W x=96 s=0 z=100 t=below
+   W x=150 s=0 z=100 t=a
+   W x=174 s=0 z=100 t=door
+   W x=226 s=0 z=100 t=closed
+   W x=292 s=0 z=100 t=softly
+   W x=362 s=0 z=100 t=the
+   W x=405 s=0 z=100 t=reader
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=turned
+   W x=68 s=0 z=100 t=another
+   W x=153 s=0 z=100 t=page
+   W x=202 s=0 z=100 t=while
+   W x=255 s=0 z=100 t=the
+   W x=297 s=0 z=100 t=rain
+   W x=345 s=0 z=100 t=kept
+   W x=389 s=0 z=100 t=falling
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=on
+   W x=31 s=0 z=100 t=the
+   W x=70 s=0 z=100 t=old
+   W x=107 s=0 z=100 t=roof
+   W x=157 s=0 z=100 t=and
+   W x=196 s=0 z=100 t=somewhere
+   W x=288 s=0 z=100 t=below
+   W x=338 s=0 z=100 t=a
+   W x=358 s=0 z=100 t=door
+   W x=406 s=0 z=100 t=closed
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=softly
+   W x=68 s=0 z=100 t=the
+   W x=109 s=0 z=100 t=reader
+   W x=173 s=0 z=100 t=turned
+   W x=240 s=0 z=100 t=another
+   W x=324 s=0 z=100 t=page
+   W x=372 s=0 z=100 t=while
+   W x=424 s=0 z=100 t=the
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=rain
+   W x=47 s=0 z=100 t=kept
+   W x=90 s=0 z=100 t=falling
+   W x=168 s=0 z=100 t=on
+   W x=201 s=0 z=100 t=the
+   W x=242 s=0 z=100 t=old
+   W x=281 s=0 z=100 t=roof
+   W x=333 s=0 z=100 t=and
+   W x=374 s=0 z=100 t=somewhere
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=below
+   W x=58 s=0 z=100 t=a
+   W x=86 s=0 z=100 t=door
+   W x=142 s=0 z=100 t=closed
+   W x=212 s=0 z=100 t=softly
+   W x=286 s=0 z=100 t=the
+   W x=333 s=0 z=100 t=reader
+   W x=403 s=0 z=100 t=turned
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=84 s=0 z=100 t=page
+   W x=132 s=0 z=100 t=while
+   W x=184 s=0 z=100 t=the
+   W x=225 s=0 z=100 t=rain
+   W x=272 s=0 z=100 t=kept
+   W x=315 s=0 z=100 t=falling
+   W x=393 s=0 z=100 t=on
+   W x=426 s=0 z=100 t=the
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=old
+   W x=37 s=0 z=100 t=roof
+   W x=87 s=0 z=100 t=and
+   W x=126 s=0 z=100 t=somewhere
+   W x=218 s=0 z=100 t=below
+   W x=268 s=0 z=100 t=a
+   W x=288 s=0 z=100 t=door
+   W x=336 s=0 z=100 t=closed
+   W x=398 s=0 z=100 t=softly
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=38 s=0 z=100 t=reader
+   W x=99 s=0 z=100 t=turned
+   W x=163 s=0 z=100 t=another
+   W x=244 s=0 z=100 t=page
+   W x=289 s=0 z=100 t=while
+   W x=338 s=0 z=100 t=the
+   W x=376 s=0 z=100 t=rain
+   W x=420 s=0 z=100 t=kept
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=falling
+   W x=80 s=0 z=100 t=on
+   W x=115 s=0 z=100 t=the
+   W x=158 s=0 z=100 t=old
+   W x=199 s=0 z=100 t=roof
+   W x=253 s=0 z=100 t=and
+   W x=296 s=0 z=100 t=somewhere
+   W x=392 s=0 z=100 t=below
+   W x=446 s=0 z=100 t=a
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=door
+   W x=47 s=0 z=100 t=closed
+   W x=108 s=0 z=100 t=softly
+   W x=173 s=0 z=100 t=the
+   W x=211 s=0 z=100 t=reader
+   W x=272 s=0 z=100 t=turned
+   W x=336 s=0 z=100 t=another
+   W x=417 s=0 z=100 t=page
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=while
+   W x=52 s=0 z=100 t=the
+   W x=93 s=0 z=100 t=rain
+   W x=140 s=0 z=100 t=kept
+   W x=183 s=0 z=100 t=falling
+   W x=261 s=0 z=100 t=on
+   W x=294 s=0 z=100 t=the
+   W x=335 s=0 z=100 t=old
+   W x=374 s=0 z=100 t=roof
+   W x=426 s=0 z=100 t=and
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=somewhere
+   W x=96 s=0 z=100 t=below
+   W x=150 s=0 z=100 t=a
+   W x=174 s=0 z=100 t=door
+   W x=226 s=0 z=100 t=closed
+   W x=292 s=0 z=100 t=softly
+   W x=362 s=0 z=100 t=the
+   W x=405 s=0 z=100 t=reader
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=turned
+   W x=68 s=0 z=100 t=another
+   W x=153 s=0 z=100 t=page
+   W x=202 s=0 z=100 t=while
+   W x=255 s=0 z=100 t=the
+   W x=297 s=0 z=100 t=rain
+   W x=345 s=0 z=100 t=kept
+   W x=389 s=0 z=100 t=falling
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=on
+   W x=31 s=0 z=100 t=the
+   W x=70 s=0 z=100 t=old
+   W x=107 s=0 z=100 t=roof
+   W x=157 s=0 z=100 t=and
+   W x=196 s=0 z=100 t=somewhere
+   W x=288 s=0 z=100 t=below
+   W x=338 s=0 z=100 t=a
+   W x=358 s=0 z=100 t=door
+   W x=406 s=0 z=100 t=closed
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=softly
+   W x=64 s=0 z=100 t=the
+   W x=101 s=0 z=100 t=reader
+   W x=161 s=0 z=100 t=turned
+   W x=224 s=0 z=100 t=another.
+ PAGE 3 elements=6 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=TARGETB
+   W x=85 s=0 z=100 t=another
+   W x=167 s=0 z=100 t=page
+   W x=213 s=0 z=100 t=while
+   W x=263 s=0 z=100 t=the
+   W x=302 s=0 z=100 t=rain
+   W x=347 s=0 z=100 t=kept
+   W x=388 s=0 z=100 t=falling
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=on
+   W x=31 s=0 z=100 t=the
+   W x=70 s=0 z=100 t=old
+   W x=107 s=0 z=100 t=roof
+   W x=157 s=0 z=100 t=and
+   W x=196 s=0 z=100 t=somewhere
+   W x=288 s=0 z=100 t=below
+   W x=338 s=0 z=100 t=a
+   W x=358 s=0 z=100 t=door
+   W x=406 s=0 z=100 t=closed
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=softly
+   W x=68 s=0 z=100 t=the
+   W x=109 s=0 z=100 t=reader
+   W x=173 s=0 z=100 t=turned
+   W x=240 s=0 z=100 t=another
+   W x=324 s=0 z=100 t=page
+   W x=372 s=0 z=100 t=while
+   W x=424 s=0 z=100 t=the
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=rain
+   W x=47 s=0 z=100 t=kept
+   W x=90 s=0 z=100 t=falling
+   W x=168 s=0 z=100 t=on
+   W x=201 s=0 z=100 t=the
+   W x=242 s=0 z=100 t=old
+   W x=281 s=0 z=100 t=roof
+   W x=333 s=0 z=100 t=and
+   W x=374 s=0 z=100 t=somewhere
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=below
+   W x=48 s=0 z=100 t=a
+   W x=66 s=0 z=100 t=door
+   W x=112 s=0 z=100 t=closed
+   W x=172 s=0 z=100 t=softly
+   W x=236 s=0 z=100 t=the.
+  LINE y=129 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=TARGETAFTER
+   W x=99 s=0 z=100 t=Text
+   W x=137 s=0 z=100 t=after
+   W x=192 s=0 z=100 t=the
+   W x=229 s=0 z=100 t=table.
+SPINE 5 href=OEBPS/text/same.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=12 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=164 s=1 z=100 t=Same
+   W x=249 s=1 z=100 t=row
+  LINE y=47 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=CASE6
+   W x=60 s=0 z=100 t=Two
+   W x=91 s=0 z=100 t=outer
+   W x=148 s=0 z=100 t=cells
+   W x=198 s=0 z=100 t=of
+   W x=227 s=0 z=100 t=one
+   W x=266 s=0 z=100 t=row,
+   W x=307 s=0 z=100 t=each
+   W x=354 s=0 z=100 t=holding
+   W x=430 s=0 z=100 t=an
+  LINE y=71 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=inner
+   W x=51 s=0 z=100 t=table.
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=SAMEA
+   W x=70 s=0 z=100 t=The
+   W x=103 s=0 z=100 t=first
+   W x=152 s=0 z=100 t=outer
+   W x=208 s=0 z=100 t=cell.
+  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=SAMEA1
+   W x=76 s=0 z=100 t=First
+   W x=121 s=0 z=100 t=inner
+   W x=172 s=0 z=100 t=table,
+   W x=232 s=0 z=100 t=cell
+   W x=272 s=0 z=100 t=one.
+  LINE y=152 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=SAMEA2
+   W x=77 s=0 z=100 t=First
+   W x=122 s=0 z=100 t=inner
+   W x=173 s=0 z=100 t=table,
+   W x=233 s=0 z=100 t=cell
+   W x=273 s=0 z=100 t=two.
+  LINE y=176 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=SAMEB
+   W x=71 s=0 z=100 t=The
+   W x=104 s=0 z=100 t=second
+   W x=166 s=0 z=100 t=outer
+   W x=222 s=0 z=100 t=cell.
+  LINE y=200 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=SAMEB1
+   W x=77 s=0 z=100 t=Second
+   W x=142 s=0 z=100 t=inner
+   W x=193 s=0 z=100 t=table,
+   W x=253 s=0 z=100 t=cell
+   W x=293 s=0 z=100 t=one.
+  LINE y=224 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=SAMEB2
+   W x=78 s=0 z=100 t=Second
+   W x=143 s=0 z=100 t=inner
+   W x=194 s=0 z=100 t=table,
+   W x=254 s=0 z=100 t=cell
+   W x=294 s=0 z=100 t=two.
+  LINE y=248 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=SAMEBTAIL
+   W x=110 s=0 z=100 t=The
+   W x=147 s=0 z=100 t=second
+   W x=213 s=0 z=100 t=outer
+   W x=273 s=0 z=100 t=cell
+   W x=317 s=0 z=100 t=after
+   W x=376 s=0 z=100 t=its
+   W x=411 s=0 z=100 t=inner
+  LINE y=272 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=table.
+  LINE y=296 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=SAMEAFTER
+   W x=87 s=0 z=100 t=Text
+   W x=125 s=0 z=100 t=after
+   W x=180 s=0 z=100 t=the
+   W x=217 s=0 z=100 t=table.

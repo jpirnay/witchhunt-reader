@@ -9,31 +9,49 @@ handover (2026-08), the memory audit (2026-09) and the earlier memory-allocation
 
 The rules and measurements these items refer to are in [Memory Allocation Strategy](../memory-allocation-strategy.md).
 
-## Text inside a nested table is dropped
+## The paragraph after a table loses its margin-top
 
-**Open.** `ChapterHtmlSlimParser::consumeText` returns early when `currentTable->depth > 1`
-(`ChapterHtmlSlimParser.cpp:4435`), so every word inside a table nested in another table is discarded. The nested-table
-branch of `ChapterHtmlSlimParser::startElement` (`:3157-3164`) calls `degradeTable("nested table")`, and its comment
-says the inner cells fold into the outer table's stream, but the text never arrives there. `test_table_streaming.epub`
-shows it: its "Nested tables" chapter (spine 2) nests a table in a cell, and its golden
-(`test/epub_pipeline/goldens/test_table_streaming.golden.txt`) holds the outer cells' words and none of the inner
-table's ("Inner cell one" to "Inner cell four").
+**Open.** The paragraph after a table collapses its margin-top against the margin-bottom of the paragraph before the
+table, as if the table were not there. In `test_table_streaming.epub` spine 3 (`p { margin: 1em 0 }`, 18 px), "Now a
+table with more columns than the grid layout supports." sits at y=414, one line under the last cell of the degraded
+rowspan table above it (y=390), and "Closing text after the tables." at y=395, the bottom of the grid fragment above it
+(`TABLE y=324 h=71`; `test/epub_pipeline/goldens/test_table_streaming.golden.txt`). The paragraphs after the nested
+tables of `test_nested_tables.epub` do the same (FIRSTAFTER at y=344 under the last cell at y=320).
 
-**Why it matters.** It breaks "never drop content", silently, on any book that nests tables. It does not depend on heap
-state, so it reproduces on the host.
+**Why it matters.** A table runs into the text that follows it, against the book's CSS. Nothing is lost; it is spacing.
 
-**Where.** The early return in `consumeText` (`:4435`); the nested `<table>` branch in `startElement` (`:3157`); the
-`depth > 1` `</table>` branch in `endElement` (`:4890`); `openBidiEdge`, which treats an element at `depth > 1` as text
-that is not laid out (`:1600`); and every handler that tests `currentTable->depth == 1`: `tr` (`:3221`) and `td`/`th`
-(`:3236`) in `startElement`, `td`/`th` (`:5036`), `caption` (`:5068`), `tr` (`:5076`) and `table` (`:5083`) in
-`endElement`. All of them need auditing, not just the one `return`: a `<tr>` or `<td>` inside the nested table must not
-open rows or cells in the outer one.
+**Where.** `applyBlockTopSpacing` takes `collapse = min(lastBlockMarginBottom, marginTop)`
+(`ChapterHtmlSlimParser.cpp:6055`), and only `makePages` (`:6013-6015`), `applyBlockTopSpacing` itself (`:6062`),
+`emitPage` (`:1862`) and the box code (`:1944`, `:2014`) write `lastBlockMarginBottom`. A table writes nothing there: a
+grid fragment is placed by `flushTableFragment`, and a degraded cell by `emitCellAsParagraph` (`:7051`), which hands
+the cell's lines to `addLineToPage` (`:7081`) without `makePages`. So the paragraph laid out before the table still
+holds `lastBlockMarginBottom` when the one after it opens.
 
-**Tried.** Kept out of the streaming table renderer (PR #126) on purpose, as its own change. Nothing since.
+**Next step.** Reset `lastBlockMarginBottom` once a table fragment or a degraded cell is placed, and regenerate the
+goldens that hold a paragraph after a table (`test_table_streaming`, `test_nested_tables`, `test_tables`,
+`test_table_grid_edges`, `test_table_cell_overflow`), checking that each moved line is the paragraph's own margin.
 
-**Next step.** Route `depth > 1` text into the degraded outer table's paragraph stream and walk through each `depth`
-branch. The fixture is there: `test_table_streaming.epub`, added with the streaming renderer (55883bd26) and without a
-`make_test_*.py` generator. Its golden then gains the inner words; check the rest of its diff.
+## A table cell keeps only its first picture
+
+**Open.** A cell holding more than one `<img>` shows the first and drops the rest, silently, whether the table is a
+grid or laid out as paragraphs. Probe (2026-11-19, the host dump tool, master 715896630 and this branch alike): a grid
+cell `GRIDA <img checker/> GRIDMID <img bar/> GRIDEND` dumps all three words and one `CELLIMG` (the checker), and the
+same cell in a table a rowspan degrades dumps its words and one block `IMG` (the checker); the bar is in neither.
+Cells of a nested table, and a cell's text after its inner table, are the exception: they stream the cell so far at a
+second picture and go on holding the next.
+
+**Why it matters.** It drops content without a word: an illustrated table (a plate with its legend, a row of icons)
+loses every picture but the first in each cell.
+
+**Where.** The in-cell branch of the image handler in `ChapterHtmlSlimParser::startElement` keeps one `src` per cell
+("first image per cell wins", `ChapterHtmlSlimParser.cpp:3353`) and returns for the others unless the cell is
+`streamed`. A grid row sizes the cell for that one picture (`layoutTableRow`, `cell.image = buildCellImage(...)`,
+`:6977`); a degraded cell places it after its text (`emitCellAsParagraph`, `:7093`, or `emitRowImagesAsBlocks`,
+`:6889`).
+
+**Next step.** In its own PR, place every picture of a cell. A degraded cell can stream the cell so far and go on, as
+a nested table's cell does now; a grid cell needs a decision about how a second picture fits its row's height (stack
+them, or degrade the row).
 
 ## A `<br>` that ends a block adds a blank line
 
