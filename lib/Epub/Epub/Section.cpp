@@ -39,7 +39,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 126;  // v126: the text of a table inside a table is laid out, a paragraph
+constexpr uint8_t SECTION_FILE_VERSION = 127;  // v127: a <br> adds a blank line only on an empty line: none after
+                                               // a word or a picture (a contents entry's trailing <br>), one each
+                                               // in a run of them, none from a table cell's
+                                               // v126: the text of a table inside a table is laid out, a paragraph
                                                // per inner cell; it was dropped
                                                // v125: with extra paragraph spacing on, an empty box right after a
                                                // laid-out block (a rule drawn as a border) keeps its frame: it took

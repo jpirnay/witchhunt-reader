@@ -53,28 +53,6 @@ loses every picture but the first in each cell.
 a nested table's cell does now; a grid cell needs a decision about how a second picture fits its row's height (stack
 them, or degrade the row).
 
-## A `<br>` that ends a block adds a blank line
-
-**Open.** `<p>Alpha<br/></p><p>Bravo</p>` lays out Bravo a whole line below Alpha (y=48 with the host stub, against 24
-without the `<br>`), whether or not the `<br>` is styled `display: block`. A browser renders no line for a line break
-that ends a block's content.
-
-**Why it matters.** Calibre ends every entry of a converted contents page with `<br class="calibre1"/>` (and styles it
-`display: block`): Hayakawa's 『七王国の玉座』, seen on the X3 on 2026-10-26, sets each contents entry as a line and a
-blank line, about twice the pages it needs.
-
-**Where.** The `<br>` branch of `ChapterHtmlSlimParser::startElement` (`ChapterHtmlSlimParser.cpp:4058-4090`) leaves an
-empty block marked `fromBrElement`, and `startNewTextBlock` adds a line height to the next block's top margin for it
-(`:2741-2748`); a block that gets text first loses the mark. `test_br_in_blocks.epub` and `test_br_section_break.epub`
-pin what `<br>` does today, so a change has to keep their deliberate cases (a run of `<br>` as a scene break) apart from
-a single trailing one. Case 5 of `test_br_in_blocks` ("TRAILING BR", `<h2>Echo heading<br/></h2>`) is this case: its
-golden puts the paragraph 58 px below the heading line (y=140 to 198), against 34 px after case 2's heading without a
-`<br>` (y=192 to 226). The extra 24 px is the gap case 6 gets on purpose from a `<br/>` of its own between a heading and
-its paragraph.
-
-**Next step.** Drop the empty line a single `<br>` leaves at the end of a block, check both goldens (case 5 of
-`test_br_in_blocks` changes, case 6 must not), and compare a calibre book's page count before and after.
-
 ## No hint when a chapter was simplified
 
 **Open.** When a fixed capacity changes what a chapter shows, `ChapterHtmlSlimParser::noteCapOverflow`

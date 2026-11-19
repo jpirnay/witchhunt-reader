@@ -93,12 +93,12 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=139 s=0 z=100 t=wasting
    W x=210 s=0 z=100 t=our
    W x=247 s=0 z=100 t=breath.
-  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=216 s=0 z=100 t=INDENTED
    W x=299 s=0 z=100 t=A
    W x=315 s=0 z=100 t=paragraph
    W x=410 s=0 z=100 t=whose
-  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=own
    W x=39 s=0 z=100 t=text-
    W x=84 s=0 z=100 t=indent
@@ -109,7 +109,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=348 s=0 z=100 t=far
    W x=388 s=0 z=100 t=in,
    W x=423 s=0 z=100 t=and
-  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=which
    W x=49 s=0 z=100 t=simply
    W x=103 s=0 z=100 t=wraps.

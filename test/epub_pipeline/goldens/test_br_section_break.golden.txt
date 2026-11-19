@@ -211,7 +211,7 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=dolore
    W x=64 s=0 z=100 t=magna
    W x=126 s=0 z=100 t=aliqua.
-  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=Lorem
    W x=75 s=0 z=100 t=ipsum
    W x=123 s=0 z=100 t=dolor
@@ -219,7 +219,7 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=209 s=0 z=100 t=amet,
    W x=264 s=0 z=100 t=consectetur
    W x=373 s=0 z=100 t=adipiscing
-  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=elit,
    W x=51 s=0 z=100 t=sed
    W x=86 s=0 z=100 t=do
@@ -229,11 +229,11 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=346 s=0 z=100 t=ut
    W x=376 s=0 z=100 t=labore
    W x=441 s=0 z=100 t=et
-  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=dolore
    W x=64 s=0 z=100 t=magna
    W x=126 s=0 z=100 t=aliqua.
-  LINE y=313 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=337 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=PASS:
    W x=73 s=0 z=100 t=Three
    W x=123 s=0 z=100 t=blank
@@ -241,7 +241,7 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=225 s=0 z=100 t=should
    W x=292 s=0 z=100 t=appear
    W x=351 s=0 z=100 t=below.
-  LINE y=338 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=362 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=Lorem
    W x=75 s=0 z=100 t=ipsum
    W x=123 s=0 z=100 t=dolor
@@ -249,7 +249,7 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=209 s=0 z=100 t=amet,
    W x=264 s=0 z=100 t=consectetur
    W x=373 s=0 z=100 t=adipiscing
-  LINE y=362 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=386 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=elit,
    W x=51 s=0 z=100 t=sed
    W x=86 s=0 z=100 t=do
@@ -259,11 +259,11 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=346 s=0 z=100 t=ut
    W x=376 s=0 z=100 t=labore
    W x=441 s=0 z=100 t=et
-  LINE y=386 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=410 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=dolore
    W x=64 s=0 z=100 t=magna
    W x=126 s=0 z=100 t=aliqua.
-  LINE y=435 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=507 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=Lorem
    W x=75 s=0 z=100 t=ipsum
    W x=123 s=0 z=100 t=dolor
@@ -271,7 +271,7 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=209 s=0 z=100 t=amet,
    W x=264 s=0 z=100 t=consectetur
    W x=373 s=0 z=100 t=adipiscing
-  LINE y=459 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=531 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=elit,
    W x=51 s=0 z=100 t=sed
    W x=86 s=0 z=100 t=do
@@ -281,7 +281,7 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=346 s=0 z=100 t=ut
    W x=376 s=0 z=100 t=labore
    W x=441 s=0 z=100 t=et
-  LINE y=483 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=555 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=dolore
    W x=64 s=0 z=100 t=magna
    W x=126 s=0 z=100 t=aliqua.
@@ -373,7 +373,7 @@ SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
    W x=194 s=1 z=100 t=After
    W x=284 s=1 z=100 t=a
    W x=315 s=1 z=100 t=Heading
-  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=80 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=18 s=0 z=100 t=PASS:
    W x=73 s=0 z=100 t=There
    W x=123 s=0 z=100 t=should
@@ -384,13 +384,13 @@ SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
    W x=325 s=0 z=100 t=gap
    W x=360 s=0 z=100 t=between
    W x=426 s=0 z=100 t=the
-  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=heading
    W x=75 s=0 z=100 t=above
    W x=132 s=0 z=100 t=and
    W x=169 s=0 z=100 t=this
    W x=212 s=0 z=100 t=paragraph.
-  LINE y=121 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=129 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=Lorem
    W x=75 s=0 z=100 t=ipsum
    W x=123 s=0 z=100 t=dolor
@@ -398,7 +398,7 @@ SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
    W x=209 s=0 z=100 t=amet,
    W x=264 s=0 z=100 t=consectetur
    W x=373 s=0 z=100 t=adipiscing
-  LINE y=145 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=153 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=elit,
    W x=51 s=0 z=100 t=sed
    W x=86 s=0 z=100 t=do
@@ -408,14 +408,14 @@ SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
    W x=346 s=0 z=100 t=ut
    W x=376 s=0 z=100 t=labore
    W x=441 s=0 z=100 t=et
-  LINE y=169 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=177 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=dolore
    W x=64 s=0 z=100 t=magna
    W x=126 s=0 z=100 t=aliqua.
-  LINE y=202 x=0 align=2 mult=1.400 hfid=0 words=2
+  LINE y=210 x=0 align=2 mult=1.400 hfid=0 words=2
    W x=121 s=1 z=100 t=Section
    W x=233 s=1 z=100 t=heading
-  LINE y=261 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=277 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=18 s=0 z=100 t=PASS:
    W x=73 s=0 z=100 t=There
    W x=123 s=0 z=100 t=should
@@ -426,7 +426,7 @@ SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
    W x=325 s=0 z=100 t=gap
    W x=360 s=0 z=100 t=between
    W x=426 s=0 z=100 t=the
-  LINE y=285 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=301 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=section
    W x=70 s=0 z=100 t=heading
    W x=145 s=0 z=100 t=and

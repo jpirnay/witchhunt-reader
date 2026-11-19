@@ -23,14 +23,67 @@ may lend its size to the next paragraph.
   6. <br> between heading and text  the same, with the usual blank-line gap
   7. empty heading                  the paragraph after it is body size
 
+A <br> adds a blank line only when the line it ends is empty, as a browser lays
+it out: after text on the same line it ends that line and adds nothing.
+
+  8. trailing <br> in a paragraph   no gap before the next paragraph
+  9. two <br> inside a paragraph    one blank line between the two lines
+ 10. two trailing <br>              one blank line before the next paragraph
+ 11. two <br> between paragraphs    two blank lines (a scene break)
+ 12. <br> after a paragraph, text   one blank line before the text
+
+A line holds more than the text of the block's open element, and a <br> that
+ends it adds nothing either:
+
+ 13. picture, <br>, caption         the caption right under the picture
+ 14. picture, trailing <br>         no gap before the next paragraph
+ 15. text, <br>, picture, <br>,     no gap above or below the picture
+     caption
+ 16. text in a <section>, <br>      no gap, though no paragraph element is open
+ 17. text after a closed            no gap: the <br> ends the loose text's line
+     paragraph, <br>                (which the parser still sets on the
+                                    paragraph's last line)
+
+Where the line ends, and what it is drawn after:
+
+ 18. <br>, then a rule              the blank line above the rule, none below
+ 19. <br>, rule, <br>               one blank line on each side of the rule
+ 20. <br> after a streamed table    one blank line (the rowspan streams the
+                                    table, its cell laid out as a paragraph)
+ 21. a run of <br> in a nested      no blank line from them
+     table's cell
+ 22. a hidden block inside the      no gap: the hidden block makes no box and
+     line, then <br>                does not end the line
+ 23. a leading <br> in a paragraph  one blank line: it stands on an empty line
+ 24. <br> after a <section> closes  one blank line before the text
+
 Regenerate with:  python test/epubs/make_test_br_in_blocks.py
 then refresh goldens: UPDATE_GOLDENS=1 ctest -R EpubPipeline
 """
 
 import os
+import struct
 import zipfile
+import zlib
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_br_in_blocks.epub")
+
+
+def png(width, height, ink):
+    """An 8-bit greyscale PNG: ink(x, y) -> True paints black on white. The writer of make_test_inline_images.py."""
+    rows = b"".join(
+        b"\x00" + bytes(0 if ink(x, y) else 255 for x in range(width)) for y in range(height)
+    )
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b"")
+
+
+# Wider than half the column and taller than a line: placed as a block of its own, not set in a line.
+PICTURE = png(240, 120, lambda x, y: ((x // 20 + y // 20) % 2 == 0) or x < 3 or y < 3 or x >= 237 or y >= 117)
 
 CONTAINER = """<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
@@ -56,6 +109,7 @@ OPF = """<?xml version="1.0" encoding="UTF-8"?>
   <manifest>
     <item id="ncx"      href="toc.ncx"        media-type="application/x-dtbncx+xml"/>
     <item id="css"      href="style.css"      media-type="text/css"/>
+    <item id="picture"  href="picture.png"    media-type="image/png"/>
     <item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
 
@@ -129,6 +183,74 @@ CHAPTER = """<?xml version="1.0" encoding="UTF-8"?>
   <h3></h3>
   <p>Golf body text</p>
 
+  <p>8. TRAILING BR IN A PARAGRAPH:</p>
+  <p>Hotel top<br/></p>
+  <p>Hotel next paragraph</p>
+
+  <p>9. TWO BR INSIDE A PARAGRAPH:</p>
+  <p>India top<br/><br/>India bottom</p>
+
+  <p>10. TWO TRAILING BR:</p>
+  <p>Juliett top<br/><br/></p>
+  <p>Juliett next paragraph</p>
+
+  <p>11. TWO BR BETWEEN PARAGRAPHS:</p>
+  <p>Kilo top</p>
+  <br/>
+  <br/>
+  <p>Kilo next paragraph</p>
+
+  <p>12. BR AFTER A PARAGRAPH, THEN TEXT:</p>
+  <p>Lima top</p>
+  <br/>Lima loose text
+
+  <p>13. PICTURE, BR, CAPTION:</p>
+  <p><img src="picture.png" alt=""/><br/>Mike caption</p>
+
+  <p>14. PICTURE, TRAILING BR:</p>
+  <p><img src="picture.png" alt=""/><br/></p>
+  <p>November next paragraph</p>
+
+  <p>15. TEXT, BR, PICTURE, BR, CAPTION:</p>
+  <p>Oscar top<br/><img src="picture.png" alt=""/><br/>Oscar caption</p>
+
+  <p>16. TEXT IN A SECTION:</p>
+  <section>Papa one<br/>Papa two</section>
+
+  <p>17. TEXT AFTER A CLOSED PARAGRAPH:</p>
+  <p>Quebec top</p>Quebec loose one<br/>Quebec loose two
+
+  <p>18. BR, THEN A RULE:</p>
+  <p>Romeo top</p>
+  <br/>
+  <hr/>
+  <p>Romeo after the rule</p>
+
+  <p>19. BR, RULE, BR:</p>
+  <p>Sierra top</p>
+  <br/>
+  <hr/>
+  <br/>
+  <p>Sierra after the rule</p>
+
+  <p>20. BR AFTER A STREAMED TABLE:</p>
+  <table><tr><td rowspan="2">Tango cell</td></tr></table>
+  <br/>
+  <p>Tango after the table</p>
+
+  <p>21. BR RUN IN A NESTED TABLE:</p>
+  <table><tr><td><table><tr><td>Uniform a<br/>Uniform b<br/>Uniform c</td></tr></table></td></tr></table>
+  <p>Uniform after the table</p>
+
+  <p>22. HIDDEN BLOCK INSIDE THE LINE:</p>
+  <p>Victor one<span style="display:none"><div>Victor hidden</div></span><br/>Victor two</p>
+
+  <p>23. LEADING BR:</p>
+  <p><br/>Whiskey two</p>
+
+  <p>24. BR AFTER A SECTION:</p>
+  <section>Xray one</section><br/>Xray two
+
 </body>
 </html>
 """.replace("LONGTEXT", "word0 word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12 word13 word14 word15 word16 word17 word18 word19 word20 word21 word22 word23 word24 word25 word26 word27 word28 word29 word30 word31 word32 word33 word34 word35 word36 word37 word38 word39 word40 word41 word42 word43 word44 word45 word46 word47 word48 word49 word50 word51 word52 word53 word54 word55 word56 word57 word58 word59 word60 word61 word62 word63 word64 word65 word66 word67 word68 word69 word70 word71 word72 word73 word74 word75 word76 word77 word78 word79 word80 word81 word82 word83 word84 word85 word86 word87 word88 word89 word90 word91 word92 word93 word94 word95 word96 word97 word98 word99 word100 word101 word102 word103 word104 word105 word106 word107 word108 word109")
@@ -145,6 +267,7 @@ def main():
         z.writestr("OEBPS/toc.ncx", NCX, zipfile.ZIP_DEFLATED)
         z.writestr("OEBPS/style.css", CSS, zipfile.ZIP_DEFLATED)
         z.writestr("OEBPS/chapter1.xhtml", CHAPTER, zipfile.ZIP_DEFLATED)
+        z.writestr("OEBPS/picture.png", PICTURE, zipfile.ZIP_DEFLATED)
     print("wrote", OUT)
 
 
