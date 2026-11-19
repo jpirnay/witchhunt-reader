@@ -1,7 +1,8 @@
 # Protected content (DRM)
 
-Status, 2026-11-17 night: D1 (the reader opens protected books) is merged (#821) and has run on the X4 Pro and the X3.
-The listing change the Adobe plugin needs is on `fix/web-list-dot-folders` (pushed, no PR). D2 and D3 are not started.
+Status, 2026-11-19: D1 (the reader opens protected books) is merged (#821) and has run on the X4 Pro and the X3.
+The listing change the Adobe plugin needs comes with the pull request that adds this version of the file. D2 and D3 are
+not started.
 This file replaces the September plan on `feat/protected-content-phase0` (`docs/protected-content-plan.md` and
 `docs/protected-content-handover-2026-09-18.md` there).
 
@@ -21,17 +22,16 @@ Where things stand:
   chip's peripheral, the book key and device secret ported from upstream), `HalClock::loanNow()`, the reader's
   messages, `POST /api/book-key` and `deviceId`. Cost on the C3 at merge: +18,114 B flash, +312 B static RAM; the C3's
   map stayed at 49 code and 44 rodata pages (10.4 KB left in the last code page then).
-- `fix/web-list-dot-folders` (7e5b6f926, master merged in): `/api/files` lists a dot folder named by its path whatever
-  **Show Hidden Files** says. Checked on the X3 (below). It needs its PR.
+- `/api/files` lists a dot folder named by its path whatever **Show Hidden Files** says (the pull request that adds
+  this version of the file). Checked on the X3 (below).
 - Nothing obtains real keys yet: the Adobe plugin needs D3.
 
 Next, in this order unless the owner reorders:
-1. The PR for `fix/web-list-dot-folders`.
-2. The `STR_PROTECTED_*` messages in the other languages (release translation pass; English only so far, so a German
+1. The `STR_PROTECTED_*` messages in the other languages (release translation pass; English only so far, so a German
    UI shows them in English).
-3. D3 (the Adobe plugin): measure the C3 cost of wolfSSL's RSA private-key operations and PKCS#12 first.
-4. D2 (the cache at rest): measure the cipher first.
-5. A real loan end to end, once D3 runs: needs the owner's Adobe ID and a library loan; activating may use one of the
+2. D3 (the Adobe plugin): measure the C3 cost of wolfSSL's RSA private-key operations and PKCS#12 first.
+3. D2 (the cache at rest): measure the cipher first.
+4. A real loan end to end, once D3 runs: needs the owner's Adobe ID and a library loan; activating may use one of the
    account's device slots, so only with the owner's go.
 
 Tools and procedures:
@@ -96,7 +96,7 @@ plugin exists (Hub, sd-plugins, GitHub; 2026-11-17). Version 1.0.5 against this 
   Upstream's contract is `handleCrypto()` in its `CrossPointWebServer.cpp` (base64 fields in and out, PKCS#8 and SPKI
   DER keys, `sign` takes a 20-byte hash).
 - It lists its own folder and `/.crosspoint` (`/api/files`) before anything else, looking for `content.key` in both.
-  Both answered 403 while hidden files were off. `fix/web-list-dot-folders` lists them; on the X3 with hidden files
+  Both answered 403 while hidden files were off. `/api/files` now lists them; on the X3 with hidden files
   off: the plugin folder, `/.crosspoint` and `/.crosspoint/plugins` list (no dot names), `System Volume Information`
   and `/CROSSP~1` stay 403, `/download` of the plugin's file 200, of `settings.json` and `wifi.json` 403.
 - The rest is in place: the relay (four arguments; a 3xx comes back unfollowed and the plugin follows it), `fetchToSd`
