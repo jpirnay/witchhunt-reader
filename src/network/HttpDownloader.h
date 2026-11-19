@@ -142,12 +142,16 @@ class HttpDownloader {
    * larger than a chunk plus its response headers; a server that ignores Range sends the whole file
    * instead, as before. The progress callback sees whole-file progress either way. See
    * lib/SecureNet/include/HttpRange.h.
+   *
+   * httpStatus, when given, receives the status of the server's last answer (the one a redirect
+   * ends at), or 0 when none came: a failed download can say what the server said.
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, const std::string& username = "",
                                       const std::string& password = "",
                                       TlsPolicy tls = TlsPolicy::VerifiedThenUnverified,
-                                      const RedirectFilter& redirectAllowed = {}, const Headers& headers = {});
+                                      const RedirectFilter& redirectAllowed = {}, const Headers& headers = {},
+                                      int* httpStatus = nullptr);
 
   /**
    * One request with any method, for the plugin relay: `headers` and `body` go out with it, the

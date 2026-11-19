@@ -11,7 +11,9 @@ target_include_directories(XtcParserTest PRIVATE
   ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/FsHelpers
+  ${REPO_ROOT}/lib/Memory  # HeapFit.h
   ${REPO_ROOT}/lib/Xtc/Xtc
+  ${REPO_ROOT}/test/epub_pipeline  # last: only for its esp_heap_caps.h stub (HeapFit.h)
 )
 
 target_link_libraries(XtcParserTest PRIVATE
