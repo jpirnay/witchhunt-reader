@@ -1,5 +1,5 @@
 BOOK title=BR In Blocks Test lang=en spine=1 toc=1 reliableToc=1
-SPINE 0 href=OEBPS/chapter1.xhtml pages=3 truncated=0 cssFallback=0
+SPINE 0 href=OEBPS/chapter1.xhtml pages=4 truncated=0 cssFallback=0
  PAGE 0 elements=25 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=1.
@@ -330,3 +330,93 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=3 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=Quebec
    W x=58 s=0 z=100 t=loose
    W x=115 s=0 z=100 t=two
+ PAGE 3 elements=21 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=18.
+   W x=28 s=0 z=100 t=BR,
+   W x=62 s=0 z=100 t=THEN
+   W x=101 s=0 z=100 t=A
+   W x=115 s=0 z=100 t=RULE:
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Romeo
+   W x=60 s=0 z=100 t=top
+  HR y=84 x=115
+  LINE y=97 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Romeo
+   W x=60 s=0 z=100 t=after
+   W x=115 s=0 z=100 t=the
+   W x=152 s=0 z=100 t=rule
+  LINE y=121 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=19.
+   W x=29 s=0 z=100 t=BR,
+   W x=63 s=0 z=100 t=RULE,
+   W x=119 s=0 z=100 t=BR:
+  LINE y=145 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Sierra
+   W x=61 s=0 z=100 t=top
+  HR y=205 x=115
+  LINE y=242 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Sierra
+   W x=61 s=0 z=100 t=after
+   W x=116 s=0 z=100 t=the
+   W x=153 s=0 z=100 t=rule
+  LINE y=266 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=20.
+   W x=35 s=0 z=100 t=BR
+   W x=61 s=0 z=100 t=AFTER
+   W x=110 s=0 z=100 t=A
+   W x=124 s=0 z=100 t=STREAMED
+   W x=208 s=0 z=100 t=TABLE:
+  LINE y=290 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=0 z=100 t=Tango
+   W x=76 s=0 z=100 t=cell
+  LINE y=338 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Tango
+   W x=58 s=0 z=100 t=after
+   W x=113 s=0 z=100 t=the
+   W x=150 s=0 z=100 t=table
+  LINE y=362 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=21.
+   W x=29 s=0 z=100 t=BR
+   W x=55 s=0 z=100 t=RUN
+   W x=86 s=0 z=100 t=IN
+   W x=108 s=0 z=100 t=A
+   W x=122 s=0 z=100 t=NESTED
+   W x=188 s=0 z=100 t=TABLE:
+  LINE y=386 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Uniform
+   W x=70 s=0 z=100 t=after
+   W x=125 s=0 z=100 t=the
+   W x=162 s=0 z=100 t=table
+  LINE y=410 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=22.
+   W x=30 s=0 z=100 t=HIDDEN
+   W x=94 s=0 z=100 t=BLOCK
+   W x=150 s=0 z=100 t=INSIDE
+   W x=216 s=0 z=100 t=THE
+   W x=248 s=0 z=100 t=LINE:
+  LINE y=434 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Victor
+   W x=57 s=0 z=100 t=one
+  LINE y=458 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Victor
+   W x=57 s=0 z=100 t=two
+  LINE y=482 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=23.
+   W x=31 s=0 z=100 t=LEADING
+   W x=103 s=0 z=100 t=BR:
+  LINE y=530 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Whiskey
+   W x=67 s=0 z=100 t=two
+  LINE y=554 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=24.
+   W x=32 s=0 z=100 t=BR
+   W x=58 s=0 z=100 t=AFTER
+   W x=107 s=0 z=100 t=A
+   W x=121 s=0 z=100 t=SECTION:
+  LINE y=578 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=0 z=100 t=Xray
+   W x=62 s=0 z=100 t=one
+  LINE y=626 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Xray
+   W x=44 s=0 z=100 t=two

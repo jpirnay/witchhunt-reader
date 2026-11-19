@@ -4051,6 +4051,19 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     }
 
     if (strcmp(name, "br") == 0) {
+      // A <br> ends the line it stands on, and adds a blank line only when that line is empty, as a browser lays it
+      // out. A line with a word or a picture on it has content, and its <br> adds nothing: a contents entry Calibre
+      // ends with <br class="calibre1"/> takes one line, not two. A line is empty when nothing came since the block
+      // began or since a close that ends a line (lineStartTokens_, closeEndsLine). Counted before the flush below,
+      // whose layout may hyphenate. The blank line goes in the padding, which a merge adds up and no margin collapses
+      // into: a run of <br> gives a line each, and the paragraph after it keeps its own margin-top. (It was decided
+      // at the next block once, from whether the <br>'s block had stayed empty, which also counted the <br> that ends
+      // a block's last line, and a merge that took the larger margin made a run of them one line.) A table cell lays
+      // its text out apart from the page's blocks, a nested table's included: its <br> leaves the block around the
+      // table alone (a run of them in a cell put a blank line under the table).
+      const bool lineHasContent = self->currentTableCell != nullptr ||
+                                  (self->currentTable && self->currentTable->depth > 1) || self->pictureOnLine_ ||
+                                  self->lineTokensSoFar() > self->lineStartTokens_;
       if (self->partWordBufferIndex > 0) {
         // flush word preceding <br/> to currentTextBlock before calling startNewTextBlock
         if (!self->flushPartWordBuffer()) return;
@@ -4058,17 +4071,6 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       // Build a neutral <br> style that keeps inline alignment/indent context but avoids
       // carrying cumulative margins from previous empty blocks (which can force spurious page breaks).
       const BlockStyle& currentStyle = self->currentTextBlock->getBlockStyle();
-      // A <br> ends the line it stands on, and adds a blank line only when that line is empty, as a browser lays it
-      // out. A line with a word or a picture on it has content, and its <br> adds nothing: a contents entry Calibre
-      // ends with <br class="calibre1"/> takes one line, not two. A line is empty when nothing came since the block
-      // began or since a block-level element closed (lineStartTokens_). The blank line goes in the padding, which a
-      // merge adds up and no margin collapses into: a run of <br> gives a line each, and the paragraph after it keeps
-      // its own margin-top. (It was decided at the next block once, from whether the <br>'s block had stayed empty,
-      // which also counted the <br> that ends a block's last line, and a merge that took the larger margin made a
-      // run of them one line.) A table cell lays its text out apart from the page's blocks: its <br> leaves the block
-      // around the table alone (a run of them in a cell put a blank line under the table).
-      const bool lineHasContent = self->currentTableCell != nullptr || self->pictureOnLine_ ||
-                                  self->blockTokensSoFar() > self->lineStartTokens_;
       BlockStyle brStyle;
       brStyle.alignment = currentStyle.alignment;
       brStyle.textAlignDefined = currentStyle.textAlignDefined;
@@ -4143,8 +4145,17 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (self->partWordBufferIndex > 0) {
       if (!self->flushPartWordBuffer()) return;
     }
+    const bool drainsEmptyBlock = self->currentTextBlock && self->currentTextBlock->isEmpty();
     self->makePages();
     // makePages() keeps the drained block for the next paragraph to merge into (see the <table> handler).
+    // An empty block's top spacing (a <br>'s blank line) went on the page above the rule just now: the paragraph
+    // after the rule must not take it again.
+    if (drainsEmptyBlock && self->currentTextBlock) {
+      BlockStyle drained = self->currentTextBlock->getBlockStyle();
+      drained.marginTop = 0;
+      drained.paddingTop = 0;
+      self->currentTextBlock->setBlockStyle(drained);
+    }
     self->clearSpentBlockDirection(self->depth);
     self->applyPendingPageBreak();
     // A rule the book leaves nothing to draw of only ends the block: a section break that is a centred dash, with the
@@ -4833,6 +4844,7 @@ void ChapterHtmlSlimParser::defaultHandlerExpand(void* userData, const char* s, 
 void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
   self->deliverSplitTail();
+  const bool endsLine = self->closeEndsLine(name);
   endElementBody(self, name);
   self->whiteSpace_ = self->openWhiteSpace();
   // A background picture goes in once its element has closed: after the element's own text and,
@@ -4846,6 +4858,9 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
     self->brRunInBackground_ = 0;
     self->placeBackgroundImage(path, elementDepth);
   }
+  // After all the close lays out (a box's last paragraph at closeBox, a caption, the background picture's block
+  // above), so that a layout that hyphenates cannot move the count past the line's end.
+  if (endsLine) self->markLineStart();
 }
 
 void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const char* name) {
@@ -5170,19 +5185,29 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
       }
     }
   }
-
-  // A block-level element's close ends the line its text was on: a <br> after it stands on an empty line, though loose
-  // text may still land in the same block. Last, so the count takes what the close laid out (a background picture's
-  // block). A word still in the buffer is the element's and counts.
-  if ((headerOrBlockTag && strcmp(name, "br") != 0) || closesBlockSpan ||
-      matches(name, INSET_CONTAINER_TAGS, NUM_INSET_CONTAINER_TAGS)) {
-    self->lineStartTokens_ = self->blockTokensSoFar() + (self->partWordHasText() ? 1 : 0);
-    self->pictureOnLine_ = false;
-  }
 }
 
-int ChapterHtmlSlimParser::blockTokensSoFar() const {
-  return wordsExtractedInBlock + (currentTextBlock ? static_cast<int>(currentTextBlock->sourceTokenCount()) : 0);
+int ChapterHtmlSlimParser::lineTokensSoFar() const {
+  return wordsExtractedInBlock + (currentTextBlock ? static_cast<int>(currentTextBlock->sourceTokenCount()) : 0) +
+         (partWordHasText() ? 1 : 0);
+}
+
+// A block-level element's close ends the line its text was on: a <br> after it stands on an empty line, though loose
+// text may still land in the same block. So does a table's, whose streamed cells were laid out as paragraphs of the
+// block around it. Read before the close's body runs, which ends the scopes this reads. Not inside a hidden subtree,
+// whose elements make no box (the hidden element's own close included), nor inside a nested table, whose <br> never
+// adds a line.
+bool ChapterHtmlSlimParser::closeEndsLine(const char* name) const {
+  const int elementDepth = depth - 1;
+  if (skipUntilDepth <= elementDepth) return false;
+  if (currentTable && currentTable->depth > 1) return false;
+  return (isHeaderOrBlock(name) && strcmp(name, "br") != 0) || blockSpan_.depth == elementDepth ||
+         matches(name, INSET_CONTAINER_TAGS, NUM_INSET_CONTAINER_TAGS) || strcmp(name, "table") == 0;
+}
+
+void ChapterHtmlSlimParser::markLineStart() {
+  lineStartTokens_ = lineTokensSoFar();
+  pictureOnLine_ = false;
 }
 
 ChapterHtmlSlimParser::~ChapterHtmlSlimParser() {

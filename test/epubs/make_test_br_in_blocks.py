@@ -44,6 +44,19 @@ ends it adds nothing either:
      paragraph, <br>                (which the parser still sets on the
                                     paragraph's last line)
 
+Where the line ends, and what it is drawn after:
+
+ 18. <br>, then a rule              the blank line above the rule, none below
+ 19. <br>, rule, <br>               one blank line on each side of the rule
+ 20. <br> after a streamed table    one blank line (the rowspan streams the
+                                    table, its cell laid out as a paragraph)
+ 21. a run of <br> in a nested      no blank line from them
+     table's cell
+ 22. a hidden block inside the      no gap: the hidden block makes no box and
+     line, then <br>                does not end the line
+ 23. a leading <br> in a paragraph  one blank line: it stands on an empty line
+ 24. <br> after a <section> closes  one blank line before the text
+
 Regenerate with:  python test/epubs/make_test_br_in_blocks.py
 then refresh goldens: UPDATE_GOLDENS=1 ctest -R EpubPipeline
 """
@@ -206,6 +219,37 @@ CHAPTER = """<?xml version="1.0" encoding="UTF-8"?>
 
   <p>17. TEXT AFTER A CLOSED PARAGRAPH:</p>
   <p>Quebec top</p>Quebec loose one<br/>Quebec loose two
+
+  <p>18. BR, THEN A RULE:</p>
+  <p>Romeo top</p>
+  <br/>
+  <hr/>
+  <p>Romeo after the rule</p>
+
+  <p>19. BR, RULE, BR:</p>
+  <p>Sierra top</p>
+  <br/>
+  <hr/>
+  <br/>
+  <p>Sierra after the rule</p>
+
+  <p>20. BR AFTER A STREAMED TABLE:</p>
+  <table><tr><td rowspan="2">Tango cell</td></tr></table>
+  <br/>
+  <p>Tango after the table</p>
+
+  <p>21. BR RUN IN A NESTED TABLE:</p>
+  <table><tr><td><table><tr><td>Uniform a<br/>Uniform b<br/>Uniform c</td></tr></table></td></tr></table>
+  <p>Uniform after the table</p>
+
+  <p>22. HIDDEN BLOCK INSIDE THE LINE:</p>
+  <p>Victor one<span style="display:none"><div>Victor hidden</div></span><br/>Victor two</p>
+
+  <p>23. LEADING BR:</p>
+  <p><br/>Whiskey two</p>
+
+  <p>24. BR AFTER A SECTION:</p>
+  <section>Xray one</section><br/>Xray two
 
 </body>
 </html>
