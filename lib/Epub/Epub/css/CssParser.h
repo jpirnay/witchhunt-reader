@@ -409,8 +409,8 @@ class CssParser {
   // (scopeToSheets). A rule's order runs on across the book's sheets in the order they are compiled (nextRuleOrder_),
   // so each sheet owns one contiguous range of orders, which setStylesheetPath starts. The compile records each sheet's
   // range and the sheets its @import rules name in a table at the end of the rules cache, written last, so that a valid
-  // table marks a complete file. It is read with the index (ensureCacheIndexLoaded), into the index's arena when it has
-  // one. No rule changes for it.
+  // table marks a complete file. It is read with the index (ensureCacheIndexLoaded), onto the heap. No rule changes for
+  // it.
   struct SheetRange {
     uint32_t pathHash = 0;    // sheetPathHash of the sheet's path in the EPUB; kFoldedSheets for the fold (below)
     uint16_t firstOrder = 0;  // its rules' orders: firstOrder <= order < endOrder, empty for a sheet without rules
@@ -436,26 +436,24 @@ class CssParser {
   // reference, a data: URI, a remote one.
   static bool resolveStylesheetHref(std::string_view baseDir, std::string_view href, std::string& out);
   // The table, loaded with the index (or staged by a compile); empty when there is none.
-  [[nodiscard]] std::span<const SheetRange> sheetRanges() const {
-    return {arenaSheetRanges_ != nullptr ? arenaSheetRanges_ : sheetRanges_.get(), sheetCount_};
-  }
-  [[nodiscard]] std::span<const SheetImport> sheetImports() const {
-    return {arenaSheetImports_ != nullptr ? arenaSheetImports_ : sheetImports_.get(), importCount_};
-  }
+  [[nodiscard]] std::span<const SheetRange> sheetRanges() const { return {sheetRanges_.get(), sheetCount_}; }
+  [[nodiscard]] std::span<const SheetImport> sheetImports() const { return {sheetImports_.get(), importCount_}; }
 
   // A chapter resolves against the stylesheets it links, and the sheets those import, as a browser does: a sheet only
-  // some chapters link (an omnibus edition's part sheets) leaves the others alone. The sheets a chapter's head links,
-  // one bit each (sheetRanges()[i]), and whether one of them is not a sheet of the table.
+  // some chapters link (an omnibus edition's part sheets) leaves the others alone. The links of a chapter's head, as a
+  // scan of it reports them (HeadingCarry::Scanner's link hook, Section::scopeStylesheets): the sheets they name, one
+  // bit each (sheetRanges()[i]), and whether one is not a sheet of the table or the head was not read whole.
   struct SheetLinks {
+    const CssParser* css = nullptr;
+    std::string_view baseDir;  // the linking file's folder, with its trailing slash
     uint64_t sheets = 0;
-    bool unknown = false;  // also set when the head was not read whole: the chapter cannot be scoped
+    bool unknown = false;  // the chapter cannot be scoped
   };
-  // Reads the stylesheet links of the XHTML `file`'s head into `links`, from the file's position up to </head> or
-  // <body>, at most 8 KB: <link rel="stylesheet" href> and <?xml-stylesheet href?>, each href resolved against
-  // `baseDir`, the chapter's folder with its trailing slash (resolveStylesheetHref). An href that names nothing in the
-  // book (data:, a remote sheet) is skipped. A 256 B window and a 256 B tag buffer on the stack; no allocation but
-  // the path of each link.
-  void readSheetLinks(FsFile& file, std::string_view baseDir, SheetLinks& links) const;
+  // A <link>'s rel and href for the SheetLinks `links` points at (the scan's hook, so a void*): a stylesheet's href,
+  // resolved against the links' baseDir (resolveStylesheetHref), sets its sheet's bit, or `unknown` when the table has
+  // no such sheet. A link that is no stylesheet, or names nothing in the book (data:, a remote sheet), is passed over;
+  // one not read `whole` sets `unknown`.
+  static void addLink(void* links, std::string_view rel, std::string_view href, bool whole);
   // Scopes resolveStyle to the sheets `links` names, the sheets they import (to any depth) and the fold. The count of
   // sheets in scope, or 0 when every sheet applies, as before: a chapter that links none, or one the table does not
   // know (an odd path, a sheet the compile skipped), a book with no table, or a chapter that links them all.
@@ -496,12 +494,11 @@ class CssParser {
 
   // The sheet table (see SheetRange): staged while the sheets are compiled, or loaded with the index. Staged, each
   // array grows in steps, as the complex-rule table does: a book's few sheets cost a few dozen bytes, 64 sheets and
-  // 128 imports 1.5 KB. On the heap (makeUniqueNoThrow): the compile has no arena, its lent region reaches only the
-  // finish. Loaded, in the index's arena when it has room (the arena views), else on the heap.
+  // 128 imports 1.5 KB. On the heap (makeUniqueNoThrow), staged or loaded: the compile has no arena, its lent region
+  // reaches only the finish, and a build's lent region has no room to spare beside the inflate ring and the picture
+  // walk for a block that lives the whole build (docs/memory-allocation-strategy.md 8.2).
   mutable std::unique_ptr<SheetRange[]> sheetRanges_;
   mutable std::unique_ptr<SheetImport[]> sheetImports_;
-  mutable SheetRange* arenaSheetRanges_ = nullptr;
-  mutable SheetImport* arenaSheetImports_ = nullptr;
   mutable uint8_t sheetCount_ = 0;
   mutable uint8_t sheetCapacity_ = 0;
   mutable uint8_t importCount_ = 0;
@@ -513,8 +510,10 @@ class CssParser {
   // The sheets the chapter being built resolves against (scopeToSheets): bit i for sheetRanges()[i]; 0, every sheet.
   uint64_t scopedSheets_ = 0;
   void beginSheetRange(uint32_t pathHash);
-  // Records the sheet an @import rule's prelude ("import url(x.css) screen") names, for the sheet being read.
-  void noteImport(std::string_view prelude);
+  // Records the sheet an @import rule's prelude ("import url(x.css) screen") names, for the sheet being read. False
+  // for an @namespace, which ends the imports (CSS Cascade 5); @charset and an @layer statement do not, nor does an
+  // at-rule a browser does not know, which it drops.
+  bool noteImport(std::string_view prelude);
   void dropSheetTable(const char* why);
   void freeSheetTable() const;
   // The table as the rules cache ends (v36), after the rule records; false when a write failed.
@@ -523,7 +522,8 @@ class CssParser {
   // sheetRanges() and sheetImports(). Damaged: the file ends in no table that adds up.
   enum class SheetTableLoad : uint8_t { Loaded, Damaged, NoMemory };
   SheetTableLoad loadSheetTable(FsFile& file, size_t floor) const;
-  // Whether a rule of this order is in the scope (scopeToSheets): a rule before the first range is of no named sheet.
+  // Whether a rule of this order is in the scope (scopeToSheets), which is on: a rule before the first range is of no
+  // named sheet.
   bool sheetApplies(uint16_t order) const;
   // The sheets of the table with this path hash, one bit each; 0 when it has none (the fold has no path).
   uint64_t sheetsOf(uint32_t pathHash) const;

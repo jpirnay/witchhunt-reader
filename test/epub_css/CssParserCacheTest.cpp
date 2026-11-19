@@ -1838,6 +1838,7 @@ TEST(CssSheetTable, AnImportAfterANamespaceIsNotRecorded) {
 }
 
 // --- A chapter's scope: the sheets its head links, and what those import ---
+// (How the head is read, HeadingCarry::Scanner's link hook, is tested with the pipeline: CssSheetRangesTest.)
 
 namespace {
 
@@ -1849,34 +1850,18 @@ const std::vector<NamedSheet> kScopeSheets = {
     {"OEBPS/Styles/c.css", "p { text-align: center }\n.a { font-weight: normal }\np.a.b { margin-left: 2em }\n"},
     {"OEBPS/Styles/d.css", "@import \"nowhere.css\";\n.d { text-decoration: underline }\n"}};
 
-std::string chapterWith(const std::string& head, const std::string& body = "<p>Text.</p>",
-                        const std::string& prolog = "") {
-  return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" + prolog +
-         "<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">\n<head><title>T</title>" + head +
-         "</head>\n<body>" + body + "</body>\n</html>\n";
-}
+struct Link {
+  std::string href;
+  std::string rel = "stylesheet";
+  bool whole = true;
+};
 
-std::string linkTo(const std::string& href) {
-  return "<link rel=\"stylesheet\" type=\"text/css\" href=\"" + href + "\"/>";
-}
-
-// Scopes `parser` to what the head of `xhtml` links, read as a chapter in OEBPS/Text/; what scopeToSheets returns, -1
-// when the file could not be written or read.
-int scopeTo(CssParser& parser, const std::string& xhtml) {
-  std::string path;
-  if (!writeTempCssFile(std::vector<uint8_t>(xhtml.begin(), xhtml.end()), path)) return -1;
-  CssParser::SheetLinks links;
-  bool read = false;
-  {
-    FsFile file;
-    if (Storage.openFileForRead("CSS", path.c_str(), file)) {
-      parser.readSheetLinks(file, "OEBPS/Text/", links);
-      read = true;
-    }
-  }
-  std::error_code ec;
-  std::filesystem::remove(path, ec);
-  return read ? parser.scopeToSheets(links) : -1;
+// Scopes `parser` to the links of a chapter in OEBPS/Text/, as its head's scan reports them; what scopeToSheets
+// returns.
+int scopeTo(CssParser& parser, const std::vector<Link>& head) {
+  CssParser::SheetLinks links{&parser, "OEBPS/Text/"};
+  for (const Link& link : head) CssParser::addLink(&links, link.rel, link.href, link.whole);
+  return parser.scopeToSheets(links);
 }
 
 struct ScopedBook {
@@ -1906,19 +1891,24 @@ struct ScopedBook {
 
 // A chapter that links a.css resolves against a.css and the base.css it imports, and not against c.css or d.css: its
 // paragraph keeps a.css's bold (c.css's later `normal` is the other part's), is not centred, and c.css's compound rule
-// does not reach it. One that links c.css alone has none of a.css's. Through the heap index and the arena alike.
+// does not reach it. One that links c.css alone has none of a.css's. Through the heap index and the arena alike; the
+// table is on the heap either way.
 TEST(CssSheetScope, AChapterResolvesAgainstTheSheetsItLinksAndTheirImports) {
   for (const bool resident : {false, true}) {
     SCOPED_TRACE(resident ? "arena-resident" : "heap");
     ScopedBook book;
     ASSERT_TRUE(book.load(kScopeSheets, resident));
     CssParser& parser = book.parser;
+    const size_t arenaBefore = book.arena.used();
+    const auto base = reinterpret_cast<uintptr_t>(book.arena.tail(book.arena.capacity()));
+    const auto table = reinterpret_cast<uintptr_t>(parser.sheetRanges().data());
+    EXPECT_TRUE(table < base || table >= base + book.arena.capacity()) << "the table is on the heap";
     const CssStyle everySheet = parser.resolveStyle("p", "a b");
     EXPECT_EQ(everySheet.textAlign, CssTextAlign::Center);
     EXPECT_EQ(everySheet.fontWeight, CssFontWeight::Normal);
     EXPECT_TRUE(everySheet.hasMarginLeft());
 
-    EXPECT_EQ(scopeTo(parser, chapterWith(linkTo("../Styles/a.css"))), 2);
+    EXPECT_EQ(scopeTo(parser, {{"../Styles/a.css"}}), 2);
     const CssStyle scoped = parser.resolveStyle("p", "a b");
     EXPECT_FALSE(scoped.hasTextAlign());
     EXPECT_EQ(scoped.fontWeight, CssFontWeight::Bold);
@@ -1926,7 +1916,7 @@ TEST(CssSheetScope, AChapterResolvesAgainstTheSheetsItLinksAndTheirImports) {
     EXPECT_TRUE(scoped.hasTextIndent());
     EXPECT_FALSE(scoped.hasMarginLeft()) << "c.css's compound rule";
 
-    EXPECT_EQ(scopeTo(parser, chapterWith(linkTo("../Styles/c.css"))), 1);
+    EXPECT_EQ(scopeTo(parser, {{"../Styles/c.css"}}), 1);
     const CssStyle other = parser.resolveStyle("p", "a b");
     EXPECT_EQ(other.textAlign, CssTextAlign::Center);
     EXPECT_EQ(other.fontWeight, CssFontWeight::Normal);
@@ -1936,66 +1926,54 @@ TEST(CssSheetScope, AChapterResolvesAgainstTheSheetsItLinksAndTheirImports) {
 
     parser.clearSheetScope();
     EXPECT_TRUE(stylesEqual(everySheet, parser.resolveStyle("p", "a b")));
+    EXPECT_EQ(book.arena.used(), arenaBefore) << "scoping takes nothing from the arena";
   }
 }
 
-// The head is read as markup: a link in a comment, in a CDATA section or after the head names no sheet; quotes of
-// either kind, upper case, a '>' in a quoted value, the attributes in any order, an <?xml-stylesheet?> instruction and
-// an href with an escape or a "./" read as a browser reads them; a link that is not a stylesheet, or names a data: or a
-// remote sheet, is passed over. An alternate stylesheet counts: every sheet applied before, and it is the book's.
-TEST(CssSheetScope, TheHeadIsReadAsMarkup) {
+// A link names a sheet as the book's own paths do: a rel that holds `stylesheet` in any case (an alternate one too:
+// every sheet applied before, and it is the book's), an href with an escape or a "./", one from the root. A link that
+// is no stylesheet, has no href, or names a data: or a remote sheet is passed over.
+TEST(CssSheetScope, ALinkNamesASheetAsTheBooksPathsDo) {
   ScopedBook book;
   ASSERT_TRUE(book.load(kScopeSheets, false));
-  const std::string a = linkTo("../Styles/a.css");
-  const std::string c = linkTo("../Styles/c.css");
   const struct {
     const char* what;
-    std::string xhtml;
+    std::vector<Link> head;
     int inScope;
   } cases[] = {
-      {"a link in a comment", chapterWith(a + "<!-- " + c + " -->"), 2},
-      {"a link in CDATA", chapterWith(a + "<script><![CDATA[ s = '" + c + "'; ]]></script>"), 2},
-      {"a link after the head", chapterWith(a, "<p>Text.</p>" + c), 2},
-      {"single quotes, upper case", chapterWith("<LINK HREF='../Styles/c.css' REL='StyleSheet'>"), 1},
-      {"a '>' in a quoted value", chapterWith("<meta name=\"x\" content=\"a > b\"/>" + c), 1},
-      {"an alternate stylesheet", chapterWith("<link rel=\"alternate stylesheet\" href=\"../Styles/c.css\"/>"), 1},
-      {"xml-stylesheet",
-       chapterWith("", "<p>Text.</p>", "<?xml-stylesheet href=\"../Styles/c.css\" type=\"text/css\"?>\n"), 1},
-      {"an escape and ./", chapterWith(linkTo("./../Styles/%61.css")), 2},
-      {"from the root", chapterWith(linkTo("/OEBPS/Styles/c.css")), 1},
-      {"not a stylesheet", chapterWith(a + "<link rel=\"icon\" href=\"../Styles/c.css\"/>"), 2},
-      {"no href", chapterWith(a + "<link rel=\"stylesheet\"/>"), 2},
-      {"data: and remote sheets", chapterWith(a + linkTo("data:text/css,p{}") + linkTo("https://example.com/c.css")),
-       2},
+      {"upper case", {{"../Styles/c.css", "StyleSheet"}}, 1},
+      {"an alternate stylesheet", {{"../Styles/c.css", "alternate stylesheet"}}, 1},
+      {"an escape and ./", {{"./../Styles/%61.css"}}, 2},
+      {"from the root", {{"/OEBPS/Styles/c.css"}}, 1},
+      {"not a stylesheet", {{"../Styles/a.css"}, {"../Styles/c.css", "icon"}}, 2},
+      {"no href", {{"../Styles/a.css"}, {""}}, 2},
+      {"data: and remote sheets", {{"../Styles/a.css"}, {"data:text/css,p{}"}, {"https://example.com/c.css"}}, 2},
   };
   for (const auto& test : cases) {
-    EXPECT_EQ(scopeTo(book.parser, test.xhtml), test.inScope) << test.what;
+    EXPECT_EQ(scopeTo(book.parser, test.head), test.inScope) << test.what;
   }
 }
 
 // What cannot be scoped resolves against every sheet, as before: a chapter that links no sheet, one that links or
-// imports a sheet the table does not know (a path the book spells another way, a sheet the compile skipped), a head
-// longer than the scan reads, a link tag too long to read.
+// imports a sheet the table does not know (a path the book spells another way, a sheet the compile skipped), a link
+// the scan could not read whole.
 TEST(CssSheetScope, WhatCannotBeScopedResolvesAgainstEverySheet) {
   ScopedBook book;
   ASSERT_TRUE(book.load(kScopeSheets, false));
   CssParser& parser = book.parser;
   const CssStyle everySheet = parser.resolveStyle("p", "a b d");
-  const std::string a = linkTo("../Styles/a.css");
   const struct {
     const char* what;
-    std::string xhtml;
+    std::vector<Link> head;
   } cases[] = {
-      {"no link", chapterWith("")},
-      {"an unknown sheet", chapterWith(a + linkTo("../Styles/missing.css"))},
-      {"an unknown sheet in another case", chapterWith(linkTo("../styles/A.css"))},
-      {"an unknown import", chapterWith(linkTo("../Styles/d.css"))},
-      {"a head longer than 8 KB", chapterWith(a + "<meta name=\"x\" content=\"" + std::string(9000, 'x') + "\"/>")},
-      {"a link tag too long to read",
-       chapterWith(a + "<link rel=\"stylesheet\" title=\"" + std::string(300, 't') + "\" href=\"../Styles/c.css\"/>")},
+      {"no link", {}},
+      {"an unknown sheet", {{"../Styles/a.css"}, {"../Styles/missing.css"}}},
+      {"an unknown sheet in another case", {{"../styles/A.css"}}},
+      {"an unknown import", {{"../Styles/d.css"}}},
+      {"a link not read whole", {{"../Styles/a.css"}, {"../Styles/c.css", "stylesheet", false}}},
   };
   for (const auto& test : cases) {
-    EXPECT_EQ(scopeTo(parser, test.xhtml), 0) << test.what;
+    EXPECT_EQ(scopeTo(parser, test.head), 0) << test.what;
     EXPECT_TRUE(stylesEqual(everySheet, parser.resolveStyle("p", "a b d"))) << test.what;
   }
 }
@@ -2006,10 +1984,10 @@ TEST(CssSheetScope, AScopeEndsWithItsBuild) {
   ASSERT_TRUE(book.load(kScopeSheets, false));
   CssParser& parser = book.parser;
   const CssStyle everySheet = parser.resolveStyle("p", "a b");
-  ASSERT_EQ(scopeTo(parser, chapterWith(linkTo("../Styles/a.css"))), 2);
+  ASSERT_EQ(scopeTo(parser, {{"../Styles/a.css"}}), 2);
   ASSERT_TRUE(parser.loadFromCache());
   EXPECT_TRUE(stylesEqual(everySheet, parser.resolveStyle("p", "a b"))) << "loadFromCache";
-  ASSERT_EQ(scopeTo(parser, chapterWith(linkTo("../Styles/a.css"))), 2);
+  ASSERT_EQ(scopeTo(parser, {{"../Styles/a.css"}}), 2);
   parser.clear();
   ASSERT_TRUE(parser.loadFromCache());
   EXPECT_TRUE(stylesEqual(everySheet, parser.resolveStyle("p", "a b"))) << "clear";
@@ -2024,8 +2002,8 @@ TEST(CssSheetScope, EverySheetAndTheFold) {
     ASSERT_TRUE(book.load(
         {{"OEBPS/Styles/x.css", ".x { font-weight: bold }\n"}, {"OEBPS/Styles/y.css", ".x { font-style: italic }\n"}},
         false));
-    EXPECT_EQ(scopeTo(book.parser, chapterWith(linkTo("../Styles/x.css") + linkTo("../Styles/y.css"))), 0);
-    EXPECT_EQ(scopeTo(book.parser, chapterWith(linkTo("../Styles/y.css"))), 1);
+    EXPECT_EQ(scopeTo(book.parser, {{"../Styles/x.css"}, {"../Styles/y.css"}}), 0);
+    EXPECT_EQ(scopeTo(book.parser, {{"../Styles/y.css"}}), 1);
     EXPECT_FALSE(book.parser.resolveStyle("p", "x").hasFontWeight());
   }
   constexpr size_t kSheets = CssParser::MAX_SHEETS + 2;
@@ -2037,10 +2015,10 @@ TEST(CssSheetScope, EverySheetAndTheFold) {
   ScopedBook book;
   ASSERT_TRUE(book.load(sheets, true));
   CssParser& parser = book.parser;
-  EXPECT_EQ(scopeTo(parser, chapterWith(linkTo("../Styles/s0.css"))), 2);
+  EXPECT_EQ(scopeTo(parser, {{"../Styles/s0.css"}}), 2);
   EXPECT_EQ(parser.resolveStyle("p", "s0").fontWeight, CssFontWeight::Bold);
   EXPECT_FALSE(parser.resolveStyle("p", "s1").hasFontWeight());
   EXPECT_EQ(parser.resolveStyle("p", "s63").fontWeight, CssFontWeight::Bold) << "the fold";
   EXPECT_EQ(parser.resolveStyle("p", "s65").fontWeight, CssFontWeight::Bold) << "the fold";
-  EXPECT_EQ(scopeTo(parser, chapterWith(linkTo("../Styles/s64.css"))), 0);
+  EXPECT_EQ(scopeTo(parser, {{"../Styles/s64.css"}}), 0);
 }

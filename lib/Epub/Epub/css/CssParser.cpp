@@ -2059,10 +2059,7 @@ bool CssParser::loadFromStream(FsFile& source) {
           inAtRule = false;
         }
       } else if (c == ';' && atDepth == 0) {
-        if (importsOpen && !declBuffer.overflowed) noteImport(declBuffer.view());
-        // An @namespace ends the imports (CSS Cascade 5); @charset and an @layer statement do not, nor does an
-        // at-rule a browser does not know, which it drops as if it were not there.
-        importsOpen = importsOpen && findIgnoreCase(trimCss(declBuffer.view()).substr(0, 9), "namespace") != 0;
+        if (importsOpen && !declBuffer.overflowed) importsOpen = noteImport(declBuffer.view());
         declBuffer.clear();
         inAtRule = false;
       } else if (atDepth == 0 || (inFontFace && atDepth == 1)) {
@@ -2882,7 +2879,7 @@ struct CssParser::Cascade {
   uint32_t ranks[CssStyle::kCascadeProperties] = {};
   void apply(const CssStyle& style, const uint32_t specificity, const uint16_t order) {
     // Every store's rules reach the result here, so the chapter's scope is one test (scopeToSheets).
-    if (!parser.sheetApplies(order)) return;
+    if (parser.scopedSheets_ != 0 && !parser.sheetApplies(order)) return;
     result.applyOver(style, specificity << 16 | order, ranks);
   }
 };
@@ -3000,12 +2997,16 @@ bool CssParser::ensureCacheIndexLoaded() const {
   if (!Storage.openFileForRead("CSS", cachePath + rulesCache, file)) {
     return false;
   }
-
-  uint8_t version = 0;
-  if (file.read(&version, 1) != 1 || version != CssParser::CSS_CACHE_VERSION) {
+  // A cache of another version, or one that ends in no valid sheet table, goes: the open compiles the CSS again.
+  const auto discard = [&] {
     file.close();
     Storage.remove((cachePath + rulesCache).c_str());
     return false;
+  };
+
+  uint8_t version = 0;
+  if (file.read(&version, 1) != 1 || version != CssParser::CSS_CACHE_VERSION) {
+    return discard();
   }
 
   uint16_t ruleCount = 0;
@@ -3059,18 +3060,15 @@ bool CssParser::ensureCacheIndexLoaded() const {
     complexBytes_ = complexBytes;
   }
 
-  // The sheet table, from the file's end, beside the complex rules and for the same reason. A v36 file always ends in
-  // one, written last: one that does not is damaged (a write cut off), not old, and goes, so that the open compiles the
-  // stylesheets again (Epub::load) rather than resolve every chapter against every sheet. No memory for it: every
-  // sheet applies.
+  // The sheet table, from the file's end, on the heap. A v36 file always ends in one, written last: one that does not
+  // is damaged (a write cut off), not old, and goes, so that the open compiles the stylesheets again (Epub::load)
+  // rather than resolve every chapter against every sheet. No memory for it: every sheet applies.
   const size_t indexEnd =
       CSS_CACHE_HEADER_BYTES + complexBytes + static_cast<size_t>(ruleCount) * sizeof(SelectorEntry);
   if (loadSheetTable(file, indexEnd) == SheetTableLoad::Damaged) {
     LOG_ERR("CSS", "Damaged sheet table: compiling the CSS again");
-    file.close();
-    Storage.remove((cachePath + rulesCache).c_str());
     dropIndex();
-    return false;
+    return discard();
   }
   if (!file.seek(CSS_CACHE_HEADER_BYTES + complexBytes)) {
     file.close();
@@ -4101,43 +4099,46 @@ void CssParser::beginSheetRange(const uint32_t pathHash) {
   sheetRanges_[sheetCount_++] = SheetRange{pathHash, nextRuleOrder_, nextRuleOrder_};
 }
 
-void CssParser::noteImport(const std::string_view prelude) {
-  if (sheetTableDropped_ || sheetCount_ == 0) return;  // no sheet named (setStylesheetPath): nothing imports it
+bool CssParser::noteImport(const std::string_view prelude) {
+  if (sheetTableDropped_ || sheetCount_ == 0) return true;  // no sheet named (setStylesheetPath): nothing imports it
   constexpr std::string_view kImport = "import";
   std::string_view rest = trimCss(prelude);
-  if (rest.size() <= kImport.size() || !equalsIgnoreCase(rest.substr(0, kImport.size()), kImport)) return;
+  if (equalsIgnoreCase(rest.substr(0, 9), "namespace")) return false;
+  if (rest.size() <= kImport.size() || !equalsIgnoreCase(rest.substr(0, kImport.size()), kImport)) return true;
   rest.remove_prefix(kImport.size());
-  if (!isCssWhitespace(rest.front()) && rest.front() != '"' && rest.front() != '\'') return;  // @imports, @import-x
+  if (!isCssWhitespace(rest.front()) && rest.front() != '"' && rest.front() != '\'')
+    return true;  // @imports, @import-x
   rest = trimCss(rest);
   // `url(x.css)`, `url("x.css")` or a string; a media list after it is not read (every @media block is skipped, but
   // a sheet imported for print applied before v36 too).
   std::string_view href;
   if (rest.size() > 4 && equalsIgnoreCase(rest.substr(0, 4), "url(")) {
     const size_t close = rest.find(')');
-    if (close == std::string_view::npos) return;
+    if (close == std::string_view::npos) return true;
     href = unquoteCss(rest.substr(4, close - 4));
   } else if (!rest.empty() && (rest.front() == '"' || rest.front() == '\'')) {
     const size_t close = rest.find(rest.front(), 1);
-    if (close == std::string_view::npos) return;
+    if (close == std::string_view::npos) return true;
     href = rest.substr(1, close - 1);
   } else {
-    return;
+    return true;
   }
   std::string path;
-  if (!resolveStylesheetHref(stylesheetDir_, href, path)) return;
+  if (!resolveStylesheetHref(stylesheetDir_, href, path)) return true;
   const SheetImport edge{sheetPathHash(path), static_cast<uint8_t>(sheetCount_ - 1)};
   for (uint8_t i = 0; i < importCount_; ++i) {
-    if (sheetImports_[i].importer == edge.importer && sheetImports_[i].importedHash == edge.importedHash) return;
+    if (sheetImports_[i].importer == edge.importer && sheetImports_[i].importedHash == edge.importedHash) return true;
   }
   if (importCount_ == MAX_SHEET_IMPORTS) {
     dropSheetTable("too many @import rules");
-    return;
+    return true;
   }
   if (!growSheetArray(sheetImports_, importCapacity_, importCount_, MAX_SHEET_IMPORTS)) {
     dropSheetTable("no heap");
-    return;
+    return true;
   }
   sheetImports_[importCount_++] = edge;
+  return true;
 }
 
 void CssParser::dropSheetTable([[maybe_unused]] const char* const why) {
@@ -4149,8 +4150,6 @@ void CssParser::dropSheetTable([[maybe_unused]] const char* const why) {
 void CssParser::freeSheetTable() const {
   sheetRanges_.reset();
   sheetImports_.reset();
-  arenaSheetRanges_ = nullptr;
-  arenaSheetImports_ = nullptr;
   sheetCount_ = 0;
   sheetCapacity_ = 0;
   importCount_ = 0;
@@ -4198,17 +4197,12 @@ CssParser::SheetTableLoad CssParser::loadSheetTable(FsFile& file, const size_t f
       counts[1] <= MAX_SHEET_IMPORTS &&
       tableBytes == SHEET_TABLE_HEADER_BYTES + counts[0] * SHEET_RANGE_BYTES + counts[1] * SHEET_IMPORT_BYTES;
   if (!found) return SheetTableLoad::Damaged;
-  // 8 B a sheet and an import, 1.5 KB at most; in the index's arena, as the complex rules are, when it has room.
-  if (counts[0] > 0) {
-    arenaSheetRanges_ = indexArena_ != nullptr ? indexArena_->allocArray<SheetRange>(counts[0]) : nullptr;
-    if (arenaSheetRanges_ == nullptr) sheetRanges_ = makeUniqueNoThrow<SheetRange[]>(counts[0]);
-  }
-  if (counts[1] > 0) {
-    arenaSheetImports_ = indexArena_ != nullptr ? indexArena_->allocArray<SheetImport>(counts[1]) : nullptr;
-    if (arenaSheetImports_ == nullptr) sheetImports_ = makeUniqueNoThrow<SheetImport[]>(counts[1]);
-  }
-  SheetRange* const ranges = arenaSheetRanges_ != nullptr ? arenaSheetRanges_ : sheetRanges_.get();
-  SheetImport* const imports = arenaSheetImports_ != nullptr ? arenaSheetImports_ : sheetImports_.get();
+  // 8 B a sheet and an import, 16 B to 1.5 KB, on the heap: a build's lent region has no room to spare for a block that
+  // lives the whole build (see sheetRanges_).
+  if (counts[0] > 0) sheetRanges_ = makeUniqueNoThrow<SheetRange[]>(counts[0]);
+  if (counts[1] > 0) sheetImports_ = makeUniqueNoThrow<SheetImport[]>(counts[1]);
+  SheetRange* const ranges = sheetRanges_.get();
+  SheetImport* const imports = sheetImports_.get();
   if ((counts[0] > 0 && ranges == nullptr) || (counts[1] > 0 && imports == nullptr)) {
     LOG_ERR("CSS", "No heap for %u bytes of the sheet table", static_cast<unsigned>(tableBytes));
     freeSheetTable();
@@ -4241,7 +4235,6 @@ CssParser::SheetTableLoad CssParser::loadSheetTable(FsFile& file, const size_t f
 }
 
 bool CssParser::sheetApplies(const uint16_t order) const {
-  if (scopedSheets_ == 0) return true;
   const std::span<const SheetRange> ranges = sheetRanges();
   // The rule's sheet is the last whose range starts at or before its order: an empty range starts where the next one
   // does. With no table (it went with the index, and has not come back) nothing is scoped.
@@ -4260,137 +4253,21 @@ uint64_t CssParser::sheetsOf(const uint32_t pathHash) const {
   return sheets;
 }
 
-namespace {
-
-// How much of a chapter the head scan reads, and the longest tag it reads whole: a head that does not end within the
-// first, or a <link> longer than the second, cannot be scoped.
-constexpr size_t kHeadScanBytes = 8 * 1024;
-constexpr size_t kHeadTagBytes = 256;
-
-// The value of attribute `name` (lowercase; the tag's spelling is compared ignoring case) in `attrs`, a tag's text
-// after its name; empty when it has none.
-std::string_view tagAttribute(std::string_view attrs, const std::string_view name) {
-  const auto skipSpace = [&attrs] {
-    while (!attrs.empty() && (isCssWhitespace(attrs.front()) || attrs.front() == '/' || attrs.front() == '?')) {
-      attrs.remove_prefix(1);
-    }
-  };
-  while (skipSpace(), !attrs.empty()) {
-    size_t end = 0;
-    while (end < attrs.size() && !isCssWhitespace(attrs[end]) && attrs[end] != '=') ++end;
-    const std::string_view attr = attrs.substr(0, end);
-    attrs.remove_prefix(end);
-    while (!attrs.empty() && isCssWhitespace(attrs.front())) attrs.remove_prefix(1);
-    if (attrs.empty() || attrs.front() != '=') continue;  // an attribute without a value
-    attrs.remove_prefix(1);
-    while (!attrs.empty() && isCssWhitespace(attrs.front())) attrs.remove_prefix(1);
-    std::string_view value;
-    if (!attrs.empty() && (attrs.front() == '"' || attrs.front() == '\'')) {
-      const size_t close = attrs.find(attrs.front(), 1);
-      if (close == std::string_view::npos) return {};
-      value = attrs.substr(1, close - 1);
-      attrs.remove_prefix(close + 1);
-    } else {
-      end = 0;
-      while (end < attrs.size() && !isCssWhitespace(attrs[end])) ++end;
-      value = attrs.substr(0, end);
-      attrs.remove_prefix(end);
-    }
-    if (equalsIgnoreCase(attr, name)) return value;
+void CssParser::addLink(void* const context, const std::string_view rel, const std::string_view href,
+                        const bool whole) {
+  SheetLinks& links = *static_cast<SheetLinks*>(context);
+  if (!whole) {
+    links.unknown = true;
+    return;
   }
-  return {};
-}
-
-}  // namespace
-
-void CssParser::readSheetLinks(FsFile& file, const std::string_view baseDir, SheetLinks& links) const {
-  // A small tag matcher over the markup, no SAX state: text, a tag (its text gathered, quotes kept apart, so a '>' in
-  // a value does not end it), and a comment or CDATA section, skipped to the two '-' or ']' and the '>' that end it.
-  enum class State : uint8_t { Text, Tag, Skip };
-  State state = State::Text;
-  char tag[kHeadTagBytes];
-  size_t tagLen = 0;
-  bool overlong = false;
-  char quote = 0;
-  char closer = 0;
-  uint8_t closers = 0;
   std::string path;
-  // The tag just read, `tag`; true when it ends the head.
-  const auto onTag = [&] {
-    std::string_view text(tag, tagLen);
-    const bool closing = !text.empty() && text.front() == '/';
-    if (closing) text.remove_prefix(1);
-    size_t nameEnd = 0;
-    while (nameEnd < text.size() && !isCssWhitespace(text[nameEnd]) && text[nameEnd] != '/') ++nameEnd;
-    const std::string_view name = text.substr(0, nameEnd);
-    if (equalsIgnoreCase(name, "head")) return closing;
-    if (equalsIgnoreCase(name, "body")) return true;
-    const bool instruction = equalsIgnoreCase(name, "?xml-stylesheet");
-    if (closing || (!instruction && !equalsIgnoreCase(name, "link"))) return false;
-    if (overlong) {
-      links.unknown = true;
-      return false;
-    }
-    const std::string_view attrs = text.substr(nameEnd);
-    if (!instruction && findIgnoreCase(tagAttribute(attrs, "rel"), "stylesheet") == std::string_view::npos) {
-      return false;
-    }
-    if (!resolveStylesheetHref(baseDir, tagAttribute(attrs, "href"), path)) return false;  // nothing in the book
-    const uint64_t sheets = sheetsOf(sheetPathHash(path));
-    if (sheets == 0) {
-      LOG_DBG("CSS", "Links %s, no sheet of the book", path.c_str());
-      links.unknown = true;
-    }
-    links.sheets |= sheets;
-    return false;
-  };
-  uint8_t window[256];
-  for (size_t scanned = 0; scanned < kHeadScanBytes;) {
-    const int got = file.read(window, std::min(sizeof(window), kHeadScanBytes - scanned));
-    if (got <= 0) return;  // the file ends in its head: read whole
-    scanned += static_cast<size_t>(got);
-    for (int i = 0; i < got; ++i) {
-      const char c = static_cast<char>(window[i]);
-      switch (state) {
-        case State::Text:
-          if (c == '<') {
-            state = State::Tag;
-            tagLen = 0;
-            overlong = false;
-            quote = 0;
-          }
-          break;
-        case State::Skip:
-          if (c == '>' && closers >= 2) state = State::Text;
-          closers = c == closer ? closers + 1 : 0;
-          break;
-        case State::Tag:
-          if (quote != 0) {
-            if (c == quote) quote = 0;
-          } else if (c == '"' || c == '\'') {
-            quote = c;
-          } else if (c == '>') {
-            state = State::Text;
-            if (onTag()) return;
-            break;
-          }
-          if (tagLen < sizeof(tag)) {
-            tag[tagLen++] = c;
-          } else {
-            overlong = true;
-          }
-          if ((tagLen == 3 && std::memcmp(tag, "!--", 3) == 0) ||
-              (tagLen == 8 && std::memcmp(tag, "![CDATA[", 8) == 0)) {
-            state = State::Skip;
-            closer = tag[1] == '-' ? '-' : ']';
-            closers = 0;
-          }
-          break;
-      }
-    }
+  if (findIgnoreCase(rel, "stylesheet") == std::string_view::npos ||
+      !resolveStylesheetHref(links.baseDir, href, path)) {
+    return;  // no stylesheet, or nothing in the book
   }
-  LOG_DBG("CSS", "A head past 8 KB");
-  links.unknown = true;
+  const uint64_t sheets = links.css->sheetsOf(sheetPathHash(path));
+  links.unknown = links.unknown || sheets == 0;
+  links.sheets |= sheets;
 }
 
 uint8_t CssParser::scopeToSheets(const SheetLinks& links) {
@@ -4404,10 +4281,7 @@ uint8_t CssParser::scopeToSheets(const SheetLinks& links) {
     for (const SheetImport& edge : sheetImports()) {
       if (((scope >> edge.importer) & 1u) == 0) continue;
       const uint64_t imported = sheetsOf(edge.importedHash);
-      if (imported == 0) {
-        LOG_DBG("CSS", "An import the book does not have");
-        return 0;
-      }
+      if (imported == 0) return 0;  // an import the book does not have
       grew = grew || (scope & imported) != imported;
       scope |= imported;
     }

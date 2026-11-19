@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "Epub.h"
+#include "Epub/HeadingCarry.h"
 #include "Epub/Page.h"
 #include "Epub/Section.h"
 #include "Epub/css/CssParser.h"
@@ -370,5 +371,108 @@ TEST_F(CssSheetRangesTest, ARulesCacheWithoutAValidSheetTableIsCompiledAgain) {
     ASSERT_TRUE(reopened->load(true));
     EXPECT_TRUE(readFile(cacheFile) == compiled) << "compiled again";
     EXPECT_EQ(firstLines(reopened, 0).at("0.").align, CssTextAlign::Justify);
+  }
+}
+
+// --- The head, read by the heading carry's scanner (HeadingCarry::Scanner's link hook, HeadingCarry::scanHead) ---
+
+namespace {
+
+// A chapter whose head holds `head`, after an optional prolog, with `body`.
+std::string chapterWith(const std::string& head, const std::string& body = "<p>Text.</p>",
+                        const std::string& prolog = "") {
+  return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" + prolog +
+         "<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:h=\"http://www.w3.org/1999/xhtml\">\n"
+         "<head><title>T</title>" +
+         head + "</head>\n<body>" + body + "</body>\n</html>\n";
+}
+
+// What a chapter in the package's folder holding `xhtml` resolves against, its head read as Section::scopeStylesheets
+// reads it; -1 when the file could not be written or read.
+int scopeOfHead(CssParser& css, const fs::path& file, const std::string& xhtml) {
+  std::ofstream(file, std::ios::binary) << xhtml;
+  CssParser::SheetLinks links{&css, ""};
+  char values[256];
+  const HeadingCarry::LinkHook hook{&CssParser::addLink, &links, values, sizeof(values)};
+  HeadingCarry::Scanner scan;
+  scan.setLinkHook(&hook);
+  FsFile in;
+  if (!Storage.openFileForRead("TST", file.string(), in)) return -1;
+  if (!HeadingCarry::scanHead(in, scan)) links.unknown = true;
+  return css.scopeToSheets(links);
+}
+
+}  // namespace
+
+// The head is read as markup: a link in a comment, in a CDATA section or in the body names no sheet; quotes of either
+// kind, upper case, attributes in any order, a '>' in a quoted value and a prefixed name read as a browser reads them,
+// and only a link's rel and href are kept. A rel or href not quoted, or longer than the 256 B the scan keeps, cannot be
+// read, nor can a head past 8 KB: every sheet applies. A file that ends in its head was read whole. Not read: an
+// <?xml-stylesheet?> instruction (docs/future_work/memory-and-parsing.md lists what the scan does not see).
+TEST_F(CssSheetRangesTest, TheHeadIsReadAsMarkup) {
+  const auto epub = bookOf({{"a.css", "@import \"base.css\";\n.a { font-weight: bold; }\n"},
+                            {"base.css", ".b { font-style: italic; }\n"},
+                            {"c.css", "p { text-align: center; }\n"},
+                            {"d.css", "@import \"nowhere.css\";\n.d { font-weight: bold; }\n"}},
+                           {{"c00.xhtml", "", "<p>Text.</p>", "One"}});
+  CssParser& css = *epub->getCssParser();
+  ASSERT_TRUE(css.loadFromCache());
+  ASSERT_EQ(css.sheetRanges().size(), 4u);
+  const std::string a = linkTo("a.css");
+  const std::string c = linkTo("c.css");
+  const struct {
+    const char* what;
+    std::string xhtml;
+    int inScope;
+  } cases[] = {
+      {"a link", chapterWith(a), 2},
+      {"a link in a comment", chapterWith(a + "<!-- " + c + " -->"), 2},
+      {"a link in CDATA", chapterWith(a + "<script><![CDATA[ s = '" + c + "'; ]]></script>"), 2},
+      {"a link in the body", chapterWith(a, "<p>Text.</p>" + c), 2},
+      {"single quotes, upper case, no slash", chapterWith("<LINK HREF='c.css' REL='StyleSheet'>"), 1},
+      {"a '>' in a quoted value", chapterWith("<meta name=\"x\" content=\"a > b\"/>" + c), 1},
+      {"a prefixed name", chapterWith("<h:link rel=\"stylesheet\" href=\"c.css\"/>"), 1},
+      {"a long title", chapterWith("<link rel=\"stylesheet\" title=\"" + std::string(300, 't') + "\" href=\"c.css\"/>"),
+       1},
+      {"an unquoted value", chapterWith(a + "<link rel=stylesheet href=\"c.css\"/>"), 0},
+      {"an href past 256 B", chapterWith(a + linkTo(std::string(300, 'x') + ".css")), 0},
+      {"a head past 8 KB", chapterWith(a + "<meta name=\"x\" content=\"" + std::string(9000, 'x') + "\"/>"), 0},
+      {"a file that ends in its head", "<html><head>" + a, 2},
+      {"an xml-stylesheet instruction",
+       chapterWith(a, "<p>Text.</p>", "<?xml-stylesheet href=\"c.css\" type=\"text/css\"?>\n"), 2},
+  };
+  for (const auto& test : cases) {
+    EXPECT_EQ(scopeOfHead(css, work / "head.xhtml", test.xhtml), test.inScope) << test.what;
+  }
+}
+
+// The link hook changes nothing the heading carry decides: the same shape and body bounds with it as without, for
+// heads with links in them and the bodies the carry looks at.
+TEST_F(CssSheetRangesTest, TheLinkHookChangesNoCarryVerdict) {
+  const std::string heads[] = {
+      "", linkTo("a.css") + "<!-- " + linkTo("b.css") + " -->",
+      "<LINK HREF='c.css' REL='StyleSheet'><style>h1 { color: black; }</style>",
+      "<link rel=stylesheet href=x.css><h:link rel=\"stylesheet\" href=\"" + std::string(300, 'x') + "\"/>"};
+  const std::string bodies[] = {"<h1>One</h1>", "<h1>One</h1><p>Text.</p>", "", "<a href=\"x.xhtml\">x</a>",
+                                "<div><h2 class=\"t\">Two</h2></div>"};
+  for (const std::string& head : heads) {
+    for (const std::string& body : bodies) {
+      const std::string xhtml = chapterWith(head, body);
+      HeadingCarry::Scanner plain;
+      HeadingCarry::Scanner hooked;
+      CssParser::SheetLinks links;
+      char values[64];
+      const HeadingCarry::LinkHook hook{[](void*, std::string_view, std::string_view, bool) {}, &links, values,
+                                        sizeof(values)};
+      hooked.setLinkHook(&hook);
+      for (size_t at = 0; at < xhtml.size(); at += 7) {
+        const std::string piece = xhtml.substr(at, 7);
+        plain.feed(reinterpret_cast<const uint8_t*>(piece.data()), piece.size());
+        hooked.feed(reinterpret_cast<const uint8_t*>(piece.data()), piece.size());
+      }
+      EXPECT_EQ(plain.finish(), hooked.finish()) << xhtml;
+      EXPECT_EQ(plain.bodyBegin(), hooked.bodyBegin()) << xhtml;
+      EXPECT_EQ(plain.bodyEnd(), hooked.bodyEnd()) << xhtml;
+    }
   }
 }
