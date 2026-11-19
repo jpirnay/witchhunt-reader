@@ -952,3 +952,5 @@ STR_PROTECTED_OTHER_DEVICE: "The key beside the book is another reader's, or dam
 STR_PROTECTED_EXPIRED: "The loan of this book has ended."
 STR_PROTECTED_NEEDS_TIME: "This loan needs today's date. Connect to Wi-Fi once to set the clock."
 STR_PROTECTED_UNREADABLE: "This protected book cannot be opened."
+STR_CHAPTER_TRUNCATED_HINT_1: "Chapter may be truncated (low memory)."
+STR_CHAPTER_TRUNCATED_HINT_2: "Try: No embedded style | No images | AA Off"

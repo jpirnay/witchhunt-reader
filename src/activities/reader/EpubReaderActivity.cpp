@@ -352,8 +352,6 @@ constexpr uint32_t AA_SETTLE_POLL_MS = 5;
 constexpr const char* LINK_STACK_FILE = "/linkstack.bin";
 
 constexpr uint8_t TRUNCATED_SECTION_HINT_RENDER_COUNT = 2;
-constexpr const char* TRUNCATED_SECTION_HINT_LINE_1 = "Chapter may be truncated (low memory).";
-constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | No images | AA Off";
 
 // --- Heap-gate instrumentation (temporary; heap/gate-rederivation branch) --------------------
 // The reader path has ~8 free/contig floors (PRE_RENDER_, BG_BUILD_*, IN_PLACE_BUILD_*,
@@ -7022,8 +7020,8 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     const int boxH = 44;
     renderer.fillRect(boxX, boxY, boxW, boxH, false);
     renderer.drawRect(boxX, boxY, boxW, boxH, true);
-    const std::string line1 = renderer.truncatedText(UI_10_FONT_ID, TRUNCATED_SECTION_HINT_LINE_1, maxWidth);
-    const std::string line2 = renderer.truncatedText(UI_10_FONT_ID, TRUNCATED_SECTION_HINT_LINE_2, maxWidth);
+    const std::string line1 = renderer.truncatedText(UI_10_FONT_ID, tr(STR_CHAPTER_TRUNCATED_HINT_1), maxWidth);
+    const std::string line2 = renderer.truncatedText(UI_10_FONT_ID, tr(STR_CHAPTER_TRUNCATED_HINT_2), maxWidth);
     renderer.drawText(UI_10_FONT_ID, hintX, hintY1, line1.c_str(), true, EpdFontFamily::BOLD);
     renderer.drawText(UI_10_FONT_ID, hintX, hintY2, line2.c_str(), true);
   }
