@@ -119,7 +119,14 @@ constexpr uint32_t RAM_LISTING_BLOCK_SLACK = 1024;
 
 void FileBrowserModel::load() {
   // What the last load listed goes first: its names, and an index open on the old folder.
-  releaseRamListing();
+  if (mode == Mode::Recents || mode == Mode::Added || mode == Mode::Authors) {
+    releaseRamListing();
+  } else {
+    // A folder is read into the same vectors at once: keep their capacity rather than free and regrow it.
+    files.clear();
+    fileSizes.clear();
+    fileDateTimes.clear();
+  }
   fileIndex = nullptr;
   if (mode == Mode::Recents) {
     loadRecents();
@@ -238,12 +245,9 @@ size_t FileBrowserModel::ramListingRoom(const size_t entries) {
 }
 
 void FileBrowserModel::releaseRamListing() {
-  files.clear();
-  files.shrink_to_fit();
-  fileSizes.clear();
-  fileSizes.shrink_to_fit();
-  fileDateTimes.clear();
-  fileDateTimes.shrink_to_fit();
+  std::vector<std::string>().swap(files);
+  std::vector<uint32_t>().swap(fileSizes);
+  std::vector<uint32_t>().swap(fileDateTimes);
 }
 
 bool FileBrowserModel::acceptForBooks(const char* name, const bool isDir) {
@@ -542,7 +546,7 @@ void FileBrowserModel::setFilter(std::string query) {
 void FileBrowserModel::rebuildMatches() {
   matches.clear();
   if (filterQuery.empty()) {
-    matches.shrink_to_fit();  // an unfiltered browser should not keep the capacity around
+    std::vector<uint32_t>().swap(matches);  // an unfiltered browser should not keep the capacity around
     return;
   }
   // Substring match on search keys (utf8SearchFold): either case, in Latin, Greek and Cyrillic
@@ -814,13 +818,11 @@ bool FileBrowserModel::ensureRecentRow(const size_t displayIndex) {
 void FileBrowserModel::clear() {
   releaseRamListing();
   filterQuery.clear();
-  matches.clear();
-  matches.shrink_to_fit();
+  std::vector<uint32_t>().swap(matches);
   clearDeepSearch();
   bookIndex.close();
   openAuthorRow = -1;
-  authorBooks.clear();
-  authorBooks.shrink_to_fit();
+  std::vector<uint16_t>().swap(authorBooks);
   if (fileIndex) fileIndex->close();
   fileIndex = nullptr;
 }
@@ -901,8 +903,7 @@ bool FileBrowserModel::openAuthor(const size_t row) {
 size_t FileBrowserModel::closeAuthor() {
   const int row = openAuthorRow;
   openAuthorRow = -1;
-  authorBooks.clear();
-  authorBooks.shrink_to_fit();
+  std::vector<uint16_t>().swap(authorBooks);
   return row < 0 ? 0 : static_cast<size_t>(row);
 }
 

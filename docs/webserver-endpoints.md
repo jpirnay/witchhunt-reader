@@ -335,7 +335,10 @@ curl "http://crosspoint.local/api/files?path=/Books"
 - Hidden files (starting with `.`) are filtered out unless **Show Hidden Files** is on
 - System folders (`System Volume Information`, `XTCache`) are always hidden
 - Every path parameter on this page is normalised first, so `..` cannot step outside the folder it is joined to
-- Listing a protected folder answers `403 Cannot access protected items`; see [Protected paths](#protected-paths)
+- A dot folder named by `path` (`/.crosspoint`, a plugin's folder) lists whatever **Show Hidden Files** says, as
+  upstream's does: plugins look for their files that way. The listing still leaves out its dot entries and system
+  folders, and reading what it shows follows [Protected paths](#protected-paths)
+- A system folder or an 8.3 alias spelling answers `403 Cannot access protected items`
 
 ---
 
@@ -584,12 +587,14 @@ endpoints and WebDAV. The rules are in
 - A segment starting with `.` is refused at any depth, unless **Show Hidden Files**
   is on. Then dot folders can be listed and walked through, so caches under
   `/.crosspoint` can be cleaned up. But an item whose own name starts with `.` still
-  cannot be read, written, renamed, moved or deleted. WebDAV ignores the setting
-  and always refuses dot segments.
+  cannot be read, written, renamed, moved or deleted. `/api/files` lists a dot folder
+  named by its path in any case (names only). WebDAV ignores the setting and always
+  refuses dot segments.
 - One exception, for plugins: `/download` reads a file inside a plugin folder
   (`/.crosspoint/plugins/<name>/...`, and the other plugin roots) at its exact path,
   whatever the setting, and the plugin write endpoints write inside the calling plugin's own
-  folder. Plugins keep their token and settings there. The folders stay out of every listing.
+  folder. Plugins keep their token and settings there. While hidden files are off the folders stay
+  out of their parent's listing, but `/api/files` lists one named by its path.
   The same holds for the exact files an installed plugin's `device.json` names as its token
   or config (`token.file`, `token.refresh_file`, `config.file`), wherever they are, as upstream
   allows: `/download` reads them and the calling plugin's writes reach them. A credential store,
@@ -1051,7 +1056,7 @@ layout cache is invalidated on success.
 | ------ | ---------------------------------------------- |
 | 400    | Missing `plugin`/`url`/`dest`, bad scheme, or a refused destination |
 | 403    | Host not in the plugin's `allowedHosts` (`host` names it)          |
-| 502    | Download failed. `"unauthorized": true` when the file's server answered 401 or 403; `status` holds the answer's code for a request with a method or body |
+| 502    | Download failed. `status` holds the file server's answer (0 or less when none came) and `error` names it (`"the server answered 404"`); `"unauthorized": true` when it answered 401 or 403 |
 
 ### POST `/api/book-key` - Store a Protected Book's Content Key
 
