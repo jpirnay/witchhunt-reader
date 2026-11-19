@@ -947,13 +947,15 @@ TEST(JpegToBmpConverter, AnEnlargedEighthIsResizedAsWhenNothingFits) {
 // A cover left to the 1/8 decode resized reads through the decoder's windows from the region too,
 // as a finer decode does (AProgressiveCoverReadsThroughWindowsFromItsRegion): through the shared
 // 512-byte buffer the index pass reads the whole file in 512-byte pieces, and every DC scan re-reads
-// its data in every band -- once for each output.
+// its data in every band -- once for each output. The file is one whose first DC scan lacks two bits
+// (prog_420_dc_al2.jpg): a resize takes a first DC scan with at most one missing bit alone
+// (DecodeOptions::firstDcScanOnly), leaving one scan to read; this one needs the refinements.
 TEST(JpegToBmpConverter, AResizedCoverReadsThroughWindowsFromItsRegion) {
   FreeHeapScope squeezed(8 * 1024);  // below the row pipeline's 16 KB: no scale fits, the 1/8 resize
-  const CoverReads heap = convertCover("prog_full_420.jpg", nullptr, false);
+  const CoverReads heap = convertCover("prog_420_dc_al2.jpg", nullptr, false);
   BuildArena arena(64 * 1024);
   ASSERT_TRUE(arena.valid());
-  const CoverReads lent = convertCover("prog_full_420.jpg", &arena, false);
+  const CoverReads lent = convertCover("prog_420_dc_al2.jpg", &arena, false);
   EXPECT_EQ(arena.used(), 0u);
   EXPECT_GE(arena.highWater(), ProgressiveJpeg::scanWindowBytes()) << "the windows came out of the region";
   ASSERT_FALSE(heap.large.empty());
