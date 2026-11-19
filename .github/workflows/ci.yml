@@ -364,6 +364,43 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build/test --output-on-failure -j
 
+  # Allocation counts of a section build, before and after the change: epub_pipeline_dump --bench built from
+  # the pull request and from its base, on the same books (test/epub_pipeline/alloc_count_report.py). Block
+  # count is what fragments the C3's heap, and the malloc interposer behind the count is reliable only on
+  # Linux. Reports in the job summary and never gates a merge (not in test-status's needs).
+  alloc-counts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Build the dump tool from this change
+        run: |
+          cmake -S test -B build/alloc-head -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/alloc-head --target epub_pipeline_dump
+
+      - name: Build the dump tool from the base
+        if: github.event_name == 'pull_request'
+        run: |
+          git worktree add --detach .alloc-base "${{ github.event.pull_request.base.sha }}"
+          git -C .alloc-base submodule update --init --reference "$GITHUB_WORKSPACE/freeink-sdk" freeink-sdk
+          git -C .alloc-base submodule update --init --recursive
+          cmake -S .alloc-base/test -B build/alloc-base -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/alloc-base --target epub_pipeline_dump
+
+      - name: Report allocation counts
+        run: |
+          base=build/alloc-base/epub_pipeline/epub_pipeline_dump
+          [ -x "$base" ] || base=-
+          python3 test/epub_pipeline/alloc_count_report.py "$base" build/alloc-head/epub_pipeline/epub_pipeline_dump test
+
   # The web pages' scripts that can run outside a browser: test/web/*_test.mjs, each given a folder
   # with jsdom and jszip (pinned here, not added to the repository).
   web-tests:

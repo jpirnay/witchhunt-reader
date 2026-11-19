@@ -76,6 +76,12 @@ The first run models a build with nothing lent, the second a build in the X3's b
 UPDATE_HEAP_BASELINE=1 ctest --test-dir $B -R HeapPeakRegression
 ```
 
+A pull request's allocation counts, before and after, are in the summary of its CI job `alloc-counts`. To get the same table locally, give `test/epub_pipeline/alloc_count_report.py` the base's dump tool (or `-`), the change's, and the `test` directory:
+
+```sh
+python3 test/epub_pipeline/alloc_count_report.py build-base/test/epub_pipeline/epub_pipeline_dump $B/epub_pipeline/epub_pipeline_dump test
+```
+
 For a site-by-site inventory of one build (Linux only):
 
 ```sh
