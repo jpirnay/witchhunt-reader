@@ -99,3 +99,20 @@ Branch `fix/truncated-hint-tr`, worktree `C:/tmp/wt-mp-03a`. Track M. Spec §3 "
   limit (`Page::MAX_ELEMENTS`) drops the tail of a page; fix only with a fixture that reaches it, by ending the page
   at the limit, not with a hint. Keep its README row true.
 - Test: the host i18n tests that exist (find them under `test/`), and the full suite once before the final commit.
+
+## Task 9: §5a and §5b, a resumed decode makes progress before it parks again
+
+Branch `perf/image-resume-progress`, worktree `C:/tmp/wt-mp-05a`. Track J. Spec §5 "5a" and "5b": after a resume the
+decode ignores the abort poll until it has finished one band (progressive) or `kResumeMinRows` (4) MCU rows
+(baseline); the `ImageParkTest` case raises input before the resume's first poll inside a `host_clock::Ticking` scope
+and asserts the parked row advanced; the PR states the worst band time from the host clock. In
+`docs/future_work/memory-and-parsing.md` rewrite the preempted-decodes item: the extraction is not lost work (it runs
+to its end and renames its `.part`), its cost is page-turn latency behind the `RenderLock` (that is 5c, a device
+measurement, stays open); remove the "resume parks at once" case once fixed; PNG and the resized 1/8 decode are not
+worth it (5d). No cache change.
+
+## Task 10: §8a, a failed baseline decode draws the placeholder once per session
+
+Branch `fix/jpeg-failed-placeholder`, worktree `C:/tmp/wt-mp-08a`. Track J, after Task 9 (both touch
+`JpegToFramebufferConverter.cpp`). Spec §8 "8a". The damaged-JPEG item in `docs/future_work/memory-and-parsing.md`
+stays parked; note what 8a changed in it.
