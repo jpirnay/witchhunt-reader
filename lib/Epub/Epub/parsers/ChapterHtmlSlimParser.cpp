@@ -5213,6 +5213,7 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
     self->commitPendingRow();
     self->flushTableFragment(self->currentTable->packer);
     self->currentTable.reset();
+    std::vector<std::unique_ptr<TextBlock>>().swap(self->cellLineScratch_);
     self->nextWordContinues = false;
     // The block a caption drained holds the table's direction: what follows the table takes the one around it.
     self->clearSpentBlockDirection(self->depth);
@@ -6993,8 +6994,33 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
   out.isHeaderRow = bufRow.isHeaderRow;
   out.renderCols = columnCount;
   out.cells.reserve(columnCount);  // spans sum to columnCount, so that is the padded upper bound
-  uint16_t maxContentHeight = 0;   // tallest cell's text + image, in pixels
-  uint8_t col = 0;                 // first grid column of the cell being laid out
+  // The table's first grid row reserves the shared line scratch; later rows find it in place. A refusal sends the row
+  // out as paragraphs, like any other grid row that cannot be laid out. Cleared on every way out of this function: a
+  // line left in it would outlive the arena block the caller releases.
+  bool scratchRefused = false;
+  if (cellLineScratch_.capacity() < MAX_CELL_LINES) {
+#ifdef TABLE_CELL_FAULT_INJECTION
+    if (cellLineScratchLeft() != SIZE_MAX) {
+      if (cellLineScratchLeft() == 0) {
+        scratchRefused = true;
+      } else {
+        --cellLineScratchLeft();
+      }
+    }
+#endif
+    if (!scratchRefused) scratchRefused = !heapReserveFor(cellLineScratch_, MAX_CELL_LINES);
+  }
+  if (scratchRefused) {
+    LOG_DBG("EHP", "No heap for the cell line scratch (%u B) — falling back to paragraphs",
+            static_cast<unsigned>(MAX_CELL_LINES * sizeof(std::unique_ptr<TextBlock>)));
+    return false;
+  }
+  struct ScratchGuard {
+    std::vector<std::unique_ptr<TextBlock>>& v;
+    ~ScratchGuard() { v.clear(); }
+  } scratchGuard{cellLineScratch_};
+  uint16_t maxContentHeight = 0;  // tallest cell's text + image, in pixels
+  uint8_t col = 0;                // first grid column of the cell being laid out
 
   for (auto& bufCell : bufRow.cells) {
     TableCell cell;
@@ -7018,7 +7044,11 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
     if (bufCell.text && !bufCell.text->isEmpty()) {
       // Count past the cap rather than stopping at it: the overflow itself is the signal, and
       // the grid cannot represent this cell either way.
-      size_t producedLines = 0;
+      // One capture only: a second would take the std::function past its in-place storage, a heap block per cell.
+      struct LineSink {
+        std::vector<std::unique_ptr<TextBlock>>* lines;
+        size_t produced;
+      } sink{&cellLineScratch_, 0};
       // Line bytes from the lent region on an arena build. No page-fit hook: the row is placed as
       // a whole by the caller, inside a block it commits or releases (see the row emission).
       bufCell.text->setLineArena(buildArena_);
@@ -7026,12 +7056,13 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
       bufCell.text->setBeforeLineHook(nullptr);
       bufCell.text->layoutAndExtractLines(
           renderer, fontId, renderInnerWidth,
-          [&cell, &producedLines](std::unique_ptr<TextBlock> tb, bool, bool) {
-            ++producedLines;
+          [&sink](std::unique_ptr<TextBlock> tb, bool, bool) {
+            ++sink.produced;
             // Stop collecting past the cap: the cell is going to the paragraph fallback anyway,
             // and a cell that needs 139 lines would otherwise build 139 TextBlocks to throw away.
-            if (cell.lines.size() < MAX_CELL_LINES) {
-              cell.lines.push_back(std::move(tb));
+            // The scratch holds MAX_CELL_LINES, so this push never reallocates.
+            if (sink.lines->size() < MAX_CELL_LINES) {
+              sink.lines->push_back(std::move(tb));
             }
             return ParsedText::LineProcessResult::Accepted;
           },
@@ -7046,10 +7077,31 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
       // that DETECTS the overflow also erases the words it laid out, so the caller's fallback
       // would find this cell -- and every cell laid out before it -- already empty, and would
       // emit nothing at all. Nothing has been written to a page from here, so bailing is clean.
-      if (producedLines > MAX_CELL_LINES) {
+      if (sink.produced > MAX_CELL_LINES) {
         LOG_DBG("EHP", "Table cell needs %u lines (max %u) — falling back to paragraphs",
-                static_cast<unsigned>(producedLines), static_cast<unsigned>(MAX_CELL_LINES));
+                static_cast<unsigned>(sink.produced), static_cast<unsigned>(MAX_CELL_LINES));
         return false;
+      }
+      // The cell's line list at its exact size, in one allocation; the pointers move out of the scratch.
+      if (!cellLineScratch_.empty()) {
+        bool refused = !heapReserveFor(cell.lines, cellLineScratch_.size());
+#ifdef TABLE_CELL_FAULT_INJECTION
+        if (cellLinesLeft() != SIZE_MAX) {
+          if (cellLinesLeft() == 0) {
+            refused = true;
+          } else {
+            --cellLinesLeft();
+          }
+        }
+        if (!refused) ++cellLinesAllocated();
+#endif
+        if (refused) {
+          LOG_DBG("EHP", "No heap for a cell's %u lines — falling back to paragraphs",
+                  static_cast<unsigned>(cellLineScratch_.size()));
+          return false;
+        }
+        for (auto& line : cellLineScratch_) cell.lines.push_back(std::move(line));
+        cellLineScratch_.clear();
       }
     }
 

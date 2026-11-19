@@ -355,6 +355,11 @@ without a device. Build them with the host suite
 - `HeapPeakRegression` (ctest, `test/epub_pipeline/heap_peak_check.py`) runs the dump on six
   fixtures in both modes and fails when a heap-side peak rises more than 8 KB above
   `heap_peak_baseline.txt`. `UPDATE_HEAP_BASELINE=1` re-baselines, on purpose only.
+- The CI job `alloc-counts` (`test/epub_pipeline/alloc_count_report.py`) builds the dump from a pull
+  request and from its base and reports each build's allocation count and heap peak, before and
+  after, for *moby-dick* and three table and `<br>` fixtures in both modes, in the job's summary. It
+  warns on a count that rises more than 5% and never fails a merge: the count is the figure a change
+  that moves per-line or per-cell objects into the arena is judged by.
 - Fidelity: the host is 64-bit, so objects holding pointers or strings read 1.3–1.6 × their device
   size; byte buffers are exact. The lent arena's high-water matched the device to 4 bytes
   (*Strange Pictures*: host 45,872, X3 45,876, 2026-09-25).
