@@ -163,6 +163,9 @@ class Decoder {
   // checkpoint does not fit -- another image, scale or firmware layout; the caller starts over.
   Result resume(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user, FsFile& checkpoint);
   uint16_t bandsDone() const;
+  // True while the decoder is still indexing the file (before its first band); a decode that stopped
+  // there resumes there.
+  bool indexing() const;
   uint16_t bandCount() const;
   // Releases the workspace (when the decoder took its own) and rewinds the file to the JPEG's
   // start. Safe to call at any point, and more than once.

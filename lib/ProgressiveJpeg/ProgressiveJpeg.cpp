@@ -1389,6 +1389,9 @@ Result Decoder::resume(FsFile& file, const DecodeOptions& options, const BandCal
 uint16_t Decoder::bandsDone() const {
   return session_ ? withSession(session_, dcOnly_, [](const auto& ss) { return ss.nextBand; }) : 0;
 }
+bool Decoder::indexing() const {
+  return session_ != nullptr && withSession(session_, dcOnly_, [](const auto& ss) { return ss.phase == Phase::Index; });
+}
 uint16_t Decoder::bandCount() const {
   return session_ ? withSession(session_, dcOnly_, [](const auto& ss) { return ss.g.bandCount; }) : 0;
 }
