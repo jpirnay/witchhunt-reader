@@ -19,6 +19,7 @@
 //      clean — the mechanism the reader uses to show the image after one rebuild.
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <filesystem>
 #include <initializer_list>
 #include <memory>
@@ -27,8 +28,10 @@
 #include "BuildArena.h"
 #include "Epub.h"
 #include "Epub/EpubImageManifest.h"
+#include "Epub/Page.h"
 #include "Epub/Section.h"
 #include "Epub/converters/ImageToFramebufferDecoder.h"
+#include "Epub/parsers/ChapterHtmlSlimParser.h"
 #include "GfxRenderer.h"
 #include "StoredZipWriter.h"
 
@@ -436,6 +439,178 @@ TEST_F(DeferredImageBuildFixture, ResolvingPendingAtBuildEndMakesTheNextBuildCle
 
   ESP.setMaxAllocHeap(16 * 1024);  // the rebuild needs no ring at all: the manifest answers
   EXPECT_FALSE(buildAndReportDegraded());
+}
+
+// --- 5: the line objects' walk reserve, end to end (memory-and-parsing 9b) ---------------------------------------
+//
+// The X4 lends a build 48,000 B. A deferred header whose SOF lies past the walk's first 16 KB stage takes the
+// whole-entry ring, 32 KB, from that region mid-parse, and it fits there only beside a small page block. The lines laid
+// out before the image on its page must not have taken that room with their TextBlock objects
+// (EpubImageManifest::kWalkArenaReserve): with the heap too short for the ring, as it is mid-parse on the X4, the lent
+// build must still resolve the header in the region, as the heap build does with an ample heap.
+
+struct LentWalkFixture : ImageManifestFixture {
+  struct Built {
+    bool degraded = true;
+    int imagePage = -1;  // the page the picture is on; -1: none
+  };
+
+  // `linesBefore` paragraphs, then, with `tableCellWords`, a one-row table of three cells of that many two-letter words
+  // and `linesAfter` paragraphs more, then the picture, then one paragraph more. Each paragraph is one short line, or,
+  // with `wordsEach`, that many two-letter words (dense lines: many words, many bytes a line). The picture's entry is
+  // deflated (in stored DEFLATE blocks), so the walk needs a ring; larger than 32 KB, so that ring is the whole 32 KB;
+  // with SOF 34 KB in, past the first stage.
+  std::string writeBook(const int linesBefore, const int wordsEach = 0, const int tableCellWords = 0,
+                        const int linesAfter = 0) const {
+    test_zip::StoredZipWriter zip;
+    zip.add("mimetype", "application/epub+zip");
+    zip.add("META-INF/container.xml",
+            "<?xml version=\"1.0\"?>\n<container version=\"1.0\" "
+            "xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles><rootfile "
+            "full-path=\"content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles>\n</container>\n");
+    zip.add("content.opf",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
+            "version=\"3.0\" unique-identifier=\"id\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+            "<dc:identifier id=\"id\">late-sof</dc:identifier><dc:title>Late SOF</dc:title>"
+            "<dc:language>en</dc:language></metadata>\n<manifest>\n"
+            "<item id=\"c\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
+            "<item id=\"p\" href=\"images/late.jpg\" media-type=\"image/jpeg\"/>\n"
+            "</manifest>\n<spine><itemref idref=\"c\"/></spine>\n</package>\n");
+    std::string body;
+    const auto paragraphs = [&](const int count) {
+      for (int i = 0; i < count; ++i) {
+        if (wordsEach == 0) {
+          body += "<p>Line " + std::to_string(i) + " before the picture.</p>\n";
+          continue;
+        }
+        body += "<p>";
+        for (int w = 0; w < wordsEach; ++w) body += "ab ";
+        body += "</p>\n";
+      }
+    };
+    paragraphs(linesBefore);
+    if (tableCellWords > 0) {
+      body += "<table><tr>";
+      for (int c = 0; c < 3; ++c) {
+        body += "<td>";
+        for (int w = 0; w < tableCellWords; ++w) body += "cd ";
+        body += "</td>";
+      }
+      body += "</tr></table>\n";
+      paragraphs(linesAfter);
+    }
+    body += "<p><img src=\"images/late.jpg\" alt=\"late\"/></p>\n<p>After the picture.</p>\n";
+    zip.add("chapter.xhtml",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head>"
+            "<title>c</title></head><body>\n" +
+                body + "</body></html>\n");
+    zip.addDeflateStoredBlocks("images/late.jpg", jpegWithLateSof(34 * 1024, kPhotoWidth, kPhotoHeight), 16000);
+    const std::string path = (work / ("late" + std::to_string(linesBefore) + "_" + std::to_string(wordsEach) + "_" +
+                                      std::to_string(tableCellWords) + "_" + std::to_string(linesAfter) + ".epub"))
+                                 .string();
+    zip.write(path);
+    return path;
+  }
+
+  // One cold build of `book` into its own cache: lent `lentBytes` (0: none), with `contig` the largest heap block.
+  Built build(const std::string& book, const std::string& tag, const size_t lentBytes, const uint32_t contig) const {
+    Built built;
+    GfxRenderer renderer;
+    auto epub = std::make_shared<Epub>(book, (work / tag).string());
+    EXPECT_TRUE(epub->load(true));
+    epub->loadImageManifest();
+    std::unique_ptr<BuildArena> lent;
+    if (lentBytes != 0) lent = std::make_unique<BuildArena>(lentBytes);
+    Section::BuildParams p;
+    p.viewportWidth = 480;
+    p.viewportHeight = 800;
+    p.lineCompression = 1.0f;
+    {
+      Section section(epub, 0, renderer);
+      if (lent) section.setExternalBuildScratch(lent.get());
+      ESP.setMaxAllocHeap(contig);
+      const bool ok = section.createSectionFile(p, {}, /*skipEviction=*/true);
+      ESP.setMaxAllocHeap(savedContig);
+      EXPECT_TRUE(ok);
+      if (!ok) return built;
+      built.degraded = section.isImageHeaderDegraded();
+      EXPECT_TRUE(section.loadSectionFile(p));
+      for (int pg = 0; pg < section.pageCount && built.imagePage < 0; ++pg) {
+        section.currentPage = pg;
+        const auto page = section.loadPageFromSectionFile();
+        if (!page) break;
+        for (const auto& el : page->elements) {
+          if (el->getTag() == TAG_PageImage) built.imagePage = pg;
+        }
+      }
+    }
+    return built;
+  }
+};
+
+// The book's first header, met on its first build: nothing on the card says yet that the book has pictures. 28 lines
+// before it, all on its page. Measured on the host with this fixture: with the objects in the region and no reserve
+// (the per-book flag this replaced), the walk misses the region and the header is degraded at 28 and 30 lines; with
+// the objects on the heap, as before 9b, it never is.
+TEST_F(LentWalkFixture, TheLinesBeforeABooksFirstLateHeaderLeaveItsWalkTheRegion) {
+  const std::string book = writeBook(28);
+  const Built heap = build(book, "heap", 0, 100 * 1024);
+  ASSERT_FALSE(heap.degraded);
+  ASSERT_EQ(0, heap.imagePage) << "the lines must share the picture's page";
+  const Built lent = build(book, "lent", 48000, 16 * 1024);
+  EXPECT_FALSE(lent.degraded) << "the lines' objects took the room of the picture's walk";
+  EXPECT_EQ(0, lent.imagePage);
+}
+
+// Dense lines: when the reserve was tested only as each object was placed, the bytes of the lines after the page's last
+// arena object took the walk's stage out of the region where the objects on the heap had left it room. Measured on
+// the host with this fixture, lent 48,000 B: the header was degraded at 12 words a paragraph from 28 paragraphs, at 18
+// from 21 and at 24 from 14 (with the objects on the heap, only at 18 words from 27). Now line bytes that would cross
+// the reserve give back to the heap the room the page's objects took (TextBlock::ArenaRoom); the header is degraded
+// only where it was with the objects on the heap. The cases below are some of those that degraded.
+TEST_F(LentWalkFixture, DenseLinesBeforeALateHeaderLeaveItsWalkTheRegion) {
+  struct Dense {
+    int words;
+    int paragraphs;
+  };
+  for (const Dense d : {Dense{12, 29}, Dense{18, 22}, Dense{18, 25}, Dense{24, 15}}) {
+    SCOPED_TRACE(std::to_string(d.words) + " words, " + std::to_string(d.paragraphs) + " paragraphs");
+    const std::string book = writeBook(d.paragraphs, d.words);
+    const std::string tag = std::to_string(d.words) + "_" + std::to_string(d.paragraphs);
+    const Built heap = build(book, "heap" + tag, 0, 100 * 1024);
+    ASSERT_FALSE(heap.degraded);
+    const Built lent = build(book, "lent" + tag, 48000, 16 * 1024);
+    EXPECT_FALSE(lent.degraded) << "the line bytes after the page's arena objects took the room of the picture's walk";
+    EXPECT_EQ(heap.imagePage, lent.imagePage);
+  }
+}
+
+// A grid row laid out, then refused (here its first cell's line list, TABLE_CELL_FAULT_INJECTION), goes out as
+// paragraphs on the same page: its block is released, and with it the room its lines took and the give-back their
+// bytes made against the prose objects above it. When that give-back stayed counted, the paragraphs after it took the
+// walk's room where the objects on the heap had left it. Measured on the host with this fixture (18-word paragraphs
+// before and after the table, lent 48,000 B, 16 KB contiguous): six of 197 cases were degraded with the objects on the
+// heap resolving them; none is now. The cases below are three of the six.
+TEST_F(LentWalkFixture, ARowSentOutAsParagraphsGivesBackItsShareOfTheWalksRoom) {
+  struct Row {
+    int before;
+    int cellWords;
+    int after;
+  };
+  for (const Row r : {Row{10, 60, 5}, Row{12, 30, 9}, Row{12, 60, 3}}) {
+    SCOPED_TRACE(std::to_string(r.before) + " paragraphs, cells of " + std::to_string(r.cellWords) + " words, " +
+                 std::to_string(r.after) + " paragraphs");
+    const std::string book = writeBook(r.before, 18, r.cellWords, r.after);
+    const std::string tag =
+        std::to_string(r.before) + "_" + std::to_string(r.cellWords) + "_" + std::to_string(r.after);
+    cellLinesLeft() = 0;  // every grid row is refused its first cell's line list
+    const Built heap = build(book, "heap" + tag, 0, 100 * 1024);
+    const Built lent = build(book, "lent" + tag, 48000, 16 * 1024);
+    cellLinesLeft() = SIZE_MAX;
+    ASSERT_FALSE(heap.degraded);
+    EXPECT_FALSE(lent.degraded) << "the row's released bytes kept their give-back: the paragraphs took the walk's room";
+    EXPECT_EQ(heap.imagePage, lent.imagePage);
+  }
 }
 
 }  // namespace

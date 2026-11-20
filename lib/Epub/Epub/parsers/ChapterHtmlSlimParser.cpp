@@ -2143,6 +2143,14 @@ void ChapterHtmlSlimParser::stopOnFullPageTable() {
   saxParser_.stop();
 }
 
+void ChapterHtmlSlimParser::stopOnLinesPastTheirPage(const char* what) {
+  LOG_ERR("EHP", "On page %d, %s laid out for it does not fit it (the fit tests disagree); dropped, stopping the parse",
+          completedPageCount, what);
+  streamFailed = true;
+  layoutFailed = true;
+  saxParser_.stop();
+}
+
 void ChapterHtmlSlimParser::noteCapOverflow(const uint8_t flag, const char* what) {
   if (capOverflowFlags_ & flag) return;
   capOverflowFlags_ |= flag;
@@ -2180,8 +2188,20 @@ void ChapterHtmlSlimParser::wireTextBlock() {
   wireParagraphLines(*currentTextBlock);
 }
 
+size_t ChapterHtmlSlimParser::lineObjectKeepFree() const {
+  // A build that can meet an image header keeps the walk's stage free in a C3-sized region from its first line: the
+  // image may be the book's first, with lines before it on its page. The S3s' 256 KB region has room for both.
+  const bool c3Sized = buildArena_ != nullptr && buildArena_->capacity() < WordShapeCache::kLargeArenaBytes;
+  return imageManifest != nullptr && c3Sized ? EpubImageManifest::kWalkArenaReserve : 0;
+}
+
+TextBlock::ArenaRoom* ChapterHtmlSlimParser::lineRoom() {
+  lineRoom_.keepFree = lineObjectKeepFree();
+  return &lineRoom_;
+}
+
 void ChapterHtmlSlimParser::wireParagraphLines(ParsedText& text) {
-  text.setLineArena(buildArena_);
+  text.setLineArena(buildArena_, lineRoom());
   text.setWordCache(&wordCache_);
   if (buildArena_) {
     text.setBeforeLineHook([this](const uint8_t maxSizePct, bool annotated) { beforeLineHook(maxSizePct, annotated); });
@@ -2205,10 +2225,12 @@ void ChapterHtmlSlimParser::beforeLineHook(const uint8_t maxSizePct, const bool 
     lineHeight += band;
     const std::span<const ParsedText::LineObject> images = currentTextBlock->lineObjects();
     if (!images.empty()) lineHeight = lineImageBox(lineText(bs, lineHeight, maxSizePct, band), images).height;
-    if (currentPageNextY + lineHeight > viewportHeight || keepTogetherBreak(lineHeight) ||
-        lineImagesFillPage(images.size())) {
-      emitPage();
-    }
+    bool breakHere = currentPageNextY + lineHeight > viewportHeight || keepTogetherBreak(lineHeight) ||
+                     lineImagesFillPage(images.size());
+#ifdef PAGE_FAULT_INJECTION
+    if (breakHere && skipEarlyFitBreak()) breakHere = false;
+#endif
+    if (breakHere) emitPage();
   }
   ensurePageBlock();
 }
@@ -2269,6 +2291,7 @@ bool ChapterHtmlSlimParser::keepTogetherBreak(const int lineHeight, const bool n
 void ChapterHtmlSlimParser::ensurePageBlock() {
   if (buildArena_ == nullptr || pageBlock_.valid()) return;
   pageBlock_ = buildArena_->reserveBlock();
+  lineRoom_.displaced = 0;  // a new page: none of its objects is in the block yet
 }
 
 void ChapterHtmlSlimParser::releasePageBlock() {
@@ -2276,9 +2299,12 @@ void ChapterHtmlSlimParser::releasePageBlock() {
   if (!buildArena_->release(pageBlock_)) {
     // Out of LIFO order: something reserved above this block and is still live. Keep the
     // token (overwriting a live one is a contract violation); later pages simply allocate
-    // above it and the region fills, at which point lines fall back to the heap.
+    // above it and the region fills, at which point lines fall back to the heap. The objects
+    // laid out there keep their room too, so lineRoom_ goes on saying so.
     LOG_ERR("EHP", "Page arena block could not be released (out of order); region stays claimed");
+    return;
   }
+  lineRoom_.displaced = 0;
 }
 
 void ChapterHtmlSlimParser::beginExternalPageBreakAnchors() {
@@ -5368,9 +5394,20 @@ void ChapterHtmlSlimParser::markLineStart() {
 }
 
 ChapterHtmlSlimParser::~ChapterHtmlSlimParser() {
-  // An aborted build can leave a page open. Rewind its block now, while the arena is still the
-  // section's: BuildState tears the parser down before it releases the feed-chunk block below.
+  // An aborted build can leave a page open, and a table's rows packed. Their lines go first (members would go only
+  // after this body), then the block is rewound, while the arena is still the section's: BuildState tears the parser
+  // down before it releases the feed-chunk block below.
+  dropLaidOutLines();
   releasePageBlock();
+}
+
+void ChapterHtmlSlimParser::dropLaidOutLines() {
+  // Both borrow elements of currentPage.
+  deferredPageImage_ = nullptr;
+  deferredDropCapLine_ = nullptr;
+  currentTableCell = nullptr;  // a cell of currentTable's row
+  currentTable.reset();
+  currentPage.reset();
 }
 
 size_t ChapterHtmlSlimParser::anchorLimit() const {
@@ -5720,14 +5757,13 @@ bool ChapterHtmlSlimParser::finalize() {
         emitPage();
       }
     }
-    // Both borrow elements of currentPage, and the layoutFailed / empty-final-page paths
-    // reach here without going through emitPage(), which is the other place they are cleared.
-    deferredPageImage_ = nullptr;
-    deferredDropCapLine_ = nullptr;
-    currentPage.reset();
-    releasePageBlock();
     currentTextBlock.reset();
   }
+  // However the parse ended -- the last page emitted above, a layout failure, an empty final page, a parse stopped
+  // inside a table with its rows packed, or a text block makePages() dropped after a refusal -- what still holds lines
+  // laid out in the page block goes before the block is rewound, so the arena is left as the parse found it.
+  dropLaidOutLines();
+  releasePageBlock();
 
   // Anything still waiting on a line after a layout that failed never got one. Record those at the last page reached,
   // before the spill closes.
@@ -5861,6 +5897,12 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
 
   if (currentPageNextY + lineHeight > viewportHeight || keepTogetherBreak(lineHeight) ||
       lineImagesFillPage(images.size())) {
+    if (buildArena_ != nullptr) {
+      // The line was made in this page's block, which emitPage() rewinds: beforeLineHook's test said it fits.
+      line.reset();
+      stopOnLinesPastTheirPage("a line");
+      return ParsedText::LineProcessResult::Accepted;
+    }
     emitPage();
     if (!currentPage) return ParsedText::LineProcessResult::Accepted;
   }
@@ -6281,9 +6323,16 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   LayoutRow lr;
   BuildArena::Block rowBlock;
   if (buildArena_) rowBlock = buildArena_->reserveBlock();
+  // What the page's objects held before the row (TextBlock::ArenaRoom). A released row takes its objects' room and
+  // its bytes' give-back with it, so the count goes back to this; a refused release keeps the row's bytes, and the
+  // count with them.
+  size_t displacedBeforeRow = lineRoom_.displaced;
   const auto dropRowLayout = [&] {
     lr.cells.clear();
-    if (rowBlock.valid() && !buildArena_->release(rowBlock)) {
+    if (!rowBlock.valid()) return;
+    if (buildArena_->release(rowBlock)) {
+      lineRoom_.displaced = displacedBeforeRow;
+    } else {
       LOG_ERR("EHP", "Table row arena block could not be released (out of order); region stays claimed");
     }
   };
@@ -6337,8 +6386,13 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   // no longer bounded, so the cap has to live here, on the fragment that actually has to satisfy
   // it. The viewport check below reaches it first at any realistic row height; this is the
   // invariant, not the working limit.
-  if (!t.packer.rows.empty() && (t.packer.rows.size() >= MAX_TABLE_ROWS ||
-                                 currentPageNextY + t.packer.height + rowContrib + closingBorder > viewportHeight)) {
+  bool fragmentFull =
+      !t.packer.rows.empty() && (t.packer.rows.size() >= MAX_TABLE_ROWS ||
+                                 currentPageNextY + t.packer.height + rowContrib + closingBorder > viewportHeight);
+#ifdef PAGE_FAULT_INJECTION
+  if (fragmentFull && skipEarlyFitBreak()) fragmentFull = false;
+#endif
+  if (fragmentFull) {
     flushFragmentBeforeRow();
     t.packer.cols = lr.renderCols;
   }
@@ -6373,6 +6427,7 @@ void ChapterHtmlSlimParser::commitPendingRow() {
     if (!currentPage) return;  // no heap for the next page: emitPage stopped the build
     ensurePageBlock();
     if (buildArena_) rowBlock = buildArena_->reserveBlock();
+    displacedBeforeRow = lineRoom_.displaced;
     if (!layoutTableRow(t.pendingRow, columnCount, lr)) {
       dropRowLayout();
       degradeRow("row cannot be a grid row");
@@ -7183,9 +7238,10 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
         std::vector<std::unique_ptr<TextBlock>>* lines;
         size_t produced;
       } sink{&cellLineScratch_, 0};
-      // Line bytes from the lent region on an arena build. No page-fit hook: the row is placed as
-      // a whole by the caller, inside a block it commits or releases (see the row emission).
-      bufCell.text->setLineArena(buildArena_);
+      // Line bytes, and their objects (lineObjectKeepFree), from the lent region on an arena build. No page-fit hook:
+      // the row is placed as a whole by the caller, inside a block it commits or releases (see the row emission); a
+      // released row's lines are gone by then (lr.cells, and cellLineScratch_ cleared on every return here).
+      bufCell.text->setLineArena(buildArena_, lineRoom());
       bufCell.text->setWordCache(&wordCache_);
       bufCell.text->setBeforeLineHook(nullptr);
       bufCell.text->layoutAndExtractLines(
@@ -7291,6 +7347,15 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
   // Below a box's top padding on a fresh page there is nothing yet to leave behind.
   const bool pageHasContent = currentPageNextY > 0 && (boxScopes_.empty() || !currentPage->elements.empty());
   if (currentPageNextY + fragTotalHeight > viewportHeight && pageHasContent) {
+    if (buildArena_ != nullptr) {
+      // The rows were laid out in this page's block, which emitPage() rewinds: the packer's test said they fit.
+      packer.rows.clear();
+      packer.height = 0;
+      packer.cols = 0;
+      packer.firstVisibleOffset = UINT32_MAX;
+      stopOnLinesPastTheirPage("a table fragment");
+      return;
+    }
     emitPage();
     if (!currentPage) return;  // no heap for the next page: emitPage stopped the build
   }

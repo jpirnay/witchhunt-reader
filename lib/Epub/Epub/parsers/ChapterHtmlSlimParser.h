@@ -161,6 +161,24 @@ inline size_t& pagesLeft() {
   static size_t left = SIZE_MAX;
   return left;
 }
+// How many page breaks the fit tests that run before a line or a grid row is laid out (beforeLineHook, the row
+// packer's) take before they skip one, as if it had found room. SIZE_MAX (the default): they never do. Drives the
+// arena build's stop when the later fit test disagrees (stopOnLinesPastTheirPage).
+inline size_t& earlyFitBreaksBeforeSkip() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// For a break one of those tests is about to take: true when it is the one to skip (once; the hook then disarms).
+inline bool skipEarlyFitBreak() {
+  size_t& left = earlyFitBreaksBeforeSkip();
+  if (left == SIZE_MAX) return false;
+  if (left > 0) {
+    --left;
+    return false;
+  }
+  left = SIZE_MAX;
+  return true;
+}
 #endif
 
 #ifdef ELEMENT_FAULT_INJECTION
@@ -1003,6 +1021,11 @@ class ChapterHtmlSlimParser final : public Print {
   // Drops the page in hand and stops the parse the way a low-heap abort does: the pages already
   // emitted are kept as a truncated section.
   void stopOnFullPageTable();
+  // An arena build lays a line or a table row out in the block of the page its fit test chose (beforeLineHook, the
+  // row packer), and emitPage() rewinds that block. Should a later test send the line or the packed rows to the next
+  // page, they would be carried over in rewound bytes, so their caller drops them while the block is live and calls
+  // this: the parse stops the way a low-heap stop does, its pages kept. Unreachable while the tests agree.
+  void stopOnLinesPastTheirPage(const char* what);
 
   // Active parser for streaming. A member so write() can feed it and the abort paths can stop
   // it from inside a callback.
@@ -1015,6 +1038,10 @@ class ChapterHtmlSlimParser final : public Print {
   // above the section's feed-chunk block and below nothing that outlives the page (a mid-build
   // draw's font-slot scope opens and closes between two slices): strictly LIFO.
   BuildArena::Block pageBlock_;
+  // What the open page's lines may take from pageBlock_'s arena, objects and bytes (TextBlock::ArenaRoom): handed to
+  // every ParsedText laid out on the page, its keepFree lineObjectKeepFree(), its displaced cleared whenever the
+  // page block opens or is rewound.
+  TextBlock::ArenaRoom lineRoom_;
   // The build's cache of shaped words, in buildArena_'s free tail (WordShapeCache.h): armed in setup() after the SAX
   // state is taken, bound to each ParsedText beside its line arena, disarmed at the end of finalize(), before the
   // section releases the feed-chunk block. Unarmed (no lent arena, or no room for it), every lookup is bypassed.
@@ -1790,6 +1817,13 @@ class ChapterHtmlSlimParser final : public Print {
   // wireParagraphLines does the same for any text laid out as a paragraph of the page.
   void wireTextBlock();
   void wireParagraphLines(ParsedText& text);
+  // What the line arena must still have free after a line's TextBlock object for the object to go there beside its
+  // bytes, and, once an object of the page is there, after the line bytes too (memory-and-parsing 9b,
+  // TextBlock::ArenaRoom): the image walk's largest stage (EpubImageManifest::kWalkArenaReserve) whenever the build has
+  // an image manifest and a C3-sized region, else nothing. The one place the rule lives.
+  size_t lineObjectKeepFree() const;
+  // lineRoom_ with its keepFree set from lineObjectKeepFree(), for a ParsedText laid out on the page.
+  TextBlock::ArenaRoom* lineRoom();
   void beforeLineHook(uint8_t maxSizePct, bool annotated);
   // Widow/orphan control and keep-with-next (CSS defaults: orphans 2, widows 2), decided before
   // each line of currentTextBlock is placed: true when the page should end before a line that
@@ -1808,4 +1842,8 @@ class ChapterHtmlSlimParser final : public Print {
   uint16_t paragraphLinesOnPage_ = 0;
   void ensurePageBlock();
   void releasePageBlock();
+  // Destroys everything that holds lines laid out in the page block -- the open page and a table's packed rows -- on
+  // the paths that end a parse early (finalize(), the destructor). They must go before releasePageBlock() rewinds the
+  // block: the lines' bytes live there.
+  void dropLaidOutLines();
 };

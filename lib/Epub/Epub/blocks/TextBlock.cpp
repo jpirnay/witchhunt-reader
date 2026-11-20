@@ -146,11 +146,26 @@ size_t TextBlock::arenaSize(const uint16_t wordCount, const bool hasSizes, const
   return arenaOffsets(wordCount, hasSizes, fontCount, textBytes).annotations + annotationBytes + bidiBytes;
 }
 
-bool TextBlock::allocArena(const size_t size, BuildArena* scratch) {
-  if (scratch != nullptr) {
-    // A line's word fonts (4-byte fields) come first, then the two 16-bit arrays: the base
-    // needs 4-byte alignment.
-    arena = static_cast<uint8_t*>(scratch->alloc(size, 4));
+bool TextBlock::roomKeepsFree(const BuildArena& arena, const size_t bytes, const size_t align, const size_t keepFree) {
+  if (!arena.valid() || keepFree == SIZE_MAX) return false;
+  // The allocation with the most padding its alignment can take, so what is left after it is never less than
+  // `keepFree`.
+  const size_t room = arena.capacity() - arena.used();
+  if (bytes > SIZE_MAX - (align - 1)) return false;
+  const size_t taken = bytes + align - 1;
+  return room >= taken && room - taken >= keepFree;
+}
+
+bool TextBlock::allocArena(const size_t size, BuildArena* scratch, ArenaRoom* room) {
+  // A line's word fonts (4-byte fields) come first, then the two 16-bit arrays: the base
+  // needs 4-byte alignment.
+  constexpr size_t kAlign = 4;
+  // The page's objects have taken room that these bytes would now take from what keepFree holds for: the heap, and the
+  // room is given back (ArenaRoom).
+  const bool giveBack = scratch != nullptr && room != nullptr && room->displaced > 0 &&
+                        !roomKeepsFree(*scratch, size, kAlign, room->keepFree);
+  if (scratch != nullptr && !giveBack) {
+    arena = static_cast<uint8_t*>(scratch->alloc(size, kAlign));
     if (arena != nullptr) {
       arenaOwned_ = false;
       return true;
@@ -158,9 +173,39 @@ bool TextBlock::allocArena(const size_t size, BuildArena* scratch) {
     // Region full (a page beyond what it was sized for): fall through to the heap for this
     // line alone. A mixed page is fine -- ownership is per block.
   }
+  // The heap, asked nothrow.
   arena = new (std::nothrow) uint8_t[size];
   arenaOwned_ = arena != nullptr;
-  return arena != nullptr;
+  if (arenaOwned_) {
+    if (giveBack) room->displaced -= std::min(room->displaced, size);
+    return true;
+  }
+  if (giveBack) {
+    // The heap refuses bytes sent there to give the walk's room back: the arena, as before 9b, rather than lose the
+    // line. Nothing is given back, so the page's later bytes go on giving it.
+    arena = static_cast<uint8_t*>(scratch->alloc(size, kAlign));
+    if (arena != nullptr) {
+      LOG_DBG("TXB", "No heap for %u give-back bytes: in the arena instead", static_cast<unsigned>(size));
+      return true;
+    }
+  }
+  // Neither: an invalid block, which its caller drops, as before 9b (ParsedText's "Dropping line").
+  return false;
+}
+
+std::unique_ptr<TextBlock> TextBlock::make(const WordRange& range, const std::vector<int16_t>& word_xpos,
+                                           const BlockStyle& blockStyle, BuildArena* arena, ArenaRoom* room) {
+  if (arena != nullptr && room != nullptr &&
+      roomKeepsFree(*arena, sizeof(TextBlock), alignof(TextBlock), room->keepFree)) {
+    const size_t before = arena->used();
+    if (void* const at = arena->alloc(sizeof(TextBlock), alignof(TextBlock))) {
+      room->displaced += arena->used() - before;  // the object and its padding
+      auto* const block = new (at) TextBlock(range, word_xpos, blockStyle, arena, room);
+      block->objectInArena_ = true;
+      return std::unique_ptr<TextBlock>(block);
+    }
+  }
+  return makeUniqueNoThrow<TextBlock>(range, word_xpos, blockStyle, arena, room);
 }
 
 void TextBlock::bindArenaPointers() {
@@ -249,7 +294,7 @@ TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_x
 }
 
 TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xpos, const BlockStyle& blockStyle,
-                     BuildArena* scratch)
+                     BuildArena* scratch, ArenaRoom* room)
     : renderStyle{blockStyle.fontSizeMultiplier, blockStyle.headingFontId, blockStyle.alignment} {
   const std::string_view* views = range.wordViews;
   if ((range.words == nullptr && views == nullptr) || range.styles == nullptr) {
@@ -395,7 +440,7 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
 
   const size_t size = arenaSize(numWords, sizesPresent, wordFontCount, textBytes,
                                 static_cast<uint16_t>(annotationBytes), static_cast<uint16_t>(bidiBytes));
-  if (!allocArena(size, scratch)) {
+  if (!allocArena(size, scratch, room)) {
     LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
     numWords = 0;
     textBytes = 0;
