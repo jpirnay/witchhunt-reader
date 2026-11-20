@@ -436,11 +436,31 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
 }
 
 #if FREEINK_DEVICE_METALIO_EINK4_PLUS
+namespace {
+RTC_NOINIT_ATTR uint32_t metalioRejectedWakes;
+}  // namespace
+
+void HalPowerManager::rejectNonPowerMetalioWake() const {
+  if (esp_reset_reason() != ESP_RST_DEEPSLEEP) return;
+  // GPIO2 only identifies the expander. Read the actual key before drawing the
+  // boot screen, otherwise Volume or another input clears the sleep wallpaper.
+  if (freeink::metalioplus::powerKeyHeld()) return;
+  ++metalioRejectedWakes;
+  sleepOnExpanderKey();
+}
+
+void HalPowerManager::logMetalioWake() const {
+  if (esp_reset_reason() == ESP_RST_DEEPSLEEP) {
+    LOG_INF("PWR", "Metalio deep sleep: ignored %lu shared interrupts",
+            static_cast<unsigned long>(metalioRejectedWakes));
+  }
+}
+
 void HalPowerManager::sleepOnExpanderKey() const {
-  if (esp_sleep_is_valid_wakeup_gpio(freeink::metalioplus::EXPANDER_INT_GPIO) &&
-      freeink::metalioplus::prepareKeyWake() &&
-      esp_sleep_enable_ext1_wakeup_io(1ULL << freeink::metalioplus::EXPANDER_INT_GPIO, ESP_EXT1_WAKEUP_ANY_LOW) ==
-          ESP_OK) {
+  constexpr gpio_num_t wakePin = freeink::metalioplus::EXPANDER_INT_GPIO;
+  if (esp_sleep_is_valid_wakeup_gpio(wakePin) && freeink::metalioplus::prepareKeyWake()) {
+    // The open-drain INT needs its RTC pull-up powered for the entire sleep.
+    freeink::PowerManager::armWakeOnPins(1ULL << wakePin, /*wakeLow=*/true);
     LOG_INF("PWR", "Metalio standby: expander wake armed");
     freeink::PowerManager::deepSleep();
   }
@@ -453,7 +473,8 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
 #if FREEINK_DEVICE_METALIO_EINK4_PLUS
   (void)gpio;
   (void)keepClockAlive;
-  // Keep the board powered so the expander can wake it on a short press.
+  // Keep the board powered so the expander can wake it on a Power press.
+  metalioRejectedWakes = 0;
   sleepOnExpanderKey();
 #else
   LOG_DBG("PWR", "startDeepSleep: isPressed=%d, rawPin=%d, keepClock=%d", gpio.isPressed(HalGPIO::BTN_POWER),

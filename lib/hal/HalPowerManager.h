@@ -101,6 +101,8 @@ class HalPowerManager {
 
 #if FREEINK_DEVICE_METALIO_EINK4_PLUS
   void sleepOnExpanderKey() const;
+  void rejectNonPowerMetalioWake() const;
+  void logMetalioWake() const;
 #endif
 
  private:

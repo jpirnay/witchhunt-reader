@@ -1216,12 +1216,7 @@ void setup() {
   BoardConfig::holdPowerRails();
 
 #if FREEINK_DEVICE_METALIO_EINK4_PLUS
-  // EXT1 records the edge across the bootloader. The key may already be released by setup().
-  const bool expanderWake = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 &&
-                            (esp_sleep_get_ext1_wakeup_status() & (1ULL << freeink::metalioplus::EXPANDER_INT_GPIO));
-  if (esp_reset_reason() == ESP_RST_DEEPSLEEP && !expanderWake && !freeink::metalioplus::powerKeyHeld()) {
-    powerManager.sleepOnExpanderKey();
-  }
+  powerManager.rejectNonPowerMetalioWake();
   WiFi.persistent(false);
 #endif
 
@@ -1443,6 +1438,9 @@ void setup() {
 #ifdef ENABLE_SERIAL_LOG
   if (openSerialLogIfHostPresent()) {
     BootDiag::markPhase(BootPhase::SerialUp);
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    powerManager.logMetalioWake();
+#endif
   }
 #endif
 
