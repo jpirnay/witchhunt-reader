@@ -39,7 +39,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 128;  // v128: a chapter's CSS lookups use only the stylesheets it
+constexpr uint8_t SECTION_FILE_VERSION = 129;  // v129: an id on an inline element names the page of its own line
+                                               // (not its block's first, nor the next block's)
+                                               // v128: a chapter's CSS lookups use only the stylesheets it
                                                // links and what those import (matcha-reader #453)
                                                // v127: a <br> adds a blank line only on an empty line: none after
                                                // a word or a picture (a contents entry's trailing <br>), one each
