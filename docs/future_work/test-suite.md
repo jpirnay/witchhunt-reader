@@ -78,6 +78,11 @@ rename or move, and small code cleanups it noticed.
   check-value test.
 - `FirmwareBoardTag.MagicFirstCharIsUnique` checks the test's own copy of the magic. Make it a
   `static_assert` next to `MAGIC_LEN` in `FirmwareBoardTag.cpp` and drop the test.
+- Four tests replace the global `operator new`/`operator delete` with `malloc`/`free` to count allocations, and
+  GCC on CI's Linux warns `-Wmismatched-new-delete` at their sized `operator delete`: `BookmarksTest.cpp:32`,
+  `CjkLineBreakTest.cpp:164`, `HtmlToPlainTextTest.cpp:25`, `InlineListFunctionRefTest.cpp:30`. Harmless, but
+  it buries new warnings in the unit-test log. Next step: try `noinline` on the replacements, else turn the
+  warning off for those four targets, and check the CI log is clean.
 
 ## epub_optimizer sweep
 
