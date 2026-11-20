@@ -335,6 +335,10 @@ class TextBlock final : public Block {
   struct ArenaRoom {
     size_t keepFree = SIZE_MAX;
     size_t displaced = 0;
+    // Where an object of the page goes in `arena` under the first rule above: `bytes` at `align` while `keepFree`
+    // stays free after them, counted in `displaced` with their padding. Null otherwise, and the object takes the heap.
+    // The one place the rule is applied, for every kind of object a page puts there.
+    void* placeObject(BuildArena& arena, size_t bytes, size_t align);
   };
   // A laid-out line, the object where its bytes go: in `arena` as `room` allows, else on the heap
   // (new (std::nothrow), as before). Null `room`: the object on the heap, the bytes in `arena` while it has room. An
