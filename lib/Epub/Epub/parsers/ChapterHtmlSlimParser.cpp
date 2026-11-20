@@ -120,9 +120,9 @@ constexpr size_t MAX_RESIDENT_ANCHORS = 256;
 constexpr size_t MAX_SPAN_ANCHORS_PER_CHAPTER = 512;
 // Write buffer for the anchor spill; see the emplace site in setup().
 constexpr size_t ANCHOR_SPILL_BUFFER_BYTES = 512;
-// Anchors that may wait for their first line at once. One per id'd element that has produced no
-// text yet; more than a couple means a run of empty anchored elements, and the excess is recorded
-// at the current page rather than held.
+// Anchors that may wait for their line at once: a paragraph's inline ids, each until the line that reaches its word,
+// and the ids of elements that have produced no text yet. The 17th and later in one layout window are recorded at the
+// page reached so far rather than held.
 constexpr size_t MAX_ANCHORS_AWAITING_LINE = 16;
 
 // Image extraction is now deferred to render time (ImageBlock::ensureExtracted).
@@ -2819,7 +2819,25 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
       effectiveBase = &currentTextBlock->getBlockStyle();
     }
 
+    // An inline id past the last word of a block that a block element opened inside of (<div>text <a id><p>..): it
+    // names the new block, whose first line is the one to wait for, not the last line of this one. They are set aside
+    // (-1, which no flush takes) while this block is laid out, and wait for the new block's first line. Not at a <br>
+    // or a kept line feed, which only end the line the id stands at the end of (text <a id><br/>), and not after the
+    // block's element has closed (text <a id></p><h2>): the id is on the last line.
+    const bool overtaken = currentBlockOwnerDepth_ >= 0 && !blockStyle.fromBrElement && !blockStyle.fromLineFeed &&
+                           !anchorsAwaitingLine_.empty();
+    if (overtaken) {
+      const int tokens = lineTokensSoFar();
+      for (auto& entry : anchorsAwaitingLine_) {
+        if (entry.wordIndex > tokens) entry.wordIndex = -1;
+      }
+    }
     if (!currentTextBlock->isEmpty()) makePages();
+    if (overtaken) {
+      for (auto& entry : anchorsAwaitingLine_) {
+        if (entry.wordIndex < 0) entry.wordIndex = 0;
+      }
+    }
   }
   blockFamilyState_ = 0;  // the next block's words start over
   wordFontsSize_ = 0;
@@ -2992,7 +3010,16 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     const bool atTocAnchor = self->isTocAnchor(idAttr);
     if (atTocAnchor ||
         (!isNonNavigableInlineElement(name) && self->anchorCount < self->anchorLimit() + self->spanAnchorCount_)) {
-      self->pendingAnchorId = idAttr;
+      // An id on an inline element inside a block waits in the queue for the line that reaches its word: the next
+      // word's index, or 0 (the block's first line) before the block's first word and in a table cell, whose row
+      // records it at the page the row reaches. Any other id (a block element's, an inline one outside any block)
+      // waits as pendingAnchorId, a single slot, for the next block's first line.
+      if (!atTocAnchor && matches(name, INLINE_FORMATTING_TAGS, NUM_INLINE_FORMATTING_TAGS) &&
+          (self->currentBlockOwnerDepth_ >= 0 || self->currentTable)) {
+        self->queueAnchorForNextLine(idAttr, self->inlineAnchorWordIndex());
+      } else {
+        self->pendingAnchorId = idAttr;
+      }
     } else if (isNonNavigableInlineElement(name)) {
       self->recordSpanAnchor(idAttr);
     } else {
@@ -5350,24 +5377,48 @@ size_t ChapterHtmlSlimParser::anchorLimit() const {
   return anchorSpillWriter.has_value() ? MAX_ANCHORS_PER_CHAPTER : MAX_RESIDENT_ANCHORS;
 }
 
-void ChapterHtmlSlimParser::flushAnchorsAwaitingLine() {
-  if (anchorsAwaitingLine_.empty()) return;
-  for (auto& id : anchorsAwaitingLine_) {
-    recordAnchor(std::move(id), static_cast<uint16_t>(completedPageCount));
+void ChapterHtmlSlimParser::flushAnchorsAwaitingLine(const int page) {
+  for (auto& entry : anchorsAwaitingLine_) {
+    recordAnchor(std::move(entry.id), static_cast<uint16_t>(page));
   }
   anchorsAwaitingLine_.clear();
 }
 
-void ChapterHtmlSlimParser::queueAnchorForNextLine(std::string id) {
+void ChapterHtmlSlimParser::flushAnchorsInRange(const int firstIndex, const int lastIndex) {
+  if (anchorsAwaitingLine_.empty()) return;
+  size_t kept = 0;
+  for (size_t i = 0; i < anchorsAwaitingLine_.size(); ++i) {
+    AnchorAwaitingLine& entry = anchorsAwaitingLine_[i];
+    if (entry.wordIndex >= firstIndex && entry.wordIndex <= lastIndex) {
+      recordAnchor(std::move(entry.id), static_cast<uint16_t>(completedPageCount));
+    } else {
+      if (kept != i)
+        anchorsAwaitingLine_[kept] = std::move(entry);  // never onto itself: a string's self-move clears it
+      ++kept;
+    }
+  }
+  anchorsAwaitingLine_.erase(anchorsAwaitingLine_.begin() + kept, anchorsAwaitingLine_.end());
+}
+
+// The next word's index (idea from crosspoint-reader #4328, Mikalai Kryvusha, @MikalaiKryvusha, who queues inline ids
+// by word index), counted as addLineToPage counts the words a line reaches and as a footnote link counts the
+// word it follows. An id inside a word (the partial word is counted) waits for that word's line.
+int ChapterHtmlSlimParser::inlineAnchorWordIndex() const {
+  if (currentTable || census_) return 0;
+  const int soFar = lineTokensSoFar();
+  return soFar > 0 ? soFar + (partWordHasText() ? 0 : 1) : 0;
+}
+
+void ChapterHtmlSlimParser::queueAnchorForNextLine(std::string id, const int wordIndex) {
   if (id.empty() || census_) return;  // the census places no line for an anchor to wait for
-  // Bounded: an id'd element that never produces a line leaves its entry queued, so a run of them
-  // would grow this. Past the cap they are recorded at the current page instead -- the behaviour
-  // this replaced, applied only where holding on would cost memory.
+  // Bounded: a paragraph's inline ids wait until the lines that reach them are placed, and an id'd element that never
+  // produces a line leaves its entry queued, so a run of either would grow this. Past the cap an id is recorded at the
+  // page reached so far instead: approximate, never lost.
   if (anchorsAwaitingLine_.size() >= MAX_ANCHORS_AWAITING_LINE) {
     recordAnchor(std::move(id), static_cast<uint16_t>(completedPageCount));
     return;
   }
-  (void)pushOrStop(anchorsAwaitingLine_, std::move(id), "the anchors awaiting a line");
+  (void)pushOrStop(anchorsAwaitingLine_, AnchorAwaitingLine{std::move(id), wordIndex}, "the anchors awaiting a line");
 }
 
 // A <span id> used to be left out of the anchor map altogether, to keep converter-injected ids
@@ -5388,17 +5439,18 @@ void ChapterHtmlSlimParser::recordSpanAnchor(const std::string& id) {
     return;
   }
   spanAnchorCount_++;
-  // A span is inline, so it is usually part of the block in progress, and the next line placed is
-  // that block's first: queue it. The exception is a span opened after its block's element has
-  // closed but before the next block started (FB2 conversions wrap a whole note,
-  // <span id><div><p>..</p></div></span>, in one): the block still in progress is the previous
-  // note's, so the id waits for the next block the way any element's does.
+  // A span is inline, so it is usually part of the block in progress: queue it at its word. The exception is a span
+  // opened after its block's element has closed but before the next block started (FB2 conversions wrap a whole note,
+  // <span id><div><p>..</p></div></span>, in one): the block still in progress is the previous note's, so the id waits
+  // for the next block the way any element's does.
   const bool opensNextBlock = currentTextBlock && !currentTextBlock->isEmpty() && currentBlockOwnerDepth_ < 0;
   if (opensNextBlock && pendingAnchorId.empty()) {
     pendingAnchorId = id;
     return;
   }
-  queueAnchorForNextLine(id);
+  // At the word it precedes: a span in the middle of a paragraph that crosses a page is on that line's page.
+  // Idea from crosspoint-reader #4328 (Mikalai Kryvusha, @MikalaiKryvusha), which queues inline ids by word index.
+  queueAnchorForNextLine(id, inlineAnchorWordIndex());
 }
 
 bool ChapterHtmlSlimParser::lookupAnchorInActiveBuild(const std::string& id, uint16_t& page) {
@@ -5653,16 +5705,17 @@ bool ChapterHtmlSlimParser::finalize() {
     while (!boxScopes_.empty() && !layoutFailed && !streamFailed) closeBox();
     if (!layoutFailed) {
       const bool hasFinalPageContent = currentPage && !currentPage->elements.empty();
+      // Avoid mapping trailing anchors to a non-existent blank page when the
+      // chapter ended exactly on a page boundary.
+      const int anchorPage =
+          !hasFinalPageContent && completedPageCount > 0 ? completedPageCount - 1 : completedPageCount;
       if (!pendingAnchorId.empty()) {
-        uint16_t anchorPage = static_cast<uint16_t>(completedPageCount);
-        // Avoid mapping trailing anchors to a non-existent blank page when the
-        // chapter ended exactly on a page boundary.
-        if (!hasFinalPageContent && completedPageCount > 0) {
-          anchorPage = static_cast<uint16_t>(completedPageCount - 1);
-        }
-        recordAnchor(std::move(pendingAnchorId), anchorPage);
+        recordAnchor(std::move(pendingAnchorId), static_cast<uint16_t>(anchorPage));
         pendingAnchorId.clear();
       }
+      // An id still waiting on a line gets none (an element with no text of its own ends the chapter: <p id></p>,
+      // <p><a id></a></p>). Recorded after the emitPage below, it named a page past the last.
+      flushAnchorsAwaitingLine(anchorPage);
       if (hasFinalPageContent) {
         emitPage();
       }
@@ -5676,9 +5729,9 @@ bool ChapterHtmlSlimParser::finalize() {
     currentTextBlock.reset();
   }
 
-  // Anything still waiting on a line never got one -- an id'd element with no text of its own.
-  // Record those at the last page reached, which is where they sit, before the spill closes.
-  flushAnchorsAwaitingLine();
+  // Anything still waiting on a line after a layout that failed never got one. Record those at the last page reached,
+  // before the spill closes.
+  flushAnchorsAwaitingLine(completedPageCount);
 
   // Close the anchor spill LAST. The trailing-anchor recording just above is the final call into
   // recordAnchor, and closing before it would send that one anchor down the resident fallback --
@@ -5824,15 +5877,14 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
     return ParsedText::LineProcessResult::RetryWithoutHyphenation;
   }
 
-  // Every emitPage() that this line could trigger is above, so completedPageCount is now the page
-  // the line is going on: the page any anchor waiting on it should name.
-  flushAnchorsAwaitingLine();
-
   // Capture first-line flag before incrementing wordsExtractedInBlock.
   const bool isFirstLineOfBlock = (wordsExtractedInBlock == 0);
 
   // Track cumulative words to assign footnotes to the page containing their anchor
   wordsExtractedInBlock += lineTokenCount;
+  // Every emitPage() that this line could trigger is above, so completedPageCount is now the page the line is going
+  // on: the page any anchor waiting on a word of it should name.
+  flushAnchorsInRange(0, wordsExtractedInBlock);
   auto footnoteIt = pendingFootnotes.begin();
   while (footnoteIt != pendingFootnotes.end() && footnoteIt->first <= wordsExtractedInBlock) {
     if (!currentPage->addFootnote(footnoteIt->second.number, footnoteIt->second.href)) {
@@ -6115,6 +6167,9 @@ void ChapterHtmlSlimParser::makePages() {
     pendingFootnotes.clear();
   }
 
+  // An id after the block's last word has no later line to reach: it is on the page the last line went to.
+  flushAnchorsInRange(1, INT_MAX);
+
   // Apply bottom spacing after the paragraph (stored in pixels)
   if (blockStyle.marginBottom > 0) {
     currentPageNextY += blockStyle.marginBottom;
@@ -6386,7 +6441,7 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   // the page it lands on. Without this an anchor on a <table> or a <tr> whose rows all lay out as
   // a grid waited for the next ordinary paragraph instead -- measured ten pages later on a book
   // whose notes are one long table.
-  flushAnchorsAwaitingLine();
+  flushAnchorsAwaitingLine(completedPageCount);
 
   // Free the row's words. Everything above exists to make this possible one row at a time.
   t.pendingRow.cells.clear();
@@ -6797,6 +6852,8 @@ bool ChapterHtmlSlimParser::placeImageOnlyParagraph() {
     }
   }
   pendingLineImages_.clear();
+  // An id after an image is on the page the images reached, as makePages records an id after a block's last word.
+  flushAnchorsInRange(1, INT_MAX);
   // Links that ended inside the paragraph go to the page the images reached, as makePages hands over its leftovers.
   if (!pendingFootnotes.empty() && currentPage) {
     for (const auto& [idx, fn] : pendingFootnotes) {
