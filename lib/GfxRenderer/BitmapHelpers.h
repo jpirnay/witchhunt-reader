@@ -48,14 +48,29 @@ struct QuantizedGray4 {
 // display tuning: the X4-tuned 30/50/140, where the even midpoints would be 43/128/213.
 // (The reader's in-book image path uses the untuned midpoints, quantizeGray4Level() in
 // Epub/converters/DitherUtils.h, which returns only an index.)
+#if SERIAL_TEST_API
+// Development builds only: CMD:SLEEP:SCREEN:T=<a>,<b>,<c> sets these to tune a panel's sleep images on the
+// glass without a rebuild (docs/serial-test-api.md). Release builds keep the constants below.
+namespace gray4tuning {
+inline uint8_t thresholds[3] = {30, 50, 140};
+}  // namespace gray4tuning
+#endif
+
 inline QuantizedGray4 quantizeGray4(int gray) {
   if (gray < 0) gray = 0;
   if (gray > 255) gray = 255;
 
   // X4-tuned thresholds; same level spacing fed back to the diffuser (see above).
+#if SERIAL_TEST_API
+  const uint8_t* t = gray4tuning::thresholds;
+  if (gray < t[0]) return {0, 0};
+  if (gray < t[1]) return {1, 85};
+  if (gray < t[2]) return {2, 170};
+#else
   if (gray < 30) return {0, 0};
   if (gray < 50) return {1, 85};
   if (gray < 140) return {2, 170};
+#endif
   return {3, 255};
 }
 

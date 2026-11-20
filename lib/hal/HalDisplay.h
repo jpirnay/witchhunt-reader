@@ -246,6 +246,8 @@ class HalDisplay {
   void displayOnePassFrame(RefreshMode refreshMode, bool turnOffScreen);
   // Development builds only (the serial test API's LAB command): both planes and an external LUT as given.
   bool displayLabFrame(const uint8_t* bw, const uint8_t* red, const uint8_t* lut);
+  // Register writes sent with every lab frame until cleared (FreeInkDisplay::setLabRegisters()); development builds.
+  bool setLabRegisters(const uint8_t* records, size_t len);
   // Compose the intact B/W framebuffer with the LSB/MSB planes staged by
   // copyGrayscale*Buffers() and display the result in one refresh. Falls back to
   // a plain displayBuffer() on a panel that cannot, so callers need no branch of

@@ -621,6 +621,10 @@ bool HalDisplay::displayLabFrame(const uint8_t* bw, const uint8_t* red, const ui
   return einkDisplay.displayLabFrame(bw, red, lut);
 }
 
+bool HalDisplay::setLabRegisters(const uint8_t* records, const size_t len) {
+  return einkDisplay.setLabRegisters(records, len);
+}
+
 bool HalDisplay::supportsAbsoluteGrayPlanes() const {
   return einkDisplay.grayscaleCapabilities(freeink::GrayscaleMode::Absolute).supported();
 }
