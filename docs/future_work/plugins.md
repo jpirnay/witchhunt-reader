@@ -18,11 +18,18 @@ plugins are offered (fetched at install, never copied here: the Hub and sd-plugi
 - **Not tried live**: the sign-in flows (password grant, device code), for want of accounts; the WebDAV catalog
   against the owner's server (a LAN test server of our own was refused by the session's safety checks). Dropbox's
   `refresh` auth type is not supported and is shown as "does not run here".
-- **Events, step 2**: step 1 (the queue, `reader.open`/`exit`/`session`, `sleep.enter`, the drain on a Wi-Fi join and
-  at sleep, on the C3s from a clean boot) is in; see [sd-plugins.md](../sd-plugins.md#events-the-reader-sends-a-plugins-requests).
-  Open: `book.downloaded`, and the `<book>.meta.json` sidecar the catalog runner writes for a downloaded book, which
-  `require_meta` handlers (Readeck) need; a password grant's token refresh on 401/403 (no event plugin in the Hub
-  uses one). The C3's sleep-time send costs two restarts (about 1.7 s each on the X3) on top of the network time.
+- **Events, step 2: parked** (owner, 2026-11-20). Step 1 (the queue, `reader.open`/`exit`/`session`, `sleep.enter`,
+  the drain on a Wi-Fi join and at sleep, on the C3s from a clean boot) is in, #861; see
+  [sd-plugins.md](../sd-plugins.md#events-the-reader-sends-a-plugins-requests). Step 2 would bring:
+  - the `<book>.meta.json` sidecar, written by the Plugins page's catalog runner after a download from the
+    `device.json`'s `sidecar` field, which `require_meta` handlers need. Gain: Readeck sends reading progress back to
+    the article (its `reader.exit` and `sleep.enter` handlers). Downloading from Readeck's catalog works already. The
+    firmware side (`require_meta` matching, `{meta.*}` templates) is in;
+  - `book.downloaded`, which the browser would report to the reader through a small endpoint after a catalog
+    download. Gain: ybx's handler for it; its other events run already;
+  - a password grant's token refresh on 401/403. No event plugin in the Hub uses one.
+
+  Take it up when someone uses Readeck or ybx. Meanwhile the Plugins page marks those handlers "not sent yet".
 - **Not done from the survey**: an `/api/settings?keys=` filter; the job queue (`registerAction` only warns). The
   job queue matters to `protected-content`: it renews a loan only as a queued job (`renew`, a new `.acsm` for a book
   already on the card), so renewing a loan does not work here; fetching a book again does.
