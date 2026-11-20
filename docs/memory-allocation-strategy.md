@@ -270,7 +270,7 @@ Invariants that hold the arena together; new consumers must not break them:
 | `ParsedText` word vectors and layout scratch | paragraph | 3–4 KB | reused across paragraphs: no allocation per paragraph |
 | TrueType scratch block and SD page cache | a glyph the glyph store lacks | 10.5–14.5 KB + 4.2 KB | the lent arena for one lookup, else the heap until `RenderLock` is given back (§9.7) |
 | A line's word bytes | laid-out line | small | the page block on arena builds, else heap |
-| `TextBlock` object and `PageLine` | laid-out line | 88 B + 24 B (host) | heap |
+| `TextBlock` object and `PageLine` | laid-out line | 88 B + 24 B (host), 52 B + 12 B (C3) | the page block on arena builds while the image walk's reserve stays free (memory-and-parsing 9b, 9c), else heap; a drop cap's line and a loaded page's lines, heap |
 | Table cell objects | grid row | about 160 B a cell (host) | heap (the cells' line bytes are in the arena on arena builds) |
 
 The heap rows are all strictly nested inside one decode, one page or one row, so they fit
@@ -471,8 +471,10 @@ under 1 KB more heap shaped than unshaped there. The room the arena has for the 
   across paragraphs, reusing the layout scratch, and taking each line's word bytes from a page
   block cut allocations per build from 84,728 to 27,177 (*Strange Pictures*) and from 204,437 to
   67,342 (*moby-dick*), host, 2026-09-25, with byte-identical section files.
-- **What is left per line** is the `TextBlock` object and the `PageLine` (88 B and 24 B on the
-  64-bit host), both on the heap.
+- **What was left per line** then was the `TextBlock` object and the `PageLine` (88 B and 24 B on the
+  64-bit host), both on the heap. Both now go into the page block on an arena build while the image
+  walk's reserve stays free (memory-and-parsing 9b, 9c): moby-dick lent the X3's 52,272 B, 54,070
+  allocations to 30,902 for the `PageLine` alone (host, 2026-11-20).
 - **A long line's working set is the next peak** (2026-11-08, `test_shaped_arabic`'s span-per-word paragraph, 126
   tokens a line in landscape). Doubling had taken the word arrays to 256 entries for a block the parser splits at
   175; the bidi fallback copied every token's text into a kept vector of strings; the line's token array (16 B a
@@ -701,9 +703,10 @@ for a page image), the decode's remaining working set (12 KB) and an 8 KB floor.
 ### 9.5 Class D still on the heap
 
 `PixelCache`'s band and `renderFromCache`'s read buffer (both raw `malloc`), the ditherer rows, the
-`PngStreamDecoder` object, the per-line `TextBlock` and `PageLine` objects, and the table cell
-objects (§4, class D). All are strictly nested, so each could take a scoped arena block. The
-per-line and per-cell objects are the larger lever; see
+`PngStreamDecoder` object, and the table cell objects (§4, class D). All are strictly nested, so each
+could take a scoped arena block. The per-line `TextBlock` and `PageLine` objects already take the page
+block on an arena build where the image walk's reserve leaves room (memory-and-parsing 9b, 9c), and
+the heap otherwise. The per-cell objects are the larger lever left; see
 [future_work/memory-and-parsing.md](future_work/memory-and-parsing.md).
 
 ### 9.6 Pre-size and chunk the per-page build tables

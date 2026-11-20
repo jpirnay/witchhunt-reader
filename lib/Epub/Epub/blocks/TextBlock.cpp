@@ -193,17 +193,23 @@ bool TextBlock::allocArena(const size_t size, BuildArena* scratch, ArenaRoom* ro
   return false;
 }
 
+void* TextBlock::ArenaRoom::placeObject(BuildArena& arena, const size_t bytes, const size_t align) {
+  if (!roomKeepsFree(arena, bytes, align, keepFree)) return nullptr;
+  const size_t before = arena.used();
+  void* const at = arena.alloc(bytes, align);
+  if (at != nullptr) displaced += arena.used() - before;  // the object and its padding
+  return at;
+}
+
 std::unique_ptr<TextBlock> TextBlock::make(const WordRange& range, const std::vector<int16_t>& word_xpos,
                                            const BlockStyle& blockStyle, BuildArena* arena, ArenaRoom* room) {
-  if (arena != nullptr && room != nullptr &&
-      roomKeepsFree(*arena, sizeof(TextBlock), alignof(TextBlock), room->keepFree)) {
-    const size_t before = arena->used();
-    if (void* const at = arena->alloc(sizeof(TextBlock), alignof(TextBlock))) {
-      room->displaced += arena->used() - before;  // the object and its padding
-      auto* const block = new (at) TextBlock(range, word_xpos, blockStyle, arena, room);
-      block->objectInArena_ = true;
-      return std::unique_ptr<TextBlock>(block);
-    }
+  // The object is counted in `displaced` before its constructor takes the bytes, which may give that room back.
+  void* const at =
+      arena != nullptr && room != nullptr ? room->placeObject(*arena, sizeof(TextBlock), alignof(TextBlock)) : nullptr;
+  if (at != nullptr) {
+    auto* const block = new (at) TextBlock(range, word_xpos, blockStyle, arena, room);
+    block->objectInArena_ = true;
+    return std::unique_ptr<TextBlock>(block);
   }
   return makeUniqueNoThrow<TextBlock>(range, word_xpos, blockStyle, arena, room);
 }
