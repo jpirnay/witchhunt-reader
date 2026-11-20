@@ -29,8 +29,8 @@ Where things stand:
 Next, in this order unless the owner reorders:
 1. The `STR_PROTECTED_*` messages in the other languages (release translation pass; English only so far, so a German
    UI shows them in English).
-2. D3 (the Adobe plugin): built and measured on `feat/plugin-crypto`, on all boards; the device check (see D3), then
-   its PR.
+2. D3 (the Adobe plugin): built, measured and checked on the Murphy on `feat/plugin-crypto`, on all boards; its PR,
+   then the C3's key generation time (see D3).
 3. D2 (the cache at rest): measure the cipher first.
 4. A real loan end to end, once D3 runs: needs the owner's Adobe ID and a library loan; activating may use one of the
    account's device slots, so only with the owner's go.
@@ -127,10 +127,20 @@ C3. Cost against master in the same worktree:
   vtable), and the ECC branch of the PKCS#12 parse's key-to-certificate check about 2 KB. 3DES may turn out unneeded
   once a real bundle shows which PBE its bags use.
 
-Open: a device check of every op against OpenSSL (a script for it:
-`~/.local/state/witchhunt-work/protected-content/crypto_check.py`), key generation's time on the C3 against the loop
-task's watchdog, a TLS fetch with an RSA chain (the trim leaves the public paths alone, but the build changed), and the
-plugin's own page on a device. No board was attached on 2026-11-20.
+Device check, Murphy, 2026-11-20 (f18239c06; record in `~/.local/state/witchhunt-device-backups/2026-11-20-murphy-crypto/`):
+- Every op against OpenSSL (`~/.local/state/witchhunt-work/protected-content/crypto_check.py`): 18 of 18. RSA-1024
+  `keygen` 0.37 to 0.95 s, `sign` 314 ms, `rsadec` 311 ms, `pubencrypt` to an RSA-4096 certificate 98 ms, `pkcs12`
+  (an RC2 certificate bag and a 3DES key bag) 184 ms; the refusals answer `{error}`.
+- TLS after the trim, through the relay: `adeactivate.adobe.com` (ECDHE-RSA, the plugin's first request) and
+  `raw.githubusercontent.com` answer 200 with `insecure=0`.
+- The plugin's own page (this build's Files page in jsdom, the Murphy's API; `pc_page.mjs` beside the check script):
+  the card loads, "No content account found on this SD card.", and Activate with a dummy account reaches `api.crypto`
+  (`random`, `sha1`, `sha1`) and stops at its own "Enter your password to activate this account."; no request left
+  the device and nothing was written.
+- The Plugins page now marks the plugin "partly runs here" with that note, and offers its install.
+
+Open: key generation's time on the C3 (an X3 or X4) against the loop task's watchdog; a real activation and loan with
+the owner's Adobe ID (with the owner's go: an activation may take one of the account's device slots).
 
 ## LCP
 
