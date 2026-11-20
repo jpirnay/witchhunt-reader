@@ -147,8 +147,23 @@ X3, 2026-11-20 (16d13fad9; `2026-11-20-x3-crypto/`): 18 of 18 against OpenSSL, n
 Transfer during the ops, and the lowest free heap since boot (15,444 B, at the Wi-Fi start) did not move. TLS through
 the relay as on the Murphy: both hosts 200 with `insecure=0`.
 
-Open: a real activation and loan with the owner's Adobe ID (with the owner's go: an activation may take one of the
-account's device slots).
+Mock ADEPT end to end, Murphy, 2026-11-20 (`2026-11-20-murphy-adept-mock/`): the plugin's page in jsdom against the
+Murphy, its relay calls to the Adobe and distributor hosts answered by an in-process mock
+(`~/.local/state/witchhunt-work/protected-content/adept-mock/adept_mock.mjs`, test-only, outside the repository), its
+book download turned into an upload of an Adobe-shaped Moby-Dick. 22 checks pass:
+- sign-in data encrypted by the device to the mock's authentication certificate;
+- both key pairs from the device's `keygen`, their private halves wrapped by its `aesenc`;
+- the signing key and certificate taken out of the mock's PKCS#12 (RC2 and 3DES bags) by the device;
+- Activate, InitLicenseService and Fulfill signed by the device, each signature opening with the issued key over the
+  request's canonical SHA-1;
+- the content key unwrapped by the device's `rsadec` and stored with `/api/book-key`, with the licence's loan end.
+
+On the reader the loan opens as protected (AES-128) and its first two pages are byte-identical to the plain copy's.
+Nothing left the device or the machine running the mock.
+
+Open: a real activation and loan, which needs an account. Adobe's free sample eBook library still hands out `.acsm` loan
+tokens (2026-11-20, fulfilled by DTS ByteBooks' content server), so an Adobe ID suffices: no library card. An activation
+may take one of the account's device slots, so only with the owner's go.
 
 ## LCP
 
