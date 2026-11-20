@@ -207,12 +207,18 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   // A panel that resolves more than four levels renders this image natively below,
   // in one decode with no plane encoding. The .pxc cache is 2 bits per pixel by
   // construction, so it has nothing to offer that path and is not consulted for it.
-  const bool nativeGray = renderer.getGrayLevels() > 4;
+  //
+  // Only in a build whose PNG decoder can paint the canvas: it does so only where
+  // kMayLendGray8Canvas (the T5S3). The Picco reports 16 levels for its BMP
+  // covers, and there the decoder would draw into the framebuffer instead, which
+  // the native path then clears: a blank sleep screen with only the overlay.
+  const bool nativeGray = HalDisplay::kMayLendGray8Canvas && renderer.getGrayLevels() > 4;
 
   // Mirror the decoder's own output sizing so the cache can be validated against the
   // geometry a fresh decode would produce (see PngToFramebufferConverter: fit to the
   // config box, never upscale).
   const std::string cachePath =
+      // cppcheck-suppress knownConditionTrueFalse ; false only in builds whose PNG decoder cannot paint a canvas
       nativeGray ? std::string() : sleepPixelCachePath(filename, SETTINGS.sleepScreenCoverFilter);
   int cacheW = 0, cacheH = 0, cacheX = 0, cacheY = 0;
   ImageDimensions srcDims{};
@@ -301,6 +307,7 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   // layered onto. Falling through costs nothing: every ordinary refresh rebuilds
   // the canvas from the framebuffer, so a half-painted canvas cannot outlive the
   // failure that abandoned it.
+  // cppcheck-suppress knownConditionTrueFalse ; false only in builds whose PNG decoder cannot paint a canvas
   if (nativeGray) {
     uint16_t canvasStride = 0;
     if (uint8_t* canvas = renderer.borrowGray8Canvas(&canvasStride)) {
