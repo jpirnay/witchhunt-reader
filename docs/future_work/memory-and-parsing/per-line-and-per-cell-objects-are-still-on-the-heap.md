@@ -5,7 +5,7 @@ and 9c.
 
 **Open.** Each grid cell still allocates its own objects on the heap (about 160 B a cell, 11–15 KB for a page of grid
 rows, host), and the per-page and per-row vectors stay heap `std::vector`s: `TableRow::cells`, `TableCell::lines`
-(`Page.h:195`), `PageTableFragment::rows` and `Page::elements` (`Page.h:257`). Moving those needs an allocator type in
+(`Page.h:198`), `PageTableFragment::rows` and `Page::elements` (`Page.h:260`). Moving those needs an allocator type in
 `Page.h` and its users; after 9a each is one allocation of known size. A laid-out line's `TextBlock` object (52 B on the
 C3, `TextBlock.cpp:23`) and its `PageLine` (12 B on the C3, `Page.cpp:20`) still go to the heap in a heap build, when the
 lent region has no room for them beside the image walk's reserve (9b, 9c, below), for a drop cap's line, and for every
@@ -15,8 +15,8 @@ page loaded to be read. The cells' word bytes already come from the row block in
 
 **Where.** `ParsedText` (the `TextBlock` it creates per line, `TextBlock::make` at `ParsedText.cpp:4405`),
 `ChapterHtmlSlimParser` (the `PageLine` per line in `addLineToPage`, `PageLine::make` at
-`ChapterHtmlSlimParser.cpp:5961`; a grid cell's lines in `layoutTableRow`), `TableCell::lines` (`Page.h:195`),
-`Page::elements` (`std::vector<std::unique_ptr<PageElement>>`, `Page.h:257`).
+`ChapterHtmlSlimParser.cpp:5966`; a grid cell's lines in `layoutTableRow`), `TableCell::lines` (`Page.h:198`),
+`Page::elements` (`std::vector<std::unique_ptr<PageElement>>`, `Page.h:260`).
 
 **Tried.** A heap pool for table line storage was reverted: its reservation pushed contig below the framebuffer ([Memory Allocation Strategy §8.4a](../../memory-allocation-strategy.md#84a-table-layout-and-the-ab-harness)). Moving the line bytes into the arena is done.
 
@@ -39,9 +39,14 @@ The parser's teardown and `finalize()` destroy the open page's and a table's lin
 the golden corpus is laid out in a lent region too (every lent case at 52,272 B, 15 books at 48,000 B), with a rewound
 block filled on the host (`BUILD_ARENA_TRACE`). Allocations of a lent build, moby-dick: 78,775 to 51,452 at the X3's
 52,272 B and to 78,720 at the X4's 48,000 B, where the line bytes give back most of what the objects take (host,
-Windows); 78,917 to 51,594 at 52,272 B on CI's Linux (`alloc-counts`). Still to run on the devices (the triage's gates
-for 9b): the X3 table chapter with `SCT_HEAP_TRACE=1` and `EHP_FORCE_BLOCKING_BUILD`, and an X4 image-heavy chapter
-with no header newly degraded.
+Windows); 78,917 to 51,594 at 52,272 B on CI's Linux (`alloc-counts`).
+
+On the X3 (2026-11-20), master before and after 9b with `SCT_HEAP_TRACE=1` and `EHP_FORCE_BLOCKING_BUILD`, the table
+chapter of *Through the Brazilian Wilderness* (appendix B, 68 pages, three tables) built from a cold cache: heap blocks
+at a page's end, median 348 to 329 on the prose pages and 536 to 471 on the table pages (the tables' excess over prose
++188 to +142); the build's lowest largest free block 23,540 to 28,660 B; no row degraded and no arena refusal in
+either arm, the arena's high water 44,972 and 44,968 B. Still to run: an X4 image-heavy chapter with no header newly
+degraded.
 
 **Done (9c).** A laid-out line's `PageLine` is built in the page block under the same rule as its `TextBlock` object
 (`PageLine::make`, `Page.cpp:38`, called from `addLineToPage`): both place through `TextBlock::ArenaRoom::placeObject`
@@ -60,8 +65,8 @@ Allocations of one build on the host (`epub_pipeline_dump --bench`, Windows), ma
 lent 52,272 B and 81,338 to 75,341 lent 48,000 B; test_table_streaming 3,826 to 3,722 and 3,960 (unchanged);
 test_nested_tables 5,414 to 5,090 and 5,610 to 5,456; test_br_in_blocks 1,659 to 1,489 and 1,749 to 1,671;
 test_jpeg_images 5,635 to 5,511 and 5,635 to 5,515. Heap builds are unchanged (moby-dick 112,661). Every golden is
-byte-identical, on the heap and lent at both sizes. Still to run on the devices: 9b's gates, the X3 table chapter with
-`SCT_HEAP_TRACE=1` and `EHP_FORCE_BLOCKING_BUILD` and an X4 image-heavy chapter with no header newly degraded.
+byte-identical, on the heap and lent at both sizes. Still to run on the devices: the X3 table chapter as for 9b (its
+"after" arm is 9c's "before"), and an X4 image-heavy chapter with no header newly degraded.
 
 **Next step.** The grid cells' objects, which a row block could hold as it holds their bytes; then, if a measurement
 asks for it, the vectors above.
