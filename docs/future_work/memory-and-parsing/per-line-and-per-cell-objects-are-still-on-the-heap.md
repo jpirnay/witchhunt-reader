@@ -1,15 +1,22 @@
 # Per-line and per-cell objects are still on the heap
 
-Part of [Memory and parsing](../memory-and-parsing.md). Checked on 2026-11-20 against master 8d1541bf4 with 9b (#851).
+Part of [Memory and parsing](../memory-and-parsing.md). Checked on 2026-11-20 against master b1a0fe019 with 9b (#851)
+and 9c.
 
-**Open.** Each laid-out line still allocates a `PageLine` on the heap (24 B on the 64-bit host), and its `TextBlock` object (52 B on the C3, `TextBlock.cpp:23`) in a heap build or when the lent region has no room for it beside the image walk's reserve (9b, below); each grid cell its own objects (about 160 B a cell, 11–15 KB for a page of grid rows, host). Their word bytes already come from the page block or the row block in the lent region.
+**Open.** Each grid cell still allocates its own objects on the heap (about 160 B a cell, 11–15 KB for a page of grid
+rows, host), and the per-page and per-row vectors stay heap `std::vector`s: `TableRow::cells`, `TableCell::lines`
+(`Page.h:195`), `PageTableFragment::rows` and `Page::elements` (`Page.h:257`). Moving those needs an allocator type in
+`Page.h` and its users; after 9a each is one allocation of known size. A laid-out line's `TextBlock` object (52 B on the
+C3, `TextBlock.cpp:23`) and its `PageLine` (12 B on the C3, `Page.cpp:20`) still go to the heap in a heap build, when the
+lent region has no room for them beside the image walk's reserve (9b, 9c, below), for a drop cap's line, and for every
+page loaded to be read. The cells' word bytes already come from the row block in the lent region.
 
 **Why it matters.** Block count, not bytes, is what fragments the heap during a build. On an X3 table chapter the block count rose from about 387 to 700–750 on the table pages while the bytes stayed in the arena (2026-09-26).
 
 **Where.** `ParsedText` (the `TextBlock` it creates per line, `TextBlock::make` at `ParsedText.cpp:4405`),
-`ChapterHtmlSlimParser` (the `PageLine` per line in `addLineToPage`, `ChapterHtmlSlimParser.cpp:5957`; a grid cell's
-lines in `layoutTableRow`, `:7255`, kept at `:7293`), `TableCell::lines` (`Page.h:146`), `Page::elements`
-(`std::vector<std::unique_ptr<PageElement>>`, `Page.h:208`).
+`ChapterHtmlSlimParser` (the `PageLine` per line in `addLineToPage`, `PageLine::make` at
+`ChapterHtmlSlimParser.cpp:5961`; a grid cell's lines in `layoutTableRow`), `TableCell::lines` (`Page.h:195`),
+`Page::elements` (`std::vector<std::unique_ptr<PageElement>>`, `Page.h:257`).
 
 **Tried.** A heap pool for table line storage was reverted: its reservation pushed contig below the framebuffer ([Memory Allocation Strategy §8.4a](../../memory-allocation-strategy.md#84a-table-layout-and-the-ab-harness)). Moving the line bytes into the arena is done.
 
@@ -36,7 +43,25 @@ Windows); 78,917 to 51,594 at 52,272 B on CI's Linux (`alloc-counts`). Still to 
 for 9b): the X3 table chapter with `SCT_HEAP_TRACE=1` and `EHP_FORCE_BLOCKING_BUILD`, and an X4 image-heavy chapter
 with no header newly degraded.
 
-**Next step (9c).** Construct the `PageLine` in the page block under the same room test (`addLineToPage`), with a flag in
-`PageElement` and a destroying `operator delete` on it that calls the virtual destructor and frees only a heap object, as
-`TextBlock` does: no change to `Page::elements`' type (41 lines in `lib/Epub` and `src` use it). `Page::deserialize`
-(`Page.cpp:705-721`) keeps the heap. Measure allocation counts and `HeapPeakRegression` on the host first.
+**Done (9c).** A laid-out line's `PageLine` is built in the page block under the same rule as its `TextBlock` object
+(`PageLine::make`, `Page.cpp:38`, called from `addLineToPage`): both place through `TextBlock::ArenaRoom::placeObject`
+(`TextBlock.cpp:196`), so the `PageLine` counts in the page's `displaced` and later line bytes give its room back too.
+`PageElement` has a destroying `operator delete` (`Page.h:66`) that runs the virtual destructor and frees only an
+element the heap made; `std::unique_ptr<PageElement>` keeps its type. The flag is not in `PageElement`, which would
+grow every element of a resident page from 8 to 12 B on the C3 (measured with the C3 and S3 compilers): the delete
+asks `getTag()` and reads a spare bit of the line's `TextBlock` (`TextBlock::holderInArena`), so `PageElement` stays
+8 B and `PageLine` 12 B (`static_assert`s at `Page.cpp:19-20`). On the host a `PageElement` destroyed after its block was
+rewound aborts (`BUILD_ARENA_TRACE`). The drop cap's line stays on the heap with its `TextBlock`: the page block opens
+with the page's first line, so on a new page it is not open when the cap is placed. `Page::deserialize` keeps the heap:
+a mid-build draw loads its page from the section file (`Section::loadPageFromActiveBuild`), so no live page of a build
+is ever drawn.
+
+Allocations of one build on the host (`epub_pipeline_dump --bench`, Windows), master to 9c: moby-dick 54,070 to 30,902
+lent 52,272 B and 81,338 to 75,341 lent 48,000 B; test_table_streaming 3,826 to 3,722 and 3,960 (unchanged);
+test_nested_tables 5,414 to 5,090 and 5,610 to 5,456; test_br_in_blocks 1,659 to 1,489 and 1,749 to 1,671;
+test_jpeg_images 5,635 to 5,511 and 5,635 to 5,515. Heap builds are unchanged (moby-dick 112,661). Every golden is
+byte-identical, on the heap and lent at both sizes. Still to run on the devices: 9b's gates, the X3 table chapter with
+`SCT_HEAP_TRACE=1` and `EHP_FORCE_BLOCKING_BUILD` and an X4 image-heavy chapter with no header newly degraded.
+
+**Next step.** The grid cells' objects, which a row block could hold as it holds their bytes; then, if a measurement
+asks for it, the vectors above.
