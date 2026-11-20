@@ -6,6 +6,7 @@
 #include <Memory.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
@@ -14,14 +15,16 @@
 
 #include "../book_metadata_cache/AllocationRefusal.h"
 #include "BuildArena.h"
+#include "Epub/EpubImageManifest.h"
 #include "Epub/Page.h"
 #include "Epub/parsers/ChapterHtmlSlimParser.h"
 #include "GfxRenderer.h"
 
 namespace {
 
-constexpr size_t kLentBytes = 52272;    // the X3's secondary framebuffer, lent to background builds
-constexpr size_t kReserve = 34 * 1024;  // what the parser keeps free: EpubImageManifest::kWalkArenaReserve
+constexpr size_t kLentBytes = 52272;  // the X3's secondary framebuffer, lent to background builds
+constexpr size_t kX4LentBytes = 48000;
+constexpr size_t kReserve = EpubImageManifest::kWalkArenaReserve;  // what the parser keeps free for the walk
 
 // A line as the drop cap makes one, object and bytes on the heap.
 std::unique_ptr<TextBlock> heapLine() {
@@ -41,35 +44,66 @@ bool inRegion(const void* object, const std::vector<uint8_t>& region) {
 struct Laid {
   size_t pages = 0;
   size_t lines = 0;
-  size_t linesInRegion = 0;  // PageLines whose object lies in the lent region
+  size_t linesInRegion = 0;    // PageLines whose object lies in the lent region
+  size_t highestLineEnd = 0;   // the end of the highest of those, as an offset into the region
+  std::vector<size_t> lowest;  // per page: the offset of its lowest PageLine in the region; SIZE_MAX: none there
+  std::vector<size_t> floors;  // per page: where its block began, read from the rewind that follows its hand-off
 };
 
-// `body` laid out by the chapter parser with `region` lent as its build arena, as a background build lays a chapter
-// out. Each page is looked at as the parser hands it off, before it is destroyed and its block rewound.
-Laid layOutLent(const std::string& body, std::vector<uint8_t>& region) {
+// The rewind that follows a page's hand-off is its block's (emitPage releases it right after completePageFn): the
+// cursor it leaves is where that block began. Read through the host's trace hook (BUILD_ARENA_TRACE).
+struct HandOffWatch {
+  const BuildArena* arena = nullptr;
+  bool handedOff = false;
+  std::vector<size_t>* floors = nullptr;
+};
+HandOffWatch& handOffWatch() {
+  static HandOffWatch watch;
+  return watch;
+}
+void noteRewind(const BuildArena* arena, const size_t cursor) {
+  HandOffWatch& watch = handOffWatch();
+  if (arena != watch.arena || !watch.handedOff) return;
+  watch.handedOff = false;
+  watch.floors->push_back(cursor);
+}
+
+// `body` laid out by the chapter parser on pages `pageHeight` tall, with `region` lent as its build arena, as a
+// background build lays a chapter out, and `manifest` as the build's image manifest (null: none). Each page is looked
+// at as the parser hands it off, before it is destroyed and its block rewound.
+Laid layOutLent(const std::string& body, std::vector<uint8_t>& region, EpubImageManifest* manifest = nullptr,
+                const uint16_t pageHeight = 400) {
   Laid laid;
   const uint8_t* const begin = region.data();
-  const uint8_t* const end = begin + region.size();
   BuildArena arena(region.data(), region.size());
+  handOffWatch() = HandOffWatch{&arena, false, &laid.floors};
+  buildArenaTraceHooks().onRewind = noteRewind;
   GfxRenderer renderer;
   // The parser's SAX state is a plain allocation in the region (setBuildArena), given back with this block.
   BuildArena::Block parse = arena.reserveBlock();
   {
     ChapterHtmlSlimParser parser(
         /*epub=*/nullptr, renderer, /*fontId=*/1, /*lineCompression=*/1.0f, /*extraParagraphSpacing=*/false,
-        /*paragraphAlignment=*/0, /*viewportWidth=*/480, /*viewportHeight=*/400, /*hyphenationEnabled=*/false,
+        /*paragraphAlignment=*/0, /*viewportWidth=*/480, /*viewportHeight=*/pageHeight, /*hyphenationEnabled=*/false,
         /*fontSizeNormalization=*/false, /*bionicReadingEnabled=*/false,
-        [&laid, begin, end](std::unique_ptr<Page> page) {
+        [&laid, &region, begin](std::unique_ptr<Page> page) {
           ++laid.pages;
+          size_t lowest = SIZE_MAX;
           for (const auto& el : page->elements) {
             if (el->getTag() != TAG_PageLine) continue;
             ++laid.lines;
-            const auto* const at = reinterpret_cast<const uint8_t*>(el.get());
-            if (at >= begin && at < end) ++laid.linesInRegion;
+            if (!inRegion(el.get(), region)) continue;
+            ++laid.linesInRegion;
+            const auto offset = static_cast<size_t>(reinterpret_cast<const uint8_t*>(el.get()) - begin);
+            lowest = std::min(lowest, offset);
+            laid.highestLineEnd = std::max(laid.highestLineEnd, offset + sizeof(PageLine));
           }
+          laid.lowest.push_back(lowest);
+          handOffWatch().handedOff = true;
           return true;
         },
-        /*embeddedStyle=*/false, /*contentBase=*/"", /*imageBasePath=*/"", /*imageRendering=*/2);
+        /*embeddedStyle=*/false, /*contentBase=*/"", /*imageBasePath=*/"", /*imageRendering=*/2,
+        /*tocAnchorPool=*/{}, /*progressFn=*/nullptr, /*cssParser=*/nullptr, manifest);
     parser.setBuildArena(&arena);
     const std::string document =
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>T"
@@ -80,8 +114,21 @@ Laid layOutLent(const std::string& body, std::vector<uint8_t>& region) {
     EXPECT_TRUE(parser.finalize());
   }
   EXPECT_TRUE(arena.release(parse));
+  buildArenaTraceHooks().onRewind = nullptr;
+  handOffWatch() = HandOffWatch{};
   EXPECT_EQ(0u, arena.releaseFailures()) << "every block of the region was released in order";
   return laid;
+}
+
+// Every PageLine of a page in the region lies in that page's block: at or above where the block began.
+void expectEachLineInItsPagesBlock(const Laid& laid) {
+  ASSERT_EQ(laid.pages, laid.floors.size()) << "each hand-off is followed by its block's release";
+  for (size_t p = 0; p < laid.pages; ++p) {
+    SCOPED_TRACE("page " + std::to_string(p));
+    if (laid.lowest[p] != SIZE_MAX) {
+      EXPECT_GE(laid.lowest[p], laid.floors[p]) << "a PageLine below its page's block";
+    }
+  }
 }
 
 std::string paragraphs(const int count) {
@@ -94,13 +141,29 @@ std::string paragraphs(const int count) {
 
 }  // namespace
 
-// A build with no image manifest keeps nothing free for the walk: every line's PageLine fits in its page's block.
+// A build with no image manifest keeps nothing free for the walk: every line's PageLine is made in its page's block,
+// and the region holds no more after a page than before it.
 TEST(PageLineArena, ALentBuildLaysEachLineOutInItsPagesBlock) {
   std::vector<uint8_t> region(kLentBytes);
   const Laid laid = layOutLent(paragraphs(60), region);
   ASSERT_GT(laid.pages, 2u) << "the chapter must span pages, each its own block";
   ASSERT_GT(laid.lines, 60u);
   EXPECT_EQ(laid.lines, laid.linesInRegion) << "a PageLine was made on the heap with room for it in the page block";
+  expectEachLineInItsPagesBlock(laid);
+  for (const size_t floor : laid.floors) EXPECT_EQ(laid.floors.front(), floor) << "a page left something in the region";
+}
+
+// With an image manifest, on the X4's 48,000 B, the walk's reserve binds: a line's PageLine goes into the page block
+// only while kWalkArenaReserve stays free after it, and a tall page's later lines yield to the heap.
+TEST(PageLineArena, ALentBuildWithAnImageManifestLeavesTheWalkItsReserve) {
+  std::vector<uint8_t> region(kX4LentBytes);
+  const auto manifest = std::make_unique<EpubImageManifest>();
+  const Laid laid = layOutLent(paragraphs(400), region, manifest.get(), /*pageHeight=*/4000);
+  ASSERT_GT(laid.pages, 2u);
+  EXPECT_GT(laid.linesInRegion, 0u) << "the region had room for some lines beside the reserve";
+  EXPECT_LT(laid.linesInRegion, laid.lines) << "the reserve sent none of the pages' lines to the heap";
+  EXPECT_LE(laid.highestLineEnd, region.size() - kReserve) << "a PageLine took the walk's room";
+  expectEachLineInItsPagesBlock(laid);
 }
 
 TEST(PageLineArena, ALineGoesInTheArenaWhileItKeepsTheReserve) {
