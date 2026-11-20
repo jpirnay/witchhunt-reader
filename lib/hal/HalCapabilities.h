@@ -235,11 +235,19 @@ inline bool clearsGhostsOnEveryScreen() {
 }
 
 // The panel's booster is powered down once the device is idle, and again after each frame drawn
-// while it stays idle (main.cpp's idle loop, HalDisplay::powerOffPanelBetweenFrames). Its driver
-// keeps the booster up after a refresh unless the Sunlight Fading Fix asks for POF, and the next
-// refresh resets and powers it up anyway. Murphy only so far: the X3's driver has the same habit,
-// but there the refresh after a POF is promoted to HALF, which wants its own look first.
-inline bool powersPanelOffWhenIdle() { return BoardConfig::isMurphyM3(); }
+// while it stays idle (main.cpp's idle loop, HalDisplay::powerOffPanelBetweenFrames). Both drivers
+// keep the booster up after a refresh unless the Sunlight Fading Fix asks for POF. Murphy's next
+// refresh resets and powers it up anyway; the X3's (UC8253, not the UC8279 run) powers up and keeps
+// its FAST, because the driver tells this power-off from a wake (Uc8253X3Driver::_idlePoweredOff).
+inline bool powersPanelOffWhenIdle() {
+  return BoardConfig::isMurphyM3() || BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3;
+}
+
+// How long after the last input the booster goes down (powersPanelOffWhenIdle). Murphy powers up
+// for every refresh anyway, so it goes down as soon as the loop idles. The X3's next refresh waits
+// for the power-up, 128 ms measured 2026-11-20, which would land on nearly every page turn after a
+// second of reading: it waits past a page's reading time, so only a pause pays it.
+inline unsigned long panelIdlePowerOffAfterMs() { return BoardConfig::isMurphyM3() ? 0 : 120000; }
 
 // The panel can show gray at all. Murphy's only can in a build with -DFREEINK_MURPHY_GRAY: without
 // it the UC8253 driver has no gray waveforms and ignores a gray pass
