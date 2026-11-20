@@ -150,6 +150,7 @@ class TextBlock final : public Block {
     uint8_t mark = 0;       // an emphasis run's mark; 0 for ruby
     std::string_view text;  // the ruby, at most kMaxAnnotationText bytes; empty for emphasis
   };
+  struct ArenaRoom;  // what a page's lines may take from their arena; see make()
 
  private:
   RenderStyle renderStyle;
@@ -183,8 +184,11 @@ class TextBlock final : public Block {
   static constexpr uint8_t kGlyphFormLead = 0xFF;   // a glyph form's first byte, which no UTF-8 form starts with
   static constexpr uint16_t kNoDisplayForm = 0xFFFF;
   static constexpr uint16_t kBidiWordCountBit = 0x8000;
-  // Takes the arena bytes from `scratch` when given and it has room, else the heap. False on OOM.
-  bool allocArena(size_t size, BuildArena* scratch);
+  // Takes the arena bytes from `scratch` when given and it has room, as `room` allows (see ArenaRoom; null: any room),
+  // else the heap (new (std::nothrow)). False on OOM.
+  bool allocArena(size_t size, BuildArena* scratch, ArenaRoom* room = nullptr);
+  // Whether `arena` can hand out `bytes` at `align` and still have `keepFree` free after them, whatever the padding.
+  static bool roomKeepsFree(const BuildArena& arena, size_t bytes, size_t align, size_t keepFree);
   // Typed views into the arena, bound once after the arena is filled. All
   // 16-bit bases sit at even offsets, so direct dereference is alignment-safe.
   const uint16_t* textOffArr = nullptr;
@@ -299,9 +303,9 @@ class TextBlock final : public Block {
   // by-value forced the caller to hand over a vector it had just built, which meant one heap
   // allocation per rendered LINE for pure scratch. See ParsedText::extractLine.
   // `scratch`: see the arena member. Null (the default, and the reader-side deserialize path)
-  // means the heap.
+  // means the heap. `room`: what the page's lines may take from `scratch` (see ArenaRoom); null: any room.
   TextBlock(const WordRange& range, const std::vector<int16_t>& word_xpos, const BlockStyle& blockStyle,
-            BuildArena* scratch = nullptr);
+            BuildArena* scratch = nullptr, ArenaRoom* room = nullptr);
   ~TextBlock() override {
 #ifdef BUILD_ARENA_TRACE
     // Host only: bytes taken from a build arena that read its rewind fill were given back before this line died.
@@ -315,13 +319,27 @@ class TextBlock final : public Block {
   TextBlock(const TextBlock&) = delete;
   TextBlock& operator=(const TextBlock&) = delete;
 
-  // A laid-out line, the object where its bytes go (memory-and-parsing 9b): built in `arena` when the arena still has
-  // `keepFree` bytes free after it, else on the heap (new (std::nothrow), as before). Either way the bytes come from
-  // `arena` while it has room for them, else the heap (the range constructor). An object built in the arena lives in
-  // the caller's block of it and must be destroyed before that block is rewound. Null when the heap refuses the object;
-  // check valid() as for the constructor. SIZE_MAX for `keepFree`: always the heap.
+  // What the lines of one page may take from their arena (memory-and-parsing 9b), held by the one who lays the page out
+  // and handed to make() for each of its lines:
+  //  - a line's object goes into the arena only while `keepFree` bytes stay free after it, else the heap;
+  //  - while the page's objects there have taken room the page's line bytes have not given back (`displaced`), line
+  //    bytes that would leave less than `keepFree` free go to the heap, one block, and give that much back;
+  //  - with nothing displaced, the bytes take any room, as before 9b.
+  // So the page's lines take more of the arena than they did before 9b only while `keepFree` stays free: the room
+  // `keepFree` holds for (the image walk's stage, ChapterHtmlSlimParser) is there whenever it was, whatever the page's
+  // text. The page's owner clears `displaced` when the page's block is new. SIZE_MAX for `keepFree`: no object goes
+  // into the arena.
+  struct ArenaRoom {
+    size_t keepFree = SIZE_MAX;
+    size_t displaced = 0;
+  };
+  // A laid-out line, the object where its bytes go: in `arena` as `room` allows, else on the heap
+  // (new (std::nothrow), as before). Null `room`: the object on the heap, the bytes in `arena` while it has room. An
+  // object built in the arena lives in the caller's block of it and must be destroyed before that block is rewound;
+  // its bytes, wherever they are, go with it. Null when the heap refuses the object; check valid() as for the
+  // constructor.
   static std::unique_ptr<TextBlock> make(const WordRange& range, const std::vector<int16_t>& word_xpos,
-                                         const BlockStyle& blockStyle, BuildArena* arena, size_t keepFree);
+                                         const BlockStyle& blockStyle, BuildArena* arena, ArenaRoom* room);
   // Every delete of a TextBlock comes here (a C++20 destroying operator delete, so std::unique_ptr<TextBlock> stays the
   // type everywhere): it runs the destructor, and gives the memory back to the heap only when the heap made the object
   // (new (std::nothrow)); an arena's goes with its block's rewind. Defined in the class: out of line, GCC 16 takes the

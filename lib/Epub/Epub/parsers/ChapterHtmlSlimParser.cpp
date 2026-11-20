@@ -2195,8 +2195,13 @@ size_t ChapterHtmlSlimParser::lineObjectKeepFree() const {
   return imageManifest != nullptr && c3Sized ? EpubImageManifest::kWalkArenaReserve : 0;
 }
 
+TextBlock::ArenaRoom* ChapterHtmlSlimParser::lineRoom() {
+  lineRoom_.keepFree = lineObjectKeepFree();
+  return &lineRoom_;
+}
+
 void ChapterHtmlSlimParser::wireParagraphLines(ParsedText& text) {
-  text.setLineArena(buildArena_, lineObjectKeepFree());
+  text.setLineArena(buildArena_, lineRoom());
   text.setWordCache(&wordCache_);
   if (buildArena_) {
     text.setBeforeLineHook([this](const uint8_t maxSizePct, bool annotated) { beforeLineHook(maxSizePct, annotated); });
@@ -2286,6 +2291,7 @@ bool ChapterHtmlSlimParser::keepTogetherBreak(const int lineHeight, const bool n
 void ChapterHtmlSlimParser::ensurePageBlock() {
   if (buildArena_ == nullptr || pageBlock_.valid()) return;
   pageBlock_ = buildArena_->reserveBlock();
+  lineRoom_.displaced = 0;  // a new page: none of its objects is in the block yet
 }
 
 void ChapterHtmlSlimParser::releasePageBlock() {
@@ -2293,9 +2299,12 @@ void ChapterHtmlSlimParser::releasePageBlock() {
   if (!buildArena_->release(pageBlock_)) {
     // Out of LIFO order: something reserved above this block and is still live. Keep the
     // token (overwriting a live one is a contract violation); later pages simply allocate
-    // above it and the region fills, at which point lines fall back to the heap.
+    // above it and the region fills, at which point lines fall back to the heap. The objects
+    // laid out there keep their room too, so lineRoom_ goes on saying so.
     LOG_ERR("EHP", "Page arena block could not be released (out of order); region stays claimed");
+    return;
   }
+  lineRoom_.displaced = 0;
 }
 
 void ChapterHtmlSlimParser::beginExternalPageBreakAnchors() {
@@ -7104,7 +7113,7 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
       // Line bytes, and their objects (lineObjectKeepFree), from the lent region on an arena build. No page-fit hook:
       // the row is placed as a whole by the caller, inside a block it commits or releases (see the row emission); a
       // released row's lines are gone by then (lr.cells, and cellLineScratch_ cleared on every return here).
-      bufCell.text->setLineArena(buildArena_, lineObjectKeepFree());
+      bufCell.text->setLineArena(buildArena_, lineRoom());
       bufCell.text->setWordCache(&wordCache_);
       bufCell.text->setBeforeLineHook(nullptr);
       bufCell.text->layoutAndExtractLines(

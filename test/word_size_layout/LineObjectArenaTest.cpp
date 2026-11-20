@@ -1,7 +1,7 @@
 // A laid-out line's TextBlock goes where its bytes go (memory-and-parsing §9b): into the build's line arena while that
 // keeps what the caller asks free after it (the parser: the image-header walk's reserve), else onto the heap as before.
-// Its destroying operator delete frees only an object the heap made, so `std::unique_ptr<TextBlock>` stays the type
-// everywhere.
+// Once an object of the page is in the arena, the line bytes keep that room too (TextBlock::ArenaRoom). Its destroying
+// operator delete frees only an object the heap made, so `std::unique_ptr<TextBlock>` stays the type everywhere.
 #include <BuildArena.h>
 #include <gtest/gtest.h>
 
@@ -29,12 +29,12 @@ BlockStyle plain() {
   return bs;
 }
 
-// A one-line paragraph laid out with `arena` as its line arena (null: none), keeping `keepFree` free after each line's
-// object; the lines are kept alive.
-std::vector<std::unique_ptr<TextBlock>> layOut(BuildArena* arena, const size_t keepFree) {
+// A one-line paragraph laid out with `arena` as its line arena (null: none) and `room` as the page's room (null:
+// none); the lines are kept alive.
+std::vector<std::unique_ptr<TextBlock>> layOut(BuildArena* arena, TextBlock::ArenaRoom* room) {
   GfxRenderer renderer;
   ParsedText text(false, false, plain());
-  text.setLineArena(arena, keepFree);
+  text.setLineArena(arena, room);
   for (const char* word : {"alpha", "beta", "gamma"}) text.addWord(word, EpdFontFamily::REGULAR);
   std::vector<std::unique_ptr<TextBlock>> lines;
   text.layoutAndExtractLines(
@@ -61,26 +61,33 @@ struct OneLine {
   }
 };
 
+// The arena room OneLine's object takes, at most (its alignment's padding included).
+constexpr size_t kObjectRoom = sizeof(TextBlock) + alignof(TextBlock) - 1;
+
 }  // namespace
 
 TEST(LineObjectArena, ALineGoesWhereItsBytesGoWhenTheArenaKeepsTheReserve) {
   BuildArena arena(kReserve + 4096);
   ASSERT_TRUE(arena.valid());
-  const auto lines = layOut(&arena, kReserve);
+  TextBlock::ArenaRoom room{kReserve};
+  const auto lines = layOut(&arena, &room);
   ASSERT_EQ(1u, lines.size());
   EXPECT_TRUE(lines[0]->objectInArena());
+  EXPECT_GE(room.displaced, sizeof(TextBlock)) << "the object took room the bytes did not give back";
   EXPECT_GE(arena.used(), sizeof(TextBlock) + lines[0]->arenaBytes());
   EXPECT_EQ(std::string("beta"), lines[0]->wordText(1));
 }
 
 TEST(LineObjectArena, ALineGoesToTheHeapWhenTheArenaWouldFallBelowTheReserve) {
-  // Room for the line's bytes, and for the object too, but not for the object and the reserve: the bytes stay in the
-  // arena, as before, and the object goes to the heap.
+  // Room for the line's bytes, and for the object too, but not for the object and the reserve: the object goes to the
+  // heap, and with no object of the page in the arena the bytes take the room they always took.
   BuildArena arena(kReserve + sizeof(TextBlock) / 2);
   ASSERT_TRUE(arena.valid());
-  const auto lines = layOut(&arena, kReserve);
+  TextBlock::ArenaRoom room{kReserve};
+  const auto lines = layOut(&arena, &room);
   ASSERT_EQ(1u, lines.size());
   EXPECT_FALSE(lines[0]->objectInArena());
+  EXPECT_EQ(0u, room.displaced);
   EXPECT_EQ(arena.used(), lines[0]->arenaBytes()) << "the bytes alone are in the arena";
 }
 
@@ -88,35 +95,80 @@ TEST(LineObjectArena, TheReserveCountsWhatTheArenaAlreadyHolds) {
   BuildArena arena(kReserve + 4096);
   ASSERT_TRUE(arena.valid());
   ASSERT_NE(nullptr, arena.alloc(4096 - sizeof(TextBlock) / 2, 1));  // what the parse holds below the page block
-  const auto lines = layOut(&arena, kReserve);
+  TextBlock::ArenaRoom room{kReserve};
+  const auto lines = layOut(&arena, &room);
   ASSERT_EQ(1u, lines.size());
   EXPECT_FALSE(lines[0]->objectInArena());
 }
 
 TEST(LineObjectArena, ALineWithoutALineArenaIsOnTheHeap) {
-  const auto lines = layOut(nullptr, kReserve);
+  TextBlock::ArenaRoom room{kReserve};
+  const auto lines = layOut(nullptr, &room);
   ASSERT_EQ(1u, lines.size());
   EXPECT_FALSE(lines[0]->objectInArena());
 }
 
-TEST(LineObjectArena, ALineArenaSetWithoutAReserveKeepsTheObjectOnTheHeap) {
+TEST(LineObjectArena, ALineArenaSetWithoutARoomKeepsTheObjectOnTheHeap) {
   BuildArena arena(kReserve + 4096);
   ASSERT_TRUE(arena.valid());
-  GfxRenderer renderer;
-  ParsedText text(false, false, plain());
-  text.setLineArena(&arena);  // the bytes only, as every caller had it before
-  text.addWord("alpha", EpdFontFamily::REGULAR);
-  std::vector<std::unique_ptr<TextBlock>> lines;
-  text.layoutAndExtractLines(
-      renderer, kFontId, 400,
-      [&lines](std::unique_ptr<TextBlock> tb, bool, bool) {
-        lines.push_back(std::move(tb));
-        return ParsedText::LineProcessResult::Accepted;
-      },
-      /*includeLastLine=*/true);
+  const auto lines = layOut(&arena, nullptr);  // the bytes only, as every caller had it before
   ASSERT_EQ(1u, lines.size());
   EXPECT_FALSE(lines[0]->objectInArena());
   EXPECT_EQ(arena.used(), lines[0]->arenaBytes());
+}
+
+// The object fits beside the reserve, its bytes would cross it: they go to the heap, so the room the object took never
+// comes out of what the reserve holds for.
+TEST(LineObjectArena, OnceAnObjectOfThePageIsInTheArenaTheBytesKeepTheReserve) {
+  const OneLine source;
+  BuildArena arena(kReserve + kObjectRoom + 2);
+  ASSERT_TRUE(arena.valid());
+  TextBlock::ArenaRoom room{kReserve};
+  const size_t made = heapAllocations();
+  auto line = TextBlock::make(source.range(), source.xs, plain(), &arena, &room);
+  ASSERT_TRUE(line);
+  ASSERT_TRUE(line->valid());
+  EXPECT_TRUE(line->objectInArena());
+  EXPECT_EQ(made + 1, heapAllocations()) << "the bytes, one heap block";
+  EXPECT_EQ(sizeof(TextBlock) - line->arenaBytes(), room.displaced) << "the bytes gave back the room they took";
+  EXPECT_GE(arena.capacity() - arena.used(), kReserve);
+  EXPECT_EQ(std::string("beta"), line->wordText(1));
+}
+
+// A later line of the page, its own object refused the arena: an earlier object of the page holds its bytes back too.
+TEST(LineObjectArena, AnEarlierObjectOfThePageHoldsALaterLinesBytesBack) {
+  const OneLine source;
+  BuildArena arena(kReserve + 16);  // room for the bytes, but only by crossing the reserve
+  ASSERT_TRUE(arena.valid());
+  TextBlock::ArenaRoom room{kReserve, /*displaced=*/sizeof(TextBlock)};
+  auto line = TextBlock::make(source.range(), source.xs, plain(), &arena, &room);
+  ASSERT_TRUE(line);
+  ASSERT_TRUE(line->valid());
+  EXPECT_FALSE(line->objectInArena());
+  EXPECT_EQ(0u, arena.used()) << "the bytes would have taken the reserve's room: the heap";
+
+  // The same line on a page with no object in the arena: its bytes take the room, as before 9b.
+  TextBlock::ArenaRoom fresh{kReserve};
+  auto before9b = TextBlock::make(source.range(), source.xs, plain(), &arena, &fresh);
+  ASSERT_TRUE(before9b);
+  EXPECT_FALSE(before9b->objectInArena());
+  EXPECT_EQ(before9b->arenaBytes(), arena.used());
+}
+
+// Once the page's bytes have given back the room its objects took, they take any room again, as before 9b: the page
+// never takes more of the arena than it did then.
+TEST(LineObjectArena, BytesThatHaveGivenBackWhatTheObjectsTookTakeAnyRoomAgain) {
+  const OneLine source;
+  BuildArena arena(kReserve + 16);  // room for the bytes, but only by crossing the reserve
+  ASSERT_TRUE(arena.valid());
+  TextBlock::ArenaRoom room{kReserve, /*displaced=*/8};
+  auto first = TextBlock::make(source.range(), source.xs, plain(), &arena, &room);
+  ASSERT_TRUE(first);
+  EXPECT_EQ(0u, arena.used()) << "8 B displaced: these bytes go to the heap";
+  EXPECT_EQ(0u, room.displaced);
+  auto second = TextBlock::make(source.range(), source.xs, plain(), &arena, &room);
+  ASSERT_TRUE(second);
+  EXPECT_EQ(second->arenaBytes(), arena.used()) << "nothing displaced: the bytes take the room";
 }
 
 // The destroying operator delete: an arena object is destroyed and not freed, a heap object is destroyed and freed.
@@ -128,7 +180,8 @@ TEST(LineObjectArena, DeletingALineFreesOnlyWhatTheHeapMade) {
 
   size_t live = heapLiveBytes();
   size_t made = heapAllocations();
-  auto inArena = TextBlock::make(source.range(), source.xs, style, &arena, kReserve);
+  TextBlock::ArenaRoom room{kReserve};
+  auto inArena = TextBlock::make(source.range(), source.xs, style, &arena, &room);
   ASSERT_TRUE(inArena);
   ASSERT_TRUE(inArena->valid());
   EXPECT_TRUE(inArena->objectInArena());
@@ -138,7 +191,8 @@ TEST(LineObjectArena, DeletingALineFreesOnlyWhatTheHeapMade) {
 
   // The object on the heap (the reserve is the whole arena), its bytes in the arena: one block, freed on delete.
   made = heapAllocations();
-  auto onHeap = TextBlock::make(source.range(), source.xs, style, &arena, arena.capacity());
+  TextBlock::ArenaRoom whole{arena.capacity()};
+  auto onHeap = TextBlock::make(source.range(), source.xs, style, &arena, &whole);
   ASSERT_TRUE(onHeap);
   EXPECT_FALSE(onHeap->objectInArena());
   EXPECT_EQ(made + 1, heapAllocations());
@@ -148,14 +202,15 @@ TEST(LineObjectArena, DeletingALineFreesOnlyWhatTheHeapMade) {
   EXPECT_GE(live - heapLiveBytes(), sizeof(TextBlock));
 }
 
-// The object in the arena, its bytes on the heap (the arena filled up behind the object): the destructor frees the
-// bytes, the delete leaves the object.
+// The object in the arena, its bytes on the heap (here the arena filled up behind the object; the reserve sends them
+// there the same way): the destructor frees the bytes, the delete leaves the object.
 TEST(LineObjectArena, AnArenaObjectWithHeapBytesFreesTheBytesOnly) {
   const OneLine source;
   BuildArena arena(sizeof(TextBlock) + alignof(TextBlock));
   ASSERT_TRUE(arena.valid());
   const size_t live = heapLiveBytes();
-  auto line = TextBlock::make(source.range(), source.xs, plain(), &arena, 0);
+  TextBlock::ArenaRoom room{0};
+  auto line = TextBlock::make(source.range(), source.xs, plain(), &arena, &room);
   ASSERT_TRUE(line);
   ASSERT_TRUE(line->valid());
   EXPECT_TRUE(line->objectInArena());

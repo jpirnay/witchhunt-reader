@@ -68,10 +68,11 @@ class EpubImageManifest {
   static constexpr size_t kWalkStageBytes = 16 * 1024;
   // What the walk's largest stage takes from a build arena: the whole-entry ring (32 KB at most), the read chunk and
   // the alignment padding, 33,312 B, rounded up. On a C3-sized lent region a laid-out line's TextBlock object goes into
-  // the page block only while this much stays free after it (ChapterHtmlSlimParser::lineObjectKeepFree,
-  // memory-and-parsing 9b). That is tested as each object is placed: the line bytes allocated after the page's last
-  // arena object are not held back (they never were), so once they pass the 1,504 B above the stage, an image later on
-  // that page can miss the region where it would have fitted without the objects.
+  // the page block only while this much stays free after it; and while the page's objects there hold room their line
+  // bytes have not given back, line bytes that would leave less than this free go to the heap and give it back
+  // (ChapterHtmlSlimParser::lineObjectKeepFree, TextBlock::ArenaRoom, memory-and-parsing 9b). So a page's lines take
+  // more of the region than they did before the objects went there only while this much stays free: an image later on
+  // the page finds its stage wherever it did then, whatever the page's text.
   static constexpr size_t kWalkArenaReserve = 34 * 1024;
   // Heap the cheapest stage of a deferred image's walk takes (read chunk + ring). 0 when the image
   // is not pending. Lets the parser gate the walk on what it will actually allocate.

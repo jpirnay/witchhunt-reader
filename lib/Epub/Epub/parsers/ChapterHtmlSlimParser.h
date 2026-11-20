@@ -968,6 +968,10 @@ class ChapterHtmlSlimParser final : public Print {
   // above the section's feed-chunk block and below nothing that outlives the page (a mid-build
   // draw's font-slot scope opens and closes between two slices): strictly LIFO.
   BuildArena::Block pageBlock_;
+  // What the open page's lines may take from pageBlock_'s arena, objects and bytes (TextBlock::ArenaRoom): handed to
+  // every ParsedText laid out on the page, its keepFree lineObjectKeepFree(), its displaced cleared whenever the
+  // page block opens or is rewound.
+  TextBlock::ArenaRoom lineRoom_;
   // The build's cache of shaped words, in buildArena_'s free tail (WordShapeCache.h): armed in setup() after the SAX
   // state is taken, bound to each ParsedText beside its line arena, disarmed at the end of finalize(), before the
   // section releases the feed-chunk block. Unarmed (no lent arena, or no room for it), every lookup is bypassed.
@@ -1739,10 +1743,13 @@ class ChapterHtmlSlimParser final : public Print {
   // wireParagraphLines does the same for any text laid out as a paragraph of the page.
   void wireTextBlock();
   void wireParagraphLines(ParsedText& text);
-  // What a line's TextBlock object must leave free in the line arena to go there beside its bytes (memory-and-parsing
-  // 9b): the image walk's largest stage (EpubImageManifest::kWalkArenaReserve) whenever the build has an image manifest
-  // and a C3-sized region, else nothing. The one place the rule lives.
+  // What the line arena must still have free after a line's TextBlock object for the object to go there beside its
+  // bytes, and, once an object of the page is there, after the line bytes too (memory-and-parsing 9b,
+  // TextBlock::ArenaRoom): the image walk's largest stage (EpubImageManifest::kWalkArenaReserve) whenever the build has
+  // an image manifest and a C3-sized region, else nothing. The one place the rule lives.
   size_t lineObjectKeepFree() const;
+  // lineRoom_ with its keepFree set from lineObjectKeepFree(), for a ParsedText laid out on the page.
+  TextBlock::ArenaRoom* lineRoom();
   void beforeLineHook(uint8_t maxSizePct, bool annotated);
   // Widow/orphan control and keep-with-next (CSS defaults: orphans 2, widows 2), decided before
   // each line of currentTextBlock is placed: true when the page should end before a line that

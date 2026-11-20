@@ -454,10 +454,11 @@ struct LentWalkFixture : ImageManifestFixture {
     int imagePage = -1;  // the page the picture is on; -1: none
   };
 
-  // `linesBefore` paragraphs, each one line, then the picture, then one paragraph more. Its entry is deflated (in
-  // stored DEFLATE blocks), so the walk needs a ring; larger than 32 KB, so that ring is the whole 32 KB; with SOF
-  // 34 KB in, past the first stage.
-  std::string writeBook(const int linesBefore) const {
+  // `linesBefore` paragraphs, then the picture, then one paragraph more. Each paragraph is one short line, or, with
+  // `wordsEach`, that many two-letter words (dense lines: many words, many bytes a line). The picture's entry is
+  // deflated (in stored DEFLATE blocks), so the walk needs a ring; larger than 32 KB, so that ring is the whole 32 KB;
+  // with SOF 34 KB in, past the first stage.
+  std::string writeBook(const int linesBefore, const int wordsEach = 0) const {
     test_zip::StoredZipWriter zip;
     zip.add("mimetype", "application/epub+zip");
     zip.add("META-INF/container.xml",
@@ -473,14 +474,23 @@ struct LentWalkFixture : ImageManifestFixture {
             "<item id=\"p\" href=\"images/late.jpg\" media-type=\"image/jpeg\"/>\n"
             "</manifest>\n<spine><itemref idref=\"c\"/></spine>\n</package>\n");
     std::string body;
-    for (int i = 0; i < linesBefore; ++i) body += "<p>Line " + std::to_string(i) + " before the picture.</p>\n";
+    for (int i = 0; i < linesBefore; ++i) {
+      if (wordsEach == 0) {
+        body += "<p>Line " + std::to_string(i) + " before the picture.</p>\n";
+        continue;
+      }
+      body += "<p>";
+      for (int w = 0; w < wordsEach; ++w) body += "ab ";
+      body += "</p>\n";
+    }
     body += "<p><img src=\"images/late.jpg\" alt=\"late\"/></p>\n<p>After the picture.</p>\n";
     zip.add("chapter.xhtml",
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head>"
             "<title>c</title></head><body>\n" +
                 body + "</body></html>\n");
     zip.addDeflateStoredBlocks("images/late.jpg", jpegWithLateSof(34 * 1024, kPhotoWidth, kPhotoHeight), 16000);
-    const std::string path = (work / ("late" + std::to_string(linesBefore) + ".epub")).string();
+    const std::string path =
+        (work / ("late" + std::to_string(linesBefore) + "_" + std::to_string(wordsEach) + ".epub")).string();
     zip.write(path);
     return path;
   }
@@ -533,6 +543,29 @@ TEST_F(LentWalkFixture, TheLinesBeforeABooksFirstLateHeaderLeaveItsWalkTheRegion
   const Built lent = build(book, "lent", 48000, 16 * 1024);
   EXPECT_FALSE(lent.degraded) << "the lines' objects took the room of the picture's walk";
   EXPECT_EQ(0, lent.imagePage);
+}
+
+// Dense lines: when the reserve was tested only as each object was placed, the bytes of the lines after the page's last
+// arena object took the walk's stage out of the region where the objects on the heap had left it room. Measured on
+// the host with this fixture, lent 48,000 B: the header was degraded at 12 words a paragraph from 28 paragraphs, at 18
+// from 21 and at 24 from 14 (with the objects on the heap, only at 18 words from 27). Now line bytes that would cross
+// the reserve give back to the heap the room the page's objects took (TextBlock::ArenaRoom); the header is degraded
+// only where it was with the objects on the heap. The cases below are some of those that degraded.
+TEST_F(LentWalkFixture, DenseLinesBeforeALateHeaderLeaveItsWalkTheRegion) {
+  struct Dense {
+    int words;
+    int paragraphs;
+  };
+  for (const Dense d : {Dense{12, 29}, Dense{18, 22}, Dense{18, 25}, Dense{24, 15}}) {
+    SCOPED_TRACE(std::to_string(d.words) + " words, " + std::to_string(d.paragraphs) + " paragraphs");
+    const std::string book = writeBook(d.paragraphs, d.words);
+    const std::string tag = std::to_string(d.words) + "_" + std::to_string(d.paragraphs);
+    const Built heap = build(book, "heap" + tag, 0, 100 * 1024);
+    ASSERT_FALSE(heap.degraded);
+    const Built lent = build(book, "lent" + tag, 48000, 16 * 1024);
+    EXPECT_FALSE(lent.degraded) << "the line bytes after the page's arena objects took the room of the picture's walk";
+    EXPECT_EQ(heap.imagePage, lent.imagePage);
+  }
 }
 
 }  // namespace
