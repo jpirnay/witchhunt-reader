@@ -2695,9 +2695,66 @@ void GfxRenderer::drawGray8Pixel(const Gray8Target& gray8, const int x, const in
   gray8.canvas[static_cast<uint32_t>(phyY) * gray8.stride + phyX] = gray;
 }
 
+namespace {
+// One bit of a 1-bpp plane in the framebuffer's physical layout (MSB first, as drawPixel writes it).
+inline void writePlaneBit(uint8_t* plane, const int widthBytes, const int phyX, const int phyY, const bool bit) {
+  uint8_t& byte = plane[static_cast<uint32_t>(phyY) * widthBytes + (phyX >> 3)];
+  const uint8_t mask = static_cast<uint8_t>(0x80u >> (phyX & 7));
+  byte = bit ? static_cast<uint8_t>(byte | mask) : static_cast<uint8_t>(byte & ~mask);
+}
+}  // namespace
+
+void GfxRenderer::drawLevelPlanePixel(const LevelPlaneTarget& planes, const int x, const int y,
+                                      const uint8_t gray) const {
+  int phyX = 0;
+  int phyY = 0;
+  const int displayWidth = getDisplayWidth();
+  const int displayHeight = getDisplayHeight();
+  rotateCoordinates(getOrientation(), x, y, &phyX, &phyY, displayWidth, displayHeight);
+  if (phyX < 0 || phyX >= displayWidth || phyY < 0 || phyY >= displayHeight) return;
+  // Physical coordinates pick the dither threshold, so every draw of the picture gives this pixel the same ink.
+  const uint8_t ink = planes.quantizer->ink(gray, static_cast<unsigned>(phyX), static_cast<unsigned>(phyY));
+  const int widthBytes = getDisplayWidthBytes();
+  writePlaneBit(frameBuffer, widthBytes, phyX, phyY, planes.first.bitFor(ink));
+  if (planes.second) writePlaneBit(planes.second, widthBytes, phyX, phyY, planes.secondPlane.bitFor(ink));
+}
+
+void GfxRenderer::clearLevelPlanes(const LevelPlaneTarget& planes) const {
+  clearScreen(planes.first.bitFor(0) ? 0xFF : 0x00);
+  if (planes.second) memset(planes.second, planes.secondPlane.bitFor(0) ? 0xFF : 0x00, frameBufferSize);
+}
+
+void GfxRenderer::bwRectToLevelPlanes(const LevelPlaneTarget& planes, const int x, const int y, const int width,
+                                      const int height) const {
+  if (!frameBuffer || !planes.quantizer || width <= 0 || height <= 0) return;
+  const uint8_t darkest = planes.quantizer->darkest();
+  const int displayWidth = getDisplayWidth();
+  const int displayHeight = getDisplayHeight();
+  const int widthBytes = getDisplayWidthBytes();
+  const int xEnd = std::min(x + width, getScreenWidth());
+  const int yEnd = std::min(y + height, getScreenHeight());
+  for (int row = std::max(0, y); row < yEnd; row++) {
+    for (int col = std::max(0, x); col < xEnd; col++) {
+      int phyX = 0;
+      int phyY = 0;
+      rotateCoordinates(getOrientation(), col, row, &phyX, &phyY, displayWidth, displayHeight);
+      if (phyX < 0 || phyX >= displayWidth || phyY < 0 || phyY >= displayHeight) continue;
+      // Read before the framebuffer's own bit is overwritten with the first plane's.
+      const uint8_t ink = getPixel(col, row) ? darkest : 0;
+      if (planes.second) writePlaneBit(planes.second, widthBytes, phyX, phyY, planes.secondPlane.bitFor(ink));
+      writePlaneBit(frameBuffer, widthBytes, phyX, phyY, planes.first.bitFor(ink));
+    }
+  }
+}
+
 void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
-                             const float cropX, const float cropY, const Gray8Target* gray8) const {
+                             const float cropX, const float cropY, const Gray8Target* gray8,
+                             const LevelPlaneTarget* planes) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
+  if (planes && (!planes->quantizer || planes->quantizer->levels() < 2)) {
+    LOG_ERR("GFX", "drawBitmap: level planes without a quantizer");
+    return;
+  }
   // For 1-bit bitmaps, use optimized 1-bit rendering path (no crop support for 1-bit)
   if (bitmap.is1Bit() && cropX == 0.0f && cropY == 0.0f) {
     drawBitmap1Bit(bitmap, x, y, maxWidth, maxHeight);
@@ -2735,12 +2792,13 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   const int outputRowSize = (bitmap.getWidth() + 3) / 4;
   auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
   auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
-  // One row of 8-bit samples, only when a canvas is actually being painted.
-  // Stack allocation is not an option: a row is one image width, thousands of
-  // bytes, and the ESP32-C3 stack budget for a call frame is 256.
-  auto* gray8Row = gray8 ? static_cast<uint8_t*>(malloc(bitmap.getWidth())) : nullptr;
+  // One row of 8-bit samples, only when a canvas or level planes are actually
+  // being painted. Stack allocation is not an option: a row is one image width,
+  // thousands of bytes, and the ESP32-C3 stack budget for a call frame is 256.
+  const bool wantsGray8 = gray8 != nullptr || planes != nullptr;
+  auto* gray8Row = wantsGray8 ? static_cast<uint8_t*>(malloc(bitmap.getWidth())) : nullptr;
 
-  if (!outputRow || !rowBytes || (gray8 && !gray8Row)) {
+  if (!outputRow || !rowBytes || (wantsGray8 && !gray8Row)) {
     LOG_ERR("GFX", "!! Failed to allocate BMP row buffers");
     free(outputRow);
     free(rowBytes);
@@ -2755,8 +2813,8 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   const int widthBytes = getDisplayWidthBytes();
   // Width of the rendered (post-crop) region in source pixels
   const int renderWidth = bitmap.getWidth() - 2 * cropPixX;
-  // A canvas paint leaves the frame alone.
-  const PolarityOnReturn polarity(*this, gray8 == nullptr, x, y, scaledExtent(renderWidth, isScaled, scale),
+  // A canvas paint leaves the frame alone, and level planes are controller bits, not a picture to invert.
+  const PolarityOnReturn polarity(*this, !wantsGray8, x, y, scaledExtent(renderWidth, isScaled, scale),
                                   scaledExtent(bitmap.getHeight() - 2 * cropPixY, isScaled, scale));
 
   // Pixel write state for each render mode:
@@ -2814,7 +2872,7 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
     }
     const int screenY = target.screenY;
 
-    if (!gray8 && !isScaled && !absolutePlanes && drawMask != 0x00) {
+    if (!wantsGray8 && !isScaled && !absolutePlanes && drawMask != 0x00) {
       // Fast path: write up to 8 pixels per call directly to the framebuffer.
       switch (drawMask) {
         case 0x07:
@@ -2857,6 +2915,10 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       if (gray8) {
         // The whole point of this path: store the sample, let the panel quantise.
         drawGray8Pixel(*gray8, screenX, screenY, gray8Row[bmpX]);
+        continue;
+      }
+      if (planes) {
+        drawLevelPlanePixel(*planes, screenX, screenY, gray8Row[bmpX]);
         continue;
       }
 
@@ -3734,6 +3796,24 @@ bool GfxRenderer::beginAbsoluteGrayPass(const HalDisplay::RefreshMode fallback) 
 uint8_t GfxRenderer::getGrayLevels() const { return display.getGrayLevels(); }
 
 uint8_t* GfxRenderer::borrowGray8Canvas(uint16_t* stride) const { return display.borrowGray8Canvas(stride); }
+
+const gray_levels::Plan* GfxRenderer::grayLevelPlan() const { return display.grayLevelPlan(); }
+
+bool GfxRenderer::displayGrayLevelBase() const {
+  // Checked first so a panel without a plan leaves an armed override for the refresh that replaces this one.
+  if (!display.grayLevelPlan()) return false;
+  const HalDisplay::RefreshMode effective = consumeRefreshOverride(HalDisplay::HALF_REFRESH);
+  if (!display.displayGrayLevelBase(frameBuffer, effective)) return false;
+  noteRefresh(effective);
+  // Same contract as displayGrayscaleFrame(): follow the display if it swapped buffers.
+  frameBuffer = display.getFrameBuffer();
+  return true;
+}
+
+bool GfxRenderer::displayGrayLevelPass(const uint8_t pass, const bool lastPass) const {
+  // The panel powers down after the last pass where the fading fix asks for it, as displayGrayBuffer() does.
+  return display.displayGrayLevelPass(pass, lastPass && fadingFix.load(std::memory_order_relaxed));
+}
 
 void GfxRenderer::displayGray8Canvas() const {
   // A full refresh whatever was asked (the driver forces its clean bank), so it satisfies an armed override too (a

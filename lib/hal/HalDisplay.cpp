@@ -686,6 +686,21 @@ void HalDisplay::displayGray8Canvas(RefreshMode refreshMode, bool turnOffScreen)
   lastDisplayModeByte = refreshModeToByte(RefreshMode::FULL_REFRESH);
 }
 
+const gray_levels::Plan* HalDisplay::grayLevelPlan() const { return nullptr; }
+
+bool HalDisplay::displayGrayLevelBase(const uint8_t* frame, RefreshMode refreshMode) {
+  (void)frame;
+  (void)refreshMode;
+  LOG_ERR("DISP", "displayGrayLevelBase: this panel has no gray-level plan");
+  return false;
+}
+
+bool HalDisplay::displayGrayLevelPass(const uint8_t pass, const bool turnOffScreen) {
+  (void)turnOffScreen;
+  LOG_ERR("DISP", "displayGrayLevelPass %u: this panel has no gray-level plan", static_cast<unsigned>(pass));
+  return false;
+}
+
 void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
   // Give the driver a real BW base when it actually reads one.

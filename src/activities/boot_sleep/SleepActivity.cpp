@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <new>
 
@@ -162,7 +163,8 @@ BitmapToneMapping sleepImageToneMapping() {
 // breaks a flattened gradient into dither banding; a target that resolves more
 // has the range to use a stronger curve, and measurably wants one.
 int sleepEqualizeBlend(const GfxRenderer& renderer) {
-  return renderer.getGrayLevels() > 4 ? adaptive_tone::EQ_BLEND_NUM_DEEP : adaptive_tone::EQ_BLEND_NUM;
+  const bool deep = renderer.getGrayLevels() > 4 || renderer.grayLevelPlan() != nullptr;
+  return deep ? adaptive_tone::EQ_BLEND_NUM_DEEP : adaptive_tone::EQ_BLEND_NUM;
 }
 
 // Ships the BW base of a grey sleep image, ahead of its LSB/MSB planes.
@@ -179,6 +181,91 @@ void shipSleepGrayBase(const GfxRenderer& renderer) {
   } else {
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
   }
+}
+
+// Where a sleep BMP goes and how it is cut: drawBitmap()'s arguments, kept together so a plane can draw it again.
+struct SleepPicture {
+  const Bitmap& bitmap;
+  int x;
+  int y;
+  int maxWidth;
+  int maxHeight;
+  float cropX;
+  float cropY;
+};
+
+// The sleep picture as a gray-level plan's steps (GrayLevelPlan.h): the B/W base, then each pass over its planes,
+// every plane drawn from the picture again (the quantizer gives each pixel the same ink every time). `overlay`
+// lands the overlay block on a plane.
+//
+// The secondary buffer is LENT here, not released: a pass's second plane is drawn into it, so one read of the
+// picture fills a pass. Where it is not resident (renderCustomSleepScreen frees it for PNG decoding), each plane
+// is a read of its own. The block goes back unchanged, so returning it cannot fail.
+//
+// False before the base when the plan cannot start; false after it when a pass fails. Either way the caller draws
+// the 4-level picture, which replaces whatever reached the glass.
+bool renderSleepLevelPlanes(const GfxRenderer& renderer, const gray_levels::Plan& plan, const SleepPicture& picture,
+                            const std::function<void(const GfxRenderer::LevelPlaneTarget&)>& overlay) {
+  if (!gray_levels::isUsable(plan)) {
+    LOG_ERR("SLP", "Gray-level plan unusable (%u levels, %u passes)", static_cast<unsigned>(plan.levels),
+            static_cast<unsigned>(plan.passCount));
+    return false;
+  }
+  auto quantizer = makeUniqueNoThrow<GrayLevelQuantizer>();
+  if (!quantizer || !quantizer->init(plan.lightness, plan.levels)) {
+    LOG_ERR("SLP", "Gray-level quantizer: %s", quantizer ? "bad lightness table" : "no memory");
+    return false;
+  }
+
+  size_t lentSize = 0;
+  uint8_t* lent = renderer.hasSecondaryBuffer() ? renderer.borrowSecondaryBuffer(&lentSize) : nullptr;
+  if (lent && lentSize < renderer.getBufferSize()) {
+    renderer.returnSecondaryBuffer();
+    lent = nullptr;
+  }
+
+  const auto draw = [&](const gray_levels::Plane& first, const gray_levels::Plane* second) {
+    GfxRenderer::LevelPlaneTarget target;
+    target.quantizer = quantizer.get();
+    target.first = first;
+    if (second != nullptr && lent != nullptr) {
+      target.second = lent;
+      target.secondPlane = *second;
+    }
+    renderer.clearLevelPlanes(target);
+    picture.bitmap.rewindToData();
+    renderer.drawBitmap(picture.bitmap, picture.x, picture.y, picture.maxWidth, picture.maxHeight, picture.cropX,
+                        picture.cropY, nullptr, &target);
+    overlay(target);
+  };
+
+  bool ok = true;
+  draw(plan.base, nullptr);
+  if (!renderer.displayGrayLevelBase()) {
+    LOG_ERR("SLP", "Gray-level base refused");
+    ok = false;
+  }
+  for (uint8_t p = 0; ok && p < plan.passCount; ++p) {
+    const gray_levels::Pass& pass = plan.passes[p];
+    if (pass.planeCount == 2 && lent != nullptr) {
+      draw(pass.planes[0], &pass.planes[1]);
+      renderer.copyGrayscaleLsbBuffers();
+      renderer.copyGrayscaleMsbBuffers(lent);
+    } else {
+      draw(pass.planes[0], nullptr);
+      renderer.copyGrayscaleLsbBuffers();
+      if (pass.planeCount == 2) {
+        draw(pass.planes[1], nullptr);
+        renderer.copyGrayscaleMsbBuffers();
+      }
+    }
+    if (!renderer.displayGrayLevelPass(p, /*lastPass=*/p + 1 == plan.passCount)) {
+      LOG_ERR("SLP", "Gray-level pass %u refused", static_cast<unsigned>(p));
+      ok = false;
+    }
+  }
+  if (lent != nullptr) renderer.returnSecondaryBuffer();
+  return ok;
 }
 
 bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, const BookOverlayInfo& overlayInfo) {
@@ -804,14 +891,23 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
   // 1-bit and inverted filters have no levels to preserve, and the inversion
   // immediately below works on the framebuffer this path does not display.
   const bool nativeGray = hasGreyscale && renderer.getGrayLevels() > 4;
+  // A panel without that canvas may still take more than four levels as a gray-level plan's passes
+  // (GrayLevelPlan.h), drawn plane by plane further down. The 2-bit pass is skipped for it as well.
+  // Compiled out with the rest of the plan path where no driver has one (HalDisplay::kMayRunGrayLevelPlan).
+  const gray_levels::Plan* levelPlan = nullptr;
+  if constexpr (HalDisplay::kMayRunGrayLevelPlan) {
+    if (hasGreyscale && !nativeGray) levelPlan = renderer.grayLevelPlan();
+  }
 
-  if (!nativeGray) {
+  const auto drawTwoBitPicture = [&]() {
     renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
 
     if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
       renderer.invertScreen();
     }
-  }
+  };
+  // cppcheck-suppress knownConditionTrueFalse ; levelPlan stays nullptr only in builds without kMayRunGrayLevelPlan
+  if (!nativeGray && levelPlan == nullptr) drawTwoBitPicture();
 
   const uint8_t overlayMode = SETTINGS.sleepCoverOverlay;
   // Set by drawOverlay() to the block it actually drew, and left at zero height
@@ -889,6 +985,15 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
 
   drawOverlay();
 
+  // The 2-bit picture after a deeper path could not run: those skipped it, and the framebuffer holds the
+  // overlay alone (or a plane's bits). Everything below then works as on a 4-level panel.
+  const auto redrawTwoBit = [&]() {
+    renderer.clearScreen();
+    bitmap.rewindToData();
+    drawTwoBitPicture();
+    drawOverlay();
+  };
+
   // Native grayscale: the image goes into the panel's own canvas at full depth,
   // and the framebuffer -- cleared above, and holding nothing but the overlay
   // drawOverlay() just drew -- is composited on top of it.
@@ -910,6 +1015,33 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
       renderer.displayGray8Canvas();
       LOG_INF("SLP", "Sleep bitmap rendered at %u levels", static_cast<unsigned>(renderer.getGrayLevels()));
       return;
+    }
+    LOG_ERR("SLP", "No gray8 canvas, drawing 4 levels");
+    redrawTwoBit();
+  }
+
+  if constexpr (HalDisplay::kMayRunGrayLevelPlan) {
+    if (levelPlan != nullptr) {
+      // drawOverlay() above, on the cleared framebuffer, has found the block's rectangle. On a plane it gets a
+      // white ground first, because the light-gray fill (mode 2) skips the rows it leaves white and the plane's
+      // bits would show through there; then it lands as solid inks.
+      const auto overlayOnPlane = [&](const GfxRenderer::LevelPlaneTarget& target) {
+        if (overlayRectHeight <= 0) return;
+        renderer.fillRect(0, overlayRectY, pageWidth, overlayRectHeight, false);
+        drawOverlay();
+        renderer.bwRectToLevelPlanes(target, 0, overlayRectY, pageWidth, overlayRectHeight);
+      };
+      if (renderSleepLevelPlanes(renderer, *levelPlan, SleepPicture{bitmap, x, y, pageWidth, pageHeight, cropX, cropY},
+                                 overlayOnPlane)) {
+        LOG_INF("SLP", "Sleep bitmap rendered at %u levels (gray-level plan)",
+                static_cast<unsigned>(levelPlan->levels));
+        return;
+      }
+      LOG_ERR("SLP", "Gray-level plan failed, drawing 4 levels");
+      // renderCoverSleepScreen() kept the secondary buffer for the plan; the 4-level path runs as it always has,
+      // without it.
+      if (renderer.hasSecondaryBuffer()) renderer.releaseSecondaryBuffer();
+      redrawTwoBit();
     }
   }
 
@@ -1009,7 +1141,12 @@ void SleepActivity::renderCoverSleepScreen() const {
   // secondary framebuffer for headroom (same lever the Home cover loader uses). No realloc: the
   // sleep render below draws via the grayscale planes / controller RAM, not the secondary buffer,
   // and enterDeepSleep() tears everything down (chip reset on wake) immediately after.
-  if (renderer.hasSecondaryBuffer()) renderer.releaseSecondaryBuffer();
+  //
+  // Except where the cover is going out as a gray-level plan and is already built: the plan then borrows the
+  // block for a pass's second plane (renderSleepLevelPlanes), which saves one read of the cover per pass. A cover
+  // still to be built needs the heap, so the block is freed for it as before.
+  const bool keepForLevelPlan = renderer.grayLevelPlan() != nullptr && !coverNeedsPreparing;
+  if (renderer.hasSecondaryBuffer() && !keepForLevelPlan) renderer.releaseSecondaryBuffer();
 
   if (coverNeedsPreparing) {
     // Ship the popup without waiting out its waveform. The panel repaints from the controller's
