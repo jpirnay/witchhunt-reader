@@ -1,180 +1,100 @@
 # Protected content (DRM)
 
-Status, 2026-11-19: D1 (the reader opens protected books) is merged (#821) and has run on the X4 Pro and the X3.
-The listing change the Adobe plugin needs is merged (#828). D3's `/api/crypto` is built on `feat/plugin-crypto` and its
-flash cost measured (see D3); the owner chose all boards (2026-11-20). D2 is not started.
+Status, 2026-11-20: D1 (the reader opens protected books, #821), the listing the Adobe plugin needs (#828) and D3
+(`/api/crypto` for the Adobe plugin, #857) are merged and have run on devices. Open: a real Adobe account end to end,
+the messages' translations, D2 (the cache at rest), LCP (asked of Free-Ink).
 This file replaces the September plan on `feat/protected-content-phase0` (`docs/protected-content-plan.md` and
 `docs/protected-content-handover-2026-09-18.md` there).
 
-Owner decisions of 2026-11-17:
-- Adobe ADEPT is supported. It is what Libby, Onleihe and the other loan services mostly use, so the Plugin Hub's
-  `protected-content` plugin is meant to run here.
+Owner decisions:
+- Adobe ADEPT is supported (2026-11-17). It is what Libby, Onleihe and the other loan services mostly use, and what
+  shops such as Thalia sell as "Adobe DRM", so the Plugin Hub's `protected-content` plugin is meant to run here.
 - LCP: Free-Ink is asked whether other firmwares may use `lcp.freeink.org` (see LCP below).
 - No second library: decryption runs on our own `ZipFile` and our own uzlib inflate (`lib/InflateReader`), never on
-  the SDK's vendored miniz or its own zip reader. (In the end none of the SDK library is linked.)
+  the SDK's vendored miniz or its own zip reader.
 - D2's cipher must be the fastest and leanest available and must not change how reading feels (see D2).
-- `/api/files` lists folders as upstream does (for the plugin, see D3).
-- `/api/crypto` runs the Adobe plugin's crypto on the device, on all boards (2026-11-20). The alternative, a JavaScript
-  crypto library in the browser's plugin host (no firmware flash), was declined: it would be a second crypto
-  implementation beside our wolfSSL.
+- `/api/files` lists folders as upstream does (2026-11-17).
+- `/api/crypto` runs the Adobe plugin's crypto on the device, on all boards (2026-11-20), with the RSA private-key code
+  the flow does not use cut away. The alternative, a JavaScript crypto library in the browser's plugin host (no
+  firmware flash), was declined: it would be a second crypto implementation beside our wolfSSL.
 
-## Handover
+## What is in master
 
-Where things stand:
-- `master` has D1: `ZipFile` decrypts beneath our uzlib, `lib/BookProtection` (the manifest `protect.bin`, AES on the
-  chip's peripheral, the book key and device secret ported from upstream), `HalClock::loanNow()`, the reader's
-  messages, `POST /api/book-key` and `deviceId`. Cost on the C3 at merge: +18,114 B flash, +312 B static RAM; the C3's
-  map stayed at 49 code and 44 rodata pages (10.4 KB left in the last code page then).
-- `/api/files` lists a dot folder named by its path whatever **Show Hidden Files** says (#828). Checked on the X3
-  (below).
-- Nothing obtains real keys yet: the Adobe plugin needs D3.
+- D1 (#821): `ZipFile` decrypts beneath our uzlib (`METHOD_ENCRYPTED` stats, a registry of two protected archives),
+  `lib/BookProtection` (`encryption.xml` into `<cache>/protect.bin`, AES on the chip's peripheral, Adobe's
+  `aes128-cbc-uncompressed`), upstream's book key and device secret (`<book>.epub.key`, NVS `devid/secret`),
+  `HalClock::loanNow()` (NVS `cptime/floor`), the reader's messages, `POST /api/book-key`, `deviceId`. Cost on the C3:
+  +18,114 B flash, +312 B static RAM. The key and the plugin's licence (`<book>.epub.rights`, which it derives the key
+  from again after a flash erase) move and go with their book (`SidecarFiles`), as upstream's do.
+- #828: `/api/files` lists a dot folder named by its path whatever **Show Hidden Files** says.
+- D3 (#857): `POST /api/crypto` (upstream's handler, #3114, on the SDK's `WolfsslCrypto`, only that file built:
+  `lib/PluginCrypto`), `api.crypto` in the plugin host, wolfSSL with its RSA private-key paths, password-based
+  encryption, 3DES and RC2 back in, and a source patch (`CROSSPOINT_SP_RSA_PUBLIC_ONLY` in `scripts/patch_wolfssl.py`,
+  gated on wolfSSL 5.7.2) that keeps SP math's 2048 to 4096-bit RSA code for public-key operations only. Cost against
+  master b1a0fe019: C3 +38,212 B flash, +8 B static RAM (map unchanged at 50 code and 44 rodata pages, 19.3 KB left in
+  the last code page); X4 Pro +35,084 B. The Plugins page marks `protected-content` "partly runs here" and offers it.
 
-Next, in this order unless the owner reorders:
-1. The `STR_PROTECTED_*` messages in the other languages (release translation pass; English only so far, so a German
-   UI shows them in English).
-2. D3 (the Adobe plugin): built, measured and checked on the Murphy and the X3 on `feat/plugin-crypto`, on all boards;
-   its PR (see D3).
-3. D2 (the cache at rest): measure the cipher first.
-4. A real loan end to end, once D3 runs: needs the owner's Adobe ID and a library loan; activating may use one of the
-   account's device slots, so only with the owner's go.
+Measured on devices (records in `~/.local/state/witchhunt-device-backups/`, scripts in
+`~/.local/state/witchhunt-work/protected-content/`):
+- Reading (2026-11-17, Moby-Dick chapter 1, the owner's settings): Adobe-shaped and LCP-shaped copies give the plain
+  book's page dumps byte for byte on the X4 Pro and the X3, covers decrypt, a copy with no key shows its message. First
+  open (the manifest) 2.3 s Adobe, 0.26 s LCP on the X4 Pro; 2.95 s and 0.37 s on the X3; a cached reopen about 60 ms.
+  Chapter build as LCP 5.94 s against 5.88 s plain (X4 Pro); 4,631 ms Adobe, 4,499 ms LCP, 4,493 ms plain (X3), the
+  X3's lowest free heap no lower than the plain book's.
+- `/api/crypto` (2026-11-20, `crypto_check.py`, every op against OpenSSL): 18 of 18 on the Murphy and on the X3. X3:
+  RSA-1024 `keygen` 0.54 to 0.88 s, `sign` 467 ms, `rsadec` 466 ms, `pubencrypt` to RSA-4096 153 ms, `pkcs12` (RC2 and
+  3DES bags) 225 ms, no watchdog reset, about 110 KB of heap free during the ops. TLS after the trim, through the
+  relay, on both boards: `adeactivate.adobe.com` (ECDHE-RSA) and `raw.githubusercontent.com` verify (`insecure=0`).
+- The plugin end to end against a mock ADEPT service (2026-11-20, Murphy, `adept-mock/adept_mock.mjs`: the plugin's
+  page in jsdom, its relay calls to Adobe's and the distributor's hosts answered in process, its download turned into
+  an upload): 22 checks pass. The device encrypts the sign-in to the authentication certificate, makes both key pairs
+  and wraps their private halves, opens the RC2/3DES PKCS#12, signs Activate, InitLicenseService and Fulfill (each
+  signature verified over the request's canonical SHA-1), unwraps the content key with `rsadec`, and the plugin stores
+  it with the loan end. The loan opens on the reader, its pages byte-identical to the plain copy's.
 
-Tools and procedures:
-- `tools/make_protected_epub.py in.epub out.epub --key <hex> [--scheme lcp]` makes Adobe-shaped (AES-128, deflated,
-  no sizes) and LCP-shaped (AES-256, sizes given) books. The device test books and keys:
-  `~/.local/state/witchhunt-work/protected-content/` (moby-adobe, moby-lcp, moby-nokey; Adobe key
-  `2b7e151628aed2a6abf7158809cf4f3c`, LCP key `603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4`).
-- A device run: post the keys with `curl` to `/api/book-key` (base64 key) after a Wi-Fi join (`ACT:FILE_TRANSFER`,
-  Confirm), open the books with `tools/devctl.py --script` (`ACT:READER:<path>@<spine>:<page>`, `page:` dumps), compare
-  the dumps with the plain book's. Leaving File Transfer reboots the C3: start the next script after the boot. The
-  steps files and logs of both runs: `x3run/` and `run/` in that folder; backups, gate scripts and READMEs in
-  `~/.local/state/witchhunt-device-backups/2026-11-17-x4pro-protected/` and `2026-11-17-x3-protected/`.
-- Host tests: `test/book_protection` (OpenSSL stands in for `esp_aes` and wolfSSL), `EpubProtectedPipelineTest`,
-  `ZipEncryptedEntryTest`.
+Tools: `tools/make_protected_epub.py in.epub out.epub --key <hex> [--scheme lcp]` makes Adobe-shaped and LCP-shaped
+books; the test books and their keys are in `~/.local/state/witchhunt-work/protected-content/`. Host tests:
+`test/book_protection`, `EpubProtectedPipelineTest`, `ZipEncryptedEntryTest`; web: `plugin_host_test` (`api.crypto`),
+`plugins_catalog_test`. A device run leaves the device secret and probably the loan floor in NVS; firmware that does not
+use them ignores both.
 
-Both device runs left the device secret (`devid/secret`) and probably the loan floor (`cptime/floor`) in NVS; firmware
-that does not use them ignores both.
+## Open
 
-## D1: what is still open
+1. **A real account end to end.** Needs the owner's Adobe ID; Adobe's free sample eBook library still hands out `.acsm`
+   loan tokens (2026-11-20, fulfilled by DTS ByteBooks' content server), so no library card is needed. Only with the
+   owner's go: an activation may take one of the account's device slots. What a real run settles:
+   - the distributors' fulfilment hosts must chain to a root in our bundle (`lib/SecureNet/include/CrossPointRoots.pem`).
+     A shop's or library's `.acsm` names its host (`operatorURL`), so this can be checked from the file alone, before
+     any activation (Thalia, Onleihe, OverDrive: unknown yet);
+   - whether Adobe's signing bundle needs 3DES (about 4.5 KB on the C3) as well as RC2;
+   - an `aes128-cbc` entry whose plaintext is not a DEFLATE stream fails here (the manifest build, or an image's read);
+     DeDRM's `ineptepub.py` takes such an entry as it is. How often real books do this is not known.
+2. **The `STR_PROTECTED_*` messages in the other languages** (release translation pass; English only so far).
+3. **D2, the cache at rest.** Owner rule: the fastest and leanest cipher, and reading must not feel different. Measure
+   first, on the C3: a page turn and a chapter build of a protected book against the same book unprotected, plus flash.
+   If even the fastest cipher is noticeable, fall back to a cheap obfuscation or leave the cache plain, and say which
+   in the release notes. The September numbers: ChaCha20 through wolfSSL 4.6 MB/s, a portable ChaCha20 1.8 MB/s,
+   AES-128-CBC 1.5 MB/s, a 4 KB page record 1.1 ms; the C3's AES peripheral (D1 uses it) is untried for this. Like
+   upstream, D1 writes the decrypted chapter (`spines/<bucket>/html_<n>.bin`) and the extracted images to the cache.
+   Phase 0 of `feat/protected-content-phase0` (3,345 commits behind, conflicts in 12 files) has `lib/CacheCipher`
+   (ChaCha20, length-preserving, addressable by offset) and the storage scope that enciphers a protected book's cache:
+   carry it over by hand, with its keys from D1's device secret and `ZipFile::isProtected()` as "this book is protected".
+4. **Books downloaded with Adobe Digital Editions.** Their licence is inside the EPUB (`META-INF/rights.xml`). The plugin
+   derives a key only from a `<book>.epub.rights` beside the book, so such a book needs that file beside it first;
+   fetching the `.acsm` again from the shop is the simple route.
 
-- Device results, 2026-11-17, Moby-Dick chapter 1 (spine 3), the owner's settings on each board:
-  - X4 Pro (a68dfdf1f): the Adobe and LCP copies give the plain book's page dumps byte for byte, the covers decrypt,
-    the no-key copy shows its message. Adobe's first open builds the manifest in 2.3 s (it measures the text's sizes),
-    LCP's in 0.26 s; a cached reopen registers in about 60 ms; the chapter builds in 5.94 s as LCP, 5.88 s plain.
-  - X3 (master d81e79e07 + 7e5b6f926): page dumps identical to plain (Adobe pages 1-2, LCP page 1), the no-key copy
-    shows its message. Manifest 2.95 s (Adobe), 0.37 s (LCP). Chapter build 4,631 ms Adobe, 4,499 ms LCP, 4,493 ms
-    plain. Lowest free heap since boot 16,408 B after the Adobe build, 15,460 B after the plain one (the LCP build did
-    not go lower); free heap at the first page's pre-render 63,984 B Adobe, 63,988 B plain, 63,156 B LCP.
-- An `aes128-cbc` entry whose plaintext is not a DEFLATE stream fails here: the manifest build fails, or, for an image
-  (which the build does not measure), its read. DeDRM's `ineptepub.py` takes such an entry as it is when inflating
-  fails ("possibly not compressed by zip"). How often real books do this is not known; a real loan will tell.
-  (`aes128-cbc-uncompressed` is handled.)
-- No real Adobe or LCP book has been opened yet (no key source until D3).
-
-## D2: the cache at rest
-
-Owner rule (2026-11-17): the cipher must be the fastest and leanest available and must not change how reading feels.
-Measure first, on the C3: a page turn and a chapter build of a protected book against the same book unprotected, plus
-flash. If even the fastest cipher is noticeable, fall back to a cheap obfuscation (a keyed XOR stream, say) or leave
-the cache plain, and say which in the release notes. The September numbers are the starting point: ChaCha20 through
-wolfSSL 4.6 MB/s, a portable ChaCha20 1.8 MB/s, AES-128-CBC 1.5 MB/s; a 4 KB page record 1.1 ms. The C3 has an AES
-peripheral too (D1 uses it through `esp_aes`): measure AES-CTR on it beside ChaCha20.
-
-Like upstream, D1 writes the decrypted chapter to the cache (`spines/<bucket>/html_<n>.bin`) and the extracted
-images. Carry over Phase 0 from `feat/protected-content-phase0` by hand (the branch is 3,345 commits behind and
-conflicts in 12 files): `lib/CacheCipher` (ChaCha20 through wolfSSL, length-preserving and addressable by offset), the
-storage scope that enciphers a protected book's cache files, and its host tests. Its keys come from the device secret
-of D1 instead of a second store, and the `.rights` stand-in becomes `ZipFile::isProtected()`.
-
-## D3: the Adobe plugin
-
-The plugin for library loans (Libby, Onleihe) is the Plugin Hub's `protected-content` (Diirge, 1.0.5, served from
-Railway, no repository, no license: never copy it into this repository). It fulfils the `.acsm` file a loan service
-hands out: an ADEPT client in the page that activates the reader with Adobe's activation service and fetches a loan
-from the distributor's ACS server. Adobe's service is DTS ByteBooks' now: `adeactivate.adobe.com` answers with a
-`dtsbytebooks.com` certificate that names it, and the plugin links there for an account. No other Libby or Onleihe
-plugin exists (Hub, sd-plugins, GitHub; 2026-11-17). Version 1.0.5 against this firmware:
-
-- Every step needs `api.crypto` (random, sha1, sha256, aesenc/aesdec, rsadec, keygen, pubencrypt, sign, pkcs12). The
-  page cannot use `crypto.subtle` instead: `SubtleCrypto` exists only in a secure context, and the reader serves
-  `http://` on a LAN address. Built on `feat/plugin-crypto` (below).
-- It lists its own folder and `/.crosspoint` (`/api/files`) before anything else, looking for `content.key` in both.
-  Both answered 403 while hidden files were off. `/api/files` now lists them; on the X3 with hidden files
-  off: the plugin folder, `/.crosspoint` and `/.crosspoint/plugins` list (no dot names), `System Volume Information`
-  and `/CROSSP~1` stay 403, `/download` of the plugin's file 200, of `settings.json` and `wifi.json` 403.
-- The rest is in place: the relay (four arguments; a 3xx comes back unfollowed and the plugin follows it), `fetchToSd`
-  (http first, then https), `writeFile` of the `.rights` sidecar beside the book (where `/upload` may write) and of its
-  account files in its folder, exact reads there, `/delete` with `path`, `deviceId`, and `/api/book-key`, which it
-  calls before the download (the endpoint needs no book at that path yet). Adobe's certificate chains to USERTrust RSA,
-  which the bundle carries (the chain has a cross-sign; `WOLFSSL_ALT_CERT_CHAINS` is on). The distributors' ACS hosts
-  are not known until a real `.acsm`. `registerAction` only serves fulfilling and renewing by job.
-- It keeps the account's license private key in plain base64 in `content.key` in its folder and reads it back with
-  `/download`, so while File Transfer runs any client on the network can read it too, as on upstream.
-- Not done: running the plugin's own page against a device. A jsdom run of the File Manager page did not load the
-  plugin card (only `/api/web/status` was requested); the calls it makes were checked with `curl` instead.
-
-`feat/plugin-crypto` (2026-11-20, off master b1a0fe019): `POST /api/crypto` is upstream's handler (#3114, Justin
-Mitchell) on the SDK's `WolfsslCrypto`, of which only that file is built (`lib/PluginCrypto`); `api.crypto` in the
-plugin host posts to it. `scripts/patch_wolfssl.py` keeps the RSA private-key paths, password-based encryption, 3DES
-and RC2 (`WC_RC2`) in; key generation runs on the framework's prebuilt mbedTLS, as the SDK does on ESP. Owner,
-2026-11-20: on all boards, with what the flow does not use cut away. A source patch in the same script
-(`CROSSPOINT_SP_RSA_PUBLIC_ONLY`) keeps SP math's size-specific RSA code (2048 to 4096 bits) for public-key operations
-only: the Adobe flow's private keys are 1024-bit, a size SP has no RSA code for, so they run on the generic `sp_int`
-path either way, and TLS verifies through the size-specific public paths as before. That patch saves 9,238 B on the
-C3. Cost against master in the same worktree:
-- `default` (C3): +38,212 B flash, +8 B static RAM. The C3's map stays at 50 code and 44 rodata pages; the last code
-  page's free room falls from 53.8 KB to 19.3 KB.
-- `x4pro`: +35,084 B flash, +16 B static RAM.
-- What is left, by symbol on the C3 before the trim: PKCS#12 with its password-based encryption, 3DES (a 2 KB S-box
-  table) and RC2 about 15 KB, the generic RSA private-key path about 7 KB, mbedTLS key generation about 4 KB, the
-  handler and the SDK wrapper about 7 KB (the wrapper's LCP methods, X25519, HKDF and AES-GCM, stay linked through its
-  vtable), and the ECC branch of the PKCS#12 parse's key-to-certificate check about 2 KB. 3DES may turn out unneeded
-  once a real bundle shows which PBE its bags use.
-
-Device check, Murphy, 2026-11-20 (f18239c06; record in `~/.local/state/witchhunt-device-backups/2026-11-20-murphy-crypto/`):
-- Every op against OpenSSL (`~/.local/state/witchhunt-work/protected-content/crypto_check.py`): 18 of 18. RSA-1024
-  `keygen` 0.37 to 0.95 s, `sign` 314 ms, `rsadec` 311 ms, `pubencrypt` to an RSA-4096 certificate 98 ms, `pkcs12`
-  (an RC2 certificate bag and a 3DES key bag) 184 ms; the refusals answer `{error}`.
-- TLS after the trim, through the relay: `adeactivate.adobe.com` (ECDHE-RSA, the plugin's first request) and
-  `raw.githubusercontent.com` answer 200 with `insecure=0`.
-- The plugin's own page (this build's Files page in jsdom, the Murphy's API; `pc_page.mjs` beside the check script):
-  the card loads, "No content account found on this SD card.", and Activate with a dummy account reaches `api.crypto`
-  (`random`, `sha1`, `sha1`) and stops at its own "Enter your password to activate this account."; no request left
-  the device and nothing was written.
-- The Plugins page now marks the plugin "partly runs here" with that note, and offers its install.
-
-X3, 2026-11-20 (16d13fad9; `2026-11-20-x3-crypto/`): 18 of 18 against OpenSSL, no reset. `keygen` 0.54 to 0.88 s,
-`sign` 467 ms, `rsadec` 466 ms, `pubencrypt` to RSA-4096 153 ms, `pkcs12` 225 ms; about 110 KB of heap free in File
-Transfer during the ops, and the lowest free heap since boot (15,444 B, at the Wi-Fi start) did not move. TLS through
-the relay as on the Murphy: both hosts 200 with `insecure=0`.
-
-Mock ADEPT end to end, Murphy, 2026-11-20 (`2026-11-20-murphy-adept-mock/`): the plugin's page in jsdom against the
-Murphy, its relay calls to the Adobe and distributor hosts answered by an in-process mock
-(`~/.local/state/witchhunt-work/protected-content/adept-mock/adept_mock.mjs`, test-only, outside the repository), its
-book download turned into an upload of an Adobe-shaped Moby-Dick. 22 checks pass:
-- sign-in data encrypted by the device to the mock's authentication certificate;
-- both key pairs from the device's `keygen`, their private halves wrapped by its `aesenc`;
-- the signing key and certificate taken out of the mock's PKCS#12 (RC2 and 3DES bags) by the device;
-- Activate, InitLicenseService and Fulfill signed by the device, each signature opening with the issued key over the
-  request's canonical SHA-1;
-- the content key unwrapped by the device's `rsadec` and stored with `/api/book-key`, with the licence's loan end.
-
-On the reader the loan opens as protected (AES-128) and its first two pages are byte-identical to the plain copy's.
-Nothing left the device or the machine running the mock.
-
-Open: a real activation and loan, which needs an account. Adobe's free sample eBook library still hands out `.acsm` loan
-tokens (2026-11-20, fulfilled by DTS ByteBooks' content server), so an Adobe ID suffices: no library card. An activation
-may take one of the account's device slots, so only with the owner's go.
+The plugin keeps the Adobe account's license private key in plain base64 in `content.key` in its folder and reads it
+back with `/download`, so while File Transfer runs any client on the network can read it too, as on upstream.
 
 ## LCP
 
 Upstream fulfils LCP loans through Free-Ink's service (`lcp.freeink.org`: `/enroll`, `/fulfill`, `/unlock`), and
-enrolment needs a release key that only CrossPoint's official builds carry (`src/network/LcpDevice.cpp`). The SDK
-keeps the production LCP profile off the device (`LcpLicense.h`), so the September plan's LCP on the device does not
-work for real loans. Asked of Free-Ink on 2026-11-17: may another firmware's release builds use the service. No
-answer recorded yet.
+enrolment needs a release key that only CrossPoint's official builds carry (`src/network/LcpDevice.cpp`). The SDK keeps
+the production LCP profile off the device (`LcpLicense.h`). Asked of Free-Ink on 2026-11-17: may another firmware's
+release builds use the service. No answer recorded yet. The reader already opens LCP-shaped books given the key (D1).
 
-## What is lost, what is kept
+## What is kept elsewhere
 
-The SDK commit the September branch pins (`d66c7a9e`, branch `feat/injectable-inflate`) was never pushed; it is not
-in any clone here. The SDK fork branch `feat/content-protection-seams` (36cdcc8, 4e418ce: an injectable pull inflater
-and entry index for `ProtectedBook`, two GCC 15 test fixes) is pushed but unused here; it is an offer to Free-Ink.
+The SDK fork branch `feat/content-protection-seams` (36cdcc8, 4e418ce: an injectable pull inflater and entry index for
+`ProtectedBook`, two GCC 15 test fixes) is pushed but unused here; it is an offer to Free-Ink. The September branch's
+SDK pin (`d66c7a9e`) was never pushed and is lost.
