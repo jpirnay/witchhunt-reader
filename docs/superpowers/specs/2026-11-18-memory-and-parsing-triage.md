@@ -729,11 +729,3 @@ amendment names its PR.
   "+2 order gap", and the table sits at the end of the cache file so the rule bytes stay master's.
 - **§5, §9.** §5b rides in the §5a PR. §9b and §9c wait for a Linux `epub_pipeline_dump --bench` allocation count
   (their gate): this PC has WSL without a distribution.
-- **§9b, the lifetime and the walk reserve.** The order "the object dies before `releasePageBlock()`" did not hold on
-  two teardown paths: the parser's destructor (every aborted arena build) and `finalize()` rewound the page block
-  before the open page and a table's packed rows were destroyed. Both are fixed first in the same PR, and the golden
-  corpus is laid out in a lent region too, with the rewound block filled. "While headers are pending" would not
-  protect a chapter's first deferred image (`hasPending()` turns true only when the parser meets it), and a reserve
-  kept in every book lost most of the gain at the X4's 48,000 B (host: moby-dick 8,785 fewer allocations of 27,333,
-  `test_table_streaming` 8 of 132). The reserve holds once the book has met any image header
-  (`EpubImageManifest::imageHeaderMet`, sticky: `resolve()`, or `images.bin` / `images.pending` at load).
