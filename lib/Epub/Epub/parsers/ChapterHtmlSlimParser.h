@@ -100,6 +100,58 @@ inline size_t& cellLinesAllocated() {
   static size_t n = 0;
   return n;
 }
+// The table's three std::vector growths: how many more asks of each kind may succeed before one is refused as if the
+// heap were out. SIZE_MAX = never refuse. `tableRowCellsLeft` is the `<td>` that adds a cell to the pending row,
+// `layoutCellsLeft` a grid row's laid-out cell list, `packerRowsLeft` the fragment's row list.
+inline size_t& tableRowCellsLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+inline size_t& layoutCellsLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+inline size_t& packerRowsLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// ...and the allocation of the PageTableFragment a flush makes of the packed rows.
+inline size_t& fragmentAllocLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// How many pushes onto the fragment's row list found it full (so would have grown it through the throwing operator
+// new, past the reserve); a table's reserve is meant to leave this at zero.
+inline size_t& packerGrowthPushes() {
+  static size_t n = 0;
+  return n;
+}
+// How many asks, once a counter above reaches zero, are refused before the heap "recovers" (SIZE_MAX: all of them),
+// and how many were refused in all.
+inline size_t& tableGrowthRefusals() {
+  static size_t n = SIZE_MAX;
+  return n;
+}
+inline size_t& tableGrowthRefused() {
+  static size_t n = 0;
+  return n;
+}
+// One ask of a kind whose counter is `left`: true when it is refused.
+inline bool tableGrowthFault(size_t& left) {
+  if (left == SIZE_MAX) return false;
+  if (left > 0) {
+    --left;
+    return false;
+  }
+  size_t& refusals = tableGrowthRefusals();
+  if (refusals == 0) {
+    left = SIZE_MAX;
+    return false;
+  }
+  if (refusals != SIZE_MAX) --refusals;
+  ++tableGrowthRefused();
+  return true;
+}
 #endif
 
 #ifdef PAGE_FAULT_INJECTION
@@ -864,16 +916,34 @@ class ChapterHtmlSlimParser final : public Print {
   // BEFORE the note. Held until addLineToPage has placed a line, then recorded against the page
   // that line actually went on.
   //
-  // Small by construction: an entry lives only from an element's start tag to its first line, so
-  // it holds more than one only for id'd elements that produce no text at all. Past
-  // MAX_ANCHORS_AWAITING_LINE the queue is flushed at the current page rather than grown, which
-  // is exactly the old behaviour and no worse.
-  std::vector<std::string> anchorsAwaitingLine_;
-  // Records every queued anchor against `completedPageCount`. Called once a line has been placed
-  // (the page is then known) and again at end of parse for anchors that never got one.
-  void flushAnchorsAwaitingLine();
-  // Holds an anchor until a line settles its page; see anchorsAwaitingLine_.
-  void queueAnchorForNextLine(std::string id);
+  // Small by construction: an entry lives only from an element's start tag to its line, so it holds
+  // more than one only for id'd elements that produce no text at all, or for several ids inside one
+  // paragraph. Past MAX_ANCHORS_AWAITING_LINE an id is recorded at once, at the page reached so far,
+  // rather than queued: approximate, never lost.
+  //
+  // An id on an inline element in the middle of a block carries the index of the next word (as a
+  // footnote link carries the index of the word it follows), so the line that reaches that word
+  // records it, not the block's first line. A block's own id, an inline id before the block's
+  // first word and an id in a table cell, carry 0: the block's first line (a table's, the row's page).
+  // Queued by word index after crosspoint-reader #4328 (Mikalai Kryvusha, @MikalaiKryvusha).
+  struct AnchorAwaitingLine {
+    std::string id;
+    int wordIndex;
+  };
+  std::vector<AnchorAwaitingLine> anchorsAwaitingLine_;
+  // Records the queued anchors whose index lies in [firstIndex, lastIndex] at `completedPageCount`, the rest wait.
+  // After a line is placed: [0, wordsExtractedInBlock], the words its lines have reached (the page is then known).
+  // After a block is laid out: [1, INT_MAX], an id after its last word names the last line's page; a block's own id
+  // (index 0) waits on for its first line. Neither takes -1, an id startNewTextBlock sets aside for the next block.
+  void flushAnchorsInRange(int firstIndex, int lastIndex);
+  // Records every queued anchor at `page`: for a grid row (its page), and at the end of the parse for anchors that
+  // never got a line (the last page).
+  void flushAnchorsAwaitingLine(int page);
+  // Holds an anchor until the line that reaches word `wordIndex` of the block settles its page.
+  void queueAnchorForNextLine(std::string id, int wordIndex = 0);
+  // The index to queue an inline element's id with: that of the next word of the block in progress, or 0 when the
+  // block has no word yet or the id is not in a plain block (a table cell lays out apart).
+  int inlineAnchorWordIndex() const;
   // Records the id of a <span>, within MAX_SPAN_ANCHORS_PER_CHAPTER and never counted against the
   // general cap: see the definition.
   void recordSpanAnchor(const std::string& id);
@@ -1335,6 +1405,10 @@ class ChapterHtmlSlimParser final : public Print {
   // ParsedText before returning. Shared by the row fallback and the degraded path so both
   // produce identical output. Returns false when the heap guard stopped the parse.
   bool emitCellAsParagraph(BufferedTableCell& cell, bool emitImage);
+  // The pending row's cell list and the fragment's row list grow through these: false when the heap holds no block for
+  // the growth, and nothing changed.
+  bool reserveRowCell(BufferedTableRow& row);
+  bool reservePackerRows(TableFragmentPacker& packer, size_t extra);
   // Give up the grid for the pending ROW: flush whatever is packed so the fragment closes before
   // the paragraphs, then emit the row's buffered cells (text then images) and latch rowDegraded so
   // the rest of the row streams at </td>. The next <tr> clears it and the grid resumes.

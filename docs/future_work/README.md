@@ -4,6 +4,12 @@ Open work that is known, analysed, and not done yet. Each file collects the open
 topic: what is open, why it matters, where in the code, what was already tried, and the next step.
 When an item is done, delete it from its file; when a file has no items left, delete the file.
 
+A topic that several PRs work on at the same time keeps its items as one file each, in a folder named after the
+topic ([memory-and-parsing/](memory-and-parsing/)); the topic's own file stays as its page and lists no items. A PR
+that closes such an item deletes its file, and a follow-up it finds goes into a new file. A row in this table describes
+its topic, not each item, so closing or adding an item does not touch the table. Items that share one file or one list
+make parallel PRs conflict: two PRs that each delete a neighbouring bullet edit adjacent lines.
+
 | File | Topic |
 |---|---|
 | [alternative-sync-providers.md](alternative-sync-providers.md) | OPDS progression sync (Kavita, Audiobookshelf) and BookOrbit, offered in the reader itself |
@@ -17,7 +23,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 | [font-flash.md](font-flash.md) | The font picker's card read, remaining flash and speed levers on the font path, glyph advances rounded twice, the C3 sdkconfig trim (decide) |
 | [library.md](library.md) | Library: measuring a large card, "Library too large", card-reader changes, silent build failures, interrupted builds, New's covers, author lists, sidecar case, tabs on button-only boards, cover thumbnails' midtones (decide), tests |
 | [list-input-harmonization.md](list-input-harmonization.md) | Screens not yet on ListController, and the cleanup after them |
-| [memory-and-parsing.md](memory-and-parsing.md) | The paragraph after a table losing its margin-top, a table cell keeping only its first picture, the page-elements limit dropping a page's tail, a `<br>` in a degraded table cell, the font prewarm's heap transients, page turns waiting behind an image extraction, covers that restart at 1/8, damaged JPEGs (parked), per-line and per-cell objects on the heap, throwing allocations left in the section build, `<style>` blocks, stylesheets per chapter, inline anchors, JPEG source reads |
+| [memory-and-parsing.md](memory-and-parsing.md) | The section build's memory and parsing: tables, pictures, page limits, the font prewarm, image extraction and decoding, CSS scoping, anchors, allocations on the build path. One file per item in [memory-and-parsing/](memory-and-parsing/) |
 | [murphy-small-screen.md](murphy-small-screen.md) | Murphy M3: fixed sizes and layouts that assume a panel larger than 240x416, with the central root causes first |
 | [opds-and-kosync.md](opds-and-kosync.md) | Gutenberg's repeated OpenSearch fetch and truncated-field warning, KOSync redirect gate and log labels, the auto-push's XPath mapping on the heap |
 | [plugins.md](plugins.md) | Plugins after #797-#824: `api.crypto`, flows not tried live, `/api/fetch` errors (#827), events (later), the survey's leftovers |

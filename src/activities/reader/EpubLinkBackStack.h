@@ -70,9 +70,10 @@ struct EpubLinkBackStack {
   // with everything above it, as Back would have. -1 when there is none. The newest entry itself is
   // never matched: it was pushed for this very link, and is where it was tapped.
   //
-  // Within a page rather than on it, because an id inside a paragraph names the page of a nearby
-  // line, not of the marker itself: the page its paragraph starts on, or the one the next block
-  // starts on. A backlink to the marker can therefore land a page either side of the saved one.
+  // Within a page rather than on it, because an id inside a paragraph can name the page of a nearby
+  // line, not of the marker itself: with hyphenation on a split word counts twice in the lines, so
+  // an inline id can be recorded a few lines early, and an id past the parser's queue of 16 is
+  // recorded at the page reached so far. A backlink to the marker can therefore land a page off.
   //
   // Based on crosspoint-reader PR #3799 (Ruslan Sukharev, @skhrv), whose FootnoteHistory unwinds the
   // same way; theirs matches any page of the origin's spine when the link crosses spines.
