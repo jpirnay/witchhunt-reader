@@ -14,6 +14,9 @@ Owner decisions of 2026-11-17:
   the SDK's vendored miniz or its own zip reader. (In the end none of the SDK library is linked.)
 - D2's cipher must be the fastest and leanest available and must not change how reading feels (see D2).
 - `/api/files` lists folders as upstream does (for the plugin, see D3).
+- `/api/crypto` runs the Adobe plugin's crypto on the device, on all boards (2026-11-20). The alternative, a JavaScript
+  crypto library in the browser's plugin host (no firmware flash), was declined: it would be a second crypto
+  implementation beside our wolfSSL.
 
 ## Handover
 
