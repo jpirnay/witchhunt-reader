@@ -46,6 +46,23 @@ TEST_F(SidecarFilesTest, MoveAllCarriesCoverAndMetadata) {
   EXPECT_TRUE(exists("from/Book.epub"));
 }
 
+// A protected book's key and the licence its plugin wrote go where the book goes, and with it.
+TEST_F(SidecarFilesTest, ProtectedBookKeyAndLicenceTravelWithIt) {
+  touch("from/Loan.epub");
+  touch("from/Loan.epub.key");
+  touch("from/Loan.epub.rights");
+
+  EXPECT_TRUE(SidecarFiles::moveAll(path("from/Loan.epub"), path("to/Loan.epub")));
+  EXPECT_TRUE(exists("to/Loan.epub.key"));
+  EXPECT_TRUE(exists("to/Loan.epub.rights"));
+  EXPECT_FALSE(exists("from/Loan.epub.key"));
+  EXPECT_FALSE(exists("from/Loan.epub.rights"));
+
+  EXPECT_TRUE(SidecarFiles::removeAll(path("to/Loan.epub")));
+  EXPECT_FALSE(exists("to/Loan.epub.key"));
+  EXPECT_FALSE(exists("to/Loan.epub.rights"));
+}
+
 TEST_F(SidecarFilesTest, MoveAllWithNoSidecarsSucceeds) {
   touch("from/Book.epub");
   EXPECT_TRUE(SidecarFiles::moveAll(path("from/Book.epub"), path("to/Book.epub")));

@@ -24,6 +24,10 @@ inline constexpr const char* kMetadataExtensions[] = {".opf", ".OPF"};
 // A protected EPUB's content key, wrapped to the device (lib/BookProtection/BookKey.h). Its name is
 // the book's whole name and ".key" ("Some Book.epub.key"), the same as an extension of the base.
 inline constexpr const char* kKeyExtensions[] = {".epub.key", ".EPUB.key"};
+// The licence a plugin wrote beside a protected EPUB it fetched (the Plugin Hub's protected-content:
+// "Some Book.epub.rights", Adobe's rights.xml), which it derives the key from again after a flash
+// erase. Upstream moves it with the book too (EpubReaderActivity's SIDECARS).
+inline constexpr const char* kLicenseExtensions[] = {".epub.rights", ".EPUB.rights"};
 // metadataStamp() reads no further than this. It must cover every byte a reader
 // of the sidecar takes in, or an edit past the cap would go unnoticed.
 inline constexpr size_t kMetadataStampBytes = 16384;
