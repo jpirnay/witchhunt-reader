@@ -533,14 +533,16 @@ static void logStartupMemory(const char* stage) {
 // appears at fourteen call sites through setup() and reads better unqualified there.
 using BootDiag::BootPhase;
 
-// The panel's booster powered down once the device has gone idle, and again after each render pass
-// drawn while it stays idle (the minute clock, a cover that finished loading), on the boards whose
-// driver keeps it up after a refresh (HalCapabilities::powersPanelOffWhenIdle). A frame that is
+// The panel's booster powered down once the device has gone idle (for the board's
+// HalCapabilities::panelIdlePowerOffAfterMs), and again after each render pass drawn while it stays
+// idle (the minute clock, a cover that finished loading), on the boards whose driver keeps it up
+// after a refresh (HalCapabilities::powersPanelOffWhenIdle). A frame that is
 // still on its way out, or a pass in flight, waits for a later idle tick: the loop never stalls
 // behind a render for this. A frame painted outside render() follows input, which starts a new
 // idle period. Loop task only.
 static void powerOffPanelWhenIdle(const unsigned long lastActivityMs) {
   if (!HalCapabilities::powersPanelOffWhenIdle()) return;
+  if (millis() - lastActivityMs < HalCapabilities::panelIdlePowerOffAfterMs()) return;
   static unsigned long offAfterActivityAt = 0;
   static uint32_t offAfterPass = 0;
   static bool off = false;
