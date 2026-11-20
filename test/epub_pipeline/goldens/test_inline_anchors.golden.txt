@@ -1,0 +1,5473 @@
+BOOK title=Inline Anchors lang=en spine=8 toc=0 reliableToc=0
+SPINE 0 href=OEBPS/chapter0.xhtml pages=4 truncated=0 cssFallback=0
+ PAGE 0 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=BLOCKFIRST
+   W x=122 s=0 z=100 t=w001
+   W x=168 s=0 z=100 t=w002
+   W x=215 s=0 z=100 t=w003
+   W x=263 s=0 z=100 t=w004
+   W x=312 s=0 z=100 t=w005
+   W x=362 s=0 z=100 t=w006
+   W x=413 s=0 z=100 t=w007
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w008
+   W x=45 s=0 z=100 t=w009
+   W x=91 s=0 z=100 t=w010
+   W x=136 s=0 z=100 t=w011
+   W x=175 s=0 z=100 t=w012
+   W x=215 s=0 z=100 t=w013
+   W x=256 s=0 z=100 t=w014
+   W x=298 s=0 z=100 t=w015
+   W x=341 s=0 z=100 t=w016
+   W x=385 s=0 z=100 t=w017
+   W x=430 s=0 z=100 t=w018
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w019
+   W x=40 s=0 z=100 t=w020
+   W x=86 s=0 z=100 t=w021
+   W x=126 s=0 z=100 t=w022
+   W x=167 s=0 z=100 t=w023
+   W x=209 s=0 z=100 t=w024
+   W x=252 s=0 z=100 t=w025
+   W x=296 s=0 z=100 t=w026
+   W x=341 s=0 z=100 t=w027
+   W x=387 s=0 z=100 t=w028
+   W x=427 s=0 z=100 t=w029
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w030
+   W x=45 s=0 z=100 t=w031
+   W x=84 s=0 z=100 t=w032
+   W x=124 s=0 z=100 t=w033
+   W x=165 s=0 z=100 t=w034
+   W x=207 s=0 z=100 t=w035
+   W x=250 s=0 z=100 t=w036
+   W x=294 s=0 z=100 t=w037
+   W x=339 s=0 z=100 t=w038
+   W x=378 s=0 z=100 t=w039
+   W x=418 s=0 z=100 t=w040
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w041
+   W x=39 s=0 z=100 t=w042
+   W x=79 s=0 z=100 t=w043
+   W x=120 s=0 z=100 t=w044
+   W x=162 s=0 z=100 t=w045
+   W x=205 s=0 z=100 t=w046
+   W x=249 s=0 z=100 t=w047
+   W x=294 s=0 z=100 t=w048
+   W x=333 s=0 z=100 t=w049
+   W x=373 s=0 z=100 t=w050
+   W x=419 s=0 z=100 t=w051
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w052
+   W x=45 s=0 z=100 t=w053
+   W x=91 s=0 z=100 t=w054
+   W x=138 s=0 z=100 t=w055
+   W x=186 s=0 z=100 t=w056
+   W x=235 s=0 z=100 t=w057
+   W x=285 s=0 z=100 t=w058
+   W x=329 s=0 z=100 t=w059
+   W x=374 s=0 z=100 t=w060
+   W x=425 s=0 z=100 t=w061
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w062
+   W x=44 s=0 z=100 t=w063
+   W x=89 s=0 z=100 t=w064
+   W x=135 s=0 z=100 t=w065
+   W x=182 s=0 z=100 t=w066
+   W x=230 s=0 z=100 t=w067
+   W x=279 s=0 z=100 t=w068
+   W x=322 s=0 z=100 t=w069
+   W x=366 s=0 z=100 t=w070
+   W x=416 s=0 z=100 t=w071
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w072
+   W x=46 s=0 z=100 t=w073
+   W x=93 s=0 z=100 t=w074
+   W x=141 s=0 z=100 t=w075
+   W x=190 s=0 z=100 t=w076
+   W x=240 s=0 z=100 t=w077
+   W x=291 s=0 z=100 t=w078
+   W x=336 s=0 z=100 t=w079
+   W x=382 s=0 z=100 t=w080
+   W x=427 s=0 z=100 t=w081
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w082
+   W x=40 s=0 z=100 t=w083
+   W x=81 s=0 z=100 t=w084
+   W x=123 s=0 z=100 t=w085
+   W x=166 s=0 z=100 t=w086
+   W x=210 s=0 z=100 t=w087
+   W x=255 s=0 z=100 t=w088
+   W x=294 s=0 z=100 t=w089
+   W x=334 s=0 z=100 t=w090
+   W x=380 s=0 z=100 t=w091
+   W x=420 s=0 z=100 t=w092
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w093
+   W x=42 s=0 z=100 t=w094
+   W x=85 s=0 z=100 t=w095
+   W x=129 s=0 z=100 t=w096
+   W x=174 s=0 z=100 t=w097
+   W x=220 s=0 z=100 t=w098
+   W x=260 s=0 z=100 t=w099
+   W x=301 s=0 z=100 t=w100
+   W x=346 s=0 z=100 t=w101
+   W x=385 s=0 z=100 t=w102
+   W x=425 s=0 z=100 t=w103
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w104
+   W x=39 s=0 z=100 t=w105
+   W x=79 s=0 z=100 t=w106
+   W x=120 s=0 z=100 t=w107
+   W x=162 s=0 z=100 t=w108
+   W x=198 s=0 z=100 t=w109
+   W x=235 s=0 z=100 t=w110
+   W x=271 s=0 z=100 t=w111
+   W x=301 s=0 z=100 t=w112
+   W x=332 s=0 z=100 t=w113
+   W x=364 s=0 z=100 t=w114
+   W x=397 s=0 z=100 t=w115
+   W x=431 s=0 z=100 t=w116
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w117
+   W x=38 s=0 z=100 t=w118
+   W x=70 s=0 z=100 t=w119
+   W x=103 s=0 z=100 t=w120
+   W x=142 s=0 z=100 t=w121
+   W x=175 s=0 z=100 t=w122
+   W x=209 s=0 z=100 t=w123
+   W x=244 s=0 z=100 t=w124
+   W x=280 s=0 z=100 t=w125
+   W x=317 s=0 z=100 t=w126
+   W x=355 s=0 z=100 t=w127
+   W x=394 s=0 z=100 t=w128
+   W x=427 s=0 z=100 t=w129
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w130
+   W x=39 s=0 z=100 t=w131
+   W x=72 s=0 z=100 t=w132
+   W x=106 s=0 z=100 t=w133
+   W x=141 s=0 z=100 t=w134
+   W x=177 s=0 z=100 t=w135
+   W x=214 s=0 z=100 t=w136
+   W x=252 s=0 z=100 t=w137
+   W x=291 s=0 z=100 t=w138
+   W x=324 s=0 z=100 t=w139
+   W x=358 s=0 z=100 t=w140
+   W x=398 s=0 z=100 t=w141
+   W x=432 s=0 z=100 t=w142
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w143
+   W x=37 s=0 z=100 t=w144
+   W x=75 s=0 z=100 t=w145
+   W x=114 s=0 z=100 t=w146
+   W x=154 s=0 z=100 t=w147
+   W x=195 s=0 z=100 t=w148
+   W x=230 s=0 z=100 t=w149
+   W x=266 s=0 z=100 t=w150
+   W x=308 s=0 z=100 t=w151
+   W x=344 s=0 z=100 t=w152
+   W x=381 s=0 z=100 t=w153
+   W x=419 s=0 z=100 t=w154
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w155
+   W x=39 s=0 z=100 t=w156
+   W x=79 s=0 z=100 t=w157
+   W x=120 s=0 z=100 t=w158
+   W x=155 s=0 z=100 t=w159
+   W x=191 s=0 z=100 t=w160
+   W x=233 s=0 z=100 t=w161
+   W x=269 s=0 z=100 t=w162
+   W x=306 s=0 z=100 t=w163
+   W x=344 s=0 z=100 t=w164
+   W x=383 s=0 z=100 t=w165
+   W x=423 s=0 z=100 t=w166
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w167
+   W x=41 s=0 z=100 t=w168
+   W x=76 s=0 z=100 t=w169
+   W x=112 s=0 z=100 t=w170
+   W x=154 s=0 z=100 t=w171
+   W x=190 s=0 z=100 t=w172
+   W x=227 s=0 z=100 t=w173
+   W x=265 s=0 z=100 t=w174
+   W x=304 s=0 z=100 t=w175
+   W x=344 s=0 z=100 t=w176
+   W x=385 s=0 z=100 t=w177
+   W x=427 s=0 z=100 t=w178
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=14
+   W x=0 s=0 z=100 t=w179
+   W x=37 s=0 z=100 t=w180
+   W x=73 s=0 z=100 t=w181
+   W x=103 s=0 z=100 t=w182
+   W x=134 s=0 z=100 t=w183
+   W x=166 s=0 z=100 t=w184
+   W x=199 s=0 z=100 t=w185
+   W x=233 s=0 z=100 t=w186
+   W x=268 s=0 z=100 t=w187
+   W x=304 s=0 z=100 t=w188
+   W x=334 s=0 z=100 t=w189
+   W x=365 s=0 z=100 t=w190
+   W x=402 s=0 z=100 t=w191
+   W x=433 s=0 z=100 t=w192
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w193
+   W x=35 s=0 z=100 t=w194
+   W x=71 s=0 z=100 t=w195
+   W x=108 s=0 z=100 t=w196
+   W x=146 s=0 z=100 t=w197
+   W x=185 s=0 z=100 t=w198
+   W x=218 s=0 z=100 t=w199
+   W x=252 s=0 z=100 t=w200
+   W x=297 s=0 z=100 t=w201
+   W x=336 s=0 z=100 t=w202
+   W x=376 s=0 z=100 t=w203
+   W x=417 s=0 z=100 t=w204
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w205
+   W x=43 s=0 z=100 t=w206
+   W x=87 s=0 z=100 t=w207
+   W x=132 s=0 z=100 t=w208
+   W x=171 s=0 z=100 t=w209
+   W x=211 s=0 z=100 t=w210
+   W x=250 s=0 z=100 t=w211
+   W x=283 s=0 z=100 t=w212
+   W x=317 s=0 z=100 t=w213
+   W x=352 s=0 z=100 t=w214
+   W x=388 s=0 z=100 t=w215
+   W x=425 s=0 z=100 t=w216
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w217
+   W x=38 s=0 z=100 t=w218
+   W x=70 s=0 z=100 t=w219
+   W x=103 s=0 z=100 t=w220
+   W x=142 s=0 z=100 t=w221
+   W x=175 s=0 z=100 t=w222
+   W x=209 s=0 z=100 t=w223
+   W x=244 s=0 z=100 t=w224
+   W x=280 s=0 z=100 t=w225
+   W x=317 s=0 z=100 t=w226
+   W x=355 s=0 z=100 t=w227
+   W x=394 s=0 z=100 t=w228
+   W x=427 s=0 z=100 t=w229
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w230
+   W x=42 s=0 z=100 t=w231
+   W x=78 s=0 z=100 t=w232
+   W x=115 s=0 z=100 t=w233
+   W x=153 s=0 z=100 t=w234
+   W x=192 s=0 z=100 t=w235
+   W x=232 s=0 z=100 t=w236
+   W x=273 s=0 z=100 t=w237
+   W x=315 s=0 z=100 t=w238
+   W x=351 s=0 z=100 t=w239
+   W x=388 s=0 z=100 t=w240
+   W x=431 s=0 z=100 t=w241
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w242
+   W x=37 s=0 z=100 t=w243
+   W x=75 s=0 z=100 t=w244
+   W x=114 s=0 z=100 t=w245
+   W x=154 s=0 z=100 t=w246
+   W x=195 s=0 z=100 t=w247
+   W x=237 s=0 z=100 t=w248
+   W x=273 s=0 z=100 t=w249
+   W x=310 s=0 z=100 t=w250
+   W x=353 s=0 z=100 t=w251
+   W x=390 s=0 z=100 t=w252
+   W x=428 s=0 z=100 t=w253
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w254
+   W x=38 s=0 z=100 t=w255
+   W x=77 s=0 z=100 t=w256
+   W x=117 s=0 z=100 t=w257
+   W x=158 s=0 z=100 t=w258
+   W x=193 s=0 z=100 t=w259
+   W x=229 s=0 z=100 t=w260
+   W x=271 s=0 z=100 t=w261
+   W x=307 s=0 z=100 t=w262
+   W x=344 s=0 z=100 t=w263
+   W x=382 s=0 z=100 t=w264
+   W x=421 s=0 z=100 t=w265
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w266
+   W x=44 s=0 z=100 t=w267
+   W x=89 s=0 z=100 t=w268
+   W x=128 s=0 z=100 t=w269
+   W x=168 s=0 z=100 t=w270
+   W x=214 s=0 z=100 t=w271
+   W x=254 s=0 z=100 t=w272
+   W x=295 s=0 z=100 t=w273
+   W x=337 s=0 z=100 t=w274
+   W x=380 s=0 z=100 t=w275
+   W x=424 s=0 z=100 t=w276
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w277
+   W x=43 s=0 z=100 t=w278
+   W x=80 s=0 z=100 t=w279
+   W x=118 s=0 z=100 t=w280
+   W x=155 s=0 z=100 t=w281
+   W x=186 s=0 z=100 t=w282
+   W x=218 s=0 z=100 t=w283
+   W x=251 s=0 z=100 t=w284
+   W x=285 s=0 z=100 t=w285
+   W x=320 s=0 z=100 t=w286
+   W x=356 s=0 z=100 t=w287
+   W x=393 s=0 z=100 t=w288
+   W x=424 s=0 z=100 t=w289
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w290
+   W x=41 s=0 z=100 t=w291
+   W x=76 s=0 z=100 t=w292
+   W x=112 s=0 z=100 t=w293
+   W x=149 s=0 z=100 t=w294
+   W x=187 s=0 z=100 t=w295
+   W x=226 s=0 z=100 t=w296
+   W x=266 s=0 z=100 t=w297
+   W x=307 s=0 z=100 t=w298
+   W x=342 s=0 z=100 t=w299
+   W x=378 s=0 z=100 t=w300
+   W x=425 s=0 z=100 t=w301
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w302
+   W x=39 s=0 z=100 t=w303
+   W x=79 s=0 z=100 t=w304
+   W x=120 s=0 z=100 t=w305
+   W x=162 s=0 z=100 t=w306
+   W x=205 s=0 z=100 t=w307
+   W x=249 s=0 z=100 t=w308
+   W x=287 s=0 z=100 t=w309
+   W x=326 s=0 z=100 t=w310
+   W x=364 s=0 z=100 t=w311
+   W x=396 s=0 z=100 t=w312
+   W x=429 s=0 z=100 t=w313
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w314
+   W x=35 s=0 z=100 t=w315
+   W x=71 s=0 z=100 t=w316
+   W x=108 s=0 z=100 t=w317
+   W x=146 s=0 z=100 t=w318
+   W x=178 s=0 z=100 t=w319
+   W x=211 s=0 z=100 t=w320
+   W x=250 s=0 z=100 t=w321
+   W x=283 s=0 z=100 t=w322
+   W x=317 s=0 z=100 t=w323
+   W x=352 s=0 z=100 t=w324
+   W x=388 s=0 z=100 t=w325
+   W x=425 s=0 z=100 t=w326
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w327
+   W x=41 s=0 z=100 t=w328
+   W x=76 s=0 z=100 t=w329
+   W x=112 s=0 z=100 t=w330
+   W x=154 s=0 z=100 t=w331
+   W x=190 s=0 z=100 t=w332
+   W x=227 s=0 z=100 t=w333
+   W x=265 s=0 z=100 t=w334
+   W x=304 s=0 z=100 t=w335
+   W x=344 s=0 z=100 t=w336
+   W x=385 s=0 z=100 t=w337
+   W x=427 s=0 z=100 t=w338
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w339
+   W x=36 s=0 z=100 t=w340
+   W x=78 s=0 z=100 t=w341
+   W x=114 s=0 z=100 t=w342
+   W x=151 s=0 z=100 t=w343
+   W x=189 s=0 z=100 t=w344
+   W x=228 s=0 z=100 t=w345
+   W x=268 s=0 z=100 t=w346
+   W x=309 s=0 z=100 t=w347
+   W x=351 s=0 z=100 t=w348
+   W x=387 s=0 z=100 t=w349
+   W x=424 s=0 z=100 t=w350
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w351
+   W x=36 s=0 z=100 t=w352
+   W x=73 s=0 z=100 t=w353
+   W x=111 s=0 z=100 t=w354
+   W x=150 s=0 z=100 t=w355
+   W x=190 s=0 z=100 t=w356
+   W x=231 s=0 z=100 t=w357
+   W x=273 s=0 z=100 t=w358
+   W x=309 s=0 z=100 t=w359
+   W x=346 s=0 z=100 t=w360
+   W x=389 s=0 z=100 t=w361
+   W x=426 s=0 z=100 t=w362
+ PAGE 1 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w363
+   W x=41 s=0 z=100 t=w364
+   W x=83 s=0 z=100 t=w365
+   W x=126 s=0 z=100 t=w366
+   W x=170 s=0 z=100 t=w367
+   W x=215 s=0 z=100 t=w368
+   W x=254 s=0 z=100 t=w369
+   W x=294 s=0 z=100 t=w370
+   W x=340 s=0 z=100 t=w371
+   W x=380 s=0 z=100 t=w372
+   W x=421 s=0 z=100 t=w373
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w374
+   W x=42 s=0 z=100 t=w375
+   W x=85 s=0 z=100 t=w376
+   W x=129 s=0 z=100 t=w377
+   W x=174 s=0 z=100 t=w378
+   W x=213 s=0 z=100 t=w379
+   W x=253 s=0 z=100 t=w380
+   W x=292 s=0 z=100 t=w381
+   W x=325 s=0 z=100 t=w382
+   W x=359 s=0 z=100 t=w383
+   W x=394 s=0 z=100 t=w384
+   W x=430 s=0 z=100 t=w385
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w386
+   W x=37 s=0 z=100 t=w387
+   W x=75 s=0 z=100 t=w388
+   W x=107 s=0 z=100 t=w389
+   W x=140 s=0 z=100 t=w390
+   W x=179 s=0 z=100 t=w391
+   W x=212 s=0 z=100 t=w392
+   W x=246 s=0 z=100 t=w393
+   W x=281 s=0 z=100 t=w394
+   W x=317 s=0 z=100 t=w395
+   W x=354 s=0 z=100 t=w396
+   W x=392 s=0 z=100 t=w397
+   W x=431 s=0 z=100 t=w398
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w399
+   W x=35 s=0 z=100 t=w400
+   W x=81 s=0 z=100 t=w401
+   W x=121 s=0 z=100 t=w402
+   W x=162 s=0 z=100 t=w403
+   W x=204 s=0 z=100 t=w404
+   W x=247 s=0 z=100 t=w405
+   W x=291 s=0 z=100 t=w406
+   W x=336 s=0 z=100 t=w407
+   W x=382 s=0 z=100 t=w408
+   W x=422 s=0 z=100 t=w409
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w410
+   W x=42 s=0 z=100 t=w411
+   W x=78 s=0 z=100 t=w412
+   W x=115 s=0 z=100 t=w413
+   W x=153 s=0 z=100 t=w414
+   W x=192 s=0 z=100 t=w415
+   W x=232 s=0 z=100 t=w416
+   W x=273 s=0 z=100 t=w417
+   W x=315 s=0 z=100 t=w418
+   W x=351 s=0 z=100 t=w419
+   W x=388 s=0 z=100 t=w420
+   W x=431 s=0 z=100 t=w421
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w422
+   W x=37 s=0 z=100 t=w423
+   W x=75 s=0 z=100 t=w424
+   W x=114 s=0 z=100 t=w425
+   W x=154 s=0 z=100 t=w426
+   W x=195 s=0 z=100 t=w427
+   W x=237 s=0 z=100 t=w428
+   W x=273 s=0 z=100 t=w429
+   W x=310 s=0 z=100 t=w430
+   W x=353 s=0 z=100 t=w431
+   W x=390 s=0 z=100 t=w432
+   W x=428 s=0 z=100 t=w433
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w434
+   W x=38 s=0 z=100 t=w435
+   W x=77 s=0 z=100 t=w436
+   W x=117 s=0 z=100 t=w437
+   W x=158 s=0 z=100 t=w438
+   W x=193 s=0 z=100 t=w439
+   W x=229 s=0 z=100 t=w440
+   W x=271 s=0 z=100 t=w441
+   W x=307 s=0 z=100 t=w442
+   W x=344 s=0 z=100 t=w443
+   W x=382 s=0 z=100 t=w444
+   W x=421 s=0 z=100 t=w445
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w446
+   W x=44 s=0 z=100 t=w447
+   W x=89 s=0 z=100 t=w448
+   W x=128 s=0 z=100 t=w449
+   W x=168 s=0 z=100 t=w450
+   W x=214 s=0 z=100 t=w451
+   W x=254 s=0 z=100 t=w452
+   W x=295 s=0 z=100 t=w453
+   W x=337 s=0 z=100 t=w454
+   W x=380 s=0 z=100 t=w455
+   W x=424 s=0 z=100 t=w456
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w457
+   W x=44 s=0 z=100 t=w458
+   W x=82 s=0 z=100 t=w459
+   W x=121 s=0 z=100 t=w460
+   W x=166 s=0 z=100 t=w461
+   W x=205 s=0 z=100 t=w462
+   W x=245 s=0 z=100 t=w463
+   W x=286 s=0 z=100 t=w464
+   W x=328 s=0 z=100 t=w465
+   W x=371 s=0 z=100 t=w466
+   W x=415 s=0 z=100 t=w467
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w468
+   W x=39 s=0 z=100 t=w469
+   W x=79 s=0 z=100 t=w470
+   W x=125 s=0 z=100 t=w471
+   W x=165 s=0 z=100 t=w472
+   W x=206 s=0 z=100 t=w473
+   W x=248 s=0 z=100 t=w474
+   W x=291 s=0 z=100 t=w475
+   W x=335 s=0 z=100 t=w476
+   W x=380 s=0 z=100 t=w477
+   W x=426 s=0 z=100 t=w478
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w479
+   W x=42 s=0 z=100 t=w480
+   W x=83 s=0 z=100 t=w481
+   W x=118 s=0 z=100 t=w482
+   W x=154 s=0 z=100 t=w483
+   W x=191 s=0 z=100 t=w484
+   W x=229 s=0 z=100 t=w485
+   W x=268 s=0 z=100 t=w486
+   W x=308 s=0 z=100 t=w487
+   W x=349 s=0 z=100 t=w488
+   W x=384 s=0 z=100 t=w489
+   W x=420 s=0 z=100 t=w490
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w491
+   W x=35 s=0 z=100 t=w492
+   W x=71 s=0 z=100 t=w493
+   W x=108 s=0 z=100 t=w494
+   W x=146 s=0 z=100 t=w495
+   W x=185 s=0 z=100 t=w496
+   W x=225 s=0 z=100 t=w497
+   W x=266 s=0 z=100 t=w498
+   W x=301 s=0 z=100 t=w499
+   W x=337 s=0 z=100 t=w500
+   W x=384 s=0 z=100 t=w501
+   W x=425 s=0 z=100 t=w502
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w503
+   W x=44 s=0 z=100 t=w504
+   W x=89 s=0 z=100 t=w505
+   W x=135 s=0 z=100 t=w506
+   W x=182 s=0 z=100 t=w507
+   W x=230 s=0 z=100 t=w508
+   W x=272 s=0 z=100 t=w509
+   W x=315 s=0 z=100 t=w510
+   W x=357 s=0 z=100 t=w511
+   W x=393 s=0 z=100 t=w512
+   W x=430 s=0 z=100 t=w513
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w514
+   W x=38 s=0 z=100 t=w515
+   W x=77 s=0 z=100 t=w516
+   W x=117 s=0 z=100 t=w517
+   W x=158 s=0 z=100 t=w518
+   W x=193 s=0 z=100 t=w519
+   W x=229 s=0 z=100 t=w520
+   W x=271 s=0 z=100 t=w521
+   W x=307 s=0 z=100 t=w522
+   W x=344 s=0 z=100 t=w523
+   W x=382 s=0 z=100 t=w524
+   W x=421 s=0 z=100 t=w525
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w526
+   W x=44 s=0 z=100 t=w527
+   W x=89 s=0 z=100 t=w528
+   W x=128 s=0 z=100 t=w529
+   W x=168 s=0 z=100 t=w530
+   W x=214 s=0 z=100 t=w531
+   W x=254 s=0 z=100 t=w532
+   W x=295 s=0 z=100 t=w533
+   W x=337 s=0 z=100 t=w534
+   W x=380 s=0 z=100 t=w535
+   W x=424 s=0 z=100 t=w536
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w537
+   W x=44 s=0 z=100 t=w538
+   W x=82 s=0 z=100 t=w539
+   W x=121 s=0 z=100 t=w540
+   W x=166 s=0 z=100 t=w541
+   W x=205 s=0 z=100 t=w542
+   W x=245 s=0 z=100 t=w543
+   W x=286 s=0 z=100 t=w544
+   W x=328 s=0 z=100 t=w545
+   W x=371 s=0 z=100 t=w546
+   W x=415 s=0 z=100 t=w547
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w548
+   W x=39 s=0 z=100 t=w549
+   W x=79 s=0 z=100 t=w550
+   W x=125 s=0 z=100 t=w551
+   W x=165 s=0 z=100 t=w552
+   W x=206 s=0 z=100 t=w553
+   W x=248 s=0 z=100 t=w554
+   W x=291 s=0 z=100 t=w555
+   W x=335 s=0 z=100 t=w556
+   W x=380 s=0 z=100 t=w557
+   W x=426 s=0 z=100 t=w558
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w559
+   W x=39 s=0 z=100 t=w560
+   W x=84 s=0 z=100 t=w561
+   W x=123 s=0 z=100 t=w562
+   W x=163 s=0 z=100 t=w563
+   W x=204 s=0 z=100 t=w564
+   W x=246 s=0 z=100 t=w565
+   W x=289 s=0 z=100 t=w566
+   W x=333 s=0 z=100 t=w567
+   W x=378 s=0 z=100 t=w568
+   W x=417 s=0 z=100 t=w569
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w570
+   W x=50 s=0 z=100 t=w571
+   W x=94 s=0 z=100 t=w572
+   W x=139 s=0 z=100 t=w573
+   W x=185 s=0 z=100 t=w574
+   W x=232 s=0 z=100 t=w575
+   W x=280 s=0 z=100 t=w576
+   W x=329 s=0 z=100 t=w577
+   W x=379 s=0 z=100 t=w578
+   W x=423 s=0 z=100 t=w579
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w580
+   W x=42 s=0 z=100 t=w581
+   W x=78 s=0 z=100 t=w582
+   W x=115 s=0 z=100 t=w583
+   W x=153 s=0 z=100 t=w584
+   W x=192 s=0 z=100 t=w585
+   W x=232 s=0 z=100 t=w586
+   W x=273 s=0 z=100 t=w587
+   W x=315 s=0 z=100 t=w588
+   W x=351 s=0 z=100 t=w589
+   W x=388 s=0 z=100 t=w590
+   W x=431 s=0 z=100 t=w591
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w592
+   W x=39 s=0 z=100 t=w593
+   W x=79 s=0 z=100 t=w594
+   W x=120 s=0 z=100 t=w595
+   W x=162 s=0 z=100 t=w596
+   W x=205 s=0 z=100 t=w597
+   W x=249 s=0 z=100 t=w598
+   W x=287 s=0 z=100 t=w599
+   W x=326 s=0 z=100 t=w600
+   W x=376 s=0 z=100 t=w601
+   W x=420 s=0 z=100 t=w602
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w603
+   W x=43 s=0 z=100 t=w604
+   W x=87 s=0 z=100 t=w605
+   W x=132 s=0 z=100 t=w606
+   W x=178 s=0 z=100 t=w607
+   W x=225 s=0 z=100 t=w608
+   W x=266 s=0 z=100 t=w609
+   W x=308 s=0 z=100 t=w610
+   W x=349 s=0 z=100 t=w611
+   W x=384 s=0 z=100 t=w612
+   W x=420 s=0 z=100 t=w613
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w614
+   W x=38 s=0 z=100 t=w615
+   W x=77 s=0 z=100 t=w616
+   W x=117 s=0 z=100 t=w617
+   W x=158 s=0 z=100 t=w618
+   W x=193 s=0 z=100 t=w619
+   W x=229 s=0 z=100 t=w620
+   W x=271 s=0 z=100 t=w621
+   W x=307 s=0 z=100 t=w622
+   W x=344 s=0 z=100 t=w623
+   W x=382 s=0 z=100 t=w624
+   W x=421 s=0 z=100 t=w625
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w626
+   W x=44 s=0 z=100 t=w627
+   W x=89 s=0 z=100 t=w628
+   W x=128 s=0 z=100 t=w629
+   W x=168 s=0 z=100 t=w630
+   W x=214 s=0 z=100 t=w631
+   W x=254 s=0 z=100 t=w632
+   W x=295 s=0 z=100 t=w633
+   W x=337 s=0 z=100 t=w634
+   W x=380 s=0 z=100 t=w635
+   W x=424 s=0 z=100 t=w636
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w637
+   W x=44 s=0 z=100 t=w638
+   W x=82 s=0 z=100 t=w639
+   W x=121 s=0 z=100 t=w640
+   W x=166 s=0 z=100 t=w641
+   W x=205 s=0 z=100 t=w642
+   W x=245 s=0 z=100 t=w643
+   W x=286 s=0 z=100 t=w644
+   W x=328 s=0 z=100 t=w645
+   W x=371 s=0 z=100 t=w646
+   W x=415 s=0 z=100 t=w647
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w648
+   W x=39 s=0 z=100 t=w649
+   W x=79 s=0 z=100 t=w650
+   W x=125 s=0 z=100 t=w651
+   W x=165 s=0 z=100 t=w652
+   W x=206 s=0 z=100 t=w653
+   W x=248 s=0 z=100 t=w654
+   W x=291 s=0 z=100 t=w655
+   W x=335 s=0 z=100 t=w656
+   W x=380 s=0 z=100 t=w657
+   W x=426 s=0 z=100 t=w658
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w659
+   W x=44 s=0 z=100 t=w660
+   W x=94 s=0 z=100 t=w661
+   W x=138 s=0 z=100 t=w662
+   W x=183 s=0 z=100 t=w663
+   W x=229 s=0 z=100 t=w664
+   W x=276 s=0 z=100 t=w665
+   W x=324 s=0 z=100 t=w666
+   W x=373 s=0 z=100 t=w667
+   W x=423 s=0 z=100 t=w668
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w669
+   W x=44 s=0 z=100 t=w670
+   W x=94 s=0 z=100 t=w671
+   W x=138 s=0 z=100 t=w672
+   W x=183 s=0 z=100 t=w673
+   W x=229 s=0 z=100 t=w674
+   W x=276 s=0 z=100 t=w675
+   W x=324 s=0 z=100 t=w676
+   W x=373 s=0 z=100 t=w677
+   W x=423 s=0 z=100 t=w678
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w679
+   W x=42 s=0 z=100 t=w680
+   W x=83 s=0 z=100 t=w681
+   W x=118 s=0 z=100 t=w682
+   W x=154 s=0 z=100 t=w683
+   W x=191 s=0 z=100 t=w684
+   W x=229 s=0 z=100 t=w685
+   W x=268 s=0 z=100 t=w686
+   W x=308 s=0 z=100 t=w687
+   W x=349 s=0 z=100 t=w688
+   W x=384 s=0 z=100 t=w689
+   W x=420 s=0 z=100 t=w690
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w691
+   W x=39 s=0 z=100 t=w692
+   W x=79 s=0 z=100 t=w693
+   W x=120 s=0 z=100 t=w694
+   W x=162 s=0 z=100 t=w695
+   W x=205 s=0 z=100 t=w696
+   W x=249 s=0 z=100 t=w697
+   W x=294 s=0 z=100 t=w698
+   W x=333 s=0 z=100 t=w699
+   W x=373 s=0 z=100 t=w700
+   W x=424 s=0 z=100 t=w701
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w702
+   W x=46 s=0 z=100 t=w703
+   W x=93 s=0 z=100 t=w704
+   W x=141 s=0 z=100 t=w705
+   W x=190 s=0 z=100 t=w706
+   W x=240 s=0 z=100 t=w707
+   W x=291 s=0 z=100 t=w708
+   W x=336 s=0 z=100 t=w709
+   W x=382 s=0 z=100 t=w710
+   W x=427 s=0 z=100 t=w711
+ PAGE 2 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w712
+   W x=40 s=0 z=100 t=w713
+   W x=81 s=0 z=100 t=w714
+   W x=123 s=0 z=100 t=w715
+   W x=166 s=0 z=100 t=w716
+   W x=210 s=0 z=100 t=w717
+   W x=255 s=0 z=100 t=w718
+   W x=294 s=0 z=100 t=w719
+   W x=334 s=0 z=100 t=w720
+   W x=380 s=0 z=100 t=w721
+   W x=420 s=0 z=100 t=w722
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w723
+   W x=41 s=0 z=100 t=w724
+   W x=83 s=0 z=100 t=w725
+   W x=126 s=0 z=100 t=w726
+   W x=170 s=0 z=100 t=w727
+   W x=215 s=0 z=100 t=w728
+   W x=254 s=0 z=100 t=w729
+   W x=294 s=0 z=100 t=w730
+   W x=340 s=0 z=100 t=w731
+   W x=380 s=0 z=100 t=w732
+   W x=421 s=0 z=100 t=w733
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w734
+   W x=42 s=0 z=100 t=w735
+   W x=85 s=0 z=100 t=w736
+   W x=129 s=0 z=100 t=w737
+   W x=174 s=0 z=100 t=w738
+   W x=213 s=0 z=100 t=w739
+   W x=253 s=0 z=100 t=w740
+   W x=299 s=0 z=100 t=w741
+   W x=339 s=0 z=100 t=w742
+   W x=380 s=0 z=100 t=w743
+   W x=422 s=0 z=100 t=w744
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w745
+   W x=47 s=0 z=100 t=w746
+   W x=95 s=0 z=100 t=w747
+   W x=144 s=0 z=100 t=w748
+   W x=187 s=0 z=100 t=w749
+   W x=231 s=0 z=100 t=w750
+   W x=281 s=0 z=100 t=w751
+   W x=325 s=0 z=100 t=w752
+   W x=370 s=0 z=100 t=w753
+   W x=416 s=0 z=100 t=w754
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w755
+   W x=47 s=0 z=100 t=w756
+   W x=95 s=0 z=100 t=w757
+   W x=144 s=0 z=100 t=w758
+   W x=187 s=0 z=100 t=w759
+   W x=231 s=0 z=100 t=w760
+   W x=281 s=0 z=100 t=w761
+   W x=325 s=0 z=100 t=w762
+   W x=370 s=0 z=100 t=w763
+   W x=416 s=0 z=100 t=w764
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w765
+   W x=47 s=0 z=100 t=w766
+   W x=95 s=0 z=100 t=w767
+   W x=144 s=0 z=100 t=w768
+   W x=187 s=0 z=100 t=w769
+   W x=231 s=0 z=100 t=w770
+   W x=281 s=0 z=100 t=w771
+   W x=325 s=0 z=100 t=w772
+   W x=370 s=0 z=100 t=w773
+   W x=416 s=0 z=100 t=w774
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w775
+   W x=46 s=0 z=100 t=w776
+   W x=93 s=0 z=100 t=w777
+   W x=141 s=0 z=100 t=w778
+   W x=183 s=0 z=100 t=w779
+   W x=226 s=0 z=100 t=w780
+   W x=268 s=0 z=100 t=w781
+   W x=304 s=0 z=100 t=w782
+   W x=341 s=0 z=100 t=w783
+   W x=379 s=0 z=100 t=w784
+   W x=418 s=0 z=100 t=w785
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w786
+   W x=44 s=0 z=100 t=w787
+   W x=89 s=0 z=100 t=w788
+   W x=128 s=0 z=100 t=w789
+   W x=168 s=0 z=100 t=w790
+   W x=214 s=0 z=100 t=w791
+   W x=254 s=0 z=100 t=w792
+   W x=295 s=0 z=100 t=w793
+   W x=337 s=0 z=100 t=w794
+   W x=380 s=0 z=100 t=w795
+   W x=424 s=0 z=100 t=w796
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=w797
+   W x=46 s=0 z=100 t=w798
+   W x=86 s=0 z=100 t=w799
+   W x=127 s=0 z=100 t=w800
+   W x=172 s=0 z=100 t=w801
+   W x=211 s=0 z=100 t=w802
+   W x=251 s=0 z=100 t=w803
+   W x=292 s=0 z=100 t=w804
+   W x=334 s=0 z=100 t=w805
+   W x=377 s=0 z=100 t=w806
+   W x=421 s=0 z=100 t=w807
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w808
+   W x=38 s=0 z=100 t=w809
+   W x=77 s=0 z=100 t=w810
+   W x=115 s=0 z=100 t=w811
+   W x=147 s=0 z=100 t=w812
+   W x=180 s=0 z=100 t=w813
+   W x=214 s=0 z=100 t=w814
+   W x=249 s=0 z=100 t=w815
+   W x=285 s=0 z=100 t=w816
+   W x=322 s=0 z=100 t=w817
+   W x=360 s=0 z=100 t=w818
+   W x=392 s=0 z=100 t=w819
+   W x=425 s=0 z=100 t=w820
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w821
+   W x=33 s=0 z=100 t=w822
+   W x=67 s=0 z=100 t=w823
+   W x=102 s=0 z=100 t=w824
+   W x=138 s=0 z=100 t=w825
+   W x=175 s=0 z=100 t=w826
+   W x=213 s=0 z=100 t=w827
+   W x=252 s=0 z=100 t=w828
+   W x=285 s=0 z=100 t=w829
+   W x=319 s=0 z=100 t=w830
+   W x=359 s=0 z=100 t=w831
+   W x=393 s=0 z=100 t=w832
+   W x=428 s=0 z=100 t=w833
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w834
+   W x=35 s=0 z=100 t=w835
+   W x=71 s=0 z=100 t=w836
+   W x=108 s=0 z=100 t=w837
+   W x=146 s=0 z=100 t=w838
+   W x=178 s=0 z=100 t=w839
+   W x=211 s=0 z=100 t=w840
+   W x=250 s=0 z=100 t=w841
+   W x=283 s=0 z=100 t=w842
+   W x=317 s=0 z=100 t=w843
+   W x=352 s=0 z=100 t=w844
+   W x=388 s=0 z=100 t=w845
+   W x=425 s=0 z=100 t=w846
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w847
+   W x=41 s=0 z=100 t=w848
+   W x=76 s=0 z=100 t=w849
+   W x=112 s=0 z=100 t=w850
+   W x=154 s=0 z=100 t=w851
+   W x=190 s=0 z=100 t=w852
+   W x=227 s=0 z=100 t=w853
+   W x=265 s=0 z=100 t=w854
+   W x=304 s=0 z=100 t=w855
+   W x=344 s=0 z=100 t=w856
+   W x=385 s=0 z=100 t=w857
+   W x=427 s=0 z=100 t=w858
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w859
+   W x=36 s=0 z=100 t=w860
+   W x=78 s=0 z=100 t=w861
+   W x=114 s=0 z=100 t=w862
+   W x=151 s=0 z=100 t=w863
+   W x=189 s=0 z=100 t=w864
+   W x=228 s=0 z=100 t=w865
+   W x=268 s=0 z=100 t=w866
+   W x=309 s=0 z=100 t=w867
+   W x=351 s=0 z=100 t=w868
+   W x=387 s=0 z=100 t=w869
+   W x=424 s=0 z=100 t=w870
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w871
+   W x=38 s=0 z=100 t=w872
+   W x=77 s=0 z=100 t=w873
+   W x=117 s=0 z=100 t=w874
+   W x=158 s=0 z=100 t=w875
+   W x=200 s=0 z=100 t=w876
+   W x=243 s=0 z=100 t=w877
+   W x=287 s=0 z=100 t=w878
+   W x=325 s=0 z=100 t=w879
+   W x=364 s=0 z=100 t=w880
+   W x=402 s=0 z=100 t=w881
+   W x=434 s=0 z=100 t=w882
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w883
+   W x=34 s=0 z=100 t=w884
+   W x=69 s=0 z=100 t=w885
+   W x=105 s=0 z=100 t=w886
+   W x=142 s=0 z=100 t=w887
+   W x=180 s=0 z=100 t=w888
+   W x=212 s=0 z=100 t=w889
+   W x=245 s=0 z=100 t=w890
+   W x=284 s=0 z=100 t=w891
+   W x=317 s=0 z=100 t=w892
+   W x=351 s=0 z=100 t=w893
+   W x=386 s=0 z=100 t=w894
+   W x=422 s=0 z=100 t=w895
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w896
+   W x=36 s=0 z=100 t=w897
+   W x=73 s=0 z=100 t=w898
+   W x=104 s=0 z=100 t=w899
+   W x=136 s=0 z=100 t=w900
+   W x=179 s=0 z=100 t=w901
+   W x=216 s=0 z=100 t=w902
+   W x=254 s=0 z=100 t=w903
+   W x=293 s=0 z=100 t=w904
+   W x=333 s=0 z=100 t=w905
+   W x=374 s=0 z=100 t=w906
+   W x=416 s=0 z=100 t=w907
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w908
+   W x=38 s=0 z=100 t=w909
+   W x=77 s=0 z=100 t=w910
+   W x=115 s=0 z=100 t=w911
+   W x=147 s=0 z=100 t=w912
+   W x=180 s=0 z=100 t=w913
+   W x=214 s=0 z=100 t=w914
+   W x=249 s=0 z=100 t=w915
+   W x=285 s=0 z=100 t=w916
+   W x=322 s=0 z=100 t=w917
+   W x=360 s=0 z=100 t=w918
+   W x=392 s=0 z=100 t=w919
+   W x=425 s=0 z=100 t=w920
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w921
+   W x=33 s=0 z=100 t=w922
+   W x=67 s=0 z=100 t=w923
+   W x=102 s=0 z=100 t=w924
+   W x=138 s=0 z=100 t=w925
+   W x=175 s=0 z=100 t=w926
+   W x=213 s=0 z=100 t=w927
+   W x=252 s=0 z=100 t=w928
+   W x=285 s=0 z=100 t=w929
+   W x=319 s=0 z=100 t=w930
+   W x=359 s=0 z=100 t=w931
+   W x=393 s=0 z=100 t=w932
+   W x=428 s=0 z=100 t=w933
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w934
+   W x=38 s=0 z=100 t=w935
+   W x=77 s=0 z=100 t=w936
+   W x=117 s=0 z=100 t=w937
+   W x=158 s=0 z=100 t=w938
+   W x=193 s=0 z=100 t=w939
+   W x=229 s=0 z=100 t=w940
+   W x=271 s=0 z=100 t=w941
+   W x=307 s=0 z=100 t=w942
+   W x=344 s=0 z=100 t=w943
+   W x=382 s=0 z=100 t=w944
+   W x=421 s=0 z=100 t=w945
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w946
+   W x=40 s=0 z=100 t=w947
+   W x=81 s=0 z=100 t=w948
+   W x=116 s=0 z=100 t=w949
+   W x=152 s=0 z=100 t=w950
+   W x=194 s=0 z=100 t=w951
+   W x=230 s=0 z=100 t=w952
+   W x=267 s=0 z=100 t=w953
+   W x=305 s=0 z=100 t=w954
+   W x=344 s=0 z=100 t=w955
+   W x=384 s=0 z=100 t=w956
+   W x=425 s=0 z=100 t=w957
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w958
+   W x=35 s=0 z=100 t=w959
+   W x=71 s=0 z=100 t=w960
+   W x=113 s=0 z=100 t=w961
+   W x=149 s=0 z=100 t=w962
+   W x=186 s=0 z=100 t=w963
+   W x=224 s=0 z=100 t=w964
+   W x=263 s=0 z=100 t=w965
+   W x=303 s=0 z=100 t=w966
+   W x=344 s=0 z=100 t=w967
+   W x=386 s=0 z=100 t=w968
+   W x=422 s=0 z=100 t=w969
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=w970
+   W x=43 s=0 z=100 t=w971
+   W x=80 s=0 z=100 t=w972
+   W x=118 s=0 z=100 t=w973
+   W x=157 s=0 z=100 t=w974
+   W x=197 s=0 z=100 t=w975
+   W x=238 s=0 z=100 t=w976
+   W x=280 s=0 z=100 t=w977
+   W x=323 s=0 z=100 t=w978
+   W x=360 s=0 z=100 t=w979
+   W x=398 s=0 z=100 t=w980
+   W x=435 s=0 z=100 t=w981
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=w982
+   W x=34 s=0 z=100 t=w983
+   W x=69 s=0 z=100 t=w984
+   W x=105 s=0 z=100 t=w985
+   W x=142 s=0 z=100 t=w986
+   W x=180 s=0 z=100 t=w987
+   W x=219 s=0 z=100 t=w988
+   W x=252 s=0 z=100 t=w989
+   W x=286 s=0 z=100 t=w990
+   W x=326 s=0 z=100 t=w991
+   W x=360 s=0 z=100 t=w992
+   W x=395 s=0 z=100 t=w993
+   W x=431 s=0 z=100 t=w994
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w995
+   W x=40 s=0 z=100 t=w996
+   W x=81 s=0 z=100 t=w997
+   W x=123 s=0 z=100 t=w998
+   W x=159 s=0 z=100 t=w999
+   W x=196 s=0 z=100 t=w1000
+   W x=254 s=0 z=100 t=w1001
+   W x=306 s=0 z=100 t=w1002
+   W x=359 s=0 z=100 t=w1003
+   W x=413 s=0 z=100 t=w1004
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=w1005
+   W x=56 s=0 z=100 t=w1006
+   W x=113 s=0 z=100 t=w1007
+   W x=171 s=0 z=100 t=w1008
+   W x=223 s=0 z=100 t=w1009
+   W x=276 s=0 z=100 t=w1010
+   W x=328 s=0 z=100 t=w1011
+   W x=374 s=0 z=100 t=w1012
+   W x=421 s=0 z=100 t=w1013
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w1014
+   W x=46 s=0 z=100 t=w1015
+   W x=93 s=0 z=100 t=w1016
+   W x=141 s=0 z=100 t=w1017
+   W x=190 s=0 z=100 t=w1018
+   W x=233 s=0 z=100 t=w1019
+   W x=277 s=0 z=100 t=w1020
+   W x=327 s=0 z=100 t=w1021
+   W x=371 s=0 z=100 t=w1022
+   W x=416 s=0 z=100 t=w1023
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w1024
+   W x=46 s=0 z=100 t=w1025
+   W x=93 s=0 z=100 t=w1026
+   W x=141 s=0 z=100 t=w1027
+   W x=190 s=0 z=100 t=w1028
+   W x=233 s=0 z=100 t=w1029
+   W x=277 s=0 z=100 t=w1030
+   W x=327 s=0 z=100 t=w1031
+   W x=371 s=0 z=100 t=w1032
+   W x=416 s=0 z=100 t=w1033
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=w1034
+   W x=52 s=0 z=100 t=w1035
+   W x=105 s=0 z=100 t=w1036
+   W x=159 s=0 z=100 t=w1037
+   W x=214 s=0 z=100 t=w1038
+   W x=263 s=0 z=100 t=w1039
+   W x=313 s=0 z=100 t=w1040
+   W x=369 s=0 z=100 t=w1041
+   W x=419 s=0 z=100 t=w1042
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=w1043
+   W x=51 s=0 z=100 t=w1044
+   W x=103 s=0 z=100 t=w1045
+   W x=156 s=0 z=100 t=w1046
+   W x=210 s=0 z=100 t=w1047
+   W x=265 s=0 z=100 t=w1048
+   W x=314 s=0 z=100 t=w1049
+   W x=364 s=0 z=100 t=w1050
+   W x=420 s=0 z=100 t=w1051
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=w1052
+   W x=49 s=0 z=100 t=w1053
+   W x=99 s=0 z=100 t=w1054
+   W x=150 s=0 z=100 t=w1055
+   W x=202 s=0 z=100 t=w1056
+   W x=255 s=0 z=100 t=w1057
+   W x=309 s=0 z=100 t=w1058
+   W x=357 s=0 z=100 t=w1059
+   W x=406 s=0 z=100 t=w1060
+ PAGE 3 elements=6 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=w1061
+   W x=49 s=0 z=100 t=w1062
+   W x=99 s=0 z=100 t=w1063
+   W x=150 s=0 z=100 t=w1064
+   W x=202 s=0 z=100 t=w1065
+   W x=255 s=0 z=100 t=w1066
+   W x=309 s=0 z=100 t=w1067
+   W x=364 s=0 z=100 t=w1068
+   W x=413 s=0 z=100 t=w1069
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=w1070
+   W x=54 s=0 z=100 t=w1071
+   W x=102 s=0 z=100 t=w1072
+   W x=151 s=0 z=100 t=w1073
+   W x=201 s=0 z=100 t=w1074
+   W x=252 s=0 z=100 t=w1075
+   W x=304 s=0 z=100 t=w1076
+   W x=357 s=0 z=100 t=w1077
+   W x=411 s=0 z=100 t=w1078
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w1079
+   W x=50 s=0 z=100 t=w1080
+   W x=99 s=0 z=100 t=w1081
+   W x=142 s=0 z=100 t=w1082
+   W x=186 s=0 z=100 t=w1083
+   W x=231 s=0 z=100 t=w1084
+   W x=277 s=0 z=100 t=w1085
+   W x=324 s=0 z=100 t=w1086
+   W x=372 s=0 z=100 t=w1087
+   W x=421 s=0 z=100 t=w1088
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=w1089
+   W x=44 s=0 z=100 t=w1090
+   W x=94 s=0 z=100 t=w1091
+   W x=138 s=0 z=100 t=w1092
+   W x=183 s=0 z=100 t=w1093
+   W x=229 s=0 z=100 t=w1094
+   W x=276 s=0 z=100 t=w1095
+   W x=324 s=0 z=100 t=w1096
+   W x=373 s=0 z=100 t=w1097
+   W x=423 s=0 z=100 t=w1098
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=w1099
+   W x=44 s=0 z=100 t=w1100
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=NEXTBLOCK
+   W x=109 s=0 z=100 t=follows
+   W x=182 s=0 z=100 t=the
+   W x=219 s=0 z=100 t=long
+   W x=268 s=0 z=100 t=paragraph.
+SPINE 1 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
+ PAGE 0 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=f001
+   W x=65 s=0 z=100 t=f002
+   W x=113 s=0 z=100 t=f003
+   W x=162 s=0 z=100 t=f004
+   W x=212 s=0 z=100 t=f005
+   W x=263 s=0 z=100 t=f006
+   W x=315 s=0 z=100 t=f007
+   W x=368 s=0 z=100 t=f008
+   W x=415 s=0 z=100 t=f009
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=f010
+   W x=50 s=0 z=100 t=f011
+   W x=94 s=0 z=100 t=f012
+   W x=139 s=0 z=100 t=f013
+   W x=185 s=0 z=100 t=f014
+   W x=232 s=0 z=100 t=f015
+   W x=280 s=0 z=100 t=f016
+   W x=329 s=0 z=100 t=f017
+   W x=379 s=0 z=100 t=f018
+   W x=423 s=0 z=100 t=f019
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=f020
+   W x=50 s=0 z=100 t=f021
+   W x=94 s=0 z=100 t=f022
+   W x=139 s=0 z=100 t=f023
+   W x=185 s=0 z=100 t=f024
+   W x=232 s=0 z=100 t=f025
+   W x=280 s=0 z=100 t=f026
+   W x=329 s=0 z=100 t=f027
+   W x=379 s=0 z=100 t=f028
+   W x=423 s=0 z=100 t=f029
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=f030
+   W x=50 s=0 z=100 t=f031
+   W x=94 s=0 z=100 t=f032
+   W x=139 s=0 z=100 t=f033
+   W x=185 s=0 z=100 t=f034
+   W x=232 s=0 z=100 t=f035
+   W x=280 s=0 z=100 t=f036
+   W x=329 s=0 z=100 t=f037
+   W x=379 s=0 z=100 t=f038
+   W x=423 s=0 z=100 t=f039
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=f040
+   W x=49 s=0 z=100 t=f041
+   W x=92 s=0 z=100 t=f042
+   W x=136 s=0 z=100 t=f043
+   W x=181 s=0 z=100 t=f044
+   W x=227 s=0 z=100 t=f045
+   W x=274 s=0 z=100 t=f046
+   W x=322 s=0 z=100 t=f047
+   W x=371 s=0 z=100 t=f048
+   W x=414 s=0 z=100 t=f049
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=f050
+   W x=55 s=0 z=100 t=f051
+   W x=104 s=0 z=100 t=f052
+   W x=154 s=0 z=100 t=f053
+   W x=205 s=0 z=100 t=f054
+   W x=257 s=0 z=100 t=f055
+   W x=310 s=0 z=100 t=f056
+   W x=364 s=0 z=100 t=f057
+   W x=419 s=0 z=100 t=f058
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=f059
+   W x=49 s=0 z=100 t=f060
+   W x=104 s=0 z=100 t=f061
+   W x=153 s=0 z=100 t=f062
+   W x=203 s=0 z=100 t=f063
+   W x=254 s=0 z=100 t=f064
+   W x=306 s=0 z=100 t=f065
+   W x=359 s=0 z=100 t=f066
+   W x=413 s=0 z=100 t=f067
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=f068
+   W x=49 s=0 z=100 t=f069
+   W x=99 s=0 z=100 t=f070
+   W x=155 s=0 z=100 t=f071
+   W x=205 s=0 z=100 t=f072
+   W x=256 s=0 z=100 t=f073
+   W x=308 s=0 z=100 t=f074
+   W x=361 s=0 z=100 t=f075
+   W x=415 s=0 z=100 t=f076
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=f077
+   W x=54 s=0 z=100 t=f078
+   W x=102 s=0 z=100 t=f079
+   W x=151 s=0 z=100 t=f080
+   W x=199 s=0 z=100 t=f081
+   W x=241 s=0 z=100 t=f082
+   W x=284 s=0 z=100 t=f083
+   W x=328 s=0 z=100 t=f084
+   W x=373 s=0 z=100 t=f085
+   W x=419 s=0 z=100 t=f086
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=f087
+   W x=49 s=0 z=100 t=f088
+   W x=92 s=0 z=100 t=f089
+   W x=136 s=0 z=100 t=f090
+   W x=186 s=0 z=100 t=f091
+   W x=230 s=0 z=100 t=f092
+   W x=275 s=0 z=100 t=f093
+   W x=321 s=0 z=100 t=f094
+   W x=368 s=0 z=100 t=f095
+   W x=416 s=0 z=100 t=f096
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=f097
+   W x=50 s=0 z=100 t=f098
+   W x=94 s=0 z=100 t=f099
+   W x=139 s=0 z=100 t=f100
+   W x=188 s=0 z=100 t=f101
+   W x=231 s=0 z=100 t=f102
+   W x=275 s=0 z=100 t=f103
+   W x=320 s=0 z=100 t=f104
+   W x=366 s=0 z=100 t=f105
+   W x=413 s=0 z=100 t=f106
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=f107
+   W x=46 s=0 z=100 t=f108
+   W x=86 s=0 z=100 t=f109
+   W x=127 s=0 z=100 t=f110
+   W x=167 s=0 z=100 t=f111
+   W x=201 s=0 z=100 t=f112
+   W x=236 s=0 z=100 t=f113
+   W x=272 s=0 z=100 t=f114
+   W x=309 s=0 z=100 t=f115
+   W x=347 s=0 z=100 t=f116
+   W x=386 s=0 z=100 t=f117
+   W x=426 s=0 z=100 t=f118
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=f119
+   W x=36 s=0 z=100 t=f120
+   W x=78 s=0 z=100 t=f121
+   W x=114 s=0 z=100 t=f122
+   W x=151 s=0 z=100 t=f123
+   W x=189 s=0 z=100 t=f124
+   W x=228 s=0 z=100 t=f125
+   W x=268 s=0 z=100 t=f126
+   W x=309 s=0 z=100 t=f127
+   W x=351 s=0 z=100 t=f128
+   W x=387 s=0 z=100 t=f129
+   W x=424 s=0 z=100 t=f130
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=f131
+   W x=40 s=0 z=100 t=f132
+   W x=81 s=0 z=100 t=f133
+   W x=123 s=0 z=100 t=f134
+   W x=166 s=0 z=100 t=f135
+   W x=210 s=0 z=100 t=f136
+   W x=255 s=0 z=100 t=f137
+   W x=301 s=0 z=100 t=f138
+   W x=341 s=0 z=100 t=f139
+   W x=382 s=0 z=100 t=f140
+   W x=429 s=0 z=100 t=f141
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=f142
+   W x=40 s=0 z=100 t=f143
+   W x=81 s=0 z=100 t=f144
+   W x=123 s=0 z=100 t=f145
+   W x=166 s=0 z=100 t=f146
+   W x=210 s=0 z=100 t=f147
+   W x=255 s=0 z=100 t=f148
+   W x=294 s=0 z=100 t=f149
+   W x=334 s=0 z=100 t=f150
+   W x=380 s=0 z=100 t=f151
+   W x=420 s=0 z=100 t=f152
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=f153
+   W x=41 s=0 z=100 t=f154
+   W x=83 s=0 z=100 t=f155
+   W x=126 s=0 z=100 t=f156
+   W x=170 s=0 z=100 t=f157
+   W x=215 s=0 z=100 t=f158
+   W x=254 s=0 z=100 t=f159
+   W x=294 s=0 z=100 t=f160
+   W x=340 s=0 z=100 t=f161
+   W x=380 s=0 z=100 t=f162
+   W x=421 s=0 z=100 t=f163
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=f164
+   W x=42 s=0 z=100 t=f165
+   W x=85 s=0 z=100 t=f166
+   W x=129 s=0 z=100 t=f167
+   W x=174 s=0 z=100 t=f168
+   W x=213 s=0 z=100 t=f169
+   W x=253 s=0 z=100 t=f170
+   W x=299 s=0 z=100 t=f171
+   W x=339 s=0 z=100 t=f172
+   W x=380 s=0 z=100 t=f173
+   W x=422 s=0 z=100 t=f174
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=f175
+   W x=47 s=0 z=100 t=f176
+   W x=95 s=0 z=100 t=f177
+   W x=144 s=0 z=100 t=f178
+   W x=187 s=0 z=100 t=f179
+   W x=231 s=0 z=100 t=f180
+   W x=274 s=0 z=100 t=f181
+   W x=311 s=0 z=100 t=f182
+   W x=349 s=0 z=100 t=f183
+   W x=388 s=0 z=100 t=f184
+   W x=428 s=0 z=100 t=f185
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=f186
+   W x=40 s=0 z=100 t=f187
+   W x=81 s=0 z=100 t=f188
+   W x=116 s=0 z=100 t=f189
+   W x=152 s=0 z=100 t=f190
+   W x=194 s=0 z=100 t=f191
+   W x=230 s=0 z=100 t=f192
+   W x=267 s=0 z=100 t=f193
+   W x=305 s=0 z=100 t=f194
+   W x=344 s=0 z=100 t=f195
+   W x=384 s=0 z=100 t=f196
+   W x=425 s=0 z=100 t=f197
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=f198
+   W x=39 s=0 z=100 t=f199
+   W x=79 s=0 z=100 t=f200
+   W x=130 s=0 z=100 t=f201
+   W x=175 s=0 z=100 t=f202
+   W x=221 s=0 z=100 t=f203
+   W x=268 s=0 z=100 t=f204
+   W x=316 s=0 z=100 t=f205
+   W x=365 s=0 z=100 t=f206
+   W x=415 s=0 z=100 t=f207
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=f208
+   W x=41 s=0 z=100 t=f209
+   W x=83 s=0 z=100 t=f210
+   W x=124 s=0 z=100 t=f211
+   W x=159 s=0 z=100 t=f212
+   W x=195 s=0 z=100 t=f213
+   W x=232 s=0 z=100 t=f214
+   W x=270 s=0 z=100 t=f215
+   W x=309 s=0 z=100 t=f216
+   W x=349 s=0 z=100 t=f217
+   W x=390 s=0 z=100 t=f218
+   W x=425 s=0 z=100 t=f219
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=f220
+   W x=45 s=0 z=100 t=f221
+   W x=84 s=0 z=100 t=f222
+   W x=124 s=0 z=100 t=f223
+   W x=165 s=0 z=100 t=f224
+   W x=207 s=0 z=100 t=f225
+   W x=250 s=0 z=100 t=f226
+   W x=294 s=0 z=100 t=f227
+   W x=339 s=0 z=100 t=f228
+   W x=378 s=0 z=100 t=f229
+   W x=418 s=0 z=100 t=f230
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=f231
+   W x=39 s=0 z=100 t=f232
+   W x=79 s=0 z=100 t=f233
+   W x=120 s=0 z=100 t=f234
+   W x=162 s=0 z=100 t=f235
+   W x=205 s=0 z=100 t=f236
+   W x=249 s=0 z=100 t=f237
+   W x=294 s=0 z=100 t=f238
+   W x=333 s=0 z=100 t=f239
+   W x=373 s=0 z=100 t=f240
+   W x=419 s=0 z=100 t=f241
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=f242
+   W x=40 s=0 z=100 t=f243
+   W x=81 s=0 z=100 t=f244
+   W x=123 s=0 z=100 t=f245
+   W x=166 s=0 z=100 t=f246
+   W x=210 s=0 z=100 t=f247
+   W x=255 s=0 z=100 t=f248
+   W x=294 s=0 z=100 t=f249
+   W x=334 s=0 z=100 t=f250
+   W x=380 s=0 z=100 t=f251
+   W x=420 s=0 z=100 t=f252
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=f253
+   W x=41 s=0 z=100 t=f254
+   W x=83 s=0 z=100 t=f255
+   W x=126 s=0 z=100 t=f256
+   W x=170 s=0 z=100 t=f257
+   W x=215 s=0 z=100 t=f258
+   W x=254 s=0 z=100 t=f259
+   W x=294 s=0 z=100 t=f260
+   W x=340 s=0 z=100 t=f261
+   W x=380 s=0 z=100 t=f262
+   W x=421 s=0 z=100 t=f263
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=f264
+   W x=46 s=0 z=100 t=f265
+   W x=93 s=0 z=100 t=f266
+   W x=141 s=0 z=100 t=f267
+   W x=190 s=0 z=100 t=f268
+   W x=233 s=0 z=100 t=f269
+   W x=277 s=0 z=100 t=f270
+   W x=327 s=0 z=100 t=f271
+   W x=371 s=0 z=100 t=f272
+   W x=416 s=0 z=100 t=f273
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=f274
+   W x=45 s=0 z=100 t=f275
+   W x=91 s=0 z=100 t=f276
+   W x=138 s=0 z=100 t=f277
+   W x=186 s=0 z=100 t=f278
+   W x=228 s=0 z=100 t=f279
+   W x=271 s=0 z=100 t=f280
+   W x=313 s=0 z=100 t=f281
+   W x=349 s=0 z=100 t=f282
+   W x=386 s=0 z=100 t=f283
+   W x=424 s=0 z=100 t=f284
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=f285
+   W x=39 s=0 z=100 t=f286
+   W x=79 s=0 z=100 t=f287
+   W x=120 s=0 z=100 t=f288
+   W x=155 s=0 z=100 t=f289
+   W x=191 s=0 z=100 t=f290
+   W x=233 s=0 z=100 t=f291
+   W x=269 s=0 z=100 t=f292
+   W x=306 s=0 z=100 t=f293
+   W x=344 s=0 z=100 t=f294
+   W x=383 s=0 z=100 t=f295
+   W x=423 s=0 z=100 t=f296
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=f297
+   W x=42 s=0 z=100 t=f298
+   W x=78 s=0 z=100 t=f299
+   W x=115 s=0 z=100 t=f300
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=SHORTFIRST
+   W x=115 s=0 z=100 t=s001
+   W x=162 s=0 z=100 t=s002
+   W x=210 s=0 z=100 t=s003
+   W x=259 s=0 z=100 t=s004
+   W x=309 s=0 z=100 t=s005
+   W x=360 s=0 z=100 t=s006
+   W x=412 s=0 z=100 t=s007
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=s008
+   W x=49 s=0 z=100 t=s009
+   W x=99 s=0 z=100 t=s010
+   W x=148 s=0 z=100 t=s011
+   W x=191 s=0 z=100 t=s012
+   W x=235 s=0 z=100 t=s013
+   W x=280 s=0 z=100 t=s014
+   W x=326 s=0 z=100 t=s015
+   W x=373 s=0 z=100 t=s016
+   W x=421 s=0 z=100 t=s017
+ PAGE 1 elements=6 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=s018
+   W x=43 s=0 z=100 t=s019
+   W x=87 s=0 z=100 t=s020
+   W x=137 s=0 z=100 t=s021
+   W x=181 s=0 z=100 t=s022
+   W x=226 s=0 z=100 t=s023
+   W x=272 s=0 z=100 t=s024
+   W x=319 s=0 z=100 t=s025
+   W x=367 s=0 z=100 t=s026
+   W x=416 s=0 z=100 t=s027
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=s028
+   W x=43 s=0 z=100 t=s029
+   W x=87 s=0 z=100 t=s030
+   W x=137 s=0 z=100 t=s031
+   W x=181 s=0 z=100 t=s032
+   W x=226 s=0 z=100 t=s033
+   W x=272 s=0 z=100 t=s034
+   W x=319 s=0 z=100 t=s035
+   W x=367 s=0 z=100 t=s036
+   W x=416 s=0 z=100 t=s037
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=s038
+   W x=43 s=0 z=100 t=s039
+   W x=87 s=0 z=100 t=s040
+   W x=137 s=0 z=100 t=s041
+   W x=181 s=0 z=100 t=s042
+   W x=226 s=0 z=100 t=s043
+   W x=272 s=0 z=100 t=s044
+   W x=319 s=0 z=100 t=s045
+   W x=367 s=0 z=100 t=s046
+   W x=416 s=0 z=100 t=s047
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=s048
+   W x=43 s=0 z=100 t=s049
+   W x=87 s=0 z=100 t=s050
+   W x=137 s=0 z=100 t=s051
+   W x=181 s=0 z=100 t=s052
+   W x=226 s=0 z=100 t=s053
+   W x=272 s=0 z=100 t=s054
+   W x=319 s=0 z=100 t=s055
+   W x=367 s=0 z=100 t=s056
+   W x=416 s=0 z=100 t=s057
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=s058
+   W x=43 s=0 z=100 t=s059
+   W x=87 s=0 z=100 t=s060
+   W x=137 s=0 z=100 t=s061
+   W x=181 s=0 z=100 t=s062
+   W x=226 s=0 z=100 t=s063
+   W x=272 s=0 z=100 t=s064
+   W x=319 s=0 z=100 t=s065
+   W x=367 s=0 z=100 t=s066
+   W x=416 s=0 z=100 t=s067
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=s068
+   W x=44 s=0 z=100 t=s069
+   W x=89 s=0 z=100 t=s070
+SPINE 2 href=OEBPS/chapter2.xhtml pages=5 truncated=0 cssFallback=0
+ PAGE 0 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=BFWORD
+   W x=81 s=0 z=100 t=b001
+   W x=126 s=0 z=100 t=b002
+   W x=172 s=0 z=100 t=b003
+   W x=219 s=0 z=100 t=b004
+   W x=267 s=0 z=100 t=b005
+   W x=316 s=0 z=100 t=b006
+   W x=366 s=0 z=100 t=b007
+   W x=417 s=0 z=100 t=b008
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=b009
+   W x=46 s=0 z=100 t=b010
+   W x=91 s=0 z=100 t=b011
+   W x=130 s=0 z=100 t=b012
+   W x=170 s=0 z=100 t=b013
+   W x=211 s=0 z=100 t=b014
+   W x=253 s=0 z=100 t=b015
+   W x=296 s=0 z=100 t=b016
+   W x=340 s=0 z=100 t=b017
+   W x=385 s=0 z=100 t=b018
+   W x=424 s=0 z=100 t=b019
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=b020
+   W x=45 s=0 z=100 t=b021
+   W x=84 s=0 z=100 t=b022
+   W x=124 s=0 z=100 t=b023
+   W x=165 s=0 z=100 t=b024
+   W x=207 s=0 z=100 t=b025
+   W x=250 s=0 z=100 t=b026
+   W x=294 s=0 z=100 t=b027
+   W x=339 s=0 z=100 t=b028
+   W x=378 s=0 z=100 t=b029
+   W x=418 s=0 z=100 t=b030
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=b031
+   W x=39 s=0 z=100 t=b032
+   W x=79 s=0 z=100 t=b033
+   W x=120 s=0 z=100 t=b034
+   W x=162 s=0 z=100 t=b035
+   W x=205 s=0 z=100 t=b036
+   W x=249 s=0 z=100 t=b037
+   W x=294 s=0 z=100 t=b038
+   W x=333 s=0 z=100 t=b039
+   W x=373 s=0 z=100 t=b040
+   W x=419 s=0 z=100 t=b041
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=b042
+   W x=40 s=0 z=100 t=b043
+   W x=81 s=0 z=100 t=b044
+   W x=123 s=0 z=100 t=b045
+   W x=166 s=0 z=100 t=b046
+   W x=210 s=0 z=100 t=b047
+   W x=255 s=0 z=100 t=b048
+   W x=294 s=0 z=100 t=b049
+   W x=334 s=0 z=100 t=b050
+   W x=380 s=0 z=100 t=b051
+   W x=420 s=0 z=100 t=b052
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=b053
+   W x=45 s=0 z=100 t=b054
+   W x=91 s=0 z=100 t=b055
+   W x=138 s=0 z=100 t=b056
+   W x=186 s=0 z=100 t=b057
+   W x=235 s=0 z=100 t=b058
+   W x=278 s=0 z=100 t=b059
+   W x=322 s=0 z=100 t=b060
+   W x=372 s=0 z=100 t=b061
+   W x=416 s=0 z=100 t=b062
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=b063
+   W x=45 s=0 z=100 t=b064
+   W x=91 s=0 z=100 t=b065
+   W x=138 s=0 z=100 t=b066
+   W x=186 s=0 z=100 t=b067
+   W x=235 s=0 z=100 t=b068
+   W x=278 s=0 z=100 t=b069
+   W x=322 s=0 z=100 t=b070
+   W x=372 s=0 z=100 t=b071
+   W x=416 s=0 z=100 t=b072
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=b073
+   W x=48 s=0 z=100 t=b074
+   W x=97 s=0 z=100 t=b075
+   W x=147 s=0 z=100 t=b076
+   W x=198 s=0 z=100 t=b077
+   W x=250 s=0 z=100 t=b078
+   W x=296 s=0 z=100 t=b079
+   W x=343 s=0 z=100 t=b080
+   W x=389 s=0 z=100 t=b081
+   W x=429 s=0 z=100 t=b082
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=b083
+   W x=41 s=0 z=100 t=b084
+   W x=83 s=0 z=100 t=b085
+   W x=126 s=0 z=100 t=b086
+   W x=170 s=0 z=100 t=b087
+   W x=215 s=0 z=100 t=b088
+   W x=254 s=0 z=100 t=b089
+   W x=294 s=0 z=100 t=b090
+   W x=340 s=0 z=100 t=b091
+   W x=380 s=0 z=100 t=b092
+   W x=421 s=0 z=100 t=b093
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=b094
+   W x=43 s=0 z=100 t=b095
+   W x=87 s=0 z=100 t=b096
+   W x=132 s=0 z=100 t=b097
+   W x=178 s=0 z=100 t=b098
+   W x=218 s=0 z=100 t=b099
+   W x=259 s=0 z=100 t=b100
+   W x=304 s=0 z=100 t=b101
+   W x=343 s=0 z=100 t=b102
+   W x=383 s=0 z=100 t=b103
+   W x=424 s=0 z=100 t=b104
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=b105
+   W x=40 s=0 z=100 t=b106
+   W x=81 s=0 z=100 t=b107
+   W x=123 s=0 z=100 t=b108
+   W x=159 s=0 z=100 t=b109
+   W x=196 s=0 z=100 t=b110
+   W x=232 s=0 z=100 t=b111
+   W x=262 s=0 z=100 t=b112
+   W x=293 s=0 z=100 t=b113
+   W x=325 s=0 z=100 t=b114
+   W x=358 s=0 z=100 t=b115
+   W x=392 s=0 z=100 t=b116
+   W x=427 s=0 z=100 t=b117
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=b118
+   W x=32 s=0 z=100 t=b119
+   W x=65 s=0 z=100 t=b120
+   W x=104 s=0 z=100 t=b121
+   W x=137 s=0 z=100 t=b122
+   W x=171 s=0 z=100 t=b123
+   W x=206 s=0 z=100 t=b124
+   W x=242 s=0 z=100 t=b125
+   W x=279 s=0 z=100 t=b126
+   W x=317 s=0 z=100 t=b127
+   W x=356 s=0 z=100 t=b128
+   W x=389 s=0 z=100 t=b129
+   W x=423 s=0 z=100 t=b130
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=b131
+   W x=33 s=0 z=100 t=b132
+   W x=67 s=0 z=100 t=b133
+   W x=102 s=0 z=100 t=b134
+   W x=138 s=0 z=100 t=b135
+   W x=175 s=0 z=100 t=b136
+   W x=213 s=0 z=100 t=b137
+   W x=252 s=0 z=100 t=b138
+   W x=285 s=0 z=100 t=b139
+   W x=319 s=0 z=100 t=b140
+   W x=359 s=0 z=100 t=b141
+   W x=393 s=0 z=100 t=b142
+   W x=428 s=0 z=100 t=b143
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b144
+   W x=38 s=0 z=100 t=b145
+   W x=77 s=0 z=100 t=b146
+   W x=117 s=0 z=100 t=b147
+   W x=158 s=0 z=100 t=b148
+   W x=193 s=0 z=100 t=b149
+   W x=229 s=0 z=100 t=b150
+   W x=271 s=0 z=100 t=b151
+   W x=307 s=0 z=100 t=b152
+   W x=344 s=0 z=100 t=b153
+   W x=382 s=0 z=100 t=b154
+   W x=421 s=0 z=100 t=b155
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b156
+   W x=40 s=0 z=100 t=b157
+   W x=81 s=0 z=100 t=b158
+   W x=116 s=0 z=100 t=b159
+   W x=152 s=0 z=100 t=b160
+   W x=194 s=0 z=100 t=b161
+   W x=230 s=0 z=100 t=b162
+   W x=267 s=0 z=100 t=b163
+   W x=305 s=0 z=100 t=b164
+   W x=344 s=0 z=100 t=b165
+   W x=384 s=0 z=100 t=b166
+   W x=425 s=0 z=100 t=b167
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b168
+   W x=35 s=0 z=100 t=b169
+   W x=71 s=0 z=100 t=b170
+   W x=113 s=0 z=100 t=b171
+   W x=149 s=0 z=100 t=b172
+   W x=186 s=0 z=100 t=b173
+   W x=224 s=0 z=100 t=b174
+   W x=263 s=0 z=100 t=b175
+   W x=303 s=0 z=100 t=b176
+   W x=344 s=0 z=100 t=b177
+   W x=386 s=0 z=100 t=b178
+   W x=422 s=0 z=100 t=b179
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=14
+   W x=0 s=0 z=100 t=b180
+   W x=36 s=0 z=100 t=b181
+   W x=66 s=0 z=100 t=b182
+   W x=97 s=0 z=100 t=b183
+   W x=129 s=0 z=100 t=b184
+   W x=162 s=0 z=100 t=b185
+   W x=196 s=0 z=100 t=b186
+   W x=231 s=0 z=100 t=b187
+   W x=267 s=0 z=100 t=b188
+   W x=297 s=0 z=100 t=b189
+   W x=328 s=0 z=100 t=b190
+   W x=365 s=0 z=100 t=b191
+   W x=396 s=0 z=100 t=b192
+   W x=428 s=0 z=100 t=b193
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b194
+   W x=36 s=0 z=100 t=b195
+   W x=73 s=0 z=100 t=b196
+   W x=111 s=0 z=100 t=b197
+   W x=150 s=0 z=100 t=b198
+   W x=183 s=0 z=100 t=b199
+   W x=217 s=0 z=100 t=b200
+   W x=262 s=0 z=100 t=b201
+   W x=301 s=0 z=100 t=b202
+   W x=341 s=0 z=100 t=b203
+   W x=382 s=0 z=100 t=b204
+   W x=424 s=0 z=100 t=b205
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b206
+   W x=44 s=0 z=100 t=b207
+   W x=89 s=0 z=100 t=b208
+   W x=128 s=0 z=100 t=b209
+   W x=168 s=0 z=100 t=b210
+   W x=207 s=0 z=100 t=b211
+   W x=240 s=0 z=100 t=b212
+   W x=274 s=0 z=100 t=b213
+   W x=309 s=0 z=100 t=b214
+   W x=345 s=0 z=100 t=b215
+   W x=382 s=0 z=100 t=b216
+   W x=420 s=0 z=100 t=b217
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=b218
+   W x=32 s=0 z=100 t=b219
+   W x=65 s=0 z=100 t=b220
+   W x=104 s=0 z=100 t=b221
+   W x=137 s=0 z=100 t=b222
+   W x=171 s=0 z=100 t=b223
+   W x=206 s=0 z=100 t=b224
+   W x=242 s=0 z=100 t=b225
+   W x=279 s=0 z=100 t=b226
+   W x=317 s=0 z=100 t=b227
+   W x=356 s=0 z=100 t=b228
+   W x=389 s=0 z=100 t=b229
+   W x=423 s=0 z=100 t=b230
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b231
+   W x=36 s=0 z=100 t=b232
+   W x=73 s=0 z=100 t=b233
+   W x=111 s=0 z=100 t=b234
+   W x=150 s=0 z=100 t=b235
+   W x=190 s=0 z=100 t=b236
+   W x=231 s=0 z=100 t=b237
+   W x=273 s=0 z=100 t=b238
+   W x=309 s=0 z=100 t=b239
+   W x=346 s=0 z=100 t=b240
+   W x=389 s=0 z=100 t=b241
+   W x=426 s=0 z=100 t=b242
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b243
+   W x=37 s=0 z=100 t=b244
+   W x=75 s=0 z=100 t=b245
+   W x=114 s=0 z=100 t=b246
+   W x=154 s=0 z=100 t=b247
+   W x=195 s=0 z=100 t=b248
+   W x=230 s=0 z=100 t=b249
+   W x=266 s=0 z=100 t=b250
+   W x=308 s=0 z=100 t=b251
+   W x=344 s=0 z=100 t=b252
+   W x=381 s=0 z=100 t=b253
+   W x=419 s=0 z=100 t=b254
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b255
+   W x=39 s=0 z=100 t=b256
+   W x=79 s=0 z=100 t=b257
+   W x=120 s=0 z=100 t=b258
+   W x=155 s=0 z=100 t=b259
+   W x=191 s=0 z=100 t=b260
+   W x=233 s=0 z=100 t=b261
+   W x=269 s=0 z=100 t=b262
+   W x=306 s=0 z=100 t=b263
+   W x=344 s=0 z=100 t=b264
+   W x=383 s=0 z=100 t=b265
+   W x=423 s=0 z=100 t=b266
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=b267
+   W x=44 s=0 z=100 t=b268
+   W x=82 s=0 z=100 t=b269
+   W x=121 s=0 z=100 t=b270
+   W x=166 s=0 z=100 t=b271
+   W x=205 s=0 z=100 t=b272
+   W x=245 s=0 z=100 t=b273
+   W x=286 s=0 z=100 t=b274
+   W x=328 s=0 z=100 t=b275
+   W x=371 s=0 z=100 t=b276
+   W x=415 s=0 z=100 t=b277
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=b278
+   W x=38 s=0 z=100 t=b279
+   W x=77 s=0 z=100 t=b280
+   W x=115 s=0 z=100 t=b281
+   W x=147 s=0 z=100 t=b282
+   W x=180 s=0 z=100 t=b283
+   W x=214 s=0 z=100 t=b284
+   W x=249 s=0 z=100 t=b285
+   W x=285 s=0 z=100 t=b286
+   W x=322 s=0 z=100 t=b287
+   W x=360 s=0 z=100 t=b288
+   W x=392 s=0 z=100 t=b289
+   W x=425 s=0 z=100 t=b290
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b291
+   W x=35 s=0 z=100 t=b292
+   W x=71 s=0 z=100 t=b293
+   W x=108 s=0 z=100 t=b294
+   W x=146 s=0 z=100 t=b295
+   W x=185 s=0 z=100 t=b296
+   W x=225 s=0 z=100 t=b297
+   W x=266 s=0 z=100 t=b298
+   W x=301 s=0 z=100 t=b299
+   W x=337 s=0 z=100 t=b300
+   W x=384 s=0 z=100 t=b301
+   W x=425 s=0 z=100 t=b302
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b303
+   W x=40 s=0 z=100 t=b304
+   W x=81 s=0 z=100 t=b305
+   W x=123 s=0 z=100 t=b306
+   W x=166 s=0 z=100 t=b307
+   W x=210 s=0 z=100 t=b308
+   W x=248 s=0 z=100 t=b309
+   W x=287 s=0 z=100 t=b310
+   W x=325 s=0 z=100 t=b311
+   W x=357 s=0 z=100 t=b312
+   W x=390 s=0 z=100 t=b313
+   W x=424 s=0 z=100 t=b314
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b315
+   W x=39 s=0 z=100 t=b316
+   W x=79 s=0 z=100 t=b317
+   W x=120 s=0 z=100 t=b318
+   W x=155 s=0 z=100 t=b319
+   W x=191 s=0 z=100 t=b320
+   W x=233 s=0 z=100 t=b321
+   W x=269 s=0 z=100 t=b322
+   W x=306 s=0 z=100 t=b323
+   W x=344 s=0 z=100 t=b324
+   W x=383 s=0 z=100 t=b325
+   W x=423 s=0 z=100 t=b326
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b327
+   W x=41 s=0 z=100 t=b328
+   W x=76 s=0 z=100 t=b329
+   W x=112 s=0 z=100 t=b330
+   W x=154 s=0 z=100 t=b331
+   W x=190 s=0 z=100 t=b332
+   W x=227 s=0 z=100 t=b333
+   W x=265 s=0 z=100 t=b334
+   W x=304 s=0 z=100 t=b335
+   W x=344 s=0 z=100 t=b336
+   W x=385 s=0 z=100 t=b337
+   W x=427 s=0 z=100 t=b338
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b339
+   W x=36 s=0 z=100 t=b340
+   W x=78 s=0 z=100 t=b341
+   W x=114 s=0 z=100 t=b342
+   W x=151 s=0 z=100 t=b343
+   W x=189 s=0 z=100 t=b344
+   W x=228 s=0 z=100 t=b345
+   W x=268 s=0 z=100 t=b346
+   W x=309 s=0 z=100 t=b347
+   W x=351 s=0 z=100 t=b348
+   W x=387 s=0 z=100 t=b349
+   W x=424 s=0 z=100 t=b350
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b351
+   W x=36 s=0 z=100 t=b352
+   W x=73 s=0 z=100 t=b353
+   W x=111 s=0 z=100 t=b354
+   W x=150 s=0 z=100 t=b355
+   W x=190 s=0 z=100 t=b356
+   W x=231 s=0 z=100 t=b357
+   W x=273 s=0 z=100 t=b358
+   W x=309 s=0 z=100 t=b359
+   W x=346 s=0 z=100 t=b360
+   W x=389 s=0 z=100 t=b361
+   W x=426 s=0 z=100 t=b362
+ PAGE 1 elements=31 footnotes=1
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=b363
+   W x=41 s=0 z=100 t=b364
+   W x=83 s=0 z=100 t=b365
+   W x=126 s=0 z=100 t=b366
+   W x=170 s=0 z=100 t=b367
+   W x=215 s=0 z=100 t=b368
+   W x=254 s=0 z=100 t=b369
+   W x=294 s=0 z=100 t=b370
+   W x=340 s=0 z=100 t=b371
+   W x=380 s=0 z=100 t=b372
+   W x=421 s=0 z=100 t=b373
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b374
+   W x=42 s=0 z=100 t=b375
+   W x=85 s=0 z=100 t=b376
+   W x=129 s=0 z=100 t=b377
+   W x=174 s=0 z=100 t=b378
+   W x=213 s=0 z=100 t=b379
+   W x=253 s=0 z=100 t=b380
+   W x=292 s=0 z=100 t=b381
+   W x=325 s=0 z=100 t=b382
+   W x=359 s=0 z=100 t=b383
+   W x=394 s=0 z=100 t=b384
+   W x=430 s=0 z=100 t=b385
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=b386
+   W x=37 s=0 z=100 t=b387
+   W x=75 s=0 z=100 t=b388
+   W x=107 s=0 z=100 t=b389
+   W x=140 s=0 z=100 t=b390
+   W x=179 s=0 z=100 t=b391
+   W x=212 s=0 z=100 t=b392
+   W x=246 s=0 z=100 t=b393
+   W x=281 s=0 z=100 t=b394
+   W x=317 s=0 z=100 t=b395
+   W x=354 s=0 z=100 t=b396
+   W x=392 s=0 z=100 t=b397
+   W x=431 s=0 z=100 t=b398
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=b399
+   W x=35 s=0 z=100 t=b400
+   W x=81 s=0 z=100 t=b401
+   W x=121 s=0 z=100 t=b402
+   W x=162 s=0 z=100 t=b403
+   W x=204 s=0 z=100 t=b404
+   W x=247 s=0 z=100 t=b405
+   W x=291 s=0 z=100 t=b406
+   W x=336 s=0 z=100 t=b407
+   W x=382 s=0 z=100 t=b408
+   W x=422 s=0 z=100 t=b409
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b410
+   W x=42 s=0 z=100 t=b411
+   W x=78 s=0 z=100 t=b412
+   W x=115 s=0 z=100 t=b413
+   W x=153 s=0 z=100 t=b414
+   W x=192 s=0 z=100 t=b415
+   W x=232 s=0 z=100 t=b416
+   W x=273 s=0 z=100 t=b417
+   W x=315 s=0 z=100 t=b418
+   W x=351 s=0 z=100 t=b419
+   W x=388 s=0 z=100 t=b420
+   W x=431 s=0 z=100 t=b421
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b422
+   W x=37 s=0 z=100 t=b423
+   W x=75 s=0 z=100 t=b424
+   W x=114 s=0 z=100 t=b425
+   W x=154 s=0 z=100 t=b426
+   W x=195 s=0 z=100 t=b427
+   W x=237 s=0 z=100 t=b428
+   W x=273 s=0 z=100 t=b429
+   W x=310 s=0 z=100 t=b430
+   W x=353 s=0 z=100 t=b431
+   W x=390 s=0 z=100 t=b432
+   W x=428 s=0 z=100 t=b433
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b434
+   W x=38 s=0 z=100 t=b435
+   W x=77 s=0 z=100 t=b436
+   W x=117 s=0 z=100 t=b437
+   W x=158 s=0 z=100 t=b438
+   W x=193 s=0 z=100 t=b439
+   W x=229 s=0 z=100 t=b440
+   W x=271 s=0 z=100 t=b441
+   W x=307 s=0 z=100 t=b442
+   W x=344 s=0 z=100 t=b443
+   W x=382 s=0 z=100 t=b444
+   W x=421 s=0 z=100 t=b445
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=b446
+   W x=44 s=0 z=100 t=b447
+   W x=89 s=0 z=100 t=b448
+   W x=128 s=0 z=100 t=b449
+   W x=168 s=0 z=100 t=b450
+   W x=214 s=0 z=100 t=b451
+   W x=254 s=0 z=100 t=b452
+   W x=295 s=0 z=100 t=b453
+   W x=337 s=0 z=100 t=b454
+   W x=380 s=0 z=100 t=b455
+   W x=424 s=0 z=100 t=b456
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=b457
+   W x=44 s=0 z=100 t=b458
+   W x=82 s=0 z=100 t=b459
+   W x=121 s=0 z=100 t=b460
+   W x=166 s=0 z=100 t=b461
+   W x=205 s=0 z=100 t=b462
+   W x=245 s=0 z=100 t=b463
+   W x=286 s=0 z=100 t=b464
+   W x=328 s=0 z=100 t=b465
+   W x=371 s=0 z=100 t=b466
+   W x=415 s=0 z=100 t=b467
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=b468
+   W x=39 s=0 z=100 t=b469
+   W x=79 s=0 z=100 t=b470
+   W x=125 s=0 z=100 t=b471
+   W x=165 s=0 z=100 t=b472
+   W x=206 s=0 z=100 t=b473
+   W x=248 s=0 z=100 t=b474
+   W x=291 s=0 z=100 t=b475
+   W x=335 s=0 z=100 t=b476
+   W x=380 s=0 z=100 t=b477
+   W x=426 s=0 z=100 t=b478
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=b479
+   W x=42 s=0 z=100 t=b480
+   W x=83 s=0 z=100 t=b481
+   W x=118 s=0 z=100 t=b482
+   W x=154 s=0 z=100 t=b483
+   W x=191 s=0 z=100 t=b484
+   W x=229 s=0 z=100 t=b485
+   W x=268 s=0 z=100 t=b486
+   W x=308 s=0 z=100 t=b487
+   W x=349 s=0 z=100 t=b488
+   W x=384 s=0 z=100 t=b489
+   W x=420 s=0 z=100 t=b490
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=b491
+   W x=34 s=0 z=100 t=b492
+   W x=69 s=0 z=100 t=b493
+   W x=105 s=0 z=100 t=b494
+   W x=142 s=0 z=100 t=b495
+   W x=180 s=0 z=100 t=b496
+   W x=219 s=0 z=100 t=b497
+   W x=259 s=0 z=100 t=b498
+   W x=293 s=0 z=100 t=b499
+   W x=328 s=0 z=100 t=b500
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=NEXTA
+  LINE y=312 x=0 align=2 mult=1.400 hfid=0 words=1
+   W x=183 s=1 z=100 t=BFTITLE
+  LINE y=346 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=HPWORD
+  LINE y=370 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=4 z=100 t=1.
+   W x=45 s=2 z=100 t=(BFWORD
+   W x=121 s=2 z=100 t=b001
+   W x=168 s=2 z=100 t=b002
+   W x=216 s=2 z=100 t=b003
+   W x=265 s=2 z=100 t=b004
+   W x=315 s=2 z=100 t=b005
+   W x=366 s=2 z=100 t=b006
+   W x=418 s=2 z=100 t=b007
+  LINE y=394 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=2 z=100 t=b008
+   W x=45 s=2 z=100 t=b009
+   W x=91 s=2 z=100 t=b010
+   W x=136 s=2 z=100 t=b011
+   W x=175 s=2 z=100 t=b012
+   W x=215 s=2 z=100 t=b013
+   W x=256 s=2 z=100 t=b014
+   W x=298 s=2 z=100 t=b015
+   W x=341 s=2 z=100 t=b016
+   W x=385 s=2 z=100 t=b017
+   W x=430 s=2 z=100 t=b018
+  LINE y=418 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=2 z=100 t=b019
+   W x=37 s=2 z=100 t=b020...)
+   W x=122 s=0 z=100 t=NOTEWORD
+   W x=200 s=0 z=100 t=a
+   W x=218 s=0 z=100 t=note
+   W x=266 s=0 z=100 t=body
+  LINE y=442 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=AFTERN
+  LINE y=466 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=1 z=100 t=BOLDWORD
+   W x=111 s=0 z=100 t=more
+  LINE y=490 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=LASTN
+  LINE y=514 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=SOLOWORD
+   W x=108 s=0 z=100 t=c001
+   W x=156 s=0 z=100 t=c002
+   W x=205 s=0 z=100 t=c003
+   W x=255 s=0 z=100 t=c004
+   W x=306 s=0 z=100 t=c005
+   W x=358 s=0 z=100 t=c006
+   W x=411 s=0 z=100 t=c007
+  LINE y=538 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c008
+   W x=44 s=0 z=100 t=c009
+   W x=89 s=0 z=100 t=c010
+   W x=133 s=0 z=100 t=c011
+   W x=171 s=0 z=100 t=c012
+   W x=210 s=0 z=100 t=c013
+   W x=250 s=0 z=100 t=c014
+   W x=291 s=0 z=100 t=c015
+   W x=333 s=0 z=100 t=c016
+   W x=376 s=0 z=100 t=c017
+   W x=420 s=0 z=100 t=c018
+  LINE y=562 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c019
+   W x=40 s=0 z=100 t=c020
+   W x=86 s=0 z=100 t=c021
+   W x=126 s=0 z=100 t=c022
+   W x=167 s=0 z=100 t=c023
+   W x=209 s=0 z=100 t=c024
+   W x=252 s=0 z=100 t=c025
+   W x=296 s=0 z=100 t=c026
+   W x=341 s=0 z=100 t=c027
+   W x=387 s=0 z=100 t=c028
+   W x=427 s=0 z=100 t=c029
+  LINE y=586 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c030
+   W x=45 s=0 z=100 t=c031
+   W x=84 s=0 z=100 t=c032
+   W x=124 s=0 z=100 t=c033
+   W x=165 s=0 z=100 t=c034
+   W x=207 s=0 z=100 t=c035
+   W x=250 s=0 z=100 t=c036
+   W x=294 s=0 z=100 t=c037
+   W x=339 s=0 z=100 t=c038
+   W x=378 s=0 z=100 t=c039
+   W x=418 s=0 z=100 t=c040
+  LINE y=610 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=c041
+   W x=44 s=0 z=100 t=c042
+   W x=89 s=0 z=100 t=c043
+   W x=135 s=0 z=100 t=c044
+   W x=182 s=0 z=100 t=c045
+   W x=230 s=0 z=100 t=c046
+   W x=279 s=0 z=100 t=c047
+   W x=329 s=0 z=100 t=c048
+   W x=373 s=0 z=100 t=c049
+   W x=418 s=0 z=100 t=c050
+  LINE y=634 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=c051
+   W x=44 s=0 z=100 t=c052
+   W x=89 s=0 z=100 t=c053
+   W x=135 s=0 z=100 t=c054
+   W x=182 s=0 z=100 t=c055
+   W x=230 s=0 z=100 t=c056
+   W x=279 s=0 z=100 t=c057
+   W x=329 s=0 z=100 t=c058
+   W x=373 s=0 z=100 t=c059
+   W x=418 s=0 z=100 t=c060
+  LINE y=658 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=c061
+   W x=43 s=0 z=100 t=c062
+   W x=87 s=0 z=100 t=c063
+   W x=132 s=0 z=100 t=c064
+   W x=178 s=0 z=100 t=c065
+   W x=225 s=0 z=100 t=c066
+   W x=273 s=0 z=100 t=c067
+   W x=322 s=0 z=100 t=c068
+   W x=365 s=0 z=100 t=c069
+   W x=409 s=0 z=100 t=c070
+  LINE y=682 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=c071
+   W x=44 s=0 z=100 t=c072
+   W x=89 s=0 z=100 t=c073
+   W x=135 s=0 z=100 t=c074
+   W x=182 s=0 z=100 t=c075
+   W x=230 s=0 z=100 t=c076
+   W x=279 s=0 z=100 t=c077
+   W x=329 s=0 z=100 t=c078
+   W x=373 s=0 z=100 t=c079
+   W x=418 s=0 z=100 t=c080
+  LINE y=706 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c081
+   W x=39 s=0 z=100 t=c082
+   W x=79 s=0 z=100 t=c083
+   W x=120 s=0 z=100 t=c084
+   W x=162 s=0 z=100 t=c085
+   W x=205 s=0 z=100 t=c086
+   W x=249 s=0 z=100 t=c087
+   W x=294 s=0 z=100 t=c088
+   W x=333 s=0 z=100 t=c089
+   W x=373 s=0 z=100 t=c090
+   W x=419 s=0 z=100 t=c091
+  LINE y=730 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c092
+   W x=41 s=0 z=100 t=c093
+   W x=83 s=0 z=100 t=c094
+   W x=126 s=0 z=100 t=c095
+   W x=170 s=0 z=100 t=c096
+   W x=215 s=0 z=100 t=c097
+   W x=261 s=0 z=100 t=c098
+   W x=301 s=0 z=100 t=c099
+   W x=342 s=0 z=100 t=c100
+   W x=387 s=0 z=100 t=c101
+   W x=426 s=0 z=100 t=c102
+  FN n=1. href=#bf1
+ PAGE 2 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c103
+   W x=40 s=0 z=100 t=c104
+   W x=81 s=0 z=100 t=c105
+   W x=123 s=0 z=100 t=c106
+   W x=166 s=0 z=100 t=c107
+   W x=210 s=0 z=100 t=c108
+   W x=248 s=0 z=100 t=c109
+   W x=287 s=0 z=100 t=c110
+   W x=325 s=0 z=100 t=c111
+   W x=357 s=0 z=100 t=c112
+   W x=390 s=0 z=100 t=c113
+   W x=424 s=0 z=100 t=c114
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=c115
+   W x=36 s=0 z=100 t=c116
+   W x=73 s=0 z=100 t=c117
+   W x=111 s=0 z=100 t=c118
+   W x=143 s=0 z=100 t=c119
+   W x=176 s=0 z=100 t=c120
+   W x=215 s=0 z=100 t=c121
+   W x=248 s=0 z=100 t=c122
+   W x=282 s=0 z=100 t=c123
+   W x=317 s=0 z=100 t=c124
+   W x=353 s=0 z=100 t=c125
+   W x=390 s=0 z=100 t=c126
+   W x=428 s=0 z=100 t=c127
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=c128
+   W x=32 s=0 z=100 t=c129
+   W x=65 s=0 z=100 t=c130
+   W x=104 s=0 z=100 t=c131
+   W x=137 s=0 z=100 t=c132
+   W x=171 s=0 z=100 t=c133
+   W x=206 s=0 z=100 t=c134
+   W x=242 s=0 z=100 t=c135
+   W x=279 s=0 z=100 t=c136
+   W x=317 s=0 z=100 t=c137
+   W x=356 s=0 z=100 t=c138
+   W x=389 s=0 z=100 t=c139
+   W x=423 s=0 z=100 t=c140
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c141
+   W x=36 s=0 z=100 t=c142
+   W x=73 s=0 z=100 t=c143
+   W x=111 s=0 z=100 t=c144
+   W x=150 s=0 z=100 t=c145
+   W x=190 s=0 z=100 t=c146
+   W x=231 s=0 z=100 t=c147
+   W x=273 s=0 z=100 t=c148
+   W x=309 s=0 z=100 t=c149
+   W x=346 s=0 z=100 t=c150
+   W x=389 s=0 z=100 t=c151
+   W x=426 s=0 z=100 t=c152
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c153
+   W x=37 s=0 z=100 t=c154
+   W x=75 s=0 z=100 t=c155
+   W x=114 s=0 z=100 t=c156
+   W x=154 s=0 z=100 t=c157
+   W x=195 s=0 z=100 t=c158
+   W x=230 s=0 z=100 t=c159
+   W x=266 s=0 z=100 t=c160
+   W x=308 s=0 z=100 t=c161
+   W x=344 s=0 z=100 t=c162
+   W x=381 s=0 z=100 t=c163
+   W x=419 s=0 z=100 t=c164
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c165
+   W x=43 s=0 z=100 t=c166
+   W x=87 s=0 z=100 t=c167
+   W x=132 s=0 z=100 t=c168
+   W x=171 s=0 z=100 t=c169
+   W x=211 s=0 z=100 t=c170
+   W x=257 s=0 z=100 t=c171
+   W x=297 s=0 z=100 t=c172
+   W x=338 s=0 z=100 t=c173
+   W x=380 s=0 z=100 t=c174
+   W x=423 s=0 z=100 t=c175
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=c176
+   W x=42 s=0 z=100 t=c177
+   W x=85 s=0 z=100 t=c178
+   W x=122 s=0 z=100 t=c179
+   W x=160 s=0 z=100 t=c180
+   W x=197 s=0 z=100 t=c181
+   W x=228 s=0 z=100 t=c182
+   W x=260 s=0 z=100 t=c183
+   W x=293 s=0 z=100 t=c184
+   W x=327 s=0 z=100 t=c185
+   W x=362 s=0 z=100 t=c186
+   W x=398 s=0 z=100 t=c187
+   W x=435 s=0 z=100 t=c188
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=c189
+   W x=32 s=0 z=100 t=c190
+   W x=70 s=0 z=100 t=c191
+   W x=102 s=0 z=100 t=c192
+   W x=135 s=0 z=100 t=c193
+   W x=169 s=0 z=100 t=c194
+   W x=204 s=0 z=100 t=c195
+   W x=240 s=0 z=100 t=c196
+   W x=277 s=0 z=100 t=c197
+   W x=315 s=0 z=100 t=c198
+   W x=347 s=0 z=100 t=c199
+   W x=380 s=0 z=100 t=c200
+   W x=424 s=0 z=100 t=c201
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c202
+   W x=39 s=0 z=100 t=c203
+   W x=79 s=0 z=100 t=c204
+   W x=120 s=0 z=100 t=c205
+   W x=162 s=0 z=100 t=c206
+   W x=205 s=0 z=100 t=c207
+   W x=249 s=0 z=100 t=c208
+   W x=287 s=0 z=100 t=c209
+   W x=326 s=0 z=100 t=c210
+   W x=364 s=0 z=100 t=c211
+   W x=396 s=0 z=100 t=c212
+   W x=429 s=0 z=100 t=c213
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=c214
+   W x=35 s=0 z=100 t=c215
+   W x=71 s=0 z=100 t=c216
+   W x=108 s=0 z=100 t=c217
+   W x=146 s=0 z=100 t=c218
+   W x=178 s=0 z=100 t=c219
+   W x=211 s=0 z=100 t=c220
+   W x=250 s=0 z=100 t=c221
+   W x=283 s=0 z=100 t=c222
+   W x=317 s=0 z=100 t=c223
+   W x=352 s=0 z=100 t=c224
+   W x=388 s=0 z=100 t=c225
+   W x=425 s=0 z=100 t=c226
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c227
+   W x=41 s=0 z=100 t=c228
+   W x=76 s=0 z=100 t=c229
+   W x=112 s=0 z=100 t=c230
+   W x=154 s=0 z=100 t=c231
+   W x=190 s=0 z=100 t=c232
+   W x=227 s=0 z=100 t=c233
+   W x=265 s=0 z=100 t=c234
+   W x=304 s=0 z=100 t=c235
+   W x=344 s=0 z=100 t=c236
+   W x=385 s=0 z=100 t=c237
+   W x=427 s=0 z=100 t=c238
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c239
+   W x=36 s=0 z=100 t=c240
+   W x=78 s=0 z=100 t=c241
+   W x=114 s=0 z=100 t=c242
+   W x=151 s=0 z=100 t=c243
+   W x=189 s=0 z=100 t=c244
+   W x=228 s=0 z=100 t=c245
+   W x=268 s=0 z=100 t=c246
+   W x=309 s=0 z=100 t=c247
+   W x=351 s=0 z=100 t=c248
+   W x=387 s=0 z=100 t=c249
+   W x=424 s=0 z=100 t=c250
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c251
+   W x=36 s=0 z=100 t=c252
+   W x=73 s=0 z=100 t=c253
+   W x=111 s=0 z=100 t=c254
+   W x=150 s=0 z=100 t=c255
+   W x=190 s=0 z=100 t=c256
+   W x=231 s=0 z=100 t=c257
+   W x=273 s=0 z=100 t=c258
+   W x=309 s=0 z=100 t=c259
+   W x=346 s=0 z=100 t=c260
+   W x=389 s=0 z=100 t=c261
+   W x=426 s=0 z=100 t=c262
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c263
+   W x=41 s=0 z=100 t=c264
+   W x=83 s=0 z=100 t=c265
+   W x=126 s=0 z=100 t=c266
+   W x=170 s=0 z=100 t=c267
+   W x=215 s=0 z=100 t=c268
+   W x=254 s=0 z=100 t=c269
+   W x=294 s=0 z=100 t=c270
+   W x=340 s=0 z=100 t=c271
+   W x=380 s=0 z=100 t=c272
+   W x=421 s=0 z=100 t=c273
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c274
+   W x=42 s=0 z=100 t=c275
+   W x=85 s=0 z=100 t=c276
+   W x=129 s=0 z=100 t=c277
+   W x=174 s=0 z=100 t=c278
+   W x=213 s=0 z=100 t=c279
+   W x=253 s=0 z=100 t=c280
+   W x=292 s=0 z=100 t=c281
+   W x=325 s=0 z=100 t=c282
+   W x=359 s=0 z=100 t=c283
+   W x=394 s=0 z=100 t=c284
+   W x=430 s=0 z=100 t=c285
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=c286
+   W x=37 s=0 z=100 t=c287
+   W x=75 s=0 z=100 t=c288
+   W x=107 s=0 z=100 t=c289
+   W x=140 s=0 z=100 t=c290
+   W x=179 s=0 z=100 t=c291
+   W x=212 s=0 z=100 t=c292
+   W x=246 s=0 z=100 t=c293
+   W x=281 s=0 z=100 t=c294
+   W x=317 s=0 z=100 t=c295
+   W x=354 s=0 z=100 t=c296
+   W x=392 s=0 z=100 t=c297
+   W x=431 s=0 z=100 t=c298
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c299
+   W x=35 s=0 z=100 t=c300
+   W x=81 s=0 z=100 t=c301
+   W x=121 s=0 z=100 t=c302
+   W x=162 s=0 z=100 t=c303
+   W x=204 s=0 z=100 t=c304
+   W x=247 s=0 z=100 t=c305
+   W x=291 s=0 z=100 t=c306
+   W x=336 s=0 z=100 t=c307
+   W x=382 s=0 z=100 t=c308
+   W x=422 s=0 z=100 t=c309
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c310
+   W x=42 s=0 z=100 t=c311
+   W x=78 s=0 z=100 t=c312
+   W x=115 s=0 z=100 t=c313
+   W x=153 s=0 z=100 t=c314
+   W x=192 s=0 z=100 t=c315
+   W x=232 s=0 z=100 t=c316
+   W x=273 s=0 z=100 t=c317
+   W x=315 s=0 z=100 t=c318
+   W x=351 s=0 z=100 t=c319
+   W x=388 s=0 z=100 t=c320
+   W x=431 s=0 z=100 t=c321
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c322
+   W x=37 s=0 z=100 t=c323
+   W x=75 s=0 z=100 t=c324
+   W x=114 s=0 z=100 t=c325
+   W x=154 s=0 z=100 t=c326
+   W x=195 s=0 z=100 t=c327
+   W x=237 s=0 z=100 t=c328
+   W x=273 s=0 z=100 t=c329
+   W x=310 s=0 z=100 t=c330
+   W x=353 s=0 z=100 t=c331
+   W x=390 s=0 z=100 t=c332
+   W x=428 s=0 z=100 t=c333
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c334
+   W x=38 s=0 z=100 t=c335
+   W x=77 s=0 z=100 t=c336
+   W x=117 s=0 z=100 t=c337
+   W x=158 s=0 z=100 t=c338
+   W x=193 s=0 z=100 t=c339
+   W x=229 s=0 z=100 t=c340
+   W x=271 s=0 z=100 t=c341
+   W x=307 s=0 z=100 t=c342
+   W x=344 s=0 z=100 t=c343
+   W x=382 s=0 z=100 t=c344
+   W x=421 s=0 z=100 t=c345
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c346
+   W x=44 s=0 z=100 t=c347
+   W x=89 s=0 z=100 t=c348
+   W x=128 s=0 z=100 t=c349
+   W x=168 s=0 z=100 t=c350
+   W x=214 s=0 z=100 t=c351
+   W x=254 s=0 z=100 t=c352
+   W x=295 s=0 z=100 t=c353
+   W x=337 s=0 z=100 t=c354
+   W x=380 s=0 z=100 t=c355
+   W x=424 s=0 z=100 t=c356
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c357
+   W x=44 s=0 z=100 t=c358
+   W x=82 s=0 z=100 t=c359
+   W x=121 s=0 z=100 t=c360
+   W x=166 s=0 z=100 t=c361
+   W x=205 s=0 z=100 t=c362
+   W x=245 s=0 z=100 t=c363
+   W x=286 s=0 z=100 t=c364
+   W x=328 s=0 z=100 t=c365
+   W x=371 s=0 z=100 t=c366
+   W x=415 s=0 z=100 t=c367
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c368
+   W x=39 s=0 z=100 t=c369
+   W x=79 s=0 z=100 t=c370
+   W x=125 s=0 z=100 t=c371
+   W x=165 s=0 z=100 t=c372
+   W x=206 s=0 z=100 t=c373
+   W x=248 s=0 z=100 t=c374
+   W x=291 s=0 z=100 t=c375
+   W x=335 s=0 z=100 t=c376
+   W x=380 s=0 z=100 t=c377
+   W x=426 s=0 z=100 t=c378
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c379
+   W x=42 s=0 z=100 t=c380
+   W x=83 s=0 z=100 t=c381
+   W x=118 s=0 z=100 t=c382
+   W x=154 s=0 z=100 t=c383
+   W x=191 s=0 z=100 t=c384
+   W x=229 s=0 z=100 t=c385
+   W x=268 s=0 z=100 t=c386
+   W x=308 s=0 z=100 t=c387
+   W x=349 s=0 z=100 t=c388
+   W x=384 s=0 z=100 t=c389
+   W x=420 s=0 z=100 t=c390
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c391
+   W x=35 s=0 z=100 t=c392
+   W x=71 s=0 z=100 t=c393
+   W x=108 s=0 z=100 t=c394
+   W x=146 s=0 z=100 t=c395
+   W x=185 s=0 z=100 t=c396
+   W x=225 s=0 z=100 t=c397
+   W x=266 s=0 z=100 t=c398
+   W x=301 s=0 z=100 t=c399
+   W x=337 s=0 z=100 t=c400
+   W x=384 s=0 z=100 t=c401
+   W x=425 s=0 z=100 t=c402
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c403
+   W x=44 s=0 z=100 t=c404
+   W x=89 s=0 z=100 t=c405
+   W x=135 s=0 z=100 t=c406
+   W x=182 s=0 z=100 t=c407
+   W x=230 s=0 z=100 t=c408
+   W x=272 s=0 z=100 t=c409
+   W x=315 s=0 z=100 t=c410
+   W x=357 s=0 z=100 t=c411
+   W x=393 s=0 z=100 t=c412
+   W x=430 s=0 z=100 t=c413
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c414
+   W x=38 s=0 z=100 t=c415
+   W x=77 s=0 z=100 t=c416
+   W x=117 s=0 z=100 t=c417
+   W x=158 s=0 z=100 t=c418
+   W x=193 s=0 z=100 t=c419
+   W x=229 s=0 z=100 t=c420
+   W x=271 s=0 z=100 t=c421
+   W x=307 s=0 z=100 t=c422
+   W x=344 s=0 z=100 t=c423
+   W x=382 s=0 z=100 t=c424
+   W x=421 s=0 z=100 t=c425
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c426
+   W x=44 s=0 z=100 t=c427
+   W x=89 s=0 z=100 t=c428
+   W x=128 s=0 z=100 t=c429
+   W x=168 s=0 z=100 t=c430
+   W x=214 s=0 z=100 t=c431
+   W x=254 s=0 z=100 t=c432
+   W x=295 s=0 z=100 t=c433
+   W x=337 s=0 z=100 t=c434
+   W x=380 s=0 z=100 t=c435
+   W x=424 s=0 z=100 t=c436
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c437
+   W x=44 s=0 z=100 t=c438
+   W x=82 s=0 z=100 t=c439
+   W x=121 s=0 z=100 t=c440
+   W x=166 s=0 z=100 t=c441
+   W x=205 s=0 z=100 t=c442
+   W x=245 s=0 z=100 t=c443
+   W x=286 s=0 z=100 t=c444
+   W x=328 s=0 z=100 t=c445
+   W x=371 s=0 z=100 t=c446
+   W x=415 s=0 z=100 t=c447
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c448
+   W x=39 s=0 z=100 t=c449
+   W x=79 s=0 z=100 t=c450
+   W x=125 s=0 z=100 t=c451
+   W x=165 s=0 z=100 t=c452
+   W x=206 s=0 z=100 t=c453
+   W x=248 s=0 z=100 t=c454
+   W x=291 s=0 z=100 t=c455
+   W x=335 s=0 z=100 t=c456
+   W x=380 s=0 z=100 t=c457
+   W x=426 s=0 z=100 t=c458
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=c459
+   W x=39 s=0 z=100 t=c460
+   W x=84 s=0 z=100 t=c461
+   W x=123 s=0 z=100 t=c462
+   W x=163 s=0 z=100 t=c463
+   W x=204 s=0 z=100 t=c464
+   W x=246 s=0 z=100 t=c465
+   W x=289 s=0 z=100 t=c466
+   W x=333 s=0 z=100 t=c467
+   W x=378 s=0 z=100 t=c468
+   W x=417 s=0 z=100 t=c469
+ PAGE 3 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=c470
+   W x=50 s=0 z=100 t=c471
+   W x=94 s=0 z=100 t=c472
+   W x=139 s=0 z=100 t=c473
+   W x=185 s=0 z=100 t=c474
+   W x=232 s=0 z=100 t=c475
+   W x=280 s=0 z=100 t=c476
+   W x=329 s=0 z=100 t=c477
+   W x=379 s=0 z=100 t=c478
+   W x=423 s=0 z=100 t=c479
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=c480
+   W x=42 s=0 z=100 t=c481
+   W x=78 s=0 z=100 t=c482
+   W x=115 s=0 z=100 t=c483
+   W x=153 s=0 z=100 t=c484
+   W x=192 s=0 z=100 t=c485
+   W x=232 s=0 z=100 t=c486
+   W x=273 s=0 z=100 t=c487
+   W x=315 s=0 z=100 t=c488
+   W x=351 s=0 z=100 t=c489
+   W x=388 s=0 z=100 t=c490
+   W x=431 s=0 z=100 t=c491
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=c492
+   W x=36 s=0 z=100 t=c493
+   W x=73 s=0 z=100 t=c494
+   W x=111 s=0 z=100 t=c495
+   W x=150 s=0 z=100 t=c496
+   W x=190 s=0 z=100 t=c497
+   W x=231 s=0 z=100 t=c498
+   W x=266 s=0 z=100 t=c499
+   W x=302 s=0 z=100 t=c500
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=SOLONEXT
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=BRFIRST
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=BRWORD
+   W x=68 s=0 z=100 t=d001
+   W x=115 s=0 z=100 t=d002
+   W x=163 s=0 z=100 t=d003
+   W x=212 s=0 z=100 t=d004
+   W x=262 s=0 z=100 t=d005
+   W x=313 s=0 z=100 t=d006
+   W x=365 s=0 z=100 t=d007
+   W x=418 s=0 z=100 t=d008
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d009
+   W x=46 s=0 z=100 t=d010
+   W x=91 s=0 z=100 t=d011
+   W x=130 s=0 z=100 t=d012
+   W x=170 s=0 z=100 t=d013
+   W x=211 s=0 z=100 t=d014
+   W x=253 s=0 z=100 t=d015
+   W x=296 s=0 z=100 t=d016
+   W x=340 s=0 z=100 t=d017
+   W x=385 s=0 z=100 t=d018
+   W x=424 s=0 z=100 t=d019
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d020
+   W x=45 s=0 z=100 t=d021
+   W x=84 s=0 z=100 t=d022
+   W x=124 s=0 z=100 t=d023
+   W x=165 s=0 z=100 t=d024
+   W x=207 s=0 z=100 t=d025
+   W x=250 s=0 z=100 t=d026
+   W x=294 s=0 z=100 t=d027
+   W x=339 s=0 z=100 t=d028
+   W x=378 s=0 z=100 t=d029
+   W x=418 s=0 z=100 t=d030
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=d031
+   W x=44 s=0 z=100 t=d032
+   W x=89 s=0 z=100 t=d033
+   W x=135 s=0 z=100 t=d034
+   W x=182 s=0 z=100 t=d035
+   W x=230 s=0 z=100 t=d036
+   W x=279 s=0 z=100 t=d037
+   W x=329 s=0 z=100 t=d038
+   W x=373 s=0 z=100 t=d039
+   W x=418 s=0 z=100 t=d040
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=d041
+   W x=44 s=0 z=100 t=d042
+   W x=89 s=0 z=100 t=d043
+   W x=135 s=0 z=100 t=d044
+   W x=182 s=0 z=100 t=d045
+   W x=230 s=0 z=100 t=d046
+   W x=279 s=0 z=100 t=d047
+   W x=329 s=0 z=100 t=d048
+   W x=373 s=0 z=100 t=d049
+   W x=418 s=0 z=100 t=d050
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=d051
+   W x=43 s=0 z=100 t=d052
+   W x=87 s=0 z=100 t=d053
+   W x=132 s=0 z=100 t=d054
+   W x=178 s=0 z=100 t=d055
+   W x=225 s=0 z=100 t=d056
+   W x=273 s=0 z=100 t=d057
+   W x=322 s=0 z=100 t=d058
+   W x=365 s=0 z=100 t=d059
+   W x=409 s=0 z=100 t=d060
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=d061
+   W x=43 s=0 z=100 t=d062
+   W x=87 s=0 z=100 t=d063
+   W x=132 s=0 z=100 t=d064
+   W x=178 s=0 z=100 t=d065
+   W x=225 s=0 z=100 t=d066
+   W x=273 s=0 z=100 t=d067
+   W x=322 s=0 z=100 t=d068
+   W x=365 s=0 z=100 t=d069
+   W x=409 s=0 z=100 t=d070
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=d071
+   W x=44 s=0 z=100 t=d072
+   W x=89 s=0 z=100 t=d073
+   W x=135 s=0 z=100 t=d074
+   W x=182 s=0 z=100 t=d075
+   W x=230 s=0 z=100 t=d076
+   W x=279 s=0 z=100 t=d077
+   W x=329 s=0 z=100 t=d078
+   W x=373 s=0 z=100 t=d079
+   W x=418 s=0 z=100 t=d080
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d081
+   W x=39 s=0 z=100 t=d082
+   W x=79 s=0 z=100 t=d083
+   W x=120 s=0 z=100 t=d084
+   W x=162 s=0 z=100 t=d085
+   W x=205 s=0 z=100 t=d086
+   W x=249 s=0 z=100 t=d087
+   W x=294 s=0 z=100 t=d088
+   W x=333 s=0 z=100 t=d089
+   W x=373 s=0 z=100 t=d090
+   W x=419 s=0 z=100 t=d091
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d092
+   W x=41 s=0 z=100 t=d093
+   W x=83 s=0 z=100 t=d094
+   W x=126 s=0 z=100 t=d095
+   W x=170 s=0 z=100 t=d096
+   W x=215 s=0 z=100 t=d097
+   W x=261 s=0 z=100 t=d098
+   W x=301 s=0 z=100 t=d099
+   W x=342 s=0 z=100 t=d100
+   W x=387 s=0 z=100 t=d101
+   W x=426 s=0 z=100 t=d102
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d103
+   W x=40 s=0 z=100 t=d104
+   W x=81 s=0 z=100 t=d105
+   W x=123 s=0 z=100 t=d106
+   W x=166 s=0 z=100 t=d107
+   W x=210 s=0 z=100 t=d108
+   W x=248 s=0 z=100 t=d109
+   W x=287 s=0 z=100 t=d110
+   W x=325 s=0 z=100 t=d111
+   W x=357 s=0 z=100 t=d112
+   W x=390 s=0 z=100 t=d113
+   W x=424 s=0 z=100 t=d114
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d115
+   W x=39 s=0 z=100 t=d116
+   W x=79 s=0 z=100 t=d117
+   W x=120 s=0 z=100 t=d118
+   W x=155 s=0 z=100 t=d119
+   W x=191 s=0 z=100 t=d120
+   W x=233 s=0 z=100 t=d121
+   W x=269 s=0 z=100 t=d122
+   W x=306 s=0 z=100 t=d123
+   W x=344 s=0 z=100 t=d124
+   W x=383 s=0 z=100 t=d125
+   W x=423 s=0 z=100 t=d126
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d127
+   W x=41 s=0 z=100 t=d128
+   W x=76 s=0 z=100 t=d129
+   W x=112 s=0 z=100 t=d130
+   W x=154 s=0 z=100 t=d131
+   W x=190 s=0 z=100 t=d132
+   W x=227 s=0 z=100 t=d133
+   W x=265 s=0 z=100 t=d134
+   W x=304 s=0 z=100 t=d135
+   W x=344 s=0 z=100 t=d136
+   W x=385 s=0 z=100 t=d137
+   W x=427 s=0 z=100 t=d138
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d139
+   W x=36 s=0 z=100 t=d140
+   W x=78 s=0 z=100 t=d141
+   W x=114 s=0 z=100 t=d142
+   W x=151 s=0 z=100 t=d143
+   W x=189 s=0 z=100 t=d144
+   W x=228 s=0 z=100 t=d145
+   W x=268 s=0 z=100 t=d146
+   W x=309 s=0 z=100 t=d147
+   W x=351 s=0 z=100 t=d148
+   W x=387 s=0 z=100 t=d149
+   W x=424 s=0 z=100 t=d150
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d151
+   W x=36 s=0 z=100 t=d152
+   W x=73 s=0 z=100 t=d153
+   W x=111 s=0 z=100 t=d154
+   W x=150 s=0 z=100 t=d155
+   W x=190 s=0 z=100 t=d156
+   W x=231 s=0 z=100 t=d157
+   W x=273 s=0 z=100 t=d158
+   W x=309 s=0 z=100 t=d159
+   W x=346 s=0 z=100 t=d160
+   W x=389 s=0 z=100 t=d161
+   W x=426 s=0 z=100 t=d162
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d163
+   W x=41 s=0 z=100 t=d164
+   W x=83 s=0 z=100 t=d165
+   W x=126 s=0 z=100 t=d166
+   W x=170 s=0 z=100 t=d167
+   W x=215 s=0 z=100 t=d168
+   W x=254 s=0 z=100 t=d169
+   W x=294 s=0 z=100 t=d170
+   W x=340 s=0 z=100 t=d171
+   W x=380 s=0 z=100 t=d172
+   W x=421 s=0 z=100 t=d173
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d174
+   W x=42 s=0 z=100 t=d175
+   W x=85 s=0 z=100 t=d176
+   W x=129 s=0 z=100 t=d177
+   W x=174 s=0 z=100 t=d178
+   W x=213 s=0 z=100 t=d179
+   W x=253 s=0 z=100 t=d180
+   W x=292 s=0 z=100 t=d181
+   W x=325 s=0 z=100 t=d182
+   W x=359 s=0 z=100 t=d183
+   W x=394 s=0 z=100 t=d184
+   W x=430 s=0 z=100 t=d185
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=d186
+   W x=37 s=0 z=100 t=d187
+   W x=75 s=0 z=100 t=d188
+   W x=107 s=0 z=100 t=d189
+   W x=140 s=0 z=100 t=d190
+   W x=179 s=0 z=100 t=d191
+   W x=212 s=0 z=100 t=d192
+   W x=246 s=0 z=100 t=d193
+   W x=281 s=0 z=100 t=d194
+   W x=317 s=0 z=100 t=d195
+   W x=354 s=0 z=100 t=d196
+   W x=392 s=0 z=100 t=d197
+   W x=431 s=0 z=100 t=d198
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d199
+   W x=35 s=0 z=100 t=d200
+   W x=81 s=0 z=100 t=d201
+   W x=121 s=0 z=100 t=d202
+   W x=162 s=0 z=100 t=d203
+   W x=204 s=0 z=100 t=d204
+   W x=247 s=0 z=100 t=d205
+   W x=291 s=0 z=100 t=d206
+   W x=336 s=0 z=100 t=d207
+   W x=382 s=0 z=100 t=d208
+   W x=422 s=0 z=100 t=d209
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d210
+   W x=42 s=0 z=100 t=d211
+   W x=78 s=0 z=100 t=d212
+   W x=115 s=0 z=100 t=d213
+   W x=153 s=0 z=100 t=d214
+   W x=192 s=0 z=100 t=d215
+   W x=232 s=0 z=100 t=d216
+   W x=273 s=0 z=100 t=d217
+   W x=315 s=0 z=100 t=d218
+   W x=351 s=0 z=100 t=d219
+   W x=388 s=0 z=100 t=d220
+   W x=431 s=0 z=100 t=d221
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d222
+   W x=37 s=0 z=100 t=d223
+   W x=75 s=0 z=100 t=d224
+   W x=114 s=0 z=100 t=d225
+   W x=154 s=0 z=100 t=d226
+   W x=195 s=0 z=100 t=d227
+   W x=237 s=0 z=100 t=d228
+   W x=273 s=0 z=100 t=d229
+   W x=310 s=0 z=100 t=d230
+   W x=353 s=0 z=100 t=d231
+   W x=390 s=0 z=100 t=d232
+   W x=428 s=0 z=100 t=d233
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d234
+   W x=38 s=0 z=100 t=d235
+   W x=77 s=0 z=100 t=d236
+   W x=117 s=0 z=100 t=d237
+   W x=158 s=0 z=100 t=d238
+   W x=193 s=0 z=100 t=d239
+   W x=229 s=0 z=100 t=d240
+   W x=271 s=0 z=100 t=d241
+   W x=307 s=0 z=100 t=d242
+   W x=344 s=0 z=100 t=d243
+   W x=382 s=0 z=100 t=d244
+   W x=421 s=0 z=100 t=d245
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d246
+   W x=44 s=0 z=100 t=d247
+   W x=89 s=0 z=100 t=d248
+   W x=128 s=0 z=100 t=d249
+   W x=168 s=0 z=100 t=d250
+   W x=214 s=0 z=100 t=d251
+   W x=254 s=0 z=100 t=d252
+   W x=295 s=0 z=100 t=d253
+   W x=337 s=0 z=100 t=d254
+   W x=380 s=0 z=100 t=d255
+   W x=424 s=0 z=100 t=d256
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d257
+   W x=44 s=0 z=100 t=d258
+   W x=82 s=0 z=100 t=d259
+   W x=121 s=0 z=100 t=d260
+   W x=166 s=0 z=100 t=d261
+   W x=205 s=0 z=100 t=d262
+   W x=245 s=0 z=100 t=d263
+   W x=286 s=0 z=100 t=d264
+   W x=328 s=0 z=100 t=d265
+   W x=371 s=0 z=100 t=d266
+   W x=415 s=0 z=100 t=d267
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d268
+   W x=39 s=0 z=100 t=d269
+   W x=79 s=0 z=100 t=d270
+   W x=125 s=0 z=100 t=d271
+   W x=165 s=0 z=100 t=d272
+   W x=206 s=0 z=100 t=d273
+   W x=248 s=0 z=100 t=d274
+   W x=291 s=0 z=100 t=d275
+   W x=335 s=0 z=100 t=d276
+   W x=380 s=0 z=100 t=d277
+   W x=426 s=0 z=100 t=d278
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d279
+   W x=42 s=0 z=100 t=d280
+   W x=83 s=0 z=100 t=d281
+   W x=118 s=0 z=100 t=d282
+   W x=154 s=0 z=100 t=d283
+   W x=191 s=0 z=100 t=d284
+   W x=229 s=0 z=100 t=d285
+   W x=268 s=0 z=100 t=d286
+   W x=308 s=0 z=100 t=d287
+   W x=349 s=0 z=100 t=d288
+   W x=384 s=0 z=100 t=d289
+   W x=420 s=0 z=100 t=d290
+ PAGE 4 elements=20 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d291
+   W x=35 s=0 z=100 t=d292
+   W x=71 s=0 z=100 t=d293
+   W x=108 s=0 z=100 t=d294
+   W x=146 s=0 z=100 t=d295
+   W x=185 s=0 z=100 t=d296
+   W x=225 s=0 z=100 t=d297
+   W x=266 s=0 z=100 t=d298
+   W x=301 s=0 z=100 t=d299
+   W x=337 s=0 z=100 t=d300
+   W x=384 s=0 z=100 t=d301
+   W x=425 s=0 z=100 t=d302
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d303
+   W x=44 s=0 z=100 t=d304
+   W x=89 s=0 z=100 t=d305
+   W x=135 s=0 z=100 t=d306
+   W x=182 s=0 z=100 t=d307
+   W x=230 s=0 z=100 t=d308
+   W x=272 s=0 z=100 t=d309
+   W x=315 s=0 z=100 t=d310
+   W x=357 s=0 z=100 t=d311
+   W x=393 s=0 z=100 t=d312
+   W x=430 s=0 z=100 t=d313
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d314
+   W x=38 s=0 z=100 t=d315
+   W x=77 s=0 z=100 t=d316
+   W x=117 s=0 z=100 t=d317
+   W x=158 s=0 z=100 t=d318
+   W x=193 s=0 z=100 t=d319
+   W x=229 s=0 z=100 t=d320
+   W x=271 s=0 z=100 t=d321
+   W x=307 s=0 z=100 t=d322
+   W x=344 s=0 z=100 t=d323
+   W x=382 s=0 z=100 t=d324
+   W x=421 s=0 z=100 t=d325
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d326
+   W x=44 s=0 z=100 t=d327
+   W x=89 s=0 z=100 t=d328
+   W x=128 s=0 z=100 t=d329
+   W x=168 s=0 z=100 t=d330
+   W x=214 s=0 z=100 t=d331
+   W x=254 s=0 z=100 t=d332
+   W x=295 s=0 z=100 t=d333
+   W x=337 s=0 z=100 t=d334
+   W x=380 s=0 z=100 t=d335
+   W x=424 s=0 z=100 t=d336
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d337
+   W x=44 s=0 z=100 t=d338
+   W x=82 s=0 z=100 t=d339
+   W x=121 s=0 z=100 t=d340
+   W x=166 s=0 z=100 t=d341
+   W x=205 s=0 z=100 t=d342
+   W x=245 s=0 z=100 t=d343
+   W x=286 s=0 z=100 t=d344
+   W x=328 s=0 z=100 t=d345
+   W x=371 s=0 z=100 t=d346
+   W x=415 s=0 z=100 t=d347
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d348
+   W x=39 s=0 z=100 t=d349
+   W x=79 s=0 z=100 t=d350
+   W x=125 s=0 z=100 t=d351
+   W x=165 s=0 z=100 t=d352
+   W x=206 s=0 z=100 t=d353
+   W x=248 s=0 z=100 t=d354
+   W x=291 s=0 z=100 t=d355
+   W x=335 s=0 z=100 t=d356
+   W x=380 s=0 z=100 t=d357
+   W x=426 s=0 z=100 t=d358
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d359
+   W x=39 s=0 z=100 t=d360
+   W x=84 s=0 z=100 t=d361
+   W x=123 s=0 z=100 t=d362
+   W x=163 s=0 z=100 t=d363
+   W x=204 s=0 z=100 t=d364
+   W x=246 s=0 z=100 t=d365
+   W x=289 s=0 z=100 t=d366
+   W x=333 s=0 z=100 t=d367
+   W x=378 s=0 z=100 t=d368
+   W x=417 s=0 z=100 t=d369
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=d370
+   W x=50 s=0 z=100 t=d371
+   W x=94 s=0 z=100 t=d372
+   W x=139 s=0 z=100 t=d373
+   W x=185 s=0 z=100 t=d374
+   W x=232 s=0 z=100 t=d375
+   W x=280 s=0 z=100 t=d376
+   W x=329 s=0 z=100 t=d377
+   W x=379 s=0 z=100 t=d378
+   W x=423 s=0 z=100 t=d379
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d380
+   W x=42 s=0 z=100 t=d381
+   W x=78 s=0 z=100 t=d382
+   W x=115 s=0 z=100 t=d383
+   W x=153 s=0 z=100 t=d384
+   W x=192 s=0 z=100 t=d385
+   W x=232 s=0 z=100 t=d386
+   W x=273 s=0 z=100 t=d387
+   W x=315 s=0 z=100 t=d388
+   W x=351 s=0 z=100 t=d389
+   W x=388 s=0 z=100 t=d390
+   W x=431 s=0 z=100 t=d391
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d392
+   W x=39 s=0 z=100 t=d393
+   W x=79 s=0 z=100 t=d394
+   W x=120 s=0 z=100 t=d395
+   W x=162 s=0 z=100 t=d396
+   W x=205 s=0 z=100 t=d397
+   W x=249 s=0 z=100 t=d398
+   W x=287 s=0 z=100 t=d399
+   W x=326 s=0 z=100 t=d400
+   W x=376 s=0 z=100 t=d401
+   W x=420 s=0 z=100 t=d402
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d403
+   W x=43 s=0 z=100 t=d404
+   W x=87 s=0 z=100 t=d405
+   W x=132 s=0 z=100 t=d406
+   W x=178 s=0 z=100 t=d407
+   W x=225 s=0 z=100 t=d408
+   W x=266 s=0 z=100 t=d409
+   W x=308 s=0 z=100 t=d410
+   W x=349 s=0 z=100 t=d411
+   W x=384 s=0 z=100 t=d412
+   W x=420 s=0 z=100 t=d413
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d414
+   W x=38 s=0 z=100 t=d415
+   W x=77 s=0 z=100 t=d416
+   W x=117 s=0 z=100 t=d417
+   W x=158 s=0 z=100 t=d418
+   W x=193 s=0 z=100 t=d419
+   W x=229 s=0 z=100 t=d420
+   W x=271 s=0 z=100 t=d421
+   W x=307 s=0 z=100 t=d422
+   W x=344 s=0 z=100 t=d423
+   W x=382 s=0 z=100 t=d424
+   W x=421 s=0 z=100 t=d425
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d426
+   W x=44 s=0 z=100 t=d427
+   W x=89 s=0 z=100 t=d428
+   W x=128 s=0 z=100 t=d429
+   W x=168 s=0 z=100 t=d430
+   W x=214 s=0 z=100 t=d431
+   W x=254 s=0 z=100 t=d432
+   W x=295 s=0 z=100 t=d433
+   W x=337 s=0 z=100 t=d434
+   W x=380 s=0 z=100 t=d435
+   W x=424 s=0 z=100 t=d436
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d437
+   W x=44 s=0 z=100 t=d438
+   W x=82 s=0 z=100 t=d439
+   W x=121 s=0 z=100 t=d440
+   W x=166 s=0 z=100 t=d441
+   W x=205 s=0 z=100 t=d442
+   W x=245 s=0 z=100 t=d443
+   W x=286 s=0 z=100 t=d444
+   W x=328 s=0 z=100 t=d445
+   W x=371 s=0 z=100 t=d446
+   W x=415 s=0 z=100 t=d447
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=d448
+   W x=39 s=0 z=100 t=d449
+   W x=79 s=0 z=100 t=d450
+   W x=125 s=0 z=100 t=d451
+   W x=165 s=0 z=100 t=d452
+   W x=206 s=0 z=100 t=d453
+   W x=248 s=0 z=100 t=d454
+   W x=291 s=0 z=100 t=d455
+   W x=335 s=0 z=100 t=d456
+   W x=380 s=0 z=100 t=d457
+   W x=426 s=0 z=100 t=d458
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=d459
+   W x=44 s=0 z=100 t=d460
+   W x=94 s=0 z=100 t=d461
+   W x=138 s=0 z=100 t=d462
+   W x=183 s=0 z=100 t=d463
+   W x=229 s=0 z=100 t=d464
+   W x=276 s=0 z=100 t=d465
+   W x=324 s=0 z=100 t=d466
+   W x=373 s=0 z=100 t=d467
+   W x=423 s=0 z=100 t=d468
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=d469
+   W x=44 s=0 z=100 t=d470
+   W x=94 s=0 z=100 t=d471
+   W x=138 s=0 z=100 t=d472
+   W x=183 s=0 z=100 t=d473
+   W x=229 s=0 z=100 t=d474
+   W x=276 s=0 z=100 t=d475
+   W x=324 s=0 z=100 t=d476
+   W x=373 s=0 z=100 t=d477
+   W x=423 s=0 z=100 t=d478
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=d479
+   W x=42 s=0 z=100 t=d480
+   W x=83 s=0 z=100 t=d481
+   W x=118 s=0 z=100 t=d482
+   W x=154 s=0 z=100 t=d483
+   W x=191 s=0 z=100 t=d484
+   W x=229 s=0 z=100 t=d485
+   W x=268 s=0 z=100 t=d486
+   W x=308 s=0 z=100 t=d487
+   W x=349 s=0 z=100 t=d488
+   W x=384 s=0 z=100 t=d489
+   W x=420 s=0 z=100 t=d490
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=d491
+   W x=36 s=0 z=100 t=d492
+   W x=73 s=0 z=100 t=d493
+   W x=111 s=0 z=100 t=d494
+   W x=150 s=0 z=100 t=d495
+   W x=190 s=0 z=100 t=d496
+   W x=231 s=0 z=100 t=d497
+   W x=273 s=0 z=100 t=d498
+   W x=309 s=0 z=100 t=d499
+   W x=346 s=0 z=100 t=d500
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=BRNEXT
+SPINE 3 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=3 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=TABLEBEFORE
+  TABLE y=24 x=0 w=460 h=36 cols=2 border=1 rows=1
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=2
+      W x=18 s=0 z=100 t=CELLA
+      W x=78 s=0 z=100 t=CELLB
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=CELLC
+  LINE y=60 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=TABLEAFTER
+SPINE 4 href=OEBPS/chapter4.xhtml pages=6 truncated=0 cssFallback=0
+ PAGE 0 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=M001
+   W x=80 s=0 z=100 t=internationalization
+   W x=299 s=0 z=100 t=characteristically
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M002
+   W x=71 s=0 z=100 t=internationalization
+   W x=298 s=0 z=100 t=characteristically
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M003
+   W x=72 s=0 z=100 t=internationalization
+   W x=299 s=0 z=100 t=characteristically
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M004
+   W x=72 s=0 z=100 t=internationalization
+   W x=298 s=0 z=100 t=characteristically
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M005
+   W x=73 s=0 z=100 t=internationalization
+   W x=299 s=0 z=100 t=characteristically
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M006
+   W x=73 s=0 z=100 t=internationalization
+   W x=298 s=0 z=100 t=characteristically
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M007
+   W x=74 s=0 z=100 t=internationalization
+   W x=299 s=0 z=100 t=characteristically
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M008
+   W x=71 s=0 z=100 t=internationalization
+   W x=299 s=0 z=100 t=characteristically
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M009
+   W x=71 s=0 z=100 t=internationalization
+   W x=298 s=0 z=100 t=characteristically
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M010
+   W x=71 s=0 z=100 t=internationalization
+   W x=299 s=0 z=100 t=characteristically
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M011
+   W x=68 s=0 z=100 t=internationalization
+   W x=299 s=0 z=100 t=characteristically
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M012
+   W x=68 s=0 z=100 t=internationalization
+   W x=298 s=0 z=100 t=characteristically
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M013
+   W x=69 s=0 z=100 t=internationalization
+   W x=299 s=0 z=100 t=characteristically
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M014
+   W x=69 s=0 z=100 t=internationalization
+   W x=298 s=0 z=100 t=characteristically
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M015
+   W x=70 s=0 z=100 t=internationalization
+   W x=299 s=0 z=100 t=characteristically
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M016
+   W x=70 s=0 z=100 t=internationalization
+   W x=298 s=0 z=100 t=characteristically
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=M017
+   W x=71 s=0 z=100 t=internationalization
+   W x=299 s=0 z=100 t=characteristically
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=M018
+   W x=45 s=0 z=100 t=internationalization
+   W x=253 s=0 z=100 t=characteristically
+   W x=429 s=0 z=100 t=M019
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M020
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M021
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M022
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M023
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M024
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M025
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M026
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M027
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M028
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M029
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M030
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M031
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M032
+ PAGE 1 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M033
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M034
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M035
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M036
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M037
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M038
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M039
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=226 s=0 z=100 t=characteristically
+   W x=420 s=0 z=100 t=M040
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M041
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M042
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M043
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M044
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M045
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M046
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=226 s=0 z=100 t=characteristically
+   W x=420 s=0 z=100 t=M047
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M048
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M049
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=226 s=0 z=100 t=characteristically
+   W x=420 s=0 z=100 t=M050
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M051
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M052
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M053
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M054
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M055
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=226 s=0 z=100 t=characteristically
+   W x=420 s=0 z=100 t=M056
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=226 s=0 z=100 t=characteristically
+   W x=420 s=0 z=100 t=M057
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M058
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M059
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=225 s=0 z=100 t=characteristically
+   W x=418 s=0 z=100 t=M060
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M061
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M062
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M063
+ PAGE 2 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M064
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=226 s=0 z=100 t=characteristically
+   W x=420 s=0 z=100 t=M065
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=226 s=0 z=100 t=characteristically
+   W x=420 s=0 z=100 t=M066
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=225 s=0 z=100 t=characteristically
+   W x=418 s=0 z=100 t=M067
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M068
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M069
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=225 s=0 z=100 t=characteristically
+   W x=418 s=0 z=100 t=M070
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M071
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M072
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M073
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=226 s=0 z=100 t=characteristically
+   W x=420 s=0 z=100 t=M074
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=226 s=0 z=100 t=characteristically
+   W x=420 s=0 z=100 t=M075
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=225 s=0 z=100 t=characteristically
+   W x=418 s=0 z=100 t=M076
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=225 s=0 z=100 t=characteristically
+   W x=418 s=0 z=100 t=M077
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M078
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M079
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M080
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M081
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M082
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M083
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M084
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M085
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M086
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M087
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M088
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M089
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M090
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M091
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M092
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M093
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M094
+ PAGE 3 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M095
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M096
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=227 s=0 z=100 t=characteristically
+   W x=422 s=0 z=100 t=M097
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M098
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M099
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M100
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M101
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M102
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M103
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M104
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M105
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M106
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=228 s=0 z=100 t=characteristically
+   W x=424 s=0 z=100 t=M107
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M108
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M109
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M110
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=234 s=0 z=100 t=characteristically
+   W x=436 s=0 z=100 t=M111
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=233 s=0 z=100 t=characteristically
+   W x=434 s=0 z=100 t=M112
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=233 s=0 z=100 t=characteristically
+   W x=434 s=0 z=100 t=M113
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M114
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M115
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M116
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M117
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=234 s=0 z=100 t=characteristically
+   W x=436 s=0 z=100 t=M118
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=233 s=0 z=100 t=characteristically
+   W x=434 s=0 z=100 t=M119
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M120
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=233 s=0 z=100 t=characteristically
+   W x=434 s=0 z=100 t=M121
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=233 s=0 z=100 t=characteristically
+   W x=434 s=0 z=100 t=M122
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M123
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M124
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M125
+ PAGE 4 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M126
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M127
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=233 s=0 z=100 t=characteristically
+   W x=434 s=0 z=100 t=M128
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=233 s=0 z=100 t=characteristically
+   W x=434 s=0 z=100 t=M129
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M130
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=233 s=0 z=100 t=characteristically
+   W x=434 s=0 z=100 t=M131
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M132
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M133
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M134
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M135
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M136
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M137
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=233 s=0 z=100 t=characteristically
+   W x=434 s=0 z=100 t=M138
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M139
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M140
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M141
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M142
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M143
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M144
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M145
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M146
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M147
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M148
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M149
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M150
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M151
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M152
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M153
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M154
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=230 s=0 z=100 t=characteristically
+   W x=428 s=0 z=100 t=M155
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M156
+ PAGE 5 elements=4 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=229 s=0 z=100 t=characteristically
+   W x=426 s=0 z=100 t=M157
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=232 s=0 z=100 t=characteristically
+   W x=432 s=0 z=100 t=M158
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=internationalization
+   W x=231 s=0 z=100 t=characteristically
+   W x=430 s=0 z=100 t=M159
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=internationalization
+   W x=199 s=0 z=100 t=characteristically
+SPINE 5 href=OEBPS/chapter5.xhtml pages=3 truncated=0 cssFallback=0
+ PAGE 0 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=TAILFIRST
+   W x=105 s=0 z=100 t=t001
+   W x=153 s=0 z=100 t=t002
+   W x=202 s=0 z=100 t=t003
+   W x=252 s=0 z=100 t=t004
+   W x=303 s=0 z=100 t=t005
+   W x=355 s=0 z=100 t=t006
+   W x=408 s=0 z=100 t=t007
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t008
+   W x=48 s=0 z=100 t=t009
+   W x=97 s=0 z=100 t=t010
+   W x=145 s=0 z=100 t=t011
+   W x=187 s=0 z=100 t=t012
+   W x=230 s=0 z=100 t=t013
+   W x=274 s=0 z=100 t=t014
+   W x=319 s=0 z=100 t=t015
+   W x=365 s=0 z=100 t=t016
+   W x=412 s=0 z=100 t=t017
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t018
+   W x=43 s=0 z=100 t=t019
+   W x=87 s=0 z=100 t=t020
+   W x=137 s=0 z=100 t=t021
+   W x=181 s=0 z=100 t=t022
+   W x=226 s=0 z=100 t=t023
+   W x=272 s=0 z=100 t=t024
+   W x=319 s=0 z=100 t=t025
+   W x=367 s=0 z=100 t=t026
+   W x=416 s=0 z=100 t=t027
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t028
+   W x=43 s=0 z=100 t=t029
+   W x=87 s=0 z=100 t=t030
+   W x=137 s=0 z=100 t=t031
+   W x=181 s=0 z=100 t=t032
+   W x=226 s=0 z=100 t=t033
+   W x=272 s=0 z=100 t=t034
+   W x=319 s=0 z=100 t=t035
+   W x=367 s=0 z=100 t=t036
+   W x=416 s=0 z=100 t=t037
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t038
+   W x=43 s=0 z=100 t=t039
+   W x=87 s=0 z=100 t=t040
+   W x=137 s=0 z=100 t=t041
+   W x=181 s=0 z=100 t=t042
+   W x=226 s=0 z=100 t=t043
+   W x=272 s=0 z=100 t=t044
+   W x=319 s=0 z=100 t=t045
+   W x=367 s=0 z=100 t=t046
+   W x=416 s=0 z=100 t=t047
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t048
+   W x=43 s=0 z=100 t=t049
+   W x=87 s=0 z=100 t=t050
+   W x=137 s=0 z=100 t=t051
+   W x=181 s=0 z=100 t=t052
+   W x=226 s=0 z=100 t=t053
+   W x=272 s=0 z=100 t=t054
+   W x=319 s=0 z=100 t=t055
+   W x=367 s=0 z=100 t=t056
+   W x=416 s=0 z=100 t=t057
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=t058
+   W x=49 s=0 z=100 t=t059
+   W x=99 s=0 z=100 t=t060
+   W x=155 s=0 z=100 t=t061
+   W x=205 s=0 z=100 t=t062
+   W x=256 s=0 z=100 t=t063
+   W x=308 s=0 z=100 t=t064
+   W x=361 s=0 z=100 t=t065
+   W x=415 s=0 z=100 t=t066
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=t067
+   W x=55 s=0 z=100 t=t068
+   W x=104 s=0 z=100 t=t069
+   W x=154 s=0 z=100 t=t070
+   W x=210 s=0 z=100 t=t071
+   W x=260 s=0 z=100 t=t072
+   W x=311 s=0 z=100 t=t073
+   W x=363 s=0 z=100 t=t074
+   W x=416 s=0 z=100 t=t075
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t076
+   W x=52 s=0 z=100 t=t077
+   W x=105 s=0 z=100 t=t078
+   W x=152 s=0 z=100 t=t079
+   W x=200 s=0 z=100 t=t080
+   W x=247 s=0 z=100 t=t081
+   W x=288 s=0 z=100 t=t082
+   W x=330 s=0 z=100 t=t083
+   W x=373 s=0 z=100 t=t084
+   W x=417 s=0 z=100 t=t085
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t086
+   W x=48 s=0 z=100 t=t087
+   W x=97 s=0 z=100 t=t088
+   W x=140 s=0 z=100 t=t089
+   W x=184 s=0 z=100 t=t090
+   W x=234 s=0 z=100 t=t091
+   W x=278 s=0 z=100 t=t092
+   W x=323 s=0 z=100 t=t093
+   W x=369 s=0 z=100 t=t094
+   W x=416 s=0 z=100 t=t095
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t096
+   W x=49 s=0 z=100 t=t097
+   W x=99 s=0 z=100 t=t098
+   W x=143 s=0 z=100 t=t099
+   W x=188 s=0 z=100 t=t100
+   W x=237 s=0 z=100 t=t101
+   W x=280 s=0 z=100 t=t102
+   W x=324 s=0 z=100 t=t103
+   W x=369 s=0 z=100 t=t104
+   W x=415 s=0 z=100 t=t105
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t106
+   W x=48 s=0 z=100 t=t107
+   W x=97 s=0 z=100 t=t108
+   W x=140 s=0 z=100 t=t109
+   W x=184 s=0 z=100 t=t110
+   W x=227 s=0 z=100 t=t111
+   W x=264 s=0 z=100 t=t112
+   W x=302 s=0 z=100 t=t113
+   W x=341 s=0 z=100 t=t114
+   W x=381 s=0 z=100 t=t115
+   W x=422 s=0 z=100 t=t116
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=t117
+   W x=41 s=0 z=100 t=t118
+   W x=76 s=0 z=100 t=t119
+   W x=112 s=0 z=100 t=t120
+   W x=154 s=0 z=100 t=t121
+   W x=190 s=0 z=100 t=t122
+   W x=227 s=0 z=100 t=t123
+   W x=265 s=0 z=100 t=t124
+   W x=304 s=0 z=100 t=t125
+   W x=344 s=0 z=100 t=t126
+   W x=385 s=0 z=100 t=t127
+   W x=427 s=0 z=100 t=t128
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t129
+   W x=40 s=0 z=100 t=t130
+   W x=86 s=0 z=100 t=t131
+   W x=126 s=0 z=100 t=t132
+   W x=167 s=0 z=100 t=t133
+   W x=209 s=0 z=100 t=t134
+   W x=252 s=0 z=100 t=t135
+   W x=296 s=0 z=100 t=t136
+   W x=341 s=0 z=100 t=t137
+   W x=387 s=0 z=100 t=t138
+   W x=427 s=0 z=100 t=t139
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t140
+   W x=45 s=0 z=100 t=t141
+   W x=84 s=0 z=100 t=t142
+   W x=124 s=0 z=100 t=t143
+   W x=165 s=0 z=100 t=t144
+   W x=207 s=0 z=100 t=t145
+   W x=250 s=0 z=100 t=t146
+   W x=294 s=0 z=100 t=t147
+   W x=339 s=0 z=100 t=t148
+   W x=378 s=0 z=100 t=t149
+   W x=418 s=0 z=100 t=t150
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t151
+   W x=39 s=0 z=100 t=t152
+   W x=79 s=0 z=100 t=t153
+   W x=120 s=0 z=100 t=t154
+   W x=162 s=0 z=100 t=t155
+   W x=205 s=0 z=100 t=t156
+   W x=249 s=0 z=100 t=t157
+   W x=294 s=0 z=100 t=t158
+   W x=333 s=0 z=100 t=t159
+   W x=373 s=0 z=100 t=t160
+   W x=419 s=0 z=100 t=t161
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t162
+   W x=40 s=0 z=100 t=t163
+   W x=81 s=0 z=100 t=t164
+   W x=123 s=0 z=100 t=t165
+   W x=166 s=0 z=100 t=t166
+   W x=210 s=0 z=100 t=t167
+   W x=255 s=0 z=100 t=t168
+   W x=294 s=0 z=100 t=t169
+   W x=334 s=0 z=100 t=t170
+   W x=380 s=0 z=100 t=t171
+   W x=420 s=0 z=100 t=t172
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t173
+   W x=44 s=0 z=100 t=t174
+   W x=89 s=0 z=100 t=t175
+   W x=135 s=0 z=100 t=t176
+   W x=182 s=0 z=100 t=t177
+   W x=230 s=0 z=100 t=t178
+   W x=272 s=0 z=100 t=t179
+   W x=315 s=0 z=100 t=t180
+   W x=357 s=0 z=100 t=t181
+   W x=393 s=0 z=100 t=t182
+   W x=430 s=0 z=100 t=t183
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=t184
+   W x=38 s=0 z=100 t=t185
+   W x=77 s=0 z=100 t=t186
+   W x=117 s=0 z=100 t=t187
+   W x=158 s=0 z=100 t=t188
+   W x=193 s=0 z=100 t=t189
+   W x=229 s=0 z=100 t=t190
+   W x=271 s=0 z=100 t=t191
+   W x=307 s=0 z=100 t=t192
+   W x=344 s=0 z=100 t=t193
+   W x=382 s=0 z=100 t=t194
+   W x=421 s=0 z=100 t=t195
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t196
+   W x=40 s=0 z=100 t=t197
+   W x=81 s=0 z=100 t=t198
+   W x=116 s=0 z=100 t=t199
+   W x=152 s=0 z=100 t=t200
+   W x=199 s=0 z=100 t=t201
+   W x=240 s=0 z=100 t=t202
+   W x=282 s=0 z=100 t=t203
+   W x=325 s=0 z=100 t=t204
+   W x=369 s=0 z=100 t=t205
+   W x=414 s=0 z=100 t=t206
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t207
+   W x=49 s=0 z=100 t=t208
+   W x=92 s=0 z=100 t=t209
+   W x=136 s=0 z=100 t=t210
+   W x=179 s=0 z=100 t=t211
+   W x=216 s=0 z=100 t=t212
+   W x=254 s=0 z=100 t=t213
+   W x=293 s=0 z=100 t=t214
+   W x=333 s=0 z=100 t=t215
+   W x=374 s=0 z=100 t=t216
+   W x=416 s=0 z=100 t=t217
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=t218
+   W x=35 s=0 z=100 t=t219
+   W x=71 s=0 z=100 t=t220
+   W x=113 s=0 z=100 t=t221
+   W x=149 s=0 z=100 t=t222
+   W x=186 s=0 z=100 t=t223
+   W x=224 s=0 z=100 t=t224
+   W x=263 s=0 z=100 t=t225
+   W x=303 s=0 z=100 t=t226
+   W x=344 s=0 z=100 t=t227
+   W x=386 s=0 z=100 t=t228
+   W x=422 s=0 z=100 t=t229
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t230
+   W x=45 s=0 z=100 t=t231
+   W x=84 s=0 z=100 t=t232
+   W x=124 s=0 z=100 t=t233
+   W x=165 s=0 z=100 t=t234
+   W x=207 s=0 z=100 t=t235
+   W x=250 s=0 z=100 t=t236
+   W x=294 s=0 z=100 t=t237
+   W x=339 s=0 z=100 t=t238
+   W x=378 s=0 z=100 t=t239
+   W x=418 s=0 z=100 t=t240
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t241
+   W x=39 s=0 z=100 t=t242
+   W x=79 s=0 z=100 t=t243
+   W x=120 s=0 z=100 t=t244
+   W x=162 s=0 z=100 t=t245
+   W x=205 s=0 z=100 t=t246
+   W x=249 s=0 z=100 t=t247
+   W x=294 s=0 z=100 t=t248
+   W x=333 s=0 z=100 t=t249
+   W x=373 s=0 z=100 t=t250
+   W x=419 s=0 z=100 t=t251
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t252
+   W x=40 s=0 z=100 t=t253
+   W x=81 s=0 z=100 t=t254
+   W x=123 s=0 z=100 t=t255
+   W x=166 s=0 z=100 t=t256
+   W x=210 s=0 z=100 t=t257
+   W x=255 s=0 z=100 t=t258
+   W x=294 s=0 z=100 t=t259
+   W x=334 s=0 z=100 t=t260
+   W x=380 s=0 z=100 t=t261
+   W x=420 s=0 z=100 t=t262
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t263
+   W x=45 s=0 z=100 t=t264
+   W x=91 s=0 z=100 t=t265
+   W x=138 s=0 z=100 t=t266
+   W x=186 s=0 z=100 t=t267
+   W x=235 s=0 z=100 t=t268
+   W x=278 s=0 z=100 t=t269
+   W x=322 s=0 z=100 t=t270
+   W x=372 s=0 z=100 t=t271
+   W x=416 s=0 z=100 t=t272
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t273
+   W x=43 s=0 z=100 t=t274
+   W x=87 s=0 z=100 t=t275
+   W x=132 s=0 z=100 t=t276
+   W x=178 s=0 z=100 t=t277
+   W x=225 s=0 z=100 t=t278
+   W x=266 s=0 z=100 t=t279
+   W x=308 s=0 z=100 t=t280
+   W x=349 s=0 z=100 t=t281
+   W x=384 s=0 z=100 t=t282
+   W x=420 s=0 z=100 t=t283
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=t284
+   W x=38 s=0 z=100 t=t285
+   W x=77 s=0 z=100 t=t286
+   W x=117 s=0 z=100 t=t287
+   W x=158 s=0 z=100 t=t288
+   W x=193 s=0 z=100 t=t289
+   W x=229 s=0 z=100 t=t290
+   W x=271 s=0 z=100 t=t291
+   W x=307 s=0 z=100 t=t292
+   W x=344 s=0 z=100 t=t293
+   W x=382 s=0 z=100 t=t294
+   W x=421 s=0 z=100 t=t295
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t296
+   W x=45 s=0 z=100 t=t297
+   W x=91 s=0 z=100 t=t298
+   W x=131 s=0 z=100 t=t299
+   W x=172 s=0 z=100 t=t300
+   W x=224 s=0 z=100 t=t301
+   W x=270 s=0 z=100 t=t302
+   W x=317 s=0 z=100 t=t303
+   W x=365 s=0 z=100 t=t304
+   W x=414 s=0 z=100 t=t305
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t306
+   W x=48 s=0 z=100 t=t307
+   W x=97 s=0 z=100 t=t308
+   W x=140 s=0 z=100 t=t309
+   W x=184 s=0 z=100 t=t310
+   W x=227 s=0 z=100 t=t311
+   W x=264 s=0 z=100 t=t312
+   W x=302 s=0 z=100 t=t313
+   W x=341 s=0 z=100 t=t314
+   W x=381 s=0 z=100 t=t315
+   W x=422 s=0 z=100 t=t316
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t317
+   W x=44 s=0 z=100 t=t318
+   W x=82 s=0 z=100 t=t319
+   W x=121 s=0 z=100 t=t320
+   W x=166 s=0 z=100 t=t321
+   W x=205 s=0 z=100 t=t322
+   W x=245 s=0 z=100 t=t323
+   W x=286 s=0 z=100 t=t324
+   W x=328 s=0 z=100 t=t325
+   W x=371 s=0 z=100 t=t326
+   W x=415 s=0 z=100 t=t327
+ PAGE 1 elements=7 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t328
+   W x=39 s=0 z=100 t=t329
+   W x=79 s=0 z=100 t=t330
+   W x=125 s=0 z=100 t=t331
+   W x=165 s=0 z=100 t=t332
+   W x=206 s=0 z=100 t=t333
+   W x=248 s=0 z=100 t=t334
+   W x=291 s=0 z=100 t=t335
+   W x=335 s=0 z=100 t=t336
+   W x=380 s=0 z=100 t=t337
+   W x=426 s=0 z=100 t=t338
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t339
+   W x=39 s=0 z=100 t=t340
+   W x=84 s=0 z=100 t=t341
+   W x=123 s=0 z=100 t=t342
+   W x=163 s=0 z=100 t=t343
+   W x=204 s=0 z=100 t=t344
+   W x=246 s=0 z=100 t=t345
+   W x=289 s=0 z=100 t=t346
+   W x=333 s=0 z=100 t=t347
+   W x=378 s=0 z=100 t=t348
+   W x=417 s=0 z=100 t=t349
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t350
+   W x=50 s=0 z=100 t=t351
+   W x=94 s=0 z=100 t=t352
+   W x=139 s=0 z=100 t=t353
+   W x=185 s=0 z=100 t=t354
+   W x=232 s=0 z=100 t=t355
+   W x=280 s=0 z=100 t=t356
+   W x=329 s=0 z=100 t=t357
+   W x=379 s=0 z=100 t=t358
+   W x=423 s=0 z=100 t=t359
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t360
+   W x=50 s=0 z=100 t=t361
+   W x=94 s=0 z=100 t=t362
+   W x=139 s=0 z=100 t=t363
+   W x=185 s=0 z=100 t=t364
+   W x=232 s=0 z=100 t=t365
+   W x=280 s=0 z=100 t=t366
+   W x=329 s=0 z=100 t=t367
+   W x=379 s=0 z=100 t=t368
+   W x=423 s=0 z=100 t=t369
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t370
+   W x=50 s=0 z=100 t=t371
+   W x=94 s=0 z=100 t=t372
+   W x=139 s=0 z=100 t=t373
+   W x=185 s=0 z=100 t=t374
+   W x=232 s=0 z=100 t=t375
+   W x=280 s=0 z=100 t=t376
+   W x=329 s=0 z=100 t=t377
+   W x=379 s=0 z=100 t=t378
+   W x=423 s=0 z=100 t=t379
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=t380
+   W x=45 s=0 z=100 t=t381
+   W x=84 s=0 z=100 t=t382
+   W x=124 s=0 z=100 t=t383
+   W x=165 s=0 z=100 t=t384
+   W x=207 s=0 z=100 t=t385
+   W x=250 s=0 z=100 t=t386
+   W x=294 s=0 z=100 t=t387
+   W x=339 s=0 z=100 t=t388
+   W x=378 s=0 z=100 t=t389
+   W x=418 s=0 z=100 t=t390
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=t391
+   W x=37 s=0 z=100 t=t392
+   W x=75 s=0 z=100 t=t393
+   W x=114 s=0 z=100 t=t394
+   W x=154 s=0 z=100 t=t395
+   W x=195 s=0 z=100 t=t396
+   W x=237 s=0 z=100 t=t397
+   W x=280 s=0 z=100 t=t398
+   W x=317 s=0 z=100 t=t399
+   W x=355 s=0 z=100 t=t400
+ PAGE 2 elements=1 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.400 hfid=0 words=1
+   W x=175 s=1 z=100 t=TAILNEXT
+SPINE 6 href=OEBPS/chapter6.xhtml pages=3 truncated=0 cssFallback=0
+ PAGE 0 elements=31 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=WRAPFIRST
+   W x=110 s=0 z=100 t=x001
+   W x=158 s=0 z=100 t=x002
+   W x=207 s=0 z=100 t=x003
+   W x=257 s=0 z=100 t=x004
+   W x=308 s=0 z=100 t=x005
+   W x=360 s=0 z=100 t=x006
+   W x=413 s=0 z=100 t=x007
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=x008
+   W x=44 s=0 z=100 t=x009
+   W x=89 s=0 z=100 t=x010
+   W x=133 s=0 z=100 t=x011
+   W x=171 s=0 z=100 t=x012
+   W x=210 s=0 z=100 t=x013
+   W x=250 s=0 z=100 t=x014
+   W x=291 s=0 z=100 t=x015
+   W x=333 s=0 z=100 t=x016
+   W x=376 s=0 z=100 t=x017
+   W x=420 s=0 z=100 t=x018
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=x019
+   W x=40 s=0 z=100 t=x020
+   W x=86 s=0 z=100 t=x021
+   W x=126 s=0 z=100 t=x022
+   W x=167 s=0 z=100 t=x023
+   W x=209 s=0 z=100 t=x024
+   W x=252 s=0 z=100 t=x025
+   W x=296 s=0 z=100 t=x026
+   W x=341 s=0 z=100 t=x027
+   W x=387 s=0 z=100 t=x028
+   W x=427 s=0 z=100 t=x029
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=x030
+   W x=45 s=0 z=100 t=x031
+   W x=84 s=0 z=100 t=x032
+   W x=124 s=0 z=100 t=x033
+   W x=165 s=0 z=100 t=x034
+   W x=207 s=0 z=100 t=x035
+   W x=250 s=0 z=100 t=x036
+   W x=294 s=0 z=100 t=x037
+   W x=339 s=0 z=100 t=x038
+   W x=378 s=0 z=100 t=x039
+   W x=418 s=0 z=100 t=x040
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=x041
+   W x=44 s=0 z=100 t=x042
+   W x=89 s=0 z=100 t=x043
+   W x=135 s=0 z=100 t=x044
+   W x=182 s=0 z=100 t=x045
+   W x=230 s=0 z=100 t=x046
+   W x=279 s=0 z=100 t=x047
+   W x=329 s=0 z=100 t=x048
+   W x=373 s=0 z=100 t=x049
+   W x=418 s=0 z=100 t=x050
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=x051
+   W x=44 s=0 z=100 t=x052
+   W x=89 s=0 z=100 t=x053
+   W x=135 s=0 z=100 t=x054
+   W x=182 s=0 z=100 t=x055
+   W x=230 s=0 z=100 t=x056
+   W x=279 s=0 z=100 t=x057
+   W x=329 s=0 z=100 t=x058
+   W x=373 s=0 z=100 t=x059
+   W x=418 s=0 z=100 t=x060
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=x061
+   W x=43 s=0 z=100 t=x062
+   W x=87 s=0 z=100 t=x063
+   W x=132 s=0 z=100 t=x064
+   W x=178 s=0 z=100 t=x065
+   W x=225 s=0 z=100 t=x066
+   W x=273 s=0 z=100 t=x067
+   W x=322 s=0 z=100 t=x068
+   W x=365 s=0 z=100 t=x069
+   W x=409 s=0 z=100 t=x070
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=x071
+   W x=44 s=0 z=100 t=x072
+   W x=89 s=0 z=100 t=x073
+   W x=135 s=0 z=100 t=x074
+   W x=182 s=0 z=100 t=x075
+   W x=230 s=0 z=100 t=x076
+   W x=279 s=0 z=100 t=x077
+   W x=329 s=0 z=100 t=x078
+   W x=373 s=0 z=100 t=x079
+   W x=418 s=0 z=100 t=x080
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=x081
+   W x=39 s=0 z=100 t=x082
+   W x=79 s=0 z=100 t=x083
+   W x=120 s=0 z=100 t=x084
+   W x=162 s=0 z=100 t=x085
+   W x=205 s=0 z=100 t=x086
+   W x=249 s=0 z=100 t=x087
+   W x=294 s=0 z=100 t=x088
+   W x=333 s=0 z=100 t=x089
+   W x=373 s=0 z=100 t=x090
+   W x=419 s=0 z=100 t=x091
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=x092
+   W x=41 s=0 z=100 t=x093
+   W x=83 s=0 z=100 t=x094
+   W x=126 s=0 z=100 t=x095
+   W x=170 s=0 z=100 t=x096
+   W x=215 s=0 z=100 t=x097
+   W x=261 s=0 z=100 t=x098
+   W x=301 s=0 z=100 t=x099
+   W x=342 s=0 z=100 t=x100
+   W x=387 s=0 z=100 t=x101
+   W x=426 s=0 z=100 t=x102
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=x103
+   W x=40 s=0 z=100 t=x104
+   W x=81 s=0 z=100 t=x105
+   W x=123 s=0 z=100 t=x106
+   W x=166 s=0 z=100 t=x107
+   W x=210 s=0 z=100 t=x108
+   W x=248 s=0 z=100 t=x109
+   W x=287 s=0 z=100 t=x110
+   W x=325 s=0 z=100 t=x111
+   W x=357 s=0 z=100 t=x112
+   W x=390 s=0 z=100 t=x113
+   W x=424 s=0 z=100 t=x114
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=x115
+   W x=36 s=0 z=100 t=x116
+   W x=73 s=0 z=100 t=x117
+   W x=111 s=0 z=100 t=x118
+   W x=143 s=0 z=100 t=x119
+   W x=176 s=0 z=100 t=x120
+   W x=215 s=0 z=100 t=x121
+   W x=248 s=0 z=100 t=x122
+   W x=282 s=0 z=100 t=x123
+   W x=317 s=0 z=100 t=x124
+   W x=353 s=0 z=100 t=x125
+   W x=390 s=0 z=100 t=x126
+   W x=428 s=0 z=100 t=x127
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=x128
+   W x=32 s=0 z=100 t=x129
+   W x=65 s=0 z=100 t=x130
+   W x=104 s=0 z=100 t=x131
+   W x=137 s=0 z=100 t=x132
+   W x=171 s=0 z=100 t=x133
+   W x=206 s=0 z=100 t=x134
+   W x=242 s=0 z=100 t=x135
+   W x=279 s=0 z=100 t=x136
+   W x=317 s=0 z=100 t=x137
+   W x=356 s=0 z=100 t=x138
+   W x=389 s=0 z=100 t=x139
+   W x=423 s=0 z=100 t=x140
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=x141
+   W x=36 s=0 z=100 t=x142
+   W x=73 s=0 z=100 t=x143
+   W x=111 s=0 z=100 t=x144
+   W x=150 s=0 z=100 t=x145
+   W x=190 s=0 z=100 t=x146
+   W x=231 s=0 z=100 t=x147
+   W x=273 s=0 z=100 t=x148
+   W x=309 s=0 z=100 t=x149
+   W x=346 s=0 z=100 t=x150
+   W x=389 s=0 z=100 t=x151
+   W x=426 s=0 z=100 t=x152
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=x153
+   W x=37 s=0 z=100 t=x154
+   W x=75 s=0 z=100 t=x155
+   W x=114 s=0 z=100 t=x156
+   W x=154 s=0 z=100 t=x157
+   W x=195 s=0 z=100 t=x158
+   W x=230 s=0 z=100 t=x159
+   W x=266 s=0 z=100 t=x160
+   W x=308 s=0 z=100 t=x161
+   W x=344 s=0 z=100 t=x162
+   W x=381 s=0 z=100 t=x163
+   W x=419 s=0 z=100 t=x164
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=x165
+   W x=43 s=0 z=100 t=x166
+   W x=87 s=0 z=100 t=x167
+   W x=132 s=0 z=100 t=x168
+   W x=171 s=0 z=100 t=x169
+   W x=211 s=0 z=100 t=x170
+   W x=257 s=0 z=100 t=x171
+   W x=297 s=0 z=100 t=x172
+   W x=338 s=0 z=100 t=x173
+   W x=380 s=0 z=100 t=x174
+   W x=423 s=0 z=100 t=x175
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=x176
+   W x=42 s=0 z=100 t=x177
+   W x=85 s=0 z=100 t=x178
+   W x=122 s=0 z=100 t=x179
+   W x=160 s=0 z=100 t=x180
+   W x=197 s=0 z=100 t=x181
+   W x=228 s=0 z=100 t=x182
+   W x=260 s=0 z=100 t=x183
+   W x=293 s=0 z=100 t=x184
+   W x=327 s=0 z=100 t=x185
+   W x=362 s=0 z=100 t=x186
+   W x=398 s=0 z=100 t=x187
+   W x=435 s=0 z=100 t=x188
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=x189
+   W x=32 s=0 z=100 t=x190
+   W x=70 s=0 z=100 t=x191
+   W x=102 s=0 z=100 t=x192
+   W x=135 s=0 z=100 t=x193
+   W x=169 s=0 z=100 t=x194
+   W x=204 s=0 z=100 t=x195
+   W x=240 s=0 z=100 t=x196
+   W x=277 s=0 z=100 t=x197
+   W x=315 s=0 z=100 t=x198
+   W x=347 s=0 z=100 t=x199
+   W x=380 s=0 z=100 t=x200
+   W x=424 s=0 z=100 t=x201
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=x202
+   W x=39 s=0 z=100 t=x203
+   W x=79 s=0 z=100 t=x204
+   W x=120 s=0 z=100 t=x205
+   W x=162 s=0 z=100 t=x206
+   W x=205 s=0 z=100 t=x207
+   W x=249 s=0 z=100 t=x208
+   W x=287 s=0 z=100 t=x209
+   W x=326 s=0 z=100 t=x210
+   W x=364 s=0 z=100 t=x211
+   W x=396 s=0 z=100 t=x212
+   W x=429 s=0 z=100 t=x213
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=x214
+   W x=35 s=0 z=100 t=x215
+   W x=71 s=0 z=100 t=x216
+   W x=108 s=0 z=100 t=x217
+   W x=146 s=0 z=100 t=x218
+   W x=178 s=0 z=100 t=x219
+   W x=211 s=0 z=100 t=x220
+   W x=250 s=0 z=100 t=x221
+   W x=283 s=0 z=100 t=x222
+   W x=317 s=0 z=100 t=x223
+   W x=352 s=0 z=100 t=x224
+   W x=388 s=0 z=100 t=x225
+   W x=425 s=0 z=100 t=x226
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=x227
+   W x=41 s=0 z=100 t=x228
+   W x=76 s=0 z=100 t=x229
+   W x=112 s=0 z=100 t=x230
+   W x=154 s=0 z=100 t=x231
+   W x=190 s=0 z=100 t=x232
+   W x=227 s=0 z=100 t=x233
+   W x=265 s=0 z=100 t=x234
+   W x=304 s=0 z=100 t=x235
+   W x=344 s=0 z=100 t=x236
+   W x=385 s=0 z=100 t=x237
+   W x=427 s=0 z=100 t=x238
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=x239
+   W x=36 s=0 z=100 t=x240
+   W x=78 s=0 z=100 t=x241
+   W x=114 s=0 z=100 t=x242
+   W x=151 s=0 z=100 t=x243
+   W x=189 s=0 z=100 t=x244
+   W x=228 s=0 z=100 t=x245
+   W x=268 s=0 z=100 t=x246
+   W x=309 s=0 z=100 t=x247
+   W x=351 s=0 z=100 t=x248
+   W x=387 s=0 z=100 t=x249
+   W x=424 s=0 z=100 t=x250
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=x251
+   W x=36 s=0 z=100 t=x252
+   W x=73 s=0 z=100 t=x253
+   W x=111 s=0 z=100 t=x254
+   W x=150 s=0 z=100 t=x255
+   W x=190 s=0 z=100 t=x256
+   W x=231 s=0 z=100 t=x257
+   W x=273 s=0 z=100 t=x258
+   W x=309 s=0 z=100 t=x259
+   W x=346 s=0 z=100 t=x260
+   W x=389 s=0 z=100 t=x261
+   W x=426 s=0 z=100 t=x262
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=x263
+   W x=41 s=0 z=100 t=x264
+   W x=83 s=0 z=100 t=x265
+   W x=126 s=0 z=100 t=x266
+   W x=170 s=0 z=100 t=x267
+   W x=215 s=0 z=100 t=x268
+   W x=254 s=0 z=100 t=x269
+   W x=294 s=0 z=100 t=x270
+   W x=340 s=0 z=100 t=x271
+   W x=380 s=0 z=100 t=x272
+   W x=421 s=0 z=100 t=x273
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=x274
+   W x=42 s=0 z=100 t=x275
+   W x=85 s=0 z=100 t=x276
+   W x=129 s=0 z=100 t=x277
+   W x=174 s=0 z=100 t=x278
+   W x=213 s=0 z=100 t=x279
+   W x=253 s=0 z=100 t=x280
+   W x=292 s=0 z=100 t=x281
+   W x=325 s=0 z=100 t=x282
+   W x=359 s=0 z=100 t=x283
+   W x=394 s=0 z=100 t=x284
+   W x=430 s=0 z=100 t=x285
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=x286
+   W x=37 s=0 z=100 t=x287
+   W x=75 s=0 z=100 t=x288
+   W x=107 s=0 z=100 t=x289
+   W x=140 s=0 z=100 t=x290
+   W x=179 s=0 z=100 t=x291
+   W x=212 s=0 z=100 t=x292
+   W x=246 s=0 z=100 t=x293
+   W x=281 s=0 z=100 t=x294
+   W x=317 s=0 z=100 t=x295
+   W x=354 s=0 z=100 t=x296
+   W x=392 s=0 z=100 t=x297
+   W x=431 s=0 z=100 t=x298
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=x299
+   W x=35 s=0 z=100 t=x300
+   W x=81 s=0 z=100 t=x301
+   W x=121 s=0 z=100 t=x302
+   W x=162 s=0 z=100 t=x303
+   W x=204 s=0 z=100 t=x304
+   W x=247 s=0 z=100 t=x305
+   W x=291 s=0 z=100 t=x306
+   W x=336 s=0 z=100 t=x307
+   W x=382 s=0 z=100 t=x308
+   W x=422 s=0 z=100 t=x309
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=x310
+   W x=42 s=0 z=100 t=x311
+   W x=78 s=0 z=100 t=x312
+   W x=115 s=0 z=100 t=x313
+   W x=153 s=0 z=100 t=x314
+   W x=192 s=0 z=100 t=x315
+   W x=232 s=0 z=100 t=x316
+   W x=273 s=0 z=100 t=x317
+   W x=315 s=0 z=100 t=x318
+   W x=351 s=0 z=100 t=x319
+   W x=388 s=0 z=100 t=x320
+   W x=431 s=0 z=100 t=x321
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=x322
+   W x=37 s=0 z=100 t=x323
+   W x=75 s=0 z=100 t=x324
+   W x=114 s=0 z=100 t=x325
+   W x=154 s=0 z=100 t=x326
+   W x=195 s=0 z=100 t=x327
+   W x=237 s=0 z=100 t=x328
+   W x=273 s=0 z=100 t=x329
+   W x=310 s=0 z=100 t=x330
+   W x=353 s=0 z=100 t=x331
+   W x=390 s=0 z=100 t=x332
+   W x=428 s=0 z=100 t=x333
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=x334
+   W x=38 s=0 z=100 t=x335
+   W x=77 s=0 z=100 t=x336
+   W x=117 s=0 z=100 t=x337
+   W x=158 s=0 z=100 t=x338
+   W x=193 s=0 z=100 t=x339
+   W x=229 s=0 z=100 t=x340
+   W x=271 s=0 z=100 t=x341
+   W x=307 s=0 z=100 t=x342
+   W x=344 s=0 z=100 t=x343
+   W x=382 s=0 z=100 t=x344
+   W x=421 s=0 z=100 t=x345
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=x346
+   W x=44 s=0 z=100 t=x347
+   W x=89 s=0 z=100 t=x348
+   W x=128 s=0 z=100 t=x349
+   W x=168 s=0 z=100 t=x350
+   W x=214 s=0 z=100 t=x351
+   W x=254 s=0 z=100 t=x352
+   W x=295 s=0 z=100 t=x353
+   W x=337 s=0 z=100 t=x354
+   W x=380 s=0 z=100 t=x355
+   W x=424 s=0 z=100 t=x356
+ PAGE 1 elements=4 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=x357
+   W x=44 s=0 z=100 t=x358
+   W x=82 s=0 z=100 t=x359
+   W x=121 s=0 z=100 t=x360
+   W x=166 s=0 z=100 t=x361
+   W x=205 s=0 z=100 t=x362
+   W x=245 s=0 z=100 t=x363
+   W x=286 s=0 z=100 t=x364
+   W x=328 s=0 z=100 t=x365
+   W x=371 s=0 z=100 t=x366
+   W x=415 s=0 z=100 t=x367
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=x368
+   W x=39 s=0 z=100 t=x369
+   W x=79 s=0 z=100 t=x370
+   W x=125 s=0 z=100 t=x371
+   W x=165 s=0 z=100 t=x372
+   W x=206 s=0 z=100 t=x373
+   W x=248 s=0 z=100 t=x374
+   W x=291 s=0 z=100 t=x375
+   W x=335 s=0 z=100 t=x376
+   W x=380 s=0 z=100 t=x377
+   W x=426 s=0 z=100 t=x378
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=x379
+   W x=42 s=0 z=100 t=x380
+   W x=83 s=0 z=100 t=x381
+   W x=118 s=0 z=100 t=x382
+   W x=154 s=0 z=100 t=x383
+   W x=191 s=0 z=100 t=x384
+   W x=229 s=0 z=100 t=x385
+   W x=268 s=0 z=100 t=x386
+   W x=308 s=0 z=100 t=x387
+   W x=349 s=0 z=100 t=x388
+   W x=384 s=0 z=100 t=x389
+   W x=420 s=0 z=100 t=x390
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=x391
+   W x=34 s=0 z=100 t=x392
+   W x=69 s=0 z=100 t=x393
+   W x=105 s=0 z=100 t=x394
+   W x=142 s=0 z=100 t=x395
+   W x=180 s=0 z=100 t=x396
+   W x=219 s=0 z=100 t=x397
+   W x=259 s=0 z=100 t=x398
+   W x=293 s=0 z=100 t=x399
+   W x=328 s=0 z=100 t=x400
+ PAGE 2 elements=2 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=0 z=100 t=WRAPPED
+   W x=93 s=0 z=100 t=here
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=WRAPNEXT
+SPINE 7 href=OEBPS/chapter7.xhtml pages=12 truncated=0 cssFallback=0
+ PAGE 0 elements=25 footnotes=0
+  LINE y=7 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L001
+  LINE y=31 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R001
+  LINE y=69 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L002
+  LINE y=93 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R002
+  LINE y=138 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L003
+  LINE y=162 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R003
+  LINE y=191 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L004
+  LINE y=215 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R004
+  LINE y=251 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L005
+  LINE y=275 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R005
+  LINE y=318 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L006
+  LINE y=342 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R006
+  LINE y=369 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L007
+  LINE y=393 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R007
+  LINE y=427 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L008
+  LINE y=451 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R008
+  LINE y=492 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L009
+  LINE y=516 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R009
+  LINE y=541 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L010
+  LINE y=565 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R010
+  LINE y=597 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L011
+  LINE y=621 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R011
+  LINE y=660 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L012
+  LINE y=684 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R012
+  LINE y=730 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L013
+ PAGE 1 elements=25 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R013
+  LINE y=30 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L014
+  LINE y=54 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R014
+  LINE y=91 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L015
+  LINE y=115 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R015
+  LINE y=159 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L016
+  LINE y=183 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R016
+  LINE y=211 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L017
+  LINE y=235 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R017
+  LINE y=270 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L018
+  LINE y=294 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R018
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L019
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R019
+  LINE y=386 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L020
+  LINE y=410 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R020
+  LINE y=443 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L021
+  LINE y=467 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R021
+  LINE y=507 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L022
+  LINE y=531 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R022
+  LINE y=555 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L023
+  LINE y=579 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R023
+  LINE y=610 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L024
+  LINE y=634 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R024
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L025
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R025
+ PAGE 2 elements=26 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L026
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R026
+  LINE y=53 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L027
+  LINE y=77 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R027
+  LINE y=113 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L028
+  LINE y=137 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R028
+  LINE y=180 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L029
+  LINE y=204 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R029
+  LINE y=231 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L030
+  LINE y=255 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R030
+  LINE y=289 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L031
+  LINE y=313 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R031
+  LINE y=354 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L032
+  LINE y=378 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R032
+  LINE y=403 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L033
+  LINE y=427 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R033
+  LINE y=459 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L034
+  LINE y=483 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R034
+  LINE y=522 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L035
+  LINE y=546 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R035
+  LINE y=592 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L036
+  LINE y=616 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R036
+  LINE y=646 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L037
+  LINE y=670 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R037
+  LINE y=707 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L038
+  LINE y=731 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R038
+ PAGE 3 elements=26 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L039
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R039
+  LINE y=52 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L040
+  LINE y=76 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R040
+  LINE y=111 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L041
+  LINE y=135 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R041
+  LINE y=177 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L042
+  LINE y=201 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R042
+  LINE y=227 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L043
+  LINE y=251 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R043
+  LINE y=284 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L044
+  LINE y=308 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R044
+  LINE y=348 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L045
+  LINE y=372 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R045
+  LINE y=396 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L046
+  LINE y=420 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R046
+  LINE y=451 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L047
+  LINE y=475 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R047
+  LINE y=513 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L048
+  LINE y=537 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R048
+  LINE y=582 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L049
+  LINE y=606 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R049
+  LINE y=635 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L050
+  LINE y=659 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R050
+  LINE y=695 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L051
+  LINE y=719 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R051
+ PAGE 4 elements=26 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L052
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R052
+  LINE y=51 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L053
+  LINE y=75 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R053
+  LINE y=109 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L054
+  LINE y=133 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R054
+  LINE y=174 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L055
+  LINE y=198 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R055
+  LINE y=223 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L056
+  LINE y=247 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R056
+  LINE y=279 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L057
+  LINE y=303 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R057
+  LINE y=342 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L058
+  LINE y=366 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R058
+  LINE y=412 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L059
+  LINE y=436 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R059
+  LINE y=466 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L060
+  LINE y=490 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R060
+  LINE y=527 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L061
+  LINE y=551 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R061
+  LINE y=595 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L062
+  LINE y=619 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R062
+  LINE y=647 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L063
+  LINE y=671 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R063
+  LINE y=706 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L064
+  LINE y=730 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R064
+ PAGE 5 elements=26 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L065
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R065
+  LINE y=50 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L066
+  LINE y=74 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R066
+  LINE y=107 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L067
+  LINE y=131 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R067
+  LINE y=171 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L068
+  LINE y=195 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R068
+  LINE y=219 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L069
+  LINE y=243 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R069
+  LINE y=274 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L070
+  LINE y=298 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R070
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L071
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R071
+  LINE y=405 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L072
+  LINE y=429 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R072
+  LINE y=458 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L073
+  LINE y=482 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R073
+  LINE y=518 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L074
+  LINE y=542 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R074
+  LINE y=585 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L075
+  LINE y=609 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R075
+  LINE y=636 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L076
+  LINE y=660 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R076
+  LINE y=694 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L077
+  LINE y=718 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R077
+ PAGE 6 elements=26 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L078
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R078
+  LINE y=49 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L079
+  LINE y=73 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R079
+  LINE y=105 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L080
+  LINE y=129 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R080
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L081
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R081
+  LINE y=238 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L082
+  LINE y=262 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R082
+  LINE y=292 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L083
+  LINE y=316 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R083
+  LINE y=353 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L084
+  LINE y=377 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R084
+  LINE y=421 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L085
+  LINE y=445 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R085
+  LINE y=473 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L086
+  LINE y=497 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R086
+  LINE y=532 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L087
+  LINE y=556 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R087
+  LINE y=598 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L088
+  LINE y=622 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R088
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L089
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R089
+  LINE y=705 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L090
+  LINE y=729 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R090
+ PAGE 7 elements=26 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L091
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R091
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L092
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R092
+  LINE y=103 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L093
+  LINE y=127 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R093
+  LINE y=165 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L094
+  LINE y=189 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R094
+  LINE y=234 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L095
+  LINE y=258 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R095
+  LINE y=287 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L096
+  LINE y=311 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R096
+  LINE y=347 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L097
+  LINE y=371 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R097
+  LINE y=414 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L098
+  LINE y=438 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R098
+  LINE y=465 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L099
+  LINE y=489 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R099
+  LINE y=523 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L100
+  LINE y=547 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R100
+  LINE y=588 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L101
+  LINE y=612 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R101
+  LINE y=637 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L102
+  LINE y=661 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R102
+  LINE y=693 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L103
+  LINE y=717 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R103
+ PAGE 8 elements=26 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L104
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R104
+  LINE y=70 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L105
+  LINE y=94 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R105
+  LINE y=124 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L106
+  LINE y=148 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R106
+  LINE y=185 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L107
+  LINE y=209 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R107
+  LINE y=253 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L108
+  LINE y=277 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R108
+  LINE y=305 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L109
+  LINE y=329 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R109
+  LINE y=364 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L110
+  LINE y=388 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R110
+  LINE y=430 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L111
+  LINE y=454 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R111
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L112
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R112
+  LINE y=537 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L113
+  LINE y=561 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R113
+  LINE y=601 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L114
+  LINE y=625 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R114
+  LINE y=649 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L115
+  LINE y=673 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R115
+  LINE y=704 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L116
+  LINE y=728 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R116
+ PAGE 9 elements=25 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L117
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R117
+  LINE y=69 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L118
+  LINE y=93 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R118
+  LINE y=122 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L119
+  LINE y=146 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R119
+  LINE y=182 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L120
+  LINE y=206 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R120
+  LINE y=249 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L121
+  LINE y=273 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R121
+  LINE y=300 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L122
+  LINE y=324 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R122
+  LINE y=358 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L123
+  LINE y=382 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R123
+  LINE y=423 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L124
+  LINE y=447 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R124
+  LINE y=472 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L125
+  LINE y=496 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R125
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L126
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R126
+  LINE y=591 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L127
+  LINE y=615 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R127
+  LINE y=661 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L128
+  LINE y=685 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R128
+  LINE y=715 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L129
+ PAGE 10 elements=25 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R129
+  LINE y=37 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L130
+  LINE y=61 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R130
+  LINE y=105 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L131
+  LINE y=129 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R131
+  LINE y=157 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L132
+  LINE y=181 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R132
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L133
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R133
+  LINE y=282 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L134
+  LINE y=306 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R134
+  LINE y=332 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L135
+  LINE y=356 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R135
+  LINE y=389 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L136
+  LINE y=413 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R136
+  LINE y=453 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L137
+  LINE y=477 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R137
+  LINE y=501 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L138
+  LINE y=525 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R138
+  LINE y=556 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L139
+  LINE y=580 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R139
+  LINE y=618 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L140
+  LINE y=642 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R140
+  LINE y=687 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L141
+  LINE y=711 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R141
+ PAGE 11 elements=18 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L142
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R142
+  LINE y=60 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L143
+  LINE y=84 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R143
+  LINE y=127 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L144
+  LINE y=151 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R144
+  LINE y=178 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L145
+  LINE y=202 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R145
+  LINE y=236 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L146
+  LINE y=260 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R146
+  LINE y=301 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L147
+  LINE y=325 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R147
+  LINE y=350 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L148
+  LINE y=374 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R148
+  LINE y=406 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L149
+  LINE y=430 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R149
+  LINE y=469 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=L150
+  LINE y=493 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=R150

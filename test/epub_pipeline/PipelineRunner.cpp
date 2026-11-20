@@ -266,7 +266,12 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
   }
 
   auto epub = std::make_shared<Epub>(epubPath, cacheDir);
-  if (!epub->load(true)) {
+  // The reader opens a book with the region it lends to the build when it has one (ReaderActivity::loadEpub): the
+  // spine table, the zip lookup, the CSS cache compile, the TOC pass and the book.bin build take their scratch from
+  // it (Epub::loadScratch_). Without it the arena column measured those on the heap, which the device does not do.
+  // content.opf's SAX state stays on the heap, as on the device. Heap mode passes none, as the reader does with
+  // nothing lent.
+  if (!epub->load(true, false, lentArena.get())) {
     out << "ERROR load failed\n";
     return false;
   }

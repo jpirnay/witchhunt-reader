@@ -174,8 +174,12 @@ class ParsedText {
   // the parser opens), or the heap when null. The parser sets it on its main text block (with
   // beforeLine_, see there for why the two go together) and on table cells laid out as a grid
   // (without the hook: the row is placed as a whole inside a block of its own). A cell laid out
-  // as a fallback paragraph keeps the heap.
+  // as a fallback paragraph is wired as a page paragraph, hook and all (ChapterHtmlSlimParser::emitCellAsParagraph).
   BuildArena* lineArena_ = nullptr;
+  // What each line may take from lineArena_, object and bytes (TextBlock::ArenaRoom, TextBlock::make): the page's, held
+  // by the parser. Null, unless the caller hands one: the object on the heap, the bytes in lineArena_ while it has
+  // room.
+  TextBlock::ArenaRoom* lineRoom_ = nullptr;
   // Called with the line's largest word-size percent, and whether the line carries ruby, just before the line is
   // materialised. The parser uses it to run its page-fit test BEFORE the allocation: a line that does not
   // fit is then allocated from the page it lands on, not from the block of the page it
@@ -703,8 +707,11 @@ class ParsedText {
   // never hyphenates. Survives reset(); the parser sets it for every block it starts (ChapterHtmlSlimParser::
   // blockHyphenates).
   void setHyphenationEnabled(const bool enabled) { hyphenationEnabled = enabled; }
-  // See lineArena_ / beforeLine_. Both survive reset().
-  void setLineArena(BuildArena* arena) { lineArena_ = arena; }
+  // See lineArena_ / lineRoom_ / beforeLine_. All survive reset().
+  void setLineArena(BuildArena* arena, TextBlock::ArenaRoom* room = nullptr) {
+    lineArena_ = arena;
+    lineRoom_ = room;
+  }
   // A run laid out as its code points because it could not be shaped (no memory, or the font failed it) sets *latch
   // (Section's kStatusShapingDegraded). Survives reset().
   void setShapingLatch(bool* latch) { shapingLatch_ = latch; }

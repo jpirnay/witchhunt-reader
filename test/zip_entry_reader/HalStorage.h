@@ -13,6 +13,7 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -86,6 +87,7 @@ class HalFile : public Print {
     ++opens;
     fp_ = fopen(path.c_str(), "rb");
     applyStdioPolicy(fp_);
+    if (fp_) openPaths[fp_] = path;
     return fp_ != nullptr;
   }
 
@@ -103,6 +105,7 @@ class HalFile : public Print {
     ++opens;
     fp_ = fopen(path.c_str(), "w+b");
     applyStdioPolicy(fp_);
+    if (fp_) openPaths[fp_] = path;
     return fp_ != nullptr;
   }
 
@@ -113,6 +116,7 @@ class HalFile : public Print {
     ++opens;
     fp_ = fopen(path.c_str(), "r+b");
     applyStdioPolicy(fp_);
+    if (fp_) openPaths[fp_] = path;
     return fp_ != nullptr;
   }
 
@@ -184,6 +188,19 @@ class HalFile : public Print {
   // is one call into SdFat under the storage lock, whatever its size. And file opens, each one a
   // directory walk there.
   static inline size_t calls = 0;
+  // Paths removed through HalStorage::remove while a handle still held them open. On SdFat a handle that flushes into a
+  // removed file writes through a freed cluster chain (cluster 0 for a tail crossing a cluster boundary), so a
+  // remove-then-close order is a card-corruption bug; the host cannot see it (POSIX unlinks an open file; Windows
+  // refuses). Recorded, not enforced: a test asserts on it. Keyed by FILE* so a moved handle keeps its entry.
+  static inline std::vector<std::string> removedWhileOpen;
+  static inline std::map<FILE*, std::string> openPaths;
+  static bool isOpenPath(const std::string& path) {
+    for (const auto& [fp, p] : openPaths) {
+      if (p == path) return true;
+    }
+    return false;
+  }
+
   static inline size_t opens = 0;
   // Folders opened by path: on the device each one searches its parent from the first entry.
   static inline size_t folderOpens = 0;
@@ -339,6 +356,7 @@ class HalFile : public Print {
   // both tolerate a handle that was never opened.
   bool closeQuiet() {
     if (fp_) {
+      openPaths.erase(fp_);
       fclose(fp_);
       fp_ = nullptr;
     }
@@ -413,7 +431,12 @@ class HalStorage {
     std::error_code ec;
     return recursive ? std::filesystem::create_directories(path, ec) : std::filesystem::create_directory(path, ec);
   }
-  bool remove(const char* path) { return std::filesystem::remove(path); }
+  bool remove(const char* path) {
+    if (HalFile::isOpenPath(path)) HalFile::removedWhileOpen.emplace_back(path);
+    // error_code form: Windows refuses to unlink an open file and the throwing form would terminate the test.
+    std::error_code ec;
+    return std::filesystem::remove(path, ec) && !ec;
+  }
   bool rename(const char* oldPath, const char* newPath) {
     std::error_code ec;
     std::filesystem::rename(oldPath, newPath, ec);

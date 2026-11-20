@@ -120,9 +120,9 @@ constexpr size_t MAX_RESIDENT_ANCHORS = 256;
 constexpr size_t MAX_SPAN_ANCHORS_PER_CHAPTER = 512;
 // Write buffer for the anchor spill; see the emplace site in setup().
 constexpr size_t ANCHOR_SPILL_BUFFER_BYTES = 512;
-// Anchors that may wait for their first line at once. One per id'd element that has produced no
-// text yet; more than a couple means a run of empty anchored elements, and the excess is recorded
-// at the current page rather than held.
+// Anchors that may wait for their line at once: a paragraph's inline ids, each until the line that reaches its word,
+// and the ids of elements that have produced no text yet. The 17th and later in one layout window are recorded at the
+// page reached so far rather than held.
 constexpr size_t MAX_ANCHORS_AWAITING_LINE = 16;
 
 // Image extraction is now deferred to render time (ImageBlock::ensureExtracted).
@@ -823,7 +823,7 @@ void ChapterHtmlSlimParser::pushBlockStyleEntry(const CssStyle& cssStyle) {
     return;
   }
   applyCssEmphasisToEntry(entry, cssStyle);
-  inlineStyleStack.push_back(entry);
+  (void)pushOrStop(inlineStyleStack, entry, "the inline style stack");
 }
 
 bool ChapterHtmlSlimParser::applyCssFontFamilyToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) const {
@@ -2143,6 +2143,14 @@ void ChapterHtmlSlimParser::stopOnFullPageTable() {
   saxParser_.stop();
 }
 
+void ChapterHtmlSlimParser::stopOnLinesPastTheirPage(const char* what) {
+  LOG_ERR("EHP", "On page %d, %s laid out for it does not fit it (the fit tests disagree); dropped, stopping the parse",
+          completedPageCount, what);
+  streamFailed = true;
+  layoutFailed = true;
+  saxParser_.stop();
+}
+
 void ChapterHtmlSlimParser::noteCapOverflow(const uint8_t flag, const char* what) {
   if (capOverflowFlags_ & flag) return;
   capOverflowFlags_ |= flag;
@@ -2180,8 +2188,20 @@ void ChapterHtmlSlimParser::wireTextBlock() {
   wireParagraphLines(*currentTextBlock);
 }
 
+size_t ChapterHtmlSlimParser::lineObjectKeepFree() const {
+  // A build that can meet an image header keeps the walk's stage free in a C3-sized region from its first line: the
+  // image may be the book's first, with lines before it on its page. The S3s' 256 KB region has room for both.
+  const bool c3Sized = buildArena_ != nullptr && buildArena_->capacity() < WordShapeCache::kLargeArenaBytes;
+  return imageManifest != nullptr && c3Sized ? EpubImageManifest::kWalkArenaReserve : 0;
+}
+
+TextBlock::ArenaRoom* ChapterHtmlSlimParser::lineRoom() {
+  lineRoom_.keepFree = lineObjectKeepFree();
+  return &lineRoom_;
+}
+
 void ChapterHtmlSlimParser::wireParagraphLines(ParsedText& text) {
-  text.setLineArena(buildArena_);
+  text.setLineArena(buildArena_, lineRoom());
   text.setWordCache(&wordCache_);
   if (buildArena_) {
     text.setBeforeLineHook([this](const uint8_t maxSizePct, bool annotated) { beforeLineHook(maxSizePct, annotated); });
@@ -2205,10 +2225,12 @@ void ChapterHtmlSlimParser::beforeLineHook(const uint8_t maxSizePct, const bool 
     lineHeight += band;
     const std::span<const ParsedText::LineObject> images = currentTextBlock->lineObjects();
     if (!images.empty()) lineHeight = lineImageBox(lineText(bs, lineHeight, maxSizePct, band), images).height;
-    if (currentPageNextY + lineHeight > viewportHeight || keepTogetherBreak(lineHeight) ||
-        lineImagesFillPage(images.size())) {
-      emitPage();
-    }
+    bool breakHere = currentPageNextY + lineHeight > viewportHeight || keepTogetherBreak(lineHeight) ||
+                     lineImagesFillPage(images.size());
+#ifdef PAGE_FAULT_INJECTION
+    if (breakHere && skipEarlyFitBreak()) breakHere = false;
+#endif
+    if (breakHere) emitPage();
   }
   ensurePageBlock();
 }
@@ -2269,6 +2291,7 @@ bool ChapterHtmlSlimParser::keepTogetherBreak(const int lineHeight, const bool n
 void ChapterHtmlSlimParser::ensurePageBlock() {
   if (buildArena_ == nullptr || pageBlock_.valid()) return;
   pageBlock_ = buildArena_->reserveBlock();
+  lineRoom_.displaced = 0;  // a new page: none of its objects is in the block yet
 }
 
 void ChapterHtmlSlimParser::releasePageBlock() {
@@ -2276,9 +2299,12 @@ void ChapterHtmlSlimParser::releasePageBlock() {
   if (!buildArena_->release(pageBlock_)) {
     // Out of LIFO order: something reserved above this block and is still live. Keep the
     // token (overwriting a live one is a contract violation); later pages simply allocate
-    // above it and the region fills, at which point lines fall back to the heap.
+    // above it and the region fills, at which point lines fall back to the heap. The objects
+    // laid out there keep their room too, so lineRoom_ goes on saying so.
     LOG_ERR("EHP", "Page arena block could not be released (out of order); region stays claimed");
+    return;
   }
+  lineRoom_.displaced = 0;
 }
 
 void ChapterHtmlSlimParser::beginExternalPageBreakAnchors() {
@@ -2685,7 +2711,10 @@ void ChapterHtmlSlimParser::holdBottomSpacing(BlockStyle& style, const bool floa
   const int16_t paddingBottom = std::max<int16_t>(style.paddingBottom, 0);
   if (marginBottom == 0 && paddingBottom == 0) return;
   if (heldBottomSpacing_.size() >= kMaxHeldBottomSpacingDepth) return;
-  heldBottomSpacing_.push_back({depth, marginBottom, paddingBottom});
+  if (!pushOrStop(heldBottomSpacing_, HeldBottomSpacing{depth, marginBottom, paddingBottom},
+                  "the held bottom spacing")) {
+    return;
+  }
   style.marginBottom = 0;
   style.paddingBottom = 0;
 }
@@ -2816,7 +2845,25 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
       effectiveBase = &currentTextBlock->getBlockStyle();
     }
 
+    // An inline id past the last word of a block that a block element opened inside of (<div>text <a id><p>..): it
+    // names the new block, whose first line is the one to wait for, not the last line of this one. They are set aside
+    // (-1, which no flush takes) while this block is laid out, and wait for the new block's first line. Not at a <br>
+    // or a kept line feed, which only end the line the id stands at the end of (text <a id><br/>), and not after the
+    // block's element has closed (text <a id></p><h2>): the id is on the last line.
+    const bool overtaken = currentBlockOwnerDepth_ >= 0 && !blockStyle.fromBrElement && !blockStyle.fromLineFeed &&
+                           !anchorsAwaitingLine_.empty();
+    if (overtaken) {
+      const int tokens = lineTokensSoFar();
+      for (auto& entry : anchorsAwaitingLine_) {
+        if (entry.wordIndex > tokens) entry.wordIndex = -1;
+      }
+    }
     if (!currentTextBlock->isEmpty()) makePages();
+    if (overtaken) {
+      for (auto& entry : anchorsAwaitingLine_) {
+        if (entry.wordIndex < 0) entry.wordIndex = 0;
+      }
+    }
   }
   blockFamilyState_ = 0;  // the next block's words start over
   wordFontsSize_ = 0;
@@ -2989,7 +3036,16 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     const bool atTocAnchor = self->isTocAnchor(idAttr);
     if (atTocAnchor ||
         (!isNonNavigableInlineElement(name) && self->anchorCount < self->anchorLimit() + self->spanAnchorCount_)) {
-      self->pendingAnchorId = idAttr;
+      // An id on an inline element inside a block waits in the queue for the line that reaches its word: the next
+      // word's index, or 0 (the block's first line) before the block's first word and in a table cell, whose row
+      // records it at the page the row reaches. Any other id (a block element's, an inline one outside any block)
+      // waits as pendingAnchorId, a single slot, for the next block's first line.
+      if (!atTocAnchor && matches(name, INLINE_FORMATTING_TAGS, NUM_INLINE_FORMATTING_TAGS) &&
+          (self->currentBlockOwnerDepth_ >= 0 || self->currentTable)) {
+        self->queueAnchorForNextLine(idAttr, self->inlineAnchorWordIndex());
+      } else {
+        self->pendingAnchorId = idAttr;
+      }
     } else if (isNonNavigableInlineElement(name)) {
       self->recordSpanAnchor(idAttr);
     } else {
@@ -3177,8 +3233,12 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (w >= 1 && w < parentWidth) {
       const bool relative = cssStyle.imageWidth.unit == CssUnit::Percent;
       const int16_t parentFixed = self->containerWidthStack_.empty() ? 0 : self->containerWidthStack_.back().fixedWidth;
-      self->containerWidthStack_.push_back(
-          {self->depth, static_cast<int16_t>(w), relative ? parentFixed : static_cast<int16_t>(w)});
+      if (!self->pushOrStop(self->containerWidthStack_,
+                            ContainerWidthEntry{self->depth, static_cast<int16_t>(w),
+                                                relative ? parentFixed : static_cast<int16_t>(w)},
+                            "the container width stack")) {
+        return;
+      }
     }
   }
 
@@ -3317,6 +3377,19 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
     BufferedTableRow& row = self->currentTable->pendingRow;
 
+    // The row's cell list grows only through a block the heap holds, asked before the cell's text exists so that text
+    // is not held through the paragraph layout below. A refusal sends the row out as paragraphs, which keeps every
+    // buffered cell's text and empties the list, and the cell being opened then streams as a degraded row's does. The
+    // second ask is for that one cell: in the capacity the emptied list kept when it had any, else a fresh block, and a
+    // refusal of that stops the build with its pages kept.
+    if (!self->reserveRowCell(row)) {
+      self->degradeRow("no heap for the row");
+      if (!self->reserveRowCell(row)) {
+        self->currentTableCell = nullptr;
+        self->stopForHeap("a table row's cells", sizeof(BufferedTableCell));
+        return;
+      }
+    }
     std::unique_ptr<ParsedText> cellText = self->makeCellText();
     if (!cellText) {
       self->currentTableCell = nullptr;
@@ -3940,7 +4013,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       applyCssTextEmphasisToEntry(entry, cssStyle);
       applyCssTextCombineToEntry(entry, cssStyle);
       applyCssFontSizeToEntry(entry, cssStyle);
-      self->inlineStyleStack.push_back(entry);
+      if (!self->pushOrStop(self->inlineStyleStack, entry, "the inline style stack")) return;
       self->updateEffectiveInlineStyle();
       self->openBidiEdge(cssStyle, /*inlineElement=*/true);
 
@@ -3969,7 +4042,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         if (v > 0) startCounter = v - 1;  // counter is pre-incremented on each <li>
       }
     }
-    self->listStack.push_back({self->depth, name[0] == 'o', startCounter, cssStyle.listStyleNone});
+    if (!self->pushOrStop(self->listStack, ListEntry{self->depth, name[0] == 'o', startCounter, cssStyle.listStyleNone},
+                          "the list stack")) {
+      return;
+    }
   }
 
   const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
@@ -4035,7 +4111,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   if ((ownInsetLeft > 0 || ownInsetRight > 0) &&
       self->blockInsetStack_.size() < ChapterHtmlSlimParser::kMaxBlockInsetDepth &&
       matches(name, INSET_CONTAINER_TAGS, NUM_INSET_CONTAINER_TAGS)) {
-    self->blockInsetStack_.push_back({self->depth, ownInsetLeft, ownInsetRight});
+    if (!self->pushOrStop(self->blockInsetStack_, BlockInsetEntry{self->depth, ownInsetLeft, ownInsetRight},
+                          "the block inset stack")) {
+      return;
+    }
   }
 
   // A <span> the book styles display:block is laid out as a block (#388): St. Martin's chapter
@@ -4327,7 +4406,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     applyCssTextEmphasisToEntry(entry, cssStyle);
     applyCssTextCombineToEntry(entry, cssStyle);
     applyCssFontSizeToEntry(entry, cssStyle);
-    self->inlineStyleStack.push_back(entry);
+    if (!self->pushOrStop(self->inlineStyleStack, entry, "the inline style stack")) return;
     self->updateEffectiveInlineStyle();
   } else if (matches(name, BOLD_TAGS, NUM_BOLD_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
@@ -4358,7 +4437,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     applyCssTextEmphasisToEntry(entry, cssStyle);
     applyCssTextCombineToEntry(entry, cssStyle);
     applyCssFontSizeToEntry(entry, cssStyle);
-    self->inlineStyleStack.push_back(entry);
+    if (!self->pushOrStop(self->inlineStyleStack, entry, "the inline style stack")) return;
     self->updateEffectiveInlineStyle();
   } else if (matches(name, ITALIC_TAGS, NUM_ITALIC_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
@@ -4389,7 +4468,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     applyCssTextEmphasisToEntry(entry, cssStyle);
     applyCssTextCombineToEntry(entry, cssStyle);
     applyCssFontSizeToEntry(entry, cssStyle);
-    self->inlineStyleStack.push_back(entry);
+    if (!self->pushOrStop(self->inlineStyleStack, entry, "the inline style stack")) return;
     self->updateEffectiveInlineStyle();
   } else if (strcmp(name, "sup") == 0 || strcmp(name, "sub") == 0) {
     if (self->partWordHasText()) {
@@ -4409,7 +4488,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     applyCssTextEmphasisToEntry(entry, cssStyle);
     applyCssTextCombineToEntry(entry, cssStyle);
     applyCssFontSizeToEntry(entry, cssStyle);  // explicit CSS font-size overrides the 50% default
-    self->inlineStyleStack.push_back(entry);
+    if (!self->pushOrStop(self->inlineStyleStack, entry, "the inline style stack")) return;
     self->updateEffectiveInlineStyle();
   } else if (strcmp(name, "span") == 0 || !isHeaderOrBlock(name)) {
     // Drop cap: a left-floated span with a large font-size opening an empty paragraph.
@@ -4460,7 +4539,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         entry.hasFontSize = true;
         entry.fontSizePct = isSmallTag ? 80 : 120;
       }
-      self->inlineStyleStack.push_back(entry);
+      if (!self->pushOrStop(self->inlineStyleStack, entry, "the inline style stack")) return;
       self->updateEffectiveInlineStyle();
     }
   }
@@ -5315,33 +5394,68 @@ void ChapterHtmlSlimParser::markLineStart() {
 }
 
 ChapterHtmlSlimParser::~ChapterHtmlSlimParser() {
-  // An aborted build can leave a page open. Rewind its block now, while the arena is still the
-  // section's: BuildState tears the parser down before it releases the feed-chunk block below.
+  // An aborted build can leave a page open, and a table's rows packed. Their lines go first (members would go only
+  // after this body), then the block is rewound, while the arena is still the section's: BuildState tears the parser
+  // down before it releases the feed-chunk block below.
+  dropLaidOutLines();
   releasePageBlock();
+}
+
+void ChapterHtmlSlimParser::dropLaidOutLines() {
+  // Both borrow elements of currentPage.
+  deferredPageImage_ = nullptr;
+  deferredDropCapLine_ = nullptr;
+  currentTableCell = nullptr;  // a cell of currentTable's row
+  currentTable.reset();
+  currentPage.reset();
 }
 
 size_t ChapterHtmlSlimParser::anchorLimit() const {
   return anchorSpillWriter.has_value() ? MAX_ANCHORS_PER_CHAPTER : MAX_RESIDENT_ANCHORS;
 }
 
-void ChapterHtmlSlimParser::flushAnchorsAwaitingLine() {
-  if (anchorsAwaitingLine_.empty()) return;
-  for (auto& id : anchorsAwaitingLine_) {
-    recordAnchor(std::move(id), static_cast<uint16_t>(completedPageCount));
+void ChapterHtmlSlimParser::flushAnchorsAwaitingLine(const int page) {
+  for (auto& entry : anchorsAwaitingLine_) {
+    recordAnchor(std::move(entry.id), static_cast<uint16_t>(page));
   }
   anchorsAwaitingLine_.clear();
 }
 
-void ChapterHtmlSlimParser::queueAnchorForNextLine(std::string id) {
+void ChapterHtmlSlimParser::flushAnchorsInRange(const int firstIndex, const int lastIndex) {
+  if (anchorsAwaitingLine_.empty()) return;
+  size_t kept = 0;
+  for (size_t i = 0; i < anchorsAwaitingLine_.size(); ++i) {
+    AnchorAwaitingLine& entry = anchorsAwaitingLine_[i];
+    if (entry.wordIndex >= firstIndex && entry.wordIndex <= lastIndex) {
+      recordAnchor(std::move(entry.id), static_cast<uint16_t>(completedPageCount));
+    } else {
+      if (kept != i)
+        anchorsAwaitingLine_[kept] = std::move(entry);  // never onto itself: a string's self-move clears it
+      ++kept;
+    }
+  }
+  anchorsAwaitingLine_.erase(anchorsAwaitingLine_.begin() + kept, anchorsAwaitingLine_.end());
+}
+
+// The next word's index (idea from crosspoint-reader #4328, Mikalai Kryvusha, @MikalaiKryvusha, who queues inline ids
+// by word index), counted as addLineToPage counts the words a line reaches and as a footnote link counts the
+// word it follows. An id inside a word (the partial word is counted) waits for that word's line.
+int ChapterHtmlSlimParser::inlineAnchorWordIndex() const {
+  if (currentTable || census_) return 0;
+  const int soFar = lineTokensSoFar();
+  return soFar > 0 ? soFar + (partWordHasText() ? 0 : 1) : 0;
+}
+
+void ChapterHtmlSlimParser::queueAnchorForNextLine(std::string id, const int wordIndex) {
   if (id.empty() || census_) return;  // the census places no line for an anchor to wait for
-  // Bounded: an id'd element that never produces a line leaves its entry queued, so a run of them
-  // would grow this. Past the cap they are recorded at the current page instead -- the behaviour
-  // this replaced, applied only where holding on would cost memory.
+  // Bounded: a paragraph's inline ids wait until the lines that reach them are placed, and an id'd element that never
+  // produces a line leaves its entry queued, so a run of either would grow this. Past the cap an id is recorded at the
+  // page reached so far instead: approximate, never lost.
   if (anchorsAwaitingLine_.size() >= MAX_ANCHORS_AWAITING_LINE) {
     recordAnchor(std::move(id), static_cast<uint16_t>(completedPageCount));
     return;
   }
-  anchorsAwaitingLine_.push_back(std::move(id));
+  (void)pushOrStop(anchorsAwaitingLine_, AnchorAwaitingLine{std::move(id), wordIndex}, "the anchors awaiting a line");
 }
 
 // A <span id> used to be left out of the anchor map altogether, to keep converter-injected ids
@@ -5362,17 +5476,18 @@ void ChapterHtmlSlimParser::recordSpanAnchor(const std::string& id) {
     return;
   }
   spanAnchorCount_++;
-  // A span is inline, so it is usually part of the block in progress, and the next line placed is
-  // that block's first: queue it. The exception is a span opened after its block's element has
-  // closed but before the next block started (FB2 conversions wrap a whole note,
-  // <span id><div><p>..</p></div></span>, in one): the block still in progress is the previous
-  // note's, so the id waits for the next block the way any element's does.
+  // A span is inline, so it is usually part of the block in progress: queue it at its word. The exception is a span
+  // opened after its block's element has closed but before the next block started (FB2 conversions wrap a whole note,
+  // <span id><div><p>..</p></div></span>, in one): the block still in progress is the previous note's, so the id waits
+  // for the next block the way any element's does.
   const bool opensNextBlock = currentTextBlock && !currentTextBlock->isEmpty() && currentBlockOwnerDepth_ < 0;
   if (opensNextBlock && pendingAnchorId.empty()) {
     pendingAnchorId = id;
     return;
   }
-  queueAnchorForNextLine(id);
+  // At the word it precedes: a span in the middle of a paragraph that crosses a page is on that line's page.
+  // Idea from crosspoint-reader #4328 (Mikalai Kryvusha, @MikalaiKryvusha), which queues inline ids by word index.
+  queueAnchorForNextLine(id, inlineAnchorWordIndex());
 }
 
 bool ChapterHtmlSlimParser::lookupAnchorInActiveBuild(const std::string& id, uint16_t& page) {
@@ -5627,32 +5742,32 @@ bool ChapterHtmlSlimParser::finalize() {
     while (!boxScopes_.empty() && !layoutFailed && !streamFailed) closeBox();
     if (!layoutFailed) {
       const bool hasFinalPageContent = currentPage && !currentPage->elements.empty();
+      // Avoid mapping trailing anchors to a non-existent blank page when the
+      // chapter ended exactly on a page boundary.
+      const int anchorPage =
+          !hasFinalPageContent && completedPageCount > 0 ? completedPageCount - 1 : completedPageCount;
       if (!pendingAnchorId.empty()) {
-        uint16_t anchorPage = static_cast<uint16_t>(completedPageCount);
-        // Avoid mapping trailing anchors to a non-existent blank page when the
-        // chapter ended exactly on a page boundary.
-        if (!hasFinalPageContent && completedPageCount > 0) {
-          anchorPage = static_cast<uint16_t>(completedPageCount - 1);
-        }
-        recordAnchor(std::move(pendingAnchorId), anchorPage);
+        recordAnchor(std::move(pendingAnchorId), static_cast<uint16_t>(anchorPage));
         pendingAnchorId.clear();
       }
+      // An id still waiting on a line gets none (an element with no text of its own ends the chapter: <p id></p>,
+      // <p><a id></a></p>). Recorded after the emitPage below, it named a page past the last.
+      flushAnchorsAwaitingLine(anchorPage);
       if (hasFinalPageContent) {
         emitPage();
       }
     }
-    // Both borrow elements of currentPage, and the layoutFailed / empty-final-page paths
-    // reach here without going through emitPage(), which is the other place they are cleared.
-    deferredPageImage_ = nullptr;
-    deferredDropCapLine_ = nullptr;
-    currentPage.reset();
-    releasePageBlock();
     currentTextBlock.reset();
   }
+  // However the parse ended -- the last page emitted above, a layout failure, an empty final page, a parse stopped
+  // inside a table with its rows packed, or a text block makePages() dropped after a refusal -- what still holds lines
+  // laid out in the page block goes before the block is rewound, so the arena is left as the parse found it.
+  dropLaidOutLines();
+  releasePageBlock();
 
-  // Anything still waiting on a line never got one -- an id'd element with no text of its own.
-  // Record those at the last page reached, which is where they sit, before the spill closes.
-  flushAnchorsAwaitingLine();
+  // Anything still waiting on a line after a layout that failed never got one. Record those at the last page reached,
+  // before the spill closes.
+  flushAnchorsAwaitingLine(completedPageCount);
 
   // Close the anchor spill LAST. The trailing-anchor recording just above is the final call into
   // recordAnchor, and closing before it would send that one anchor down the resident fallback --
@@ -5782,6 +5897,12 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
 
   if (currentPageNextY + lineHeight > viewportHeight || keepTogetherBreak(lineHeight) ||
       lineImagesFillPage(images.size())) {
+    if (buildArena_ != nullptr) {
+      // The line was made in this page's block, which emitPage() rewinds: beforeLineHook's test said it fits.
+      line.reset();
+      stopOnLinesPastTheirPage("a line");
+      return ParsedText::LineProcessResult::Accepted;
+    }
     emitPage();
     if (!currentPage) return ParsedText::LineProcessResult::Accepted;
   }
@@ -5798,15 +5919,14 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
     return ParsedText::LineProcessResult::RetryWithoutHyphenation;
   }
 
-  // Every emitPage() that this line could trigger is above, so completedPageCount is now the page
-  // the line is going on: the page any anchor waiting on it should name.
-  flushAnchorsAwaitingLine();
-
   // Capture first-line flag before incrementing wordsExtractedInBlock.
   const bool isFirstLineOfBlock = (wordsExtractedInBlock == 0);
 
   // Track cumulative words to assign footnotes to the page containing their anchor
   wordsExtractedInBlock += lineTokenCount;
+  // Every emitPage() that this line could trigger is above, so completedPageCount is now the page the line is going
+  // on: the page any anchor waiting on a word of it should name.
+  flushAnchorsInRange(0, wordsExtractedInBlock);
   auto footnoteIt = pendingFootnotes.begin();
   while (footnoteIt != pendingFootnotes.end() && footnoteIt->first <= wordsExtractedInBlock) {
     if (!currentPage->addFootnote(footnoteIt->second.number, footnoteIt->second.href)) {
@@ -6089,6 +6209,9 @@ void ChapterHtmlSlimParser::makePages() {
     pendingFootnotes.clear();
   }
 
+  // An id after the block's last word has no later line to reach: it is on the page the last line went to.
+  flushAnchorsInRange(1, INT_MAX);
+
   // Apply bottom spacing after the paragraph (stored in pixels)
   if (blockStyle.marginBottom > 0) {
     currentPageNextY += blockStyle.marginBottom;
@@ -6200,9 +6323,16 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   LayoutRow lr;
   BuildArena::Block rowBlock;
   if (buildArena_) rowBlock = buildArena_->reserveBlock();
+  // What the page's objects held before the row (TextBlock::ArenaRoom). A released row takes its objects' room and
+  // its bytes' give-back with it, so the count goes back to this; a refused release keeps the row's bytes, and the
+  // count with them.
+  size_t displacedBeforeRow = lineRoom_.displaced;
   const auto dropRowLayout = [&] {
     lr.cells.clear();
-    if (rowBlock.valid() && !buildArena_->release(rowBlock)) {
+    if (!rowBlock.valid()) return;
+    if (buildArena_->release(rowBlock)) {
+      lineRoom_.displaced = displacedBeforeRow;
+    } else {
       LOG_ERR("EHP", "Table row arena block could not be released (out of order); region stays claimed");
     }
   };
@@ -6256,10 +6386,33 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   // no longer bounded, so the cap has to live here, on the fragment that actually has to satisfy
   // it. The viewport check below reaches it first at any realistic row height; this is the
   // invariant, not the working limit.
-  if (!t.packer.rows.empty() && (t.packer.rows.size() >= MAX_TABLE_ROWS ||
-                                 currentPageNextY + t.packer.height + rowContrib + closingBorder > viewportHeight)) {
+  bool fragmentFull =
+      !t.packer.rows.empty() && (t.packer.rows.size() >= MAX_TABLE_ROWS ||
+                                 currentPageNextY + t.packer.height + rowContrib + closingBorder > viewportHeight);
+#ifdef PAGE_FAULT_INJECTION
+  if (fragmentFull && skipEarlyFitBreak()) fragmentFull = false;
+#endif
+  if (fragmentFull) {
     flushFragmentBeforeRow();
     t.packer.cols = lr.renderCols;
+  }
+
+  // The fragment's row list takes this row and, when this row opens a continuation fragment, the repeated header ahead
+  // of it. Asked here, after every flush above: flushTableFragment moves the list into the fragment, which leaves it
+  // with no capacity, so an ask made earlier would be lost. A refusal flushes the fragment (which empties the list) and
+  // asks again for the count the empty packer needs; the fit tests below then place the row against it. Refused with
+  // nothing left to flush, the build stops with its pages kept.
+  {
+    const auto rowsNeeded = [&] { return size_t{1} + ((repeatHeaderHere && t.packer.rows.empty()) ? 1 : 0); };
+    if (!reservePackerRows(t.packer, rowsNeeded())) {
+      flushFragmentBeforeRow();
+      t.packer.cols = lr.renderCols;
+      if (!currentPage || streamFailed || !reservePackerRows(t.packer, rowsNeeded())) {
+        stopForHeap("a table fragment's rows", 2 * sizeof(TableRow));
+        dropRowLayout();
+        return;
+      }
+    }
   }
 
   // If what is left of the page cannot hold even this one row, break now. Without this the row
@@ -6274,6 +6427,7 @@ void ChapterHtmlSlimParser::commitPendingRow() {
     if (!currentPage) return;  // no heap for the next page: emitPage stopped the build
     ensurePageBlock();
     if (buildArena_) rowBlock = buildArena_->reserveBlock();
+    displacedBeforeRow = lineRoom_.displaced;
     if (!layoutTableRow(t.pendingRow, columnCount, lr)) {
       dropRowLayout();
       degradeRow("row cannot be a grid row");
@@ -6318,6 +6472,9 @@ void ChapterHtmlSlimParser::commitPendingRow() {
       hdr.isHeaderRow = hdrLayout.isHeaderRow;
       hdr.height = hdrLayout.height;
       hdr.cells = std::move(hdrLayout.cells);
+#ifdef TABLE_CELL_FAULT_INJECTION
+      if (t.packer.rows.size() == t.packer.rows.capacity()) ++packerGrowthPushes();
+#endif
       t.packer.rows.push_back(std::move(hdr));
       t.packer.height += headerContrib;
     }
@@ -6328,6 +6485,9 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   tr.height = lr.height;
   tr.cells = std::move(lr.cells);
   if (t.packer.firstVisibleOffset == UINT32_MAX) t.packer.firstVisibleOffset = rowStart;
+#ifdef TABLE_CELL_FAULT_INJECTION
+  if (t.packer.rows.size() == t.packer.rows.capacity()) ++packerGrowthPushes();
+#endif
   t.packer.rows.push_back(std::move(tr));
   t.packer.height += rowContrib;
 
@@ -6336,7 +6496,7 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   // the page it lands on. Without this an anchor on a <table> or a <tr> whose rows all lay out as
   // a grid waited for the next ordinary paragraph instead -- measured ten pages later on a book
   // whose notes are one long table.
-  flushAnchorsAwaitingLine();
+  flushAnchorsAwaitingLine(completedPageCount);
 
   // Free the row's words. Everything above exists to make this possible one row at a time.
   t.pendingRow.cells.clear();
@@ -6426,7 +6586,8 @@ void ChapterHtmlSlimParser::noteBackgroundImage(const char* name, const std::str
   if (path.empty()) return;
   std::string resolved = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(path));
   if (!isImageCandidate(resolved)) return;
-  backgroundImageScopes_.push_back({depth, std::move(resolved)});
+  (void)pushOrStop(backgroundImageScopes_, BackgroundImageScope{depth, std::move(resolved)},
+                   "the background picture scopes");
 }
 
 void ChapterHtmlSlimParser::placeBackgroundImage(const std::string& resolvedPath, const int elementDepth) {
@@ -6746,6 +6907,8 @@ bool ChapterHtmlSlimParser::placeImageOnlyParagraph() {
     }
   }
   pendingLineImages_.clear();
+  // An id after an image is on the page the images reached, as makePages records an id after a block's last word.
+  flushAnchorsInRange(1, INT_MAX);
   // Links that ended inside the paragraph go to the page the images reached, as makePages hands over its leftovers.
   if (!pendingFootnotes.empty() && currentPage) {
     for (const auto& [idx, fn] : pendingFootnotes) {
@@ -6823,6 +6986,20 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
       emitPage();
     }
   }
+}
+
+bool ChapterHtmlSlimParser::reserveRowCell(BufferedTableRow& row) {
+#ifdef TABLE_CELL_FAULT_INJECTION
+  if (tableGrowthFault(tableRowCellsLeft())) return false;
+#endif
+  return heapReserveFor(row.cells, 1);
+}
+
+bool ChapterHtmlSlimParser::reservePackerRows(TableFragmentPacker& packer, const size_t extra) {
+#ifdef TABLE_CELL_FAULT_INJECTION
+  if (tableGrowthFault(packerRowsLeft())) return false;
+#endif
+  return heapReserveFor(packer.rows, extra);
 }
 
 void ChapterHtmlSlimParser::degradeRow(const char* reason) {
@@ -6903,6 +7080,7 @@ bool ChapterHtmlSlimParser::degradeRowAtOpenCell(const char* reason) {
   open.text = makeCellText();
   if (!open.text) return false;  // the parse stops; the open cell is left out (currentTableCell stays null)
 
+  // Cannot grow: the open cell was popped off this list above, so its slot is still there.
   t.pendingRow.cells.push_back(std::move(open));
   t.pendingRow.effectiveCols = 0;
   currentTableCell = &t.pendingRow.cells.back();
@@ -6993,7 +7171,18 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
   out.cells.clear();
   out.isHeaderRow = bufRow.isHeaderRow;
   out.renderCols = columnCount;
-  out.cells.reserve(columnCount);  // spans sum to columnCount, so that is the padded upper bound
+  // Spans sum to columnCount, so that is the padded upper bound: at most MAX_TABLE_COLS cells, asked of the heap. A
+  // refusal is the paragraph exit, like any other row that cannot be laid out as a grid row.
+  bool cellsRefused = false;
+#ifdef TABLE_CELL_FAULT_INJECTION
+  cellsRefused = tableGrowthFault(layoutCellsLeft());
+#endif
+  if (!cellsRefused) cellsRefused = !heapReserveFor(out.cells, columnCount);
+  if (cellsRefused) {
+    LOG_DBG("EHP", "No heap for a row's %u laid-out cells - falling back to paragraphs",
+            static_cast<unsigned>(columnCount));
+    return false;
+  }
   // The table's first grid row reserves the shared line scratch; later rows find it in place. A refusal sends the row
   // out as paragraphs, like any other grid row that cannot be laid out. Cleared on every way out of this function: a
   // line left in it would outlive the arena block the caller releases.
@@ -7049,9 +7238,10 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
         std::vector<std::unique_ptr<TextBlock>>* lines;
         size_t produced;
       } sink{&cellLineScratch_, 0};
-      // Line bytes from the lent region on an arena build. No page-fit hook: the row is placed as
-      // a whole by the caller, inside a block it commits or releases (see the row emission).
-      bufCell.text->setLineArena(buildArena_);
+      // Line bytes, and their objects (lineObjectKeepFree), from the lent region on an arena build. No page-fit hook:
+      // the row is placed as a whole by the caller, inside a block it commits or releases (see the row emission); a
+      // released row's lines are gone by then (lr.cells, and cellLineScratch_ cleared on every return here).
+      bufCell.text->setLineArena(buildArena_, lineRoom());
       bufCell.text->setWordCache(&wordCache_);
       bufCell.text->setBeforeLineHook(nullptr);
       bufCell.text->layoutAndExtractLines(
@@ -7157,18 +7347,37 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
   // Below a box's top padding on a fresh page there is nothing yet to leave behind.
   const bool pageHasContent = currentPageNextY > 0 && (boxScopes_.empty() || !currentPage->elements.empty());
   if (currentPageNextY + fragTotalHeight > viewportHeight && pageHasContent) {
+    if (buildArena_ != nullptr) {
+      // The rows were laid out in this page's block, which emitPage() rewinds: the packer's test said they fit.
+      packer.rows.clear();
+      packer.height = 0;
+      packer.cols = 0;
+      packer.firstVisibleOffset = UINT32_MAX;
+      stopOnLinesPastTheirPage("a table fragment");
+      return;
+    }
     emitPage();
     if (!currentPage) return;  // no heap for the next page: emitPage stopped the build
   }
 
-  if (auto fragment = makeUniqueNoThrow<PageTableFragment>(
-          packer.cols, packer.totalWidth, fragTotalHeight, std::move(packer.rows),
-          /*xPos=*/packer.xInset, /*yPos=*/static_cast<int16_t>(currentPageNextY), packer.hasBorder)) {
-    noteElementOnPage(packer.firstVisibleOffset != UINT32_MAX ? packer.firstVisibleOffset : placementOffset());
-    if (!addPageElement(std::move(fragment))) return;
-  } else {
-    LOG_ERR("EHP", "Dropping table fragment: allocation failed");
+  std::unique_ptr<PageTableFragment> fragment;
+#ifdef TABLE_CELL_FAULT_INJECTION
+  if (!tableGrowthFault(fragmentAllocLeft()))
+#endif
+  {
+    fragment =
+        makeUniqueNoThrow<PageTableFragment>(packer.cols, packer.totalWidth, fragTotalHeight, std::move(packer.rows),
+                                             /*xPos=*/packer.xInset,
+                                             /*yPos=*/static_cast<int16_t>(currentPageNextY), packer.hasBorder);
   }
+  if (!fragment) {
+    // The rows are packed text the section has no other copy of: stop the build, which marks the section truncated,
+    // rather than drop them and go on as if the table had been laid out.
+    stopForHeap("a table fragment", sizeof(PageTableFragment));
+    return;
+  }
+  noteElementOnPage(packer.firstVisibleOffset != UINT32_MAX ? packer.firstVisibleOffset : placementOffset());
+  if (!addPageElement(std::move(fragment))) return;
   currentPageNextY += fragTotalHeight;
   noteBoxContent(currentPageNextY);
   packer.rows.clear();

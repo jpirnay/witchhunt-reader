@@ -4,6 +4,7 @@
 #include <BuildArena.h>
 #include <ChunkedVector.h>
 #include <HalStorage.h>
+#include <HeapFit.h>
 #include <Print.h>
 #include <SaxParser/SaxParser.h>
 
@@ -18,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "../BlockFontFamilies.h"
@@ -98,6 +100,58 @@ inline size_t& cellLinesAllocated() {
   static size_t n = 0;
   return n;
 }
+// The table's three std::vector growths: how many more asks of each kind may succeed before one is refused as if the
+// heap were out. SIZE_MAX = never refuse. `tableRowCellsLeft` is the `<td>` that adds a cell to the pending row,
+// `layoutCellsLeft` a grid row's laid-out cell list, `packerRowsLeft` the fragment's row list.
+inline size_t& tableRowCellsLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+inline size_t& layoutCellsLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+inline size_t& packerRowsLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// ...and the allocation of the PageTableFragment a flush makes of the packed rows.
+inline size_t& fragmentAllocLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// How many pushes onto the fragment's row list found it full (so would have grown it through the throwing operator
+// new, past the reserve); a table's reserve is meant to leave this at zero.
+inline size_t& packerGrowthPushes() {
+  static size_t n = 0;
+  return n;
+}
+// How many asks, once a counter above reaches zero, are refused before the heap "recovers" (SIZE_MAX: all of them),
+// and how many were refused in all.
+inline size_t& tableGrowthRefusals() {
+  static size_t n = SIZE_MAX;
+  return n;
+}
+inline size_t& tableGrowthRefused() {
+  static size_t n = 0;
+  return n;
+}
+// One ask of a kind whose counter is `left`: true when it is refused.
+inline bool tableGrowthFault(size_t& left) {
+  if (left == SIZE_MAX) return false;
+  if (left > 0) {
+    --left;
+    return false;
+  }
+  size_t& refusals = tableGrowthRefusals();
+  if (refusals == 0) {
+    left = SIZE_MAX;
+    return false;
+  }
+  if (refusals != SIZE_MAX) --refusals;
+  ++tableGrowthRefused();
+  return true;
+}
 #endif
 
 #ifdef PAGE_FAULT_INJECTION
@@ -106,6 +160,24 @@ inline size_t& cellLinesAllocated() {
 inline size_t& pagesLeft() {
   static size_t left = SIZE_MAX;
   return left;
+}
+// How many page breaks the fit tests that run before a line or a grid row is laid out (beforeLineHook, the row
+// packer's) take before they skip one, as if it had found room. SIZE_MAX (the default): they never do. Drives the
+// arena build's stop when the later fit test disagrees (stopOnLinesPastTheirPage).
+inline size_t& earlyFitBreaksBeforeSkip() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// For a break one of those tests is about to take: true when it is the one to skip (once; the hook then disarms).
+inline bool skipEarlyFitBreak() {
+  size_t& left = earlyFitBreaksBeforeSkip();
+  if (left == SIZE_MAX) return false;
+  if (left > 0) {
+    --left;
+    return false;
+  }
+  left = SIZE_MAX;
+  return true;
 }
 #endif
 
@@ -121,6 +193,30 @@ inline size_t& elementsLeft() {
 inline bool& elementRefusalRecovers() {
   static bool recovers = false;
   return recovers;
+}
+#endif
+
+#ifdef STACK_FAULT_INJECTION
+// Host tests only (firmware never defines it): how many more pushes onto the per-element stacks may succeed before each
+// is refused as if the heap were out. SIZE_MAX = never refuse. Drives pushOrStop's out-of-memory path.
+inline size_t& stackPushesLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// The `what` of every refusal since the test cleared it, one name per stack, so a test can show each stack took one.
+inline std::string& stackRefusals() {
+  static std::string refused;
+  return refused;
+}
+// Every push, counted whether it is refused or not: the walk's upper bound.
+inline size_t& stackPushCount() {
+  static size_t count = 0;
+  return count;
+}
+// The `what` of every push in order, refused or not, so a test can pick the pushes that start a run of one stack.
+inline std::vector<const char*>& stackPushNames() {
+  static std::vector<const char*> names;
+  return names;
 }
 #endif
 
@@ -820,16 +916,34 @@ class ChapterHtmlSlimParser final : public Print {
   // BEFORE the note. Held until addLineToPage has placed a line, then recorded against the page
   // that line actually went on.
   //
-  // Small by construction: an entry lives only from an element's start tag to its first line, so
-  // it holds more than one only for id'd elements that produce no text at all. Past
-  // MAX_ANCHORS_AWAITING_LINE the queue is flushed at the current page rather than grown, which
-  // is exactly the old behaviour and no worse.
-  std::vector<std::string> anchorsAwaitingLine_;
-  // Records every queued anchor against `completedPageCount`. Called once a line has been placed
-  // (the page is then known) and again at end of parse for anchors that never got one.
-  void flushAnchorsAwaitingLine();
-  // Holds an anchor until a line settles its page; see anchorsAwaitingLine_.
-  void queueAnchorForNextLine(std::string id);
+  // Small by construction: an entry lives only from an element's start tag to its line, so it holds
+  // more than one only for id'd elements that produce no text at all, or for several ids inside one
+  // paragraph. Past MAX_ANCHORS_AWAITING_LINE an id is recorded at once, at the page reached so far,
+  // rather than queued: approximate, never lost.
+  //
+  // An id on an inline element in the middle of a block carries the index of the next word (as a
+  // footnote link carries the index of the word it follows), so the line that reaches that word
+  // records it, not the block's first line. A block's own id, an inline id before the block's
+  // first word and an id in a table cell, carry 0: the block's first line (a table's, the row's page).
+  // Queued by word index after crosspoint-reader #4328 (Mikalai Kryvusha, @MikalaiKryvusha).
+  struct AnchorAwaitingLine {
+    std::string id;
+    int wordIndex;
+  };
+  std::vector<AnchorAwaitingLine> anchorsAwaitingLine_;
+  // Records the queued anchors whose index lies in [firstIndex, lastIndex] at `completedPageCount`, the rest wait.
+  // After a line is placed: [0, wordsExtractedInBlock], the words its lines have reached (the page is then known).
+  // After a block is laid out: [1, INT_MAX], an id after its last word names the last line's page; a block's own id
+  // (index 0) waits on for its first line. Neither takes -1, an id startNewTextBlock sets aside for the next block.
+  void flushAnchorsInRange(int firstIndex, int lastIndex);
+  // Records every queued anchor at `page`: for a grid row (its page), and at the end of the parse for anchors that
+  // never got a line (the last page).
+  void flushAnchorsAwaitingLine(int page);
+  // Holds an anchor until the line that reaches word `wordIndex` of the block settles its page.
+  void queueAnchorForNextLine(std::string id, int wordIndex = 0);
+  // The index to queue an inline element's id with: that of the next word of the block in progress, or 0 when the
+  // block has no word yet or the id is not in a plain block (a table cell lays out apart).
+  int inlineAnchorWordIndex() const;
   // Records the id of a <span>, within MAX_SPAN_ANCHORS_PER_CHAPTER and never counted against the
   // general cap: see the definition.
   void recordSpanAnchor(const std::string& id);
@@ -907,6 +1021,11 @@ class ChapterHtmlSlimParser final : public Print {
   // Drops the page in hand and stops the parse the way a low-heap abort does: the pages already
   // emitted are kept as a truncated section.
   void stopOnFullPageTable();
+  // An arena build lays a line or a table row out in the block of the page its fit test chose (beforeLineHook, the
+  // row packer), and emitPage() rewinds that block. Should a later test send the line or the packed rows to the next
+  // page, they would be carried over in rewound bytes, so their caller drops them while the block is live and calls
+  // this: the parse stops the way a low-heap stop does, its pages kept. Unreachable while the tests agree.
+  void stopOnLinesPastTheirPage(const char* what);
 
   // Active parser for streaming. A member so write() can feed it and the abort paths can stop
   // it from inside a callback.
@@ -919,6 +1038,10 @@ class ChapterHtmlSlimParser final : public Print {
   // above the section's feed-chunk block and below nothing that outlives the page (a mid-build
   // draw's font-slot scope opens and closes between two slices): strictly LIFO.
   BuildArena::Block pageBlock_;
+  // What the open page's lines may take from pageBlock_'s arena, objects and bytes (TextBlock::ArenaRoom): handed to
+  // every ParsedText laid out on the page, its keepFree lineObjectKeepFree(), its displaced cleared whenever the
+  // page block opens or is rewound.
+  TextBlock::ArenaRoom lineRoom_;
   // The build's cache of shaped words, in buildArena_'s free tail (WordShapeCache.h): armed in setup() after the SAX
   // state is taken, bound to each ParsedText beside its line arena, disarmed at the end of finalize(), before the
   // section releases the feed-chunk block. Unarmed (no lent arena, or no room for it), every lookup is bypassed.
@@ -1282,6 +1405,10 @@ class ChapterHtmlSlimParser final : public Print {
   // ParsedText before returning. Shared by the row fallback and the degraded path so both
   // produce identical output. Returns false when the heap guard stopped the parse.
   bool emitCellAsParagraph(BufferedTableCell& cell, bool emitImage);
+  // The pending row's cell list and the fragment's row list grow through these: false when the heap holds no block for
+  // the growth, and nothing changed.
+  bool reserveRowCell(BufferedTableRow& row);
+  bool reservePackerRows(TableFragmentPacker& packer, size_t extra);
   // Give up the grid for the pending ROW: flush whatever is packed so the fragment closes before
   // the paragraphs, then emit the row's buffered cells (text then images) and latch rowDegraded so
   // the rest of the row streams at </td>. The next <tr> clears it and the grid resumes.
@@ -1396,6 +1523,32 @@ class ChapterHtmlSlimParser final : public Print {
   // has stopped through stopForHeap, the element is gone) or when there is no page: the caller places nothing more.
   // A borrowed pointer to the element (deferredPageImage_, deferredDropCapLine_) must be cleared on false.
   [[nodiscard]] bool addPageElement(std::unique_ptr<PageElement> element);
+  // Push onto one of the per-element stacks, asking the heap for its growth first. False when it refuses: the build has
+  // stopped through stopForHeap (streamFailed latches, so startElement and endElementBody return at once and no pop
+  // follows), the entry is gone, and the caller returns as it does when flushPartWordBuffer() refuses.
+  template <typename V, typename T>
+  [[nodiscard]] bool pushOrStop(V& v, T&& x, const char* what) {
+    bool room = heapReserveFor(v, 1);
+#ifdef STACK_FAULT_INJECTION
+    ++stackPushCount();
+    stackPushNames().push_back(what);
+    if (stackPushesLeft() == 0) {
+      room = false;
+    } else if (stackPushesLeft() != SIZE_MAX) {
+      --stackPushesLeft();
+    }
+    if (!room) {
+      stackRefusals() += what;
+      stackRefusals() += ';';
+    }
+#endif
+    if (!room) {
+      stopForHeap(what, 2 * v.capacity() * sizeof(typename V::value_type));
+      return false;
+    }
+    v.push_back(std::forward<T>(x));
+    return true;
+  }
   // Take a pending page break (pageBreakPending_): emit the page if anything is on it. Called
   // where the content before the break has been laid out and the next is about to be placed.
   void applyPendingPageBreak();
@@ -1664,6 +1817,13 @@ class ChapterHtmlSlimParser final : public Print {
   // wireParagraphLines does the same for any text laid out as a paragraph of the page.
   void wireTextBlock();
   void wireParagraphLines(ParsedText& text);
+  // What the line arena must still have free after a line's TextBlock object for the object to go there beside its
+  // bytes, and, once an object of the page is there, after the line bytes too (memory-and-parsing 9b,
+  // TextBlock::ArenaRoom): the image walk's largest stage (EpubImageManifest::kWalkArenaReserve) whenever the build has
+  // an image manifest and a C3-sized region, else nothing. The one place the rule lives.
+  size_t lineObjectKeepFree() const;
+  // lineRoom_ with its keepFree set from lineObjectKeepFree(), for a ParsedText laid out on the page.
+  TextBlock::ArenaRoom* lineRoom();
   void beforeLineHook(uint8_t maxSizePct, bool annotated);
   // Widow/orphan control and keep-with-next (CSS defaults: orphans 2, widows 2), decided before
   // each line of currentTextBlock is placed: true when the page should end before a line that
@@ -1682,4 +1842,8 @@ class ChapterHtmlSlimParser final : public Print {
   uint16_t paragraphLinesOnPage_ = 0;
   void ensurePageBlock();
   void releasePageBlock();
+  // Destroys everything that holds lines laid out in the page block -- the open page and a table's packed rows -- on
+  // the paths that end a parse early (finalize(), the destructor). They must go before releasePageBlock() rewinds the
+  // block: the lines' bytes live there.
+  void dropLaidOutLines();
 };

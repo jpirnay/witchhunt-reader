@@ -28,6 +28,11 @@ constexpr const char* kPendingTempFile = "/images.pending.tmp";
 constexpr size_t kHeaderBufSize = 4 * 1024;
 // Compressed-side read chunk of the streaming walk; the walk's other cost is the inflate ring.
 constexpr size_t kWalkChunkBytes = 512;
+// walkEntry's arena test for the whole-entry stage, at InflateReader's largest ring: the 32 * 1024 is the cap
+// InflateReader::ringSizeFor() puts on a ring (min(32 KB, max(size, 512))); it is not a constant there to name, so a
+// change to that cap must change this line too.
+static_assert(kWalkChunkBytes + 32 * 1024 + 2 * alignof(std::max_align_t) <= EpubImageManifest::kWalkArenaReserve,
+              "the line objects' reserve must hold the walk's largest stage");
 // Largest-free-block readings land a few bytes under the round number (allocator bookkeeping),
 // so the walk gate does not sit exactly on the ring size.
 constexpr size_t kWalkHeapSlack = 64;

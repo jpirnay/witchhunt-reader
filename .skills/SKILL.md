@@ -49,7 +49,10 @@ a capability check (see `HalCapabilities::keepsSecondaryBuffer()` for the patter
   `lib/TextShaping`, `lib/OtShaper`, `lib/MiniBidi`: complex scripts and bidi.
 - `test/`: host GoogleTest suites, one folder each; `test/shims/` stands in for Arduino and the HAL.
 - `docs/`: reference docs. `docs/design/`: design records for shipped features. `docs/future_work/`:
-  open work, one file per topic. Read the relevant one before planning in that area.
+  open work, one file per topic. Read the relevant one before planning in that area. A topic that
+  parallel PRs work on keeps one file per item in a folder of the topic's name (`memory-and-parsing/`):
+  a PR deletes the item file it closes and adds a file for a follow-up, and leaves the topic page and
+  the README row alone, so PRs on different items never conflict.
 
 Singletons: `SETTINGS`, `APP_STATE`, `GUI`, `Storage`, `I18N`, `RECENT_BOOKS`, `READING_STATS`,
 `GLOBAL_BOOKMARKS`, `WIFI_STORE`, `OPDS_STORE`, `KOREADER_STORE`, `AUTOSYNC_STATE`, `WEATHER_SETTINGS`.

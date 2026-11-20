@@ -138,6 +138,7 @@ add_executable(EpubPipelineTest
   TableCellTextHeapTest.cpp
   BlockImageHeapTest.cpp
   PageHeapTest.cpp
+  StackHeapTest.cpp
   SectionSetupHeapTest.cpp
   TableRowFallbackArenaTest.cpp
   AnchorMapTest.cpp
@@ -211,6 +212,8 @@ add_executable(EpubPipelineTest
   FirstChapterTest.cpp
   TocPassTest.cpp
   BoxLayoutTest.cpp
+  LentBuildTeardownTest.cpp
+  LentTableLayoutTest.cpp
   # A book's embedded body font (Publisher Fonts): the probe and the extraction. Its SHA-1 comes from
   # test/shims/wolfssl, standing in for wolfCrypt.
   ${REPO_ROOT}/lib/Epub/Epub/BookFonts.cpp
@@ -247,7 +250,9 @@ target_compile_definitions(EpubPipelineTest PRIVATE
   # LongChapterPageTablesTest refuses build-table chunks on purpose (see ChunkedVector.h). The
   # hook is inert until a test arms it; firmware and the dump tools never define it.
   CHUNKED_VECTOR_FAULT_INJECTION
-  # TableCellTextHeapTest refuses table cells their text (ChapterHtmlSlimParser::makeCellText). Inert otherwise.
+  # TableCellTextHeapTest refuses table cells their text (ChapterHtmlSlimParser::makeCellText), a grid row its line lists,
+  # and a table's row, cell-list and fragment growth (reserveRowCell, layoutTableRow, reservePackerRows,
+  # flushTableFragment). Inert otherwise.
   TABLE_CELL_FAULT_INJECTION
   # BlockImageHeapTest refuses block images their ImageBlock (ChapterHtmlSlimParser::placeImageWithBlockSpacing).
   BLOCK_IMAGE_FAULT_INJECTION
@@ -257,8 +262,13 @@ target_compile_definitions(EpubPipelineTest PRIVATE
   SECTION_SETUP_FAULT_INJECTION
   # PageHeapTest refuses a page its n-th element (ChapterHtmlSlimParser::addPageElement). Inert otherwise.
   ELEMENT_FAULT_INJECTION
+  # StackHeapTest refuses the n-th push onto a per-element stack (ChapterHtmlSlimParser::pushOrStop). Inert otherwise.
+  STACK_FAULT_INJECTION
   # Central-directory walk counters (ZipFile.h), for the tests that bound them. Inert otherwise.
   ZIP_FILE_SCAN_STATS
+  # A rewound build-arena block is filled (BuildArena.h), so a line or page used or destroyed after its block was given
+  # back fails here. The trace hooks it also compiles in stay null.
+  BUILD_ARENA_TRACE=1
 )
 target_link_libraries(EpubPipelineTest PRIVATE
   crosspoint_test_common

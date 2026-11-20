@@ -30,8 +30,10 @@
 // free, so every room check and every allocation is as it would be without it.
 // markPeak()/peakSinceMark() tell it whether an allocation has reached those bytes
 // since it last looked; tail() is where they are. That is sound only because
-// nothing writes an arena's memory except through alloc() (§6): keep it so. No
-// accessor for the base or for any byte below the tail.
+// nothing writes an arena's memory except through alloc() (§6): keep it so. (The
+// host's rewind fill, BUILD_ARENA_TRACE, writes only bytes below the cursor, which
+// the tail never is while it is trusted.) No accessor for the base or for any byte
+// below the tail.
 //
 // Heap discipline: the backing buffer comes from makeUniqueNoThrow (never a
 // throwing new); valid() must be checked before use.
@@ -40,10 +42,12 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 // Host-only allocation trace (the epub_build_inventory tool): every cursor move is reported, so a
 // shadow stack of live arena allocations -- with the code that made each -- can be kept outside
-// the arena. Compiled out entirely unless BUILD_ARENA_TRACE is defined; firmware never defines it.
+// the arena. The same switch fills a rewound block (kBuildArenaRewoundFill below), for EpubPipelineTest. Compiled out
+// entirely unless BUILD_ARENA_TRACE is defined; firmware never defines it.
 #ifdef BUILD_ARENA_TRACE
 class BuildArena;
 struct BuildArenaTraceHooks {
@@ -58,16 +62,34 @@ inline BuildArenaTraceHooks& buildArenaTraceHooks() {
   static BuildArenaTraceHooks hooks;
   return hooks;
 }
+// What a rewind leaves in the bytes it gives back: release() fills the block, reset() what was in use. A pointer read
+// from them faults and a count reads absurd, so an object used after its block was released fails a test instead of
+// reading whatever happened to be left there. Only bytes below the cursor are filled: the free tail above it (the
+// word-shaping cache's sets) is untouched.
+inline constexpr uint8_t kBuildArenaRewoundFill = 0xA5;
+// Whether all `bytes` at `p` read the fill: what something that lives in an arena checks as it is destroyed. False for
+// no bytes.
+inline bool buildArenaLooksRewound(const void* p, const size_t bytes) {
+  if (p == nullptr || bytes == 0) return false;
+  const auto* b = static_cast<const uint8_t*>(p);
+  for (size_t i = 0; i < bytes; ++i) {
+    if (b[i] != kBuildArenaRewoundFill) return false;
+  }
+  return true;
+}
 #define BUILD_ARENA_TRACE_ALLOC(off, bytes) \
   if (buildArenaTraceHooks().onAlloc) buildArenaTraceHooks().onAlloc(this, (off), (bytes), cursor_)
 #define BUILD_ARENA_TRACE_REWIND() \
   if (buildArenaTraceHooks().onRewind) buildArenaTraceHooks().onRewind(this, cursor_)
 #define BUILD_ARENA_TRACE_LANE() \
   if (buildArenaTraceHooks().onLane) buildArenaTraceHooks().onLane(this, cursor_)
+#define BUILD_ARENA_TRACE_FILL(from) \
+  if (base_ != nullptr && cursor_ > (from)) std::memset(base_ + (from), kBuildArenaRewoundFill, cursor_ - (from))
 #else
 #define BUILD_ARENA_TRACE_ALLOC(off, bytes) ((void)0)
 #define BUILD_ARENA_TRACE_REWIND() ((void)0)
 #define BUILD_ARENA_TRACE_LANE() ((void)0)
+#define BUILD_ARENA_TRACE_FILL(from) ((void)0)
 #endif
 
 class BuildArena {
@@ -203,6 +225,7 @@ class BuildArena {
       ++releaseFailures_;
       return false;
     }
+    BUILD_ARENA_TRACE_FILL(block.start_);
     cursor_ = block.start_;
     activeBlockId_ = block.parentId_;
     block.id_ = 0;
@@ -243,6 +266,7 @@ class BuildArena {
   // Discard everything (build boundary). highWater/failedAllocSize survive so
   // post-build diagnostics can still report the peak.
   void reset() {
+    BUILD_ARENA_TRACE_FILL(0);
     cursor_ = 0;
     activeBlockId_ = 0;
     laneStart_ = 0;
