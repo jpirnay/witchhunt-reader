@@ -321,15 +321,24 @@ void WeatherActivity::loop() {
   }
 
   if (state == State::LOCATION_REQUIRED) {
-    int action = -1;
+#if CP_TOUCH_UI
     int x = 0;
     int y = 0;
     if (TapTargets::screenActions().hasTargets() && mappedInput.wasScreenTapped(x, y)) {
-      action = TapTargets::screenActions().hitTest(x, y);
+      const int action = TapTargets::screenActions().hitTest(x, y);
+      if (action == GoBack) {
+        onGoHome();
+        return;
+      }
+      if (action == OpenSettings) {
+        openSettingsActivity();
+        return;
+      }
     }
-    if (action == GoBack || mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+#endif
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       onGoHome();
-    } else if (action == OpenSettings || mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
                mappedInput.wasReleased(MappedInputManager::Button::Left) ||
                mappedInput.wasReleased(MappedInputManager::Button::Right)) {
       openSettingsActivity();
