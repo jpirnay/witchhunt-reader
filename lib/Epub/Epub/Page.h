@@ -5,11 +5,18 @@
 #include <algorithm>
 #include <array>
 #include <memory>
+#include <new>  // std::destroying_delete_t
 #include <string>
 #include <utility>
 #include <vector>
 
-class BuildArena;  // lib/Memory -- optional storage for TextBlock bytes on deserialize
+class BuildArena;  // lib/Memory -- optional storage for TextBlock bytes on deserialize, and a built line's PageLine
+#ifdef BUILD_ARENA_TRACE
+#include <BuildArena.h>  // the rewind fill a destroyed element checks its bytes against
+
+#include <cstdio>
+#include <cstdlib>
+#endif
 namespace serialization {
 class BufferedFileWriter;  // lib/Serialization -- where a block writes itself
 class BufferedFileReader;  // and where it reads itself back
@@ -47,6 +54,34 @@ class PageElement {
   virtual void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) = 0;
   virtual bool serialize(serialization::BufferedFileWriter& out) = 0;
   virtual PageElementTag getTag() const = 0;  // Add type identification
+
+  // Every delete of a page element comes here (a C++20 destroying operator delete, so std::unique_ptr<PageElement> and
+  // each element type's own std::unique_ptr stay the types everywhere): it runs the element's virtual destructor, and
+  // gives the memory back to the heap only when the heap made the element. A PageLine laid out in a build's page block
+  // (PageLine::make) goes with that block's rewind; no other element is built in an arena. Every element type derives
+  // from PageElement alone, so `element` is the address its allocation returned. Defined in the class, as TextBlock's
+  // is. GCC 16 (the host tests') still reports -Wmismatched-new-delete where it inlines a deleting destructor without
+  // this (the parser's refused PageBox): a false positive, the heap path's ::operator delete frees a nothrow new. GCC
+  // 14 (the firmware's) does not; [[gnu::always_inline]] would silence it for about 370 B of C3 flash in two files.
+  static void operator delete(PageElement* const element, std::destroying_delete_t) {
+#ifdef BUILD_ARENA_TRACE
+    // Host only: an element whose own bytes read the rewind fill was destroyed after the arena block it lives in. Asked
+    // before the virtual call below, which would read the fill as a vtable pointer.
+    if (buildArenaLooksRewound(element, sizeof(PageElement))) {
+      std::fprintf(stderr, "PageElement destroyed after the arena block it was built in was rewound\n");
+      std::abort();
+    }
+#endif
+    const bool inArena = builtInArena(*element);
+    element->~PageElement();
+    if (!inArena) ::operator delete(element);
+  }
+
+ private:
+  // Whether `element` was built in a build arena: only a PageLine that says so (PageLine::objectInArena). A virtual
+  // call, where a flag in this base would grow every element of a resident page by 4 B on the C3 (8 to 12). Defined
+  // below PageLine, which it reads.
+  static bool builtInArena(const PageElement& element);
 };
 
 // a line from a block element
@@ -56,12 +91,26 @@ class PageLine final : public PageElement {
  public:
   PageLine(std::unique_ptr<TextBlock> block, const int16_t xPos, const int16_t yPos)
       : PageElement(xPos, yPos), block(std::move(block)) {}
+  // A laid-out line's PageLine, where its TextBlock's object goes (memory-and-parsing 9c): in `arena` as `room` lets
+  // an object of the page in (TextBlock::ArenaRoom::placeObject, counted in its `displaced`), else on the heap
+  // (new (std::nothrow), as before). A PageLine built in the arena lives in the caller's block of it, the page's, and
+  // must be destroyed before that block is rewound, as its TextBlock must. Null when the heap refuses it; `block`
+  // then goes with the refusal.
+  static std::unique_ptr<PageLine> make(std::unique_ptr<TextBlock> block, int16_t xPos, int16_t yPos, BuildArena* arena,
+                                        TextBlock::ArenaRoom* room);
+  // Whether make() built this line in a build arena. Kept in its TextBlock's pad byte (TextBlock::holderInArena), so a
+  // PageLine stays 12 B on the C3; make() puts one in an arena only when it has a TextBlock to keep the bit.
+  bool objectInArena() const { return block != nullptr && block->holderInArena(); }
   const TextBlock* getBlock() const { return block.get(); }
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(serialization::BufferedFileWriter& out) override;
   PageElementTag getTag() const override { return TAG_PageLine; }
   static std::unique_ptr<PageLine> deserialize(serialization::BufferedFileReader& in, BuildArena* scratch = nullptr);
 };
+
+inline bool PageElement::builtInArena(const PageElement& element) {
+  return element.getTag() == TAG_PageLine && static_cast<const PageLine&>(element).objectInArena();
+}
 
 // New PageImage class
 class PageImage final : public PageElement {

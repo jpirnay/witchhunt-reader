@@ -159,14 +159,16 @@ class TextBlock final : public Block {
   bool sizesPresent = false;
   bool isValid = true;
   uint8_t wordFontCount = 0;  // the line's word fonts (see WordFont); 0 on a line in the block's font alone
-  // Five bits in the struct's pad byte: a line of a vertical-rl page (see setVertical), whether its 、。 are centred,
+  // Six bits in the struct's pad byte: a line of a vertical-rl page (see setVertical), whether its 、。 are centred,
   // whether it has a Ruby or Emphasis record (it reserves the band above its base), whether the arena is ours to
-  // free (see arena), and whether the object itself was built in a build arena (make, operator delete).
+  // free (see arena), whether the object itself was built in a build arena (make, operator delete), and whether the
+  // PageLine that holds it was (setHolderInArena).
   bool vertical_ : 1 = false;
   bool centredMarks_ : 1 = false;
   bool annotationBand_ : 1 = false;
   bool arenaOwned_ : 1 = false;
   bool objectInArena_ : 1 = false;
+  bool holderInArena_ : 1 = false;
   // The ONLY allocation. Heap by default (nothrow, so OOM yields an invalid block instead of
   // abort() -- bare new is not nothrow with -fno-exceptions). A section build that lends a
   // scratch region (the borrowed secondary framebuffer) hands it in through the range
@@ -364,6 +366,11 @@ class TextBlock final : public Block {
     if (!inArena) ::operator delete(block);
   }
   bool objectInArena() const { return objectInArena_; }
+  // The PageLine that holds this line keeps here whether it was built in a build arena (PageLine::make,
+  // PageLine::objectInArena): a spare bit of this object's pad byte, where the PageLine has no byte to spare on the
+  // C3 (12 B: its vtable pointer, x and y, and this line's pointer). Only PageLine::make sets it.
+  void setHolderInArena() { holderInArena_ = true; }
+  bool holderInArena() const { return holderInArena_; }
 
   const RenderStyle& getRenderStyle() const { return renderStyle; }
   bool isEmpty() override { return numWords == 0; }

@@ -2652,6 +2652,8 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   // internal leading (offset by the first line's own small leading) puts the cap's ink
   // top level with the first line's ink top. Provisional; re-based in addLineToPage.
   dropCapYAdjust_ = static_cast<int16_t>(bodyLeading - capLeadScaled + sinkShift);
+  // On the heap, as its TextBlock: the page's block opens with the page's first line (beforeLineHook), so on a new page
+  // it is not open yet here, and an object made in the arena now would land below it, its room kept after the page.
   auto capLine = makeUniqueNoThrow<PageLine>(std::move(capBlock), capX, static_cast<int16_t>(top + dropCapYAdjust_));
   if (!capLine) {
     LOG_DBG("EHP", "dropcap '%s': inline fallback (PageLine alloc failed)", pendingDropCap_.text);
@@ -5954,7 +5956,10 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
   line->setCentredMarks(vertical_ && typography_.punctuation == TypographyProfile::Punctuation::TraditionalChinese);
   // A line of images alone has no text to place.
   if (line->wordCount() > 0 || images.empty()) {
-    auto pageLine = makeUniqueNoThrow<PageLine>(std::move(line), xOffset, currentPageNextY + box.textTop);
+    // In the page's block of the line arena under the line's room, as its TextBlock is (memory-and-parsing 9c): the
+    // page is serialised and destroyed before emitPage() rewinds that block.
+    auto pageLine = PageLine::make(std::move(line), xOffset, static_cast<int16_t>(currentPageNextY + box.textTop),
+                                   buildArena_, lineRoom());
     if (!pageLine) {
       // Accepted, not a retry: the line is gone either way, and retrying would just fail again.
       LOG_ERR("EHP", "Dropping line: PageLine allocation failed");
