@@ -305,15 +305,32 @@
     return rows;
   }
 
+  // The device events the reader sends (src/util/PluginEventCore.h; docs/sd-plugins.md, "Events"). book.downloaded is
+  // not sent yet, and a handler with require_meta waits for <book>.meta.json files nothing writes here yet.
+  const EVENTS_SENT = ['reader.open', 'reader.exit', 'reader.session', 'sleep.enter'];
+
+  // A device.json's events: {run, wait}, the names whose handler the reader sends, and those it does not yet. A handler
+  // runs as the firmware's handlerFor() reads it: a request with a URL, or a download with a URL and a destination.
+  function describeEvents(events) {
+    const out = { run: [], wait: [] };
+    if (!events || typeof events !== 'object') return out;
+    for (const name of Object.keys(events)) {
+      const h = events[name] && typeof events[name] === 'object' ? events[name] : {};
+      const download = h.download && typeof h.download === 'object' ? h.download : null;
+      const request = h.request && typeof h.request === 'object' ? h.request : null;
+      const sendable = download ? typeof download.url === 'string' && !!text(download.dest)
+        : !!request && typeof request.url === 'string';
+      (EVENTS_SENT.includes(name) && h.require_meta === undefined && sendable ? out.run : out.wait).push(name);
+    }
+    return out;
+  }
+
   // What of a device.json runs here: {catalog, reason, events}. catalog: it can be opened on the Plugins page;
-  // reason: why not, when it has one that cannot; events: it subscribes to device events, which do not run here yet.
+  // reason: why not, when it has one that cannot; events: describeEvents() of its device events.
   function describe(manifest) {
     const m = manifest && typeof manifest === 'object' ? manifest : {};
     const browse = m.browse && typeof m.browse === 'object' ? m.browse : null;
-    const out = {
-      catalog: false, reason: '',
-      events: !!(m.events && typeof m.events === 'object' && Object.keys(m.events).length)
-    };
+    const out = { catalog: false, reason: '', events: describeEvents(m.events) };
     if (!browse) return out;
     const lists = Array.isArray(browse.lists) ? browse.lists : [];
     if (!browse.url && !browse.lists_url && !lists.some((l) => l && l.url)) return out;
