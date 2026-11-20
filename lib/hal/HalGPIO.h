@@ -150,6 +150,10 @@ class HalGPIO {
   ButtonEdge edgeBuf_[EDGE_BUF] = {};
   int edgeHead_ = 0;
   int edgeTail_ = 0;
+#if FREEINK_CAP_TOUCH
+  // The touch rings and the snapshot below exist only where there is a panel to fill them: on a
+  // board without one (FREEINK_CAP_TOUCH 0, the X3 and X4) every event query reports none.
+  //
   // A discrete single-contact touch event, latched by the sampler so it survives
   // a loop tick that took longer than the SDK's flags live.
   //
@@ -197,6 +201,8 @@ class HalGPIO {
   int touchEventTail_ = 0;
   bool touchReleasedPending_ = false;  // release edges seen since the last drain
 
+#endif  // FREEINK_CAP_TOUCH
+
   // Loop-side snapshot refreshed by update(); only the loop task reads/writes these.
   uint8_t snapState_ = 0;
   // Counts of injected inputs, and of those update() has handed over; under inputMux_.
@@ -204,10 +210,12 @@ class HalGPIO {
   uint32_t deliveredInputs_ = 0;
   uint8_t snapPressed_ = 0;
   uint8_t snapReleased_ = 0;
+#if FREEINK_CAP_TOUCH
   TouchEvent snapTouchEvent_{};
   // atMs of the touch event drained this cycle, kept when a reader consumes the event itself.
   uint32_t snapTouchAtMs_ = 0;
   bool snapTouchReleased_ = false;
+#endif  // FREEINK_CAP_TOUCH
 
   // Capacitive home key -> the nav buttons the board physically lacks: tap emits
   // CONFIRM, hold emits BACK. Each is enabled independently in begin(), so a
@@ -217,6 +225,7 @@ class HalGPIO {
   bool homeKeyDrivesBack_ = false;
   bool homeKeyHeld_ = false;
 
+#if FREEINK_CAP_TOUCH
   // Edge detection for the BUTTON_TRACE touch line, so a resting finger logs once
   // rather than every sampler pass. Bring-up scaffolding; goes with the trace.
   bool touchTraceWasHeld_ = false;
@@ -229,9 +238,11 @@ class HalGPIO {
   float touchTraceDownNy_ = 0.0f;
   float touchTraceLastNx_ = 0.0f;
   float touchTraceLastNy_ = 0.0f;
+#endif  // FREEINK_CAP_TOUCH
 
   void sampleOnce();
   void pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs);
+#if FREEINK_CAP_TOUCH
   // Drain the SDK's one-shot multi-touch flags into gestureBuf_. Called from
   // sampleOnce() with inputMux_ NOT held: it reads the SDK, which the critical
   // section must not do.
@@ -244,6 +255,7 @@ class HalGPIO {
   void pushTouchEvent(const TouchEvent& event);
   // Drop every latched and snapshotted touch event, gestures included.
   void clearTouchEventState();
+#endif  // FREEINK_CAP_TOUCH
   static void samplerTask(void* arg);
 
  public:
@@ -340,9 +352,10 @@ class HalGPIO {
   // the layers above stay diff-comparable; see
   // docs/contributing/touch-architecture.md, "Layers".
   //
-  // No FREEINK_CAP_TOUCH guards are needed: every InputManager touch method is
-  // already guarded inside the SDK and compiles to an inert false/0 on non-touch
-  // boards, so the C3 pays nothing for these.
+  // Declared on every board, so a caller needs no guard. On a board without a
+  // panel (FREEINK_CAP_TOUCH 0) the event rings behind them are compiled out and
+  // each query reports none. The SDK's own calls are inert there too, but only at
+  // run time, which is why the rings needed a guard of their own.
   bool hasTouch() const;
   // The touch controller's pulsed data-ready line as a light-sleep wake (the SDK's
   // InputManager::touchPulseWakePin, armTouchPulseWake, touchPulseWakeDone): -1 / false where
@@ -381,7 +394,11 @@ class HalGPIO {
   void suppressTouchContact();
   unsigned long lastTouchHeldMs() const;
   // When the touch event drained this cycle happened (its TouchEvent::atMs), 0 if none.
+#if FREEINK_CAP_TOUCH
   uint32_t lastTouchEventAtMs() const { return snapTouchAtMs_; }
+#else
+  uint32_t lastTouchEventAtMs() const { return 0; }
+#endif
   bool wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const;
   // Drain one queued multi-touch gesture (FIFO). Returns false when empty.
   bool popTouchGesture(TouchGesture& out);

@@ -355,6 +355,8 @@ initialisers in `CrossPointSettings.h`. Why they are what they are:
   and leave the image without a guard of their own. Out-of-line queries that returned false at
   run time kept them all: the build has no LTO. cppcheck (`CPPCHECK_ANALYSIS`) sees only the
   declarations and checks both sides.
+- `FREEINK_CAP_TOUCH` 0 compiles `HalGPIO`'s touch event rings, their snapshot and the sampler's
+  latching out of the same builds. The queries stay declared and report no event.
 - `touchUiControls` silences touch outside the reader. `main.cpp` sets the gate every tick from
   the setting and the activity on top, and the reader is always enabled, because
   `touchReaderControls` governs it there. `hasTouch()` is not gated: screens use it for layout.
