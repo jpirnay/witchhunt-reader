@@ -87,10 +87,13 @@ heading shows an untitled card.
 | `registerAction(name, fn)` | accepted and ignored with a console warning: there is no job queue here |
 | `currentPath` | the folder the File Manager is showing. Default to it rather than asking for a path the user has already navigated to; always `/` on Settings |
 
-**`api.crypto` is not provided.** The browser's own `crypto.subtle` covers
-hashing, HMAC, AES and RSA, so a device-side implementation would only duplicate
-it. A plugin written against the upstream API that calls `api.crypto` gets a
-readable error rather than `is not a function`.
+**`api.crypto(op, fields)`** runs on the device, as upstream's does: the page has
+no `crypto.subtle`, which exists only in a secure context, and the reader serves
+`http://`. It posts the op and its base64 fields to `POST /api/crypto` (random,
+sha1, sha256, aesenc/aesdec, rsadec, sign, keygen, pubencrypt, pkcs12; see
+[webserver-endpoints.md](webserver-endpoints.md)) and resolves to the device's
+JSON; a failed op answers `{error}`. Keys come and go with each call: the device
+keeps nothing.
 
 A plugin may declare what it needs, and one asking for something this firmware
 does not implement is refused with a visible message instead of failing somewhere
@@ -100,7 +103,7 @@ inside its own code:
 { "requires": ["relay", "fetchToSd"] }
 ```
 
-Supported: `relay`, `fetchToSd`, `writeFile`, `pluginFile`, `dir`.
+Supported: `relay`, `fetchToSd`, `writeFile`, `pluginFile`, `dir`, `crypto`.
 
 Everything else is the web server's own
 same-origin API — a plugin uses `fetch()` against the endpoints in
@@ -352,8 +355,10 @@ it is sent:
   - **does not run here**: nothing of it runs (an events-only `device.json`,
     for example), another `firmware_family`, a requirement this firmware lacks
     (named), a `device.json` that could not be read, or a reason the catalog
-    does not state (`protected-content` needs DRM support). These have no Install
-    button.
+    does not state. These have no Install button.
+  `protected-content` (Adobe-protected loans and purchases) is marked **partly
+  runs here** with a note: it runs up to the account sign-in on a device, while
+  activation and fetching have been tried only against a mock Adobe service.
 
   Files a community entry lists in subfolders (the dictionaries catalog's own
   pages, which its plugin reads from GitHub) are left out of the install, and the

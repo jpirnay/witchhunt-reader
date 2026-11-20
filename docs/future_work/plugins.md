@@ -5,22 +5,23 @@ reach: the relay and fetch with per-plugin host approval (#797), the Plugin Hub 
 by compatibility (#807), `device.json` catalogs run in the browser (#809), and sign-in, XML (WebDAV) catalogs and the
 token and config files a `device.json` names (#814). This repository's catalog lists a `device.json`-only plugin
 (#824), `/api/files` lists a dot folder named by its path, as upstream does, so plugins find their own files (#828),
-and a failed `/api/fetch` names the file server's answer (#827). The decisions: hosts are approved per plugin on the Plugins page,
+a failed `/api/fetch` names the file server's answer (#827), and `api.crypto` runs upstream's crypto ops on the
+device for the Plugin Hub's `protected-content` (Adobe loans and purchases, #857). The decisions: hosts are approved per
+plugin on the Plugins page,
 `device.json` catalogs run in the browser and never on the reader, events come later on all boards, and the Hub's
 plugins are offered (fetched at install, never copied here: the Hub and sd-plugins have no license).
 
 ## Open
 
-- **`api.crypto`**: the Plugin Hub's `protected-content` (Libby, Onleihe) needs it at every step (`crypto.subtle`
-  needs a secure context; the reader serves `http://`). Built on `feat/plugin-crypto`, upstream's `/api/crypto`, on
-  all boards (+38 KB flash on the C3), checked on the Murphy (up to the plugin's account sign-in) and the X3; a real
-  account is open. D3 in
-  [protected-content.md](protected-content.md).
+- **`protected-content` with a real account**: run on devices up to its sign-in and end to end against a mock Adobe
+  service; a real Adobe ID is open (the owner's go first). See [protected-content.md](protected-content.md).
 - **Not tried live**: the sign-in flows (password grant, device code), for want of accounts; the WebDAV catalog
   against the owner's server (a LAN test server of our own was refused by the session's safety checks). Dropbox's
   `refresh` auth type is not supported and is shown as "does not run here".
 - **Events** (upstream's outbox, the sleep drain, `reader.session`): owner, 2026-11-16: later, on all boards (the C3
   joins Wi-Fi at sleep too). Not started.
-- **Not done from the survey**: an `/api/settings?keys=` filter; the job queue (`registerAction` only warns).
+- **Not done from the survey**: an `/api/settings?keys=` filter; the job queue (`registerAction` only warns). The
+  job queue matters to `protected-content`: it renews a loan only as a queued job (`renew`, a new `.acsm` for a book
+  already on the card), so renewing a loan does not work here; fetching a book again does.
 
 Survey and decisions: `~/.local/state/witchhunt-work/plugin-survey/plugin-survey-2026-11-16.md`.
