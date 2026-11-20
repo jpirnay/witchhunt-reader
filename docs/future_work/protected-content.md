@@ -1,8 +1,8 @@
 # Protected content (DRM)
 
 Status, 2026-11-19: D1 (the reader opens protected books) is merged (#821) and has run on the X4 Pro and the X3.
-The listing change the Adobe plugin needs comes with the pull request that adds this version of the file. D2 and D3 are
-not started.
+The listing change the Adobe plugin needs is merged (#828). D3's `/api/crypto` is built on `feat/plugin-crypto` and its
+flash cost measured (see D3); the owner decides on that cost before it goes further. D2 is not started.
 This file replaces the September plan on `feat/protected-content-phase0` (`docs/protected-content-plan.md` and
 `docs/protected-content-handover-2026-09-18.md` there).
 
@@ -22,14 +22,15 @@ Where things stand:
   chip's peripheral, the book key and device secret ported from upstream), `HalClock::loanNow()`, the reader's
   messages, `POST /api/book-key` and `deviceId`. Cost on the C3 at merge: +18,114 B flash, +312 B static RAM; the C3's
   map stayed at 49 code and 44 rodata pages (10.4 KB left in the last code page then).
-- `/api/files` lists a dot folder named by its path whatever **Show Hidden Files** says (the pull request that adds
-  this version of the file). Checked on the X3 (below).
+- `/api/files` lists a dot folder named by its path whatever **Show Hidden Files** says (#828). Checked on the X3
+  (below).
 - Nothing obtains real keys yet: the Adobe plugin needs D3.
 
 Next, in this order unless the owner reorders:
 1. The `STR_PROTECTED_*` messages in the other languages (release translation pass; English only so far, so a German
    UI shows them in English).
-2. D3 (the Adobe plugin): measure the C3 cost of wolfSSL's RSA private-key operations and PKCS#12 first.
+2. D3 (the Adobe plugin): built and measured on `feat/plugin-crypto`; the owner's decision on the cost, then the device
+   check (see D3).
 3. D2 (the cache at rest): measure the cipher first.
 4. A real loan end to end, once D3 runs: needs the owner's Adobe ID and a library loan; activating may use one of the
    account's device slots, so only with the owner's go.
@@ -90,11 +91,9 @@ from the distributor's ACS server. Adobe's service is DTS ByteBooks' now: `adeac
 `dtsbytebooks.com` certificate that names it, and the plugin links there for an account. No other Libby or Onleihe
 plugin exists (Hub, sd-plugins, GitHub; 2026-11-17). Version 1.0.5 against this firmware:
 
-- Every step needs `api.crypto` (random, sha1, sha256, aesenc/aesdec, rsadec, keygen, pubencrypt, sign, pkcs12); the
-  plugin host throws. The page cannot use `crypto.subtle` instead, as `PluginHost.js.inc` says it can: `SubtleCrypto`
-  exists only in a secure context, and the reader serves `http://` on a LAN address. Correct that comment with D3.
-  Upstream's contract is `handleCrypto()` in its `CrossPointWebServer.cpp` (base64 fields in and out, PKCS#8 and SPKI
-  DER keys, `sign` takes a 20-byte hash).
+- Every step needs `api.crypto` (random, sha1, sha256, aesenc/aesdec, rsadec, keygen, pubencrypt, sign, pkcs12). The
+  page cannot use `crypto.subtle` instead: `SubtleCrypto` exists only in a secure context, and the reader serves
+  `http://` on a LAN address. Built on `feat/plugin-crypto` (below).
 - It lists its own folder and `/.crosspoint` (`/api/files`) before anything else, looking for `content.key` in both.
   Both answered 403 while hidden files were off. `/api/files` now lists them; on the X3 with hidden files
   off: the plugin folder, `/.crosspoint` and `/.crosspoint/plugins` list (no dot names), `System Volume Information`
@@ -110,9 +109,24 @@ plugin exists (Hub, sd-plugins, GitHub; 2026-11-17). Version 1.0.5 against this 
 - Not done: running the plugin's own page against a device. A jsdom run of the File Manager page did not load the
   plugin card (only `/api/web/status` was requested); the calls it makes were checked with `curl` instead.
 
-`POST /api/crypto` needs wolfSSL's RSA private-key operations and PKCS#12, which `scripts/patch_wolfssl.py` removed to
-save flash (`WOLFSSL_RSA_PUBLIC_ONLY`, `NO_PWDBASED`): measure that cost on the C3 first, and decide with the owner if
-it is large (an S3-only `/api/crypto` behind a capability is one option).
+`feat/plugin-crypto` (2026-11-20, off master b1a0fe019): `POST /api/crypto` is upstream's handler (#3114, Justin
+Mitchell) on the SDK's `WolfsslCrypto`, of which only that file is built (`lib/PluginCrypto`); `api.crypto` in the
+plugin host posts to it. `scripts/patch_wolfssl.py` keeps the RSA private-key paths, password-based encryption, 3DES
+and RC2 (`WC_RC2`) in; key generation runs on the framework's prebuilt mbedTLS, as the SDK does on ESP. Cost against
+master in the same worktree:
+- `default` (C3): +47,450 B flash, +8 B static RAM. The C3's map stays at 50 code and 44 rodata pages, but the last
+  code page's free room falls from 53.8 KB to 10.0 KB: the next 10 KB of code then costs the font cache a map page.
+- `x4pro`: +43,336 B flash, +16 B static RAM.
+- By symbol on the C3: RSA private-key operations about 16 KB (SP math's CRT exponentiation for 2048 to 4096-bit keys
+  among them, which the 1024-bit Adobe keys do not use: those go through the generic `sp_exptmod_ex`), PKCS#12 with
+  its password-based encryption, 3DES (a 2 KB S-box table) and RC2 about 15 KB, mbedTLS key generation about 4 KB,
+  the handler and the SDK wrapper about 7 KB (the wrapper's LCP methods, X25519, HKDF and AES-GCM, stay linked through
+  its vtable).
+
+Open: the owner's decision on that cost (all boards, or the S3 boards only, the C3 keeping its lean wolfSSL; the patch
+script runs per environment, so either is possible), then a device check of every op against OpenSSL (a script for it:
+`~/.local/state/witchhunt-work/protected-content/crypto_check.py`), key generation's time on the C3 against the loop
+task's watchdog, and the plugin's own page on a device. No board was attached on 2026-11-20.
 
 ## LCP
 
