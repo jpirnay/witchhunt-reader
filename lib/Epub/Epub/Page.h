@@ -86,7 +86,10 @@ class PageElement {
 
 // a line from a block element
 class PageLine final : public PageElement {
-  std::unique_ptr<TextBlock> block;
+  // Const: the line's TextBlock is held for the PageLine's whole life. Where the PageLine was built rides in this
+  // block (objectInArena), and PageElement's operator delete reads it there, so a line released, reset or moved out
+  // would send an arena PageLine to the heap.
+  const std::unique_ptr<TextBlock> block;
 
  public:
   PageLine(std::unique_ptr<TextBlock> block, const int16_t xPos, const int16_t yPos)
