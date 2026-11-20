@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Tests the browser-side plugin host (src/network/html/shared/PluginHost.js.inc) against the API plugins written for
 // upstream crosspoint-reader expect: api.dir, relay(method, url, headers, body) answering {status, headers, body},
-// writeFile with base64, fetchToSd with headers and {method, body}, a registerAction that loads, and the host
-// approval a refused relay asks for. Our own one-argument relay keeps answering a Response.
+// writeFile with base64, fetchToSd with headers and {method, body}, crypto(op, fields) on the device, a registerAction
+// that loads, and the host approval a refused relay asks for. Our own one-argument relay keeps answering a Response.
 //
 // The host's real scripts run in jsdom; a plugin is served through jsdom's resource loader, and the device is a fake
 // fetch that records each request and answers it from a script.
@@ -221,6 +221,25 @@ check(fetchReq.json.plugin === 'up' && fetchReq.json.url === 'https://example.or
       fetchReq.json.dest === '/Books/b.epub' && fetchReq.json.headers.Authorization === 'Bearer x' &&
       fetchReq.json.method === 'POST' && fetchReq.json.body === 'id=1', 'fetchToSd sends url, dest, headers, method and body');
 check(fetched.complete === true, 'fetchToSd answers the device\'s result');
+
+// ---- crypto(op, fields) ---------------------------------------------------------------------------------------------
+// The page has no crypto.subtle on http://, so upstream's ops run on the device: one JSON post, the op beside its
+// base64 fields; a failed op is the device's {error}, which the plugin checks itself; no room on the heap throws.
+requests.length = 0;
+answer = (req) => req.url === '/api/crypto' && req.json.op === 'sha1' ? new FakeResponse(200, { data: 'AAEC' })
+  : req.url === '/api/crypto' && req.json.op === 'keygen' ? new FakeResponse(503, { error: 'low memory' })
+  : new FakeResponse(200, { error: 'unknown op' });
+check(w.eval('PLUGIN_CAPABILITIES').includes('crypto'), 'crypto is a capability a manifest may require');
+const digest = await api.crypto('sha1', { data: 'aGk=' });
+const cryptoReq = requests[0];
+check(cryptoReq.url === '/api/crypto' && cryptoReq.method === 'POST' &&
+      cryptoReq.options.headers['Content-Type'] === 'application/json', 'crypto posts application/json to /api/crypto');
+check(cryptoReq.json.op === 'sha1' && cryptoReq.json.data === 'aGk=', 'crypto sends the op beside its fields');
+check(digest.data === 'AAEC', 'crypto answers the device\'s JSON');
+check((await api.crypto('nonsense')).error === 'unknown op', 'a failed op answers its {error}, as upstream\'s does');
+let cryptoErr = null;
+try { await api.crypto('keygen'); } catch (e) { cryptoErr = e; }
+check(cryptoErr && cryptoErr.status === 503, 'no room on the device throws with the status');
 
 dom.window.close();
 console.log(failures ? failures + ' check(s) failed' : 'all checks passed');
