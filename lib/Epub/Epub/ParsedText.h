@@ -174,7 +174,7 @@ class ParsedText {
   // the parser opens), or the heap when null. The parser sets it on its main text block (with
   // beforeLine_, see there for why the two go together) and on table cells laid out as a grid
   // (without the hook: the row is placed as a whole inside a block of its own). A cell laid out
-  // as a fallback paragraph keeps the heap.
+  // as a fallback paragraph is wired as a page paragraph, hook and all (ChapterHtmlSlimParser::emitCellAsParagraph).
   BuildArena* lineArena_ = nullptr;
   // What each line may take from lineArena_, object and bytes (TextBlock::ArenaRoom, TextBlock::make): the page's, held
   // by the parser. Null, unless the caller hands one: the object on the heap, the bytes in lineArena_ while it has

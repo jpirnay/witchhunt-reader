@@ -325,10 +325,13 @@ class TextBlock final : public Block {
   //  - while the page's objects there have taken room the page's line bytes have not given back (`displaced`), line
   //    bytes that would leave less than `keepFree` free go to the heap, one block, and give that much back;
   //  - with nothing displaced, the bytes take any room, as before 9b.
-  // So the page's lines take more of the arena than they did before 9b only while `keepFree` stays free: the room
-  // `keepFree` holds for (the image walk's stage, ChapterHtmlSlimParser) is there whenever it was, whatever the page's
-  // text. The page's owner clears `displaced` when the page's block is new. SIZE_MAX for `keepFree`: no object goes
-  // into the arena.
+  // The page's owner clears `displaced` when the page's block is new, and restores it, when a block inside the page is
+  // released (a grid row laid out again or refused), to what it was when that block opened. With that, on a page
+  // whose blocks only grow or are released that way, the page's lines take more of the arena than they did before 9b
+  // only while `keepFree` stays free: the room `keepFree` holds for (the image walk's stage, ChapterHtmlSlimParser) is
+  // there wherever it was before 9b. One exception: bytes the heap refuses while giving back take the arena as before
+  // 9b (allocArena), and the room is short of that by what is still displaced until later bytes give it back.
+  // SIZE_MAX for `keepFree`: no object goes into the arena.
   struct ArenaRoom {
     size_t keepFree = SIZE_MAX;
     size_t displaced = 0;

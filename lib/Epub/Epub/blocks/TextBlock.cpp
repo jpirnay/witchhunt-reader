@@ -173,11 +173,24 @@ bool TextBlock::allocArena(const size_t size, BuildArena* scratch, ArenaRoom* ro
     // Region full (a page beyond what it was sized for): fall through to the heap for this
     // line alone. A mixed page is fine -- ownership is per block.
   }
-  // The heap, asked nothrow: a refusal is an invalid block, which its caller drops (ParsedText's "Dropping line").
+  // The heap, asked nothrow.
   arena = new (std::nothrow) uint8_t[size];
   arenaOwned_ = arena != nullptr;
-  if (arenaOwned_ && giveBack) room->displaced -= std::min(room->displaced, size);
-  return arena != nullptr;
+  if (arenaOwned_) {
+    if (giveBack) room->displaced -= std::min(room->displaced, size);
+    return true;
+  }
+  if (giveBack) {
+    // The heap refuses bytes sent there to give the walk's room back: the arena, as before 9b, rather than lose the
+    // line. Nothing is given back, so the page's later bytes go on giving it.
+    arena = static_cast<uint8_t*>(scratch->alloc(size, kAlign));
+    if (arena != nullptr) {
+      LOG_DBG("TXB", "No heap for %u give-back bytes: in the arena instead", static_cast<unsigned>(size));
+      return true;
+    }
+  }
+  // Neither: an invalid block, which its caller drops, as before 9b (ParsedText's "Dropping line").
+  return false;
 }
 
 std::unique_ptr<TextBlock> TextBlock::make(const WordRange& range, const std::vector<int16_t>& word_xpos,

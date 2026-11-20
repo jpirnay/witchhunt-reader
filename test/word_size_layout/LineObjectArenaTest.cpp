@@ -171,6 +171,41 @@ TEST(LineObjectArena, BytesThatHaveGivenBackWhatTheObjectsTookTakeAnyRoomAgain) 
   EXPECT_EQ(second->arenaBytes(), arena.used()) << "nothing displaced: the bytes take the room";
 }
 
+// The heap refuses the block for bytes sent there to give the walk's room back (AllocationRefusal): they take the
+// arena, as they did before 9b, and the line is kept; nothing is given back.
+TEST(LineObjectArena, BytesTheHeapRefusesWhileGivingBackTakeTheArena) {
+  const OneLine source;
+  BuildArena arena(kReserve + sizeof(TextBlock) + 20);  // the object fits beside the reserve, its bytes only across it
+  ASSERT_TRUE(arena.valid());
+  TextBlock::ArenaRoom room{kReserve};
+  std::unique_ptr<TextBlock> line;
+  {
+    const AllocationRefusal refused(16);  // the bytes' block; the object, in the arena, needs none
+    line = TextBlock::make(source.range(), source.xs, plain(), &arena, &room);
+  }
+  ASSERT_TRUE(line);
+  ASSERT_TRUE(line->valid()) << "the line is kept";
+  EXPECT_TRUE(line->objectInArena());
+  EXPECT_EQ(sizeof(TextBlock) + line->arenaBytes(), arena.used()) << "its bytes in the arena";
+  EXPECT_EQ(sizeof(TextBlock), room.displaced) << "nothing given back";
+  EXPECT_EQ(std::string("beta"), line->wordText(1));
+}
+
+// Room for the bytes neither on the heap nor in the arena: an invalid line, which ParsedText drops, as before 9b.
+TEST(LineObjectArena, BytesNeitherTheHeapNorTheArenaHoldsMakeAnInvalidLine) {
+  const OneLine source;
+  BuildArena arena(sizeof(TextBlock) + 8);  // the object, and 8 B: not the line's bytes
+  ASSERT_TRUE(arena.valid());
+  TextBlock::ArenaRoom room{0};  // the object goes in; its bytes cannot keep even 0 B free, so they are sent away
+  std::unique_ptr<TextBlock> line;
+  {
+    const AllocationRefusal refused(16);
+    line = TextBlock::make(source.range(), source.xs, plain(), &arena, &room);
+  }
+  ASSERT_TRUE(line);
+  EXPECT_FALSE(line->valid());
+}
+
 // The destroying operator delete: an arena object is destroyed and not freed, a heap object is destroyed and freed.
 TEST(LineObjectArena, DeletingALineFreesOnlyWhatTheHeapMade) {
   const OneLine source;

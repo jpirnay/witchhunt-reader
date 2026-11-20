@@ -6255,9 +6255,16 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   LayoutRow lr;
   BuildArena::Block rowBlock;
   if (buildArena_) rowBlock = buildArena_->reserveBlock();
+  // What the page's objects held before the row (TextBlock::ArenaRoom). A released row takes its objects' room and
+  // its bytes' give-back with it, so the count goes back to this; a refused release keeps the row's bytes, and the
+  // count with them.
+  size_t displacedBeforeRow = lineRoom_.displaced;
   const auto dropRowLayout = [&] {
     lr.cells.clear();
-    if (rowBlock.valid() && !buildArena_->release(rowBlock)) {
+    if (!rowBlock.valid()) return;
+    if (buildArena_->release(rowBlock)) {
+      lineRoom_.displaced = displacedBeforeRow;
+    } else {
       LOG_ERR("EHP", "Table row arena block could not be released (out of order); region stays claimed");
     }
   };
@@ -6334,6 +6341,7 @@ void ChapterHtmlSlimParser::commitPendingRow() {
     if (!currentPage) return;  // no heap for the next page: emitPage stopped the build
     ensurePageBlock();
     if (buildArena_) rowBlock = buildArena_->reserveBlock();
+    displacedBeforeRow = lineRoom_.displaced;
     if (!layoutTableRow(t.pendingRow, columnCount, lr)) {
       dropRowLayout();
       degradeRow("row cannot be a grid row");
