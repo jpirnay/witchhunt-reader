@@ -201,11 +201,6 @@ degraded.
 build like the other heap refusals instead of aborting. These still allocate through the throwing `operator new`, so a
 refusal there aborts and reboots (`-fno-exceptions`); counted in `ChapterHtmlSlimParser.cpp`:
 
-- the style stack, `std::vector<StyleStackEntry> inlineStyleStack` (`ChapterHtmlSlimParser.h:605`; pushes at
-  `ChapterHtmlSlimParser.cpp:826`, `:3943`, `:4330`, `:4361`, `:4392`, `:4412`, `:4463`);
-- the other per-element stacks: `listStack` (`:3972`), `containerWidthStack_` (`:3180`), `backgroundImageScopes_`
-  (`:6428`), and, capped in count but grown the same way, `heldBottomSpacing_` (`:2688`, 8), `blockInsetStack_`
-  (`:4038`, 8) and `anchorsAwaitingLine_` (`:5343`, 16);
 - a table's packed rows, `t.packer.rows.push_back` (`:6320`, `:6330`; at most `MAX_TABLE_ROWS`, 48, per fragment);
 - a row's cells: `pendingRow.cells` (`:3327`, `:6905`; the streamed nested cell's own `emplace_back`, `:6954`, asks
   `heapReserveFor` first), a laid-out row's `out.cells.reserve(columnCount)` (`:6995`; the pushes at `:7080` and `:7085` stay within it),
@@ -215,7 +210,8 @@ refusal there aborts and reboots (`-fno-exceptions`); counted in `ChapterHtmlSli
 **Next step.** Ask `HeapFit` before each growth (`heapReserveFor`, as the elements reserve does) and stop the build on
 a refusal (`stopForHeap`, `:2112`), or move the table to the build's arena or a `ChunkedVector`. Each site needs a host
 fault-injection test, as `PageHeapTest.cpp` (`PAGE_FAULT_INJECTION`, `ELEMENT_FAULT_INJECTION`) does for pages and for
-`Page::elements`, which `addPageElement` now covers.
+`Page::elements`, which `addPageElement` now covers, and `StackHeapTest.cpp` (`STACK_FAULT_INJECTION`) for the
+per-element stacks, which `pushOrStop` now covers.
 
 ## CSS in a chapter's `<style>` blocks is never applied (matcha-reader #627)
 
