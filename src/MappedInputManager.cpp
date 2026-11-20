@@ -21,6 +21,7 @@ static_assert(CP_TOUCH_UI == (FREEINK_CAP_TOUCH ? 1 : 0),
 
 namespace fui = freeink::ui;
 
+#if CP_TOUCH_UI
 namespace {
 // A touch-down only moves a list selection once the finger has rested briefly.
 // Without the delay every glancing contact drags the highlight across rows on
@@ -28,6 +29,7 @@ namespace {
 // value, kept verbatim.
 constexpr unsigned long TOUCH_DOWN_SELECT_DELAY_MS = 90;
 }  // namespace
+#endif  // CP_TOUCH_UI
 
 MappedInputManager::ScreenOrientation (*MappedInputManager::orientationProvider)() = nullptr;
 
@@ -262,8 +264,9 @@ int MappedInputManager::getPressedFrontButton() const {
 // normalized coordinates into logical pixels via the renderer's live
 // orientation, then give the result app meaning. Ported from upstream/develop;
 // see docs/contributing/touch-architecture.md, "Layers".
-
-bool MappedInputManager::hasTouch() const { return gpio.hasTouch(); }
+//
+// A build without a digitiser (CP_TOUCH_UI 0) answers the queries inline in the
+// header instead; only setTouchEventsEnabled() and injectRawPress() are shared.
 
 void MappedInputManager::setTouchEventsEnabled(const bool enabled) {
   if (enabled == touchEventsEnabled_) return;
@@ -273,6 +276,13 @@ void MappedInputManager::setTouchEventsEnabled(const bool enabled) {
   // replay whatever was done while it was off.
   if (!enabled) gpio.flushTouchEvents();
 }
+
+void MappedInputManager::injectRawPress(const uint8_t rawButtonIndex, const bool longPress, const uint32_t atMs) const {
+  gpio.injectPress(rawButtonIndex, longPress, atMs);
+}
+
+#if CP_TOUCH_UI
+bool MappedInputManager::hasTouch() const { return gpio.hasTouch(); }
 
 bool MappedInputManager::wasScreenTapped(int& x, int& y) const {
   float nx = 0.0f;
@@ -341,10 +351,6 @@ bool MappedInputManager::isScreenTouchHeld(int& x, int& y) const {
   return true;
 }
 
-void MappedInputManager::injectRawPress(const uint8_t rawButtonIndex, const bool longPress, const uint32_t atMs) const {
-  gpio.injectPress(rawButtonIndex, longPress, atMs);
-}
-
 uint32_t MappedInputManager::lastTouchEventAtMs() const { return gpio.lastTouchEventAtMs(); }
 
 bool MappedInputManager::wasScreenTouchReleased() const { return rawReleased(); }
@@ -352,13 +358,6 @@ bool MappedInputManager::wasScreenTouchReleased() const { return rawReleased(); 
 unsigned long MappedInputManager::lastTouchHeldMs() const { return gpio.lastTouchHeldMs(); }
 
 MappedInputManager::RowTouch MappedInputManager::listTouch(int& index) const {
-#if !CP_TOUCH_UI
-  // No digitiser: ListTouchBand's stub hit test is a literal -1, so everything below is
-  // unreachable. Returned early rather than left for the optimiser, because cppcheck reads the
-  // constant and reports the dependent conditions -- correctly -- as always-true.
-  (void)index;
-  return RowTouch::None;
-#else
   // Live-orientation coordinates, unlike the hint strip: drawList() paints in whatever
   // orientation the renderer is in rather than forcing Portrait, so that is the frame its rows
   // were recorded in. See ListTouchBand.h.
@@ -373,7 +372,6 @@ MappedInputManager::RowTouch MappedInputManager::listTouch(int& index) const {
   if (wasScreenTouchDown(x, y) && hit(x, y)) return RowTouch::Down;
   if (wasScreenTapped(x, y) && hit(x, y)) return RowTouch::Tap;
   return RowTouch::None;
-#endif  // CP_TOUCH_UI
 }
 
 MappedInputManager::MultiTouch MappedInputManager::popMultiTouch(int& x, int& y) const {
@@ -492,3 +490,4 @@ bool MappedInputManager::wasLightPanelGesture() const { return Frontlight.presen
 bool MappedInputManager::wasHomeGesture() const {
   return gpio.hasHomeKey() ? gpio.wasHomeKeyTapped() : wasBottomEdgeUpSwipe();
 }
+#endif  // CP_TOUCH_UI

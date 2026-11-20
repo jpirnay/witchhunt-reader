@@ -350,6 +350,13 @@ initialisers in `CrossPointSettings.h`. Why they are what they are:
   dependency-free for the host tests, and a macro that exists only once `BoardConfig.h` is
   included would give translation units different sizes for the same recorder struct.
   `MappedInputManager.cpp` checks the two agree with a `static_assert`.
+- With `CP_TOUCH_UI` 0, `MappedInputManager.h` answers every touch query inline ("nothing
+  happened"), so a screen's tap, swipe and drag branches are dead code in its own translation unit
+  and leave the image without a guard of their own. Out-of-line queries that returned false at
+  run time kept them all: the build has no LTO. cppcheck (`CPPCHECK_ANALYSIS`) sees only the
+  declarations and checks both sides.
+- `FREEINK_CAP_TOUCH` 0 compiles `HalGPIO`'s touch event rings, their snapshot and the sampler's
+  latching out of the same builds. The queries stay declared and report no event.
 - `touchUiControls` silences touch outside the reader. `main.cpp` sets the gate every tick from
   the setting and the activity on top, and the reader is always enabled, because
   `touchReaderControls` governs it there. `hasTouch()` is not gated: screens use it for layout.
