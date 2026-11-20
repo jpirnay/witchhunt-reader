@@ -15,11 +15,21 @@
 #include "SettingsSubmenuActivity.h"
 #include "TouchUi.h"
 #include "UiFontScale.h"
+#include "activities/RenderLock.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/OtaBootSwitch.h"
 
 namespace fui = freeink::ui;
+
+namespace {
+constexpr int kHeaderHeight = 110;
+constexpr int kHeaderInset = 20;
+constexpr int kBackWidth = 150;
+constexpr int kBackHeight = 66;
+constexpr int kBackTop = 36;
+constexpr int kBottomInset = 12;
+}
 
 bool SettingsActivity::isRowSelectable(const int index) const {
   return index >= 0 && index < settingsCount && !(*currentSettings)[index].isSeparator;
@@ -50,6 +60,10 @@ void SettingsActivity::onEnter() {
   // and tab actions, points the screen at buildScreen(), and puts focus on the bar.
   enterCategory(0);
   TabbedUiListActivity::onEnter();
+  if (BoardConfig::isMetalioEInk4Plus()) {
+    app.on(ACTION_USER + 1,
+           [](const fui::ActionEvent&, void* user) { static_cast<SettingsActivity*>(user)->onBackFromTabs(); }, this);
+  }
   // Another tab when asked for one (the serial CMD:ACT:SETTINGS:<tab>), the way a tap on it goes.
   if (initialTab > 0) selectTab(initialTab);
 }
@@ -286,7 +300,13 @@ void SettingsActivity::activateIndex(const int index) {
   if (setting.usesSelectorActivity) {
     auto selector = createSelectorActivity(setting, renderer, mappedInput);
     if (selector) {
-      startActivityForResult(std::move(selector), [this](const ActivityResult&) {
+      const auto previousTheme = SETTINGS.uiTheme;
+      startActivityForResult(std::move(selector), [this, previousTheme](const ActivityResult&) {
+        if (BoardConfig::isMetalioEInk4Plus() && SETTINGS.uiTheme != previousTheme) {
+          RenderLock lock{RenderLock::ExclusiveActivityAccess{}};
+          UITheme::getInstance().reload();
+          resetUi();
+        }
         CrossPointSettings::normalizeDependentSettings(SETTINGS);
         SETTINGS.saveToFile();
         needsHalfRefresh = true;
@@ -388,9 +408,24 @@ void SettingsActivity::materializeListWindow() {
 }
 
 void SettingsActivity::buildScreen(UiScreen& screen) {
-  // The tab bar sits directly under the header; the list stops above the line Base keeps for the
-  // version drawChrome() gives the header.
-  layoutListArea(screen, 0, 0, /*spacer=*/false, CROSSPOINT_VERSION);
+  if (BoardConfig::isMetalioEInk4Plus()) {
+    const Rect header = settingsHeaderRect();
+    screen.setContentMarginFromScreen(
+        fui::Insets{static_cast<int16_t>(header.y + header.height), 0, kBottomInset, 0});
+    if (mappedInput.hasTouch() && mappedInput.touchEventsEnabled()) {
+      fui::ButtonProps back;
+      back.action = ACTION_USER + 1;
+      back.label = tr(STR_BACK);
+      back.inputMask = fui::InputTouch;
+      back.text = screen.theme().bodyText;
+      back.radius = 8;
+      screen.button(back, fui::Rect{static_cast<int16_t>(header.x + kHeaderInset),
+                                   static_cast<int16_t>(header.y + kBackTop), kBackWidth, kBackHeight});
+    }
+  } else {
+    // Classic reserves a line for the firmware version above the footer strip.
+    layoutListArea(screen, 0, 0, /*spacer=*/false, CROSSPOINT_VERSION);
+  }
 
   buildTabBar(screen);
   screen.spacer(static_cast<int16_t>(UITheme::getInstance().getMetrics().verticalSpacing));
@@ -415,8 +450,34 @@ void SettingsActivity::onBackFromTabs() {
   onGoHome();
 }
 
+Rect SettingsActivity::settingsHeaderRect() const {
+  if (!BoardConfig::isMetalioEInk4Plus()) return listHeaderRect();
+  Rect header = UITheme::getHeaderRect(renderer, false, false);
+  header.height = kHeaderHeight;
+  return header;
+}
+
 void SettingsActivity::drawChrome() {
-  GUI.drawHeader(renderer, listHeaderRect(), tr(STR_SETTINGS_TITLE), CROSSPOINT_VERSION);
+  const Rect header = settingsHeaderRect();
+  if (!BoardConfig::isMetalioEInk4Plus()) {
+    GUI.drawHeader(renderer, header, tr(STR_SETTINGS_TITLE), CROSSPOINT_VERSION);
+    return;
+  }
+
+  GUI.drawHeader(renderer, header, nullptr);
+  const int titleX = header.x + kHeaderInset +
+                     (mappedInput.hasTouch() && mappedInput.touchEventsEnabled() ? kBackWidth + 16 : 0);
+  const int titleY = header.y + kBackTop + (kBackHeight - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
+  const auto title = renderer.truncatedText(UI_12_FONT_ID, tr(STR_SETTINGS_TITLE),
+                                           header.x + header.width - kHeaderInset - titleX, EpdFontFamily::BOLD);
+  renderer.drawText(UI_12_FONT_ID, titleX, titleY, title.c_str(), true, EpdFontFamily::BOLD);
+  constexpr int batteryReserve = 112;
+  const auto version = renderer.truncatedText(SMALL_FONT_ID, CROSSPOINT_VERSION, header.width / 2);
+  renderer.drawText(SMALL_FONT_ID,
+                    header.x + header.width - batteryReserve - renderer.getTextWidth(SMALL_FONT_ID, version.c_str()),
+                    header.y + 5, version.c_str());
+  const int ruleY = header.y + header.height - 2;
+  renderer.drawLine(header.x, ruleY, header.x + header.width - 1, ruleY, 2, true);
 }
 
 const char* SettingsActivity::footerConfirmLabel() const {
@@ -438,7 +499,7 @@ void SettingsActivity::render(RenderLock&&) {
     renderUi();
   }
   publishListWindow();
-  drawFooter();
+  if (!BoardConfig::isMetalioEInk4Plus()) drawFooter();
 
   // Only spend the HALF if enough FAST refreshes have piled up since the last one to have
   // reintroduced ghosting. needsHalfRefresh is armed on entry AND on returning from every

@@ -94,6 +94,10 @@ typedef struct {
 } JDCURSOR;
 
 /* TJpgDec API functions */
+/* ESP32-S31 exports these two names as absolute ROM symbols. Keep the bundled
+   decoder's callers and implementation on its own ABI. */
+#define jd_prepare witch_tjpg_prepare
+#define jd_decomp witch_tjpg_decomp
 JRESULT jd_prepare(JDEC* jd, size_t (*infunc)(JDEC*, uint8_t*, size_t), void* pool, size_t sz_pool, void* dev);
 JRESULT jd_decomp(JDEC* jd, int (*outfunc)(JDEC*, void*, JRECT*), uint8_t scale);
 /* jd_decomp in slices (added here, not upstream): outputs at most `mcuRows` rows of MCUs and keeps

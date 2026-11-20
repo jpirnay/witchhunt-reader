@@ -42,7 +42,12 @@ struct Step {
   int body;   // UI_10_FONT_ID — list rows, values, button hints
   int title;  // UI_12_FONT_ID — headers, titles of rows that have a subtitle
 };
-#if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY
+#if defined(FREEINK_DEVICE_METALIO_EINK4_PLUS) && FREEINK_DEVICE_METALIO_EINK4_PLUS
+inline constexpr Step STEPS[] = {
+    {30, 30, 35},  // Normal: Inter 12/12/14 pt
+    {30, 35, 35},  // Large:  Inter 12/14/14 pt
+};
+#elif defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY
 inline constexpr Step STEPS[] = {
     {17, 20, 25},  // DEFAULT: notosans_6,  inter_ui_8,  inter_ui_10
     {23, 25, 30},  // LARGE:   notosans_8,  inter_ui_10, inter_ui_12

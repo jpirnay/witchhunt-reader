@@ -22,6 +22,7 @@ class UITheme {
   BaseTheme& getMutableTheme() { return *currentTheme; }
   void reload();
   void setTheme(CrossPointSettings::UI_THEME type);
+  static bool showsHomeButtonHints();
 
   // Growth of each logical UI font slot at the active SETTINGS.uiFontSize step, relative to the
   // default step (see UiFontLadder). Themes add these to the baked offsets that position stacked

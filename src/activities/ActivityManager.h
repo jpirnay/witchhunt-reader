@@ -329,6 +329,7 @@ class ActivityManager {
   // the dark is most of what a quick route to it is for, and taps/long taps are reader-only
   // so a swipe is the only gesture that can serve both.
   void dispatchLightPanelGesture();
+  void openLightPanel();
   // Turn a tap on the on-screen button-hint strip into the button press it depicts, so the
   // four labels at the bottom work as touch targets on every screen that draws them. Runs
   // after the current activity's loop() so screens that handle touch themselves win; see

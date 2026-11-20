@@ -9,6 +9,7 @@
 
 #include "ReaderLayoutSheet.h"
 #include "components/icons/readerBarIcons.h"
+#include "components/icons/sunIcons.h"
 
 // The reader bars' layout, kept out of ReaderBarsController so that it needs FreeInkUI and nothing else of the
 // firmware's: the controller draws it, and test/reader_bars_layout lays it out at every board's size in both
@@ -56,6 +57,7 @@ enum class Button : uint8_t {
   Inverted,
   LandscapeCcw,
   AutoRotate,
+  Light,
 };
 
 enum class Tab : uint8_t { Navigation, Progress, Layout, Orientation, More, Count };
@@ -94,6 +96,7 @@ constexpr uint8_t kMaxListRows = 5;
 struct Model {
   const char* title = nullptr;
   bool starred = false;
+  bool showLight = false;
   Panel panel = Panel::None;
   Focus focus = Focus::None;
   Tab focusedTab = Tab::Navigation;  // the tab under the cursor while focus is Tabs
@@ -332,7 +335,7 @@ void build(ScreenT& screen, const Model& model, const Metrics& metrics, const fu
     target.fill(fui::Rect{top.x, static_cast<int16_t>(top.bottom() - metrics.rule), top.width, metrics.rule}, black);
     // The title between the two buttons: a tap there opens the book's details. Inverted under the keys' cursor.
     const fui::Rect title{static_cast<int16_t>(top.x + metrics.topBar), top.y,
-                          static_cast<int16_t>(top.width - 2 * metrics.topBar),
+                          static_cast<int16_t>(top.width - (model.showLight ? 3 : 2) * metrics.topBar),
                           static_cast<int16_t>(metrics.topBar - metrics.rule)};
     const bool titleFocused = model.focus == Focus::Title;
     if (titleFocused) target.fill(title.inset(fui::Insets{4, 0, 4, 0}), black, 8);
@@ -347,6 +350,11 @@ void build(ScreenT& screen, const Model& model, const Metrics& metrics, const fu
                Button::Exit, model.focus == Focus::Exit);
     iconButton(screen, fui::Rect{static_cast<int16_t>(top.right() - theme.spaceSm - square), squareY, square, square},
                model.starred ? icon_star_filled_32 : icon_star_32, Button::Star, model.focus == Focus::Star);
+    if (model.showLight) {
+      iconButton(screen, fui::Rect{static_cast<int16_t>(top.right() - metrics.topBar - theme.spaceSm - square),
+                                  squareY, square, square},
+                 icon_sun_32, Button::Light, false);
+    }
   }
 
   // The bottom band: the rule along its top edge, the tab bar along its bottom one.

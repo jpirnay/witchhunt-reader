@@ -13,6 +13,7 @@
 
 enum class HomeMenuAction : uint8_t {
   Library,
+  Recent,
   ReadingStats,
   GlobalBookmarks,
   FileTransfer,

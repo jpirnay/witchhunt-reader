@@ -25,6 +25,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/PanelMetrics.h"
+#include "components/themes/TapTargets.h"
 #include "fontIds.h"
 #include "util/ScreenshotUtil.h"
 
@@ -48,6 +49,7 @@ constexpr char FAHRENHEIT_LABEL[] =
 
 constexpr int EDGE = 12;         // to the panel's edges, and to the button hints
 constexpr int GRAPH_HOURS = 24;  // the days after are the forecast strip's
+enum LocationAction { OpenSettings, GoBack };
 
 // Whole multiples, so GfxRenderer's area-weighted resample turns every source pixel into a whole block.
 float heroTextScale() { return PanelMetrics::COMPACT ? 2.0f : 3.0f; }
@@ -158,8 +160,7 @@ void WeatherActivity::onExit() {
 
 void WeatherActivity::loadAndDisplay() {
   if (!WEATHER_SETTINGS.hasLocation()) {
-    state = State::ERROR;
-    errorMessage = tr(STR_WEATHER_NO_LOCATION);
+    state = State::LOCATION_REQUIRED;
     requestUpdate();
     return;
   }
@@ -208,7 +209,10 @@ void WeatherActivity::checkAndConnectWifi() {
 
 void WeatherActivity::launchWifiSelection() {
   state = State::WIFI_SELECTION;
-  requestUpdate();
+  {
+    RenderLock lock(*this);
+    renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  }
 
   startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
@@ -316,6 +320,23 @@ void WeatherActivity::loop() {
     return;  // Handled by WifiSelectionActivity
   }
 
+  if (state == State::LOCATION_REQUIRED) {
+    int action = -1;
+    int x = 0;
+    int y = 0;
+    if (TapTargets::screenActions().hasTargets() && mappedInput.wasScreenTapped(x, y)) {
+      action = TapTargets::screenActions().hitTest(x, y);
+    }
+    if (action == GoBack || mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      onGoHome();
+    } else if (action == OpenSettings || mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
+               mappedInput.wasReleased(MappedInputManager::Button::Left) ||
+               mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+      openSettingsActivity();
+    }
+    return;
+  }
+
   if (state == State::ERROR) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       openSettingsActivity();
@@ -374,9 +395,38 @@ void WeatherActivity::loop() {
 void WeatherActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  const auto pageHeight = renderer.getScreenHeight();  // 480 in landscape
+  const auto pageHeight = renderer.getScreenHeight();
 
-  if (state == State::LOADING_CACHE || (state == State::FETCHING && (!showRefreshPopup || !weatherData.valid))) {
+  if (state == State::LOCATION_REQUIRED) {
+    renderer.drawCenteredText(FIT_TITLE_FONT_ID, pageHeight / 2 - 54, tr(STR_WEATHER), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(FIT_BODY_FONT_ID, pageHeight / 2 - 12, tr(STR_WEATHER_NO_LOCATION));
+    if (mappedInput.hasTouch() && mappedInput.touchEventsEnabled()) {
+      const int width = renderer.getScreenWidth() / 2;
+      const int x = (renderer.getScreenWidth() - width) / 2;
+      const int height = UITheme::getInstance().getMetrics().menuRowHeight;
+      const int textHeight = renderer.getLineHeight(FIT_BODY_FONT_ID);
+      const int settingsY = pageHeight / 2 + 28;
+      const int backY = settingsY + height + EDGE;
+      renderer.fillRoundedRect(x, settingsY, width, height, 8, Color::Black);
+      renderer.drawCenteredText(FIT_BODY_FONT_ID, settingsY + (height - textHeight) / 2,
+                                tr(STR_WEATHER_SETTINGS), false, EpdFontFamily::BOLD);
+      renderer.drawRoundedRect(x, backY, width, height, 2, 8, true);
+      renderer.drawCenteredText(FIT_BODY_FONT_ID, backY + (height - textHeight) / 2, tr(STR_BACK));
+
+      TapTargets::Recorder::Builder targets;
+      targets.add(x, settingsY, width, height, OpenSettings);
+      targets.add(x, backY, width, height, GoBack);
+      TapTargets::screenActions().record(targets);
+    } else {
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_WEATHER_SETTINGS_SHORT), "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    }
+    renderer.displayBuffer();
+    return;
+  }
+
+  if (state == State::LOADING_CACHE || state == State::CHECK_WIFI || state == State::WIFI_SELECTION ||
+      (state == State::FETCHING && (!showRefreshPopup || !weatherData.valid))) {
     renderer.drawCenteredText(FIT_TITLE_FONT_ID, pageHeight / 2, tr(STR_LOADING));
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

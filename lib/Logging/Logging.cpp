@@ -37,6 +37,16 @@ bool isSerialWireMuted() { return serialWireMuted; }
 // Same single-writer argument as serialWireMuted (the loop task's CMD:LOG).
 static volatile uint8_t wireLevel = LOG_LEVEL;
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+static std::atomic<bool> serialLogReady{false};
+#endif
+
+void markSerialLogReady() {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  serialLogReady.store(true, std::memory_order_release);
+#endif
+}
+
 void setLogWireLevel(const uint8_t level) {
   constexpr int kCompiled = LOG_LEVEL;  // int: an unsigned compare against 0 would warn
   wireLevel = static_cast<uint8_t>(static_cast<int>(level) < kCompiled ? level : kCompiled);
@@ -184,7 +194,13 @@ void logPrintf(const char* level, const char* origin, const char* format, ...) {
   //
   // serialWireMuted is honoured on every path: it is how the serial-transfer
   // activity keeps log noise out of a binary protocol stream.
-  if (!serialWireMuted && levelRank(level) <= wireLevel) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // Static constructors can log before Arduino constructs HWCDC on S31.
+  const bool ready = serialLogReady.load(std::memory_order_acquire);
+#else
+  constexpr bool ready = true;
+#endif
+  if (ready && !serialWireMuted && levelRank(level) <= wireLevel) {
 #if FREEINK_LOG_TRANSPORT == FREEINK_LOG_TRANSPORT_ROM_PRINTF
     // IDF/ROM console: the most robust path when the USB bridge is external
     // (Sticky) and Arduino's Serial object is not the thing being monitored.

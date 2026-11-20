@@ -49,6 +49,7 @@ won't trigger deprecation warnings.
 static HWCDC& logSerial = Serial;
 
 void logPrintf(const char* level, const char* origin, const char* format, ...);
+void markSerialLogReady();
 
 // Mute/unmute LOG_* output to the serial wire. While muted, log lines are still
 // recorded in the RTC ring buffer (getLastLogs) but are NOT written to

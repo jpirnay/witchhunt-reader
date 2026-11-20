@@ -716,6 +716,9 @@ void ActivityManager::goToHomeMenuAction(const HomeMenuAction action) {
     case HomeMenuAction::Library:
       goToLibrary(libraryTabFrom(APP_STATE.libraryTab));
       break;
+    case HomeMenuAction::Recent:
+      goToLibrary(LibraryTab::Recent);
+      break;
     case HomeMenuAction::ReadingStats:
       goToReadingStats();
       break;
@@ -891,6 +894,10 @@ void ActivityManager::dispatchLightPanelGesture() {
   // Inert on an unlit board: wasLightPanelGesture() already answers false there, because
   // the top edge is the reader menu on those and the two must not compete.
   if (!mappedInput.wasLightPanelGesture()) return;
+  openLightPanel();
+}
+
+void ActivityManager::openLightPanel() {
   if (currentActivity == nullptr) return;
 
   // Don't stack a panel on top of itself, or on a screen that owns the whole surface for
@@ -948,7 +955,7 @@ void ActivityManager::dispatchLightPanelGesture() {
   mappedInput.suppressTouchContact();
   currentActivity->startActivityForResult(std::make_unique<FrontlightPanelActivity>(renderer, mappedInput),
                                           [](const ActivityResult&) {});
-  LOG_DBG("TCH", "Top-edge swipe -> reading light");
+  LOG_DBG("TCH", "Opened reading light");
 }
 
 void ActivityManager::dispatchListTap() {

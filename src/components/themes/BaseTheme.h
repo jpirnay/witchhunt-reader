@@ -123,6 +123,12 @@ enum class HomeNavigation { Linear, Carousel };
 // Additional themes can inherit from this and override methods as needed
 
 namespace BaseMetrics {
+inline constexpr int homeBookDetailsHeight =
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    124;
+#else
+    0;
+#endif
 constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
                                           .batteryHeight = 12,
                                           .topPadding = 5,
@@ -301,6 +307,11 @@ class BaseTheme {
     std::string text;
   };
   static FittedHintLabel fitHintLabel(const GfxRenderer& renderer, int fontId, const char* label, int maxWidth);
+
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  static void drawMetalioKeyHints(GfxRenderer& renderer, const char* back, const char* confirm,
+                                  const char* previous, const char* next);
+#endif
 
   // A short message on a card `maxWidth` wide, the empty recent-book card's: in `fontId` when it
   // fits on one line, else in `smallerFontId`, wrapped over at most `maxLines` lines when even that

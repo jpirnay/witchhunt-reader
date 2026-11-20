@@ -1,5 +1,6 @@
 #include "OtaBootSwitch.h"
 
+#include <BoardConfig.h>
 #include <Logging.h>
 #include <esp_ota_ops.h>
 #include <esp_rom_crc.h>
@@ -13,10 +14,15 @@ uint32_t computeSeqCrc(uint32_t seq) {
 }
 
 const esp_partition_t* idleAppPartition() {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // The other slot may contain the manufacturer's firmware.
+  return nullptr;
+#else
   const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
   const esp_partition_t* running = esp_ota_get_running_partition();
   if (next == nullptr || (running != nullptr && next->address == running->address)) return nullptr;
   return next;
+#endif
 }
 
 bool switchTo(const esp_partition_t* dest) {

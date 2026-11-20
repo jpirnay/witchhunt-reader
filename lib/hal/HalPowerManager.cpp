@@ -113,6 +113,10 @@ void HalPowerManager::begin() {
       LOG_ERR("PWR", "Audio codec did not take its power-down");
     }
   }
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // EPDiy needs this clock rate to supply both LCD line producers.
+  setCpuFrequencyMhz(320);
+#endif
   normalFreq = getCpuFrequencyMhz();
   modeMutex = xSemaphoreCreateMutex();
   assert(modeMutex != nullptr);
@@ -249,6 +253,11 @@ void HalPowerManager::exitWaveformWait() {
 // the comment there for why our background button sampler needs it, and
 // catchUpTicksOnCore0() for where it has to run on a dual-core chip.
 bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // The S31 core in this toolchain can corrupt PSRAM on light-sleep wake.
+  (void)gpio;
+  return false;
+#else
   const unsigned long entryMs = millis();
   if (lastSliceEndMs_ != 0) {
     lightSleepStats_.awakeMs += entryMs - lastSliceEndMs_;
@@ -423,9 +432,30 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   xTaskCatchUpTicks(pdMS_TO_TICKS(sleptMs));
 #endif
   return true;
+#endif
 }
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+void HalPowerManager::sleepOnExpanderKey() const {
+  if (esp_sleep_is_valid_wakeup_gpio(freeink::metalioplus::EXPANDER_INT_GPIO) &&
+      freeink::metalioplus::prepareKeyWake() &&
+      esp_sleep_enable_ext1_wakeup_io(1ULL << freeink::metalioplus::EXPANDER_INT_GPIO, ESP_EXT1_WAKEUP_ANY_LOW) ==
+          ESP_OK) {
+    LOG_INF("PWR", "Metalio standby: expander wake armed");
+    freeink::PowerManager::deepSleep();
+  }
+  LOG_INF("PWR", "Metalio standby: polling power key for wake");
+  freeink::metalioplus::waitForPowerKeyThenRestart();
+}
+#endif
+
 void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  (void)gpio;
+  (void)keepClockAlive;
+  // Keep the board powered so the expander can wake it on a short press.
+  sleepOnExpanderKey();
+#else
   LOG_DBG("PWR", "startDeepSleep: isPressed=%d, rawPin=%d, keepClock=%d", gpio.isPressed(HalGPIO::BTN_POWER),
           digitalRead(InputManager::POWER_BUTTON_PIN) == LOW, keepClockAlive);
 
@@ -566,6 +596,7 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
   if (sleepStepHook_) sleepStepHook_(SleepStep::WakeArmed, releaseWaitMs, releaseTimedOut, gpio13IsBatteryLatch);
   // Enter Deep Sleep
   esp_deep_sleep_start();
+#endif
 }
 
 namespace {

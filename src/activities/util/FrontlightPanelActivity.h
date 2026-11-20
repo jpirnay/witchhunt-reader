@@ -88,6 +88,7 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   static void onDarkModeEvent(const freeink::ui::ActionEvent& event, void* user);
 
   void buildPanelScreen(UiScreen& screen);
+  void saveLightSettings();
   LightDrawerLayout::Model layoutModel() const;
   void adjustBrightness(int delta);
   void adjustWarmth(int delta);

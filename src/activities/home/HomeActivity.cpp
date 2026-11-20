@@ -80,6 +80,9 @@ int getMinRecentToMenuGap() {
 }
 
 HomeScreenLayout computeHomeScreenLayout(const ThemeMetrics& metrics, int contentHeight, int menuItemCount) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  contentHeight -= metrics.verticalSpacing;
+#endif
   HomeScreenLayout layout{metrics.homeCoverTileHeight, metrics.verticalSpacing, 0};
 
   const int menuRequiredHeight =
@@ -120,7 +123,8 @@ int getHomeCoverRenderHeight(const HomeScreenLayout& layout) {
   // Lyra Extended's split between cover and text lives with the theme that draws it: the height
   // chosen here goes into the thumbnail's filename, so the theme has to ask for the same one.
   return isLyraExtendedTheme() ? Lyra3CoversMetrics::coverRenderHeight(layout.recentTileHeight)
-                               : std::max(120, layout.recentTileHeight - (isLyraFamilyTheme() ? 16 : 0));
+                               : std::max(120, layout.recentTileHeight -
+                                                   (isLyraFamilyTheme() ? 16 : BaseMetrics::homeBookDetailsHeight));
 }
 }  // namespace
 
@@ -625,7 +629,7 @@ void HomeActivity::loop() {
   // The interface language's pack, when the card lacks it: once a start and language (UiLanguagePacks).
   if (firstRenderDone && offerLanguagePack()) return;
 
-  const bool isCarousel = (GUI.getHomeNavigation() == HomeNavigation::Carousel);
+  const bool isCarousel = GUI.getHomeNavigation() == HomeNavigation::Carousel;
 
   // A press may be in EITHER place: hasPendingInput() reads the live sampler accumulator
   // (presses arriving this tick), while wasAnyPressed()/wasAnyReleased() read the snapshot
@@ -709,7 +713,7 @@ void HomeActivity::loop() {
 
     if (firstRenderDone && !recentsLoaded && !recentsLoading && !inputWaiting) {
       const auto& metrics = UITheme::getInstance().getMetrics();
-      const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+      const Rect contentRect = UITheme::getContentRect(renderer, UITheme::showsHomeButtonHints(), false);
       const HomeScreenLayout layout =
           computeHomeScreenLayout(metrics, contentRect.height, static_cast<int>(menuEntries.size()));
       loadRecentCovers(getHomeCoverRenderHeight(layout));
@@ -741,11 +745,13 @@ void HomeActivity::loop() {
 }
 
 void HomeActivity::render(RenderLock&&) {
+  const auto& theme = UITheme::getInstance().getTheme();
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+  const bool showButtonHints = UITheme::showsHomeButtonHints();
+  const Rect contentRect = UITheme::getContentRect(renderer, showButtonHints, false);
 
   const int menuCount = static_cast<int>(menuEntries.size());
-  const bool isCarousel = (GUI.getHomeNavigation() == HomeNavigation::Carousel);
+  const bool isCarousel = theme.getHomeNavigation() == HomeNavigation::Carousel;
 
   // Fast path: theme owns its own pre-rendered frame cache
   if (isCarousel) {
@@ -755,7 +761,7 @@ void HomeActivity::render(RenderLock&&) {
     const auto carouselLabels =
         mappedInput.mapHints("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
             .front;
-    const bool handled = GUI.tryFastHomeRender(
+    const bool handled = theme.tryFastHomeRender(
         renderer, recentBooks, selectorIndex, menuCount,
         [this](int index) { return std::string(I18N.get(menuEntries[index].label)); },
         [this](int index) { return menuEntries[index].icon; }, carouselLabels.btn1, carouselLabels.btn2,
@@ -786,7 +792,7 @@ void HomeActivity::render(RenderLock&&) {
   // Ported from crosspoint-reader PR #4076 (Leopoldo Pla Sempere).
   bool bufferRestored = coverRendered && coverBufferStored && restoreCoverBuffer();
 
-  GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.homeTopPadding}, nullptr);
+  theme.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.homeTopPadding}, nullptr);
 
   const int totalItems = static_cast<int>(recentBooks.size() + menuEntries.size());
   if (selectorIndex >= totalItems) {
@@ -804,12 +810,12 @@ void HomeActivity::render(RenderLock&&) {
   // carousel render is either served by that cache or clears coverRendered (above) before it could restore, so the
   // copy was never read. It was a malloc of the tile region with no heap floor, which the X3 logged as "OOM: cover
   // buffer (20592 bytes)".
-  GUI.drawRecentBookCover(renderer,
+  theme.drawRecentBookCover(renderer,
                           Rect{contentRect.x, metrics.homeTopPadding, contentRect.width, layout.recentTileHeight},
                           recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
                           [this, isCarousel] { return !isCarousel && storeCoverBuffer(); });
 
-  GUI.drawButtonMenu(
+  theme.drawButtonMenu(
       renderer,
       Rect{contentRect.x, metrics.homeTopPadding + layout.recentTileHeight + layout.recentToMenuGap, contentRect.width,
            layout.menuHeight},
@@ -817,12 +823,14 @@ void HomeActivity::render(RenderLock&&) {
       [this](int index) { return std::string(I18N.get(menuEntries[index].label)); },
       [this](int index) { return menuEntries[index].icon; });
 
-  const auto labels = isCarousel ? mappedInput
-                                       .mapHints("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT),
-                                                 tr(STR_DIR_UP), tr(STR_DIR_DOWN))
-                                       .front
-                                 : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (showButtonHints) {
+    const auto labels = isCarousel ? mappedInput
+                                         .mapHints("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT),
+                                                   tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+                                         .front
+                                   : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    theme.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  }
 
   renderer.displayBuffer();
 
@@ -895,7 +903,13 @@ bool HomeActivity::handleHomeTouch() {
   int y = 0;
   // Claimed but not acted on: moving the selection mid-contact would defeat the two-step below.
   if (mappedInput.wasScreenTouchDown(x, y) && resolve(x, y)) return true;
-  if (!mappedInput.wasScreenTapped(x, y) || !resolve(x, y)) return false;
+  if (!mappedInput.wasScreenTapped(x, y)) return false;
+  const bool target = resolve(x, y);
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  LOG_DBG("TOUCH", "Home tap x=%d y=%d target=%d immediate=%d", x, y, target,
+          SETTINGS.touchListActivation == CrossPointSettings::TOUCH_LIST_ACTIVATE_IMMEDIATELY);
+#endif
+  if (!target) return false;
 
   // The whole selector is one range (covers then menu), so the comparison happens in that frame
   // and a tap on the menu correctly counts as "new" while a cover is selected, and vice versa.

@@ -23,6 +23,9 @@ struct HomeMenuRow {
 // screen already says so plainly when there is nothing to show.
 constexpr HomeMenuRow kRows[] = {
     {{HomeMenuAction::Library, StrId::STR_LIBRARY, Folder}, Requires::Nothing, &CrossPointSettings::showLibraryOnHome},
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    {{HomeMenuAction::Recent, StrId::STR_MENU_RECENT_BOOKS, Recent}, Requires::Nothing, nullptr},
+#endif
     {{HomeMenuAction::ReadingStats, StrId::STR_READING_STATS, Stats},
      Requires::Nothing,
      &CrossPointSettings::showReadingStatsOnHome},
@@ -72,7 +75,7 @@ void collectHomeMenuEntries(const HomeMenuPlacement placement, const HomeMenuAva
   for (const HomeMenuRow& row : kRows) {
     if (!isAvailable(row.requirement, availability)) continue;
     // More goes directly above the pinned entry (Settings), the one that can never move to it.
-    if (placement == HomeMenuPlacement::Home && anyMovedToMore && row.shownOnHome == nullptr) {
+    if (placement == HomeMenuPlacement::Home && anyMovedToMore && row.entry.action == HomeMenuAction::Settings) {
       out.push_back(kMoreEntry);
     }
     if (placementOf(row) == placement) out.push_back(row.entry);
