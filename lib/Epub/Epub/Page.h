@@ -60,9 +60,9 @@ class PageElement {
   // gives the memory back to the heap only when the heap made the element. A PageLine laid out in a build's page block
   // (PageLine::make) goes with that block's rewind; no other element is built in an arena. Every element type derives
   // from PageElement alone, so `element` is the address its allocation returned. Defined in the class, as TextBlock's
-  // is. GCC 16 (the host tests') still reports -Wmismatched-new-delete where it inlines a deleting destructor without
-  // this (the parser's refused PageBox): a false positive, the heap path's ::operator delete frees a nothrow new. GCC
-  // 14 (the firmware's) does not; [[gnu::always_inline]] would silence it for about 370 B of C3 flash in two files.
+  // is. GCC 16 (the host tests') still reports -Wmismatched-new-delete where an element is destroyed right after its
+  // nothrow new without this delete inlined: a false positive, the heap path's ::operator delete frees a nothrow new.
+  // Arrange such a site so nothing refuses the element once it is made (ChapterHtmlSlimParser::placeBoxSegment).
   static void operator delete(PageElement* const element, std::destroying_delete_t) {
 #ifdef BUILD_ARENA_TRACE
     // Host only: an element whose own bytes read the rewind fill was destroyed after the arena block it lives in. Asked

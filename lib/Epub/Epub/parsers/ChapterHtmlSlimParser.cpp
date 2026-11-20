@@ -2028,9 +2028,14 @@ void ChapterHtmlSlimParser::placeBoxSegment(const BoxScope& box, const int top, 
   // A slice with no edge left and no shade (a bottom rule's slice above a break) draws nothing: no element.
   if (!box.shaded && edges[0].width == 0 && edges[1].width == 0 && edges[2].width == 0 && edges[3].width == 0) return;
   const int width = std::max(1, box.right - box.left);
-  auto element = makeUniqueNoThrow<PageBox>(box.left, static_cast<int16_t>(top), static_cast<uint16_t>(width),
-                                            static_cast<uint16_t>(bottom - top), edges, box.shaded);
-  if (!element || !heapReserveFor(currentPage->elements, 1)) {
+  // The element table's slot first: a frame refused its slot after it was made would be destroyed here, which GCC 16
+  // reports as a mismatched delete (a false positive; see PageElement's operator delete).
+  std::unique_ptr<PageBox> element;
+  if (heapReserveFor(currentPage->elements, 1)) {
+    element = makeUniqueNoThrow<PageBox>(box.left, static_cast<int16_t>(top), static_cast<uint16_t>(width),
+                                         static_cast<uint16_t>(bottom - top), edges, box.shaded);
+  }
+  if (!element) {
     LOG_ERR("EHP", "No heap for a box's frame; the page is drawn without it");
     return;
   }
