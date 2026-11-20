@@ -2,8 +2,7 @@
 // Ported from crosspoint-reader PR #2734 ("feat: Add browser-side plugin system
 // with SD card support", Justin Mitchell / @itsthisjustin). The discovery flow,
 // the registerPlugin handshake and the mount convention are his design; this
-// version leaves out crypto (the browser's crypto.subtle covers it) and the
-// plugin job queue.
+// version leaves out the plugin job queue.
 //
 // Discovers plugins from the SD card via /api/plugins, loads each plugin.js,
 // and hands it a container element to render into. A plugin is just JS on the
@@ -20,9 +19,9 @@
 //
 // Plugins written for upstream crosspoint-reader run too: api.dir, the
 // relay(method, url, headers, body) form answering {status, headers, body},
-// writeFile(path, base64) and fetchToSd(url, dest, headers, {method, body}) follow
-// its plugin-host.js (#3114, Justin Mitchell, and later PRs). registerAction()
-// only warns: there is no job queue here.
+// writeFile(path, base64), fetchToSd(url, dest, headers, {method, body}) and
+// crypto(op, fields) follow its plugin-host.js (#3114, Justin Mitchell, and
+// later PRs). registerAction() only warns: there is no job queue here.
 window.CrossPoint = window.CrossPoint || {
   _pending: null,
   // Called by a plugin at top level; loadPlugins() picks the function up after
@@ -34,10 +33,7 @@ window.CrossPoint = window.CrossPoint || {
 // Device capabilities this firmware implements. A plugin may declare what it
 // needs as "requires" in its manifest, and one asking for something absent is
 // refused with a readable card instead of failing somewhere inside its own code.
-//
-// "crypto" is deliberately absent: the browser's own crypto.subtle covers
-// hashing, HMAC, AES and RSA, so a device-side implementation would duplicate it.
-const PLUGIN_CAPABILITIES = ['relay', 'fetchToSd', 'writeFile', 'pluginFile', 'dir'];
+const PLUGIN_CAPABILITIES = ['relay', 'fetchToSd', 'writeFile', 'pluginFile', 'dir', 'crypto'];
 
 // Raises the device's error, with its JSON answer (and a refused host's name) attached.
 async function pluginApiError(r, path) {
@@ -207,11 +203,16 @@ function makePluginApi(p) {
     registerAction: (action) => {
       console.warn('Plugin ' + p.name + ': registerAction(' + action + ') is not supported on this firmware');
     },
-    // Present so a plugin written against the upstream API fails with a
-    // sentence rather than "api.crypto is not a function".
-    crypto: () => {
-      throw new Error('api.crypto is not available on this firmware - use the ' +
-        "browser's crypto.subtle instead");
+    // Crypto the page cannot do itself: crypto.subtle exists only in a secure context, and the reader serves
+    // http://. The device runs upstream's ops (POST /api/crypto: random, sha1, sha256, aesenc, aesdec, rsadec, sign,
+    // keygen, pubencrypt, pkcs12), base64 fields in and out; an op that fails answers {error}, as upstream's does.
+    crypto: async (op, fields) => {
+      const r = await fetch('/api/crypto', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.assign({}, fields || {}, { op }))
+      });
+      if (!r.ok) throw await pluginApiError(r, '/api/crypto');
+      return r.json();
     },
     // manifest.json's title, falling back to the folder name. The host
     // renders no chrome - the plugin owns its whole card - so this is here

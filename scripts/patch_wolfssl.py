@@ -102,15 +102,19 @@ OVERRIDES = """
 #ifndef WC_RSA_PSS
 #define WC_RSA_PSS
 #endif
-/* RSA public-key operations only: the client verifies RSA (and RSA-PSS) signatures but never signs
- * or decrypts with an RSA key. Compiles out the RSA private paths, in wolfCrypt and in SP math
- * (sp_RsaPrivate_*). The only RSA signer left in a client build is client-certificate
- * authentication (internal.c RsaSign, for CertificateVerify), so that goes too: the reader never
- * presents a client certificate. A server that asks for one still gets the empty Certificate
- * message (tls13.c SendTls13Certificate stays), exactly as before. */
-#ifndef WOLFSSL_RSA_PUBLIC_ONLY
-#define WOLFSSL_RSA_PUBLIC_ONLY
-#endif
+/* RSA private-key operations stay in: POST /api/crypto signs and decrypts with a plugin's RSA keys
+ * (rsadec, sign; the Plugin Hub's protected-content, for Adobe loans). TLS still never signs with
+ * one: client-certificate authentication (internal.c RsaSign, for CertificateVerify) stays out, as
+ * the reader never presents a client certificate. A server that asks for one still gets the empty
+ * Certificate message (tls13.c SendTls13Certificate stays). */
+/* SP math's size-specific RSA code (2048, 3072 and 4096 bits) for public-key operations only: a
+ * source patch below (SOURCE_PATCHES) drops its private-key paths, in RsaFunction_SP and in
+ * sp_exptmod_ex's size dispatch: 9,238 B on the C3, 8,252 B on the X4 Pro (2026-11-20, pio run
+ * against the unpatched build). /api/crypto's private keys are the Adobe
+ * flow's 1024-bit ones, a size SP has no RSA code for, so they take the generic sp_int path
+ * either way; a larger private key still works there, slower. TLS verifies RSA through the
+ * size-specific public paths as before. */
+#define CROSSPOINT_SP_RSA_PUBLIC_ONLY
 #ifndef WOLFSSL_NO_CLIENT_AUTH
 #define WOLFSSL_NO_CLIENT_AUTH
 #endif
@@ -153,14 +157,16 @@ OVERRIDES = """
 #ifndef NO_MD4
 #define NO_MD4
 #endif
-#ifndef NO_DES3
-#define NO_DES3
+/* Password-based encryption, 3DES and RC2 stay in for PKCS#12: /api/crypto's pkcs12 opens the
+ * signing bundle Adobe's activation returns. As upstream's build: RC2 for "the legacy PBE-SHA1-RC2
+ * cipher the PKCS#12 signing bundle uses" (its platformio.ini), 3DES at wolfSSL's default (on).
+ * Which PBE each of the bundle's bags uses is not checked here; a real activation will show whether
+ * both are needed. TLS uses none of them. */
+#ifndef WC_RC2
+#define WC_RC2
 #endif
 #ifndef NO_PSK
 #define NO_PSK
-#endif
-#ifndef NO_PWDBASED
-#define NO_PWDBASED
 #endif
 #ifndef NO_WOLFSSL_MEMORY
 /* keep wolfSSL memory hooks so heap stats work */
@@ -247,6 +253,78 @@ TAIL_OVERRIDES = """
 """
 
 
+# Source patches, for what user_settings.h cannot switch: wolfSSL has no knob that keeps SP math's
+# size-specific RSA public paths (TLS needs them) without its private ones. Each entry is a file
+# under the library's src/, the text as Arduino-wolfSSL 5.7.2 ships it, our text, and how often it
+# occurs. A file already patched is left alone, so incremental builds recompile nothing; a file
+# that holds neither text as expected fails the build rather than half-patch it. Bumping wolfSSL
+# means re-deriving these.
+WOLFSSL_VERSION = "5.7.2"
+SP_PRIVATE_GUARD = "!defined(CROSSPOINT_SP_RSA_PUBLIC_ONLY)"
+SOURCE_PATCHES = (
+    (
+        # RsaFunction_SP: the private cases of the 2048, 3072 and 4096-bit switches. Without them the
+        # function answers WC_KEY_SIZE_E and wc_RsaFunctionSync takes the generic path.
+        "wolfcrypt/src/rsa.c",
+        "        switch(type) {\n#ifndef WOLFSSL_RSA_PUBLIC_ONLY\n        case RSA_PRIVATE_DECRYPT:\n",
+        "        switch(type) {\n#if !defined(WOLFSSL_RSA_PUBLIC_ONLY) && " + SP_PRIVATE_GUARD + "\n"
+        "        case RSA_PRIVATE_DECRYPT:\n",
+        3,
+    ),
+    (
+        # sp_exptmod_ex: the dispatch to sp_ModExp_1024 ... _4096, which only the private paths reach.
+        # Without it the generic exponentiation below runs.
+        "wolfcrypt/src/sp_int.c",
+        "#if (defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL)) && \\\n"
+        "    (defined(WOLFSSL_HAVE_SP_RSA) || defined(WOLFSSL_HAVE_SP_DH))\n"
+        "    #ifndef WOLFSSL_SP_NO_2048\n"
+        "        if ((mBits == 1024) && sp_isodd(m) && (bBits <= 1024) &&\n",
+        "#if (defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL)) && \\\n"
+        "    (defined(WOLFSSL_HAVE_SP_RSA) || defined(WOLFSSL_HAVE_SP_DH)) && " + SP_PRIVATE_GUARD + "\n"
+        "    #ifndef WOLFSSL_SP_NO_2048\n"
+        "        if ((mBits == 1024) && sp_isodd(m) && (bBits <= 1024) &&\n",
+        1,
+    ),
+)
+
+
+def library_version(lib_dir):
+    path = os.path.join(lib_dir, "library.properties")
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if line.startswith("version="):
+                return line.split("=", 1)[1].strip()
+    return None
+
+
+def patch_sources(src_dir):
+    lib_dir = os.path.dirname(src_dir)
+    version = library_version(lib_dir)
+    if version != WOLFSSL_VERSION:
+        raise SystemExit(
+            "patch_wolfssl: {} is wolfSSL {}, the source patches are for {}: re-derive SOURCE_PATCHES".format(
+                os.path.relpath(lib_dir, PROJECT_DIR), version, WOLFSSL_VERSION
+            )
+        )
+    for rel, old, new, count in SOURCE_PATCHES:
+        path = os.path.join(src_dir, rel)
+        with open(path, "r", encoding="utf-8", errors="replace", newline="") as f:
+            text = f.read()
+        if text.count(new) == count and text.count(old) == 0:
+            continue  # already patched
+        if text.count(old) != count:
+            raise SystemExit(
+                "patch_wolfssl: {} holds the expected text {} times, not {}: refusing to patch".format(
+                    os.path.relpath(path, PROJECT_DIR), text.count(old), count
+                )
+            )
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(text.replace(old, new))
+        print("Patched wolfSSL source: {}".format(os.path.relpath(path, PROJECT_DIR)))
+
+
 def strip_block(text, start, end):
     # Remove a prior injection delimited by start/end markers, wherever it sits.
     if start in text and end in text:
@@ -280,6 +358,7 @@ def main():
     for pat in patterns:
         for path in glob.glob(pat):
             patch(path)
+            patch_sources(os.path.dirname(path))
             found = True
     if not found:
         # Normal for flag-off / non-network envs; not an error.

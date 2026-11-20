@@ -481,8 +481,12 @@
       // Plugin stores, which install plugins on the device: this page is the store here.
       const COMMUNITY_HIDDEN = ['pluginhub', 'plugin-store'];
       // Known not to run, for a reason the catalog does not state.
-      const COMMUNITY_KNOWN = {
-        'protected-content': 'it needs DRM support (api.crypto and book keys), which this firmware does not have'
+      const COMMUNITY_KNOWN = {};
+      // Known to run in part, for a reason the catalog does not state. protected-content (Adobe loans) was run on a
+      // Murphy up to its account sign-in (2026-11-20): activation and fulfilment need a real account.
+      const COMMUNITY_PARTIAL = {
+        'protected-content': 'Its web page runs here up to the account sign-in; activating the reader and fetching ' +
+          'loans have not been tried with a real account yet'
       };
       let communityCatalog = null;
       // {"<entry>": PluginCatalog.describe() of its device.json, or null when it could not be read}.
@@ -494,6 +498,7 @@
         const files = Array.isArray(c.files) ? c.files : [];
         const compat = c.compatibility || {};
         if (COMMUNITY_KNOWN[c.name]) return { level: 'no', text: 'Does not run here: ' + COMMUNITY_KNOWN[c.name] };
+        if (COMMUNITY_PARTIAL[c.name]) return { level: 'partial', text: COMMUNITY_PARTIAL[c.name] };
         if (compat.firmware_family && compat.firmware_family !== 'crosspoint') {
           return { level: 'no', text: 'Made for another firmware (' + compat.firmware_family + ')' };
         }

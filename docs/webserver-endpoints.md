@@ -1079,6 +1079,40 @@ request may reach ([Protected paths](#protected-paths)).
 | 400    | Not JSON, a refused path, a key that is not 16 or 32 bytes of base64, an `expires` that is negative or not a whole number |
 | 500    | The key could not be wrapped or written                  |
 
+### POST `/api/crypto` - Crypto for a Plugin's Page
+
+Runs one crypto operation for a plugin's page, which has no `crypto.subtle`: that exists only in a secure
+context, and the reader serves `http://`. Upstream's endpoint and ops (crosspoint-reader #3114), on the Free-Ink
+SDK's `WolfsslCrypto` (`lib/PluginCrypto`). The Plugin Hub's `protected-content` (Adobe loans) uses every op.
+Binary fields are base64 in both directions; nothing is kept between calls.
+
+```bash
+curl -X POST http://crosspoint.local/api/crypto -H "Content-Type: application/json" \
+  -d '{"op": "sha1", "data": "aGVsbG8="}'
+# -> {"data":"qvTGHdzF6KLavt4PO0gs2a6pQ00="}
+```
+
+| `op`         | Fields                  | Answer                 | Notes                                                    |
+| ------------ | ----------------------- | ---------------------- | -------------------------------------------------------- |
+| `random`     | `len` (default 16)      | `data`                 | At most 4096 bytes                                       |
+| `sha1`       | `data`                  | `data`                 |                                                          |
+| `sha256`     | `data`                  | `data`                 |                                                          |
+| `aesenc`     | `key`, `iv`, `data`     | `data`                 | AES-128-CBC, PKCS#7 padding added                        |
+| `aesdec`     | `key`, `iv`, `data`     | `data`                 | AES-128-CBC, the raw blocks: the caller removes the padding |
+| `rsadec`     | `private`, `data`       | `data`                 | Raw `m^d` with a PKCS#8 key; the caller removes the padding |
+| `sign`       | `private`, `hash`       | `data`                 | PKCS#1 type 1 over a bare 20-byte hash, as Adobe signs   |
+| `keygen`     |                         | `public`, `private`    | RSA-1024: SPKI and PKCS#8 DER                            |
+| `pubencrypt` | `cert`, `data`          | `data`                 | PKCS#1 v1.5 to the public key of a DER certificate       |
+| `pkcs12`     | `data`, `password`      | `key`, `cert`          | The bundle's private key (PKCS#8) and certificate (DER)  |
+
+A failed op answers `200` with `{"error": "..."}`, as upstream's does; an unknown `op` too.
+
+| Status | Cause                                                                     |
+| ------ | ------------------------------------------------------------------------- |
+| 400    | Not JSON                                                                  |
+| 415    | Not `application/json`                                                    |
+| 503    | No 16 KB block free on the heap, or no room for an input or the answer    |
+
 ### POST `/api/plugin-fs` - Write a Small File
 
 Writes one small file, sent as `multipart/form-data`. `/upload` already does this; it exists for compatibility with plugins written against the
