@@ -171,7 +171,8 @@ check(text(row('Needs transfer')).includes('transfer.localsend.v1') && !hasButto
       'a missing capability is named and blocks the install');
 check(text(row('Other firmware')).includes('another firmware (elsewhere)') && !hasButton(row('Other firmware')),
       'a plugin for another firmware is not offered');
-check(text(row('Protected')).includes('DRM') && !hasButton(row('Protected')), 'the DRM plugin says why it does not run');
+check(text(row('Protected')).includes('partly runs here') && text(row('Protected')).includes('account sign-in') &&
+      hasButton(row('Protected')), 'the DRM plugin is offered, saying how far it was checked');
 check(text(row('Organize by Author (CrossPoint)')).includes("Witch Reader's Organize by Author"),
       'a shared folder name with one of ours is flagged');
 
