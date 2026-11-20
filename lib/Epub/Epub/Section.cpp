@@ -1143,7 +1143,8 @@ struct Section::BuildState {
   // The owned arena is a region of setOwnedBuildRegionBytes(), not the 10 KB parse arena: the build uses it as it would
   // a lent one.
   bool ownedIsRegion = false;
-  // The running text counted for the book's body size (BuildParams::measureBodySize), ~1 KB for the build's length.
+  // The running text counted for the book's body size (BuildParams::measureBodySize), ~1 KB from the parse's start
+  // (runBuildParse, after the note-preview resolve) to the build's end.
   std::unique_ptr<BodySize::Census> bodySizeCensus;
   // External region is large enough to also host the reader's readBuf + ring
   // directly (no separate entry-sized zipArena needed).
@@ -1367,7 +1368,8 @@ struct Section::BuildState {
   uint32_t previewResolveMs = 0;          // CPU actually spent resolving, summed across slices
   uint32_t previewResolveMaxSliceMs = 0;  // worst single slice — the number that says it slices
   // The pages on their way to `file`. A page is some 150 fields of a few bytes; this gathers them and sends them to
-  // the card in whole sectors (BufferedFileWriter::writeWholeSectors). Made once the header is written. A page loaded
+  // the card in whole sectors (BufferedFileWriter::writeWholeSectors). Made when the parse starts (runBuildParse, after
+  // the note-preview resolve); until then the file holds only its header, and no page can be loaded. A page loaded
   // mid-build is sent first (loadPageFromActiveBuild), and runBuildFinalize sends the rest before it reads or patches
   // the file. A build that never reaches finalize leaves a file nothing reads, so what is still here then is dropped.
   std::optional<serialization::BufferedFileWriter> pageWriter;
@@ -1533,11 +1535,6 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   writeSectionFileHeader(p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment, p.viewportWidth,
                          p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle, p.bionicReadingEnabled,
                          p.imageRendering, p.verticalText);
-  st.pageWriter.emplace(file, PAGE_WRITE_BUFFER_BYTES);
-  if (!st.pageWriter->buffered()) {
-    LOG_INF("SCT", "createSectionFile spine=%d: no %u-byte block for the page writer, pages go out field by field",
-            spineIndex, static_cast<unsigned>(PAGE_WRITE_BUFFER_BYTES));
-  }
   st.lut.clear();
   // One u32 per page, appended by the completePageFn below across the whole parse. Pre-sized for
   // the same reason as the parser's paragraph LUT — see estimatePagesForSpine and
@@ -1653,15 +1650,6 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   st.visitor->setWidowOrphanControl(p.widowOrphanControl);
   st.visitor->setParagraphIndent(p.paragraphIndent);
   if (p.embeddedStyle) st.visitor->setBodySizePct(p.bodySizePct);
-  // Counted afresh by each setup: one build's text is the sample, and a setup run again (a retry without the book's
-  // style) counts nothing, its sizes not being the book's. Without the memory the build lays out as ever and counts
-  // nothing; the next one counts.
-  st.bodySizeCensus.reset();
-  if (p.measureBodySize && p.embeddedStyle && p.fontSizeNormalization) {
-    st.bodySizeCensus = makeUniqueNoThrow<BodySize::Census>();
-    if (!st.bodySizeCensus) LOG_ERR("SCT", "spine=%d: no memory for the body size census", spineIndex);
-  }
-  st.visitor->setBuildCensus(st.bodySizeCensus.get());
   if (p.embeddedStyle && p.fontFamilies) st.visitor->setFontFamilies(*p.fontFamilies);
   // Anchors stream to SD as they are found rather than accumulating in the parser; the
   // finalizer below copies the spill into the section file's anchor map. Set before setup(),
@@ -1684,7 +1672,8 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
 
   // The layout parser is NOT initialised here. Its yxml state is ~10 KB, and the note-preview
   // resolve that runs between the phases needs a SAX parser of its own; initialising this one
-  // first would put both on the heap at once for no reason. See runBuildParse.
+  // first would put both on the heap at once for no reason. See runBuildParse. The page writer and
+  // the body-size census are taken there too, for the same reason.
   st.setupMs = millis() - phaseSetupStart;
   if (st.arena) st.laneSetup = static_cast<uint32_t>(st.arena->used());
   SCT_TRACE_HEAP(spineIndex, "after_setup");
@@ -1986,6 +1975,24 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     if (!scopeStylesheets(st)) {
       streamFailed = true;
     } else {
+      // The page writer's buffer and the body-size census are taken now rather than at setup: the extraction and the
+      // note-preview resolve above use neither, and on a heap-backed build the resolve can be the build's heap peak.
+      // Nothing touches the section file between its header and here, so the writer starts where it did, at the
+      // header's end; no page can complete before setup() below starts the parser's first text block.
+      st.pageWriter.emplace(file, PAGE_WRITE_BUFFER_BYTES);
+      if (!st.pageWriter->buffered()) {
+        LOG_INF("SCT", "createSectionFile spine=%d: no %u-byte block for the page writer, pages go out field by field",
+                spineIndex, static_cast<unsigned>(PAGE_WRITE_BUFFER_BYTES));
+      }
+      // Counted afresh by each build: one build's text is the sample, and a retry without the book's style counts
+      // nothing, its sizes not being the book's. Without the memory the build lays out as ever and counts nothing; the
+      // next one counts. Handed to the parser before setup(), as it asks.
+      const BuildParams& p = st.params;
+      if (p.measureBodySize && p.embeddedStyle && p.fontSizeNormalization) {
+        st.bodySizeCensus = makeUniqueNoThrow<BodySize::Census>();
+        if (!st.bodySizeCensus) LOG_ERR("SCT", "spine=%d: no memory for the body size census", spineIndex);
+      }
+      st.visitor->setBuildCensus(st.bodySizeCensus.get());
       if (!st.visitor->setup(st.inflatedSize)) {
         LOG_ERR("SCT", "Failed to set up chapter parser");
         file.close();
