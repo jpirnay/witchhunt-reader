@@ -270,8 +270,7 @@ void FrontlightPanelActivity::render(RenderLock&&) {
                           ? renderer.getScreenHeight() - panelHeight - uiTarget.deviceContext().safeArea.bottom +
                                 sheet.grabberMargin + sheet.grabberHeight + sheet.grabberInset + metrics.topPadding
                           : metrics.topPadding;
-  GUI.drawHeader(renderer, Rect{0, headerY, renderer.getScreenWidth(), metrics.headerHeight},
-                 tr(STR_MENU_DISP_LIGHT));
+  GUI.drawHeader(renderer, Rect{0, headerY, renderer.getScreenWidth(), metrics.headerHeight}, tr(STR_MENU_DISP_LIGHT));
 
   // Plain FAST throughout. The opening pass was briefly forced to HALF while the stale-frame bug
   // was still open; the device log showed HALF did not fix it (the content was wrong, not the

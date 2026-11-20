@@ -105,7 +105,9 @@ int bottomReservedHeight(const GfxRenderer& renderer) {
 }
 constexpr int kMenuTileH = kMenuIconPad + kMenuIconSize + kMenuIconPad;
 constexpr int kMenuHighlightSize = kMenuIconSize + 2 * kHighlightPad;
-int menuRowY(const GfxRenderer& renderer) { return renderer.getScreenHeight() - bottomReservedHeight(renderer) - kMenuTileH; }
+int menuRowY(const GfxRenderer& renderer) {
+  return renderer.getScreenHeight() - bottomReservedHeight(renderer) - kMenuTileH;
+}
 #if FREEINK_DEVICE_METALIO_EINK4_PLUS
 constexpr int kTouchMenuColumns = 3;
 constexpr int kTouchMenuTileHeight = 112;

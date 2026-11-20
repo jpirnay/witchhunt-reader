@@ -161,7 +161,7 @@ constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
                                           .keyboardVerticalOffset = -13,
                                           .keyboardTextFieldWidthPercent = 85,
                                           .headerSubtitleLine = 23});
-}
+}  // namespace BaseMetrics
 
 enum class SyncIndicator : uint8_t { None, Active, Failed };
 
@@ -307,11 +307,6 @@ class BaseTheme {
     std::string text;
   };
   static FittedHintLabel fitHintLabel(const GfxRenderer& renderer, int fontId, const char* label, int maxWidth);
-
-#if FREEINK_DEVICE_METALIO_EINK4_PLUS
-  static void drawMetalioKeyHints(GfxRenderer& renderer, const char* back, const char* confirm,
-                                  const char* previous, const char* next);
-#endif
 
   // A short message on a card `maxWidth` wide, the empty recent-book card's: in `fontId` when it
   // fits on one line, else in `smallerFontId`, wrapped over at most `maxLines` lines when even that

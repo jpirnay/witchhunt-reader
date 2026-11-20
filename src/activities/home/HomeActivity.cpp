@@ -122,9 +122,9 @@ HomeScreenLayout computeHomeScreenLayout(const ThemeMetrics& metrics, int conten
 int getHomeCoverRenderHeight(const HomeScreenLayout& layout) {
   // Lyra Extended's split between cover and text lives with the theme that draws it: the height
   // chosen here goes into the thumbnail's filename, so the theme has to ask for the same one.
-  return isLyraExtendedTheme() ? Lyra3CoversMetrics::coverRenderHeight(layout.recentTileHeight)
-                               : std::max(120, layout.recentTileHeight -
-                                                   (isLyraFamilyTheme() ? 16 : BaseMetrics::homeBookDetailsHeight));
+  return isLyraExtendedTheme()
+             ? Lyra3CoversMetrics::coverRenderHeight(layout.recentTileHeight)
+             : std::max(120, layout.recentTileHeight - (isLyraFamilyTheme() ? 16 : BaseMetrics::homeBookDetailsHeight));
 }
 }  // namespace
 
@@ -792,7 +792,8 @@ void HomeActivity::render(RenderLock&&) {
   // Ported from crosspoint-reader PR #4076 (Leopoldo Pla Sempere).
   bool bufferRestored = coverRendered && coverBufferStored && restoreCoverBuffer();
 
-  theme.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.homeTopPadding}, nullptr);
+  theme.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.homeTopPadding},
+                   nullptr);
 
   const int totalItems = static_cast<int>(recentBooks.size() + menuEntries.size());
   if (selectorIndex >= totalItems) {
@@ -811,9 +812,9 @@ void HomeActivity::render(RenderLock&&) {
   // copy was never read. It was a malloc of the tile region with no heap floor, which the X3 logged as "OOM: cover
   // buffer (20592 bytes)".
   theme.drawRecentBookCover(renderer,
-                          Rect{contentRect.x, metrics.homeTopPadding, contentRect.width, layout.recentTileHeight},
-                          recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
-                          [this, isCarousel] { return !isCarousel && storeCoverBuffer(); });
+                            Rect{contentRect.x, metrics.homeTopPadding, contentRect.width, layout.recentTileHeight},
+                            recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
+                            [this, isCarousel] { return !isCarousel && storeCoverBuffer(); });
 
   theme.drawButtonMenu(
       renderer,

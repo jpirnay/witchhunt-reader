@@ -269,57 +269,9 @@ int BaseTheme::sideHintNeededLength(const GfxRenderer& renderer, const int fontI
          HintLayout::SIDE_LABEL_PADDING;
 }
 
-#if FREEINK_DEVICE_METALIO_EINK4_PLUS
-void BaseTheme::drawMetalioKeyHints(GfxRenderer& renderer, const char* back, const char* confirm, const char* previous,
-                                   const char* next) {
-  const auto orientation = renderer.getOrientation();
-  const bool inverted = orientation == GfxRenderer::Orientation::PortraitInverted;
-  renderer.setDrawOrientation(inverted ? orientation : GfxRenderer::Orientation::Portrait);
-
-  const int pageWidth = renderer.getScreenWidth();
-  const int pageHeight = renderer.getScreenHeight();
-  const int stripHeight = UITheme::getInstance().getMetrics().buttonHintsHeight;
-  const int bezelInset = BoardConfig::ACTIVE.viewableInsets.bottom;
-  const int height = stripHeight - bezelInset;
-  const int width = pageWidth / 6;
-  const int y = inverted ? bezelInset : pageHeight - stripHeight;
-
-  // The centers follow the three capacitive keys on the Metalio front.
-  constexpr int centers[] = {11, 67, 88};
-  const bool showConfirm = confirm && *confirm && (!next || !*next);
-  const int buttons[] = {HalGPIO::BTN_BACK, HalGPIO::BTN_LEFT,
-                         showConfirm ? HalGPIO::BTN_CONFIRM : HalGPIO::BTN_RIGHT};
-  const char* const labels[] = {back && *back ? back : tr(STR_HOME),
-                                previous && *previous ? previous : tr(STR_PREV),
-                                showConfirm ? confirm : next && *next ? next : tr(STR_NEXT)};
-  ButtonHintStrip::Strip strip;
-  strip.y = pageHeight - stripHeight;
-  strip.height = height;
-  for (int i = 0; i < 3; ++i) {
-    const int left = pageWidth * centers[i] / 100 - width / 2;
-    const int x = inverted ? pageWidth - left - width : left;
-    const int button = buttons[i];
-    strip.x[button] = left;
-    strip.width[button] = width;
-    strip.active[button] = true;
-
-    renderer.fillRoundedRect(x, y, width, height, 6, Color::Black);
-    const auto label = fitHintLabel(renderer, SMALL_FONT_ID, labels[i], width - 8);
-    const int textX = x + (width - renderer.getTextWidth(label.fontId, label.text.c_str())) / 2;
-    const int textY = y + (height - renderer.getLineHeight(label.fontId)) / 2;
-    renderer.drawText(label.fontId, textX, textY, label.text.c_str(), false);
-  }
-  ButtonHintStrip::record(strip);
-  renderer.setDrawOrientation(orientation);
-}
-#endif
-
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
-#if FREEINK_DEVICE_METALIO_EINK4_PLUS
-  drawMetalioKeyHints(renderer, btn1, btn2, btn3, btn4);
-  return;
-#endif
+  if (UITheme::getInstance().getMetrics().buttonHintsHeight == 0) return;
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
   // The strip is laid out in panel coordinates so each box lands beside the button it names. In
   // PortraitInverted the panel is simply turned 180°, so drawing it inverted instead of upright
@@ -898,8 +850,8 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     }
     const int actionY = textY + titleHeight + bodyHeight + 4;
     const int actionWidth = renderer.getTextWidth(UI_10_FONT_ID, action.c_str(), EpdFontFamily::BOLD) + 24;
-    renderer.drawRoundedRect(rect.x + (rect.width - actionWidth) / 2, actionY - 3, actionWidth, bodyHeight + 6,
-                             1, 8, true);
+    renderer.drawRoundedRect(rect.x + (rect.width - actionWidth) / 2, actionY - 3, actionWidth, bodyHeight + 6, 1, 8,
+                             true);
     renderer.drawCenteredText(UI_10_FONT_ID, actionY, action.c_str(), true, EpdFontFamily::BOLD);
     return;
   }

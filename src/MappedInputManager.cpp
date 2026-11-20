@@ -462,6 +462,8 @@ bool MappedInputManager::wasTopEdgeDownSwipe() const { return wasEdgeSwipe(fui::
 
 bool MappedInputManager::wasBottomEdgeUpSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Bottom); }
 
+bool MappedInputManager::wasLeftEdgeRightSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Left); }
+
 // Which edge the reader menu answers to depends on whether the board has a light,
 // because a lit board has one more thing to reach than edges to put it on.
 //

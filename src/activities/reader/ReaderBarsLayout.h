@@ -351,8 +351,9 @@ void build(ScreenT& screen, const Model& model, const Metrics& metrics, const fu
     iconButton(screen, fui::Rect{static_cast<int16_t>(top.right() - theme.spaceSm - square), squareY, square, square},
                model.starred ? icon_star_filled_32 : icon_star_32, Button::Star, model.focus == Focus::Star);
     if (model.showLight) {
-      iconButton(screen, fui::Rect{static_cast<int16_t>(top.right() - metrics.topBar - theme.spaceSm - square),
-                                  squareY, square, square},
+      iconButton(screen,
+                 fui::Rect{static_cast<int16_t>(top.right() - metrics.topBar - theme.spaceSm - square), squareY, square,
+                           square},
                  icon_sun_32, Button::Light, false);
     }
   }

@@ -29,7 +29,7 @@ constexpr int kBackWidth = 150;
 constexpr int kBackHeight = 66;
 constexpr int kBackTop = 36;
 constexpr int kBottomInset = 12;
-}
+}  // namespace
 
 bool SettingsActivity::isRowSelectable(const int index) const {
   return index >= 0 && index < settingsCount && !(*currentSettings)[index].isSeparator;
@@ -61,8 +61,9 @@ void SettingsActivity::onEnter() {
   enterCategory(0);
   TabbedUiListActivity::onEnter();
   if (BoardConfig::isMetalioEInk4Plus()) {
-    app.on(ACTION_USER + 1,
-           [](const fui::ActionEvent&, void* user) { static_cast<SettingsActivity*>(user)->onBackFromTabs(); }, this);
+    app.on(
+        ACTION_USER + 1,
+        [](const fui::ActionEvent&, void* user) { static_cast<SettingsActivity*>(user)->onBackFromTabs(); }, this);
   }
   // Another tab when asked for one (the serial CMD:ACT:SETTINGS:<tab>), the way a tap on it goes.
   if (initialTab > 0) selectTab(initialTab);
@@ -410,8 +411,7 @@ void SettingsActivity::materializeListWindow() {
 void SettingsActivity::buildScreen(UiScreen& screen) {
   if (BoardConfig::isMetalioEInk4Plus()) {
     const Rect header = settingsHeaderRect();
-    screen.setContentMarginFromScreen(
-        fui::Insets{static_cast<int16_t>(header.y + header.height), 0, kBottomInset, 0});
+    screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(header.y + header.height), 0, kBottomInset, 0});
     if (mappedInput.hasTouch() && mappedInput.touchEventsEnabled()) {
       fui::ButtonProps back;
       back.action = ACTION_USER + 1;
@@ -420,7 +420,7 @@ void SettingsActivity::buildScreen(UiScreen& screen) {
       back.text = screen.theme().bodyText;
       back.radius = 8;
       screen.button(back, fui::Rect{static_cast<int16_t>(header.x + kHeaderInset),
-                                   static_cast<int16_t>(header.y + kBackTop), kBackWidth, kBackHeight});
+                                    static_cast<int16_t>(header.y + kBackTop), kBackWidth, kBackHeight});
     }
   } else {
     // Classic reserves a line for the firmware version above the footer strip.
@@ -465,11 +465,11 @@ void SettingsActivity::drawChrome() {
   }
 
   GUI.drawHeader(renderer, header, nullptr);
-  const int titleX = header.x + kHeaderInset +
-                     (mappedInput.hasTouch() && mappedInput.touchEventsEnabled() ? kBackWidth + 16 : 0);
+  const int titleX =
+      header.x + kHeaderInset + (mappedInput.hasTouch() && mappedInput.touchEventsEnabled() ? kBackWidth + 16 : 0);
   const int titleY = header.y + kBackTop + (kBackHeight - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
   const auto title = renderer.truncatedText(UI_12_FONT_ID, tr(STR_SETTINGS_TITLE),
-                                           header.x + header.width - kHeaderInset - titleX, EpdFontFamily::BOLD);
+                                            header.x + header.width - kHeaderInset - titleX, EpdFontFamily::BOLD);
   renderer.drawText(UI_12_FONT_ID, titleX, titleY, title.c_str(), true, EpdFontFamily::BOLD);
   constexpr int batteryReserve = 112;
   const auto version = renderer.truncatedText(SMALL_FONT_ID, CROSSPOINT_VERSION, header.width / 2);

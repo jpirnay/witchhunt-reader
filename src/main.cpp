@@ -2470,8 +2470,8 @@ void loop() {
     // cannot both run its action and fall through as a page turn.
     {
       BA gestureAction = BA::BTN_DEFAULT;
-      const bool lightPanelOwnsTouch = BoardConfig::isMetalioEInk4Plus() &&
-                                      strcmp(activityManager.currentActivityName(), "FrontlightPanel") == 0;
+      const bool lightPanelOwnsTouch =
+          BoardConfig::isMetalioEInk4Plus() && strcmp(activityManager.currentActivityName(), "FrontlightPanel") == 0;
       if (!lightPanelOwnsTouch &&
           gestureEventManager.consumeAction(gestureAction, activityManager.currentIsReaderActivity(),
                                             mirrorLeftRight) &&

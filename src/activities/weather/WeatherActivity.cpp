@@ -408,8 +408,8 @@ void WeatherActivity::render(RenderLock&&) {
       const int settingsY = pageHeight / 2 + 28;
       const int backY = settingsY + height + EDGE;
       renderer.fillRoundedRect(x, settingsY, width, height, 8, Color::Black);
-      renderer.drawCenteredText(FIT_BODY_FONT_ID, settingsY + (height - textHeight) / 2,
-                                tr(STR_WEATHER_SETTINGS), false, EpdFontFamily::BOLD);
+      renderer.drawCenteredText(FIT_BODY_FONT_ID, settingsY + (height - textHeight) / 2, tr(STR_WEATHER_SETTINGS),
+                                false, EpdFontFamily::BOLD);
       renderer.drawRoundedRect(x, backY, width, height, 2, 8, true);
       renderer.drawCenteredText(FIT_BODY_FONT_ID, backY + (height - textHeight) / 2, tr(STR_BACK));
 

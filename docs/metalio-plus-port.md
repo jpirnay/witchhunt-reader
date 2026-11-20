@@ -159,7 +159,11 @@ dùng cũng xác nhận thao tác bấm ngắn đã đánh thức được máy.
 
 ### Điều chỉnh Trang chủ — 2026-11-20
 
-Trang chủ trở lại bố cục của theme đang chọn. Ngày tháng và hàng gợi ý
-Home, Up, Down được bỏ khỏi riêng Trang chủ. Carousel đặt dãy menu phía
-trên mép viền dưới. Settings vẫn vẽ hàng nút và áp dụng theme ngay khi
-đóng bộ chọn.
+Trang chủ áp dụng ngay theme đã chọn và dùng các vùng chạm trực tiếp.
+Lyra Carousel có lưới menu hai hàng với nhãn dưới biểu tượng. Metalio ẩn
+hàng gợi ý ba phím viền trên toàn giao diện. Cài đặt có nút Quay lại ở
+đầu màn hình. Trong menu và các màn hình phụ, vuốt từ mép trái vào để quay lại.
+
+Khi đọc EPUB, mở menu đọc rồi chọn Sync. Nếu chưa có tài khoản, tab này
+mở cài đặt KOReader. Sau khi lưu thông tin tài khoản, tab hiện các thao
+tác tải xuống, đẩy lên và so sánh tiến độ.

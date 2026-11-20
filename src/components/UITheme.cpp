@@ -105,7 +105,6 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
   currentMetrics.menuRowHeight = 84;
   currentMetrics.menuSpacing = 12;
   currentMetrics.tabBarHeight = 84;
-  currentMetrics.buttonHintsHeight = 96;
   currentMetrics.sideButtonHintsWidth = 0;
   currentMetrics.homeTopPadding = 72;
   switch (type) {
@@ -123,6 +122,9 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
   }
 #endif
   UiFontLadder::applyTo(currentMetrics, fontGrowth());
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  currentMetrics.buttonHintsHeight = 0;
+#endif
 }
 
 Rect UITheme::getHeaderRect(const GfxRenderer& renderer, const bool hasBottomHints, const bool hasSideHints) {

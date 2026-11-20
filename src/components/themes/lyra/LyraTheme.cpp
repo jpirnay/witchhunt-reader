@@ -404,10 +404,7 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
 void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
-#if FREEINK_DEVICE_METALIO_EINK4_PLUS
-  drawMetalioKeyHints(renderer, btn1, btn2, btn3, btn4);
-  return;
-#endif
+  if (UITheme::getInstance().getMetrics().buttonHintsHeight == 0) return;
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
   // Inverted draws the strip inverted too, so the labels are the right way up for the reader —
   // see BaseTheme::drawButtonHints for why that works and why landscape is a separate problem.
@@ -852,8 +849,7 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
 
   for (int i = 0; i < buttonCount; ++i) {
     int tileWidth = rect.width - sidePadding * 2;
-    Rect tileRect = Rect{rect.x + sidePadding, rect.y + i * (rowHeight + rowSpacing),
-                         tileWidth, rowHeight};
+    Rect tileRect = Rect{rect.x + sidePadding, rect.y + i * (rowHeight + rowSpacing), tileWidth, rowHeight};
     menuTargets.add(tileRect.x, tileRect.y, tileRect.width, tileRect.height, i);
 
     const bool selected = selectedIndex == i;
@@ -888,10 +884,9 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     }
 
     const int endPadding = BoardConfig::isMetalioEInk4Plus() ? 12 : 0;
-    renderer.drawText(UI_12_FONT_ID, textX, textY,
-                      renderer.truncatedText(UI_12_FONT_ID, label, tileRect.x + tileRect.width - textX - endPadding)
-                          .c_str(),
-                      true);
+    renderer.drawText(
+        UI_12_FONT_ID, textX, textY,
+        renderer.truncatedText(UI_12_FONT_ID, label, tileRect.x + tileRect.width - textX - endPadding).c_str(), true);
   }
 
   TapTargets::homeMenu().record(menuTargets);

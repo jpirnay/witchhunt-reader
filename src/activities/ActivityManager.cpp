@@ -294,6 +294,15 @@ void ActivityManager::loop() {
   }
 
   if (!drainInput && currentActivity) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    // A swipe inward from the left edge backs out of menus, even above an open book.
+    // Leave Home's carousel and on-page reading gestures to their own screens.
+    if (!currentActivity->takesReaderControls() && currentActivity->getName() != "Home" &&
+        mappedInput.wasLeftEdgeRightSwipe()) {
+      mappedInput.suppressTouchContact();
+      mappedInput.injectRawPress(mappedInput.rawIndex(MappedInputManager::Button::Back));
+    }
+#endif
     if (mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased()) {
       currentActivity->listTapActivation.reset();
     }
