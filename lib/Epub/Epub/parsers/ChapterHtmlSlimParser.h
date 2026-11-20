@@ -107,6 +107,24 @@ inline size_t& pagesLeft() {
   static size_t left = SIZE_MAX;
   return left;
 }
+// How many page breaks the fit tests that run before a line or a grid row is laid out (beforeLineHook, the row
+// packer's) take before they skip one, as if it had found room. SIZE_MAX (the default): they never do. Drives the
+// arena build's stop when the later fit test disagrees (stopOnLinesPastTheirPage).
+inline size_t& earlyFitBreaksBeforeSkip() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// For a break one of those tests is about to take: true when it is the one to skip (once; the hook then disarms).
+inline bool skipEarlyFitBreak() {
+  size_t& left = earlyFitBreaksBeforeSkip();
+  if (left == SIZE_MAX) return false;
+  if (left > 0) {
+    --left;
+    return false;
+  }
+  left = SIZE_MAX;
+  return true;
+}
 #endif
 
 #ifdef ELEMENT_FAULT_INJECTION
@@ -907,6 +925,11 @@ class ChapterHtmlSlimParser final : public Print {
   // Drops the page in hand and stops the parse the way a low-heap abort does: the pages already
   // emitted are kept as a truncated section.
   void stopOnFullPageTable();
+  // An arena build lays a line or a table row out in the block of the page its fit test chose (beforeLineHook, the
+  // row packer), and emitPage() rewinds that block. Should a later test send the line or the packed rows to the next
+  // page, they would be carried over in rewound bytes, so their caller drops them while the block is live and calls
+  // this: the parse stops the way a low-heap stop does, its pages kept. Unreachable while the tests agree.
+  void stopOnLinesPastTheirPage(const char* what);
 
   // Active parser for streaming. A member so write() can feed it and the abort paths can stop
   // it from inside a callback.

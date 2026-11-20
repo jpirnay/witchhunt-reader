@@ -2143,6 +2143,14 @@ void ChapterHtmlSlimParser::stopOnFullPageTable() {
   saxParser_.stop();
 }
 
+void ChapterHtmlSlimParser::stopOnLinesPastTheirPage(const char* what) {
+  LOG_ERR("EHP", "On page %d, %s laid out for it does not fit it (the fit tests disagree); dropped, stopping the parse",
+          completedPageCount, what);
+  streamFailed = true;
+  layoutFailed = true;
+  saxParser_.stop();
+}
+
 void ChapterHtmlSlimParser::noteCapOverflow(const uint8_t flag, const char* what) {
   if (capOverflowFlags_ & flag) return;
   capOverflowFlags_ |= flag;
@@ -2212,10 +2220,12 @@ void ChapterHtmlSlimParser::beforeLineHook(const uint8_t maxSizePct, const bool 
     lineHeight += band;
     const std::span<const ParsedText::LineObject> images = currentTextBlock->lineObjects();
     if (!images.empty()) lineHeight = lineImageBox(lineText(bs, lineHeight, maxSizePct, band), images).height;
-    if (currentPageNextY + lineHeight > viewportHeight || keepTogetherBreak(lineHeight) ||
-        lineImagesFillPage(images.size())) {
-      emitPage();
-    }
+    bool breakHere = currentPageNextY + lineHeight > viewportHeight || keepTogetherBreak(lineHeight) ||
+                     lineImagesFillPage(images.size());
+#ifdef PAGE_FAULT_INJECTION
+    if (breakHere && skipEarlyFitBreak()) breakHere = false;
+#endif
+    if (breakHere) emitPage();
   }
   ensurePageBlock();
 }
@@ -5659,12 +5669,13 @@ bool ChapterHtmlSlimParser::finalize() {
         emitPage();
       }
     }
-    // The layoutFailed / empty-final-page paths reach here without going through emitPage(), and a parse stopped inside
-    // a table leaves its rows packed: what is left goes before its block is rewound.
-    dropLaidOutLines();
-    releasePageBlock();
     currentTextBlock.reset();
   }
+  // However the parse ended -- the last page emitted above, a layout failure, an empty final page, a parse stopped
+  // inside a table with its rows packed, or a text block makePages() dropped after a refusal -- what still holds lines
+  // laid out in the page block goes before the block is rewound, so the arena is left as the parse found it.
+  dropLaidOutLines();
+  releasePageBlock();
 
   // Anything still waiting on a line never got one -- an id'd element with no text of its own.
   // Record those at the last page reached, which is where they sit, before the spill closes.
@@ -5798,6 +5809,12 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
 
   if (currentPageNextY + lineHeight > viewportHeight || keepTogetherBreak(lineHeight) ||
       lineImagesFillPage(images.size())) {
+    if (buildArena_ != nullptr) {
+      // The line was made in this page's block, which emitPage() rewinds: beforeLineHook's test said it fits.
+      line.reset();
+      stopOnLinesPastTheirPage("a line");
+      return ParsedText::LineProcessResult::Accepted;
+    }
     emitPage();
     if (!currentPage) return ParsedText::LineProcessResult::Accepted;
   }
@@ -6272,8 +6289,13 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   // no longer bounded, so the cap has to live here, on the fragment that actually has to satisfy
   // it. The viewport check below reaches it first at any realistic row height; this is the
   // invariant, not the working limit.
-  if (!t.packer.rows.empty() && (t.packer.rows.size() >= MAX_TABLE_ROWS ||
-                                 currentPageNextY + t.packer.height + rowContrib + closingBorder > viewportHeight)) {
+  bool fragmentFull =
+      !t.packer.rows.empty() && (t.packer.rows.size() >= MAX_TABLE_ROWS ||
+                                 currentPageNextY + t.packer.height + rowContrib + closingBorder > viewportHeight);
+#ifdef PAGE_FAULT_INJECTION
+  if (fragmentFull && skipEarlyFitBreak()) fragmentFull = false;
+#endif
+  if (fragmentFull) {
     flushFragmentBeforeRow();
     t.packer.cols = lr.renderCols;
   }
@@ -7174,6 +7196,15 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
   // Below a box's top padding on a fresh page there is nothing yet to leave behind.
   const bool pageHasContent = currentPageNextY > 0 && (boxScopes_.empty() || !currentPage->elements.empty());
   if (currentPageNextY + fragTotalHeight > viewportHeight && pageHasContent) {
+    if (buildArena_ != nullptr) {
+      // The rows were laid out in this page's block, which emitPage() rewinds: the packer's test said they fit.
+      packer.rows.clear();
+      packer.height = 0;
+      packer.cols = 0;
+      packer.firstVisibleOffset = UINT32_MAX;
+      stopOnLinesPastTheirPage("a table fragment");
+      return;
+    }
     emitPage();
     if (!currentPage) return;  // no heap for the next page: emitPage stopped the build
   }

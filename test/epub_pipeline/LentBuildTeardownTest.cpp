@@ -142,3 +142,69 @@ TEST(LentBuildTeardown, AStoppedBuildDropsATablesPackedRowsBeforeFinalizeRewinds
   }
   removeWorkDir(work);
 }
+
+namespace {
+
+// Paragraphs enough for several pages.
+std::string manyParagraphs() {
+  std::string body;
+  for (int i = 0; i < 120; ++i) body += "<p>Paragraph " + std::to_string(i) + " with words enough to fill a line.</p>";
+  return body;
+}
+
+// Sections of a heading paragraph and a table a little longer than a page, so that the second table's first fragment
+// starts below its paragraph, part-way down a page (a fragment at a page's top is placed however tall it is).
+std::string tablesUnderParagraphs() {
+  std::string body;
+  for (int s = 0; s < 3; ++s) {
+    body += "<p>Section " + std::to_string(s) + "</p><table>";
+    for (int r = 0; r < 30; ++r) {
+      body += "<tr>";
+      for (int c = 0; c < 3; ++c) body += "<td>c" + std::to_string(r) + std::to_string(c) + "</td>";
+      body += "</tr>";
+    }
+    body += "</table>";
+  }
+  return body;
+}
+
+// Builds `body` lent, with the fit test that runs before a line or a grid row is laid out skipping one page break, the
+// one after `breaksFirst` (PAGE_FAULT_INJECTION). The later test then finds that what was laid out for the page does
+// not fit it.
+void expectStoppedWithItsPages(const std::string& tag, const std::string& body, const size_t breaksFirst) {
+  SCOPED_TRACE(tag);
+  const fs::path work = freshWorkDir(tag);
+  {
+    auto epub = syntheticBook(work, 0, body);
+    ASSERT_TRUE(epub);
+    GfxRenderer renderer;
+    BuildArena lent(kLentBytes);
+    ASSERT_TRUE(lent.valid());
+    Section section(epub, 0, renderer);
+    section.setExternalBuildScratch(&lent);
+    bool ok = false;
+    {
+      earlyFitBreaksBeforeSkip() = breaksFirst;
+      ok = section.createSectionFile(params(), {}, /*skipEviction=*/true);
+      earlyFitBreaksBeforeSkip() = SIZE_MAX;
+    }
+    EXPECT_TRUE(ok) << "the pages before the stop are kept";
+    EXPECT_TRUE(section.isTruncatedCache());
+    EXPECT_GE(static_cast<size_t>(section.pageCount), breaksFirst) << "the pages before the skipped break are kept";
+    EXPECT_EQ(0u, lent.releaseFailures()) << "every block of the region was released in order";
+  }
+  removeWorkDir(work);
+}
+
+}  // namespace
+
+// The line was made in the page's block, which emitPage() rewinds: carried onto the next page it would have pointed at
+// the rewound bytes (this binary fills them). It is dropped and the build stops instead.
+TEST(LentBuildTeardown, ALineTheEarlierFitTestPassedStopsTheBuildInsteadOfMovingOn) {
+  expectStoppedWithItsPages("line", manyParagraphs(), 2);
+}
+
+// The same for a table: the packed rows were laid out in the page's block.
+TEST(LentBuildTeardown, AFragmentTheRowPackerPassedStopsTheBuildInsteadOfMovingOn) {
+  expectStoppedWithItsPages("fragment", tablesUnderParagraphs(), 1);
+}
