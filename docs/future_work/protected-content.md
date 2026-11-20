@@ -29,8 +29,8 @@ Where things stand:
 Next, in this order unless the owner reorders:
 1. The `STR_PROTECTED_*` messages in the other languages (release translation pass; English only so far, so a German
    UI shows them in English).
-2. D3 (the Adobe plugin): built, measured and checked on the Murphy on `feat/plugin-crypto`, on all boards; its PR,
-   then the C3's key generation time (see D3).
+2. D3 (the Adobe plugin): built, measured and checked on the Murphy and the X3 on `feat/plugin-crypto`, on all boards;
+   its PR (see D3).
 3. D2 (the cache at rest): measure the cipher first.
 4. A real loan end to end, once D3 runs: needs the owner's Adobe ID and a library loan; activating may use one of the
    account's device slots, so only with the owner's go.
@@ -139,8 +139,13 @@ Device check, Murphy, 2026-11-20 (f18239c06; record in `~/.local/state/witchhunt
   the device and nothing was written.
 - The Plugins page now marks the plugin "partly runs here" with that note, and offers its install.
 
-Open: key generation's time on the C3 (an X3 or X4) against the loop task's watchdog; a real activation and loan with
-the owner's Adobe ID (with the owner's go: an activation may take one of the account's device slots).
+X3, 2026-11-20 (16d13fad9; `2026-11-20-x3-crypto/`): 18 of 18 against OpenSSL, no reset. `keygen` 0.54 to 0.88 s,
+`sign` 467 ms, `rsadec` 466 ms, `pubencrypt` to RSA-4096 153 ms, `pkcs12` 225 ms; about 110 KB of heap free in File
+Transfer during the ops, and the lowest free heap since boot (15,444 B, at the Wi-Fi start) did not move. TLS through
+the relay as on the Murphy: both hosts 200 with `insecure=0`.
+
+Open: a real activation and loan with the owner's Adobe ID (with the owner's go: an activation may take one of the
+account's device slots).
 
 ## LCP
 
