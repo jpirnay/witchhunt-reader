@@ -2,7 +2,7 @@
 
 Status, 2026-11-19: D1 (the reader opens protected books) is merged (#821) and has run on the X4 Pro and the X3.
 The listing change the Adobe plugin needs is merged (#828). D3's `/api/crypto` is built on `feat/plugin-crypto` and its
-flash cost measured (see D3); the owner decides on that cost before it goes further. D2 is not started.
+flash cost measured (see D3); the owner chose all boards (2026-11-20). D2 is not started.
 This file replaces the September plan on `feat/protected-content-phase0` (`docs/protected-content-plan.md` and
 `docs/protected-content-handover-2026-09-18.md` there).
 
@@ -29,8 +29,8 @@ Where things stand:
 Next, in this order unless the owner reorders:
 1. The `STR_PROTECTED_*` messages in the other languages (release translation pass; English only so far, so a German
    UI shows them in English).
-2. D3 (the Adobe plugin): built and measured on `feat/plugin-crypto`; the owner's decision on the cost, then the device
-   check (see D3).
+2. D3 (the Adobe plugin): built and measured on `feat/plugin-crypto`, on all boards; the device check (see D3), then
+   its PR.
 3. D2 (the cache at rest): measure the cipher first.
 4. A real loan end to end, once D3 runs: needs the owner's Adobe ID and a library loan; activating may use one of the
    account's device slots, so only with the owner's go.
@@ -112,21 +112,25 @@ plugin exists (Hub, sd-plugins, GitHub; 2026-11-17). Version 1.0.5 against this 
 `feat/plugin-crypto` (2026-11-20, off master b1a0fe019): `POST /api/crypto` is upstream's handler (#3114, Justin
 Mitchell) on the SDK's `WolfsslCrypto`, of which only that file is built (`lib/PluginCrypto`); `api.crypto` in the
 plugin host posts to it. `scripts/patch_wolfssl.py` keeps the RSA private-key paths, password-based encryption, 3DES
-and RC2 (`WC_RC2`) in; key generation runs on the framework's prebuilt mbedTLS, as the SDK does on ESP. Cost against
-master in the same worktree:
-- `default` (C3): +47,450 B flash, +8 B static RAM. The C3's map stays at 50 code and 44 rodata pages, but the last
-  code page's free room falls from 53.8 KB to 10.0 KB: the next 10 KB of code then costs the font cache a map page.
-- `x4pro`: +43,336 B flash, +16 B static RAM.
-- By symbol on the C3: RSA private-key operations about 16 KB (SP math's CRT exponentiation for 2048 to 4096-bit keys
-  among them, which the 1024-bit Adobe keys do not use: those go through the generic `sp_exptmod_ex`), PKCS#12 with
-  its password-based encryption, 3DES (a 2 KB S-box table) and RC2 about 15 KB, mbedTLS key generation about 4 KB,
-  the handler and the SDK wrapper about 7 KB (the wrapper's LCP methods, X25519, HKDF and AES-GCM, stay linked through
-  its vtable).
+and RC2 (`WC_RC2`) in; key generation runs on the framework's prebuilt mbedTLS, as the SDK does on ESP. Owner,
+2026-11-20: on all boards, with what the flow does not use cut away. A source patch in the same script
+(`CROSSPOINT_SP_RSA_PUBLIC_ONLY`) keeps SP math's size-specific RSA code (2048 to 4096 bits) for public-key operations
+only: the Adobe flow's private keys are 1024-bit, a size SP has no RSA code for, so they run on the generic `sp_int`
+path either way, and TLS verifies through the size-specific public paths as before. That patch saves 9,238 B on the
+C3. Cost against master in the same worktree:
+- `default` (C3): +38,212 B flash, +8 B static RAM. The C3's map stays at 50 code and 44 rodata pages; the last code
+  page's free room falls from 53.8 KB to 19.3 KB.
+- `x4pro`: +35,084 B flash, +16 B static RAM.
+- What is left, by symbol on the C3 before the trim: PKCS#12 with its password-based encryption, 3DES (a 2 KB S-box
+  table) and RC2 about 15 KB, the generic RSA private-key path about 7 KB, mbedTLS key generation about 4 KB, the
+  handler and the SDK wrapper about 7 KB (the wrapper's LCP methods, X25519, HKDF and AES-GCM, stay linked through its
+  vtable), and the ECC branch of the PKCS#12 parse's key-to-certificate check about 2 KB. 3DES may turn out unneeded
+  once a real bundle shows which PBE its bags use.
 
-Open: the owner's decision on that cost (all boards, or the S3 boards only, the C3 keeping its lean wolfSSL; the patch
-script runs per environment, so either is possible), then a device check of every op against OpenSSL (a script for it:
+Open: a device check of every op against OpenSSL (a script for it:
 `~/.local/state/witchhunt-work/protected-content/crypto_check.py`), key generation's time on the C3 against the loop
-task's watchdog, and the plugin's own page on a device. No board was attached on 2026-11-20.
+task's watchdog, a TLS fetch with an RSA chain (the trim leaves the public paths alone, but the build changed), and the
+plugin's own page on a device. No board was attached on 2026-11-20.
 
 ## LCP
 

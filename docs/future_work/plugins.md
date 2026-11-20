@@ -12,8 +12,8 @@ plugins are offered (fetched at install, never copied here: the Hub and sd-plugi
 ## Open
 
 - **`api.crypto`**: the Plugin Hub's `protected-content` (Libby, Onleihe) needs it at every step (`crypto.subtle`
-  needs a secure context; the reader serves `http://`). Built on `feat/plugin-crypto`, upstream's `/api/crypto`, at
-  +47 KB flash on the C3; the owner's decision on that cost and a device check are open. D3 in
+  needs a secure context; the reader serves `http://`). Built on `feat/plugin-crypto`, upstream's `/api/crypto`, on
+  all boards (+38 KB flash on the C3); a device check is open. D3 in
   [protected-content.md](protected-content.md).
 - **Not tried live**: the sign-in flows (password grant, device code), for want of accounts; the WebDAV catalog
   against the owner's server (a LAN test server of our own was refused by the session's safety checks). Dropbox's
