@@ -37,6 +37,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
 
@@ -259,9 +260,10 @@ std::string runOnce(const Case& c, const std::string& cacheDir) {
   return dump.str();
 }
 
-// Unique per (book, variant) so the two variants never share a cache dir.
+// Unique per (book, variant, lent size) so no two cases ever share a cache dir.
 std::string caseCacheDir(const Case& c, const std::string& tag) {
-  return freshCacheDir(stem(c.epub) + variantSuffix(c) + (c.lentArenaBytes != 0 ? "_lent_" : "_") + tag);
+  const std::string lent = c.lentArenaBytes != 0 ? "_lent" + std::to_string(c.lentArenaBytes) : "";
+  return freshCacheDir(stem(c.epub) + variantSuffix(c) + lent + "_" + tag);
 }
 
 bool readFile(const fs::path& path, std::string& out) {
@@ -295,14 +297,15 @@ TEST_P(EpubPipelineWarmTest, RebuildOverWarmBookCacheMatchesColdRun) {
 // A lent-region case is built once and only compared: the golden is the heap build's.
 TEST_P(EpubPipelineTest, MatchesGolden) {
   const Case c = GetParam();
+  const bool updating = std::getenv("UPDATE_GOLDENS") != nullptr;
+  if (updating && c.lentArenaBytes != 0) GTEST_SKIP() << "a lent-region build never writes a golden";
   const std::string dump = runOnce(c, caseCacheDir(c, "a"));
   if (c.lentArenaBytes == 0) {
     ASSERT_EQ(dump, runOnce(c, caseCacheDir(c, "b"))) << "two cold builds of " << c.epub << " diverged";
   }
   const fs::path goldenPath = fs::path(GOLDEN_DIR) / (stem(c.epub) + variantSuffix(c) + ".golden.txt");
 
-  if (std::getenv("UPDATE_GOLDENS")) {
-    if (c.lentArenaBytes != 0) GTEST_SKIP() << "a lent-region build never writes a golden";
+  if (updating) {
     std::ofstream(goldenPath, std::ios::binary) << dump;
     GTEST_SKIP() << "golden regenerated: " << goldenPath;
   }
@@ -361,6 +364,37 @@ std::vector<Case> lentCases() {
   return cases;
 }
 
+// The X4's 48,000 B, where the line objects' reserve (EpubImageManifest::kWalkArenaReserve) binds: a subset of the
+// corpus in its default layout, one or more books for each kind of content the region holds -- images, deferred image
+// headers, tables, a table's overflowing cells, nested tables, prose, CJK, bidi, footnotes.
+const char* const kX4LentBooks[] = {
+    "test_jpeg_images",
+    "test_jpeg_metadata_heavy",
+    "test_mixed_images",
+    "test_inline_images",
+    "test_tables",
+    "test_table_streaming",
+    "test_table_cell_overflow",
+    "test_nested_tables",
+    "test_wrapped_paragraphs",
+    "test_long_paragraph_spacing",
+    "test_cjk_ja_soseki",
+    "test_cjk_zh_honglou",
+    "test_bidi_text",
+    "test_inline_footnotes",
+    "test_split_footnotes",
+};
+
+std::vector<Case> lentX4Cases() {
+  std::vector<Case> cases;
+  for (Case c : corpusCases()) {
+    if (c.variant != Variant::Default || !listed(kX4LentBooks, stem(c.epub))) continue;
+    c.lentArenaBytes = 48000;
+    cases.push_back(c);
+  }
+  return cases;
+}
+
 // The cases whose warm run can differ from their cold one. What the warm run reads back is the book-level cache,
 // which the default layout, normalization (the CSS index's font sizes) and the accent families (its font families)
 // all draw on. Hyphenation, bionic reading, an unshaped layout, a wider page and paragraph spacing draw on none of it:
@@ -387,6 +421,10 @@ std::string caseName(const testing::TestParamInfo<Case>& info) {
 
 INSTANTIATE_TEST_SUITE_P(SyntheticCorpus, EpubPipelineTest, testing::ValuesIn(corpusCases()), caseName);
 INSTANTIATE_TEST_SUITE_P(LentRegion, EpubPipelineTest, testing::ValuesIn(lentCases()), caseName);
+INSTANTIATE_TEST_SUITE_P(LentRegionX4, EpubPipelineTest, testing::ValuesIn(lentX4Cases()), caseName);
 INSTANTIATE_TEST_SUITE_P(SyntheticCorpus, EpubPipelineWarmTest, testing::ValuesIn(warmCases()), caseName);
+
+// A renamed or dropped corpus book would leave the X4 subset quietly smaller.
+TEST(LentRegionX4Subset, EveryListedBookIsInTheCorpus) { EXPECT_EQ(std::size(kX4LentBooks), lentX4Cases().size()); }
 
 }  // namespace
