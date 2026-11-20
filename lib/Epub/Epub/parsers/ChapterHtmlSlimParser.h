@@ -1665,9 +1665,8 @@ class ChapterHtmlSlimParser final : public Print {
   void wireTextBlock();
   void wireParagraphLines(ParsedText& text);
   // What a line's TextBlock object must leave free in the line arena to go there beside its bytes (memory-and-parsing
-  // 9b): the image walk's largest stage once the book has met an image header (EpubImageManifest::imageHeaderMet), so
-  // an image met later on the page still finds its stage in the region; nothing before that. A book without image
-  // headers never walks; the page its first header is met on was laid out without the reserve.
+  // 9b): the image walk's largest stage (EpubImageManifest::kWalkArenaReserve) whenever the build has an image manifest
+  // and a C3-sized region, else nothing. The one place the rule lives.
   size_t lineObjectKeepFree() const;
   void beforeLineHook(uint8_t maxSizePct, bool annotated);
   // Widow/orphan control and keep-with-next (CSS defaults: orphans 2, widows 2), decided before

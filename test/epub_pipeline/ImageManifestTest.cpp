@@ -19,6 +19,7 @@
 //      clean — the mechanism the reader uses to show the image after one rebuild.
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <filesystem>
 #include <initializer_list>
 #include <memory>
@@ -27,6 +28,7 @@
 #include "BuildArena.h"
 #include "Epub.h"
 #include "Epub/EpubImageManifest.h"
+#include "Epub/Page.h"
 #include "Epub/Section.h"
 #include "Epub/converters/ImageToFramebufferDecoder.h"
 #include "GfxRenderer.h"
@@ -258,37 +260,6 @@ TEST_F(ImageManifestFixture, AJpegShorterThanTheWindowWithNoSofIsUnreadable) {
   EXPECT_FALSE(manifest.hasPending());
 }
 
-// The parser keeps the walk's reserve beside a line's TextBlock once the book has met an image header
-// (memory-and-parsing 9b): sticky for the book, so a reload keeps it, from images.bin or from the queue alone.
-TEST_F(ImageManifestFixture, AnImageHeaderMetIsRememberedForTheBook) {
-  {
-    EpubImageManifest manifest;
-    ASSERT_TRUE(manifest.load(cacheDir));
-    EXPECT_FALSE(manifest.imageHeaderMet()) << "a book that has asked for no image";
-    ImageDimensions entry = {0, 0};
-    ASSERT_EQ(manifest.resolve(kPngBook, kPngEntry, entry), EpubImageManifest::Resolve::Resolved);
-    EXPECT_TRUE(manifest.imageHeaderMet());
-    manifest.persistIfDirty();
-  }
-  EpubImageManifest reloaded;
-  ASSERT_TRUE(reloaded.load(cacheDir));
-  EXPECT_TRUE(reloaded.imageHeaderMet()) << "images.bin holds the image";
-}
-
-TEST_F(ImageManifestFixture, AQueuedImageAloneIsAnImageHeaderMet) {
-  {
-    EpubImageManifest manifest;
-    ASSERT_TRUE(manifest.load(cacheDir));
-    ImageDimensions entry = {0, 0};
-    ASSERT_EQ(manifest.resolve(kBook, kEntry, entry), EpubImageManifest::Resolve::Deferred);
-    EXPECT_TRUE(manifest.imageHeaderMet());
-  }
-  EpubImageManifest reloaded;
-  ASSERT_TRUE(reloaded.load(cacheDir));
-  EXPECT_EQ(0u, reloaded.entryCount());
-  EXPECT_TRUE(reloaded.imageHeaderMet()) << "images.pending holds the image";
-}
-
 TEST_F(ImageManifestFixture, AHeaderWithinTheWindowResolvesInline) {
   EpubImageManifest manifest;
   ASSERT_TRUE(manifest.load(cacheDir));
@@ -467,6 +438,101 @@ TEST_F(DeferredImageBuildFixture, ResolvingPendingAtBuildEndMakesTheNextBuildCle
 
   ESP.setMaxAllocHeap(16 * 1024);  // the rebuild needs no ring at all: the manifest answers
   EXPECT_FALSE(buildAndReportDegraded());
+}
+
+// --- 5: the line objects' walk reserve, end to end (memory-and-parsing 9b) ---------------------------------------
+//
+// The X4 lends a build 48,000 B. A deferred header whose SOF lies past the walk's first 16 KB stage takes the
+// whole-entry ring, 32 KB, from that region mid-parse, and it fits there only beside a small page block. The lines laid
+// out before the image on its page must not have taken that room with their TextBlock objects
+// (EpubImageManifest::kWalkArenaReserve): with the heap too short for the ring, as it is mid-parse on the X4, the lent
+// build must still resolve the header in the region, as the heap build does with an ample heap.
+
+struct LentWalkFixture : ImageManifestFixture {
+  struct Built {
+    bool degraded = true;
+    int imagePage = -1;  // the page the picture is on; -1: none
+  };
+
+  // `linesBefore` paragraphs, each one line, then the picture, then one paragraph more. Its entry is deflated (in
+  // stored DEFLATE blocks), so the walk needs a ring; larger than 32 KB, so that ring is the whole 32 KB; with SOF
+  // 34 KB in, past the first stage.
+  std::string writeBook(const int linesBefore) const {
+    test_zip::StoredZipWriter zip;
+    zip.add("mimetype", "application/epub+zip");
+    zip.add("META-INF/container.xml",
+            "<?xml version=\"1.0\"?>\n<container version=\"1.0\" "
+            "xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles><rootfile "
+            "full-path=\"content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles>\n</container>\n");
+    zip.add("content.opf",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
+            "version=\"3.0\" unique-identifier=\"id\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+            "<dc:identifier id=\"id\">late-sof</dc:identifier><dc:title>Late SOF</dc:title>"
+            "<dc:language>en</dc:language></metadata>\n<manifest>\n"
+            "<item id=\"c\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
+            "<item id=\"p\" href=\"images/late.jpg\" media-type=\"image/jpeg\"/>\n"
+            "</manifest>\n<spine><itemref idref=\"c\"/></spine>\n</package>\n");
+    std::string body;
+    for (int i = 0; i < linesBefore; ++i) body += "<p>Line " + std::to_string(i) + " before the picture.</p>\n";
+    body += "<p><img src=\"images/late.jpg\" alt=\"late\"/></p>\n<p>After the picture.</p>\n";
+    zip.add("chapter.xhtml",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head>"
+            "<title>c</title></head><body>\n" +
+                body + "</body></html>\n");
+    zip.addDeflateStoredBlocks("images/late.jpg", jpegWithLateSof(34 * 1024, kPhotoWidth, kPhotoHeight), 16000);
+    const std::string path = (work / ("late" + std::to_string(linesBefore) + ".epub")).string();
+    zip.write(path);
+    return path;
+  }
+
+  // One cold build of `book` into its own cache: lent `lentBytes` (0: none), with `contig` the largest heap block.
+  Built build(const std::string& book, const std::string& tag, const size_t lentBytes, const uint32_t contig) const {
+    Built built;
+    GfxRenderer renderer;
+    auto epub = std::make_shared<Epub>(book, (work / tag).string());
+    EXPECT_TRUE(epub->load(true));
+    epub->loadImageManifest();
+    std::unique_ptr<BuildArena> lent;
+    if (lentBytes != 0) lent = std::make_unique<BuildArena>(lentBytes);
+    Section::BuildParams p;
+    p.viewportWidth = 480;
+    p.viewportHeight = 800;
+    p.lineCompression = 1.0f;
+    {
+      Section section(epub, 0, renderer);
+      if (lent) section.setExternalBuildScratch(lent.get());
+      ESP.setMaxAllocHeap(contig);
+      const bool ok = section.createSectionFile(p, {}, /*skipEviction=*/true);
+      ESP.setMaxAllocHeap(savedContig);
+      EXPECT_TRUE(ok);
+      if (!ok) return built;
+      built.degraded = section.isImageHeaderDegraded();
+      EXPECT_TRUE(section.loadSectionFile(p));
+      for (int pg = 0; pg < section.pageCount && built.imagePage < 0; ++pg) {
+        section.currentPage = pg;
+        const auto page = section.loadPageFromSectionFile();
+        if (!page) break;
+        for (const auto& el : page->elements) {
+          if (el->getTag() == TAG_PageImage) built.imagePage = pg;
+        }
+      }
+    }
+    return built;
+  }
+};
+
+// The book's first header, met on its first build: nothing on the card says yet that the book has pictures. 28 lines
+// before it, all on its page. Measured on the host with this fixture: with the objects in the region and no reserve
+// (the per-book flag this replaced), the walk misses the region and the header is degraded at 28 and 30 lines; with
+// the objects on the heap, as before 9b, it never is.
+TEST_F(LentWalkFixture, TheLinesBeforeABooksFirstLateHeaderLeaveItsWalkTheRegion) {
+  const std::string book = writeBook(28);
+  const Built heap = build(book, "heap", 0, 100 * 1024);
+  ASSERT_FALSE(heap.degraded);
+  ASSERT_EQ(0, heap.imagePage) << "the lines must share the picture's page";
+  const Built lent = build(book, "lent", 48000, 16 * 1024);
+  EXPECT_FALSE(lent.degraded) << "the lines' objects took the room of the picture's walk";
+  EXPECT_EQ(0, lent.imagePage);
 }
 
 }  // namespace

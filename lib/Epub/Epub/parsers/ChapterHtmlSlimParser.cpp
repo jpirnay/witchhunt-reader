@@ -2181,7 +2181,10 @@ void ChapterHtmlSlimParser::wireTextBlock() {
 }
 
 size_t ChapterHtmlSlimParser::lineObjectKeepFree() const {
-  return imageManifest != nullptr && imageManifest->imageHeaderMet() ? EpubImageManifest::kWalkArenaReserve : 0;
+  // A build that can meet an image header keeps the walk's stage free in a C3-sized region from its first line: the
+  // image may be the book's first, with lines before it on its page. The S3s' 256 KB region has room for both.
+  const bool c3Sized = buildArena_ != nullptr && buildArena_->capacity() < WordShapeCache::kLargeArenaBytes;
+  return imageManifest != nullptr && c3Sized ? EpubImageManifest::kWalkArenaReserve : 0;
 }
 
 void ChapterHtmlSlimParser::wireParagraphLines(ParsedText& text) {
@@ -3517,11 +3520,6 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
               dimsOk = true;
             }
             if (!dimsOk && self->imageManifest) {
-              // The book's first image header: the open paragraph's lines from here on keep the walk's reserve
-              // too (lineObjectKeepFree), as every block wired after it does.
-              if (!self->imageManifest->imageHeaderMet() && self->currentTextBlock) {
-                self->currentTextBlock->setLineArena(self->buildArena_, EpubImageManifest::kWalkArenaReserve);
-              }
               // Resolve + cache on a miss: each image's header is read at most once ever.
               switch (self->imageManifest->resolve(self->epub->getPath(), resolvedPath, dims, self->buildArena_)) {
                 case EpubImageManifest::Resolve::Resolved:
