@@ -87,7 +87,7 @@ class HalFile : public Print {
     ++opens;
     fp_ = fopen(path.c_str(), "rb");
     applyStdioPolicy(fp_);
-    if (fp_) openPaths[fp_] = path;
+    if (fp_ && trackOpenPaths) openPaths[fp_] = path;
     return fp_ != nullptr;
   }
 
@@ -105,7 +105,7 @@ class HalFile : public Print {
     ++opens;
     fp_ = fopen(path.c_str(), "w+b");
     applyStdioPolicy(fp_);
-    if (fp_) openPaths[fp_] = path;
+    if (fp_ && trackOpenPaths) openPaths[fp_] = path;
     return fp_ != nullptr;
   }
 
@@ -116,7 +116,7 @@ class HalFile : public Print {
     ++opens;
     fp_ = fopen(path.c_str(), "r+b");
     applyStdioPolicy(fp_);
-    if (fp_) openPaths[fp_] = path;
+    if (fp_ && trackOpenPaths) openPaths[fp_] = path;
     return fp_ != nullptr;
   }
 
@@ -192,6 +192,9 @@ class HalFile : public Print {
   // removed file writes through a freed cluster chain (cluster 0 for a tail crossing a cluster boundary), so a
   // remove-then-close order is a card-corruption bug; the host cannot see it (POSIX unlinks an open file; Windows
   // refuses). Recorded, not enforced: a test asserts on it. Keyed by FILE* so a moved handle keeps its entry.
+  // Only while a test turns it on (TrackOpenPaths): the map's nodes and paths are heap the firmware does not have, and
+  // the heap-peak gate counts every allocation (about 1.4 KB at a build's peak with the section's files open).
+  static inline bool trackOpenPaths = false;
   static inline std::vector<std::string> removedWhileOpen;
   static inline std::map<FILE*, std::string> openPaths;
   static bool isOpenPath(const std::string& path) {
