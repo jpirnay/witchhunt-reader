@@ -18,11 +18,14 @@
 #include <Memory.h>
 #include <Txt.h>
 #include <WiFi.h>
+#include <WolfsslCrypto.h>
 #include <Xtc.h>
 #include <XteinkDetect.h>
+#include <base64.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
 #include <uri/UriBraces.h>
+#include <wolfssl/wolfcrypt/aes.h>
 #include <wolfssl/wolfcrypt/coding.h>
 #include <wolfssl/wolfcrypt/hash.h>
 
@@ -645,6 +648,7 @@ void CrossPointWebServer::begin() {
   server->on("/api/plugins/hosts", HTTP_POST, [this] { handlePluginHostsSet(); });
   server->on("/api/fetch", HTTP_POST, [this] { handleFetchToSd(); });
   server->on("/api/book-key", HTTP_POST, [this] { handleBookKey(); });
+  server->on("/api/crypto", HTTP_POST, [this] { handleCrypto(); });
   addMultipartRoute("/api/plugin-fs", [this] { handlePluginFs(); }, [this] { handlePluginFsData(); });
   server->on("/plugins", HTTP_GET, [this] { handlePluginsPage(); });
   server->on("/api/book/opf", HTTP_GET, [this] { handleBookOpf(); });
@@ -3797,6 +3801,204 @@ void CrossPointWebServer::handleBookKey() {
   }
   LOG_INF("WEB", "Stored the content key of %s", path.c_str());
   server->send(200, "application/json", "{\"ok\":true}");
+}
+
+namespace {
+
+// Crypto inputs are keys, certificates and PKCS#12 bundles, a few KB: the cap keeps a client on the network from
+// making the device hold more.
+constexpr size_t MAX_CRYPTO_FIELD = 64u * 1024u;
+// The largest block an RSA or PKCS#12 op is started with: WolfsslCrypto keeps its RsaKey (~8.4 KB, its own comment)
+// on the heap, beside the math's temporaries.
+constexpr uint32_t MIN_HEAP_FOR_CRYPTO = 16u * 1024u;
+// RSA output up to a 4096-bit modulus.
+constexpr size_t MAX_RSA_BYTES = 512;
+
+struct CryptoBytes {
+  std::unique_ptr<uint8_t[]> data;
+  size_t size = 0;
+  // Never null, so an empty field is still a valid zero-length input.
+  const uint8_t* ptr() const {
+    static constexpr uint8_t kEmpty = 0;
+    return data ? data.get() : &kEmpty;
+  }
+};
+
+// A base64 field of a crypto request. False only when the heap had no room; a missing, oversized or malformed field
+// decodes to nothing, and the op then refuses it.
+bool decodeCryptoField(const JsonDocument& req, const char* field, CryptoBytes* out) {
+  const char* value = req[field] | "";
+  const size_t len = strlen(value);
+  if (len == 0 || len > MAX_CRYPTO_FIELD) return true;
+  word32 cap = static_cast<word32>(len * 3 / 4 + 3);
+  out->data = makeUniqueNoThrow<uint8_t[]>(cap);
+  if (!out->data) return false;
+  if (Base64_Decode(reinterpret_cast<const byte*>(value), static_cast<word32>(len), out->data.get(), &cap) != 0) {
+    out->data.reset();
+    return true;
+  }
+  out->size = cap;
+  return true;
+}
+
+}  // namespace
+
+// POST /api/crypto {op, ...base64 fields} -> {data} | {public, private} | {key, cert}, or {error}: the crypto a
+// plugin's page needs and cannot do itself, as SubtleCrypto exists only in a secure context and the reader serves
+// http://. The Plugin Hub's protected-content (Adobe ADEPT activation and fulfilment, the way to Libby and Onleihe
+// loans) uses every op. Stateless: keys come in the request and go out in the reply. A failed op answers 200 with
+// {error}, as upstream's does; no room on the heap answers 503.
+//   random {len}               sha1, sha256 {data}             aesenc, aesdec {key, iv, data}: AES-128-CBC, aesenc
+//   rsadec {private, data}     raw m^d with a PKCS#8 key        pads PKCS#7, aesdec returns the raw blocks
+//   sign {private, hash}       PKCS#1 type 1 over a 20-byte hash    keygen: RSA-1024, SPKI and PKCS#8
+//   pubencrypt {cert, data}    PKCS#1 v1.5 to a certificate's key   pkcs12 {data, password} -> {key, cert}
+// Upstream's endpoint and ops, from crosspoint-reader PR #3114 (Justin Mitchell), on the Free-Ink SDK's WolfsslCrypto
+// (lib/PluginCrypto).
+void CrossPointWebServer::handleCrypto() {
+  if (rejectIfLowMemory(server.get(), MIN_HEAP_FOR_CRYPTO)) return;
+  if (!requireJsonBody(server.get())) return;
+  JsonDocument req;
+  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+    server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
+    return;
+  }
+  const std::string op = req["op"] | "";
+  const auto sendOom = [this](const char* what) {
+    LOG_ERR("WEB", "OOM: crypto %s", what);
+    sendLowMemory(server.get());
+  };
+
+  JsonDocument resp;
+  bool encodeFailed = false;
+  const auto setField = [&resp, &encodeFailed](const char* name, const uint8_t* data, const size_t size) {
+    const String encoded = base64::encode(data, size);
+    if ((size > 0 && encoded.isEmpty()) || encoded == "-FAIL-") {
+      encodeFailed = true;
+      return;
+    }
+    resp[name] = encoded;
+  };
+
+  freeink::content::WolfsslCrypto c;
+  if (op == "random") {
+    static constexpr int kMaxRandomBytes = 4096;
+    const int n = std::clamp(static_cast<int>(req["len"] | 16), 0, kMaxRandomBytes);
+    const auto out = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(n) + 1);
+    if (!out) return sendOom("random");
+    c.randomBytes(out.get(), static_cast<size_t>(n));
+    setField("data", out.get(), static_cast<size_t>(n));
+  } else if (op == "sha1" || op == "sha256") {
+    CryptoBytes d;
+    if (!decodeCryptoField(req, "data", &d)) return sendOom("input");
+    uint8_t digest[32];
+    if (op == "sha1") {
+      c.sha1(d.ptr(), d.size, digest);
+      setField("data", digest, 20);
+    } else {
+      c.sha256(d.ptr(), d.size, digest);
+      setField("data", digest, 32);
+    }
+  } else if (op == "aesenc" || op == "aesdec") {
+    CryptoBytes key, iv, d;
+    if (!decodeCryptoField(req, "key", &key) || !decodeCryptoField(req, "iv", &iv) ||
+        !decodeCryptoField(req, "data", &d)) {
+      return sendOom("input");
+    }
+    if (key.size != 16 || iv.size != 16) {
+      resp["error"] = "key/iv must be 16 bytes";
+    } else if (op == "aesenc") {
+      // PKCS#7 inside the output buffer: the SDK's aes128CbcEncrypt pads into a second copy, a std::vector.
+      const size_t outSize = (d.size / 16 + 1) * 16;
+      const auto out = makeUniqueNoThrow<uint8_t[]>(outSize);
+      const auto aes = makeUniqueNoThrow<Aes>();
+      if (!out || !aes) return sendOom("AES output");
+      memcpy(out.get(), d.ptr(), d.size);
+      memset(out.get() + d.size, static_cast<int>(outSize - d.size), outSize - d.size);
+      const bool ok = wc_AesInit(aes.get(), nullptr, INVALID_DEVID) == 0 &&
+                      wc_AesSetKey(aes.get(), key.ptr(), 16, iv.ptr(), AES_ENCRYPTION) == 0 &&
+                      wc_AesCbcEncrypt(aes.get(), out.get(), out.get(), static_cast<word32>(outSize)) == 0;
+      wc_AesFree(aes.get());
+      if (ok) {
+        setField("data", out.get(), outSize);
+      } else {
+        resp["error"] = "aesenc failed";
+      }
+    } else if (d.size % 16 != 0) {
+      resp["error"] = "data not block-aligned";
+    } else {
+      const auto out = makeUniqueNoThrow<uint8_t[]>(d.size + 1);
+      if (!out) return sendOom("AES output");
+      if (c.aes128CbcDecrypt(key.ptr(), iv.ptr(), d.ptr(), d.size, out.get())) {
+        setField("data", out.get(), d.size);
+      } else {
+        resp["error"] = "aesdec failed";
+      }
+    }
+  } else if (op == "rsadec") {
+    CryptoBytes priv, d;
+    if (!decodeCryptoField(req, "private", &priv) || !decodeCryptoField(req, "data", &d)) return sendOom("input");
+    const auto out = makeUniqueNoThrow<uint8_t[]>(MAX_RSA_BYTES);
+    if (!out) return sendOom("RSA output");
+    const int32_t n = c.rsaPrivateRaw(priv.ptr(), priv.size, d.ptr(), d.size, out.get(), MAX_RSA_BYTES);
+    if (n > 0) {
+      setField("data", out.get(), static_cast<size_t>(n));
+    } else {
+      resp["error"] = "rsadec failed";
+    }
+  } else if (op == "sign") {
+    CryptoBytes priv, hash;
+    if (!decodeCryptoField(req, "private", &priv) || !decodeCryptoField(req, "hash", &hash)) return sendOom("input");
+    uint8_t sig[128];
+    if (hash.size != 20) {
+      resp["error"] = "hash must be 20 bytes";
+    } else if (c.rsaPrivateSignRaw(priv.ptr(), priv.size, hash.ptr(), sig)) {
+      setField("data", sig, sizeof(sig));
+    } else {
+      resp["error"] = "sign failed";
+    }
+  } else if (op == "keygen") {
+    freeink::content::RsaKeyPairDer pair;
+    if (c.rsaGenerate(&pair)) {
+      setField("public", pair.spki.data(), pair.spki.size());
+      setField("private", pair.pkcs8.data(), pair.pkcs8.size());
+    } else {
+      resp["error"] = "keygen failed: " + c.lastError;
+    }
+  } else if (op == "pubencrypt") {
+    CryptoBytes cert, d;
+    if (!decodeCryptoField(req, "cert", &cert) || !decodeCryptoField(req, "data", &d)) return sendOom("input");
+    const auto out = makeUniqueNoThrow<uint8_t[]>(MAX_RSA_BYTES);
+    if (!out) return sendOom("RSA output");
+    size_t outLen = 0;
+    if (c.rsaPublicEncrypt(cert.ptr(), cert.size, d.ptr(), d.size, out.get(), MAX_RSA_BYTES, &outLen)) {
+      setField("data", out.get(), outLen);
+    } else {
+      resp["error"] = "pubencrypt failed: " + c.lastError;
+    }
+  } else if (op == "pkcs12") {
+    CryptoBytes bundle;
+    if (!decodeCryptoField(req, "data", &bundle)) return sendOom("input");
+    const std::string password = req["password"] | "";
+    // The decoded bundle no longer needs the request: give its base64 back before the KDF and the certificate parse.
+    req.clear();
+    // The SDK returns the key and the certificate in std::vectors, whose growth aborts without the room
+    // (-fno-exceptions); each is smaller than the bundle they come from.
+    if (!heapHasBlockFor(bundle.size)) return sendOom("pkcs12");
+    std::vector<uint8_t> key, cert;
+    if (bundle.size == 0) {
+      resp["error"] = "pkcs12 failed: bundle missing or invalid";
+    } else if (c.pkcs12Extract(bundle.ptr(), bundle.size, password, &key, &cert)) {
+      setField("key", key.data(), key.size());
+      setField("cert", cert.data(), cert.size());
+    } else {
+      resp["error"] = "pkcs12 failed: " + c.lastError;
+    }
+  } else {
+    resp["error"] = "unknown op";
+  }
+
+  if (encodeFailed || resp.overflowed()) return sendOom("response");
+  sendJson(server.get(), 200, resp);
 }
 
 void CrossPointWebServer::handleFetchToSd() {

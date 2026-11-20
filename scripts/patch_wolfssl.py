@@ -102,15 +102,11 @@ OVERRIDES = """
 #ifndef WC_RSA_PSS
 #define WC_RSA_PSS
 #endif
-/* RSA public-key operations only: the client verifies RSA (and RSA-PSS) signatures but never signs
- * or decrypts with an RSA key. Compiles out the RSA private paths, in wolfCrypt and in SP math
- * (sp_RsaPrivate_*). The only RSA signer left in a client build is client-certificate
- * authentication (internal.c RsaSign, for CertificateVerify), so that goes too: the reader never
- * presents a client certificate. A server that asks for one still gets the empty Certificate
- * message (tls13.c SendTls13Certificate stays), exactly as before. */
-#ifndef WOLFSSL_RSA_PUBLIC_ONLY
-#define WOLFSSL_RSA_PUBLIC_ONLY
-#endif
+/* RSA private-key operations stay in: POST /api/crypto signs and decrypts with a plugin's RSA keys
+ * (rsadec, sign; the Plugin Hub's protected-content, for Adobe loans). TLS still never signs with
+ * one: client-certificate authentication (internal.c RsaSign, for CertificateVerify) stays out, as
+ * the reader never presents a client certificate. A server that asks for one still gets the empty
+ * Certificate message (tls13.c SendTls13Certificate stays). */
 #ifndef WOLFSSL_NO_CLIENT_AUTH
 #define WOLFSSL_NO_CLIENT_AUTH
 #endif
@@ -153,14 +149,16 @@ OVERRIDES = """
 #ifndef NO_MD4
 #define NO_MD4
 #endif
-#ifndef NO_DES3
-#define NO_DES3
+/* Password-based encryption, 3DES and RC2 stay in for PKCS#12: /api/crypto's pkcs12 opens the
+ * signing bundle Adobe's activation returns. As upstream's build: RC2 for "the legacy PBE-SHA1-RC2
+ * cipher the PKCS#12 signing bundle uses" (its platformio.ini), 3DES at wolfSSL's default (on).
+ * Which PBE each of the bundle's bags uses is not checked here; a real activation will show whether
+ * both are needed. TLS uses none of them. */
+#ifndef WC_RC2
+#define WC_RC2
 #endif
 #ifndef NO_PSK
 #define NO_PSK
-#endif
-#ifndef NO_PWDBASED
-#define NO_PWDBASED
 #endif
 #ifndef NO_WOLFSSL_MEMORY
 /* keep wolfSSL memory hooks so heap stats work */

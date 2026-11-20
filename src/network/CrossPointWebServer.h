@@ -228,6 +228,8 @@ class CrossPointWebServer {
   // the double transfer of relaying through the browser and uploading back.
   void handleFetchToSd();
   void handleBookKey();
+  // POST /api/crypto {op, ...base64 fields} -> the crypto a plugin's page cannot do on http:// (upstream's ops).
+  void handleCrypto();
   // The request headers are HttpDownloader::Headers, spelled out to keep that header out of this one.
   void fetchToSd(const String& plugin, const std::string& url, const String& dest,
                  const std::vector<std::pair<std::string, std::string>>& headers, const std::string& method,
