@@ -248,7 +248,9 @@ target_compile_definitions(EpubPipelineTest PRIVATE
   # LongChapterPageTablesTest refuses build-table chunks on purpose (see ChunkedVector.h). The
   # hook is inert until a test arms it; firmware and the dump tools never define it.
   CHUNKED_VECTOR_FAULT_INJECTION
-  # TableCellTextHeapTest refuses table cells their text (ChapterHtmlSlimParser::makeCellText). Inert otherwise.
+  # TableCellTextHeapTest refuses table cells their text (ChapterHtmlSlimParser::makeCellText), a grid row its line lists,
+  # and a table's row, cell-list and fragment growth (reserveRowCell, layoutTableRow, reservePackerRows,
+  # flushTableFragment). Inert otherwise.
   TABLE_CELL_FAULT_INJECTION
   # BlockImageHeapTest refuses block images their ImageBlock (ChapterHtmlSlimParser::placeImageWithBlockSpacing).
   BLOCK_IMAGE_FAULT_INJECTION

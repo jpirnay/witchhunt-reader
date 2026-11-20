@@ -100,6 +100,58 @@ inline size_t& cellLinesAllocated() {
   static size_t n = 0;
   return n;
 }
+// The table's three std::vector growths: how many more asks of each kind may succeed before one is refused as if the
+// heap were out. SIZE_MAX = never refuse. `tableRowCellsLeft` is the `<td>` that adds a cell to the pending row,
+// `layoutCellsLeft` a grid row's laid-out cell list, `packerRowsLeft` the fragment's row list.
+inline size_t& tableRowCellsLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+inline size_t& layoutCellsLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+inline size_t& packerRowsLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// ...and the allocation of the PageTableFragment a flush makes of the packed rows.
+inline size_t& fragmentAllocLeft() {
+  static size_t left = SIZE_MAX;
+  return left;
+}
+// How many pushes onto the fragment's row list found it full (so would have grown it through the throwing operator
+// new, past the reserve); a table's reserve is meant to leave this at zero.
+inline size_t& packerGrowthPushes() {
+  static size_t n = 0;
+  return n;
+}
+// How many asks, once a counter above reaches zero, are refused before the heap "recovers" (SIZE_MAX: all of them),
+// and how many were refused in all.
+inline size_t& tableGrowthRefusals() {
+  static size_t n = SIZE_MAX;
+  return n;
+}
+inline size_t& tableGrowthRefused() {
+  static size_t n = 0;
+  return n;
+}
+// One ask of a kind whose counter is `left`: true when it is refused.
+inline bool tableGrowthFault(size_t& left) {
+  if (left == SIZE_MAX) return false;
+  if (left > 0) {
+    --left;
+    return false;
+  }
+  size_t& refusals = tableGrowthRefusals();
+  if (refusals == 0) {
+    left = SIZE_MAX;
+    return false;
+  }
+  if (refusals != SIZE_MAX) --refusals;
+  ++tableGrowthRefused();
+  return true;
+}
 #endif
 
 #ifdef PAGE_FAULT_INJECTION
@@ -1308,6 +1360,10 @@ class ChapterHtmlSlimParser final : public Print {
   // ParsedText before returning. Shared by the row fallback and the degraded path so both
   // produce identical output. Returns false when the heap guard stopped the parse.
   bool emitCellAsParagraph(BufferedTableCell& cell, bool emitImage);
+  // The pending row's cell list and the fragment's row list grow through these: false when the heap holds no block for
+  // the growth, and nothing changed.
+  bool reserveRowCell(BufferedTableRow& row);
+  bool reservePackerRows(TableFragmentPacker& packer, size_t extra);
   // Give up the grid for the pending ROW: flush whatever is packed so the fragment closes before
   // the paragraphs, then emit the row's buffered cells (text then images) and latch rowDegraded so
   // the rest of the row streams at </td>. The next <tr> clears it and the grid resumes.
