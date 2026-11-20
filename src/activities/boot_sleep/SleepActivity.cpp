@@ -492,6 +492,24 @@ bool SleepActivity::keepsLastScreen() const {
           SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
 }
 
+bool SleepActivity::showsCustomImageOnly() {
+  switch (static_cast<CrossPointSettings::SLEEP_SCREEN_MODE>(SETTINGS.sleepScreen)) {
+    case CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM:
+      return true;
+    case CrossPointSettings::SLEEP_SCREEN_MODE::COVER:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM:
+      return APP_STATE.openEpubPath.empty();  // renderSleepScreen()'s fallback without a book
+    case CrossPointSettings::SLEEP_SCREEN_MODE::DARK:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::LIGHT:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::BLANK:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::SLEEP_SCREEN_MODE_COUNT:
+      return false;
+  }
+  return false;
+}
+
 void SleepActivity::renderSleepScreen() {
   RenderLock lock(*this);
 

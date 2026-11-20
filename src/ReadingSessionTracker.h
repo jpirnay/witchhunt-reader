@@ -37,6 +37,11 @@ class ReadingSessionTracker {
   // (no-op).
   void onPageTurn();
 
+  // Hears every page turn onPageTurn() is told of, whether or not a session is active: the plugin events'
+  // reading time (util/PluginReaderEvents.h), installed at boot, so the tracker itself depends on nothing more.
+  using TurnListener = void (*)();
+  void setTurnListener(const TurnListener listener) { turnListener = listener; }
+
   // Update the snapshot of the book's progress (0-100). Cached and written
   // out when the session is flushed. Cheap; OK to call on every page turn.
   void updateProgress(uint8_t progress);
@@ -67,6 +72,8 @@ class ReadingSessionTracker {
   void cutAtMidnight();
 
   bool active = false;
+
+  TurnListener turnListener = nullptr;
   std::string docId;
   std::string title;
   std::string author;

@@ -108,6 +108,7 @@
 #include "components/themes/ButtonHintStrip.h"
 #include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
+#include "util/PluginReaderEvents.h"
 #include "util/ScreenshotUtil.h"
 #include "util/SerialCommandGrammar.h"
 #include "util/WakeTrace.h"
@@ -850,6 +851,7 @@ void EpubReaderActivity::onEnter() {
   // computing the content hash would re-read the file on every reader open,
   // and a renamed book getting a new stats entry is acceptable — it'll still
   // accumulate going forward. A device test's book is no history (SerialTestApi::isTestBook).
+  plugin_events::reader::opened(epub->getPath());
   if (const std::string& bookPath = epub->getPath(); !SerialTestApi::isTestBook(bookPath)) {
     globalReadingSessionTracker().begin(KOReaderDocumentId::calculateFromFilename(bookPath), epub->getTitle(),
                                         epub->getAuthor());
@@ -1039,6 +1041,7 @@ void EpubReaderActivity::onExit() {
   // copied the id, title and author at begin()). Here it has the heap the teardown just freed.
   // Deep sleep ends the session here too (goToSleep() replaces the activity, which runs this);
   // the silent restarts, which skip onExit(), end it themselves (main.cpp).
+  plugin_events::reader::closed();
   globalReadingSessionTracker().end();
 
   // Last: everything above saved under the book's path, which the finished-book flow may have moved.
@@ -6645,6 +6648,16 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
   // overwrites the stored per-book progress, so an unknown 0 at session end would regress it.
   if (pageCount > 0) {
     globalReadingSessionTracker().updateProgress(percent);
+    // The plugin events' view of the page: byte-weighted whole-book progress at its top and its bottom (100 only on the
+    // last page), read only while a plugin subscribes.
+    if (plugin_events::reader::tracking()) {
+      const bool lastPage = spineIndex + 1 >= epub->getSpineItemsCount() && currentPage + 1 >= pageCount;
+      const float top = epub->calculateProgress(spineIndex, static_cast<float>(currentPage) / pageCount);
+      const float bottom = epub->calculateProgress(spineIndex, static_cast<float>(currentPage + 1) / pageCount);
+      plugin_events::reader::shown((static_cast<uint32_t>(spineIndex) << 16) | static_cast<uint16_t>(currentPage),
+                                   static_cast<int>(top * 10000.0f),
+                                   lastPage ? 100 : std::min(99, static_cast<int>(bottom * 100.0f)));
+    }
   }
   LOG_DBG("ERS", "Progress saved: Chapter %d, Page %d (%d%%)", spineIndex, currentPage, percent);
 }
