@@ -14,6 +14,7 @@
 #include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/reader/KOReaderSyncWorker.h"
+#include "components/TouchExitButton.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -146,6 +147,11 @@ void KOReaderAuthActivity::onEnter() {
 void KOReaderAuthActivity::onExit() {
   Activity::onExit();
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  if (WiFi.getMode() != WIFI_MODE_NULL) HalClock::wifiOff(/*skipNtpSync=*/true);
+  return;
+#endif
+
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
     delay(30);
@@ -169,6 +175,7 @@ void KOReaderAuthActivity::render(RenderLock&&) {
                  tr(STR_KOREADER_AUTH));
   const auto height = renderer.getLineHeight(UI_10_FONT_ID);
   const auto top = contentRect.y + (contentRect.height - height) / 2;
+  int resultBottom = top + 2 * height + 10;
 
   if (state == AUTHENTICATING || state == REGISTERING) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, statusMessage.c_str());
@@ -188,6 +195,12 @@ void KOReaderAuthActivity::render(RenderLock&&) {
       renderer.drawCenteredText(UI_10_FONT_ID, y, line.c_str());
       y += height;
     }
+    resultBottom = y;
+  }
+
+  if (BoardConfig::isMetalioEInk4Plus() && (state == SUCCESS || state == FAILED || state == USER_EXISTS)) {
+    TouchExitButton::draw(renderer, mappedInput, contentRect.x + contentRect.width / 4, resultBottom + 24,
+                          contentRect.width / 2);
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
@@ -197,7 +210,8 @@ void KOReaderAuthActivity::render(RenderLock&&) {
 
 void KOReaderAuthActivity::loop() {
   if (state == SUCCESS || state == FAILED || state == USER_EXISTS) {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
+    if ((BoardConfig::isMetalioEInk4Plus() && TouchExitButton::tapped(mappedInput)) ||
+        mappedInput.wasPressed(MappedInputManager::Button::Back) ||
         mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       finish();
     }
