@@ -9086,6 +9086,11 @@ void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
     case ReaderBarsResult::Action::SyncPush:
       onReaderMenuConfirm(MenuAction::PUSH_LOCAL);
       return;
+    case ReaderBarsResult::Action::Light:
+#if CP_TOUCH_UI
+      activityManager.openLightPanel();
+#endif
+      return;
   }
 }
 

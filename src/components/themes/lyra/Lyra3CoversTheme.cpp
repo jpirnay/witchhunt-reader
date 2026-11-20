@@ -26,7 +26,10 @@ constexpr int cornerRadius = 6;
 void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                            const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
                                            bool& bufferRestored, std::function<bool()> storeCoverBuffer) const {
-  const int tileWidth = (rect.width - 2 * Lyra3CoversMetrics::values.contentSidePadding) / 3;
+  const bool metalio = BoardConfig::isMetalioEInk4Plus();
+  const int sidePadding = UITheme::getInstance().getMetrics().contentSidePadding;
+  const int tileGap = metalio ? 12 : 0;
+  const int tileWidth = (rect.width - 2 * sidePadding - 2 * tileGap) / 3;
   const int tileY = rect.y;
   const bool hasContinueReading = !recentBooks.empty();
   const int maxLineWidth = tileWidth - 2 * hPaddingInSelection;
@@ -39,6 +42,8 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
   const int tileCount = hasContinueReading ? std::min(static_cast<int>(recentBooks.size()),
                                                       Lyra3CoversMetrics::values.homeRecentBooksCount)
                                            : 0;
+  const int rowWidth = tileCount * tileWidth + std::max(0, tileCount - 1) * tileGap;
+  const int rowX = rect.x + (metalio ? (rect.width - rowWidth) / 2 : sidePadding);
 
   // Both the cover height and the block under it come from Lyra3CoversMetrics, because
   // HomeActivity has to arrive at the same cover height to name the thumbnail file it writes.
@@ -74,9 +79,13 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
   {
     TapTargets::Recorder::Builder coverTargets;
     for (int i = 0; i < tileCount; i++) {
-      const int tileX = Lyra3CoversMetrics::values.contentSidePadding + tileWidth * i;
-      coverTargets.add(tileX + hPaddingInSelection, tileY + hPaddingInSelection, tileWidth - 2 * hPaddingInSelection,
-                       coverHeight, i);
+      const int tileX = rowX + (tileWidth + tileGap) * i;
+      if (metalio) {
+        coverTargets.add(tileX, tileY, tileWidth, rect.height, i);
+      } else {
+        coverTargets.add(tileX + hPaddingInSelection, tileY + hPaddingInSelection, tileWidth - 2 * hPaddingInSelection,
+                         coverHeight, i);
+      }
     }
     TapTargets::homeCovers().record(coverTargets);
   }
@@ -92,7 +101,7 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
         std::string coverPath = recentBooks[i].coverBmpPath;
         bool hasCover = true;
         bool tilePending = false;
-        int tileX = Lyra3CoversMetrics::values.contentSidePadding + tileWidth * i;
+        const int tileX = rowX + (tileWidth + tileGap) * i;
         if (coverPath.empty()) {
           hasCover = false;
         } else {
@@ -163,7 +172,7 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
       bool bookSelected = (selectorIndex == i);
       const int progressPercent = getRecentBookProgressPercent(recentBooks[i]);
 
-      int tileX = Lyra3CoversMetrics::values.contentSidePadding + tileWidth * i;
+      const int tileX = rowX + (tileWidth + tileGap) * i;
 
       const auto& titleLines = titleLinesPerTile[static_cast<size_t>(i)];
 
@@ -175,7 +184,9 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
       // than three cards of different depths.
       const int dynamicTitleBoxHeight = textBoxHeight;
 
-      if (bookSelected) {
+      if (metalio) {
+        renderer.drawRoundedRect(tileX, tileY, tileWidth, rect.height, bookSelected ? 3 : 1, 8, true);
+      } else if (bookSelected) {
         // Draw selection box
         renderer.fillRoundedRect(tileX, tileY, tileWidth, hPaddingInSelection, cornerRadius, true, true, false, false,
                                  Color::LightGray);

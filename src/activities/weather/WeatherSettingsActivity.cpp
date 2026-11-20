@@ -19,8 +19,7 @@ void WeatherSettingsActivity::buildMenuItems() {
   menuItems.push_back(SettingInfo::Toggle(StrId::STR_USE_WEATHER, &CrossPointSettings::useWeather, "useWeather",
                                           StrId::STR_CAT_SYSTEM));
 
-  menuItems.push_back(SettingInfo::Separator(StrId::STR_WEATHER_LOCATION));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_WEATHER_LOCATION, SettingAction::None));
+  menuItems.push_back(SettingInfo::Action(StrId::STR_WEATHER_SEARCH_CITY, SettingAction::None));
   menuItems.push_back(SettingInfo::Action(StrId::STR_WEATHER_LATITUDE, SettingAction::None));
   menuItems.push_back(SettingInfo::Action(StrId::STR_WEATHER_LONGITUDE, SettingAction::None));
 
@@ -33,7 +32,7 @@ void WeatherSettingsActivity::buildMenuItems() {
 std::string WeatherSettingsActivity::getItemValueString(int index) const {
   const auto& item = menuItems[index];
   switch (item.nameId) {
-    case StrId::STR_WEATHER_LOCATION: {
+    case StrId::STR_WEATHER_SEARCH_CITY: {
       auto name = WEATHER_SETTINGS.getLocationName();
       return name.empty() ? std::string(tr(STR_NOT_SET)) : name;
     }
@@ -70,7 +69,7 @@ std::string WeatherSettingsActivity::getItemValueString(int index) const {
 
 void WeatherSettingsActivity::onActionSelected(int index) {
   const auto& item = menuItems[index];
-  if (item.nameId == StrId::STR_WEATHER_LOCATION) {
+  if (item.nameId == StrId::STR_WEATHER_SEARCH_CITY) {
     launchCitySearch();
   } else if (item.nameId == StrId::STR_WEATHER_LATITUDE) {
     launchLatitudeEntry();

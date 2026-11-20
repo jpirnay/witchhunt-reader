@@ -404,6 +404,7 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
 void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
+  if (UITheme::getInstance().getMetrics().buttonHintsHeight == 0) return;
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
   // Inverted draws the strip inverted too, so the labels are the right way up for the reader —
   // see BaseTheme::drawButtonHints for why that works and why landscape is a separate problem.
@@ -491,7 +492,8 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 }
 
 void LyraTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, const char* downBtn) const {
-  if (LyraMetrics::values.sideButtonHintsWidth == 0) return;  // no side column on this panel
+  const int buttonWidth = UITheme::getInstance().getMetrics().sideButtonHintsWidth;
+  if (buttonWidth == 0) return;
   // Panel coordinates and the inverted mirroring, for the reasons spelled out in
   // BaseTheme::drawSideButtonHints — including why LandscapeCounterClockwise draws inverted too.
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
@@ -505,7 +507,6 @@ void LyraTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, co
 
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
-  constexpr int buttonWidth = LyraMetrics::values.sideButtonHintsWidth;  // Width on screen (height when rotated)
   constexpr int buttonHeight = 78;  // Tuned height on screen (width when rotated); a longer label grows it
   constexpr int buttonMargin = 0;
   const bool hasUp = upBtn != nullptr && upBtn[0] != '\0';
@@ -597,7 +598,9 @@ void LyraTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, co
 void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                     const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
                                     bool& bufferRestored, std::function<bool()> storeCoverBuffer) const {
-  const int tileWidth = rect.width - 2 * LyraMetrics::values.contentSidePadding;
+  const int tileX = rect.x + UITheme::getInstance().getMetrics().contentSidePadding;
+  const int tileWidth = rect.width - 2 * (tileX - rect.x);
+  const int coverGap = BoardConfig::isMetalioEInk4Plus() ? 24 : LyraMetrics::values.verticalSpacing;
   const int tileHeight = rect.height;
   const int tileY = rect.y;
   const int coverHeight = std::max(120, tileHeight - 2 * hPaddingInSelection);
@@ -611,7 +614,7 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   {
     TapTargets::Recorder::Builder coverTargets;
     if (hasContinueReading) {
-      coverTargets.add(rect.x + LyraMetrics::values.contentSidePadding, tileY, tileWidth, tileHeight, 0);
+      coverTargets.add(tileX, tileY, tileWidth, tileHeight, 0);
     }
     TapTargets::homeCovers().record(coverTargets);
   }
@@ -626,7 +629,6 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
       std::string coverPath = book.coverBmpPath;
       bool hasCover = true;
       bool coverPending = false;
-      int tileX = LyraMetrics::values.contentSidePadding;
       if (coverPath.empty()) {
         hasCover = false;
       } else {
@@ -683,9 +685,11 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
 
     bool bookSelected = (selectorIndex == 0);
 
-    int tileX = LyraMetrics::values.contentSidePadding;
-    int textWidth = tileWidth - 2 * hPaddingInSelection - LyraMetrics::values.verticalSpacing - coverWidth;
+    int textWidth = tileWidth - 2 * hPaddingInSelection - coverGap - coverWidth;
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    renderer.drawRoundedRect(tileX, tileY, tileWidth, tileHeight, bookSelected ? 3 : 1, 8, true);
+#else
     if (bookSelected) {
       // Draw selection box
       renderer.fillRoundedRect(tileX, tileY, tileWidth, hPaddingInSelection, cornerRadius, true, true, false, false,
@@ -696,6 +700,7 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
       renderer.fillRoundedRect(tileX, tileY + coverHeight + hPaddingInSelection, tileWidth, hPaddingInSelection,
                                cornerRadius, false, false, true, true, Color::LightGray);
     }
+#endif
 
     // Progress + pace-based ETA, e.g. "62% · ~45m". Replaces the old top-right
     // percent badge on this layout — the percentage now lives in the text line.
@@ -770,7 +775,7 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     // Centred in the tile. A block too tall even at its leanest is held to the top of the
     // selection, so what overflows is the bottom rather than the title.
     const int blockY = std::max(tileY + hPaddingInSelection, tileY + tileHeight / 2 - fit.height / 2);
-    const int textX = tileX + hPaddingInSelection + coverWidth + LyraMetrics::values.verticalSpacing;
+    const int textX = tileX + hPaddingInSelection + coverWidth + coverGap;
     const auto drawPart = [&](const std::vector<std::string>& lines, const CardTextFit::PartId part, const int fontId,
                               const EpdFontFamily::Style style) {
       int y = blockY + fit.tops[part];
@@ -821,7 +826,7 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
                                const std::function<std::string(int index)>& buttonLabel,
                                const std::function<UIIcon(int index)>& rowIcon) const {
   int rowHeight = UITheme::getInstance().getMetrics().menuRowHeight;
-  int rowSpacing = LyraMetrics::values.menuSpacing;
+  int rowSpacing = UITheme::getInstance().getMetrics().menuSpacing;
   if (buttonCount > 0 && rect.height > 0) {
     const int defaultHeight = buttonCount * rowHeight + std::max(0, buttonCount - 1) * rowSpacing;
     if (defaultHeight > rect.height) {
@@ -840,18 +845,22 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
 
   // Rows published for touch — see BaseTheme::drawButtonMenu. Values are MENU-LOCAL indices.
   TapTargets::Recorder::Builder menuTargets;
+  const int sidePadding = UITheme::getInstance().getMetrics().contentSidePadding;
 
   for (int i = 0; i < buttonCount; ++i) {
-    int tileWidth = rect.width - LyraMetrics::values.contentSidePadding * 2;
-    Rect tileRect = Rect{rect.x + LyraMetrics::values.contentSidePadding, rect.y + i * (rowHeight + rowSpacing),
-                         tileWidth, rowHeight};
+    int tileWidth = rect.width - sidePadding * 2;
+    Rect tileRect = Rect{rect.x + sidePadding, rect.y + i * (rowHeight + rowSpacing), tileWidth, rowHeight};
     menuTargets.add(tileRect.x, tileRect.y, tileRect.width, tileRect.height, i);
 
     const bool selected = selectedIndex == i;
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    renderer.drawRoundedRect(tileRect.x, tileRect.y, tileRect.width, tileRect.height, selected ? 3 : 1, 8, true);
+#else
     if (selected) {
       renderer.fillRoundedRect(tileRect.x, tileRect.y, tileRect.width, tileRect.height, cornerRadius, Color::LightGray);
     }
+#endif
 
     std::string labelStr = buttonLabel(i);
     const char* label = labelStr.c_str();
@@ -874,8 +883,10 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
       }
     }
 
-    renderer.drawText(UI_12_FONT_ID, textX, textY,
-                      renderer.truncatedText(UI_12_FONT_ID, label, tileRect.x + tileRect.width - textX).c_str(), true);
+    const int endPadding = BoardConfig::isMetalioEInk4Plus() ? 12 : 0;
+    renderer.drawText(
+        UI_12_FONT_ID, textX, textY,
+        renderer.truncatedText(UI_12_FONT_ID, label, tileRect.x + tileRect.width - textX - endPadding).c_str(), true);
   }
 
   TapTargets::homeMenu().record(menuTargets);

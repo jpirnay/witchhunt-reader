@@ -18,6 +18,9 @@
 #include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <HalI2cBus.h>
+#if defined(FREEINK_DEVICE_METALIO_EINK4_PLUS) && FREEINK_DEVICE_METALIO_EINK4_PLUS
+#include <HapticManager.h>
+#endif
 #include <HalPowerManager.h>
 #include <HalSpiBus.h>
 #include <HalStorage.h>
@@ -110,6 +113,7 @@ EpdFont serif14BoldFont(&serif_14_bold);
 EpdFont serif14ItalicFont(&serif_14_italic);
 EpdFont serif14BoldItalicFont(&serif_14_bolditalic);
 EpdFontFamily serif14FontFamily(&serif14RegularFont, &serif14BoldFont, &serif14ItalicFont, &serif14BoldItalicFont);
+#if !FREEINK_DEVICE_METALIO_EINK4_PLUS
 EpdFont serif10RegularFont(&serif_10_regular);
 EpdFont serif10BoldFont(&serif_10_bold);
 EpdFont serif10ItalicFont(&serif_10_italic);
@@ -125,12 +129,14 @@ EpdFont serif16BoldFont(&serif_16_bold);
 EpdFont serif16ItalicFont(&serif_16_italic);
 EpdFont serif16BoldItalicFont(&serif_16_bolditalic);
 EpdFontFamily serif16FontFamily(&serif16RegularFont, &serif16BoldFont, &serif16ItalicFont, &serif16BoldItalicFont);
+#endif
 EpdFont serif18RegularFont(&serif_18_regular);
 EpdFont serif18BoldFont(&serif_18_bold);
 EpdFont serif18ItalicFont(&serif_18_italic);
 EpdFont serif18BoldItalicFont(&serif_18_bolditalic);
 EpdFontFamily serif18FontFamily(&serif18RegularFont, &serif18BoldFont, &serif18ItalicFont, &serif18BoldItalicFont);
 
+#if !FREEINK_DEVICE_METALIO_EINK4_PLUS
 EpdFont notosans10RegularFont(&notosans_10_regular);
 EpdFont notosans10BoldFont(&notosans_10_bold);
 EpdFont notosans10ItalicFont(&notosans_10_italic);
@@ -143,18 +149,21 @@ EpdFont notosans12ItalicFont(&notosans_12_italic);
 EpdFont notosans12BoldItalicFont(&notosans_12_bolditalic);
 EpdFontFamily notosans12FontFamily(&notosans12RegularFont, &notosans12BoldFont, &notosans12ItalicFont,
                                    &notosans12BoldItalicFont);
+#endif
 EpdFont notosans14RegularFont(&notosans_14_regular);
 EpdFont notosans14BoldFont(&notosans_14_bold);
 EpdFont notosans14ItalicFont(&notosans_14_italic);
 EpdFont notosans14BoldItalicFont(&notosans_14_bolditalic);
 EpdFontFamily notosans14FontFamily(&notosans14RegularFont, &notosans14BoldFont, &notosans14ItalicFont,
                                    &notosans14BoldItalicFont);
+#if !FREEINK_DEVICE_METALIO_EINK4_PLUS
 EpdFont notosans16RegularFont(&notosans_16_regular);
 EpdFont notosans16BoldFont(&notosans_16_bold);
 EpdFont notosans16ItalicFont(&notosans_16_italic);
 EpdFont notosans16BoldItalicFont(&notosans_16_bolditalic);
 EpdFontFamily notosans16FontFamily(&notosans16RegularFont, &notosans16BoldFont, &notosans16ItalicFont,
                                    &notosans16BoldItalicFont);
+#endif
 EpdFont notosans18RegularFont(&notosans_18_regular);
 EpdFont notosans18BoldFont(&notosans_18_bold);
 EpdFont notosans18ItalicFont(&notosans_18_italic);
@@ -565,7 +574,13 @@ static void serviceBootPowerRelease() {
   // reason it did — the 5 ms debounce is too short for mechanical release bounce.
   constexpr unsigned long RELEASE_STABLE_MS = 200;
   const unsigned long now = millis();
-  if (digitalRead(InputManager::POWER_BUTTON_PIN) == HIGH) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // The sampler reads the Metalio power key through the TCA9555.
+  const bool powerReleased = !gpio.isPressed(HalGPIO::BTN_POWER);
+#else
+  const bool powerReleased = digitalRead(InputManager::POWER_BUTTON_PIN) == HIGH;
+#endif
+  if (powerReleased) {
     if (bootPowerHighSince == 0) bootPowerHighSince = now;
   } else {
     bootPowerHighSince = 0;
@@ -657,6 +672,9 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
   // ADC read races with that teardown. From here sleep prep reads the power pin
   // directly (HalGPIO::startDeepSleep / waitForStablePowerRelease).
   gpio.stopInputSampler();
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  HapticManager::getInstance().stop();
+#endif
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
   const bool keepLpAlive = keepClockAliveForSleep();
@@ -773,7 +791,11 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
 // each step's growth to the metrics that have to hold its text.
 void applyUiFontScale() {
   const bool large = SETTINGS.uiFontSize == CrossPointSettings::UI_FONT_SIZE_LARGE;
-#if FREEINK_DEVICE_MURPHY
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  renderer.replaceFont(SMALL_FONT_ID, ui12FontFamily);
+  renderer.replaceFont(UI_10_FONT_ID, large ? ui14FontFamily : ui12FontFamily);
+  renderer.replaceFont(UI_12_FONT_ID, ui14FontFamily);
+#elif FREEINK_DEVICE_MURPHY
   // Murphy's three roles are two points smaller than the corresponding roles on other boards.
   // Its Large choice therefore matches other devices' Normal choice across all three slots.
   renderer.replaceFont(SMALL_FONT_ID, large ? smallFontFamily : murphySmall6FontFamily);
@@ -832,16 +854,25 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   renderer.insertFont(FIT_TITLE_FONT_ID, ui12FontFamily);
 #endif
   renderer.insertFont(SERIF_14_FONT_ID, serif14FontFamily);
+  renderer.insertFont(SERIF_18_FONT_ID, serif18FontFamily);
+  renderer.insertFont(NOTOSANS_14_FONT_ID, notosans14FontFamily);
+  renderer.insertFont(NOTOSANS_18_FONT_ID, notosans18FontFamily);
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // Two bitmap masters fit alongside CloudZao's app in its 5 MiB OTA layout.
+  renderer.insertScaledFont(SERIF_10_FONT_ID, serif14FontFamily, 10.0f / 14.0f);
+  renderer.insertScaledFont(SERIF_12_FONT_ID, serif14FontFamily, 12.0f / 14.0f);
+  renderer.insertScaledFont(SERIF_16_FONT_ID, serif18FontFamily, 16.0f / 18.0f);
+  renderer.insertScaledFont(NOTOSANS_10_FONT_ID, notosans14FontFamily, 10.0f / 14.0f);
+  renderer.insertScaledFont(NOTOSANS_12_FONT_ID, notosans14FontFamily, 12.0f / 14.0f);
+  renderer.insertScaledFont(NOTOSANS_16_FONT_ID, notosans18FontFamily, 16.0f / 18.0f);
+#else
   renderer.insertFont(SERIF_10_FONT_ID, serif10FontFamily);
   renderer.insertFont(SERIF_12_FONT_ID, serif12FontFamily);
   renderer.insertFont(SERIF_16_FONT_ID, serif16FontFamily);
-  renderer.insertFont(SERIF_18_FONT_ID, serif18FontFamily);
-
   renderer.insertFont(NOTOSANS_10_FONT_ID, notosans10FontFamily);
   renderer.insertFont(NOTOSANS_12_FONT_ID, notosans12FontFamily);
-  renderer.insertFont(NOTOSANS_14_FONT_ID, notosans14FontFamily);
   renderer.insertFont(NOTOSANS_16_FONT_ID, notosans16FontFamily);
-  renderer.insertFont(NOTOSANS_18_FONT_ID, notosans18FontFamily);
+#endif
 
   // 20/22/24/26 pt have no faces: they render the 18 pt master scaled, x1.11 to x1.44. Real faces
   // cost about half a megabyte per size (20 pt's eight were 505,656 B) that the app partition does
@@ -1184,6 +1215,16 @@ void setup() {
   // unit the rail must already be held before anything blocks for that long.
   BoardConfig::holdPowerRails();
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // EXT1 records the edge across the bootloader. The key may already be released by setup().
+  const bool expanderWake = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 &&
+                            (esp_sleep_get_ext1_wakeup_status() & (1ULL << freeink::metalioplus::EXPANDER_INT_GPIO));
+  if (esp_reset_reason() == ESP_RST_DEEPSLEEP && !expanderWake && !freeink::metalioplus::powerKeyHeld()) {
+    powerManager.sleepOnExpanderKey();
+  }
+  WiFi.persistent(false);
+#endif
+
   // On a power-on reset the RTC timer started with the rail, so it minus millis() is what ran before the app: the ROM
   // and the second-stage bootloader. Read before anything below can block. The raw counter, not esp_rtc_get_time_us():
   // that one starts counting at the first calibration, in the app's startup, and drops the ticks before it -- which
@@ -1205,11 +1246,13 @@ void setup() {
   // released during it found the pin HIGH and was refused, so it lengthened the hold every
   // wake needs, release builds included. Neither this nor the NVS read logs anything, which
   // is all the TX timeout below has to come first for.
+#if !FREEINK_DEVICE_METALIO_EINK4_PLUS
   {
     const auto hold = CrossPointSettings::wakeHoldFor(BootDiag::preAppMs());
     BootDiag::setWakeCheck(
         gpio.verifyPowerButtonWakeup(wakeGestureFromSettings(), hold.requiredMs, hold.heldBeforeAppMs));
   }
+#endif
   BootDiag::markPhase(BootPhase::WakeGate);
 
 #ifdef ENABLE_SERIAL_LOG
@@ -1245,6 +1288,7 @@ void setup() {
   // usbDetect pin, so that gate can read false precisely when this matters.
   // CDC_ON_BOOT means the core has already begun Serial, so this is valid here.
   logSerial.setTxTimeoutMs(1);
+  markSerialLogReady();
 #endif
 
   // print_errors=true: the corrupt block's address and overwritten values go to the
@@ -1354,13 +1398,18 @@ void setup() {
   HalI2cBus::adoptMutex(BoardT5S3::i2cMutexHandle());
 #endif
   gpio.begin();
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  LOG_INF("MAIN", "FT6336U input ready: %d", gpio.hasTouch());
+#endif
   // Bus start-up must follow gpio.begin(): that runs inputMgr.begin(), and on a
   // touch board the SDK's GT911 init starts the shared I2C bus itself. The owner
   // detects that and stands down rather than re-initialising it. See HalI2cBus.h.
   HalI2cBus::ensureBusStarted();
   powerManager.begin();
   halTiltSensor.begin();
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
   gpio_deep_sleep_hold_dis();  // Release deep sleep GPIO hold state from previous sleep cycle
+#endif
   BootDiag::markPhase(BootPhase::HwInit);
 
   const auto wakeupReason = gpio.getWakeupReason();
@@ -1447,7 +1496,8 @@ void setup() {
 #endif
   logStartupMemory("after_hw_init");
 
-  if (wakeupReason == HalGPIO::WakeupReason::PowerButton && !BootDiag::wakeCheck().accepted()) {
+  if (!BoardConfig::isMetalioEInk4Plus() && wakeupReason == HalGPIO::WakeupReason::PowerButton &&
+      !BootDiag::wakeCheck().accepted()) {
     LOG_INF("BOOT", "Wake gate rejected the press (%s), returning to deep sleep",
             HalGPIO::wakeVerdictName(BootDiag::wakeCheck().verdict));
     halTiltSensor.deepSleep();
@@ -2420,7 +2470,10 @@ void loop() {
     // cannot both run its action and fall through as a page turn.
     {
       BA gestureAction = BA::BTN_DEFAULT;
-      if (gestureEventManager.consumeAction(gestureAction, activityManager.currentIsReaderActivity(),
+      const bool lightPanelOwnsTouch =
+          BoardConfig::isMetalioEInk4Plus() && strcmp(activityManager.currentActivityName(), "FrontlightPanel") == 0;
+      if (!lightPanelOwnsTouch &&
+          gestureEventManager.consumeAction(gestureAction, activityManager.currentIsReaderActivity(),
                                             mirrorLeftRight) &&
           !runAction(gestureAction)) {
         return;

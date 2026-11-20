@@ -17,7 +17,7 @@
  */
 class WeatherActivity final : public Activity {
  public:
-  enum class State { LOADING_CACHE, CHECK_WIFI, WIFI_SELECTION, FETCHING, WEATHER_DISPLAY, ERROR };
+  enum class State { LOADING_CACHE, LOCATION_REQUIRED, CHECK_WIFI, WIFI_SELECTION, FETCHING, WEATHER_DISPLAY, ERROR };
 
   // In the folder SleepActivity picks custom sleep images from.
   static constexpr char SLEEP_IMAGE_PATH[] = "/sleep/weather.bmp";

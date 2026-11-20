@@ -123,6 +123,12 @@ enum class HomeNavigation { Linear, Carousel };
 // Additional themes can inherit from this and override methods as needed
 
 namespace BaseMetrics {
+inline constexpr int homeBookDetailsHeight =
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    124;
+#else
+    0;
+#endif
 constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
                                           .batteryHeight = 12,
                                           .topPadding = 5,
@@ -155,7 +161,7 @@ constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
                                           .keyboardVerticalOffset = -13,
                                           .keyboardTextFieldWidthPercent = 85,
                                           .headerSubtitleLine = 23});
-}
+}  // namespace BaseMetrics
 
 enum class SyncIndicator : uint8_t { None, Active, Failed };
 
