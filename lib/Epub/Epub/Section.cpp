@@ -2728,13 +2728,16 @@ void Section::abortSectionBuild() {
   // closing an unopened handle asserts.
   if (file) file.close();
   Storage.remove(filePath.c_str());
-  // Unlike the extraction temp above, the anchor spill is worth nothing to a retry: it belongs to
-  // the parse that just died, and the next attempt rewrites it from the first anchor.
-  Storage.remove(getAnchorSpillPath().c_str());
   if (buildState_->cssParser) {
     buildState_->cssParser->clear();
   }
   buildState_.reset();
+  // Unlike the extraction temp above, the anchor spill is worth nothing to a retry: it belongs to
+  // the parse that just died, and the next attempt rewrites it from the first anchor. Removed only
+  // now: the parser's spill writer flushes its buffer in its destructor, and a flush into a file
+  // that is already removed writes through a freed cluster chain on SdFat (cluster 0 when the tail
+  // crosses a cluster boundary, which is below the data region).
+  Storage.remove(getAnchorSpillPath().c_str());
 }
 
 std::unique_ptr<Page> Section::loadPageFromSectionFile() {
