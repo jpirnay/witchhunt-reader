@@ -1904,6 +1904,8 @@ void cmdFs(const std::string_view arg) {
 //   LAB:DRAW:<FULL|LUT>:<bg>:<x>,<y>,<w>,<h>,<c>;...   both planes from rectangles in panel RAM
 //                   coordinates, each code c (and the background bg) being RED * 2 + BW. FULL draws the BW
 //                   bit and runs a normal full refresh; LUT sends both planes with the LUT. LAB_OK:<ms>.
+//   LAB:CANVAS:<gray>  the whole 8-bit canvas at one gray (0..255), drawn as an 8-bit picture: on a panel with
+//                   16 levels, a gray that lands on a level shows that level alone. LAB_OK:<ms>, LAB_ERROR without one.
 //   LAB:REG:<hex>   register writes sent with every LUT frame until the next LAB:REG (empty clears): records of
 //                   command, length and that many bytes (frame rate, source voltages, VCOM). LAB_OK:reg <bytes>,
 //                   or LAB_ERROR where the panel driver takes none (PanelDriver::setLabRegisters()).
@@ -1991,7 +1993,24 @@ void cmdLab(std::string_view arg) {
       return static_cast<void>(reply("LAB_ERROR:registers not taken"));
     return static_cast<void>(replyf("LAB_OK:reg %u", static_cast<unsigned>(hex.size() / 2)));
   }
-  if (arg.substr(0, 5) != "DRAW:") return static_cast<void>(reply("LAB_ERROR:LUT, REG or DRAW"));
+  if (arg.substr(0, 7) == "CANVAS:") {
+    // One gray over the whole 8-bit canvas, drawn as the panel draws 8-bit pictures (16 levels where it has them). A
+    // gray that lands exactly on a level leaves no dither error, so the screen is that level alone: a uniform
+    // scene, which is what measuring a level on the stand needs (a level among others catches their lens glare).
+    arg.remove_prefix(7);
+    long gray = 0;
+    if (!lab::takeNumber(arg, ':', gray) || gray < 0 || gray > 255)
+      return static_cast<void>(reply("LAB_ERROR:bad gray"));
+    RenderLock lock;
+    uint16_t stride = 0;
+    uint8_t* canvas = display.borrowGray8Canvas(&stride);
+    if (!canvas) return static_cast<void>(reply("LAB_ERROR:no canvas on this panel"));
+    memset(canvas, static_cast<int>(gray), static_cast<size_t>(stride) * display.getDisplayHeight());
+    const unsigned long start = millis();
+    display.displayGray8Canvas(HalDisplay::HALF_REFRESH, false);
+    return static_cast<void>(replyf("LAB_OK:%lu", millis() - start));
+  }
+  if (arg.substr(0, 5) != "DRAW:") return static_cast<void>(reply("LAB_ERROR:LUT, REG, CANVAS or DRAW"));
   arg.remove_prefix(5);
   const bool full = arg.substr(0, 5) == "FULL:";
   if (!full && arg.substr(0, 4) != "LUT:") return static_cast<void>(reply("LAB_ERROR:FULL or LUT"));
