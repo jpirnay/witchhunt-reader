@@ -273,7 +273,7 @@ TEST_P(VerticalRules, APlacedMarksInkStaysInItsColumnPlace) {
         for (const auto& element : page.elements) {
           if (element->getTag() != TAG_PageLine) continue;
           const TextBlock& block = *static_cast<const PageLine&>(*element).getBlock();
-          if (block.getRenderStyle().fontSizeMultiplier != 1.0f) continue;
+          if (!block.getRenderStyle().fontSizeMultiplier.isOne()) continue;
           for (uint16_t i = 0; i < block.wordCount(); ++i) {
             const std::vector<uint32_t> cps = codepointsOf(block.wordText(i));
             if (cps.size() != 1 || CjkPunctuation::classOf(cps[0]) == CjkPunctuation::Class::None ||

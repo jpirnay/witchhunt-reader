@@ -39,7 +39,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 129;  // v129: an id on an inline element names the page of its own line
+constexpr uint8_t SECTION_FILE_VERSION = 130;  // v130: a line's font-size multiplier and its word fonts' scales
+                                               // are TextScale (2^-20ths in a u32), not float
+                                               // v129: an id on an inline element names the page of its own line
                                                // (not its block's first, nor the next block's)
                                                // v128: a chapter's CSS lookups use only the stylesheets it
                                                // links and what those import (matcha-reader #453)

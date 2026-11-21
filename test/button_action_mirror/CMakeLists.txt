@@ -5,6 +5,7 @@ add_executable(ButtonActionMirrorTest
 target_include_directories(ButtonActionMirrorTest PRIVATE
   ${REPO_ROOT}/src
   ${REPO_ROOT}/test/shims
+  ${REPO_ROOT}/lib/EpdFont
 )
 
 target_link_libraries(ButtonActionMirrorTest PRIVATE

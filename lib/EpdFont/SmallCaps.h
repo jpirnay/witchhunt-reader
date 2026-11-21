@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "TextScale.h"
+
 // Shared helpers for font-variant: small-caps rendering.
 //
 // Small-caps folds lowercase letters to their uppercase glyph and draws them at a
@@ -13,7 +15,7 @@ namespace smallCaps {
 
 // Scale factor applied to folded (was-lowercase) glyphs.  ~0.75 keeps small caps
 // visibly smaller than full capitals while staying legible on e-ink.
-inline constexpr float SCALE = 0.75f;
+inline constexpr TextScale SCALE = TextScale::ratio(3, 4);
 
 // Fold a codepoint to its uppercase form for small-caps rendering.
 // Returns true and rewrites `cp` to the uppercase codepoint when the input was a

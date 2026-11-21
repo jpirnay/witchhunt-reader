@@ -190,12 +190,13 @@ TEST(ReaderSizeListNative, BuiltInFamiliesStillStartAtTheLadder) { EXPECT_EQ(10,
 // the master enlarged, never reduced and never drawn at x1.
 TEST(BuiltinReaderFaces, OnlyTheRungsAboveTheMasterAreScaled) {
   for (const auto& rung : S::FONT_SIZE_RUNGS) {
-    const float scale = S::builtinFaceScale(rung.points);
+    const TextScale scale = S::builtinFaceScale(rung.points);
     if (rung.points <= S::BUILTIN_FACE_MAX_POINTS) {
-      EXPECT_EQ(1.0f, scale) << int{rung.points} << "pt";
+      EXPECT_TRUE(scale.isOne()) << int{rung.points} << "pt";
     } else {
-      EXPECT_GT(scale, 1.0f) << int{rung.points} << "pt";
-      EXPECT_FLOAT_EQ(static_cast<float>(rung.points) / S::BUILTIN_FACE_MAX_POINTS, scale) << int{rung.points} << "pt";
+      EXPECT_GT(scale, TextScale()) << int{rung.points} << "pt";
+      // The master's size at the rung's scale is the rung's size.
+      EXPECT_EQ(int{rung.points}, scale.apply(S::BUILTIN_FACE_MAX_POINTS)) << int{rung.points} << "pt";
     }
   }
 }

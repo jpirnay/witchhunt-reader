@@ -457,16 +457,17 @@ int WeatherActivity::drawCurrentConditions(const int left, const int right) {
   char temp[16];
   snprintf(temp, sizeof(temp), "%d", weather::whole(cur.temperature, weather::TENTHS_DECIMALS));
   const int scale = heroTextScale();
+  const TextScale textScale = TextScale::ratio(scale, 1);
   const int digitsHeight = inkAbove(renderer, VALUE_FONT_ID, temp, EpdFontFamily::BOLD) * scale;
   const int digitsTop = top + std::max(0, (iconSize - digitsHeight) / 2);  // centred on the icon
   const int baseline = digitsTop + digitsHeight;
   const int tempX = left + iconSize + 12;
-  renderer.drawTextScaled(VALUE_FONT_ID, tempX, baseline - renderer.getFontAscenderSizeScaled(VALUE_FONT_ID, scale),
-                          temp, true, EpdFontFamily::BOLD, scale);
+  renderer.drawTextScaled(VALUE_FONT_ID, tempX, baseline - renderer.getFontAscenderSizeScaled(VALUE_FONT_ID, textScale),
+                          temp, true, EpdFontFamily::BOLD, textScale);
 
   // The unit's ink top level with the digits'.
   const char* unit = tempUnitLabel();
-  const int unitX = tempX + renderer.getTextWidthScaled(VALUE_FONT_ID, temp, EpdFontFamily::BOLD, scale) + 6;
+  const int unitX = tempX + renderer.getTextWidthScaled(VALUE_FONT_ID, temp, EpdFontFamily::BOLD, textScale) + 6;
   renderer.drawText(HEADING_FONT_ID, unitX,
                     digitsTop - renderer.getFontAscenderSize(HEADING_FONT_ID) +
                         inkAbove(renderer, HEADING_FONT_ID, unit, EpdFontFamily::BOLD),

@@ -126,9 +126,9 @@ bool tablesFromSfnt(const uint8_t* data, const uint32_t length, FaceTables* out)
   return true;
 }
 
-void Scale::set(const int32_t scale, const unsigned ppem, const uint16_t upem) {
+void Scale::set(const int32_t scale, const unsigned ppem, const uint16_t unitsPerEm) {
   xScale = yScale = scale;
-  xMultf = yMultf = static_cast<float>(scale) / static_cast<float>(upem);
+  upem = unitsPerEm != 0 ? unitsPerEm : 1;
   xMult = yMult = static_cast<int64_t>(scale) * 0x10000 / upem;
   xPpem = yPpem = ppem;
 }

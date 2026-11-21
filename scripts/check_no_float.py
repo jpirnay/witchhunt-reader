@@ -97,6 +97,19 @@ FLOAT_FREE = [
     "src/util/DecimalFormat.cpp",
     "freeink-sdk/libs/hardware/BatteryMonitor/src/BatteryMonitor.cpp",
     "freeink-sdk/libs/hardware/Imu/src/Imu.cpp",
+    # Text scale (integer-maths area 2): TextScale, 2^-20ths in fixed point (lib/EpdFont/TextScale.h).
+    "lib/EpdFont/EpdFont.cpp",
+    "lib/EpdFont/FontDecompressor.cpp",
+    "lib/EpdFont/SdCardFontManager.cpp",
+    "lib/Epub/Epub/ParsedText.cpp",
+    "lib/Epub/Epub/VerticalDraw.cpp",
+    "lib/Epub/Epub/blocks/TextBlock.cpp",
+    "lib/GfxRenderer/GfxRenderer.cpp",
+    "lib/GfxRenderer/UiShapedText.cpp",
+    "lib/OtShaper/",
+    "src/activities/reader/DictionaryWordSelectActivity.cpp",
+    "src/activities/settings/FontScalingTestActivity.cpp",
+    "src/main.cpp",
 ]
 
 

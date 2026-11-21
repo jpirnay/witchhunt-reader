@@ -9,7 +9,7 @@
 
 namespace {
 
-int scaled(const int raw, const float scale) { return scale == 1.0f ? raw : static_cast<int>(raw * scale + 0.5f); }
+int scaled(const int raw, const TextScale scale) { return scale.isOne() ? raw : scale.apply(raw); }
 
 // The advance of 一 unscaled; 0 in a font that has none.
 int rawEm(const GfxRenderer& renderer, const int fontId, const EpdFontFamily::Style style) {
@@ -24,13 +24,13 @@ int rawColumnAdvance(const GfxRenderer& renderer, const int fontId, const char* 
   return renderer.getTextAdvanceX(fontId, piece, style);
 }
 
-int ascenderOf(const GfxRenderer& renderer, const int fontId, const float scale) {
-  return scale == 1.0f ? renderer.getFontAscenderSize(fontId) : renderer.getFontAscenderSizeScaled(fontId, scale);
+int ascenderOf(const GfxRenderer& renderer, const int fontId, const TextScale scale) {
+  return scale.isOne() ? renderer.getFontAscenderSize(fontId) : renderer.getFontAscenderSizeScaled(fontId, scale);
 }
 
 void drawIn(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
-            const EpdFontFamily::Style style, const float scale, const bool black) {
-  if (scale == 1.0f) {
+            const EpdFontFamily::Style style, const TextScale scale, const bool black) {
+  if (scale.isOne()) {
     renderer.drawFormedText(fontId, x, y, text, black, style);
   } else {
     renderer.drawFormedTextScaled(fontId, x, y, text, black, style, scale);
@@ -46,7 +46,7 @@ struct Shift {
 // The ink of `cp` at `scale`. False when the font has no glyph of its own (a lookalike or U+FFFD is never placed) or no
 // ink for it.
 bool scaledInk(const GfxRenderer& renderer, const int fontId, const uint32_t cp, const EpdFontFamily::Style style,
-               const float scale, GlyphInk& ink) {
+               const TextScale scale, GlyphInk& ink) {
   if (!renderer.hasGlyph(fontId, cp, style) || !renderer.getGlyphInk(fontId, cp, style, ink)) return false;
   ink.left = scaled(ink.left, scale);
   ink.width = scaled(ink.width, scale);
@@ -80,8 +80,8 @@ bool columnInk(const GfxRenderer& renderer, const int fontId, const uint32_t cp,
                const bool centredMarks, int& inkStart, int& inkSize, int& cell) {
   if (!drawsUpright(cp)) return false;
   GlyphInk ink;
-  if (!scaledInk(renderer, fontId, cp, style, 1.0f, ink)) return false;
-  const int em = columnEm(renderer, fontId, style, 1.0f);
+  if (!scaledInk(renderer, fontId, cp, style, TextScale(), ink)) return false;
+  const int em = columnEm(renderer, fontId, style, TextScale());
   const Shift shift = shiftOf(uprightPlacementOf(cp), ink, em, ink.advance, centredMarks);
   inkStart = (em * 88 + 50) / 100 - ink.top + shift.dy;
   inkSize = ink.height;
@@ -89,13 +89,13 @@ bool columnInk(const GfxRenderer& renderer, const int fontId, const uint32_t cp,
   return true;
 }
 
-int columnEm(const GfxRenderer& renderer, const int fontId, const EpdFontFamily::Style style, const float scale) {
+int columnEm(const GfxRenderer& renderer, const int fontId, const EpdFontFamily::Style style, const TextScale scale) {
   const int raw = rawEm(renderer, fontId, style);
   return raw > 0 ? scaled(raw, scale) : ascenderOf(renderer, fontId, scale);
 }
 
 int verticalTextAdvance(const GfxRenderer& renderer, const int fontId, const char* text,
-                        const EpdFontFamily::Style style, const float scale) {
+                        const EpdFontFamily::Style style, const TextScale scale) {
   const int em = rawEm(renderer, fontId, style);
   char piece[kMaxColumnRunBytes + 1];
   int raw = 0;
@@ -110,7 +110,8 @@ int verticalTextAdvance(const GfxRenderer& renderer, const int fontId, const cha
 }
 
 void drawTextVertical(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
-                      const EpdFontFamily::Style style, const float scale, const bool centredMarks, const bool black) {
+                      const EpdFontFamily::Style style, const TextScale scale, const bool centredMarks,
+                      const bool black) {
   if (renderer.isFontCacheScanning()) {
     // Record 一 in this style too: the draw below measures with it, and an unprewarmed glyph is a miss on SD/TTF fonts.
     (void)rawEm(renderer, fontId, style);
@@ -154,7 +155,7 @@ void drawTextVertical(const GfxRenderer& renderer, const int fontId, const int x
 }
 
 void drawCombinedVertical(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
-                          const EpdFontFamily::Style style, const float scale, const bool black) {
+                          const EpdFontFamily::Style style, const TextScale scale, const bool black) {
   if (renderer.isFontCacheScanning()) {
     (void)rawEm(renderer, fontId, style);
     drawIn(renderer, fontId, x, y, text, style, scale, black);
@@ -171,7 +172,7 @@ void drawCombinedVertical(const GfxRenderer& renderer, const int fontId, const i
   // A run wider than the em is shrunk to it, on top of the line's own scale.
   const int rawWidth = renderer.getTextAdvanceX(fontId, text, style);
   const int width = scaled(rawWidth, scale);
-  const float runScale = width > em && em > 0 ? scale * static_cast<float>(em) / static_cast<float>(width) : scale;
+  const TextScale runScale = width > em && em > 0 ? scale * TextScale::ratio(em, width) : scale;
   const int runWidth = scaled(rawWidth, runScale);
   const int runEm = rawOne > 0 ? scaled(rawOne, runScale) : ascenderOf(renderer, fontId, runScale);
   const int runAscender = ascenderOf(renderer, fontId, runScale);

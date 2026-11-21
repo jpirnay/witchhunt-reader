@@ -1,5 +1,3 @@
-#include <cmath>
-
 #include "OtLayoutInternal.h"
 
 // GPOS subtables (OT/Layout/GPOS): value records, anchors and device tables,
@@ -10,9 +8,15 @@ namespace ot::layout {
 
 namespace {
 
-// HarfBuzz's roundf(): floor(x + 0.5), so halves round up (-12.5 -> -12),
-// unlike the C library's away-from-zero rounding.
-OT_HOT int32_t hbRound(const float x) { return static_cast<int32_t>(floorf(x + 0.5f)); }
+// HarfBuzz's roundf() of an exact anchor coordinate, `numerator` / `upem` (Scale::emExactX): floor(x + 0.5), so
+// halves round up (-12.5 -> -12), unlike the C library's away-from-zero rounding.
+OT_HOT int32_t hbRound(const int64_t numerator, const uint16_t upem) {
+  const int64_t twice = 2 * numerator + upem;  // 2x + 1, over 2 x upem
+  const int64_t den = 2 * static_cast<int64_t>(upem);
+  // C++ division truncates toward zero: one step down floors a negative quotient that is not whole.
+  const int64_t q = twice / den;
+  return static_cast<int32_t>(twice < 0 && q * den != twice ? q - 1 : q);
+}
 
 constexpr uint16_t VF_X_PLACEMENT = 0x0001, VF_Y_PLACEMENT = 0x0002, VF_X_ADVANCE = 0x0004, VF_Y_ADVANCE = 0x0008,
                    VF_X_PLA_DEVICE = 0x0010, VF_Y_PLA_DEVICE = 0x0020, VF_X_ADV_DEVICE = 0x0040, VF_DEVICES = 0x00F0;
@@ -75,20 +79,21 @@ void applyValue(const ApplyContext* c, const uint16_t format, const Table& base,
   }
 }
 
-void anchorPoint(const ApplyContext* c, const Table& anchor, float* x, float* y) {
+// An anchor's coordinates in output units times the face's units per em (Scale::emExactX), exact until hbRound.
+void anchorPoint(const ApplyContext* c, const Table& anchor, int64_t* x, int64_t* y) {
   const Scale& s = c->scale;
   *x = *y = 0;
   switch (anchor.u16(0)) {
     case 1:
     case 2:  // contour points need hinting, which is not done: use the coordinates
-      *x = s.emFscaleX(anchor.s16(2));
-      *y = s.emFscaleY(anchor.s16(4));
+      *x = s.emExactX(anchor.s16(2));
+      *y = s.emExactY(anchor.s16(4));
       break;
     case 3:
-      *x = s.emFscaleX(anchor.s16(2));
-      *y = s.emFscaleY(anchor.s16(4));
-      if (s.xPpem) *x += static_cast<float>(deviceDelta(anchor.offset16(6), s.xPpem, s.xScale));
-      if (s.yPpem) *y += static_cast<float>(deviceDelta(anchor.offset16(8), s.yPpem, s.yScale));
+      *x = s.emExactX(anchor.s16(2));
+      *y = s.emExactY(anchor.s16(4));
+      if (s.xPpem) *x += static_cast<int64_t>(deviceDelta(anchor.offset16(6), s.xPpem, s.xScale)) * s.upem;
+      if (s.yPpem) *y += static_cast<int64_t>(deviceDelta(anchor.offset16(8), s.yPpem, s.yScale)) * s.upem;
       break;
     default:
       break;
@@ -220,20 +225,21 @@ bool applyCursivePos(ApplyContext* c, const Table& st) {
 
   const unsigned i = it.idx;
   const unsigned j = buffer.idx;
-  float entryX, entryY, exitX, exitY;
+  int64_t entryX, entryY, exitX, exitY;
   anchorPoint(c, exit, &exitX, &exitY);
   anchorPoint(c, entry, &entryX, &entryY);
+  const uint16_t upem = c->scale.upem;
   GlyphPosition* pos = buffer.pos.data();
 
   // Main-direction adjustment.
   if (buffer.backward) {  // witchhunt: deviation 11 - HB_DIRECTION_RTL
-    const int32_t d = satAdd(hbRound(exitX), pos[i].xOffset);
+    const int32_t d = satAdd(hbRound(exitX, upem), pos[i].xOffset);
     pos[i].xAdvance = satSub(pos[i].xAdvance, d);
     pos[i].xOffset = satSub(pos[i].xOffset, d);
-    pos[j].xAdvance = satAdd(hbRound(entryX), pos[j].xOffset);
+    pos[j].xAdvance = satAdd(hbRound(entryX, upem), pos[j].xOffset);
   } else {
-    pos[i].xAdvance = satAdd(hbRound(exitX), pos[i].xOffset);
-    const int32_t d = satAdd(hbRound(entryX), pos[j].xOffset);
+    pos[i].xAdvance = satAdd(hbRound(exitX, upem), pos[i].xOffset);
+    const int32_t d = satAdd(hbRound(entryX, upem), pos[j].xOffset);
     pos[j].xAdvance = satSub(pos[j].xAdvance, d);
     pos[j].xOffset = satSub(pos[j].xOffset, d);
   }
@@ -241,7 +247,7 @@ bool applyCursivePos(ApplyContext* c, const Table& st) {
   // Cross-direction adjustment.
   unsigned child = i;
   unsigned parent = j;
-  int32_t yOffset = hbRound(entryY - exitY);
+  int32_t yOffset = hbRound(entryY - exitY, upem);
   if (!(c->lookupProps & lookupflag::RIGHT_TO_LEFT)) {
     const unsigned k = child;
     child = parent;
@@ -297,7 +303,7 @@ bool applyMarkArray(ApplyContext* c, const Table& markArray, const unsigned mark
   if (!anchorOffset) return false;
   const Table glyphAnchor = anchors.at(anchorOffset);
 
-  float markX, markY, baseX, baseY;
+  int64_t markX, markY, baseX, baseY;
   anchorPoint(c, markAnchor, &markX, &markY);
   anchorPoint(c, glyphAnchor, &baseX, &baseY);
   const int32_t baseOffset = crossOffset(buffer.pos.data(), buffer.len(), glyphPos);
@@ -306,8 +312,8 @@ bool applyMarkArray(ApplyContext* c, const Table& markArray, const unsigned mark
   if (chain >= INT16_MIN && chain <= INT16_MAX) {
     mark.attachChain = static_cast<int16_t>(chain);
     mark.attachType = ATTACH_TYPE_MARK;
-    mark.xOffset = hbRound(baseX - markX);
-    mark.yOffset = hbRound(baseY - markY);
+    mark.xOffset = hbRound(baseX - markX, c->scale.upem);
+    mark.yOffset = hbRound(baseY - markY, c->scale.upem);
     mark.yOffset = satAdd(mark.yOffset, baseOffset);
     buffer.hasGposAttachment = true;
   } else {

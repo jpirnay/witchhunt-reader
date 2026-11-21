@@ -1,5 +1,6 @@
 #pragma once
 #include <HalStorage.h>
+#include <TextScale.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -238,8 +239,8 @@ class CrossPointSettings {
 
   /// The scale a built-in rung draws its faces at: exactly 1 for a rung with faces of its own, its
   /// size over the master's above that -- 20 pt is the 18 pt faces at x1.11.
-  static constexpr float builtinFaceScale(const uint8_t points) {
-    return points > BUILTIN_FACE_MAX_POINTS ? static_cast<float>(points) / BUILTIN_FACE_MAX_POINTS : 1.0f;
+  static constexpr TextScale builtinFaceScale(const uint8_t points) {
+    return points > BUILTIN_FACE_MAX_POINTS ? TextScale::ratio(points, BUILTIN_FACE_MAX_POINTS) : TextScale();
   }
 
   /// The point size a FONT_SIZE renders at, or 0 if it names no rung.

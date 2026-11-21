@@ -27,14 +27,14 @@ TEST(VerticalDraw, UprightPiecesDrawInTheReadersFrameRunsInTheTurnedFrame) {
   GfxRenderer r;
   r.setOrientation(GfxRenderer::Portrait);
   r.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
-  drawTextVertical(r, kFontId, 100, 50, "日本Latin語", EpdFontFamily::REGULAR, 1.0f, false);
+  drawTextVertical(r, kFontId, 100, 50, "日本Latin語", EpdFontFamily::REGULAR, TextScale(), false);
   ASSERT_EQ(4u, r.drawCalls.size());
   expectCall(r.drawCalls[0], "日", GfxRenderer::Portrait, 412, 93);
   expectCall(r.drawCalls[1], "本", GfxRenderer::Portrait, 412, 103);
   expectCall(r.drawCalls[2], "Latin", GfxRenderer::LandscapeCounterClockwise, 120, 50);
   expectCall(r.drawCalls[3], "語", GfxRenderer::Portrait, 412, 163);
   EXPECT_EQ(GfxRenderer::LandscapeCounterClockwise, r.getOrientation());
-  EXPECT_EQ(80, verticalTextAdvance(r, kFontId, "日本Latin語", EpdFontFamily::REGULAR, 1.0f));
+  EXPECT_EQ(80, verticalTextAdvance(r, kFontId, "日本Latin語", EpdFontFamily::REGULAR, TextScale()));
 }
 
 // A scan pass draws the text as is, and must also ask for 一 in the word's style: the draw pass measures the column
@@ -42,7 +42,7 @@ TEST(VerticalDraw, UprightPiecesDrawInTheReadersFrameRunsInTheTurnedFrame) {
 TEST(VerticalDraw, AScanPassRecordsTheEmGlyphInTheWordsStyle) {
   GfxRenderer r;
   r.scanning = true;
-  drawTextVertical(r, kFontId, 100, 50, "日本", EpdFontFamily::BOLD, 1.0f, false);
+  drawTextVertical(r, kFontId, 100, 50, "日本", EpdFontFamily::BOLD, TextScale(), false);
   bool askedForOneInBold = false;
   for (const auto& q : r.hasGlyphQueries) askedForOneInBold |= q.first == 0x4E00 && q.second == EpdFontFamily::BOLD;
   EXPECT_TRUE(askedForOneInBold);
@@ -54,15 +54,15 @@ TEST(VerticalDraw, AScaledColumnRoundsOnceAsLayoutDoes) {
   GfxRenderer r;
   r.setOrientation(GfxRenderer::Portrait);
   r.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
-  EXPECT_EQ(15, columnEm(r, kFontId, EpdFontFamily::REGULAR, 1.5f));
-  drawTextVertical(r, kFontId, 100, 50, "日本Latin語", EpdFontFamily::REGULAR, 1.5f, false);
+  EXPECT_EQ(15, columnEm(r, kFontId, EpdFontFamily::REGULAR, TextScale::ratio(3, 2)));
+  drawTextVertical(r, kFontId, 100, 50, "日本Latin語", EpdFontFamily::REGULAR, TextScale::ratio(3, 2), false);
   ASSERT_EQ(4u, r.drawCalls.size());
   expectCall(r.drawCalls[0], "日", GfxRenderer::Portrait, 404, 89);
   expectCall(r.drawCalls[1], "本", GfxRenderer::Portrait, 404, 104);
   expectCall(r.drawCalls[2], "Latin", GfxRenderer::LandscapeCounterClockwise, 130, 50);
   expectCall(r.drawCalls[3], "語", GfxRenderer::Portrait, 404, 194);
-  for (const auto& call : r.drawCalls) EXPECT_EQ(1.5f, call.scale);
-  EXPECT_EQ(120, verticalTextAdvance(r, kFontId, "日本Latin語", EpdFontFamily::REGULAR, 1.5f));
+  for (const auto& call : r.drawCalls) EXPECT_EQ(TextScale::ratio(3, 2), call.scale);
+  EXPECT_EQ(120, verticalTextAdvance(r, kFontId, "日本Latin語", EpdFontFamily::REGULAR, TextScale::ratio(3, 2)));
 }
 
 TEST(VerticalDraw, ALongSidewaysRunIsDrawnInPiecesAtTheirPens) {
@@ -70,13 +70,13 @@ TEST(VerticalDraw, ALongSidewaysRunIsDrawnInPiecesAtTheirPens) {
   r.setOrientation(GfxRenderer::Portrait);
   r.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
   const std::string text(70, 'a');
-  drawTextVertical(r, kFontId, 100, 50, text.c_str(), EpdFontFamily::REGULAR, 1.0f, false);
+  drawTextVertical(r, kFontId, 100, 50, text.c_str(), EpdFontFamily::REGULAR, TextScale(), false);
   ASSERT_EQ(2u, r.drawCalls.size());
   EXPECT_EQ(64u, r.drawCalls[0].text.size());
   EXPECT_EQ(100, r.drawCalls[0].x);
   EXPECT_EQ(6u, r.drawCalls[1].text.size());
   EXPECT_EQ(740, r.drawCalls[1].x);
-  EXPECT_EQ(700, verticalTextAdvance(r, kFontId, text.c_str(), EpdFontFamily::REGULAR, 1.0f));
+  EXPECT_EQ(700, verticalTextAdvance(r, kFontId, text.c_str(), EpdFontFamily::REGULAR, TextScale()));
 }
 
 TEST(VerticalDraw, ACombiningMarkStaysOnItsBase) {
@@ -84,10 +84,10 @@ TEST(VerticalDraw, ACombiningMarkStaysOnItsBase) {
   r.setOrientation(GfxRenderer::Portrait);
   r.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
   const std::string text = "か\u3099";
-  drawTextVertical(r, kFontId, 100, 50, text.c_str(), EpdFontFamily::REGULAR, 1.0f, false);
+  drawTextVertical(r, kFontId, 100, 50, text.c_str(), EpdFontFamily::REGULAR, TextScale(), false);
   ASSERT_EQ(1u, r.drawCalls.size());
   EXPECT_EQ(6u, r.drawCalls[0].text.size());
-  EXPECT_EQ(10, verticalTextAdvance(r, kFontId, text.c_str(), EpdFontFamily::REGULAR, 1.0f));
+  EXPECT_EQ(10, verticalTextAdvance(r, kFontId, text.c_str(), EpdFontFamily::REGULAR, TextScale()));
 }
 
 TEST(VerticalDraw, TheReadersFrameIsTheHeldOne) {
@@ -95,7 +95,7 @@ TEST(VerticalDraw, TheReadersFrameIsTheHeldOne) {
     GfxRenderer r;
     r.setOrientation(static_cast<GfxRenderer::Orientation>(held));
     r.setDrawOrientation(static_cast<GfxRenderer::Orientation>(turnedframe::contentOf(held)));
-    drawTextVertical(r, kFontId, 100, 50, "日", EpdFontFamily::REGULAR, 1.0f, false);
+    drawTextVertical(r, kFontId, 100, 50, "日", EpdFontFamily::REGULAR, TextScale(), false);
     ASSERT_EQ(1u, r.drawCalls.size());
     const int width = held == turnedframe::Portrait || held == turnedframe::PortraitInverted ? 480 : 800;
     expectCall(r.drawCalls[0], "日", static_cast<GfxRenderer::Orientation>(held), width - 1 - 62 - 5, 93);
@@ -110,7 +110,7 @@ TEST(VerticalDraw, DrawingAllocatesNothing) {
   r.drawCalls.reserve(16);
   const long live = liveAllocations();
   const long all = allocations();
-  drawTextVertical(r, kFontId, 100, 50, "日。っLatin語", EpdFontFamily::REGULAR, 1.0f, false);
+  drawTextVertical(r, kFontId, 100, 50, "日。っLatin語", EpdFontFamily::REGULAR, TextScale(), false);
   EXPECT_EQ(all, allocations());
   EXPECT_EQ(live, liveAllocations());
 }
@@ -137,7 +137,7 @@ TEST(VerticalDraw, ALongSidewaysRunAllocatesOnlyWhatTheRecorderDoes) {
   r.drawCalls.reserve(16);
   const long live = liveAllocations();
   const long all = allocations();
-  drawTextVertical(r, kFontId, 100, 50, run.c_str(), EpdFontFamily::REGULAR, 1.0f, false);
+  drawTextVertical(r, kFontId, 100, 50, run.c_str(), EpdFontFamily::REGULAR, TextScale(), false);
   ASSERT_EQ(2u, r.drawCalls.size());
   EXPECT_EQ(64u, r.drawCalls[0].text.size());
   EXPECT_EQ(6u, r.drawCalls[1].text.size());
@@ -160,7 +160,7 @@ GfxRenderer turned() {
 // dy = 10 - 2 * 9 + 2 * 3 - 3 = -5. Unplaced it is at (412, 93).
 TEST(VerticalDraw, AFullStopIsReflectedIntoTheTopRightCorner) {
   GfxRenderer r = turned();
-  drawTextVertical(r, kFontId, 100, 50, "。", EpdFontFamily::REGULAR, 1.0f, false);
+  drawTextVertical(r, kFontId, 100, 50, "。", EpdFontFamily::REGULAR, TextScale(), false);
   ASSERT_EQ(1u, r.drawCalls.size());
   expectCall(r.drawCalls[0], "。", GfxRenderer::Portrait, 417, 88);
 }
@@ -168,7 +168,7 @@ TEST(VerticalDraw, AFullStopIsReflectedIntoTheTopRightCorner) {
 // A small kana moves by (10 * 10 + 50) / 100 = 1 up and right.
 TEST(VerticalDraw, ASmallKanaMovesUpAndRight) {
   GfxRenderer r = turned();
-  drawTextVertical(r, kFontId, 100, 50, "っ", EpdFontFamily::REGULAR, 1.0f, false);
+  drawTextVertical(r, kFontId, 100, 50, "っ", EpdFontFamily::REGULAR, TextScale(), false);
   ASSERT_EQ(1u, r.drawCalls.size());
   expectCall(r.drawCalls[0], "っ", GfxRenderer::Portrait, 413, 92);
 }
@@ -176,14 +176,14 @@ TEST(VerticalDraw, ASmallKanaMovesUpAndRight) {
 // Centred marks use the reflection's halves: (5 / 2, -5 / 2) = (2, -2).
 TEST(VerticalDraw, ACentredMarkIsCentred) {
   GfxRenderer r = turned();
-  drawTextVertical(r, kFontId, 100, 50, "。", EpdFontFamily::REGULAR, 1.0f, true);
+  drawTextVertical(r, kFontId, 100, 50, "。", EpdFontFamily::REGULAR, TextScale(), true);
   ASSERT_EQ(1u, r.drawCalls.size());
   expectCall(r.drawCalls[0], "。", GfxRenderer::Portrait, 414, 91);
 }
 
 TEST(VerticalDraw, AnUnplacedCharacterDoesNotMove) {
   GfxRenderer r = turned();
-  drawTextVertical(r, kFontId, 100, 50, "日！", EpdFontFamily::REGULAR, 1.0f, false);
+  drawTextVertical(r, kFontId, 100, 50, "日！", EpdFontFamily::REGULAR, TextScale(), false);
   ASSERT_EQ(2u, r.drawCalls.size());
   expectCall(r.drawCalls[0], "日", GfxRenderer::Portrait, 412, 93);
   expectCall(r.drawCalls[1], "！", GfxRenderer::Portrait, 412, 103);
@@ -193,7 +193,7 @@ TEST(VerticalDraw, AnUnplacedCharacterDoesNotMove) {
 // 414, y = 100 + (16 * 88 + 50) / 100 - 16 = 98, and the draw does not move it.
 TEST(VerticalDraw, AMarkTheFontLacksIsNotMoved) {
   GfxRenderer r = turned();
-  drawTextVertical(r, kLatinFont, 100, 50, "。", EpdFontFamily::REGULAR, 1.0f, false);
+  drawTextVertical(r, kLatinFont, 100, 50, "。", EpdFontFamily::REGULAR, TextScale(), false);
   ASSERT_EQ(1u, r.drawCalls.size());
   expectCall(r.drawCalls[0], "。", GfxRenderer::Portrait, 414, 98);
 }
@@ -203,7 +203,7 @@ TEST(VerticalDraw, AMarkTheFontLacksIsNotMoved) {
 // unplaced x = 479 - 74 - 10 = 395, y = 100 + 18 - 32 = 86.
 TEST(VerticalDraw, PlacementScalesWithTheEm) {
   GfxRenderer r = turned();
-  drawTextVertical(r, kFontId, 100, 50, "。", EpdFontFamily::REGULAR, 2.0f, false);
+  drawTextVertical(r, kFontId, 100, 50, "。", EpdFontFamily::REGULAR, TextScale::ratio(2, 1), false);
   ASSERT_EQ(1u, r.drawCalls.size());
   expectCall(r.drawCalls[0], "。", GfxRenderer::Portrait, 405, 76);
 }
@@ -231,10 +231,10 @@ TEST(VerticalDraw, ACombinedPairIsCentredUpright) {
   GfxRenderer r;
   r.setOrientation(GfxRenderer::Portrait);
   r.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
-  drawCombinedVertical(r, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, 1.0f);
+  drawCombinedVertical(r, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, TextScale());
   ASSERT_EQ(1u, r.drawCalls.size());
   expectCall(r.drawCalls[0], "13", GfxRenderer::Portrait, 412, 98);
-  EXPECT_EQ(0.5f, r.drawCalls[0].scale);
+  EXPECT_EQ(TextScale::ratio(1, 2), r.drawCalls[0].scale);
   EXPECT_EQ(GfxRenderer::LandscapeCounterClockwise, r.getOrientation());
 }
 
@@ -243,21 +243,21 @@ TEST(VerticalDraw, ANarrowRunIsNotScaled) {
   GfxRenderer r;
   r.setOrientation(GfxRenderer::Portrait);
   r.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
-  drawCombinedVertical(r, kFontId, 100, 50, "7", EpdFontFamily::REGULAR, 1.0f);
+  drawCombinedVertical(r, kFontId, 100, 50, "7", EpdFontFamily::REGULAR, TextScale());
   ASSERT_EQ(1u, r.drawCalls.size());
   expectCall(r.drawCalls[0], "7", GfxRenderer::Portrait, 412, 93);
-  EXPECT_EQ(1.0f, r.drawCalls[0].scale);
+  EXPECT_TRUE(r.drawCalls[0].scale.isOne());
 }
 
 TEST(VerticalDraw, AWhiteColumnDrawsWhite) {
   GfxRenderer black;
   black.setOrientation(GfxRenderer::Portrait);
   black.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
-  drawTextVertical(black, kFontId, 100, 50, "日a", EpdFontFamily::REGULAR, 1.0f, false);
+  drawTextVertical(black, kFontId, 100, 50, "日a", EpdFontFamily::REGULAR, TextScale(), false);
   GfxRenderer white;
   white.setOrientation(GfxRenderer::Portrait);
   white.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
-  drawTextVertical(white, kFontId, 100, 50, "日a", EpdFontFamily::REGULAR, 1.0f, false, false);
+  drawTextVertical(white, kFontId, 100, 50, "日a", EpdFontFamily::REGULAR, TextScale(), false, false);
   ASSERT_EQ(black.drawCalls.size(), white.drawCalls.size());
   ASSERT_FALSE(white.drawCalls.empty());
   for (size_t i = 0; i < white.drawCalls.size(); ++i) {
@@ -272,11 +272,11 @@ TEST(VerticalDraw, AWhiteCombinedRunDrawsWhite) {
   GfxRenderer black;
   black.setOrientation(GfxRenderer::Portrait);
   black.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
-  drawCombinedVertical(black, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, 1.0f);
+  drawCombinedVertical(black, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, TextScale());
   GfxRenderer white;
   white.setOrientation(GfxRenderer::Portrait);
   white.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
-  drawCombinedVertical(white, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, 1.0f, false);
+  drawCombinedVertical(white, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, TextScale(), false);
   ASSERT_EQ(1u, black.drawCalls.size());
   ASSERT_EQ(1u, white.drawCalls.size());
   EXPECT_TRUE(black.drawCalls[0].black);
@@ -288,7 +288,7 @@ TEST(VerticalDraw, AWhiteCombinedRunDrawsWhite) {
 TEST(VerticalDraw, AScanPassDrawsACombinedRunPlainly) {
   GfxRenderer r;
   r.scanning = true;
-  drawCombinedVertical(r, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, 1.0f);
+  drawCombinedVertical(r, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, TextScale());
   ASSERT_EQ(1u, r.drawCalls.size());
   EXPECT_EQ("13", r.drawCalls[0].text);
 }
@@ -300,7 +300,7 @@ TEST(VerticalDraw, CombinedDrawingAllocatesNothing) {
   r.drawCalls.reserve(16);
   const long live = liveAllocations();
   const long all = allocations();
-  drawCombinedVertical(r, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, 1.0f);
+  drawCombinedVertical(r, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, TextScale());
   EXPECT_EQ(all, allocations());
   EXPECT_EQ(live, liveAllocations());
 }

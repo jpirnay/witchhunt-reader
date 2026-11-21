@@ -25,7 +25,7 @@ struct Resolver {
 
 TEST(FontLookup, HitDoesNotAskTheResolver) {
   std::map<int, int> fonts{{7, 70}};
-  std::map<int, float> scales;
+  std::map<int, TextScale> scales;
   Resolver r;
   r.answer = ResolvedFont<int>{99};
 
@@ -38,7 +38,7 @@ TEST(FontLookup, HitDoesNotAskTheResolver) {
 
 TEST(FontLookup, MissWithoutResolverReturnsNull) {
   std::map<int, int> fonts{{7, 70}};
-  std::map<int, float> scales;
+  std::map<int, TextScale> scales;
 
   EXPECT_EQ(nullptr, findOrResolveFont(fonts, scales, 8, FontResolverHook<int>{}));
   EXPECT_EQ(1u, fonts.size());
@@ -46,7 +46,7 @@ TEST(FontLookup, MissWithoutResolverReturnsNull) {
 
 TEST(FontLookup, MissAsksTheResolverAndRegistersWhatItSupplies) {
   std::map<int, int> fonts;
-  std::map<int, float> scales;
+  std::map<int, TextScale> scales;
   Resolver r;
   r.answer = ResolvedFont<int>{42};
 
@@ -62,7 +62,7 @@ TEST(FontLookup, MissAsksTheResolverAndRegistersWhatItSupplies) {
 
 TEST(FontLookup, DeclinedIdIsNotRegistered) {
   std::map<int, int> fonts{{7, 70}};
-  std::map<int, float> scales;
+  std::map<int, TextScale> scales;
   Resolver r;  // declines
 
   EXPECT_EQ(nullptr, findOrResolveFont(fonts, scales, 8, r.hook()));
@@ -76,28 +76,28 @@ TEST(FontLookup, DeclinedIdIsNotRegistered) {
 // text at the named size, as a scaled font registered up front would.
 TEST(FontLookup, AStandInIsRegisteredWithItsScale) {
   std::map<int, int> fonts;
-  std::map<int, float> scales;
+  std::map<int, TextScale> scales;
   Resolver r;
-  r.answer = ResolvedFont<int>{47, 1.25f};
+  r.answer = ResolvedFont<int>{47, TextScale::ratio(5, 4)};
 
   ASSERT_NE(nullptr, findOrResolveFont(fonts, scales, 8, r.hook()));
 
-  EXPECT_FLOAT_EQ(1.25f, scales.at(8));
+  EXPECT_EQ(TextScale::ratio(5, 4), scales.at(8));
 }
 
 // Layout often asks for a font's scale before anything else about it: the scale of an ID nobody looked up yet
 // resolves it first, so the first measurement already uses the stand-in's scale.
 TEST(FontLookup, TheScaleOfAnIdNotYetLookedUpResolvesItFirst) {
   std::map<int, int> fonts{{7, 70}};
-  std::map<int, float> scales{{7, 1.1f}};
+  std::map<int, TextScale> scales{{7, TextScale::percent(110)}};
   Resolver r;
-  r.answer = ResolvedFont<int>{47, 1.25f};
+  r.answer = ResolvedFont<int>{47, TextScale::ratio(5, 4)};
 
-  EXPECT_FLOAT_EQ(1.25f, resolvedBaseScale(fonts, scales, 8, r.hook()));
+  EXPECT_EQ(TextScale::ratio(5, 4), resolvedBaseScale(fonts, scales, 8, r.hook()));
   EXPECT_EQ(1u, fonts.count(8));
-  EXPECT_FLOAT_EQ(1.25f, resolvedBaseScale(fonts, scales, 8, r.hook()));
+  EXPECT_EQ(TextScale::ratio(5, 4), resolvedBaseScale(fonts, scales, 8, r.hook()));
   EXPECT_EQ(1, r.calls);
-  EXPECT_FLOAT_EQ(1.1f, resolvedBaseScale(fonts, scales, 7, r.hook()));  // known fonts: the map alone
-  EXPECT_FLOAT_EQ(1.0f, resolvedBaseScale(fonts, scales, 9, FontResolverHook<int>{}));
+  EXPECT_EQ(TextScale::percent(110), resolvedBaseScale(fonts, scales, 7, r.hook()));  // known fonts: the map alone
+  EXPECT_TRUE(resolvedBaseScale(fonts, scales, 9, FontResolverHook<int>{}).isOne());
   EXPECT_EQ(1, r.calls);
 }

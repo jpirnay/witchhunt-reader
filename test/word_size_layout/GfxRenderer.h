@@ -16,6 +16,7 @@
 
 #include <EpdFontFamily.h>
 #include <GlyphRun.h>
+#include <TextScale.h>
 
 #include <cstdint>
 #include <string>
@@ -65,7 +66,7 @@ class GfxRenderer {
     int fontId;
     int x;
     int y;
-    float scale;
+    TextScale scale;
     EpdFontFamily::Style style;
     Orientation frame;  // the live orientation at the call
     bool black;
@@ -96,7 +97,7 @@ class GfxRenderer {
     int x;
     int y;
     uint16_t count;
-    float scale;
+    TextScale scale;
   };
   mutable std::vector<GlyphRunDraw> glyphRunDraws;
 
@@ -186,13 +187,9 @@ class GfxRenderer {
     return kerningPx;
   }
   int getFontAscenderSize(const int fontId) const { return ascender(fontId); }
-  int getFontAscenderSizeScaled(const int fontId, const float scale) const {
-    return static_cast<int>(ascender(fontId) * scale + 0.5f);
-  }
+  int getFontAscenderSizeScaled(const int fontId, const TextScale scale) const { return scale.apply(ascender(fontId)); }
   int getLineHeight(int /*fontId*/) const { return LINE_HEIGHT; }
-  int getLineHeightScaled(int /*fontId*/, const float scale) const {
-    return static_cast<int>(LINE_HEIGHT * scale + 0.5f);
-  }
+  int getLineHeightScaled(int /*fontId*/, const TextScale scale) const { return scale.apply(LINE_HEIGHT); }
   // What layout asked each font to get ready for, in order.
   struct ReadyCall {
     int fontId;
@@ -206,16 +203,16 @@ class GfxRenderer {
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const {
     return getTextAdvanceX(fontId, text, style);
   }
-  int getTextWidthScaled(int fontId, const char* text, EpdFontFamily::Style style, const float scale) const {
-    return static_cast<int>(getTextAdvanceX(fontId, text, style) * scale + 0.5f);
+  int getTextWidthScaled(int fontId, const char* text, EpdFontFamily::Style style, const TextScale scale) const {
+    return scale.apply(getTextAdvanceX(fontId, text, style));
   }
   // The page's words come formed (drawFormedText); this stub records both entry points alike.
   void drawFormedText(int fontId, int x, int y, const char* text, bool black = true,
                       EpdFontFamily::Style style = EpdFontFamily::REGULAR) const {
-    drawCalls.push_back({text, fontId, x, y, 1.0f, style, live, black});
+    drawCalls.push_back({text, fontId, x, y, TextScale(), style, live, black});
   }
   void drawFormedTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
-                            const float scale) const {
+                            const TextScale scale) const {
     drawCalls.push_back({text, fontId, x, y, scale, style, live, black});
   }
   void drawText(int fontId, int x, int y, const char* text, bool black = true,
@@ -223,17 +220,18 @@ class GfxRenderer {
     drawFormedText(fontId, x, y, text, black, style);
   }
   void drawTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
-                      const float scale) const {
+                      const TextScale scale) const {
     drawFormedTextScaled(fontId, x, y, text, black, style, scale);
   }
   // A shaped run: drawn as the real renderer's drawGlyphRun is called, measured as its glyphRunWidth measures (the
   // records' pen, accumulated outside drawTextScaled's unscaled window; this stub's fonts have a base scale of 1).
   void drawGlyphRun(const int fontId, const int x, const int y, const GlyphRun& run, bool /*black*/ = true,
-                    EpdFontFamily::Style /*style*/ = EpdFontFamily::REGULAR, const float scale = 1.0f) const {
+                    EpdFontFamily::Style /*style*/ = EpdFontFamily::REGULAR,
+                    const TextScale scale = TextScale()) const {
     glyphRunDraws.push_back({fontId, x, y, run.count, scale});
   }
-  int glyphRunWidth(int /*fontId*/, const GlyphRun& run, const float scale = 1.0f) const {
-    return glyphRunAdvance(run, scale < 0.99f || scale > 1.01f);
+  int glyphRunWidth(int /*fontId*/, const GlyphRun& run, const TextScale scale = TextScale()) const {
+    return glyphRunAdvance(run, scale < TextScale::percent(99) || scale > TextScale::percent(101));
   }
   // The face a shaper reads for a font's style, and its ppem (26.6), as the real renderer's shapingFace answers: the
   // test's seam decides, a face refused its memory included; null (the default) is a font that cannot shape.
@@ -243,7 +241,7 @@ class GfxRenderer {
                            bool* refused = nullptr) const {
     return shapingFaceSource != nullptr ? shapingFaceSource(fontId, style, ppem26_6, refused) : nullptr;
   }
-  float fontBaseScale(int /*fontId*/) const { return 1.0f; }
+  TextScale fontBaseScale(int /*fontId*/) const { return TextScale(); }
   // The glyph-ID prefetch of a build's warm step: counted, one per run.
   mutable int prefetchedRuns = 0;
   void prefetchGlyphRun(int /*fontId*/, const GlyphRun& /*run*/, EpdFontFamily::Style /*style*/) const {

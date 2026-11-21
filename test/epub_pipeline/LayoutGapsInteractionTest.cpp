@@ -14,6 +14,7 @@
 #include "Epub/blocks/ImageBlock.h"
 #include "Epub/blocks/TextBlock.h"
 #include "GfxRenderer.h"
+#include "PipelineRunner.h"
 #include "SyntheticBook.h"
 
 namespace fs = std::filesystem;
@@ -109,7 +110,8 @@ struct LayoutGapsFixture : testing::Test {
         switch (el->getTag()) {
           case TAG_PageLine: {
             const TextBlock& block = *static_cast<const PageLine&>(*el).getBlock();
-            Line line{p, el->xPos, el->yPos, block.getRenderStyle().fontSizeMultiplier, {}, {}};
+            Line line{p,  el->xPos, el->yPos, pipeline_harness::scaleValue(block.getRenderStyle().fontSizeMultiplier),
+                      {}, {}};
             for (uint16_t w = 0; w < block.wordCount(); ++w) {
               line.words.emplace_back(block.wordText(w));
               line.xpos.push_back(block.wordXpos(w));

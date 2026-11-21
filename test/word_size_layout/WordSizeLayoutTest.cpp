@@ -715,7 +715,7 @@ TEST(WordSizeFolding, UniformNonDefaultFoldsIntoBlockMultiplier) {
   for (const char* w : {"all", "words", "small"}) text.addWord(w, EpdFontFamily::REGULAR, false, false, 70);
 
   ASSERT_TRUE(text.foldUniformWordSizes());
-  EXPECT_FLOAT_EQ(text.getBlockStyle().fontSizeMultiplier, 0.7f);
+  EXPECT_EQ(text.getBlockStyle().fontSizeMultiplier, TextScale::percent(70));
 
   // Per-word sizes were reset to 100 — the emitted line normalizes to the empty
   // (zero-cost) vector, and measurement now runs off the block multiplier.
@@ -723,7 +723,7 @@ TEST(WordSizeFolding, UniformNonDefaultFoldsIntoBlockMultiplier) {
   const auto result = layout(text, renderer, 400);
   ASSERT_EQ(result.lines.size(), 1u);
   EXPECT_FALSE(result.lines[0]->hasWordSizes());
-  EXPECT_FLOAT_EQ(result.lines[0]->getRenderStyle().fontSizeMultiplier, 0.7f);
+  EXPECT_EQ(result.lines[0]->getRenderStyle().fontSizeMultiplier, TextScale::percent(70));
 }
 
 TEST(WordSizeFolding, MixedOrDefaultSizesDoNotFold) {
@@ -731,7 +731,7 @@ TEST(WordSizeFolding, MixedOrDefaultSizesDoNotFold) {
   mixed.addWord("normal", EpdFontFamily::REGULAR);
   mixed.addWord("small", EpdFontFamily::REGULAR, false, false, 70);
   EXPECT_FALSE(mixed.foldUniformWordSizes());
-  EXPECT_FLOAT_EQ(mixed.getBlockStyle().fontSizeMultiplier, 1.0f);
+  EXPECT_TRUE(mixed.getBlockStyle().fontSizeMultiplier.isOne());
 
   ParsedText uniform100(false, false, noIndentStyle());
   uniform100.addWord("plain", EpdFontFamily::REGULAR);
@@ -740,12 +740,12 @@ TEST(WordSizeFolding, MixedOrDefaultSizesDoNotFold) {
 
 TEST(WordSizeFolding, FoldComposesWithExistingBlockMultiplier) {
   BlockStyle bs = noIndentStyle();
-  bs.fontSizeMultiplier = 1.4f;  // e.g. an h2 whose text sits in a 50% span
+  bs.fontSizeMultiplier = TextScale::percent(140);  // e.g. an h2 whose text sits in a 50% span
   ParsedText text(false, false, bs);
   text.addWord("word", EpdFontFamily::REGULAR, false, false, 50);
 
   ASSERT_TRUE(text.foldUniformWordSizes());
-  EXPECT_FLOAT_EQ(text.getBlockStyle().fontSizeMultiplier, 0.7f);
+  EXPECT_EQ(text.getBlockStyle().fontSizeMultiplier, TextScale::percent(70));
 }
 
 // ---------------------------------------------------------------------------
@@ -762,8 +762,8 @@ TEST(WordSizeRender, MixedSizesBaselineAlign) {
   ASSERT_EQ(renderer.drawCalls.size(), 2u);
   const auto& big = renderer.drawCalls[0];
   const auto& small = renderer.drawCalls[1];
-  EXPECT_FLOAT_EQ(big.scale, 2.0f);
-  EXPECT_FLOAT_EQ(small.scale, 1.0f);
+  EXPECT_EQ(big.scale, TextScale::ratio(2, 1));
+  EXPECT_TRUE(small.scale.isOne());
   EXPECT_EQ(big.y, 100);                                                          // tallest word sits at line top
   EXPECT_EQ(small.y, 100 + (2 * GfxRenderer::ASCENDER - GfxRenderer::ASCENDER));  // shifted to shared baseline
 }
@@ -776,7 +776,7 @@ TEST(WordSizeRender, UniformLineRendersAtLineTop) {
   ASSERT_EQ(renderer.drawCalls.size(), 2u);
   EXPECT_EQ(renderer.drawCalls[0].y, 50);
   EXPECT_EQ(renderer.drawCalls[1].y, 50);
-  EXPECT_FLOAT_EQ(renderer.drawCalls[0].scale, 1.0f);
+  EXPECT_TRUE(renderer.drawCalls[0].scale.isOne());
 }
 
 // ---------------------------------------------------------------------------
@@ -797,22 +797,22 @@ TEST(WordSizeRender, SupSubBaselineMatchesLegacyPositions) {
 
   ASSERT_EQ(renderer.drawCalls.size(), 3u);
   EXPECT_EQ(renderer.drawCalls[0].y, 100);  // full-size word at line top
-  EXPECT_FLOAT_EQ(renderer.drawCalls[1].scale, 0.5f);
+  EXPECT_EQ(renderer.drawCalls[1].scale, TextScale::percent(50));
   EXPECT_EQ(renderer.drawCalls[1].y, 100 + 8 - (16 * 2 / 5));  // baseline-align +8, SUP raise -6
-  EXPECT_FLOAT_EQ(renderer.drawCalls[2].scale, 0.5f);
+  EXPECT_EQ(renderer.drawCalls[2].scale, TextScale::percent(50));
   EXPECT_EQ(renderer.drawCalls[2].y, 100 + 8 + (16 / 4));  // baseline-align +8, SUB lower +4
 }
 
 TEST(WordSizeRender, BlockMultiplierComposesWithWordSize) {
   GfxRenderer renderer;
   BlockStyle heading;
-  heading.fontSizeMultiplier = 1.5f;
+  heading.fontSizeMultiplier = TextScale::ratio(3, 2);
   TextBlock line({"word", "small"}, {0, 60}, {EpdFontFamily::REGULAR, EpdFontFamily::REGULAR}, heading, {100, 50});
   line.render(renderer, kFontId, 0, 0);
 
   ASSERT_EQ(renderer.drawCalls.size(), 2u);
-  EXPECT_FLOAT_EQ(renderer.drawCalls[0].scale, 1.5f);   // block multiplier alone
-  EXPECT_FLOAT_EQ(renderer.drawCalls[1].scale, 0.75f);  // 1.5 x 50%
+  EXPECT_EQ(renderer.drawCalls[0].scale, TextScale::ratio(3, 2));  // block multiplier alone
+  EXPECT_EQ(renderer.drawCalls[1].scale, TextScale::ratio(3, 4));  // 1.5 x 50%
 }
 
 // ---------------------------------------------------------------------------

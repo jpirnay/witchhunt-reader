@@ -982,7 +982,7 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   static_assert(CrossPointSettings::BUILTIN_FACE_MAX_POINTS == 18, "the masters below are the 18 pt families");
   for (const auto& rung : CrossPointSettings::FONT_SIZE_RUNGS) {
     if (rung.points <= CrossPointSettings::BUILTIN_FACE_MAX_POINTS) continue;
-    const float scale = CrossPointSettings::builtinFaceScale(rung.points);
+    const TextScale scale = CrossPointSettings::builtinFaceScale(rung.points);
     renderer.insertScaledFont(CrossPointSettings::getBuiltinReaderFontId(CrossPointSettings::SERIF, rung.size),
                               serif18FontFamily, scale);
     renderer.insertScaledFont(CrossPointSettings::getBuiltinReaderFontId(CrossPointSettings::NOTOSANS, rung.size),

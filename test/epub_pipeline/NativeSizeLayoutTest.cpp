@@ -14,6 +14,7 @@
 #include "Epub/Page.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
+#include "PipelineRunner.h"
 #include "SyntheticBook.h"
 
 namespace fs = std::filesystem;
@@ -61,7 +62,9 @@ struct NativeSizeLayoutFixture : testing::Test {
       if (el->getTag() != TAG_PageLine) continue;
       const TextBlock& block = *static_cast<const PageLine&>(*el).getBlock();
       if (block.wordCount() == 0) continue;
-      Line line{{}, block.getRenderStyle().headingFontId, block.getRenderStyle().fontSizeMultiplier};
+      Line line{{},
+                block.getRenderStyle().headingFontId,
+                pipeline_harness::scaleValue(block.getRenderStyle().fontSizeMultiplier)};
       for (uint16_t w = 0; w < block.wordCount(); ++w) {
         if (w > 0) line.text += ' ';
         line.text += block.wordText(w);
@@ -98,9 +101,9 @@ TEST_F(NativeSizeLayoutFixture, EachHeadingSizeHasAFaceOfItsOwn) {
   EXPECT_EQ(kNativeBase | 47, h1->fontId);
   EXPECT_EQ(kNativeBase | 41, h2->fontId);
   EXPECT_EQ(kNativeBase | 35, h3->fontId);
-  for (const Line* heading : {h1, h2, h3}) EXPECT_FLOAT_EQ(1.0f, heading->mult) << heading->text;
+  for (const Line* heading : {h1, h2, h3}) EXPECT_NEAR(1.0f, heading->mult, 1e-5f) << heading->text;
   EXPECT_EQ(0, p->fontId);
-  EXPECT_FLOAT_EQ(1.0f, p->mult);
+  EXPECT_NEAR(1.0f, p->mult, 1e-5f);
 }
 
 TEST_F(NativeSizeLayoutFixture, ABuiltInLadderStillHasOneAuxiliaryFace) {
@@ -113,7 +116,7 @@ TEST_F(NativeSizeLayoutFixture, ABuiltInLadderStillHasOneAuxiliaryFace) {
   ASSERT_TRUE(h1 && h3);
   EXPECT_EQ(106, h1->fontId);  // 160% on the 142% rung claims the section's one auxiliary face
   EXPECT_EQ(0, h3->fontId);    // 120% wants the 114% rung: taken, so the body face, scaled
-  EXPECT_FLOAT_EQ(1.2f, h3->mult);
+  EXPECT_NEAR(1.2f, h3->mult, 1e-5f);
 }
 
 TEST_F(NativeSizeLayoutFixture, ACssSizeHasAFaceOfItsOwn) {
@@ -121,7 +124,7 @@ TEST_F(NativeSizeLayoutFixture, ACssSizeHasAFaceOfItsOwn) {
   const Line* small = find(lines, "Small print.");
   ASSERT_NE(nullptr, small);
   EXPECT_EQ(kNativeBase | 23, small->fontId);  // 23.3 px
-  EXPECT_FLOAT_EQ(1.0f, small->mult);
+  EXPECT_NEAR(1.0f, small->mult, 1e-5f);
 }
 
 TEST_F(NativeSizeLayoutFixture, ADropCapIsSetAtItsOwnSize) {
@@ -132,7 +135,7 @@ TEST_F(NativeSizeLayoutFixture, ADropCapIsSetAtItsOwnSize) {
   const Line* cap = find(lines, "A");
   ASSERT_NE(nullptr, cap);
   EXPECT_EQ(kNativeBase | 88, cap->fontId);  // 3 x 29.17 = 87.5 px
-  EXPECT_FLOAT_EQ(1.0f, cap->mult);
+  EXPECT_NEAR(1.0f, cap->mult, 1e-5f);
 }
 
 TEST_F(NativeSizeLayoutFixture, ADropCapAboveTheLargestFaceIsItScaled) {

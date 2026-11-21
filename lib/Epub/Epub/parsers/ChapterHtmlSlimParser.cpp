@@ -729,8 +729,8 @@ int ChapterHtmlSlimParser::currentBlockSizePct() const {
   // of the book's other families: a block is resolved before its words are laid out, so only a block long enough
   // to be laid out in parts sees one, and a rem span in it is sized as in a body-size block.)
   const BlockStyle& bs = currentTextBlock->getBlockStyle();
-  return std::max(1,
-                  static_cast<int>(fontSizeLadder_.scaleOf(bs.headingFontId) * bs.fontSizeMultiplier * 100.0f + 0.5f));
+  return std::max(
+      1, static_cast<int>(fontSizeLadder_.scaleOf(bs.headingFontId) * floatOf(bs.fontSizeMultiplier) * 100.0f + 0.5f));
 }
 
 void ChapterHtmlSlimParser::countCensusWord(BodySize::Census& census) {
@@ -2495,7 +2495,7 @@ void ChapterHtmlSlimParser::startDropCap(const CssStyle& cssStyle, const bool fi
   if (lines == 0) {
     mult = cssStyle.fontSizeRootRelative ? cssStyle.fontSizeMultiplier
                                          : cssStyle.fontSizeMultiplier * (effectiveSizePct / 100.0f) *
-                                               currentTextBlock->getBlockStyle().fontSizeMultiplier;
+                                               floatOf(currentTextBlock->getBlockStyle().fontSizeMultiplier);
     mult = std::min(std::max(mult, kDropCapMinMultiplier), kDropCapMaxMultiplier);
   }
 
@@ -2537,7 +2537,7 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   int bodyInkBelow = 0;
   renderer.ensureFontReady(fontId, pendingDropCap_.text);
   renderer.getTextInkMetrics(fontId, pendingDropCap_.text, EpdFontFamily::REGULAR, &bodyInkTop, &bodyInkBelow);
-  const float paraMult = currentTextBlock->getBlockStyle().fontSizeMultiplier;
+  const float paraMult = floatOf(currentTextBlock->getBlockStyle().fontSizeMultiplier);
   const int bodyLeading =
       std::max(0, static_cast<int>((renderer.getFontAscenderSize(fontId) - bodyInkTop) * paraMult + 0.5f));
 
@@ -2590,13 +2590,15 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   int capInkBelow = 0;
   const bool haveInk =
       renderer.getTextInkMetrics(capEffFontId, pendingDropCap_.text, pendingDropCap_.style, &capInkTop, &capInkBelow);
-  int capWidth = renderer.getTextWidthScaled(capEffFontId, pendingDropCap_.text, pendingDropCap_.style, capScale);
+  int capWidth =
+      renderer.getTextWidthScaled(capEffFontId, pendingDropCap_.text, pendingDropCap_.style, textScaleOf(capScale));
   // As tall as its lines in the face it is set in; fewer lines, down to two, where it would be wider than half the
   // column (the inline fallback's limit below).
   if (lines > 0 && haveInk && capInkTop > 0) {
     const auto fit = [&] {
       capScale = capHeight(lines) / static_cast<float>(capInkTop);
-      capWidth = renderer.getTextWidthScaled(capEffFontId, pendingDropCap_.text, pendingDropCap_.style, capScale);
+      capWidth =
+          renderer.getTextWidthScaled(capEffFontId, pendingDropCap_.text, pendingDropCap_.style, textScaleOf(capScale));
     };
     fit();
     while (lines > 2 && capWidth + kDropCapGapPx > viewportWidth / 2) {
@@ -2638,7 +2640,7 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
 
   BlockStyle capBlockStyle;
   capBlockStyle.headingFontId = capFontId;
-  capBlockStyle.fontSizeMultiplier = capScale;
+  capBlockStyle.fontSizeMultiplier = textScaleOf(capScale);
   capBlockStyle.fontResolved = true;
   auto capBlock = makeUniqueNoThrow<TextBlock>(std::vector<std::string>{pendingDropCap_.text}, std::vector<int16_t>{0},
                                                std::vector<EpdFontFamily::Style>{pendingDropCap_.style}, capBlockStyle,
@@ -4191,7 +4193,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (!cssStyle.hasFontSizeMultiplier()) {
       const int level = name[1] - '0';  // 'h1'->1, 'h2'->2, …
       if (level >= 1 && level <= 3) {
-        headerBlockStyle.fontSizeMultiplier = kHeadingMultiplier[level - 1];
+        headerBlockStyle.fontSizeMultiplier = textScaleOf(kHeadingMultiplier[level - 1]);
       }
     }
     if (self->headingDepth_ == INT_MAX) {
@@ -5810,10 +5812,10 @@ void ChapterHtmlSlimParser::resolveBlockFont(BlockStyle& bs) {
   if (bs.headingFontId != 0) return;
   const uint8_t slot =
       blockFamilyState_ == 0 ? 0 : fontFamilySlot(blockFamilyState_ == 1 ? blockFirstFamily_ : blockOwnFamily_);
-  const float size = bs.fontSizeMultiplier;
+  const float size = floatOf(bs.fontSizeMultiplier);
   const FontSizeLadder::Resolved r = resolveFamilyFont(fontFamily(slot), size);
   bs.headingFontId = r.fontId;
-  bs.fontSizeMultiplier = r.residual;
+  bs.fontSizeMultiplier = textScaleOf(r.residual);
   // The block's words in other families than its own: each family's face at the block's size.
   if (!fontFamilies_ || !currentTextBlock || &currentTextBlock->getBlockStyle() != &bs) return;
   wordFontsSize_ = size;
@@ -5846,7 +5848,7 @@ FontSizeLadder::Resolved ChapterHtmlSlimParser::resolveFamilyFont(const BlockFon
 void ChapterHtmlSlimParser::resolveWordFont(const uint8_t slot) {
   if (slot == blockFontSlot_) return;  // the block's own family: its font, the slot's default
   const FontSizeLadder::Resolved r = resolveFamilyFont(fontFamily(slot), wordFontsSize_);
-  const TextBlock::WordFont font{r.fontId != 0 ? r.fontId : fontId, r.residual};
+  const TextBlock::WordFont font{r.fontId != 0 ? r.fontId : fontId, textScaleOf(r.residual)};
   const BlockStyle& bs = currentTextBlock->getBlockStyle();
   if (font.fontId == effectiveFontId(bs) && font.scale == bs.fontSizeMultiplier) return;  // the block's font after all
   currentTextBlock->setFontSlot(slot, font);
@@ -5865,7 +5867,8 @@ int ChapterHtmlSlimParser::effectiveLineHeight(const BlockStyle& bs) const {
   const float compression = bookPerEm_ > 0.0f && bs.lineHeightEm > 0.0f
                                 ? std::max(bs.lineHeightEm * bookPerEm_, bookFloor_)
                                 : lineCompression;
-  return static_cast<int>(renderer.getLineHeight(effectiveFontId(bs)) * compression * bs.fontSizeMultiplier + 0.5f);
+  return static_cast<int>(renderer.getLineHeight(effectiveFontId(bs)) * compression * floatOf(bs.fontSizeMultiplier) +
+                          0.5f);
 }
 
 ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line,
@@ -5999,9 +6002,7 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
   // The line's glyphs reach the font's full line height below its text's top, more than the advance under a tight
   // spacing; a line's images lower its text by box.textTop.
   const int glyphHeight =
-      static_cast<int>(renderer.getLineHeight(effectiveFontId(lineStyle)) * lineStyle.fontSizeMultiplier + 0.5f) *
-          maxPct / 100 +
-      band;
+      lineStyle.fontSizeMultiplier.apply(renderer.getLineHeight(effectiveFontId(lineStyle))) * maxPct / 100 + band;
   lastGlyphBottom_ = static_cast<int16_t>(currentPageNextY + std::max(lineHeight, box.textTop + glyphHeight));
   if (!boxScopes_.empty()) {
     noteBoxContent(lastGlyphBottom_);
@@ -6082,7 +6083,7 @@ void ChapterHtmlSlimParser::endBlockSpan() {
 void ChapterHtmlSlimParser::clearSpentBlockHeadingStyle() {
   if (!currentTextBlock || !currentTextBlock->isEmpty()) return;
   BlockStyle& spent = currentTextBlock->getBlockStyle();
-  spent.fontSizeMultiplier = 1.0f;
+  spent.fontSizeMultiplier = TextScale();
   spent.headingFontId = 0;
   spent.fontResolved = false;
   spent.keepWithNext = false;
@@ -6818,8 +6819,8 @@ ChapterHtmlSlimParser::LineText ChapterHtmlSlimParser::lineText(const BlockStyle
   text.height = height;
   text.ascent = TextBlock::lineAscenderFor(renderer, font, bs.fontSizeMultiplier, maxSizePct);
   text.baseline = band + text.ascent;
-  text.descent =
-      std::max(0, renderer.getLineHeightScaled(font, bs.fontSizeMultiplier * maxSizePct / 100.0f) - text.ascent);
+  text.descent = std::max(
+      0, renderer.getLineHeightScaled(font, bs.fontSizeMultiplier * TextScale::percent(maxSizePct)) - text.ascent);
   if (vertical_) {
     // The centre line TextBlock::render draws a column's characters on: the block's em at its baseline.
     text.column = true;

@@ -1635,7 +1635,7 @@ bool EpubReaderActivity::inkOnlyPrerenderAvailable() const {
   const int fontId = getEffectiveReaderFontId();
   const auto it = renderer.getSdCardFonts().find(fontId);
   return it != renderer.getSdCardFonts().end() && it->second && it->second->hasTwoBitBitmaps() &&
-         renderer.fontBaseScale(fontId) == 1.0f;
+         renderer.fontBaseScale(fontId).isOne();
 }
 
 bool EpubReaderActivity::pageDrawsUnscaled(const Page& page) {
