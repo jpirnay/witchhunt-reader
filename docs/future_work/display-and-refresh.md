@@ -1,6 +1,6 @@
 # Display and refresh
 
-Status: open items as of 2026-10-07; the last three sections (sleep-image upscaling, landscape screenshots, the next SDK resync) added 2026-11-15, from the upstream triage. Collected from display-baseline-audit-2026-09-23.md, display-capability-audit-2026-08-17.md, framebuffer-content-audit-2026-09-23.md, x3-sleep-ghosting-hypotheses.md, superpowers/specs/2026-09-23-framebuffer-contract-design.md, busy-indicator-handover-2026-09-21.md, background-rendering.md and grayscale-aa-rendering.md (the audits and handovers were removed in the 2026-10-07 docs cleanup; they are in git history).
+Status: open items as of 2026-10-07; the sections on sleep-image upscaling, landscape screenshots and the next SDK resync added 2026-11-15, from the upstream triage; sleep pictures above four levels added 2026-11-21. Collected from display-baseline-audit-2026-09-23.md, display-capability-audit-2026-08-17.md, framebuffer-content-audit-2026-09-23.md, x3-sleep-ghosting-hypotheses.md, superpowers/specs/2026-09-23-framebuffer-contract-design.md, busy-indicator-handover-2026-09-21.md, background-rendering.md and grayscale-aa-rendering.md (the audits and handovers were removed in the 2026-10-07 docs cleanup; they are in git history).
 
 Background for every item: [secondary-buffer-management.md](../secondary-buffer-management.md) (what each
 framebuffer holds, and where each controller keeps its previous frame).
@@ -485,6 +485,34 @@ bump). Prefer CrossInk's version if it is ported: a cache key hashed from the wh
 board without a clock; one full SD read per sleep), an explicit target size, 1-bit sources kept 1-bit for the B/W
 refresh, and a direct-draw fallback. crosspoint-reader #4185, Justin Mitchell (@itsthisjustin); CrossInk e36b25b1,
 Julia Nguyen (@uxjulia).
+
+## Sleep pictures above four levels on panels without a canvas
+
+**Prepared 2026-11-21, not reachable yet.** Measured on 2026-11-20 (camera, `CMD:SLEEP:SCREEN`), the two 4-level
+grays sit far below a third and two thirds: 11/20 % of white on the X3, 6/63 % on the Picco, 8/29 % on the X4 Pro. The
+fix is more levels, from calibrated waveforms: Free-Ink #220 (zuyan9, X3, two-pass 16-gray) and #223 (Katie
+Paxton-Fear, Picco 16-level image). The Picco takes its image through the gray8 canvas (SDK `feat/picco-gray16-images`).
+The C3 boards have no memory for a canvas, so #220's shape is described as data instead: `gray_levels::Plan`
+(`lib/hal/GrayLevelPlan.h`), a B/W base and passes of 1-bit planes chosen by 16-bit ink masks. `SleepActivity` draws
+each plane from the cover again (`GrayLevelQuantizer`, an ordered dither against the panel's measured L*, so every
+read gives a pixel the same ink), and lends the secondary buffer to fill both planes of a pass in one read where the
+cover is already built. `HalDisplay::grayLevelPlan()` is nullptr on every board, so nothing changes on a device yet,
+and `HalDisplay::kMayRunGrayLevelPlan` (false) compiles the path out. Over master that costs about 0.85 KB of C3
+flash (stubs, the drawBitmap branch, the canvas fallback); compiled in, about 3.9 KB. The quantizer is integer only (an
+sRGB -> L* table, setup in hundredths of L*): its first, float version pulled soft-float `pow` and `cbrt` into the C3
+image, about 3.8 KB more.
+
+**Open.**
+- X3: port #220's 16-gray into our UC8253 driver, answer `grayLevelPlan()` from its masks (`freeink::gray16`) and an
+  L* table measured with a reference card, forward the base and passes, and turn on `kMayRunGrayLevelPlan` for it.
+- X4 Pro (UC8179): measure the 32 cells (black and white base, `x4plab/grid2.py`), pick 16, and decide between a plan
+  and the Picco's canvas adapter (the board has PSRAM).
+- X4 (SSD1677): lab tooling first (`setLabRegisters`, a HALF lab frame), then the same measurement.
+- Cost: one read of the cover per pass with the secondary lent, one per plane without; neither is measured yet.
+- Picco: #223's levels measured darker than its L* table (level 7: 15 % against 52 % of the L* range); re-measure with
+  the card. A sleep cover's net drive is never given back, because deep sleep loses the PSRAM level copy.
+- The Picco's PNG sleep images stay at 4 levels: the PNG decoder paints the canvas only where
+  `HalDisplay::kMayLendGray8Canvas` (T5S3). Reader pictures do not use a plan.
 
 ## Screenshots in landscape come out sideways (CrossPoint #4457)
 
