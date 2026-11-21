@@ -18,7 +18,7 @@ namespace ChapterXPathIndexerInternal {
 // not, is anchored at its first direct text or, lacking any, at its END tag.
 // scratch: see PassScratch.
 bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, int spineIndex, const std::string& xpath,
-                                  float& outIntraSpineProgress, bool& outExactMatch,
+                                  ProgressPpb& outIntraSpineProgress, bool& outExactMatch,
                                   uint16_t* outListItemIndex = nullptr, uint32_t* outVisibleOffset = nullptr,
                                   bool* outIsTextPoint = nullptr, BuildArena* scratch = nullptr);
 

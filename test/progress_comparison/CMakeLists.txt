@@ -6,6 +6,7 @@ add_executable(ProgressComparisonTest
 
 target_include_directories(ProgressComparisonTest PRIVATE
   ${REPO_ROOT}/lib
+  ${REPO_ROOT}/lib/Epub
   ${REPO_ROOT}/lib/KOReaderSync
 )
 

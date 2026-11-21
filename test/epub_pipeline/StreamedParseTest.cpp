@@ -98,8 +98,9 @@ TEST_F(StreamedParseFixture, CountingStreamsToo) {
 
 TEST_F(StreamedParseFixture, AnUnreadableChapterYieldsNoXPathRatherThanTheBaseOne) {
   // "" (uncached, so the next push retries) rather than the chapter-start xpath.
-  EXPECT_EQ(ChapterXPathIndexer::findXPathForProgress(epub, 99, 0.5f), "");
-  EXPECT_EQ(ChapterXPathIndexer::findXPathForProgress(epub, 99, 0.5f), "");
+  const ProgressPpb half(ProgressPpb::kWhole / 2);
+  EXPECT_EQ(ChapterXPathIndexer::findXPathForProgress(epub, 99, half), "");
+  EXPECT_EQ(ChapterXPathIndexer::findXPathForProgress(epub, 99, half), "");
 }
 
 // Lent a region (the secondary framebuffer, on the X3 the one block a chapter's inflate ring fits in), both mappings
@@ -117,14 +118,14 @@ TEST_F(StreamedParseFixture, BothMappingsWorkInALentRegionAndGiveItBack) {
     EXPECT_EQ(lent, onHeap) << "offset " << offset;
     EXPECT_EQ(arena.used(), 0u) << "offset " << offset;
 
-    float intra = 0.0f;
+    ProgressPpb intra;
     bool exact = false;
     uint32_t back = 0;
     bool textPoint = false;
     ASSERT_TRUE(ChapterXPathIndexer::findProgressForXPath(epub, kAppendixSpine, lent, intra, exact, nullptr, &back,
                                                           &textPoint, &arena));
     EXPECT_EQ(arena.used(), 0u);
-    float heapIntra = 0.0f;
+    ProgressPpb heapIntra;
     bool heapExact = false;
     uint32_t heapBack = 0;
     ASSERT_TRUE(ChapterXPathIndexer::findProgressForXPath(epub, kAppendixSpine, lent, heapIntra, heapExact, nullptr,

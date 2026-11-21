@@ -17,6 +17,9 @@ target_include_directories(KOReaderProgressReplyTest PRIVATE
   ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/KOReaderSync
+  # Epub/ProgressPpb.h and SeriesIndex.h, header-only.
+  ${REPO_ROOT}/lib/Epub
+  ${REPO_ROOT}/lib/LibraryIndex
 )
 
 target_link_libraries(KOReaderProgressReplyTest PRIVATE

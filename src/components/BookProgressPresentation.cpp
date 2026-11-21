@@ -47,10 +47,11 @@ std::string bookEtaSuffix(const RecentBook& book, int progressPercent) {
     return {};
   }
   const auto* history = historyOf(book);
-  const float own =
-      history != nullptr ? ReadingStatsStore::ownSecondsPerPercent(history->totalSeconds, history->progress) : 0.0f;
-  const float pace = own > 0.0f ? own : READING_STATS.recentPooledPace();
-  const uint32_t etaSeconds = ReadingStatsStore::etaSeconds(pace, 100.0f - static_cast<float>(progressPercent));
+  const ReadingStatsStore::SecondsPerPercent own =
+      history != nullptr ? ReadingStatsStore::ownSecondsPerPercent(history->totalSeconds, history->progress)
+                         : ReadingStatsStore::SecondsPerPercent{};
+  const uint32_t etaSeconds =
+      ReadingStatsStore::etaSeconds(own.known() ? own : READING_STATS.recentPooledPace(), 100 - progressPercent);
   if (etaSeconds == 0) {
     return {};
   }
@@ -206,6 +207,16 @@ std::string formatReadingDuration(uint32_t totalSeconds) {
   } else {
     snprintf(buf, sizeof(buf), "%us", s);
   }
+  return buf;
+}
+
+std::string formatPagesPerMinute(const uint32_t pages, const uint32_t seconds) {
+  if (seconds < 60 || pages == 0) {
+    return tr(STR_READING_STATS_UNKNOWN);
+  }
+  const uint32_t tenths = ReadingStatsStore::pagesPerMinuteTenths(pages, seconds);
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%u.%u", static_cast<unsigned>(tenths / 10), static_cast<unsigned>(tenths % 10));
   return buf;
 }
 

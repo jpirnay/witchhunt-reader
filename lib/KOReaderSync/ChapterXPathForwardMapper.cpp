@@ -149,7 +149,7 @@ std::optional<size_t> getTotalTextBytesCached(const std::shared_ptr<Epub>& epub,
 }  // namespace
 
 std::string findXPathForProgressInternal(const std::shared_ptr<Epub>& epub, const int spineIndex,
-                                         const float intraSpineProgress) {
+                                         const ProgressPpb intraSpineProgress) {
   const auto counted = getTotalTextBytesCached(epub, spineIndex);
   if (!counted) {
     return "";
@@ -161,8 +161,7 @@ std::string findXPathForProgressInternal(const std::shared_ptr<Epub>& epub, cons
     return base;
   }
 
-  const float clamped = std::max(0.0f, std::min(1.0f, intraSpineProgress));
-  const size_t targetOffset = static_cast<size_t>(clamped * static_cast<float>(totalTextBytes));
+  const size_t targetOffset = intraSpineProgress.partOf(static_cast<uint32_t>(totalTextBytes));
 
   ForwardState state(spineIndex, targetOffset);
   state.inclusive = true;
@@ -179,8 +178,8 @@ std::string findXPathForProgressInternal(const std::shared_ptr<Epub>& epub, cons
     state.result = "/body/DocFragment[" + std::to_string(spineIndex + 1) + "]/body";
   }
 
-  LOG_DBG("KOX", "Forward: spine=%d progress=%.3f target=%zu/%zu -> %s", spineIndex, intraSpineProgress, targetOffset,
-          totalTextBytes, state.result.c_str());
+  LOG_DBG("KOX", "Forward: spine=%d progress=%lu ppb target=%zu/%zu -> %s", spineIndex,
+          static_cast<unsigned long>(intraSpineProgress.ppb()), targetOffset, totalTextBytes, state.result.c_str());
   return state.result;
 }
 

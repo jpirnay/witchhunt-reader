@@ -47,7 +47,7 @@ TEST(LibraryOrder, TitlesCompareNaturallyAndIgnoreCase) {
   EXPECT_EQ(sorted({0, 1, 2}, catalog), (std::vector<uint16_t>{2, 1, 0}));
 }
 
-// strtof gives NaN for "nan", and a NaN in the comparison breaks the sort's ordering contract.
+// Not a number, "nan" included (strtof read it as NaN, which broke the sort's ordering contract).
 TEST(LibraryOrder, AnIndexThatIsNotANumberSortsAsZero) {
   const Catalog catalog{{0, {"S", "1", "a"}}, {1, {"S", "nan", "b"}}, {2, {"S", "x", "c"}}};
   EXPECT_EQ(sorted({0, 1, 2}, catalog), (std::vector<uint16_t>{1, 2, 0}));

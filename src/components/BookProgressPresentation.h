@@ -53,6 +53,10 @@ void drawBadge(const GfxRenderer& renderer, Rect coverRect, const RecentBook& bo
 // ReadingStatsBookDetailActivity, which were byte-identical; behaviour is unchanged.
 std::string formatReadingDuration(uint32_t totalSeconds);
 
+// Pages per minute to a tenth ("1.4"), or the "unknown" word below a minute of reading or with no page turned, so a
+// handful of seconds does not read as "120.0". Shared by the two reading-stats screens.
+std::string formatPagesPerMinute(uint32_t pages, uint32_t seconds);
+
 // "just now" / "5m ago" / "3d ago", falling back to an absolute date past a month. Empty when
 // the epoch is unknown or the clock has never been wall-anchored, so the caller draws nothing
 // rather than claiming a book was last read at the epoch.

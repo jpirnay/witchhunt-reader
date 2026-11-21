@@ -122,7 +122,7 @@ TEST(XPathNormalize, AncestorMeansAProperPrefixOnASegmentBoundary) {
 // are in the XPath string.
 
 TEST(PeekRemote, ReadsSpineAndBodyChildParagraph) {
-  const auto pos = ProgressMapper::peekRemote({"/body/DocFragment[1]/body/p[25]/text().0", 0.3f}, 3);
+  const auto pos = ProgressMapper::peekRemote({"/body/DocFragment[1]/body/p[25]/text().0", ProgressPpb(300000)}, 3);
   EXPECT_TRUE(pos.hasResolvedSpineIndex);
   EXPECT_EQ(pos.spineIndex, 0);
   EXPECT_TRUE(pos.hasParagraphIndex);
@@ -130,20 +130,24 @@ TEST(PeekRemote, ReadsSpineAndBodyChildParagraph) {
 }
 
 TEST(PeekRemote, NestedParagraphGivesOnlyTheSpine) {
-  const auto pos = ProgressMapper::peekRemote({"/body/DocFragment[2]/body/section/p[30]/text().0", 0.3f}, 3);
+  const auto pos =
+      ProgressMapper::peekRemote({"/body/DocFragment[2]/body/section/p[30]/text().0", ProgressPpb(300000)}, 3);
   EXPECT_TRUE(pos.hasResolvedSpineIndex);
   EXPECT_EQ(pos.spineIndex, 1);
   EXPECT_FALSE(pos.hasParagraphIndex);
 }
 
 TEST(PeekRemote, SpineOutOfRangeOrMissingIsNotTrusted) {
-  EXPECT_FALSE(ProgressMapper::peekRemote({"/body/DocFragment[9]/body/p[1]", 0.3f}, 3).hasResolvedSpineIndex);
-  EXPECT_FALSE(ProgressMapper::peekRemote({"/body/DocFragment[0]/body/p[1]", 0.3f}, 3).hasResolvedSpineIndex);
-  EXPECT_FALSE(ProgressMapper::peekRemote({"", 0.3f}, 3).hasResolvedSpineIndex);
+  EXPECT_FALSE(
+      ProgressMapper::peekRemote({"/body/DocFragment[9]/body/p[1]", ProgressPpb(300000)}, 3).hasResolvedSpineIndex);
+  EXPECT_FALSE(
+      ProgressMapper::peekRemote({"/body/DocFragment[0]/body/p[1]", ProgressPpb(300000)}, 3).hasResolvedSpineIndex);
+  EXPECT_FALSE(ProgressMapper::peekRemote({"", ProgressPpb(300000)}, 3).hasResolvedSpineIndex);
 }
 
 TEST(PeekRemote, UnknownSpineCountSkipsTheRangeCheck) {
-  EXPECT_TRUE(ProgressMapper::peekRemote({"/body/DocFragment[9]/body/p[1]", 0.3f}, 0).hasResolvedSpineIndex);
+  EXPECT_TRUE(
+      ProgressMapper::peekRemote({"/body/DocFragment[9]/body/p[1]", ProgressPpb(300000)}, 0).hasResolvedSpineIndex);
 }
 
 }  // namespace

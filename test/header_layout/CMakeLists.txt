@@ -11,6 +11,8 @@ target_include_directories(HeaderLayoutTest PRIVATE
   ${REPO_ROOT}/lib/I18n
   ${I18N_GENERATED_DIR}
   ${REPO_ROOT}/lib
+  # Epub/ProgressPpb.h, the status bar's progress type.
+  ${REPO_ROOT}/lib/Epub
   # I18n.h stub, and the stdio-backed HalStorage CrossPointSettings.h pulls in.
   ${REPO_ROOT}/test/epub_pipeline
   ${REPO_ROOT}/test/zip_entry_reader
