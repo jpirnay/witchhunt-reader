@@ -30,7 +30,7 @@ constexpr int kChapter3Spine = 6;
 Section::BuildParams params() {
   Section::BuildParams p;
   p.fontId = 0;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.extraParagraphSpacing = false;
   p.paragraphAlignment = 0;
   p.viewportWidth = 480;

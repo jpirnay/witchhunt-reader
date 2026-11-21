@@ -93,7 +93,7 @@ struct HeadingBlockLayoutFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = viewportWidth;
     params.viewportHeight = 800;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     params.embeddedStyle = true;
     params.paragraphAlignment = paragraphAlignment;
     params.hyphenationEnabled = hyphenation;

@@ -277,7 +277,7 @@ static_assert(CrossPointSettings::PARAGRAPH_INDENT_NONE == static_cast<uint8_t>(
                   CrossPointSettings::PARAGRAPH_INDENT_FROM_BOOK == static_cast<uint8_t>(ParagraphIndent::FromBook),
               "the stored paragraph indents are ParagraphIndent's");
 
-float CrossPointSettings::getReaderLineCompression() const {
+TextScale CrossPointSettings::getReaderLineCompression() const {
   // Without a book (the dictionary's pages): no CJK pitch, and Book's style reads as Normal.
   const LineSpacingScale scale = getReaderFontId() == getBuiltinReaderFontIdForPoints(NOTOSANS, fontPointSize)
                                      ? LineSpacingScale::BuiltinNotoSans

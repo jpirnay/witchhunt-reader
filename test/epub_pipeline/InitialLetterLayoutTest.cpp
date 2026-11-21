@@ -65,7 +65,7 @@ struct InitialLetterFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = 480;
     params.viewportHeight = 800;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     params.extraParagraphSpacing = true;  // no reader's first-line indent
     params.paragraphAlignment = 1;        // left
     params.embeddedStyle = options.embeddedStyle;

@@ -1110,7 +1110,7 @@ class CrossPointSettings {
   // quickResumeSleepScreen=ON). Call after any setting mutation that could invalidate the pair.
   static void normalizeDependentSettings(CrossPointSettings& settings);
 
-  float getReaderLineCompression() const;
+  TextScale getReaderLineCompression() const;
   unsigned long getSleepTimeoutMs() const;
   int getRefreshFrequency() const;
 };

@@ -26,9 +26,17 @@ class TextScale {
   // above it.
   static constexpr TextScale ratio(const int64_t num, const int64_t den) {
     if (num < 0 || den <= 0) return TextScale();
-    if (num > (int64_t{1} << 42)) return TextScale(UINT32_MAX);
-    return saturated((static_cast<uint64_t>(num) << kShift) + static_cast<uint64_t>(den) - 1,
-                     static_cast<uint64_t>(den));
+    auto d = static_cast<uint64_t>(den);
+    const uint64_t whole = static_cast<uint64_t>(num) / d;
+    if (whole >= (uint64_t{1} << (32 - kShift))) return TextScale(UINT32_MAX);
+    uint64_t rest = static_cast<uint64_t>(num) % d;
+    // rest << kShift must fit 64 bits: a divisor this large (no scale of a stylesheet's has one) gives up its low bits.
+    while (d >= (uint64_t{1} << 43)) {
+      rest >>= 1;
+      d >>= 1;
+    }
+    const uint64_t q = (whole << kShift) + ((rest << kShift) + d - 1) / d;
+    return TextScale(q > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(q));
   }
   // pct / 100, rounded up onto the grid: percent(80) is 0.8. Per word in layout, so in 32 bits (the C3 divides those
   // in hardware, 64 bits in a library call): fine for any percent a uint8_t or a font size holds.
@@ -45,6 +53,12 @@ class TextScale {
   constexpr TextScale operator*(const TextScale other) const {
     const uint64_t product = (static_cast<uint64_t>(raw_) * other.raw_ + (kOne - 1)) >> kShift;
     return TextScale(product > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(product));
+  }
+
+  // The quotient, rounded up onto the grid; the largest scale for a zero divisor.
+  constexpr TextScale operator/(const TextScale other) const {
+    if (other.raw_ == 0) return TextScale(UINT32_MAX);
+    return saturated((static_cast<uint64_t>(raw_) << kShift) + other.raw_ - 1, other.raw_);
   }
 
   // v x scale + 1/2, truncated toward zero: the nearest integer, halves up, for any product from -1/2 up, which is all

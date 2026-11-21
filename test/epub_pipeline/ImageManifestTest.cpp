@@ -385,7 +385,7 @@ struct DeferredImageBuildFixture : ImageManifestFixture {
     Section::BuildParams p;
     p.viewportWidth = 480;
     p.viewportHeight = 800;
-    p.lineCompression = 1.0f;
+    p.lineCompression = TextScale();
     return p;
   }
 
@@ -524,7 +524,7 @@ struct LentWalkFixture : ImageManifestFixture {
     Section::BuildParams p;
     p.viewportWidth = 480;
     p.viewportHeight = 800;
-    p.lineCompression = 1.0f;
+    p.lineCompression = TextScale();
     {
       Section section(epub, 0, renderer);
       if (lent) section.setExternalBuildScratch(lent.get());

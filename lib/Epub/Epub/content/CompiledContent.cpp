@@ -109,8 +109,8 @@ void writeStyle(FsFile& f, const CssStyle& s) {
   writePod(f, static_cast<uint8_t>(s.listStyleNone));
   writePod(f, static_cast<uint8_t>(s.pageBreakBefore));
   writePod(f, static_cast<uint8_t>(s.pageBreakAfter));
-  writePod(f, s.lineHeightEm);
-  writePod(f, s.fontSizeMultiplier);
+  writePod(f, s.lineHeightEm.raw());
+  writePod(f, s.fontSizeMultiplier.raw());
   writePod(f, static_cast<uint8_t>(s.cssFloat));
   writePod(f, static_cast<uint8_t>(s.smallCaps));
   writePod(f, packDefined(s.defined));
@@ -147,8 +147,11 @@ void readStyle(FsFile& f, CssStyle& s) {
   s.pageBreakBefore = e != 0;
   readPod(f, e);
   s.pageBreakAfter = e != 0;
-  readPod(f, s.lineHeightEm);
-  readPod(f, s.fontSizeMultiplier);
+  uint32_t raw = 0;
+  readPod(f, raw);
+  s.lineHeightEm = TextScale::fromRaw(raw);
+  readPod(f, raw);
+  s.fontSizeMultiplier = TextScale::fromRaw(raw);
   readPod(f, e);
   s.cssFloat = static_cast<CssFloat>(e);
   readPod(f, e);

@@ -83,7 +83,7 @@ Laid layOutLent(const std::string& body, std::vector<uint8_t>& region, EpubImage
   BuildArena::Block parse = arena.reserveBlock();
   {
     ChapterHtmlSlimParser parser(
-        /*epub=*/nullptr, renderer, /*fontId=*/1, /*lineCompression=*/1.0f, /*extraParagraphSpacing=*/false,
+        /*epub=*/nullptr, renderer, /*fontId=*/1, /*lineCompression=*/TextScale(), /*extraParagraphSpacing=*/false,
         /*paragraphAlignment=*/0, /*viewportWidth=*/480, /*viewportHeight=*/pageHeight, /*hyphenationEnabled=*/false,
         /*fontSizeNormalization=*/false, /*bionicReadingEnabled=*/false,
         [&laid, &region, begin](std::unique_ptr<Page> page) {

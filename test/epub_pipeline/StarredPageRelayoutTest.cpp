@@ -39,7 +39,7 @@ namespace {
 Section::BuildParams layoutA() {
   Section::BuildParams p;
   p.fontId = 0;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.viewportWidth = 480;
   p.viewportHeight = 800;
   return p;
@@ -50,7 +50,7 @@ Section::BuildParams layoutA() {
 Section::BuildParams layoutB() {
   Section::BuildParams p = layoutA();
   p.fontId = 1;
-  p.lineCompression = 1.35f;
+  p.lineCompression = TextScale::percent(135);
   p.viewportWidth = 352;
   p.viewportHeight = 590;
   return p;
@@ -60,7 +60,7 @@ Section::BuildParams layoutB() {
 Section::BuildParams layoutC() {
   Section::BuildParams p = layoutA();
   p.fontId = 2;
-  p.lineCompression = 0.9f;
+  p.lineCompression = TextScale::percent(90);
   p.viewportWidth = 560;
   p.viewportHeight = 780;
   return p;

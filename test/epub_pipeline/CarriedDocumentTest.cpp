@@ -71,7 +71,7 @@ class CarriedDocumentTest : public testing::Test {
   Laid lay(const std::string& prefix, const std::string& carried, const std::string& rest) {
     Laid run;
     ChapterHtmlSlimParser parser(
-        epub, renderer, /*fontId=*/1, /*lineCompression=*/1.0f, /*extraParagraphSpacing=*/false,
+        epub, renderer, /*fontId=*/1, /*lineCompression=*/TextScale(), /*extraParagraphSpacing=*/false,
         /*paragraphAlignment=*/0, kWidth, kHeight, /*hyphenationEnabled=*/false, /*fontSizeNormalization=*/false,
         /*bionicReadingEnabled=*/false,
         [&run](std::unique_ptr<Page> page) {

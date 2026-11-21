@@ -59,7 +59,7 @@ struct Laid {
 
 struct Options {
   uint8_t indent = static_cast<uint8_t>(ParagraphIndent::FromBook);
-  float lineCompression = 1.0f;
+  TextScale lineCompression;
   bool extraParagraphSpacing = true;
 };
 
@@ -177,7 +177,7 @@ TEST_F(LayoutGapsFixture, AnImageAfterKeptSpacesTakesNoGapOfItsOwn) {
 // taller lowers its text, glyphs and all. Under a tight line spacing the glyphs reach past the line's advance.
 TEST_F(LayoutGapsFixture, ABoxBelowALineAnImageLowersStartsBelowItsGlyphs) {
   Options tight;
-  tight.lineCompression = 0.9f;
+  tight.lineCompression = TextScale::percent(90);
   tight.extraParagraphSpacing = false;  // nothing between the line and the frame but the frame's own rule
   const Laid laid =
       build("p, div { margin: 0; } .frame { border: 1px solid; }",

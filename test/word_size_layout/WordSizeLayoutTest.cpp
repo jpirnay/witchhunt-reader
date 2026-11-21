@@ -560,6 +560,10 @@ TEST(WordSizeSerialization, EmptyBlockRoundTrips) {
 // ---------------------------------------------------------------------------
 
 namespace {
+// A size `pct` percent of the body's, as the parser hands one to the ladder; and a scale as a number, to compare.
+TextScale pct(const int64_t percent, const int64_t per = 1) { return TextScale::ratio(percent, 100 * per); }
+float value(const TextScale s) { return static_cast<float>(s.raw()) / TextScale::kOne; }
+
 // Serif body at 14 pt: rungs 10/12/14/16/18 pt as percent of the body.
 FontSizeLadder serif14Ladder() {
   FontSizeLadder ladder;
@@ -574,53 +578,53 @@ FontSizeLadder serif14Ladder() {
 
 TEST(FontSizeLadderTest, EmptyLadderKeepsScaleFallback) {
   const FontSizeLadder empty;
-  const auto r = empty.resolve(160.0f);
+  const auto r = empty.resolve(pct(160));
   EXPECT_EQ(r.fontId, 0);
-  EXPECT_FLOAT_EQ(r.residual, 1.6f);
+  EXPECT_NEAR(value(r.residual), 1.6f, 1e-5f);
 }
 
 TEST(FontSizeLadderTest, SnapsToNearestRungWithResidual) {
   const auto ladder = serif14Ladder();
   // h1 default 160% → nearest rung is 18 pt (128%), residual 160/128.
-  const auto h1 = ladder.resolve(160.0f);
+  const auto h1 = ladder.resolve(pct(160));
   EXPECT_EQ(h1.fontId, 105);
-  EXPECT_FLOAT_EQ(h1.residual, 160.0f / 128.0f);
+  EXPECT_NEAR(value(h1.residual), 160.0f / 128.0f, 1e-5f);
   // 80% (footnote) → nearest rung is 12 pt (85%), residual < 1.
-  const auto small = ladder.resolve(80.0f);
+  const auto small = ladder.resolve(pct(80));
   EXPECT_EQ(small.fontId, 102);
-  EXPECT_FLOAT_EQ(small.residual, 80.0f / 85.0f);
+  EXPECT_NEAR(value(small.residual), 80.0f / 85.0f, 1e-5f);
   // Exact rung hit → residual 1.0.
-  const auto exact = ladder.resolve(114.0f);
+  const auto exact = ladder.resolve(pct(114));
   EXPECT_EQ(exact.fontId, 104);
-  EXPECT_FLOAT_EQ(exact.residual, 1.0f);
+  EXPECT_NEAR(value(exact.residual), 1.0f, 1e-5f);
 }
 
 TEST(FontSizeLadderTest, NearBodySizesStayOnBodyFont) {
   const auto ladder = serif14Ladder();
   // 105% is nearest the 100% body rung → fontId 0, pure scale (legacy path).
-  const auto near = ladder.resolve(105.0f);
+  const auto near = ladder.resolve(pct(105));
   EXPECT_EQ(near.fontId, 0);
-  EXPECT_FLOAT_EQ(near.residual, 1.05f);
+  EXPECT_NEAR(value(near.residual), 1.05f, 1e-5f);
 }
 
 TEST(FontSizeLadderTest, ResidualDeadZoneSnapsToNativeGlyphs) {
   const auto ladder = serif14Ladder();
   // 87% → 12 pt rung (85%), residual 1.024 — inside the 3% zone → native 12 pt.
-  const auto near12 = ladder.resolve(87.0f);
+  const auto near12 = ladder.resolve(pct(87));
   EXPECT_EQ(near12.fontId, 102);
-  EXPECT_FLOAT_EQ(near12.residual, 1.0f);
+  EXPECT_NEAR(value(near12.residual), 1.0f, 1e-5f);
   // 98% → body rung, residual 0.98 — snaps to plain unscaled body text.
-  const auto nearBody = ladder.resolve(98.0f);
+  const auto nearBody = ladder.resolve(pct(98));
   EXPECT_EQ(nearBody.fontId, 0);
-  EXPECT_FLOAT_EQ(nearBody.residual, 1.0f);
+  EXPECT_NEAR(value(nearBody.residual), 1.0f, 1e-5f);
   // 80% → 12 pt rung, residual 0.941 — OUTSIDE the zone, stays scaled.
-  const auto scaled = ladder.resolve(80.0f);
+  const auto scaled = ladder.resolve(pct(80));
   EXPECT_EQ(scaled.fontId, 102);
-  EXPECT_FLOAT_EQ(scaled.residual, 80.0f / 85.0f);
+  EXPECT_NEAR(value(scaled.residual), 80.0f / 85.0f, 1e-5f);
   // Empty ladder (SD fonts): the zone applies to the pure-scale residual too.
   const FontSizeLadder empty;
-  EXPECT_FLOAT_EQ(empty.resolve(102.0f).residual, 1.0f);
-  EXPECT_FLOAT_EQ(empty.resolve(95.0f).residual, 0.95f);
+  EXPECT_NEAR(value(empty.resolve(pct(102)).residual), 1.0f, 1e-5f);
+  EXPECT_NEAR(value(empty.resolve(pct(95)).residual), 0.95f, 1e-5f);
 }
 
 // A TTF family: every size its own face, at whole pixels per em.
@@ -638,48 +642,47 @@ FontSizeLadder nativeLadder() {
 TEST(FontSizeLadderTest, ANativeLadderGivesEachSizeItsOwnWholePixelFace) {
   const auto ladder = nativeLadder();
   // h1 160%: 46.7 px, drawn at 47 px; the 0.7% left over is inside the dead zone.
-  const auto h1 = ladder.resolve(160.0f);
+  const auto h1 = ladder.resolve(pct(160));
   EXPECT_EQ(kNativeBase | 47, h1.fontId);
-  EXPECT_FLOAT_EQ(1.0f, h1.residual);
-  const auto h2 = ladder.resolve(140.0f);
+  EXPECT_NEAR(1.0f, value(h1.residual), 1e-5f);
+  const auto h2 = ladder.resolve(pct(140));
   EXPECT_EQ(kNativeBase | 41, h2.fontId);
-  EXPECT_FLOAT_EQ(1.0f, h2.residual);
+  EXPECT_NEAR(1.0f, value(h2.residual), 1e-5f);
   // A footnote at 80%: 23.3 px at 23 px.
-  const auto small = ladder.resolve(80.0f);
+  const auto small = ladder.resolve(pct(80));
   EXPECT_EQ(kNativeBase | 23, small.fontId);
-  EXPECT_FLOAT_EQ(1.0f, small.residual);
+  EXPECT_NEAR(1.0f, value(small.residual), 1e-5f);
 }
 
 TEST(FontSizeLadderTest, ANativeLadderKeepsTheBodyFaceNearTheBodySize) {
   const auto ladder = nativeLadder();
-  for (const float pct : {97.5f, 100.0f, 102.5f}) {
-    const auto r = ladder.resolve(pct);
-    EXPECT_EQ(0, r.fontId) << pct;
-    EXPECT_FLOAT_EQ(1.0f, r.residual) << pct;
+  for (const TextScale size : {pct(975, 10), pct(100), pct(1025, 10)}) {
+    const auto r = ladder.resolve(size);
+    EXPECT_EQ(0, r.fontId) << size.raw();
+    EXPECT_TRUE(r.residual.isOne()) << size.raw();
   }
   // 96%: 28.0 px is a face of its own, not the body's 29.17.
-  EXPECT_EQ(kNativeBase | 28, ladder.resolve(96.0f).fontId);
+  EXPECT_EQ(kNativeBase | 28, ladder.resolve(pct(96)).fontId);
 }
 
 TEST(FontSizeLadderTest, ANativeLadderScalesTheLargestFaceBeyondIt) {
   const auto ladder = nativeLadder();
   // A 5x drop cap: 145.8 px, the 120 px face scaled by the rest.
-  const auto cap = ladder.resolve(500.0f);
+  const auto cap = ladder.resolve(pct(500));
   EXPECT_EQ(kNativeBase | 120, cap.fontId);
-  EXPECT_NEAR(145.83f / 120.0f, cap.residual, 0.001f);
+  EXPECT_NEAR(145.83f / 120.0f, value(cap.residual), 0.001f);
   // Tiny text: the smallest face, scaled down.
-  const auto tiny = ladder.resolve(30.0f);
+  const auto tiny = ladder.resolve(pct(30));
   EXPECT_EQ(kNativeBase | 10, tiny.fontId);
-  EXPECT_NEAR(8.75f / 10.0f, tiny.residual, 0.001f);
+  EXPECT_NEAR(8.75f / 10.0f, value(tiny.residual), 0.001f);
 }
 
 TEST(FontSizeLadderTest, ANativeLadderClampsAbsurdSizesBeforeConvertingThem) {
-  // A book's CSS can ask for any size (font-size: 1e12%); converting a float beyond int's range is undefined, and
-  // differs between the host and the device. The largest face serves, scaled.
+  // A book's CSS can ask for any size (font-size: 1e12%): the scale saturates, and the largest face serves, scaled.
   const auto ladder = nativeLadder();
-  EXPECT_EQ(kNativeBase | 120, ladder.resolve(1e12f).fontId);
-  EXPECT_EQ(kNativeBase | 120, ladder.resolve(3e38f).fontId);
-  EXPECT_EQ(kNativeBase | 10, ladder.resolve(1e-30f).fontId);
+  EXPECT_EQ(kNativeBase | 120, ladder.resolve(pct(1000000000000)).fontId);
+  EXPECT_EQ(kNativeBase | 120, ladder.resolve(TextScale::fromRaw(UINT32_MAX)).fontId);
+  EXPECT_EQ(kNativeBase | 10, ladder.resolve(TextScale::fromRaw(1)).fontId);
 }
 
 TEST(FontSizeLadderTest, AnIncompleteNativeLadderIsIgnored) {
@@ -688,22 +691,22 @@ TEST(FontSizeLadderTest, AnIncompleteNativeLadderIsIgnored) {
   ladder.setNative(kNativeBase, 0, 10, 120);
   ladder.setNative(kNativeBase, kBody14pt, 20, 10);
   EXPECT_FALSE(ladder.native());
-  EXPECT_FLOAT_EQ(1.6f, ladder.resolve(160.0f).residual);  // the scale fallback
+  EXPECT_NEAR(1.6f, value(ladder.resolve(pct(160)).residual), 1e-5f);  // the scale fallback
 }
 
 // scaleOf undoes resolve: the chosen font's size times the residual is the size asked for, which
 // is how the chapter parser puts a body-relative (rem) span into an already resolved block.
 TEST(FontSizeLadderTest, ScaleOfTimesResidualIsTheResolvedSize) {
   for (const auto& ladder : {serif14Ladder(), nativeLadder(), FontSizeLadder{}}) {
-    for (const float pct : {60.0f, 80.0f, 100.0f, 114.0f, 160.0f, 240.0f}) {
-      const auto r = ladder.resolve(pct);
-      const float size = ladder.scaleOf(r.fontId) * r.residual;
+    for (const int percent : {60, 80, 100, 114, 160, 240}) {
+      const auto r = ladder.resolve(pct(percent));
+      const float size = value(ladder.scaleOf(r.fontId) * r.residual);
       // Within the residual dead zone: resolve snaps a residual that close to 1.0.
-      EXPECT_NEAR(pct / 100.0f, size, pct / 100.0f * FontSizeLadder::kResidualDeadZone) << pct;
+      EXPECT_NEAR(percent / 100.0f, size, percent / 100.0f * FontSizeLadder::kResidualDeadZonePct / 100.0f) << percent;
     }
   }
-  EXPECT_FLOAT_EQ(1.0f, serif14Ladder().scaleOf(0));
-  EXPECT_FLOAT_EQ(1.0f, serif14Ladder().scaleOf(12345));  // not a font of the ladder
+  EXPECT_TRUE(serif14Ladder().scaleOf(0).isOne());
+  EXPECT_TRUE(serif14Ladder().scaleOf(12345).isOne());  // not a font of the ladder
 }
 
 // ---------------------------------------------------------------------------

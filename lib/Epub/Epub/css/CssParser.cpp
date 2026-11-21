@@ -100,22 +100,23 @@ constexpr size_t NEGATIVE_CACHE_SIZE = CSS_NEGATIVE_CACHE_SIZE;
 constexpr size_t MAX_SELECTOR_LENGTH = 256;
 
 constexpr size_t CSS_LENGTH_FIELD_COUNT = 11;
-constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
+constexpr size_t CSS_LENGTH_BYTES = sizeof(int32_t) + sizeof(uint8_t);
 // Layout: 4 enum bytes + 11 lengths + display byte + definedBits uint16 + 3 vertAlign bytes (value, defined and
 //         percent flags, the length; v35) + cssFloat byte
-//         + smallCaps byte (bit 2 = text-emphasis defined, bits 3-6 = its mark; v31) + fontSizeMultiplier float +
+//         + smallCaps byte (bit 2 = text-emphasis defined, bits 3-6 = its mark; v31) + fontSizeMultiplier u32 +
 //         fontSize flags byte + block flags byte (listStyleNone / pageBreakBefore / pageBreakAfter value+defined pairs)
 //         + visibility flags byte (colorTransparent / opacityZero / visibilityHidden value+defined pairs; v19)
 //         + fontFamily hash (uint32; defined is bit 2 of the font-size flags byte; v28)
-//         + line-height in ems (float; defined is bit 3 of the font-size flags byte; v30)
+//         + line-height in ems (u32; defined is bit 3 of the font-size flags byte; v30)
+//         Lengths are 16.16 (CssLength), the multiplier and the line-height TextScale (v37; floats before)
 //         + the flow word (uint16: writing-mode, direction, text-combine-upright, text-orientation,
 //           unicode-bidi; packFlow; v30; white-space, v35)
 //         + the initial-letter byte (CssStyle::initialLetter; v35)
 //         + the box (CssBox's three bytes: the borders, the background and the <hr> facts; v35)
 constexpr size_t CSS_FIXED_STYLE_BYTES =
     4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) + sizeof(uint8_t) + sizeof(uint16_t) +
-    3 * sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint8_t) + sizeof(float) + sizeof(uint8_t) + sizeof(uint8_t) +
-    sizeof(uint8_t) + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) + sizeof(uint8_t) + CssBox::kBytes;
+    3 * sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t) +
+    sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint16_t) + sizeof(uint8_t) + CssBox::kBytes;
 static_assert(CSS_FIXED_STYLE_BYTES == 88,
               "style payload layout changed — update read/writeCssStylePayload and bump CSS_CACHE_VERSION");
 // A rule record is selectorLen(2) selector order(2) payload; the order sits between selector and
@@ -716,16 +717,11 @@ CssLength CssParser::interpretLength(const std::string_view val) {
   return result;
 }
 
-bool CssParser::tryInterpretLength(const std::string_view v, CssLength& out) {
-  // Was three heap strings per call — normalized(val) plus a substr for each of the number and
-  // unit halves — on a function invoked for every margin/padding/indent in the sheet (and four
-  // times over for each shorthand). Now zero: the input is already normalized (see the note
-  // above the interpreters) and both halves are views into it.
-  if (v.empty()) {
-    out = CssLength{};
-    return false;
-  }
-
+namespace {
+// A length's number, read exactly, and its unit as written (the text after the number: "em", "%", nothing). The number
+// is what leads up to the first character that is no digit, point or sign, as CSS lengths are written; false when no
+// number starts it (auto, inherit, initial).
+bool splitLength(const std::string_view v, CssNumber& number, std::string_view& unit) {
   size_t unitStart = v.size();
   for (size_t i = 0; i < v.size(); ++i) {
     const char c = v[i];
@@ -734,26 +730,23 @@ bool CssParser::tryInterpretLength(const std::string_view v, CssLength& out) {
       break;
     }
   }
+  // Anything this long is no length.
+  if (unitStart == 0 || unitStart >= 24) return false;
+  unit = v.substr(unitStart);
+  return CssNumber::parse(v.substr(0, unitStart), number, /*exponent=*/false) != 0;
+}
+}  // namespace
 
-  const std::string_view numPart = v.substr(0, unitStart);
-  const std::string_view unitPart = v.substr(unitStart);
-
-  // strtof needs a NUL-terminated buffer and string_view gives no guarantee of one. The number
-  // half of a CSS length is short by construction, so copy it into a small stack buffer rather
-  // than heap-allocating; anything longer than the buffer is not a valid length anyway.
-  char numBuf[24];
-  if (numPart.empty() || numPart.size() >= sizeof(numBuf)) {
+bool CssParser::tryInterpretLength(const std::string_view v, CssLength& out) {
+  // Was three heap strings per call — normalized(val) plus a substr for each of the number and
+  // unit halves — on a function invoked for every margin/padding/indent in the sheet (and four
+  // times over for each shorthand). Now zero: the input is already normalized (see the note
+  // above the interpreters) and both halves are views into it.
+  CssNumber number;
+  std::string_view unitPart;
+  if (!splitLength(v, number, unitPart)) {
     out = CssLength{};
     return false;
-  }
-  std::memcpy(numBuf, numPart.data(), numPart.size());
-  numBuf[numPart.size()] = '\0';
-
-  char* endPtr = nullptr;
-  const float numericValue = std::strtof(numBuf, &endPtr);
-  if (endPtr == numBuf) {
-    out = CssLength{};
-    return false;  // No number parsed (e.g. auto, inherit, initial)
   }
 
   auto unit = CssUnit::Pixels;
@@ -767,7 +760,7 @@ bool CssParser::tryInterpretLength(const std::string_view v, CssLength& out) {
     unit = CssUnit::Percent;
   }
 
-  out = CssLength{numericValue, unit};
+  out = CssLength::of(number, unit);
   return true;
 }
 
@@ -776,27 +769,29 @@ bool CssParser::interpretVerticalAlignLength(const std::string_view v, int8_t& s
   // medium, as interpretLineHeight takes them, and ex as half an em; rounded, and clamped to what a byte holds (about
   // eight ems either way). A length that rounds to nothing is not kept, as before lengths were read: it is the
   // baseline anyway, and kept it would cancel a <sup>'s raise.
-  CssLength length;
-  if (!tryInterpretLength(v, length)) return false;
-  const size_t unitAt = v.find_first_not_of("0123456789.+-");
-  const std::string_view unit = unitAt == std::string_view::npos ? std::string_view{} : v.substr(unitAt);
-  float sixteenths = 0.0f;
+  CssNumber number;
+  std::string_view unit;
+  if (!splitLength(v, number, unit)) return false;
+  // The length in sixteenths, exactly: number x times / per.
+  int64_t times = 1;
+  int64_t per = 1;
   percent = false;
   if (unit == "em" || unit == "rem") {
-    sixteenths = length.value * 16.0f;
+    times = 16;
   } else if (unit == "ex") {
-    sixteenths = length.value * 8.0f;
-  } else if (unit == "px") {
-    sixteenths = length.value;
+    times = 8;
   } else if (unit == "pt") {
-    sixteenths = length.value * 4.0f / 3.0f;
+    times = 4;
+    per = 3;
   } else if (unit == "%") {
-    sixteenths = length.value;
     percent = true;
-  } else {
+  } else if (unit != "px") {
     return false;
   }
-  const long rounded = std::lround(std::clamp(sixteenths, -127.0f, 127.0f));
+  const CssNumber sixteenths{number.num * times, number.den * per};
+  const int64_t rounded = sixteenths.num > 127 * sixteenths.den    ? 127
+                          : sixteenths.num < -127 * sixteenths.den ? -127
+                                                                   : sixteenths.rounded();
   if (rounded == 0) return false;
   shift = static_cast<int8_t>(rounded);
   return true;
@@ -918,49 +913,43 @@ bool CssParser::interpretInitialLetter(const std::string_view v, uint8_t& out) {
     sink = trimCss(v.substr(space + 1));
     if (size == "drop" || size == "raise") std::swap(size, sink);
   }
-  const auto number = [](const std::string_view text, float& value) {
-    char buf[16];
-    if (text.empty() || text.size() >= sizeof(buf)) return false;
-    memcpy(buf, text.data(), text.size());
-    buf[text.size()] = '\0';
-    char* end = nullptr;
-    value = std::strtof(buf, &end);
-    return end == buf + text.size();
+  // The whole of `text` a number.
+  const auto number = [](const std::string_view text, CssNumber& value) {
+    return !text.empty() && text.size() < 16 && CssNumber::parse(text, value) == text.size();
   };
-  float lines = 0.0f;
-  if (!number(size, lines) || lines < 1.0f) return false;
-  uint8_t sinkLines = 0;  // as deep as the letter is tall
+  CssNumber lines;
+  if (!number(size, lines) || lines.num < lines.den) return false;  // below 1
+  uint8_t sinkLines = 0;                                            // as deep as the letter is tall
   if (sink == "raise") {
     sinkLines = 1;
   } else if (!sink.empty() && sink != "drop") {
-    float k = 0.0f;
-    if (!number(sink, k) || k < 1.0f || k != static_cast<float>(static_cast<int>(k))) return false;
-    sinkLines = static_cast<uint8_t>(std::min<float>(k, CssInitialLetter::kMaxLines));
+    CssNumber k;
+    if (!number(sink, k) || k.num < k.den || !k.whole()) return false;
+    sinkLines = static_cast<uint8_t>(std::min<int64_t>(k.num / k.den, CssInitialLetter::kMaxLines));
   }
-  out = CssInitialLetter::pack(static_cast<uint8_t>(std::min<float>(lines + 0.5f, CssInitialLetter::kMaxLines)),
+  out = CssInitialLetter::pack(static_cast<uint8_t>(std::min<int64_t>(lines.rounded(), CssInitialLetter::kMaxLines)),
                                sinkLines);
   return true;
 }
 
-bool CssParser::interpretLineHeight(const std::string_view v, float& em) {
+bool CssParser::interpretLineHeight(const std::string_view v, TextScale& em) {
   // A multiple of the element's font size, as CSS has it. px and pt are taken at CSS's 16 px medium, so a book written
   // in pixels keeps its ratio to the text. Clamped to what a page can sensibly show; zero and below are not a value.
-  CssLength length;
-  if (!tryInterpretLength(v, length)) return false;
-  const size_t unitAt = v.find_first_not_of("0123456789.+-");
-  const std::string_view unit = unitAt == std::string_view::npos ? std::string_view{} : v.substr(unitAt);
-  float value = length.value;
+  CssNumber number;
+  std::string_view unit;
+  if (!splitLength(v, number, unit)) return false;
+  int64_t per = 1;
   if (unit == "%") {
-    value /= 100.0f;
+    per = 100;
   } else if (unit == "px") {
-    value /= 16.0f;
+    per = 16;
   } else if (unit == "pt") {
-    value /= 12.0f;
+    per = 12;
   } else if (!unit.empty() && unit != "em" && unit != "rem") {
     return false;
   }
-  if (!(value > 0.0f)) return false;
-  em = std::max(0.5f, std::min(4.0f, value));
+  if (number.num <= 0) return false;
+  em = std::max(TextScale::percent(50), std::min(TextScale::ratio(4, 1), number.scale(per)));
   return true;
 }
 
@@ -974,7 +963,7 @@ bool CssParser::interpretImageSize(const std::string_view v, CssLength& out) {
   // inherit is excluded on purpose: width/height are not inherited properties, so it is not
   // equivalent to auto and we keep ignoring it.
   if (v == "auto" || v == "initial" || v == "unset" || v == "revert") {
-    out = CssLength{0.0f, CssUnit::Auto};
+    out = CssLength{0, CssUnit::Auto};
     return true;
   }
   return false;
@@ -1629,7 +1618,7 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
       style.defined.pageBreakAfter = 1;
     }
   } else if (propNameBuf == "line-height") {
-    float em = 0.0f;
+    TextScale em;
     if (interpretLineHeight(propValueBuf, em)) {
       style.lineHeightEm = em;
       style.defined.lineHeight = 1;
@@ -1637,85 +1626,58 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
   } else if (propNameBuf == "font-size") {
     const std::string_view val = propValueBuf;
     if (val != "inherit" && val != "initial" && val != "unset") {
-      float parsed = 0.0f;
-      bool ok = false;
+      TextScale parsed = TextScale::fromRaw(0);
       // em, % and smaller/larger scale the parent's size; everything else is the body's (rem) or a
       // fixed size, normalised against the body's nominal one -- CssStyle::fontSizeRootRelative.
       bool fromRoot = true;
+      // The number the value starts with, divided by `per`: 0 when none starts it.
+      const auto number = [&val](const int64_t per) {
+        CssNumber n;
+        return CssNumber::parse(val, n) != 0 ? n.scale(per) : TextScale::fromRaw(0);
+      };
       if (!val.empty() && val.back() == '%') {
         fromRoot = false;
-        const char* p = val.data();
-        char* end = nullptr;
-        float v = std::strtof(p, &end);
-        if (end != p) {
-          parsed = v / 100.0f;
-          ok = true;
-        }
+        parsed = number(100);
       } else if (val.size() > 3 && val.substr(val.size() - 3) == "rem") {
-        const char* p = val.data();
-        char* end = nullptr;
-        float v = std::strtof(p, &end);
-        if (end != p) {
-          parsed = v;
-          ok = true;
-        }
+        parsed = number(1);
       } else if (val.size() > 2 && val.substr(val.size() - 2) == "em") {
         fromRoot = false;
-        const char* p = val.data();
-        char* end = nullptr;
-        float v = std::strtof(p, &end);
-        if (end != p) {
-          parsed = v;
-          ok = true;
-        }
+        parsed = number(1);
       } else if (val.size() > 2 && val.substr(val.size() - 2) == "pt") {
         // Absolute points, normalised against a 12 pt nominal body size — the
         // convention print-derived EPUBs assume (CSS medium == 16 px == 12 pt).
-        const char* p = val.data();
-        char* end = nullptr;
-        float v = std::strtof(p, &end);
-        if (end != p) {
-          parsed = v / 12.0f;
-          ok = true;
-        }
+        parsed = number(12);
       } else if (val.size() > 2 && val.substr(val.size() - 2) == "px") {
         // Absolute pixels, normalised against the CSS default body size of 16 px.
-        const char* p = val.data();
-        char* end = nullptr;
-        float v = std::strtof(p, &end);
-        if (end != p) {
-          parsed = v / 16.0f;
-          ok = true;
-        }
+        parsed = number(16);
       } else {
         // CSS absolute-size keywords on the scale of CSS Fonts Level 4 (section 2.5, the table of
         // absolute-size keywords), as factors of medium; smaller and larger are relative-size
         // keywords, one step of 1.2 down or up from the parent's size.
         if (val == "xx-small") {
-          parsed = 3.0f / 5.0f;
+          parsed = TextScale::ratio(3, 5);
         } else if (val == "x-small") {
-          parsed = 3.0f / 4.0f;
+          parsed = TextScale::ratio(3, 4);
         } else if (val == "small") {
-          parsed = 8.0f / 9.0f;
+          parsed = TextScale::ratio(8, 9);
         } else if (val == "medium") {
-          parsed = 1.0f;
+          parsed = TextScale();
         } else if (val == "large") {
-          parsed = 6.0f / 5.0f;
+          parsed = TextScale::ratio(6, 5);
         } else if (val == "x-large") {
-          parsed = 3.0f / 2.0f;
+          parsed = TextScale::ratio(3, 2);
         } else if (val == "xx-large") {
-          parsed = 2.0f;
+          parsed = TextScale::ratio(2, 1);
         } else if (val == "xxx-large") {
-          parsed = 3.0f;
+          parsed = TextScale::ratio(3, 1);
         } else if (val == "smaller") {
-          parsed = 1.0f / 1.2f;
+          parsed = TextScale::ratio(5, 6);
         } else if (val == "larger") {
-          parsed = 1.2f;
+          parsed = TextScale::ratio(6, 5);
         }
-        ok = parsed > 0.0f;
         fromRoot = val != "smaller" && val != "larger";
       }
-      if (ok && parsed > 0.0f) {
+      if (parsed.raw() > 0) {
         style.fontSizeMultiplier = parsed;
         style.fontSizeRootRelative = fromRoot;
         style.defined.fontSizeMultiplier = 1;
@@ -2645,13 +2607,13 @@ bool CssParser::decodeCssStylePayload(const uint8_t* const bytes, CssStyle& styl
   style.defined.smallCaps = (smallCapsVal & 0x2) != 0 ? 1 : 0;
   style.defined.textEmphasis = (smallCapsVal & 0x4) != 0 ? 1 : 0;
   style.textEmphasis = style.defined.textEmphasis ? static_cast<uint8_t>((smallCapsVal >> 3) & 0xF) : 0;
-  float fontSizeMul = 1.0f;
+  uint32_t fontSizeMul = TextScale::kOne;
   uint8_t fontSizeFlags = 0;
   if (!get(&fontSizeMul, sizeof(fontSizeMul)) || !get(&fontSizeFlags, 1)) {
     return false;
   }
   if ((fontSizeFlags & 0x1) != 0) {
-    style.fontSizeMultiplier = fontSizeMul;
+    style.fontSizeMultiplier = TextScale::fromRaw(fontSizeMul);
     style.fontSizeRootRelative = (fontSizeFlags & 0x2) != 0;
     style.defined.fontSizeMultiplier = 1;
   }
@@ -2677,7 +2639,7 @@ bool CssParser::decodeCssStylePayload(const uint8_t* const bytes, CssStyle& styl
   style.defined.opacityZero = (visibilityFlags & 0x08) != 0 ? 1 : 0;
   style.visibilityHidden = (visibilityFlags & 0x10) != 0;
   style.defined.visibilityHidden = (visibilityFlags & 0x20) != 0 ? 1 : 0;
-  float lineHeightEm = 0.0f;
+  uint32_t lineHeightEm = 0;
   uint16_t flow = 0;
   uint8_t box[CssBox::kBytes];
   if (!get(&style.fontFamily, sizeof(style.fontFamily)) || !get(&lineHeightEm, sizeof(lineHeightEm)) ||
@@ -2687,7 +2649,7 @@ bool CssParser::decodeCssStylePayload(const uint8_t* const bytes, CssStyle& styl
   unpackFlow(flow, style);
   style.box.setBytes(box);
   if (lineHeightDefined) {
-    style.lineHeightEm = lineHeightEm;
+    style.lineHeightEm = TextScale::fromRaw(lineHeightEm);
     style.defined.lineHeight = 1;
   }
   return true;
@@ -2759,9 +2721,10 @@ size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const pa
   uint8_t smallCapsVal = (style.smallCaps ? 0x1 : 0x0) | (style.defined.smallCaps ? 0x2 : 0x0);
   if (style.defined.textEmphasis) smallCapsVal |= static_cast<uint8_t>(0x4 | ((style.textEmphasis & 0xF) << 3));
   put8(smallCapsVal);
-  // font-size multiplier: float + flags byte (bit 0 = defined, bit 1 = relative to the body, v27;
-  // bit 2 = font-family defined, v28; bit 3 = line-height defined, v30)
-  put(&style.fontSizeMultiplier, sizeof(style.fontSizeMultiplier));
+  // font-size multiplier: TextScale's u32 (v37; a float before) + flags byte (bit 0 = defined, bit 1 = relative to
+  // the body, v27; bit 2 = font-family defined, v28; bit 3 = line-height defined, v30)
+  const uint32_t fontSizeMul = style.fontSizeMultiplier.raw();
+  put(&fontSizeMul, sizeof(fontSizeMul));
   const uint8_t fontSizeFlags = (style.defined.fontSizeMultiplier ? 0x1 : 0x0) |
                                 (style.fontSizeRootRelative ? 0x2 : 0x0) | (style.defined.fontFamily ? 0x4 : 0x0) |
                                 (style.defined.lineHeight ? 0x8 : 0x0);
@@ -2778,7 +2741,8 @@ size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const pa
                                   (style.defined.visibilityHidden ? 0x20 : 0x00);
   put8(visibilityFlags);
   put(&style.fontFamily, sizeof(style.fontFamily));
-  put(&style.lineHeightEm, sizeof(style.lineHeightEm));
+  const uint32_t lineHeightEm = style.lineHeightEm.raw();
+  put(&lineHeightEm, sizeof(lineHeightEm));
   const uint16_t flow = packFlow(style);
   put(&flow, sizeof(flow));
   put8(style.initialLetter);

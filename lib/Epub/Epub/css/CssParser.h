@@ -144,7 +144,9 @@ class CssParser {
   // v36: the file ends with the sheet table (each stylesheet's range of rule orders and the sheets its @import rules
   //      name; see sheetRanges), and a selector redeclared at the start of a sheet no longer merges into the rule that
   //      ended the sheet before it. Otherwise the rule records and the index are as v35 wrote them.
-  static constexpr uint8_t CSS_CACHE_VERSION = 36;
+  // v37: a length is 16.16 fixed point (CssLength), the font-size multiplier and the line-height TextScale (u32);
+  //      floats before. The payload's size is unchanged.
+  static constexpr uint8_t CSS_CACHE_VERSION = 37;
   // Bytes before the complex-rule table and the sorted offset index: version(1) + ruleCount(2) +
   // totalSelectorCandidates(4) + unsupportedSelectorSkips(4) + flags(1) + complexTableBytes(2).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 14;
@@ -655,7 +657,7 @@ class CssParser {
    *  either the length or the CssUnit::Auto marker; false for values we ignore. */
   static bool interpretImageSize(std::string_view val, CssLength& out);
   /** line-height as a multiple of the element's font size; false for normal, the keywords and what is not a length. */
-  static bool interpretLineHeight(std::string_view val, float& em);
+  static bool interpretLineHeight(std::string_view val, TextScale& em);
   // vertical-align as a length (CssStyle::verticalAlignShift and verticalAlignPercent); false for anything else.
   static bool interpretVerticalAlignLength(std::string_view val, int8_t& shift, bool& percent);
   // How text runs. Each leaves `out` alone and returns false for inherit, unset, revert and values it does not know,

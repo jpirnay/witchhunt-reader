@@ -64,6 +64,14 @@ FLOAT_FREE = [
     "src/activities/reader/DictionaryWordSelectActivity.cpp",
     "src/activities/settings/FontScalingTestActivity.cpp",
     "src/main.cpp",
+    # CSS lengths and layout (integer-maths area 3): CssNumber, 16.16 CssLength, TextScale for sizes and spacing.
+    "lib/Epub/Epub/BodySize.cpp",
+    "lib/Epub/Epub/Section.cpp",
+    "lib/Epub/Epub/content/CompiledContent.cpp",
+    "lib/Epub/Epub/css/",
+    "lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp",
+    "src/CrossPointSettings.cpp",
+    "src/util/DictHtmlPages.cpp",
 ]
 
 

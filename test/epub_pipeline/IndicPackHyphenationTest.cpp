@@ -87,7 +87,7 @@ TEST(IndicPackHyphenation, AHindiBookBreaksBetweenSyllablesWithoutAHyphen) {
   GfxRenderer renderer;
   Section::BuildParams p;
   p.fontId = 1;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.viewportWidth = 150;  // narrow: lines end inside words
   p.viewportHeight = 760;
   p.inlineFootnotePreviews = false;

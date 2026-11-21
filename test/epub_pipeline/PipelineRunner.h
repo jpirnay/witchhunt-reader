@@ -30,9 +30,9 @@ inline float scaleValue(const TextScale scale) { return static_cast<float>(scale
 struct Profile {
   const char* name = "default";
   int fontId = 1;
-  float lineCompression = 1.0f;
+  TextScale lineCompression;
   // Book's style line spacing (Section::BuildParams); off by default.
-  float bookLineHeightFloor = 0.0f;
+  TextScale bookLineHeightFloor = TextScale::fromRaw(0);
   uint16_t lineHeightEmPx = 0;
   bool extraParagraphSpacing = false;
   // The reader's Paragraph Indent (Section::BuildParams): Book's Style, which the goldens were laid out with.

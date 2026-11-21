@@ -198,7 +198,7 @@ class BoxLayout : public testing::Test {
   bool embeddedStyle = true;
   bool vertical = false;
   uint16_t viewportHeight = 600;
-  float lineCompression = 1.0f;
+  TextScale lineCompression;
 
   void SetUp() override {
     std::string name = testing::UnitTest::GetInstance()->current_test_info()->name();
@@ -678,7 +678,7 @@ TEST_F(BoxLayout, ALongParagraphInABoxRunsOverPages) {
 
 // Under a tight line spacing a line's glyphs reach below its advance: a frame under it starts below them.
 TEST_F(BoxLayout, AFrameStartsBelowTheGlyphsOfTheLineAbove) {
-  lineCompression = 0.75f;
+  lineCompression = TextScale::percent(75);
   const auto pages =
       layout("<p>above</p><p class=\"box\">boxed</p>", std::string(kReset) + ".box { border: 1px solid; }");
   ASSERT_EQ(1u, pages[0].boxes.size());

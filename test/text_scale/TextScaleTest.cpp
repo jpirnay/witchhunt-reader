@@ -91,6 +91,20 @@ TEST(TextScale, AProductRoundsUpAndOneLeavesAScaleAsItIs) {
   EXPECT_GE(product * 100, uint64_t{99} << 20);
 }
 
+TEST(TextScale, AQuotientRoundsUp) {
+  EXPECT_TRUE((TextScale::percent(90) / TextScale::percent(90)).isOne());
+  EXPECT_EQ(TextScale::ratio(5, 4), TextScale::ratio(3, 2) / TextScale::percent(120));
+  // 1.6 / 1.28, both rounded up already: the quotient is not below the 1.25 it stands for.
+  EXPECT_GE((TextScale::percent(160) / TextScale::percent(128)).raw(), TextScale::ratio(5, 4).raw());
+  EXPECT_EQ(UINT32_MAX, (TextScale() / TextScale::fromRaw(0)).raw());
+}
+
+// A ratio of large numbers is the scale they stand for, not a saturated one.
+TEST(TextScale, ARatioOfLargeNumbersIsExact) {
+  EXPECT_EQ(TextScale::ratio(5, 4), TextScale::ratio(int64_t{5} << 40, int64_t{4} << 40));
+  EXPECT_EQ(TextScale::ratio(29 * 140, 100 * 42), TextScale::ratio(int64_t{29 * 140} << 30, int64_t{100 * 42} << 30));
+}
+
 TEST(TextScale, OutOfRangeSaturatesAndNonsenseIsOne) {
   EXPECT_EQ(UINT32_MAX, TextScale::ratio(int64_t{1} << 40, 1).raw());
   EXPECT_EQ(UINT32_MAX, (TextScale::ratio(4000, 1) * TextScale::ratio(4000, 1)).raw());

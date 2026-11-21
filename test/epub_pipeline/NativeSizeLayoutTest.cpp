@@ -47,7 +47,7 @@ struct NativeSizeLayoutFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = 480;
     params.viewportHeight = 800;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     params.embeddedStyle = true;
     params.fontSizeLadder = ladder;
     GfxRenderer renderer;

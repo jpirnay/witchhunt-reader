@@ -32,7 +32,7 @@ const std::string kFixture = std::string(CORPUS_DIR) + "/test_wrapped_paragraphs
 Section::BuildParams params(const uint16_t viewportHeight = 800) {
   Section::BuildParams p;
   p.fontId = 0;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.extraParagraphSpacing = false;
   p.paragraphAlignment = 0;
   p.viewportWidth = 480;
