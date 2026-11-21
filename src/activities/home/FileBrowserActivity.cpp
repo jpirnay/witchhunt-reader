@@ -9,6 +9,7 @@
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <ImageScale.h>
 #include <LibraryBuilder.h>
 #include <Memory.h>
 #include <SidecarFiles.h>
@@ -357,10 +358,10 @@ FileBrowserActivity::CoverThumb FileBrowserActivity::drawCoverThumb(const std::s
       result = CoverThumb::NoCover;
     } else {
       // Never upscaled -- and a current thumbnail always fits, so never scaled at all.
-      const float scale = std::min(
-          1.0f, std::min(static_cast<float>(tw - 2) / bmp.getWidth(), static_cast<float>(th - 2) / bmp.getHeight()));
-      drawn.width = static_cast<int>(bmp.getWidth() * scale);
-      drawn.height = static_cast<int>(bmp.getHeight() * scale);
+      const ImageScale scale =
+          ImageScale::smaller(ImageScale::fit(bmp.getWidth(), bmp.getHeight(), tw - 2, th - 2), ImageScale());
+      drawn.width = scale.apply(bmp.getWidth());
+      drawn.height = scale.apply(bmp.getHeight());
       drawn.x = x + std::max(1, (tw - drawn.width) / 2);
       drawn.y = y + std::max(1, (th - drawn.height) / 2);
       renderer.fillRect(drawn.x, drawn.y, drawn.width, drawn.height, false);  // white under it, on a selection

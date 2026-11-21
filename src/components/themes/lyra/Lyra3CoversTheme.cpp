@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <ImageScale.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -106,18 +107,16 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
             // Falling through to the existing no-cover branch shows the theme's own tile instead.
             if (bitmap.parseHeaders() == BmpReaderError::Ok &&
                 !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
-              const float bitmapHeight = static_cast<float>(bitmap.getHeight());
-              const float bitmapWidth = static_cast<float>(bitmap.getWidth());
-              const float ratio = bitmapWidth / bitmapHeight;
-              const float tileRatio = static_cast<float>(coverBoxWidth) / static_cast<float>(coverHeight);
-              const float cropX = std::max(0.0f, 1.0f - (tileRatio / ratio));
+              // Wider than the tile: cut to its shape. Narrower: fitted, white at the sides.
+              BoxCut cut = cutToBox(bitmap.getWidth(), bitmap.getHeight(), coverBoxWidth, coverHeight);
+              if (cut.visibleHeight > 0) cut = BoxCut{coverBoxWidth, coverHeight, 0, 0};
 
               // Clear tile to white before drawing: 1-bit BMPs only draw dark pixels,
               // leaving white pixels transparent — any stale dark content shows through.
               renderer.fillRect(tileX + hPaddingInSelection + coverBoxInset, tileY + hPaddingInSelection, coverBoxWidth,
                                 coverHeight, false);
               renderer.drawBitmap(bitmap, tileX + hPaddingInSelection + coverBoxInset, tileY + hPaddingInSelection,
-                                  coverBoxWidth, coverHeight, cropX);
+                                  cut.maxWidth, cut.maxHeight, cut.visibleWidth);
             } else {
               hasCover = false;
             }

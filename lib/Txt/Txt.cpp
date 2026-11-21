@@ -186,7 +186,7 @@ std::string Txt::getThumbBmpPath(int width, int height) const {
 bool Txt::generateThumbBmp(int height) const {
   const std::string destPath = getThumbBmpPath(height);
   if (Storage.exists(destPath.c_str())) return true;
-  const int width = static_cast<int>(height * 0.6f);
+  const int width = height * 3 / 5;  // thumbnails are 6:10
   if (!generateThumbBmp(width, height)) return false;
   const std::string srcPath = getThumbBmpPath(width, height);
   Storage.rename(srcPath.c_str(), destPath.c_str());

@@ -4,6 +4,7 @@ add_executable(SleepImagePlacementTest
 
 target_include_directories(SleepImagePlacementTest PRIVATE
   ${REPO_ROOT}/src
+  ${REPO_ROOT}/lib/GfxRenderer
 )
 
 target_link_libraries(SleepImagePlacementTest PRIVATE

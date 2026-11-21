@@ -8,6 +8,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <HalSystem.h>  // feedWatchdog()
+#include <ImageScale.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <ProgressiveJpeg.h>
@@ -621,16 +622,16 @@ bool readJpegDimensionsFromHeader(const std::string& imagePath, ImageDimensions&
 
 // Choose the coarse DCT downscale factor. Returns the scale denominator (1, 2, 4 or 8)
 // and sets tjpgScale to the matching TJpgDec scale exponent (0=1/1, 1=1/2, 2=1/4, 3=1/8).
-int chooseJpegScale(float targetScale, uint8_t& tjpgScale) {
-  if (targetScale <= 0.125f) {
+int chooseJpegScale(const ImageScale targetScale, uint8_t& tjpgScale) {
+  if (targetScale.atMost(1, 8)) {
     tjpgScale = 3;
     return 8;
   }
-  if (targetScale <= 0.25f) {
+  if (targetScale.atMost(1, 4)) {
     tjpgScale = 2;
     return 4;
   }
-  if (targetScale <= 0.5f) {
+  if (targetScale.atMost(1, 2)) {
     tjpgScale = 1;
     return 2;
   }
@@ -1623,21 +1624,23 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   }
 
   // Calculate overall target scale
-  float targetScale;
+  ImageScale targetScale;
   int destWidth, destHeight;
 
   if (config.useExactDimensions && config.maxWidth > 0 && config.maxHeight > 0) {
     destWidth = config.maxWidth;
     destHeight = config.maxHeight;
-    targetScale = (float)destWidth / srcWidth;
+    targetScale = ImageScale(destWidth, srcWidth);
   } else {
-    float scaleX = (config.maxWidth > 0 && srcWidth > config.maxWidth) ? (float)config.maxWidth / srcWidth : 1.0f;
-    float scaleY = (config.maxHeight > 0 && srcHeight > config.maxHeight) ? (float)config.maxHeight / srcHeight : 1.0f;
-    targetScale = (scaleX < scaleY) ? scaleX : scaleY;
-    if (targetScale > 1.0f) targetScale = 1.0f;
+    // Each side binds only when the image overflows it, so the scale never goes above 1:1.
+    const ImageScale scaleX =
+        (config.maxWidth > 0 && srcWidth > config.maxWidth) ? ImageScale(config.maxWidth, srcWidth) : ImageScale();
+    const ImageScale scaleY =
+        (config.maxHeight > 0 && srcHeight > config.maxHeight) ? ImageScale(config.maxHeight, srcHeight) : ImageScale();
+    targetScale = ImageScale::smaller(scaleX, scaleY);
 
-    destWidth = (int)(srcWidth * targetScale);
-    destHeight = (int)(srcHeight * targetScale);
+    destWidth = targetScale.apply(srcWidth);
+    destHeight = targetScale.apply(srcHeight);
   }
 
   // Coarse DCT downscale (TJpgDec's built-in 1/1..1/8, or the progressive decoder's reduced
@@ -1717,8 +1720,9 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   }
   configureResample(ctx, !resized);
 
-  LOG_TRC("JPG", "JPEG %dx%d -> %dx%d (scale %.2f, jpegScale 1/%d, fineScale %.2f)", srcWidth, srcHeight, destWidth,
-          destHeight, targetScale, jpegScaleDenom, (float)destWidth / ctx.scaledSrcWidth);
+  LOG_TRC("JPG", "JPEG %dx%d -> %dx%d (scale %d/%d, jpegScale 1/%d, fineScale %d/%d)", srcWidth, srcHeight, destWidth,
+          destHeight, static_cast<int>(targetScale.num()), static_cast<int>(targetScale.den()), jpegScaleDenom,
+          destWidth, static_cast<int>(ctx.scaledSrcWidth));
 
   // The tallest block the decoder emits, in scaled-source rows: a TJpgDec MCU row is 8 * msy
   // source rows (8 for grayscale/4:4:4, 16 for 4:2:0) descaled by the DCT step, a ProgressiveJpeg
