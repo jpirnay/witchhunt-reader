@@ -2592,6 +2592,21 @@ void loop() {
       logSerial.flush();
       silentRestart();
       return;
+    case SerialTestApi::PowerRequest::SleepScreen: {
+#if SERIAL_TEST_API
+      // CMD:SLEEP:SCREEN: the screen enterDeepSleep() paints, without the sleep. The state it reads is set as
+      // enterDeepSleep() sets it and put back afterwards; BOOK= stands in for the last book for this screen.
+      const std::string book = SerialTestApi::takeSleepScreenBook();
+      const std::string savedPath = APP_STATE.openEpubPath;
+      const bool savedFromReader = APP_STATE.lastSleepFromReader;
+      APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+      if (!book.empty()) APP_STATE.openEpubPath = book;
+      activityManager.goToSleep(/*fromTimeout=*/false);
+      APP_STATE.openEpubPath = savedPath;
+      APP_STATE.lastSleepFromReader = savedFromReader;
+#endif
+      break;
+    }
   }
 
   const unsigned long loopDuration = millis() - loopStartTime;

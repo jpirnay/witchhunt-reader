@@ -28,6 +28,7 @@
 
 #if SERIAL_TEST_API
 #include <ArabicScripts.h>
+#include <BitmapHelpers.h>
 #include <EpdFontFamily.h>
 #include <Epub/Page.h>
 #include <FileReplace.h>
@@ -1904,8 +1905,16 @@ void cmdFs(const std::string_view arg) {
 //   LAB:DRAW:<FULL|LUT>:<bg>:<x>,<y>,<w>,<h>,<c>;...   both planes from rectangles in panel RAM
 //                   coordinates, each code c (and the background bg) being RED * 2 + BW. FULL draws the BW
 //                   bit and runs a normal full refresh; LUT sends both planes with the LUT. LAB_OK:<ms>.
+//   LAB:CANVAS:<gray>  the whole 8-bit canvas at one gray (0..255), drawn as an 8-bit picture: on a panel with
+//                   16 levels, a gray that lands on a level shows that level alone. LAB_OK:<ms>, LAB_ERROR without one.
+//   LAB:REG:<hex>   register writes sent with every LUT frame until the next LAB:REG (empty clears): records of
+//                   command, length and that many bytes (frame rate, source voltages, VCOM). LAB_OK:reg <bytes>,
+//                   or LAB_ERROR where the panel driver takes none (PanelDriver::setLabRegisters()).
 namespace lab {
-uint8_t lut[128];
+// Up to one SSD2677 table (535 bytes), the largest any driver here takes. Allocated by the first LAB:LUT, so a
+// session that never runs the lab keeps the RAM.
+constexpr size_t kLutCapacity = 540;
+std::unique_ptr<uint8_t[]> lut;
 size_t lutLength = 0;
 
 int hexDigit(const char c) {
@@ -1968,8 +1977,10 @@ void cmdImu(std::string_view /*arg*/) {
 void cmdLab(std::string_view arg) {
   if (arg.substr(0, 4) == "LUT:") {
     const std::string_view hex = arg.substr(4);
-    if (hex.empty() || hex.size() % 2 != 0 || hex.size() / 2 > sizeof(lab::lut))
+    if (hex.empty() || hex.size() % 2 != 0 || hex.size() / 2 > lab::kLutCapacity)
       return static_cast<void>(reply("LAB_ERROR:bad lut"));
+    if (!lab::lut) lab::lut = makeUniqueNoThrow<uint8_t[]>(lab::kLutCapacity);
+    if (!lab::lut) return static_cast<void>(reply("LAB_ERROR:no memory for the lut"));
     for (size_t i = 0; i < hex.size() / 2; ++i) {
       const int high = lab::hexDigit(hex[2 * i]), low = lab::hexDigit(hex[2 * i + 1]);
       if (high < 0 || low < 0) return static_cast<void>(reply("LAB_ERROR:bad lut"));
@@ -1978,7 +1989,37 @@ void cmdLab(std::string_view arg) {
     lab::lutLength = hex.size() / 2;
     return static_cast<void>(replyf("LAB_OK:lut %u", static_cast<unsigned>(lab::lutLength)));
   }
-  if (arg.substr(0, 5) != "DRAW:") return static_cast<void>(reply("LAB_ERROR:LUT or DRAW"));
+  if (arg.substr(0, 4) == "REG:") {
+    const std::string_view hex = arg.substr(4);
+    uint8_t records[64];
+    if (hex.size() % 2 != 0 || hex.size() / 2 > sizeof(records)) return static_cast<void>(reply("LAB_ERROR:bad reg"));
+    for (size_t i = 0; i < hex.size() / 2; ++i) {
+      const int high = lab::hexDigit(hex[2 * i]), low = lab::hexDigit(hex[2 * i + 1]);
+      if (high < 0 || low < 0) return static_cast<void>(reply("LAB_ERROR:bad reg"));
+      records[i] = static_cast<uint8_t>(high << 4 | low);
+    }
+    if (!display.setLabRegisters(hex.empty() ? nullptr : records, hex.size() / 2))
+      return static_cast<void>(reply("LAB_ERROR:registers not taken"));
+    return static_cast<void>(replyf("LAB_OK:reg %u", static_cast<unsigned>(hex.size() / 2)));
+  }
+  if (arg.substr(0, 7) == "CANVAS:") {
+    // One gray over the whole 8-bit canvas, drawn as the panel draws 8-bit pictures (16 levels where it has them). A
+    // gray that lands exactly on a level leaves no dither error, so the screen is that level alone: a uniform
+    // scene, which is what measuring a level on the stand needs (a level among others catches their lens glare).
+    arg.remove_prefix(7);
+    long gray = 0;
+    if (!lab::takeNumber(arg, ':', gray) || gray < 0 || gray > 255)
+      return static_cast<void>(reply("LAB_ERROR:bad gray"));
+    RenderLock lock;
+    uint16_t stride = 0;
+    uint8_t* canvas = display.borrowGray8Canvas(&stride);
+    if (!canvas) return static_cast<void>(reply("LAB_ERROR:no canvas on this panel"));
+    memset(canvas, static_cast<int>(gray), static_cast<size_t>(stride) * display.getDisplayHeight());
+    const unsigned long start = millis();
+    display.displayGray8Canvas(HalDisplay::HALF_REFRESH, false);
+    return static_cast<void>(replyf("LAB_OK:%lu", millis() - start));
+  }
+  if (arg.substr(0, 5) != "DRAW:") return static_cast<void>(reply("LAB_ERROR:LUT, REG, CANVAS or DRAW"));
   arg.remove_prefix(5);
   const bool full = arg.substr(0, 5) == "FULL:";
   if (!full && arg.substr(0, 4) != "LUT:") return static_cast<void>(reply("LAB_ERROR:FULL or LUT"));
@@ -2018,16 +2059,51 @@ void cmdLab(std::string_view arg) {
   if (full) {
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
   } else {
-    shown = display.displayLabFrame(bw, red, lab::lut);
+    shown = display.displayLabFrame(bw, red, lab::lut.get());
   }
   if (red) renderer.returnSecondaryBuffer();
   if (!shown) return static_cast<void>(reply("LAB_ERROR:no lab path on this panel"));
   replyf("LAB_OK:%lu", millis() - start);
 }
 
-void cmdSleep(std::string_view /*arg*/) {
-  reply("SLEEP_OK");
-  powerRequest = PowerRequest::Sleep;
+// CMD:SLEEP:SCREEN's BOOK=, taken by main.cpp when it paints the screen.
+std::string sleepScreenBook;
+
+// SLEEP: deep sleep, as a held power key. SLEEP:SCREEN[:T=<a>,<b>,<c>][:BOOK=<path>]: only the sleep screen, painted as
+// deep sleep paints it, with the device left awake on it, so a camera can look at it and the next one follows without
+// a button press. T= sets the 4-level dither thresholds (gray4tuning in BitmapHelpers.h), kept until the next T= or a
+// restart. BOOK= (last, it takes the rest of the line) shows that book's cover where the mode shows the last book's,
+// for this screen only and without opening the book.
+void cmdSleep(const std::string_view arg) {
+  if (arg.empty()) {
+    reply("SLEEP_OK");
+    powerRequest = PowerRequest::Sleep;
+    return;
+  }
+  std::string_view head;
+  std::string_view rest;
+  splitHead(arg, head, rest);
+  if (head != "SCREEN") return static_cast<void>(reply("SLEEP_ERROR:expected SCREEN, got ", head));
+  sleepScreenBook.clear();
+  while (!rest.empty()) {
+    if (rest.substr(0, 5) == "BOOK=") {
+      sleepScreenBook.assign(rest.substr(5));
+      break;
+    }
+    std::string_view field;
+    std::string_view after;
+    splitHead(rest, field, after);
+    rest = after;
+    int t[3];
+    if (field.substr(0, 2) != "T=" || !SerialCommandGrammar::parseIntList(field.substr(2), t, 3) || t[0] < 0 ||
+        t[0] > t[1] || t[1] > t[2] || t[2] > 255) {
+      return static_cast<void>(reply("SLEEP_ERROR:expected T=<a>,<b>,<c> rising in 0..255 or BOOK=, got ", field));
+    }
+    for (int i = 0; i < 3; i++) gray4tuning::thresholds[i] = static_cast<uint8_t>(t[i]);
+  }
+  replyf("SLEEP_OK:screen T=%u,%u,%u", gray4tuning::thresholds[0], gray4tuning::thresholds[1],
+         gray4tuning::thresholds[2]);
+  powerRequest = PowerRequest::SleepScreen;
 }
 
 void cmdReboot(std::string_view /*arg*/) {
@@ -2341,6 +2417,8 @@ PowerRequest takePowerRequest() {
   powerRequest = PowerRequest::None;
   return request;
 }
+
+std::string takeSleepScreenBook() { return std::exchange(sleepScreenBook, std::string()); }
 
 bool sendPage(const PageOnScreen& onScreen) {
   const WireScratch scratch;

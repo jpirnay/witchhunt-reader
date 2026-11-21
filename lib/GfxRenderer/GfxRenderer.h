@@ -21,6 +21,7 @@ class Shaped;
 
 #include "Bitmap.h"
 #include "FontLookup.h"
+#include "GrayLevelQuantizer.h"
 #include "ScaledGlyphResample.h"
 #include "TextWrap.h"
 
@@ -677,21 +678,43 @@ class GfxRenderer {
     uint16_t stride;
   };
 
+  // A picture drawn as the 1-bit planes of a gray-level plan (GrayLevelPlan.h). Each covered pixel's ink, from
+  // `quantizer`, sets its bit in the framebuffer by `first` and, where `second` is set, in that buffer by
+  // `secondPlane`, so one read of the picture fills both planes of a pass. `second` has the framebuffer's size
+  // and physical layout (the lent secondary buffer).
+  struct LevelPlaneTarget {
+    const GrayLevelQuantizer* quantizer = nullptr;
+    gray_levels::Plane first;
+    uint8_t* second = nullptr;
+    gray_levels::Plane secondPlane;
+  };
+
   // Draws the centred `visibleWidth` x `visibleHeight` part of the bitmap (0, or the whole size, for all of
   // it; an odd remainder is cut from the right or bottom), scaled down to fit `maxWidth` x `maxHeight` where
   // a bound is given, never up.
   //
   // When `gray8` is set the bitmap's 8-bit samples are painted there and the
   // framebuffer is left untouched — the 2-bit dither is skipped entirely rather
-  // than done and discarded. Ignored for 1-bit bitmaps, which have no levels to
-  // preserve. Default nullptr keeps every existing caller on the 2-bit path.
+  // than done and discarded. When `planes` is set, the same samples are given
+  // inks and written as plane bits instead. Both are ignored for 1-bit bitmaps,
+  // which have no levels to preserve. Default nullptr keeps every existing caller
+  // on the 2-bit path.
   void drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, int visibleWidth = 0,
-                  int visibleHeight = 0, const Gray8Target* gray8 = nullptr) const;
+                  int visibleHeight = 0, const Gray8Target* gray8 = nullptr,
+                  const LevelPlaneTarget* planes = nullptr) const;
+  // Both planes at ink 0's bit: the ground a fitted picture leaves uncovered.
+  void clearLevelPlanes(const LevelPlaneTarget& planes) const;
+  // A LOGICAL rectangle of the framebuffer, drawn there in black and white by the ordinary render path, as the
+  // darkest ink and ink 0 of both planes. How 1-bit content with a background of its own (the sleep overlay
+  // block) lands on a level picture, solid and undithered; see compositeBwRectOntoGray8Canvas for the canvas.
+  void bwRectToLevelPlanes(const LevelPlaneTarget& planes, int x, int y, int width, int height) const;
   // One 8-bit sample at LOGICAL (x, y), rotated onto the canvas exactly as
   // drawPixel() rotates onto the framebuffer. Silently drops out-of-panel
   // coordinates, where drawPixel() logs — a scaled image legitimately walks off
   // the edge, and one log line per pixel would be its own failure.
   void drawGray8Pixel(const Gray8Target& gray8, int x, int y, uint8_t gray) const;
+  // The same for level planes: the sample's ink at LOGICAL (x, y), written as both planes' bits.
+  void drawLevelPlanePixel(const LevelPlaneTarget& planes, int x, int y, uint8_t gray) const;
   void drawBitmap1Bit(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight) const;
   // Dark mode shows pictures as they are, not as negatives: a picture goes into the frame inverted, and the panel's
   // inversion turns it back. True while that applies to a picture drawn now: output inverted, a B/W pass, and a frame
@@ -889,6 +912,17 @@ class GfxRenderer {
   // it. Both buffers are 1-bit-derived, so nothing here is dithered.
   void compositeBwRectOntoGray8Canvas(const Gray8Target& gray8, int x, int y, int width, int height) const;
   void displayGray8Canvas() const;
+
+  // --- gray-level plans (panels without a canvas: a B/W base, then passes of 1-bit planes) ---
+  //
+  // See GrayLevelPlan.h and HalDisplay::grayLevelPlan(). nullptr on every panel until the SDK carries the
+  // waveforms. Planes go up with copyGrayscaleLsbBuffers(plane)/copyGrayscaleMsbBuffers(plane).
+  const gray_levels::Plan* grayLevelPlan() const;
+  // The plan's base from the framebuffer, consuming an armed refresh override as its mode (as
+  // beginAbsoluteGrayPass() does). False where the panel cannot run it; nothing reached the glass then.
+  bool displayGrayLevelBase() const;
+  // `lastPass`: the panel may power down after it (with the fading fix on).
+  bool displayGrayLevelPass(uint8_t pass, bool lastPass) const;
 
   // Timing breakdown returned by renderGrayscalePlanesSequential().
   struct GrayscaleTimings {

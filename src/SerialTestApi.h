@@ -40,8 +40,8 @@ bool handleLine(std::string_view line);
 void sendScreenshot(const uint8_t* frame, uint32_t size, int width, int height, bool busy);
 
 // Set by CMD:SLEEP and CMD:REBOOT; main.cpp acts on them after the reply is out, since sleep and
-// the restart helpers live there.
-enum class PowerRequest : uint8_t { None, Sleep, Reboot };
+// the restart helpers live there. SleepScreen: the sleep screen without the sleep (CMD:SLEEP:SCREEN).
+enum class PowerRequest : uint8_t { None, Sleep, Reboot, SleepScreen };
 
 #if SERIAL_TEST_API
 // Once from setup(): the renderer CMD:TOUCH maps screen coordinates with.
@@ -51,6 +51,8 @@ void begin(GfxRenderer& renderer);
 // EVT: lines a host asked for (CMD:EVENTS:ON).
 void service();
 PowerRequest takePowerRequest();
+// The book CMD:SLEEP:SCREEN:BOOK= named, empty when none; cleared by the call.
+std::string takeSleepScreenBook();
 // True while a CMD:IDLE waits, or while the effect of a BTN, TOUCH, SWIPE or ACT is still being followed
 // (IdleGate::active()). main.cpp counts that as user activity too, so a device under test neither
 // sleeps nor drops to its idle clock while a command is under way.
