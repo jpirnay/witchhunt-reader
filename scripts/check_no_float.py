@@ -52,16 +52,25 @@ FLOAT_FREE = [
     "src/components/themes/lyra/LyraCarouselTheme.cpp",
     "src/components/themes/lyra/LyraTheme.cpp",
     # Clock and sensors (area 5): drift in ppb and millionths, temperatures in hundredths of a degree
-    # (lib/hal/ClockDrift.h).
+    # (lib/hal/ClockDrift.h), IMU samples in mg and mdps, the battery divider in thousandths.
     "lib/hal/HalClock.cpp",
+    "lib/hal/HalTiltSensor.cpp",
+    "lib/hal/OrientationTracker.cpp",
+    "src/SerialTestApi.cpp",
     "src/activities/settings/SyncTimeActivity.cpp",
     "src/util/DecimalFormat.cpp",
+    "freeink-sdk/libs/hardware/BatteryMonitor/src/BatteryMonitor.cpp",
+    "freeink-sdk/libs/hardware/Imu/src/Imu.cpp",
 ]
 
 
 def object_suffix(source):
     """How the object built from `source` ends: PlatformIO builds lib/<Name>/x.cpp to lib<hash>/<Name>/x.cpp.o
-    and src/x.cpp to src/x.cpp.o under the build directory."""
+    and src/x.cpp to src/x.cpp.o under the build directory. An SDK library, freeink-sdk/libs/<group>/<Name>/src/x.cpp,
+    builds like one of lib/: to lib<hash>/<Name>/x.cpp.o, without its group or src/ folder."""
+    if source.startswith("freeink-sdk/libs/"):
+        name, _, rest = source[len("freeink-sdk/libs/") :].partition("/")[2].partition("/")
+        return "/" + name + "/" + (rest[len("src/") :] if rest.startswith("src/") else rest)
     return "/" + (source[len("lib/") :] if source.startswith("lib/") else source)
 
 

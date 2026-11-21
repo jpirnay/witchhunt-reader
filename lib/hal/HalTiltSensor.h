@@ -42,8 +42,9 @@ class HalTiltSensor {
   unsigned long _wakeMs = 0;
   unsigned long _lastPollMs = 0;
 
-  static constexpr float RATE_THRESHOLD_DPS = 270.0f;
-  static constexpr float NEUTRAL_RATE_DPS = 50.0f;
+  // In thousandths of a degree per second, Imu::Sample's unit: 270 and 50 dps.
+  static constexpr int32_t RATE_THRESHOLD_MDPS = 270000;
+  static constexpr int32_t NEUTRAL_RATE_MDPS = 50000;
   static constexpr unsigned long COOLDOWN_MS = 600;
   static constexpr unsigned long POLL_INTERVAL_MS = 50;
   // Auto-rotate alone: a pose takes OrientationTracker::kDwellMs to settle, so 5 Hz is enough.

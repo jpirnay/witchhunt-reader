@@ -9,8 +9,8 @@ using TiltRate::Axis;
 // A rotation in the panel's native frame (x along the long side, y along the short side, z into the screen) as the
 // gyro reports it: the rate about each axis, right-hand rule.
 struct Turn {
-  float gx;
-  float gy;
+  int32_t gx;  // mdps
+  int32_t gy;
 };
 
 // The edge of the text that moves away from the reader, for each orientation. The text's edges sit, in the native

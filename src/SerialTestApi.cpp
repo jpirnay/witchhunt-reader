@@ -59,6 +59,7 @@
 #include "TouchUi.h"  // CP_TOUCH_UI
 #include "UiLanguage.h"
 #include "util/CjkLookupRun.h"
+#include "util/DecimalFormat.h"
 #include "util/Dictionary.h"
 #include "util/IdleGate.h"
 #endif
@@ -1946,14 +1947,22 @@ void fill(uint8_t* bw, uint8_t* red, const uint16_t width, const uint16_t height
 // ---- IMU ------------------------------------------------------------------------------------
 // One sample from the board's IMU, mount-corrected as tilt page turns read it: acceleration in g,
 // rotation rate in degrees per second. Held still in a known pose, the acceleration is gravity,
-// which is how a board's mounting is measured.
+// which is how a board's mounting is measured. The sample is integer mg and mdps; the reply keeps
+// the decimals it had when the sample was float.
 void cmdImu(std::string_view /*arg*/) {
   Imu::Sample s{};
   if (!halTiltSensor.readSample(s)) {
     reply("IMU_ERROR:no IMU on this board, or the read failed");
     return;
   }
-  replyf("IMU:ax=%.3f ay=%.3f az=%.3f gx=%.1f gy=%.1f gz=%.1f", s.ax, s.ay, s.az, s.gx, s.gy, s.gz);
+  char text[6][16];
+  const int32_t accel[3] = {s.axMg, s.ayMg, s.azMg};
+  const int32_t gyro[3] = {s.gxMdps, s.gyMdps, s.gzMdps};
+  for (int i = 0; i < 3; ++i) {
+    formatDecimal(text[i], sizeof(text[i]), accel[i], 1000, 3);
+    formatDecimal(text[3 + i], sizeof(text[3 + i]), gyro[i], 1000, 1);
+  }
+  replyf("IMU:ax=%s ay=%s az=%s gx=%s gy=%s gz=%s", text[0], text[1], text[2], text[3], text[4], text[5]);
 }
 
 void cmdLab(std::string_view arg) {
