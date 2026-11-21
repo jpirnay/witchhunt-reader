@@ -51,13 +51,17 @@ FLOAT_FREE = [
     "src/components/themes/lyra/Lyra3CoversTheme.cpp",
     "src/components/themes/lyra/LyraCarouselTheme.cpp",
     "src/components/themes/lyra/LyraTheme.cpp",
-    # UI screens (area 6): sizes in tenths (src/util/ByteSize.h). PluginEventCore and the web server read JSON: their
-    # objects hold ArduinoJson's number conversions, float included. BaseTheme.cpp keeps area 4's status bar.
+    # UI screens (area 6): sizes in tenths (src/util/ByteSize.h), the weather in integer units
+    # (lib/Weather/WeatherUnits.h). WeatherClient, WeatherSettingsStore, PluginEventCore and the web server read JSON:
+    # their objects hold ArduinoJson's number conversions, float included. BaseTheme.cpp keeps area 4's status bar.
+    "lib/Serialization/FixedDecimal.cpp",
+    "lib/Weather/WeatherIcons.cpp",
     "src/FlashLayoutNotice.cpp",
     "src/activities/home/BookInfoActivity.cpp",
     "src/activities/settings/FontDownloadActivity.cpp",
     "src/activities/settings/OtaUpdateActivity.cpp",
     "src/activities/settings/SystemInformationActivity.cpp",
+    "src/activities/weather/",
     "src/util/ByteSize.cpp",
 ]
 
