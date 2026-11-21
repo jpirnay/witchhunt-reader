@@ -156,23 +156,36 @@ bool ReadingStatsStore::evictsBefore(const time_t aLastRead, const uint32_t aSec
   return aSeconds < bSeconds;
 }
 
-float ReadingStatsStore::pooledSecondsPerPercent(const uint32_t globalTotalSeconds, const uint32_t countedSeconds,
-                                                 const uint32_t countedPercents) {
-  if (globalTotalSeconds < MIN_GLOBAL_SECONDS_FOR_RATE) return 0.0f;
-  if (countedPercents == 0 || countedSeconds == 0) return 0.0f;
-  return static_cast<float>(countedSeconds) / static_cast<float>(countedPercents);
+ReadingStatsStore::SecondsPerPercent ReadingStatsStore::pooledSecondsPerPercent(const uint32_t globalTotalSeconds,
+                                                                                const uint32_t countedSeconds,
+                                                                                const uint32_t countedPercents) {
+  if (globalTotalSeconds < MIN_GLOBAL_SECONDS_FOR_RATE) return {};
+  return {countedSeconds, countedPercents};
 }
 
-float ReadingStatsStore::ownSecondsPerPercent(const uint32_t totalSeconds, const uint8_t progress) {
-  if (!countsTowardPace(progress) || totalSeconds == 0) return 0.0f;
-  return static_cast<float>(totalSeconds) / static_cast<float>(progress);
+ReadingStatsStore::SecondsPerPercent ReadingStatsStore::ownSecondsPerPercent(const uint32_t totalSeconds,
+                                                                             const uint8_t progress) {
+  if (!countsTowardPace(progress)) return {};
+  return {totalSeconds, progress};
 }
 
-uint32_t ReadingStatsStore::etaSeconds(const float secondsPerPercent, float remainingPercent) {
-  if (remainingPercent <= 0.0f) return 0;
-  if (remainingPercent > 100.0f) remainingPercent = 100.0f;
-  if (secondsPerPercent <= 0.0f) return 0;
-  return static_cast<uint32_t>(remainingPercent * secondsPerPercent + 0.5f);
+uint32_t ReadingStatsStore::etaSeconds(const SecondsPerPercent pace, int remainingPercent) {
+  if (remainingPercent <= 0 || !pace.known()) return 0;
+  if (remainingPercent > 100) remainingPercent = 100;
+  // remaining * seconds / percents, half up: at most 100 * 2^32 * 2, well inside 64 bits.
+  const uint64_t twice = static_cast<uint64_t>(remainingPercent) * pace.seconds * 2;
+  const uint64_t eta = (twice + pace.percents) / (uint64_t{2} * pace.percents);
+  return eta > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(eta);
+}
+
+uint32_t ReadingStatsStore::pagesPerMinuteTenths(const uint32_t pages, const uint32_t seconds) {
+  if (seconds == 0) return 0;
+  const uint64_t n = static_cast<uint64_t>(pages) * 600;
+  const uint64_t q = n / seconds;
+  const uint64_t r = n % seconds;
+  const bool up = 2 * r > seconds || (2 * r == seconds && (q & 1) != 0);
+  const uint64_t tenths = q + (up ? 1 : 0);
+  return tenths > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(tenths);
 }
 
 void ReadingStatsStore::trimBookDays(std::vector<DayBucket>& days) {
@@ -289,7 +302,7 @@ BookRead readBook(FsFile& file, const Entry& entry, uint8_t* image, BookReadingS
 }
 
 // The global pace from the directory alone.
-float pooledPaceOf(const Meta& meta) {
+ReadingStatsStore::SecondsPerPercent pooledPaceOf(const Meta& meta) {
   uint32_t seconds = 0;
   uint32_t percents = 0;
   for (size_t i = 0; i < kEntryCount; ++i) {
@@ -721,7 +734,7 @@ void ReadingStatsStore::prefetchRecent(const std::vector<std::string>& docIds) {
   // long-lived block placed after a freed one splits the free space it leaves.
   std::vector<RecentSnapshot> snapshots(docIds.size());
   for (size_t i = 0; i < docIds.size(); ++i) snapshots[i].docId = docIds[i];
-  float pace = 0.0f;
+  SecondsPerPercent pace;
   ReadResult result = prepare();
   if (result == ReadResult::Ok) {
     auto meta = Meta::create();
@@ -789,7 +802,8 @@ ReadingStatsStore::ReadResult ReadingStatsStore::writeJson(Print& out, const uin
   } else {
     ReadingStatsJson::writeFileHead(out, summary);
   }
-  const float pooled = pooledSecondsPerPercent(summary.totalSeconds, summary.paceSeconds, summary.pacePercents);
+  const SecondsPerPercent pooled =
+      pooledSecondsPerPercent(summary.totalSeconds, summary.paceSeconds, summary.pacePercents);
   bool first = true;
   for (size_t i = 0; exists && i < kEntryCount; ++i) {
     const Entry entry = meta->entry(i);
@@ -799,9 +813,9 @@ ReadingStatsStore::ReadResult ReadingStatsStore::writeJson(Print& out, const uin
     if (!first) ReadingStatsJson::writeBookSeparator(out);
     first = false;
     if (dashboard) {
-      const float own = ownSecondsPerPercent(book.totalSeconds, book.progress);
-      const float remaining = book.progress < 100 ? 100.0f - static_cast<float>(book.progress) : 0.0f;
-      ReadingStatsJson::writeBook(out, book, etaSeconds(own > 0.0f ? own : pooled, remaining));
+      const SecondsPerPercent own = ownSecondsPerPercent(book.totalSeconds, book.progress);
+      const int remaining = book.progress < 100 ? 100 - book.progress : 0;
+      ReadingStatsJson::writeBook(out, book, etaSeconds(own.known() ? own : pooled, remaining));
     } else {
       ReadingStatsJson::writeBook(out, book);
     }

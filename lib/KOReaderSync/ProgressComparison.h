@@ -1,6 +1,9 @@
 #pragma once
 
+#include <Epub/ProgressPpb.h>
+
 #include <cstdint>
+#include <optional>
 
 #include "CrossPointPosition.h"
 
@@ -21,7 +24,8 @@
 //      when K(p-1) < K <= K(p), where K(i) is the LUT index at the end of page i -- exact for books
 //      whose paragraphs are children of <body>;
 //   3. the percentages, with a tolerance for rounding -- an estimate, bounded to one chapter by 1;
-//   4. Unknown, when neither side's percentage is usable: the caller asks rather than guesses.
+//   4. Unknown, when either side's percentage is unusable (nullopt: a record's number that is none,
+//      see KOReaderSyncClient.h): the caller asks rather than guesses.
 enum class ProgressComparison : uint8_t { LocalAhead, Synchronized, RemoteAhead, Unknown };
 
 // Where the reader is, as the reader itself knows it. The paragraph fields are the section
@@ -40,8 +44,8 @@ struct LocalReadingPosition {
   bool hasVisibleOffset = false;
 };
 
-ProgressComparison compareProgress(const LocalReadingPosition& local, float localPercentage,
-                                   const CrossPointPosition& remote, float remotePercentage);
+ProgressComparison compareProgress(const LocalReadingPosition& local, std::optional<ProgressPpb> localPercentage,
+                                   const CrossPointPosition& remote, std::optional<ProgressPpb> remotePercentage);
 
 // Two records for the same book under two document ids (filename and binary hash): which one is
 // the live position. Primary unless the alternate is strictly further by the same evidence order
@@ -49,5 +53,6 @@ ProgressComparison compareProgress(const LocalReadingPosition& local, float loca
 // also the id uploads go to.
 enum class RemoteRecordChoice : uint8_t { Primary, Alternate };
 
-RemoteRecordChoice selectRemoteRecord(const CrossPointPosition& primary, float primaryPercentage,
-                                      const CrossPointPosition& alternate, float alternatePercentage);
+RemoteRecordChoice selectRemoteRecord(const CrossPointPosition& primary, std::optional<ProgressPpb> primaryPercentage,
+                                      const CrossPointPosition& alternate,
+                                      std::optional<ProgressPpb> alternatePercentage);

@@ -1105,7 +1105,7 @@ class EpubReaderActivity final : public Activity {
   void restoreCurrentPageToBufferIfPreRendered();
   void renderStatusBar() const;
   // The book percentage and the chapter title the status bar shows; section must be loaded.
-  float statusBarBookPercent() const;
+  ProgressPpb statusBarBookProgress() const;
   std::string chapterTitle() const;
   // The status bar's chapter page counter: the current file's page and total, widened to the
   // whole TOC chapter when that spans several spine items (#325; see ChapterPageSpan).
@@ -1187,7 +1187,7 @@ class EpubReaderActivity final : public Activity {
   void jumpToPercent(int percent);
   // The spine and the position within it that `percent` (0-100) of the book falls on. False
   // when the book has no size or spines to measure.
-  bool resolvePercent(int percent, int& targetSpineIndex, float& spineProgress) const;
+  bool resolvePercent(int percent, int& targetSpineIndex, ProgressPpb& spineProgress) const;
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
 
   // Open word selection over the current page, or the dictionary picker when no

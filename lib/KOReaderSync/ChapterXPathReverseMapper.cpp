@@ -230,9 +230,9 @@ struct ReverseState : StackState {
 }  // namespace
 
 bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int spineIndex, const std::string& xpath,
-                                  float& outIntraSpineProgress, bool& outExactMatch, uint16_t* outListItemIndex,
+                                  ProgressPpb& outIntraSpineProgress, bool& outExactMatch, uint16_t* outListItemIndex,
                                   uint32_t* outVisibleOffset, bool* outIsTextPoint, BuildArena* const scratch) {
-  outIntraSpineProgress = 0.0f;
+  outIntraSpineProgress = ProgressPpb();
   outExactMatch = false;
   if (outListItemIndex) {
     *outListItemIndex = 0;
@@ -276,12 +276,7 @@ bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int s
   if (outIsTextPoint) {
     *outIsTextPoint = state.bestIsTextPoint;
   }
-  if (state.totalTextBytes == 0) {
-    outIntraSpineProgress = 0.0f;
-  } else {
-    outIntraSpineProgress = static_cast<float>(state.bestOffset) / static_cast<float>(state.totalTextBytes);
-    outIntraSpineProgress = std::max(0.0f, std::min(1.0f, outIntraSpineProgress));
-  }
+  outIntraSpineProgress = ProgressPpb::of(state.bestOffset, state.totalTextBytes);  // 0 for a chapter without text
 
   // Only surface the li index when the target was actually <li>-anchored AND we
   // captured a count > 0. NO_IDX fallback tiers can match the wrong <li> sibling,
@@ -293,13 +288,14 @@ bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int s
   }
 
   if (state.targetTextNodeIndex > 0) {
-    LOG_DBG("KOX", "Reverse: spine=%d %s match textNode=%d char=%d offset=%zu/%zu -> progress=%.3f li=%d for '%s'",
+    LOG_DBG("KOX", "Reverse: spine=%d %s match textNode=%d char=%d offset=%zu/%zu -> progress=%lu ppb li=%d for '%s'",
             spineIndex, state.bestTierName, state.targetTextNodeIndex, state.targetCharOffset, state.bestOffset,
-            state.totalTextBytes, outIntraSpineProgress, state.bestLiIndex, xpath.c_str());
-  } else {
-    LOG_DBG("KOX", "Reverse: spine=%d %s match offset=%zu/%zu -> progress=%.3f li=%d for '%s'", spineIndex,
-            state.bestTierName, state.bestOffset, state.totalTextBytes, outIntraSpineProgress, state.bestLiIndex,
+            state.totalTextBytes, static_cast<unsigned long>(outIntraSpineProgress.ppb()), state.bestLiIndex,
             xpath.c_str());
+  } else {
+    LOG_DBG("KOX", "Reverse: spine=%d %s match offset=%zu/%zu -> progress=%lu ppb li=%d for '%s'", spineIndex,
+            state.bestTierName, state.bestOffset, state.totalTextBytes,
+            static_cast<unsigned long>(outIntraSpineProgress.ppb()), state.bestLiIndex, xpath.c_str());
   }
   return true;
 }

@@ -205,14 +205,14 @@ bool EpubReaderActivity::evaluateAutoSyncPull() {
   const int total = section->estimatedTotalPages();
   // The percentage only. The local XPath costs an inflate and two parses of the chapter, and is
   // computed by silentUploadCurrentPosition() if an upload turns out to be needed.
-  const float localPercentage = ProgressMapper::percentageFor(epub, currentSpineIndex, page, total);
+  const ProgressPpb localPercentage = ProgressMapper::percentageFor(epub, currentSpineIndex, page, total);
   const ProgressComparison comparison = compareProgress(localReadingPosition(*section, currentSpineIndex, page),
                                                         localPercentage, peek(remote), remote.percentage);
   switch (comparison) {
     case ProgressComparison::Synchronized:
       AUTOSYNC_STATE.markSynced(path, currentSpineIndex, page);
-      LOG_DBG("AutoSync", "Wake pull: remote matches local (%.6f at %s); nothing to do", remote.percentage,
-              remote.progress.c_str());
+      LOG_DBG("AutoSync", "Wake pull: remote matches local (%lu ppb at %s); nothing to do",
+              static_cast<unsigned long>(remote.percentage ? remote.percentage->ppb() : 0), remote.progress.c_str());
       return false;
     case ProgressComparison::LocalAhead:
       if (smart) {
@@ -299,8 +299,8 @@ void EpubReaderActivity::silentApplyRemote(const KOReaderProgress& remote) {
   }
   AUTOSYNC_STATE.markSynced(epub->getPath(), remotePos.spineIndex, remotePos.pageNumber);
   requestUpdate();
-  LOG_DBG("AutoSync", "Wake apply: jumped to spine %d page %d (%.6f)", remotePos.spineIndex, remotePos.pageNumber,
-          remote.percentage);
+  LOG_DBG("AutoSync", "Wake apply: jumped to spine %d page %d (%lu ppb)", remotePos.spineIndex, remotePos.pageNumber,
+          static_cast<unsigned long>(remote.percentage ? remote.percentage->ppb() : 0));
 }
 
 void EpubReaderActivity::maybeAutoPushInterval() {
