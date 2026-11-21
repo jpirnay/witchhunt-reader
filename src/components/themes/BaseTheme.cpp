@@ -68,14 +68,12 @@ int progressBarPixelHeight(const uint8_t progressBar, const uint8_t thickness, c
   return std::max(0, reservedHeight - metrics.progressBarMarginTop);
 }
 
-int statusBarProgressPercent(const uint8_t progressBar, const float bookProgress, const int currentPage,
+int statusBarProgressPercent(const uint8_t progressBar, const ProgressPpb bookProgress, const int currentPage,
                              const int pageCount) {
   if (progressBar == CrossPointSettings::STATUS_BAR_PROGRESS_BAR::BOOK_PROGRESS) {
-    return std::clamp(static_cast<int>(std::lround(bookProgress)), 0, 100);
+    return bookProgress.percentHalfUp();  // as lround() rounded the float percent
   }
-  const int chapterProgress =
-      (pageCount > 0) ? static_cast<int>((static_cast<float>(currentPage) / pageCount) * 100) : 0;
-  return std::clamp(chapterProgress, 0, 100);
+  return ProgressPpb::of(currentPage, pageCount).percentFloor();
 }
 
 constexpr int SYNC_INDICATOR_SIZE = 12;
@@ -1146,7 +1144,7 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }
 
-void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
+void BaseTheme::drawStatusBar(GfxRenderer& renderer, const ProgressPpb bookProgress, const int currentPage,
                               const int pageCount, std::string title, const int paddingBottom, const bool isStarred,
                               const std::string& printedPageLabel, const bool fillMargin,
                               const bool pageCountApproximate, const SyncIndicator syncIndicator, const bool lowMemory,
@@ -1231,11 +1229,12 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     // right always reflects spine pagination.
     char progressStr[32];
 
+    // The percent rounds as printf's "%.0f" rounded the float it was: a half to the even neighbour.
     if (SETTINGS.statusBarBookProgressPercentage && SETTINGS.statusBarChapterPageCount) {
-      snprintf(progressStr, sizeof(progressStr), "%d/%s%d  %.0f%%", currentPage, pageCountPrefix, pageCount,
-               bookProgress);
+      snprintf(progressStr, sizeof(progressStr), "%d/%s%d  %d%%", currentPage, pageCountPrefix, pageCount,
+               bookProgress.percentHalfEven());
     } else if (SETTINGS.statusBarBookProgressPercentage) {
-      snprintf(progressStr, sizeof(progressStr), "%.0f%%", bookProgress);
+      snprintf(progressStr, sizeof(progressStr), "%d%%", bookProgress.percentHalfEven());
     } else {
       snprintf(progressStr, sizeof(progressStr), "%d/%s%d", currentPage, pageCountPrefix, pageCount);
     }

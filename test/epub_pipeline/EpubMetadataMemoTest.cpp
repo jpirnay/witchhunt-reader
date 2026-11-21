@@ -53,11 +53,12 @@ TEST_F(EpubMetadataMemo, BookSizeIsTheLastCumulativeSize) {
 }
 
 TEST_F(EpubMetadataMemo, ProgressIsTheSameAskedTwice) {
-  const float first = epub_->calculateProgress(2, 0.5f);
-  EXPECT_GT(first, 0.0f);
-  EXPECT_LT(first, 1.0f);
-  EXPECT_FLOAT_EQ(epub_->calculateProgress(2, 0.5f), first);
-  EXPECT_LT(epub_->calculateProgress(1, 0.5f), first);
+  const ProgressPpb half(ProgressPpb::kWhole / 2);
+  const ProgressPpb first = epub_->calculateProgress(2, half);
+  EXPECT_GT(first.ppb(), 0u);
+  EXPECT_LT(first.ppb(), ProgressPpb::kWhole);
+  EXPECT_EQ(epub_->calculateProgress(2, half), first);
+  EXPECT_LT(epub_->calculateProgress(1, half), first);
 }
 
 TEST_F(EpubMetadataMemo, TocEntriesAndIndexesMatchInAnyOrder) {

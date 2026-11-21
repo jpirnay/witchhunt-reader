@@ -83,10 +83,18 @@ class ReadingStatsStore {
     std::vector<IndexEntry> byTime;
   };
 
+  // Seconds spent reading per 1% of book progress, kept as the two sums it comes from: an estimate from it rounds
+  // once, in integers. Unknown (no pace) while either is 0.
+  struct SecondsPerPercent {
+    uint32_t seconds = 0;
+    uint32_t percents = 0;
+    bool known() const { return seconds > 0 && percents > 0; }
+  };
+
   struct BookQuery {
     bool found = false;
     BookReadingStats book;
-    float pooledPace = 0.0f;  // the global pace, for a book without one of its own
+    SecondsPerPercent pooledPace;  // the global pace, for a book without one of its own
   };
 
   // What Home draws for one recent book.
@@ -114,7 +122,7 @@ class ReadingStatsStore {
   // until the next prefetch.
   void prefetchRecent(const std::vector<std::string>& docIds);
   const RecentSnapshot* recent(const std::string& docId) const;
-  float recentPooledPace() const { return pooledPace_; }
+  SecondsPerPercent recentPooledPace() const { return pooledPace_; }
 
   // ---- The web ----------------------------------------------------------------------------------
   //
@@ -147,12 +155,17 @@ class ReadingStatsStore {
   // The cap's eviction order: the least recently read book goes first (an entry never read with
   // the clock set, lastReadEpoch 0, is the oldest); on the same date, the one with less time.
   static bool evictsBefore(time_t aLastRead, uint32_t aSeconds, time_t bLastRead, uint32_t bSeconds);
-  // The global pace from the sums over the books that count toward it; 0 below
+  // The global pace from the sums over the books that count toward it; unknown below
   // MIN_GLOBAL_SECONDS_FOR_RATE of reading overall.
-  static float pooledSecondsPerPercent(uint32_t globalTotalSeconds, uint32_t countedSeconds, uint32_t countedPercents);
-  // A book's own pace, or 0 when it has not covered enough ground to have one.
-  static float ownSecondsPerPercent(uint32_t totalSeconds, uint8_t progress);
-  static uint32_t etaSeconds(float secondsPerPercent, float remainingPercent);
+  static SecondsPerPercent pooledSecondsPerPercent(uint32_t globalTotalSeconds, uint32_t countedSeconds,
+                                                   uint32_t countedPercents);
+  // A book's own pace, or unknown when it has not covered enough ground to have one.
+  static SecondsPerPercent ownSecondsPerPercent(uint32_t totalSeconds, uint8_t progress);
+  // `remainingPercent` (at most 100) at `pace`, rounded half up to the second; 0 when the pace is unknown.
+  static uint32_t etaSeconds(SecondsPerPercent pace, int remainingPercent);
+  // Pages per minute in tenths, rounded to the nearest, a half to the even tenth as printf's "%.1f" rounded the
+  // float it was.
+  static uint32_t pagesPerMinuteTenths(uint32_t pages, uint32_t seconds);
   // Past the caps, the oldest buckets go; the global trim first folds the streak they held into
   // `record`, since the record may live in them.
   static void trimGlobalDays(std::vector<DayBucket>& days, uint16_t& record);
@@ -202,7 +215,7 @@ class ReadingStatsStore {
   std::string legacyPath_;
   bool prepared_ = false;
   std::vector<RecentSnapshot> recent_;
-  float pooledPace_ = 0.0f;
+  SecondsPerPercent pooledPace_;
 };
 
 static_assert(ReadingStatsStore::kMaxBooks == ReadingStatsSlotFile::kEntryCount, "the directory holds the cap");

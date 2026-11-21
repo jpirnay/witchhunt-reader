@@ -25,20 +25,8 @@
 namespace {
 
 // "1h 23m" / "23m 45s" / "12s" — compact so a long row fits on the X3.
+using BookProgressPresentation::formatPagesPerMinute;
 using BookProgressPresentation::formatReadingDuration;
-
-// Pages per minute, rounded to 1 decimal. Returns "—" when there's not enough
-// data (fewer than a minute total) so we don't display "120.0 ppm" when only
-// a handful of seconds have been recorded.
-std::string formatPagesPerMin(uint32_t pages, uint32_t seconds) {
-  if (seconds < 60 || pages == 0) {
-    return tr(STR_READING_STATS_UNKNOWN);
-  }
-  const float ppm = (pages * 60.0f) / seconds;
-  char buf[16];
-  snprintf(buf, sizeof(buf), "%.1f", ppm);
-  return buf;
-}
 
 }  // namespace
 
@@ -141,7 +129,8 @@ void ReadingStatsActivity::render(RenderLock&&) {
 
     b.rowLR(tr(STR_READING_STATS_TOTAL_TIME), formatReadingDuration(summary_.totalSeconds));
     b.rowLR(tr(STR_READING_STATS_PAGES), std::to_string(summary_.totalPagesTurned));
-    b.rowLR(tr(STR_READING_STATS_PAGES_PER_MIN), formatPagesPerMin(summary_.totalPagesTurned, summary_.totalSeconds));
+    b.rowLR(tr(STR_READING_STATS_PAGES_PER_MIN),
+            formatPagesPerMinute(summary_.totalPagesTurned, summary_.totalSeconds));
     // Only show the finished row once the user has actually finished a book —
     // otherwise it's just clutter saying "0".
     if (summary_.finishedBookCount > 0) {

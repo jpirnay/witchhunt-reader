@@ -51,9 +51,32 @@ FLOAT_FREE = [
     "src/components/themes/lyra/Lyra3CoversTheme.cpp",
     "src/components/themes/lyra/LyraCarouselTheme.cpp",
     "src/components/themes/lyra/LyraTheme.cpp",
+    # Progress and sync (integer-maths area 4): progress in billionths (lib/Epub/Epub/ProgressPpb.h).
+    # KOReaderSyncClient.cpp and KOReaderAutoSync.cpp stay out: ArduinoJson's float parsing and writing is inlined
+    # into them.
+    "lib/Epub/Epub.cpp",
+    "lib/KOReaderSync/ChapterXPathForwardMapper.cpp",
+    "lib/KOReaderSync/ChapterXPathIndexer.cpp",
+    "lib/KOReaderSync/ChapterXPathReverseMapper.cpp",
+    "lib/KOReaderSync/ProgressComparison.cpp",
+    "lib/KOReaderSync/ProgressMapper.cpp",
+    "lib/LibraryIndex/LibraryOrder.cpp",
+    "src/ReadingStats.cpp",
+    "src/StarAnchoring.cpp",
+    "src/activities/boot_sleep/SleepActivity.cpp",
+    "src/activities/reader/BookSearchActivity.cpp",
+    "src/activities/reader/EpubNavigationTarget.cpp",
+    "src/activities/reader/EpubReaderAutoSync.cpp",
+    "src/activities/reader/FinishedBookActivity.cpp",
+    "src/activities/reader/KOReaderSyncActivity.cpp",
+    "src/activities/reader/MdReaderActivity.cpp",
+    "src/activities/reader/TxtReaderActivity.cpp",
+    "src/activities/settings/ReadingStatsActivity.cpp",
+    "src/activities/settings/ReadingStatsBookDetailActivity.cpp",
+    "src/components/BookProgressPresentation.cpp",
     # UI screens (area 6): sizes in tenths (src/util/ByteSize.h), the weather in integer units
     # (lib/Weather/WeatherUnits.h). WeatherClient, WeatherSettingsStore, PluginEventCore and the web server read JSON:
-    # their objects hold ArduinoJson's number conversions, float included. BaseTheme.cpp keeps area 4's status bar.
+    # their objects hold ArduinoJson's number conversions, float included.
     "lib/Serialization/FixedDecimal.cpp",
     "lib/Weather/WeatherIcons.cpp",
     "src/FlashLayoutNotice.cpp",
@@ -62,6 +85,7 @@ FLOAT_FREE = [
     "src/activities/settings/OtaUpdateActivity.cpp",
     "src/activities/settings/SystemInformationActivity.cpp",
     "src/activities/weather/",
+    "src/components/themes/BaseTheme.cpp",
     "src/util/ByteSize.cpp",
 ]
 

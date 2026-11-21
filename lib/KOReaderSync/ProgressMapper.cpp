@@ -3,14 +3,13 @@
 #include <Logging.h>
 
 #include <algorithm>
-#include <cmath>
 
 #include "ChapterXPathIndexer.h"
 
 namespace {
-bool resolveFromPercentage(const std::shared_ptr<Epub>& epub, const float percentage, const int spineCount,
-                           int& outSpineIndex, float& outIntraSpineProgress) {
-  if (!std::isfinite(percentage) || !epub || spineCount <= 0) {
+bool resolveFromPercentage(const std::shared_ptr<Epub>& epub, const std::optional<ProgressPpb> percentage,
+                           const int spineCount, int& outSpineIndex, ProgressPpb& outIntraSpineProgress) {
+  if (!percentage || !epub || spineCount <= 0) {
     return false;
   }
 
@@ -19,8 +18,7 @@ bool resolveFromPercentage(const std::shared_ptr<Epub>& epub, const float percen
     return false;
   }
 
-  const float sanitizedPercentage = std::clamp(percentage, 0.0f, 1.0f);
-  const size_t targetBytes = static_cast<size_t>(bookSize * sanitizedPercentage);
+  const size_t targetBytes = percentage->partOf(static_cast<uint32_t>(bookSize));
 
   outSpineIndex = spineCount - 1;
   for (int i = 0; i < spineCount; i++) {
@@ -31,14 +29,13 @@ bool resolveFromPercentage(const std::shared_ptr<Epub>& epub, const float percen
     }
   }
 
-  outIntraSpineProgress = 0.0f;
+  outIntraSpineProgress = ProgressPpb();
   const size_t prevCumSize = (outSpineIndex > 0) ? epub->getCumulativeSpineItemSize(outSpineIndex - 1) : 0;
   const size_t currentCumSize = epub->getCumulativeSpineItemSize(outSpineIndex);
   const size_t spineSize = currentCumSize - prevCumSize;
   if (spineSize > 0) {
     const size_t bytesIntoSpine = (targetBytes > prevCumSize) ? (targetBytes - prevCumSize) : 0;
-    outIntraSpineProgress = static_cast<float>(bytesIntoSpine) / static_cast<float>(spineSize);
-    outIntraSpineProgress = std::clamp(outIntraSpineProgress, 0.0f, 1.0f);
+    outIntraSpineProgress = ProgressPpb::of(bytesIntoSpine, spineSize);
   }
 
   return true;
@@ -52,27 +49,23 @@ bool resolveFromPercentage(const std::shared_ptr<Epub>& epub, const float percen
 // The math is identical to the per-spine portion of resolveFromPercentage. Returns 0
 // when the percentage maps to bytes before the spine's start (the position lives
 // inside the spine by assumption, so clamp to 0) and 1 when it overshoots the end.
-float intraSpineFromPercentage(const std::shared_ptr<Epub>& epub, const int spineIndex, const float percentage) {
-  if (!epub || spineIndex < 0 || spineIndex >= epub->getSpineItemsCount() || !std::isfinite(percentage)) {
-    return 0.0f;
+ProgressPpb intraSpineFromPercentage(const std::shared_ptr<Epub>& epub, const int spineIndex,
+                                     const std::optional<ProgressPpb> percentage) {
+  if (!epub || spineIndex < 0 || spineIndex >= epub->getSpineItemsCount() || !percentage) {
+    return ProgressPpb();
   }
   const size_t bookSize = epub->getBookSize();
   if (bookSize == 0) {
-    return 0.0f;
+    return ProgressPpb();
   }
-  const float sanitized = std::clamp(percentage, 0.0f, 1.0f);
-  const size_t targetBytes = static_cast<size_t>(bookSize * sanitized);
+  const size_t targetBytes = percentage->partOf(static_cast<uint32_t>(bookSize));
   const size_t prevCumSize = (spineIndex > 0) ? epub->getCumulativeSpineItemSize(spineIndex - 1) : 0;
   const size_t currentCumSize = epub->getCumulativeSpineItemSize(spineIndex);
   const size_t spineSize = currentCumSize - prevCumSize;
-  if (spineSize == 0) {
-    return 0.0f;
+  if (spineSize == 0 || targetBytes <= prevCumSize) {
+    return ProgressPpb();
   }
-  if (targetBytes <= prevCumSize) {
-    return 0.0f;
-  }
-  const size_t bytesIntoSpine = targetBytes - prevCumSize;
-  return std::clamp(static_cast<float>(bytesIntoSpine) / static_cast<float>(spineSize), 0.0f, 1.0f);
+  return ProgressPpb::of(targetBytes - prevCumSize, spineSize);
 }
 
 // KOReader emits chapter-start XPaths as ".../body/<wrapper>.0" or just
@@ -103,16 +96,23 @@ bool isChapterStartXPath(const std::string& xpath) {
 // page to intra=1, which is what KOReader expects when round-tripping. Dividing by totalPages
 // would peg the last page short of 100%, so a user who finished the chapter would only show ~94%
 // on KOReader.
-float intraSpineProgressOf(const int pageNumber, const int totalPages) {
-  if (totalPages > 1) {
-    return static_cast<float>(pageNumber) / static_cast<float>(totalPages - 1);
-  }
-  return 0.0f;
+ProgressPpb intraSpineProgressOf(const int pageNumber, const int totalPages) {
+  return totalPages > 1 ? ProgressPpb::of(pageNumber, totalPages - 1) : ProgressPpb();
+}
+
+// A book percentage for a log line: "45.32".
+struct LoggedPercent {
+  unsigned whole;
+  unsigned hundredths;
+};
+LoggedPercent logged(const std::optional<ProgressPpb> percentage) {
+  const uint32_t basisPoints = percentage ? percentage->basisPoints() : 0;
+  return {static_cast<unsigned>(basisPoints / 100), static_cast<unsigned>(basisPoints % 100)};
 }
 }  // namespace
 
-float ProgressMapper::percentageFor(const std::shared_ptr<Epub>& epub, const int spineIndex, const int pageNumber,
-                                    const int totalPages) {
+ProgressPpb ProgressMapper::percentageFor(const std::shared_ptr<Epub>& epub, const int spineIndex, const int pageNumber,
+                                          const int totalPages) {
   return epub->calculateProgress(spineIndex, intraSpineProgressOf(pageNumber, totalPages));
 }
 
@@ -135,10 +135,9 @@ CrossPointPosition ProgressMapper::peekRemote(const KOReaderPosition& koPos, con
 KOReaderPosition ProgressMapper::toKOReader(const std::shared_ptr<Epub>& epub, const CrossPointPosition& pos) {
   KOReaderPosition result;
 
-  const float intraSpineProgress = intraSpineProgressOf(pos.pageNumber, pos.totalPages);
-
-  // Calculate overall book progress (0.0-1.0)
-  result.percentage = epub->calculateProgress(pos.spineIndex, intraSpineProgress);
+  const ProgressPpb intraSpineProgress = intraSpineProgressOf(pos.pageNumber, pos.totalPages);
+  const ProgressPpb percentage = epub->calculateProgress(pos.spineIndex, intraSpineProgress);
+  result.percentage = percentage;
 
   // The page's content offset names the text to the character; the byte fraction is the fallback
   // for a position without one (the finished-book sentinel, a chapter not laid out yet).
@@ -156,9 +155,10 @@ KOReaderPosition ProgressMapper::toKOReader(const std::shared_ptr<Epub>& epub, c
   const int tocIndex = epub->getTocIndexForSpineIndex(pos.spineIndex);
   const std::string chapterName = (tocIndex >= 0) ? epub->getTocItem(tocIndex).title : "unknown";
 
-  LOG_DBG("ProgressMapper", "CrossPoint -> KOReader: chapter='%s', page=%d/%d off=%u/%d -> %.2f%% at %s",
+  const LoggedPercent shown = logged(percentage);
+  LOG_DBG("ProgressMapper", "CrossPoint -> KOReader: chapter='%s', page=%d/%d off=%u/%d -> %u.%02u%% at %s",
           chapterName.c_str(), pos.pageNumber, pos.totalPages, pos.visibleTextOffset, pos.hasVisibleTextOffset,
-          result.percentage * 100, result.xpath.c_str());
+          shown.whole, shown.hundredths, result.xpath.c_str());
 
   return result;
 }
@@ -176,7 +176,7 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
 
   const int spineCount = epub->getSpineItemsCount();
 
-  float resolvedIntraSpineProgress = -1.0f;
+  std::optional<ProgressPpb> resolvedIntraSpineProgress;
   bool xpathExactMatch = false;
   bool usedXPathMapping = false;
   bool usedPercentageReconcile = false;
@@ -189,7 +189,7 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
   const bool haveXPathSpine = ChapterXPathIndexer::tryExtractSpineIndexFromXPath(koPos.xpath, xpathSpineIndex) &&
                               xpathSpineIndex >= 0 && xpathSpineIndex < spineCount;
   if (haveXPathSpine) {
-    float intraFromXPath = 0.0f;
+    ProgressPpb intraFromXPath;
     uint16_t liIndexFromXPath = 0;
     uint32_t offsetFromXPath = 0;
     bool textPointFromXPath = false;
@@ -220,20 +220,21 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
       // An exact match is never overridden: KOReader's percentage is rendered pages, ours is
       // XHTML bytes, and a gap over 1% between them is normal. Overriding an exact chapter-start
       // match pushed the reader a dozen pages into the chapter (#268).
-      if (!xpathExactMatch && std::isfinite(koPos.percentage) && resolvedIntraSpineProgress >= 0.0f) {
-        const float sanitizedPercentage = std::clamp(koPos.percentage, 0.0f, 1.0f);
-        const float mappedPercentage = epub->calculateProgress(result.spineIndex, resolvedIntraSpineProgress);
-        const float delta = std::fabs(mappedPercentage - sanitizedPercentage);
+      if (!xpathExactMatch && koPos.percentage) {
+        const ProgressPpb mappedPercentage = epub->calculateProgress(result.spineIndex, intraFromXPath);
+        const uint32_t delta = distance(mappedPercentage, *koPos.percentage);
 
-        constexpr float kReconcileThreshold = 0.01f;  // 1% absolute book progress
+        constexpr uint32_t kReconcileThreshold = ProgressPpb::kWhole / 100;  // 1% absolute book progress
         if (delta > kReconcileThreshold) {
           int percentageSpineIndex = -1;
-          float percentageIntraSpine = -1.0f;
+          ProgressPpb percentageIntraSpine;
           if (resolveFromPercentage(epub, koPos.percentage, spineCount, percentageSpineIndex, percentageIntraSpine) &&
-              percentageSpineIndex == result.spineIndex && percentageIntraSpine >= 0.0f) {
+              percentageSpineIndex == result.spineIndex) {
             LOG_DBG("ProgressMapper",
-                    "Reconciling XPath position with percentage: spine=%d xpath=%.3f pct=%.3f delta=%.3f -> %.3f",
-                    result.spineIndex, resolvedIntraSpineProgress, sanitizedPercentage, delta, percentageIntraSpine);
+                    "Reconciling XPath position with percentage (ppb): spine=%d xpath=%lu pct=%lu delta=%lu -> %lu",
+                    result.spineIndex, static_cast<unsigned long>(intraFromXPath.ppb()),
+                    static_cast<unsigned long>(koPos.percentage->ppb()), static_cast<unsigned long>(delta),
+                    static_cast<unsigned long>(percentageIntraSpine.ppb()));
             resolvedIntraSpineProgress = percentageIntraSpine;
             usedPercentageReconcile = true;
           }
@@ -268,19 +269,20 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
       result.spineIndex = xpathSpineIndex;
       result.hasResolvedSpineIndex = true;
       if (isChapterStartXPath(koPos.xpath)) {
-        resolvedIntraSpineProgress = 0.0f;
+        resolvedIntraSpineProgress = ProgressPpb();
         mappingSource = "xpath-spine+chapter-start";
         LOG_DBG("ProgressMapper", "Chapter-start XPath '%s' on spine=%d, pinning intra=0", koPos.xpath.c_str(),
                 xpathSpineIndex);
       } else {
         resolvedIntraSpineProgress = intraSpineFromPercentage(epub, xpathSpineIndex, koPos.percentage);
         mappingSource = "xpath-spine+percentage";
-        LOG_DBG("ProgressMapper", "XPath resolve unavailable for spine=%d; intra from pct=%.3f -> %.3f",
-                xpathSpineIndex, koPos.percentage, resolvedIntraSpineProgress);
+        LOG_DBG("ProgressMapper", "XPath resolve unavailable for spine=%d; intra from pct=%lu -> %lu ppb",
+                xpathSpineIndex, static_cast<unsigned long>(koPos.percentage ? koPos.percentage->ppb() : 0),
+                static_cast<unsigned long>(resolvedIntraSpineProgress->ppb()));
       }
     } else {
       int percentageSpineIndex = -1;
-      float percentageIntraSpine = -1.0f;
+      ProgressPpb percentageIntraSpine;
       if (!resolveFromPercentage(epub, koPos.percentage, spineCount, percentageSpineIndex, percentageIntraSpine)) {
         return result;
       }
@@ -309,21 +311,21 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
       const size_t currSpineSize = currCumSize - prevCurrCumSize;
 
       if (currSpineSize > 0) {
-        float ratio = static_cast<float>(spineSize) / static_cast<float>(currSpineSize);
-        estimatedTotalPages = static_cast<int>(totalPagesInCurrentSpine * ratio);
+        estimatedTotalPages =
+            static_cast<int>(static_cast<uint64_t>(totalPagesInCurrentSpine) * spineSize / currSpineSize);
         if (estimatedTotalPages < 1) estimatedTotalPages = 1;
       }
     }
 
     result.totalPages = estimatedTotalPages;
 
-    if (estimatedTotalPages > 0 && resolvedIntraSpineProgress >= 0.0f) {
-      const float clampedProgress = std::max(0.0f, std::min(1.0f, resolvedIntraSpineProgress));
+    if (estimatedTotalPages > 0 && resolvedIntraSpineProgress) {
       // Symmetric inverse of the toKOReader formula: intra=1.0 should land on the
       // last page (totalPages - 1), intra=0 on page 0. Round-to-nearest avoids
       // truncating mid-page progress down to the previous page.
       if (estimatedTotalPages > 1) {
-        result.pageNumber = static_cast<int>(clampedProgress * static_cast<float>(estimatedTotalPages - 1) + 0.5f);
+        result.pageNumber =
+            static_cast<int>(resolvedIntraSpineProgress->roundedPartOf(static_cast<uint32_t>(estimatedTotalPages - 1)));
       } else {
         result.pageNumber = 0;
       }
@@ -333,14 +335,17 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
     }
   }
 
-  LOG_DBG("ProgressMapper", "Resolved KOReader position: spine=%d intra=%.3f hasPIdx=%s pIdx=%u hasLiIdx=%s liIdx=%u",
-          result.spineIndex, resolvedIntraSpineProgress, result.hasParagraphIndex ? "yes" : "no", result.paragraphIndex,
-          result.hasListItemIndex ? "yes" : "no", result.listItemIndex);
+  LOG_DBG("ProgressMapper",
+          "Resolved KOReader position: spine=%d intra=%ld ppb hasPIdx=%s pIdx=%u hasLiIdx=%s liIdx=%u",
+          result.spineIndex, resolvedIntraSpineProgress ? static_cast<long>(resolvedIntraSpineProgress->ppb()) : -1L,
+          result.hasParagraphIndex ? "yes" : "no", result.paragraphIndex, result.hasListItemIndex ? "yes" : "no",
+          result.listItemIndex);
 
   // INF, not DBG: release builds log at INF, and a sync that lands on the wrong page is
   // undiagnosable from a user's log without the mapping source.
-  LOG_INF("ProgressMapper", "KOReader -> CrossPoint: %.2f%% at %s -> spine=%d, page=%d/%d off=%u/%d (%s, exact=%s)",
-          koPos.percentage * 100, koPos.xpath.c_str(), result.spineIndex, result.pageNumber, result.totalPages,
+  const LoggedPercent remote = logged(koPos.percentage);
+  LOG_INF("ProgressMapper", "KOReader -> CrossPoint: %u.%02u%% at %s -> spine=%d, page=%d/%d off=%u/%d (%s, exact=%s)",
+          remote.whole, remote.hundredths, koPos.xpath.c_str(), result.spineIndex, result.pageNumber, result.totalPages,
           result.visibleTextOffset, result.hasVisibleTextOffset, mappingSource, xpathExactMatch ? "yes" : "no");
 
   return result;

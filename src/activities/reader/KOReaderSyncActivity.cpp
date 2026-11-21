@@ -11,7 +11,6 @@
 #include <esp_system.h>
 #include <esp_wifi.h>
 
-#include <cmath>
 #include <new>
 
 #include "CrossPointSettings.h"
@@ -30,6 +29,7 @@
 #include "components/themes/ListTouchBand.h"
 #include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
+#include "util/PrintfDouble.h"
 
 namespace {
 constexpr time_t NTP_RESYNC_MIN_INTERVAL_SEC = 15 * 60;
@@ -72,6 +72,14 @@ bool shouldSyncNtpNow() {
   return clock_authority::ntpDueBeforeSync(HalClock::source(), time(nullptr), HalClock::lastSyncTime(),
                                            NTP_RESYNC_MIN_INTERVAL_SEC,
                                            HalClock::ntpFailedWithin(clock_authority::kRetryAfterFailureMs));
+}
+
+// A record's percentage for a log line, in billionths; 0 for one that is no usable number.
+unsigned long logPpb(const std::optional<ProgressPpb> percentage) { return percentage ? percentage->ppb() : 0; }
+
+// A percentage as the "%.2f" of STR_PAGE_OVERALL_FORMAT and STR_PAGE_TOTAL_OVERALL_FORMAT takes it.
+double overallPercentArg(const std::optional<ProgressPpb> percentage) {
+  return printfDouble(percentage ? percentage->basisPointsHalfEven() : 0, 100);
 }
 }  // namespace
 
@@ -247,9 +255,9 @@ bool KOReaderSyncActivity::probeAlternateDocumentId(const bool havePrimaryRecord
                          remoteProgress.percentage,
                          ProgressMapper::peekRemote({altProgress.progress, altProgress.percentage}, spineCount),
                          altProgress.percentage) == RemoteRecordChoice::Primary) {
-    LOG_DBG("KOSync", "Alternate %s id is not ahead (%.4f at %s vs %.4f at %s); keeping the %s id",
-            matchMethodName(altMethod), altProgress.percentage, altProgress.progress.c_str(), remoteProgress.percentage,
-            remoteProgress.progress.c_str(), matchMethodName(effectiveMatchMethod));
+    LOG_DBG("KOSync", "Alternate %s id is not ahead (%lu ppb at %s vs %lu ppb at %s); keeping the %s id",
+            matchMethodName(altMethod), logPpb(altProgress.percentage), altProgress.progress.c_str(),
+            logPpb(remoteProgress.percentage), remoteProgress.progress.c_str(), matchMethodName(effectiveMatchMethod));
     return false;
   }
 
@@ -312,9 +320,10 @@ bool KOReaderSyncActivity::handleAutoPushPreflight() {
   }
   if (syncIntent == KOReaderSyncIntentState::AUTO_PUSH &&
       (againstServer == ProgressComparison::RemoteAhead || againstServer == ProgressComparison::Synchronized)) {
-    LOG_DBG("KOSync", "AUTO_PUSH skipped: server is %s (remote %.4f at %s, local %.4f spine=%d page=%d)",
-            againstServer == ProgressComparison::RemoteAhead ? "ahead" : "at this page", warmupProgress.percentage,
-            warmupProgress.progress.c_str(), localProgress.percentage, currentSpineIndex, currentPage);
+    LOG_DBG("KOSync", "AUTO_PUSH skipped: server is %s (remote %lu ppb at %s, local %lu ppb spine=%d page=%d)",
+            againstServer == ProgressComparison::RemoteAhead ? "ahead" : "at this page",
+            logPpb(warmupProgress.percentage), warmupProgress.progress.c_str(), logPpb(localProgress.percentage),
+            currentSpineIndex, currentPage);
     KOReaderSyncClient::endPersistentSession();
     // Drop the radio while user reads the result; full teardown happens at silent reboot.
     esp_wifi_stop();
@@ -928,7 +937,7 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     }
     char remotePageStr[64];
     snprintf(remotePageStr, sizeof(remotePageStr), tr(STR_PAGE_OVERALL_FORMAT), remotePosition.pageNumber + 1,
-             remoteProgress.percentage * 100);
+             overallPercentArg(remoteProgress.percentage));
     y += rowStep;
     drawRow(y, remotePageStr);
 
@@ -953,7 +962,7 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     }
     char localPageStr[64];
     snprintf(localPageStr, sizeof(localPageStr), tr(STR_PAGE_TOTAL_OVERALL_FORMAT), currentPage + 1, totalPagesInSpine,
-             localProgress.percentage * 100);
+             overallPercentArg(localProgress.percentage));
     y += rowStep;
     drawRow(y, localPageStr);
 
