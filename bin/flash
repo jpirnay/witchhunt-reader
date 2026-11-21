@@ -27,6 +27,10 @@
 # partition, where settings live. Do NOT "simplify" this by flashing
 # firmware.factory.bin at 0x0: that image spans 0x0-0x10000 and pads the NVS
 # window with 0xFF, so it would wipe the user's settings on every flash.
+#
+# An env built for a board's stock partition table (picco_stock) gets what its
+# PlatformIO upload writes (scripts/stock_table_upload.py): otadata and the app
+# at that table's offsets, and nothing else.
 
 set -euo pipefail
 
@@ -38,7 +42,8 @@ DRY_RUN=0
 WAIT_SECONDS=120
 
 usage() {
-  sed -n '3,29p' "$0" | sed 's/^# \{0,1\}//'
+  # The header comment, up to the first line that is not one.
+  awk 'NR > 2 && /^#/ { sub(/^# ?/, ""); print; next } NR > 2 { exit }' "$0"
   exit "${1:-0}"
 }
 
@@ -77,6 +82,34 @@ if [[ -z "${ESPTOOL}" ]]; then
   echo "flash: no esptool under ${PIO_CORE}/penv -- is PlatformIO installed?" >&2
   exit 1
 fi
+PYTHON=""
+for candidate in "${PIO_CORE}/penv/Scripts/python.exe" "${PIO_CORE}/penv/bin/python"; do
+  [[ -x "${candidate}" ]] && PYTHON="${candidate}" && break
+done
+
+# Prints the offsets of otadata and of ota_0, the slot boot_app0.bin selects, from
+# a partition table image (32-byte entries starting 0xAA 0x50: type, subtype,
+# offset). Not the first app partition: the Picco's stock table puts a factory
+# "safeboot" app at 0x20000 before its ota_0 at 0xe0000.
+partition_offsets() {
+  "${PYTHON}" - "$1" <<'PY'
+import struct, sys
+table = open(sys.argv[1], "rb").read()
+otadata = app = None
+for i in range(0, len(table) - 31, 32):
+    entry = table[i:i + 32]
+    if entry[:2] != b"\xaa\x50":
+        break
+    kind, subtype, offset = entry[2], entry[3], struct.unpack("<I", entry[4:8])[0]
+    if kind == 1 and subtype == 0 and otadata is None:
+        otadata = offset
+    if kind == 0 and subtype == 0x10 and app is None:
+        app = offset
+if otadata is None or app is None:
+    sys.exit("no otadata or no ota_0 partition in " + sys.argv[1])
+print(hex(otadata), hex(app))
+PY
+}
 
 if [[ -n "${FIRMWARE}" ]]; then
   APP="${FIRMWARE}"
@@ -119,12 +152,38 @@ ARGS=(--chip auto --baud 921600 --before default-reset --after hard-reset)
 [[ -n "${PORT}" ]] && ARGS+=(--port "${PORT}")
 
 # Same offsets a PlatformIO upload uses, verified against firmware.factory.bin:
-# bootloader 0x0, partition table 0x8000, otadata 0xe000, app 0x10000.
-IMAGES=(0x10000 "${APP}")
+# bootloader 0x0, partition table 0x8000, otadata 0xe000, app 0x10000. They are
+# read from the env's partition table, because a stock table puts otadata and
+# the app elsewhere: on the Picco's, 0xe000 is inside its NVS and the one app
+# slot starts at 0xe0000. On such a table the bootloader, the table and NVS are
+# the vendor's, and a PlatformIO upload writes otadata and the app only
+# (scripts/stock_table_upload.py; writing the rest wrecked the Picco's first
+# install). So does this.
+OTADATA_OFFSET=0xe000
+APP_OFFSET=0x10000
+STOCK_TABLE=0
+if [[ -f "${BUILD_DIR}/partitions.bin" ]]; then
+  if [[ -z "${PYTHON}" ]]; then
+    echo "flash: no python under ${PIO_CORE}/penv to read ${BUILD_DIR}/partitions.bin." >&2
+    exit 1
+  fi
+  read -r OTADATA_OFFSET APP_OFFSET < <(partition_offsets "${BUILD_DIR}/partitions.bin") || true
+  if [[ -z "${APP_OFFSET}" ]]; then
+    echo "flash: could not read the offsets from ${BUILD_DIR}/partitions.bin." >&2
+    exit 1
+  fi
+  [[ "${OTADATA_OFFSET}" == 0xe000 && "${APP_OFFSET}" == 0x10000 ]] || STOCK_TABLE=1
+fi
+IMAGES=("${APP_OFFSET}" "${APP}")
 if [[ "${APP_ONLY}" -eq 0 ]]; then
   BOOT_APP0="$(ls "${PIO_CORE}"/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin 2>/dev/null | head -n1 || true)"
   if [[ -z "${BOOT_APP0}" ]]; then
     echo "flash: boot_app0.bin not found in the framework package; flashing the app only." >&2
+  elif [[ "${STOCK_TABLE}" -eq 1 ]]; then
+    # boot_app0.bin is otadata with sequence 1 in its first sector: it selects ota_0 on any table.
+    echo "flash: ${ENV_NAME} is built for a stock partition table: writing otadata at ${OTADATA_OFFSET} and the app at ${APP_OFFSET} only."
+    IMAGES=("${OTADATA_OFFSET}" "${BOOT_APP0}"
+            "${APP_OFFSET}" "${APP}")
   else
     IMAGES=(0x0 "${BUILD_DIR}/bootloader.bin"
             0x8000 "${BUILD_DIR}/partitions.bin"

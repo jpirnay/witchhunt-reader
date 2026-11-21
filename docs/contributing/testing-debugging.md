@@ -125,6 +125,8 @@ To write an image that is already built without PlatformIO re-scanning the proje
 
 With `-f`, the bootloader and partition table still come from the env's build directory; if it has none, the script writes the app alone and says so. `-w SECONDS` sets how long it waits for the device (0 fails at once). Like a PlatformIO upload, the scripts leave the NVS partition, and with it the settings, alone.
 
+`bin/flash` reads the offsets from the env's partition table. For an env built for a board's stock table (`picco_stock`) it writes only otadata and the app, at that table's offsets, as its PlatformIO upload does (`scripts/stock_table_upload.py`). `bin\flash.ps1` still writes every env as ours: do not use it for `picco_stock`.
+
 Open serial monitor:
 
 ```sh
