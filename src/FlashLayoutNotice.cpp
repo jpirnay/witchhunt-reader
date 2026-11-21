@@ -7,6 +7,7 @@
 #include <cstdio>
 
 #include "CrossPointState.h"
+#include "util/ByteSize.h"
 
 namespace FlashLayoutNotice {
 
@@ -21,7 +22,7 @@ void markShown() {
 std::string sizeText(const uint32_t bytes) {
   char text[16];
   if (bytes >= 1024u * 1024u) {
-    snprintf(text, sizeof(text), "%.1f MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
+    byte_size::formatTenths(text, sizeof(text), bytes, byte_size::MB, "MB");
   } else {
     snprintf(text, sizeof(text), "%u KB", static_cast<unsigned>(bytes / 1024));
   }
