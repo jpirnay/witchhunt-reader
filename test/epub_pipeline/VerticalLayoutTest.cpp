@@ -164,7 +164,7 @@ struct VerticalLayout : testing::Test {
     p.fontId = 1;
     p.viewportWidth = 460;
     p.viewportHeight = 760;
-    p.lineCompression = 1.0f;
+    p.lineCompression = TextScale();
     p.embeddedStyle = true;
     p.verticalText = request;
     return p;

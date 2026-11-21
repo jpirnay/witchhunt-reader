@@ -467,7 +467,7 @@ struct ImageHeapGateFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = 480;
     params.viewportHeight = 800;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     GfxRenderer renderer;
     renderer.heapAfterFontCacheRelease = heapAfterFontCacheRelease;
     Section section(epub, 0, renderer);
@@ -497,7 +497,7 @@ TEST_F(ImageHeapGateFixture, HeapRefusalIsReadBackFromTheCachedSection) {
   Section::BuildParams params;
   params.viewportWidth = 480;
   params.viewportHeight = 800;
-  params.lineCompression = 1.0f;
+  params.lineCompression = TextScale();
   GfxRenderer renderer;
   Section section(epub, 0, renderer);
   ASSERT_TRUE(section.loadSectionFile(params)) << "the degraded build is still a usable cache";
@@ -520,7 +520,7 @@ TEST_F(ImageHeapGateFixture, CleanBuildIsNotReadBackAsDegraded) {
   Section::BuildParams params;
   params.viewportWidth = 480;
   params.viewportHeight = 800;
-  params.lineCompression = 1.0f;
+  params.lineCompression = TextScale();
   GfxRenderer renderer;
   Section section(epub, 0, renderer);
   ASSERT_TRUE(section.loadSectionFile(params));
@@ -547,7 +547,7 @@ TEST_F(ImageHeapGateFixture, AResolvableImageIsNeverFlagged) {
   Section::BuildParams params;
   params.viewportWidth = 480;
   params.viewportHeight = 800;
-  params.lineCompression = 1.0f;
+  params.lineCompression = TextScale();
   GfxRenderer renderer;
   Section section(epub, 5, renderer);  // chapter with an <img> carrying no dimensions
   ASSERT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));

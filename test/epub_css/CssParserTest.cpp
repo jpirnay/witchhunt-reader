@@ -5,6 +5,9 @@
 #include "../../lib/Epub/Epub/css/CssParser.h"
 #include "../../lib/Epub/Epub/parsers/HtmlDirectionality.h"
 
+// A CSS length's number as CssLength holds it (16.16, its magnitude rounded up).
+inline int32_t cssNumber(const int64_t n, const int64_t d = 1) { return CssLength::of(n, d, CssUnit::Pixels).value; }
+
 TEST(CssParserDeclarations, InlineUnderlineLineThrough) {
   const CssStyle style = CssParser::parseInlineStyle("text-decoration: underline line-through");
   ASSERT_TRUE(style.hasTextDecoration());
@@ -59,7 +62,7 @@ TEST(CssParserDeclarations, ImageWidthImportant) {
   const CssStyle style = CssParser::parseInlineStyle("width: 50% !important");
   ASSERT_TRUE(style.hasImageWidth());
   ASSERT_EQ(style.imageWidth.unit, CssUnit::Percent);
-  ASSERT_EQ(style.imageWidth.value, 50.0f);
+  ASSERT_EQ(style.imageWidth.value, cssNumber(50));
 }
 
 // Issue #388: every value but `none` used to read as Block, so a <span> styled display:inline
@@ -174,13 +177,13 @@ TEST(CssParserDeclarations, ImportantStrippedForEveryProperty) {
 
   const CssStyle indent = CssParser::parseInlineStyle("text-indent: 2em !important");
   ASSERT_TRUE(indent.hasTextIndent());
-  ASSERT_EQ(indent.textIndent.value, 2.0f);
+  ASSERT_EQ(indent.textIndent.value, cssNumber(2));
 
   // Shorthand: the marker has to go before the value is split on whitespace, or the last
   // component parses as "0 !important" and the whole declaration is dropped.
   const CssStyle margin = CssParser::parseInlineStyle("margin: 0 !important");
   ASSERT_TRUE(margin.hasMarginTop());
-  ASSERT_EQ(margin.marginTop.value, 0.0f);
+  ASSERT_EQ(margin.marginTop.value, cssNumber(0));
 }
 
 // Font-size absolute units and keywords resolve to body-relative multipliers:
@@ -189,23 +192,32 @@ TEST(CssParserDeclarations, ImportantStrippedForEveryProperty) {
 TEST(CssParserUnits, FontSizeKeywordsAndAbsoluteUnits) {
   struct Case {
     const char* decl;
-    float expected;
+    TextScale expected;
   };
   const Case cases[] = {
-      {"font-size: 9pt", 0.75f},         {"font-size: 12pt", 1.0f},
-      {"font-size: 24pt", 2.0f},         {"font-size: 8px", 0.5f},
-      {"font-size: 16px", 1.0f},         {"font-size: 32px", 2.0f},
-      {"font-size: xx-small", 3.0f / 5}, {"font-size: x-small", 3.0f / 4},
-      {"font-size: small", 8.0f / 9},    {"font-size: smaller", 1.0f / 1.2f},
-      {"font-size: medium", 1.0f},       {"font-size: large", 6.0f / 5},
-      {"font-size: larger", 1.2f},       {"font-size: x-large", 3.0f / 2},
-      {"font-size: xx-large", 2.0f},     {"font-size: xxx-large", 3.0f},
-      {"font-size: 160%", 1.6f},         {"font-size: 1.4em", 1.4f},
+      {"font-size: 9pt", TextScale::ratio(3, 4)},
+      {"font-size: 12pt", TextScale()},
+      {"font-size: 24pt", TextScale::ratio(2, 1)},
+      {"font-size: 8px", TextScale::ratio(1, 2)},
+      {"font-size: 16px", TextScale()},
+      {"font-size: 32px", TextScale::ratio(2, 1)},
+      {"font-size: xx-small", TextScale::ratio(3, 5)},
+      {"font-size: x-small", TextScale::ratio(3, 4)},
+      {"font-size: small", TextScale::ratio(8, 9)},
+      {"font-size: smaller", TextScale::ratio(5, 6)},
+      {"font-size: medium", TextScale()},
+      {"font-size: large", TextScale::ratio(6, 5)},
+      {"font-size: larger", TextScale::ratio(6, 5)},
+      {"font-size: x-large", TextScale::ratio(3, 2)},
+      {"font-size: xx-large", TextScale::ratio(2, 1)},
+      {"font-size: xxx-large", TextScale::ratio(3, 1)},
+      {"font-size: 160%", TextScale::percent(160)},
+      {"font-size: 1.4em", TextScale::percent(140)},
   };
   for (const auto& c : cases) {
     const CssStyle st = CssParser::parseInlineStyle(c.decl);
     EXPECT_TRUE(st.hasFontSizeMultiplier()) << c.decl;
-    EXPECT_FLOAT_EQ(st.fontSizeMultiplier, c.expected) << c.decl;
+    EXPECT_EQ(st.fontSizeMultiplier, c.expected) << c.decl;
   }
 
   // Unknown keyword must leave font-size undefined.
@@ -546,25 +558,25 @@ TEST(CssLogical, VerticalRlTurnsTheBox) {
   CssStyle s =
       CssParser::parseInlineStyle("margin: 1px 2px 3px 4px; padding: 5px 6px 7px 8px; width: 9px; height: 10px");
   s.resolveLogical(CssWritingMode::VerticalRl, CssDirection::Unset);
-  EXPECT_FLOAT_EQ(2, s.marginTop.value);     // block-start: right
-  EXPECT_FLOAT_EQ(3, s.marginRight.value);   // inline-end: bottom
-  EXPECT_FLOAT_EQ(4, s.marginBottom.value);  // block-end: left
-  EXPECT_FLOAT_EQ(1, s.marginLeft.value);    // inline-start: top
-  EXPECT_FLOAT_EQ(6, s.paddingTop.value);
-  EXPECT_FLOAT_EQ(7, s.paddingRight.value);
-  EXPECT_FLOAT_EQ(8, s.paddingBottom.value);
-  EXPECT_FLOAT_EQ(5, s.paddingLeft.value);
-  EXPECT_FLOAT_EQ(10, s.imageWidth.value);  // inline size: height
-  EXPECT_FLOAT_EQ(9, s.imageHeight.value);  // block size: width
+  EXPECT_EQ(cssNumber(2), s.marginTop.value);     // block-start: right
+  EXPECT_EQ(cssNumber(3), s.marginRight.value);   // inline-end: bottom
+  EXPECT_EQ(cssNumber(4), s.marginBottom.value);  // block-end: left
+  EXPECT_EQ(cssNumber(1), s.marginLeft.value);    // inline-start: top
+  EXPECT_EQ(cssNumber(6), s.paddingTop.value);
+  EXPECT_EQ(cssNumber(7), s.paddingRight.value);
+  EXPECT_EQ(cssNumber(8), s.paddingBottom.value);
+  EXPECT_EQ(cssNumber(5), s.paddingLeft.value);
+  EXPECT_EQ(cssNumber(10), s.imageWidth.value);  // inline size: height
+  EXPECT_EQ(cssNumber(9), s.imageHeight.value);  // block size: width
 }
 
 TEST(CssLogical, VerticalLrTurnsTheBox) {
   CssStyle s = CssParser::parseInlineStyle("margin: 1px 2px 3px 4px");
   s.resolveLogical(CssWritingMode::VerticalLr, CssDirection::Unset);
-  EXPECT_FLOAT_EQ(4, s.marginTop.value);     // block-start: left
-  EXPECT_FLOAT_EQ(3, s.marginRight.value);   // inline-end: bottom
-  EXPECT_FLOAT_EQ(2, s.marginBottom.value);  // block-end: right
-  EXPECT_FLOAT_EQ(1, s.marginLeft.value);    // inline-start: top
+  EXPECT_EQ(cssNumber(4), s.marginTop.value);     // block-start: left
+  EXPECT_EQ(cssNumber(3), s.marginRight.value);   // inline-end: bottom
+  EXPECT_EQ(cssNumber(2), s.marginBottom.value);  // block-end: right
+  EXPECT_EQ(cssNumber(1), s.marginLeft.value);    // inline-start: top
 }
 
 TEST(CssLogical, DefinedBitsTurnWithTheirValues) {
@@ -583,12 +595,12 @@ TEST(CssLogical, DefinedBitsTurnWithTheirValues) {
 TEST(CssLogical, HorizontalLeavesTheBox) {
   CssStyle s = CssParser::parseInlineStyle("margin: 1px 2px 3px 4px; width: 9px");
   s.resolveLogical(CssWritingMode::HorizontalTb, CssDirection::Rtl);
-  EXPECT_FLOAT_EQ(1, s.marginTop.value);
-  EXPECT_FLOAT_EQ(4, s.marginLeft.value);  // margins are physical in CSS: direction does not mirror them
-  EXPECT_FLOAT_EQ(9, s.imageWidth.value);
+  EXPECT_EQ(cssNumber(1), s.marginTop.value);
+  EXPECT_EQ(cssNumber(4), s.marginLeft.value);  // margins are physical in CSS: direction does not mirror them
+  EXPECT_EQ(cssNumber(9), s.imageWidth.value);
   CssStyle unset = CssParser::parseInlineStyle("margin: 1px 2px 3px 4px");
   unset.resolveLogical(CssWritingMode::Unset, CssDirection::Unset);  // reads as horizontal-tb
-  EXPECT_FLOAT_EQ(2, unset.marginRight.value);
+  EXPECT_EQ(cssNumber(2), unset.marginRight.value);
 }
 
 TEST(CssLogical, StartAndEndFollowTheDirection) {

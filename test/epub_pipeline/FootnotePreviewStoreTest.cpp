@@ -138,7 +138,7 @@ TEST(FootnotePreviewStore, BuildResolvesItsOwnSpine) {
   Section::BuildParams params;
   params.viewportWidth = 480;
   params.viewportHeight = 800;
-  params.lineCompression = 1.0f;
+  params.lineCompression = TextScale();
   params.inlineFootnotePreviews = true;
 
   // The build must produce the note text itself. Before this change the reader had to gather the

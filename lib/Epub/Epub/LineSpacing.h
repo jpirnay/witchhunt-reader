@@ -1,5 +1,7 @@
 #pragma once
 
+#include <TextScale.h>
+
 #include <cstdint>
 
 // The reader's line-spacing steps, in the order the setting stores them (CrossPointSettings::LINE_COMPRESSION asserts
@@ -31,9 +33,9 @@ enum class LineSpacingScale : uint8_t { Font, BuiltinNotoSans, CjkPitch };
 
 struct LineSpacing {
   // Line pitch over the body font's line height, for every line the book's line-height does not set.
-  float compression = 1.0f;
+  TextScale compression;
   // Book's style: no block's compression below this. 0 when the book's line-height is not read.
-  float bookFloor = 0.0f;
+  TextScale bookFloor = TextScale::fromRaw(0);
   // The body text's em in pixels, which a book's line-height multiplies.
   uint16_t emPx = 0;
 };
@@ -50,24 +52,28 @@ namespace line_spacing_detail {
 constexpr uint8_t kSteps = kLineSpacingPercentSteps;
 // The options' labels. A number, not a word: it reads the same in every language and needs no translation.
 constexpr const char* const kLabels[kSteps] = {"90%", "95%", "100%", "110%", "120%", "130%", "145%", "160%", "175%"};
-constexpr float kFontFactor[kSteps] = {0.90f, 0.95f, 1.0f, 1.1f, 1.2f, 1.3f, 1.45f, 1.6f, 1.75f};
+// In percent of the body font's line height.
+constexpr uint8_t kFontFactorPct[kSteps] = {90, 95, 100, 110, 120, 130, 145, 160, 175};
 // Up to Pct100 a twentieth under the Font factor, from Pct110 on a tenth, as Tight to Widest were set.
-constexpr float kNotoSansFactor[kSteps] = {0.85f, 0.90f, 0.95f, 1.0f, 1.1f, 1.2f, 1.35f, 1.5f, 1.65f};
-// From Pct110 on, near Normal's 1.7 em times the step's percentage: 1.87, 2.04 and 2.21 em were set as 1.85, 2 and
-// 2.2, and 2.465, 2.72 and 2.975 are set as 2.45, 2.7 and 3. Pct90 keeps below Pct95's 1.5 em: a gap of 0.4 character.
-constexpr float kCjkPitchEm[kSteps] = {1.4f, 1.5f, 1.7f, 1.85f, 2.0f, 2.2f, 2.45f, 2.7f, 3.0f};
+constexpr uint8_t kNotoSansFactorPct[kSteps] = {85, 90, 95, 100, 110, 120, 135, 150, 165};
+// In hundredths of an em. From Pct110 on, near Normal's 1.7 em times the step's percentage: 1.87, 2.04 and 2.21 em were
+// set as 1.85, 2 and 2.2, and 2.465, 2.72 and 2.975 are set as 2.45, 2.7 and 3. Pct90 keeps below Pct95's 1.5 em: a
+// gap of 0.4 character.
+constexpr uint16_t kCjkPitchHundredthsEm[kSteps] = {140, 150, 170, 185, 200, 220, 245, 270, 300};
 
-constexpr float compressionAt(const uint8_t step, const LineSpacingScale scale, const uint16_t emPx,
-                              const int fontLineHeightPx) {
+constexpr TextScale compressionAt(const uint8_t step, const LineSpacingScale scale, const uint16_t emPx,
+                                  const int fontLineHeightPx) {
   switch (scale) {
     case LineSpacingScale::Font:
-      return kFontFactor[step];
+      return TextScale::percent(kFontFactorPct[step]);
     case LineSpacingScale::BuiltinNotoSans:
-      return kNotoSansFactor[step];
+      return TextScale::percent(kNotoSansFactorPct[step]);
     case LineSpacingScale::CjkPitch:
-      return fontLineHeightPx > 0 ? kCjkPitchEm[step] * emPx / static_cast<float>(fontLineHeightPx) : 1.0f;
+      return fontLineHeightPx > 0
+                 ? TextScale::ratio(int64_t{kCjkPitchHundredthsEm[step]} * emPx, int64_t{100} * fontLineHeightPx)
+                 : TextScale();
   }
-  return 1.0f;
+  return TextScale();
 }
 }  // namespace line_spacing_detail
 

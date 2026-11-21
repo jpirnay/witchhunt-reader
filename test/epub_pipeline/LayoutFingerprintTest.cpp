@@ -21,7 +21,7 @@ const std::string kFixture = std::string(CORPUS_DIR) + "/test_wrapped_paragraphs
 Section::BuildParams params() {
   Section::BuildParams p;
   p.fontId = 0;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.viewportWidth = 480;
   p.viewportHeight = 800;
   return p;
@@ -67,7 +67,7 @@ TEST_F(LayoutFingerprint, EveryLayoutInputGivesAnotherFingerprint) {
   Section::BuildParams margins = params();
   margins.viewportWidth = 400;
   Section::BuildParams spacing = params();
-  spacing.lineCompression = 1.2f;
+  spacing.lineCompression = TextScale::percent(120);
   EXPECT_NE(Section::layoutFingerprintFor(font), base);
   EXPECT_NE(Section::layoutFingerprintFor(margins), base);
   EXPECT_NE(Section::layoutFingerprintFor(spacing), base);

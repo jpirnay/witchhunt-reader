@@ -71,7 +71,7 @@ struct FontFamilyLayoutFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = 480;
     params.viewportHeight = 800;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     params.fontId = kBodyFont;
     params.embeddedStyle = true;
     params.fontFamilies = families;

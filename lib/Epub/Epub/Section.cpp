@@ -39,7 +39,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 130;  // v130: a line's font-size multiplier and its word fonts' scales
+constexpr uint8_t SECTION_FILE_VERSION = 131;  // v131: the header's line compression is TextScale (2^-20ths in a
+                                               // u32), not float; CSS lengths resolve in fixed point
+                                               // v130: a line's font-size multiplier and its word fonts' scales
                                                // are TextScale (2^-20ths in a u32), not float
                                                // v129: an id on an inline element names the page of its own line
                                                // (not its block's first, nor the next block's)
@@ -230,7 +232,7 @@ namespace header {
 constexpr uint32_t kVersion = 0;
 constexpr uint32_t kFontId = kVersion + sizeof(uint8_t);
 constexpr uint32_t kLineCompression = kFontId + sizeof(int);
-constexpr uint32_t kExtraParagraphSpacing = kLineCompression + sizeof(float);
+constexpr uint32_t kExtraParagraphSpacing = kLineCompression + sizeof(uint32_t);
 constexpr uint32_t kParagraphAlignment = kExtraParagraphSpacing + sizeof(bool);
 constexpr uint32_t kViewportWidth = kParagraphAlignment + sizeof(uint8_t);
 constexpr uint32_t kViewportHeight = kViewportWidth + sizeof(uint16_t);
@@ -448,6 +450,26 @@ uint32_t fnv1a(const uint8_t* data, size_t length) {
   return hash;
 }
 
+// The line compression as the variant key hashes it: the bytes the key hashed while it was a float (its IEEE-754
+// single), for the line-spacing steps, which are whole percents. A book's section files keep their names so, and the
+// format bump rebuilds each in place instead of beside a new one the card would keep until variant eviction. A CJK
+// pitch (a ratio of the font's metrics) has no float to recall: it hashes its TextScale.
+struct LegacyCompressionKey {
+  uint8_t percent;
+  uint32_t floatBits;
+};
+constexpr LegacyCompressionKey kLegacyCompressionKeys[] = {
+    {85, 0x3F59999A},  {90, 0x3F666666},  {95, 0x3F733333},  {100, 0x3F800000}, {110, 0x3F8CCCCD},
+    {120, 0x3F99999A}, {130, 0x3FA66666}, {135, 0x3FACCCCD}, {145, 0x3FB9999A}, {150, 0x3FC00000},
+    {160, 0x3FCCCCCD}, {165, 0x3FD33333}, {175, 0x3FE00000}};
+
+uint32_t compressionKey(const TextScale compression) {
+  for (const LegacyCompressionKey& key : kLegacyCompressionKeys) {
+    if (compression == TextScale::percent(key.percent)) return key.floatBits;
+  }
+  return compression.raw();
+}
+
 // A cache variant's property hash under this section format: what a page number is counted in. Never 0, which says
 // "not known".
 uint32_t layoutFingerprintOf(const uint32_t propertyHash) {
@@ -517,7 +539,7 @@ void Section::becomeCarried(const BuildParams& p) {
 
 uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   uint8_t buffer[104];
-  static_assert(sizeof(buffer) >= 23 + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) +
+  static_assert(sizeof(buffer) >= 23 + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint16_t) +
                                       BlockFontFamilies::kMaxFamilies * 3 * sizeof(int32_t) + sizeof(uint8_t) +
                                       sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t),
                 "the settings (23 B), Book's style line spacing, every family, the vertical request, the "
@@ -530,7 +552,8 @@ uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   };
 
   append(&p.fontId, sizeof(p.fontId));
-  append(&p.lineCompression, sizeof(p.lineCompression));
+  const uint32_t lineCompression = compressionKey(p.lineCompression);
+  append(&lineCompression, sizeof(lineCompression));
   append(&p.extraParagraphSpacing, sizeof(p.extraParagraphSpacing));
   append(&p.paragraphAlignment, sizeof(p.paragraphAlignment));
   append(&p.viewportWidth, sizeof(p.viewportWidth));
@@ -548,8 +571,9 @@ uint32_t Section::calculatePropertyHash(const BuildParams& p) {
     append(&INLINE_FOOTNOTE_PREVIEW_LAYOUT_VERSION, sizeof(INLINE_FOOTNOTE_PREVIEW_LAYOUT_VERSION));
   }
   append(&p.imageRendering, sizeof(p.imageRendering));
-  if (p.bookLineHeightFloor > 0.0f) {
-    append(&p.bookLineHeightFloor, sizeof(p.bookLineHeightFloor));
+  if (p.bookLineHeightFloor.raw() > 0) {
+    const uint32_t floor = compressionKey(p.bookLineHeightFloor);
+    append(&floor, sizeof(floor));
     append(&p.lineHeightEmPx, sizeof(p.lineHeightEmPx));
   }
   // Only what the book's CSS can reach, and only when there is any: a variant without families keeps its old key.
@@ -800,11 +824,12 @@ uint32_t Section::onPageComplete(std::unique_ptr<Page> page, serialization::Buff
   return position;
 }
 
-void Section::writeSectionFileHeader(const int fontId, const float lineCompression, const bool extraParagraphSpacing,
-                                     const uint8_t paragraphAlignment, const uint16_t viewportWidth,
-                                     const uint16_t viewportHeight, const bool hyphenationEnabled,
-                                     const bool embeddedStyle, const bool bionicReadingEnabled,
-                                     const uint8_t imageRendering, const VerticalText verticalText) {
+void Section::writeSectionFileHeader(const int fontId, const TextScale lineCompression,
+                                     const bool extraParagraphSpacing, const uint8_t paragraphAlignment,
+                                     const uint16_t viewportWidth, const uint16_t viewportHeight,
+                                     const bool hyphenationEnabled, const bool embeddedStyle,
+                                     const bool bionicReadingEnabled, const uint8_t imageRendering,
+                                     const VerticalText verticalText) {
   if (!file) {
     LOG_DBG("SCT", "File not open for writing header");
     return;
@@ -819,7 +844,7 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
                 "Header size mismatch");
   serialization::writePod(file, SECTION_FILE_VERSION);
   serialization::writePod(file, fontId);
-  serialization::writePod(file, lineCompression);
+  serialization::writePod(file, lineCompression.raw());
   serialization::writePod(file, extraParagraphSpacing);
   serialization::writePod(file, paragraphAlignment);
   serialization::writePod(file, viewportWidth);
@@ -905,7 +930,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
 
     int fileFontId;
     uint16_t fileViewportWidth, fileViewportHeight;
-    float fileLineCompression;
+    uint32_t fileLineCompression;
     bool fileExtraParagraphSpacing;
     uint8_t fileParagraphAlignment;
     bool fileHyphenationEnabled;
@@ -929,7 +954,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
 
     const bool embeddedStyleMatches =
         (p.embeddedStyle == fileEmbeddedStyle) || (usingEmbeddedStyleFallback && !fileEmbeddedStyle);
-    if (p.fontId != fileFontId || p.lineCompression != fileLineCompression ||
+    if (p.fontId != fileFontId || p.lineCompression.raw() != fileLineCompression ||
         p.extraParagraphSpacing != fileExtraParagraphSpacing || p.paragraphAlignment != fileParagraphAlignment ||
         p.viewportWidth != fileViewportWidth || p.viewportHeight != fileViewportHeight ||
         p.hyphenationEnabled != fileHyphenationEnabled || !embeddedStyleMatches ||

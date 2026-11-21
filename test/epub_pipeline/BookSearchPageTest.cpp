@@ -28,7 +28,7 @@ struct Collected final : BookSearch::HitSink {
 Section::BuildParams params() {
   Section::BuildParams p;
   p.fontId = 0;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.viewportWidth = 480;
   p.viewportHeight = 800;
   p.fontSizeNormalization = false;

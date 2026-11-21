@@ -167,7 +167,7 @@ SPINE 6 href=OEBPS/chapter7.xhtml pages=1 truncated=0 cssFallback=0
   LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=cache
    W x=53 s=0 z=100 t=mismatches.
-  IMG y=134 x=0 w=459 h=187 src=<cache>/epub_<hash>/img_7d1fe9c8ee1cf9d3.png
+  IMG y=134 x=0 w=460 h=187 src=<cache>/epub_<hash>/img_7d1fe9c8ee1cf9d3.png
 SPINE 7 href=OEBPS/chapter8.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=4 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=5

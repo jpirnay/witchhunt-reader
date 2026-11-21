@@ -28,6 +28,9 @@
 #include "BuildArena.h"
 #include "HalStorage.h"
 
+// A CSS length's number as CssLength holds it (16.16, its magnitude rounded up).
+inline int32_t cssNumber(const int64_t n, const int64_t d = 1) { return CssLength::of(n, d, CssUnit::Pixels).value; }
+
 // ---------------------------------------------------------------------------
 // Heap instrumentation: malloc/free/calloc/realloc are interposed and every
 // allocation gets a hidden header in front of the user pointer. The header
@@ -757,7 +760,7 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   EXPECT_TRUE(heapStyles[6].defined.colorTransparent && heapStyles[6].defined.opacityZero &&
               heapStyles[6].defined.visibilityHidden);
   EXPECT_TRUE(heapStyles[0].hasLineHeight()) << "line-height did not survive the disk cache";
-  EXPECT_FLOAT_EQ(1.6f, heapStyles[0].lineHeightEm);
+  EXPECT_EQ(TextScale::percent(160), heapStyles[0].lineHeightEm);
   const CssStyle& flow = heapStyles[7];
   EXPECT_EQ(CssWritingMode::VerticalLr, flow.writingMode) << "the flow word did not survive the disk cache";
   EXPECT_EQ(CssTextOrientation::Upright, flow.textOrientation);
@@ -893,15 +896,15 @@ TEST(CssParserCache, FontSizeMultiplierSurvivesDiskCache) {
 
   const CssStyle tale1 = parser.resolveStyle("span", "tale1");
   ASSERT_TRUE(tale1.hasFontSizeMultiplier());
-  EXPECT_FLOAT_EQ(tale1.fontSizeMultiplier, 0.95f);
+  EXPECT_EQ(tale1.fontSizeMultiplier, TextScale::percent(95));
 
   const CssStyle tale5 = parser.resolveStyle("span", "tale5");
   ASSERT_TRUE(tale5.hasFontSizeMultiplier());
-  EXPECT_FLOAT_EQ(tale5.fontSizeMultiplier, 0.55f);
+  EXPECT_EQ(tale5.fontSizeMultiplier, TextScale::percent(55));
 
   const CssStyle em120 = parser.resolveStyle("span", "em120");
   ASSERT_TRUE(em120.hasFontSizeMultiplier());
-  EXPECT_FLOAT_EQ(em120.fontSizeMultiplier, 1.2f);
+  EXPECT_EQ(em120.fontSizeMultiplier, TextScale::percent(120));
 
   // A rule without font-size must not gain one through the new payload bytes.
   const CssStyle plain = parser.resolveStyle("span", "plain");
@@ -1034,9 +1037,9 @@ TEST(CssParserCache, FinishingTheCompileWritesTheRulesInAFewCalls) {
   EXPECT_EQ(r5.fontWeight, CssFontWeight::Bold);
   EXPECT_EQ(r5.fontStyle, CssFontStyle::Italic);
   EXPECT_TRUE(r5.hasMarginLeft());
-  EXPECT_EQ(r5.marginLeft.value, 5.0f);
+  EXPECT_EQ(r5.marginLeft.value, cssNumber(5));
   const CssStyle r398 = parser.resolveStyle("p", "r398");
-  EXPECT_EQ(r398.marginLeft.value, static_cast<float>(398 % 7));
+  EXPECT_EQ(r398.marginLeft.value, cssNumber(398 % 7));
   parser.clear();
   ASSERT_TRUE(parser.loadFromCache());
   EXPECT_EQ(parser.ruleCount(), static_cast<size_t>(kRules + 1));
@@ -1100,7 +1103,7 @@ TEST(CssParserCache, ARuleWithoutAFontSizeTakesNoneFromTheRuleReadBeforeIt) {
 
     const CssStyle h1 = parser.resolveStyle("h1", "");
     ASSERT_TRUE(h1.hasFontSizeMultiplier());
-    EXPECT_FLOAT_EQ(h1.fontSizeMultiplier, 2.0f) << "the last font-size declared is 2em";
+    EXPECT_EQ(h1.fontSizeMultiplier, TextScale::ratio(2, 1)) << "the last font-size declared is 2em";
     EXPECT_TRUE(h1.hasMarginTop());
     EXPECT_TRUE(h1.hasMarginBottom());
     EXPECT_EQ(h1.textAlign, CssTextAlign::Center);
@@ -1532,7 +1535,7 @@ TEST(CssParserSupports, AnInitialLetterBlockIsRead) {
   const CssStyle cap = parser.resolveStyle("span", "dropcap");
   EXPECT_EQ(3, cap.initialLetterLines());
   EXPECT_EQ(CssFloat::None, cap.cssFloat);
-  EXPECT_FLOAT_EQ(1.0f, cap.fontSizeMultiplier);
+  EXPECT_TRUE(cap.fontSizeMultiplier.isOne());
   EXPECT_EQ(2, parser.resolveFirstLetterStyle("p", "lead").initialLetterLines());
   EXPECT_EQ(CssTextAlign::Right, parser.resolveStyle("div", "inner").textAlign);
   EXPECT_FALSE(parser.resolveStyle("span", "nested").anyDefined());  // @media inside: skipped as ever
