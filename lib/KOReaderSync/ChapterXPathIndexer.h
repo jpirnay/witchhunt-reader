@@ -29,10 +29,11 @@ class ChapterXPathIndexer {
    *
    * @param epub Loaded EPUB instance
    * @param spineIndex Current spine item index
-   * @param intraSpineProgress Position within the spine item [0.0, 1.0]
+   * @param intraSpineProgress Position within the spine item, as a share of its text bytes
    * @return Best matching XPath for KOReader, or empty string on failure
    */
-  static std::string findXPathForProgress(const std::shared_ptr<Epub>& epub, int spineIndex, float intraSpineProgress);
+  static std::string findXPathForProgress(const std::shared_ptr<Epub>& epub, int spineIndex,
+                                          ProgressPpb intraSpineProgress);
 
   /**
    * The XPath of the text at a visible-text offset (Section::getVisibleTextOffsetForPage), named
@@ -56,7 +57,7 @@ class ChapterXPathIndexer {
    * @param epub Loaded EPUB instance
    * @param spineIndex Spine item index to parse
    * @param xpath Incoming KOReader XPath
-   * @param outIntraSpineProgress Resolved position within spine [0.0, 1.0]
+   * @param outIntraSpineProgress Resolved position within spine, as a share of its text bytes
    * @param outExactMatch True only for full exact path match
    * @param outListItemIndex Optional. When non-null and the target XPath's deepest element
    *                 is /li[N], receives the running <li> count at the matched element so the
@@ -74,7 +75,7 @@ class ChapterXPathIndexer {
    * @return true if any match was resolved; false means caller should fallback
    */
   static bool findProgressForXPath(const std::shared_ptr<Epub>& epub, int spineIndex, const std::string& xpath,
-                                   float& outIntraSpineProgress, bool& outExactMatch,
+                                   ProgressPpb& outIntraSpineProgress, bool& outExactMatch,
                                    uint16_t* outListItemIndex = nullptr, uint32_t* outVisibleOffset = nullptr,
                                    bool* outIsTextPoint = nullptr, BuildArena* scratch = nullptr);
 

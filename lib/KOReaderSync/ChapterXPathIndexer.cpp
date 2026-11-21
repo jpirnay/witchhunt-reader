@@ -17,7 +17,7 @@ using namespace ChapterXPathIndexerInternal;
 // heavy parsing/mapping work to the internal forward/reverse modules.
 
 std::string ChapterXPathIndexer::findXPathForProgress(const std::shared_ptr<Epub>& epub, const int spineIndex,
-                                                      const float intraSpineProgress) {
+                                                      const ProgressPpb intraSpineProgress) {
   return findXPathForProgressInternal(epub, spineIndex, intraSpineProgress);
 }
 
@@ -27,7 +27,7 @@ std::string ChapterXPathIndexer::findXPathForVisibleOffset(const std::shared_ptr
 }
 
 bool ChapterXPathIndexer::findProgressForXPath(const std::shared_ptr<Epub>& epub, const int spineIndex,
-                                               const std::string& xpath, float& outIntraSpineProgress,
+                                               const std::string& xpath, ProgressPpb& outIntraSpineProgress,
                                                bool& outExactMatch, uint16_t* outListItemIndex,
                                                uint32_t* outVisibleOffset, bool* outIsTextPoint,
                                                BuildArena* const scratch) {

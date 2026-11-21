@@ -5,6 +5,8 @@
 // word's text/x-position/style. Two runs over the same book with the same
 // profile must produce byte-identical dumps (determinism), and any layout
 // refactor must keep the dump unchanged (golden equivalence).
+#include <TextScale.h>
+
 #include <cstdint>
 #include <functional>
 #include <ostream>
@@ -21,13 +23,16 @@ struct BlockFontFamilies;
 
 namespace pipeline_harness {
 
+// A text scale as a number, for a test to print or compare with a tolerance (TextScale rounds up onto a grid of 2^-20).
+inline float scaleValue(const TextScale scale) { return static_cast<float>(scale.raw()) / TextScale::kOne; }
+
 // A named render-settings profile — the section-cache variant under test.
 struct Profile {
   const char* name = "default";
   int fontId = 1;
-  float lineCompression = 1.0f;
+  TextScale lineCompression;
   // Book's style line spacing (Section::BuildParams); off by default.
-  float bookLineHeightFloor = 0.0f;
+  TextScale bookLineHeightFloor = TextScale::fromRaw(0);
   uint16_t lineHeightEmPx = 0;
   bool extraParagraphSpacing = false;
   // The reader's Paragraph Indent (Section::BuildParams): Book's Style, which the goldens were laid out with.

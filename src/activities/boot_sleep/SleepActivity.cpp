@@ -9,6 +9,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <ImageScale.h>
 #include <Memory.h>
 #include <PngStreamDecoder.h>
 #include <Serialization.h>
@@ -34,6 +35,7 @@
 #include "fontIds.h"
 #include "images/Logo120.h"
 #include "images/MoonIcon.h"
+#include "util/PrintfDouble.h"
 
 namespace {
 
@@ -190,8 +192,8 @@ struct SleepPicture {
   int y;
   int maxWidth;
   int maxHeight;
-  float cropX;
-  float cropY;
+  int visibleWidth;
+  int visibleHeight;
 };
 
 // The sleep picture as a gray-level plan's steps (GrayLevelPlan.h): the B/W base, then each pass over its planes,
@@ -234,8 +236,8 @@ bool renderSleepLevelPlanes(const GfxRenderer& renderer, const gray_levels::Plan
     }
     renderer.clearLevelPlanes(target);
     picture.bitmap.rewindToData();
-    renderer.drawBitmap(picture.bitmap, picture.x, picture.y, picture.maxWidth, picture.maxHeight, picture.cropX,
-                        picture.cropY, nullptr, &target);
+    renderer.drawBitmap(picture.bitmap, picture.x, picture.y, picture.maxWidth, picture.maxHeight, picture.visibleWidth,
+                        picture.visibleHeight, nullptr, &target);
     overlay(target);
   };
 
@@ -311,12 +313,10 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   ImageDimensions srcDims{};
   if (!cachePath.empty() && PngToFramebufferConverter::getDimensionsStatic(filename, srcDims) && srcDims.width > 0 &&
       srcDims.height > 0) {
-    const float scaleX = static_cast<float>(pageWidth) / srcDims.width;
-    const float scaleY = static_cast<float>(pageHeight) / srcDims.height;
-    float scale = (scaleX < scaleY) ? scaleX : scaleY;
-    if (scale > 1.0f) scale = 1.0f;
-    cacheW = std::max(1, static_cast<int>(srcDims.width * scale));
-    cacheH = std::max(1, static_cast<int>(srcDims.height * scale));
+    const ImageScale scale =
+        ImageScale::smaller(ImageScale::fit(srcDims.width, srcDims.height, pageWidth, pageHeight), ImageScale());
+    cacheW = std::max(1, scale.apply(srcDims.width));
+    cacheH = std::max(1, scale.apply(srcDims.height));
     // The decoder draws at config.x/config.y (0,0 here) and caches with that same
     // origin, so the replay must not re-centre or the image would shift.
     cacheX = config.x;
@@ -586,6 +586,24 @@ bool SleepActivity::keepsLastScreen() const {
           SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
 }
 
+bool SleepActivity::showsCustomImageOnly() {
+  switch (static_cast<CrossPointSettings::SLEEP_SCREEN_MODE>(SETTINGS.sleepScreen)) {
+    case CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM:
+      return true;
+    case CrossPointSettings::SLEEP_SCREEN_MODE::COVER:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM:
+      return APP_STATE.openEpubPath.empty();  // renderSleepScreen()'s fallback without a book
+    case CrossPointSettings::SLEEP_SCREEN_MODE::DARK:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::LIGHT:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::BLANK:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME:
+    case CrossPointSettings::SLEEP_SCREEN_MODE::SLEEP_SCREEN_MODE_COUNT:
+      return false;
+  }
+  return false;
+}
+
 void SleepActivity::renderSleepScreen() {
   RenderLock lock(*this);
 
@@ -741,10 +759,11 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
           uint32_t currentPage = static_cast<uint32_t>(data[0]) | (static_cast<uint32_t>(data[1]) << 8) |
                                  (static_cast<uint32_t>(data[2]) << 16) | (static_cast<uint32_t>(data[3]) << 24);
           uint32_t totalPages = xtc.getPageCount();
-          float progress = xtc.calculateProgress(currentPage) * 100.0f;
+          // Already a whole percent (Xtc::calculateProgress), not a fraction.
+          const uint8_t percent = xtc.calculateProgress(currentPage);
           char buf[64];
           snprintf(buf, sizeof(buf), tr(STR_OVERLAY_READING_PROGRESS), (unsigned long)currentPage + 1, totalPages,
-                   progress);
+                   printfDouble(percent));
           info.progressText = buf;
         }
         f.close();
@@ -778,10 +797,10 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
           }
 
           if (totalPages > 0) {
-            float progress = (currentPage + 1) * 100.0f / totalPages;
+            const int percent = ProgressPpb::of(currentPage + 1, totalPages).percentHalfEven();
             char buf[64];
             snprintf(buf, sizeof(buf), tr(STR_OVERLAY_READING_PROGRESS), (unsigned long)currentPage + 1, totalPages,
-                     progress);
+                     printfDouble(percent));
             info.progressText = buf;
           } else {
             char buf[64];
@@ -808,8 +827,9 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
           const int currentPage = record->page;
           const int pageCount = record->pageCount;
           if (pageCount > 0) {
-            float chapterProgress = static_cast<float>(currentPage) / static_cast<float>(pageCount);
-            float bookProgress = epub.calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+            // Rounded as the "%.0f" of the translated strings below rounded the float it was.
+            const double bookPercent = printfDouble(
+                epub.calculateProgress(currentSpineIndex, ProgressPpb::of(currentPage, pageCount)).percentHalfEven());
 
             // The reader records what its status bar showed when it closed the book: the page within
             // the whole TOC chapter (#325) and the printed page. Records without it (older ones, a
@@ -835,13 +855,13 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
               const int chapterTotal = shownChapter ? shown->chapterTotal : pageCount;
               char suffix[64];
               snprintf(suffix, sizeof(suffix), tr(STR_OVERLAY_CHAPTER_PAGE_SUFFIX), chapterPage, chapterTotal,
-                       bookProgress);
+                       bookPercent);
               info.progressSuffix = printedPagePrefix + suffix;
               info.progressText = info.chapterName + info.progressSuffix;
             } else {
               char buf[80];
               snprintf(buf, sizeof(buf), tr(STR_OVERLAY_READING_PROGRESS), (unsigned long)currentPage + 1,
-                       (unsigned)pageCount, bookProgress);
+                       (unsigned)pageCount, bookPercent);
               info.progressText = printedPagePrefix + buf;
             }
           } else {
@@ -865,11 +885,11 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
                                  SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP);
   const int x = placement.x;
   const int y = placement.y;
-  const float cropX = placement.cropX;
-  const float cropY = placement.cropY;
+  const BoxCut& draw = placement.draw;
 
-  LOG_DBG("SLP", "bitmap %d x %d, screen %d x %d: drawing to %d x %d, crop %f x %f", bitmap.getWidth(),
-          bitmap.getHeight(), pageWidth, pageHeight, x, y, cropX, cropY);
+  LOG_DBG("SLP", "bitmap %d x %d, screen %d x %d: drawing to %d x %d, shown %d x %d within %d x %d", bitmap.getWidth(),
+          bitmap.getHeight(), pageWidth, pageHeight, x, y, draw.visibleWidth, draw.visibleHeight, draw.maxWidth,
+          draw.maxHeight);
   renderer.clearScreen();
 
   // The tone filters are greyscale modes too: they change how levels are derived, not
@@ -900,7 +920,7 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
   }
 
   const auto drawTwoBitPicture = [&]() {
-    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+    renderer.drawBitmap(bitmap, x, y, draw.maxWidth, draw.maxHeight, draw.visibleWidth, draw.visibleHeight);
 
     if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
       renderer.invertScreen();
@@ -1005,7 +1025,7 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
       }
       const GfxRenderer::Gray8Target target{canvas, canvasStride};
       bitmap.rewindToData();
-      renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY, &target);
+      renderer.drawBitmap(bitmap, x, y, draw.maxWidth, draw.maxHeight, draw.visibleWidth, draw.visibleHeight, &target);
       // Composite the overlay's whole block rather than stamping its dark pixels:
       // the block is opaque, and in mode 3 it is black with WHITE text, so a
       // stamp would drop the fill and the text with it.
@@ -1031,8 +1051,10 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
         drawOverlay();
         renderer.bwRectToLevelPlanes(target, 0, overlayRectY, pageWidth, overlayRectHeight);
       };
-      if (renderSleepLevelPlanes(renderer, *levelPlan, SleepPicture{bitmap, x, y, pageWidth, pageHeight, cropX, cropY},
-                                 overlayOnPlane)) {
+      if (renderSleepLevelPlanes(
+              renderer, *levelPlan,
+              SleepPicture{bitmap, x, y, draw.maxWidth, draw.maxHeight, draw.visibleWidth, draw.visibleHeight},
+              overlayOnPlane)) {
         LOG_INF("SLP", "Sleep bitmap rendered at %u levels (gray-level plan)",
                 static_cast<unsigned>(levelPlan->levels));
         return;
@@ -1087,7 +1109,7 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
       renderer.clearScreen(absolutePass ? 0xFF : 0x00);
       renderer.setRenderMode(mode);
       renderer.setAbsoluteGrayPlanes(absolutePass);
-      renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+      renderer.drawBitmap(bitmap, x, y, draw.maxWidth, draw.maxHeight, draw.visibleWidth, draw.visibleHeight);
       // setRenderMode(BW) also clears the absolute flag, hence re-arming it per
       // plane above.
       if (absolutePass) renderer.setRenderMode(GfxRenderer::BW);
@@ -1299,15 +1321,10 @@ void SleepActivity::renderOverlaySleepScreen() const {
     }
 
     const int srcW = static_cast<int>(info.width), srcH = static_cast<int>(info.height);
-    float yScale = 1.0f;
-    int dstW = srcW, dstH = srcH;
-    if (srcW > pageWidth || srcH > pageHeight) {
-      const float scaleX = (float)pageWidth / srcW, scaleY = (float)pageHeight / srcH;
-      const float scale = (scaleX < scaleY) ? scaleX : scaleY;
-      dstW = (int)(srcW * scale);
-      dstH = (int)(srcH * scale);
-      yScale = (float)dstH / srcH;
-    }
+    // Fit the page, never up. Rows map by dstH / srcH, the scale the height actually got.
+    const ImageScale fit = ImageScale::smaller(ImageScale::fit(srcW, srcH, pageWidth, pageHeight), ImageScale());
+    const int dstW = fit.apply(srcW), dstH = fit.apply(srcH);
+    const ImageScale yScale(dstH, srcH);
     const int dstX = (pageWidth - dstW) / 2;
     const int dstY = (pageHeight - dstH) / 2;
 
@@ -1327,7 +1344,7 @@ void SleepActivity::renderOverlaySleepScreen() const {
         ok = false;
         break;
       }
-      const int destY = dstY + (int)(srcY * yScale);
+      const int destY = dstY + yScale.apply(srcY);
       if (destY == lastDstY) continue;  // skip duplicate rows from Y scaling
       lastDstY = destY;
       if (destY < 0 || destY >= pageHeight) continue;

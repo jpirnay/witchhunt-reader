@@ -61,7 +61,7 @@ constexpr const char* kBaseCss = "body { margin: 0; padding: 0 } p { margin: 0; 
 
 pipeline_harness::Profile bookStyle() {
   pipeline_harness::Profile p;
-  p.bookLineHeightFloor = 0.95f;
+  p.bookLineHeightFloor = TextScale::percent(95);
   p.lineHeightEmPx = 20;
   return p;
 }

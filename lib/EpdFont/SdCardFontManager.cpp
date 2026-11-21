@@ -377,7 +377,7 @@ std::optional<ResolvedFont<EpdFontFamily>> SdCardFontManager::resolveTtfSize(voi
   ResolvedFont<EpdFontFamily> resolved{EpdFontFamily(fonts[0], fonts[1], fonts[2], fonts[3])};
   const uint32_t wanted = static_cast<uint32_t>(px) << 6;
   if (served != 0 && served != wanted) {
-    resolved.baseScale = static_cast<float>(wanted) / static_cast<float>(served);
+    resolved.baseScale = TextScale::ratio(wanted, served);
     LOG_INF("SDMGR", "%u px drawn from the %lu/64 px size, scaled", px, static_cast<unsigned long>(served));
   }
   return resolved;
@@ -623,7 +623,7 @@ bool SdCardFontManager::ensureSizeAlias(GfxRenderer& renderer, const uint8_t tar
   EpdFontFamily fontFamily(lf.font->getEpdFont(0), lf.font->getEpdFont(1), lf.font->getEpdFont(2),
                            lf.font->getEpdFont(3));
   renderer.registerSdCardFontAlias(aliasId, lf.font);
-  renderer.insertScaledFont(aliasId, fontFamily, static_cast<float>(targetPtSize) / loadedPointSize_);
+  renderer.insertScaledFont(aliasId, fontFamily, TextScale::ratio(targetPtSize, loadedPointSize_));
   aliasFontId_ = aliasId;
   aliasPointSize_ = targetPtSize;
   LOG_INF("SDMGR", "%s: %u pt served by the %u pt face scaled %u/%u (id=%d)", loadedFamilyName_.c_str(), targetPtSize,

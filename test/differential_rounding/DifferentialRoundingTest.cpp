@@ -465,7 +465,7 @@ TEST(SmallCaps, UppercaseWidthUnchanged) { EXPECT_EQ(textWidthSC("T"), textWidth
 // 't' folds to the 'T' glyph (width 8) drawn at SCALE=0.75 -> round(8*0.75)=6.
 // Single glyph at x=0 with left=0, so width == scaled glyph width.
 TEST(SmallCaps, FoldedGlyphScaledWidth) {
-  const int expected = static_cast<int>(8 * smallCaps::SCALE + 0.5f);  // 6
+  const int expected = smallCaps::SCALE.apply(8);  // 6
   EXPECT_EQ(textWidthSC("t"), expected);
   // Sanity: the folded small-cap is narrower than the full-size capital.
   EXPECT_LT(textWidthSC("t"), textWidth("T"));
@@ -476,9 +476,9 @@ TEST(SmallCaps, FoldedGlyphScaledWidth) {
 // in the matrix for T->T -> 0). Folded step = toPixel(round(137*0.75)) = toPixel(103) = 6.
 // t1 scaled-width 6 at x=0; t2 at x=6, scaled width 6 -> w = 6 + 6 = 12.
 TEST(SmallCaps, FoldedRunAdvance) {
-  const int32_t scaledAdvFP = static_cast<int32_t>(137 * smallCaps::SCALE + 0.5f);  // 103
-  const int step = fp4::toPixel(scaledAdvFP);                                       // 6
-  const int scaledWidth = static_cast<int>(8 * smallCaps::SCALE + 0.5f);            // 6
+  const int32_t scaledAdvFP = smallCaps::SCALE.apply(137);  // 103
+  const int step = fp4::toPixel(scaledAdvFP);               // 6
+  const int scaledWidth = smallCaps::SCALE.apply(8);        // 6
   EXPECT_EQ(textWidthSC("tt"), step + scaledWidth);
 }
 
@@ -556,8 +556,8 @@ TEST(SmallCapsLigatures, PlainTextFormsTheLigature) { EXPECT_EQ(ligWidth("fi", f
 
 // F at 3/4: advance round(144 * 0.75) = 108 FP -> 7 px; I at x=7 is round(4 * 0.75) = 3 px wide.
 TEST(SmallCapsLigatures, SmallCapsMeasureTwoSmallCapitals) {
-  const int step = fp4::toPixel(static_cast<int32_t>(144 * smallCaps::SCALE + 0.5f));  // 7
-  const int iWidth = static_cast<int>(4 * smallCaps::SCALE + 0.5f);                    // 3
+  const int step = fp4::toPixel(smallCaps::SCALE.apply(144));  // 7
+  const int iWidth = smallCaps::SCALE.apply(4);                // 3
   EXPECT_EQ(ligWidth("fi", true), step + iWidth);
 }
 

@@ -13,7 +13,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -21,7 +20,9 @@
 #include <memory>
 
 #include "KOReaderCredentialStore.h"
+#include "KOReaderJsonNumber.h"
 #include "KOReaderProgressReply.h"
+#include "SeriesIndex.h"
 
 int KOReaderSyncClient::lastHttpCode = 0;
 int KOReaderSyncClient::lastEspError = 0;
@@ -656,11 +657,18 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   LOG_DBG("KOSync", "Updating progress: %s (heap: %u, contig: %u)", url.c_str(), lastHeapAtFailure,
           lastContigHeapAtFailure);
 
-  // Build JSON body
+  // Build JSON body. The numbers go in as digits, the text ArduinoJson wrote for the floats they were
+  // (KOReaderJsonNumber.h); serialized() copies them into the document.
+  char number[24];
   JsonDocument doc;
   doc["document"] = progress.document;
   doc["progress"] = progress.progress;
-  doc["percentage"] = progress.percentage;
+  if (progress.percentage) {
+    formatJsonPercentage(*progress.percentage, number);
+    doc["percentage"] = serialized(static_cast<const char*>(number));
+  } else {
+    doc["percentage"] = nullptr;  // what ArduinoJson wrote for a NaN
+  }
   doc["device"] = DEVICE_NAME;
   doc["device_id"] = DEVICE_ID;
 
@@ -673,11 +681,11 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
     if (!progress.metadata->asin.empty()) meta["asin"] = progress.metadata->asin;
     if (!progress.metadata->series.empty()) meta["series"] = progress.metadata->series;
     // A number; an index that is not one is left out rather than sent as text.
-    const std::string& index = progress.metadata->seriesIndex;
-    char* end = nullptr;
-    const float number = index.empty() ? 0.0f : std::strtof(index.c_str(), &end);
-    if (end != nullptr && end != index.c_str() && *end == '\0' && std::isfinite(number)) {
-      meta["series_index"] = number;
+    const char* end = nullptr;
+    const auto index = SeriesIndex::parse(progress.metadata->seriesIndex.c_str(), &end);
+    if (index && *end == '\0') {
+      formatJsonMillionths(index->millionths, number);
+      meta["series_index"] = serialized(static_cast<const char*>(number));
     }
   }
 
@@ -709,8 +717,10 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
     if (err == ESP_OK && (httpCode < 200 || httpCode >= 300)) {
       rememberResponsePreview(responseBody.c_str());
       LOG_ERR("KOSync", "PUT failure body preview: %s", g_lastResponsePreview);
-      LOG_ERR("KOSync", "PUT failure request summary: document=%s percentage=%.4f progress=%s",
-              progress.document.c_str(), progress.percentage, progress.progress.c_str());
+      LOG_ERR("KOSync", "PUT failure request summary: document=%s percentage=%lu ppb progress=%s",
+              progress.document.c_str(),
+              static_cast<unsigned long>(progress.percentage ? progress.percentage->ppb() : 0),
+              progress.progress.c_str());
     }
 
     // Retry up to two times for transient connect or EAGAIN failures only.

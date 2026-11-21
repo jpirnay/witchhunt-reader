@@ -203,7 +203,7 @@ SPINE 6 href=OEBPS/chapter7.xhtml pages=1 truncated=0 cssFallback=0
    W x=155 s=0 z=100 t=progressive
    W x=260 s=0 z=100 t=JPEG
    W x=304 s=0 z=100 t=encoding.
-  IMG y=158 x=0 w=459 h=187 src=<cache>/epub_<hash>/img_5d6843c96ce24d3b.jpg
+  IMG y=158 x=0 w=460 h=187 src=<cache>/epub_<hash>/img_5d6843c96ce24d3b.jpg
 SPINE 7 href=OEBPS/chapter8.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=4 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=5

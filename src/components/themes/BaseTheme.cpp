@@ -68,14 +68,12 @@ int progressBarPixelHeight(const uint8_t progressBar, const uint8_t thickness, c
   return std::max(0, reservedHeight - metrics.progressBarMarginTop);
 }
 
-int statusBarProgressPercent(const uint8_t progressBar, const float bookProgress, const int currentPage,
+int statusBarProgressPercent(const uint8_t progressBar, const ProgressPpb bookProgress, const int currentPage,
                              const int pageCount) {
   if (progressBar == CrossPointSettings::STATUS_BAR_PROGRESS_BAR::BOOK_PROGRESS) {
-    return std::clamp(static_cast<int>(std::lround(bookProgress)), 0, 100);
+    return bookProgress.percentHalfUp();  // as lround() rounded the float percent
   }
-  const int chapterProgress =
-      (pageCount > 0) ? static_cast<int>((static_cast<float>(currentPage) / pageCount) * 100) : 0;
-  return std::clamp(chapterProgress, 0, 100);
+  return ProgressPpb::of(currentPage, pageCount).percentFloor();
 }
 
 constexpr int SYNC_INDICATOR_SIZE = 12;
@@ -707,11 +705,10 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
 
         // Calculate width based on aspect ratio, maintaining baseHeight
         if (imgWidth > 0 && imgHeight > 0) {
-          const float aspectRatio = static_cast<float>(imgWidth) / static_cast<float>(imgHeight);
-          bookWidth = static_cast<int>(baseHeight * aspectRatio);
+          bookWidth = static_cast<int>(static_cast<int64_t>(baseHeight) * imgWidth / imgHeight);
 
           // Ensure width doesn't exceed reasonable limits (max 90% of screen width)
-          const int maxWidth = static_cast<int>(rect.width * 0.9f);
+          const int maxWidth = rect.width * 9 / 10;
           if (bookWidth > maxWidth) {
             bookWidth = maxWidth;
           }
@@ -1091,25 +1088,25 @@ Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message, cons
 // panel's native orientation. drawLine() goes through rotateCoordinates() and is upright in all
 // four.
 static void drawHourglass(const GfxRenderer& renderer, const int originX, const int originY, const int size) {
-  const float s = static_cast<float>(size) / 24.0f;
-  const int stroke = std::max(2, static_cast<int>(2.0f * s + 0.5f));  // Lucide stroke-width 2
-  const auto px = [&](const float u) { return originX + static_cast<int>(u * s + 0.5f); };
-  const auto py = [&](const float v) { return originY + static_cast<int>(v * s + 0.5f); };
-  const auto line = [&](const float x1, const float y1, const float x2, const float y2) {
+  // Grid coordinates in thousandths (the arcs' chords end at 6.172 and 17.828), scaled by size / 24 and rounded.
+  const int stroke = std::max(2, (size + 6) / 12);  // Lucide stroke-width 2
+  const auto px = [&](const int u) { return originX + (u * size + 12000) / 24000; };
+  const auto py = [&](const int v) { return originY + (v * size + 12000) / 24000; };
+  const auto line = [&](const int x1, const int y1, const int x2, const int y2) {
     renderer.drawLine(px(x1), py(y1), px(x2), py(y2), stroke, true);
   };
-  line(5, 2, 19, 2);    // top bar
-  line(5, 22, 19, 22);  // bottom bar
+  line(5000, 2000, 19000, 2000);    // top bar
+  line(5000, 22000, 19000, 22000);  // bottom bar
   // Upper funnel, then lower. The two 2-unit corner arcs are taken as their chords, which is
   // sub-pixel at this size.
-  line(7, 2, 7, 6.172f);
-  line(7, 6.172f, 12, 12);
-  line(12, 12, 17, 6.172f);
-  line(17, 6.172f, 17, 2);
-  line(7, 22, 7, 17.828f);
-  line(7, 17.828f, 12, 12);
-  line(12, 12, 17, 17.828f);
-  line(17, 17.828f, 17, 22);
+  line(7000, 2000, 7000, 6172);
+  line(7000, 6172, 12000, 12000);
+  line(12000, 12000, 17000, 6172);
+  line(17000, 6172, 17000, 2000);
+  line(7000, 22000, 7000, 17828);
+  line(7000, 17828, 12000, 12000);
+  line(12000, 12000, 17000, 17828);
+  line(17000, 17828, 17000, 22000);
 }
 
 Rect BaseTheme::drawBusyIndicator(const GfxRenderer& renderer, const bool overlayDisplayedFrame,
@@ -1147,7 +1144,7 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }
 
-void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
+void BaseTheme::drawStatusBar(GfxRenderer& renderer, const ProgressPpb bookProgress, const int currentPage,
                               const int pageCount, std::string title, const int paddingBottom, const bool isStarred,
                               const std::string& printedPageLabel, const bool fillMargin,
                               const bool pageCountApproximate, const SyncIndicator syncIndicator, const bool lowMemory,
@@ -1232,11 +1229,12 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     // right always reflects spine pagination.
     char progressStr[32];
 
+    // The percent rounds as printf's "%.0f" rounded the float it was: a half to the even neighbour.
     if (SETTINGS.statusBarBookProgressPercentage && SETTINGS.statusBarChapterPageCount) {
-      snprintf(progressStr, sizeof(progressStr), "%d/%s%d  %.0f%%", currentPage, pageCountPrefix, pageCount,
-               bookProgress);
+      snprintf(progressStr, sizeof(progressStr), "%d/%s%d  %d%%", currentPage, pageCountPrefix, pageCount,
+               bookProgress.percentHalfEven());
     } else if (SETTINGS.statusBarBookProgressPercentage) {
-      snprintf(progressStr, sizeof(progressStr), "%.0f%%", bookProgress);
+      snprintf(progressStr, sizeof(progressStr), "%d%%", bookProgress.percentHalfEven());
     } else {
       snprintf(progressStr, sizeof(progressStr), "%d/%s%d", currentPage, pageCountPrefix, pageCount);
     }

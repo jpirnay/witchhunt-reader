@@ -14,21 +14,24 @@ constexpr uint8_t kSteps = kLineSpacingPercentSteps;  // 90% to 175%; Book's sty
 uint8_t step(const LineSpacingStep s) { return static_cast<uint8_t>(s); }
 
 // The line pitch the parser lays out for a compression (ChapterHtmlSlimParser::effectiveLineHeight).
-int pitch(const int lineHeight, const float compression) { return static_cast<int>(lineHeight * compression + 0.5f); }
+int pitch(const int lineHeight, const TextScale compression) { return compression.apply(lineHeight); }
+
+// A compression as a number, to set beside the factors the steps are named by (TextScale rounds up onto 2^-20ths).
+float asFloat(const TextScale s) { return static_cast<float>(s.raw()) / TextScale::kOne; }
 
 TEST(LineSpacing, FontFactorsAreTheStepsPercentages) {
   const float expected[kSteps] = {0.90f, 0.95f, 1.0f, 1.1f, 1.2f, 1.3f, 1.45f, 1.6f, 1.75f};
   for (uint8_t s = 0; s < kSteps; ++s) {
     const LineSpacing ls = lineSpacingFor(s, LineSpacingScale::Font, 14, 30);
-    EXPECT_FLOAT_EQ(ls.compression, expected[s]) << "step " << int{s};
-    EXPECT_EQ(ls.bookFloor, 0.0f) << "step " << int{s};
+    EXPECT_NEAR(asFloat(ls.compression), expected[s], 1e-5f) << "step " << int{s};
+    EXPECT_EQ(ls.bookFloor.raw(), 0u) << "step " << int{s};
   }
 }
 
 TEST(LineSpacing, BuiltinNotoSansFactorsPerStep) {
   const float expected[kSteps] = {0.85f, 0.90f, 0.95f, 1.0f, 1.1f, 1.2f, 1.35f, 1.5f, 1.65f};
   for (uint8_t s = 0; s < kSteps; ++s) {
-    EXPECT_FLOAT_EQ(lineSpacingFor(s, LineSpacingScale::BuiltinNotoSans, 14, 30).compression, expected[s])
+    EXPECT_NEAR(asFloat(lineSpacingFor(s, LineSpacingScale::BuiltinNotoSans, 14, 30).compression), expected[s], 1e-5f)
         << "step " << int{s};
   }
 }
@@ -37,8 +40,8 @@ TEST(LineSpacing, CjkPitchPerStep) {
   const float pitchEm[kSteps] = {1.4f, 1.5f, 1.7f, 1.85f, 2.0f, 2.2f, 2.45f, 2.7f, 3.0f};
   for (uint8_t s = 0; s < kSteps; ++s) {
     const LineSpacing ls = lineSpacingFor(s, LineSpacingScale::CjkPitch, 14, 42);
-    EXPECT_NEAR(ls.compression, pitchEm[s] * 29.0f / 42.0f, 1e-5f) << "step " << int{s};
-    EXPECT_EQ(ls.bookFloor, 0.0f) << "step " << int{s};
+    EXPECT_NEAR(asFloat(ls.compression), pitchEm[s] * 29.0f / 42.0f, 1e-5f) << "step " << int{s};
+    EXPECT_EQ(ls.bookFloor.raw(), 0u) << "step " << int{s};
   }
   // 1.7 em of 29 px is 49.3, 1.85 em 53.65, 2 em 58, 2.2 em 63.8, 2.45 em 71.05, 2.7 em 78.3, 3 em 87. 1.4 em is 40.6
   // and 1.5 em 43.5 px, a half pixel the float product may put on either side, so only their compressions are asserted.
@@ -64,9 +67,10 @@ TEST(LineSpacing, TheFormerFiveStepsKeepTheirFactors) {
   const float cjkEm[] = {1.5f, 1.7f, 1.85f, 2.0f, 2.2f};
   for (int i = 0; i < 5; ++i) {
     const uint8_t s = step(former[i]);
-    EXPECT_FLOAT_EQ(lineSpacingFor(s, LineSpacingScale::Font, 14, 30).compression, font[i]) << i;
-    EXPECT_FLOAT_EQ(lineSpacingFor(s, LineSpacingScale::BuiltinNotoSans, 14, 30).compression, noto[i]) << i;
-    EXPECT_NEAR(lineSpacingFor(s, LineSpacingScale::CjkPitch, 14, 42).compression, cjkEm[i] * 29.0f / 42.0f, 1e-5f)
+    EXPECT_NEAR(asFloat(lineSpacingFor(s, LineSpacingScale::Font, 14, 30).compression), font[i], 1e-5f) << i;
+    EXPECT_NEAR(asFloat(lineSpacingFor(s, LineSpacingScale::BuiltinNotoSans, 14, 30).compression), noto[i], 1e-5f) << i;
+    EXPECT_NEAR(asFloat(lineSpacingFor(s, LineSpacingScale::CjkPitch, 14, 42).compression), cjkEm[i] * 29.0f / 42.0f,
+                1e-5f)
         << i;
   }
 }
@@ -87,7 +91,8 @@ TEST(LineSpacing, LabelsArePercentagesOfNormal) {
     ASSERT_NE(lineSpacingStepLabel(s), nullptr) << "step " << int{s};
     EXPECT_STREQ(lineSpacingStepLabel(s), expected[s]);
     // The label says the Font factor.
-    EXPECT_NEAR(lineSpacingFor(s, LineSpacingScale::Font, 14, 30).compression * 100.0f, std::atoi(expected[s]), 1e-3f);
+    EXPECT_NEAR(asFloat(lineSpacingFor(s, LineSpacingScale::Font, 14, 30).compression) * 100.0f, std::atoi(expected[s]),
+                1e-3f);
   }
   EXPECT_EQ(lineSpacingStepLabel(step(LineSpacingStep::FromBook)), nullptr);
 }
@@ -114,20 +119,20 @@ TEST(LineSpacing, BookStyleIsNormalFlooredAtNinetyFivePercent) {
   for (const LineSpacingScale scale :
        {LineSpacingScale::Font, LineSpacingScale::BuiltinNotoSans, LineSpacingScale::CjkPitch}) {
     const LineSpacing ls = lineSpacingFor(book, scale, 14, 42);
-    EXPECT_FLOAT_EQ(ls.compression, lineSpacingFor(normal, scale, 14, 42).compression);
-    EXPECT_FLOAT_EQ(ls.bookFloor, lineSpacingFor(floor, scale, 14, 42).compression);
+    EXPECT_EQ(ls.compression, lineSpacingFor(normal, scale, 14, 42).compression);
+    EXPECT_EQ(ls.bookFloor, lineSpacingFor(floor, scale, 14, 42).compression);
     EXPECT_EQ(ls.emPx, 29);
   }
 }
 
 TEST(LineSpacing, OutOfRangeStepIsNormal) {
   const LineSpacing ls = lineSpacingFor(12, LineSpacingScale::Font, 14, 30);
-  EXPECT_FLOAT_EQ(ls.compression, 1.0f);
-  EXPECT_EQ(ls.bookFloor, 0.0f);
+  EXPECT_NEAR(asFloat(ls.compression), 1.0f, 1e-5f);
+  EXPECT_EQ(ls.bookFloor.raw(), 0u);
 }
 
 TEST(LineSpacing, NoFontLineHeightFallsBack) {
-  EXPECT_FLOAT_EQ(lineSpacingFor(step(LineSpacingStep::Pct110), LineSpacingScale::CjkPitch, 14, 0).compression, 1.0f);
+  EXPECT_TRUE(lineSpacingFor(step(LineSpacingStep::Pct110), LineSpacingScale::CjkPitch, 14, 0).compression.isOne());
 }
 
 // --- stored values (LINE_SPACING_ORDER_VERSION)
@@ -148,7 +153,7 @@ TEST(LineSpacingStored, AnUnstampedValueKeepsItsSpacing) {
   const float oldFont[] = {0.95f, 1.0f, 1.1f, 1.2f, 1.3f};
   for (int old = 0; old < 5; ++old) {
     const uint8_t now = lineSpacingStepFromStored(old, 0);
-    EXPECT_FLOAT_EQ(lineSpacingFor(now, LineSpacingScale::Font, 14, 30).compression, oldFont[old]) << old;
+    EXPECT_NEAR(asFloat(lineSpacingFor(now, LineSpacingScale::Font, 14, 30).compression), oldFont[old], 1e-5f) << old;
   }
 }
 

@@ -43,7 +43,7 @@ Section::BuildParams params() {
   p.fontId = 1;
   p.viewportWidth = 480;
   p.viewportHeight = 800;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.embeddedStyle = true;
   return p;
 }

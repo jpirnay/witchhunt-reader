@@ -19,6 +19,7 @@
 
 #include "BitmapHelpers.h"
 #include "BufferedPrint.h"
+#include "ImageScale.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Toggle these to test different configurations
@@ -376,11 +377,10 @@ static bool convertResized(FsFile& jpegFile, Print& sink, int targetWidth, int t
   int outWidth = image.width;
   int outHeight = image.height;
   if (targetWidth > 0 && targetHeight > 0) {
-    const float scaleX = static_cast<float>(targetWidth) / image.width;
-    const float scaleY = static_cast<float>(targetHeight) / image.height;
-    const float scale = crop ? std::max(scaleX, scaleY) : std::min(scaleX, scaleY);
-    outWidth = std::max(1, static_cast<int>(image.width * scale));
-    outHeight = std::max(1, static_cast<int>(image.height * scale));
+    const ImageScale scale = crop ? ImageScale::fill(image.width, image.height, targetWidth, targetHeight)
+                                  : ImageScale::fit(image.width, image.height, targetWidth, targetHeight);
+    outWidth = std::max(1, scale.apply(image.width));
+    outHeight = std::max(1, scale.apply(image.height));
   }
   // The resize emits rows at a 16-bit size: a crop-fill of an extreme aspect ratio past it would
   // be cut short, and a BMP with too few rows reported complete.
@@ -483,13 +483,12 @@ struct OutputTarget {
 // (the TJpgDec and progressive paths both pick the largest pre-scale that keeps both axes at or
 // above the target, so the fine scaler only ever downscales). With several outputs the smaller
 // ones then resample from the larger one's source rows.
-static float finestTargetScale(const OutputTarget* targets, const int count, const int srcW, const int srcH) {
-  float finest = 0.0f;
+static ImageScale finestTargetScale(const OutputTarget* targets, const int count, const int srcW, const int srcH) {
+  ImageScale finest;
   for (int i = 0; i < count; ++i) {
-    if (targets[i].targetWidth <= 0 || targets[i].targetHeight <= 0) return 1.0f;  // native size wanted
-    const float scaleX = static_cast<float>(targets[i].targetWidth) / srcW;
-    const float scaleY = static_cast<float>(targets[i].targetHeight) / srcH;
-    finest = std::max(finest, scaleX > scaleY ? scaleX : scaleY);
+    if (targets[i].targetWidth <= 0 || targets[i].targetHeight <= 0) return ImageScale();  // native size wanted
+    const ImageScale fill = ImageScale::fill(srcW, srcH, targets[i].targetWidth, targets[i].targetHeight);
+    finest = i == 0 ? fill : ImageScale::larger(finest, fill);
   }
   return finest;
 }
@@ -507,17 +506,10 @@ static void initOutputGeometry(BmpConvertCtx& ctx, Print& bmpOut, const int effe
   bool needsScaling = false;
 
   if (targetWidth > 0 && targetHeight > 0 && (effectiveSrcW != targetWidth || effectiveSrcH != targetHeight)) {
-    const float scaleToFitWidth = static_cast<float>(targetWidth) / effectiveSrcW;
-    const float scaleToFitHeight = static_cast<float>(targetHeight) / effectiveSrcH;
-    float scale = 1.0f;
-    if (crop) {
-      scale = (scaleToFitWidth > scaleToFitHeight) ? scaleToFitWidth : scaleToFitHeight;
-    } else {
-      scale = (scaleToFitWidth < scaleToFitHeight) ? scaleToFitWidth : scaleToFitHeight;
-    }
-
-    outWidth = static_cast<int>(effectiveSrcW * scale);
-    outHeight = static_cast<int>(effectiveSrcH * scale);
+    const ImageScale scale = crop ? ImageScale::fill(effectiveSrcW, effectiveSrcH, targetWidth, targetHeight)
+                                  : ImageScale::fit(effectiveSrcW, effectiveSrcH, targetWidth, targetHeight);
+    outWidth = scale.apply(effectiveSrcW);
+    outHeight = scale.apply(effectiveSrcH);
     if (outWidth < 1) outWidth = 1;
     if (outHeight < 1) outHeight = 1;
 
@@ -785,12 +777,12 @@ constexpr size_t PROGRESSIVE_ROW_PIPELINE_HEAP = 16 * 1024;
 static bool chooseProgressiveShift(const OutputTarget* targets, const int count, const ProgressiveJpeg::ImageInfo& info,
                                    BuildArena* scratch, uint8_t* shiftOut) {
   uint8_t shift = 0;
-  const float scaleMax = finestTargetScale(targets, count, info.width, info.height);
-  if (scaleMax <= 0.125f) {
+  const ImageScale scaleMax = finestTargetScale(targets, count, info.width, info.height);
+  if (scaleMax.atMost(1, 8)) {
     shift = 3;
-  } else if (scaleMax <= 0.25f) {
+  } else if (scaleMax.atMost(1, 4)) {
     shift = 2;
-  } else if (scaleMax <= 0.5f) {
+  } else if (scaleMax.atMost(1, 2)) {
     shift = 1;
   }
   const bool arenaBacked = scratch != nullptr && scratch->valid();
@@ -808,7 +800,7 @@ static bool chooseProgressiveShift(const OutputTarget* targets, const int count,
             static_cast<unsigned>(ESP.getFreeHeap()));
     return false;
   }
-  if (shift == 3 && scaleMax > 0.125f) {
+  if (shift == 3 && !scaleMax.atMost(1, 8)) {
     LOG_INF("JPG", "Progressive cover: only 1/8 fits (%u free); resized rather than enlarged in blocks",
             static_cast<unsigned>(ESP.getFreeHeap()));
     return false;
@@ -941,14 +933,14 @@ bool TjpgJob::prepare(FsFile& jpegFile, const uint32_t base, const OutputTarget*
   // scale) and crop=false (uses min scale).
   int jpegScaleDenom = 1;
   {
-    const float scaleMax = finestTargetScale(targets, count, srcWidth, srcHeight);
-    if (scaleMax <= 0.125f) {
+    const ImageScale scaleMax = finestTargetScale(targets, count, srcWidth, srcHeight);
+    if (scaleMax.atMost(1, 8)) {
       scale = 3;
       jpegScaleDenom = 8;
-    } else if (scaleMax <= 0.25f) {
+    } else if (scaleMax.atMost(1, 4)) {
       scale = 2;
       jpegScaleDenom = 4;
-    } else if (scaleMax <= 0.5f) {
+    } else if (scaleMax.atMost(1, 2)) {
       scale = 1;
       jpegScaleDenom = 2;
     }

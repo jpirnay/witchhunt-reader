@@ -1,7 +1,8 @@
 #pragma once
 
-#include <cmath>
 #include <cstdint>
+
+#include "ImageScale.h"
 
 // Where GfxRenderer::drawBitmap() puts one row of a BMP, free of Arduino so the host can test it
 // (test/bitmap_rows). The rows come off the card in file order, and an ordinary BMP stores them
@@ -19,22 +20,18 @@ struct RowTarget {
   int screenY;
 };
 
-// Row `bmpY`, counted in file order, of a `height`-row bitmap stored `topDown` (or bottom-up), with
-// `cropPixY` rows cut from each end, scaled by `scale` when `isScaled`, its top at screen row `y`
-// on a `screenHeight`-row screen.
-inline RowTarget rowTarget(const int bmpY, const int height, const bool topDown, const int cropPixY,
-                           const bool isScaled, const float scale, const int y, const int screenHeight) {
-  int screenY = -cropPixY + (topDown ? bmpY : height - 1 - bmpY);
-  if (isScaled) {
-    screenY = static_cast<int>(std::floor(static_cast<float>(screenY) * scale));
-  }
-  screenY += y;  // the offset should not be scaled
-  // Top-down rows walk down the screen, bottom-up rows walk up it. Only a row past the edge they walk
-  // towards ends the read: a bottom-up image taller than the screen starts below it, and stopping
-  // there drew nothing at all (crosspoint-reader PR #4472, Justin Mitchell).
-  if (screenY >= screenHeight) return {topDown ? RowFate::Stop : RowFate::Skip, screenY};
-  if (screenY < 0) return {topDown ? RowFate::Skip : RowFate::Stop, screenY};
-  if (bmpY < cropPixY) return {RowFate::Skip, screenY};
+// Row `bmpY`, counted in file order, of a `height`-row bitmap stored `topDown` (or bottom-up), of which
+// the `shownRows` rows from image row `cropTop` down are drawn, scaled by `scale`, their top at screen
+// row `y` on a `screenHeight`-row screen.
+inline RowTarget rowTarget(const int bmpY, const int height, const bool topDown, const int cropTop, const int shownRows,
+                           const ImageScale scale, const int y, const int screenHeight) {
+  const int fromTop = (topDown ? bmpY : height - 1 - bmpY) - cropTop;  // the row within the shown part
+  const int screenY = scale.apply(fromTop) + y;                        // the offset is not scaled
+  // Top-down rows walk down the image and the screen, bottom-up rows walk up them. Only a row past the
+  // edge they walk towards ends the read: a bottom-up image taller than the screen starts below it, and
+  // stopping there drew nothing at all (crosspoint-reader PR #4472, Justin Mitchell).
+  if (fromTop >= shownRows || screenY >= screenHeight) return {topDown ? RowFate::Stop : RowFate::Skip, screenY};
+  if (fromTop < 0 || screenY < 0) return {topDown ? RowFate::Skip : RowFate::Stop, screenY};
   return {RowFate::Draw, screenY};
 }
 

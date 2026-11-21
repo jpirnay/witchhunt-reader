@@ -76,7 +76,7 @@ struct StackHeap : testing::Test {
       Section::BuildParams p;
       p.viewportWidth = 480;
       p.viewportHeight = 300;
-      p.lineCompression = 1.0f;
+      p.lineCompression = TextScale();
       p.embeddedStyle = true;
       out.ok = section.createSectionFile(p, {}, /*skipEviction=*/true);
       out.pushes = stackPushCount();

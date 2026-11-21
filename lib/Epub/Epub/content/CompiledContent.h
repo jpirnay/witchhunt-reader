@@ -24,7 +24,8 @@
 namespace compiled {
 
 inline constexpr char kMagic[4] = {'W', 'B', 'C', '1'};
-inline constexpr uint8_t kVersion = 1;
+// 2: a style's lengths are 16.16 fixed point, its line-height and font-size multiplier TextScale (u32); floats in 1.
+inline constexpr uint8_t kVersion = 2;
 
 // Per-word settings-independent data — the slice of today's TextBlock that survives
 // a relayout. No xpos: Stage-2 measurement computes it. bidiLevel is 0 for LTR books

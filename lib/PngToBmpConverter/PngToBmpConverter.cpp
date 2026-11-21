@@ -14,6 +14,7 @@
 
 #include "BitmapHelpers.h"
 #include "BufferedPrint.h"
+#include "ImageScale.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Same as JpegToBmpConverter for consistency
@@ -61,17 +62,10 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
 
   if (targetWidth > 0 && targetHeight > 0 &&
       (static_cast<int>(width) != targetWidth || static_cast<int>(height) != targetHeight)) {
-    const float scaleToFitWidth = static_cast<float>(targetWidth) / width;
-    const float scaleToFitHeight = static_cast<float>(targetHeight) / height;
-    float scale = 1.0;
-    if (crop) {
-      scale = (scaleToFitWidth > scaleToFitHeight) ? scaleToFitWidth : scaleToFitHeight;
-    } else {
-      scale = (scaleToFitWidth < scaleToFitHeight) ? scaleToFitWidth : scaleToFitHeight;
-    }
-
-    outWidth = static_cast<int>(width * scale);
-    outHeight = static_cast<int>(height * scale);
+    const ImageScale scale = crop ? ImageScale::fill(width, height, targetWidth, targetHeight)
+                                  : ImageScale::fit(width, height, targetWidth, targetHeight);
+    outWidth = scale.apply(width);
+    outHeight = scale.apply(height);
     if (outWidth < 1) outWidth = 1;
     if (outHeight < 1) outHeight = 1;
 
@@ -345,11 +339,10 @@ bool PngDecodeSession::begin(FsFile& pngFile, FsFile& bmpFile, int targetWidth, 
   needsScaling_ = false;
 
   if (targetWidth > 0 && targetHeight > 0 && (outWidth_ != targetWidth || outHeight_ != targetHeight)) {
-    const float sw = static_cast<float>(targetWidth) / width_;
-    const float sh = static_cast<float>(targetHeight) / height_;
-    const float scale = crop ? ((sw > sh) ? sw : sh) : ((sw < sh) ? sw : sh);
-    outWidth_ = static_cast<int>(width_ * scale);
-    outHeight_ = static_cast<int>(height_ * scale);
+    const ImageScale scale = crop ? ImageScale::fill(width_, height_, targetWidth, targetHeight)
+                                  : ImageScale::fit(width_, height_, targetWidth, targetHeight);
+    outWidth_ = scale.apply(width_);
+    outHeight_ = scale.apply(height_);
     if (outWidth_ < 1) outWidth_ = 1;
     if (outHeight_ < 1) outHeight_ = 1;
     scaleX_fp_ = (width_ << 16) / outWidth_;

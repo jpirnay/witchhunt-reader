@@ -86,7 +86,7 @@ void FontScalingTestActivity::renderContent() const {
     const LadderRow& r = ladder[i];
     // Asked of the renderer, not assumed: a synthesised size carries its scale on its font ID, so
     // this marker reports what will actually be drawn.
-    const bool real = renderer.fontBaseScale(r.fontId) == 1.0f;
+    const bool real = renderer.fontBaseScale(r.fontId).isOne();
     const int lineH = renderer.getLineHeight(r.fontId);
     if (y + lineH > bottom) break;
 

@@ -41,7 +41,7 @@ pipeline_harness::Profile profileFor(const std::string& name) {
     // extra paragraph spacing on. The stub renderer gives every font the same metrics, so the font is not modelled.
     profile.viewportWidth = 214;
     profile.viewportHeight = 358;
-    profile.lineCompression = 0.95f;
+    profile.lineCompression = TextScale::percent(95);
     profile.extraParagraphSpacing = true;
   }
   return profile;

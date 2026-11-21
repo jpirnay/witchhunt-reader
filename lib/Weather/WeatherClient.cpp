@@ -14,10 +14,27 @@
 namespace {
 constexpr char WEATHER_CACHE_FILE[] = "/.crosspoint/weather_cache.json";
 
+// The cache's numbers are integers in WeatherUnits.h's units since layout 2. The layout is part of the request
+// signature, so a cache of the other layout fails the signature check, also in firmware that wrote floats, and neither
+// reads the other's numbers in the wrong unit.
+constexpr int CACHE_LAYOUT = 2;
+
+// A coordinate with six decimals, as the request and the signature carried the float before.
+std::string degreesText(const weather::MicroDegrees value) {
+  char text[16];
+  weather::formatDegrees(text, sizeof(text), value, weather::MICRODEGREE_DECIMALS);
+  return text;
+}
+
+// An API number in an integer unit, converted here, once, from the float the screens kept before (`| 0.0f`).
+int apiValue(const JsonVariantConst value, const unsigned decimals, const int fallback = 0) {
+  return value.is<float>() ? weather::fromFloat(value.as<float>(), decimals) : fallback;
+}
+
 std::string buildForecastUrl(const WeatherSettingsStore& settings) {
   std::string url = "https://api.open-meteo.com/v1/forecast?";
-  url += "latitude=" + std::to_string(settings.getLatitude());
-  url += "&longitude=" + std::to_string(settings.getLongitude());
+  url += "latitude=" + degreesText(settings.getLatitude());
+  url += "&longitude=" + degreesText(settings.getLongitude());
   url +=
       "&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
       "weather_code,wind_speed_10m,wind_direction_10m,is_day,precipitation,uv_index";
@@ -51,15 +68,10 @@ std::string urlEncode(const std::string& value) {
 }
 
 std::string buildRequestSignature(const WeatherSettingsStore& settings) {
-  char latitude[24];
-  char longitude[24];
-  snprintf(latitude, sizeof(latitude), "%.6f", settings.getLatitude());
-  snprintf(longitude, sizeof(longitude), "%.6f", settings.getLongitude());
-
   std::string signature = "lat=";
-  signature += latitude;
+  signature += degreesText(settings.getLatitude());
   signature += "|lon=";
-  signature += longitude;
+  signature += degreesText(settings.getLongitude());
   signature += "|temp=";
   signature += settings.getTempUnitParam();
   signature += "|wind=";
@@ -68,6 +80,8 @@ std::string buildRequestSignature(const WeatherSettingsStore& settings) {
   signature += settings.getPrecipUnitParam();
   signature += "|days=";
   signature += std::to_string(settings.getForecastDays());
+  signature += "|layout=";
+  signature += std::to_string(CACHE_LAYOUT);
   return signature;
 }
 }  // namespace
@@ -161,14 +175,14 @@ bool WeatherClient::parseWeatherJson(const std::string& json, WeatherData& data)
   // Parse current weather
   JsonObject current = doc["current"];
   if (current) {
-    data.current.temperature = current["temperature_2m"] | 0.0f;
-    data.current.apparentTemperature = current["apparent_temperature"] | 0.0f;
+    data.current.temperature = apiValue(current["temperature_2m"], weather::TENTHS_DECIMALS);
+    data.current.apparentTemperature = apiValue(current["apparent_temperature"], weather::TENTHS_DECIMALS);
     data.current.humidity = current["relative_humidity_2m"] | 0;
     data.current.weatherCode = current["weather_code"] | 0;
-    data.current.windSpeed = current["wind_speed_10m"] | 0.0f;
+    data.current.windSpeed = apiValue(current["wind_speed_10m"], weather::TENTHS_DECIMALS);
     data.current.windDirection = current["wind_direction_10m"] | 0;
-    data.current.precipitation = current["precipitation"] | 0.0f;
-    data.current.uvIndex = current["uv_index"] | 0.0f;
+    data.current.precipitation = apiValue(current["precipitation"], weather::TENTHS_DECIMALS);
+    data.current.uvIndex = apiValue(current["uv_index"], weather::HUNDREDTHS_DECIMALS);
     data.current.isDay = (current["is_day"] | 1) != 0;
   }
 
@@ -189,14 +203,14 @@ bool WeatherClient::parseWeatherJson(const std::string& json, WeatherData& data)
     for (size_t i = 0; i < count; i++) {
       DailyForecast day;
       day.date = times[i] | (time_t)0;
-      day.tempMax = tempMax[i] | 0.0f;
-      day.tempMin = tempMin[i] | 0.0f;
+      day.tempMax = apiValue(tempMax[i], weather::TENTHS_DECIMALS);
+      day.tempMin = apiValue(tempMin[i], weather::TENTHS_DECIMALS);
       day.weatherCode = codes[i] | 0;
-      day.precipSum = precip[i] | 0.0f;
+      day.precipSum = apiValue(precip[i], weather::TENTHS_DECIMALS);
       day.sunrise = sunrise[i] | (time_t)0;
       day.sunset = sunset[i] | (time_t)0;
-      day.uvIndexMax = uvMax[i] | 0.0f;
-      day.moonPhase = daily["moon_phase"] ? (daily["moon_phase"][i] | -1.0f) : -1.0f;
+      day.uvIndexMax = apiValue(uvMax[i], weather::HUNDREDTHS_DECIMALS);
+      day.moonPhase = apiValue(daily["moon_phase"][i], weather::THOUSANDTHS_DECIMALS, weather::MOON_PHASE_UNKNOWN);
       data.daily.push_back(day);
     }
   }
@@ -216,8 +230,8 @@ bool WeatherClient::parseWeatherJson(const std::string& json, WeatherData& data)
     for (size_t i = 0; i < count; i++) {
       HourlyForecast hour;
       hour.time = times[i] | (time_t)0;
-      hour.temperature = temp[i] | 0.0f;
-      hour.precipitation = precip[i] | 0.0f;
+      hour.temperature = apiValue(temp[i], weather::TENTHS_DECIMALS);
+      hour.precipitation = apiValue(precip[i], weather::TENTHS_DECIMALS);
       hour.precipitationProbability = precipProb[i] | 0;
       hour.weatherCode = codes[i] | 0;
       hour.isDay = (isDay[i] | 1) != 0;
@@ -237,7 +251,7 @@ bool WeatherClient::saveCache(const WeatherData& data) {
   doc["timezone"] = data.timezone;
   doc["utcOffsetSeconds"] = data.utcOffsetSeconds;
 
-  // Current
+  // Current. The numbers in WeatherUnits.h's units (CACHE_LAYOUT).
   JsonObject cur = doc["current"].to<JsonObject>();
   cur["temperature"] = data.current.temperature;
   cur["apparentTemperature"] = data.current.apparentTemperature;
@@ -305,14 +319,14 @@ bool WeatherClient::loadCache(WeatherData& data) {
   // Current
   JsonObject cur = doc["current"];
   if (cur) {
-    data.current.temperature = cur["temperature"] | 0.0f;
-    data.current.apparentTemperature = cur["apparentTemperature"] | 0.0f;
+    data.current.temperature = cur["temperature"] | 0;
+    data.current.apparentTemperature = cur["apparentTemperature"] | 0;
     data.current.humidity = cur["humidity"] | 0;
     data.current.weatherCode = cur["weatherCode"] | 0;
-    data.current.windSpeed = cur["windSpeed"] | 0.0f;
+    data.current.windSpeed = cur["windSpeed"] | 0;
     data.current.windDirection = cur["windDirection"] | 0;
-    data.current.precipitation = cur["precipitation"] | 0.0f;
-    data.current.uvIndex = cur["uvIndex"] | 0.0f;
+    data.current.precipitation = cur["precipitation"] | 0;
+    data.current.uvIndex = cur["uvIndex"] | 0;
     data.current.isDay = cur["isDay"] | true;
   }
 
@@ -321,14 +335,14 @@ bool WeatherClient::loadCache(WeatherData& data) {
   for (JsonObject d : dailyArr) {
     DailyForecast day;
     day.date = d["date"] | (time_t)0;
-    day.tempMax = d["tempMax"] | 0.0f;
-    day.tempMin = d["tempMin"] | 0.0f;
+    day.tempMax = d["tempMax"] | 0;
+    day.tempMin = d["tempMin"] | 0;
     day.weatherCode = d["weatherCode"] | 0;
-    day.precipSum = d["precipSum"] | 0.0f;
-    day.uvIndexMax = d["uvIndexMax"] | 0.0f;
+    day.precipSum = d["precipSum"] | 0;
+    day.uvIndexMax = d["uvIndexMax"] | 0;
     day.sunrise = d["sunrise"] | (time_t)0;
     day.sunset = d["sunset"] | (time_t)0;
-    day.moonPhase = d["moonPhase"] | -1.0f;
+    day.moonPhase = d["moonPhase"] | weather::MOON_PHASE_UNKNOWN;
     data.daily.push_back(day);
   }
 
@@ -337,8 +351,8 @@ bool WeatherClient::loadCache(WeatherData& data) {
   for (JsonObject h : hourlyArr) {
     HourlyForecast hour;
     hour.time = h["time"] | (time_t)0;
-    hour.temperature = h["temperature"] | 0.0f;
-    hour.precipitation = h["precipitation"] | 0.0f;
+    hour.temperature = h["temperature"] | 0;
+    hour.precipitation = h["precipitation"] | 0;
     hour.precipitationProbability = h["precipProb"] | 0;
     hour.weatherCode = h["weatherCode"] | 0;
     hour.isDay = h["isDay"] | true;
@@ -376,8 +390,8 @@ std::vector<GeocodingResult> WeatherClient::searchCity(const std::string& query)
     r.name = obj["name"] | std::string("");
     r.country = obj["country"] | std::string("");
     r.admin1 = obj["admin1"] | std::string("");
-    r.latitude = obj["latitude"] | 0.0f;
-    r.longitude = obj["longitude"] | 0.0f;
+    r.latitude = apiValue(obj["latitude"], weather::MICRODEGREE_DECIMALS);
+    r.longitude = apiValue(obj["longitude"], weather::MICRODEGREE_DECIMALS);
     results.push_back(r);
   }
 

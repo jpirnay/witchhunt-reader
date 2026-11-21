@@ -75,7 +75,7 @@ struct WhiteSpaceFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = static_cast<uint16_t>(options.width);
     params.viewportHeight = 800;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     params.extraParagraphSpacing = options.extraParagraphSpacing;
     params.hyphenationEnabled = options.hyphenation;
     params.paragraphAlignment = options.alignment;

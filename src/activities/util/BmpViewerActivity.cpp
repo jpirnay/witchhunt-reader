@@ -7,9 +7,8 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <ImageScale.h>
 #include <Memory.h>
-
-#include <cmath>
 
 #include "../reader/ReaderUtils.h"
 #include "CrossPointSettings.h"
@@ -38,15 +37,15 @@ void computeCenteredImagePlacement(const int imageWidth, const int imageHeight, 
   renderHeight = imageHeight;
 
   if (imageWidth > pageWidth || imageHeight > pageHeight) {
-    const float ratio = static_cast<float>(imageWidth) / static_cast<float>(imageHeight);
-    const float screenRatio = static_cast<float>(pageWidth) / static_cast<float>(pageHeight);
-
-    if (ratio > screenRatio) {
+    // Cross-multiplied, the shapes compare exactly.
+    const int64_t imageW = imageWidth;
+    const int64_t imageH = imageHeight;
+    if (imageW * pageHeight > pageWidth * imageH) {
       renderWidth = pageWidth;
-      renderHeight = std::max(1, static_cast<int>(std::round(static_cast<float>(pageWidth) / ratio)));
+      renderHeight = std::max(1, roundedQuotient(pageWidth * imageH, imageW));
     } else {
       renderHeight = pageHeight;
-      renderWidth = std::max(1, static_cast<int>(std::round(static_cast<float>(pageHeight) * ratio)));
+      renderWidth = std::max(1, roundedQuotient(pageHeight * imageW, imageH));
     }
 
     x = std::max(0, (pageWidth - renderWidth) / 2);

@@ -135,38 +135,39 @@ void HalTiltSensor::update(const CrossPointTiltPageTurn::Value mode, const TiltR
     return;
   }
 
-  if (rotateOn && _tracker.update(sample.ax, sample.ay, static_cast<uint32_t>(now))) {
+  if (rotateOn && _tracker.update(sample.axMg, sample.ayMg, static_cast<uint32_t>(now))) {
     _orientationEvent = _tracker.settled();
     _hadActivity = true;
-    LOG_INF("GYR", "Held as orientation %u (ax=%.2f ay=%.2f)", _orientationEvent, sample.ax, sample.ay);
+    LOG_INF("GYR", "Held as orientation %u (ax=%ld ay=%ld mg)", _orientationEvent, static_cast<long>(sample.axMg),
+            static_cast<long>(sample.ayMg));
   }
   if (!tiltOn) {
     return;
   }
 
-  float tiltAxis = TiltRate::rate(sample.gx, sample.gy, orientation, axis);
+  int32_t tiltAxis = TiltRate::rate(sample.gxMdps, sample.gyMdps, orientation, axis);
   if (mode == CrossPointTiltPageTurn::TILT_INVERTED) {
     tiltAxis = -tiltAxis;
   }
 
   if (_inTilt) {
-    if (fabsf(tiltAxis) < NEUTRAL_RATE_DPS) {
+    if (tiltAxis > -NEUTRAL_RATE_MDPS && tiltAxis < NEUTRAL_RATE_MDPS) {
       _inTilt = false;
     }
   } else {
     if ((now - _lastTiltMs) >= COOLDOWN_MS) {
-      if (tiltAxis > RATE_THRESHOLD_DPS) {
+      if (tiltAxis > RATE_THRESHOLD_MDPS) {
         _tiltForwardEvent = true;
         _hadActivity = true;
         _inTilt = true;
         _lastTiltMs = now;
-        LOG_INF("GYR", "Forward Trigger=(%.1f) dps", tiltAxis);
-      } else if (tiltAxis < -RATE_THRESHOLD_DPS) {
+        LOG_INF("GYR", "Forward Trigger=(%ld) mdps", static_cast<long>(tiltAxis));
+      } else if (tiltAxis < -RATE_THRESHOLD_MDPS) {
         _tiltBackEvent = true;
         _hadActivity = true;
         _inTilt = true;
         _lastTiltMs = now;
-        LOG_INF("GYR", "Backward Trigger=(%.1f) dps", tiltAxis);
+        LOG_INF("GYR", "Backward Trigger=(%ld) mdps", static_cast<long>(tiltAxis));
       }
     }
   }

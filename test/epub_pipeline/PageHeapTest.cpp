@@ -51,7 +51,7 @@ Section::BuildParams params() {
   Section::BuildParams p;
   p.viewportWidth = 480;
   p.viewportHeight = 160;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.embeddedStyle = true;
   return p;
 }

@@ -603,7 +603,7 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   const int coverHeight = std::max(120, tileHeight - 2 * hPaddingInSelection);
   const bool hasContinueReading = !recentBooks.empty();
   if (coverWidth == 0) {
-    coverWidth = static_cast<int>(coverHeight * 0.6f);
+    coverWidth = coverHeight * 3 / 5;  // thumbnails are 6:10
   }
 
   // Tile published for touch, ahead of the draw so a cached repaint (coverRendered) records it

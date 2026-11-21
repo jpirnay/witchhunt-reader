@@ -29,21 +29,21 @@ TEST(CssGapsListStyle, TypeDiscIsNotNone) {
 TEST(CssGapsLineHeight, IsAMultipleOfTheFontSize) {
   const auto em = [](const char* decl) {
     const CssStyle s = CssParser::parseInlineStyle(decl);
-    return s.hasLineHeight() ? s.lineHeightEm : -1.0f;
+    return s.hasLineHeight() ? s.lineHeightEm : TextScale::fromRaw(0);
   };
-  EXPECT_FLOAT_EQ(1.5f, em("line-height: 1.5"));
-  EXPECT_FLOAT_EQ(1.75f, em("line-height: 175%"));
-  EXPECT_FLOAT_EQ(1.6f, em("line-height: 1.6em"));
-  EXPECT_FLOAT_EQ(1.25f, em("line-height: 1.25rem"));
-  EXPECT_FLOAT_EQ(1.5f, em("line-height: 24px"));
-  EXPECT_FLOAT_EQ(2.0f, em("line-height: 24pt"));
-  EXPECT_FLOAT_EQ(1.75f, em("LINE-HEIGHT : 1.75 !important"));
+  EXPECT_EQ(TextScale::ratio(3, 2), em("line-height: 1.5"));
+  EXPECT_EQ(TextScale::percent(175), em("line-height: 175%"));
+  EXPECT_EQ(TextScale::percent(160), em("line-height: 1.6em"));
+  EXPECT_EQ(TextScale::ratio(5, 4), em("line-height: 1.25rem"));
+  EXPECT_EQ(TextScale::ratio(3, 2), em("line-height: 24px"));
+  EXPECT_EQ(TextScale::ratio(2, 1), em("line-height: 24pt"));
+  EXPECT_EQ(TextScale::percent(175), em("LINE-HEIGHT : 1.75 !important"));
 }
 
 TEST(CssGapsLineHeight, IsClamped) {
   const auto em = [](const char* decl) { return CssParser::parseInlineStyle(decl).lineHeightEm; };
-  EXPECT_FLOAT_EQ(0.5f, em("line-height: 0.1"));
-  EXPECT_FLOAT_EQ(4.0f, em("line-height: 9"));
+  EXPECT_EQ(TextScale::ratio(1, 2), em("line-height: 0.1"));
+  EXPECT_EQ(TextScale::ratio(4, 1), em("line-height: 9"));
 }
 
 TEST(CssGapsLineHeight, KeywordsAndNonsenseLeaveItUnset) {

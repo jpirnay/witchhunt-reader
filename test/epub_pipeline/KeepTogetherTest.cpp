@@ -70,7 +70,7 @@ class KeepTogetherLayout : public testing::Test {
     Section::BuildParams params;
     params.viewportWidth = 100;
     params.viewportHeight = 240;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     params.embeddedStyle = true;
     params.widowOrphanControl = widowOrphanControl;
     if (vertical) {

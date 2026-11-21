@@ -109,7 +109,7 @@ struct ImageWrapperWidthFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = kViewportWidth;
     params.viewportHeight = 800;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     params.embeddedStyle = true;  // the wrapper widths ARE publisher CSS
     GfxRenderer renderer;
     Section section(epub, 0, renderer);

@@ -6,6 +6,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <ImageScale.h>
 #include <Logging.h>
 #include <Txt.h>
 #include <Xtc.h>
@@ -535,11 +536,10 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
             !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
           // Height always fills the tile. Only crop horizontally if the cover is
           // wider than the tile; narrow covers get white space on the sides.
-          const float bmpRatio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
-          const float tileRatio = static_cast<float>(maxW) / static_cast<float>(maxH);
-          const float cropX = (bmpRatio > tileRatio) ? (1.0f - tileRatio / bmpRatio) : 0.0f;
+          BoxCut cut = cutToBox(bitmap.getWidth(), bitmap.getHeight(), maxW, maxH);
+          if (cut.visibleHeight > 0) cut = BoxCut{maxW, maxH, 0, 0};  // narrower: fitted, white at the sides
           renderer.fillRect(x, y, maxW, maxH, false);
-          renderer.drawBitmap(bitmap, x, y, maxW, maxH, cropX, 0.0f);
+          renderer.drawBitmap(bitmap, x, y, cut.maxWidth, cut.maxHeight, cut.visibleWidth);
           // Clear only the pixels outside the arc in each corner.
           // The arc centre for the top-left corner is (x+r, y+r). A pixel at
           // (x+dx, y+dy) is outside the arc when its distance from that centre

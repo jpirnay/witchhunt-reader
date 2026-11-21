@@ -1,9 +1,12 @@
 #pragma once
 
+#include <TextScale.h>
+
 #include <cstddef>
 #include <cstdint>
 
 #include "../TextEmphasis.h"
+#include "CssNumber.h"
 
 // Matches order of PARAGRAPH_ALIGNMENT in CrossPointSettings. Inherit is not an alignment: it is
 // the marker for an explicit `inherit`, which must beat a value set lower in the cascade and then
@@ -27,42 +30,67 @@ enum class CssTextAlign : uint8_t {
 // property as unset when it is present); toPixels() never sees it.
 enum class CssUnit : uint8_t { Pixels = 0, Em = 1, Rem = 2, Points = 3, Percent = 4, Auto = 5 };
 
-// Represents a CSS length value with its unit, allowing deferred resolution to pixels
+// A CSS length: a number in its unit, resolved to pixels once the em size and the container are known. The number is
+// 16.16 fixed point (`value` / 65536, about +-32,768), its magnitude rounded up onto that grid as it is read, so a
+// length that comes to a whole number of pixels resolves to it: integer only, as the C3 has no FPU.
 struct CssLength {
-  float value = 0.0f;
+  static constexpr int kShift = 16;
+  int32_t value = 0;  // 16.16
   CssUnit unit = CssUnit::Pixels;
 
-  CssLength() = default;
-  CssLength(const float v, const CssUnit u) : value(v), unit(u) {}
+  constexpr CssLength() = default;
+  constexpr CssLength(const int32_t raw, const CssUnit u) : value(raw), unit(u) {}
 
-  // Convenience constructor for pixel values (most common case)
-  explicit CssLength(const float pixels) : value(pixels) {}
+  // `n` / `d` in `u` (d above zero), its magnitude rounded up onto the 16.16 grid; saturated at its range.
+  static constexpr CssLength of(const int64_t n, const int64_t d, const CssUnit u) {
+    const int64_t magnitude = n < 0 ? -n : n;
+    if (d <= 0) return CssLength{0, u};
+    const int64_t q = magnitude > (int64_t{1} << 46) ? INT32_MAX : ((magnitude << kShift) + d - 1) / d;
+    const int32_t raw = q > INT32_MAX ? INT32_MAX : static_cast<int32_t>(q);
+    return CssLength{n < 0 ? -raw : raw, u};
+  }
+  static constexpr CssLength of(const CssNumber& n, const CssUnit u) { return of(n.num, n.den, u); }
 
   // Returns true if this length can be resolved to pixels with the given context.
   // Percentage units require a non-zero containerWidth to resolve.
-  [[nodiscard]] bool isResolvable(const float containerWidth = 0) const {
+  [[nodiscard]] constexpr bool isResolvable(const int containerWidth = 0) const {
     return unit != CssUnit::Percent || containerWidth > 0;
   }
 
-  // Resolve to pixels given the current em size (font line height)
-  // containerWidth is needed for percentage units (e.g. viewport width)
-  [[nodiscard]] float toPixels(const float emSize, const float containerWidth = 0) const {
+  // Pixels for the current em size (font line height) and container width (percentages), truncated toward zero.
+  [[nodiscard]] constexpr int toPixels(const int emSize, const int containerWidth = 0) const {
+    const Fraction px = pixels(emSize, containerWidth);
+    return static_cast<int>(px.num / px.den);
+  }
+  // The same rounded: px + 1/2, truncated toward zero, as the float code wrote (int)(px + 0.5f).
+  [[nodiscard]] constexpr int toPixelsRounded(const int emSize, const int containerWidth = 0) const {
+    const Fraction px = pixels(emSize, containerWidth);
+    return static_cast<int>((2 * px.num + px.den) / (2 * px.den));
+  }
+  // Resolve to int16_t pixels (for BlockStyle fields)
+  [[nodiscard]] constexpr int16_t toPixelsInt16(const int emSize, const int containerWidth = 0) const {
+    return static_cast<int16_t>(toPixels(emSize, containerWidth));
+  }
+
+ private:
+  struct Fraction {
+    int64_t num;
+    int64_t den;
+  };
+  // The length in pixels, exactly: num / den.
+  [[nodiscard]] constexpr Fraction pixels(const int emSize, const int containerWidth) const {
+    constexpr int64_t one = int64_t{1} << kShift;
     switch (unit) {
       case CssUnit::Em:
       case CssUnit::Rem:
-        return value * emSize;
+        return {static_cast<int64_t>(value) * emSize, one};
       case CssUnit::Points:
-        return value * 1.33f;  // Approximate pt to px conversion
+        return {static_cast<int64_t>(value) * 133, one * 100};  // 1.33 px a point, as it has always been taken
       case CssUnit::Percent:
-        return value * containerWidth / 100.0f;
+        return {static_cast<int64_t>(value) * containerWidth, one * 100};
       default:
-        return value;
+        return {value, one};
     }
-  }
-
-  // Resolve to int16_t pixels (for BlockStyle fields)
-  [[nodiscard]] int16_t toPixelsInt16(const float emSize, const float containerWidth = 0) const {
-    return static_cast<int16_t>(toPixels(emSize, containerWidth));
   }
 };
 
@@ -366,8 +394,8 @@ struct CssStyle {
   CssTextCombine textCombine = CssTextCombine::Unset;
   // line-height as a multiple of the element's font size, as CSS has it (unitless, em, % and px all end up here);
   // unset is `normal`, the font's own line height. Not read by layout yet: the reader's line-spacing setting decides.
-  float lineHeightEm = 0.0f;
-  float fontSizeMultiplier = 1.0f;  // font-size multiplier relative to body em size
+  TextScale lineHeightEm = TextScale::fromRaw(0);
+  TextScale fontSizeMultiplier;  // font-size multiplier relative to body em size
   // Part of font-size, set with it: true for rem, px, pt and the absolute keywords, whose size is
   // the body's times the multiplier; false for em, % and smaller/larger, which scale the parent's.
   bool fontSizeRootRelative = false;
@@ -610,7 +638,7 @@ struct CssStyle {
   // keyword (xx-small) is 0.6, the sup/sub default 0.5, and the renderer's own floor
   // (ParsedText::MIN_WORD_SIZE_PCT, 30 %) is three times above it. A tenth itself is left to that
   // floor, as test_font_sizes.epub pins.
-  static constexpr float kInvisibleFontSizeMultiplier = 0.1f;
+  static constexpr TextScale kInvisibleFontSizeMultiplier = TextScale::percent(10);
   [[nodiscard]] bool isFontSizeInvisible() const {
     return defined.fontSizeMultiplier && fontSizeMultiplier < kInvisibleFontSizeMultiplier;
   }
@@ -709,8 +737,8 @@ struct CssStyle {
     listStyleNone = false;
     pageBreakBefore = false;
     pageBreakAfter = false;
-    lineHeightEm = 0.0f;
-    fontSizeMultiplier = 1.0f;
+    lineHeightEm = TextScale::fromRaw(0);
+    fontSizeMultiplier = TextScale();
     fontSizeRootRelative = false;
     cssFloat = CssFloat::None;
     smallCaps = false;

@@ -55,7 +55,7 @@ std::string coverJpeg() {
 Section::BuildParams x3Params() {
   Section::BuildParams p;
   p.fontId = 0;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.viewportWidth = 400;
   p.viewportHeight = 430;
   p.fontSizeNormalization = false;

@@ -3,6 +3,7 @@
 # support, off on a host by default, is what the firmware serialises through.
 add_executable(JsonFileTest
   JsonFileTest.cpp
+  ${REPO_ROOT}/lib/Serialization/FixedDecimal.cpp
   ${REPO_ROOT}/lib/Serialization/JsonFile.cpp
   ${REPO_ROOT}/lib/Weather/WeatherSettingsStore.cpp
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp

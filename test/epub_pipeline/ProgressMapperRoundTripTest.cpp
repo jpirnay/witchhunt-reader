@@ -36,7 +36,7 @@ namespace {
 Section::BuildParams params() {
   Section::BuildParams p;
   p.fontId = 0;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.extraParagraphSpacing = false;
   p.paragraphAlignment = 0;
   p.viewportWidth = 480;
@@ -162,7 +162,8 @@ TEST_P(RoundTripFixture, ChapterStartStaysOnFirstPageWhateverThePercentageSays) 
     // override an exact XPath match), and an offset on the pull would land the page by itself.
     const auto ko = ProgressMapper::toKOReader(epub, {spine, 0, pages});
     for (const float skew : kSkews) {
-      const float percentage = std::clamp(spineStartPercentage(spine) + skew, 0.0f, 1.0f);
+      const float share = std::clamp(spineStartPercentage(spine) + skew, 0.0f, 1.0f);
+      const ProgressPpb percentage(static_cast<uint32_t>(share * ProgressPpb::kWhole));
       const auto back = ProgressMapper::toCrossPoint(epub, {ko.xpath, percentage}, spine, pages);
       EXPECT_EQ(back.spineIndex, spine) << "skew " << skew << " via " << ko.xpath;
       if (back.spineIndex != spine) continue;
@@ -193,7 +194,7 @@ TEST_P(RoundTripFixture, EveryTextPointComesBackExactly) {
       pos.hasVisibleTextOffset = true;
       const auto ko = ProgressMapper::toKOReader(epub, pos);
       if (ko.xpath.find("/text()[") == std::string::npos) {
-        float intra = 0.0f;
+        ProgressPpb intra;
         bool exact = false;
         uint32_t anchor = 0;
         ASSERT_TRUE(ChapterXPathIndexer::findProgressForXPath(epub, spine, ko.xpath, intra, exact, nullptr, &anchor))

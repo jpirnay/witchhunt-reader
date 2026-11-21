@@ -103,7 +103,7 @@ struct InlineImageFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = kViewportWidth;
     params.viewportHeight = viewportHeight;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     params.embeddedStyle = true;
     params.paragraphAlignment = static_cast<uint8_t>(CssTextAlign::Left);
     params.verticalText = vertical;
@@ -395,7 +395,7 @@ TEST_F(InlineImageFixture, AGaijiBesideARubyInAColumnKeepsTheRubyOverItsBase) {
   Section::BuildParams params;
   params.viewportWidth = kViewportWidth;
   params.viewportHeight = 800;
-  params.lineCompression = 1.0f;
+  params.lineCompression = TextScale();
   params.embeddedStyle = true;
   params.verticalText = VerticalText::Automatic;
   Section section(epub, 0, renderer);

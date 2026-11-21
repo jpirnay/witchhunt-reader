@@ -3,9 +3,9 @@
 #include <FsHelpers.h>
 
 #include <algorithm>
-#include <cmath>
-#include <cstdlib>
 #include <cstring>
+
+#include "SeriesIndex.h"
 
 namespace {
 
@@ -17,7 +17,7 @@ constexpr size_t TITLE_BYTES = 28;
 struct Key {
   uint8_t series[SERIES_BYTES];
   uint8_t title[TITLE_BYTES];
-  float index;
+  int64_t index;  // SeriesIndex::millionths
   uint16_t record;
   bool inSeries;
 };
@@ -27,10 +27,9 @@ void fill(const std::string& text, uint8_t* out, const size_t cap) {
   FsHelpers::naturalSortKey(text.c_str(), out, cap);
 }
 
-// strtof reads "nan" as NaN, and a NaN makes every comparison false, which breaks the sort.
-float seriesIndex(const std::string& text) {
-  const float value = std::strtof(text.c_str(), nullptr);
-  return std::isfinite(value) ? value : 0.0f;
+int64_t seriesIndex(const std::string& text) {
+  const auto index = SeriesIndex::parse(text.c_str());
+  return index ? index->millionths : 0;
 }
 
 bool before(const Key& a, const Key& b) {

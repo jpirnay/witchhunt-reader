@@ -266,7 +266,7 @@ TEST(VerticalTextBlock, ACombinedWordDrawsAsOneUprightBlock) {
   ASSERT_EQ(3u, r.drawCalls.size());
   EXPECT_EQ("13", r.drawCalls[1].text);
   EXPECT_EQ(GfxRenderer::Portrait, r.drawCalls[1].frame);
-  EXPECT_EQ(0.5f, r.drawCalls[1].scale);
+  EXPECT_EQ(TextScale::ratio(1, 2), r.drawCalls[1].scale);
 }
 
 TEST(VerticalTextBlock, ACombineRecordReservesNoBand) {

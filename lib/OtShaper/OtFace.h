@@ -36,16 +36,17 @@ struct Scale {
   int32_t yScale = 0;
   int64_t xMult = 0;
   int64_t yMult = 0;
-  float xMultf = 0;
-  float yMultf = 0;
   unsigned xPpem = 0;
   unsigned yPpem = 0;
+  uint16_t upem = 1;
 
   void set(int32_t scale, unsigned ppem, uint16_t upem);
   int32_t emScaleX(int32_t v) const { return static_cast<int32_t>((v * xMult + 32768) >> 16); }
   int32_t emScaleY(int32_t v) const { return static_cast<int32_t>((v * yMult + 32768) >> 16); }
-  float emFscaleX(int32_t v) const { return static_cast<float>(v) * xMultf; }
-  float emFscaleY(int32_t v) const { return static_cast<float>(v) * yMultf; }
+  // witchhunt: deviation 22 - HarfBuzz's em_fscale_x/y scale an anchor in float. Here it stays exact, in output units
+  // times `upem`, until a difference of two is rounded (OtGpos.cpp, hbRound): the C3 has no FPU.
+  int64_t emExactX(int32_t v) const { return static_cast<int64_t>(v) * xScale; }
+  int64_t emExactY(int32_t v) const { return static_cast<int64_t>(v) * yScale; }
 };
 
 // Glyph properties, as HarfBuzz keeps them: the GDEF class in the low bits

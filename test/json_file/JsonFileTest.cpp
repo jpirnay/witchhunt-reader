@@ -118,13 +118,13 @@ TEST_F(JsonFileTest, AnOverflowedDocumentLeavesTheFileAsItWas) {
 // weather settings on the card stay as they were.
 TEST_F(JsonFileTest, WeatherSettingsAreNotCutShort) {
   auto& store = WeatherSettingsStore::getInstance();
-  store.setLocation(52.52f, 13.405f, "Berlin");
+  store.setLocation(52520000, 13405000, "Berlin");
   store.setForecastDays(5);
   ASSERT_TRUE(store.saveToFile());
   const std::string saved = json_file_fixture::state.files[kWeatherPath];
   ASSERT_NE(saved.find("\"Berlin\""), std::string::npos) << saved;
 
-  store.setLocation(48.137f, 11.575f, "Munich");
+  store.setLocation(48137000, 11575000, "Munich");
   String::growLimit() = 40;
   EXPECT_FALSE(store.saveToFile());
   EXPECT_EQ(json_file_fixture::state.files[kWeatherPath], saved);

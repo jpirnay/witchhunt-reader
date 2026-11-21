@@ -1,5 +1,7 @@
 #pragma once
 
+#include <TextScale.h>
+
 #include <cstdint>
 
 // FontSizeLadder — the body font's sibling sizes, used to snap an effective block
@@ -81,13 +83,13 @@ struct FontSizeLadder {
   // The size of a font resolve() returned, relative to the body (1.0 for the body font, fontId 0):
   // with a resolved block's residual it gives back the block's size, which the parser needs to put
   // a body-relative (rem, px) span into a block of another size.
-  float scaleOf(const int32_t fontId) const {
-    if (fontId == 0) return 1.0f;
-    if (native() && (fontId & ~0xFF) == nativeBase) return static_cast<float>(fontId & 0xFF) * 64.0f / nativeBodyPpem;
+  TextScale scaleOf(const int32_t fontId) const {
+    if (fontId == 0) return TextScale();
+    if (native() && (fontId & ~0xFF) == nativeBase) return TextScale::ratio((fontId & 0xFF) * 64, nativeBodyPpem);
     for (int i = 0; i < count; ++i) {
-      if (rungs[i].fontId == fontId) return rungs[i].sizePct / 100.0f;
+      if (rungs[i].fontId == fontId) return TextScale::percent(rungs[i].sizePct);
     }
-    return 1.0f;
+    return TextScale();
   }
 
   // Residual dead zone: a leftover scale this close to 1.0 is snapped to exactly 1.0,
@@ -96,55 +98,60 @@ struct FontSizeLadder {
   // Kept at 3% so deliberate fine gradients (Alice's 99/98/97… mouse tale) only lose
   // their first, imperceptible steps. Applied to the final residual regardless of rung
   // (including the body font and the empty-ladder SD path).
-  static constexpr float kResidualDeadZone = 0.03f;
+  static constexpr int kResidualDeadZonePct = 3;
 
   // Result of snapping a desired size to the ladder. fontId == 0 means "use the
   // body font"; residual is the remaining scale applied on top of the chosen font
   // so the exact desired size is reached (1.0 when the rung matches exactly).
   struct Resolved {
     int32_t fontId = 0;
-    float residual = 1.0f;
+    TextScale residual;
   };
 
-  // Snap desiredPct (percent of the body size) to the nearest rung. An empty
+  // Whether a residual is inside the dead zone, so close to 1 that it is drawn at 1.
+  static bool inDeadZone(const TextScale residual) {
+    return residual > TextScale::percent(100 - kResidualDeadZonePct) &&
+           residual < TextScale::percent(100 + kResidualDeadZonePct);
+  }
+
+  // Snap `size` (a multiple of the body size) to the nearest rung. An empty
   // ladder, or a nearest rung of 100%, keeps the body font with the full scale
   // as residual — exactly the legacy scale-only behavior.
-  Resolved resolve(const float desiredPct) const {
-    Resolved r = native() ? resolveNative(desiredPct) : resolveExact(desiredPct);
-    if (r.residual > 1.0f - kResidualDeadZone && r.residual < 1.0f + kResidualDeadZone) {
-      r.residual = 1.0f;
-    }
+  Resolved resolve(const TextScale size) const {
+    Resolved r = native() ? resolveNative(size) : resolveExact(size);
+    if (inDeadZone(r.residual)) r.residual = TextScale();
     return r;
   }
 
  private:
-  Resolved resolveNative(const float desiredPct) const {
+  Resolved resolveNative(const TextScale size) const {
     Resolved r;
-    r.residual = desiredPct / 100.0f;
+    r.residual = size;
     // Within the dead zone of the body size, the body face itself.
-    if (desiredPct <= 0.0f || (r.residual > 1.0f - kResidualDeadZone && r.residual < 1.0f + kResidualDeadZone)) {
-      return r;
-    }
-    const float target = static_cast<float>(nativeBodyPpem) / 64.0f * r.residual;
-    // Clamped as a float: a book's CSS can ask for any size, and converting one beyond int's range is undefined.
-    const float lo = nativeMinPx;
-    const float hi = nativeMaxPx;
-    const int px = static_cast<int>((target > hi ? hi : target > lo ? target : lo) + 0.5f);
+    if (size.raw() == 0 || inDeadZone(size)) return r;
+    // The size in pixels, in 64ths (the face's 26.6) times 2^20: exact, and in range for any size a book asks for.
+    const int64_t target = static_cast<int64_t>(nativeBodyPpem) * size.raw();
+    const int64_t pixel = int64_t{64} << TextScale::kShift;
+    const int px = target > nativeMaxPx * pixel   ? nativeMaxPx
+                   : target > nativeMinPx * pixel ? static_cast<int>((target + pixel / 2) / pixel)
+                                                  : nativeMinPx;
     r.fontId = nativeBase | px;
-    r.residual = target / static_cast<float>(px);
+    r.residual = TextScale::ratio(target, px * pixel);
     return r;
   }
 
-  Resolved resolveExact(const float desiredPct) const {
+  Resolved resolveExact(const TextScale size) const {
     Resolved r;
-    r.residual = desiredPct / 100.0f;
-    if (count == 0 || desiredPct <= 0.0f) return r;
+    r.residual = size;
+    if (count == 0 || size.raw() == 0) return r;
 
+    // Distances in 100ths of TextScale's grid: |rung% x 2^20 - 100 x size|, exact.
+    const int64_t wanted = static_cast<int64_t>(size.raw()) * 100;
     int best = -1;
-    float bestDiff = 0.0f;
+    int64_t bestDiff = 0;
     for (int i = 0; i < count; ++i) {
-      const float diff =
-          (rungs[i].sizePct > desiredPct) ? (rungs[i].sizePct - desiredPct) : (desiredPct - rungs[i].sizePct);
+      const int64_t rung = static_cast<int64_t>(rungs[i].sizePct) << TextScale::kShift;
+      const int64_t diff = rung > wanted ? rung - wanted : wanted - rung;
       if (best < 0 || diff < bestDiff) {
         best = i;
         bestDiff = diff;
@@ -153,7 +160,7 @@ struct FontSizeLadder {
     if (best < 0 || rungs[best].sizePct == 100) return r;  // body font is the closest — pure scale
 
     r.fontId = rungs[best].fontId;
-    r.residual = desiredPct / static_cast<float>(rungs[best].sizePct);
+    r.residual = TextScale::ratio(wanted, static_cast<int64_t>(rungs[best].sizePct) << TextScale::kShift);
     return r;
   }
 };

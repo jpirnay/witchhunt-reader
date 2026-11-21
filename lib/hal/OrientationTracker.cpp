@@ -7,20 +7,21 @@ constexpr uint8_t LANDSCAPE_CW = 1;
 constexpr uint8_t INVERTED = 2;
 constexpr uint8_t LANDSCAPE_CCW = 3;
 
-float absf(const float v) { return v < 0 ? -v : v; }
+// Squares in int64: a sample is a few thousand mg, but nothing here assumes the sensor's range.
+int64_t absMg(const int32_t v) { return v < 0 ? -static_cast<int64_t>(v) : v; }
 }  // namespace
 
-uint8_t OrientationTracker::classify(const float ax, const float ay) {
-  if (ax * ax + ay * ay < kMinTiltG * kMinTiltG) return kNone;
-  const float x = absf(ax);
-  const float y = absf(ay);
-  if (x >= kLeadRatio * y) return ax < 0 ? PORTRAIT : INVERTED;
-  if (y >= kLeadRatio * x) return ay > 0 ? LANDSCAPE_CW : LANDSCAPE_CCW;
+uint8_t OrientationTracker::classify(const int32_t axMg, const int32_t ayMg) {
+  const int64_t x = absMg(axMg);
+  const int64_t y = absMg(ayMg);
+  if (x * x + y * y < static_cast<int64_t>(kMinTiltMg) * kMinTiltMg) return kNone;
+  if (x * kLeadDen >= kLeadNum * y) return axMg < 0 ? PORTRAIT : INVERTED;
+  if (y * kLeadDen >= kLeadNum * x) return ayMg > 0 ? LANDSCAPE_CW : LANDSCAPE_CCW;
   return kNone;
 }
 
-bool OrientationTracker::update(const float ax, const float ay, const uint32_t nowMs) {
-  const uint8_t now = classify(ax, ay);
+bool OrientationTracker::update(const int32_t axMg, const int32_t ayMg, const uint32_t nowMs) {
+  const uint8_t now = classify(axMg, ayMg);
   if (now != candidate_) {
     candidate_ = now;
     candidateSinceMs_ = nowMs;

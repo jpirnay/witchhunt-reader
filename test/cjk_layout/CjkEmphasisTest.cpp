@@ -56,7 +56,7 @@ struct Result {
   std::vector<GfxRenderer::DrawCall> markCalls(const std::string& glyph) const {
     std::vector<GfxRenderer::DrawCall> calls;
     for (const auto& call : renderer.drawCalls)
-      if (call.scale == 0.5f && call.text == glyph) calls.push_back(call);
+      if (call.scale == TextScale::percent(50) && call.text == glyph) calls.push_back(call);
     return calls;
   }
 };
@@ -113,7 +113,7 @@ TEST(CjkEmphasis, EachCharacterGetsAMarkCentredAboveIt) {
   EXPECT_EQ(marks[1].y, 0);
   int baseY = -1;
   for (const auto& call : r.renderer.drawCalls)
-    if (call.scale == 1.0f && call.text == "強") baseY = call.y;
+    if (call.scale.isOne() && call.text == "強") baseY = call.y;
   EXPECT_EQ(baseY, 8);
 }
 

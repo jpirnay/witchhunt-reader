@@ -9,14 +9,29 @@ WeatherSettingsStore WeatherSettingsStore::instance;
 
 namespace {
 constexpr char WEATHER_SETTINGS_FILE[] = "/.crosspoint/weather_settings.json";
+
+// A coordinate in millionths of a degree. A file from firmware that held it as a float has only `floatKey`: its value
+// is taken as that firmware read it, the float ArduinoJson makes of it, rounded to millionths as its "%.6f" printed it
+// in the forecast request and on the keyboard.
+weather::MicroDegrees readDegrees(const JsonDocument& doc, const char* key, const char* floatKey) {
+  const JsonVariantConst micro = doc[key];
+  if (micro.is<int>()) return micro.as<int>();
+  return weather::fromFloat(doc[floatKey] | 0.0f, weather::MICRODEGREE_DECIMALS);
 }
+}  // namespace
 
 bool WeatherSettingsStore::saveToFile() const {
   Storage.mkdir("/.crosspoint");
 
   JsonDocument doc;
-  doc["latitude"] = latitude;
-  doc["longitude"] = longitude;
+  doc["latitudeE6"] = latitude;
+  doc["longitudeE6"] = longitude;
+  // Firmware that held the location as a float reads only these: the same place for it after a downgrade.
+  char degrees[16];
+  weather::formatDegrees(degrees, sizeof(degrees), latitude, weather::MICRODEGREE_DECIMALS);
+  doc["latitude"] = serialized(static_cast<char*>(degrees));  // a char*: ArduinoJson copies it
+  weather::formatDegrees(degrees, sizeof(degrees), longitude, weather::MICRODEGREE_DECIMALS);
+  doc["longitude"] = serialized(static_cast<char*>(degrees));
   doc["locationConfigured"] = locationConfigured;
   doc["locationName"] = locationName;
   doc["tempUnit"] = static_cast<uint8_t>(tempUnit);
@@ -45,9 +60,9 @@ bool WeatherSettingsStore::loadFromFile() {
     return false;
   }
 
-  latitude = doc["latitude"] | 0.0f;
-  longitude = doc["longitude"] | 0.0f;
-  locationConfigured = doc["locationConfigured"] | (latitude != 0.0f || longitude != 0.0f);
+  latitude = readDegrees(doc, "latitudeE6", "latitude");
+  longitude = readDegrees(doc, "longitudeE6", "longitude");
+  locationConfigured = doc["locationConfigured"] | (latitude != 0 || longitude != 0);
   locationName = doc["locationName"] | std::string("");
   tempUnit = static_cast<WeatherTempUnit>(doc["tempUnit"] | (uint8_t)0);
   windUnit = static_cast<WeatherWindUnit>(doc["windUnit"] | (uint8_t)0);
@@ -57,16 +72,18 @@ bool WeatherSettingsStore::loadFromFile() {
   if (forecastDays < 1) forecastDays = 1;
   if (forecastDays > 5) forecastDays = 5;
 
-  LOG_DBG("WEA", "Loaded weather settings: %s (%.2f, %.2f)", locationName.c_str(), latitude, longitude);
+  LOG_DBG("WEA", "Loaded weather settings: %s (%d, %d millionths of a degree)", locationName.c_str(), latitude,
+          longitude);
   return true;
 }
 
-void WeatherSettingsStore::setLocation(float lat, float lon, const std::string& name) {
+void WeatherSettingsStore::setLocation(const weather::MicroDegrees lat, const weather::MicroDegrees lon,
+                                       const std::string& name) {
   latitude = lat;
   longitude = lon;
   locationConfigured = true;
   locationName = name;
-  LOG_DBG("WEA", "Set location: %s (%.4f, %.4f)", name.c_str(), lat, lon);
+  LOG_DBG("WEA", "Set location: %s (%d, %d millionths of a degree)", name.c_str(), lat, lon);
 }
 
 void WeatherSettingsStore::clearLocation() {

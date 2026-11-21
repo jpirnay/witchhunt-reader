@@ -31,8 +31,8 @@ struct TextNodeRules : testing::Test {
   }
   // The visible offset the pull lands on for a KOReader text point, or UINT32_MAX when inexact.
   uint32_t pull(const std::string& body, const std::string& xpath) {
-    const auto pos =
-        ProgressMapper::toCrossPoint(syntheticBook(work, bookCount++, body), KOReaderPosition{xpath, 0.5f});
+    const auto pos = ProgressMapper::toCrossPoint(syntheticBook(work, bookCount++, body),
+                                                  KOReaderPosition{xpath, ProgressPpb(ProgressPpb::kWhole / 2)});
     return pos.hasVisibleTextOffset ? pos.visibleTextOffset : UINT32_MAX;
   }
 };

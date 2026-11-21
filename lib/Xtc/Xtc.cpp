@@ -11,6 +11,7 @@
 #include <BookCache.h>
 #include <BufferedPrint.h>
 #include <HalStorage.h>
+#include <ImageScale.h>
 #include <Logging.h>
 
 #include <algorithm>
@@ -479,7 +480,7 @@ std::string Xtc::getThumbBmpPath(int width, int height) const {
 bool Xtc::generateThumbBmp(int height) const {
   const std::string destPath = getThumbBmpPath(height);
   if (Storage.exists(destPath.c_str())) return true;
-  const int width = static_cast<int>(height * 0.6f);
+  const int width = height * 3 / 5;  // thumbnails are 6:10
   if (!generateThumbBmp(width, height)) return false;
   const std::string srcPath = getThumbBmpPath(width, height);
   Storage.rename(srcPath.c_str(), destPath.c_str());
@@ -510,19 +511,22 @@ bool Xtc::generateThumbBmp(int width, int height) const {
   const int THUMB_TARGET_WIDTH = width;
   const int THUMB_TARGET_HEIGHT = height;
 
-  float scaleX = static_cast<float>(THUMB_TARGET_WIDTH) / pageInfo.width;
-  float scaleY = static_cast<float>(THUMB_TARGET_HEIGHT) / pageInfo.height;
-  float scale = (scaleX < scaleY) ? scaleX : scaleY;
+  const ImageScale scale = ImageScale::fit(pageInfo.width, pageInfo.height, THUMB_TARGET_WIDTH, THUMB_TARGET_HEIGHT);
 
-  if (scale >= 1.0f) {
+  if (!scale.isDownscale()) {
     if (generateCoverBmp()) {
       return Storage.copyFile("XTC", getCoverBmpPath(), getThumbBmpPath(width, height).c_str());
     }
     return false;
   }
 
-  uint16_t thumbWidth = static_cast<uint16_t>(pageInfo.width * scale);
-  uint16_t thumbHeight = static_cast<uint16_t>(pageInfo.height * scale);
+  uint16_t thumbWidth = static_cast<uint16_t>(scale.apply(pageInfo.width));
+  uint16_t thumbHeight = static_cast<uint16_t>(scale.apply(pageInfo.height));
+  if (thumbWidth == 0 || thumbHeight == 0) {
+    LOG_ERR("XTC", "Thumb %dx%d of a %dx%d page is empty", width, height, static_cast<int>(pageInfo.width),
+            static_cast<int>(pageInfo.height));
+    return false;
+  }
 
   xtc::XtcParser* mutParser = const_cast<xtc::XtcParser*>(parser.get());
   const std::string thumbPath = getThumbBmpPath(width, height);
@@ -539,8 +543,8 @@ bool Xtc::generateThumbBmp(int width, int height) const {
   // The band stores one grayscale byte per source pixel (0=black .. 255=white),
   // preserving the 4 gray levels of XTH for the box average. Band size is
   // bandCap * width bytes (~a couple KB), versus the full ~94KB page it replaces.
-  const size_t srcRowBytes = (pageInfo.width + 7) / 8;     // packed 1-bit page row (XTG read unit)
-  const int bandCap = static_cast<int>(1.0f / scale) + 2;  // rows spanned by one dstY + slack
+  const size_t srcRowBytes = (pageInfo.width + 7) / 8;  // packed 1-bit page row (XTG read unit)
+  const int bandCap = scale.den() / scale.num() + 2;    // rows spanned by one dstY + slack
   uint8_t* srcBand = static_cast<uint8_t*>(malloc(static_cast<size_t>(bandCap) * pageInfo.width));  // freed below
   uint8_t* packRow = static_cast<uint8_t*>(malloc(srcRowBytes));  // scratch for one packed XTG row
   if (!srcBand || !packRow) {
@@ -623,7 +627,8 @@ bool Xtc::generateThumbBmp(int width, int height) const {
     return false;
   }
 
-  uint32_t scaleInv_fp = static_cast<uint32_t>(65536.0f / scale);
+  // Source rows per thumb row, 16.16; below 2^32 while a page is under 65536 rows.
+  const auto scaleInv_fp = static_cast<uint32_t>((static_cast<uint64_t>(scale.den()) << 16) / scale.num());
 
   for (uint16_t dstY = 0; dstY < thumbHeight; dstY++) {
     memset(rowBuffer, 0xFF, rowSize);

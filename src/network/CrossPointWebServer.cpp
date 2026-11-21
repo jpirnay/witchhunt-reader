@@ -62,6 +62,7 @@
 #include "WifiCredentialStore.h"
 #include "html/WebSetupPageHtml.generated.h"
 #include "network/HttpDownloader.h"
+#include "util/ByteSize.h"
 #include "util/FontDownloadRules.h"
 #include "util/FontManifestReader.h"
 #include "util/PluginLocations.h"
@@ -1532,6 +1533,33 @@ static unsigned long uploadStartTime = 0;
 static unsigned long totalWriteTime = 0;
 static size_t writeCount = 0;
 
+namespace {
+
+// A number with one decimal for the upload logs, by value so that a LOG_DBG compiled out works nothing out.
+struct TenthsText {
+  char text[24];
+};
+
+[[maybe_unused]] TenthsText tenthsText(const uint64_t tenths) {
+  TenthsText t;
+  snprintf(t.text, sizeof(t.text), "%llu.%u", static_cast<unsigned long long>(tenths / 10),
+           static_cast<unsigned>(tenths % 10));
+  return t;
+}
+
+// KB/s, rounded to a tenth: bytes / 1024 per ms / 1000.
+[[maybe_unused]] TenthsText kbPerSecond(const uint64_t bytes, const unsigned long ms) {
+  const uint64_t divisor = 1024ULL * ms;
+  return tenthsText(ms > 0 ? (bytes * 10000 + divisor / 2) / divisor : 0);
+}
+
+// `part` as a percentage of `whole`, rounded to a tenth.
+[[maybe_unused]] TenthsText percentOf(const uint64_t part, const unsigned long whole) {
+  return tenthsText(whole > 0 ? (part * 1000 + whole / 2) / whole : 0);
+}
+
+}  // namespace
+
 static bool flushUploadBuffer(CrossPointWebServer::UploadState& state) {
   const size_t buffered = state.buffer.size();
   if (buffered > 0 && state.file) {
@@ -1702,10 +1730,10 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
 
       // Progress every 100 KB, and every 5 s on a link too slow for that
       if (state.size - lastLoggedSize >= 102400 || state.lastDataAt - lastLoggedAt >= 5000) {
-        const unsigned long elapsed = state.lastDataAt - uploadStartTime;
-        const float kbps = (elapsed > 0) ? (state.size / 1024.0) / (elapsed / 1000.0) : 0;
-        LOG_DBG("WEB", "[UPLOAD] %d bytes (%.1f KB), %.1f KB/s, %d writes", state.size, state.size / 1024.0, kbps,
-                writeCount);
+        [[maybe_unused]] const unsigned long elapsed = state.lastDataAt - uploadStartTime;  // for the log
+        LOG_DBG("WEB", "[UPLOAD] %d bytes (%s KB), %s KB/s, %d writes", state.size,
+                tenthsText(byte_size::rounded(state.size, byte_size::KB, 10)).text,
+                kbPerSecond(state.size, elapsed).text, writeCount);
         lastLoggedSize = state.size;
         lastLoggedAt = state.lastDataAt;
       }
@@ -1731,13 +1759,11 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
 
       if (state.error.isEmpty()) {
         state.success = true;
-        const unsigned long elapsed = millis() - uploadStartTime;
-        const float avgKbps = (elapsed > 0) ? (state.size / 1024.0) / (elapsed / 1000.0) : 0;
-        const float writePercent = (elapsed > 0) ? (totalWriteTime * 100.0 / elapsed) : 0;
-        LOG_DBG("WEB", "[UPLOAD] Complete: %s (%d bytes in %lu ms, avg %.1f KB/s)", state.fileName.c_str(), state.size,
-                elapsed, avgKbps);
-        LOG_DBG("WEB", "[UPLOAD] Diagnostics: %d writes, total write time: %lu ms (%.1f%%)", writeCount, totalWriteTime,
-                writePercent);
+        [[maybe_unused]] const unsigned long elapsed = millis() - uploadStartTime;  // for the logs
+        LOG_DBG("WEB", "[UPLOAD] Complete: %s (%d bytes in %lu ms, avg %s KB/s)", state.fileName.c_str(), state.size,
+                elapsed, kbPerSecond(state.size, elapsed).text);
+        LOG_DBG("WEB", "[UPLOAD] Diagnostics: %d writes, total write time: %lu ms (%s%%)", writeCount, totalWriteTime,
+                percentOf(totalWriteTime, elapsed).text);
 
         // Clear epub cache to prevent stale metadata issues when overwriting files
         clearBookCacheIfNeeded(filePath);
@@ -1762,10 +1788,9 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     f.idleMs = now - state.lastDataAt;
     f.reason = state.cancelled ? "cancelled" : server->client().connected() ? "stalled" : "closed";
     f.rssi = apMode ? 0 : WiFi.RSSI();
-    const float kbps = (f.ms > 0) ? (f.received / 1024.0) / (f.ms / 1000.0) : 0;
-    LOG_DBG("WEB", "[UPLOAD] Aborted (%s): %s, %u of %u bytes in %lu ms (%.1f KB/s), no data for the last %lu ms",
-            f.reason, f.name.c_str(), static_cast<unsigned>(f.received), static_cast<unsigned>(f.expected), f.ms, kbps,
-            f.idleMs);
+    LOG_DBG("WEB", "[UPLOAD] Aborted (%s): %s, %u of %u bytes in %lu ms (%s KB/s), no data for the last %lu ms",
+            f.reason, f.name.c_str(), static_cast<unsigned>(f.received), static_cast<unsigned>(f.expected), f.ms,
+            kbPerSecond(f.received, f.ms).text, f.idleMs);
     if (!apMode) LOG_DBG("WEB", "[UPLOAD] Wi-Fi %d dBm", f.rssi);
   }
 }
@@ -2504,10 +2529,13 @@ bool installRemoteFamily(HttpDownloader::Session& session, const FontCatalog& fa
   // Font Manager shows (the total plus the margin, in MB).
   uint64_t freeBytes = 0;
   if (!FontInstaller::hasRoomFor(families.totalSize(familyIndex), &freeBytes)) {
+    char needed[24];
+    char available[24];
+    byte_size::formatTenths(needed, sizeof(needed),
+                            families.totalSize(familyIndex) + FontDownloadRules::kSpaceMarginBytes, byte_size::MB);
+    byte_size::formatTenths(available, sizeof(available), freeBytes, byte_size::MB);
     char message[96];
-    snprintf(message, sizeof(message), "Not enough space on the SD card: %.1f MB needed, %.1f MB free",
-             static_cast<double>(families.totalSize(familyIndex) + FontDownloadRules::kSpaceMarginBytes) / 1048576.0,
-             static_cast<double>(freeBytes) / 1048576.0);
+    snprintf(message, sizeof(message), "Not enough space on the SD card: %s MB needed, %s MB free", needed, available);
     outError = message;
     return false;
   }
@@ -4717,11 +4745,9 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
         wsLastCompleteSize = wsUploadSize;
         wsLastCompleteAt = millis();
 
-        unsigned long elapsed = millis() - wsUploadStartTime;
-        float kbps = (elapsed > 0) ? (wsUploadSize / 1024.0) / (elapsed / 1000.0) : 0;
-
-        LOG_DBG("WS", "Upload complete: %s (%d bytes in %lu ms, %.1f KB/s)", wsUploadFileName.c_str(), wsUploadSize,
-                elapsed, kbps);
+        [[maybe_unused]] const unsigned long elapsed = millis() - wsUploadStartTime;  // for the log
+        LOG_DBG("WS", "Upload complete: %s (%d bytes in %lu ms, %s KB/s)", wsUploadFileName.c_str(), wsUploadSize,
+                elapsed, kbPerSecond(wsUploadSize, elapsed).text);
 
         // Clear epub cache to prevent stale metadata issues when overwriting files
         clearBookCacheIfNeeded(filePath);

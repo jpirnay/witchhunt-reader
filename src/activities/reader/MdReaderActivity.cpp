@@ -1026,7 +1026,7 @@ void MdReaderActivity::renderPage() {
 }
 
 void MdReaderActivity::renderStatusBar() const {
-  const float progress = totalPages > 0 ? (currentPage + 1) * 100.0f / totalPages : 0;
+  const ProgressPpb progress = ProgressPpb::of(currentPage + 1, totalPages);
   std::string title;
   if (SETTINGS.statusBarTitle != CrossPointSettings::STATUS_BAR_TITLE::HIDE_TITLE) {
     title = txt->getTitle();
