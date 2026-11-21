@@ -1088,25 +1088,25 @@ Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message, cons
 // panel's native orientation. drawLine() goes through rotateCoordinates() and is upright in all
 // four.
 static void drawHourglass(const GfxRenderer& renderer, const int originX, const int originY, const int size) {
-  const float s = static_cast<float>(size) / 24.0f;
-  const int stroke = std::max(2, static_cast<int>(2.0f * s + 0.5f));  // Lucide stroke-width 2
-  const auto px = [&](const float u) { return originX + static_cast<int>(u * s + 0.5f); };
-  const auto py = [&](const float v) { return originY + static_cast<int>(v * s + 0.5f); };
-  const auto line = [&](const float x1, const float y1, const float x2, const float y2) {
+  // Grid coordinates in thousandths (the arcs' chords end at 6.172 and 17.828), scaled by size / 24 and rounded.
+  const int stroke = std::max(2, (size + 6) / 12);  // Lucide stroke-width 2
+  const auto px = [&](const int u) { return originX + (u * size + 12000) / 24000; };
+  const auto py = [&](const int v) { return originY + (v * size + 12000) / 24000; };
+  const auto line = [&](const int x1, const int y1, const int x2, const int y2) {
     renderer.drawLine(px(x1), py(y1), px(x2), py(y2), stroke, true);
   };
-  line(5, 2, 19, 2);    // top bar
-  line(5, 22, 19, 22);  // bottom bar
+  line(5000, 2000, 19000, 2000);    // top bar
+  line(5000, 22000, 19000, 22000);  // bottom bar
   // Upper funnel, then lower. The two 2-unit corner arcs are taken as their chords, which is
   // sub-pixel at this size.
-  line(7, 2, 7, 6.172f);
-  line(7, 6.172f, 12, 12);
-  line(12, 12, 17, 6.172f);
-  line(17, 6.172f, 17, 2);
-  line(7, 22, 7, 17.828f);
-  line(7, 17.828f, 12, 12);
-  line(12, 12, 17, 17.828f);
-  line(17, 17.828f, 17, 22);
+  line(7000, 2000, 7000, 6172);
+  line(7000, 6172, 12000, 12000);
+  line(12000, 12000, 17000, 6172);
+  line(17000, 6172, 17000, 2000);
+  line(7000, 22000, 7000, 17828);
+  line(7000, 17828, 12000, 12000);
+  line(12000, 12000, 17000, 17828);
+  line(17000, 17828, 17000, 22000);
 }
 
 Rect BaseTheme::drawBusyIndicator(const GfxRenderer& renderer, const bool overlayDisplayedFrame,

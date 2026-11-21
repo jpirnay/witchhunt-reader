@@ -245,15 +245,16 @@ void OtaUpdateActivity::render(RenderLock&&) {
   const auto height = renderer.getLineHeight(UI_10_FONT_ID);
   const auto top = contentRect.y + (contentRect.height - height) / 2;
 
-  float updaterProgress = 0;
+  unsigned int percent = 0;
   if (state == UPDATE_IN_PROGRESS) {
     LOG_DBG("OTA", "Update progress: %d / %d", updater.getProcessedSize(), updater.getTotalSize());
-    updaterProgress = static_cast<float>(updater.getProcessedSize()) / static_cast<float>(updater.getTotalSize());
+    const size_t total = updater.getTotalSize();
+    percent = total > 0 ? static_cast<unsigned int>(uint64_t{updater.getProcessedSize()} * 100 / total) : 0;
     // Only update every 2% at the most
-    if (static_cast<int>(updaterProgress * 50) == lastUpdaterPercentage / 2) {
+    if (percent / 2 == lastUpdaterPercentage / 2) {
       return;
     }
-    lastUpdaterPercentage = static_cast<int>(updaterProgress * 100);
+    lastUpdaterPercentage = percent;
   }
 
   if (state == CHECKING_FOR_UPDATE) {
@@ -265,7 +266,7 @@ void OtaUpdateActivity::render(RenderLock&&) {
     y = GUI.drawProgressBar(renderer,
                             Rect{contentRect.x + metrics.contentSidePadding, y,
                                  contentRect.width - metrics.contentSidePadding * 2, metrics.progressBarHeight},
-                            static_cast<int>(updaterProgress * 100), 100) +
+                            static_cast<int>(percent), 100) +
         metrics.verticalSpacing;
     renderer.drawCenteredText(
         UI_10_FONT_ID, y,
