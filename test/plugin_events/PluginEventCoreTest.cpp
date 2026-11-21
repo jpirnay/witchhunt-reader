@@ -74,6 +74,15 @@ TEST(PluginEventCore, SubscriptionIgnoresWhatItCannotRun) {
   EXPECT_FALSE(parseSubscription("not json", none));
 }
 
+TEST(PluginEventCore, ConnectIsAJsonTrue) {
+  // As upstream reads "connect": a number is not a yes (as<bool>() compared it to zero, in floating point).
+  const char* json = R"({"events":{"reader.open":{"connect":true,"request":{"url":"u"}},
+    "reader.exit":{"connect":1,"request":{"url":"u"}},"reader.session":{"connect":false,"request":{"url":"u"}}}})";
+  const Subscription s = subscribe(json);
+  EXPECT_EQ(s.mask, eventBit(Event::ReaderOpen) | eventBit(Event::ReaderExit) | eventBit(Event::ReaderSession));
+  EXPECT_EQ(s.connectMask, eventBit(Event::ReaderOpen));
+}
+
 TEST(PluginEventCore, QueueLine) {
   const Var vars[] = {{"book", "/Books/Loan \"1\".epub"}, {"percent", "42"}};
   const std::string line = eventLine(Event::ReaderExit, vars, 2, "1a2b3c4d-7", 1795000000);
