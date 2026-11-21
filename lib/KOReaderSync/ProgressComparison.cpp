@@ -1,23 +1,21 @@
 #include "ProgressComparison.h"
 
-#include <cmath>
-
 namespace {
-// Rounding noise between two percentages of the same book, not a real difference.
-constexpr float SAME_PROGRESS_EPSILON = 0.001f;
+// Rounding noise between two percentages of the same book, not a real difference: a tenth of a percent.
+constexpr uint32_t SAME_PROGRESS_EPSILON = ProgressPpb::kWhole / 1000;
 
-ProgressComparison byPercentage(const float local, const float remote) {
-  if (!std::isfinite(local) || !std::isfinite(remote)) {
+ProgressComparison byPercentage(const std::optional<ProgressPpb> local, const std::optional<ProgressPpb> remote) {
+  if (!local || !remote) {
     return ProgressComparison::Unknown;
   }
-  const float delta = local - remote;
-  if (std::fabs(delta) <= SAME_PROGRESS_EPSILON) return ProgressComparison::Synchronized;
-  return delta > 0.0f ? ProgressComparison::LocalAhead : ProgressComparison::RemoteAhead;
+  if (distance(*local, *remote) <= SAME_PROGRESS_EPSILON) return ProgressComparison::Synchronized;
+  return *local > *remote ? ProgressComparison::LocalAhead : ProgressComparison::RemoteAhead;
 }
 }  // namespace
 
-ProgressComparison compareProgress(const LocalReadingPosition& local, const float localPercentage,
-                                   const CrossPointPosition& remote, const float remotePercentage) {
+ProgressComparison compareProgress(const LocalReadingPosition& local, const std::optional<ProgressPpb> localPercentage,
+                                   const CrossPointPosition& remote,
+                                   const std::optional<ProgressPpb> remotePercentage) {
   if (remote.hasResolvedSpineIndex) {
     if (local.spineIndex != remote.spineIndex) {
       return local.spineIndex > remote.spineIndex ? ProgressComparison::LocalAhead : ProgressComparison::RemoteAhead;
@@ -43,8 +41,10 @@ ProgressComparison compareProgress(const LocalReadingPosition& local, const floa
   return byPercentage(localPercentage, remotePercentage);
 }
 
-RemoteRecordChoice selectRemoteRecord(const CrossPointPosition& primary, const float primaryPercentage,
-                                      const CrossPointPosition& alternate, const float alternatePercentage) {
+RemoteRecordChoice selectRemoteRecord(const CrossPointPosition& primary,
+                                      const std::optional<ProgressPpb> primaryPercentage,
+                                      const CrossPointPosition& alternate,
+                                      const std::optional<ProgressPpb> alternatePercentage) {
   if (primary.hasResolvedSpineIndex && alternate.hasResolvedSpineIndex) {
     if (primary.spineIndex != alternate.spineIndex) {
       return alternate.spineIndex > primary.spineIndex ? RemoteRecordChoice::Alternate : RemoteRecordChoice::Primary;

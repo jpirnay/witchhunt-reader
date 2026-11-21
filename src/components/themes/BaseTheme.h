@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Epub/ProgressPpb.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -211,7 +213,7 @@ class BaseTheme {
   virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const;
   // lowMemory: the page is drawn short of memory (an image as a "not enough memory" box, see ImageMemoryLadder): a
   // chip icon beside the sync indicator says so.
-  virtual void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
+  virtual void drawStatusBar(GfxRenderer& renderer, const ProgressPpb bookProgress, const int currentPage,
                              const int pageCount, std::string title, const int paddingBottom = 0,
                              const bool isStarred = false, const std::string& printedPageLabel = std::string(),
                              const bool fillMargin = true, const bool pageCountApproximate = false,

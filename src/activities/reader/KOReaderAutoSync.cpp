@@ -204,7 +204,8 @@ uint64_t KOReaderAutoSync::pushSilentAsync(const std::string& epubPath, const KO
     LOG_DBG("AutoSync", "Push deferred: sync worker busy");
     return 0;
   }
-  LOG_DBG("AutoSync", "Silent push queued: %s (%.6f)", epubPath.c_str(), localKoPos.percentage);
+  LOG_DBG("AutoSync", "Silent push queued: %s (%lu ppb)", epubPath.c_str(),
+          static_cast<unsigned long>(localKoPos.percentage ? localKoPos.percentage->ppb() : 0));
   return seq;
 }
 
@@ -222,7 +223,8 @@ bool KOReaderAutoSync::finalizeSilentPush(const uint64_t seq) {
     return false;
   }
   AUTOSYNC_STATE.markSynced(job.path, job.spine, job.page);
-  LOG_DBG("AutoSync", "Silent push OK: %s (%.6f)", job.path.c_str(), job.progress.percentage);
+  LOG_DBG("AutoSync", "Silent push OK: %s (%lu ppb)", job.path.c_str(),
+          static_cast<unsigned long>(job.progress.percentage ? job.progress.percentage->ppb() : 0));
   return true;
 }
 
