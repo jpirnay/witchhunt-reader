@@ -49,10 +49,12 @@ struct QuantizedGray4 {
 // (The reader's in-book image path uses the untuned midpoints, quantizeGray4Level() in
 // Epub/converters/DitherUtils.h, which returns only an index.)
 #if SERIAL_TEST_API
-// Development builds only: CMD:SLEEP:SCREEN:T=<a>,<b>,<c> sets these to tune a panel's sleep images on the
-// glass without a rebuild (docs/serial-test-api.md). Release builds keep the constants below.
+// Development builds only: CMD:SLEEP:SCREEN:T=<a>,<b>,<c> sets the thresholds and F=<a>,<b>,<c>,<d> the values fed
+// back to the diffuser, to tune a panel's sleep images on the glass without a rebuild (docs/serial-test-api.md).
+// Release builds keep the constants below.
 namespace gray4tuning {
 inline uint8_t thresholds[3] = {30, 50, 140};
+inline uint8_t feedback[4] = {0, 85, 170, 255};
 }  // namespace gray4tuning
 #endif
 
@@ -63,15 +65,17 @@ inline QuantizedGray4 quantizeGray4(int gray) {
   // X4-tuned thresholds; same level spacing fed back to the diffuser (see above).
 #if SERIAL_TEST_API
   const uint8_t* t = gray4tuning::thresholds;
-  if (gray < t[0]) return {0, 0};
-  if (gray < t[1]) return {1, 85};
-  if (gray < t[2]) return {2, 170};
+  const uint8_t* f = gray4tuning::feedback;
+  if (gray < t[0]) return {0, f[0]};
+  if (gray < t[1]) return {1, f[1]};
+  if (gray < t[2]) return {2, f[2]};
+  return {3, f[3]};
 #else
   if (gray < 30) return {0, 0};
   if (gray < 50) return {1, 85};
   if (gray < 140) return {2, 170};
-#endif
   return {3, 255};
+#endif
 }
 
 enum class BmpRowOrder { BottomUp, TopDown };

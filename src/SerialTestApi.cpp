@@ -2069,11 +2069,12 @@ void cmdLab(std::string_view arg) {
 // CMD:SLEEP:SCREEN's BOOK=, taken by main.cpp when it paints the screen.
 std::string sleepScreenBook;
 
-// SLEEP: deep sleep, as a held power key. SLEEP:SCREEN[:T=<a>,<b>,<c>][:BOOK=<path>]: only the sleep screen, painted as
-// deep sleep paints it, with the device left awake on it, so a camera can look at it and the next one follows without
-// a button press. T= sets the 4-level dither thresholds (gray4tuning in BitmapHelpers.h), kept until the next T= or a
-// restart. BOOK= (last, it takes the rest of the line) shows that book's cover where the mode shows the last book's,
-// for this screen only and without opening the book.
+// SLEEP: deep sleep, as a held power key. SLEEP:SCREEN[:T=<a>,<b>,<c>][:F=<a>,<b>,<c>,<d>][:BOOK=<path>]: only the
+// sleep screen, painted as deep sleep paints it, with the device left awake on it, so a camera can look at it and the
+// next one follows without a button press. T= sets the 4-level dither thresholds and F= the values fed back for the
+// four levels (gray4tuning in BitmapHelpers.h), both kept until the next T=/F= or a restart. BOOK= (last, it takes the
+// rest of the line) shows that book's cover where the mode shows the last book's, for this screen only and without
+// opening the book.
 void cmdSleep(const std::string_view arg) {
   if (arg.empty()) {
     reply("SLEEP_OK");
@@ -2094,15 +2095,24 @@ void cmdSleep(const std::string_view arg) {
     std::string_view after;
     splitHead(rest, field, after);
     rest = after;
-    int t[3];
-    if (field.substr(0, 2) != "T=" || !SerialCommandGrammar::parseIntList(field.substr(2), t, 3) || t[0] < 0 ||
-        t[0] > t[1] || t[1] > t[2] || t[2] > 255) {
-      return static_cast<void>(reply("SLEEP_ERROR:expected T=<a>,<b>,<c> rising in 0..255 or BOOK=, got ", field));
+    // T= takes 3 values, F= 4, each rising within 0..255.
+    const bool isT = field.substr(0, 2) == "T=";
+    const bool isF = field.substr(0, 2) == "F=";
+    const int count = isT ? 3 : 4;
+    int v[4];
+    bool ok = (isT || isF) && SerialCommandGrammar::parseIntList(field.substr(2), v, count) && v[0] >= 0 &&
+              v[count - 1] <= 255;
+    for (int i = 1; ok && i < count; i++) ok = v[i - 1] <= v[i];
+    if (!ok) {
+      return static_cast<void>(
+          reply("SLEEP_ERROR:expected T=<a>,<b>,<c> or F=<a>,<b>,<c>,<d> rising in 0..255, or BOOK=, got ", field));
     }
-    for (int i = 0; i < 3; i++) gray4tuning::thresholds[i] = static_cast<uint8_t>(t[i]);
+    uint8_t* target = isT ? gray4tuning::thresholds : gray4tuning::feedback;
+    for (int i = 0; i < count; i++) target[i] = static_cast<uint8_t>(v[i]);
   }
-  replyf("SLEEP_OK:screen T=%u,%u,%u", gray4tuning::thresholds[0], gray4tuning::thresholds[1],
-         gray4tuning::thresholds[2]);
+  const uint8_t* t = gray4tuning::thresholds;
+  const uint8_t* f = gray4tuning::feedback;
+  replyf("SLEEP_OK:screen T=%u,%u,%u F=%u,%u,%u,%u", t[0], t[1], t[2], f[0], f[1], f[2], f[3]);
   powerRequest = PowerRequest::SleepScreen;
 }
 
