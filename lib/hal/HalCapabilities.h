@@ -249,6 +249,37 @@ inline bool powersPanelOffWhenIdle() {
 // second of reading: it waits past a page's reading time, so only a pause pays it.
 inline unsigned long panelIdlePowerOffAfterMs() { return BoardConfig::isMurphyM3() ? 0 : 120000; }
 
+// The 4-level image dither's table for this board's panel (quantizeGray4() in BitmapHelpers.h, copied there by
+// setupDisplayAndFonts()): the three thresholds, and for each level the value fed back to the diffuser, the sRGB gray
+// whose L* matches where that level sits between the panel's black and white. Measured on the gray-lab stand with
+// full-screen uniform grays, every shot mapped through the reference card in it. Boards not measured yet keep the
+// X4-tuned thresholds and even feedback that every board had before. Sleep pictures and the BMP viewer use it; the
+// 16-level panels draw sleep pictures on their own levels.
+struct ImageGray4Levels {
+  uint8_t thresholds[3];
+  uint8_t feedback[4];
+};
+// Feedback from black (0) to white (255) and thresholds both strictly rising, so every level can be reached. A
+// threshold may sit below the level under it: the X4's 50 promotes grays from 50 up to light gray on purpose.
+constexpr bool wellFormed(const ImageGray4Levels& l) {
+  if (l.feedback[0] != 0 || l.feedback[3] != 255 || l.thresholds[0] == 0) return false;
+  for (int i = 0; i < 3; i++) {
+    if (l.feedback[i] >= l.feedback[i + 1]) return false;
+    if (i > 0 && l.thresholds[i - 1] >= l.thresholds[i]) return false;
+  }
+  return true;
+}
+inline constexpr ImageGray4Levels kUnmeasuredImageGray4 = {{30, 50, 140}, {0, 85, 170, 255}};
+// Murphy's UC8253, 2026-11-22: alone the levels read L* 19.0 / 26.4 / 33.5 / 52.1, light gray 44 % of the way to white
+// where even spacing puts it at 67 %. Fed back as measured (0/53/104/255) uniform grays came within 4.4 L* of an even
+// lightness ramp; with light gray fed back darker, as 82, within 2.9, because a fine light-gray and white mix reads
+// darker on this glass than its share. Both rise at every step; the even table missed by up to 8.6.
+inline constexpr ImageGray4Levels kMurphyImageGray4 = {{27, 68, 169}, {0, 53, 82, 255}};
+static_assert(wellFormed(kUnmeasuredImageGray4) && wellFormed(kMurphyImageGray4));
+inline ImageGray4Levels imageGray4Levels() {
+  return BoardConfig::isMurphyM3() ? kMurphyImageGray4 : kUnmeasuredImageGray4;
+}
+
 // The panel can show gray at all. Murphy's only can in a build with -DFREEINK_MURPHY_GRAY: without
 // it the UC8253 driver has no gray waveforms and ignores a gray pass
 // (Uc8253MurphyDriver::displayGray), so a setting for one means nothing there.
