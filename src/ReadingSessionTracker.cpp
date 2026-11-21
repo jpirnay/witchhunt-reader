@@ -41,6 +41,8 @@ void ReadingSessionTracker::begin(const std::string& docId_, const std::string& 
 }
 
 void ReadingSessionTracker::onPageTurn() {
+  // Before the stats' own check: a device test's book has no stats session, but a listener still hears its turns.
+  if (turnListener != nullptr) turnListener();
   if (!active) return;
   flushIdleSinceLastActivity();
   pagesTurnedThisSession += 1;

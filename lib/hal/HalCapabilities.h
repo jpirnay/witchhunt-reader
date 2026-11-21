@@ -301,6 +301,18 @@ bool defersLiveFontChange();
 inline bool defersLiveFontChange() { return !keepsSecondaryBuffer(); }
 #endif
 
+// Plugin events that bring Wi-Fi up at sleep entry go from a clean boot: the sleep screen is painted, the chip
+// restarts, that boot sends the queue before the display takes its framebuffers, and restarts into the sleep (main.cpp,
+// SILENT_REBOOT_TARGET_SLEEP_SEND_EVENTS). The C3s: beside two framebuffers, joining Wi-Fi left the X3 less than 8 KB
+// in one block, too little for TLS (67 KB free and a 57 KB block before the join, sleeping out of a book; before the
+// display takes its buffers, its boot has 212 KB free; 2026-11-20). The PSRAM boards join where they are (Murphy: 175
+// KB free before the join, a download and a PUT went through). cppcheck sees only the declaration, as above.
+#if defined(CPPCHECK_ANALYSIS)
+bool sendsSleepEventsFromCleanBoot();
+#else
+inline bool sendsSleepEventsFromCleanBoot() { return !keepsSecondaryBuffer(); }
+#endif
+
 // A frontlight is present: PWM (LEDC or PM1-driven), or an LED driver on the I2C bus (the BOOX Picco's).
 inline bool hasFrontlight() { return BoardConfig::hasPwmFrontlight() || BoardConfig::hasI2cFrontlight(); }
 

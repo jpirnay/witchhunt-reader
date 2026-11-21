@@ -29,6 +29,7 @@
 #include "XtcReaderChapterSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/PluginReaderEvents.h"
 
 void XtcReaderActivity::onEnter() {
   Activity::onEnter();
@@ -55,6 +56,7 @@ void XtcReaderActivity::onEnter() {
   // Start the reading-stats session. XTC has real title/author from the
   // file header so the per-book screen will look nicer than TXT/MD. A device test's book is no history
   // (SerialTestApi::isTestBook).
+  plugin_events::reader::opened(xtc->getPath());
   if (!SerialTestApi::isTestBook(xtc->getPath())) {
     globalReadingSessionTracker().begin(KOReaderDocumentId::calculateFromFilename(xtc->getPath()), xtc->getTitle(),
                                         xtc->getAuthor());
@@ -79,6 +81,7 @@ void XtcReaderActivity::onExit() {
   }
 
   // Flush stats session before tearing down the XTC reader.
+  plugin_events::reader::closed();
   globalReadingSessionTracker().end();
 
   APP_STATE.readerActivityLoadCount = 0;
@@ -367,6 +370,10 @@ void XtcReaderActivity::saveProgress() const {
     f.write(data, 5);
     f.close();
     globalReadingSessionTracker().updateProgress(percent);
+    if (const uint32_t pages = xtc->getPageCount(); pages > 0 && currentPage < pages) {
+      plugin_events::reader::shown(currentPage, static_cast<int>(static_cast<uint64_t>(currentPage) * 10000 / pages),
+                                   static_cast<int>(static_cast<uint64_t>(currentPage + 1) * 100 / pages));
+    }
   }
 }
 

@@ -16,6 +16,7 @@
 #include "SerialTestApi.h"
 #include "activities/home/BookDetails.h"
 #include "components/UITheme.h"
+#include "util/PluginReaderEvents.h"
 
 void LineReaderActivity::onEnter() {
   Activity::onEnter();
@@ -57,6 +58,7 @@ void LineReaderActivity::onEnter() {
   // Start reading-stats session. Same filename-hash policy as EPUB, so the history is keyed by the
   // file name; BookRelocation carries it over when the file is renamed. A device test's book is no history
   // (SerialTestApi::isTestBook).
+  plugin_events::reader::opened(filePath);
   if (!SerialTestApi::isTestBook(filePath)) {
     globalReadingSessionTracker().begin(KOReaderDocumentId::calculateFromFilename(filePath), title, details.author);
   }
@@ -83,6 +85,7 @@ void LineReaderActivity::onExit() {
 
   // Flush the stats session before tearing down the document — same pattern as
   // EpubReaderActivity::onExit().
+  plugin_events::reader::closed();
   globalReadingSessionTracker().end();
 
   onReaderExit();
@@ -353,6 +356,10 @@ void LineReaderActivity::saveProgress() const {
     f.write(data, 7);
     f.close();
     globalReadingSessionTracker().updateProgress(percent);
+    if (totalPages > 0) {
+      plugin_events::reader::shown(static_cast<uint32_t>(currentPage), currentPage * 10000 / totalPages,
+                                   (currentPage + 1) * 100 / totalPages);
+    }
   }
 }
 

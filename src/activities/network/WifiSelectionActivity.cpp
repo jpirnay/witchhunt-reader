@@ -30,6 +30,7 @@
 #include "fontIds.h"
 #include "network/MacFormat.h"
 #include "network/WifiApChoice.h"
+#include "util/PluginEvents.h"
 #include "util/QrUtils.h"
 
 namespace {
@@ -1432,6 +1433,9 @@ void WifiSelectionActivity::onComplete(const bool connected) {
   result.isCancelled = !connected;
   if (connected) {
     result.data = WifiResult{true, selectedSSID, connectedIP};
+    // Online: the plugins' queued events go out (util/PluginEvents.h), a few at most, with their popups. Every join
+    // ends here, File Transfer's too.
+    plugin_events::drain(&renderer);
   }
   setResult(std::move(result));
   finish();
