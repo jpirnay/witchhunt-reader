@@ -665,7 +665,8 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
           uint32_t currentPage = static_cast<uint32_t>(data[0]) | (static_cast<uint32_t>(data[1]) << 8) |
                                  (static_cast<uint32_t>(data[2]) << 16) | (static_cast<uint32_t>(data[3]) << 24);
           uint32_t totalPages = xtc.getPageCount();
-          float progress = xtc.calculateProgress(currentPage) * 100.0f;
+          // Already a whole percent (Xtc::calculateProgress), not a fraction.
+          const float progress = xtc.calculateProgress(currentPage);
           char buf[64];
           snprintf(buf, sizeof(buf), tr(STR_OVERLAY_READING_PROGRESS), (unsigned long)currentPage + 1, totalPages,
                    progress);
