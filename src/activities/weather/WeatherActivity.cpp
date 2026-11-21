@@ -12,7 +12,6 @@
 #include <WiFi.h>
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <ctime>
 
@@ -50,7 +49,7 @@ constexpr int EDGE = 12;         // to the panel's edges, and to the button hint
 constexpr int GRAPH_HOURS = 24;  // the days after are the forecast strip's
 
 // Whole multiples, so GfxRenderer's area-weighted resample turns every source pixel into a whole block.
-TextScale heroTextScale() { return TextScale::ratio(PanelMetrics::COMPACT ? 2 : 3, 1); }
+int heroTextScale() { return PanelMetrics::COMPACT ? 2 : 3; }
 int heroIconScale() { return PanelMetrics::COMPACT ? 1 : 2; }
 
 constexpr StrId DAY_NAME_IDS[] = {StrId::STR_WEATHER_DAY_SUN, StrId::STR_WEATHER_DAY_MON, StrId::STR_WEATHER_DAY_TUE,
@@ -456,25 +455,27 @@ int WeatherActivity::drawCurrentConditions(const int left, const int right) {
   drawWeatherIcon(renderer, getWeatherIconLarge(getWeatherIconType(cur.weatherCode, cur.isDay)), left, top, iconScale);
 
   char temp[16];
-  snprintf(temp, sizeof(temp), "%ld", lroundf(cur.temperature));
-  const TextScale scale = heroTextScale();
-  const int digitsHeight = scale.applyTruncated(inkAbove(renderer, VALUE_FONT_ID, temp, EpdFontFamily::BOLD));
+  snprintf(temp, sizeof(temp), "%d", weather::whole(cur.temperature, weather::TENTHS_DECIMALS));
+  const int scale = heroTextScale();
+  const TextScale textScale = TextScale::ratio(scale, 1);
+  const int digitsHeight = inkAbove(renderer, VALUE_FONT_ID, temp, EpdFontFamily::BOLD) * scale;
   const int digitsTop = top + std::max(0, (iconSize - digitsHeight) / 2);  // centred on the icon
   const int baseline = digitsTop + digitsHeight;
   const int tempX = left + iconSize + 12;
-  renderer.drawTextScaled(VALUE_FONT_ID, tempX, baseline - renderer.getFontAscenderSizeScaled(VALUE_FONT_ID, scale),
-                          temp, true, EpdFontFamily::BOLD, scale);
+  renderer.drawTextScaled(VALUE_FONT_ID, tempX, baseline - renderer.getFontAscenderSizeScaled(VALUE_FONT_ID, textScale),
+                          temp, true, EpdFontFamily::BOLD, textScale);
 
   // The unit's ink top level with the digits'.
   const char* unit = tempUnitLabel();
-  const int unitX = tempX + renderer.getTextWidthScaled(VALUE_FONT_ID, temp, EpdFontFamily::BOLD, scale) + 6;
+  const int unitX = tempX + renderer.getTextWidthScaled(VALUE_FONT_ID, temp, EpdFontFamily::BOLD, textScale) + 6;
   renderer.drawText(HEADING_FONT_ID, unitX,
                     digitsTop - renderer.getFontAscenderSize(HEADING_FONT_ID) +
                         inkAbove(renderer, HEADING_FONT_ID, unit, EpdFontFamily::BOLD),
                     unit, true, EpdFontFamily::BOLD);
 
   char feels[48];
-  snprintf(feels, sizeof(feels), "%s %ld%s", tr(STR_WEATHER_FEELS_LIKE), lroundf(cur.apparentTemperature), DEGREE);
+  snprintf(feels, sizeof(feels), "%s %d%s", tr(STR_WEATHER_FEELS_LIKE),
+           weather::whole(cur.apparentTemperature, weather::TENTHS_DECIMALS), DEGREE);
   const int feelsTop = baseline + 8;
   renderer.drawText(HEADING_FONT_ID, tempX, feelsTop,
                     renderer.truncatedText(HEADING_FONT_ID, feels, right - tempX - 8).c_str());
@@ -531,7 +532,8 @@ int WeatherActivity::drawDays(const int left, const int right, const int top) {
                     centre - WEATHER_ICON_SIZE / 2, iconTop, 1);
 
     char temps[24];
-    snprintf(temps, sizeof(temps), "%ld%s|%ld%s", lroundf(day.tempMax), DEGREE, lroundf(day.tempMin), DEGREE);
+    snprintf(temps, sizeof(temps), "%d%s|%d%s", weather::whole(day.tempMax, weather::TENTHS_DECIMALS), DEGREE,
+             weather::whole(day.tempMin, weather::TENTHS_DECIMALS), DEGREE);
     renderer.drawText(LABEL_FONT_ID, centre - renderer.getTextWidth(LABEL_FONT_ID, temps) / 2, tempsTop, temps);
   }
   return tempsTop + renderer.getLineHeight(LABEL_FONT_ID);
@@ -562,15 +564,15 @@ void WeatherActivity::drawDetails(const int x, const int y, const int w, const i
     formatClockTime(value, sizeof(value), weatherData.daily[0].sunset, weatherData.utcOffsetSeconds);
     add(StrId::STR_WEATHER_SUNSET, value, "");
   }
-  snprintf(value, sizeof(value), "%ld", lroundf(cur.windSpeed));
+  snprintf(value, sizeof(value), "%d", weather::whole(cur.windSpeed, weather::TENTHS_DECIMALS));
   snprintf(unit, sizeof(unit), "%s %s", windUnitLabel(), getWindDirectionText(cur.windDirection));
   add(StrId::STR_WEATHER_WIND, value, unit);
   snprintf(value, sizeof(value), "%d", cur.humidity);
   add(StrId::STR_WEATHER_HUMIDITY, value, "%");
-  snprintf(value, sizeof(value), "%ld", lroundf(cur.uvIndex));
+  snprintf(value, sizeof(value), "%d", weather::whole(cur.uvIndex, weather::HUNDREDTHS_DECIMALS));
   add(StrId::STR_WEATHER_UV_INDEX, value, "");
   if (!weatherData.daily.empty()) {
-    snprintf(value, sizeof(value), "%.1f", weatherData.daily[0].precipSum);
+    weather::formatPrecipitation(value, sizeof(value), weatherData.daily[0].precipSum);
     add(StrId::STR_WEATHER_PRECIP, value, precipUnitLabel());
   }
 
@@ -605,15 +607,15 @@ void WeatherActivity::drawHourlyGraph(const int x, const int y, const int w, con
   const int count = std::min(static_cast<int>(hours.size()), GRAPH_HOURS);
   if (count < 2) return;
 
-  float lowest = hours[0].temperature;
-  float highest = lowest;
+  weather::Tenths lowest = hours[0].temperature;
+  weather::Tenths highest = lowest;
   for (int i = 1; i < count; i++) {
     lowest = std::min(lowest, hours[i].temperature);
     highest = std::max(highest, hours[i].temperature);
   }
   // Five grid lines on whole degrees, with a degree of air above and below the curve.
-  const int tempMin = static_cast<int>(std::floor(lowest)) - 1;
-  const int tempStep = std::max(1, (static_cast<int>(std::ceil(highest)) + 1 - tempMin + 3) / 4);
+  const int tempMin = weather::floorWhole(lowest) - 1;
+  const int tempStep = std::max(1, (weather::ceilWhole(highest) + 1 - tempMin + 3) / 4);
   const int tempMax = tempMin + 4 * tempStep;
 
   char label[16];
@@ -634,8 +636,11 @@ void WeatherActivity::drawHourlyGraph(const int x, const int y, const int w, con
   if (plotWidth < count || plotHeight < 40) return;
 
   const auto xAt = [&](const int i) { return plotLeft + i * plotWidth / (count - 1); };
-  const auto yAt = [&](const float t) {
-    return plotBottom - static_cast<int>(std::lround((t - tempMin) * plotHeight / (tempMax - tempMin)));
+  // Rounded to the nearest pixel, a half up: t is above tempMin, so the quotient is positive.
+  const auto yAt = [&](const weather::Tenths t) {
+    const int64_t above = static_cast<int64_t>(t - tempMin * 10) * plotHeight;
+    const int64_t span = static_cast<int64_t>(tempMax - tempMin) * 10;
+    return plotBottom - static_cast<int>((2 * above + span) / (2 * span));
   };
 
   for (int k = 0; k <= 4; k++) {

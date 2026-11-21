@@ -238,8 +238,7 @@ void BookSearchActivity::provideRow(void* ctx, const uint16_t index, fui::ListIt
   // How far into the book it lies, and its chapter: the percentage first, where a long title cut at the row's end
   // leaves it.
   const Epub& book = *self->epub;
-  const float within = static_cast<float>(hit.chapterPermille) / 1000.0f;
-  const int percent = static_cast<int>(book.calculateProgress(hit.spine, within) * 100.0f + 0.5f);
+  const int percent = book.calculateProgress(hit.spine, ProgressPpb::of(hit.chapterPermille, 1000)).percentHalfUp();
   const int toc = book.getTocIndexForSpineIndex(hit.spine);
   const std::string title = toc >= 0 ? book.getTocItem(toc).title : std::string();
   const int titleBytes = utf8SafeTruncateBuffer(

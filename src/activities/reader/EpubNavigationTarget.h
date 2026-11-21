@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Epub/ProgressPpb.h>
 #include <Epub/Section.h>
 
 #include <cstdint>
@@ -15,7 +16,7 @@ struct EpubNavigationTarget {
     LastPage,       // go to last page of section (was UINT16_MAX sentinel)
     Anchor,         // href fragment (e.g. "note1")
     TocIndex,       // TOC entry index
-    Percent,        // normalised 0.0–1.0 within spine
+    Percent,        // a share of the spine item's pages
     Paragraph,      // KOReader paragraph LUT index
     ListItem,       // KOReader li-anchored LUT index
     VisibleOffset,  // KOReader content offset (Section::getPageForVisibleTextOffset)
@@ -24,7 +25,7 @@ struct EpubNavigationTarget {
   union {
     int page;                // Kind::Page
     int tocIndex;            // Kind::TocIndex
-    float spineProgress;     // Kind::Percent
+    uint32_t spineProgress;  // Kind::Percent: a ProgressPpb's billionths
     uint16_t lutIndex;       // Kind::Paragraph / Kind::ListItem
     uint32_t visibleOffset;  // Kind::VisibleOffset
   };
@@ -85,10 +86,10 @@ struct EpubNavigationTarget {
     t.tocIndex = idx;
     return t;
   }
-  static EpubNavigationTarget makePercent(float sp) {
+  static EpubNavigationTarget makePercent(const ProgressPpb sp) {
     EpubNavigationTarget t;
     t.kind = Kind::Percent;
-    t.spineProgress = sp;
+    t.spineProgress = sp.ppb();
     return t;
   }
   static EpubNavigationTarget makeParagraph(uint16_t i, int fallback = 0) {

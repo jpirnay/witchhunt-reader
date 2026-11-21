@@ -14,10 +14,11 @@
 #include <sys/time.h>
 #include <time.h>
 
-#include <cmath>
 #include <cstdlib>
 #include <cstring>
 
+#include "ClockDrift.h"
+#include "FloatBits.h"
 #include "HalI2cBus.h"
 
 // ---- RTC / I2C configuration ----------------------------------------------
@@ -59,7 +60,10 @@ static time_t timegm_compat(const struct tm* tm) {
 
 // ---- RTC-memory state (survives deep sleep, not cold boot) ----------------
 
-static constexpr uint32_t CLOCK_RTC_MAGIC = 0xC10C4B1D;
+// The snapshot's layout. The temperature is hundredths of a degree in an int32_t; the previous magic marks a snapshot
+// from firmware that kept it as a float, which rtcValid() still reads (an update's reboot keeps RTC memory).
+static constexpr uint32_t CLOCK_RTC_MAGIC = 0xC10C4B1E;
+static constexpr uint32_t CLOCK_RTC_MAGIC_FLOAT_TEMP = 0xC10C4B1D;
 // Set when the LP timer will KEEP RUNNING from this capture until the next restore(), so the
 // elapsed-time correction in restore() is usable. That is true for every reboot (a CPU reset
 // leaves the RTC domain running) and for a deep sleep that holds the clock rail up; it is false
@@ -71,28 +75,15 @@ static constexpr uint32_t CLOCK_RTC_MAGIC = 0xC10C4B1D;
 // on the uncorrected NVS path after every silent restart.
 static constexpr uint32_t CLOCK_RTC_FLAG_LP_CONTINUOUS = 0x00000001u;
 
-// Temperature drift model for ESP32 RTC-based timekeeping.
-//
-// The chip's low-power (slow) clock frequency depends on temperature.
-// ESP32 variants can drift by about 2 minutes per day per °C from the
-// initial captured operating temperature.
-//
-// - dt_drift ≈ 120 seconds/day/°C
-// - relative frequency error per second per °C = 120 / 86400
-//
-// At restore() we apply a first-order correction over the sleep interval:
-// corrected_interval = raw_interval × (1 + ΔT × drift_factor), where
-// drift_factor = 120 / 86400.
-//
-// Experimental source: https://www.reddit.com/r/esp32/comments/11cikkp/the_clock_on_the_esp_is_wrong/
-static constexpr float CLOCK_TEMP_DRIFT_SECONDS_PER_SECOND_PER_DEG = 120.0f / 86400.0f;
+// The temperature drift model (about 2 minutes a day per degree C off the captured temperature, first-order, over the
+// interval) is in ClockDrift.h, in integers: the C3 has no FPU.
 
 RTC_NOINIT_ATTR static uint32_t rtcClockMagic;
 RTC_NOINIT_ATTR static uint32_t rtcClockFlags;
-RTC_NOINIT_ATTR static time_t rtcEpoch;        // last-known unix epoch
-RTC_NOINIT_ATTR static uint64_t rtcLpTimeUs;   // esp_clk_rtc_time() at capture
-RTC_NOINIT_ATTR static uint32_t rtcSlowCal;    // esp_clk_slowclk_cal_get() at capture
-RTC_NOINIT_ATTR static float rtcTemperatureC;  // captured chip temperature at save
+RTC_NOINIT_ATTR static time_t rtcEpoch;       // last-known unix epoch
+RTC_NOINIT_ATTR static uint64_t rtcLpTimeUs;  // esp_clk_rtc_time() at capture
+RTC_NOINIT_ATTR static uint32_t rtcSlowCal;   // esp_clk_slowclk_cal_get() at capture
+RTC_NOINIT_ATTR static int32_t rtcTempCenti;  // chip temperature at capture, 0.01 C (clock_drift::kTempUnknown)
 RTC_NOINIT_ATTR static uint32_t rtcStateChecksum;
 
 static bool clockApproximate = true;
@@ -127,18 +118,18 @@ static void noteNtpFailure() {
 static uint32_t lastSleepSec = 0;
 // Sanity bound on the above, shared by both paths: a year. Anything larger means
 // a stale NVS epoch or a corrupt snapshot, not a real sleep.
-static constexpr double MAX_PLAUSIBLE_SLEEP_S = 365.0 * 24 * 3600;
+static constexpr int64_t MAX_PLAUSIBLE_SLEEP_S = 365LL * 24 * 3600;
 
-// Drift correction scale factor (learned from NTP sync results).
+// Drift correction scale factor (learned from NTP sync results), in millionths.
 //
 // Raw temp drift model uses 2 min/day/°C -> factor = 120/86400. This is a
 // generic base model. The actual board may behave a bit differently. On each
 // NTP sync we estimate how the local clock error compares to the model and
 // update this scale factor slightly to converge toward real world behavior.
 //
-// rtcDriftScale = 1.0 means we trust 2 min/day/°C exactly. If the device is
+// clock_drift::kScaleOne means we trust 2 min/day/°C exactly. If the device is
 // slower/faster than that, NTP drift calibration adjusts this factor.
-static float rtcDriftScale = 1.0f;
+static int32_t rtcDriftScaleMicro = clock_drift::kScaleOne;
 
 static unsigned long lastPeriodicUpdateMs = 0;
 static constexpr unsigned long PERIODIC_UPDATE_INTERVAL_MS = 10UL * 60UL * 1000UL;
@@ -152,8 +143,14 @@ static constexpr int64_t STALE_THRESHOLD_S = 72 * 3600;  // 72 hours
 static constexpr char NVS_NAMESPACE[] = "halclock";
 static constexpr char NVS_KEY[] = "epoch";
 static constexpr char NVS_SYNC_KEY[] = "lastsync";
-static constexpr char NVS_DRIFT_KEY[] = "driftcoef";
-static constexpr char NVS_TEMP_KEY[] = "lasttemp";
+// The learned drift scale (millionths) and the temperature at the last NTP sync or sleep (hundredths of a degree), as
+// int32. Firmware before the integer clock wrote both as floats under the *_FLOAT_KEY names: read when the integer key
+// is missing, never written. Both are four-byte blobs, as the floats were: Preferences' putInt() would link its
+// separate int path, about 400 bytes, for two values.
+static constexpr char NVS_DRIFT_KEY[] = "driftmicro";
+static constexpr char NVS_TEMP_KEY[] = "lasttempcc";
+static constexpr char NVS_DRIFT_FLOAT_KEY[] = "driftcoef";
+static constexpr char NVS_TEMP_FLOAT_KEY[] = "lasttemp";
 // Sleep-entry epoch, written by capture() and CONSUMED (zeroed) by restore().
 // Deliberately not NVS_KEY: that one is the clock's cold-boot fallback and must
 // survive, whereas this must not. Consuming it is what makes the reported
@@ -173,41 +170,59 @@ static void nvsWrite(time_t epoch) {
   }
 }
 
-static void nvsWriteDriftScale(float driftScale) {
+// One NVS value: the int32 under `key`, else the float older firmware stored under `floatKey` times `scale`, else
+// `fallback`. A stored float that is not a number (or not one int32 holds) reads as `notANumber`.
+static int32_t nvsReadFixed(Preferences& prefs, const char* key, const char* floatKey, const int32_t scale,
+                            const int32_t fallback, const int32_t notANumber) {
+  if (prefs.isKey(key)) {
+    int32_t stored = 0;
+    return prefs.getBytes(key, &stored, sizeof(stored)) == sizeof(stored) ? stored : fallback;
+  }
+  uint32_t bits = 0;
+  if (!prefs.isKey(floatKey) || prefs.getBytes(floatKey, &bits, sizeof(bits)) != sizeof(bits)) {
+    return fallback;
+  }
+  int32_t value = 0;
+  return fixedFromFloatBits(bits, scale, value) ? value : notANumber;
+}
+
+static void nvsWriteDriftScale(const int32_t scaleMicro) {
   Preferences prefs;
   if (prefs.begin(NVS_NAMESPACE, false)) {
-    prefs.putFloat(NVS_DRIFT_KEY, driftScale);
+    prefs.putBytes(NVS_DRIFT_KEY, &scaleMicro, sizeof(scaleMicro));
     prefs.end();
   }
 }
 
-static float nvsReadDriftScale() {
+static int32_t nvsReadDriftScale() {
   Preferences prefs;
-  float result = 1.0f;
+  int32_t result = clock_drift::kScaleOne;
   if (prefs.begin(NVS_NAMESPACE, true)) {
-    result = prefs.getFloat(NVS_DRIFT_KEY, 1.0f);
+    result = nvsReadFixed(prefs, NVS_DRIFT_KEY, NVS_DRIFT_FLOAT_KEY, clock_drift::kScaleOne, clock_drift::kScaleOne,
+                          clock_drift::kScaleOne);
     prefs.end();
   }
-  // Guard against NaN, Inf, or out-of-range values from corrupted NVS.
-  if (!std::isfinite(result) || result < 0.1f || result > 5.0f) {
-    result = 1.0f;
+  // Guard against out-of-range values from corrupted NVS.
+  if (result < clock_drift::kScaleMin || result > clock_drift::kScaleMax) {
+    result = clock_drift::kScaleOne;
   }
   return result;
 }
 
-static void nvsWriteLastSyncTemp(float tempC) {
+static void nvsWriteLastSyncTemp(const int32_t tempCenti) {
   Preferences prefs;
   if (prefs.begin(NVS_NAMESPACE, false)) {
-    prefs.putFloat(NVS_TEMP_KEY, tempC);
+    prefs.putBytes(NVS_TEMP_KEY, &tempCenti, sizeof(tempCenti));
     prefs.end();
   }
 }
 
-static float nvsReadLastSyncTemp() {
+// 0 when none was ever stored, which callers also read as "unknown" (see restore()).
+static int32_t nvsReadLastSyncTemp() {
   Preferences prefs;
-  float result = 0.0f;
+  int32_t result = 0;
   if (prefs.begin(NVS_NAMESPACE, true)) {
-    result = prefs.getFloat(NVS_TEMP_KEY, 0.0f);
+    result = nvsReadFixed(prefs, NVS_TEMP_KEY, NVS_TEMP_FLOAT_KEY, 100, 0, clock_drift::kTempUnknown);
     prefs.end();
   }
   return result;
@@ -290,7 +305,7 @@ static void applyStoredTimezone() {
 // ---- internal helpers -----------------------------------------------------
 
 static bool initExternalRTC();
-static float readExternalTemp();
+static int32_t readExternalTempCenti();
 
 // The SDK RTC driver. Function-local so it is constructed on first use rather than
 // during static init, where the I2C bus is not up yet. Only reached when
@@ -309,7 +324,8 @@ static bool rtcUsesSdkDriver() {
   return type != BoardConfig::RtcType::None && type != BoardConfig::RtcType::Ds3231;
 }
 
-static float readChipTemperatureC() {
+// Hundredths of a degree C, or clock_drift::kTempUnknown.
+static int32_t readChipTemperatureCenti() {
   // ESP32 and ESP32-C3 use the internal ADC temperature sensor.
   //
   // Specifically Ds3231, not merely "an external RTC is present": the DS3231
@@ -317,9 +333,15 @@ static float readChipTemperatureC() {
   // temperature sensor at all, so widening this with the RTC gate would read a
   // nonexistent register and report noise as the device temperature.
   if (HalCapabilities::rtcType() == BoardConfig::RtcType::Ds3231 && initExternalRTC()) {
-    return readExternalTemp();
+    return readExternalTempCenti();
   }
-  return (float)temperatureRead();
+  // The IDF sensor reports a float (NaN when the read failed). Taken from its bits: the one conversion where it
+  // enters, with no soft-float call.
+  const float celsius = temperatureRead();
+  uint32_t bits = 0;
+  memcpy(&bits, &celsius, sizeof(bits));
+  int32_t centi = 0;
+  return fixedFromFloatBits(bits, 100, centi) ? centi : clock_drift::kTempUnknown;
 }
 
 // ---- New internal helpers for DS3231 ---------------------------------------
@@ -435,22 +457,23 @@ static time_t readExternalRTC() {
   return timegm_compat(&timeinfo);
 }
 
-// Read temperature (Register 0x11)
-static float readExternalTemp() {
+// Read temperature (Register 0x11), in hundredths of a degree: a signed whole degree and quarters in the top two bits
+// of the second byte.
+static int32_t readExternalTempCenti() {
   Wire.beginTransmission(ds3231Address());
   Wire.write(0x11);
   if (Wire.endTransmission() != 0) {
-    return 0.0f;
+    return 0;
   }
 
   int count = Wire.requestFrom(ds3231Address(), (uint8_t)2);
   if (count < 2) {
-    return 0.0f;
+    return 0;
   }
 
   int8_t msb = Wire.read();
   uint8_t lsb = Wire.read();
-  return (float)msb + (lsb >> 6) * 0.25f;
+  return msb * 100 + (lsb >> 6) * 25;
 }
 
 // ----
@@ -476,7 +499,7 @@ static uint32_t computeRtcStateChecksum() {
   hash = fnv1a32Append(hash, &rtcEpoch, sizeof(rtcEpoch));
   hash = fnv1a32Append(hash, &rtcLpTimeUs, sizeof(rtcLpTimeUs));
   hash = fnv1a32Append(hash, &rtcSlowCal, sizeof(rtcSlowCal));
-  hash = fnv1a32Append(hash, &rtcTemperatureC, sizeof(rtcTemperatureC));
+  hash = fnv1a32Append(hash, &rtcTempCenti, sizeof(rtcTempCenti));
   return hash;
 }
 
@@ -491,35 +514,47 @@ static bool rtcStateLooksSane() {
   if (rtcLpTimeUs == 0 || rtcSlowCal == 0) {
     return false;
   }
-  if (!std::isfinite(rtcTemperatureC) || rtcTemperatureC < -80.0f || rtcTemperatureC > 150.0f) {
-    return false;
-  }
-  return true;
+  return clock_drift::temperatureSane(rtcTempCenti);
 }
 
+// Also converts, in place, a snapshot from firmware that kept the temperature as a float.
 static bool rtcValid() {
-  if (rtcClockMagic != CLOCK_RTC_MAGIC) {
+  const bool floatTemp = rtcClockMagic == CLOCK_RTC_MAGIC_FLOAT_TEMP;
+  if (rtcClockMagic != CLOCK_RTC_MAGIC && !floatTemp) {
     return false;
   }
 
-  // Backward compatibility: older firmware snapshots had no checksum.
-  if (rtcStateChecksum == 0) {
-    return rtcStateLooksSane();
+  // Backward compatibility: older firmware snapshots had no checksum. The checksum covers the temperature's four
+  // bytes whatever they hold, so a float snapshot checks before its temperature is converted.
+  if (rtcStateChecksum != 0 && rtcStateChecksum != computeRtcStateChecksum()) {
+    return false;
   }
 
-  if (rtcStateChecksum != computeRtcStateChecksum()) {
-    return false;
+  if (floatTemp) {
+    uint32_t bits = 0;
+    memcpy(&bits, &rtcTempCenti, sizeof(bits));
+    int32_t centi = 0;
+    // NaN or infinity: the float check rejected those too.
+    if (!fixedFromFloatBits(bits, 100, centi)) {
+      return false;
+    }
+    const bool hadChecksum = rtcStateChecksum != 0;
+    rtcTempCenti = centi;
+    rtcClockMagic = CLOCK_RTC_MAGIC;
+    if (hadChecksum) {
+      rtcStateChecksum = computeRtcStateChecksum();
+    }
   }
 
   return rtcStateLooksSane();
 }
 
-/// Compute temperature-corrected elapsed seconds from LP timer delta.
+/// Compute temperature-corrected elapsed microseconds from LP timer delta.
 /// Uses the trapezoidal rule (average of start + end temperature) as a
-/// first-order approximation of the temperature integral over the interval.
-/// Returns the corrected elapsed seconds and updates lpNowOut/calNowOut
-/// for the caller to re-baseline.
-static double computeCorrectedElapsedSec(uint64_t lpNow, float tempNow) {
+/// first-order approximation of the temperature integral over the interval
+/// (clock_drift::ratePpb()). False when either temperature is unknown: there is
+/// no correction to make, as the float model's NaN had none.
+static bool computeCorrectedElapsedUs(uint64_t lpNow, int32_t tempNowCenti, uint64_t& correctedUs) {
   // A plain difference, deliberately not rescaled for a calibration change. esp_clk_rtc_time() is
   // not ticks x current calibration: IDF converts each stretch of ticks with the calibration in
   // force at the time and keeps the running total in RTC memory, and esp_clk_slowclk_cal_set()
@@ -534,33 +569,23 @@ static double computeCorrectedElapsedSec(uint64_t lpNow, float tempNow) {
   // Both callers have already established lpNow > rtcLpTimeUs, so this cannot wrap.
   const uint64_t elapsedUs = lpNow - rtcLpTimeUs;
 
-  // Use the full temperature delta between the average over the interval
-  // and the calibration reference (which is the capture-time temperature).
-  // avgTemp approximates the mean temperature during the interval.
-  // The drift model says the RTC runs (1 + deltaT * driftRate) times
-  // faster/slower than nominal, so the true elapsed wall-clock time
-  // differs from the raw LP-derived time by that factor.
-  float avgTemp = (rtcTemperatureC + tempNow) * 0.5f;
-  // Positive when COOLED DOWN relative to capture temperature.
   // ESP32 RC oscillator has a positive temperature coefficient: it runs faster
   // when hotter, causing the LP timer to over-count. To recover true elapsed
-  // time we must REDUCE the raw LP-derived seconds when the device is warmer
-  // than at capture (and INCREASE them when cooler). Hence the sign inversion.
-  float tempDelta = rtcTemperatureC - avgTemp;  // = (rtcTemperatureC - tempNow) / 2
-  float tempFactor = 1.0f + tempDelta * CLOCK_TEMP_DRIFT_SECONDS_PER_SECOND_PER_DEG * rtcDriftScale;
-  if (tempFactor < 0.5f) {
-    tempFactor = 0.5f;
-  } else if (tempFactor > 1.5f) {
-    tempFactor = 1.5f;
+  // time we must REDUCE the raw LP-derived time when the device is warmer
+  // than at capture (and INCREASE it when cooler): the rate is positive when
+  // it cooled down.
+  if (rtcTempCenti == clock_drift::kTempUnknown || tempNowCenti == clock_drift::kTempUnknown) {
+    LOG_DBG("CLK", "Drift calc: temperature unknown (start %ld, now %ld), raw=%lluus", static_cast<long>(rtcTempCenti),
+            static_cast<long>(tempNowCenti), static_cast<unsigned long long>(elapsedUs));
+    return false;
   }
+  const int32_t ppb = clock_drift::ratePpb(rtcTempCenti, tempNowCenti, rtcDriftScaleMicro);
+  correctedUs = clock_drift::correctedUs(elapsedUs, ppb);
 
-  double elapsedSec = (double)elapsedUs / 1000000.0;
-  double correctedSec = elapsedSec * (double)tempFactor;
-
-  LOG_DBG("CLK", "Drift calc: startT=%.1fC nowT=%.1fC dT=%.3f factor=%.6f raw=%.3fs corr=%.3fs", rtcTemperatureC,
-          tempNow, tempDelta, tempFactor, elapsedSec, correctedSec);
-
-  return correctedSec;
+  LOG_DBG("CLK", "Drift calc: startT=%ld nowT=%ld (0.01C) rate=%ldppb raw=%lluus corr=%lluus",
+          static_cast<long>(rtcTempCenti), static_cast<long>(tempNowCenti), static_cast<long>(ppb),
+          static_cast<unsigned long long>(elapsedUs), static_cast<unsigned long long>(correctedUs));
+  return true;
 }
 
 /// Capture current time + LP timer into RTC memory, and epoch into NVS.
@@ -569,7 +594,7 @@ static void capture(bool lpContinuous) {
   rtcEpoch = time(nullptr);
   rtcLpTimeUs = esp_clk_rtc_time();
   rtcSlowCal = esp_clk_slowclk_cal_get();
-  rtcTemperatureC = readChipTemperatureC();
+  rtcTempCenti = readChipTemperatureCenti();
   rtcClockMagic = CLOCK_RTC_MAGIC;
   rtcClockFlags = lpContinuous ? CLOCK_RTC_FLAG_LP_CONTINUOUS : 0;
   rtcStateChecksum = computeRtcStateChecksum();
@@ -768,7 +793,7 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
 
   time_t preSyncTime = time(nullptr);
   time_t prevSyncTime = nvsReadSyncTime();
-  float prevSyncTemp = nvsReadLastSyncTemp();
+  const int32_t prevSyncTempCenti = nvsReadLastSyncTemp();
 
   const bool havePreferred = (preferredServer != nullptr) && (preferredServer[0] != '\0');
 
@@ -869,7 +894,7 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
   // never once "Restored from RTC + LP timer" across dozens of boots, always "Restored from NVS
   // ... (no elapsed correction)", with the clock visibly stepping backwards over the reboot
   // (13:06:52 -> 13:05:21). The losses compound per reboot and surfaced as a 45%-slow clock
-  // (NTP drift: interval=2689s error=-1217.000s), which in turn drove rtcDriftScale to its 0.1
+  // (NTP drift: interval=2689s error=-1217.000s), which in turn drove the drift scale to its 0.1
   // floor -- the drift learner was measuring reboot count, not temperature.
   capture(true);
   // The hardware RTC is written here and in applyClientTime(), where a new time arrives, and
@@ -885,21 +910,18 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
   nvsWriteSyncTime(rtcEpoch);
   raiseLoanFloor();
 
-  float currentTemp = rtcTemperatureC;
-  if (currentTemp != 0.0f) {
-    nvsWriteLastSyncTemp(currentTemp);
+  const int32_t currentTempCenti = rtcTempCenti;
+  if (currentTempCenti != 0) {
+    nvsWriteLastSyncTemp(currentTempCenti);
   }
 
   if (prevSyncTime > 0 && preSyncTime > 0 && rtcEpoch > prevSyncTime) {
-    float interval = (float)(rtcEpoch - prevSyncTime);
+    const int64_t interval = static_cast<int64_t>(rtcEpoch - prevSyncTime);
     // error = how far the local clock was off before NTP corrected it.
     // Negative means local clock was behind (NTP jumped us forward).
     // Positive means local clock was ahead (NTP pulled us back).
-    float error = (float)(preSyncTime - rtcEpoch);
-    if (interval >= 60.0f) {
-      // Convert to seconds-of-drift per day.
-      float observedDriftPerDay = error * 86400.0f / interval;
-
+    const int64_t error = static_cast<int64_t>(preSyncTime - rtcEpoch);
+    if (interval >= 60) {
       // Adaptive model calibration:
       // - Observed drift is derived from the difference between local clock
       //   reading just before NTP and the true time reported by NTP, scaled
@@ -909,20 +931,12 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
       // - If large enough, compute an empirical scale to apply to the model
       //   so future drift corrections are better aligned with actual hardware.
       // - The scale is persisted to NVS via saveBeforeSleep().
-      float effectiveScale = rtcDriftScale;
-      float tempDelta = currentTemp - prevSyncTemp;
-      if (std::fabs(tempDelta) > 0.1f) {
-        float modelDriftPerDay = 120.0f * tempDelta;
-        if (std::fabs(modelDriftPerDay) > 0.01f) {
-          float measuredScale = observedDriftPerDay / modelDriftPerDay;
-          effectiveScale = 0.9f * rtcDriftScale + 0.1f * measuredScale;
-          effectiveScale = std::max(0.1f, std::min(5.0f, effectiveScale));
-          rtcDriftScale = effectiveScale;
-        }
-      }
+      rtcDriftScaleMicro =
+          clock_drift::learnedScale(rtcDriftScaleMicro, interval, error, prevSyncTempCenti, currentTempCenti);
 
-      LOG_DBG("CLK", "NTP drift: interval=%.0fs error=%.3fs perDay=%.3f scale=%.3f deltaT=%.2f", interval, error,
-              observedDriftPerDay, rtcDriftScale, tempDelta);
+      LOG_DBG("CLK", "NTP drift: interval=%llds error=%llds scale=%ld/1000000 T=%ld->%ld (0.01C)",
+              static_cast<long long>(interval), static_cast<long long>(error), static_cast<long>(rtcDriftScaleMicro),
+              static_cast<long>(prevSyncTempCenti), static_cast<long>(currentTempCenti));
     }
   }
 
@@ -941,9 +955,10 @@ void saveBeforeSleep(bool keepLpAlive) {
   capture(keepLpAlive);
   // Persist learned drift scale and last temperature to NVS so they survive
   // cold boot. We only write here (not periodically) to minimise flash wear.
-  nvsWriteDriftScale(rtcDriftScale);
-  nvsWriteLastSyncTemp(rtcTemperatureC);
-  LOG_DBG("CLK", "Saved epoch %lld before sleep (driftScale=%.3f)", (long long)rtcEpoch, rtcDriftScale);
+  nvsWriteDriftScale(rtcDriftScaleMicro);
+  nvsWriteLastSyncTemp(rtcTempCenti);
+  LOG_DBG("CLK", "Saved epoch %lld before sleep (driftScale=%ld/1000000)", (long long)rtcEpoch,
+          static_cast<long>(rtcDriftScaleMicro));
 }
 
 void restore() {
@@ -963,8 +978,8 @@ void restore() {
       // capture() persisted on the way in is the sleep duration. The marker is
       // zero on any boot that did not follow a sleep (a reflash, a reset), which
       // is what keeps this from reporting time-since-last-sleep instead.
-      const double slept = static_cast<double>(rtcTime - sleepEntryEpoch);
-      if (sleepEntryEpoch > 0 && slept > 0.0 && slept < MAX_PLAUSIBLE_SLEEP_S) {
+      const int64_t slept = static_cast<int64_t>(rtcTime - sleepEntryEpoch);
+      if (sleepEntryEpoch > 0 && slept > 0 && slept < MAX_PLAUSIBLE_SLEEP_S) {
         lastSleepSec = static_cast<uint32_t>(slept);
       }
       setSystemClock(rtcTime);
@@ -976,7 +991,7 @@ void restore() {
     }
   }
 
-  rtcDriftScale = nvsReadDriftScale();
+  rtcDriftScaleMicro = nvsReadDriftScale();
   const bool lpValid = (rtcClockFlags & CLOCK_RTC_FLAG_LP_CONTINUOUS) != 0;
   if (rtcValid() && lpValid) {
     // RTC memory survived — we woke from deep sleep.
@@ -1001,18 +1016,21 @@ void restore() {
     uint64_t lpNow = esp_clk_rtc_time();
     time_t estimated = rtcEpoch;
     if (lpNow > rtcLpTimeUs) {
-      float tempNow = readChipTemperatureC();
-      double correctedSec = computeCorrectedElapsedSec(lpNow, tempNow);
+      const int32_t tempNowCenti = readChipTemperatureCenti();
+      uint64_t correctedUs = 0;
       // Reject obviously bad values from a corrupted RTC snapshot.
       // 157680000 s = 5 years.
-      if (std::isfinite(correctedSec) && correctedSec >= 0.0 && correctedSec <= 157680000.0) {
+      constexpr uint64_t MAX_CORRECTED_US = 157680000ULL * 1000000ULL;
+      if (computeCorrectedElapsedUs(lpNow, tempNowCenti, correctedUs) && correctedUs <= MAX_CORRECTED_US) {
+        const uint64_t correctedSec = correctedUs / 1000000;
         estimated += static_cast<time_t>(correctedSec);
         // The LP timer ran through the sleep, so this correction IS its duration.
-        if (correctedSec < MAX_PLAUSIBLE_SLEEP_S) {
+        if (correctedUs < static_cast<uint64_t>(MAX_PLAUSIBLE_SLEEP_S) * 1000000ULL) {
           lastSleepSec = static_cast<uint32_t>(correctedSec);
         }
       } else {
-        LOG_ERR("CLK", "Discarding implausible LP elapsed time: %.3fs", correctedSec);
+        LOG_ERR("CLK", "Discarding implausible LP elapsed time: %lluus (temperature %ld/100 C)",
+                static_cast<unsigned long long>(correctedUs), static_cast<long>(tempNowCenti));
       }
     } else if (lpNow < rtcLpTimeUs) {
       LOG_ERR("CLK", "LP timer regressed (now=%llu < saved=%llu), using baseline epoch",
@@ -1024,7 +1042,7 @@ void restore() {
     rtcEpoch = estimated;
     rtcLpTimeUs = esp_clk_rtc_time();
     rtcSlowCal = esp_clk_slowclk_cal_get();
-    rtcTemperatureC = readChipTemperatureC();
+    rtcTempCenti = readChipTemperatureCenti();
     rtcStateChecksum = computeRtcStateChecksum();
     clockApproximate = true;
     clockSource = clock_authority::Source::SleepEstimate;
@@ -1057,9 +1075,9 @@ void restore() {
     rtcEpoch = epoch;
     rtcLpTimeUs = esp_clk_rtc_time();
     rtcSlowCal = esp_clk_slowclk_cal_get();
-    rtcTemperatureC = nvsReadLastSyncTemp();
-    if (rtcTemperatureC == 0.0f) {
-      rtcTemperatureC = readChipTemperatureC();
+    rtcTempCenti = nvsReadLastSyncTemp();
+    if (rtcTempCenti == 0) {
+      rtcTempCenti = readChipTemperatureCenti();
     }
     rtcClockMagic = CLOCK_RTC_MAGIC;
     rtcClockFlags = 0;
@@ -1110,29 +1128,35 @@ void updatePeriodic() {
     return;
   }
 
-  float tempNow = readChipTemperatureC();
-  double correctedSec = computeCorrectedElapsedSec(lpNow, tempNow);
+  const int32_t tempNowCenti = readChipTemperatureCenti();
+  uint64_t correctedUs = 0;
+  const bool corrected = computeCorrectedElapsedUs(lpNow, tempNowCenti, correctedUs);
 
-  // Raw elapsed seconds (what the kernel clock already counted).
-  uint64_t rawElapsedUs = lpNow - rtcLpTimeUs;
-  double rawSec = (double)rawElapsedUs / 1000000.0;
-
-  // The drift delta is the difference between what really elapsed
-  // (temperature-corrected) and what the kernel counted (raw).
-  double driftDeltaSec = correctedSec - rawSec;
+  // Raw elapsed time (what the kernel clock already counted).
+  const uint64_t rawElapsedUs = lpNow - rtcLpTimeUs;
 
   // Re-baseline LP timer and temperature for the next interval.
   rtcLpTimeUs = lpNow;
   rtcSlowCal = esp_clk_slowclk_cal_get();
-  rtcTemperatureC = tempNow;
+  rtcTempCenti = tempNowCenti;
+
+  if (!corrected) {
+    return;
+  }
+  // The drift delta is the difference between what really elapsed
+  // (temperature-corrected) and what the kernel counted (raw). Both are under
+  // clock_drift::kMaxElapsedUs, so the difference fits.
+  const int64_t driftDeltaUs = static_cast<int64_t>(correctedUs) - static_cast<int64_t>(rawElapsedUs);
 
   // Only nudge the system clock if the drift delta is meaningful (>50 ms).
   // This avoids unnecessary settimeofday calls for negligible corrections.
-  if (std::fabs(driftDeltaSec) > 0.05) {
-    rtcEpoch = time(nullptr) + (time_t)driftDeltaSec;
+  // The whole seconds of it, truncated toward zero.
+  if (driftDeltaUs > 50000 || driftDeltaUs < -50000) {
+    rtcEpoch = time(nullptr) + static_cast<time_t>(driftDeltaUs / 1000000);
     setSystemClock(rtcEpoch);
-    LOG_DBG("CLK", "Periodic drift nudge: raw=%.3fs corr=%.3fs delta=%.3fs scale=%.3f", rawSec, correctedSec,
-            driftDeltaSec, rtcDriftScale);
+    LOG_DBG("CLK", "Periodic drift nudge: raw=%lluus corr=%lluus delta=%lldus scale=%ld/1000000",
+            static_cast<unsigned long long>(rawElapsedUs), static_cast<unsigned long long>(correctedUs),
+            static_cast<long long>(driftDeltaUs), static_cast<long>(rtcDriftScaleMicro));
   }
 }
 

@@ -59,7 +59,10 @@ bool parseSubscription(const std::string& json, Subscription& out) {
     const JsonVariantConst requireMeta = kv.value()["require_meta"];
     if (!requireMeta.isNull() && !requireMeta.is<const char*>()) continue;
     out.mask |= static_cast<uint8_t>(1u << e);
-    if (kv.value()["connect"].as<bool>()) out.connectMask |= static_cast<uint8_t>(1u << e);
+    // A JSON true, as upstream reads it (`| false`, spelled out for cppcheck's badBitmaskCheck): a number is not one,
+    // where as<bool>() alone compared it to zero in floating point.
+    const JsonVariantConst connect = kv.value()["connect"];
+    if (connect.is<bool>() && connect.as<bool>()) out.connectMask |= static_cast<uint8_t>(1u << e);
     const char* key = requireMeta | "";
     if (key[0] != '\0') out.metaKeyHash[e] = metaKeyHash(key);
   }

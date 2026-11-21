@@ -13,14 +13,13 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <PngToBmpConverter.h>
+#include <SeriesIndex.h>
 #include <SidecarFiles.h>
 #include <Txt.h>
 #include <Xtc.h>
 
 #include <algorithm>
-#include <cerrno>
 #include <cstdlib>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -324,15 +323,8 @@ bool naturalLess(const std::string& str1, const std::string& str2) {
   return *s1 == '\0' && *s2 != '\0';
 }
 
-std::optional<float> parseSeriesIndex(const std::string& rawIndex) {
-  const char* start = rawIndex.c_str();
-  char* end = nullptr;
-  errno = 0;
-  const float value = std::strtof(start, &end);
-  if (end == start || errno == ERANGE) {
-    return std::nullopt;
-  }
-  return value;
+std::optional<SeriesIndex> parseSeriesIndex(const std::string& rawIndex) {
+  return SeriesIndex::parse(rawIndex.c_str());
 }
 
 std::string pathWithFilename(const std::string& directory, const std::string& fileName) {
@@ -376,7 +368,7 @@ std::string findSeriesSequel(const std::string& directory, const std::string& cu
   }
 
   std::string bestPath;
-  float bestIndex = std::numeric_limits<float>::infinity();
+  std::optional<SeriesIndex> bestIndex;
   size_t examined = 0;
 
   root.rewindDirectory();
@@ -422,7 +414,7 @@ std::string findSeriesSequel(const std::string& directory, const std::string& cu
     if (!candidateIndex.has_value() || candidateIndex.value() <= currentIndex.value()) {
       continue;
     }
-    if (candidateIndex.value() < bestIndex) {
+    if (!bestIndex || candidateIndex.value() < *bestIndex) {
       bestIndex = candidateIndex.value();
       bestPath = candidatePath;
     }

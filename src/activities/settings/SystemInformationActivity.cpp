@@ -11,6 +11,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/Logo120.h"
+#include "util/ByteSize.h"
 
 // Set to 1 to add a "Declined" row breaking down why idle light sleep did not
 // happen: the attempt count, then per-guard counters (lock / wifi / usb / front /
@@ -21,31 +22,32 @@
 // that was silently disabling light sleep on X3 (see HalGPIO::isUsbElectricalConnected).
 #define SHOW_SLEEP_DIAGNOSTICS 0
 
-static const char* pickUnit(uint64_t maxBytes, double& outDivisor) {
+// The unit for values up to `maxBytes`, and its size as a shift (byte_size::KB, MB, GB; 0 for bytes).
+static const char* pickUnit(uint64_t maxBytes, unsigned& outShift) {
   if (maxBytes >= 1024ULL * 1024 * 1024) {
-    outDivisor = 1024.0 * 1024.0 * 1024.0;
+    outShift = byte_size::GB;
     return "GB";
   }
   if (maxBytes >= 1024ULL * 1024) {
-    outDivisor = 1024.0 * 1024.0;
+    outShift = byte_size::MB;
     return "MB";
   }
   if (maxBytes >= 1024ULL) {
-    outDivisor = 1024.0;
+    outShift = byte_size::KB;
     return "KB";
   }
-  outDivisor = 1.0;
+  outShift = 0;
   return "B";
 }
 
 static std::string formatBytes(uint64_t bytes) {
-  double div;
-  const char* unit = pickUnit(bytes, div);
+  unsigned shift;
+  const char* unit = pickUnit(bytes, shift);
   char buf[16];
-  if (div == 1.0) {
+  if (shift == 0) {
     snprintf(buf, sizeof(buf), "%llu %s", static_cast<unsigned long long>(bytes), unit);
   } else {
-    snprintf(buf, sizeof(buf), "%.1f %s", bytes / div, unit);
+    byte_size::formatTenths(buf, sizeof(buf), bytes, shift, unit);
   }
   return buf;
 }
@@ -119,14 +121,20 @@ static std::string languageValue() {
 // Format three byte values on a single line sharing one trailing unit. The
 // unit is chosen from the largest of the three so all values fit sensibly.
 static std::string formatBytesTriple(uint64_t a, uint64_t b, uint64_t c) {
-  double div;
-  const char* unit = pickUnit(std::max({a, b, c}), div);
+  unsigned shift;
+  const char* unit = pickUnit(std::max({a, b, c}), shift);
   char buf[48];
-  if (div == 1.0) {
+  if (shift == 0) {
     snprintf(buf, sizeof(buf), "%llu / %llu / %llu %s", static_cast<unsigned long long>(a),
              static_cast<unsigned long long>(b), static_cast<unsigned long long>(c), unit);
   } else {
-    snprintf(buf, sizeof(buf), "%.1f / %.1f / %.1f %s", a / div, b / div, c / div, unit);
+    char ta[16];
+    char tb[16];
+    char tc[16];
+    byte_size::formatTenths(ta, sizeof(ta), a, shift);
+    byte_size::formatTenths(tb, sizeof(tb), b, shift);
+    byte_size::formatTenths(tc, sizeof(tc), c, shift);
+    snprintf(buf, sizeof(buf), "%s / %s / %s %s", ta, tb, tc, unit);
   }
   return buf;
 }

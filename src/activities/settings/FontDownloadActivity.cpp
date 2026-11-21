@@ -21,6 +21,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
+#include "util/ByteSize.h"
 #include "util/FontDownloadRules.h"
 #include "util/FontManifestReader.h"
 
@@ -994,9 +995,9 @@ void FontDownloadActivity::buildScreen(UiScreen& screen) {
 
 void FontDownloadActivity::formatSize(const size_t bytes, char* out, const size_t outSize) {
   if (bytes >= 1024 * 1024) {
-    snprintf(out, outSize, "%.1f MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
+    byte_size::formatTenths(out, outSize, bytes, byte_size::MB, "MB");
   } else if (bytes >= 1024) {
-    snprintf(out, outSize, "%.0f KB", static_cast<double>(bytes) / 1024.0);
+    snprintf(out, outSize, "%llu KB", static_cast<unsigned long long>(byte_size::rounded(bytes, byte_size::KB, 1)));
   } else {
     snprintf(out, outSize, "%zu B", bytes);
   }
@@ -1031,16 +1032,13 @@ void FontDownloadActivity::drawChrome() {
                              std::to_string(currentFileIndex_ + 1) + "/" + std::to_string(currentFileTotal_) + ")";
     renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, statusText.c_str());
 
-    float progress = 0;
-    if (fileTotal_ > 0) {
-      progress = static_cast<float>(fileProgress_) / static_cast<float>(fileTotal_);
-    }
+    const int percent = fileTotal_ > 0 ? static_cast<int>(uint64_t{fileProgress_} * 100 / fileTotal_) : 0;
 
     int barY = centerY + metrics.verticalSpacing;
     GUI.drawProgressBar(
         renderer,
         Rect{metrics.contentSidePadding, barY, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
-        static_cast<int>(progress * 100), 100);
+        percent, 100);
   } else if (state_ == COMPLETE) {
     renderer.drawCenteredText(UI_10_FONT_ID, centerY,
                               completed_ == Completed::Hyphenation ? tr(STR_HYPHENATION_INSTALLED)

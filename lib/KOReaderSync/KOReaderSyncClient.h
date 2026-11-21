@@ -1,4 +1,6 @@
 #pragma once
+#include <Epub/ProgressPpb.h>
+
 #include <optional>
 #include <string>
 
@@ -23,9 +25,10 @@ struct KOReaderMetadata {
  * Progress data from KOReader sync server.
  */
 struct KOReaderProgress {
-  std::string document;                      // Document hash
-  std::string progress;                      // XPath-like progress string; empty: percentage only
-  float percentage = 0.0f;                   // Progress percentage (0.0 to 1.0)
+  std::string document;  // Document hash
+  std::string progress;  // XPath-like progress string; empty: percentage only
+  // The book percentage. nullopt: the record's number is no usable one (an infinity), which compares as unknown.
+  std::optional<ProgressPpb> percentage = ProgressPpb();
   std::string device;                        // Device name
   std::string deviceId;                      // Device ID
   int64_t timestamp = 0;                     // Unix timestamp of last update

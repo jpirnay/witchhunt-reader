@@ -2,6 +2,7 @@
 #include <Epub.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "CrossPointPosition.h"
@@ -11,7 +12,8 @@
  */
 struct KOReaderPosition {
   std::string xpath;  // XPath-like progress string
-  float percentage;   // Progress percentage (0.0 to 1.0)
+  // The book percentage; nullopt when a record's number is no usable one (KOReaderSyncClient.h).
+  std::optional<ProgressPpb> percentage = ProgressPpb();
 };
 
 /**
@@ -70,7 +72,7 @@ class ProgressMapper {
    * The book percentage of a page, in the units an upload carries (XHTML bytes). What toKOReader
    * reports, without the XPath and the chapter scan behind it.
    */
-  static float percentageFor(const std::shared_ptr<Epub>& epub, int spineIndex, int pageNumber, int totalPages);
+  static ProgressPpb percentageFor(const std::shared_ptr<Epub>& epub, int spineIndex, int pageNumber, int totalPages);
 
  private:
   /**

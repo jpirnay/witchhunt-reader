@@ -113,7 +113,7 @@ void EpubNavigationTarget::resolveInto(Section& sec, int spineIndex) const {
 
     case Kind::Percent: {
       if (sec.pageCount > 0) {
-        int newPage = static_cast<int>(spineProgress * static_cast<float>(sec.pageCount));
+        int newPage = static_cast<int>(ProgressPpb(spineProgress).partOf(sec.pageCount));
         if (newPage >= sec.pageCount) newPage = sec.pageCount - 1;
         sec.currentPage = newPage;
       }
@@ -136,8 +136,7 @@ void EpubNavigationTarget::resolveInto(Section& sec, int spineIndex) const {
   // the section's current page count (reflow / different spine entirely), rescale
   // the estimate proportionally before clamping.
   if (isEstimate && cachedPageCount > 0 && cachedSpineIdx == spineIndex && sec.pageCount != cachedPageCount) {
-    const float progress = static_cast<float>(sec.currentPage) / static_cast<float>(cachedPageCount);
-    sec.currentPage = static_cast<int>(progress * static_cast<float>(sec.pageCount));
+    sec.currentPage = static_cast<int>(static_cast<int64_t>(sec.currentPage) * sec.pageCount / cachedPageCount);
   }
 
   // Safety clamp for all paths — a LUT-derived page is also defensively clamped in

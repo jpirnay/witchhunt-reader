@@ -23,6 +23,7 @@
 
 namespace {
 
+using BookProgressPresentation::formatPagesPerMinute;
 using BookProgressPresentation::formatReadingDuration;
 
 // "today", "yesterday", "N days ago", or "YYYY-MM-DD" beyond a month.
@@ -32,16 +33,6 @@ std::string formatDateOrRelative(time_t epoch) {
   // saying out loud in a table of dates, where on the home screen it is worth saying nothing.
   const std::string relative = BookProgressPresentation::formatLastRead(epoch);
   return relative.empty() ? std::string(tr(STR_READING_STATS_UNKNOWN)) : relative;
-}
-
-std::string formatPagesPerMin(uint32_t pages, uint32_t seconds) {
-  if (seconds < 60 || pages == 0) {
-    return tr(STR_READING_STATS_UNKNOWN);
-  }
-  const float ppm = (pages * 60.0f) / seconds;
-  char buf[16];
-  snprintf(buf, sizeof(buf), "%.1f", ppm);
-  return buf;
 }
 
 uint32_t secondsForDayIn(const std::vector<DayBucket>& days, uint16_t dayIndex) {
@@ -162,15 +153,15 @@ void ReadingStatsBookDetailActivity::render(RenderLock&&) {
     // ---- Time card ----
     layout.card(tr(STR_READING_STATS_TOTAL_TIME), [&](CardLayout::Body& b) {
       b.rowLR(tr(STR_READING_STATS_TOTAL_TIME), formatReadingDuration(book->totalSeconds));
-      b.rowLR(tr(STR_READING_STATS_PAGES_PER_MIN), formatPagesPerMin(book->pagesTurned, book->totalSeconds));
+      b.rowLR(tr(STR_READING_STATS_PAGES_PER_MIN), formatPagesPerMinute(book->pagesTurned, book->totalSeconds));
       // Time-to-finish estimate based on the user's pace. We display it on the
       // detail screen so the reader sees the projection even when not actively
       // reading the book; the reader's status bar can pick this up live.
       if (book->progress < 100) {
-        const float remainingPercent = 100.0f - static_cast<float>(book->progress);
-        const float own = ReadingStatsStore::ownSecondsPerPercent(book->totalSeconds, book->progress);
+        const ReadingStatsStore::SecondsPerPercent own =
+            ReadingStatsStore::ownSecondsPerPercent(book->totalSeconds, book->progress);
         const uint32_t etaSeconds =
-            ReadingStatsStore::etaSeconds(own > 0.0f ? own : query_.pooledPace, remainingPercent);
+            ReadingStatsStore::etaSeconds(own.known() ? own : query_.pooledPace, 100 - book->progress);
         b.rowLR(tr(STR_READING_STATS_ETA),
                 etaSeconds > 0 ? formatReadingDuration(etaSeconds) : std::string(tr(STR_READING_STATS_UNKNOWN)));
       }

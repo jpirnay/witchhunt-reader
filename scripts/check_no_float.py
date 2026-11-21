@@ -51,6 +51,52 @@ FLOAT_FREE = [
     "src/components/themes/lyra/Lyra3CoversTheme.cpp",
     "src/components/themes/lyra/LyraCarouselTheme.cpp",
     "src/components/themes/lyra/LyraTheme.cpp",
+    # Progress and sync (integer-maths area 4): progress in billionths (lib/Epub/Epub/ProgressPpb.h).
+    # KOReaderSyncClient.cpp and KOReaderAutoSync.cpp stay out: ArduinoJson's float parsing and writing is inlined
+    # into them.
+    "lib/Epub/Epub.cpp",
+    "lib/KOReaderSync/ChapterXPathForwardMapper.cpp",
+    "lib/KOReaderSync/ChapterXPathIndexer.cpp",
+    "lib/KOReaderSync/ChapterXPathReverseMapper.cpp",
+    "lib/KOReaderSync/ProgressComparison.cpp",
+    "lib/KOReaderSync/ProgressMapper.cpp",
+    "lib/LibraryIndex/LibraryOrder.cpp",
+    "src/ReadingStats.cpp",
+    "src/StarAnchoring.cpp",
+    "src/activities/boot_sleep/SleepActivity.cpp",
+    "src/activities/reader/BookSearchActivity.cpp",
+    "src/activities/reader/EpubNavigationTarget.cpp",
+    "src/activities/reader/EpubReaderAutoSync.cpp",
+    "src/activities/reader/FinishedBookActivity.cpp",
+    "src/activities/reader/KOReaderSyncActivity.cpp",
+    "src/activities/reader/MdReaderActivity.cpp",
+    "src/activities/reader/TxtReaderActivity.cpp",
+    "src/activities/settings/ReadingStatsActivity.cpp",
+    "src/activities/settings/ReadingStatsBookDetailActivity.cpp",
+    "src/components/BookProgressPresentation.cpp",
+    # UI screens (area 6): sizes in tenths (src/util/ByteSize.h), the weather in integer units
+    # (lib/Weather/WeatherUnits.h). WeatherClient, WeatherSettingsStore, PluginEventCore and the web server read JSON:
+    # their objects hold ArduinoJson's number conversions, float included.
+    "lib/Serialization/FixedDecimal.cpp",
+    "lib/Weather/WeatherIcons.cpp",
+    "src/FlashLayoutNotice.cpp",
+    "src/activities/home/BookInfoActivity.cpp",
+    "src/activities/settings/FontDownloadActivity.cpp",
+    "src/activities/settings/OtaUpdateActivity.cpp",
+    "src/activities/settings/SystemInformationActivity.cpp",
+    "src/activities/weather/",
+    "src/components/themes/BaseTheme.cpp",
+    "src/util/ByteSize.cpp",
+    # Clock and sensors (area 5): drift in ppb and millionths, temperatures in hundredths of a degree
+    # (lib/hal/ClockDrift.h), IMU samples in mg and mdps, the battery divider in thousandths.
+    "lib/hal/HalClock.cpp",
+    "lib/hal/HalTiltSensor.cpp",
+    "lib/hal/OrientationTracker.cpp",
+    "src/SerialTestApi.cpp",
+    "src/activities/settings/SyncTimeActivity.cpp",
+    "src/util/DecimalFormat.cpp",
+    "freeink-sdk/libs/hardware/BatteryMonitor/src/BatteryMonitor.cpp",
+    "freeink-sdk/libs/hardware/Imu/src/Imu.cpp",
     # Text scale (integer-maths area 2): TextScale, 2^-20ths in fixed point (lib/EpdFont/TextScale.h).
     "lib/EpdFont/EpdFont.cpp",
     "lib/EpdFont/FontDecompressor.cpp",
@@ -77,7 +123,11 @@ FLOAT_FREE = [
 
 def object_suffix(source):
     """How the object built from `source` ends: PlatformIO builds lib/<Name>/x.cpp to lib<hash>/<Name>/x.cpp.o
-    and src/x.cpp to src/x.cpp.o under the build directory."""
+    and src/x.cpp to src/x.cpp.o under the build directory. An SDK library, freeink-sdk/libs/<group>/<Name>/src/x.cpp,
+    builds like one of lib/: to lib<hash>/<Name>/x.cpp.o, without its group or src/ folder."""
+    if source.startswith("freeink-sdk/libs/"):
+        name, _, rest = source[len("freeink-sdk/libs/") :].partition("/")[2].partition("/")
+        return "/" + name + "/" + (rest[len("src/") :] if rest.startswith("src/") else rest)
     return "/" + (source[len("lib/") :] if source.startswith("lib/") else source)
 
 

@@ -587,8 +587,8 @@ uint8_t epubProgressPercentByte(const Epub& epub, const int spineIndex, const in
   if (pageCount <= 0) {
     return 0;
   }
-  const float chapterProgress = static_cast<float>(currentPage) / static_cast<float>(pageCount);
-  return ReaderUtils::fractionProgressPercentByte(epub.calculateProgress(spineIndex, chapterProgress));
+  return ReaderUtils::fractionProgressPercentByte(
+      epub.calculateProgress(spineIndex, ProgressPpb::of(currentPage, pageCount)));
 }
 
 int clampPercent(int percent) {
@@ -3239,7 +3239,7 @@ bool EpubReaderActivity::runBuildPageGrayRedraw(const BuildPageOnScreen& shown) 
 // within that spine so we can jump after the section is loaded.
 void EpubReaderActivity::jumpToPercent(const int percent) {
   int targetSpineIndex = 0;
-  float spineProgress = 0.0f;
+  ProgressPpb spineProgress;
   if (!resolvePercent(percent, targetSpineIndex, spineProgress)) {
     return;
   }
@@ -3253,7 +3253,7 @@ void EpubReaderActivity::jumpToPercent(const int percent) {
   }
 }
 
-bool EpubReaderActivity::resolvePercent(int percent, int& targetSpineIndex, float& spineProgress) const {
+bool EpubReaderActivity::resolvePercent(int percent, int& targetSpineIndex, ProgressPpb& spineProgress) const {
   if (!epub) {
     return false;
   }
@@ -3287,12 +3287,7 @@ bool EpubReaderActivity::resolvePercent(int percent, int& targetSpineIndex, floa
 
   const size_t cumulative = epub->getCumulativeSpineItemSize(targetSpineIndex);
   const size_t spineSize = (cumulative > prevCumulative) ? (cumulative - prevCumulative) : 0;
-  spineProgress =
-      (spineSize == 0) ? 0.0f : static_cast<float>(targetSize - prevCumulative) / static_cast<float>(spineSize);
-  if (spineProgress < 0.0f)
-    spineProgress = 0.0f;
-  else if (spineProgress > 1.0f)
-    spineProgress = 1.0f;
+  spineProgress = targetSize > prevCumulative ? ProgressPpb::of(targetSize - prevCumulative, spineSize) : ProgressPpb();
   return true;
 }
 
@@ -3410,16 +3405,15 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::GO_TO_PERCENT: {
-      float bookProgress = 0.0f;
+      ProgressPpb bookProgress;
       {
         RenderLock lock(*this);
         if (epub && epub->getBookSize() > 0 && section && section->pageCount > 0) {
-          const float chapterProgress =
-              static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
-          bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+          bookProgress =
+              epub->calculateProgress(currentSpineIndex, ProgressPpb::of(section->currentPage, section->pageCount));
         }
       }
-      const int initialPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
+      const int initialPercent = clampPercent(bookProgress.percentHalfUp());
       startActivityForResult(std::make_unique<EpubReaderPercentSelectionActivity>(renderer, mappedInput, initialPercent,
                                                                                   pageProgressionRtl_.load()),
                              [this](const ActivityResult& result) {
@@ -3726,9 +3720,10 @@ void EpubReaderActivity::applyPendingPercentJump() {
     return;
   }
   int spine = 0;
-  float progress = 0.0f;
+  ProgressPpb progress;
   if (resolvePercent(jump.percent, spine, progress)) {
-    LOG_DBG("ERS", "Applying pending percent jump: %d%% -> spine=%d at %.3f", jump.percent, spine, progress);
+    LOG_DBG("ERS", "Applying pending percent jump: %d%% -> spine=%d at %lu ppb", jump.percent, spine,
+            static_cast<unsigned long>(progress.ppb()));
     currentSpineIndex = spine;
     navTarget = NavigationTarget::makePercent(progress);
   }
@@ -6652,11 +6647,11 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
     // last page), read only while a plugin subscribes.
     if (plugin_events::reader::tracking()) {
       const bool lastPage = spineIndex + 1 >= epub->getSpineItemsCount() && currentPage + 1 >= pageCount;
-      const float top = epub->calculateProgress(spineIndex, static_cast<float>(currentPage) / pageCount);
-      const float bottom = epub->calculateProgress(spineIndex, static_cast<float>(currentPage + 1) / pageCount);
+      const ProgressPpb top = epub->calculateProgress(spineIndex, ProgressPpb::of(currentPage, pageCount));
+      const ProgressPpb bottom = epub->calculateProgress(spineIndex, ProgressPpb::of(currentPage + 1, pageCount));
       plugin_events::reader::shown((static_cast<uint32_t>(spineIndex) << 16) | static_cast<uint16_t>(currentPage),
-                                   static_cast<int>(top * 10000.0f),
-                                   lastPage ? 100 : std::min(99, static_cast<int>(bottom * 100.0f)));
+                                   static_cast<int>(top.basisPoints()),
+                                   lastPage ? 100 : std::min(99, bottom.percentFloor()));
     }
   }
   LOG_DBG("ERS", "Progress saved: Chapter %d, Page %d (%d%%)", spineIndex, currentPage, percent);
@@ -7719,7 +7714,7 @@ void EpubReaderActivity::appendDebugState(std::string& out) const {
   const ChapterPageSpan::Display chapter = chapterPageDisplay();
   snprintf(number, sizeof(number), "%d/%d%s", chapter.page, chapter.total, chapter.approximate ? "~" : "");
   appendField(out, "chapter_page", number);
-  snprintf(number, sizeof(number), "%.0f", statusBarBookPercent());
+  snprintf(number, sizeof(number), "%d", statusBarBookProgress().percentHalfEven());
   appendField(out, "percent", number);
   const FlowContext flow = section->flowContext();
   appendField(out, "flow", flow.vertical ? "vertical-rl" : "horizontal");
@@ -7839,7 +7834,7 @@ void EpubReaderActivity::restoreCurrentPageToBufferIfPreRendered() {
   usePreRenderedBuffer = false;
 }
 
-float EpubReaderActivity::statusBarBookPercent() const {
+ProgressPpb EpubReaderActivity::statusBarBookProgress() const {
   // Calculate progress in book. During an active section build pageCount only reflects pages
   // built so far, not the final chapter length, so show a byte-based estimate ("page X of ~Y")
   // instead of the misleading watermark. estimatedTotalPages() returns 0 while it's still too
@@ -7847,9 +7842,7 @@ float EpubReaderActivity::statusBarBookPercent() const {
   const bool building = section->hasActiveBuild();
   const int currentPage = section->currentPage + 1;
   const int displayPageCount = building ? section->estimatedTotalPages() : section->pageCount;
-  const float pageCount = static_cast<float>(displayPageCount);
-  const float sectionChapterProg = (pageCount > 0) ? (static_cast<float>(currentPage) / pageCount) : 0;
-  return epub->calculateProgress(currentSpineIndex, sectionChapterProg) * 100;
+  return epub->calculateProgress(currentSpineIndex, ProgressPpb::of(currentPage, displayPageCount));
 }
 
 std::string EpubReaderActivity::chapterTitle() const {
@@ -7861,7 +7854,7 @@ std::string EpubReaderActivity::chapterTitle() const {
 
 void EpubReaderActivity::renderStatusBar() const {
   const int currentPage = section->currentPage + 1;
-  const float bookProgress = statusBarBookPercent();
+  const ProgressPpb bookProgress = statusBarBookProgress();
   // The page counter and the chapter progress bar count the whole TOC chapter, which can span
   // several spine items (#325). The book percentage above stays per spine.
   const ChapterPageSpan::Display chapter = chapterPageDisplay();
@@ -8688,19 +8681,19 @@ void EpubReaderActivity::openReaderMenu() {
 
   int currentPage = 0;
   int totalPages = 0;
-  float bookProgress = 0.0f;
+  ProgressPpb bookProgress;
   bool isCurrentPageStarred = false;
   {
     RenderLock lock(*this);
     currentPage = section ? section->currentPage + 1 : 0;
     totalPages = section ? section->pageCount : 0;
     if (epub->getBookSize() > 0 && section && section->pageCount > 0) {
-      const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
-      bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+      bookProgress =
+          epub->calculateProgress(currentSpineIndex, ProgressPpb::of(section->currentPage, section->pageCount));
     }
     isCurrentPageStarred = pageStarred();
   }
-  const int bookProgressPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
+  const int bookProgressPercent = clampPercent(bookProgress.percentHalfUp());
 
   // Show the "Go to printed page" item only when this book has at least one integer-labelled
   // entry in pagelist.bin. Roman-only or empty page lists are excluded — the numeric input
@@ -8813,7 +8806,7 @@ void EpubReaderActivity::openReaderBars() {
         info.chapterValue =
             std::to_string(chapter.page) + (chapter.approximate ? " / ~" : " / ") + std::to_string(chapter.total);
       }
-      info.bookValue = std::to_string(clampPercent(static_cast<int>(statusBarBookPercent() + 0.5f))) + "%";
+      info.bookValue = std::to_string(clampPercent(statusBarBookProgress().percentHalfUp())) + "%";
     }
   }
   // The Layout tab: the values as the book is read and as the settings have them, and the sizes of its font.

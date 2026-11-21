@@ -38,7 +38,8 @@ via a KOReader contributor mapping spine items to DocFragment numbers.
 Implemented in `ProgressMapper::toKOReader`.
 
 1. Compute overall `percentage` from chapter/page (`Epub::calculateProgress`, with intra-spine
-   progress `page / (pageCount - 1)`).
+   progress `page / (pageCount - 1)`). Progress is a `ProgressPpb` (billionths, no floating point); the
+   upload writes the six decimals ArduinoJson wrote for the float it used to be (`KOReaderJsonNumber.h`).
 2. Take the page's content offset from the section cache (`Section::getVisibleTextOffsetForPage`:
    where the page's first text starts, in visible bytes, in the chapter's text) and name that text with
    `ChapterXPathIndexer::findXPathForVisibleOffset`: one streamed pass over the spine XHTML (a second, inclusive pass only when the page starts at the chapter's total, to name the end of the last text),
