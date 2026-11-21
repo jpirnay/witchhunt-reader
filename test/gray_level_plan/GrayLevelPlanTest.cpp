@@ -28,12 +28,19 @@ gray_levels::Plan sixteenLevelPlan() {
 }
 
 // Mean L* the inks of one 8x8 dither tile land at.
-float tileLightness(const GrayLevelQuantizer& q, const uint8_t* lightness, const uint8_t gray) {
+double tileLightness(const GrayLevelQuantizer& q, const uint8_t* lightness, const uint8_t gray) {
   int sum = 0;
   for (unsigned y = 0; y < 8; ++y) {
     for (unsigned x = 0; x < 8; ++x) sum += lightness[q.ink(gray, x, y)];
   }
-  return static_cast<float>(sum) / 64.0f;
+  return sum / 64.0;
+}
+
+// CIE L* (0..100) of an sRGB gray, in double on the host: what the quantizer's integer table must hold.
+double referenceLightness(const int gray) {
+  const double c = gray / 255.0;
+  const double y = c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
+  return y > 216.0 / 24389.0 ? 116.0 * std::cbrt(y) - 16.0 : 24389.0 / 27.0 * y;
 }
 
 TEST(GrayLevelPlane, MaskBitPerInkAndInversion) {
@@ -136,29 +143,45 @@ TEST(GrayLevelQuantizer, UsesOnlyNeighbouringInks) {
   }
 }
 
-// A darker gray never comes out lighter, and the tile's average lands where the gray's L*, stretched onto the
-// panel's range, asks: within the step a 64-threshold tile can resolve.
+// A darker gray never comes out lighter, and the tile's average lands where the gray's exact L*, stretched onto the
+// panel's range, asks: within one of the tile's 64 thresholds of the widest gap between neighbouring inks. The
+// integer setup rounds twice (target and share), which this bound has room for even with inks one L* apart.
 TEST(GrayLevelQuantizer, TileAverageFollowsTheTarget) {
-  GrayLevelQuantizer q;
-  ASSERT_TRUE(q.init(kPiccoLightness, 16));
-  const float white = kPiccoLightness[0];
-  const float black = kPiccoLightness[15];
-  float previous = 1000.0f;
-  for (int gray = 255; gray >= 0; --gray) {
-    const float mean = tileLightness(q, kPiccoLightness, static_cast<uint8_t>(gray));
-    EXPECT_LE(mean, previous + 1e-3f) << "gray " << gray;
-    previous = mean;
-    const float target = black + (white - black) * GrayLevelQuantizer::lightnessOf(gray) / 100.0f;
-    // Widest gap between neighbouring inks is 11 L* (100 -> 89): one threshold of 64 is ~0.2 L*.
-    EXPECT_NEAR(mean, target, 0.5f) << "gray " << gray;
+  constexpr uint8_t kWide[4] = {95, 70, 40, 12};
+  constexpr uint8_t kCrowded[16] = {100, 99, 98, 97, 96, 95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85};
+  struct Inks {
+    const uint8_t* lightness;
+    uint8_t levels;
+  };
+  for (const Inks& inks : {Inks{kPiccoLightness, 16}, Inks{kWide, 4}, Inks{kCrowded, 16}}) {
+    GrayLevelQuantizer q;
+    ASSERT_TRUE(q.init(inks.lightness, inks.levels));
+    const double white = inks.lightness[0];
+    const double black = inks.lightness[inks.levels - 1];
+    int widest = 0;
+    for (uint8_t i = 1; i < inks.levels; ++i) widest = std::max(widest, inks.lightness[i - 1] - inks.lightness[i]);
+    const double tolerance = widest / 64.0 + 0.02;
+    double previous = 1000.0;
+    for (int gray = 255; gray >= 0; --gray) {
+      const double mean = tileLightness(q, inks.lightness, static_cast<uint8_t>(gray));
+      EXPECT_LE(mean, previous + 1e-9) << int(inks.levels) << " levels, gray " << gray;
+      previous = mean;
+      const double target = black + (white - black) * referenceLightness(gray) / 100.0;
+      EXPECT_NEAR(mean, target, tolerance) << int(inks.levels) << " levels, gray " << gray;
+    }
   }
 }
 
-TEST(GrayLevelQuantizer, LightnessOfSrgbGray) {
-  EXPECT_NEAR(GrayLevelQuantizer::lightnessOf(0), 0.0f, 1e-4f);
-  EXPECT_NEAR(GrayLevelQuantizer::lightnessOf(255), 100.0f, 1e-3f);
+TEST(GrayLevelQuantizer, LightnessTableMatchesTheFormula) {
+  for (int gray = 0; gray < 256; ++gray) {
+    EXPECT_EQ(GrayLevelQuantizer::lightnessCenti(static_cast<uint8_t>(gray)),
+              std::lround(referenceLightness(gray) * 100.0))
+        << "gray " << gray;
+  }
+  EXPECT_EQ(GrayLevelQuantizer::lightnessCenti(0), 0);
+  EXPECT_EQ(GrayLevelQuantizer::lightnessCenti(255), 10000);
   // sRGB 119 is the classic middle gray, L* ~50.
-  EXPECT_NEAR(GrayLevelQuantizer::lightnessOf(119), 50.0f, 0.5f);
+  EXPECT_NEAR(GrayLevelQuantizer::lightnessCenti(119), 5000, 50);
 }
 
 }  // namespace

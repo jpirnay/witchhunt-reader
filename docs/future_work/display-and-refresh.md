@@ -497,8 +497,10 @@ The C3 boards have no memory for a canvas, so #220's shape is described as data 
 each plane from the cover again (`GrayLevelQuantizer`, an ordered dither against the panel's measured L*, so every
 read gives a pixel the same ink), and lends the secondary buffer to fill both planes of a pass in one read where the
 cover is already built. `HalDisplay::grayLevelPlan()` is nullptr on every board, so nothing changes on a device yet,
-and `HalDisplay::kMayRunGrayLevelPlan` (false) compiles the path out: about 7.7 KB of C3 flash, most of it the
-quantizer's soft-float setup, of which about 0.85 KB stays (stubs, the drawBitmap branch, the canvas fallback).
+and `HalDisplay::kMayRunGrayLevelPlan` (false) compiles the path out. Over master that costs about 0.85 KB of C3
+flash (stubs, the drawBitmap branch, the canvas fallback); compiled in, about 3.9 KB. The quantizer is integer only (an
+sRGB -> L* table, setup in hundredths of L*): its first, float version pulled soft-float `pow` and `cbrt` into the C3
+image, about 3.8 KB more.
 
 **Open.**
 - X3: port #220's 16-gray into our UC8253 driver, answer `grayLevelPlan()` from its masks (`freeink::gray16`) and an
