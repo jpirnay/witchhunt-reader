@@ -5,6 +5,7 @@
 
 #include <string>
 
+#include "KOReaderJsonNumber.h"
 #include "KOReaderSyncClient.h"
 
 // What a 2xx reply to GET /syncs/progress/<document> says, given a body that is not empty: OK with
@@ -47,11 +48,14 @@ inline KOReaderSyncClient::Error parseProgressReply(const std::string& body, con
 
   outProgress.document = documentHash;
   outProgress.progress = progress;
-  outProgress.percentage = doc["percentage"].as<float>();
+  // ArduinoJson parses the number into a float; it becomes billionths here, once.
+  outProgress.percentage = progressFromJsonFloat(doc["percentage"].as<float>());
   outProgress.device = doc["device"] | "";
   outProgress.deviceId = doc["device_id"] | "";
   outProgress.timestamp = doc["timestamp"].as<int64_t>();
 
-  LOG_INF("KOSync", "Got progress: %.2f%% at %s", outProgress.percentage * 100, outProgress.progress.c_str());
+  const uint32_t basisPoints = outProgress.percentage ? outProgress.percentage->basisPoints() : 0;
+  LOG_INF("KOSync", "Got progress: %u.%02u%% at %s", static_cast<unsigned>(basisPoints / 100),
+          static_cast<unsigned>(basisPoints % 100), outProgress.progress.c_str());
   return KOReaderSyncClient::OK;
 }

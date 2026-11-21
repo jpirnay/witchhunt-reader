@@ -9,6 +9,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <ImageScale.h>
 #include <Memory.h>
 #include <PngStreamDecoder.h>
 #include <Serialization.h>
@@ -33,6 +34,7 @@
 #include "fontIds.h"
 #include "images/Logo120.h"
 #include "images/MoonIcon.h"
+#include "util/PrintfDouble.h"
 
 namespace {
 
@@ -218,12 +220,10 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   ImageDimensions srcDims{};
   if (!cachePath.empty() && PngToFramebufferConverter::getDimensionsStatic(filename, srcDims) && srcDims.width > 0 &&
       srcDims.height > 0) {
-    const float scaleX = static_cast<float>(pageWidth) / srcDims.width;
-    const float scaleY = static_cast<float>(pageHeight) / srcDims.height;
-    float scale = (scaleX < scaleY) ? scaleX : scaleY;
-    if (scale > 1.0f) scale = 1.0f;
-    cacheW = std::max(1, static_cast<int>(srcDims.width * scale));
-    cacheH = std::max(1, static_cast<int>(srcDims.height * scale));
+    const ImageScale scale =
+        ImageScale::smaller(ImageScale::fit(srcDims.width, srcDims.height, pageWidth, pageHeight), ImageScale());
+    cacheW = std::max(1, scale.apply(srcDims.width));
+    cacheH = std::max(1, scale.apply(srcDims.height));
     // The decoder draws at config.x/config.y (0,0 here) and caches with that same
     // origin, so the replay must not re-centre or the image would shift.
     cacheX = config.x;
@@ -665,10 +665,11 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
           uint32_t currentPage = static_cast<uint32_t>(data[0]) | (static_cast<uint32_t>(data[1]) << 8) |
                                  (static_cast<uint32_t>(data[2]) << 16) | (static_cast<uint32_t>(data[3]) << 24);
           uint32_t totalPages = xtc.getPageCount();
-          float progress = xtc.calculateProgress(currentPage) * 100.0f;
+          // Already a whole percent (Xtc::calculateProgress), not a fraction.
+          const uint8_t percent = xtc.calculateProgress(currentPage);
           char buf[64];
           snprintf(buf, sizeof(buf), tr(STR_OVERLAY_READING_PROGRESS), (unsigned long)currentPage + 1, totalPages,
-                   progress);
+                   printfDouble(percent));
           info.progressText = buf;
         }
         f.close();
@@ -702,10 +703,10 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
           }
 
           if (totalPages > 0) {
-            float progress = (currentPage + 1) * 100.0f / totalPages;
+            const int percent = ProgressPpb::of(currentPage + 1, totalPages).percentHalfEven();
             char buf[64];
             snprintf(buf, sizeof(buf), tr(STR_OVERLAY_READING_PROGRESS), (unsigned long)currentPage + 1, totalPages,
-                     progress);
+                     printfDouble(percent));
             info.progressText = buf;
           } else {
             char buf[64];
@@ -732,8 +733,9 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
           const int currentPage = record->page;
           const int pageCount = record->pageCount;
           if (pageCount > 0) {
-            float chapterProgress = static_cast<float>(currentPage) / static_cast<float>(pageCount);
-            float bookProgress = epub.calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+            // Rounded as the "%.0f" of the translated strings below rounded the float it was.
+            const double bookPercent = printfDouble(
+                epub.calculateProgress(currentSpineIndex, ProgressPpb::of(currentPage, pageCount)).percentHalfEven());
 
             // The reader records what its status bar showed when it closed the book: the page within
             // the whole TOC chapter (#325) and the printed page. Records without it (older ones, a
@@ -759,13 +761,13 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
               const int chapterTotal = shownChapter ? shown->chapterTotal : pageCount;
               char suffix[64];
               snprintf(suffix, sizeof(suffix), tr(STR_OVERLAY_CHAPTER_PAGE_SUFFIX), chapterPage, chapterTotal,
-                       bookProgress);
+                       bookPercent);
               info.progressSuffix = printedPagePrefix + suffix;
               info.progressText = info.chapterName + info.progressSuffix;
             } else {
               char buf[80];
               snprintf(buf, sizeof(buf), tr(STR_OVERLAY_READING_PROGRESS), (unsigned long)currentPage + 1,
-                       (unsigned)pageCount, bookProgress);
+                       (unsigned)pageCount, bookPercent);
               info.progressText = printedPagePrefix + buf;
             }
           } else {
@@ -1173,15 +1175,10 @@ void SleepActivity::renderOverlaySleepScreen() const {
     }
 
     const int srcW = static_cast<int>(info.width), srcH = static_cast<int>(info.height);
-    float yScale = 1.0f;
-    int dstW = srcW, dstH = srcH;
-    if (srcW > pageWidth || srcH > pageHeight) {
-      const float scaleX = (float)pageWidth / srcW, scaleY = (float)pageHeight / srcH;
-      const float scale = (scaleX < scaleY) ? scaleX : scaleY;
-      dstW = (int)(srcW * scale);
-      dstH = (int)(srcH * scale);
-      yScale = (float)dstH / srcH;
-    }
+    // Fit the page, never up. Rows map by dstH / srcH, the scale the height actually got.
+    const ImageScale fit = ImageScale::smaller(ImageScale::fit(srcW, srcH, pageWidth, pageHeight), ImageScale());
+    const int dstW = fit.apply(srcW), dstH = fit.apply(srcH);
+    const ImageScale yScale(dstH, srcH);
     const int dstX = (pageWidth - dstW) / 2;
     const int dstY = (pageHeight - dstH) / 2;
 
@@ -1201,7 +1198,7 @@ void SleepActivity::renderOverlaySleepScreen() const {
         ok = false;
         break;
       }
-      const int destY = dstY + (int)(srcY * yScale);
+      const int destY = dstY + yScale.apply(srcY);
       if (destY == lastDstY) continue;  // skip duplicate rows from Y scaling
       lastDstY = destY;
       if (destY < 0 || destY >= pageHeight) continue;

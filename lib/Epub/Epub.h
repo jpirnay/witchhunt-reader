@@ -16,6 +16,7 @@
 
 #include "Epub/BookMetadataCache.h"
 #include "Epub/EpubImageManifest.h"
+#include "Epub/ProgressPpb.h"
 #include "Epub/ThumbResult.h"
 #include "Epub/TocReliability.h"
 #include "Epub/css/CssParser.h"
@@ -449,7 +450,9 @@ class Epub {
   int getLargestSpineIndex() const;
 
   size_t getBookSize() const;
-  float calculateProgress(int currentSpineIndex, float currentSpineRead) const;
+  // How far through the book a point `inSpine` of the way through spine item `currentSpineIndex` lies, weighed by
+  // the items' inflated bytes.
+  ProgressPpb calculateProgress(int currentSpineIndex, ProgressPpb inSpine) const;
   CssParser* getCssParser() const { return cssParser.get(); }
   // Load (or build) the image manifest. Call after load() when images will be rendered.
   // Skipping this is valid for text-only or placeholder rendering modes.
