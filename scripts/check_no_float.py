@@ -51,6 +51,11 @@ FLOAT_FREE = [
     "src/components/themes/lyra/Lyra3CoversTheme.cpp",
     "src/components/themes/lyra/LyraCarouselTheme.cpp",
     "src/components/themes/lyra/LyraTheme.cpp",
+    # Clock and sensors (area 5): drift in ppb and millionths, temperatures in hundredths of a degree
+    # (lib/hal/ClockDrift.h).
+    "lib/hal/HalClock.cpp",
+    "src/activities/settings/SyncTimeActivity.cpp",
+    "src/util/DecimalFormat.cpp",
 ]
 
 
