@@ -74,6 +74,19 @@ FLOAT_FREE = [
     "src/activities/settings/ReadingStatsActivity.cpp",
     "src/activities/settings/ReadingStatsBookDetailActivity.cpp",
     "src/components/BookProgressPresentation.cpp",
+    # UI screens (area 6): sizes in tenths (src/util/ByteSize.h), the weather in integer units
+    # (lib/Weather/WeatherUnits.h). WeatherClient, WeatherSettingsStore, PluginEventCore and the web server read JSON:
+    # their objects hold ArduinoJson's number conversions, float included.
+    "lib/Serialization/FixedDecimal.cpp",
+    "lib/Weather/WeatherIcons.cpp",
+    "src/FlashLayoutNotice.cpp",
+    "src/activities/home/BookInfoActivity.cpp",
+    "src/activities/settings/FontDownloadActivity.cpp",
+    "src/activities/settings/OtaUpdateActivity.cpp",
+    "src/activities/settings/SystemInformationActivity.cpp",
+    "src/activities/weather/",
+    "src/components/themes/BaseTheme.cpp",
+    "src/util/ByteSize.cpp",
     # Clock and sensors (area 5): drift in ppb and millionths, temperatures in hundredths of a degree
     # (lib/hal/ClockDrift.h), IMU samples in mg and mdps, the battery divider in thousandths.
     "lib/hal/HalClock.cpp",
