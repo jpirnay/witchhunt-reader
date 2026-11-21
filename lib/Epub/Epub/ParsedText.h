@@ -140,7 +140,7 @@ class ParsedText {
   static constexpr uint8_t MAX_WORD_SIZE_PCT = 250;
   static constexpr uint8_t DEFAULT_WORD_SIZE_PCT = 100;
   // The smallest scale a combined word is drawn at to fit one em: a run wider than two ems stays sideways.
-  static constexpr float kMinCombineScale = 0.5f;
+  static constexpr TextScale kMinCombineScale = TextScale::ratio(1, 2);
 
  private:
   // Start and End (text-align: start / end, kept for the layout while the direction is unset or auto) become Left or
@@ -450,9 +450,9 @@ class ParsedText {
   void applyBionicReadingTransform();
   // Effective measurement scale of words[i]: the block-level multiplier (a word font's own scale for a word in
   // another family) combined with the word's own inline size percentage.
-  float wordScale(const size_t i) const {
+  TextScale wordScale(const size_t i) const {
     const TextBlock::WordFont& font = fontSlots_[wordSizes[i].fontSlot];
-    return (font.fontId != 0 ? font.scale : blockStyle.fontSizeMultiplier) * (wordSizes[i].pct / 100.0f);
+    return (font.fontId != 0 ? font.scale : blockStyle.fontSizeMultiplier) * TextScale::percent(wordSizes[i].pct);
   }
   // The font words[i] is measured in: its slot's, else the block's (`fontId`).
   int wordFontId(const size_t i, const int fontId) const {

@@ -471,7 +471,7 @@ int codepointAdvance(const EpdFontFamily& family, const char* text, const EpdFon
     // matching drawText so measurement and rendering agree exactly.
     if (prevCp != 0) {
       auto kernFP = static_cast<int32_t>(family.getKerning(prevCp, cp, style));  // 4.4 fixed-point kern
-      if (folded) kernFP = static_cast<int32_t>(kernFP * smallCaps::SCALE + 0.5f);
+      if (folded) kernFP = smallCaps::SCALE.apply(kernFP);
       widthPx += fp4::toPixel(prevAdvanceFP + kernFP);  // snap 12.4 fixed-point to nearest pixel
     }
 
@@ -486,7 +486,7 @@ int codepointAdvance(const EpdFontFamily& family, const char* text, const EpdFon
     // SUP/SUB no longer halve here — superscript/subscript words are measured at their
     // explicit per-word scale by the layout code, matching drawTextScaled exactly.
     if (folded) {
-      prevAdvanceFP = static_cast<int>(prevAdvanceFP * smallCaps::SCALE + 0.5f);
+      prevAdvanceFP = smallCaps::SCALE.apply(prevAdvanceFP);
     }
     prevCp = cp;
   }

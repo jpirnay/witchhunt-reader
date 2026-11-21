@@ -1,9 +1,25 @@
 #pragma once
 
+#include <TextScale.h>
+
 #include <cstddef>
 #include <cstdint>
 
 #include "../TextEmphasis.h"
+
+// Where CSS's float font sizes enter text scaling, which is fixed point (TextScale): rounded up onto its grid, as
+// TextScale::ratio() rounds. The CSS side moves to fixed point next (docs/future_work/integer-math/), and these go.
+inline TextScale textScaleOf(const float multiplier) {
+  if (!(multiplier > 0.0f)) return TextScale::fromRaw(0);
+  const float raw = multiplier * static_cast<float>(TextScale::kOne);  // exact: a power of two
+  if (raw >= 4294967040.0f) return TextScale::fromRaw(UINT32_MAX);     // the largest float below 2^32
+  auto whole = static_cast<uint32_t>(raw);
+  if (static_cast<float>(whole) < raw) ++whole;
+  return TextScale::fromRaw(whole);
+}
+inline float floatOf(const TextScale scale) {
+  return static_cast<float>(scale.raw()) / static_cast<float>(TextScale::kOne);
+}
 
 // Matches order of PARAGRAPH_ALIGNMENT in CrossPointSettings. Inherit is not an alignment: it is
 // the marker for an explicit `inherit`, which must beat a value set lower in the cascade and then

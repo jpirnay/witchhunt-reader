@@ -1355,7 +1355,7 @@ class ChapterHtmlSlimParser final : public Print {
   // The outermost open <center>: every block inside it is centred (startElement).
   int centerDepth_ = INT_MAX;
   CssTextAlign headingAlignment_ = CssTextAlign::Center;
-  float headingFontSizeMultiplier_ = 1.0f;
+  TextScale headingFontSizeMultiplier_;
   void applyHeadingScope(BlockStyle& blockStyle, const CssStyle& cssStyle) const;
   // The <span> laid out as a block because the book styles it display:block (#388), and the
   // alignment and size of the block it interrupted: text after the span, still inside the same
@@ -1367,7 +1367,7 @@ class ChapterHtmlSlimParser final : public Print {
     CssTextAlign alignment = CssTextAlign::Justify;
     bool textAlignDefined = false;
     bool fontResolved = false;
-    float fontSizeMultiplier = 1.0f;
+    TextScale fontSizeMultiplier;
     int32_t headingFontId = 0;
   };
   BlockSpan blockSpan_;

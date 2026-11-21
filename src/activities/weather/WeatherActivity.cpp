@@ -50,7 +50,7 @@ constexpr int EDGE = 12;         // to the panel's edges, and to the button hint
 constexpr int GRAPH_HOURS = 24;  // the days after are the forecast strip's
 
 // Whole multiples, so GfxRenderer's area-weighted resample turns every source pixel into a whole block.
-float heroTextScale() { return PanelMetrics::COMPACT ? 2.0f : 3.0f; }
+TextScale heroTextScale() { return TextScale::ratio(PanelMetrics::COMPACT ? 2 : 3, 1); }
 int heroIconScale() { return PanelMetrics::COMPACT ? 1 : 2; }
 
 constexpr StrId DAY_NAME_IDS[] = {StrId::STR_WEATHER_DAY_SUN, StrId::STR_WEATHER_DAY_MON, StrId::STR_WEATHER_DAY_TUE,
@@ -457,8 +457,8 @@ int WeatherActivity::drawCurrentConditions(const int left, const int right) {
 
   char temp[16];
   snprintf(temp, sizeof(temp), "%ld", lroundf(cur.temperature));
-  const float scale = heroTextScale();
-  const int digitsHeight = static_cast<int>(inkAbove(renderer, VALUE_FONT_ID, temp, EpdFontFamily::BOLD) * scale);
+  const TextScale scale = heroTextScale();
+  const int digitsHeight = scale.applyTruncated(inkAbove(renderer, VALUE_FONT_ID, temp, EpdFontFamily::BOLD));
   const int digitsTop = top + std::max(0, (iconSize - digitsHeight) / 2);  // centred on the icon
   const int baseline = digitsTop + digitsHeight;
   const int tempX = left + iconSize + 12;

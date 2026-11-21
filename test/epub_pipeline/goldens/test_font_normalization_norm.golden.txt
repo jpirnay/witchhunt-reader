@@ -424,12 +424,12 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=190 s=0 z=100 t=and
    W x=227 s=0 z=100 t=ten.
   LINE y=503 x=0 align=2 mult=1.060 hfid=0 words=7
-   W x=24 s=1 z=100 t=10.
-   W x=63 s=1 z=100 t=HEADING
-   W x=142 s=1 z=100 t=EDGE:
-   W x=206 s=1 z=100 t=one
-   W x=249 s=1 z=100 t=hundred
-   W x=333 s=1 z=100 t=six
+   W x=23 s=1 z=100 t=10.
+   W x=62 s=1 z=100 t=HEADING
+   W x=141 s=1 z=100 t=EDGE:
+   W x=205 s=1 z=100 t=one
+   W x=248 s=1 z=100 t=hundred
+   W x=332 s=1 z=100 t=six
    W x=365 s=1 z=100 t=percent
   LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=18 s=0 z=100 t=A

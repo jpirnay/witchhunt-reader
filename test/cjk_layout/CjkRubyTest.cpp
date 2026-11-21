@@ -20,7 +20,7 @@
 // Defined outside the anonymous namespace: CjkTypographyTest.cpp, where the global operator new counter lives, uses
 // the same hand-built line.
 std::unique_ptr<TextBlock> rubyLine(std::vector<TextBlock::Annotation> annotations,
-                                    std::vector<std::string> words = {"漢", "字"}, float multiplier = 1.0f,
+                                    std::vector<std::string> words = {"漢", "字"}, TextScale multiplier = TextScale(),
                                     std::vector<uint8_t> sizePct = {}) {
   std::vector<int16_t> xpos;
   int x = 0;
@@ -78,7 +78,7 @@ std::unique_ptr<TextBlock> restore(const std::string& bytes) {
 std::vector<GfxRenderer::DrawCall> rubyCalls(const GfxRenderer& renderer) {
   std::vector<GfxRenderer::DrawCall> calls;
   for (const auto& call : renderer.drawCalls)
-    if (call.scale == 0.5f) calls.push_back(call);
+    if (call.scale == TextScale::percent(50)) calls.push_back(call);
   return calls;
 }
 
@@ -157,7 +157,7 @@ TEST(RubyTextBlock, RubySitsInABandOfHalfAnAscenderAboveItsBase) {
   for (const auto& call : ruby) EXPECT_EQ(call.y, 100);  // 108 - round(16 * 0.5)
   int bases = 0;
   for (const auto& call : renderer.drawCalls) {
-    if (call.scale != 1.0f) continue;
+    if (!call.scale.isOne()) continue;
     ++bases;
     EXPECT_EQ(call.y, 108);
   }
@@ -189,19 +189,19 @@ TEST(RubyTextBlock, TheBandFollowsTheBlocksSize) {
   GfxRenderer renderer;
   const TextBlock::Annotation ruby{0, 2, 0, 20, Kind::Ruby, 0, "かんじ"};
   EXPECT_EQ(rubyLine({ruby})->annotationBand(renderer, kFontId), 8);
-  EXPECT_EQ(rubyLine({ruby}, {"漢", "字"}, 2.0f)->annotationBand(renderer, kFontId), 16);
+  EXPECT_EQ(rubyLine({ruby}, {"漢", "字"}, TextScale::ratio(2, 1))->annotationBand(renderer, kFontId), 16);
   EXPECT_EQ(rubyLine({})->annotationBand(renderer, kFontId), 0);
 }
 
 TEST(RubyTextBlock, TheBandIsTheSameBeforeAndAfterTheLineExists) {
   GfxRenderer renderer;
   const TextBlock::Annotation ruby{0, 2, 0, 20, Kind::Ruby, 0, "かんじ"};
-  for (const float multiplier : {1.0f, 1.25f}) {
+  for (const TextScale multiplier : {TextScale(), TextScale::ratio(5, 4)}) {
     for (const std::vector<uint8_t>& sizes : {std::vector<uint8_t>{100, 100}, std::vector<uint8_t>{100, 150}}) {
       const auto line = rubyLine({ruby}, {"漢", "字"}, multiplier, sizes);
       EXPECT_EQ(line->annotationBand(renderer, kFontId),
                 TextBlock::annotationBandFor(renderer, kFontId, multiplier, line->maxSizePct()))
-          << multiplier << " " << static_cast<int>(sizes[1]);
+          << multiplier.raw() << " " << static_cast<int>(sizes[1]);
     }
   }
 }
@@ -221,7 +221,7 @@ TEST(RubyTextBlock, RubyIsPlacedByTheRawPrefixRoundedOnce) {
   // Block multiplier 0.3: the ruby draws at 0.15, 10 px glyphs advance 1.5 px. Rounding each character gave 2 px a
   // character (a 6 px ruby, the third character at 11); layout measures the whole ruby once: 4.5 -> 5 px, and the
   // characters stand at the rounded prefixes 0, 2, 3.
-  const auto line = rubyLine({{0, 2, 0, 20, Kind::Ruby, 0, "abc"}}, {"漢", "字"}, 0.3f);
+  const auto line = rubyLine({{0, 2, 0, 20, Kind::Ruby, 0, "abc"}}, {"漢", "字"}, TextScale::percent(30));
   GfxRenderer renderer;
   line->render(renderer, kFontId, 0, 100);
   std::vector<int> xs;
@@ -236,8 +236,8 @@ TEST(RubyTextBlock, RubyIsPlacedByTheRawPrefixRoundedOnce) {
 TEST(RubyTextBlock, TheBandRoundsUpForAnOddAscender) {
   // Ascender 16 at 1.0625 is 17: a band of 9, the ruby's own ascender round(17 * 0.5) = 9.
   GfxRenderer renderer;
-  EXPECT_EQ(TextBlock::annotationBandFor(renderer, kFontId, 1.0625f, 100), 9);
-  EXPECT_EQ(TextBlock::annotationBandFor(renderer, kFontId, 1.0f, 100), 8);
+  EXPECT_EQ(TextBlock::annotationBandFor(renderer, kFontId, TextScale::ratio(17, 16), 100), 9);
+  EXPECT_EQ(TextBlock::annotationBandFor(renderer, kFontId, TextScale(), 100), 8);
 }
 
 TEST(RubyTextBlock, TheRangeConstructorRefusesBadAnnotations) {

@@ -85,7 +85,8 @@ Details: `docs/memory-allocation-strategy.md`, `docs/contributing/heap-and-data-
   from the `RAM:` and `Flash:` lines of `pio run`, compared with a master build in the same worktree.
 - New on-device maths is integer or fixed point: the C3 has no FPU. The sources listed in `FLOAT_FREE` in
   `scripts/check_no_float.py` (the TTF engine, image scaling, and more as `docs/future_work/integer-math.md`
-  progresses) fail the build if they use floating point. Images scale by exact ratios (`ImageScale`).
+  progresses) fail the build if they use floating point. Images scale by exact ratios (`ImageScale`), text by
+  `TextScale` (2^-20ths of 1, rounded up onto its grid).
 
 ## Activities and rendering
 

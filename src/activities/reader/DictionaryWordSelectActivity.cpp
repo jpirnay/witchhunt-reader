@@ -174,8 +174,8 @@ turnedframe::Offsets pageOrigin(const GfxRenderer& renderer, const Page& page, c
 int pieceWidth(const GfxRenderer& renderer, const TextBlock::WordBox& geometry, const char* piece,
                const bool vertical) {
   if (vertical) return verticalTextAdvance(renderer, geometry.fontId, piece, geometry.style, geometry.scale);
-  return (geometry.scale == 1.0f) ? renderer.getTextWidth(geometry.fontId, piece, geometry.style)
-                                  : renderer.getTextWidthScaled(geometry.fontId, piece, geometry.style, geometry.scale);
+  return geometry.scale.isOne() ? renderer.getTextWidth(geometry.fontId, piece, geometry.style)
+                                : renderer.getTextWidthScaled(geometry.fontId, piece, geometry.style, geometry.scale);
 }
 
 // How far the pen moves past that piece: its advance, not its ink width. A vertical line's run down the column is both.
@@ -183,7 +183,7 @@ int pieceAdvance(const GfxRenderer& renderer, const TextBlock::WordBox& geometry
                  const bool vertical) {
   if (vertical) return verticalTextAdvance(renderer, geometry.fontId, piece, geometry.style, geometry.scale);
   const int advance = renderer.getTextAdvanceX(geometry.fontId, piece, geometry.style);
-  return (geometry.scale == 1.0f) ? advance : static_cast<int>(advance * geometry.scale + 0.5f);
+  return geometry.scale.isOne() ? advance : geometry.scale.apply(advance);
 }
 
 // The middle of a row, where the first selection starts: across the screen, or down it on a vertical page, whose rows
@@ -222,7 +222,7 @@ turnedframe::Rect readerBox(const bool vertical, const int readerWidth, const tu
 // piece). Called in the page's frame: on a vertical line (x, y) is the pen down the column and the line's top, as
 // drawTextVertical takes them.
 void drawPiece(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
-               const GlyphRun& glyphs, const EpdFontFamily::Style style, const float scale, const uint8_t flags,
+               const GlyphRun& glyphs, const EpdFontFamily::Style style, const TextScale scale, const uint8_t flags,
                const bool black) {
   if (glyphs.count != 0) {
     renderer.drawGlyphRun(fontId, x, y, glyphs, black, style, scale);
@@ -230,7 +230,7 @@ void drawPiece(const GfxRenderer& renderer, const int fontId, const int x, const
     drawCombinedVertical(renderer, fontId, x, y, text, style, scale, black);
   } else if ((flags & DRAW_VERTICAL) != 0) {
     drawTextVertical(renderer, fontId, x, y, text, style, scale, (flags & DRAW_CENTRED_MARKS) != 0, black);
-  } else if (scale == 1.0f) {
+  } else if (scale.isOne()) {
     renderer.drawFormedText(fontId, x, y, text, black, style);
   } else {
     renderer.drawFormedTextScaled(fontId, x, y, text, black, style, scale);

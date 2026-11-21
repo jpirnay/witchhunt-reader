@@ -57,7 +57,7 @@ struct IndicRules : testing::Test {
             if (element->getTag() != TAG_PageLine) continue;
             const TextBlock& block = *static_cast<const PageLine&>(*element).getBlock();
             // A drop cap is a line of its own, set larger than the text.
-            if (block.getRenderStyle().fontSizeMultiplier > 1.0f) ++result.dropCaps;
+            if (block.getRenderStyle().fontSizeMultiplier > TextScale()) ++result.dropCaps;
             for (uint16_t i = 0; i < block.wordCount(); ++i) {
               result.words.push_back({block.wordText(i), (block.wordStyle(i) & EpdFontFamily::BOLD) != 0});
             }

@@ -214,7 +214,7 @@ TEST(RubyGroups, ReleasingAnEmptyBlocksScratchGivesBackItsRuby) {
 }
 // CjkRubyTest.cpp: the same hand-built line.
 std::unique_ptr<TextBlock> rubyLine(std::vector<TextBlock::Annotation> annotations,
-                                    std::vector<std::string> words = {"漢", "字"}, float multiplier = 1.0f,
+                                    std::vector<std::string> words = {"漢", "字"}, TextScale multiplier = TextScale(),
                                     std::vector<uint8_t> sizePct = {});
 TEST(RubyTextBlock, DrawingRubyAllocatesNothing) {
   const auto line = rubyLine({{0, 2, 0, 20, TextBlock::AnnotationKind::Ruby, 0, "かんじ"}});
@@ -293,7 +293,7 @@ TEST(CjkGrid, OtherBooksHaveNoGrid) {
 TEST(CjkGrid, AHeadingsGridIsInItsOwnEms) {
   // A block at 1.2 times the body size has 12 px ems: 47 px holds 3 of them, 5 px in from the left.
   BlockStyle heading = aligned(CssTextAlign::Left);
-  heading.fontSizeMultiplier = 1.2f;
+  heading.fontSizeMultiplier = TextScale::percent(120);
   ParsedText text(false, false, heading);
   text.setTypography(TypographyProfile::forLanguage("ja"));
   text.addWord("一二三四", EpdFontFamily::REGULAR);

@@ -19,6 +19,7 @@
 #include "Epub/Page.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
+#include "PipelineRunner.h"
 #include "SyntheticBook.h"
 
 namespace fs = std::filesystem;
@@ -66,7 +67,7 @@ struct RootFontSizeFixture : testing::Test {
       if (el->getTag() != TAG_PageLine) continue;
       const TextBlock& block = *static_cast<const PageLine&>(*el).getBlock();
       if (block.wordCount() == 0) continue;
-      Line line{{}, block.getRenderStyle().fontSizeMultiplier};
+      Line line{{}, pipeline_harness::scaleValue(block.getRenderStyle().fontSizeMultiplier)};
       for (uint16_t w = 0; w < block.wordCount(); ++w) {
         if (w > 0) line.text += ' ';
         line.text += block.wordText(w);

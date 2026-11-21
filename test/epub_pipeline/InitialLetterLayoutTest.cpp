@@ -15,6 +15,7 @@
 #include "Epub/Page.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
+#include "PipelineRunner.h"
 #include "SyntheticBook.h"
 
 namespace fs = std::filesystem;
@@ -83,7 +84,8 @@ struct InitialLetterFixture : testing::Test {
         const TextBlock& block = *static_cast<const PageLine&>(*el).getBlock();
         std::string text;
         for (uint16_t w = 0; w < block.wordCount(); ++w) text += (w > 0 ? " " : "") + std::string(block.wordText(w));
-        lines.push_back({el->yPos + p * 1000, el->xPos, block.getRenderStyle().fontSizeMultiplier, text});
+        lines.push_back({el->yPos + p * 1000, el->xPos,
+                         pipeline_harness::scaleValue(block.getRenderStyle().fontSizeMultiplier), text});
       }
     }
     return lines;

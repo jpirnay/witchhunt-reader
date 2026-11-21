@@ -267,7 +267,7 @@ TEST(TextBlockGlyphForms, RenderDrawsTheRunAtTheWordsPosition) {
     EXPECT_EQ(50 + 7, r.glyphRunDraws[0].x);
     EXPECT_EQ(asText.drawCalls[1].y, r.glyphRunDraws[0].y) << "pct " << static_cast<int>(pct);
     EXPECT_EQ(5, r.glyphRunDraws[0].count);
-    EXPECT_FLOAT_EQ(pct / 100.0f, r.glyphRunDraws[0].scale);
+    EXPECT_EQ(TextScale::percent(pct), r.glyphRunDraws[0].scale);
     ASSERT_EQ(1u, r.drawCalls.size());
     EXPECT_EQ("abc", r.drawCalls[0].text);
   }
@@ -307,7 +307,8 @@ TEST(TextBlockGlyphForms, TheEmphasisMarksSkipAGlyphWord) {
   GfxRenderer r;
   block->render(r, kFontId, 0, 0);
   size_t marks = 0;
-  for (const auto& call : r.drawCalls) marks += call.scale == 0.5f ? 1 : 0;  // the marks, at half the word's size
+  for (const auto& call : r.drawCalls)
+    marks += call.scale == TextScale::percent(50) ? 1 : 0;  // the marks, at half the word's size
   EXPECT_EQ(3u, marks);
   EXPECT_EQ(1u, r.glyphRunDraws.size());
 }

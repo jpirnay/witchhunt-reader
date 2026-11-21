@@ -19,5 +19,6 @@ float multipliers: bump `CSS_CACHE_VERSION`. The section header stores the line 
 returns a float. Fetch master right before the bump.
 
 **Next step.** A fixed-point length (for example 1/256 px or 1/1000 em) with an integer CSS number parser, then the
-parser's arithmetic on it. Shares the font-size multiplier with [text scale](text-scale.md). The epub pipeline
+parser's arithmetic on it. The font-size multiplier is a `TextScale` already (`lib/EpdFont/TextScale.h`, area 2): the
+parser turns its float into one where it hands a size to layout (`textScaleOf` in `CssStyle.h`). The epub pipeline
 goldens and the CSS suites show layout changes; a pixel here and there from rounding is expected.

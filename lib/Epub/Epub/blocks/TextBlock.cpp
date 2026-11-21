@@ -761,19 +761,19 @@ bool TextBlock::bidiValid() const {
   return !hasOrder || (wc <= kMaxOrderedWords && isPermutation(region + bidiBytes_ - wc, wc));
 }
 
-int TextBlock::annotationBandFor(const GfxRenderer& renderer, const int effFontId, const float blockScale,
+int TextBlock::annotationBandFor(const GfxRenderer& renderer, const int effFontId, const TextScale blockScale,
                                  const uint8_t maxSizePct) {
-  const int ascender = (maxSizePct == 100 && blockScale == 1.0f)
+  const int ascender = (maxSizePct == 100 && blockScale.isOne())
                            ? renderer.getFontAscenderSize(effFontId)
-                           : renderer.getFontAscenderSizeScaled(effFontId, blockScale * maxSizePct / 100.0f);
+                           : renderer.getFontAscenderSizeScaled(effFontId, blockScale * TextScale::percent(maxSizePct));
   return (ascender + 1) / 2;  // the ruby's own ascender is round(ascender * 0.5)
 }
 
-int TextBlock::lineAscenderFor(const GfxRenderer& renderer, const int effFontId, const float blockScale,
+int TextBlock::lineAscenderFor(const GfxRenderer& renderer, const int effFontId, const TextScale blockScale,
                                const uint8_t maxSizePct) {
-  return (maxSizePct == 100 && blockScale == 1.0f)
+  return (maxSizePct == 100 && blockScale.isOne())
              ? renderer.getFontAscenderSize(effFontId)
-             : renderer.getFontAscenderSizeScaled(effFontId, blockScale * maxSizePct / 100.0f);
+             : renderer.getFontAscenderSizeScaled(effFontId, blockScale * TextScale::percent(maxSizePct));
 }
 
 int TextBlock::annotationBand(const GfxRenderer& renderer, const int fontId) const {
@@ -786,7 +786,7 @@ int TextBlock::annotationBand(const GfxRenderer& renderer, const int fontId) con
 // and a wrong fast-path page costs more than a missed pre-render.
 bool TextBlock::drawsUnscaled() const {
   if (!isValid) return true;  // draws nothing
-  if (renderStyle.fontSizeMultiplier != 1.0f || renderStyle.headingFontId != 0 || sizesPresent || hasAnnotations() ||
+  if (!renderStyle.fontSizeMultiplier.isOne() || renderStyle.headingFontId != 0 || sizesPresent || hasAnnotations() ||
       vertical_) {
     return false;
   }
@@ -805,19 +805,19 @@ TextBlock::WordBox TextBlock::wordBox(const GfxRenderer& renderer, const uint16_
   if (!isValid || i >= numWords) return box;
 
   const int effFontId = renderStyle.headingFontId != 0 ? renderStyle.headingFontId : fontId;
-  const float blockScale = renderStyle.fontSizeMultiplier;
-  const int blockAscender = (blockScale == 1.0f) ? renderer.getFontAscenderSize(effFontId)
-                                                 : renderer.getFontAscenderSizeScaled(effFontId, blockScale);
+  const TextScale blockScale = renderStyle.fontSizeMultiplier;
+  const int blockAscender = blockScale.isOne() ? renderer.getFontAscenderSize(effFontId)
+                                               : renderer.getFontAscenderSizeScaled(effFontId, blockScale);
   int lineAscender = blockAscender;
   if (sizesPresent) {
-    lineAscender = renderer.getFontAscenderSizeScaled(effFontId, blockScale * (maxSizePct() / 100.0f));
+    lineAscender = renderer.getFontAscenderSizeScaled(effFontId, blockScale * TextScale::percent(maxSizePct()));
   }
   const int baseY = y + annotationBand(renderer, fontId);  // the ruby's band is above the base
 
   const char* word = wordDrawText(i);
   const EpdFontFamily::Style style = wordStyle(i);
   const int font = wordFontId(i, effFontId);
-  const float scale = wordScale(i);
+  const TextScale scale = wordScale(i);
   const int ascender =
       (font == effFontId && scale == blockScale) ? blockAscender : renderer.getFontAscenderSizeScaled(font, scale);
 
@@ -840,11 +840,11 @@ TextBlock::WordBox TextBlock::wordBox(const GfxRenderer& renderer, const uint16_
   const GlyphRun glyphs = glyphForm(i);
   box.width = static_cast<int16_t>(glyphs.count != 0            ? renderer.glyphRunWidth(font, glyphs, scale)
                                    : vertical_ && isCombined(i) ? columnEm(renderer, font, style, scale)
-                                   : vertical_       ? verticalTextAdvance(renderer, font, word, style, scale)
-                                   : (scale == 1.0f) ? renderer.getTextWidth(font, word, style)
-                                                     : renderer.getTextWidthScaled(font, word, style, scale));
+                                   : vertical_     ? verticalTextAdvance(renderer, font, word, style, scale)
+                                   : scale.isOne() ? renderer.getTextWidth(font, word, style)
+                                                   : renderer.getTextWidthScaled(font, word, style, scale));
   box.height =
-      static_cast<int16_t>((scale == 1.0f) ? renderer.getLineHeight(font) : renderer.getLineHeightScaled(font, scale));
+      static_cast<int16_t>(scale.isOne() ? renderer.getLineHeight(font) : renderer.getLineHeightScaled(font, scale));
   return box;
 }
 
@@ -859,7 +859,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   // body font. In that case fontSizeMultiplier is a small residual (usually 1.0). Resolve the
   // effective (fontId, scale) pair once and use it for every measure/draw below.
   const int effFontId = renderStyle.headingFontId != 0 ? renderStyle.headingFontId : fontId;
-  const float blockScale = renderStyle.fontSizeMultiplier;
+  const TextScale blockScale = renderStyle.fontSizeMultiplier;
   const int blockAscender = lineAscenderFor(renderer, effFontId, blockScale, 100);
   // Mixed-size lines are baseline-aligned: every word's baseline sits at y + lineAscender,
   // where lineAscender is the tallest word's ascender. Uniform lines (no sizes) keep
@@ -880,7 +880,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   // has its font's ascender.
   struct CachedAscender {
     int fontId;
-    float scale;
+    TextScale scale;
     int ascender;
   };
   // A vertical line runs every draw down its column at the position the horizontal code computes (VerticalDraw.h).
@@ -888,7 +888,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   const bool vertical = vertical_;
   const bool centredMarks = centredMarks_;
   auto drawRun = [&renderer, vertical, centredMarks](const int font, const int px, const int py, const char* text,
-                                                     const EpdFontFamily::Style style, const float scale,
+                                                     const EpdFontFamily::Style style, const TextScale scale,
                                                      const bool combined = false, const GlyphRun* glyphs = nullptr) {
     if (glyphs != nullptr) {
       renderer.drawGlyphRun(font, px, py, *glyphs, true, style, scale);
@@ -896,7 +896,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       drawCombinedVertical(renderer, font, px, py, text, style, scale);
     } else if (vertical) {
       drawTextVertical(renderer, font, px, py, text, style, scale, centredMarks);
-    } else if (scale == 1.0f) {
+    } else if (scale.isOne()) {
       renderer.drawFormedText(font, px, py, text, true, style);
     } else {
       renderer.drawFormedTextScaled(font, px, py, text, true, style, scale);
@@ -904,12 +904,12 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   };
   // How far a piece of text, or a shaped word's run, runs along the line at `scale`.
   auto runWidth = [&renderer, vertical](const int font, const char* text, const EpdFontFamily::Style style,
-                                        const float scale, const bool combined = false,
+                                        const TextScale scale, const bool combined = false,
                                         const GlyphRun* glyphs = nullptr) {
     if (glyphs != nullptr) return renderer.glyphRunWidth(font, *glyphs, scale);
     if (vertical && combined) return columnEm(renderer, font, style, scale);
     if (vertical) return verticalTextAdvance(renderer, font, text, style, scale);
-    return scale == 1.0f ? renderer.getTextWidth(font, text, style)
+    return scale.isOne() ? renderer.getTextWidth(font, text, style)
                          : renderer.getTextWidthScaled(font, text, style, scale);
   };
   // Whether any word is shaped: a line without glyph forms (every Latin, CJK and Hebrew line) looks none up.
@@ -918,7 +918,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   const int baseline = baseY + lineAscender;
   const int blockEm = vertical ? columnEm(renderer, effFontId, EpdFontFamily::REGULAR, blockScale) : 0;
   std::vector<CachedAscender> ascenderCache;
-  auto getOrCacheAscender = [&](const int font, const float s) -> int {
+  auto getOrCacheAscender = [&](const int font, const TextScale s) -> int {
     if (font == effFontId && s == blockScale) return blockAscender;
     for (const CachedAscender& cached : ascenderCache) {
       if (cached.fontId == font && cached.scale == s) return cached.ascender;
@@ -940,7 +940,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     const int wordX = xposArr[i] + x;
     const EpdFontFamily::Style currentStyle = wordStyle(i);
     const int font = wordFontId(i, effFontId);
-    const float scale = wordScale(i);
+    const TextScale scale = wordScale(i);
     const int ascender = getOrCacheAscender(font, scale);
     // Baseline alignment: shift smaller words down so all baselines meet at y + lineAscender. A word in
     // another family meets it too: the line keeps its block font's baseline, whatever the word's ascender.
@@ -1006,7 +1006,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     const Annotation a = annotation(k);
     if (a.kind != AnnotationKind::Ruby || a.text.empty()) continue;
     const int font = wordFontId(a.firstWord, effFontId);
-    const float rubyScale = 0.5f * wordScale(a.firstWord);
+    const TextScale rubyScale = TextScale::ratio(1, 2) * wordScale(a.firstWord);
     const int rubyY = baseY - renderer.getFontAscenderSizeScaled(font, rubyScale);
 
     // Walk the ruby's characters (at most 4 bytes and a NUL each; the view is not NUL-terminated).
@@ -1037,13 +1037,13 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       const unsigned char* p = reinterpret_cast<const unsigned char*>(wordDrawText(w));
       while (spread && *p != 0) spread = utf8IsUnspacedCjk(utf8NextCodepoint(&p));
     }
-    const int slack = a.width - static_cast<int>(rawTotal * rubyScale + 0.5f);
+    const int slack = a.width - rubyScale.apply(rawTotal);
     int rawBefore = 0;
     size_t pos = 0;
     for (int c = 0; c < chars; c++) {
       nextChar(pos, buf);
       const int offset = spread ? slack * (2 * c + 1) / (2 * chars) : slack / 2;
-      const int advanced = static_cast<int>(rawBefore * rubyScale + 0.5f);
+      const int advanced = rubyScale.apply(rawBefore);
       drawRun(font, x + a.x + offset + advanced, rubyY, buf, EpdFontFamily::REGULAR, rubyScale);
       rawBefore += renderer.getTextAdvanceX(font, buf, EpdFontFamily::REGULAR);
     }
@@ -1066,8 +1066,8 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     for (uint16_t w = a.firstWord; w < a.firstWord + a.wordCount && w < numWords; w++) {
       if (glyphLine && hasGlyphForm(w)) continue;
       const int font = wordFontId(w, effFontId);
-      const float wordScl = wordScale(w);
-      const float markScale = 0.5f * wordScl;
+      const TextScale wordScl = wordScale(w);
+      const TextScale markScale = TextScale::ratio(1, 2) * wordScl;
       const EpdFontFamily::Style style = wordStyle(w);
       const int markAscender = renderer.getFontAscenderSizeScaled(font, markScale);
       const int markY = baseY - markAscender;
@@ -1101,11 +1101,11 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
         const size_t len = std::min<size_t>(static_cast<size_t>(p - start), 4);
         memcpy(buf, start, len);
         buf[len] = '\0';
-        const int raw = vertical ? verticalTextAdvance(renderer, font, buf, style, 1.0f)
+        const int raw = vertical ? verticalTextAdvance(renderer, font, buf, style, TextScale())
                                  : renderer.getTextAdvanceX(font, buf, style);
         if (TextEmphasis::takesMark(cp)) {
-          const int charX = wordX + (wordScl == 1.0f ? rawBefore : static_cast<int>(rawBefore * wordScl + 0.5f));
-          const int advance = wordScl == 1.0f ? raw : static_cast<int>(raw * wordScl + 0.5f);
+          const int charX = wordX + (wordScl.isOne() ? rawBefore : wordScl.apply(rawBefore));
+          const int advance = wordScl.isOne() ? raw : wordScl.apply(raw);
           if (drawGlyph) {
             drawRun(font, charX + (advance - markWidth) / 2, markY, markText, EpdFontFamily::REGULAR, markScale);
           } else {
@@ -1153,7 +1153,7 @@ bool TextBlock::serialize(serialization::BufferedFileWriter& out) const {
   // Dropping them is a format change; SECTION_FILE_VERSION is bumped so stale
   // caches are rejected and rebuilt.
   out.writePod(renderStyle.alignment);
-  out.writePod(renderStyle.fontSizeMultiplier);
+  out.writePod(renderStyle.fontSizeMultiplier.raw());
   out.writePod(renderStyle.headingFontId);
 
   return true;
@@ -1267,7 +1267,9 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(serialization::BufferedFileRea
   // Style: the render slice only (see serialize).
   RenderStyle& renderStyle = block->renderStyle;
   in.readPod(renderStyle.alignment);
-  in.readPod(renderStyle.fontSizeMultiplier);
+  uint32_t multiplierRaw = TextScale::kOne;
+  in.readPod(multiplierRaw);
+  renderStyle.fontSizeMultiplier = TextScale::fromRaw(multiplierRaw);
   in.readPod(renderStyle.headingFontId);
 
   return block;

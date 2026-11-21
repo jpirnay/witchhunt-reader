@@ -5,6 +5,7 @@ add_executable(FontSizeLadderTest
 target_include_directories(FontSizeLadderTest PRIVATE
   ${REPO_ROOT}/src
   ${REPO_ROOT}/test/shims
+  ${REPO_ROOT}/lib/EpdFont
 )
 
 target_link_libraries(FontSizeLadderTest PRIVATE

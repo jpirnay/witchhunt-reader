@@ -55,7 +55,7 @@ class DictionaryWordSelectActivity final : public Activity {
   // -- body text, plus a heading or an inline size change -- so they are deduplicated into a
   // side table and a fragment stores a one-byte index instead of the fields themselves.
   struct DrawStyle {
-    float scale;
+    TextScale scale;
     // Full width, NOT narrowed: font ids are 32-bit hashes (see fontIds.h, e.g. 1883578066), so
     // a 16-bit field truncates every one of them to a font that does not exist -- which draws
     // the highlight box and none of the glyphs inside it.

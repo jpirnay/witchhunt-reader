@@ -10,10 +10,8 @@
 #include "SmallCaps.h"
 #include "UnicodeSpace.h"
 
-// Scale a 12.4 fixed-point advance by the small-caps factor, rounding to nearest.
-static inline int32_t scaleAdvanceFP(const int32_t advanceFP) {
-  return static_cast<int32_t>(advanceFP * smallCaps::SCALE + 0.5f);
-}
+// Scale a 12.4 fixed-point advance (or kern) by the small-caps factor, as the renderer does.
+static inline int32_t scaleAdvanceFP(const int32_t advanceFP) { return smallCaps::SCALE.apply(advanceFP); }
 
 void EpdFont::getTextBounds(const char* string, const int startX, const int startY, int* minX, int* minY, int* maxX,
                             int* maxY, const bool useSmallCaps) const {
@@ -54,10 +52,10 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
     }
 
     // Folded glyphs are drawn at smallCaps::SCALE, so all their metrics scale to match.
-    const int glyphLeft = folded ? static_cast<int>(glyph.left * smallCaps::SCALE) : glyph.left;
-    const int glyphWidth = folded ? static_cast<int>(glyph.width * smallCaps::SCALE + 0.5f) : glyph.width;
-    const int glyphTop = folded ? static_cast<int>(glyph.top * smallCaps::SCALE) : glyph.top;
-    const int glyphHeight = folded ? static_cast<int>(glyph.height * smallCaps::SCALE + 0.5f) : glyph.height;
+    const int glyphLeft = folded ? smallCaps::SCALE.applyTruncated(glyph.left) : glyph.left;
+    const int glyphWidth = folded ? smallCaps::SCALE.apply(glyph.width) : glyph.width;
+    const int glyphTop = folded ? smallCaps::SCALE.applyTruncated(glyph.top) : glyph.top;
+    const int glyphHeight = folded ? smallCaps::SCALE.apply(glyph.height) : glyph.height;
 
     const int raiseBy =
         isCombining ? combiningMark::raiseAboveBase(combiningMark::anchorFor(cp), glyphTop, glyphHeight, lastBaseTop)

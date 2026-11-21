@@ -3,6 +3,7 @@
 // Glyph resampling for text drawn at a scale (GfxRenderer's renderCharAtScale): pure, so the host tests
 // include it directly.
 #include <GlyphKey.h>
+#include <TextScale.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -26,7 +27,7 @@ constexpr ScaledGlyphKey scaledGlyphKeyOf(const uint32_t cp) {
 /// cache's budget and why it is keyed so: GfxRenderer.h). 16 B on the C3.
 struct ScaledGlyphEntry {
   const void* fontData;  // EpdFontData for the style (stable per font object)
-  uint32_t scaleBits;    // exact float bits of the scale factor (no quantisation)
+  uint32_t scaleRaw;     // the scale, TextScale::raw()
   uint16_t id;           // scaledGlyphKeyOf's id: a BMP codepoint or a glyph key's glyph ID
   uint16_t offset;       // byte offset into the cache's arena
   uint8_t sel;           // the drawMask the glyph was resampled for
@@ -35,11 +36,11 @@ struct ScaledGlyphEntry {
   uint8_t kind;  // scaledGlyphKeyOf's kind: 0 codepoint, 1 glyph ID; the 16th byte on the C3
 };
 
-/// Whether `e` holds the mask asked for: the same font data, scale bits, drawMask and size, and the same key, its kind
+/// Whether `e` holds the mask asked for: the same font data, scale, drawMask and size, and the same key, its kind
 /// as well as its id, so glyph ID 0x41 never serves 'A' (their ids are the same 16 bits), nor 'A' glyph ID 0x41.
 constexpr bool scaledGlyphEntryMatches(const ScaledGlyphEntry& e, const void* fontData, const ScaledGlyphKey& key,
-                                       const uint32_t scaleBits, const uint8_t sel, const int w, const int h) {
-  return e.fontData == fontData && e.id == key.id && e.kind == key.kind && e.scaleBits == scaleBits && e.sel == sel &&
+                                       const TextScale scale, const uint8_t sel, const int w, const int h) {
+  return e.fontData == fontData && e.id == key.id && e.kind == key.kind && e.scaleRaw == scale.raw() && e.sel == sel &&
          e.w == w && e.h == h;
 }
 
@@ -52,16 +53,13 @@ constexpr bool scaledGlyphEntryMatches(const ScaledGlyphEntry& e, const void* fo
 // `drawMask` picks the ink levels that are emitted (bit n: level n), at every scale.
 template <typename Emit>
 static inline void emitScaledGlyphPixels(const uint8_t* const bitmap, const bool is2Bit, const int srcW, const int srcH,
-                                         const int dstW, const int dstH, const float scale, const uint8_t drawMask,
+                                         const int dstW, const int dstH, const TextScale scale, const uint8_t drawMask,
                                          Emit&& emit) {
-  // The ESP32-C3 has no FPU — every float op in a per-pixel loop is a soft-float call
-  // costing hundreds of cycles. The resampling therefore runs in 16.16 fixed point:
-  // the ONLY float operation per glyph is the one-time conversion of `scale` into a
-  // fixed-point step; the pixel loops are pure integer (the C3's M extension gives a
-  // hardware divider for the one division per destination pixel).
-  constexpr int FP_SHIFT = 16;
-  constexpr int32_t FP_ONE = 1 << FP_SHIFT;
-  const int32_t invScaleFP = static_cast<int32_t>(FP_ONE / scale + 0.5f);
+  // The ESP32-C3 has no FPU, so the resampling runs in 16.16 fixed point: the scale becomes a source step once per
+  // glyph, and the pixel loops are pure integer (the C3's M extension gives a hardware divider for the one division
+  // per destination pixel).
+  constexpr int FP_SHIFT = 16;  // inverse16()'s
+  const int32_t invScaleFP = scale.inverse16();
 
   // Per-source-pixel raw ink level: 2-bit fonts carry 4 AA levels (0..3); 1-bit fonts map
   // to 0 or 3.
@@ -91,7 +89,7 @@ static inline void emitScaledGlyphPixels(const uint8_t* const bitmap, const bool
   // the bit, only the BW pass honors the caller's pixelState.)
   //
   // Area integration in fixed point. Overlap extents are 16.16 and at most one source pixel
-  // (FP_ONE) each; the raw x h x w product needs 64 bits, which
+  // (1 << FP_SHIFT) each; the raw x h x w product needs 64 bits, which
   // RV32IM handles with a few integer multiplies — still an order of magnitude cheaper
   // than one soft-float op. Verified pixel-equivalent to the historical float path
   // (differences only at mathematically exact quantization ties, ~0.2% of AA edge

@@ -105,7 +105,7 @@ class BufferedFileReader;  // and where it reads itself back
 // right-aligned. Nothing here is lost: the dropped fields remain in BlockStyle
 // and on disk, so widening this struct later is a local change.
 struct RenderStyle {
-  float fontSizeMultiplier = 1.0f;
+  TextScale fontSizeMultiplier;
   int32_t headingFontId = 0;  // 0 = body font scaled by fontSizeMultiplier
   CssTextAlign alignment = CssTextAlign::Justify;
 };
@@ -127,7 +127,7 @@ class TextBlock final : public Block {
   // crosspoint-reader PR #3934 (Justin Mitchell): its MAX_WORD_FONTS table and slot per word.
   struct WordFont {
     int32_t fontId = 0;  // a full 32-bit font ID; 0: the block's own font
-    float scale = 1.0f;
+    TextScale scale;
   };
   static constexpr uint8_t kMaxWordFonts = 8;
   // A word's size as layout keeps it: its inline font-size percent of the block's size, and its font slot, an index
@@ -233,10 +233,10 @@ class TextBlock final : public Block {
 
   // Effective render scale of word i: its font's scale (a word font's own, else the block multiplier) x the word's
   // size percent.
-  float wordScale(const uint16_t i) const {
+  TextScale wordScale(const uint16_t i) const {
     const WordFont* font = wordFont(i);
-    const float base = font ? font->scale : renderStyle.fontSizeMultiplier;
-    return sizesPresent ? base * (sizesArr[i] / 100.0f) : base;
+    const TextScale base = font ? font->scale : renderStyle.fontSizeMultiplier;
+    return sizesPresent ? base * TextScale::percent(sizesArr[i]) : base;
   }
   // The font word i is drawn in: its word font's, else the block's (`blockFontId`).
   int wordFontId(const uint16_t i, const int blockFontId) const {
@@ -455,10 +455,10 @@ class TextBlock final : public Block {
   // drawn in.
   int annotationBand(const GfxRenderer& renderer, int fontId) const;
   // The same band from what a layout knows before the line exists.
-  static int annotationBandFor(const GfxRenderer& renderer, int effFontId, float blockScale, uint8_t maxSizePct);
+  static int annotationBandFor(const GfxRenderer& renderer, int effFontId, TextScale blockScale, uint8_t maxSizePct);
   // How far below the band the line's baseline sits: the ascender of its tallest word size, which render() draws every
   // word's baseline at. From what a layout knows before the line exists, as annotationBandFor is.
-  static int lineAscenderFor(const GfxRenderer& renderer, int effFontId, float blockScale, uint8_t maxSizePct);
+  static int lineAscenderFor(const GfxRenderer& renderer, int effFontId, TextScale blockScale, uint8_t maxSizePct);
   // No word draws scaled: block multiplier 1, no heading font, no word sizes, no SUP/SUB/SMALL_CAPS, no annotations,
   // not vertical.
   bool drawsUnscaled() const;
@@ -481,7 +481,7 @@ class TextBlock final : public Block {
     // font, and a word may carry a style and a size scale of its own.
     int fontId = 0;
     EpdFontFamily::Style style = EpdFontFamily::REGULAR;
-    float scale = 1.0f;
+    TextScale scale;
   };
   WordBox wordBox(const GfxRenderer& renderer, uint16_t i, int fontId, int x, int y) const;
 

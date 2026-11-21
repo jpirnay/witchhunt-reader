@@ -15,6 +15,7 @@
 #include "Epub/Section.h"
 #include "Epub/css/CssParser.h"
 #include "GfxRenderer.h"
+#include "PipelineRunner.h"
 #include "SyntheticBook.h"
 
 namespace fs = std::filesystem;
@@ -86,7 +87,9 @@ struct FontFamilyLayoutFixture : testing::Test {
       if (el->getTag() != TAG_PageLine) continue;
       const TextBlock& block = *static_cast<const PageLine&>(*el).getBlock();
       if (block.wordCount() == 0) continue;
-      Line line{{}, block.getRenderStyle().headingFontId, block.getRenderStyle().fontSizeMultiplier};
+      Line line{{},
+                block.getRenderStyle().headingFontId,
+                pipeline_harness::scaleValue(block.getRenderStyle().fontSizeMultiplier)};
       for (uint16_t w = 0; w < block.wordCount(); ++w) {
         if (w > 0) line.text += ' ';
         line.text += block.wordText(w);
@@ -130,9 +133,9 @@ TEST_F(FontFamilyLayoutFixture, WithoutFamiliesABlocksFontIsAsBefore) {
   const Line* dedication = find(lines, "For someone");
   ASSERT_TRUE(h1 && dedication);
   EXPECT_EQ(0, h1->fontId);  // no ladder: the body face scaled
-  EXPECT_FLOAT_EQ(1.6f, h1->mult);
+  EXPECT_NEAR(1.6f, h1->mult, 1e-5f);
   EXPECT_EQ(0, dedication->fontId);
-  EXPECT_FLOAT_EQ(1.0f, dedication->mult);
+  EXPECT_NEAR(1.0f, dedication->mult, 1e-5f);
 }
 
 TEST_F(FontFamilyLayoutFixture, AHeadingInTheAccentFamilyHasItsFaceAtItsSize) {
@@ -142,7 +145,7 @@ TEST_F(FontFamilyLayoutFixture, AHeadingInTheAccentFamilyHasItsFaceAtItsSize) {
   const Line* p = find(lines, "Body text.");
   ASSERT_TRUE(h1 && p);
   EXPECT_EQ(kAccentBase | 47, h1->fontId);  // 1.6 x 29.17 px
-  EXPECT_FLOAT_EQ(1.0f, h1->mult);
+  EXPECT_NEAR(1.0f, h1->mult, 1e-5f);
   EXPECT_EQ(0, p->fontId);
 }
 
@@ -153,9 +156,9 @@ TEST_F(FontFamilyLayoutFixture, ABodySizeBlockInAnotherFamilyHasThatFamilysBodyF
   const Line* sans = find(lines, "Sans words");
   ASSERT_TRUE(dedication && sans);
   EXPECT_EQ(kAccentBody, dedication->fontId);
-  EXPECT_FLOAT_EQ(1.0f, dedication->mult);
+  EXPECT_NEAR(1.0f, dedication->mult, 1e-5f);
   EXPECT_EQ(kSansBody, sans->fontId);
-  EXPECT_FLOAT_EQ(1.0f, sans->mult);
+  EXPECT_NEAR(1.0f, sans->mult, 1e-5f);
 }
 
 TEST_F(FontFamilyLayoutFixture, AGenericSansHeadingHasTheNearestBuiltInRung) {
@@ -163,8 +166,8 @@ TEST_F(FontFamilyLayoutFixture, AGenericSansHeadingHasTheNearestBuiltInRung) {
   const auto lines = layout("<h2 class='generic'>Bravo</h2>", &families);
   const Line* h2 = find(lines, "Bravo");
   ASSERT_NE(nullptr, h2);
-  EXPECT_EQ(2020, h2->fontId);      // 140 % on the 142 % rung
-  EXPECT_FLOAT_EQ(1.0f, h2->mult);  // inside the dead zone
+  EXPECT_EQ(2020, h2->fontId);         // 140 % on the 142 % rung
+  EXPECT_NEAR(1.0f, h2->mult, 1e-5f);  // inside the dead zone
 }
 
 TEST_F(FontFamilyLayoutFixture, TheBodyFamilyAndFamiliesTheBookLacksKeepTheBodyFont) {
@@ -239,7 +242,7 @@ TEST_F(FontFamilyLayoutFixture, AnAccentWordInABodyParagraphHasTheAccentFace) {
   ASSERT_EQ(3u, mixed->wordFonts.size());
   EXPECT_EQ(0, mixed->wordFonts[0].fontId);
   EXPECT_EQ(kAccentBody, mixed->wordFonts[1].fontId);
-  EXPECT_FLOAT_EQ(1.0f, mixed->wordFonts[1].scale);
+  EXPECT_TRUE(mixed->wordFonts[1].scale.isOne());
   EXPECT_EQ(0, mixed->wordFonts[2].fontId);
 }
 
@@ -251,7 +254,7 @@ TEST_F(FontFamilyLayoutFixture, AWordInAnotherFamilyHasItsFaceAtTheBlocksSize) {
   EXPECT_EQ(kAccentBase | 47, h1->fontId);  // the heading's own family, Display, at 160 %
   ASSERT_EQ(3u, h1->wordFonts.size());
   EXPECT_EQ(2022, h1->wordFonts[1].fontId);  // the built-in sans at 160 %: its 157 % rung
-  EXPECT_FLOAT_EQ(1.0f, h1->wordFonts[1].scale);
+  EXPECT_TRUE(h1->wordFonts[1].scale.isOne());
   EXPECT_EQ(0, h1->wordFonts[0].fontId);
   EXPECT_EQ(0, h1->wordFonts[2].fontId);
 }
@@ -312,7 +315,7 @@ TEST_F(FontFamilyLayoutFixture, ADropCapInAnotherFamilyHasThatFamilysFace) {
   const Line* cap = find(plain, "A");
   ASSERT_TRUE(cap);
   EXPECT_EQ(0, cap->fontId);
-  EXPECT_FLOAT_EQ(3.0f, cap->mult);
+  EXPECT_NEAR(3.0f, cap->mult, 1e-5f);
 }
 
 TEST_F(FontFamilyLayoutFixture, AHandFilledLetterInsideAWordHasTheAccentFace) {

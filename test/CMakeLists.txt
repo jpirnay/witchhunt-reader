@@ -97,6 +97,9 @@ target_include_directories(crosspoint_test_common INTERFACE
   ${REPO_ROOT}/lib
   # Header-only: lib/ZipFile takes its registry's lock from it.
   ${REPO_ROOT}/lib/BssMutex
+  # For <TextScale.h>, which the settings, CSS and layout headers include; no other header there shares a name with a
+  # test's own or a shim.
+  ${REPO_ROOT}/lib/EpdFont
 )
 target_compile_options(crosspoint_test_common INTERFACE
   -Wall
@@ -227,6 +230,7 @@ add_subdirectory(epub_opf)
 add_subdirectory(boot_diag_ring)
 add_subdirectory(image_dimensions_guard)
 add_subdirectory(image_scale)
+add_subdirectory(text_scale)
 add_subdirectory(word_size_layout)
 add_subdirectory(text_block_range)
 add_subdirectory(token_boundary)
