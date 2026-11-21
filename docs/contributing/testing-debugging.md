@@ -121,9 +121,23 @@ To write an image that is already built without PlatformIO re-scanning the proje
 ./bin/flash -a                  # app image only; bootloader and partition table untouched
 ./bin/flash -f saved.bin        # flash this app image instead of the env's firmware.bin
 ./bin/flash -n                  # print the esptool command and exit
+./bin/flash -d x4pro            # a board named in bin/devices.local: its env and its port (bash on Linux)
+./bin/flash -l                  # the boards in bin/devices.local, and where each is attached
 ```
 
 With `-f`, the bootloader and partition table still come from the env's build directory; if it has none, the script writes the app alone and says so. `-w SECONDS` sets how long it waits for the device (0 fails at once). Like a PlatformIO upload, the scripts leave the NVS partition, and with it the settings, alone.
+
+With several boards plugged in, name each once in `bin/devices.local` (kept out of git): one line per board with a name, its PlatformIO environment, and the serial number its USB port reports. An ESP32-C3 or S3 on its own USB reports the chip's MAC:
+
+```text
+# name   environment   serial
+x4pro    x4pro         B8:1F:3F:D6:A6:FC
+picco    picco_stock   9C:96:D5:E1:D8:2C
+```
+
+`bin/flash -d <name>` then takes that environment and finds the port as the `/dev/serial/by-id` link naming the serial, so it stays right when boards are swapped or replugged, and waits for it as for any device. `-e` and `-p` still win over the file. `bin\flash.ps1` has no `-d` yet.
+
+`bin/flash` reads the offsets from the env's partition table. For an env built for a board's stock table (`picco_stock`) it writes only otadata and the app, at that table's offsets, as its PlatformIO upload does (`scripts/stock_table_upload.py`). `bin\flash.ps1` still writes every env as ours: do not use it for `picco_stock`.
 
 Open serial monitor:
 

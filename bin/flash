@@ -19,14 +19,32 @@
 #   ./bin/flash -n              print the esptool command and exit
 #   ./bin/flash -f FILE         flash FILE as the app image instead of .pio/build/<env>/firmware.bin
 #                               (bootloader/partitions still come from the env build dir if present)
+#   ./bin/flash -d x4pro        a board named in bin/devices.local: its environment, and its port
+#   ./bin/flash -l              list the boards in bin/devices.local and where each is attached
 #
 # The port may also be set once via the FLASH_PORT environment variable.
+#
+# bin/devices.local (optional, kept out of git) names your boards, one per line:
+# a name, the PlatformIO environment, and the serial number its USB port
+# reports. An ESP32-C3/S3's own USB reports the chip's MAC address:
+#
+#   x4pro   x4pro         B8:1F:3F:D6:A6:FC
+#   picco   picco_stock   9C:96:D5:E1:D8:2C
+#
+# -d finds the port as the /dev/serial/by-id link naming that serial (Linux), so
+# it stays right when boards are swapped or replugged, and waits for it like any
+# other flash. The serial may be any part of the link's name, or a /dev path.
+# -e and -p still win over the file.
 #
 # NOTE: it writes the same four images at the same four offsets as a PlatformIO
 # upload, which deliberately leaves the gap at 0x9000 alone -- that is the NVS
 # partition, where settings live. Do NOT "simplify" this by flashing
 # firmware.factory.bin at 0x0: that image spans 0x0-0x10000 and pads the NVS
 # window with 0xFF, so it would wipe the user's settings on every flash.
+#
+# An env built for a board's stock partition table (picco_stock) gets what its
+# PlatformIO upload writes (scripts/stock_table_upload.py): otadata and the app
+# at that table's offsets, and nothing else.
 
 set -euo pipefail
 
@@ -36,16 +54,23 @@ FIRMWARE=""
 APP_ONLY=0
 DRY_RUN=0
 WAIT_SECONDS=120
+DEVICE=""
+LIST_DEVICES=0
+ENV_GIVEN=0
+PORT_GIVEN=0
 
 usage() {
-  sed -n '3,29p' "$0" | sed 's/^# \{0,1\}//'
+  # The header comment, up to the first line that is not one.
+  awk 'NR > 2 && /^#/ { sub(/^# ?/, ""); print; next } NR > 2 { exit }' "$0"
   exit "${1:-0}"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -e|--environment) ENV_NAME="${2:?-e needs an environment name}"; shift 2 ;;
-    -p|--port)        PORT="${2:?-p needs a port}"; shift 2 ;;
+    -e|--environment) ENV_NAME="${2:?-e needs an environment name}"; ENV_GIVEN=1; shift 2 ;;
+    -p|--port)        PORT="${2:?-p needs a port}"; PORT_GIVEN=1; shift 2 ;;
+    -d|--device)      DEVICE="${2:?-d needs a device name}"; shift 2 ;;
+    -l|--list-devices) LIST_DEVICES=1; shift ;;
     -f|--firmware)    FIRMWARE="${2:?-f needs a firmware file}"; shift 2 ;;
     -w|--wait)        WAIT_SECONDS="${2:?-w needs a number of seconds}"; shift 2 ;;
     -a|--app-only)    APP_ONLY=1; shift ;;
@@ -55,7 +80,76 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEVICES_FILE="${SCRIPT_DIR}/devices.local"
+
+# The boards in devices.local, one "name environment serial" line each; comments and blank lines
+# skipped, as are lines missing a field.
+device_lines() {
+  awk '!/^[[:space:]]*(#|$)/ && NF >= 3 { print $1, $2, $3 }' "${DEVICES_FILE}"
+}
+
+# Every /dev/serial/by-id link whose name holds this serial (case ignored), one per line; or the
+# serial itself when it is a path that exists. Nothing while the board is unplugged or asleep.
+device_ports() {
+  local serial=$1
+  if [[ "${serial}" == /* ]]; then
+    [[ -e "${serial}" ]] && echo "${serial}"
+    return 0
+  fi
+  local links=()
+  shopt -s nullglob nocaseglob
+  links=(/dev/serial/by-id/*"${serial}"*)
+  shopt -u nullglob nocaseglob
+  [[ ${#links[@]} -eq 0 ]] || printf '%s\n' "${links[@]}"
+}
+
+if [[ "${LIST_DEVICES}" -eq 1 || -n "${DEVICE}" ]] && [[ ! -f "${DEVICES_FILE}" ]]; then
+  echo "flash: no ${DEVICES_FILE}: one line per board, name, environment and USB serial number," >&2
+  echo "flash: e.g. 'x4pro x4pro B8:1F:3F:D6:A6:FC' (see ./bin/flash -h)." >&2
+  exit 1
+fi
+
+if [[ "${LIST_DEVICES}" -eq 1 ]]; then
+  while read -r name env serial; do
+    ports="$(device_ports "${serial}" | paste -sd' ' -)"
+    printf '%-12s %-22s %-20s %s\n' "${name}" "${env}" "${serial}" "${ports:-(not attached)}"
+  done < <(device_lines)
+  exit 0
+fi
+
+DEVICE_SERIAL=""
+if [[ -n "${DEVICE}" ]]; then
+  read -r DEVICE_ENV DEVICE_SERIAL < <(device_lines | awk -v n="${DEVICE,,}" 'tolower($1) == n { print $2, $3; exit }') || true
+  if [[ -z "${DEVICE_SERIAL}" ]]; then
+    echo "flash: no device '${DEVICE}' in ${DEVICES_FILE} (it names: $(device_lines | cut -d' ' -f1 | paste -sd' ' -))." >&2
+    exit 1
+  fi
+  [[ "${ENV_GIVEN}" -eq 1 ]] || ENV_NAME="${DEVICE_ENV}"
+  # by-id links are udev's: Git Bash and macOS have none, and there -d would only ever wait.
+  if [[ "${PORT_GIVEN}" -eq 0 && "${DEVICE_SERIAL}" != /* && "$(uname -s)" != Linux ]]; then
+    echo "flash: -d finds ports through /dev/serial/by-id, which only Linux has; name the port with -p." >&2
+    exit 1
+  fi
+  echo "flash: device ${DEVICE}: environment ${ENV_NAME}, serial ${DEVICE_SERIAL}"
+fi
+
+# Sets PORT to the device's link; fails while the device is not attached. Two links naming the
+# same serial (a too-short serial in devices.local) stop the run rather than pick one.
+resolve_device_port() {
+  local found=()
+  mapfile -t found < <(device_ports "${DEVICE_SERIAL}")
+  if [[ ${#found[@]} -gt 1 ]]; then
+    echo "flash: ${#found[@]} ports match '${DEVICE_SERIAL}': ${found[*]}" >&2
+    exit 1
+  fi
+  [[ ${#found[@]} -eq 1 ]] || return 1
+  PORT="${found[0]}"
+}
+DEVICE_PORT_LOOKUP=0
+[[ -n "${DEVICE_SERIAL}" && "${PORT_GIVEN}" -eq 0 ]] && DEVICE_PORT_LOOKUP=1
+
 BUILD_DIR="${REPO_ROOT}/.pio/build/${ENV_NAME}"
 
 # PlatformIO's core directory holds both esptool and the framework blob. The
@@ -77,6 +171,34 @@ if [[ -z "${ESPTOOL}" ]]; then
   echo "flash: no esptool under ${PIO_CORE}/penv -- is PlatformIO installed?" >&2
   exit 1
 fi
+PYTHON=""
+for candidate in "${PIO_CORE}/penv/Scripts/python.exe" "${PIO_CORE}/penv/bin/python"; do
+  [[ -x "${candidate}" ]] && PYTHON="${candidate}" && break
+done
+
+# Prints the offsets of otadata and of ota_0, the slot boot_app0.bin selects, from
+# a partition table image (32-byte entries starting 0xAA 0x50: type, subtype,
+# offset). Not the first app partition: the Picco's stock table puts a factory
+# "safeboot" app at 0x20000 before its ota_0 at 0xe0000.
+partition_offsets() {
+  "${PYTHON}" - "$1" <<'PY'
+import struct, sys
+table = open(sys.argv[1], "rb").read()
+otadata = app = None
+for i in range(0, len(table) - 31, 32):
+    entry = table[i:i + 32]
+    if entry[:2] != b"\xaa\x50":
+        break
+    kind, subtype, offset = entry[2], entry[3], struct.unpack("<I", entry[4:8])[0]
+    if kind == 1 and subtype == 0 and otadata is None:
+        otadata = offset
+    if kind == 0 and subtype == 0x10 and app is None:
+        app = offset
+if otadata is None or app is None:
+    sys.exit("no otadata or no ota_0 partition in " + sys.argv[1])
+print(hex(otadata), hex(app))
+PY
+}
 
 if [[ -n "${FIRMWARE}" ]]; then
   APP="${FIRMWARE}"
@@ -116,15 +238,51 @@ fi
 # image whose header does not match the chip it finds, so auto cannot mis-flash.
 # --flash-freq is omitted deliberately: esptool already defaults it to keep.
 ARGS=(--chip auto --baud 921600 --before default-reset --after hard-reset)
-[[ -n "${PORT}" ]] && ARGS+=(--port "${PORT}")
+
+# esptool's arguments for this attempt: the port named, found for the device, or none (esptool
+# then looks for one itself). A device that is not attached yet fails it.
+attempt_args() {
+  if [[ "${DEVICE_PORT_LOOKUP}" -eq 1 ]]; then
+    resolve_device_port || return 1
+  fi
+  CALL=("${ESPTOOL}" "${ARGS[@]}")
+  [[ -z "${PORT}" ]] || CALL+=(--port "${PORT}")
+  CALL+=(write-flash --flash-mode keep --flash-size keep "${IMAGES[@]}")
+}
 
 # Same offsets a PlatformIO upload uses, verified against firmware.factory.bin:
-# bootloader 0x0, partition table 0x8000, otadata 0xe000, app 0x10000.
-IMAGES=(0x10000 "${APP}")
+# bootloader 0x0, partition table 0x8000, otadata 0xe000, app 0x10000. They are
+# read from the env's partition table, because a stock table puts otadata and
+# the app elsewhere: on the Picco's, 0xe000 is inside its NVS and the one app
+# slot starts at 0xe0000. On such a table the bootloader, the table and NVS are
+# the vendor's, and a PlatformIO upload writes otadata and the app only
+# (scripts/stock_table_upload.py; writing the rest wrecked the Picco's first
+# install). So does this.
+OTADATA_OFFSET=0xe000
+APP_OFFSET=0x10000
+STOCK_TABLE=0
+if [[ -f "${BUILD_DIR}/partitions.bin" ]]; then
+  if [[ -z "${PYTHON}" ]]; then
+    echo "flash: no python under ${PIO_CORE}/penv to read ${BUILD_DIR}/partitions.bin." >&2
+    exit 1
+  fi
+  read -r OTADATA_OFFSET APP_OFFSET < <(partition_offsets "${BUILD_DIR}/partitions.bin") || true
+  if [[ -z "${APP_OFFSET}" ]]; then
+    echo "flash: could not read the offsets from ${BUILD_DIR}/partitions.bin." >&2
+    exit 1
+  fi
+  [[ "${OTADATA_OFFSET}" == 0xe000 && "${APP_OFFSET}" == 0x10000 ]] || STOCK_TABLE=1
+fi
+IMAGES=("${APP_OFFSET}" "${APP}")
 if [[ "${APP_ONLY}" -eq 0 ]]; then
   BOOT_APP0="$(ls "${PIO_CORE}"/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin 2>/dev/null | head -n1 || true)"
   if [[ -z "${BOOT_APP0}" ]]; then
     echo "flash: boot_app0.bin not found in the framework package; flashing the app only." >&2
+  elif [[ "${STOCK_TABLE}" -eq 1 ]]; then
+    # boot_app0.bin is otadata with sequence 1 in its first sector: it selects ota_0 on any table.
+    echo "flash: ${ENV_NAME} is built for a stock partition table: writing otadata at ${OTADATA_OFFSET} and the app at ${APP_OFFSET} only."
+    IMAGES=("${OTADATA_OFFSET}" "${BOOT_APP0}"
+            "${APP_OFFSET}" "${APP}")
   else
     IMAGES=(0x0 "${BUILD_DIR}/bootloader.bin"
             0x8000 "${BUILD_DIR}/partitions.bin"
@@ -134,7 +292,13 @@ if [[ "${APP_ONLY}" -eq 0 ]]; then
 fi
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
-  printf '%q ' "${ESPTOOL}" "${ARGS[@]}" write-flash --flash-mode keep --flash-size keep "${IMAGES[@]}"
+  if ! attempt_args; then
+    echo "flash: ${DEVICE} (${DEVICE_SERIAL}) is not attached; the port would be its /dev/serial/by-id link." >&2
+    PORT="/dev/serial/by-id/*${DEVICE_SERIAL}*"
+    DEVICE_PORT_LOOKUP=0
+    attempt_args
+  fi
+  printf '%q ' "${CALL[@]}"
   printf '\n'
   exit 0
 fi
@@ -146,15 +310,25 @@ DEADLINE=$(( $(date +%s) + WAIT_SECONDS ))
 ATTEMPT=0
 while true; do
   ATTEMPT=$(( ATTEMPT + 1 ))
-  if "${ESPTOOL}" "${ARGS[@]}" write-flash --flash-mode keep --flash-size keep "${IMAGES[@]}"; then
-    echo "flash: done."
-    exit 0
+  if attempt_args; then
+    [[ "${DEVICE_PORT_LOOKUP}" -eq 0 ]] || echo "flash: ${DEVICE} is at ${PORT}"
+    if "${CALL[@]}"; then
+      echo "flash: done."
+      exit 0
+    fi
+    NOT_READY="device not ready -- power it on"
+  else
+    NOT_READY="${DEVICE} (${DEVICE_SERIAL}) is not attached -- plug it in or wake it"
   fi
   if [[ $(date +%s) -ge ${DEADLINE} ]]; then
     echo "flash: giving up after ${ATTEMPT} attempt(s)." >&2
-    echo "flash: if the device is awake and still not found, check the port with 'pio device list'." >&2
+    if [[ -n "${DEVICE}" ]]; then
+      echo "flash: './bin/flash -l' shows which boards in devices.local are attached, and where." >&2
+    else
+      echo "flash: if the device is awake and still not found, check the port with 'pio device list'." >&2
+    fi
     exit 1
   fi
-  echo "flash: device not ready -- power it on; retrying (attempt ${ATTEMPT}, $(( DEADLINE - $(date +%s) ))s left)..." >&2
+  echo "flash: ${NOT_READY}; retrying (attempt ${ATTEMPT}, $(( DEADLINE - $(date +%s) ))s left)..." >&2
   sleep 3
 done
