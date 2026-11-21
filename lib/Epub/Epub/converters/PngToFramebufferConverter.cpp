@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <HalSystem.h>  // feedWatchdog()
+#include <ImageScale.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <PngStreamDecoder.h>
@@ -158,11 +159,9 @@ OutputSize outputSizeFor(const int srcWidth, const int srcHeight, const RenderCo
   if (config.useExactDimensions && config.maxWidth > 0 && config.maxHeight > 0) {
     return {config.maxWidth, config.maxHeight};
   }
-  const float scaleX = (float)config.maxWidth / srcWidth;
-  const float scaleY = (float)config.maxHeight / srcHeight;
-  float scale = (scaleX < scaleY) ? scaleX : scaleY;
-  if (scale > 1.0f) scale = 1.0f;  // never upscale
-  OutputSize out{(int)(srcWidth * scale), (int)(srcHeight * scale)};
+  const ImageScale scale = ImageScale::smaller(ImageScale::fit(srcWidth, srcHeight, config.maxWidth, config.maxHeight),
+                                               ImageScale());  // never upscale
+  OutputSize out{scale.apply(srcWidth), scale.apply(srcHeight)};
   if (out.width < 1) out.width = 1;
   if (out.height < 1) out.height = 1;
   return out;
@@ -396,8 +395,8 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
   const int dstHeight = out.height;
   // No single scale factor: the axes map independently below (Bresenham across, pull-per-row
   // down), so nothing here relies on the caller having handed us an aspect-correct box.
-  LOG_TRC("PNG", "PNG %dx%d -> %dx%d (scale %.2fx%.2f), colorType=%d bitDepth=%d", srcWidth, srcHeight, dstWidth,
-          dstHeight, (float)dstWidth / srcWidth, (float)dstHeight / srcHeight, info.colorType, info.bitDepth);
+  LOG_TRC("PNG", "PNG %dx%d -> %dx%d, colorType=%d bitDepth=%d", srcWidth, srcHeight, dstWidth, dstHeight,
+          info.colorType, info.bitDepth);
 
   auto grayLine = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[srcWidth]);
   if (!grayLine) {

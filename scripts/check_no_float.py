@@ -1,10 +1,15 @@
-"""Fails the firmware build when the TTF engine (lib/EpdFont/ttf) uses floating point (spec 5.2).
+"""Fails the firmware build when a source listed in FLOAT_FREE uses floating point.
 
-The C3 has no FPU: float or double maths would pull in libgcc's slow soft-float routines, which the engine
-was designed to avoid. The linker map cannot show this. It names only the first object that pulled in each
-archive member, and other code (SdFat, the battery monitor) already pulls in the double routines. So this
-script reads the engine's own objects instead: any undefined soft-float or libm symbol in one of them fails
-the build.
+The C3 has no FPU: float or double maths pulls in libgcc's slow soft-float routines. The TTF engine was
+designed without them (spec 5.2), and the integer-maths work moves the rest of the firmware off them one
+area at a time (docs/future_work/integer-math/): each finished area adds its sources to FLOAT_FREE, so the
+float cannot come back unnoticed.
+
+The linker map cannot show this. It names only the first object that pulled in each archive member, and
+other code (newlib's printf and strtod, ArduinoJson, libstdc++) keeps the double routines in the image
+anyway. So this script reads the listed sources' own objects: any undefined soft-float, libm or
+float-parsing symbol in one of them fails the build. Code inlined from a header is checked in the objects
+that include it.
 
 PlatformIO runs it after every link (platformio.ini: extra_scripts = post:scripts/check_no_float.py).
 By hand:
@@ -26,19 +31,51 @@ SOFT_FLOAT = re.compile(
 LIBM = re.compile(
     r"^(?:sqrt|cbrt|hypot|pow|exp|exp2|log|log2|log10|sin|cos|tan|asin|acos|atan|atan2"
     r"|floor|ceil|round|lround|trunc|fmod|ldexp|frexp|modf)f?$"
+    r"|^(?:strtof|strtod|atof)$"
 )
-ENGINE_DIR = "/EpdFont/ttf/"
+
+# Sources, from the repository root, that must build without floating point. A path ending in "/" takes the
+# folder and everything below it.
+FLOAT_FREE = [
+    "lib/EpdFont/ttf/",
+    # Image scaling (integer-maths area 1): exact ratios (lib/GfxRenderer/ImageScale.h).
+    "lib/Epub/Epub/converters/",
+    "lib/GfxRenderer/Bitmap.cpp",
+    "lib/GfxRenderer/BitmapHelpers.cpp",
+    "lib/JpegToBmpConverter/",
+    "lib/PngToBmpConverter/",
+    "lib/Txt/",
+    "lib/Xtc/",
+    "src/activities/home/FileBrowserActivity.cpp",
+    "src/activities/util/BmpViewerActivity.cpp",
+    "src/components/themes/lyra/Lyra3CoversTheme.cpp",
+    "src/components/themes/lyra/LyraCarouselTheme.cpp",
+    "src/components/themes/lyra/LyraTheme.cpp",
+]
 
 
-def engine_objects(build_dir):
-    """Every object compiled from lib/EpdFont/ttf, its third_party folder included."""
+def object_suffix(source):
+    """How the object built from `source` ends: PlatformIO builds lib/<Name>/x.cpp to lib<hash>/<Name>/x.cpp.o
+    and src/x.cpp to src/x.cpp.o under the build directory."""
+    return "/" + (source[len("lib/") :] if source.startswith("lib/") else source)
+
+
+def matches(path, source):
+    suffix = object_suffix(source)
+    return suffix in path if source.endswith("/") else path.endswith(suffix + ".o")
+
+
+def float_free_objects(build_dir):
+    """(object, source entry) for every object built from a FLOAT_FREE source."""
     for root, _, files in os.walk(build_dir):
-        path = root.replace("\\", "/") + "/"
-        if ENGINE_DIR not in path:
-            continue
         for name in files:
-            if name.endswith(".o"):
-                yield os.path.join(root, name)
+            if not name.endswith(".o"):
+                continue
+            path = os.path.join(root, name).replace("\\", "/")
+            for source in FLOAT_FREE:
+                if matches(path, source):
+                    yield path, source
+                    break
 
 
 def float_symbols(nm, obj, env=None):
@@ -49,18 +86,21 @@ def float_symbols(nm, obj, env=None):
 
 def check(nm, build_dir, env=None):
     """Prints the verdict; returns the number of offending objects."""
-    objects = sorted(engine_objects(build_dir))
+    found_objects = sorted(float_free_objects(build_dir))
     bad = 0
-    for obj in objects:
+    for obj, _ in found_objects:
         found = float_symbols(nm, obj, env)
         if found:
             bad += 1
             print(f"check_no_float: {os.path.relpath(obj, build_dir)} uses floating point: {', '.join(found)}")
-    if not objects:
-        print("check_no_float: this build has no TTF engine objects; nothing to check")
-        return 0
+    # A listed source that built nothing here is compiled out of this board, or renamed: say so, as a renamed one
+    # would otherwise go unchecked.
+    covered = {source for _, source in found_objects}
+    for source in FLOAT_FREE:
+        if source not in covered:
+            print(f"check_no_float: no object from {source} in this build")
     if not bad:
-        print(f"check_no_float: {len(objects)} TTF engine objects, no floating point")
+        print(f"check_no_float: {len(found_objects)} objects from float-free sources, no floating point")
     return bad
 
 
@@ -79,7 +119,7 @@ if env is not None:
         return 1 if check(nm, env.subst("$BUILD_DIR"), env["ENV"]) else 0
 
     env.AddPostAction(  # noqa: F821
-        "$BUILD_DIR/${PROGNAME}.elf", env.VerboseAction(_after_link, "Checking the TTF engine for floating point")
+        "$BUILD_DIR/${PROGNAME}.elf", env.VerboseAction(_after_link, "Checking float-free sources for floating point")
     )
 elif __name__ == "__main__":
     if len(sys.argv) != 3:

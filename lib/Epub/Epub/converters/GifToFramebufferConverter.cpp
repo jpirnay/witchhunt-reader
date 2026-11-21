@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <HalSystem.h>  // feedWatchdog()
+#include <ImageScale.h>
 #include <Logging.h>
 
 #include <cstring>
@@ -330,19 +331,17 @@ bool GifToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
 
   const int srcW = st->frameWidth;
   const int srcH = st->frameHeight;
-  float scale;
+  ImageScale scale;
   int dstW, dstH;
   if (config.useExactDimensions && config.maxWidth > 0 && config.maxHeight > 0) {
     dstW = config.maxWidth;
     dstH = config.maxHeight;
-    scale = (float)dstW / srcW;
+    scale = ImageScale(dstW, srcW);
   } else {
-    float sx = (float)config.maxWidth / srcW;
-    float sy = (float)config.maxHeight / srcH;
-    scale = (sx < sy) ? sx : sy;
-    if (scale > 1.0f) scale = 1.0f;
-    dstW = (int)(srcW * scale);
-    dstH = (int)(srcH * scale);
+    // Into the box, never up; a box side of 0 leaves nothing to draw.
+    scale = ImageScale::smaller(ImageScale::fit(srcW, srcH, config.maxWidth, config.maxHeight), ImageScale());
+    dstW = scale.apply(srcW);
+    dstH = scale.apply(srcH);
   }
   if (dstW <= 0 || dstH <= 0) {
     LOG_ERR("GIF", "Zero-sized output for: %s", imagePath.c_str());
@@ -372,8 +371,8 @@ bool GifToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
 
   const int screenW = renderer.getScreenWidth();
   const int screenH = renderer.getScreenHeight();
-  const int cfgX = config.x + (int)(st->frameLeft * scale);
-  const int cfgY = config.y + (int)(st->frameTop * scale);
+  const int cfgX = config.x + scale.apply(st->frameLeft);
+  const int cfgY = config.y + scale.apply(st->frameTop);
   int nextDstY = 0;  // first destination row not yet emitted (progressive GIFs only)
   bool aborted = false;
 

@@ -1793,7 +1793,7 @@ ThumbResult Epub::generateThumbBmp(int height, bool allowExtract, BuildArena* sc
     return ThumbResult::TransientFail;
   }
 
-  const int thumbW = static_cast<int>(height * 0.6f);
+  const int thumbW = height * 3 / 5;  // thumbnails are 6:10
   bool success = false;
   if (detectedFormat == ImageFormatDetector::Format::Jpeg) {
     LOG_DBG("EBP", "Generating thumb BMP from JPEG cover image");

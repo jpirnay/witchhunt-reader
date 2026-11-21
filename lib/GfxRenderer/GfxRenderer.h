@@ -674,12 +674,16 @@ class GfxRenderer {
     uint16_t stride;
   };
 
+  // Draws the centred `visibleWidth` x `visibleHeight` part of the bitmap (0, or the whole size, for all of
+  // it; an odd remainder is cut from the right or bottom), scaled down to fit `maxWidth` x `maxHeight` where
+  // a bound is given, never up.
+  //
   // When `gray8` is set the bitmap's 8-bit samples are painted there and the
   // framebuffer is left untouched — the 2-bit dither is skipped entirely rather
   // than done and discarded. Ignored for 1-bit bitmaps, which have no levels to
   // preserve. Default nullptr keeps every existing caller on the 2-bit path.
-  void drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0, float cropY = 0,
-                  const Gray8Target* gray8 = nullptr) const;
+  void drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, int visibleWidth = 0,
+                  int visibleHeight = 0, const Gray8Target* gray8 = nullptr) const;
   // One 8-bit sample at LOGICAL (x, y), rotated onto the canvas exactly as
   // drawPixel() rotates onto the framebuffer. Silently drops out-of-panel
   // coordinates, where drawPixel() logs — a scaled image legitimately walks off

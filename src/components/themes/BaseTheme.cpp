@@ -707,11 +707,10 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
 
         // Calculate width based on aspect ratio, maintaining baseHeight
         if (imgWidth > 0 && imgHeight > 0) {
-          const float aspectRatio = static_cast<float>(imgWidth) / static_cast<float>(imgHeight);
-          bookWidth = static_cast<int>(baseHeight * aspectRatio);
+          bookWidth = static_cast<int>(static_cast<int64_t>(baseHeight) * imgWidth / imgHeight);
 
           // Ensure width doesn't exceed reasonable limits (max 90% of screen width)
-          const int maxWidth = static_cast<int>(rect.width * 0.9f);
+          const int maxWidth = rect.width * 9 / 10;
           if (bookWidth > maxWidth) {
             bookWidth = maxWidth;
           }
