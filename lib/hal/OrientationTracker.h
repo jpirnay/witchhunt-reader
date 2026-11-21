@@ -4,7 +4,8 @@
 
 // Which of the reader's four orientations the device is held in, from the accelerometer.
 //
-// Input is the IMU's mount-corrected sample (freeink::Imu, BoardConfig SensorsConfig) in the panel's native frame: X
+// Input is the IMU's mount-corrected sample (freeink::Imu, BoardConfig SensorsConfig) in thousandths of g, in the
+// panel's native frame: X
 // along the long side toward native +x, Y along the short side toward native +y, Z into the screen. A board whose IMU
 // sits otherwise sets imuSwapXY / imuFlipX / imuFlipY in its profile. Held still, an accelerometer reads 1 g pointing
 // UP, so the reading points at the top edge of the text that reads upright in that pose, and GfxRenderer puts that
@@ -19,20 +20,22 @@ class OrientationTracker {
  public:
   static constexpr uint8_t kNone = 0xFF;
 
-  // The orientation a sample points at, a CrossPointOrientation value, or kNone: near flat (less than kMinTiltG of
+  // The orientation a sample points at, a CrossPointOrientation value, or kNone: near flat (less than kMinTiltMg of
   // gravity in the panel's plane, about 30 degrees from flat) or near a diagonal (the leading axis under
-  // kLeadRatio times the other, about 34 degrees from the axis).
-  static uint8_t classify(float ax, float ay);
+  // kLeadNum / kLeadDen times the other, about 34 degrees from the axis).
+  static uint8_t classify(int32_t axMg, int32_t ayMg);
 
   // One sample at `nowMs`. True when a new orientation has settled: read it from settled(). The first one to settle
   // after reset() counts as new, so a reader opened in landscape turns at once.
-  bool update(float ax, float ay, uint32_t nowMs);
+  bool update(int32_t axMg, int32_t ayMg, uint32_t nowMs);
   uint8_t settled() const { return settled_; }
   // Forget the history: the IMU was asleep, or auto-rotate was off.
   void reset();
 
-  static constexpr float kMinTiltG = 0.5f;
-  static constexpr float kLeadRatio = 1.5f;
+  static constexpr int32_t kMinTiltMg = 500;
+  // The lead ratio, 1.5, as a fraction: integer maths (the C3 has no FPU).
+  static constexpr int32_t kLeadNum = 3;
+  static constexpr int32_t kLeadDen = 2;
   static constexpr uint32_t kDwellMs = 600;
 
  private:
