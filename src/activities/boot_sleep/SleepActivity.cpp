@@ -1214,10 +1214,11 @@ void SleepActivity::renderCoverSleepScreen() const {
 
   FsFile file;
   if (Storage.openFileForRead("SLP", coverBmpPath, file)) {
-    // EPUB covers are cached as 8-bit greyscale, so dithering happens here rather
-    // than at generation time, and the adaptive filter has real tonal data to work
-    // with. Covers still cached as 2-bit (or TXT/XTC covers) take the native-palette
-    // path inside Bitmap and are unaffected by either flag.
+    // EPUB and TXT covers converted from a JPEG or PNG are cached as 8-bit greyscale,
+    // so dithering happens here, with this panel's table, rather than at generation
+    // time, and the adaptive filter has real tonal data to work with. 2-bit covers (XTC
+    // covers, a 2-bit BMP beside a TXT book) take the native-palette path inside Bitmap
+    // and are unaffected by either flag.
     Bitmap bitmap(file, /*dithering=*/true, sleepImageToneMapping(), sleepEqualizeBlend(renderer));
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Rendering sleep cover: %s", coverBmpPath.c_str());
