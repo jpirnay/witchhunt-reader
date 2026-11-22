@@ -625,6 +625,16 @@ bool HalDisplay::setLabRegisters(const uint8_t* records, const size_t len) {
   return einkDisplay.setLabRegisters(records, len);
 }
 
+bool HalDisplay::setGray16Calibration(const uint8_t black[3], const uint8_t white[3], const uint8_t erase,
+                                      const uint8_t (*paths)[3]) {
+  // The driver checks new doses against the paths in force and new paths against the doses in force, so a change of
+  // both could be refused for a mix of old and new. Every level undriven first fits any doses.
+  static constexpr uint8_t kUndriven[16][3] = {};
+  HalSpiBus::Lock spiLock;  // a 16-level image on the glass gives its drive back first: refreshes
+  return einkDisplay.setGray16Levels(kUndriven) && einkDisplay.setGray16Passes(black, white, erase) &&
+         einkDisplay.setGray16Levels(paths);
+}
+
 bool HalDisplay::supportsAbsoluteGrayPlanes() const {
   return einkDisplay.grayscaleCapabilities(freeink::GrayscaleMode::Absolute).supported();
 }
