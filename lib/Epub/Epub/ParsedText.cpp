@@ -996,7 +996,7 @@ int ParsedText::kernBefore(const GfxRenderer& renderer, const int fontId, const 
   const int left = wordFontId(j - 1, fontId);
   if (left != wordFontId(j, fontId)) return 0;
   // The engine kerns by code point, and the shaper kerned inside its runs: a glued gap beside a glyph run takes none.
-  if (shapes_ && (glyphEdge(renderer, fontId, j - 1, true) || glyphEdge(renderer, fontId, j, false))) return 0;
+  if (shapes_ && (glyphEdge(j - 1, true) || glyphEdge(j, false))) return 0;
   return renderer.getKerning(left, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
 }
 
@@ -1436,8 +1436,7 @@ bool ParsedText::shapedText(const std::string_view text) const {
          myanmar::holdsMyanmar(text.data(), text.size());
 }
 
-bool ParsedText::storedWidth(const GfxRenderer& /*renderer*/, const int /*fontId*/, const size_t i,
-                             uint16_t* const width) const {
+bool ParsedText::storedWidth(const size_t i, uint16_t* const width) const {
   const auto pieces = shapingState_ ? shapingState_->piecesOf(i) : std::nullopt;
   if (!pieces) return false;
   int sum = 0;
@@ -1480,8 +1479,7 @@ int ParsedText::shapedPrefixWidth(const GfxRenderer& renderer, const int fontId,
                     : measureWordWidth(renderer, font, candidate, wordStyles[i], false, wordScale(i), vertical_);
 }
 
-bool ParsedText::glyphEdge(const GfxRenderer& /*renderer*/, const int /*fontId*/, const size_t i,
-                           const bool last) const {
+bool ParsedText::glyphEdge(const size_t i, const bool last) const {
   if (!shapingState_) return false;
   // An empty glyph run (a letter its neighbour's ligature took) is a glyph edge too.
   const auto pieces = shapingState_->piecesOf(i);
@@ -2245,7 +2243,7 @@ void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int font
       } else if (combines(i)) {
         // A combined word is one em down its column, whatever its glyphs' advances.
         out.push_back(static_cast<uint16_t>(columnEm(renderer, font, wordStyles[i], wordScale(i))));
-      } else if (shapes_ && (shapedFirst ? storedWidth(renderer, fontId, i, &shapedWidth)
+      } else if (shapes_ && (shapedFirst ? storedWidth(i, &shapedWidth)
                                          : shapeToken(renderer, fontId, i, &shapedWidth, &prefetchBatch))) {
         // A token with pieces is as wide as they are: its runs' advances and its other code points measured as today.
         out.push_back(shapedWidth);
@@ -3340,7 +3338,7 @@ BidiLine::Scratch* ParsedText::bidiScratchFor(const BidiLine::ArenaWorkspace& wo
   return workspace.scratch() != nullptr ? workspace.scratch() : BidiLine::heapScratch();
 }
 
-bool ParsedText::layOutBidiLine(const GfxRenderer& renderer, const int fontId, const size_t first, const size_t count) {
+bool ParsedText::layOutBidiLine(const size_t first, const size_t count) {
   BidiState& state = *bidiState_;
   // The workspace is the pass's alone: its scope ends here, before the line is materialised (beforeLine_ may close the
   // page's arena block, and the line's TextBlock takes its bytes above it). No shaping call is made under it. The
@@ -3363,7 +3361,7 @@ bool ParsedText::layOutBidiLine(const GfxRenderer& renderer, const int fontId, c
     new (tokens + t) BidiLine::Token{words[first + t], TokenBoundary::hasSpace(wordBoundaries[first + t])};
   }
   state.lineTokens = count;
-  if (shapes_) cutShapedTokens(renderer, fontId, first, count, tokens);
+  if (shapes_) cutShapedTokens(first, count, tokens);
   BidiLine::Scratch* const scratch = bidiScratchFor(workspace);
   if (scratch == nullptr) return false;
   if (!BidiLine::layoutLine(tokens, count, state.openControls, level_, *scratch, state.line)) {
@@ -3381,8 +3379,7 @@ bool ParsedText::layOutBidiLine(const GfxRenderer& renderer, const int fontId, c
   return true;
 }
 
-void ParsedText::cutShapedTokens(const GfxRenderer& /*renderer*/, const int /*fontId*/, const size_t first,
-                                 const size_t count, BidiLine::Token* const tokens) {
+void ParsedText::cutShapedTokens(const size_t first, const size_t count, BidiLine::Token* const tokens) {
   BidiState& state = *bidiState_;
   // The line's cuts are counted first and their room taken whole, so no growth moves the array under a pointer handed
   // out: 2 B a cut, and 2 B a token for the counts, kept across lines and freed at the slice's yield
@@ -3985,7 +3982,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   // So does a line the pass could not run on (no workspace or scratch, logged), without its bidi controls.
   bool withoutBidi = false;
   if (bidi_) {
-    withoutBidi = !layOutBidiLine(renderer, fontId, lastBreakAt, lineWordCount);
+    withoutBidi = !layOutBidiLine(lastBreakAt, lineWordCount);
     if (!withoutBidi && !bidiLineIsPlain(lastBreakAt, lineWordCount)) {
       const int effectivePageWidth =
           widthForLine(static_cast<int>(breakIndex), lineHeight, blockStartY, pageWidth) - lineIndent;

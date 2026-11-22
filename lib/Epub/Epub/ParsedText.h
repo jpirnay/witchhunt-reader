@@ -303,12 +303,12 @@ class ParsedText {
   // Runs the line pass over tokens [first, first + count) into bidiState_->line, with the workspace borrowed from
   // lineArena_ for the pass alone. A token with shaped pieces is cut at their edges (cutShapedTokens). False, logged,
   // when it could not run: the line is then laid out without bidi.
-  bool layOutBidiLine(const GfxRenderer& renderer, int fontId, size_t first, size_t count);
+  bool layOutBidiLine(size_t first, size_t count);
   // Gives each of the line's tokens with more than one shaped piece its cut points (BidiLine::Token::cuts): where each
   // piece after the first begins, in bidiState_->tokenCuts, and records each token's cut count (tokenCutCount) for
   // the materialisation, which runs after the tokens are gone. A token whose cuts the heap has no room for, or that
   // break their contract, gets none (logged, latched): its pieces are then drawn as the line pass's code points.
-  void cutShapedTokens(const GfxRenderer& renderer, int fontId, size_t first, size_t count, BidiLine::Token* tokens);
+  void cutShapedTokens(size_t first, size_t count, BidiLine::Token* tokens);
   // What each of the line's pieces is drawn as, in bidiState_'s pieceForms and pieceGlyphs, and its width, in
   // lineXPosScratch_: the line pass's display form and its measure, unless the piece draws a shaped token's store piece
   // that is not Text (a glyph run, or a Reordered form, at the store's width). An empty run (a letter its glued
@@ -404,14 +404,14 @@ class ParsedText {
   bool chooseMyanmarBreak(const GfxRenderer& renderer, int fontId, size_t wordIndex, int availableWidth,
                           const std::vector<Hyphenator::BreakInfo>& breaks, size_t& chosenOffset, int& chosenWidth);
   // *width, the sum of token i's stored pieces' widths, and true; false when the store holds none for it. Nothing is
-  // shaped: a paragraph that needs bidi shapes its tokens before the line pass's workspace is borrowed.
-  bool storedWidth(const GfxRenderer& renderer, int fontId, size_t i, uint16_t* width) const;
+  // shaped: a paragraph that needs bidi, or that mixes shaped styles, shapes its tokens before the width loop.
+  bool storedWidth(size_t i, uint16_t* width) const;
   // The width of words[i]'s first `bytes` bytes and a hyphen when `hyphen`: a candidate the breaker measures, shaped in
   // the store's scratch entry (nothing is kept), or measured as code points when it is not shaped (and latched when it
   // could not be, or its pieces measured). The candidate's string was reserved by hyphenateWordAtIndex.
   int shapedPrefixWidth(const GfxRenderer& renderer, int fontId, size_t i, size_t bytes, bool hyphen);
   // Whether token i's first piece (its last, when `last`) is a glyph run: a glued gap there takes no kerning (step 8).
-  bool glyphEdge(const GfxRenderer& renderer, int fontId, size_t i, bool last) const;
+  bool glyphEdge(size_t i, bool last) const;
   // A line of a paragraph that shapes, tokens [first, first + count) placed: when a token has pieces, each token
   // becomes its pieces, in order (step 7), and true. The first piece keeps the token's boundary, the others are glued;
   // each takes the token's style and size; a Glyphs piece is drawn as its run, a Reordered piece as its form (without

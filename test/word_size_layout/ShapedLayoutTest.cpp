@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -793,8 +794,18 @@ TEST_F(ShapedLayout, AFontThatCannotShapeBuildsNoPlan) {
 TEST_F(ShapedLayout, TheGlyphsAreWarmedOncePerShaping) {
   ParsedText text(false, false, noIndentStyle());
   add(text, {{kHindi}, {kPatrika}, {kKa + kEmDash + kLa}});
+  renderer.prefetchBatchCalls.clear();
   EXPECT_TRUE(layOut(text, renderer, 400, /*includeLastLine=*/false).empty());
   EXPECT_EQ(1, renderer.prefetchBatches);  // हिन्दी, पत्रिका, क and ल coalesced into one batch
+  // The batch holds each shaped glyph once: coalescing drops none and repeats none.
+  std::set<uint16_t> shapedGlyphs;
+  for (const std::string& word : {kHindi, kPatrika, kKa, kLa}) {
+    for (const StoredGlyph& g : oracle(word)) shapedGlyphs.insert(static_cast<uint16_t>(g.gid));
+  }
+  ASSERT_EQ(1u, renderer.prefetchBatchCalls.size());
+  const std::vector<uint16_t>& warmed = renderer.prefetchBatchCalls[0].glyphs;
+  EXPECT_EQ(shapedGlyphs, std::set<uint16_t>(warmed.begin(), warmed.end()));
+  EXPECT_EQ(shapedGlyphs.size(), warmed.size());
   EXPECT_EQ(1u, layOut(text, renderer, 400).size());
   EXPECT_EQ(1, renderer.prefetchBatches);  // the second pass reused them, warm
 }

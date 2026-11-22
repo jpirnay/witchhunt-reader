@@ -57,9 +57,11 @@ class ShapedStore final : public IndicShaper::PieceSink {
   // Token `token`'s pieces when its entry was made for this text and key; nullopt otherwise (none, or stale). The span
   // and the views of glyphs() and form() are valid until the next call that changes the store.
   std::optional<std::span<const Piece>> pieces(size_t token, std::string_view text, uint32_t key) const;
-  // Pass-local cache validity: cleared at the start of calculateWordWidths() via clearPassValid() and set by
-  // pieces() / commit() after validating (hash, length, key). Lets passPieces() return the validated piece span in
-  // O(1) across subsequent line-break and emission calls in the same pass without re-hashing text.
+  // Token `token`'s pieces when pieces() or commit() found them valid since the last clearPassValid() (the start of
+  // each layout pass); nullopt otherwise, and for an entry without pieces. It reads no text: the line pass asks it
+  // several times a token, where pieces() would hash the token each time. So a caller that changes a token's text
+  // after the pass validated it makes the entry stale first (open(), as forgetShaping() does: the hyphenation split),
+  // or this hands out the old text's pieces, whose byte ranges can lie past the new text's end.
   std::optional<std::span<const Piece>> passPieces(size_t token) const;
   void clearPassValid();
   // The open entry's pieces so far (none when no entry is open): a scratch entry's are measured here before abandon().
