@@ -1910,6 +1910,10 @@ void cmdFs(const std::string_view arg) {
 //   LAB:REG:<hex>   register writes sent with every LUT frame until the next LAB:REG (empty clears): records of
 //                   command, length and that many bytes (frame rate, source voltages, VCOM). LAB_OK:reg <bytes>,
 //                   or LAB_ERROR where the panel driver takes none (PanelDriver::setLabRegisters()).
+//   LAB:G16:<b1>,<b2>,<b3>:<w1>,<w2>,<w3>:<erase>:<paths>  a 16-level panel's doses (frames toward black, toward
+//                   white, the fast-turn erase) and level paths, kept until the next LAB:G16 or a restart: <paths> is
+//                   16 groups of three digits, black dose 0..3, white dose 0..3, deep 0/1, level 0 first; one group
+//                   alone gives every level that path, so LAB:CANVAS then shows it on the whole screen. LAB_OK:g16.
 namespace lab {
 // Up to one SSD2677 table (535 bytes), the largest any driver here takes. Allocated by the first LAB:LUT, so a
 // session that never runs the lab keeps the RAM.
@@ -2019,7 +2023,30 @@ void cmdLab(std::string_view arg) {
     display.displayGray8Canvas(HalDisplay::HALF_REFRESH, false);
     return static_cast<void>(replyf("LAB_OK:%lu", millis() - start));
   }
-  if (arg.substr(0, 5) != "DRAW:") return static_cast<void>(reply("LAB_ERROR:LUT, REG, CANVAS or DRAW"));
+  if (arg.substr(0, 4) == "G16:") {
+    arg.remove_prefix(4);
+    uint8_t doses[6];
+    long erase = 0;
+    for (int i = 0; i < 6; ++i) {
+      long frames = 0;
+      if (!lab::takeNumber(arg, i == 2 || i == 5 ? ':' : ',', frames) || frames < 1 || frames > 63)
+        return static_cast<void>(reply("LAB_ERROR:bad dose"));
+      doses[i] = static_cast<uint8_t>(frames);
+    }
+    if (!lab::takeNumber(arg, ':', erase) || erase > 63) return static_cast<void>(reply("LAB_ERROR:bad erase"));
+    if (arg.size() != 3 && arg.size() != 48) return static_cast<void>(reply("LAB_ERROR:paths: 1 or 16 groups of 3"));
+    uint8_t paths[16][3];
+    for (size_t i = 0; i < 48; ++i) {
+      const char c = arg[i % arg.size()];
+      if (c < '0' || c > '3') return static_cast<void>(reply("LAB_ERROR:bad path"));
+      paths[i / 3][i % 3] = static_cast<uint8_t>(c - '0');
+    }
+    RenderLock lock;  // a 16-level image on the glass is given back with refreshes
+    if (!display.setGray16Calibration(doses, doses + 3, static_cast<uint8_t>(erase), paths))
+      return static_cast<void>(reply("LAB_ERROR:refused (no 16 levels, or a path nets out of range)"));
+    return static_cast<void>(reply("LAB_OK:g16"));
+  }
+  if (arg.substr(0, 5) != "DRAW:") return static_cast<void>(reply("LAB_ERROR:LUT, REG, CANVAS, G16 or DRAW"));
   arg.remove_prefix(5);
   const bool full = arg.substr(0, 5) == "FULL:";
   if (!full && arg.substr(0, 4) != "LUT:") return static_cast<void>(reply("LAB_ERROR:FULL or LUT"));

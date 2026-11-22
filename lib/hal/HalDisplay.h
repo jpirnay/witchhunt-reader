@@ -249,6 +249,11 @@ class HalDisplay {
   bool displayLabFrame(const uint8_t* bw, const uint8_t* red, const uint8_t* lut);
   // Register writes sent with every lab frame until cleared (FreeInkDisplay::setLabRegisters()); development builds.
   bool setLabRegisters(const uint8_t* records, size_t len);
+  // A 16-level panel's calibration (FreeInkDisplay::setGray16Passes and setGray16Levels): three doses toward black and
+  // three toward white in frames, the fast-turn erase, and each level's path {black dose 0..3, white dose 0..3, deep
+  // 0/1}. Kept until the next call or a restart. False where the panel has no 16 levels or a path nets outside the
+  // give-back's range. Development builds only (the serial test API's LAB:G16).
+  bool setGray16Calibration(const uint8_t black[3], const uint8_t white[3], uint8_t erase, const uint8_t (*paths)[3]);
   // Compose the intact B/W framebuffer with the LSB/MSB planes staged by
   // copyGrayscale*Buffers() and display the result in one refresh. Falls back to
   // a plain displayBuffer() on a panel that cannot, so callers need no branch of
