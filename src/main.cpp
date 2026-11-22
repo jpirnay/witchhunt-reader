@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <BitmapHelpers.h>
 #include <BoardConfig.h>
 #include <CooperativeAbort.h>
 #include <Epub.h>
@@ -39,6 +40,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <vector>
 
 #include "BootDiagnostics.h"
@@ -935,6 +937,10 @@ void openUiBookFonts();  // syncUiBookFonts' opener, below
 
 void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = false) {
   display.begin(seamless);
+  // The image dither's table for this panel, before anything draws a picture.
+  const HalCapabilities::ImageGray4Levels gray4 = HalCapabilities::imageGray4Levels();
+  std::copy(std::begin(gray4.thresholds), std::end(gray4.thresholds), gray4tuning::thresholds);
+  std::copy(std::begin(gray4.feedback), std::end(gray4.feedback), gray4tuning::feedback);
   // Carry the panel's measured FAST cost across the reboot. Without this the first decision that
   // depends on it is made blind, and on a slow panel that means one avoidable slow repaint per
   // boot before the measurement catches up. Seed-only: a live measurement always wins.

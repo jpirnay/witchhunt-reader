@@ -678,11 +678,11 @@ directly (`Wait complete: refresh ...`) are not log lines and stay. A reboot res
 
 ```
 CMD:SLEEP
-CMD:SLEEP:SCREEN[:T=<a>,<b>,<c>][:BOOK=<path>]
+CMD:SLEEP:SCREEN[:T=<a>,<b>,<c>][:F=<a>,<b>,<c>,<d>][:BOOK=<path>]
 CMD:REBOOT
 ```
 
-Replies: `SLEEP_OK`, `SLEEP_OK:screen T=<a>,<b>,<c>`, `REBOOT_OK`, sent before the device acts.
+Replies: `SLEEP_OK`, `SLEEP_OK:screen T=<a>,<b>,<c> F=<a>,<b>,<c>,<d>`, `REBOOT_OK`, sent before the device acts.
 
 - `SLEEP` goes to sleep the normal way (sleep screen, progress saved), as a held power key does.
   **Deep sleep switches the USB port off, and only a real button press wakes the device.** Do not
@@ -690,8 +690,10 @@ Replies: `SLEEP_OK`, `SLEEP_OK:screen T=<a>,<b>,<c>`, `REBOOT_OK`, sent before t
 - `SLEEP:SCREEN` paints the sleep screen the way `SLEEP` would and stays awake on it, so a camera
   can look at it and the next one follows without a button press. `ACT:HOME` leaves it; the screen
   may have given up the second framebuffer, so end a series with `REBOOT`. `T=` sets the 4-level
-  dither thresholds (`quantizeGray4()` in `lib/GfxRenderer/BitmapHelpers.h`, default 30,50,140,
-  rising, 0..255) for this and every later image until the next `T=` or a restart. `BOOK=` comes
+  dither thresholds (`quantizeGray4()` in `lib/GfxRenderer/BitmapHelpers.h`, rising, 0..255) and `F=`
+  the values fed back to the diffuser for the four levels (rising), for this and every later image
+  until the next `T=`/`F=` or a restart, which puts back the panel's own table
+  (`HalCapabilities::imageGray4Levels()`; 30,50,140 and 0,85,170,255 on a panel not measured yet). `BOOK=` comes
   last and takes the rest of the line: that book's cover stands in for the last book's for this
   screen, without opening it. Development builds only.
 - `REBOOT` restarts to Home the way the firmware's own maintenance restarts do: the reading session
