@@ -57,6 +57,11 @@ class ShapedStore final : public IndicShaper::PieceSink {
   // Token `token`'s pieces when its entry was made for this text and key; nullopt otherwise (none, or stale). The span
   // and the views of glyphs() and form() are valid until the next call that changes the store.
   std::optional<std::span<const Piece>> pieces(size_t token, std::string_view text, uint32_t key) const;
+  // Pass-local cache validity: cleared at the start of calculateWordWidths() via clearPassValid() and set by
+  // pieces() / commit() after validating (hash, length, key). Lets passPieces() return the validated piece span in
+  // O(1) across subsequent line-break and emission calls in the same pass without re-hashing text.
+  std::optional<std::span<const Piece>> passPieces(size_t token) const;
+  void clearPassValid();
   // The open entry's pieces so far (none when no entry is open): a scratch entry's are measured here before abandon().
   // Valid as pieces() is.
   std::span<const Piece> openPieces() const;
@@ -98,8 +103,9 @@ class ShapedStore final : public IndicShaper::PieceSink {
     uint16_t begin = 0;   // its run of pieces_
     uint16_t count = 0;
     bool valid = false;
+    mutable bool passValid = false;
   };
-  static_assert(sizeof(Entry) == 16, "an entry is 16 B: two words, three halfwords and a flag");
+  static_assert(sizeof(Entry) == 16, "an entry is 16 B: two words, three halfwords and flags");
   static constexpr size_t kMaxPieces = UINT16_MAX;  // an entry's run is counted in halfwords
   static uint32_t hashOf(std::string_view text);
   struct Chunk {

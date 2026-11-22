@@ -20,6 +20,7 @@
 
 #include "../book_metadata_cache/AllocationRefusal.h"
 #include "ArabicNumberExpected.h"
+#include "Epub/GlyphPrefetchBatch.h"
 #include "Epub/HeapGrowth.h"
 #include "Epub/ParsedText.h"
 #include "Epub/ShapedStore.h"
@@ -252,7 +253,7 @@ TEST_F(ShapedLayout, ADashJoinedTokenShapesEachPartAsItsOwnRun) {
     add(text, {{dashed}, {kHindi}});
     EXPECT_EQ(width == fits ? 1u : 2u, layOut(text, renderer, width).size()) << width;
   }
-  EXPECT_EQ(2 * 3, renderer.prefetchedRuns);  // two Glyphs pieces and हिन्दी's, in each of the two layouts
+  EXPECT_EQ(2, renderer.prefetchBatches);  // one coalesced batch per layout for क, ल, and हिन्दी
 }
 
 TEST_F(ShapedLayout, ATokenKeptForTheNextPassIsNotShapedAgain) {
@@ -349,7 +350,7 @@ TEST_F(ShapedLayout, AVerticalLineReordersInsteadOfShaping) {
   EXPECT_FALSE(layOut(text, renderer, 400).empty());
   EXPECT_EQ(2u, text.tokensShaped());
   EXPECT_EQ(0, face->planBuilds());
-  EXPECT_EQ(0, renderer.prefetchedRuns);
+  EXPECT_EQ(0, renderer.prefetchBatches);
   EXPECT_FALSE(latch);
 }
 
@@ -472,7 +473,7 @@ TEST_F(ShapedLayout, AFaceIsResolvedOncePerPass) {
   EXPECT_EQ(1u, layOut(text, renderer, 400).size());
   EXPECT_EQ(1, Seam::asks);
   EXPECT_EQ(3u, text.tokensShaped());
-  EXPECT_EQ(0, renderer.prefetchedRuns);  // reordered, as without a face: no glyph run
+  EXPECT_EQ(0, renderer.prefetchBatches);  // reordered, as without a face: no glyph run
   EXPECT_TRUE(latch);
 
   // The next paragraph asks again, and shapes.
@@ -480,7 +481,7 @@ TEST_F(ShapedLayout, AFaceIsResolvedOncePerPass) {
   add(text, {{kHindi}});
   EXPECT_EQ(1u, layOut(text, renderer, 400).size());
   EXPECT_EQ(2, Seam::asks);
-  EXPECT_EQ(1, renderer.prefetchedRuns);
+  EXPECT_EQ(1, renderer.prefetchBatches);
 }
 
 TEST_F(ShapedLayout, AFaceRefusedForAStyleOfLatinWordsLatchesNothing) {
@@ -493,7 +494,7 @@ TEST_F(ShapedLayout, AFaceRefusedForAStyleOfLatinWordsLatchesNothing) {
     add(text, {{kHindi}, {"Latin", EpdFontFamily::BOLD}, {kPatrika}});
     EXPECT_EQ(1u, layOut(text, renderer, 400).size());
     EXPECT_EQ(1, Seam::asks);  // the regular face, once
-    EXPECT_EQ(2, renderer.prefetchedRuns);
+    EXPECT_EQ(1, renderer.prefetchBatches);
     EXPECT_FALSE(latch);
   }
   // The control: a Hindi word in bold asks for the refused face, and latches.
@@ -793,9 +794,9 @@ TEST_F(ShapedLayout, TheGlyphsAreWarmedOncePerShaping) {
   ParsedText text(false, false, noIndentStyle());
   add(text, {{kHindi}, {kPatrika}, {kKa + kEmDash + kLa}});
   EXPECT_TRUE(layOut(text, renderer, 400, /*includeLastLine=*/false).empty());
-  EXPECT_EQ(4, renderer.prefetchedRuns);  // हिन्दी, पत्रिका, and क and ल
+  EXPECT_EQ(1, renderer.prefetchBatches);  // हिन्दी, पत्रिका, क and ल coalesced into one batch
   EXPECT_EQ(1u, layOut(text, renderer, 400).size());
-  EXPECT_EQ(4, renderer.prefetchedRuns);  // the second pass reused them, warm
+  EXPECT_EQ(1, renderer.prefetchBatches);  // the second pass reused them, warm
 }
 
 TEST_F(ShapedLayout, ABidiParagraphShapesItsIndicWords) {
@@ -826,7 +827,7 @@ TEST_F(ShapedLayout, ALatinParagraphMakesNoShapingState) {
   EXPECT_EQ(1u, layOut(text, renderer, 400).size());
   EXPECT_FALSE(text.shapingStateHeld());
   EXPECT_EQ(0u, text.tokensShaped());
-  EXPECT_EQ(0, renderer.prefetchedRuns);
+  EXPECT_EQ(0, renderer.prefetchBatches);
 }
 
 // ---- The build's word cache (WordShapeCache) ----
@@ -846,7 +847,7 @@ TEST_F(ShapedLayout, TheWordCacheShapesARepeatedWordOnce) {
   add(plain, words);
   const std::vector<std::string> expected = bytesOfLines(layOut(plain, renderer, 200));
   EXPECT_EQ(6u, plain.tokensShaped());
-  const int prefetched = renderer.prefetchedRuns;
+  const int prefetched = renderer.prefetchBatches;
 
   BuildArena arena(52272);
   WordShapeCache cache;
@@ -859,7 +860,7 @@ TEST_F(ShapedLayout, TheWordCacheShapesARepeatedWordOnce) {
   EXPECT_EQ(3u, cache.stats().misses);
   EXPECT_EQ(3u, cache.stats().inserts);
   EXPECT_EQ(3u, cache.stats().hits);
-  EXPECT_EQ(2 * prefetched, renderer.prefetchedRuns);  // a replayed word's glyphs are warmed as a shaped one's
+  EXPECT_EQ(2 * prefetched, renderer.prefetchBatches);  // a replayed word's glyphs are warmed as a shaped one's
 
   // The next paragraph shapes none of them.
   text.reset(noIndentStyle());
@@ -2249,4 +2250,121 @@ TEST_F(ShapedLine, AConsumedLetterDrawnWithoutTheLinePassTakesItsWidth) {
   ASSERT_GE(comma, 0);
   EXPECT_EQ(kAlef, line.wordDrawText(static_cast<uint16_t>(alef)));
   EXPECT_EQ(line.wordXpos(static_cast<uint16_t>(alef)) + kGlyph, line.wordXpos(static_cast<uint16_t>(comma)));
+}
+
+TEST_F(ShapedLayout, MixedStylesGroupShapingAndSkipShapedCodepointsInEnsureFontReady) {
+  ParsedText text(false, false, noIndentStyle());
+  add(text, {{kHindi, EpdFontFamily::REGULAR},
+             {"alpha", EpdFontFamily::BOLD},
+             {kPatrika, EpdFontFamily::ITALIC},
+             {kHindi, EpdFontFamily::BOLD},
+             {"omega", EpdFontFamily::REGULAR},
+             {kPatrika, EpdFontFamily::REGULAR}});
+  renderer.readyCalls.clear();
+  const Lines lines = layOut(text, renderer, 600);
+  ASSERT_EQ(1u, lines.size());
+  const TextBlock& line = *lines[0];
+  ASSERT_EQ(6u, line.wordCount());
+  for (uint16_t i : {uint16_t(0), uint16_t(2), uint16_t(3), uint16_t(5)}) {
+    ASSERT_TRUE(line.hasGlyphForm(i)) << i;
+    EXPECT_EQ(oracle(line.wordText(i)), recordsOf(line.glyphForm(i))) << line.wordText(i);
+  }
+  EXPECT_FALSE(line.hasGlyphForm(1));
+  EXPECT_FALSE(line.hasGlyphForm(4));
+  // Shaped Devanagari words are excluded from ensureFontReady's unshaped codepoint pass.
+  std::string readyText;
+  for (const auto& call : renderer.readyCalls) readyText += call.text;
+  EXPECT_NE(std::string::npos, readyText.find("alpha"));
+  EXPECT_NE(std::string::npos, readyText.find("omega"));
+  EXPECT_EQ(std::string::npos, readyText.find(kHindi));
+  EXPECT_EQ(std::string::npos, readyText.find(kPatrika));
+}
+
+// Review of PR 872: a mixed token split by the fallback breaks inside its Latin part. The prefix holds no shaped text,
+// so shapeToken() returns before it touches the store; the token's entry must not hand the prefix the whole word's
+// pieces.
+TEST_F(ShapedLayout, ReviewPr872ALatinPrefixOfAMixedTokenKeepsNoStalePieces) {
+  const std::string mixed = std::string(30, 'x') + kHindi;
+  constexpr int kColumn = 100;
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{mixed}});
+  const Lines lines = layOut(text, renderer, kColumn);
+  ASSERT_GE(lines.size(), 2u);
+  std::string joined;
+  for (const auto& line : lines) {
+    for (uint16_t i = 0; i < line->wordCount(); ++i) {
+      const std::string word = line->wordText(i);
+      joined += word;
+      if (word.find(kHindi) == std::string::npos) {
+        EXPECT_FALSE(line->hasGlyphForm(i)) << word;
+      }
+    }
+  }
+  std::string unhyphenated;
+  for (const char c : joined)
+    if (c != '-') unhyphenated += c;
+  EXPECT_EQ(mixed, unhyphenated);
+}
+
+TEST_F(ShapedLayout, GlyphPrefetchBatchCoalescesDedupsAndFlushesOnStyleOrCap) {
+  renderer.prefetchBatchCalls.clear();
+  GlyphPrefetchBatch batch;
+  // Duplicate IDs within the same (fontId, style) coalesce into one batch.
+  batch.add(renderer, 1, EpdFontFamily::REGULAR, 10);
+  batch.add(renderer, 1, EpdFontFamily::REGULAR, 20);
+  batch.add(renderer, 1, EpdFontFamily::REGULAR, 10);
+  EXPECT_TRUE(renderer.prefetchBatchCalls.empty());
+
+  // Changing style flushes the pending REGULAR batch immediately.
+  batch.add(renderer, 1, EpdFontFamily::BOLD, 30);
+  ASSERT_EQ(1u, renderer.prefetchBatchCalls.size());
+  EXPECT_EQ((std::vector<uint16_t>{10, 20}), renderer.prefetchBatchCalls[0].glyphs);
+  EXPECT_EQ(EpdFontFamily::REGULAR, renderer.prefetchBatchCalls[0].style);
+
+  // Changing fontId flushes the pending BOLD batch immediately.
+  batch.add(renderer, 2, EpdFontFamily::BOLD, 40);
+  ASSERT_EQ(2u, renderer.prefetchBatchCalls.size());
+  EXPECT_EQ((std::vector<uint16_t>{30}), renderer.prefetchBatchCalls[1].glyphs);
+  EXPECT_EQ(1, renderer.prefetchBatchCalls[1].fontId);
+
+  // Filling up to kCapacity unique glyphs auto-flushes the full 64-entry batch.
+  for (uint16_t g = 100; g < 164; ++g) batch.add(renderer, 2, EpdFontFamily::BOLD, g);
+  ASSERT_EQ(3u, renderer.prefetchBatchCalls.size());
+  EXPECT_EQ(GlyphPrefetchBatch::kCapacity, renderer.prefetchBatchCalls[2].glyphs.size());
+
+  // Remaining glyph (163 was the 64th after 40) flushes on explicit flush(), and a 2nd flush() is a no-op.
+  batch.flush(renderer);
+  ASSERT_EQ(4u, renderer.prefetchBatchCalls.size());
+  EXPECT_EQ((std::vector<uint16_t>{163}), renderer.prefetchBatchCalls[3].glyphs);
+  batch.flush(renderer);
+  EXPECT_EQ(4u, renderer.prefetchBatchCalls.size());
+}
+
+TEST_F(ShapedLine, MyanmarBinaryBreakMatchesLinearScanAcrossWidths) {
+  FixtureShapingFace& burmese = useFont("NotoSansMyanmar-Book-Regular.ttf");
+  const auto shaped = [&](const std::string& text) { return oracleOn(burmese, ot::Script::Myanmar, text); };
+  const std::string phrase = "အခြေခံအုတ်မြစ်ဖြစ်သောကြောင့်လည်းကောင်း၊အခြေခံအုတ်မြစ်ဖြစ်သောကြောင့်လည်းကောင်း၊";
+  const std::vector<Hyphenator::BreakInfo> breaks = Hyphenator::myanmarLineEndBreaks(phrase);
+  ASSERT_GT(breaks.size(), 8u);
+  const int fullW = advancePx(shaped(phrase));
+  for (const int pct : {15, 35, 50, 75, 90}) {
+    const int room = (fullW * pct) / 100;
+    size_t linearOffset = 0;
+    int linearW = -1;
+    for (const Hyphenator::BreakInfo& b : breaks) {
+      const int w = advancePx(shaped(phrase.substr(0, b.byteOffset)));
+      if (w > room) break;
+      if (w > linearW) {
+        linearW = w;
+        linearOffset = b.byteOffset;
+      }
+    }
+    ASSERT_GT(linearOffset, 0u) << pct;
+    ParsedText text(false, false, noIndentStyle());
+    add(text, {{phrase}});
+    const Lines lines = layOut(text, renderer, room);
+    ASSERT_GE(lines.size(), 2u) << pct;
+    EXPECT_EQ(phrase.substr(0, linearOffset), lines[0]->wordText(0)) << "pct=" << pct;
+  }
 }

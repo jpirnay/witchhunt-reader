@@ -263,8 +263,9 @@ class GfxRenderer {
   static inline int shapingReleases = 0;
   static void releaseShapingFaces() { ++shapingReleases; }
   TextScale fontBaseScale(int) const { return TextScale(); }
-  // The glyph-ID prefetch of a build's warm step: counted, one per run.
+  // The glyph-ID prefetch of a build's warm step: counted per run / batch.
   mutable int prefetchedRuns = 0;
+  void prefetchGlyphs(int, const uint16_t*, size_t, EpdFontFamily::Style) const {}
   void prefetchGlyphRun(int, const GlyphRun&, EpdFontFamily::Style) const { ++prefetchedRuns; }
   void drawCenteredText(int, int, const char*, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR) const {}
   void drawTextRotated90CW(int, int, int, const char*, bool = true,

@@ -820,6 +820,8 @@ class GfxRenderer {
                     EpdFontFamily::Style style = EpdFontFamily::REGULAR, TextScale scale = TextScale()) const;
   /// How far drawGlyphRun's pen moves: glyphRunAdvance, accumulated when scale x the base scale is not 1.
   int glyphRunWidth(int fontId, const GlyphRun& run, TextScale scale = TextScale()) const;
+  /// Prefetches a pre-batched slice of `count` glyph IDs for `(fontId, style)` in a single store commit.
+  void prefetchGlyphs(int fontId, const uint16_t* glyphs, size_t count, EpdFontFamily::Style style) const;
   /// The glyph-ID prefetch for a section build's warm step: the run's glyphs, 64 at a time (128 B on the stack).
   void prefetchGlyphRun(int fontId, const GlyphRun& run, EpdFontFamily::Style style) const;
 

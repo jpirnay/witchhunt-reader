@@ -1864,6 +1864,14 @@ int GfxRenderer::glyphRunWidth(const int fontId, const GlyphRun& run, const Text
   return glyphRunAdvance(run, !drawsUnscaled(totalScale(scale, fontBaseScale(fontId))));
 }
 
+void GfxRenderer::prefetchGlyphs(const int fontId, const uint16_t* const glyphs, const size_t count,
+                                 const EpdFontFamily::Style style) const {
+  if (count == 0) return;
+  if (const EpdFontFamily* const family = findFontFamily(fontId); family && family->drawsGlyphKeys(style)) {
+    family->prefetchGlyphs(glyphs, count, style);
+  }
+}
+
 void GfxRenderer::prefetchGlyphRun(const int fontId, const GlyphRun& run, const EpdFontFamily::Style style) const {
   const EpdFontFamily* const family = findFontFamily(fontId);
   if (!family || !family->drawsGlyphKeys(style)) return;

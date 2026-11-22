@@ -21,6 +21,7 @@
 #include "hyphenation/Hyphenator.h"
 
 class GfxRenderer;
+class GlyphPrefetchBatch;
 class BuildArena;
 class ShapingFace;
 class WordShapeCache;
@@ -396,7 +397,12 @@ class ParsedText {
   // Token i's pieces, found in the store, else replayed from the word cache or shaped now, their glyphs warmed and
   // their widths set, and *width their sum; false: it is laid out as its code points (and latched when it could not be
   // shaped, or its pieces measured for want of memory).
-  bool shapeToken(const GfxRenderer& renderer, int fontId, size_t i, uint16_t* width);
+  bool shapeToken(const GfxRenderer& renderer, int fontId, size_t i, uint16_t* width,
+                  GlyphPrefetchBatch* prefetchBatch = nullptr);
+  // Plain binary search for the widest legal Myanmar syllable prefix fitting `availableWidth`.
+  // `breaks` must be ascending in `(0, words[wordIndex].size())` (as myanmarLineEndBreaks returns).
+  bool chooseMyanmarBreak(const GfxRenderer& renderer, int fontId, size_t wordIndex, int availableWidth,
+                          const std::vector<Hyphenator::BreakInfo>& breaks, size_t& chosenOffset, int& chosenWidth);
   // *width, the sum of token i's stored pieces' widths, and true; false when the store holds none for it. Nothing is
   // shaped: a paragraph that needs bidi shapes its tokens before the line pass's workspace is borrowed.
   bool storedWidth(const GfxRenderer& renderer, int fontId, size_t i, uint16_t* width) const;

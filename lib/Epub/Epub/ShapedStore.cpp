@@ -138,7 +138,10 @@ bool ShapedStore::open(const size_t token, const std::string_view text, const ui
   savedCur_ = cur_;
   savedUsed_ = nChunks_ > 0 ? chunks_[cur_].used : 0;
   placed_ = false;
-  if (token < entries_.size()) entries_[token].valid = false;  // stale from here on, whatever happens to the rewrite
+  if (token < entries_.size()) {
+    entries_[token].valid = false;  // stale from here on, whatever happens to the rewrite
+    entries_[token].passValid = false;
+  }
   pending_ = true;
   return true;
 }
@@ -209,6 +212,7 @@ void ShapedStore::commit() {
   entry.key = pendKey_;
   entry.length = pendLength_;
   entry.valid = true;
+  entry.passValid = true;
   pending_ = false;
 }
 
@@ -257,8 +261,23 @@ std::optional<std::span<const ShapedStore::Piece>> ShapedStore::pieces(const siz
   if (!entry.valid || entry.length != text.size() || entry.key != key || entry.hash != hashOf(text)) {
     return std::nullopt;
   }
+  // Cache validation for this layout pass so subsequent lookups (line breaks, rendering) avoid
+  // repeating hashOf(text) and key comparisons via passPieces().
+  entry.passValid = true;
   if (entry.count == 0) return std::span<const Piece>();
   return std::span<const Piece>(pieces_.data() + entry.begin, entry.count);
+}
+
+std::optional<std::span<const ShapedStore::Piece>> ShapedStore::passPieces(const size_t token) const {
+  if (token >= entries_.size()) return std::nullopt;
+  const Entry& entry = entries_[token];
+  if (!entry.passValid || entry.count == 0) return std::nullopt;
+  return std::span<const Piece>(pieces_.data() + entry.begin, entry.count);
+}
+
+void ShapedStore::clearPassValid() {
+  // Invalidated once per layout pass before calculateWordWidths() re-validates active tokens.
+  for (Entry& entry : entries_) entry.passValid = false;
 }
 
 std::span<const ShapedStore::Piece> ShapedStore::openPieces() const {
