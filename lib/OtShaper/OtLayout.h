@@ -39,6 +39,9 @@ struct LookupSettings {
   // witchhunt: deviation 19 - a ligature lookup's second components (ligatureSeconds()): the start glyph's next glyph,
   // when it may not be skipped, must be one, or no ligature can match. All bits: no filter.
   uint64_t secondMask = ~0ull;
+  // Pointer to the Plan's 24-byte digest record for this lookup, checked in place via digestRecordMayHave()
+  // instead of copying a 24-byte Digest struct into LookupSettings on every lookup in applyTable().
+  const uint8_t* digestRecord = nullptr;
   // witchhunt: deviation 20 - the lookup's offset in its LookupList (0: a lookup Face::lookup() drops), so it is found
   // without reading the list; NO_LOOKUP_OFFSET: read it.
   static constexpr uint32_t NO_LOOKUP_OFFSET = 0xFFFFFFFF;
@@ -48,6 +51,8 @@ struct LookupSettings {
   bool autoZwj = true;
   bool random = false;
   bool perSyllable = false;
+  // witchhunt: deviation 23 - mirrors Plan::testBypassCaches so ApplyContext::recurse() ignores CPac filters.
+  bool bypassCaches = false;
 };
 
 // Union of the coverage of every subtable of a lookup: the glyphs it can
@@ -72,15 +77,16 @@ uint64_t ligatureSeconds(const Face& face, uint32_t lookupIndex);
 // an Extension resolved).
 bool isLigatureLookup(const Face& face, uint32_t lookupIndex);
 
-// Applies one GSUB or GPOS lookup across the buffer. GPOS requires buffer.pos
-// to be sized.
+// Applies one GSUB or GPOS lookup across the buffer starting at `startIdx` (for forward lookups).
+// GPOS requires buffer.pos to be sized.
 void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, int table, uint32_t lookupIndex,
-                 const LookupSettings& settings);
+                 const LookupSettings& settings, unsigned startIdx = 0);
 
 // Whether GSUB lookup `lookupIndex` would substitute `glyphs` (HarfBuzz's
 // hb_ot_layout_lookup_would_substitute). `digest` is lookupDigest().
+// witchhunt: deviation 20 - `lookupOffset` avoids re-reading LookupList.
 bool wouldSubstitute(const Face& face, uint32_t lookupIndex, const Digest& digest, const uint32_t* glyphs,
-                     unsigned count, bool zeroContext);
+                     unsigned count, bool zeroContext, uint32_t lookupOffset = LookupSettings::NO_LOOKUP_OFFSET);
 
 // Joins mark and cursive attachment offsets once GPOS is done, in the
 // buffer's direction (witchhunt: deviation 11 - buffer.backward).

@@ -39,6 +39,15 @@ Table subtableCoverage(const int table, uint16_t type, Table st) {
   return st.offset16(2);
 }
 
+bool isReverseLookup(const Table& lookup) {
+  uint16_t type = lookup.u16(0);
+  if (type == gsub::EXTENSION) {
+    Table st = lookup.offset16(6);
+    resolveExtension(GSUB, type, st);
+  }
+  return type == gsub::REVERSE_CHAIN;
+}
+
 void collectCoverage(const Table& coverage, Digest& digest) {
   switch (coverage.u16(0)) {
     case 1:
@@ -52,15 +61,6 @@ void collectCoverage(const Table& coverage, Digest& digest) {
     default:
       break;
   }
-}
-
-bool isReverseLookup(const Table& lookup) {
-  uint16_t type = lookup.u16(0);
-  if (type == gsub::EXTENSION) {
-    Table st = lookup.offset16(6);
-    resolveExtension(GSUB, type, st);
-  }
-  return type == gsub::REVERSE_CHAIN;
 }
 
 }  // namespace
@@ -241,19 +241,31 @@ OT_HOT bool ApplyContext::applyLookupSubtables(const Table& lookup, const uint8_
 // dispatch_recurse_func(): a nested lookup applies once at buffer.idx, with
 // its own flags and its own row of match positions, and without the mask
 // and glyph-property check the top-level loop makes.
+// witchhunt: deviation 23 - when CPac filters are active (and not bypassed by tests), reject
+// uncovered target glyphs before touching Face::lookup() / flash tables, and pass per-subtable digests.
 bool ApplyContext::recurse(const uint32_t subLookupIndex) {
   if (nestingLeft == 0 || --buffer.maxOps < 0) {
     buffer.successful = false;
     return false;
   }
+  const FilterRecords* const r = !bypassCaches ? face.filters(table) : nullptr;
+  const uint32_t filterLookups = r ? r->subtableStarts.length() / 4 : 0;
+  if (r && subLookupIndex < filterLookups &&
+      !digestRecordMayHave(r->lookupDigests + DIGEST_BYTES * subLookupIndex, buffer.cur().codepoint)) {
+    return false;
+  }
   const Table lookup = face.lookup(table, subLookupIndex);
   if (lookup.empty()) return false;
+  const uint8_t* digests = nullptr;
+  if (r && subLookupIndex < filterLookups && Face::subtableCount(lookup) > 1) {
+    digests = r->subtableDigests + DIGEST_BYTES * r->firstSubtable(subLookupIndex);
+  }
   const uint32_t savedProps = lookupProps;
   uint16_t* savedPositions = matchPositions;
   nestingLeft--;
   matchPositions = buffer.matchStack[MAX_NESTING_LEVEL - nestingLeft];
   setLookupProps(face.lookupProps(lookup));
-  const bool ret = applyLookupSubtables(lookup);
+  const bool ret = applyLookupSubtables(lookup, digests);
   setLookupProps(savedProps);
   matchPositions = savedPositions;
   nestingLeft++;
@@ -327,7 +339,7 @@ bool isLigatureLookup(const Face& face, const uint32_t lookupIndex) {  // witchh
 }
 
 OT_HOT void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int table,
-                        const uint32_t lookupIndex, const LookupSettings& settings) {
+                        const uint32_t lookupIndex, const LookupSettings& settings, const unsigned startIdx) {
   if (!buffer.len() || !settings.mask) return;
   // witchhunt: deviation 20 - Face::lookup()'s answer, from the offset the plan read once.
   const Table lookup = settings.lookupOffset == LookupSettings::NO_LOOKUP_OFFSET
@@ -341,6 +353,7 @@ OT_HOT void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, co
   c.autoZwnj = settings.autoZwnj;
   c.random = settings.random;
   c.perSyllable = settings.perSyllable;
+  c.bypassCaches = settings.bypassCaches;
   // witchhunt: deviation 4 - a lookup of one subtable is not filtered again: its subtable's digest is the lookup's
   // own, which every glyph it starts at has passed, and reading the record would cost a read of CPac for nothing. Nor
   // is the index of its first record read from CPac (LookupSettings::fontRecords).
@@ -357,8 +370,11 @@ OT_HOT void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, co
   // Glyphs the lookup may start at: in its digest, selected by its mask, and
   // not ignored by its flags.
   // witchhunt: deviation 13 - the digest is always there (no hasDigest).
+  const uint8_t* const digestRecord = settings.digestRecord;
   const auto startsAt = [&](const GlyphInfo& g) OT_HOT {
-    return settings.digest.mayHave(g.codepoint) && (g.mask & c.lookupMask) && c.checkGlyphProperty(g, c.lookupProps);
+    const bool inDigest =
+        digestRecord ? digestRecordMayHave(digestRecord, g.codepoint) : settings.digest.mayHave(g.codepoint);
+    return inDigest && (g.mask & c.lookupMask) && c.checkGlyphProperty(g, c.lookupProps);
   };
 
   if (table == GSUB && layout::isReverseLookup(lookup)) {
@@ -369,7 +385,7 @@ OT_HOT void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, co
     return;
   }
 
-  buffer.idx = 0;
+  buffer.idx = startIdx;
   while (buffer.successful) {
     while (buffer.idx < buffer.len() && !startsAt(buffer.info[buffer.idx])) buffer.idx++;
     if (buffer.idx >= buffer.len()) break;
@@ -384,11 +400,15 @@ OT_HOT void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, co
 }
 
 bool wouldSubstitute(const Face& face, const uint32_t lookupIndex, const Digest& digest, const uint32_t* glyphs,
-                     const unsigned count, const bool zeroContext) {
+                     const unsigned count, const bool zeroContext, const uint32_t lookupOffset) {
   if (!count || lookupIndex >= face.lookupCount(GSUB)) return false;
   if (!digest.mayHave(glyphs[0])) return false;
-  const Table lookup = face.lookup(GSUB, lookupIndex);
-  for (uint16_t i = 0; i < Face::subtableCount(lookup); i++) {
+  const Table lookup = lookupOffset == LookupSettings::NO_LOOKUP_OFFSET
+                           ? face.lookup(GSUB, lookupIndex)
+                           : face.layout(GSUB).offset16(8).at(lookupOffset);
+  if (lookup.empty()) return false;
+  const uint16_t subtables = Face::subtableCount(lookup);
+  for (uint16_t i = 0; i < subtables; i++) {
     if (layout::wouldApplyGsubSubtable(glyphs, count, zeroContext, lookup.u16(0), lookup.offset16(6 + 2 * i))) {
       return true;
     }

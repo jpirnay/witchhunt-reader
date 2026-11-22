@@ -264,6 +264,7 @@ OT_HOT int32_t Face::advance(const uint32_t glyph) const {
 }
 
 OT_HOT uint16_t Face::glyphProps(const uint32_t glyph) const {
+  if (glyphClassDef_.empty()) return 0;
   switch (classOf(glyphClassDef_, glyph)) {
     case 1:
       return props::BASE_GLYPH;

@@ -123,6 +123,9 @@ class Plan {
   // Lookup settings (flags, mask, filters) of planned lookup `i` of `table`.
   // witchhunt: deviation 4 - `resolve` false leaves the CPac route's subtableDigests to applyLookup() (fontRecords).
   LookupSettings settings(int table, size_t i, bool resolve = true) const;
+  // Populates `out` in place so applyTable() reuses one stack LookupSettings struct across lookups; when
+  // `copyDigest` is false, `out.digestRecord` points to the Plan's 24-byte record instead of copying a Digest.
+  void fillSettings(int table, size_t i, bool resolve, LookupSettings& out, bool copyDigest = true) const;
   // witchhunt: deviation 13 - whether planned lookup `i` of `table` may start
   // at a glyph the buffer holds (`buffer` is its digest): the digest test of
   // HarfBuzz's apply loop, on the plan's own copy of the lookup's digest, so
@@ -133,6 +136,9 @@ class Plan {
   // first two of applyLookup()'s tests of a start glyph, so a lookup no glyph
   // passes them is skipped before anything of the font is read for it.
   bool mayStart(int table, size_t i, const Buffer& buffer) const;
+  // First buffer index matching `mayStart()` (or 0 when testBypassCaches is set), or `buffer.len()` if none does.
+  // Forward applyLookup() resumes scanning at this index instead of re-testing leading glyphs.
+  unsigned firstStart(int table, size_t i, const Buffer& buffer) const;
   // witchhunt: deviation 13 - consonantPositionFromFace() of the glyphs
   // `consonant` and `virama`, remembered: the walk runs on a miss only.
   uint8_t consonantPosition(const Face& face, uint32_t consonant, uint32_t virama) const;
