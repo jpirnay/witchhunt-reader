@@ -275,9 +275,23 @@ inline constexpr ImageGray4Levels kUnmeasuredImageGray4 = {{30, 50, 140}, {0, 85
 // lightness ramp; with light gray fed back darker, as 82, within 2.9, because a fine light-gray and white mix reads
 // darker on this glass than its share. Both rise at every step; the even table missed by up to 8.6.
 inline constexpr ImageGray4Levels kMurphyImageGray4 = {{27, 68, 169}, {0, 53, 82, 255}};
-static_assert(wellFormed(kUnmeasuredImageGray4) && wellFormed(kMurphyImageGray4));
+// The X3's UC8253 (the later UC8279 run is not measured), 2026-11-22: alone the levels read L* about -4 (below the
+// card's darkest step) / 6.4 / 22.7 / 72.7, dark gray 13 % and light gray 35 % of the way to white. The even table
+// missed an even lightness ramp by up to 24.3 L*, mid grays far too dark. Fed back as measured (0/34/81/255)
+// within 10.6, with flat stretches; both grays fed back darker, as 28 and 64, within 5.5 and rising at every step,
+// because sparse lighter dots read smaller than their share on this glass. Thresholds from a dither model fitted to
+// four sweeps.
+inline constexpr ImageGray4Levels kX3Uc8253ImageGray4 = {{4, 68, 152}, {0, 28, 64, 255}};
+static_assert(wellFormed(kUnmeasuredImageGray4) && wellFormed(kMurphyImageGray4) && wellFormed(kX3Uc8253ImageGray4));
 inline ImageGray4Levels imageGray4Levels() {
-  return BoardConfig::isMurphyM3() ? kMurphyImageGray4 : kUnmeasuredImageGray4;
+  switch (BoardConfig::ACTIVE.board) {
+    case BoardConfig::Board::MurphyM3:
+      return kMurphyImageGray4;
+    case BoardConfig::Board::XteinkX3:
+      return kX3Uc8253ImageGray4;
+    default:
+      return kUnmeasuredImageGray4;
+  }
 }
 
 // The panel can show gray at all. Murphy's only can in a build with -DFREEINK_MURPHY_GRAY: without
