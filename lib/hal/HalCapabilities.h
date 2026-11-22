@@ -253,14 +253,14 @@ inline unsigned long panelIdlePowerOffAfterMs() { return BoardConfig::isMurphyM3
 // setupDisplayAndFonts()): the three thresholds, and for each level the value fed back to the diffuser, the sRGB gray
 // whose L* matches where that level sits between the panel's black and white. Measured on the gray-lab stand with
 // full-screen uniform grays, every shot mapped through the reference card in it. Boards not measured yet keep the
-// X4-tuned thresholds and even feedback that every board had before. Sleep pictures and the BMP viewer use it; the
-// 16-level panels draw sleep pictures on their own levels.
+// thresholds once tuned for the X4 and the even feedback that every board had before. Sleep pictures and the BMP viewer
+// use it; the 16-level panels draw sleep pictures on their own levels.
 struct ImageGray4Levels {
   uint8_t thresholds[3];
   uint8_t feedback[4];
 };
 // Feedback from black (0) to white (255) and thresholds both strictly rising, so every level can be reached. A
-// threshold may sit below the level under it: the X4's 50 promotes grays from 50 up to light gray on purpose.
+// threshold may sit below the level under it: the old table's 50 promotes grays from 50 up to light gray on purpose.
 constexpr bool wellFormed(const ImageGray4Levels& l) {
   if (l.feedback[0] != 0 || l.feedback[3] != 255 || l.thresholds[0] == 0) return false;
   for (int i = 0; i < 3; i++) {
@@ -282,13 +282,22 @@ inline constexpr ImageGray4Levels kMurphyImageGray4 = {{27, 68, 169}, {0, 53, 82
 // because sparse lighter dots read smaller than their share on this glass. Thresholds from a dither model fitted to
 // four sweeps.
 inline constexpr ImageGray4Levels kX3Uc8253ImageGray4 = {{4, 68, 152}, {0, 28, 64, 255}};
-static_assert(wellFormed(kUnmeasuredImageGray4) && wellFormed(kMurphyImageGray4) && wellFormed(kX3Uc8253ImageGray4));
+// The X4's SSD1677, 2026-11-22: alone the levels read L* 16.2 / 27.6 / 61.8 / 80.8, dark gray 18 % and light gray 71 %
+// of the way to white. The even table missed an even lightness ramp by up to 10.4 L*, shadows too dark and mid grays
+// too light, 144 and 160 the same. Fed back as measured (0/43/173/255) within 6.2, with flat stretches; with dark gray
+// fed back darker and light gray lighter, as 36 and 192, within 3.1 and rising at every step. Both from a dither model
+// fitted to two sweeps, which predicted the next two within 2 L*. Grays from 236 up come out white.
+inline constexpr ImageGray4Levels kX4ImageGray4 = {{24, 68, 172}, {0, 36, 192, 255}};
+static_assert(wellFormed(kUnmeasuredImageGray4) && wellFormed(kMurphyImageGray4) && wellFormed(kX3Uc8253ImageGray4) &&
+              wellFormed(kX4ImageGray4));
 inline ImageGray4Levels imageGray4Levels() {
   switch (BoardConfig::ACTIVE.board) {
     case BoardConfig::Board::MurphyM3:
       return kMurphyImageGray4;
     case BoardConfig::Board::XteinkX3:
       return kX3Uc8253ImageGray4;
+    case BoardConfig::Board::XteinkX4:
+      return kX4ImageGray4;
     default:
       return kUnmeasuredImageGray4;
   }

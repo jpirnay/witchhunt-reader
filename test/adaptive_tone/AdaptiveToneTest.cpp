@@ -288,8 +288,8 @@ TEST(Gray4Quantization, FeedbackValuesAreEvenlySpaced) {
 }
 
 TEST(Gray4Quantization, KeepsItsBrighteningThresholds) {
-  // The X4 compensation lives here and only here: a pixel is promoted to a higher level than the
-  // even midpoints (43/128/213) would give it. Losing this is the near-black failure.
+  // The default table's compensation, first tuned for the X4: a pixel is promoted to a higher level
+  // than the even midpoints (43/128/213) would give it. Losing this is the near-black failure.
   EXPECT_EQ(quantizeGray4(100).index, 2);  // the even midpoints give 1
   for (int gray = 0; gray <= 255; gray++) {
     const int evenIndex = gray < 43 ? 0 : gray < 128 ? 1 : gray < 213 ? 2 : 3;
