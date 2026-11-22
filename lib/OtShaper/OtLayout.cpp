@@ -39,15 +39,6 @@ Table subtableCoverage(const int table, uint16_t type, Table st) {
   return st.offset16(2);
 }
 
-bool isReverseLookup(const Table& lookup) {
-  uint16_t type = lookup.u16(0);
-  if (type == gsub::EXTENSION) {
-    Table st = lookup.offset16(6);
-    resolveExtension(GSUB, type, st);
-  }
-  return type == gsub::REVERSE_CHAIN;
-}
-
 void collectCoverage(const Table& coverage, Digest& digest) {
   switch (coverage.u16(0)) {
     case 1:
@@ -61,6 +52,15 @@ void collectCoverage(const Table& coverage, Digest& digest) {
     default:
       break;
   }
+}
+
+bool isReverseLookup(const Table& lookup) {
+  uint16_t type = lookup.u16(0);
+  if (type == gsub::EXTENSION) {
+    Table st = lookup.offset16(6);
+    resolveExtension(GSUB, type, st);
+  }
+  return type == gsub::REVERSE_CHAIN;
 }
 
 }  // namespace

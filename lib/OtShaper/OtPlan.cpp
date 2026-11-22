@@ -468,10 +468,6 @@ OT_HOT unsigned Plan::firstStart(const int table, const size_t i, const Buffer& 
   return len;
 }
 
-bool Plan::mayStart(const int table, const size_t i, const Buffer& buffer) const {
-  return firstStart(table, i, buffer) < buffer.len();
-}
-
 // witchhunt: deviation 13 - see positions_. A glyph past 16 bits (no font has
 // one) walks every time.
 uint8_t Plan::consonantPosition(const Face& face, const uint32_t consonant, const uint32_t virama) const {

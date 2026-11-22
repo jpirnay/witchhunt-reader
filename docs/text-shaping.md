@@ -230,8 +230,8 @@ shaped-script book for the X4's in-place gate.
     slots keyed by the consonant's and the virama's glyph IDs, `mutable` in a const plan, which serves one build at a
     time under RenderLock.
   - A lookup that passes the digest test is skipped when no glyph of the run both passes its digest and carries its
-    mask (`Plan::firstStart` / `Plan::mayStart`, deviation 16): the plan holds both, so such a lookup reads nothing of
-    the font, and forward `applyLookup()` starts at the returned index rather than re-scanning leading glyphs.
+    mask (`Plan::firstStart`, deviation 16): the plan holds both, so such a lookup reads nothing of the font, and a
+    forward `applyLookup()` starts at the first glyph that passes rather than scanning the ones before it again.
     `applyTable()` reuses one `LookupSettings` via `Plan::fillSettings()` with `digestRecord` pointer reuse instead of
     copying a `Digest`.
   - A lookup of more than 8 subtables also gets, per 8 of them, the low masks of their digest records ORed (8 B a
@@ -256,7 +256,7 @@ shaped-script book for the X4's in-place gate.
   the font lines read per word by 37-45% made X3 chapter builds only 3-6% faster. `OT_HOT` links into IRAM the 8.7 KB
   of the engine that executes the most instructions per byte, ranked by emulating the firmware's RV32 build (same
   flags) over the distinct words of the Hindi and Arabic bench chapters: the table reads, the digest tests,
-  `mayApply`/`mayStart`, the lookup loop and `settings()`, the skipping iterator, coverage and class lookups, the
+  `mayApply`/`firstStart`, the lookup loop and `fillSettings()`, the skipping iterator, coverage and class lookups, the
   chained-context and GSUB dispatch, and the hot normalization and cmap functions. They execute 91% of the engine's
   instructions; the whole hot path (15 KB) reaches 92-95%. The S3 links the same functions into IRAM; other targets
   and the host leave `OT_HOT` empty.
