@@ -74,7 +74,7 @@ use them ignores both.
 3. **D2, the cache at rest: built** (branch `feat/cache-cipher-at-rest`). A protected book's cache folder is enciphered:
    its extracted chapters, laid-out pages, footnotes, search snippets, pictures, pixel caches and the book's own fonts.
    `lib/CacheCipher` (ChaCha20 through wolfSSL, by file offset) under `HalStorage`: a folder with the marker
-   `cipher.bin` enciphers every file opened in it, for whoever opens it, behind a 16-byte header with a random nonce
+   `cipher.bin` enciphers every file opened in it, for whoever opens it, behind a 512-byte header with a random nonce
    that `HalFile` hides (`docs/file-formats.md`, "Enciphered cache folders"). The key comes from the device secret and
    the marker's salt (`lib/BookProtection/CacheAtRest.cpp`); without it nothing in the folder opens. A folder made
    before is emptied on the book's next open or the next look at it, keeping the reading state and `protect.bin`. The
@@ -89,8 +89,23 @@ use them ignores both.
    | wolfSSL AES-128-CBC decrypt | 1.34 ms | 2.67 ms | 42.6 ms (1.5 MB/s) |
    | wolfSSL AES-256-CTR | 1.72 ms | 3.42 ms | 54.6 ms (1.2 MB/s) |
 
-   The wrapper takes about a quarter longer than raw wolfSSL (3.7 against 4.6 MB/s): the first thing to look at if a
-   protected book ever reads slower than its plain copy. The C3's AES peripheral (D1 uses it) is untried here.
+   In the reader, on the X3 (2026-11-23, Moby-Dick's 62-page chapter 2, 14 pt, cold build, three runs each): the
+   protected copy builds in 5,935 ms against 5,809 ms for the plain one, +126 ms (+2.2%); on master the two build
+   alike (5,827 against 5,824 ms), so all of it is the cache cipher. Of the first version's +330 ms, the 16-byte
+   header (content off the sector grid, so SdFat moved every file through its one-sector cache) cost 86 ms and
+   writing through a 512-byte chunk (one sector per card write) 118 ms; the header is a sector now and a large write
+   from RAM is enciphered where it is. Pure ChaCha is about 30 ms of a build's reads; the open file's last keystream
+   block saves 34 ms. Page turns (a page record read from the section file and drawn) are unchanged, 40 to 55 ms
+   either way. A protected book's cache made by master was emptied and enciphered on the first open, keeping its
+   progress and manifest; one with files of an older layout had them removed and made again.
+
+   The wrapper takes about a quarter longer than raw wolfSSL (3.7 against 4.6 MB/s), and the chapter's remaining cost
+   is mostly card time. The C3's AES peripheral (D1 uses it) is untried here.
+
+   Cost on the X3/X4 build against master (same worktree): flash +1,180 B, static RAM +288 B (the table of the last
+   four cache folders, in the HalStorage singleton), IRAM unchanged; an open enciphered file takes about 120 B more
+   heap (its cipher and keystream block). The new code is about 5.5 KB; linking `lib/CacheCipher` shrank other code
+   by about 4.6 KB in the same link, as it did with the library alone (2026-11-23), so the net figure depends on layout.
 
    Left open: covers and thumbnails a protected book's cache shares with Home stay in the folder, enciphered, so a
    card moved to another reader shows the placeholder cover; Quick Resume's `sleep_frame.bin` and screenshots stay

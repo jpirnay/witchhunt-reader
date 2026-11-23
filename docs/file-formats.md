@@ -54,7 +54,7 @@ the card stays as it was. `state.json` is streamed to its file and checked again
 directory whole.
 
 A protected book's directory (Adobe or LCP, `lib/BookProtection/`) is enciphered: [below](#enciphered-cache-folders-cipherbin).
-Every file in it has the format given here, behind a 16-byte header, and enciphered on the card.
+Every file in it has the format given here, behind a 512-byte header, and enciphered on the card.
 
 | File | Formats | Version | Contents |
 |---|---|---|---|
@@ -128,13 +128,16 @@ directory is enciphered instead (`lib/CacheCipher/CacheCipherFile.h`, `lib/BookP
 - `cipher.bin`, the marker: `WCF1`, then a 12-byte random salt. Not enciphered itself. The directory's key is
   lib/CacheCipher's derivation over the salt and `sha256("cache-key:" || the device secret)`, so another reader (or a
   computer) cannot read the files.
-- Every other file: `WCC1`, a 12-byte random nonce, then its content XORed with the ChaCha20 keystream of (the
-  directory's key, the nonce) at the content's own offset. A new nonce whenever a file is written from empty. The
-  header is not part of the file to the firmware: `HalFile` gives the content's size and positions, so every format
-  on this page, its offsets and its patches in place are unchanged. A rename keeps the file readable.
+- Every other file: a 512-byte header (`WCC1`, a 12-byte random nonce, zeros), then its content XORed with the
+  ChaCha20 keystream of (the directory's key, the nonce) at the content's own offset. One sector, so the content
+  starts on a sector as a plain file's does and SdFat reads and writes it in runs of whole sectors. A new nonce
+  whenever a file is written from empty. The header is not part of the file to the firmware: `HalFile` gives the
+  content's size and positions, so every format on this page, its offsets and its patches in place are unchanged. A
+  rename keeps the file readable.
 - `HalStorage` recognises the directory by its path (`.../epub_<n>/`) and its marker, for whatever opens a file in it:
   the reader, Home, the library, the sleep screen. Without the key (a marker another reader made, a damaged one)
-  nothing in it opens, for reading or writing. A file in it without a header is refused like a damaged one.
+  nothing in it opens, for reading or writing. A file in it without a valid header (copied in, damaged, an older
+  layout) is damaged cache: removed when it is opened, and made again like a missing one.
 - What hands a file to the outside (the web server's download, the serial transfers) reads it raw
   (`HalStorage::openRaw`), enciphered as on the card. A directory listing's entries are raw handles too: their size
   includes the header.
