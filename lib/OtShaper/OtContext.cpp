@@ -313,11 +313,16 @@ OT_HOT bool applyChainContext(ApplyContext* c, const Table& st) {
     }
     case 2: {
       if (coverageIndex(st.offset16(2), glyph) == NOT_COVERED) return false;
-      const ChainFuncs f{{MatchFunc::Class, MatchFunc::Class, MatchFunc::Class},
-                         {st.offset16(4), st.offset16(6), st.offset16(8)}};
-      const uint16_t klass = classOf(f.data[1], glyph);
+      // Check input class and non-empty RuleSet before reading backtrack/lookahead ClassDef offsets
+      // (avoiding extra table reads in flash when the covered glyph's class has no rules).
+      const Table inputClassDef = st.offset16(6);
+      const uint16_t klass = classOf(inputClassDef, glyph);
       if (klass >= st.u16(10)) return false;
-      return applyChainRuleSet(c, st.offset16(12 + 2 * klass), f);
+      const Table ruleSet = st.offset16(12 + 2 * klass);
+      if (ruleSet.u16(0) == 0) return false;
+      const ChainFuncs f{{MatchFunc::Class, MatchFunc::Class, MatchFunc::Class},
+                         {st.offset16(4), inputClassDef, st.offset16(8)}};
+      return applyChainRuleSet(c, ruleSet, f);
     }
     case 3: {
       uint32_t o = 2;

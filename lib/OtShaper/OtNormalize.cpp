@@ -116,6 +116,31 @@ struct VowelBits {
 };
 constexpr VowelBits VOWEL_FIRSTS;
 
+// Compile-time bitmap covering [0x0600, 0x1080) (336 B in .rodata): every entry in
+// ucd::DECOMPOSITIONS sits inside this span, so decompose1() rejects non-decomposable Arabic,
+// Indic, and Myanmar characters in O(1) without touching binary search over Flash .rodata.
+struct DecompBits {
+  static constexpr uint32_t FIRST = 0x0600;
+  static constexpr uint32_t END = 0x1080;
+  uint8_t bits[(END - FIRST) / 8] = {};
+  constexpr DecompBits() {
+    for (const auto& d : ucd::DECOMPOSITIONS) {
+      if (d.ab >= FIRST && d.ab < END) bits[(d.ab - FIRST) / 8] |= 1 << ((d.ab - FIRST) % 8);
+    }
+  }
+  constexpr bool has(const uint32_t cp) const {
+    return cp >= FIRST && cp < END && (bits[(cp - FIRST) / 8] & (1 << ((cp - FIRST) % 8)));
+  }
+};
+constexpr DecompBits DECOMP_BITS;
+constexpr bool decompositionsWithinBitmap() {
+  for (const auto& d : ucd::DECOMPOSITIONS) {
+    if (d.ab < DecompBits::FIRST || d.ab >= DecompBits::END) return false;
+  }
+  return true;
+}
+static_assert(decompositionsWithinBitmap(), "DECOMP_BITS range must cover all ucd::DECOMPOSITIONS entries");
+
 // The generator writes decompositions in code point order and compositions in (a, b) order; a binary search finds
 // the entry a walk would.
 constexpr bool decompositionsSorted() {
@@ -171,6 +196,7 @@ class Normalizer {
 
  private:
   bool decompose1(const uint32_t ab, uint32_t* a, uint32_t* b) const {
+    if (!DECOMP_BITS.has(ab)) return false;
     // decompose_indic(): keep these composed (they are separate letters in
     // their scripts' fonts).
     if (plan_.shaper == ShaperKind::Indic && (ab == 0x0931 || ab == 0x09DC || ab == 0x09DD || ab == 0x0B94)) {

@@ -671,4 +671,29 @@ TEST(ShapedStore, OnlyOneEntryIsOpenAtATime) {
   store.abandon();
 }
 
+TEST(ShapedStore, PassPiecesReusesValidatedEntriesUntilCleared) {
+  ShapedStore store;
+  ASSERT_TRUE(store.insert(0));
+  ASSERT_TRUE(writeGlyphToken(store, 0, "abc", 1, 2, 10));
+  // commit() marks the entry pass-valid immediately; passPieces() returns its span without text/key matching.
+  auto p0 = store.passPieces(0);
+  ASSERT_TRUE(p0.has_value());
+  ASSERT_EQ(p0->size(), 1u);
+  EXPECT_EQ((*p0)[0].count, 2);
+
+  store.clearPassValid();
+  EXPECT_FALSE(store.passPieces(0).has_value());
+
+  // pieces() re-validates text/key and sets passValid again; a key mismatch leaves it cleared.
+  EXPECT_FALSE(store.pieces(0, "abc", 2).has_value());
+  EXPECT_FALSE(store.passPieces(0).has_value());
+  ASSERT_TRUE(store.pieces(0, "abc", 1).has_value());
+  EXPECT_TRUE(store.passPieces(0).has_value());
+
+  // An abandoned rewrite invalidates both pieces() and passPieces().
+  ASSERT_TRUE(store.open(0, "abc", 2));
+  store.abandon();
+  EXPECT_FALSE(store.passPieces(0).has_value());
+}
+
 }  // namespace
