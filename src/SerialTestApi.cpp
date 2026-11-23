@@ -477,6 +477,9 @@ void lookUpWord(const std::string_view wordView) {
   DictPrefixMatch match;
   long searchMs = 0;
   long exactMs = -1;  // -1: no exact baseline ran
+  // A Latin miss: "Did you mean", as the word screen offers it.
+  DictSuggestions suggestions;
+  long suggestMs = -1;  // -1: none were asked for
   if (dictionaryName[0] != '\0') {
     // The object carries scan buffers and an inflate window between lookups; on the heap for the
     // length of this command only, and makeUniqueNoThrow so a fragmented heap is an answer, not
@@ -507,6 +510,11 @@ void lookUpWord(const std::string_view wordView) {
         }
       } else {
         found = dict->lookup(text.c_str(), definition, headword, &result);
+        if (!found && result == Dictionary::LookupResult::NotFound) {
+          const unsigned long suggestStart = millis();
+          dict->suggest(text.c_str(), suggestions);
+          suggestMs = static_cast<long>(millis() - suggestStart);
+        }
       }
       outcome = Dictionary::resultName(result);
     }
@@ -545,6 +553,16 @@ void lookUpWord(const std::string_view wordView) {
     appendField(line, "reads", static_cast<long>(match.reads));
     appendField(line, "ms", searchMs);
     if (exactMs >= 0) appendField(line, "exact_ms", exactMs);
+  }
+  if (suggestMs >= 0) {
+    std::string list;
+    for (uint8_t i = 0; i < suggestions.count; ++i) {
+      if (i > 0) list += ',';
+      list += suggestions.words[i];
+    }
+    appendField(line, "suggestions", list);
+    appendField(line, "scanned", static_cast<long>(suggestions.scanned));
+    appendField(line, "suggest_ms", suggestMs);
   }
   reply(line);
 }

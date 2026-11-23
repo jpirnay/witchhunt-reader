@@ -2322,4 +2322,152 @@ TEST_F(DictionaryTest, AnIfoWithWindowsLineEndsReadsTheSame) {
   EXPECT_TRUE(dict.definitionsAreHtml());
 }
 
+// --- suggestions ("Did you mean") -------------------------------------------
+
+std::vector<std::string> suggestionsOf(const DictSuggestions& s) {
+  std::vector<std::string> out;
+  for (uint8_t i = 0; i < s.count; ++i) out.emplace_back(s.words[i]);
+  return out;
+}
+
+TEST_F(DictionaryTest, AMisprintSuggestsTheHeadwordItMissed) {
+  const std::string folder = provision("plain", "SuggestMisprint");
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, folder));
+  DictSuggestions s;
+  Dictionary::LookupResult result = Dictionary::LookupResult::ReadError;
+  ASSERT_TRUE(dict.suggest("quixotik", s, &result));
+  EXPECT_EQ(result, Dictionary::LookupResult::Found);
+  ASSERT_GE(s.count, 1);
+  EXPECT_STREQ(s.words[0], "quixotic");
+  // Three windows of the sampled index at most: the fixture's 3006 headwords are not all read.
+  EXPECT_LE(s.scanned, 3 * 256);
+}
+
+TEST_F(DictionaryTest, AStemComesBeforeCloseSpellings) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary(
+      "SuggestStem",
+      {{"fi", "0"}, {"fis", "1"}, {"fish", "2"}, {"fisher", "3"}, {"fishery", "4"}, {"fishing", "5"}, {"walk", "6"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SuggestStem"));
+  DictSuggestions s;
+  ASSERT_TRUE(dict.suggest("fished", s));
+  // Stems first, the longer first: fish, then fis (half the word, the shortest a stem may be). Then fisher, one edit
+  // away, and fishery, two. fishing is three, over the limit of two for six letters; fi is shorter than three letters.
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"fish", "fis", "fisher", "fishery"}));
+}
+
+TEST_F(DictionaryTest, SuggestionsAreCappedAndEqualRanksKeepIndexOrder) {
+  std::vector<HeadwordSpec> headwords;
+  for (const char* w : {"act", "bat", "cab", "can", "car", "cot", "cut", "eat", "fat", "hat", "mat", "rat", "zebra"}) {
+    headwords.push_back({w, "x"});
+  }
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SuggestCap", headwords));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SuggestCap"));
+  DictSuggestions s;
+  ASSERT_TRUE(dict.suggest("cat", s));
+  // Twelve headwords one edit from "cat": "act", its own letters swapped, first; then those that keep the c, then the
+  // rest, each in index order, until eight are kept.
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"act", "cab", "can", "car", "cot", "cut", "bat", "eat"}));
+}
+
+TEST_F(DictionaryTest, CaseDoesNotCountInSuggestions) {
+  ASSERT_NO_FATAL_FAILURE(
+      writeDictionary("SuggestCase", {{"Paris", "city"}, {"paris", "bets"}, {"überall", "everywhere"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SuggestCase"));
+  DictSuggestions s;
+  ASSERT_TRUE(dict.suggest("PARISS", s));
+  // One of the two case variants is enough: the lookup finds either.
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"Paris"}));
+  ASSERT_TRUE(dict.suggest("Überal", s));
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"überall"}));
+}
+
+TEST_F(DictionaryTest, AHeadwordTheLookupWouldCleanToAnotherWordIsNotSuggested) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SuggestPunct", {{"dog", "animal"}, {"dog.", "abbreviation"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SuggestPunct"));
+  DictSuggestions s;
+  ASSERT_TRUE(dict.suggest("dogz", s));
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"dog"}));
+}
+
+TEST_F(DictionaryTest, AStemInTheWindowBeforeIsFound) {
+  // 600 fillers, "walk", then 300 headwords after it: "walked" sorts into the window after the one "walk" is in.
+  std::vector<HeadwordSpec> headwords = asciiFillers(600);
+  headwords.push_back({"walk", "go on foot"});
+  for (int i = 0; i < 300; i++) {
+    char w[16];
+    snprintf(w, sizeof(w), "walka%03d", i);
+    headwords.push_back({w, "filler"});
+  }
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SuggestWindow", headwords));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SuggestWindow"));
+  DictSuggestions s;
+  ASSERT_TRUE(dict.suggest("walked", s));
+  EXPECT_STREQ(s.words[0], "walk");
+}
+
+TEST_F(DictionaryTest, ASwapAtTheStartIsFoundOutsideTheWindows) {
+  // "eth" sorts 800 headwords before "teh" and "the" 800 after it, both well outside the windows read around it;
+  // "tea", "tee" and "ten" are one edit away and close by.
+  std::vector<HeadwordSpec> headwords{{"eth", "1"}, {"tea", "2"}, {"tee", "3"}, {"ten", "4"}, {"the", "5"}};
+  for (int i = 0; i < 800; i++) {
+    char w[16];
+    snprintf(w, sizeof(w), "f%03d", i);  // between eth and tea
+    headwords.push_back({w, "filler"});
+    snprintf(w, sizeof(w), "tf%03d", i);  // between ten and the
+    headwords.push_back({w, "filler"});
+  }
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SuggestSwap", headwords));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SuggestSwap"));
+  DictSuggestions s;
+  ASSERT_TRUE(dict.suggest("teh", s));
+  // The swaps first, the one that keeps the first letter ahead; then the other one-edit headwords in index order.
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"the", "eth", "tea", "tee", "ten"}));
+}
+
+TEST_F(DictionaryTest, InTheWindowTooTheFirstLetterAndRearrangedLettersCount) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary(
+      "SuggestRanks", {{"eth", "1"}, {"tea", "2"}, {"the", "3"}, {"tidal", "4"}, {"trail", "5"}, {"trial", "6"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SuggestRanks"));
+  DictSuggestions s;
+  // All in one window: "the" keeps the first letter, "eth" does not, both before "tea", a changed letter.
+  ASSERT_TRUE(dict.suggest("teh", s));
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"the", "eth", "tea"}));
+  // trial: two letters swapped, one edit. tidal: a changed letter, one edit, but no rearrangement. trail: two edits.
+  ASSERT_TRUE(dict.suggest("tiral", s));
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"trial", "tidal", "trail"}));
+}
+
+TEST_F(DictionaryTest, NothingCloseMeansNoSuggestions) {
+  const std::string folder = provision("plain", "SuggestNone");
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, folder));
+  DictSuggestions s;
+  Dictionary::LookupResult result = Dictionary::LookupResult::Found;
+  EXPECT_FALSE(dict.suggest("zzzzzzzzzzzz", s, &result));
+  EXPECT_EQ(result, Dictionary::LookupResult::NotFound);
+  EXPECT_EQ(s.count, 0);
+  // Nothing to compare: punctuation only, and a word longer than 32 characters.
+  EXPECT_FALSE(dict.suggest("...", s, &result));
+  EXPECT_FALSE(dict.suggest(std::string(40, 'q').c_str(), s, &result));
+  EXPECT_EQ(result, Dictionary::LookupResult::NotFound);
+}
+
+TEST_F(DictionaryTest, NoSidecarMeansNoSuggestionsRatherThanAWholeScan) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SuggestNoSidecar", {{"fish", "1"}}));
+  Dictionary dict;
+  ASSERT_TRUE(dict.open("SuggestNoSidecar"));  // no buildIndex(): no .qidx
+  DictSuggestions s;
+  Dictionary::LookupResult result = Dictionary::LookupResult::Found;
+  EXPECT_FALSE(dict.suggest("fished", s, &result));
+  EXPECT_EQ(result, Dictionary::LookupResult::NotFound);
+}
+
 }  // namespace
