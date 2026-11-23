@@ -87,7 +87,8 @@ class FolderTable {
 // An open file's cipher: CacheCipher, and the keystream block it used last. A cache file is read and written in small
 // pieces (a section file's fields are a few bytes each), and CacheCipher sets its key up and computes a whole block for
 // every call; this computes each block once while a file moves through it. Whole blocks still go to CacheCipher in one
-// call. Measured on the X3 (2026-11-23): a 62-page chapter's build took 330 ms longer without it.
+// call. Measured on the X3 (2026-11-23): a 62-page chapter's build took 34 ms longer without it (5,969 ms against
+// 5,935 ms, three runs each).
 class CipherStream {
  public:
   CipherStream(const uint8_t (&key)[kKeyBytes], const uint8_t (&nonce)[CacheCipher::kNonceBytes])
@@ -172,9 +173,12 @@ Attach attach(Raw& raw, const bool mayWrite, const uint8_t (&key)[kKeyBytes], Ra
     if (!mayWrite) return Attach::Plain;
     fill(nonce, sizeof(nonce));
     makeHeader(nonce, header);
-    static const uint8_t kZeros[kHeaderBytes - kHeaderFieldBytes] = {};
-    if (raw.write(header, sizeof(header)) != sizeof(header) || raw.write(kZeros, sizeof(kZeros)) != sizeof(kZeros)) {
-      return Attach::Refused;
+    if (raw.write(header, sizeof(header)) != sizeof(header)) return Attach::Refused;
+    // The padding a piece at a time: one sector of zeros in flash would cost the C3 its 496 bytes, and these writes
+    // land in SdFat's sector cache.
+    const uint8_t zeros[kHeaderFieldBytes] = {};
+    for (size_t at = kHeaderFieldBytes; at < kHeaderBytes; at += sizeof(zeros)) {
+      if (raw.write(zeros, sizeof(zeros)) != sizeof(zeros)) return Attach::Refused;
     }
   } else if (size < kHeaderBytes || raw.read(header, sizeof(header)) != static_cast<int>(sizeof(header)) ||
              !parseHeader(header, nonce) || !raw.seek(kHeaderBytes)) {
