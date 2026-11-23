@@ -2,10 +2,10 @@
 
 Status, 2026-11-20: D1 (the reader opens protected books, #821), the listing the Adobe plugin needs (#828) and D3
 (`/api/crypto` for the Adobe plugin, #857) are merged and have run on devices. Open: a real Adobe account end to end,
-the messages' translations, D2 (the cache at rest), LCP (asked of Free-Ink).
+the messages' translations, LCP (asked of Free-Ink). D2 (the cache at rest) is built.
 This file replaces the September plan (`docs/protected-content-plan.md` and
 `docs/protected-content-handover-2026-09-18.md` on the branch `feat/protected-content-phase0`). That branch is
-deleted; the part D2 still needs is kept in `patches/` (see D2).
+deleted; D2 took its cache cipher over.
 
 Owner decisions:
 - Adobe ADEPT is supported (2026-11-17). It is what Libby, Onleihe and the other loan services mostly use, and what
@@ -71,16 +71,16 @@ use them ignores both.
    - an `aes128-cbc` entry whose plaintext is not a DEFLATE stream fails here (the manifest build, or an image's read);
      DeDRM's `ineptepub.py` takes such an entry as it is. How often real books do this is not known.
 2. **The `STR_PROTECTED_*` messages in the other languages** (release translation pass; English only so far).
-3. **D2, the cache at rest.** Owner rule: the fastest and leanest cipher, and reading must not feel different. Measure
-   first, on the C3: a page turn and a chapter build of a protected book against the same book unprotected, plus flash.
-   If even the fastest cipher is noticeable, fall back to a cheap obfuscation or leave the cache plain, and say which
-   in the release notes. Like upstream, D1 writes the decrypted chapter (`spines/<bucket>/html_<n>.bin`) and the
-   extracted images to the cache.
+3. **D2, the cache at rest: built** (branch `feat/cache-cipher-at-rest`). A protected book's cache folder is enciphered:
+   its extracted chapters, laid-out pages, footnotes, search snippets, pictures, pixel caches and the book's own fonts.
+   `lib/CacheCipher` (ChaCha20 through wolfSSL, by file offset) under `HalStorage`: a folder with the marker
+   `cipher.bin` enciphers every file opened in it, for whoever opens it, behind a 512-byte header with a random nonce
+   that `HalFile` hides (`docs/file-formats.md`, "Enciphered cache folders"). The key comes from the device secret and
+   the marker's salt (`lib/BookProtection/CacheAtRest.cpp`); without it nothing in the folder opens. A folder made
+   before is emptied on the book's next open or the next look at it, keeping the reading state and `protect.bin`. The
+   web download and the serial transfers hand the files out enciphered (`HalStorage::openRaw`).
 
-   The cipher exists: `lib/CacheCipher` (ChaCha20 through wolfSSL, length-preserving, addressable by file offset, so a
-   page turn deciphers only the record it reads) with 17 host tests and the `bench_crypto` device benchmark, kept as
-   [`patches/cache-cipher.patch`](patches/cache-cipher.patch). It applies to master e8f661d74 with `git apply`.
-   Measured 2026-11-23 on the X3 at 160 MHz (`bench_crypto`, 64 passes a row):
+   Measured 2026-11-23 on the X3 at 160 MHz (`pio run -e bench_crypto`, 64 passes a row):
 
    | Cipher | 2 KB | 4 KB | 64 KB |
    |---|---|---|---|
@@ -89,17 +89,34 @@ use them ignores both.
    | wolfSSL AES-128-CBC decrypt | 1.34 ms | 2.67 ms | 42.6 ms (1.5 MB/s) |
    | wolfSSL AES-256-CTR | 1.72 ms | 3.42 ms | 54.6 ms (1.2 MB/s) |
 
-   So a 4 KB page record costs about 1.1 ms and a 48 KB image about 13 ms. The wrapper takes about a quarter longer than
-   raw wolfSSL (3.7 against 4.6 MB/s); that is the first thing to look at if D2 needs speed. The C3's AES peripheral (D1 uses it) is untried
-   here. Flash, on the `default` build with a call to `deriveBookKey`, `deriveFileNonce` and `apply`: +1,040 B against
-   the same tree without the call (the cipher's own code is 696 B); IRAM and static RAM unchanged; wolfSSL's ChaCha20
-   is already linked for TLS, and its symbols are identical in both builds. Not measured yet, because nothing calls
-   the cipher: a page turn and a chapter build of a protected book.
+   In the reader, on the X3 (2026-11-23, Moby-Dick's 62-page chapter 2, 14 pt, cold build, three runs each): the
+   protected copy builds in 5,935 ms against 5,809 ms for the plain one, +126 ms (+2.2%); on master the two build
+   alike (5,827 against 5,824 ms), so all of it is the cache cipher. Of the first version's +330 ms, the 16-byte
+   header (content off the sector grid, so SdFat moved every file through its one-sector cache) cost 86 ms and
+   writing through a 512-byte chunk (one sector per card write) 118 ms; the header is a sector now and a large write
+   from RAM is enciphered where it is. Pure ChaCha is about 30 ms of a build's reads; the open file's last keystream
+   block saves 34 ms. Page turns (a page record read from the section file and drawn) are unchanged, 40 to 55 ms
+   either way. A protected book's cache made by master was emptied and enciphered on the first open, keeping its
+   progress and manifest; one with files of an older layout had them removed and made again.
 
-   The storage scope that enciphered a protected book's cache in September, and the NVS key store behind it, are in
-   [`patches/cache-cipher-integration-2026-09.patch`](patches/cache-cipher-integration-2026-09.patch), for reading
-   only: they no longer apply. Carry the scope over by hand, with its keys from D1's device secret and
-   `ZipFile::isProtected()` as "this book is protected".
+   The wrapper takes about a quarter longer than raw wolfSSL (3.7 against 4.6 MB/s), and the chapter's remaining cost
+   is mostly card time. The C3's AES peripheral (D1 uses it) is untried here.
+
+   Cost on the X3/X4 build against master (same worktree): flash +1,180 B, static RAM +288 B (the table of the last
+   four cache folders, in the HalStorage singleton), IRAM unchanged; an open enciphered file takes about 120 B more
+   heap (its cipher and keystream block). The new code is about 5.5 KB; linking `lib/CacheCipher` shrank other code
+   by about 4.6 KB in the same link, as it did with the library alone (2026-11-23), so the net figure depends on layout.
+
+   Left open: covers and thumbnails a protected book's cache shares with Home stay in the folder, enciphered, so a
+   card moved to another reader shows the placeholder cover; Quick Resume's `sleep_frame.bin` and screenshots stay
+   plain (owner, 2026-11-23); a book font copied into a card-backed flash-area image (`flash-area.img`, S3 boards
+   without a usable partition) stays unenciphered there, which the owner accepts (2026-11-23).
+
+   On the Murphy (S3, SDMMC; the same chapter, 90 pages, three runs each): master builds the protected copy in 4,717
+   ms against 4,677 ms plain (+40 ms, D1); this branch in 4,842 against 4,747 ms (+95 ms), so the cache cipher adds
+   about 55 ms (+1.2%). Page turns are unchanged. The plain copy built about 65 ms slower on this branch than on master
+   for a reason not found: the cipher never runs for it, its per-open checks cost microseconds, and the X3 shows no such
+   difference (5,812 against 5,824 ms). Placement in the S3's flash cache is the likely one, not proven.
 4. **Books downloaded with Adobe Digital Editions.** Their licence is inside the EPUB (`META-INF/rights.xml`). The plugin
    derives a key only from a `<book>.epub.rights` beside the book, so such a book needs that file beside it first;
    fetching the `.acsm` again from the shop is the simple route.

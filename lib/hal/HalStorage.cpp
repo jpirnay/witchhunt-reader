@@ -13,6 +13,10 @@
 #include <UsbMassStorage.h>
 #endif
 
+#include <esp_memory_utils.h>
+#include <esp_random.h>
+
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <ctime>
@@ -150,6 +154,7 @@ bool HalStorage::beginUsbDrive() {
   // Recorded while the card is still the firmware's to write: the host may change anything, and the
   // power may go before the session ends.
   noteContentChange(nullptr);
+  cipherFolders_.clear();  // what it knew of the cache folders: the host may change any of them
   auto* const blockDevice = SDCard.detachFilesystemForRawAccess();
   if (!blockDevice) {
     LOG_ERR("USB", "USB Drive needs a mounted SD card");
@@ -184,6 +189,7 @@ void HalStorage::endUsbDrive() {
   StorageLock lock;
   usbMassStorage.end();
   noteContentChange(nullptr);  // the host may have changed anything
+  cipherFolders_.clear();      // a cache folder's marker among it
 #endif
 }
 
@@ -304,14 +310,58 @@ std::vector<String> HalStorage::listFiles(const char* path, int maxFiles) {
   HAL_STORAGE_WRAPPED_CALL(listFiles, path, maxFiles);
 }
 
-String HalStorage::readFile(const char* path) { HAL_STORAGE_WRAPPED_CALL(readFile, path); }
+// SdFat's own whole-file helpers read and write the card's bytes, so a file of an enciphered cache folder goes
+// through HalFile instead, with the same limits.
+String HalStorage::readFile(const char* path) {
+  if (!insideEncipheredFolder(path)) {
+    HAL_STORAGE_WRAPPED_CALL(readFile, path);
+  }
+  HalFile file;
+  String content;
+  if (!openFileForRead("SD", path, file)) return content;
+  constexpr size_t kMaxSize = 50000;  // SDCardManager::readFile's limit
+  char buf[65];                       // a chunk and its terminator: readFile() is for text, as SdFat's is
+  size_t total = 0;
+  int got = 0;
+  while (total < kMaxSize && (got = file.read(buf, std::min(sizeof(buf) - 1, kMaxSize - total))) > 0) {
+    buf[got] = '\0';
+    content += buf;
+    total += static_cast<size_t>(got);
+  }
+  return content;
+}
 
 bool HalStorage::readFileToStream(const char* path, Print& out, size_t chunkSize) {
-  HAL_STORAGE_WRAPPED_CALL(readFileToStream, path, out, chunkSize);
+  if (!insideEncipheredFolder(path)) {
+    HAL_STORAGE_WRAPPED_CALL(readFileToStream, path, out, chunkSize);
+  }
+  HalFile file;
+  if (!openFileForRead("SD", path, file)) return false;
+  uint8_t buf[256];
+  const size_t want = chunkSize == 0 || chunkSize > sizeof(buf) ? sizeof(buf) : chunkSize;
+  size_t remaining = file.fileSize();
+  while (remaining > 0) {
+    const int got = file.read(buf, std::min(want, remaining));
+    if (got <= 0 || out.write(buf, static_cast<size_t>(got)) != static_cast<size_t>(got)) return false;
+    remaining -= static_cast<size_t>(got);
+  }
+  return true;
 }
 
 size_t HalStorage::readFileToBuffer(const char* path, char* buffer, size_t bufferSize, size_t maxBytes) {
-  HAL_STORAGE_WRAPPED_CALL(readFileToBuffer, path, buffer, bufferSize, maxBytes);
+  if (!insideEncipheredFolder(path)) {
+    HAL_STORAGE_WRAPPED_CALL(readFileToBuffer, path, buffer, bufferSize, maxBytes);
+  }
+  if (buffer == nullptr || bufferSize == 0) return 0;
+  buffer[0] = '\0';
+  HalFile file;
+  if (!openFileForRead("SD", path, file)) return 0;
+  const size_t cap = maxBytes == 0 ? bufferSize - 1 : std::min(maxBytes, bufferSize - 1);
+  size_t total = 0;
+  int got = 0;
+  while (total < cap && (got = file.read(buffer + total, cap - total)) > 0) total += static_cast<size_t>(got);
+  buffer[total] = '\0';
+  return total;
 }
 
 // Ported verbatim from crosspoint-reader PR #2734 by Justin Mitchell
@@ -331,6 +381,13 @@ bool HalStorage::readFileToString(const char* moduleName, const std::string& pat
 }
 
 bool HalStorage::writeFile(const char* path, const String& content) {
+  if (insideEncipheredFolder(path)) {
+    HalFile file;
+    if (!openFileForWrite("SD", path, file)) return false;
+    const size_t len = content.length();
+    const bool wrote = file.write(content.c_str(), len) == len;
+    return file.close() && wrote;
+  }
   noteContentChange(path);
   HAL_STORAGE_WRAPPED_CALL(writeFile, path, content);
 }
@@ -362,6 +419,9 @@ class HalFile::Impl {
   explicit Impl(FsFile&& fsFile) : file(std::move(fsFile)) {}
   Impl(const char* path, const oflag_t oflag) : file(SDCard.open(path, oflag)) {}  // openInto()
   FsFile file;
+  // Set for a file of an enciphered cache folder (HalStorage::attachCacheCipher): its bytes on the card start with
+  // the cache_cipher header, which every size, position and seek below leaves out.
+  std::unique_ptr<cache_cipher::CipherStream> cipher;
 
   // The Impl for what an open returned, taken under the StorageLock. An open file gets one of its
   // own. A failed open gets `failed`, which costs no heap: a missing file or the end of a folder's
@@ -427,9 +487,131 @@ HalFile& HalFile::operator=(HalFile&& other) {
 
 HalFile HalStorage::open(const char* path, const oflag_t oflag) {
   StorageLock lock;  // ensure thread safety for the duration of this function
+  // Refused before the open: an open for writing empties the file as it opens it.
+  if (cacheFolderRefuses(path)) return HalFile(&HalFile::Impl::failed);
+  HalFile file = openRaw(path, oflag);
+  attachCacheCipher(file, path, opensForWriting(oflag));
+  return file;
+}
+
+HalFile HalStorage::openRaw(const char* path, const oflag_t oflag) {
+  StorageLock lock;
   if (opensForWriting(oflag)) noteContentChange(path);
   if (changesOnOpen(oflag)) return HalFile(HalFile::Impl::openInto(path, oflag));
   return HalFile(HalFile::Impl::adopt(SDCard.open(path, oflag)));
+}
+
+namespace {
+
+// The card's bytes of an open file, for cache_cipher's templates.
+struct RawFsFile {
+  FsFile& file;
+  uint64_t size() const { return file.fileSize(); }
+  uint64_t position() const { return file.position(); }
+  bool seek(const uint64_t pos) { return file.seekSet(pos); }
+  int read(void* buf, const size_t count) { return file.read(buf, count); }
+  size_t write(const void* buf, const size_t count) { return file.write(buf, count); }
+};
+
+void fillRandom(uint8_t* out, const size_t len) { esp_fill_random(out, len); }
+
+// A buffer cache_cipher::write() may encipher where it is for the length of a write: in RAM, internal or PSRAM. Never
+// one in flash (a constant), where a store faults.
+bool writableRam(const void* buf) { return esp_ptr_in_dram(buf) || esp_ptr_external_ram(buf); }
+
+}  // namespace
+
+void HalStorage::setCacheKeySource(const cache_cipher::KeySource source) {
+  StorageLock lock;
+  cacheKeySource_ = source;
+  cipherFolders_.clear();  // a folder judged Unreadable without a key may have one now
+}
+
+cache_cipher::FolderState HalStorage::cacheFolderState(const char* path, const size_t folderLen,
+                                                       uint8_t (&key)[cache_cipher::kKeyBytes]) {
+  const auto readMarker = [](const char* markerPath, uint8_t* bytes, const size_t cap) -> int {
+    if (!SDCard.exists(markerPath)) return 0;
+    FsFile marker = SDCard.open(markerPath, O_RDONLY);
+    if (!marker) return -1;  // there and not readable: refuse the folder rather than take it as plain
+    const int got = marker.read(bytes, cap);
+    marker.close();
+    return got > 0 ? got : -1;
+  };
+  return cache_cipher::resolve(cipherFolders_, path, folderLen, cacheKeySource_, readMarker, key);
+}
+
+void HalStorage::attachCacheCipher(HalFile& file, const char* path, const bool mayWrite) {
+  if (!file.isOpen()) return;
+  const size_t folderLen = cache_cipher::folderLength(path);
+  if (folderLen == 0 || cache_cipher::isMarker(path, folderLen) || file.impl->file.isDirectory()) return;
+  uint8_t key[cache_cipher::kKeyBytes];
+  const cache_cipher::FolderState state = cacheFolderState(path, folderLen, key);
+  cache_cipher::Attach attached = cache_cipher::Attach::Plain;
+  if (state == cache_cipher::FolderState::Enciphered) {
+    RawFsFile raw{file.impl->file};
+    attached = cache_cipher::attach(raw, mayWrite, key, fillRandom, file.impl->cipher);
+  }
+  memset(key, 0, sizeof(key));
+  if (state == cache_cipher::FolderState::Plain || attached != cache_cipher::Attach::Refused) return;
+  // Not one of the folder's own files (no header: copied in, damaged, or an older layout): damaged cache, removed so
+  // that whatever wanted it makes it again, as for a missing file. Closed first: SdFat must not remove an open file.
+  LOG_ERR("SD", "%s: not an enciphered cache file, removed", path);
+  file.impl->file.close();
+  file = HalFile(&HalFile::Impl::failed);
+  noteContentChange(path);
+  SDCard.remove(path);
+}
+
+bool HalStorage::markCacheFolderEnciphered(const char* folder) {
+  StorageLock lock;
+  uint8_t salt[cache_cipher::kSaltBytes];
+  esp_fill_random(salt, sizeof(salt));
+  uint8_t bytes[cache_cipher::kMarkerBytes];
+  cache_cipher::makeMarker(salt, bytes);
+  memset(salt, 0, sizeof(salt));
+  const std::string path = std::string(folder) + "/" + cache_cipher::kMarkerName;
+  noteContentChange(path.c_str());
+  FsFile marker = SDCard.open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC);
+  const bool ok = marker && marker.write(bytes, sizeof(bytes)) == sizeof(bytes) && marker.close();
+  memset(bytes, 0, sizeof(bytes));
+  cipherFolders_.forget(folder);
+  if (!ok) {
+    LOG_ERR("SD", "Could not mark %s enciphered", folder);
+    SDCard.remove(path.c_str());
+  }
+  return ok;
+}
+
+bool HalStorage::cacheFolderEnciphered(const char* folder) {
+  StorageLock lock;
+  // The state of a file inside it: the folder's own path is not "inside" anything.
+  const std::string probe = std::string(folder) + "/" + cache_cipher::kMarkerName;
+  const size_t folderLen = cache_cipher::folderLength(probe.c_str());
+  if (folderLen != strlen(folder)) return false;
+  uint8_t key[cache_cipher::kKeyBytes];
+  const bool enciphered = cacheFolderState(probe.c_str(), folderLen, key) == cache_cipher::FolderState::Enciphered;
+  memset(key, 0, sizeof(key));
+  return enciphered;
+}
+
+bool HalStorage::cacheFolderRefuses(const char* path) {
+  const size_t folderLen = cache_cipher::folderLength(path);
+  if (folderLen == 0 || cache_cipher::isMarker(path, folderLen)) return false;
+  uint8_t key[cache_cipher::kKeyBytes];
+  const bool refused = cacheFolderState(path, folderLen, key) == cache_cipher::FolderState::Unreadable;
+  memset(key, 0, sizeof(key));
+  if (refused) LOG_ERR("SD", "%s: its folder is enciphered under a key this device does not have", path);
+  return refused;
+}
+
+bool HalStorage::insideEncipheredFolder(const char* path) {
+  StorageLock lock;
+  const size_t folderLen = cache_cipher::folderLength(path);
+  if (folderLen == 0) return false;
+  uint8_t key[cache_cipher::kKeyBytes];
+  const bool plain = cacheFolderState(path, folderLen, key) == cache_cipher::FolderState::Plain;
+  memset(key, 0, sizeof(key));
+  return !plain;
 }
 
 bool HalStorage::mkdir(const char* path, const bool pFlag) {
@@ -447,6 +629,7 @@ bool HalStorage::exists(const char* path) { HAL_STORAGE_WRAPPED_CALL(exists, pat
 bool HalStorage::remove(const char* path) {
   noteContentChange(path);
   StorageLock lock;
+  cipherFolders_.forget(path);
   if (SDCard.remove(path)) return true;
 
   FsFile file = SDCard.open(path, O_RDONLY);
@@ -465,12 +648,17 @@ bool HalStorage::remove(const char* path) {
 bool HalStorage::rename(const char* oldPath, const char* newPath) {
   noteContentChange(oldPath);
   noteContentChange(newPath);
-  HAL_STORAGE_WRAPPED_CALL(rename, oldPath, newPath);
+  StorageLock lock;
+  cipherFolders_.forget(oldPath);
+  cipherFolders_.forget(newPath);
+  return SDCard.rename(oldPath, newPath);
 }
 
 bool HalStorage::rmdir(const char* path) {
   noteContentChange(path);
-  HAL_STORAGE_WRAPPED_CALL(rmdir, path);
+  StorageLock lock;
+  cipherFolders_.forget(path);
+  return SDCard.rmdir(path);
 }
 
 // Ported from crosspoint-reader PR #3979 (phuclee, @phucisstupid). A directory entry is known by
@@ -501,10 +689,15 @@ bool HalStorage::areSameFile(const char* first, const char* second, bool& same) 
 
 bool HalStorage::openFileForRead(const char* moduleName, const char* path, HalFile& file) {
   StorageLock lock;  // ensure thread safety for the duration of this function
+  if (cacheFolderRefuses(path)) {
+    file = HalFile(&HalFile::Impl::failed);
+    return false;
+  }
   FsFile fsFile;
   const bool ok = SDCard.openFileForRead(moduleName, path, fsFile);
   file = HalFile(HalFile::Impl::adopt(std::move(fsFile)));
-  return ok && file.isOpen();  // not open after all when its Impl could not be had
+  attachCacheCipher(file, path, false);
+  return ok && file.isOpen();  // not open after all when its Impl could not be had, or its cipher
 }
 
 bool HalStorage::openFileForRead(const char* moduleName, const std::string& path, HalFile& file) {
@@ -533,12 +726,17 @@ bool HalStorage::openFileForWrite(const char* moduleName, const String& path, Ha
 
 bool HalStorage::openFileForUpdate(const char* moduleName, const char* path, HalFile& file) {
   StorageLock lock;  // ensure thread safety for the duration of this function
+  if (cacheFolderRefuses(path)) {
+    file = HalFile(&HalFile::Impl::failed);
+    return false;
+  }
   FsFile fsFile = SDCard.open(path, O_RDWR);
   const bool ok = static_cast<bool>(fsFile);
   if (!ok) {
     LOG_ERR(moduleName, "Failed to open %s for update", path);
   }
   file = HalFile(HalFile::Impl::adopt(std::move(fsFile)));
+  attachCacheCipher(file, path, true);
   return ok && file.isOpen();
 }
 
@@ -548,7 +746,9 @@ bool HalStorage::openFileForUpdate(const char* moduleName, const std::string& pa
 
 bool HalStorage::removeDir(const char* path) {
   noteContentChange(path);
-  HAL_STORAGE_WRAPPED_CALL(removeDir, path);
+  StorageLock lock;
+  cipherFolders_.forget(path);
+  return SDCard.removeDir(path);
 }
 
 bool HalStorage::copyFile(const char* moduleName, const std::string& srcPath, const char* dstPath) {
@@ -603,27 +803,44 @@ bool HalStorage::copyFile(const char* moduleName, const std::string& srcPath, co
 
 void HalFile::flush() { HAL_FILE_WRAPPED_CALL(flush, ); }
 size_t HalFile::getName(char* name, size_t len) { HAL_FILE_WRAPPED_CALL(getName, name, len); }
-size_t HalFile::size() {
+// An enciphered file's header is not the file's: sizes and positions leave it out, seeks skip it.
+namespace {
+constexpr uint64_t kCipherHeader = cache_cipher::kHeaderBytes;
+uint64_t contentSize(const uint64_t onCard) { return onCard > kCipherHeader ? onCard - kCipherHeader : 0; }
+}  // namespace
+
+size_t HalFile::size() { return static_cast<size_t>(size64()); }
+size_t HalFile::fileSize() { return static_cast<size_t>(fileSize64()); }
+bool HalFile::seek(size_t pos) { return seekSet64(pos); }
+bool HalFile::seekCur(int64_t offset) {
+  HalStorage::StorageLock lock;
   assert(impl != nullptr);
-  return static_cast<size_t>(impl->file.size());
+  if (impl->cipher && static_cast<int64_t>(impl->file.position() - kCipherHeader) + offset < 0) return false;
+  return impl->file.seekCur(offset);
 }
-size_t HalFile::fileSize() {
-  assert(impl != nullptr);
-  return static_cast<size_t>(impl->file.fileSize());
-}
-bool HalFile::seek(size_t pos) { HAL_FILE_WRAPPED_CALL(seekSet, pos); }
-bool HalFile::seekCur(int64_t offset) { HAL_FILE_WRAPPED_CALL(seekCur, offset); }
-bool HalFile::seekSet(size_t offset) { HAL_FILE_WRAPPED_CALL(seekSet, offset); }
+bool HalFile::seekSet(size_t offset) { return seekSet64(offset); }
 int HalFile::available() const { HAL_FILE_WRAPPED_CALL(available, ); }
-size_t HalFile::position() const {
+size_t HalFile::position() const { return static_cast<size_t>(position64()); }
+int HalFile::read(void* buf, size_t count) {
+  HalStorage::StorageLock lock;
   assert(impl != nullptr);
-  return static_cast<size_t>(impl->file.position());
+  if (!impl->cipher) return impl->file.read(buf, count);
+  RawFsFile raw{impl->file};
+  return cache_cipher::read(raw, *impl->cipher, buf, count);
 }
-int HalFile::read(void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(read, buf, count); }
-int HalFile::read() { HAL_FILE_WRAPPED_CALL(read, ); }
-size_t HalFile::write(const void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(write, buf, count); }
-size_t HalFile::write(const uint8_t* buf, size_t count) { HAL_FILE_WRAPPED_CALL(write, buf, count); }
-size_t HalFile::write(uint8_t b) { HAL_FILE_WRAPPED_CALL(write, b); }
+int HalFile::read() {
+  uint8_t b = 0;
+  return read(&b, 1) == 1 ? b : -1;
+}
+size_t HalFile::write(const void* buf, size_t count) {
+  HalStorage::StorageLock lock;
+  assert(impl != nullptr);
+  if (!impl->cipher) return impl->file.write(buf, count);
+  RawFsFile raw{impl->file};
+  return cache_cipher::write(raw, *impl->cipher, buf, count, writableRam(buf));
+}
+size_t HalFile::write(const uint8_t* buf, size_t count) { return write(static_cast<const void*>(buf), count); }
+size_t HalFile::write(uint8_t b) { return write(static_cast<const void*>(&b), 1); }
 bool HalFile::rename(const char* newPath) {
   Storage.noteContentChange(nullptr);  // the old path is not known here
   HAL_FILE_WRAPPED_CALL(rename, newPath);
@@ -639,11 +856,25 @@ uint32_t HalFile::dirIndex() const { HAL_FILE_WRAPPED_CALL(dirIndex, ); }
 void HalFile::rewindDirectory() { HAL_FILE_WRAPPED_CALL(rewindDirectory, ); }
 bool HalFile::close() { HAL_FILE_WRAPPED_CALL(close, ); }
 bool HalFile::detectContiguous() { HAL_FILE_WRAPPED_CALL(contiguousRange, nullptr, nullptr); }
-uint64_t HalFile::size64() { HAL_FILE_FORWARD_CALL(size, ); }
-uint64_t HalFile::fileSize64() { HAL_FILE_FORWARD_CALL(fileSize, ); }
-bool HalFile::seek64(uint64_t pos) { HAL_FILE_WRAPPED_CALL(seekSet, pos); }
-bool HalFile::seekSet64(uint64_t offset) { HAL_FILE_WRAPPED_CALL(seekSet, offset); }
-uint64_t HalFile::position64() const { HAL_FILE_FORWARD_CALL(position, ); }
+uint64_t HalFile::size64() {
+  assert(impl != nullptr);
+  return impl->cipher ? contentSize(impl->file.size()) : impl->file.size();
+}
+uint64_t HalFile::fileSize64() {
+  assert(impl != nullptr);
+  return impl->cipher ? contentSize(impl->file.fileSize()) : impl->file.fileSize();
+}
+bool HalFile::seek64(uint64_t pos) { return seekSet64(pos); }
+bool HalFile::seekSet64(uint64_t offset) {
+  HalStorage::StorageLock lock;
+  assert(impl != nullptr);
+  return impl->file.seekSet(impl->cipher ? offset + kCipherHeader : offset);
+}
+uint64_t HalFile::position64() const {
+  assert(impl != nullptr);
+  const uint64_t onCard = impl->file.position();
+  return impl->cipher ? contentSize(onCard) : onCard;
+}
 HalFile HalFile::openNextFile() {
   HalStorage::StorageLock lock;
   assert(impl != nullptr);

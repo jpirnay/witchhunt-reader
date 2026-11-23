@@ -1493,7 +1493,8 @@ void CrossPointWebServer::handleDownload() const {
     return;
   }
 
-  FsFile file = Storage.open(itemPath.c_str());
+  // The card's bytes: a protected book's cache files leave enciphered, as they are on the card (HalStorage::openRaw).
+  FsFile file = Storage.openRaw(itemPath.c_str());
   if (!file) {
     server->send(500, "text/plain", "Failed to open file");
     return;
@@ -1918,7 +1919,8 @@ void CrossPointWebServer::handleRename() const {
     return;
   }
 
-  FsFile file = Storage.open(itemPath.c_str());
+  // The card's bytes: a protected book's cache files leave enciphered, as they are on the card (HalStorage::openRaw).
+  FsFile file = Storage.openRaw(itemPath.c_str());
   if (!file) {
     server->send(500, "text/plain", "Failed to open file");
     return;
@@ -2005,7 +2007,8 @@ void CrossPointWebServer::handleMove() const {
     return;
   }
 
-  FsFile file = Storage.open(itemPath.c_str());
+  // The card's bytes: a protected book's cache files leave enciphered, as they are on the card (HalStorage::openRaw).
+  FsFile file = Storage.openRaw(itemPath.c_str());
   if (!file) {
     server->send(500, "text/plain", "Failed to open file");
     return;

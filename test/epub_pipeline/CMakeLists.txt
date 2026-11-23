@@ -360,6 +360,7 @@ if(OPENSSL_FOUND)
     ${REPO_ROOT}/lib/BookProtection/AesCbcCipher.cpp
     ${REPO_ROOT}/lib/BookProtection/BookKey.cpp
     ${REPO_ROOT}/lib/BookProtection/BookSession.cpp
+    ${REPO_ROOT}/lib/BookProtection/CacheAtRest.cpp
     ${REPO_ROOT}/lib/BookProtection/EncryptionXmlParser.cpp
     ${REPO_ROOT}/lib/BookProtection/ProtectionManifest.cpp
     ${REPO_ROOT}/lib/DeviceSecret/DeviceSecret.cpp

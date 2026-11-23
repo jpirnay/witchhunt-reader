@@ -322,7 +322,11 @@ class ManifestProtection final : public ZipFile::Protection {
 
   ManifestStatus open(const std::string& path, const uint64_t fingerprint, const uint8_t* key, const size_t keyLen) {
     if (!Storage.exists(path.c_str())) return ManifestStatus::Missing;
-    if (!Storage.openFileForRead("PRT", path, file_)) return ManifestStatus::Failed;
+    if (!Storage.openFileForRead("PRT", path, file_)) {
+      // Gone since: an enciphered cache folder removes a file of it that is not its own (HalStorage), damaged as a
+      // manifest of other content is. Built again either way.
+      return Storage.exists(path.c_str()) ? ManifestStatus::Failed : ManifestStatus::Missing;
+    }
     Header header{};
     if (file_.read(&header, sizeof(header)) != static_cast<int>(sizeof(header)) || header.magic != MANIFEST_MAGIC ||
         header.version != MANIFEST_VERSION || header.fingerprint != fingerprint || header.runs > MAX_RUNS) {

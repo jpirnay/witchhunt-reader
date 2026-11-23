@@ -1649,7 +1649,9 @@ void fsGet(const std::string_view arg) {
     reply("FS_ERROR:protected ", path);
     return;
   }
-  HalFile file = Storage.open(path.c_str());
+  // The card's bytes, as for every way a file leaves the device (HalStorage::openRaw): a protected book's cache files
+  // stay enciphered.
+  HalFile file = Storage.openRaw(path.c_str());
   if (!file) {
     reply("FS_ERROR:not found ", path);
     return;
@@ -1722,7 +1724,9 @@ void fsHash(const std::string_view arg) {
     reply("FS_ERROR:protected ", path);
     return;
   }
-  HalFile file = Storage.open(path.c_str());
+  // The card's bytes, as for every way a file leaves the device (HalStorage::openRaw): a protected book's cache files
+  // stay enciphered.
+  HalFile file = Storage.openRaw(path.c_str());
   if (!file) {
     reply("FS_ERROR:not found ", path);
     return;
