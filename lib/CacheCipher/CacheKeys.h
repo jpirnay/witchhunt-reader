@@ -1,6 +1,6 @@
 #pragma once
 
-// Key and nonce derivation for the protected-book cache — docs/future_work/protected-content.md (D2).
+// Key and nonce derivation for the protected-book cache — docs/design/cache-cipher.md (D2).
 // Pure functions: no storage, no NVS, no Arduino, so the derivation is pinned by host
 // tests. The plumbing that supplies the device key and the per-book salt lives on the device
 // side; this file only says how the bytes are computed.

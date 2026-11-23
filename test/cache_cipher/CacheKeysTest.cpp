@@ -1,4 +1,4 @@
-// Host tests for the cache key/nonce derivation — docs/future_work/protected-content.md (D2).
+// Host tests for the cache key/nonce derivation — docs/design/cache-cipher.md (D2).
 //
 // The properties that matter are separation (nothing shares a keystream that shouldn't) and
 // stability (the derivation cannot drift, because a change silently invalidates every cache

@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <string>
 
-// A protected book's cache at rest (D2 in docs/future_work/protected-content.md). Its cache folder holds the book's
+// A protected book's cache at rest (D2, docs/design/cache-cipher.md). Its cache folder holds the book's
 // derived content: the extracted chapters, the laid-out pages, the footnotes, search snippets, the pictures and their
 // pixel caches, the book's own fonts. HalStorage enciphers every file of a marked folder (lib/CacheCipher/
 // CacheCipherFile.h); this is where a folder gets its key and its mark.

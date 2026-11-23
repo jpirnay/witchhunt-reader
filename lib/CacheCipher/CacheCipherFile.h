@@ -1,6 +1,6 @@
 #pragma once
 
-// The file layer of the cache cipher (docs/future_work/protected-content.md, D2): which files are enciphered, the
+// The file layer of the cache cipher (docs/design/cache-cipher.md, D2): which files are enciphered, the
 // header that carries each file's nonce, and the read, write and offset rules. The device's HalFile and the host
 // tests' stdio HalFile both follow them through the templates below, so the pipeline tests run the device's rules.
 //

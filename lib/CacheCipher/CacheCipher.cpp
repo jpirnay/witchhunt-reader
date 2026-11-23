@@ -4,7 +4,7 @@
 
 // Two backends, one behaviour. On device wolfSSL's ChaCha20 does the work: it is already
 // linked for TLS, so it costs no flash, and it measured 4.6 MB/s against 1.8 MB/s for the
-// portable core below on an ESP32-C3 (docs/future_work/protected-content.md, D2). At 1.8 MB/s a 4 KB
+// portable core below on an ESP32-C3 (docs/design/cache-cipher.md, D2). At 1.8 MB/s a 4 KB
 // page record costs 2.25 ms and a 48 KB image 26 ms, both over D2's budgets; at
 // 4.6 MB/s they are 0.9 ms and 10 ms, both inside. The gap is the byte-at-a-time XOR here
 // against wolfSSL's word-wise one — worth knowing before anyone "simplifies" this back to one

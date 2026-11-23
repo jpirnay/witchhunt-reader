@@ -1,4 +1,4 @@
-// Host tests for CacheCipher — docs/future_work/protected-content.md (D2).
+// Host tests for CacheCipher — docs/design/cache-cipher.md (D2).
 //
 // Two kinds of check, and both matter:
 //   * the RFC 8439 vectors, which prove this is really ChaCha20 and not merely a
