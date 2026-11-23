@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <BitmapHelpers.h>
 #include <BoardConfig.h>
+#include <CacheAtRest.h>
 #include <CooperativeAbort.h>
 #include <Epub.h>
 #include <Epub/BookFonts.h>
@@ -1658,6 +1659,9 @@ void setup() {
     return;
   }
   BootDiag::markPhase(BootPhase::SdMount);
+  // Before anything opens a book's cache: a protected book's folder is enciphered under a key from this device's
+  // secret (lib/BookProtection/CacheAtRest.h), and opens nothing without it.
+  Storage.setCacheKeySource(book_protection::cacheFolderKey);
   // First point at which the card is writable. Files this boot's record and amends the
   // previous sleep's, so the pair "how the last sleep ended" / "how this boot started"
   // is on the card before anything later in setup() can hang or panic.

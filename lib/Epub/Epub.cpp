@@ -4,6 +4,7 @@
 #include <BookCache.h>
 #include <BookSession.h>
 #include <BufferedFileIO.h>
+#include <CacheAtRest.h>
 #include <CooperativeAbort.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
@@ -606,13 +607,9 @@ bool Epub::openProtection(const bool build) {
   uint64_t fingerprint = 0;
   if (!hasEncryptionManifest() || !computeZipFingerprint(&fingerprint)) return true;
   setupCacheDir();
-  if (build && !Storage.exists(book_protection::manifestPath(cachePath).c_str()) &&
-      BookMetadataCache::cacheExists(cachePath) &&
-      book_protection::probeManifest(filepath).status == book_protection::ManifestStatus::Protected) {
-    // A cache made before the book's protection was known is a cache of its ciphertext.
-    LOG_INF("EBP", "Protected book with a cache from before: rebuilding it");
-    clearCache();
-    setupCacheDir();
+  if (!encipherCacheIfProtected(build)) {
+    protection_ = static_cast<uint8_t>(book_protection::OpenResult::Unreadable);
+    return false;
   }
   const auto result = book_protection::openBook(filepath, cachePath, fingerprint, build, loadScratch_);
   protection_ = static_cast<uint8_t>(result);
@@ -628,9 +625,31 @@ void Epub::attachKnownProtection() {
   // No manifest: never opened with a key, or plain. Its cover then reads as ciphertext and fails to
   // decode, which shows the placeholder.
   if (!Storage.exists(book_protection::manifestPath(cachePath).c_str())) return;
+  // A book opened before its cache was enciphered: the next look at it (Home, the library) enciphers it, rather than
+  // the next time it is read, which may be never.
+  if (!encipherCacheIfProtected(false)) {
+    protection_ = static_cast<uint8_t>(book_protection::OpenResult::Unreadable);
+    return;
+  }
   uint64_t fingerprint = 0;
   if (!computeZipFingerprint(&fingerprint)) return;
   protection_ = static_cast<uint8_t>(book_protection::openBook(filepath, cachePath, fingerprint, false, nullptr));
+}
+
+bool Epub::encipherCacheIfProtected(const bool probe) {
+  if (Storage.cacheFolderEnciphered(cachePath.c_str())) return true;
+  // Known protected by its manifest, or by its encryption.xml when the caller may read it (an open that builds). A
+  // book that has neither is plain here; nothing of its text can reach the folder before openBook() knows better.
+  const bool known = Storage.exists(book_protection::manifestPath(cachePath).c_str());
+  if (!known &&
+      !(probe && book_protection::probeManifest(filepath).status == book_protection::ManifestStatus::Protected)) {
+    return true;
+  }
+  // The folder of a protected book holds its derived text, pictures and fonts, so it is enciphered (D2). One made
+  // before holds them in the clear, or is a cache of the book's ciphertext: emptied first, the reading state kept.
+  if (book_protection::encipherCache(filepath, cachePath)) return true;
+  LOG_ERR("EBP", "Could not encipher the cache of %s: not opened", filepath.c_str());
+  return false;
 }
 
 book_protection::OpenResult Epub::protectionResult() const {

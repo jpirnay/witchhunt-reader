@@ -168,6 +168,9 @@ class Epub {
   // Registers the book's protection with ZipFile before anything reads it (BookSession.h); false
   // when the book is protected and cannot be read. `build`: build the manifest on the first open.
   bool openProtection(bool build);
+  // Enciphers the cache folder of a protected book (book_protection::encipherCache()) when it is not yet: one known
+  // by its manifest, or with `probe` by its encryption.xml. False when it should be and could not be.
+  bool encipherCacheIfProtected(bool probe);
   // The cover and metadata loads: registers a protection an earlier open established; never builds.
   void attachKnownProtection();
   // fingerprint.bin sidecar in the cache dir: the fingerprint the cache was
