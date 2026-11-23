@@ -381,3 +381,12 @@ void LineReaderActivity::loadProgress() {
     f.close();
   }
 }
+
+ScreenshotInfo LineReaderActivity::screenshotInfo() const {
+  ScreenshotInfo info;
+  if (!txt) return info;
+  info.title = txt->getTitle();  // the file's name without its extension
+  info.page = currentPage + 1;
+  info.percent = ReaderUtils::pageProgressPercentByte(currentPage, totalPages);
+  return info;
+}

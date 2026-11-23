@@ -823,6 +823,7 @@ STR_DELETE_FOLDER_QUESTION: "Видалити папку з усім вміст�
 STR_BTN_DEF_NOTHING: "Нічого"
 STR_ALL_FILES: "Усі файли"
 STR_FIRMWARE_WRONG_DEVICE: "Прошивка для іншого пристрою"
+STR_FIRMWARE_NO_CHECKSUM: "Оновлення не має контрольної суми"
 STR_BROWSER_VIEW: "Вигляд книг"
 STR_VIEW_FILENAMES: "Імена файлів"
 STR_VIEW_DETAILS: "Детально"

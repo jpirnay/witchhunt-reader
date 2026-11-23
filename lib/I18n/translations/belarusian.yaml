@@ -824,6 +824,7 @@ STR_DELETE_FOLDER_QUESTION: "Выдаліць папку з усім змесц�
 STR_BTN_DEF_NOTHING: "Нічога"
 STR_ALL_FILES: "Усе файлы"
 STR_FIRMWARE_WRONG_DEVICE: "Прашыўка для іншай прылады"
+STR_FIRMWARE_NO_CHECKSUM: "Абнаўленне без кантрольнай сумы"
 STR_BROWSER_VIEW: "Выгляд кніг"
 STR_VIEW_FILENAMES: "Імёны файлаў"
 STR_VIEW_DETAILS: "Падрабязна"

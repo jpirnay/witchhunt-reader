@@ -9,6 +9,7 @@
 #include <string>
 
 #include "Bitmap.h"  // Required for BmpHeader struct definition
+#include "ScreenshotName.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/RenderLock.h"
@@ -68,14 +69,16 @@ void ScreenshotUtil::service(GfxRenderer& renderer, void (*sendToHost)(const uin
 void ScreenshotUtil::takeScreenshot(GfxRenderer& renderer) {
   const uint8_t* fb = renderer.getFrameBuffer();
   if (fb) {
-    String filename_str = "/screenshots/screenshot-" + String(millis()) + ".bmp";
+    // A reader names the book, chapter, page and progress; any other screen gets screenshot-<millis>.bmp.
+    char filename[256];
+    screenshot_name::build(activityManager.screenshotInfo(), millis(), filename, sizeof(filename));
     const bool inverted = renderer.isOutputInverted();  // as for the host capture in service()
     if (inverted) renderer.invertScreen();
-    const bool saved = ScreenshotUtil::saveFramebufferAsBmp(filename_str.c_str(), fb, renderer.getDisplayWidth(),
-                                                            renderer.getDisplayHeight());
+    const bool saved =
+        ScreenshotUtil::saveFramebufferAsBmp(filename, fb, renderer.getDisplayWidth(), renderer.getDisplayHeight());
     if (inverted) renderer.invertScreen();
     if (saved) {
-      LOG_DBG("SCR", "Screenshot saved to %s", filename_str.c_str());
+      LOG_DBG("SCR", "Screenshot saved to %s", filename);
     } else {
       LOG_ERR("SCR", "Failed to save screenshot");
     }

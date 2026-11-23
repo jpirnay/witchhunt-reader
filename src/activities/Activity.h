@@ -15,6 +15,7 @@
 #include "MappedInputManager.h"
 #include "RenderLock.h"
 #include "SerialTestApi.h"  // SERIAL_TEST_API
+#include "util/ScreenshotInfo.h"
 
 class Activity {
   friend class ActivityManager;
@@ -122,6 +123,11 @@ class Activity {
   // the frame buffer (e.g. the reader's pre-rendered next page) must redraw the visible page
   // here so the capture matches the display. Default is a no-op.
   virtual void prepareFramebufferForCapture() {}
+
+  // What a card screenshot of this screen is named after: the readers give the open book's title, chapter, page and
+  // progress (screenshot_name::build); every other screen keeps the plain screenshot-<millis>.bmp. Called on the loop
+  // task under the render lock. Ported from crosspoint-reader PR #1589 (Jon Stieglitz).
+  virtual ScreenshotInfo screenshotInfo() const { return {}; }
 
   // Appends what a test script needs to know about this activity's state to `out`, as
   // space-separated key=value pairs, for the serial CMD:STATE. Called under the render lock.

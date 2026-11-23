@@ -7834,6 +7834,20 @@ void EpubReaderActivity::restoreCurrentPageToBufferIfPreRendered() {
   usePreRenderedBuffer = false;
 }
 
+ScreenshotInfo EpubReaderActivity::screenshotInfo() const {
+  ScreenshotInfo info;
+  if (!epub) return info;
+  info.title = epub->getTitle();
+  // The spine item, as upstream names it: a book's chapters and its spine items differ only where the TOC is coarser.
+  info.chapter = currentSpineIndex + 1;
+  if (section) {
+    info.page = section->currentPage + 1;
+    // The percent the status bar shows, so the name agrees with the capture.
+    info.percent = ReaderUtils::fractionProgressPercentByte(statusBarBookProgress());
+  }
+  return info;
+}
+
 ProgressPpb EpubReaderActivity::statusBarBookProgress() const {
   // Calculate progress in book. During an active section build pageCount only reflects pages
   // built so far, not the final chapter length, so show a byte-based estimate ("page X of ~Y")
