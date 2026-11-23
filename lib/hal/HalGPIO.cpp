@@ -261,6 +261,14 @@ void HalGPIO::pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs) {
   edgeTail_ = next;
 }
 
+bool HalGPIO::injectedInputPending() const {
+  portENTER_CRITICAL_SAFE(const_cast<portMUX_TYPE*>(&inputMux_));
+  const bool pending = deliveredInputs_ != injectedInputs_;
+  portEXIT_CRITICAL_SAFE(const_cast<portMUX_TYPE*>(&inputMux_));
+  return pending;
+}
+
+#if FREEINK_CAP_TOUCH
 // Reads the SDK's one-shot multi-touch flags and queues whatever it classified.
 // Runs on the sampler task, outside inputMux_ — the SDK reads must not happen
 // with interrupts disabled — and takes the lock only to push. Drops the newest
@@ -289,16 +297,6 @@ void HalGPIO::latchTouchGestures(const uint32_t timeMs) {
   }
 }
 
-// Latches the SDK's one-shot single-contact events. See TouchEvent for why they
-// cannot simply be read from the loop task. Drops the newest on a full ring,
-// matching pushEdgeLocked.
-bool HalGPIO::injectedInputPending() const {
-  portENTER_CRITICAL_SAFE(const_cast<portMUX_TYPE*>(&inputMux_));
-  const bool pending = deliveredInputs_ != injectedInputs_;
-  portEXIT_CRITICAL_SAFE(const_cast<portMUX_TYPE*>(&inputMux_));
-  return pending;
-}
-
 void HalGPIO::pushTouchEvent(const TouchEvent& event) {
   portENTER_CRITICAL(&inputMux_);
   const int next = (touchEventTail_ + 1) % TOUCH_EVENT_BUF;
@@ -309,6 +307,9 @@ void HalGPIO::pushTouchEvent(const TouchEvent& event) {
   portEXIT_CRITICAL(&inputMux_);
 }
 
+// Latches the SDK's one-shot single-contact events. See TouchEvent for why they
+// cannot simply be read from the loop task. Drops the newest on a full ring,
+// matching pushEdgeLocked.
 void HalGPIO::latchTouchEvents() {
   const auto push = [&](const TouchEvent& event) { pushTouchEvent(event); };
 
@@ -359,6 +360,7 @@ void HalGPIO::latchTouchEvents() {
     portEXIT_CRITICAL(&inputMux_);
   }
 }
+#endif  // FREEINK_CAP_TOUCH
 
 // One sampling pass: read + debounce the buttons, then latch any edges. Runs on
 // the sampler task once started; also called synchronously from update() before
@@ -417,8 +419,9 @@ void HalGPIO::sampleOnce() {
   const uint32_t now = millis();
   const unsigned long held = inputMgr.getHeldTime();
 
+#if FREEINK_CAP_TOUCH
   // Before the critical section: these read the SDK, and the queue push inside
-  // takes inputMux_ itself. Inert on non-touch boards.
+  // takes inputMux_ itself.
   latchTouchGestures(now);
   latchTouchEvents();
 #if FREEINK_DEVICE_METALIO_EINK4_PLUS
@@ -426,6 +429,7 @@ void HalGPIO::sampleOnce() {
   if ((released & bezelPageKeys) || inputMgr.wasHomeKeyTapped() || inputMgr.wasHomeKeyLongPressed()) {
     HapticManager::getInstance().pulse();
   }
+#endif
 #endif
 
   // Capacitive home key -> synthetic CONFIRM button.
@@ -525,6 +529,7 @@ void HalGPIO::sampleOnce() {
   // This answers the first bring-up question -- is the panel reporting contact at
   // all -- separately from the second, whether anything acts on it. Logged on
   // transition only, so a resting finger does not flood the log.
+#if FREEINK_CAP_TOUCH
   if (BoardConfig::hasTouch()) {
     // What the SDK made of the contact, reported from the SAMPLER task at the
     // release edge — i.e. where the one-shot flags are still fresh. That is the
@@ -571,6 +576,7 @@ void HalGPIO::sampleOnce() {
       }
     }
   }
+#endif  // FREEINK_CAP_TOUCH
 
   // Raw button trace for board bring-up. Deliberately placed AFTER the critical
   // section: logging inside portENTER_CRITICAL would run with interrupts
@@ -715,6 +721,7 @@ bool HalGPIO::popButtonEdge(ButtonEdge& out) {
   return got;
 }
 
+#if FREEINK_CAP_TOUCH
 bool HalGPIO::popTouchGesture(TouchGesture& out) {
   bool got = false;
   portENTER_CRITICAL(&inputMux_);
@@ -728,6 +735,11 @@ bool HalGPIO::popTouchGesture(TouchGesture& out) {
 }
 
 void HalGPIO::flushTouchEvents() { clearTouchEventState(); }
+#else
+bool HalGPIO::popTouchGesture(TouchGesture&) { return false; }
+
+void HalGPIO::flushTouchEvents() {}
+#endif  // FREEINK_CAP_TOUCH
 
 void HalGPIO::flushButtonEdges() {
   portENTER_CRITICAL(&inputMux_);
@@ -754,6 +766,7 @@ void HalGPIO::update() {
   snapReleased_ = accumReleased_;
   accumPressed_ = 0;
   accumReleased_ = 0;
+#if FREEINK_CAP_TOUCH
   // One discrete touch event per drain, and the snapshot is REPLACED (not
   // merged) so each is visible for exactly one cycle — the same contract
   // snapPressed_ has. Within that cycle it is a non-consuming peek, which is
@@ -771,6 +784,10 @@ void HalGPIO::update() {
   snapTouchAtMs_ = snapTouchEvent_.atMs;
   snapTouchReleased_ = touchReleasedPending_;
   touchReleasedPending_ = false;
+#else
+  // Injected presses are all in the edge queue ButtonEventManager drains right after this.
+  deliveredInputs_ = injectedInputs_;
+#endif  // FREEINK_CAP_TOUCH
   portEXIT_CRITICAL(&inputMux_);
   updateUsbState(millis());
 }
@@ -822,6 +839,7 @@ void HalGPIO::injectPress(const uint8_t buttonIndex, const bool longPress, const
 void HalGPIO::holdSyntheticButtons(const uint8_t mask) { syntheticButtons.store(mask, std::memory_order_relaxed); }
 #endif
 
+#if FREEINK_CAP_TOUCH
 void HalGPIO::injectTouch(const float nx, const float ny) {
   if (!hasTouch()) return;
   TouchEvent tap;
@@ -866,6 +884,13 @@ void HalGPIO::injectSwipe(const float nx, const float ny, const float nxEnd, con
   injectedInputs_++;
   portEXIT_CRITICAL(&inputMux_);
 }
+#else
+void HalGPIO::injectTouch(float, float) {}
+
+void HalGPIO::injectLongTouch(float, float) {}
+
+void HalGPIO::injectSwipe(float, float, float, float) {}
+#endif  // FREEINK_CAP_TOUCH
 
 bool HalGPIO::isPressed(uint8_t buttonIndex) const { return (snapState_ & (1u << buttonIndex)) != 0; }
 
@@ -917,9 +942,20 @@ bool HalGPIO::wasHomeKeyTapped() const { return inputMgr.wasHomeKeyTapped(); }
 
 bool HalGPIO::wasHomeKeyLongPressed() const { return inputMgr.wasHomeKeyLongPressed(); }
 
+// The level states (candidate, held-at) are live reads, because "where is the
+// finger now" has no meaning latched.
+
+bool HalGPIO::wasTouchDown(float& nx, float& ny) const { return inputMgr.wasTouchPressedAt(nx, ny); }
+
+bool HalGPIO::isTouchTapCandidate(float& nx, float& ny, unsigned long& heldMs) const {
+  return inputMgr.isTouchTapCandidate(nx, ny, heldMs);
+}
+
+bool HalGPIO::isTouchHeldAt(float& nx, float& ny) const { return inputMgr.isTouchHeldAt(nx, ny); }
+
+#if FREEINK_CAP_TOUCH
 // The four discrete events answer from the loop-side snapshot, not from the SDK:
-// see TouchEvent. The level states below (candidate, held-at) stay live reads,
-// because "where is the finger now" has no meaning latched.
+// see TouchEvent.
 
 bool HalGPIO::wasTouchTap(float& nx, float& ny) const {
   if (snapTouchEvent_.kind != TouchEvent::Kind::Tap) return false;
@@ -928,15 +964,7 @@ bool HalGPIO::wasTouchTap(float& nx, float& ny) const {
   return true;
 }
 
-bool HalGPIO::wasTouchDown(float& nx, float& ny) const { return inputMgr.wasTouchPressedAt(nx, ny); }
-
 bool HalGPIO::wasTouchReleased() const { return snapTouchReleased_; }
-
-bool HalGPIO::isTouchTapCandidate(float& nx, float& ny, unsigned long& heldMs) const {
-  return inputMgr.isTouchTapCandidate(nx, ny, heldMs);
-}
-
-bool HalGPIO::isTouchHeldAt(float& nx, float& ny) const { return inputMgr.isTouchHeldAt(nx, ny); }
 
 bool HalGPIO::wasTouchLongPress(float& nx, float& ny) const {
   if (snapTouchEvent_.kind != TouchEvent::Kind::LongPress) return false;
@@ -995,6 +1023,22 @@ bool HalGPIO::wasTouchActivity() const {
   // not a latched event, still counts.
   return snapTouchEvent_.kind != TouchEvent::Kind::None || snapTouchReleased_ || inputMgr.wasTouchActivity();
 }
+#else
+// No panel: nothing is latched, so there is never an event to report.
+bool HalGPIO::wasTouchTap(float&, float&) const { return false; }
+
+bool HalGPIO::wasTouchReleased() const { return false; }
+
+bool HalGPIO::wasTouchLongPress(float&, float&) const { return false; }
+
+void HalGPIO::suppressTouchContact() {}
+
+unsigned long HalGPIO::lastTouchHeldMs() const { return 0; }
+
+bool HalGPIO::wasSwipe(float&, float&, float&, float&) const { return false; }
+
+bool HalGPIO::wasTouchActivity() const { return false; }
+#endif  // FREEINK_CAP_TOUCH
 
 unsigned long HalGPIO::waitForStablePowerRelease(unsigned long timeoutMs) {
   // Wait until the raw power-button pin reads HIGH (released) for RELEASE_STABLE_MS

@@ -59,8 +59,8 @@ void dumpWords(std::ostream& out, const TextBlock& block, const char* indent) {
     out << indent << "W x=" << block.wordXpos(w) << " s=" << static_cast<int>(block.wordStyle(w))
         << " z=" << static_cast<int>(block.wordSizePct(w)) << " t=" << block.wordText(w) << "\n";
     if (const TextBlock::WordFont* font = block.wordFont(w)) {
-      out << indent << " WF fid=" << font->fontId << " mult=" << std::fixed << std::setprecision(3) << font->scale
-          << "\n";
+      out << indent << " WF fid=" << font->fontId << " mult=" << std::fixed << std::setprecision(3)
+          << scaleValue(font->scale) << "\n";
     }
     if (block.hasDisplayForm(w)) out << indent << " WD t=" << block.wordDrawText(w) << "\n";
     if (block.hasGlyphForm(w)) dumpGlyphForm(out, block.glyphForm(w), indent);
@@ -100,7 +100,8 @@ void dumpTextLine(std::ostream& out, const PageLine& line) {
   const auto& block = *line.getBlock();
   const auto& bs = block.getRenderStyle();
   out << "  LINE y=" << line.yPos << " x=" << line.xPos << " align=" << static_cast<int>(bs.alignment)
-      << " mult=" << std::fixed << std::setprecision(3) << bs.fontSizeMultiplier << " hfid=" << bs.headingFontId
+      << " mult=" << std::fixed << std::setprecision(3)
+      << static_cast<double>(bs.fontSizeMultiplier.raw()) / TextScale::kOne << " hfid=" << bs.headingFontId
       << " words=" << block.wordCount() << "\n";
   dumpWords(out, block, "   ");
   dumpAnnotations(out, block, "   ");

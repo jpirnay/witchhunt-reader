@@ -1,6 +1,7 @@
 #pragma once
 
 #include <CrossPointSettings.h>
+#include <Epub/ProgressPpb.h>
 #include <GfxRenderer.h>
 #include <HalCapabilities.h>
 #include <HalTiltSensor.h>
@@ -32,13 +33,10 @@ inline uint8_t pageProgressPercentByte(int currentPage, int totalPages) {
   return static_cast<uint8_t>(percent);
 }
 
-// Round-half-up clamp for a pre-computed [0,1] progress fraction (used by EPUB, where progress
-// is byte-weighted across spine items rather than a simple page ratio).
-inline uint8_t fractionProgressPercentByte(float fraction) {
-  const int percent = static_cast<int>(fraction * 100.0f + 0.5f);
-  if (percent < 0) return 0;
-  if (percent > 100) return 100;
-  return static_cast<uint8_t>(percent);
+// Round-half-up percent of a pre-computed progress (used by EPUB, where progress is byte-weighted
+// across spine items rather than a simple page ratio).
+inline uint8_t fractionProgressPercentByte(const ProgressPpb progress) {
+  return static_cast<uint8_t>(progress.percentHalfUp());
 }
 
 // The reader's margins, Top & Bottom and Left & Right, added to the panel's viewable insets (getOrientedViewableTRBL)

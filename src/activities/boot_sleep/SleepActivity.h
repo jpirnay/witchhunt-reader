@@ -30,6 +30,10 @@ class SleepActivity final : public Activity {
   DarkMode::ScreenPolarity outputPolarity() const override {
     return keepsLastScreen() ? DarkMode::ScreenPolarity::AsOnScreen : DarkMode::ScreenPolarity::Normal;
   }
+  // Whether the sleep screen is drawn from the custom images alone (/sleep.bmp, /sleep.png, /sleep/, /.sleep/): what a
+  // plugin's download can change, and what a boot with no page in its frame buffer can draw again. Not the cover of an
+  // open book, nor Overlay and Quick Resume, which draw over the page.
+  static bool showsCustomImageOnly();
 
  private:
   // Quick Resume: the page on screen stays, with a moon icon over it.

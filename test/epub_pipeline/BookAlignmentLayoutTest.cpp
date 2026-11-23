@@ -78,7 +78,7 @@ struct BookAlignmentFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = 480;
     params.viewportHeight = 800;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     params.embeddedStyle = embeddedStyle;
     GfxRenderer renderer;
     Section section(epub, 0, renderer);
@@ -102,7 +102,7 @@ struct BookAlignmentFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = 480;
     params.viewportHeight = 800;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     params.embeddedStyle = embeddedStyle;
     params.paragraphAlignment = paragraphAlignment;
     GfxRenderer renderer;

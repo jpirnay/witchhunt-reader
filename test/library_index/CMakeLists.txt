@@ -4,6 +4,7 @@ add_executable(LibraryIndexTest
   LibraryJoinTest.cpp
   LibraryBuilderTest.cpp
   LibraryOrderTest.cpp
+  SeriesIndexTest.cpp
   LibraryStalenessTest.cpp
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryBlob.cpp

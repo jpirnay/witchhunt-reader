@@ -102,7 +102,22 @@ std::string Txt::findCoverImage() const {
 
 std::string Txt::getCoverBmpPath() const { return cachePath + "/cover.bmp"; }
 
-bool Txt::coverBmpReady() const { return Storage.exists(getCoverBmpPath().c_str()); }
+bool Txt::coverBmpReady() const {
+  const std::string path = getCoverBmpPath();
+  if (!Storage.exists(path.c_str())) return false;
+  FsFile file;
+  if (!Storage.openFileForRead("TXT", path, file)) return false;
+  Bitmap bmp(file);
+  const bool complete = bmp.parseHeaders() == BmpReaderError::Ok && bmp.isComplete();
+  const int bpp = bmp.getBpp();
+  file.close();
+  if (!complete) return false;
+  // A cover converted from a JPEG or PNG by an earlier firmware is 2-bit, dithered once with the table of the board
+  // that converted it (HalCapabilities::imageGray4Levels()); it is converted again as 8-bit, which the panel drawing
+  // it dithers, as EPUB covers are (coverBmpComplete in Epub.cpp). A 2-bit BMP left beside the book is copied as it
+  // is, and stays.
+  return bpp != 2 || FsHelpers::hasBmpExtension(findCoverImage());
+}
 
 bool Txt::generateCoverBmp() const {
   // Already generated, return true
@@ -139,7 +154,9 @@ bool Txt::generateCoverBmp() const {
       coverJpg.close();
       return false;
     }
-    const bool success = JpegToBmpConverter::jpegFileToBmpStream(coverJpg, coverBmp);
+    // 8-bit, dithered when it is drawn, with the drawing panel's table (coverBmpReady()).
+    const bool success =
+        JpegToBmpConverter::jpegFileToBmpStream(coverJpg, coverBmp, /*crop=*/true, /*grayscale8Bit=*/true);
     coverJpg.close();
     coverBmp.close();
 
@@ -160,7 +177,8 @@ bool Txt::generateCoverBmp() const {
       coverPng.close();
       return false;
     }
-    const bool success = PngToBmpConverter::pngFileToBmpStream(coverPng, coverBmp);
+    const bool success =
+        PngToBmpConverter::pngFileToBmpStream(coverPng, coverBmp, /*crop=*/true, /*grayscale8Bit=*/true);
     coverPng.close();
     coverBmp.close();
 
@@ -186,7 +204,7 @@ std::string Txt::getThumbBmpPath(int width, int height) const {
 bool Txt::generateThumbBmp(int height) const {
   const std::string destPath = getThumbBmpPath(height);
   if (Storage.exists(destPath.c_str())) return true;
-  const int width = static_cast<int>(height * 0.6f);
+  const int width = height * 3 / 5;  // thumbnails are 6:10
   if (!generateThumbBmp(width, height)) return false;
   const std::string srcPath = getThumbBmpPath(width, height);
   Storage.rename(srcPath.c_str(), destPath.c_str());

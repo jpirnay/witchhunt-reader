@@ -243,7 +243,7 @@ TEST_P(BidiRules, GluedWordsTouchAndSpacedWordsKeepASpace) {
             const TextBlock::WordBox box = block.wordBox(r, i, kFontId, x, 0);
             const int end = before.x + before.width;
             // A paragraph set smaller has a smaller space: the stub's, scaled and truncated as its widths are.
-            const int space = static_cast<int>(kSpaceWidth * std::min({1.0f, before.scale, box.scale}));
+            const int space = std::min({TextScale(), before.scale, box.scale}).applyTruncated(kSpaceWidth);
             if (block.wordContinues(i)) {
               EXPECT_EQ(end, box.x) << "a glued word apart from the one before: " << where(spine, block, i);
             } else {

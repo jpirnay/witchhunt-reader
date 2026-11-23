@@ -64,6 +64,10 @@ const communityCatalog = { name: 'test hub', plugins: [
     files: ['manifest.json', 'device.json', 'README.md', 'catalog/all-1.json'], compatibility: crosspoint },
   { name: 'events-only', title: 'Events only', version: '1.0.0', base: 'https://example.org/k/',
     files: ['manifest.json', 'device.json'] },
+  { name: 'session-push', title: 'Session push', version: '1.0.0', base: 'https://example.org/s/',
+    files: ['manifest.json', 'device.json', 'plugin.js'] },
+  { name: 'meta-filter', title: 'Meta filter', version: '1.0.0', base: 'https://example.org/t/',
+    files: ['manifest.json', 'device.json'] },
   { name: 'xml-catalog', title: 'XML catalog', version: '1.0.0', base: 'https://example.org/l/',
     files: ['manifest.json', 'device.json', 'plugin.js'] },
   { name: 'unreadable', title: 'Unreadable', version: '1.0.0', base: 'https://example.org/m/',
@@ -89,6 +93,12 @@ const deviceJson = {
   'https://example.org/c/': { title: 'Catalog only', browse: { url: 'https://example.org/c/all-{page}.json', items: 'items' } },
   'https://example.org/e/': { browse: { url: 'https://example.org/e/list' }, events: { book_finished: { url: 'https://example.org/e/done' } } },
   'https://example.org/k/': { events: { book_finished: { url: 'https://example.org/k/done' } } },
+  // As kosync-autopush: a request on reader.session, which the reader sends.
+  'https://example.org/s/': { events: { 'reader.session': { connect: true,
+    request: { method: 'PUT', url: '{cfg.server}/syncs/progress' } } } },
+  // As readeck: a download on sleep.enter is sent; a require_meta handler waits for meta files nothing writes yet.
+  'https://example.org/t/': { events: { 'sleep.enter': { download: { url: 'https://example.org/t/x.bmp', dest: '/sleep.bmp' } },
+    'reader.exit': { require_meta: 'readeck_id', request: { method: 'PATCH', url: 'https://example.org/t/{meta.readeck_id}' } } } },
   'https://example.org/l/': { browse: { format: 'xml', url: 'https://example.org/l/dav/', item: 'response' } }
 };
 
@@ -150,7 +160,7 @@ const row = (title) => rows.find((r) => r.querySelector('strong').textContent.st
 const text = (r) => (r ? r.textContent : '');
 const hasButton = (r) => !!(r && r.querySelector('button'));
 
-check(rows.length === 11, 'every entry but the two plugin stores is listed (' + rows.length + ')');
+check(rows.length === 13, 'every entry but the two plugin stores is listed (' + rows.length + ')');
 check(!requests.some((r) => r.url === 'https://example.org/h/device.json'), 'a plugin store\'s device.json is not read');
 check(!row('Plugin Hub') && !row('Plugin Store'), 'the plugin stores are left out');
 check(text(row('Web only')).includes('runs here') && hasButton(row('Web only')), 'a web-only plugin runs here');
@@ -161,8 +171,14 @@ check(text(row('Catalog only')).includes('runs here') && text(row('Catalog only'
       hasButton(row('Catalog only')), 'a public catalog alone runs here');
 check(text(row('Needs catalog')).includes('partly runs here') && text(row('Needs catalog')).includes('events') &&
       hasButton(row('Needs catalog')), 'the catalog.* requirements are met; its events are not');
-check(text(row('Events only')).includes('does not run here') && text(row('Events only')).includes('(events)') &&
-      !hasButton(row('Events only')), 'a plugin with only device events is not offered for install');
+check(text(row('Events only')).includes('does not run here') && text(row('Events only')).includes('book_finished') &&
+      !hasButton(row('Events only')), 'a plugin whose only events the reader does not send is not offered for install');
+check(/runs here/.test(text(row('Session push'))) && !/partly|does not/.test(text(row('Session push'))) &&
+      text(row('Session push')).includes('its events (reader.session) sent by the reader') && hasButton(row('Session push')),
+      'a plugin whose events the reader sends runs here');
+check(text(row('Meta filter')).includes('partly runs here') && text(row('Meta filter')).includes('(sleep.enter)') &&
+      text(row('Meta filter')).includes('reader.exit are not sent yet') && hasButton(row('Meta filter')),
+      'a require_meta handler waits; the sleep download runs');
 check(/runs here/.test(text(row('XML catalog'))) && !/partly|does not/.test(text(row('XML catalog'))) &&
       text(row('XML catalog')).includes('a card, and a catalog you open on this page'), 'an XML catalog runs here');
 check(text(row('Unreadable')).includes('could not be checked') && !hasButton(row('Unreadable')),
@@ -171,7 +187,8 @@ check(text(row('Needs transfer')).includes('transfer.localsend.v1') && !hasButto
       'a missing capability is named and blocks the install');
 check(text(row('Other firmware')).includes('another firmware (elsewhere)') && !hasButton(row('Other firmware')),
       'a plugin for another firmware is not offered');
-check(text(row('Protected')).includes('DRM') && !hasButton(row('Protected')), 'the DRM plugin says why it does not run');
+check(text(row('Protected')).includes('partly runs here') && text(row('Protected')).includes('account sign-in') &&
+      hasButton(row('Protected')), 'the DRM plugin is offered, saying how far it was checked');
 check(text(row('Organize by Author (CrossPoint)')).includes("Witch Reader's Organize by Author"),
       'a shared folder name with one of ours is flagged');
 

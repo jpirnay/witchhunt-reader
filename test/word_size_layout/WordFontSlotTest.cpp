@@ -77,7 +77,7 @@ ParsedText threeWords(const TextBlock::WordFont& slot1) {
 
 TEST(WordFontSlots, AWordInASlotIsMeasuredInItsFontAndSpacedInTheBlocks) {
   GfxRenderer renderer;
-  ParsedText text = threeWords({kWide, 1.0f});
+  ParsedText text = threeWords({kWide, TextScale()});
   const auto lines = layout(text, renderer, 400);
   ASSERT_EQ(1u, lines.size());
   const TextBlock& line = *lines[0];
@@ -98,7 +98,7 @@ TEST(WordFontSlots, TheSpaceBetweenTwoWordsOfASlotIsTheSlotsFont) {
   ParsedText text(false, false, noIndentStyle());
   text.addWord("bb", kRegular, false, false, /*sizePct=*/100, 0, /*fontSlot=*/1);
   text.addWord("cc", kRegular, false, false, /*sizePct=*/100, 0, /*fontSlot=*/1);
-  text.setFontSlot(1, {kWide, 1.0f});
+  text.setFontSlot(1, {kWide, TextScale()});
   const auto lines = layout(text, renderer, 400);
   ASSERT_EQ(1u, lines.size());
   EXPECT_EQ(2 * GfxRenderer::WIDE_GLYPH_W + GfxRenderer::WIDE_SPACE_W, lines[0]->wordXpos(1));
@@ -107,25 +107,25 @@ TEST(WordFontSlots, TheSpaceBetweenTwoWordsOfASlotIsTheSlotsFont) {
 TEST(WordFontSlots, TheSlotsScaleStandsInForTheBlocksAndComposesWithTheWordsSize) {
   GfxRenderer renderer;
   BlockStyle style = noIndentStyle();
-  style.fontSizeMultiplier = 2.0f;  // the block's residual: not the word's
+  style.fontSizeMultiplier = TextScale::ratio(2, 1);  // the block's residual: not the word's
   ParsedText text(false, false, style);
   text.addWord("aa", kRegular);
   text.addWord("bb", kRegular, false, false, /*sizePct=*/50, 0, /*fontSlot=*/1);
-  text.setFontSlot(1, {kWide, 1.6f});
+  text.setFontSlot(1, {kWide, TextScale::percent(160)});
   const auto lines = layout(text, renderer, 400);
   ASSERT_EQ(1u, lines.size());
   renderer.drawCalls.clear();
   lines[0]->render(renderer, kFontId, 0, 0);
   ASSERT_EQ(2u, renderer.drawCalls.size());
   EXPECT_EQ(kFontId, renderer.drawCalls[0].fontId);
-  EXPECT_FLOAT_EQ(2.0f, renderer.drawCalls[0].scale);
+  EXPECT_EQ(TextScale::ratio(2, 1), renderer.drawCalls[0].scale);
   EXPECT_EQ(kWide, renderer.drawCalls[1].fontId);
-  EXPECT_FLOAT_EQ(0.8f, renderer.drawCalls[1].scale);  // 1.6 x 50 %
+  EXPECT_EQ(TextScale::percent(160) * TextScale::percent(50), renderer.drawCalls[1].scale);  // 1.6 x 50 %
 }
 
 TEST(WordFontSlots, EachFontGetsReadyForItsOwnWords) {
   GfxRenderer renderer;
-  ParsedText text = threeWords({kWide, 1.0f});
+  ParsedText text = threeWords({kWide, TextScale()});
   layout(text, renderer, 400);
   ASSERT_EQ(2u, renderer.readyCalls.size());
   EXPECT_EQ(kFontId, renderer.readyCalls[0].fontId);
@@ -158,7 +158,7 @@ TEST(WordFontSlots, ALineCarriesOnlyTheFontsOfItsOwnWords) {
   }
   text.addWord("d", kRegular, false, false, 100, 0, /*fontSlot=*/2);
   plain.addWord("d", kRegular);
-  text.setFontSlot(2, {kWide, 1.0f});
+  text.setFontSlot(2, {kWide, TextScale()});
   const auto lines = layout(text, renderer, 50);
   const auto plainLines = layout(plain, renderer, 50);
   ASSERT_EQ(2u, lines.size());
@@ -176,7 +176,7 @@ TEST(WordFontSlots, ASplitWordKeepsItsSlotOnBothHalves) {
   // Ten glyphs fit 100 px in the block's font; in the wide font (150 px) the word is split to fit.
   ParsedText text(false, false, noIndentStyle());
   text.addWord("abcdefghij", kRegular, false, false, 100, 0, /*fontSlot=*/1);
-  text.setFontSlot(1, {kWide, 1.0f});
+  text.setFontSlot(1, {kWide, TextScale()});
   const auto lines = layout(text, renderer, 100);
   ASSERT_GE(lines.size(), 2u);
   for (const auto& line : lines) {
@@ -189,7 +189,7 @@ TEST(WordFontSlots, ASplitWordKeepsItsSlotOnBothHalves) {
 
 TEST(WordFontSlots, RenderAndWordBoxUseTheWordsFontOnTheLinesBaseline) {
   GfxRenderer renderer;
-  ParsedText text = threeWords({kWide, 1.0f});
+  ParsedText text = threeWords({kWide, TextScale()});
   const auto lines = layout(text, renderer, 400);
   ASSERT_EQ(1u, lines.size());
   const TextBlock& line = *lines[0];
@@ -211,7 +211,7 @@ TEST(WordFontSlots, RenderAndWordBoxUseTheWordsFontOnTheLinesBaseline) {
 
 TEST(WordFontSlots, SerializationKeepsTheFontsAndRefusesASlotThatNamesNone) {
   GfxRenderer renderer;
-  ParsedText text = threeWords({kWide, 1.25f});
+  ParsedText text = threeWords({kWide, TextScale::ratio(5, 4)});
   const auto lines = layout(text, renderer, 400);
   ASSERT_EQ(1u, lines.size());
   const std::string bytes = serialized(*lines[0]);
@@ -225,7 +225,7 @@ TEST(WordFontSlots, SerializationKeepsTheFontsAndRefusesASlotThatNamesNone) {
   EXPECT_EQ(nullptr, restored->wordFont(0));
   ASSERT_NE(nullptr, restored->wordFont(1));
   EXPECT_EQ(kWide, restored->wordFont(1)->fontId);
-  EXPECT_FLOAT_EQ(1.25f, restored->wordFont(1)->scale);
+  EXPECT_EQ(TextScale::ratio(5, 4), restored->wordFont(1)->scale);
   EXPECT_EQ("bb", std::string(restored->wordText(1)));
 
   // Header (u16 words, u8 flags, u16 text bytes), one 8-byte font, then textOff, xpos, styles and the slots.
@@ -260,7 +260,7 @@ TEST(SpaceParts, EveryGapIsTheRenderersThoughThePassRemembersItsParts) {
       const auto style = static_cast<EpdFontFamily::Style>(i % 4);
       text.addWord(word, style, false, false, 100, 0, /*fontSlot=*/static_cast<uint8_t>(i % 3 == 0 ? 1 : 0));
     }
-    text.setFontSlot(1, {kWide, 1.0f});
+    text.setFontSlot(1, {kWide, TextScale()});
     return text;
   };
   GfxRenderer renderer;

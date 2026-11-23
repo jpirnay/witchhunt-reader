@@ -406,7 +406,8 @@ std::map<std::string, float> lineSizes(const std::string& epubPath, const fs::pa
           if (element->getTag() != TAG_PageLine) continue;
           const TextBlock& line = *static_cast<const PageLine&>(*element).getBlock();
           if (line.wordCount() == 0) continue;
-          sizes.emplace(line.wordText(0), line.getRenderStyle().fontSizeMultiplier * line.wordSizePct(0) / 100.0f);
+          sizes.emplace(line.wordText(0), pipeline_harness::scaleValue(line.getRenderStyle().fontSizeMultiplier) *
+                                              line.wordSizePct(0) / 100.0f);
         }
       }));
   return sizes;

@@ -7,6 +7,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <HeapFit.h>
+#include <ImageScale.h>
 #include <IndicScripts.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -301,7 +302,8 @@ constexpr int NUM_INSET_CONTAINER_TAGS = sizeof(INSET_CONTAINER_TAGS) / sizeof(I
 
 // A list's padding-left when the book states none -- the stand-in for the browser default
 // `padding-inline-start: 40px`, which is what indents an unstyled list. Nested lists each add it.
-constexpr float LIST_DEFAULT_PADDING_EM = 1.5f;
+// A list's default start padding, 1.5 em, in halves of an em.
+constexpr int LIST_DEFAULT_PADDING_HALF_EMS = 3;
 
 const char* const BOLD_TAGS[] = {"b", "strong"};
 constexpr int NUM_BOLD_TAGS = sizeof(BOLD_TAGS) / sizeof(BOLD_TAGS[0]);
@@ -729,8 +731,7 @@ int ChapterHtmlSlimParser::currentBlockSizePct() const {
   // of the book's other families: a block is resolved before its words are laid out, so only a block long enough
   // to be laid out in parts sees one, and a rem span in it is sized as in a body-size block.)
   const BlockStyle& bs = currentTextBlock->getBlockStyle();
-  return std::max(1,
-                  static_cast<int>(fontSizeLadder_.scaleOf(bs.headingFontId) * bs.fontSizeMultiplier * 100.0f + 0.5f));
+  return std::max(1, (fontSizeLadder_.scaleOf(bs.headingFontId) * bs.fontSizeMultiplier).apply(100));
 }
 
 void ChapterHtmlSlimParser::countCensusWord(BodySize::Census& census) {
@@ -753,7 +754,7 @@ void ChapterHtmlSlimParser::countCensusWord(BodySize::Census& census) {
 
 void ChapterHtmlSlimParser::applyCssFontSizeToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) {
   if (!cssStyle.hasFontSizeMultiplier()) return;
-  const int pct = static_cast<int>(cssStyle.fontSizeMultiplier * 100.0f + 0.5f);
+  const int pct = cssStyle.fontSizeMultiplier.apply(100);
   entry.hasFontSize = true;
   entry.fontSizeFromRoot = cssStyle.fontSizeRootRelative;
   entry.fontSizePct = static_cast<uint8_t>(
@@ -891,8 +892,8 @@ void ChapterHtmlSlimParser::applyVerticalAlignToEntry(StyleStackEntry& entry, co
 namespace {
 bool isRootFontSizeElement(const char* tagName) { return strcmp(tagName, "html") == 0 || strcmp(tagName, "body") == 0; }
 
-float saneFontSizeBaseline(float value) {
-  if (value < 0.25f || value > 4.0f) return 1.0f;
+TextScale saneFontSizeBaseline(const TextScale value) {
+  if (value < TextScale::percent(25) || value > TextScale::ratio(4, 1)) return TextScale();
   return value;
 }
 }  // namespace
@@ -902,30 +903,30 @@ void ChapterHtmlSlimParser::initializeFontSizeBaseline() {
 
   if (!hasRootFontSizeBaseline_) {
     const CssStyle bodyStyle = cssParser->resolveStyle("body", "");
-    if (bodyStyle.hasFontSizeMultiplier() && bodyStyle.fontSizeMultiplier != 1.0f) {
+    if (bodyStyle.hasFontSizeMultiplier() && !bodyStyle.fontSizeMultiplier.isOne()) {
       rootFontSizeBaseline_ = saneFontSizeBaseline(bodyStyle.fontSizeMultiplier);
-      hasRootFontSizeBaseline_ = rootFontSizeBaseline_ != 1.0f;
+      hasRootFontSizeBaseline_ = !rootFontSizeBaseline_.isOne();
     } else {
       const CssStyle htmlStyle = cssParser->resolveStyle("html", "");
-      if (htmlStyle.hasFontSizeMultiplier() && htmlStyle.fontSizeMultiplier != 1.0f) {
+      if (htmlStyle.hasFontSizeMultiplier() && !htmlStyle.fontSizeMultiplier.isOne()) {
         rootFontSizeBaseline_ = saneFontSizeBaseline(htmlStyle.fontSizeMultiplier);
-        hasRootFontSizeBaseline_ = rootFontSizeBaseline_ != 1.0f;
+        hasRootFontSizeBaseline_ = !rootFontSizeBaseline_.isOne();
       }
     }
   }
 
   if (!hasMainTextFontSizeBaseline_) {
     const CssStyle paragraphStyle = cssParser->resolveStyle("p", "");
-    if (paragraphStyle.hasFontSizeMultiplier() && paragraphStyle.fontSizeMultiplier != 1.0f) {
+    if (paragraphStyle.hasFontSizeMultiplier() && !paragraphStyle.fontSizeMultiplier.isOne()) {
       mainTextFontSizeBaseline_ = saneFontSizeBaseline(paragraphStyle.fontSizeMultiplier);
-      hasMainTextFontSizeBaseline_ = mainTextFontSizeBaseline_ != 1.0f;
+      hasMainTextFontSizeBaseline_ = !mainTextFontSizeBaseline_.isOne();
       return;
     }
 
     const CssStyle listStyle = cssParser->resolveStyle("li", "");
-    if (listStyle.hasFontSizeMultiplier() && listStyle.fontSizeMultiplier != 1.0f) {
+    if (listStyle.hasFontSizeMultiplier() && !listStyle.fontSizeMultiplier.isOne()) {
       mainTextFontSizeBaseline_ = saneFontSizeBaseline(listStyle.fontSizeMultiplier);
-      hasMainTextFontSizeBaseline_ = mainTextFontSizeBaseline_ != 1.0f;
+      hasMainTextFontSizeBaseline_ = !mainTextFontSizeBaseline_.isOne();
     }
   }
 }
@@ -939,9 +940,9 @@ void ChapterHtmlSlimParser::observeFontSizeBaseline(const char* tagName, const C
   // class-styled paragraph like a decorative opener is indistinguishable here
   // from ordinary prose, so treating the first sized <p> as the baseline would
   // wrongly shrink/grow the real body text.
-  if (!hasRootFontSizeBaseline_ && isRootFontSizeElement(tagName) && cssStyle.fontSizeMultiplier != 1.0f) {
+  if (!hasRootFontSizeBaseline_ && isRootFontSizeElement(tagName) && !cssStyle.fontSizeMultiplier.isOne()) {
     rootFontSizeBaseline_ = saneFontSizeBaseline(cssStyle.fontSizeMultiplier);
-    hasRootFontSizeBaseline_ = rootFontSizeBaseline_ != 1.0f;
+    hasRootFontSizeBaseline_ = !rootFontSizeBaseline_.isOne();
   }
 }
 
@@ -950,14 +951,14 @@ CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName,
 
   CssStyle normalized = cssStyle;
   if (hasRootFontSizeBaseline_ && isRootFontSizeElement(tagName)) {
-    normalized.fontSizeMultiplier = 1.0f;
+    normalized.fontSizeMultiplier = TextScale();
   }
   const bool blockLevel = isHeaderOrBlock(tagName) && strcmp(tagName, "br") != 0;
   // A body-relative size on an inline element is on the blocks' scale too (a 1rem span is the
   // prose size), so it takes the same main-text normalisation.
   const bool onTextScale = blockLevel || cssStyle.fontSizeRootRelative;
   if (hasMainTextFontSizeBaseline_ && onTextScale) {
-    normalized.fontSizeMultiplier /= mainTextFontSizeBaseline_;
+    normalized.fontSizeMultiplier = normalized.fontSizeMultiplier / mainTextFontSizeBaseline_;
   }
   const bool bodyBlock = blockLevel && !matches(tagName, HEADER_TAGS, NUM_HEADER_TAGS);
   // A size that undoes the dropped root size is the book's body text: Calibre sets <body> to its base size and
@@ -965,16 +966,17 @@ CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName,
   // such paragraphs at 0.889 of the reader's size, drawn as the body face shrunk. Only an exact undo, within 1%:
   // a size its designer chose below the body text's (0.85em under a 1.2em body, 1.02) is kept. Told by the size as
   // the book states it, before its body size is taken out below.
-  const float fromRoot = normalized.fontSizeMultiplier * rootFontSizeBaseline_;
-  if (bodyBlock && hasRootFontSizeBaseline_ && fromRoot > 0.99f && fromRoot < 1.01f) {
-    normalized.fontSizeMultiplier = 1.0f;
+  const TextScale fromRoot = normalized.fontSizeMultiplier * rootFontSizeBaseline_;
+  if (bodyBlock && hasRootFontSizeBaseline_ && fromRoot > TextScale::percent(99) &&
+      fromRoot < TextScale::percent(101)) {
+    normalized.fontSizeMultiplier = TextScale();
   }
   // The size of the book's running text (setBodySizePct) is the reader's size: a book that sets all its text smaller
   // or larger is read at the size chosen, its headings and small print in proportion. Every size on the text's scale,
   // a block's or a body-relative one, is taken relative to it, before the band below; an em or % size of an inline
   // element is relative to its parent, which already is. Not html's or body's: theirs is the context, made 1 above.
-  if (bodyScale_ != 1.0f && onTextScale && !isRootFontSizeElement(tagName)) {
-    normalized.fontSizeMultiplier /= bodyScale_;
+  if (!bodyScale_.isOne() && onTextScale && !isRootFontSizeElement(tagName)) {
+    normalized.fontSizeMultiplier = normalized.fontSizeMultiplier / bodyScale_;
   }
   // Block twin of the per-word near-body snap in updateEffectiveInlineStyle. The same
   // publisher sizing arrives either as a <span style="font-size:1.1em"> wrapping the
@@ -992,9 +994,9 @@ CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName,
     // Rounded to integer percent like the per-word channel (applyCssFontSizeToEntry), so the
     // same declared size lands the same side of the band edge on either channel — a float
     // 1.1em multiplies out a hair either side of 110.
-    const int pct = static_cast<int>(normalized.fontSizeMultiplier * 100.0f + 0.5f);
+    const int pct = normalized.fontSizeMultiplier.apply(100);
     if (pct >= 100 - deadZone && pct <= 100 + deadZone) {
-      normalized.fontSizeMultiplier = 1.0f;
+      normalized.fontSizeMultiplier = TextScale();
     }
   }
   return normalized;
@@ -1004,7 +1006,7 @@ void ChapterHtmlSlimParser::setBodySizePct(const uint8_t pct) {
   // Only with the wide band: off, the book's sizes stay as it states them. A size no word can take is no body size.
   const bool usable = fontSizeNormalization && pct >= ParsedText::MIN_WORD_SIZE_PCT &&
                       pct <= ParsedText::MAX_WORD_SIZE_PCT && pct != 100;
-  bodyScale_ = usable ? pct / 100.0f : 1.0f;
+  bodyScale_ = usable ? TextScale::percent(pct) : TextScale();
 }
 
 CssStyle ChapterHtmlSlimParser::inlineStyleFor(const std::string& styleAttr) {
@@ -1469,7 +1471,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
                               partWordVisibleOffset_, fontSlot, effectiveTextEmphasis_, effectiveTextCombine_,
                               keptSpaces);
     // A block laid out in parts has its font already: a family its later words bring in gets its face now.
-    if (newFontSlot && wordFontsSize_ != 0) resolveWordFont(fontSlot);
+    if (newFontSlot && wordFontsSize_.raw() != 0) resolveWordFont(fontSlot);
 
     // A split waits for a ruby that is open, up to kRubyGroupSlack tokens, so its group is made whole. It also waits
     // for the block to grow kSplitRegrowth tokens past what the last split kept (the last line): a line of more
@@ -1983,7 +1985,7 @@ void ChapterHtmlSlimParser::closeBox() {
     BlockStyle after;
     after.alignment = readerAlignment();
     after.direction = directionAround(box.depth);
-    addAncestorInsets(after, static_cast<float>(renderer.getFontAscenderSize(fontId)), box.depth);
+    addAncestorInsets(after, renderer.getFontAscenderSize(fontId), box.depth);
     currentTextBlock->setBlockStyle(after);
   }
   // The reader's extra paragraph spacing after the box's last block goes after the frame, as after a paragraph: the
@@ -2028,9 +2030,14 @@ void ChapterHtmlSlimParser::placeBoxSegment(const BoxScope& box, const int top, 
   // A slice with no edge left and no shade (a bottom rule's slice above a break) draws nothing: no element.
   if (!box.shaded && edges[0].width == 0 && edges[1].width == 0 && edges[2].width == 0 && edges[3].width == 0) return;
   const int width = std::max(1, box.right - box.left);
-  auto element = makeUniqueNoThrow<PageBox>(box.left, static_cast<int16_t>(top), static_cast<uint16_t>(width),
-                                            static_cast<uint16_t>(bottom - top), edges, box.shaded);
-  if (!element || !heapReserveFor(currentPage->elements, 1)) {
+  // The element table's slot first: a frame refused its slot after it was made would be destroyed here, which GCC 16
+  // reports as a mismatched delete (a false positive; see PageElement's operator delete).
+  std::unique_ptr<PageBox> element;
+  if (heapReserveFor(currentPage->elements, 1)) {
+    element = makeUniqueNoThrow<PageBox>(box.left, static_cast<int16_t>(top), static_cast<uint16_t>(width),
+                                         static_cast<uint16_t>(bottom - top), edges, box.shaded);
+  }
+  if (!element) {
     LOG_ERR("EHP", "No heap for a box's frame; the page is drawn without it");
     return;
   }
@@ -2264,7 +2271,7 @@ bool ChapterHtmlSlimParser::keepTogetherBreak(const int lineHeight, const bool n
   if (style.keepWithNext) {
     // A heading goes over unless it fits with its bottom spacing and the first lines below it.
     if (!place.paragraphStart || place.linesLeft == 0) return false;
-    const int bodyLineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression + 0.5f);
+    const int bodyLineHeight = lineCompression.apply(renderer.getLineHeight(fontId));
     const int need = place.linesLeft * lineHeight + std::max<int>(style.marginBottom, 0) +
                      std::max<int>(style.paddingBottom, 0) + kKeepWithNextLines * bodyLineHeight;
     return need > room;
@@ -2486,10 +2493,10 @@ void ChapterHtmlSlimParser::startDropCap(const CssStyle& cssStyle, const bool fi
   // x the paragraph block's own multiplier — all relative to the body font; a rem or px
   // cap is relative to the body already. Clamped so the cap stays around three text lines
   // tall (KOReader-comparable) and never absurd.
-  float mult = kDropCapMinMultiplier;
+  TextScale mult = kDropCapMinMultiplier;
   if (lines == 0) {
     mult = cssStyle.fontSizeRootRelative ? cssStyle.fontSizeMultiplier
-                                         : cssStyle.fontSizeMultiplier * (effectiveSizePct / 100.0f) *
+                                         : cssStyle.fontSizeMultiplier * TextScale::percent(effectiveSizePct) *
                                                currentTextBlock->getBlockStyle().fontSizeMultiplier;
     mult = std::min(std::max(mult, kDropCapMinMultiplier), kDropCapMaxMultiplier);
   }
@@ -2532,17 +2539,24 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   int bodyInkBelow = 0;
   renderer.ensureFontReady(fontId, pendingDropCap_.text);
   renderer.getTextInkMetrics(fontId, pendingDropCap_.text, EpdFontFamily::REGULAR, &bodyInkTop, &bodyInkBelow);
-  const float paraMult = currentTextBlock->getBlockStyle().fontSizeMultiplier;
-  const int bodyLeading =
-      std::max(0, static_cast<int>((renderer.getFontAscenderSize(fontId) - bodyInkTop) * paraMult + 0.5f));
+  const TextScale paraMult = currentTextBlock->getBlockStyle().fontSizeMultiplier;
+  const int bodyLeading = std::max(0, paraMult.apply(renderer.getFontAscenderSize(fontId) - bodyInkTop));
 
   // initial-letter: the letter's height above its baseline is the first line's (its own letters' ink there) and the
   // pitch of every line after it the cap spans, so it runs from the first line's top to the last one's baseline (CSS
   // Inline 3, 7.3). It picks the cap's face; the scale that face takes is then set from the face's own ink.
   uint8_t lines = pendingDropCap_.lines;
   const int pitch = lines > 0 ? effectiveLineHeight(currentTextBlock->getBlockStyle()) : 0;
-  const auto capHeight = [&](const int n) { return bodyInkTop * paraMult + static_cast<float>((n - 1) * pitch); };
-  if (lines > 0 && bodyInkTop > 0) pendingDropCap_.multiplier = capHeight(lines) / static_cast<float>(bodyInkTop);
+  // The cap's height over its lines, exactly, in TextScale's 2^-20ths of a pixel; and the scale that makes `inkTop`
+  // pixels of ink that tall.
+  const auto capHeight = [&](const int n) {
+    return static_cast<int64_t>(bodyInkTop) * paraMult.raw() +
+           (static_cast<int64_t>((n - 1) * pitch) << TextScale::kShift);
+  };
+  const auto capScaleFor = [&](const int inkTop) {
+    return TextScale::ratio(capHeight(lines), static_cast<int64_t>(inkTop) << TextScale::kShift);
+  };
+  if (lines > 0 && bodyInkTop > 0) pendingDropCap_.multiplier = capScaleFor(bodyInkTop);
 
   // Cap font selection. Unlike resolveBlockFont (nearest rung, single aux slot), a drop
   // cap wants the LARGEST real font available: the desired size is far beyond every rung,
@@ -2550,7 +2564,7 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   // pixelation). If the aux slot is already claimed (chapter heading), reuse that font
   // rather than falling back to scaling the small body font — same decompressor budget.
   int32_t capFontId = 0;  // 0 = body font
-  float capScale = pendingDropCap_.multiplier;
+  TextScale capScale = pendingDropCap_.multiplier;
   if (const BlockFontFamilies::Family* family = fontFamily(fontFamilySlot(pendingDropCap_.family))) {
     // A cap in another of the book's families (a display face for the initials): that family's face at the cap's
     // size, as a heading in it takes, outside the body ladder's one-auxiliary-face budget.
@@ -2559,7 +2573,7 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
     capScale = r.residual;
   } else if (fontSizeLadder_.native()) {
     // Every size has a face of its own: the cap is drawn at its own size, scaled only above the largest face.
-    const FontSizeLadder::Resolved r = fontSizeLadder_.resolve(pendingDropCap_.multiplier * 100.0f);
+    const FontSizeLadder::Resolved r = fontSizeLadder_.resolve(pendingDropCap_.multiplier);
     capFontId = r.fontId;
     capScale = r.residual;
   } else {
@@ -2572,7 +2586,7 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
     }
     if (best >= 0) {
       capFontId = fontSizeLadder_.rungs[best].fontId;
-      capScale = pendingDropCap_.multiplier * 100.0f / fontSizeLadder_.rungs[best].sizePct;
+      capScale = pendingDropCap_.multiplier / TextScale::percent(fontSizeLadder_.rungs[best].sizePct);
       if (auxFontId_ == 0) auxFontId_ = capFontId;
     }
   }
@@ -2590,7 +2604,7 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   // column (the inline fallback's limit below).
   if (lines > 0 && haveInk && capInkTop > 0) {
     const auto fit = [&] {
-      capScale = capHeight(lines) / static_cast<float>(capInkTop);
+      capScale = capScaleFor(capInkTop);
       capWidth = renderer.getTextWidthScaled(capEffFontId, pendingDropCap_.text, pendingDropCap_.style, capScale);
     };
     fit();
@@ -2612,8 +2626,8 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   }
 
   const int capAsc = renderer.getFontAscenderSize(capEffFontId);
-  const int capLeadScaled = static_cast<int>((capAsc - capInkTop) * capScale + 0.5f);
-  const int capInkHeightScaled = static_cast<int>((capInkTop + capInkBelow) * capScale + 0.5f);
+  const int capLeadScaled = capScale.apply(capAsc - capInkTop);
+  const int capInkHeightScaled = capScale.apply(capInkTop + capInkBelow);
   // initial-letter's sink: the cap's baseline is the sink-th line's, below the lines it spans for a sunken cap, above
   // them for a raised one. A raised cap stands above the first line, which goes down to make room for it (padding on
   // the paragraph): the first line's box grows, as CSS has it. The sink is as deep as the cap is tall unless the book
@@ -2652,6 +2666,8 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   // internal leading (offset by the first line's own small leading) puts the cap's ink
   // top level with the first line's ink top. Provisional; re-based in addLineToPage.
   dropCapYAdjust_ = static_cast<int16_t>(bodyLeading - capLeadScaled + sinkShift);
+  // On the heap, as its TextBlock: the page's block opens with the page's first line (beforeLineHook), so on a new page
+  // it is not open yet here, and an object made in the arena now would land below it, its room kept after the page.
   auto capLine = makeUniqueNoThrow<PageLine>(std::move(capBlock), capX, static_cast<int16_t>(top + dropCapYAdjust_));
   if (!capLine) {
     LOG_DBG("EHP", "dropcap '%s': inline fallback (PageLine alloc failed)", pendingDropCap_.text);
@@ -2736,7 +2752,7 @@ void ChapterHtmlSlimParser::applyHeldBottomSpacing(const HeldBottomSpacing& held
   currentTextBlock->setBlockStyle(style);
 }
 
-void ChapterHtmlSlimParser::addAncestorInsets(BlockStyle& style, const float emSize, const int belowDepth) const {
+void ChapterHtmlSlimParser::addAncestorInsets(BlockStyle& style, const int emSize, const int belowDepth) const {
   if (blockInsetStack_.empty()) return;
   int left = style.leftInset();
   int right = style.rightInset();
@@ -2745,7 +2761,7 @@ void ChapterHtmlSlimParser::addAncestorInsets(BlockStyle& style, const float emS
     left += entry.left;
     right += entry.right;
   }
-  const int cap = static_cast<int>(emSize * BlockStyle::MAX_HORIZONTAL_INSET_EM);
+  const int cap = emSize * BlockStyle::MAX_HORIZONTAL_INSET_EM;
   // Only the sum is ever laid out (leftInset()/rightInset()), so the capped total goes on the
   // margin and the padding keeps its own value. Both stay >= 0: fromCssStyle clamps each
   // element's contribution to [0, cap], so the capped total can never fall below the padding.
@@ -2866,7 +2882,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     }
   }
   blockFamilyState_ = 0;  // the next block's words start over
-  wordFontsSize_ = 0;
+  wordFontsSize_ = TextScale::fromRaw(0);
   applyPendingPageBreak();
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
   // block is flushed so the chapter starts on a fresh page.
@@ -3118,10 +3134,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       outline.box.setWidth(static_cast<CssBox::Side>(i), 1);
       outline.box.setStyle(static_cast<CssBox::Side>(i), CssBorderStyle::Solid);
     }
-    outline.marginLeft = outline.marginRight = CssLength(2.0f);
-    outline.paddingTop = CssLength(0.35f, CssUnit::Em);
-    outline.paddingBottom = CssLength(0.625f, CssUnit::Em);
-    outline.paddingLeft = outline.paddingRight = CssLength(0.75f, CssUnit::Em);
+    outline.marginLeft = outline.marginRight = CssLength::of(2, 1, CssUnit::Pixels);
+    outline.paddingTop = CssLength::of(35, 100, CssUnit::Em);
+    outline.paddingBottom = CssLength::of(625, 1000, CssUnit::Em);
+    outline.paddingLeft = outline.paddingRight = CssLength::of(75, 100, CssUnit::Em);
     outline.defined.marginLeft = outline.defined.marginRight = 1;
     outline.defined.paddingTop = outline.defined.paddingBottom = outline.defined.paddingLeft =
         outline.defined.paddingRight = 1;
@@ -3150,7 +3166,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // line-height and white-space are inherited: the element's copy carries the computed values, for every block built
   // from it.
   cssStyle.lineHeightEm = self->elementFlow_.lineHeightEm;
-  cssStyle.defined.lineHeight = self->elementFlow_.lineHeightEm > 0.0f;
+  cssStyle.defined.lineHeight = self->elementFlow_.lineHeightEm.raw() > 0;
   cssStyle.whiteSpace = self->elementFlow_.whiteSpace;
 
   // The HTML `hidden` attribute means display:none, and outranks the CSS that got
@@ -3228,8 +3244,8 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   if (cssStyle.hasImageWidth() && !matches(name, IMAGE_TAGS, NUM_IMAGE_TAGS)) {
     const int parentWidth =
         self->containerWidthStack_.empty() ? self->viewportWidth : self->containerWidthStack_.back().width;
-    const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
-    const int w = static_cast<int>(cssStyle.imageWidth.toPixels(emSize, static_cast<float>(parentWidth)) + 0.5f);
+    const int emSize = self->renderer.getFontAscenderSize(self->fontId);
+    const int w = cssStyle.imageWidth.toPixelsRounded(emSize, parentWidth);
     if (w >= 1 && w < parentWidth) {
       const bool relative = cssStyle.imageWidth.unit == CssUnit::Percent;
       const int16_t parentFixed = self->containerWidthStack_.empty() ? 0 : self->containerWidthStack_.back().fixedWidth;
@@ -3304,7 +3320,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     // ("feat: improve table rendering (#89)", Julia <julia@uxj.io>), which sizes the grid from
     // the table's block inset; we reuse BlockStyle::fromCssStyle so the 4em inset cap and the
     // em/percentage resolution stay shared with every other block.
-    const float tableEmSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
+    const int tableEmSize = self->renderer.getFontAscenderSize(self->fontId);
     BlockStyle tableBlockStyle = BlockStyle::fromCssStyle(
         cssStyle, tableEmSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
     self->addAncestorInsets(tableBlockStyle, tableEmSize);
@@ -3660,7 +3676,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
               {
                 int displayWidth = 0;
                 int displayHeight = 0;
-                const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
+                const int emSize = self->renderer.getFontAscenderSize(self->fontId);
                 CssStyle imgStyle = self->cssParser ? self->resolvedImgStyle(classAttr) : CssStyle{};
                 // Merge inline style (e.g. style="height: 2em") so it overrides stylesheet rules
                 if (!styleAttr.empty()) imgStyle.applyOver(self->inlineStyleFor(styleAttr));
@@ -3687,10 +3703,8 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 if (hasCssHeight && hasCssWidth && dims.width > 0 && dims.height > 0) {
                   // Both CSS height and width set: resolve both, fit the image inside that box,
                   // then clamp to the current container.
-                  displayHeight = static_cast<int>(
-                      imgStyle.imageHeight.toPixels(emSize, static_cast<float>(self->viewportHeight)) + 0.5f);
-                  displayWidth =
-                      static_cast<int>(imgStyle.imageWidth.toPixels(emSize, static_cast<float>(containerWidth)) + 0.5f);
+                  displayHeight = imgStyle.imageHeight.toPixelsRounded(emSize, self->viewportHeight);
+                  displayWidth = imgStyle.imageWidth.toPixelsRounded(emSize, containerWidth);
                   if (displayHeight < 1) displayHeight = 1;
                   if (displayWidth < 1) displayWidth = 1;
                   // A browser stretches the image to fill a box of a different ratio. We
@@ -3698,42 +3712,35 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   // honour it, so a stylesheet we only partly understand (no min-/max-width, no
                   // box model) could hand us a box that squashes the picture. Fit inside the
                   // requested box and keep the source ratio.
-                  const float boxScale = std::min(static_cast<float>(displayWidth) / dims.width,
-                                                  static_cast<float>(displayHeight) / dims.height);
-                  displayWidth = std::max(1, static_cast<int>(dims.width * boxScale + 0.5f));
-                  displayHeight = std::max(1, static_cast<int>(dims.height * boxScale + 0.5f));
+                  const ImageScale box = ImageScale::fit(dims.width, dims.height, displayWidth, displayHeight);
+                  displayWidth = std::max(1, roundedQuotient(int64_t{dims.width} * box.num(), box.den()));
+                  displayHeight = std::max(1, roundedQuotient(int64_t{dims.height} * box.num(), box.den()));
                   if (displayWidth > containerWidth || displayHeight > self->viewportHeight) {
-                    float scaleX =
-                        (displayWidth > containerWidth) ? static_cast<float>(containerWidth) / displayWidth : 1.0f;
-                    float scaleY = (displayHeight > self->viewportHeight)
-                                       ? static_cast<float>(self->viewportHeight) / displayHeight
-                                       : 1.0f;
-                    float scale = (scaleX < scaleY) ? scaleX : scaleY;
-                    displayWidth = static_cast<int>(displayWidth * scale + 0.5f);
-                    displayHeight = static_cast<int>(displayHeight * scale + 0.5f);
+                    const ImageScale scale = ImageScale::smaller(
+                        displayWidth > containerWidth ? ImageScale(containerWidth, displayWidth) : ImageScale(),
+                        displayHeight > self->viewportHeight ? ImageScale(self->viewportHeight, displayHeight)
+                                                             : ImageScale());
+                    displayWidth = roundedQuotient(int64_t{displayWidth} * scale.num(), scale.den());
+                    displayHeight = roundedQuotient(int64_t{displayHeight} * scale.num(), scale.den());
                     if (displayWidth < 1) displayWidth = 1;
                     if (displayHeight < 1) displayHeight = 1;
                   }
                   LOG_TRC("EHP", "Display size from CSS height+width: %dx%d", displayWidth, displayHeight);
                 } else if (hasCssHeight && !hasCssWidth && dims.width > 0 && dims.height > 0) {
                   // Use CSS height (resolve % against viewport height) and derive width from aspect ratio
-                  displayHeight = static_cast<int>(
-                      imgStyle.imageHeight.toPixels(emSize, static_cast<float>(self->viewportHeight)) + 0.5f);
+                  displayHeight = imgStyle.imageHeight.toPixelsRounded(emSize, self->viewportHeight);
                   if (displayHeight < 1) displayHeight = 1;
-                  displayWidth =
-                      static_cast<int>(displayHeight * (static_cast<float>(dims.width) / dims.height) + 0.5f);
+                  displayWidth = roundedQuotient(int64_t{displayHeight} * dims.width, dims.height);
                   if (displayHeight > self->viewportHeight) {
                     displayHeight = self->viewportHeight;
                     // Rescale width to preserve aspect ratio when height is clamped
-                    displayWidth =
-                        static_cast<int>(displayHeight * (static_cast<float>(dims.width) / dims.height) + 0.5f);
+                    displayWidth = roundedQuotient(int64_t{displayHeight} * dims.width, dims.height);
                     if (displayWidth < 1) displayWidth = 1;
                   }
                   if (displayWidth > containerWidth) {
                     displayWidth = containerWidth;
                     // Rescale height to preserve aspect ratio when width is clamped
-                    displayHeight =
-                        static_cast<int>(displayWidth * (static_cast<float>(dims.height) / dims.width) + 0.5f);
+                    displayHeight = roundedQuotient(int64_t{displayWidth} * dims.height, dims.width);
                     if (displayHeight < 1) displayHeight = 1;
                   }
                   if (displayWidth < 1) displayWidth = 1;
@@ -3741,17 +3748,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 } else if (hasCssWidth && !hasCssHeight && dims.width > 0 && dims.height > 0) {
                   // Use CSS width (resolve % against container width) and derive
                   // height from aspect ratio.
-                  displayWidth =
-                      static_cast<int>(imgStyle.imageWidth.toPixels(emSize, static_cast<float>(containerWidth)) + 0.5f);
+                  displayWidth = imgStyle.imageWidth.toPixelsRounded(emSize, containerWidth);
                   if (displayWidth > containerWidth) displayWidth = containerWidth;
                   if (displayWidth < 1) displayWidth = 1;
-                  displayHeight =
-                      static_cast<int>(displayWidth * (static_cast<float>(dims.height) / dims.width) + 0.5f);
+                  displayHeight = roundedQuotient(int64_t{displayWidth} * dims.height, dims.width);
                   if (displayHeight > self->viewportHeight) {
                     displayHeight = self->viewportHeight;
                     // Rescale width to preserve aspect ratio when height is clamped
-                    displayWidth =
-                        static_cast<int>(displayHeight * (static_cast<float>(dims.width) / dims.height) + 0.5f);
+                    displayWidth = roundedQuotient(int64_t{displayHeight} * dims.width, dims.height);
                     if (displayWidth < 1) displayWidth = 1;
                   }
                   if (displayHeight < 1) displayHeight = 1;
@@ -3760,14 +3764,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   // Scale to fit current container while maintaining aspect ratio.
                   int maxWidth = containerWidth;
                   int maxHeight = self->viewportHeight;
-                  float scaleX = (dims.width > maxWidth) ? (float)maxWidth / dims.width : 1.0f;
-                  float scaleY = (dims.height > maxHeight) ? (float)maxHeight / dims.height : 1.0f;
-                  float scale = (scaleX < scaleY) ? scaleX : scaleY;
-                  if (scale > 1.0f) scale = 1.0f;
-
-                  displayWidth = (int)(dims.width * scale);
-                  displayHeight = (int)(dims.height * scale);
-                  LOG_TRC("EHP", "Display size: %dx%d (scale %.2f)", displayWidth, displayHeight, scale);
+                  // Never up: a side that fits keeps its 1:1.
+                  const ImageScale scale =
+                      ImageScale::smaller(dims.width > maxWidth ? ImageScale(maxWidth, dims.width) : ImageScale(),
+                                          dims.height > maxHeight ? ImageScale(maxHeight, dims.height) : ImageScale());
+                  displayWidth = scale.apply(dims.width);
+                  displayHeight = scale.apply(dims.height);
+                  LOG_TRC("EHP", "Display size: %dx%d (scale %d/%d)", displayWidth, displayHeight, scale.num(),
+                          scale.den());
                 }
 
                 // A percentage wrapper (<div class="full60">) is layout for a large screen, where
@@ -3781,9 +3785,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                     !hasCssHeight && (!hasCssWidth || imgStyle.imageWidth.unit == CssUnit::Percent);
                 if (percentWrapper && sizedByContainer && self->floatDepth_ == 0 && dims.width > 0 && dims.height > 0) {
                   int floorWidth =
-                      hasCssWidth ? static_cast<int>(
-                                        imgStyle.imageWidth.toPixels(emSize, static_cast<float>(unwrappedWidth)) + 0.5f)
-                                  : unwrappedWidth;
+                      hasCssWidth ? imgStyle.imageWidth.toPixelsRounded(emSize, unwrappedWidth) : unwrappedWidth;
                   floorWidth = std::min({floorWidth, unwrappedWidth, static_cast<int>(dims.width)});
                   int floorHeight = static_cast<int>(static_cast<int64_t>(floorWidth) * dims.height / dims.width);
                   if (floorHeight > self->viewportHeight) {
@@ -4048,7 +4050,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     }
   }
 
-  const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
+  const int emSize = self->renderer.getFontAscenderSize(self->fontId);
   auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
       cssStyle, emSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
   userAlignmentBlockStyle.direction = self->blockDirection(cssStyle);
@@ -4058,7 +4060,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   }
   // As in CSS, a list's own padding on its start side replaces the default and its margin there adds to it. A <dd>'s
   // default is a margin, the same 40 px in a browser.
-  const int16_t listPadding = static_cast<int16_t>(emSize * LIST_DEFAULT_PADDING_EM);
+  const auto listPadding = static_cast<int16_t>(emSize * LIST_DEFAULT_PADDING_HALF_EMS / 2);
   if (isList) {
     if (self->startSideIsRight()) {
       if (!cssStyle.hasPaddingRight()) userAlignmentBlockStyle.paddingRight = listPadding;
@@ -4261,7 +4263,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       }
       if (!lineHasContent) {
         brStyle.paddingTop =
-            static_cast<int16_t>(self->renderer.getLineHeight(self->fontId) * self->lineCompression + 0.5f);
+            static_cast<int16_t>(self->lineCompression.apply(self->renderer.getLineHeight(self->fontId)));
       }
       brStyle.fromBrElement = true;
       self->startNewTextBlockWithinElements(brStyle);
@@ -4331,8 +4333,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     // <hr> kept for the structure, has no line and takes no room.
     if (!self->embeddedStyle || !cssStyle.hidesRule()) {
       if (!self->ensurePage()) return;
-      const int lineHeight =
-          static_cast<int>(self->renderer.getLineHeight(self->fontId) * self->lineCompression + 0.5f);
+      const int lineHeight = self->lineCompression.apply(self->renderer.getLineHeight(self->fontId));
       const int16_t marginV = static_cast<int16_t>(lineHeight / 2);
       self->currentPageNextY += marginV;
       if (self->currentPageNextY + 1 + marginV > self->viewportHeight) {
@@ -4522,7 +4523,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         // margin-left on an inline span acts as a per-line indent (poem stanza pattern).
         // Applied immediately to the current block because the span closes before the
         // trailing <br>, so the indent must be on the block that receives the text.
-        const int16_t marginPx = cssStyle.marginLeft.toPixelsInt16(emSize, static_cast<float>(self->viewportWidth));
+        const int16_t marginPx = cssStyle.marginLeft.toPixelsInt16(emSize, self->viewportWidth);
         entry.hasMarginLeft = true;
         entry.marginLeftPx = marginPx;
         if (marginPx > 0 && self->currentTextBlock) {
@@ -5803,7 +5804,7 @@ void ChapterHtmlSlimParser::resolveBlockFont(BlockStyle& bs) {
   if (bs.headingFontId != 0) return;
   const uint8_t slot =
       blockFamilyState_ == 0 ? 0 : fontFamilySlot(blockFamilyState_ == 1 ? blockFirstFamily_ : blockOwnFamily_);
-  const float size = bs.fontSizeMultiplier;
+  const TextScale size = bs.fontSizeMultiplier;
   const FontSizeLadder::Resolved r = resolveFamilyFont(fontFamily(slot), size);
   bs.headingFontId = r.fontId;
   bs.fontSizeMultiplier = r.residual;
@@ -5817,15 +5818,15 @@ void ChapterHtmlSlimParser::resolveBlockFont(BlockStyle& bs) {
 }
 
 FontSizeLadder::Resolved ChapterHtmlSlimParser::resolveFamilyFont(const BlockFontFamilies::Family* family,
-                                                                  const float size) {
+                                                                  const TextScale size) {
   // Another of the book's families: its face at the size, at its body size included.
   if (family) {
-    FontSizeLadder::Resolved r = family->ladder.resolve(size * 100.0f);
+    FontSizeLadder::Resolved r = family->ladder.resolve(size);
     if (r.fontId == 0) r.fontId = family->bodyFontId;
     return r;
   }
-  if (size == 1.0f) return {};
-  const FontSizeLadder::Resolved r = fontSizeLadder_.resolve(size * 100.0f);
+  if (size.isOne()) return {};
+  const FontSizeLadder::Resolved r = fontSizeLadder_.resolve(size);
   // Nearest rung is the body font (or the ladder is empty, e.g. SD fonts): keep the pure-scale
   // path — identical to the legacy behavior.
   if (r.fontId == 0) return r;
@@ -5845,20 +5846,19 @@ void ChapterHtmlSlimParser::resolveWordFont(const uint8_t slot) {
   currentTextBlock->setFontSlot(slot, font);
 }
 
-void ChapterHtmlSlimParser::setBookLineHeight(const float floor, const uint16_t emPx) {
+void ChapterHtmlSlimParser::setBookLineHeight(const TextScale floor, const uint16_t emPx) {
   const int bodyLineHeight = renderer.getLineHeight(fontId);
   bookFloor_ = floor;
-  bookPerEm_ =
-      floor > 0.0f && bodyLineHeight > 0 ? static_cast<float>(emPx) / static_cast<float>(bodyLineHeight) : 0.0f;
+  bookPerEm_ = floor.raw() > 0 && bodyLineHeight > 0 ? TextScale::ratio(emPx, bodyLineHeight) : TextScale::fromRaw(0);
 }
 
 int ChapterHtmlSlimParser::effectiveLineHeight(const BlockStyle& bs) const {
   // Book's style: the block's line-height in ems of the body text, as a compression on the body font's line height, so
   // a heading in a taller face gets its own em's pitch from that face's line height.
-  const float compression = bookPerEm_ > 0.0f && bs.lineHeightEm > 0.0f
-                                ? std::max(bs.lineHeightEm * bookPerEm_, bookFloor_)
-                                : lineCompression;
-  return static_cast<int>(renderer.getLineHeight(effectiveFontId(bs)) * compression * bs.fontSizeMultiplier + 0.5f);
+  const TextScale compression = bookPerEm_.raw() > 0 && bs.lineHeightEm.raw() > 0
+                                    ? std::max(bs.lineHeightEm * bookPerEm_, bookFloor_)
+                                    : lineCompression;
+  return (compression * bs.fontSizeMultiplier).apply(renderer.getLineHeight(effectiveFontId(bs)));
 }
 
 ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line,
@@ -5954,7 +5954,10 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
   line->setCentredMarks(vertical_ && typography_.punctuation == TypographyProfile::Punctuation::TraditionalChinese);
   // A line of images alone has no text to place.
   if (line->wordCount() > 0 || images.empty()) {
-    auto pageLine = makeUniqueNoThrow<PageLine>(std::move(line), xOffset, currentPageNextY + box.textTop);
+    // In the page's block of the line arena under the line's room, as its TextBlock is (memory-and-parsing 9c): the
+    // page is serialised and destroyed before emitPage() rewinds that block.
+    auto pageLine = PageLine::make(std::move(line), xOffset, static_cast<int16_t>(currentPageNextY + box.textTop),
+                                   buildArena_, lineRoom());
     if (!pageLine) {
       // Accepted, not a retry: the line is gone either way, and retrying would just fail again.
       LOG_ERR("EHP", "Dropping line: PageLine allocation failed");
@@ -5989,9 +5992,7 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
   // The line's glyphs reach the font's full line height below its text's top, more than the advance under a tight
   // spacing; a line's images lower its text by box.textTop.
   const int glyphHeight =
-      static_cast<int>(renderer.getLineHeight(effectiveFontId(lineStyle)) * lineStyle.fontSizeMultiplier + 0.5f) *
-          maxPct / 100 +
-      band;
+      lineStyle.fontSizeMultiplier.apply(renderer.getLineHeight(effectiveFontId(lineStyle))) * maxPct / 100 + band;
   lastGlyphBottom_ = static_cast<int16_t>(currentPageNextY + std::max(lineHeight, box.textTop + glyphHeight));
   if (!boxScopes_.empty()) {
     noteBoxContent(lastGlyphBottom_);
@@ -6046,7 +6047,7 @@ void ChapterHtmlSlimParser::endBlockSpan() {
   resumed.headingFontId = blockSpan_.headingFontId;
   resumed.fontResolved = blockSpan_.fontResolved;
   resumed.keepWithNext = depth > headingDepth_;  // the rest of a heading the span sat in
-  addAncestorInsets(resumed, static_cast<float>(renderer.getFontAscenderSize(fontId)));
+  addAncestorInsets(resumed, renderer.getFontAscenderSize(fontId));
 
   if (currentTextBlock && currentTextBlock->isEmpty()) {
     // Nothing of the span reached its block. Its spacing stays there for whatever follows to
@@ -6072,7 +6073,7 @@ void ChapterHtmlSlimParser::endBlockSpan() {
 void ChapterHtmlSlimParser::clearSpentBlockHeadingStyle() {
   if (!currentTextBlock || !currentTextBlock->isEmpty()) return;
   BlockStyle& spent = currentTextBlock->getBlockStyle();
-  spent.fontSizeMultiplier = 1.0f;
+  spent.fontSizeMultiplier = TextScale();
   spent.headingFontId = 0;
   spent.fontResolved = false;
   spent.keepWithNext = false;
@@ -6533,12 +6534,12 @@ std::unique_ptr<ImageBlock> ChapterHtmlSlimParser::buildImageFromEpubPath(
   turnIfVertical(dims);
 
   // Scale to fit the cell box, preserving aspect ratio. Never upscale.
-  float scale = 1.0f;
-  if (static_cast<int>(dims.width) > static_cast<int>(maxWidth)) scale = static_cast<float>(maxWidth) / dims.width;
-  if (static_cast<int>(dims.height) * scale > static_cast<int>(maxHeight))
-    scale = static_cast<float>(maxHeight) / dims.height;
-  const int displayWidth = std::max(1, static_cast<int>(dims.width * scale));
-  const int displayHeight = std::max(1, static_cast<int>(dims.height * scale));
+  ImageScale scale;
+  if (static_cast<int>(dims.width) > static_cast<int>(maxWidth)) scale = ImageScale(maxWidth, dims.width);
+  // Its height at that scale, as a fraction, against the box's.
+  if (int64_t{dims.height} * scale.num() > int64_t{maxHeight} * scale.den()) scale = ImageScale(maxHeight, dims.height);
+  const int displayWidth = std::max(1, scale.apply(dims.width));
+  const int displayHeight = std::max(1, scale.apply(dims.height));
 
   const std::string cachedPath = imageCachePathFor(imageBasePath, resolvedPath);
 
@@ -6808,8 +6809,8 @@ ChapterHtmlSlimParser::LineText ChapterHtmlSlimParser::lineText(const BlockStyle
   text.height = height;
   text.ascent = TextBlock::lineAscenderFor(renderer, font, bs.fontSizeMultiplier, maxSizePct);
   text.baseline = band + text.ascent;
-  text.descent =
-      std::max(0, renderer.getLineHeightScaled(font, bs.fontSizeMultiplier * maxSizePct / 100.0f) - text.ascent);
+  text.descent = std::max(
+      0, renderer.getLineHeightScaled(font, bs.fontSizeMultiplier * TextScale::percent(maxSizePct)) - text.ascent);
   if (vertical_) {
     // The centre line TextBlock::render draws a column's characters on: the block's em at its baseline.
     text.column = true;
@@ -6825,9 +6826,9 @@ int ChapterHtmlSlimParser::lineImageTop(const PendingLineImage& image, const Lin
     case CssVerticalAlign::Baseline: {
       // A length raises it (lowers it when negative): in ems of the line's text, or percent of its line height.
       const LineImageAlign& a = image.align;
-      const float pixels = a.shiftPercent ? a.shift * (text.height - (text.baseline - text.ascent)) / 100.0f
-                                          : a.shift * text.ascent / 16.0f;
-      return text.baseline - h - static_cast<int>(std::lround(pixels));
+      const int pixels = a.shiftPercent ? roundedQuotient(a.shift * (text.height - (text.baseline - text.ascent)), 100)
+                                        : roundedQuotient(a.shift * text.ascent, 16);
+      return text.baseline - h - pixels;
     }
     case CssVerticalAlign::Middle:
       // Its middle at half the x-height above the baseline: a third of the ascent, as the guide dots take it.
@@ -7166,7 +7167,7 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
   // paragraph fallback and drop the image).
   const uint16_t cellImageMaxHeight = static_cast<uint16_t>(
       std::min<int>(MAX_CELL_IMAGE_HEIGHT, std::max<int>(1, viewportHeight - 2 * TABLE_CELL_PADDING)));
-  const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression + 0.5f);
+  const int lineHeight = lineCompression.apply(renderer.getLineHeight(fontId));
 
   out.cells.clear();
   out.isHeaderRow = bufRow.isHeaderRow;

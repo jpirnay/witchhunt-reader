@@ -192,7 +192,8 @@ TEST_F(StoreTest, QueryBookFindsItAndTheGlobalPace) {
 
   ASSERT_TRUE(query.found);
   EXPECT_EQ(query.book.totalSeconds, 300u);
-  EXPECT_FLOAT_EQ(query.pooledPace, 20.0f);
+  ASSERT_TRUE(query.pooledPace.known());
+  EXPECT_EQ(query.pooledPace.seconds, 20 * query.pooledPace.percents);  // 20 s a percent
 }
 
 TEST_F(StoreTest, QueryBooksAtReadsTheIndexedEntries) {
@@ -238,7 +239,8 @@ TEST_F(StoreTest, PrefetchReportsKnownAndUnknownBooks) {
   ASSERT_NE(store.recent("not-a-document-id"), nullptr);
   EXPECT_FALSE(store.recent("not-a-document-id")->known);
   EXPECT_EQ(store.recent(id(1)), nullptr);  // not asked for
-  EXPECT_FLOAT_EQ(store.recentPooledPace(), 20.0f);
+  ASSERT_TRUE(store.recentPooledPace().known());
+  EXPECT_EQ(store.recentPooledPace().seconds, 20 * store.recentPooledPace().percents);
 }
 
 TEST_F(StoreTest, PrefetchShowsTheLatestFigures) {

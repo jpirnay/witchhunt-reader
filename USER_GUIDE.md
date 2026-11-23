@@ -44,6 +44,7 @@ Welcome to **Witch Reader** firmware. This guide outlines the hardware controls,
     - [System Navigation](#system-navigation)
     - [Bookmarks](#bookmarks)
     - [Searching the book](#searching-the-book)
+    - [Protected books](#protected-books)
     - [Supported Languages](#supported-languages)
     - [Language packs](#language-packs)
       - [Interface languages](#interface-languages)
@@ -834,6 +835,7 @@ To use custom sleep images, set the sleep screen mode to **Custom** or **Cover +
 - **Multiple Images (recommended):** Create a `.sleep` directory in the root of the SD card and place any number of `.bmp` or `.png` images inside. (A directory named `sleep` is also accepted as a fallback.)
 - **Single Image:** Place a file named `sleep.bmp` or `sleep.png` in the root directory. While it is there, it is shown instead of the images in the `.sleep`/`sleep` directory.
 - **Weather forecast:** Each time the **Weather** screen fetches a forecast, it saves the screen, without its button hints, as `sleep/weather.bmp`, so it joins the custom images. It shows sideways, as the Weather screen does. Deleting the file only lasts until the next fetch.
+- **From a plugin:** a community plugin such as **Month Wallpaper** fetches a new `sleep.bmp` each time the reader goes to sleep, joining your last Wi-Fi network for it (not under 20 % battery). Sleep then takes as long as the download. On the X3 and X4 the reader shows the sleep screen first, restarts twice while it fetches, and shows the new picture after; a book's cover stays as it is. See [Plugins](./docs/webserver.md#10-plugins).
 
 A BMP image is placed by **Sleep Screen Cover Mode** as a cover is. **Fit** shows it whole, centred, scaled down if it is larger than the screen. **Crop** fills the screen with an image that is larger than it both ways. An image larger than the screen one way and smaller the other (an X4-sized picture on the X3) is cut only where it runs over the edge and centred the other way, since images are never scaled up.
 
@@ -923,6 +925,23 @@ Open **Search** from the **Navigation** tab of the reader bars or from the reade
 * **The list:** each match with the words around it, its chapter and how far into the book it lies. The first row searches again (for something else, or the same).
 * **A match on the page:** choosing one opens its page with the match outlined, as are any other matches on that page. The button hints step through the matches: **Left** and **Right** go to the previous and the next one, **Confirm** (shown as the match's number, such as **3/12**) returns to the list, and **Back** ends the search and leaves you on that page. The page shows in black and white while the hints are up and gets its gray again once the search ends.
 * **Back to where you were:** the page you started from is kept as after following a link, so **Back** once the search has ended returns to it.
+
+### Protected books
+
+Books borrowed or bought with **Adobe DRM** (most library loans, such as Onleihe or Libby, and shops' "Adobe
+DRM" titles) open once their key is on the reader. Books with only a watermark need nothing: copy them on like any
+EPUB.
+
+- The key comes from the community plugin **Protected Content** in the web interface (see
+  [Plugins](./docs/webserver.md#10-plugins)). Sign in with your Adobe ID, upload the `.acsm` file the library or shop
+  gives you, and fetch the book. The plugin puts the book beside its key (`Book.epub.key`) and its licence
+  (`Book.epub.rights`). The plugin has been tried against a test Adobe service, not yet with a real account.
+- The key belongs to this reader: the same card does not open the book in another reader.
+- A loan stops opening when it ends. A reader that has not had the date since it was reset asks for one Wi-Fi
+  connection before it opens a loan.
+- When a protected book does not open, the reader says why (no key, another reader's key, the loan has ended, no
+  date, a book it cannot read) and goes back.
+- Moving or deleting the book on the reader moves or deletes its key and licence with it.
 
 ### Supported Languages
 

@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <BitmapHelpers.h>
 #include <BoardConfig.h>
 #include <CooperativeAbort.h>
 #include <Epub.h>
@@ -42,6 +43,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <vector>
 
 #include "BootDiagnostics.h"
@@ -70,6 +72,7 @@
 #include "WifiCredentialStore.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
+#include "activities/boot_sleep/SleepActivity.h"
 #include "activities/reader/KOReaderAutoSync.h"
 #include "activities/reader/KOReaderSyncWorker.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
@@ -79,6 +82,8 @@
 #include "network/OtaBootSwitch.h"
 #include "platform/UsbSerialJtagHandoff.h"
 #include "util/ButtonNavigator.h"
+#include "util/PluginEvents.h"
+#include "util/PluginReaderEvents.h"
 #include "util/ScreenshotUtil.h"
 #include "util/SerialLineBuffer.h"
 #include "util/Timezones.h"
@@ -249,10 +254,26 @@ constexpr uint32_t SILENT_REBOOT_TARGET_USB_DRIVE = 10;
 // session (or the join it starts with), as SILENT_REBOOT_TARGET_FILE_TRANSFER_OPDS does
 // for the OPDS browser.
 constexpr uint32_t SILENT_REBOOT_TARGET_FILE_TRANSFER_CALIBRE = 11;
+// Sleep was entered with plugin events waiting for a connection on a board that sends them from a clean boot
+// (HalCapabilities::sendsSleepEventsFromCleanBoot): the sleep screen is up, and this boot sends the queue before the
+// display takes its framebuffers, then restarts into SILENT_REBOOT_TARGET_SLEEP(_TIMEOUT) with sleepEventsSent set.
+// Two targets so fromTimeout survives, as for those.
+constexpr uint32_t SILENT_REBOOT_TARGET_SLEEP_SEND_EVENTS = 12;
+constexpr uint32_t SILENT_REBOOT_TARGET_SLEEP_SEND_EVENTS_TIMEOUT = 13;
 // Upper bound for the cold-boot sanity check on silentRebootTarget (RTC_NOINIT is
 // uninitialized on power-up). Must equal the highest target above — keep it in
 // sync when adding one, or the new target silently reads as HOME.
-constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_FILE_TRANSFER_CALIBRE;
+constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_SLEEP_SEND_EVENTS_TIMEOUT;
+// Set by the sleep-events boot for the sleep it restarts into, read and cleared by that boot's setup(): the events went
+// (or were tried) already, so that sleep neither queues sleep.enter again nor connects, and the screen painted before
+// the first restart stays unless a download replaced a file. Any other value (a cold boot's garbage) means neither.
+RTC_NOINIT_ATTR uint32_t sleepEventsSent;
+constexpr uint32_t SLEEP_EVENTS_SENT_NO_DOWNLOAD = 0x5E0E5E01;
+constexpr uint32_t SLEEP_EVENTS_SENT_DOWNLOADED = 0x5E0E5E02;
+// What this boot's sleep does about plugin events: the ordinary sleep sends them; the sleep a sleep-events boot
+// restarted into has sent them, and knows whether a download replaced a file (a sleep image to draw again).
+enum class SleepEventsPass : uint8_t { Send, SentNoDownload, SentDownloaded };
+static SleepEventsPass sleepEventsPass = SleepEventsPass::Send;
 constexpr uint32_t HEAP_RECOVERY_RESTART_LATCH_MAGIC = 0x48EA9C01;
 
 // How the device is coming back to life, resolved once at boot. Both resume
@@ -542,14 +563,16 @@ static void logStartupMemory(const char* stage) {
 // appears at fourteen call sites through setup() and reads better unqualified there.
 using BootDiag::BootPhase;
 
-// The panel's booster powered down once the device has gone idle, and again after each render pass
-// drawn while it stays idle (the minute clock, a cover that finished loading), on the boards whose
-// driver keeps it up after a refresh (HalCapabilities::powersPanelOffWhenIdle). A frame that is
+// The panel's booster powered down once the device has gone idle (for the board's
+// HalCapabilities::panelIdlePowerOffAfterMs), and again after each render pass drawn while it stays
+// idle (the minute clock, a cover that finished loading), on the boards whose driver keeps it up
+// after a refresh (HalCapabilities::powersPanelOffWhenIdle). A frame that is
 // still on its way out, or a pass in flight, waits for a later idle tick: the loop never stalls
 // behind a render for this. A frame painted outside render() follows input, which starts a new
 // idle period. Loop task only.
 static void powerOffPanelWhenIdle(const unsigned long lastActivityMs) {
   if (!HalCapabilities::powersPanelOffWhenIdle()) return;
+  if (millis() - lastActivityMs < HalCapabilities::panelIdlePowerOffAfterMs()) return;
   static unsigned long offAfterActivityAt = 0;
   static uint32_t offAfterPass = 0;
   static bool off = false;
@@ -651,6 +674,90 @@ static void onSleepStep(HalPowerManager::SleepStep step, unsigned long waitedMs,
   }
 }
 
+// Plugin events at sleep entry (util/PluginEvents.h): what was read is queued as reader.session and sleep.enter with
+// the open book, then the queue goes out when that is worth a connection: Wi-Fi already up, or a queued event whose
+// handler asks to connect ("connect", and sleep.enter always). The join is bounded (10 s), needs 20 % battery and a
+// saved password for the last network, and never holds sleep up: a failed join or request just sleeps, and the queue
+// goes on the next drain. Upstream CrossPoint's sleep delivery (PR #3114, Justin Mitchell).
+
+// The saved network to send queued events on, or null: nothing queued wants a connection, the battery is under 20 %,
+// or the last network has no saved password.
+static const WifiCredential* sleepEventsNetwork() {
+  if (!plugin_events::wantsConnectAny()) return nullptr;
+  if (powerManager.getBatteryPercentage() < 20) {
+    LOG_INF("PEVT", "battery under 20 %%: events wait for the next connection");
+    return nullptr;
+  }
+  WIFI_STORE.loadFromFile();
+  const WifiCredential* cred = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
+  if (cred == nullptr) LOG_INF("PEVT", "no saved network to send events on");
+  return cred;
+}
+
+static bool joinForSleepEvents(const WifiCredential& cred) {
+  LOG_INF("PEVT", "joining %s for plugin events (heap %u, largest %u)", cred.ssid.c_str(),
+          static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(cred.ssid.c_str(), cred.password.c_str());
+  const unsigned long deadline = millis() + 10000;
+  while (WiFi.status() != WL_CONNECTED && static_cast<long>(deadline - millis()) > 0) {
+    HalSystem::feedWatchdog();
+    delay(100);
+  }
+  if (WiFi.status() == WL_CONNECTED) return true;
+  LOG_INF("PEVT", "join timed out: events wait for the next connection");
+  return false;
+}
+
+// Queues sleep.enter and sends the queue where it can. True when it must go from a clean boot
+// (HalCapabilities::sendsSleepEventsFromCleanBoot): the caller paints the sleep screen first, so the reader's own
+// reader.exit (queued as goToSleep() closes it) goes along, then restarts into SILENT_REBOOT_TARGET_SLEEP_SEND_EVENTS.
+static bool deliverSleepPluginEvents() {
+  plugin_events::reader::flushSession();
+  std::string book;
+  int percent = 0;
+  int endPercent = 0;
+  char pct[8];
+  char endPct[8];
+  plugin_events::Var vars[3];
+  size_t count = 0;
+  if (plugin_events::reader::current(book, percent, endPercent)) {
+    snprintf(pct, sizeof(pct), "%d", percent);
+    snprintf(endPct, sizeof(endPct), "%d", endPercent);
+    vars[count++] = {"book", book.c_str()};
+    vars[count++] = {"percent", pct};
+    vars[count++] = {"end_percent", endPct};
+  }
+  plugin_events::emit(plugin_events::Event::SleepEnter, vars, count);
+  if (WiFi.status() == WL_CONNECTED) {
+    plugin_events::drain(&renderer);
+    return false;
+  }
+  const WifiCredential* cred = sleepEventsNetwork();
+  if (cred == nullptr) return false;
+  if (HalCapabilities::sendsSleepEventsFromCleanBoot()) return true;
+  GUI.drawPopup(renderer, tr(STR_CONNECTING_SAVED_WIFI));
+  if (joinForSleepEvents(*cred)) plugin_events::drain(&renderer);
+  return false;
+}
+
+// The sleep-events boot (SILENT_REBOOT_TARGET_SLEEP_SEND_EVENTS), called by setup() before the display takes its
+// framebuffers, so Wi-Fi and TLS have the heap. No screen yet: no toasts, and the sleep screen painted before the
+// restart stays up. Then on into the sleep, which draws that screen again only when a download replaced a file (a new
+// sleep image). Never returns.
+static void sendSleepEventsThenSleep(const bool fromTimeout) {
+  bool downloaded = false;
+  const WifiCredential* cred = sleepEventsNetwork();
+  if (cred != nullptr && joinForSleepEvents(*cred)) downloaded = plugin_events::drain(nullptr).downloads > 0;
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  sleepEventsSent = downloaded ? SLEEP_EVENTS_SENT_DOWNLOADED : SLEEP_EVENTS_SENT_NO_DOWNLOAD;
+  armSilentReboot(fromTimeout ? SILENT_REBOOT_TARGET_SLEEP_TIMEOUT : SILENT_REBOOT_TARGET_SLEEP);
+  LOG_INF("PEVT", "events sent from a clean boot%s; on into the sleep",
+          downloaded ? ", a download replaced a file" : "");
+  restartKeepingFlashArea();
+}
+
 // Enter deep sleep mode. fromTimeout=true marks an auto-sleep (gates "Quick Resume on
 // Timeout"). `trigger` is diagnostics only — it does not change behaviour, it just records
 // which gesture asked for the sleep, which is the first thing a "it did not wake up" report
@@ -666,8 +773,11 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
     silentRestartToSleep(fromTimeout);
     return;  // not reached — silentRestartToSleep() restarts the chip
   }
-  BootDiag::beginSleep(fromTimeout ? BootDiag::SleepTrigger::Timeout : trigger, keepClockAliveForSleep(),
-                       activityManager.isReaderActivity());
+  // The sleep a sleep-events boot restarted into has no activity: the reader it left was closed before the first
+  // restart, and APP_STATE holds what it was.
+  const bool fromReader =
+      sleepEventsPass == SleepEventsPass::Send ? activityManager.isReaderActivity() : APP_STATE.lastSleepFromReader;
+  BootDiag::beginSleep(fromTimeout ? BootDiag::SleepTrigger::Timeout : trigger, keepClockAliveForSleep(), fromReader);
   // Stop the background sampler before tearing down the display/power rails so no
   // ADC read races with that teardown. From here sleep prep reads the power pin
   // directly (HalGPIO::startDeepSleep / waitForStablePowerRelease).
@@ -676,7 +786,7 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
   HapticManager::getInstance().stop();
 #endif
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
-  APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+  APP_STATE.lastSleepFromReader = fromReader;
   const bool keepLpAlive = keepClockAliveForSleep();
   HalClock::saveBeforeSleep(keepLpAlive);
   // If sleeping from a running reader the book loaded successfully, so the boot-loop
@@ -721,6 +831,15 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
   keepRadioUp = !KOReaderSyncWorker::drain(AUTO_SYNC_PRESLEEP_DRAIN_MS);
   keepRadioUp = keepRadioUp || (KOReaderAutoSync::sleepPushEnabled() && activityManager.isReaderActivity());
 #endif
+  // Before the radio comes down, unless KOReader's sync worker still holds it, and once per sleep.
+  bool sendEventsFromCleanBoot = false;
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  if (sleepEventsPass == SleepEventsPass::Send && !KOReaderSyncWorker::isBusy()) {
+    sendEventsFromCleanBoot = deliverSleepPluginEvents();
+  }
+#else
+  if (sleepEventsPass == SleepEventsPass::Send) sendEventsFromCleanBoot = deliverSleepPluginEvents();
+#endif
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
   // Wake from deep sleep is effectively a chip reset, so no state needs to survive.
   // cppcheck-suppress knownConditionTrueFalse ; compile-time false without CROSSPOINT_KOREADER_AUTOSYNC
@@ -732,7 +851,13 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
-  activityManager.goToSleep(fromTimeout);
+  // After a sleep-events boot the panel still holds the sleep screen painted before it. It is drawn again only when a
+  // download replaced a file and the screen is made of custom images alone: a book's cover does not change, and this
+  // boot has no page for Quick Resume or Overlay to draw over.
+  const bool paintSleepScreen =
+      sleepEventsPass == SleepEventsPass::Send || (sleepEventsPass == SleepEventsPass::SentDownloaded &&
+                                                   !isQuickResumeSleep && SleepActivity::showsCustomImageOnly());
+  if (paintSleepScreen) activityManager.goToSleep(fromTimeout);
 
 #if CROSSPOINT_KOREADER_AUTOSYNC
   if (!KOReaderSyncWorker::isBusy() && WiFi.getMode() != WIFI_MODE_NULL) {
@@ -746,8 +871,17 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
   // full sync because the restored frame IS the reader page — the user is looking at their book
   // for the whole load, not at an interstitial. A plain reader resume saves nothing and paints
   // nothing, so the page gets that sync instead (see showBootScreen above).
-  if (isQuickResumeSleep) {
+  if (isQuickResumeSleep && paintSleepScreen) {
     saveSleepFrameBuffer();
+  }
+
+  // The screen is up and the reader closed (its reader.exit queued): the queue goes from a clean boot, which restarts
+  // into this function to finish the sleep.
+  if (sendEventsFromCleanBoot) {
+    armSilentReboot(fromTimeout ? SILENT_REBOOT_TARGET_SLEEP_SEND_EVENTS_TIMEOUT
+                                : SILENT_REBOOT_TARGET_SLEEP_SEND_EVENTS);
+    LOG_INF("PEVT", "events wait for a connection: sending them from a clean boot");
+    restartKeepingFlashArea();
   }
 
   BootDiag::markSleepStage(BootDiag::SleepStage::ScreenPainted);
@@ -825,6 +959,10 @@ void openUiBookFonts();  // syncUiBookFonts' opener, below
 
 void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = false) {
   display.begin(seamless);
+  // The image dither's table for this panel, before anything draws a picture.
+  const HalCapabilities::ImageGray4Levels gray4 = HalCapabilities::imageGray4Levels();
+  std::copy(std::begin(gray4.thresholds), std::end(gray4.thresholds), gray4tuning::thresholds);
+  std::copy(std::begin(gray4.feedback), std::end(gray4.feedback), gray4tuning::feedback);
   // Carry the panel's measured FAST cost across the reboot. Without this the first decision that
   // depends on it is made blind, and on a slow panel that means one avoidable slow repaint per
   // boot before the measurement catches up. Seed-only: a live measurement always wins.
@@ -881,7 +1019,7 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   static_assert(CrossPointSettings::BUILTIN_FACE_MAX_POINTS == 18, "the masters below are the 18 pt families");
   for (const auto& rung : CrossPointSettings::FONT_SIZE_RUNGS) {
     if (rung.points <= CrossPointSettings::BUILTIN_FACE_MAX_POINTS) continue;
-    const float scale = CrossPointSettings::builtinFaceScale(rung.points);
+    const TextScale scale = CrossPointSettings::builtinFaceScale(rung.points);
     renderer.insertScaledFont(CrossPointSettings::getBuiltinReaderFontId(CrossPointSettings::SERIF, rung.size),
                               serif18FontFamily, scale);
     renderer.insertScaledFont(CrossPointSettings::getBuiltinReaderFontId(CrossPointSettings::NOTOSANS, rung.size),
@@ -1337,9 +1475,11 @@ void setup() {
       (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_MAX) ? silentRebootTarget : 0;
   // Read-and-clear alongside the magic: a stale 1 here must not outlive the reboot that set it.
   const bool lightWasOnAtSilentReboot = isSilentReboot && silentRebootLightOn == 1;
+  const uint32_t sleepEventsSentSnapshot = isSilentReboot ? sleepEventsSent : 0;
   silentRebootMagic = 0;
   silentRebootTarget = 0;
   silentRebootLightOn = 0;
+  sleepEventsSent = 0;
   if (!isSilentReboot) {
     heapRecoveryRestartLatch = 0;
   }
@@ -1612,6 +1752,10 @@ void setup() {
 #endif
   OPDS_STORE.loadFromFile();
   WEATHER_SETTINGS.loadFromFile();
+  // The plugins whose device.json subscribes to events; nothing stays allocated when none does. The reader's page
+  // turns reach their reading time through the stats tracker.
+  plugin_events::refreshSubscriptions();
+  globalReadingSessionTracker().setTurnListener(plugin_events::reader::turned);
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
   buttonEventManager.setReaderOnTopQuery([] { return activityManager.currentIsReaderActivity(); });
@@ -1666,6 +1810,10 @@ void setup() {
   // First serial output only here to avoid timing inconsistencies for power button press duration verification
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
   logStartupMemory("before_display_fonts");
+  if (silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_SLEEP_SEND_EVENTS ||
+      silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_SLEEP_SEND_EVENTS_TIMEOUT) {
+    sendSleepEventsThenSleep(silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_SLEEP_SEND_EVENTS_TIMEOUT);
+  }
 
   // Resolve the single boot-presentation decision. Skipping the splash also
   // skips the panel-clearing pass and the X3 initial-full-sync arming (see
@@ -1781,6 +1929,10 @@ void setup() {
     // The forced HALF_REFRESH from the Silent branch above cleanly repaints the
     // panel (still showing the old session's pixels) with the sleep screen.
     LOG_INF("MAIN", "Resuming sleep transition after framebuffer-recovery reboot");
+    // Or after a sleep-events boot, which sent the queue and left the sleep screen up.
+    sleepEventsPass = sleepEventsSentSnapshot == SLEEP_EVENTS_SENT_DOWNLOADED    ? SleepEventsPass::SentDownloaded
+                      : sleepEventsSentSnapshot == SLEEP_EVENTS_SENT_NO_DOWNLOAD ? SleepEventsPass::SentNoDownload
+                                                                                 : SleepEventsPass::Send;
     enterDeepSleep(/*fromTimeout=*/silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_SLEEP_TIMEOUT);
     return;  // not reached — enterDeepSleep() never returns
   } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_SERIAL_TRANSFER) {
@@ -2497,6 +2649,21 @@ void loop() {
       logSerial.flush();
       silentRestart();
       return;
+    case SerialTestApi::PowerRequest::SleepScreen: {
+#if SERIAL_TEST_API
+      // CMD:SLEEP:SCREEN: the screen enterDeepSleep() paints, without the sleep. The state it reads is set as
+      // enterDeepSleep() sets it and put back afterwards; BOOK= stands in for the last book for this screen.
+      const std::string book = SerialTestApi::takeSleepScreenBook();
+      const std::string savedPath = APP_STATE.openEpubPath;
+      const bool savedFromReader = APP_STATE.lastSleepFromReader;
+      APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+      if (!book.empty()) APP_STATE.openEpubPath = book;
+      activityManager.goToSleep(/*fromTimeout=*/false);
+      APP_STATE.openEpubPath = savedPath;
+      APP_STATE.lastSleepFromReader = savedFromReader;
+#endif
+      break;
+    }
   }
 
   const unsigned long loopDuration = millis() - loopStartTime;

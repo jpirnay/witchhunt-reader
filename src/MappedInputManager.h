@@ -3,6 +3,8 @@
 #include <HalGPIO.h>
 #include <TouchTransform.h>
 
+#include "TouchUi.h"
+
 class GfxRenderer;
 namespace freeink {
 namespace ui {
@@ -139,8 +141,10 @@ class MappedInputManager {
   // screens stay diff-comparable when they convert; see
   // docs/contributing/touch-architecture.md, "Layers".
   //
-  // All of these are inert on non-touch boards (the SDK's touch methods compile
-  // to false), so callers need no #ifdefs.
+  // All of these are inert on non-touch boards, so callers need no #ifdefs. A
+  // build without a digitiser (CP_TOUCH_UI 0) defines them inline below the
+  // class as "nothing happened", so every caller's touch branch is dead code in
+  // its own TU and leaves the image -- see the note there.
   bool hasTouch() const;
 
   // --- UI touch gate ----------------------------------------------------------
@@ -300,6 +304,9 @@ class MappedInputManager {
   const GfxRenderer& renderer;
   static ScreenOrientation (*orientationProvider)();
 
+  bool touchEventsEnabled_ = true;
+
+#if CP_TOUCH_UI
   // Every raw touch read goes through one of these, so the UI gate above cannot
   // be forgotten by a query added later. They are the only place in this class
   // that may call gpio's touch methods directly.
@@ -317,8 +324,6 @@ class MappedInputManager {
     return touchEventsEnabled_ && gpio.popTouchGesture(gesture);
   }
 
-  bool touchEventsEnabled_ = true;
-
   // SDK edge classification (fui::edgeSwipe) plus the shared decode; the
   // wrappers above give each edge its board meaning.
   bool wasEdgeSwipe(freeink::ui::ScreenEdge edge) const;
@@ -327,6 +332,7 @@ class MappedInputManager {
   // Fetch the pending swipe (if any) and map both endpoints to logical coords
   // in the given orientation.
   bool decodeSwipe(touchtransform::Orientation orientation, int& sx, int& sy, int& ex, int& ey) const;
+#endif  // CP_TOUCH_UI
 
   // Left/Right swap when the front-button strip runs bottom-to-top on screen, so
   // "previous" always sits above "next". The side buttons (Up/Down and their
@@ -419,3 +425,39 @@ class MappedInputManager {
 
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;
 };
+
+#if !CP_TOUCH_UI && !defined(CPPCHECK_ANALYSIS)
+// No digitiser (CP_TOUCH_UI 0: the X3 and X4). Every touch query is answered here, in the
+// caller's own TU, rather than by an out-of-line function that returns false at run time: the
+// build has no LTO, so a call the compiler cannot see into kept every tap, swipe and drag
+// handler behind it in the image. Seen through, the branch is dead and goes, and a handler
+// nothing else calls goes with it at link time. The Home key is no exception: the touch
+// controller reports it (BoardConfig's touch.hasHomeKey).
+//
+// cppcheck, which reads one board's build, sees only the declarations, so it checks both sides
+// of a caller's branch instead of calling one dead (as HalCapabilities::buildsInPsram).
+inline bool MappedInputManager::hasTouch() const { return false; }
+inline bool MappedInputManager::wasScreenTapped(int&, int&) const { return false; }
+inline bool MappedInputManager::wasScreenTappedIn(touchtransform::Orientation, int&, int&) const { return false; }
+inline bool MappedInputManager::peekScreenTapIn(touchtransform::Orientation, int&, int&) const { return false; }
+inline bool MappedInputManager::wasScreenTouchPressed(int&, int&) const { return false; }
+inline bool MappedInputManager::wasScreenTouchDown(int&, int&) const { return false; }
+inline bool MappedInputManager::peekScreenLongPressIn(touchtransform::Orientation, int&, int&) const { return false; }
+inline bool MappedInputManager::peekScreenLongPress(int&, int&) const { return false; }
+inline bool MappedInputManager::isScreenTouchHeld(int&, int&) const { return false; }
+inline bool MappedInputManager::wasScreenTouchReleased() const { return false; }
+inline unsigned long MappedInputManager::lastTouchHeldMs() const { return 0; }
+inline MappedInputManager::RowTouch MappedInputManager::listTouch(int&) const { return RowTouch::None; }
+inline MappedInputManager::SwipeDir MappedInputManager::wasSwipe() const { return SwipeDir::None; }
+inline MappedInputManager::SwipeDir MappedInputManager::wasSwipeIn(touchtransform::Orientation) const {
+  return SwipeDir::None;
+}
+inline MappedInputManager::SwipeDir MappedInputManager::wasSwipeIn(touchtransform::Orientation, int&, int&) const {
+  return SwipeDir::None;
+}
+inline MappedInputManager::MultiTouch MappedInputManager::popMultiTouch(int&, int&) const { return MultiTouch::None; }
+inline bool MappedInputManager::wasHomeGesture() const { return false; }
+inline bool MappedInputManager::wasMenuGesture() const { return false; }
+inline bool MappedInputManager::wasLightPanelGesture() const { return false; }
+inline uint32_t MappedInputManager::lastTouchEventAtMs() const { return 0; }
+#endif  // !CP_TOUCH_UI

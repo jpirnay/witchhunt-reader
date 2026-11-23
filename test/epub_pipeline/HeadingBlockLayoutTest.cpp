@@ -32,6 +32,7 @@
 #include "Epub/Page.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
+#include "PipelineRunner.h"
 #include "StoredZipWriter.h"
 
 namespace fs = std::filesystem;
@@ -92,7 +93,7 @@ struct HeadingBlockLayoutFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = viewportWidth;
     params.viewportHeight = 800;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     params.embeddedStyle = true;
     params.paragraphAlignment = paragraphAlignment;
     params.hyphenationEnabled = hyphenation;
@@ -109,8 +110,12 @@ struct HeadingBlockLayoutFixture : testing::Test {
         if (el->getTag() != TAG_PageLine) continue;
         const TextBlock& block = *static_cast<const PageLine&>(*el).getBlock();
         if (block.wordCount() == 0) continue;
-        Line line{el->yPos, block.getRenderStyle().alignment,         block.getRenderStyle().fontSizeMultiplier,
-                  {},       static_cast<uint8_t>(block.wordStyle(0)), block.wordSizePct(0)};
+        Line line{el->yPos,
+                  block.getRenderStyle().alignment,
+                  pipeline_harness::scaleValue(block.getRenderStyle().fontSizeMultiplier),
+                  {},
+                  static_cast<uint8_t>(block.wordStyle(0)),
+                  block.wordSizePct(0)};
         for (uint16_t w = 0; w < block.wordCount(); ++w) {
           if (w > 0) line.text += ' ';
           line.text += block.wordText(w);

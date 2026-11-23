@@ -264,11 +264,11 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=18 s=0 z=100 t=6.
    W x=49 s=0 z=100 t=NESTING:
    W x=127 s=0 z=105 t=outer
-   W x=189 s=0 z=105 t=at
-   W x=222 s=0 z=105 t=one
-   W x=266 s=0 z=105 t=hundred
-   W x=346 s=0 z=105 t=five
-   W x=395 s=0 z=105 t=percent
+   W x=190 s=0 z=105 t=at
+   W x=223 s=0 z=105 t=one
+   W x=267 s=0 z=105 t=hundred
+   W x=347 s=0 z=105 t=five
+   W x=396 s=0 z=105 t=percent
   LINE y=25 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=94 t=inner
    W x=49 s=0 z=94 t=composes
@@ -283,8 +283,8 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
   LINE y=50 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=0 s=0 z=105 t=to
    W x=29 s=0 z=105 t=outer
-   W x=87 s=0 z=100 t=and
-   W x=124 s=0 z=100 t=normal.
+   W x=88 s=0 z=100 t=and
+   W x=125 s=0 z=100 t=normal.
   LINE y=75 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=7.
    W x=46 s=0 z=100 t=GRADIENT
@@ -424,12 +424,12 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=359 s=0 z=100 t=and
    W x=400 s=0 z=100 t=ten.
   LINE y=509 x=0 align=2 mult=1.060 hfid=0 words=7
-   W x=24 s=1 z=100 t=10.
-   W x=63 s=1 z=100 t=HEADING
-   W x=142 s=1 z=100 t=EDGE:
-   W x=206 s=1 z=100 t=one
-   W x=249 s=1 z=100 t=hundred
-   W x=333 s=1 z=100 t=six
+   W x=23 s=1 z=100 t=10.
+   W x=62 s=1 z=100 t=HEADING
+   W x=141 s=1 z=100 t=EDGE:
+   W x=205 s=1 z=100 t=one
+   W x=248 s=1 z=100 t=hundred
+   W x=332 s=1 z=100 t=six
    W x=365 s=1 z=100 t=percent
   LINE y=534 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=18 s=0 z=100 t=A

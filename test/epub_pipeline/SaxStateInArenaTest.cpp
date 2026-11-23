@@ -51,7 +51,7 @@ struct SaxStateInArenaFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = 480;
     params.viewportHeight = 800;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     GfxRenderer renderer;
     Section section(epub, spine, renderer);
     section.clearCache();

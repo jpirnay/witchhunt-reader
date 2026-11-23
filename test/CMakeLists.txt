@@ -97,6 +97,9 @@ target_include_directories(crosspoint_test_common INTERFACE
   ${REPO_ROOT}/lib
   # Header-only: lib/ZipFile takes its registry's lock from it.
   ${REPO_ROOT}/lib/BssMutex
+  # For <TextScale.h>, which the settings, CSS and layout headers include; no other header there shares a name with a
+  # test's own or a shim.
+  ${REPO_ROOT}/lib/EpdFont
 )
 target_compile_options(crosspoint_test_common INTERFACE
   -Wall
@@ -217,6 +220,8 @@ add_subdirectory(opds_parser)
 add_subdirectory(obfuscation)
 add_subdirectory(tls_policy)
 add_subdirectory(clock_authority)
+add_subdirectory(clock_drift)
+add_subdirectory(decimal_format)
 add_subdirectory(opds_format_label)
 add_subdirectory(md_parser)
 add_subdirectory(epub_benchmark)
@@ -226,6 +231,11 @@ add_subdirectory(epub_css)
 add_subdirectory(epub_opf)
 add_subdirectory(boot_diag_ring)
 add_subdirectory(image_dimensions_guard)
+add_subdirectory(image_scale)
+add_subdirectory(text_scale)
+add_subdirectory(byte_size)
+add_subdirectory(fixed_decimal)
+add_subdirectory(progress_ppb)
 add_subdirectory(word_size_layout)
 add_subdirectory(text_block_range)
 add_subdirectory(token_boundary)
@@ -322,6 +332,7 @@ add_subdirectory(utf8_compose)
 add_subdirectory(utf8_lower)
 add_subdirectory(adaptive_tone)
 add_subdirectory(gray8_writer)
+add_subdirectory(gray_level_plan)
 add_subdirectory(image_polarity)
 add_subdirectory(dark_mode)
 add_subdirectory(reader_gray_canvas)
@@ -361,6 +372,7 @@ add_subdirectory(progress_comparison)
 add_subdirectory(kosync_progress_reply)
 # After kosync_progress_reply: links the ArduinoJson target it fetches.
 add_subdirectory(json_file)
+add_subdirectory(weather_units)
 add_subdirectory(library_index)
 add_subdirectory(xtc_parser)
 add_subdirectory(usb_link_debounce)
@@ -372,3 +384,4 @@ add_subdirectory(shaped_store)
 add_subdirectory(word_shape_cache)
 add_subdirectory(imu_motion)
 add_subdirectory(plugin_relay)
+add_subdirectory(plugin_events)

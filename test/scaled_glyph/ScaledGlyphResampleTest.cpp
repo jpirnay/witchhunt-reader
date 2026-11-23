@@ -40,9 +40,9 @@ Glyph glyphOf(const std::vector<std::string>& rows) {
 using Pixels = std::set<std::pair<int, int>>;
 
 // The destination pixels whose ink level is in `drawMask` (bit n: level n), shrunk to `scale`.
-Pixels shrink(const Glyph& g, const float scale, const uint8_t drawMask) {
-  const int dstW = static_cast<int>(g.w * scale + 0.5f);
-  const int dstH = static_cast<int>(g.h * scale + 0.5f);
+Pixels shrink(const Glyph& g, const TextScale scale, const uint8_t drawMask) {
+  const int dstW = scale.apply(g.w);
+  const int dstH = scale.apply(g.h);
   Pixels out;
   emitScaledGlyphPixels(g.bits.data(), true, g.w, g.h, dstW, dstH, scale, drawMask,
                         [&out](const int x, const int y) { out.insert({x, y}); });
@@ -59,7 +59,7 @@ TEST(ScaledGlyphShrink, AOnePixelStrokeSurvives) {
   // A crossbar on source row 4 of 12. At 0.75 point sampling reads rows 0, 1, 2, 3, 5, 6, 7, 9, 10: never 4 or 8.
   std::vector<std::string> rows(12, "00000000");
   rows[4] = "33333333";
-  const Pixels drawn = shrink(glyphOf(rows), 0.75f, kAnyInk);
+  const Pixels drawn = shrink(glyphOf(rows), TextScale::ratio(3, 4), kAnyInk);
   EXPECT_FALSE(drawn.empty()) << "the stroke vanished";
 }
 
@@ -67,8 +67,8 @@ TEST(ScaledGlyphShrink, AnEdgeAcrossAPixelIsGrey) {
   // A stem three pixels wide, shrunk to 0.75: destination columns 0 and 1 lie inside it, column 2 covers a quarter
   // of stem (source x 2.67 to 4), so it is a grey edge, not black and not missing.
   const Glyph stem = glyphOf(std::vector<std::string>(8, "33300000"));
-  const Pixels black = shrink(stem, 0.75f, kFullInk);
-  const Pixels grey = shrink(stem, 0.75f, kGreys);
+  const Pixels black = shrink(stem, TextScale::ratio(3, 4), kFullInk);
+  const Pixels grey = shrink(stem, TextScale::ratio(3, 4), kGreys);
   ASSERT_FALSE(black.empty());
   ASSERT_FALSE(grey.empty()) << "no anti-aliasing levels";
   for (const auto& [x, y] : black) EXPECT_LT(x, 2) << "black at column " << x;
@@ -100,12 +100,12 @@ TEST(ScaledGlyphResample, AGlyphKeyHasACacheKeyOfItsOwn) {
 // The cache's own match (GfxRenderer's find): an entry stored for 'A' never serves glyph 0x41 of the same font at the
 // same scale, size and drawMask, nor one stored for glyph 0x41 'A'.
 TEST(ScaledGlyphResample, AGlyphKeyAndACodePointNeverShareAnEntry) {
-  const int fontData = 0;                  // stands for one style's EpdFontData
-  constexpr uint32_t kScale = 0x3FC00000;  // 1.5f
+  const int fontData = 0;  // stands for one style's EpdFontData
+  constexpr TextScale kScale = TextScale::ratio(3, 2);
   const auto storedFor = [&](const ScaledGlyphKey& key) {
     ScaledGlyphEntry e{};
     e.fontData = &fontData;
-    e.scaleBits = kScale;
+    e.scaleRaw = kScale.raw();
     e.id = key.id;
     e.kind = key.kind;
     e.sel = 3;
@@ -125,7 +125,7 @@ TEST(ScaledGlyphResample, AGlyphKeyAndACodePointNeverShareAnEntry) {
   const ScaledGlyphEntry e = storedFor(letter);
   EXPECT_FALSE(scaledGlyphEntryMatches(e, &otherFont, letter, kScale, 3, 10, 12));
   EXPECT_FALSE(scaledGlyphEntryMatches(e, &fontData, scaledGlyphKeyOf('B'), kScale, 3, 10, 12));
-  EXPECT_FALSE(scaledGlyphEntryMatches(e, &fontData, letter, kScale + 1, 3, 10, 12));
+  EXPECT_FALSE(scaledGlyphEntryMatches(e, &fontData, letter, TextScale::fromRaw(kScale.raw() + 1), 3, 10, 12));
   EXPECT_FALSE(scaledGlyphEntryMatches(e, &fontData, letter, kScale, 1, 10, 12));
   EXPECT_FALSE(scaledGlyphEntryMatches(e, &fontData, letter, kScale, 3, 11, 12));
   EXPECT_FALSE(scaledGlyphEntryMatches(e, &fontData, letter, kScale, 3, 10, 13));

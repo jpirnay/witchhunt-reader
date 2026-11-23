@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <numeric>
@@ -267,10 +268,10 @@ TEST(AdaptiveToneEqualize, ReachesFullWhiteAtTheTop) {
 
 // --- quantizeGray4 ----------------------------------------------------------
 //
-// The quantizer's tuning is in its thresholds, not in the level spacing. Feeding error
-// diffusion a bunched spacing (the old 15/30/80/210) collapsed midtone images onto two
-// levels 130 apart and washed the covers out; these pin the separation of concerns so it
-// cannot be reintroduced by "tuning the quantizer".
+// The table is the panel's (HalCapabilities::imageGray4Levels(), copied into gray4tuning at boot). These
+// pin the one every board keeps until its panel is measured: X4-tuned thresholds over even feedback.
+// Guessed uneven feedback (the old 15/30/80/210) collapsed midtone covers onto two levels 130 apart, so a
+// panel gets uneven feedback only from its measured levels.
 
 TEST(Gray4Quantization, FeedbackValuesAreEvenlySpaced) {
   // `value` is the error-diffusion feedback term and must describe how far apart the levels are:
@@ -287,8 +288,8 @@ TEST(Gray4Quantization, FeedbackValuesAreEvenlySpaced) {
 }
 
 TEST(Gray4Quantization, KeepsItsBrighteningThresholds) {
-  // The X4 compensation lives here and only here: a pixel is promoted to a higher level than the
-  // even midpoints (43/128/213) would give it. Losing this is the near-black failure.
+  // The default table's compensation, first tuned for the X4: a pixel is promoted to a higher level
+  // than the even midpoints (43/128/213) would give it. Losing this is the near-black failure.
   EXPECT_EQ(quantizeGray4(100).index, 2);  // the even midpoints give 1
   for (int gray = 0; gray <= 255; gray++) {
     const int evenIndex = gray < 43 ? 0 : gray < 128 ? 1 : gray < 213 ? 2 : 3;
@@ -300,6 +301,26 @@ TEST(Gray4Quantization, IsMonotonic) {
   for (int gray = 1; gray <= 255; gray++) {
     EXPECT_GE(quantizeGray4(gray).index, quantizeGray4(gray - 1).index) << "gray=" << gray;
   }
+}
+
+TEST(Gray4Quantization, FollowsThePanelsTable) {
+  // A measured panel's table replaces both halves: where a level starts, and what the diffuser is told it shows.
+  const uint8_t savedT[3] = {gray4tuning::thresholds[0], gray4tuning::thresholds[1], gray4tuning::thresholds[2]};
+  const uint8_t savedF[4] = {gray4tuning::feedback[0], gray4tuning::feedback[1], gray4tuning::feedback[2],
+                             gray4tuning::feedback[3]};
+  const uint8_t t[3] = {27, 68, 169};
+  const uint8_t f[4] = {0, 53, 82, 255};
+  std::copy(t, t + 3, gray4tuning::thresholds);
+  std::copy(f, f + 4, gray4tuning::feedback);
+  const int expected[][3] = {{26, 0, 0}, {27, 1, 53}, {67, 1, 53}, {68, 2, 82}, {168, 2, 82}, {169, 3, 255}};
+  for (const auto& e : expected) {
+    const QuantizedGray4 q = quantizeGray4(e[0]);
+    EXPECT_EQ(q.index, e[1]) << "gray=" << e[0];
+    EXPECT_EQ(q.value, e[2]) << "gray=" << e[0];
+  }
+  std::copy(savedT, savedT + 3, gray4tuning::thresholds);
+  std::copy(savedF, savedF + 4, gray4tuning::feedback);
+  EXPECT_EQ(quantizeGray4(100).index, 2);  // the default table is back for the tests after this one
 }
 
 }  // namespace

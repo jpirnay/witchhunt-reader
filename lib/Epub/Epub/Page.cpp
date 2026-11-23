@@ -1,6 +1,7 @@
 #include "Page.h"
 
 #include <BufferedFileIO.h>
+#include <BuildArena.h>
 #include <CooperativeAbort.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
@@ -12,6 +13,11 @@
 #include <optional>
 
 #include "PageFrameScope.h"
+
+// 32-bit layout: the vtable pointer, xPos and yPos; a PageLine adds its TextBlock's pointer. Where a PageLine was built
+// (PageLine::objectInArena) rides in its TextBlock, so a page loaded for reading pays nothing for 9c.
+static_assert(sizeof(void*) != 4 || sizeof(PageElement) == 8, "every element of a resident page has this base");
+static_assert(sizeof(void*) != 4 || sizeof(PageLine) == 12, "a resident page holds ~28 PageLines");
 
 namespace {
 
@@ -28,6 +34,18 @@ bool refusalEndsWarm(const ImageBlock& image, const uint32_t shortBefore, const 
 }
 
 }  // namespace
+
+std::unique_ptr<PageLine> PageLine::make(std::unique_ptr<TextBlock> block, const int16_t xPos, const int16_t yPos,
+                                         BuildArena* const arena, TextBlock::ArenaRoom* const room) {
+  void* const at = block != nullptr && arena != nullptr && room != nullptr
+                       ? room->placeObject(*arena, sizeof(PageLine), alignof(PageLine))
+                       : nullptr;
+  if (at != nullptr) {
+    block->setHolderInArena();
+    return std::unique_ptr<PageLine>(new (at) PageLine(std::move(block), xPos, yPos));
+  }
+  return makeUniqueNoThrow<PageLine>(std::move(block), xPos, yPos);
+}
 
 void PageLine::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
   block->render(renderer, fontId, xPos + xOffset, yPos + yOffset);

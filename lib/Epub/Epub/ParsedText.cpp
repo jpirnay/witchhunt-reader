@@ -269,13 +269,13 @@ void stripSoftHyphensInPlace(std::string& word) {
 // don't inflate inter-word spacing.
 int textAdvance(const GfxRenderer& renderer, const int fontId, const char* text, const EpdFontFamily::Style style,
                 const bool vertical) {
-  return vertical ? verticalTextAdvance(renderer, fontId, text, style, 1.0f)
+  return vertical ? verticalTextAdvance(renderer, fontId, text, style, TextScale())
                   : renderer.getTextAdvanceX(fontId, text, style);
 }
 
-uint16_t scaledWidth(const int raw, const float scale) {
-  if (scale == 1.0f) return static_cast<uint16_t>(raw);
-  return static_cast<uint16_t>(raw * scale + 0.5f);
+uint16_t scaledWidth(const int raw, const TextScale scale) {
+  if (scale.isOne()) return static_cast<uint16_t>(raw);
+  return static_cast<uint16_t>(scale.apply(raw));
 }
 
 // Whether `text` is one or more ASCII spaces and nothing else: a no-break space's token, or a run of kept spaces.
@@ -287,7 +287,7 @@ bool isSpaceRun(const std::string_view text) {
 // copied. A lone space is the font's space width, and a run of kept spaces that many of them, so a run of four is
 // exactly four word spaces wide on every line.
 uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const char* text,
-                          const EpdFontFamily::Style style, const float scale, const bool vertical) {
+                          const EpdFontFamily::Style style, const TextScale scale, const bool vertical) {
   if (text[0] == ' ' && isSpaceRun(text)) {
     return scaledWidth(static_cast<int>(strlen(text)) * renderer.getSpaceWidth(fontId, style), scale);
   }
@@ -299,7 +299,7 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const c
 // prefix).
 uint16_t measureWordPrefixWidth(const GfxRenderer& renderer, const int fontId, const std::string& word,
                                 const size_t bytes, const EpdFontFamily::Style style, const bool appendHyphen,
-                                const float scale, const bool vertical, std::string& scratch) {
+                                const TextScale scale, const bool vertical, std::string& scratch) {
   scratch.assign(word, 0, bytes);
   const bool hasSoftHyphen = containsSoftHyphen(scratch);
   if (!hasSoftHyphen && !appendHyphen)
@@ -311,7 +311,7 @@ uint16_t measureWordPrefixWidth(const GfxRenderer& renderer, const int fontId, c
 
 // Returns the advance width for a word while ignoring soft hyphen glyphs and optionally appending a visible hyphen.
 uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const std::string& word,
-                          const EpdFontFamily::Style style, const bool appendHyphen = false, const float scale = 1.0f,
+                          const EpdFontFamily::Style style, const bool appendHyphen = false, const TextScale scale = {},
                           const bool vertical = false) {
   if (!containsSoftHyphen(word) && !appendHyphen) {
     return measureWordWidth(renderer, fontId, word.c_str(), style, scale, vertical);
@@ -345,9 +345,10 @@ void dropUndrawn(std::string& text) {
 // glyph run by its records' pen (glyphRunWidth), any other piece as its code points are measured today, a Text piece
 // of a paragraph that needs bidi (`bidi`) without the controls and joiners its line does not draw. `scratch` takes the
 // piece's bytes, NUL-terminated.
-uint16_t measurePiece(const GfxRenderer& renderer, const int font, const EpdFontFamily::Style style, const float scale,
-                      const bool vertical, const ShapedStore& store, const ShapedStore::Piece& piece,
-                      const std::string_view text, const bool bidi, std::string& scratch) {
+uint16_t measurePiece(const GfxRenderer& renderer, const int font, const EpdFontFamily::Style style,
+                      const TextScale scale, const bool vertical, const ShapedStore& store,
+                      const ShapedStore::Piece& piece, const std::string_view text, const bool bidi,
+                      std::string& scratch) {
   if (piece.kind == IndicShaper::PieceKind::Glyphs) {
     return clampedWidth(renderer.glyphRunWidth(font, store.glyphs(piece), scale));
   }
@@ -536,7 +537,7 @@ bool combineRequestedFor(const uint8_t mode, const std::string_view token) {
 // The em of CJK text in this face and size: the advance of 一. 0 when the face has no 一 of its own: a Latin font
 // draws CJK characters as its replacement glyph, whose advance says nothing about CJK widths, so no mark is taken
 // for full-width punctuation and no grid is made from it.
-int cjkEm(const GfxRenderer& renderer, const int fontId, const EpdFontFamily::Style style, const float scale) {
+int cjkEm(const GfxRenderer& renderer, const int fontId, const EpdFontFamily::Style style, const TextScale scale) {
   if (!renderer.hasGlyph(fontId, 0x4E00, style)) return 0;
   return measureWordWidth(renderer, fontId, "\xE4\xB8\x80", style, scale, false);  // 一
 }
@@ -953,7 +954,7 @@ bool ParsedText::foldUniformWordSizes() {
   }
   if (first == DEFAULT_WORD_SIZE_PCT) return false;  // all-100% — nothing to fold
 
-  blockStyle.fontSizeMultiplier *= first / 100.0f;
+  blockStyle.fontSizeMultiplier = blockStyle.fontSizeMultiplier * TextScale::percent(first);
   for (TextBlock::WordSize& sz : wordSizes) sz.pct = DEFAULT_WORD_SIZE_PCT;
   return true;
 }
@@ -1297,7 +1298,7 @@ ShapingFace* ParsedText::shapingFaceFor(const GfxRenderer& renderer, const int f
   if (refused) latchShapingDegraded();
   if (face == nullptr) return nullptr;
   // Records are in drawn pixels: the word is shaped at the size it is drawn at.
-  *drawnPpem = static_cast<uint32_t>(static_cast<float>(ppem) * renderer.fontBaseScale(font) * wordScale(i) + 0.5f);
+  *drawnPpem = static_cast<uint32_t>((renderer.fontBaseScale(font) * wordScale(i)).apply(static_cast<int>(ppem)));
   return face;
 }
 
@@ -1314,8 +1315,8 @@ uint32_t ParsedText::shapeKey(const GfxRenderer& renderer, const int fontId, con
   key = mixKey(key, static_cast<uint8_t>(wordStyles[i]));
   key = mixKey(key, wordSizes[i].pct);
   key = mixKey(key, wordSizes[i].fontSlot);
-  key = mixKey(key, wordScale(i));
-  key = mixKey(key, renderer.fontBaseScale(font));
+  key = mixKey(key, wordScale(i).raw());
+  key = mixKey(key, renderer.fontBaseScale(font).raw());
   key = mixKey(key, ppem);
   key = mixKey(key, static_cast<uint8_t>((face ? 1 : 0) | (vertical_ ? 2 : 0)));
   return key;
@@ -2233,13 +2234,13 @@ bool ParsedText::fitsCombined(const GfxRenderer& renderer, const int fontId, con
   const int font = wordFontId(i, fontId);
   const int across = measureWordWidth(renderer, font, words[i], wordStyles[i], false, wordScale(i));
   const int em = columnEm(renderer, font, wordStyles[i], wordScale(i));
-  return em > 0 && static_cast<float>(across) * kMinCombineScale <= static_cast<float>(em);
+  return em > 0 && kMinCombineScale.apply(across) <= em;
 }
 
 int ParsedText::rubyWidth(const GfxRenderer& renderer, const int fontId, const size_t leader,
                           const std::string& text) const {
   return measureWordWidth(renderer, wordFontId(leader, fontId), text, EpdFontFamily::REGULAR, false,
-                          0.5f * wordScale(leader));
+                          TextScale::ratio(1, 2) * wordScale(leader));
 }
 
 // Ruby widths after crosspoint-reader PR #2665 ("feat(epub): native <ruby> support for Chinese, Japanese", Phạm Bình
@@ -2346,7 +2347,7 @@ void ParsedText::applyPunctuationWidths(const GfxRenderer& renderer, const int f
   // longer pass.
   int emFont = -1;
   EpdFontFamily::Style emStyle = EpdFontFamily::REGULAR;
-  float emScale = 0.0f;
+  TextScale emScale = TextScale::fromRaw(0);
   int em = 0;
   const auto fullWidth = [&](const size_t i) {
     const EpdFontFamily::Style style = static_cast<EpdFontFamily::Style>(wordStyles[i] & EpdFontFamily::BOLD_ITALIC);
@@ -2662,7 +2663,7 @@ void ParsedText::applyParagraphIndent(const GfxRenderer& renderer, const int fon
   // One em in pixels: the font's ascender at the block's size, the typographic convention for a
   // paragraph indent. A pixel indent rather than an injected U+2003 (em space), which caused
   // glyph-miss overhead on every page when the active font doesn't contain that codepoint.
-  const int oneEm = static_cast<int>(renderer.getFontAscenderSize(fontId) * blockStyle.fontSizeMultiplier + 0.5f);
+  const int oneEm = blockStyle.fontSizeMultiplier.apply(renderer.getFontAscenderSize(fontId));
   const ResolvedIndent indent = resolveParagraphIndent(paragraphIndent_, in, oneEm);
   blockStyle.textIndent = indent.px;
   blockStyle.textIndentDefined = indent.defined;
@@ -3032,7 +3033,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 
   const std::string& word = words[wordIndex];
   const auto style = wordStyles[wordIndex];
-  const float scale = wordScale(wordIndex);
+  const TextScale scale = wordScale(wordIndex);
   const int font = wordFontId(wordIndex, fontId);
   // A word this pass shapes is measured as each part would be shaped. Only upstream's fallback breaks, between
   // syllables or Arabic clusters, and Myanmar's syllable breaks reach one in practice: no language's patterns cut
@@ -3545,7 +3546,7 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
     const BidiLine::Piece& piece = pieces[v];
     if (piece.gapBefore == BidiLine::Gap::Space) {
       const size_t j = spaceToken(v);
-      return static_cast<int>(spaceBefore(renderer, fontId, j) * wordScale(spaceSource(fontId, j)) + 0.5f);
+      return wordScale(spaceSource(fontId, j)).apply(spaceBefore(renderer, fontId, j));
     }
     if (piece.gapBefore != BidiLine::Gap::Glued || form(v - 1).empty() || form(v).empty()) return 0;
     const size_t left = first + pieces[v - 1].token;
@@ -3555,7 +3556,7 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
     if (font != wordFontId(right, fontId)) return 0;
     const int kern =
         renderer.getKerning(font, lastCodepoint(form(v - 1)), firstCodepoint(form(v).data()), wordStyles[left]);
-    return static_cast<int>(kern * wordScale(left) + 0.5f);
+    return wordScale(left).apply(kern);
   };
   // A word space stretches when the line is justified, unless closing punctuation follows it, as on the ordinary path;
   // and so does a piece drawn as a space (a no-break space), between two pieces: at an end of the line its share would
@@ -3953,8 +3954,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
       if (TokenBoundary::hasSpace(boundary)) {
         // Inter-word gaps scale with the effective size of the word whose space it is (spaceSource).
         const size_t j = lastBreakAt + wordIdx;
-        totalNaturalGaps +=
-            static_cast<int>(spaceBefore(renderer, fontId, j) * wordScale(spaceSource(fontId, j)) + 0.5f);
+        totalNaturalGaps += wordScale(spaceSource(fontId, j)).apply(spaceBefore(renderer, fontId, j));
       } else {
         // The CJK-Latin gap is already scaled to its CJK side.
         const int gap = cjkLatinGapBefore(renderer, fontId, lastBreakAt + wordIdx);
@@ -3965,8 +3965,8 @@ ParsedText::LineProcessResult ParsedText::extractLine(
       // Non-breaking space tokens are visible spaces: count them as justifiable gaps so justifyExtra reaches them too.
       if (isStretchableSpace(wordIdx)) actualGapCount++;
       // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-      totalNaturalGaps += static_cast<int>(
-          kernBefore(renderer, fontId, lastBreakAt + wordIdx) * wordScale(lastBreakAt + wordIdx - 1) + 0.5f);
+      totalNaturalGaps +=
+          wordScale(lastBreakAt + wordIdx - 1).apply(kernBefore(renderer, fontId, lastBreakAt + wordIdx));
     }
   }
 
@@ -4121,8 +4121,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     if (nextIsContinuation) {
       int advance = box;
       // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-      advance += static_cast<int>(
-          kernBefore(renderer, fontId, lastBreakAt + wordIdx + 1) * wordScale(lastBreakAt + wordIdx) + 0.5f);
+      advance += wordScale(lastBreakAt + wordIdx).apply(kernBefore(renderer, fontId, lastBreakAt + wordIdx + 1));
       // Non-breaking space tokens are stretchable — expand them during justification like normal spaces.
       if (isStretchableSpace(wordIdx) && blockStyle.alignment == CssTextAlign::Justify && !isLastLine) {
         advance += gapExtra();
@@ -4134,7 +4133,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
         // A CJK gap has no natural width but the CJK-Latin gap; it takes the justification share below.
         if (TokenBoundary::hasSpace(boundaries[lastBreakAt + wordIdx + 1])) {
           const size_t j = lastBreakAt + wordIdx + 1;
-          gap = static_cast<int>(spaceBefore(renderer, fontId, j) * wordScale(spaceSource(fontId, j)) + 0.5f);
+          gap = wordScale(spaceSource(fontId, j)).apply(spaceBefore(renderer, fontId, j));
         } else {
           gap = gapShrinkTotal > 0 ? cjkLatinGapBefore(renderer, fontId, lastBreakAt + wordIdx + 1) : 0;
           gap -= gapGive(wordIdx + 1, gap);

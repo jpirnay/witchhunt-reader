@@ -88,6 +88,7 @@ std::vector<const char*> existingExtensions(const std::string& bookPath) {
       {kCoverExtensions, sizeof(kCoverExtensions) / sizeof(kCoverExtensions[0])},
       {kMetadataExtensions, sizeof(kMetadataExtensions) / sizeof(kMetadataExtensions[0])},
       {kKeyExtensions, sizeof(kKeyExtensions) / sizeof(kKeyExtensions[0])},
+      {kLicenseExtensions, sizeof(kLicenseExtensions) / sizeof(kLicenseExtensions[0])},
   };
   // Small and bounded by the tables above; reserve once rather than grow.
   size_t total = 0;

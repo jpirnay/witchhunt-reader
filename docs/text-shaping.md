@@ -263,6 +263,10 @@ shaped-script book for the X4's in-place gate.
     `CONFIG_ESP32S3_INSTRUCTION_CACHE_SIZE` in the prebuilt core), beside a 32 KB data cache for the font reads and
     PSRAM, from 80 MHz DIO flash on the Murphy and the X4 Pro, with the core at 240 MHz. Its IRAM comes out of internal
     RAM that allocations over 4 KB leave alone (they go to PSRAM). Not yet measured on an S3.
+- **Anchors in integer maths** (deviation 22, `Scale::emExactX`). HarfBuzz scales a GPOS anchor in float
+  (`em_fscale_x`); the C3 has no FPU. Here an anchor stays exact, in output units times the face's units per em, and
+  only the difference `hbRound` takes is rounded, half up. It differs from HarfBuzz's float only where that lands an
+  exact half on its other side.
 
 ## The word cache
 

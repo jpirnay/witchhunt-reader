@@ -621,6 +621,20 @@ bool HalDisplay::displayLabFrame(const uint8_t* bw, const uint8_t* red, const ui
   return einkDisplay.displayLabFrame(bw, red, lut);
 }
 
+bool HalDisplay::setLabRegisters(const uint8_t* records, const size_t len) {
+  return einkDisplay.setLabRegisters(records, len);
+}
+
+bool HalDisplay::setGray16Calibration(const uint8_t black[3], const uint8_t white[3], const uint8_t erase,
+                                      const uint8_t (*paths)[3]) {
+  // The driver checks new doses against the paths in force and new paths against the doses in force, so a change of
+  // both could be refused for a mix of old and new. Every level undriven first fits any doses.
+  static constexpr uint8_t kUndriven[16][3] = {};
+  HalSpiBus::Lock spiLock;  // a 16-level image on the glass gives its drive back first: refreshes
+  return einkDisplay.setGray16Levels(kUndriven) && einkDisplay.setGray16Passes(black, white, erase) &&
+         einkDisplay.setGray16Levels(paths);
+}
+
 bool HalDisplay::supportsAbsoluteGrayPlanes() const {
   return einkDisplay.grayscaleCapabilities(freeink::GrayscaleMode::Absolute).supported();
 }
@@ -680,6 +694,21 @@ void HalDisplay::displayGray8Canvas(RefreshMode refreshMode, bool turnOffScreen)
   // for. See the note on displayGrayscaleFrame().
   lastRefreshMode = RefreshMode::FULL_REFRESH;
   lastDisplayModeByte = refreshModeToByte(RefreshMode::FULL_REFRESH);
+}
+
+const gray_levels::Plan* HalDisplay::grayLevelPlan() const { return nullptr; }
+
+bool HalDisplay::displayGrayLevelBase(const uint8_t* frame, RefreshMode refreshMode) {
+  (void)frame;
+  (void)refreshMode;
+  LOG_ERR("DISP", "displayGrayLevelBase: this panel has no gray-level plan");
+  return false;
+}
+
+bool HalDisplay::displayGrayLevelPass(const uint8_t pass, const bool turnOffScreen) {
+  (void)turnOffScreen;
+  LOG_ERR("DISP", "displayGrayLevelPass %u: this panel has no gray-level plan", static_cast<unsigned>(pass));
+  return false;
 }
 
 void HalDisplay::displayGrayBuffer(bool turnOffScreen) {

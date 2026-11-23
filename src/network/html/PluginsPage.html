@@ -330,8 +330,7 @@
         }
         const what = PluginCatalog.describe(manifest);
         if (!what.catalog) {
-          setStatus('Cannot open ' + title + ': ' + (what.reason ||
-            'it has no catalog; its part on the device (' + (what.events ? 'events' : 'screens') + ') does not run here yet') + '.', 'err');
+          setStatus('Cannot open ' + title + ': ' + (what.reason || 'it has no catalog; ' + deviceClause(what)) + '.', 'err');
           return;
         }
         setStatus('', '');
@@ -474,15 +473,19 @@
       // What of an entry runs here (communityStatus()) is judged from the catalog and the entry's device.json,
       // which the browser reads from GitHub too: its web part (plugin.js) runs on this firmware's plugin host,
       // which speaks upstream's API; a device.json catalog opens on this page (js/plugin-catalog.js) unless
-      // it is XML or needs a sign-in; device events do not run yet, nor does anything needing a capability
-      // in compatibility.requires that this firmware lacks.
+      // it is XML or needs a sign-in; its device events go out from the reader, but for book.downloaded and handlers
+      // with require_meta; nothing needing a capability in compatibility.requires that this firmware lacks runs.
       const COMMUNITY_CATALOG_URL =
         'https://raw.githubusercontent.com/crosspoint-reader/crosspoint-plugin-hub/main/catalog.json';
       // Plugin stores, which install plugins on the device: this page is the store here.
       const COMMUNITY_HIDDEN = ['pluginhub', 'plugin-store'];
       // Known not to run, for a reason the catalog does not state.
-      const COMMUNITY_KNOWN = {
-        'protected-content': 'it needs DRM support (api.crypto and book keys), which this firmware does not have'
+      const COMMUNITY_KNOWN = {};
+      // Known to run in part, for a reason the catalog does not state. protected-content (Adobe loans) was run on a
+      // Murphy up to its account sign-in (2026-11-20): activation and fulfilment need a real account.
+      const COMMUNITY_PARTIAL = {
+        'protected-content': 'Its web page runs here up to the account sign-in; activating the reader and fetching ' +
+          'loans have not been tried with a real account yet'
       };
       let communityCatalog = null;
       // {"<entry>": PluginCatalog.describe() of its device.json, or null when it could not be read}.
@@ -494,6 +497,7 @@
         const files = Array.isArray(c.files) ? c.files : [];
         const compat = c.compatibility || {};
         if (COMMUNITY_KNOWN[c.name]) return { level: 'no', text: 'Does not run here: ' + COMMUNITY_KNOWN[c.name] };
+        if (COMMUNITY_PARTIAL[c.name]) return { level: 'partial', text: COMMUNITY_PARTIAL[c.name] };
         if (compat.firmware_family && compat.firmware_family !== 'crosspoint') {
           return { level: 'no', text: 'Made for another firmware (' + compat.firmware_family + ')' };
         }
@@ -509,14 +513,30 @@
           return { level: web ? 'partial' : 'no', text: (web ? 'Its web page runs here; its' : 'Its') +
                    ' part on the device could not be checked' };
         }
-        if (device.catalog) {
-          const runs = web ? 'Its web page and its catalog run here' : 'Its catalog runs here, on this page';
-          return device.events ? { level: 'partial', text: runs + '; its events on the device do not yet' }
-            : { level: 'yes', text: 'Runs here: ' + (web ? 'a card, and a catalog you open on this page' : 'a catalog you open on this page') };
+        const runs = [];
+        if (web) runs.push(device.catalog ? 'a card' : 'its web page');
+        if (device.catalog) runs.push('a catalog you open on this page');
+        if (device.events.run.length) runs.push('its events (' + device.events.run.join(', ') + ') sent by the reader');
+        const notHere = [];
+        if (!device.catalog && device.reason) notHere.push(device.reason);
+        if (device.events.wait.length) notHere.push('its events ' + device.events.wait.join(', ') + ' are not sent yet');
+        if (!device.catalog && !device.reason && !device.events.run.length && !device.events.wait.length) {
+          notHere.push('its part on the device (screens) does not run here yet');
         }
-        const notHere = device.reason || 'its part on the device (' + (device.events ? 'events' : 'screens') + ') does not run here yet';
-        return web ? { level: 'partial', text: 'Its web page runs here; ' + notHere }
-          : { level: 'no', text: 'Does not run here: ' + notHere };
+        if (!runs.length) return { level: 'no', text: 'Does not run here: ' + notHere.join('; ') };
+        const ran = runs.length > 1 ? runs.slice(0, -1).join(', ') + ', and ' + runs[runs.length - 1] : runs[0];
+        return notHere.length ? { level: 'partial', text: 'Runs here: ' + ran + '; ' + notHere.join('; ') }
+          : { level: 'yes', text: 'Runs here: ' + ran };
+      }
+
+      // Why a device.json without a catalog that opens is still worth having, or not: its events, or the part of it
+      // this firmware does not run.
+      function deviceClause(what) {
+        const ev = what.events;
+        if (ev.run.length && !ev.wait.length) return 'its events (' + ev.run.join(', ') + ') are sent by the reader';
+        if (ev.run.length) return 'of its events, the reader sends ' + ev.run.join(', ') + ', not yet ' + ev.wait.join(', ');
+        if (ev.wait.length) return 'its events (' + ev.wait.join(', ') + ') are not sent yet';
+        return 'its part on the device (screens) does not run here yet';
       }
 
       // Reads each entry's device.json from where the entry's files are, all at once: that is GitHub, not the

@@ -578,9 +578,9 @@ class ChapterHtmlSlimParser final : public Print {
   // used for left-floated inline images.
   // CSS initial-letter asks for one in so many lines, on such a span (float and size or not) or on the paragraph's
   // ::first-letter: the letter is then as tall as the lines it spans, whatever font-size the book gives it.
-  static constexpr float kDropCapMinMultiplier = 1.95f;  // spans below this render inline
-  static constexpr float kDropCapMaxMultiplier = 4.0f;   // ≈3 text lines tall
-  static constexpr int16_t kDropCapGapPx = 6;            // horizontal gap between cap and text
+  static constexpr TextScale kDropCapMinMultiplier = TextScale::percent(195);  // spans below this render inline
+  static constexpr TextScale kDropCapMaxMultiplier = TextScale::ratio(4, 1);   // ≈3 text lines tall
+  static constexpr int16_t kDropCapGapPx = 6;                                  // horizontal gap between cap and text
   // The most lines an initial-letter cap spans (crosspoint-reader's MAX_INITIAL_LETTER too), and fewer where the cap
   // would take more than half the column's width.
   static constexpr uint8_t kMaxInitialLetterLines = 6;
@@ -593,7 +593,7 @@ class ChapterHtmlSlimParser final : public Print {
     uint8_t sink = 0;
     // Captured from a ::first-letter rule: the capture ends after the first letter, and the punctuation before it.
     bool firstLetter = false;
-    float multiplier = 1.0f;  // composed font-size multiplier relative to the body font
+    TextScale multiplier;  // composed font-size multiplier relative to the body font
     EpdFontFamily::Style style = EpdFontFamily::REGULAR;
     uint32_t family = 0;  // CssStyle::fontFamily of the cap, while the book has other families (fontFamilies_)
     char text[16] = {};   // drop caps are 1 glyph, occasionally with a leading quote
@@ -620,7 +620,8 @@ class ChapterHtmlSlimParser final : public Print {
   int fontId;
   // Default heading multipliers (index 0=h1, 1=h2, 2=h3) applied when a heading has no
   // explicit CSS font-size; resolveBlockFont() then snaps them to the size ladder.
-  static constexpr float kHeadingMultiplier[3] = {1.6f, 1.4f, 1.2f};
+  static constexpr TextScale kHeadingMultiplier[3] = {TextScale::percent(160), TextScale::percent(140),
+                                                      TextScale::percent(120)};
   // Sibling-size ladder of the body font (see FontSizeLadder). resolveBlockFont() snaps a
   // block's effective font size to the nearest real font on it; empty = scale-only fallback.
   FontSizeLadder fontSizeLadder_;
@@ -650,22 +651,22 @@ class ChapterHtmlSlimParser final : public Print {
   // A word in another family than its block's has the font slot of its family (BlockFontFamilies::slotOf), whose
   // face resolveBlockFont puts at the block's size: the block's size before it was resolved, and its own slot, kept
   // for the words a block laid out in parts takes after its first part. 0: currentTextBlock is not resolved yet.
-  float wordFontsSize_ = 0;
+  TextScale wordFontsSize_ = TextScale::fromRaw(0);
   uint8_t blockFontSlot_ = 0;
   // EPUBs often set their running prose to a nominal CSS size such as 10pt,
   // 87%, or 0.875em. The reader's selected font size is our body size. Root
   // (html/body) sizes are normalized as inherited context; the main-text
   // baseline comes from tag-level paragraph/list rules so prose maps to 1.0
   // and headings/notes remain proportional to that prose size.
-  float rootFontSizeBaseline_ = 1.0f;
+  TextScale rootFontSizeBaseline_;
   bool hasRootFontSizeBaseline_ = false;
-  float mainTextFontSizeBaseline_ = 1.0f;
+  TextScale mainTextFontSizeBaseline_;
   bool hasMainTextFontSizeBaseline_ = false;
-  float lineCompression;
+  TextScale lineCompression;
   // Book's style line spacing (setBookLineHeight): the compression of one em of line-height, and the least a block
   // takes. bookPerEm_ 0: off.
-  float bookPerEm_ = 0.0f;
-  float bookFloor_ = 0.0f;
+  TextScale bookPerEm_ = TextScale::fromRaw(0);
+  TextScale bookFloor_ = TextScale::fromRaw(0);
   bool extraParagraphSpacing;
   uint8_t paragraphAlignment;
   uint16_t viewportWidth;
@@ -682,7 +683,7 @@ class ChapterHtmlSlimParser final : public Print {
   BodySize::Census* buildCensus_ = nullptr;
   // The book's body size as a factor (setBodySizePct): the sizes on the text's scale are taken relative to it
   // (normalizeFontSizeForElement). 1 when it is the reader's size, or normalization is off.
-  float bodyScale_ = 1.0f;
+  TextScale bodyScale_;
   const CssParser* cssParser;
   EpubImageManifest* imageManifest;
   bool embeddedStyle;
@@ -883,7 +884,7 @@ class ChapterHtmlSlimParser final : public Print {
   // Fold the insets of every enclosing block-level element into `style`, capping each side at
   // MAX_HORIZONTAL_INSET_EM so deep nesting cannot squeeze the text column away. Only those opened above `belowDepth`
   // (the elements around the one at that depth), when given.
-  void addAncestorInsets(BlockStyle& style, float emSize, int belowDepth = INT_MAX) const;
+  void addAncestorInsets(BlockStyle& style, int emSize, int belowDepth = INT_MAX) const;
 
   // Bottom spacing (margin-bottom, padding-bottom) of the block-level elements currently open. A
   // block element's style starts only its FIRST text block -- child blocks and <br> lines follow
@@ -1153,7 +1154,7 @@ class ChapterHtmlSlimParser final : public Print {
     int16_t depth = 0;
     CssWritingMode writingMode = CssWritingMode::Unset;
     CssDirection direction = CssDirection::Unset;
-    float lineHeightEm = 0.0f;  // 0: no line-height set
+    TextScale lineHeightEm = TextScale::fromRaw(0);  // 0: no line-height set
     CssWhiteSpace whiteSpace = CssWhiteSpace::Unset;
   };
   static constexpr uint8_t kMaxFlowEntries = 8;
@@ -1355,7 +1356,7 @@ class ChapterHtmlSlimParser final : public Print {
   // The outermost open <center>: every block inside it is centred (startElement).
   int centerDepth_ = INT_MAX;
   CssTextAlign headingAlignment_ = CssTextAlign::Center;
-  float headingFontSizeMultiplier_ = 1.0f;
+  TextScale headingFontSizeMultiplier_;
   void applyHeadingScope(BlockStyle& blockStyle, const CssStyle& cssStyle) const;
   // The <span> laid out as a block because the book styles it display:block (#388), and the
   // alignment and size of the block it interrupted: text after the span, still inside the same
@@ -1367,7 +1368,7 @@ class ChapterHtmlSlimParser final : public Print {
     CssTextAlign alignment = CssTextAlign::Justify;
     bool textAlignDefined = false;
     bool fontResolved = false;
-    float fontSizeMultiplier = 1.0f;
+    TextScale fontSizeMultiplier;
     int32_t headingFontId = 0;
   };
   BlockSpan blockSpan_;
@@ -1588,7 +1589,7 @@ class ChapterHtmlSlimParser final : public Print {
 
  public:
   explicit ChapterHtmlSlimParser(std::shared_ptr<Epub> epub, GfxRenderer& renderer, const int fontId,
-                                 const float lineCompression, const bool extraParagraphSpacing,
+                                 const TextScale lineCompression, const bool extraParagraphSpacing,
                                  const uint8_t paragraphAlignment, const uint16_t viewportWidth,
                                  const uint16_t viewportHeight, const bool hyphenationEnabled,
                                  const bool fontSizeNormalization, const bool bionicReadingEnabled,
@@ -1783,7 +1784,7 @@ class ChapterHtmlSlimParser final : public Print {
   bool isVertical() const { return vertical_; }
   // Book's style line spacing: a block's CSS line-height sets its pitch, a multiple of `emPx`, never below `floor`
   // (a compression on the font's line height). Off by default, and with a floor of 0.
-  void setBookLineHeight(float floor, uint16_t emPx);
+  void setBookLineHeight(TextScale floor, uint16_t emPx);
   // Widow and orphan control (keepTogetherBreak), on by default. Off, a page fills before a paragraph's lines go
   // over; a heading still keeps with its text. A vertical section ignores it and always fills.
   void setWidowOrphanControl(const bool on) { widowOrphanControl_ = on; }
@@ -1804,7 +1805,7 @@ class ChapterHtmlSlimParser final : public Print {
   // The face text in `family` (nullptr: the body's) is set in at `size`, a multiple of the body size: fontId 0 is the
   // body font, with the size left over as the residual. What resolveBlockFont does for a block, and for each family of
   // its words.
-  FontSizeLadder::Resolved resolveFamilyFont(const BlockFontFamilies::Family* family, float size);
+  FontSizeLadder::Resolved resolveFamilyFont(const BlockFontFamilies::Family* family, TextScale size);
   // Puts the face of font slot `slot` at the block's size into currentTextBlock (see wordFontsSize_).
   void resolveWordFont(uint8_t slot);
   // Effective fontId for a block: its heading font when set, else the body fontId.

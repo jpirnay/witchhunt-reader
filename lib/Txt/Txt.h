@@ -25,9 +25,9 @@ class Txt {
 
   // Cover image support - looks for cover.bmp/jpg/jpeg/png in same folder as txt file
   [[nodiscard]] std::string getCoverBmpPath() const;
-  // True when generateCoverBmp() would return immediately from its cache. Needs no load() —
-  // the path is derived in the constructor — so a caller can ask "is this going to be slow?"
-  // before committing to the work. See Epub::coverBmpReady.
+  // True when generateCoverBmp() would return immediately from its cache: the cover is there, whole, and not a 2-bit
+  // conversion from an earlier firmware. Needs no load() — the path is derived in the constructor — so a caller can
+  // ask "is this going to be slow?" before committing to the work. See Epub::coverBmpReady.
   [[nodiscard]] bool coverBmpReady() const;
   [[nodiscard]] bool generateCoverBmp() const;
   [[nodiscard]] std::string findCoverImage() const;

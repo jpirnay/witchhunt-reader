@@ -54,7 +54,7 @@ PageWords buildAndRead(const std::string& tag, const int viewportHeight, const b
   GfxRenderer renderer;
   Section::BuildParams p;
   p.fontId = 0;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.viewportWidth = 480;
   p.viewportHeight = static_cast<uint16_t>(viewportHeight);
   p.fontSizeNormalization = false;

@@ -898,6 +898,11 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
 
 // --- Stats ---
 
+// part / whole in tenths of a percent, rounded; 0 for nothing.
+static uint32_t tenthsOfPercent(const uint32_t part, const uint32_t whole) {
+  return whole == 0 ? 0 : static_cast<uint32_t>((static_cast<uint64_t>(part) * 1000 + whole / 2) / whole);
+}
+
 void FontDecompressor::resetStats() { stats = Stats{}; }
 
 void FontDecompressor::logStats(const char* label) {
@@ -912,14 +917,15 @@ void FontDecompressor::logStats(const char* label) {
   // "Page summary" (fontHits / fontMisses / fontHitPct / glyphCalls / glyphUs) or only meaningful
   // when something is wrong, and at 5-7 lines per pass and two passes per page they were the
   // single largest source of noise in a reading trace.
-  LOG_TRC("FDC", "[%s] hits=%lu misses=%lu (%.1f%% hit rate)", label, stats.cacheHits, stats.cacheMisses,
-          total > 0 ? 100.0f * stats.cacheHits / total : 0.0f);
+  const uint32_t hitTenths = tenthsOfPercent(stats.cacheHits, total);
+  LOG_TRC("FDC", "[%s] hits=%lu misses=%lu (%lu.%lu%% hit rate)", label, stats.cacheHits, stats.cacheMisses,
+          hitTenths / 10, hitTenths % 10);
   LOG_TRC("FDC", "[%s] decompress=%lums groups_accessed=%u", label, stats.decompressTimeMs, stats.uniqueGroupsAccessed);
   LOG_TRC("FDC", "[%s] mem: pageBuf=%lu pageGlyphs=%lu peakRing=%lu arenaTemps=%u", label, stats.pageBufferBytes,
           stats.pageGlyphsBytes, stats.peakTempBytes, stats.arenaTemps);
   if (stats.groupBytes > 0) {
-    LOG_TRC("FDC", "[%s] streamed %lu of %lu group bytes (%.0f%%)", label, stats.streamedBytes, stats.groupBytes,
-            100.0f * stats.streamedBytes / stats.groupBytes);
+    LOG_TRC("FDC", "[%s] streamed %lu of %lu group bytes (%lu%%)", label, stats.streamedBytes, stats.groupBytes,
+            (tenthsOfPercent(stats.streamedBytes, stats.groupBytes) + 5) / 10);
   }
 
   // getBitmap timing is the exception: a prewarm that missed its font sends every glyph down the
@@ -945,8 +951,9 @@ void FontDecompressor::logStats(const char* label) {
   const uint32_t lruTotal = stats.fallbackCacheHits + stats.fallbackCacheMisses;
   if (lruTotal > 0) {
     if (stats.fallbackCacheMisses > 0) {
-      LOG_DBG("FDC", "[%s] LRU Fallback: hits=%lu misses=%lu (%.1f%%)", label, stats.fallbackCacheHits,
-              stats.fallbackCacheMisses, 100.0f * stats.fallbackCacheHits / lruTotal);
+      const uint32_t lruTenths = tenthsOfPercent(stats.fallbackCacheHits, lruTotal);
+      LOG_DBG("FDC", "[%s] LRU Fallback: hits=%lu misses=%lu (%lu.%lu%%)", label, stats.fallbackCacheHits,
+              stats.fallbackCacheMisses, lruTenths / 10, lruTenths % 10);
     } else {
       LOG_TRC("FDC", "[%s] LRU Fallback: hits=%lu misses=0", label, stats.fallbackCacheHits);
     }

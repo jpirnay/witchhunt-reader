@@ -41,7 +41,7 @@ std::string freshCacheDir(const std::string& tag) {
 Section::BuildParams defaultParams() {
   Section::BuildParams p;
   p.fontId = 0;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.extraParagraphSpacing = false;
   p.paragraphAlignment = 0;
   p.viewportWidth = 480;
@@ -164,6 +164,15 @@ TEST(SectionAbort, ABuildThatMeasuredAGlyphWithoutMemoryIsNotKept) {
 // it is destroyed, which is after abortSectionBuild() has already run; on SdFat a flush into a removed file writes
 // through a freed cluster chain (cluster 0 when the tail crosses a cluster boundary, i.e. below the data region).
 TEST(SectionAbort, AnAbortedBuildDoesNotRemoveTheAnchorSpillWhileItIsStillOpen) {
+  // The shim records open paths only while a test asks (HalFile::trackOpenPaths); off again however this test ends.
+  struct TrackOpenPaths {
+    TrackOpenPaths() { HalFile::trackOpenPaths = true; }
+    ~TrackOpenPaths() {
+      HalFile::trackOpenPaths = false;
+      HalFile::openPaths.clear();
+      HalFile::removedWhileOpen.clear();
+    }
+  } const tracking;
   const std::string cacheDir = freshCacheDir("spill_removed_after_close");
   const std::string epubPath = std::string(CORPUS_DIR) + "/test_tables.epub";
 

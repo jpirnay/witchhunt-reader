@@ -17,7 +17,7 @@ namespace {
 // anchors at that text. Anything else is a stand-in (an ancestor, a sibling) and lands nowhere a page starts.
 std::optional<uint32_t> resolveXPath(const std::shared_ptr<Epub>& epub, const int spineIndex, const std::string& xpath,
                                      BuildArena* const scratch) {
-  float intra = 0.0f;
+  ProgressPpb intra;
   bool exact = false;
   uint32_t offset = 0;
   bool textPoint = false;

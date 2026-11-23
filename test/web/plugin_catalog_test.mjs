@@ -457,7 +457,16 @@ check(D({ browse: { url: 'u' }, token: { file: '/p/x/token.json' } }).catalog &&
       D({ browse: { url: 'u' }, config: { file: '/.app/config.json' } }).catalog,
       'token and config files may sit anywhere');
 const events = D({ events: { book_finished: {} } });
-check(!events.catalog && events.events && !events.reason, 'an events-only manifest has no catalog');
+check(!events.catalog && events.events.wait.join() === 'book_finished' && !events.reason, 'an events-only manifest has no catalog');
+const sent = D({ events: {
+  'reader.session': { request: { method: 'PUT', url: 'u' } },
+  'sleep.enter': { download: { url: 'u', dest: '/sleep.bmp' } },
+  'reader.exit': { require_meta: 'readeck_id', request: { url: 'u' } },
+  'reader.open': { download: { url: 'u' } },
+  'book.downloaded': { request: { url: 'u' } } } }).events;
+check(sent.run.join() === 'reader.session,sleep.enter' && sent.wait.join() === 'reader.exit,reader.open,book.downloaded',
+      'the reader sends a request or a download with a destination; not require_meta, a download with nowhere to go, ' +
+      'or book.downloaded (' + JSON.stringify(sent) + ')');
 
 // ---- Offset paging, lists, search and a download --------------------------------------------------------------------
 

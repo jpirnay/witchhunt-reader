@@ -2,6 +2,7 @@
 # cache. Pure host code, so they run in the default ctest sweep on any host.
 add_executable(CssParserTest
   CssParserTest.cpp
+  CssNumberTest.cpp
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
   ${REPO_ROOT}/lib/Epub/Epub/css/CssParser.cpp
   ${REPO_ROOT}/lib/FsHelpers/FsHelpers.cpp

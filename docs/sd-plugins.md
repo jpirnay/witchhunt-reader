@@ -20,14 +20,18 @@ or changing a plugin never needs a firmware build.
 > upstream, the device reaches only the hosts a plugin may reach: those its
 > manifest lists, or that you approved when it asked. Upstream's on-device catalog
 > screens (`device.json`) run in the browser here, on the Plugins page. Its crypto
-> endpoint, job queue, device events and content-protection work are not here —
+> endpoint (`api.crypto`) and its device events are here, the events from
+> #3114 and #4200 (Arthur Tazhitdinov) without `book.downloaded` so far (see
+> [Events](#events-the-reader-sends-a-plugins-requests)); its job queue is not —
 > see [Trust](#trust) and [Reaching the internet](#reaching-the-internet-allowedhosts-and-approvals)
 > below.
 
-Plugins extend the **web interface**, not the reader. Nothing runs on the
-device: the firmware only enumerates the folders and serves their bytes, and the
+Plugins extend the **web interface**, not the reader. No plugin code runs on the
+device: the firmware enumerates the folders and serves their bytes, and the
 script, or the catalog, runs in the browser of whoever opened the page. Cost on the device is
-one directory scan per page load and no resident RAM.
+one directory scan per page load and no resident RAM. The one thing the reader
+does for a plugin by itself is send the HTTP requests its `device.json` declares
+for reading and sleep events ([Events](#events-the-reader-sends-a-plugins-requests)).
 
 ## Layout
 
@@ -87,10 +91,13 @@ heading shows an untitled card.
 | `registerAction(name, fn)` | accepted and ignored with a console warning: there is no job queue here |
 | `currentPath` | the folder the File Manager is showing. Default to it rather than asking for a path the user has already navigated to; always `/` on Settings |
 
-**`api.crypto` is not provided.** The browser's own `crypto.subtle` covers
-hashing, HMAC, AES and RSA, so a device-side implementation would only duplicate
-it. A plugin written against the upstream API that calls `api.crypto` gets a
-readable error rather than `is not a function`.
+**`api.crypto(op, fields)`** runs on the device, as upstream's does: the page has
+no `crypto.subtle`, which exists only in a secure context, and the reader serves
+`http://`. It posts the op and its base64 fields to `POST /api/crypto` (random,
+sha1, sha256, aesenc/aesdec, rsadec, sign, keygen, pubencrypt, pkcs12; see
+[webserver-endpoints.md](webserver-endpoints.md)) and resolves to the device's
+JSON; a failed op answers `{error}`. Keys come and go with each call: the device
+keeps nothing.
 
 A plugin may declare what it needs, and one asking for something this firmware
 does not implement is refused with a visible message instead of failing somewhere
@@ -100,7 +107,7 @@ inside its own code:
 { "requires": ["relay", "fetchToSd"] }
 ```
 
-Supported: `relay`, `fetchToSd`, `writeFile`, `pluginFile`, `dir`.
+Supported: `relay`, `fetchToSd`, `writeFile`, `pluginFile`, `dir`, `crypto`.
 
 Everything else is the web server's own
 same-origin API — a plugin uses `fetch()` against the endpoints in
@@ -304,8 +311,89 @@ Differences from upstream:
   with `writeFile` (`PluginLocations::deviceJsonNames()`). A name with `..` in
   it names nothing. A credential store, a system folder and a path spelled by its
   8.3 alias stay refused, as for every request.
-- Not yet: Details pages, the `sidecar` file, `events`, and sign-in types
-  upstream does not define (`refresh`).
+- Not yet: Details pages, the `sidecar` file, and sign-in types upstream does
+  not define (`refresh`). A `device.json`'s `events` are the reader's business:
+  [Events](#events-the-reader-sends-a-plugins-requests).
+
+## Events: the reader sends a plugin's requests
+
+A `device.json` may declare an `events` section, in upstream's format
+(crosspoint-reader #3114, Justin Mitchell; `require_meta` from #4200, Arthur
+Tazhitdinov): per event, one HTTP request or one download that the reader sends
+when the event has happened. No plugin code runs for it: the reader queues the
+event on the card and later fills in the declared templates and sends them. A
+progress sync (`kosync-autopush`) and a sleep image (`monthwallpaper`) are the
+usual uses.
+
+```json
+"events": {
+  "reader.session": { "connect": true, "toast": "Progress pushed",
+    "request": { "method": "PUT", "url": "{cfg.server}/syncs/progress",
+                 "headers": { "x-auth-user": "{cfg.user}" },
+                 "body": "{\"document\":\"{event.document}\",\"percentage\":{event.end_progress_bp}e-4}" } },
+  "sleep.enter": { "download": { "url": "https://example.org/today.bmp", "dest": "/sleep.bmp" } }
+}
+```
+
+| Event | When | Variables (`{event.NAME}`) |
+|---|---|---|
+| `reader.open` | a book opens | `book` (its path) |
+| `reader.exit` | a book closes, also when sleeping out of it | `book`, `percent`, `end_percent` |
+| `reader.session` | a book closes or the reader sleeps, after at least 10 s of reading | `book`, `document`, `start_time`, `end_time`, `duration_seconds`, `start_progress_bp`, `end_progress_bp`, `progress_scale` |
+| `sleep.enter` | the reader goes to sleep | `book`, `percent`, `end_percent` when sleeping out of a book, else none |
+
+- **Reading time** counts the time on a page before a forward turn, from 2 s to
+  30 min a page, as upstream does; backward turns and skimming add nothing.
+  `start_time` and `end_time` are Unix seconds, so a session is sent only while
+  the clock is set (a hardware clock, or network time). `document` is KOReader's
+  partial MD5 of the book file, the id KOSync servers match books by. Progress
+  goes in basis points of `progress_scale` (10000).
+- **Not sent yet**: `book.downloaded`, and a handler with `require_meta` (it
+  fires only for books whose `<book>.meta.json` has that key, and nothing writes
+  those files here yet). The Plugins page names such events.
+- **Templates**: `{cfg.KEY}` from the plugin's `config.file`, `{token}` from its
+  `token.file` (at `token.path`), `{meta.KEY}` from the book's
+  `<book>.meta.json`, and `{event.ts}`, `{event.id}` and `{event.NAME}`. Strings
+  and whole numbers go in as text; a key that is missing stays as written. One
+  pass: a filled-in value is not read for placeholders again.
+
+**The queue.** Each subscribing plugin has its own, `events.jsonl` in its folder,
+one line per event (`{"e", "id", "ts", "vars"}`). A line is at most 512 bytes;
+a queue over 4 KB is dropped whole, as its events are stale by then. Delivery is
+at least once and in order per plugin: an event leaves the queue when its
+request answers 2xx (a download: when its file is in place), and the first
+failure stops that plugin's queue until the next try. A plugin whose handlers
+this firmware cannot run has its queue removed.
+
+**When it is sent.** Whenever the reader joins Wi-Fi through its network picker
+(File Transfer's **Join a Network**, among others), and at sleep entry: over a
+connection that is up, or by joining the last network with its saved password
+when a queued event's handler says `"connect": true` (`sleep.enter` always
+does). The join waits 10 s at most, and not under 20 % battery; a failed join
+or request does not hold up the sleep, and the queue waits for the next
+connection. At most 4 events go per drain. A `toast` shows as a popup after its
+request succeeded. The subscriptions are read at boot; plugins are installed
+over File Transfer, whose end restarts the reader.
+
+**X3 and X4.** With two framebuffers allocated, joining Wi-Fi leaves the C3 too
+little for TLS (`HalCapabilities::sendsSleepEventsFromCleanBoot`). There the
+sleep screen is painted first, then the reader restarts, sends the queue before
+the display takes its buffers (about 210 KB free), and restarts into the sleep.
+The two restarts take about 1.7 s each on the X3, on top of the network time.
+The sleep screen is drawn again only when a download replaced a file and the
+screen is made of custom images alone (Custom, or Cover with no book open);
+Quick Resume and Overlay keep what was painted. No toasts there.
+
+**Trust.** A request, and any download with headers, needs a verified server
+certificate, since it carries the user's data; a plain download falls back as a
+public read does. A download goes to an absolute path outside the plugin
+folders, the credential stores and the system folders, through a `.part` file
+that replaces the target only after a clean answer. A request's answer is read
+to 8 KB and dropped. The serial log (`[PEVT]`) names the URL and status of each
+delivery, never headers or bodies.
+
+**Limits.** 8 subscribing plugins; a `device.json` up to 8 KB; token, config and
+`<book>.meta.json` files up to 2 KB.
 
 ## Installing and managing plugins: the Plugins page
 
@@ -346,14 +434,18 @@ it is sent:
   what of it runs on this firmware, judged from the catalog and from the entry's
   `device.json`, which the browser reads from GitHub as well:
   - **runs here**: a web part (`plugin.js`), a catalog that opens here
-    ([Catalogs](#catalogs-upstreams-devicejson)), or both;
-  - **partly runs here**: one of them runs, and something does not yet: device
-    `events`, say;
-  - **does not run here**: nothing of it runs (an events-only `device.json`,
-    for example), another `firmware_family`, a requirement this firmware lacks
+    ([Catalogs](#catalogs-upstreams-devicejson)), events the reader sends
+    ([Events](#events-the-reader-sends-a-plugins-requests)), or several of them;
+  - **partly runs here**: one of them runs, and something does not yet: an
+    event the reader does not send yet (`book.downloaded`, a handler with
+    `require_meta`), say;
+  - **does not run here**: nothing of it runs (a `device.json` whose only
+    events the reader does not send, for example), another `firmware_family`, a requirement this firmware lacks
     (named), a `device.json` that could not be read, or a reason the catalog
-    does not state (`protected-content` needs DRM support). These have no Install
-    button.
+    does not state. These have no Install button.
+  `protected-content` (Adobe-protected loans and purchases) is marked **partly
+  runs here** with a note: it runs up to the account sign-in on a device, while
+  activation and fetching have been tried only against a mock Adobe service.
 
   Files a community entry lists in subfolders (the dictionaries catalog's own
   pages, which its plugin reads from GitHub) are left out of the install, and the

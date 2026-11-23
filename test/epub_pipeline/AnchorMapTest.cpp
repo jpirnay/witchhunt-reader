@@ -66,7 +66,7 @@ std::string freshCacheDir(const std::string& tag) {
 Section::BuildParams params(const bool hyphenate = false, const bool embeddedStyle = false) {
   Section::BuildParams p;
   p.fontId = 0;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.extraParagraphSpacing = false;
   p.paragraphAlignment = 0;
   p.viewportWidth = 480;

@@ -68,7 +68,7 @@ class SpineCacheLayout : public testing::Test {
     Section::BuildParams p;
     p.viewportWidth = viewportWidth;
     p.viewportHeight = 800;
-    p.lineCompression = 1.0f;
+    p.lineCompression = TextScale();
     p.fontSizeNormalization = false;
     return p;
   }

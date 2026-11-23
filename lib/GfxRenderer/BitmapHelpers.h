@@ -21,42 +21,45 @@ struct QuantizedGray4 {
   uint8_t value;
 };
 
-// A 4-level error-diffusion quantizer needs two things, and they are not the same thing:
+// A 4-level error-diffusion quantizer needs two things, and both belong to the panel:
 //
-//   - THRESHOLDS decide which level a pixel lands on. This is where a display tuning
-//     belongs: the X4's greys read darker than their nominal value, so pushing the
-//     thresholds down (30/50/140 rather than the even 43/128/213) promotes pixels a
-//     level and compensates. That is a deliberate, output-referred brightening.
-//   - REPRESENTED VALUES are the feedback term: `error = wanted - value` is what the
-//     ditherer pushes to the neighbouring pixels. They must describe how far apart the
-//     levels are, because that spacing is what the error is measured against.
+//   - THRESHOLDS decide which level a pixel lands on.
+//   - FEEDBACK values are what each level is taken to show: `error = wanted - value` is what the ditherer pushes to
+//     the neighbouring pixels, so they must say where the panel's levels really sit. Atkinson carries 6/8 of the
+//     error, so a uniform gray settles on a pure level wherever 4*gray - 3*feedback falls inside that level's band:
+//     with feedback away from the panel's levels, no thresholds put a level where the panel shows it.
 //
-// These were conflated. DisplayTuned used to report 15/30/80/210 as its values, on the
-// reasoning that they encode how dark each level really renders. As a description of the
-// panel that may well be right, but as a feedback term it is ruinous: three of the four
-// levels sit inside the bottom 80 and there is a 130-wide gap below white. Any image
-// whose mass sits in 50..140 -- 76% of the pixels on a typical low-contrast cover -- then
-// has only levels 2 and 3 to work with, 130 apart, and comes back as coarse speckle with
-// its midtone structure gone. Measured as the correlation between the source and the
-// rendered level map (both box-averaged 4x4, so the metric does not depend on what the
-// panel does with each level), 15/30/80/210 lost structure on all seven sample covers,
-// r = 0.87-0.98 where even spacing held r > 0.99 -- worst exactly where tone mapping had
-// widened the midtones first, which is why this surfaced as "the adaptive filter washes
-// covers out".
+// The table is the running panel's, HalCapabilities::imageGray4Levels(), which setupDisplayAndFonts() copies here:
+// each level's lightness measured against a reference card, fed back as the sRGB gray of that lightness. Until a
+// panel is measured it keeps what every board had before, the even 0/85/170/255 with the X4-tuned 30/50/140. On
+// Murphy that table drew uniform grays up to 8.6 L* too dark, and 128 darker than 112.
 //
-// So error diffusion is fed the even 0/85/170/255 spacing, and only the thresholds carry the
-// display tuning: the X4-tuned 30/50/140, where the even midpoints would be 43/128/213.
+// An earlier change (8bc41a1fb) fed back guessed values, 15/30/80/210: three levels in the bottom 80 left a 130-wide
+// gap below white, which midtones can only fill with coarse speckle, and covers lost their midtone structure. Its
+// measure was the correlation between the source and the level-index map, which favours even spacing whatever the
+// glass shows. A panel whose levels really are uneven either pays some of that speckle or shows its midtones too
+// dark, so judge a table by the panel's lightness and by covers on the glass, not by the index map.
 // (The reader's in-book image path uses the untuned midpoints, quantizeGray4Level() in
 // Epub/converters/DitherUtils.h, which returns only an index.)
+//
+// Development builds' CMD:SLEEP:SCREEN:T=<a>,<b>,<c>:F=<a>,<b>,<c>,<d> overwrite the table to try values on the glass
+// without a rebuild (docs/serial-test-api.md).
+namespace gray4tuning {
+inline uint8_t thresholds[3] = {30, 50, 140};
+inline uint8_t feedback[4] = {0, 85, 170, 255};
+}  // namespace gray4tuning
+
 inline QuantizedGray4 quantizeGray4(int gray) {
   if (gray < 0) gray = 0;
   if (gray > 255) gray = 255;
 
-  // X4-tuned thresholds; same level spacing fed back to the diffuser (see above).
-  if (gray < 30) return {0, 0};
-  if (gray < 50) return {1, 85};
-  if (gray < 140) return {2, 170};
-  return {3, 255};
+  // The panel's table (see above).
+  const uint8_t* t = gray4tuning::thresholds;
+  const uint8_t* f = gray4tuning::feedback;
+  if (gray < t[0]) return {0, f[0]};
+  if (gray < t[1]) return {1, f[1]};
+  if (gray < t[2]) return {2, f[2]};
+  return {3, f[3]};
 }
 
 enum class BmpRowOrder { BottomUp, TopDown };

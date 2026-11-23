@@ -100,7 +100,7 @@ TEST_F(HeadingJoinTest, MurphyLayoutMatchesGolden) {
   pipeline_harness::Profile murphy;
   murphy.viewportWidth = 214;
   murphy.viewportHeight = 358;
-  murphy.lineCompression = 0.95f;
+  murphy.lineCompression = TextScale::percent(95);
   murphy.extraParagraphSpacing = true;
   const std::string out = dump(murphy, "murphy");
   ASSERT_EQ(out, dump(murphy, "murphy_again"));

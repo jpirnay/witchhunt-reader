@@ -80,7 +80,7 @@ int recordedFiles(const Epub& epub, const Section::BuildParams& p) {
 Section::BuildParams params() {
   Section::BuildParams p;
   p.fontId = 1;
-  p.lineCompression = 1.0f;
+  p.lineCompression = TextScale();
   p.viewportWidth = 460;
   p.viewportHeight = 760;
   p.inlineFootnotePreviews = false;

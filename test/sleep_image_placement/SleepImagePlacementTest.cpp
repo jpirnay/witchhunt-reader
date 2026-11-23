@@ -1,5 +1,5 @@
 // Where a custom sleep BMP lands (SleepImagePlacement.h), checked by what GfxRenderer::drawBitmap()
-// makes of the placement: it cuts the crop in whole pixels, scales down to the screen but never up,
+// makes of the placement: it shows the centred visible part, scales it down to the bounds but never up,
 // and clips at the screen's edges.
 //
 // The bug this pins (reported against CrossInk as its #925): in Crop mode an image larger than the
@@ -10,7 +10,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <cmath>
 
 #include "activities/boot_sleep/SleepImagePlacement.h"
 
@@ -33,24 +32,21 @@ std::ostream& operator<<(std::ostream& out, const Rect& r) {
   return out << r.w << "x" << r.h << " at (" << r.x << ", " << r.y << ")" << (r.scaled ? " scaled" : "");
 }
 
-// The screen pixels drawBitmap(bitmap, p.x, p.y, pageWidth, pageHeight, p.cropX, p.cropY) covers.
+// The screen pixels drawBitmap(bitmap, p.x, p.y, maxWidth, maxHeight, visibleWidth, visibleHeight) covers.
 Rect drawn(const int w, const int h, const int pageWidth, const int pageHeight, const Placement& p) {
-  const int cropPixX = static_cast<int>(std::floor(static_cast<float>(w) * p.cropX / 2.0f));
-  const int cropPixY = static_cast<int>(std::floor(static_cast<float>(h) * p.cropY / 2.0f));
-  const float croppedWidth = (1.0f - p.cropX) * static_cast<float>(w);
-  const float croppedHeight = (1.0f - p.cropY) * static_cast<float>(h);
-  const float fitScale =
-      std::min(static_cast<float>(pageWidth) / croppedWidth, static_cast<float>(pageHeight) / croppedHeight);
+  const BoxCut& d = p.draw;
+  const int shownW = (d.visibleWidth > 0 && d.visibleWidth < w) ? d.visibleWidth : w;
+  const int shownH = (d.visibleHeight > 0 && d.visibleHeight < h) ? d.visibleHeight : h;
+  ImageScale fit;
+  if (d.maxWidth > 0) fit = ImageScale(d.maxWidth, shownW);
+  if (d.maxHeight > 0)
+    fit = d.maxWidth > 0 ? ImageScale::smaller(fit, ImageScale(d.maxHeight, shownH)) : ImageScale(d.maxHeight, shownH);
   Rect r;
-  r.scaled = fitScale < 1.0f;
-  const int renderWidth = w - 2 * cropPixX;
-  const int renderHeight = h - 2 * cropPixY;
+  r.scaled = fit.isDownscale();
+  const ImageScale scale = r.scaled ? fit : ImageScale();
   // Each source pixel's offset is scaled and floored: the last lands at floor((n - 1) * scale).
-  const auto extent = [&](const int n) {
-    return r.scaled ? static_cast<int>(std::floor(static_cast<float>(n - 1) * fitScale)) + 1 : n;
-  };
-  const int x1 = std::min(p.x + extent(renderWidth), pageWidth);
-  const int y1 = std::min(p.y + extent(renderHeight), pageHeight);
+  const int x1 = std::min(p.x + scale.extent(shownW), pageWidth);
+  const int y1 = std::min(p.y + scale.extent(shownH), pageHeight);
   r.x = std::max(p.x, 0);
   r.y = std::max(p.y, 0);
   r.w = x1 - r.x;
@@ -96,6 +92,25 @@ TEST(SleepImagePlacement, CropFillsTheScreenWithAnImageLargerBothWays) {
 TEST(SleepImagePlacement, CropFillsTheScreenWithAnImageAsWideAndTaller) {
   // #4472's case on the X4: cut to the screen's shape top and bottom, nothing to scale.
   EXPECT_EQ(drawnFor(kX4W, 1000, kX4W, kX4H, true), (Rect{0, 0, kX4W, kX4H}));
+}
+
+// Shapes that do not divide evenly: the cut rounds up and only the uncut side bounds the scale, so the
+// image covers the screen to the last pixel, and no further.
+TEST(SleepImagePlacement, CropCoversTheScreenExactlyWhateverTheShape) {
+  for (const int w : {529, 600, 601, 777, 1001, 1201, 1999}) {
+    for (const int h : {793, 800, 901, 1203, 1600, 2401}) {
+      const Placement p = place(w, h, kX3W, kX3H, true);
+      const Rect r = drawn(w, h, kX3W, kX3H, p);
+      EXPECT_EQ(r, (Rect{0, 0, kX3W, kX3H})) << w << "x" << h;
+      // Not clipped by the screen either: the scaled cut ends on its last column and row.
+      const BoxCut& d = p.draw;
+      const int shownW = d.visibleWidth > 0 ? d.visibleWidth : w;
+      const int shownH = d.visibleHeight > 0 ? d.visibleHeight : h;
+      const ImageScale scale = d.maxWidth > 0 ? ImageScale(d.maxWidth, shownW) : ImageScale(d.maxHeight, shownH);
+      EXPECT_EQ(scale.extent(shownW), kX3W) << w << "x" << h;
+      EXPECT_EQ(scale.extent(shownH), kX3H) << w << "x" << h;
+    }
+  }
 }
 
 TEST(SleepImagePlacement, FitScalesAMixedImageDownAndCentresIt) {

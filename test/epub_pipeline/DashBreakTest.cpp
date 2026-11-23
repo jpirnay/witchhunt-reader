@@ -44,7 +44,7 @@ struct DashBreakFixture : testing::Test {
     Section::BuildParams params;
     params.viewportWidth = static_cast<uint16_t>(width);
     params.viewportHeight = 800;
-    params.lineCompression = 1.0f;
+    params.lineCompression = TextScale();
     params.extraParagraphSpacing = true;  // no first-line indent: the widths below are the text's own
     params.paragraphAlignment = static_cast<uint8_t>(align);
     GfxRenderer renderer;

@@ -235,11 +235,73 @@ inline bool clearsGhostsOnEveryScreen() {
 }
 
 // The panel's booster is powered down once the device is idle, and again after each frame drawn
-// while it stays idle (main.cpp's idle loop, HalDisplay::powerOffPanelBetweenFrames). Its driver
-// keeps the booster up after a refresh unless the Sunlight Fading Fix asks for POF, and the next
-// refresh resets and powers it up anyway. Murphy only so far: the X3's driver has the same habit,
-// but there the refresh after a POF is promoted to HALF, which wants its own look first.
-inline bool powersPanelOffWhenIdle() { return BoardConfig::isMurphyM3(); }
+// while it stays idle (main.cpp's idle loop, HalDisplay::powerOffPanelBetweenFrames). Both drivers
+// keep the booster up after a refresh unless the Sunlight Fading Fix asks for POF. Murphy's next
+// refresh resets and powers it up anyway; the X3's (UC8253, not the UC8279 run) powers up and keeps
+// its FAST, because the driver tells this power-off from a wake (Uc8253X3Driver::_idlePoweredOff).
+inline bool powersPanelOffWhenIdle() {
+  return BoardConfig::isMurphyM3() || BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3;
+}
+
+// How long after the last input the booster goes down (powersPanelOffWhenIdle). Murphy powers up
+// for every refresh anyway, so it goes down as soon as the loop idles. The X3's next refresh waits
+// for the power-up, 128 ms measured 2026-11-20, which would land on nearly every page turn after a
+// second of reading: it waits past a page's reading time, so only a pause pays it.
+inline unsigned long panelIdlePowerOffAfterMs() { return BoardConfig::isMurphyM3() ? 0 : 120000; }
+
+// The 4-level image dither's table for this board's panel (quantizeGray4() in BitmapHelpers.h, copied there by
+// setupDisplayAndFonts()): the three thresholds, and for each level the value fed back to the diffuser, the sRGB gray
+// whose L* matches where that level sits between the panel's black and white. Measured on the gray-lab stand with
+// full-screen uniform grays, every shot mapped through the reference card in it. Boards not measured yet keep the
+// thresholds once tuned for the X4 and the even feedback that every board had before. Sleep pictures and the BMP viewer
+// use it; the 16-level panels draw sleep pictures on their own levels.
+struct ImageGray4Levels {
+  uint8_t thresholds[3];
+  uint8_t feedback[4];
+};
+// Feedback from black (0) to white (255) and thresholds both strictly rising, so every level can be reached. A
+// threshold may sit below the level under it: the old table's 50 promotes grays from 50 up to light gray on purpose.
+constexpr bool wellFormed(const ImageGray4Levels& l) {
+  if (l.feedback[0] != 0 || l.feedback[3] != 255 || l.thresholds[0] == 0) return false;
+  for (int i = 0; i < 3; i++) {
+    if (l.feedback[i] >= l.feedback[i + 1]) return false;
+    if (i > 0 && l.thresholds[i - 1] >= l.thresholds[i]) return false;
+  }
+  return true;
+}
+inline constexpr ImageGray4Levels kUnmeasuredImageGray4 = {{30, 50, 140}, {0, 85, 170, 255}};
+// Murphy's UC8253, 2026-11-22: alone the levels read L* 19.0 / 26.4 / 33.5 / 52.1, light gray 44 % of the way to white
+// where even spacing puts it at 67 %. Fed back as measured (0/53/104/255) uniform grays came within 4.4 L* of an even
+// lightness ramp; with light gray fed back darker, as 82, within 2.9, because a fine light-gray and white mix reads
+// darker on this glass than its share. Both rise at every step; the even table missed by up to 8.6.
+inline constexpr ImageGray4Levels kMurphyImageGray4 = {{27, 68, 169}, {0, 53, 82, 255}};
+// The X3's UC8253 (the later UC8279 run is not measured), 2026-11-22: alone the levels read L* about -4 (below the
+// card's darkest step) / 6.4 / 22.7 / 72.7, dark gray 13 % and light gray 35 % of the way to white. The even table
+// missed an even lightness ramp by up to 24.3 L*, mid grays far too dark. Fed back as measured (0/34/81/255)
+// within 10.6, with flat stretches; both grays fed back darker, as 28 and 64, within 5.5 and rising at every step,
+// because sparse lighter dots read smaller than their share on this glass. Thresholds from a dither model fitted to
+// four sweeps.
+inline constexpr ImageGray4Levels kX3Uc8253ImageGray4 = {{4, 68, 152}, {0, 28, 64, 255}};
+// The X4's SSD1677, 2026-11-22: alone the levels read L* 16.2 / 27.6 / 61.8 / 80.8, dark gray 18 % and light gray 71 %
+// of the way to white. The even table missed an even lightness ramp by up to 10.4 L*, shadows too dark and mid grays
+// too light, 144 and 160 the same. Fed back as measured (0/43/173/255) within 6.2, with flat stretches; with dark gray
+// fed back darker and light gray lighter, as 36 and 192, within 3.1 and rising at every step. Both from a dither model
+// fitted to two sweeps, which predicted the next two within 2 L*. Grays from 236 up come out white.
+inline constexpr ImageGray4Levels kX4ImageGray4 = {{24, 68, 172}, {0, 36, 192, 255}};
+static_assert(wellFormed(kUnmeasuredImageGray4) && wellFormed(kMurphyImageGray4) && wellFormed(kX3Uc8253ImageGray4) &&
+              wellFormed(kX4ImageGray4));
+inline ImageGray4Levels imageGray4Levels() {
+  switch (BoardConfig::ACTIVE.board) {
+    case BoardConfig::Board::MurphyM3:
+      return kMurphyImageGray4;
+    case BoardConfig::Board::XteinkX3:
+      return kX3Uc8253ImageGray4;
+    case BoardConfig::Board::XteinkX4:
+      return kX4ImageGray4;
+    default:
+      return kUnmeasuredImageGray4;
+  }
+}
 
 // The panel can show gray at all. Murphy's only can in a build with -DFREEINK_MURPHY_GRAY: without
 // it the UC8253 driver has no gray waveforms and ignores a gray pass
@@ -291,6 +353,18 @@ inline bool decodesThroughRefresh() { return !sdUsesSpi() && keepsSecondaryBuffe
 bool defersLiveFontChange();
 #else
 inline bool defersLiveFontChange() { return !keepsSecondaryBuffer(); }
+#endif
+
+// Plugin events that bring Wi-Fi up at sleep entry go from a clean boot: the sleep screen is painted, the chip
+// restarts, that boot sends the queue before the display takes its framebuffers, and restarts into the sleep (main.cpp,
+// SILENT_REBOOT_TARGET_SLEEP_SEND_EVENTS). The C3s: beside two framebuffers, joining Wi-Fi left the X3 less than 8 KB
+// in one block, too little for TLS (67 KB free and a 57 KB block before the join, sleeping out of a book; before the
+// display takes its buffers, its boot has 212 KB free; 2026-11-20). The PSRAM boards join where they are (Murphy: 175
+// KB free before the join, a download and a PUT went through). cppcheck sees only the declaration, as above.
+#if defined(CPPCHECK_ANALYSIS)
+bool sendsSleepEventsFromCleanBoot();
+#else
+inline bool sendsSleepEventsFromCleanBoot() { return !keepsSecondaryBuffer(); }
 #endif
 
 // A frontlight is present: PWM (LEDC or PM1-driven), or an LED driver on the I2C bus (the BOOX Picco's).

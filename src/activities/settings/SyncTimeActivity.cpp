@@ -15,6 +15,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/DecimalFormat.h"
 
 static void formatDuration(char* buf, size_t bufSize, int32_t totalSeconds) {
   const char* sign = totalSeconds < 0 ? "-" : "+";
@@ -166,10 +167,10 @@ void SyncTimeActivity::render(RenderLock&&) {
       formatDuration(driftFmt, sizeof(driftFmt), driftSeconds);
 
       if (elapsedSinceSync > 0) {
-        double hours = (double)elapsedSinceSync / 3600.0;
-        double rate = (double)driftSeconds / hours;
+        // Seconds per hour: drift / (elapsed / 3600), as "%+.2f" wrote the double.
         char rateFmt[16];
-        snprintf(rateFmt, sizeof(rateFmt), "%+.2f", rate);
+        formatDecimal(rateFmt, sizeof(rateFmt), static_cast<int64_t>(driftSeconds) * 3600, elapsedSinceSync, 2,
+                      /*plus=*/true);
 
         char driftWithRate[48];
         snprintf(driftWithRate, sizeof(driftWithRate), "%s (%s s/hr)", driftFmt, rateFmt);

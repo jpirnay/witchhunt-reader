@@ -116,10 +116,10 @@ class Section {
   // A carried item: no page and no file, its SpinePageIndex entry marked (recordCarried). What loadSectionFile and a
   // build make of it.
   void becomeCarried(const BuildParams& p);
-  void writeSectionFileHeader(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
-                              uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
-                              bool embeddedStyle, bool bionicReadingEnabled, uint8_t imageRendering,
-                              VerticalText verticalText);
+  void writeSectionFileHeader(int fontId, TextScale lineCompression, bool extraParagraphSpacing,
+                              uint8_t paragraphAlignment, uint16_t viewportWidth, uint16_t viewportHeight,
+                              bool hyphenationEnabled, bool embeddedStyle, bool bionicReadingEnabled,
+                              uint8_t imageRendering, VerticalText verticalText);
   uint32_t onPageComplete(std::unique_ptr<Page> page, serialization::BufferedFileWriter& out);
 
   struct TocBoundary {
@@ -266,10 +266,10 @@ class Section {
   // build can carry them across slices without re-passing ten arguments each call.
   struct BuildParams {
     int fontId = 0;
-    float lineCompression = 1.0f;
+    TextScale lineCompression;
     // Book's style line spacing (LineSpacing.h): a block's CSS line-height, in ems of lineHeightEmPx, sets its pitch,
     // never below this compression. 0 = off. Hashed only when on, so the variants without it keep their key.
-    float bookLineHeightFloor = 0.0f;
+    TextScale bookLineHeightFloor = TextScale::fromRaw(0);
     uint16_t lineHeightEmPx = 0;
     bool extraParagraphSpacing = false;
     uint8_t paragraphAlignment = 0;

@@ -14,6 +14,7 @@
 #include "Epub/blocks/ImageBlock.h"
 #include "Epub/blocks/TextBlock.h"
 #include "GfxRenderer.h"
+#include "PipelineRunner.h"
 #include "SyntheticBook.h"
 
 namespace fs = std::filesystem;
@@ -58,7 +59,7 @@ struct Laid {
 
 struct Options {
   uint8_t indent = static_cast<uint8_t>(ParagraphIndent::FromBook);
-  float lineCompression = 1.0f;
+  TextScale lineCompression;
   bool extraParagraphSpacing = true;
 };
 
@@ -109,7 +110,8 @@ struct LayoutGapsFixture : testing::Test {
         switch (el->getTag()) {
           case TAG_PageLine: {
             const TextBlock& block = *static_cast<const PageLine&>(*el).getBlock();
-            Line line{p, el->xPos, el->yPos, block.getRenderStyle().fontSizeMultiplier, {}, {}};
+            Line line{p,  el->xPos, el->yPos, pipeline_harness::scaleValue(block.getRenderStyle().fontSizeMultiplier),
+                      {}, {}};
             for (uint16_t w = 0; w < block.wordCount(); ++w) {
               line.words.emplace_back(block.wordText(w));
               line.xpos.push_back(block.wordXpos(w));
@@ -175,7 +177,7 @@ TEST_F(LayoutGapsFixture, AnImageAfterKeptSpacesTakesNoGapOfItsOwn) {
 // taller lowers its text, glyphs and all. Under a tight line spacing the glyphs reach past the line's advance.
 TEST_F(LayoutGapsFixture, ABoxBelowALineAnImageLowersStartsBelowItsGlyphs) {
   Options tight;
-  tight.lineCompression = 0.9f;
+  tight.lineCompression = TextScale::percent(90);
   tight.extraParagraphSpacing = false;  // nothing between the line and the frame but the frame's own rule
   const Laid laid =
       build("p, div { margin: 0; } .frame { border: 1px solid; }",

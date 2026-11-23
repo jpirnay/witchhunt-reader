@@ -2,6 +2,7 @@
 
 #include <EpdFontFamily.h>
 #include <HalDisplay.h>
+#include <TextScale.h>
 
 class FontCacheManager;
 class SdCardFont;
@@ -20,6 +21,7 @@ class Shaped;
 
 #include "Bitmap.h"
 #include "FontLookup.h"
+#include "GrayLevelQuantizer.h"
 #include "ScaledGlyphResample.h"
 #include "TextWrap.h"
 
@@ -108,7 +110,7 @@ class GfxRenderer {
   // resolver's stand-in for a size it could not make. Only synthesised sizes appear here, so the
   // map is empty on a build that ships every size for real and the lookup is a miss that costs one
   // comparison. Mutable for the resolver, as fontMap.
-  mutable std::map<int, float> fontBaseScales;
+  mutable std::map<int, TextScale> fontBaseScales;
   // Mutable because ensureFontReady() is const (called from layout code that
   // holds a const GfxRenderer&) but triggers SD card reads and heap allocation
   // inside the SdCardFont objects. Same pragmatic compromise as fontCacheManager_.
@@ -309,9 +311,9 @@ class GfxRenderer {
   /// NOT for UI font IDs. FreeInkUI (freeink-sdk) centres icons by reading a glyph's raw width,
   /// left and top straight out of getFontMap(), which for a synthesised ID are the master's and
   /// would place every icon wrong. Reader sizes only; the UI ladder rebinds real faces.
-  void insertScaledFont(int fontId, EpdFontFamily font, float scale) {
+  void insertScaledFont(int fontId, EpdFontFamily font, TextScale scale) {
     fontMap.insert_or_assign(fontId, font);
-    if (scale > 0.99f && scale < 1.01f) {
+    if (scale > TextScale::percent(99) && scale < TextScale::percent(101)) {
       fontBaseScales.erase(fontId);  // a scale of 1 is a real face; do not pay for the lookup
     } else {
       fontBaseScales.insert_or_assign(fontId, scale);
@@ -319,11 +321,13 @@ class GfxRenderer {
     invalidateScaledGlyphCache();
   }
 
-  /// The scale `fontId` renders its master at, or exactly 1.0f for a font with real faces.
+  /// The scale `fontId` renders its master at, or exactly 1 for a font with real faces.
   ///
   /// Callers that need a size in pixels should use the ordinary accessors, which already apply
   /// this; it is exposed for the few places that must know a size is synthesised at all.
-  float fontBaseScale(int fontId) const { return resolvedBaseScale(fontMap, fontBaseScales, fontId, fontResolver_); }
+  TextScale fontBaseScale(int fontId) const {
+    return resolvedBaseScale(fontMap, fontBaseScales, fontId, fontResolver_);
+  }
   // The manager prewarms through this renderer's font lookup, so it reaches the faces the resolver makes.
   void setFontCacheManager(FontCacheManager* m);
   /// Installs the word breaker wrappedText() splits space-less words with (see WordBreaker).
@@ -674,17 +678,43 @@ class GfxRenderer {
     uint16_t stride;
   };
 
+  // A picture drawn as the 1-bit planes of a gray-level plan (GrayLevelPlan.h). Each covered pixel's ink, from
+  // `quantizer`, sets its bit in the framebuffer by `first` and, where `second` is set, in that buffer by
+  // `secondPlane`, so one read of the picture fills both planes of a pass. `second` has the framebuffer's size
+  // and physical layout (the lent secondary buffer).
+  struct LevelPlaneTarget {
+    const GrayLevelQuantizer* quantizer = nullptr;
+    gray_levels::Plane first;
+    uint8_t* second = nullptr;
+    gray_levels::Plane secondPlane;
+  };
+
+  // Draws the centred `visibleWidth` x `visibleHeight` part of the bitmap (0, or the whole size, for all of
+  // it; an odd remainder is cut from the right or bottom), scaled down to fit `maxWidth` x `maxHeight` where
+  // a bound is given, never up.
+  //
   // When `gray8` is set the bitmap's 8-bit samples are painted there and the
   // framebuffer is left untouched — the 2-bit dither is skipped entirely rather
-  // than done and discarded. Ignored for 1-bit bitmaps, which have no levels to
-  // preserve. Default nullptr keeps every existing caller on the 2-bit path.
-  void drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0, float cropY = 0,
-                  const Gray8Target* gray8 = nullptr) const;
+  // than done and discarded. When `planes` is set, the same samples are given
+  // inks and written as plane bits instead. Both are ignored for 1-bit bitmaps,
+  // which have no levels to preserve. Default nullptr keeps every existing caller
+  // on the 2-bit path.
+  void drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, int visibleWidth = 0,
+                  int visibleHeight = 0, const Gray8Target* gray8 = nullptr,
+                  const LevelPlaneTarget* planes = nullptr) const;
+  // Both planes at ink 0's bit: the ground a fitted picture leaves uncovered.
+  void clearLevelPlanes(const LevelPlaneTarget& planes) const;
+  // A LOGICAL rectangle of the framebuffer, drawn there in black and white by the ordinary render path, as the
+  // darkest ink and ink 0 of both planes. How 1-bit content with a background of its own (the sleep overlay
+  // block) lands on a level picture, solid and undithered; see compositeBwRectOntoGray8Canvas for the canvas.
+  void bwRectToLevelPlanes(const LevelPlaneTarget& planes, int x, int y, int width, int height) const;
   // One 8-bit sample at LOGICAL (x, y), rotated onto the canvas exactly as
   // drawPixel() rotates onto the framebuffer. Silently drops out-of-panel
   // coordinates, where drawPixel() logs — a scaled image legitimately walks off
   // the edge, and one log line per pixel would be its own failure.
   void drawGray8Pixel(const Gray8Target& gray8, int x, int y, uint8_t gray) const;
+  // The same for level planes: the sample's ink at LOGICAL (x, y), written as both planes' bits.
+  void drawLevelPlanePixel(const LevelPlaneTarget& planes, int x, int y, uint8_t gray) const;
   void drawBitmap1Bit(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight) const;
   // Dark mode shows pictures as they are, not as negatives: a picture goes into the frame inverted, and the panel's
   // inversion turns it back. True while that applies to a picture drawn now: output inverted, a B/W pass, and a frame
@@ -706,12 +736,13 @@ class GfxRenderer {
   // Unscaled primitives. The public accessors above apply the font's base scale; these do not,
   // and exist so the *Scaled paths can compound base x residual without applying base twice.
   int rawTextWidth(int fontId, const char* text, EpdFontFamily::Style style) const;
-  int scaledTextAdvanceX(const EpdFontFamily& font, const char* text, EpdFontFamily::Style style, float scale) const;
+  int scaledTextAdvanceX(const EpdFontFamily& font, const char* text, EpdFontFamily::Style style,
+                         TextScale scale) const;
   int rawLineHeight(int fontId) const;
   int rawFontAscenderSize(int fontId) const;
   void drawTextAtScale(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
-                       float totalScale) const;
-  int getTextWidthScaled(int fontId, const char* text, EpdFontFamily::Style style, float scale) const;
+                       TextScale totalScale) const;
+  int getTextWidthScaled(int fontId, const char* text, EpdFontFamily::Style style, TextScale scale) const;
   // Ink extents of `text` relative to its baseline, from glyph bitmap metrics:
   // aboveBaseline = tallest glyph ink top, belowBaseline = deepest ink below the
   // baseline (0 for caps/digits). Excludes the font's internal leading, unlike
@@ -719,14 +750,14 @@ class GfxRenderer {
   // ensureFontReady(fontId, text) first so glyph metrics are loaded.
   bool getTextInkMetrics(int fontId, const char* text, EpdFontFamily::Style style, int* aboveBaseline,
                          int* belowBaseline) const;
-  int getLineHeightScaled(int fontId, float scale) const;
-  int getFontAscenderSizeScaled(int fontId, float scale) const;
+  int getLineHeightScaled(int fontId, TextScale scale) const;
+  int getFontAscenderSizeScaled(int fontId, TextScale scale) const;
   /// UI text, in reading order: a line with a right-to-left character is drawn in visual order
   /// (BidiUtils::visualUiLine), every other one as it is. Fit it (truncatedText, wrappedText) before, never after: the
   /// fitting works in reading order, so an ellipsis lands where the text ends. A page's words come formed at section
   /// build, in visual order already, and are drawn with drawFormedText instead.
   void drawTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
-                      float scale) const;
+                      TextScale scale) const;
   void drawCenteredText(int fontId, int y, const char* text, bool black = true,
                         EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   void drawText(int fontId, int x, int y, const char* text, bool black = true,
@@ -736,7 +767,7 @@ class GfxRenderer {
   void drawFormedText(int fontId, int x, int y, const char* text, bool black = true,
                       EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   void drawFormedTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
-                            float scale) const;
+                            TextScale scale) const;
   int getSpaceWidth(int fontId, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   /// Returns the total inter-word advance: fp4::toPixel(spaceAdvance + kern(leftCp,' ') + kern(' ',rightCp)).
   /// Using a single snap avoids the +/-1 px rounding error that arises when space advance and kern are
@@ -786,9 +817,9 @@ class GfxRenderer {
   /// lacks draws nothing but still moves the pen. A font that draws no glyph keys draws nothing (logged once).
   /// While the page is scanned, records the run's glyph IDs instead (FontCacheManager::recordGlyphs).
   void drawGlyphRun(int fontId, int x, int y, const GlyphRun& run, bool black = true,
-                    EpdFontFamily::Style style = EpdFontFamily::REGULAR, float scale = 1.0f) const;
+                    EpdFontFamily::Style style = EpdFontFamily::REGULAR, TextScale scale = TextScale()) const;
   /// How far drawGlyphRun's pen moves: glyphRunAdvance, accumulated when scale x the base scale is not 1.
-  int glyphRunWidth(int fontId, const GlyphRun& run, float scale = 1.0f) const;
+  int glyphRunWidth(int fontId, const GlyphRun& run, TextScale scale = TextScale()) const;
   /// The glyph-ID prefetch for a section build's warm step: the run's glyphs, 64 at a time (128 B on the stack).
   void prefetchGlyphRun(int fontId, const GlyphRun& run, EpdFontFamily::Style style) const;
 
@@ -881,6 +912,17 @@ class GfxRenderer {
   // it. Both buffers are 1-bit-derived, so nothing here is dithered.
   void compositeBwRectOntoGray8Canvas(const Gray8Target& gray8, int x, int y, int width, int height) const;
   void displayGray8Canvas() const;
+
+  // --- gray-level plans (panels without a canvas: a B/W base, then passes of 1-bit planes) ---
+  //
+  // See GrayLevelPlan.h and HalDisplay::grayLevelPlan(). nullptr on every panel until the SDK carries the
+  // waveforms. Planes go up with copyGrayscaleLsbBuffers(plane)/copyGrayscaleMsbBuffers(plane).
+  const gray_levels::Plan* grayLevelPlan() const;
+  // The plan's base from the framebuffer, consuming an armed refresh override as its mode (as
+  // beginAbsoluteGrayPass() does). False where the panel cannot run it; nothing reached the glass then.
+  bool displayGrayLevelBase() const;
+  // `lastPass`: the panel may power down after it (with the fading fix on).
+  bool displayGrayLevelPass(uint8_t pass, bool lastPass) const;
 
   // Timing breakdown returned by renderGrayscalePlanesSequential().
   struct GrayscaleTimings {
@@ -1188,8 +1230,9 @@ class GfxRenderer {
   // large to cache or the arena could not be allocated. `cp` is a codepoint or a
   // glyph key (GlyphKey.h); scaledGlyphKeyOf makes the entry's (id, kind) of it,
   // and one it cannot key renders uncached.
-  const uint8_t* findScaledGlyphMask(const void* fontData, uint32_t cp, float scale, uint8_t sel, int w, int h) const;
-  uint8_t* allocScaledGlyphMask(const void* fontData, uint32_t cp, float scale, uint8_t sel, int w, int h) const;
+  const uint8_t* findScaledGlyphMask(const void* fontData, uint32_t cp, TextScale scale, uint8_t sel, int w,
+                                     int h) const;
+  uint8_t* allocScaledGlyphMask(const void* fontData, uint32_t cp, TextScale scale, uint8_t sel, int w, int h) const;
 
   // Drop every cached mask, keeping the arena. MUST run whenever a font is added
   // or removed: entries are keyed by EpdFontData address, which a later font

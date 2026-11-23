@@ -388,19 +388,35 @@ older firmware.
 
 ## 10. Plugins
 
-Plugins add tools to the File Manager and Settings pages. They run in your browser, not on the reader.
+Plugins add tools to the File Manager and Settings pages. They run in your browser, not on the reader; some also
+have the reader send their requests (see below).
 
 ![The Plugins page](images/web/plugins.png)
 
 - **Installed plugins** lists what is on the card. **Switch off** keeps a plugin but stops loading
   it; **Remove** deletes it.
 - **Available plugins** is the catalog of this project's plugins. Your browser reads it from GitHub,
-  so it needs internet (in hotspot mode, use a file instead). Click **Install** on one.
+  so it needs internet (in hotspot mode, use a file instead). Click **Install** on one. **CrossPoint community**
+  shows the plugins written for CrossPoint instead, from its Plugin Hub, each marked **runs here**, **partly runs
+  here** (with what does not) or **does not run here**. Witch Reader has not checked them.
 - **Install from a file** takes a plugin as a `.zip` file.
 
 Each plugin says which page it adds itself to and which internet sites it may reach through the reader
 (**Reaches**). Only install plugins you trust: a plugin can read, change and delete anything on the
 card that this web interface can. For writing your own, see [SD-card web plugins](./sd-plugins.md).
+
+**Plugins that act while you read.** Some community plugins have the reader send something when you read or put it
+to sleep: **KOSync Auto-push** sends your reading progress to a KOSync server, **Month Wallpaper** fetches a new sleep
+picture. The reader keeps what they want to send on the card and sends it whenever it joins Wi-Fi; at sleep it joins
+your last network for it (not under 20 % battery), so going to sleep takes a few seconds longer. On the X3 and X4 it
+shows the sleep screen first and restarts twice while it sends. Such a plugin's settings (a server, an account) are
+made on its card in the web interface. See [Events](./sd-plugins.md#events-the-reader-sends-a-plugins-requests).
+
+**Books with Adobe DRM** (library loans and shops' "Adobe DRM" titles) come in through the community
+plugin **Protected Content**: it adds itself to the File Manager, signs in with your Adobe ID, turns the
+`.acsm` file the library or shop gives you into the book, and stores the book's key on the reader. The
+reader does the plugin's cryptography for it, since the browser cannot on this page. See
+[Protected books](../USER_GUIDE.md#protected-books) for what the reader then does.
 
 ## 11. System Info and Diagnostics
 

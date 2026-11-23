@@ -282,7 +282,7 @@ struct Word {
   EpdFontFamily::Style style = EpdFontFamily::REGULAR;
   uint8_t sizePct = 100;
   int32_t font = 0;  // its word font's ID, 0 for the block's
-  float fontScale = 1.0f;
+  TextScale fontScale;
   bool continues = false;
   bool glyphs = false;
   std::vector<Glyph> records;
@@ -560,8 +560,8 @@ BookReading readBook(const Book& book, const pipeline_harness::Profile& profile,
             r.shapingFace(w.box.fontId, static_cast<EpdFontFamily::Style>(w.box.style & EpdFontFamily::BOLD_ITALIC),
                           &facePpem);
             // Records are in drawn pixels: the word is shaped at the size it is drawn at.
-            w.ppem26_6 = static_cast<uint32_t>(
-                static_cast<float>(facePpem) * r.fontBaseScale(w.box.fontId) * w.box.scale + 0.5f);
+            w.ppem26_6 =
+                static_cast<uint32_t>((r.fontBaseScale(w.box.fontId) * w.box.scale).apply(static_cast<int>(facePpem)));
             line.words.push_back(std::move(w));
           }
           line.places.resize(line.words.size());

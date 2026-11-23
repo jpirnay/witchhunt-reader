@@ -30,7 +30,7 @@ struct BlockStyle {
   // Some EPUBs apply huge em-based insets to chapter-opener classes; without a
   // cap, effectiveWidth collapses to 1-2 words per line and justification dumps
   // the remaining space into a single gap.
-  static constexpr float MAX_HORIZONTAL_INSET_EM = 4.0f;
+  static constexpr int MAX_HORIZONTAL_INSET_EM = 4;
 
   CssTextAlign alignment = CssTextAlign::Justify;
 
@@ -89,7 +89,7 @@ struct BlockStyle {
   //  - headingFontId != 0: render with that (taller, real) built-in fontId; fontSizeMultiplier
   //    is then a small residual (usually 1.0) applied on top, so glyphs stay crisp.
   // h1=1.6, h2=1.4, h3=1.2 are the default desired multipliers when no explicit CSS size.
-  float fontSizeMultiplier = 1.0f;
+  TextScale fontSizeMultiplier;
   // 32-bit font-id hash (fontIds.h); 0 = use the body font + fontSizeMultiplier. Must be a
   // full int — a uint8_t would truncate the hash and the heading would render nothing.
   int32_t headingFontId = 0;
@@ -97,7 +97,7 @@ struct BlockStyle {
   // The block's computed CSS line-height, a multiple of its font size; 0 when neither it nor an ancestor sets one.
   // Inherited through the parser's flow stack, so a merge takes the child's: a spent sibling block must not lend its
   // value. Read only for Book's style line spacing (ChapterHtmlSlimParser::effectiveLineHeight). Parse-time only.
-  float lineHeightEm = 0.0f;
+  TextScale lineHeightEm = TextScale::fromRaw(0);
   // The paragraph's computed direction: Ltr or Rtl from dir or CSS, Auto for dir="auto" or unicode-bidi: plaintext on
   // the block, Unset when nothing sets one (the layout then decides it from the text or the book). Parse-time only, NOT
   // serialised; a merge takes the child's when set, else the parent's.
@@ -180,7 +180,7 @@ struct BlockStyle {
     combinedBlockStyle.direction = child.direction != CssDirection::Unset ? child.direction : direction;
     // fontSizeMultiplier: use child's if != 1.0, else parent's
     combinedBlockStyle.fontSizeMultiplier =
-        (child.fontSizeMultiplier != 1.0f) ? child.fontSizeMultiplier : fontSizeMultiplier;
+        !child.fontSizeMultiplier.isOne() ? child.fontSizeMultiplier : fontSizeMultiplier;
     // headingFontId: use child's if set, else parent's, so inline children of a heading
     // (e.g. <em> inside an <h2>) inherit the taller heading font.
     combinedBlockStyle.headingFontId = (child.headingFontId != 0) ? child.headingFontId : headingFontId;
@@ -190,10 +190,10 @@ struct BlockStyle {
   // Create a BlockStyle from CSS style properties, resolving CssLength values to pixels
   // emSize is the current font line height, used for em/rem unit conversion
   // paragraphAlignment is the user's paragraphAlignment setting preference
-  static BlockStyle fromCssStyle(const CssStyle& cssStyle, const float emSize, const CssTextAlign paragraphAlignment,
+  static BlockStyle fromCssStyle(const CssStyle& cssStyle, const int emSize, const CssTextAlign paragraphAlignment,
                                  const uint16_t viewportWidth = 0) {
     BlockStyle blockStyle;
-    const float vw = viewportWidth;
+    const int vw = viewportWidth;
     const auto maxHorizontalInsetPx = static_cast<int16_t>(emSize * MAX_HORIZONTAL_INSET_EM);
     // Resolve all CssLength values to pixels using the current font's em size and viewport width
     blockStyle.marginTop = cssStyle.marginTop.toPixelsInt16(emSize, vw);

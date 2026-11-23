@@ -25,6 +25,7 @@
 // Plus the forward direction's edges: first page, last page, one-page and zero-page chapters.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <limits>
@@ -114,16 +115,19 @@ struct ProgressMapperFixture : testing::Test {
     fs::remove_all(work);
   }
 
-  // The book percentage of a point `fraction` of the way through `spine`, by bytes. fraction may
-  // run below 0 or above 1 to reach into the neighbouring chapters.
-  float percentageInto(const int spine, const float fraction) const {
-    const float start = spine > 0 ? static_cast<float>(epub->getCumulativeSpineItemSize(spine - 1)) : 0.0f;
-    const float size = static_cast<float>(epub->getCumulativeSpineItemSize(spine)) - start;
-    return (start + fraction * size) / static_cast<float>(epub->getBookSize());
+  // The book percentage of a point `fraction` of the way through `spine`, by bytes, floored to the
+  // billionth as Epub::calculateProgress floors it. fraction may run below 0 or above 1 to reach into
+  // the neighbouring chapters.
+  ProgressPpb percentageInto(const int spine, const double fraction) const {
+    const double start = spine > 0 ? static_cast<double>(epub->getCumulativeSpineItemSize(spine - 1)) : 0.0;
+    const double size = static_cast<double>(epub->getCumulativeSpineItemSize(spine)) - start;
+    const double share = (start + fraction * size) / static_cast<double>(epub->getBookSize());
+    return ProgressPpb(static_cast<uint32_t>(std::clamp(share, 0.0, 1.0) * ProgressPpb::kWhole));
   }
 
   // Maps as the sync activity does: the reader is open on `currentSpine` with kPagesInSpine pages.
-  CrossPointPosition map(const std::string& xpath, const float percentage,
+  // nullopt is a record whose percentage is no usable number.
+  CrossPointPosition map(const std::string& xpath, const std::optional<ProgressPpb> percentage,
                          const int currentSpine = kSectionSpine) const {
     return ProgressMapper::toCrossPoint(epub, {xpath, percentage}, currentSpine, kPagesInSpine);
   }
@@ -132,10 +136,10 @@ struct ProgressMapperFixture : testing::Test {
 // --- 1. The resolver succeeds -------------------------------------------------------------------
 
 TEST_F(ProgressMapperFixture, ChapterHeadingStaysOnFirstPageWhenPercentageRunsAhead) {
-  const float percentage = percentageInto(kSectionSpine, 0.3f);
+  const ProgressPpb percentage = percentageInto(kSectionSpine, 0.3);
   // The scenario only means something if the old reconcile would have fired: more than 1% of the
   // book past the chapter's start, inside the same spine.
-  ASSERT_GT(percentage - percentageInto(kSectionSpine, 0.0f), 0.01f);
+  ASSERT_GT(distance(percentage, percentageInto(kSectionSpine, 0.0)), ProgressPpb::kWhole / 100);
 
   const auto pos = map("/body/DocFragment[2]/body/section/header/hgroup/h1/span[1]/a/span/text().0", percentage);
 
@@ -144,12 +148,12 @@ TEST_F(ProgressMapperFixture, ChapterHeadingStaysOnFirstPageWhenPercentageRunsAh
 }
 
 TEST_F(ProgressMapperFixture, MidChapterXPathWinsOverDisagreeingPercentage) {
-  const float percentage = percentageInto(kSectionSpine, 0.05f);
+  const ProgressPpb percentage = percentageInto(kSectionSpine, 0.05);
 
   // p[30] of 60 equal paragraphs: just under half way, so about page 19 of 40.
   const auto pos = map("/body/DocFragment[2]/body/section/p[30]/text().0", percentage);
 
-  ASSERT_GT(percentageInto(kSectionSpine, 0.48f) - percentage, 0.01f);
+  ASSERT_GT(distance(percentageInto(kSectionSpine, 0.48), percentage), ProgressPpb::kWhole / 100);
   EXPECT_EQ(pos.spineIndex, kSectionSpine);
   EXPECT_NEAR(pos.pageNumber, 19, 2);
 }
@@ -157,7 +161,7 @@ TEST_F(ProgressMapperFixture, MidChapterXPathWinsOverDisagreeingPercentage) {
 TEST_F(ProgressMapperFixture, ExactXPathWinsOverPercentageInAnotherSpine) {
   // KOReader's percentage says the previous chapter; the XPath says this one. The XPath names
   // an element, the percentage is an estimate: the element wins.
-  const float percentage = percentageInto(kFlatSpine, 0.5f);
+  const ProgressPpb percentage = percentageInto(kFlatSpine, 0.5);
 
   const auto pos = map("/body/DocFragment[2]/body/section/p[30]/text().0", percentage);
 
@@ -166,15 +170,14 @@ TEST_F(ProgressMapperFixture, ExactXPathWinsOverPercentageInAnotherSpine) {
 }
 
 TEST_F(ProgressMapperFixture, ExactXPathIgnoresAnUnusablePercentage) {
-  const auto pos = map("/body/DocFragment[2]/body/section/header/hgroup/h1/span[1]/a/span/text().0",
-                       std::numeric_limits<float>::quiet_NaN());
+  const auto pos = map("/body/DocFragment[2]/body/section/header/hgroup/h1/span[1]/a/span/text().0", std::nullopt);
 
   EXPECT_EQ(pos.spineIndex, kSectionSpine);
   EXPECT_EQ(pos.pageNumber, 0);
 }
 
 TEST_F(ProgressMapperFixture, AncestorOnlyMatchStillDefersToPercentage) {
-  const float percentage = percentageInto(kSectionSpine, 0.4f);
+  const ProgressPpb percentage = percentageInto(kSectionSpine, 0.4);
 
   // There is no div in this chapter, so only the enclosing section matches, and at its END tag.
   const auto pos = map("/body/DocFragment[2]/body/section/div[4]/p[2]/text().0", percentage);
@@ -186,7 +189,7 @@ TEST_F(ProgressMapperFixture, AncestorOnlyMatchStillDefersToPercentage) {
 TEST_F(ProgressMapperFixture, AncestorOnlyMatchKeepsTheXPathSpineWhenPercentageIsElsewhere) {
   // The percentage can only stand in for the page when it falls in the XPath's own spine. Here it
   // does not, so the spine is still the XPath's; the page is whatever the ancestor resolved to.
-  const float percentage = percentageInto(kFlatSpine, 0.5f);
+  const ProgressPpb percentage = percentageInto(kFlatSpine, 0.5);
 
   const auto pos = map("/body/DocFragment[2]/body/section/div[4]/p[2]/text().0", percentage);
 
@@ -196,7 +199,7 @@ TEST_F(ProgressMapperFixture, AncestorOnlyMatchKeepsTheXPathSpineWhenPercentageI
 TEST_F(ProgressMapperFixture, BodyChildParagraphXPathCarriesTheParagraphIndex) {
   // The reader snaps to the page where p[25] starts through the section cache's paragraph LUT,
   // which only knows direct children of <body>. The mapper has to hand the index over.
-  const auto pos = map("/body/DocFragment[1]/body/p[25]/text().0", percentageInto(kFlatSpine, 0.6f), kFlatSpine);
+  const auto pos = map("/body/DocFragment[1]/body/p[25]/text().0", percentageInto(kFlatSpine, 0.6), kFlatSpine);
 
   EXPECT_EQ(pos.spineIndex, kFlatSpine);
   EXPECT_TRUE(pos.hasParagraphIndex);
@@ -205,7 +208,7 @@ TEST_F(ProgressMapperFixture, BodyChildParagraphXPathCarriesTheParagraphIndex) {
 
 TEST_F(ProgressMapperFixture, NestedParagraphXPathCarriesNoParagraphIndex) {
   // p[30] inside <section> is not the 30th <p> child of <body>, so the LUT could not use it.
-  const auto pos = map("/body/DocFragment[2]/body/section/p[30]/text().0", percentageInto(kSectionSpine, 0.5f));
+  const auto pos = map("/body/DocFragment[2]/body/section/p[30]/text().0", percentageInto(kSectionSpine, 0.5));
 
   EXPECT_FALSE(pos.hasParagraphIndex);
 }
@@ -213,7 +216,7 @@ TEST_F(ProgressMapperFixture, NestedParagraphXPathCarriesNoParagraphIndex) {
 // --- 2. The resolver fails ----------------------------------------------------------------------
 
 TEST_F(ProgressMapperFixture, UnresolvedChapterStartPinsFirstPage) {
-  const float percentage = percentageInto(kBrokenSpine, 0.3f);
+  const ProgressPpb percentage = percentageInto(kBrokenSpine, 0.3);
 
   const auto pos = map("/body/DocFragment[3]/body/h1/text().0", percentage);
 
@@ -222,7 +225,7 @@ TEST_F(ProgressMapperFixture, UnresolvedChapterStartPinsFirstPage) {
 }
 
 TEST_F(ProgressMapperFixture, UnresolvedChapterStartKeepsTheXPathSpineWhenPercentageIsElsewhere) {
-  const float percentage = percentageInto(kFlatSpine, 0.5f);
+  const ProgressPpb percentage = percentageInto(kFlatSpine, 0.5);
 
   const auto pos = map("/body/DocFragment[3]/body/h1/text().0", percentage);
 
@@ -231,7 +234,7 @@ TEST_F(ProgressMapperFixture, UnresolvedChapterStartKeepsTheXPathSpineWhenPercen
 }
 
 TEST_F(ProgressMapperFixture, UnresolvedParagraphTakesThePageFromThePercentage) {
-  const float percentage = percentageInto(kBrokenSpine, 0.4f);
+  const ProgressPpb percentage = percentageInto(kBrokenSpine, 0.4);
 
   const auto pos = map("/body/DocFragment[3]/body/p[30]/text().0", percentage, kBrokenSpine);
 
@@ -243,7 +246,7 @@ TEST_F(ProgressMapperFixture, UnresolvedParagraphTakesThePageFromThePercentage) 
 }
 
 TEST_F(ProgressMapperFixture, UnresolvedParagraphWithPercentageBeforeTheSpineClampsToFirstPage) {
-  const float percentage = percentageInto(kBrokenSpine, -0.5f);
+  const ProgressPpb percentage = percentageInto(kBrokenSpine, -0.5);
 
   const auto pos = map("/body/DocFragment[3]/body/p[30]/text().0", percentage, kBrokenSpine);
 
@@ -252,15 +255,15 @@ TEST_F(ProgressMapperFixture, UnresolvedParagraphWithPercentageBeforeTheSpineCla
 }
 
 TEST_F(ProgressMapperFixture, UnresolvedParagraphWithPercentageBeyondTheSpineClampsToLastPage) {
-  const auto pos = map("/body/DocFragment[3]/body/p[30]/text().0", 1.5f, kBrokenSpine);
+  // A record past the end of the book (KOReader's percentages never are) reads as its end.
+  const auto pos = map("/body/DocFragment[3]/body/p[30]/text().0", ProgressPpb(1500000000), kBrokenSpine);
 
   EXPECT_EQ(pos.spineIndex, kBrokenSpine);
   EXPECT_EQ(pos.pageNumber, kPagesInSpine - 1);
 }
 
 TEST_F(ProgressMapperFixture, UnresolvedParagraphWithUnusablePercentageLandsOnFirstPage) {
-  const auto pos =
-      map("/body/DocFragment[3]/body/p[30]/text().0", std::numeric_limits<float>::quiet_NaN(), kBrokenSpine);
+  const auto pos = map("/body/DocFragment[3]/body/p[30]/text().0", std::nullopt, kBrokenSpine);
 
   EXPECT_EQ(pos.spineIndex, kBrokenSpine);
   EXPECT_EQ(pos.pageNumber, 0);
@@ -274,7 +277,7 @@ TEST_F(ProgressMapperFixture, UnresolvedParagraphWithUnusablePercentageLandsOnFi
 // ASpineFromTheXPathIsTrustedAndOneFromThePercentageIsNot the range check.
 
 TEST_F(ProgressMapperFixture, NoDocFragmentFallsBackToThePercentageSpine) {
-  const auto pos = map("/body/p[3]", percentageInto(kSectionSpine, 0.5f));
+  const auto pos = map("/body/p[3]", percentageInto(kSectionSpine, 0.5));
 
   EXPECT_EQ(pos.spineIndex, kSectionSpine);
   EXPECT_NEAR(pos.pageNumber, 20, 1);
@@ -282,14 +285,14 @@ TEST_F(ProgressMapperFixture, NoDocFragmentFallsBackToThePercentageSpine) {
 }
 
 TEST_F(ProgressMapperFixture, PercentageZeroIsTheStartOfTheBook) {
-  const auto pos = map("", 0.0f);
+  const auto pos = map("", ProgressPpb());
 
   EXPECT_EQ(pos.spineIndex, 0);
   EXPECT_EQ(pos.pageNumber, 0);
 }
 
 TEST_F(ProgressMapperFixture, PercentageOneIsTheLastPageOfTheLastSpine) {
-  const auto pos = map("", 1.0f, kBrokenSpine);
+  const auto pos = map("", ProgressPpb(ProgressPpb::kWhole), kBrokenSpine);
 
   EXPECT_EQ(pos.spineIndex, kBrokenSpine);
   EXPECT_EQ(pos.pageNumber, kPagesInSpine - 1);
@@ -298,14 +301,14 @@ TEST_F(ProgressMapperFixture, PercentageOneIsTheLastPageOfTheLastSpine) {
 TEST_F(ProgressMapperFixture, PercentageAtASpineBoundaryIsTheEndOfTheEarlierSpine) {
   // The byte exactly at the boundary belongs to both "the end of 12" and "the start of 13".
   // Either would be right; this pins which one, so a change is noticed.
-  const auto pos = map("", percentageInto(kFlatSpine, 1.0f), kFlatSpine);
+  const auto pos = map("", percentageInto(kFlatSpine, 1.0), kFlatSpine);
 
   EXPECT_EQ(pos.spineIndex, kFlatSpine);
   EXPECT_EQ(pos.pageNumber, kPagesInSpine - 1);
 }
 
 TEST_F(ProgressMapperFixture, UnusablePercentageAndNoXPathGiveTheStartOfTheBook) {
-  const auto pos = map("", std::numeric_limits<float>::quiet_NaN());
+  const auto pos = map("", std::nullopt);
 
   EXPECT_EQ(pos.spineIndex, 0);
   EXPECT_EQ(pos.pageNumber, 0);
@@ -316,7 +319,7 @@ TEST_F(ProgressMapperFixture, UnusablePercentageAndNoXPathGiveTheStartOfTheBook)
 TEST_F(ProgressMapperFixture, FirstPageUploadsAsTheChapterStart) {
   const auto ko = ProgressMapper::toKOReader(epub, {kSectionSpine, 0, kPagesInSpine});
 
-  EXPECT_FLOAT_EQ(ko.percentage, percentageInto(kSectionSpine, 0.0f));
+  EXPECT_EQ(ko.percentage, percentageInto(kSectionSpine, 0.0));
   EXPECT_EQ(ko.xpath.rfind("/body/DocFragment[2]/body/", 0), 0u) << ko.xpath;
 
   const auto back = ProgressMapper::toCrossPoint(epub, ko, kSectionSpine, kPagesInSpine);
@@ -332,7 +335,7 @@ TEST_F(ProgressMapperFixture, LastPageUploadsAsTheLastParagraphAndComesBackThere
   // and 60 paragraphs over 40 pages put p[60]'s start on page 38.
   const auto ko = ProgressMapper::toKOReader(epub, {kSectionSpine, kPagesInSpine - 1, kPagesInSpine});
 
-  EXPECT_FLOAT_EQ(ko.percentage, percentageInto(kSectionSpine, 1.0f));
+  EXPECT_EQ(ko.percentage, percentageInto(kSectionSpine, 1.0));
   EXPECT_EQ(ko.xpath, "/body/DocFragment[2]/body/section[1]/p[60]");
 
   const auto back = ProgressMapper::toCrossPoint(epub, ko, kSectionSpine, kPagesInSpine);
@@ -343,7 +346,7 @@ TEST_F(ProgressMapperFixture, LastPageUploadsAsTheLastParagraphAndComesBackThere
 TEST_F(ProgressMapperFixture, OnePageChapterUploadsAsItsStart) {
   const auto ko = ProgressMapper::toKOReader(epub, {kSectionSpine, 0, 1});
 
-  EXPECT_FLOAT_EQ(ko.percentage, percentageInto(kSectionSpine, 0.0f));
+  EXPECT_EQ(ko.percentage, percentageInto(kSectionSpine, 0.0));
 }
 
 TEST_F(ProgressMapperFixture, ChapterWithNoPageCountUploadsAsItsStart) {
@@ -351,19 +354,19 @@ TEST_F(ProgressMapperFixture, ChapterWithNoPageCountUploadsAsItsStart) {
   // the mapper must not divide by it either way.
   const auto ko = ProgressMapper::toKOReader(epub, {kSectionSpine, 0, 0});
 
-  EXPECT_FLOAT_EQ(ko.percentage, percentageInto(kSectionSpine, 0.0f));
+  EXPECT_EQ(ko.percentage, percentageInto(kSectionSpine, 0.0));
 }
 
 // --- What the comparison sees -------------------------------------------------------------------
 
 TEST_F(ProgressMapperFixture, ASpineFromTheXPathIsTrustedAndOneFromThePercentageIsNot) {
-  EXPECT_TRUE(map("/body/DocFragment[2]/body/section/p[30]/text().0", percentageInto(kSectionSpine, 0.5f))
+  EXPECT_TRUE(map("/body/DocFragment[2]/body/section/p[30]/text().0", percentageInto(kSectionSpine, 0.5))
                   .hasResolvedSpineIndex);
   // Still trusted when the resolver fails: the spine is string-derived.
-  EXPECT_TRUE(map("/body/DocFragment[3]/body/p[30]/text().0", percentageInto(kBrokenSpine, 0.4f), kBrokenSpine)
+  EXPECT_TRUE(map("/body/DocFragment[3]/body/p[30]/text().0", percentageInto(kBrokenSpine, 0.4), kBrokenSpine)
                   .hasResolvedSpineIndex);
-  EXPECT_FALSE(map("", percentageInto(kFlatSpine, 0.5f)).hasResolvedSpineIndex);
-  EXPECT_FALSE(map("/body/DocFragment[99]/body/p[1]", percentageInto(kFlatSpine, 0.5f)).hasResolvedSpineIndex);
+  EXPECT_FALSE(map("", percentageInto(kFlatSpine, 0.5)).hasResolvedSpineIndex);
+  EXPECT_FALSE(map("/body/DocFragment[99]/body/p[1]", percentageInto(kFlatSpine, 0.5)).hasResolvedSpineIndex);
 }
 
 TEST_F(ProgressMapperFixture, UnparseableChapterUploadsAsItsRoot) {
@@ -371,7 +374,9 @@ TEST_F(ProgressMapperFixture, UnparseableChapterUploadsAsItsRoot) {
   const auto ko = ProgressMapper::toKOReader(epub, {kBrokenSpine, 20, kPagesInSpine});
 
   EXPECT_EQ(ko.xpath, "/body/DocFragment[3]/body");
-  EXPECT_FLOAT_EQ(ko.percentage, percentageInto(kBrokenSpine, 20.0f / (kPagesInSpine - 1)));
+  // The chapter share is floored to the billionth before the book's: a billionth or two apart at most.
+  ASSERT_TRUE(ko.percentage.has_value());
+  EXPECT_NEAR(ko.percentage->ppb(), percentageInto(kBrokenSpine, 20.0 / (kPagesInSpine - 1)).ppb(), 2);
 }
 
 // --- Push by content offset ---------------------------------------------------------------------
@@ -475,7 +480,7 @@ TEST_F(OffsetPushFixture, AParagraphAfterAnEntityPushesToTheExactCodepoint) {
 // is anchored at its first direct text or, lacking any, at its END tag, which is no page start.
 
 TEST_F(ProgressMapperFixture, AnExactMatchCarriesItsOffset) {
-  const auto pos = map("/body/DocFragment[2]/body/section/p[30]/text().0", percentageInto(kSectionSpine, 0.5f));
+  const auto pos = map("/body/DocFragment[2]/body/section/p[30]/text().0", percentageInto(kSectionSpine, 0.5));
   EXPECT_TRUE(pos.hasVisibleTextOffset);
   EXPECT_GT(pos.visibleTextOffset, 0u);
   // p[30] of 60 equal paragraphs: a little under half the chapter's text.
@@ -486,7 +491,7 @@ TEST_F(ProgressMapperFixture, AnExactMatchCarriesItsOffset) {
 
 TEST_F(ProgressMapperFixture, TheChapterHeadingCarriesOffsetZero) {
   const auto pos = map("/body/DocFragment[2]/body/section/header/hgroup/h1/span[1]/a/span/text().0",
-                       percentageInto(kSectionSpine, 0.3f));
+                       percentageInto(kSectionSpine, 0.3));
   EXPECT_TRUE(pos.hasVisibleTextOffset);
   EXPECT_EQ(pos.visibleTextOffset, 0u);
 }
@@ -494,16 +499,16 @@ TEST_F(ProgressMapperFixture, TheChapterHeadingCarriesOffsetZero) {
 TEST_F(ProgressMapperFixture, AnInexactMatchCarriesNoOffset) {
   const std::string xpath = "/body/DocFragment[2]/body/section/div[4]/p[2]/text().0";
   // The chapter has no div: the resolver does match, but only through a stand-in.
-  float intra = 0.0f;
+  ProgressPpb intra;
   bool exact = true;
   ASSERT_TRUE(ChapterXPathIndexer::findProgressForXPath(epub, kSectionSpine, xpath, intra, exact));
   ASSERT_FALSE(exact);
 
-  EXPECT_FALSE(map(xpath, percentageInto(kSectionSpine, 0.4f)).hasVisibleTextOffset);
+  EXPECT_FALSE(map(xpath, percentageInto(kSectionSpine, 0.4)).hasVisibleTextOffset);
 }
 
 TEST_F(ProgressMapperFixture, AFailedResolveCarriesNoOffset) {
-  EXPECT_FALSE(map("/body/DocFragment[3]/body/p[30]/text().0", percentageInto(kBrokenSpine, 0.4f), kBrokenSpine)
+  EXPECT_FALSE(map("/body/DocFragment[3]/body/p[30]/text().0", percentageInto(kBrokenSpine, 0.4), kBrokenSpine)
                    .hasVisibleTextOffset);
 }
 
@@ -551,7 +556,7 @@ struct ElementPullFixture : testing::Test {
   std::shared_ptr<Epub> book(const std::string& body) { return syntheticBook(work, bookCount++, body); }
 
   static CrossPointPosition pull(const std::shared_ptr<Epub>& epub, const std::string& xpath) {
-    return ProgressMapper::toCrossPoint(epub, KOReaderPosition{xpath, 0.5f});
+    return ProgressMapper::toCrossPoint(epub, KOReaderPosition{xpath, ProgressPpb(ProgressPpb::kWhole / 2)});
   }
 
   // The page the reader lands on: applyPendingSyncSession's order of preference (offset, list

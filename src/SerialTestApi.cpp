@@ -28,6 +28,7 @@
 
 #if SERIAL_TEST_API
 #include <ArabicScripts.h>
+#include <BitmapHelpers.h>
 #include <EpdFontFamily.h>
 #include <Epub/Page.h>
 #include <FileReplace.h>
@@ -59,6 +60,7 @@
 #include "TouchUi.h"  // CP_TOUCH_UI
 #include "UiLanguage.h"
 #include "util/CjkLookupRun.h"
+#include "util/DecimalFormat.h"
 #include "util/Dictionary.h"
 #include "util/IdleGate.h"
 #endif
@@ -1903,8 +1905,20 @@ void cmdFs(const std::string_view arg) {
 //   LAB:DRAW:<FULL|LUT>:<bg>:<x>,<y>,<w>,<h>,<c>;...   both planes from rectangles in panel RAM
 //                   coordinates, each code c (and the background bg) being RED * 2 + BW. FULL draws the BW
 //                   bit and runs a normal full refresh; LUT sends both planes with the LUT. LAB_OK:<ms>.
+//   LAB:CANVAS:<gray>  the whole 8-bit canvas at one gray (0..255), drawn as an 8-bit picture: on a panel with
+//                   16 levels, a gray that lands on a level shows that level alone. LAB_OK:<ms>, LAB_ERROR without one.
+//   LAB:REG:<hex>   register writes sent with every LUT frame until the next LAB:REG (empty clears): records of
+//                   command, length and that many bytes (frame rate, source voltages, VCOM). LAB_OK:reg <bytes>,
+//                   or LAB_ERROR where the panel driver takes none (PanelDriver::setLabRegisters()).
+//   LAB:G16:<b1>,<b2>,<b3>:<w1>,<w2>,<w3>:<erase>:<paths>  a 16-level panel's doses (frames toward black, toward
+//                   white, the fast-turn erase) and level paths, kept until the next LAB:G16 or a restart: <paths> is
+//                   16 groups of three digits, black dose 0..3, white dose 0..3, deep 0/1, level 0 first; one group
+//                   alone gives every level that path, so LAB:CANVAS then shows it on the whole screen. LAB_OK:g16.
 namespace lab {
-uint8_t lut[128];
+// Up to one SSD2677 table (535 bytes), the largest any driver here takes. Allocated by the first LAB:LUT, so a
+// session that never runs the lab keeps the RAM.
+constexpr size_t kLutCapacity = 540;
+std::unique_ptr<uint8_t[]> lut;
 size_t lutLength = 0;
 
 int hexDigit(const char c) {
@@ -1946,21 +1960,31 @@ void fill(uint8_t* bw, uint8_t* red, const uint16_t width, const uint16_t height
 // ---- IMU ------------------------------------------------------------------------------------
 // One sample from the board's IMU, mount-corrected as tilt page turns read it: acceleration in g,
 // rotation rate in degrees per second. Held still in a known pose, the acceleration is gravity,
-// which is how a board's mounting is measured.
+// which is how a board's mounting is measured. The sample is integer mg and mdps; the reply keeps
+// the decimals it had when the sample was float.
 void cmdImu(std::string_view /*arg*/) {
   Imu::Sample s{};
   if (!halTiltSensor.readSample(s)) {
     reply("IMU_ERROR:no IMU on this board, or the read failed");
     return;
   }
-  replyf("IMU:ax=%.3f ay=%.3f az=%.3f gx=%.1f gy=%.1f gz=%.1f", s.ax, s.ay, s.az, s.gx, s.gy, s.gz);
+  char text[6][16];
+  const int32_t accel[3] = {s.axMg, s.ayMg, s.azMg};
+  const int32_t gyro[3] = {s.gxMdps, s.gyMdps, s.gzMdps};
+  for (int i = 0; i < 3; ++i) {
+    formatDecimal(text[i], sizeof(text[i]), accel[i], 1000, 3);
+    formatDecimal(text[3 + i], sizeof(text[3 + i]), gyro[i], 1000, 1);
+  }
+  replyf("IMU:ax=%s ay=%s az=%s gx=%s gy=%s gz=%s", text[0], text[1], text[2], text[3], text[4], text[5]);
 }
 
 void cmdLab(std::string_view arg) {
   if (arg.substr(0, 4) == "LUT:") {
     const std::string_view hex = arg.substr(4);
-    if (hex.empty() || hex.size() % 2 != 0 || hex.size() / 2 > sizeof(lab::lut))
+    if (hex.empty() || hex.size() % 2 != 0 || hex.size() / 2 > lab::kLutCapacity)
       return static_cast<void>(reply("LAB_ERROR:bad lut"));
+    if (!lab::lut) lab::lut = makeUniqueNoThrow<uint8_t[]>(lab::kLutCapacity);
+    if (!lab::lut) return static_cast<void>(reply("LAB_ERROR:no memory for the lut"));
     for (size_t i = 0; i < hex.size() / 2; ++i) {
       const int high = lab::hexDigit(hex[2 * i]), low = lab::hexDigit(hex[2 * i + 1]);
       if (high < 0 || low < 0) return static_cast<void>(reply("LAB_ERROR:bad lut"));
@@ -1969,7 +1993,60 @@ void cmdLab(std::string_view arg) {
     lab::lutLength = hex.size() / 2;
     return static_cast<void>(replyf("LAB_OK:lut %u", static_cast<unsigned>(lab::lutLength)));
   }
-  if (arg.substr(0, 5) != "DRAW:") return static_cast<void>(reply("LAB_ERROR:LUT or DRAW"));
+  if (arg.substr(0, 4) == "REG:") {
+    const std::string_view hex = arg.substr(4);
+    uint8_t records[64];
+    if (hex.size() % 2 != 0 || hex.size() / 2 > sizeof(records)) return static_cast<void>(reply("LAB_ERROR:bad reg"));
+    for (size_t i = 0; i < hex.size() / 2; ++i) {
+      const int high = lab::hexDigit(hex[2 * i]), low = lab::hexDigit(hex[2 * i + 1]);
+      if (high < 0 || low < 0) return static_cast<void>(reply("LAB_ERROR:bad reg"));
+      records[i] = static_cast<uint8_t>(high << 4 | low);
+    }
+    if (!display.setLabRegisters(hex.empty() ? nullptr : records, hex.size() / 2))
+      return static_cast<void>(reply("LAB_ERROR:registers not taken"));
+    return static_cast<void>(replyf("LAB_OK:reg %u", static_cast<unsigned>(hex.size() / 2)));
+  }
+  if (arg.substr(0, 7) == "CANVAS:") {
+    // One gray over the whole 8-bit canvas, drawn as the panel draws 8-bit pictures (16 levels where it has them). A
+    // gray that lands exactly on a level leaves no dither error, so the screen is that level alone: a uniform
+    // scene, which is what measuring a level on the stand needs (a level among others catches their lens glare).
+    arg.remove_prefix(7);
+    long gray = 0;
+    if (!lab::takeNumber(arg, ':', gray) || gray < 0 || gray > 255)
+      return static_cast<void>(reply("LAB_ERROR:bad gray"));
+    RenderLock lock;
+    uint16_t stride = 0;
+    uint8_t* canvas = display.borrowGray8Canvas(&stride);
+    if (!canvas) return static_cast<void>(reply("LAB_ERROR:no canvas on this panel"));
+    memset(canvas, static_cast<int>(gray), static_cast<size_t>(stride) * display.getDisplayHeight());
+    const unsigned long start = millis();
+    display.displayGray8Canvas(HalDisplay::HALF_REFRESH, false);
+    return static_cast<void>(replyf("LAB_OK:%lu", millis() - start));
+  }
+  if (arg.substr(0, 4) == "G16:") {
+    arg.remove_prefix(4);
+    uint8_t doses[6];
+    long erase = 0;
+    for (int i = 0; i < 6; ++i) {
+      long frames = 0;
+      if (!lab::takeNumber(arg, i == 2 || i == 5 ? ':' : ',', frames) || frames < 1 || frames > 63)
+        return static_cast<void>(reply("LAB_ERROR:bad dose"));
+      doses[i] = static_cast<uint8_t>(frames);
+    }
+    if (!lab::takeNumber(arg, ':', erase) || erase > 63) return static_cast<void>(reply("LAB_ERROR:bad erase"));
+    if (arg.size() != 3 && arg.size() != 48) return static_cast<void>(reply("LAB_ERROR:paths: 1 or 16 groups of 3"));
+    uint8_t paths[16][3];
+    for (size_t i = 0; i < 48; ++i) {
+      const char c = arg[i % arg.size()];
+      if (c < '0' || c > '3') return static_cast<void>(reply("LAB_ERROR:bad path"));
+      paths[i / 3][i % 3] = static_cast<uint8_t>(c - '0');
+    }
+    RenderLock lock;  // a 16-level image on the glass is given back with refreshes
+    if (!display.setGray16Calibration(doses, doses + 3, static_cast<uint8_t>(erase), paths))
+      return static_cast<void>(reply("LAB_ERROR:refused (no 16 levels, or a path nets out of range)"));
+    return static_cast<void>(reply("LAB_OK:g16"));
+  }
+  if (arg.substr(0, 5) != "DRAW:") return static_cast<void>(reply("LAB_ERROR:LUT, REG, CANVAS, G16 or DRAW"));
   arg.remove_prefix(5);
   const bool full = arg.substr(0, 5) == "FULL:";
   if (!full && arg.substr(0, 4) != "LUT:") return static_cast<void>(reply("LAB_ERROR:FULL or LUT"));
@@ -2009,16 +2086,61 @@ void cmdLab(std::string_view arg) {
   if (full) {
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
   } else {
-    shown = display.displayLabFrame(bw, red, lab::lut);
+    shown = display.displayLabFrame(bw, red, lab::lut.get());
   }
   if (red) renderer.returnSecondaryBuffer();
   if (!shown) return static_cast<void>(reply("LAB_ERROR:no lab path on this panel"));
   replyf("LAB_OK:%lu", millis() - start);
 }
 
-void cmdSleep(std::string_view /*arg*/) {
-  reply("SLEEP_OK");
-  powerRequest = PowerRequest::Sleep;
+// CMD:SLEEP:SCREEN's BOOK=, taken by main.cpp when it paints the screen.
+std::string sleepScreenBook;
+
+// SLEEP: deep sleep, as a held power key. SLEEP:SCREEN[:T=<a>,<b>,<c>][:F=<a>,<b>,<c>,<d>][:BOOK=<path>]: only the
+// sleep screen, painted as deep sleep paints it, with the device left awake on it, so a camera can look at it and the
+// next one follows without a button press. T= sets the 4-level dither thresholds and F= the values fed back for the
+// four levels (gray4tuning in BitmapHelpers.h), both kept until the next T=/F= or a restart. BOOK= (last, it takes the
+// rest of the line) shows that book's cover where the mode shows the last book's, for this screen only and without
+// opening the book.
+void cmdSleep(const std::string_view arg) {
+  if (arg.empty()) {
+    reply("SLEEP_OK");
+    powerRequest = PowerRequest::Sleep;
+    return;
+  }
+  std::string_view head;
+  std::string_view rest;
+  splitHead(arg, head, rest);
+  if (head != "SCREEN") return static_cast<void>(reply("SLEEP_ERROR:expected SCREEN, got ", head));
+  sleepScreenBook.clear();
+  while (!rest.empty()) {
+    if (rest.substr(0, 5) == "BOOK=") {
+      sleepScreenBook.assign(rest.substr(5));
+      break;
+    }
+    std::string_view field;
+    std::string_view after;
+    splitHead(rest, field, after);
+    rest = after;
+    // T= takes 3 values, F= 4, each rising within 0..255.
+    const bool isT = field.substr(0, 2) == "T=";
+    const bool isF = field.substr(0, 2) == "F=";
+    const int count = isT ? 3 : 4;
+    int v[4];
+    bool ok = (isT || isF) && SerialCommandGrammar::parseIntList(field.substr(2), v, count) && v[0] >= 0 &&
+              v[count - 1] <= 255;
+    for (int i = 1; ok && i < count; i++) ok = v[i - 1] <= v[i];
+    if (!ok) {
+      return static_cast<void>(
+          reply("SLEEP_ERROR:expected T=<a>,<b>,<c> or F=<a>,<b>,<c>,<d> rising in 0..255, or BOOK=, got ", field));
+    }
+    uint8_t* target = isT ? gray4tuning::thresholds : gray4tuning::feedback;
+    for (int i = 0; i < count; i++) target[i] = static_cast<uint8_t>(v[i]);
+  }
+  const uint8_t* t = gray4tuning::thresholds;
+  const uint8_t* f = gray4tuning::feedback;
+  replyf("SLEEP_OK:screen T=%u,%u,%u F=%u,%u,%u,%u", t[0], t[1], t[2], f[0], f[1], f[2], f[3]);
+  powerRequest = PowerRequest::SleepScreen;
 }
 
 void cmdReboot(std::string_view /*arg*/) {
@@ -2332,6 +2454,8 @@ PowerRequest takePowerRequest() {
   powerRequest = PowerRequest::None;
   return request;
 }
+
+std::string takeSleepScreenBook() { return std::exchange(sleepScreenBook, std::string()); }
 
 bool sendPage(const PageOnScreen& onScreen) {
   const WireScratch scratch;

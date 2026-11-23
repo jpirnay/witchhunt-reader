@@ -21,6 +21,7 @@
 #include <EpdFontFamily.h>
 #include <GlyphProvider.h>
 #include <GlyphRun.h>
+#include <TextScale.h>
 #include <Utf8.h>
 
 #include <cmath>
@@ -113,8 +114,8 @@ class GfxRenderer {
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const {
     return getTextAdvanceX(fontId, text, style);
   }
-  int getTextWidthScaled(int fontId, const char* text, EpdFontFamily::Style style, float scale) const {
-    return static_cast<int>(getTextWidth(fontId, text, style) * scale);
+  int getTextWidthScaled(int fontId, const char* text, EpdFontFamily::Style style, TextScale scale) const {
+    return scale.applyTruncated(getTextWidth(fontId, text, style));
   }
   // Test seam: called on every measurement, so a test can look at state the layout holds mid-build. Null: nothing.
   inline static void (*onTextAdvance)() = nullptr;
@@ -181,7 +182,7 @@ class GfxRenderer {
   int snapSpaceAdvance(int /*fontId*/, const int32_t totalFP) const { return (totalFP + 8) >> 4; }
   int getKerning(int, uint32_t, uint32_t, EpdFontFamily::Style) const { return 0; }
   int getLineHeight(int) const { return 24; }
-  int getLineHeightScaled(int, float scale) const { return static_cast<int>(24 * scale); }
+  int getLineHeightScaled(int, TextScale scale) const { return scale.applyTruncated(24); }
   // Test seam for the image-header heap recovery. 0 (the default) models a host build with
   // no cache manager at all, so callers are told nothing was released. When set, this models
   // the real thing — dropping the SD-font glyph caches frees heap — by reporting success and
@@ -193,7 +194,7 @@ class GfxRenderer {
     return true;
   }
   int getFontAscenderSize(int) const { return 18; }
-  int getFontAscenderSizeScaled(int, float scale) const { return static_cast<int>(18 * scale); }
+  int getFontAscenderSizeScaled(int, TextScale scale) const { return scale.applyTruncated(18); }
   int getTextHeight(int) const { return 24; }
   // Synthetic ink model: caps span 14 px above the baseline, nothing below
   // (matches the deterministic-metrics philosophy above; 18-14=4 px leading).
@@ -212,15 +213,15 @@ class GfxRenderer {
     Orientation frame;
     int x;
     int y;
-    float scale;
+    TextScale scale;
   };
   mutable std::vector<TextDraw>* textDraws = nullptr;
   // The page's words come formed (drawFormedText); this stub records both entry points alike.
   void drawFormedText(int, int x, int y, const char* text, bool = true,
                       EpdFontFamily::Style = EpdFontFamily::REGULAR) const {
-    if (textDraws) textDraws->push_back({text, live_, x, y, 1.0f});
+    if (textDraws) textDraws->push_back({text, live_, x, y, TextScale()});
   }
-  void drawFormedTextScaled(int, int x, int y, const char* text, bool, EpdFontFamily::Style, float scale) const {
+  void drawFormedTextScaled(int, int x, int y, const char* text, bool, EpdFontFamily::Style, TextScale scale) const {
     if (textDraws) textDraws->push_back({text, live_, x, y, scale});
   }
   void drawText(int f, int x, int y, const char* text, bool black = true,
@@ -228,7 +229,7 @@ class GfxRenderer {
     drawFormedText(f, x, y, text, black, style);
   }
   void drawTextScaled(int f, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
-                      float scale) const {
+                      TextScale scale) const {
     drawFormedTextScaled(f, x, y, text, black, style, scale);
   }
   // A shaped run, measured as the real renderer's glyphRunWidth measures it (the records' pen, accumulated outside
@@ -239,15 +240,15 @@ class GfxRenderer {
     int x;
     int y;
     uint16_t count;
-    float scale;
+    TextScale scale;
   };
   mutable std::vector<GlyphRunDraw>* glyphRunDraws = nullptr;
   void drawGlyphRun(const int fontId, const int x, const int y, const GlyphRun& run, bool = true,
-                    EpdFontFamily::Style = EpdFontFamily::REGULAR, const float scale = 1.0f) const {
+                    EpdFontFamily::Style = EpdFontFamily::REGULAR, const TextScale scale = TextScale()) const {
     if (glyphRunDraws) glyphRunDraws->push_back({fontId, x, y, run.count, scale});
   }
-  int glyphRunWidth(int, const GlyphRun& run, const float scale = 1.0f) const {
-    return glyphRunAdvance(run, scale < 0.99f || scale > 1.01f);
+  int glyphRunWidth(int, const GlyphRun& run, const TextScale scale = TextScale()) const {
+    return glyphRunAdvance(run, scale < TextScale::percent(99) || scale > TextScale::percent(101));
   }
   // The face a shaper reads for a font's style, and its ppem (26.6), as the real renderer's shapingFace answers: a
   // test's seam decides, a face refused its memory included; null (the default) is a font that cannot shape, as the
@@ -261,7 +262,7 @@ class GfxRenderer {
   // A section build's end frees the shaping faces: counted, so a test sees each build do it.
   static inline int shapingReleases = 0;
   static void releaseShapingFaces() { ++shapingReleases; }
-  float fontBaseScale(int) const { return 1.0f; }
+  TextScale fontBaseScale(int) const { return TextScale(); }
   // The glyph-ID prefetch of a build's warm step: counted, one per run.
   mutable int prefetchedRuns = 0;
   void prefetchGlyphRun(int, const GlyphRun&, EpdFontFamily::Style) const { ++prefetchedRuns; }

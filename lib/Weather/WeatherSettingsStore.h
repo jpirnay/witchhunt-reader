@@ -2,6 +2,8 @@
 #include <cstdint>
 #include <string>
 
+#include "WeatherUnits.h"
+
 enum class WeatherTempUnit : uint8_t { CELSIUS = 0, FAHRENHEIT = 1 };
 enum class WeatherWindUnit : uint8_t { KMH = 0, MS = 1, MPH = 2, KNOTS = 3 };
 enum class WeatherPrecipUnit : uint8_t { MM = 0, INCH = 1 };
@@ -10,8 +12,8 @@ class WeatherSettingsStore {
  private:
   static WeatherSettingsStore instance;
 
-  float latitude = 0;
-  float longitude = 0;
+  weather::MicroDegrees latitude = 0;
+  weather::MicroDegrees longitude = 0;
   bool locationConfigured = false;
   std::string locationName;
   WeatherTempUnit tempUnit = WeatherTempUnit::CELSIUS;
@@ -31,10 +33,10 @@ class WeatherSettingsStore {
   bool loadFromFile();
 
   // Location
-  void setLocation(float lat, float lon, const std::string& name);
+  void setLocation(weather::MicroDegrees lat, weather::MicroDegrees lon, const std::string& name);
   void clearLocation();
-  float getLatitude() const { return latitude; }
-  float getLongitude() const { return longitude; }
+  weather::MicroDegrees getLatitude() const { return latitude; }
+  weather::MicroDegrees getLongitude() const { return longitude; }
   const std::string& getLocationName() const { return locationName; }
   bool hasLocation() const { return locationConfigured; }
 

@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <BoardConfig.h>  // FREEINK_DRIVER_LGFX_EPD
 #include <EInkDisplay.h>
+#include <GrayLevelPlan.h>
 
 class HalDisplay {
  public:
@@ -246,6 +247,13 @@ class HalDisplay {
   void displayOnePassFrame(RefreshMode refreshMode, bool turnOffScreen);
   // Development builds only (the serial test API's LAB command): both planes and an external LUT as given.
   bool displayLabFrame(const uint8_t* bw, const uint8_t* red, const uint8_t* lut);
+  // Register writes sent with every lab frame until cleared (FreeInkDisplay::setLabRegisters()); development builds.
+  bool setLabRegisters(const uint8_t* records, size_t len);
+  // A 16-level panel's calibration (FreeInkDisplay::setGray16Passes and setGray16Levels): three doses toward black and
+  // three toward white in frames, the fast-turn erase, and each level's path {black dose 0..3, white dose 0..3, deep
+  // 0/1}. Kept until the next call or a restart. False where the panel has no 16 levels or a path nets outside the
+  // give-back's range. Development builds only (the serial test API's LAB:G16).
+  bool setGray16Calibration(const uint8_t black[3], const uint8_t white[3], uint8_t erase, const uint8_t (*paths)[3]);
   // Compose the intact B/W framebuffer with the LSB/MSB planes staged by
   // copyGrayscale*Buffers() and display the result in one refresh. Falls back to
   // a plain displayBuffer() on a panel that cannot, so callers need no branch of
@@ -259,8 +267,9 @@ class HalDisplay {
   // Grey levels this panel resolves in one refresh. 4 on every dual-plane
   // controller (X3, X4, X4 Pro, M5 Paper Mono) — two selector bits per pixel is
   // the whole state space, so it is a hard ceiling, not a setting — and 16 on a
-  // panel whose driver keeps a multi-bit buffer of its own (T5S3). Callers that
-  // can render either way branch on this; everyone else keeps the plane path.
+  // panel whose driver keeps a multi-bit buffer of its own (T5S3; the Picco's
+  // 16-level image). Callers that can render either way branch on this;
+  // everyone else keeps the plane path.
   uint8_t getGrayLevels() const;
   // Borrow the driver's composition buffer and paint 8-bit grey straight into
   // it: one byte per pixel (0x00 black, 0xFF white), `stride` bytes per row,
@@ -281,6 +290,22 @@ class HalDisplay {
   // waveform. The driver picks a bank that can land every level, so this may
   // refresh more thoroughly (and more slowly) than `refreshMode` asked for.
   void displayGray8Canvas(RefreshMode refreshMode, bool turnOffScreen = false);
+
+  // A panel without such a canvas can still show more than four levels where its driver runs a gray-level plan
+  // (GrayLevelPlan.h: a B/W base, then passes of 1-bit planes the host draws). getGrayLevels() stays at what the
+  // canvas offers, so callers that only know the canvas are not sent to one that is not there.
+  //
+  // nullptr on every panel for now: the waveforms (Free-Ink #220 on the X3; the X4 Pro and X4 to follow) are not
+  // in the SDK yet. Once they are, the plan comes from the driver and the two calls below forward to it.
+  const gray_levels::Plan* grayLevelPlan() const;
+  // Whether this build's panel driver can answer with a plan at all. Known when building, as kMayLendGray8Canvas
+  // is: code that runs a plan is compiled out of every other build (on the C3 it is ~7.7 KB of flash, most of it
+  // the quantizer's soft-float setup). Turn it on with the first driver that carries a plan.
+  static constexpr bool kMayRunGrayLevelPlan = false;
+  // The plan's base, from `frame`. False, before any bus traffic, where the panel has no plan.
+  bool displayGrayLevelBase(const uint8_t* frame, RefreshMode refreshMode);
+  // Pass `pass` of the plan over the planes uploaded since the last step (copyGrayscaleLsbBuffers/MsbBuffers).
+  bool displayGrayLevelPass(uint8_t pass, bool turnOffScreen = false);
 
   // What the panel does, from the SDK (FreeInkDisplay): ask these rather than which board this
   // is. They are what the old deviceIsX3() callers meant, and an X4 Pro can come up on any of

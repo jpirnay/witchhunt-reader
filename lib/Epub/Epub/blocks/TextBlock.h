@@ -105,7 +105,7 @@ class BufferedFileReader;  // and where it reads itself back
 // right-aligned. Nothing here is lost: the dropped fields remain in BlockStyle
 // and on disk, so widening this struct later is a local change.
 struct RenderStyle {
-  float fontSizeMultiplier = 1.0f;
+  TextScale fontSizeMultiplier;
   int32_t headingFontId = 0;  // 0 = body font scaled by fontSizeMultiplier
   CssTextAlign alignment = CssTextAlign::Justify;
 };
@@ -127,7 +127,7 @@ class TextBlock final : public Block {
   // crosspoint-reader PR #3934 (Justin Mitchell): its MAX_WORD_FONTS table and slot per word.
   struct WordFont {
     int32_t fontId = 0;  // a full 32-bit font ID; 0: the block's own font
-    float scale = 1.0f;
+    TextScale scale;
   };
   static constexpr uint8_t kMaxWordFonts = 8;
   // A word's size as layout keeps it: its inline font-size percent of the block's size, and its font slot, an index
@@ -159,14 +159,16 @@ class TextBlock final : public Block {
   bool sizesPresent = false;
   bool isValid = true;
   uint8_t wordFontCount = 0;  // the line's word fonts (see WordFont); 0 on a line in the block's font alone
-  // Five bits in the struct's pad byte: a line of a vertical-rl page (see setVertical), whether its 、。 are centred,
+  // Six bits in the struct's pad byte: a line of a vertical-rl page (see setVertical), whether its 、。 are centred,
   // whether it has a Ruby or Emphasis record (it reserves the band above its base), whether the arena is ours to
-  // free (see arena), and whether the object itself was built in a build arena (make, operator delete).
+  // free (see arena), whether the object itself was built in a build arena (make, operator delete), and whether the
+  // PageLine that holds it was (setHolderInArena).
   bool vertical_ : 1 = false;
   bool centredMarks_ : 1 = false;
   bool annotationBand_ : 1 = false;
   bool arenaOwned_ : 1 = false;
   bool objectInArena_ : 1 = false;
+  bool holderInArena_ : 1 = false;
   // The ONLY allocation. Heap by default (nothrow, so OOM yields an invalid block instead of
   // abort() -- bare new is not nothrow with -fno-exceptions). A section build that lends a
   // scratch region (the borrowed secondary framebuffer) hands it in through the range
@@ -231,10 +233,10 @@ class TextBlock final : public Block {
 
   // Effective render scale of word i: its font's scale (a word font's own, else the block multiplier) x the word's
   // size percent.
-  float wordScale(const uint16_t i) const {
+  TextScale wordScale(const uint16_t i) const {
     const WordFont* font = wordFont(i);
-    const float base = font ? font->scale : renderStyle.fontSizeMultiplier;
-    return sizesPresent ? base * (sizesArr[i] / 100.0f) : base;
+    const TextScale base = font ? font->scale : renderStyle.fontSizeMultiplier;
+    return sizesPresent ? base * TextScale::percent(sizesArr[i]) : base;
   }
   // The font word i is drawn in: its word font's, else the block's (`blockFontId`).
   int wordFontId(const uint16_t i, const int blockFontId) const {
@@ -335,6 +337,10 @@ class TextBlock final : public Block {
   struct ArenaRoom {
     size_t keepFree = SIZE_MAX;
     size_t displaced = 0;
+    // Where an object of the page goes in `arena` under the first rule above: `bytes` at `align` while `keepFree`
+    // stays free after them, counted in `displaced` with their padding. Null otherwise, and the object takes the heap.
+    // The one place the rule is applied, for every kind of object a page puts there.
+    void* placeObject(BuildArena& arena, size_t bytes, size_t align);
   };
   // A laid-out line, the object where its bytes go: in `arena` as `room` allows, else on the heap
   // (new (std::nothrow), as before). Null `room`: the object on the heap, the bytes in `arena` while it has room. An
@@ -360,6 +366,11 @@ class TextBlock final : public Block {
     if (!inArena) ::operator delete(block);
   }
   bool objectInArena() const { return objectInArena_; }
+  // The PageLine that holds this line keeps here whether it was built in a build arena (PageLine::make,
+  // PageLine::objectInArena): a spare bit of this object's pad byte, where the PageLine has no byte to spare on the
+  // C3 (12 B: its vtable pointer, x and y, and this line's pointer). Only PageLine::make sets it.
+  void setHolderInArena() { holderInArena_ = true; }
+  bool holderInArena() const { return holderInArena_; }
 
   const RenderStyle& getRenderStyle() const { return renderStyle; }
   bool isEmpty() override { return numWords == 0; }
@@ -444,10 +455,10 @@ class TextBlock final : public Block {
   // drawn in.
   int annotationBand(const GfxRenderer& renderer, int fontId) const;
   // The same band from what a layout knows before the line exists.
-  static int annotationBandFor(const GfxRenderer& renderer, int effFontId, float blockScale, uint8_t maxSizePct);
+  static int annotationBandFor(const GfxRenderer& renderer, int effFontId, TextScale blockScale, uint8_t maxSizePct);
   // How far below the band the line's baseline sits: the ascender of its tallest word size, which render() draws every
   // word's baseline at. From what a layout knows before the line exists, as annotationBandFor is.
-  static int lineAscenderFor(const GfxRenderer& renderer, int effFontId, float blockScale, uint8_t maxSizePct);
+  static int lineAscenderFor(const GfxRenderer& renderer, int effFontId, TextScale blockScale, uint8_t maxSizePct);
   // No word draws scaled: block multiplier 1, no heading font, no word sizes, no SUP/SUB/SMALL_CAPS, no annotations,
   // not vertical.
   bool drawsUnscaled() const;
@@ -470,7 +481,7 @@ class TextBlock final : public Block {
     // font, and a word may carry a style and a size scale of its own.
     int fontId = 0;
     EpdFontFamily::Style style = EpdFontFamily::REGULAR;
-    float scale = 1.0f;
+    TextScale scale;
   };
   WordBox wordBox(const GfxRenderer& renderer, uint16_t i, int fontId, int x, int y) const;
 
