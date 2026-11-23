@@ -48,9 +48,9 @@ FLOAT_FREE = [
     "lib/Xtc/",
     "src/activities/home/FileBrowserActivity.cpp",
     "src/activities/util/BmpViewerActivity.cpp",
-    "src/components/themes/lyra/Lyra3CoversTheme.cpp",
     "src/components/themes/lyra/LyraCarouselTheme.cpp",
     "src/components/themes/lyra/LyraTheme.cpp",
+    "src/components/themes/lyra/LyraTilesTheme.cpp",
     # Progress and sync (integer-maths area 4): progress in billionths (lib/Epub/Epub/ProgressPpb.h).
     # KOReaderSyncClient.cpp and KOReaderAutoSync.cpp stay out: ArduinoJson's float parsing and writing is inlined
     # into them.

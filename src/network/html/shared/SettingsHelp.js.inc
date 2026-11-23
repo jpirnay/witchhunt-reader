@@ -44,7 +44,7 @@ const SETTINGS_HELP = {
     "sleepImagePickMode": "Whether Custom sleep images are picked at random or shown in turn.",
     "quickResumeSleepScreen": "When the device sleeps on its own, the page stays on screen and waking returns straight to it.",
     "hideBatteryPercentage": "Hides the battery percentage: never, only while reading, or everywhere.",
-    "uiTheme": "Look of menus and Home; Lyra Extended shows three books on Home, Lyra Carousel a cover carousel.",
+    "uiTheme": "Look of menus and Home; Lyra Tiles shows the book you read on a card with large tiles, Lyra Carousel a cover carousel.",
     "uiFontSize": "Text size in menus, headers and lists; the reader's status bar is not affected.",
     "showLibraryOnHome": "Shows Library on the Home screen; when off, it moves behind More.",
     "showReadingStatsOnHome": "Shows Reading Stats on the Home screen; when off, it moves behind More.",

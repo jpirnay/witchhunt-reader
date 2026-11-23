@@ -826,9 +826,9 @@ void HomeActivity::render(RenderLock&&) {
 
 // A tap on a cover or a menu entry. Both sets of targets were published by whichever theme
 // painted them, so this knows nothing about where a cover or a row physically sits -- which is
-// the point, given four themes that lay the home screen out four different ways (one cover,
-// three covers, a carousel, and a menu that is a vertical row list in two themes and a
-// horizontal icon strip in the carousel).
+// the point, given four themes that lay the home screen out four different ways (one cover, a
+// card with tiles, a carousel, and a menu that is a vertical row list in two themes, a grid of
+// tiles in one and a horizontal icon strip in the carousel).
 //
 // Apply the same configurable selection/activation policy as other selectable touch surfaces.
 // This includes the carousel's horizontal icon row as well as covers and vertical menu rows.

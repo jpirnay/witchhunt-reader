@@ -541,9 +541,8 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 - **UI Theme**: Visual theme for the device UI:
   - "Classic" - The original theme
   - "Lyra" - Rounded elements and menu icons
-  - "Lyra Extended" - Lyra with 3 books on the Home Screen
   - "Lyra Carousel" - Lyra with a full cover carousel on the Home Screen
-  - "Lyra Tiles" - Lyra with a large card for the book you are reading and big labelled tiles for the screens you open most (not on the Murphy M3)
+  - "Lyra Tiles" - Lyra with a large card for the book you are reading and big labelled tiles for the screens you open most
 - **UI Font Size**: Text size for menus, headers and lists: "Normal" (default) / "Large". The reader's own status bar is not affected.
 - **Dark Mode**: White text on black, in the reader and every menu. Pictures, covers and QR codes keep their own colours; sleep screens and the image viewer show as usual. Text anti-aliasing and the gray shades of pictures are off while it is on (except anti-aliased text in the EPUB reader on the LilyGo T5 S3), and the screen clears its ghosting twice as often as **Refresh Frequency** says. "OFF" (default) / "ON". On a device with a reading light the choices are "Off" / "On" / "Scheduled": **Dark From** and **Dark Until** (in half-hour steps, shown under Scheduled) set the hours, which may run past midnight. The switch happens with the next page turn or screen change after the hour, never in the middle of one, and the device does not wake for it. On the BOOX Picco the slide switch can turn Dark Mode on and off instead of the light (**Slide Switch** under **[Controls](#373-controls)**). On any device a key or gesture bound to **Toggle Dark Mode** does it from any screen; under Scheduled that holds until the dark hours next start or end.
 - **Home screen** (submenu): Which entries sit on the Home screen; the rest move behind **More**. See **[Home Screen](#31-home-screen)**.
