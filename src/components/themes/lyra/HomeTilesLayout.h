@@ -21,34 +21,69 @@ struct Box {
   int h = 0;
 };
 
-constexpr int kGap = 12;
-constexpr int kSidePadding = 16;
-constexpr int kBottomPadding = 8;
-// More and Settings: as tall as Lyra's menu rows, so as easy to hit, and set apart by being lighter.
-constexpr int kBottomRowHeight = 60;
-// Upright, a tile is 16 % of the content's height within these bounds.
-constexpr int kMinTileHeight = 104;
-constexpr int kMaxTileHeight = 136;
-// Sideways the tiles share the right column's height, up to this.
-constexpr int kMaxSidewaysTileHeight = 180;
 constexpr int kMaxTiles = 4;
-
-// The Also reading row, its label line included. It appears only where the card keeps
-// kMinCardHeight beside it and a full grid of tiles (stripFits): a panel shows it or does not,
-// whatever the number of entries.
-constexpr int kStripHeight = 118;
-// One line of the small face (23 px on the 480 px panels) and the space under it. At 22 the line sat
-// on the covers.
-constexpr int kStripLabelHeight = 28;
 constexpr int kStripBooks = 3;
-constexpr int kMinCardHeight = 360;
 
-// Inside the card: the padding, the progress line and bar at its foot, and the space between the
-// cover and the text column and between the cover and the foot.
-constexpr int kCardPadding = 14;
-constexpr int kCardFootHeight = 36;
-constexpr int kCoverToText = 18;
-constexpr int kCoverToFoot = 10;
+// The sizes the proportions work with. Two sets: the 480 px panels and up, and the compact one
+// (Murphy, 240 px), where every size of the large set would leave the card no room at all.
+struct Dimensions {
+  int gap;
+  int sidePadding;
+  int bottomPadding;
+  // More and Settings: as tall as Lyra's menu rows, so as easy to hit, and set apart by being lighter.
+  int bottomRowHeight;
+  // Upright, a tile is 16 % of the content's height within these bounds.
+  int minTileHeight;
+  int maxTileHeight;
+  // Sideways the tiles share the right column's height, up to this.
+  int maxSidewaysTileHeight;
+  // The Also reading row, its label line included. It appears only where the card keeps
+  // minCardHeight beside it and a full grid of tiles (stripFits): a panel shows it or does not,
+  // whatever the number of entries.
+  int stripHeight;
+  // One line of the small face (23 px on the 480 px panels) and the space under it.
+  int stripLabelHeight;
+  int minCardHeight;
+  // Inside the card: the padding, the progress line and bar at its foot, and the space between
+  // the cover and the text column and between the cover and the foot.
+  int cardPadding;
+  int cardFootHeight;
+  int coverToText;
+  int coverToFoot;
+};
+
+inline constexpr Dimensions kRegular{/*gap=*/12,
+                                     /*sidePadding=*/16,
+                                     /*bottomPadding=*/8,
+                                     /*bottomRowHeight=*/60,
+                                     /*minTileHeight=*/104,
+                                     /*maxTileHeight=*/136,
+                                     /*maxSidewaysTileHeight=*/180,
+                                     /*stripHeight=*/118,
+                                     /*stripLabelHeight=*/28,
+                                     /*minCardHeight=*/360,
+                                     /*cardPadding=*/14,
+                                     /*cardFootHeight=*/36,
+                                     /*coverToText=*/18,
+                                     /*coverToFoot=*/10};
+
+// Sized for Murphy's 240 x 416 with its smaller faces (a body line is 20 px): a 176 px card, two
+// rows of 62 px tiles and a 36 px bottom row, as tall as its capped menu rows. No room for the
+// Also reading row on any compact panel.
+inline constexpr Dimensions kCompact{/*gap=*/6,
+                                     /*sidePadding=*/8,
+                                     /*bottomPadding=*/4,
+                                     /*bottomRowHeight=*/36,
+                                     /*minTileHeight=*/56,
+                                     /*maxTileHeight=*/72,
+                                     /*maxSidewaysTileHeight=*/90,
+                                     /*stripHeight=*/118,
+                                     /*stripLabelHeight=*/28,
+                                     /*minCardHeight=*/360,
+                                     /*cardPadding=*/8,
+                                     /*cardFootHeight=*/24,
+                                     /*coverToText=*/10,
+                                     /*coverToFoot=*/6};
 
 // Upright or sideways is decided by the content, not the panel: the X4 held in landscape is wide.
 constexpr bool sideways(const Box& content) { return content.w > content.h; }
@@ -60,34 +95,34 @@ struct Regions {
 
 // `content` is the screen above the button hints; `top` is the first line under the status line.
 // `tileCount` is the destinations shown as tiles (at most kMaxTiles); the bottom row always exists.
-constexpr Regions regions(const Box& content, const int top, const int tileCount) {
+constexpr Regions regions(const Box& content, const int top, const int tileCount, const Dimensions& d = kRegular) {
   const int tiles = tileCount < 0 ? 0 : (tileCount > kMaxTiles ? kMaxTiles : tileCount);
-  const int bottom = content.y + content.h - kBottomPadding;
+  const int bottom = content.y + content.h - d.bottomPadding;
   Regions r{};
   if (!sideways(content)) {
-    const int x = content.x + kSidePadding;
-    const int w = content.w - 2 * kSidePadding;
+    const int x = content.x + d.sidePadding;
+    const int w = content.w - 2 * d.sidePadding;
     const int rows = (tiles + 1) / 2;
     int tileH = (content.h * 16 + 50) / 100;
-    tileH = tileH < kMinTileHeight ? kMinTileHeight : (tileH > kMaxTileHeight ? kMaxTileHeight : tileH);
+    tileH = tileH < d.minTileHeight ? d.minTileHeight : (tileH > d.maxTileHeight ? d.maxTileHeight : tileH);
     // Each row of tiles brings the gap under it, down to the bottom row.
-    const int menuH = rows * (tileH + kGap) + kBottomRowHeight;
+    const int menuH = rows * (tileH + d.gap) + d.bottomRowHeight;
     r.menu = Box{x, bottom - menuH, w, menuH};
-    const int booksH = r.menu.y - kGap - top;
+    const int booksH = r.menu.y - d.gap - top;
     r.books = Box{x, top, w, booksH > 0 ? booksH : 0};
     return r;
   }
-  const int leftW = (content.w * 56 + 50) / 100 - kSidePadding;
-  r.books = Box{content.x + kSidePadding, top, leftW, bottom - top};
-  const int menuX = r.books.x + leftW + kGap;
-  r.menu = Box{menuX, top, content.x + content.w - kSidePadding - menuX, bottom - top};
+  const int leftW = (content.w * 56 + 50) / 100 - d.sidePadding;
+  r.books = Box{content.x + d.sidePadding, top, leftW, bottom - top};
+  const int menuX = r.books.x + leftW + d.gap;
+  r.menu = Box{menuX, top, content.x + content.w - d.sidePadding - menuX, bottom - top};
   return r;
 }
 
-// Whether the panel has room for the Also reading row: the card keeps kMinCardHeight with two full
+// Whether the panel has room for the Also reading row: the card keeps minCardHeight with two full
 // rows of tiles and the bottom row under it. Fewer tiles give the card more room, not the row.
-constexpr bool stripFits(const Box& content, const int top) {
-  return regions(content, top, kMaxTiles).books.h - kStripHeight - kGap >= kMinCardHeight;
+constexpr bool stripFits(const Box& content, const int top, const Dimensions& d = kRegular) {
+  return regions(content, top, kMaxTiles, d).books.h - d.stripHeight - d.gap >= d.minCardHeight;
 }
 
 struct Books {
@@ -102,23 +137,23 @@ struct Books {
 };
 
 // `withStrip` from stripFits(); the row then takes the foot of `area`.
-constexpr Books books(const Box& area, const bool withStrip) {
+constexpr Books books(const Box& area, const bool withStrip, const Dimensions& d = kRegular) {
   Books b{};
   b.card = area;
-  if (withStrip && area.h - kStripHeight - kGap >= kMinCardHeight) {
+  if (withStrip && area.h - d.stripHeight - d.gap >= d.minCardHeight) {
     b.hasStrip = true;
-    b.card.h = area.h - kStripHeight - kGap;
-    b.strip = Box{area.x, area.y + area.h - kStripHeight, area.w, kStripHeight};
-    const int slotW = (b.strip.w - (kStripBooks - 1) * kGap) / kStripBooks;
-    const int slotH = kStripHeight - kStripLabelHeight;
+    b.card.h = area.h - d.stripHeight - d.gap;
+    b.strip = Box{area.x, area.y + area.h - d.stripHeight, area.w, d.stripHeight};
+    const int slotW = (b.strip.w - (kStripBooks - 1) * d.gap) / kStripBooks;
+    const int slotH = d.stripHeight - d.stripLabelHeight;
     for (int i = 0; i < kStripBooks; ++i) {
-      b.slots[i] = Box{b.strip.x + i * (slotW + kGap), b.strip.y + kStripLabelHeight, slotW, slotH};
+      b.slots[i] = Box{b.strip.x + i * (slotW + d.gap), b.strip.y + d.stripLabelHeight, slotW, slotH};
       b.slotCovers[i] = Box{b.slots[i].x, b.slots[i].y, slotH * 3 / 5, slotH};
     }
   }
 
-  const int innerW = b.card.w - 2 * kCardPadding;
-  int coverAreaH = b.card.h - 2 * kCardPadding - kCardFootHeight - kCoverToFoot;
+  const int innerW = b.card.w - 2 * d.cardPadding;
+  int coverAreaH = b.card.h - 2 * d.cardPadding - d.cardFootHeight - d.coverToFoot;
   if (coverAreaH < 0) coverAreaH = 0;
   // Thumbnails are 6:10. A wide card (sideways) would make the cover take the text's room, so the
   // cover keeps to 45 % of the card's width and gives up height instead.
@@ -129,12 +164,12 @@ constexpr Books books(const Box& area, const bool withStrip) {
     coverW = maxCoverW;
     coverH = coverW * 5 / 3;
   }
-  b.cover = Box{b.card.x + kCardPadding, b.card.y + kCardPadding, coverW, coverH};
-  const int textX = b.cover.x + coverW + kCoverToText;
-  const int textW = b.card.x + b.card.w - kCardPadding - textX;
-  b.text = Box{textX, b.card.y + kCardPadding, textW > 0 ? textW : 0, coverAreaH};
-  b.foot = Box{b.card.x + kCardPadding, b.card.y + b.card.h - kCardPadding - kCardFootHeight, innerW > 0 ? innerW : 0,
-               kCardFootHeight};
+  b.cover = Box{b.card.x + d.cardPadding, b.card.y + d.cardPadding, coverW, coverH};
+  const int textX = b.cover.x + coverW + d.coverToText;
+  const int textW = b.card.x + b.card.w - d.cardPadding - textX;
+  b.text = Box{textX, b.card.y + d.cardPadding, textW > 0 ? textW : 0, coverAreaH};
+  b.foot = Box{b.card.x + d.cardPadding, b.card.y + b.card.h - d.cardPadding - d.cardFootHeight,
+               innerW > 0 ? innerW : 0, d.cardFootHeight};
   return b;
 }
 
@@ -147,31 +182,31 @@ struct Menu {
 
 // `tileCount` destinations as tiles, two to a row, an odd first one across the whole row; then
 // `bottomCount` (1: Settings, 2: More and Settings) along the foot of `area`.
-constexpr Menu menu(const Box& area, const int tileCount, const int bottomCount) {
+constexpr Menu menu(const Box& area, const int tileCount, const int bottomCount, const Dimensions& d = kRegular) {
   Menu m{};
   m.tileCount = tileCount < 0 ? 0 : (tileCount > kMaxTiles ? kMaxTiles : tileCount);
   m.bottomCount = bottomCount < 1 ? 1 : (bottomCount > 2 ? 2 : bottomCount);
 
-  const int bottomY = area.y + area.h - kBottomRowHeight;
-  const int halfW = (area.w - kGap) / 2;
+  const int bottomY = area.y + area.h - d.bottomRowHeight;
+  const int halfW = (area.w - d.gap) / 2;
   if (m.bottomCount == 1) {
-    m.bottom[0] = Box{area.x, bottomY, area.w, kBottomRowHeight};
+    m.bottom[0] = Box{area.x, bottomY, area.w, d.bottomRowHeight};
   } else {
-    m.bottom[0] = Box{area.x, bottomY, halfW, kBottomRowHeight};
-    m.bottom[1] = Box{area.x + area.w - halfW, bottomY, halfW, kBottomRowHeight};
+    m.bottom[0] = Box{area.x, bottomY, halfW, d.bottomRowHeight};
+    m.bottom[1] = Box{area.x + area.w - halfW, bottomY, halfW, d.bottomRowHeight};
   }
 
   const int rows = (m.tileCount + 1) / 2;
   if (rows == 0) return m;
-  int tileH = (bottomY - kGap - area.y - (rows - 1) * kGap) / rows;
-  if (tileH > kMaxSidewaysTileHeight) tileH = kMaxSidewaysTileHeight;
+  int tileH = (bottomY - d.gap - area.y - (rows - 1) * d.gap) / rows;
+  if (tileH > d.maxSidewaysTileHeight) tileH = d.maxSidewaysTileHeight;
   if (tileH < 0) tileH = 0;
   const bool firstSpans = (m.tileCount % 2) == 1;
   for (int i = 0; i < m.tileCount; ++i) {
     // With an odd count the first tile spans the row, and the rest pair up after it.
     const int slot = firstSpans ? i + 1 : i;
     const int row = slot / 2;
-    const int y = area.y + row * (tileH + kGap);
+    const int y = area.y + row * (tileH + d.gap);
     if (firstSpans && i == 0) {
       m.tiles[i] = Box{area.x, y, area.w, tileH};
     } else {

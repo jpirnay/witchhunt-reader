@@ -10,7 +10,7 @@ namespace LyraTilesMetrics {
 constexpr ThemeMetrics make() {
   ThemeMetrics m = LyraMetrics::values;
   // The status line (clock, battery) is all the header Home draws; the card starts under it.
-  m.homeTopPadding = 40;
+  m.homeTopPadding = PanelMetrics::capped(40, 28);
   // The card and the Also reading row show four; the fifth is a swipe away.
   m.homeRecentBooksCount = 5;
   return m;

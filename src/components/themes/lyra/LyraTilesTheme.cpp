@@ -23,7 +23,9 @@ namespace {
 
 using HomeTilesLayout::Box;
 
-constexpr int kCornerRadius = 8;
+using PanelMetrics::capped;  // the compact panel's size where it is smaller (PanelMetrics.h)
+
+constexpr int kCornerRadius = capped(8, 6);
 // Selection is a heavier frame around the card or an Also reading book, and a solid black tile:
 // no grey fills, which the panel can only dither.
 constexpr int kCardFrameWidth = 1;
@@ -31,22 +33,28 @@ constexpr int kSelectedFrameWidth = 3;
 constexpr int kSelectedFrameOutset = 3;
 constexpr int kTileFrameWidth = 2;
 constexpr int kBottomFrameWidth = 1;
-constexpr int kIconSize = 32;  // the icons' own size, and the bottom row's
+constexpr int kIconSize = 32;  // the icons' own size
+constexpr int kBottomIconSize = capped(32, 20);
 // The tiles' icons, drawn up from the 32 px set (drawIconScaled), with the label beside them where at
 // least kMinBesideLabelWidth is left for it.
-constexpr int kTileIconSize = 48;
-constexpr int kTileIconToLabel = 14;
-constexpr int kMinBesideLabelWidth = 96;
-constexpr int kTileInset = 16;
-constexpr int kIconToLabel = 10;
-constexpr int kEyebrowGap = 6;
-constexpr int kBarHeight = 10;
+constexpr int kTileIconSize = capped(48, 20);
+constexpr int kTileIconToLabel = capped(14, 4);
+constexpr int kMinBesideLabelWidth = capped(96, 60);
+constexpr int kTileInset = capped(16, 6);
+constexpr int kIconToLabel = capped(10, 6);
+constexpr int kEyebrowGap = capped(6, 2);
+constexpr int kBarHeight = capped(10, 6);
 constexpr int kStripCoverToText = 8;
 constexpr int kStripLabelToCovers = 4;
 
 // Titles run long, and the card's column has the height for them: four lines of UI 12 bold, then
 // five of UI 10 bold, before any word is cut.
 constexpr CardTextFit::Face kTitleFaces[] = {{UI_12_FONT_ID, 4}, {UI_10_FONT_ID, 5}};
+
+// The geometry's sizes for this panel (HomeTilesLayout::Dimensions).
+const HomeTilesLayout::Dimensions& dims() {
+  return PanelMetrics::COMPACT ? HomeTilesLayout::kCompact : HomeTilesLayout::kRegular;
+}
 
 Box toBox(const Rect& r) { return Box{r.x, r.y, r.width, r.height}; }
 Rect toRect(const Box& b) { return Rect{b.x, b.y, b.w, b.h}; }
@@ -56,7 +64,8 @@ Rect toRect(const Box& b) { return Rect{b.x, b.y, b.w, b.h}; }
 // taller, so it asks the panel again rather than judging by that height.
 bool stripFitsHome(const GfxRenderer& renderer) {
   const Rect content = UITheme::getContentRect(renderer, true, false);
-  return HomeTilesLayout::stripFits(toBox(content), content.y + UITheme::getInstance().getMetrics().homeTopPadding);
+  return HomeTilesLayout::stripFits(toBox(content), content.y + UITheme::getInstance().getMetrics().homeTopPadding,
+                                    dims());
 }
 
 enum class Cover : uint8_t { Drawn, Pending, Absent };
@@ -118,7 +127,8 @@ void drawIconScaled(const GfxRenderer& renderer, const uint8_t* icon, const int 
 
 // A tile's icon and label. Where the tile is wide enough the label stands beside a large icon and
 // wraps over as many lines as the tile holds; a narrow tile (sideways) puts the label under it.
-// The label steps down from UI 12 to UI 10 before a word is cut.
+// The label steps down from UI 12 to UI 10, then to the small face, before a word is cut: a long
+// word ("Bookmarks" on the compact panel, many translations) fits that way.
 void drawTileContent(const GfxRenderer& renderer, const Box& tile, const uint8_t* icon, const std::string& label,
                      const bool selected) {
   const bool ink = !selected;
@@ -135,7 +145,7 @@ void drawTileContent(const GfxRenderer& renderer, const Box& tile, const uint8_t
   const int textH = tile.y + tile.h - kTileInset - textTop;
   std::vector<std::string> lines;
   int fontId = UI_12_FONT_ID;
-  for (const int face : {UI_12_FONT_ID, UI_10_FONT_ID}) {
+  for (const int face : {UI_12_FONT_ID, UI_10_FONT_ID, SMALL_FONT_ID}) {
     fontId = face;
     const int maxLines = std::max(1, textH / renderer.getLineHeight(face));
     bool whole = false;
@@ -167,8 +177,9 @@ HomeLayout LyraTilesTheme::homeLayout(const GfxRenderer& /*renderer*/, const Rec
                                       const int menuTrailing) const {
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
   const int top = content.y + metrics.homeTopPadding;
-  const auto regions = HomeTilesLayout::regions(toBox(content), top, menuCount - menuTrailing);
-  const auto books = HomeTilesLayout::books(regions.books, HomeTilesLayout::stripFits(toBox(content), top));
+  const auto regions = HomeTilesLayout::regions(toBox(content), top, menuCount - menuTrailing, dims());
+  const auto books =
+      HomeTilesLayout::books(regions.books, HomeTilesLayout::stripFits(toBox(content), top, dims()), dims());
 
   HomeLayout layout;
   layout.books = toRect(regions.books);
@@ -198,7 +209,7 @@ void LyraTilesTheme::drawRecentBookCover(GfxRenderer& renderer, const Rect rect,
                                          const std::vector<RecentBook>& recentBooks, const int selectorIndex,
                                          bool& coverRendered, bool& coverBufferStored, bool& /*bufferRestored*/,
                                          std::function<bool()> storeCoverBuffer) const {
-  const HomeTilesLayout::Books layout = HomeTilesLayout::books(toBox(rect), stripFitsHome(renderer));
+  const HomeTilesLayout::Books layout = HomeTilesLayout::books(toBox(rect), stripFitsHome(renderer), dims());
   const int bookCount = static_cast<int>(recentBooks.size());
   const int stripBooks = layout.hasStrip ? std::min(HomeTilesLayout::kStripBooks, std::max(0, bookCount - 1)) : 0;
   const Box& card = layout.card;
@@ -327,7 +338,7 @@ void LyraTilesTheme::drawHomeMenu(GfxRenderer& renderer, const Rect rect, const 
                                   const std::function<std::string(int index)>& buttonLabel,
                                   const std::function<UIIcon(int index)>& rowIcon) const {
   const int tileCount = std::max(0, buttonCount - trailingCount);
-  const HomeTilesLayout::Menu menu = HomeTilesLayout::menu(toBox(rect), tileCount, trailingCount);
+  const HomeTilesLayout::Menu menu = HomeTilesLayout::menu(toBox(rect), tileCount, trailingCount, dims());
 
   // Targets carry MENU-LOCAL indices, as every theme's menu does: tiles first, then the bottom row.
   TapTargets::Recorder::Builder targets;
@@ -359,17 +370,12 @@ void LyraTilesTheme::drawHomeMenu(GfxRenderer& renderer, const Rect rect, const 
     }
     const std::string label = buttonLabel(index);
     const uint8_t* icon = iconFor(index);
-    const int iconRoom = icon ? kIconSize + kIconToLabel : 0;
+    const int iconRoom = icon ? kBottomIconSize + kIconToLabel : 0;
     const std::string fitted =
         renderer.truncatedText(UI_10_FONT_ID, label.c_str(), std::max(0, box.w - 2 * kTileInset - iconRoom));
     const int groupX = box.x + (box.w - iconRoom - renderer.getTextWidth(UI_10_FONT_ID, fitted.c_str())) / 2;
     if (icon) {
-      const int iconY = box.y + (box.h - kIconSize) / 2;
-      if (selected) {
-        renderer.drawIconInverted(icon, groupX, iconY, kIconSize, kIconSize);
-      } else {
-        renderer.drawIcon(icon, groupX, iconY, kIconSize, kIconSize);
-      }
+      drawIconScaled(renderer, icon, groupX, box.y + (box.h - kBottomIconSize) / 2, kBottomIconSize, !selected);
     }
     renderer.drawText(UI_10_FONT_ID, groupX + iconRoom, box.y + (box.h - renderer.getLineHeight(UI_10_FONT_ID)) / 2,
                       fitted.c_str(), !selected);

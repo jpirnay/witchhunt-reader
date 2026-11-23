@@ -122,9 +122,9 @@ TEST(HomeTilesLayout, X4UprightWithFourTiles) {
   EXPECT_EQ(books.cover.h, 298);
   EXPECT_EQ(menu.tiles[0].w, 218);
   EXPECT_EQ(menu.tiles[0].h, 122);
-  EXPECT_EQ(menu.bottom[0].h, HomeTilesLayout::kBottomRowHeight);
+  EXPECT_EQ(menu.bottom[0].h, HomeTilesLayout::kRegular.bottomRowHeight);
   // The bottom row ends kBottomPadding above the hints.
-  EXPECT_EQ(menu.bottom[1].y + menu.bottom[1].h, 760 - HomeTilesLayout::kBottomPadding);
+  EXPECT_EQ(menu.bottom[1].y + menu.bottom[1].h, 760 - HomeTilesLayout::kRegular.bottomPadding);
 }
 
 // The row is the panel's: it needs room beside two full rows of tiles and the bottom row, so the
@@ -142,7 +142,7 @@ TEST(HomeTilesLayout, AlsoReadingAppearsOnlyBesideAFullGrid) {
     for (int tiles = 0; tiles <= HomeTilesLayout::kMaxTiles; ++tiles) {
       const auto books = booksFor(panel.content, tiles);
       if (books.hasStrip) {
-        EXPECT_GE(books.card.h, HomeTilesLayout::kMinCardHeight) << panel.name;
+        EXPECT_GE(books.card.h, HomeTilesLayout::kRegular.minCardHeight) << panel.name;
       }
     }
   }
@@ -177,7 +177,7 @@ TEST(HomeTilesLayout, SidewaysTheCardAndTheTilesShareTheWidth) {
   EXPECT_EQ(regions.books.h, regions.menu.h);
   const auto books = booksFor({0, 0, 800, 440}, 4);
   // A wide card keeps the cover to its share of the width, and the 6:10 shape with it.
-  EXPECT_LE(books.cover.w * 20, (books.card.w - 2 * HomeTilesLayout::kCardPadding) * 9);
+  EXPECT_LE(books.cover.w * 20, (books.card.w - 2 * HomeTilesLayout::kRegular.cardPadding) * 9);
 }
 
 // The row's label gets a whole line of the small face (23 px at the Normal UI size) and a gap above
@@ -188,6 +188,42 @@ TEST(HomeTilesLayout, TheAlsoReadingLabelClearsTheCovers) {
   EXPECT_GE(books.slots[0].y - books.strip.y, 23 + 4);
   EXPECT_EQ(books.slotCovers[0].w, 54);
   EXPECT_EQ(books.slotCovers[0].h, 90);
+}
+
+// The compact panel (Murphy, 240 x 416, hints 30 px, the body under a 28 px status line) with its
+// own sizes: everything on screen and apart, nothing under its 36 px menu rows, a text column wide
+// enough for a title, and no Also reading row.
+TEST(HomeTilesLayout, TheCompactPanelFitsTheCardAndTwoRowsOfTiles) {
+  constexpr int kCompactTop = 28;
+  const Box murphyPanels[] = {{0, 0, 240, 386}, {0, 0, 416, 210}};
+  for (const Box& content : murphyPanels) {
+    for (int tiles = 0; tiles <= HomeTilesLayout::kMaxTiles; ++tiles) {
+      for (int bottom = 1; bottom <= 2; ++bottom) {
+        SCOPED_TRACE(describe(content) + ", " + std::to_string(tiles) + " tiles, " + std::to_string(bottom));
+        const auto& d = HomeTilesLayout::kCompact;
+        const auto regions = HomeTilesLayout::regions(content, kCompactTop, tiles, d);
+        const auto books =
+            HomeTilesLayout::books(regions.books, HomeTilesLayout::stripFits(content, kCompactTop, d), d);
+        const auto menu = HomeTilesLayout::menu(regions.menu, tiles, bottom, d);
+        const Box screen{content.x, kCompactTop, content.w, content.h - kCompactTop};
+        EXPECT_FALSE(books.hasStrip);
+        std::vector<Box> targets{books.card};
+        for (int i = 0; i < menu.tileCount; ++i) targets.push_back(menu.tiles[i]);
+        for (int i = 0; i < menu.bottomCount; ++i) targets.push_back(menu.bottom[i]);
+        for (size_t i = 0; i < targets.size(); ++i) {
+          EXPECT_TRUE(inside(targets[i], screen)) << describe(targets[i]);
+          EXPECT_GE(targets[i].h, 36) << describe(targets[i]);
+          for (size_t j = i + 1; j < targets.size(); ++j) {
+            EXPECT_FALSE(overlap(targets[i], targets[j])) << describe(targets[i]) << " / " << describe(targets[j]);
+          }
+        }
+        EXPECT_TRUE(inside(books.cover, books.card));
+        EXPECT_FALSE(overlap(books.cover, books.text));
+        EXPECT_GE(books.text.w, 100) << describe(books.text);
+        EXPECT_GE(books.cover.h, 100) << describe(books.cover);
+      }
+    }
+  }
 }
 
 // --- Moving by rows and columns (four direction keys) -------------------------------------------
