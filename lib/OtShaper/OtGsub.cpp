@@ -86,13 +86,6 @@ bool applyLigatureSubst(ApplyContext* c, const Table& st) {
   if (index == NOT_COVERED || static_cast<unsigned>(index) >= st.u16(4)) return false;
   const Table set = st.offset16(6 + 2 * index);
   const uint16_t ligCount = set.u16(0);
-  // witchhunt: deviation 24 - lazily inspect the first non-skipped glyph after buffer.idx once per
-  // LigatureSet (when ligCount > 1) so non-matching 2+-component entries reject on lig.u16(4) != secondGlyph
-  // without re-running SkippyIter::next(). Falls back to `Slow` (full matchInput()) whenever ligId/ligComp
-  // cross-ligature rules apply or SkippyIter encounters SKIP_MAYBE marks.
-  enum class SecondState : uint8_t { Unchecked, None, Exact, Slow };
-  SecondState secondState = ligCount > 1 ? SecondState::Unchecked : SecondState::Slow;
-  uint32_t secondGlyph = 0;
   for (uint16_t i = 0; i < ligCount; i++) {
     const Table lig = set.offset16(2 + 2 * i);
     const uint16_t ligGlyph = lig.u16(0);
@@ -103,32 +96,6 @@ bool applyLigatureSubst(ApplyContext* c, const Table& st) {
       return true;
     }
     if (count > MAX_CONTEXT_LENGTH) continue;
-    if (secondState == SecondState::Unchecked) {
-      const GlyphInfo& first = buffer.cur();
-      if (first.ligId() && first.ligComp()) {
-        secondState = SecondState::Slow;
-      } else {
-        SkippyIter& it = c->iterInput;
-        it.reset(buffer.idx);
-        it.func = MatchFunc::Always;
-        it.hasValues = false;
-        if (!it.next()) {
-          secondState = SecondState::None;
-        } else if (it.maySkip(buffer.info[it.idx]) != SkippyIter::SKIP_NO) {
-          secondState = SecondState::Slow;
-        } else {
-          const GlyphInfo& sec = buffer.info[it.idx];
-          if (sec.ligId() && sec.ligComp() && sec.ligId() != first.ligId()) {
-            secondState = SecondState::None;
-          } else {
-            secondState = SecondState::Exact;
-            secondGlyph = sec.codepoint;
-          }
-        }
-      }
-    }
-    if (secondState == SecondState::None) continue;
-    if (secondState == SecondState::Exact && lig.u16(4) != secondGlyph) continue;
     unsigned matchEnd = 0;
     unsigned totalComponentCount = 0;
     if (!matchInput(c, count, Values{lig, 4}, MatchFunc::Glyph, Table(), &matchEnd, &totalComponentCount)) continue;

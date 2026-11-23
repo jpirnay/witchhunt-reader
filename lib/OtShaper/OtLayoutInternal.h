@@ -110,7 +110,6 @@ struct ApplyContext {
   bool autoZwj = true;
   bool perSyllable = false;
   bool random = false;
-  bool bypassCaches = false;
 
   // Mark attachment's memo of the last base found (last_base, last_base_until).
   int lastBase = -1;

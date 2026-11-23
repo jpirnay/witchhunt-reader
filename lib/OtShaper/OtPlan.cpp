@@ -403,19 +403,15 @@ bool Plan::allocateFilters(const int table, const size_t lookupCount, const size
   return true;
 }
 
-OT_HOT void Plan::fillSettings(const int table, const size_t i, const bool resolve, LookupSettings& out,
-                               const bool copyDigest) const {
+OT_HOT LookupSettings Plan::settings(const int table, const size_t i, const bool resolve) const {
   const PlannedLookup& lookup = lookups[table][i];
+  LookupSettings out;
   out.mask = lookup.mask;
   out.autoZwnj = lookup.flags & lookupbits::AUTO_ZWNJ;
   out.autoZwj = lookup.flags & lookupbits::AUTO_ZWJ;
   out.random = lookup.flags & lookupbits::RANDOM;
   out.perSyllable = lookup.flags & lookupbits::PER_SYLLABLE;
-  out.bypassCaches = testBypassCaches;
-  out.digestRecord = digestRecord(table, i);
-  if (copyDigest) readDigest(out.digestRecord, out.digest);  // witchhunt: deviation 13 - the plan's copy
-  out.subtableDigests = nullptr;
-  out.fontRecords = nullptr;
+  readDigest(digestRecord(table, i), out.digest);  // witchhunt: deviation 13 - the plan's copy
   if (const FilterRecords* r = fontFilters_[table]) {
     if (resolve) {
       out.subtableDigests = r->subtableDigests + DIGEST_BYTES * r->firstSubtable(lookup.index);
@@ -427,23 +423,17 @@ OT_HOT void Plan::fillSettings(const int table, const size_t i, const bool resol
   }
   // witchhunt: deviation 20 - where the lookup is.
   const size_t planned = table == GSUB ? i : lookups[GSUB].size() + i;
-  out.lookupOffset =
-      !testBypassCaches && planned < lookupOffsets_.size() ? lookupOffsets_[planned] : LookupSettings::NO_LOOKUP_OFFSET;
+  if (!testBypassCaches && planned < lookupOffsets_.size()) out.lookupOffset = lookupOffsets_[planned];
   // witchhunt: deviation 19 - a LigatureSubst lookup's second mask.
-  out.secondMask = (table == GSUB && !testBypassCaches && i < secondSlots_.size() && secondSlots_[i])
-                       ? readLowMask(secondMasks_.data() + 8 * (secondSlots_[i] - 1))
-                       : ~0ull;
+  if (table == GSUB && !testBypassCaches && i < secondSlots_.size() && secondSlots_[i]) {
+    out.secondMask = readLowMask(secondMasks_.data() + 8 * (secondSlots_[i] - 1));
+  }
   // witchhunt: deviation 18 - the lookup's group masks, once fillSubtableGroups() has made them.
   const size_t k = table == GSUB ? i : lookups[GSUB].size() + i;
-  out.subtableGroups = (out.subtableDigests || out.fontRecords) && !testBypassCaches && k < groupStarts_.size() &&
-                               groupStarts_[k] != NO_GROUPS
-                           ? groupMasks_.data() + 8 * groupStarts_[k]
-                           : nullptr;
-}
-
-LookupSettings Plan::settings(const int table, const size_t i, const bool resolve) const {
-  LookupSettings out;
-  fillSettings(table, i, resolve, out, true);
+  if ((out.subtableDigests || out.fontRecords) && !testBypassCaches && k < groupStarts_.size() &&
+      groupStarts_[k] != NO_GROUPS) {
+    out.subtableGroups = groupMasks_.data() + 8 * groupStarts_[k];
+  }
   return out;
 }
 
@@ -454,18 +444,16 @@ OT_HOT bool Plan::mayApply(const int table, const size_t i, const Digest& buffer
 }
 
 // witchhunt: deviation 16 - applyLookup() starts only at a glyph its digest may hold, of its mask, that its flags do
-// not ignore. firstStart() finds the first matching buffer index so applyTable() skips the lookup if none matches,
-// and forwards the starting index to applyLookup() so leading non-matching glyphs are not re-scanned.
-OT_HOT unsigned Plan::firstStart(const int table, const size_t i, const Buffer& buffer) const {
-  if (testBypassCaches) return 0;
-  const uint8_t* const rec = digestRecord(table, i);
+// not ignore. A lookup no glyph of the buffer passes the first two for starts nowhere: applyLookup() would only walk
+// the buffer to its end, and no pass reads the index it leaves.
+OT_HOT bool Plan::mayStart(const int table, const size_t i, const Buffer& buffer) const {
+  if (testBypassCaches) return true;
+  const Digest digest = readDigest(digestRecord(table, i));
   const uint32_t mask = lookups[table][i].mask;
-  const unsigned len = buffer.len();
-  for (unsigned idx = 0; idx < len; idx++) {
-    const GlyphInfo& g = buffer.info[idx];
-    if ((g.mask & mask) && digestRecordMayHave(rec, g.codepoint)) return idx;
+  for (const GlyphInfo& g : buffer.info) {
+    if ((g.mask & mask) && digest.mayHave(g.codepoint)) return true;
   }
-  return len;
+  return false;
 }
 
 // witchhunt: deviation 13 - see positions_. A glyph past 16 bits (no font has
@@ -515,10 +503,8 @@ bool Plan::wouldSubstitute(const Face& face, const WouldFeature feature, const u
                            const unsigned count) const {
   const WouldSubstituteLookups& w = would_[feature];
   for (size_t i = w.start; i < w.end; i++) {
-    const uint32_t lookupOffset =
-        !testBypassCaches && i < lookupOffsets_.size() ? lookupOffsets_[i] : LookupSettings::NO_LOOKUP_OFFSET;
     if (ot::wouldSubstitute(face, lookups[GSUB][i].index, readDigest(digestRecord(GSUB, i)), glyphs, count,
-                            zeroContext_, lookupOffset)) {
+                            zeroContext_)) {
       return true;
     }
   }
