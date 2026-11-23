@@ -136,6 +136,11 @@ The C3 is single-core RISC-V and the S3 dual-core Xtensa. Code that only held be
   (`SOC_PM_SUPPORT_EXT1_WAKEUP` or `SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP`, in `HalPowerManager`), and
   the panic backtrace in `HalSystem.cpp` on `__riscv` or `__XTENSA__`. Both have an `#error`
   default. Branch on capability, not on the chip name.
+- Light-sleep ticks. IDF's dual-core FreeRTOS winds pended ticks down only on core 0, and the idle loop
+  light-sleeps on core 1, so `xTaskCatchUpTicks()` there only queued them. The next flash operation
+  (`spi_flash_op_block_func()`) then wound every tick since in one critical section: an interrupt watchdog on CPU0,
+  on the Murphy at the first flash read after light sleep. `HalPowerManager::lightSleep()` hands each slice's ticks
+  to core 0 (`catchUpTicksOnCore0()`, #812).
 
 ## PSRAM
 
@@ -257,7 +262,7 @@ Its panel is an SE0400NQW47 on an SSD2677 (the driver's probe, boot log).
   defaults to Confirm and a double press to Back (`CrossPointSettings::applyDeviceButtonDefaults()`, actions
   `BTN_CONFIRM` and `BTN_BACK`); touch and the hint boxes do the rest.
 - Slide switch on GPIO6, read and debounced by the SDK (`InputManager::isToggleSwitchOn()`). The **Slide Switch**
-  setting binds it to the reading light (default), Dark Mode or nothing; `applySlideSwitch()` in `main.cpp` sets the
+  setting binds it to the reading light (default), Dark Mode, touch (off is Touch Lock, #877) or nothing; `applySlideSwitch()` in `main.cpp` sets the
   bound function at the first loop pass, when the switch moves and when the binding changes.
 - I2C bus SDA7/SCL8, shared: TMA525C touch (0x24), the warm/cool LED driver of the light (0x38), PCF8563-class RTC
   (0x51), QMI8658 IMU (0x6A) and the SGM41562 charger (0x03). The light is the SDK's `PiccoDualLed` backend: it is
@@ -294,6 +299,13 @@ only come from a dump of the unit itself: Onyx's firmware cannot be downloaded a
 install (`esptool --no-stub read-flash 0 ALL`, then `verify-flash` against it); restore with `write-flash 0x0`.
 
 ## Gotchas
+
+- Idle light sleep and touch. `HalPowerManager::lightSleep()` declines on a board with a PWM frontlight while the
+  light is lit, or while its touch cannot wake the chip (`rejFrontlight`). The Murphy's CHSC6x pulses its data-ready
+  line; it is armed as a low-level wake (`armTouchPulseWake()`), with the pin's edge interrupt off while the level
+  type is set. Without it a test build missed about every second tap. With the light off the Murphy light-sleeps:
+  96 % of 27 minutes on Home, on battery (#812). The X4 Pro and the T5S3 poll a GT911 that keeps only its latest
+  frame, so they still decline.
 
 - A `platformio.local.ini` (gitignored, loaded through `extra_configs`) whose env builds on
   `${base.build_flags}` selects no device. `BoardConfig.h` then reports "no device selected" and

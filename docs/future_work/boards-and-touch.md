@@ -1,6 +1,7 @@
 # Boards and touch
 
-Status: open items as of 2026-10-07; the last three sections added 2026-11-15, from the upstream triage. Collected from multiboard-bringup-handover-2026-08-15.md, multi-board-bringup-2026-08-14.md, x4pro_support.md and touch-input-migration-2026-08-14.md.
+Status: open items as of 2026-11-23. The early items come from the 2026-08 multi-board bring-up and touch-migration
+notes (removed, in git history); the later ones from device checks and the upstream triage.
 
 Background for all of these is in [Board Support](../contributing/board-support.md) and
 [Touch Architecture](../contributing/touch-architecture.md). Display items from the same sources
@@ -12,25 +13,11 @@ AA pass, the PanelSel/baseline-model split) are in [Display and refresh](display
 Open: the X4 Pro and the T5S3 never take idle light sleep. `HalPowerManager::lightSleep()` declines on
 a board with a PWM frontlight while the light is lit, or while its touch cannot wake the chip (counted in
 `rejFrontlight`). Their GT911 is polled and keeps only its latest frame, so a tap shorter than a 50 ms
-slice would be lost asleep.
+slice would be lost asleep. The Murphy M3 light-sleeps with its light off since #812: its CHSC6x wakes the chip
+(`InputManager::armTouchPulseWake()`).
 
 Why it matters: idle light sleep is the main idle-power saving. On Home with no sleep timeout and the
-light off, a Murphy that could not light-sleep lost about 40 % of its charge in 10 h (user, 2026-11-16).
-
-Done (2026-11-17, Murphy M3): with its light off the Murphy light-sleeps. Its CHSC6x data-ready line is
-armed as a low-level wake (`InputManager::armTouchPulseWake()` in the SDK), with the pin's edge
-interrupt switched off while the level type is set. Without that wake a test build missed about every
-second tap. On battery, Home, light off: light sleep 26 min 11 s of 27 min 17 s (96 %); the battery drain
-per hour was not measured.
-
-The 2026-11-16 restarts were not the touch line. The idle loop runs on core 1, and IDF's dual-core
-FreeRTOS winds pended ticks down only on core 0, so the ticks each slice handed to `xTaskCatchUpTicks()`
-piled up until core 0 next resumed its scheduler. A flash operation does that
-(`spi_flash_op_block_func()`), and then wound every tick since in one critical section: an interrupt
-watchdog on CPU0 with CPU1 in `esp_partition_read()`, twice, each time on the first flash read after
-light-sleeping (System Information, Boot Diagnostics). `catchUpTicksOnCore0()` now hands the ticks to
-core 0 each slice. The Picco takes the same path (dual-core S3, no PWM light), so by the code it had
-the same latent bug; no Picco restart was traced to it.
+light off, a Murphy that could not light-sleep lost about 40 % of its charge in 10 h (user report, #812).
 
 Next: (1) the X4 Pro and T5S3 need a touch wake first; the SDK's GT911 INT wake
 (`FREEINK_GT911_INT_WAKE`, `InputManager::touchWakeIrqPin()`) is the candidate. (2) A lit light:
@@ -41,7 +28,8 @@ measured 92 % residency with the light on, X4 Pro). Our SDK carries the driver h
 reverted its idle light sleep (#3077) and dropped the flag from the X4 Pro (#3289). RC_FAST (~17.5 MHz)
 cannot drive the Murphy's 25 kHz at 10 bits, so the Murphy needs about 17 kHz or 9 bits first, or the
 light stays dark. Setting the flag also needs `park()` before deep sleep and `releaseOnWake()` before
-`Frontlight.begin()`.
+`Frontlight.begin()`. (3) The Murphy's battery drain per hour in light sleep was not measured, only its share of
+light sleep (#812).
 
 Where: `HalPowerManager::lightSleep()`, `HalFrontlight`, the SDK's `InputManager` (touch wakes) and
 `FrontlightManager`. The comment beside the `lightSleep()` fallback in `main.cpp`'s idle loop lists the
@@ -49,26 +37,25 @@ reasons it declines.
 
 ## SD clock on the T5S3
 
-Open: `HalStorage::begin()` holds SD-over-SPI at 20 MHz on non-C3 boards whose profile leaves
-`sd.spiHz` at 0, instead of the SDK's 40 MHz default. Today that is only the T5S3; the X4 Pro
-mounts over SDMMC.
+Open: `HalStorage::begin()` holds SD-over-SPI at 20 MHz on S3 boards whose card is on SPI and whose profile leaves
+`sd.spiHz` at 0, instead of the SDK's 40 MHz default. Today that is only the T5S3; the X4 Pro, the Murphy M3 and the
+BOOX Picco mount over SDMMC.
 
 Why it matters: if the clamp is not needed it halves SD throughput on the T5S3.
 
-Tried: nothing; the clamp was a precaution. The SD card may have worked at bring-up because
-`BoardT5S3::begin()` deselects the LoRa radio on the same bus, not because of the lower clock.
+Tried: nothing; the clamp was a precaution. The SD card may have worked at bring-up because the board layer
+deselects the LoRa radio on the same bus (the SDK's `prepareSdBus()`, BoardT5S3), not because of the lower clock.
 
 Next: one T5S3 build at 40 MHz, then a book open, a section build and a USB-drive transfer. Keep
 the clamp only if mounts or reads fail.
 
 ## BUTTON_TRACE scaffolding
 
-Open: `-DBUTTON_TRACE=1` is commented out in `[lilygo_board]`, but `[env:murphy]` builds with it
-(`platformio.ini:608`), so it is a live diagnostic there. Its code is in `HalGPIO::sampleOnce()` (raw
-button, Home key and touch-release lines), `GestureEventManager`, `TouchGestures.h` and
-`ActivityManager.cpp`, and its touch-edge state (`touchTraceWasHeld_`, `touchTraceDownNx_` and friends)
-sits unguarded in `HalGPIO.h`. The `[lilygo_board]` comment still says to drop it once the board's input
-is settled.
+Open: `-DBUTTON_TRACE=1` is commented out in `[lilygo_board]`, but `[env:murphy]` builds with it, so it is a live
+diagnostic there. Its code is in `HalGPIO::sampleOnce()` (raw button, Home key and touch-release lines),
+`GestureEventManager`, `TouchGestures.h` and `ActivityManager.cpp`, and its touch-edge state (`touchTraceWasHeld_`,
+`touchTraceDownNx_` and friends) sits in `HalGPIO.h` under `FREEINK_CAP_TOUCH` only, not under `BUTTON_TRACE`. The
+`[lilygo_board]` comment still says to drop it once the board's input is settled.
 
 Why it matters: the Murphy build uses it as a diagnostic, while its one comment calls it a bring-up aid
 to drop.
@@ -95,17 +82,16 @@ Next: an SSD1677-batch X4 Pro and a long reading session across temperatures, be
 
 ## Device validation
 
-Open: parts of the touch layer and of the X4 Pro have no recorded device pass.
+Open: parts of the touch layer, the X4 Pro and the power code have no recorded device pass.
 
 - The touch defaults in [Touch Gestures](../touch-gestures.md) have had one hardware session, on a
   T5S3 (2026-09-11). It found four faults, all fixed since. Whether the either-direction ten-page
   swipe is now reliable, and whether the gesture overview's labels fit legibly, were not checked
   again.
-- The X4 Pro has run this firmware since the pre-flight fixes (PR #246, 2026-09-12), and display
-  work has been tested on it since. Earlier plans said it was deliberately not flashed; that hold
-  ended with PR #246. There is still no recorded pass for its gesture set (the warm/cool right edge
-  column exists only there), two-finger gestures on its GT911, or the input sampler's stack
-  high-water with its GT911 (the 4096-byte stack was measured only on the T5S3).
+- The X4 Pro has run this firmware since the pre-flight fixes (PR #246), and display work has been tested on it
+  since. There is still no recorded pass for its gesture set (the warm/cool right edge column exists only there),
+  two-finger gestures on its GT911, or the input sampler's stack high-water with its GT911 (the 4096-byte stack was
+  measured only on the T5S3).
 
 Why it matters: host tests cover geometry, not what a thumb can reach or what a screen shows. The
 first T5S3 session found four faults that 880 host tests and two board builds had passed.
@@ -123,36 +109,23 @@ Device checks still owed for the 2026-10-21 PRs (all X3-only):
   Keep/Reset of the cache clear (#538), the held-key steps of the password editor (#537).
 - X4: Base's portrait side-box gap and the X4 keyboard in landscape (#543).
 
-Device checks still owed for the faster cold opens (#789, #792, 2.53; measured on the X3 and the X4 Pro only):
+Device checks still owed for the faster cold opens (#789, #792): the T5S3, for the PSRAM build region (#789) and the
+book indexed while its popup paints (#792). The X4, the Murphy M3 and the Picco have run them since (#802, #811,
+#819).
 
-- X4: it builds resident, so it keeps the first open's Indexing popup for the chapter build (#792).
-- T5S3, Murphy M3, BOOX Picco: the PSRAM build region (#789) and the book indexed while the popup paints (#792);
-  on the Murphy and the Picco also the SDK's SDMMC read-ahead (freeink-sdk cf63426).
+The X4's clock drift model (#866): the X3 and the Picco take their time from a hardware RTC, so only a plain X4 (no
+RTC) runs the LP-timer drift model (`lib/hal/ClockDrift.h`), now in integers, and no device has run that version.
+Needs an X4: the clock over sleep, NTP drift learning, and the first boot after the update.
 
-Test API gap that blocks some of these: no `CMD:HEAP:REFUSE` field that refuses the secondary-buffer
-realloc (it would make the fragmented-heap restart reachable). Held keys are there since #741
+The Picco's touch in light sleep (inferred from the code, not seen on the device): the Picco light-sleeps in 50 ms
+slices on battery, because the touch-wake test in `HalPowerManager::lightSleep()` applies only to boards with a PWM
+frontlight, and nothing arms a wake for its TMA525C (`InputManager::touchPulseWakePin()` answers only for a CHSC6x).
+If the TMA525C, like the GT911, keeps only its latest report, a tap shorter than a slice is lost. Next: short taps on
+battery at Home; if some are lost, a TMA525C wake, or the X4 Pro's rule (decline while touch cannot wake).
+
+Test API gap that blocks some of these: `CMD:HEAP:REFUSE` refuses decodes and reloads, but nothing refuses the
+secondary-buffer realloc (it would make the fragmented-heap restart reachable). Held keys are there since #741
 (`CMD:BTN:<key>:<ms>`, [Serial Test API](../serial-test-api.md)).
-
-## Localized tap flash
-
-Open: screens on the recorder path get no tap acknowledgement except the selection repaint
-(`ActivityManager::dispatchListTap()`, `Selected` branch). Those are the screens still on
-`ListTouchBand`: the XTC chapter selector, the Markdown table of contents, footnotes,
-the OPDS browser, Wi-Fi selection, global bookmarks, starred pages and KOReader sync
-(`ButtonRemapActivity` is excluded on purpose). The EPUB chapter selector moved to `UiListActivity`
-in #593 (2026-10-31, `eace39655`).
-
-Already done elsewhere: screens on FreeInkUI (`UiListActivity`, `TabbedUiListActivity`,
-`UiAppHost`) get FreeInkUI's tap flash, which paints the tapped element gray in the refresh that
-shows the result (`FreeInkApp::route()`).
-
-Ruled out: a flash with its own partial refresh bounded to the row. The SDK primitive it would have
-used, `ListNav::rowRectFor()`, was removed upstream, and a windowed refresh on the SSD1677 and
-UC8279 costs nearly as much as a full one (measurements in
-[Display and refresh](display-and-refresh.md#windowed-refresh-capability-query-alignment-baseline)).
-
-Next: move the remaining band screens onto `UiListActivity`, which brings the flash with it,
-rather than building a second flash for the recorder path.
 
 ## Ten-page skip stops at a chapter boundary
 
@@ -183,8 +156,9 @@ user guide offers a scroll-bar tap.
 Why it matters: the T5S3 has no Up key, and a scroll-bar tap was the most direct way back up a long
 list.
 
-Next: decide whether to add a scroll-track interaction to FreeInkUI's list (an SDK change that would
-cover every FreeInkUI list).
+Next: decide between (a) a scroll-track interaction in FreeInkUI's list, an SDK change that would cover every
+FreeInkUI list, and (b) none, with [Touch Gestures](../touch-gestures.md) saying that a long list pages by swipe or
+hint box.
 
 ## Long-press discoverability
 
@@ -205,35 +179,28 @@ Next: apply the browser's "short / long" form wherever a screen has a hold-only 
 
 ## BOOX Picco: after the first build
 
-Status: merged as #769 (2026-11-14), on the SDK pin of the #771 resync, which brought Free-Ink main's Picco display
-fixes (grayscale LUTs, SSD2677 night mode, dark AA pixels on the SE0400NQW47, first-paint clearing, inverted gray
-overlay). Notes from 2026-11-13: a retail unit's flash is dumped, and the `picco_stock` build runs on
-it on Onyx's table: boot to Home in about 1 s of setup, SSD2677 with an SE0400NQW47 panel, TMA525C reporting two
-contacts, charger configured, RTC and IMU found, the light present (`Frontlight up`), the flash area taken as the
-PSRAM image beside the 512 KB `spiffs`, no System Update rows, the Slide Switch row and double Power = Back as
-defaults (serial log, screenshots, `GET`). Tried by hand on the unit: it turns on, the screen is upright, taps work,
-and the slide switch turns the light on and off. Board notes:
+Merged as #769. Board notes, including what the first unit showed on Onyx's table:
 [Board Support](../contributing/board-support.md#onyx-boox-picco).
 
 - **Validate on the device**: touch in the other three orientations (the SDK profile sets `swapXY` and `flipY`),
   Power / Up / Down and the double-Power Back, the light's warmth and that it is off in deep sleep, the battery
-  reading, USB Drive, deep sleep and wake; then the full install on our table.
+  reading, USB Drive, deep sleep and wake; then the full install on our table. Auto-rotate has been checked by hand in
+  all four orientations.
 - **A boot-log error** on that unit, cause not looked at: `gpio_isr_handler_remove(): GPIO isr service is not
-  installed`. (The other one, `i2c_master_transmit_receive failed: ESP_ERR_INVALID_STATE` right after `Charger
-  configured`, was the tilt driver probing the X3's IMU address 0x6B first; the IDF reports that NACK as
-  INVALID_STATE. Gone since tilt reads through the SDK's `Imu`, which asks the profile's 0x6A first.)
+  installed`. A likely source, by reading the code only: `InputManager::begin()` in the SDK calls
+  `detachInterrupt()` on the Picco's power pin at boot, and the IDF logs this error for a detach while no GPIO
+  interrupt service is installed. Next: confirm with a boot log, then guard the detach.
 - **Updates on the stock table.** Onyx's recovery installs `/update/firmware.bin` from the card. An action that erases
-  otadata and restarts would hand the stock-table Picco to it, the way the stock app's Power + Volume Up does.
-- **USB presence from the charger.** The charging bolt and "Charging" now ask the charger, so a wall charger shows
-  them (`HalPowerManager::isExternalPowerPresent()`). `HalGPIO::isUsbConnected()` still sees the host link only:
+  otadata and restarts would hand the stock-table Picco to it, the way the stock app's Power + Volume Up does. Nothing
+  is built. Next: decide whether a stock-table Picco should update from the card this way.
+- **USB presence from the charger.** The charging bolt and "Charging" ask the charger, so a wall charger shows
+  them (`HalPowerManager::isExternalPowerPresent()`, #795). `HalGPIO::isUsbConnected()` still sees the host link only:
   upstream asks the charger there too, which would also change light sleep, the serial-log gate and the USB wake on
   the Picco and the T5S3. Decide with the sleep item below.
 - **Sleep on USB power.** Upstream keeps the Picco in light sleep while USB powers it, with a charge strip on the sleep
   screen, because deep sleep cannot see the charger; and it powers on when a cable is plugged in, since that pulses
   the wake line. Here the wake gate rejects that wake and the device sleeps on. Decide after seeing it.
 - **GPIO5.** The SDK carries it as Confirm; what drives it on the device is not known.
-- **Slide switch and touch page turns.** Upstream's third binding. Here Touch Page Turn has four values, so "on" needs
-  a remembered mode.
 
 ## Motion sensor: power and the SDK gating
 
@@ -250,22 +217,29 @@ and the BOOX Picco.
 ## USB attach during light sleep on the X4 (CrossPoint #3082)
 
 Open, unproven here: upstream reports an X4 that freezes when USB is plugged in while it idles in light sleep, and
-reverted its light sleep; ours still sleeps in slices. `HalPowerManager::lightSleep()` arms only the timer and the
-power button (`lib/hal/HalPowerManager.cpp:277-283`, no `usbDetect` wake) and keeps the GPIO13 hold on while running,
-on purpose (the comment at `:285-298`: a release between slices can drop the pad).
+reverted its light sleep; ours still sleeps in slices. `HalPowerManager::lightSleep()` declines while USB is already
+connected (`rejUsb`), so the case is a cable plugged in during a slice. It arms only the timer, the power button and,
+where there is one, the touch line (no `usbDetect` wake), and keeps the GPIO13 hold on while running, on purpose (the
+GPIO13 comment there: a release between slices can drop the pad).
 
 Next: a device test first: plug USB into an idle X4 at a reader page, ten times. If it ever freezes, take only the PR's
 second commit (arm `BoardConfig::ACTIVE.usbDetect` as a level wake, disarm after); its first commit, dropping the hold
-after wake, contradicts our documented reason. crosspoint-reader #3082, Brian Pugh (@BrianPugh); its author had no X4.
+after wake, contradicts our documented reason. crosspoint-reader #3082 (open), Brian Pugh (@BrianPugh); its author had
+no X4.
 
-## Symbolized crash traces (CrossPoint #4477)
+## Symbolized crash traces (CrossPoint #4477, closed)
 
-Open: `/crash_report.txt` (written at the boot after a captured panic, `HalSystem::checkPanic()`,
-`lib/hal/HalSystem.cpp:185`) holds the stack as raw hex words, which need the build's ELF to read. Upstream writes
-human-readable stack traces from a compressed symbol table in the image.
+Open: `/crash_report.txt` (written at the boot after a captured panic, `HalSystem::checkPanic()`) holds the stack as
+raw hex words, which need the build's ELF to read. crosspoint-reader #4477 (David Boring, @david-boring) wrote
+human-readable traces on the device from a compressed symbol table in the image; upstream closed it unmerged on
+2026-11-15, preferring a host script that takes the crash report, fetches the matching ELF from CI and prints the
+trace.
 
-Constraint: the table's flash cost is unknown, and on the C3 each 64 KB of app growth costs the font cache one MMU
-page. Next: measure the table for `default` before porting. crosspoint-reader #4477, David Boring (@david-boring).
+Constraint: an on-device table costs flash, and on the C3 each 64 KB of app growth costs the font cache one MMU page.
+A host script needs each release's ELF kept; our release workflows do not publish them.
+
+Next: decide. Upstream's way: keep the release ELFs and add a host script that decodes `/crash_report.txt` against
+the matching one. The on-device way: measure the table for `default` first.
 
 ## Button cursor on touch boards (matcha-reader #719): decide
 

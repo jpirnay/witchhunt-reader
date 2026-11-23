@@ -162,6 +162,11 @@ bottom edge returns Home.
   stay reachable, so switching page turns off while reading with a palm on the glass does
   not strand you.
 - **Settings → Controls → Touch Navigation** silences touch outside the reader.
+- **Settings → Controls → Touch Lock** silences touch everywhere, books included: page turns,
+  the reader bars, gestures and the light panel. The keys keep working, the Home key too.
+  Switch it off with the same row, a key bound to **Toggle Touch Lock**, or on the BOOX Picco
+  the slide switch set to *Touch* (**Settings → Controls → Slide Switch**): on is touch on,
+  off is Touch Lock.
 - **Settings → Controls → Tap Action** chooses whether a tap on a list row selects it
   (*Select, then activate*, the default) or opens it straight away.
 - Any single gesture can be set to **Ignore (do nothing)** in *Gesture actions* to switch
