@@ -112,7 +112,7 @@ bool CrossPointSettings::isReaderScopedAction(const uint8_t action) {
     default:
       // BTN_GO_HOME / BTN_SLEEP / BTN_FORCE_*_REFRESH / BTN_OPEN_BOOKMARKS /
       // BTN_LIGHT_* / BTN_TOGGLE_TOUCH_UI / BTN_TOGGLE_DARK_MODE / BTN_SCREENSHOT /
-      // BTN_IGNORE are global.
+      // BTN_TOGGLE_TOUCH_LOCK / BTN_IGNORE are global.
       return false;
   }
 }

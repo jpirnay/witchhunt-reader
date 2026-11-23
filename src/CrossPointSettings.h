@@ -614,6 +614,7 @@ class CrossPointSettings {
     SLIDE_SWITCH_READING_LIGHT = 0,
     SLIDE_SWITCH_DARK_MODE = 1,
     SLIDE_SWITCH_NOTHING = 2,
+    SLIDE_SWITCH_TOUCH = 3,  // on: touch on; off: Touch Lock
     SLIDE_SWITCH_ACTION_COUNT
   };
   uint8_t slideSwitchAction = SLIDE_SWITCH_READING_LIGHT;
@@ -657,6 +658,12 @@ class CrossPointSettings {
   // with this off: HalGPIO synthesises them as BUTTON edges below this layer, so
   // turning touch navigation off cannot strand anyone in a menu.
   uint8_t touchUiControls = TOUCH_UI_ON;
+  // Touch Lock: no touch anywhere, the reading page included, until it is switched off. Touch Navigation and Touch Page
+  // Turn each leave part of the glass live by design (the reader; its bars, gestures and the light panel), so this is
+  // the one way to read by the keys alone with a hand on the glass. The keys keep working, the capacitive Home key
+  // among them (HalGPIO feeds it in as button edges, below the touch gate), and so does a key bound to
+  // BTN_TOGGLE_TOUCH_LOCK. A finger on the glass does not keep the device awake while it is on. See TouchGate.h.
+  uint8_t touchLock = 0;
   uint8_t touchListActivation = TOUCH_LIST_SELECT_THEN_ACTIVATE;
 
   // Bumped whenever the SHIPPED gesture defaults change. A stored value below
@@ -695,7 +702,8 @@ class CrossPointSettings {
   //    default, Confirm on a board with no Back or Home key (BOOX Picco), in place of nothing.
   // 4: BTN_TOGGLE_DARK_MODE, BTN_AUTO_PAGE_TURN and BTN_SCREENSHOT inserted after BTN_CONFIRM, and
   //    BTN_LIGHT_PANEL at the end of the light block, before the warm pair.
-  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 4;
+  // 5: BTN_TOGGLE_TOUCH_LOCK inserted after BTN_SCREENSHOT.
+  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 5;
 
   // --- Gesture actions (touch boards) ---------------------------------------
   // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
@@ -940,6 +948,9 @@ class CrossPointSettings {
     // A screenshot to the card, as POWER+DOWN takes one: for a board with no Down key (BOOX Picco), and for a screen
     // other than the reader, whose menu is the other way to one.
     BTN_SCREENSHOT,
+    // Touch Lock on or off (touchLock). Global. Bind it to a key: a gesture can switch the lock on, but no gesture
+    // reaches the device while it is on.
+    BTN_TOGGLE_TOUCH_LOCK,
     // --- Board-gated actions MUST stay at the end of this enum ---------------
     // SettingsList builds each button's option list positionally: index i in the
     // list is action value i. Actions it drops on boards that cannot perform them
@@ -1109,18 +1120,22 @@ class CrossPointSettings {
   }
 
   // A stored action from a settings file written at BUTTON_ACTIONS_VERSION `fromVersion`, in today's numbering. Each
-  // version that inserted actions moved every action from their place up by as many. The insertions run in order and
-  // each lands after the one before, so today's value of an inserted action is also where it went in: version 4's
-  // three go in at Toggle Dark Mode's place, and then its light-panel action at its own, past the three. Past the end
-  // is left for the loader's range check.
+  // version that inserted actions moved every action from their place up by as many. The steps run in order, and each
+  // compares with where its version put its first insertion: today's value of that action, less the actions later
+  // versions inserted before it. So far only Open Light Panel has any, version 5's Touch Lock. Past the end is left
+  // for the loader's range check.
   static constexpr uint8_t upgradeStoredAction(uint8_t action, const int fromVersion) {
     if (fromVersion < 1 && action >= BTN_BACK) ++action;
     if (fromVersion < 2 && action >= BTN_READER_BARS) ++action;
     if (fromVersion < 3 && action >= BTN_CONFIRM) ++action;
+    // Version 4's three, Toggle Dark Mode to Take Screenshot.
     if (fromVersion < 4 && action >= BTN_TOGGLE_DARK_MODE) {
-      action = static_cast<uint8_t>(action + (BTN_LIGHT_TOGGLE - BTN_TOGGLE_DARK_MODE));
+      action = static_cast<uint8_t>(action + (BTN_SCREENSHOT + 1 - BTN_TOGGLE_DARK_MODE));
     }
-    if (fromVersion < 4 && action >= BTN_LIGHT_PANEL) ++action;
+    // Version 4's Open Light Panel, one below today's place: version 5's Touch Lock went in before it.
+    if (fromVersion < 4 && action >= BTN_LIGHT_PANEL - 1) ++action;
+    // Version 5's Touch Lock.
+    if (fromVersion < 5 && action >= BTN_TOGGLE_TOUCH_LOCK) ++action;
     return action;
   }
 

@@ -188,8 +188,9 @@ edge, the slide switch in the lower part of the left edge, and the USB-C port in
 | **Up** / **Down** | In a book: previous / next page. In a list: move up / down | | In a book: previous / next chapter. In a list: jump to the first / last row |
 
 The **slide switch** turns the reading light on and off. **Settings → Controls → Slide Switch** makes it switch
-Dark Mode instead, or nothing. Wherever it is set, the switch's position counts at start-up and each time it moves;
-in between, the light and Dark Mode can still be changed on the screen.
+Dark Mode instead, or touch (off is **Touch Lock**: no touch anywhere, for reading by the keys alone), or nothing.
+Wherever it is set, the switch's position counts at start-up and each time it moves; in between, the light, Dark Mode
+and Touch Lock can still be changed on the screen.
 
 A press of Power takes effect after a short pause, because the device waits to see if a second press follows.
 Single and double Power can be changed under **Settings → Controls → Button Actions**.
@@ -599,15 +600,16 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 #### 3.7.3 Controls
 
 - **Remap Front Buttons**: Reassign the physical function of each bottom-edge button.
-- **Button Actions** (submenus — one per logical button: Back, Confirm, Left, Right, Up/Page Back, Down/Page Forward, Power): For each button, independently configure the **Short Press**, **Double Press**, and **Long Press** action. Available actions include: page forward/back, skip 10 pages, go home, sleep, force refresh, force fast refresh, open TOC, open bookmarks, toggle bookmark, footnotes, next/previous chapter, exit reader, open reader menu, open the reader bars (what a short **Confirm** opens in a book), toggle bionic reading, KOReader sync, cycle font size, larger/smaller text, cycle orientation (either direction), quick overrides, toggle touch navigation, back, confirm, toggle Dark Mode, toggle auto page turn (an EPUB book turns its pages by itself every **Auto Turn (Seconds)**, set in the reader menu; the same action, **Confirm** or **Back** stops it), take screenshot, ignore, and — on devices with a light — toggle reading light, light brighter, light dimmer and open the light panel — plus light warmer and light cooler on a device with a warm/cool light.
+- **Button Actions** (submenus — one per logical button: Back, Confirm, Left, Right, Up/Page Back, Down/Page Forward, Power): For each button, independently configure the **Short Press**, **Double Press**, and **Long Press** action. Available actions include: page forward/back, skip 10 pages, go home, sleep, force refresh, force fast refresh, open TOC, open bookmarks, toggle bookmark, footnotes, next/previous chapter, exit reader, open reader menu, open the reader bars (what a short **Confirm** opens in a book), toggle bionic reading, KOReader sync, cycle font size, larger/smaller text, cycle orientation (either direction), quick overrides, toggle touch navigation, toggle touch lock, back, confirm, toggle Dark Mode, toggle auto page turn (an EPUB book turns its pages by itself every **Auto Turn (Seconds)**, set in the reader menu; the same action, **Confirm** or **Back** stops it), take screenshot, ignore, and — on devices with a light — toggle reading light, light brighter, light dimmer and open the light panel — plus light warmer and light cooler on a device with a warm/cool light.
 - **Page Turn Buttons**: "Follow Book" (default) or "Fixed". In a book whose pages turn right to left (a vertical book, or a Hebrew, Arabic, Persian or Urdu book), Follow Book makes the **Left** and **Right** buttons follow the page: Left shows the next page and Right the previous one. Every direction-bound action you gave to Left or Right (short, double and long press: page back or forward, 10 pages back or forward, previous or next chapter) swaps the same way, and so do the actions of the left and right swipe zones on a touch device. Other actions, and the Up and Down buttons, never change. "Fixed" keeps Left as back and Right as forward in every book. The setting does not touch the taps, page swipes and progress bars below, which follow the page.
 - **Button Actions Overview**: A read-only overview screen showing the current short/double/long press mapping for every button at a glance.
+- **Touch Lock** *(touch devices only)*: Touch off everywhere, books included: page turns, the reader bars, gestures and the light panel. Read and navigate by the keys alone, with a hand resting on the glass. The keys keep working, the Home key of the X4 Pro and the LilyGo T5 S3 among them, and touching the glass does not keep the device awake. Switch it off here, with a key bound to **Toggle Touch Lock**, or on the BOOX Picco with the slide switch set to "Touch". "OFF" (default) / "ON".
 - **Touch Navigation** *(touch devices only)*: Whether touch does anything outside the reader — list rows, covers, the home menu, the settings tabs, the on-screen button hints. "ON" / "OFF". See **[Touch Controls](#5-touch-controls)**.
 - **Touch Page Turn** *(touch devices only)*: How the reading page turns pages by touch — "Off", "Tap Zones", "Swipe", "Tap Zones (Inverted)". It governs page turns only; the reader menu and the reading light stay reachable either way.
 - **Tap Action** *(touch devices only)*: Whether tapping a list row selects it — "Select, then activate" (default) — or opens it straight away, "Activate immediately".
 - **Gesture actions** *(touch devices only)*: One entry per gesture — the sideways swipes, the four edge swipes (left and right edge columns, up and down), the two ten-page zone swipes, the five tap zones, the same five as long taps, the four corner holds, pinch and rotation — each assigned an action from the same list the buttons offer. See **[Touch Controls](#5-touch-controls)**.
 - **Gesture overview** *(touch devices only)*: A read-only screen drawing the tap, hold and swipe zones with your current assignments in them. Generated from live settings, so it is the authority if the documentation disagrees.
-- **Slide Switch** *(BOOX Picco only)*: What the slide switch turns on and off: "Reading Light" (default), "Dark Mode" or "Nothing". Its position counts at start-up and each time it moves; in between, the light and Dark Mode can still be changed on the screen.
+- **Slide Switch** *(BOOX Picco only)*: What the slide switch turns on and off: "Reading Light" (default), "Dark Mode", "Nothing" or "Touch" (off is **Touch Lock**). Its position counts at start-up and each time it moves; in between, the light, Dark Mode and Touch Lock can still be changed on the screen.
 - **Tilt Page Turn** *(X3 and BOOX Picco)*: Turn pages with a quick flick of the device: tilt it and bring it back. Sub-settings:
   - **Tilt Page Turn**: "ON" / "OFF"
   - **Tilt Direction**: "Left / Right" (default), a twist that moves the right or the left edge away from you; or "Forward / Back", the top edge tipped away from you (forward) or toward you (back). Both follow the reading orientation.
@@ -1070,7 +1072,8 @@ Two things are worth knowing before the tables:
 
 ### 5.1 The two master switches
 
-Both live under **[Settings → Controls](#373-controls)**:
+Both live under **[Settings → Controls](#373-controls)**, beside **Touch Lock**, which turns all touch off, books
+included (see **[5.8](#58-turning-it-off)**):
 
 | Setting | Governs | Default |
 | --- | --- | --- |
@@ -1301,6 +1304,9 @@ Home.
 
 ### 5.8 Turning it off
 
+- **Settings → Controls → Touch Lock** → *On* turns touch off everywhere, the reading page included:
+  read by the keys alone. Bind **Toggle Touch Lock** to a key to switch it with one press (not to a gesture:
+  no gesture reaches the device while it is on), or on the BOOX Picco set the slide switch to "Touch".
 - **Settings → Controls → Touch Page Turn** → *Off* stops touch turning pages, and nothing
   else.
 - **Settings → Controls → Touch Navigation** → *Off* silences touch outside the reading page,
@@ -1312,7 +1318,7 @@ Home.
   each row names what Built-in will actually do, so "Swipe left" reads *Next Page* while you
   are in Swipe mode and *Nothing* when you are not.
 - The action **Toggle Touch Navigation** can be bound to a button, if you want to silence
-  touch without going into Settings.
+  touch outside books without going into Settings.
 
 ### 5.9 If a gesture does nothing
 
