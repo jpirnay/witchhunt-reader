@@ -292,6 +292,7 @@ void HomeActivity::loadRecentCovers(const int coverHeight, const std::pair<int, 
       }
       // Cover decode needs ~42 KB contiguous heap -- free the frame cache first.
       invalidateFrameCacheSafely();
+      coverBookPath_ = book.path;
       coverLoader.begin(book.path, coverScratch_.get());
     }
 
@@ -305,7 +306,15 @@ void HomeActivity::loadRecentCovers(const int coverHeight, const std::pair<int, 
         return;
       }
     }
-    RecentBook& book = recentBooks[nextRecentCoverIndex];
+    // Found by path: a swipe that cycled the books while this one was in hand moved it
+    // (cycleRecentBooks), and the position the pass started from now holds another book.
+    const auto inHand = std::find_if(recentBooks.begin(), recentBooks.end(),
+                                     [this](const RecentBook& b) { return b.path == coverBookPath_; });
+    if (inHand == recentBooks.end()) {
+      recentsLoading = false;
+      return;
+    }
+    RecentBook& book = *inHand;
     const std::string placeholder = ReaderActivity::coverThumbPlaceholder(book.path);
     if (step == CoverThumbLoader::Step::Done) {
       // A cover written, or the placeholder of a book that has none: the stored path is canonical.
@@ -317,7 +326,11 @@ void HomeActivity::loadRecentCovers(const int coverHeight, const std::pair<int, 
       // Counts the transient; writes a durable placeholder once the budget is spent.
       giveUpCover(book, ThumbResult::TransientFail, slotsForBook(placeholder));
     }
-    nextRecentCoverIndex++;
+    // Past the book in hand when it is where the pass left off. After a cycle the pass starts over
+    // from the front instead, and skips whatever is complete by then.
+    if (nextRecentCoverIndex < recentBooks.size() && &recentBooks[nextRecentCoverIndex] == &book) {
+      nextRecentCoverIndex++;
+    }
     yieldAfterDecode();
     return;
   }
@@ -449,14 +462,18 @@ void HomeActivity::onEnter() {
   // each clearing and then appending, and Home showed every entry twice. The rebuild also reads the
   // bookmark index off the card.
   rebuildMenuEntries();
+  shownBooks_ = std::min(
+      static_cast<int>(recentBooks.size()),
+      GUI.homeLayout(renderer, UITheme::getContentRect(renderer, true, false), static_cast<int>(menuEntries.size()))
+          .bookSlots);
 
   // Apply focus: book path takes priority, else combined selector index (covers
   // "return to the menu entry I was on").
   bool focused = false;
   if (!focusBookPath.empty()) {
-    for (size_t i = 0; i < recentBooks.size(); ++i) {
+    for (int i = 0; i < shownBooks_; ++i) {
       if (recentBooks[i].path == focusBookPath) {
-        selectorIndex = static_cast<int>(i);
+        selectorIndex = i;
         focused = true;
         break;
       }
@@ -464,7 +481,7 @@ void HomeActivity::onEnter() {
     focusBookPath.clear();
   }
   if (!focused && focusSelectorIndex >= 0) {
-    const int combinedSize = static_cast<int>(recentBooks.size() + menuEntries.size());
+    const int combinedSize = shownBooks_ + static_cast<int>(menuEntries.size());
     if (combinedSize > 0) {
       selectorIndex = std::min(focusSelectorIndex, combinedSize - 1);
     }
@@ -624,7 +641,18 @@ void HomeActivity::loop() {
       requestUpdate();
     }
   } else {
-    const int totalItems = static_cast<int>(recentBooks.size() + menuEntries.size());
+    const int totalItems = shownBooks_ + static_cast<int>(menuEntries.size());
+
+    // Ahead of the cover pass, which would otherwise take this tick and let the swipe go by. The
+    // direction is the reader's (and the carousel's): a swipe to the left brings the next book.
+    // wasSwipe() is silent on boards without touch and while Touch Navigation is off.
+    if (GUI.homeSwipeCyclesBooks()) {
+      const auto swipe = mappedInput.wasSwipe();
+      if (swipe == MappedInputManager::SwipeDir::Left || swipe == MappedInputManager::SwipeDir::Right) {
+        cycleRecentBooks(swipe == MappedInputManager::SwipeDir::Left ? 1 : -1);
+        return;
+      }
+    }
 
     if (firstRenderDone && !recentsLoaded && !recentsLoading && !inputWaiting) {
       const HomeLayout layout = GUI.homeLayout(renderer, UITheme::getContentRect(renderer, true, false),
@@ -645,7 +673,7 @@ void HomeActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    const int recentsCount = static_cast<int>(recentBooks.size());
+    const int recentsCount = shownBooks_;
     if (selectorIndex < recentsCount) {
       onSelectBook(recentBooks[selectorIndex].path);
     } else {
@@ -705,7 +733,7 @@ void HomeActivity::render(RenderLock&&) {
 
   GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.homeTopPadding}, nullptr);
 
-  const int totalItems = static_cast<int>(recentBooks.size() + menuEntries.size());
+  const int totalItems = shownBooks_ + static_cast<int>(menuEntries.size());
   if (selectorIndex >= totalItems) {
     selectorIndex = std::max(0, totalItems - 1);
   }
@@ -725,7 +753,7 @@ void HomeActivity::render(RenderLock&&) {
                           bufferRestored, [this, isCarousel] { return !isCarousel && storeCoverBuffer(); });
 
   GUI.drawButtonMenu(
-      renderer, layout.menu, menuCount, selectorIndex - static_cast<int>(recentBooks.size()),
+      renderer, layout.menu, menuCount, selectorIndex - shownBooks_,
       [this](int index) { return std::string(I18N.get(menuEntries[index].label)); },
       [this](int index) { return menuEntries[index].icon; });
 
@@ -778,7 +806,7 @@ bool HomeActivity::handleHomeTouch() {
   if (!mappedInput.hasTouch()) return false;
   if (!TapTargets::homeCovers().hasTargets() && !TapTargets::homeMenu().hasTargets()) return false;
 
-  const int recentsCount = static_cast<int>(recentBooks.size());
+  const int recentsCount = shownBooks_;
   const int menuCount = static_cast<int>(menuEntries.size());
 
   // Covers first: in the carousel theme the side covers slide behind the centre one, and the
@@ -841,6 +869,25 @@ void HomeActivity::onSelectBook(const std::string& path) {
   activityManager.replaceWithReader(path, std::move(hint));
 }
 
+void HomeActivity::cycleRecentBooks(const int step) {
+  if (recentBooks.size() < 2) return;
+  {
+    // render() reads the list, and the theme's cover flags with it.
+    RenderLock lock;
+    if (step > 0) {
+      std::rotate(recentBooks.begin(), recentBooks.begin() + 1, recentBooks.end());
+    } else {
+      std::rotate(recentBooks.rbegin(), recentBooks.rbegin() + 1, recentBooks.rend());
+    }
+    // A different cover goes to the front, so the stored copy no longer matches.
+    coverRendered = false;
+  }
+  // The cover pass walks the list by position, and the rotation moved what it had done: it starts
+  // over and skips the books that are complete. The one in hand, if any, it finds by path.
+  nextRecentCoverIndex = 0;
+  requestUpdate();
+}
+
 void HomeActivity::dispatchMenuAction(HomeMenuAction action) {
   // Every entry replaces Home, so the buffer lent for the cover pass or kept as the carousel's frame cache
   // (keepRegionAsFrameCache) goes back now, as startActivityForResult() does, not at onExit(): the busy indicator
@@ -864,7 +911,7 @@ void HomeActivity::appendDebugState(std::string& out) const {
   using SerialCommandGrammar::appendField;
   appendField(out, "sel", static_cast<long>(selectorIndex));
   if (selectorIndex < 0) return;
-  const int books = static_cast<int>(recentBooks.size());
+  const int books = shownBooks_;
   const int menuIndex = selectorIndex - books;
   if (menuIndex < 0) {
     appendField(out, "label", recentBooks[selectorIndex].title);

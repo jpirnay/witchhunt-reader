@@ -136,6 +136,9 @@ struct HomeLayout {
   // Exact thumbnail boxes, cropped to fit, for a theme that draws covers at fixed sizes.
   int thumbSizeCount = 0;
   std::pair<int, int> thumbSizes[kMaxThumbSizes]{};
+  // How many recent books the screen has places for. Home selects and opens only those; a theme
+  // that cycles through more (homeSwipeCyclesBooks) loads them all and shows the front ones.
+  int bookSlots = std::numeric_limits<int>::max();
 };
 
 // Default theme implementation (Classic Theme)
@@ -254,6 +257,10 @@ class BaseTheme {
   // How many entries besides Settings fit on Home; the rest go behind More (collectHomeMenuEntries).
   // A theme whose menu grows or scrolls with the list has no limit.
   virtual int homeMenuCapacity() const { return std::numeric_limits<int>::max(); }
+
+  // A horizontal swipe on Home brings the next or previous recent book to the front (the carousel
+  // scrolls its own row instead). Same direction as a page turn: a swipe to the left is "next".
+  virtual bool homeSwipeCyclesBooks() const { return false; }
 
   // Return the cover thumbnail sizes this theme needs for its home screen.
   // HomeActivity calls generateThumbBmp() for each pair. Empty = use height-only path.
