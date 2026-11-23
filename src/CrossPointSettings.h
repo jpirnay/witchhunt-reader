@@ -580,7 +580,7 @@ class CrossPointSettings {
   // Hide battery percentage
   uint8_t hideBatteryPercentage = HIDE_NEVER;
   // UI Theme
-  uint8_t uiTheme = LYRA;
+  uint8_t uiTheme = LYRA_TILES;
   // Acknowledge a press that starts a slow screen change. See ActivityManager::showBusyIndicator().
   uint8_t showBusyIndicator = 1;
   // NOT a preference: the measured cost of a FAST refresh on this panel, carried across boots so
