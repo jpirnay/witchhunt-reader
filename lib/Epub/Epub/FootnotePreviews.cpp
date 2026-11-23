@@ -285,13 +285,16 @@ class LinkScanner {
 // is decided the same way for both, by the TEXT captured: tags never count towards it.
 class NoteCapturer {
  public:
-  using EmitFn = std::function<void(uint32_t keyHash, const char* text, size_t len)>;
+  // Where a finished note goes: a function and its context rather than a std::function, whose handler each caller would
+  // instantiate.
+  using EmitFn = void (*)(void* ctx, uint32_t keyHash, const char* text, size_t len);
 
  private:
   SaxParser parser_;
   const int spineIndex_;                  // the document being scanned; anchors the id hashes
   const NoThrowArray<uint32_t>& wanted_;  // key hashes of the targets that live in this spine
   EmitFn emit_;
+  void* emitCtx_;
   int depth_ = 0;
   int captureDepth_ = -1;  // depth of the id'd element while capturing, -1 = idle
   int skipDepth_ = -1;     // depth of a chrome element being skipped over, -1 = not skipping
@@ -467,7 +470,7 @@ class NoteCapturer {
       buf_[textLen_ - 1] = '.';
     }
     buf_[textLen_] = '\0';
-    if (plainLen_ > 0) emit_(wanted_[activeIdx_], buf_, textLen_);
+    if (plainLen_ > 0) emit_(emitCtx_, wanted_[activeIdx_], buf_, textLen_);
     captureDepth_ = -1;
     skipDepth_ = -1;
     tailMode_ = false;
@@ -574,12 +577,18 @@ class NoteCapturer {
   }
 
  public:
-  NoteCapturer(const int spineIndex, const NoThrowArray<uint32_t>& wanted, EmitFn emit)
-      : spineIndex_(spineIndex), wanted_(wanted), emit_(std::move(emit)) {}
+  NoteCapturer(const int spineIndex, const NoThrowArray<uint32_t>& wanted, const EmitFn emit, void* emitCtx)
+      : spineIndex_(spineIndex), wanted_(wanted), emit_(emit), emitCtx_(emitCtx) {}
   // Markup mode, into `buffer`, which holds `capacity` bytes and a terminator.
-  NoteCapturer(const int spineIndex, const NoThrowArray<uint32_t>& wanted, EmitFn emit, char* buffer,
-               const size_t capacity)
-      : spineIndex_(spineIndex), wanted_(wanted), emit_(std::move(emit)), buf_(buffer), cap_(capacity), markup_(true) {}
+  NoteCapturer(const int spineIndex, const NoThrowArray<uint32_t>& wanted, const EmitFn emit, void* emitCtx,
+               char* buffer, const size_t capacity)
+      : spineIndex_(spineIndex),
+        wanted_(wanted),
+        emit_(emit),
+        emitCtx_(emitCtx),
+        buf_(buffer),
+        cap_(capacity),
+        markup_(true) {}
   NoteCapturer(const NoteCapturer&) = delete;
   NoteCapturer& operator=(const NoteCapturer&) = delete;
   // Scans chapter XHTML (HTML-flavored): enable bare-void-tag repair.
@@ -1287,7 +1296,10 @@ Resolver::Step Resolver::step() {
       }
       st.capturer = makeUniqueNoThrow<NoteCapturer>(
           noteSpine, st.wanted,
-          [&st](const uint32_t keyHash, const char* text, const size_t len) { st.store.addNote(keyHash, text, len); });
+          [](void* ctx, const uint32_t keyHash, const char* text, const size_t len) {
+            static_cast<Store*>(ctx)->addNote(keyHash, text, len);
+          },
+          &st.store);
       if (st.capturer) {
         if (void* state = st.saxState.take(st.arena)) st.capturer->useExternalState(state, SaxParser::stateBytes());
       }
@@ -1388,20 +1400,25 @@ bool captureNote(Epub& epub, const int fromSpineIndex, const char* href, std::st
   }
   epub.primeZip(*zip);
 
-  bool captured = false;
-  bool noRoom = false;
+  // Where the capturer hands the note: the caller's string, copied once, at most MAX_NOTE_MARKUP_BYTES, so one block
+  // for the copy is all it takes.
+  struct Sink {
+    std::string* out;
+    bool captured;
+    bool noRoom;
+  } sink{&outMarkup, false, false};
   auto capturer = makeUniqueNoThrow<NoteCapturer>(
       targetSpine, wanted,
-      [&](uint32_t, const char* text, const size_t len) {
-        // At most MAX_NOTE_MARKUP_BYTES, so one block for the copy is all it takes.
+      [](void* ctx, uint32_t, const char* text, const size_t len) {
+        auto& to = *static_cast<Sink*>(ctx);
         if (!heapHasBlockFor(len + 1)) {
-          noRoom = true;
+          to.noRoom = true;
           return;
         }
-        outMarkup.assign(text, len);
-        captured = true;
+        to.out->assign(text, len);
+        to.captured = true;
       },
-      buffer.get(), MAX_NOTE_MARKUP_BYTES);
+      &sink, buffer.get(), MAX_NOTE_MARKUP_BYTES);
   if (!capturer || !capturer->setup()) {
     LOG_ERR("FNP", "Note capture: no parser");
     return false;
@@ -1414,7 +1431,7 @@ bool captureNote(Epub& epub, const int fromSpineIndex, const char* href, std::st
   }
   bool done = false;
   // Only as far as the note: one near the top of a long notes document costs a chunk or two.
-  while (!done && !captured && !noRoom) {
+  while (!done && !sink.captured && !sink.noRoom) {
     const int n = doc.next(chunk.get(), STREAM_CHUNK_BYTES, &done);
     if (n < 0) {
       LOG_ERR("FNP", "Note capture: read error in spine %d", targetSpine);
@@ -1424,11 +1441,11 @@ bool captureNote(Epub& epub, const int fromSpineIndex, const char* href, std::st
     if (n > 0 && !capturer->feed(chunk.get(), static_cast<size_t>(n))) break;
   }
   // A note that runs to the end of its document closes there.
-  if (!captured && !noRoom) capturer->finalize();
+  if (!sink.captured && !sink.noRoom) capturer->finalize();
   doc.close();
   epub.adoptZipDetails(*zip);
-  if (!captured) {
-    LOG_DBG("FNP", "Note capture: nothing at %s (spine %d)%s", href, targetSpine, noRoom ? ", no memory" : "");
+  if (!sink.captured) {
+    LOG_DBG("FNP", "Note capture: nothing at %s (spine %d)%s", href, targetSpine, sink.noRoom ? ", no memory" : "");
     return false;
   }
   LOG_DBG("FNP", "Captured the note at %s: %u bytes from spine %d in %lums", href,
