@@ -330,6 +330,9 @@ void OtaUpdateActivity::render(RenderLock&&) {
       case OtaUpdater::CHECKSUM_ERROR:
         reason = "Download corrupted (checksum mismatch)";
         break;
+      case OtaUpdater::NO_CHECKSUM_ERROR:
+        reason = tr(STR_FIRMWARE_NO_CHECKSUM);
+        break;
       default:
         break;
     }

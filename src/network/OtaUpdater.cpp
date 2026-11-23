@@ -257,6 +257,13 @@ OtaUpdater::OtaUpdaterError OtaUpdater::beginInstallUpdate() {
   if (!isUpdateNewer()) {
     return UPDATE_OLDER_ERROR;
   }
+  // The digest is the only check of the whole image: esp_ota_end()'s own validation is bypassed for
+  // unsigned builds (see the boot switch below). Without one, the size would be the only test, so
+  // refuse here, before the download. Every release since 2.40 lists a digest for every board asset.
+  if (!otaHasSha256) {
+    LOG_ERR("OTA", "the release lists no SHA-256 for %s; refusing to install it", otaUrl.c_str());
+    return NO_CHECKSUM_ERROR;
+  }
 
   cleanupUpdate();
   render = false;
@@ -514,17 +521,21 @@ OtaUpdater::OtaUpdaterError OtaUpdater::performInstallUpdateStep() {
     installResult = CHECKSUM_ERROR;
     return installResult;
   }
-  if (otaHasSha256) {
-    if (memcmp(digest, otaSha256, sizeof(digest)) != 0) {
-      LOG_ERR("OTA", "image SHA-256 differs from the release's digest");
-      cleanupUpdate();
-      installResult = CHECKSUM_ERROR;
-      return installResult;
-    }
-    LOG_INF("OTA", "image SHA-256 matches the release's digest");
-  } else {
-    LOG_INF("OTA", "the release lists no SHA-256 for this asset; size checked only");
+  // beginInstallUpdate() refused a release without a digest. Checked again here so that no path
+  // reaches the boot switch with an image nothing has verified.
+  if (!otaHasSha256) {
+    LOG_ERR("OTA", "no SHA-256 to check the image against");
+    cleanupUpdate();
+    installResult = NO_CHECKSUM_ERROR;
+    return installResult;
   }
+  if (memcmp(digest, otaSha256, sizeof(digest)) != 0) {
+    LOG_ERR("OTA", "image SHA-256 differs from the release's digest");
+    cleanupUpdate();
+    installResult = CHECKSUM_ERROR;
+    return installResult;
+  }
+  LOG_INF("OTA", "image SHA-256 matches the release's digest");
 
   esp_err_t finish_err = esp_ota_end(handle);
   otaWriteHandle = nullptr;

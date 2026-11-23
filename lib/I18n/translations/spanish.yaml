@@ -822,6 +822,7 @@ STR_COMPARE_PROGRESS_WITH_OTHER_DEVICES: "Comparar el progreso con otros disposi
 STR_BTN_DEF_NOTHING: "Nada"
 STR_ALL_FILES: "Todos los archivos"
 STR_FIRMWARE_WRONG_DEVICE: "El firmware es para otro dispositivo"
+STR_FIRMWARE_NO_CHECKSUM: "La actualización no tiene suma de verificación"
 STR_BROWSER_VIEW: "Vista de libros"
 STR_VIEW_FILENAMES: "Nombres de archivo"
 STR_VIEW_DETAILS: "Detalles"
