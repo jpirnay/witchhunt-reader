@@ -4662,16 +4662,8 @@ bool EpubReaderActivity::reallocSecondaryEvictingCaches() {
   return false;
 }
 
-EpubReaderActivity::PageLinkInfo EpubReaderActivity::pageLinkInfoForCurrentPage() {
+EpubReaderActivity::PageLinkInfo EpubReaderActivity::pageLinkInfoForCurrentPage(const bool withPreviews) {
   PageLinkInfo info;
-  info.previews.resize(currentPageFootnotes.size());
-  // Everything is a note until the store says otherwise: a book with no store must look exactly
-  // as it did before any of this. The distinction only groups the list -- following a link always
-  // saves a return position either way (see navigateToHref).
-  info.isNote.assign(currentPageFootnotes.size(), 1);
-  if (!epub) {
-    return info;
-  }
   // Under the render lock because resolving a cross-file note href walks the spine through
   // BookMetadataCache, which seeks and reads a book.bin handle whose position is SHARED with
   // renderStatusBar() on the render task (calculateProgress -> getSpineItem -> getSpineEntry).
@@ -4680,26 +4672,32 @@ EpubReaderActivity::PageLinkInfo EpubReaderActivity::pageLinkInfoForCurrentPage(
   // entry comes back as whatever the other task had seeked to. Cheap to hold: Lookup memoises
   // the path, so a page's notes cost one spine walk, not one per note.
   //
-  // Taken here rather than by the callers because both of them (the menu item and the
-  // BTN_FOOTNOTES button action) reach this on the loop task with no lock held.
+  // Taken here rather than by the callers because all of them (the menu item, the BTN_FOOTNOTES
+  // button action, the footnote popup) reach this on the loop task with no lock held.
   RenderLock lock(*this);
+  const size_t count = currentPageFootnotes.size();
+  info.isNote.resize(count);
+  if (withPreviews) info.previews.resize(count);
+  if (!epub) return info;
   // Purely a read. Whatever the reader has walked through has already resolved its notes at
   // build time, so the entries for this page are in the store; a link the store does not know
-  // renders as its plain marker and stays navigable.
+  // renders as its plain marker and stays navigable. cacheExists() first: it asks without
+  // opening, so a book with no store logs no failed open.
   //
   // The same lookup answers both questions, because they are the same question: the store holds
   // a note's text keyed by its caller's href, so a hit IS "this is a note" and the text is the
   // preview. A miss on a spine the store HAS scanned means the link is navigation -- a contents
   // link, a cross-reference -- and the list groups it separately.
-  if (!FootnotePreviews::spineResolved(epub->getCachePath(), currentSpineIndex)) {
-    return info;
-  }
-  FootnotePreviews::Lookup previewLookup;
-  if (!previewLookup.open(epub->getCachePath(), epub.get(), currentSpineIndex)) {
-    return info;
-  }
-  for (size_t i = 0; i < currentPageFootnotes.size(); ++i) {
-    info.isNote[i] = previewLookup.find(currentPageFootnotes[i].href, info.previews[i]) ? 1 : 0;
+  FootnotePreviews::Lookup lookup;
+  const bool storeDecides = FootnotePreviews::cacheExists(epub->getCachePath()) &&
+                            FootnotePreviews::spineResolved(epub->getCachePath(), currentSpineIndex) &&
+                            lookup.open(epub->getCachePath(), epub.get(), currentSpineIndex);
+  std::string text;
+  for (size_t i = 0; i < count; ++i) {
+    const FootnoteEntry& entry = currentPageFootnotes[i];
+    const bool note = storeDecides ? lookup.find(entry.href, withPreviews ? info.previews[i] : text)
+                                   : FootnoteShape::isMarkerText(entry.number, strlen(entry.number));
+    info.isNote[i] = note ? 1 : 0;
   }
   return info;
 }
@@ -8386,23 +8384,14 @@ void EpubReaderActivity::followListedLink(const FootnoteResult& picked) {
   }
 }
 
-EpubReaderActivity::PageNotes EpubReaderActivity::pageNotes() const {
+EpubReaderActivity::PageNotes EpubReaderActivity::pageNotes() {
   static_assert(PageNotes::kMaxLinks == Page::MAX_FOOTNOTES_PER_PAGE,
                 "PageNotes holds one entry for each link a page can carry");
   static_assert(Page::MAX_FOOTNOTES_PER_PAGE <= 256, "PageNotes indexes links in a uint8_t");
   PageNotes notes;
-  if (!epub) return notes;
-  // cacheExists() first: it asks without opening, so a book with no store logs no failed open.
-  const bool storeDecides = FootnotePreviews::cacheExists(epub->getCachePath()) &&
-                            FootnotePreviews::spineResolved(epub->getCachePath(), currentSpineIndex);
-  FootnotePreviews::Lookup lookup;
-  const bool lookupOpen = storeDecides && lookup.open(epub->getCachePath(), epub.get(), currentSpineIndex);
-  std::string preview;
-  for (size_t i = 0; i < currentPageFootnotes.size() && notes.count < PageNotes::kMaxLinks; ++i) {
-    const FootnoteEntry& entry = currentPageFootnotes[i];
-    const bool note = storeDecides ? lookupOpen && lookup.find(entry.href, preview)
-                                   : FootnoteShape::isMarkerText(entry.number, strlen(entry.number));
-    if (note) notes.link[notes.count++] = static_cast<uint8_t>(i);
+  const PageLinkInfo info = pageLinkInfoForCurrentPage(/*withPreviews=*/false);
+  for (size_t i = 0; i < info.isNote.size() && notes.count < PageNotes::kMaxLinks; ++i) {
+    if (info.isNote[i]) notes.link[notes.count++] = static_cast<uint8_t>(i);
   }
   return notes;
 }
@@ -8413,11 +8402,11 @@ bool EpubReaderActivity::openFootnotePopup(const size_t link, const bool atLastP
   if (!epub) return false;
   FootnoteEntry entry;
   FootnotePopupActivity::Place place;
+  const PageNotes notes = pageNotes();
   {
     RenderLock lock(*this);
     if (!section || link >= currentPageFootnotes.size()) return false;
     entry = currentPageFootnotes[link];
-    const PageNotes notes = pageNotes();
     int position = -1;
     for (uint8_t i = 0; i < notes.count; ++i) {
       if (notes.link[i] == link) position = i;
@@ -8508,11 +8497,7 @@ bool EpubReaderActivity::openFootnotePopup(const size_t link, const bool atLastP
 }
 
 void EpubReaderActivity::stepFootnotePopup(const size_t link, const int delta) {
-  PageNotes notes;
-  {
-    RenderLock lock(*this);
-    notes = pageNotes();
-  }
+  const PageNotes notes = pageNotes();
   int at = -1;
   for (uint8_t i = 0; i < notes.count; ++i) {
     if (notes.link[i] == link) at = i;

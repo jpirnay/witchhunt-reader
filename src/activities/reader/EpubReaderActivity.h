@@ -843,14 +843,16 @@ class EpubReaderActivity final : public Activity {
   // Note text for each of currentPageFootnotes, for the footnote list activity (empty strings
   // where the store has no entry). A pure read: note text is resolved by the section build that
   // needs it, never by opening the list.
-  // Note text and kind for each of currentPageFootnotes, for the footnote list. One pass over one
-  // open store: a hit gives the preview AND says the link is a note, a miss on a scanned spine
-  // says it is navigation.
+  // Kind, and with `withPreviews` note text, for each of currentPageFootnotes: for the footnote list, and (kind only)
+  // for the footnote popup's notes (pageNotes). One rule for both. The preview store decides once it opens for the
+  // chapter, in one pass: a hit gives the preview AND says the link is a note, a miss says it is navigation. Without it
+  // the link's own text decides, by the test the store's scan uses (FootnoteShape::isMarkerText): "12", "*", "[3]" are
+  // notes, "Chapter 2" is not. Takes the render lock itself.
   struct PageLinkInfo {
-    std::vector<std::string> previews;  // empty where the store has no text
+    std::vector<std::string> previews;  // empty where the store has no text, or not asked for
     std::vector<uint8_t> isNote;        // 1 = footnote, 0 = navigation
   };
-  PageLinkInfo pageLinkInfoForCurrentPage();
+  PageLinkInfo pageLinkInfoForCurrentPage(bool withPreviews = true);
   // Clamp currentSpineIndex into [0, spineCount]. spineCount itself is the finished-book sentinel.
   void clampSpineIndex(int spineCount);
   // Compute oriented + padded margins and the derived viewport for this render.
@@ -1458,16 +1460,14 @@ class EpubReaderActivity final : public Activity {
   void followLinkDirectly(size_t link);
   // The same for a row picked in the footnote list, which hands back its index and href.
   void followListedLink(const FootnoteResult& picked);
-  // The page's notes in page order: the links of currentPageFootnotes that open the popup. The preview store decides
-  // once the chapter's links have been scanned (a hit is a note, a miss navigation); without it the link's own text
-  // does, by the test the store's scan uses (FootnoteShape::isMarkerText): "12", "*", "[3]" are notes, "Chapter 2" is
-  // not. Under RenderLock.
+  // The page's notes in page order: the links of currentPageFootnotes that open the popup, by
+  // pageLinkInfoForCurrentPage()'s rule. Takes the render lock itself.
   struct PageNotes {
     static constexpr uint16_t kMaxLinks = 64;  // Page::MAX_FOOTNOTES_PER_PAGE, checked where Page is complete
     uint8_t count = 0;
     uint8_t link[kMaxLinks] = {};
   };
-  PageNotes pageNotes() const;
+  PageNotes pageNotes();
   // The popup for link `link`: false when it is no note, or its note could not be read or laid out, and the caller
   // follows it (followLink) or tries the next note (stepFootnotePopup). `atLastPage`: stepped back to, so it opens on
   // the note's last page. On the loop task, no lock held.
