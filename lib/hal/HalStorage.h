@@ -1,5 +1,6 @@
 #pragma once
 
+#include <CacheCipherFile.h>
 #include <Print.h>
 #include <common/FsApiConstants.h>  // for oflag_t
 #include <freertos/semphr.h>
@@ -135,6 +136,23 @@ class HalStorage {
   // one of its own: the generation goes up and the marker is left.
   void noteFoundChange() { noteContentChange(nullptr); }
 
+  // At-rest cipher for a protected book's cache folder (lib/CacheCipher/CacheCipherFile.h, D2 in
+  // docs/future_work/protected-content.md). Every file opened under a folder that holds the marker is enciphered on
+  // the card and plain through its handle, whoever opens it: the reader, the home screen, the sleep screen. A folder
+  // whose marker has no key (no key source installed, a damaged marker) opens nothing at all, so nothing in it is
+  // ever read or written in the clear.
+  //
+  // The folder's key from its marker's salt; installed once at boot.
+  void setCacheKeySource(cache_cipher::KeySource source);
+  // Leaves the marker (a fresh salt) in `folder`, which must exist and hold nothing yet. From then on every file
+  // written there is enciphered.
+  bool markCacheFolderEnciphered(const char* folder);
+  // Whether `folder` (a book cache folder, ".../epub_<n>") is marked.
+  bool cacheFolderEnciphered(const char* folder);
+  // The file's bytes as they are on the card, never deciphered: for whatever hands files to the outside (the web
+  // server's download, the serial transfers), which then gives out an enciphered folder's files enciphered.
+  HalFile openRaw(const char* path, oflag_t oflag = O_RDONLY);
+
   static HalStorage& getInstance() { return instance; }
 
   class StorageLock;  // private class, used internally
@@ -144,6 +162,17 @@ class HalStorage {
 
   void noteContentChange(const char* path);
   void persistChangeMarker();
+  // Attaches the cipher to `file`, just opened at `path`, when its folder is enciphered; closes it and fails the
+  // open when the folder cannot be read or the file is not one of its own. Under the storage lock.
+  void attachCacheCipher(HalFile& file, const char* path, bool mayWrite);
+  // A book cache folder's state, under the storage lock.
+  cache_cipher::FolderState cacheFolderState(const char* path, size_t folderLen,
+                                             uint8_t (&key)[cache_cipher::kKeyBytes]);
+  // Whether `path` lies in a folder enciphered under a key this device cannot have: such a file is never opened, so
+  // never read as if plain nor emptied by an open for writing.
+  bool cacheFolderRefuses(const char* path);
+  // A whole-file helper's path inside an enciphered folder goes through HalFile, not SdFat directly.
+  bool insideEncipheredFolder(const char* path);
 
   static HalStorage instance;
 
@@ -151,6 +180,8 @@ class HalStorage {
   SemaphoreHandle_t storageMutex = nullptr;
   std::atomic<uint32_t> contentGeneration_{0};
   int8_t changeMarker_ = -1;  // the marker file: -1 not looked for yet, 0 absent, 1 present
+  cache_cipher::FolderTable cipherFolders_;
+  cache_cipher::KeySource cacheKeySource_ = nullptr;
 };
 
 #define Storage HalStorage::getInstance()

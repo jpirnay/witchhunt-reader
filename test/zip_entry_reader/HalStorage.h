@@ -3,6 +3,7 @@
 // Implements FsFile on top of stdio so tests can read actual .epub files
 // and write real cache files under /tmp.
 
+#include <CacheCipherFile.h>
 #include <fcntl.h>
 
 #include <algorithm>
@@ -14,6 +15,8 @@
 #include <ctime>
 #include <filesystem>
 #include <map>
+#include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -39,7 +42,8 @@ class HalFile : public Print {
         entryTime_(o.entryTime_),
         entries_(std::move(o.entries_)),
         next_(o.next_),
-        dirPath_(std::move(o.dirPath_)) {
+        dirPath_(std::move(o.dirPath_)),
+        cipher_(std::move(o.cipher_)) {
     o.fp_ = nullptr;
     o.hasImpl_ = false;
     o.isDir_ = false;
@@ -60,6 +64,7 @@ class HalFile : public Print {
       entries_ = std::move(o.entries_);
       next_ = o.next_;
       dirPath_ = std::move(o.dirPath_);
+      cipher_ = std::move(o.cipher_);
       o.fp_ = nullptr;
       o.hasImpl_ = false;
       o.isDir_ = false;
@@ -219,6 +224,12 @@ class HalFile : public Print {
       failOneReadFrom = -1;
       return -1;
     }
+    if (cipher_) {
+      RawStdio raw{fp_};
+      const int got = cache_cipher::read(raw, *cipher_, buf, n);
+      if (got > 0) bytesRead += static_cast<size_t>(got);
+      return got;
+    }
     const size_t got = fread(buf, 1, n, fp_);
     bytesRead += got;
     return static_cast<int>(got);
@@ -227,6 +238,11 @@ class HalFile : public Print {
   int read() {
     ++calls;
     if (!fp_) return -1;
+    if (cipher_) {
+      uint8_t b = 0;
+      RawStdio raw{fp_};
+      return cache_cipher::read(raw, *cipher_, &b, 1) == 1 ? b : -1;
+    }
     return fgetc(fp_);
   }
 
@@ -244,19 +260,19 @@ class HalFile : public Print {
     if (fp_ && seekLog) seekLog->push_back(pos);
     if (failSeekAt >= 0 && static_cast<long>(pos) == failSeekAt) return false;
     if (failSeeksFrom >= 0 && static_cast<long>(pos) >= failSeeksFrom) return false;
-    return fp_ && fseek(fp_, static_cast<long>(pos), SEEK_SET) == 0;
+    return fp_ && fseek(fp_, static_cast<long>(pos + header()), SEEK_SET) == 0;
   }
   bool seekSet(size_t pos) { return seek(pos); }
   bool seekCur(int64_t offset) {
     ++calls;
     return fp_ && fseek(fp_, static_cast<long>(offset), SEEK_CUR) == 0;
   }
-  bool seek64(uint64_t pos) { return fp_ && fseek(fp_, static_cast<long>(pos), SEEK_SET) == 0; }
+  bool seek64(uint64_t pos) { return fp_ && fseek(fp_, static_cast<long>(pos + header()), SEEK_SET) == 0; }
   bool seekSet64(uint64_t pos) { return seek64(pos); }
 
   size_t position() const {
     if (isDir_) return next_ * kDirEntryBytes;
-    return fp_ ? static_cast<size_t>(ftell(fp_)) : 0;
+    return fp_ ? static_cast<size_t>(ftell(fp_)) - header() : 0;
   }
   uint64_t position64() const { return position(); }
   // Bytes left to read, as on device: EpubImageManifest::load() sizes its corruption guard from
@@ -278,27 +294,37 @@ class HalFile : public Print {
     fseek(fp_, 0, SEEK_END);
     const long sz = ftell(fp_);
     fseek(fp_, cur, SEEK_SET);
-    return static_cast<size_t>(sz);
+    return static_cast<size_t>(sz) > header() ? static_cast<size_t>(sz) - header() : 0;
   }
   uint64_t size64() { return fileSize(); }
   uint64_t fileSize64() { return fileSize(); }
 
-  size_t write(const uint8_t* data, size_t size) {
-    ++calls;
-    if (!fp_) return 0;
-    return fwrite(data, 1, size, fp_);
-  }
+  size_t write(const uint8_t* data, size_t size) { return write(static_cast<const void*>(data), size); }
   // Device SdFat accepts void*; Page.cpp writes char arrays through this.
   size_t write(const void* data, size_t size) {
     ++calls;
     if (!fp_) return 0;
+    if (cipher_) {
+      RawStdio raw{fp_};
+      return cache_cipher::write(raw, *cipher_, data, size);
+    }
     return fwrite(data, 1, size, fp_);
   }
-  size_t write(uint8_t c) override {
-    ++calls;
-    if (!fp_) return 0;
-    return fwrite(&c, 1, 1, fp_);
+  size_t write(uint8_t c) override { return write(static_cast<const void*>(&c), 1); }
+
+  // HalStorage's at-rest cipher, as the device's HalStorage::attachCacheCipher does it: for a file just opened in an
+  // enciphered cache folder. False closes it, and the open fails.
+  bool attachCacheCipher(const bool mayWrite, const uint8_t (&key)[cache_cipher::kKeyBytes]) {
+    if (!fp_ || isDir_) return true;
+    RawStdio raw{fp_};
+    const auto attached = cache_cipher::attach(raw, mayWrite, key, fillRandom, cipher_);
+    if (attached != cache_cipher::Attach::Refused) return true;
+    closeQuiet();
+    return false;
   }
+  bool enciphered() const { return cipher_ != nullptr; }
+  // A failed open, as the device leaves one: closed, and still closeable.
+  void failOpen() { closeQuiet(); }
   void flush() {
     ++flushes;
     if (fp_) fflush(fp_);
@@ -358,6 +384,7 @@ class HalFile : public Print {
   // close() without the device-parity check: for the destructor and the open helpers, which must
   // both tolerate a handle that was never opened.
   bool closeQuiet() {
+    cipher_.reset();
     if (fp_) {
       openPaths.erase(fp_);
       fclose(fp_);
@@ -388,18 +415,84 @@ class HalFile : public Print {
   std::vector<DirEntry> entries_;
   size_t next_ = 0;
   std::string dirPath_;
+  std::unique_ptr<CacheCipher> cipher_;
+
+  // An enciphered file's header, which sizes, positions and seeks leave out.
+  size_t header() const { return cipher_ ? cache_cipher::kHeaderBytes : 0; }
+  // The bytes as they are in the file, for cache_cipher's templates.
+  struct RawStdio {
+    FILE* fp;
+    uint64_t size() const {
+      const long cur = ftell(fp);
+      fseek(fp, 0, SEEK_END);
+      const long end = ftell(fp);
+      fseek(fp, cur, SEEK_SET);
+      return end > 0 ? static_cast<uint64_t>(end) : 0;
+    }
+    uint64_t position() const { return static_cast<uint64_t>(ftell(fp)); }
+    int read(void* buf, size_t count) { return static_cast<int>(fread(buf, 1, count, fp)); }
+    size_t write(const void* buf, size_t count) { return fwrite(buf, 1, count, fp); }
+  };
+  static void fillRandom(uint8_t* out, size_t len) {
+    static std::mt19937 engine{std::random_device{}()};
+    for (size_t i = 0; i < len; ++i) out[i] = static_cast<uint8_t>(engine());
+  }
 };
 
 using FsFile = HalFile;
 
 class HalStorage {
  public:
-  bool openFileForRead(const char*, const std::string& path, HalFile& f) { return f.openForRead(path); }
-  bool openFileForRead(const char*, const char* path, HalFile& f) { return f.openForRead(path); }
-  bool openFileForWrite(const char*, const std::string& path, HalFile& f) { return f.openForWrite(path); }
-  bool openFileForWrite(const char*, const char* path, HalFile& f) { return f.openForWrite(path); }
-  bool openFileForUpdate(const char*, const std::string& path, HalFile& f) { return f.openForUpdate(path); }
-  bool openFileForUpdate(const char*, const char* path, HalFile& f) { return f.openForUpdate(path); }
+  bool openFileForRead(const char*, const std::string& path, HalFile& f) {
+    if (refuses(path.c_str())) return refuse(f);
+    return f.openForRead(path) && attach(f, path.c_str(), false);
+  }
+  bool openFileForRead(const char* m, const char* path, HalFile& f) { return openFileForRead(m, std::string(path), f); }
+  bool openFileForWrite(const char*, const std::string& path, HalFile& f) {
+    if (refuses(path.c_str())) return refuse(f);  // before the open, which empties the file
+    return f.openForWrite(path) && attach(f, path.c_str(), true);
+  }
+  bool openFileForWrite(const char* m, const char* path, HalFile& f) {
+    return openFileForWrite(m, std::string(path), f);
+  }
+  bool openFileForUpdate(const char*, const std::string& path, HalFile& f) {
+    if (refuses(path.c_str())) return refuse(f);
+    return f.openForUpdate(path) && attach(f, path.c_str(), true);
+  }
+  bool openFileForUpdate(const char* m, const char* path, HalFile& f) {
+    return openFileForUpdate(m, std::string(path), f);
+  }
+
+  // The device's at-rest cipher for a book cache folder (lib/hal/HalStorage.h), on the same rules.
+  void setCacheKeySource(cache_cipher::KeySource source) {
+    keySource_ = source;
+    folders_.clear();
+  }
+  bool markCacheFolderEnciphered(const char* folder) {
+    uint8_t salt[cache_cipher::kSaltBytes];
+    std::random_device rd;
+    for (uint8_t& b : salt) b = static_cast<uint8_t>(rd());
+    uint8_t bytes[cache_cipher::kMarkerBytes];
+    cache_cipher::makeMarker(salt, bytes);
+    const std::string path = std::string(folder) + "/" + cache_cipher::kMarkerName;
+    FILE* fp = fopen(path.c_str(), "wb");
+    const bool ok = fp != nullptr && fwrite(bytes, 1, sizeof(bytes), fp) == sizeof(bytes);
+    if (fp != nullptr && fclose(fp) != 0) return false;
+    folders_.forget(folder);
+    return ok;
+  }
+  bool cacheFolderEnciphered(const char* folder) {
+    const std::string probe = std::string(folder) + "/" + cache_cipher::kMarkerName;
+    const size_t len = cache_cipher::folderLength(probe.c_str());
+    uint8_t key[cache_cipher::kKeyBytes];
+    return len == std::strlen(folder) && state(probe.c_str(), len, key) == cache_cipher::FolderState::Enciphered;
+  }
+  // The file's bytes as they are on the card, never deciphered.
+  HalFile openRaw(const char* path) {
+    HalFile f;
+    f.openForRead(path);
+    return f;
+  }
   bool exists(const char* path) { return std::filesystem::exists(path); }
   // The device counts the firmware's own writes, for caches keyed on the card's contents; a host
   // test changes its tree between runs, not under a cache.
@@ -409,7 +502,7 @@ class HalStorage {
   // so the host pipeline exercises the same code path the device runs.
   bool readFileToStream(const char* path, Print& out, size_t chunkSize = 256) {
     HalFile f;
-    if (!f.openForRead(path)) return false;
+    if (!openFileForRead("SD", path, f)) return false;
     std::vector<uint8_t> buf(chunkSize ? chunkSize : 256);
     for (;;) {
       const int n = f.read(buf.data(), buf.size());
@@ -424,7 +517,7 @@ class HalStorage {
   bool readFileToString(const char*, const std::string& path, size_t cap, std::string& out) {
     out.clear();
     HalFile f;
-    if (!f.openForRead(path) || f.isDirectory()) return false;
+    if (!openFileForRead("SD", path, f) || f.isDirectory()) return false;
     const size_t size = f.fileSize();
     if (size == 0 || size > cap) return false;
     out.resize(size);
@@ -435,17 +528,21 @@ class HalStorage {
     return recursive ? std::filesystem::create_directories(path, ec) : std::filesystem::create_directory(path, ec);
   }
   bool remove(const char* path) {
+    folders_.forget(path);
     if (HalFile::isOpenPath(path)) HalFile::removedWhileOpen.emplace_back(path);
     // error_code form: Windows refuses to unlink an open file and the throwing form would terminate the test.
     std::error_code ec;
     return std::filesystem::remove(path, ec) && !ec;
   }
   bool rename(const char* oldPath, const char* newPath) {
+    folders_.forget(oldPath);
+    folders_.forget(newPath);
     std::error_code ec;
     std::filesystem::rename(oldPath, newPath, ec);
     return !ec;
   }
   bool removeDir(const char* path) {
+    folders_.forget(path);
     std::error_code ec;
     std::filesystem::remove_all(path, ec);
     return !ec;
@@ -457,8 +554,10 @@ class HalStorage {
     if (std::filesystem::is_directory(path, ec) && !ec) {
       ++HalFile::folderOpens;
       f.openDir(path);
-    } else {
-      f.openForRead(path);
+    } else if (refuses(path)) {
+      refuse(f);
+    } else if (f.openForRead(path)) {
+      attach(f, path, false);
     }
     return f;
   }
@@ -481,6 +580,50 @@ class HalStorage {
     static HalStorage i;
     return i;
   }
+
+ private:
+  cache_cipher::FolderState state(const char* path, size_t len, uint8_t (&key)[cache_cipher::kKeyBytes]) {
+    const auto readMarker = [](const char* markerPath, uint8_t* bytes, size_t cap) -> int {
+      std::error_code ec;
+      if (!std::filesystem::exists(markerPath, ec)) return 0;
+      FILE* fp = fopen(markerPath, "rb");
+      if (fp == nullptr) return -1;
+      const size_t got = fread(bytes, 1, cap, fp);
+      fclose(fp);
+      return got > 0 ? static_cast<int>(got) : -1;
+    };
+    return cache_cipher::resolve(folders_, path, len, keySource_, readMarker, key);
+  }
+  // HalStorage::cacheFolderRefuses.
+  bool refuses(const char* path) {
+    const size_t len = cache_cipher::folderLength(path);
+    if (len == 0 || cache_cipher::isMarker(path, len)) return false;
+    uint8_t key[cache_cipher::kKeyBytes];
+    return state(path, len, key) == cache_cipher::FolderState::Unreadable;
+  }
+  static bool refuse(HalFile& f) {
+    f.openForRead("");  // a failed open: closed, and closeable
+    return false;
+  }
+  // HalStorage::attachCacheCipher: false when the open fails for it.
+  bool attach(HalFile& f, const char* path, bool mayWrite) {
+    const size_t len = cache_cipher::folderLength(path);
+    if (len == 0 || cache_cipher::isMarker(path, len) || f.isDirectory()) return true;
+    uint8_t key[cache_cipher::kKeyBytes];
+    switch (state(path, len, key)) {
+      case cache_cipher::FolderState::Plain:
+        return true;
+      case cache_cipher::FolderState::Enciphered:
+        return f.attachCacheCipher(mayWrite, key);
+      case cache_cipher::FolderState::Unreadable:
+        break;
+    }
+    f.failOpen();
+    return false;
+  }
+
+  cache_cipher::FolderTable folders_;
+  cache_cipher::KeySource keySource_ = nullptr;
 };
 
 #define Storage HalStorage::getInstance()

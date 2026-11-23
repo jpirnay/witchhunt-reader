@@ -110,6 +110,7 @@ target_include_directories(crosspoint_test_common INTERFACE
 add_library(cache_cipher_host STATIC
   ${REPO_ROOT}/lib/CacheCipher/CacheCipher.cpp
   ${REPO_ROOT}/lib/CacheCipher/CacheKeys.cpp
+  ${REPO_ROOT}/lib/CacheCipher/CacheCipherFile.cpp
 )
 target_include_directories(cache_cipher_host PUBLIC ${REPO_ROOT}/lib/CacheCipher)
 target_link_libraries(crosspoint_test_common INTERFACE cache_cipher_host)

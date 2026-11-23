@@ -31,6 +31,8 @@
 // (<book>_unshaped.golden.txt), as in a font that cannot shape them: IndicReorder's forms, and the line pass's code
 // points. The Arabic one also runs 1,600 px wide (<book>_1600.golden.txt), where its lines pass the line pass's 128
 // slots and take its fallback, and so does the Myanmar one, whose lines end between syllables at both widths.
+#include <CacheCipherFile.h>
+#include <HalStorage.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -41,6 +43,7 @@
 #include <sstream>
 #include <string>
 
+#include "Epub.h"
 #include "Epub/BlockFontFamilies.h"
 #include "Epub/css/CssParser.h"
 #include "PipelineRunner.h"
@@ -423,6 +426,59 @@ INSTANTIATE_TEST_SUITE_P(SyntheticCorpus, EpubPipelineTest, testing::ValuesIn(co
 INSTANTIATE_TEST_SUITE_P(LentRegion, EpubPipelineTest, testing::ValuesIn(lentCases()), caseName);
 INSTANTIATE_TEST_SUITE_P(LentRegionX4, EpubPipelineTest, testing::ValuesIn(lentX4Cases()), caseName);
 INSTANTIATE_TEST_SUITE_P(SyntheticCorpus, EpubPipelineWarmTest, testing::ValuesIn(warmCases()), caseName);
+
+// A protected book's cache at rest (D2, lib/CacheCipher/CacheCipherFile.h): every book of the corpus laid out in an
+// enciphered cache folder gives its golden, cold and then over its warm book cache (which reads book.bin, the CSS
+// index, the image manifest and the banked chapters back through the cipher), and leaves no file in the folder that
+// is not enciphered on the card. The default layout only: the cipher sits below the layout, which no variant changes.
+std::vector<Case> encipheredCases() {
+  std::vector<Case> cases = corpusCases();
+  cases.erase(std::remove_if(cases.begin(), cases.end(),
+                             [](const Case& c) { return c.variant != Variant::Default || c.lentArenaBytes != 0; }),
+              cases.end());
+  return cases;
+}
+
+bool testCacheKey(const uint8_t (&salt)[cache_cipher::kSaltBytes], uint8_t (&key)[cache_cipher::kKeyBytes]) {
+  for (size_t i = 0; i < sizeof(key); ++i) key[i] = static_cast<uint8_t>(0xA5 ^ i ^ salt[i % sizeof(salt)]);
+  return true;
+}
+
+class EpubPipelineEncipheredTest : public EpubPipelineTest {};
+
+TEST_P(EpubPipelineEncipheredTest, EncipheredCacheMatchesGolden) {
+  const Case c = GetParam();
+  if (std::getenv("UPDATE_GOLDENS") != nullptr) GTEST_SKIP() << "compares with the goldens, never writes one";
+  const std::string cacheDir = caseCacheDir(c, "enciphered");
+  const std::string folder = Epub::cachePathFor(c.epub, cacheDir);
+  fs::create_directories(folder);
+  Storage.setCacheKeySource(testCacheKey);
+  ASSERT_TRUE(Storage.markCacheFolderEnciphered(folder.c_str()));
+  const std::string cold = runOnce(c, cacheDir);
+  const std::string warm = runOnce(c, cacheDir);
+  Storage.setCacheKeySource(nullptr);
+
+  std::string golden;
+  ASSERT_TRUE(readFile(fs::path(GOLDEN_DIR) / (stem(c.epub) + ".golden.txt"), golden));
+  EXPECT_EQ(golden, cold) << c.epub << " lays out differently in an enciphered cache folder";
+  EXPECT_EQ(golden, warm) << c.epub << " lays out differently over its warm enciphered book cache";
+
+  size_t files = 0;
+  for (const auto& entry : fs::recursive_directory_iterator(folder)) {
+    if (!entry.is_regular_file() || entry.path().filename() == cache_cipher::kMarkerName) continue;
+    std::string bytes;
+    ASSERT_TRUE(readFile(entry.path(), bytes));
+    if (bytes.empty()) continue;  // an empty file a reader opened and never wrote holds nothing
+    ++files;
+    EXPECT_EQ(bytes.compare(0, sizeof(cache_cipher::kFileMagic),
+                            reinterpret_cast<const char*>(cache_cipher::kFileMagic), sizeof(cache_cipher::kFileMagic)),
+              0)
+        << entry.path() << " is on the card in the clear";
+  }
+  EXPECT_GE(files, 3u) << "the build left almost nothing in " << folder;
+}
+
+INSTANTIATE_TEST_SUITE_P(SyntheticCorpus, EpubPipelineEncipheredTest, testing::ValuesIn(encipheredCases()), caseName);
 
 // A renamed or dropped corpus book would leave the X4 subset quietly smaller.
 TEST(LentRegionX4Subset, EveryListedBookIsInTheCorpus) { EXPECT_EQ(std::size(kX4LentBooks), lentX4Cases().size()); }
