@@ -302,6 +302,15 @@ file browser.
 their `std::function` row callbacks. The `ListTouchBand` path stays while the Home carousel
 records a band.
 
+**Tap flash.** FreeInkUI paints a tapped row gray in the refresh that shows the result
+(`FreeInkApp::route()`), so rows on `fui::list` acknowledge a tap with nothing more. A screen that
+draws its own rows and records a `ListTouchBand` gets only the selection repaint
+(`ActivityManager::dispatchListTap()`). A flash of its own for that path, a partial refresh bounded
+to the row, was ruled out: the SDK primitive it would have used, `ListNav::rowRectFor()`, was removed
+upstream, and a windowed refresh on the SSD1677 and UC8279 costs nearly as much as a full one
+(measurements in `docs/future_work/display-and-refresh.md`, "Windowed refresh"). Such a screen gets
+the flash by moving its rows onto `fui::list`.
+
 **Viewport.** `ListNav`'s own follow keeps the selection visible while stepping; paging (R3)
 sets the top explicitly. The render publishes the drawn window for the input side (a
 render-published atomic, never a loop-task measurement — see `listWindow()` in §2).

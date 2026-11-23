@@ -1,21 +1,25 @@
 # Alternative sync providers (OPDS progression, BookOrbit)
 
 Status: **shelved 2026-10-07**, not started. Written so the work can be picked up without redoing the analysis.
-Related: `docs/contributing/koreader-synchronization.md` (the position layer
-this builds on), PR #398 (merged via #399).
+Related: `docs/contributing/koreader-synchronization.md` (the position layer this builds on), #398 (landed
+through #399).
 
-## What is already in place (master, 2026-10-07)
+## What is already in place
 
-Protocol-free, usable by any sync provider:
+Protocol-free, usable by any sync provider (details in `docs/contributing/koreader-synchronization.md`):
 
 - Per-page content offsets in the section cache (`Section::getVisibleTextOffsetForPage`,
   `getVisibleTextOffsetAfterPage`, `getPageForVisibleTextOffset`), layout-independent, exact.
-- `ProgressMapper::percentageFor` (byte-based fraction of the book for a page) and
-  `countTotalTextBytes` (one streamed pass over a chapter, cached per spine).
+- `ProgressMapper::percentageFor`: the book fraction of a page in billionths (`ProgressPpb`,
+  `lib/Epub/Epub/ProgressPpb.h`, #863), weighted by XHTML bytes as `Epub::calculateProgress` weighs a
+  chapter. `ChapterXPathIndexerInternal::countTotalTextBytes`: a chapter's visible text bytes in one
+  streamed pass, cached per spine by the forward mapper.
 - `ProgressComparison::compareProgress` with the offset tier.
 - The sync activity's memory pattern: map the local position before WiFi; take the radio down
   before any chapter parse that follows a GET; reconnect only when an upload follows;
   `SaxParser::Profile::Lean` for mapper parses; the per-book last-push cache (`LastPushCache.h`).
+- A JSON fraction enters as an integer: `progressFromJsonFloat` (`lib/KOReaderSync/KOReaderJsonNumber.h`)
+  turns ArduinoJson's float into a `ProgressPpb` without floating point.
 
 KOSync-specific: the XPath serialisation and crengine's text-node rules in `StackState`
 (`ChapterXPathIndexerState.h`, rules R1-R7 in the header of `ChapterXPathForwardMapper.cpp`).
@@ -35,7 +39,8 @@ KOSync-specific: the XPath serialisation and crengine's text-node rules in `Stac
 - Beyond progress, the fork adds reading stats (`/plugin/page-stats`), highlights and annotations
   (`/plugin/annotations/exchange`), bookmarks (`/plugin/bookmarks/exchange`) and catalog browsing:
   `lib/BookOrbitSync` + `src/bookorbit`, about 3,000 lines. The fork removed KOReader sync to fit the
-  flash partition; our `default` build (X3/X4) is at 96.6 % (about 224 KB free, 2026-11-09).
+  flash partition. Our `default` build (X3/X4): #868's body gives 6,178,901 B of the 6,553,600 B app
+  slot on 2026-11-21; re-measure before relying on it.
 
 ### OPDS Progression 1.0 (Kavita, Audiobookshelf; fork syfq91/witchling-reader)
 
@@ -49,22 +54,26 @@ KOSync-specific: the XPath serialisation and crengine's text-node rules in `Stac
 - witchling lands a pulled position with `jumpToPercent(progression * 100)`: one percent of the
   whole book as granularity. The position is a book fraction plus the spine href; no node path.
 
-## Plan A: OPDS progression sync in witchhunt-reader (recommended first)
+## Plan A: OPDS progression sync in the firmware
 
 Port witchling's feature with attribution (source comment + commit trailer, per the porting
-convention), then wire it to the position layer. Bounded-plus scope: a short design in chat, then
-TDD; no spec needed unless the reader hooks turn out to need a new activity flow.
+convention), then wire it to the position layer. Bounded-plus scope: a short design, then TDD; no spec
+needed unless the reader hooks turn out to need a new activity flow.
 
 1. **Parser:** `OpdsEntry::progressionHref` from the rel or the media type (port).
 2. **Client:** `OpdsProgressionSync` GET/PUT through `SecureHttpClient`, device id/name, `modified`
-   timestamp from `HalClock`; per-book config file beside `progress.bin` (port, trimmed).
-3. **Position mapping (new, ours):**
-   - push: book fraction = `ProgressMapper::percentageFor(epub, spine, page, totalPages)` (bytes),
-     `title` = TOC title, `reference` = spine href. Optional: append `#vto=<offset>` to the
-     reference so two Witch Hunt devices land exactly through Kavita; other clients ignore it.
-   - pull: fraction → spine by inverting `Epub::calculateProgress` (cumulative chapter bytes), intra
-     fraction → offset = intra × `countTotalTextBytes(spine)` → `getPageForVisibleTextOffset`; if the
-     reference carries `#vto=`, use that offset directly.
+   timestamp from `HalClock`; per-book config file beside `progress.bin` (port, trimmed). Add its name to
+   `BookCache::isReadingState`: a clear that keeps the reading state deletes every other file
+   (`BookCache::clear`).
+3. **Position mapping (new, ours), in `ProgressPpb`:**
+   - push: book fraction = `ProgressMapper::percentageFor(epub, spine, page, totalPages)`, written as
+     the JSON number with its digits, as `KOReaderJsonNumber.h` writes KOReader's; `title` = TOC title,
+     `reference` = spine href. Optional: append `#vto=<offset>` to the reference so two of our devices
+     land exactly through Kavita; other clients ignore it.
+   - pull: the fraction enters through `progressFromJsonFloat`; fraction → spine by inverting
+     `Epub::calculateProgress` (cumulative chapter bytes), intra fraction → offset = intra ×
+     `countTotalTextBytes(spine)` → `getPageForVisibleTextOffset`; if the reference carries `#vto=`, use
+     that offset directly.
    - compare: `compareProgress` with the offset tier (local handoff offsets vs the mapped remote).
 4. **Activity:** reuse `KOReaderSyncActivity`'s flow shape (map local before WiFi; GET; radio down
    before `countTotalTextBytes`; reconnect only for a PUT) rather than witchling's separate screen,
@@ -75,11 +84,34 @@ TDD; no spec needed unless the reader hooks turn out to need a new activity flow
 6. **Tests:** host: JSON codec, fraction↔spine inversion, fraction→offset→page on the corpus
    (round trip within one page), `#vto=` round trip exact. Device: one Kavita and one Audiobookshelf
    server, push/pull/compare, `Sync mem` troughs.
-7. **Flash:** expect +20 to 30 KB, about a tenth of the 224 KB left on 2026-11-09; check against the
-   budget before merging.
+7. **Flash:** an estimate of +20 to 30 KB; measure against the budget before merging.
 
 Effort: two to three days including reviews. Preconditions: a Kavita or Audiobookshelf server to
 test against.
+
+## Plugin route
+
+Since #861 a plugin's `device.json` can declare device events (`docs/sd-plugins.md`, "Events: the reader
+sends a plugin's requests"): on `reader.open`, `reader.exit`, `reader.session` or `sleep.enter` the reader
+fills in a declared HTTP request and sends it at the next Wi-Fi join or at sleep. It reads the answer to
+8 KB and drops it. No plugin code runs on the device.
+
+- **Push:** a handler could PUT the progression when a book closes, from `{event.end_progress_bp}`
+  (basis points of 10,000). The progression URL is per book and comes from the catalog entry, so the
+  handler needs `{meta.*}` from the book's `<book>.meta.json` with `require_meta`. Nothing writes those
+  files yet: that is events step 2, parked ([plugins.md](plugins.md)). From the variables
+  `docs/sd-plugins.md` lists (inference): an event carries Unix seconds, not an ISO 8601 `modified`, and
+  no chapter title or href for `title` and `reference`. Whether Kavita and Audiobookshelf take a record
+  without them is untested.
+- **Pull, compare and landing cannot be a plugin:** events are queued and sent later, even `reader.open`,
+  and nothing hands a server's answer back to the reader.
+- KOSync push already has this form: `docs/sd-plugins.md` names a progress sync (`kosync-autopush`) as a
+  usual use of events.
+- BookOrbit (B3): its reading stats could be a `reader.session` handler if its endpoint takes such a
+  request (inference, untested). The device has no highlights or annotations to send.
+
+Which route to take -- Plan A in the firmware, a plugin for the push with the pull in the firmware, or the
+plugin alone without a pull -- is the owner's decision.
 
 ## Plan B: BookOrbit
 
@@ -90,10 +122,11 @@ test against.
   rule tests for W3C.
 - **B3 (a week plus flash work, separate decision):** stats, highlights/annotations, bookmarks,
   catalog from the fork. Needs a flash diet or a build variant (sync providers as variants, like the
-  language packs) first.
+  language packs) first, or the plugin route above for what it can carry.
 
 ## Open questions for pickup
 
 - Which test servers exist: Kavita, Audiobookshelf, BookOrbit account?
+- Firmware or plugin route (above): the owner's decision.
 - Flash budget: accept +30 KB for Plan A; decide on variants before B3.
 - One provider switch (KOSync / OPDS / BookOrbit) per book, or several at once?
