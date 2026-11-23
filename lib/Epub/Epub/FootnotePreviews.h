@@ -152,12 +152,14 @@ constexpr size_t MAX_NOTE_MARKUP_BYTES = 4096;
 //
 // Reads the target document only as far as the note's end: the inflated copy a build left on the card when there is
 // one, the archive otherwise. Costs a SAX parser (~9 KB), MAX_NOTE_MARKUP_BYTES and a 1 KB chunk while it runs, plus an
-// inflate ring of up to 32 KB on the archive path; every allocation is checked, and none is held after it returns.
-// Under RenderLock: resolving a cross-file href reads book.bin through a handle the status bar shares.
+// inflate ring of up to 32 KB and its read buffer on the archive path, taken from `arena` when it has the room (a C3's
+// reading heap rarely has 32 KB in one block: the caller lends the secondary framebuffer); every allocation is checked,
+// and none is held after it returns. Under RenderLock: resolving a cross-file href reads book.bin through a handle the
+// status bar shares.
 //
 // False when the href leads nowhere, no note text stands at its target (a link back to a caller, an empty anchor with
 // a link after it), or memory ran out; outMarkup is then empty.
-bool captureNote(Epub& epub, int fromSpineIndex, const char* href, std::string& outMarkup);
+bool captureNote(Epub& epub, int fromSpineIndex, const char* href, std::string& outMarkup, BuildArena* arena = nullptr);
 
 // Disk-backed lookup used during a section build. Holds NOTHING but an open read handle: the
 // sorted index is binary-searched in the file itself, and the text is read on a hit.

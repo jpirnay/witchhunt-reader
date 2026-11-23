@@ -8386,7 +8386,15 @@ bool EpubReaderActivity::openFootnotePopup(const std::string& href, const std::s
     // Under the lock: resolving a cross-file href reads book.bin through a handle the status bar shares.
     RenderLock lock(*this);
     if (section) {
-      captured = FootnotePreviews::captureNote(*epub, currentSpineIndex, href.c_str(), markup);
+      // A note in a chapter not yet opened comes out of the archive, through a 32 KB inflate ring: more than a C3's
+      // reading heap has in one block (X3, The Anarchy's 163 KB notes chapter: OOM, and the link was followed instead).
+      // So the secondary framebuffer is lent for it, as for a build. The staged page work goes first and the displayed
+      // frame is put in the write buffer, which seeds the buffer when it comes back.
+      prepareForOverlay("FootnotePopup");
+      renderer.syncWriteBufferFromDisplayed();
+      LentSecondary lend(renderer, arenaOfBuildHoldingBuffer());
+      captured = FootnotePreviews::captureNote(*epub, currentSpineIndex, href.c_str(), markup, lend.arena());
+      lend.giveBack();
       // During an active build the on-disk LUT is not written yet, so the page comes from the in-memory one, as the
       // dictionary's does.
       if (captured) {

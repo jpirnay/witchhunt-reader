@@ -1365,7 +1365,7 @@ bool resolveSpine(Epub& epub, const int spineIndex, const std::string& bankedHtm
   return step == Resolver::Step::Done;
 }
 
-bool captureNote(Epub& epub, const int fromSpineIndex, const char* href, std::string& outMarkup) {
+bool captureNote(Epub& epub, const int fromSpineIndex, const char* href, std::string& outMarkup, BuildArena* arena) {
   outMarkup.clear();
   const char* hash = href ? strchr(href, '#') : nullptr;
   if (!hash || hash[1] == '\0' || strlen(hash + 1) > MAX_HREF_BYTES) return false;
@@ -1408,7 +1408,7 @@ bool captureNote(Epub& epub, const int fromSpineIndex, const char* href, std::st
   }
   DocStream doc;
   // Not banked: the read stops at the note's end, and a part-written bank would only fail its size test later.
-  if (!doc.open(epub, *zip, targetSpine, {}, /*bankIt=*/false)) {
+  if (!doc.open(epub, *zip, targetSpine, {}, /*bankIt=*/false, arena)) {
     LOG_ERR("FNP", "Note capture: could not read spine %d", targetSpine);
     return false;
   }
