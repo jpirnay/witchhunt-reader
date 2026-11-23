@@ -107,10 +107,12 @@ bool CrossPointSettings::isReaderScopedAction(const uint8_t action) {
     case BTN_CYCLE_ORIENTATION_BACK:
     case BTN_QUICK_OVERRIDES:
     case BTN_DICTIONARY:
+    case BTN_AUTO_PAGE_TURN:
       return true;
     default:
       // BTN_GO_HOME / BTN_SLEEP / BTN_FORCE_*_REFRESH / BTN_OPEN_BOOKMARKS /
-      // BTN_LIGHT_* / BTN_TOGGLE_TOUCH_UI / BTN_IGNORE are global.
+      // BTN_LIGHT_* / BTN_TOGGLE_TOUCH_UI / BTN_TOGGLE_DARK_MODE / BTN_SCREENSHOT /
+      // BTN_IGNORE are global.
       return false;
   }
 }
@@ -173,7 +175,8 @@ void CrossPointSettings::dropUnsupportedActions(CrossPointSettings& settings, co
 
   for (const auto field : ACTION_FIELDS) {
     const uint8_t action = settings.*field;
-    const bool needsLight = action == BTN_LIGHT_TOGGLE || action == BTN_LIGHT_BRIGHTER || action == BTN_LIGHT_DIMMER;
+    const bool needsLight = action == BTN_LIGHT_TOGGLE || action == BTN_LIGHT_BRIGHTER || action == BTN_LIGHT_DIMMER ||
+                            action == BTN_LIGHT_PANEL;
     const bool needsWarm = action == BTN_LIGHT_WARMER || action == BTN_LIGHT_COOLER;
     if ((needsLight && !hasFrontlight) || (needsWarm && !hasWarmLight)) {
       settings.*field = BTN_DEFAULT;

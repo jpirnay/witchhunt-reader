@@ -308,7 +308,7 @@ two.
 ### Taking a Screenshot
 When the Power Button and Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`.
 
-Alternatively, while reading a book, press **Confirm**, then **More**, to open the reader menu and select **Take screenshot**.
+Alternatively, while reading a book, press **Confirm**, then **More**, to open the reader menu and select **Take screenshot**. Or bind **Take screenshot** to a key or gesture under **[Controls](#373-controls)**: it works on every screen, and is the way on the BOOX Picco, which has no Down key.
 
 ---
 
@@ -541,7 +541,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
   - "Lyra Extended" - Lyra with 3 books on the Home Screen
   - "Lyra Carousel" - Lyra with a full cover carousel on the Home Screen
 - **UI Font Size**: Text size for menus, headers and lists: "Normal" (default) / "Large". The reader's own status bar is not affected.
-- **Dark Mode**: White text on black, in the reader and every menu. Pictures, covers and QR codes keep their own colours; sleep screens and the image viewer show as usual. Text anti-aliasing and the gray shades of pictures are off while it is on (except anti-aliased text in the EPUB reader on the LilyGo T5 S3), and the screen clears its ghosting twice as often as **Refresh Frequency** says. "OFF" (default) / "ON". On a device with a reading light the choices are "Off" / "On" / "Scheduled": **Dark From** and **Dark Until** (in half-hour steps, shown under Scheduled) set the hours, which may run past midnight. The switch happens with the next page turn or screen change after the hour, never in the middle of one, and the device does not wake for it. On the BOOX Picco the slide switch can turn Dark Mode on and off instead of the light (**Slide Switch** under **[Controls](#373-controls)**).
+- **Dark Mode**: White text on black, in the reader and every menu. Pictures, covers and QR codes keep their own colours; sleep screens and the image viewer show as usual. Text anti-aliasing and the gray shades of pictures are off while it is on (except anti-aliased text in the EPUB reader on the LilyGo T5 S3), and the screen clears its ghosting twice as often as **Refresh Frequency** says. "OFF" (default) / "ON". On a device with a reading light the choices are "Off" / "On" / "Scheduled": **Dark From** and **Dark Until** (in half-hour steps, shown under Scheduled) set the hours, which may run past midnight. The switch happens with the next page turn or screen change after the hour, never in the middle of one, and the device does not wake for it. On the BOOX Picco the slide switch can turn Dark Mode on and off instead of the light (**Slide Switch** under **[Controls](#373-controls)**). On any device a key or gesture bound to **Toggle Dark Mode** does it from any screen; under Scheduled that holds until the dark hours next start or end.
 - **Home screen** (submenu): Which entries sit on the Home screen; the rest move behind **More**. See **[Home Screen](#31-home-screen)**.
 - **Show Busy Indicator**: Shows a small hourglass in the middle of the screen when a button press starts a screen change that takes a second or more, such as opening or leaving a book, so you can tell the press was received. It only appears on devices whose screen refreshes fast enough for it to help, so never on the LilyGo T5 S3. "ON" (default) / "OFF".
 
@@ -599,7 +599,7 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 #### 3.7.3 Controls
 
 - **Remap Front Buttons**: Reassign the physical function of each bottom-edge button.
-- **Button Actions** (submenus — one per logical button: Back, Confirm, Left, Right, Up/Page Back, Down/Page Forward, Power): For each button, independently configure the **Short Press**, **Double Press**, and **Long Press** action. Available actions include: page forward/back, skip 10 pages, go home, sleep, force refresh, force fast refresh, open TOC, open bookmarks, toggle bookmark, footnotes, next/previous chapter, exit reader, open reader menu, open the reader bars (what a short **Confirm** opens in a book), toggle bionic reading, KOReader sync, cycle font size, larger/smaller text, cycle orientation (either direction), quick overrides, toggle touch navigation, back, confirm, ignore, and — on devices with a light — toggle reading light, light brighter and light dimmer — plus light warmer and light cooler on a device with a warm/cool light.
+- **Button Actions** (submenus — one per logical button: Back, Confirm, Left, Right, Up/Page Back, Down/Page Forward, Power): For each button, independently configure the **Short Press**, **Double Press**, and **Long Press** action. Available actions include: page forward/back, skip 10 pages, go home, sleep, force refresh, force fast refresh, open TOC, open bookmarks, toggle bookmark, footnotes, next/previous chapter, exit reader, open reader menu, open the reader bars (what a short **Confirm** opens in a book), toggle bionic reading, KOReader sync, cycle font size, larger/smaller text, cycle orientation (either direction), quick overrides, toggle touch navigation, back, confirm, toggle Dark Mode, toggle auto page turn (an EPUB book turns its pages by itself every **Auto Turn (Seconds)**, set in the reader menu; the same action, **Confirm** or **Back** stops it), take screenshot, ignore, and — on devices with a light — toggle reading light, light brighter, light dimmer and open the light panel — plus light warmer and light cooler on a device with a warm/cool light.
 - **Page Turn Buttons**: "Follow Book" (default) or "Fixed". In a book whose pages turn right to left (a vertical book, or a Hebrew, Arabic, Persian or Urdu book), Follow Book makes the **Left** and **Right** buttons follow the page: Left shows the next page and Right the previous one. Every direction-bound action you gave to Left or Right (short, double and long press: page back or forward, 10 pages back or forward, previous or next chapter) swaps the same way, and so do the actions of the left and right swipe zones on a touch device. Other actions, and the Up and Down buttons, never change. "Fixed" keeps Left as back and Right as forward in every book. The setting does not touch the taps, page swipes and progress bars below, which follow the page.
 - **Button Actions Overview**: A read-only overview screen showing the current short/double/long press mapping for every button at a glance.
 - **Touch Navigation** *(touch devices only)*: Whether touch does anything outside the reader — list rows, covers, the home menu, the settings tabs, the on-screen button hints. "ON" / "OFF". See **[Touch Controls](#5-touch-controls)**.
@@ -1280,7 +1280,9 @@ Adjusting brightness while the light is off turns it on — a brightness gesture
 you can find a book in the dark.
 
 The same actions are bindable to any button or gesture: **Toggle Reading Light**, **Light
-Brighter**, **Light Dimmer**, and on a warm/cool device **Light Warmer** and **Light Cooler**.
+Brighter**, **Light Dimmer**, **Open Light Panel**, and on a warm/cool device **Light Warmer** and
+**Light Cooler**. The light panel opened from a key also works from the keys: **Back** closes it,
+**Confirm** switches the light, **Left** / **Right** dim and brighten it.
 
 ### 5.7 Per-device differences
 

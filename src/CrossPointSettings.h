@@ -693,7 +693,9 @@ class CrossPointSettings {
   // 2: BTN_READER_BARS inserted after BTN_BACK.
   // 3: BTN_CONFIRM inserted after BTN_READER_BARS. A stored built-in short Power takes the board's
   //    default, Confirm on a board with no Back or Home key (BOOX Picco), in place of nothing.
-  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 3;
+  // 4: BTN_TOGGLE_DARK_MODE, BTN_AUTO_PAGE_TURN and BTN_SCREENSHOT inserted after BTN_CONFIRM, and
+  //    BTN_LIGHT_PANEL at the end of the light block, before the warm pair.
+  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 4;
 
   // --- Gesture actions (touch boards) ---------------------------------------
   // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
@@ -929,6 +931,15 @@ class CrossPointSettings {
     // Send a normal Confirm press to the current activity, as BTN_BACK sends Back. On a board with no
     // Back or Home key (BOOX Picco) a short press of Power carries it by default.
     BTN_CONFIRM,
+    // Dark Mode on or off, as the light drawer's switch and the Picco's slide switch do (DarkModeNow::flip): under
+    // Scheduled, until the night hours next begin or end. Global, and on every board: an unlit X3 or X4 has no drawer,
+    // so without this the setting is a Settings trip away.
+    BTN_TOGGLE_DARK_MODE,
+    // Start the automatic page turn at the remembered interval (autoTurnSeconds), or stop it. EPUB reader only.
+    BTN_AUTO_PAGE_TURN,
+    // A screenshot to the card, as POWER+DOWN takes one: for a board with no Down key (BOOX Picco), and for a screen
+    // other than the reader, whose menu is the other way to one.
+    BTN_SCREENSHOT,
     // --- Board-gated actions MUST stay at the end of this enum ---------------
     // SettingsList builds each button's option list positionally: index i in the
     // list is action value i. Actions it drops on boards that cannot perform them
@@ -947,6 +958,8 @@ class CrossPointSettings {
     BTN_LIGHT_TOGGLE,
     BTN_LIGHT_BRIGHTER,
     BTN_LIGHT_DIMMER,
+    // Open the light drawer that a swipe down from the top edge opens (ActivityManager::requestLightPanel).
+    BTN_LIGHT_PANEL,
     // Colour temperature, on a warm/cool board only (X4 Pro). Brightness is the
     // TOTAL light and warmth splits it between the two strings, so these shift
     // the mix without changing how bright the page looks.
@@ -1096,13 +1109,18 @@ class CrossPointSettings {
   }
 
   // A stored action from a settings file written at BUTTON_ACTIONS_VERSION `fromVersion`, in today's numbering. Each
-  // version that inserted an action before the board-gated block moved every action from its place up by one. The
-  // insertions run in order and each lands after the one before, so today's value of an inserted action is also where
-  // it went in. Past the end is left for the loader's range check.
+  // version that inserted actions moved every action from their place up by as many. The insertions run in order and
+  // each lands after the one before, so today's value of an inserted action is also where it went in: version 4's
+  // three go in at Toggle Dark Mode's place, and then its light-panel action at its own, past the three. Past the end
+  // is left for the loader's range check.
   static constexpr uint8_t upgradeStoredAction(uint8_t action, const int fromVersion) {
     if (fromVersion < 1 && action >= BTN_BACK) ++action;
     if (fromVersion < 2 && action >= BTN_READER_BARS) ++action;
     if (fromVersion < 3 && action >= BTN_CONFIRM) ++action;
+    if (fromVersion < 4 && action >= BTN_TOGGLE_DARK_MODE) {
+      action = static_cast<uint8_t>(action + (BTN_LIGHT_TOGGLE - BTN_TOGGLE_DARK_MODE));
+    }
+    if (fromVersion < 4 && action >= BTN_LIGHT_PANEL) ++action;
     return action;
   }
 
