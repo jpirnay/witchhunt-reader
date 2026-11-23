@@ -287,8 +287,9 @@ not while the page is up, so its log gives no time for the whole chapter.
 
 Witch Reader turns pages, turns into the next chapter and reopens a chapter faster in every mode, and shows the first
 page of a chapter it has not laid out 1.7 s sooner without AA. With AA, CrossPoint completes that page sooner, by
-0.5 s: it adds the AA as soon as the page is on screen. On the X3 Witch Reader adds the AA to that page once the whole
-chapter is laid out, 0.4 s after the end of the layout.
+0.5 s: it adds the AA as soon as the page is on screen. In the build measured, Witch Reader on the X3 added the AA to
+that page once the whole chapter was laid out, 0.4 s after the end of the layout. Since #823 it adds it while the
+chapter is still being laid out (gray on the panel at 4.08 s instead of 6.58 s in #823's bench, two passes).
 
 At rest, CrossPoint has more of the X3's heap free, because Witch Reader keeps a second 52 KB framebuffer. It holds
 the pre-rendered next page and the page under the AA planes, and chapter builds and cover decodes borrow it as
@@ -319,7 +320,8 @@ read the last pages of this one (#805). 2.53 itself: 3.7 s, 5.0 s, 7.8 s, 7.5 s 
 On the X4 Witch Reader turns pages faster in every mode, shows the page of a chapter it has not laid out before
 sooner, and turns into the next chapter as fast. CrossPoint reopens a chapter a little sooner, and after an open
 without a cache it completes the page with its AA about 2 s sooner: it adds the AA once part of the chapter is laid
-out, Witch Reader once the whole chapter is. At rest CrossPoint has more heap free, for the reason given under the X3.
+out, Witch Reader in the build measured once the whole chapter is (since #823 a borrowed build's page gets it during
+the build; not measured on the X4). At rest CrossPoint has more heap free, for the reason given under the X3.
 
 **X4 Pro**
 
