@@ -1303,7 +1303,8 @@ Home.
 
 - **Settings → Controls → Touch Page Turn** → *Off* stops touch turning pages, and nothing
   else.
-- **Settings → Controls → Touch Navigation** → *Off* silences touch outside the reader.
+- **Settings → Controls → Touch Navigation** → *Off* silences touch outside the reading page,
+  the reader menu, table of contents and dictionary included.
 - **Settings → Controls → Tap Action** switches list rows between select-then-open and
   open-on-first-tap.
 - Any single gesture can be set to **Ignore (do nothing)** in *Gesture actions* to switch just

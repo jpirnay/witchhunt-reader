@@ -266,6 +266,8 @@ class ActivityManager {
   bool requiresExclusiveStorageLoop() const;
   // True while a reader is anywhere on the stack -- including under its own menu or TOC.
   bool isReaderActivity() const;
+  // True while a reader is the activity on top, its bars open or not; false under its menu or TOC.
+  bool readerIsOnTop() const;
   // True only while the reader itself is on top: the one case every configured reader action is
   // delivered (see currentTakesButtonAction()). A list opened from the reader answers false here
   // but true above. witchling-reader commit babb8050 (syfq91, isCurrentReaderActivity()) made the

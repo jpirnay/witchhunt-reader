@@ -2031,9 +2031,10 @@ void loop() {
   // top. The reader keeps touch whatever this says — touchReaderControls governs
   // it there, and giving one behaviour two switches only creates a way for a
   // device to look broken. Reader SUB-screens (contents, dictionary, the menu)
-  // are UI screens and are gated with the rest.
+  // are UI screens and are gated with the rest: hence the reader ON TOP, not
+  // isReaderActivity(), which also answers true under them and left them live.
   mappedInputManager.setTouchEventsEnabled(SETTINGS.touchUiControls != CrossPointSettings::TOUCH_UI_OFF ||
-                                           activityManager.isReaderActivity());
+                                           activityManager.readerIsOnTop());
   // Must follow the drain above and precede every power consumer below.
   serviceBootPowerRelease();
   HalClock::updatePeriodic();
