@@ -4,8 +4,9 @@ Status: design for the maintainer, 2026-11-09. PR 1 (the engine) is #668, merged
 (`feat/myanmar-books`); PR 3 (line breaking) is built on `feat/myanmar-line-breaks`, stacked on PR 2 ("PR 2 as built"
 and "PR 3 as built", under section 8). Questions 1, 2, 3, 5, 6 and 7 are decided (the end of this file). It builds on
 writing modes step 2 (`docs/superpowers/specs/2026-11-02-writing-modes-step2-design.md`; its deviations 1-13 hold) and
-on the handover's items 3 and 6 (`docs/future_work/writing-modes-handover.md`), which list Myanmar as "their own shaper
-modules", not planned until asked for. The maintainer has now asked: "we should add at least Myanmar".
+on the handover's items 3 and 6 (`docs/future_work/writing-modes-handover.md`, since replaced by
+`docs/future_work/complex-scripts.md`), which list Myanmar as "their own shaper modules", not planned until asked for.
+The maintainer has now asked: "we should add at least Myanmar".
 
 **How each figure was obtained.** Every statement is one of three kinds, and says which:
 - **read**: from source. Ours at master `74b8fc803`; HarfBuzz at tag `14.5.0` (GitHub raw); crengine and libunibreak

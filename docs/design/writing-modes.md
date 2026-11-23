@@ -1,7 +1,7 @@
 # Writing modes: right-to-left and vertical text: design
 
-Status: shipped, steps 0-4 (#560 to #673). Design record; the code is the authority on what it does now. What is
-left is in [../future_work/writing-modes-handover.md](../future_work/writing-modes-handover.md).
+Status: shipped, steps 0-4 (#560 to #673), and step 5's UI text (section 8). Design record; the code is the authority
+on what it does now. What is left is in [../future_work/complex-scripts.md](../future_work/complex-scripts.md).
 
 Hebrew and Arabic books, and vertical Chinese, Japanese and Korean. The design and the maintainer's decisions are in
 `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md`:
@@ -9,7 +9,7 @@ Hebrew and Arabic books, and vertical Chinese, Japanese and Korean. The design a
 - vertical text is a horizontal layout in a frame turned 90 degrees clockwise, not a second engine;
 - the book decides the writing mode (CSS `writing-mode`, then OPF `page-progression-direction`), with a global setting
   and a per-book override;
-- no right-to-left UI for now.
+- no right-to-left UI at first; Hebrew, Arabic and Persian interfaces came later (#711, section 8).
 
 The turned frame was tried on the X3 (spec section 10, branch `spike/vertical-frame`): columns, ruby on the right,
 sideways Latin and brackets all came out right, at the horizontal page's speed. Step 3 built it from that spike.
@@ -25,10 +25,10 @@ Each step was its own plan and PR (spec section 7). After step 0, steps 1-2 and 
 |---|---|---|
 | 0 | Parse every trigger (`writing-mode`, `text-orientation`, `text-combine-upright`, `direction`, `unicode-bidi`, `start`/`end`, `dir` with `<bdo>`/`<bdi>`, OPF ppd); CSS boxes along the writing mode, `start`/`end` along the direction; `line-height` parsed as CSS means it and kept through the cache; fixture books | #560 ([plan](../superpowers/plans/2026-10-26-writing-modes-step0.md)) |
 | 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; the horizontal right-to-left case of FlowContext and page progression, which step 3 built for vertical text (section 3) | PR 1 #599 (the library: bidi core, shaping layer, Hebrew divine-name rule); PR 2 #613 (layout and drawing: right-to-left lines, niqqud, lists and tables, bidi markup); PR 3, reading a Hebrew book, as #664, #665 and #666 (2026-11-09; section 4) ([design](../superpowers/specs/2026-11-02-writing-modes-step1-design.md), [PR 1 plan](../superpowers/plans/2026-11-02-writing-modes-step1-pr1.md), [PR 2 plan](../superpowers/plans/2026-11-02-writing-modes-step1-pr2.md)) |
-| 2 | Arabic script, with one shaper for Arabic and the Indic scripts (section 7) | PR 1 #603, PR 2 #624; PR 3 #642 (Indic books: shaped text laid out and drawn); PR 3b #645 (the Font Manager's Indic families: 20 Noto families, chosen by the book's language); PR 4a #651 (the Arabic shaper in the engine: Arabic, Persian and Urdu shape right to left and match HarfBuzz); PR 4b #656 (Arabic books: Arabic, Persian and Urdu shape and join on the page, Indic words shape inside bidi paragraphs, and the Font Manager offers NotoNaskhArabic and NotoSansArabic); #657, #660, #672 and #667 followed, and Myanmar after it (#668, #671, #673). Speed is left: the 2x build-time line is missed at 3.17x ([design](../superpowers/specs/2026-11-02-writing-modes-step2-design.md), [measurements](../superpowers/specs/2026-11-02-writing-modes-step2-measurements.md), [PR 1 plan](../superpowers/plans/2026-11-02-writing-modes-step2-pr1.md), [PR 2 plan](../superpowers/plans/2026-11-04-writing-modes-step2-pr2.md), [PR 3 plan](../superpowers/plans/2026-11-05-writing-modes-step2-pr3.md), [PR 3b plan](../superpowers/plans/2026-11-06-writing-modes-step2-pr3b.md), [PR 4a plan](../superpowers/plans/2026-11-07-writing-modes-step2-pr4a.md), [PR 4b plan](../superpowers/plans/2026-11-07-writing-modes-step2-pr4b.md), [reference](../text-shaping.md)) |
+| 2 | Arabic script, with one shaper for Arabic and the Indic scripts (section 7) | PR 1 #603, PR 2 #624; PR 3 #642 (Indic books: shaped text laid out and drawn); PR 3b #645 (the Font Manager's Indic families: 20 Noto families, chosen by the book's language); PR 4a #651 (the Arabic shaper in the engine: Arabic, Persian and Urdu shape right to left and match HarfBuzz); PR 4b #656 (Arabic books: Arabic, Persian and Urdu shape and join on the page, Indic words shape inside bidi paragraphs, and the Font Manager offers NotoNaskhArabic and NotoSansArabic); #657, #660, #672 and #667 followed, and Myanmar after it (#668, #671, #673). Speed followed (section 9) ([design](../superpowers/specs/2026-11-02-writing-modes-step2-design.md), [measurements](../superpowers/specs/2026-11-02-writing-modes-step2-measurements.md), [PR 1 plan](../superpowers/plans/2026-11-02-writing-modes-step2-pr1.md), [PR 2 plan](../superpowers/plans/2026-11-04-writing-modes-step2-pr2.md), [PR 3 plan](../superpowers/plans/2026-11-05-writing-modes-step2-pr3.md), [PR 3b plan](../superpowers/plans/2026-11-06-writing-modes-step2-pr3b.md), [PR 4a plan](../superpowers/plans/2026-11-07-writing-modes-step2-pr4a.md), [PR 4b plan](../superpowers/plans/2026-11-07-writing-modes-step2-pr4b.md), [reference](../text-shaping.md)) |
 | 3 | Vertical frame (from the spike); the vertical decision and its settings; FlowContext and page progression | #577 ([plan](../superpowers/plans/2026-10-28-writing-modes-step3.md)) |
 | 4 | Vertical typography: widows and orphans off and lone images centred (PR 1); 、。 and small kana placed from glyph ink, A3a along the column, Traditional Chinese marks (PR 2); tate-chu-yoko (PR 3); the dictionary on vertical pages (PR 4) | #594, #595, #597, #598 ([design](../superpowers/specs/2026-10-30-writing-modes-step4-design.md), [PR 1 plan](../superpowers/plans/2026-10-30-writing-modes-step4-pr1.md), [PR 2 plan](../superpowers/plans/2026-10-31-writing-modes-step4-pr2.md), [PR 3 plan](../superpowers/plans/2026-11-01-writing-modes-step4-pr3.md), [PR 4 plan](../superpowers/plans/2026-11-02-writing-modes-step4-pr4.md)) |
-| 5 | Visual strings for titles and TOC; bidi in TXT and MD | partly: titles and the TOC are drawn in visual order since #666 (section 4), and list rows borrow the last book's font whatever its script since #670; Indic and Myanmar titles are shaped over that font when it maps their script (`UiShapedText`), else reordered; Arabic titles keep presentation forms, and TXT and MD have no paragraph bidi |
+| 5 | Visual strings for titles and TOC; bidi in TXT and MD | titles and the TOC in visual order (#666, section 4); the last book's family behind the UI faces whatever its script (#670); Hebrew, Greek and Arabic in the UI faces (#681, #702); Indic titles reordered (#692), and Indic and Burmese titles shaped over the face behind the UI face (#699); right-to-left UI languages (#711) (section 8). TXT and MD have no paragraph bidi |
 
 Line spacing (`cjk.md`, step 10, shipped 2026-10-26) reads the `line-height` step 0 keeps.
 
@@ -75,8 +75,7 @@ reader"); page progression is section 3 above.
   with a right-to-left character visual as they draw it (`BidiUtils::visualUiLine`); a page's words, formed at section
   build, go through `drawFormedText` instead. Every UI string is covered at once: the status bar, Home, the lists, the
   TOC, centred text, alt text. X3: a Hebrew chapter title in the status bar read mirrored on master and reads right
-  with the change. Where the UI face has no Hebrew (the list rows), the last book's font draws it when it has Hebrew
-  (#670).
+  with the change. The UI faces hold the Hebrew letters since #681 (section 8).
 - **Fonts** (#665): NotoSansHebrew and NotoSerifHebrew in the Font Manager, merged with Noto Sans/Serif Latin by
   `merge_noto_latin.py` (checked against a Hebrew corpus, `generate_corpus_hebrew.py`), and a Hebrew-script book picks
   an installed one by itself when the reader font has no alef (`SdCardFontSystem::selectLanguageFamily`). X3: under
@@ -99,8 +98,16 @@ Vertical text is a horizontal layout in the turned frame (step 3, #577); step 4 
 - **The page** (step 4 PR 1): widows and orphans are off and lone images are centred in a vertical section. The
   dictionary works on vertical pages (PR 4).
 - **Line spacing:** the column pitch is the line pitch in the turned frame, so the same steps set it.
-- **Limits** that shipped with it and have no next step (`text-orientation`, `vertical-lr`, drop caps, vertical forms)
-  are listed in the handover's item 10.
+- **Limits** that shipped with it. None has a next step; each waits for a request.
+  - `text-orientation` is parsed and cached (`CssStyle::textOrientation`, section 2) and never read: every character
+    takes its UAX #50 class (CSS `mixed`).
+  - `vertical-lr` books are set horizontally under Automatic; only `vertical-rl` has a turned frame (`FlowContext`).
+  - Drop caps are off in a vertical section (`ChapterHtmlSlimParser::dropCapPositionAllows`): their ink metrics are
+    horizontal.
+  - No vertical forms, and the wave dashes stay rotated: their vertical form is a mirror image, and the renderer
+    cannot mirror a glyph (step 4 design: not built).
+  - No shaped run is set down a column: a vertical section reorders Indic words only
+    ([text-shaping.md](../text-shaping.md#what-is-not-shaped-yet)).
 
 ## 6. Found in real books
 
@@ -146,7 +153,7 @@ own, not planned):
 5. **Line breaking:** Hindi separates words with spaces, so today's breakers serve; a break never splits a syllable;
    the danda (। ॥) ends a sentence; Hindi hyphenation patterns exist (optional).
 6. **UI:** book titles in the library need the same shaping (step 5's visual strings). A Hindi UI translation stays
-   out of scope, as the right-to-left UI does.
+   out of scope, as the right-to-left UI then did (it came in #711).
 
 Thai and Lao need a further piece: no spaces between words, so line breaking needs a word dictionary (a CJK-like
 problem with a large data cost).
@@ -178,3 +185,48 @@ HarfBuzz's MIT notice, which ship with the port. The engine already had every lo
 joining module plus right-to-left) and the Indic scripts was likely; section 5.6's "hundreds of KB" premise for a
 shaper was out of date. Step 2 measured first (the measurements file) and ported it (#603). The allocation fix was
 offered upstream in a comment on #3787 on 2026-11-04 (decision 7).
+
+## 8. UI text (step 5)
+
+UI text is drawn by bitmap UI faces, which cannot shape. Step 5 drew titles and the TOC in visual order (#666, section
+4); what followed fills the faces and shapes what they cannot.
+- **The last book's family behind the UI faces** (#670). Outside the reader, the screens that list books borrow the
+  last book's TrueType family for the characters the UI faces lack. It was opened only when it had CJK, so Hebrew,
+  Arabic and Indic titles drew blank; it is opened whatever it covers, and lends real characters only, so a Latin book
+  font draws no U+FFFD or square of its own over a title the UI faces leave blank. It stays the last book's family for
+  every row: only its set is in the glyph store, and opening another would rewrite it.
+- **Hebrew and Greek in every UI face** (#681): the Hebrew letters and points from Noto Sans Hebrew behind Inter and
+  Noto Sans (+13.8 KB), and modern Greek from Inter (the whole Greek block would cost 8.7 KB more, for Coptic and
+  archaic letters). A Hebrew title shows whatever book was read last.
+- **Arabic titles joined in the built-in faces** (#681, #702). `BidiUtils::arabicUiForms` turns Arabic UI text into
+  its presentation forms, on minibidi's joining tables, before it is measured and drawn. #681 put the forms in a
+  downloadable pack; #702 built 284 code points of Noto Sans Arabic UI into every UI face instead (+81,782 B on the
+  `default` build), as CrossPoint builds Arabic into its menu fonts, and the pack went. Vowel marks are centred, not
+  anchored by the font, and lam-alef is the only ligature.
+- **Indic and Burmese titles** (#692, #699). `IndicReorder` puts Indic text in visual order where UI text is measured or
+  drawn, once only, because the reorder is not idempotent; without shaping, conjuncts keep a visible virama. Where the
+  TrueType face behind the UI face maps the script, the run is shaped over it with `IndicShaper::shapeToken` and drawn
+  by glyph ID (`lib/GfxRenderer/UiShapedText`). When it is, and when not, is in
+  [text-shaping.md](../text-shaping.md#what-is-not-shaped-yet), "Titles, chapter names and the TOC".
+- **Right-to-left UI languages** (#711): Hebrew, Arabic and Persian interfaces, shipped as card packs. Their text reads
+  right to left while the menus keep their left-to-right layout, as CrossPoint's do; the conventions are in
+  `docs/i18n.md`, "Hebrew, Arabic and Persian".
+- **The labels of the writing-mode settings** (Vertical Text, Automatic, Page Turn Buttons, Follow Book, Fixed) are in
+  every UI language since #680.
+- **TXT and Markdown** have no paragraph bidi. `drawText` reorders a TXT line whole, as one string, with no paragraph
+  direction; a Markdown line is reordered span by span. TXT would get bidi from the parked TXT pipeline
+  ([txt-pipeline.md](../future_work/txt-pipeline.md)); Markdown is open
+  ([complex-scripts.md](../future_work/complex-scripts.md)).
+
+## 9. Speed
+
+The design's line is a cold chapter in at most 2x its Latin twin's time on the X3. Step 2 missed it: Arabic 3.17x,
+Hindi 2.61x. The figures, and what each PR gained, are under "Time" in [text-shaping.md](../text-shaping.md#time); X3
+builds are now at 1.88x (Hindi) and 2.00x (Arabic) (#874). Two findings decided the order of the work:
+- **Most of the right-to-left excess was not the shaper.** Unshaped Arabic was already 2.22x its twin, on the bidi and
+  TrueType path that Hebrew takes whole, so that path came first: the plain token (#661), the memory of letters that
+  kern with nothing (#662), the glyph store's recent answers (#669), the space's width (#674).
+- **The C3 is bound by fetching code.** Code and flash data share one 16 KB cache. Cutting the font data each word reads
+  by 37-45% made X3 builds 3-6% faster; the engine's hottest 8.7 KB in IRAM made them 17-24% faster (#683, deviation
+  21). A deviation from HarfBuzz has to earn its upkeep on every resync: #874 reverted the engine half of #872, whose two
+  deviations were within the X3's noise.
