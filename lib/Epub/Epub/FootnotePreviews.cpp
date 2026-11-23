@@ -1390,35 +1390,23 @@ bool captureNote(Epub& epub, const int fromSpineIndex, const char* href, std::st
     LOG_ERR("FNP", "OOM: cannot start a note capture");
     return false;
   }
-  // Declared before the stream: the reader inside DocStream holds the archive, so it has to go first.
+  // Declared before the stream: the reader inside DocStream holds the archive, so it has to go first. The markup and
+  // the read chunk share one block.
   auto zip = makeUniqueNoThrow<ZipFile>(epub.getPath());
-  auto buffer = makeUniqueNoThrow<char[]>(MAX_NOTE_MARKUP_BYTES + 1);
-  auto chunk = makeUniqueNoThrow<uint8_t[]>(STREAM_CHUNK_BYTES);
-  if (!zip || !buffer || !chunk) {
+  auto block = makeUniqueNoThrow<uint8_t[]>(MAX_NOTE_MARKUP_BYTES + 1 + STREAM_CHUNK_BYTES);
+  if (!zip || !block) {
     LOG_ERR("FNP", "OOM: cannot allocate a note capture's buffers");
     return false;
   }
+  char* const markup = reinterpret_cast<char*>(block.get());
+  uint8_t* const chunk = block.get() + MAX_NOTE_MARKUP_BYTES + 1;
   epub.primeZip(*zip);
 
-  // Where the capturer hands the note: the caller's string, copied once, at most MAX_NOTE_MARKUP_BYTES, so one block
-  // for the copy is all it takes.
-  struct Sink {
-    std::string* out;
-    bool captured;
-    bool noRoom;
-  } sink{&outMarkup, false, false};
+  // The capturer writes the note into `markup` and only says here how long it came out; it is copied once, after.
+  size_t capturedLen = 0;
   auto capturer = makeUniqueNoThrow<NoteCapturer>(
-      targetSpine, wanted,
-      [](void* ctx, uint32_t, const char* text, const size_t len) {
-        auto& to = *static_cast<Sink*>(ctx);
-        if (!heapHasBlockFor(len + 1)) {
-          to.noRoom = true;
-          return;
-        }
-        to.out->assign(text, len);
-        to.captured = true;
-      },
-      &sink, buffer.get(), MAX_NOTE_MARKUP_BYTES);
+      targetSpine, wanted, [](void* ctx, uint32_t, const char*, const size_t len) { *static_cast<size_t*>(ctx) = len; },
+      &capturedLen, markup, MAX_NOTE_MARKUP_BYTES);
   if (!capturer || !capturer->setup()) {
     LOG_ERR("FNP", "Note capture: no parser");
     return false;
@@ -1431,23 +1419,25 @@ bool captureNote(Epub& epub, const int fromSpineIndex, const char* href, std::st
   }
   bool done = false;
   // Only as far as the note: one near the top of a long notes document costs a chunk or two.
-  while (!done && !sink.captured && !sink.noRoom) {
-    const int n = doc.next(chunk.get(), STREAM_CHUNK_BYTES, &done);
+  while (!done && capturedLen == 0) {
+    const int n = doc.next(chunk, STREAM_CHUNK_BYTES, &done);
     if (n < 0) {
       LOG_ERR("FNP", "Note capture: read error in spine %d", targetSpine);
       return false;
     }
     // Malformed markup mid-stream ends the read; what was captured before it stands, as in a resolve.
-    if (n > 0 && !capturer->feed(chunk.get(), static_cast<size_t>(n))) break;
+    if (n > 0 && !capturer->feed(chunk, static_cast<size_t>(n))) break;
   }
   // A note that runs to the end of its document closes there.
-  if (!sink.captured && !sink.noRoom) capturer->finalize();
+  if (capturedLen == 0) capturer->finalize();
   doc.close();
   epub.adoptZipDetails(*zip);
-  if (!sink.captured) {
-    LOG_DBG("FNP", "Note capture: nothing at %s (spine %d)%s", href, targetSpine, sink.noRoom ? ", no memory" : "");
+  // At most MAX_NOTE_MARKUP_BYTES, so one block for the copy is all it takes.
+  if (capturedLen == 0 || !heapHasBlockFor(capturedLen + 1)) {
+    LOG_DBG("FNP", "Note capture: nothing at %s (spine %d)", href, targetSpine);
     return false;
   }
+  outMarkup.assign(markup, capturedLen);
   LOG_DBG("FNP", "Captured the note at %s: %u bytes from spine %d in %lums", href,
           static_cast<unsigned>(outMarkup.size()), targetSpine, millis() - startMs);
   return true;
