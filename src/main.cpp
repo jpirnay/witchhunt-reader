@@ -41,7 +41,6 @@
 #include <algorithm>
 #include <cstring>
 #include <iterator>
-#include <vector>
 
 #include "BootDiagnostics.h"
 #include "ButtonEventManager.h"
@@ -2270,93 +2269,9 @@ void loop() {
     // nothing swaps twice.
     const bool mirrorLeftRight = activityManager.currentMirrorsLeftRight();
     auto actionFor = [&](const ButtonEventManager::ButtonEvent& ev) -> uint8_t {
-      const auto mirrored = [&](const uint8_t a) {
-        return mirrorLeftRight ? CrossPointSettings::mirroredDirection(a) : a;
-      };
-      switch (ev.button) {
-        case B::Back:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortBack;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoubleBack;
-            case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongBack;
-          }
-          break;
-        case B::Confirm:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortConfirm;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoubleConfirm;
-            case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongConfirm;
-          }
-          break;
-        case B::Left:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return mirrored(SETTINGS.btnShortLeft);
-            case ButtonEventManager::PressType::Double:
-              return mirrored(SETTINGS.btnDoubleLeft);
-            case ButtonEventManager::PressType::Long:
-              return mirrored(SETTINGS.btnLongLeft);
-          }
-          break;
-        case B::Right:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return mirrored(SETTINGS.btnShortRight);
-            case ButtonEventManager::PressType::Double:
-              return mirrored(SETTINGS.btnDoubleRight);
-            case ButtonEventManager::PressType::Long:
-              return mirrored(SETTINGS.btnLongRight);
-          }
-          break;
-        case B::PageBack:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortPageBack;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoublePageBack;
-            case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongPageBack;
-          }
-          break;
-        case B::PageForward:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortPageForward;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoublePageForward;
-            case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongPageForward;
-          }
-          break;
-        case B::Power:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortPower;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoublePower;
-            case ButtonEventManager::PressType::Long:
-              // Unreachable, and left that way on purpose. The power-hold timer above
-              // sleeps the device at getPowerButtonDuration() (400 ms), so the press is
-              // long gone before ButtonEventManager's LONG_PRESS_MS (1000 ms) could emit a
-              // Long for Power. btnLongPower survives only as the settings screen's way of
-              // stating "Long press: Sleep" (SettingsList.h gives it that single option and
-              // no selector); dispatching it here would imply it were configurable.
-              break;
-          }
-          break;
-        default:
-          break;  // Up/Down are the PageBack/PageForward buttons under their list-navigation
-                  // names. The FSM emits both names for one press, and the PageBack/PageForward
-                  // event above already carries the configured action — so these fall through
-                  // to the activity, which is what list-style activities match on.
-      }
-      return BA::BTN_DEFAULT;
+      const uint8_t action = ButtonEventManager::configuredAction(ev.button, ev.type);
+      const bool sideways = ev.button == B::Left || ev.button == B::Right;
+      return sideways && mirrorLeftRight ? CrossPointSettings::mirroredDirection(action) : action;
     };
     // Reader-scoped actions are only meaningful inside the reader (they funnel through
     // dispatchButtonAction(), a no-op elsewhere). When such an action is configured on a
@@ -2382,19 +2297,14 @@ void loop() {
     // ladder would not stay that way. Returns false only when the device is on
     // its way into deep sleep and the caller must stop.
     auto runAction = [&](const BA action) -> bool {
+      // A reader action is the screen's to carry out (Activity::onButtonAction()). Whether it reaches the screen at
+      // all is decided before this is called: the button loop below lets it fall through outside the reader, and
+      // the gesture path does not claim the contact.
+      if (isReaderScopedAction(action)) {
+        activityManager.dispatchButtonAction(action);
+        return true;
+      }
       switch (action) {
-        case BA::BTN_PAGE_FORWARD:
-          activityManager.dispatchButtonAction(BA::BTN_PAGE_FORWARD);
-          break;
-        case BA::BTN_PAGE_BACK:
-          activityManager.dispatchButtonAction(BA::BTN_PAGE_BACK);
-          break;
-        case BA::BTN_PAGE_FORWARD_10:
-          activityManager.dispatchButtonAction(BA::BTN_PAGE_FORWARD_10);
-          break;
-        case BA::BTN_PAGE_BACK_10:
-          activityManager.dispatchButtonAction(BA::BTN_PAGE_BACK_10);
-          break;
         case BA::BTN_GO_HOME:
           activityManager.goHome();
           break;
@@ -2426,52 +2336,13 @@ void loop() {
           }
           break;
         }
-        case BA::BTN_OPEN_TOC:
-          activityManager.dispatchButtonAction(BA::BTN_OPEN_TOC);
-          break;
         case BA::BTN_OPEN_BOOKMARKS:
           activityManager.goToGlobalBookmarks();
-          break;
-        case BA::BTN_STAR_PAGE:
-          activityManager.dispatchButtonAction(BA::BTN_STAR_PAGE);
-          break;
-        case BA::BTN_FOOTNOTES:
-          activityManager.dispatchButtonAction(BA::BTN_FOOTNOTES);
-          break;
-        case BA::BTN_NEXT_SECTION:
-          activityManager.dispatchButtonAction(BA::BTN_NEXT_SECTION);
-          break;
-        case BA::BTN_PREV_SECTION:
-          activityManager.dispatchButtonAction(BA::BTN_PREV_SECTION);
-          break;
-        case BA::BTN_EXIT_READER:
-          activityManager.dispatchButtonAction(BA::BTN_EXIT_READER);
-          break;
-        case BA::BTN_READER_MENU:
-          activityManager.dispatchButtonAction(BA::BTN_READER_MENU);
-          break;
-        case BA::BTN_READER_BARS:
-          activityManager.dispatchButtonAction(BA::BTN_READER_BARS);
           break;
         case BA::BTN_CONFIRM:
           mappedInputManager.injectLogicalPress(B::Confirm);
           buttonEventManager.pushEventFront(
               {B::Confirm, ButtonEventManager::PressType::Short, millis(), /*bypassActionMapping=*/true});
-          break;
-        case BA::BTN_KOREADER_SYNC:
-          activityManager.dispatchButtonAction(BA::BTN_KOREADER_SYNC);
-          break;
-        case BA::BTN_TOGGLE_BIONIC_READING:
-          activityManager.dispatchButtonAction(BA::BTN_TOGGLE_BIONIC_READING);
-          break;
-        case BA::BTN_CYCLE_FONT_SIZE:
-          activityManager.dispatchButtonAction(BA::BTN_CYCLE_FONT_SIZE);
-          break;
-        case BA::BTN_FONT_SIZE_SMALLER:
-          activityManager.dispatchButtonAction(BA::BTN_FONT_SIZE_SMALLER);
-          break;
-        case BA::BTN_FONT_SIZE_LARGER:
-          activityManager.dispatchButtonAction(BA::BTN_FONT_SIZE_LARGER);
           break;
         case BA::BTN_TOGGLE_TOUCH_UI: {
           const bool enabled = SETTINGS.touchUiControls == CrossPointSettings::TOUCH_UI_OFF;
@@ -2482,21 +2353,6 @@ void loop() {
           LOG_INF("MAIN", "Touch navigation %s", enabled ? "on" : "off");
           break;
         }
-        case BA::BTN_CYCLE_ORIENTATION:
-          activityManager.dispatchButtonAction(BA::BTN_CYCLE_ORIENTATION);
-          break;
-        case BA::BTN_CYCLE_ORIENTATION_BACK:
-          activityManager.dispatchButtonAction(BA::BTN_CYCLE_ORIENTATION_BACK);
-          break;
-        case BA::BTN_QUICK_OVERRIDES:
-          activityManager.dispatchButtonAction(BA::BTN_QUICK_OVERRIDES);
-          break;
-        case BA::BTN_DICTIONARY:
-          activityManager.dispatchButtonAction(BA::BTN_DICTIONARY);
-          break;
-        case BA::BTN_AUTO_PAGE_TURN:
-          activityManager.dispatchButtonAction(BA::BTN_AUTO_PAGE_TURN);
-          break;
         case BA::BTN_TOGGLE_DARK_MODE:
           flipDarkMode();
           LOG_INF("MAIN", "Dark Mode %s", DarkModeNow::isDark() ? "on" : "off");
@@ -2558,6 +2414,8 @@ void loop() {
           // leak through as a page turn.
           break;
         default:
+          // The reader actions, handed to the screen above, and BTN_DEFAULT, which never gets here: the callers
+          // leave the press to the screen.
           break;
       }
       return true;
@@ -2568,11 +2426,18 @@ void loop() {
     mappedInputManager.setConfirmWaitsForGesture(confirmWaits);
 
     ButtonEventManager::ButtonEvent ev;
-    std::vector<ButtonEventManager::ButtonEvent> defaultEvents;
-    defaultEvents.reserve(8);
+    // The events left to the screen, put back at the front of the queue in their order after this pass. An array, not
+    // a vector: this runs on every loop pass, and a vector reserved here allocated on every one of them, events or
+    // not. Each event taken off the queue leaves at most one here (itself, or the Back or Confirm press its action
+    // puts back in its place), so the queue's capacity bounds it.
+    ButtonEventManager::ButtonEvent defaultEvents[ButtonEventManager::MAX_QUEUED_EVENTS];
+    int defaultCount = 0;
+    const auto leaveToScreen = [&](const ButtonEventManager::ButtonEvent& event) {
+      if (defaultCount < ButtonEventManager::MAX_QUEUED_EVENTS) defaultEvents[defaultCount++] = event;
+    };
     while (buttonEventManager.consumeEvent(ev)) {
       if (ev.bypassActionMapping) {
-        defaultEvents.push_back(ev);
+        leaveToScreen(ev);
         continue;
       }
       const uint8_t action = actionFor(ev);
@@ -2584,18 +2449,19 @@ void loop() {
       if (keptByScreen || action == BA::BTN_DEFAULT ||
           (isReaderScopedAction(action) &&
            !activityManager.currentTakesButtonAction(static_cast<BA>(action), ev.button))) {
-        defaultEvents.push_back(ev);
+        leaveToScreen(ev);
         continue;
       }
       if (!runAction(static_cast<BA>(action))) return;
     }
 
-    for (auto it = defaultEvents.rbegin(); it != defaultEvents.rend(); ++it) {
-      if (confirmWaits && it->button == B::Confirm && !it->offeredToPolling) {
+    for (int i = defaultCount - 1; i >= 0; --i) {
+      ButtonEventManager::ButtonEvent& held = defaultEvents[i];
+      if (confirmWaits && held.button == B::Confirm && !held.offeredToPolling) {
         mappedInputManager.injectLogicalPress(B::Confirm);
-        it->offeredToPolling = true;
+        held.offeredToPolling = true;
       }
-      buttonEventManager.pushEventFront(*it);
+      buttonEventManager.pushEventFront(held);
     }
 
     // Gestures. In the reader every gesture is live; elsewhere only swipes and

@@ -1,5 +1,8 @@
 #include "ButtonEventManager.h"
 
+#include <cstddef>
+#include <iterator>
+
 #include "CrossPointSettings.h"
 #include "util/DoubleActionWait.h"
 
@@ -49,26 +52,51 @@ bool ButtonEventManager::hasDoubleAction(const Button button) const {
                                CrossPointSettings::isReaderScopedAction(action), readerOnTop);
 }
 
+uint8_t ButtonEventManager::configuredAction(const Button button, const PressType type) {
+  using S = CrossPointSettings;
+  struct Row {
+    Button button;
+    uint8_t S::* press[3];  // by PressType: Short, Double, Long
+  };
+  // One row per Button, at its value.
+  static constexpr Row ROWS[] = {
+      {Button::Back, {&S::btnShortBack, &S::btnDoubleBack, &S::btnLongBack}},
+      {Button::Confirm, {&S::btnShortConfirm, &S::btnDoubleConfirm, &S::btnLongConfirm}},
+      {Button::Left, {&S::btnShortLeft, &S::btnDoubleLeft, &S::btnLongLeft}},
+      {Button::Right, {&S::btnShortRight, &S::btnDoubleRight, &S::btnLongRight}},
+      {Button::Up, {}},
+      {Button::Down, {}},
+      // No long press, on purpose. The power-hold timer in main.cpp sleeps the device at getPowerButtonDuration()
+      // (400 ms), long before LONG_PRESS_MS (1000 ms) could emit a Long for Power. btnLongPower survives only as the
+      // settings screen's way of stating "Long press: Sleep" (SettingsList.h gives it that single option and no
+      // selector); dispatching it would imply it were configurable.
+      {Button::Power, {&S::btnShortPower, &S::btnDoublePower, nullptr}},
+      {Button::PageBack, {&S::btnShortPageBack, &S::btnDoublePageBack, &S::btnLongPageBack}},
+      {Button::PageForward, {&S::btnShortPageForward, &S::btnDoublePageForward, &S::btnLongPageForward}},
+  };
+  static_assert(std::size(ROWS) == NUM_BUTTONS, "one row per Button");
+  static_assert(
+      [] {
+        for (size_t i = 0; i < std::size(ROWS); ++i) {
+          if (static_cast<size_t>(ROWS[i].button) != i) return false;
+        }
+        return true;
+      }(),
+      "ROWS must be in Button order: a button's row is read at its value");
+  static_assert(static_cast<int>(PressType::Short) == 0 && static_cast<int>(PressType::Double) == 1 &&
+                    static_cast<int>(PressType::Long) == 2,
+                "Row::press is indexed by PressType");
+
+  const auto row = static_cast<size_t>(button);
+  if (row >= std::size(ROWS)) return S::BTN_DEFAULT;
+  const auto field = ROWS[row].press[static_cast<int>(type)];
+  return field != nullptr ? SETTINGS.*field : S::BTN_DEFAULT;
+}
+
 uint8_t ButtonEventManager::configuredDoubleAction(const Button button) {
-  switch (button) {
-    case Button::Back:
-      return SETTINGS.btnDoubleBack;
-    case Button::Confirm:
-      return SETTINGS.btnDoubleConfirm;
-    case Button::Left:
-      return SETTINGS.btnDoubleLeft;
-    case Button::Right:
-      return SETTINGS.btnDoubleRight;
-    case Button::Up:
-    case Button::PageBack:
-      return SETTINGS.btnDoublePageBack;
-    case Button::Down:
-    case Button::PageForward:
-      return SETTINGS.btnDoublePageForward;
-    case Button::Power:
-      return SETTINGS.btnDoublePower;
-  }
-  return CrossPointSettings::BTN_DEFAULT;
+  // Up and Down answer with their PageBack/PageForward twin's setting, which configuredAction() keeps for the twin.
+  const Button named = button == Button::Up || button == Button::Down ? pairedAlias(button) : button;
+  return configuredAction(named, PressType::Double);
 }
 
 ButtonEventManager::PressLog ButtonEventManager::pressLog(const Button button) const {
