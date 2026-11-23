@@ -1300,7 +1300,7 @@ class EpubReaderActivity final : public Activity {
   bool bookSearchShown() const { return search_ != nullptr && search_->current >= 0; }
   // Something is drawn over the page (the live bars, a search's strip): it goes out in black and white, and the next
   // page is not drawn ahead without it.
-  bool uiOverPage() const { return liveBarsOpen() || bookSearchShown(); }
+  bool uiOverPage() const { return liveOverlayOpen() || bookSearchShown(); }
   // A key while a hit is shown. True when the search took it.
   bool handleBookSearchKey(const ButtonEventManager::ButtonEvent& ev);
   // The query outlined wherever it is on the page, and the hint strip. In the page's draw, after the status bar.
@@ -1311,18 +1311,18 @@ class EpubReaderActivity final : public Activity {
   // --- The reader bars, live ---
   // Open while the bars are over the page and the reader runs under them: their input in loop(), the build of a
   // chapter laid out anew in its idle branch, the bars drawn over every page (renderContents, displayBuildPage) or,
-  // where a pass has no page to draw, over the frame on the panel (paintLiveBars). Null while closed. Opened and
+  // where a pass has no page to draw, over the frame on the panel (paintLiveOverlay). Null while closed. Opened and
   // closed on the loop task under the render lock; the render task reads it under the lock.
   std::unique_ptr<ReaderBarsController> liveBars_;
   // A page is owed under the live bars: a forced refresh asked for one. Cleared by the pass that draws a page
-  // (drawLiveBarsOverPage). Under RenderLock.
-  bool liveBarsPageOwed_ = false;
+  // (drawLiveOverlayOverPage). Under RenderLock.
+  bool liveOverlayPageOwed_ = false;
   // The page under the live bars is drawn again once the chapter's build is done: a build still running drew it, its
   // pictures as placeholders, or it was on the panel when the bars opened. Under RenderLock.
-  bool liveBarsRedrawWhenBuilt_ = false;
+  bool liveOverlayRedrawWhenBuilt_ = false;
   // The bars on the panel are not the ones the controller would draw now: they opened, or their input changed them.
   // Without it a pass with no page to draw draws nothing. Under RenderLock.
-  bool liveBarsStale_ = false;
+  bool liveOverlayStale_ = false;
   // A change on the Layout tab waits for the bars showing it to be painted (serviceLiveBars). Loop task only.
   bool liveLayoutOwed_ = false;
   // Layouts of this chapter the live bars have seen complete on the card (noteLiveLayoutBuilt): the one they opened
@@ -1340,6 +1340,11 @@ class EpubReaderActivity final : public Activity {
   bool liveLayoutChangeIsBuilt();
   // The live bars are open. False at compile time where they never open (the C3s), so their code drops out there.
   bool liveBarsOpen() const;
+  // Something the reader draws over its page and takes the input for is open: the live bars. The hooks below are the
+  // overlay's: painted over the frame on the panel when no page is due, drawn over a page that is.
+  bool liveOverlayOpen() const;
+  // The open overlay into the frame being drawn. Under RenderLock.
+  void drawLiveOverlay();
   // One loop() pass with the live bars open: their input, then what it asked for.
   void serviceLiveBars();
   // The Layout tab's values applied as they changed, the page owed, and the bars told what the book is read with now.
@@ -1349,13 +1354,13 @@ class EpubReaderActivity final : public Activity {
   // The bars down without their result: the reader is leaving, or another screen opens over it. Under RenderLock.
   void dismissLiveBars();
   // Whether this pass has a page to draw under the live bars; without one it paints only the bars (render()).
-  bool liveBarsPageDue() const;
+  bool liveOverlayPageDue() const;
   // The bars over the frame on the panel, for a pass with no page to draw, when they changed. Releases `lock` for the
   // refresh.
-  void paintLiveBars(RenderLock& lock);
+  void paintLiveOverlay(RenderLock& lock);
   // The bars into the frame being drawn, over the page and its status bar; the page is the one owed.
-  // `redrawWhenBuilt`: liveBarsRedrawWhenBuilt_. Under RenderLock.
-  void drawLiveBarsOverPage(bool redrawWhenBuilt);
+  // `redrawWhenBuilt`: liveOverlayRedrawWhenBuilt_. Under RenderLock.
+  void drawLiveOverlayOverPage(bool redrawWhenBuilt);
   // The sizes the reader's font offers, for the Layout tab.
   ReaderSizeList layoutSheetSizes() const;
   // The Layout tab's values (ReaderLayoutValues): as the book is read now, and as the global settings have them.

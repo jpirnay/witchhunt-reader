@@ -1433,7 +1433,7 @@ InputFirst::Press EpubReaderActivity::pressInFlight() const {
 
 bool EpubReaderActivity::lookAheadMayRun() const {
   // Not under the live bars: the next change on their Layout tab would throw the work away.
-  return epub && section && readerPhase_ == ReaderPhase::READING && !backgroundWorkSuspended_ && !liveBarsOpen() &&
+  return epub && section && readerPhase_ == ReaderPhase::READING && !backgroundWorkSuspended_ && !liveOverlayOpen() &&
          !pendingPreRender && !usePreRenderedBuffer && !renderer.isRefreshPending() && !imageProcessingActive_;
 }
 
@@ -3052,7 +3052,7 @@ bool EpubReaderActivity::keepBuildPageOnScreen() {
   const BuildPageOnScreen shown = buildPageOnScreen_;
   buildPageOnScreen_ = {};
   if (!section || shown.spine != currentSpineIndex || shown.page != section->currentPage || shown.hasImages ||
-      uiOverPage() || liveBarsOpen()) {
+      uiOverPage() || liveOverlayOpen()) {
     return false;
   }
   // What the render would have done first: the build is over, so its borrowed buffer goes back (the AA pass needs it).
@@ -4085,7 +4085,7 @@ bool EpubReaderActivity::displayPageOnGrayCanvas(const Page& page, const int mar
                                                  const bool picturesAreBoxes, const bool forceLoadLargeImages) {
   if constexpr (!HalDisplay::kMayLendGray8Canvas) return false;  // a build without such a panel carries none of this
   // Under the live bars the page goes out with them, in the frame drawn: the canvas holds the page alone.
-  if (liveBarsOpen()) return false;
+  if (liveOverlayOpen()) return false;
   const bool pageHasPictures =
       page.hasImages() && !page.allImagesArePlaceholders(forceLoadLargeImages, /*monochromeOutput=*/true);
   if (!ReaderGrayCanvas::pageGoesOutOnCanvas(renderer.getGrayLevels(), pageHasPictures, picturesAreBoxes,
@@ -6274,8 +6274,9 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
   const int built = static_cast<int>(section->activeBuildPageCount());
   if (navTarget.kind == NavigationTarget::Kind::Page && target >= 0 && target < built) {
     if (target == buildDisplayedPage_) {
-      if (liveBarsOpen()) paintLiveBars(lock);  // a pass for the bars, or a page owed that the build has not redrawn
-      return;  // already handled this target (drawn, or an image page we're waiting out)
+      if (liveOverlayOpen())
+        paintLiveOverlay(lock);  // a pass for the bars, or a page owed that the build has not redrawn
+      return;                    // already handled this target (drawn, or an image page we're waiting out)
     }
     // Text-only pages render cleanly without the image decode / secondary-buffer dance that the
     // lock-light build path avoids; an image target waits for the final Normal render but is
@@ -6311,8 +6312,8 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
 
   // Under the live bars the page they cover stays until the build reaches the text: the popup would land on them, and
   // the Layout tab already shows the change.
-  if (liveBarsOpen()) {
-    paintLiveBars(lock);
+  if (liveOverlayOpen()) {
+    paintLiveOverlay(lock);
     return;
   }
 
@@ -6373,8 +6374,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   }
 
   // Under the live bars a pass with no page to draw would draw the page on the panel again: it paints only the bars.
-  if (liveBarsOpen() && !liveBarsPageDue()) {
-    paintLiveBars(lock);
+  if (liveOverlayOpen() && !liveOverlayPageDue()) {
+    paintLiveOverlay(lock);
     return;
   }
 
@@ -7038,7 +7039,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     renderer.drawText(UI_10_FONT_ID, hintX, hintY2, line2.c_str(), true);
   }
   drawBookSearchOverlay(*page, orientedMarginLeft, contentTop);
-  drawLiveBarsOverPage(/*redrawWhenBuilt=*/false);
+  drawLiveOverlayOverPage(/*redrawWhenBuilt=*/false);
   // Everything the capture was meant to see is drawn. The status bar is inside
   // the window on purpose and costs nothing: UI chrome is 1-bit, so it produces
   // no anti-aliased pixels for the capture to record.
@@ -7373,7 +7374,7 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
     renderStatusBar();
     drawBookSearchOverlay(page, layout.marginLeft, contentTop);
     // A page with pictures is drawn again once the build is done, with them; a page of text would come out the same.
-    drawLiveBarsOverPage(/*redrawWhenBuilt=*/page.hasImages());
+    drawLiveOverlayOverPage(/*redrawWhenBuilt=*/page.hasImages());
     if (capLsb) renderer.endGrayCapture();
     buildPageOnScreen_ = {currentSpineIndex, section->currentPage, page.hasImages(), layout.marginLeft, contentTop};
     if (capLsb) buildPageOnScreen_.gray = BuildPageGray::Gray::Shown;
@@ -7752,7 +7753,7 @@ bool EpubReaderActivity::hasPendingBackgroundWork() {
   if (section && section->hasActiveBuild()) return true;
   if (backgroundBuildState_ == BackgroundBuildState::Building) return true;
   // The look-ahead and the glyph store's room wait while the live bars are open (lookAheadMayRun).
-  if (!epub || !section || readerPhase_ != ReaderPhase::READING || backgroundWorkSuspended_ || liveBarsOpen())
+  if (!epub || !section || readerPhase_ != ReaderPhase::READING || backgroundWorkSuspended_ || liveOverlayOpen())
     return false;
   if (sdFontSystem.ttfNeedsIdleRoom()) return true;  // a glyph-store step is due in idle time (room, or use counts)
   // Work that has not started yet but will on its own. Background-B waits out its quiet period
@@ -8106,7 +8107,7 @@ bool EpubReaderActivity::skipLoopDelay() {
 
 bool EpubReaderActivity::shouldSkipPeriodicUpdate() const {
   // The status bar is under the live bars. Loop task, which alone opens and closes them.
-  if (liveBarsOpen()) return true;
+  if (liveOverlayOpen()) return true;
   // Polled once a minute by ActivityManager::loop() on the loop task with no lock held, so it
   // had the same unlocked read of `section` as the hints above (and raced render() on
   // statusRefreshDeferred_). A pass holding the lock means "cannot tell" -- and it is usually a
@@ -9006,7 +9007,7 @@ void EpubReaderActivity::openReaderBars() {
   }
 
   // Drawn by the reader, which keeps running under them. The first pass paints them over the frame on the panel
-  // (paintLiveBars): the page under them stays as it is until a change asks for it again.
+  // (paintLiveOverlay): the page under them stays as it is until a change asks for it again.
   auto bars = makeUniqueNoThrow<ReaderBarsController>(renderer, std::move(info));
   if (!bars) {
     LOG_ERR("ERS", "Reader bars: no memory for them");
@@ -9017,9 +9018,9 @@ void EpubReaderActivity::openReaderBars() {
     RenderLock lock(*this);
     prepareForOverlay("ReaderBars");
     liveBars_ = std::move(bars);
-    liveBarsPageOwed_ = false;
-    liveBarsRedrawWhenBuilt_ = section && section->hasActiveBuild();
-    liveBarsStale_ = true;
+    liveOverlayPageOwed_ = false;
+    liveOverlayRedrawWhenBuilt_ = section && section->hasActiveBuild();
+    liveOverlayStale_ = true;
     noteLiveLayoutBuilt();
   }
   requestUpdate();
@@ -9043,7 +9044,7 @@ void EpubReaderActivity::serviceLiveBars() {
         bool painted = false;
         {
           RenderLock lock(*this);
-          painted = !liveBarsStale_;
+          painted = !liveOverlayStale_;
         }
         if (painted) {
           liveLayoutOwed_ = false;
@@ -9066,7 +9067,7 @@ void EpubReaderActivity::serviceLiveBars() {
         return;
       }
       RenderLock lock(*this);
-      liveBarsStale_ = true;
+      liveOverlayStale_ = true;
     }
       // A change is applied after the bars showing it are painted: the new value is on the panel at once, and the
       // rebuild follows. Presses in between go in as one change.
@@ -9081,9 +9082,9 @@ void EpubReaderActivity::serviceLiveBars() {
 
 void EpubReaderActivity::applyLiveLayout() {
   // No page owed for it here. Every value but the darkness lays the chapter out again, and that pass draws the page
-  // (liveBarsPageDue); the darkness only picks the gray levels, which the black and white page under the bars does not
-  // draw (GfxRenderer's drawMaskFor2BitMode): it shows once they close.
-  // True when the book opens again: this reader is on its way out, the bars with it (onExit).
+  // (liveOverlayPageDue); the darkness only picks the gray levels, which the black and white page under the bars does
+  // not draw (GfxRenderer's drawMaskFor2BitMode): it shows once they close. True when the book opens again: this reader
+  // is on its way out, the bars with it (onExit).
   if (applyReaderLayout(liveBars_->liveLayoutValues(), liveBars_->layoutIsThisBooks())) return;
   liveBars_->resync(effectiveLayoutValues(), globalLayoutValues(), layoutSheetSizes());
 }
@@ -9115,9 +9116,9 @@ void EpubReaderActivity::dismissLiveBars() {
   if (!liveBarsOpen()) return;
   liveBars_->end();
   liveBars_.reset();
-  liveBarsPageOwed_ = false;
-  liveBarsRedrawWhenBuilt_ = false;
-  liveBarsStale_ = false;
+  liveOverlayPageOwed_ = false;
+  liveOverlayRedrawWhenBuilt_ = false;
+  liveOverlayStale_ = false;
   liveLayoutOwed_ = false;
   builtLiveLayouts_ = {};
   builtLiveLayoutsNext_ = 0;
@@ -9146,10 +9147,16 @@ bool EpubReaderActivity::liveLayoutChangeIsBuilt() {
 
 bool EpubReaderActivity::liveBarsOpen() const { return liveBars_ != nullptr; }
 
-bool EpubReaderActivity::takesReaderControls() const { return !liveBarsOpen(); }
+bool EpubReaderActivity::liveOverlayOpen() const { return liveBarsOpen(); }
 
-bool EpubReaderActivity::liveBarsPageDue() const {
-  if (liveBarsPageOwed_) return true;
+void EpubReaderActivity::drawLiveOverlay() {
+  if (liveBarsOpen()) liveBars_->draw();
+}
+
+bool EpubReaderActivity::takesReaderControls() const { return !liveOverlayOpen(); }
+
+bool EpubReaderActivity::liveOverlayPageDue() const {
+  if (liveOverlayPageOwed_) return true;
   switch (classifyRenderPass()) {
     case RenderPass::BuildSection:
       return true;
@@ -9160,7 +9167,7 @@ bool EpubReaderActivity::liveBarsPageDue() const {
              target < static_cast<int>(section->activeBuildPageCount()) && target != buildDisplayedPage_;
     }
     case RenderPass::Normal:
-      return liveBarsRedrawWhenBuilt_;
+      return liveOverlayRedrawWhenBuilt_;
     case RenderPass::FinishedBook:
     case RenderPass::PreRender:
     case RenderPass::BufferDisplay:
@@ -9170,14 +9177,14 @@ bool EpubReaderActivity::liveBarsPageDue() const {
   return false;
 }
 
-void EpubReaderActivity::paintLiveBars(RenderLock& lock) {
+void EpubReaderActivity::paintLiveOverlay(RenderLock& lock) {
   // Nothing new to show: the pass came for the page (the build's end, a picture landing) and found none to draw.
-  if (!liveBarsStale_) return;
-  liveBarsStale_ = false;
+  if (!liveOverlayStale_) return;
+  liveOverlayStale_ = false;
   // The frame on the panel under them: displayBuffer() ends in a swap, so the write buffer is two frames behind. The
   // bars only grow over the page while they are open (a panel closing closes them), so the rest of it is the page.
   renderer.syncWriteBufferFromDisplayed();
-  liveBars_->draw();
+  drawLiveOverlay();
   // Started, then waited for without the lock, as a page is (renderContents): the loop task takes the bars' input and
   // applies the change they show (serviceLiveBars), and the build slices on where it can run through a refresh
   // (stepCurrentSectionBuild). Held through it, the lock kept the loop out for the whole refresh: 0.95 s on the X4 Pro.
@@ -9186,12 +9193,12 @@ void EpubReaderActivity::paintLiveBars(RenderLock& lock) {
   renderer.completeDisplay();
 }
 
-void EpubReaderActivity::drawLiveBarsOverPage(const bool redrawWhenBuilt) {
-  if (!liveBarsOpen()) return;
-  liveBars_->draw();
-  liveBarsStale_ = false;
-  liveBarsPageOwed_ = false;
-  liveBarsRedrawWhenBuilt_ = redrawWhenBuilt;
+void EpubReaderActivity::drawLiveOverlayOverPage(const bool redrawWhenBuilt) {
+  if (!liveOverlayOpen()) return;
+  drawLiveOverlay();
+  liveOverlayStale_ = false;
+  liveOverlayPageOwed_ = false;
+  liveOverlayRedrawWhenBuilt_ = redrawWhenBuilt;
   noteLiveLayoutBuilt();
 }
 
@@ -9814,7 +9821,7 @@ bool EpubReaderActivity::handleForcedRefresh(const HalDisplay::RefreshMode mode)
     preRenderedPlanesStaged_ = false;
     forceRefreshModeNextRender_ = static_cast<int8_t>(mode);
     // Under the live bars too: the page and the bars over it.
-    if (liveBarsOpen()) liveBarsPageOwed_ = true;
+    if (liveOverlayOpen()) liveOverlayPageOwed_ = true;
   }
   requestUpdate();
   return true;
