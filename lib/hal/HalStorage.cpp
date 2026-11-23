@@ -420,7 +420,7 @@ class HalFile::Impl {
   FsFile file;
   // Set for a file of an enciphered cache folder (HalStorage::attachCacheCipher): its bytes on the card start with
   // the cache_cipher header, which every size, position and seek below leaves out.
-  std::unique_ptr<CacheCipher> cipher;
+  std::unique_ptr<cache_cipher::CipherStream> cipher;
 
   // The Impl for what an open returned, taken under the StorageLock. An open file gets one of its
   // own. A failed open gets `failed`, which costs no heap: a missing file or the end of a folder's

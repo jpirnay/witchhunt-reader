@@ -415,7 +415,7 @@ class HalFile : public Print {
   std::vector<DirEntry> entries_;
   size_t next_ = 0;
   std::string dirPath_;
-  std::unique_ptr<CacheCipher> cipher_;
+  std::unique_ptr<cache_cipher::CipherStream> cipher_;
 
   // An enciphered file's header, which sizes, positions and seeks leave out.
   size_t header() const { return cipher_ ? cache_cipher::kHeaderBytes : 0; }

@@ -1,6 +1,8 @@
 add_executable(CacheCipherTest
   CacheCipherTest.cpp
   CacheKeysTest.cpp
+  CacheCipherFileTest.cpp
+  ${REPO_ROOT}/lib/CacheCipher/CacheCipherFile.cpp
   ${REPO_ROOT}/lib/CacheCipher/CacheCipher.cpp
   ${REPO_ROOT}/lib/CacheCipher/CacheKeys.cpp
 )

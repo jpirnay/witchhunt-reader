@@ -25,6 +25,47 @@ bool isMarker(const char* path, const size_t folderLen) {
   return path != nullptr && path[folderLen] == '/' && strcmp(path + folderLen + 1, kMarkerName) == 0;
 }
 
+CipherStream::~CipherStream() { memset(keystream_, 0, sizeof(keystream_)); }
+
+bool CipherStream::apply(uint8_t* buf, const size_t len, const uint64_t offset) {
+  if (buf == nullptr) return false;
+  if (len == 0) return true;
+  // CacheCipher's own limit, checked before any byte changes.
+  if (offset > CacheCipher::kMaxOffset || len - 1 > CacheCipher::kMaxOffset - offset) return false;
+  constexpr size_t kBlock = CacheCipher::kBlockBytes;
+  size_t done = 0;
+  while (done < len) {
+    const uint64_t at = offset + done;
+    const uint64_t block = at / kBlock;
+    const size_t within = static_cast<size_t>(at % kBlock);
+    const size_t left = len - done;
+    bool ok = true;
+    if (within == 0 && left >= kBlock && block != block_) {
+      // Whole blocks not computed yet: one call for all of them.
+      const size_t run = left - left % kBlock;
+      ok = cipher_.apply(buf + done, run, at);
+      done += run;
+    } else {
+      if (block != block_) {
+        memset(keystream_, 0, sizeof(keystream_));
+        ok = cipher_.apply(keystream_, kBlock, block * kBlock);
+        block_ = ok ? block : kNoBlock;
+      }
+      const size_t take = left < kBlock - within ? left : kBlock - within;
+      if (ok) {
+        for (size_t i = 0; i < take; ++i) buf[done + i] ^= keystream_[within + i];
+      }
+      done += take;
+    }
+    if (!ok) {
+      // Only wolfSSL itself can fail here. Part of the buffer may be done already: none of it is handed on.
+      memset(buf, 0, len);
+      return false;
+    }
+  }
+  return true;
+}
+
 void makeMarker(const uint8_t (&salt)[kSaltBytes], uint8_t (&out)[kMarkerBytes]) {
   memcpy(out, kMarkerMagic, sizeof(kMarkerMagic));
   memcpy(out + sizeof(kMarkerMagic), salt, kSaltBytes);
