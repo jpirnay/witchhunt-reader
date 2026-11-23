@@ -33,8 +33,10 @@ constexpr int kMaxTiles = 4;
 
 // The Also reading row, its label line included. It appears only where the card keeps
 // kMinCardHeight beside it.
-constexpr int kStripHeight = 112;
-constexpr int kStripLabelHeight = 22;
+constexpr int kStripHeight = 118;
+// One line of the small face (23 px on the 480 px panels) and the space under it. At 22 the line sat
+// on the covers.
+constexpr int kStripLabelHeight = 28;
 constexpr int kStripBooks = 3;
 constexpr int kMinCardHeight = 360;
 

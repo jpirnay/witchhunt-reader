@@ -37,6 +37,7 @@ constexpr int kIconToLabel = 10;
 constexpr int kEyebrowGap = 6;
 constexpr int kBarHeight = 10;
 constexpr int kStripCoverToText = 8;
+constexpr int kStripLabelToCovers = 4;
 
 // Titles run long, and the card's column has the height for them: four lines of UI 12 bold, then
 // five of UI 10 bold, before any word is cut.
@@ -198,11 +199,12 @@ void LyraTilesTheme::drawRecentBookCover(GfxRenderer& renderer, const Rect rect,
 
   // --- Also reading: the books after the one on the card ---
   if (stripBooks == 0) return;
+  // Set on the covers' top rather than on the row's, so it clears them at any UI font size.
+  const int smallLine = renderer.getLineHeight(SMALL_FONT_ID);
   renderer.drawText(
-      SMALL_FONT_ID, layout.strip.x, layout.strip.y,
+      SMALL_FONT_ID, layout.strip.x, layout.slots[0].y - kStripLabelToCovers - smallLine,
       renderer.truncatedText(SMALL_FONT_ID, tr(STR_ALSO_READING), layout.strip.w, EpdFontFamily::BOLD).c_str(), true,
       EpdFontFamily::BOLD);
-  const int smallLine = renderer.getLineHeight(SMALL_FONT_ID);
   for (int i = 0; i < stripBooks; ++i) {
     const RecentBook& other = recentBooks[i + 1];
     const Box& slot = layout.slots[i];

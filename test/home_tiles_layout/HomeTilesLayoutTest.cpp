@@ -167,3 +167,13 @@ TEST(HomeTilesLayout, SidewaysTheCardAndTheTilesShareTheWidth) {
   // A wide card keeps the cover to its share of the width, and the 6:10 shape with it.
   EXPECT_LE(books.cover.w * 20, (books.card.w - 2 * HomeTilesLayout::kCardPadding) * 9);
 }
+
+// The row's label gets a whole line of the small face (23 px at the Normal UI size) and a gap above
+// the covers, which keep the 54x90 box their thumbnails are made at.
+TEST(HomeTilesLayout, TheAlsoReadingLabelClearsTheCovers) {
+  const auto books = HomeTilesLayout::books(HomeTilesLayout::regions({0, 0, 540, 920}, kTop, 4).books);
+  ASSERT_TRUE(books.hasStrip);
+  EXPECT_GE(books.slots[0].y - books.strip.y, 23 + 4);
+  EXPECT_EQ(books.slotCovers[0].w, 54);
+  EXPECT_EQ(books.slotCovers[0].h, 90);
+}
