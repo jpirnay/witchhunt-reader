@@ -600,7 +600,7 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   const int tileWidth = rect.width - 2 * LyraMetrics::values.contentSidePadding;
   const int tileHeight = rect.height;
   const int tileY = rect.y;
-  const int coverHeight = std::max(120, tileHeight - 2 * hPaddingInSelection);
+  const int coverHeight = stackedCoverHeight(tileHeight);
   const bool hasContinueReading = !recentBooks.empty();
   if (coverWidth == 0) {
     coverWidth = coverHeight * 3 / 5;  // thumbnails are 6:10

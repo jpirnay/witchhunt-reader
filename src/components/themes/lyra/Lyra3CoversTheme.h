@@ -77,4 +77,10 @@ class Lyra3CoversTheme : public LyraTheme {
   void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                            const int selectorIndex, bool& coverRendered, bool& coverBufferStored, bool& bufferRestored,
                            std::function<bool()> storeCoverBuffer) const override;
+
+ protected:
+  StackedHomeRules stackedHomeRules() const override { return {200, 4}; }
+  int stackedCoverHeight(const int tileHeight) const override {
+    return Lyra3CoversMetrics::coverRenderHeight(tileHeight);
+  }
 };

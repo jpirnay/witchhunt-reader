@@ -667,6 +667,43 @@ void BaseTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char
 
 // Draw the "Recent Book" cover card on the home screen
 // TODO: Refactor method to make it cleaner, split into smaller methods
+HomeLayout BaseTheme::homeLayout(const GfxRenderer& /*renderer*/, const Rect content, const int menuCount) const {
+  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
+  const StackedHomeRules rules = stackedHomeRules();
+  int tileHeight = metrics.homeCoverTileHeight;
+  int gap = metrics.verticalSpacing;
+
+  const int menuRequired = menuCount * metrics.menuRowHeight + std::max(0, menuCount - 1) * metrics.menuSpacing;
+  const auto menuHeightLeft = [&] { return content.height - (metrics.homeTopPadding + tileHeight + gap); };
+
+  // The tile keeps its height while the rows fit; the gap gives way first, then the tile.
+  int menuHeight = menuHeightLeft();
+  if (menuHeight < menuRequired) {
+    const int gapReduction = std::min(gap - rules.minGap, menuRequired - menuHeight);
+    if (gapReduction > 0) {
+      gap -= gapReduction;
+      menuHeight = menuHeightLeft();
+    }
+  }
+  if (menuHeight < menuRequired) {
+    const int tileReduction = std::min(tileHeight - rules.minTileHeight, menuRequired - menuHeight);
+    if (tileReduction > 0) {
+      tileHeight -= tileReduction;
+      menuHeight = menuHeightLeft();
+    }
+  }
+
+  HomeLayout layout;
+  layout.books = Rect{content.x, metrics.homeTopPadding, content.width, tileHeight};
+  layout.menu = Rect{content.x, metrics.homeTopPadding + tileHeight + gap, content.width, std::max(0, menuHeight)};
+  layout.coverSnapshot = layout.books;
+  layout.coverHeight = stackedCoverHeight(tileHeight);
+  const auto sizes = getCoverThumbSizes(layout.coverHeight);
+  layout.thumbSizeCount = std::min(static_cast<int>(sizes.size()), HomeLayout::kMaxThumbSizes);
+  std::copy_n(sizes.begin(), layout.thumbSizeCount, layout.thumbSizes);
+  return layout;
+}
+
 void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                     const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
                                     bool& bufferRestored, std::function<bool()> storeCoverBuffer) const {
@@ -679,11 +716,11 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   const int baseHeight = rect.height;  // The tile height the layout settled on, not the metric
 
   // The cover thumbnail's height is part of its filename, and HomeActivity generates the file
-  // from this same rect (getHomeCoverRenderHeight). Asking for BaseMetrics::homeCoverHeight
-  // instead is equivalent only while the tile is never trimmed -- and computeHomeScreenLayout
-  // trims it as soon as the menu needs the room, at which point this side asks the card for a
-  // file the other side never wrote and the cover reads "Loading..." for ever.
-  const int coverThumbHeight = std::max(120, rect.height);
+  // from this same rect (homeLayout() -> stackedCoverHeight()). Asking for BaseMetrics::homeCoverHeight
+  // instead is equivalent only while the tile is never trimmed -- and homeLayout() trims it as soon
+  // as the menu needs the room, at which point this side asks the card for a file the other side
+  // never wrote and the cover reads "Loading..." for ever.
+  const int coverThumbHeight = stackedCoverHeight(rect.height);
 
   int bookWidth, bookX;
   bool hasCoverImage = false;

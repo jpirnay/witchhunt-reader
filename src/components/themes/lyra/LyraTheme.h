@@ -71,6 +71,10 @@ class LyraTheme : public BaseTheme {
   bool showsFileIcons() const override { return true; }
 
  protected:
+  StackedHomeRules stackedHomeRules() const override { return {170, 4}; }
+  // The cover sits inside the selection's 8 px padding, above and below.
+  int stackedCoverHeight(const int tileHeight) const override { return tileHeight - 16 > 120 ? tileHeight - 16 : 120; }
+
   static int getRecentBookProgressPercent(const RecentBook& book);
   static const uint8_t* iconForName(UIIcon icon, int size);
 };

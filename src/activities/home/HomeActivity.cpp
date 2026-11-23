@@ -39,90 +39,8 @@
 #include "activities/reader/ReaderActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/TapTargets.h"
-#include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "fontIds.h"
 #include "util/SerialCommandGrammar.h"
-
-namespace {
-constexpr int CLASSIC_MIN_RECENT_TILE_HEIGHT = 280;
-constexpr int LYRA_MIN_RECENT_TILE_HEIGHT = 170;
-constexpr int LYRA_3_COVERS_MIN_RECENT_TILE_HEIGHT = 200;
-constexpr int CLASSIC_MIN_RECENT_TO_MENU_GAP = 2;
-constexpr int LYRA_MIN_RECENT_TO_MENU_GAP = 4;
-
-struct HomeScreenLayout {
-  int recentTileHeight;
-  int recentToMenuGap;
-  int menuHeight;
-};
-
-bool isLyraFamilyTheme() {
-  const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
-  return theme == CrossPointSettings::UI_THEME::LYRA || theme == CrossPointSettings::UI_THEME::LYRA_3_COVERS;
-}
-
-bool isLyraExtendedTheme() {
-  return static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_3_COVERS;
-}
-
-int getMinRecentTileHeight() {
-  if (isLyraExtendedTheme()) {
-    return LYRA_3_COVERS_MIN_RECENT_TILE_HEIGHT;
-  }
-  if (isLyraFamilyTheme()) {
-    return LYRA_MIN_RECENT_TILE_HEIGHT;
-  }
-  return CLASSIC_MIN_RECENT_TILE_HEIGHT;
-}
-
-int getMinRecentToMenuGap() {
-  return isLyraFamilyTheme() ? LYRA_MIN_RECENT_TO_MENU_GAP : CLASSIC_MIN_RECENT_TO_MENU_GAP;
-}
-
-HomeScreenLayout computeHomeScreenLayout(const ThemeMetrics& metrics, int contentHeight, int menuItemCount) {
-  HomeScreenLayout layout{metrics.homeCoverTileHeight, metrics.verticalSpacing, 0};
-
-  const int menuRequiredHeight =
-      menuItemCount * metrics.menuRowHeight + std::max(0, menuItemCount - 1) * metrics.menuSpacing;
-
-  auto computeMenuHeight = [&]() {
-    return contentHeight - (metrics.homeTopPadding + layout.recentTileHeight + layout.recentToMenuGap);
-  };
-
-  layout.menuHeight = computeMenuHeight();
-  if (layout.menuHeight >= menuRequiredHeight) {
-    return layout;
-  }
-
-  const int gapReduction =
-      std::min(layout.recentToMenuGap - getMinRecentToMenuGap(), menuRequiredHeight - layout.menuHeight);
-  if (gapReduction > 0) {
-    layout.recentToMenuGap -= gapReduction;
-    layout.menuHeight = computeMenuHeight();
-  }
-
-  if (layout.menuHeight >= menuRequiredHeight) {
-    return layout;
-  }
-
-  const int tileReduction =
-      std::min(layout.recentTileHeight - getMinRecentTileHeight(), menuRequiredHeight - layout.menuHeight);
-  if (tileReduction > 0) {
-    layout.recentTileHeight -= tileReduction;
-    layout.menuHeight = computeMenuHeight();
-  }
-
-  layout.menuHeight = std::max(0, layout.menuHeight);
-  return layout;
-}
-
-int getHomeCoverRenderHeight(const HomeScreenLayout& layout) {
-  // Lyra Extended's split between cover and text lives with the theme that draws it: the height
-  // chosen here goes into the thumbnail's filename, so the theme has to ask for the same one.
-  return isLyraExtendedTheme() ? Lyra3CoversMetrics::coverRenderHeight(layout.recentTileHeight)
-                               : std::max(120, layout.recentTileHeight - (isLyraFamilyTheme() ? 16 : 0));
-}
-}  // namespace
 
 // Builds the menu entry list in display order. Single source of truth for both loop() (which
 // dispatches Confirm based on action) and render() (which draws labels/icons).
@@ -207,7 +125,8 @@ void HomeActivity::giveUpCover(RecentBook& book, ThumbResult res, const std::vec
   book.coverBmpPath = "";
 }
 
-void HomeActivity::loadRecentCovers(int coverHeight) {
+void HomeActivity::loadRecentCovers(const int coverHeight, const std::pair<int, int>* thumbSizes,
+                                    const int thumbSizeCount) {
   recentsLoading = true;
 
   // Cold-cache cover loading runs the JPEG/PNG decoders, the sliced ZIP inflate and
@@ -276,16 +195,14 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
     return;
   }
 
-  const auto thumbSizes = GUI.getCoverThumbSizes(coverHeight);
-
   // Build the placeholder slots for a book on give-up. Multi-size themes placeholder every
   // WxH thumb; the single-height path placeholders its one thumb_<h>.bmp (width = h*0.6, matching
   // the decode). Each slot's path is exactly what the loader's isCoverThumbComplete() checks.
   const auto slotsForBook = [&](const std::string& placeholder) {
     std::vector<ThumbSlot> slots;
-    if (!thumbSizes.empty()) {
-      slots.reserve(thumbSizes.size());
-      std::transform(thumbSizes.begin(), thumbSizes.end(), std::back_inserter(slots), [&](const auto& sz) {
+    if (thumbSizeCount > 0) {
+      slots.reserve(thumbSizeCount);
+      std::transform(thumbSizes, thumbSizes + thumbSizeCount, std::back_inserter(slots), [&](const auto& sz) {
         return ThumbSlot{UITheme::getCoverThumbPath(placeholder, sz.first, sz.second), sz.first, sz.second};
       });
     } else {
@@ -325,10 +242,10 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
   // The pass's thumbnails: the carousel's two boxes, cropped, or the single-height form the other
   // themes draw. Set once per height, not per call: configure() abandons the book in hand.
   if (coverLoaderHeight_ != coverHeight) {
-    if (thumbSizes.empty()) {
+    if (thumbSizeCount == 0) {
       coverLoader.configureSingleHeight(coverHeight);
     } else {
-      coverLoader.configure(thumbSizes.data(), static_cast<int>(thumbSizes.size()), /*crop=*/true);
+      coverLoader.configure(thumbSizes, thumbSizeCount, /*crop=*/true);
     }
     coverLoaderHeight_ = coverHeight;
   }
@@ -639,7 +556,9 @@ void HomeActivity::loop() {
 
   if (isCarousel) {
     if (firstRenderDone && !recentsLoaded && !recentsLoading && !inputWaiting) {
-      loadRecentCovers(UITheme::getInstance().getMetrics().homeCoverHeight);
+      const int coverHeight = UITheme::getInstance().getMetrics().homeCoverHeight;
+      const auto sizes = GUI.getCoverThumbSizes(coverHeight);
+      loadRecentCovers(coverHeight, sizes.data(), static_cast<int>(sizes.size()));
       return;
     }
 
@@ -708,11 +627,9 @@ void HomeActivity::loop() {
     const int totalItems = static_cast<int>(recentBooks.size() + menuEntries.size());
 
     if (firstRenderDone && !recentsLoaded && !recentsLoading && !inputWaiting) {
-      const auto& metrics = UITheme::getInstance().getMetrics();
-      const Rect contentRect = UITheme::getContentRect(renderer, true, false);
-      const HomeScreenLayout layout =
-          computeHomeScreenLayout(metrics, contentRect.height, static_cast<int>(menuEntries.size()));
-      loadRecentCovers(getHomeCoverRenderHeight(layout));
+      const HomeLayout layout = GUI.homeLayout(renderer, UITheme::getContentRect(renderer, true, false),
+                                               static_cast<int>(menuEntries.size()));
+      loadRecentCovers(layout.coverHeight, layout.thumbSizes, layout.thumbSizeCount);
       return;
     }
 
@@ -793,27 +710,22 @@ void HomeActivity::render(RenderLock&&) {
     selectorIndex = std::max(0, totalItems - 1);
   }
 
-  const HomeScreenLayout layout = computeHomeScreenLayout(metrics, contentRect.height, menuCount);
+  const HomeLayout layout = GUI.homeLayout(renderer, contentRect, menuCount);
 
-  coverRectX = contentRect.x;
-  coverRectY = metrics.homeTopPadding;
-  coverRectW = contentRect.width;
-  coverRectH = layout.recentTileHeight;
+  coverRectX = layout.coverSnapshot.x;
+  coverRectY = layout.coverSnapshot.y;
+  coverRectW = layout.coverSnapshot.width;
+  coverRectH = layout.coverSnapshot.height;
 
   // The carousel stores nothing: this draw is its fallback for a render its frame cache could not serve, and every
   // carousel render is either served by that cache or clears coverRendered (above) before it could restore, so the
   // copy was never read. It was a malloc of the tile region with no heap floor, which the X3 logged as "OOM: cover
   // buffer (20592 bytes)".
-  GUI.drawRecentBookCover(renderer,
-                          Rect{contentRect.x, metrics.homeTopPadding, contentRect.width, layout.recentTileHeight},
-                          recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
-                          [this, isCarousel] { return !isCarousel && storeCoverBuffer(); });
+  GUI.drawRecentBookCover(renderer, layout.books, recentBooks, selectorIndex, coverRendered, coverBufferStored,
+                          bufferRestored, [this, isCarousel] { return !isCarousel && storeCoverBuffer(); });
 
   GUI.drawButtonMenu(
-      renderer,
-      Rect{contentRect.x, metrics.homeTopPadding + layout.recentTileHeight + layout.recentToMenuGap, contentRect.width,
-           layout.menuHeight},
-      menuCount, selectorIndex - static_cast<int>(recentBooks.size()),
+      renderer, layout.menu, menuCount, selectorIndex - static_cast<int>(recentBooks.size()),
       [this](int index) { return std::string(I18N.get(menuEntries[index].label)); },
       [this](int index) { return menuEntries[index].icon; });
 

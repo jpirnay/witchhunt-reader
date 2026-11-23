@@ -104,7 +104,9 @@ class HomeActivity final : public Activity {
   void freeCoverBuffer();
   void restoreSecondaryBuffer(bool callerHoldsRenderLock = false);
   void loadRecentBooks(int maxBooks);
-  void loadRecentCovers(int coverHeight);
+  // The cover pass for the books Home shows. `thumbSizes` are the theme's exact boxes (HomeLayout);
+  // with none, every cover is made at `coverHeight` on the single-height path.
+  void loadRecentCovers(int coverHeight, const std::pair<int, int>* thumbSizes, int thumbSizeCount);
   // One thumbnail slot to placeholder on a permanent give-up: the exact on-disk path the cover
   // loader checks, plus the (w,h) the placeholder BMP should be written at.
   struct ThumbSlot {

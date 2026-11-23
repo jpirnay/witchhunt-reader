@@ -122,6 +122,21 @@ enum UIIcon { Folder, Text, Image, Book, File, Recent, Settings, Transfer, Libra
 
 enum class HomeNavigation { Linear, Carousel };
 
+// Where the home screen's parts go, as the theme lays them out. HomeActivity asks once when it
+// draws and once when it loads covers, and both must get the same answer: the cover height and
+// the thumbnail boxes name the files the cover pass writes and the draw reads.
+struct HomeLayout {
+  static constexpr int kMaxThumbSizes = 2;
+
+  Rect books;           // drawRecentBookCover() draws the recent books here
+  Rect menu;            // drawButtonMenu() draws the entries here
+  Rect coverSnapshot;   // the part of `books` Home copies once its covers are drawn, and restores after
+  int coverHeight = 0;  // the thumbnail height on the single-height path (thumbSizeCount == 0)
+  // Exact thumbnail boxes, cropped to fit, for a theme that draws covers at fixed sizes.
+  int thumbSizeCount = 0;
+  std::pair<int, int> thumbSizes[kMaxThumbSizes]{};
+};
+
 // Default theme implementation (Classic Theme)
 // Additional themes can inherit from this and override methods as needed
 
@@ -230,6 +245,11 @@ class BaseTheme {
   // Return Carousel to opt in to left/right book navigation and tryFastHomeRender().
   virtual HomeNavigation getHomeNavigation() const { return HomeNavigation::Linear; }
 
+  // Where the recent books and the menu go inside `content` (HomeLayout). The default stacks the
+  // recent-book tile over the menu rows: it keeps the theme's tile height while the rows fit, and
+  // otherwise gives up the gap, then tile height down to stackedHomeRules().minTileHeight.
+  virtual HomeLayout homeLayout(const GfxRenderer& renderer, Rect content, int menuCount) const;
+
   // Return the cover thumbnail sizes this theme needs for its home screen.
   // HomeActivity calls generateThumbBmp() for each pair. Empty = use height-only path.
   virtual std::vector<std::pair<int, int>> getCoverThumbSizes(int coverHeight) const { return {}; }
@@ -281,6 +301,16 @@ class BaseTheme {
   static int statusBarBatteryWidth(const GfxRenderer& renderer, const ThemeMetrics& metrics, bool showPercentage);
 
  protected:
+  // The floors the default homeLayout() shrinks to before the menu rows lose height.
+  struct StackedHomeRules {
+    int minTileHeight;
+    int minGap;
+  };
+  virtual StackedHomeRules stackedHomeRules() const { return {280, 2}; }
+  // The cover thumbnail height for a stacked tile this tall. It goes into the thumbnail's
+  // filename, so the theme that draws the cover and the cover pass must agree on it.
+  virtual int stackedCoverHeight(const int tileHeight) const { return tileHeight > 120 ? tileHeight : 120; }
+
   // Up/down triangles marking that the list continues past the visible rows. Used by themes
   // without a scroll bar.
   static void drawListOverflowArrows(const GfxRenderer& renderer, Rect rect);

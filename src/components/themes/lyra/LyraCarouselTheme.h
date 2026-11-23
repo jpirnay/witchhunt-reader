@@ -86,6 +86,11 @@ class LyraCarouselTheme : public LyraTheme {
                 bool highlightValue) const override;
 
  protected:
+  // Classic's floors, not Lyra's: the carousel was always laid out by them, and only its fallback
+  // draw reads the result (its covers and icon row sit at fixed places).
+  StackedHomeRules stackedHomeRules() const override { return BaseTheme::stackedHomeRules(); }
+  int stackedCoverHeight(const int tileHeight) const override { return BaseTheme::stackedCoverHeight(tileHeight); }
+
   // Same geometry as Lyra, but the carousel's selected row is a solid black bar with the text and
   // icon knocked out of it.
 
