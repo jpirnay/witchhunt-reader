@@ -234,7 +234,9 @@ void SerialTransferDevice::fileEnd(bool keep) {
 }
 
 bool SerialTransferDevice::fileReadBegin(const std::string& path, uint32_t& outSize) {
-  if (!Storage.openFileForRead("SerialTransfer", path, downloadFile_)) {
+  // The card's bytes: a protected book's cache files leave enciphered, as they are on the card (HalStorage::openRaw).
+  downloadFile_ = Storage.openRaw(path.c_str());
+  if (!downloadFile_ || downloadFile_.isDirectory()) {
     emitStatus("Download failed (open): %s", baseName(path).c_str());
     return false;
   }
