@@ -140,6 +140,27 @@ class Resolver {
   std::unique_ptr<State> state_;
 };
 
+// The most a popup note holds (captureNote): its text and the tags kept with it. A note longer than this is cut, with
+// "..." where it stops; the reader's "Go to note" shows the rest where it stands in the book.
+constexpr size_t MAX_NOTE_MARKUP_BYTES = 4096;
+
+// The note a link points at, for the reader's footnote sheet: read from its document now, not from the preview store,
+// so it works whether inline previews are on or not and is not cut at MAX_TEXT_BYTES. `href` is a link in spine item
+// `fromSpineIndex` ("#n3", "notes.xhtml#n3"). The same capture as a preview's (the same note found, the same chrome
+// skipped), but as a small XHTML fragment: paragraphs, line breaks, lists and inline emphasis keep their tags, every
+// other element gives only its text.
+//
+// Reads the target document only as far as the note's end: the inflated copy a build left on the card when there is
+// one, the archive otherwise. Costs a SAX parser (~9 KB), MAX_NOTE_MARKUP_BYTES and a 1 KB chunk while it runs, plus an
+// inflate ring of up to 32 KB and its read buffer on the archive path, taken from `arena` when it has the room (a C3's
+// reading heap rarely has 32 KB in one block: the caller lends the secondary framebuffer); every allocation is checked,
+// and none is held after it returns. Under RenderLock: resolving a cross-file href reads book.bin through a handle the
+// status bar shares.
+//
+// False when the href leads nowhere, no note text stands at its target (a link back to a caller, an empty anchor with
+// a link after it), or memory ran out; outMarkup is then empty.
+bool captureNote(Epub& epub, int fromSpineIndex, const char* href, std::string& outMarkup, BuildArena* arena = nullptr);
+
 // Disk-backed lookup used during a section build. Holds NOTHING but an open read handle: the
 // sorted index is binary-searched in the file itself, and the text is read on a hit.
 class Lookup {

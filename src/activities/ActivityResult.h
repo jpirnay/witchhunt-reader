@@ -91,8 +91,11 @@ struct NetworkModeResult {
   NetworkMode mode;
 };
 
+// A link of the page the footnote list picked: its index among the page's links (-1 for none) and its href, to be
+// followed or opened as a note.
 struct FootnoteResult {
   std::string href;
+  int16_t link = -1;
 };
 
 struct FilePathResult {
