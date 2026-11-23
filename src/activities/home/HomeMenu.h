@@ -47,6 +47,10 @@ enum class HomeMenuPlacement : uint8_t { Home, More };
 void collectHomeMenuEntries(HomeMenuPlacement placement, const HomeMenuAvailability& availability,
                             std::vector<HomeMenuEntry>& out, int homeCapacity = std::numeric_limits<int>::max());
 
+// How many entries at the end of `entries` are More and Settings, the two that are not destinations
+// (Settings is always last, with More directly above it when present).
+[[nodiscard]] int homeMenuTrailingCount(const std::vector<HomeMenuEntry>& entries);
+
 // The Library entry's setting for a settings file written before it existed, when Browse Files and
 // Recent Books had an entry each: shown on the home screen if either was.
 [[nodiscard]] uint8_t libraryOnHomeFromLegacy(uint8_t browseFiles, uint8_t recentBooks);

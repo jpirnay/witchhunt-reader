@@ -92,6 +92,9 @@ class HomeActivity final : public Activity {
   // then the menu. All of them except on a theme that keeps more books than it shows, to cycle
   // through (HomeLayout::bookSlots). Set in onEnter() before the first render, read by both tasks.
   int shownBooks_ = 0;
+  // How many of menuEntries, at the end, are More and Settings (homeMenuTrailingCount). Set with the
+  // entries, in onEnter().
+  int menuTrailing_ = 0;
 
   std::string focusBookPath;
   int focusSelectorIndex = -1;
@@ -106,6 +109,9 @@ class HomeActivity final : public Activity {
   void dispatchMenuAction(HomeMenuAction action);
 
   void rebuildMenuEntries();
+  // The theme's layout of this screen for the current entries. One call for the draw and the cover
+  // pass, so the cover height that names the thumbnails is the same on both sides.
+  HomeLayout homeLayout() const;
   bool keepRegionAsFrameCache();
   bool storeCoverBuffer();
   bool restoreCoverBuffer();

@@ -214,6 +214,14 @@ class BaseTheme {
   virtual void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                               const std::function<std::string(int index)>& buttonLabel,
                               const std::function<UIIcon(int index)>& rowIcon) const;
+  // Home's menu, in HomeLayout::menu. The last `trailingCount` entries are More and Settings, which
+  // a theme may set apart from the destinations; the default draws every entry alike.
+  virtual void drawHomeMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int trailingCount, int selectedIndex,
+                            const std::function<std::string(int index)>& buttonLabel,
+                            const std::function<UIIcon(int index)>& rowIcon) const {
+    (void)trailingCount;
+    drawButtonMenu(renderer, rect, buttonCount, selectedIndex, buttonLabel, rowIcon);
+  }
   // Draws a centered message box and ships it. By default the box is overlaid on the frame that is
   // currently on screen: displayBuffer() ends in a buffer swap, so the write buffer holds the frame
   // from two refreshes ago, and a bare overlay would diff stale content around the box (ghosting).
@@ -249,10 +257,12 @@ class BaseTheme {
   // Return Carousel to opt in to left/right book navigation and tryFastHomeRender().
   virtual HomeNavigation getHomeNavigation() const { return HomeNavigation::Linear; }
 
-  // Where the recent books and the menu go inside `content` (HomeLayout). The default stacks the
-  // recent-book tile over the menu rows: it keeps the theme's tile height while the rows fit, and
-  // otherwise gives up the gap, then tile height down to stackedHomeRules().minTileHeight.
-  virtual HomeLayout homeLayout(const GfxRenderer& renderer, Rect content, int menuCount) const;
+  // Where the recent books and the menu go inside `content` (HomeLayout). `menuTrailing` of the
+  // `menuCount` entries are More and Settings, at the end of the list (homeMenuTrailingCount). The
+  // default stacks the recent-book tile over the menu rows: it keeps the theme's tile height while
+  // the rows fit, and otherwise gives up the gap, then tile height down to
+  // stackedHomeRules().minTileHeight.
+  virtual HomeLayout homeLayout(const GfxRenderer& renderer, Rect content, int menuCount, int menuTrailing) const;
 
   // How many entries besides Settings fit on Home; the rest go behind More (collectHomeMenuEntries).
   // A theme whose menu grows or scrolls with the list has no limit.

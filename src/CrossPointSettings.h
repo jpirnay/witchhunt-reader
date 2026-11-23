@@ -317,7 +317,7 @@ class CrossPointSettings {
   enum HIDE_BATTERY_PERCENTAGE { HIDE_NEVER = 0, HIDE_READER = 1, HIDE_ALWAYS = 2, HIDE_BATTERY_PERCENTAGE_COUNT };
 
   // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, LYRA_CAROUSEL = 3 };
+  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, LYRA_CAROUSEL = 3, LYRA_TILES = 4 };
 
   // Size of the menu/chrome text. Each step rebinds the three logical UI font IDs one rung up
   // the device's UI font ladder (applyUiFontScale() in main.cpp) and adds the matching pixels to

@@ -665,9 +665,8 @@ void BaseTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char
   }
 }
 
-// Draw the "Recent Book" cover card on the home screen
-// TODO: Refactor method to make it cleaner, split into smaller methods
-HomeLayout BaseTheme::homeLayout(const GfxRenderer& /*renderer*/, const Rect content, const int menuCount) const {
+HomeLayout BaseTheme::homeLayout(const GfxRenderer& /*renderer*/, const Rect content, const int menuCount,
+                                 int /*menuTrailing*/) const {
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
   const StackedHomeRules rules = stackedHomeRules();
   int tileHeight = metrics.homeCoverTileHeight;
@@ -704,6 +703,8 @@ HomeLayout BaseTheme::homeLayout(const GfxRenderer& /*renderer*/, const Rect con
   return layout;
 }
 
+// Draw the "Recent Book" cover card on the home screen
+// TODO: Refactor method to make it cleaner, split into smaller methods
 void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                     const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
                                     bool& bufferRestored, std::function<bool()> storeCoverBuffer) const {

@@ -159,6 +159,19 @@ TEST_F(HomeMenuTest, SettingsStaysWithNoRoomAtAll) {
             (std::vector<A>{A::Library, A::ReadingStats, A::GlobalBookmarks, A::FileTransfer, A::Weather}));
 }
 
+// The tiles theme sets More and Settings apart from the destinations by counting them off the end.
+TEST_F(HomeMenuTest, TheTrailingEntriesAreMoreAndSettings) {
+  std::vector<HomeMenuEntry> entries;
+  collectHomeMenuEntries(HomeMenuPlacement::Home, everything, entries);
+  EXPECT_EQ(homeMenuTrailingCount(entries), 1);  // Settings
+
+  entries.clear();
+  collectHomeMenuEntries(HomeMenuPlacement::Home, everything, entries, 4);
+  EXPECT_EQ(homeMenuTrailingCount(entries), 2);  // More, Settings
+
+  EXPECT_EQ(homeMenuTrailingCount({}), 0);
+}
+
 // Browse Files and Recent Books had a home entry each; the Library is shown where either was.
 TEST(HomeMenuMigration, LibraryShownWhereEitherOldEntryWas) {
   EXPECT_EQ(libraryOnHomeFromLegacy(1, 1), 1);

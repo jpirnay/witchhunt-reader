@@ -49,6 +49,12 @@ void HomeActivity::rebuildMenuEntries() {
   menuEntries.reserve(6);  // all six shown, or five plus More
   const HomeMenuAvailability availability{.hasBookmarks = GLOBAL_BOOKMARKS.hasAny()};
   collectHomeMenuEntries(HomeMenuPlacement::Home, availability, menuEntries, GUI.homeMenuCapacity());
+  menuTrailing_ = homeMenuTrailingCount(menuEntries);
+}
+
+HomeLayout HomeActivity::homeLayout() const {
+  return GUI.homeLayout(renderer, UITheme::getContentRect(renderer, true, false), static_cast<int>(menuEntries.size()),
+                        menuTrailing_);
 }
 
 void HomeActivity::loadRecentBooks(int maxBooks) {
@@ -462,10 +468,7 @@ void HomeActivity::onEnter() {
   // each clearing and then appending, and Home showed every entry twice. The rebuild also reads the
   // bookmark index off the card.
   rebuildMenuEntries();
-  shownBooks_ = std::min(
-      static_cast<int>(recentBooks.size()),
-      GUI.homeLayout(renderer, UITheme::getContentRect(renderer, true, false), static_cast<int>(menuEntries.size()))
-          .bookSlots);
+  shownBooks_ = std::min(static_cast<int>(recentBooks.size()), homeLayout().bookSlots);
 
   // Apply focus: book path takes priority, else combined selector index (covers
   // "return to the menu entry I was on").
@@ -655,8 +658,7 @@ void HomeActivity::loop() {
     }
 
     if (firstRenderDone && !recentsLoaded && !recentsLoading && !inputWaiting) {
-      const HomeLayout layout = GUI.homeLayout(renderer, UITheme::getContentRect(renderer, true, false),
-                                               static_cast<int>(menuEntries.size()));
+      const HomeLayout layout = homeLayout();
       loadRecentCovers(layout.coverHeight, layout.thumbSizes, layout.thumbSizeCount);
       return;
     }
@@ -738,7 +740,7 @@ void HomeActivity::render(RenderLock&&) {
     selectorIndex = std::max(0, totalItems - 1);
   }
 
-  const HomeLayout layout = GUI.homeLayout(renderer, contentRect, menuCount);
+  const HomeLayout layout = homeLayout();
 
   coverRectX = layout.coverSnapshot.x;
   coverRectY = layout.coverSnapshot.y;
@@ -752,8 +754,8 @@ void HomeActivity::render(RenderLock&&) {
   GUI.drawRecentBookCover(renderer, layout.books, recentBooks, selectorIndex, coverRendered, coverBufferStored,
                           bufferRestored, [this, isCarousel] { return !isCarousel && storeCoverBuffer(); });
 
-  GUI.drawButtonMenu(
-      renderer, layout.menu, menuCount, selectorIndex - shownBooks_,
+  GUI.drawHomeMenu(
+      renderer, layout.menu, menuCount, menuTrailing_, selectorIndex - shownBooks_,
       [this](int index) { return std::string(I18N.get(menuEntries[index].label)); },
       [this](int index) { return menuEntries[index].icon; });
 

@@ -96,6 +96,15 @@ void collectHomeMenuEntries(const HomeMenuPlacement placement, const HomeMenuAva
   }
 }
 
+int homeMenuTrailingCount(const std::vector<HomeMenuEntry>& entries) {
+  int trailing = 0;
+  for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+    if (it->action != HomeMenuAction::More && it->action != HomeMenuAction::Settings) break;
+    ++trailing;
+  }
+  return trailing;
+}
+
 uint8_t libraryOnHomeFromLegacy(const uint8_t browseFiles, const uint8_t recentBooks) {
   return browseFiles != 0 || recentBooks != 0 ? 1 : 0;
 }

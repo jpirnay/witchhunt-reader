@@ -18,6 +18,7 @@
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
+#include "components/themes/lyra/LyraTilesTheme.h"
 
 namespace {
 constexpr int SKIP_PAGE_MS = 700;
@@ -88,6 +89,11 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       LOG_DBG("UI", "Using Lyra Carousel theme");
       currentTheme = std::make_unique<LyraCarouselTheme>();
       currentMetrics = LyraCarouselMetrics::values;
+      break;
+    case CrossPointSettings::UI_THEME::LYRA_TILES:
+      LOG_DBG("UI", "Using Lyra Tiles theme");
+      currentTheme = std::make_unique<LyraTilesTheme>();
+      currentMetrics = LyraTilesMetrics::values;
       break;
     default:
       LOG_ERR("UI", "Unknown theme %d, falling back to Classic", static_cast<int>(type));
