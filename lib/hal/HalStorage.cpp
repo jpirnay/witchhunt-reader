@@ -547,9 +547,13 @@ void HalStorage::attachCacheCipher(HalFile& file, const char* path, const bool m
   }
   memset(key, 0, sizeof(key));
   if (state == cache_cipher::FolderState::Plain || attached != cache_cipher::Attach::Refused) return;
-  LOG_ERR("SD", "%s: not readable as an enciphered cache file, the open fails", path);
+  // Not one of the folder's own files (no header: copied in, damaged, or an older layout): damaged cache, removed so
+  // that whatever wanted it makes it again, as for a missing file. Closed first: SdFat must not remove an open file.
+  LOG_ERR("SD", "%s: not an enciphered cache file, removed", path);
   file.impl->file.close();
   file = HalFile(&HalFile::Impl::failed);
+  noteContentChange(path);
+  SDCard.remove(path);
 }
 
 bool HalStorage::markCacheFolderEnciphered(const char* folder) {

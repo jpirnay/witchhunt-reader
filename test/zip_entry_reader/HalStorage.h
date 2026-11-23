@@ -614,7 +614,9 @@ class HalStorage {
       case cache_cipher::FolderState::Plain:
         return true;
       case cache_cipher::FolderState::Enciphered:
-        return f.attachCacheCipher(mayWrite, key);
+        if (f.attachCacheCipher(mayWrite, key)) return true;
+        remove(path);  // HalStorage::attachCacheCipher: damaged cache, closed and removed
+        return false;
       case cache_cipher::FolderState::Unreadable:
         break;
     }

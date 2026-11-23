@@ -455,13 +455,16 @@ TEST_F(CacheCipherStorageTest, AFolderWithoutItsKeyOpensNothing) {
   file.close();
 }
 
-// A file in a marked folder that the cipher did not write (copied in from a computer, left by an older firmware) is
-// refused, never read as the book's.
-TEST_F(CacheCipherStorageTest, AFileWithoutAHeaderIsRefused) {
+// A file in a marked folder that the cipher did not write (copied in from a computer, damaged, an older layout) is
+// never read as the book's: it is damaged cache, removed, and made again like a missing one.
+TEST_F(CacheCipherStorageTest, AFileWithoutAHeaderIsRemovedAndMadeAgain) {
   put(kFile, kText);
   HalFile file;
   EXPECT_FALSE(Storage.openFileForRead("TEST", kFile, file));
   file.close();
+  EXPECT_EQ(contents(kFile), "<none>");
+  write(kFile, kText);
+  EXPECT_EQ(read(kFile), kText);
 }
 
 // A folder without the marker, and any other folder, are not touched.
