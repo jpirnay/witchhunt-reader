@@ -5,6 +5,11 @@
 #include "components/themes/ListTouchBand.h"
 #include "components/themes/TapTargets.h"
 
+Activity::Activity(std::string name, GfxRenderer& renderer, MappedInputManager& mappedInput)
+    : name(std::move(name)), renderer(renderer), mappedInput(mappedInput), buttonEvents(globalButtonEvents()) {}
+
+Activity::~Activity() = default;
+
 // The recorded button-hint strip, list rows and tap targets belong to the screen that painted
 // them. Drop them all on every transition, in both directions: a screen that draws no hints would otherwise
 // inherit the previous one's boxes and turn taps near the bottom edge into phantom button

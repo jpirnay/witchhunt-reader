@@ -37,9 +37,11 @@ class Activity {
  public:
   enum class ListPageDirection : uint8_t { Back, Forward };
 
-  explicit Activity(std::string name, GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : name(std::move(name)), renderer(renderer), mappedInput(mappedInput), buttonEvents(globalButtonEvents()) {}
-  virtual ~Activity() = default;
+  // Out of line, with the destructor: every activity's constructor and destructor would otherwise carry the member
+  // set-up and tear-down below inline (a name, a result handler, a result variant), twice over, as the complete- and
+  // base-object variants.
+  explicit Activity(std::string name, GfxRenderer& renderer, MappedInputManager& mappedInput);
+  virtual ~Activity();
   const std::string& getName() const { return name; }
   virtual void onEnter();
   virtual void onExit();
