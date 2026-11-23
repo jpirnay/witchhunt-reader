@@ -8167,6 +8167,13 @@ constexpr int kLinkTargetMin = 30;
 }  // namespace
 
 void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marginLeft, const int contentTop) const {
+#if !CP_TOUCH_UI
+  // Without a digitiser the recorder is a stub that keeps nothing: walking the page for it cost a page walk a render
+  // and the code to do it. The walk itself stays, for the footnote popup's placement.
+  (void)page;
+  (void)marginLeft;
+  (void)contentTop;
+#else
   TapTargets::Recorder::Builder targets;
   if (currentPageFootnotes.empty()) {
     TapTargets::readerLinks().record(targets);
@@ -8200,6 +8207,7 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
       },
       &publish);
   TapTargets::readerLinks().record(targets);
+#endif  // CP_TOUCH_UI
 }
 
 void EpubReaderActivity::visitPageLinkBoxes(const Page& page, const int marginLeft, const int contentTop,
