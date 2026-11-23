@@ -42,6 +42,13 @@ bool overlap(const Box& a, const Box& b) {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
 
+// The books' part of Home as the theme lays it out: the card, and the Also reading row where the
+// panel has room for it beside a full grid.
+HomeTilesLayout::Books booksFor(const Box& content, const int tiles) {
+  return HomeTilesLayout::books(HomeTilesLayout::regions(content, kTop, tiles).books,
+                                HomeTilesLayout::stripFits(content, kTop));
+}
+
 std::string describe(const Box& b) {
   return "{" + std::to_string(b.x) + "," + std::to_string(b.y) + " " + std::to_string(b.w) + "x" + std::to_string(b.h) +
          "}";
@@ -56,7 +63,7 @@ TEST(HomeTilesLayout, EveryPartIsOnScreenApartAndBigEnoughToHit) {
         SCOPED_TRACE(std::string(panel.name) + ", " + std::to_string(tiles) + " tiles, " + std::to_string(bottom) +
                      " in the bottom row");
         const auto regions = HomeTilesLayout::regions(panel.content, kTop, tiles);
-        const auto books = HomeTilesLayout::books(regions.books);
+        const auto books = booksFor(panel.content, tiles);
         const auto menu = HomeTilesLayout::menu(regions.menu, tiles, bottom);
         const Box screen{panel.content.x, kTop, panel.content.w, panel.content.h - kTop};
 
@@ -88,7 +95,7 @@ TEST(HomeTilesLayout, TheCardHoldsItsCoverTextAndFootApart) {
   for (const Panel& panel : kPanels) {
     for (int tiles = 0; tiles <= HomeTilesLayout::kMaxTiles; ++tiles) {
       SCOPED_TRACE(std::string(panel.name) + ", " + std::to_string(tiles) + " tiles");
-      const auto books = HomeTilesLayout::books(HomeTilesLayout::regions(panel.content, kTop, tiles).books);
+      const auto books = booksFor(panel.content, tiles);
       EXPECT_TRUE(inside(books.cover, books.card)) << describe(books.cover);
       EXPECT_TRUE(inside(books.text, books.card)) << describe(books.text);
       EXPECT_TRUE(inside(books.foot, books.card)) << describe(books.foot);
@@ -107,7 +114,7 @@ TEST(HomeTilesLayout, TheCardHoldsItsCoverTextAndFootApart) {
 // two rows of 218x122 tiles, and no room for the Also reading row.
 TEST(HomeTilesLayout, X4UprightWithFourTiles) {
   const auto regions = HomeTilesLayout::regions({0, 0, 480, 760}, kTop, 4);
-  const auto books = HomeTilesLayout::books(regions.books);
+  const auto books = booksFor({0, 0, 480, 760}, 4);
   const auto menu = HomeTilesLayout::menu(regions.menu, 4, 2);
   EXPECT_FALSE(books.hasStrip);
   EXPECT_EQ(books.card.h, 372);
@@ -120,15 +127,20 @@ TEST(HomeTilesLayout, X4UprightWithFourTiles) {
   EXPECT_EQ(menu.bottom[1].y + menu.bottom[1].h, 760 - HomeTilesLayout::kBottomPadding);
 }
 
-// The room is a matter of height: the tall T5S3 has it with four tiles, the X4 once two tiles
-// share a single row.
-TEST(HomeTilesLayout, AlsoReadingAppearsOnlyWhereTheCardCanSpareIt) {
-  EXPECT_TRUE(HomeTilesLayout::books(HomeTilesLayout::regions({0, 0, 540, 920}, kTop, 4).books).hasStrip);
-  EXPECT_FALSE(HomeTilesLayout::books(HomeTilesLayout::regions({0, 0, 480, 760}, kTop, 3).books).hasStrip);
-  EXPECT_TRUE(HomeTilesLayout::books(HomeTilesLayout::regions({0, 0, 480, 760}, kTop, 2).books).hasStrip);
+// The row is the panel's: it needs room beside two full rows of tiles and the bottom row, so the
+// tall T5S3 has it and the X4 and X3 do not, whatever the number of entries. Fewer tiles give the
+// card the room instead.
+TEST(HomeTilesLayout, AlsoReadingAppearsOnlyBesideAFullGrid) {
+  for (int tiles = 0; tiles <= HomeTilesLayout::kMaxTiles; ++tiles) {
+    SCOPED_TRACE(std::to_string(tiles) + " tiles");
+    EXPECT_TRUE(booksFor({0, 0, 540, 920}, tiles).hasStrip);
+    EXPECT_FALSE(booksFor({0, 0, 480, 760}, tiles).hasStrip);
+    EXPECT_FALSE(booksFor({0, 0, 528, 752}, tiles).hasStrip);
+  }
+  EXPECT_GT(booksFor({0, 0, 480, 760}, 2).card.h, booksFor({0, 0, 480, 760}, 4).card.h);
   for (const Panel& panel : kPanels) {
     for (int tiles = 0; tiles <= HomeTilesLayout::kMaxTiles; ++tiles) {
-      const auto books = HomeTilesLayout::books(HomeTilesLayout::regions(panel.content, kTop, tiles).books);
+      const auto books = booksFor(panel.content, tiles);
       if (books.hasStrip) {
         EXPECT_GE(books.card.h, HomeTilesLayout::kMinCardHeight) << panel.name;
       }
@@ -163,7 +175,7 @@ TEST(HomeTilesLayout, SidewaysTheCardAndTheTilesShareTheWidth) {
   EXPECT_LT(regions.books.x + regions.books.w, regions.menu.x);
   EXPECT_EQ(regions.books.y, regions.menu.y);
   EXPECT_EQ(regions.books.h, regions.menu.h);
-  const auto books = HomeTilesLayout::books(regions.books);
+  const auto books = booksFor({0, 0, 800, 440}, 4);
   // A wide card keeps the cover to its share of the width, and the 6:10 shape with it.
   EXPECT_LE(books.cover.w * 20, (books.card.w - 2 * HomeTilesLayout::kCardPadding) * 9);
 }
@@ -171,7 +183,7 @@ TEST(HomeTilesLayout, SidewaysTheCardAndTheTilesShareTheWidth) {
 // The row's label gets a whole line of the small face (23 px at the Normal UI size) and a gap above
 // the covers, which keep the 54x90 box their thumbnails are made at.
 TEST(HomeTilesLayout, TheAlsoReadingLabelClearsTheCovers) {
-  const auto books = HomeTilesLayout::books(HomeTilesLayout::regions({0, 0, 540, 920}, kTop, 4).books);
+  const auto books = booksFor({0, 0, 540, 920}, 4);
   ASSERT_TRUE(books.hasStrip);
   EXPECT_GE(books.slots[0].y - books.strip.y, 23 + 4);
   EXPECT_EQ(books.slotCovers[0].w, 54);

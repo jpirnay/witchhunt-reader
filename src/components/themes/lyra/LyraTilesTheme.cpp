@@ -46,6 +46,14 @@ constexpr CardTextFit::Face kTitleFaces[] = {{UI_12_FONT_ID, 4}, {UI_10_FONT_ID,
 Box toBox(const Rect& r) { return Box{r.x, r.y, r.width, r.height}; }
 Rect toRect(const Box& b) { return Rect{b.x, b.y, b.w, b.h}; }
 
+// Whether Home has the Also reading row. homeLayout() decides it from the content HomeActivity
+// passes, which is this rect; the card's draw gets only the books' rect, which a short menu makes
+// taller, so it asks the panel again rather than judging by that height.
+bool stripFitsHome(const GfxRenderer& renderer) {
+  const Rect content = UITheme::getContentRect(renderer, true, false);
+  return HomeTilesLayout::stripFits(toBox(content), content.y + UITheme::getInstance().getMetrics().homeTopPadding);
+}
+
 enum class Cover : uint8_t { Drawn, Pending, Absent };
 
 // A book's thumbnail at `box`'s exact size, which the cover pass writes cropped to it
@@ -81,9 +89,9 @@ void drawLines(const GfxRenderer& renderer, const int fontId, const int x, int y
 HomeLayout LyraTilesTheme::homeLayout(const GfxRenderer& /*renderer*/, const Rect content, const int menuCount,
                                       const int menuTrailing) const {
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
-  const auto regions =
-      HomeTilesLayout::regions(toBox(content), content.y + metrics.homeTopPadding, menuCount - menuTrailing);
-  const auto books = HomeTilesLayout::books(regions.books);
+  const int top = content.y + metrics.homeTopPadding;
+  const auto regions = HomeTilesLayout::regions(toBox(content), top, menuCount - menuTrailing);
+  const auto books = HomeTilesLayout::books(regions.books, HomeTilesLayout::stripFits(toBox(content), top));
 
   HomeLayout layout;
   layout.books = toRect(regions.books);
@@ -109,7 +117,7 @@ void LyraTilesTheme::drawRecentBookCover(GfxRenderer& renderer, const Rect rect,
                                          const std::vector<RecentBook>& recentBooks, const int selectorIndex,
                                          bool& coverRendered, bool& coverBufferStored, bool& /*bufferRestored*/,
                                          std::function<bool()> storeCoverBuffer) const {
-  const HomeTilesLayout::Books layout = HomeTilesLayout::books(toBox(rect));
+  const HomeTilesLayout::Books layout = HomeTilesLayout::books(toBox(rect), stripFitsHome(renderer));
   const int bookCount = static_cast<int>(recentBooks.size());
   const int stripBooks = layout.hasStrip ? std::min(HomeTilesLayout::kStripBooks, std::max(0, bookCount - 1)) : 0;
   const Box& card = layout.card;

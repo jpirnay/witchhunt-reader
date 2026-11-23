@@ -32,7 +32,8 @@ constexpr int kMaxSidewaysTileHeight = 180;
 constexpr int kMaxTiles = 4;
 
 // The Also reading row, its label line included. It appears only where the card keeps
-// kMinCardHeight beside it.
+// kMinCardHeight beside it and a full grid of tiles (stripFits): a panel shows it or does not,
+// whatever the number of entries.
 constexpr int kStripHeight = 118;
 // One line of the small face (23 px on the 480 px panels) and the space under it. At 22 the line sat
 // on the covers.
@@ -81,6 +82,12 @@ constexpr Regions regions(const Box& content, const int top, const int tileCount
   return r;
 }
 
+// Whether the panel has room for the Also reading row: the card keeps kMinCardHeight with two full
+// rows of tiles and the bottom row under it. Fewer tiles give the card more room, not the row.
+constexpr bool stripFits(const Box& content, const int top) {
+  return regions(content, top, kMaxTiles).books.h - kStripHeight - kGap >= kMinCardHeight;
+}
+
 struct Books {
   Box card;
   Box cover;  // 6:10, the thumbnail's exact box
@@ -92,10 +99,11 @@ struct Books {
   Box slotCovers[kStripBooks];
 };
 
-constexpr Books books(const Box& area) {
+// `withStrip` from stripFits(); the row then takes the foot of `area`.
+constexpr Books books(const Box& area, const bool withStrip) {
   Books b{};
   b.card = area;
-  if (area.h - kStripHeight - kGap >= kMinCardHeight) {
+  if (withStrip && area.h - kStripHeight - kGap >= kMinCardHeight) {
     b.hasStrip = true;
     b.card.h = area.h - kStripHeight - kGap;
     b.strip = Box{area.x, area.y + area.h - kStripHeight, area.w, kStripHeight};
