@@ -5,16 +5,23 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "BookCacheReset.h"
 #include "BookRelocation.h"
 #include "HalStorage.h"
+
+namespace book_protection_stub {
+extern std::vector<std::pair<std::string, bool>> closed;
+}  // namespace book_protection_stub
 
 namespace {
 
 class BookCacheReset : public ::testing::Test {
  protected:
   void SetUp() override {
+    book_protection_stub::closed.clear();
     Storage.reset();
     Storage.putFolder("/.crosspoint");
     Storage.putFolder("/Books");
@@ -68,10 +75,22 @@ TEST_F(BookCacheReset, ACoverSidecarDropsOnlyTheThumbnails) {
   EXPECT_TRUE(has(dir, "index.bin"));
 }
 
+// The protection a protected book registers holds the manifest in its cache folder. Epub::clearCache() closes it
+// first; this clear, which the web file manager, WebDAV and the OPDS download go through, did not.
+TEST_F(BookCacheReset, ABookIsClosedBeforeItsCacheGoes) {
+  const std::string dir = book("/Books/loan.epub");
+  clearBookCacheIfNeeded(std::string("/Books/loan.epub"));
+  ASSERT_EQ(book_protection_stub::closed.size(), 1u);
+  EXPECT_EQ(book_protection_stub::closed[0].first, "/Books/loan.epub");
+  EXPECT_TRUE(book_protection_stub::closed[0].second) << "closed after its cache folder was removed";
+  EXPECT_FALSE(Storage.exists(dir.c_str()));
+}
+
 TEST_F(BookCacheReset, OtherFilesTouchNothing) {
   const std::string dir = book("/Books/novel.epub");
   Storage.put("/Books/novel.pdf", "not a book here");
   clearBookCacheIfNeeded(String("/Books/novel.pdf"));
+  EXPECT_TRUE(book_protection_stub::closed.empty());
   for (const char* name : {"progress.bin", "bookmarks.bin", "index.bin", "cover.bmp", "thumb_240.bmp"}) {
     EXPECT_TRUE(has(dir, name)) << name;
   }
