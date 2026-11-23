@@ -93,6 +93,8 @@ struct NetworkModeResult {
 
 struct FootnoteResult {
   std::string href;
+  // The link's text as the page shows it ("12", "*"): whether a note opens in the popup, and its title there.
+  std::string marker;
 };
 
 struct FilePathResult {

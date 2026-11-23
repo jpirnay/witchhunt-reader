@@ -1450,6 +1450,14 @@ class EpubReaderActivity final : public Activity {
   // footnote list groups them (see pageLinkInfoForCurrentPage). Following one always leaves a
   // way back.
   void navigateToHref(const std::string& href, bool savePosition = false);
+  // A link the reader activates -- a tap on its marker, the footnote button, a row of the footnote list. A note opens
+  // in the footnote popup over the page (openFootnotePopup), whose "Go to note" then follows it; anything else is
+  // followed at once, as navigateToHref(href, true). `marker` is the link's text as the page shows it.
+  void followLink(const std::string& href, const std::string& marker);
+  // The popup for a note: false when the link is not a note's (the preview store says so, or with no store its text is
+  // no marker), or its note could not be read or laid out, and the caller follows it instead. On the loop task, no
+  // lock held.
+  bool openFootnotePopup(const std::string& href, const std::string& marker);
   void restoreSavedPosition();
   // A followed link's anchor has resolved to `page` of the current spine: if that is where an
   // earlier link was followed from, unwinds the Back stack below it (EpubLinkBackStack::returnDepth).
