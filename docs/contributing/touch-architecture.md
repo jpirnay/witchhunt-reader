@@ -174,7 +174,7 @@ The reading page has no widgets, so readers read touch directly through the help
 opens the reader's menu or, in the readers without one, their own navigation. The menu edge is
 the bottom edge on a board with a light and the top edge otherwise (`wasMenuGesture()`). In the EPUB
 reader a tap on a link (footnote marker or cross-reference) is tested first, because a marker can
-sit inside a page-turn zone; a note's marker opens the footnote popup over the page and any other link is followed
+sit inside a page-turn zone; a note's marker opens the footnote sheet, which the reader draws over its page as it does the reader bars, and any other link is followed
 (`EpubReaderActivity::followLink`); the markers are located during the render by matching the page's
 words (`LinkMarkerMatch`), a word at a time, so a link of CJK text, stored one page word per
 character, matches its characters one by one: a page word may consume the front of the current marker token where

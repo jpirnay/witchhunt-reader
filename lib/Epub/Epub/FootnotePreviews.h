@@ -144,7 +144,7 @@ class Resolver {
 // "..." where it stops; the reader's "Go to note" shows the rest where it stands in the book.
 constexpr size_t MAX_NOTE_MARKUP_BYTES = 4096;
 
-// The note a link points at, for the reader's footnote popup: read from its document now, not from the preview store,
+// The note a link points at, for the reader's footnote sheet: read from its document now, not from the preview store,
 // so it works whether inline previews are on or not and is not cut at MAX_TEXT_BYTES. `href` is a link in spine item
 // `fromSpineIndex` ("#n3", "notes.xhtml#n3"). The same capture as a preview's (the same note found, the same chrome
 // skipped), but as a small XHTML fragment: paragraphs, line breaks, lists and inline emphasis keep their tags, every

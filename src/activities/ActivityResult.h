@@ -91,13 +91,11 @@ struct NetworkModeResult {
   NetworkMode mode;
 };
 
-// A link of the page to act on. From the footnote list: `link` (the row's index in the page's links, -1 for none) and
-// its `href`, to be followed or opened as a note. From the footnote popup: `step`, the page's next (+1) or previous
-// (-1) note, or 0 to follow the note's own link.
+// A link of the page the footnote list picked: its index among the page's links (-1 for none) and its href, to be
+// followed or opened as a note.
 struct FootnoteResult {
   std::string href;
   int16_t link = -1;
-  int8_t step = 0;
 };
 
 struct FilePathResult {

@@ -34,7 +34,7 @@ class LanguageHyphenator;
 // through the EPUB chapter parser into styled Pages; anything else (plain text,
 // or HTML too damaged or too large to lay out) is word-wrapped once on entry and
 // each page renders spans of the original string, so no per-line copies are held
-// (PagedTextBody, which the footnote popup shares).
+// (PagedTextBody, which the footnote sheet shares).
 class DictionaryDefinitionActivity final : public Activity {
  public:
   // `dictionaryName` is shown alongside the page counter and is empty when only

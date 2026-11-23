@@ -12,7 +12,7 @@ class GfxRenderer;
 class LanguageHyphenator;
 
 // The body of a paged text viewer: a string laid out once into pages of a fixed box, then drawn a page at a time.
-// Shared by the dictionary's definition viewer and the reader's footnote popup.
+// Shared by the dictionary's definition viewer and the reader's footnote sheet.
 //
 // Two layouts. HTML goes through the EPUB chapter parser into styled, reader-identical Pages (buildDictionaryHtmlPages)
 // when it is small enough and the heap allows. Anything else -- plain text, or HTML too damaged, too large or laid out
@@ -20,7 +20,7 @@ class LanguageHyphenator;
 // string, so no per-line copies are held.
 //
 // Moved out of DictionaryDefinitionActivity (ported from crosspoint-reader PR #2583 and the HTML layout of #2836, by
-// Uri Tauber) when the footnote popup needed the same body.
+// Uri Tauber) when the footnote sheet needed the same body.
 class PagedTextBody {
  public:
   // Lays `text` out for a box of `width` x `height` in `fontId`. With `html`, the styled layout is tried first when the

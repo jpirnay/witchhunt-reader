@@ -46,6 +46,7 @@
 #include "components/themes/TapTargets.h"
 
 class ReaderBarsController;
+class FootnoteSheet;
 
 class EpubReaderActivity final : public Activity {
   // Reader can launch sync in several UX modes:
@@ -844,7 +845,7 @@ class EpubReaderActivity final : public Activity {
   // where the store has no entry). A pure read: note text is resolved by the section build that
   // needs it, never by opening the list.
   // Kind, and with `withPreviews` note text, for each of currentPageFootnotes: for the footnote list, and (kind only)
-  // for the footnote popup's notes (pageNotes). One rule for both. The preview store decides once it opens for the
+  // for the footnote sheet's notes (pageNotes). One rule for both. The preview store decides once it opens for the
   // chapter, in one pass: a hit gives the preview AND says the link is a note, a miss says it is navigation. Without it
   // the link's own text decides, by the test the store's scan uses (FootnoteShape::isMarkerText): "12", "*", "[3]" are
   // notes, "Chapter 2" is not. Takes the render lock itself.
@@ -1314,6 +1315,16 @@ class EpubReaderActivity final : public Activity {
   // where a pass has no page to draw, over the frame on the panel (paintLiveOverlay). Null while closed. Opened and
   // closed on the loop task under the render lock; the render task reads it under the lock.
   std::unique_ptr<ReaderBarsController> liveBars_;
+  // The footnote sheet, the reader's other live overlay, and the link it shows (an index of currentPageFootnotes). Null
+  // while closed. Opened, stepped and closed on the loop task under the render lock; the render task draws it.
+  std::unique_ptr<FootnoteSheet> liveNote_;
+  size_t liveNoteLink_ = 0;
+  // One loop() pass with the sheet open: its input, then what it asked for.
+  void serviceLiveNote();
+  // The sheet closed by its own input: it comes down and the page is drawn again.
+  void closeLiveNote();
+  // The sheet down, the reader leaving or another screen opening over it. Under RenderLock.
+  void dismissLiveNote();
   // A page is owed under the live bars: a forced refresh asked for one. Cleared by the pass that draws a page
   // (drawLiveOverlayOverPage). Under RenderLock.
   bool liveOverlayPageOwed_ = false;
@@ -1340,8 +1351,8 @@ class EpubReaderActivity final : public Activity {
   bool liveLayoutChangeIsBuilt();
   // The live bars are open. False at compile time where they never open (the C3s), so their code drops out there.
   bool liveBarsOpen() const;
-  // Something the reader draws over its page and takes the input for is open: the live bars. The hooks below are the
-  // overlay's: painted over the frame on the panel when no page is due, drawn over a page that is.
+  // Something the reader draws over its page and takes the input for is open: the live bars or the footnote sheet. The
+  // hooks below are the overlay's: painted over the frame on the panel when no page is due, drawn over a page that is.
   bool liveOverlayOpen() const;
   // The open overlay into the frame being drawn. Under RenderLock.
   void drawLiveOverlay();
@@ -1457,15 +1468,16 @@ class EpubReaderActivity final : public Activity {
   // footnote list groups them (see pageLinkInfoForCurrentPage). Following one always leaves a
   // way back.
   void navigateToHref(const std::string& href, bool savePosition = false);
-  // A link the reader activates -- a tap on its marker, the footnote button. `link` indexes currentPageFootnotes. A
-  // note opens in the footnote popup over the page (openFootnotePopup), whose "Go to note" then follows it; anything
-  // else is followed at once, as navigateToHref(href, true).
-  void followLink(size_t link);
-  // The link followed as navigateToHref(href, true) does, with no popup: "Go to note", and any link that is no note.
+  // A link the reader activates -- a tap on its marker, the footnote button, a row of the footnote list (`pageOnPanel`
+  // false: the list is on the panel, not the page). `link` indexes currentPageFootnotes. A note opens in the footnote
+  // sheet over the page (openFootnoteSheet), whose "Go to note" then follows it; anything else is followed at once, as
+  // navigateToHref(href, true).
+  void followLink(size_t link, bool pageOnPanel = true);
+  // The link followed as navigateToHref(href, true) does, with no sheet: "Go to note", and any link that is no note.
   void followLinkDirectly(size_t link);
   // The same for a row picked in the footnote list, which hands back its index and href.
   void followListedLink(const FootnoteResult& picked);
-  // The page's notes in page order: the links of currentPageFootnotes that open the popup, by
+  // The page's notes in page order: the links of currentPageFootnotes that open the sheet, by
   // pageLinkInfoForCurrentPage()'s rule. Takes the render lock itself.
   struct PageNotes {
     static constexpr uint16_t kMaxLinks = 64;  // Page::MAX_FOOTNOTES_PER_PAGE, checked where Page is complete
@@ -1473,13 +1485,15 @@ class EpubReaderActivity final : public Activity {
     uint8_t link[kMaxLinks] = {};
   };
   PageNotes pageNotes();
-  // The popup for link `link`: false when it is no note, or its note could not be read or laid out, and the caller
-  // follows it (followLink) or tries the next note (stepFootnotePopup). `atLastPage`: stepped back to, so it opens on
-  // the note's last page. On the loop task, no lock held.
-  bool openFootnotePopup(size_t link, bool atLastPage = false);
-  // The popup showing link `link` asked for the note `delta` (+1, -1) away among the page's notes: the first one from
-  // there that opens, or none, and the page is drawn again.
-  void stepFootnotePopup(size_t link, int delta);
+  // The footnote sheet for link `link`, as the reader's live overlay (liveNote_), in place of one already open: false
+  // when it is no note, or its note could not be read or laid out, and the caller follows it (followLink) or tries the
+  // next note (stepFootnoteSheet). `atLastPage`: stepped back to, so it opens on the note's last page. `pageOnPanel`:
+  // the panel shows the page (or an earlier sheet over it), so a sheet that covers what is there is painted over it;
+  // otherwise the page is drawn again under it. On the loop task, no lock held.
+  bool openFootnoteSheet(size_t link, bool atLastPage = false, bool pageOnPanel = true);
+  // The sheet showing link `link` asked for the note `delta` (+1, -1) away among the page's notes: the first one from
+  // there that opens, or none, and the sheet closes.
+  void stepFootnoteSheet(size_t link, int delta);
   void restoreSavedPosition();
   // A followed link's anchor has resolved to `page` of the current spine: if that is where an
   // earlier link was followed from, unwinds the Back stack below it (EpubLinkBackStack::returnDepth).
@@ -1511,7 +1525,7 @@ class EpubReaderActivity final : public Activity {
   void publishPageLinkTargets(const Page& page, int marginLeft, int contentTop) const;
   // The walk behind it: `visit` once for each of the page's links it finds, with the box of its glyphs [left, right) x
   // [top, bottom) in the reader's frame and its index in currentPageFootnotes. Text is matched word by word in page
-  // order; a link around an image is boxed by the image. The footnote popup asks it which half of the screen a marker
+  // order; a link around an image is boxed by the image. The footnote sheet asks it which half of the screen a marker
   // stands in, on every board, where the tap targets exist only with touch.
   using LinkBoxVisitor = void (*)(void* ctx, int left, int top, int right, int bottom, size_t link);
   void visitPageLinkBoxes(const Page& page, int marginLeft, int contentTop, LinkBoxVisitor visit, void* ctx) const;
