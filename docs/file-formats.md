@@ -53,8 +53,13 @@ the card stays as it was. `state.json` is streamed to its file and checked again
 `koreader_syncmethod.txt` and `overrides.bin` (`BookCache::isReadingState`), and removes the rest; **Reset** removes the
 directory whole.
 
+A protected book's directory (Adobe or LCP, `lib/BookProtection/`) is enciphered: [below](#enciphered-cache-folders-cipherbin).
+Every file in it has the format given here, behind a 16-byte header, and enciphered on the card.
+
 | File | Formats | Version | Contents |
 |---|---|---|---|
+| `cipher.bin` | EPUB | `WCF1` | Only in a protected book's directory, which it marks enciphered: [below](#enciphered-cache-folders-cipherbin) |
+| `protect.bin` | EPUB | in its header | A protected book's manifest: which archive entries are encrypted, and how (`lib/BookProtection/ProtectionManifest.cpp`) |
 | `progress.bin` | all | none (told apart by length) | Where the book was left: [below](#progressbin) |
 | `bookmarks.bin` | all | `BookmarkStore::FILE_VERSION` (4) | `u8` version, `u16` count, then per bookmark `u16` spine, `u16` page, `u16` name length, the name, and what finds an EPUB page's text again after a relayout (`StarAnchor`): `u32` layout (`Section::layoutFingerprint()` of the layout the page was counted in; 0 = not known: a TXT page, or a bookmark from older firmware, which the reader anchors when its chapter is first shown complete, its page taken as counted in that layout), `u16` that layout's page count for the chapter, `u16` XPath length, the KOReader XPath of the page's first text (at most 512 bytes; longer is written as none), `u8` the section format the offset was counted under (`Section::formatVersion()`; 0 = none) and `u32` the visible-text offset of that text in the chapter. The offset finds the text with no parse while that format stands; the XPath is what the text is, resolved again under another format. Versions 3 (no offset; it never left test devices), 2 (no anchor) and 1 (no names either) still read. Replaced whole through `FileReplace`. The anchors stay out of `global_bookmarks.bin` |
 | `overrides.bin` | EPUB | `kFormatVersion` (1) in `src/BookReaderOverrides.cpp` | The settings chosen for this book alone (`BookReaderOverridesFile`): `BO`, `u8` format version, `u8` font-size numbering (`FONT_SIZE_ORDER_VERSION`), `u8` line-spacing numbering (`LINE_SPACING_ORDER_VERSION`), `u8` count, then `count` `i8` values in `BookReaderOverrides::Field` order (-1 follows the global setting), `u8` length and the SD font family's name. Fields are only appended: a reader takes the ones it knows. No file while the book follows every setting. Replaced whole through `FileReplace`; a left-over `overrides.bin.old` is read when the file is missing |
@@ -112,6 +117,30 @@ On the X3 and X4 the 384 KB below the language slot (`FlashFontPartition::HYPH_R
 area for the hyphenation store, `WHHS`: [below](#hyphenation-packs-cphy-and-the-store-whhs). The S3 boards keep the
 whole area for fonts and read a book's pack into PSRAM. A C3 whose area has no room for the store reads the book's trie
 from its pack on the card, a page at a time.
+
+## Enciphered cache folders (`cipher.bin`)
+
+The derived files of a protected book (its extracted chapters, laid-out pages, footnotes, search snippets, pictures
+and their pixel caches, and its own fonts) would be the book in the clear beside the encrypted one. Its cache
+directory is enciphered instead (`lib/CacheCipher/CacheCipherFile.h`, `lib/BookProtection/CacheAtRest.h`, and D2 in
+`docs/future_work/protected-content.md`):
+
+- `cipher.bin`, the marker: `WCF1`, then a 12-byte random salt. Not enciphered itself. The directory's key is
+  lib/CacheCipher's derivation over the salt and `sha256("cache-key:" || the device secret)`, so another reader (or a
+  computer) cannot read the files.
+- Every other file: `WCC1`, a 12-byte random nonce, then its content XORed with the ChaCha20 keystream of (the
+  directory's key, the nonce) at the content's own offset. A new nonce whenever a file is written from empty. The
+  header is not part of the file to the firmware: `HalFile` gives the content's size and positions, so every format
+  on this page, its offsets and its patches in place are unchanged. A rename keeps the file readable.
+- `HalStorage` recognises the directory by its path (`.../epub_<n>/`) and its marker, for whatever opens a file in it:
+  the reader, Home, the library, the sleep screen. Without the key (a marker another reader made, a damaged one)
+  nothing in it opens, for reading or writing. A file in it without a header is refused like a damaged one.
+- What hands a file to the outside (the web server's download, the serial transfers) reads it raw
+  (`HalStorage::openRaw`), enciphered as on the card. A directory listing's entries are raw handles too: their size
+  includes the header.
+- A protected book's directory made before (by an older firmware) is emptied on the book's next open or the next look
+  at it (Home, the library): the reading state and `protect.bin` are written back enciphered, everything else is made
+  again. Freed sectors keep what they held until written over.
 
 ## `book.bin`
 
