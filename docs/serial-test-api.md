@@ -606,10 +606,18 @@ DICT:result=<outcome> dict=<dictionary> word=<word>[ headword=<matched entry> by
 DICT_ERROR:no word
 ```
 
+A Latin word the dictionary does not have also gets the "Did you mean" headwords the word screen
+would list (`Dictionary::suggest`): up to 8, best first, comma-separated and empty when there are
+none; `scanned` counts the index headwords compared (at most 768), `suggest_ms` times the search.
+
+```
+DICT:result=not_found dict=<d> word=<w> suggestions=<s1,s2,...> scanned=<n> suggest_ms=<t>
+```
+
 A word whose first kept character is Han, kana or Hangul takes the prefix search the word screen
 runs on CJK text instead (it searches the `.syn` too, but takes none of the word-form fallbacks: no
-stemming, lowercase or elision retries), and the reply gains the search's findings. The Latin reply
-is unchanged.
+stemming, lowercase or elision retries), and the reply gains the search's findings, never
+suggestions.
 
 ```
 DICT:result=<outcome> dict=<d> word=<w>[ headword=<hits[0]> bytes=<n>] run=<run> matched=<codepoints of hits[0]> hits=<h1,h2,h3> entries=<n1,n2,n3> probes=<n> reads=<n> ms=<t>[ exact_ms=<t>]
