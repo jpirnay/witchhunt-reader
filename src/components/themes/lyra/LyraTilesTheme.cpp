@@ -31,7 +31,12 @@ constexpr int kSelectedFrameWidth = 3;
 constexpr int kSelectedFrameOutset = 3;
 constexpr int kTileFrameWidth = 2;
 constexpr int kBottomFrameWidth = 1;
-constexpr int kIconSize = 32;
+constexpr int kIconSize = 32;  // the icons' own size, and the bottom row's
+// The tiles' icons, drawn up from the 32 px set (drawIconScaled), with the label beside them where at
+// least kMinBesideLabelWidth is left for it.
+constexpr int kTileIconSize = 48;
+constexpr int kTileIconToLabel = 14;
+constexpr int kMinBesideLabelWidth = 96;
 constexpr int kTileInset = 16;
 constexpr int kIconToLabel = 10;
 constexpr int kEyebrowGap = 6;
@@ -73,6 +78,78 @@ Cover drawCoverThumb(const GfxRenderer& renderer, const RecentBook& book, const 
   renderer.fillRect(box.x, box.y, box.w, box.h, false);
   renderer.drawBitmap(bitmap, box.x, box.y, box.w, box.h);
   return Cover::Drawn;
+}
+
+// A 32 px icon at `size` px. Each target pixel takes the ink under its centre, bilinear over the
+// four nearest source pixels and set where they are at least half ink, which keeps the 2 px strokes
+// even at a scale that is not a whole number. Integer maths: the C3 has no FPU. The icons are stored
+// for the upright frame drawIcon() writes them to: logical (u, v) is source row 31 - u, bit v, and a
+// 0 bit is ink.
+void drawIconScaled(const GfxRenderer& renderer, const uint8_t* icon, const int x, const int y, const int size,
+                    const bool ink) {
+  constexpr int kSource = kIconSize;
+  constexpr int kStride = kSource / 8;
+  constexpr int kOne = 256;  // fixed point: 1/256 of a source pixel
+  const auto inkAt = [icon](const int u, const int v) {
+    if (u < 0 || v < 0 || u >= kSource || v >= kSource) return 0;
+    const int row = kSource - 1 - u;
+    return ((icon[row * kStride + v / 8] >> (7 - v % 8)) & 1) == 0 ? 1 : 0;
+  };
+  // The source coordinate under a target pixel's centre, less half a pixel, as a whole part and a fraction.
+  const auto locate = [size](const int d, int& whole, int& fraction) {
+    const int at = (2 * d + 1) * kSource * kOne / (2 * size) - kOne / 2;
+    whole = at >= 0 ? at / kOne : -1;
+    fraction = at - whole * kOne;
+  };
+  for (int dy = 0; dy < size; ++dy) {
+    int v0 = 0;
+    int fv = 0;
+    locate(dy, v0, fv);
+    for (int dx = 0; dx < size; ++dx) {
+      int u0 = 0;
+      int fu = 0;
+      locate(dx, u0, fu);
+      const int weight = (kOne - fu) * (kOne - fv) * inkAt(u0, v0) + fu * (kOne - fv) * inkAt(u0 + 1, v0) +
+                         (kOne - fu) * fv * inkAt(u0, v0 + 1) + fu * fv * inkAt(u0 + 1, v0 + 1);
+      if (2 * weight >= kOne * kOne) renderer.drawPixel(x + dx, y + dy, ink);
+    }
+  }
+}
+
+// A tile's icon and label. Where the tile is wide enough the label stands beside a large icon and
+// wraps over as many lines as the tile holds; a narrow tile (sideways) puts the label under it.
+// The label steps down from UI 12 to UI 10 before a word is cut.
+void drawTileContent(const GfxRenderer& renderer, const Box& tile, const uint8_t* icon, const std::string& label,
+                     const bool selected) {
+  const bool ink = !selected;
+  const int besideW = tile.w - 2 * kTileInset - kTileIconSize - kTileIconToLabel;
+  const bool beside = besideW >= kMinBesideLabelWidth;
+  if (icon) {
+    const int iconY = beside ? tile.y + (tile.h - kTileIconSize) / 2 : tile.y + kTileInset;
+    drawIconScaled(renderer, icon, tile.x + kTileInset, iconY, kTileIconSize, ink);
+  }
+
+  const int textX = beside ? tile.x + kTileInset + kTileIconSize + kTileIconToLabel : tile.x + kTileInset;
+  const int textW = beside ? besideW : tile.w - 2 * kTileInset;
+  const int textTop = beside ? tile.y + kTileInset : tile.y + kTileInset + kTileIconSize + kTileIconToLabel;
+  const int textH = tile.y + tile.h - kTileInset - textTop;
+  std::vector<std::string> lines;
+  int fontId = UI_12_FONT_ID;
+  for (const int face : {UI_12_FONT_ID, UI_10_FONT_ID}) {
+    fontId = face;
+    const int maxLines = std::max(1, textH / renderer.getLineHeight(face));
+    bool whole = false;
+    lines = renderer.wrappedText(face, label.c_str(), textW, maxLines, EpdFontFamily::BOLD, &whole);
+    if (whole) break;
+  }
+  const int lineHeight = renderer.getLineHeight(fontId);
+  const int blockH = static_cast<int>(lines.size()) * lineHeight;
+  // Beside the icon the label is centred on it; under it, it sits at the tile's foot.
+  int y = beside ? tile.y + (tile.h - blockH) / 2 : tile.y + tile.h - kTileInset - blockH;
+  for (const auto& line : lines) {
+    renderer.drawText(fontId, textX, y, line.c_str(), ink, EpdFontFamily::BOLD);
+    y += lineHeight;
+  }
 }
 
 void drawLines(const GfxRenderer& renderer, const int fontId, const int x, int y, const std::vector<std::string>& lines,
@@ -261,19 +338,7 @@ void LyraTilesTheme::drawHomeMenu(GfxRenderer& renderer, const Rect rect, const 
     } else {
       renderer.drawRoundedRect(tile.x, tile.y, tile.w, tile.h, kTileFrameWidth, kCornerRadius, true);
     }
-    if (const uint8_t* icon = iconFor(i)) {
-      if (selected) {
-        renderer.drawIconInverted(icon, tile.x + kTileInset, tile.y + kTileInset, kIconSize, kIconSize);
-      } else {
-        renderer.drawIcon(icon, tile.x + kTileInset, tile.y + kTileInset, kIconSize, kIconSize);
-      }
-    }
-    const std::string label = buttonLabel(i);
-    const int labelY = tile.y + tile.h - kTileInset - renderer.getLineHeight(UI_12_FONT_ID);
-    renderer.drawText(
-        UI_12_FONT_ID, tile.x + kTileInset, labelY,
-        renderer.truncatedText(UI_12_FONT_ID, label.c_str(), tile.w - 2 * kTileInset, EpdFontFamily::BOLD).c_str(),
-        !selected, EpdFontFamily::BOLD);
+    drawTileContent(renderer, tile, iconFor(i), buttonLabel(i), selected);
   }
 
   // More and Settings: as easy to hit as the rows they replace, lighter to look at.
