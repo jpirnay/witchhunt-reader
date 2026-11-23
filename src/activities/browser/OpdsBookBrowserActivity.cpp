@@ -1,7 +1,6 @@
 #include "OpdsBookBrowserActivity.h"
 
 #include <ArduinoJson.h>
-#include <Epub.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -11,13 +10,13 @@
 #include <OpdsStream.h>
 #include <OpenSearchDescription.h>
 #include <WiFi.h>
-#include <Xtc.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <memory>
 
+#include "BookCacheReset.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "OpdsFormatLabel.h"
@@ -992,8 +991,6 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const OpdsAcqu
 
     LOG_DBG("OPDS", "Download complete: %s", filename.c_str());
 
-    // Clear any existing cache for this book just in case it's a redownload of
-    // a previously opened book.
     if (acquisition.mimeType == "application/epub+zip") {
       if (!book.imageHref.empty()) {
         const std::string coverUrl =
@@ -1042,12 +1039,11 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const OpdsAcqu
           Storage.remove(sidecarPath.c_str());
         }
       }
-
-      Epub epub(filename, "/.crosspoint");
-      epub.clearCache();
-    } else if (acquisition.formatKey == "xtc" || acquisition.formatKey == "xtch") {
-      Xtc(filename, "/.crosspoint").clearCache();
     }
+    // A redownload replaces a book that may have been opened: its position, bookmarks and layout were about the old
+    // bytes. The shared helper clears every format's cache folder; clearing Epub's and Xtc's here left a TXT or
+    // Markdown book opening at the old file's position.
+    clearBookCacheIfNeeded(filename);
     selectedBookIndex = -1;
     formatSelectionLabels.clear();
     state = BrowserState::BROWSING;
