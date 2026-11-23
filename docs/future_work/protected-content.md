@@ -110,7 +110,13 @@ use them ignores both.
    Left open: covers and thumbnails a protected book's cache shares with Home stay in the folder, enciphered, so a
    card moved to another reader shows the placeholder cover; Quick Resume's `sleep_frame.bin` and screenshots stay
    plain (owner, 2026-11-23); a book font copied into a card-backed flash-area image (`flash-area.img`, S3 boards
-   without a usable partition) is not enciphered there.
+   without a usable partition) stays unenciphered there, which the owner accepts (2026-11-23).
+
+   On the Murphy (S3, SDMMC; the same chapter, 90 pages, three runs each): master builds the protected copy in 4,717
+   ms against 4,677 ms plain (+40 ms, D1); this branch in 4,842 against 4,747 ms (+95 ms), so the cache cipher adds
+   about 55 ms (+1.2%). Page turns are unchanged. The plain copy built about 65 ms slower on this branch than on master
+   for a reason not found: the cipher never runs for it, its per-open checks cost microseconds, and the X3 shows no such
+   difference (5,812 against 5,824 ms). Placement in the S3's flash cache is the likely one, not proven.
 4. **Books downloaded with Adobe Digital Editions.** Their licence is inside the EPUB (`META-INF/rights.xml`). The plugin
    derives a key only from a `<book>.epub.rights` beside the book, so such a book needs that file beside it first;
    fetching the `.acsm` again from the shop is the simple route.
