@@ -887,10 +887,14 @@ bool ActivityManager::handleForcedRefresh(const HalDisplay::RefreshMode mode) {
 #if CP_TOUCH_UI
 
 void ActivityManager::dispatchLightPanelGesture() {
-  if (!mappedInput.hasTouch()) return;
+  // A request needs no digitiser: the drawer works from the keys too (Back closes it, Confirm switches the light,
+  // Left/Right step the brightness), and a key is how a reader with touch switched off reaches it.
+  const bool requested = lightPanelRequested;
+  lightPanelRequested = false;
   // Inert on an unlit board: wasLightPanelGesture() already answers false there, because
   // the top edge is the reader menu on those and the two must not compete.
-  if (!mappedInput.wasLightPanelGesture()) return;
+  const bool swiped = mappedInput.hasTouch() && mappedInput.wasLightPanelGesture();
+  if (!requested && !swiped) return;
   if (currentActivity == nullptr) return;
 
   // Don't stack a panel on top of itself, or on a screen that owns the whole surface for
@@ -945,10 +949,10 @@ void ActivityManager::dispatchLightPanelGesture() {
   // again would undo prepareFramebufferForCapture() above and hand the drawer the wrong page.
   framebufferPreparedThisTick = true;
 
-  mappedInput.suppressTouchContact();
+  if (swiped) mappedInput.suppressTouchContact();
   currentActivity->startActivityForResult(std::make_unique<FrontlightPanelActivity>(renderer, mappedInput),
                                           [](const ActivityResult&) {});
-  LOG_DBG("TCH", "Top-edge swipe -> reading light");
+  LOG_DBG("TCH", "%s -> reading light", swiped ? "Top-edge swipe" : "Light panel action");
 }
 
 void ActivityManager::dispatchListTap() {

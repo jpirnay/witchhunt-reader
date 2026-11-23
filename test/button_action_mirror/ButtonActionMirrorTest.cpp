@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <iterator>
+
 #include "CrossPointSettings.h"
 
 namespace {
@@ -31,17 +33,44 @@ TEST(ButtonActionMirror, OtherActionsAreUnchanged) {
 
 // A settings file stores actions by number. Each version that inserted an action before the board-gated light block
 // moved that block up; a file from before keeps its meaning (JsonSettingsIO::loadSettings).
+//
+// The light block as versions 0 to 3 numbered it, in today's names: version 4 put the light panel into it, before the
+// warm pair.
+constexpr uint8_t OLD_LIGHT_BLOCK[] = {S::BTN_LIGHT_TOGGLE, S::BTN_LIGHT_BRIGHTER, S::BTN_LIGHT_DIMMER,
+                                       S::BTN_LIGHT_WARMER, S::BTN_LIGHT_COOLER};
+
 TEST(StoredButtonAction, TheLightActionsKeepTheirMeaningFromEveryVersion) {
-  // Version 0 numbered the light actions from BTN_BACK's place: nothing between Cycle Orientation Back and them.
-  for (uint8_t light = 0; light < S::BUTTON_ACTION_COUNT - S::BTN_LIGHT_TOGGLE; ++light) {
-    EXPECT_EQ(S::BTN_LIGHT_TOGGLE + light, S::upgradeStoredAction(S::BTN_BACK + light, 0)) << int(light);
-    EXPECT_EQ(S::BTN_LIGHT_TOGGLE + light, S::upgradeStoredAction(S::BTN_READER_BARS + light, 1)) << int(light);
-    EXPECT_EQ(S::BTN_LIGHT_TOGGLE + light, S::upgradeStoredAction(S::BTN_CONFIRM + light, 2)) << int(light);
-    EXPECT_EQ(S::BTN_LIGHT_TOGGLE + light, S::upgradeStoredAction(S::BTN_LIGHT_TOGGLE + light, 3)) << int(light);
+  // Where each version's light block began. Version 0 had nothing between Cycle Orientation Back and it, so it began
+  // at Back's place; each later version's began past its own insertion.
+  const struct {
+    int version;
+    uint8_t start;
+  } FILES[] = {{0, S::BTN_BACK}, {1, S::BTN_READER_BARS}, {2, S::BTN_CONFIRM}, {3, S::BTN_TOGGLE_DARK_MODE}};
+  for (const auto& file : FILES) {
+    for (uint8_t i = 0; i < std::size(OLD_LIGHT_BLOCK); ++i) {
+      EXPECT_EQ(OLD_LIGHT_BLOCK[i], S::upgradeStoredAction(file.start + i, file.version))
+          << "v" << file.version << " light " << int(i);
+    }
   }
-  // Version 1 had Back, version 2 Reader Bars; they stay.
+  // Version 1 had Back, version 2 Reader Bars, version 3 Confirm; they stay.
   EXPECT_EQ(S::BTN_BACK, S::upgradeStoredAction(S::BTN_BACK, 1));
   EXPECT_EQ(S::BTN_READER_BARS, S::upgradeStoredAction(S::BTN_READER_BARS, 2));
+  EXPECT_EQ(S::BTN_CONFIRM, S::upgradeStoredAction(S::BTN_CONFIRM, 3));
+}
+
+// Version 4's actions are new: no value a version 3 file can hold becomes one of them, and the first value past
+// version 3's last action is still past today's.
+TEST(StoredButtonAction, NoStoredValueBecomesAVersionFourAction) {
+  const uint8_t version3Count = S::BTN_TOGGLE_DARK_MODE + std::size(OLD_LIGHT_BLOCK);
+  for (uint8_t stored = 0; stored < version3Count; ++stored) {
+    const uint8_t now = S::upgradeStoredAction(stored, 3);
+    EXPECT_LT(now, S::BUTTON_ACTION_COUNT) << int(stored);
+    for (const uint8_t added :
+         {S::BTN_TOGGLE_DARK_MODE, S::BTN_AUTO_PAGE_TURN, S::BTN_SCREENSHOT, S::BTN_LIGHT_PANEL}) {
+      EXPECT_NE(added, now) << int(stored);
+    }
+  }
+  EXPECT_EQ(S::BUTTON_ACTION_COUNT, S::upgradeStoredAction(version3Count, 3));
 }
 
 TEST(StoredButtonAction, TheActionsBeforeTheInsertionsStay) {
@@ -49,6 +78,10 @@ TEST(StoredButtonAction, TheActionsBeforeTheInsertionsStay) {
     for (const int version : {0, 1, 2, 3}) {
       EXPECT_EQ(action, S::upgradeStoredAction(action, version)) << int(action) << " v" << version;
     }
+  }
+  // Version 4 inserted after Confirm, so everything up to it stays from a version 3 file.
+  for (uint8_t action = 0; action < S::BTN_TOGGLE_DARK_MODE; ++action) {
+    EXPECT_EQ(action, S::upgradeStoredAction(action, 3)) << int(action);
   }
 }
 

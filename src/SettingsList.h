@@ -144,14 +144,17 @@ inline void buildSettings(const RowSink& emit) {
                                                  StrId::STR_BTN_ACT_CYCLE_ORIENTATION_BACK,
                                                  StrId::STR_BACK,
                                                  StrId::STR_BTN_ACT_READER_BARS,
-                                                 StrId::STR_CONFIRM};
+                                                 StrId::STR_CONFIRM,
+                                                 StrId::STR_BTN_ACT_TOGGLE_DARK_MODE,
+                                                 StrId::STR_BTN_ACT_AUTO_PAGE_TURN,
+                                                 StrId::STR_SCREENSHOT_BUTTON};
   // The ONLY conditional block, and correspondingly the LAST entries of
   // BUTTON_ACTION. Dropping them on a board with no light therefore leaves every
   // other action's numeric value untouched, so a settings file written on a lit
   // board still reads correctly here. Anything added after these would break
   // that — see the comment on BUTTON_ACTION.
   const std::vector<StrId> lightActionOptions = {StrId::STR_BTN_ACT_LIGHT_TOGGLE, StrId::STR_BTN_ACT_LIGHT_BRIGHTER,
-                                                 StrId::STR_BTN_ACT_LIGHT_DIMMER};
+                                                 StrId::STR_BTN_ACT_LIGHT_DIMMER, StrId::STR_BTN_ACT_LIGHT_PANEL};
   // Narrower still, and correspondingly last: a warm/cool pair is a subset of
   // the lit boards. Dropping these on a single-channel light leaves every value
   // above untouched.
@@ -172,7 +175,7 @@ inline void buildSettings(const RowSink& emit) {
   auto makeBtnActionOptions = [&](StrId defaultAction) {
     std::vector<StrId> result;
     // Reserves for the light options whether or not this board has them: a hint
-    // does not need to be exact, and three spare pointers cost less than a
+    // does not need to be exact, and a few spare pointers cost less than a
     // condition that reads as dead code on every build without a frontlight.
     result.reserve(1 + btnActionOptions.size() + extraActionOptions.size() + lightActionOptions.size() +
                    warmActionOptions.size());

@@ -134,6 +134,10 @@ class ActivityManager {
   // write framebuffer, so a later partial paint must not sync over it. Cleared at the top of
   // every tick. See the "Re-syncing the write buffer" pitfall in docs/activity-manager.md.
   bool framebufferPreparedThisTick = false;
+#if CP_TOUCH_UI
+  // requestLightPanel() was called; served, or dropped, by the next dispatchLightPanelGesture().
+  bool lightPanelRequested = false;
+#endif
 
   // Paints the "working on it" banner before a queued transition runs. See the .cpp.
   void showBusyIndicator();
@@ -327,8 +331,12 @@ class ActivityManager {
   // Pull the reading-light submenu down from the top edge, from whatever screen is up.
   // Global rather than reader-only on purpose: reaching the light from the home screen in
   // the dark is most of what a quick route to it is for, and taps/long taps are reader-only
-  // so a swipe is the only gesture that can serve both.
+  // so a swipe is the only gesture that can serve both. Also serves requestLightPanel().
   void dispatchLightPanelGesture();
+  // Open the light drawer as the swipe does, for a key or gesture bound to it (BTN_LIGHT_PANEL). main.cpp runs actions
+  // before this tick's activity loop, so this only asks: dispatchLightPanelGesture() opens it after that loop, where
+  // nothing the activity draws can land in the frame it prepares for the drawer.
+  void requestLightPanel() { lightPanelRequested = true; }
   // Turn a tap on the on-screen button-hint strip into the button press it depicts, so the
   // four labels at the bottom work as touch targets on every screen that draws them. Runs
   // after the current activity's loop() so screens that handle touch themselves win; see

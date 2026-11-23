@@ -1959,6 +1959,12 @@ void setup() {
   logStartupMemory("setup_complete");
 }
 
+// Dark Mode the other way, from the slide switch or a key or gesture bound to it (BTN_TOGGLE_DARK_MODE).
+static void flipDarkMode() {
+  DarkModeNow::flip();  // saves; the next frame takes the new polarity with a full refresh
+  activityManager.requestUpdate();
+}
+
 // A board's slide switch (BOOX Picco) sets what it is bound to (SETTINGS.slideSwitchAction): at the first pass, when
 // it moves, and when the binding changes. The position is compared, not a change edge, because the input loops of the
 // transfer screens drain the edge before this runs. In between, the bound setting is free to change from the UI.
@@ -1980,8 +1986,7 @@ static void applySlideSwitch() {
       break;
     case CrossPointSettings::SLIDE_SWITCH_DARK_MODE:
       if (DarkModeNow::isDark() == on) return;
-      DarkModeNow::flip();  // saves; the next frame takes the new polarity with a full refresh
-      activityManager.requestUpdate();
+      flipDarkMode();
       break;
     case CrossPointSettings::SLIDE_SWITCH_NOTHING:
     case CrossPointSettings::SLIDE_SWITCH_ACTION_COUNT:
@@ -2477,6 +2482,17 @@ void loop() {
         case BA::BTN_DICTIONARY:
           activityManager.dispatchButtonAction(BA::BTN_DICTIONARY);
           break;
+        case BA::BTN_AUTO_PAGE_TURN:
+          activityManager.dispatchButtonAction(BA::BTN_AUTO_PAGE_TURN);
+          break;
+        case BA::BTN_TOGGLE_DARK_MODE:
+          flipDarkMode();
+          LOG_INF("MAIN", "Dark Mode %s", DarkModeNow::isDark() ? "on" : "off");
+          break;
+        case BA::BTN_SCREENSHOT:
+          // Taken by ScreenshotUtil::service() on the next pass, or a few passes on if a render holds the buffers.
+          ScreenshotUtil::request(ScreenshotUtil::Target::Card);
+          break;
         // Frontlight control is global — handled here rather than through
         // dispatchButtonAction() because it is not the activity's business, and
         // it is as useful on the home screen as it is mid-page. The level is
@@ -2501,6 +2517,11 @@ void loop() {
           SETTINGS.saveToFile();
           break;
         }
+        case BA::BTN_LIGHT_PANEL:
+#if CP_TOUCH_UI
+          activityManager.requestLightPanel();
+#endif
+          break;
         case BA::BTN_LIGHT_WARMER:
         case BA::BTN_LIGHT_COOLER: {
           const int delta =
