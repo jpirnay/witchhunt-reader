@@ -3,6 +3,7 @@
 #include <BuildArena.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
+#include <HeapFit.h>
 #include <InflateReader.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -276,6 +277,12 @@ class LinkScanner {
 //  - empty inline anchor (<a id="filepos123"/>text…</p>, Calibre/MOBI): the subtree
 //    yields nothing, so capture continues past the anchor until its parent block closes
 //    or the NEXT wanted anchor starts (sequential rearnote lists).
+//
+// Two outputs. A preview (the store's) is the note's text alone, flattened onto one line and cut
+// at MAX_TEXT_BYTES. A popup note (captureNote) keeps the markup a reader sees in a note --
+// paragraphs, line breaks, lists and inline emphasis -- as a small XHTML fragment in the caller's
+// larger buffer, every other element reduced to its text. Which note is found, and where it ends,
+// is decided the same way for both, by the TEXT captured: tags never count towards it.
 class NoteCapturer {
  public:
   using EmitFn = std::function<void(uint32_t keyHash, const char* text, size_t len)>;
@@ -291,8 +298,78 @@ class NoteCapturer {
   bool tailMode_ = false;  // id element closed short; capturing following siblings
   size_t activeIdx_ = 0;   // wanted_ index being captured
   char text_[FootnotePreviews::MAX_TEXT_BYTES + 1] = {};
-  size_t textLen_ = 0;
+  // Where the capture goes: text_ for a preview, the caller's buffer for a popup note. `cap_` bytes before the
+  // terminator.
+  char* buf_ = text_;
+  size_t cap_ = FootnotePreviews::MAX_TEXT_BYTES;
+  size_t textLen_ = 0;   // bytes in buf_, tags included
+  size_t plainLen_ = 0;  // text bytes among them: what says whether a note is here at all
   bool truncated_ = false;
+
+  // Markup mode (the popup note): the kept elements open in the capture, innermost last, and the bytes their end tags
+  // need. Those bytes, and three for the "..." of a cut note, are held back from the text, so a note cut short still
+  // closes every element it opened and stays a well-formed fragment.
+  struct OpenTag {
+    uint8_t tag;  // index into kKeptTags
+    int16_t depth;
+  };
+  static constexpr uint8_t kMaxOpenTags = 12;
+  bool markup_ = false;
+  OpenTag open_[kMaxOpenTags] = {};
+  uint8_t openCount_ = 0;
+  size_t closeBytes_ = 0;
+
+  // The elements a note keeps in markup mode: what the reader sees of its structure and emphasis. Anything else -- a
+  // span, a table, a link's text is chrome anyway -- passes its text through without its tags, so no attribute or
+  // class reaches the fragment and nothing in it needs the book's stylesheet. "br" is the one void element.
+  static constexpr const char* const kKeptTags[] = {"p",   "div",   "br", "i",          "em",   "b",  "strong", "sup",
+                                                    "sub", "small", "u",  "blockquote", "cite", "ol", "ul",     "li"};
+  static constexpr uint8_t kBreakTag = 2;
+  static int keptTag(const char* name) {
+    for (size_t i = 0; i < sizeof(kKeptTags) / sizeof(kKeptTags[0]); ++i) {
+      if (strcmp(name, kKeptTags[i]) == 0) return static_cast<int>(i);
+    }
+    return -1;
+  }
+
+  // Whether `bytes` more fit, keeping back in markup mode what the open elements' end tags and a cut note's "..." will
+  // need. For a preview it is the plain capacity test it always was.
+  bool room(const size_t bytes) const { return textLen_ + bytes + (markup_ ? closeBytes_ + 3 : 0) <= cap_; }
+  void put(const char* bytes, const size_t n) {
+    memcpy(buf_ + textLen_, bytes, n);
+    textLen_ += n;
+  }
+
+  void openTag(const char* name) {
+    const int tag = keptTag(name);
+    if (tag < 0 || truncated_) return;
+    const size_t nameLen = strlen(kKeptTags[tag]);
+    if (tag == kBreakTag) {
+      if (room(5)) put("<br/>", 5);
+      return;
+    }
+    // Too deep to track: the element's text still comes through, without its tags.
+    if (openCount_ >= kMaxOpenTags) return;
+    if (!room(nameLen + 2 + nameLen + 3)) {
+      truncated_ = true;
+      return;
+    }
+    put("<", 1);
+    put(kKeptTags[tag], nameLen);
+    put(">", 1);
+    closeBytes_ += nameLen + 3;
+    open_[openCount_++] = {static_cast<uint8_t>(tag), static_cast<int16_t>(depth_)};
+  }
+
+  // The innermost open element's end tag, from the bytes held back for it.
+  void closeTag() {
+    const char* name = kKeptTags[open_[--openCount_].tag];
+    const size_t nameLen = strlen(name);
+    closeBytes_ -= nameLen + 3;
+    put("</", 2);
+    put(name, nameLen);
+    put(">", 1);
+  }
 
   // Hash the id exactly as Pass A hashed the href fragment that points at it, so the two sides
   // cannot drift — the same rule the key comment states. Costs one snprintf per id'd element,
@@ -338,13 +415,20 @@ class NoteCapturer {
     return href != nullptr && *href != '\0';
   }
 
+  void resetCapture() {
+    textLen_ = 0;
+    plainLen_ = 0;
+    truncated_ = false;
+    openCount_ = 0;
+    closeBytes_ = 0;
+  }
+
   void beginCapture(const size_t targetIdx, const int idDepth) {
     activeIdx_ = targetIdx;
     captureDepth_ = idDepth;
     skipDepth_ = -1;
     tailMode_ = false;
-    textLen_ = 0;
-    truncated_ = false;
+    resetCapture();
   }
 
   // Drops the capture in progress without emitting: what we were standing on turned out not to
@@ -353,32 +437,42 @@ class NoteCapturer {
     captureDepth_ = -1;
     skipDepth_ = -1;
     tailMode_ = false;
-    textLen_ = 0;
-    truncated_ = false;
+    resetCapture();
   }
 
   void finishCapture() {
     for (;;) {
-      if (textLen_ > 0 && text_[textLen_ - 1] == ' ') {
+      if (textLen_ > 0 && buf_[textLen_ - 1] == ' ') {
         --textLen_;
-      } else if (textLen_ >= 2 && unicodeSpaceLen(text_, textLen_ - 2, textLen_) == 2) {
+      } else if (textLen_ >= 2 && unicodeSpaceLen(buf_, textLen_ - 2, textLen_) == 2) {
         textLen_ -= 2;
-      } else if (textLen_ >= 3 && unicodeSpaceLen(text_, textLen_ - 3, textLen_) == 3) {
+      } else if (textLen_ >= 3 && unicodeSpaceLen(buf_, textLen_ - 3, textLen_) == 3) {
         textLen_ -= 3;
       } else {
         break;
       }
     }
-    if (truncated_ && textLen_ >= 3) {
-      text_[textLen_ - 3] = '.';
-      text_[textLen_ - 2] = '.';
-      text_[textLen_ - 1] = '.';
+    if (markup_) {
+      if (truncated_) {
+        // Cut at a byte, so possibly inside a character: back off to the last whole one (a whole one at the very end
+        // goes too, which costs a letter before the "..." and nothing else). Its three bytes were held back.
+        while (textLen_ > 0 && (static_cast<uint8_t>(buf_[textLen_ - 1]) & 0xC0) == 0x80) --textLen_;
+        if (textLen_ > 0 && static_cast<uint8_t>(buf_[textLen_ - 1]) >= 0xC0) --textLen_;
+        put("...", 3);
+      }
+      while (openCount_ > 0) closeTag();
+    } else if (truncated_ && textLen_ >= 3) {
+      buf_[textLen_ - 3] = '.';
+      buf_[textLen_ - 2] = '.';
+      buf_[textLen_ - 1] = '.';
     }
-    text_[textLen_] = '\0';
-    if (textLen_ > 0) emit_(wanted_[activeIdx_], text_, textLen_);
+    buf_[textLen_] = '\0';
+    if (plainLen_ > 0) emit_(wanted_[activeIdx_], buf_, textLen_);
     captureDepth_ = -1;
     skipDepth_ = -1;
     tailMode_ = false;
+    openCount_ = 0;
+    closeBytes_ = 0;
   }
 
   static void startElement(void* ctx, const char* name, const char** atts) {
@@ -407,12 +501,14 @@ class NoteCapturer {
       // Costs a preview for a note whose text genuinely opens with a link, which is rare and
       // merely cosmetic; the alternative is chapter prose stored and displayed as a note, and
       // 101 of them injected into one chapter of the book this was found on.
-      if (self->tailMode_ && self->textLen_ == 0 && isCallerAnchor(name, atts)) {
+      if (self->tailMode_ && self->plainLen_ == 0 && isCallerAnchor(name, atts)) {
         self->abandonCapture();
         ++self->depth_;
         return;
       }
       self->skipDepth_ = self->depth_;
+    } else if (self->markup_ && self->captureDepth_ >= 0 && self->skipDepth_ < 0) {
+      self->openTag(name);
     }
     ++self->depth_;
   }
@@ -422,22 +518,32 @@ class NoteCapturer {
     if (self->captureDepth_ < 0 || self->skipDepth_ >= 0) return;
     for (int i = 0; i < length; ++i) {
       const bool space = isSpaceChar(text[i]);
-      if (space && (self->textLen_ == 0 || self->text_[self->textLen_ - 1] == ' ')) continue;
+      if (space && (self->plainLen_ == 0 || self->buf_[self->textLen_ - 1] == ' ')) continue;
       // A Unicode space before any text is skipped the same way, so a target holding nothing else
       // (a contents entry padded with U+2005 around its link) captures nothing and is no note.
       // Inside the note it stays as written: an NBSP keeps its no-break.
-      if (self->textLen_ == 0) {
+      if (self->plainLen_ == 0) {
         const size_t n = unicodeSpaceLen(text, static_cast<size_t>(i), static_cast<size_t>(length));
         if (n > 0) {
           i += static_cast<int>(n) - 1;
           continue;
         }
       }
-      if (self->textLen_ >= FootnotePreviews::MAX_TEXT_BYTES) {
+      const char c = space ? ' ' : text[i];
+      // Markup mode writes the three characters XML reserves as entities; the parser handed them over decoded.
+      const char* escaped = nullptr;
+      if (self->markup_) escaped = c == '&' ? "&amp;" : c == '<' ? "&lt;" : c == '>' ? "&gt;" : nullptr;
+      const size_t n = escaped ? strlen(escaped) : 1;
+      if (!self->room(n)) {
         self->truncated_ = true;
         return;
       }
-      self->text_[self->textLen_++] = space ? ' ' : text[i];
+      if (escaped) {
+        self->put(escaped, n);
+      } else {
+        self->buf_[self->textLen_++] = c;
+      }
+      ++self->plainLen_;
     }
   }
 
@@ -449,10 +555,14 @@ class NoteCapturer {
       if (self->depth_ == self->skipDepth_) self->skipDepth_ = -1;
       return;  // chrome closes before anything else is decided
     }
+    // A cut note's end tags wait for finishCapture(), which writes the "..." before them.
+    if (!self->truncated_ && self->openCount_ > 0 && self->open_[self->openCount_ - 1].depth == self->depth_) {
+      self->closeTag();
+    }
     if (!self->tailMode_ && self->depth_ == self->captureDepth_) {
       // The id'd element itself closed. Enough subtree text = container pattern, done;
       // near-empty = inline anchor pattern, keep capturing the following siblings.
-      if (self->textLen_ >= FootnotePreviews::MIN_SUBTREE_BYTES || self->truncated_) {
+      if (self->plainLen_ >= FootnotePreviews::MIN_SUBTREE_BYTES || self->truncated_) {
         self->finishCapture();
       } else {
         self->tailMode_ = true;
@@ -466,6 +576,12 @@ class NoteCapturer {
  public:
   NoteCapturer(const int spineIndex, const NoThrowArray<uint32_t>& wanted, EmitFn emit)
       : spineIndex_(spineIndex), wanted_(wanted), emit_(std::move(emit)) {}
+  // Markup mode, into `buffer`, which holds `capacity` bytes and a terminator.
+  NoteCapturer(const int spineIndex, const NoThrowArray<uint32_t>& wanted, EmitFn emit, char* buffer,
+               const size_t capacity)
+      : spineIndex_(spineIndex), wanted_(wanted), emit_(std::move(emit)), buf_(buffer), cap_(capacity), markup_(true) {}
+  NoteCapturer(const NoteCapturer&) = delete;
+  NoteCapturer& operator=(const NoteCapturer&) = delete;
   // Scans chapter XHTML (HTML-flavored): enable bare-void-tag repair.
   // Parser state from caller-provided storage (the build arena); call before setup().
   void useExternalState(void* storage, const size_t bytes) { parser_.setExternalState(storage, bytes); }
@@ -1247,6 +1363,77 @@ bool resolveSpine(Epub& epub, const int spineIndex, const std::string& bankedHtm
     step = resolver.step();
   }
   return step == Resolver::Step::Done;
+}
+
+bool captureNote(Epub& epub, const int fromSpineIndex, const char* href, std::string& outMarkup) {
+  outMarkup.clear();
+  const char* hash = href ? strchr(href, '#') : nullptr;
+  if (!hash || hash[1] == '\0' || strlen(hash + 1) > MAX_HREF_BYTES) return false;
+  const int targetSpine = epub.resolveLinkToSpineIndex(href, fromSpineIndex);
+  if (targetSpine < 0) return false;
+  const unsigned long startMs = millis();
+
+  NoThrowArray<uint32_t> wanted;
+  if (!wanted.push(makeKeyHash(targetSpine, hash + 1))) {
+    LOG_ERR("FNP", "OOM: cannot start a note capture");
+    return false;
+  }
+  // Declared before the stream: the reader inside DocStream holds the archive, so it has to go first.
+  auto zip = makeUniqueNoThrow<ZipFile>(epub.getPath());
+  auto buffer = makeUniqueNoThrow<char[]>(MAX_NOTE_MARKUP_BYTES + 1);
+  auto chunk = makeUniqueNoThrow<uint8_t[]>(STREAM_CHUNK_BYTES);
+  if (!zip || !buffer || !chunk) {
+    LOG_ERR("FNP", "OOM: cannot allocate a note capture's buffers");
+    return false;
+  }
+  epub.primeZip(*zip);
+
+  bool captured = false;
+  bool noRoom = false;
+  auto capturer = makeUniqueNoThrow<NoteCapturer>(
+      targetSpine, wanted,
+      [&](uint32_t, const char* text, const size_t len) {
+        // At most MAX_NOTE_MARKUP_BYTES, so one block for the copy is all it takes.
+        if (!heapHasBlockFor(len + 1)) {
+          noRoom = true;
+          return;
+        }
+        outMarkup.assign(text, len);
+        captured = true;
+      },
+      buffer.get(), MAX_NOTE_MARKUP_BYTES);
+  if (!capturer || !capturer->setup()) {
+    LOG_ERR("FNP", "Note capture: no parser");
+    return false;
+  }
+  DocStream doc;
+  // Not banked: the read stops at the note's end, and a part-written bank would only fail its size test later.
+  if (!doc.open(epub, *zip, targetSpine, {}, /*bankIt=*/false)) {
+    LOG_ERR("FNP", "Note capture: could not read spine %d", targetSpine);
+    return false;
+  }
+  bool done = false;
+  // Only as far as the note: one near the top of a long notes document costs a chunk or two.
+  while (!done && !captured && !noRoom) {
+    const int n = doc.next(chunk.get(), STREAM_CHUNK_BYTES, &done);
+    if (n < 0) {
+      LOG_ERR("FNP", "Note capture: read error in spine %d", targetSpine);
+      return false;
+    }
+    // Malformed markup mid-stream ends the read; what was captured before it stands, as in a resolve.
+    if (n > 0 && !capturer->feed(chunk.get(), static_cast<size_t>(n))) break;
+  }
+  // A note that runs to the end of its document closes there.
+  if (!captured && !noRoom) capturer->finalize();
+  doc.close();
+  epub.adoptZipDetails(*zip);
+  if (!captured) {
+    LOG_DBG("FNP", "Note capture: nothing at %s (spine %d)%s", href, targetSpine, noRoom ? ", no memory" : "");
+    return false;
+  }
+  LOG_DBG("FNP", "Captured the note at %s: %u bytes from spine %d in %lums", href,
+          static_cast<unsigned>(outMarkup.size()), targetSpine, millis() - startMs);
+  return true;
 }
 
 bool Lookup::open(const std::string& bookCachePath, const Epub* epub, const int currentSpineIndex) {

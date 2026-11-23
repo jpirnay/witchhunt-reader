@@ -125,6 +125,7 @@ add_executable(EpubPipelineTest
   StreamedParseTest.cpp
   FootnotePreviewStoreTest.cpp
   FootnoteResolveSliceTest.cpp
+  FootnoteNoteCaptureTest.cpp
   ParagraphAnchorTest.cpp
   SavedPositionRestoreTest.cpp
   KeptReadingStateTest.cpp
