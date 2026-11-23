@@ -204,6 +204,18 @@ void FootnotePopupActivity::render(RenderLock&&) {
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
   renderer.fillRect(sheet.x, sheet.y, sheet.width, sheet.height, false);
+  // A page line the sheet's edge would cut goes whole: half a line of text above the rule reads as a fault. A line's
+  // yPos is its top; a vertical page's lines run across the screen and are left as they are.
+  if (page && !page->isVertical()) {
+    const int lineHeight = renderer.getLineHeight(pageFontId);
+    int coverTop = sheet.y;
+    for (const auto& element : page->elements) {
+      if (!element || element->getTag() != TAG_PageLine) continue;
+      const int top = pageY + element->yPos;
+      if (top < sheet.y && top + lineHeight > sheet.y) coverTop = std::min(coverTop, top);
+    }
+    if (coverTop < sheet.y) renderer.fillRect(sheet.x, coverTop, sheet.width, sheet.y - coverTop, false);
+  }
   if (area.y > 0) renderer.fillRect(0, 0, screenWidth, area.y, false);
   if (area.y + area.height < screenHeight) {
     renderer.fillRect(0, area.y + area.height, screenWidth, screenHeight - area.y - area.height, false);
