@@ -2270,93 +2270,9 @@ void loop() {
     // nothing swaps twice.
     const bool mirrorLeftRight = activityManager.currentMirrorsLeftRight();
     auto actionFor = [&](const ButtonEventManager::ButtonEvent& ev) -> uint8_t {
-      const auto mirrored = [&](const uint8_t a) {
-        return mirrorLeftRight ? CrossPointSettings::mirroredDirection(a) : a;
-      };
-      switch (ev.button) {
-        case B::Back:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortBack;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoubleBack;
-            case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongBack;
-          }
-          break;
-        case B::Confirm:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortConfirm;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoubleConfirm;
-            case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongConfirm;
-          }
-          break;
-        case B::Left:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return mirrored(SETTINGS.btnShortLeft);
-            case ButtonEventManager::PressType::Double:
-              return mirrored(SETTINGS.btnDoubleLeft);
-            case ButtonEventManager::PressType::Long:
-              return mirrored(SETTINGS.btnLongLeft);
-          }
-          break;
-        case B::Right:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return mirrored(SETTINGS.btnShortRight);
-            case ButtonEventManager::PressType::Double:
-              return mirrored(SETTINGS.btnDoubleRight);
-            case ButtonEventManager::PressType::Long:
-              return mirrored(SETTINGS.btnLongRight);
-          }
-          break;
-        case B::PageBack:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortPageBack;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoublePageBack;
-            case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongPageBack;
-          }
-          break;
-        case B::PageForward:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortPageForward;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoublePageForward;
-            case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongPageForward;
-          }
-          break;
-        case B::Power:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortPower;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoublePower;
-            case ButtonEventManager::PressType::Long:
-              // Unreachable, and left that way on purpose. The power-hold timer above
-              // sleeps the device at getPowerButtonDuration() (400 ms), so the press is
-              // long gone before ButtonEventManager's LONG_PRESS_MS (1000 ms) could emit a
-              // Long for Power. btnLongPower survives only as the settings screen's way of
-              // stating "Long press: Sleep" (SettingsList.h gives it that single option and
-              // no selector); dispatching it here would imply it were configurable.
-              break;
-          }
-          break;
-        default:
-          break;  // Up/Down are the PageBack/PageForward buttons under their list-navigation
-                  // names. The FSM emits both names for one press, and the PageBack/PageForward
-                  // event above already carries the configured action — so these fall through
-                  // to the activity, which is what list-style activities match on.
-      }
-      return BA::BTN_DEFAULT;
+      const uint8_t action = ButtonEventManager::configuredAction(ev.button, ev.type);
+      const bool sideways = ev.button == B::Left || ev.button == B::Right;
+      return sideways && mirrorLeftRight ? CrossPointSettings::mirroredDirection(action) : action;
     };
     // Reader-scoped actions are only meaningful inside the reader (they funnel through
     // dispatchButtonAction(), a no-op elsewhere). When such an action is configured on a
