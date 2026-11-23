@@ -97,6 +97,12 @@ struct FootnoteResult {
   std::string marker;
 };
 
+// The footnote popup asks for the page's next (+1) or previous (-1) note: its page keys went past the end of the one
+// it shows.
+struct FootnoteStepResult {
+  int8_t delta = 0;
+};
+
 struct FilePathResult {
   std::string path;
 };
@@ -162,10 +168,10 @@ struct ReaderBarsResult {
   ReaderLayoutValues layout{};
 };
 
-using ResultVariant =
-    std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult, PageResult,
-                 SyncResult, NetworkModeResult, FootnoteResult, FilePathResult, StarredPageResult, PrintedPageResult,
-                 DictionarySwitchResult, ConfirmResult, ReaderBarsResult, BookSearchResult, WordSearchResult>;
+using ResultVariant = std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult,
+                                   PageResult, SyncResult, NetworkModeResult, FootnoteResult, FootnoteStepResult,
+                                   FilePathResult, StarredPageResult, PrintedPageResult, DictionarySwitchResult,
+                                   ConfirmResult, ReaderBarsResult, BookSearchResult, WordSearchResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

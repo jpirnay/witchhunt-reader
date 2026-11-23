@@ -1450,14 +1450,29 @@ class EpubReaderActivity final : public Activity {
   // footnote list groups them (see pageLinkInfoForCurrentPage). Following one always leaves a
   // way back.
   void navigateToHref(const std::string& href, bool savePosition = false);
-  // A link the reader activates -- a tap on its marker, the footnote button, a row of the footnote list. A note opens
-  // in the footnote popup over the page (openFootnotePopup), whose "Go to note" then follows it; anything else is
-  // followed at once, as navigateToHref(href, true). `marker` is the link's text as the page shows it.
-  void followLink(const std::string& href, const std::string& marker);
-  // The popup for a note: false when the link is not a note's (the preview store says so, or with no store its text is
-  // no marker), or its note could not be read or laid out, and the caller follows it instead. On the loop task, no
-  // lock held.
-  bool openFootnotePopup(const std::string& href, const std::string& marker);
+  // A link the reader activates -- a tap on its marker, the footnote button. `link` indexes currentPageFootnotes. A
+  // note opens in the footnote popup over the page (openFootnotePopup), whose "Go to note" then follows it; anything
+  // else is followed at once, as navigateToHref(href, true).
+  void followLink(size_t link);
+  // The same for a row picked in the footnote list, which hands back the link's href and text.
+  void followListedLink(const FootnoteResult& picked);
+  // The page's notes in page order: the links of currentPageFootnotes that open the popup. The preview store decides
+  // once the chapter's links have been scanned (a hit is a note, a miss navigation); without it the link's own text
+  // does, by the test the store's scan uses (FootnoteShape::isMarkerText): "12", "*", "[3]" are notes, "Chapter 2" is
+  // not. Under RenderLock.
+  struct PageNotes {
+    static constexpr uint16_t kMaxLinks = 64;  // Page::MAX_FOOTNOTES_PER_PAGE, checked where Page is complete
+    uint8_t count = 0;
+    uint8_t link[kMaxLinks] = {};
+  };
+  PageNotes pageNotes() const;
+  // The popup for link `link`: false when it is no note, or its note could not be read or laid out, and the caller
+  // follows it (followLink) or tries the next note (stepFootnotePopup). `atLastPage`: stepped back to, so it opens on
+  // the note's last page. On the loop task, no lock held.
+  bool openFootnotePopup(size_t link, bool atLastPage = false);
+  // The popup showing link `link` asked for the note `delta` (+1, -1) away among the page's notes: the first one from
+  // there that opens, or none, and the page is drawn again.
+  void stepFootnotePopup(size_t link, int delta);
   void restoreSavedPosition();
   // A followed link's anchor has resolved to `page` of the current spine: if that is where an
   // earlier link was followed from, unwinds the Back stack below it (EpubLinkBackStack::returnDepth).

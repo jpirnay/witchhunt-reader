@@ -19,7 +19,8 @@
 
 namespace {
 
-// The line along the sheet's top edge: the reader bars' bottom band draws the same (ReaderBarsLayout::Metrics::rule).
+// The line along the sheet's page-side edge: the reader bars' bottom band draws the same
+// (ReaderBarsLayout::Metrics::rule).
 constexpr int kRule = 2;
 
 bool contains(const Rect& r, const int x, const int y) {
@@ -31,7 +32,7 @@ bool contains(const Rect& r, const int x, const int y) {
 FootnotePopupActivity::FootnotePopupActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                              std::unique_ptr<Page> page, const int pageFontId, const int pageX,
                                              const int pageY, std::string marker, std::string href, std::string markup,
-                                             const LanguageHyphenator* hyphenator)
+                                             const LanguageHyphenator* hyphenator, const Place place)
     : Activity("FootnotePopup", renderer, mappedInput),
       page(std::move(page)),
       pageFontId(pageFontId),
@@ -40,7 +41,8 @@ FootnotePopupActivity::FootnotePopupActivity(GfxRenderer& renderer, MappedInputM
       marker(std::move(marker)),
       href(std::move(href)),
       markup(std::move(markup)),
-      hyphenator(hyphenator) {}
+      hyphenator(hyphenator),
+      place(place) {}
 
 bool FootnotePopupActivity::layOut() {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -50,9 +52,9 @@ bool FootnotePopupActivity::layOut() {
   const int inset = metrics.contentSidePadding;
   const int gap = metrics.verticalSpacing;
   const int lineHeight = renderer.getLineHeight(pageFontId);
-  // The rule, a gap, the title line, half a gap, the note, a gap.
+  // The rule, a gap, the title line, half a gap, the note, a gap; the rule on the edge that faces the page.
   const int chrome = kRule + gap + renderer.getLineHeight(UI_10_FONT_ID) + gap / 2 + gap;
-  // At most half the screen, so the page the note belongs to stays readable above it; a longer note pages.
+  // At most half the screen, so the page the note belongs to stays readable beside it; a longer note pages.
   const int bodyMax = std::max(lineHeight, area.height / 2 - chrome);
   const int bodyWidth = area.width - 2 * inset;
   if (!body.layOut(renderer, std::move(markup), /*html=*/true, FootnotePreviews::MAX_NOTE_MARKUP_BYTES, pageFontId,
@@ -62,10 +64,17 @@ bool FootnotePopupActivity::layOut() {
   }
   const int bodyHeight = body.pageCount() > 1 ? bodyMax : std::max(lineHeight, body.usedHeight(renderer, 0));
   const int sheetHeight = chrome + bodyHeight;
-  sheet = Rect{area.x, area.y + area.height - sheetHeight, area.width, sheetHeight};
-  headerY = sheet.y + kRule + gap;
+  if (place.sheetAtTop) {
+    sheet = Rect{area.x, area.y, area.width, sheetHeight};
+    ruleY = sheet.y + sheet.height - kRule;
+    headerY = sheet.y + gap;
+  } else {
+    sheet = Rect{area.x, area.y + area.height - sheetHeight, area.width, sheetHeight};
+    ruleY = sheet.y;
+    headerY = sheet.y + kRule + gap;
+  }
   bodyBox = Rect{area.x + inset, headerY + renderer.getLineHeight(UI_10_FONT_ID) + gap / 2, bodyWidth, bodyHeight};
-  currentPage = 0;
+  currentPage = place.startAtLastPage ? body.pageCount() - 1 : 0;
   return true;
 }
 
@@ -86,13 +95,22 @@ void FootnotePopupActivity::goToNote() {
   finish();
 }
 
+void FootnotePopupActivity::step(const int delta) {
+  setResult(FootnoteStepResult{static_cast<int8_t>(delta)});
+  finish();
+}
+
 bool FootnotePopupActivity::nextPage() {
   if (currentPage + 1 < body.pageCount()) {
     currentPage++;
     requestUpdate();
     return true;
   }
-  close();
+  if (hasNextNote()) {
+    step(+1);
+  } else {
+    close();
+  }
   return false;
 }
 
@@ -102,7 +120,11 @@ bool FootnotePopupActivity::previousPage() {
     requestUpdate();
     return true;
   }
-  close();
+  if (hasPreviousNote()) {
+    step(-1);
+  } else {
+    close();
+  }
   return false;
 }
 
@@ -115,19 +137,21 @@ bool FootnotePopupActivity::handleTap() {
   // note are there.
   if (mappedInput.peekScreenTapIn(touchtransform::Portrait, x, y) && ButtonHintStrip::hitTest(x, y) >= 0) return false;
   if (!mappedInput.wasScreenTapped(x, y)) return false;
-  // On the page above the sheet: closed, as a tap beside a drawer closes it.
-  if (contains(area, x, y) && y < sheet.y) {
+  // On the page beside the sheet: closed, as a tap beside a drawer closes it.
+  const bool onPage = place.sheetAtTop ? y >= sheet.y + sheet.height : y < sheet.y;
+  if (contains(area, x, y) && onPage) {
     close();
     return true;
   }
-  // A long note pages by its halves, as a book page does.
-  if (body.pageCount() > 1) {
+  // The note's halves page it, as a book page's do, and go on to the next or previous note; at the page's first or last
+  // note a tap there does nothing (the page beside the sheet closes it).
+  if (body.pageCount() > 1 || place.count > 1) {
     switch (TapZones::halfOfBand(x, y, bodyBox.x, bodyBox.y, bodyBox.width, bodyBox.height)) {
       case TapZones::Half::Previous:
-        if (currentPage > 0) previousPage();
+        if (currentPage > 0 || hasPreviousNote()) previousPage();
         return true;
       case TapZones::Half::Next:
-        if (currentPage + 1 < body.pageCount()) nextPage();
+        if (currentPage + 1 < body.pageCount() || hasNextNote()) nextPage();
         return true;
       case TapZones::Half::None:
         break;
@@ -204,17 +228,23 @@ void FootnotePopupActivity::render(RenderLock&&) {
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
   renderer.fillRect(sheet.x, sheet.y, sheet.width, sheet.height, false);
-  // A page line the sheet's edge would cut goes whole: half a line of text above the rule reads as a fault. A line's
+  // A page line the sheet's edge would cut goes whole: half a line of text beside the rule reads as a fault. A line's
   // yPos is its top; a vertical page's lines run across the screen and are left as they are.
   if (page && !page->isVertical()) {
     const int lineHeight = renderer.getLineHeight(pageFontId);
-    int coverTop = sheet.y;
+    const int edge = place.sheetAtTop ? sheet.y + sheet.height : sheet.y;
+    int coverFrom = edge;
+    int coverTo = edge;
     for (const auto& element : page->elements) {
       if (!element || element->getTag() != TAG_PageLine) continue;
       const int top = pageY + element->yPos;
-      if (top < sheet.y && top + lineHeight > sheet.y) coverTop = std::min(coverTop, top);
+      if (top >= edge || top + lineHeight <= edge) continue;
+      coverFrom = std::min(coverFrom, top);
+      coverTo = std::max(coverTo, top + lineHeight);
     }
-    if (coverTop < sheet.y) renderer.fillRect(sheet.x, coverTop, sheet.width, sheet.y - coverTop, false);
+    if (place.sheetAtTop && coverTo > edge) renderer.fillRect(sheet.x, edge, sheet.width, coverTo - edge, false);
+    if (!place.sheetAtTop && coverFrom < edge)
+      renderer.fillRect(sheet.x, coverFrom, sheet.width, edge - coverFrom, false);
   }
   if (area.y > 0) renderer.fillRect(0, 0, screenWidth, area.y, false);
   if (area.y + area.height < screenHeight) {
@@ -224,29 +254,34 @@ void FootnotePopupActivity::render(RenderLock&&) {
   if (area.x + area.width < screenWidth) {
     renderer.fillRect(area.x + area.width, 0, screenWidth - area.x - area.width, screenHeight, false);
   }
-  renderer.fillRect(sheet.x, sheet.y, sheet.width, kRule, true);
+  renderer.fillRect(sheet.x, ruleY, sheet.width, kRule, true);
 
-  // The title: which note this is, and on a long one which page of it.
-  char title[64];
-  if (marker.empty()) {
-    snprintf(title, sizeof(title), "%s", tr(STR_NOTE));
-  } else {
-    snprintf(title, sizeof(title), "%s %s", tr(STR_NOTE), marker.c_str());
+  // The title: which note this is, and where it stands among the page's notes; on a long note, right, which page of it.
+  char title[96];
+  int used = marker.empty() ? snprintf(title, sizeof(title), "%s", tr(STR_NOTE))
+                            : snprintf(title, sizeof(title), "%s %s", tr(STR_NOTE), marker.c_str());
+  if (place.count > 1 && used > 0 && static_cast<size_t>(used) < sizeof(title)) {
+    char position[32];
+    snprintf(position, sizeof(position), tr(STR_NOTE_POSITION), place.position + 1, static_cast<int>(place.count));
+    snprintf(title + used, sizeof(title) - used, "  \xC2\xB7  %s", position);
   }
-  const int titleWidth = std::max(0, bodyBox.width / 2);
+  int counterWidth = 0;
+  char counter[16] = {};
+  if (body.pageCount() > 1) {
+    snprintf(counter, sizeof(counter), "%d/%d", currentPage + 1, body.pageCount());
+    counterWidth = renderer.getTextWidth(UI_10_FONT_ID, counter);
+    renderer.drawText(UI_10_FONT_ID, bodyBox.x + bodyBox.width - counterWidth, headerY, counter);
+  }
+  const int titleWidth = std::max(0, bodyBox.width - (counterWidth > 0 ? counterWidth + 16 : 0));
   const std::string shownTitle = renderer.truncatedText(UI_10_FONT_ID, title, titleWidth, EpdFontFamily::BOLD);
   renderer.drawText(UI_10_FONT_ID, bodyBox.x, headerY, shownTitle.c_str(), true, EpdFontFamily::BOLD);
-  if (body.pageCount() > 1) {
-    char counter[16];
-    snprintf(counter, sizeof(counter), "%d/%d", currentPage + 1, body.pageCount());
-    renderer.drawText(UI_10_FONT_ID, bodyBox.x + bodyBox.width - renderer.getTextWidth(UI_10_FONT_ID, counter), headerY,
-                      counter);
-  }
 
   body.draw(renderer, currentPage, bodyBox.x, bodyBox.y);
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_GO_TO_NOTE), currentPage > 0 ? "<" : "",
-                                            currentPage + 1 < body.pageCount() ? ">" : "");
+  // "<" and ">" while the keys have somewhere to go: another page of this note, or another note on the page.
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), tr(STR_GO_TO_NOTE), currentPage > 0 || hasPreviousNote() ? "<" : "",
+                            currentPage + 1 < body.pageCount() || hasNextNote() ? ">" : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

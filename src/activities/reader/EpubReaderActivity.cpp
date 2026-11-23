@@ -3399,7 +3399,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           [this](const ActivityResult& result) {
             if (!result.isCancelled) {
               const auto& footnoteResult = std::get<FootnoteResult>(result.data);
-              followLink(footnoteResult.href, footnoteResult.marker);
+              followListedLink(footnoteResult);
             }
             requestUpdate();
           });
@@ -8359,38 +8359,81 @@ bool EpubReaderActivity::handleLinkTouch() {
 
   mappedInput.suppressTouchContact();
   LOG_DBG("ERS", "Link tap at (%d,%d) -> %s", x, y, currentPageFootnotes[link].href);
-  // Copied out: the list belongs to the page on screen, and the popup draws the page again.
-  const FootnoteEntry entry = currentPageFootnotes[link];
-  followLink(entry.href, entry.number);
+  followLink(static_cast<size_t>(link));
   return true;
 #endif  // CP_TOUCH_UI
 }
 
-void EpubReaderActivity::followLink(const std::string& href, const std::string& marker) {
-  if (openFootnotePopup(href, marker)) return;
+void EpubReaderActivity::followLink(const size_t link) {
+  if (openFootnotePopup(link)) return;
+  std::string href;
+  {
+    RenderLock lock(*this);
+    if (link >= currentPageFootnotes.size()) return;
+    href = currentPageFootnotes[link].href;
+  }
   navigateToHref(href, true);
 }
 
-// Only a note opens the popup. The preview store knows which links are notes once the chapter's links have been
-// scanned (inline previews on): a hit is a note, a miss is navigation. Without it the link's own text decides, by the
-// same test the store's scan uses (FootnoteShape::isMarkerText): "12", "*", "[3]" are notes, "Chapter 2" is not.
-//
-// The page goes with the popup, which draws it under the sheet itself: what the frame buffers hold here may be a
-// pre-rendered next page, or lent to a build.
-bool EpubReaderActivity::openFootnotePopup(const std::string& href, const std::string& marker) {
-  if (!epub || href.empty()) return false;
+void EpubReaderActivity::followListedLink(const FootnoteResult& picked) {
+  // The list hands back what it showed; the page's own entry is found again by it, as the popup steps by index.
+  size_t found = SIZE_MAX;
   {
     RenderLock lock(*this);
-    if (!section) return false;
-    bool note = FootnoteShape::isMarkerText(marker.c_str(), marker.size());
-    // cacheExists() first: it asks without opening, so a book with no store logs no failed open.
-    if (FootnotePreviews::cacheExists(epub->getCachePath()) &&
-        FootnotePreviews::spineResolved(epub->getCachePath(), currentSpineIndex)) {
-      FootnotePreviews::Lookup lookup;
-      std::string preview;
-      note = lookup.open(epub->getCachePath(), epub.get(), currentSpineIndex) && lookup.find(href.c_str(), preview);
+    for (size_t i = 0; i < currentPageFootnotes.size(); ++i) {
+      if (picked.href == currentPageFootnotes[i].href && picked.marker == currentPageFootnotes[i].number) {
+        found = i;
+        break;
+      }
     }
-    if (!note) return false;
+  }
+  if (found != SIZE_MAX) {
+    followLink(found);
+    return;
+  }
+  navigateToHref(picked.href, true);
+}
+
+EpubReaderActivity::PageNotes EpubReaderActivity::pageNotes() const {
+  static_assert(PageNotes::kMaxLinks == Page::MAX_FOOTNOTES_PER_PAGE,
+                "PageNotes holds one entry for each link a page can carry");
+  static_assert(Page::MAX_FOOTNOTES_PER_PAGE <= 256, "PageNotes indexes links in a uint8_t");
+  PageNotes notes;
+  if (!epub) return notes;
+  // cacheExists() first: it asks without opening, so a book with no store logs no failed open.
+  const bool storeDecides = FootnotePreviews::cacheExists(epub->getCachePath()) &&
+                            FootnotePreviews::spineResolved(epub->getCachePath(), currentSpineIndex);
+  FootnotePreviews::Lookup lookup;
+  const bool lookupOpen = storeDecides && lookup.open(epub->getCachePath(), epub.get(), currentSpineIndex);
+  std::string preview;
+  for (size_t i = 0; i < currentPageFootnotes.size() && notes.count < PageNotes::kMaxLinks; ++i) {
+    const FootnoteEntry& entry = currentPageFootnotes[i];
+    const bool note = storeDecides ? lookupOpen && lookup.find(entry.href, preview)
+                                   : FootnoteShape::isMarkerText(entry.number, strlen(entry.number));
+    if (note) notes.link[notes.count++] = static_cast<uint8_t>(i);
+  }
+  return notes;
+}
+
+// The page goes with the popup, which draws it under the sheet itself: what the frame buffers hold here may be a
+// pre-rendered next page, or lent to a build.
+bool EpubReaderActivity::openFootnotePopup(const size_t link, const bool atLastPage) {
+  if (!epub) return false;
+  FootnoteEntry entry;
+  FootnotePopupActivity::Place place;
+  {
+    RenderLock lock(*this);
+    if (!section || link >= currentPageFootnotes.size()) return false;
+    entry = currentPageFootnotes[link];
+    const PageNotes notes = pageNotes();
+    int position = -1;
+    for (uint8_t i = 0; i < notes.count; ++i) {
+      if (notes.link[i] == link) position = i;
+    }
+    if (position < 0) return false;
+    place.position = static_cast<uint8_t>(position);
+    place.count = notes.count;
+    place.startAtLastPage = atLastPage;
   }
 
   // Before the note is read: a look-ahead build holds the heap and the frame buffer the capture and the layout want.
@@ -8409,7 +8452,7 @@ bool EpubReaderActivity::openFootnotePopup(const std::string& href, const std::s
       prepareForOverlay("FootnotePopup");
       renderer.syncWriteBufferFromDisplayed();
       LentSecondary lend(renderer, arenaOfBuildHoldingBuffer());
-      captured = FootnotePreviews::captureNote(*epub, currentSpineIndex, href.c_str(), markup, lend.arena());
+      captured = FootnotePreviews::captureNote(*epub, currentSpineIndex, entry.href, markup, lend.arena());
       lend.giveBack();
       // During an active build the on-disk LUT is not written yet, so the page comes from the in-memory one, as the
       // dictionary's does.
@@ -8427,9 +8470,26 @@ bool EpubReaderActivity::openFootnotePopup(const std::string& href, const std::s
 
   const RenderLayout layout = computeRenderLayout();
   const int contentTop = layout.marginTop + ReaderPageLayout::imageOnlyPageYOffset(*page, layout.viewportHeight);
+  {
+    // The sheet takes the half of the screen the marker is not in, so the sentence that calls the note stays in view.
+    // A marker the walk does not find (one the page has no word for) leaves it at the bottom.
+    RenderLock lock(*this);
+    struct Find {
+      size_t link;
+      int centre;
+    } find{link, -1};
+    visitPageLinkBoxes(
+        *page, layout.marginLeft, contentTop,
+        [](void* ctx, int, const int top, int, const int bottom, const size_t found) {
+          auto& f = *static_cast<Find*>(ctx);
+          if (found == f.link && f.centre < 0) f.centre = (top + bottom) / 2;
+        },
+        &find);
+    place.sheetAtTop = find.centre >= renderer.getScreenHeight(renderer.getHeldOrientation()) / 2;
+  }
   auto popup = makeUniqueNoThrow<FootnotePopupActivity>(
-      renderer, mappedInput, std::move(page), getEffectiveReaderFontId(), layout.marginLeft, contentTop, marker, href,
-      std::move(markup), TypographyProfile::forLanguage(epub->getLanguage()).hyphenator);
+      renderer, mappedInput, std::move(page), getEffectiveReaderFontId(), layout.marginLeft, contentTop, entry.number,
+      entry.href, std::move(markup), TypographyProfile::forLanguage(epub->getLanguage()).hyphenator, place);
   bool laidOut = false;
   if (popup) {
     // The reader's font may be a TrueType face, measured only under the lock.
@@ -8440,14 +8500,39 @@ bool EpubReaderActivity::openFootnotePopup(const std::string& href, const std::s
     resumeBackgroundWork();
     return false;
   }
-  LOG_DBG("ERS", "Footnote popup for %s", href.c_str());
-  startActivityForResult(std::move(popup), [this](const ActivityResult& result) {
+  LOG_DBG("ERS", "Footnote popup for %s: note %u of %u, sheet at the %s", entry.href, place.position + 1u,
+          static_cast<unsigned>(place.count), place.sheetAtTop ? "top" : "bottom");
+  startActivityForResult(std::move(popup), [this, link](const ActivityResult& result) {
     resumeBackgroundWork();
-    const auto* note = result.isCancelled ? nullptr : std::get_if<FootnoteResult>(&result.data);
-    if (note) navigateToHref(note->href, true);
+    if (!result.isCancelled) {
+      if (const auto* note = std::get_if<FootnoteResult>(&result.data)) {
+        navigateToHref(note->href, true);
+      } else if (const auto* step = std::get_if<FootnoteStepResult>(&result.data)) {
+        stepFootnotePopup(link, step->delta);
+      }
+    }
     requestUpdate();
   });
   return true;
+}
+
+void EpubReaderActivity::stepFootnotePopup(const size_t link, const int delta) {
+  PageNotes notes;
+  {
+    RenderLock lock(*this);
+    notes = pageNotes();
+  }
+  int at = -1;
+  for (uint8_t i = 0; i < notes.count; ++i) {
+    if (notes.link[i] == link) at = i;
+  }
+  if (at < 0 || delta == 0) return;
+  // A note that cannot be read is stepped over, not followed: the reader is going through the notes, not leaving.
+  for (int i = at + delta; i >= 0 && i < notes.count; i += delta) {
+    if (openFootnotePopup(notes.link[i], /*atLastPage=*/delta < 0)) return;
+    LOG_INF("ERS", "Footnote popup: note %d of %u could not be shown; stepping past it", i + 1,
+            static_cast<unsigned>(notes.count));
+  }
 }
 
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {
@@ -9537,8 +9622,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
     case BA::BTN_FOOTNOTES:
       if (!currentPageFootnotes.empty()) {
         if (currentPageFootnotes.size() == 1) {
-          const FootnoteEntry entry = currentPageFootnotes[0];
-          followLink(entry.href, entry.number);
+          followLink(0);
         } else {
           auto linkInfo = pageLinkInfoForCurrentPage();
           startActivityForResult(
@@ -9547,7 +9631,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
               [this](const ActivityResult& result) {
                 if (!result.isCancelled) {
                   const auto& footnoteResult = std::get<FootnoteResult>(result.data);
-                  followLink(footnoteResult.href, footnoteResult.marker);
+                  followListedLink(footnoteResult);
                 }
               });
         }
