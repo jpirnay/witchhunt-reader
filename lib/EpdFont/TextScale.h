@@ -7,7 +7,7 @@
 // largest scale is 4096.
 //
 // Integer only. The C3 boards have no FPU, and text is scaled per glyph and per word, so a float scale cost
-// soft-float calls in the reader's hottest loops (docs/future_work/integer-math.md).
+// soft-float calls in the reader's hottest loops (docs/design/integer-math.md).
 //
 // A scale is rounded up onto its grid (ratio(), percent(), a product), so v x scale lands on or just above the exact
 // v x num / den, never below. Measured against the float expressions this type replaced (test/text_scale): a product

@@ -4,7 +4,7 @@
 #include <cstdint>
 
 // Decimal fixed point: an integer that counts 10^-decimals of a unit (tenths of a degree, millionths of a degree).
-// The C3 has no FPU, so the firmware keeps such values in integers (docs/future_work/integer-math.md); these turn them
+// The C3 has no FPU, so the firmware keeps such values in integers (docs/design/integer-math.md); these turn them
 // into text and back, and take in a float that a library hands over (ArduinoJson's numbers) once, where it arrives.
 // Values are int32; decimals go up to 9.
 namespace fixed_decimal {

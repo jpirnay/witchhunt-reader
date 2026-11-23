@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
-// The weather's numbers as integers in a stated unit, since the C3 has no FPU (docs/future_work/integer-math.md).
+// The weather's numbers as integers in a stated unit, since the C3 has no FPU (docs/design/integer-math.md).
 // WeatherClient converts each where it reads the API's JSON, so that the screen shows what it showed when they were
 // floats. Open-Meteo sends temperature and wind speed with one decimal and the UV index with two (seen 2026-11-21):
 // kept whole, they round to the shown whole number as lroundf did. Precipitation comes with two decimals in mm and
