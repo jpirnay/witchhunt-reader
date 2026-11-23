@@ -822,6 +822,7 @@ STR_DELETE_FOLDER_QUESTION: "Удалить папку со всем содер�
 STR_BTN_DEF_NOTHING: "Ничего"
 STR_ALL_FILES: "Все файлы"
 STR_FIRMWARE_WRONG_DEVICE: "Несовместимая прошивка"
+STR_FIRMWARE_NO_CHECKSUM: "У обновления нет контрольной суммы"
 STR_BROWSER_VIEW: "Вид книг"
 STR_VIEW_FILENAMES: "Имена файлов"
 STR_VIEW_DETAILS: "Подробно"

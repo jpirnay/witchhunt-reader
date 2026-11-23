@@ -923,6 +923,7 @@ STR_INVALID_FIRMWARE: "Жарамсыз микробағдарлама файл�
 STR_FIRMWARE_TOO_LARGE: "Микробағдарлама бөлімге тым үлкен"
 STR_FIRMWARE_TOO_SMALL: "Микробағдарлама файлы тым кіші"
 STR_FIRMWARE_WRONG_DEVICE: "Микробағдарлама басқа құрылғыға арналған"
+STR_FIRMWARE_NO_CHECKSUM: "Жаңартудың бақылау сомасы жоқ"
 STR_FIRMWARE_UPDATE_PROMPT: "Микробағдарлама жаңартылсын ба?"
 STR_FIRMWARE_FILE_OPEN_FAILED: "Файл ашылмады"
 STR_FIRMWARE_WRITE_FAILED: "Микробағдарлама жазылмады"

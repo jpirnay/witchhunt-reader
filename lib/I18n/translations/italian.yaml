@@ -822,6 +822,7 @@ STR_DELETE_FOLDER_QUESTION: "Eliminare questa cartella e tutto il suo contenuto?
 STR_BTN_DEF_NOTHING: "Niente"
 STR_ALL_FILES: "Tutti i file"
 STR_FIRMWARE_WRONG_DEVICE: "Firmware per dispositivo diverso"
+STR_FIRMWARE_NO_CHECKSUM: "L'aggiornamento non ha un checksum"
 STR_BROWSER_VIEW: "Vista libri"
 STR_VIEW_FILENAMES: "Nomi file"
 STR_VIEW_DETAILS: "Dettagli"
