@@ -1,0 +1,9 @@
+{
+  "name": "CacheCipher",
+  "version": "1.0.0",
+  "description": "Length-preserving, offset-addressable at-rest cipher (ChaCha20) for the per-book cache of protected EPUBs. Freestanding C++17: no Arduino, no allocation, no filesystem knowledge.",
+  "build": {
+    "srcFilter": ["+<CacheCipher.cpp>", "+<CacheKeys.cpp>"],
+    "includeDir": "."
+  }
+}

@@ -100,7 +100,19 @@ target_include_directories(crosspoint_test_common INTERFACE
   # For <TextScale.h>, which the settings, CSS and layout headers include; no other header there shares a name with a
   # test's own or a shim.
   ${REPO_ROOT}/lib/EpdFont
+  # The cache cipher (lib/CacheCipher, test/cache_cipher).
+  ${REPO_ROOT}/lib/CacheCipher
 )
+# ... and its sources, as a STATIC library: an OBJECT library's objects do not propagate
+# through an INTERFACE target here, and the failure is a bare linker error with no undefined
+# symbol named. One library rather than a copy per target, so the derivation pinned by
+# test/cache_cipher is the same code every other suite links.
+add_library(cache_cipher_host STATIC
+  ${REPO_ROOT}/lib/CacheCipher/CacheCipher.cpp
+  ${REPO_ROOT}/lib/CacheCipher/CacheKeys.cpp
+)
+target_include_directories(cache_cipher_host PUBLIC ${REPO_ROOT}/lib/CacheCipher)
+target_link_libraries(crosspoint_test_common INTERFACE cache_cipher_host)
 target_compile_options(crosspoint_test_common INTERFACE
   -Wall
   -Wextra
@@ -184,6 +196,7 @@ add_custom_target(i18n_generated DEPENDS ${I18N_GENERATED_KEYS} ${I18N_GENERATED
 add_subdirectory(${REPO_ROOT}/lib/SaxParser ${CMAKE_CURRENT_BINARY_DIR}/SaxParser)
 
 add_subdirectory(buffered_io)
+add_subdirectory(cache_cipher)
 add_subdirectory(natural_sort)
 add_subdirectory(home_clock_cadence)
 add_subdirectory(sidecar_files)
