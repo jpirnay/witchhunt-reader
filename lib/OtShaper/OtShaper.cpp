@@ -64,17 +64,15 @@ void runPause(const Pause pause, const Face& face, const Plan& plan, Buffer& buf
 // hb_ot_map_t::apply(): every stage's lookups, then its pause.
 OT_HOT void applyTable(const Face& face, const Scale& scale, const Plan& plan, Buffer& buffer, const int table) {
   size_t i = 0;
-  LookupSettings settings;
   for (const Stage& stage : plan.stages[table]) {
     for (; i < stage.lastLookup; i++) {
       // Only lookups that can start at a glyph the buffer holds.
       // witchhunt: deviation 13 - tested on the plan's copy of the digest, before settings() reads the font.
       if (!plan.mayApply(table, i, buffer.digest)) continue;
       // witchhunt: deviation 16 - and only when a glyph may start it, before settings() reads the font.
-      const unsigned startIdx = plan.firstStart(table, i, buffer);
-      if (startIdx >= buffer.len()) continue;
-      plan.fillSettings(table, i, false, settings, false);  // witchhunt: deviation 4 - see fontRecords
-      applyLookup(face, scale, buffer, table, plan.lookups[table][i].index, settings, startIdx);
+      if (!plan.mayStart(table, i, buffer)) continue;
+      const LookupSettings settings = plan.settings(table, i, false);  // witchhunt: deviation 4 - see fontRecords
+      applyLookup(face, scale, buffer, table, plan.lookups[table][i].index, settings);
       if (!buffer.successful) return;
     }
     if (stage.pause == Pause::None) continue;
