@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -249,6 +250,10 @@ class BaseTheme {
   // recent-book tile over the menu rows: it keeps the theme's tile height while the rows fit, and
   // otherwise gives up the gap, then tile height down to stackedHomeRules().minTileHeight.
   virtual HomeLayout homeLayout(const GfxRenderer& renderer, Rect content, int menuCount) const;
+
+  // How many entries besides Settings fit on Home; the rest go behind More (collectHomeMenuEntries).
+  // A theme whose menu grows or scrolls with the list has no limit.
+  virtual int homeMenuCapacity() const { return std::numeric_limits<int>::max(); }
 
   // Return the cover thumbnail sizes this theme needs for its home screen.
   // HomeActivity calls generateThumbBmp() for each pair. Empty = use height-only path.

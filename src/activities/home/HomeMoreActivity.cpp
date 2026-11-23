@@ -13,7 +13,7 @@ HomeMoreActivity::HomeMoreActivity(GfxRenderer& renderer, MappedInputManager& ma
   const HomeMenuAvailability availability{.hasBookmarks = GLOBAL_BOOKMARKS.hasAny()};
   std::vector<HomeMenuEntry> entries;
   entries.reserve(5);
-  collectHomeMenuEntries(HomeMenuPlacement::More, availability, entries);
+  collectHomeMenuEntries(HomeMenuPlacement::More, availability, entries, GUI.homeMenuCapacity());
 
   menuItems.reserve(entries.size());
   actions.reserve(entries.size());

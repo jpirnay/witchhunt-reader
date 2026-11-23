@@ -1,5 +1,8 @@
 #include "HomeMenu.h"
 
+#include <array>
+#include <iterator>
+
 #include "CrossPointSettings.h"
 
 namespace {
@@ -60,22 +63,36 @@ HomeMenuPlacement placementOf(const HomeMenuRow& row) {
 }  // namespace
 
 void collectHomeMenuEntries(const HomeMenuPlacement placement, const HomeMenuAvailability& availability,
-                            std::vector<HomeMenuEntry>& out) {
+                            std::vector<HomeMenuEntry>& out, const int homeCapacity) {
+  // Where each available row ends up: its setting, then the theme's room, in table order. The
+  // pinned row needs no room; it is never counted and never moved.
+  std::array<HomeMenuPlacement, std::size(kRows)> placed{};
   bool anyMovedToMore = false;
-  for (const HomeMenuRow& row : kRows) {
-    if (isAvailable(row.requirement, availability) && placementOf(row) == HomeMenuPlacement::More) {
+  int onHome = 0;
+  for (size_t i = 0; i < std::size(kRows); ++i) {
+    const HomeMenuRow& row = kRows[i];
+    if (!isAvailable(row.requirement, availability)) continue;
+    placed[i] = placementOf(row);
+    if (placed[i] == HomeMenuPlacement::More) {
       anyMovedToMore = true;
-      break;
+    } else if (row.shownOnHome != nullptr) {
+      if (onHome < homeCapacity) {
+        ++onHome;
+      } else {
+        placed[i] = HomeMenuPlacement::More;
+        anyMovedToMore = true;
+      }
     }
   }
 
-  for (const HomeMenuRow& row : kRows) {
+  for (size_t i = 0; i < std::size(kRows); ++i) {
+    const HomeMenuRow& row = kRows[i];
     if (!isAvailable(row.requirement, availability)) continue;
     // More goes directly above the pinned entry (Settings), the one that can never move to it.
     if (placement == HomeMenuPlacement::Home && anyMovedToMore && row.shownOnHome == nullptr) {
       out.push_back(kMoreEntry);
     }
-    if (placementOf(row) == placement) out.push_back(row.entry);
+    if (placed[i] == placement) out.push_back(row.entry);
   }
 }
 

@@ -3,6 +3,7 @@
 #include <I18n.h>
 
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "components/themes/BaseTheme.h"
@@ -39,8 +40,12 @@ enum class HomeMenuPlacement : uint8_t { Home, More };
 // entry is inserted before Settings whenever anything available was moved off the home screen,
 // so hiding an entry never makes it unreachable. Settings always stays on the home screen: it is
 // where the choice is undone.
+//
+// `homeCapacity` is how many entries besides Settings the theme has room for (BaseTheme::
+// homeMenuCapacity). Entries placed on Home past it go behind More as if they had been moved there,
+// so the two screens, which ask with the same capacity, agree on where each one is.
 void collectHomeMenuEntries(HomeMenuPlacement placement, const HomeMenuAvailability& availability,
-                            std::vector<HomeMenuEntry>& out);
+                            std::vector<HomeMenuEntry>& out, int homeCapacity = std::numeric_limits<int>::max());
 
 // The Library entry's setting for a settings file written before it existed, when Browse Files and
 // Recent Books had an entry each: shown on the home screen if either was.
