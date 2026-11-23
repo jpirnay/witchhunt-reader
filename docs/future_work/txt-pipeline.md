@@ -1,6 +1,7 @@
 # TXT on the EPUB pipeline
 
-Status: decided 2026-11-06, not started. Code references are to master at `17e2ba942`, by symbol.
+Status: decided 2026-11-06, not started, and parked by the maintainer the same day. Checked against master on 2026-11-23
+(1a9f93b08); code references are by symbol.
 
 ## Decisions
 
@@ -57,12 +58,14 @@ allocation. It does five things at once:
 5. writes `book.bin` through the usual calls: `beginWrite`, `beginContentOpfPass`, `createSpineEntry`,
    `endContentOpfPass`, `beginTocPass`, `createTocEntry`, `endWrite`, `buildBookBin`.
 
-No HTML is written to the card: a spine is turned into HTML as it is read.
+No HTML is written at the first open. A spine is turned into HTML when its section is built
+([below](#the-section-build-reads-the-html)).
 
 ### Spines
 
-**A spine is a byte range of the `.txt`.** A long file cannot be one spine: there is no partial section build, so opening
-it would lay out the whole novel first, and `Page::MAX_PAGES_PER_SECTION` stops at 10,000 pages.
+**A spine is a byte range of the `.txt`.** A long file cannot be one spine: a section is built whole, so the reader would
+wait behind the whole novel's layout for everything past its first page (shown mid-build since #789), and
+`Page::MAX_PAGES_PER_SECTION` stops at 10,000 pages.
 - **Boundaries:** at each heading, and at a line end once a spine reaches a size cap. 64 KB (about 21,000 CJK characters,
   60-70 pages) is a first guess, to tune on a device. The optimizer's own limit is 32 KB.
 - **The range lives in the href,** `txt/<start>-<end>.html`, with the same string in the TOC, so the existing href pass
@@ -113,9 +116,11 @@ lines.
 What Latin text keeps is open: upstream turns leading spaces into NBSP, which keeps ASCII layouts and makes every indented
 paragraph look typed.
 
-**Indent.** A `<p>` with no CSS takes `ParsedText::applyParagraphIndent`'s fallback: one em, and only with Extra Paragraph
-Spacing off, which is not the default. So a Chinese TXT would get no indent until `TypographyProfile` carries a default:
-2 em for Chinese, 1 em for Japanese and Korean. crossmux gives every CJK language 2 em and does not look for a literal
+**Indent.** Under the default Paragraph Indent, Book's Style (`ParagraphIndent::FromBook`, #717), a `<p>` with no CSS
+gets one em, and only with Extra Paragraph Spacing off, which is not the default (`resolveParagraphIndent`,
+`ParagraphIndent.h`). A reader can choose a fixed 2 em, which applies either way. So under the defaults a Chinese TXT
+gets no indent until `TypographyProfile` carries a default for Book's Style: 2 em for Chinese, 1 em for Japanese and
+Korean. crossmux gives every CJK language 2 em and does not look for a literal
 U+3000; ours should, for EPUBs: U+3000 opens 96% of the paragraphs in *Bei Jing Gu Shi* and 53% in the Hayakawa book.
 
 ### Language and font
@@ -136,7 +141,9 @@ and per-book overrides. The `txt*` settings stay for Markdown. A custom TXT size
 |---|---|
 | `load`, `loadForMetadata`, `loadForCover` | the scan instead of the OPF and TOC parsers; `book.bin` as usual |
 | `clearCacheIfContentChanged`, `computeZipFingerprint` | file size and `getModifyDateTime` instead of the central directory |
-| `readSpineItemToStream`, `getSpineItemInflatedSize` | the byte range through the HTML writer; the range's length |
+| `Section::runBuildParse`, phase (a) (today a `ZipFile::EntryReader` over the book) | the HTML writer over the spine's byte range, into the same file ([below](#the-section-build-reads-the-html)) |
+| `getSpineItemStat`, `getSpineItemInflatedSize` (`Section::resolveSpineStat`) | no ZIP entry; the size of the spine's HTML, counted by the scan or the writer, not the range's length |
+| `readSpineItemToStream` (the body-size census in `BodySize.cpp`, the Publisher Fonts probe in `BookFonts.cpp`) | skipped: a TXT has one size and no fonts of its own |
 | `buildBookBin` | no ZIP walk: sizes from the hrefs (upstream's `isZip`) |
 | `discoverCssFilesFromZip`, `parseCssFiles`, `loadImageManifest` | nothing to do |
 | `readItemContentsToStream`, `getItemSize`, `extractItemToFile`, `readItemHeaderBytes`, `getStoredItemRange` | no items: false |
@@ -146,35 +153,63 @@ and per-book overrides. The `txt*` settings stay for Markdown. A custom TXT size
 **The cache folder stays.** Have `Epub::cachePathFor` keep `/txt_<hash>` for `.txt`: the hash is the same, no folder moves,
 and every `Txt(path, ...).getCachePath()` call keeps working. `Txt` stays for Markdown in any case.
 
+### The section build reads the HTML
+
+A section build does not read a spine through `readSpineItemToStream`. `Section::runBuildParse` writes the spine's text
+to a file on the card first (phase (a): a `ZipFile::EntryReader` inflates the entry), and the parser then reads that file
+in slices (phase (b)). The file is kept as the spine's HTML cache (`Section::sectionHtmlCachePath`,
+`spines/<bucket>/html_<n>.bin`), keyed on the spine alone, and a later build reuses it when its size equals the size
+`resolveSpineStat` resolved.
+
+So the TXT branch replaces phase (a)'s source: the HTML writer over the spine's byte range writes that file, and phase
+(b) and everything after it stay as they are. The HTML does reach the card, once a spine is built, as an EPUB's inflated
+entry does, and a relayout reuses it. `getSpineItemInflatedSize` must answer the HTML's size, not the range's, or the
+reuse check never matches.
+
 ### The reader
 
 `.txt` goes through `onGoToEpubReader`, and `TxtReaderActivity` is deleted. `LineReaderActivity` stays for Markdown,
 then with one subclass. Markdown stays out: our reader has its own tables and code frames, which the EPUB path would lose.
 
 **Sites that tell the formats apart,** each to review:
-- `ReaderActivity`: `isTxtFile`, `onGoToTxtReader`, `loadTxt`, and about eight `hasEpubExtension` checks;
+- `ReaderActivity`: `isTxtFile`, `onGoToTxtReader`, `loadTxt`, and eight `hasEpubExtension` checks;
 - `SleepActivity`: the overlay calls `TxtReaderActivity::drawCurrentPageToBuffer`; the progress and cover branches;
 - `FinishedBookActivity`, `BookProgressPresentation`, `BookDetails`, `HomeActivity`, `LyraCarouselTheme`, `RecentBooksStore`;
-- `FileBrowserActivity` (it writes `progress.bin`), `BookRelocation`, `CrossPointWebServer`, `WebDAVHandler`;
+- `FileBrowserActivity` (it writes `progress.bin`), `FileBrowserModel`, `FileContextMenuActivity`, `BookRelocation`,
+  `CrossPointWebServer`, `WebDAVHandler`;
+- `ClearCacheActivity`, `UITheme`, `RecentBookMetadata`;
 - `main.cpp`: the `isTxtMd` branch.
 
-**To hide:** the Sync tab (`MenuTab::Sync`), as KOSync positions name items in a ZIP.
+**To hide:** KOSync, as its positions name items in a ZIP: the reader menu's Sync tab (`MenuTab::Sync`), the reader
+bars' Sync Pull and Sync Push (`ReaderBarsController`, `hasSync`), the `koreaderSync` key action
+(`ButtonActionNames.h`) and the auto-sync (`KOReaderAutoSync`, called from the reader, `SleepActivity` and `main.cpp`).
 
 **Comes free:** kinsoku, punctuation, the grid, justification, line spacing, hyphenation, the dictionary, pre-render,
-background builds, the chapter menu, per-book overrides. A book's language also chooses right-to-left page turns and the
+background builds, the chapter menu, per-book overrides, book search (#768), bookmarks that follow their text through a
+relayout (#785). A book's language also chooses right-to-left page turns and the
 Hebrew, Arabic, Indic and Myanmar families and their shaping (#645, #656, #664, #665, #671); a TXT file gets those only
 on this pipeline. Today, since #666, each TXT line goes through `GfxRenderer::drawText` and so is reordered line by line,
 with no paragraph direction: a right-to-left line is right aligned only if the alignment setting says so.
 
 ### Reading state
 
-Today's `progress.bin` is 6 bytes, page and byte offset, beside `index.bin` with every page's offset. A leftover `index.bin`
-marks an old cache. On the first open after the move:
-- **Progress:** take the offset, find the spine whose range holds it, open at that fraction of the spine, delete `index.bin`.
-  Landing within a page of the old place is enough, once. Check that the old file cannot be read as the EPUB format first.
-- **Starred pages:** stored as spine 0 plus a page number, for `BookmarkStore` and `GLOBAL_BOOKMARKS`. Their offsets come
-  from `index.bin` the same way, but a new page number needs the spine laid out. Converting when that spine is first built
-  costs code; dropping them costs the reader's bookmarks. Decide.
+Today's `progress.bin` is 7 bytes, page (2), byte offset (4) and percent (1), as `LineReaderActivity::saveProgress`
+writes it; a bookmark jump writes 6 (`TxtReaderActivity::applyPendingBookmarkJump`). Beside it, `index.bin` holds every
+page's offset. 7 bytes is also the short form of the EPUB progress record (`EpubProgressRecord.h`: spine, page, page
+count, percent), so an old file reads as a valid EPUB record. The migration keys on the leftover `index.bin`, never on
+the file. On the first open after the move:
+- **Progress:** take the offset, find the spine whose range holds it, and write an EPUB record with that spine and the
+  offset's place in the spine's visible text (`EpubProgressRecord::visibleOffset`), which the reader lands on under any
+  layout; then delete `index.bin`. The visible text is the HTML writer's output, so the writer must map a byte offset to
+  it (a dropped NUL, a skipped BOM, stripped leading whitespace).
+- **Bookmarks:** a TXT bookmark is spine 0 plus a page number (`BookmarkStore`, `GLOBAL_BOOKMARKS`) with an empty anchor
+  (`StarAnchor`, `src/Bookmark.h`). Their offsets come from `index.bin` the same way, but a page in the new layout needs
+  the spine laid out. Decide:
+  - **convert:** write each bookmark's spine and its text offset in that spine (`StarAnchor::offset`, mapped as for
+    progress), and let `StarAnchoring::settleKnown` move it onto the page that holds it once the spine is built, as it
+    moves an EPUB bookmark after a relayout (#785, #787). That needs only the mapping progress needs too. To check:
+    `settleKnown` keeps the page of an anchor whose layout is 0, so a converted one must name a layout no build has.
+  - **drop them**, which costs the reader's bookmarks.
 
 ### A file that is not UTF-8
 
@@ -198,9 +233,9 @@ Runs in the browser, so firmware pays nothing. `TextDecoder` holds every legacy 
 | EUC-KR (cp949) | 47,880 B | 13,190 B |
 | All four | 157,884 B | 57,913 B |
 
-Against about 224 KB free in the `default` app slot on 2026-11-09. Compressed means delta plus zlib over a whole table;
-random access would need chunks and cost more. If a device-only path is ever wanted, the tables can be an optional download
-to the card, still no flash.
+#868 reports the `default` build at 6,178,901 B of the 6,553,600 B app slot. Compressed means delta plus zlib over a
+whole table; random access would need chunks and cost more. If a device-only path is ever wanted, the tables can be an
+optional download to the card, still no flash.
 
 ### Where it sits
 
@@ -269,7 +304,8 @@ Node 22 accepted all twelve labels. The Encoding Standard requires them of brows
 
 Each is its own plan and PR.
 1. The scan and the HTML writer in `lib/Txt`, with host tests, nothing routed to them.
-2. The indent default in `TypographyProfile`, with U+3000 detection. Useful to EPUBs alone, and independent of the rest.
+2. Book's Style's indent default in `TypographyProfile`, with U+3000 detection. Useful to EPUBs alone, and independent
+   of the rest.
 3. The move: the `Epub` branches, the reader, the state migration, the device message, `TxtReaderActivity` deleted.
 4. The converter.
 
@@ -294,7 +330,7 @@ Each is its own plan and PR.
 ## Open
 
 - Whether a custom TXT font size carries over.
-- Bookmarks: convert or drop.
+- Bookmarks: convert or drop (converting is cheap now, under "Reading state").
 - Leading spaces in Latin text.
 - The size cap, the shape rule, the 5% message threshold: all first guesses, to set on real files.
 - Is there a test file set? All detection so far used text re-encoded from our EPUBs. Real GBK, Big5 and Shift-JIS novels from
