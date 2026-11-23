@@ -62,7 +62,8 @@ class FolderTable {
 
   const Info* find(const char* folder, size_t len);
   void put(const char* folder, size_t len, const Info& info);
-  // Drops every entry `path` is inside of or contains.
+  // Drops the entry of a folder that `path` is, lies in, or is the marker of: what a remove or rename of `path` can
+  // change. Any other file inside it leaves the entry as it was.
   void forget(const char* path);
   void clear();
 

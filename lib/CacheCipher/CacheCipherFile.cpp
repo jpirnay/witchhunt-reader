@@ -111,12 +111,16 @@ void FolderTable::forget(const char* path) {
   const size_t pathLen = strlen(path);
   for (Entry& entry : entries_) {
     if (entry.len == 0) continue;
-    const size_t common = pathLen < entry.len ? pathLen : entry.len;
-    // One is the other or lies inside it: "/.crosspoint" or ".../epub_1" itself, or a file inside it.
-    if (memcmp(entry.folder, path, common) == 0 &&
-        (pathLen == entry.len || (pathLen < entry.len ? entry.folder[pathLen] == '/' : path[entry.len] == '/'))) {
-      drop(entry);
+    bool touches = false;
+    if (pathLen <= entry.len) {
+      // The folder itself, or a folder it lies in ("/.crosspoint", a book's folder renamed or removed).
+      touches = memcmp(entry.folder, path, pathLen) == 0 && (pathLen == entry.len || entry.folder[pathLen] == '/');
+    } else {
+      // Inside it, only its marker decides what it is: a build removes and renames its own files all the time, and
+      // each forgotten folder costs the next open a look for the marker on the card.
+      touches = memcmp(entry.folder, path, entry.len) == 0 && isMarker(path, entry.len);
     }
+    if (touches) drop(entry);
   }
 }
 

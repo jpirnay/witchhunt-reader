@@ -132,9 +132,15 @@ TEST(FolderTable, ForgetsWhatAPathTouches) {
   const char* b = "/.crosspoint/epub_12";
   table.put(a, strlen(a), info);
   table.put(b, strlen(b), info);
-  table.forget("/.crosspoint/epub_1/progress.bin");  // inside a: a goes, not epub_12
+  table.forget("/.crosspoint/epub_1/progress.bin");  // a file inside a: a is what it was
+  table.forget("/.crosspoint/epub_1/spines/0/html_1.bin.part");
+  EXPECT_NE(table.find(a, strlen(a)), nullptr);
+  table.forget("/.crosspoint/epub_1/cipher.bin");  // a's marker: a goes, not epub_12
   EXPECT_EQ(table.find(a, strlen(a)), nullptr);
   EXPECT_NE(table.find(b, strlen(b)), nullptr);
+  table.put(a, strlen(a), info);
+  table.forget("/.crosspoint/epub_1");  // the folder itself
+  EXPECT_EQ(table.find(a, strlen(a)), nullptr);
   table.forget("/.crosspoint");  // a parent: everything under it goes
   EXPECT_EQ(table.find(b, strlen(b)), nullptr);
 }
