@@ -91,7 +91,7 @@ What it does not do:
 - **No deinflection.** 食べた has no entry of its own and finds 食; 먹었습니다 finds nothing in CC-KEDICT. Each entry is headed by the word it is for, so you can see what was matched.
 - **The other script only where the dictionary has it.** The search covers the dictionary's word index and its `.syn`, and none of the Latin fallbacks above (no stemming, no lowercase retry). CC-CEDICT lists every traditional form as a synonym of its simplified headword, so 學校 finds 学校; a dictionary without them finds nothing for text in the other script.
 - **Characters your reading font lacks.** CC-CEDICT writes each word in both scripts (大学生 / 大學生). A font made for one region (Simplified Chinese, Japanese) lacks some characters of the other and draws them as a box; a font that carries both draws them all. The NotoSansCJK `.cpfont` family carries both scripts but not pinyin's ē, ǎ and ū, which drop out of the reading (dàxuéshēng shows as dàxuéshng); a TrueType family has them.
-- **Greedy matches.** The longest word is not always the one the sentence means: 研究生命 starts with 研究生 (graduate student), not 研究 (research). The shorter matches follow it in the definition.
+- **Greedy matches.** The longest word is not always the one the sentence means: 研究生命 starts with 研究生 (graduate student), not 研究 (research). The shorter matches follow it in the definition. Against a segmenter on the same text (word boundaries, F1), the longest match scores 0.74 on Hong Lou Meng with CC-CEDICT against `jieba` (0.88 without its HMM, 0.90 without it on the text mapped to simplified), and 0.77 on Soseki with JMdict against `fugashi` and UniDic; JMdict's long entries (吾輩は猫である, これと言う) and kana synonyms (はま from はまだ) make most of the Japanese misses.
 
 **Where to get them.** None of these ship as StarDict; [PyGlossary](https://github.com/ilius/pyglossary) converts them on a computer. Convert to a plain `.dict` (`dictzip=False`): it needs no 32 KB inflate window, which is hardest to find on a dense CJK page when the framebuffer cannot be lent.
 
@@ -116,6 +116,22 @@ Run the `pyglossary` command (`python -m pyglossary` does not start the converte
 | CC-CEDICT | 125,331 | 77,970 | 2.1 MB | 1.1 MB | 56.5 MB | 1.5 s (`.idx` 0.97 s, `.syn` 0.49 s) |
 | JMdict_e | 218,975 | 550,503 | 4.7 MB | 15.8 MB | 62.0 MB | 9.2 s (`.idx` 2.1 s, `.syn` 7.1 s) |
 | CC-KEDICT | 13,669 | none | 0.2 MB | none | 1.8 MB | 0.1 s |
+
+### How the CJK search is built
+
+For developers. Shipped in #574, with the heap fix of #569 beside it; the plan is `docs/superpowers/plans/2026-10-23-cjk-dictionary.md`. Open
+follow-ups are in [future_work/cjk.md](future_work/cjk.md#dictionary-on-cjk-pages).
+
+- **The run** (`CjkLookupRun`). From the cursor's character: up to 12 code points across words and line ends, stopping at the first one that is not unspaced CJK or that `cleanWord` strips as punctuation; 々, 〆, ー and kana are kept. On Hangul, the token itself. Each code point remembers its word, so a match length maps back to a span of words.
+- **The search** (`Dictionary::resolvePrefixes`). Up to three headwords that are prefixes of the run, longest first, from the `.idx` and the `.syn` (a tie goes to the `.idx`), each with its run of same-headword entries (at most 8). None of the Latin fallbacks. It gives up between probes when a button press is waiting, which only the speculative search does.
+  - One descent per index file; a later, shorter target steps back from the window it left (`gallopSamples`).
+  - Sidecar samples are read in 512-byte blocks through whichever scan buffer is idle. A probe reads its window's first headword from its own scan, no `.syn` probe runs whose every hit the merge would drop, and a followed synonym finds its run in its own window (`followSynonym`).
+- **Definitions** (`readPrefixDefinitions`). Every entry of the longest match, then the shorter matches, in one buffer sized once within `MAX_DEFINITION_BYTES`, each entry under its headword. Drawn in the reader's font (`DictionaryWordSelectActivity::definitionFontId`).
+- **The word screen.** The highlight grows over the match with no extra press (speculation), Confirm looks it up, and the span is drawn on the differential path (2 runs, 2,048 bytes) or by the full repaint. A tap inside the span looks it up.
+- **Heap.** While a definition is open, the word screen's word arrays and snapshot are freed and rebuilt on return (8 ms for 232 words): +9.2 KB free heap when the definition opens, on the X4 with 12 KB of ballast (#569).
+- **Speed.** The maintainer's gate is the median of `ms / exact_ms` over 50 words per book, at most 1.5. #574's five speed-ups brought Hong Lou Meng with CC-CEDICT from 2.69 to 1.46; Soseki with JMdict went from 3.66 to 1.95, accepted with JMdict as best effort.
+- **Cost.** No cache or sidecar version changed; `gh_release` flash +9,044 B, static RAM +0 B.
+- **Tests.** `test/dictionary/DictionaryTest.cpp` (the prefix search and its read counts, the definitions) and `test/dictionary/CjkLookupRunTest.cpp`. `CMD:ACT:DICT` reports the run, the hits, their entries, probes, reads and both timings (`docs/serial-test-api.md`).
 
 ## The Definition Screen
 

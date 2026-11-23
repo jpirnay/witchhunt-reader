@@ -3,7 +3,7 @@
 Open work on right-to-left text and the shaped scripts (the ten Indic ones, Arabic and Myanmar). What shipped, and
 why, is in [../design/writing-modes.md](../design/writing-modes.md); how shaping works now, its timings and what it does
 not shape yet are in [../text-shaping.md](../text-shaping.md). The limits of vertical text are in the design record's
-section 5, and CJK's out-of-scope list is in [cjk.md](cjk.md). How to time a chapter build and profile the X3 is in
+section 5, and CJK's out-of-scope list is in [../design/cjk-typography.md](../design/cjk-typography.md), section 10. How to time a chapter build and profile the X3 is in
 [../debugging.md](../debugging.md#for-developers-timing-and-profiling-a-chapter-build). The shaped store's heap is a
 [memory-and-parsing item](memory-and-parsing/the-shaped-store-is-on-the-heap-and-the-paragraph-gate-ignores-its-size.md).
 

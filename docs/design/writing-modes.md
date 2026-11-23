@@ -30,7 +30,7 @@ Each step was its own plan and PR (spec section 7). After step 0, steps 1-2 and 
 | 4 | Vertical typography: widows and orphans off and lone images centred (PR 1); 、。 and small kana placed from glyph ink, A3a along the column, Traditional Chinese marks (PR 2); tate-chu-yoko (PR 3); the dictionary on vertical pages (PR 4) | #594, #595, #597, #598 ([design](../superpowers/specs/2026-10-30-writing-modes-step4-design.md), [PR 1 plan](../superpowers/plans/2026-10-30-writing-modes-step4-pr1.md), [PR 2 plan](../superpowers/plans/2026-10-31-writing-modes-step4-pr2.md), [PR 3 plan](../superpowers/plans/2026-11-01-writing-modes-step4-pr3.md), [PR 4 plan](../superpowers/plans/2026-11-02-writing-modes-step4-pr4.md)) |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | titles and the TOC in visual order (#666, section 4); the last book's family behind the UI faces whatever its script (#670); Hebrew, Greek and Arabic in the UI faces (#681, #702); Indic titles reordered (#692), and Indic and Burmese titles shaped over the face behind the UI face (#699); right-to-left UI languages (#711) (section 8). TXT and MD have no paragraph bidi |
 
-Line spacing (`cjk.md`, step 10, shipped 2026-10-26) reads the `line-height` step 0 keeps.
+Line spacing ([cjk-typography.md](cjk-typography.md), 11.8) reads the `line-height` step 0 keeps.
 
 ## 2. Parsed in step 0, and who reads it
 
@@ -43,7 +43,7 @@ Step 0 parses, caches and tests every trigger; each waited for the step that fir
 | `direction`, `dir` (beyond `start`/`end`) | `CssStyle::direction` | step 1: a paragraph's base direction |
 | `unicode-bidi`, `<bdo>`, `<bdi>` | `CssStyle::unicodeBidi` | step 1: embeddings and isolates |
 | OPF `page-progression-direction` | `Epub::pageProgression()` | step 3: the vertical decision and page turns (`FlowContext`); step 1 reuses it |
-| `line-height` | `CssStyle::lineHeightEm` | line spacing (`cjk.md`, step 10) |
+| `line-height` | `CssStyle::lineHeightEm` | line spacing (cjk-typography.md, 11.8) |
 
 ## 3. Page progression
 
