@@ -127,6 +127,11 @@ struct WordSearchResult {
   std::string word;
 };
 
+// A headword chosen from "Did you mean" (DictionarySuggestionsActivity), for DictionaryWordSelectActivity to look up.
+struct DictionarySuggestionResult {
+  std::string headword;
+};
+
 // What the reader does once its bars (ReaderBarsController) close: the control that closed them, and whether the page's
 // star was flipped while they were open. The reader owns the bookmarks and the navigation, so the bars only report.
 struct ReaderBarsResult {
@@ -160,10 +165,10 @@ struct ReaderBarsResult {
   ReaderLayoutValues layout{};
 };
 
-using ResultVariant =
-    std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult, PageResult,
-                 SyncResult, NetworkModeResult, FootnoteResult, FilePathResult, StarredPageResult, PrintedPageResult,
-                 DictionarySwitchResult, ConfirmResult, ReaderBarsResult, BookSearchResult, WordSearchResult>;
+using ResultVariant = std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult,
+                                   PageResult, SyncResult, NetworkModeResult, FootnoteResult, FilePathResult,
+                                   StarredPageResult, PrintedPageResult, DictionarySwitchResult, ConfirmResult,
+                                   ReaderBarsResult, BookSearchResult, WordSearchResult, DictionarySuggestionResult>;
 
 struct ActivityResult {
   bool isCancelled = false;
