@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "components/themes/HintLayout.h"
+#include "components/themes/HomeGridNav.h"
 #include "components/themes/PanelMetrics.h"
 
 class GfxRenderer;
@@ -272,6 +273,15 @@ class BaseTheme {
   // A horizontal swipe on Home brings the next or previous recent book to the front (the carousel
   // scrolls its own row instead). Same direction as a page turn: a swipe to the left is "next".
   virtual bool homeSwipeCyclesBooks() const { return false; }
+
+  // Home's rows for a board with a key for each direction (HomeGridNav). None (rowCount 0) for a
+  // theme laid out as a list, which Up and Down step through in order.
+  virtual HomeGridNav::Grid homeGrid(int shownBooks, int menuCount, int menuTrailing) const {
+    (void)shownBooks;
+    (void)menuCount;
+    (void)menuTrailing;
+    return {};
+  }
 
   // Return the cover thumbnail sizes this theme needs for its home screen.
   // HomeActivity calls generateThumbBmp() for each pair. Empty = use height-only path.

@@ -22,6 +22,7 @@ class LyraTilesTheme : public LyraTheme {
  public:
   HomeLayout homeLayout(const GfxRenderer& renderer, Rect content, int menuCount, int menuTrailing) const override;
   int homeMenuCapacity() const override;
+  HomeGridNav::Grid homeGrid(int shownBooks, int menuCount, int menuTrailing) const override;
   bool homeSwipeCyclesBooks() const override { return true; }
 
   // The card of the book in front, and the Also reading row under it when the layout has one.

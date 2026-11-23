@@ -190,6 +190,10 @@ HomeLayout LyraTilesTheme::homeLayout(const GfxRenderer& /*renderer*/, const Rec
 
 int LyraTilesTheme::homeMenuCapacity() const { return HomeTilesLayout::kMaxTiles; }
 
+HomeGridNav::Grid LyraTilesTheme::homeGrid(const int shownBooks, const int menuCount, const int menuTrailing) const {
+  return HomeTilesLayout::grid(shownBooks, menuCount - menuTrailing, menuTrailing);
+}
+
 void LyraTilesTheme::drawRecentBookCover(GfxRenderer& renderer, const Rect rect,
                                          const std::vector<RecentBook>& recentBooks, const int selectorIndex,
                                          bool& coverRendered, bool& coverBufferStored, bool& /*bufferRestored*/,

@@ -176,6 +176,15 @@ inline bool hasBackAndConfirmButtons() {
   return in.back != BoardConfig::PIN_UNASSIGNED && in.confirm != BoardConfig::PIN_UNASSIGNED;
 }
 
+// Left, Right, Up and Down are keys of their own (X3, X4): a screen laid out in rows and columns can
+// move along a row with one pair and between rows with the other. A board with only Up and Down
+// (X4 Pro, T5S3, Murphy, Picco) steps through such a screen as a list.
+inline bool hasFourDirectionKeys() {
+  const BoardConfig::InputPins& in = BoardConfig::ACTIVE.input;
+  return in.left != BoardConfig::PIN_UNASSIGNED && in.right != BoardConfig::PIN_UNASSIGNED &&
+         in.up != BoardConfig::PIN_UNASSIGNED && in.down != BoardConfig::PIN_UNASSIGNED;
+}
+
 // The physical button topology, for the places that genuinely need to know the
 // arrangement rather than a yes/no capability.
 inline BoardConfig::InputStyle inputStyle() { return BoardConfig::ACTIVE.inputStyle; }

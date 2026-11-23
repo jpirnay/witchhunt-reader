@@ -5,6 +5,7 @@
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalCapabilities.h>
 #include <HalDisplay.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -469,6 +470,8 @@ void HomeActivity::onEnter() {
   // bookmark index off the card.
   rebuildMenuEntries();
   shownBooks_ = std::min(static_cast<int>(recentBooks.size()), homeLayout().bookSlots);
+  grid_ = GUI.homeGrid(shownBooks_, static_cast<int>(menuEntries.size()), menuTrailing_);
+  gridNav_ = grid_.rowCount > 0 && HalCapabilities::hasFourDirectionKeys();
 
   // Apply focus: book path takes priority, else combined selector index (covers
   // "return to the menu entry I was on").
@@ -663,15 +666,45 @@ void HomeActivity::loop() {
       return;
     }
 
-    buttonNavigator.onNext([this, totalItems] {
-      selectorIndex = ButtonNavigator::nextIndex(selectorIndex, totalItems);
-      requestUpdate();
-    });
+    if (gridNav_) {
+      // Rows and columns (HomeGridNav): Up and Down between rows, Left and Right along one, and on
+      // the book card Left and Right bring the previous or next book. One direction per tick, as
+      // the carousel does, so two edges drained in one batch cannot both act on a stale position.
+      using Move = HomeGridNav::Move;
+      using Direction = MappedInputManager::Direction;
+      bool pressed = true;
+      Move move = Move::Down;
+      if (mappedInput.wasLogicalPressed(Direction::Up)) {
+        move = Move::Up;
+      } else if (mappedInput.wasLogicalPressed(Direction::Down)) {
+        move = Move::Down;
+      } else if (mappedInput.wasLogicalPressed(Direction::Left)) {
+        move = Move::Left;
+      } else if (mappedInput.wasLogicalPressed(Direction::Right)) {
+        move = Move::Right;
+      } else {
+        pressed = false;
+      }
+      if (pressed) {
+        const HomeGridNav::Step step = HomeGridNav::step(grid_, selectorIndex, move);
+        if (step.cycle != 0) {
+          cycleRecentBooks(step.cycle);
+        } else if (step.index != selectorIndex) {
+          selectorIndex = step.index;
+          requestUpdate();
+        }
+      }
+    } else {
+      buttonNavigator.onNext([this, totalItems] {
+        selectorIndex = ButtonNavigator::nextIndex(selectorIndex, totalItems);
+        requestUpdate();
+      });
 
-    buttonNavigator.onPrevious([this, totalItems] {
-      selectorIndex = ButtonNavigator::previousIndex(selectorIndex, totalItems);
-      requestUpdate();
-    });
+      buttonNavigator.onPrevious([this, totalItems] {
+        selectorIndex = ButtonNavigator::previousIndex(selectorIndex, totalItems);
+        requestUpdate();
+      });
+    }
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
@@ -759,11 +792,12 @@ void HomeActivity::render(RenderLock&&) {
       [this](int index) { return std::string(I18N.get(menuEntries[index].label)); },
       [this](int index) { return menuEntries[index].icon; });
 
-  const auto labels = isCarousel ? mappedInput
-                                       .mapHints("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT),
-                                                 tr(STR_DIR_UP), tr(STR_DIR_DOWN))
-                                       .front
-                                 : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto labels =
+      (isCarousel || gridNav_)
+          ? mappedInput
+                .mapHints("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+                .front
+          : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();

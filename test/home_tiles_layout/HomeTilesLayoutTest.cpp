@@ -189,3 +189,72 @@ TEST(HomeTilesLayout, TheAlsoReadingLabelClearsTheCovers) {
   EXPECT_EQ(books.slotCovers[0].w, 54);
   EXPECT_EQ(books.slotCovers[0].h, 90);
 }
+
+// --- Moving by rows and columns (four direction keys) -------------------------------------------
+
+namespace {
+using HomeGridNav::Move;
+
+int go(const HomeGridNav::Grid& grid, const int from, const Move move) {
+  return HomeGridNav::step(grid, from, move).index;
+}
+}  // namespace
+
+// The X3's Home: the card, Library and File Transfer, More and Settings. Selector positions: card 0,
+// tiles 1-2, More 3, Settings 4.
+TEST(HomeGridNav, UpAndDownGoBetweenRowsLeftAndRightAlongOne) {
+  const auto grid = HomeTilesLayout::grid(/*shownBooks=*/1, /*tiles=*/2, /*bottom=*/2);
+  ASSERT_EQ(grid.rowCount, 3);
+  EXPECT_EQ(go(grid, 0, Move::Down), 1);  // card -> the first tile
+  EXPECT_EQ(go(grid, 1, Move::Right), 2);
+  EXPECT_EQ(go(grid, 2, Move::Right), 1);  // along a row it wraps
+  EXPECT_EQ(go(grid, 2, Move::Down), 4);   // the same side: File Transfer -> Settings
+  EXPECT_EQ(go(grid, 1, Move::Down), 3);   // Library -> More
+  EXPECT_EQ(go(grid, 4, Move::Down), 0);   // past the bottom row, back to the card
+  EXPECT_EQ(go(grid, 0, Move::Up), 3);     // and the other way round
+  EXPECT_EQ(go(grid, 3, Move::Up), 1);
+}
+
+TEST(HomeGridNav, LeftAndRightOnTheCardCycleTheBooks) {
+  const auto grid = HomeTilesLayout::grid(1, 4, 2);
+  EXPECT_EQ(HomeGridNav::step(grid, 0, Move::Right).cycle, 1);
+  EXPECT_EQ(HomeGridNav::step(grid, 0, Move::Left).cycle, -1);
+  EXPECT_EQ(HomeGridNav::step(grid, 0, Move::Right).index, 0);  // the selection stays on the card
+  EXPECT_EQ(HomeGridNav::step(grid, 1, Move::Right).cycle, 0);  // a tile moves, it does not cycle
+}
+
+// The T5S3: the card, three Also reading books (1-3), four tiles (4-7), More 8, Settings 9.
+TEST(HomeGridNav, TheAlsoReadingRowIsARowOfThree) {
+  const auto grid = HomeTilesLayout::grid(4, 4, 2);
+  ASSERT_EQ(grid.rowCount, 5);
+  EXPECT_EQ(go(grid, 0, Move::Down), 1);
+  EXPECT_EQ(go(grid, 1, Move::Right), 2);
+  EXPECT_EQ(go(grid, 3, Move::Right), 1);
+  EXPECT_EQ(go(grid, 3, Move::Down), 5);  // the right-hand book -> the right-hand tile
+  EXPECT_EQ(go(grid, 1, Move::Down), 4);
+  EXPECT_EQ(go(grid, 4, Move::Up), 1);
+  EXPECT_EQ(go(grid, 5, Move::Up), 3);
+  EXPECT_EQ(go(grid, 6, Move::Down), 8);
+  EXPECT_EQ(go(grid, 7, Move::Down), 9);
+}
+
+// Three tiles: Library spans its row, so it is a row of one.
+TEST(HomeGridNav, ASpanningTileIsARowOfOne) {
+  const auto grid = HomeTilesLayout::grid(1, 3, 1);
+  ASSERT_EQ(grid.rowCount, 4);
+  EXPECT_EQ(go(grid, 0, Move::Down), 1);
+  EXPECT_EQ(go(grid, 1, Move::Right), 1);  // nothing beside it
+  EXPECT_EQ(go(grid, 1, Move::Down), 2);
+  EXPECT_EQ(go(grid, 3, Move::Up), 1);
+  EXPECT_EQ(go(grid, 3, Move::Down), 4);  // Settings alone
+  EXPECT_EQ(go(grid, 4, Move::Down), 0);
+}
+
+// No recent book: no card row, and the first row is a row of tiles that does not cycle anything.
+TEST(HomeGridNav, WithoutBooksTheTilesComeFirst) {
+  const auto grid = HomeTilesLayout::grid(0, 2, 2);
+  ASSERT_EQ(grid.rowCount, 2);
+  EXPECT_FALSE(grid.firstRowCyclesBooks);
+  EXPECT_EQ(go(grid, 0, Move::Right), 1);
+  EXPECT_EQ(HomeGridNav::step(grid, 0, Move::Right).cycle, 0);
+}

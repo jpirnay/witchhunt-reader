@@ -95,6 +95,10 @@ class HomeActivity final : public Activity {
   // How many of menuEntries, at the end, are More and Settings (homeMenuTrailingCount). Set with the
   // entries, in onEnter().
   int menuTrailing_ = 0;
+  // The theme's rows (BaseTheme::homeGrid), and whether the buttons move by them: only where the board
+  // has a key for each direction. Otherwise Up and Down step through the screen as a list. Set in onEnter().
+  HomeGridNav::Grid grid_;
+  bool gridNav_ = false;
 
   std::string focusBookPath;
   int focusSelectorIndex = -1;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "components/themes/HomeGridNav.h"
+
 // Where the Lyra Tiles theme puts each part of Home: the card of the book in front, the "Also
 // reading" row, the tiles of the destinations and the bottom row (More, Settings).
 //
@@ -177,6 +179,30 @@ constexpr Menu menu(const Box& area, const int tileCount, const int bottomCount)
     }
   }
   return m;
+}
+
+// The screen's rows for HomeGridNav, in the order of Home's selector: the card, the Also reading
+// books, the tiles as menu() places them, then the bottom row. `shownBooks` counts the card.
+constexpr HomeGridNav::Grid grid(const int shownBooks, const int tileCount, const int bottomCount) {
+  HomeGridNav::Grid g{};
+  int next = 0;
+  if (shownBooks > 0) {
+    g.addRow(next, 1);
+    g.firstRowCyclesBooks = true;
+    next += 1;
+    g.addRow(next, shownBooks - 1);
+    next += shownBooks - 1;
+  }
+  const int tiles = tileCount < 0 ? 0 : (tileCount > kMaxTiles ? kMaxTiles : tileCount);
+  int placed = 0;
+  if (tiles % 2 == 1) {
+    g.addRow(next, 1);  // the first tile spans its row
+    placed = 1;
+  }
+  for (; placed < tiles; placed += 2) g.addRow(next + placed, 2);
+  next += tiles;
+  g.addRow(next, bottomCount);
+  return g;
 }
 
 }  // namespace HomeTilesLayout
