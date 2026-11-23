@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <type_traits>
 
@@ -1223,6 +1224,160 @@ bool Dictionary::resolve(const char* word, DictEntries& entriesOut, std::string&
   }
   entriesOut = entries;
   setResult(LookupResult::Found);  // found in the INDEX; reading it may still fail
+  return true;
+}
+
+// --- suggestions ("Did you mean") ----------------------------------------------
+
+namespace {
+
+// The longest word, in codepoints, suggest() compares; edit distances stay in a uint8_t.
+constexpr int kSuggestMaxCodepoints = 32;
+
+// `word` case-folded codepoint by codepoint into `out`; the count, or -1 when it has more than kSuggestMaxCodepoints.
+int foldedCodepoints(const char* word, uint32_t* out) {
+  const auto* p = reinterpret_cast<const unsigned char*>(word);
+  int count = 0;
+  while (*p != 0) {
+    if (count == kSuggestMaxCodepoints) return -1;
+    out[count++] = utf8LowerCodepoint(utf8NextCodepoint(&p));
+  }
+  return count;
+}
+
+// Edits between a and b: letters added, dropped or changed, and two neighbours swapped (optimal string alignment).
+// limit + 1 as soon as it must be more than `limit`: two rows in a row above it, since a swap reaches back two rows.
+int editDistance(const uint32_t* a, const int aLen, const uint32_t* b, const int bLen, const int limit) {
+  if (aLen - bLen > limit || bLen - aLen > limit) return limit + 1;
+  uint8_t rows[3][kSuggestMaxCodepoints + 1];
+  uint8_t* beforePrevious = rows[0];
+  uint8_t* previous = rows[1];
+  uint8_t* current = rows[2];
+  for (int j = 0; j <= bLen; ++j) previous[j] = static_cast<uint8_t>(j);
+  int previousLow = 0;
+  for (int i = 1; i <= aLen; ++i) {
+    current[0] = static_cast<uint8_t>(i);
+    int rowLow = current[0];
+    for (int j = 1; j <= bLen; ++j) {
+      int best = std::min(previous[j], current[j - 1]) + 1;
+      best = std::min(best, previous[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1])
+        best = std::min(best, beforePrevious[j - 2] + 1);
+      current[j] = static_cast<uint8_t>(best);
+      rowLow = std::min(rowLow, best);
+    }
+    if (rowLow > limit && previousLow > limit) return limit + 1;
+    previousLow = rowLow;
+    uint8_t* const freed = beforePrevious;
+    beforePrevious = previous;
+    previous = current;
+    current = freed;
+  }
+  return previous[bLen];
+}
+
+// How a kept headword ranks: smaller is better, compared field by field.
+struct SuggestionRank {
+  uint8_t kind = 0;      // 0: a stem of the word; 1: within the edit limit
+  uint8_t distance = 0;  // a stem: the letters the word adds to it; otherwise the edits
+  uint8_t lengthGap = 0;
+  uint16_t order = 0;  // index order, so equal ranks keep the dictionary's order
+
+  bool operator<(const SuggestionRank& other) const {
+    if (kind != other.kind) return kind < other.kind;
+    if (distance != other.distance) return distance < other.distance;
+    if (lengthGap != other.lengthGap) return lengthGap < other.lengthGap;
+    return order < other.order;
+  }
+};
+
+}  // namespace
+
+bool Dictionary::suggest(const char* word, DictSuggestions& out, LookupResult* outResult) {
+  const auto setResult = [outResult](const LookupResult r) {
+    if (outResult) *outResult = r;
+  };
+  out = DictSuggestions{};
+  setResult(LookupResult::NotFound);
+  const std::string cleaned = cleanWord(word);
+  if (cleaned.empty() || !isOpen()) return false;
+  uint32_t target[kSuggestMaxCodepoints];
+  const int targetLen = foldedCodepoints(cleaned.c_str(), target);
+  if (targetLen <= 0) return false;
+  const int editLimit = targetLen <= 4 ? 1 : targetLen <= 8 ? 2 : 3;
+
+  LookupSession session;
+  if (!openSession(session)) {
+    setResult(scanBuf ? LookupResult::ReadError : LookupResult::LowMemory);
+    return false;
+  }
+  if (session.sampleCount == 0) {
+    LOG_INF("DICT", "No suggestions for '%s': the index has no sidecar", cleaned.c_str());
+    return false;
+  }
+  // The window the word sorts into, and the one before it: a stem sorts before the word, often a window back.
+  uint32_t sample = 0;
+  bisectSamples(session.qidx, session.idxScan, session.sampleCount, cleaned.c_str(), nullptr, false, &sample);
+  uint32_t startByte = 0;
+  if (!readSample(session.qidx, sample > 0 ? sample - 1 : 0, &startByte) || !session.idxScan.seekSet(startByte)) {
+    setResult(LookupResult::ReadError);
+    return false;
+  }
+
+  SuggestionRank ranks[DictSuggestions::MAX];
+  uint32_t candidate[kSuggestMaxCodepoints];
+  // From the start of the window before the word's to past the window after it, whatever the word's place in its own.
+  constexpr uint32_t kScanLimit = 3 * SAMPLE_INTERVAL;
+  while (out.scanned < kScanLimit && session.idxScan.position() < session.idxSize) {
+    const int length = session.idxScan.readWord(wordBuf, sizeof(wordBuf));
+    uint8_t suffix[8];
+    if (length < 0 || !session.idxScan.readBytes(suffix, sizeof(suffix))) break;
+    const auto order = out.scanned++;
+    if (length == 0 || static_cast<size_t>(length) >= DictSuggestions::WORD_BYTES) continue;
+    const int candidateLen = foldedCodepoints(wordBuf, candidate);
+    if (candidateLen <= 0) continue;
+
+    SuggestionRank rank;
+    rank.order = order;
+    rank.lengthGap = static_cast<uint8_t>(std::abs(targetLen - candidateLen));
+    const bool isStem = candidateLen < targetLen && candidateLen >= 3 && 2 * candidateLen >= targetLen &&
+                        std::equal(candidate, candidate + candidateLen, target);
+    if (isStem) {
+      rank.kind = 0;
+      rank.distance = static_cast<uint8_t>(targetLen - candidateLen);
+    } else {
+      const int edits = editDistance(target, targetLen, candidate, candidateLen, editLimit);
+      // 0 edits: the word itself in another case, which the lookup already tried.
+      if (edits == 0 || edits > editLimit) continue;
+      rank.kind = 1;
+      rank.distance = static_cast<uint8_t>(edits);
+    }
+
+    // Where it would go; a full list keeps it only if it beats the last.
+    uint8_t at = out.count;
+    while (at > 0 && rank < ranks[at - 1]) --at;
+    if (at >= DictSuggestions::MAX) continue;
+    // A case variant of one already kept ("Bill", "bill") adds nothing: the lookup finds either.
+    bool duplicate = false;
+    for (uint8_t k = 0; k < out.count && !duplicate; ++k) {
+      duplicate = StringUtils::asciiCaseCmp(out.words[k], wordBuf) == 0;
+    }
+    // Looked up again, a headword with punctuation at an edge ("a.m.") would be cleaned to another word and miss.
+    if (duplicate || StringUtils::asciiCaseCmp(cleanWord(wordBuf).c_str(), wordBuf) != 0) continue;
+
+    const uint8_t last = out.count < DictSuggestions::MAX ? out.count : DictSuggestions::MAX - 1;
+    for (uint8_t k = last; k > at; --k) {
+      ranks[k] = ranks[k - 1];
+      memcpy(out.words[k], out.words[k - 1], DictSuggestions::WORD_BYTES);
+    }
+    ranks[at] = rank;
+    memcpy(out.words[at], wordBuf, static_cast<size_t>(length) + 1);
+    if (out.count < DictSuggestions::MAX) ++out.count;
+  }
+  LOG_DBG("DICT", "Suggestions for '%s': %u of %u headwords", cleaned.c_str(), static_cast<unsigned>(out.count),
+          static_cast<unsigned>(out.scanned));
+  if (out.count == 0) return false;
+  setResult(LookupResult::Found);
   return true;
 }
 
