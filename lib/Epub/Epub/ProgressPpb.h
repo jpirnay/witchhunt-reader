@@ -6,7 +6,7 @@
 // How far through a book or a chapter, in parts per billion: 0 at its start, 1,000,000,000 at its end.
 //
 // Integer, because the C3 boards have no FPU and a float there is a soft-float call per operation
-// (docs/future_work/integer-math.md). Every fraction is floored, and a percent rounded half up from a floored
+// (docs/design/integer-math.md). Every fraction is floored, and a percent rounded half up from a floored
 // billionth is the exact fraction's rounding: floor((floor(x * 10^9) + 5 * 10^6) / 10^7) == floor(x * 100 + 1/2).
 //
 // Why billionths and not millionths: some screens round as printf's "%.0f" and "%.2f" did, a half to the even

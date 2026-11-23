@@ -325,9 +325,9 @@ class HalDisplay {
   // waveform, if whoever waits for it does so without the bus lock (waitRefreshOffBus). The X4, on any of its three
   // controllers. Not where the card has a bus of its own (nothing to hand over: HalCapabilities::decodesThroughRefresh
   // covers those), not the T5S3 (a host task clocks the waveform out; card traffic beside it has not been tried), and
-  // not the X3 (asyncRefreshHoldsFrameBuffer: the finish reads the frame back into the controller and runs
-  // conditioning passes; its Indexing popup is built through already, borrowSecondaryBufferDuringRefresh, the page
-  // refresh has not been tried).
+  // not the X3 (asyncRefreshHoldsFrameBuffer: the finish can read the frame back into the controller, the UC8279d's
+  // after every refresh and the UC8253's after a full sync, with its conditioning passes; its Indexing popup is built
+  // through already, borrowSecondaryBufferDuringRefresh, the page refresh has not been tried).
   bool refreshLeavesBusToCard() const;
   // Sleeps until the pending refresh's waveform has ended, WITHOUT the bus lock every other display entry point takes,
   // so that the card can be read meanwhile. Only where refreshLeavesBusToCard(). The finish is still owed:

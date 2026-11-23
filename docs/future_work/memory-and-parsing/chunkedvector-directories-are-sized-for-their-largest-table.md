@@ -1,12 +1,12 @@
 # ChunkedVector directories are sized for their largest table
 
-Part of [Memory and parsing](../memory-and-parsing.md). Checked against master on 2026-11-20 (8d1541bf4).
+Part of [Memory and parsing](../memory-and-parsing.md).
 
-**Open.** A `ChunkedVector` holds its chunk directory inline, sized at compile time for its `Capacity`
-(`ChunkedVector.h:185`). The section's page table (`Section::PageLut`, `Section.h:59`, 10,000 entries) has about 43
-chunk pointers and the parser's paragraph table (`ParagraphLut`, `ChapterHtmlSlimParser.h:998`, 10,000 pages) about
-81, though almost every chapter fits its first chunk. One `PageLut` is in each build's `BuildState`
-(`Section.cpp:1118`) and one in every resident `Section` (`Section.h:66`).
+**Open.** A `ChunkedVector` holds its chunk directory inline (`chunks_[MAX_CHUNKS]`, `ChunkedVector.h`), sized at
+compile time for its `Capacity`. The section's page table (`Section::PageLut`, 10,000 entries) has 43 chunk pointers
+and the parser's paragraph table (`ChapterHtmlSlimParser::ParagraphLut`, `Page::MAX_PAGES_PER_SECTION` entries) 81
+(from `MAX_CHUNKS`' formula), though almost every chapter fits its first chunk. One `PageLut` is in each build's
+`BuildState` (`BuildState::lut`, `Section.cpp`) and one in every resident `Section` (`Section::lut`).
 
 **Why it matters.** The parser and the `BuildState` are each one heap block that lives from setup to the end of the
 build, so the directories' bytes are held at every peak of every build, heap and lent alike: about 500 B a build on the

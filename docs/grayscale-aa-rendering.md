@@ -137,7 +137,8 @@ this selects the long XTH4 waveform (the vertical-banding fix ported from crossp
 on the UC8253 the planes go out under the `gc` bank with both endpoints idle, after a real base push;
 on the SSD1677 the factory waveform draws base and greys in one pass (`GrayscaleBase::Combined`). The
 T5S3 has no absolute mode: its sleep cover paints 8-bit grey into the borrowed panel canvas
-(`borrowGray8Canvas()`, `displayGray8Canvas()`).
+(`borrowGray8Canvas()`, `displayGray8Canvas()`). So do the X4 Pro with UC8179 and the Picco's SE0400, at 16
+levels: see [Pictures above four levels](#pictures-above-four-levels).
 
 ### Greys left on the glass
 
@@ -444,10 +445,12 @@ at room temperature. Open work is in [future_work/display-and-refresh.md](future
 A book with a stored `textAntiAliasingOverride` of 0 stays B/W whatever the setting says. Books opened on a Murphy
 before gray may carry one, which is how the first reader test came out B/W.
 
-**Image midtones stay dark.** BMP, JPG and PNG all show in one gray pass, and Confirm's gray and B/W toggle works.
-Midtones come out dark: the 4-level dither assumes light gray at 67 %, and ours is 50-58 % (the lab's Test 5 has the
-ramp; JPG and PNG also read 8-15 points below BMP on a soft test image). This was left as it is. Light gray at 5
-frames instead of 4 would be about 70 %, but it would change text as well. Not tried.
+**Image midtones.** BMP, JPG and PNG all show in one gray pass, and Confirm's gray and B/W toggle works. Midtones
+came out dark: the 4-level dither assumed light gray at 67 %, and ours is 50-58 % (the lab's Test 5 has the ramp; JPG
+and PNG also read 8-15 points below BMP on a soft test image). The waveform was left as it is (light gray at 5 frames
+instead of 4 would be about 70 %, but it would change text as well; not tried). Sleep pictures and the BMP viewer
+dither with the Murphy's own table instead (#873, [Pictures above four levels](#pictures-above-four-levels)); pictures
+in books keep the even midpoints.
 
 **FAST gives black to white 20 frames instead of 15,** as VSL needs about twice as long as VSH. B/W UI screens ghost,
 which is why their refresh counter came down; on a real Settings list the band a selection bar leaves went from 4.2
@@ -469,6 +472,71 @@ HALF ever matters more, 10 extra + 25 is the balanced choice, at 100 ms more per
 **Upstream.** Offered to Free-Ink/freeink-sdk: gray as #174 and the FAST change and the limit removal as #176, both
 merged into Free-Ink main on 2026-11-04. HALF was not offered, as it did not change. The firmware still pins our fork,
 for other reasons (`.gitmodules`: the T5S3 support of Free-Ink #51 and our fixes on it).
+
+---
+
+## Pictures above four levels
+
+Sleep pictures and the BMP viewer. Open work is in
+[future_work/display-and-refresh.md](future_work/display-and-refresh.md), "Sleep pictures above four levels".
+
+**Four levels, one table per panel (#873).** On a 4-level panel a picture is dithered with Atkinson onto the four
+levels (`quantizeGray4()`, `lib/GfxRenderer/BitmapHelpers.h`). Atkinson carries 6/8 of the error, so a uniform gray
+settles on a pure level wherever `4*gray - 3*feedback` falls in that level's band. When a panel's levels do not sit at
+0/85/170/255, thresholds alone cannot fix the tone: the feedback has to say where the levels really are.
+`HalCapabilities::imageGray4Levels()` holds each panel's thresholds and feedback, and `setupDisplayAndFonts()` seeds
+`quantizeGray4()` with them. A board not measured keeps the old table (thresholds 30/50/140 over even feedback), and
+pictures in books keep the untuned midpoints (`quantizeGray4Level()`). Measured on the gray-lab stand through a
+reference card, error against an even lightness ramp between the panel's own black and white, mean / worst L*:
+
+| Panel | Old table | Own table |
+|---|---|---|
+| Murphy M3 (UC8253) | 4.3 / 8.6 | 1.5 / 2.9 |
+| X3 (UC8253) | 13.6 / 24.3 | 2.7 / 4.9 |
+| X4 (SSD1677) | 5.6 / 10.4 | 1.6 / 3.1 |
+
+The levels fed back exactly as measured were not enough (X3 10.6 worst, X4 6.2, with flat stretches): a dither mix
+reads off its share on the glass. The values come from a dither model with a fitted dot gain; each table's comment
+holds its measurements.
+
+**Sixteen levels on a canvas (#869, #871).** The two 4-level grays sit far below a third and two thirds of white: 11
+and 20 % on the X3, 6 and 63 % on the Picco, 8 and 29 % on the X4 Pro (camera, `CMD:SLEEP:SCREEN`). The cure is more
+levels from calibrated waveforms. The X4 Pro with UC8179 (`Uc8179Driver`) and the Picco's SE0400 (`Ssd2677Driver`)
+report 16 levels (`grayLevels()`) and lend an 8-bit canvas in PSRAM (`borrowGray8Canvas()`). `SleepActivity` paints a
+greyscale sleep BMP there at full depth wherever the panel reports more than four levels. The driver dithers the canvas
+onto its 16 measured levels with the SDK's shared integer dither (`Gray16Canvas.h`: sRGB to L* through a table,
+Floyd-Steinberg in tenths of L*) and draws them as a B/W base plus table passes: the shape of Free-Ink #220 (zuyan9)
+and #223 (Katie Paxton-Fear), with each panel's own doses (`lut/Uc8179Gray16Luts.h`, `lut/Ssd2677Gray16Luts.h`).
+
+- **X4 Pro (#869).** Two waveform findings. Pass 1's rows end their white drive together, with 0 V between the black
+  and the white part: a pixel driving white beside one still driving black made the mix darker than either level
+  alone (gray 88 read 30.6 L* for 37.3 wanted). And the 16 levels cross from the black base to the white base once,
+  because mixes across the two bases also read too dark. Full-screen gray sweeps rise at every canvas step and land
+  within 3.3 L* of the target; a sleep cover takes about 3.6 s. There is no tone table: one fitted to a sweep was
+  dropped when the same firmware read 3 to 5 L* differently two hours later, as much as the table corrected. The
+  canvas (384 KB) stays in PSRAM after the first 16-level picture; its three 48 KB planes are freed after each draw.
+- **Picco (#871).** #223's design put level 1 about 18 L* below white, so highlights had nothing to dither with. The
+  levels now spread evenly from white to black. Each candidate path was measured filling the screen inside the full
+  pass sequence, since a level measured alone skips passes and reads 3-5 L* differently, and the dither targets the
+  new levels' measured L*. Full-screen grays 0-255 against the sweep's own black and white: worst error 5.3 to 2.7 L*,
+  mean 2.6 to 1.0, and now rising at every step. A 16-level picture takes 2.40 s on a clean screen. The design doses
+  stay as `kGray16Design*`, for the reference-table test.
+
+**Limits.** X4 Pro units with SSD1677 or UC8279 keep four levels. PNG sleep images stay at four levels on the X4 Pro
+and the Picco: the PNG decoder paints the canvas only in builds where `HalDisplay::kMayLendGray8Canvas` (the T5S3),
+and elsewhere draws into the framebuffer, which the canvas path clears. Pictures in books do not use the canvas there
+either.
+
+**Gray-level plans, compiled out.** A panel with no memory for a canvas (the C3 boards) is to take more than four
+levels as data: `gray_levels::Plan` (`lib/hal/GrayLevelPlan.h`), a B/W base and passes of 1-bit planes chosen by
+16-bit ink masks, #220's shape. `SleepActivity` routes a greyscale picture to the canvas, else to a plan, else to four
+levels; a plan that fails, or a canvas that cannot be borrowed, falls back to four levels. It draws each plane from
+the cover again with `GrayLevelQuantizer`, an ordered dither against the panel's measured L*: error diffusion cannot
+give a pixel the same ink on every read of a scaled picture. Where the cover is already built it lends the secondary
+buffer to fill both planes of a pass in one read (`renderSleepLevelPlanes()`). No panel answers with a plan yet:
+`HalDisplay::grayLevelPlan()` is nullptr, and `HalDisplay::kMayRunGrayLevelPlan` (false) compiles the path out. That
+costs about 0.85 KB of C3 flash (stubs, the `drawBitmap()` branch, the canvas fallback); compiled in, about 3.9 KB.
+The quantizer is integer only: a first float version pulled soft-float `pow` and `cbrt` into the C3 image.
 
 ---
 

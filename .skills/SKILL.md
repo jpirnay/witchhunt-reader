@@ -84,8 +84,8 @@ Details: `docs/memory-allocation-strategy.md`, `docs/contributing/heap-and-data-
 - Flash: each 64 KB of app growth on the C3 costs the font cache one MMU map page. Quote size changes
   from the `RAM:` and `Flash:` lines of `pio run`, compared with a master build in the same worktree.
 - New on-device maths is integer or fixed point: the C3 has no FPU. The sources listed in `FLOAT_FREE` in
-  `scripts/check_no_float.py` (the TTF engine, image scaling, and more as `docs/future_work/integer-math.md`
-  progresses) fail the build if they use floating point. Images scale by exact ratios (`ImageScale`), text by
+  `scripts/check_no_float.py` (the TTF engine and every area of the integer-maths work, `docs/design/integer-math.md`)
+  fail the build if they use floating point. Images scale by exact ratios (`ImageScale`), text by
   `TextScale` (2^-20ths of 1, rounded up onto its grid), CSS lengths in 16.16 (`CssLength`, read by `CssNumber`).
 
 ## Activities and rendering

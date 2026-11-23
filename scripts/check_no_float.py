@@ -1,8 +1,8 @@
 """Fails the firmware build when a source listed in FLOAT_FREE uses floating point.
 
 The C3 has no FPU: float or double maths pulls in libgcc's slow soft-float routines. The TTF engine was
-designed without them (spec 5.2), and the integer-maths work moves the rest of the firmware off them one
-area at a time (docs/future_work/integer-math/): each finished area adds its sources to FLOAT_FREE, so the
+designed without them (spec 5.2), and the integer-maths work moved the rest of the firmware off them one
+area at a time (docs/design/integer-math.md): each finished area added its sources to FLOAT_FREE, so the
 float cannot come back unnoticed.
 
 The linker map cannot show this. It names only the first object that pulled in each archive member, and

@@ -29,7 +29,7 @@ Short-lived allocations repeated inside a long pass (per image, per line, per pa
 - Always `reserve(n)` before a `push_back` loop when `n` is known.
 - When `n` is not known upfront, do a first pass to count, then `reserve`, then fill, or reserve from an estimate that errs high.
 - Never grow a vector inside a render or per-element callback.
-- A growth that cannot allocate calls `abort()`. Where a vector can grow on a tight heap, check for the block first (see `ParsedText::addWord`).
+- A growth that cannot allocate calls `abort()`. Where a vector can grow on a tight heap, check for the block first (`heapReserveFor`, `lib/Memory/HeapFit.h`; see `ParsedText::addWord`). In the chapter parser a refused growth stops the build with its pages kept, through one helper per kind (`addPageElement`, `pushOrStop`): [Memory Allocation Strategy §9.6](../memory-allocation-strategy.md#96-pre-size-and-chunk-the-per-page-build-tables).
 
 Code that runs on every loop pass must not allocate at all, pressed or not. Two helpers in `src/util/` cover the usual offenders, and `ButtonNavigator` uses both:
 

@@ -137,7 +137,7 @@ class HalStorage {
   void noteFoundChange() { noteContentChange(nullptr); }
 
   // At-rest cipher for a protected book's cache folder (lib/CacheCipher/CacheCipherFile.h, D2 in
-  // docs/future_work/protected-content.md). Every file opened under a folder that holds the marker is enciphered on
+  // docs/design/cache-cipher.md). Every file opened under a folder that holds the marker is enciphered on
   // the card and plain through its handle, whoever opens it: the reader, the home screen, the sleep screen. A folder
   // whose marker has no key (no key source installed, a damaged marker) opens nothing at all, so nothing in it is
   // ever read or written in the clear.

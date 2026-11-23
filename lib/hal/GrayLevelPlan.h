@@ -5,8 +5,8 @@
 // How a panel without an 8-bit canvas of its own (HalDisplay::borrowGray8Canvas) takes a picture with more than
 // four levels: an ordinary B/W base first, then passes that each move the glass by what one or two 1-bit planes
 // select. The shape is that of Free-Ink #220 (zuyan9), the X3's calibrated two-pass 16-gray on the UC8253: a B/W
-// base, a coarse pass and a fine pass, two planes each. The X4 Pro (UC8179) and the X4 (SSD1677) are to take the
-// same shape with waveforms measured on their own panels.
+// base, a coarse pass and a fine pass, two planes each. The X4 (SSD1677) is to take the same shape with waveforms
+// measured on its own panel; the X4 Pro took an 8-bit canvas instead (#869).
 //
 // A plan is data, so the host needs no knowledge of the waveforms: it draws every plane from the picture
 // (GrayLevelQuantizer gives each pixel its ink), uploads it, and lets the panel run that step. Ink 0 is white and

@@ -471,7 +471,7 @@ HarfBuzz 14.5, not by this shaper.
   the neutral symbols and the presentation forms (U+FB50-FDFF, FE70-FEFF), which bidi orders or which are formed
   already. They are drawn as plain text in the book's font, but for a number sign with digits after it (next item).
   Brackets and every other mirrored code point are outside by construction.
-- **Number runs** (`RunKind::ArabicNumber`): a number sign (Unicode's Prepended_Concatenation_Mark of the blocks:
+- **Number runs** (`RunKind::ArabicNumber`, #698): a number sign (Unicode's Prepended_Concatenation_Mark of the blocks:
   `arabic::isNumberSign`; the end of ayah U+06DD among them) followed by a digit starts a run of the sign and the
   digits after it (European, Arabic-Indic or Extended Arabic-Indic; at most `arabic::kNumberSignDigits`, 8), which the
   font draws as the sign around its digits: the shipped Naskh and Sans Arabic families take one to three digits in
@@ -582,8 +582,8 @@ a line's tokens by the bidi levels. PR 4b teaches it to carry shaped pieces.
 A paragraph's shaped records live in its `ShapedStore`, on the heap (memory strategy §8.2). The stress case is
 `test/epubs/test_shaped_arabic.epub`'s chapter 2 in landscape on the X3. #660 shrank the store's index and took four
 more changes (Tier A); #672 added a free-heap floor. Why the rest of the store does not move into the lent arena is
-in memory strategy §8.5, rows 17 and 18; what is left (Tier B and C, a size-aware gate) is in the
-[handover](future_work/writing-modes-handover.md), item 1.
+in memory strategy §8.5, rows 17 and 18; what is left (Tier B and C, a size-aware gate) is a
+[memory-and-parsing item](future_work/memory-and-parsing/the-shaped-store-is-on-the-heap-and-the-paragraph-gate-ignores-its-size.md).
 
 **What failed.** On the X3 in landscape, the test book `test/epubs/test_shaped_arabic.epub` chapter 2 degraded. That
 chapter holds a 400-token paragraph at a quarter of the body size (every Allah split by a span) whose lines hold more
@@ -689,31 +689,52 @@ gate keeps a shaped Arabic book out of an in-place build on the X4 too
 
 ## Time
 
-Each shaped word costs a walk of the flash-mapped GSUB and GPOS, so an Indic chapter builds slower than a Latin one;
-page turns cost nothing more. On the X3, with the word cache and the plan's memos, a 2,593-word chapter of Hindi prose
-(Gaban) builds in 6.9 s against 2.6 s for a Latin chapter of the same length (2.6x), and the repeated-text timing book
-in 4.9 s against 2.5 s (1.95x) (the
-[measurements](superpowers/specs/2026-11-02-writing-modes-step2-measurements.md), "PR 3: shaped text on the page").
-A word the cache misses still costs about 2.5 ms, most of it the conjunct ligature walks; speeding the engine up is
-left to a later change.
+Each shaped word costs a walk of the flash-mapped GSUB and GPOS, so a shaped chapter builds slower than a Latin one;
+page turns cost nothing more. The design's line is a cold chapter in at most 2x its Latin twin's time on the X3, with
+the timing books of `tools/writing-modes-bench/` (how to time a build: [debugging.md](debugging.md#timing-a-chapter-build)).
 
-Arabic misses the design's 2x line. On the X3, Jurji Zaydan's England chapter (2,529 words) builds in a median 7,880 ms
-against 5,586 ms on master, which drew it unshaped, and its Latin twin in 2,489 ms: 3.17x the twin, where master was
-already 2.22x. Shaping adds about 2.3 s, or 0.9 ms a word, and the word cache hits 707 of 2,527 lookups (28%).
-Master's bidi-only Arabic build is already past 2x, so shaping alone cannot reach it; as for Hindi, the engine's speed
-is left to a later change ([measurements](superpowers/specs/2026-11-02-writing-modes-step2-measurements.md), "PR 4b:
-Arabic on the page").
+**Where it stands.** X3, chapter 2 of the bench books at 14 pt portrait, warm glyph store, median of six cold builds
+(#874): Gaban's Hindi 5,640 ms, Zaydan's Arabic 6,015 ms, their Latin twin 3,004 ms (1.88x and 2.00x).
 
-The right-to-left path without shaping, which Hebrew takes whole and Arabic shares, was profiled on the X3 on
-2026-11-08 with a Hebrew timing book (Bialik, `tools/writing-modes-bench/make_bialik_books.py`): the width pass ran a
-UAX#9 pass on every token of a bidi paragraph on its own (`BidiLine::tokenForm`, 2,686 passes a chapter against the
-293 lines'), and the placed line measured every piece a second time. A plain token (letters of one strong class,
-with unmirrored punctuation when the letters run the paragraph's way, no control open) now takes a short path: its
-form is its code points reversed, and the placed line keeps the width pass's measure. Layout is byte-identical. The
-chapter builds in 4,244 ms against its Latin twin's 2,557 in NotoSansHebrew (1.66x; master 4,680, 1.81x), and in
-4,918 against 2,600 when the fallback face draws it from BookerlyTTF (1.89x; master 5,531, 2.13x). What remains is
-measured in the handover: the TrueType measure (a Hebrew kerning pair costs three to four times a Latin one), the line
-pass itself, and the form bytes a Hebrew line writes.
+**How it got there:**
+- **When shaping shipped** (#642, #656): Hindi 6,908 against 2,648 ms (2.61x), Arabic 7,880 against 2,489 ms (3.17x),
+  where master's Arabic without shaping was already 2.22x. Shaping added about 0.9 ms an Arabic word; a Hindi word the
+  cache missed cost about 2.5 ms, most of it the conjunct ligature walks
+  ([measurements](superpowers/specs/2026-11-02-writing-modes-step2-measurements.md), "PR 3: shaped text on the page"
+  and "PR 4b: Arabic on the page").
+- **A sampling profile of the X3** (master 74b8fc803, the build after its first page) put `shapeToken` at 61% of an
+  Arabic build and 65% of a Hindi one, the engine (`ot::shape`) at about a third of each, and their processor work at
+  about 4.5x and 3.5x the Latin twin's 1,452 ms.
+- **The engine** (#683, deviations 16-21 under "The face and its plans"): Arabic and Hindi chapters 21-24% faster on
+  the X3, almost all of it from the hottest code in IRAM; the shaped output is unchanged against HarfBuzz.
+- **Layout** (#872, its layout half: the shaped store's validation, the glyph warm-up, the Myanmar break search):
+  Hindi -5.6%, Arabic -7.4% on the X3. Its engine half (deviations 23 and 24) was within the X3's code-placement noise,
+  and #874 reverted it.
+
+**The right-to-left path without shaping**, which Hebrew takes whole and Arabic shares (Bialik's Hebrew chapter,
+`tools/writing-modes-bench/make_bialik_books.py`, against its Latin twin):
+- **A plain token** (#661). The width pass ran a UAX #9 pass on every token of a bidi paragraph on its own
+  (`BidiLine::tokenForm`, 2,686 passes a chapter against the 293 lines'), and the placed line measured every piece a
+  second time. A plain token (letters of one strong class, with unmirrored punctuation when the letters run the
+  paragraph's way, no control open) takes a short path: its form is its code points reversed, and the placed line
+  keeps the width pass's measure (`plainForm_`). Layout is byte-identical. In NotoSansHebrew 4,680 to 4,244 ms (1.81x
+  to 1.66x the twin); drawn by a Latin body font's fallback face 5,531 to 4,918 (2.13x to 1.89x).
+- **Left letters that kern with nothing** (#662). Their pairs are never stored, and `TtfFont::Style` remembered them
+  in a bit set that ended at U+0250, so a Hebrew, Arabic or Indic letter read the font's GPOS again with every word:
+  4,300 reads a Hebrew chapter in its own font, 17,000 through a Latin font's fallback face. A 64-entry set above
+  U+0250, where a left code point the face lacks counts too: 4,680 to 4,044 ms in NotoSansHebrew, 5,531 to 5,100
+  through the fallback face.
+- **The glyph store's recent answers** (#669): `FlashGlyphStore::find` keeps them in RAM, two ways of 32 sets (512 B
+  while a family is loaded). It saved less than the 182 ms the lookups took: X3, warm store, Hebrew 3,747 to 3,678 ms,
+  its Latin twin 2,657 to 2,616, Arabic 7,655 to 7,588, Hindi 6,800 to 6,721, a page's pre-render 62 to 59 ms. 128
+  entries saved at most 70 ms more a chapter, so 64 stay.
+- **The space's width** (#674): a layout pass remembers the space glyph's advance per font and style, and its kerning
+  with each neighbour (560 B static), summed and snapped as `getSpaceAdvance()` does. `parse=`, warm: Latin 1,220 to
+  1,151 ms, Hebrew 2,346 to 2,210, Hindi 5,472 to 5,311, Arabic 6,341 to 6,275; the chapter files the same size.
+- **The split search** (#675): a kind of prefix stops at its first one too wide, measured in one string. Latin 1,220
+  to 1,211 ms, near the noise.
+
+What is left is in [complex-scripts.md](future_work/complex-scripts.md).
 
 ## Tests
 

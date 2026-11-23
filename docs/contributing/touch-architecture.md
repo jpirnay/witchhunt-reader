@@ -374,7 +374,8 @@ initialisers in `CrossPointSettings.h`. Why they are what they are:
 
 ## Debugging touch
 
-Build with `-DBUTTON_TRACE=1` (commented out in `[lilygo_board]`) to trace both ends of the path:
+Build with `-DBUTTON_TRACE=1` (commented out in `[lilygo_board]`, on in `[env:murphy]`) to trace both ends of the
+path:
 
 - `[TCH] release: held=... tap=... swipe=... travel=...` from the sampler task at the release edge,
   while the SDK's one-shot flags are fresh. The trace measures travel itself, in panel-native

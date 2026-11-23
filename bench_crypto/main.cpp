@@ -1,4 +1,4 @@
-// ESP32-C3/S3 cache-cipher benchmark — docs/future_work/protected-content.md (D2).
+// ESP32-C3/S3 cache-cipher benchmark — docs/design/cache-cipher.md (D2).
 //
 // Decides two things with numbers instead of assumptions:
 //

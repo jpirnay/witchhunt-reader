@@ -6,12 +6,12 @@ A "section" is one spine item (typically one chapter) laid out into pages for a 
 
 The section cache filename is `{cachePath}/spines/{spineIndex / 32}/{spineIndex}_{propertyHash:08x}.bin` (`Epub::spineCacheDir`). The per-spine caches sit in buckets of 32 spine items because a FAT open scans its directory linearly: the single flat `sections/` directory older firmware used held two files per spine item, 3400+ entries on a book with 1700 spine items, all scanned on every section open. The book-keyed inflated XHTML (`html_{spineIndex}.bin`) and the build's anchor spill share the bucket.
 
-The property hash (`Section::calculatePropertyHash`) is 32-bit FNV-1a over a packed buffer of the twelve rendering parameters in `Section::BuildParams` that affect layout:
+The property hash (`Section::calculatePropertyHash`) is 32-bit FNV-1a over a packed buffer of the rendering parameters in `Section::BuildParams` that affect layout. These twelve are always in it:
 
 | Parameter | Type | Effect on layout |
 |---|---|---|
 | `fontId` | `int` | Glyph metrics, advance widths |
-| `lineCompression` | `float` | Line-height multiplier |
+| `lineCompression` | `TextScale` | Line-height multiplier |
 | `extraParagraphSpacing` | `bool` | Extra gap between paragraphs |
 | `paragraphAlignment` | `u8` | Justify / left / center / right |
 | `viewportWidth` | `u16` | Line break positions |
@@ -23,15 +23,17 @@ The property hash (`Section::calculatePropertyHash`) is 32-bit FNV-1a over a pac
 | `inlineFootnotePreviews` | `bool` | Footnote text expanded inline; when on, `INLINE_FOOTNOTE_PREVIEW_LAYOUT_VERSION` is hashed too |
 | `imageRendering` | `u8` | Image scaling policy |
 
+The others go in only when they differ from their default, so a layout made before the parameter existed keeps its hash: widow and orphan control when off, the book's line-height floor, the book's font families (with its style on), the vertical-text request when not Off, the hyphenation patterns' key, the body size (with normalisation and the book's style on, when not 100 %) and the paragraph indent when not Book's Style. `calculatePropertyHash` is the list.
+
 Any change to a parameter produces a different hash and a new cache file. Old variants are kept up to `MAX_VARIANTS = 5` per chapter (see Variant eviction below).
 
 ## Cache load path
 
-`Section::loadSectionFile` opens the candidate file and validates the version byte (`SECTION_FILE_VERSION`, defined at the top of `lib/Epub/Epub/Section.cpp` — it is bumped on every layout change, so read it there rather than trusting a number quoted here) and the ten render parameters the header stores. `fontSizeNormalization` and `inlineFootnotePreviews` are not in the header; the hash in the filename is what keys them. Then it:
+`Section::loadSectionFile` opens the candidate file and validates the version byte (`SECTION_FILE_VERSION`, defined at the top of `lib/Epub/Epub/Section.cpp` — it is bumped on every layout change, so read it there rather than trusting a number quoted here) and the eleven render parameters the header stores (the vertical-text request among them). `fontSizeNormalization` and `inlineFootnotePreviews` are not in the header; the hash in the filename is what keys them. Then it:
 
 1. Reads the status byte. `kStatusParseComplete` clear means the cache was truncated (a low-memory partial parse), and the reader shows a hint. The other bits record a degraded build (an image dropped to alt text, a table row demoted to paragraphs, skipped CSS lookups) that earns the spine one rebuild per session, or a fixed capacity that changed the output (`kStatusSimplified`, logged only).
 2. Reads `pageCount` and the page LUT offset.
-3. Loads the LUT into `lut: vector<uint32_t>` — one file offset per page. When no heap block can hold it, pages read their offset from the file instead (`lutFileOffset_`).
+3. Loads the LUT into `lut` (`Section::PageLut`, a `ChunkedVector<uint32_t>`) — one file offset per page. When no heap block can hold it, pages read their offset from the file instead (`lutFileOffset_`).
 4. Builds the TOC boundaries from the anchor map. The page-break labels are read on first use (`Section::ensurePageBreakLabels`) and the paragraph LUT on demand.
 5. Leaves the file **open** so `loadPageFromSectionFile()` can seek within the same handle without reopening.
 
@@ -53,7 +55,7 @@ Who builds:
 
 **Embedded style gate.** Before a heap-backed build with `embeddedStyle=true`, `Section::startBuild` checks `Section::heapAllowsEmbeddedStyle`: free heap against `SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES` (44 KB), and the largest block against `SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES` (12 KB) or 8 B per CSS rule plus 8 KB, whichever is larger. A build in the borrowed buffer is exempt, because its ruleset lives in the build arena. If the gate refuses, the build continues with `embeddedStyle=false`, writing the no-CSS variant, rather than failing.
 
-**Two phases.** Phase (a) inflates the spine's XHTML into `html_{spineIndex}.bin`, keyed on the book and spine only, so a settings change or a rebuild skips the inflate. Phase (b) streams that file through `ChapterHtmlSlimParser`. The parser calls `onPageComplete(page)` for each finished page; the callback serialises the page immediately to the section file and records its byte offset. Peak memory is proportional to one page, not the whole chapter.
+**Two phases.** Phase (a) inflates the spine's XHTML into `html_{spineIndex}.bin`, keyed on the book and spine only, so a settings change or a rebuild skips the inflate. Phase (b) streams that file through `ChapterHtmlSlimParser`. The parser calls `onPageComplete(page)` for each finished page; the callback serialises the page immediately to the section file and records its byte offset. Peak memory is proportional to one page, not the whole chapter. Before the parse reads its first style, `Section::scopeStylesheets` reads the chapter's head from that file and limits the book's CSS to the stylesheets the chapter links ([Stylesheet scope](../design/stylesheet-scope.md)).
 
 **Anchors spill to SD.** The parser writes each anchor record to a temp file (`anchors_{spineIndex}.tmp`, `Section::getAnchorSpillPath`) as it finds it, so nothing in memory scales with how many anchors a chapter has. The finalizer copies the spill into the section file's anchor map and deletes it.
 
@@ -62,10 +64,10 @@ Who builds:
 ### On-disk file structure
 
 ```
-[Header: 38 bytes]
+[Header: 39 bytes]
   u8   version (= SECTION_FILE_VERSION, see Section.cpp)
   i32  fontId
-  f32  lineCompression
+  u32  lineCompression     // TextScale, 2^-20ths of 1 (a float before v131)
   bool extraParagraphSpacing
   u8   paragraphAlignment
   u16  viewportWidth
@@ -74,8 +76,9 @@ Who builds:
   bool embeddedStyle
   bool bionicReadingEnabled
   u8   imageRendering
+  u8   verticalText        // the request the section was built with
   u8   status              // kStatusParseComplete | ...ImageHeaderDegraded | ...TableRowDegraded
-                           //   | ...CssDegraded | ...Simplified
+                           //   | ...CssDegraded | ...Simplified | ...Vertical | ...ShapingDegraded
   u16  pageCount
   u32  pageLutOffset
   u32  anchorMapOffset

@@ -2,7 +2,7 @@
 """Build test_css_scoping.epub -- the corpus book that pins which stylesheets a chapter resolves against.
 
 A chapter resolves against the stylesheets its <link> elements name, and the sheets those import, as a browser
-does (docs/future_work/memory-and-parsing.md, 13b). Before, every stylesheet of the manifest applied to every
+does (docs/design/stylesheet-scope.md). Before, every stylesheet of the manifest applied to every
 chapter, so a sheet only some chapters link (matcha-reader #453's vertical_image.css, an omnibus edition whose
 parts each ship a sheet with the same class names) styled the rest of the book too. A paragraph's text-align is its
 own rules', so centre.css centres through `p`: under Justified, the default, a book's centre and right stand.

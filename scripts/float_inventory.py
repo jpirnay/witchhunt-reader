@@ -3,7 +3,7 @@
 The C3 has no FPU, so every float or double operation is a call into a libgcc soft-float helper (__mulsf3,
 __divdf3, ...) or a libm routine. This disassembles the ELF, finds every call to one of them, and attributes
 it to the calling function and its source file: what runs on the device, with nothing from comments, names
-or compiled-out code. Used to plan and check the integer-maths work (docs/future_work/integer-math.md).
+or compiled-out code. Used to plan and check the integer-maths work (docs/design/integer-math.md).
 
     python scripts/float_inventory.py .pio/build/default/firmware.elf [--all] [--helpers]
 

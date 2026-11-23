@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // Input first: the reader's background work starts no unit while a press is on its way to becoming a turn (rule R0 of
-// docs/future_work/reader-priority-scheme.md).
+// docs/design/reader-priority-scheme.md).
 //
 // The reader's loop hands every pass without an input event to the background work, and a press is no event until it
 // is released and read: down, then released, then, with a double-press action set, waiting out its window. Each of

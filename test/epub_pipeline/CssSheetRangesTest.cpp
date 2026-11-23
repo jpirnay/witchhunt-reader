@@ -408,7 +408,7 @@ int scopeOfHead(CssParser& css, const fs::path& file, const std::string& xhtml) 
 // kind, upper case, attributes in any order, a '>' in a quoted value and a prefixed name read as a browser reads them,
 // and only a link's rel and href are kept. A rel or href not quoted, or longer than the 256 B the scan keeps, cannot be
 // read, nor can a head past 8 KB: every sheet applies. A file that ends in its head was read whole. Not read: an
-// <?xml-stylesheet?> instruction (docs/future_work/memory-and-parsing.md lists what the scan does not see).
+// <?xml-stylesheet?> instruction (docs/design/stylesheet-scope.md lists what the scan does not see).
 TEST_F(CssSheetRangesTest, TheHeadIsReadAsMarkup) {
   const auto epub = bookOf({{"a.css", "@import \"base.css\";\n.a { font-weight: bold; }\n"},
                             {"base.css", ".b { font-style: italic; }\n"},

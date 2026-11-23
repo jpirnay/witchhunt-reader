@@ -32,7 +32,7 @@ shared foundations.
 
 - **The per-language profile exists.** `TypographyProfile` (`lib/Epub/Epub/TypographyProfile.h`, PR A3) is chosen once
   per section build from `dc:language` and travels by value Section → ChapterHtmlSlimParser → every ParsedText. It
-  already holds `Direction direction` and `verticalAllowed`; nothing reads either (`docs/future_work/test-suite.md:79`).
+  already holds `Direction direction` and `verticalAllowed`; nothing reads either (found by the host test-suite audit, #547).
 - **Character rules stay with the characters.** Kinsoku and the CJK breaks apply by codepoint in every book
   (`CjkLineBreak`); the profile adds only what needs the language. The new scripts should keep that split.
 - **Layout is logical in all but name.** ParsedText computes each word's offset from the line's start

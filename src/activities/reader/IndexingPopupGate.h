@@ -9,7 +9,7 @@
 // started: 0.63-0.66 s on a C3 first open (X3, X4, 2026-11-16), a FAST refresh on every chapter crossing elsewhere.
 // Where the panel and the board allow it, the popup ships async (PopupShip::Async) and the work runs through its
 // waveform. What each panel's refresh needs from the host, and for how long, is in
-// docs/future_work/reader-priority-scheme.md, section 4.
+// docs/design/reader-priority-scheme.md, section 4.
 //
 // Two things decide it. The work reads the card: that must be possible while the refresh is pending
 // (cardReadsDuringRefresh). And the first open and a chapter build lend the secondary buffer to the work; a lend of
@@ -31,7 +31,8 @@ struct Panel {
   // GfxRenderer::refreshLeavesBusToCard(): the card shares the panel's SPI bus, which the panel needs only to start and
   // to finish a refresh (the X4).
   bool refreshLeavesBusToCard = false;
-  // GfxRenderer::asyncRefreshHoldsFrameBuffer(): the X3, whose refresh's finish reads the painted frame back.
+  // GfxRenderer::asyncRefreshHoldsFrameBuffer(): the X3, whose refresh's finish can read the painted frame back (the
+  // UC8279d's after every refresh, the UC8253's after a full sync).
   bool refreshHoldsFrame = false;
   // GfxRenderer::lendsDuringRefresh(): the framebuffer lend (the C3s), which during a refresh takes the frame not being
   // painted.
@@ -47,7 +48,9 @@ struct Panel {
 // - A card on a bus of its own.
 // - The X4: its SSD1677 needs the shared bus only to start and to finish (HalDisplay::refreshLeavesBusToCard).
 // - The X3: its controllers need the bus only to start and to finish as well. They are left out of
-//   refreshLeavesBusToCard for the finish, which reads the frame back; the chapter build has read the card through its
+//   refreshLeavesBusToCard for the finish, which can read the frame back: the UC8279d sends it to DTM1 after every
+//   refresh, the UC8253 only after a full sync (since #860 its FAST, HALF and one-pass finish leave DTM1 to the
+//   controller). The chapter build has read the card through its
 //   Indexing popup's waveform since 193c1560c (X3, 2026-11-09: the chapter built 0.30-0.38 s sooner).
 // Not the T5S3: a host task clocks its waveform out, and card traffic beside it has not been tried for a build
 // (HalDisplay::refreshLeavesBusToCard).

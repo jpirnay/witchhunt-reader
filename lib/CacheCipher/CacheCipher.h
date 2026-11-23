@@ -1,6 +1,6 @@
 #pragma once
 
-// Cache-at-rest cipher for protected books — docs/future_work/protected-content.md (D2).
+// Cache-at-rest cipher for protected books — docs/design/cache-cipher.md (D2).
 //
 // A book read under LCP or Adobe DRM must not leave its plaintext on the SD card, but the
 // reader's whole page-turn path is built on cached derivatives of that plaintext (the

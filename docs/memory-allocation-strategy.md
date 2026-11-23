@@ -520,7 +520,8 @@ about a fifth, but the pool's own 6 KB reservation cost about 4 KB of contig and
 page turn became a HALF refresh (X3, 2026-08-22). Reverted. Most of a table page's excess is the
 per-cell objects (`TableCell::lines`, `TableRow::cells`, the `TextBlock` objects), not word
 storage. On arena builds the cells' line bytes now come from a row block in the lent region
-(`ChapterHtmlSlimParser::layoutTableRow`); the objects are still on the heap.
+(`ChapterHtmlSlimParser::layoutTableRow`), and so do their lines' `TextBlock` objects where the walk reserve allows
+(§9.5); the cells' own objects and lists are still on the heap.
 
 The A/B method that measured it: build with `-DSCT_HEAP_TRACE=1 -DEHP_FORCE_BLOCKING_BUILD` so both
 arms take the same path, clear the cache between arms, and compare each arm's excess over its own
@@ -697,17 +698,74 @@ for a page image), the decode's remaining working set (12 KB) and an 8 KB floor.
 - The prewarm's text scan grows in 512-byte steps up to 4 KB per style and asks for each block
   first (`FontCacheManager::recordText`). It used to reserve 4 KB per style up front, and on a
   fragmented heap that reserve aborted the device.
-- Still open: the prewarm of an ordinary page render set the session's heap minimum on the X3
-  (§8.1). See [future_work/memory-and-parsing.md](future_work/memory-and-parsing.md).
+- A page render lends the secondary buffer to its prewarm, as it lends it to an image decode. A TrueType miss takes
+  its scratch block and SD page cache from that region per miss (§9.7), and what a miss still made on the heap is
+  freed before the black-and-white render (`releaseTtfMissMemory()` in `EpubReaderActivity::renderContents`), not when
+  `RenderLock` goes back (#515). Every prewarm lends, not only one with a TrueType set, and `FontDecompressor` takes a
+  group's ring from its slot arena, else from the region lent to the misses (`ringArena`, `glyph_miss::Scope`),
+  giving it back before the next group; the page slots stay on the heap (#519). On the host the prewarm's heap peak
+  loses its largest ring (3,036 B for a Noto Sans 14 sample); on the X3 the prewarm's free low median went from
+  43,434 to 45,832 B.
+- So the prewarm no longer sets the session's heap minimum (§8.1). Re-measured on the X3 after #515 (Build Through
+  test book, `[MEM]` and the per-phase lows of `renderContents`): the session's low sat at about 33 KB, inside
+  Background-B's build, and a page render's phases stayed within 1-2 KB of their start:
+
+  | Page render, X3 | start | prewarm low | BW render low |
+  |---|---|---|---|
+  | TrueType body (BookerlyTTF), glyphs in the store | 50.5 KB | 48.6 KB | 50.3 KB |
+  | the same, first page after the glyph store was installed again, before | 50.3 KB | 38.7 KB | 39.9 KB |
+  | the same, after | 50.5 KB | 48.7 KB | 50.3 KB |
+  | built-in Bookerly | 53.0 KB | 45.0 KB | 49.4 KB |
+
+- Two prewarms cannot lend, because the buffer holds a frame the display needs: a pre-render (the page on screen) and,
+  on the C3s, a page that goes out composed one-pass (`prewarmKeepsFrameOnScreen`). Their transients stay on the
+  heap; see [two font prewarm transients stay on the
+  heap](future_work/memory-and-parsing/two-font-prewarm-transients-stay-on-the-heap.md).
 
 ### 9.5 Class D still on the heap
 
 `PixelCache`'s band and `renderFromCache`'s read buffer (both raw `malloc`), the ditherer rows, the
 `PngStreamDecoder` object, and the table cell objects (§4, class D). All are strictly nested, so each
-could take a scoped arena block. The per-line `TextBlock` and `PageLine` objects already take the page
-block on an arena build where the image walk's reserve leaves room (memory-and-parsing 9b, 9c), and
-the heap otherwise. The per-cell objects are the larger lever left; see
-[future_work/memory-and-parsing.md](future_work/memory-and-parsing.md).
+could take a scoped arena block. The per-cell objects are the larger lever left; see [per-line and per-cell objects
+are still on the heap](future_work/memory-and-parsing/per-line-and-per-cell-objects-are-still-on-the-heap.md).
+
+The per-line objects were the first moved (memory-and-parsing triage §9):
+
+- **A cell's line list is one allocation** (9a, #841). `layoutTableRow` collects a grid cell's lines in one parser
+  member, `cellLineScratch_` (`MAX_CELL_LINES` pointers, 256 B on the C3, reserved at the table's first grid row and
+  freed at `</table>`), then gives `cell.lines` its exact size. A four-line cell had allocated three times and freed
+  twice inside one row's layout. A refusal of either sends the row out as paragraphs, every word kept.
+- **A line's `TextBlock` goes where its bytes go** (9b, #851). `TextBlock::make` builds the object in the line arena
+  (the page block for prose, the row block for a cell) when the line's room allows, else nothrow on the heap. A
+  class-scoped destroying `operator delete` frees only an object the heap made, so `std::unique_ptr<TextBlock>` keeps
+  its type at every user.
+- **The `PageLine` follows it** (9c, #856). `PageLine::make`, called from `addLineToPage`, places through the same
+  rule (`TextBlock::ArenaRoom::placeObject`). `PageElement` has the destroying `operator delete`; the flag it needs
+  rides a spare bit of the line's `TextBlock` (`TextBlock::holderInArena`), because a flag in `PageElement` would
+  grow every element of a resident page from 8 to 12 B on the C3 (measured with the C3 and S3 compilers).
+  `static_assert`s in `Page.cpp` hold `PageElement` at 8 B and `PageLine` at 12 B, and `TextBlock.cpp` holds
+  `TextBlock` at 52 B.
+- **The walk reserve.** An object in the page block takes room from whatever a page allocates above it later, and
+  the image-header walk's 32 KB stage leaves 64 B of the X4's lent region (§8.2). So on a C3-sized region (below
+  `WordShapeCache::kLargeArenaBytes`) with an image manifest, an object goes there only while the region keeps
+  `EpubImageManifest::kWalkArenaReserve` (34 KB) free after it. While a page's objects hold room their line bytes have
+  not given back, line bytes that would cross the reserve go to the heap and give it back (`TextBlock::ArenaRoom`),
+  and a grid row whose block is released takes its share of that count with it. A bound on a page's text instead was
+  not derivable: up to 16.8 KB with TrueType at 8 pt, and none for SD fonts. The S3's 256 KB region always has room.
+- **Stays on the heap:** a drop cap's line (the page block opens with the page's first line, so on a new page it is
+  not open when the cap is placed), and every page loaded to be read (`Page::deserialize`): a mid-build draw loads
+  its page from the section file (`Section::loadPageFromActiveBuild`), so no live page of a build is ever drawn.
+- **Lifetime.** The parser's teardown and `finalize()` destroy the open page's and a table's lines before the page
+  block is rewound. On the host `BUILD_ARENA_TRACE` fills a rewound block, and a `PageElement` destroyed after its
+  block was rewound aborts; the golden corpus is laid out in a lent region too (every lent case at 52,272 B, 15 books
+  at 48,000 B).
+- **Measured.** Allocations of one moby-dick build on the host (Windows): 78,775 to 51,452 lent the X3's 52,272 B
+  for 9b (78,917 to 51,594 on CI's Linux, `alloc-counts`), then 54,070 to 30,902 for 9c. Lent the X4's 48,000 B,
+  where the line bytes give back most of what the objects take: 78,775 to 78,720 for 9b, and 81,338 to 75,341 for 9c
+  (each pair against the master of its PR). Heap builds are unchanged, and every golden is byte-identical. On the X3
+  (*Through the Brazilian Wilderness*, appendix B, 68 pages, three tables, the method of §8.4a), before and after 9b:
+  heap blocks at a page's end, median 348 to 329 on the prose pages and 536 to 471 on the table pages; the build's
+  lowest largest free block 23,540 to 28,660 B; no row degraded. The X3 run for 9c and an X4 image-heavy chapter are still to run (see the item above).
 
 ### 9.6 Pre-size and chunk the per-page build tables
 
@@ -730,6 +788,37 @@ The page itself is taken the same way: every parser site gets its `Page` from
 `stopForHeap()` (`streamFailed`, `layoutFailed`, the parser stopped), the pages so far kept and the
 section truncated. A bare `new Page()` aborted mid-build, and the next open of the chapter rebuilt
 into the same abort.
+
+The other tables a build grows from data take the same exit (memory-and-parsing triage §10). Each asks the heap first
+(`heapReserveFor`, `makeUniqueNoThrow`). A refusal during the parse stops the build through `stopForHeap()` with its
+pages kept; one at setup keeps the build from starting:
+
+- A page's element table grows through one helper, `ChapterHtmlSlimParser::addPageElement()` (#829). Once the build
+  has stopped it refuses every later add (`layoutFailed`), so no line lands behind a refused one. Worst case one
+  doubling, 32 to 64 pointers: 256 B on the C3.
+- The parser object is made nothrow (`makeUniqueNoThrow` in `Section.cpp`); refused, the build does not start and the
+  open section file is removed (#836). The spine's TOC anchors, a `std::vector<std::string>` whose length the book
+  decides (a one-file book puts every TOC entry in one spine), are one packed pool `id\0id\0...`, sized in a first
+  pass over the TOC and filled in a second (`BuildState::tocAnchorPool`). On the C3s it is one heap block: in the
+  lent region a 200-entry pool pushed the X4's 33,792 B inflate ring onto the heap (host, `--arena=48000`). On a
+  PSRAM board (`kPoolInRegion`) it takes the build region when it is under a quarter of it. A refusal of both means
+  the build does not start: a TOC anchor drives a page break and navigation, so it is never dropped.
+- The parser's per-element stacks (`inlineStyleStack`, `listStack`, `containerWidthStack_`, `backgroundImageScopes_`,
+  `heldBottomSpacing_`, `blockInsetStack_`, `anchorsAwaitingLine_`) grow through one helper,
+  `ChapterHtmlSlimParser::pushOrStop` (#842). They are not reserved at setup: that added about 2 KB to every build's
+  heap peak and failed `HeapPeakRegression`. After a refusal no pop runs, because `stopForHeap` latches `streamFailed`
+  and the element callbacks return at their top.
+- A table's growing lists (#845): a row's cells (refused, the row is degraded and its cells go out as paragraphs with
+  their text; refused again, the build stops), a laid-out row's cells (refused, the row's paragraph exit), and a
+  fragment's packed rows, asked for the exact count the next push needs (refused, the fragment is flushed and the
+  heap asked once more). A lost fragment allocation, which used to drop the packed rows silently, stops the build.
+
+Each has a fault-injection host test that walks a refusal over a fixture and checks that nothing aborts and that a
+stopped build keeps its pages, marked truncated, or a refused setup leaves no section file
+(`ELEMENT_FAULT_INJECTION`, `SECTION_SETUP_FAULT_INJECTION`, `STACK_FAULT_INJECTION`, `TABLE_CELL_FAULT_INJECTION`).
+What is left, the parser's `std::string` growth, is the item [throwing allocations left on the section-build path](future_work/memory-and-parsing/throwing-allocations-left-on-the-section-build-path.md).
+Two refusals still drop a line and let the build go on: [a line the allocators refuse is dropped while the build goes
+on](future_work/memory-and-parsing/a-line-the-allocators-refuse-is-dropped-while-the-build-goes-on.md).
 
 What would otherwise grow without bound is not held in memory: anchors stream to a spill file
 during the parse (`Section::getAnchorSpillPath`) and are copied into the section file at the end,

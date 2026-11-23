@@ -136,3 +136,46 @@ If you use **Google Chrome** or **Microsoft Edge**, you do not need to install a
 * **No Device Found:** Ensure your USB cable supports **data transmission** and isn't a power-only charging cable.
 
 * **Unknown device (Windows):** If Device Manager shows an unknown USB device with a yellow icon, try another cable or port, then reinstall the Espressif USB JTAG/serial driver. No CH340 or CP210x driver is needed.
+
+## For developers: timing and profiling a chapter build
+
+These notes serve work on layout and shaping speed. [The serial test API](serial-test-api.md) drives the device. The
+timing books come from `tools/writing-modes-bench/` (its README says how to fetch their sources) and are never
+committed.
+
+### Timing a chapter build
+
+* **Compare `parse=`**, or the per-page rate (`[SCT] Page N processed`), not `total=`. The logged
+  `createSectionFile ... total=` includes 0.7 to 1.4 s in which the build waits for the first page's render and
+  refresh, the same for every script.
+* **A cold build:** delete the book's `spines/*/*.bin` in its cache folder (`/.crosspoint/epub_<hash of its path>/`).
+* **Run one book's builds in a row.** A book whose language picks another family (since #665 a Hebrew book picks
+  NotoSansHebrew) reinstalls the glyph store when it opens after a book in another family: 7.5-10.5 s, and an empty
+  store. Alternating a book with its Latin twin gives cold-store figures.
+* **Instrumented builds**, throwaway and never merged, on origin: `wip/layout-profile` (build with
+  `-DLAYOUT_PROFILE=1`; prints `LAYOUTPROF`: the layout pass's steps and the renderer's kerning and glyph lookups) and
+  `wip/shaper-profile` (`OT_PROFILE`, with a host profile test).
+
+### Sampling the C3 with OpenOCD
+
+The X3 and X4 carry JTAG on their USB port, so a sampling profiler needs no extra hardware:
+1. Use Espressif's OpenOCD, the version that `tool-openocd-esp32`'s `tools.json` names (download it and check its
+   sha256), with `set ESP_RTOS none`, `set ESP_FLASH_SIZE 0` and `board/esp32c3-builtin.cfg`.
+2. Build with frame pointers in the libraries to profile (a `library.json` with `build.flags` in each of `Epub`,
+   `EpdFont`, `GfxRenderer`, `OtShaper`, `MiniBidi`, `TextShaping` and `Utf8`) and in `src/` (`build_src_flags`).
+   All of `lib/` with frame pointers does not fit the 0x640000 app slot. Check the `.bin` against the slot before
+   flashing: PlatformIO's "used" figure is about 14 KB under the image.
+3. Run `reset run` once, so the firmware boots with the debugger attached. Otherwise its memory protection faults on
+   the first stack read and the chip panics.
+4. A Tcl procedure in OpenOCD halts the core, reads `pc`, `ra`, `sp` and `fp`, walks the frame pointers (reading
+   aligned SRAM only) and resumes, about 40 times a second. GDB's `bt` at each halt gave stale frames, so its
+   inclusive figures were wrong.
+
+### Traps
+
+* **No literal bidi controls or joiners in sources.** U+200E and U+200F, U+202A-202E, U+2066-2069, U+061C, ZWJ and
+  ZWNJ are invisible and reorder or join the text around them. Write them as code points in sources, commit messages
+  and generated data. The exceptions are goldens, which hold laid-out bytes, and the translations, which write U+200C,
+  U+200E and U+200F as the characters themselves (`docs/i18n.md`, "Hebrew, Arabic and Persian").
+* **A `std::string_view` bound to a temporary** (`IndicShaper::Request::before` and `after` are views) can pass one
+  host's suite and fail only in Linux CI, where glibc overwrites the first 16 bytes of a freed chunk.

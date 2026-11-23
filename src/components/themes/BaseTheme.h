@@ -32,9 +32,10 @@ enum class PopupShip : uint8_t {
   Blocking,  // displayBuffer(): return once the panel has finished painting the box.
   Async,     // triggerDisplayAsync(): return while the panel is still painting, so the caller can
              // start the slow work the popup is announcing. The caller then owes the panel a
-             // GfxRenderer::finishDisplayAsync() before it next writes the framebuffer, touches
-             // the display, or frees a framebuffer — releaseSecondaryBuffer() in particular does
-             // NOT drain a refresh in flight, and X3 re-reads the frame after the waveform.
+             // GfxRenderer::finishDisplayAsync() before it next writes the framebuffer: the X3 can
+             // read the frame again after the waveform (asyncRefreshHoldsFrameBuffer). Display
+             // calls, and a borrow or release of the secondary buffer, drain a refresh in flight
+             // themselves, so the wait then lands there.
   Caller,    // Not shipped: the box is only drawn into the write buffer, and the caller's own
              // displayBuffer() ships it with the rest of the frame. For a popup drawn inside a
              // render that ships itself, such as UiListActivity::render() via drawFooter(): a ship
