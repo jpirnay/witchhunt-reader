@@ -1487,6 +1487,12 @@ class EpubReaderActivity final : public Activity {
   // costs a wordBox() — which itself reads a precomputed x from the block rather than laying
   // anything out. Nothing is allocated.
   void publishPageLinkTargets(const Page& page, int marginLeft, int contentTop) const;
+  // The walk behind it: `visit` once for each of the page's links it finds, with the box of its glyphs [left, right) x
+  // [top, bottom) in the reader's frame and its index in currentPageFootnotes. Text is matched word by word in page
+  // order; a link around an image is boxed by the image. The footnote popup asks it which half of the screen a marker
+  // stands in, on every board, where the tap targets exist only with touch.
+  using LinkBoxVisitor = void (*)(void* ctx, int left, int top, int right, int bottom, size_t link);
+  void visitPageLinkBoxes(const Page& page, int marginLeft, int contentTop, LinkBoxVisitor visit, void* ctx) const;
 
   // A tap on one of those targets, resolved in loop(). Returns true when it claimed the tap, so
   // the reader stops before the page-turn zones -- a marker can sit anywhere on the page,

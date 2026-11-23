@@ -8174,34 +8174,51 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
     TapTargets::readerLinks().record(targets);
     return;
   }
+  const GfxRenderer::Orientation held = renderer.getHeldOrientation();
+  struct Publish {
+    TapTargets::Recorder::Builder* targets;
+    int screenW;
+    int screenH;
+  } publish{&targets, renderer.getScreenWidth(held), renderer.getScreenHeight(held)};
+  // A link's target over [left, right) x [top, bottom) in the reader's frame: grown by the pad, floored, kept on the
+  // panel.
+  visitPageLinkBoxes(
+      page, marginLeft, contentTop,
+      [](void* ctx, const int left, const int top, const int right, const int bottom, const size_t link) {
+        const auto& p = *static_cast<Publish*>(ctx);
+        int x = left - kLinkTargetPad;
+        int y = top - kLinkTargetPad;
+        int w = std::max(right - left + 2 * kLinkTargetPad, kLinkTargetMin);
+        int h = std::max(bottom - top + 2 * kLinkTargetPad, kLinkTargetMin);
+        // Centre the floor on the glyphs rather than growing right/down only, and keep the rect on
+        // the panel so a marker in a margin is still reachable.
+        x -= std::max(0, (w - (right - left + 2 * kLinkTargetPad)) / 2);
+        y -= std::max(0, (h - (bottom - top + 2 * kLinkTargetPad)) / 2);
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x + w > p.screenW) w = p.screenW - x;
+        if (y + h > p.screenH) h = p.screenH - y;
+        if (w > 0 && h > 0) p.targets->add(x, y, w, h, static_cast<int>(link));
+      },
+      &publish);
+  TapTargets::readerLinks().record(targets);
+}
 
+void EpubReaderActivity::visitPageLinkBoxes(const Page& page, const int marginLeft, const int contentTop,
+                                            const LinkBoxVisitor visit, void* ctx) const {
+  if (currentPageFootnotes.empty()) return;
   const int fontId = getEffectiveReaderFontId();
   // The reader's frame: a vertical page draws in the turned one, and this runs while it does.
   const GfxRenderer::Orientation held = renderer.getHeldOrientation();
   const int screenW = renderer.getScreenWidth(held);
-  const int screenH = renderer.getScreenHeight(held);
   // A vertical page's words are boxed where it draws them, in the turned frame; the targets are recorded in the
   // reader's.
   const bool vertical = page.isVertical();
   const turnedframe::Offsets origin =
       vertical ? turnedframe::contentOffsets(screenW, marginLeft, contentTop, page.verticalBlockExtent)
                : turnedframe::Offsets{marginLeft, contentTop};
-  // A link's target over [left, right) x [top, bottom) in the reader's frame: grown by the pad, floored, kept on the
-  // panel.
   const auto addTarget = [&](const int left, const int top, const int right, const int bottom, const size_t link) {
-    int x = left - kLinkTargetPad;
-    int y = top - kLinkTargetPad;
-    int w = std::max(right - left + 2 * kLinkTargetPad, kLinkTargetMin);
-    int h = std::max(bottom - top + 2 * kLinkTargetPad, kLinkTargetMin);
-    // Centre the floor on the glyphs rather than growing right/down only, and keep the rect on
-    // the panel so a marker in a margin is still reachable.
-    x -= std::max(0, (w - (right - left + 2 * kLinkTargetPad)) / 2);
-    y -= std::max(0, (h - (bottom - top + 2 * kLinkTargetPad)) / 2);
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (x + w > screenW) w = screenW - x;
-    if (y + h > screenH) h = screenH - y;
-    if (w > 0 && h > 0) targets.add(x, y, w, h, static_cast<int>(link));
+    visit(ctx, left, top, right, bottom, link);
   };
 
   // The links arrive in page order, so one forward walk resolves them all: whichever word first
@@ -8312,7 +8329,6 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
       break;
     }
   }
-  TapTargets::readerLinks().record(targets);
 }
 
 // A tap on a footnote marker or cross-reference follows it, exactly as picking it out of the
