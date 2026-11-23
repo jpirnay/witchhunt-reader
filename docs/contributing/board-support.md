@@ -65,8 +65,9 @@ Rules:
   numbers. A test that reads them as pins, for presence or against a GPIO number, answers a
   different question there. Check `inputStyle()` first; `upKeyIsBootStrap()` shows the pattern.
 
-The remaining board-name checks are listed in
-[future work](../future_work/boards-and-touch.md#board-name-checks-still-to-convert).
+Feature code no longer asks by board name (242f14ced); the Murphy's button defaults still do
+(`BoardConfig::isMurphyM3()` in `CrossPointSettings.cpp` and `JsonSettingsIO.cpp`). What still decides by board in the
+SDK, `FreeInkDisplay::PanelSel`, is in [future work](../future_work/display-and-refresh.md).
 
 ## Build environments
 
@@ -325,6 +326,22 @@ install (`esptool --no-stub read-flash 0 ALL`, then `verify-flash` against it); 
   sizes come from the profile (`MAX_FRAMEBUFFER_BYTES`), and no static array in `src/` or `lib/` is sized by a panel
   constant. The image caps in `PngToBmpConverter` and `JpegToBmpConverter` count source pixels, and the 480x800 in
   `XtcTypes.h` are parser defaults only.
+- A compact panel (the Murphy M3's 240x416) is a build-time switch, `PanelMetrics::COMPACT`
+  (`src/components/themes/PanelMetrics.h`): `forPanel()` in `BaseTheme.h` caps every theme's metric table, and a
+  layout sized outside the tables asks `PanelMetrics::capped()` or `isShort()`. A runtime scale would miss the places
+  that read the tables as constexpr; `BoardProfile.uiScale` has no consumer (nothing calls `HalCapabilities::uiScale()`).
+  The layouts still wrong there are in [future work](../future_work/murphy-small-screen.md).
+- On the Murphy these layouts stay as they are, by choice: Gesture Actions Overview scales its zones, but a cell label
+  gets about a third of a roughly 150 px frame and is clipped; a Markdown table of 7 or more columns flattens at 230 px
+  (`MdReaderActivity::MIN_COL_INNER_WIDTH`), and a third-level list indent takes 60 of 230 px (`LIST_INDENT`); the
+  reader's truncated-section hint (in `EpubReaderActivity::renderContents`) fits, though its numbers were tuned for a
+  larger line height; a user's sleep BMP made for 480x800 is scaled, so a dithered 1-bit picture is resampled
+  (`SleepActivity::renderCustomSleepScreen`). `GfxRenderer::drawIcon` transforms for portrait only, so an icon drawn
+  in landscape lands off the panel and is dropped, on every board; no landscape screen draws one today.
+- FreeInkUI sizes list rows by its target's `hasTouch`, which `makeUiTarget` (`src/components/UiAppHelpers.h`) leaves
+  false on every board, touch or not: 28 px rows with no gap, about 8 rows of Settings on the Murphy. Passing true
+  applies `listTouchMinRowHeight` (56) and `listTouchRowGap` (6) from the SDK's `FreeInkUICore.h`, which leaves 3 rows;
+  `uiThemeTokens()` would then have to override those tokens.
 - On a board far from the one the code was written for, a fix that changes nothing visible may
   have uncovered the next fault. The T5S3's anti-aliasing problems came in three layers, each
   visible only once the one above was fixed.

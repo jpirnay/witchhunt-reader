@@ -1,8 +1,9 @@
 # Font flash and glyph-path speed
 
-Status: open items as of 2026-10-19; the last two added 2026-11-15, from the upstream triage. Collected from the font-flash analysis of 2026-09-19 (removed in the 2026-10-07 docs cleanup; in git history).
+Collected from the font-flash analysis of 2026-09-19 (removed in the 2026-10-07 docs cleanup; in git history), the
+upstream triage and the integer-maths work ([design/integer-math.md](../design/integer-math.md)).
 
-Fonts are the largest part of the firmware image, so they are where flash headroom comes from. Every lever below except the first trades bytes for glyph-path CPU or RAM; measure that trade before changing a format (last item).
+Fonts are the largest part of the firmware image, so they are where flash headroom comes from. Every format lever below except the `.cpfont` record trades bytes for glyph-path CPU or RAM; measure that trade before changing a format ("Measure before changing the format").
 
 Already shipped, so nobody redoes it: the built-in glyph record went from 16 to 8 bytes by deriving `dataLength` and narrowing `left`/`top` (`f66c1a467`, −384 KB), then to 6 bytes by dropping `dataOffset` (`7779e1936`, −97,716 B); lookups return `EpdGlyphRef` by value and `epdResolveGlyph()` is the one place that tells built-in and `.cpfont` records apart. Size-invariant tables are shared across a family's sizes (`51707caae`, −226,560 B). Kerning is stored sparsely (`b16b4cb28`, −414,710 B) with split class maps (`30a3689e7`). Groups decode through a ring sized to their longest back-reference instead of whole (`bf39ecfcd`, ~4 KB peak for +2.1 % font data). Non-English UI languages ship compressed in a flash language pack (`e06754e18`, −232 KB). `GfxRenderer::truncatedText` truncates in one pass (`8b54d1c78`). The bitmap recompression survey found every alternative but brotli dead: zopfli tuning (−0.2 % for 30× the encode time), lzma2 (+1.7 %), zstd (−0.8 %), shared or trained preset dictionaries (+3.6 % to +6.2 %), byte-delta and bitplane pre-transforms (+32 %, +35 %), and per-glyph DEFLATE at any dictionary size (best case +41 %). The six CJK UI faces ship as 1-bit DEFLATE groups (`compress_ui_face.py`, −78.8 KB of font data, −75,238 B of image), the active UI language's inflated into its language pack slot so no UI screen decodes them (`docs/i18n.md`).
 
@@ -12,8 +13,15 @@ Since #791 (2.53) the boot no longer reads the SD font families: the reader find
 the option rows keep only the names. The screens that need the full records (the font picker, the web font pages, the
 installer) read the list when they open, and every change of screen drops it again, because a list kept after the
 picker split Home's largest heap block from 61,428 to 20,468 B on the X3. So the picker takes longer to open: on the
-X3 with 23 families, 2.48 s to idle against 1.70 s before (+0.8 s). Next: keep the list on the S3 boards, which have
-the PSRAM for it (`HalCapabilities`), or read only the records the picker's first screen shows.
+X3 with 23 families, 2.48 s to idle against 1.70 s before (+0.8 s).
+
+**Where.** `ActivityManager` calls `sdFontSystem.releaseFamilyList()` at every screen change (its replace and its
+return-from-child paths), on every board; `SdCardFontSystem::releaseFamilyList()` drops `SdCardFontRegistry`'s list
+(the families the reader looked up by name stay, unless all their slots are taken or an install changed the list). The
+picker is `FontSelectionActivity`.
+
+**Next step.** Keep the list on the S3 boards, which have the PSRAM for it (a `HalCapabilities` check at the release),
+or read only the records the picker's first screen shows.
 
 ## `.cpfont` glyph record 16 → 10 bytes
 
@@ -60,7 +68,9 @@ the PSRAM for it (`HalCapabilities`), or read only the records the picker's firs
 
 **Open.** Brotli at quality 11 with a 64 KB window (`lgwin=16`) is the only bitmap recompression that beat zopfli DEFLATE: −95 KB gross. The decoder costs ~25–40 KB of flash, so the net gain is −55 to −70 KB, for a second decoder on the font path and more CPU per cold glyph.
 
-**Why it matters.** Flash headroom; the image was at 94.8 % of the app partition after `7779e1936` (2026-09-20). On 2026-11-09 the `default` build for the X3 and X4 is at 96.6 %, about 224 KB free.
+**Why it matters.** Flash headroom; the image was at 94.8 % of the app partition after `7779e1936` (2026-09-20). The
+last recorded size of the X3/X4 image is 6,178,901 B (#868), of a 6,553,600 B (0x640000) app slot; D2 added 1,180 B
+since (#880). Take the `Flash:` line of a fresh `pio run -e default` before deciding.
 
 **Ruled out.** Porting crosspoint-reader PR #3083's GlyphStream codec (per-glyph range coding, ~−650 KB on our bitmaps): it was still a draft, its render cost was +107 % before caching, and the Home screen regressed from 14 to 70 ms because its cache was reader-scoped. It would need the global glyph cache first.
 
@@ -82,32 +92,43 @@ the PSRAM for it (`HalCapabilities`), or read only the records the picker's firs
 
 **Where.**
 - `env:bench_font` (`bench/font_main.cpp`): the font layer on a C3 with no framebuffer or panel. `glyph_lookup`, `kerning`, `text_measure`, `ui_bitmap_fetch`, `reader_cold`, `reader_prewarm` and `reader_warm` for `inter_ui_12`, `inter_ui_14` and `notosans_14`, and `cjk_cold` and `cjk_inflate` for the compressed Chinese UI faces. `pio run -e bench_font -t upload`, then `pio device monitor -e bench_font`. It replaces the firmware; flash `env:default` back afterwards.
-- The reader's render benchmark (`EpubReaderActivity::runRenderBenchmark`, reader menu "Render Benchmark"): ten page turns each way with per-phase timings and font cache counters. Compiled out unless `-DENABLE_BENCHMARKS=1`.
+- The reader's render benchmark (`EpubReaderActivity::runRenderBenchmark` in `src/activities/reader/EpubReaderBenchmark.cpp`, reader menu "Render Benchmark"): ten page turns each way with per-phase timings and font cache counters. Compiled out unless `-DENABLE_BENCHMARKS=1`.
 - UI screens: only the `Time = … ms from clearScreen to displayBuffer` debug line, which is the whole compose and cannot separate the font path.
 
 **Baselines.** X3 only: the 2026-09-19 capture before the repack, and the after-repack numbers in the message of `f66c1a467`. No X4 or S3 numbers.
 
 **Next step.** Before starting any lever here, run `env:bench_font` on the X3 and the X4 at current master and put the numbers in the PR next to the after-change run, together with Home and Settings compose times.
 
-## Glyph advances rounded twice (CrossPoint #4431)
+## Glyph advances and scaled kerns rounded inconsistently
 
-**Open.** The TTF engine rounds a 16.16 advance to 12.4 to the nearest step (`(linear + (1 << 11)) >> 12`,
-`lib/EpdFont/ttf/TtfFace.cpp:322`), and the renderer snaps each advance-plus-kern step to a pixel on its own. An
-advance whose fraction lies in [15/32, 1/2) px therefore steps one pixel too wide every time: about 3 % of glyph and
-size pairs. Ours matches the converter on purpose (`lib/EpdFont/scripts/fontconvert.py:186-188`, the same rounding),
-and the embolden path rounds the same way. Upstream changed only its FreeType runtime path.
+**Open.** Two rounding mismatches on the glyph path, both kept on purpose so far.
 
-**Next step.** Fix both together (truncate; the result stays float-free) and regenerate the built-in fonts, or leave
-both alone. Either way one `SECTION_FILE_VERSION` bump. crosspoint-reader #4431, Georg Kaindl (@gkaindl).
+- **Advances rounded twice (CrossPoint #4431).** The TTF engine rounds a 16.16 advance to 12.4 to the nearest step
+  (`(linear + (1 << 11)) >> 12` in `ttf::advance12_4`, `lib/EpdFont/ttf/TtfFace.cpp`), and the renderer snaps each
+  advance-plus-kern step to a pixel on its own. An advance whose fraction lies in [15/32, 1/2) px therefore steps one
+  pixel too wide every time: about 3 % of glyph and size pairs. Ours matches the converter on purpose
+  (`fp4_from_ft16_16` in `lib/EpdFont/scripts/fontconvert.py`, the same rounding), and the embolden path rounds the
+  same way. Upstream changed only its FreeType runtime path (crosspoint-reader #4431, merged).
+- **A negative scaled kern, drawn and measured differently.** `GfxRenderer::drawTextAtScale` scales a kern with
+  `TextScale::apply()` (halves up), while `GfxRenderer::scaledTextAdvanceX`, which `getTextAdvanceX` uses for every
+  word width in layout and which is meant to mirror the draw step for step, uses `applySymmetric()` (halves away from
+  zero). They differ by one 12.4 step for a negative kern at an exact half. Both reproduce the float code they
+  replaced (#867 kept the conversion pixel-equal). Changing the measuring side changes layout: `TextScale.h` notes
+  that a kern rounded otherwise moves words.
+
+**Next step.** For the advances: fix the engine and the converter together (truncate; the result stays float-free)
+and regenerate the built-in fonts, or leave both alone; either way one `SECTION_FILE_VERSION` bump. crosspoint-reader
+#4431, Georg Kaindl (@gkaindl). For the kern: make the draw side round as the measure does (pixels move, layout does
+not), or the measure side as the draw does (words move, a `SECTION_FILE_VERSION` bump), or leave both.
 
 ## The C3 sdkconfig trim (CrossPoint #4212): decide
 
 **Open.** Upstream's draft compiles out unused network and crypto features on the C3: about -145 KB of flash (about two
 font-cache MMU pages) and -2.7 KB of static RAM. IPv6, 802.11k/v/r, PPP and NAPT, SoftAP WPA3 and some mbedTLS curves
 go; HTTPS is unaffected (TLS is wolfSSL here), and the WPA3 client stays. Our `[firmware_tuned]` block spells the
-option `custom_sdk_config`, so it is inert, by a recorded decision (`platformio.ini:218-225`; the option pioarduino
-reads is `custom_sdkconfig`).
+option `custom_sdk_config`, so it is inert, by a recorded decision (the NOTE on `[firmware_tuned]` in `platformio.ini`;
+the option pioarduino reads is `custom_sdkconfig`).
 
 **Next step.** Decide whether to switch on the from-source C3 sdkconfig (and fix the name): it costs a core rebuild in
-every build and a Wi-Fi, hotspot and TLS pass on a device. crosspoint-reader #4212 (draft), Arthur Tazhitdinov
+every build and a Wi-Fi, hotspot and TLS pass on a device. crosspoint-reader #4212 (still a draft), Arthur Tazhitdinov
 (@osteotek).

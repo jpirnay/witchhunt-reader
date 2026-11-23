@@ -43,7 +43,7 @@ the tree; miniz was removed in `d14623ac6`.
 
 | Candidate | Working set | Speed on the C3 | Flash | Usable |
 |---|---|---|---|---|
-| uzlib inflate (have) | ring up to 32 KB (`InflateReader.cpp:8`), state about 1.3 KB (`docs/i18n.md:443`) | about 2.5 µs a byte plus 0.4 ms a stream start (recorded, host-scaled, `docs/future_work/font-flash.md:53`) | 0 | decode only |
+| uzlib inflate (have) | ring up to 32 KB (`InflateReader.cpp:8`), state about 1.3 KB (`docs/i18n.md:443`) | about 2.5 µs a byte plus 0.4 ms a stream start (recorded, host-scaled, `docs/future_work/font-flash.md`, "Compressing the Inter and Noto Sans 8 UI faces") | 0 | decode only |
 | ROM miniz `tdefl` (C3 and S3 ROM, `esp32c3.rom.ld:68-84`) | `tdefl_compressor` about 168 KB (estimate from the ROM header's array sizes) | not measured | 0 | no: the state does not fit the C3's heap |
 | uzlib deflate (`genlz77.c`, `defl_static.c`, not vendored) | a hash table of 2^N pointers, 4-16 KB | 5-10 µs a byte (estimate, hash-chain LZ77 on a 160 MHz RV32) | 2-3 KB (estimate) | possible, no user |
 | byte RLE (PackBits) | none | under 0.2 µs a byte, about 8 ms for a 52 KB frame (estimate, 20-30 cycles a byte) | about 200 B (estimate) | possible |
