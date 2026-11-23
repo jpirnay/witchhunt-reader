@@ -3,8 +3,9 @@
 Status, 2026-11-20: D1 (the reader opens protected books, #821), the listing the Adobe plugin needs (#828) and D3
 (`/api/crypto` for the Adobe plugin, #857) are merged and have run on devices. Open: a real Adobe account end to end,
 the messages' translations, D2 (the cache at rest), LCP (asked of Free-Ink).
-This file replaces the September plan on `feat/protected-content-phase0` (`docs/protected-content-plan.md` and
-`docs/protected-content-handover-2026-09-18.md` there).
+This file replaces the September plan (`docs/protected-content-plan.md` and
+`docs/protected-content-handover-2026-09-18.md` on the branch `feat/protected-content-phase0`). That branch is
+deleted; the part D2 still needs is kept in `patches/` (see D2).
 
 Owner decisions:
 - Adobe ADEPT is supported (2026-11-17). It is what Libby, Onleihe and the other loan services mostly use, and what
@@ -73,12 +74,32 @@ use them ignores both.
 3. **D2, the cache at rest.** Owner rule: the fastest and leanest cipher, and reading must not feel different. Measure
    first, on the C3: a page turn and a chapter build of a protected book against the same book unprotected, plus flash.
    If even the fastest cipher is noticeable, fall back to a cheap obfuscation or leave the cache plain, and say which
-   in the release notes. The September numbers: ChaCha20 through wolfSSL 4.6 MB/s, a portable ChaCha20 1.8 MB/s,
-   AES-128-CBC 1.5 MB/s, a 4 KB page record 1.1 ms; the C3's AES peripheral (D1 uses it) is untried for this. Like
-   upstream, D1 writes the decrypted chapter (`spines/<bucket>/html_<n>.bin`) and the extracted images to the cache.
-   Phase 0 of `feat/protected-content-phase0` (3,345 commits behind, conflicts in 12 files) has `lib/CacheCipher`
-   (ChaCha20, length-preserving, addressable by offset) and the storage scope that enciphers a protected book's cache:
-   carry it over by hand, with its keys from D1's device secret and `ZipFile::isProtected()` as "this book is protected".
+   in the release notes. Like upstream, D1 writes the decrypted chapter (`spines/<bucket>/html_<n>.bin`) and the
+   extracted images to the cache.
+
+   The cipher exists: `lib/CacheCipher` (ChaCha20 through wolfSSL, length-preserving, addressable by file offset, so a
+   page turn deciphers only the record it reads) with 17 host tests and the `bench_crypto` device benchmark, kept as
+   [`patches/cache-cipher.patch`](patches/cache-cipher.patch). It applies to master e8f661d74 with `git apply`.
+   Measured 2026-11-23 on the X3 at 160 MHz (`bench_crypto`, 64 passes a row):
+
+   | Cipher | 2 KB | 4 KB | 64 KB |
+   |---|---|---|---|
+   | `CacheCipher` (device path) | 0.56 ms | 1.11 ms | 17.4 ms (3.7 MB/s) |
+   | wolfSSL ChaCha20, raw | 0.45 ms | 0.89 ms | 14.2 ms (4.6 MB/s) |
+   | wolfSSL AES-128-CBC decrypt | 1.34 ms | 2.67 ms | 42.6 ms (1.5 MB/s) |
+   | wolfSSL AES-256-CTR | 1.72 ms | 3.42 ms | 54.6 ms (1.2 MB/s) |
+
+   So a 4 KB page record costs about 1.1 ms and a 48 KB image about 13 ms. The wrapper takes about a quarter longer than
+   raw wolfSSL (3.7 against 4.6 MB/s); that is the first thing to look at if D2 needs speed. The C3's AES peripheral (D1 uses it) is untried
+   here. Flash, on the `default` build with a call to `deriveBookKey`, `deriveFileNonce` and `apply`: +1,040 B against
+   the same tree without the call (the cipher's own code is 696 B); IRAM and static RAM unchanged; wolfSSL's ChaCha20
+   is already linked for TLS, and its symbols are identical in both builds. Not measured yet, because nothing calls
+   the cipher: a page turn and a chapter build of a protected book.
+
+   The storage scope that enciphered a protected book's cache in September, and the NVS key store behind it, are in
+   [`patches/cache-cipher-integration-2026-09.patch`](patches/cache-cipher-integration-2026-09.patch), for reading
+   only: they no longer apply. Carry the scope over by hand, with its keys from D1's device secret and
+   `ZipFile::isProtected()` as "this book is protected".
 4. **Books downloaded with Adobe Digital Editions.** Their licence is inside the EPUB (`META-INF/rights.xml`). The plugin
    derives a key only from a `<book>.epub.rights` beside the book, so such a book needs that file beside it first;
    fetching the `.acsm` again from the shop is the simple route.

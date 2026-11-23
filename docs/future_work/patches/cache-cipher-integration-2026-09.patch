@@ -1,0 +1,935 @@
+From 26533d0037f814566c5cb2bd1a29277d501a2462 Mon Sep 17 00:00:00 2001
+From: jpirnay <jens@pirnay.com>
+Date: Fri, 18 Sep 2026 18:31:27 +0200
+Subject: [PATCH] feat(drm): supply cache keys from NVS and a per-book salt
+
+The device half of the key derivation. Two secrets:
+
+  * a 32-byte device key generated once and kept in NVS. NVS is internal flash,
+    so it never leaves with the card -- lift the SD out and the enciphered
+    caches on it are noise, on any machine including another reader.
+  * a 12-byte salt per cache directory, written into the directory itself. It
+    costs nothing to lose, and it is what makes a rebuilt cache differ from the
+    one it replaced.
+
+Failure is reported rather than papered over: a protected book that cannot be
+keyed must fail to open, not fall back to caching in the clear. The device key
+is wiped from the stack once the book key is derived.
+
+Lives in lib/hal rather than lib/CacheCipher because it needs NVS and the SD
+card. Putting it beside the cipher made that library depend on the HAL that now
+depends on it, and broke the "freestanding, host-testable" promise in its own
+header.
+
+The host stub answers "no key here" for the same reason: a host test that
+somehow took the protected path fails loudly instead of caching in the clear.
+---
+ lib/hal/CacheKeyStore.cpp  | 88 ++++++++++++++++++++++++++++++++++++++
+ lib/hal/CacheKeyStore.h    | 37 ++++++++++++++++
+ test/shims/CacheKeyStore.h | 19 ++++++++
+ 3 files changed, 144 insertions(+)
+ create mode 100644 lib/hal/CacheKeyStore.cpp
+ create mode 100644 lib/hal/CacheKeyStore.h
+ create mode 100644 test/shims/CacheKeyStore.h
+
+diff --git a/lib/hal/CacheKeyStore.cpp b/lib/hal/CacheKeyStore.cpp
+new file mode 100644
+index 000000000..a8bb21fdb
+--- /dev/null
++++ b/lib/hal/CacheKeyStore.cpp
+@@ -0,0 +1,88 @@
++#include "CacheKeyStore.h"
++
++#include <HalStorage.h>
++#include <Logging.h>
++#include <Preferences.h>
++#include <esp_system.h>
++
++#include <cstring>
++#include <string>
++
++namespace {
++
++// NVS namespace and key. Same pattern as HalClock's persisted epoch: a short-lived
++// Preferences handle opened around the access, not a long-lived one.
++constexpr const char* kNvsNamespace = "cachecipher";
++constexpr const char* kNvsDeviceKey = "devkey";
++
++}  // namespace
++
++namespace cachekeys {
++
++bool loadDeviceKey(uint8_t out[kDeviceKeyBytes]) {
++  Preferences prefs;
++  if (!prefs.begin(kNvsNamespace, /*readOnly=*/false)) {
++    LOG_ERR("CKEY", "NVS namespace unavailable - cannot supply a cache key");
++    return false;
++  }
++
++  const size_t stored = prefs.getBytesLength(kNvsDeviceKey);
++  if (stored == kDeviceKeyBytes && prefs.getBytes(kNvsDeviceKey, out, kDeviceKeyBytes) == kDeviceKeyBytes) {
++    prefs.end();
++    return true;
++  }
++
++  // First use on this device, or a truncated entry. Generating a fresh key orphans any cache
++  // enciphered under an old one, which is harmless: those files decipher to noise, fail their
++  // header checks, and get rebuilt.
++  esp_fill_random(out, kDeviceKeyBytes);
++  const size_t written = prefs.putBytes(kNvsDeviceKey, out, kDeviceKeyBytes);
++  prefs.end();
++
++  if (written != kDeviceKeyBytes) {
++    LOG_ERR("CKEY", "Failed to persist device key (wrote %u of %u)", static_cast<unsigned>(written),
++            static_cast<unsigned>(kDeviceKeyBytes));
++    memset(out, 0, kDeviceKeyBytes);
++    return false;
++  }
++  LOG_INF("CKEY", "Generated a new cache device key");
++  return true;
++}
++
++bool bookKeyForCacheDir(const char* cacheDir, uint8_t out[kBookKeyBytes]) {
++  if (cacheDir == nullptr || *cacheDir == '\0') return false;
++
++  uint8_t deviceKey[kDeviceKeyBytes];
++  if (!loadDeviceKey(deviceKey)) return false;
++
++  const std::string saltPath = std::string(cacheDir) + "/" + kSaltFileName;
++  uint8_t salt[kSaltBytes];
++  bool haveSalt = false;
++
++  if (HalFile existing = Storage.open(saltPath.c_str(), O_RDONLY)) {
++    haveSalt = existing.read(salt, kSaltBytes) == static_cast<int>(kSaltBytes);
++    if (!haveSalt) {
++      LOG_ERR("CKEY", "Salt file %s is short - regenerating", saltPath.c_str());
++    }
++  }
++
++  if (!haveSalt) {
++    esp_fill_random(salt, kSaltBytes);
++    // The cache directory may not exist yet on a first open; mkdir is recursive.
++    Storage.mkdir(cacheDir);
++    HalFile file;
++    if (!Storage.openFileForWrite("CKEY", saltPath, file) ||
++        file.write(salt, kSaltBytes) != static_cast<size_t>(kSaltBytes)) {
++      LOG_ERR("CKEY", "Failed to write %s - refusing to cache this book", saltPath.c_str());
++      memset(deviceKey, 0, sizeof(deviceKey));
++      return false;
++    }
++  }
++
++  deriveBookKey(deviceKey, salt, out);
++  // The device key has no business staying on the stack after this.
++  memset(deviceKey, 0, sizeof(deviceKey));
++  return true;
++}
++
++}  // namespace cachekeys
+diff --git a/lib/hal/CacheKeyStore.h b/lib/hal/CacheKeyStore.h
+new file mode 100644
+index 000000000..aaf2c44fe
+--- /dev/null
++++ b/lib/hal/CacheKeyStore.h
+@@ -0,0 +1,37 @@
++#pragma once
++
++// Device-side plumbing behind CacheKeys — docs/protected-content-plan.md §3, step 3.
++//
++// Supplies the two secrets the derivation needs:
++//
++//   * the **device key**, 32 random bytes generated once and kept in NVS. NVS is internal
++//     flash, so it never leaves with the card: lift the SD out of a device and the enciphered
++//     caches on it are noise, on any machine including another reader.
++//   * the **per-cache-directory salt**, 12 random bytes written into the directory itself when
++//     it is first used. It costs nothing to lose — deleting a cache regenerates it — and it is
++//     what makes a rebuilt cache differ from the one it replaced.
++//
++// Device-only (NVS + SD); the pure derivation it feeds lives in CacheKeys.h and is what the
++// host tests cover.
++
++#include <cstdint>
++
++#include "CacheKeys.h"
++
++namespace cachekeys {
++
++// Reads the device key, generating and persisting one on first use.
++// False means NVS is unavailable or the write failed — the caller must then refuse to cache a
++// protected book rather than fall back to writing it in the clear.
++bool loadDeviceKey(uint8_t out[kDeviceKeyBytes]);
++
++// The book key for one cache directory, reading or creating that directory's salt file.
++// `cacheDir` is an absolute path on the card ("/.crosspoint/epub_12345678").
++bool bookKeyForCacheDir(const char* cacheDir, uint8_t out[kBookKeyBytes]);
++
++// Name of the salt file inside a cache directory. Dot-prefixed so the web file manager will
++// not serve it: harmless if it leaks (a salt is not a secret), but there is no reason to hand
++// it out either.
++inline constexpr const char* kSaltFileName = ".csalt";
++
++}  // namespace cachekeys
+diff --git a/test/shims/CacheKeyStore.h b/test/shims/CacheKeyStore.h
+new file mode 100644
+index 000000000..46f82fa88
+--- /dev/null
++++ b/test/shims/CacheKeyStore.h
+@@ -0,0 +1,19 @@
++#pragma once
++// Host stub for lib/hal/CacheKeyStore.h.
++//
++// The real one reads a device key out of NVS and a salt off the SD card, neither of which
++// exists on the host. Epub.cpp includes it to encipher a protected book's cache, so the stub
++// only has to answer "no key here": the constants and the derivation itself come from the real
++// CacheKeys.h, which host tests link and test/cache_cipher pins.
++//
++// Reporting failure rather than handing back a fake key is deliberate — a test that somehow
++// took the protected path fails the open loudly instead of quietly caching in the clear.
++
++#include "CacheKeys.h"
++
++namespace cachekeys {
++
++inline bool loadDeviceKey(uint8_t[kDeviceKeyBytes]) { return false; }
++inline bool bookKeyForCacheDir(const char*, uint8_t[kBookKeyBytes]) { return false; }
++
++}  // namespace cachekeys
+-- 
+2.53.0
+
+From 32710003394ac66ed5bf2883586ba70ee9380d02 Mon Sep 17 00:00:00 2001
+From: jpirnay <jens@pirnay.com>
+Date: Fri, 18 Sep 2026 18:31:42 +0200
+Subject: [PATCH] feat(drm): encipher a protected book's cache at rest
+
+Wires the cipher in. A protected book's cache directory holds its extracted
+XHTML, its laid-out pages and its converted images -- the whole book in the
+clear beside the encrypted one if left alone.
+
+The cipher attaches in HalStorage, not at the call sites. Section alone opens
+its cache through a dozen sites, and one missed site would write a protected
+book's text to the card in the clear; instead Epub puts its cache directory
+under a scope and every handle opened beneath it is enciphered, keyed by its
+path within the scope. No cache code and no serialization signature changes,
+because FsFile IS HalFile for all downstream code -- every Page::serialize,
+header patch and page-LUT seek already passed through one class.
+
+Costs for an ordinary book: one bool test per open and one null check per
+read/write. No allocation, no new virtual dispatch (plan RULE P1).
+
+Details worth keeping:
+
+  * a handle that cannot get its cipher is CLOSED, so the caller sees a failed
+    open -- a path every site already handles -- rather than a working handle
+    that would write plaintext.
+  * the scope is released in ~Epub() rather than a close() call, so no early
+    return can leave a stale scope that would encipher the next book under this
+    book's key.
+  * load(), loadForCover() and loadForMetadata() all set it. The cover path
+    writes to the same directory, and writing thumbnails in the clear that a
+    later full open reads back through the cipher returns noise.
+
+Detection is a stand-in: a <book>.epub.rights sidecar marks a book protected.
+That is the same marker Phase 1 uses, so it is the seam the real classification
+replaces, and meanwhile the mechanism can be exercised on any ordinary book.
+
+The stdio HalStorage the host pipeline uses gained the same hook, so 44 new
+cases run every corpus book twice -- once normally, once enciphered -- and
+require identical page dumps, unreadable bytes on disk, and headers that
+decipher back under the derived key and nonce. That covers the cache-hit path,
+where pages are seeked to rather than written in order.
+
+Whole-file comparison between the two runs does NOT work, and the test says why:
+cache files embed their own cache-directory path, so files from differently
+named directories differ in length. That looked exactly like a 2-byte short
+write until the file was deciphered and read.
+---
+ lib/Epub/Epub.cpp                       |  41 +++++++
+ lib/Epub/Epub.h                         |  20 ++-
+ lib/hal/HalStorage.cpp                  | 155 ++++++++++++++++++++++--
+ lib/hal/HalStorage.h                    |  37 ++++++
+ test/epub_pipeline/CMakeLists.txt       |   1 +
+ test/epub_pipeline/EpubPipelineTest.cpp | Bin 5388 -> 9634 bytes
+ test/shims/HalStorage.h                 |   5 +
+ test/zip_entry_reader/HalStorage.h      | 100 +++++++++++++--
+ 8 files changed, 339 insertions(+), 20 deletions(-)
+
+diff --git a/lib/Epub/Epub.cpp b/lib/Epub/Epub.cpp
+index 6d8ff95fd..2514e30a0 100644
+--- a/lib/Epub/Epub.cpp
++++ b/lib/Epub/Epub.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include <Bitmap.h>
+ #include <BufferedFileIO.h>
++#include <CacheKeyStore.h>
+ #include <CooperativeAbort.h>
+ #include <FsHelpers.h>
+ #include <HalStorage.h>
+@@ -626,11 +627,43 @@ void Epub::parseCssFiles() const {
+   cssParser->clear();
+ }
+ 
++Epub::~Epub() {
++  // The storage cipher scope is global state keyed to this book; a scope left behind would
++  // encipher the NEXT book's cache under this book's key. Tied to the destructor rather than
++  // to a close() call so no early-return path can skip it.
++  if (cacheCipherActive) Storage.clearCacheCipherScope();
++}
++
++// Puts this book's cache directory under a storage cipher scope when the book is protected, so
++// every cache file it writes is enciphered at rest without any of the cache code knowing.
++// Returns false only when the book IS protected but no key could be obtained — the caller must
++// then refuse to open it rather than cache it in the clear.
++bool Epub::initCacheCipher() {
++  if (cacheCipherActive) return true;
++  // Phase 1 replaces this with the real classification; see Epub::cacheEnciphered().
++  if (!Storage.exists((filepath + ".rights").c_str())) return true;
++
++  uint8_t bookKey[cachekeys::kBookKeyBytes];
++  if (!cachekeys::bookKeyForCacheDir(cachePath.c_str(), bookKey)) {
++    LOG_ERR("EBP", "Protected book but no cache key: %s", filepath.c_str());
++    return false;
++  }
++  Storage.setCacheCipherScope(cachePath.c_str(), bookKey);
++  memset(bookKey, 0, sizeof(bookKey));
++  cacheCipherActive = true;
++  LOG_INF("EBP", "Cache enciphered at rest for %s", filepath.c_str());
++  return true;
++}
++
+ // load in the meta data for the epub file
+ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
+   LOG_DBG("EBP", "Loading ePub: %s", filepath.c_str());
+   tocReliability = TocReliability::Unknown;
+ 
++  // Before anything touches the cache directory: every open below has to land inside the
++  // scope, or a protected book leaves half its text on the card in the clear.
++  if (!initCacheCipher()) return false;
++
+   // Initialize spine/TOC cache
+   bookMetadataCache.reset(new BookMetadataCache(cachePath));
+   // Always create CssParser - needed for inline style parsing even without CSS files
+@@ -897,6 +930,12 @@ bool Epub::loadForCover() {
+   // Cover-only load: get coverItemHref WITHOUT building the spine/TOC book.bin (which, on a huge
+   // book, is both slow and the site of the large manifest-index build). Used by RecentBooks / Home
+   // cover thumbnails so showing a thumbnail never triggers a full-book parse.
++  //
++  // The cipher scope belongs here too, not only in load(): this path WRITES to the same cache
++  // directory (book.bin, cover thumbnails). Writing those in the clear and later reading them
++  // back through the cipher — which a full open would do — returns noise, so every entry point
++  // that touches a book's cache has to agree about whether it is enciphered.
++  if (!initCacheCipher()) return false;
+   bookMetadataCache.reset(new BookMetadataCache(cachePath));
+   cssParser.reset(new CssParser(cachePath));  // constructed for API symmetry; not parsed here
+ 
+@@ -945,6 +984,8 @@ bool Epub::loadForMetadata() {
+   // Metadata-only load: see the header for why this exists (issue #104 — the series-sequel scan used
+   // to full-load every EPUB in the folder). Structured exactly like loadForCover(); the only
+   // difference is which field the caller goes on to read, so neither marks the other's data valid.
++  // Same cache directory, so the same cipher-scope rule as loadForCover().
++  if (!initCacheCipher()) return false;
+   bookMetadataCache.reset(new BookMetadataCache(cachePath));
+   cssParser.reset(new CssParser(cachePath));  // constructed for API symmetry; not parsed here
+ 
+diff --git a/lib/Epub/Epub.h b/lib/Epub/Epub.h
+index 255385c4d..68fa0e962 100644
+--- a/lib/Epub/Epub.h
++++ b/lib/Epub/Epub.h
+@@ -34,6 +34,9 @@ class Epub {
+   std::string contentBasePath;
+   // Uniq cache key based on filepath
+   std::string cachePath;
++  // True once this book's cache directory has been put under a storage cipher scope; cleared
++  // in the destructor so the scope never outlives the book that owns it.
++  bool cacheCipherActive = false;
+   // Spine and TOC cache
+   std::unique_ptr<BookMetadataCache> bookMetadataCache;
+   // CSS parser for styling
+@@ -112,12 +115,27 @@ class Epub {
+   // for the EPUB's own bytes to change. Cheap when absent (one Storage.exists).
+   void applyMetadataSidecar() const;
+ 
++  // Puts this book's cache directory under a storage cipher scope when the book is protected.
++  // False means protected-but-unkeyable, which must fail the open rather than cache in clear.
++  bool initCacheCipher();
++
+  public:
+   explicit Epub(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)) {
+     // create a cache key based on the filepath
+     cachePath = cacheDir + "/epub_" + std::to_string(std::hash<std::string>{}(this->filepath));
+   }
+-  ~Epub() = default;
++  ~Epub();
++
++  // True when this book's derived cache is enciphered at rest (docs/protected-content-plan.md
++  // §3). A protected book's cache holds its extracted text, laid-out pages and converted
++  // images — the whole book in the clear beside the encrypted one if left alone.
++  //
++  // Detection is currently the presence of a `<book>.epub.rights` sidecar, which is the same
++  // marker Phase 1 uses for Adobe-protected books. It is the seam the real classification
++  // (ContentProtection's encryption.xml scan, an LCP licence) replaces later; until then it
++  // also lets the mechanism be exercised on an ordinary book by dropping an empty sidecar
++  // beside it.
++  bool cacheEnciphered() const { return cacheCipherActive; }
+   std::string& getBasePath() { return contentBasePath; }
+   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);
+ 
+diff --git a/lib/hal/HalStorage.cpp b/lib/hal/HalStorage.cpp
+index fe79527f3..eaed0dc78 100644
+--- a/lib/hal/HalStorage.cpp
++++ b/lib/hal/HalStorage.cpp
+@@ -2,10 +2,13 @@
+ #include "HalStorage.h"
+ 
+ #include <BoardConfig.h>
++#include <CacheCipher.h>
++#include <CacheKeys.h>
+ #include <FS.h>  // need to be included before SdFat.h for compatibility with FS.h's File class
+ #include <HalCapabilities.h>
+ #include <HalClock.h>
+ #include <Logging.h>
++#include <Memory.h>
+ #include <SDCardManager.h>
+ #include <SdFat.h>
+ #if FREEINK_CAP_USB_MSC
+@@ -14,6 +17,7 @@
+ #endif
+ 
+ #include <cassert>
++#include <cstring>
+ #include <ctime>
+ #include <new>
+ #include <optional>
+@@ -295,6 +299,10 @@ class HalFile::Impl {
+  public:
+   Impl(FsFile&& fsFile) : file(std::move(fsFile)) {}
+   FsFile file;
++  // Null for every ordinary file, which is all of them outside a protected book's cache
++  // directory. One 44-byte allocation per enciphered handle, made only when enableCipher()
++  // is called; a plain file pays a null check per read/write and nothing else.
++  std::unique_ptr<CacheCipher> cipher;
+ };
+ 
+ HalFile::HalFile() = default;
+@@ -318,7 +326,52 @@ HalFile& HalFile::operator=(HalFile&& other) {
+ 
+ HalFile HalStorage::open(const char* path, const oflag_t oflag) {
+   StorageLock lock;  // ensure thread safety for the duration of this function
+-  return HalFile(std::make_unique<HalFile::Impl>(SDCard.open(path, oflag)));
++  HalFile file(std::make_unique<HalFile::Impl>(SDCard.open(path, oflag)));
++  applyCacheCipher(file, path);
++  return file;
++}
++
++void HalStorage::setCacheCipherScope(const char* dir, const uint8_t key[32]) {
++  if (dir == nullptr || *dir == '\0' || key == nullptr) {
++    clearCacheCipherScope();
++    return;
++  }
++  cipherScopeDir = dir;
++  if (!cipherScopeDir.empty() && cipherScopeDir.back() != '/') cipherScopeDir += '/';
++  memcpy(cipherScopeKey, key, sizeof(cipherScopeKey));
++  cipherScopeActive = true;
++  LOG_INF("SD", "Cache cipher scope: %s", cipherScopeDir.c_str());
++}
++
++void HalStorage::clearCacheCipherScope() {
++  if (!cipherScopeActive) return;
++  cipherScopeActive = false;
++  cipherScopeDir.clear();
++  memset(cipherScopeKey, 0, sizeof(cipherScopeKey));
++}
++
++// Every file opened under the active scope is enciphered; everything else is untouched. Doing
++// this here rather than at each call site is deliberate: Section alone opens its cache through
++// a dozen sites, and one missed site would write a protected book's text to the card in the
++// clear. One check per open (not per read), so an ordinary book pays a bool test.
++//
++// A file that cannot get its cipher is CLOSED rather than returned: the caller then sees a
++// failed open, which every site already handles, instead of a working handle that would write
++// plaintext.
++void HalStorage::applyCacheCipher(HalFile& file, const char* path) {
++  if (!cipherScopeActive || path == nullptr || !file.isOpen()) return;
++  const size_t prefixLen = cipherScopeDir.size();
++  if (strncmp(path, cipherScopeDir.c_str(), prefixLen) != 0) return;
++
++  // The nonce comes from the path *relative to the cache directory*, so the same file in two
++  // books (whose keys differ anyway) and two files in one book never share a keystream.
++  const char* relative = path + prefixLen;
++  uint8_t nonce[cachekeys::kNonceBytes];
++  cachekeys::deriveFileNonce(relative, nonce);
++  if (!file.enableCipher(cipherScopeKey, nonce)) {
++    LOG_ERR("SD", "No cipher for %s - closing rather than exposing it", path);
++    file.close();
++  }
+ }
+ 
+ bool HalStorage::mkdir(const char* path, const bool pFlag) { HAL_STORAGE_WRAPPED_CALL(mkdir, path, pFlag); }
+@@ -337,7 +390,8 @@ bool HalStorage::openFileForRead(const char* moduleName, const char* path, HalFi
+   FsFile fsFile;
+   bool ok = SDCard.openFileForRead(moduleName, path, fsFile);
+   file = HalFile(std::make_unique<HalFile::Impl>(std::move(fsFile)));
+-  return ok;
++  applyCacheCipher(file, path);
++  return ok && file.isOpen();
+ }
+ 
+ bool HalStorage::openFileForRead(const char* moduleName, const std::string& path, HalFile& file) {
+@@ -353,7 +407,8 @@ bool HalStorage::openFileForWrite(const char* moduleName, const char* path, HalF
+   FsFile fsFile;
+   bool ok = SDCard.openFileForWrite(moduleName, path, fsFile);
+   file = HalFile(std::make_unique<HalFile::Impl>(std::move(fsFile)));
+-  return ok;
++  applyCacheCipher(file, path);
++  return ok && file.isOpen();
+ }
+ 
+ bool HalStorage::openFileForWrite(const char* moduleName, const std::string& path, HalFile& file) {
+@@ -372,7 +427,8 @@ bool HalStorage::openFileForUpdate(const char* moduleName, const char* path, Hal
+     LOG_ERR(moduleName, "Failed to open %s for update", path);
+   }
+   file = HalFile(std::make_unique<HalFile::Impl>(std::move(fsFile)));
+-  return ok;
++  applyCacheCipher(file, path);
++  return ok && file.isOpen();
+ }
+ 
+ bool HalStorage::openFileForUpdate(const char* moduleName, const std::string& path, HalFile& file) {
+@@ -441,10 +497,93 @@ size_t HalFile::position() const {
+   assert(impl != nullptr);
+   return static_cast<size_t>(impl->file.position());
+ }
+-int HalFile::read(void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(read, buf, count); }
+-int HalFile::read() { HAL_FILE_WRAPPED_CALL(read, ); }
+-size_t HalFile::write(const void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(write, buf, count); }
+-size_t HalFile::write(uint8_t b) { HAL_FILE_WRAPPED_CALL(write, b); }
++bool HalFile::enableCipher(const uint8_t key[CacheCipher::kKeyBytes], const uint8_t nonce[CacheCipher::kNonceBytes]) {
++  assert(impl != nullptr);
++  // 44 bytes, once per protected-cache file open. Not on the stack because it has to outlive
++  // this call, and not a member by value because that would cost every file handle in the
++  // firmware for a case almost none of them are in.
++  impl->cipher = makeUniqueNoThrow<CacheCipher>(key, nonce);
++  if (!impl->cipher) {
++    LOG_ERR("SD", "OOM: cache cipher (%u bytes) - refusing to use this handle", (unsigned)sizeof(CacheCipher));
++    return false;
++  }
++  return true;
++}
++
++bool HalFile::cipherEnabled() const { return impl != nullptr && impl->cipher != nullptr; }
++
++// Read, then decipher in place at the offset the bytes came from. The position is sampled
++// before the read because the read advances it.
++int HalFile::read(void* buf, size_t count) {
++  assert(impl != nullptr);
++  if (!impl->cipher) {
++    HAL_FILE_WRAPPED_CALL(read, buf, count);
++  }
++  HalStorage::StorageLock lock;
++  const uint64_t at = impl->file.position();
++  const int n = impl->file.read(buf, count);
++  if (n > 0 && !impl->cipher->apply(static_cast<uint8_t*>(buf), static_cast<size_t>(n), at)) {
++    LOG_ERR("SD", "cache decipher refused at offset %llu", (unsigned long long)at);
++    return -1;
++  }
++  return n;
++}
++
++int HalFile::read() {
++  assert(impl != nullptr);
++  if (!impl->cipher) {
++    HAL_FILE_WRAPPED_CALL(read, );
++  }
++  HalStorage::StorageLock lock;
++  const uint64_t at = impl->file.position();
++  const int value = impl->file.read();
++  if (value < 0) return value;
++  uint8_t byte = static_cast<uint8_t>(value);
++  if (!impl->cipher->apply(&byte, 1, at)) return -1;
++  return byte;
++}
++
++// Encipher into a stack chunk rather than in place: the caller's buffer is const and may be
++// reused (a serializer writing the same record twice, say), so mutating it would be a bug that
++// only shows up later. A refusal stops the write rather than letting plaintext reach the card.
++size_t HalFile::write(const void* buf, size_t count) {
++  assert(impl != nullptr);
++  if (!impl->cipher) {
++    HAL_FILE_WRAPPED_CALL(write, buf, count);
++  }
++  HalStorage::StorageLock lock;
++  constexpr size_t kChunkBytes = 128;  // stack budget: CLAUDE.md caps locals at ~256 bytes
++  uint8_t chunk[kChunkBytes];
++  const uint8_t* src = static_cast<const uint8_t*>(buf);
++  const uint64_t start = impl->file.position();
++
++  size_t written = 0;
++  while (written < count) {
++    const size_t remaining = count - written;
++    const size_t take = remaining < kChunkBytes ? remaining : kChunkBytes;
++    memcpy(chunk, src + written, take);
++    if (!impl->cipher->apply(chunk, take, start + written)) {
++      LOG_ERR("SD", "cache encipher refused at offset %llu - write truncated", (unsigned long long)(start + written));
++      return written;
++    }
++    const size_t n = impl->file.write(chunk, take);
++    written += n;
++    if (n != take) break;  // short write; the caller sees the count it actually got
++  }
++  return written;
++}
++
++size_t HalFile::write(uint8_t b) {
++  assert(impl != nullptr);
++  if (!impl->cipher) {
++    HAL_FILE_WRAPPED_CALL(write, b);
++  }
++  HalStorage::StorageLock lock;
++  const uint64_t at = impl->file.position();
++  uint8_t byte = b;
++  if (!impl->cipher->apply(&byte, 1, at)) return 0;
++  return impl->file.write(byte);
++}
+ bool HalFile::rename(const char* newPath) { HAL_FILE_WRAPPED_CALL(rename, newPath); }
+ bool HalFile::getModifyDateTime(uint16_t* pdate, uint16_t* ptime) {
+   HAL_FILE_WRAPPED_CALL(getModifyDateTime, pdate, ptime);
+diff --git a/lib/hal/HalStorage.h b/lib/hal/HalStorage.h
+index 93d7f27e6..9711bfdf7 100644
+--- a/lib/hal/HalStorage.h
++++ b/lib/hal/HalStorage.h
+@@ -107,6 +107,19 @@ class HalStorage {
+   uint64_t sdUsedBytes();
+   uint64_t sdFreeBytes();
+ 
++  // Encipher-at-rest for one directory subtree — the per-book cache of a protected book.
++  // While a scope is set, every file opened under `dir` is transparently enciphered with a key
++  // derived from the book and a nonce derived from the file's path within the scope; reads
++  // decipher, writes encipher, and no caller changes. See docs/protected-content-plan.md §3.
++  //
++  // One scope at a time, which matches one book open at a time. The owner sets it as the book
++  // opens and clears it as the book closes; leaving a stale scope set would encipher another
++  // book's cache under the wrong key, so tie it to the book's lifetime rather than to a code
++  // path. Files outside the scope, and all files when no scope is set, are untouched.
++  void setCacheCipherScope(const char* dir, const uint8_t key[32]);
++  void clearCacheCipherScope();
++  bool cacheCipherScopeActive() const { return cipherScopeActive; }
++
+   static HalStorage& getInstance() { return instance; }
+ 
+   class StorageLock;  // private class, used internally
+@@ -114,8 +127,16 @@ class HalStorage {
+  private:
+   static HalStorage instance;
+ 
++  // Attaches the cipher to a freshly opened handle when its path falls inside the active
++  // scope, and closes the handle if that fails.
++  void applyCacheCipher(HalFile& file, const char* path);
++
+   bool initialized = false;
+   SemaphoreHandle_t storageMutex = nullptr;
++
++  std::string cipherScopeDir;  // always ends in '/', empty when inactive
++  uint8_t cipherScopeKey[32] = {0};
++  bool cipherScopeActive = false;
+ };
+ 
+ #define Storage HalStorage::getInstance()
+@@ -162,6 +183,22 @@ class HalFile : public Print {
+   HalFile openNextFile();
+   bool isOpen() const;
+   operator bool() const;
++
++  // Encipher this handle's contents at rest — for the per-book cache of a protected book,
++  // where the derived files (extracted XHTML, laid-out pages, converted images) would
++  // otherwise put the whole book in the clear beside the encrypted one. See
++  // docs/protected-content-plan.md §3 and lib/CacheCipher.
++  //
++  // Applies from here on: call it immediately after opening, before any read or write. Reads
++  // decipher in place, writes encipher a copy, and the cipher is length-preserving and
++  // addressed by absolute file offset, so every seek, offset table and header patch in the
++  // cache formats keeps working untouched.
++  //
++  // Returns false only on allocation failure, which the caller must treat as fatal for that
++  // file: continuing would write plaintext. Files without this call are unaffected — one null
++  // check per read/write, no allocation.
++  bool enableCipher(const uint8_t key[32], const uint8_t nonce[12]);
++  bool cipherEnabled() const;
+ };
+ 
+ // Only do renaming FsFile to HalFile if this header is included by downstream code
+diff --git a/test/epub_pipeline/CMakeLists.txt b/test/epub_pipeline/CMakeLists.txt
+index 77a27c33e..6e20c8f90 100644
+--- a/test/epub_pipeline/CMakeLists.txt
++++ b/test/epub_pipeline/CMakeLists.txt
+@@ -72,6 +72,7 @@ set(PIPELINE_INCLUDES
+   ${REPO_ROOT}/lib/Memory
+   ${REPO_ROOT}/lib/Serialization
+   ${REPO_ROOT}/lib/Utf8
++  ${REPO_ROOT}/lib/CacheCipher
+   ${REPO_ROOT}/lib/ZipFile
+   ${REPO_ROOT}/lib/InflateReader
+   ${REPO_ROOT}/lib/uzlib/src
+diff --git a/test/epub_pipeline/EpubPipelineTest.cpp b/test/epub_pipeline/EpubPipelineTest.cpp
+index ac6b1c8cf2fe63d3068fc1d340951bbcf01b9588..1bd2c8d7ee89264c55e342db8de2a418e9019f95 100644
+GIT binary patch
+literal 9634
+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
+KU&=2~9Q+5W5^gsD
+
+delta 17
+YcmZ4F-J`YP5A$Xhmie5U4dn{i0YZBQZ~y=R
+
+diff --git a/test/shims/HalStorage.h b/test/shims/HalStorage.h
+index 14a5f037b..a672da55e 100644
+--- a/test/shims/HalStorage.h
++++ b/test/shims/HalStorage.h
+@@ -138,6 +138,11 @@ class HalStorage {
+   bool ensureDirectoryExists(const char*) { return false; }
+   HalFile open(const char*, int = 0) { return HalFile::opened(); }
+   bool mkdir(const char*, bool = true) { return false; }
++  // Cache enciphering for protected books (lib/CacheCipher). No-ops here: host tests run plain
++  // books, and the cipher and its key derivation are covered directly by test/cache_cipher.
++  void setCacheCipherScope(const char*, const uint8_t[32]) {}
++  void clearCacheCipherScope() {}
++  bool cacheCipherScopeActive() const { return false; }
+   bool exists(const char*) { return false; }
+   bool remove(const char*) { return false; }
+   bool rename(const char*, const char*) { return false; }
+diff --git a/test/zip_entry_reader/HalStorage.h b/test/zip_entry_reader/HalStorage.h
+index 898704788..ce8935a44 100644
+--- a/test/zip_entry_reader/HalStorage.h
++++ b/test/zip_entry_reader/HalStorage.h
+@@ -3,6 +3,10 @@
+ // Implements FsFile on top of stdio so tests can read actual .epub files
+ // and write real cache files under /tmp.
+ 
++#include "CacheCipher.h"
++#include "CacheKeys.h"
++
++#include <memory>
+ #include <fcntl.h>
+ 
+ #include <algorithm>
+@@ -122,14 +126,32 @@ class HalFile : public Print {
+   bool isOpen() const { return fp_ != nullptr; }
+   explicit operator bool() const { return fp_ != nullptr || isDir_ || hasName_; }
+ 
++  // Mirrors HalFile::enableCipher on the device (lib/hal/HalStorage.cpp). Implemented here
++  // rather than stubbed so the pipeline goldens can run over an ENCIPHERED cache and prove the
++  // enciphering is transparent — the whole point of the length-preserving, offset-addressed
++  // design. The host uses the portable ChaCha20 core; the device uses wolfSSL's.
++  bool enableCipher(const uint8_t key[32], const uint8_t nonce[12]) {
++    cipher_ = std::make_unique<CacheCipher>(key, nonce);
++    return true;
++  }
++  bool cipherEnabled() const { return cipher_ != nullptr; }
++
+   int read(void* buf, size_t n) {
+     if (!fp_) return -1;
+-    return static_cast<int>(fread(buf, 1, n, fp_));
++    const uint64_t at = position();
++    const int got = static_cast<int>(fread(buf, 1, n, fp_));
++    if (cipher_ && got > 0 && !cipher_->apply(static_cast<uint8_t*>(buf), static_cast<size_t>(got), at)) return -1;
++    return got;
+   }
+   // Single-byte read, SdFat-style: returns the byte or -1 (used by Bitmap.cpp).
+   int read() {
+     if (!fp_) return -1;
+-    return fgetc(fp_);
++    const uint64_t at = position();
++    const int value = fgetc(fp_);
++    if (!cipher_ || value < 0) return value;
++    uint8_t byte = static_cast<uint8_t>(value);
++    if (!cipher_->apply(&byte, 1, at)) return -1;
++    return byte;
+   }
+ 
+   bool seek(size_t pos) { return fp_ && fseek(fp_, static_cast<long>(pos), SEEK_SET) == 0; }
+@@ -154,17 +176,30 @@ class HalFile : public Print {
+   uint64_t size64() { return fileSize(); }
+   uint64_t fileSize64() { return fileSize(); }
+ 
+-  size_t write(const uint8_t* data, size_t size) {
+-    if (!fp_) return 0;
+-    return fwrite(data, 1, size, fp_);
+-  }
++  size_t write(const uint8_t* data, size_t size) { return write(static_cast<const void*>(data), size); }
+   // Device SdFat accepts void*; Page.cpp writes char arrays through this.
+   size_t write(const void* data, size_t size) {
+     if (!fp_) return 0;
+-    return fwrite(data, 1, size, fp_);
++    if (!cipher_) return fwrite(data, 1, size, fp_);
++    // Enciphered into a scratch chunk, never in the caller's buffer — same contract as the
++    // device path, which callers rely on when they reuse a record buffer.
++    const uint8_t* src = static_cast<const uint8_t*>(data);
++    uint8_t chunk[128];
++    const uint64_t start = position();
++    size_t written = 0;
++    while (written < size) {
++      const size_t take = std::min(sizeof(chunk), size - written);
++      memcpy(chunk, src + written, take);
++      if (!cipher_->apply(chunk, take, start + written)) return written;
++      const size_t n = fwrite(chunk, 1, take, fp_);
++      written += n;
++      if (n != take) break;
++    }
++    return written;
+   }
+   size_t write(uint8_t c) override {
+     if (!fp_) return 0;
++    if (cipher_ && !cipher_->apply(&c, 1, position())) return 0;
+     return fwrite(&c, 1, 1, fp_);
+   }
+   void flush() {
+@@ -214,6 +249,7 @@ class HalFile : public Print {
+   };
+ 
+   FILE* fp_ = nullptr;
++  std::unique_ptr<CacheCipher> cipher_;  // null for every ordinary file
+   bool hasImpl_ = false;
+   bool isDir_ = false;
+   bool hasName_ = false;
+@@ -226,10 +262,37 @@ using FsFile = HalFile;
+ 
+ class HalStorage {
+  public:
+-  bool openFileForRead(const char*, const std::string& path, HalFile& f) { return f.openForRead(path); }
+-  bool openFileForRead(const char*, const char* path, HalFile& f) { return f.openForRead(path); }
+-  bool openFileForWrite(const char*, const std::string& path, HalFile& f) { return f.openForWrite(path); }
+-  bool openFileForWrite(const char*, const char* path, HalFile& f) { return f.openForWrite(path); }
++  bool openFileForRead(const char* m, const std::string& path, HalFile& f) {
++    return openFileForRead(m, path.c_str(), f);
++  }
++  bool openFileForRead(const char*, const char* path, HalFile& f) {
++    const bool ok = f.openForRead(path);
++    applyCacheCipher(f, path);
++    return ok;
++  }
++  bool openFileForWrite(const char* m, const std::string& path, HalFile& f) {
++    return openFileForWrite(m, path.c_str(), f);
++  }
++  bool openFileForWrite(const char*, const char* path, HalFile& f) {
++    const bool ok = f.openForWrite(path);
++    applyCacheCipher(f, path);
++    return ok;
++  }
++
++  // The device's scope mechanism, mirrored so host tests can run a protected book end to end.
++  void setCacheCipherScope(const char* dir, const uint8_t key[32]) {
++    if (!dir || !*dir || !key) return clearCacheCipherScope();
++    cipherScopeDir_ = dir;
++    if (!cipherScopeDir_.empty() && cipherScopeDir_.back() != '/') cipherScopeDir_ += '/';
++    memcpy(cipherScopeKey_, key, sizeof(cipherScopeKey_));
++    cipherScopeActive_ = true;
++  }
++  void clearCacheCipherScope() {
++    cipherScopeActive_ = false;
++    cipherScopeDir_.clear();
++    memset(cipherScopeKey_, 0, sizeof(cipherScopeKey_));
++  }
++  bool cacheCipherScopeActive() const { return cipherScopeActive_; }
+   bool openFileForUpdate(const char*, const std::string& path, HalFile& f) { return f.openForUpdate(path); }
+   bool openFileForUpdate(const char*, const char* path, HalFile& f) { return f.openForUpdate(path); }
+   bool exists(const char* path) { return std::filesystem::exists(path); }
+@@ -288,6 +351,21 @@ class HalStorage {
+     static HalStorage i;
+     return i;
+   }
++
++ private:
++  // Same rule as the device: a file opened under the active scope is enciphered, keyed by its
++  // path relative to that scope. See lib/hal/HalStorage.cpp.
++  void applyCacheCipher(HalFile& f, const char* path) {
++    if (!cipherScopeActive_ || !path || !f.isOpen()) return;
++    if (strncmp(path, cipherScopeDir_.c_str(), cipherScopeDir_.size()) != 0) return;
++    uint8_t nonce[cachekeys::kNonceBytes];
++    cachekeys::deriveFileNonce(path + cipherScopeDir_.size(), nonce);
++    f.enableCipher(cipherScopeKey_, nonce);
++  }
++
++  std::string cipherScopeDir_;
++  uint8_t cipherScopeKey_[32] = {0};
++  bool cipherScopeActive_ = false;
+ };
+ 
+ #define Storage HalStorage::getInstance()
+-- 
+2.53.0
+
