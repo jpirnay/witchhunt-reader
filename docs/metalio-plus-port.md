@@ -28,7 +28,7 @@ The two `-app.bin` files identify the exact slot images for the switch tool.
 The WitchHunt updater is disabled because the other slot can hold CloudZao.
 The CloudZao updater can replace the inactive slot and therefore may replace
 WitchHunt. The combined image has been validated offline. The app-only
-build reached Home on an ESP32-S31 unit with the dpReader slot layout.
+build reached Home on a physical ESP32-S31 unit in an OTA slot layout.
 Serial diagnostics confirmed SDMMC mount, successful EPD refresh calls,
 and a nonblank framebuffer. Hardware checks on one unit covered sleep
 and short-press wake, touch and bezel keys, and Wi-Fi discovery. The
@@ -40,15 +40,15 @@ one tap. A saved touch activation preference takes precedence.
 At boot the app watches the Metalio power key through the input sampler so
 the touch event queue resumes once the power key is released.
 
-The footer aligns three buttons with the Metalio front bezel. The bezel Menu
-key sends Back on tap and defaults to Go Home on hold. The bezel page keys
-send Left and Right, independently of the two side volume keys (Up and Down).
-The side BOOT/AI key is WitchHunt's Confirm key. Power uses the board's
-expander and the WitchHunt sleep action. CloudZao voice and media functions
-belong to the CloudZao slot.
+The bezel Menu key sends Back on tap and defaults to Go Home on hold. The bezel
+page keys send Left and Right, independently of the two side volume keys (Up and
+Down). The side BOOT/AI key is WitchHunt's Confirm key. Power uses the board's
+expander and defaults to Go Home on short press and Sleep on hold. CloudZao
+voice and media functions belong to the CloudZao slot.
 
-The 4.7-inch portrait UI uses 78 px minimum list rows, 84 px tabs, and a
-96 px footer at the normal UI font size. Lists use the full content width.
+The 4.7-inch portrait UI (684 × 1216 px) uses 28 px side padding, 78 px minimum
+list rows, 84 px tabs, and enlarged touch targets. Lists use the full content
+width, and the three mirrored bezel-key hints are hidden across the UI.
 
 The Windows bench script uses esptool 5.6.0. With only `--port` it reports
 the current slot and app descriptions. A switch requires the destination slot
@@ -72,98 +72,30 @@ armed, firmware waits for Power and restarts. Light sleep is disabled on
 the S31 RC toolchain because the FreeInk bring-up reported PSRAM corruption
 after wake.
 
-## Lần sửa tiếp theo — 2026-11-19
+## Implementation Notes
 
-Ba phím cảm ứng dưới viền đã được người dùng xác nhận hoạt động trên máy.
-
-- **Vuốt ngang Back/Forward.** Bản thử hiện chưa có thao tác này. Thêm điều
-  hướng bằng vuốt trái/phải và kiểm tra trên máy thật, kể cả khi có vùng chạm
-  hoặc thanh trượt trên màn hình.
-- **Giao diện 4,7 inch (684 × 1216 px).** Chỉnh lại phân cấp chữ, bố cục và
-  kích thước nút. Làm cho các vùng chạm dễ bấm bằng ngón tay, đủ cách nhau
-  và khớp với vị trí hiển thị.
-- **Nút cứng cạnh hông dưới cùng.** Đặt thao tác bấm mặc định là về HOME.
-  Xác nhận đúng nút trên máy và kiểm tra thao tác nguồn/Sleep khi giữ nút.
-- **Thanh trượt chỉnh đèn đọc (frontlight).** Thêm điều khiển kéo bằng ngón
-  tay. Ảnh BOOX là tham chiếu cho cách bố trí thanh trượt và nút tăng/giảm.
-  Số thanh điều khiển theo số kênh đèn thực tế của Metalio.
-- **Phản hồi rung khi chạm (haptic).** Người dùng ghi nhận máy có rung khi
-  chạm. Mã CloudZao có phản hồi rung cho vùng chạm trên màn hình và phím
-  cảm ứng dưới viền. Khi sửa giao diện, kiểm tra riêng hai đường chạm trên
-  WitchHunt để phản hồi rung xác nhận thao tác đã được nhận.
-
-### Bố cục đề xuất tham chiếu BOOX và Kindle
-
-**Trang chủ**, từ trên xuống:
-
-1. **Ngày tháng năm** ở đầu màn hình, hiển thị gọn theo ngôn ngữ thiết bị.
-2. **Sách đang đọc** là khối nổi bật, với bìa, tên sách và thao tác **Đọc tiếp**.
-3. **Tiến độ đọc** nằm trong khối sách, ngay dưới tên sách, gồm thanh tiến độ
-   và phần trăm của cuốn đang đọc.
-4. **Menu bên dưới khối sách**, ưu tiên nút lớn cho Thư viện, Sách gần đây và
-   Cài đặt. Các mục khác có thể nằm trong menu nếu còn chỗ.
-
-**Màn đọc** ưu tiên diện tích trang sách. Chạm giữa để mở Mục lục, Aa, Đèn
-và Đánh dấu. Vuốt ngang lật trang theo chiều đọc của sách. Cử chỉ bắt đầu
-trên slider hoặc thanh công cụ thuộc về điều khiển đó.
-
-**Cài đặt** dùng danh sách một cột, tiêu đề nhóm rõ, tên và giá trị ở hai
-đầu dòng. Cả dòng là vùng chạm. **Bảng đèn đọc** mở ở nửa dưới, có Bật/Tắt,
-slider độ sáng và ấm/lạnh nếu hai kênh hoạt động, cùng nút trừ/cộng. Đèn
-phản hồi khi kéo và lưu giá trị khi nhấc tay.
-
-Mốc thử trên máy ở 684 × 1216 px: lề ngang 28 px, chữ danh sách 28–32 px,
-tiêu đề 36–40 px, vùng chạm chính 84–96 px và cách nhau ít nhất 12 px.
-
-Tham chiếu: [Menu đọc BOOX](https://support.boox.com/fee6/5a9b),
-[Đèn đọc BOOX](https://shop.boox.com/blogs/news/boox-firmware-v4-1-overview-of-new-features-and-upgrades),
-[Thanh công cụ đọc Kindle](https://digprjsurvey.amazon.com/csad/help/node/T5Y94BzSCGwm0vd75W).
-
-### Bản triển khai — 2026-11-20
-
-- Vuốt ngang lật một trang theo chiều đọc trên Metalio. Chạm hai cạnh vẫn lật
-  trang trong chế độ chạm. Chế độ tắt điều khiển trang bằng cảm ứng vẫn tắt cả
-  thao tác vuốt.
-- Trang chủ dùng một khối sách đang đọc, tiến độ, ngày từ đồng hồ thiết bị và
-  các mục điều hướng bên dưới. Sách gần đây mở thẳng tab tương ứng của Thư viện.
-- Phím nguồn bấm ngắn mặc định về HOME. Giữ phím vẫn dùng thao tác Sleep.
-  Cấu hình bấm ngắn do người dùng đặt được đọc lại khi khởi động.
-- Bảng đèn đọc mở phía dưới màn hình bằng vuốt từ mép trên hoặc biểu tượng mặt
-  trời trên thanh đọc EPUB. Kéo thanh độ sáng hoặc ấm/lạnh để đổi đèn trực tiếp.
-- Motor rung của Metalio phát một nhịp khi nhận chạm màn hình hoặc thao tác phím
-  cảm ứng dưới viền.
-
-Kiểm tra trên máy qua USB với EPUB thử: vuốt trái/phải đổi đúng một trang,
-biểu tượng mặt trời mở bảng đèn, nút cộng chỉnh ấm/lạnh và lưu khi nhấc tay,
-bấm ngắn Power đưa về HOME. Người dùng đã xác nhận rung khi chạm màn hình
-và khi dùng phím cảm ứng dưới viền. Nút cứng dưới cùng bên hông cũng đã được
-xác nhận đưa về HOME. Bản thử đang ở slot WitchHunt, cạnh slot dpReader.
-Người dùng đã xác nhận độ sáng thay đổi ngay trong lúc kéo thanh trượt.
-
-Lỗi lặp khởi động khi nạp bìa JPEG đến từ việc ROM ESP32-S31 và thư viện
-TJpgDec dùng cùng tên hàm với ABI khác nhau. Bản sửa đổi tên hai ký hiệu của
-TJpgDec. Đã kiểm tra máy lên HOME, vẽ được bìa JPEG của EPUB thử, mở lại đúng
-trang qua Đọc tiếp và vuốt ngang hai chiều. Người dùng đã mở lại thành công
-cuốn từng gây lỗi từ Thư viện.
-
-Chữ giao diện Metalio ở cỡ Normal dùng Inter 12 pt cho mục và giá trị,
-14 pt cho tiêu đề. Bảng đèn có nút Quay lại để trở về màn hình đã mở bảng.
-Ảnh chụp Settings trên máy cho thấy chiều cao chữ của một mục tăng từ
-21 lên 24 px. Kiểm thử qua USB xác nhận nút Quay lại đóng bảng đèn và mở
-lại đúng màn Settings.
-Sleep giữ nguồn cho mạch đánh thức để thao tác bấm ngắn Power có thể bật
-lại máy. Tín hiệu đánh thức cũng có thể đến từ các phím dùng chung ngắt
-với Power trên bộ mở rộng GPIO. Đã thử trên máy qua USB: giữ Power để vào
-Sleep, ngắt đánh thức được bật, bấm ngắn Power và máy quay lại HOME. Người
-dùng cũng xác nhận thao tác bấm ngắn đã đánh thức được máy.
-
-### Điều chỉnh Trang chủ — 2026-11-20
-
-Trang chủ áp dụng ngay theme đã chọn và dùng các vùng chạm trực tiếp.
-Lyra Carousel có lưới menu hai hàng với nhãn dưới biểu tượng. Metalio ẩn
-hàng gợi ý ba phím viền trên toàn giao diện. Cài đặt có nút Quay lại ở
-đầu màn hình. Trong menu và các màn hình phụ, vuốt từ mép trái vào để quay lại.
-
-Khi đọc EPUB, mở menu đọc rồi chọn Sync. Nếu chưa có tài khoản, tab này
-mở cài đặt KOReader. Sau khi lưu thông tin tài khoản, tab hiện các thao
-tác tải xuống, đẩy lên và so sánh tiến độ.
+- **Horizontal swipe page turns**: Swiping left/right turns one page along the
+  book's reading direction on Metalio. Edge taps still turn pages in tap mode,
+  and disabling touch page controls disables swipes as well.
+- **Home & touch-first navigation**: Home applies the selected theme immediately
+  with direct touch targets. Lyra Carousel uses a two-row menu grid with labels
+  below the icons. Settings provides a header Back button, and swiping in from
+  the left edge returns from menus and sub-screens.
+- **Power key & sleep/wake**: Short-pressing Power defaults to Go Home (restored
+  from saved settings on boot) while holding Power enters Sleep. Deep sleep
+  keeps the wake interrupt circuit powered so a short press of Power wakes the
+  device back to Home.
+- **Frontlight drawer**: Opens at the bottom of the screen via a top-edge swipe
+  or the sun icon on the EPUB reader bar. Dragging brightness or warmth updates
+  the light live and saves on finger release, with a Back button to dismiss.
+- **Haptic feedback**: The Metalio vibration motor pulses on screen touches and
+  capacitive bezel-key actions.
+- **TJpgDec ROM symbol collision fix**: Boot loops when decoding JPEG covers
+  were caused by ESP32-S31 ROM symbols colliding with TJpgDec functions that
+  have a different ABI. Renaming the conflicting TJpgDec symbols resolved cover
+  decoding on hardware.
+- **UI font sizing**: Normal UI font size on Metalio uses Inter 12 pt for items
+  and values and 14 pt for titles.
+- **EPUB KOReader Sync**: Selecting Sync in the EPUB reader menu opens KOReader
+  settings when no account is configured, and shows pull, push, and compare
+  actions once credentials are saved.
