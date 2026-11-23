@@ -3,16 +3,13 @@
 // Ported from crosspoint-reader (PR #2583 by Uri Tauber, HTML layout #2836 by
 // Uri Tauber). Adapted to this device: a pinned font, and dictionary switching.
 
-#include <Epub/Page.h>
-
 #include <cstdint>
-#include <memory>
 #include <string>
-#include <vector>
 
 #include "activities/Activity.h"
 #include "fontIds.h"
 #include "util/ButtonNavigator.h"
+#include "util/PagedTextBody.h"
 
 // The font a Latin lookup's definition is rendered in -- fixed, and deliberately
 // NOT the reader's font.
@@ -36,7 +33,8 @@ class LanguageHyphenator;
 // Paged viewer for one dictionary definition. HTML definitions are laid out
 // through the EPUB chapter parser into styled Pages; anything else (plain text,
 // or HTML too damaged or too large to lay out) is word-wrapped once on entry and
-// each page renders spans of the original string, so no per-line copies are held.
+// each page renders spans of the original string, so no per-line copies are held
+// (PagedTextBody, which the footnote popup shares).
 class DictionaryDefinitionActivity final : public Activity {
  public:
   // `dictionaryName` is shown alongside the page counter and is empty when only
@@ -69,13 +67,6 @@ class DictionaryDefinitionActivity final : public Activity {
   void nextPage();
   void previousPage();
 
-  // One wrapped display line: a byte span of `definition`. Wrapping keeps lines
-  // under the screen width, so uint16_t length is ample.
-  struct Line {
-    uint32_t start;
-    uint16_t len;
-  };
-
   // Usable body-text rectangle between the header and the button hints. Carries its origin as
   // well as its size because the tap-to-page split has to land on exactly the rectangle the text
   // was drawn in -- one statement of it, read by both.
@@ -87,16 +78,11 @@ class DictionaryDefinitionActivity final : public Activity {
   };
 
   BodyArea bodyArea() const;
-  bool layoutHtmlPages();
-  bool reserveLines(size_t capacity);
-  bool wrapText();
-  int measureSpan(int fontId, const char* text, size_t len) const;
-  void drawBody(int fontId, int x, int startY) const;
 
   const std::string headword;
   // Not const: onEnter() normalizes embedded NULs (StarDict multi-type
-  // separators) to newlines so C-string APIs see the whole text, and the
-  // plain-text path converts it in place, in this same buffer.
+  // separators) to newlines so C-string APIs see the whole text, then hands it
+  // to the body, which lays it out and keeps what it draws from.
   std::string definition;
   const LanguageHyphenator* const hyphenator;
   const bool htmlDefinition;
@@ -105,15 +91,10 @@ class DictionaryDefinitionActivity final : public Activity {
   // What the body is laid out and drawn in.
   const int bodyFontId;
   bool canSwitchDictionary() const { return !dictionaryName.empty(); }
-  // Styled path: reader-identical Pages laid out from the HTML definition.
-  // Empty means the plain-text span path below is active.
-  std::vector<std::unique_ptr<Page>> pages;
-  std::vector<Line> lines;
-  // The line table could not be built (no heap for it): the body shows a
-  // low-memory message instead.
+  PagedTextBody body;
+  // The body could not be laid out (no heap for its line table): the screen
+  // shows a low-memory message instead.
   bool layoutFailed = false;
   int currentPage = 0;
-  int totalPages = 1;
-  int linesPerPage = 1;
   ButtonNavigator buttonNavigator;
 };
