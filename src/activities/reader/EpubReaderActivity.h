@@ -1454,7 +1454,9 @@ class EpubReaderActivity final : public Activity {
   // note opens in the footnote popup over the page (openFootnotePopup), whose "Go to note" then follows it; anything
   // else is followed at once, as navigateToHref(href, true).
   void followLink(size_t link);
-  // The same for a row picked in the footnote list, which hands back the link's href and text.
+  // The link followed as navigateToHref(href, true) does, with no popup: "Go to note", and any link that is no note.
+  void followLinkDirectly(size_t link);
+  // The same for a row picked in the footnote list, which hands back its index and href.
   void followListedLink(const FootnoteResult& picked);
   // The page's notes in page order: the links of currentPageFootnotes that open the popup. The preview store decides
   // once the chapter's links have been scanned (a hit is a note, a miss navigation); without it the link's own text

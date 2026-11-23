@@ -91,16 +91,13 @@ struct NetworkModeResult {
   NetworkMode mode;
 };
 
+// A link of the page to act on. From the footnote list: `link` (the row's index in the page's links, -1 for none) and
+// its `href`, to be followed or opened as a note. From the footnote popup: `step`, the page's next (+1) or previous
+// (-1) note, or 0 to follow the note's own link.
 struct FootnoteResult {
   std::string href;
-  // The link's text as the page shows it ("12", "*"): whether a note opens in the popup, and its title there.
-  std::string marker;
-};
-
-// The footnote popup asks for the page's next (+1) or previous (-1) note: its page keys went past the end of the one
-// it shows.
-struct FootnoteStepResult {
-  int8_t delta = 0;
+  int16_t link = -1;
+  int8_t step = 0;
 };
 
 struct FilePathResult {
@@ -168,10 +165,10 @@ struct ReaderBarsResult {
   ReaderLayoutValues layout{};
 };
 
-using ResultVariant = std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult,
-                                   PageResult, SyncResult, NetworkModeResult, FootnoteResult, FootnoteStepResult,
-                                   FilePathResult, StarredPageResult, PrintedPageResult, DictionarySwitchResult,
-                                   ConfirmResult, ReaderBarsResult, BookSearchResult, WordSearchResult>;
+using ResultVariant =
+    std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult, PageResult,
+                 SyncResult, NetworkModeResult, FootnoteResult, FilePathResult, StarredPageResult, PrintedPageResult,
+                 DictionarySwitchResult, ConfirmResult, ReaderBarsResult, BookSearchResult, WordSearchResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

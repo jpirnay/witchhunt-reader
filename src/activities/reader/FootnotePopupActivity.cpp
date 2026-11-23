@@ -31,20 +31,19 @@ bool contains(const Rect& r, const int x, const int y) {
 
 FootnotePopupActivity::FootnotePopupActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                              std::unique_ptr<Page> page, const int pageFontId, const int pageX,
-                                             const int pageY, std::string marker, std::string href, std::string markup,
-                                             const LanguageHyphenator* hyphenator, const Place place)
+                                             const int pageY, const char* marker, const LanguageHyphenator* hyphenator,
+                                             const Place place)
     : Activity("FootnotePopup", renderer, mappedInput),
       page(std::move(page)),
       pageFontId(pageFontId),
       pageX(pageX),
       pageY(pageY),
-      marker(std::move(marker)),
-      href(std::move(href)),
-      markup(std::move(markup)),
       hyphenator(hyphenator),
-      place(place) {}
+      place(place) {
+  if (marker) snprintf(this->marker, sizeof(this->marker), "%s", marker);
+}
 
-bool FootnotePopupActivity::layOut() {
+bool FootnotePopupActivity::layOut(std::string markup) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   // In the book's orientation, as the reader holds it; the hint strip lies outside this area, on whichever edge the
   // keys are.
@@ -90,13 +89,8 @@ void FootnotePopupActivity::close() {
   finish();
 }
 
-void FootnotePopupActivity::goToNote() {
-  setResult(FootnoteResult{href, marker});
-  finish();
-}
-
 void FootnotePopupActivity::step(const int delta) {
-  setResult(FootnoteStepResult{static_cast<int8_t>(delta)});
+  setResult(FootnoteResult{{}, -1, static_cast<int8_t>(delta)});
   finish();
 }
 
@@ -175,7 +169,7 @@ void FootnotePopupActivity::loop() {
       return;
     }
     if (ev.button == B::Confirm) {
-      goToNote();
+      step(0);
       return;
     }
     // Either axis pages, as in the footnote list: the logical directions, so a side key is one step and not two
@@ -258,8 +252,8 @@ void FootnotePopupActivity::render(RenderLock&&) {
 
   // The title: which note this is, and where it stands among the page's notes; on a long note, right, which page of it.
   char title[96];
-  int used = marker.empty() ? snprintf(title, sizeof(title), "%s", tr(STR_NOTE))
-                            : snprintf(title, sizeof(title), "%s %s", tr(STR_NOTE), marker.c_str());
+  int used = marker[0] == '\0' ? snprintf(title, sizeof(title), "%s", tr(STR_NOTE))
+                               : snprintf(title, sizeof(title), "%s %s", tr(STR_NOTE), marker);
   if (place.count > 1 && used > 0 && static_cast<size_t>(used) < sizeof(title)) {
     char position[32];
     snprintf(position, sizeof(position), tr(STR_NOTE_POSITION), place.position + 1, static_cast<int>(place.count));

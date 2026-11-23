@@ -8365,7 +8365,10 @@ bool EpubReaderActivity::handleLinkTouch() {
 }
 
 void EpubReaderActivity::followLink(const size_t link) {
-  if (openFootnotePopup(link)) return;
+  if (!openFootnotePopup(link)) followLinkDirectly(link);
+}
+
+void EpubReaderActivity::followLinkDirectly(const size_t link) {
   std::string href;
   {
     RenderLock lock(*this);
@@ -8376,22 +8379,11 @@ void EpubReaderActivity::followLink(const size_t link) {
 }
 
 void EpubReaderActivity::followListedLink(const FootnoteResult& picked) {
-  // The list hands back what it showed; the page's own entry is found again by it, as the popup steps by index.
-  size_t found = SIZE_MAX;
-  {
-    RenderLock lock(*this);
-    for (size_t i = 0; i < currentPageFootnotes.size(); ++i) {
-      if (picked.href == currentPageFootnotes[i].href && picked.marker == currentPageFootnotes[i].number) {
-        found = i;
-        break;
-      }
-    }
+  if (picked.link >= 0) {
+    followLink(static_cast<size_t>(picked.link));
+  } else {
+    navigateToHref(picked.href, true);
   }
-  if (found != SIZE_MAX) {
-    followLink(found);
-    return;
-  }
-  navigateToHref(picked.href, true);
 }
 
 EpubReaderActivity::PageNotes EpubReaderActivity::pageNotes() const {
@@ -8489,12 +8481,12 @@ bool EpubReaderActivity::openFootnotePopup(const size_t link, const bool atLastP
   }
   auto popup = makeUniqueNoThrow<FootnotePopupActivity>(
       renderer, mappedInput, std::move(page), getEffectiveReaderFontId(), layout.marginLeft, contentTop, entry.number,
-      entry.href, std::move(markup), TypographyProfile::forLanguage(epub->getLanguage()).hyphenator, place);
+      TypographyProfile::forLanguage(epub->getLanguage()).hyphenator, place);
   bool laidOut = false;
   if (popup) {
     // The reader's font may be a TrueType face, measured only under the lock.
     RenderLock lock(*this);
-    laidOut = popup->layOut();
+    laidOut = popup->layOut(std::move(markup));
   }
   if (!laidOut) {
     resumeBackgroundWork();
@@ -8504,12 +8496,11 @@ bool EpubReaderActivity::openFootnotePopup(const size_t link, const bool atLastP
           static_cast<unsigned>(place.count), place.sheetAtTop ? "top" : "bottom");
   startActivityForResult(std::move(popup), [this, link](const ActivityResult& result) {
     resumeBackgroundWork();
-    if (!result.isCancelled) {
-      if (const auto* note = std::get_if<FootnoteResult>(&result.data)) {
-        navigateToHref(note->href, true);
-      } else if (const auto* step = std::get_if<FootnoteStepResult>(&result.data)) {
-        stepFootnotePopup(link, step->delta);
-      }
+    const auto* picked = result.isCancelled ? nullptr : std::get_if<FootnoteResult>(&result.data);
+    if (picked && picked->step != 0) {
+      stepFootnotePopup(link, picked->step);
+    } else if (picked) {
+      followLinkDirectly(link);
     }
     requestUpdate();
   });

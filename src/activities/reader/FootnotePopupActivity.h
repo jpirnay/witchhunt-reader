@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Epub/FootnoteEntry.h>
 #include <Epub/Page.h>
 
 #include <memory>
@@ -37,16 +38,16 @@ class FootnotePopupActivity final : public Activity {
     bool startAtLastPage = false;  // stepped back to: open on the note's last page
   };
 
-  // `page` is drawn in `pageFontId` with its top-left at (pageX, pageY), as the reader drew it. `marker` titles the
-  // sheet; `href` is what Confirm hands back. `markup`: the note (captureNote's fragment).
+  // `page` is drawn in `pageFontId` with its top-left at (pageX, pageY), as the reader drew it. `marker`, the link's
+  // text, titles the sheet.
   FootnotePopupActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Page> page,
-                        int pageFontId, int pageX, int pageY, std::string marker, std::string href, std::string markup,
-                        const LanguageHyphenator* hyphenator, Place place);
+                        int pageFontId, int pageX, int pageY, const char* marker, const LanguageHyphenator* hyphenator,
+                        Place place);
 
-  // Lays the note out for the sheet. Called by the reader before it pushes this, under its RenderLock: false (no memory
-  // for the note's lines) leaves the reader to follow the link instead, so a note that cannot be shown is never an
-  // empty sheet.
-  bool layOut();
+  // Lays the note out for the sheet: `markup`, captureNote's fragment. Called by the reader before it pushes this,
+  // under its RenderLock: false (no memory for the note's lines) leaves the reader to follow the link instead, so a
+  // note that cannot be shown is never an empty sheet.
+  bool layOut(std::string markup);
 
   void onEnter() override;
   void loop() override;
@@ -64,7 +65,8 @@ class FootnotePopupActivity final : public Activity {
   bool hasNextNote() const { return place.position + 1 < place.count; }
   bool hasPreviousNote() const { return place.position > 0; }
   void close();
-  void goToNote();
+  // Hands the reader a FootnoteResult: `delta` 0 follows the note's link ("Go to note"), +1 / -1 open the page's next
+  // or previous note.
   void step(int delta);
   // The tap, if one came that is not the hint strip's: closes on the page beside the sheet, pages (and steps) in the
   // note's halves.
@@ -74,10 +76,7 @@ class FootnotePopupActivity final : public Activity {
   const int pageFontId;
   const int pageX;
   const int pageY;
-  const std::string marker;
-  const std::string href;
-  // The note until layOut() hands it to the body.
-  std::string markup;
+  char marker[FOOTNOTE_NUMBER_LEN] = {};
   const LanguageHyphenator* const hyphenator;
   const Place place;
 

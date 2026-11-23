@@ -54,8 +54,7 @@ void EpubReaderFootnotesActivity::loop() {
     if ((ev.button == MappedInputManager::Button::Confirm || ev.button == MappedInputManager::Button::Power) &&
         ev.type == ButtonEventManager::PressType::Short) {
       if (selectedIndex >= 0 && selectedIndex < static_cast<int>(order.size())) {
-        const FootnoteEntry& entry = footnotes[order[selectedIndex]];
-        setResult(FootnoteResult{entry.href, entry.number});
+        setResult(FootnoteResult{footnotes[order[selectedIndex]].href, static_cast<int16_t>(order[selectedIndex])});
         finish();
       }
       return;
