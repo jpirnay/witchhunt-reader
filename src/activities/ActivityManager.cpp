@@ -795,6 +795,8 @@ bool ActivityManager::isReaderActivity() const {
                      [](const auto& activity) { return activity->isReaderActivity(); });
 }
 
+bool ActivityManager::readerIsOnTop() const { return currentActivity && currentActivity->isReaderActivity(); }
+
 bool ActivityManager::currentIsReaderActivity() const {
   return currentActivity && currentActivity->takesReaderControls();
 }

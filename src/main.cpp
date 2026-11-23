@@ -64,6 +64,7 @@
 #include "SerialBuffers.h"
 #include "SerialTestApi.h"
 #include "SilentRestart.h"
+#include "TouchGate.h"
 #include "UiFontScale.h"
 #include "WeatherSettingsStore.h"
 #include "WifiCredentialStore.h"
@@ -1988,6 +1989,14 @@ static void applySlideSwitch() {
       if (DarkModeNow::isDark() == on) return;
       flipDarkMode();
       break;
+    case CrossPointSettings::SLIDE_SWITCH_TOUCH: {
+      // On is touch on, as on is the light on: off is Touch Lock.
+      const uint8_t lock = on ? 0 : 1;
+      if (SETTINGS.touchLock == lock) return;
+      SETTINGS.touchLock = lock;
+      SETTINGS.saveToFile();
+      break;
+    }
     case CrossPointSettings::SLIDE_SWITCH_NOTHING:
     case CrossPointSettings::SLIDE_SWITCH_ACTION_COUNT:
       return;
@@ -2027,13 +2036,16 @@ void loop() {
   // After the exclusive-storage return: it saves settings to the card.
   applySlideSwitch();
 
-  // The UI touch gate, refreshed every tick from the setting and the activity on
-  // top. The reader keeps touch whatever this says — touchReaderControls governs
-  // it there, and giving one behaviour two switches only creates a way for a
-  // device to look broken. Reader SUB-screens (contents, dictionary, the menu)
-  // are UI screens and are gated with the rest.
-  mappedInputManager.setTouchEventsEnabled(SETTINGS.touchUiControls != CrossPointSettings::TOUCH_UI_OFF ||
-                                           activityManager.isReaderActivity());
+  // The UI touch gate, refreshed every tick from the settings and the activity on
+  // top (TouchGate.h). Touch Lock silences everything. Otherwise the reader keeps
+  // touch whatever Touch Navigation says — touchReaderControls governs it there,
+  // and giving one behaviour two switches only creates a way for a device to look
+  // broken. Reader SUB-screens (contents, dictionary, the menu) are UI screens and
+  // are gated with the rest: hence the reader ON TOP, not isReaderActivity(),
+  // which also answers true under them and left them live.
+  mappedInputManager.setTouchEventsEnabled(
+      TouchGate::eventsEnabled(SETTINGS.touchLock != 0, SETTINGS.touchUiControls != CrossPointSettings::TOUCH_UI_OFF,
+                               activityManager.readerIsOnTop()));
   // Must follow the drain above and precede every power consumer below.
   serviceBootPowerRelease();
   HalClock::updatePeriodic();
@@ -2160,7 +2172,7 @@ void loop() {
   // being followed to its frame): a device driven only over USB used to auto-sleep mid-test, and
   // to answer at 10 MHz, where the USB link can drop reply bytes unseen.
   if (serialCommandRan || SerialTestApi::commandPending() || gpio.wasAnyPressed() || gpio.wasAnyReleased() ||
-      gpio.isAnyPressed() || gpio.wasTouchActivity() || halTiltSensor.hadActivity() ||
+      gpio.isAnyPressed() || (gpio.wasTouchActivity() && SETTINGS.touchLock == 0) || halTiltSensor.hadActivity() ||
       activityManager.preventAutoSleep()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
@@ -2488,6 +2500,12 @@ void loop() {
         case BA::BTN_TOGGLE_DARK_MODE:
           flipDarkMode();
           LOG_INF("MAIN", "Dark Mode %s", DarkModeNow::isDark() ? "on" : "off");
+          break;
+        case BA::BTN_TOGGLE_TOUCH_LOCK:
+          SETTINGS.touchLock = SETTINGS.touchLock ? 0 : 1;
+          SETTINGS.saveToFile();
+          // Applied by the touch gate at the top of the next tick, like Toggle Touch Navigation.
+          LOG_INF("MAIN", "Touch lock %s", SETTINGS.touchLock ? "on" : "off");
           break;
         case BA::BTN_SCREENSHOT:
           // Taken by ScreenshotUtil::service() on the next pass, or a few passes on if a render holds the buffers.

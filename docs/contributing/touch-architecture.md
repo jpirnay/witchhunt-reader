@@ -358,12 +358,19 @@ initialisers in `CrossPointSettings.h`. Why they are what they are:
 - `FREEINK_CAP_TOUCH` 0 compiles `HalGPIO`'s touch event rings, their snapshot and the sampler's
   latching out of the same builds. The queries stay declared and report no event.
 - `touchUiControls` silences touch outside the reader. `main.cpp` sets the gate every tick from
-  the setting and the activity on top, and the reader is always enabled, because
+  the setting and the activity on top, and the reader on top is always enabled
+  (`ActivityManager::readerIsOnTop()`; the screens it opens, such as its menu, contents and
+  dictionary, are gated with the rest), because
   `touchReaderControls` governs it there. `hasTouch()` is not gated: screens use it for layout.
   Nobody is stranded with the gate off: the Home key's Back and Confirm arrive as button presses
   below this layer, and `BTN_TOGGLE_TOUCH_UI` can be bound to a reader gesture.
 - `touchReaderControls` (off, tap, swipe, inverted tap) governs the reading surface, link taps
   included. Off leaves the page inert, so a thumb resting on the glass cannot turn a page.
+- `touchLock` (Touch Lock) closes the gate on every screen, the reader on top included
+  (`TouchGate::eventsEnabled()`, tested in `test/touch_gate`). Keys undo it: one bound to
+  `BTN_TOGGLE_TOUCH_LOCK`, the settings row reached by the keys, or the Picco's slide switch set to
+  Touch. The Home key's presses arrive below the gate and keep working. While it is on, a contact
+  does not count as activity for the sleep timer.
 
 ## Debugging touch
 
