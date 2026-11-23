@@ -5,7 +5,7 @@
 // tests' stdio HalFile both follow them through the templates below, so the pipeline tests run the device's rules.
 //
 // A protected book's cache folder (".../epub_<n>/") holds a marker, cipher.bin, with a random salt. Every other file
-// in it is enciphered: a 16-byte header (magic + a random nonce) and then the content, XORed with the ChaCha20
+// in it is enciphered: a 512-byte header (magic, a random nonce, zeros) and then the content, XORed with the ChaCha20
 // keystream of (the folder's key, the file's nonce) at the content's own offset. The handle hides the header: its
 // size, position and seeks are the content's, so every cache format, its offsets and its in-place patches work as
 // they are. A new nonce per file written from empty: a rename keeps the nonce with the file, and rewriting a file
@@ -22,7 +22,12 @@
 
 namespace cache_cipher {
 
-constexpr size_t kHeaderBytes = 16;
+// One sector, so the content starts on a sector as a plain file's does: SdFat moves whole aligned sectors between the
+// card and the caller's buffer directly, and anything off the grid through its one-sector cache, sector by sector. A
+// 16-byte header cost a 62-page chapter's build on the X3 190 ms of card time (2026-11-23). On the card it costs
+// nothing: a file takes whole clusters anyway.
+constexpr size_t kHeaderBytes = 512;
+constexpr size_t kHeaderFieldBytes = 16;  // magic and nonce; the rest of the header is zeros
 constexpr uint8_t kFileMagic[4] = {'W', 'C', 'C', '1'};
 constexpr char kMarkerName[] = "cipher.bin";
 constexpr uint8_t kMarkerMagic[4] = {'W', 'C', 'F', '1'};
@@ -104,12 +109,12 @@ class CipherStream {
 void makeMarker(const uint8_t (&salt)[kSaltBytes], uint8_t (&out)[kMarkerBytes]);
 bool parseMarker(const uint8_t* bytes, size_t len, uint8_t (&salt)[kSaltBytes]);
 
-inline void makeHeader(const uint8_t (&nonce)[CacheCipher::kNonceBytes], uint8_t (&out)[kHeaderBytes]) {
+inline void makeHeader(const uint8_t (&nonce)[CacheCipher::kNonceBytes], uint8_t (&out)[kHeaderFieldBytes]) {
   memcpy(out, kFileMagic, sizeof(kFileMagic));
   memcpy(out + sizeof(kFileMagic), nonce, CacheCipher::kNonceBytes);
 }
 
-inline bool parseHeader(const uint8_t (&in)[kHeaderBytes], uint8_t (&nonce)[CacheCipher::kNonceBytes]) {
+inline bool parseHeader(const uint8_t (&in)[kHeaderFieldBytes], uint8_t (&nonce)[CacheCipher::kNonceBytes]) {
   if (memcmp(in, kFileMagic, sizeof(kFileMagic)) != 0) return false;
   memcpy(nonce, in + sizeof(kFileMagic), CacheCipher::kNonceBytes);
   return true;
@@ -154,21 +159,25 @@ enum class Attach : uint8_t {
   Refused,     // not a file of this folder's (no header, a short one), or no memory: close it, the open fails
 };
 
-// Attaches the cipher to a file just opened at raw position 0. `Raw` has size(), seek(uint64_t), read(void*, size_t)
-// and write(const void*, size_t) on the file's bytes as they are on the card.
+// Attaches the cipher to a file just opened at raw position 0, and leaves it at the content's start. `Raw` has size(),
+// position(), seek(uint64_t), read(void*, size_t) and write(const void*, size_t) on the file's bytes as they are on the
+// card.
 template <class Raw>
 Attach attach(Raw& raw, const bool mayWrite, const uint8_t (&key)[kKeyBytes], RandomFill fill,
               std::unique_ptr<CipherStream>& out) {
-  uint8_t header[kHeaderBytes];
+  uint8_t header[kHeaderFieldBytes];
   uint8_t nonce[CacheCipher::kNonceBytes];
   const uint64_t size = raw.size();
   if (size == 0) {
     if (!mayWrite) return Attach::Plain;
     fill(nonce, sizeof(nonce));
     makeHeader(nonce, header);
-    if (raw.write(header, sizeof(header)) != sizeof(header)) return Attach::Refused;
+    static const uint8_t kZeros[kHeaderBytes - kHeaderFieldBytes] = {};
+    if (raw.write(header, sizeof(header)) != sizeof(header) || raw.write(kZeros, sizeof(kZeros)) != sizeof(kZeros)) {
+      return Attach::Refused;
+    }
   } else if (size < kHeaderBytes || raw.read(header, sizeof(header)) != static_cast<int>(sizeof(header)) ||
-             !parseHeader(header, nonce)) {
+             !parseHeader(header, nonce) || !raw.seek(kHeaderBytes)) {
     return Attach::Refused;
   }
   out.reset(new (std::nothrow) CipherStream(key, nonce));
@@ -190,19 +199,36 @@ int read(Raw& raw, CipherStream& cipher, void* buf, const size_t count) {
   return got;
 }
 
-// Enciphers a copy, a chunk at a time (the caller's bytes stay as they are), and writes it at the raw position.
-// Stops short, never writing a byte in the clear, when the cipher refuses.
+// Writes at the raw position, enciphered; stops short, never writing a byte in the clear, when the cipher refuses.
+//
+// A write of kInPlaceBytes or more whose bytes the caller says may be changed for the length of the call (`inPlace`:
+// the device passes it for a buffer in RAM, never for one in flash) is enciphered where it is, written in one call, and
+// deciphered back: SdFat writes it as one run of sectors. Anything else goes through a stack chunk, one sector per
+// write, and the caller's bytes are never touched. Measured on the X3 (2026-11-23): a 62-page chapter's build wrote
+// 147 KB of enciphered files in 255 ms through the chunk, against about 100 ms in place.
+constexpr size_t kInPlaceBytes = 1024;
+
 template <class Raw>
-size_t write(Raw& raw, CipherStream& cipher, const void* buf, const size_t count) {
+size_t write(Raw& raw, CipherStream& cipher, const void* buf, const size_t count, const bool inPlace) {
+  const uint64_t start = raw.position();
+  if (start < kHeaderBytes) return 0;
+  const uint64_t offset = start - kHeaderBytes;
+  if (inPlace && count >= kInPlaceBytes) {
+    auto* bytes = static_cast<uint8_t*>(const_cast<void*>(buf));
+    // A refusal is wolfSSL failing, which zeroes the buffer (CipherStream::apply): nothing in the clear is written.
+    if (!cipher.apply(bytes, count, offset)) return 0;
+    const size_t wrote = raw.write(bytes, count);
+    // The caller's bytes as they were. The same keystream, so this cannot fail where the first pass did not.
+    (void)cipher.apply(bytes, count, offset);
+    return wrote;
+  }
   uint8_t chunk[512];
   const auto* src = static_cast<const uint8_t*>(buf);
-  const uint64_t start = raw.position();
   size_t done = 0;
-  if (start < kHeaderBytes) return 0;
   while (done < count) {
     const size_t len = count - done < sizeof(chunk) ? count - done : sizeof(chunk);
     memcpy(chunk, src + done, len);
-    if (!cipher.apply(chunk, len, start - kHeaderBytes + done)) break;
+    if (!cipher.apply(chunk, len, offset + done)) break;
     const size_t wrote = raw.write(chunk, len);
     done += wrote;
     if (wrote != len) break;

@@ -13,6 +13,7 @@
 #include <UsbMassStorage.h>
 #endif
 
+#include <esp_memory_utils.h>
 #include <esp_random.h>
 
 #include <algorithm>
@@ -507,11 +508,16 @@ struct RawFsFile {
   FsFile& file;
   uint64_t size() const { return file.fileSize(); }
   uint64_t position() const { return file.position(); }
+  bool seek(const uint64_t pos) { return file.seekSet(pos); }
   int read(void* buf, const size_t count) { return file.read(buf, count); }
   size_t write(const void* buf, const size_t count) { return file.write(buf, count); }
 };
 
 void fillRandom(uint8_t* out, const size_t len) { esp_fill_random(out, len); }
+
+// A buffer cache_cipher::write() may encipher where it is for the length of a write: in RAM, internal or PSRAM. Never
+// one in flash (a constant), where a store faults.
+bool writableRam(const void* buf) { return esp_ptr_in_dram(buf) || esp_ptr_external_ram(buf); }
 
 }  // namespace
 
@@ -831,7 +837,7 @@ size_t HalFile::write(const void* buf, size_t count) {
   assert(impl != nullptr);
   if (!impl->cipher) return impl->file.write(buf, count);
   RawFsFile raw{impl->file};
-  return cache_cipher::write(raw, *impl->cipher, buf, count);
+  return cache_cipher::write(raw, *impl->cipher, buf, count, writableRam(buf));
 }
 size_t HalFile::write(const uint8_t* buf, size_t count) { return write(static_cast<const void*>(buf), count); }
 size_t HalFile::write(uint8_t b) { return write(static_cast<const void*>(&b), 1); }

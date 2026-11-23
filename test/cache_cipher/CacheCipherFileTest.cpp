@@ -3,7 +3,9 @@
 #include <CacheCipherFile.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstring>
+#include <memory>
 #include <random>
 #include <vector>
 
@@ -51,6 +53,59 @@ TEST(CipherStream, AnOffsetPastTheCounterIsRefusedUntouched) {
   EXPECT_FALSE(stream.apply(bytes, sizeof(bytes), CacheCipher::kMaxOffset));
   EXPECT_EQ(bytes[0], 1);
   EXPECT_EQ(bytes[3], 4);
+}
+
+// The card's bytes of a file, for cache_cipher's templates.
+struct MemoryFile {
+  std::vector<uint8_t> bytes;
+  uint64_t pos = 0;
+  uint64_t size() const { return bytes.size(); }
+  uint64_t position() const { return pos; }
+  bool seek(uint64_t to) {
+    pos = to;
+    return true;
+  }
+  int read(void* buf, size_t count) {
+    const size_t n = pos >= bytes.size() ? 0 : std::min(count, static_cast<size_t>(bytes.size() - pos));
+    memcpy(buf, bytes.data() + pos, n);
+    pos += n;
+    return static_cast<int>(n);
+  }
+  size_t write(const void* buf, size_t count) {
+    if (bytes.size() < pos + count) bytes.resize(pos + count);
+    memcpy(bytes.data() + pos, buf, count);
+    pos += count;
+    return count;
+  }
+};
+
+void fillZero(uint8_t* out, size_t len) { memset(out, 0, len); }
+
+// A large write enciphered where it is puts the same bytes on the card as one through the chunk, and gives the
+// caller's buffer back as it was.
+TEST(CipherFileWrite, InPlaceWritesWhatTheChunkWritesAndRestoresTheBuffer) {
+  std::vector<uint8_t> text(5000);
+  for (size_t i = 0; i < text.size(); ++i) text[i] = static_cast<uint8_t>(i * 31 + 7);
+  const std::vector<uint8_t> original = text;
+  MemoryFile chunked, inPlace;
+  std::unique_ptr<cache_cipher::CipherStream> a, b;
+  ASSERT_EQ(cache_cipher::attach(chunked, true, kKey, fillZero, a), cache_cipher::Attach::Enciphered);
+  ASSERT_EQ(cache_cipher::attach(inPlace, true, kKey, fillZero, b), cache_cipher::Attach::Enciphered);
+  ASSERT_EQ(cache_cipher::write(chunked, *a, text.data(), 3, false), 3u);  // off the block grid first
+  ASSERT_EQ(cache_cipher::write(inPlace, *b, text.data(), 3, true), 3u);
+  ASSERT_EQ(cache_cipher::write(chunked, *a, text.data() + 3, text.size() - 3, false), text.size() - 3);
+  ASSERT_EQ(cache_cipher::write(inPlace, *b, text.data() + 3, text.size() - 3, true), text.size() - 3);
+  EXPECT_EQ(text, original) << "the in-place write did not give the buffer back";
+  EXPECT_EQ(inPlace.bytes, chunked.bytes);
+  ASSERT_EQ(inPlace.bytes.size(), cache_cipher::kHeaderBytes + text.size());
+
+  // And it reads back.
+  ASSERT_TRUE(inPlace.seek(0));
+  std::unique_ptr<cache_cipher::CipherStream> reader;
+  ASSERT_EQ(cache_cipher::attach(inPlace, false, kKey, fillZero, reader), cache_cipher::Attach::Enciphered);
+  std::vector<uint8_t> back(text.size());
+  ASSERT_EQ(cache_cipher::read(inPlace, *reader, back.data(), back.size()), static_cast<int>(back.size()));
+  EXPECT_EQ(back, original);
 }
 
 TEST(FolderLength, OnlyAFileInsideABookCacheFolder) {

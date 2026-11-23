@@ -306,7 +306,9 @@ class HalFile : public Print {
     if (!fp_) return 0;
     if (cipher_) {
       RawStdio raw{fp_};
-      return cache_cipher::write(raw, *cipher_, data, size);
+      // The device enciphers a large write in place when the buffer is in RAM (HalStorage.cpp): so does the host, where
+      // every buffer a write is given is.
+      return cache_cipher::write(raw, *cipher_, data, size, true);
     }
     return fwrite(data, 1, size, fp_);
   }
@@ -430,6 +432,7 @@ class HalFile : public Print {
       return end > 0 ? static_cast<uint64_t>(end) : 0;
     }
     uint64_t position() const { return static_cast<uint64_t>(ftell(fp)); }
+    bool seek(uint64_t pos) { return fseek(fp, static_cast<long>(pos), SEEK_SET) == 0; }
     int read(void* buf, size_t count) { return static_cast<int>(fread(buf, 1, count, fp)); }
     size_t write(const void* buf, size_t count) { return fwrite(buf, 1, count, fp); }
   };
