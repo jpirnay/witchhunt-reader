@@ -217,7 +217,9 @@ before B; one page per tick.
   image is never a placeholder (`ImageBlock::wouldShowPlaceholder()` checks the cache with a stat
   before it probes the image's size).
 - **Preemption and misses:** input aborts the decode (`CooperativeAbort`); the page is retried after
-  the next settle. A page that comes back incomplete without input (an unsupported or corrupt
+  the next settle. A JPEG parks instead: its caches keep their finished rows in `.part` files, a checkpoint
+  (`ImageBlock::checkpointPath()`) holds the decoder's state, and a resume decodes one band (progressive) or
+  `kResumeMinRows` (4) MCU rows (baseline) before it polls again, so a resume always makes progress (#837). A page that comes back incomplete without input (an unsupported or corrupt
   image, a decode refused for heap) gets `kImageWarmMaxTries` (2) attempts per session.
 - **After a warm:** if the page on screen showed those images as placeholders, it is redrawn from
   the cache unless input is waiting. If the warmed page is the one after the page on screen, the

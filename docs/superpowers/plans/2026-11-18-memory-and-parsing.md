@@ -4,6 +4,11 @@ Spec: [2026-11-18-memory-and-parsing-triage.md](../specs/2026-11-18-memory-and-p
 task names its section). Every task is one pull request on its own branch, in its own worktree, from `origin/master`.
 Tasks run in the spec's tracks ("Order of work"): serial inside a track, parallel across tracks.
 
+**Status, 2026-11-23.** Done: Task 1 (#829), 2 (#832), 3 (#834), 4 (#830), 5 (#833), 6 (#836), 7 (#835), 9 (#837),
+10 (#838), 11 (#841), 12 (#842), 13 (#846), 14 (#843). Task 8 was declined (#831 closed). After this plan: §10d
+(#845), §9b (#851) and §9c (#856). The open-work doc is now one file per item in
+[future_work/memory-and-parsing/](../../future_work/memory-and-parsing/); the spec's status list names them.
+
 ## Global Constraints
 
 - **The spec section a task names is its requirements.** Read the spec's "The rules the designs follow" and
@@ -80,6 +85,9 @@ what 13b will need). First settle the spec's open point: whether the tokenizer f
 say so and leave the edges out. Bumps `CSS_CACHE_VERSION`, not `SECTION_FILE_VERSION`.
 
 ## Task 8: §3a, the truncated-chapter hint in every language
+
+**Declined.** #831 was closed: on 2026-11-19 the owner kept the hint in English, since it is rare diagnostic text and
+translations cost flash in every language. The 3b item was added without it.
 
 Branch `fix/truncated-hint-tr`, worktree `C:/tmp/wt-mp-03a`. Track M. Spec §3 "3a"; the owner decided §3 on
 2026-11-18: **no hint for a simplified chapter** (option A).

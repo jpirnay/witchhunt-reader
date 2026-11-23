@@ -348,8 +348,9 @@ TEST(AnchorMap, InlineIdsNameTheirWordsPageWithHyphenationOff) {
 // Hyphenation on, the same paragraph: its long words split at the lines' ends (84 of them in this layout). A split's
 // remainder is a token of its own in the lines' count but not in the parser's (ParsedText::hyphenateWordAtIndex), so
 // the lines run ahead of an id's index and can record it a line or two early: 2 of the 40 ids name the page before
-// their word's here (docs/future_work/memory-and-parsing.md). Never late, never more than a page off (the link Back
-// stack's tolerance); tighten this to the word's page once a split counts as one token.
+// their word's here (docs/future_work/memory-and-parsing/inline-ids-and-footnote-links-drift-with-hyphenation.md).
+// Never late, never more than a page off (the link Back stack's tolerance); tighten this to the word's page once a
+// split counts as one token.
 TEST(AnchorMap, InlineIdsHoldWithHyphenationOn) {
   HyphenDrift drift;
   ASSERT_NO_FATAL_FAILURE(measureHyphenDrift(/*hyphenate=*/true, drift));

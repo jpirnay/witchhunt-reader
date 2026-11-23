@@ -2,7 +2,9 @@
 
 Status: design for the maintainer, 2026-11-18. It decides each open item of
 [future_work/memory-and-parsing.md](../../future_work/memory-and-parsing.md) and specifies the ones worth doing, one
-small PR each. Nothing here is implemented. Line references are to master `715896630`.
+small PR each. Line references are to master `715896630`. Most of it has since been built: the status list at the end
+("Status, 2026-11-23") gives each section's PR or the item file it became; the designs below are as written then, and
+the amendments say where the implementation departed from them.
 
 **How each figure was obtained.** Every statement is one of four kinds, and says which:
 
@@ -159,7 +161,9 @@ today's behaviour for a `<br>` after a closed block followed by text and say so 
 ## 3. No hint when a chapter was simplified
 
 **Verdict: owner decision. Recommendation: no on-page hint.** Two small PRs are worth doing whatever is decided.
-**Decided 2026-11-18 by the owner: A, no hint.** 3a is plan Task 8; 3b stays an open item.
+**Decided 2026-11-18 by the owner: A, no hint.** 3a (plan Task 8) was declined on 2026-11-19 and #831 closed: the
+owner keeps the rare diagnostic text in English, since translations cost flash in every language. 3b stays an open
+item.
 
 **Why not a hint.** Read, the seven limits (`ChapterHtmlSlimParser.h:1426-1432`):
 
@@ -728,4 +732,36 @@ amendment names its PR.
   across sheets on master (into the later sheet's order); a merge guard keeps one record per sheet instead of the
   "+2 order gap", and the table sits at the end of the cache file so the rule bytes stay master's.
 - **§5, §9.** §5b rides in the §5a PR. §9b and §9c wait for a Linux `epub_pipeline_dump --bench` allocation count
-  (their gate): this PC has WSL without a distribution.
+  (their gate): this PC has WSL without a distribution. *Superseded:* CI's `alloc-counts` job supplied the Linux count,
+  and both merged (#851, #856).
+
+**Status, 2026-11-23 (master 1a9f93b08).** Each section, and where it went. Item files are in
+[future_work/memory-and-parsing/](../../future_work/memory-and-parsing/).
+
+- §1, nested tables: #832.
+- §2, `<br>`: #834. Found in the first wave: `br-inside-a-degraded-table-cell-does-not-break-the-line.md`.
+- §3, the hint: A, no hint. 3a declined (#831 closed). 3b: `page-elements-limit-drops-the-tail-of-a-page.md`.
+- §4, the font prewarm: not built; `two-font-prewarm-transients-stay-on-the-heap.md` holds what reopens it.
+- §5: 5a and 5b, #837. 5c: `page-turn-waits-behind-an-image-extraction.md`. 5d not built (recorded in that item).
+- §6, a cover at 1/8: `cover-that-fits-only-at-1-8-restarts-on-every-key-press.md`, after a device measurement.
+- §7, the first DC scan: #833.
+- §8: 8a, #838. The rest parked: `cut-or-corrupt-progressive-jpeg-draws-a-placeholder.md`.
+- §9: 9a #841, 9b #851, 9c #856 (recorded in Memory Allocation Strategy §9.5). The grid cells' objects and the
+  vectors: `per-line-and-per-cell-objects-are-still-on-the-heap.md`. A refused line object drops the line:
+  `a-line-the-allocators-refuse-is-dropped-while-the-build-goes-on.md`.
+- §10: 10a #829, 10b #836, 10c #842, 10d #845 (recorded in Memory Allocation Strategy §9.6). 10e:
+  `throwing-allocations-left-on-the-section-build-path.md`. The `new_handler` net was not taken.
+- §11, `shrink_to_fit()`: #830.
+- §12, `<style>` blocks: `css-in-a-chapters-style-blocks-is-never-applied.md`.
+- §13: 13a #835, 13b #843 (recorded in [Stylesheet scope](../../design/stylesheet-scope.md)). Background pictures and
+  `@font-face`: `css-backgrounds-and-font-faces-stay-book-wide.md`.
+- §14, inline anchors: #846. Hyphenation's drift: `inline-ids-and-footnote-links-drift-with-hyphenation.md`.
+- §15, JPEG reads: `jpeg-source-reads-of-512-bytes.md`, after a device measurement.
+
+Items filed after this triage, with no section here: from the first wave's PRs,
+`paragraph-after-a-table-loses-its-margin-top.md` and `table-cell-keeps-only-its-first-picture.md`; from the
+attribution of master's heap-peak rise (2026-11-19, cb8a9a6ab),
+`book-open-keeps-the-content-opf-sax-state-on-the-heap.md`,
+`chunkedvector-directories-are-sized-for-their-largest-table.md`, `page-writes-could-stage-in-the-lent-region.md`,
+`parser-state-most-books-never-use-is-held-by-every-build.md` and `the-body-size-census-is-larger-than-its-decision.md`.
+Later items say where they came from.
