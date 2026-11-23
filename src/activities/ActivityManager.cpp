@@ -813,6 +813,10 @@ void ActivityManager::prepareFramebufferForCapture() {
   }
 }
 
+ScreenshotInfo ActivityManager::screenshotInfo() const {
+  return currentActivity ? currentActivity->screenshotInfo() : ScreenshotInfo{};
+}
+
 void ActivityManager::describeState(std::string& out) const {
   out += "activity=";
   out += currentActivityName();

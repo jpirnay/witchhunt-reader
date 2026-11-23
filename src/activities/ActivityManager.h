@@ -20,6 +20,7 @@
 #include "activities/browser/OpdsBackTo.h"
 #include "activities/home/LibraryTab.h"
 #include "activities/network/NetworkMode.h"
+#include "util/ScreenshotInfo.h"
 
 class Activity;                       // forward declaration
 class RenderLock;                     // forward declaration
@@ -286,6 +287,9 @@ class ActivityManager {
   // Forward to the current activity so it can redraw the visible screen into the frame
   // buffer before a raw capture (e.g. a screenshot). See Activity::prepareFramebufferForCapture().
   void prepareFramebufferForCapture();
+
+  // The current activity's ScreenshotInfo (Activity::screenshotInfo); empty with no activity.
+  ScreenshotInfo screenshotInfo() const;
 
   // For the serial CMD:STATE: "activity=<name> stack=<bottom>,...,<top>" plus the current
   // activity's own key=value pairs (Activity::appendDebugState). Call under the render lock.

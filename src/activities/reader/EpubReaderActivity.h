@@ -1547,6 +1547,7 @@ class EpubReaderActivity final : public Activity {
   // A pending pre-render leaves the *next* page in the frame buffer; redraw the current page
   // so a screenshot (or any raw frame-buffer capture) matches what the user sees.
   void prepareFramebufferForCapture() override { restoreCurrentPageToBufferIfPreRendered(); }
+  ScreenshotInfo screenshotInfo() const override;
   // " book=<path> spine=<i>/<count> page=<n>/<count> font=<family> font_pt=<size>", then with a
   // section loaded " chapter=<toc title> chapter_page=<n>/<total>[~] percent=<book %>" (1-based;
   // 0/0 while no section is loaded; ~ = the total is an estimate).

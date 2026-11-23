@@ -35,6 +35,7 @@ class XtcReaderActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool isReaderActivity() const override { return true; }
+  ScreenshotInfo screenshotInfo() const override;
   void onButtonAction(CrossPointSettings::BUTTON_ACTION action) override;
   bool handleForcedRefresh(HalDisplay::RefreshMode mode) override;
 
