@@ -1,6 +1,6 @@
 # Screen flow
 
-Status: open items as of 2026-10-22.
+Status: open items as of 2026-11-23.
 
 ## A screen that goes back by itself after its message
 
@@ -13,57 +13,21 @@ Status: open items as of 2026-10-22.
 
 **Next step.** A design that lists the screens first.
 
-## A quick font menu in the reader
+## The reader bars: a layout change still waits
 
-Without a bound key or a pinch, changing the font size means the reader menu and then the font selector. The stock X4
-Pro firmware (XT Licorice) has a quick change menu in the reader, and with the same 2 to 2.5 s redraw it is far easier to
-use. A reader who wants a size up or down should not have to go through Settings. User request, 2026-11-06.
+The reader bars and their live Layout tab shipped (#747-#764); what they do and why is in
+[../design/reader-bars.md](../design/reader-bars.md).
 
-**What exists.** Keys and gestures can be bound to `BTN_FONT_SIZE_SMALLER`, `BTN_FONT_SIZE_LARGER` and
-`BTN_CYCLE_FONT_SIZE`, and a pinch changes the size by default (`CrossPointSettings.h:715-716`). `BTN_QUICK_OVERRIDES`
-opens Quick overrides, whose Font Size row sets the book's size (`QuickOverridesActivity.cpp:117-145`).
+**Open.**
+- **The first build pass of a new layout starts only after the bars' refresh.** `serviceLiveBars()` applies a change
+  once the bars showing it are painted (`liveLayoutOwed_`). Overlapping the two would start the build up to that
+  refresh earlier (about 0.7 s on the X4 Pro, #761; inference, not tried).
+- **The book's settings are saved before the font is looked up,** about 0.2 s, also for a layout already built:
+  `applyReaderLayout()` saves the settings (`SETTINGS.saveToFile()`) or the book's overrides
+  (`RECENT_BOOKS.setReaderOverrides()`) before `relayoutWithChangedSettings()` loads the font.
+- **A Font step on the X4 Pro takes 4 to 15 s, by family,** live under the bars (the PSRAM boards do not defer the font,
+  `HalCapabilities::defersLiveFontChange()`). Where that time goes is not measured.
+- **The X4 has not run the live bars** on a device.
 
-**Done (2026-11-12).** Licorice's arrangement: reader bars over the page (Contents, Progress, Layout, More), opened by
-Confirm, a centre tap or a tap on the status bar (`ReaderBarsActivity`). The Layout tab sets the font (the book's own
-fonts as the first choice, Publisher Fonts' All Text), size, line spacing, margin, darkness, paragraph gap, alignment,
-hyphenation and the book's style, with "This book only" sending them to the book's own settings or to the global ones;
-they apply when the bars close. Margin, paragraph spacing and darkness have per-book overrides for it.
-
-**Done (2026-11-12), live on the PSRAM boards** (`HalCapabilities::laysOutReaderLive`). The reader draws the bars
-itself (`EpubReaderActivity::liveBars_`) and keeps running under them: each Layout change lays the chapter out again
-(Background-C), the page lands under the sheet as soon as the build reaches its text, black and white (no AA, gray
-canvas, pre-render or look-ahead while the bars are open), and a pass with no page to draw paints only the bars. X4 Pro,
-2026-11-12: a size, spacing or margin never used for the chapter took 5 to 6.5 s until the build was done (the page
-showed 3.6 to 4.2 s after the press), one used before 1.5 s.
-
-**Done (2026-11-13), less waiting.** The bars' repaint lets the render lock go during its refresh, a change is applied
-once the bars showing it are painted, and where the card is not on the panel's bus (`decodesThroughRefresh`) the build
-runs through refreshes. X4 Pro, cold Size+ to 18 pt: the new value showed after 0.7 s (was 2.5 s), the page after about
-3.0 s (about 4.3 s), the build ended after 4.25 s (6.2 s). A size used before now takes 2.05 s (was 1.7 s), because its
-page waits behind the bars' refresh.
-
-**Done (2026-11-13), page writes.** A page went to the card as some 150 to 220 writes of a few bytes, one card
-command per 512 bytes. The build now gathers them in a heap buffer (2 KB on the C3s, 4 KB on the PSRAM boards) and
-writes whole sectors (`Section::BuildState::pageWriter`). Same chapters built cold, parse time before and after: X3
-1,961 -> 1,816 ms (37 pages), X4 Pro 2,100 -> 1,760 ms (48 pages); the section files are byte-identical.
-
-**Done (2026-11-13), a layout already built in one refresh.** The bars remember the layouts this chapter has complete on
-the card (the one they opened on, each build that ended, each page drawn from a complete chapter); a change back to one
-goes in at once and its page comes with the bars in one refresh (`EpubReaderActivity::liveLayoutChangeIsBuilt`). X4 Pro:
-1.94 s back to 1.54 s, the page on the panel 1.22 s after the press. A layout built in an earlier session is not known to
-them and still shows the bars first. The whole series on the X4 Pro, press to idle: a new layout 5.6 s (#749) to 3.8 s,
-one built before 1.5 s.
-
-**Done (2026-11-13), live on the X3 and X4 but for the font.** Measured on the X3 with the sheet open: a cold Size+ build
-(39 pages, 2.9-3.1 s) bottomed out at 29.6 KB free against 32.2 KB for the same build after the bars close (15 KB of
-ballast held: Min Free 14.6 KB against 17.2 KB, the build completed either way, no failed allocation), and the page
-draws between the bars. What did not fit was the font: each step copies the family into the flash font area first, a
-3 MB erase (5.3 s) and the file (1.8 s for 608 KB), 10-12 s a Font press with the build. So on the C3s a new font waits
-for the bars to close (`HalCapabilities::defersLiveFontChange`): the cell shows it, the Size cell steps along its sizes,
-and the reader lays the book out with it once (`ReaderBarsResult::layoutChanged`). The pushed bars screen
-(`ReaderBarsActivity`) went with it.
-
-**Open.** Speed: the first build pass of a new layout starts only after the bars' refresh; the book's settings are saved
-(about 0.2 s) before the font is looked up, also for a layout already built. A Font step on the X4 Pro took 4 to 15 s by
-family (live there). The X4 has not run the live bars. The Murphy held sideways has no room for the sheet; its Layout
-tab opens the reader menu.
+**Next step (proposed).** Profile a Font step on the X4 Pro, as the size changes were profiled for #751, before
+choosing what to overlap.

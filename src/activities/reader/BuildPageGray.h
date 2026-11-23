@@ -17,7 +17,7 @@
 //    push (one-pass text, the T5S3) the gray goes up with the page's own push; elsewhere it comes from the deferred
 //    pass, once the page's refresh is over and ahead of the build's next slice.
 //  - Redraw: the build holds the secondary buffer as its arena (the C3s' borrowed build). The gray needs neither that
-//    buffer nor the heap (docs/future_work/reader-priority-scheme.md, section 4): the pass renders its planes over the
+//    buffer nor the heap (docs/design/reader-priority-scheme.md, section 4): the pass renders its planes over the
 //    write buffer, which holds the page on screen, draws the page there again and hands that to the cleanup. The
 //    page, its glyphs and the status bar's pixels are kept in the build's arena for the length of the pass, between
 //    two of its slices. The status bar is not drawn again: its clock, battery and page count may have moved since,
