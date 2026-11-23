@@ -41,7 +41,6 @@
 #include <algorithm>
 #include <cstring>
 #include <iterator>
-#include <vector>
 
 #include "BootDiagnostics.h"
 #include "ButtonEventManager.h"
@@ -2427,11 +2426,18 @@ void loop() {
     mappedInputManager.setConfirmWaitsForGesture(confirmWaits);
 
     ButtonEventManager::ButtonEvent ev;
-    std::vector<ButtonEventManager::ButtonEvent> defaultEvents;
-    defaultEvents.reserve(8);
+    // The events left to the screen, put back at the front of the queue in their order after this pass. An array, not
+    // a vector: this runs on every loop pass, and a vector reserved here allocated on every one of them, events or
+    // not. Each event taken off the queue leaves at most one here (itself, or the Back or Confirm press its action
+    // puts back in its place), so the queue's capacity bounds it.
+    ButtonEventManager::ButtonEvent defaultEvents[ButtonEventManager::MAX_QUEUED_EVENTS];
+    int defaultCount = 0;
+    const auto leaveToScreen = [&](const ButtonEventManager::ButtonEvent& event) {
+      if (defaultCount < ButtonEventManager::MAX_QUEUED_EVENTS) defaultEvents[defaultCount++] = event;
+    };
     while (buttonEventManager.consumeEvent(ev)) {
       if (ev.bypassActionMapping) {
-        defaultEvents.push_back(ev);
+        leaveToScreen(ev);
         continue;
       }
       const uint8_t action = actionFor(ev);
@@ -2443,18 +2449,19 @@ void loop() {
       if (keptByScreen || action == BA::BTN_DEFAULT ||
           (isReaderScopedAction(action) &&
            !activityManager.currentTakesButtonAction(static_cast<BA>(action), ev.button))) {
-        defaultEvents.push_back(ev);
+        leaveToScreen(ev);
         continue;
       }
       if (!runAction(static_cast<BA>(action))) return;
     }
 
-    for (auto it = defaultEvents.rbegin(); it != defaultEvents.rend(); ++it) {
-      if (confirmWaits && it->button == B::Confirm && !it->offeredToPolling) {
+    for (int i = defaultCount - 1; i >= 0; --i) {
+      ButtonEventManager::ButtonEvent& held = defaultEvents[i];
+      if (confirmWaits && held.button == B::Confirm && !held.offeredToPolling) {
         mappedInputManager.injectLogicalPress(B::Confirm);
-        it->offeredToPolling = true;
+        held.offeredToPolling = true;
       }
-      buttonEventManager.pushEventFront(*it);
+      buttonEventManager.pushEventFront(held);
     }
 
     // Gestures. In the reader every gesture is live; elsewhere only swipes and

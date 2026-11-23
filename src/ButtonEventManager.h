@@ -37,6 +37,9 @@ class ButtonEventManager {
  public:
   using Button = MappedInputManager::Button;
 
+  // The most events the queue holds at once: its ring keeps one slot free to tell full from empty.
+  static constexpr int MAX_QUEUED_EVENTS = 15;
+
   enum class PressType { Short, Double, Long };
 
   struct ButtonEvent {
@@ -164,7 +167,7 @@ class ButtonEventManager {
   PerButton buttons[NUM_BUTTONS];
 
   // Pending events ring buffer (small — at most one event per button per tick)
-  static constexpr int EVENT_BUF = 16;
+  static constexpr int EVENT_BUF = MAX_QUEUED_EVENTS + 1;
   ButtonEvent eventBuf[EVENT_BUF] = {};
   int eventHead = 0;
   int eventTail = 0;
