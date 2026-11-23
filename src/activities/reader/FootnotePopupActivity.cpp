@@ -221,39 +221,32 @@ void FootnotePopupActivity::render(RenderLock&&) {
   // them. The band is whatever of the screen lies outside the content area, on one edge.
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
-  renderer.fillRect(sheet.x, sheet.y, sheet.width, sheet.height, false);
-  // A page line the sheet's edge would cut goes whole: half a line of text beside the rule reads as a fault. A line's
-  // yPos is its top; a vertical page's lines run across the screen and are left as they are.
+  // The sheet, grown over any page line one of its edges would cut, so the line goes whole: half a line of text beside
+  // the rule reads as a fault. A line's yPos is its top; a vertical page's lines run across the screen and stay.
+  int fillTop = sheet.y;
+  int fillBottom = sheet.y + sheet.height;
   if (page && !page->isVertical()) {
     const int lineHeight = renderer.getLineHeight(pageFontId);
-    const int edge = place.sheetAtTop ? sheet.y + sheet.height : sheet.y;
-    int coverFrom = edge;
-    int coverTo = edge;
     for (const auto& element : page->elements) {
       if (!element || element->getTag() != TAG_PageLine) continue;
       const int top = pageY + element->yPos;
-      if (top >= edge || top + lineHeight <= edge) continue;
-      coverFrom = std::min(coverFrom, top);
-      coverTo = std::max(coverTo, top + lineHeight);
+      if (top < sheet.y && top + lineHeight > sheet.y) fillTop = std::min(fillTop, top);
+      if (top < sheet.y + sheet.height && top + lineHeight > sheet.y + sheet.height) {
+        fillBottom = std::max(fillBottom, top + lineHeight);
+      }
     }
-    if (place.sheetAtTop && coverTo > edge) renderer.fillRect(sheet.x, edge, sheet.width, coverTo - edge, false);
-    if (!place.sheetAtTop && coverFrom < edge)
-      renderer.fillRect(sheet.x, coverFrom, sheet.width, edge - coverFrom, false);
   }
-  if (area.y > 0) renderer.fillRect(0, 0, screenWidth, area.y, false);
-  if (area.y + area.height < screenHeight) {
-    renderer.fillRect(0, area.y + area.height, screenWidth, screenHeight - area.y - area.height, false);
-  }
-  if (area.x > 0) renderer.fillRect(0, 0, area.x, screenHeight, false);
-  if (area.x + area.width < screenWidth) {
-    renderer.fillRect(area.x + area.width, 0, screenWidth - area.x - area.width, screenHeight, false);
-  }
+  renderer.fillRect(sheet.x, fillTop, sheet.width, fillBottom - fillTop, false);
+  // fillRect() draws nothing for an empty rectangle: three of these four are, the band lies on one edge.
+  renderer.fillRect(0, 0, screenWidth, area.y, false);
+  renderer.fillRect(0, area.y + area.height, screenWidth, screenHeight - area.y - area.height, false);
+  renderer.fillRect(0, 0, area.x, screenHeight, false);
+  renderer.fillRect(area.x + area.width, 0, screenWidth - area.x - area.width, screenHeight, false);
   renderer.fillRect(sheet.x, ruleY, sheet.width, kRule, true);
 
   // The title: which note this is, and where it stands among the page's notes; on a long note, right, which page of it.
   char title[96];
-  int used = marker[0] == '\0' ? snprintf(title, sizeof(title), "%s", tr(STR_NOTE))
-                               : snprintf(title, sizeof(title), "%s %s", tr(STR_NOTE), marker);
+  const int used = snprintf(title, sizeof(title), "%s %s", tr(STR_NOTE), marker);
   if (place.count > 1 && used > 0 && static_cast<size_t>(used) < sizeof(title)) {
     char position[32];
     snprintf(position, sizeof(position), tr(STR_NOTE_POSITION), place.position + 1, static_cast<int>(place.count));
