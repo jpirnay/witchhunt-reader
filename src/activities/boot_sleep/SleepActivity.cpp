@@ -1174,9 +1174,10 @@ void SleepActivity::renderCoverSleepScreen() const {
     // Ship the popup without waiting out its waveform. The panel repaints from the controller's
     // own RAM, and the cover build below is pure SD -> SD streaming that never reads or writes the
     // framebuffer, so the two overlap: the popup costs the moment it takes to push the frame, not
-    // the ~600 ms it takes to appear. Arming it only AFTER the release is deliberate —
-    // releaseSecondaryBuffer() frees without draining a refresh in flight, and X3 re-reads that
-    // buffer for its post-waveform sync. finishDisplayAsync() below closes the window again.
+    // the ~600 ms it takes to appear. It is armed after the release because the release drains a
+    // refresh in flight (FreeInkDisplay::releaseSecondaryBuffer): armed before it, the popup's
+    // waveform would be waited out there and nothing would overlap. finishDisplayAsync() below
+    // closes the window again.
     GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP), /*overlayDisplayedFrame=*/false, PopupShip::Async);
   }
 

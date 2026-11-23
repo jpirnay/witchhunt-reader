@@ -23,10 +23,12 @@ They are different objects, and bug reports in this repo have mixed them up more
 | **Host copy** (`frameBufferActive`) | The frame the host last pushed. | `FreeInkDisplay` |
 | **Advisory flags** | Bits that claim the baseline is in sync: the facade's `_redRamSynced`, and each driver's own (`_redRamSynced`, `_oldPlaneValid`, `_needFullClear`, `_inGrayscaleMode`, ...). | The facade and each driver separately |
 
-**The host copy is the controller baseline on one controller only: the SSD1677**, which takes it as
-`prev`. Every other driver ignores `prev` and keeps its own baseline. So borrowing, releasing or
-reseeding the secondary changes what the host believes is on the panel (which is what overlays,
-popups, screenshots and Quick Resume read), and on the SSD1677 also what the next FAST diffs against.
+**The host copy is the controller baseline on two controllers: the SSD1677**, which writes `prev` into
+RED, **and the Murphy's UC8253**, which writes it into DTM1 for a FAST (`Uc8253MurphyDriver::displayStart()`;
+without `prev` it takes a full refresh). Every other driver ignores `prev` and keeps its own baseline. So
+borrowing, releasing or reseeding the secondary changes what the host believes is on the panel (which is
+what overlays, popups, screenshots and Quick Resume read), and on those two also what the next FAST diffs
+against.
 
 ---
 
@@ -42,7 +44,9 @@ popups, screenshots and Quick Resume read), and on the SSD1677 also what the nex
 The controller is found at boot by a display-bus probe (`freeink::applyXteinkDisplayController()`,
 called from `HalGPIO::begin()` on the C3 and from `HalDisplay::begin()` on the S3), and
 `FreeInkDisplay::selectDriver()` picks the driver from `BoardConfig::ACTIVE.displayController`.
-Settings > System Information shows which controller a unit has. Controller overview:
+Settings > System Information shows which controller a unit has. The Murphy M3 (`Uc8253MurphyDriver`) and the BOOX
+Picco (`Ssd2677Driver` for its SE0400NQW47 panel, `Ssd1677Driver` for the others) are not described per controller
+below; like every S3 board they keep their secondary (section 5). Controller overview:
 [contributing/eink-controllers.md](contributing/eink-controllers.md). T5S3 panel:
 [lilygo-t5s3-display-stack.md](lilygo-t5s3-display-stack.md).
 
@@ -51,7 +55,7 @@ Settings > System Information shows which controller a unit has. Controller over
 ## 3. The host buffers
 
 `FreeInkDisplay::begin()` allocates two framebuffer-sized heap blocks (`frameBuffer0`, `frameBuffer1`)
-with plain `malloc` (`FREEINK_FB_PSRAM` is off on all four boards). The firmware is always
+with plain `malloc` (`FREEINK_FB_PSRAM` is off on every board). The firmware is always
 dual-buffer: it never defines `EINK_DISPLAY_SINGLE_BUFFER_MODE`.
 
 | Pointer | Meaning |
@@ -84,7 +88,12 @@ The invariant every compositing consumer relies on:
 > `syncWriteBufferFromDisplayed()` can restore the write buffer from it.
 
 I1 holds only while the secondary is resident and has not been reseeded since the last full-frame
-refresh.
+refresh. The display can say whether it holds: `secondaryHoldsFrameOnScreen()` is true only while
+`frameBufferActive` holds the frame a display left on the glass, and false after a lend comes back, a
+realloc, a window update, a canvas push, a one-pass mask or an inversion (the facade's private
+`_activeMatchesGlass`). The X4's build-through asks it before seeding RED
+(`BuildThroughGate::seedsRed()`), and `beginOnePassMask()` checks the same flag. The overlay paths
+below do not ask it yet.
 
 ### What else ends up in the write buffer
 
@@ -95,7 +104,7 @@ refresh.
 | Grayscale plane pass (`renderGrayscalePlanesSequential` / `Interleaved`) | The LSB, then the MSB plane, until the cleanup at its tail copies the displayed frame back. | Yes if resident. With the secondary away the plane stays. |
 | `borrowSecondaryBuffer()` | Untouched: the frame from before the last refresh. No copy of the panel exists anywhere. | No |
 | `HalDisplay::releaseSecondaryBuffer()` | The displayed frame, copied in before the free; then free for any use. | No, once overwritten |
-| `returnSecondaryBuffer()` / `reallocSecondaryBuffer()` | Untouched, but the **secondary** is now a copy of the write buffer (or white) and reports resident. | No, and it looks as if it were |
+| `returnSecondaryBuffer()` / `reallocSecondaryBuffer()` | Untouched, but the **secondary** is now a copy of the write buffer (or white) and reports resident. | No. `hasSecondaryBuffer()` says yes; only `secondaryHoldsFrameOnScreen()` says no |
 
 ### Who relies on I1
 
@@ -115,7 +124,8 @@ refresh.
 
 ### UC8253 (X3)
 
-- **Baseline:** DTM1, rewritten from `fb` in `displayFinish()` after every refresh. `prev` is ignored.
+- **Baseline:** DTM1. After a FAST, HALF or one-pass refresh the controller has already put the frame
+  there; `displayFinish()` rewrites it from `fb` only after a full sync (#860). `prev` is ignored.
 - **FAST:** `_fast` bank, differential against DTM1.
 - **HALF:** `_half` bank, WW==BW and WB==BB: every pixel is driven toward its target regardless of
   DTM1. One short pass, not an inverting clear.
@@ -221,14 +231,17 @@ rail. On UC8253 one `_half` clears it and the differential `_aa_pre_bw_mid` does
 
 ### Cross-controller facts
 
-- `prev` is consumed by the SSD1677 only.
+- `prev` is consumed by the SSD1677 and the Murphy's UC8253 only.
 - HALF is a different waveform on each controller: single-pass target drive (UC8253), GC diff against
   the real old frame (UC8279d), BYPASS_RED absolute (SSD1677), charge scrub (UC8179), invert-seed
   scrub (UC8279 X4), clean bank (T5S3). A fix tuned on one does not carry over by mode name.
 - `cleanupGrayscaleBuffers(nullptr)` means "no baseline, take a clean sync on the next push"
   everywhere, implemented differently: UC8253 drops `_redRamSynced`; UC8279d sets
   `_forceFullSyncNext`; UC8179 and UC8279 X4 set `_needFullClear`; SSD1677 leaves `_inGrayscaleMode`
-  set so the next FAST becomes HALF; LGFX rebuilds its canvas on the next push.
+  set so the next FAST becomes HALF; LGFX rebuilds its canvas on the next push. The SE0400's
+  `Ssd2677Driver` keeps an old plane of its own (`_old`), and its `nullptr` cleanup only finishes an
+  owed text page; the Murphy's `Uc8253MurphyDriver` has the base no-op. Only `test_pro.cpp` checks
+  the contract, for `Uc8279X4Driver`.
 - `displayGrayBuffer()` hands every driver the write buffer, which holds the last plane at that point.
   SSD1677, UC8253 and UC8279d ignore it; UC8179 and UC8279 X4 use `_grayBase`; LGFX darkens its canvas.
   `HalDisplay::displayGrayBuffer()` still copies the displayed frame into the write buffer first, on
@@ -254,6 +267,12 @@ There are three ways to get framebuffer memory back. Prefer the first.
 | On return | secondary seeded from the write buffer; one-shot RED handling armed | same |
 
 The third way, releasing **both** buffers, is only for sessions that end in a reboot (Scenario 2).
+
+The S3 boards never release (`HalCapabilities::keepsSecondaryBuffer()`: `HalDisplay` refuses the release). A borrow
+there hands out a dedicated PSRAM block instead (`HalDisplay::lendsPsramArena()`), and the display stays
+double-buffered. Callers see the same contract: `hasSecondaryBuffer()` is false while the block is out, so the
+reader's recovery gives it back, while `keepsPreviousFrame()` stays true because the display's own buffer is still
+there.
 
 Borrowers today: Home cover loading, the Library's titles, covers and book-index build
 (`FileBrowserActivity`), the font selector's previews (`FontSelectionActivity`), the word screen's
@@ -348,8 +367,9 @@ renderer.releaseFrameBuffers();  // no display call until the reboot
 | Away, `setSingleBufferFastDiff(true)` | FAST, diffing against what the controller kept |
 
 The rule keys on `PanelSel::X4`, and every board that is not an X3 reads as `X4`, including the
-UC8179, UC8279 and T5S3 boards, which keep their own baseline and would not need it. On an X4
-(SSD1677) a downgraded FAST took ~1755 ms against ~476 ms (2026-08-19). Ask the display for this
+UC8179, UC8279, T5S3 and SE0400 (Picco) panels, which keep their own baseline and would not need it.
+The S3 boards never reach it (they keep the secondary), so it bites the C3 X4 units with a UC8179 or
+UC8279. On an X4 (SSD1677) a downgraded FAST took ~1755 ms against ~476 ms (2026-08-19). Ask the display for this
 state (`hasSecondaryBuffer()`, `isRedRamSynced()`); do not mirror it in a HAL flag, because after a
 failed realloc the copy and the truth diverge.
 
@@ -363,14 +383,16 @@ On `FreeInkDisplay`, forwarded by `HalDisplay` and `GfxRenderer` unless noted.
 |---|---|
 | `borrowSecondaryBuffer(size_t*)` / `returnSecondaryBuffer()` | Lend the block without freeing it. Return cannot fail. |
 | `releaseSecondaryBuffer()` / `reallocSecondaryBuffer()` | Free and reallocate. Realloc returns false on OOM. `HalDisplay`'s release copies the displayed frame into the write buffer first and logs a double release. |
-| `hasSecondaryBuffer()` | `frameBufferActive != nullptr`. False both when lent and when released. |
+| `hasSecondaryBuffer()` | `frameBufferActive != nullptr`. False both when lent and when released, and on an S3 while its PSRAM block is lent. |
+| `keepsPreviousFrame()` (`HalDisplay`, `GfxRenderer`) | The display still holds its previous frame: true during an S3 PSRAM-block lend, where `hasSecondaryBuffer()` is false. |
+| `secondaryHoldsFrameOnScreen()` | The secondary holds the frame on the glass (I1 above). False after a return, a realloc, a window, a canvas push, a mask or an inversion. |
 | `syncWriteBufferFromDisplayed()` (`GfxRenderer`) | Copy the secondary into the write buffer (`syncWriteBufferFromActive()`). No-op while the secondary is away. |
 | `syncRedRamFromFrameBuffer()` | Seed the SSD1677's RED from the displayed frame. No-op on the X3 and on drivers without `seedPreviousFrame()`. |
 | `setSingleBufferFastDiff(bool)` | Keep FAST while the secondary is away. |
 | `cleanupGrayscaleWithPreviousBuffer()` | Tail of every plane pass: hands the driver `frameBufferActive` as the baseline and copies it back into the write buffer. With the secondary away the driver is told there is no baseline. |
 | `releaseFrameBuffers()` / `releaseFrameBuffersWithScratch()` (`GfxRenderer`) | Free both buffers. A reboot must follow. |
 
-There is no public way to tell a lent secondary from a released one; `_secondaryLent` is private.
+There is no public way to tell a lent secondary from a released one on a C3; `_secondaryLent` is private.
 
 ---
 
@@ -390,14 +412,17 @@ becomes HALF. Call `setSingleBufferFastDiff(true)` when FAST updates are needed 
 both. A release seeds the write buffer with the displayed frame; a borrow does not, so the write buffer
 then holds the frame from before the last refresh, and `syncWriteBufferFromDisplayed()` cannot rescue
 it. Treat "no secondary" conservatively; `ActivityManager::showBusyIndicator()` skips in both cases for
-this reason.
+this reason (and, by the code, also during an S3 PSRAM-block lend, where `keepsPreviousFrame()` is true).
 
 **Expecting a grayscale cleanup to restore the write buffer while the secondary is away.** It cannot:
 the plane stays in the write buffer, and the driver takes a clean sync on its next push.
 
 **Assuming `displayWindow()` updates `frameBufferActive`.** It does not swap, so after a windowed
 refresh the host copy still holds the old content for that rectangle, and the next FAST can leave
-those pixels as the window left them. The SSD1677's window also returns silently when x or width is
-not byte-aligned. Nothing calls `GfxRenderer::displayWindow()` today.
+those pixels as the window left them. The facade drops its frame-on-screen flag on a window
+(`secondaryHoldsFrameOnScreen()` false). Three drivers implement a window: the SSD1677 and PaperMono
+ones return silently when x or width is not byte-aligned, and `Uc8279X4Driver` refreshes the whole
+panel with FAST then, and also when its differential baseline is not valid. The rest inherit the
+base, a whole-panel FAST. Nothing calls `GfxRenderer::displayWindow()` today.
 
 **Reading `redSynced=` in `[FBUF]` lines as a driver fact.** It is the facade's SSD1677 flag.
