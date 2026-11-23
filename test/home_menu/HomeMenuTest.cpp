@@ -152,6 +152,34 @@ TEST_F(HomeMenuTest, RoomToSpareAddsNoMore) {
   EXPECT_TRUE(actionsWithRoomFor(4, HomeMenuPlacement::More, nothingOptional).empty());
 }
 
+// A theme with four places and two entries switched on: the free places take switched-off entries
+// in table order, after the switched-on ones, so the grid keeps its two rows. More keeps the rest.
+// A theme without a limit (Lyra's list) leaves the switches as they are.
+TEST_F(HomeMenuTest, FreePlacesFillFromMoreAfterTheSwitchedOnEntries) {
+  SETTINGS.showReadingStatsOnHome = 0;
+  SETTINGS.showBookmarksOnHome = 0;
+  SETTINGS.showWeatherOnHome = 0;
+
+  EXPECT_EQ(actionsWithRoomFor(4, HomeMenuPlacement::Home, everything),
+            (std::vector<A>{A::Library, A::FileTransfer, A::ReadingStats, A::GlobalBookmarks, A::More, A::Settings}));
+  EXPECT_EQ(actionsWithRoomFor(4, HomeMenuPlacement::More, everything), (std::vector<A>{A::Weather}));
+
+  EXPECT_EQ(actionsAt(HomeMenuPlacement::Home, everything),
+            (std::vector<A>{A::Library, A::FileTransfer, A::More, A::Settings}));
+  EXPECT_EQ(actionsAt(HomeMenuPlacement::More, everything),
+            (std::vector<A>{A::ReadingStats, A::GlobalBookmarks, A::Weather}));
+}
+
+// Filling never shows an entry twice, and with nothing left behind More there is no More.
+TEST_F(HomeMenuTest, FillingThatEmptiesMoreDropsIt) {
+  SETTINGS.showReadingStatsOnHome = 0;
+  SETTINGS.useWeather = 0;
+
+  EXPECT_EQ(actionsWithRoomFor(4, HomeMenuPlacement::Home, nothingOptional),
+            (std::vector<A>{A::Library, A::FileTransfer, A::ReadingStats, A::Settings}));
+  EXPECT_TRUE(actionsWithRoomFor(4, HomeMenuPlacement::More, nothingOptional).empty());
+}
+
 // Settings needs no room and never moves, so even a theme with none keeps the way back.
 TEST_F(HomeMenuTest, SettingsStaysWithNoRoomAtAll) {
   EXPECT_EQ(actionsWithRoomFor(0, HomeMenuPlacement::Home, everything), (std::vector<A>{A::More, A::Settings}));

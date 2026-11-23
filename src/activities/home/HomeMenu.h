@@ -41,11 +41,14 @@ enum class HomeMenuPlacement : uint8_t { Home, More };
 // so hiding an entry never makes it unreachable. Settings always stays on the home screen: it is
 // where the choice is undone.
 //
-// `homeCapacity` is how many entries besides Settings the theme has room for (BaseTheme::
-// homeMenuCapacity). Entries placed on Home past it go behind More as if they had been moved there,
-// so the two screens, which ask with the same capacity, agree on where each one is.
+// `homeCapacity` is how many places besides Settings the theme has for entries (BaseTheme::
+// homeMenuCapacity). Entries switched on past it go behind More as if they had been moved there. A
+// theme with a fixed number of places (any capacity but kHomeMenuNoLimit) fills the places the
+// switched-on entries leave free with switched-off ones, in table order and after them, so its
+// grid keeps its shape. The two screens ask with the same capacity and so agree on where each is.
+inline constexpr int kHomeMenuNoLimit = std::numeric_limits<int>::max();
 void collectHomeMenuEntries(HomeMenuPlacement placement, const HomeMenuAvailability& availability,
-                            std::vector<HomeMenuEntry>& out, int homeCapacity = std::numeric_limits<int>::max());
+                            std::vector<HomeMenuEntry>& out, int homeCapacity = kHomeMenuNoLimit);
 
 // How many entries at the end of `entries` are More and Settings, the two that are not destinations
 // (Settings is always last, with More directly above it when present).

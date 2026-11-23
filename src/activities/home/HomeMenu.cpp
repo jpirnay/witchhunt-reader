@@ -64,35 +64,58 @@ HomeMenuPlacement placementOf(const HomeMenuRow& row) {
 
 void collectHomeMenuEntries(const HomeMenuPlacement placement, const HomeMenuAvailability& availability,
                             std::vector<HomeMenuEntry>& out, const int homeCapacity) {
-  // Where each available row ends up: its setting, then the theme's room, in table order. The
-  // pinned row needs no room; it is never counted and never moved.
-  std::array<HomeMenuPlacement, std::size(kRows)> placed{};
-  bool anyMovedToMore = false;
+  constexpr size_t kCount = std::size(kRows);
+  const auto available = [&](const size_t i) { return isAvailable(kRows[i].requirement, availability); };
+  const auto pinned = [](const size_t i) { return kRows[i].shownOnHome == nullptr; };
+
+  // Where each available row ends up. First its switch, in table order, as far as the theme has
+  // places; the pinned row needs no place and never moves.
+  std::array<HomeMenuPlacement, kCount> placed{};
+  std::array<bool, kCount> filled{};
   int onHome = 0;
-  for (size_t i = 0; i < std::size(kRows); ++i) {
-    const HomeMenuRow& row = kRows[i];
-    if (!isAvailable(row.requirement, availability)) continue;
-    placed[i] = placementOf(row);
-    if (placed[i] == HomeMenuPlacement::More) {
-      anyMovedToMore = true;
-    } else if (row.shownOnHome != nullptr) {
-      if (onHome < homeCapacity) {
-        ++onHome;
-      } else {
-        placed[i] = HomeMenuPlacement::More;
-        anyMovedToMore = true;
-      }
+  for (size_t i = 0; i < kCount; ++i) {
+    if (!available(i)) continue;
+    placed[i] = placementOf(kRows[i]);
+    if (pinned(i) || placed[i] != HomeMenuPlacement::Home) continue;
+    if (onHome < homeCapacity) {
+      ++onHome;
+    } else {
+      placed[i] = HomeMenuPlacement::More;
+    }
+  }
+  // A theme with a fixed number of places fills the ones the switched-on rows leave free with
+  // switched-off rows, in table order, so its grid keeps its shape; More keeps what is left.
+  if (homeCapacity != kHomeMenuNoLimit) {
+    for (size_t i = 0; i < kCount && onHome < homeCapacity; ++i) {
+      if (!available(i) || pinned(i) || placed[i] != HomeMenuPlacement::More) continue;
+      placed[i] = HomeMenuPlacement::Home;
+      filled[i] = true;
+      ++onHome;
     }
   }
 
-  for (size_t i = 0; i < std::size(kRows); ++i) {
-    const HomeMenuRow& row = kRows[i];
-    if (!isAvailable(row.requirement, availability)) continue;
-    // More goes directly above the pinned entry (Settings), the one that can never move to it.
-    if (placement == HomeMenuPlacement::Home && anyMovedToMore && row.shownOnHome == nullptr) {
-      out.push_back(kMoreEntry);
+  bool anyOnMore = false;
+  for (size_t i = 0; i < kCount; ++i) {
+    if (available(i) && placed[i] == HomeMenuPlacement::More) anyOnMore = true;
+  }
+
+  if (placement == HomeMenuPlacement::More) {
+    for (size_t i = 0; i < kCount; ++i) {
+      if (available(i) && placed[i] == HomeMenuPlacement::More) out.push_back(kRows[i].entry);
     }
-    if (placed[i] == placement) out.push_back(row.entry);
+    return;
+  }
+  // Home: the rows switched on, then those that took a free place, then More when anything is
+  // behind it, then the pinned row (Settings), which More sits directly above.
+  for (size_t i = 0; i < kCount; ++i) {
+    if (available(i) && !pinned(i) && placed[i] == HomeMenuPlacement::Home && !filled[i]) out.push_back(kRows[i].entry);
+  }
+  for (size_t i = 0; i < kCount; ++i) {
+    if (available(i) && filled[i]) out.push_back(kRows[i].entry);
+  }
+  if (anyOnMore) out.push_back(kMoreEntry);
+  for (size_t i = 0; i < kCount; ++i) {
+    if (available(i) && pinned(i)) out.push_back(kRows[i].entry);
   }
 }
 

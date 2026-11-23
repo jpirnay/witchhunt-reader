@@ -264,8 +264,9 @@ class BaseTheme {
   // stackedHomeRules().minTileHeight.
   virtual HomeLayout homeLayout(const GfxRenderer& renderer, Rect content, int menuCount, int menuTrailing) const;
 
-  // How many entries besides Settings fit on Home; the rest go behind More (collectHomeMenuEntries).
-  // A theme whose menu grows or scrolls with the list has no limit.
+  // How many places besides Settings Home has for entries (collectHomeMenuEntries): the rest go
+  // behind More, and a theme with a fixed number fills the free ones with switched-off entries. A
+  // theme whose menu grows with the list has no limit (kHomeMenuNoLimit, this value).
   virtual int homeMenuCapacity() const { return std::numeric_limits<int>::max(); }
 
   // A horizontal swipe on Home brings the next or previous recent book to the front (the carousel
