@@ -2382,19 +2382,14 @@ void loop() {
     // ladder would not stay that way. Returns false only when the device is on
     // its way into deep sleep and the caller must stop.
     auto runAction = [&](const BA action) -> bool {
+      // A reader action is the screen's to carry out (Activity::onButtonAction()). Whether it reaches the screen at
+      // all is decided before this is called: the button loop below lets it fall through outside the reader, and
+      // the gesture path does not claim the contact.
+      if (isReaderScopedAction(action)) {
+        activityManager.dispatchButtonAction(action);
+        return true;
+      }
       switch (action) {
-        case BA::BTN_PAGE_FORWARD:
-          activityManager.dispatchButtonAction(BA::BTN_PAGE_FORWARD);
-          break;
-        case BA::BTN_PAGE_BACK:
-          activityManager.dispatchButtonAction(BA::BTN_PAGE_BACK);
-          break;
-        case BA::BTN_PAGE_FORWARD_10:
-          activityManager.dispatchButtonAction(BA::BTN_PAGE_FORWARD_10);
-          break;
-        case BA::BTN_PAGE_BACK_10:
-          activityManager.dispatchButtonAction(BA::BTN_PAGE_BACK_10);
-          break;
         case BA::BTN_GO_HOME:
           activityManager.goHome();
           break;
@@ -2426,52 +2421,13 @@ void loop() {
           }
           break;
         }
-        case BA::BTN_OPEN_TOC:
-          activityManager.dispatchButtonAction(BA::BTN_OPEN_TOC);
-          break;
         case BA::BTN_OPEN_BOOKMARKS:
           activityManager.goToGlobalBookmarks();
-          break;
-        case BA::BTN_STAR_PAGE:
-          activityManager.dispatchButtonAction(BA::BTN_STAR_PAGE);
-          break;
-        case BA::BTN_FOOTNOTES:
-          activityManager.dispatchButtonAction(BA::BTN_FOOTNOTES);
-          break;
-        case BA::BTN_NEXT_SECTION:
-          activityManager.dispatchButtonAction(BA::BTN_NEXT_SECTION);
-          break;
-        case BA::BTN_PREV_SECTION:
-          activityManager.dispatchButtonAction(BA::BTN_PREV_SECTION);
-          break;
-        case BA::BTN_EXIT_READER:
-          activityManager.dispatchButtonAction(BA::BTN_EXIT_READER);
-          break;
-        case BA::BTN_READER_MENU:
-          activityManager.dispatchButtonAction(BA::BTN_READER_MENU);
-          break;
-        case BA::BTN_READER_BARS:
-          activityManager.dispatchButtonAction(BA::BTN_READER_BARS);
           break;
         case BA::BTN_CONFIRM:
           mappedInputManager.injectLogicalPress(B::Confirm);
           buttonEventManager.pushEventFront(
               {B::Confirm, ButtonEventManager::PressType::Short, millis(), /*bypassActionMapping=*/true});
-          break;
-        case BA::BTN_KOREADER_SYNC:
-          activityManager.dispatchButtonAction(BA::BTN_KOREADER_SYNC);
-          break;
-        case BA::BTN_TOGGLE_BIONIC_READING:
-          activityManager.dispatchButtonAction(BA::BTN_TOGGLE_BIONIC_READING);
-          break;
-        case BA::BTN_CYCLE_FONT_SIZE:
-          activityManager.dispatchButtonAction(BA::BTN_CYCLE_FONT_SIZE);
-          break;
-        case BA::BTN_FONT_SIZE_SMALLER:
-          activityManager.dispatchButtonAction(BA::BTN_FONT_SIZE_SMALLER);
-          break;
-        case BA::BTN_FONT_SIZE_LARGER:
-          activityManager.dispatchButtonAction(BA::BTN_FONT_SIZE_LARGER);
           break;
         case BA::BTN_TOGGLE_TOUCH_UI: {
           const bool enabled = SETTINGS.touchUiControls == CrossPointSettings::TOUCH_UI_OFF;
@@ -2482,21 +2438,6 @@ void loop() {
           LOG_INF("MAIN", "Touch navigation %s", enabled ? "on" : "off");
           break;
         }
-        case BA::BTN_CYCLE_ORIENTATION:
-          activityManager.dispatchButtonAction(BA::BTN_CYCLE_ORIENTATION);
-          break;
-        case BA::BTN_CYCLE_ORIENTATION_BACK:
-          activityManager.dispatchButtonAction(BA::BTN_CYCLE_ORIENTATION_BACK);
-          break;
-        case BA::BTN_QUICK_OVERRIDES:
-          activityManager.dispatchButtonAction(BA::BTN_QUICK_OVERRIDES);
-          break;
-        case BA::BTN_DICTIONARY:
-          activityManager.dispatchButtonAction(BA::BTN_DICTIONARY);
-          break;
-        case BA::BTN_AUTO_PAGE_TURN:
-          activityManager.dispatchButtonAction(BA::BTN_AUTO_PAGE_TURN);
-          break;
         case BA::BTN_TOGGLE_DARK_MODE:
           flipDarkMode();
           LOG_INF("MAIN", "Dark Mode %s", DarkModeNow::isDark() ? "on" : "off");
@@ -2558,6 +2499,8 @@ void loop() {
           // leak through as a page turn.
           break;
         default:
+          // The reader actions, handed to the screen above, and BTN_DEFAULT, which never gets here: the callers
+          // leave the press to the screen.
           break;
       }
       return true;
