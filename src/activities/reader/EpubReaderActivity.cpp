@@ -9614,6 +9614,16 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
         openQuickOverrides();
       }
       break;
+    case BA::BTN_AUTO_PAGE_TURN:
+      // At the interval the reader menu last set; Confirm or Back stops it as well (loop()).
+      if (automaticPageTurnActive) {
+        stopAutomaticPageTurn();
+      } else {
+        toggleAutoPageTurn(SETTINGS.autoTurnSeconds);
+      }
+      // The status bar shows the turn while it runs, and its band may lay the page out again.
+      requestUpdate();
+      break;
     default:
       break;
   }

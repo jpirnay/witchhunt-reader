@@ -144,14 +144,18 @@ inline void buildSettings(const RowSink& emit) {
                                                  StrId::STR_BTN_ACT_CYCLE_ORIENTATION_BACK,
                                                  StrId::STR_BACK,
                                                  StrId::STR_BTN_ACT_READER_BARS,
-                                                 StrId::STR_CONFIRM};
+                                                 StrId::STR_CONFIRM,
+                                                 StrId::STR_BTN_ACT_TOGGLE_DARK_MODE,
+                                                 StrId::STR_BTN_ACT_AUTO_PAGE_TURN,
+                                                 StrId::STR_SCREENSHOT_BUTTON,
+                                                 StrId::STR_BTN_ACT_TOGGLE_TOUCH_LOCK};
   // The ONLY conditional block, and correspondingly the LAST entries of
   // BUTTON_ACTION. Dropping them on a board with no light therefore leaves every
   // other action's numeric value untouched, so a settings file written on a lit
   // board still reads correctly here. Anything added after these would break
   // that — see the comment on BUTTON_ACTION.
   const std::vector<StrId> lightActionOptions = {StrId::STR_BTN_ACT_LIGHT_TOGGLE, StrId::STR_BTN_ACT_LIGHT_BRIGHTER,
-                                                 StrId::STR_BTN_ACT_LIGHT_DIMMER};
+                                                 StrId::STR_BTN_ACT_LIGHT_DIMMER, StrId::STR_BTN_ACT_LIGHT_PANEL};
   // Narrower still, and correspondingly last: a warm/cool pair is a subset of
   // the lit boards. Dropping these on a single-channel light leaves every value
   // above untouched.
@@ -172,7 +176,7 @@ inline void buildSettings(const RowSink& emit) {
   auto makeBtnActionOptions = [&](StrId defaultAction) {
     std::vector<StrId> result;
     // Reserves for the light options whether or not this board has them: a hint
-    // does not need to be exact, and three spare pointers cost less than a
+    // does not need to be exact, and a few spare pointers cost less than a
     // condition that reads as dead code on every build without a frontlight.
     result.reserve(1 + btnActionOptions.size() + extraActionOptions.size() + lightActionOptions.size() +
                    warmActionOptions.size());
@@ -577,6 +581,8 @@ inline void buildSettings(const RowSink& emit) {
 #if CP_TOUCH_UI
   // Touch reading controls (touch boards only — gated on the capability, not on
   // a board name, so X4 Pro and T5S3 both get them).
+  emit(SettingInfo::Toggle(StrId::STR_TOUCH_LOCK, &CrossPointSettings::touchLock, "touchLock", StrId::STR_CAT_CONTROLS)
+           .requiring(SettingRequires::TouchPanel));
   emit(SettingInfo::Enum(StrId::STR_TOUCH_UI_CONTROLS, &CrossPointSettings::touchUiControls,
                          {StrId::STR_TOUCH_UI_OFF, StrId::STR_TOUCH_UI_ON}, "touchUiControls", StrId::STR_CAT_CONTROLS)
            .withSubcategory(StrId::STR_TOUCH_UI_CONTROLS)
@@ -592,9 +598,10 @@ inline void buildSettings(const RowSink& emit) {
                          "touchReaderCtl", StrId::STR_CAT_CONTROLS)
            .requiring(SettingRequires::TouchPanel));
   // Option order is CrossPointSettings::SLIDE_SWITCH_ACTION.
-  emit(SettingInfo::Enum(StrId::STR_SLIDE_SWITCH, &CrossPointSettings::slideSwitchAction,
-                         {StrId::STR_READING_LIGHT, StrId::STR_DARK_MODE, StrId::STR_BTN_DEF_NOTHING}, "slideSwitch",
-                         StrId::STR_CAT_CONTROLS)
+  emit(SettingInfo::Enum(
+           StrId::STR_SLIDE_SWITCH, &CrossPointSettings::slideSwitchAction,
+           {StrId::STR_READING_LIGHT, StrId::STR_DARK_MODE, StrId::STR_BTN_DEF_NOTHING, StrId::STR_SLIDE_SWITCH_TOUCH},
+           "slideSwitch", StrId::STR_CAT_CONTROLS)
            .requiring(SettingRequires::SlideSwitch));
   for (const auto& binding : TouchGestures::BINDINGS) {
     // cppcheck-suppress useStlAlgorithm ; std::transform would have to carry this
