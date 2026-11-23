@@ -104,9 +104,9 @@ is made again by the next open. Freed sectors keep what they held until they are
 - A book font copied into a card-backed flash-area image (`flash-area.img`, the S3 boards without a usable `spiffs`
   partition; [flash-area.md](flash-area.md)) stays unenciphered there (owner's decision).
 
-Covers and thumbnails that Home takes from a protected book's folder are enciphered with it, so a card moved to
-another reader shows the placeholder cover. Whether to keep it so is a decide item in
-[future_work/protected-content.md](../future_work/protected-content.md).
+Covers and thumbnails that Home takes from a protected book's folder are enciphered with it today, so a card moved
+to another reader shows the placeholder cover. The owner decided they stay plain (2026-11-23); the change is an item
+in [future_work/protected-content.md](../future_work/protected-content.md).
 
 ## Measured in the reader
 

@@ -72,20 +72,27 @@ floor in NVS; firmware that does not use them ignores both.
      DeDRM's `ineptepub.py` takes such an entry as it is. How often real books do this is not known.
 2. **The `STR_PROTECTED_*` messages in the other languages** (release translation pass; English only so far,
    `lib/I18n/translations/english.yaml`).
-3. **Books downloaded with Adobe Digital Editions: decide.** Their licence is inside the EPUB
-   (`META-INF/rights.xml`). The plugin derives a key only from a `<book>.epub.rights` beside the book, so such a book
-   does not open until that file is there; fetching the `.acsm` again from the shop works today. Options:
-   (a) the firmware writes `<book>.epub.rights` from the book's `rights.xml` (a `ZipFile` read; `SidecarFiles` already
-   moves the file with its book); (b) the plugin does it, through `/download` and `writeFile` (Plugin Hub code, not
-   ours); (c) neither: the user fetches the `.acsm` again.
-4. **The plugin's licence key over `/download`: decide.** The plugin keeps the Adobe account's licence private key in
-   plain base64 in `content.key` in its folder and reads it back with `/download`, so while File Transfer runs any
-   client on the network can read it too, as on upstream. Options: (a) accept it, as upstream does; (b) block that
-   path in `/download` (the plugin then cannot read its key back, so its flow changes too).
-5. **Covers of a protected book on another reader: decide.** Home's covers and thumbnails of a protected book lie in
-   its enciphered cache folder, so a card moved to another reader shows the placeholder cover
-   ([design/cache-cipher.md](../design/cache-cipher.md), "What stays plain"). Options: (a) accept it; (b) keep the
-   cover and thumbnails plain, outside the cipher, as screenshots and `sleep_frame.bin` are.
+3. **Books downloaded with Adobe Digital Editions: support them (decided 2026-11-23).** Their licence is inside the
+   EPUB (`META-INF/rights.xml`). The plugin derives a key only from a `<book>.epub.rights` beside the book, so such a
+   book does not open until that file is there; fetching the `.acsm` again from the shop works today. Plan: the
+   firmware writes `<book>.epub.rights` from the book's `rights.xml` when the book has none (a `ZipFile` read;
+   `SidecarFiles` already moves the file with its book). The other route, the plugin doing it through `/download` and
+   `writeFile`, would change Plugin Hub's code, not ours. Next step: where the firmware notices such a book (the
+   protection's first open, which already reads `encryption.xml`, is the candidate) and a host test with an
+   ADE-shaped book from `tools/make_protected_epub.py`.
+4. **The plugin's licence key at rest: encipher it (decided 2026-11-23).** The plugin keeps the Adobe account's
+   licence private key in plain base64 in `content.key` in its folder and reads it back with `/download`, so while
+   File Transfer runs any client on the network can read it too, as on upstream. Decided: the key is enciphered at
+   rest with ChaCha20 under a key bound to the device, as the cache is ([design/cache-cipher.md](../design/cache-cipher.md)),
+   so `/download` hands any client only ciphertext that is useless off this device. To design: how the plugin then
+   uses the key. The key only feeds `rsadec` in `POST /api/crypto`, so the device can decipher it there and the
+   plaintext never leaves it; that changes upstream's plugin flow, and how it reaches the plugin is open.
+5. **Covers of a protected book stay plain (decided 2026-11-23).** Today Home's covers and thumbnails of a protected
+   book lie in its enciphered cache folder like everything else there, so a card moved to another reader shows the
+   placeholder cover ([design/cache-cipher.md](../design/cache-cipher.md), "What stays plain"). Decided: the cover and
+   thumbnails stay outside the cipher, as screenshots and `sleep_frame.bin` do. Next step: exempt the files
+   `BookCache::isCoverImage()` names (the cover and thumbnail BMPs, the cached raw cover) from the folder rule in
+   `HalStorage`, and decide whether covers an older build enciphered are made again.
 6. **D2 leads, device work.** On the Murphy the plain copy built about 65 ms slower with #880 than without it,
    while the cipher never runs for it and the X3 shows no such difference (5,812 against 5,824 ms); code placement in
    the S3's flash cache is the guess, not proven. The C3's AES peripheral (D1 uses it, through `esp_aes`) was not
