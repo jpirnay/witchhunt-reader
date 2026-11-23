@@ -16,6 +16,7 @@
 #include <iterator>
 #include <string>
 
+#include "ButtonActionNames.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "KOReaderCredentialStore.h"
@@ -30,6 +31,13 @@
 #include "util/UrlUtils.h"
 
 namespace {
+// The rows that hold a button or gesture action (CrossPointSettings::BUTTON_ACTION), stored by name.
+bool isButtonActionKey(const char* key) {
+  if (key == nullptr) return false;
+  return std::strncmp(key, "btnShort", 8) == 0 || std::strncmp(key, "btnDouble", 9) == 0 ||
+         std::strncmp(key, "btnLong", 7) == 0 || std::strncmp(key, "gest", 4) == 0;
+}
+
 // Upper bound on any stored credential we will decode from JSON. A WPA passphrase
 // tops out at 63 characters (or a 64-hex-char PSK); server passwords get the same
 // generous cap. Anything longer is corrupt or hand-edited, and decoding it would
@@ -276,6 +284,14 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
       } else {
         doc[info.key] = strPtr;
       }
+    } else if (isButtonActionKey(info.key)) {
+      // By name (ButtonActionNames.h). The name stays in flash: a static JsonString is stored by pointer, not copied.
+      const uint8_t action = s.*field;
+      const char* name = action < CrossPointSettings::BUTTON_ACTION_COUNT
+                             ? ButtonActionNames::name(static_cast<ButtonActionNames::Action>(action))
+                             : nullptr;
+      doc[info.key] = JsonString(name != nullptr ? name : ButtonActionNames::name(CrossPointSettings::BTN_DEFAULT),
+                                 /*isStatic=*/true);
     } else {
       doc[info.key] = s.*field;
     }
@@ -360,11 +376,6 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
 #endif
     return false;
   };
-  const auto isButtonActionKey = [](const char* key) {
-    if (key == nullptr) return false;
-    return std::strncmp(key, "btnShort", 8) == 0 || std::strncmp(key, "btnDouble", 9) == 0 ||
-           std::strncmp(key, "btnLong", 7) == 0 || std::strncmp(key, "gest", 4) == 0;
-  };
 
   forEachPersistedSetting([&](const SettingInfo& info) {
     if (!info.key) return;
@@ -416,7 +427,16 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
         return;
       }
       uint8_t v = doc[info.key] | fieldDefault;
-      if (staleButtonActions && isButtonActionKey(info.key) && !doc[info.key].isNull()) {
+      const JsonVariantConst stored = doc[info.key];
+      if (isButtonActionKey(info.key) && stored.is<const char*>()) {
+        // A name this build does not know was written by a newer one: the row's default.
+        if (!ButtonActionNames::fromName(stored.as<const char*>(), v)) {
+          LOG_INF("CPS", "Unknown action '%s' for '%s': default", stored.as<const char*>(), info.key);
+          v = fieldDefault;
+        }
+      } else if (isButtonActionKey(info.key) && stored.is<uint8_t>()) {
+        // A number: a file from before names (BUTTON_ACTIONS_VERSION 5 or older), saved again with names
+        // (staleButtonActions above).
         const bool isConfirmDoubleOrLong =
             std::strcmp(info.key, "btnDoubleConfirm") == 0 || std::strcmp(info.key, "btnLongConfirm") == 0;
         if (storedButtonActions < 1 && BoardConfig::isMurphyM3() && isConfirmDoubleOrLong &&
@@ -435,9 +455,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
           return;
         }
 
-        // Actions inserted before the board-gated light actions since the file was written: shift what it stored
-        // after them so it keeps its meaning.
-        v = CrossPointSettings::upgradeStoredAction(v, storedButtonActions);
+        // In the numbering of the version that wrote it; a number past that version's last action falls back.
+        if (!ButtonActionNames::fromLegacyNumber(v, std::min(storedButtonActions, 5), v)) v = fieldDefault;
       }
       if (info.persistPtr) {
         // A slider's range is its own; anything past it falls back rather than driving the

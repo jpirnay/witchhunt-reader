@@ -693,7 +693,8 @@ class CrossPointSettings {
   static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 3;
   uint8_t gestureDefaultsVersion = GESTURE_DEFAULTS_VERSION;
 
-  // Tracks button-action enum ordering and board-specific keymap defaults.
+  // Tracks how settings.json stores the button and gesture actions, and board-specific keymap defaults. Up to 5 the
+  // file held the enum's number, and every insertion before the board-gated block needed a version:
   // 1: BTN_BACK inserted before the board-gated block. Older settings keep
   //    explicit custom actions, while old built-in Confirm double/long entries
   //    inherit Murphy's Back/Sleep defaults.
@@ -703,7 +704,9 @@ class CrossPointSettings {
   // 4: BTN_TOGGLE_DARK_MODE, BTN_AUTO_PAGE_TURN and BTN_SCREENSHOT inserted after BTN_CONFIRM, and
   //    BTN_LIGHT_PANEL at the end of the light block, before the warm pair.
   // 5: BTN_TOGGLE_TOUCH_LOCK inserted after BTN_SCREENSHOT.
-  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 5;
+  // 6: stored by name (ButtonActionNames.h), so the enum's order no longer reaches the file. An older file's numbers
+  //    are read once through ButtonActionNames::fromLegacyNumber() and written back as names.
+  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 6;
 
   // --- Gesture actions (touch boards) ---------------------------------------
   // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
@@ -887,8 +890,8 @@ class CrossPointSettings {
   // fixed action into the defaults. BTN_IGNORE is the opposite: explicitly do
   // nothing and suppress the built-in behaviour for that press.
   //
-  // New values MUST be appended before BUTTON_ACTION_COUNT — the settings option
-  // list (SettingsList.h btnActionOptions) and persisted JSON map by numeric value.
+  // settings.json stores these by name (ButtonActionNames.h), so a new value can go anywhere above the board-gated
+  // block, given a name there and its label at the same place in SettingsList.h's option list.
   enum BUTTON_ACTION {
     BTN_DEFAULT = 0,
     BTN_PAGE_FORWARD,
@@ -954,9 +957,8 @@ class CrossPointSettings {
     // --- Board-gated actions MUST stay at the end of this enum ---------------
     // SettingsList builds each button's option list positionally: index i in the
     // list is action value i. Actions it drops on boards that cannot perform them
-    // therefore have to be the LAST entries, or dropping them renumbers every
-    // action after them and a settings file written on one board is misread on
-    // another. Add unconditional actions above this line.
+    // therefore have to be the LAST entries, or dropping them would shift every
+    // option after them off its value. Add unconditional actions above this line.
     //
     // Frontlight/backlight control. Global rather than reader-scoped: the light
     // is as wanted on the home screen as it is mid-page.
@@ -1117,26 +1119,6 @@ class CrossPointSettings {
       default:
         return action;
     }
-  }
-
-  // A stored action from a settings file written at BUTTON_ACTIONS_VERSION `fromVersion`, in today's numbering. Each
-  // version that inserted actions moved every action from their place up by as many. The steps run in order, and each
-  // compares with where its version put its first insertion: today's value of that action, less the actions later
-  // versions inserted before it. So far only Open Light Panel has any, version 5's Touch Lock. Past the end is left
-  // for the loader's range check.
-  static constexpr uint8_t upgradeStoredAction(uint8_t action, const int fromVersion) {
-    if (fromVersion < 1 && action >= BTN_BACK) ++action;
-    if (fromVersion < 2 && action >= BTN_READER_BARS) ++action;
-    if (fromVersion < 3 && action >= BTN_CONFIRM) ++action;
-    // Version 4's three, Toggle Dark Mode to Take Screenshot.
-    if (fromVersion < 4 && action >= BTN_TOGGLE_DARK_MODE) {
-      action = static_cast<uint8_t>(action + (BTN_SCREENSHOT + 1 - BTN_TOGGLE_DARK_MODE));
-    }
-    // Version 4's Open Light Panel, one below today's place: version 5's Touch Lock went in before it.
-    if (fromVersion < 4 && action >= BTN_LIGHT_PANEL - 1) ++action;
-    // Version 5's Touch Lock.
-    if (fromVersion < 5 && action >= BTN_TOGGLE_TOUCH_LOCK) ++action;
-    return action;
   }
 
   // Enforce settings whose values depend on others (e.g. sleepScreen=QUICK_RESUME implies

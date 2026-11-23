@@ -151,8 +151,7 @@ inline void buildSettings(const RowSink& emit) {
                                                  StrId::STR_BTN_ACT_TOGGLE_TOUCH_LOCK};
   // The ONLY conditional block, and correspondingly the LAST entries of
   // BUTTON_ACTION. Dropping them on a board with no light therefore leaves every
-  // other action's numeric value untouched, so a settings file written on a lit
-  // board still reads correctly here. Anything added after these would break
+  // other option at its action's value. Anything added after these would break
   // that — see the comment on BUTTON_ACTION.
   const std::vector<StrId> lightActionOptions = {StrId::STR_BTN_ACT_LIGHT_TOGGLE, StrId::STR_BTN_ACT_LIGHT_BRIGHTER,
                                                  StrId::STR_BTN_ACT_LIGHT_DIMMER, StrId::STR_BTN_ACT_LIGHT_PANEL};
@@ -164,8 +163,8 @@ inline void buildSettings(const RowSink& emit) {
   // Prepend the per-button default action to the shared options list.
   // The option list is positional — index i is BUTTON_ACTION value i — so it must
   // name every action exactly once. Asserted because the failure mode is not a
-  // crash but a silent misreading of every stored button and gesture mapping,
-  // which would look like the settings screen forgetting things at random.
+  // crash but the settings screen showing and setting the wrong action for every
+  // button and gesture, which would look like it forgetting things at random.
   assert(1 + btnActionOptions.size() + extraActionOptions.size() + lightActionOptions.size() +
                  warmActionOptions.size() ==
              static_cast<size_t>(CrossPointSettings::BUTTON_ACTION_COUNT) &&
