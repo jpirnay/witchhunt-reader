@@ -224,10 +224,13 @@ class Dictionary {
   //   - a headword the word starts with that is at least 3 characters and half the word long: its stem, for an
   //     inflection the stemmer does not know ("fished" -> "fish");
   //   - a headword within a few edits of the word (1 up to 4 characters, 2 up to 8, 3 beyond; an edit is a letter
-  //     added, dropped, changed or two swapped): a misprint, or a spelling the dictionary lists another way.
-  // Stems first, the longest first; then by edits, then by how near the lengths are, then in index order. Letter case
-  // does not count, non-ASCII letters' included. Headwords that cleanWord() would change other than in case are left
-  // out, since looking them up again would miss.
+  //     added, dropped, changed or two swapped): a misprint, or a spelling the dictionary lists another way;
+  //   - the word with its first two or its second and third letters swapped ("teh" -> "the"), looked up directly:
+  //     such a swap sorts far from the word, outside the windows read.
+  // Stems first, the longest first; then by edits; then the word's own letters rearranged before other letters, and a
+  // headword with the word's first letter before one without ("the" before "eth" for "teh"); then by how near the
+  // lengths are, then in index order. Letter case does not count, non-ASCII letters' included.
+  // Headwords that cleanWord() would change other than in case are left out, since looking them up again would miss.
   //
   // Only alphabetical neighbours are seen: a stem whose spelling changes ("Häuser" -> "Haus") sorts too far away.
   // Needs the .qidx sidecar (buildIndex()): without one there are no suggestions rather than a scan of the whole

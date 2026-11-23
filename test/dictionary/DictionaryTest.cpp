@@ -2367,8 +2367,9 @@ TEST_F(DictionaryTest, SuggestionsAreCappedAndEqualRanksKeepIndexOrder) {
   ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SuggestCap"));
   DictSuggestions s;
   ASSERT_TRUE(dict.suggest("cat", s));
-  // Twelve headwords one edit from "cat" ("act" by a swap): the first eight in index order.
-  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"act", "bat", "cab", "can", "car", "cot", "cut", "eat"}));
+  // Twelve headwords one edit from "cat": "act", its own letters swapped, first; then those that keep the c, then the
+  // rest, each in index order, until eight are kept.
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"act", "cab", "can", "car", "cot", "cut", "bat", "eat"}));
 }
 
 TEST_F(DictionaryTest, CaseDoesNotCountInSuggestions) {
@@ -2408,6 +2409,40 @@ TEST_F(DictionaryTest, AStemInTheWindowBeforeIsFound) {
   DictSuggestions s;
   ASSERT_TRUE(dict.suggest("walked", s));
   EXPECT_STREQ(s.words[0], "walk");
+}
+
+TEST_F(DictionaryTest, ASwapAtTheStartIsFoundOutsideTheWindows) {
+  // "eth" sorts 800 headwords before "teh" and "the" 800 after it, both well outside the windows read around it;
+  // "tea", "tee" and "ten" are one edit away and close by.
+  std::vector<HeadwordSpec> headwords{{"eth", "1"}, {"tea", "2"}, {"tee", "3"}, {"ten", "4"}, {"the", "5"}};
+  for (int i = 0; i < 800; i++) {
+    char w[16];
+    snprintf(w, sizeof(w), "f%03d", i);  // between eth and tea
+    headwords.push_back({w, "filler"});
+    snprintf(w, sizeof(w), "tf%03d", i);  // between ten and the
+    headwords.push_back({w, "filler"});
+  }
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SuggestSwap", headwords));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SuggestSwap"));
+  DictSuggestions s;
+  ASSERT_TRUE(dict.suggest("teh", s));
+  // The swaps first, the one that keeps the first letter ahead; then the other one-edit headwords in index order.
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"the", "eth", "tea", "tee", "ten"}));
+}
+
+TEST_F(DictionaryTest, InTheWindowTooTheFirstLetterAndRearrangedLettersCount) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary(
+      "SuggestRanks", {{"eth", "1"}, {"tea", "2"}, {"the", "3"}, {"tidal", "4"}, {"trail", "5"}, {"trial", "6"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SuggestRanks"));
+  DictSuggestions s;
+  // All in one window: "the" keeps the first letter, "eth" does not, both before "tea", a changed letter.
+  ASSERT_TRUE(dict.suggest("teh", s));
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"the", "eth", "tea"}));
+  // trial: two letters swapped, one edit. tidal: a changed letter, one edit, but no rearrangement. trail: two edits.
+  ASSERT_TRUE(dict.suggest("tiral", s));
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"trial", "tidal", "trail"}));
 }
 
 TEST_F(DictionaryTest, NothingCloseMeansNoSuggestions) {
