@@ -146,10 +146,13 @@ function loadPage() {
   run(fs.readFileSync(path.join(HTML_DIR, 'js', 'jszip.min.js'), 'utf8'), 'jszip.min.js');
   run(main, 'FilesPage.inline.js');
   // jsdom has no canvas: images keep their bytes under the name the optimizer gives them. The
-  // calls are recorded so a test can see what the optimizer asked for.
+  // calls are recorded so a test can see what the optimizer asked for; a path in
+  // processImageFailPaths throws instead, as a conversion that fails in the browser does.
   run(`var processImageCalls = [];
+  var processImageFailPaths = new Set();
   processImage = async function (data, imageState = 0, imagePath = '', preserveColor = false) {
     processImageCalls.push({ imagePath, imageState, preserveColor });
+    if (processImageFailPaths.has(imagePath)) throw new Error('test: conversion failed');
     return {
       parts: [{ data, suffix: '', width: 0, height: 0, size: data.byteLength }],
       meta: { origW: 0, origH: 0, origSize: data.byteLength, wasSplit: false, rotated: false,
@@ -548,6 +551,41 @@ await test('the cover can keep its color; other images cannot', async () => {
   check(calls.find((c) => c.imagePath === 'OEBPS/Images/cover.jpg')?.preserveColor === true, 'option on: the cover keeps its color');
   check(calls.find((c) => c.imagePath === 'OEBPS/Images/pic.png')?.preserveColor === false, 'option on: other images still go to grayscale');
   check(/cover\.jpg kept in color \(cover\)/.test(log), 'log says the cover kept its color');
+});
+
+await test('an image whose conversion fails keeps its name, type and references', async () => {
+  const items = [
+    ['bad', 'Images/bad.png', 'image/png'],
+    ['good', 'Images/good.png', 'image/png'],
+    ['c1', 'Text/c1.xhtml', 'application/xhtml+xml'],
+    ['ncx', 'toc.ncx', 'application/x-dtbncx+xml'],
+  ];
+  const bytes = await buildEpub({
+    'OEBPS/content.opf': opf(items, ['c1']),
+    'OEBPS/toc.ncx': ncx([['One', 'Text/c1.xhtml']]),
+    'OEBPS/Text/c1.xhtml': xhtml('One', '<p><img src="../Images/bad.png" alt=""/><img src="../Images/good.png" alt=""/></p>'),
+    'OEBPS/Images/bad.png': new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1]),
+    'OEBPS/Images/good.png': new Uint8Array([0x89, 0x50, 0x4e, 0x47, 2]),
+  });
+  run("processImageFailPaths.add('OEBPS/Images/bad.png')");
+  let out;
+  try {
+    out = await optimize(bytes, 'fallback.epub');
+  } finally {
+    run('processImageFailPaths.clear()');
+  }
+  check(/Failed to process bad\.png, using original/.test(out.log), 'the log names the failed image');
+  const book = await readBook(out.bytes);
+  check(book.paths.includes('OEBPS/Images/bad.png'), 'the failed image keeps its .png name');
+  check(!book.paths.includes('OEBPS/Images/bad.jpg'), 'no .jpg holds the failed image');
+  const bad = await book.zip.files['OEBPS/Images/bad.png']?.async('uint8array');
+  check(bad && bad.length === 5 && bad[4] === 1, 'the failed image keeps its original bytes');
+  check(book.manifest.get('bad')?.href === 'Images/bad.png' && book.manifest.get('bad')?.mediaType === 'image/png',
+    `its manifest entry is unchanged (${book.manifest.get('bad')?.href} ${book.manifest.get('bad')?.mediaType})`);
+  check(book.paths.includes('OEBPS/Images/good.jpg') && book.manifest.get('good')?.mediaType === 'image/jpeg',
+    'the image that converted is still renamed to .jpg and declared image/jpeg');
+  const srcs = [...(await xhtmlDoc(book, 'OEBPS/Text/c1.xhtml')).getElementsByTagName('img')].map((i) => i.getAttribute('src'));
+  check(JSON.stringify(srcs) === JSON.stringify(['../Images/bad.png', '../Images/good.jpg']), `the chapter points at both files (${srcs.join(', ')})`);
 });
 
 // --- Long chapters ---------------------------------------------------------------------------
