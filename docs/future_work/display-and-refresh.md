@@ -231,6 +231,36 @@ on the T5S3, which now mostly uses single-push AA.
 
 **Next.** Remove it behind a device test that exercises the two-push overlay path on a T5S3.
 
+## Window-aware updates: a full review (requested)
+
+**Open, requested 2026-11-23.** Before anything calls `displayWindow()`, the whole window-aware update path is to be
+reviewed in one pass, every layer and every screen that redraws only part of the panel, rather than one caller at a
+time. The three items after this one are its known pieces; this one lists what the review covers.
+
+**Drivers.** Which controllers can refresh a rectangle at all, what each override does with an unaligned or invalid
+window (returns, falls back to a full FAST, refreshes the whole panel), and what a window saves against a full FAST
+in time and ghosting. The SSD1677 and UC8279 measurements in the next item found next to nothing. `Ssd1677Driver::
+displayWindow()` also copies the window and its previous frame into two `std::vector`s sized to the window: under
+`-fno-exceptions` a failed allocation aborts, and on the X4 a half-screen window is about 24 KB twice. A window path
+has to stream rows from the frame buffer, or take a lent block, before any caller uses it on the X4.
+
+**Facade and HAL.** `FreeInkDisplay::displayWindow()` falls back to a full FAST when the output is inverted (Dark
+Mode). It does not swap the buffers and drops its frame-on-screen flag, so the page after a window loses the one-pass
+text path (`composesOnePassText()`). No capability query reaches the firmware (next item).
+
+**Renderer.** `GfxRenderer::displayWindow()` maps the rectangle for the orientation but does not snap it to the
+controller's byte alignment, whose axis flips with the orientation.
+
+**Callers.** None today. The candidates: the reader's live overlay, `EpubReaderActivity::paintLiveOverlay()`, which
+paints the reader bars and the footnote sheet over the frame on the panel and refreshes it whole; the popups and the
+busy indicator (`PopupShip::Window`, below); the light drawer (`FrontlightPanelActivity`); the status bar.
+
+**Next.** Measure on every controller first (UC8253 on the X3 and the Murphy, UC8179 and UC8279 on the X4 Pro,
+SSD1677 on the X4, SSD2677 on the Picco, the T5S3's panel): a full-width band of 60 rows and half the screen against
+a whole-panel FAST, time and ghosting. Then settle the contract in the SDK and the HAL together (capability query,
+alignment, fallback, the frame on screen after a window), and route the live overlay and the popups through it only
+after that.
+
 ## Windowed refresh: capability query, alignment, baseline
 
 **Open.** `PanelDriver::displayWindow()` defaults to a whole-panel FAST. `Ssd1677Driver`, `PaperMonoDriver` and
