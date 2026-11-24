@@ -62,10 +62,17 @@ void Reach::approve(const std::string_view host) {
   approved_ += '\n';
 }
 
+void Reach::declare(const std::string_view host) {
+  if (host.empty() || host.find('\n') != std::string_view::npos) return;
+  appendLower(declared_, host);
+  declared_ += '\n';
+}
+
 bool Reach::allowsHost(const std::string_view host) const {
   if (host.empty()) return false;
+  const auto exact = [host](const std::string_view entry) { return equalsIgnoreCase(host, entry); };
   return anyEntry(patterns_, [host](const std::string_view p) { return hostMatches(host, p); }) ||
-         anyEntry(approved_, [host](const std::string_view a) { return equalsIgnoreCase(host, a); });
+         anyEntry(approved_, exact) || anyEntry(declared_, exact);
 }
 
 }  // namespace PluginHosts

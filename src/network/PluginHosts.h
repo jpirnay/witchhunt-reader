@@ -19,7 +19,8 @@ std::string urlHost(std::string_view url);
 // compares without case.
 bool hostMatches(std::string_view host, std::string_view pattern);
 
-// What one plugin may reach: the allowedHosts entries of its manifest, and the hosts the user approved for it, exact
+// What one plugin may reach: the allowedHosts entries of its manifest, the hosts the user approved for it, and for its
+// device events the hosts its event URLs name literally (plugin_events::declareLiteralHosts()); the last two exact
 // hosts only. Filled once (PluginReach::load()), then asked per URL without touching the card, so a redirect is judged
 // in the middle of a transfer at no cost.
 class Reach {
@@ -28,8 +29,10 @@ class Reach {
   // the caller asks HeapFit first.
   void reservePatterns(size_t bytes) { patterns_.reserve(bytes); }
   void reserveApproved(size_t bytes) { approved_.reserve(bytes); }
+  void reserveDeclared(size_t bytes) { declared_.reserve(bytes); }
   void allow(std::string_view pattern);  // an allowedHosts entry
   void approve(std::string_view host);   // a host the user approved
+  void declare(std::string_view host);   // a host the plugin's device.json writes out in an event URL
   bool allowsHost(std::string_view host) const;
   // False also for a URL whose host urlHost() cannot judge.
   bool allows(std::string_view url) const { return allowsHost(urlHost(url)); }
@@ -38,6 +41,7 @@ class Reach {
   // Lower case, each entry followed by '\n' (no host holds one: urlHost() refuses it).
   std::string patterns_;
   std::string approved_;
+  std::string declared_;
 };
 
 }  // namespace PluginHosts

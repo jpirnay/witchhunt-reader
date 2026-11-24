@@ -15,6 +15,10 @@
 #include <cstdint>
 #include <string>
 
+namespace PluginHosts {
+class Reach;
+}
+
 namespace plugin_events {
 
 // Names are a compatibility promise with upstream's manifests: semantic, never activity names. Append only.
@@ -108,5 +112,17 @@ std::string expand(const char* tpl, const TemplateContext& ctx);
 std::string handlerUrl(JsonVariantConst handler, const TemplateContext& ctx);
 // Spaces, control characters and non-ASCII bytes of a URL percent-encoded; '&', '?', '#', '+' and '/' left alone.
 std::string escapeUrl(const std::string& url);
+
+// The host an event URL template writes out, lower-cased: its authority holds no placeholder, so no filled-in value can
+// move it. Read as every URL is judged (PluginHosts::urlHost()), so "" when a placeholder, user info or anything else
+// urlHost() refuses sits in the authority ("{cfg.server}/x", "https://{cfg.host}/", "https://a.org{cfg.x}/"). Such a
+// host counts as declared by the plugin, as an allowedHosts entry does: it is written in its device.json, readable
+// before the plugin is installed, and the Plugins page lists it under Reaches (js/plugin-catalog.js, literalHost()).
+std::string literalHost(const char* urlTemplate);
+// The bytes declareLiteralHosts() adds: each literal host's length plus one.
+size_t literalHostBytes(JsonVariantConst manifest);
+// Declares in `reach` the literal host of every handler this firmware can run (handlerFor()). The caller asks HeapFit
+// for literalHostBytes() first.
+void declareLiteralHosts(JsonVariantConst manifest, PluginHosts::Reach& reach);
 
 }  // namespace plugin_events

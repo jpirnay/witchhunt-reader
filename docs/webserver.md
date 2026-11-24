@@ -402,8 +402,9 @@ have the reader send their requests (see below).
 - **Install from a file** takes a plugin as a `.zip` file.
 
 Each plugin says which page it adds itself to and which internet sites it may reach through the reader
-(**Reaches**). Only install plugins you trust: a plugin can read, change and delete anything on the
-card that this web interface can. For writing your own, see [SD-card web plugins](./sd-plugins.md).
+(**Reaches**: those its manifest lists, and those written out in the addresses its reading and sleep events use).
+Only install plugins you trust: a plugin can read, change and delete anything on the card that this web interface
+can. For writing your own, see [SD-card web plugins](./sd-plugins.md).
 
 **Plugins that act while you read.** Some community plugins have the reader send something when you read or put it
 to sleep: **KOSync Auto-push** sends your reading progress to a KOSync server, **Month Wallpaper** fetches a new sleep

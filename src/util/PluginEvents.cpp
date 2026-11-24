@@ -237,9 +237,9 @@ LineOutcome deliverLine(const DrainContext& dc, const std::string& line, GfxRend
   ctx.id = doc["id"] | "";
 
   const std::string url = handlerUrl(handler, ctx);
-  // Only to a host the plugin may reach over the web (its manifest's allowedHosts, or one the user approved), judged
-  // on the URL as filled in: a template can put any host there ({cfg.server}). It could never go, so it leaves the
-  // queue. Not logged with the URL, which may carry the token.
+  // Only to a host the plugin may reach: its manifest's allowedHosts, one the user approved, or one its event URLs
+  // write out (declareLiteralHosts()). Judged on the URL as filled in, since a template can put any host there
+  // ({cfg.server}). It could never go, so it leaves the queue. Not logged with the URL, which may carry the token.
   if (!dc.reach.allows(url)) {
     LOG_ERR("PEVT", "%s: %s dropped, its host is not one the plugin may reach", dc.name,
             eventName(static_cast<Event>(e)));
@@ -348,6 +348,12 @@ DrainResult drain(GfxRenderer* renderer, const size_t maxEvents) {
       continue;
     }
     if (PluginReach::load(dc.reach, s.name, s.dir) == PluginReach::Load::NoRoom) return result;
+    // The hosts its event URLs write out count as declared, as allowedHosts entries do (literalHost()).
+    if (!heapHasBlockFor(literalHostBytes(dc.manifest.as<JsonVariantConst>()))) {
+      LOG_ERR("PEVT", "no room to drain %s", s.name);
+      return result;
+    }
+    declareLiteralHosts(dc.manifest.as<JsonVariantConst>(), dc.reach);
     {
       JsonDocument token;
       const char* tokenPath = dc.manifest["token"]["path"] | "token";

@@ -18,7 +18,8 @@ or changing a plugin never needs a firmware build.
 > `relay(method, url, headers, body)` answering `{status, headers, body}`, a
 > base64 `writeFile`, and `fetchToSd(url, dest, headers, {method, body})`. Unlike
 > upstream, the device reaches only the hosts a plugin may reach: those its
-> manifest lists, or that you approved when it asked. Upstream's on-device catalog
+> manifest lists, those its device events' URLs write out, or that you approved
+> when it asked. Upstream's on-device catalog
 > screens (`device.json`) run in the browser here, on the Plugins page. Its crypto
 > endpoint (`api.crypto`) and its device events are here, the events from
 > #3114 and #4200 (Arthur Tazhitdinov) without `book.downloaded` so far (see
@@ -366,19 +367,23 @@ usual uses.
   pass: a filled-in value is not read for placeholders again. The token and
   config files are read as the web server lets the plugin read them: a name with
   `..` names nothing, and a credential store or a system folder is refused.
-- **Hosts**: a request or a download goes only to a host the plugin may reach
-  over the web, one its `manifest.json` lists in `allowedHosts` or one you
-  approved for it ([Reaching the internet](#reaching-the-internet-allowedhosts-and-approvals)).
-  The URL is judged as filled in, since a template can put any host there
-  (`{cfg.server}`), and a download's redirects stay within those hosts as well. A
-  line that fails this leaves the queue unsent, and the log (`[PEVT]`) names the
-  plugin and the event, not the URL. The reader cannot ask you, so a plugin
-  whose events go to a fixed host lists it in `allowedHosts`, as the Home Screen
-  page's pictures do. A plugin written for upstream lists none: it reaches the
-  hosts its card asked for through the relay (KOSync Auto-push's login test asks
-  for its server). One whose card never asks (Month Wallpaper 2.0.2) sends
-  nothing until its host is approved with `POST /api/plugins/hosts`
-  ([webserver-endpoints.md](webserver-endpoints.md)).
+- **Hosts**: a request or a download goes only to a host the plugin may reach:
+  one its `manifest.json` lists in `allowedHosts`, one you approved for it
+  ([Reaching the internet](#reaching-the-internet-allowedhosts-and-approvals)),
+  or one an event URL in its `device.json` writes out. A host is written out
+  when no placeholder sits between `://` and the path, so no filled-in value can
+  move it: `https://crosspoint-calendar.marczyk.ovh/current.bmp?w={cfg.width}`
+  declares its host, as an `allowedHosts` entry would (that host exactly, not its
+  subdomains); `{cfg.server}/syncs/progress` and `https://{cfg.host}/` declare
+  nothing. The Plugins page lists these hosts under **Reaches**, beside
+  `allowedHosts`. The URL is judged as filled in, and a download's redirects stay
+  within the same hosts. A line that fails this leaves the queue unsent, and the
+  log (`[PEVT]`) names the plugin and the event, not the URL. The reader cannot
+  ask you about a host a template fills in: a plugin written for upstream reaches
+  it once its card has asked for it through the relay (KOSync Auto-push's login
+  test asks for its server); otherwise approve it with `POST /api/plugins/hosts`
+  ([webserver-endpoints.md](webserver-endpoints.md)). A token or config value
+  can go to a declared host only from a file the plugin may read itself (above).
 
 **The queue.** Each subscribing plugin has its own, `events.jsonl` in its folder,
 one line per event (`{"e", "id", "ts", "vars"}`). A line is at most 512 bytes;
@@ -429,7 +434,9 @@ removes them; the Plugins page lists them like any other.
 
 `/plugins` in the web interface (linked from every page) lists every installed
 plugin with its description, the page it adds itself to and the hosts it may
-reach (`allowedHosts`), and offers **Switch off** / **Switch on** and **Remove**.
+reach (`allowedHosts`, and the hosts its event URLs write out, see
+[Events](#events-the-reader-sends-a-plugins-requests)), and offers **Switch off** /
+**Switch on** and **Remove**.
 Plugin management lives here and nowhere on the reader: it is only ever useful
 while a browser is connected.
 
