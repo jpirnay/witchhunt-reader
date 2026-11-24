@@ -422,27 +422,85 @@
   // is closed (sent at the next sleep or Wi-Fi connection).
   const WEB_PICTURE_EVENTS = ['sleep.enter', 'reader.exit'];
 
-  // The file the n-th picture from the web goes to: its type as the URL's path names it, else JPEG.
-  function webPictureDest(n, url) {
-    let path = '';
-    try {
-      path = new URL(url).pathname.toLowerCase();
-    } catch {
-      path = '';
-    }
-    const ext = /\.png$/.test(path) ? '.png' : /\.bmp$/.test(path) ? '.bmp' : '.jpg';
-    return `${WEB_PICTURE_FOLDER}/web-${n}${ext}`;
-  }
+  // Ready-made sources, checked 2026-11-24: each answers a JPEG, PNG or BMP without a key. `url` may hold
+  // {width} and {height} (the widget's size, filled when the page saves) and the preset's own fields; `ext`
+  // is the type the service answers with. A `once` preset never changes: the page fetches it in the browser
+  // as it saves (the service allows that), and the reader never asks the service again.
+  const WEB_PICTURE_PRESETS = [
+    { id: 'photo', ext: '.jpg', url: 'https://picsum.photos/{width}/{height}?grayscale' },
+    { id: 'calendar', ext: '.bmp',
+      url: 'https://crosspoint-calendar.marczyk.ovh/current.bmp?w={width}&h={height}&country={country}&week_start={week_start}' },
+    { id: 'sun', ext: '.jpg', url: 'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIIC.jpg' },
+    { id: 'earth', ext: '.jpg', url: 'https://cdn.star.nesdis.noaa.gov/GOES19/ABI/FD/GEOCOLOR/339x339.jpg' },
+    { id: 'note', ext: '.png', once: true },
+    { id: 'qr', ext: '.png', once: true },
+  ];
+  const presetOf = (source) => WEB_PICTURE_PRESETS.find((p) => p.id === source.preset) || null;
 
   // The URL with {width} and {height} set to the widget's size, so a server can render the picture to fit.
   const fillSize = (url, width, height) => url.replaceAll('{width}', String(width)).replaceAll('{height}', String(height));
 
+  // Where a source fetches from: with `size` ({w, h}) the address itself; without, the address with {width}
+  // and {height} still in it ('' for a once preset, which needs the size).
+  function webSourceUrl(source, size) {
+    const preset = presetOf(source);
+    if (preset && preset.id === 'note') {
+      if (!size) return '';
+      // One line a line of the text; placehold.co breaks lines at "\n".
+      const text = String(source.text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join('\\n');
+      return `https://placehold.co/${size.w}x${size.h}/FFFFFF/000000/png?text=${encodeURIComponent(text)}&font=roboto`;
+    }
+    if (preset && preset.id === 'qr') {
+      if (!size) return '';
+      // A square the box's longer side, with a margin inside it wide enough that Home's cut to the box (it
+      // fills the box and cuts what is over) leaves the whole code and a quiet zone.
+      const side = Math.max(size.w, size.h);
+      const margin = Math.ceil((side - Math.min(size.w, size.h)) / 2) + 8;
+      return `https://api.qrserver.com/v1/create-qr-code/?size=${side}x${side}&margin=${margin}&data=${encodeURIComponent(source.data || '')}`;
+    }
+    let template = preset ? preset.url : String(source.url || '');
+    if (preset && preset.id === 'calendar') {
+      const country = /^[A-Za-z]{2}$/.test(source.country || '') ? source.country.toUpperCase() : 'none';
+      template = template.replace('{country}', country).replace('{week_start}', source.weekStart === 'sunday' ? 'sunday' : 'monday');
+    }
+    return size ? fillSize(template, size.w, size.h) : template;
+  }
+
+  // The type a source answers with: a preset's, else as the address's path names it, else JPEG.
+  function webSourceExt(source) {
+    const preset = presetOf(source);
+    if (preset) return preset.ext;
+    let path = '';
+    try {
+      path = new URL(source.url).pathname.toLowerCase();
+    } catch {
+      path = '';
+    }
+    return /\.png$/.test(path) ? '.png' : /\.bmp$/.test(path) ? '.bmp' : '.jpg';
+  }
+
+  // What keeps a source from being saved, '' when nothing does.
+  function webSourceProblem(source) {
+    const preset = presetOf(source);
+    if (preset && preset.id === 'note') return String(source.text || '').trim() ? '' : 'A note needs its text.';
+    if (preset && preset.id === 'qr') return String(source.data || '').trim() ? '' : 'A QR code needs the link or text it holds.';
+    if (preset) return '';
+    return /^https?:\/\/[^/\s]+/i.test(source.url || '') ? '' : 'A picture from the web needs an address starting with https:// (or http://).';
+  }
+
+  // The file the n-th picture from the web goes to. `source` is {preset, ...} or {url}; a string is a URL.
+  function webPictureDest(n, source) {
+    return `${WEB_PICTURE_FOLDER}/web-${n}${webSourceExt(typeof source === 'string' ? { url: source } : source)}`;
+  }
+
   // The plugin that fetches the n-th picture from the web: {name, dest, url, files: {'device.json', 'manifest.json'}}.
-  // `source` is {url, event} as the user gave them; `size` the widget's {w, h}, or null when it is not shown.
+  // `source` is {url, event} or a preset's {preset, ..., event}; `size` the widget's {w, h}, or null when it is not
+  // shown. Not for a once preset, which no plugin fetches.
   function webPicturePlugin(n, source, size) {
     const name = `${WEB_PICTURE_PLUGIN}${n}`;
-    const dest = webPictureDest(n, source.url);
-    const url = size ? fillSize(source.url, size.w, size.h) : source.url;
+    const dest = webPictureDest(n, source);
+    const template = webSourceUrl(source, null);
+    const url = size ? webSourceUrl(source, size) : template;
     let host = '';
     try {
       host = new URL(url).hostname;
@@ -453,21 +511,24 @@
     const handler = { download: { url, dest } };
     if (event !== 'sleep.enter') handler.connect = true;  // sleep.enter joins Wi-Fi on its own
     const device = { events: { [event]: handler } };
+    const homeScreen = { url: template, event, dest };
+    if (source.preset) homeScreen.preset = source.preset;
     const manifest = {
       title: `Home screen picture ${n}`,
-      description: `Fetches ${source.url} to ${dest} for the Home screen. Made by the Home Screen page, which replaces or removes it.`,
+      description: `Fetches ${template} to ${dest} for the Home screen. Made by the Home Screen page, which replaces or removes it.`,
       version: '1',
       catalog: false,
       // The host and its subdomains: picture services often redirect to a CDN under their own name.
       allowedHosts: host ? [host, `.${host}`] : [],
-      homeScreen: { url: source.url, event, dest },
+      homeScreen,
     };
     return { name, dest, url, host, files: { 'device.json': JSON.stringify(device), 'manifest.json': JSON.stringify(manifest) } };
   }
 
   window.HomeLayout = {
     DIMENSIONS, PRESETS, DESTINATIONS, MENU_DESTINATIONS, PAIRS, OPENS, MAX_ROWS, MAX_PICTURES, MAX_BYTES,
-    PICTURE_FOLDER, WEB_PICTURE_FOLDER, WEB_PICTURE_PLUGIN, WEB_PICTURE_EVENTS, parse, withAvailable, place, card, strip,
-    bottomCount, layOut, webPictureDest, fillSize, webPicturePlugin,
+    PICTURE_FOLDER, WEB_PICTURE_FOLDER, WEB_PICTURE_PLUGIN, WEB_PICTURE_EVENTS, WEB_PICTURE_PRESETS, parse, withAvailable,
+    place, card, strip, bottomCount, layOut, webPictureDest, fillSize, webSourceUrl, webSourceExt, webSourceProblem,
+    webPicturePlugin,
   };
 })();

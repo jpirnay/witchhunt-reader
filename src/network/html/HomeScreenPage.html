@@ -27,8 +27,9 @@
     .toolbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between;
       margin-bottom: 12px; }
     .toolbar label { display: flex; gap: 8px; align-items: center; color: var(--text-muted); font-size: 0.875rem; }
-    select, input[type="text"] { font: inherit; padding: 6px 8px; border: 1px solid var(--control-border);
+    select, input[type="text"], textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--control-border);
       border-radius: var(--radius-sm); background: var(--control-bg); color: var(--text); max-width: 100%; }
+    textarea { resize: vertical; }
 
     .rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
     .row { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--surface-2); }
@@ -131,6 +132,21 @@
         ['sleep.enter', 'Each time the reader goes to sleep'],
         ['reader.exit', 'After you close a book (fetched at the next sleep)'],
       ];
+      // The sources From the web... offers (js/home-layout.js WEB_PICTURE_PRESETS), and what each sends where.
+      const WEB_SOURCES = [
+        ['photo', 'A random photo (Lorem Picsum)', 'A new photo each time it is fetched, from the free photos on Unsplash.'],
+        ['calendar', 'Month calendar', 'This month and its public holidays, drawn for e-ink by the server of the Month ' +
+          'Wallpaper plugin (Marcin Marczyk). The country sets the holidays and the language.'],
+        ['note', 'A note', 'Your text, black on white, made once by placehold.co when you save. The text goes to placehold.co.'],
+        ['qr', 'A QR code', 'A link or a text as a QR code, made once by goqr.me (api.qrserver.com) when you save. Never ' +
+          'put a password in it: it goes to the service.'],
+        ['sun', 'The Sun now (NASA SDO)', 'The Sun in visible light, with its sunspots; updated about every 15 minutes.'],
+        ['earth', 'The Earth now (NOAA GOES-19)', 'The whole Earth as the GOES-19 satellite sees it; updated every 10 minutes, ' +
+          '126 KB a fetch.'],
+        ['custom', 'My own address…', 'A JPEG, PNG or BMP; {width} and {height} in the address become the picture’s ' +
+          'size, so a server can render it to fit.'],
+      ];
+      const ONCE = new Set(L.WEB_PICTURE_PRESETS.filter((p) => p.once).map((p) => p.id));
       const enc = encodeURIComponent;
       const UNAVAILABLE = {
         bookmarks: 'Left out until you make a bookmark.',
@@ -182,12 +198,28 @@
         }
       }
 
-      // The picture cells whose file a web plugin fetches get their source back.
+      // A source of `kind` with its fields at their defaults: the calendar's country from the browser's language,
+      // its week from the reader's First Day of Week (the calendar has Monday and Sunday).
+      function webSource(kind) {
+        if (kind === 'custom') return { url: '', event: L.WEB_PICTURE_EVENTS[0] };
+        const source = { preset: kind, event: L.WEB_PICTURE_EVENTS[0] };
+        if (kind === 'calendar') {
+          const region = (navigator.language || '').split('-')[1] || '';
+          source.country = /^[A-Za-z]{2}$/.test(region) ? region.toUpperCase() : 'none';
+          source.weekStart = state.settings.firstDayOfWeek && state.settings.firstDayOfWeek.value === 1 ? 'sunday' : 'monday';
+        }
+        if (kind === 'note') source.text = '';
+        if (kind === 'qr') source.data = '';
+        return source;
+      }
+
+      // The picture cells whose file a web plugin fetches get their source back: for a layout saved before the
+      // file kept the source itself (the cell's "web").
       function markWebPictures() {
         const byDest = Object.values(state.webPlugins).filter((w) => w.dest && w.url);
         for (const cell of state.rows.flat()) {
           const web = cell.widget === 'picture' && byDest.find((w) => w.dest === cell.path);
-          if (web) cell.web = { url: web.url, event: web.event };
+          if (web && !cell.web) cell.web = web.preset ? { ...webSource(web.preset), event: web.event } : { url: web.url, event: web.event };
         }
       }
 
@@ -253,15 +285,18 @@
 
       // The pictures from the web, in reading order: the n-th is fetched by home-picture-n.
       const webCells = () => state.rows.flat().filter((cell) => cell.widget === 'picture' && cell.web);
-      const validUrl = (url) => /^https?:\/\/[^/\s]+/i.test(url || '');
 
       function layoutJson() {
-        webCells().forEach((cell, i) => { cell.path = L.webPictureDest(i + 1, cell.web.url); });
+        webCells().forEach((cell, i) => { cell.path = L.webPictureDest(i + 1, cell.web); });
         const rows = state.rows.map((row) => row.map((cell) => {
           const out = { widget: cell.widget };
           if (cell.widget === 'book' && cell.size === 'compact') out.size = 'compact';
           if (cell.widget === 'shortcut') out.to = cell.to || 'library';
           if (cell.widget === 'picture') out.path = cell.path || PICTURE_FOLDER;
+          // The reader reads only the path; the page keeps the source here to show it again.
+          if (cell.widget === 'picture' && cell.web) {
+            out.web = Object.fromEntries(Object.entries(cell.web).filter(([, value]) => value !== undefined && value !== ''));
+          }
           return out;
         }));
         return JSON.stringify({ version: 1, rows });
@@ -319,7 +354,7 @@
         const wrap = element('div', { class: 'slot' });
         wrap.append(select(options, cell.web ? '__web' : path, (value) => {
           if (value === '__web') {
-            cell.web = cell.web || { url: '', event: L.WEB_PICTURE_EVENTS[0] };
+            cell.web = cell.web || webSource('photo');
           } else if (value === '__other') {
             delete cell.web;
             const typed = prompt('A JPEG, PNG or BMP on the card, or a folder of them:', path);
@@ -331,14 +366,38 @@
           changed();
         }, `Row ${r + 1} picture`));
         if (cell.web) {
-          wrap.append(element('input', { type: 'text', inputmode: 'url', value: cell.web.url,
-            placeholder: 'https://example.org/today.jpg', 'aria-label': `Row ${r + 1} picture address`,
-            onchange: (e) => { cell.web.url = e.target.value.trim(); changed(); } }));
-          wrap.append(select(WEB_EVENTS, cell.web.event, (value) => { cell.web.event = value; changed(); },
-            `Row ${r + 1} when to fetch it`));
-          wrap.append(element('span', { class: 'slot-note' + (cell.web.url && !validUrl(cell.web.url) ? ' warn' : '') },
-            'A JPEG, PNG or BMP the reader fetches over Wi-Fi; {width} and {height} in the address become the ' +
-            'picture’s size, so a server can render it to fit. Saving fetches it once now.'));
+          const web = cell.web;
+          const kind = web.preset || 'custom';
+          const field = (props, key) => element('input', { type: 'text', value: web[key] || '', ...props,
+            onchange: (e) => { web[key] = e.target.value.trim(); changed(); } });
+          wrap.append(select(WEB_SOURCES.map(([id, label]) => [id, label]), kind, (value) => {
+            cell.web = { ...webSource(value), event: web.event };
+            changed();
+          }, `Row ${r + 1} picture source`));
+          if (kind === 'custom') {
+            wrap.append(field({ inputmode: 'url', placeholder: 'https://example.org/today.jpg',
+              'aria-label': `Row ${r + 1} picture address` }, 'url'));
+          } else if (kind === 'calendar') {
+            wrap.append(field({ maxlength: 4, placeholder: 'DE', 'aria-label': `Row ${r + 1} calendar country (two letters)`,
+              title: 'Two letters (DE, US, PL, ...), or none' }, 'country'));
+            wrap.append(select([['monday', 'Weeks start on Monday'], ['sunday', 'Weeks start on Sunday']],
+              web.weekStart || 'monday', (value) => { web.weekStart = value; changed(); }, `Row ${r + 1} calendar week`));
+          } else if (kind === 'note') {
+            wrap.append(element('textarea', { rows: 2, placeholder: 'Read more books', 'aria-label': `Row ${r + 1} note`,
+              onchange: (e) => { web.text = e.target.value; changed(); } }, web.text || ''));
+          } else if (kind === 'qr') {
+            wrap.append(field({ placeholder: 'https://example.org', 'aria-label': `Row ${r + 1} QR code content` }, 'data'));
+          }
+          if (ONCE.has(kind)) {
+            wrap.append(element('span', { class: 'slot-note' }, 'Made once when you save; the reader does not fetch it again.'));
+          } else {
+            wrap.append(select(WEB_EVENTS, web.event, (value) => { web.event = value; changed(); },
+              `Row ${r + 1} when to fetch it`));
+          }
+          const problem = L.webSourceProblem(web);
+          const about = WEB_SOURCES.find(([id]) => id === kind)[2];
+          wrap.append(element('span', { class: 'slot-note' + (problem && (web.url || web.text || web.data) ? ' warn' : '') },
+            ONCE.has(kind) ? about : `${about} The reader fetches it over Wi-Fi, from the service, each time; saving fetches it once now.`));
         } else {
           wrap.append(element('button', { type: 'button', class: 'btn btn-small add-beside',
             onclick: () => uploadPicture(cell) }, 'Upload a picture…'));
@@ -615,7 +674,8 @@
         if (paths.size > L.MAX_PICTURES) add(`At most ${L.MAX_PICTURES} different pictures: the others are left out.`);
         if (new TextEncoder().encode(layoutJson()).length > L.MAX_BYTES) add('The layout is too long to save (4 KB at most).');
         webCells().forEach((cell) => {
-          if (!validUrl(cell.web.url)) add('A picture from the web needs an address starting with https:// (or http://).');
+          const problem = L.webSourceProblem(cell.web);
+          if (problem) add(problem);
         });
       }
 
@@ -709,20 +769,42 @@
         await post(`/api/plugins/commit?name=${enc(plugin.name)}`);
       }
 
+      // A picture that never changes, made once: fetched by the browser (its service allows that) and uploaded.
+      // Answers what happened; a failure is a line, as the layout is already saved.
+      async function fetchOnce(source, dest, box) {
+        if (!box) return `${dest} is made once its row is shown on this reader.`;
+        try {
+          const response = await fetch(L.webSourceUrl(source, box));
+          const blob = await response.blob();
+          if (!response.ok || !/^image\/(png|jpeg|bmp)/.test(blob.type)) {
+            return `${dest} was not made (${response.status} ${blob.type || 'no picture'}); save again to retry.`;
+          }
+          const form = new FormData();
+          form.append('file', blob, dest.slice(dest.lastIndexOf('/') + 1));
+          await post(`/upload?path=${enc(L.WEB_PICTURE_FOLDER)}`, form);
+          return `Made ${dest} (${Math.round(blob.size / 1024)} KB).`;
+        } catch (error) {
+          return `${dest} was not made (${error.message}); save again to retry.`;
+        }
+      }
+
       // Each picture from the web gets its plugin (made again, as its address, event or size may have
-      // changed) and is fetched once now; the plugins of pictures no longer in the layout go. Answers what
-      // happened, a line a picture.
+      // changed) and is fetched once now, or, for a once preset, is made by the browser; the plugins of
+      // pictures no longer fetched by one go. Answers what happened, a line a picture.
       async function syncWebPictures() {
         const result = L.layOut(layoutJson(), state.device);
-        const plugins = webCells().map((cell, i) => {
-          const dest = L.webPictureDest(i + 1, cell.web.url);
-          const item = result.placement.items.find((it) => it.cell.widget === 'picture' && result.pictures[it.cell.option] === dest);
-          return L.webPicturePlugin(i + 1, cell.web, item ? item.box : null);
-        });
         const lines = [];
-        if (plugins.length) {
+        const plugins = [];
+        const cells = webCells();
+        if (cells.length) {
           await ensureFolder(PICTURE_FOLDER);
           await ensureFolder(L.WEB_PICTURE_FOLDER);
+        }
+        for (const [i, cell] of cells.entries()) {
+          const dest = L.webPictureDest(i + 1, cell.web);
+          const item = result.placement.items.find((it) => it.cell.widget === 'picture' && result.pictures[it.cell.option] === dest);
+          if (ONCE.has(cell.web.preset)) lines.push(await fetchOnce(cell.web, dest, item ? item.box : null));
+          else plugins.push(L.webPicturePlugin(i + 1, cell.web, item ? item.box : null));
         }
         for (const plugin of plugins) {
           await installPlugin(plugin);
@@ -757,8 +839,9 @@
 
       async function save() {
         const button = $('save');
-        if (webCells().some((cell) => !validUrl(cell.web.url))) {
-          $('saveState').textContent = 'Not saved: a picture from the web needs an address starting with https://.';
+        const problem = webCells().map((cell) => L.webSourceProblem(cell.web)).find(Boolean);
+        if (problem) {
+          $('saveState').textContent = `Not saved: ${problem}`;
           return;
         }
         button.disabled = true;
