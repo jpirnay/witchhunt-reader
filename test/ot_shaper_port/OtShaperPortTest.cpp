@@ -63,7 +63,7 @@ void checkAllWords(const bool withFilters) {
       words++;
     }
   }
-  EXPECT_EQ(words, 56u);
+  EXPECT_EQ(words, 70u);
 }
 
 // A fixture font with its stored filters and a built plan (CPpl dropped).
@@ -365,7 +365,7 @@ void checkMovedFace(const bool withFilters) {
       words++;
     }
   }
-  EXPECT_EQ(words, 56u);
+  EXPECT_EQ(words, 70u);
 }
 
 }  // namespace
@@ -506,7 +506,7 @@ TEST(OtFilterWriter, TheTableItWritesIsTheOneTheFaceReads) {
       words++;
     }
   }
-  EXPECT_EQ(words, 56u);
+  EXPECT_EQ(words, 70u);
 }
 
 TEST(OtFilterWriter, AFaceWithoutLookupsHasNoTable) {
