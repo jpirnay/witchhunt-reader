@@ -223,7 +223,7 @@ constexpr HomeGridNav::Grid grid(const int shownBooks, const int tileCount, cons
   int next = 0;
   if (shownBooks > 0) {
     g.addRow(next, 1);
-    g.firstRowCyclesBooks = true;
+    g.markCycleRow();
     next += 1;
     g.addRow(next, shownBooks - 1);
     next += shownBooks - 1;

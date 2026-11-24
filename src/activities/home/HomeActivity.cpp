@@ -668,6 +668,17 @@ void HomeActivity::loop() {
           requestUpdate();
         }
       }
+    } else if (grid_.cellCount > 0) {
+      // Up and Down only: through the theme's cells in screen order, which need not be the
+      // selector's order (HomeGridNav::next).
+      buttonNavigator.onNext([this] {
+        selectorIndex = HomeGridNav::next(grid_, selectorIndex, 1);
+        requestUpdate();
+      });
+      buttonNavigator.onPrevious([this] {
+        selectorIndex = HomeGridNav::next(grid_, selectorIndex, -1);
+        requestUpdate();
+      });
     } else {
       buttonNavigator.onNext([this, totalItems] {
         selectorIndex = ButtonNavigator::nextIndex(selectorIndex, totalItems);

@@ -274,6 +274,25 @@ TEST(HomeGridNav, TheAlsoReadingRowIsARowOfThree) {
   EXPECT_EQ(go(grid, 7, Move::Down), 9);
 }
 
+// Up and Down alone step through the cells in screen order, wrapping at both ends.
+TEST(HomeGridNav, NextFollowsTheScreenOrder) {
+  HomeGridNav::Grid grid;
+  grid.addRow(0, 1);
+  grid.markCycleRow();
+  const int widgets[] = {7, 6};  // positions numbered after the menu, drawn between card and tiles
+  grid.addCells(widgets, 2);
+  grid.addRow(1, 2);
+  EXPECT_EQ(HomeGridNav::next(grid, 0, 1), 7);
+  EXPECT_EQ(HomeGridNav::next(grid, 7, 1), 6);
+  EXPECT_EQ(HomeGridNav::next(grid, 6, 1), 1);
+  EXPECT_EQ(HomeGridNav::next(grid, 2, 1), 0);
+  EXPECT_EQ(HomeGridNav::next(grid, 0, -1), 2);
+  EXPECT_EQ(HomeGridNav::next(grid, 42, 1), 0);  // not on the grid: the first cell
+  EXPECT_EQ(go(grid, 0, Move::Down), 7);
+  EXPECT_EQ(go(grid, 6, Move::Down), 2);  // the right-hand widget -> the right-hand tile
+  EXPECT_EQ(HomeGridNav::step(grid, 7, Move::Right).index, 6);
+}
+
 // Three tiles: Library spans its row, so it is a row of one.
 TEST(HomeGridNav, ASpanningTileIsARowOfOne) {
   const auto grid = HomeTilesLayout::grid(1, 3, 1);
@@ -290,7 +309,7 @@ TEST(HomeGridNav, ASpanningTileIsARowOfOne) {
 TEST(HomeGridNav, WithoutBooksTheTilesComeFirst) {
   const auto grid = HomeTilesLayout::grid(0, 2, 2);
   ASSERT_EQ(grid.rowCount, 2);
-  EXPECT_FALSE(grid.firstRowCyclesBooks);
+  EXPECT_EQ(grid.cycleRow, -1);
   EXPECT_EQ(go(grid, 0, Move::Right), 1);
   EXPECT_EQ(HomeGridNav::step(grid, 0, Move::Right).cycle, 0);
 }
