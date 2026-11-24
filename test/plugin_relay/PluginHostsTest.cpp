@@ -80,3 +80,66 @@ TEST(PluginHostsTest, AnEmptyReachAllowsNothing) {
   blank.approve("");
   EXPECT_FALSE(blank.allows("https://openlibrary.org/"));
 }
+
+// The hosts a plugin's device events were refused for (PluginHosts::wantedWith()): what GET /api/plugins lists as
+// "wants" and the Plugins page offers to Allow or Dismiss. Kept in the plugin's folder, so removing the plugin removes
+// them (CrossPointWebServer::handlePluginRemove() deletes the folder).
+namespace {
+std::string listed(const std::string& list) {
+  std::string_view hosts[PluginHosts::kMaxWanted];
+  const size_t n = PluginHosts::wantedHosts(list, hosts);
+  std::string out;
+  for (size_t i = 0; i < n; i++) out += std::string(hosts[i]) + ";";
+  return out;
+}
+}  // namespace
+
+TEST(PluginHostsTest, ARefusedHostIsAskedForOnce) {
+  std::string list = PluginHosts::wantedWith("", "w.example");
+  EXPECT_EQ(list, "w.example\n");
+  EXPECT_EQ(PluginHosts::wantedWith(list, "w.example"), list);  // no second entry, and no write
+  list = PluginHosts::wantedWith(list, "cdn.example");
+  EXPECT_EQ(listed(list), "w.example;cdn.example;");
+}
+
+TEST(PluginHostsTest, TheRequestsAreBoundedOldestFirst) {
+  std::string list;
+  for (const char* host : {"a.example", "b.example", "c.example", "d.example", "e.example", "f.example"}) {
+    list = PluginHosts::wantedWith(list, host);
+  }
+  EXPECT_EQ(listed(list), "c.example;d.example;e.example;f.example;");
+  EXPECT_EQ(PluginHosts::kMaxWanted, 4u);
+}
+
+TEST(PluginHostsTest, OnlyAHostUrlHostGivesIsRecorded) {
+  for (const char* host : {"", "W.Example", "a b.example", "evil.example:443", "u@evil.example", "x/y", "a\nb"}) {
+    EXPECT_EQ(PluginHosts::wantedWith("", host), "") << host;
+  }
+  EXPECT_EQ(PluginHosts::wantedWith("", std::string(PluginHosts::kMaxWantedHost + 1, 'a')), "");
+  EXPECT_EQ(PluginHosts::wantedWith("", std::string(PluginHosts::kMaxWantedHost, 'a')),
+            std::string(PluginHosts::kMaxWantedHost, 'a') + "\n");
+}
+
+TEST(PluginHostsTest, AllowClearsARequestAndDismissKeepsItFromComingBack) {
+  std::string list = PluginHosts::wantedWith(PluginHosts::wantedWith("", "w.example"), "x.example");
+  // Allow (an approval) answers the request.
+  EXPECT_EQ(listed(PluginHosts::wantedWithout(list, "w.example", false)), "x.example;");
+  // Dismiss drops it from the offer, and a later refusal does not ask again.
+  list = PluginHosts::wantedWithout(list, "w.example", true);
+  EXPECT_EQ(listed(list), "x.example;");
+  EXPECT_EQ(PluginHosts::wantedWith(list, "w.example"), list);
+  EXPECT_EQ(listed(PluginHosts::wantedWith(list, "w.example")), "x.example;");
+  // An approval after all clears the dismissal too: the next refusal would ask again.
+  list = PluginHosts::wantedWithout(list, "w.example", false);
+  EXPECT_EQ(listed(PluginHosts::wantedWith(list, "w.example")), "x.example;w.example;");
+  EXPECT_EQ(PluginHosts::wantedWithout("", "w.example", false), "");
+}
+
+// The file sits in the plugin's folder, which the plugin may write: anything that is not a well-formed entry is left
+// out, and the list stays within its bound.
+TEST(PluginHostsTest, AWrongListIsReadAsFarAsItIsRight) {
+  const std::string written = "ok.example\nNOT OK\n-gone.example\n\n:bad\r\nlast.example";
+  EXPECT_EQ(listed(written), "ok.example;last.example;");
+  EXPECT_EQ(PluginHosts::wantedWith(written, "gone.example"), written);  // dismissed stays dismissed
+  EXPECT_EQ(PluginHosts::wantedWith(written, "new.example"), "ok.example\n-gone.example\nlast.example\nnew.example\n");
+}

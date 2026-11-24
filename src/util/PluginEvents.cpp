@@ -183,6 +183,7 @@ namespace {
 // reach.
 struct DrainContext {
   const char* name = "";
+  const char* dir = "";
   JsonDocument manifest;
   JsonDocument config;
   std::string token;
@@ -190,6 +191,14 @@ struct DrainContext {
 };
 
 bool refusedPluginFile(const std::string& path) { return isProtectedPluginFile(String(path.c_str())); }
+
+// The host of a refused URL, recorded for the Plugins page to offer (PluginReach::recordWanted()). A failed write names
+// the host: the page would have shown it anyway.
+void askForHost(const DrainContext& dc, const std::string& host) {
+  if (host.empty()) return;
+  if (!PluginReach::recordWanted(dc.dir, host))
+    LOG_ERR("PEVT", "%s: could not record its request for %s", dc.name, host.c_str());
+}
 
 // A token or config file the device.json names, or "" for none and for one the web server would not let the plugin
 // read either (pluginFile()). A refused one is logged by its name.
@@ -240,9 +249,13 @@ LineOutcome deliverLine(const DrainContext& dc, const std::string& line, GfxRend
   // Only to a host the plugin may reach: its manifest's allowedHosts, one the user approved, or one its event URLs
   // write out (declareLiteralHosts()). Judged on the URL as filled in, since a template can put any host there
   // ({cfg.server}). It could never go, so it leaves the queue. Not logged with the URL, which may carry the token.
+  // The Plugins page then offers the host with Allow and Dismiss. The line is dropped rather than held for the answer:
+  // a held line keeps the queue wanting a connection (wantsConnectAny()), which costs a Wi-Fi join, and on the X3 and
+  // X4 two restarts, at every sleep until the user answers. The next event after an Allow goes.
   if (!dc.reach.allows(url)) {
     LOG_ERR("PEVT", "%s: %s dropped, its host is not one the plugin may reach", dc.name,
             eventName(static_cast<Event>(e)));
+    askForHost(dc, PluginHosts::urlHost(url));
     return LineOutcome::Dropped;
   }
   HttpDownloader::Headers headers;
@@ -272,8 +285,10 @@ LineOutcome deliverLine(const DrainContext& dc, const std::string& line, GfxRend
     // Redirects stay within the hosts the plugin may reach, as the relay's do; one leaving them could not go on a
     // later try either, so the line leaves the queue.
     bool leftReach = false;
-    const HttpDownloader::RedirectFilter withinReach = [&dc, &leftReach](const std::string& next) {
+    std::string refusedHost;
+    const HttpDownloader::RedirectFilter withinReach = [&dc, &leftReach, &refusedHost](const std::string& next) {
       leftReach = !dc.reach.allows(next);
+      if (leftReach) refusedHost = PluginHosts::urlHost(next);
       return !leftReach;
     };
     // Into a sibling first, and in only on a clean answer, so an error page never replaces the file (a sleep image).
@@ -283,6 +298,7 @@ LineOutcome deliverLine(const DrainContext& dc, const std::string& line, GfxRend
       Storage.remove(part.c_str());
       LOG_ERR("PEVT", "%s: %s dropped, redirected to a host the plugin may not reach", dc.name,
               eventName(static_cast<Event>(e)));
+      askForHost(dc, refusedHost);
       return LineOutcome::Dropped;
     }
     if (result != HttpDownloader::OK || status < 200 || status >= 300 ||
@@ -330,6 +346,7 @@ DrainResult drain(GfxRenderer* renderer, const size_t maxEvents) {
 
     DrainContext dc;
     dc.name = s.name;
+    dc.dir = s.dir;
     {
       std::string text;
       // Unreadable now (a card fault, a manifest being replaced): the queue waits for the next drain.
