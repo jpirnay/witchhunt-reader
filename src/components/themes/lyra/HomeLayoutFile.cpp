@@ -12,17 +12,18 @@ namespace {
 using HomeTilesLayout::Cell;
 using HomeTilesLayout::Widget;
 
+// A shortcut's "to", by destination (HomeTilesLayout::destination): the file's names and the web API's.
+constexpr const char* const kDestinationNames[HomeTilesLayout::destination::Count] = {
+    "library", "stats", "bookmarks", "transfer", "weather", "recent"};
+static_assert(HomeTilesLayout::destination::Library == 0 && HomeTilesLayout::destination::ReadingStats == 1 &&
+                  HomeTilesLayout::destination::Bookmarks == 2 && HomeTilesLayout::destination::FileTransfer == 3 &&
+                  HomeTilesLayout::destination::Weather == 4 && HomeTilesLayout::destination::Recent == 5,
+              "kDestinationNames is indexed by destination");
+
 bool destinationNamed(const char* name, uint8_t& out) {
-  static constexpr struct {
-    const char* name;
-    uint8_t destination;
-  } kNames[] = {
-      {"library", HomeTilesLayout::destination::Library},     {"stats", HomeTilesLayout::destination::ReadingStats},
-      {"bookmarks", HomeTilesLayout::destination::Bookmarks}, {"transfer", HomeTilesLayout::destination::FileTransfer},
-      {"weather", HomeTilesLayout::destination::Weather},     {"recent", HomeTilesLayout::destination::Recent}};
-  for (const auto& entry : kNames) {
-    if (std::strcmp(name, entry.name) == 0) {
-      out = entry.destination;
+  for (uint8_t d = 0; d < HomeTilesLayout::destination::Count; ++d) {
+    if (std::strcmp(name, kDestinationNames[d]) == 0) {
+      out = d;
       return true;
     }
   }
@@ -76,6 +77,10 @@ bool cellFrom(JsonObjectConst object, Cell& cell, std::string* pictures) {
 }
 
 }  // namespace
+
+const char* destinationName(const uint8_t destination) {
+  return destination < HomeTilesLayout::destination::Count ? kDestinationNames[destination] : "";
+}
 
 Parsed parse(const std::string& json) {
   Parsed parsed;
