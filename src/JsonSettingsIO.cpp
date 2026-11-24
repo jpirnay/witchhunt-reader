@@ -7,6 +7,7 @@
 #include <HalStorage.h>
 #include <HeapFit.h>
 #include <JsonFile.h>
+#include <JsonText.h>
 #include <Logging.h>
 #include <ObfuscationUtils.h>
 
@@ -82,7 +83,7 @@ obfuscation::CardHint cardHintFromWifiJson() {
   // The whole small file, parsed as loadWifi() parses it: a filter for the two fields costs ~3 KB
   // of flash in ArduinoJson template code to save a few hundred bytes of heap, once.
   JsonDocument doc;
-  if (json.isEmpty() || deserializeJson(doc, json.c_str())) return obfuscation::CardHint::None;
+  if (json.isEmpty() || JsonText::parse(doc, json.c_str())) return obfuscation::CardHint::None;
   return obfuscation::cardHint(doc["lastKnownMacAddress"] | std::string(""), doc["arrivedFrom"] | std::string(""));
 }
 
@@ -179,10 +180,10 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   // Streamed rather than serialised into a String first, to keep the heap out of it (it runs on the way to sleep).
   // ArduinoJson writes the punctuation a character at a time, so a small buffer on the stack gathers the ~900 bytes
   // into a handful of writes instead of several hundred, each taking the storage lock.
-  const size_t expected = measureJson(doc);
+  const size_t expected = JsonText::measure(doc);
   uint8_t streamBuffer[256];
   BufferedPrint out(file, streamBuffer, sizeof(streamBuffer));
-  const size_t written = serializeJson(doc, out);
+  const size_t written = JsonText::write(doc, out);
   const bool flushed = out.flushBuffer();
   file.flush();
   if (!file.close()) {
@@ -193,7 +194,7 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
 
 bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     LOG_ERR("CPS", "JSON parse error: %s", error.c_str());
     return false;
@@ -344,7 +345,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
 bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool* needsResave) {
   if (needsResave) *needsResave = false;
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     LOG_ERR("CPS", "JSON parse error: %s", error.c_str());
     return false;
@@ -606,7 +607,7 @@ bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const ch
 bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* json, bool* needsResave) {
   if (needsResave) *needsResave = false;
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     LOG_ERR("KRS", "JSON parse error: %s", error.c_str());
     return false;
@@ -713,7 +714,7 @@ bool JsonSettingsIO::saveWifi(const WifiCredentialStore& store, const char* path
 bool JsonSettingsIO::loadWifi(WifiCredentialStore& store, const char* json, bool* needsResave) {
   if (needsResave) *needsResave = false;
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     LOG_ERR("WCS", "JSON parse error: %s", error.c_str());
     return false;
@@ -880,7 +881,7 @@ static_assert(std::size(kRecentBookOverrideKeys) == BookReaderOverrides::kLegacy
 
 RecentBooksLoad JsonSettingsIO::loadRecentBooks(std::vector<LegacyRecentBook>& out, const char* json) {
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error == DeserializationError::NoMemory) {
     LOG_ERR("RBS", "No memory to read the recent books");
     return RecentBooksLoad::ShortOfMemory;
@@ -964,7 +965,7 @@ bool JsonSettingsIO::saveOpds(const OpdsServerStore& store, const char* path) {
 bool JsonSettingsIO::loadOpds(OpdsServerStore& store, const char* json, bool* needsResave) {
   if (needsResave) *needsResave = false;
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     LOG_ERR("OPS", "JSON parse error: %s", error.c_str());
     return false;

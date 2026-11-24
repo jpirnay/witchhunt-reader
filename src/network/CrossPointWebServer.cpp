@@ -14,6 +14,8 @@
 #include <HalStorage.h>
 #include <HalSystem.h>  // feedWatchdog()
 #include <HeapFit.h>
+#include <JsonFile.h>
+#include <JsonText.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <Txt.h>
@@ -290,7 +292,7 @@ bool deviceJsonNames(const std::string& pluginDir, const std::string& path) {
   std::string text;
   if (!Storage.readFileToString("WEB", pluginDir + "/device.json", PLUGIN_DEVICE_JSON_MAX_BYTES, text)) return false;
   JsonDocument doc;
-  if (deserializeJson(doc, text) != DeserializationError::Ok) return false;
+  if (JsonText::parse(doc, text) != DeserializationError::Ok) return false;
   const char* named[] = {doc["token"]["file"] | "", doc["token"]["refresh_file"] | "", doc["config"]["file"] | ""};
   return std::any_of(std::begin(named), std::end(named),
                      [&](const char* n) { return PluginLocations::namesPath(n, pluginDir, path); });
@@ -346,7 +348,7 @@ void loadPluginHosts(JsonDocument& doc) {
   std::string text;
   if (Storage.exists(PLUGIN_HOSTS_PATH) &&
       Storage.readFileToString("WEB", PLUGIN_HOSTS_PATH, PLUGIN_HOSTS_MAX_BYTES, text) &&
-      deserializeJson(doc, text) == DeserializationError::Ok && doc.is<JsonObject>()) {
+      JsonText::parse(doc, text) == DeserializationError::Ok && doc.is<JsonObject>()) {
     return;
   }
   doc.clear();
@@ -355,8 +357,9 @@ void loadPluginHosts(JsonDocument& doc) {
 
 bool savePluginHosts(const JsonDocument& doc) {
   String text;
-  serializeJson(doc, text);
-  if (text.length() > PLUGIN_HOSTS_MAX_BYTES) return false;
+  if (!JsonFile::serializeWhole("WEB", PLUGIN_HOSTS_PATH, doc, text) || text.length() > PLUGIN_HOSTS_MAX_BYTES) {
+    return false;
+  }
   const std::string temp = std::string(PLUGIN_HOSTS_PATH) + ".tmp";
   return Storage.writeFile(temp.c_str(), text) && FileReplace::replace(temp.c_str(), PLUGIN_HOSTS_PATH);
 }
@@ -386,7 +389,7 @@ bool relayHostAllowed(const String& plugin, const std::string& url) {
   std::string manifest;
   if (Storage.readFileToString("WEB", dir + "/manifest.json", PLUGIN_MANIFEST_MAX_BYTES, manifest)) {
     JsonDocument m;
-    if (deserializeJson(m, manifest) == DeserializationError::Ok && m["allowedHosts"].is<JsonArray>()) {
+    if (JsonText::parse(m, manifest) == DeserializationError::Ok && m["allowedHosts"].is<JsonArray>()) {
       for (JsonVariant entry : m["allowedHosts"].as<JsonArray>()) {
         const char* pattern = entry.as<const char*>();
         if (pattern && hostMatches(host, pattern)) return true;
@@ -877,14 +880,14 @@ static void sendSetupPage(WebServer* server) {
 // WDT is reset before and after sendContent so the write can't outlast the watchdog.
 // On malloc failure, sends a 500.
 static void sendJson(WebServer* server, int code, const JsonDocument& doc) {
-  const size_t payloadSize = measureJson(doc);
+  const size_t payloadSize = JsonText::measure(doc);
   char* buf = static_cast<char*>(malloc(payloadSize + 1));
   if (!buf) {
     LOG_DBG("WEB", "sendJson: malloc(%zu) failed", payloadSize + 1);
     server->send(500, "application/json", "{\"error\":\"OOM\"}");
     return;
   }
-  serializeJson(doc, buf, payloadSize + 1);
+  JsonText::write(doc, buf, payloadSize + 1);
   server->setContentLength(payloadSize);
   server->send(code, "application/json", "");
   HalSystem::feedWatchdog();
@@ -1025,7 +1028,7 @@ void CrossPointWebServer::handleStatsApi() const {
 void CrossPointWebServer::handleStatsRemove() const {
   if (rejectIfLowMemory(server.get())) return;
   JsonDocument req;
-  if (deserializeJson(req, server->arg("plain")) || !req["docId"].is<const char*>()) {
+  if (JsonText::parse(req, server->arg("plain")) || !req["docId"].is<const char*>()) {
     server->send(400, "application/json", "{\"error\":\"Invalid request\"}");
     return;
   }
@@ -1330,19 +1333,19 @@ void CrossPointWebServer::handleBootDiagnostics() const {
   JsonDocument doc;
   out.print("{\"hardware\":");
   fillBootHardware(doc);
-  serializeJson(doc, out);
+  JsonText::write(doc, out);
 
   doc.clear();
   out.print(",\"thisBoot\":");
   fillThisBoot(doc, records.get(), count);
-  serializeJson(doc, out);
+  JsonText::write(doc, out);
 
   out.print(",\"history\":[");
   for (uint8_t i = 0; i < count; i++) {
     doc.clear();
     fillBootRecord(doc, records[i]);
     if (i > 0) out.print(',');
-    serializeJson(doc, out);
+    JsonText::write(doc, out);
   }
   out.print("]}");
   response.finish();
@@ -1455,7 +1458,7 @@ void CrossPointWebServer::handleFileListData() const {
         (*ctx.doc)["isEpub"] = info.isEpub;
         // Straight into the reply: through a buffer, a name of ~150 CJK characters did not fit and
         // was left out of the list. Found by Arthur Tazhitdinov (crosspoint-reader #4285).
-        serializeJson(*ctx.doc, ctx.out->nextEntry());
+        JsonText::write(*ctx.doc, ctx.out->nextEntry());
       },
       &context);
 
@@ -2092,7 +2095,7 @@ void CrossPointWebServer::handleDelete() const {
   DeserializationError error = DeserializationError(DeserializationError::Code::Ok);
   if (hasPathsArg) {
     pathsArg = server->arg("paths");
-    error = deserializeJson(doc, pathsArg);
+    error = JsonText::parse(doc, pathsArg);
   } else {
     pathsArg = server->arg("path");
     doc.add(pathsArg);
@@ -2117,7 +2120,9 @@ void CrossPointWebServer::handleDelete() const {
   for (const auto& p : paths) {
     // Resolved before the protection check below -- see handleFileListData.
     // crosspoint-reader PR #3353.
-    auto itemPath = normalizeWebPath(p.as<String>());
+    // `| ""`, not as<String>(): an entry that is not a string is refused as an empty path, where
+    // as<String>() turned it into its JSON (5 -> "/5") and kept ArduinoJson's String writer in the image.
+    auto itemPath = normalizeWebPath(p | "");
 
     // Validate path
     if (itemPath.isEmpty() || itemPath == "/") {
@@ -2198,7 +2203,7 @@ void CrossPointWebServer::handleGetSettings() const {
   // Straight into the response, without a buffer of its own: an entry can be any size. The
   // timezone row's 86 city names make about 2 KB, more than the 1 KB buffer this used to be
   // formatted into, so the row was dropped and the web page had no Timezone setting.
-  auto sendEntry = [&]() { serializeJson(doc, out.nextEntry()); };
+  auto sendEntry = [&]() { JsonText::write(doc, out.nextEntry()); };
 
   // Rows are visited one at a time (forEachSetting()), never held as a list: the whole list is
   // one 11.5 KB block, and this runs while Wi-Fi holds most of the heap.
@@ -2329,7 +2334,7 @@ void CrossPointWebServer::handlePostSettings() {
 
   const String body = server->arg("plain");
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, body);
+  const DeserializationError err = JsonText::parse(doc, body);
   if (err) {
     server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
     return;
@@ -2711,7 +2716,7 @@ void CrossPointWebServer::handleFontList() {
         fileObj["size"] = 0;
       }
     }
-    serializeJson(doc, out.nextEntry());
+    JsonText::write(doc, out.nextEntry());
   }
   LOG_WEB_MEM("font_list_exit");
   out.finish("}");
@@ -2778,7 +2783,7 @@ void CrossPointWebServer::handleFontManifest() {
     if (one.installed(0) && UiLanguagePacks::usedByInterface(one, 0)) doc["inUse"] = true;
     doc["totalSize"] = static_cast<unsigned long>(one.totalSize(0));
     doc["fileCount"] = static_cast<unsigned>(one.fileCount(0));
-    serializeJson(doc, s.out->nextEntry());
+    JsonText::write(doc, s.out->nextEntry());
   };
   FontManifestReader reader = manifestReader();
   std::string baseUrl;
@@ -2798,7 +2803,7 @@ void CrossPointWebServer::handleFontManifest() {
 void CrossPointWebServer::handleFontDownload() {
   String body = server->arg("plain");
   JsonDocument req;
-  if (deserializeJson(req, body)) {
+  if (JsonText::parse(req, body)) {
     server->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid request\"}");
     return;
   }
@@ -3140,7 +3145,7 @@ void CrossPointWebServer::handleFontUpload() {
 void CrossPointWebServer::handleFontDelete() {
   String body = server->arg("plain");
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, body);
+  DeserializationError err = JsonText::parse(doc, body);
 
   if (err || !doc["family"].is<const char*>()) {
     server->send(400, "application/json", "{\"error\":\"Invalid request\"}");
@@ -3209,7 +3214,7 @@ void CrossPointWebServer::handleGetWifiNetworks() const {
     doc["hasPassword"] = !credentials[i].password.empty();
     doc["isLastConnected"] = credentials[i].ssid == lastConnectedSsid;
 
-    const size_t written = serializeJson(doc, output, outputSize);
+    const size_t written = JsonText::write(doc, output, outputSize);
     if (written >= outputSize) continue;
 
     out.addEntry(output, written);
@@ -3227,7 +3232,7 @@ void CrossPointWebServer::handlePostWifiNetwork() {
 
   const String body = server->arg("plain");
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, body);
+  const DeserializationError err = JsonText::parse(doc, body);
   if (err) {
     server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
     return;
@@ -3297,7 +3302,7 @@ void CrossPointWebServer::handleDeleteWifiNetwork() {
 
   const String body = server->arg("plain");
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, body);
+  const DeserializationError err = JsonText::parse(doc, body);
   if (err) {
     server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
     return;
@@ -3348,7 +3353,7 @@ void CrossPointWebServer::handleGetOpdsServers() const {
     // Never expose passwords over the API — only indicate whether one is set
     doc["hasPassword"] = !servers[i].password.empty();
 
-    const size_t written = serializeJson(doc, output, outputSize);
+    const size_t written = JsonText::write(doc, output, outputSize);
     if (written >= outputSize) continue;
 
     out.addEntry(output, written);
@@ -3366,7 +3371,7 @@ void CrossPointWebServer::handlePostOpdsServer() {
 
   const String body = server->arg("plain");
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, body);
+  const DeserializationError err = JsonText::parse(doc, body);
   if (err) {
     server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
     return;
@@ -3455,7 +3460,7 @@ void CrossPointWebServer::handleDeleteOpdsServer() {
 
   const String body = server->arg("plain");
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, body);
+  const DeserializationError err = JsonText::parse(doc, body);
   if (err) {
     server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
     return;
@@ -3523,7 +3528,7 @@ void CrossPointWebServer::handlePluginList() const {
     if (e.hasManifest &&
         Storage.readFileToString("WEB", e.dir + "/manifest.json", PLUGIN_MANIFEST_MAX_BYTES, manifest)) {
       JsonDocument m;
-      if (deserializeJson(m, manifest) == DeserializationError::Ok) {
+      if (JsonText::parse(m, manifest) == DeserializationError::Ok) {
         if (m["title"].is<const char*>()) doc["title"] = m["title"];
         if (m["mount"].is<const char*>()) doc["mount"] = m["mount"];
         if (m["description"].is<const char*>()) doc["description"] = m["description"];
@@ -3538,7 +3543,7 @@ void CrossPointWebServer::handlePluginList() const {
       }
     }
 
-    const size_t written = serializeJson(doc, output.get(), kEntryBytes);
+    const size_t written = JsonText::write(doc, output.get(), kEntryBytes);
     if (written >= kEntryBytes) {
       LOG_DBG("WEB", "Plugin %s: entry too long, skipped", e.name.c_str());
       continue;
@@ -3699,7 +3704,7 @@ void CrossPointWebServer::handleRelayPost() {
   if (!requireJsonBody(server.get())) return;
 
   JsonDocument req;
-  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+  if (JsonText::parse(req, server->arg("plain")) != DeserializationError::Ok) {
     server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
     return;
   }
@@ -3801,7 +3806,7 @@ void CrossPointWebServer::handleBookKey() {
   if (rejectIfLowMemory(server.get())) return;
   if (!requireJsonBody(server.get())) return;
   JsonDocument req;
-  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+  if (JsonText::parse(req, server->arg("plain")) != DeserializationError::Ok) {
     server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
     return;
   }
@@ -3889,7 +3894,7 @@ void CrossPointWebServer::handleCrypto() {
   if (rejectIfLowMemory(server.get(), MIN_HEAP_FOR_CRYPTO)) return;
   if (!requireJsonBody(server.get())) return;
   JsonDocument req;
-  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+  if (JsonText::parse(req, server->arg("plain")) != DeserializationError::Ok) {
     server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
     return;
   }
@@ -4045,7 +4050,7 @@ void CrossPointWebServer::handleFetchToSd() {
   // browser-side segments (offset, maxBytes) only work around mobile browsers dropping long requests: the plugin
   // host here makes one call, and the answer reports the whole file.
   JsonDocument req;
-  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+  if (JsonText::parse(req, server->arg("plain")) != DeserializationError::Ok) {
     server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
     return;
   }
@@ -4167,7 +4172,7 @@ void CrossPointWebServer::handlePluginHostsList() const {
 void CrossPointWebServer::handlePluginHostsSet() const {
   if (!requireJsonBody(server.get())) return;
   JsonDocument req;
-  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+  if (JsonText::parse(req, server->arg("plain")) != DeserializationError::Ok) {
     server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
     return;
   }

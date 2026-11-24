@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <HalStorage.h>
 #include <JsonFile.h>
+#include <JsonText.h>
 #include <Logging.h>
 
 WeatherSettingsStore WeatherSettingsStore::instance;
@@ -54,7 +55,7 @@ bool WeatherSettingsStore::loadFromFile() {
   }
 
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     LOG_ERR("WEA", "JSON parse error: %s", error.c_str());
     return false;
