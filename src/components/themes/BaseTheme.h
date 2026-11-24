@@ -315,6 +315,14 @@ class BaseTheme {
                                 int /*max*/) const {
     return 0;
   }
+  // Whether Home shows the time in a widget of its own, apart from the header's clock that Use Clock
+  // switches. Home then asks for the clock's minute tick whatever Use Clock says, at its idle pace
+  // (HomeClockCadence). Asked when Home opens, after setHomeMenu().
+  virtual bool homeShowsClock(const GfxRenderer& /*renderer*/, Rect /*content*/) const { return false; }
+  // The day turned while Home is up, or the clock was set: a theme whose widgets show the day (a
+  // calendar, the week's reading) reads what they show for it again, and returns true so Home
+  // redraws. Called by HomeActivity on the loop task with the render lock held.
+  virtual bool refreshHomeDay(const GfxRenderer& /*renderer*/, Rect /*content*/) { return false; }
 
   // Home's rows in screen order (HomeGridNav): Up and Down between rows and Left and Right along one
   // on a board with a key for each direction, and the order Up and Down alone step through. None

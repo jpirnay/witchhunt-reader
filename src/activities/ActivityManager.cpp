@@ -18,6 +18,7 @@
 #include "DarkMode.h"
 #include "DarkModeNow.h"
 #include "FlashLayoutNotice.h"
+#include "MinuteTick.h"
 #include "OpdsServerStore.h"
 #include "SdCardFontGlobals.h"
 #include "SettingsList.h"
@@ -313,14 +314,20 @@ void ActivityManager::loop() {
 #endif
   }
 
-  if (SETTINGS.useClock && HalClock::isSynced()) {
-    time_t now = HalClock::now();
+  // The clock's minute tick: Use Clock asks it of every screen, a screen with a clock of its own asks
+  // for it itself (MinuteTick). The minute is followed whenever the clock is set, not only while one
+  // of them asks: Home with a Clock widget would otherwise be redrawn just after its first frame, for
+  // a minute that turned before it opened.
+  if (HalClock::isSynced()) {
+    const time_t now = HalClock::now();
     if (now > 0) {
       static time_t lastMinute = -1;
-      time_t minute = now / 60;
+      const time_t minute = now / 60;
       if (minute != lastMinute) {
         lastMinute = minute;
-        if (!currentActivity || !currentActivity->shouldSkipPeriodicUpdate()) {
+        const bool screenShowsTime = currentActivity && currentActivity->onClockMinute();
+        if (MinuteTick::redraws(SETTINGS.useClock, screenShowsTime,
+                                [this] { return currentActivity && currentActivity->shouldSkipPeriodicUpdate(); })) {
           requestUpdate();
         }
       }

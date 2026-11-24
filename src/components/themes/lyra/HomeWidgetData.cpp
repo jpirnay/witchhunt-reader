@@ -142,7 +142,7 @@ void removeReplacedHomePictures(const std::string& target) {
   }
 }
 
-void HomeWidgetData::load(const HomeTilesLayout::Config& config, const std::string* pictureSources) {
+void HomeWidgetData::loadDay(const HomeTilesLayout::Config& config) {
   const bool wantsDate = uses(config, Widget::Calendar);
   const bool wantsReading = uses(config, Widget::Summary) || wantsDate;
 
@@ -192,6 +192,10 @@ void HomeWidgetData::load(const HomeTilesLayout::Config& config, const std::stri
       LOG_DBG("HOME", "Widgets: no reading stats");
     }
   }
+}
+
+void HomeWidgetData::load(const HomeTilesLayout::Config& config, const std::string* pictureSources) {
+  loadDay(config);
 
   weatherKnown = false;
   if (uses(config, Widget::Weather)) {

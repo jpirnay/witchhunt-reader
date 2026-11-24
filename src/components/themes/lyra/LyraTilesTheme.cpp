@@ -330,6 +330,19 @@ int LyraTilesTheme::homeWidgetActions(const GfxRenderer& /*renderer*/, const Rec
   return n;
 }
 
+bool LyraTilesTheme::homeShowsClock(const GfxRenderer& /*renderer*/, const Rect content) const {
+  // A clock in a row left out for room asks for nothing.
+  return placement(content, menuCount_).find(Widget::Clock) != nullptr;
+}
+
+bool LyraTilesTheme::refreshHomeDay(const GfxRenderer& /*renderer*/, const Rect content) {
+  const HomeTilesLayout::Placement p = placement(content, menuCount_);
+  if (p.find(Widget::Calendar) == nullptr && p.find(Widget::Summary) == nullptr) return false;
+  // Only what the day decides: the forecast and the pictures stay as Home opened with them.
+  data_.loadDay(config_);
+  return true;
+}
+
 HomeGridNav::Grid LyraTilesTheme::homeGrid(const GfxRenderer& /*renderer*/, const Rect content, const int shownBooks,
                                            const int menuCount, const int menuTrailing) const {
   (void)menuTrailing;

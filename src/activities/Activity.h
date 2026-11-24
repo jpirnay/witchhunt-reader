@@ -178,6 +178,14 @@ class Activity {
   // followed by a no-diff e-ink refresh, which on X3 panels accumulates visible speckle.
   virtual bool shouldSkipPeriodicUpdate() const { return false; }
 
+  // The clock's minute turned: ActivityManager::loop() asks once a minute while the clock is set, on
+  // the loop task with no lock held. True when this screen shows the time apart from the header and
+  // status-bar clocks Use Clock switches (Home's Clock widget), or shows something the minute just
+  // changed (the day Home's calendar shows): the tick then redraws it whatever Use Clock says, still
+  // through shouldSkipPeriodicUpdate() (MinuteTick). A screen may bring that state up to date here,
+  // under RenderLock. Default: nothing of its own, so only Use Clock asks for the tick.
+  virtual bool onClockMinute() { return false; }
+
   // Called by ActivityManager when a globally-configured button action targets the
   // current activity. Override in reader activities to handle reader-specific actions.
   // Non-reader activities can ignore this (default is no-op).

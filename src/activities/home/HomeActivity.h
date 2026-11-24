@@ -109,6 +109,12 @@ class HomeActivity final : public Activity {
   // Makes one picture a widget shows that is not on the card yet; false when none is left.
   bool makeNextHomePicture();
   bool gridNav_ = false;
+  // Whether the theme shows a clock among its widgets (BaseTheme::homeShowsClock): Home then takes
+  // the minute tick whatever Use Clock says. Set in onEnter().
+  bool showsClock_ = false;
+  // The day the theme read its widgets for (currentLocalDayIndex(), 0 while the clock is not set).
+  // Loop task only.
+  uint16_t shownDay_ = 0;
 
   std::string focusBookPath;
   int focusSelectorIndex = -1;
@@ -172,6 +178,9 @@ class HomeActivity final : public Activity {
   // The clock's minute tick redraws Home every minute while it is in use and every ten once it has
   // been left alone for ten (HomeClockCadence).
   bool shouldSkipPeriodicUpdate() const override;
+  // The minute turned: the widgets that show the day read it again when it has changed, and a Clock
+  // widget asks for the redraw whatever Use Clock says.
+  bool onClockMinute() override;
 #if SERIAL_TEST_API
   // The covers still to load are the work CMD:IDLE waits for: the same answer as above.
   bool hasPendingBackgroundWork() override { return skipLoopDelay(); }
