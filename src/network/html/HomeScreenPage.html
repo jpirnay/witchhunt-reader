@@ -179,7 +179,8 @@
         state.webFiles = new Set(await listPictures(L.WEB_PICTURE_FOLDER));
       }
 
-      // The plugins this page made for pictures from the web, by name: {root, url, event, dest}.
+      // The plugins this page made for pictures from the web, by name: {root, url, event, dest, disabled}; `disabled`
+      // when switched off on the Plugins page.
       async function loadWebPlugins() {
         state.webPlugins = {};
         let plugins = [];
@@ -189,11 +190,12 @@
           return;
         }
         for (const plugin of plugins.filter((p) => p.name.startsWith(L.WEB_PICTURE_PLUGIN))) {
+          const disabled = !!plugin.disabled;
           try {
             const manifest = await getJson(`/download?path=${enc(`${plugin.root}/${plugin.name}/manifest.json`)}`);
-            if (manifest.homeScreen) state.webPlugins[plugin.name] = { root: plugin.root, ...manifest.homeScreen };
+            if (manifest.homeScreen) state.webPlugins[plugin.name] = { root: plugin.root, ...manifest.homeScreen, disabled };
           } catch {
-            state.webPlugins[plugin.name] = { root: plugin.root };
+            state.webPlugins[plugin.name] = { root: plugin.root, disabled };
           }
         }
       }
@@ -788,6 +790,24 @@
         await post(`/api/plugins/commit?name=${enc(plugin.name)}`);
       }
 
+      const hostOf = (url) => {
+        try {
+          return new URL(url).hostname;
+        } catch {
+          return '';
+        }
+      };
+
+      // A picture's plugin, made again on each save; `before` is what the slot's plugin was ({url, disabled}), or
+      // nothing. The hosts the user approved for a plugin are kept by its name, home-picture-n, so a slot that now
+      // fetches from another host loses them first (removing the plugin drops them). The install replaces the
+      // plugin's folder, and with it the mark the Plugins page leaves on one switched off: set again.
+      async function installWebPlugin(plugin, before) {
+        if (before && hostOf(before.url) !== plugin.host) await post(`/api/plugins/remove?name=${enc(plugin.name)}`);
+        await installPlugin(plugin);
+        if (before && before.disabled) await post(`/api/plugins/enable?name=${enc(plugin.name)}&on=0`);
+      }
+
       // A picture that never changes, made once: fetched by the browser (its service allows that) and uploaded.
       // Answers what happened; a failure is a line, as the layout is already saved.
       async function fetchOnce(source, dest, box) {
@@ -809,7 +829,8 @@
 
       // Each picture from the web gets its plugin (made again, as its address, event or size may have
       // changed) and is fetched once now, or, for a once preset, is made by the browser; the plugins of
-      // pictures no longer fetched by one go. Answers what happened, a line a picture.
+      // pictures no longer fetched by one go. Answers what happened, a line a picture; throws only when the
+      // folders cannot be made.
       async function syncWebPictures() {
         const result = L.layOut(layoutJson(), state.device);
         const lines = [];
@@ -833,29 +854,54 @@
           else lines.push(`${dest} is not set up: its address takes the picture's size, and its row does not fit on ` +
             'this reader. Save again once it fits.');
         }
+        // What each slot's plugin is once this is done, for the next save.
+        const now = {};
         for (const plugin of plugins) {
-          await installPlugin(plugin);
-          const fetchNow = () => fetch(`/api/fetch?plugin=${enc(plugin.name)}&url=${enc(plugin.url)}&dest=${enc(plugin.dest)}`,
-            { method: 'POST' });
-          let response = await fetchNow();
-          let answer = await response.json().catch(() => ({}));
-          // A redirect to another host is refused until that host is approved for the plugin, as plugins ask.
-          if (response.status === 403 && answer.host &&
-              confirm(`The picture's server sends the reader on to ${answer.host}. Allow the reader to fetch from it?`)) {
-            await post('/api/plugins/hosts', JSON.stringify({ plugin: plugin.name, host: answer.host, allow: true }),
-              { 'Content-Type': 'application/json' });
-            response = await fetchNow();
-            answer = await response.json().catch(() => ({}));
+          const before = state.webPlugins[plugin.name];
+          try {
+            await installWebPlugin(plugin, before);
+          } catch (error) {
+            if (before) now[plugin.name] = before;
+            lines.push(`${plugin.dest}: its plugin was not installed (${error.message}); save again to retry.`);
+            continue;
           }
-          lines.push(response.ok && answer.ok && answer.complete
-            ? `Fetched ${plugin.dest} (${Math.round((answer.bytes || 0) / 1024)} KB).`
-            : `${plugin.dest} was not fetched now (${answer.error || answer.status || response.status}); the reader tries again ` +
-              'when it fetches it next.');
+          const disabled = !!(before && before.disabled);
+          now[plugin.name] = { ...JSON.parse(plugin.files['manifest.json']).homeScreen, disabled };
+          if (disabled) {
+            lines.push(`${plugin.dest} is not fetched: its plugin is switched off on the Plugins page.`);
+            continue;
+          }
+          try {
+            const fetchNow = () => fetch(`/api/fetch?plugin=${enc(plugin.name)}&url=${enc(plugin.url)}&dest=${enc(plugin.dest)}`,
+              { method: 'POST' });
+            let response = await fetchNow();
+            let answer = await response.json().catch(() => ({}));
+            // A redirect to another host is refused until that host is approved for the plugin, as plugins ask.
+            if (response.status === 403 && answer.host &&
+                confirm(`The picture's server sends the reader on to ${answer.host}. Allow the reader to fetch from it?`)) {
+              await post('/api/plugins/hosts', JSON.stringify({ plugin: plugin.name, host: answer.host, allow: true }),
+                { 'Content-Type': 'application/json' });
+              response = await fetchNow();
+              answer = await response.json().catch(() => ({}));
+            }
+            lines.push(response.ok && answer.ok && answer.complete
+              ? `Fetched ${plugin.dest} (${Math.round((answer.bytes || 0) / 1024)} KB).`
+              : `${plugin.dest} was not fetched now (${answer.error || answer.status || response.status}); the reader tries ` +
+                'again when it fetches it next.');
+          } catch (error) {
+            lines.push(`${plugin.dest} was not fetched now (${error.message}); the reader tries again when it fetches it next.`);
+          }
         }
-        for (const name of Object.keys(state.webPlugins)) {
-          if (!plugins.some((p) => p.name === name)) await post(`/api/plugins/remove?name=${enc(name)}`);
+        for (const [name, before] of Object.entries(state.webPlugins)) {
+          if (plugins.some((p) => p.name === name)) continue;
+          try {
+            await post(`/api/plugins/remove?name=${enc(name)}`);
+          } catch (error) {
+            now[name] = before;
+            lines.push(`${name} was not removed (${error.message}); remove it on the Plugins page.`);
+          }
         }
-        state.webPlugins = Object.fromEntries(plugins.map((p) => [p.name, JSON.parse(p.files['manifest.json']).homeScreen]));
+        state.webPlugins = now;
         await loadPictures();
         return lines;
       }
@@ -869,26 +915,41 @@
         }
         button.disabled = true;
         $('saveState').textContent = 'Saving...';
+        // Three steps, each saying how it went: the layout file, the settings that show it, the pictures from the
+        // web. Only the first failing is "Not saved"; after it the file is on the card whatever follows.
+        const text = layoutJson();
         try {
           const response = await fetch('/api/home-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: layoutJson() });
+            body: text });
           if (!response.ok) throw new Error(await response.text());
+        } catch (error) {
+          $('saveState').textContent = `Not saved: ${error.message}`;
+          button.disabled = false;
+          return;
+        }
+        state.fileText = text;
+        state.dirty = false;
+        const lines = [];
+        try {
           const settings = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ uiTheme: THEME_TILES, homeLayout: LAYOUT_CUSTOM }) });
           if (!settings.ok) throw new Error(await settings.text());
-          state.fileText = layoutJson();
           if (state.settings.uiTheme) state.settings.uiTheme.value = THEME_TILES;
           if (state.settings.homeLayout) state.settings.homeLayout.value = LAYOUT_CUSTOM;
-          const fetched = await syncWebPictures();
-          state.dirty = false;
-          showNotice(L.parse(state.fileText));
-          $('saveState').textContent = ['Saved. The reader shows it on Home once you leave File Transfer.', ...fetched].join(' ');
-          render();
+          lines.push('Saved. The reader shows it on Home once you leave File Transfer.');
         } catch (error) {
-          $('saveState').textContent = `Not saved: ${error.message}`;
-        } finally {
-          button.disabled = false;
+          lines.push(`The layout is saved, but the reader was not switched to it (${error.message}): save again, or choose ` +
+            'the Lyra Tiles theme and its Custom layout in the reader’s Display settings.');
         }
+        try {
+          lines.push(...await syncWebPictures());
+        } catch (error) {
+          lines.push(`The pictures from the web were not set up (${error.message}); save again to retry.`);
+        }
+        showNotice(L.parse(state.fileText));
+        $('saveState').textContent = lines.join(' ');
+        render();
+        button.disabled = false;
       }
 
       $('start').addEventListener('change', (e) => {

@@ -79,6 +79,8 @@ page fetches the picture once through `/api/fetch` as it saves. The reader fills
 with them gets no plugin while its row does not fit (the page removes the one it had and says so). A note and a QR code never change: the
 browser fetches them once from their service (which allows it) and uploads the file, and no plugin
 fetches them again. The page replaces the plugins when the layout changes and removes those of
-pictures it no longer shows. The firmware has no code of its own for any of this: what such a picture
+pictures it no longer shows. A plugin switched off on the Plugins page is switched off again after the
+replacement, and one whose host changed is removed first, so the hosts approved for the old address
+(kept by the plugin's name) do not carry over. The firmware has no code of its own for any of this: what such a picture
 shows is the business of the service behind the address ([SCOPE.md](../SCOPE.md)). Every source was
 checked on 2026-11-24; a service may change or stop.

@@ -302,8 +302,11 @@ to this one), or that its Home already shows this layout.
    is now. Click a part of the preview to find its row in the list. A row the screen has no room for
    is marked **does not fit on this reader**, and the list under the preview says why a widget is left
    out.
-4. Click **Save and use on the reader**. The line beside the button says what was saved and fetched.
-   The reader shows the new Home when you leave File Transfer.
+4. Click **Save and use on the reader**. The line beside the button says what was saved and fetched,
+   and what was not: **Not saved** only when the layout itself could not be written. When the layout
+   was written but the reader could not be switched to it, or a picture from the web could not be set
+   up, it says that, and saving again tries once more. The reader shows the new Home when you leave
+   File Transfer.
 
 The widgets:
 
@@ -362,7 +365,10 @@ picture's site. For each one, choose when the reader fetches it: **Each time the
 or **After you close a book** (fetched at the next sleep). The reader then joins your last Wi-Fi network
 as it goes to sleep, as for any [plugin that acts while you read](#11-plugins), so going to sleep takes
 a few seconds longer. Saving fetches each picture once straight away. If a picture's server sends the
-reader on to another site, the page asks whether to allow that site. A source drawn at the picture's
+reader on to another site, the page asks whether to allow that site; that permission belongs to the
+picture's slot and is dropped when the slot changes to a source on another site. A picture plugin you
+switch off on the Plugins page stays off when you save again here: the reader does not fetch that
+picture until you switch it on there. A source drawn at the picture's
 size (the random photo, the month calendar, an address of your own with `{width}` or `{height}`) is set
 up only while its row fits on this reader: otherwise the preview and the save say so, and it gets no
 plugin until you save again with the row in place. When you remove a picture from the
