@@ -31,6 +31,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "SleepImagePlacement.h"
+#include "SleepPixelCacheStamp.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/Logo120.h"
@@ -55,18 +56,53 @@ namespace {
 //
 // The leading dot keeps it out of collectSleepImages(), which skips dotfiles, so a
 // cache can never be picked as a sleep image itself.
+//
+// The name says nothing about which file was at the image's path, so the cache ends
+// with a stamp of the PNG it was decoded from (SleepPixelCacheStamp.h).
 std::string sleepPixelCachePath(const std::string& imagePath, uint8_t filter) {
   const size_t slash = imagePath.find_last_of('/');
   if (slash == std::string::npos) return "";
   return imagePath.substr(0, slash + 1) + "." + imagePath.substr(slash + 1) + ".f" + std::to_string(filter) + ".pxc";
 }
 
+// Header and rows of a width x height sleep pixel cache: where its source stamp starts.
+size_t sleepPixelCacheBytes(const int width, const int height) {
+  return PixelCache::PXC_HEADER_BYTES + static_cast<size_t>((width + 3) / 4) * static_cast<size_t>(height);
+}
+
+bool readSleepSourceStamp(const std::string& imagePath, sleep_pixel_cache::SourceStamp& out) {
+  FsFile source;
+  if (!Storage.openFileForRead("SLP", imagePath, source)) return false;
+  out = sleep_pixel_cache::stampOf(source);
+  source.close();
+  return true;
+}
+
+// Stamps the cache the decode has just written with its source. A cache that cannot take the stamp is removed rather
+// than left to be thrown away by the next sleep. False when there is no stamped cache to replay.
+bool stampSleepPixelCache(const std::string& cachePath, const int width, const int height,
+                          const sleep_pixel_cache::SourceStamp& source) {
+  if (!Storage.exists(cachePath.c_str())) return false;  // the decode wrote none
+  FsFile cacheFile;
+  bool stamped = false;
+  if (Storage.openFileForUpdate("SLP", cachePath, cacheFile)) {
+    stamped = sleep_pixel_cache::append(cacheFile, sleepPixelCacheBytes(width, height), source);
+    cacheFile.close();
+  }
+  if (!stamped) {
+    LOG_ERR("SLP", "Could not stamp sleep pixel cache, removing: %s", cachePath.c_str());
+    Storage.remove(cachePath.c_str());
+  }
+  return stamped;
+}
+
 // Replays a cached 2-bit image into the framebuffer under the current render mode.
-// Returns false if the cache is missing, stale, or does not match the expected
-// geometry, in which case the caller decodes normally. A version or size mismatch
-// deletes the file so the next decode rewrites it.
+// Returns false if the cache is missing, stale, does not match the expected
+// geometry or was decoded from another file than `source`, in which case the caller
+// decodes normally. A version, size or source mismatch deletes the file so the next
+// decode rewrites it.
 bool renderSleepImageFromCache(GfxRenderer& renderer, const std::string& cachePath, int x, int y, int expectedWidth,
-                               int expectedHeight) {
+                               int expectedHeight, const sleep_pixel_cache::SourceStamp& source) {
   FsFile cacheFile;
   if (!Storage.openFileForRead("SLP", cachePath, cacheFile)) return false;
 
@@ -89,6 +125,14 @@ bool renderSleepImageFromCache(GfxRenderer& renderer, const std::string& cachePa
     cacheFile.close();
     LOG_INF("SLP", "Sleep pixel cache geometry changed (%ux%u vs %dx%d), deleting: %s", cachedWidth, cachedHeight,
             expectedWidth, expectedHeight, cachePath.c_str());
+    Storage.remove(cachePath.c_str());
+    return false;
+  }
+  // Same name and geometry, but perhaps another picture: a PNG replaced by one of the same dimensions.
+  if (!sleep_pixel_cache::matches(cacheFile, sleepPixelCacheBytes(cachedWidth, cachedHeight), source,
+                                  PixelCache::PXC_HEADER_BYTES)) {
+    cacheFile.close();
+    LOG_INF("SLP", "Sleep pixel cache is not of the image now at its path, deleting: %s", cachePath.c_str());
     Storage.remove(cachePath.c_str());
     return false;
   }
@@ -311,8 +355,9 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
       nativeGray ? std::string() : sleepPixelCachePath(filename, SETTINGS.sleepScreenCoverFilter);
   int cacheW = 0, cacheH = 0, cacheX = 0, cacheY = 0;
   ImageDimensions srcDims{};
+  sleep_pixel_cache::SourceStamp sourceStamp;
   if (!cachePath.empty() && PngToFramebufferConverter::getDimensionsStatic(filename, srcDims) && srcDims.width > 0 &&
-      srcDims.height > 0) {
+      srcDims.height > 0 && readSleepSourceStamp(filename, sourceStamp)) {
     const ImageScale scale =
         ImageScale::smaller(ImageScale::fit(srcDims.width, srcDims.height, pageWidth, pageHeight), ImageScale());
     cacheW = std::max(1, scale.apply(srcDims.width));
@@ -328,7 +373,7 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   bool useCache = false;
   if (cacheW > 0) {
     renderer.setRenderMode(GfxRenderer::BW);
-    useCache = renderSleepImageFromCache(renderer, cachePath, cacheX, cacheY, cacheW, cacheH);
+    useCache = renderSleepImageFromCache(renderer, cachePath, cacheX, cacheY, cacheW, cacheH, sourceStamp);
   }
 
   // Derived once and shared by all three passes below: a PNG cannot be rewound, so
@@ -341,7 +386,7 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
                                                                          sleepEqualizeBlend(renderer));
   }
   // Write the cache on the decoding pass only; the filter is already part of the
-  // cache filename, so no separate invalidation is needed.
+  // cache filename, and the source stamp goes on once the decode has written it.
   if (!useCache && cacheW > 0) config.cachePath = cachePath;
 
   // Overlay drawing is shared across all three rendering passes (BW + LSB + MSB) so the
@@ -439,8 +484,8 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
       return false;
     }
     // The decode just wrote the cache, so the remaining passes replay instead of
-    // decoding again.
-    useCache = !config.cachePath.empty() && Storage.exists(cachePath.c_str());
+    // decoding again, once it carries its source's stamp.
+    useCache = !config.cachePath.empty() && stampSleepPixelCache(cachePath, cacheW, cacheH, sourceStamp);
   }
   drawOverlay();
   // Fire the BW scrub without waiting where that is safe (see shipSleepGrayBase): the
@@ -451,7 +496,9 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   // Passes 2 and 3 replay the cache when one is available; the render mode selects
   // which bit-plane each cached 2-bit value lands in, so no re-decode is needed.
   const auto renderPass = [&](const char* planeName) -> bool {
-    if (useCache && renderSleepImageFromCache(renderer, cachePath, cacheX, cacheY, cacheW, cacheH)) return true;
+    if (useCache && renderSleepImageFromCache(renderer, cachePath, cacheX, cacheY, cacheW, cacheH, sourceStamp)) {
+      return true;
+    }
     if (!decoder.decodeToFramebuffer(filename, renderer, config)) {
       LOG_DBG("SLP", "PNG sleep image %s decode failed: %s", planeName, filename.c_str());
       return false;
