@@ -56,7 +56,7 @@ class FixedVector {
 
   void clear() { size_ = 0; }
 
-  OT_HOT bool push_back(const T& value) {
+  OT_HOT_HEADER bool push_back(const T& value) {
     if (size_ >= capacity_) return refuse();
     data_[size_++] = value;
     return true;
