@@ -74,7 +74,8 @@ def image_to_c_array(img, array_name):
     # Format as C array
     c = "#pragma once\n#include <cstdint>\n\n"
     c += f"// size: {width}x{height}\n"
-    c += f"static const uint8_t {array_name}[] = {{\n    "
+    # inline, not static: a static array is linked once per file that includes the header.
+    c += f"inline constexpr uint8_t {array_name}[] = {{\n    "
     for i, v in enumerate(packed):
         c += f"0x{v:02X}, "
         if (i + 1) % 16 == 0:
