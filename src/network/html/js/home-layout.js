@@ -498,10 +498,16 @@
     return `${WEB_PICTURE_FOLDER}/web-${n}${webSourceExt(typeof source === 'string' ? { url: source } : source)}`;
   }
 
-  // The plugin that fetches the n-th picture from the web: {name, dest, url, files: {'device.json', 'manifest.json'}}.
-  // `source` is {url, event} or a preset's {preset, ..., event}; `size` the widget's {w, h}, or null when it is not
-  // shown. Not for a once preset, which no plugin fetches.
+  // Whether a source's address takes the widget's size ({width}, {height}): it cannot be fetched before its row is
+  // shown on the reader. The reader fills no placeholder, so it would ask for "{width}" on every sleep.
+  const webSourceNeedsSize = (source) => /\{(width|height)\}/.test(webSourceUrl(source, null));
+
+  // The plugin that fetches the n-th picture from the web: {name, dest, url, host, files: {'device.json',
+  // 'manifest.json'}}. `source` is {url, event} or a preset's {preset, ..., event}; `size` the widget's {w, h}, or
+  // null when it is not shown: then null for an address that needs the size. Not for a once preset, which no plugin
+  // fetches.
   function webPicturePlugin(n, source, size) {
+    if (!size && webSourceNeedsSize(source)) return null;
     const name = `${WEB_PICTURE_PLUGIN}${n}`;
     const dest = webPictureDest(n, source);
     const template = webSourceUrl(source, null);
@@ -534,6 +540,6 @@
     DIMENSIONS, PRESETS, DESTINATIONS, MENU_DESTINATIONS, PAIRS, SINGLE, OPENS, MAX_ROWS, MAX_PICTURES, MAX_BYTES,
     PICTURE_FOLDER, WEB_PICTURE_FOLDER, WEB_PICTURE_PLUGIN, WEB_PICTURE_EVENTS, WEB_PICTURE_PRESETS, parse, withAvailable,
     place, card, strip, bottomCount, layOut, webPictureDest, fillSize, webSourceUrl, webSourceExt, webSourceProblem,
-    webPicturePlugin,
+    webSourceNeedsSize, webPicturePlugin,
   };
 })();

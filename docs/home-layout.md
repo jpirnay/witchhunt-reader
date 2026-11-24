@@ -74,7 +74,8 @@ whose one event handler downloads the address to the file
 ([plugin events](sd-plugins.md#events-the-reader-sends-a-plugins-requests)), and a `manifest.json` that
 may reach the address's host and its subdomains and keeps the address and the preset under
 `homeScreen`. `{width}` and `{height}` are filled with the widget's size when the page saves, and the
-page fetches the picture once through `/api/fetch` as it saves. A note and a QR code never change: the
+page fetches the picture once through `/api/fetch` as it saves. The reader fills neither, so an address
+with them gets no plugin while its row does not fit (the page removes the one it had and says so). A note and a QR code never change: the
 browser fetches them once from their service (which allows it) and uploads the file, and no plugin
 fetches them again. The page replaces the plugins when the layout changes and removes those of
 pictures it no longer shows. The firmware has no code of its own for any of this: what such a picture

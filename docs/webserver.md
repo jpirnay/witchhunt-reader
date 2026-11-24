@@ -362,7 +362,10 @@ picture's site. For each one, choose when the reader fetches it: **Each time the
 or **After you close a book** (fetched at the next sleep). The reader then joins your last Wi-Fi network
 as it goes to sleep, as for any [plugin that acts while you read](#11-plugins), so going to sleep takes
 a few seconds longer. Saving fetches each picture once straight away. If a picture's server sends the
-reader on to another site, the page asks whether to allow that site. When you remove a picture from the
+reader on to another site, the page asks whether to allow that site. A source drawn at the picture's
+size (the random photo, the month calendar, an address of your own with `{width}` or `{height}`) is set
+up only while its row fits on this reader: otherwise the preview and the save say so, and it gets no
+plugin until you save again with the row in place. When you remove a picture from the
 web from the layout, saving removes its plugin as well.
 
 **A note and a QR code never change.** Your browser asks the service for them once when you save (a

@@ -83,8 +83,14 @@ check(sleep.name === 'home-picture-1' && manifest.catalog === false, 'the plugin
 check(JSON.stringify(manifest.allowedHosts) === '["img.example",".img.example"]', 'it may reach the host and its subdomains');
 check(manifest.homeScreen.url === 'https://img.example/render?w={width}&h={height}' && manifest.homeScreen.event === 'sleep.enter',
       'it keeps the address as written, for the page to show again');
-const unshown = HomeLayout.webPicturePlugin(1, { url: 'https://x.org/{width}.jpg', event: 'nonsense' }, null);
-check(unshown.url === 'https://x.org/{width}.jpg', 'a picture not shown keeps {width} unfilled');
+// The reader fills no {width}: a plugin made without the size would ask for it as written on every sleep.
+check(HomeLayout.webPicturePlugin(1, { url: 'https://x.org/{width}.jpg', event: 'sleep.enter' }, null) === null &&
+      HomeLayout.webPicturePlugin(1, { preset: 'photo', event: 'sleep.enter' }, null) === null,
+      'no plugin for a picture not shown whose address takes its size');
+check(HomeLayout.webSourceNeedsSize({ preset: 'calendar' }) && !HomeLayout.webSourceNeedsSize({ preset: 'sun' }) &&
+      !HomeLayout.webSourceNeedsSize({ url: 'https://x.org/today.jpg' }), 'which addresses take the size');
+const unshown = HomeLayout.webPicturePlugin(1, { url: 'https://x.org/today.jpg', event: 'nonsense' }, null);
+check(unshown.url === 'https://x.org/today.jpg', 'a picture not shown with a fixed address keeps its plugin');
 check('sleep.enter' in JSON.parse(unshown.files['device.json']).events, 'an unknown event is fetched at sleep');
 
 // The ready-made sources (WEB_PICTURE_PRESETS): what each fetches for a 218 x 170 widget.

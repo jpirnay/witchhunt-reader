@@ -686,9 +686,14 @@
         const paths = new Set(state.rows.flat().filter((c) => c.widget === 'picture').map((c) => c.path || PICTURE_FOLDER));
         if (paths.size > L.MAX_PICTURES) add(`At most ${L.MAX_PICTURES} different pictures: the others are left out.`);
         if (new TextEncoder().encode(layoutJson()).length > L.MAX_BYTES) add('The layout is too long to save (4 KB at most).');
-        webCells().forEach((cell) => {
+        webCells().forEach((cell, i) => {
           const problem = L.webSourceProblem(cell.web);
           if (problem) add(problem);
+          const dest = L.webPictureDest(i + 1, cell.web);
+          const shown = result.placement.items.some((it) => it.cell.widget === 'picture' && result.pictures[it.cell.option] === dest);
+          if (!shown && !ONCE.has(cell.web.preset) && L.webSourceNeedsSize(cell.web)) {
+            add(`${dest} is not fetched until its row fits on this reader: its address takes the picture's size.`);
+          }
         });
       }
 
@@ -816,15 +821,19 @@
         for (const [i, cell] of cells.entries()) {
           const dest = L.webPictureDest(i + 1, cell.web);
           const item = result.placement.items.find((it) => it.cell.widget === 'picture' && result.pictures[it.cell.option] === dest);
-          if (ONCE.has(cell.web.preset)) lines.push(await fetchOnce(cell.web, dest, item ? item.box : null));
-          else plugins.push(L.webPicturePlugin(i + 1, cell.web, item ? item.box : null));
+          if (ONCE.has(cell.web.preset)) {
+            lines.push(await fetchOnce(cell.web, dest, item ? item.box : null));
+            continue;
+          }
+          // An address that takes the picture's size gets no plugin before its row is shown: the reader would
+          // fetch it with {width} and {height} as written. Its old plugin goes below.
+          const plugin = L.webPicturePlugin(i + 1, cell.web, item ? item.box : null);
+          if (plugin) plugins.push(plugin);
+          else lines.push(`${dest} is not set up: its address takes the picture's size, and its row does not fit on ` +
+            'this reader. Save again once it fits.');
         }
         for (const plugin of plugins) {
           await installPlugin(plugin);
-          if (/\{(width|height)\}/.test(plugin.url)) {
-            lines.push(`${plugin.dest} is fetched once its row is shown on this reader.`);
-            continue;
-          }
           const fetchNow = () => fetch(`/api/fetch?plugin=${enc(plugin.name)}&url=${enc(plugin.url)}&dest=${enc(plugin.dest)}`,
             { method: 'POST' });
           let response = await fetchNow();
