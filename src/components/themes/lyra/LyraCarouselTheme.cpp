@@ -18,12 +18,10 @@
 #include <vector>
 
 #include "RecentBooksStore.h"
-#include "SerialTestApi.h"
 #include "UiFontScale.h"
 #include "components/BookProgressPresentation.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
-#include "components/themes/ListTouchBand.h"
 #include "components/themes/TapTargets.h"
 #include "components/themes/lyra/CarouselCoverLayout.h"
 #include "fontIds.h"
@@ -766,131 +764,4 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
   }
 
   TapTargets::homeMenu().record(menuTargets);
-}
-
-void LyraCarouselTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
-                                 const std::function<std::string(int index)>& rowTitle,
-                                 const std::function<std::string(int index)>& rowSubtitle,
-                                 const std::function<UIIcon(int index)>& rowIcon,
-                                 const std::function<std::string(int index)>& rowValue, bool highlightValue) const {
-  constexpr int hPad = 8;
-  constexpr int listIconSz = 24;
-  constexpr int mainMenuIconSz = 32;
-  constexpr int maxValWidth = 200;
-  constexpr int cornerRadius = 6;
-
-  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
-  const UiFontLadder::Step growth = UITheme::fontGrowth();
-  const int rowHeight = (rowSubtitle != nullptr) ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
-  // Never paint more rows than the touch band can register — see BaseTheme::drawList.
-  const int pageItems = std::min(rect.height / rowHeight, ListTouchBand::kMaxRows);
-  if (pageItems <= 0 || itemCount <= 0 || rowTitle == nullptr) {
-    ListTouchBand::invalidate();
-    return;
-  }
-  const int totalPages = (itemCount + pageItems - 1) / pageItems;
-
-  if (totalPages > 1) {
-    const int scrollAreaHeight = rect.height;
-    const int scrollBarHeight = (scrollAreaHeight * pageItems) / itemCount;
-    const int currentPage = selectedIndex / pageItems;
-    const int scrollBarY = rect.y + ((scrollAreaHeight - scrollBarHeight) * currentPage) / (totalPages - 1);
-    const int scrollBarX = rect.x + rect.width - LyraCarouselMetrics::values.scrollBarRightOffset;
-    renderer.drawLine(scrollBarX, rect.y, scrollBarX, rect.y + scrollAreaHeight, true);
-    renderer.fillRect(scrollBarX - LyraCarouselMetrics::values.scrollBarWidth, scrollBarY,
-                      LyraCarouselMetrics::values.scrollBarWidth, scrollBarHeight, true);
-  }
-
-  int contentWidth =
-      rect.width -
-      (totalPages > 1 ? (LyraCarouselMetrics::values.scrollBarWidth + LyraCarouselMetrics::values.scrollBarRightOffset)
-                      : 1);
-
-  // Solid black highlight bar — skip if selected item is a separator
-  const bool selectedIsSeparator = (selectedIndex >= 0 && selectedIndex < itemCount && rowTitle != nullptr &&
-                                    UITheme::isSeparatorTitle(rowTitle(selectedIndex)));
-  if (selectedIndex >= 0 && !selectedIsSeparator) {
-    renderer.fillRoundedRect(
-        rect.x + LyraCarouselMetrics::values.contentSidePadding, rect.y + selectedIndex % pageItems * rowHeight,
-        contentWidth - LyraCarouselMetrics::values.contentSidePadding * 2, rowHeight, kCornerRadius, Color::Black);
-  }
-
-  int textX = rect.x + LyraCarouselMetrics::values.contentSidePadding + hPad;
-  int textWidth = contentWidth - LyraCarouselMetrics::values.contentSidePadding * 2 - hPad * 2;
-  int iconSize = 0;
-  int iconY = 0;
-  if (rowIcon != nullptr) {
-    iconSize = (rowSubtitle != nullptr) ? mainMenuIconSz : listIconSz;
-    iconY = (rowHeight - iconSize) / 2;
-    textX += iconSize + hPad;
-    textWidth -= iconSize + hPad;
-  }
-
-  const auto pageStartIndex = selectedIndex / pageItems * pageItems;
-  // Rows published for touch as they are painted — see BaseTheme::drawList. This theme is the
-  // third fixed-height list draw, and the one that shipped without this: every screen drawn
-  // through GUI.drawList was painted correctly and answered no tap at all.
-  ListTouchBand::Builder touchBand;
-  touchBand.begin(rect.x, rect.width, pageStartIndex);
-
-  for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
-    const int itemY = rect.y + (i % pageItems) * rowHeight;
-    const bool sel = (i == selectedIndex);
-    int rowTextWidth = textWidth;
-
-    int valueWidth = 0;
-    std::string valueText;
-    if (rowValue != nullptr) {
-      valueText = rowValue(i);
-      valueText = renderer.truncatedText(UI_10_FONT_ID, valueText.c_str(), maxValWidth);
-      valueWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str()) + hPad;
-      rowTextWidth -= valueWidth;
-    }
-
-    auto itemName = rowTitle(i);
-    if (i == selectedIndex) SerialTestApi::noteSelection(i, itemName.c_str());  // CMD:STATE sel=, label=
-    const bool isSeparator = UITheme::isSeparatorTitle(itemName);
-    touchBand.addRow(itemY, rowHeight, !isSeparator);
-    if (isSeparator) {
-      itemName = UITheme::stripSeparatorTitle(itemName);
-      drawListSeparator(renderer,
-                        Rect{rect.x + LyraCarouselMetrics::values.contentSidePadding, itemY,
-                             contentWidth - LyraCarouselMetrics::values.contentSidePadding * 2, rowHeight},
-                        textX, rowTextWidth, itemName);
-      continue;
-    }
-    auto item = renderer.truncatedText(UI_10_FONT_ID, itemName.c_str(), rowTextWidth);
-    renderer.drawText(UI_10_FONT_ID, textX, itemY + 7, item.c_str(), !sel);
-
-    if (rowIcon != nullptr) {
-      const uint8_t* iconBitmap = iconForName(rowIcon(i), iconSize);
-      if (iconBitmap != nullptr) {
-        const int ix = rect.x + LyraCarouselMetrics::values.contentSidePadding + hPad;
-        if (sel)
-          renderer.drawIconInverted(iconBitmap, ix, itemY + iconY, iconSize, iconSize);
-        else
-          renderer.drawIcon(iconBitmap, ix, itemY + iconY, iconSize, iconSize);
-      }
-    }
-
-    if (rowSubtitle != nullptr) {
-      std::string subtitleText = rowSubtitle(i);
-      auto subtitle = renderer.truncatedText(SMALL_FONT_ID, subtitleText.c_str(), rowTextWidth);
-      // Pushed down by however much the title line above it grew at the current UI font size.
-      renderer.drawText(SMALL_FONT_ID, textX, itemY + 30 + growth.body, subtitle.c_str(), !sel);
-    }
-
-    if (!valueText.empty()) {
-      if (sel && highlightValue) {
-        renderer.fillRoundedRect(
-            rect.x + contentWidth - LyraCarouselMetrics::values.contentSidePadding - hPad - valueWidth, itemY,
-            valueWidth + hPad, rowHeight, cornerRadius, Color::Black);
-      }
-      renderer.drawText(UI_10_FONT_ID,
-                        rect.x + contentWidth - LyraCarouselMetrics::values.contentSidePadding - valueWidth, itemY + 6,
-                        valueText.c_str(), !sel);
-    }
-  }
-
-  touchBand.commit();
 }

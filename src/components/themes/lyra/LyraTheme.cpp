@@ -260,6 +260,7 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<std::string(int index)>& rowValue, bool highlightValue) const {
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
   const UiFontLadder::Step growth = UITheme::fontGrowth();
+  const bool inverted = invertsListSelection();
   int rowHeight = (rowSubtitle != nullptr) ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
   int pageItems = rect.height / rowHeight;
   // Never paint more rows than the touch band can register: a painted row past the cap is drawn
@@ -297,9 +298,10 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       rect.width -
       (totalPages > 1 ? (LyraMetrics::values.scrollBarWidth + LyraMetrics::values.scrollBarRightOffset) : 1);
   if (selectedIndex >= 0 && !selectedIsSeparator) {
-    renderer.fillRoundedRect(
-        rect.x + LyraMetrics::values.contentSidePadding, rect.y + selectedIndex % pageItems * rowHeight,
-        contentWidth - LyraMetrics::values.contentSidePadding * 2, rowHeight, cornerRadius, Color::LightGray);
+    renderer.fillRoundedRect(rect.x + LyraMetrics::values.contentSidePadding,
+                             rect.y + selectedIndex % pageItems * rowHeight,
+                             contentWidth - LyraMetrics::values.contentSidePadding * 2, rowHeight, cornerRadius,
+                             inverted ? Color::Black : Color::LightGray);
   }
 
   int textX = rect.x + LyraMetrics::values.contentSidePadding + hPaddingInSelection;
@@ -323,6 +325,9 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
+    const bool selected = i == selectedIndex;
+    // White on the black bar of an inverted selection, black everywhere else.
+    const bool ink = !(inverted && selected);
     int rowTextWidth = textWidth;
 
     // Draw name
@@ -349,7 +354,7 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     }
 
     auto item = renderer.truncatedText(UI_10_FONT_ID, itemName.c_str(), rowTextWidth);
-    renderer.drawText(UI_10_FONT_ID, textX, itemY + 7, item.c_str(), true);
+    renderer.drawText(UI_10_FONT_ID, textX, itemY + 7, item.c_str(), ink);
 
     if (rowIcon != nullptr) {
       UIIcon icon = rowIcon(i);
@@ -360,8 +365,12 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
         iconBitmap = iconForName(icon, renderSize);
       }
       if (iconBitmap != nullptr) {
-        renderer.drawIcon(iconBitmap, rect.x + LyraMetrics::values.contentSidePadding + hPaddingInSelection,
-                          itemY + iconY, renderSize, renderSize);
+        const int iconX = rect.x + LyraMetrics::values.contentSidePadding + hPaddingInSelection;
+        if (ink) {
+          renderer.drawIcon(iconBitmap, iconX, itemY + iconY, renderSize, renderSize);
+        } else {
+          renderer.drawIconInverted(iconBitmap, iconX, itemY + iconY, renderSize, renderSize);
+        }
       }
     }
 
@@ -374,25 +383,25 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       if (nl != std::string::npos) {
         // Two-line subtitle: first line (author) at +24, second line (series) at +40
         auto line1 = renderer.truncatedText(SMALL_FONT_ID, subtitleText.substr(0, nl).c_str(), rowTextWidth);
-        renderer.drawText(SMALL_FONT_ID, textX, itemY + 24 + growth.body, line1.c_str(), true);
+        renderer.drawText(SMALL_FONT_ID, textX, itemY + 24 + growth.body, line1.c_str(), ink);
         auto line2 = renderer.truncatedText(SMALL_FONT_ID, subtitleText.substr(nl + 1).c_str(), rowTextWidth);
-        renderer.drawText(SMALL_FONT_ID, textX, itemY + 40 + growth.body + growth.small, line2.c_str(), true);
+        renderer.drawText(SMALL_FONT_ID, textX, itemY + 40 + growth.body + growth.small, line2.c_str(), ink);
       } else {
         auto subtitle = renderer.truncatedText(SMALL_FONT_ID, subtitleText.c_str(), rowTextWidth);
-        renderer.drawText(SMALL_FONT_ID, textX, itemY + 30 + growth.body, subtitle.c_str(), true);
+        renderer.drawText(SMALL_FONT_ID, textX, itemY + 30 + growth.body, subtitle.c_str(), ink);
       }
     }
 
     // Draw value
     if (!valueText.empty()) {
-      if (i == selectedIndex && highlightValue) {
+      if (selected && highlightValue) {
         renderer.fillRoundedRect(
             rect.x + contentWidth - LyraMetrics::values.contentSidePadding - hPaddingInSelection - valueWidth, itemY,
             valueWidth + hPaddingInSelection, rowHeight, cornerRadius, Color::Black);
       }
 
       renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - LyraMetrics::values.contentSidePadding - valueWidth,
-                        itemY + 6, valueText.c_str(), !(i == selectedIndex && highlightValue));
+                        itemY + 6, valueText.c_str(), ink && !(selected && highlightValue));
     }
   }
 

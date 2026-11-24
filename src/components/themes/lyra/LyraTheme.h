@@ -80,6 +80,10 @@ class LyraTheme : public BaseTheme {
   // The cover sits inside the selection's 8 px padding, above and below.
   int stackedCoverHeight(const int tileHeight) const override { return tileHeight - 16 > 120 ? tileHeight - 16 : 120; }
 
+  // drawList's selected row: Lyra's light grey bar under black text, or, where this is true, a
+  // solid black bar with the text and icon knocked out of it (Carousel).
+  virtual bool invertsListSelection() const { return false; }
+
   static int getRecentBookProgressPercent(const RecentBook& book);
 
   // A book's details as a home card shows them: title, author, series, the status line (progress
