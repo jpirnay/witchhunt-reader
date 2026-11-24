@@ -46,6 +46,9 @@ class LyraTilesTheme : public LyraTheme {
   // Where everything goes on this screen. Both draw calls and Home's questions (homeLayout,
   // homeGrid, homeWidgetActions) ask it with the same inputs, so they agree.
   HomeTilesLayout::Placement placement(Rect content, int menuCount) const;
+  // The layout saved as /.crosspoint/home.json (Layout "Custom"), and its pictures; false when there
+  // is none Home can use.
+  bool readCustomLayout(HomeTilesLayout::Config& layout);
   // The same for a draw call, with the menu Home handed over (setHomeMenu).
   HomeTilesLayout::Placement placement(const GfxRenderer& renderer) const;
 

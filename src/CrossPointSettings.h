@@ -317,7 +317,12 @@ class CrossPointSettings {
   enum HIDE_BATTERY_PERCENTAGE { HIDE_NEVER = 0, HIDE_READER = 1, HIDE_ALWAYS = 2, HIDE_BATTERY_PERCENTAGE_COUNT };
 
   // Lyra Tiles' Home: one of its ready-made layouts. Positional: append, never reorder.
-  enum HOME_LAYOUT { HOME_LAYOUT_READER = 0, HOME_LAYOUT_DASHBOARD = 1, HOME_LAYOUT_GALLERY = 2 };
+  enum HOME_LAYOUT {
+    HOME_LAYOUT_READER = 0,
+    HOME_LAYOUT_DASHBOARD = 1,
+    HOME_LAYOUT_GALLERY = 2,
+    HOME_LAYOUT_CUSTOM = 3
+  };
 
   // First day of the week. Saturday is where Persian and much of the Arabic-speaking world start it.
   enum FIRST_DAY_OF_WEEK { WEEK_STARTS_MONDAY = 0, WEEK_STARTS_SUNDAY = 1, WEEK_STARTS_SATURDAY = 2 };

@@ -4,8 +4,10 @@
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
+#include <HalStorage.h>
 #include <I18n.h>
 #include <ImageScale.h>
+#include <Logging.h>
 
 #include <algorithm>
 #include <iterator>
@@ -19,6 +21,7 @@
 #include "components/WeatherDraw.h"
 #include "components/themes/CardTextFit.h"
 #include "components/themes/TapTargets.h"
+#include "components/themes/lyra/HomeLayoutFile.h"
 #include "components/themes/lyra/HomeTilesLayout.h"
 #include "fontIds.h"
 
@@ -175,6 +178,8 @@ void LyraTilesTheme::prepareHome(const uint32_t available) {
   // A shortcut to a destination with nothing behind it (no bookmarks, weather not set up) is left
   // out, as its menu entry would be; its neighbour then takes the row.
   HomeTilesLayout::Config layout;
+  // The ready-made layouts take their pictures from one folder, a new one each start.
+  for (std::string& source : pictureSources_) source = kHomePicturesFolder;
   switch (SETTINGS.homeLayout) {
     case CrossPointSettings::HOME_LAYOUT_DASHBOARD:
       layout = HomeTilesLayout::presets::dashboard();
@@ -182,12 +187,13 @@ void LyraTilesTheme::prepareHome(const uint32_t available) {
     case CrossPointSettings::HOME_LAYOUT_GALLERY:
       layout = HomeTilesLayout::presets::gallery();
       break;
+    case CrossPointSettings::HOME_LAYOUT_CUSTOM:
+      if (!readCustomLayout(layout)) layout = HomeTilesLayout::presets::reader();
+      break;
     default:
       layout = HomeTilesLayout::presets::reader();
       break;
   }
-  // The ready-made layouts take their pictures from one folder, a new one each start.
-  for (std::string& source : pictureSources_) source = kHomePicturesFolder;
   HomeTilesLayout::Config shown;
   for (int r = 0; r < layout.rowCount; ++r) {
     HomeTilesLayout::Cell cells[2]{};
@@ -218,6 +224,33 @@ int LyraTilesTheme::homePictureJobs(const GfxRenderer& /*renderer*/, const Rect 
                        item.box.w, item.box.h};
   }
   return n;
+}
+
+bool LyraTilesTheme::readCustomLayout(HomeTilesLayout::Config& layout) {
+  FsFile file;
+  if (!Storage.openFileForRead("HOME", HomeLayoutFile::kPath, file)) {
+    LOG_ERR("HOME", "Custom layout: no %s, Reader instead", HomeLayoutFile::kPath);
+    return false;
+  }
+  const size_t size = file.size();
+  if (size == 0 || size > HomeLayoutFile::kMaxBytes) {
+    LOG_ERR("HOME", "Custom layout: %u bytes, Reader instead", static_cast<unsigned>(size));
+    return false;
+  }
+  std::string json;
+  json.resize(size);
+  if (file.read(reinterpret_cast<uint8_t*>(&json[0]), size) != static_cast<int>(size)) {
+    LOG_ERR("HOME", "Custom layout: read failed, Reader instead");
+    return false;
+  }
+  const HomeLayoutFile::Parsed parsed = HomeLayoutFile::parse(json.data(), json.size());
+  if (!parsed.ok) {
+    LOG_ERR("HOME", "Custom layout: not a layout, Reader instead");
+    return false;
+  }
+  layout = parsed.config;
+  for (int i = 0; i < HomeTilesLayout::kMaxPictures; ++i) pictureSources_[i] = parsed.pictures[i];
+  return true;
 }
 
 uint32_t LyraTilesTheme::homeShownDestinations(const GfxRenderer& /*renderer*/, const Rect content) const {
@@ -663,18 +696,29 @@ void LyraTilesTheme::drawCalendar(GfxRenderer& renderer, const Box& box, const b
   const int cellW = inner.w / 7;
   const int cellH = (inner.y + inner.h - gridTop) / (weeks + 1);
   const int textTop = (cellH - small) / 2;
-  // The weekdays from the first day of the week: two characters where they fit, else one.
+  // The weekdays from the first day of the week: two characters where all seven fit, else one each.
+  int characters = 2;
+  for (int c = 0; c < 7 && characters == 2; ++c) {
+    const std::string two = firstCharacters(I18N.get(DateNames::kShortDays[c]), 2);
+    if (renderer.getTextWidth(SMALL_FONT_ID, two.c_str(), EpdFontFamily::BOLD) > cellW - 2) characters = 1;
+  }
   for (int c = 0; c < 7; ++c) {
-    const char* name = I18N.get(DateNames::kShortDays[(data_.weekStartsOn + c) % 7]);
-    std::string label = firstCharacters(name, 2);
-    if (renderer.getTextWidth(SMALL_FONT_ID, label.c_str()) > cellW - 2) label = firstCharacters(name, 1);
+    const std::string label =
+        firstCharacters(I18N.get(DateNames::kShortDays[(data_.weekStartsOn + c) % 7]), characters);
     drawCentered(renderer, SMALL_FONT_ID, Box{inner.x + c * cellW, gridTop, cellW, cellH}, gridTop + textTop,
                  label.c_str(), true, EpdFontFamily::BOLD);
   }
-  // The days, shaded by the time read on them: some, half an hour, an hour or more.
+  // The days, shaded by the time read on them: some, half an hour, an hour or more. Where two digits
+  // do not fit a cell (the compact panel's half width) the month is the shading alone, a square a day.
+  const bool numbers = renderer.getTextWidth(SMALL_FONT_ID, "28") <= cellW - 2;
   for (int d = 1; d <= data_.daysInMonth; ++d) {
     const int at = data_.firstColumn + d - 1;
-    const Box cell{inner.x + (at % 7) * cellW, gridTop + (at / 7 + 1) * cellH, cellW, cellH};
+    Box cell{inner.x + (at % 7) * cellW, gridTop + (at / 7 + 1) * cellH, cellW, cellH};
+    if (!numbers) {
+      // A square, centred in its cell, with a pixel of paper around it.
+      const int side = std::max(2, std::min(cellW, cellH) - 2);
+      cell = Box{cell.x + (cellW - side) / 2, cell.y + (cellH - side) / 2, side, side};
+    }
     const uint16_t minutes = data_.monthMinutes[d - 1];
     bool ink = true;
     if (minutes >= 60) {
@@ -684,8 +728,11 @@ void LyraTilesTheme::drawCalendar(GfxRenderer& renderer, const Box& box, const b
       renderer.fillRectDither(cell.x + 1, cell.y + 1, cell.w - 2, cell.h - 2, Color::DarkGray);
     } else if (minutes > 0) {
       renderer.fillRectDither(cell.x + 1, cell.y + 1, cell.w - 2, cell.h - 2, Color::LightGray);
+    } else if (!numbers) {
+      renderer.drawRect(cell.x + 1, cell.y + 1, cell.w - 2, cell.h - 2, true);
     }
     if (d == data_.today) renderer.drawRect(cell.x, cell.y, cell.w, cell.h, 2, true);
+    if (!numbers) continue;
     char number[4];
     snprintf(number, sizeof(number), "%d", d);
     drawCentered(renderer, SMALL_FONT_ID, cell, cell.y + textTop, number, ink,

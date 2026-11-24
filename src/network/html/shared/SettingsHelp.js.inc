@@ -148,7 +148,7 @@ const SETTINGS_HELP = {
     "useClock": "Shows the time in screen headers and allows a status bar clock; on the X4 it uses a little battery in sleep.",
     "clockFormat12h": "Shows times as 14:00 (24h) or 2:00pm (12h).",
     "firstDayOfWeek": "The day the calendar and the week's reading on Home start on.",
-    "homeLayout": "Lyra Tiles' Home: Reader (book and tiles), Dashboard (clock, picture, the week's reading) or Gallery (a picture on top).",
+    "homeLayout": "Lyra Tiles' Home: Reader (book and tiles), Dashboard (clock, picture, the week's reading) or Gallery (a picture on top), or Custom, the layout saved as /.crosspoint/home.json.",
     "clockTimezone": "Your time zone; named places follow their own daylight-saving rules, UTC offsets stay fixed.",
     "ntpServer": "Time server asked first when the clock syncs over WiFi; leave empty to use the built-in ones.",
     "useWeather": "Turns the weather feature on or off; off removes the weather panel from the Home screen and More.",
