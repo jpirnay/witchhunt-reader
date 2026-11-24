@@ -243,10 +243,11 @@ curl http://crosspoint.local/api/status/fast
 
 ### GET `/api/diagnostics/boot` - Boot and Sleep History
 
-What the device's **Settings → System → Boot Diagnostics** screen shows: the
-hardware variant, how this boot started, and the last 16 sleep and boot events
-kept on the card (`/.crosspoint/bootdiag.bin`). Values are the same short English
-tokens the screen prints, untranslated, so reports from different devices compare.
+The boot and sleep history the device records: the hardware variant, how this
+boot started, and the last 16 sleep and boot events kept on the card
+(`/.crosspoint/bootdiag.bin`). Builds with `ENABLE_BOOT_DIAGNOSTICS_SCREEN` also
+show it on the device under **Settings → System → Boot Diagnostics**. Values are
+short English tokens, untranslated, so reports from different devices compare.
 The Diagnostics page reads it and saves it, with `/api/status`, as a bug report.
 Streamed; no parameters.
 

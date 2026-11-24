@@ -427,10 +427,9 @@ space.
 ![System Info](images/web/systeminfo.png)
 
 **Diagnostics** is for bug reports. It shows how the reader last went to sleep and started up, and the
-history of the last sleeps and starts, the same as **Settings → System → Boot Diagnostics** on the
-reader but in plain words. **Download report** saves all of it, with the firmware version and device
-status, as one file to attach to an issue. The report leaves out the IP and MAC address and holds no
-passwords.
+history of the last sleeps and starts, in plain words. **Download report** saves all of it, with the
+firmware version and device status, as one file to attach to an issue. The report leaves out the IP
+and MAC address and holds no passwords.
 
 ![Diagnostics](images/web/diagnostics.png)
 

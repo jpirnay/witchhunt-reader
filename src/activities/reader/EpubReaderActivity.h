@@ -1,13 +1,5 @@
 #pragma once
 
-// On-device render-benchmark harness (reader menu "Render benchmark" entry). Off by default —
-// enable with -DENABLE_BENCHMARKS=1 in a platformio.ini environment for perf investigation
-// builds only; the harness and its report-building code have no value for end users and are
-// worth keeping out of release flash budgets.
-#ifndef ENABLE_BENCHMARKS
-#define ENABLE_BENCHMARKS 0
-#endif
-
 #include <BookCache.h>
 #include <BuildArena.h>
 #include <Epub.h>
@@ -28,6 +20,7 @@
 #include "BuildThroughGate.h"
 #include "ChapterPageSpan.h"
 #include "CrossPointState.h"
+#include "DiagnosticScreens.h"  // ENABLE_BENCHMARKS: the reader menu's Render Benchmark
 #include "EpubLinkBackStack.h"
 #include "EpubNavigationTarget.h"
 #include "EpubProgressRecord.h"

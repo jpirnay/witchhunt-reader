@@ -31,7 +31,9 @@
 ///   * SD          — a fixed-size ring of the last 16 sleep/boot events, so history
 ///                   survives power loss and can be read back on screen.
 ///
-/// Surfaced by BootDiagnosticsActivity (Settings > System > Boot Diagnostics).
+/// Surfaced by the web Diagnostics page (GET /api/diagnostics/boot) in every build, and by
+/// BootDiagnosticsActivity (Settings > System > Boot Diagnostics) in builds with
+/// ENABLE_BOOT_DIAGNOSTICS_SCREEN (DiagnosticScreens.h).
 namespace BootDiag {
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@
 #include <HalCapabilities.h>
 #include <I18n.h>
 
+#include "DiagnosticScreens.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "OnOffOverride.h"
@@ -17,11 +18,6 @@
 #include "fontIds.h"
 
 namespace fui = freeink::ui;
-
-// Keep in sync with the default in EpubReaderActivity.h — see the comment there for rationale.
-#ifndef ENABLE_BENCHMARKS
-#define ENABLE_BENCHMARKS 0
-#endif
 
 namespace {
 // Three-state cycle helper for overrides represented as int8_t with -1 = default.
