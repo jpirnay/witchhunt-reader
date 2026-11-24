@@ -909,7 +909,7 @@ bool ActivityManager::handleForcedRefresh(const HalDisplay::RefreshMode mode) {
 
 void ActivityManager::dispatchLightPanelGesture() {
   // A request needs no digitiser: the drawer works from the keys too (Back closes it, Confirm switches the light,
-  // Left/Right step the brightness), and a key is how a reader with touch switched off reaches it.
+  // Up/Down step the brightness), and a key is how a reader with touch switched off reaches it.
   const bool requested = lightPanelRequested;
   lightPanelRequested = false;
   // Inert on an unlit board: wasLightPanelGesture() already answers false there, because

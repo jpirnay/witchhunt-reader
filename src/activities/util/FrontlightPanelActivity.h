@@ -70,6 +70,8 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   // unconditionally on boot), so only lightOn needs a touched-by-the-user flag: onExit() must
   // not persist a mirror that never reflected user intent in the first place.
   bool lightOnChanged = false;
+  // False until no brightness key is down, so a key held from before the drawer opened does not step it (loop()).
+  bool stepKeysReleased = false;
   // Sheet height and layout metrics for the pass being built. Set in render() before renderUi(), because the sheet
   // must be sized before anything lays out inside it.
   int16_t panelHeight = 0;

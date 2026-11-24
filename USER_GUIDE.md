@@ -1297,8 +1297,9 @@ you can find a book in the dark.
 
 The same actions are bindable to any button or gesture: **Toggle Reading Light**, **Light
 Brighter**, **Light Dimmer**, **Open Light Panel**, and on a warm/cool device **Light Warmer** and
-**Light Cooler**. The light panel opened from a key also works from the keys: **Back** closes it,
-**Confirm** switches the light, **Left** / **Right** dim and brighten it.
+**Light Cooler**. The light panel also works from the keys, with touch off or locked: **Back** closes
+it, **Confirm** switches the light, and **Up** / **Down** brighten and dim it in 5% steps (hold to keep
+going). The LilyGo T5 S3 has no Up key, so there the keys only dim it. Warmth is set by touch.
 
 ### 5.7 Per-device differences
 

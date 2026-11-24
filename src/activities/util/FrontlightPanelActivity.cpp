@@ -52,6 +52,7 @@ void FrontlightPanelActivity::onEnter() {
   warmth = Frontlight.warmth();
   lightOn = Frontlight.isOn();
   lightOnChanged = false;
+  stepKeysReleased = false;
 
   resetUi();
   app.on(ACTION_BRIGHTNESS, &FrontlightPanelActivity::onBrightnessEvent, this);
@@ -192,10 +193,23 @@ void FrontlightPanelActivity::loop() {
     return;
   }
 
-  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left},
-                                       [this] { adjustBrightness(-BUTTON_BRIGHTNESS_STEP); });
-  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right},
+  // Brightness from the side keys, the ones every board with a light has: Up and Down on the X4 Pro, the Murphy and
+  // the Picco, Down alone on the T5S3. None of them has the front Left and Right, which used to be the only step keys
+  // here. PageBack/PageForward name the side keys whatever the orientation; the logical Up/Down directions move to the
+  // front strip in landscape. Up is brighter, as on the Settings brightness slider (SliderPickerActivity). Left and
+  // Right stay for a board that has them.
+  using Button = MappedInputManager::Button;
+  // A step key still held from the press that opened the drawer (Open Light Panel on a long press of Up or Down)
+  // would start repeating as soon as the drawer is up: the keys step only once all of them have been let go.
+  if (!stepKeysReleased) {
+    stepKeysReleased = !mappedInput.isPressed(Button::PageBack) && !mappedInput.isPressed(Button::PageForward) &&
+                       !mappedInput.isPressed(Button::Left) && !mappedInput.isPressed(Button::Right);
+    if (!stepKeysReleased) return;
+  }
+  buttonNavigator.onPressAndContinuous({Button::PageBack, Button::Right},
                                        [this] { adjustBrightness(BUTTON_BRIGHTNESS_STEP); });
+  buttonNavigator.onPressAndContinuous({Button::PageForward, Button::Left},
+                                       [this] { adjustBrightness(-BUTTON_BRIGHTNESS_STEP); });
 }
 
 LightDrawerLayout::Model FrontlightPanelActivity::layoutModel() const {
