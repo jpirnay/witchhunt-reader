@@ -736,8 +736,10 @@ void HomeActivity::loop() {
 
     // Ahead of the cover pass, which would otherwise take this tick and let the swipe go by. The
     // direction is the reader's (and the carousel's): a swipe to the left brings the next book.
-    // wasSwipe() is silent on boards without touch and while Touch Navigation is off.
-    if (GUI.homeSwipeCyclesBooks()) {
+    // wasSwipe() is silent on boards without touch and while Touch Navigation is off. Only where the
+    // book card shows the book in front (shownBooks_): on a layout without one the swipe turned the
+    // unseen list round and redrew Home for nothing.
+    if (GUI.homeSwipeCyclesBooks() && shownBooks_ > 0) {
       const auto swipe = mappedInput.wasSwipe();
       if (swipe == MappedInputManager::SwipeDir::Left || swipe == MappedInputManager::SwipeDir::Right) {
         cycleRecentBooks(swipe == MappedInputManager::SwipeDir::Left ? 1 : -1);
