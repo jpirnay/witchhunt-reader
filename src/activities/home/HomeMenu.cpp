@@ -60,12 +60,72 @@ HomeMenuPlacement placementOf(const HomeMenuRow& row) {
   return HomeMenuPlacement::More;
 }
 
+// The destination a row opens; Count for Settings, which is not one.
+HomeDestination destinationOf(const HomeMenuAction action) {
+  switch (action) {
+    case HomeMenuAction::Library:
+      return HomeDestination::Library;
+    case HomeMenuAction::ReadingStats:
+      return HomeDestination::ReadingStats;
+    case HomeMenuAction::GlobalBookmarks:
+      return HomeDestination::Bookmarks;
+    case HomeMenuAction::FileTransfer:
+      return HomeDestination::FileTransfer;
+    case HomeMenuAction::Weather:
+      return HomeDestination::Weather;
+    case HomeMenuAction::RecentBooks:
+      return HomeDestination::Recent;
+    case HomeMenuAction::More:
+    case HomeMenuAction::Settings:
+      return HomeDestination::Count;
+  }
+  return HomeDestination::Count;
+}
+
+bool shownBy(const uint32_t mask, const HomeMenuAction action) {
+  const HomeDestination d = destinationOf(action);
+  return d != HomeDestination::Count && (mask & destinationBit(d)) != 0;
+}
+
 }  // namespace
 
+uint32_t availableDestinations(const HomeMenuAvailability& availability) {
+  // Recent has no menu entry to ask, and needs nothing: the tab says when it is empty.
+  uint32_t mask = destinationBit(HomeDestination::Recent);
+  for (const HomeMenuRow& row : kRows) {
+    const HomeDestination d = destinationOf(row.entry.action);
+    if (d != HomeDestination::Count && isAvailable(row.requirement, availability)) mask |= destinationBit(d);
+  }
+  return mask;
+}
+
+HomeMenuAction actionFor(const HomeDestination destination) {
+  switch (destination) {
+    case HomeDestination::Library:
+      return HomeMenuAction::Library;
+    case HomeDestination::ReadingStats:
+      return HomeMenuAction::ReadingStats;
+    case HomeDestination::Bookmarks:
+      return HomeMenuAction::GlobalBookmarks;
+    case HomeDestination::FileTransfer:
+      return HomeMenuAction::FileTransfer;
+    case HomeDestination::Weather:
+      return HomeMenuAction::Weather;
+    case HomeDestination::Recent:
+      return HomeMenuAction::RecentBooks;
+    case HomeDestination::Count:
+      return HomeMenuAction::Library;
+  }
+  return HomeMenuAction::Library;
+}
+
 void collectHomeMenuEntries(const HomeMenuPlacement placement, const HomeMenuAvailability& availability,
-                            std::vector<HomeMenuEntry>& out, const int homeCapacity) {
+                            std::vector<HomeMenuEntry>& out, const int homeCapacity, const uint32_t shownByTheme) {
   constexpr size_t kCount = std::size(kRows);
-  const auto available = [&](const size_t i) { return isAvailable(kRows[i].requirement, availability); };
+  // A destination the theme shows itself is in neither list.
+  const auto available = [&](const size_t i) {
+    return isAvailable(kRows[i].requirement, availability) && !shownBy(shownByTheme, kRows[i].entry.action);
+  };
   const auto pinned = [](const size_t i) { return kRows[i].shownOnHome == nullptr; };
 
   // Where each available row ends up. First its switch, in table order, as far as the theme has
