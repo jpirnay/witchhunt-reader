@@ -1,0 +1,23 @@
+{
+  "sleep": {
+    "events": {
+      "sleep.enter": {
+        "download": {
+          "url": "https://img.example/render?w=218&h=170",
+          "dest": "/home/web/web-1.jpg"
+        }
+      }
+    }
+  },
+  "close": {
+    "events": {
+      "reader.exit": {
+        "download": {
+          "url": "https://img.example/today.png",
+          "dest": "/home/web/web-2.png"
+        },
+        "connect": true
+      }
+    }
+  }
+}

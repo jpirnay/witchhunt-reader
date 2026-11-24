@@ -27,7 +27,7 @@ be written by hand. A missing or unreadable file gives the **Reader** layout, an
 | `calendar` | The month, the days shaded by the time read on them. Opens Reading Stats. | |
 | `week` | The time read this week, by day across the screen; books finished and in progress; the streak. Opens Reading Stats. | |
 | `weather` | The last forecast the Weather screen fetched. Opens Weather. | |
-| `picture` | A picture. A picture across the screen takes the height the other rows leave. | `"path"`: a JPEG, PNG or BMP, or a folder of them (one per start); `/home` when left out. At most two different pictures per layout. |
+| `picture` | A picture. A picture across the screen takes the height the other rows leave. | `"path"`: a JPEG, PNG or BMP, or a folder of them (one per start); `/home` when left out. At most two different pictures per layout. A picture from the web is a file in `/home/web` that a plugin fetches (below). |
 
 The rules Home lays the rows out by:
 
@@ -44,3 +44,15 @@ The rules Home lays the rows out by:
 What the firmware does not know (a widget or a place a later version adds) is left out, not refused.
 The geometry is `src/components/themes/lyra/HomeTilesLayout.h`, the parser
 `src/components/themes/lyra/HomeLayoutFile.cpp`.
+
+## Pictures from the web
+
+The Home Screen page's **From the web…** makes a plugin for each picture from the web
+(`home-picture-<n>` in `/.crosspoint/plugins`): a `device.json` whose one event handler downloads the
+address to `/home/web/web-<n>.<jpg|png|bmp>` ([plugin events](sd-plugins.md#events-the-reader-sends-a-plugins-requests)),
+and a `manifest.json` that may reach the address's host and its subdomains and keeps the address as
+written under `homeScreen` (`url`, `event`, `dest`), so the page can show it again. `{width}` and
+`{height}` in the address are filled with the widget's size when the page saves. The page fetches the
+picture once through `/api/fetch` as it saves, replaces the plugins when the layout changes, and
+removes those of pictures it no longer shows. The firmware has no code of its own for any of this:
+what such a picture shows is the business of the service behind the address ([SCOPE.md](../SCOPE.md)).

@@ -4,6 +4,7 @@ add_executable(ReadingStatsTest
   ${REPO_ROOT}/src/ReadingStats.cpp
   ${REPO_ROOT}/src/ReadingStatsJson.cpp
   ${REPO_ROOT}/src/ReadingStatsSlotFile.cpp
+  ${REPO_ROOT}/src/util/AsciiParse.cpp
   ${REPO_ROOT}/lib/JsonParser/StreamingJsonParser.cpp
 )
 
@@ -38,6 +39,7 @@ add_executable(ReadingStatsStoreTest
   ${REPO_ROOT}/src/ReadingStats.cpp
   ${REPO_ROOT}/src/ReadingStatsJson.cpp
   ${REPO_ROOT}/src/ReadingStatsSlotFile.cpp
+  ${REPO_ROOT}/src/util/AsciiParse.cpp
   ${REPO_ROOT}/lib/JsonParser/StreamingJsonParser.cpp
 )
 
@@ -69,6 +71,7 @@ gtest_discover_tests(ReadingStatsStoreTest)
 add_executable(ReadingStatsSlotFileTest
   ReadingStatsSlotFileTest.cpp
   ${REPO_ROOT}/src/ReadingStatsSlotFile.cpp
+  ${REPO_ROOT}/src/util/AsciiParse.cpp
 )
 
 target_include_directories(ReadingStatsSlotFileTest PRIVATE

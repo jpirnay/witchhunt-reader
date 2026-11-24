@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <string>
 
 using namespace plugin_events;
@@ -193,3 +195,33 @@ TEST(PluginEventCore, TemplatesTokenMetaAndEventFields) {
 }
 
 TEST(PluginEventCore, EscapeUrl) { EXPECT_EQ(escapeUrl("https://x/a b?q=1&r=ä#f"), "https://x/a%20b?q=1&r=%C3%A4#f"); }
+
+// The plugins the web Home Screen page makes for a picture from the web (js/home-layout.js webPicturePlugin; the page's
+// test checks it makes exactly these): the device subscribes to them and reads where each picture goes.
+TEST(PluginEventCore, HomePicturePluginsSubscribe) {
+  std::ifstream in(HOME_PICTURE_PLUGINS);
+  std::stringstream text;
+  text << in.rdbuf();
+  JsonDocument fixture;
+  ASSERT_EQ(deserializeJson(fixture, text.str()), DeserializationError::Ok);
+
+  std::string sleepJson;
+  serializeJson(fixture["sleep"], sleepJson);
+  const Subscription sleep = subscribe(sleepJson.c_str());
+  EXPECT_EQ(sleep.mask, eventBit(Event::SleepEnter));
+  EXPECT_EQ(sleep.connectMask, eventBit(Event::SleepEnter));
+  const JsonVariantConst atSleep = handlerFor(fixture["sleep"].as<JsonVariantConst>(), Event::SleepEnter);
+  ASSERT_TRUE(isDownload(atSleep));
+  EXPECT_STREQ(atSleep["download"]["dest"] | "", "/home/web/web-1.jpg");
+  EXPECT_STREQ(atSleep["download"]["url"] | "", "https://img.example/render?w=218&h=170");
+
+  // After a book is closed: queued then, fetched over a connection the next sleep brings up.
+  std::string closeJson;
+  serializeJson(fixture["close"], closeJson);
+  const Subscription close = subscribe(closeJson.c_str());
+  EXPECT_EQ(close.mask, eventBit(Event::ReaderExit));
+  EXPECT_EQ(close.connectMask, eventBit(Event::ReaderExit));
+  const JsonVariantConst afterBook = handlerFor(fixture["close"].as<JsonVariantConst>(), Event::ReaderExit);
+  ASSERT_TRUE(isDownload(afterBook));
+  EXPECT_STREQ(afterBook["download"]["dest"] | "", "/home/web/web-2.png");
+}

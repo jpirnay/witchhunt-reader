@@ -21,6 +21,7 @@
 #include "activities/RenderLock.h"
 #include "activities/home/LibraryTab.h"
 #include "network/WebAssets.h"
+#include "util/AsciiParse.h"
 #include "util/ButtonPressQueue.h"
 #include "util/PopupProbe.h"
 #include "util/ScreenshotUtil.h"
@@ -1943,13 +1944,6 @@ constexpr size_t kLutCapacity = 540;
 std::unique_ptr<uint8_t[]> lut;
 size_t lutLength = 0;
 
-int hexDigit(const char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-  return -1;
-}
-
 // The next number up to `separator` (or the end), consumed from `text`.
 bool takeNumber(std::string_view& text, const char separator, long& out) {
   const size_t end = std::min(text.find(separator), text.size());
@@ -2007,11 +2001,8 @@ void cmdLab(std::string_view arg) {
       return static_cast<void>(reply("LAB_ERROR:bad lut"));
     if (!lab::lut) lab::lut = makeUniqueNoThrow<uint8_t[]>(lab::kLutCapacity);
     if (!lab::lut) return static_cast<void>(reply("LAB_ERROR:no memory for the lut"));
-    for (size_t i = 0; i < hex.size() / 2; ++i) {
-      const int high = lab::hexDigit(hex[2 * i]), low = lab::hexDigit(hex[2 * i + 1]);
-      if (high < 0 || low < 0) return static_cast<void>(reply("LAB_ERROR:bad lut"));
-      lab::lut[i] = static_cast<uint8_t>(high << 4 | low);
-    }
+    if (!ascii_parse::hexBytes(hex.data(), lab::lut.get(), hex.size() / 2))
+      return static_cast<void>(reply("LAB_ERROR:bad lut"));
     lab::lutLength = hex.size() / 2;
     return static_cast<void>(replyf("LAB_OK:lut %u", static_cast<unsigned>(lab::lutLength)));
   }
@@ -2019,11 +2010,8 @@ void cmdLab(std::string_view arg) {
     const std::string_view hex = arg.substr(4);
     uint8_t records[64];
     if (hex.size() % 2 != 0 || hex.size() / 2 > sizeof(records)) return static_cast<void>(reply("LAB_ERROR:bad reg"));
-    for (size_t i = 0; i < hex.size() / 2; ++i) {
-      const int high = lab::hexDigit(hex[2 * i]), low = lab::hexDigit(hex[2 * i + 1]);
-      if (high < 0 || low < 0) return static_cast<void>(reply("LAB_ERROR:bad reg"));
-      records[i] = static_cast<uint8_t>(high << 4 | low);
-    }
+    if (!ascii_parse::hexBytes(hex.data(), records, hex.size() / 2))
+      return static_cast<void>(reply("LAB_ERROR:bad reg"));
     if (!display.setLabRegisters(hex.empty() ? nullptr : records, hex.size() / 2))
       return static_cast<void>(reply("LAB_ERROR:registers not taken"));
     return static_cast<void>(replyf("LAB_OK:reg %u", static_cast<unsigned>(hex.size() / 2)));
