@@ -105,7 +105,9 @@ Hebrew, Arabic and Greek layouts. StarDict dictionaries look words up in horizon
   from the second framebuffer (on the S3 boards, in PSRAM), and hyphenation patterns come from packs on the SD card instead of the firmware image.
 - **Fonts:** the Font Manager downloads TrueType, OpenType and `.cpfont` families over Wi-Fi; a book's own fonts can be
   used (Publisher Fonts); large-print sizes up to 26 pt.
-- **Library:** Books, Recent, New and Authors tabs, as file names, details or a cover grid; a cover carousel on Home;
+- **Library:** Books, Recent, New and Authors tabs, as file names, details or a cover grid; a Home screen of widgets
+  (the book you read, shortcuts, clock, calendar, your week, weather, pictures) that you arrange in the web interface,
+  or a cover carousel;
   a book information screen; bookmarks you can name, per book and across all books, that stay with their text when the
   layout changes; reading statistics.
 - **Sync and network:** KOReader sync that lands on the exact page in both directions, OPDS catalogs, Calibre, a web
