@@ -8,6 +8,8 @@
 #include <cstring>
 #include <vector>
 
+#include "util/AsciiParse.h"
+
 namespace ReadingStatsSlotFile {
 namespace {
 
@@ -100,13 +102,6 @@ void getDays(const uint8_t* p, const size_t count, std::vector<DayBucket>& days)
   for (size_t i = 0; i < count; ++i, p += kDaySize) days.push_back({get16(p), get32(p + 2)});
 }
 
-int hexDigit(const char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-  return -1;
-}
-
 uint8_t rawSlot(const uint8_t* image, const size_t index) {
   return image[kEntriesAt + index * kEntrySize + kEntrySlotAt];
 }
@@ -114,14 +109,7 @@ uint8_t rawSlot(const uint8_t* image, const size_t index) {
 }  // namespace
 
 bool parseDocId(const std::string& docId, DocKey& key) {
-  if (docId.size() != 2 * key.size()) return false;
-  for (size_t i = 0; i < key.size(); ++i) {
-    const int hi = hexDigit(docId[2 * i]);
-    const int lo = hexDigit(docId[2 * i + 1]);
-    if (hi < 0 || lo < 0) return false;
-    key[i] = static_cast<uint8_t>(hi << 4 | lo);
-  }
-  return true;
+  return docId.size() == 2 * key.size() && ascii_parse::hexBytes(docId.data(), key.data(), key.size());
 }
 
 std::string formatDocId(const DocKey& key) {
