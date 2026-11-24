@@ -289,7 +289,10 @@ class HalDisplay {
   // Quantise the borrowed canvas to the panel's native depth and show it as one
   // waveform. The driver picks a bank that can land every level, so this may
   // refresh more thoroughly (and more slowly) than `refreshMode` asked for.
-  void displayGray8Canvas(RefreshMode refreshMode, bool turnOffScreen = false);
+  // False when nothing reached the panel (the X4 Pro without PSRAM for its
+  // planes, say): the previous frame stays up, and the caller draws this one
+  // another way.
+  bool displayGray8Canvas(RefreshMode refreshMode, bool turnOffScreen = false);
 
   // A panel without such a canvas can still show more than four levels where its driver runs a gray-level plan
   // (GrayLevelPlan.h: a B/W base, then passes of 1-bit planes the host draws). getGrayLevels() stays at what the
