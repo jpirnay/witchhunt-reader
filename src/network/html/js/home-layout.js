@@ -45,6 +45,8 @@
   const PLAIN = ['also', 'clock', 'calendar', 'week', 'weather'];
   // The widgets that may share a row; book and also take the row across.
   const PAIRS = new Set(['shortcut', 'clock', 'calendar', 'week', 'weather', 'picture']);
+  // The widgets a layout holds once: the first is kept, a later one left out.
+  const SINGLE = ['book', 'also'];
   // The widgets that open something when chosen.
   const OPENS = new Set(['shortcut', 'week', 'calendar', 'weather']);
 
@@ -107,17 +109,20 @@
     }
     if (!doc || typeof doc !== 'object' || doc.version !== 1) return result;
     const rows = Array.isArray(doc.rows) ? doc.rows : [];
+    // One book card and one Also reading row: a second is left out as an unknown widget is.
+    const kept = new Set();
     for (let source = 0; source < rows.length; source++) {
       if (result.rows.length >= MAX_ROWS) break;
       const cells = [];
       for (const object of Array.isArray(rows[source]) ? rows[source] : []) {
         if (cells.length < 2) {
           const cell = cellFrom(object, result.pictures);
-          if (cell) cells.push(cell);
+          if (cell && !(SINGLE.includes(cell.widget) && kept.has(cell.widget))) cells.push(cell);
         }
       }
       if (cells.length === 2 && !(PAIRS.has(cells[0].widget) && PAIRS.has(cells[1].widget))) cells.length = 1;
       if (cells.length > 0) result.rows.push({ cells, source });
+      for (const cell of cells) kept.add(cell.widget);
     }
     result.ok = result.rows.length > 0;
     return result;
@@ -526,7 +531,7 @@
   }
 
   window.HomeLayout = {
-    DIMENSIONS, PRESETS, DESTINATIONS, MENU_DESTINATIONS, PAIRS, OPENS, MAX_ROWS, MAX_PICTURES, MAX_BYTES,
+    DIMENSIONS, PRESETS, DESTINATIONS, MENU_DESTINATIONS, PAIRS, SINGLE, OPENS, MAX_ROWS, MAX_PICTURES, MAX_BYTES,
     PICTURE_FOLDER, WEB_PICTURE_FOLDER, WEB_PICTURE_PLUGIN, WEB_PICTURE_EVENTS, WEB_PICTURE_PRESETS, parse, withAvailable,
     place, card, strip, bottomCount, layOut, webPictureDest, fillSize, webSourceUrl, webSourceExt, webSourceProblem,
     webPicturePlugin,

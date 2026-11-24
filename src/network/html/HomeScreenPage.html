@@ -88,8 +88,8 @@
         </div>
         <ol id="rows" class="rows"></ol>
         <p class="hint">Up to six rows, each one widget across or two side by side; the book card and Also reading
-          take a row alone. More and Settings always close the screen, and More holds every place your shortcuts
-          leave out.</p>
+          take a row alone, and a layout has one of each. More and Settings always close the screen, and More holds
+          every place your shortcuts leave out.</p>
       </section>
       <section class="card preview-card">
         <h2>Preview</h2>
@@ -405,9 +405,12 @@
         return wrap;
       }
 
-      function slot(cell, r, c, row) {
+      // `kept`: the cell the reader shows for each widget a layout holds once (L.SINGLE), as it reads the file.
+      function slot(cell, r, c, row, kept) {
         const node = element('div', { class: 'slot' });
-        const widgets = WIDGETS.map(([value, text]) => [value, text, c === 1 && !L.PAIRS.has(value)]);
+        // A widget beside another must pair; the book card and Also reading are offered while the layout has none.
+        const widgets = WIDGETS.map(([value, text]) => [value, text,
+          (c === 1 && !L.PAIRS.has(value)) || (L.SINGLE.includes(value) && !!kept[value] && kept[value] !== cell)]);
         const head = element('div', { class: 'slot-head' });
         head.append(select(widgets, cell.widget, (value) => {
           row[c] = defaultCell(value);
@@ -420,6 +423,11 @@
             'aria-label': 'Remove this widget', onclick: () => { row.length = 1; changed(); } }, '✕'));
         }
         node.append(head);
+        if (L.SINGLE.includes(cell.widget) && kept[cell.widget] && kept[cell.widget] !== cell) {
+          node.append(element('span', { class: 'slot-note warn' }, cell.widget === 'book'
+            ? 'Left out: Home has one book card, the first.' : 'Left out: Home has one Also reading row, the first.'));
+          return node;
+        }
         const available = state.device ? state.device.available : [];
         switch (cell.widget) {
           case 'book':
@@ -467,6 +475,11 @@
         const shownSources = new Set(result.placement.items.map((i) => result.rows[i.row].source));
         const droppedSources = new Set();
         result.rows.forEach((row, r) => { if (result.placement.dropped & (1 << r)) droppedSources.add(row.source); });
+        const kept = {};
+        for (const widget of L.SINGLE) {
+          const row = result.rows.find((x) => x.cells.some((cell) => cell.widget === widget));
+          kept[widget] = row ? state.rows[row.source].find((cell) => cell.widget === widget) : null;
+        }
         state.rows.forEach((row, r) => {
           const dropped = droppedSources.has(r);
           const item = element('li', { class: 'row' + (dropped ? ' dropped' : ''), 'data-row': r });
@@ -483,7 +496,7 @@
           else if (!shownSources.has(r)) title.append(element('span', { class: 'row-note' }, 'not shown'));
           item.append(element('div', { class: 'row-head' }, title, actions));
           const slots = element('div', { class: 'slots' + (row.length === 1 ? ' one' : '') });
-          row.forEach((cell, c) => slots.append(slot(cell, r, c, row)));
+          row.forEach((cell, c) => slots.append(slot(cell, r, c, row, kept)));
           item.append(slots);
           if (row.length === 1 && L.PAIRS.has(row[0].widget)) {
             item.append(element('button', { type: 'button', class: 'btn btn-small add-beside', style: 'margin-top:8px',

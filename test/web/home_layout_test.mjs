@@ -56,6 +56,11 @@ check(!HomeLayout.parse('{"version":1,"rows":[]}').ok, 'no rows is no layout');
 check(!HomeLayout.parse(' '.repeat(HomeLayout.MAX_BYTES + 1)).ok, 'more than 4 KB is no layout');
 const fromObject = HomeLayout.parse(HomeLayout.PRESETS.dashboard);
 check(fromObject.ok && fromObject.pictures[0] === '/home', 'a picture without a path is /home');
+// One book card and one Also reading row (the second-card cases above lay it out; here the rows themselves).
+const twice = HomeLayout.parse({ version: 1, rows: [[{ widget: 'book' }], [{ widget: 'also' }], [{ widget: 'book', size: 'compact' }],
+  [{ widget: 'also' }], [{ widget: 'book' }, { widget: 'clock' }]] });
+check(JSON.stringify(twice.rows.map((r) => [r.source, r.cells.map((c) => c.widget).join('+')])) ===
+      '[[0,"book"],[1,"also"],[4,"clock"]]', 'only the first book card and Also reading row are kept');
 
 // Pictures from the web: the file, the size in the address, and the plugin that fetches it. The device.json
 // files must be test/plugin_events/home_picture_plugins.json, which the device's event code is tested on

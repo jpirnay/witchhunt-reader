@@ -309,8 +309,8 @@ The widgets:
 
 | Widget | Shows | Choices |
 |---|---|---|
-| **Book card** | The book you read last: its cover, title, author, reading history and progress. Choose it on the reader to read on. Takes a row alone. | **Large** takes the height the other rows leave; **Compact** is a smaller card of a fixed height |
-| **Also reading** | The three books you read before it. Takes a row alone, and is shown only where the book card keeps enough room beside it (never on the Murphy M3) | |
+| **Book card** | The book you read last: its cover, title, author, reading history and progress. Choose it on the reader to read on. Takes a row alone; a layout has one, so the page offers it only until a row holds it. | **Large** takes the height the other rows leave; **Compact** is a smaller card of a fixed height |
+| **Also reading** | The three books you read before it. Takes a row alone, one a layout, and is shown only where the book card keeps enough room beside it (never on the Murphy M3) | |
 | **Shortcut** | A tile that opens one place | **Library**, **Recent books**, **Reading Stats**, **Bookmarks**, **File Transfer** or **Weather**. Bookmarks is left out until you make a bookmark, Weather while Weather is off in the reader's settings |
 | **Clock** | The time and the date, once the reader knows the time | |
 | **Calendar** | This month, each day shaded by the time you read on it. Opens Reading Stats | |

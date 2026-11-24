@@ -15,7 +15,8 @@ be written by hand. A missing or unreadable file gives the **Reader** layout, an
 
 - `version` is 1. A file of another version is not read.
 - `rows`: up to six, top to bottom. A row holds one widget across the screen or two side by side;
-  `book` and `also` take a row alone. A third widget in a row is left out.
+  `book` and `also` take a row alone. A third widget in a row is left out, and so is a second `book`
+  or a second `also`: Home has one book card and one Also reading row, the first ones in the file.
 - At most 4 KB.
 
 | `widget` | Shows | Options |

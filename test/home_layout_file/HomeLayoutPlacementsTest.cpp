@@ -69,6 +69,9 @@ constexpr Layout kLayouts[] = {
     // picture, a seventh row.
     {"left-out",
      R"({"version":1,"rows":[[{"widget":"book"},{"widget":"clock"}],[{"widget":"clock"},{"widget":"week"},{"widget":"weather"}],[{"widget":"sundial"},{"widget":"shortcut","to":"library"}],[{"widget":"picture","path":"/a.jpg"},{"widget":"picture","path":"/b.jpg"}],[{"widget":"picture","path":"/c.jpg"},{"widget":"shortcut","to":"stats"}],[{"widget":"shortcut","to":"transfer"}],[{"widget":"calendar"}]]})"},
+    // A second book card and a second Also reading row: only the first of each is kept.
+    {"second-card",
+     R"({"version":1,"rows":[[{"widget":"book"}],[{"widget":"also"}],[{"widget":"shortcut","to":"library"},{"widget":"shortcut","to":"stats"}],[{"widget":"book","size":"compact"}],[{"widget":"also"}],[{"widget":"book"},{"widget":"clock"}]]})"},
 };
 
 constexpr uint32_t kEverything = (1u << HomeTilesLayout::destination::Count) - 1;
