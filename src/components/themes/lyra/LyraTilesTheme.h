@@ -70,8 +70,6 @@ class LyraTilesTheme : public LyraTheme {
   int menuTrailing_ = 0;
   // What the widgets show, read in prepareHome().
   HomeWidgetData data_;
-  // Each picture's file or folder, and a folder's choice, kept for the rest of the start.
+  // Each picture's file or folder, as the layout names it.
   std::string pictureSources_[HomeTilesLayout::kMaxPictures];
-  std::string pickedSources_[HomeTilesLayout::kMaxPictures];
-  std::string pickedFiles_[HomeTilesLayout::kMaxPictures];
 };

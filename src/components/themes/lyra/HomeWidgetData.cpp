@@ -8,7 +8,9 @@
 #include <WeatherSettingsStore.h>
 #include <esp_system.h>
 
+#include <cstring>
 #include <ctime>
+#include <string_view>
 
 #include "CrossPointSettings.h"
 #include "ReadingStats.h"
@@ -56,12 +58,19 @@ int daysIn(const int year, const int month) {
   return month == 1 && leap ? 29 : kDays[month];
 }
 
-bool isPicture(const std::string& name) {
+bool isPicture(const std::string_view name) {
   return FsHelpers::hasBmpExtension(name) || FsHelpers::hasJpgExtension(name) || FsHelpers::hasPngExtension(name);
 }
 
 uint16_t minutesOf(const uint32_t seconds) {
   return static_cast<uint16_t>(seconds > 65535u * 60u ? 65535u : seconds / 60);
+}
+
+// Whether `file` sits directly in `folder`: chosen from it, rather than from the folder a layout named before.
+bool inFolder(const std::string& file, const std::string& folder) {
+  const size_t n = folder.size() - (folder.back() == '/' ? 1 : 0);
+  return file.size() > n + 1 && file.compare(0, n, folder, 0, n) == 0 && file[n] == '/' &&
+         file.find('/', n + 1) == std::string::npos;
 }
 
 // One picture of `folder`, each with the same chance, in one pass and without a list: the k-th kept with
@@ -72,7 +81,7 @@ std::string pickFrom(const std::string& folder) {
     if (dir) dir.close();
     return {};
   }
-  std::string chosen;
+  char chosen[256] = "";
   uint32_t seen = 0;
   char name[256];
   for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
@@ -81,10 +90,13 @@ std::string pickFrom(const std::string& folder) {
     file.close();
     if (!candidate || name[0] == '.' || !isPicture(name)) continue;
     ++seen;
-    if (esp_random() % seen == 0) chosen = folder + (folder.back() == '/' ? "" : "/") + name;
+    if (esp_random() % seen == 0) memcpy(chosen, name, sizeof(chosen));
   }
   dir.close();
-  return chosen;
+  if (chosen[0] == '\0') return {};
+  std::string path = folder;
+  if (path.back() != '/') path += '/';
+  return path += chosen;
 }
 
 }  // namespace
@@ -100,8 +112,7 @@ std::string homePictureTarget(const std::string& source, const uint32_t sourceBy
   return name;
 }
 
-void HomeWidgetData::load(const HomeTilesLayout::Config& config, const std::string* pictureSources,
-                          std::string* pickedSources, std::string* pickedFiles) {
+void HomeWidgetData::load(const HomeTilesLayout::Config& config, const std::string* pictureSources) {
   const bool wantsDate = uses(config, Widget::Calendar);
   const bool wantsReading = uses(config, Widget::Summary) || wantsDate;
 
@@ -173,20 +184,15 @@ void HomeWidgetData::load(const HomeTilesLayout::Config& config, const std::stri
   for (int i = 0; i < HomeTilesLayout::kMaxPictures; ++i) {
     const std::string& source = pictureSources[i];
     pictureSizes[i] = 0;
-    if (source.empty() || !showsPicture(config, i)) {
-      pictures[i].clear();
-      continue;
-    }
+    // A slot no widget shows keeps its folder's choice for when a layout shows it again.
+    if (source.empty() || !showsPicture(config, i)) continue;
     if (isPicture(source)) {
       pictures[i] = source;
-    } else {
-      // A folder: one of its pictures, chosen once per start, so Home does not change it on every return;
-      // again when the chosen one has gone from the card since.
-      if (pickedSources[i] != source || (!pickedFiles[i].empty() && !Storage.exists(pickedFiles[i].c_str()))) {
-        pickedSources[i] = source;
-        pickedFiles[i] = pickFrom(source);
-      }
-      pictures[i] = pickedFiles[i];
+    } else if (!inFolder(pictures[i], source) || !Storage.exists(pictures[i].c_str())) {
+      // A folder: one of its pictures, kept while it is on the card, so Home does not change it on
+      // every return. Chosen again when the layout names another folder or the file has gone; an
+      // empty folder is looked at again on each return, so a picture added to it shows.
+      pictures[i] = pickFrom(source);
     }
     if (!pictures[i].empty()) {
       auto file = Storage.open(pictures[i].c_str());

@@ -218,7 +218,7 @@ void LyraTilesTheme::prepareHome(const uint32_t available) {
     if (count == 2) shown.add(cells[0], cells[1]);
   }
   config_ = shown;
-  data_.load(config_, pictureSources_, pickedSources_, pickedFiles_);
+  data_.load(config_, pictureSources_);
 }
 
 int LyraTilesTheme::homePictureJobs(const GfxRenderer& /*renderer*/, const Rect content, HomePictureJob* out,

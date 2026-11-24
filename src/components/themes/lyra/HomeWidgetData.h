@@ -36,14 +36,13 @@ struct HomeWidgetData {
   int weatherCode = 0;
   bool isDay = true;
 
-  // ---- The pictures: the file each Picture widget shows, a folder's chosen once per start ----
+  // ---- The pictures: the file each Picture widget shows; a folder's choice is kept here between visits ----
   std::string pictures[HomeTilesLayout::kMaxPictures];
   uint32_t pictureSizes[HomeTilesLayout::kMaxPictures]{};  // bytes, so a replaced file is made again
 
-  // Reads what `config` uses. `pictureSources` names each picture's file or folder; a folder is
-  // read once per start (`pickedSources` keeps the choice, so a return to Home does not change it).
-  void load(const HomeTilesLayout::Config& config, const std::string* pictureSources, std::string* pickedSources,
-            std::string* pickedFiles);
+  // Reads what `config` uses. `pictureSources` names each picture's file or folder; a folder's
+  // choice stays in `pictures` while it is on the card, so a return to Home does not change it.
+  void load(const HomeTilesLayout::Config& config, const std::string* pictureSources);
 };
 
 // The folder Home's ready-made layouts take their pictures from.
