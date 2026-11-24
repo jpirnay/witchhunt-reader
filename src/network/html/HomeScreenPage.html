@@ -461,6 +461,7 @@
             break;
           case 'weather':
             node.append(element('span', { class: 'slot-note' }, 'The last forecast; opens Weather.'));
+            if (!available.includes('weather')) node.append(element('span', { class: 'slot-note warn' }, UNAVAILABLE.weather));
             break;
           default:
             if (!WIDGET_NAMES[cell.widget]) node.append(element('span', { class: 'slot-note warn' }, 'Not a widget this reader knows.'));

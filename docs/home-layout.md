@@ -34,8 +34,9 @@ The rules Home lays the rows out by:
 
 - More and Settings always close Home in a row of their own. More holds every place the layout's
   shortcuts do not open.
-- A shortcut to a place with nothing behind it (Bookmarks before the first bookmark, Weather before it
-  is set up) is left out; its neighbour then takes the row.
+- A shortcut to a place with nothing behind it (Bookmarks before the first bookmark, Weather while it
+  is off) is left out; its neighbour then takes the row. The `weather` widget goes with Weather's
+  shortcut.
 - Where the screen cannot hold every row with the book card at its smallest readable size, rows are
   left out from the bottom up; the book card's row never is.
 - Held sideways, the rows with the book card take the left column and the others the right one.

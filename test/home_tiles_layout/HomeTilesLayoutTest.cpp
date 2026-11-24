@@ -651,6 +651,20 @@ TEST(HomeWidgets, ATileAloneTakesTheRow) {
   EXPECT_EQ(tile->box.w, 480 - 2 * HomeTilesLayout::kRegular.sidePadding);
 }
 
+// Weather off takes the weather off Home: the widget goes as its shortcut does, its neighbour taking
+// the row. It used to stay, showing the last forecast and opening Weather.
+TEST(HomeWidgets, WeatherOffLeavesTheWeatherWidgetOut) {
+  HomeTilesLayout::Config cfg;
+  cfg.add({Widget::Book}).add({Widget::Weather}, {Widget::Clock}).add({Widget::Weather});
+  constexpr uint32_t kAll = (1u << dest::Count) - 1;
+  const auto on = HomeTilesLayout::withAvailable(cfg, kAll);
+  EXPECT_EQ(on.rowCount, 3);
+  const auto off = HomeTilesLayout::withAvailable(cfg, kAll & ~(1u << dest::Weather));
+  ASSERT_EQ(off.rowCount, 2);
+  EXPECT_EQ(off.rows[1].count, 1);
+  EXPECT_EQ(off.rows[1].cells[0].widget, Widget::Clock);
+}
+
 // Widgets that open something are numbered after the menu, in reading order, and the grid visits
 // them where they are drawn.
 TEST(HomeWidgets, WidgetsThatOpenSomethingFollowTheMenuInNumberAndTheScreenInOrder) {

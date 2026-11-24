@@ -291,7 +291,8 @@ constexpr Config gallery() {
 }  // namespace presets
 
 // `cfg` without its shortcuts to destinations with nothing behind them (bit d of `available`: destination d
-// has), as Home shows it: the neighbour of one left out takes its row, and a row left empty goes.
+// has), as Home shows it: the neighbour of one left out takes its row, and a row left empty goes. The
+// Weather widget goes with Weather's shortcut: it opens Weather, and Weather off takes the weather off Home.
 constexpr Config withAvailable(const Config& cfg, const uint32_t available) {
   Config shown;
   for (int r = 0; r < cfg.rowCount && r < kMaxRows; ++r) {
@@ -300,6 +301,7 @@ constexpr Config withAvailable(const Config& cfg, const uint32_t available) {
     for (int c = 0; c < cfg.rows[r].count; ++c) {
       const Cell& cell = cfg.rows[r].cells[c];
       if (cell.widget == Widget::Shortcut && (available & (1u << cell.option)) == 0) continue;
+      if (cell.widget == Widget::Weather && (available & (1u << destination::Weather)) == 0) continue;
       cells[count++] = cell;
     }
     if (count == 1) shown.add(cells[0]);

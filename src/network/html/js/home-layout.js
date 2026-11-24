@@ -128,12 +128,14 @@
     return result;
   }
 
-  // HomeTilesLayout::withAvailable: the shortcuts to destinations not in `available` (names) left out.
+  // HomeTilesLayout::withAvailable: the shortcuts to destinations not in `available` (names) left out, and the
+  // Weather widget with Weather's.
   function withAvailable(rows, available) {
     const has = new Set(available);
     const shown = [];
     for (const row of rows) {
-      const cells = row.cells.filter((c) => c.widget !== 'shortcut' || has.has(DESTINATIONS[c.option]));
+      const cells = row.cells.filter((c) => (c.widget !== 'shortcut' || has.has(DESTINATIONS[c.option])) &&
+        (c.widget !== 'weather' || has.has('weather')));
       if (cells.length > 0) shown.push({ cells, source: row.source });
     }
     return shown;

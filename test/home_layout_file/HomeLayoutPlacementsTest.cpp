@@ -75,7 +75,7 @@ constexpr Layout kLayouts[] = {
 };
 
 constexpr uint32_t kEverything = (1u << HomeTilesLayout::destination::Count) - 1;
-// No bookmarks, Weather switched off: their shortcuts are left out.
+// No bookmarks, Weather switched off: their shortcuts are left out, and the Weather widget with them.
 constexpr uint32_t kBare =
     kEverything & ~(1u << HomeTilesLayout::destination::Bookmarks) & ~(1u << HomeTilesLayout::destination::Weather);
 

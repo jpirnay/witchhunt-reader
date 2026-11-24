@@ -315,7 +315,7 @@ The widgets:
 | **Clock** | The time and the date, once the reader knows the time | |
 | **Calendar** | This month, each day shaded by the time you read on it. Opens Reading Stats | |
 | **This week** | The time you read on each day of this week, the books you finished and are reading, and your streak. Opens Reading Stats | The week starts on the reader's **First Day of Week** (Settings → System → Clock Settings) |
-| **Weather** | The last forecast the reader's Weather screen fetched. Opens Weather | |
+| **Weather** | The last forecast the reader's Weather screen fetched. Opens Weather. Left out while Weather is off in the reader's settings | |
 | **Picture** | A picture from the card or from the web (below) | |
 
 **More** and **Settings** always close the screen in a row of their own, and **More** holds every place

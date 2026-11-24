@@ -56,6 +56,10 @@ check(!HomeLayout.parse('{"version":1,"rows":[]}').ok, 'no rows is no layout');
 check(!HomeLayout.parse(' '.repeat(HomeLayout.MAX_BYTES + 1)).ok, 'more than 4 KB is no layout');
 const fromObject = HomeLayout.parse(HomeLayout.PRESETS.dashboard);
 check(fromObject.ok && fromObject.pictures[0] === '/home', 'a picture without a path is /home');
+// Weather off takes the Weather widget off as it does Weather's shortcut, its neighbour taking the row.
+const weatherOff = HomeLayout.withAvailable([{ cells: [{ widget: 'weather', option: 0 }, { widget: 'clock', option: 0 }], source: 0 },
+  { cells: [{ widget: 'weather', option: 0 }], source: 1 }], ['library', 'stats', 'transfer', 'recent']);
+check(JSON.stringify(weatherOff.map((r) => r.cells.map((c) => c.widget))) === '[["clock"]]', 'Weather off leaves the Weather widget out');
 // One book card and one Also reading row (the second-card cases above lay it out; here the rows themselves).
 const twice = HomeLayout.parse({ version: 1, rows: [[{ widget: 'book' }], [{ widget: 'also' }], [{ widget: 'book', size: 'compact' }],
   [{ widget: 'also' }], [{ widget: 'book' }, { widget: 'clock' }]] });
