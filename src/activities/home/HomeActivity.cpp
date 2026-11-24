@@ -984,13 +984,14 @@ int HomeActivity::selectableCount() const {
 }
 
 void HomeActivity::dispatchSelection(const int menuIndex) {
+  if (menuIndex < 0) return;
   const int menuCount = static_cast<int>(menuEntries.size());
-  if (menuIndex >= 0 && menuIndex < menuCount) {
+  if (menuIndex < menuCount) {
     dispatchMenuAction(menuEntries[menuIndex].action);
     return;
   }
   const int widget = menuIndex - menuCount;
-  if (widget < 0 || widget >= widgetActionCount_) return;
+  if (widget >= widgetActionCount_) return;
   dispatchMenuAction(actionFor(widgetActions_[widget]));
 }
 

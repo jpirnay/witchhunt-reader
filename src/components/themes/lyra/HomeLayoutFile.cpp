@@ -85,7 +85,7 @@ Parsed parse(const char* json, const size_t length) {
   if (json == nullptr || length == 0 || length > kMaxBytes) return parsed;
   JsonDocument doc;
   if (deserializeJson(doc, json, length)) return parsed;
-  if ((doc["version"] | 0) != 1) return parsed;
+  if (doc["version"].as<int>() != 1) return parsed;
   for (JsonArrayConst row : doc["rows"].as<JsonArrayConst>()) {
     if (parsed.config.rowCount >= HomeTilesLayout::kMaxRows) break;
     Cell cells[2]{};
