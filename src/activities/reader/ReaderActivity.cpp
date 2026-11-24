@@ -7,6 +7,7 @@
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <ImageToBmp.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <PngToBmpConverter.h>
@@ -276,20 +277,18 @@ std::string ReaderActivity::convertSidecarToBmp(const std::string& cacheDir, con
     Storage.remove(bmpPath.c_str());
   }
 
-  FsFile src;
-  if (!Storage.openFileForRead("COVER", sidecarPath, src)) return "";
-  FsFile dst;
-  if (!Storage.openFileForWrite("COVER", bmpPath, dst)) {
-    src.close();
-    return "";
-  }
-
   bool ok = false;
-  if (FsHelpers::hasJpgExtension(sidecarPath)) {
-    ok = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(src, dst, width, height, nullptr, crop);
-  } else if (FsHelpers::hasPngExtension(sidecarPath)) {
-    ok = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(src, dst, width, height, crop);
-  } else if (FsHelpers::hasBmpExtension(sidecarPath)) {
+  if (!FsHelpers::hasBmpExtension(sidecarPath)) {
+    ok = ImageToBmp::convertFile("COVER", sidecarPath, bmpPath,
+                                 ImageToBmp::Target{.width = width, .height = height, .crop = crop});
+  } else {
+    FsFile src;
+    if (!Storage.openFileForRead("COVER", sidecarPath, src)) return "";
+    FsFile dst;
+    if (!Storage.openFileForWrite("COVER", bmpPath, dst)) {
+      src.close();
+      return "";
+    }
     // Verbatim copy is only usable when the sidecar already fits the slot: the themes
     // draw thumbs 1:1, and an oversized BMP would be rescaled at draw time, aliasing
     // its dithered pixels into a grid. (It would also fail isCoverThumbComplete's
@@ -317,13 +316,13 @@ std::string ReaderActivity::convertSidecarToBmp(const std::string& cacheDir, con
     } else {
       LOG_DBG("COVER", "Sidecar BMP unusable for %dx%d slot (must fit 1:1): %s", width, height, sidecarPath.c_str());
     }
+    src.close();
+    dst.close();
+    if (!ok) Storage.remove(bmpPath.c_str());
   }
-  src.close();
-  dst.close();
   if (!ok) {
     LOG_DBG("COVER", "convertSidecarToBmp: conversion FAILED sidecar=%s bmpPath=%s", sidecarPath.c_str(),
             bmpPath.c_str());
-    Storage.remove(bmpPath.c_str());
     return "";
   }
   LOG_DBG("COVER", "convertSidecarToBmp: wrote %s from %s", bmpPath.c_str(), sidecarPath.c_str());

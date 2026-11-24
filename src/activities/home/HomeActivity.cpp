@@ -9,10 +9,9 @@
 #include <HalDisplay.h>
 #include <HalStorage.h>
 #include <I18n.h>
-#include <JpegToBmpConverter.h>
+#include <ImageToBmp.h>
 #include <Logging.h>
 #include <Memory.h>
-#include <PngToBmpConverter.h>
 #include <Txt.h>
 #include <Utf8.h>
 #include <Xtc.h>
@@ -352,19 +351,9 @@ bool HomeActivity::makeNextHomePicture() {
     // Written under another name and renamed when whole: the theme draws the target on the render
     // task meanwhile, and must not find half a picture.
     const std::string part = job.target + ".part";
-    bool ok = false;
-    {
-      FsFile src;
-      FsFile dst;
-      if (Storage.openFileForRead("HOME", job.source, src) && Storage.openFileForWrite("HOME", part, dst)) {
-        if (FsHelpers::hasJpgExtension(job.source)) {
-          ok = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(src, dst, job.width, job.height, coverScratch_.get(),
-                                                                   /*crop=*/true);
-        } else if (FsHelpers::hasPngExtension(job.source)) {
-          ok = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(src, dst, job.width, job.height, /*crop=*/true);
-        }
-      }
-    }
+    bool ok = ImageToBmp::convertFile(
+        "HOME", job.source, part,
+        ImageToBmp::Target{.width = job.width, .height = job.height, .crop = true, .scratch = coverScratch_.get()});
     if (ok) {
       Storage.remove(job.target.c_str());
       ok = Storage.rename(part.c_str(), job.target.c_str());
