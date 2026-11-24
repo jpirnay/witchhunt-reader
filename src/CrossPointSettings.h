@@ -316,6 +316,17 @@ class CrossPointSettings {
   // Hide battery percentage
   enum HIDE_BATTERY_PERCENTAGE { HIDE_NEVER = 0, HIDE_READER = 1, HIDE_ALWAYS = 2, HIDE_BATTERY_PERCENTAGE_COUNT };
 
+  // Lyra Tiles' Home: one of its ready-made layouts. Positional: append, never reorder.
+  enum HOME_LAYOUT {
+    HOME_LAYOUT_READER = 0,
+    HOME_LAYOUT_DASHBOARD = 1,
+    HOME_LAYOUT_GALLERY = 2,
+    HOME_LAYOUT_CUSTOM = 3
+  };
+
+  // First day of the week. Saturday is where Persian and much of the Arabic-speaking world start it.
+  enum FIRST_DAY_OF_WEEK { WEEK_STARTS_MONDAY = 0, WEEK_STARTS_SUNDAY = 1, WEEK_STARTS_SATURDAY = 2 };
+
   // UI Theme. Lyra Tiles took over 2 from Lyra Extended (three books on Home), which it replaced:
   // a stored 2 opens Lyra Tiles. 4 was Lyra Tiles on test builds only; out of range, it loads as
   // the default.
@@ -842,6 +853,10 @@ class CrossPointSettings {
   uint8_t statusBarClockPosition = STATUS_BAR_CLOCK_LEFT;
   // Clock format: 0 = 24h (14:00), 1 = 12h (2:00pm)
   uint8_t clockFormat12h = 0;
+  // The day a week starts on, for the calendar and the week's reading on Home (FIRST_DAY_OF_WEEK).
+  uint8_t firstDayOfWeek = WEEK_STARTS_MONDAY;
+  // Lyra Tiles' Home layout (HOME_LAYOUT).
+  uint8_t homeLayout = HOME_LAYOUT_READER;
   // LEGACY timezone selection, a LEGACY_TIMEZONE value. Still READ from the settings file -- it
   // is the only record of what a device chose before clockTimezone existed, and
   // timezones::activeIndex() migrates it -- but no longer written: it left the settings list, so

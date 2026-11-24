@@ -183,6 +183,21 @@ constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
 
 enum class SyncIndicator : uint8_t { None, Active, Failed };
 
+// The places Home leads to, as a theme that draws its own shortcuts to them names them
+// (BaseTheme::homeWidgetActions, homeShownDestinations). A set of them is a bit mask, 1 << value.
+enum class HomeDestination : uint8_t { Library, ReadingStats, Bookmarks, FileTransfer, Weather, Recent, Count };
+constexpr uint32_t destinationBit(const HomeDestination d) { return 1u << static_cast<uint8_t>(d); }
+
+// A picture a widget on Home shows, to be made from `source` (JPEG or PNG) at the widget's size into
+// `target`, cut to fill and dithered, as the cover pass makes a cover thumbnail
+// (BaseTheme::homePictureJobs).
+struct HomePictureJob {
+  std::string source;
+  std::string target;
+  int width = 0;
+  int height = 0;
+};
+
 class BaseTheme {
  public:
   virtual ~BaseTheme() = default;
@@ -275,9 +290,39 @@ class BaseTheme {
   // scrolls its own row instead). Same direction as a page turn: a swipe to the left is "next".
   virtual bool homeSwipeCyclesBooks() const { return false; }
 
-  // Home's rows for a board with a key for each direction (HomeGridNav). None (rowCount 0) for a
-  // theme laid out as a list, which Up and Down step through in order.
-  virtual HomeGridNav::Grid homeGrid(int shownBooks, int menuCount, int menuTrailing) const {
+  // Home is about to be built. A theme whose Home the reader arranges reads the arrangement now,
+  // before Home builds its menu: homeMenuCapacity() and homeShownDestinations() follow it.
+  // `available` is the destinations with something behind them (bit mask over HomeDestination): a
+  // shortcut to one without is left out, as its menu entry would be. Called from
+  // HomeActivity::onEnter with the render lock held.
+  virtual void prepareHome(uint32_t /*available*/) {}
+  // The destinations the theme shows on Home itself, as widgets (bit mask over HomeDestination):
+  // they are neither Home's menu entries nor behind More. A shortcut whose row does not fit the
+  // panel is not shown, so More offers it.
+  virtual uint32_t homeShownDestinations(const GfxRenderer& /*renderer*/, Rect /*content*/) const { return 0; }
+  // The pictures Home's widgets show, as files Home's cover pass makes (it has the scratch for a
+  // decode): up to `max`, whether made already or not; Home checks.
+  virtual int homePictureJobs(const GfxRenderer& /*renderer*/, Rect /*content*/, HomePictureJob* /*out*/,
+                              int /*max*/) const {
+    return 0;
+  }
+  // The menu Home built: a theme that lays its widgets out around it needs the counts in every draw,
+  // and drawRecentBookCover() is not given them. Same caller and lock as prepareHome(), afterwards.
+  virtual void setHomeMenu(int /*menuCount*/, int /*menuTrailing*/) {}
+  // The widgets on Home that open something, numbered after Home's menu in reading order: what each
+  // opens. None for a theme without such widgets.
+  virtual int homeWidgetActions(const GfxRenderer& /*renderer*/, Rect /*content*/, HomeDestination* /*out*/,
+                                int /*max*/) const {
+    return 0;
+  }
+
+  // Home's rows in screen order (HomeGridNav): Up and Down between rows and Left and Right along one
+  // on a board with a key for each direction, and the order Up and Down alone step through. None
+  // (rowCount 0) for a theme laid out as a list, which Up and Down step through in Home's order.
+  virtual HomeGridNav::Grid homeGrid(const GfxRenderer& renderer, Rect content, int shownBooks, int menuCount,
+                                     int menuTrailing) const {
+    (void)renderer;
+    (void)content;
     (void)shownBooks;
     (void)menuCount;
     (void)menuTrailing;

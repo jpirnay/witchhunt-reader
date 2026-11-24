@@ -734,6 +734,9 @@ void ActivityManager::goToHomeMenuAction(const HomeMenuAction action) {
     case HomeMenuAction::Settings:
       goToSettings();
       break;
+    case HomeMenuAction::RecentBooks:
+      goToLibrary(LibraryTab::Recent);
+      break;
   }
 }
 
