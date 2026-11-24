@@ -49,6 +49,11 @@ class String {
     _buf.append(s ? s : "", n);
     return true;
   }
+  bool concat(const char* s, const unsigned int n) {
+    if (_buf.size() + n > growLimit()) return false;
+    _buf.append(s, n);
+    return true;
+  }
   // The longest a String may grow to through concat(); no limit unless a test sets one.
   static size_t& growLimit() {
     static size_t limit = static_cast<size_t>(-1);

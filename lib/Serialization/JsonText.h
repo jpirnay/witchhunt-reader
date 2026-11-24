@@ -13,7 +13,7 @@
 // (std::string, String, const char*, and each class derived from Print separately), and at -Os a further
 // private copy of the main loop in each calling file. On the X3 the parser alone came to 14 KB of flash.
 // Every parse and every write goes through the functions below instead, defined in one file, so the
-// firmware carries each once.
+// firmware carries each once. (Arduino's String is written in one place too: JsonFile::serializeWhole.)
 namespace JsonText {
 
 // ---- Parsing: the same results as deserializeJson() on the same text. The input is read up to

@@ -19,7 +19,7 @@ target_include_directories(WeatherUnitsTest PRIVATE
   ${REPO_ROOT}/lib/Weather
 )
 
-target_compile_definitions(WeatherUnitsTest PRIVATE ARDUINOJSON_ENABLE_ARDUINO_STRING=1)
+target_compile_definitions(WeatherUnitsTest PRIVATE ARDUINOJSON_ENABLE_ARDUINO_STRING=1 ARDUINOJSON_ENABLE_ARDUINO_PRINT=1)
 
 target_link_libraries(WeatherUnitsTest PRIVATE
   crosspoint_test_common

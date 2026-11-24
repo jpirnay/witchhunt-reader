@@ -14,6 +14,7 @@
 #include <HalStorage.h>
 #include <HalSystem.h>  // feedWatchdog()
 #include <HeapFit.h>
+#include <JsonFile.h>
 #include <JsonText.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -356,8 +357,9 @@ void loadPluginHosts(JsonDocument& doc) {
 
 bool savePluginHosts(const JsonDocument& doc) {
   String text;
-  serializeJson(doc, text);
-  if (text.length() > PLUGIN_HOSTS_MAX_BYTES) return false;
+  if (!JsonFile::serializeWhole("WEB", PLUGIN_HOSTS_PATH, doc, text) || text.length() > PLUGIN_HOSTS_MAX_BYTES) {
+    return false;
+  }
   const std::string temp = std::string(PLUGIN_HOSTS_PATH) + ".tmp";
   return Storage.writeFile(temp.c_str(), text) && FileReplace::replace(temp.c_str(), PLUGIN_HOSTS_PATH);
 }
@@ -2118,7 +2120,9 @@ void CrossPointWebServer::handleDelete() const {
   for (const auto& p : paths) {
     // Resolved before the protection check below -- see handleFileListData.
     // crosspoint-reader PR #3353.
-    auto itemPath = normalizeWebPath(p.as<String>());
+    // `| ""`, not as<String>(): an entry that is not a string is refused as an empty path, where
+    // as<String>() turned it into its JSON (5 -> "/5") and kept ArduinoJson's String writer in the image.
+    auto itemPath = normalizeWebPath(p | "");
 
     // Validate path
     if (itemPath.isEmpty() || itemPath == "/") {

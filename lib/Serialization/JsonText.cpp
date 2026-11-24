@@ -1,6 +1,6 @@
 #include "JsonText.h"
 
-// The firmware's deserializeJson() call and its serializeJson() calls but those into a String (see JsonText.h).
+// The only deserializeJson() and serializeJson() calls in the firmware but JsonFile's String (see JsonText.h).
 
 DeserializationError JsonText::parse(JsonDocument& doc, const char* text, const size_t length) {
   return deserializeJson(doc, text, length);
