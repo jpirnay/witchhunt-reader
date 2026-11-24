@@ -56,6 +56,31 @@ TEST(ScreenshotName, NonAsciiTitlesKeepTheirCharacters) {
   EXPECT_EQ(build(book("北京故事", 1, 2, 3)), "/screenshots/北京故事/北京故事_ch1_p2_3pct_1234.bmp");
 }
 
+// A title that is not UTF-8 (an XTC file's Latin-1 header): the card's long names are UTF-8, and SdFat refused the name
+// with the bytes copied in, so the screenshot was lost. Each byte that is not part of a character goes as '_'.
+TEST(ScreenshotName, BytesThatAreNotUtf8BecomeUnderscores) {
+  EXPECT_EQ(build(book("Caf\xE9"
+                       " cr\xE8"
+                       "me",
+                       0, 1, 1)),
+            "/screenshots/Caf_ cr_me/Caf_ cr_me_p1_1pct_1234.bmp");
+  // A stray continuation byte, and a lead byte the title ends on.
+  EXPECT_EQ(build(book("A\x80"
+                       "B\xC3",
+                       0, 1, 1)),
+            "/screenshots/A_B_/A_B__p1_1pct_1234.bmp");
+}
+
+// U+FFFD written as such is a character like any other.
+TEST(ScreenshotName, AnEncodedReplacementCharacterStays) {
+  EXPECT_EQ(build(book("A\xEF\xBF\xBD"
+                       "B",
+                       0, 1, 1)),
+            "/screenshots/A\xEF\xBF\xBD"
+            "B/A\xEF\xBF\xBD"
+            "B_p1_1pct_1234.bmp");
+}
+
 TEST(ScreenshotName, ATitleWithNothingUsableBecomesBook) {
   EXPECT_EQ(build(book("...", 0, 1, 1)), "/screenshots/book/book_p1_1pct_1234.bmp");
 }
