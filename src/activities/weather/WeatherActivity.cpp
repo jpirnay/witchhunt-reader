@@ -249,8 +249,7 @@ void WeatherActivity::saveSleepImage() {
   RenderLock lock(*this);
   renderer.clearScreen();
   drawForecast(EDGE);  // without the button hints: there are no buttons to press on a sleep screen
-  if (!ScreenshotUtil::saveFramebufferAsBmp(kTmpPath, renderer.getFrameBuffer(), renderer.getDisplayWidth(),
-                                            renderer.getDisplayHeight())) {
+  if (!ScreenshotUtil::saveFramebufferAsBmp(kTmpPath, renderer, GfxRenderer::Portrait)) {
     LOG_ERR("WEA", "Could not write %s", kTmpPath);
     return;
   }

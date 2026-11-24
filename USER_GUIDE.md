@@ -307,7 +307,7 @@ other. **Back** answers **Cancel** and carries its hint, and the two front butto
 two.
 
 ### Taking a Screenshot
-When the Power Button and Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`. A screenshot taken in a book goes into a folder named after the book, and its name says where in the book it was taken: `screenshots/<title>/<title>_ch5_p42_4pct_<number>.bmp` (an EPUB's chapter, page and progress; TXT, Markdown and XTC books have no chapter part). Screenshots of every other screen are `screenshots/screenshot-<number>.bmp`.
+When the Power Button and Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`. A screenshot taken in a book goes into a folder named after the book, and its name says where in the book it was taken: `screenshots/<title>/<title>_ch5_p42_4pct_<number>.bmp` (an EPUB's chapter, page and progress; TXT, Markdown and XTC books have no chapter part). Screenshots of every other screen are `screenshots/screenshot-<number>.bmp`. The picture is upright in the orientation you are holding the reader in, landscape included.
 
 Alternatively, while reading a book, press **Confirm**, then **More**, to open the reader menu and select **Take screenshot**. Or bind **Take screenshot** to a key or gesture under **[Controls](#373-controls)**: it works on every screen, and is the way on the BOOX Picco, which has no Down key.
 

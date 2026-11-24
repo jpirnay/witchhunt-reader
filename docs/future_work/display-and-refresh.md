@@ -539,13 +539,6 @@ gray-level plan) is in [grayscale-aa-rendering.md](../grayscale-aa-rendering.md#
 - **16-level text (Picco):** has no soft level under #871's paths; the pull pass pulls deep levels back instead. The
   firmware does not use 16-level text.
 
-## Screenshots in landscape come out sideways (CrossPoint #4457)
-
-**Open.** `ScreenshotUtil::saveFramebufferAsBmp()` always writes the portrait rotation, and the "taken" border uses the
-display's width and height as the logical size, so it is wrong in landscape too. Keep a portrait-form writer for the
-two callers that write sleep BMPs through it (`WeatherActivity`'s forecast image, `BmpViewerActivity`'s "set as sleep
-image"). crosspoint-reader #4457 (merged), Uri Tauber (@Uri-Tauber).
-
 ## For the next SDK resync
 
 Two open Free-Ink PRs would break this firmware silently if they land as they are:

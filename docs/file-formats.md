@@ -101,7 +101,7 @@ CSS pass), `spines/<n>/anchors_<spine>.tmp` (a section's anchor map), `footnotes
 | `/sleep/weather.bmp` | `WeatherActivity` | The last fetched forecast as a custom sleep image, the panel's pixels in portrait as `ScreenshotUtil` writes them. Goes through `/sleep/weather.bmp.tmp` and `FileReplace` |
 | `.<image>.png.f<filter>.pxc` beside a sleep PNG | `SleepActivity` | The PNG's dithered pixels under one sleep filter: the `.pxc` layout of the book caches above, then a 12-byte stamp of the PNG it was decoded from (`SPS1`, `u32` size, `u16` FAT modify date, `u16` time; `SleepPixelCacheStamp.h`). A cache with no stamp, or with another file's, is deleted and the PNG decoded again |
 | `/crash_report.txt` | `HalSystem::checkPanic` | The last panic, written at the first boot after it: the firmware version, the panic reason, the last log lines and the stack. A watchdog reset writes one only when the panic handler ran first (`PanicReboot::isFromPanic()`). The Library's Books tab and All Files list it; New and Authors, Recent books and the next-book suggestion leave it out (`FirmwareFiles`) |
-| `/screenshots/*.bmp` | `ScreenshotUtil` | Screenshots |
+| `/screenshots/*.bmp` | `ScreenshotUtil` | Screenshots, 1-bit, upright in the orientation the reader was held in |
 | `<dictionary>.qidx`, `.sidx` | `Dictionary` | Lookup indexes beside a dictionary's `.idx` and `.syn`, `SIDECAR_VERSION` (2): [dictionary.md](dictionary.md) |
 
 ### In flash: the font area
