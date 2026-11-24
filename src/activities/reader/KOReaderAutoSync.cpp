@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <HalStorage.h>
 #include <JsonFile.h>
+#include <JsonText.h>
 #include <Logging.h>
 #include <esp_heap_caps.h>
 
@@ -78,7 +79,7 @@ bool AutoSyncState::loadFromFile() {
     return false;
   }
   JsonDocument doc;
-  if (const auto error = deserializeJson(doc, json.c_str())) {
+  if (const auto error = JsonText::parse(doc, json.c_str())) {
     LOG_ERR("AutoSync", "JSON parse error: %s", error.c_str());
     return false;
   }

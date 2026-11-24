@@ -6,6 +6,7 @@
 #include <I18n.h>
 #include <JpegToBmpConverter.h>
 #include <JsonFile.h>
+#include <JsonText.h>
 #include <Logging.h>
 #include <OpdsStream.h>
 #include <OpenSearchDescription.h>
@@ -197,7 +198,7 @@ bool loadOpdsDiscovery(const std::string& serverUrl, std::string& searchTemplate
   if (json.isEmpty()) return false;
 
   JsonDocument doc;
-  if (deserializeJson(doc, json)) return false;
+  if (JsonText::parse(doc, json)) return false;
 
   if (doc["v"].as<int>() != OPDS_DISCOVERY_VERSION) return false;  // unknown or pre-versioned format — discard
 

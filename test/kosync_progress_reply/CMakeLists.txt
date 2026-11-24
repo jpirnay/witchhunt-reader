@@ -10,6 +10,7 @@ FetchContent_MakeAvailable(arduinojson)
 
 add_executable(KOReaderProgressReplyTest
   KOReaderProgressReplyTest.cpp
+  ${REPO_ROOT}/lib/Serialization/JsonText.cpp
 )
 
 target_include_directories(KOReaderProgressReplyTest PRIVATE
@@ -17,6 +18,7 @@ target_include_directories(KOReaderProgressReplyTest PRIVATE
   ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/KOReaderSync
+  ${REPO_ROOT}/lib/Serialization
   # Epub/ProgressPpb.h and SeriesIndex.h, header-only.
   ${REPO_ROOT}/lib/Epub
   ${REPO_ROOT}/lib/LibraryIndex

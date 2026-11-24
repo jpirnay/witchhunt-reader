@@ -4,6 +4,7 @@
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <I18n.h>
+#include <JsonText.h>
 #include <Logging.h>
 #include <WiFi.h>
 
@@ -75,7 +76,7 @@ bool detectTimezoneSetting(uint8_t& outSetting, std::string& outIana, bool& outD
   }
 
   JsonDocument doc;
-  const auto err = deserializeJson(doc, payload);
+  const auto err = JsonText::parse(doc, payload);
   if (err) {
     LOG_ERR("CLK", "Timezone detect failed: %s", err.c_str());
     return false;

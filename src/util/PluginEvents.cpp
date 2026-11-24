@@ -5,6 +5,7 @@
 #include <HalClock.h>
 #include <HalStorage.h>
 #include <HeapFit.h>
+#include <JsonText.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <esp_random.h>
@@ -186,7 +187,7 @@ struct DrainContext {
 // A small JSON file (token, config, <book>.meta.json) parsed into `doc`; false when absent or not JSON.
 bool readSmallJson(const std::string& path, JsonDocument& doc) {
   std::string raw;
-  return readSmallFile(path, raw) && deserializeJson(doc, raw) == DeserializationError::Ok;
+  return readSmallFile(path, raw) && JsonText::parse(doc, raw) == DeserializationError::Ok;
 }
 
 // What became of one queued line.
@@ -200,7 +201,7 @@ enum class LineOutcome : uint8_t {
 // Sends one queued line.
 LineOutcome deliverLine(const DrainContext& dc, const std::string& line, GfxRenderer* renderer) {
   JsonDocument doc;
-  if (deserializeJson(doc, line) != DeserializationError::Ok) return LineOutcome::Dropped;
+  if (JsonText::parse(doc, line) != DeserializationError::Ok) return LineOutcome::Dropped;
   const int e = eventFromName(doc["e"] | "");
   if (e < 0) return LineOutcome::Dropped;
   const JsonVariantConst handler = handlerFor(dc.manifest.as<JsonVariantConst>(), static_cast<Event>(e));
@@ -295,7 +296,7 @@ DrainResult drain(GfxRenderer* renderer, const size_t maxEvents) {
       std::string text;
       // Unreadable now (a card fault, a manifest being replaced): the queue waits for the next drain.
       if (!Storage.readFileToString("PEVT", std::string(s.dir) + "/device.json", kMaxManifestBytes, text) ||
-          deserializeJson(dc.manifest, text) != DeserializationError::Ok) {
+          JsonText::parse(dc.manifest, text) != DeserializationError::Ok) {
         continue;
       }
     }

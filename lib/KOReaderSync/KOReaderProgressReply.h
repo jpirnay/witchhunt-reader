@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ArduinoJson.h>
+#include <JsonText.h>
 #include <Logging.h>
 
 #include <string>
@@ -17,7 +18,7 @@
 inline KOReaderSyncClient::Error parseProgressReply(const std::string& body, const std::string& documentHash,
                                                     KOReaderProgress& outProgress) {
   JsonDocument doc;
-  const DeserializationError error = deserializeJson(doc, body);
+  const DeserializationError error = JsonText::parse(doc, body);
 
   if (error) {
     LOG_ERR("KOSync", "JSON parse failed: %s", error.c_str());

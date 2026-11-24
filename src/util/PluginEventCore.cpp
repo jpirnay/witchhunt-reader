@@ -1,5 +1,7 @@
 #include "PluginEventCore.h"
 
+#include <JsonText.h>
+
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -52,7 +54,7 @@ bool parseSubscription(const std::string& json, Subscription& out) {
   out = Subscription{};
   // Whole, from a std::string: the parser the firmware already has (a filtered one would be new code).
   JsonDocument doc;
-  if (deserializeJson(doc, json) != DeserializationError::Ok) return false;
+  if (JsonText::parse(doc, json) != DeserializationError::Ok) return false;
   for (JsonPairConst kv : doc["events"].as<JsonObjectConst>()) {
     const int e = eventFromName(kv.key().c_str());
     if (e < 0) continue;
@@ -92,7 +94,7 @@ const char* eventBook(JsonVariantConst vars) {
 
 bool metaMatches(const std::string& json, const uint32_t wanted) {
   JsonDocument doc;
-  if (deserializeJson(doc, json) != DeserializationError::Ok) return false;
+  if (JsonText::parse(doc, json) != DeserializationError::Ok) return false;
   for (JsonPairConst kv : doc.as<JsonObjectConst>()) {
     if (metaKeyHash(kv.key().c_str()) == wanted && !variantToString(kv.value()).empty()) return true;
   }
