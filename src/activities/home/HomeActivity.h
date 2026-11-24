@@ -102,6 +102,11 @@ class HomeActivity final : public Activity {
   static constexpr int kMaxWidgetActions = 12;
   HomeDestination widgetActions_[kMaxWidgetActions]{};
   int widgetActionCount_ = 0;
+  // The pictures the widgets show that this visit has tried to make (makeNextHomePicture).
+  static constexpr int kMaxPictureJobs = 4;
+  std::vector<std::string> pictureAttempts_;
+  // Makes one picture a widget shows that is not on the card yet; false when none is left.
+  bool makeNextHomePicture();
   bool gridNav_ = false;
 
   std::string focusBookPath;

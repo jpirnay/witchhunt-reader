@@ -1,8 +1,11 @@
 #include "LyraTilesTheme.h"
 
 #include <Bitmap.h>
+#include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <I18n.h>
+#include <ImageScale.h>
 
 #include <algorithm>
 #include <iterator>
@@ -11,7 +14,9 @@
 
 #include "RecentBooksStore.h"
 #include "components/BookProgressPresentation.h"
+#include "components/DateNames.h"
 #include "components/UITheme.h"
+#include "components/WeatherDraw.h"
 #include "components/themes/CardTextFit.h"
 #include "components/themes/TapTargets.h"
 #include "components/themes/lyra/HomeTilesLayout.h"
@@ -169,7 +174,20 @@ HomeTilesLayout::Placement LyraTilesTheme::placement(const GfxRenderer& renderer
 void LyraTilesTheme::prepareHome(const uint32_t available) {
   // A shortcut to a destination with nothing behind it (no bookmarks, weather not set up) is left
   // out, as its menu entry would be; its neighbour then takes the row.
-  const HomeTilesLayout::Config layout = HomeTilesLayout::presets::reader();
+  HomeTilesLayout::Config layout;
+  switch (SETTINGS.homeLayout) {
+    case CrossPointSettings::HOME_LAYOUT_DASHBOARD:
+      layout = HomeTilesLayout::presets::dashboard();
+      break;
+    case CrossPointSettings::HOME_LAYOUT_GALLERY:
+      layout = HomeTilesLayout::presets::gallery();
+      break;
+    default:
+      layout = HomeTilesLayout::presets::reader();
+      break;
+  }
+  // The ready-made layouts take their pictures from one folder, a new one each start.
+  for (std::string& source : pictureSources_) source = kHomePicturesFolder;
   HomeTilesLayout::Config shown;
   for (int r = 0; r < layout.rowCount; ++r) {
     HomeTilesLayout::Cell cells[2]{};
@@ -183,6 +201,23 @@ void LyraTilesTheme::prepareHome(const uint32_t available) {
     if (count == 2) shown.add(cells[0], cells[1]);
   }
   config_ = shown;
+  data_.load(config_, pictureSources_, pickedSources_, pickedFiles_);
+}
+
+int LyraTilesTheme::homePictureJobs(const GfxRenderer& /*renderer*/, const Rect content, HomePictureJob* out,
+                                    const int max) const {
+  const HomeTilesLayout::Placement p = placement(content, menuCount_);
+  int n = 0;
+  for (int i = 0; i < p.count && n < max; ++i) {
+    const HomeTilesLayout::Placed& item = p.items[i];
+    if (item.cell.widget != Widget::Picture || item.cell.option >= HomeTilesLayout::kMaxPictures) continue;
+    const std::string& source = data_.pictures[item.cell.option];
+    if (source.empty() || FsHelpers::hasBmpExtension(source)) continue;
+    out[n++] =
+        HomePictureJob{source, homePictureTarget(source, data_.pictureSizes[item.cell.option], item.box.w, item.box.h),
+                       item.box.w, item.box.h};
+  }
+  return n;
 }
 
 uint32_t LyraTilesTheme::homeShownDestinations(const GfxRenderer& /*renderer*/, const Rect content) const {
@@ -257,7 +292,7 @@ struct DestinationLook {
 // In HomeDestination's order, as the Home menu labels and draws them (HomeMenu.cpp).
 constexpr DestinationLook kDestinations[] = {
     {StrId::STR_LIBRARY, Folder},         {StrId::STR_READING_STATS, Stats}, {StrId::STR_GLOBAL_BOOKMARKS, Book},
-    {StrId::STR_FILE_TRANSFER, Transfer}, {StrId::STR_WEATHER, Weather},
+    {StrId::STR_FILE_TRANSFER, Transfer}, {StrId::STR_WEATHER, Weather},     {StrId::STR_TAB_RECENT, Recent},
 };
 static_assert(std::size(kDestinations) == static_cast<size_t>(HomeDestination::Count));
 static_assert(HomeTilesLayout::destination::Count == static_cast<uint8_t>(HomeDestination::Count));
@@ -307,6 +342,13 @@ void LyraTilesTheme::drawRecentBookCover(GfxRenderer& renderer, const Rect /*rec
   if (book)
     drawBookCard(renderer, book->box, recentBooks, selectorIndex, coverRendered, coverBufferStored, storeCoverBuffer);
   if (also && stripBooks > 0) drawAlsoReading(renderer, also->box, recentBooks, stripBooks, selectorIndex);
+
+  // The widgets that are only looked at; those that open something are the menu's (drawHomeMenu).
+  for (int i = 0; i < p.count; ++i) {
+    const HomeTilesLayout::Placed& item = p.items[i];
+    if (item.cell.widget == Widget::Clock) drawClock(renderer, item.box);
+    if (item.cell.widget == Widget::Picture) drawPicture(renderer, item.box, item.cell.option);
+  }
 }
 
 void LyraTilesTheme::drawBookCard(GfxRenderer& renderer, const Box& card, const std::vector<RecentBook>& recentBooks,
@@ -475,8 +517,14 @@ void LyraTilesTheme::drawHomeMenu(GfxRenderer& renderer, const Rect rect, const 
         break;
       }
       case Widget::Summary:
+        drawSummary(renderer, box, item.full, selected);
+        break;
       case Widget::Calendar:
+        drawCalendar(renderer, box, selected);
+        break;
       case Widget::Weather:
+        drawWeatherCard(renderer, box, item.full, selected);
+        break;
       case Widget::Book:
       case Widget::AlsoReading:
       case Widget::Clock:
@@ -486,4 +534,257 @@ void LyraTilesTheme::drawHomeMenu(GfxRenderer& renderer, const Rect rect, const 
   }
 
   TapTargets::homeMenu().record(targets);
+}
+
+// ---- The widgets beyond the book and the tiles ----------------------------------------------------
+
+namespace {
+
+constexpr int kWidgetPadding = capped(12, 5);
+
+// The first `count` characters of `text` (UTF-8): a weekday's initial where the name does not fit.
+std::string firstCharacters(const char* text, const int count) {
+  std::string out;
+  int seen = 0;
+  for (const char* p = text; *p != '\0'; ++p) {
+    const bool starts = (static_cast<unsigned char>(*p) & 0xC0) != 0x80;
+    if (starts && seen++ == count) break;
+    out += *p;
+  }
+  return out;
+}
+
+void drawCentered(const GfxRenderer& renderer, const int fontId, const Box& box, const int y, const char* text,
+                  const bool black, const EpdFontFamily::Style style = EpdFontFamily::REGULAR) {
+  const std::string fitted = renderer.truncatedText(fontId, text, box.w, style);
+  renderer.drawText(fontId, box.x + (box.w - renderer.getTextWidth(fontId, fitted.c_str(), style)) / 2, y,
+                    fitted.c_str(), black, style);
+}
+
+// A card's frame: the plain one, or the selected one that shows where the keys are.
+void drawCardFrame(const GfxRenderer& renderer, const Box& box, const bool selected, const int plain, const int chosen,
+                   const int radius) {
+  renderer.drawRoundedRect(box.x, box.y, box.w, box.h, selected ? chosen : plain, radius, true);
+}
+
+bool clockSet() { return HalClock::isSynced() && !HalClock::isStaleRestore(); }
+
+}  // namespace
+
+void LyraTilesTheme::drawClock(GfxRenderer& renderer, const Box& box) const {
+  renderer.fillRoundedRect(box.x, box.y, box.w, box.h, kCornerRadius, Color::Black);
+  char time[16];
+  HalClock::formatTime(time, sizeof(time), !SETTINGS.clockFormat12h);  // "--:--" while the time is unknown
+  char date[48];
+  if (clockSet()) {
+    const time_t epoch = HalClock::now();
+    struct tm t{};
+    localtime_r(&epoch, &t);
+    snprintf(date, sizeof(date), "%s %d %s", I18N.get(DateNames::kShortDays[t.tm_wday]), t.tm_mday,
+             I18N.get(DateNames::kShortMonths[t.tm_mon]));
+  } else {
+    snprintf(date, sizeof(date), "%s", tr(STR_CLOCK_NOT_SET));
+  }
+  // The digits as large as the box allows: Weather's value face, three, two or one times.
+  const int dateHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int room = box.w - 2 * kWidgetPadding;
+  int scale = 3;
+  for (; scale > 1; --scale) {
+    const TextScale ts = TextScale::ratio(scale, 1);
+    if (renderer.getTextWidthScaled(NOTOSANS_18_FONT_ID, time, EpdFontFamily::BOLD, ts) <= room &&
+        renderer.getLineHeightScaled(NOTOSANS_18_FONT_ID, ts) + dateHeight <= box.h - 2 * kWidgetPadding) {
+      break;
+    }
+  }
+  const TextScale ts = TextScale::ratio(scale, 1);
+  const int timeHeight = renderer.getLineHeightScaled(NOTOSANS_18_FONT_ID, ts);
+  const int top = box.y + (box.h - timeHeight - dateHeight) / 2;
+  const int timeWidth = renderer.getTextWidthScaled(NOTOSANS_18_FONT_ID, time, EpdFontFamily::BOLD, ts);
+  renderer.drawTextScaled(NOTOSANS_18_FONT_ID, box.x + (box.w - timeWidth) / 2, top, time, false, EpdFontFamily::BOLD,
+                          ts);
+  drawCentered(renderer, UI_10_FONT_ID, Box{box.x + kWidgetPadding, box.y, room, box.h}, top + timeHeight, date, false);
+}
+
+void LyraTilesTheme::drawPicture(GfxRenderer& renderer, const Box& box, const int picture) const {
+  const int index = picture >= 0 && picture < HomeTilesLayout::kMaxPictures ? picture : 0;
+  const std::string& source = data_.pictures[index];
+  CoverThumb drawn = CoverThumb::Absent;
+  if (FsHelpers::hasBmpExtension(source)) {
+    // A BMP is drawn as it is, cut to the box's shape and scaled to cover it: one made at the
+    // widget's size (as the web editor makes it) is drawn 1:1.
+    drawn = withCoverThumb(source, [&](Bitmap& bitmap) {
+      const BoxCut cut = cutToBox(bitmap.getWidth(), bitmap.getHeight(), box.w, box.h);
+      renderer.fillRect(box.x, box.y, box.w, box.h, false);
+      renderer.drawBitmap(bitmap, box.x, box.y, cut.maxWidth, cut.maxHeight, cut.visibleWidth, cut.visibleHeight);
+    });
+  } else if (!source.empty()) {
+    // A JPEG or PNG Home's cover pass has made at this size, cut and dithered (homePictureJobs).
+    drawn = withCoverThumb(homePictureTarget(source, data_.pictureSizes[index], box.w, box.h), [&](Bitmap& bitmap) {
+      renderer.fillRect(box.x, box.y, box.w, box.h, false);
+      renderer.drawBitmap(bitmap, box.x, box.y, box.w, box.h);
+    });
+  }
+  if (drawn == CoverThumb::Pending && !FsHelpers::hasBmpExtension(source)) {
+    drawCoverLoading(renderer, toRect(box));
+  } else if (drawn != CoverThumb::Drawn) {
+    // Nothing to show: where the pictures go.
+    char hint[96];
+    snprintf(hint, sizeof(hint), tr(STR_HOME_PICTURES_HINT), kHomePicturesFolder);
+    const int lineHeight = renderer.getLineHeight(SMALL_FONT_ID);
+    const auto lines = renderer.wrappedText(SMALL_FONT_ID, hint, box.w - 2 * kWidgetPadding,
+                                            std::max(1, (box.h - 2 * kWidgetPadding) / lineHeight));
+    int y = box.y + (box.h - static_cast<int>(lines.size()) * lineHeight) / 2;
+    for (const auto& line : lines) {
+      drawCentered(renderer, SMALL_FONT_ID, Box{box.x + kWidgetPadding, box.y, box.w - 2 * kWidgetPadding, box.h}, y,
+                   line.c_str(), true);
+      y += lineHeight;
+    }
+  }
+  renderer.drawRoundedRect(box.x, box.y, box.w, box.h, kCardFrameWidth, kCornerRadius, true);
+}
+
+void LyraTilesTheme::drawCalendar(GfxRenderer& renderer, const Box& box, const bool selected) const {
+  drawCardFrame(renderer, box, selected, kCardFrameWidth, kSelectedFrameWidth, kCornerRadius);
+  const Box inner{box.x + kWidgetPadding, box.y + kWidgetPadding, box.w - 2 * kWidgetPadding,
+                  box.h - 2 * kWidgetPadding};
+  const int small = renderer.getLineHeight(SMALL_FONT_ID);
+  if (!data_.dateKnown) {
+    drawCentered(renderer, SMALL_FONT_ID, inner, box.y + (box.h - small) / 2, tr(STR_CLOCK_NOT_SET), true);
+    return;
+  }
+  char title[32];
+  snprintf(title, sizeof(title), "%s %d", I18N.get(DateNames::kShortMonths[data_.month]), data_.year);
+  renderer.drawText(SMALL_FONT_ID, inner.x, inner.y,
+                    renderer.truncatedText(SMALL_FONT_ID, title, inner.w, EpdFontFamily::BOLD).c_str(), true,
+                    EpdFontFamily::BOLD);
+
+  const int weeks = (data_.firstColumn + data_.daysInMonth + 6) / 7;
+  const int gridTop = inner.y + small;
+  const int cellW = inner.w / 7;
+  const int cellH = (inner.y + inner.h - gridTop) / (weeks + 1);
+  const int textTop = (cellH - small) / 2;
+  // The weekdays from the first day of the week: two characters where they fit, else one.
+  for (int c = 0; c < 7; ++c) {
+    const char* name = I18N.get(DateNames::kShortDays[(data_.weekStartsOn + c) % 7]);
+    std::string label = firstCharacters(name, 2);
+    if (renderer.getTextWidth(SMALL_FONT_ID, label.c_str()) > cellW - 2) label = firstCharacters(name, 1);
+    drawCentered(renderer, SMALL_FONT_ID, Box{inner.x + c * cellW, gridTop, cellW, cellH}, gridTop + textTop,
+                 label.c_str(), true, EpdFontFamily::BOLD);
+  }
+  // The days, shaded by the time read on them: some, half an hour, an hour or more.
+  for (int d = 1; d <= data_.daysInMonth; ++d) {
+    const int at = data_.firstColumn + d - 1;
+    const Box cell{inner.x + (at % 7) * cellW, gridTop + (at / 7 + 1) * cellH, cellW, cellH};
+    const uint16_t minutes = data_.monthMinutes[d - 1];
+    bool ink = true;
+    if (minutes >= 60) {
+      renderer.fillRect(cell.x + 1, cell.y + 1, cell.w - 2, cell.h - 2, true);
+      ink = false;
+    } else if (minutes >= 30) {
+      renderer.fillRectDither(cell.x + 1, cell.y + 1, cell.w - 2, cell.h - 2, Color::DarkGray);
+    } else if (minutes > 0) {
+      renderer.fillRectDither(cell.x + 1, cell.y + 1, cell.w - 2, cell.h - 2, Color::LightGray);
+    }
+    if (d == data_.today) renderer.drawRect(cell.x, cell.y, cell.w, cell.h, 2, true);
+    char number[4];
+    snprintf(number, sizeof(number), "%d", d);
+    drawCentered(renderer, SMALL_FONT_ID, cell, cell.y + textTop, number, ink,
+                 d == data_.today ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+  }
+}
+
+void LyraTilesTheme::drawSummary(GfxRenderer& renderer, const Box& box, const bool full, const bool selected) const {
+  drawCardFrame(renderer, box, selected, kCardFrameWidth, kSelectedFrameWidth, kCornerRadius);
+  const Box inner{box.x + kWidgetPadding, box.y + kWidgetPadding, box.w - 2 * kWidgetPadding,
+                  box.h - 2 * kWidgetPadding};
+  const int small = renderer.getLineHeight(SMALL_FONT_ID);
+  renderer.drawText(SMALL_FONT_ID, inner.x, inner.y,
+                    renderer.truncatedText(SMALL_FONT_ID, tr(STR_THIS_WEEK), inner.w, EpdFontFamily::BOLD).c_str(),
+                    true, EpdFontFamily::BOLD);
+  if (!data_.readingKnown) {
+    drawCentered(renderer, SMALL_FONT_ID, inner, box.y + (box.h - small) / 2,
+                 data_.dateKnown ? tr(STR_READING_STATS_NO_DATA) : tr(STR_CLOCK_NOT_SET), true);
+    return;
+  }
+  // The week's time, large; across the screen the week by day beside it.
+  // An empty week reads as a dash rather than "0s".
+  const std::string total = data_.weekSeconds > 0 ? BookProgressPresentation::formatReadingDuration(data_.weekSeconds)
+                                                  : std::string(tr(STR_READING_STATS_UNKNOWN));
+  renderer.drawText(NOTOSANS_18_FONT_ID, inner.x, inner.y + small,
+                    renderer.truncatedText(NOTOSANS_18_FONT_ID, total.c_str(), inner.w, EpdFontFamily::BOLD).c_str(),
+                    true, EpdFontFamily::BOLD);
+  const int footTop = inner.y + inner.h - small;
+  if (full) {
+    const int chartW = std::min(inner.w / 2, 7 * capped(18, 10));
+    const int chartX = inner.x + inner.w - chartW;
+    const int chartTop = inner.y;
+    const int labelTop = footTop - small - 2;
+    const int barRoom = labelTop - chartTop - 2;
+    uint16_t most = 1;
+    for (const uint16_t m : data_.weekMinutes) most = std::max(most, m);
+    const int slot = chartW / 7;
+    const int barW = std::max(2, slot * 3 / 5);
+    for (int i = 0; i < 7; ++i) {
+      const int x = chartX + i * slot + (slot - barW) / 2;
+      const int h = barRoom * data_.weekMinutes[i] / most;
+      if (h > 0) renderer.fillRect(x, labelTop - 2 - h, barW, h, true);
+      renderer.drawLine(x, labelTop - 2, x + barW - 1, labelTop - 2, true);
+      const std::string initial = firstCharacters(I18N.get(DateNames::kShortDays[(data_.weekStartsOn + i) % 7]), 1);
+      drawCentered(renderer, SMALL_FONT_ID, Box{chartX + i * slot, labelTop, slot, small}, labelTop, initial.c_str(),
+                   true);
+    }
+  }
+  // The foot: the books finished and in progress across the screen, and a streak once there is one.
+  char line[96] = "";
+  char streak[32] = "";
+  if (data_.streak > 0) snprintf(streak, sizeof(streak), tr(STR_HOME_STREAK_DAYS), static_cast<unsigned>(data_.streak));
+  if (full) {
+    char finished[32];
+    char reading[32];
+    snprintf(finished, sizeof(finished), tr(STR_HOME_FINISHED_COUNT), static_cast<unsigned>(data_.finished));
+    snprintf(reading, sizeof(reading), tr(STR_HOME_READING_COUNT), static_cast<unsigned>(data_.reading));
+    snprintf(line, sizeof(line), streak[0] != '\0' ? "%s \xC2\xB7 %s \xC2\xB7 %s" : "%s \xC2\xB7 %s", finished, reading,
+             streak);
+  } else {
+    snprintf(line, sizeof(line), "%s", streak);
+  }
+  if (line[0] != '\0') {
+    renderer.drawText(SMALL_FONT_ID, inner.x, footTop, renderer.truncatedText(SMALL_FONT_ID, line, inner.w).c_str(),
+                      true);
+  }
+}
+
+void LyraTilesTheme::drawWeatherCard(GfxRenderer& renderer, const Box& box, const bool full,
+                                     const bool selected) const {
+  drawCardFrame(renderer, box, selected, kCardFrameWidth, kSelectedFrameWidth, kCornerRadius);
+  const Box inner{box.x + kWidgetPadding, box.y + kWidgetPadding, box.w - 2 * kWidgetPadding,
+                  box.h - 2 * kWidgetPadding};
+  const int small = renderer.getLineHeight(SMALL_FONT_ID);
+  if (!data_.weatherKnown) {
+    drawCentered(renderer, SMALL_FONT_ID, inner, box.y + (box.h - small) / 2, tr(STR_NO_FORECAST), true);
+    return;
+  }
+  // The icon where it fits beside the temperature, the day's high and low under it.
+  const int iconSize = WEATHER_ICON_SIZE;
+  const bool icon = inner.h >= iconSize && inner.w >= iconSize * 2;
+  if (icon) {
+    WeatherDraw::drawIcon(renderer, getWeatherIconLarge(getWeatherIconType(data_.weatherCode, data_.isDay)), inner.x,
+                          inner.y + (full ? (inner.h - iconSize) / 2 : 0), 1);
+  }
+  char temp[24];
+  snprintf(temp, sizeof(temp), "%d%s", weather::whole(data_.temperature, weather::TENTHS_DECIMALS),
+           WeatherDraw::tempUnitLabel());
+  const int textX = icon ? inner.x + iconSize + kWidgetPadding : inner.x;
+  const int textW = inner.x + inner.w - textX;
+  const TextScale ts = TextScale::ratio(PanelMetrics::COMPACT ? 1 : 2, 1);
+  const int tempHeight = renderer.getLineHeightScaled(NOTOSANS_18_FONT_ID, ts);
+  const int tempTop = full || !icon ? inner.y + (inner.h - tempHeight - small) / 2 : inner.y;
+  renderer.drawTextScaled(NOTOSANS_18_FONT_ID, textX, tempTop, temp, true, EpdFontFamily::BOLD, ts);
+  char range[32];
+  snprintf(range, sizeof(range), "%d%s / %d%s", weather::whole(data_.high, weather::TENTHS_DECIMALS),
+           WeatherDraw::kDegree, weather::whole(data_.low, weather::TENTHS_DECIMALS), WeatherDraw::kDegree);
+  const int rangeY = full || !icon ? tempTop + tempHeight : inner.y + inner.h - small;
+  const int rangeX = full || !icon ? textX : inner.x;
+  renderer.drawText(SMALL_FONT_ID, rangeX, rangeY,
+                    renderer.truncatedText(SMALL_FONT_ID, range, full || !icon ? textW : inner.w).c_str(), true);
 }

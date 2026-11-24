@@ -73,6 +73,8 @@ HomeDestination destinationOf(const HomeMenuAction action) {
       return HomeDestination::FileTransfer;
     case HomeMenuAction::Weather:
       return HomeDestination::Weather;
+    case HomeMenuAction::RecentBooks:
+      return HomeDestination::Recent;
     case HomeMenuAction::More:
     case HomeMenuAction::Settings:
       return HomeDestination::Count;
@@ -88,7 +90,8 @@ bool shownBy(const uint32_t mask, const HomeMenuAction action) {
 }  // namespace
 
 uint32_t availableDestinations(const HomeMenuAvailability& availability) {
-  uint32_t mask = 0;
+  // Recent has no menu entry to ask, and needs nothing: the tab says when it is empty.
+  uint32_t mask = destinationBit(HomeDestination::Recent);
   for (const HomeMenuRow& row : kRows) {
     const HomeDestination d = destinationOf(row.entry.action);
     if (d != HomeDestination::Count && isAvailable(row.requirement, availability)) mask |= destinationBit(d);
@@ -107,8 +110,11 @@ HomeMenuAction actionFor(const HomeDestination destination) {
     case HomeDestination::FileTransfer:
       return HomeMenuAction::FileTransfer;
     case HomeDestination::Weather:
-    case HomeDestination::Count:
       return HomeMenuAction::Weather;
+    case HomeDestination::Recent:
+      return HomeMenuAction::RecentBooks;
+    case HomeDestination::Count:
+      return HomeMenuAction::Library;
   }
   return HomeMenuAction::Library;
 }

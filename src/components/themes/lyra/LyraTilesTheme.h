@@ -1,6 +1,7 @@
 #pragma once
 
 #include "components/themes/lyra/HomeTilesLayout.h"
+#include "components/themes/lyra/HomeWidgetData.h"
 #include "components/themes/lyra/LyraTheme.h"
 
 // Lyra Tiles: Lyra's look, with a Home laid out for the book in front. A card for the book takes
@@ -25,6 +26,7 @@ class LyraTilesTheme : public LyraTheme {
   int homeMenuCapacity() const override;
   void prepareHome(uint32_t available) override;
   uint32_t homeShownDestinations(const GfxRenderer& renderer, Rect content) const override;
+  int homePictureJobs(const GfxRenderer& renderer, Rect content, HomePictureJob* out, int max) const override;
   void setHomeMenu(int menuCount, int menuTrailing) override;
   int homeWidgetActions(const GfxRenderer& renderer, Rect content, HomeDestination* out, int max) const override;
   HomeGridNav::Grid homeGrid(const GfxRenderer& renderer, Rect content, int shownBooks, int menuCount,
@@ -52,10 +54,21 @@ class LyraTilesTheme : public LyraTheme {
                     const std::function<bool()>& storeCoverBuffer) const;
   void drawAlsoReading(GfxRenderer& renderer, const HomeTilesLayout::Box& row,
                        const std::vector<RecentBook>& recentBooks, int stripBooks, int selectorIndex) const;
+  void drawClock(GfxRenderer& renderer, const HomeTilesLayout::Box& box) const;
+  void drawPicture(GfxRenderer& renderer, const HomeTilesLayout::Box& box, int picture) const;
+  void drawCalendar(GfxRenderer& renderer, const HomeTilesLayout::Box& box, bool selected) const;
+  void drawSummary(GfxRenderer& renderer, const HomeTilesLayout::Box& box, bool full, bool selected) const;
+  void drawWeatherCard(GfxRenderer& renderer, const HomeTilesLayout::Box& box, bool full, bool selected) const;
 
   // Set before Home draws, on the loop task under the render lock (prepareHome, setHomeMenu), and
   // only read while it is open.
   HomeTilesLayout::Config config_ = HomeTilesLayout::presets::reader();
   int menuCount_ = 0;
   int menuTrailing_ = 0;
+  // What the widgets show, read in prepareHome().
+  HomeWidgetData data_;
+  // Each picture's file or folder, and a folder's choice, kept for the rest of the start.
+  std::string pictureSources_[HomeTilesLayout::kMaxPictures];
+  std::string pickedSources_[HomeTilesLayout::kMaxPictures];
+  std::string pickedFiles_[HomeTilesLayout::kMaxPictures];
 };

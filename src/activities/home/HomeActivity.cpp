@@ -324,9 +324,59 @@ void HomeActivity::loadRecentCovers(const int coverHeight, const std::pair<int, 
     return;
   }
 
+  // Every cover is resolved. The pictures Home's widgets show come next, one a call, while the
+  // scratch is still lent: a JPEG needs the decoder's buffers as a cover does.
+  if (makeNextHomePicture()) {
+    yieldAfterDecode();
+    return;
+  }
+
   recentsLoaded = true;
   recentsLoading = false;
   if (!keepRegionAsFrameCache()) restoreSecondaryBuffer();
+}
+
+bool HomeActivity::makeNextHomePicture() {
+  HomePictureJob jobs[kMaxPictureJobs];
+  const int count =
+      GUI.homePictureJobs(renderer, UITheme::getContentRect(renderer, true, false), jobs, kMaxPictureJobs);
+  for (int i = 0; i < count; ++i) {
+    const HomePictureJob& job = jobs[i];
+    if (std::find(pictureAttempts_.begin(), pictureAttempts_.end(), job.target) != pictureAttempts_.end()) continue;
+    if (ReaderActivity::isCoverThumbComplete(job.target, job.width, job.height)) continue;
+    // Once a visit, made or not: a picture the decoders refuse is not tried on every tick.
+    pictureAttempts_.push_back(job.target);
+    const std::string dir = job.target.substr(0, job.target.rfind('/'));
+    if (!Storage.exists(dir.c_str())) Storage.mkdir(dir.c_str());
+    // Written under another name and renamed when whole: the theme draws the target on the render
+    // task meanwhile, and must not find half a picture.
+    const std::string part = job.target + ".part";
+    bool ok = false;
+    {
+      FsFile src;
+      FsFile dst;
+      if (Storage.openFileForRead("HOME", job.source, src) && Storage.openFileForWrite("HOME", part, dst)) {
+        if (FsHelpers::hasJpgExtension(job.source)) {
+          ok = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(src, dst, job.width, job.height, coverScratch_.get(),
+                                                                   /*crop=*/true);
+        } else if (FsHelpers::hasPngExtension(job.source)) {
+          ok = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(src, dst, job.width, job.height, /*crop=*/true);
+        }
+      }
+    }
+    if (ok) {
+      Storage.remove(job.target.c_str());
+      ok = Storage.rename(part.c_str(), job.target.c_str());
+    }
+    if (!ok) {
+      Storage.remove(part.c_str());
+      LOG_ERR("HOME", "Picture not made: %s (%dx%d)", job.source.c_str(), job.width, job.height);
+    } else {
+      LOG_INF("HOME", "Picture made: %s -> %s", job.source.c_str(), job.target.c_str());
+    }
+    return true;
+  }
+  return false;
 }
 
 bool HomeActivity::keepRegionAsFrameCache() {
@@ -443,9 +493,7 @@ void HomeActivity::onEnter() {
   recentDocIds.reserve(recentBooks.size());
   for (const auto& book : recentBooks) recentDocIds.push_back(KOReaderDocumentId::calculateFromFilename(book.path));
   READING_STATS.prefetchRecent(recentDocIds);
-  if (recentBooks.empty()) {
-    recentsLoaded = true;
-  }
+  pictureAttempts_.clear();
   // Built here, once per entry, before the first render is requested. render() runs on the render
   // task and loop() on this one; when both rebuilt the list on a dirty flag, they could run at once,
   // each clearing and then appending, and Home showed every entry twice. The rebuild also reads the
@@ -459,6 +507,11 @@ void HomeActivity::onEnter() {
   const Rect content = UITheme::getContentRect(renderer, true, false);
   grid_ = GUI.homeGrid(renderer, content, shownBooks_, static_cast<int>(menuEntries.size()), menuTrailing_);
   widgetActionCount_ = GUI.homeWidgetActions(renderer, content, widgetActions_, kMaxWidgetActions);
+  // Nothing for the cover pass to make: no book, and no picture a widget shows.
+  if (recentBooks.empty()) {
+    HomePictureJob jobs[kMaxPictureJobs];
+    recentsLoaded = GUI.homePictureJobs(renderer, content, jobs, kMaxPictureJobs) == 0;
+  }
   gridNav_ = grid_.rowCount > 0 && HalCapabilities::hasFourDirectionKeys();
 
   // Apply focus: book path takes priority, else combined selector index (covers
@@ -968,8 +1021,8 @@ void HomeActivity::appendDebugState(std::string& out) const {
     appendField(out, "label", I18N.get(menuEntries[menuIndex].label));
   } else if (menuIndex - static_cast<int>(menuEntries.size()) < widgetActionCount_) {
     // A widget that opens something: named by where it leads.
-    static constexpr const char* kNames[] = {"widget:Library", "widget:ReadingStats", "widget:Bookmarks",
-                                             "widget:FileTransfer", "widget:Weather"};
+    static constexpr const char* kNames[] = {"widget:Library",      "widget:ReadingStats", "widget:Bookmarks",
+                                             "widget:FileTransfer", "widget:Weather",      "widget:Recent"};
     const auto d = static_cast<size_t>(widgetActions_[menuIndex - static_cast<int>(menuEntries.size())]);
     if (d < std::size(kNames)) appendField(out, "label", kNames[d]);
   }

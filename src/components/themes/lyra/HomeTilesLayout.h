@@ -195,7 +195,8 @@ constexpr uint8_t ReadingStats = 1;
 constexpr uint8_t Bookmarks = 2;
 constexpr uint8_t FileTransfer = 3;
 constexpr uint8_t Weather = 4;
-constexpr uint8_t Count = 5;
+constexpr uint8_t Recent = 5;  // the Library's Recent tab
+constexpr uint8_t Count = 6;
 }  // namespace destination
 
 // The widgets that may share a row; the rest take the row across.

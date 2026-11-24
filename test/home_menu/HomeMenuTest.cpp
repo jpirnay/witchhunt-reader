@@ -256,3 +256,14 @@ TEST_F(HomeMenuTest, DestinationsAreAvailableAsTheirEntriesAre) {
   }
   EXPECT_EQ(actionFor(HomeDestination::Bookmarks), A::GlobalBookmarks);
 }
+
+// Recent is a destination for Home's widgets only: always there, opened as the Library's Recent
+// tab, and never an entry of either list.
+TEST_F(HomeMenuTest, RecentIsAWidgetDestinationOnly) {
+  EXPECT_NE(availableDestinations(nothingOptional) & destinationBit(HomeDestination::Recent), 0u);
+  EXPECT_EQ(actionFor(HomeDestination::Recent), A::RecentBooks);
+  const auto home = actionsAt(HomeMenuPlacement::Home, everything);
+  const auto more = actionsAt(HomeMenuPlacement::More, everything);
+  EXPECT_EQ(std::count(home.begin(), home.end(), A::RecentBooks), 0);
+  EXPECT_EQ(std::count(more.begin(), more.end(), A::RecentBooks), 0);
+}

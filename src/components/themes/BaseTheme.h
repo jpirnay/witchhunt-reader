@@ -185,8 +185,18 @@ enum class SyncIndicator : uint8_t { None, Active, Failed };
 
 // The places Home leads to, as a theme that draws its own shortcuts to them names them
 // (BaseTheme::homeWidgetActions, homeShownDestinations). A set of them is a bit mask, 1 << value.
-enum class HomeDestination : uint8_t { Library, ReadingStats, Bookmarks, FileTransfer, Weather, Count };
+enum class HomeDestination : uint8_t { Library, ReadingStats, Bookmarks, FileTransfer, Weather, Recent, Count };
 constexpr uint32_t destinationBit(const HomeDestination d) { return 1u << static_cast<uint8_t>(d); }
+
+// A picture a widget on Home shows, to be made from `source` (JPEG or PNG) at the widget's size into
+// `target`, cut to fill and dithered, as the cover pass makes a cover thumbnail
+// (BaseTheme::homePictureJobs).
+struct HomePictureJob {
+  std::string source;
+  std::string target;
+  int width = 0;
+  int height = 0;
+};
 
 class BaseTheme {
  public:
@@ -290,6 +300,12 @@ class BaseTheme {
   // they are neither Home's menu entries nor behind More. A shortcut whose row does not fit the
   // panel is not shown, so More offers it.
   virtual uint32_t homeShownDestinations(const GfxRenderer& /*renderer*/, Rect /*content*/) const { return 0; }
+  // The pictures Home's widgets show, as files Home's cover pass makes (it has the scratch for a
+  // decode): up to `max`, whether made already or not; Home checks.
+  virtual int homePictureJobs(const GfxRenderer& /*renderer*/, Rect /*content*/, HomePictureJob* /*out*/,
+                              int /*max*/) const {
+    return 0;
+  }
   // The menu Home built: a theme that lays its widgets out around it needs the counts in every draw,
   // and drawRecentBookCover() is not given them. Same caller and lock as prepareHome(), afterwards.
   virtual void setHomeMenu(int /*menuCount*/, int /*menuTrailing*/) {}

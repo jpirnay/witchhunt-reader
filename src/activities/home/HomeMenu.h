@@ -20,6 +20,9 @@ enum class HomeMenuAction : uint8_t {
   Weather,
   More,
   Settings,
+  // The Library on its Recent tab: a destination for Home's widgets only, not a menu entry (the
+  // Library entry leads there too).
+  RecentBooks,
 };
 
 struct HomeMenuEntry {

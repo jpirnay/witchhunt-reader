@@ -250,6 +250,12 @@ inline void buildSettings(const RowSink& emit) {
   emit(DarkModeOption::make(HalCapabilities::hasFrontlightAndRtc()));
   emit(DarkModeOption::fromRow());
   emit(DarkModeOption::untilRow());
+  // Lyra Tiles' Home is one of its layouts; the entries below are the other themes'.
+  emit(SettingInfo::Enum(
+           StrId::STR_HOME_LAYOUT, &CrossPointSettings::homeLayout,
+           {StrId::STR_HOME_LAYOUT_READER, StrId::STR_HOME_LAYOUT_DASHBOARD, StrId::STR_HOME_LAYOUT_GALLERY},
+           "homeLayout", StrId::STR_CAT_DISPLAY)
+           .withSubmenu(StrId::STR_MENU_DISP_HOME));
   // Home screen entries: on = on the home screen, off = behind its "More" entry.
   emit(SettingInfo::Toggle(StrId::STR_LIBRARY, &CrossPointSettings::showLibraryOnHome, "showLibraryOnHome",
                            StrId::STR_CAT_DISPLAY)
