@@ -27,6 +27,7 @@
 #include "activities/settings/DarkModeOption.h"
 #include "activities/settings/SettingInfo.h"
 #include "activities/settings/TimezoneOptions.h"
+#include "activities/settings/WeekStartOption.h"
 #include "components/themes/PanelMetrics.h"
 
 // Shared settings list used by both the device settings UI and the web settings API.
@@ -667,6 +668,7 @@ inline void buildSettings(const RowSink& emit) {
   emit(SettingInfo::Toggle(StrId::STR_USE_CLOCK, &CrossPointSettings::useClock, "useClock", StrId::STR_CLOCK));
   emit(SettingInfo::Enum(StrId::STR_CLOCK_FORMAT, &CrossPointSettings::clockFormat12h, {StrId::STR_24H, StrId::STR_12H},
                          "clockFormat12h", StrId::STR_CLOCK));
+  emit(WeekStartOption::make(StrId::STR_CLOCK));
   // Every zone the table defines, via the shared factory -- not a list maintained here. The
   // hand-written copy this replaces had stopped at 16 of 19, and because JsonSettingsIO bounds
   // a loaded ENUM on THIS row's option count, the three it omitted reset to the default on

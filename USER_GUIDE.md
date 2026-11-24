@@ -644,6 +644,7 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 - **Clock Settings** (submenu):
   - **Use Clock**: Enable the software clock. "ON" / "OFF"
   - **Clock Format**: "24h" / "12h"
+  - **First Day of Week**: The day the calendar and the week's reading on the Home screen start on. "Monday" (default) / "Sunday" / "Saturday"
   - **Timezone**: Pick your timezone from a full-screen list of 86: named places and regions that follow their own daylight-saving rules, fixed UTC offsets for anywhere the list misses, and plain UTC.
   - **Detect Timezone**: Auto-detect timezone via IP geolocation (requires WiFi).
   - **Sync Time**: Sync the clock via NTP (requires WiFi). Afterwards the device restarts quickly and returns to Clock Settings, like every other screen that uses WiFi.
