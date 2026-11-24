@@ -70,6 +70,8 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   // unconditionally on boot), so only lightOn needs a touched-by-the-user flag: onExit() must
   // not persist a mirror that never reflected user intent in the first place.
   bool lightOnChanged = false;
+  // False until no brightness key is down, so a key held from before the drawer opened does not step it (loop()).
+  bool stepKeysReleased = false;
   // Sheet height and layout metrics for the pass being built. Set in render() before renderUi(), because the sheet
   // must be sized before anything lays out inside it.
   int16_t panelHeight = 0;
@@ -101,6 +103,10 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   // why dispatchLightPanelGesture() prepares the framebuffer for it. Nothing may repaint between
   // that preparation and this activity's first render.
   bool suppressesBusyIndicator() const override { return true; }
+  // Pulled down over a book, the drawer belongs to the reading page: with Touch Navigation off it takes touch there as
+  // the page does (TouchGate.h). Without this the top-edge swipe on the page opened a drawer whose sliders, and the
+  // tap outside that closes it, no finger could reach. Over any other screen it follows that screen's gate.
+  bool overlaysScreenBelow() const override { return true; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
