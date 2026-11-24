@@ -59,6 +59,8 @@ TEST(CipherStream, AnOffsetPastTheCounterIsRefusedUntouched) {
 struct MemoryFile {
   std::vector<uint8_t> bytes;
   uint64_t pos = 0;
+  bool failReads = false;  // a card error
+  bool failWrites = false;
   uint64_t size() const { return bytes.size(); }
   uint64_t position() const { return pos; }
   bool seek(uint64_t to) {
@@ -66,12 +68,14 @@ struct MemoryFile {
     return true;
   }
   int read(void* buf, size_t count) {
+    if (failReads) return -1;
     const size_t n = pos >= bytes.size() ? 0 : std::min(count, static_cast<size_t>(bytes.size() - pos));
     memcpy(buf, bytes.data() + pos, n);
     pos += n;
     return static_cast<int>(n);
   }
   size_t write(const void* buf, size_t count) {
+    if (failWrites) return 0;
     if (bytes.size() < pos + count) bytes.resize(pos + count);
     memcpy(bytes.data() + pos, buf, count);
     pos += count;
@@ -80,6 +84,30 @@ struct MemoryFile {
 };
 
 void fillZero(uint8_t* out, size_t len) { memset(out, 0, len); }
+
+// What attach() says of a file it cannot attach to decides whether the card keeps it (HalStorage::attachCacheCipher).
+// A file that is not one of the folder's (too short for a header, another magic) is damaged cache, removed and made
+// again. A header the card would not give or take is the card's failure, not the file's: the file stays.
+TEST(CipherFileAttach, OnlyAFileThatIsNotTheFoldersIsDamaged) {
+  std::unique_ptr<cache_cipher::CipherStream> cipher;
+  MemoryFile tooShort;
+  tooShort.bytes.assign(cache_cipher::kHeaderBytes - 1, 0);
+  EXPECT_EQ(cache_cipher::attach(tooShort, false, kKey, fillZero, cipher), cache_cipher::Attach::Damaged);
+
+  MemoryFile foreign;
+  foreign.bytes.assign(cache_cipher::kHeaderBytes + 10, 'x');
+  EXPECT_EQ(cache_cipher::attach(foreign, false, kKey, fillZero, cipher), cache_cipher::Attach::Damaged);
+
+  MemoryFile unreadable;
+  ASSERT_EQ(cache_cipher::attach(unreadable, true, kKey, fillZero, cipher), cache_cipher::Attach::Enciphered);
+  ASSERT_TRUE(unreadable.seek(0));
+  unreadable.failReads = true;
+  EXPECT_EQ(cache_cipher::attach(unreadable, false, kKey, fillZero, cipher), cache_cipher::Attach::Failed);
+
+  MemoryFile unwritable;
+  unwritable.failWrites = true;
+  EXPECT_EQ(cache_cipher::attach(unwritable, true, kKey, fillZero, cipher), cache_cipher::Attach::Failed);
+}
 
 // A large write enciphered where it is puts the same bytes on the card as one through the chunk, and gives the
 // caller's buffer back as it was.

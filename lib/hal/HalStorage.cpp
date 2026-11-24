@@ -552,7 +552,21 @@ void HalStorage::attachCacheCipher(HalFile& file, const char* path, const bool m
     attached = cache_cipher::attach(raw, mayWrite, key, fillRandom, file.impl->cipher);
   }
   memset(key, 0, sizeof(key));
-  if (state == cache_cipher::FolderState::Plain || attached != cache_cipher::Attach::Refused) return;
+  if (state == cache_cipher::FolderState::Plain) return;
+  switch (attached) {
+    case cache_cipher::Attach::Plain:
+    case cache_cipher::Attach::Enciphered:
+      return;
+    case cache_cipher::Attach::Failed:
+      // The heap or the card refused, not the file: the open fails as one whose Impl cannot be had does, and the file
+      // stays for the next. Removed as damaged cache, a valid progress.bin went for want of about 120 B of heap.
+      LOG_ERR("SD", "%s: no memory for its cipher, or a card error: the open fails", path);
+      file.impl->file.close();
+      file = HalFile(&HalFile::Impl::failed);
+      return;
+    case cache_cipher::Attach::Damaged:
+      break;
+  }
   // Not one of the folder's own files (no header: copied in, damaged, or an older layout): damaged cache, removed so
   // that whatever wanted it makes it again, as for a missing file. Closed first: SdFat must not remove an open file.
   LOG_ERR("SD", "%s: not an enciphered cache file, removed", path);

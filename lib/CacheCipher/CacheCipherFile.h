@@ -158,7 +158,8 @@ FolderState resolve(FolderTable& table, const char* path, const size_t folderLen
 enum class Attach : uint8_t {
   Plain,       // an empty file opened read-only: it reads as empty, nothing to decipher
   Enciphered,  // `out` holds the file's cipher; the raw position is past the header
-  Refused,     // not a file of this folder's (no header, a short one), or no memory: close it, the open fails
+  Damaged,     // not a file of this folder's (shorter than a header, another magic): close it and remove it
+  Failed,      // the card would not read or write the header, or no memory for the cipher: close it and keep it
 };
 
 // Attaches the cipher to a file just opened at raw position 0, and leaves it at the content's start. `Raw` has size(),
@@ -174,20 +175,24 @@ Attach attach(Raw& raw, const bool mayWrite, const uint8_t (&key)[kKeyBytes], Ra
     if (!mayWrite) return Attach::Plain;
     fill(nonce, sizeof(nonce));
     makeHeader(nonce, header);
-    if (raw.write(header, sizeof(header)) != sizeof(header)) return Attach::Refused;
+    if (raw.write(header, sizeof(header)) != sizeof(header)) return Attach::Failed;
     // The padding a piece at a time: one sector of zeros in flash would cost the C3 its 496 bytes, and these writes
     // land in SdFat's sector cache.
     const uint8_t zeros[kHeaderFieldBytes] = {};
     for (size_t at = kHeaderFieldBytes; at < kHeaderBytes; at += sizeof(zeros)) {
-      if (raw.write(zeros, sizeof(zeros)) != sizeof(zeros)) return Attach::Refused;
+      if (raw.write(zeros, sizeof(zeros)) != sizeof(zeros)) return Attach::Failed;
     }
-  } else if (size < kHeaderBytes || raw.read(header, sizeof(header)) != static_cast<int>(sizeof(header)) ||
-             !parseHeader(header, nonce) || !raw.seek(kHeaderBytes)) {
-    return Attach::Refused;
+  } else {
+    // Only what the file holds makes it damaged. A read or a seek the card refuses says nothing of the file, and an
+    // X3 short of heap for a moment must not cost a valid progress.bin.
+    if (size < kHeaderBytes) return Attach::Damaged;
+    if (raw.read(header, sizeof(header)) != static_cast<int>(sizeof(header))) return Attach::Failed;
+    if (!parseHeader(header, nonce)) return Attach::Damaged;
+    if (!raw.seek(kHeaderBytes)) return Attach::Failed;
   }
   out.reset(new (std::nothrow) CipherStream(key, nonce));
   memset(nonce, 0, sizeof(nonce));
-  return out ? Attach::Enciphered : Attach::Refused;
+  return out ? Attach::Enciphered : Attach::Failed;
 }
 
 // Reads at the raw position and deciphers in place. -1 when the cipher refuses (the bytes are zeroed, never handed
