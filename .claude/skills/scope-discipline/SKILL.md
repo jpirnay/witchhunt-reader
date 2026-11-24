@@ -21,8 +21,11 @@ live in `docs/design/` and `docs/future_work/`; check there first.
 Before adding a feature, activity, lib, setting, or dependency, answer in order:
 
 1. **Is it in `SCOPE.md`?** Explicitly out: interactive apps (notepad,
-   calculator, games), active connectivity (RSS, news, browser), media/audio
-   playback. If it is out, say so and stop.
+   calculator, games), content features built into the firmware (RSS, news,
+   quote or picture of the day, browser), media/audio playback. If it is out,
+   say so and stop. Content of that kind comes from a plugin as a prerendered
+   image the reader fetches on an event (SCOPE.md, "Content from Plugins"), not
+   from a new widget.
 2. **Does it materially improve focused reading?** If the benefit is
    "nice to have" or serves a different use case, it is out. This is not a PDA.
 3. **What does it cost on the X3?** Steady-state RAM, the largest transient
