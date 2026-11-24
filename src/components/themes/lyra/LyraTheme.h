@@ -80,6 +80,10 @@ class LyraTheme : public BaseTheme {
   // The cover sits inside the selection's 8 px padding, above and below.
   int stackedCoverHeight(const int tileHeight) const override { return tileHeight - 16 > 120 ? tileHeight - 16 : 120; }
 
+  // drawList's selected row: Lyra's light grey bar under black text, or, where this is true, a
+  // solid black bar with the text and icon knocked out of it (Carousel).
+  virtual bool invertsListSelection() const { return false; }
+
   static int getRecentBookProgressPercent(const RecentBook& book);
 
   // A book's details as a home card shows them: title, author, series, the status line (progress
@@ -99,4 +103,7 @@ class LyraTheme : public BaseTheme {
   static void drawCardTextPart(const GfxRenderer& renderer, const CardText& text, CardTextFit::PartId part, int x,
                                int y, int width);
   static const uint8_t* iconForName(UIIcon icon, int size);
+  // Where a cover thumbnail did not draw: "Loading" while the cover pass is still making it, else
+  // the no-cover tile, the cover icon over a black lower two thirds. Nothing for a drawn one.
+  static void drawCoverStandIn(const GfxRenderer& renderer, Rect box, CoverThumb state);
 };
