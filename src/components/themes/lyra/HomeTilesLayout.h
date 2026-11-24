@@ -6,9 +6,10 @@
 
 // Where the Lyra Tiles theme puts each part of Home. Home is a column of rows, each holding one
 // widget across the screen or two side by side (Config); a row of More and Settings always closes
-// it, so no layout can put Settings out of reach. The ready-made layouts are in `presets`; Reader
-// is Lyra Tiles as it was before widgets: the book card, the Also reading row where it fits, and
-// two rows of shortcut tiles.
+// it, so no layout can put Settings out of reach. A shortcut is a widget of its own, one tile that
+// opens one destination; More holds every destination the layout does not show. The ready-made
+// layouts are in `presets`; Reader is Lyra Tiles as it was before widgets: the book card, the Also
+// reading row where it fits, and two rows of two tiles.
 //
 // Proportions rather than per-board numbers: the shortcut tiles take a share of the height, the
 // other widgets their own heights, and the book card (or a picture across the screen) takes what
@@ -185,11 +186,22 @@ constexpr Strip strip(const Box& box, const Dimensions& d = kRegular) {
 
 // ---- The widgets and the layouts made of them -----------------------------------------------------
 
-enum class Widget : uint8_t { Book, AlsoReading, Shortcuts, Clock, Calendar, Summary, Weather, Picture };
+enum class Widget : uint8_t { Book, AlsoReading, Shortcut, Clock, Calendar, Summary, Weather, Picture };
+
+// A shortcut's destination (Cell::option), in the order of BaseTheme's HomeDestination.
+namespace destination {
+constexpr uint8_t Library = 0;
+constexpr uint8_t ReadingStats = 1;
+constexpr uint8_t Bookmarks = 2;
+constexpr uint8_t FileTransfer = 3;
+constexpr uint8_t Weather = 4;
+constexpr uint8_t Count = 5;
+}  // namespace destination
 
 // The widgets that may share a row; the rest take the row across.
 constexpr bool pairs(const Widget w) {
   switch (w) {
+    case Widget::Shortcut:
     case Widget::Clock:
     case Widget::Calendar:
     case Widget::Summary:
@@ -198,29 +210,26 @@ constexpr bool pairs(const Widget w) {
       return true;
     case Widget::Book:
     case Widget::AlsoReading:
-    case Widget::Shortcuts:
       return false;
   }
   return false;
 }
 
-// The widgets that open something when chosen: the reading summary and the calendar Reading
-// Stats, the weather Weather. The book card, Also reading and the tiles are chosen as books and
-// menu entries; the clock and pictures are only looked at.
+// The widgets that open something when chosen: a shortcut its destination, the reading summary
+// and the calendar Reading Stats, the weather Weather. The book card and Also reading are chosen
+// as books; the clock and pictures are only looked at.
 constexpr bool opensSomething(const Widget w) {
-  return w == Widget::Summary || w == Widget::Calendar || w == Widget::Weather;
+  return w == Widget::Shortcut || w == Widget::Summary || w == Widget::Calendar || w == Widget::Weather;
 }
 
 constexpr int kMaxRows = 6;
-constexpr int kMaxTileRows = 3;
-constexpr int kMaxTiles = kMaxTileRows * 2;
 constexpr int kMaxPictures = 2;
 constexpr int kMaxBottom = 3;
 
 struct Cell {
   Widget widget = Widget::Book;
-  // Book: 0 large, 1 compact. Shortcuts: rows of tiles, 1 to kMaxTileRows. Picture: which of the
-  // layout's pictures, 0 to kMaxPictures - 1. Others: unused.
+  // Book: 0 large, 1 compact. Shortcut: its destination (namespace destination). Picture: which of
+  // the layout's pictures, 0 to kMaxPictures - 1. Others: unused.
   uint8_t option = 0;
 };
 
@@ -250,38 +259,32 @@ struct Config {
     }
     return *this;
   }
-  static constexpr int shortcutRows(const Cell& cell) {
-    return cell.option < 1 ? 1 : (cell.option > kMaxTileRows ? kMaxTileRows : cell.option);
-  }
-  // The rows of shortcut tiles the layout asks for; 0 without a Shortcuts widget.
-  constexpr int tileRows() const {
-    for (int r = 0; r < rowCount; ++r) {
-      for (int c = 0; c < rows[r].count; ++c) {
-        if (rows[r].cells[c].widget == Widget::Shortcuts) return shortcutRows(rows[r].cells[c]);
-      }
-    }
-    return 0;
-  }
 };
 
 namespace presets {
-// Lyra Tiles as it has been: the book card, Also reading where it fits, two rows of tiles.
+// Lyra Tiles as it has been: the book card, Also reading where it fits, two rows of two tiles.
 constexpr Config reader() {
   Config c;
-  c.add({Widget::Book}).add({Widget::AlsoReading}).add({Widget::Shortcuts, 2});
+  c.add({Widget::Book})
+      .add({Widget::AlsoReading})
+      .add({Widget::Shortcut, destination::Library}, {Widget::Shortcut, destination::ReadingStats})
+      .add({Widget::Shortcut, destination::FileTransfer}, {Widget::Shortcut, destination::Bookmarks});
   return c;
 }
-// The book card, a clock beside a picture, and the week's reading. Without tiles, the destinations
-// share the bottom row with More and Settings.
+// The book card, a clock beside a picture, and the week's reading beside the Library.
 constexpr Config dashboard() {
   Config c;
-  c.add({Widget::Book}).add({Widget::Clock}, {Widget::Picture, 0}).add({Widget::Summary});
+  c.add({Widget::Book})
+      .add({Widget::Clock}, {Widget::Picture, 0})
+      .add({Widget::Summary}, {Widget::Shortcut, destination::Library});
   return c;
 }
-// A picture across the top, the compact book card, one row of tiles.
+// A picture across the top, the compact book card, two tiles.
 constexpr Config gallery() {
   Config c;
-  c.add({Widget::Picture, 0}).add({Widget::Book, 1}).add({Widget::Shortcuts, 1});
+  c.add({Widget::Picture, 0})
+      .add({Widget::Book, 1})
+      .add({Widget::Shortcut, destination::Library}, {Widget::Shortcut, destination::FileTransfer});
   return c;
 }
 }  // namespace presets
@@ -298,9 +301,7 @@ struct Placed {
 struct Placement {
   Placed items[kMaxRows * 2]{};  // in reading order: row by row, the left column first sideways
   int count = 0;
-  Box tiles[kMaxTiles]{};  // the shortcut tiles, in menu order
-  int tileCount = 0;
-  Box bottom[kMaxBottom]{};  // the bottom row, in menu order after the tiles
+  Box bottom[kMaxBottom]{};  // the bottom row, in menu order
   int bottomCount = 0;
   int dropped = 0;  // bit r: the layout's row r did not fit and is left out
   bool sideways = false;
@@ -328,11 +329,11 @@ struct Need {
   bool flex = false;
   bool optional = false;  // Also reading: left out quietly
   bool book = false;      // holds the book card: never left out
-  bool empty = false;     // shortcuts with no tiles to show
+  bool tile = false;      // holds a shortcut tile
 };
 
-// What a row needs with `tileRows` rows of tiles of `tileH`.
-constexpr Need need(const Row& row, const int tileRows, const int tileH, const Dimensions& d) {
+// What a row needs upright, its tiles `tileH` tall.
+constexpr Need need(const Row& row, const int tileH, const Dimensions& d) {
   Need n{};
   const bool full = row.count == 1;
   int fixed = 0;
@@ -353,9 +354,9 @@ constexpr Need need(const Row& row, const int tileRows, const int tileH, const D
         n.optional = true;
         fixed = maxInt(fixed, d.stripHeight);
         break;
-      case Widget::Shortcuts:
-        if (tileRows <= 0) n.empty = true;
-        fixed = maxInt(fixed, tileRows > 0 ? tileRows * tileH + (tileRows - 1) * d.gap : 0);
+      case Widget::Shortcut:
+        n.tile = true;
+        fixed = maxInt(fixed, tileH);
         break;
       case Widget::Clock:
         fixed = maxInt(fixed, full ? d.clockFullHeight : d.clockHeight);
@@ -381,22 +382,6 @@ constexpr Need need(const Row& row, const int tileRows, const int tileH, const D
   }
   n.height = n.flex ? maxInt(floor, fixed) : fixed;
   return n;
-}
-
-// The rows of tiles a Shortcuts cell shows: what it asks for, no more than its tiles fill.
-constexpr int tileRowsFor(const Cell& cell, const int tileCount) {
-  const int asked = Config::shortcutRows(cell);
-  const int filled = (tileCount + 1) / 2;
-  return asked < filled ? asked : filled;
-}
-
-constexpr int rowTileRows(const Row& row, const int tileCount, const bool asked) {
-  for (int c = 0; c < row.count; ++c) {
-    if (row.cells[c].widget == Widget::Shortcuts) {
-      return asked ? Config::shortcutRows(row.cells[c]) : tileRowsFor(row.cells[c], tileCount);
-    }
-  }
-  return 0;
 }
 
 // The heights of the rows marked `on`, stacked in `avail` with a gap between; rows that take what
@@ -469,23 +454,14 @@ constexpr void fit(const Need* needs, bool* on, const int count, const int avail
   }
 }
 
-constexpr bool rowHasShortcuts(const Row& row) {
-  for (int c = 0; c < row.count; ++c) {
-    if (row.cells[c].widget == Widget::Shortcuts) return true;
-  }
-  return false;
-}
-
-// The Also reading row only where the large book card keeps minCardHeight beside it, with the
-// shortcut rows the layout asks for (not the fewer a short menu fills): whether a panel has the row
-// does not change with the number of entries.
-constexpr void keepStripOnlyBesideATallCard(const Row* rows, const Need* asked, bool* on, const int count,
-                                            const int avail, const Dimensions& d, const bool tilesBelow) {
+// The Also reading row only where the large book card keeps minCardHeight beside it.
+constexpr void keepStripOnlyBesideATallCard(const Row* rows, const Need* needs, bool* on, const int count,
+                                            const int avail, const Dimensions& d) {
   int stripRow = -1;
   int bookRow = -1;
   for (int r = 0; r < count; ++r) {
     if (!on[r]) continue;
-    if (asked[r].optional) stripRow = r;
+    if (needs[r].optional) stripRow = r;
     for (int c = 0; c < rows[r].count; ++c) {
       if (rows[r].cells[c].widget == Widget::Book && rows[r].cells[c].option != 1) bookRow = r;
     }
@@ -495,30 +471,9 @@ constexpr void keepStripOnlyBesideATallCard(const Row* rows, const Need* asked, 
     on[stripRow] = false;
     return;
   }
-  // A row of tiles under the card counts here even with none to show: the asked rows decide.
-  bool all[kMaxRows]{};
-  for (int r = 0; r < count; ++r) all[r] = on[r] || (tilesBelow && rowHasShortcuts(rows[r]));
   int heights[kMaxRows]{};
-  stack(asked, all, count, avail, d, heights);
+  stack(needs, on, count, avail, d, heights);
   if (heights[bookRow] < d.minCardHeight) on[stripRow] = false;
-}
-
-// Tiles two to a row, an odd first one across the row; `tileH` tall.
-constexpr void placeTiles(Placement& p, const Box& box, const int tileCount, const int tileRows, const int tileH,
-                          const Dimensions& d) {
-  const int shown = tileCount < tileRows * 2 ? tileCount : tileRows * 2;
-  const int halfW = (box.w - d.gap) / 2;
-  const bool firstSpans = (shown % 2) == 1;
-  for (int i = 0; i < shown; ++i) {
-    const int slot = firstSpans ? i + 1 : i;
-    const int y = box.y + (slot / 2) * (tileH + d.gap);
-    if (firstSpans && i == 0) {
-      p.tiles[i] = Box{box.x, y, box.w, tileH};
-    } else {
-      p.tiles[i] = Box{slot % 2 == 0 ? box.x : box.x + box.w - halfW, y, halfW, tileH};
-    }
-  }
-  p.tileCount = shown;
 }
 
 constexpr void placeBottom(Placement& p, const Box& area, const int count, const Dimensions& d) {
@@ -540,7 +495,7 @@ constexpr void placeBottom(Placement& p, const Box& area, const int count, const
 
 // Rows `on` stacked from `y` in the column at x, w; each row's widgets across or side by side.
 constexpr void placeRows(Placement& p, const Config& cfg, const bool* on, const int* heights, const int x, const int w,
-                         int y, const int tileCount, const Dimensions& d, const bool sidewaysTiles) {
+                         int y, const Dimensions& d) {
   for (int r = 0; r < cfg.rowCount && r < kMaxRows; ++r) {
     if (!on[r]) continue;
     const Row& row = cfg.rows[r];
@@ -551,14 +506,6 @@ constexpr void placeRows(Placement& p, const Config& cfg, const bool* on, const 
       const int halfW = (w - d.gap) / 2;
       p.items[p.count++] = Placed{row.cells[0], Box{x, y, halfW, h}, false, r};
       p.items[p.count++] = Placed{row.cells[1], Box{x + w - halfW, y, halfW, h}, false, r};
-    }
-    for (int c = 0; c < row.count; ++c) {
-      if (row.cells[c].widget != Widget::Shortcuts) continue;
-      const int tileRows = tileRowsFor(row.cells[c], tileCount);
-      if (tileRows <= 0) continue;
-      int tileH = (h - (tileRows - 1) * d.gap) / tileRows;
-      if (sidewaysTiles && tileH > d.maxSidewaysTileHeight) tileH = d.maxSidewaysTileHeight;
-      placeTiles(p, Box{x, y, w, h}, tileCount, tileRows, tileH, d);
     }
     y += h + d.gap;
   }
@@ -574,13 +521,12 @@ constexpr bool holdsBook(const Row& row) {
 }  // namespace detail
 
 // `content` is the screen above the button hints; `top` is the first line under the status line.
-// `tileCount` is the menu entries shown as tiles (none without a Shortcuts widget), `bottomCount`
-// the entries in the bottom row (1 to kMaxBottom).
-constexpr Placement place(const Box& content, const int top, const Config& cfg, const int tileCount,
-                          const int bottomCount, const Dimensions& d = kRegular) {
+// `bottomCount` is the entries in the bottom row (1 to kMaxBottom): More when anything is behind it,
+// and Settings.
+constexpr Placement place(const Box& content, const int top, const Config& cfg, const int bottomCount,
+                          const Dimensions& d = kRegular) {
   using namespace detail;
   Placement p{};
-  const int tiles = clampInt(tileCount, 0, kMaxTiles);
   const int bottom = content.y + content.h - d.bottomPadding;
   const int count = cfg.rowCount < kMaxRows ? cfg.rowCount : kMaxRows;
 
@@ -595,18 +541,16 @@ constexpr Placement place(const Box& content, const int top, const Config& cfg, 
     const int avail = (bottom - d.bottomRowHeight - d.gap) - top;
     const int tileH = tileHeight(content, d);
     Need needs[kMaxRows]{};
-    Need asked[kMaxRows]{};
     bool on[kMaxRows]{};
     for (int r = 0; r < count; ++r) {
-      needs[r] = need(cfg.rows[r], rowTileRows(cfg.rows[r], tiles, false), tileH, d);
-      asked[r] = need(cfg.rows[r], rowTileRows(cfg.rows[r], tiles, true), tileH, d);
-      on[r] = !needs[r].empty;
+      needs[r] = need(cfg.rows[r], tileH, d);
+      on[r] = true;
     }
-    keepStripOnlyBesideATallCard(cfg.rows, asked, on, count, avail, d, /*tilesBelow=*/true);
+    keepStripOnlyBesideATallCard(cfg.rows, needs, on, count, avail, d);
     fit(needs, on, count, avail, d, p.dropped);
     int heights[kMaxRows]{};
     stack(needs, on, count, avail, d, heights);
-    placeRows(p, cfg, on, heights, x, w, top, tiles, d, false);
+    placeRows(p, cfg, on, heights, x, w, top, d);
     return p;
   }
 
@@ -622,32 +566,34 @@ constexpr Placement place(const Box& content, const int top, const Config& cfg, 
   Need needs[kMaxRows]{};
   bool left[kMaxRows]{};
   bool right[kMaxRows]{};
+  int cap[kMaxRows]{};
   for (int r = 0; r < count; ++r) {
-    needs[r] = need(cfg.rows[r], 0, 0, d);
-    // Sideways the tiles share the right column's height: a row of them takes what is left there,
-    // down to rows of the smallest tiles.
-    const int tileRows = rowTileRows(cfg.rows[r], tiles, false);
-    if (tileRows > 0) {
+    needs[r] = need(cfg.rows[r], d.minTileHeight, d);
+    // Sideways the rows of tiles share the right column's height, down to the smallest tiles and up
+    // to maxSidewaysTileHeight; a widget beside a tile keeps at least its own height.
+    if (needs[r].tile) {
+      cap[r] = maxInt(needs[r].height, d.maxSidewaysTileHeight);
       needs[r].flex = true;
-      needs[r].empty = false;
-      needs[r].height = tileRows * d.minTileHeight + (tileRows - 1) * d.gap;
     }
     const bool inLeft = holdsBook(cfg.rows[r]);
-    left[r] = inLeft && !needs[r].empty;
-    right[r] = !inLeft && !needs[r].empty;
+    left[r] = inLeft;
+    right[r] = !inLeft;
   }
   const int leftAvail = bottom - top;
-  keepStripOnlyBesideATallCard(cfg.rows, needs, left, count, leftAvail, d, /*tilesBelow=*/false);
+  keepStripOnlyBesideATallCard(cfg.rows, needs, left, count, leftAvail, d);
   fit(needs, left, count, leftAvail, d, p.dropped);
   int leftHeights[kMaxRows]{};
   stack(needs, left, count, leftAvail, d, leftHeights);
-  placeRows(p, cfg, left, leftHeights, leftX, leftW, top, tiles, d, true);
+  placeRows(p, cfg, left, leftHeights, leftX, leftW, top, d);
 
   const int rightAvail = (bottom - d.bottomRowHeight - d.gap) - top;
   fit(needs, right, count, rightAvail, d, p.dropped);
   int rightHeights[kMaxRows]{};
   stack(needs, right, count, rightAvail, d, rightHeights);
-  placeRows(p, cfg, right, rightHeights, rightX, rightW, top, tiles, d, true);
+  for (int r = 0; r < count; ++r) {
+    if (cap[r] > 0 && rightHeights[r] > cap[r]) rightHeights[r] = cap[r];
+  }
+  placeRows(p, cfg, right, rightHeights, rightX, rightW, top, d);
   return p;
 }
 
@@ -661,8 +607,8 @@ constexpr int actions(const Placement& p, Widget* out, const int max) {
 }
 
 // The screen's rows for HomeGridNav, in reading order. Home's selector runs: the books it shows
-// (the card 0, Also reading after it), the menu (tiles, then the bottom row), then the widgets that
-// open something, as actions() lists them.
+// (the card 0, Also reading after it), the menu (the bottom row: More, Settings), then the widgets
+// that open something, as actions() lists them.
 constexpr HomeGridNav::Grid grid(const Placement& p, const int shownBooks, const int menuCount) {
   HomeGridNav::Grid g{};
   const int actionBase = shownBooks + menuCount;
@@ -683,18 +629,10 @@ constexpr HomeGridNav::Grid grid(const Placement& p, const int shownBooks, const
         case Widget::AlsoReading:
           if (shownBooks > 1) g.addRow(1, shownBooks - 1);
           break;
-        case Widget::Shortcuts: {
-          int placed = 0;
-          if (p.tileCount % 2 == 1) {
-            g.addRow(shownBooks, 1);  // the first tile spans its row
-            placed = 1;
-          }
-          for (; placed < p.tileCount; placed += 2) g.addRow(shownBooks + placed, 2);
-          break;
-        }
         case Widget::Clock:
         case Widget::Picture:
           break;
+        case Widget::Shortcut:
         case Widget::Calendar:
         case Widget::Summary:
         case Widget::Weather:
@@ -704,7 +642,7 @@ constexpr HomeGridNav::Grid grid(const Placement& p, const int shownBooks, const
     }
     if (widgetCount > 0) g.addCells(widgets, widgetCount);
   }
-  g.addRow(shownBooks + p.tileCount, p.bottomCount);
+  g.addRow(shownBooks, p.bottomCount);
   return g;
 }
 

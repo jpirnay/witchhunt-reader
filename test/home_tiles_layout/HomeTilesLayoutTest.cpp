@@ -341,7 +341,7 @@ TEST(HomeTilesLayout, SidewaysTheCardAndTheTilesShareTheWidth) {
 // The row's label gets a whole line of the small face (23 px at the Normal UI size) and a gap above
 // the covers, which keep the 54x90 box their thumbnails are made at.
 TEST(HomeTilesLayout, TheAlsoReadingLabelClearsTheCovers) {
-  const auto p = HomeTilesLayout::place({0, 0, 540, 920}, kTop, HomeTilesLayout::presets::reader(), 4, 2);
+  const auto p = HomeTilesLayout::place({0, 0, 540, 920}, kTop, HomeTilesLayout::presets::reader(), 2);
   const auto* also = p.find(HomeTilesLayout::Widget::AlsoReading);
   ASSERT_NE(also, nullptr);
   const auto strip = HomeTilesLayout::strip(also->box);
@@ -499,60 +499,70 @@ const Screen kScreens[] = {
     {"Murphy sideways", {0, 0, 416, 210}, 28, &HomeTilesLayout::kCompact},
 };
 
+using HomeTilesLayout::Widget;
+namespace dest = HomeTilesLayout::destination;
+
+std::vector<Box> shortcutBoxes(const HomeTilesLayout::Placement& p) {
+  std::vector<Box> boxes;
+  for (int i = 0; i < p.count; ++i) {
+    if (p.items[i].cell.widget == Widget::Shortcut) boxes.push_back(p.items[i].box);
+  }
+  return boxes;
+}
+
 }  // namespace
 
-// The Reader layout is Lyra Tiles as it was: every box where the old layout put it, on every panel
-// and with every number of tiles, so switching Tiles to widgets moves no pixel.
+// The Reader layout is Lyra Tiles as it was with its four tiles: every box where the old layout
+// put it, on every panel, so switching Tiles to widgets moves no pixel, and the same rows to move
+// through.
 TEST(HomeWidgets, TheReaderLayoutIsLyraTilesAsItWas) {
   const auto reader = HomeTilesLayout::presets::reader();
   for (const Screen& s : kScreens) {
-    for (int tiles = 0; tiles <= legacy::kMaxTiles; ++tiles) {
-      for (int bottom = 1; bottom <= 2; ++bottom) {
-        SCOPED_TRACE(std::string(s.name) + ", " + std::to_string(tiles) + " tiles, " + std::to_string(bottom));
-        const auto& d = *s.d;
-        const auto regions = legacy::regions(s.content, s.top, tiles, d);
-        const auto books = legacy::books(regions.books, legacy::stripFits(s.content, s.top, d), d);
-        const auto menu = legacy::menu(regions.menu, tiles, bottom, d);
-        const auto p = HomeTilesLayout::place(s.content, s.top, reader, tiles, bottom, d);
+    for (int bottom = 1; bottom <= 2; ++bottom) {
+      SCOPED_TRACE(std::string(s.name) + ", " + std::to_string(bottom) + " in the bottom row");
+      const auto& d = *s.d;
+      const auto regions = legacy::regions(s.content, s.top, 4, d);
+      const auto books = legacy::books(regions.books, legacy::stripFits(s.content, s.top, d), d);
+      const auto menu = legacy::menu(regions.menu, 4, bottom, d);
+      const auto p = HomeTilesLayout::place(s.content, s.top, reader, bottom, d);
 
-        const auto* book = p.find(HomeTilesLayout::Widget::Book);
-        ASSERT_NE(book, nullptr);
-        EXPECT_TRUE(same(book->box, books.card)) << describe(book->box) << " vs " << describe(books.card);
-        const auto card = HomeTilesLayout::card(book->box, d);
-        EXPECT_TRUE(same(card.cover, books.cover)) << describe(card.cover);
-        EXPECT_TRUE(same(card.text, books.text)) << describe(card.text);
-        EXPECT_TRUE(same(card.foot, books.foot)) << describe(card.foot);
+      const auto* book = p.find(Widget::Book);
+      ASSERT_NE(book, nullptr);
+      EXPECT_TRUE(same(book->box, books.card)) << describe(book->box) << " vs " << describe(books.card);
+      const auto card = HomeTilesLayout::card(book->box, d);
+      EXPECT_TRUE(same(card.cover, books.cover)) << describe(card.cover);
+      EXPECT_TRUE(same(card.text, books.text)) << describe(card.text);
+      EXPECT_TRUE(same(card.foot, books.foot)) << describe(card.foot);
 
-        const auto* also = p.find(HomeTilesLayout::Widget::AlsoReading);
-        EXPECT_EQ(also != nullptr, books.hasStrip);
-        if (also != nullptr && books.hasStrip) {
-          EXPECT_TRUE(same(also->box, books.strip)) << describe(also->box);
-          // The row has a frame now, which the reference did not: its books sit inside it.
-          const auto strip = HomeTilesLayout::strip(also->box, d);
-          for (int i = 0; i < HomeTilesLayout::kStripBooks; ++i) {
-            EXPECT_TRUE(inside(strip.slots[i], also->box)) << describe(strip.slots[i]);
-            EXPECT_GE(strip.slots[i].x - also->box.x, d.stripPadding);
-          }
+      const auto* also = p.find(Widget::AlsoReading);
+      EXPECT_EQ(also != nullptr, books.hasStrip);
+      if (also != nullptr && books.hasStrip) {
+        EXPECT_TRUE(same(also->box, books.strip)) << describe(also->box);
+        // The row has a frame now, which the reference did not: its books sit inside it.
+        const auto strip = HomeTilesLayout::strip(also->box, d);
+        for (int i = 0; i < HomeTilesLayout::kStripBooks; ++i) {
+          EXPECT_TRUE(inside(strip.slots[i], also->box)) << describe(strip.slots[i]);
+          EXPECT_GE(strip.slots[i].x - also->box.x, d.stripPadding);
         }
-
-        ASSERT_EQ(p.tileCount, menu.tileCount);
-        for (int i = 0; i < p.tileCount; ++i) {
-          EXPECT_TRUE(same(p.tiles[i], menu.tiles[i]))
-              << i << ": " << describe(p.tiles[i]) << " vs " << describe(menu.tiles[i]);
-        }
-        ASSERT_EQ(p.bottomCount, menu.bottomCount);
-        for (int i = 0; i < p.bottomCount; ++i) EXPECT_TRUE(same(p.bottom[i], menu.bottom[i])) << describe(p.bottom[i]);
-        EXPECT_EQ(p.dropped, 0);
-
-        // And it is navigated as it was.
-        const int shown = books.hasStrip ? 4 : 1;
-        const auto oldGrid = legacy::grid(shown, tiles, bottom);
-        const auto newGrid = HomeTilesLayout::grid(p, shown, tiles + bottom);
-        ASSERT_EQ(newGrid.rowCount, oldGrid.rowCount);
-        ASSERT_EQ(newGrid.cellCount, oldGrid.cellCount);
-        for (int c = 0; c < newGrid.cellCount; ++c) EXPECT_EQ(newGrid.cells[c], oldGrid.cells[c]);
-        EXPECT_EQ(newGrid.cycleRow, oldGrid.cycleRow);
       }
+
+      const auto tiles = shortcutBoxes(p);
+      ASSERT_EQ(static_cast<int>(tiles.size()), menu.tileCount);
+      for (int i = 0; i < menu.tileCount; ++i) {
+        EXPECT_TRUE(same(tiles[i], menu.tiles[i]))
+            << i << ": " << describe(tiles[i]) << " vs " << describe(menu.tiles[i]);
+      }
+      ASSERT_EQ(p.bottomCount, menu.bottomCount);
+      for (int i = 0; i < p.bottomCount; ++i) EXPECT_TRUE(same(p.bottom[i], menu.bottom[i])) << describe(p.bottom[i]);
+      EXPECT_EQ(p.dropped, 0);
+
+      // The same rows to move through; the tiles are numbered after the bottom row now.
+      const int shown = books.hasStrip ? 4 : 1;
+      const auto oldGrid = legacy::grid(shown, 4, bottom);
+      const auto newGrid = HomeTilesLayout::grid(p, shown, bottom);
+      ASSERT_EQ(newGrid.rowCount, oldGrid.rowCount);
+      for (int r = 0; r < newGrid.rowCount; ++r) EXPECT_EQ(newGrid.count[r], oldGrid.count[r]);
+      EXPECT_EQ(newGrid.cycleRow, oldGrid.cycleRow);
     }
   }
 }
@@ -567,15 +577,10 @@ TEST(HomeWidgets, EveryLayoutKeepsItsWidgetsOnScreenAndApart) {
   for (const auto& [name, cfg] : layouts) {
     for (const Screen& s : kScreens) {
       SCOPED_TRACE(std::string(name) + " on " + s.name);
-      const int tiles = cfg.tileRows() * 2;
-      const int bottom = tiles > 0 ? 2 : 3;
-      const auto p = HomeTilesLayout::place(s.content, s.top, cfg, tiles, bottom, *s.d);
+      const auto p = HomeTilesLayout::place(s.content, s.top, cfg, 2, *s.d);
       const Box body{s.content.x, s.top, s.content.w, s.content.h - s.top};
       std::vector<Box> boxes;
-      for (int i = 0; i < p.count; ++i) {
-        if (p.items[i].cell.widget != HomeTilesLayout::Widget::Shortcuts) boxes.push_back(p.items[i].box);
-      }
-      for (int i = 0; i < p.tileCount; ++i) boxes.push_back(p.tiles[i]);
+      for (int i = 0; i < p.count; ++i) boxes.push_back(p.items[i].box);
       for (int i = 0; i < p.bottomCount; ++i) boxes.push_back(p.bottom[i]);
       for (size_t i = 0; i < boxes.size(); ++i) {
         EXPECT_TRUE(inside(boxes[i], body)) << describe(boxes[i]);
@@ -584,82 +589,102 @@ TEST(HomeWidgets, EveryLayoutKeepsItsWidgetsOnScreenAndApart) {
           EXPECT_FALSE(overlap(boxes[i], boxes[j])) << describe(boxes[i]) << " / " << describe(boxes[j]);
         }
       }
-      const auto* book = p.find(HomeTilesLayout::Widget::Book);
-      ASSERT_NE(book, nullptr);  // the book card is never the row left out
+      ASSERT_NE(p.find(Widget::Book), nullptr);  // the book card is never the row left out
     }
   }
 }
 
-// Dashboard on the X3: the card takes what the clock and picture row and the summary leave. On the
-// Murphy the summary does not fit beside a readable card and is left out, and only it.
+// Dashboard on the X3: the card takes what the clock and picture row and the summary row leave. On
+// the Murphy the summary's row does not fit beside a readable card and is left out, and only it.
 TEST(HomeWidgets, ARowThatDoesNotFitIsLeftOutFromTheBottom) {
   const auto dash = HomeTilesLayout::presets::dashboard();
-  const auto x3 = HomeTilesLayout::place({0, 0, 528, 752}, kTop, dash, 0, 3);
+  const auto x3 = HomeTilesLayout::place({0, 0, 528, 752}, kTop, dash, 2);
   EXPECT_EQ(x3.dropped, 0);
-  ASSERT_NE(x3.find(HomeTilesLayout::Widget::Book), nullptr);
-  EXPECT_GE(x3.find(HomeTilesLayout::Widget::Book)->box.h, HomeTilesLayout::kRegular.bookMinHeight);
-  const auto* clock = x3.find(HomeTilesLayout::Widget::Clock);
-  const auto* picture = x3.find(HomeTilesLayout::Widget::Picture);
+  ASSERT_NE(x3.find(Widget::Book), nullptr);
+  EXPECT_GE(x3.find(Widget::Book)->box.h, HomeTilesLayout::kRegular.bookMinHeight);
+  const auto* clock = x3.find(Widget::Clock);
+  const auto* picture = x3.find(Widget::Picture);
   ASSERT_NE(clock, nullptr);
   ASSERT_NE(picture, nullptr);
   EXPECT_FALSE(clock->full);
   EXPECT_EQ(clock->box.y, picture->box.y);
   EXPECT_LT(clock->box.x, picture->box.x);
-  EXPECT_EQ(x3.bottomCount, 3);  // Library joins More and Settings
+  // A tile beside the summary takes the row's height.
+  const auto* summary = x3.find(Widget::Summary);
+  const auto* library = x3.find(Widget::Shortcut);
+  ASSERT_NE(summary, nullptr);
+  ASSERT_NE(library, nullptr);
+  EXPECT_EQ(library->box.h, summary->box.h);
 
-  const auto murphy = HomeTilesLayout::place({0, 0, 240, 386}, 28, dash, 0, 3, HomeTilesLayout::kCompact);
+  const auto murphy = HomeTilesLayout::place({0, 0, 240, 386}, 28, dash, 2, HomeTilesLayout::kCompact);
   EXPECT_EQ(murphy.dropped, 1 << 2);
-  EXPECT_EQ(murphy.find(HomeTilesLayout::Widget::Summary), nullptr);
-  EXPECT_NE(murphy.find(HomeTilesLayout::Widget::Clock), nullptr);
+  EXPECT_EQ(murphy.find(Widget::Summary), nullptr);
+  EXPECT_EQ(murphy.find(Widget::Shortcut), nullptr);  // its row partner goes with it
+  EXPECT_NE(murphy.find(Widget::Clock), nullptr);
 }
 
 // A picture across the screen takes the room left, like the large card; the compact card keeps its
 // own height.
 TEST(HomeWidgets, GalleryGivesThePictureTheRoomLeft) {
-  const auto p = HomeTilesLayout::place({0, 0, 480, 760}, kTop, HomeTilesLayout::presets::gallery(), 2, 2);
-  const auto* picture = p.find(HomeTilesLayout::Widget::Picture);
-  const auto* book = p.find(HomeTilesLayout::Widget::Book);
+  const auto p = HomeTilesLayout::place({0, 0, 480, 760}, kTop, HomeTilesLayout::presets::gallery(), 2);
+  const auto* picture = p.find(Widget::Picture);
+  const auto* book = p.find(Widget::Book);
   ASSERT_NE(picture, nullptr);
   ASSERT_NE(book, nullptr);
   EXPECT_EQ(book->box.h, HomeTilesLayout::kRegular.bookCompactHeight);
   EXPECT_GE(picture->box.h, HomeTilesLayout::kRegular.pictureMinHeight);
   EXPECT_LT(picture->box.y, book->box.y);
-  EXPECT_EQ(p.tileCount, 2);
+  const auto tiles = shortcutBoxes(p);
+  ASSERT_EQ(tiles.size(), 2u);
   // The rows end one gap above the bottom row.
-  EXPECT_EQ(p.tiles[0].y + p.tiles[0].h + HomeTilesLayout::kRegular.gap, p.bottom[0].y);
+  EXPECT_EQ(tiles[0].y + tiles[0].h + HomeTilesLayout::kRegular.gap, p.bottom[0].y);
+}
+
+// A tile alone in its row takes the whole row.
+TEST(HomeWidgets, ATileAloneTakesTheRow) {
+  HomeTilesLayout::Config cfg;
+  cfg.add({Widget::Book}).add({Widget::Shortcut, dest::FileTransfer});
+  const auto p = HomeTilesLayout::place({0, 0, 480, 760}, kTop, cfg, 2);
+  const auto* tile = p.find(Widget::Shortcut);
+  ASSERT_NE(tile, nullptr);
+  EXPECT_TRUE(tile->full);
+  EXPECT_EQ(tile->box.w, 480 - 2 * HomeTilesLayout::kRegular.sidePadding);
 }
 
 // Widgets that open something are numbered after the menu, in reading order, and the grid visits
 // them where they are drawn.
 TEST(HomeWidgets, WidgetsThatOpenSomethingFollowTheMenuInNumberAndTheScreenInOrder) {
   HomeTilesLayout::Config cfg;
-  cfg.add({HomeTilesLayout::Widget::Book})
-      .add({HomeTilesLayout::Widget::Weather}, {HomeTilesLayout::Widget::Summary})
-      .add({HomeTilesLayout::Widget::Shortcuts, 1});
-  const auto p = HomeTilesLayout::place({0, 0, 480, 760}, kTop, cfg, 2, 2);
-  HomeTilesLayout::Widget acts[4]{};
-  ASSERT_EQ(HomeTilesLayout::actions(p, acts, 4), 2);
-  EXPECT_EQ(acts[0], HomeTilesLayout::Widget::Weather);
-  EXPECT_EQ(acts[1], HomeTilesLayout::Widget::Summary);
-  // Selector: card 0, tiles 1-2, More 3, Settings 4, weather 5, summary 6.
-  const auto g = HomeTilesLayout::grid(p, 1, 4);
+  cfg.add({Widget::Book})
+      .add({Widget::Weather}, {Widget::Summary})
+      .add({Widget::Shortcut, dest::Library}, {Widget::Shortcut, dest::Bookmarks});
+  const auto p = HomeTilesLayout::place({0, 0, 480, 760}, kTop, cfg, 2);
+  Widget acts[6]{};
+  ASSERT_EQ(HomeTilesLayout::actions(p, acts, 6), 4);
+  EXPECT_EQ(acts[0], Widget::Weather);
+  EXPECT_EQ(acts[1], Widget::Summary);
+  EXPECT_EQ(acts[2], Widget::Shortcut);
+  // Selector: card 0, More 1, Settings 2, then weather 3, summary 4, Library 5, Bookmarks 6.
+  const auto g = HomeTilesLayout::grid(p, 1, 2);
   ASSERT_EQ(g.rowCount, 4);
-  EXPECT_EQ(HomeGridNav::next(g, 0, 1), 5);
-  EXPECT_EQ(HomeGridNav::next(g, 5, 1), 6);
+  EXPECT_EQ(HomeGridNav::next(g, 0, 1), 3);
+  EXPECT_EQ(HomeGridNav::next(g, 4, 1), 5);
   EXPECT_EQ(HomeGridNav::next(g, 6, 1), 1);
-  EXPECT_EQ(HomeGridNav::step(g, 6, HomeGridNav::Move::Down).index, 2);
+  EXPECT_EQ(HomeGridNav::next(g, 2, 1), 0);
+  EXPECT_EQ(HomeGridNav::step(g, 4, HomeGridNav::Move::Down).index, 6);
+  EXPECT_EQ(HomeGridNav::step(g, 5, HomeGridNav::Move::Down).index, 1);
 }
 
 // Sideways the book card keeps the left column and the other widgets share the right one with the
-// bottom row.
+// bottom row; tiles there grow with the room, to their sideways cap.
 TEST(HomeWidgets, SidewaysTheCardTakesTheLeftColumn) {
-  const auto p = HomeTilesLayout::place({0, 0, 800, 440}, kTop, HomeTilesLayout::presets::dashboard(), 0, 3);
-  const auto* book = p.find(HomeTilesLayout::Widget::Book);
-  const auto* clock = p.find(HomeTilesLayout::Widget::Clock);
+  const auto p = HomeTilesLayout::place({0, 0, 800, 440}, kTop, HomeTilesLayout::presets::dashboard(), 2);
+  const auto* book = p.find(Widget::Book);
+  const auto* clock = p.find(Widget::Clock);
   ASSERT_NE(book, nullptr);
   ASSERT_NE(clock, nullptr);
   EXPECT_TRUE(p.sideways);
   EXPECT_LT(book->box.x + book->box.w, clock->box.x);
   EXPECT_EQ(book->box.y, clock->box.y);
-  EXPECT_LT(clock->box.x, p.bottom[0].x + 1);
+  for (const Box& tile : shortcutBoxes(p)) EXPECT_LE(tile.h, HomeTilesLayout::kRegular.maxSidewaysTileHeight + 60);
 }

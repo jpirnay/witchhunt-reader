@@ -48,7 +48,14 @@ void HomeActivity::rebuildMenuEntries() {
   menuEntries.clear();
   menuEntries.reserve(6);  // all six shown, or five plus More
   const HomeMenuAvailability availability{.hasBookmarks = GLOBAL_BOOKMARKS.hasAny()};
-  collectHomeMenuEntries(HomeMenuPlacement::Home, availability, menuEntries, GUI.homeMenuCapacity());
+  {
+    // Before the menu: the theme's arrangement decides how many entries Home has places for, and
+    // which destinations it shows itself.
+    RenderLock lock;
+    UITheme::getInstance().getMutableTheme().prepareHome(availableDestinations(availability));
+  }
+  const uint32_t shownByTheme = GUI.homeShownDestinations(renderer, UITheme::getContentRect(renderer, true, false));
+  collectHomeMenuEntries(HomeMenuPlacement::Home, availability, menuEntries, GUI.homeMenuCapacity(), shownByTheme);
   menuTrailing_ = homeMenuTrailingCount(menuEntries);
 }
 
@@ -443,11 +450,6 @@ void HomeActivity::onEnter() {
   // task and loop() on this one; when both rebuilt the list on a dirty flag, they could run at once,
   // each clearing and then appending, and Home showed every entry twice. The rebuild also reads the
   // bookmark index off the card.
-  {
-    // Before the menu: the theme's arrangement decides how many entries Home has places for.
-    RenderLock lock;
-    UITheme::getInstance().getMutableTheme().prepareHome();
-  }
   rebuildMenuEntries();
   {
     RenderLock lock;
@@ -761,7 +763,9 @@ void HomeActivity::render(RenderLock&&) {
 
   GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.homeTopPadding}, nullptr);
 
-  const int totalItems = shownBooks_ + static_cast<int>(menuEntries.size());
+  // Books, menu, and the widgets numbered after it: clamping to the first two pulled a step onto a
+  // widget back to the last menu entry.
+  const int totalItems = selectableCount();
   if (selectorIndex >= totalItems) {
     selectorIndex = std::max(0, totalItems - 1);
   }
@@ -930,14 +934,7 @@ void HomeActivity::dispatchSelection(const int menuIndex) {
   }
   const int widget = menuIndex - menuCount;
   if (widget < 0 || widget >= widgetActionCount_) return;
-  switch (widgetActions_[widget]) {
-    case HomeWidgetAction::ReadingStats:
-      dispatchMenuAction(HomeMenuAction::ReadingStats);
-      break;
-    case HomeWidgetAction::Weather:
-      dispatchMenuAction(HomeMenuAction::Weather);
-      break;
-  }
+  dispatchMenuAction(actionFor(widgetActions_[widget]));
 }
 
 void HomeActivity::dispatchMenuAction(HomeMenuAction action) {
@@ -969,6 +966,12 @@ void HomeActivity::appendDebugState(std::string& out) const {
     appendField(out, "label", recentBooks[selectorIndex].title);
   } else if (menuIndex < static_cast<int>(menuEntries.size())) {
     appendField(out, "label", I18N.get(menuEntries[menuIndex].label));
+  } else if (menuIndex - static_cast<int>(menuEntries.size()) < widgetActionCount_) {
+    // A widget that opens something: named by where it leads.
+    static constexpr const char* kNames[] = {"widget:Library", "widget:ReadingStats", "widget:Bookmarks",
+                                             "widget:FileTransfer", "widget:Weather"};
+    const auto d = static_cast<size_t>(widgetActions_[menuIndex - static_cast<int>(menuEntries.size())]);
+    if (d < std::size(kNames)) appendField(out, "label", kNames[d]);
   }
 }
 #endif  // SERIAL_TEST_API

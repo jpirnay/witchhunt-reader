@@ -155,24 +155,44 @@ void drawLines(const GfxRenderer& renderer, const int fontId, const int x, int y
 
 using HomeTilesLayout::Widget;
 
-HomeTilesLayout::Placement LyraTilesTheme::placement(const Rect content, const int menuCount,
-                                                     const int menuTrailing) const {
+HomeTilesLayout::Placement LyraTilesTheme::placement(const Rect content, const int menuCount) const {
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
-  const int tiles = tileCountFor(menuCount, menuTrailing);
-  return HomeTilesLayout::place(toBox(content), content.y + metrics.homeTopPadding, config_, tiles,
-                                std::max(1, menuCount - tiles), dims());
+  // Home's whole menu is the bottom row: More when anything is behind it, and Settings.
+  return HomeTilesLayout::place(toBox(content), content.y + metrics.homeTopPadding, config_, std::max(1, menuCount),
+                                dims());
 }
 
 HomeTilesLayout::Placement LyraTilesTheme::placement(const GfxRenderer& renderer) const {
-  return placement(UITheme::getContentRect(renderer, true, false), menuCount_, menuTrailing_);
+  return placement(UITheme::getContentRect(renderer, true, false), menuCount_);
 }
 
-int LyraTilesTheme::tileCountFor(const int menuCount, const int menuTrailing) const {
-  // With tiles, every entry but More and Settings is a tile; without, they all share the bottom row.
-  return config_.tileRows() > 0 ? std::max(0, menuCount - menuTrailing) : 0;
+void LyraTilesTheme::prepareHome(const uint32_t available) {
+  // A shortcut to a destination with nothing behind it (no bookmarks, weather not set up) is left
+  // out, as its menu entry would be; its neighbour then takes the row.
+  const HomeTilesLayout::Config layout = HomeTilesLayout::presets::reader();
+  HomeTilesLayout::Config shown;
+  for (int r = 0; r < layout.rowCount; ++r) {
+    HomeTilesLayout::Cell cells[2]{};
+    int count = 0;
+    for (int c = 0; c < layout.rows[r].count; ++c) {
+      const HomeTilesLayout::Cell& cell = layout.rows[r].cells[c];
+      if (cell.widget == Widget::Shortcut && (available & (1u << cell.option)) == 0) continue;
+      cells[count++] = cell;
+    }
+    if (count == 1) shown.add(cells[0]);
+    if (count == 2) shown.add(cells[0], cells[1]);
+  }
+  config_ = shown;
 }
 
-void LyraTilesTheme::prepareHome() {}
+uint32_t LyraTilesTheme::homeShownDestinations(const GfxRenderer& /*renderer*/, const Rect content) const {
+  const HomeTilesLayout::Placement p = placement(content, 2);
+  uint32_t mask = 0;
+  for (int i = 0; i < p.count; ++i) {
+    if (p.items[i].cell.widget == Widget::Shortcut) mask |= 1u << p.items[i].cell.option;
+  }
+  return mask;
+}
 
 void LyraTilesTheme::setHomeMenu(const int menuCount, const int menuTrailing) {
   menuCount_ = menuCount;
@@ -181,7 +201,8 @@ void LyraTilesTheme::setHomeMenu(const int menuCount, const int menuTrailing) {
 
 HomeLayout LyraTilesTheme::homeLayout(const GfxRenderer& /*renderer*/, const Rect content, const int menuCount,
                                       const int menuTrailing) const {
-  const HomeTilesLayout::Placement p = placement(content, menuCount, menuTrailing);
+  (void)menuTrailing;
+  const HomeTilesLayout::Placement p = placement(content, menuCount);
   HomeLayout layout;
   // Both draw calls place the widgets from the content again, with the same inputs.
   layout.books = content;
@@ -206,27 +227,57 @@ HomeLayout LyraTilesTheme::homeLayout(const GfxRenderer& /*renderer*/, const Rec
   return layout;
 }
 
-int LyraTilesTheme::homeMenuCapacity() const {
-  // Without tiles the one place is in the bottom row, beside More and Settings.
-  const int rows = config_.tileRows();
-  return rows > 0 ? rows * 2 : 1;
+// No places for menu entries: the layout's shortcuts are widgets, and every destination it does not
+// show is behind More (homeShownDestinations).
+int LyraTilesTheme::homeMenuCapacity() const { return 0; }
+
+namespace {
+// What a widget that opens something opens.
+HomeDestination destinationOf(const HomeTilesLayout::Cell& cell) {
+  switch (cell.widget) {
+    case Widget::Shortcut:
+      return static_cast<HomeDestination>(cell.option);
+    case Widget::Weather:
+      return HomeDestination::Weather;
+    case Widget::Summary:
+    case Widget::Calendar:
+    case Widget::Book:
+    case Widget::AlsoReading:
+    case Widget::Clock:
+    case Widget::Picture:
+      return HomeDestination::ReadingStats;
+  }
+  return HomeDestination::ReadingStats;
 }
 
-int LyraTilesTheme::homeWidgetActions(const GfxRenderer& /*renderer*/, const Rect content, HomeWidgetAction* out,
+struct DestinationLook {
+  StrId label;
+  UIIcon icon;
+};
+// In HomeDestination's order, as the Home menu labels and draws them (HomeMenu.cpp).
+constexpr DestinationLook kDestinations[] = {
+    {StrId::STR_LIBRARY, Folder},         {StrId::STR_READING_STATS, Stats}, {StrId::STR_GLOBAL_BOOKMARKS, Book},
+    {StrId::STR_FILE_TRANSFER, Transfer}, {StrId::STR_WEATHER, Weather},
+};
+static_assert(std::size(kDestinations) == static_cast<size_t>(HomeDestination::Count));
+static_assert(HomeTilesLayout::destination::Count == static_cast<uint8_t>(HomeDestination::Count));
+static_assert(HomeTilesLayout::destination::Weather == static_cast<uint8_t>(HomeDestination::Weather));
+}  // namespace
+
+int LyraTilesTheme::homeWidgetActions(const GfxRenderer& /*renderer*/, const Rect content, HomeDestination* out,
                                       const int max) const {
-  Widget widgets[HomeTilesLayout::kMaxRows * 2]{};
-  const int count =
-      HomeTilesLayout::actions(placement(content, menuCount_, menuTrailing_), widgets, HomeTilesLayout::kMaxRows * 2);
+  const HomeTilesLayout::Placement p = placement(content, menuCount_);
   int n = 0;
-  for (int i = 0; i < count && n < max; ++i) {
-    out[n++] = widgets[i] == Widget::Weather ? HomeWidgetAction::Weather : HomeWidgetAction::ReadingStats;
+  for (int i = 0; i < p.count && n < max; ++i) {
+    if (HomeTilesLayout::opensSomething(p.items[i].cell.widget)) out[n++] = destinationOf(p.items[i].cell);
   }
   return n;
 }
 
 HomeGridNav::Grid LyraTilesTheme::homeGrid(const GfxRenderer& /*renderer*/, const Rect content, const int shownBooks,
                                            const int menuCount, const int menuTrailing) const {
-  return HomeTilesLayout::grid(placement(content, menuCount, menuTrailing), shownBooks, menuCount);
+  (void)menuTrailing;
+  return HomeTilesLayout::grid(placement(content, menuCount), shownBooks, menuCount);
 }
 
 void LyraTilesTheme::drawRecentBookCover(GfxRenderer& renderer, const Rect /*rect*/,
@@ -370,41 +421,29 @@ void LyraTilesTheme::drawAlsoReading(GfxRenderer& renderer, const Box& row, cons
 }
 
 void LyraTilesTheme::drawHomeMenu(GfxRenderer& renderer, const Rect rect, const int buttonCount,
-                                  const int trailingCount, const int selectedIndex,
+                                  const int /*trailingCount*/, const int selectedIndex,
                                   const std::function<std::string(int index)>& buttonLabel,
                                   const std::function<UIIcon(int index)>& rowIcon) const {
-  const HomeTilesLayout::Placement p = placement(rect, buttonCount, trailingCount);
+  const HomeTilesLayout::Placement p = placement(rect, buttonCount);
 
-  // Targets carry MENU-LOCAL indices, as every theme's menu does: tiles first, then the bottom row.
+  // Targets carry MENU-LOCAL indices, as every theme's menu does: the bottom row's entries, then the
+  // widgets that open something, numbered on after them (homeWidgetActions).
   TapTargets::Recorder::Builder targets;
   const auto iconFor = [&](const int index) { return rowIcon ? iconForName(rowIcon(index), kIconSize) : nullptr; };
 
-  for (int i = 0; i < p.tileCount && i < buttonCount; ++i) {
-    const Box& tile = p.tiles[i];
-    targets.add(tile.x, tile.y, tile.w, tile.h, i);
-    const bool selected = i == selectedIndex;
-    if (selected) {
-      renderer.fillRoundedRect(tile.x, tile.y, tile.w, tile.h, kCornerRadius, Color::Black);
-    } else {
-      renderer.drawRoundedRect(tile.x, tile.y, tile.w, tile.h, kTileFrameWidth, kCornerRadius, true);
-    }
-    drawTileContent(renderer, tile, iconFor(i), buttonLabel(i), selected);
-  }
-
   // More and Settings: as easy to hit as the rows they replace, lighter to look at.
-  const int bottomCount = std::min(p.bottomCount, std::max(0, buttonCount - p.tileCount));
+  const int bottomCount = std::min(p.bottomCount, buttonCount);
   for (int j = 0; j < bottomCount; ++j) {
-    const int index = p.tileCount + j;
     const Box& box = p.bottom[j];
-    targets.add(box.x, box.y, box.w, box.h, index);
-    const bool selected = index == selectedIndex;
+    targets.add(box.x, box.y, box.w, box.h, j);
+    const bool selected = j == selectedIndex;
     if (selected) {
       renderer.fillRoundedRect(box.x, box.y, box.w, box.h, kCornerRadius, Color::Black);
     } else {
       renderer.drawRoundedRect(box.x, box.y, box.w, box.h, kBottomFrameWidth, kCornerRadius, true);
     }
-    const std::string label = buttonLabel(index);
-    const uint8_t* icon = iconFor(index);
+    const std::string label = buttonLabel(j);
+    const uint8_t* icon = iconFor(j);
     const int iconRoom = icon ? kBottomIconSize + kIconToLabel : 0;
     const std::string fitted =
         renderer.truncatedText(UI_10_FONT_ID, label.c_str(), std::max(0, box.w - 2 * kTileInset - iconRoom));
@@ -414,6 +453,36 @@ void LyraTilesTheme::drawHomeMenu(GfxRenderer& renderer, const Rect rect, const 
     }
     renderer.drawText(UI_10_FONT_ID, groupX + iconRoom, box.y + (box.h - renderer.getLineHeight(UI_10_FONT_ID)) / 2,
                       fitted.c_str(), !selected);
+  }
+
+  int action = 0;
+  for (int i = 0; i < p.count; ++i) {
+    const HomeTilesLayout::Placed& item = p.items[i];
+    if (!HomeTilesLayout::opensSomething(item.cell.widget)) continue;
+    const int index = buttonCount + action++;
+    const Box& box = item.box;
+    targets.add(box.x, box.y, box.w, box.h, index);
+    const bool selected = index == selectedIndex;
+    switch (item.cell.widget) {
+      case Widget::Shortcut: {
+        const DestinationLook& look = kDestinations[item.cell.option < std::size(kDestinations) ? item.cell.option : 0];
+        if (selected) {
+          renderer.fillRoundedRect(box.x, box.y, box.w, box.h, kCornerRadius, Color::Black);
+        } else {
+          renderer.drawRoundedRect(box.x, box.y, box.w, box.h, kTileFrameWidth, kCornerRadius, true);
+        }
+        drawTileContent(renderer, box, iconForName(look.icon, kIconSize), I18N.get(look.label), selected);
+        break;
+      }
+      case Widget::Summary:
+      case Widget::Calendar:
+      case Widget::Weather:
+      case Widget::Book:
+      case Widget::AlsoReading:
+      case Widget::Clock:
+      case Widget::Picture:
+        break;
+    }
   }
 
   TapTargets::homeMenu().record(targets);

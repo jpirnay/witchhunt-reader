@@ -23,9 +23,10 @@ class LyraTilesTheme : public LyraTheme {
  public:
   HomeLayout homeLayout(const GfxRenderer& renderer, Rect content, int menuCount, int menuTrailing) const override;
   int homeMenuCapacity() const override;
-  void prepareHome() override;
+  void prepareHome(uint32_t available) override;
+  uint32_t homeShownDestinations(const GfxRenderer& renderer, Rect content) const override;
   void setHomeMenu(int menuCount, int menuTrailing) override;
-  int homeWidgetActions(const GfxRenderer& renderer, Rect content, HomeWidgetAction* out, int max) const override;
+  int homeWidgetActions(const GfxRenderer& renderer, Rect content, HomeDestination* out, int max) const override;
   HomeGridNav::Grid homeGrid(const GfxRenderer& renderer, Rect content, int shownBooks, int menuCount,
                              int menuTrailing) const override;
   bool homeSwipeCyclesBooks() const override { return true; }
@@ -42,7 +43,7 @@ class LyraTilesTheme : public LyraTheme {
  private:
   // Where everything goes on this screen. Both draw calls and Home's questions (homeLayout,
   // homeGrid, homeWidgetActions) ask it with the same inputs, so they agree.
-  HomeTilesLayout::Placement placement(Rect content, int menuCount, int menuTrailing) const;
+  HomeTilesLayout::Placement placement(Rect content, int menuCount) const;
   // The same for a draw call, with the menu Home handed over (setHomeMenu).
   HomeTilesLayout::Placement placement(const GfxRenderer& renderer) const;
 
@@ -51,8 +52,6 @@ class LyraTilesTheme : public LyraTheme {
                     const std::function<bool()>& storeCoverBuffer) const;
   void drawAlsoReading(GfxRenderer& renderer, const HomeTilesLayout::Box& row,
                        const std::vector<RecentBook>& recentBooks, int stripBooks, int selectorIndex) const;
-  // The tiles and the bottom row's entries of a menu of `menuCount` with `menuTrailing` More/Settings.
-  int tileCountFor(int menuCount, int menuTrailing) const;
 
   // Set before Home draws, on the loop task under the render lock (prepareHome, setHomeMenu), and
   // only read while it is open.

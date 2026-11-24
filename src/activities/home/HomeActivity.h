@@ -99,8 +99,8 @@ class HomeActivity final : public Activity {
   // has a key for each direction. Otherwise Up and Down step through the screen as a list. Set in onEnter().
   HomeGridNav::Grid grid_;
   // The widgets that open something, numbered after the menu (BaseTheme::homeWidgetActions).
-  static constexpr int kMaxWidgetActions = 8;
-  HomeWidgetAction widgetActions_[kMaxWidgetActions]{};
+  static constexpr int kMaxWidgetActions = 12;
+  HomeDestination widgetActions_[kMaxWidgetActions]{};
   int widgetActionCount_ = 0;
   bool gridNav_ = false;
 

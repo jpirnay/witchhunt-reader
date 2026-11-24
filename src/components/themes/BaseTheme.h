@@ -183,8 +183,10 @@ constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
 
 enum class SyncIndicator : uint8_t { None, Active, Failed };
 
-// What a widget on Home opens when it is chosen (BaseTheme::homeWidgetActions).
-enum class HomeWidgetAction : uint8_t { ReadingStats, Weather };
+// The places Home leads to, as a theme that draws its own shortcuts to them names them
+// (BaseTheme::homeWidgetActions, homeShownDestinations). A set of them is a bit mask, 1 << value.
+enum class HomeDestination : uint8_t { Library, ReadingStats, Bookmarks, FileTransfer, Weather, Count };
+constexpr uint32_t destinationBit(const HomeDestination d) { return 1u << static_cast<uint8_t>(d); }
 
 class BaseTheme {
  public:
@@ -279,15 +281,21 @@ class BaseTheme {
   virtual bool homeSwipeCyclesBooks() const { return false; }
 
   // Home is about to be built. A theme whose Home the reader arranges reads the arrangement now,
-  // before Home builds its menu: homeMenuCapacity() follows it. Called from HomeActivity::onEnter
-  // with the render lock held.
-  virtual void prepareHome() {}
+  // before Home builds its menu: homeMenuCapacity() and homeShownDestinations() follow it.
+  // `available` is the destinations with something behind them (bit mask over HomeDestination): a
+  // shortcut to one without is left out, as its menu entry would be. Called from
+  // HomeActivity::onEnter with the render lock held.
+  virtual void prepareHome(uint32_t /*available*/) {}
+  // The destinations the theme shows on Home itself, as widgets (bit mask over HomeDestination):
+  // they are neither Home's menu entries nor behind More. A shortcut whose row does not fit the
+  // panel is not shown, so More offers it.
+  virtual uint32_t homeShownDestinations(const GfxRenderer& /*renderer*/, Rect /*content*/) const { return 0; }
   // The menu Home built: a theme that lays its widgets out around it needs the counts in every draw,
   // and drawRecentBookCover() is not given them. Same caller and lock as prepareHome(), afterwards.
   virtual void setHomeMenu(int /*menuCount*/, int /*menuTrailing*/) {}
   // The widgets on Home that open something, numbered after Home's menu in reading order: what each
   // opens. None for a theme without such widgets.
-  virtual int homeWidgetActions(const GfxRenderer& /*renderer*/, Rect /*content*/, HomeWidgetAction* /*out*/,
+  virtual int homeWidgetActions(const GfxRenderer& /*renderer*/, Rect /*content*/, HomeDestination* /*out*/,
                                 int /*max*/) const {
     return 0;
   }

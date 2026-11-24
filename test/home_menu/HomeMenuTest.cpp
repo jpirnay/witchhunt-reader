@@ -221,3 +221,38 @@ TEST(LibraryTabs, StepWrapsAtBothEnds) {
 }
 
 }  // namespace
+
+// A theme that draws its own shortcuts (Lyra Tiles) has no places for entries: Home keeps More and
+// Settings, and More holds exactly the destinations the theme does not show, whatever the switches.
+TEST_F(HomeMenuTest, WhatTheThemeShowsIsNeitherOnTheMenuNorBehindMore) {
+  SETTINGS.showFileTransferOnHome = 0;  // the switches do not decide here
+  const uint32_t shown = destinationBit(HomeDestination::Library) | destinationBit(HomeDestination::ReadingStats) |
+                         destinationBit(HomeDestination::FileTransfer) | destinationBit(HomeDestination::Bookmarks);
+  const auto at = [&](const HomeMenuPlacement placement, const HomeMenuAvailability& availability) {
+    std::vector<HomeMenuEntry> entries;
+    collectHomeMenuEntries(placement, availability, entries, /*homeCapacity=*/0, shown);
+    std::vector<A> actions;
+    for (const HomeMenuEntry& entry : entries) actions.push_back(entry.action);
+    return actions;
+  };
+  EXPECT_EQ(at(HomeMenuPlacement::Home, everything), (std::vector<A>{A::More, A::Settings}));
+  EXPECT_EQ(at(HomeMenuPlacement::More, everything), (std::vector<A>{A::Weather}));
+  // Nothing left to put behind More: no More row.
+  SETTINGS.useWeather = 0;
+  EXPECT_EQ(at(HomeMenuPlacement::Home, everything), (std::vector<A>{A::Settings}));
+  EXPECT_TRUE(at(HomeMenuPlacement::More, everything).empty());
+}
+
+TEST_F(HomeMenuTest, DestinationsAreAvailableAsTheirEntriesAre) {
+  const uint32_t all = availableDestinations(everything);
+  EXPECT_NE(all & destinationBit(HomeDestination::Bookmarks), 0u);
+  EXPECT_EQ(availableDestinations(nothingOptional) & destinationBit(HomeDestination::Bookmarks), 0u);
+  SETTINGS.useWeather = 0;
+  EXPECT_EQ(availableDestinations(everything) & destinationBit(HomeDestination::Weather), 0u);
+  for (const HomeDestination d : {HomeDestination::Library, HomeDestination::ReadingStats, HomeDestination::Bookmarks,
+                                  HomeDestination::FileTransfer, HomeDestination::Weather}) {
+    EXPECT_NE(actionFor(d), A::More);
+    EXPECT_NE(actionFor(d), A::Settings);
+  }
+  EXPECT_EQ(actionFor(HomeDestination::Bookmarks), A::GlobalBookmarks);
+}
