@@ -2494,6 +2494,13 @@ void loop() {
   const unsigned long activityStartTime = millis();
   activityManager.loop();
   const unsigned long activityDuration = millis() - activityStartTime;
+  // Time spent inside the activity's loop() is work, not idle time. The OPDS browser downloads a book whole inside one
+  // call, and turns DOWNLOADING (which holds off auto-sleep) only inside it, after the sleep check above: a download
+  // longer than the sleep timeout put the device to sleep the moment it returned. Both clocks move, as the idle
+  // governor below reads lastActivityTime and would light-sleep straight after the download. Both were stamped before
+  // the call, so neither passes millis(). Ported from crosspoint-reader PR #4538 (John Stader, @jstader).
+  lastActivityTime += activityDuration;
+  sleepTimerStart += activityDuration;
 
   // After the activity's pass, so a pending CMD:IDLE sees what it queued.
   SerialTestApi::service();
