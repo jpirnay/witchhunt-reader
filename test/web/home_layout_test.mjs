@@ -57,4 +57,29 @@ check(!HomeLayout.parse(' '.repeat(HomeLayout.MAX_BYTES + 1)).ok, 'more than 4 K
 const fromObject = HomeLayout.parse(HomeLayout.PRESETS.dashboard);
 check(fromObject.ok && fromObject.pictures[0] === '/home', 'a picture without a path is /home');
 
+// Pictures from the web: the file, the size in the address, and the plugin that fetches it. The device.json
+// files must be test/plugin_events/home_picture_plugins.json, which the device's event code is tested on
+// (PluginEventCoreTest, HomePicturePluginsSubscribe).
+check(HomeLayout.webPictureDest(1, 'https://x.org/a/b.PNG?q=1') === '/home/web/web-1.png', 'a .png address keeps its type');
+check(HomeLayout.webPictureDest(2, 'https://x.org/today.bmp') === '/home/web/web-2.bmp', 'a .bmp address keeps its type');
+check(HomeLayout.webPictureDest(1, 'https://x.org/today') === '/home/web/web-1.jpg', 'an address naming no type is a JPEG');
+check(HomeLayout.fillSize('https://x.org/{width}x{height}/{width}', 218, 170) === 'https://x.org/218x170/218',
+      '{width} and {height} become the size, wherever they are');
+const sleep = HomeLayout.webPicturePlugin(1, { url: 'https://img.example/render?w={width}&h={height}', event: 'sleep.enter' },
+                                           { w: 218, h: 170 });
+const close = HomeLayout.webPicturePlugin(2, { url: 'https://img.example/today.png', event: 'reader.exit' }, { w: 448, h: 284 });
+const fixture = JSON.parse(readFileSync(join(repo, 'test/plugin_events/home_picture_plugins.json'), 'utf8'));
+check(JSON.stringify(JSON.parse(sleep.files['device.json'])) === JSON.stringify(fixture.sleep),
+      'a picture fetched at sleep: the device.json the device is tested on');
+check(JSON.stringify(JSON.parse(close.files['device.json'])) === JSON.stringify(fixture.close),
+      'a picture fetched after a book: the device.json the device is tested on');
+const manifest = JSON.parse(sleep.files['manifest.json']);
+check(sleep.name === 'home-picture-1' && manifest.catalog === false, 'the plugin is home-picture-n, kept out of the catalog');
+check(JSON.stringify(manifest.allowedHosts) === '["img.example",".img.example"]', 'it may reach the host and its subdomains');
+check(manifest.homeScreen.url === 'https://img.example/render?w={width}&h={height}' && manifest.homeScreen.event === 'sleep.enter',
+      'it keeps the address as written, for the page to show again');
+const unshown = HomeLayout.webPicturePlugin(1, { url: 'https://x.org/{width}.jpg', event: 'nonsense' }, null);
+check(unshown.url === 'https://x.org/{width}.jpg', 'a picture not shown keeps {width} unfilled');
+check('sleep.enter' in JSON.parse(unshown.files['device.json']).events, 'an unknown event is fetched at sleep');
+
 process.exit(failures ? 1 : 0);
