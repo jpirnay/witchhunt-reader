@@ -13,6 +13,7 @@
 #include <string_view>
 
 #include "CrossPointSettings.h"
+#include "HomePictureName.h"
 #include "ReadingStats.h"
 
 namespace {
@@ -103,13 +104,42 @@ std::string pickFrom(const std::string& folder) {
 
 std::string homePictureTarget(const std::string& source, const uint32_t sourceBytes, const int width,
                               const int height) {
-  // FNV-1a over the path and the size.
-  uint32_t hash = 2166136261u;
-  for (const char c : source) hash = (hash ^ static_cast<uint8_t>(c)) * 16777619u;
-  for (int i = 0; i < 4; ++i) hash = (hash ^ ((sourceBytes >> (8 * i)) & 0xFF)) * 16777619u;
+  std::string target = kHomePictureCache;
+  target += '/';
+  return target += homePictureName(source, sourceBytes, width, height);
+}
+
+void removeReplacedHomePictures(const std::string& target) {
+  const std::string_view made = std::string_view(target).substr(target.rfind('/') + 1);
+  auto dir = Storage.open(kHomePictureCache);
+  if (!dir || !dir.isDirectory()) {
+    if (dir) dir.close();
+    return;
+  }
+  // Collected first and removed after the walk, which removing would disturb. One make finds what
+  // the copies since the last one left: usually one file.
+  constexpr int kMax = 8;
+  char replaced[kMax][48];
+  int count = 0;
   char name[64];
-  snprintf(name, sizeof(name), "%s/pic_%08x_%dx%d.bmp", kHomePictureCache, static_cast<unsigned>(hash), width, height);
-  return name;
+  for (auto file = dir.openNextFile(); file && count < kMax; file = dir.openNextFile()) {
+    const bool candidate = !file.isDirectory();
+    if (candidate) file.getName(name, sizeof(name));
+    file.close();
+    if (candidate && replacesHomePicture(made, name)) {
+      snprintf(replaced[count++], sizeof(replaced[0]), "%s", name);
+    }
+  }
+  dir.close();
+  char path[80];
+  for (int i = 0; i < count; ++i) {
+    snprintf(path, sizeof(path), "%s/%s", kHomePictureCache, replaced[i]);
+    if (Storage.remove(path)) {
+      LOG_DBG("HOME", "Removed %s, replaced by %s", path, target.c_str());
+    } else {
+      LOG_ERR("HOME", "Could not remove %s", path);
+    }
+  }
 }
 
 void HomeWidgetData::load(const HomeTilesLayout::Config& config, const std::string* pictureSources) {

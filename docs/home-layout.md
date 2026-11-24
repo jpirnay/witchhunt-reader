@@ -39,7 +39,9 @@ The rules Home lays the rows out by:
   left out from the bottom up; the book card's row never is.
 - Held sideways, the rows with the book card take the left column and the others the right one.
 - A JPEG or PNG is cut to its place and converted to black and white once, by Home's cover pass, and
-  kept in `/.crosspoint/home`. A BMP is drawn as it is: make one at its place's size.
+  kept in `/.crosspoint/home`, named by the picture's path and size and the place's size. A picture
+  replaced by one of another size is converted again, and the file the old one left is removed. A BMP
+  is drawn as it is: make one at its place's size.
 
 What the firmware does not know (a widget or a place a later version adds) is left out, not refused.
 The geometry is `src/components/themes/lyra/HomeTilesLayout.h`, the parser
