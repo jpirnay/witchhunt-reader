@@ -38,12 +38,13 @@ struct HomeWidgetData {
   int weatherCode = 0;
   bool isDay = true;
 
-  // ---- The pictures: the file each Picture widget shows; a folder's choice is kept here between visits ----
+  // ---- The pictures: the file each Picture widget shows ----
   std::string pictures[HomeTilesLayout::kMaxPictures];
   uint32_t pictureSizes[HomeTilesLayout::kMaxPictures]{};  // bytes, so a replaced file is made again
 
   // Reads what `config` uses. `pictureSources` names each picture's file or folder; a folder's
-  // choice stays in `pictures` while it is on the card, so a return to Home does not change it.
+  // choice is kept for the start (HomeWidgetData.cpp) while it is on the card, so neither a return
+  // to Home nor the theme made again when Settings closes changes it.
   void load(const HomeTilesLayout::Config& config, const std::string* pictureSources);
   // The part of load() a new day changes: the date, and the reading by day where `config` shows it.
   void loadDay(const HomeTilesLayout::Config& config);
