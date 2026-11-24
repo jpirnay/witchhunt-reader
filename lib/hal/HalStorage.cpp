@@ -320,7 +320,13 @@ String HalStorage::readFile(const char* path) {
   String content;
   if (!openFileForRead("SD", path, file)) return content;
   constexpr size_t kMaxSize = 50000;  // SDCardManager::readFile's limit
-  char buf[65];                       // a chunk and its terminator: readFile() is for text, as SdFat's is
+  // Past it the file fails, as there, rather than coming back cut short: a partial file parses as corrupt or as valid.
+  const uint64_t size = file.fileSize64();
+  if (size > kMaxSize) {
+    LOG_ERR("SD", "%s is too large for readFile (%llu B)", path, static_cast<unsigned long long>(size));
+    return content;
+  }
+  char buf[65];  // a chunk and its terminator: readFile() is for text, as SdFat's is
   size_t total = 0;
   int got = 0;
   while (total < kMaxSize && (got = file.read(buf, std::min(sizeof(buf) - 1, kMaxSize - total))) > 0) {
