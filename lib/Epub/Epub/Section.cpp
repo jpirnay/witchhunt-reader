@@ -39,7 +39,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 131;  // v131: the header's line compression is TextScale (2^-20ths in a
+constexpr uint8_t SECTION_FILE_VERSION = 132;  // v132: in a table, a TOC anchor breaks the page only before the
+                                               // first packed row, and an <hr> draws no rule: both acted on the
+                                               // page under the packed rows (an arena build corrupted or cut them)
+                                               // v131: the header's line compression is TextScale (2^-20ths in a
                                                // u32), not float; CSS lengths resolve in fixed point
                                                // v130: a line's font-size multiplier and its word fonts' scales
                                                // are TextScale (2^-20ths in a u32), not float

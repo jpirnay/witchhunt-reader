@@ -521,7 +521,11 @@ page turn became a HALF refresh (X3, 2026-08-22). Reverted. Most of a table page
 per-cell objects (`TableCell::lines`, `TableRow::cells`, the `TextBlock` objects), not word
 storage. On arena builds the cells' line bytes now come from a row block in the lent region
 (`ChapterHtmlSlimParser::layoutTableRow`), and so do their lines' `TextBlock` objects where the walk reserve allows
-(§9.5); the cells' own objects and lists are still on the heap.
+(§9.5); the cells' own objects and lists are still on the heap. A row that stays on its page has its block committed
+into the page block, so the packed rows live until their page is emitted: while they wait for their fragment, nothing
+in the table may emit the page or move its flow. A TOC anchor in a later row takes no page break and an `<hr>` in a
+table draws no rule (they did, and an emit rewound the rows' bytes under them: heap corruption when their lines were
+destroyed); `emitPage` drops the rows and stops an arena build that still gets there.
 
 The A/B method that measured it: build with `-DSCT_HEAP_TRACE=1 -DEHP_FORCE_BLOCKING_BUILD` so both
 arms take the same path, clear the cache between arms, and compare each arm's excess over its own

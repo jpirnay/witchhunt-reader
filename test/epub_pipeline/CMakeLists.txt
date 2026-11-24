@@ -217,6 +217,7 @@ add_executable(EpubPipelineTest
   BoxLayoutTest.cpp
   LentBuildTeardownTest.cpp
   LentTableLayoutTest.cpp
+  GridTablePageFlowTest.cpp
   PageLineArenaTest.cpp
   # A book's embedded body font (Publisher Fonts): the probe and the extraction. Its SHA-1 comes from
   # test/shims/wolfssl, standing in for wolfCrypt.
