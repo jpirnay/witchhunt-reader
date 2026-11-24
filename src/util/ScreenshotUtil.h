@@ -27,5 +27,9 @@ class ScreenshotUtil {
                       void (*sendToHost)(const uint8_t* frame, uint32_t size, int width, int height, bool busy));
 
   static void takeScreenshot(GfxRenderer& renderer);
-  static bool saveFramebufferAsBmp(const char* filename, const uint8_t* framebuffer, int width, int height);
+  // The frame buffer as a 1-bit BMP, upright in `orientation`. A screenshot passes the orientation the reader is held
+  // in; the sleep images written through it (WeatherActivity, BmpViewerActivity) pass Portrait, the form they always
+  // had.
+  static bool saveFramebufferAsBmp(const char* filename, const GfxRenderer& renderer,
+                                   GfxRenderer::Orientation orientation);
 };

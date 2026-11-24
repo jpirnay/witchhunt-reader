@@ -8,7 +8,8 @@
 //
 //   * File Manager: a picked file over WebSocket (START line) and over HTTP (multipart filename);
 //     a dropped folder's mkdir and destination; New folder; Rename (whose path, the card's own
-//     name, must stay as it is); the clash check against an NFD name already on the card;
+//     name, must stay as it is, and which opens with the name before its extension selected);
+//     the clash check against an NFD name already on the card;
 //   * Font Manager: a .cpfont upload's filename and the family taken from it;
 //   * Plugins: the names of the files of a plugin installed from a zip.
 //
@@ -265,6 +266,20 @@ console.log('- File Manager folders and names');
   const renamed = sent.xhrs.find((x) => x.url === '/rename');
   same(renamed && renamed.body.get('name'), NFC + ' 2.epub', 'Rename sends the new name in NFC');
   same(renamed && renamed.body.get('path'), '/books/' + NFD + '.epub', 'and the card\'s own path as it listed it');
+
+  // Rename opens with the name up to its extension selected, so what the user types keeps ".epub"
+  // (crosspoint-reader PR #4547). A dot-file, a name without a dot and a folder are selected whole.
+  const input = w.document.getElementById('renameNewName');
+  const selectionOf = async (name, isFolder) => {
+    w.openRenameModal(name, '/books/' + name, isFolder);
+    await new Promise((resolve) => setTimeout(resolve, 80));  // the page selects after 50 ms
+    return [input.selectionStart, input.selectionEnd];
+  };
+  same(JSON.stringify(await selectionOf('My Book.epub', false)), '[0,7]', 'Rename selects a book\'s name without its extension');
+  same(JSON.stringify(await selectionOf('archive.tar.gz', false)), '[0,11]', 'only the last extension');
+  same(JSON.stringify(await selectionOf('.hidden', false)), '[0,7]', 'a dot-file whole');
+  same(JSON.stringify(await selectionOf('README', false)), '[0,6]', 'a name without a dot whole');
+  same(JSON.stringify(await selectionOf('Vol. 2', true)), '[0,6]', 'and a folder whole');
   dom.window.close();
 }
 

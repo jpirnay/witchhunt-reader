@@ -74,12 +74,13 @@ function parseIfo(text) {
   return ifo;
 }
 
-// The reader stores the chosen dictionary's folder in a 32-byte setting
-// (CrossPointSettings::dictionaryName): a longer name is cut short there and the
-// folder is not found again. Folder names are ASCII, so characters are bytes.
-const MAX_FOLDER_NAME = 31;
-// Dictionary::open() refuses a "<root>/<folder>/<stem>" longer than this.
-const MAX_BASE_PATH = 151;
+// The reader reads folder and file names into DictionaryRegistry::MAX_NAME_BYTES
+// (128) bytes and keeps the chosen dictionary's folder name in a setting of that
+// size: a folder, or an index file, whose name is longer than 127 bytes is not
+// listed. Counted in UTF-8, as the card stores names; the names this page makes
+// are ASCII, so there a character is a byte.
+const MAX_FOLDER_NAME = 127;
+const utf8Bytes = (s) => new TextEncoder().encode(s).length;
 
 // A folder name the card and the reader both take: one path component, ASCII
 // (the device's UI fonts do not cover every script a bookname can be in), and
@@ -450,7 +451,8 @@ async function analyseDictionary(group, fallbackName) {
 
   const folder =
     sanitizeFolderName(ifo && ifo.bookname) || sanitizeFolderName(fallbackName) || sanitizeFolderName(group.stem) || 'dictionary';
-  const stem = isSafeStem(group.stem) ? group.stem : folder.replace(/ /g, '_');
+  // As long as a safe stem at most, so "<stem>.idx" stays within MAX_FOLDER_NAME.
+  const stem = isSafeStem(group.stem) ? group.stem : folder.replace(/ /g, '_').slice(0, 100);
 
   for (const skipped of group.skipped) {
     warnings.push('Not used: ' + baseName(skipped.path) + ' (using ' + baseName(group.files[skipped.kind].path) + ').');
@@ -504,7 +506,7 @@ async function analyseDictionary(group, fallbackName) {
 
 // The reader's verdict on the folder root/folderName (root is /dictionaries or
 // /.dictionaries), from its listing: DictionaryRegistry::findStem, plus the
-// setting's and Dictionary::open()'s length limits.
+// length of name it reads (MAX_FOLDER_NAME).
 // { level: 'ok'|'warn'|'error', messages, stem, ifoName }.
 function evaluateInstalled(root, folderName, entries) {
   const messages = [];
@@ -531,12 +533,12 @@ function evaluateInstalled(root, folderName, entries) {
   }
   const stem = stems[0];
   const ifoName = has(stem + '.ifo') ? files.find((e) => e.name.toLowerCase() === (stem + '.ifo').toLowerCase()).name : null;
-  if (folderName.length > MAX_FOLDER_NAME) {
-    messages.push('The folder name is longer than ' + MAX_FOLDER_NAME + ' characters. The reader keeps only that many when you choose it, and then cannot find the folder: rename it.');
+  if (utf8Bytes(folderName) > MAX_FOLDER_NAME) {
+    messages.push('The folder name is longer than ' + MAX_FOLDER_NAME + ' bytes, and the reader does not list it: rename it.');
     return { level: 'error', messages, stem, ifoName };
   }
-  if ((root + '/' + folderName + '/' + stem).length > MAX_BASE_PATH) {
-    messages.push('The folder and file names together are too long for the reader (' + MAX_BASE_PATH + ' characters with the path): shorten them.');
+  if (utf8Bytes(stem + '.idx') > MAX_FOLDER_NAME) {
+    messages.push('The index file name is longer than ' + MAX_FOLDER_NAME + ' bytes, and the reader does not find it: shorten the file names.');
     return { level: 'error', messages, stem, ifoName };
   }
   if (!has(stem + '.dict') && !has(stem + '.dict.dz')) {

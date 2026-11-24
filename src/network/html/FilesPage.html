@@ -7334,7 +7334,15 @@
       setTimeout(() => {
         const input = document.getElementById('renameNewName');
         input.focus();
-        input.select();
+        // A file's name up to its extension, so what the user types keeps ".epub". A folder, a
+        // dot-file and a name without a dot are selected whole. Ported from crosspoint-reader
+        // PR #4547 (Uri Tauber).
+        const dot = isFolder ? -1 : name.lastIndexOf('.');
+        if (dot > 0) {
+          input.setSelectionRange(0, dot);
+        } else {
+          input.select();
+        }
       }, 50);
     }
 

@@ -388,6 +388,7 @@ add_subdirectory(folder_walk)
 add_subdirectory(file_browser_model)
 add_subdirectory(bitmap_rows)
 add_subdirectory(sleep_image_placement)
+add_subdirectory(sleep_pixel_cache_stamp)
 add_subdirectory(progress_comparison)
 add_subdirectory(kosync_progress_reply)
 # After kosync_progress_reply: links the ArduinoJson target it fetches.
