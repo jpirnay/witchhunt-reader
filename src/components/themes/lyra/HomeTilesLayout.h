@@ -42,11 +42,13 @@ struct Dimensions {
   int maxTileHeight;
   // Sideways the tiles share the right column's height, up to this.
   int maxSidewaysTileHeight;
-  // The Also reading row, its label line included. It appears only where the book card keeps
-  // minCardHeight beside it and the shortcut rows the layout asks for.
+  // The Also reading row, its frame and label line included. It appears only where the book card
+  // keeps minCardHeight beside it and the shortcut rows the layout asks for.
   int stripHeight;
   // One line of the small face (23 px on the 480 px panels) and the space under it.
   int stripLabelHeight;
+  // Between the row's frame and what it holds.
+  int stripPadding;
   int minCardHeight;
   // Inside the card: the padding, the progress line and bar at its foot, and the space between
   // the cover and the text column and between the cover and the foot.
@@ -77,8 +79,9 @@ inline constexpr Dimensions kRegular{/*gap=*/12,
                                      /*minTileHeight=*/104,
                                      /*maxTileHeight=*/136,
                                      /*maxSidewaysTileHeight=*/180,
-                                     /*stripHeight=*/118,
+                                     /*stripHeight=*/130,
                                      /*stripLabelHeight=*/28,
+                                     /*stripPadding=*/6,
                                      /*minCardHeight=*/360,
                                      /*cardPadding=*/14,
                                      /*cardFootHeight=*/36,
@@ -106,8 +109,9 @@ inline constexpr Dimensions kCompact{/*gap=*/6,
                                      /*minTileHeight=*/56,
                                      /*maxTileHeight=*/72,
                                      /*maxSidewaysTileHeight=*/90,
-                                     /*stripHeight=*/118,
+                                     /*stripHeight=*/130,
                                      /*stripLabelHeight=*/28,
+                                     /*stripPadding=*/4,
                                      /*minCardHeight=*/360,
                                      /*cardPadding=*/8,
                                      /*cardFootHeight=*/24,
@@ -164,13 +168,16 @@ struct Strip {
   Box slotCovers[kStripBooks];
 };
 
-// The three books of an Also reading row `box` tall: the label line on top, then cover and text.
+// The three books of an Also reading row: inside its frame the label line on top, then cover and
+// text. The 480 px panels' row keeps the covers at 54 x 90, the size their thumbnails were made at.
 constexpr Strip strip(const Box& box, const Dimensions& d = kRegular) {
   Strip s{};
-  const int slotW = (box.w - (kStripBooks - 1) * d.gap) / kStripBooks;
-  const int slotH = box.h - d.stripLabelHeight;
+  const Box inner{box.x + d.stripPadding, box.y + d.stripPadding, box.w - 2 * d.stripPadding,
+                  box.h - 2 * d.stripPadding};
+  const int slotW = (inner.w - (kStripBooks - 1) * d.gap) / kStripBooks;
+  const int slotH = inner.h - d.stripLabelHeight;
   for (int i = 0; i < kStripBooks; ++i) {
-    s.slots[i] = Box{box.x + i * (slotW + d.gap), box.y + d.stripLabelHeight, slotW, slotH};
+    s.slots[i] = Box{inner.x + i * (slotW + d.gap), inner.y + d.stripLabelHeight, slotW, slotH};
     s.slotCovers[i] = Box{s.slots[i].x, s.slots[i].y, slotH * 3 / 5, slotH};
   }
   return s;

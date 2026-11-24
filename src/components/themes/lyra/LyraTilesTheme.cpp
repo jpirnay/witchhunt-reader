@@ -26,10 +26,13 @@ using PanelMetrics::capped;  // the compact panel's size where it is smaller (Pa
 constexpr int kCornerRadius = capped(8, 6);
 // Selection is a heavier frame around the card or an Also reading book, and a solid black tile:
 // no grey fills, which the panel can only dither.
+// One step between a frame and a selected one, whatever the panel: the card cannot show its
+// selection inverted, as a tile does, without hiding its cover. The compact panel's 240 px take a
+// step lighter.
 constexpr int kCardFrameWidth = 1;
-constexpr int kSelectedFrameWidth = 3;
+constexpr int kSelectedFrameWidth = capped(3, 2);
 constexpr int kSelectedFrameOutset = 3;
-constexpr int kTileFrameWidth = 2;
+constexpr int kTileFrameWidth = capped(2, 1);
 constexpr int kBottomFrameWidth = 1;
 constexpr int kIconSize = 32;  // the icons' own size
 constexpr int kBottomIconSize = capped(32, 20);
@@ -328,10 +331,15 @@ void LyraTilesTheme::drawBookCard(GfxRenderer& renderer, const Box& card, const 
 void LyraTilesTheme::drawAlsoReading(GfxRenderer& renderer, const Box& row, const std::vector<RecentBook>& recentBooks,
                                      const int stripBooks, const int selectorIndex) const {
   const HomeTilesLayout::Strip layout = HomeTilesLayout::strip(row, dims());
+  // Framed like the card above it and the tiles below.
+  renderer.drawRoundedRect(row.x, row.y, row.w, row.h, kCardFrameWidth, kCornerRadius, true);
   // Set on the covers' top rather than on the row's, so it clears them at any UI font size.
   const int smallLine = renderer.getLineHeight(SMALL_FONT_ID);
-  renderer.drawText(SMALL_FONT_ID, row.x, layout.slots[0].y - kStripLabelToCovers - smallLine,
-                    renderer.truncatedText(SMALL_FONT_ID, tr(STR_ALSO_READING), row.w, EpdFontFamily::BOLD).c_str(),
+  const int labelX = layout.slots[0].x;
+  const int labelW =
+      layout.slots[HomeTilesLayout::kStripBooks - 1].x + layout.slots[HomeTilesLayout::kStripBooks - 1].w - labelX;
+  renderer.drawText(SMALL_FONT_ID, labelX, layout.slots[0].y - kStripLabelToCovers - smallLine,
+                    renderer.truncatedText(SMALL_FONT_ID, tr(STR_ALSO_READING), labelW, EpdFontFamily::BOLD).c_str(),
                     true, EpdFontFamily::BOLD);
   for (int i = 0; i < stripBooks; ++i) {
     const RecentBook& other = recentBooks[i + 1];

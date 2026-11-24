@@ -341,11 +341,15 @@ TEST(HomeTilesLayout, SidewaysTheCardAndTheTilesShareTheWidth) {
 // The row's label gets a whole line of the small face (23 px at the Normal UI size) and a gap above
 // the covers, which keep the 54x90 box their thumbnails are made at.
 TEST(HomeTilesLayout, TheAlsoReadingLabelClearsTheCovers) {
-  const auto books = booksFor({0, 0, 540, 920}, 4);
-  ASSERT_TRUE(books.hasStrip);
-  EXPECT_GE(books.slots[0].y - books.strip.y, 23 + 4);
-  EXPECT_EQ(books.slotCovers[0].w, 54);
-  EXPECT_EQ(books.slotCovers[0].h, 90);
+  const auto p = HomeTilesLayout::place({0, 0, 540, 920}, kTop, HomeTilesLayout::presets::reader(), 4, 2);
+  const auto* also = p.find(HomeTilesLayout::Widget::AlsoReading);
+  ASSERT_NE(also, nullptr);
+  const auto strip = HomeTilesLayout::strip(also->box);
+  EXPECT_GE(strip.slots[0].y - also->box.y, HomeTilesLayout::kRegular.stripPadding + 23 + 4);
+  EXPECT_EQ(strip.slotCovers[0].w, 54);
+  EXPECT_EQ(strip.slotCovers[0].h, 90);
+  // Inside its frame at the foot too.
+  EXPECT_EQ(strip.slots[0].y + strip.slots[0].h + HomeTilesLayout::kRegular.stripPadding, also->box.y + also->box.h);
 }
 
 // The compact panel (Murphy, 240 x 416, hints 30 px, the body under a 28 px status line) with its
@@ -523,10 +527,11 @@ TEST(HomeWidgets, TheReaderLayoutIsLyraTilesAsItWas) {
         EXPECT_EQ(also != nullptr, books.hasStrip);
         if (also != nullptr && books.hasStrip) {
           EXPECT_TRUE(same(also->box, books.strip)) << describe(also->box);
+          // The row has a frame now, which the reference did not: its books sit inside it.
           const auto strip = HomeTilesLayout::strip(also->box, d);
           for (int i = 0; i < HomeTilesLayout::kStripBooks; ++i) {
-            EXPECT_TRUE(same(strip.slots[i], books.slots[i]));
-            EXPECT_TRUE(same(strip.slotCovers[i], books.slotCovers[i]));
+            EXPECT_TRUE(inside(strip.slots[i], also->box)) << describe(strip.slots[i]);
+            EXPECT_GE(strip.slots[i].x - also->box.x, d.stripPadding);
           }
         }
 
