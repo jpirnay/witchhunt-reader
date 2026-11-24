@@ -30,6 +30,6 @@ struct Parsed {
   std::string pictures[HomeTilesLayout::kMaxPictures];
 };
 
-Parsed parse(const char* json, size_t length);
+Parsed parse(const std::string& json);
 
 }  // namespace HomeLayoutFile

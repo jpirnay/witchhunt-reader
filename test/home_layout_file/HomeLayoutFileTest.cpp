@@ -11,7 +11,7 @@ namespace {
 using HomeTilesLayout::Widget;
 namespace dest = HomeTilesLayout::destination;
 
-HomeLayoutFile::Parsed parse(const std::string& json) { return HomeLayoutFile::parse(json.c_str(), json.size()); }
+HomeLayoutFile::Parsed parse(const std::string& json) { return HomeLayoutFile::parse(json); }
 
 }  // namespace
 

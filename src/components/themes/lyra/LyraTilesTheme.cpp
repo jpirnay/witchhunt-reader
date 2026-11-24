@@ -227,23 +227,12 @@ int LyraTilesTheme::homePictureJobs(const GfxRenderer& /*renderer*/, const Rect 
 }
 
 bool LyraTilesTheme::readCustomLayout(HomeTilesLayout::Config& layout) {
-  FsFile file;
-  if (!Storage.openFileForRead("HOME", HomeLayoutFile::kPath, file)) {
-    LOG_ERR("HOME", "Custom layout: no %s, Reader instead", HomeLayoutFile::kPath);
-    return false;
-  }
-  const size_t size = file.size();
-  if (size == 0 || size > HomeLayoutFile::kMaxBytes) {
-    LOG_ERR("HOME", "Custom layout: %u bytes, Reader instead", static_cast<unsigned>(size));
-    return false;
-  }
   std::string json;
-  json.resize(size);
-  if (file.read(reinterpret_cast<uint8_t*>(&json[0]), size) != static_cast<int>(size)) {
-    LOG_ERR("HOME", "Custom layout: read failed, Reader instead");
+  if (!Storage.readFileToString("HOME", HomeLayoutFile::kPath, HomeLayoutFile::kMaxBytes, json)) {
+    LOG_ERR("HOME", "Custom layout: %s missing, empty or too large; Reader instead", HomeLayoutFile::kPath);
     return false;
   }
-  const HomeLayoutFile::Parsed parsed = HomeLayoutFile::parse(json.data(), json.size());
+  const HomeLayoutFile::Parsed parsed = HomeLayoutFile::parse(json);
   if (!parsed.ok) {
     LOG_ERR("HOME", "Custom layout: not a layout, Reader instead");
     return false;
