@@ -112,6 +112,7 @@
 #include "util/PluginReaderEvents.h"
 #include "util/ScreenshotUtil.h"
 #include "util/SerialCommandGrammar.h"
+#include "util/ToggleNotice.h"
 #include "util/WakeTrace.h"
 
 // Defined further down (near the other font helpers); declared here because
@@ -9813,6 +9814,8 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
                                  static_cast<int8_t>(getEffectiveBionicReading() ? 0 : 1),
                                  bookParagraphAlignmentOverride);
         requestUpdate();
+        // Over the page laid out again.
+        ToggleNotice::show(StrId::STR_BIONIC_READING, getEffectiveBionicReading(), /*afterFrame=*/true);
       }
       break;
     case BA::BTN_CYCLE_FONT_SIZE:
@@ -9876,6 +9879,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       }
       // The status bar shows the turn while it runs, and its band may lay the page out again.
       requestUpdate();
+      ToggleNotice::show(StrId::STR_AUTO_PAGE_TURN, automaticPageTurnActive, /*afterFrame=*/true);
       break;
     default:
       break;

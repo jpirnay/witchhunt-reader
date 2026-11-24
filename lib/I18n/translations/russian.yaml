@@ -943,6 +943,7 @@ STR_BTN_ACT_TOGGLE_TOUCH_UI: "Переключить сенсорную нави
 STR_BTN_ACT_CYCLE_ORIENTATION_BACK: "Ориентация назад"
 STR_BTN_ACT_TOGGLE_DARK_MODE: "Переключить тёмный режим"
 STR_BTN_ACT_AUTO_PAGE_TURN: "Переключить автолистание"
+STR_AUTO_PAGE_TURN: "Автоперелистывание"
 STR_BTN_ACT_TOGGLE_TOUCH_LOCK: "Переключить блокировку сенсора"
 STR_TOUCH_LOCK: "Блокировка сенсора"
 STR_SLIDE_SWITCH_TOUCH: "Сенсор"

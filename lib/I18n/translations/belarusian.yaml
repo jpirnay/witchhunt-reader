@@ -944,6 +944,7 @@ STR_BTN_ACT_TOGGLE_TOUCH_UI: "Пераключыць сэнсарную наві
 STR_BTN_ACT_CYCLE_ORIENTATION_BACK: "Арыентацыя назад"
 STR_BTN_ACT_TOGGLE_DARK_MODE: "Пераключыць цёмны рэжым"
 STR_BTN_ACT_AUTO_PAGE_TURN: "Пераключыць аўтаперагортванне"
+STR_AUTO_PAGE_TURN: "Аўтаперагортванне"
 STR_BTN_ACT_TOGGLE_TOUCH_LOCK: "Пераключыць блакіроўку сэнсара"
 STR_TOUCH_LOCK: "Блакіроўка сэнсара"
 STR_SLIDE_SWITCH_TOUCH: "Сэнсар"

@@ -884,6 +884,7 @@ STR_BTN_ACT_TOGGLE_TOUCH_UI: "Сенсорлық навигацияны қосу
 STR_BTN_ACT_CYCLE_ORIENTATION_BACK: "Бағдарды кері өзгерту"
 STR_BTN_ACT_TOGGLE_DARK_MODE: "Қараңғы режимді қосу/өшіру"
 STR_BTN_ACT_AUTO_PAGE_TURN: "Авто бет аударуды қосу/өшіру"
+STR_AUTO_PAGE_TURN: "Авто бет аудару"
 STR_BTN_ACT_TOGGLE_TOUCH_LOCK: "Сенсор құлпын қосу/өшіру"
 STR_TOUCH_LOCK: "Сенсор құлпы"
 STR_SLIDE_SWITCH_TOUCH: "Сенсор"

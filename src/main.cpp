@@ -85,6 +85,7 @@
 #include "util/ScreenshotUtil.h"
 #include "util/SerialLineBuffer.h"
 #include "util/Timezones.h"
+#include "util/ToggleNotice.h"
 #include "util/WakeTrace.h"
 
 #ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
@@ -2359,17 +2360,21 @@ void loop() {
           // The gate itself is applied at the top of the next tick, from the
           // setting — one place decides it, so this cannot drift out of step.
           LOG_INF("MAIN", "Touch navigation %s", enabled ? "on" : "off");
+          ToggleNotice::show(StrId::STR_TOUCH_UI_CONTROLS, enabled, /*afterFrame=*/false);
           break;
         }
         case BA::BTN_TOGGLE_DARK_MODE:
           flipDarkMode();
           LOG_INF("MAIN", "Dark Mode %s", DarkModeNow::isDark() ? "on" : "off");
+          // After the frame in the new polarity, which flipDarkMode() asked for.
+          ToggleNotice::show(StrId::STR_DARK_MODE, DarkModeNow::isDark(), /*afterFrame=*/true);
           break;
         case BA::BTN_TOGGLE_TOUCH_LOCK:
           SETTINGS.touchLock = SETTINGS.touchLock ? 0 : 1;
           SETTINGS.saveToFile();
           // Applied by the touch gate at the top of the next tick, like Toggle Touch Navigation.
           LOG_INF("MAIN", "Touch lock %s", SETTINGS.touchLock ? "on" : "off");
+          ToggleNotice::show(StrId::STR_TOUCH_LOCK, SETTINGS.touchLock != 0, /*afterFrame=*/false);
           break;
         case BA::BTN_SCREENSHOT:
           // Taken by ScreenshotUtil::service() on the next pass, or a few passes on if a render holds the buffers.
@@ -2384,6 +2389,7 @@ void loop() {
           Frontlight.setOn(!Frontlight.isOn());
           SETTINGS.frontlightOn = Frontlight.isOn() ? 1 : 0;
           SETTINGS.saveToFile();
+          ToggleNotice::show(StrId::STR_READING_LIGHT, Frontlight.isOn(), /*afterFrame=*/false);
           break;
         case BA::BTN_LIGHT_BRIGHTER:
         case BA::BTN_LIGHT_DIMMER: {
@@ -2503,6 +2509,8 @@ void loop() {
   // the call, so neither passes millis(). Ported from crosspoint-reader PR #4538 (John Stader, @jstader).
   lastActivityTime += activityDuration;
   sleepTimerStart += activityDuration;
+  // A toggle action's message, once the frame the toggle asked for (if any) is on the panel.
+  ToggleNotice::service(renderer);
 
   // After the activity's pass, so a pending CMD:IDLE sees what it queued.
   SerialTestApi::service();
