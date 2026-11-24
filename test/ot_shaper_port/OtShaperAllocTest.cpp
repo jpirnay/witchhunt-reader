@@ -236,7 +236,7 @@ TEST(OtShaperAlloc, NothingThrowingIsAllocated) {
     EXPECT_EQ(throwing, 0u) << fx.script;
     EXPECT_EQ(inShape, 0u) << fx.script;
   }
-  EXPECT_EQ(words, 56u);
+  EXPECT_EQ(words, 70u);
   EXPECT_EQ(gAlloc.liveNothrowBytes, 0u);
 }
 

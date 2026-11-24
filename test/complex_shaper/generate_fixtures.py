@@ -67,6 +67,18 @@ FIXTURES = [
         "लक्ष", ("लक्ष", "mr"),   # Marathi la and k-ssa
         "झाड", ("झाड", "ne"),     # Nepali jha
         ("९८५", "ne"),            # Nepali digits
+        # A reader's photo of a Hindi book (r/CrossPointReader post 1y320pq, 2026-11) showed these words without
+        # exactly their glyphs that GSUB makes; the words it drew whole use cmap glyphs only.
+        "कि", "फिर",        # i-matra (.04 width) before ka and pha
+        "दिख", "लिया",       # its .03 and .08 widths
+        "की",              # ii-matra .03 after ka
+        "प्रसाद",           # p_ra ligature
+        "उन्होंने",          # half na; aa-matra, then e-matra and anusvara in one glyph
+        "क्यों",            # half ka
+        "दूर",             # da and uu-matra in one glyph
+        "में", "हैं", "नहीं",  # e-, ai- and ii-matra, each with anusvara in one glyph
+        "पूछेंगे",          # uu-matra below, e-matra with anusvara
+        "ौ",               # a vowel sign with no consonant: a dotted circle before it (the photo's ornament line)
     ]),
     ("tamil", "Taml", [
         "தமிழ்",           # visible pulli
