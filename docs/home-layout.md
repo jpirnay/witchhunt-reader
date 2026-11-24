@@ -1,8 +1,9 @@
 # Lyra Tiles' Home layout file
 
 With **Settings → Display → Home screen → Layout** on **Custom**, Lyra Tiles draws Home from
-`/.crosspoint/home.json`. The web interface's Home screen page writes it; it can also be written by
-hand. A missing or unreadable file gives the **Reader** layout, and the serial log says why
+`/.crosspoint/home.json`. The web interface's **Home Screen** page (`/home-screen`) writes it, with a
+preview of Home as the reader lays it out ([the API](webserver-endpoints.md#home-screen)); it can also
+be written by hand. A missing or unreadable file gives the **Reader** layout, and the serial log says why
 (`Custom layout: ...`).
 
 ```json

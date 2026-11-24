@@ -205,19 +205,7 @@ void LyraTilesTheme::prepareHome(const uint32_t available) {
       layout = HomeTilesLayout::presets::reader();
       break;
   }
-  HomeTilesLayout::Config shown;
-  for (int r = 0; r < layout.rowCount; ++r) {
-    HomeTilesLayout::Cell cells[2]{};
-    int count = 0;
-    for (int c = 0; c < layout.rows[r].count; ++c) {
-      const HomeTilesLayout::Cell& cell = layout.rows[r].cells[c];
-      if (cell.widget == Widget::Shortcut && (available & (1u << cell.option)) == 0) continue;
-      cells[count++] = cell;
-    }
-    if (count == 1) shown.add(cells[0]);
-    if (count == 2) shown.add(cells[0], cells[1]);
-  }
-  config_ = shown;
+  config_ = HomeTilesLayout::withAvailable(layout, available);
   data_.load(config_, pictureSources_);
 }
 

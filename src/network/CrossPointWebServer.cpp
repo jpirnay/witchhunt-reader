@@ -62,6 +62,11 @@
 #include "WebDAVHandler.h"
 #include "WebPathGuard.h"
 #include "WifiCredentialStore.h"
+#include "activities/home/HomeMenu.h"
+#include "components/UITheme.h"
+#include "components/themes/PanelMetrics.h"
+#include "components/themes/lyra/HomeLayoutFile.h"
+#include "components/themes/lyra/LyraTilesTheme.h"
 #include "html/WebSetupPageHtml.generated.h"
 #include "network/HttpDownloader.h"
 #include "util/ByteSize.h"
@@ -69,6 +74,8 @@
 #include "util/FontManifestReader.h"
 #include "util/PluginLocations.h"
 #include "util/UrlUtils.h"
+
+extern GfxRenderer renderer;  // main.cpp: the Home Screen API reads the panel's size and orientation
 
 // Log free heap + max contiguous block at a named point.
 #define LOG_WEB_MEM(tag)                                                                                              \
@@ -623,6 +630,9 @@ void CrossPointWebServer::begin() {
 
   // Font management endpoints
   server->on("/stats", HTTP_GET, [this] { handleStatsPage(); });
+  server->on("/home-screen", HTTP_GET, [this] { handleHomeScreenPage(); });
+  server->on("/api/home-layout", HTTP_GET, [this] { handleGetHomeLayout(); });
+  server->on("/api/home-layout", HTTP_POST, [this] { handlePostHomeLayout(); });
   server->on("/api/stats", HTTP_GET, [this] { handleStatsApi(); });
   server->on("/api/stats/export", HTTP_GET, [this] { handleStatsExport(); });
   server->on("/api/stats/remove", HTTP_POST, [this] { handleStatsRemove(); });
@@ -1020,6 +1030,67 @@ void CrossPointWebServer::handleStatsApi() const {
   }
   response.finish();
   LOG_WEB_MEM("stats_api_exit");
+}
+
+void CrossPointWebServer::handleHomeScreenPage() const { serveBundlePage(web_bundle::HomeScreenPageHtml); }
+
+// What the Home Screen page needs to edit and preview Lyra Tiles' layout: the file as it is on the
+// card, the place Home lays out in on this panel as it is held now, and the destinations a shortcut
+// can open now. The page lays the rows out itself (js/home-layout.js, the same rules as
+// HomeTilesLayout::place); the device answers this while it shows the transfer screen, not Home.
+void CrossPointWebServer::handleGetHomeLayout() const {
+  JsonDocument doc;
+  std::string file;
+  if (Storage.readFileToString("WEB", HomeLayoutFile::kPath, HomeLayoutFile::kMaxBytes, file)) doc["file"] = file;
+
+  // Lyra Tiles' own metrics, whatever theme is in use: the layout is that theme's.
+  ThemeMetrics metrics = LyraTilesMetrics::values;
+  UiFontLadder::applyTo(metrics, UITheme::fontGrowth());
+  const Rect content = UITheme::getContentRect(renderer, metrics, /*hasBottomHints=*/true, /*hasSideHints=*/false);
+  JsonObject screen = doc["screen"].to<JsonObject>();
+  screen["w"] = renderer.getScreenWidth();
+  screen["h"] = renderer.getScreenHeight();
+  JsonArray box = doc["content"].to<JsonArray>();
+  box.add(content.x);
+  box.add(content.y);
+  box.add(content.width);
+  box.add(content.height);
+  doc["top"] = content.y + metrics.homeTopPadding;
+  doc["compact"] = PanelMetrics::COMPACT;
+
+  // A shortcut to a destination with nothing behind it is left out on Home, its neighbour taking the row.
+  const uint32_t available = availableDestinations(HomeMenuAvailability{.hasBookmarks = GLOBAL_BOOKMARKS.hasAny()});
+  JsonArray destinations = doc["available"].to<JsonArray>();
+  for (uint8_t d = 0; d < HomeTilesLayout::destination::Count; ++d) {
+    if ((available & (1u << d)) != 0) destinations.add(HomeLayoutFile::destinationName(d));
+  }
+  sendJson(server.get(), 200, doc);
+}
+
+// Saves the page's layout as /.crosspoint/home.json, whole or not at all, once the device's own parser
+// takes it. The page then switches Layout to Custom through POST /api/settings.
+void CrossPointWebServer::handlePostHomeLayout() const {
+  if (!server->hasArg("plain")) {
+    server->send(400, "text/plain", "Missing JSON body");
+    return;
+  }
+  const String& body = server->arg("plain");
+  if (body.length() > HomeLayoutFile::kMaxBytes) {
+    server->send(400, "text/plain", "Layout too large");
+    return;
+  }
+  if (!HomeLayoutFile::parse(std::string(body.c_str(), body.length())).ok) {
+    server->send(400, "text/plain", "Not a layout this reader can show");
+    return;
+  }
+  const std::string temp = std::string(HomeLayoutFile::kPath) + ".tmp";
+  if (!Storage.writeFile(temp.c_str(), body) || !FileReplace::replace(temp.c_str(), HomeLayoutFile::kPath)) {
+    LOG_ERR("WEB", "Home layout not saved");
+    server->send(500, "text/plain", "The layout file could not be written");
+    return;
+  }
+  LOG_INF("WEB", "Home layout saved (%u bytes)", static_cast<unsigned>(body.length()));
+  server->send(200, "text/plain", "Saved");
 }
 
 // Body: {"docId": "..."}. Same removal as the device's per-book stats screen: the book's entry goes

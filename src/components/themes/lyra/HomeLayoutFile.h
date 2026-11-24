@@ -32,4 +32,7 @@ struct Parsed {
 
 Parsed parse(const std::string& json);
 
+// A shortcut's destination (HomeTilesLayout::destination) as the file names it, "" for none.
+const char* destinationName(uint8_t destination);
+
 }  // namespace HomeLayoutFile

@@ -32,11 +32,22 @@ usability over "swiss-army-knife" functionality.
 *These items are rejected because they compromise the device's stability or mission.*
 
 * **Interactive Apps:** No Notepads, Calculators, or Games. This is a reader, not a PDA.
-* **Active Connectivity:** No RSS readers, News aggregators, or Web browsers. Background Wi-Fi tasks drain the battery
-  and complicate the single-core CPU's execution.
+* **Content Features in the Firmware:** No RSS readers, news aggregators, quote or picture-of-the-day services, or web
+  browsers built into the firmware, and no widget for each kind of content. Background Wi-Fi tasks drain the battery
+  and complicate the single-core CPU's execution. Content like this comes from plugins (see below).
 * **Media Playback:** No Audio players or Audio-books.
 * **Complex Annotation:** No typed out notes. These features are better suited for devices with better input
   capabilities and more powerful chips.
+
+### Content from Plugins
+
+*The firmware gathers prerendered images; what they show is a plugin's business.*
+
+A plugin can provide whatever it likes as a prerendered image: the reader fetches it from a URL when an event happens
+(going to sleep, closing a book), keeps it on the card, and shows it as a picture on the Home screen or the sleep
+screen. One mechanism, a URL, an event and an image, serves a quote of the day, headlines, a comic, a picture of the
+day or a calendar, with no firmware code for any of them. The plugin, or the server behind it, chooses and renders the
+content.
 
 ### In-scope — Technically Unsupported
 
