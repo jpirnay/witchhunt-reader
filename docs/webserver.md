@@ -142,7 +142,7 @@ Each book has a label with its format (EPUB, XTC, TXT, MD). At the right of each
 | ------ | ---- |
 | ℹ️ **Details** (books only) | Edit the book's title, author, series and cover (below) |
 | 📂 **Move** | Move it to another folder |
-| ✏️ **Rename** | Rename it |
+| ✏️ **Rename** | Rename it. A file's name opens selected up to its extension, so what you type keeps the `.epub` |
 | 🗑️ **Delete** | Delete it, after asking |
 
 Tick the boxes in front of several items (or the box in the header for all of them) to **Move**,
