@@ -29,6 +29,7 @@
 #include "WifiCredentialStore.h"
 #include "activities/home/HomeMenu.h"
 #include "activities/home/LibraryTab.h"
+#include "util/AsciiParse.h"
 #include "util/UrlUtils.h"
 
 namespace {
@@ -796,37 +797,14 @@ bool JsonSettingsIO::loadWifi(WifiCredentialStore& store, const char* json, bool
     }
     const std::string bssidHex = obj["bssid"] | std::string("");
     const int channel = obj["channel"].as<int>();
-    if (bssidHex.size() == 12 && channel > 0 && channel <= 14) {
-      bool parseOk = true;
-      uint8_t parsed[6] = {0};
-      for (int i = 0; i < 6 && parseOk; i++) {
-        unsigned int byte = 0;
-        if (sscanf(bssidHex.c_str() + i * 2, "%2x", &byte) != 1) {
-          parseOk = false;
-        } else {
-          parsed[i] = static_cast<uint8_t>(byte);
-        }
-      }
-      if (parseOk) {
-        std::memcpy(cred.bssid, parsed, 6);
-        cred.channel = static_cast<uint8_t>(channel);
-      }
+    if (bssidHex.size() == 12 && channel > 0 && channel <= 14 &&
+        ascii_parse::hexBytes(bssidHex.c_str(), cred.bssid, 6)) {
+      cred.channel = static_cast<uint8_t>(channel);
     }
     const int aps = obj["aps"].as<int>();  // 0 when absent: files from before the count
     cred.apCount = static_cast<uint8_t>(aps < 0 ? 0 : (aps > 255 ? 255 : aps));
-    const auto parseQuad = [](const std::string& s, uint8_t out[4]) -> bool {
-      unsigned int a = 0, b = 0, c = 0, d = 0;
-      int consumed = 0;
-      // %n stores characters consumed; require it to equal full string length so we
-      // reject inputs with trailing garbage like "192.168.1.10xyz".
-      if (sscanf(s.c_str(), "%u.%u.%u.%u%n", &a, &b, &c, &d, &consumed) != 4) return false;
-      if (consumed < 0 || static_cast<size_t>(consumed) != s.size()) return false;
-      if (a > 255 || b > 255 || c > 255 || d > 255) return false;
-      out[0] = a;
-      out[1] = b;
-      out[2] = c;
-      out[3] = d;
-      return true;
+    const auto parseQuad = [](const std::string& text, uint8_t out[4]) {
+      return ascii_parse::ipv4(text.data(), text.size(), out);
     };
     const std::string ipStr = obj["ip"] | std::string("");
     const std::string gwStr = obj["gw"] | std::string("");
