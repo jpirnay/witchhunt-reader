@@ -4,7 +4,8 @@ Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tamil)
 Copyright 2022 The Noto Project Authors (https://github.com/notofonts/sinhala)
 
 The *.layout files here are subsets of Noto Sans Bengali, Devanagari, Tamil
-and Sinhala (Regular), built by generate_fixtures.py.
+and Sinhala (Regular), built by crosspoint-reader's generate_fixtures.py
+(PR #3787) and kept here as built.
 
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
