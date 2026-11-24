@@ -779,6 +779,13 @@ class ChapterHtmlSlimParser final : public Print {
     int16_t xInset = 0;  // left edge of the table box; non-zero when the <table> carries a left inset
     bool hasBorder = true;
     uint32_t firstVisibleOffset = UINT32_MAX;  // first word of the fragment's first row with words
+    // Empty for the next fragment, once the rows are placed or dropped.
+    void reset() {
+      rows.clear();
+      height = 0;
+      cols = 0;
+      firstVisibleOffset = UINT32_MAX;
+    }
   };
   struct BufferedTable {
     // The row currently being filled. Cleared at every <tr> and freed again at </tr> once the row
@@ -835,6 +842,10 @@ class ChapterHtmlSlimParser final : public Print {
   };
   std::unique_ptr<BufferedTable> currentTable;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
+  // True while laid-out rows wait in currentTable's packer for their fragment. They were laid out for the page in
+  // progress (on an arena build in its block, which emitPage() rewinds), so until flushTableFragment places them
+  // nothing else may go into the page's flow, nor the page be emitted.
+  bool tableRowsWait() const { return currentTable && !currentTable->packer.rows.empty(); }
 
   struct ListEntry {
     int depth;
@@ -972,6 +983,9 @@ class ChapterHtmlSlimParser final : public Print {
   std::string_view tocAnchorPool;
   // True when `id` is one of them: a chapter boundary, which starts a page. Walks the pool.
   bool isTocAnchor(std::string_view id) const;
+  // The page break a TOC anchor takes before its block, so that its chapter starts on a fresh page: none on an empty
+  // page, nor while tableRowsWait().
+  void breakPageBeforeTocAnchor();
 
   // External printed-page labels sourced from NCX <pageList> or EPUB 3 nav page-list.
   // Keyed by HTML id (anchor fragment). When the parser encounters an element whose id
