@@ -37,4 +37,15 @@ Load load(PluginHosts::Reach& reach, const std::string& plugin);
 // For a plugin whose folder the caller already knows (PluginLocations::scanPlugins()).
 Load load(PluginHosts::Reach& reach, const std::string& plugin, const std::string& dir);
 
+// The hosts a plugin's device events were refused for (PluginHosts::wantedWith()), kept in its folder: a removal takes
+// them along, an update or a new install starts without them.
+inline constexpr char kWantedFile[] = "wanted-hosts";
+// The list in the plugin folder `dir`, "" when there is none (or no room to read it).
+std::string loadWanted(const std::string& dir);
+// Asks for `host` (as urlHost() gives it) on the plugin's behalf. Writes only when the list changes; false when the
+// write failed.
+bool recordWanted(const std::string& dir, const std::string& host);
+// Answers the request for `host`: drops it (approved), or marks it dismissed.
+bool settleWanted(const std::string& dir, const std::string& host, bool dismiss);
+
 }  // namespace PluginReach

@@ -507,6 +507,9 @@ have the reader send their requests (see below).
 
 Each plugin says which page it adds itself to and which internet sites it may reach through the reader
 (**Reaches**: those its manifest lists, and those written out in the addresses its reading and sleep events use).
+When the reader refused a site such a plugin wanted to send to (one its settings name, say), the plugin shows
+"Wants to reach" that site: **Allow** lets it, and the site joins those **Approved by you**, where **Take back**
+withdraws it again; **Dismiss** drops the question, and the reader does not ask about that site again.
 Only install plugins you trust: a plugin can read, change and delete anything on the card that this web interface
 can. For writing your own, see [SD-card web plugins](./sd-plugins.md).
 

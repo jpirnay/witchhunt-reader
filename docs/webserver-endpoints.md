@@ -943,6 +943,7 @@ curl http://crosspoint.local/api/plugins
 | `web`          | It has a `plugin.js`, which the Settings or File Manager page loads      |
 | `device`       | It has a `device.json`, a catalog the Plugins page opens                 |
 | `description`, `version`, `requires`, `allowedHosts` | From `manifest.json`, when present |
+| `wants`        | Hosts its device events were refused for and the user has not answered (at most 4), when there are any |
 
 Always 200 with an array; an unreadable or absent plugins folder yields `[]`.
 
@@ -1093,7 +1094,10 @@ The relay plugins written for upstream crosspoint-reader use. Body (`application
 `{"plugin": "<name>", "host": "<host>", "allow": true}` approves a host for that plugin (at most 16 a plugin),
 `"allow": false` takes the approval back. The host is stored in lower case, and only one a URL can name (no port,
 user info or path) is approved. Stored in `/.crosspoint/plugin-hosts.json`; removing a plugin drops its
-approvals.
+approvals. An approval also answers the plugin's request for that host (`wants` in `/api/plugins`);
+`{"plugin": "<name>", "host": "<host>", "dismiss": true}` drops the request instead, and the plugin is not asked
+about that host again until it is installed anew. The requests live in the plugin's folder (`wanted-hosts`), so
+removing the plugin removes them.
 
 ### POST `/api/fetch` - Download to the SD Card
 

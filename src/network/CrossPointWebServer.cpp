@@ -3541,7 +3541,21 @@ void CrossPointWebServer::handlePluginList() const {
       }
     }
 
-    const size_t written = JsonText::write(doc, output.get(), kEntryBytes);
+    // The hosts its device events were refused for, which the Plugins page offers to Allow or Dismiss.
+    const std::string wanted = e.hasDeviceJson ? PluginReach::loadWanted(e.dir) : std::string();
+    std::string_view wants[PluginHosts::kMaxWanted];
+    const size_t wantCount = PluginHosts::wantedHosts(wanted, wants);
+    if (wantCount > 0) {
+      JsonArray list = doc["wants"].to<JsonArray>();
+      for (size_t i = 0; i < wantCount; i++) list.add(std::string(wants[i]));
+    }
+
+    size_t written = JsonText::write(doc, output.get(), kEntryBytes);
+    if (written >= kEntryBytes && wantCount > 0) {
+      // Listed without its requests rather than not at all.
+      doc.remove("wants");
+      written = JsonText::write(doc, output.get(), kEntryBytes);
+    }
     if (written >= kEntryBytes) {
       LOG_DBG("WEB", "Plugin %s: entry too long, skipped", e.name.c_str());
       continue;
@@ -4157,7 +4171,9 @@ void CrossPointWebServer::handlePluginHostsList() const {
 }
 
 // POST /api/plugins/hosts  {plugin, host, allow}  (application/json): approve a host for a plugin, or take the
-// approval back. The page asks the user first; the plugin itself never calls this.
+// approval back. {plugin, host, dismiss: true} drops a request its device events made (PluginReach::recordWanted())
+// and keeps it from being asked again; an approval answers one. The page asks the user first; the plugin itself never
+// calls this.
 void CrossPointWebServer::handlePluginHostsSet() const {
   if (!requireJsonBody(server.get())) return;
   JsonDocument req;
@@ -4171,13 +4187,27 @@ void CrossPointWebServer::handlePluginHostsSet() const {
   // Absent means approve. Spelled out: cppcheck takes ArduinoJson's `| true` default for a bitwise or
   // (badBitmaskCheck).
   const bool allow = !req["allow"].is<bool>() || req["allow"].as<bool>();
+  const bool dismiss = req["dismiss"].is<bool>() && req["dismiss"].as<bool>();
   // An approval holds a host as PluginHosts::urlHost() judges one, or it could never match. One stored by an older
   // firmware may not be, and can still be taken back.
   const bool judgeable = PluginHosts::urlHost("https://" + std::string(host.c_str()) + "/") == host.c_str();
   if (!isSafePathComponent(plugin) || host.isEmpty() || host.length() > 253 || host.indexOf('/') >= 0 ||
-      host.indexOf(':') >= 0 || host.indexOf('@') >= 0 || (allow && !judgeable) ||
-      PluginLocations::findPluginDir(plugin.c_str()).empty()) {
+      host.indexOf(':') >= 0 || host.indexOf('@') >= 0 || (allow && !dismiss && !judgeable)) {
     server->send(400, "application/json", "{\"error\":\"invalid plugin or host\"}");
+    return;
+  }
+  const std::string dir = PluginLocations::findPluginDir(plugin.c_str());
+  if (dir.empty()) {
+    server->send(400, "application/json", "{\"error\":\"invalid plugin or host\"}");
+    return;
+  }
+  if (dismiss) {
+    if (!PluginReach::settleWanted(dir, host.c_str(), true)) {
+      server->send(500, "application/json", "{\"error\":\"could not save\"}");
+      return;
+    }
+    LOG_INF("WEB", "Plugin %s: request for %s dismissed", plugin.c_str(), host.c_str());
+    server->send(200, "application/json", "{\"ok\":true}");
     return;
   }
   JsonDocument doc;
@@ -4198,6 +4228,10 @@ void CrossPointWebServer::handlePluginHostsSet() const {
   if (!PluginReach::saveApprovals(doc)) {
     server->send(500, "application/json", "{\"error\":\"could not save\"}");
     return;
+  }
+  // An approval answers the plugin's request for that host, if it made one.
+  if (allow && !PluginReach::settleWanted(dir, host.c_str(), false)) {
+    LOG_ERR("WEB", "Plugin %s: could not clear its request for %s", plugin.c_str(), host.c_str());
   }
   LOG_INF("WEB", "Plugin %s: host %s %s", plugin.c_str(), host.c_str(), allow ? "approved" : "revoked");
   server->send(200, "application/json", "{\"ok\":true}");
