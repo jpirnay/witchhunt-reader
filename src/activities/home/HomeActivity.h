@@ -125,19 +125,12 @@ class HomeActivity final : public Activity {
   // The cover pass for the books Home shows. `thumbSizes` are the theme's exact boxes (HomeLayout);
   // with none, every cover is made at `coverHeight` on the single-height path.
   void loadRecentCovers(int coverHeight, const std::pair<int, int>* thumbSizes, int thumbSizeCount);
-  // One thumbnail slot to placeholder on a permanent give-up: the exact on-disk path the cover
-  // loader checks, plus the (w,h) the placeholder BMP should be written at.
-  struct ThumbSlot {
-    std::string path;
-    int width;
-    int height;
-  };
   // Give up on a book's cover for this pass. Bumps the session retry counter for a transient
   // failure. When the failure is permanent — structurally absent, or transient but past the
-  // session retry budget — writes a valid placeholder BMP at each slot (as CoverThumbLoader does)
-  // so the book reads as resolved on disk and is not re-decoded on the next boot; otherwise just
-  // records an empty cover so it retries next session. Shared by both cover paths.
-  void giveUpCover(RecentBook& book, ThumbResult res, const std::vector<ThumbSlot>& slots);
+  // session retry budget — writes the no-cover placeholder at every size the cover loader makes
+  // (CoverThumbLoader::writeNoCoverPlaceholders) so the book reads as resolved on disk and is not
+  // re-decoded on the next boot; otherwise just records an empty cover so it retries next session.
+  void giveUpCover(RecentBook& book, ThumbResult res);
   // True once a book has burned COVER_MAX_TRANSIENT_ATTEMPTS transient failures this session.
   bool coverAttemptsExhausted(const std::string& path) const;
 

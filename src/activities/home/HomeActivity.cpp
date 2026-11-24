@@ -22,7 +22,6 @@
 #include <algorithm>
 #include <cstring>
 #include <ctime>
-#include <iterator>
 #include <string>
 #include <vector>
 
@@ -94,7 +93,7 @@ bool HomeActivity::coverAttemptsExhausted(const std::string& path) const {
   return it != coverTransientAttempts.end() && it->second >= COVER_MAX_TRANSIENT_ATTEMPTS;
 }
 
-void HomeActivity::giveUpCover(RecentBook& book, ThumbResult res, const std::vector<ThumbSlot>& slots) {
+void HomeActivity::giveUpCover(RecentBook& book, ThumbResult res) {
   // Only transient failures count toward the session budget; a structural absence is already
   // permanent (generateThumbBmp wrote a sentinel) and needs no retry accounting.
   if (res == ThumbResult::TransientFail) {
@@ -103,21 +102,14 @@ void HomeActivity::giveUpCover(RecentBook& book, ThumbResult res, const std::vec
   }
 
   // Permanent give-up = structurally absent, or transient failures past this session's budget
-  // (e.g. an embedded cover the decoder rejects every time — oversize PNG, corrupt image). As
-  // CoverThumbLoader does: write a valid placeholder BMP at each thumb slot so isCoverThumbComplete()
-  // treats the book as resolved on disk and it is never re-decoded on the next boot. A still-retryable
-  // transient failure records an empty cover instead, so it gets a fresh attempt next session.
+  // (e.g. an embedded cover the decoder rejects every time — oversize PNG, corrupt image). The loader
+  // writes a valid placeholder BMP at each size it makes, so isCoverThumbComplete() treats the book
+  // as resolved on disk and it is never re-decoded on the next boot. A still-retryable transient
+  // failure records an empty cover instead, so it gets a fresh attempt next session.
   const bool permanent = (res == ThumbResult::StructurallyAbsent) || coverAttemptsExhausted(book.path);
 
   if (permanent) {
-    bool allWritten = !slots.empty();
-    for (const auto& slot : slots) {
-      if (!ReaderActivity::isCoverThumbComplete(slot.path, slot.width, slot.height) &&
-          !ReaderActivity::writeCoverPlaceholderBmp(slot.path)) {
-        allWritten = false;
-      }
-    }
-    if (allWritten) {
+    if (coverLoader.writeNoCoverPlaceholders(book.path)) {
       const std::string placeholder = ReaderActivity::coverThumbPlaceholder(book.path);
       LOG_DBG("HOME", "Wrote cover placeholder(s) for %s — resolved, will not re-decode", book.path.c_str());
       RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
@@ -202,22 +194,6 @@ void HomeActivity::loadRecentCovers(const int coverHeight, const std::pair<int, 
     return;
   }
 
-  // Build the placeholder slots for a book on give-up. Multi-size themes placeholder every
-  // WxH thumb; the single-height path placeholders its one thumb_<h>.bmp (width = h*0.6, matching
-  // the decode). Each slot's path is exactly what the loader's isCoverThumbComplete() checks.
-  const auto slotsForBook = [&](const std::string& placeholder) {
-    std::vector<ThumbSlot> slots;
-    if (thumbSizeCount > 0) {
-      slots.reserve(thumbSizeCount);
-      std::transform(thumbSizes, thumbSizes + thumbSizeCount, std::back_inserter(slots), [&](const auto& sz) {
-        return ThumbSlot{UITheme::getCoverThumbPath(placeholder, sz.first, sz.second), sz.first, sz.second};
-      });
-    } else {
-      slots.push_back({UITheme::getCoverThumbPath(placeholder, coverHeight), coverHeight * 6 / 10, coverHeight});
-    }
-    return slots;
-  };
-
   // HomeActivity::loop runs on the main task while rendering runs on the render task.
   // Invalidate the Lyra frame cache under the render lock to avoid freeing cached
   // frames while tryFastHomeRender is copying from them.
@@ -291,8 +267,7 @@ void HomeActivity::loadRecentCovers(const int coverHeight, const std::pair<int, 
       // reboot resets the counter and tries again) so it cannot starve the others.
       if (coverAttemptsExhausted(book.path)) {
         LOG_DBG("HOME", "Cover attempts exhausted for %s this session -- writing placeholder", book.path.c_str());
-        giveUpCover(book, ThumbResult::StructurallyAbsent,
-                    slotsForBook(ReaderActivity::coverThumbPlaceholder(book.path)));
+        giveUpCover(book, ThumbResult::StructurallyAbsent);
         nextRecentCoverIndex++;
         yieldAfterDecode();
         return;
@@ -331,7 +306,7 @@ void HomeActivity::loadRecentCovers(const int coverHeight, const std::pair<int, 
       }
     } else {
       // Counts the transient; writes a durable placeholder once the budget is spent.
-      giveUpCover(book, ThumbResult::TransientFail, slotsForBook(placeholder));
+      giveUpCover(book, ThumbResult::TransientFail);
     }
     // Past the book in hand when it is where the pass left off. After a cycle the pass starts over
     // from the front instead, and skips whatever is complete by then.
@@ -579,9 +554,8 @@ void HomeActivity::loop() {
 
   if (isCarousel) {
     if (firstRenderDone && !recentsLoaded && !recentsLoading && !inputWaiting) {
-      const int coverHeight = UITheme::getInstance().getMetrics().homeCoverHeight;
-      const auto sizes = GUI.getCoverThumbSizes(coverHeight);
-      loadRecentCovers(coverHeight, sizes.data(), static_cast<int>(sizes.size()));
+      const HomeLayout layout = homeLayout();
+      loadRecentCovers(layout.coverHeight, layout.thumbSizes, layout.thumbSizeCount);
       return;
     }
 
