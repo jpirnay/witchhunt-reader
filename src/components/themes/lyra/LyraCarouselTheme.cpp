@@ -22,21 +22,7 @@
 #include "UiFontScale.h"
 #include "components/BookProgressPresentation.h"
 #include "components/UITheme.h"
-#include "components/icons/book.h"
-#include "components/icons/book24.h"
 #include "components/icons/cover.h"
-#include "components/icons/ellipsis.h"
-#include "components/icons/file24.h"
-#include "components/icons/folder.h"
-#include "components/icons/folder24.h"
-#include "components/icons/image24.h"
-#include "components/icons/library.h"
-#include "components/icons/recent.h"
-#include "components/icons/settings2.h"
-#include "components/icons/stats.h"
-#include "components/icons/text24.h"
-#include "components/icons/transfer.h"
-#include "components/icons/weather32.h"
 #include "components/themes/ListTouchBand.h"
 #include "components/themes/TapTargets.h"
 #include "components/themes/lyra/CarouselCoverLayout.h"
@@ -140,30 +126,6 @@ CenterTextLayout layoutCenterText(const GfxRenderer& renderer, const int coverBo
 
 int lastCarouselSelectorIndex = -1;
 
-const uint8_t* iconBitmapFor(UIIcon icon) {
-  switch (icon) {
-    case UIIcon::Folder:
-      return FolderIcon;
-    case UIIcon::Recent:
-      return RecentIcon;
-    case UIIcon::Stats:
-      return StatsIcon;
-    case UIIcon::Ellipsis:
-      return EllipsisIcon;
-    case UIIcon::Transfer:
-      return TransferIcon;
-    case UIIcon::Settings:
-      return Settings2Icon;
-    case UIIcon::Book:
-      return BookIcon;
-    case UIIcon::Library:
-      return LibraryIcon;
-    case UIIcon::Weather:
-      return Weather32Icon;
-    default:
-      return nullptr;
-  }
-}
 // ---------------------------------------------------------------------------
 // Static frame cache — survives HomeActivity re-creation so that returning to
 // home after settings doesn't re-read covers from SD.
@@ -783,7 +745,7 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
     }
 
     if (rowIcon != nullptr) {
-      const uint8_t* bmp = iconBitmapFor(rowIcon(i));
+      const uint8_t* bmp = iconForName(rowIcon(i), kMenuIconSize);
       if (bmp != nullptr) {
         if (selected)
           renderer.drawIconInverted(bmp, iconX, iconY, kMenuIconSize, kMenuIconSize);
