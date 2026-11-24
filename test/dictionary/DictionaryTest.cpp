@@ -251,6 +251,37 @@ TEST_F(DictionaryTest, ResolveBasePathRejectsEscapesAndMissingFolders) {
   EXPECT_FALSE(DictionaryRegistry::resolveBasePath("NoSuchFolder", base));
 }
 
+// The setting that remembers the chosen dictionary is DictionaryRegistry::MAX_NAME_BYTES long, the size the scan reads
+// folder names in. It was 32 bytes: a longer folder was listed, then stored cut short, and the cut name opened nothing
+// (crosspoint-reader PR #4507). Every name the scan lists must come back whole and open.
+TEST_F(DictionaryTest, AFolderNameLongerThanThirtyOneBytesIsListedWholeAndOpens) {
+  // Two names that agree in their first 31 bytes, the old field's capacity: cut there, they were the same name.
+  const std::string shared(31, 'a');
+  const std::string first = shared + " one";
+  const std::string second = shared + " two";
+  const std::string longest(DictionaryRegistry::MAX_NAME_BYTES - 1, 'b');
+  for (const std::string& name : {first, second, longest}) provision("plain", name);
+
+  std::vector<DictionaryEntry> found;
+  DictionaryRegistry::discover(found);
+  std::vector<std::string> names;
+  for (const auto& e : found) names.push_back(e.name);
+  for (const std::string& name : {first, second, longest}) {
+    SCOPED_TRACE(name);
+    EXPECT_NE(std::find(names.begin(), names.end(), name), names.end()) << "listed whole";
+    std::string base;
+    EXPECT_TRUE(DictionaryRegistry::resolveBasePath(name.c_str(), base));
+    EXPECT_EQ(base, (kDictRoot / name / "plain").generic_string());
+    Dictionary dict;
+    EXPECT_TRUE(dict.open(name.c_str()));
+  }
+  // The name cut at the old field's size is no folder.
+  std::string base;
+  EXPECT_FALSE(DictionaryRegistry::resolveBasePath(shared.c_str(), base));
+
+  for (const std::string& name : {first, second, longest}) fs::remove_all(kDictRoot / name);
+}
+
 // --- open / .ifo ------------------------------------------------------------
 
 TEST_F(DictionaryTest, OpenRejectsSixtyFourBitOffsets) {

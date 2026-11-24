@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "components/themes/PanelMetrics.h"
+#include "util/DictionaryRegistry.h"
 
 class CrossPointSettings {
  private:
@@ -512,7 +513,8 @@ class CrossPointSettings {
   // dictionary used for word lookup; empty means no dictionary is selected.
   // A folder NAME, not a path: DictionaryRegistry::resolveBasePath rejects
   // separators and dot prefixes so a hand-edited value cannot escape the roots.
-  char dictionaryName[32] = "";
+  // As long as any name the registry lists, which it reads in MAX_NAME_BYTES.
+  char dictionaryName[DictionaryRegistry::MAX_NAME_BYTES] = "";
   // Point size of the EPUB reader font, persisted as "fontSize". Shown and drawn snapped to the
   // sizes the active family offers (ReaderSizeList), never rewritten to them.
   uint8_t fontPointSize = DEFAULT_FONT_POINT_SIZE;
