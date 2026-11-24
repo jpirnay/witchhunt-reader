@@ -381,9 +381,19 @@ usual uses.
   log (`[PEVT]`) names the plugin and the event, not the URL. The reader cannot
   ask you about a host a template fills in: a plugin written for upstream reaches
   it once its card has asked for it through the relay (KOSync Auto-push's login
-  test asks for its server); otherwise approve it with `POST /api/plugins/hosts`
-  ([webserver-endpoints.md](webserver-endpoints.md)). A token or config value
-  can go to a declared host only from a file the plugin may read itself (above).
+  test asks for its server); otherwise the Plugins page asks for it, below. A
+  token or config value can go to a declared host only from a file the plugin
+  may read itself (above).
+- **Refused hosts**: the reader notes the host of a line it refused, or of a
+  download's refused redirect, in `wanted-hosts` in the plugin's folder (at most
+  four, the oldest dropped first; a host over 128 characters is not noted). The
+  Plugins page shows each as "Wants to reach ..." with **Allow**, which approves
+  it as an approval asked by the plugin's card would, and **Dismiss**, after
+  which the reader drops lines to that host without asking again (until the
+  plugin is installed anew). The refused line itself leaves the queue: kept, it
+  would make the reader join Wi-Fi at every sleep until you answer (on the X3 and
+  X4 with two restarts). A progress push or a sleep picture after **Allow** goes
+  as usual. Removing the plugin removes its requests with its folder.
 
 **The queue.** Each subscribing plugin has its own, `events.jsonl` in its folder,
 one line per event (`{"e", "id", "ts", "vars"}`). A line is at most 512 bytes;

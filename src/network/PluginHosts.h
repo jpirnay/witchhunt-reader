@@ -44,4 +44,20 @@ class Reach {
   std::string declared_;
 };
 
+// The hosts a plugin's device events were refused for: what the Plugins page offers to Allow or Dismiss
+// (PluginReach keeps the list in the plugin's folder). One entry a line, oldest first: a host waiting for the user's
+// answer, or '-' and a host the user dismissed, which is not asked about again. At most kMaxWanted entries, the oldest
+// dropped first; a host longer than kMaxWantedHost is not recorded, so the list fits a /api/plugins entry.
+inline constexpr size_t kMaxWanted = 4;
+inline constexpr size_t kMaxWantedHost = 128;
+inline constexpr size_t kWantedMaxBytes = kMaxWanted * (kMaxWantedHost + 2);
+
+// `list` with `host` (lower case, as urlHost() gives it) asked for. `list` itself, unchanged, when the host is in it
+// already, asked for or dismissed, or is not a host urlHost() gives.
+std::string wantedWith(std::string_view list, std::string_view host);
+// `list` without `host`; with it dismissed instead when `dismiss`.
+std::string wantedWithout(std::string_view list, std::string_view host, bool dismiss);
+// The hosts `list` asks for (not the dismissed ones), oldest first, into `out`; how many.
+size_t wantedHosts(std::string_view list, std::string_view (&out)[kMaxWanted]);
+
 }  // namespace PluginHosts

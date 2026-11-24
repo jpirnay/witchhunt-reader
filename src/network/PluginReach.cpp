@@ -58,6 +58,49 @@ bool saveApprovals(const JsonDocument& doc) {
   return Storage.writeFile(temp.c_str(), text) && FileReplace::replace(temp.c_str(), kApprovalsPath);
 }
 
+namespace {
+
+std::string wantedPath(const std::string& dir) { return dir + "/" + kWantedFile; }
+
+// The list replaced whole (FileReplace), or the file removed once the list is empty.
+bool saveWanted(const std::string& dir, const std::string& list) {
+  const std::string path = wantedPath(dir);
+  if (list.empty()) return !Storage.exists(path.c_str()) || Storage.remove(path.c_str());
+  const std::string temp = path + ".tmp";
+  if (Storage.writeFile(temp.c_str(), String(list.c_str())) && FileReplace::replace(temp.c_str(), path.c_str())) {
+    return true;
+  }
+  Storage.remove(temp.c_str());
+  return false;
+}
+
+}  // namespace
+
+std::string loadWanted(const std::string& dir) {
+  std::string text;
+  const std::string path = wantedPath(dir);
+  // A list that is larger than any this firmware writes is read as none, and replaced by the next record.
+  if (dir.empty() || !Storage.exists(path.c_str()) || !heapHasBlockFor(PluginHosts::kWantedMaxBytes) ||
+      !Storage.readFileToString("PLG", path, PluginHosts::kWantedMaxBytes, text)) {
+    return "";
+  }
+  return text;
+}
+
+bool recordWanted(const std::string& dir, const std::string& host) {
+  if (dir.empty()) return false;
+  const std::string old = loadWanted(dir);
+  const std::string next = PluginHosts::wantedWith(old, host);
+  return next == old || saveWanted(dir, next);
+}
+
+bool settleWanted(const std::string& dir, const std::string& host, const bool dismiss) {
+  if (dir.empty()) return false;
+  const std::string old = loadWanted(dir);
+  const std::string next = PluginHosts::wantedWithout(old, host, dismiss);
+  return next == old || saveWanted(dir, next);
+}
+
 Load load(PluginHosts::Reach& reach, const std::string& plugin) {
   reach = PluginHosts::Reach{};
   if (plugin == DETAILS_SCOPE) {
