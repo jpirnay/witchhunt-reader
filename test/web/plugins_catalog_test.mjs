@@ -179,6 +179,10 @@ check(/runs here/.test(text(row('Session push'))) && !/partly|does not/.test(tex
 check(text(row('Meta filter')).includes('partly runs here') && text(row('Meta filter')).includes('(sleep.enter)') &&
       text(row('Meta filter')).includes('reader.exit are not sent yet') && hasButton(row('Meta filter')),
       'a require_meta handler waits; the sleep download runs');
+check(text(row('Meta filter')).includes('Reaches: example.org (named by its events)'),
+      'the host its event URLs write out is named under Reaches (' + text(row('Meta filter')) + ')');
+check(text(row('Session push')).includes('Reaches no site unless you approve one when it asks'),
+      'a host its events fill in from the config is not');
 check(/runs here/.test(text(row('XML catalog'))) && !/partly|does not/.test(text(row('XML catalog'))) &&
       text(row('XML catalog')).includes('a card, and a catalog you open on this page'), 'an XML catalog runs here');
 check(text(row('Unreadable')).includes('could not be checked') && !hasButton(row('Unreadable')),

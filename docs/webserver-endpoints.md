@@ -1036,8 +1036,14 @@ forwarded, so the caller infers the type from what it asked for.
 
 - **GET only.** A plugin cannot make the device POST anywhere.
 - **Allowlisted per plugin.** The host must appear in that plugin's
-  `manifest.json` `allowedHosts`. A bare entry matches exactly; one starting
-  with a dot matches that suffix. No list, no access.
+  `manifest.json` `allowedHosts`, or be one the user approved
+  (`/api/plugins/hosts`). A bare entry matches exactly; one starting
+  with a dot matches that suffix. Hosts compare without case. No list, no access.
+- **The host judged is the host reached.** The allowlist reads the URL with the
+  HTTP client's own parser (`crosspoint::splitUrl()`). A URL with user info
+  (`https://user@host/`, `https://a.com:443@b.com/`), a host with a byte other
+  than a letter, digit, `-`, `.` or `_` (an IPv6 literal among them), or a port
+  outside 1-65535 has no host to judge and is refused with `400`.
 - **Redirects stay inside the allowlist.** A redirect is followed only to a host
   the same `allowedHosts` list allows, or that the user approved. One to any
   other host fails the request with the same `403` and `host` as a refused first
@@ -1052,8 +1058,8 @@ forwarded, so the caller infers the type from what it asked for.
 
 | Status | Cause                                                        |
 | ------ | ------------------------------------------------------------ |
-| 400    | Missing `plugin`/`url`, or a non-http(s) URL                  |
-| 403    | Host not listed in the plugin's `allowedHosts`                |
+| 400    | Missing `plugin`/`url`, a non-http(s) URL, or one with no host to judge |
+| 403    | Host not listed in the plugin's `allowedHosts`, nor approved  |
 | 502    | The fetch failed before any data arrived                      |
 | 503    | Heap too low to serve the request                             |
 
@@ -1085,7 +1091,8 @@ The relay plugins written for upstream crosspoint-reader use. Body (`application
 
 `GET` answers `{"<plugin>": ["host", ...]}`. `POST` (`application/json`) with
 `{"plugin": "<name>", "host": "<host>", "allow": true}` approves a host for that plugin (at most 16 a plugin),
-`"allow": false` takes the approval back. Stored in `/.crosspoint/plugin-hosts.json`; removing a plugin drops its
+`"allow": false` takes the approval back. The host is stored in lower case, and only one a URL can name (no port,
+user info or path) is approved. Stored in `/.crosspoint/plugin-hosts.json`; removing a plugin drops its
 approvals.
 
 ### POST `/api/fetch` - Download to the SD Card

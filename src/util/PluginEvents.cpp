@@ -18,6 +18,8 @@
 #include "PluginLocations.h"
 #include "components/UITheme.h"
 #include "network/HttpDownloader.h"
+#include "network/PluginHosts.h"
+#include "network/PluginReach.h"
 #include "network/WebPathGuard.h"
 
 // Upstream CrossPoint's plugin events, PR #3114 (Justin Mitchell) and PR #4200 (Arthur Tazhitdinov), on this
@@ -177,12 +179,25 @@ void emit(const Event e, const Var* vars, const size_t count) {
 
 namespace {
 
-// What a drain needs from one plugin: its manifest and config as parsed, its token.
+// What a drain needs from one plugin: its name, its manifest and config as parsed, its token, and the hosts it may
+// reach.
 struct DrainContext {
+  const char* name = "";
   JsonDocument manifest;
   JsonDocument config;
   std::string token;
+  PluginHosts::Reach reach;
 };
+
+bool refusedPluginFile(const std::string& path) { return isProtectedPluginFile(String(path.c_str())); }
+
+// A token or config file the device.json names, or "" for none and for one the web server would not let the plugin
+// read either (pluginFile()). A refused one is logged by its name.
+std::string ownFile(const Subscriber& s, const char* name) {
+  const std::string path = pluginFile(s.dir, name, refusedPluginFile);
+  if (path.empty() && name[0] != '\0') LOG_ERR("PEVT", "%s: refused to read %s", s.name, name);
+  return path;
+}
 
 // A small JSON file (token, config, <book>.meta.json) parsed into `doc`; false when absent or not JSON.
 bool readSmallJson(const std::string& path, JsonDocument& doc) {
@@ -221,11 +236,19 @@ LineOutcome deliverLine(const DrainContext& dc, const std::string& line, GfxRend
   ctx.ts = doc["ts"].as<long long>();
   ctx.id = doc["id"] | "";
 
+  const std::string url = handlerUrl(handler, ctx);
+  // Only to a host the plugin may reach: its manifest's allowedHosts, one the user approved, or one its event URLs
+  // write out (declareLiteralHosts()). Judged on the URL as filled in, since a template can put any host there
+  // ({cfg.server}). It could never go, so it leaves the queue. Not logged with the URL, which may carry the token.
+  if (!dc.reach.allows(url)) {
+    LOG_ERR("PEVT", "%s: %s dropped, its host is not one the plugin may reach", dc.name,
+            eventName(static_cast<Event>(e)));
+    return LineOutcome::Dropped;
+  }
   HttpDownloader::Headers headers;
   for (JsonPairConst h : req["headers"].as<JsonObjectConst>()) {
     headers.emplace_back(h.key().c_str(), expand(h.value() | "", ctx));
   }
-  const std::string url = escapeUrl(expand(req["url"] | "", ctx));
   const char* method = req["method"] | (download ? "GET" : "POST");
   // A request carries the user's data (a progress, a key): its server's certificate must verify. A plain download
   // may fall back like any public read.
@@ -246,9 +269,22 @@ LineOutcome deliverLine(const DrainContext& dc, const std::string& line, GfxRend
       LOG_ERR("PEVT", "download by %s is not supported: %s", method, url.c_str());
       return LineOutcome::Dropped;
     }
+    // Redirects stay within the hosts the plugin may reach, as the relay's do; one leaving them could not go on a
+    // later try either, so the line leaves the queue.
+    bool leftReach = false;
+    const HttpDownloader::RedirectFilter withinReach = [&dc, &leftReach](const std::string& next) {
+      leftReach = !dc.reach.allows(next);
+      return !leftReach;
+    };
     // Into a sibling first, and in only on a clean answer, so an error page never replaces the file (a sleep image).
     const std::string part = dest + ".part";
-    const auto result = HttpDownloader::downloadToFile(url, part, nullptr, "", "", tls, {}, headers, &status);
+    const auto result = HttpDownloader::downloadToFile(url, part, nullptr, "", "", tls, withinReach, headers, &status);
+    if (leftReach) {
+      Storage.remove(part.c_str());
+      LOG_ERR("PEVT", "%s: %s dropped, redirected to a host the plugin may not reach", dc.name,
+              eventName(static_cast<Event>(e)));
+      return LineOutcome::Dropped;
+    }
     if (result != HttpDownloader::OK || status < 200 || status >= 300 ||
         !FileReplace::replace(part.c_str(), dest.c_str())) {
       Storage.remove(part.c_str());
@@ -256,6 +292,7 @@ LineOutcome deliverLine(const DrainContext& dc, const std::string& line, GfxRend
       return LineOutcome::Kept;
     }
   } else {
+    // request() follows no redirect: a 3xx comes back as the answer.
     size_t received = 0;
     status = HttpDownloader::request(
         method, url, headers, expand(req["body"] | "", ctx), nullptr,
@@ -292,6 +329,7 @@ DrainResult drain(GfxRenderer* renderer, const size_t maxEvents) {
     if (!Storage.readFileToString("PEVT", path, kMaxOutboxBytes + kMaxEventLine, raw)) continue;
 
     DrainContext dc;
+    dc.name = s.name;
     {
       std::string text;
       // Unreadable now (a card fault, a manifest being replaced): the queue waits for the next drain.
@@ -309,13 +347,20 @@ DrainResult drain(GfxRenderer* renderer, const size_t maxEvents) {
       Storage.remove(path.c_str());
       continue;
     }
+    if (PluginReach::load(dc.reach, s.name, s.dir) == PluginReach::Load::NoRoom) return result;
+    // The hosts its event URLs write out count as declared, as allowedHosts entries do (literalHost()).
+    if (!heapHasBlockFor(literalHostBytes(dc.manifest.as<JsonVariantConst>()))) {
+      LOG_ERR("PEVT", "no room to drain %s", s.name);
+      return result;
+    }
+    declareLiteralHosts(dc.manifest.as<JsonVariantConst>(), dc.reach);
     {
       JsonDocument token;
       const char* tokenPath = dc.manifest["token"]["path"] | "token";
-      if (readSmallJson(pluginFile(s.dir, dc.manifest["token"]["file"] | ""), token)) {
+      if (readSmallJson(ownFile(s, dc.manifest["token"]["file"] | ""), token)) {
         dc.token = valueAt(token.as<JsonVariantConst>(), tokenPath);
       }
-      readSmallJson(pluginFile(s.dir, dc.manifest["config"]["file"] | ""), dc.config);
+      readSmallJson(ownFile(s, dc.manifest["config"]["file"] | ""), dc.config);
     }
 
     // In order; the first failure stops this plugin's queue, so no later event overtakes it.

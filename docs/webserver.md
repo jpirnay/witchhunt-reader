@@ -402,15 +402,17 @@ have the reader send their requests (see below).
 - **Install from a file** takes a plugin as a `.zip` file.
 
 Each plugin says which page it adds itself to and which internet sites it may reach through the reader
-(**Reaches**). Only install plugins you trust: a plugin can read, change and delete anything on the
-card that this web interface can. For writing your own, see [SD-card web plugins](./sd-plugins.md).
+(**Reaches**: those its manifest lists, and those written out in the addresses its reading and sleep events use).
+Only install plugins you trust: a plugin can read, change and delete anything on the card that this web interface
+can. For writing your own, see [SD-card web plugins](./sd-plugins.md).
 
 **Plugins that act while you read.** Some community plugins have the reader send something when you read or put it
 to sleep: **KOSync Auto-push** sends your reading progress to a KOSync server, **Month Wallpaper** fetches a new sleep
-picture. The reader keeps what they want to send on the card and sends it whenever it joins Wi-Fi; at sleep it joins
-your last network for it (not under 20 % battery), so going to sleep takes a few seconds longer. On the X3 and X4 it
-shows the sleep screen first and restarts twice while it sends. Such a plugin's settings (a server, an account) are
-made on its card in the web interface. See [Events](./sd-plugins.md#events-the-reader-sends-a-plugins-requests).
+picture. The reader sends only to the sites such a plugin may reach: those it lists (**Reaches**) and those you
+approved when its card asked. It keeps what they want to send on the card and sends it whenever it joins Wi-Fi; at
+sleep it joins your last network for it (not under 20 % battery), so going to sleep takes a few seconds longer. On the
+X3 and X4 it shows the sleep screen first and restarts twice while it sends. Such a plugin's settings (a server, an
+account) are made on its card in the web interface. See [Events](./sd-plugins.md#events-the-reader-sends-a-plugins-requests).
 
 **Books with Adobe DRM** (library loans and shops' "Adobe DRM" titles) come in through the community
 plugin **Protected Content**: it adds itself to the File Manager, signs in with your Adobe ID, turns the

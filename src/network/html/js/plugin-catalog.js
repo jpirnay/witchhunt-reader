@@ -325,12 +325,47 @@
     return out;
   }
 
-  // What of a device.json runs here: {catalog, reason, events}. catalog: it can be opened on the Plugins page;
-  // reason: why not, when it has one that cannot; events: describeEvents() of its device events.
+  // The host an event URL writes out, as the reader reads it (plugin_events::literalHost(), crosspoint::splitUrl()):
+  // lower case, from an http(s) URL whose authority holds no placeholder, user info, port out of range or other odd
+  // byte. '' otherwise: a host a template fills in is not declared, and needs allowedHosts or an approval.
+  function literalHost(url) {
+    const m = /^https?:\/\/([^/?#]*)/i.exec(typeof url === 'string' ? url : '');
+    if (!m) return '';
+    const colon = m[1].indexOf(':');
+    const host = colon < 0 ? m[1] : m[1].slice(0, colon);
+    const port = colon < 0 ? null : m[1].slice(colon + 1);
+    if (!/^[A-Za-z0-9._-]+$/.test(host)) return '';
+    if (port !== null && !(/^[0-9]{1,5}$/.test(port) && +port >= 1 && +port <= 65535)) return '';
+    return host.toLowerCase();
+  }
+
+  // The events the firmware knows (src/util/PluginEventCore.h), sent or not yet.
+  const EVENTS_KNOWN = EVENTS_SENT.concat(['book.downloaded']);
+
+  // The hosts a device.json's events write out (literalHost()), each once: the reader counts them as the plugin's own,
+  // as its allowedHosts, for every handler it can run (handlerFor(): a request with a URL, a download with a URL and a
+  // destination).
+  function eventHosts(events) {
+    const hosts = [];
+    if (!events || typeof events !== 'object') return hosts;
+    for (const name of EVENTS_KNOWN) {
+      const h = events[name] && typeof events[name] === 'object' ? events[name] : {};
+      const download = h.download && typeof h.download === 'object' && typeof h.download.url === 'string' ? h.download : null;
+      const request = h.request && typeof h.request === 'object' ? h.request : null;
+      const url = download ? (text(download.dest) ? download.url : '') : request && request.url;
+      const host = literalHost(url);
+      if (host && !hosts.includes(host)) hosts.push(host);
+    }
+    return hosts;
+  }
+
+  // What of a device.json runs here: {catalog, reason, events, eventHosts}. catalog: it can be opened on the Plugins
+  // page; reason: why not, when it has one that cannot; events: describeEvents() of its device events; eventHosts: the
+  // hosts they write out (eventHosts()).
   function describe(manifest) {
     const m = manifest && typeof manifest === 'object' ? manifest : {};
     const browse = m.browse && typeof m.browse === 'object' ? m.browse : null;
-    const out = { catalog: false, reason: '', events: describeEvents(m.events) };
+    const out = { catalog: false, reason: '', events: describeEvents(m.events), eventHosts: eventHosts(m.events) };
     if (!browse) return out;
     const lists = Array.isArray(browse.lists) ? browse.lists : [];
     if (!browse.url && !browse.lists_url && !lists.some((l) => l && l.url)) return out;
@@ -1077,7 +1112,7 @@
     // For the tests.
     _internal: {
       getPath, enc, escapeUrl, resolveTemplate, pagingMode, pageSize, compatible, listAllowed, sanitizeFilename,
-      cardFolder, joinServerPath, tokenJson, signInKind, urlDecodePath, urlEncodePath, xmlRows
+      cardFolder, joinServerPath, tokenJson, signInKind, urlDecodePath, urlEncodePath, xmlRows, literalHost, eventHosts
     }
   };
 })();
