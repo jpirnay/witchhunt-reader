@@ -2,6 +2,126 @@
 
 User-facing changes only. Full commit history is in git log.
 
+## 2.54 — 2026-11-24
+
+**A Home screen you arrange yourself, footnotes over the page, and library loans.** Lyra Tiles, the new default theme,
+puts the book you read in front, with ready-made layouts and a web page to build your own from widgets and pictures.
+Footnotes open in a sheet over the page, the dictionary suggests words after a miss, and books with Adobe DRM open
+through a plugin.
+
+Read the upgrade notes at the end of this section before you update.
+
+### Home screen
+
+- **Lyra Tiles**, the theme a new reader starts with: a large card for the book you read last (cover, title, author,
+  series, reading history, progress and time left), big labelled tiles for the places you open most, and **More** for
+  the rest. Swipe across Home, or press Left and Right on the card, to bring another recent book onto it.
+- **Layouts** (Settings → Display → Home screen → Layout): **Reader**, **Dashboard** (a clock, a picture and your
+  week's reading), **Gallery** (a picture across the top) and **Custom**.
+- **The web interface's new Home Screen page** builds the Custom layout from up to six rows of widgets: the book card,
+  Also reading, shortcuts, a clock, a month calendar shaded by your reading time, this week's reading, the weather and
+  pictures. A preview shows Home as your reader lays it out, and one button saves it and switches the reader to it.
+  See [Home Screen](docs/webserver.md#7-home-screen).
+- **Pictures on Home** come from the card's `/home` folder (a different one each start), from a picture you upload on
+  the page, or from the web: a random photo, a month calendar with your country's holidays, the Sun or the Earth now,
+  a note, a QR code, or an address of your own. A picture from the web that changes is fetched again each time the
+  reader goes to sleep.
+- **First Day of Week** (Settings → System → Clock Settings): Monday, Sunday or Saturday, for the week's reading.
+- The Reading Stats icon stands upright, and Lyra Carousel's menus are drawn like Lyra's.
+
+### Reading
+
+- **Footnotes open in a sheet over the page**, in the book's font, so the sentence that calls the note stays in view.
+  The page keys page through a long note and move on to the page's next note; **Go to note** shows it where it stands
+  in the book.
+- **"Did you mean?"** When the dictionary has no entry for a word, it offers up to eight close headwords: `recieve`
+  finds *receive*, `fished` finds *fish*.
+- **A heading that a converter left alone in its own file** shows at the top of its chapter's first page, not on a
+  page by itself.
+- **Each chapter is styled only by the stylesheets it links**, so one part of an omnibus no longer takes another part's
+  styles.
+- **Tables inside tables** show their text and pictures; they were left out.
+- **A `<br>` adds a blank line only where its line is empty**, so a contents list that ends each entry with `<br/>` is
+  single-spaced.
+- **Links and footnotes to a word inside a paragraph** open the page that holds the word, not the paragraph's first
+  page.
+- **A rule drawn under a heading as an empty bordered block** shows again with Extra Paragraph Spacing on.
+- **Screenshots taken in a book** go into a folder named after it, with the chapter, page and progress in the name.
+- **Less memory while a chapter is laid out**, and a chapter that runs out of memory now stops where it got to instead
+  of restarting the reader: deeply nested markup, large tables, pages with very many elements and one-file books with
+  long contents lists.
+- **On the X4, a chapter is laid out while you read**, the next one as you turn the pages before it, and a book's
+  first page shows sooner. On every board, the page that shows while a chapter is laid out gets its gray sooner.
+- A progressive JPEG is shrunk faster for a small picture, a picture that cannot be decoded draws its placeholder
+  instead of a blank, and the Indexing message no longer holds up the work it announces.
+- Fix: an interrupted chapter build could write into a file already deleted from the card.
+
+### Controls
+
+- **New actions for keys and gestures** (Settings → Controls): **Toggle Dark Mode**, **Toggle Auto Page Turn**,
+  **Take screenshot** (on every screen), **Toggle Touch Lock** and, on a device with a light, **Open Light Panel**.
+- **Touch Lock** (Settings → Controls, touch devices): touch off everywhere, books included, for reading by the keys
+  alone with a hand on the glass. On the BOOX Picco the slide switch can work it (**Slide Switch** → **Touch**).
+
+### Pictures, sleep and power
+
+- **X4 Pro:** book covers and BMP pictures on the sleep screen in 16 shades of gray (PNG pictures keep 4).
+- **BOOX Picco:** its 16 gray levels spread evenly, measured against a reference card.
+- **X3, X4 and Murphy M3:** sleep pictures and the picture viewer dither with each panel's own measured gray levels.
+- **Picco and Murphy M3:** a chapter opened for the first time is laid out sooner, as the reader works on while the
+  panel refreshes: *The Odyssey*'s Book IV in 2.3 s instead of 3.4 s on the Picco, 4.7 s instead of 6.2 s on the
+  Murphy.
+- **Murphy M3:** much less battery used while it sits on a screen. A Murphy left on Home with its light off had lost
+  about 40 % in 10 hours. Fix: it could restart after a long idle spell.
+- **X3:** the panel's booster switches off after two idle minutes, and each page turn sends less to the panel.
+
+### Plugins and library loans
+
+- **Books with Adobe DRM** (most library loans, such as Onleihe or Libby, and shops' "Adobe DRM" titles) open once the
+  community plugin **Protected Content** has stored their key on the reader. A loan stops opening when it ends. When a
+  book does not open, the reader says why. What the reader keeps of such a book on the card is enciphered with a key
+  of this reader's own. See [Protected books](USER_GUIDE.md#protected-books).
+- **The Plugins page** lists CrossPoint's community plugins, each marked by how much of it runs here, and opens a
+  plugin's own catalog to browse, search, sign in to, and download to the card from.
+- **The reader asks before a plugin reaches a new site.** The sites you allowed are listed with each plugin, and
+  removing a plugin removes them.
+- **Plugins that act while you read** can send your progress when a book opens or closes, or fetch a picture as the
+  reader goes to sleep. At sleep the reader joins your last Wi-Fi network for them (not under 20 % battery).
+
+### Updates and the web interface
+
+- **Check for updates refuses an update whose release lists no checksum**, with a message saying so.
+- **The [flasher](https://jpirnay.github.io/witchhunt-reader/)** offers the last five releases, to go back to one,
+  and newer pre-releases.
+- The web File Manager lists a hidden folder you type the path of, and the EPUB optimizer keeps a picture's name when
+  it cannot convert it.
+
+### Upgrade notes
+
+- **Check for updates on 2.51 to 2.53 installs 2.54.** On 2.38 to 2.50, install once by hand, as under 2.51.
+- **Each book's chapters are laid out once more** on first open; books are not indexed again. Your place, bookmarks and
+  settings are kept.
+- **Your theme is kept**, except **Lyra Extended**, which is gone: a reader set to it opens Lyra Tiles. A reader that
+  never saved its settings starts on Lyra Tiles.
+- **Button and gesture actions are now saved by name.** Your assignments carry over. **Going back to 2.53 or older
+  resets them** to the defaults.
+- **The weather is fetched once more**: the old forecast is not read. Your places are kept.
+- **The web interface installs its pages again** on your first visit; for hotspot mode, have `web-….bin` ready.
+- **Languages:** the new labels exist in every language and arrive with the language-pack update Check for updates
+  offers; until then they show in English.
+- **Which file:** `firmware.bin` (X3, X4) or `firmware-<device>.bin` for the card, `full-install-<device>.bin` at 0x0.
+
+### With thanks to
+
+- **Justin Mitchell** (plugin device events, on-device crypto and book keys), **Arthur Tazhitdinov** and
+  **Jadehawk** (plugin events and catalogs), **franssjz** (dictionary suggestions, book keys, the optimizer fix),
+  **Jon Stieglitz** (screenshot names, crosspoint-reader #1589), **zuyan9** (the X3's idle power-off, Free-Ink #220),
+  **InsiderPhD** (the Picco's calibrated gray levels, Free-Ink #223) and **Mikalai Kryvusha** (ids inside a paragraph,
+  crosspoint-reader #4328).
+- **Marcin Marczyk**, whose Month Wallpaper server draws the month calendar for Home.
+
+Source-level credits remain in the relevant files.
+
 ## 2.53 — 2026-11-16
 
 **Faster book opens, Auto-Rotate and forward/back tilt.** A short release before the plugin work begins: books
