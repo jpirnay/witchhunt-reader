@@ -172,8 +172,12 @@ inline void buildSettings(const RowSink& emit) {
              static_cast<size_t>(CrossPointSettings::BUTTON_ACTION_COUNT) &&
          "btnActionOptions must name every BUTTON_ACTION except BTN_DEFAULT, in enum order");
 
-  const bool hasLight = Frontlight.present();
-  const bool hasWarmLight = hasLight && Frontlight.hasColorTemperature();
+  // From the board profile, not Frontlight.present(): the BOOX Picco's light (an LED driver on I2C) is present only
+  // once Frontlight.begin() has found it, and settings.json is read before that (main.cpp). The lists then had no light
+  // actions, so the load bounded every stored light action back to its row's default, and the next save wrote the
+  // default over it: each boot lost them.
+  const bool hasLight = HalCapabilities::hasFrontlight();
+  const bool hasWarmLight = HalCapabilities::hasColorTemperature();
   auto makeBtnActionOptions = [&](StrId defaultAction) {
     std::vector<StrId> result;
     // Reserves for the light options whether or not this board has them: a hint
@@ -184,13 +188,9 @@ inline void buildSettings(const RowSink& emit) {
     result.push_back(defaultAction);
     result.insert(result.end(), btnActionOptions.begin(), btnActionOptions.end());
     result.insert(result.end(), extraActionOptions.begin(), extraActionOptions.end());
-    // cppcheck-suppress knownConditionTrueFalse ; hasLight is a compile-time false
-    // on a build with FREEINK_CAP_FRONTLIGHT off, where present() returns a literal.
-    // It is a genuine runtime question on every board that has a light.
     if (hasLight) {
       result.insert(result.end(), lightActionOptions.begin(), lightActionOptions.end());
     }
-    // cppcheck-suppress knownConditionTrueFalse ; see the hasLight check above.
     if (hasWarmLight) {
       result.insert(result.end(), warmActionOptions.begin(), warmActionOptions.end());
     }
@@ -856,9 +856,11 @@ inline bool boardHas(const SettingRequires capability) {
 // Whether settings.json keeps a row: what the board's profile says it has, not what answered at
 // this boot. boardHas() asks the touch controller's probe, and a probe that missed one boot hid the
 // touch rows from that boot's load and dropped them from its next save, so the boot after, with the
-// controller answering again, started every gesture and touch control from its default. The other
-// capabilities are answered from the profile already (the light by Frontlight.present() on every
-// board this firmware builds for), so they keep what boardHas() says.
+// controller answering again, started every gesture and touch control from its default. The light
+// is the same: Frontlight.present() answers for the BOOX Picco's I2C light only after begin(), which
+// runs after the settings load, so its brightness, warmth and Restore on Wake came back at their
+// defaults at every boot. The other capabilities are answered from the profile already, so they keep
+// what boardHas() says.
 //
 // Based on crosspoint-reader PR #4078 (Tuan Q. Nguyen), which keeps the tilt row in the persisted
 // list when the IMU probe fails; tilt is answered from the profile here, the touch rows were not.
@@ -872,11 +874,13 @@ inline bool boardKeeps(const SettingRequires capability) {
       // The settings load before the display comes up, so the driver cannot be asked yet, and a row
       // missing from that load would go from the next save. A spare row costs a board nothing.
       return true;
+    case SettingRequires::ReadingLight:
+      return HalCapabilities::hasFrontlight();
+    case SettingRequires::WarmLight:
+      return HalCapabilities::hasColorTemperature();
     case SettingRequires::Nothing:
     case SettingRequires::TiltSensor:
     case SettingRequires::GrayscalePanel:
-    case SettingRequires::ReadingLight:
-    case SettingRequires::WarmLight:
     case SettingRequires::ReadingLightAndClock:
     case SettingRequires::SunlightFadingPanel:
     case SettingRequires::SlideSwitch:

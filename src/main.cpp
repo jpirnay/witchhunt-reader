@@ -1730,12 +1730,14 @@ void setup() {
   const bool restoreLightOn =
       isSilentReboot ? lightWasOnAtSilentReboot : (SETTINGS.frontlightOn != 0 && SETTINGS.frontlightRestoreOnWake != 0);
   Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, restoreLightOn);
-  // After begin(), because a board whose light is probed rather than declared
-  // only knows whether it has one by then. Clears mappings this board cannot
-  // perform — the case that makes it necessary is an SD card moved from a board
-  // with a frontlight to one without, where the stored action would otherwise be
-  // both inert and uneditable (the settings screen does not offer it here).
-  CrossPointSettings::dropUnsupportedActions(SETTINGS, Frontlight.present(), Frontlight.hasColorTemperature());
+  // Clears mappings this board cannot perform — the case that makes it necessary
+  // is an SD card moved from a board with a frontlight to one without, where the
+  // stored action would otherwise be both inert and uneditable (the settings screen
+  // does not offer it here). By the profile, as the settings list offers the light
+  // actions: a light that did not answer this boot's begin() (the BOOX Picco's is
+  // probed on I2C) would otherwise lose its bindings for good with the next save.
+  CrossPointSettings::dropUnsupportedActions(SETTINGS, HalCapabilities::hasFrontlight(),
+                                             HalCapabilities::hasColorTemperature());
   // Navigation follows the screen, not the panel: rotating the device rotates which physical
   // button means "up". The input layer sits below the renderer and so cannot ask it directly —
   // this bridges the two, and is queried live so it can never go stale.
