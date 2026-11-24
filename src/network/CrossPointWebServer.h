@@ -200,6 +200,9 @@ class CrossPointWebServer {
   // Reading-stats handlers
   void handleStatsPage() const;
   void handleStatsApi() const;
+  void handleHomeScreenPage() const;
+  void handleGetHomeLayout() const;
+  void handlePostHomeLayout() const;
   void handleStatsExport() const;
   void handleStatsRemove() const;
 

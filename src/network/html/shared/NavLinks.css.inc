@@ -11,7 +11,7 @@
 }
 .nav-links::-webkit-scrollbar { display: none; }
 .nav-links a {
-  padding: 7px 10px;
+  padding: 7px 8px;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   text-decoration: none;

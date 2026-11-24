@@ -5,6 +5,7 @@
 <nav class="nav-links">
   <a href="/files">File Manager</a>
   <a href="/settings">Settings</a>
+  <a href="/home-screen">Home Screen</a>
   <a href="/fonts">Font Manager</a>
   <a href="/dictionary">Dictionaries</a>
   <a href="/stats">Reading Stats</a>

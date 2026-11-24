@@ -20,6 +20,9 @@ This document describes all HTTP, WebDAV and WebSocket endpoints available on th
   - [Settings](#settings)
     - [GET `/api/settings` - List Settings](#get-apisettings---list-settings)
     - [POST `/api/settings` - Change Settings](#post-apisettings---change-settings)
+  - [Home Screen](#home-screen)
+    - [GET `/api/home-layout` - The Layout and the Screen](#get-apihome-layout---the-layout-and-the-screen)
+    - [POST `/api/home-layout` - Save the Layout](#post-apihome-layout---save-the-layout)
   - [Reading Stats](#reading-stats)
     - [GET `/api/stats` - Dashboard Data](#get-apistats---dashboard-data)
     - [GET `/api/stats/export` - Download a Backup](#get-apistatsexport---download-a-backup)
@@ -68,6 +71,7 @@ the setup page and every other page redirects (`302`) to `/setup`.
 | `/setup`      | Setup page: installs the web interface, and uploads books without it |
 | `/files`      | File Manager                               |
 | `/settings`   | Settings                                   |
+| `/home-screen`| Home Screen: the Lyra Tiles Home's rows, with a preview, picture upload and save |
 | `/stats`      | Reading Stats                              |
 | `/fonts`      | Font Manager                               |
 | `/dictionary` | Dictionaries: lists, installs and removes StarDict dictionaries |
@@ -683,6 +687,59 @@ curl -X POST -H "Content-Type: application/json" \
 
 For a credential (`obfuscated`) string, sending the key replaces the stored
 value, so the page sends it only when the user typed something.
+
+---
+
+## Home Screen
+
+The Home Screen page edits `/.crosspoint/home.json`, Lyra Tiles' **Custom** layout
+([home-layout.md](home-layout.md)). The device cannot draw Home while it serves the page, so the page
+lays the rows out itself (`js/home-layout.js`: the same parser, filter and placement as
+`HomeTilesLayout`, checked against the device's own code by `test/web/home_layout_test.mjs`).
+Pictures go through `/upload` into `/home`, scaled down in the browser first (longest side
+1200 px, JPEG).
+
+### GET `/api/home-layout` - The Layout and the Screen
+
+```bash
+curl http://crosspoint.local/api/home-layout
+```
+
+```json
+{"file": "{\"version\":1,\"rows\":[[{\"widget\":\"book\"}]]}",
+ "screen": {"w": 480, "h": 800}, "content": [0, 0, 480, 760], "top": 40, "compact": false,
+ "available": ["library", "stats", "transfer", "weather", "recent"]}
+```
+
+| Field       | Description |
+| ----------- | ----------- |
+| `file`      | `home.json` as it is on the card; absent when there is none (or it is over 4 KB) |
+| `screen`    | The panel as it is held now, in pixels |
+| `content`   | `[x, y, w, h]`: where Lyra Tiles lays Home out, above the button hints, with Lyra Tiles' metrics whatever theme is in use |
+| `top`       | The first line under the status line |
+| `compact`   | The compact panel's sizes (Murphy M3) |
+| `available` | The destinations with something behind them now; a shortcut to another is left out on Home |
+
+### POST `/api/home-layout` - Save the Layout
+
+Saves the body as `/.crosspoint/home.json`, written whole through a temporary file, once the
+device's own parser reads it as a layout (version 1, at least one widget it knows). The page then
+sets `uiTheme` and `homeLayout` through `POST /api/settings`.
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"version":1,"rows":[[{"widget":"book"}],[{"widget":"clock"},{"widget":"picture"}]]}' \
+  http://crosspoint.local/api/home-layout
+```
+
+**Response (200 OK):** `Saved`
+
+| Status | Body                                   | Cause |
+| ------ | -------------------------------------- | ----- |
+| 400    | `Missing JSON body`                    | No body |
+| 400    | `Layout too large`                     | Over 4 KB |
+| 400    | `Not a layout this reader can show`    | Another version, no rows, or no widget it knows |
+| 500    | `The layout file could not be written` | SD card error; the file on the card is as it was |
 
 ---
 

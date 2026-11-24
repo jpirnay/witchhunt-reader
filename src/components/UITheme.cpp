@@ -137,7 +137,11 @@ int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader
 }
 
 Rect UITheme::getContentRect(const GfxRenderer& renderer, bool hasBottomHints, bool hasSideHints) {
-  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
+  return getContentRect(renderer, UITheme::getInstance().getMetrics(), hasBottomHints, hasSideHints);
+}
+
+Rect UITheme::getContentRect(const GfxRenderer& renderer, const ThemeMetrics& metrics, const bool hasBottomHints,
+                             const bool hasSideHints) {
   const int bh = hasBottomHints ? metrics.buttonHintsHeight : 0;
   const int sw = hasSideHints ? metrics.sideButtonHintsWidth : 0;
 

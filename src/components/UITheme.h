@@ -69,6 +69,10 @@ class UITheme {
   // The mapping to logical edges is orientation-dependent. A strip that ends up on the logical left
   // or right edge also keeps HeaderLayout::HINT_COLUMN_GAP between it and the content.
   static Rect getContentRect(const GfxRenderer& renderer, bool hasBottomHints, bool hasSideHints);
+  // The same with a theme's `metrics` instead of the current theme's: the web Home screen editor lays
+  // out Lyra Tiles whatever theme is in use.
+  static Rect getContentRect(const GfxRenderer& renderer, const ThemeMetrics& metrics, bool hasBottomHints,
+                             bool hasSideHints);
   // The top strip the header, clock and battery are drawn in: one topPadding into the content area
   // getContentRect(renderer, hasBottomHints, hasSideHints) leaves (HeaderLayout::header), so it
   // clears a hint strip that lies across the logical top -- the bottom strip in PortraitInverted,

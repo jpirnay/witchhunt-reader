@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!--#include file="shared/ThemeInit.html.inc" -->
+  <title>Home Screen - %%CROSSPOINT%%</title>
+  <style>
+    <!--#include file="shared/Theme.css.inc" -->
+    <!--#include file="shared/NavLinks.css.inc" -->
+
+    .hint { color: var(--text-muted); font-size: 0.875rem; margin: 8px 0 0; }
+    .notice { background: var(--warn-soft); border: 1px solid var(--warn-border); color: var(--warn-text);
+      border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px; }
+    .notice.ok { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent-text); }
+
+    /* The rows on the left, the preview beside them; one column on a narrow screen. */
+    .editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 380px); gap: 16px; align-items: start; }
+    .editor > .card { margin: 0; }
+    .preview-card { position: sticky; top: 16px; }
+    @media (max-width: 860px) {
+      .editor { grid-template-columns: minmax(0, 1fr); }
+      .preview-card { position: static; }
+    }
+
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between;
+      margin-bottom: 12px; }
+    .toolbar label { display: flex; gap: 8px; align-items: center; color: var(--text-muted); font-size: 0.875rem; }
+    select, input[type="text"] { font: inherit; padding: 6px 8px; border: 1px solid var(--control-border);
+      border-radius: var(--radius-sm); background: var(--control-bg); color: var(--text); max-width: 100%; }
+
+    .rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+    .row { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--surface-2); }
+    .row.dropped { border-color: var(--warn-border); background: var(--warn-soft); }
+    .row.flash { box-shadow: var(--focus-ring); }
+    .row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .row-title { font-weight: 600; color: var(--text-strong); font-size: 0.875rem; }
+    .row-note { color: var(--warn-text); font-size: 0.8125rem; margin-left: 6px; font-weight: 500; }
+    .row-actions { display: flex; gap: 4px; }
+    .icon-btn { border: 1px solid var(--control-border); background: var(--control-bg); color: var(--text);
+      border-radius: var(--radius-sm); width: 30px; height: 30px; cursor: pointer; font-size: 0.875rem; }
+    .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .slots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .slots.one { grid-template-columns: minmax(0, 1fr); }
+    .slot { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .slot-head { display: flex; gap: 6px; align-items: center; }
+    .slot-head select { flex: 1; min-width: 0; }
+    .slot .segmented { align-self: flex-start; }
+    .slot-note { color: var(--text-muted); font-size: 0.8125rem; }
+    .slot-note.warn { color: var(--warn-text); }
+    .add-beside { align-self: flex-start; }
+
+    /* The reader's screen, at its own proportions. */
+    .device { background: #1f2421; border-radius: 18px; padding: 14px; max-width: 360px; margin: 0 auto; }
+    .device svg { display: block; width: 100%; height: auto; background: #fff; border-radius: 4px; }
+    .device svg .hit { cursor: pointer; }
+    .warnings { margin: 12px 0 0; padding-left: 18px; color: var(--warn-text); font-size: 0.875rem; }
+    .warnings:empty { display: none; }
+
+    .savebar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+    .savebar .hint { margin: 0; flex: 1; }
+  </style>
+</head>
+<body>
+  <!--#include file="shared/PageHeader.html.inc" -->
+  <main class="page">
+    <div class="page-head">
+      <h1>Home Screen</h1>
+      <p class="page-intro">Choose the rows of the Lyra Tiles Home screen: the book you are reading, shortcuts, a clock,
+        the calendar, your week, the weather and pictures. The reader shows them when its Home screen layout is
+        Custom; saving here sets that.</p>
+    </div>
+    <div id="notice" class="notice" hidden></div>
+    <div class="editor">
+      <section class="card">
+        <div class="toolbar">
+          <label>Start from
+            <select id="start">
+              <option value="saved">This reader's layout</option>
+              <option value="reader">Reader</option>
+              <option value="dashboard">Dashboard</option>
+              <option value="gallery">Gallery</option>
+            </select>
+          </label>
+          <button id="addRow" class="btn btn-small" type="button">Add a row</button>
+        </div>
+        <ol id="rows" class="rows"></ol>
+        <p class="hint">Up to six rows, each one widget across or two side by side; the book card and Also reading
+          take a row alone. More and Settings always close the screen, and More holds every place your shortcuts
+          leave out.</p>
+      </section>
+      <section class="card preview-card">
+        <h2>Preview</h2>
+        <div class="device"><svg id="preview" role="img" aria-label="The Home screen as the reader lays it out"></svg></div>
+        <ul id="warnings" class="warnings"></ul>
+        <p class="hint" id="previewHint">Loading...</p>
+      </section>
+    </div>
+    <div class="card savebar">
+      <p class="hint" id="saveState"></p>
+      <button id="save" class="btn btn-primary" type="button" disabled>Save and use on the reader</button>
+    </div>
+  </main>
+  <input type="file" id="pictureFile" accept="image/jpeg,image/png" hidden />
+
+  <script src="/js/home-layout.js"></script>
+  <script>
+    (() => {
+      const L = window.HomeLayout;
+      // The settings the page switches to on Save: the Lyra Tiles theme (CrossPointSettings::LYRA_TILES)
+      // and its Custom layout (HOME_LAYOUT_CUSTOM). Both enums only ever grow.
+      const THEME_TILES = 2;
+      const LAYOUT_CUSTOM = 3;
+      const PRESET_BY_SETTING = ['reader', 'dashboard', 'gallery'];
+      // Pictures are made smaller before they go to the card: the reader converts them to each widget's
+      // size, and a small file is quick to convert even on the X3.
+      const PICTURE_LONGEST_SIDE = 1200;
+      const PICTURE_FOLDER = L.PICTURE_FOLDER;
+
+      const WIDGETS = [
+        ['book', 'Book card'], ['also', 'Also reading'], ['shortcut', 'Shortcut'], ['clock', 'Clock'],
+        ['calendar', 'Calendar'], ['week', 'This week'], ['weather', 'Weather'], ['picture', 'Picture'],
+      ];
+      const WIDGET_NAMES = Object.fromEntries(WIDGETS);
+      const DESTINATION_NAMES = {
+        library: 'Library', recent: 'Recent books', stats: 'Reading Stats', bookmarks: 'Bookmarks',
+        transfer: 'File Transfer', weather: 'Weather',
+      };
+      const UNAVAILABLE = {
+        bookmarks: 'Left out until you make a bookmark.',
+        weather: 'Left out while Weather is off in the reader’s settings.',
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const state = { rows: [], device: null, settings: {}, pictures: [], fileText: '', dirty: false };
+
+      // ---- Loading ----------------------------------------------------------------------------------
+
+      async function getJson(url) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`${url}: ${response.status}`);
+        return response.json();
+      }
+
+      async function loadPictures() {
+        try {
+          const list = await getJson(`/api/files?path=${encodeURIComponent(PICTURE_FOLDER)}`);
+          state.pictures = list.filter((f) => !f.isDirectory && /\.(jpe?g|png|bmp)$/i.test(f.name))
+            .map((f) => `${PICTURE_FOLDER}/${f.name}`).sort();
+        } catch {
+          state.pictures = [];
+        }
+      }
+
+      async function load() {
+        try {
+          const [device, settings] = await Promise.all([getJson('/api/home-layout'), getJson('/api/settings')]);
+          state.device = device;
+          for (const s of settings) state.settings[s.key] = s;
+          await loadPictures();
+        } catch (error) {
+          $('previewHint').textContent = `Could not ask the reader for its layout (${error.message}). Reload to try again.`;
+          return;
+        }
+        state.fileText = state.device.file || '';
+        const saved = state.fileText ? L.parse(state.fileText) : null;
+        if (saved && saved.ok) {
+          useLayout(JSON.parse(state.fileText));
+        } else {
+          const setting = state.settings.homeLayout ? state.settings.homeLayout.value : 0;
+          const preset = PRESET_BY_SETTING[setting] || 'reader';
+          $('start').value = preset;
+          useLayout(L.PRESETS[preset]);
+        }
+        state.dirty = false;
+        showNotice(saved);
+        $('save').disabled = false;
+        render();
+      }
+
+      function showNotice(saved) {
+        const notice = $('notice');
+        const theme = state.settings.uiTheme;
+        const layout = state.settings.homeLayout;
+        const option = (s) => (s && s.options ? s.options[s.value] : '');
+        let text = '';
+        let ok = false;
+        if (state.fileText && !(saved && saved.ok)) {
+          text = 'The layout saved on the reader cannot be read, so its Home shows the Reader layout. Saving here replaces it.';
+        } else if (theme && theme.value !== THEME_TILES) {
+          text = `The reader uses the ${option(theme)} theme. Saving switches it to Lyra Tiles with this layout.`;
+        } else if (layout && layout.value !== LAYOUT_CUSTOM) {
+          text = `The reader’s Home shows the ${option(layout)} layout. Saving switches it to this one (Custom).`;
+        } else if (layout) {
+          text = 'The reader’s Home shows this layout.';
+          ok = true;
+        }
+        notice.textContent = text;
+        notice.classList.toggle('ok', ok);
+        notice.hidden = !text;
+      }
+
+      // ---- The rows ---------------------------------------------------------------------------------
+
+      // A file's rows as the editor holds them: one or two cells each, as written (unknown widgets too:
+      // the preview leaves them out, as the reader does).
+      function useLayout(layout) {
+        state.rows = (Array.isArray(layout.rows) ? layout.rows : []).slice(0, L.MAX_ROWS)
+          .map((row) => (Array.isArray(row) ? row.slice(0, 2) : []).map((cell) => ({ ...cell })))
+          .filter((row) => row.length > 0);
+        state.dirty = true;
+      }
+
+      function layoutJson() {
+        const rows = state.rows.map((row) => row.map((cell) => {
+          const out = { widget: cell.widget };
+          if (cell.widget === 'book' && cell.size === 'compact') out.size = 'compact';
+          if (cell.widget === 'shortcut') out.to = cell.to || 'library';
+          if (cell.widget === 'picture') out.path = cell.path || PICTURE_FOLDER;
+          return out;
+        }));
+        return JSON.stringify({ version: 1, rows });
+      }
+
+      function defaultCell(widget) {
+        if (widget === 'shortcut') return { widget, to: 'library' };
+        if (widget === 'picture') return { widget, path: PICTURE_FOLDER };
+        return { widget };
+      }
+
+      function changed() {
+        state.dirty = true;
+        $('saveState').textContent = '';
+        render();
+      }
+
+      function element(tag, props = {}, ...children) {
+        const node = document.createElement(tag);
+        for (const [key, value] of Object.entries(props)) {
+          if (key === 'class') node.className = value;
+          else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
+          else if (value !== undefined && value !== false) node.setAttribute(key, value === true ? '' : value);
+        }
+        for (const child of children) if (child) node.append(child);
+        return node;
+      }
+
+      function select(options, value, onchange, label) {
+        const node = element('select', { 'aria-label': label, onchange: (e) => onchange(e.target.value) });
+        for (const [optionValue, text, disabled] of options) {
+          node.append(element('option', { value: optionValue, selected: optionValue === value, disabled }, text));
+        }
+        return node;
+      }
+
+      function segmented(name, options, value, onchange) {
+        const group = element('div', { class: 'segmented', role: 'radiogroup' });
+        for (const [optionValue, text] of options) {
+          group.append(element('label', {},
+            element('input', { type: 'radio', name, value: optionValue, checked: optionValue === value,
+              onchange: () => onchange(optionValue) }),
+            element('span', {}, text)));
+        }
+        return group;
+      }
+
+      function pictureControls(cell, r) {
+        const options = [[PICTURE_FOLDER, `A picture from ${PICTURE_FOLDER}, a new one each start`]];
+        for (const path of state.pictures) options.push([path, path.slice(PICTURE_FOLDER.length + 1)]);
+        const path = cell.path || PICTURE_FOLDER;
+        if (!options.some(([value]) => value === path)) options.push([path, path]);
+        options.push(['__other', 'Another file or folder…']);
+        const wrap = element('div', { class: 'slot' });
+        wrap.append(select(options, path, (value) => {
+          if (value === '__other') {
+            const typed = prompt('A JPEG, PNG or BMP on the card, or a folder of them:', path);
+            if (typed && typed.startsWith('/')) cell.path = typed.replace(/\/+$/, '') || '/';
+          } else {
+            cell.path = value;
+          }
+          changed();
+        }, `Row ${r + 1} picture`));
+        wrap.append(element('button', { type: 'button', class: 'btn btn-small add-beside',
+          onclick: () => uploadPicture(cell) }, 'Upload a picture…'));
+        return wrap;
+      }
+
+      function slot(cell, r, c, row) {
+        const node = element('div', { class: 'slot' });
+        const widgets = WIDGETS.map(([value, text]) => [value, text, c === 1 && !L.PAIRS.has(value)]);
+        const head = element('div', { class: 'slot-head' });
+        head.append(select(widgets, cell.widget, (value) => {
+          row[c] = defaultCell(value);
+          // The book card and Also reading take a row alone.
+          if (!L.PAIRS.has(value)) row.length = 1;
+          changed();
+        }, `Row ${r + 1} widget ${c + 1}`));
+        if (c === 1) {
+          head.append(element('button', { type: 'button', class: 'icon-btn', title: 'Remove this widget',
+            'aria-label': 'Remove this widget', onclick: () => { row.length = 1; changed(); } }, '✕'));
+        }
+        node.append(head);
+        const available = state.device ? state.device.available : [];
+        switch (cell.widget) {
+          case 'book':
+            node.append(segmented(`size-${r}`, [['large', 'Large'], ['compact', 'Compact']],
+              cell.size === 'compact' ? 'compact' : 'large', (value) => {
+                cell.size = value === 'compact' ? 'compact' : undefined;
+                changed();
+              }));
+            node.append(element('span', { class: 'slot-note' }, cell.size === 'compact'
+              ? 'A smaller card of a fixed height.' : 'Takes the height the other rows leave.'));
+            break;
+          case 'shortcut': {
+            const to = cell.to || 'library';
+            node.append(select(L.DESTINATIONS.map((d) => [d, DESTINATION_NAMES[d]]), to, (value) => {
+              cell.to = value;
+              changed();
+            }, `Row ${r + 1} shortcut`));
+            if (!available.includes(to)) node.append(element('span', { class: 'slot-note warn' }, UNAVAILABLE[to] || ''));
+            break;
+          }
+          case 'picture':
+            node.append(pictureControls(cell, r));
+            break;
+          case 'also':
+            node.append(element('span', { class: 'slot-note' },
+              'Shown only where the book card above keeps enough room beside it.'));
+            break;
+          case 'week':
+          case 'calendar':
+            node.append(element('span', { class: 'slot-note' }, 'Opens Reading Stats.'));
+            break;
+          case 'weather':
+            node.append(element('span', { class: 'slot-note' }, 'The last forecast; opens Weather.'));
+            break;
+          default:
+            if (!WIDGET_NAMES[cell.widget]) node.append(element('span', { class: 'slot-note warn' }, 'Not a widget this reader knows.'));
+        }
+        return node;
+      }
+
+      function renderRows(result) {
+        const list = $('rows');
+        list.replaceChildren();
+        // The file's rows the reader leaves out: did not fit, or kept nothing it can show.
+        const shownSources = new Set(result.placement.items.map((i) => result.rows[i.row].source));
+        const droppedSources = new Set();
+        result.rows.forEach((row, r) => { if (result.placement.dropped & (1 << r)) droppedSources.add(row.source); });
+        state.rows.forEach((row, r) => {
+          const dropped = droppedSources.has(r);
+          const item = element('li', { class: 'row' + (dropped ? ' dropped' : ''), 'data-row': r });
+          const actions = element('div', { class: 'row-actions' },
+            element('button', { type: 'button', class: 'icon-btn', title: 'Move up', 'aria-label': 'Move up', disabled: r === 0,
+              onclick: () => { [state.rows[r - 1], state.rows[r]] = [state.rows[r], state.rows[r - 1]]; changed(); } }, '↑'),
+            element('button', { type: 'button', class: 'icon-btn', title: 'Move down', 'aria-label': 'Move down',
+              disabled: r === state.rows.length - 1,
+              onclick: () => { [state.rows[r + 1], state.rows[r]] = [state.rows[r], state.rows[r + 1]]; changed(); } }, '↓'),
+            element('button', { type: 'button', class: 'icon-btn', title: 'Remove the row', 'aria-label': 'Remove the row',
+              disabled: state.rows.length === 1, onclick: () => { state.rows.splice(r, 1); changed(); } }, '✕'));
+          const title = element('span', { class: 'row-title' }, `Row ${r + 1}`);
+          if (dropped) title.append(element('span', { class: 'row-note' }, 'does not fit on this reader'));
+          else if (!shownSources.has(r)) title.append(element('span', { class: 'row-note' }, 'not shown'));
+          item.append(element('div', { class: 'row-head' }, title, actions));
+          const slots = element('div', { class: 'slots' + (row.length === 1 ? ' one' : '') });
+          row.forEach((cell, c) => slots.append(slot(cell, r, c, row)));
+          item.append(slots);
+          if (row.length === 1 && L.PAIRS.has(row[0].widget)) {
+            item.append(element('button', { type: 'button', class: 'btn btn-small add-beside', style: 'margin-top:8px',
+              onclick: () => { row.push(defaultCell('shortcut')); changed(); } }, 'Add a widget beside it'));
+          }
+          list.append(item);
+        });
+        $('addRow').disabled = state.rows.length >= L.MAX_ROWS;
+      }
+
+      // ---- The preview ------------------------------------------------------------------------------
+
+      const SVG = 'http://www.w3.org/2000/svg';
+      function svg(tag, attrs = {}, text) {
+        const node = document.createElementNS(SVG, tag);
+        for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+        if (text !== undefined) node.textContent = text;
+        return node;
+      }
+      const rect = (b, attrs = {}) => svg('rect', { x: b.x, y: b.y, width: Math.max(0, b.w), height: Math.max(0, b.h), ...attrs });
+      const frame = (b, extra = {}) => rect(b, { rx: 8, fill: '#fff', stroke: '#000', 'stroke-width': 2, ...extra });
+      const label = (x, y, text, size, attrs = {}) => svg('text', { x, y, 'font-size': size, 'font-family': 'sans-serif',
+        fill: '#000', 'dominant-baseline': 'hanging', ...attrs }, text);
+      const centred = (b, text, size, attrs = {}) => label(b.x + b.w / 2, b.y + (b.h - size) / 2, text, size,
+        { 'text-anchor': 'middle', ...attrs });
+
+      function cover(b, shade) {
+        const g = svg('g');
+        g.append(rect(b, { fill: shade, stroke: '#000', 'stroke-width': 1 }));
+        g.append(svg('line', { x1: b.x, y1: b.y + b.h, x2: b.x + b.w, y2: b.y, stroke: '#fff', 'stroke-width': 1 }));
+        return g;
+      }
+
+      function picturePath(cellOption, pictures) {
+        const source = pictures[cellOption] || PICTURE_FOLDER;
+        if (/\.(jpe?g|png|bmp)$/i.test(source)) return source;
+        const inFolder = state.pictures.filter((p) => p.startsWith(source.replace(/\/$/, '') + '/'));
+        return inFolder[0] || '';
+      }
+
+      function drawItem(g, item, result, d, scale) {
+        const b = item.box;
+        const small = Math.max(10, Math.round(14 * scale));
+        switch (item.cell.widget) {
+          case 'book': {
+            g.append(frame(b));
+            const parts = L.card(b, d);
+            g.append(cover(parts.cover, '#8a8a8a'));
+            g.append(label(parts.text.x, parts.text.y, 'Continue Reading', small, { 'font-weight': 700 }));
+            [0.55, 0.45, 0.35].forEach((w, i) => g.append(rect({ x: parts.text.x, y: parts.text.y + small * (2 + i * 1.5),
+              w: parts.text.w * w * 1.6, h: small * 0.8 }, { fill: i === 0 ? '#000' : '#999' })));
+            g.append(rect({ x: parts.foot.x, y: parts.foot.y + parts.foot.h - 8, w: parts.foot.w, h: 8 },
+              { rx: 4, fill: '#fff', stroke: '#000' }));
+            g.append(rect({ x: parts.foot.x, y: parts.foot.y + parts.foot.h - 8, w: parts.foot.w * 0.3, h: 8 }, { rx: 4 }));
+            break;
+          }
+          case 'also':
+            g.append(frame(b));
+            g.append(label(b.x + d.stripPadding + 4, b.y + d.stripPadding, 'Also reading', small, { 'font-weight': 700 }));
+            for (const { slot, cover: c } of L.strip(b, d)) {
+              g.append(cover(c, '#a0a0a0'));
+              g.append(rect({ x: c.x + c.w + 6, y: slot.y + 4, w: Math.max(0, slot.w - c.w - 12), h: small * 0.7 }, { fill: '#555' }));
+            }
+            break;
+          case 'shortcut':
+            g.append(frame(b));
+            g.append(centred(b, DESTINATION_NAMES[L.DESTINATIONS[item.cell.option]] || '', Math.round(20 * scale),
+              { 'font-weight': 700 }));
+            break;
+          case 'clock':
+            g.append(rect(b, { rx: 8, fill: '#000' }));
+            g.append(centred({ x: b.x, y: b.y - small, w: b.w, h: b.h }, '12:34', Math.min(b.h * 0.42, b.w * 0.28),
+              { fill: '#fff', 'font-weight': 700 }));
+            g.append(centred({ x: b.x, y: b.y + b.h * 0.28, w: b.w, h: b.h }, 'Tue 24 Nov', small, { fill: '#fff' }));
+            break;
+          case 'calendar': {
+            g.append(frame(b));
+            g.append(label(b.x + 10, b.y + 8, 'November 2026', small, { 'font-weight': 700 }));
+            // The weekdays, then five weeks, shaded by the time read on each day.
+            const gridTop = b.y + 12 + small;
+            const cw = (b.w - 20) / 7;
+            const ch = (b.y + b.h - 8 - gridTop) / 6;
+            'MTWTFSS'.split('').forEach((day, c) => g.append(label(b.x + 10 + c * cw + cw / 2, gridTop + 2, day,
+              Math.min(small, ch * 0.7), { 'text-anchor': 'middle', 'font-weight': 700 })));
+            for (let day = 0; day < 30; day++) {
+              g.append(rect({ x: b.x + 10 + (day % 7) * cw + 1, y: gridTop + (Math.floor(day / 7) + 1) * ch + 1, w: cw - 2, h: ch - 2 },
+                { fill: day % 3 === 0 ? '#000' : day % 4 === 0 ? '#aaa' : '#fff', stroke: '#ccc' }));
+            }
+            break;
+          }
+          case 'week': {
+            g.append(frame(b));
+            g.append(label(b.x + 10, b.y + 8, 'This week', small, { 'font-weight': 700 }));
+            g.append(label(b.x + 10, b.y + 12 + small, '2h 15m', Math.round(26 * scale), { 'font-weight': 700 }));
+            if (item.full) {
+              const heights = [0.3, 0.8, 0.5, 0, 0.9, 0.4, 0.2];
+              const slotW = Math.min(b.w / 2, 7 * 18 * scale) / 7;
+              const chartX = b.x + b.w - 10 - slotW * 7;
+              heights.forEach((h, i) => g.append(rect({ x: chartX + i * slotW + slotW * 0.2, y: b.y + b.h - 14 - small - h * (b.h - 40 - small),
+                w: slotW * 0.6, h: h * (b.h - 40 - small) })));
+            }
+            g.append(label(b.x + 10, b.y + b.h - 8 - small, item.full ? '3 finished · 2 reading · 5-day streak' : '5-day streak', small));
+            break;
+          }
+          case 'weather':
+            g.append(frame(b));
+            g.append(svg('circle', { cx: b.x + 10 + 22 * scale, cy: b.y + b.h / 2, r: 16 * scale, fill: 'none', stroke: '#000', 'stroke-width': 3 }));
+            g.append(label(b.x + 20 + 44 * scale, b.y + b.h / 2 - 22 * scale, '18°', Math.round(36 * scale), { 'font-weight': 700 }));
+            g.append(label(b.x + 20 + 44 * scale, b.y + b.h / 2 + 16 * scale, '21° / 12°', small));
+            break;
+          case 'picture': {
+            const path = picturePath(item.cell.option, result.pictures);
+            const id = `clip${Math.random().toString(36).slice(2)}`;
+            const clip = svg('clipPath', { id });
+            clip.append(rect(b, { rx: 8 }));
+            g.append(clip);
+            if (path) {
+              g.append(svg('image', { href: `/download?path=${encodeURIComponent(path)}`, x: b.x, y: b.y, width: b.w, height: b.h,
+                preserveAspectRatio: 'xMidYMid slice', 'clip-path': `url(#${id})`, filter: 'grayscale(1)' }));
+            } else {
+              g.append(rect(b, { rx: 8, fill: '#ddd' }));
+              g.append(centred(b, `Add pictures to ${PICTURE_FOLDER}`, small, { fill: '#333' }));
+            }
+            g.append(frame(b, { fill: 'none', 'stroke-width': 1 }));
+            break;
+          }
+        }
+      }
+
+      function renderPreview(result) {
+        const preview = $('preview');
+        preview.replaceChildren();
+        const { screen, top } = state.device;
+        const [cx, cy, cw, ch] = state.device.content;
+        preview.setAttribute('viewBox', `0 0 ${screen.w} ${screen.h}`);
+        const d = result.dimensions;
+        const scale = state.device.compact ? 0.6 : 1;
+        preview.append(rect({ x: 0, y: 0, w: screen.w, h: screen.h }, { fill: '#fff' }));
+        // The status line, and the button hints under the content.
+        const status = Math.max(10, Math.round(16 * scale));
+        preview.append(label(cx + d.sidePadding, cy + Math.max(2, (top - cy - status) / 2), '12:34', status));
+        preview.append(label(cx + cw - d.sidePadding, cy + Math.max(2, (top - cy - status) / 2), '87%', status, { 'text-anchor': 'end' }));
+        if (cy + ch < screen.h) {
+          const hints = ['', 'Select', '↑', '↓'];  // Home has no Back
+          const hw = cw / 4;
+          hints.forEach((h, i) => {
+            const box = { x: cx + i * hw + 6, y: cy + ch + 4, w: hw - 12, h: screen.h - cy - ch - 8 };
+            preview.append(rect(box, { rx: 4, fill: '#fff', stroke: '#000' }));
+            preview.append(centred(box, h, Math.max(9, Math.round(13 * scale))));
+          });
+        }
+        for (const item of result.placement.items) {
+          const g = svg('g', { class: 'hit' });
+          g.addEventListener('click', () => showRow(result.rows[item.row].source));
+          drawItem(g, item, result, d, scale);
+          preview.append(g);
+        }
+        const bottomLabels = result.placement.bottom.length > 1 ? ['More', 'Settings'] : ['Settings'];
+        result.placement.bottom.forEach((b, i) => {
+          preview.append(rect(b, { rx: 8, fill: '#fff', stroke: '#000', 'stroke-width': 1 }));
+          preview.append(centred(b, bottomLabels[i] || '', Math.round(18 * scale)));
+        });
+      }
+
+      function showRow(index) {
+        const node = document.querySelector(`.row[data-row="${index}"]`);
+        if (!node) return;
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        node.classList.add('flash');
+        setTimeout(() => node.classList.remove('flash'), 900);
+      }
+
+      function renderWarnings(result) {
+        const list = $('warnings');
+        list.replaceChildren();
+        const add = (text) => list.append(element('li', {}, text));
+        result.rows.forEach((row, r) => {
+          if (result.placement.dropped & (1 << r)) add(`Row ${row.source + 1} does not fit on this reader and is left out.`);
+        });
+        const hasStrip = state.rows.some((row) => row.some((c) => c.widget === 'also'));
+        if (hasStrip && !result.placement.items.some((i) => i.cell.widget === 'also')) {
+          add('Also reading is left out: the book card keeps too little room beside it here.');
+        }
+        const paths = new Set(state.rows.flat().filter((c) => c.widget === 'picture').map((c) => c.path || PICTURE_FOLDER));
+        if (paths.size > L.MAX_PICTURES) add(`At most ${L.MAX_PICTURES} different pictures: the others are left out.`);
+        if (new TextEncoder().encode(layoutJson()).length > L.MAX_BYTES) add('The layout is too long to save (4 KB at most).');
+      }
+
+      function render() {
+        if (!state.device) return;
+        const result = L.layOut(layoutJson(), state.device);
+        renderRows(result);
+        renderPreview(result);
+        renderWarnings(result);
+        const { screen } = state.device;
+        $('previewHint').textContent = `As this reader lays it out, held as it is now (${screen.w} × ${screen.h}). ` +
+          'Select a part of the screen to find its row.';
+      }
+
+      // ---- Pictures ---------------------------------------------------------------------------------
+
+      function shrink(file) {
+        return createImageBitmap(file, { imageOrientation: 'from-image' }).then((bitmap) => {
+          const scale = Math.min(1, PICTURE_LONGEST_SIDE / Math.max(bitmap.width, bitmap.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+          canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+          const context = canvas.getContext('2d');
+          context.fillStyle = '#fff';  // a PNG's transparent parts come out white, as the reader draws them
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('no JPEG'))),
+            'image/jpeg', 0.85));
+        });
+      }
+
+      function freeName(original) {
+        const base = (original.replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9 _-]+/g, '_').trim() || 'picture').slice(0, 40);
+        let name = `${base}.jpg`;
+        for (let i = 2; state.pictures.includes(`${PICTURE_FOLDER}/${name}`); i++) name = `${base}-${i}.jpg`;
+        return name;
+      }
+
+      function uploadPicture(cell) {
+        const input = $('pictureFile');
+        input.value = '';
+        input.onchange = async () => {
+          const file = input.files[0];
+          if (!file) return;
+          $('saveState').textContent = `Uploading ${file.name}...`;
+          try {
+            const blob = await shrink(file);
+            const name = freeName(file.name);
+            if (!(await fetch(`/api/files?path=${encodeURIComponent(PICTURE_FOLDER)}`)).ok) {
+              const body = new URLSearchParams({ name: PICTURE_FOLDER.slice(1), path: '/' });
+              await fetch('/mkdir', { method: 'POST', body });
+            }
+            const form = new FormData();
+            form.append('file', blob, name);
+            const response = await fetch(`/upload?path=${encodeURIComponent(PICTURE_FOLDER)}`, { method: 'POST', body: form });
+            if (!response.ok) throw new Error(await response.text());
+            await loadPictures();
+            cell.path = `${PICTURE_FOLDER}/${name}`;
+            changed();
+            $('saveState').textContent = `${name} is on the card (${Math.round(blob.size / 1024)} KB).`;
+          } catch (error) {
+            $('saveState').textContent = `The picture was not uploaded: ${error.message}`;
+          }
+        };
+        input.click();
+      }
+
+      // ---- Save -------------------------------------------------------------------------------------
+
+      async function save() {
+        const button = $('save');
+        button.disabled = true;
+        $('saveState').textContent = 'Saving...';
+        try {
+          const response = await fetch('/api/home-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: layoutJson() });
+          if (!response.ok) throw new Error(await response.text());
+          const settings = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uiTheme: THEME_TILES, homeLayout: LAYOUT_CUSTOM }) });
+          if (!settings.ok) throw new Error(await settings.text());
+          state.fileText = layoutJson();
+          if (state.settings.uiTheme) state.settings.uiTheme.value = THEME_TILES;
+          if (state.settings.homeLayout) state.settings.homeLayout.value = LAYOUT_CUSTOM;
+          state.dirty = false;
+          showNotice(L.parse(state.fileText));
+          $('saveState').textContent = 'Saved. The reader shows it on Home once you leave File Transfer.';
+        } catch (error) {
+          $('saveState').textContent = `Not saved: ${error.message}`;
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      $('start').addEventListener('change', (e) => {
+        const value = e.target.value;
+        if (value === 'saved') {
+          const saved = state.fileText ? L.parse(state.fileText) : null;
+          useLayout(saved && saved.ok ? JSON.parse(state.fileText) : L.PRESETS.reader);
+        } else {
+          useLayout(L.PRESETS[value]);
+        }
+        changed();
+      });
+      $('addRow').addEventListener('click', () => {
+        if (state.rows.length < L.MAX_ROWS) state.rows.push([defaultCell('shortcut')]);
+        changed();
+      });
+      $('save').addEventListener('click', save);
+      window.addEventListener('beforeunload', (e) => {
+        if (state.dirty) e.preventDefault();
+      });
+
+      load();
+    })();
+  </script>
+</body>
+
+</html>
