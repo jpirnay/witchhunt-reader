@@ -4,7 +4,6 @@
 #include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
-#include <HalStorage.h>
 #include <I18n.h>
 
 #include <algorithm>
@@ -629,59 +628,21 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     RecentBook book = recentBooks[0];
     const int progressPercent = getRecentBookProgressPercent(book);
     if (!coverRendered) {
-      std::string coverPath = book.coverBmpPath;
-      bool hasCover = true;
-      bool coverPending = false;
-      int tileX = LyraMetrics::values.contentSidePadding;
-      if (coverPath.empty()) {
-        hasCover = false;
-      } else {
-        const std::string coverBmpPath = UITheme::getCoverThumbPath(coverPath, coverHeight);
-
-        // First time: load cover from SD and render
-        FsFile file;
-        if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
-          Bitmap bitmap(file);
-          // Never draw the no-cover marker: scaling a 1x1 BMP into the slot paints a solid block.
-          // Falling through to the existing no-cover branch shows the theme's own tile instead.
-          if (bitmap.parseHeaders() == BmpReaderError::Ok &&
-              !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
+      // First time: load the cover from SD and draw it; later renders restore the stored buffer.
+      const int coverX = LyraMetrics::values.contentSidePadding + hPaddingInSelection;
+      const int coverY = tileY + hPaddingInSelection;
+      const CoverThumb thumb =
+          withCoverThumb(UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight), [&](Bitmap& bitmap) {
             coverWidth = bitmap.getWidth();
-            renderer.fillRect(tileX + hPaddingInSelection, tileY + hPaddingInSelection, coverWidth, coverHeight, false);
-            renderer.drawBitmap(bitmap, tileX + hPaddingInSelection, tileY + hPaddingInSelection, coverWidth,
-                                coverHeight);
-          } else {
-            hasCover = false;
-          }
-          file.close();
-        } else {
-          hasCover = false;
-          coverPending = true;  // path exists but BMP not ready yet
-        }
-      }
-
-      // Draw either way
-      renderer.drawRect(tileX + hPaddingInSelection, tileY + hPaddingInSelection, coverWidth, coverHeight, true);
-
-      if (!hasCover) {
-        if (coverPending) {
-          // Cover is being generated — show a loading label centred in the cover area
-          const char* loadingText = tr(STR_LOADING);
-          const int textW = renderer.getTextWidth(SMALL_FONT_ID, loadingText);
-          const int textH = renderer.getLineHeight(SMALL_FONT_ID);
-          renderer.drawText(SMALL_FONT_ID, tileX + hPaddingInSelection + (coverWidth - textW) / 2,
-                            tileY + hPaddingInSelection + (coverHeight - textH) / 2, loadingText, true);
-        } else {
-          // No cover at all — render empty cover placeholder
-          renderer.fillRect(tileX + hPaddingInSelection, tileY + hPaddingInSelection + (coverHeight / 3), coverWidth,
-                            2 * coverHeight / 3, true);
-          renderer.drawIcon(CoverIcon, tileX + hPaddingInSelection + 24, tileY + hPaddingInSelection + 24, 32, 32);
-        }
-      }
+            renderer.fillRect(coverX, coverY, coverWidth, coverHeight, false);
+            renderer.drawBitmap(bitmap, coverX, coverY, coverWidth, coverHeight);
+          });
+      renderer.drawRect(coverX, coverY, coverWidth, coverHeight, true);
+      drawCoverStandIn(renderer, Rect{coverX, coverY, coverWidth, coverHeight}, thumb);
 
       // Only cache the frame buffer once the cover is definitively resolved (loaded or confirmed absent).
       // If a cover is still being generated we keep coverRendered=false so the next render will retry.
-      if (!coverPending) {
+      if (thumb != CoverThumb::Pending) {
         coverBufferStored = storeCoverBuffer();
         coverRendered = coverBufferStored;
       }
@@ -811,6 +772,20 @@ void LyraTheme::drawCardTextPart(const GfxRenderer& renderer, const CardText& te
   for (const auto& line : text.lines[part]) {
     renderer.drawText(fontId, x, y, line.c_str(), true, style);
     y += text.parts[part].lineHeight;
+  }
+}
+
+void LyraTheme::drawCoverStandIn(const GfxRenderer& renderer, const Rect box, const CoverThumb state) {
+  switch (state) {
+    case CoverThumb::Drawn:
+      return;
+    case CoverThumb::Pending:
+      drawCoverLoading(renderer, box);
+      return;
+    case CoverThumb::Absent:
+      renderer.fillRect(box.x, box.y + box.height / 3, box.width, 2 * box.height / 3, true);
+      renderer.drawIcon(CoverIcon, box.x + 24, box.y + 24, 32, 32);
+      return;
   }
 }
 

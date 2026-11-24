@@ -103,4 +103,7 @@ class LyraTheme : public BaseTheme {
   static void drawCardTextPart(const GfxRenderer& renderer, const CardText& text, CardTextFit::PartId part, int x,
                                int y, int width);
   static const uint8_t* iconForName(UIIcon icon, int size);
+  // Where a cover thumbnail did not draw: "Loading" while the cover pass is still making it, else
+  // the no-cover tile, the cover icon over a black lower two thirds. Nothing for a drawn one.
+  static void drawCoverStandIn(const GfxRenderer& renderer, Rect box, CoverThumb state);
 };

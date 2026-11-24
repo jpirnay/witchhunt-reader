@@ -233,6 +233,26 @@ BaseTheme::FittedMessage BaseTheme::fitMessage(const GfxRenderer& renderer, cons
   return {fitted, renderer.wrappedText(fitted, text, width, maxLines, style)};
 }
 
+BaseTheme::CoverThumb BaseTheme::withCoverThumb(const std::string& thumbPath,
+                                                const std::function<void(Bitmap&)>& draw) {
+  if (thumbPath.empty()) return CoverThumb::Absent;
+  FsFile file;
+  if (!Storage.openFileForRead("HOME", thumbPath, file)) return CoverThumb::Pending;
+  Bitmap bitmap(file);
+  if (bitmap.parseHeaders() != BmpReaderError::Ok ||
+      UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
+    return CoverThumb::Absent;
+  }
+  draw(bitmap);
+  return CoverThumb::Drawn;
+}
+
+void BaseTheme::drawCoverLoading(const GfxRenderer& renderer, const Rect box) {
+  const char* loading = tr(STR_LOADING);
+  renderer.drawText(SMALL_FONT_ID, box.x + (box.width - renderer.getTextWidth(SMALL_FONT_ID, loading)) / 2,
+                    box.y + (box.height - renderer.getLineHeight(SMALL_FONT_ID)) / 2, loading, true);
+}
+
 void BaseTheme::layOutButtonHints(const GfxRenderer& renderer, const int fontId, const int base, const int (&tuned)[4],
                                   const char* const (&labels)[4], int (&x)[4], int (&width)[4]) {
   const int maxWidth = HintLayout::bottomMaxWidth(renderer.getScreenWidth(), base, tuned);
@@ -726,36 +746,26 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   int bookWidth, bookX;
   bool hasCoverImage = false;
 
-  if (hasContinueReading && !recentBooks[0].coverBmpPath.empty()) {
-    // Try to get actual image dimensions from BMP header
-    const std::string coverBmpPath = UITheme::getCoverThumbPath(recentBooks[0].coverBmpPath, coverThumbHeight);
+  if (hasContinueReading) {
+    // The card takes the thumbnail's own aspect ratio at baseHeight; without one, the no-cover card below.
+    withCoverThumb(UITheme::getCoverThumbPath(recentBooks[0].coverBmpPath, coverThumbHeight), [&](Bitmap& bitmap) {
+      hasCoverImage = true;
+      const int imgWidth = bitmap.getWidth();
+      const int imgHeight = bitmap.getHeight();
 
-    FsFile file;
-    if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
-      Bitmap bitmap(file);
-      // Never draw the no-cover marker: scaling a 1x1 BMP into the slot paints a solid block.
-      // Falling through to the existing no-cover branch shows the theme's own tile instead.
-      if (bitmap.parseHeaders() == BmpReaderError::Ok &&
-          !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
-        hasCoverImage = true;
-        const int imgWidth = bitmap.getWidth();
-        const int imgHeight = bitmap.getHeight();
+      // Calculate width based on aspect ratio, maintaining baseHeight
+      if (imgWidth > 0 && imgHeight > 0) {
+        bookWidth = static_cast<int>(static_cast<int64_t>(baseHeight) * imgWidth / imgHeight);
 
-        // Calculate width based on aspect ratio, maintaining baseHeight
-        if (imgWidth > 0 && imgHeight > 0) {
-          bookWidth = static_cast<int>(static_cast<int64_t>(baseHeight) * imgWidth / imgHeight);
-
-          // Ensure width doesn't exceed reasonable limits (max 90% of screen width)
-          const int maxWidth = rect.width * 9 / 10;
-          if (bookWidth > maxWidth) {
-            bookWidth = maxWidth;
-          }
-        } else {
-          bookWidth = rect.width / 2;  // Fallback
+        // Ensure width doesn't exceed reasonable limits (max 90% of screen width)
+        const int maxWidth = rect.width * 9 / 10;
+        if (bookWidth > maxWidth) {
+          bookWidth = maxWidth;
         }
+      } else {
+        bookWidth = rect.width / 2;  // Fallback
       }
-      file.close();
-    }
+    });
   }
 
   if (!hasCoverImage) {
@@ -788,40 +798,30 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     // Draw cover image as background if available (inside the box)
     // Only load from SD on first render, then use stored buffer
 
-    if (hasContinueReading && !recentBooks[0].coverBmpPath.empty() && !coverRendered) {
-      const std::string coverBmpPath = UITheme::getCoverThumbPath(recentBooks[0].coverBmpPath, coverThumbHeight);
-
+    if (hasContinueReading && !coverRendered) {
       // First time: load cover from SD and render
-      FsFile file;
-      if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
-        Bitmap bitmap(file);
-        // Never draw the no-cover marker: scaling a 1x1 BMP into the slot paints a solid block.
-        // Falling through to the existing no-cover branch shows the theme's own tile instead.
-        if (bitmap.parseHeaders() == BmpReaderError::Ok &&
-            !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
-          LOG_DBG("THEME", "Rendering bmp");
+      withCoverThumb(UITheme::getCoverThumbPath(recentBooks[0].coverBmpPath, coverThumbHeight), [&](Bitmap& bitmap) {
+        LOG_DBG("THEME", "Rendering bmp");
 
-          renderer.fillRect(bookX, bookY, bookWidth, bookHeight, false);
-          renderer.drawBitmap(bitmap, bookX, bookY, bookWidth, bookHeight);
+        renderer.fillRect(bookX, bookY, bookWidth, bookHeight, false);
+        renderer.drawBitmap(bitmap, bookX, bookY, bookWidth, bookHeight);
 
-          // Draw border around the card
-          renderer.drawRect(bookX, bookY, bookWidth, bookHeight);
+        // Draw border around the card
+        renderer.drawRect(bookX, bookY, bookWidth, bookHeight);
 
-          // No bookmark ribbon when cover is shown - it would just cover the art
+        // No bookmark ribbon when cover is shown - it would just cover the art
 
-          // Store the buffer with cover image for fast navigation
-          coverBufferStored = storeCoverBuffer();
-          coverRendered = coverBufferStored;  // Only consider it rendered if we successfully stored the buffer
+        // Store the buffer with cover image for fast navigation
+        coverBufferStored = storeCoverBuffer();
+        coverRendered = coverBufferStored;  // Only consider it rendered if we successfully stored the buffer
 
-          // First render: if selected, draw selection indicators now
-          if (bookSelected) {
-            LOG_DBG("THEME", "Drawing selection");
-            renderer.drawRect(bookX + 1, bookY + 1, bookWidth - 2, bookHeight - 2);
-            renderer.drawRect(bookX + 2, bookY + 2, bookWidth - 4, bookHeight - 4);
-          }
+        // First render: if selected, draw selection indicators now
+        if (bookSelected) {
+          LOG_DBG("THEME", "Drawing selection");
+          renderer.drawRect(bookX + 1, bookY + 1, bookWidth - 2, bookHeight - 2);
+          renderer.drawRect(bookX + 2, bookY + 2, bookWidth - 4, bookHeight - 4);
         }
-        file.close();
-      }
+      });
     }
 
     if (!bufferRestored && !coverRendered) {

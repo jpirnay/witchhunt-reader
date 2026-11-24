@@ -4,7 +4,6 @@
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
-#include <HalStorage.h>
 #include <I18n.h>
 #include <ImageScale.h>
 #include <Logging.h>
@@ -482,18 +481,10 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
     // Side tiles may extend off-screen — only round corners that are on-screen.
     const bool roundLeft = (x >= 0);
     const bool roundRight = (x + maxW <= screenW);
-    bool hasCover = false;
-    bool tilePending = false;
-    if (!book.coverBmpPath.empty()) {
-      const std::string thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, maxW, maxH);
-      FsFile file;
-      if (Storage.openFileForRead("HOME", thumbPath, file)) {
-        Bitmap bitmap(file);
-        // The no-cover marker must never be drawn — scaling a 1x1 BMP into the tile would paint a
-        // solid block. Leaving hasCover/tilePending false drops through to the no-cover tile below,
-        // which is a better picture than the blank box the old slot-sized placeholder produced.
-        if (bitmap.parseHeaders() == BmpReaderError::Ok &&
-            !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
+    // The no-cover marker is never handed over (withCoverThumb): it drops through to the no-cover
+    // tile below, a better picture than the blank box the old slot-sized placeholder produced.
+    const CoverThumb thumb =
+        withCoverThumb(UITheme::getCoverThumbPath(book.coverBmpPath, maxW, maxH), [&](Bitmap& bitmap) {
           // Height always fills the tile. Only crop horizontally if the cover is
           // wider than the tile; narrow covers get white space on the sides.
           BoxCut cut = cutToBox(bitmap.getWidth(), bitmap.getHeight(), maxW, maxH);
@@ -522,22 +513,14 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
           }
           renderer.drawRoundedRect(x, y, maxW, maxH, kThinOutlineW, kCornerRadius, roundLeft, roundRight, roundLeft,
                                    roundRight, true);
-          hasCover = true;
-        }
-        file.close();
-      } else {
-        tilePending = true;  // path exists but BMP not ready yet
-        anyPending = true;
-      }
-    }
+        });
+    const bool hasCover = thumb == CoverThumb::Drawn;
+    const bool tilePending = thumb == CoverThumb::Pending;
+    if (tilePending) anyPending = true;
     if (!hasCover) {
       renderer.drawRoundedRect(x, y, maxW, maxH, 1, kCornerRadius, roundLeft, roundRight, roundLeft, roundRight, true);
       if (tilePending) {
-        // Cover is being generated — show a loading label centred in the tile
-        const char* loadingText = tr(STR_LOADING);
-        const int textW = renderer.getTextWidth(SMALL_FONT_ID, loadingText);
-        const int textH = renderer.getLineHeight(SMALL_FONT_ID);
-        renderer.drawText(SMALL_FONT_ID, x + (maxW - textW) / 2, y + (maxH - textH) / 2, loadingText, true);
+        drawCoverLoading(renderer, Rect{x, y, maxW, maxH});
       } else {
         renderer.fillRoundedRect(x, y + maxH / 3, maxW, 2 * maxH / 3, kCornerRadius, /*roundTopLeft=*/false,
                                  /*roundTopRight=*/false, /*roundBottomLeft=*/roundLeft,

@@ -2,7 +2,6 @@
 
 #include <Bitmap.h>
 #include <GfxRenderer.h>
-#include <HalStorage.h>
 #include <I18n.h>
 
 #include <algorithm>
@@ -13,7 +12,6 @@
 #include "RecentBooksStore.h"
 #include "components/BookProgressPresentation.h"
 #include "components/UITheme.h"
-#include "components/icons/cover.h"
 #include "components/themes/CardTextFit.h"
 #include "components/themes/TapTargets.h"
 #include "components/themes/lyra/HomeTilesLayout.h"
@@ -68,25 +66,13 @@ bool stripFitsHome(const GfxRenderer& renderer) {
                                     dims());
 }
 
-enum class Cover : uint8_t { Drawn, Pending, Absent };
-
 // A book's thumbnail at `box`'s exact size, which the cover pass writes cropped to it
-// (HomeLayout::thumbSizes). Pending while the pass has not written it yet.
-Cover drawCoverThumb(const GfxRenderer& renderer, const RecentBook& book, const Box& box) {
-  if (book.coverBmpPath.empty()) return Cover::Absent;
-  FsFile file;
-  if (!Storage.openFileForRead("HOME", UITheme::getCoverThumbPath(book.coverBmpPath, box.w, box.h), file)) {
-    return Cover::Pending;
-  }
-  Bitmap bitmap(file);
-  // Never draw the no-cover marker: scaling a 1x1 BMP into the box paints a solid block.
-  if (bitmap.parseHeaders() != BmpReaderError::Ok ||
-      UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
-    return Cover::Absent;
-  }
-  renderer.fillRect(box.x, box.y, box.w, box.h, false);
-  renderer.drawBitmap(bitmap, box.x, box.y, box.w, box.h);
-  return Cover::Drawn;
+// (HomeLayout::thumbSizes).
+BaseTheme::CoverThumb drawCoverThumb(const GfxRenderer& renderer, const RecentBook& book, const Box& box) {
+  return BaseTheme::withCoverThumb(UITheme::getCoverThumbPath(book.coverBmpPath, box.w, box.h), [&](Bitmap& bitmap) {
+    renderer.fillRect(box.x, box.y, box.w, box.h, false);
+    renderer.drawBitmap(bitmap, box.x, box.y, box.w, box.h);
+  });
 }
 
 // A 32 px icon at `size` px. Each target pixel takes the ink under its centre, bilinear over the
@@ -239,18 +225,11 @@ void LyraTilesTheme::drawRecentBookCover(GfxRenderer& renderer, const Rect rect,
   const RecentBook& book = recentBooks[0];
   const Box& cover = layout.cover;
   if (!coverRendered) {
-    const Cover drawn = drawCoverThumb(renderer, book, cover);
-    if (drawn == Cover::Pending) {
-      const char* loading = tr(STR_LOADING);
-      renderer.drawText(SMALL_FONT_ID, cover.x + (cover.w - renderer.getTextWidth(SMALL_FONT_ID, loading)) / 2,
-                        cover.y + (cover.h - renderer.getLineHeight(SMALL_FONT_ID)) / 2, loading, true);
-    } else if (drawn == Cover::Absent) {
-      renderer.fillRect(cover.x, cover.y + cover.h / 3, cover.w, 2 * cover.h / 3, true);
-      renderer.drawIcon(CoverIcon, cover.x + 24, cover.y + 24, 32, 32);
-    }
+    const CoverThumb drawn = drawCoverThumb(renderer, book, cover);
+    drawCoverStandIn(renderer, toRect(cover), drawn);
     renderer.drawRect(cover.x, cover.y, cover.w, cover.h, true);
     // Kept only once the cover is settled; while its thumbnail is being made the next render retries.
-    if (drawn != Cover::Pending) {
+    if (drawn != CoverThumb::Pending) {
       coverBufferStored = storeCoverBuffer();
       coverRendered = coverBufferStored;
     }

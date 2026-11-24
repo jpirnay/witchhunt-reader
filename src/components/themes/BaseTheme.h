@@ -14,6 +14,7 @@
 #include "components/themes/HomeGridNav.h"
 #include "components/themes/PanelMetrics.h"
 
+class Bitmap;
 class GfxRenderer;
 class Epub;
 class Txt;
@@ -332,6 +333,18 @@ class BaseTheme {
   // than estimate it — a three digit percentage ("100%") is wider than any fixed guess, which is
   // how the clock ended up drawn on top of the battery percentage (issue #214).
   static int statusBarBatteryWidth(const GfxRenderer& renderer, const ThemeMetrics& metrics, bool showPercentage);
+
+  // ---- A book's cover thumbnail, as every Home theme draws it ----
+  // What became of it: drawn, not on the card yet (the Home cover pass has not written it), or
+  // nothing to draw (no cover recorded, an unreadable file, or the no-cover marker).
+  enum class CoverThumb : uint8_t { Drawn, Pending, Absent };
+  // Opens the thumbnail at `thumbPath` (UITheme::getCoverThumbPath()) and hands it to `draw`. An
+  // empty path, a book with no cover recorded, is Absent. The 1x1 no-cover marker is never handed
+  // over: scaled into a slot it paints a solid block, so it is Absent and the theme draws its own
+  // no-cover tile instead.
+  static CoverThumb withCoverThumb(const std::string& thumbPath, const std::function<void(Bitmap&)>& draw);
+  // "Loading" centred in `box`, where a cover the pass is still making will go.
+  static void drawCoverLoading(const GfxRenderer& renderer, Rect box);
 
  protected:
   // The floors the default homeLayout() shrinks to before the menu rows lose height.
