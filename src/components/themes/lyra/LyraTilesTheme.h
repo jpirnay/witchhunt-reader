@@ -29,6 +29,8 @@ class LyraTilesTheme : public LyraTheme {
   int homePictureJobs(const GfxRenderer& renderer, Rect content, HomePictureJob* out, int max) const override;
   void setHomeMenu(int menuCount, int menuTrailing) override;
   int homeWidgetActions(const GfxRenderer& renderer, Rect content, HomeDestination* out, int max) const override;
+  bool homeShowsClock(const GfxRenderer& renderer, Rect content) const override;
+  bool refreshHomeDay(const GfxRenderer& renderer, Rect content) override;
   HomeGridNav::Grid homeGrid(const GfxRenderer& renderer, Rect content, int shownBooks, int menuCount,
                              int menuTrailing) const override;
   bool homeSwipeCyclesBooks() const override { return true; }

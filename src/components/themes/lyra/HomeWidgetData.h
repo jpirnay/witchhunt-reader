@@ -7,8 +7,9 @@
 
 // What Home's widgets show that is not the book list: the week's and the month's reading, the last
 // forecast and the pictures. Read once when Home opens (LyraTilesTheme::prepareHome), on the loop
-// task, and only what the layout uses; the draw calls on the render task only read it. The clock
-// widget reads the time when it draws.
+// task, and only what the layout uses; the draw calls on the render task only read it. The day's
+// part is read again when the day turns while Home is up (loadDay). The clock widget reads the time
+// when it draws.
 struct HomeWidgetData {
   // ---- Reading stats. A day is a day of the clock, so they are known only once it is set. ----
   bool readingKnown = false;
@@ -43,6 +44,8 @@ struct HomeWidgetData {
   // Reads what `config` uses. `pictureSources` names each picture's file or folder; a folder's
   // choice stays in `pictures` while it is on the card, so a return to Home does not change it.
   void load(const HomeTilesLayout::Config& config, const std::string* pictureSources);
+  // The part of load() a new day changes: the date, and the reading by day where `config` shows it.
+  void loadDay(const HomeTilesLayout::Config& config);
 };
 
 // The folder Home's ready-made layouts take their pictures from.

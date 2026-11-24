@@ -95,6 +95,18 @@ bool HomeActivity::shouldSkipPeriodicUpdate() const {
   return !HomeClockCadence::redraws(millis() - activityManager.lastUserActivityMs(), shown.tm_min);
 }
 
+bool HomeActivity::onClockMinute() {
+  // The theme reads the calendar and the week's reading when Home opens. Left up through midnight,
+  // or with the clock set meanwhile, they are read again for the new day. Local midnight is a
+  // multiple of ten minutes, so the idle pace never skips that redraw.
+  const uint16_t day = currentLocalDayIndex();
+  if (day == shownDay_) return showsClock_;
+  shownDay_ = day;
+  const Rect content = UITheme::getContentRect(renderer, true, false);
+  RenderLock lock;
+  return UITheme::getInstance().getMutableTheme().refreshHomeDay(renderer, content) || showsClock_;
+}
+
 bool HomeActivity::coverAttemptsExhausted(const std::string& path) const {
   const auto it = coverTransientAttempts.find(path);
   return it != coverTransientAttempts.end() && it->second >= COVER_MAX_TRANSIENT_ATTEMPTS;
@@ -486,6 +498,9 @@ void HomeActivity::onEnter() {
   for (const auto& book : recentBooks) recentDocIds.push_back(KOReaderDocumentId::calculateFromFilename(book.path));
   READING_STATS.prefetchRecent(recentDocIds);
   pictureAttempts_ = 0;
+  // The day before the theme reads its widgets for it (prepareHome, in the rebuild below): one that
+  // turns in between is then caught at the next minute (onClockMinute) rather than missed.
+  shownDay_ = currentLocalDayIndex();
   // Built here, once per entry, before the first render is requested. render() runs on the render
   // task and loop() on this one; when both rebuilt the list on a dirty flag, they could run at once,
   // each clearing and then appending, and Home showed every entry twice. The rebuild also reads the
@@ -499,6 +514,7 @@ void HomeActivity::onEnter() {
   const Rect content = UITheme::getContentRect(renderer, true, false);
   grid_ = GUI.homeGrid(renderer, content, shownBooks_, static_cast<int>(menuEntries.size()), menuTrailing_);
   widgetActionCount_ = GUI.homeWidgetActions(renderer, content, widgetActions_, kMaxWidgetActions);
+  showsClock_ = GUI.homeShowsClock(renderer, content);
   // Nothing for the cover pass to make: no book, and no picture a widget shows.
   if (recentBooks.empty()) {
     HomePictureJob jobs[kMaxPictureJobs];
