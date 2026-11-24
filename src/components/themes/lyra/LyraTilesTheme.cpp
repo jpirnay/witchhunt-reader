@@ -70,11 +70,16 @@ Rect toRect(const Box& b) { return Rect{b.x, b.y, b.w, b.h}; }
 
 // A book's thumbnail at `box`'s exact size, which the cover pass writes cropped to it
 // (HomeLayout::thumbSizes).
-BaseTheme::CoverThumb drawCoverThumb(const GfxRenderer& renderer, const RecentBook& book, const Box& box) {
-  return BaseTheme::withCoverThumb(UITheme::getCoverThumbPath(book.coverBmpPath, box.w, box.h), [&](Bitmap& bitmap) {
+// A thumbnail made at the box's size (a cover's, a converted picture's), drawn 1:1 over paper.
+BaseTheme::CoverThumb drawThumbFile(const GfxRenderer& renderer, const std::string& path, const Box& box) {
+  return BaseTheme::withCoverThumb(path, [&](Bitmap& bitmap) {
     renderer.fillRect(box.x, box.y, box.w, box.h, false);
     renderer.drawBitmap(bitmap, box.x, box.y, box.w, box.h);
   });
+}
+
+BaseTheme::CoverThumb drawCoverThumb(const GfxRenderer& renderer, const RecentBook& book, const Box& box) {
+  return drawThumbFile(renderer, UITheme::getCoverThumbPath(book.coverBmpPath, box.w, box.h), box);
 }
 
 // A 32 px icon at `size` px. Each target pixel takes the ink under its centre, bilinear over the
@@ -148,6 +153,12 @@ void drawTileContent(const GfxRenderer& renderer, const Box& tile, const uint8_t
     renderer.drawText(fontId, textX, y, line.c_str(), ink, EpdFontFamily::BOLD);
     y += lineHeight;
   }
+}
+
+// `text` on one line `width` wide, cut short with an ellipsis where it is longer.
+void drawFitted(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
+                const int width, const EpdFontFamily::Style style = EpdFontFamily::REGULAR) {
+  renderer.drawText(fontId, x, y, renderer.truncatedText(fontId, text, width, style).c_str(), true, style);
 }
 
 void drawLines(const GfxRenderer& renderer, const int fontId, const int x, int y, const std::vector<std::string>& lines,
@@ -404,10 +415,7 @@ void LyraTilesTheme::drawBookCard(GfxRenderer& renderer, const Box& card, const 
   // --- The text column: what the card is for, then the book's details ---
   const Box& column = layout.text;
   const int eyebrowHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  renderer.drawText(
-      SMALL_FONT_ID, column.x, column.y,
-      renderer.truncatedText(SMALL_FONT_ID, tr(STR_CONTINUE_READING), column.w, EpdFontFamily::BOLD).c_str(), true,
-      EpdFontFamily::BOLD);
+  drawFitted(renderer, SMALL_FONT_ID, column.x, column.y, tr(STR_CONTINUE_READING), column.w, EpdFontFamily::BOLD);
   const int blockTop = column.y + eyebrowHeight + kEyebrowGap;
   const int blockHeight = column.y + column.h - blockTop;
   // The status line has a place of its own at the card's foot, so the column fits it out.
@@ -430,9 +438,8 @@ void LyraTilesTheme::drawBookCard(GfxRenderer& renderer, const Box& card, const 
   if (!status.empty()) {
     const Box& foot = layout.foot;
     const int barY = foot.y + foot.h - kBarHeight;
-    renderer.drawText(UI_10_FONT_ID, foot.x, barY - 2 - renderer.getLineHeight(UI_10_FONT_ID),
-                      renderer.truncatedText(UI_10_FONT_ID, status.c_str(), foot.w, EpdFontFamily::BOLD).c_str(), true,
-                      EpdFontFamily::BOLD);
+    drawFitted(renderer, UI_10_FONT_ID, foot.x, barY - 2 - renderer.getLineHeight(UI_10_FONT_ID), status.c_str(),
+               foot.w, EpdFontFamily::BOLD);
     renderer.drawRoundedRect(foot.x, barY, foot.w, kBarHeight, 1, kBarHeight / 2, true);
     const int filled = foot.w * std::clamp(progressPercent, 0, 100) / 100;
     if (filled >= kBarHeight) {
@@ -453,9 +460,8 @@ void LyraTilesTheme::drawAlsoReading(GfxRenderer& renderer, const Box& row, cons
   const int labelX = layout.slots[0].x;
   const int labelW =
       layout.slots[HomeTilesLayout::kStripBooks - 1].x + layout.slots[HomeTilesLayout::kStripBooks - 1].w - labelX;
-  renderer.drawText(SMALL_FONT_ID, labelX, layout.slots[0].y - kStripLabelToCovers - smallLine,
-                    renderer.truncatedText(SMALL_FONT_ID, tr(STR_ALSO_READING), labelW, EpdFontFamily::BOLD).c_str(),
-                    true, EpdFontFamily::BOLD);
+  drawFitted(renderer, SMALL_FONT_ID, labelX, layout.slots[0].y - kStripLabelToCovers - smallLine, tr(STR_ALSO_READING),
+             labelW, EpdFontFamily::BOLD);
   for (int i = 0; i < stripBooks; ++i) {
     const RecentBook& other = recentBooks[i + 1];
     const Box& slot = layout.slots[i];
@@ -591,6 +597,9 @@ void drawCardFrame(const GfxRenderer& renderer, const Box& box, const bool selec
 
 bool clockSet() { return HalClock::isSynced() && !HalClock::isStaleRestore(); }
 
+// One, two and three times: worked out here, so no draw divides at run time for them.
+constexpr TextScale kTimes[] = {TextScale::ratio(1, 1), TextScale::ratio(2, 1), TextScale::ratio(3, 1)};
+
 }  // namespace
 
 void LyraTilesTheme::drawClock(GfxRenderer& renderer, const Box& box) const {
@@ -612,13 +621,13 @@ void LyraTilesTheme::drawClock(GfxRenderer& renderer, const Box& box) const {
   const int room = box.w - 2 * kWidgetPadding;
   int scale = 3;
   for (; scale > 1; --scale) {
-    const TextScale ts = TextScale::ratio(scale, 1);
+    const TextScale ts = kTimes[scale - 1];
     if (renderer.getTextWidthScaled(NOTOSANS_18_FONT_ID, time, EpdFontFamily::BOLD, ts) <= room &&
         renderer.getLineHeightScaled(NOTOSANS_18_FONT_ID, ts) + dateHeight <= box.h - 2 * kWidgetPadding) {
       break;
     }
   }
-  const TextScale ts = TextScale::ratio(scale, 1);
+  const TextScale ts = kTimes[scale - 1];
   const int timeHeight = renderer.getLineHeightScaled(NOTOSANS_18_FONT_ID, ts);
   const int top = box.y + (box.h - timeHeight - dateHeight) / 2;
   const int timeWidth = renderer.getTextWidthScaled(NOTOSANS_18_FONT_ID, time, EpdFontFamily::BOLD, ts);
@@ -641,10 +650,7 @@ void LyraTilesTheme::drawPicture(GfxRenderer& renderer, const Box& box, const in
     });
   } else if (!source.empty()) {
     // A JPEG or PNG Home's cover pass has made at this size, cut and dithered (homePictureJobs).
-    drawn = withCoverThumb(homePictureTarget(source, data_.pictureSizes[index], box.w, box.h), [&](Bitmap& bitmap) {
-      renderer.fillRect(box.x, box.y, box.w, box.h, false);
-      renderer.drawBitmap(bitmap, box.x, box.y, box.w, box.h);
-    });
+    drawn = drawThumbFile(renderer, homePictureTarget(source, data_.pictureSizes[index], box.w, box.h), box);
   }
   if (drawn == CoverThumb::Pending && !FsHelpers::hasBmpExtension(source)) {
     drawCoverLoading(renderer, toRect(box));
@@ -676,9 +682,7 @@ void LyraTilesTheme::drawCalendar(GfxRenderer& renderer, const Box& box, const b
   }
   char title[32];
   snprintf(title, sizeof(title), "%s %d", I18N.get(DateNames::kShortMonths[data_.month]), data_.year);
-  renderer.drawText(SMALL_FONT_ID, inner.x, inner.y,
-                    renderer.truncatedText(SMALL_FONT_ID, title, inner.w, EpdFontFamily::BOLD).c_str(), true,
-                    EpdFontFamily::BOLD);
+  drawFitted(renderer, SMALL_FONT_ID, inner.x, inner.y, title, inner.w, EpdFontFamily::BOLD);
 
   const int weeks = (data_.firstColumn + data_.daysInMonth + 6) / 7;
   const int gridTop = inner.y + small;
@@ -734,9 +738,7 @@ void LyraTilesTheme::drawSummary(GfxRenderer& renderer, const Box& box, const bo
   const Box inner{box.x + kWidgetPadding, box.y + kWidgetPadding, box.w - 2 * kWidgetPadding,
                   box.h - 2 * kWidgetPadding};
   const int small = renderer.getLineHeight(SMALL_FONT_ID);
-  renderer.drawText(SMALL_FONT_ID, inner.x, inner.y,
-                    renderer.truncatedText(SMALL_FONT_ID, tr(STR_THIS_WEEK), inner.w, EpdFontFamily::BOLD).c_str(),
-                    true, EpdFontFamily::BOLD);
+  drawFitted(renderer, SMALL_FONT_ID, inner.x, inner.y, tr(STR_THIS_WEEK), inner.w, EpdFontFamily::BOLD);
   if (!data_.readingKnown) {
     drawCentered(renderer, SMALL_FONT_ID, inner, box.y + (box.h - small) / 2,
                  data_.dateKnown ? tr(STR_READING_STATS_NO_DATA) : tr(STR_CLOCK_NOT_SET), true);
@@ -746,9 +748,7 @@ void LyraTilesTheme::drawSummary(GfxRenderer& renderer, const Box& box, const bo
   // An empty week reads as a dash rather than "0s".
   const std::string total = data_.weekSeconds > 0 ? BookProgressPresentation::formatReadingDuration(data_.weekSeconds)
                                                   : std::string(tr(STR_READING_STATS_UNKNOWN));
-  renderer.drawText(NOTOSANS_18_FONT_ID, inner.x, inner.y + small,
-                    renderer.truncatedText(NOTOSANS_18_FONT_ID, total.c_str(), inner.w, EpdFontFamily::BOLD).c_str(),
-                    true, EpdFontFamily::BOLD);
+  drawFitted(renderer, NOTOSANS_18_FONT_ID, inner.x, inner.y + small, total.c_str(), inner.w, EpdFontFamily::BOLD);
   const int footTop = inner.y + inner.h - small;
   if (full) {
     const int chartW = std::min(inner.w / 2, 7 * capped(18, 10));
@@ -785,8 +785,7 @@ void LyraTilesTheme::drawSummary(GfxRenderer& renderer, const Box& box, const bo
     snprintf(line, sizeof(line), "%s", streak);
   }
   if (line[0] != '\0') {
-    renderer.drawText(SMALL_FONT_ID, inner.x, footTop, renderer.truncatedText(SMALL_FONT_ID, line, inner.w).c_str(),
-                      true);
+    drawFitted(renderer, SMALL_FONT_ID, inner.x, footTop, line, inner.w);
   }
 }
 
@@ -812,7 +811,7 @@ void LyraTilesTheme::drawWeatherCard(GfxRenderer& renderer, const Box& box, cons
            WeatherDraw::tempUnitLabel());
   const int textX = icon ? inner.x + iconSize + kWidgetPadding : inner.x;
   const int textW = inner.x + inner.w - textX;
-  const TextScale ts = TextScale::ratio(PanelMetrics::COMPACT ? 1 : 2, 1);
+  const TextScale ts = kTimes[PanelMetrics::COMPACT ? 0 : 1];
   const int tempHeight = renderer.getLineHeightScaled(NOTOSANS_18_FONT_ID, ts);
   const int tempTop = full || !icon ? inner.y + (inner.h - tempHeight - small) / 2 : inner.y;
   renderer.drawTextScaled(NOTOSANS_18_FONT_ID, textX, tempTop, temp, true, EpdFontFamily::BOLD, ts);
@@ -821,6 +820,5 @@ void LyraTilesTheme::drawWeatherCard(GfxRenderer& renderer, const Box& box, cons
            WeatherDraw::kDegree, weather::whole(data_.low, weather::TENTHS_DECIMALS), WeatherDraw::kDegree);
   const int rangeY = full || !icon ? tempTop + tempHeight : inner.y + inner.h - small;
   const int rangeX = full || !icon ? textX : inner.x;
-  renderer.drawText(SMALL_FONT_ID, rangeX, rangeY,
-                    renderer.truncatedText(SMALL_FONT_ID, range, full || !icon ? textW : inner.w).c_str(), true);
+  drawFitted(renderer, SMALL_FONT_ID, rangeX, rangeY, range, full || !icon ? textW : inner.w);
 }
