@@ -360,9 +360,12 @@ initialisers in `CrossPointSettings.h`. Why they are what they are:
   latching out of the same builds. The queries stay declared and report no event.
 - `touchUiControls` silences touch outside the reader. `main.cpp` sets the gate every tick from
   the setting and the activity on top, and the reader on top is always enabled
-  (`ActivityManager::readerIsOnTop()`; the screens it opens, such as its menu, contents and
-  dictionary, are gated with the rest), because
-  `touchReaderControls` governs it there. `hasTouch()` is not gated: screens use it for layout.
+  (`ActivityManager::readerOrItsOverlayOnTop()`; the screens it opens, such as its menu, contents
+  and dictionary, are gated with the rest), because
+  `touchReaderControls` governs it there. An overlay over the page counts as the reader
+  (`Activity::overlaysScreenBelow()`, `TouchGate::readerOwnsScreen()`): the light drawer, which the
+  top-edge swipe pulls over the page and which would otherwise open with no touch at all.
+  `hasTouch()` is not gated: screens use it for layout.
   Nobody is stranded with the gate off: the Home key's Back and Confirm arrive as button presses
   below this layer, and `BTN_TOGGLE_TOUCH_UI` can be bound to a reader gesture.
 - `touchReaderControls` (off, tap, swipe, inverted tap) governs the reading surface, link taps

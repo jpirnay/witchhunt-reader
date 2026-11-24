@@ -612,7 +612,7 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 - **Page Turn Buttons**: "Follow Book" (default) or "Fixed". In a book whose pages turn right to left (a vertical book, or a Hebrew, Arabic, Persian or Urdu book), Follow Book makes the **Left** and **Right** buttons follow the page: Left shows the next page and Right the previous one. Every direction-bound action you gave to Left or Right (short, double and long press: page back or forward, 10 pages back or forward, previous or next chapter) swaps the same way, and so do the actions of the left and right swipe zones on a touch device. Other actions, and the Up and Down buttons, never change. "Fixed" keeps Left as back and Right as forward in every book. The setting does not touch the taps, page swipes and progress bars below, which follow the page.
 - **Button Actions Overview**: A read-only overview screen showing the current short/double/long press mapping for every button at a glance.
 - **Touch Lock** *(touch devices only)*: Touch off everywhere, books included: page turns, the reader bars, gestures and the light panel. Read and navigate by the keys alone, with a hand resting on the glass. The keys keep working, the Home key of the X4 Pro and the LilyGo T5 S3 among them, and touching the glass does not keep the device awake. Switch it off here, with a key bound to **Toggle Touch Lock**, or on the BOOX Picco with the slide switch set to "Touch". "OFF" (default) / "ON".
-- **Touch Navigation** *(touch devices only)*: Whether touch does anything outside the reader — list rows, covers, the home menu, the settings tabs, the on-screen button hints. "ON" / "OFF". See **[Touch Controls](#5-touch-controls)**.
+- **Touch Navigation** *(touch devices only)*: Whether touch does anything outside the reader — list rows, covers, the home menu, the settings tabs, the on-screen button hints. The light panel pulled down over a book counts as the book and keeps touch. "ON" / "OFF". See **[Touch Controls](#5-touch-controls)**.
 - **Touch Page Turn** *(touch devices only)*: How the reading page turns pages by touch — "Off", "Tap Zones", "Swipe", "Tap Zones (Inverted)". It governs page turns only; the reader menu and the reading light stay reachable either way.
 - **Tap Action** *(touch devices only)*: Whether tapping a list row selects it — "Select, then activate" (default) — or opens it straight away, "Activate immediately".
 - **Gesture actions** *(touch devices only)*: One entry per gesture — the sideways swipes, the four edge swipes (left and right edge columns, up and down), the two ten-page zone swipes, the five tap zones, the same five as long taps, the four corner holds, pinch and rotation — each assigned an action from the same list the buttons offer. See **[Touch Controls](#5-touch-controls)**.
@@ -1323,7 +1323,8 @@ Home.
 - **Settings → Controls → Touch Page Turn** → *Off* stops touch turning pages, and nothing
   else.
 - **Settings → Controls → Touch Navigation** → *Off* silences touch outside the reading page,
-  the reader menu, table of contents and dictionary included.
+  the reader menu, table of contents and dictionary included. The light panel pulled down over
+  the page is part of it and keeps touch.
 - **Settings → Controls → Tap Action** switches list rows between select-then-open and
   open-on-first-tap.
 - Any single gesture can be set to **Ignore (do nothing)** in *Gesture actions* to switch just

@@ -2045,10 +2045,12 @@ void loop() {
   // and giving one behaviour two switches only creates a way for a device to look
   // broken. Reader SUB-screens (contents, dictionary, the menu) are UI screens and
   // are gated with the rest: hence the reader ON TOP, not isReaderActivity(),
-  // which also answers true under them and left them live.
+  // which also answers true under them and left them live. An overlay pulled
+  // over the page (the light drawer) is the reader's, not a screen of its own:
+  // gated as the page, or a swipe on the page opens a drawer touch cannot use.
   mappedInputManager.setTouchEventsEnabled(
       TouchGate::eventsEnabled(SETTINGS.touchLock != 0, SETTINGS.touchUiControls != CrossPointSettings::TOUCH_UI_OFF,
-                               activityManager.readerIsOnTop()));
+                               activityManager.readerOrItsOverlayOnTop()));
   // Must follow the drain above and precede every power consumer below.
   serviceBootPowerRelease();
   HalClock::updatePeriodic();

@@ -15,6 +15,7 @@
 #include "MappedInputManager.h"
 #include "RenderLock.h"
 #include "SerialTestApi.h"  // SERIAL_TEST_API
+#include "TouchUi.h"        // CP_TOUCH_UI
 #include "util/ScreenshotInfo.h"
 
 class Activity {
@@ -81,6 +82,14 @@ class Activity {
   // gestures come here (ActivityManager::currentIsReaderActivity()). The EPUB reader answers false while its bars are
   // open over the page and it draws them itself: they take the keys and the touch, as a screen pushed over it would.
   virtual bool takesReaderControls() const { return isReaderActivity(); }
+#if CP_TOUCH_UI
+  // A sheet over the screen it was opened from, which it leaves standing: part of that screen rather than a screen of
+  // its own. Over the reader it takes touch as the reader does, with Touch Navigation off too
+  // (ActivityManager::readerOrItsOverlayOnTop(), TouchGate::readerOwnsScreen()). The light drawer. Compiled out with
+  // the touch layer: it only steers the touch gate, and a virtual is a slot in every activity's vtable (~380 B on the
+  // C3).
+  virtual bool overlaysScreenBelow() const { return false; }
+#endif
   // The panel's polarity this screen goes out in under Dark Mode (DarkMode::invertsOutput): inverted with the setting,
   // unless it shows a picture of its own or the frame already on screen. ActivityManager sets the panel from it before
   // the screen's onEnter() and at every render pass.

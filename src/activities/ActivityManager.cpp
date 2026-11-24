@@ -22,6 +22,7 @@
 #include "SdCardFontGlobals.h"
 #include "SettingsList.h"
 #include "SilentRestart.h"
+#include "TouchGate.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -798,7 +799,18 @@ bool ActivityManager::isReaderActivity() const {
                      [](const auto& activity) { return activity->isReaderActivity(); });
 }
 
-bool ActivityManager::readerIsOnTop() const { return currentActivity && currentActivity->isReaderActivity(); }
+bool ActivityManager::readerOrItsOverlayOnTop() const {
+  if (currentActivity == nullptr) return false;
+#if CP_TOUCH_UI
+  // The top of the stack is the screen the current one was opened from.
+  const bool belowIsReader = !stackActivities.empty() && stackActivities.back()->isReaderActivity();
+  return TouchGate::readerOwnsScreen(currentActivity->isReaderActivity(), currentActivity->overlaysScreenBelow(),
+                                     belowIsReader);
+#else
+  // No digitiser, so no overlay to ask about (Activity::overlaysScreenBelow() is compiled out with the touch layer).
+  return currentActivity->isReaderActivity();
+#endif
+}
 
 bool ActivityManager::currentIsReaderActivity() const {
   return currentActivity && currentActivity->takesReaderControls();
