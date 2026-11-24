@@ -544,6 +544,10 @@ void HomeActivity::onExit() {
   Epub::clearCoverMetadataMemo();
   Activity::onExit();
   freeCoverBuffer();
+  // The clock and weather widgets draw scaled text, which takes the reader's scaled-glyph cache
+  // (4.75 KB) on first use. Given back as a reader gives it back, so it does not stay under the
+  // next screen: X3, kept, it cost Home 5 KB of free heap and the next reader its stable placement.
+  renderer.releaseScaledGlyphCache();
   UITheme::getInstance().getMutableTheme().invalidateFrameCache();
   // Never hand the next activity a degraded display: if we exit mid-load (e.g. the
   // user opened a book before covers finished), put the secondary framebuffer back.
