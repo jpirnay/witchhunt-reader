@@ -1245,6 +1245,16 @@ int foldedCodepoints(const char* word, uint32_t* out) {
   return count;
 }
 
+// Whether a and b are one word but for case, folded codepoint by codepoint as foldedCodepoints() folds them.
+bool sameFoldedWord(const char* a, const char* b) {
+  const auto* pa = reinterpret_cast<const unsigned char*>(a);
+  const auto* pb = reinterpret_cast<const unsigned char*>(b);
+  while (*pa != 0 && *pb != 0) {
+    if (utf8LowerCodepoint(utf8NextCodepoint(&pa)) != utf8LowerCodepoint(utf8NextCodepoint(&pb))) return false;
+  }
+  return *pa == 0 && *pb == 0;
+}
+
 // Edits between a and b: letters added, dropped or changed, and two neighbours swapped (optimal string alignment).
 // limit + 1 as soon as it must be more than `limit`: two rows in a row above it, since a swap reaches back two rows.
 int editDistance(const uint32_t* a, const int aLen, const uint32_t* b, const int bLen, const int limit) {
@@ -1278,7 +1288,7 @@ int editDistance(const uint32_t* a, const int aLen, const uint32_t* b, const int
 
 // How a kept headword ranks: smaller is better, compared field by field.
 struct SuggestionRank {
-  uint8_t kind = 0;          // 0: a stem of the word; 1: within the edit limit
+  uint8_t kind = 0;          // 0: the word in a case the lookup did not try; 1: a stem of it; 2: within the edit limit
   uint8_t distance = 0;      // a stem: the letters the word adds to it; otherwise the edits
   uint8_t rearranged = 1;    // 0: the word's own letters in another order, the likeliest misprint; 1: other letters
   uint8_t otherInitial = 0;  // 1: it does not start with the word's first letter, a less likely misprint
@@ -1322,6 +1332,13 @@ bool Dictionary::suggest(const char* word, DictSuggestions& out, LookupResult* o
   const int targetLen = foldedCodepoints(cleaned.c_str(), target);
   if (targetLen <= 0) return false;
   const int editLimit = targetLen <= 4 ? 1 : targetLen <= 8 ? 2 : 3;
+  // The two spellings the lookup tried (resolve()): as written, and in lower case. Its index compares ASCII letters
+  // without case, so a headword that differs from one of them in ASCII case alone was tried as well.
+  const std::string lowered = utf8ToLower(cleaned);
+  const auto triedByLookup = [&](const char* headword) {
+    return StringUtils::asciiCaseCmp(headword, cleaned.c_str()) == 0 ||
+           StringUtils::asciiCaseCmp(headword, lowered.c_str()) == 0;
+  };
 
   LookupSession session;
   if (!openSession(session)) {
@@ -1347,9 +1364,10 @@ bool Dictionary::suggest(const char* word, DictSuggestions& out, LookupResult* o
     uint8_t at = out.count;
     while (at > 0 && rank < ranks[at - 1]) --at;
     if (at >= DictSuggestions::MAX) return;
-    // A case variant of one already kept ("Bill", "bill") adds nothing: the lookup finds either.
+    // A case variant of one already kept ("Bill", "bill"; "Öl", "öl") adds nothing: the lookup finds either. Folded
+    // per codepoint, as the edits are counted: compared by ASCII case alone, both "Öl" and "öl" were listed.
     for (uint8_t k = 0; k < out.count; ++k) {
-      if (StringUtils::asciiCaseCmp(out.words[k], headword) == 0) return;
+      if (sameFoldedWord(out.words[k], headword)) return;
     }
     // Looked up again, a headword with punctuation at an edge ("a.m.") would be cleaned to another word and miss.
     if (StringUtils::asciiCaseCmp(cleanWord(headword).c_str(), headword) != 0) return;
@@ -1382,13 +1400,20 @@ bool Dictionary::suggest(const char* word, DictSuggestions& out, LookupResult* o
     const bool isStem = candidateLen < targetLen && candidateLen >= 3 && 2 * candidateLen >= targetLen &&
                         std::equal(candidate, candidate + candidateLen, target);
     if (isStem) {
-      rank.kind = 0;
+      rank.kind = 1;
       rank.distance = static_cast<uint8_t>(targetLen - candidateLen);
     } else {
       const int edits = editDistance(target, targetLen, candidate, candidateLen, editLimit);
-      // 0 edits: the word itself in another case, which the lookup already tried.
-      if (edits == 0 || edits > editLimit) continue;
-      rank.kind = 1;
+      if (edits > editLimit) continue;
+      if (edits == 0) {
+        // The word itself in another case. One the lookup tried is no suggestion; any other is the likeliest there is:
+        // "Москва" for "МОСКВА", which the lookup tried as written and as "москва" and never in title case.
+        if (triedByLookup(wordBuf)) continue;
+        rank.kind = 0;
+        offer(wordBuf, static_cast<size_t>(length), rank);
+        continue;
+      }
+      rank.kind = 2;
       rank.distance = static_cast<uint8_t>(edits);
       rank.rearranged = candidateLen == targetLen && sameLetters(candidate, target, targetLen) ? 0 : 1;
       rank.otherInitial = candidate[0] != target[0] ? 1 : 0;
@@ -1409,11 +1434,30 @@ bool Dictionary::suggest(const char* word, DictSuggestions& out, LookupResult* o
     const DictEntries found = locate(session, swapped.c_str(), headword);
     if (!found.location.found || headword.size() >= DictSuggestions::WORD_BYTES) continue;
     SuggestionRank rank;
-    rank.kind = 1;
+    rank.kind = 2;
     rank.distance = 1;
     rank.rearranged = 0;
     rank.otherInitial = at == 0 ? 1 : 0;
     offer(headword.c_str(), headword.size(), rank);
+  }
+
+  // The word in title case ("Москва" for "москва"), which the lookup does not try: a capital sorts far from its small
+  // letter, outside the windows read whenever the word was typed in lower case. Looked up directly, one index search.
+  {
+    const auto* rest = reinterpret_cast<const unsigned char*>(lowered.c_str());
+    const uint32_t first = utf8NextCodepoint(&rest);
+    std::string titled;
+    utf8AppendCodepoint(titled, utf8UpperCodepoint(first));
+    titled.append(reinterpret_cast<const char*>(rest));
+    if (!triedByLookup(titled.c_str())) {
+      std::string headword;
+      const DictEntries found = locate(session, titled.c_str(), headword);
+      if (found.location.found && headword.size() < DictSuggestions::WORD_BYTES) {
+        SuggestionRank rank;
+        rank.kind = 0;
+        offer(headword.c_str(), headword.size(), rank);
+      }
+    }
   }
   LOG_DBG("DICT", "Suggestions for '%s': %u of %u headwords", cleaned.c_str(), static_cast<unsigned>(out.count),
           static_cast<unsigned>(out.scanned));

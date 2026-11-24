@@ -2416,6 +2416,33 @@ TEST_F(DictionaryTest, CaseDoesNotCountInSuggestions) {
   EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"überall"}));
 }
 
+// The duplicate check folds case per character, as the comparison does: "Öl" and "öl" are one suggestion, as "Paris"
+// and "paris" are.
+TEST_F(DictionaryTest, NonAsciiCaseVariantsAreOneSuggestion) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SuggestCaseNonAscii", {{"Öl", "oil"}, {"öl", "oil, lower case"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SuggestCaseNonAscii"));
+  DictSuggestions s;
+  ASSERT_TRUE(dict.suggest("ÖLL", s));
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"Öl"}));
+}
+
+// The lookup tries the word as written and in lower case. A headword the dictionary keeps capitalised ("Москва") is
+// neither for "МОСКВА" or "москва": the same word in a case the lookup did not try, and suggested ahead of the rest.
+TEST_F(DictionaryTest, AHeadwordInACaseTheLookupDidNotTryComesFirst) {
+  ASSERT_NO_FATAL_FAILURE(
+      writeDictionary("SuggestTitleCase", {{"Москва", "capital"}, {"Москве", "dative"}, {"Αθηνα", "Athens"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SuggestTitleCase"));
+  DictSuggestions s;
+  ASSERT_TRUE(dict.suggest("МОСКВА", s));
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"Москва", "Москве"}));
+  ASSERT_TRUE(dict.suggest("москва", s));
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"Москва", "Москве"}));
+  ASSERT_TRUE(dict.suggest("ΑΘΗΝΑ", s));
+  EXPECT_EQ(suggestionsOf(s), (std::vector<std::string>{"Αθηνα"}));
+}
+
 TEST_F(DictionaryTest, AHeadwordTheLookupWouldCleanToAnotherWordIsNotSuggested) {
   ASSERT_NO_FATAL_FAILURE(writeDictionary("SuggestPunct", {{"dog", "animal"}, {"dog.", "abbreviation"}}));
   Dictionary dict;
