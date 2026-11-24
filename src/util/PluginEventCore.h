@@ -80,8 +80,13 @@ inline JsonVariantConst requestOf(JsonVariantConst handler) {
 }
 inline bool isDownload(JsonVariantConst handler) { return handler["download"]["url"].is<const char*>(); }
 
-// A token or config file a device.json names: a relative name is in the plugin's folder. "" for none.
-std::string pluginFile(const std::string& pluginDir, const char* name);
+// A token or config file a device.json names, by the rules the web server reads the same names with, so the reader
+// reads no file the plugin could not read over the web: PluginLocations::namedFilePath() (a relative name is in the
+// plugin's folder, an absolute one as written, a name with ".." names nothing), then `isProtected` on the result, which
+// the device answers with isProtectedPluginFile() (a credential store, a system folder, an 8.3 alias spelling). "" for
+// none and for a refused name.
+using PathCheck = bool (*)(const std::string& path);
+std::string pluginFile(const std::string& pluginDir, const char* name, PathCheck isProtected);
 // The value at a dotted path ("access_token", "data.token", "list.0") of a parsed token file, as text.
 std::string valueAt(JsonVariantConst root, const char* dottedPath);
 
@@ -98,6 +103,9 @@ struct TemplateContext {
   const char* id = "";
 };
 std::string expand(const char* tpl, const TemplateContext& ctx);
+// The URL a handler's request or download goes to: its "url" filled in (expand()) and escaped (escapeUrl()). What the
+// HTTP client is handed, so it is what the drain's host check judges.
+std::string handlerUrl(JsonVariantConst handler, const TemplateContext& ctx);
 // Spaces, control characters and non-ASCII bytes of a URL percent-encoded; '&', '?', '#', '+' and '/' left alone.
 std::string escapeUrl(const std::string& url);
 

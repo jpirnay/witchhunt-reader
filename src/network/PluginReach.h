@@ -9,7 +9,9 @@
 #include "PluginHosts.h"
 
 // The card-aware half of PluginHosts: what a plugin may reach, read from its manifest's allowedHosts and from the
-// hosts the user approved for it. One decision for every request the device makes for a plugin.
+// hosts the user approved for it. One decision for every request the device makes for a plugin: the relay and
+// fetch-to-SD (CrossPointWebServer) and the device events (PluginEvents), so a host a plugin may not reach over the web
+// is not reached for it at sleep either.
 namespace PluginReach {
 
 // Hosts the user approved for a plugin on a plugin's request (the Plugins page and the plugin host ask), kept apart
