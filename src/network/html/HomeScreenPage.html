@@ -598,10 +598,7 @@
           try {
             const blob = await shrink(file);
             const name = freeName(file.name);
-            if (!(await fetch(`/api/files?path=${encodeURIComponent(PICTURE_FOLDER)}`)).ok) {
-              const body = new URLSearchParams({ name: PICTURE_FOLDER.slice(1), path: '/' });
-              await fetch('/mkdir', { method: 'POST', body });
-            }
+            await ensureFolder(PICTURE_FOLDER);
             const form = new FormData();
             form.append('file', blob, name);
             const response = await fetch(`/upload?path=${encodeURIComponent(PICTURE_FOLDER)}`, { method: 'POST', body: form });
@@ -618,6 +615,23 @@
       }
 
       // ---- Save -------------------------------------------------------------------------------------
+
+      async function post(url, body, headers) {
+        const response = await fetch(url, { method: 'POST', body, headers });
+        if (!response.ok) throw new Error(`${url.split('?')[0]}: ${(await response.text()) || response.status}`);
+        return response;
+      }
+
+      // /api/files answers an empty list for a folder that is not there, so the folder is looked for in its
+      // parent's listing (FAT names match whatever their case).
+      async function ensureFolder(path) {
+        const at = path.lastIndexOf('/');
+        const parent = path.slice(0, at) || '/';
+        const name = path.slice(at + 1);
+        const list = await getJson(`/api/files?path=${encodeURIComponent(parent)}`).catch(() => []);
+        if (list.some((f) => f.isDirectory && f.name.toLowerCase() === name.toLowerCase())) return;
+        await post('/mkdir', new URLSearchParams({ name, path: parent }));
+      }
 
       async function save() {
         const button = $('save');
