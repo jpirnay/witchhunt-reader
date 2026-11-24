@@ -87,7 +87,9 @@ whoever opens it. The rule sits beneath every caller, so no reader, theme or scr
 - **The open file keeps its last keystream block:** 34 ms. Pure ChaCha is about 30 ms of the chapter's reads.
 - **Without the key nothing opens.** A marker another reader made, or a damaged one, refuses every open; an open for
   writing is refused before it can empty a file. A file without a valid header (copied in, damaged, an older layout)
-  is damaged cache: removed when opened and made again.
+  is damaged cache: removed when opened and made again. An open the heap or the card refuses (no memory for the
+  file's cipher, a header read that fails) fails and keeps the file: the first version removed it as damaged, so a
+  fragmented X3 heap could cost a valid `progress.bin`.
 - **Files leave the device enciphered.** The web server's download, the serial transfers and the serial test API's
   GET and HASH read raw (`HalStorage::openRaw`).
 
@@ -97,6 +99,14 @@ A protected book's folder made by earlier firmware is emptied on the book's next
 library looks at it (`book_protection::encipherCache`). The reader's state (`BookCache::isReadingState`) and the
 manifest `protect.bin`, which takes an Adobe book seconds to build again, are written back enciphered; everything else
 is made again by the next open. Freed sectors keep what they held until they are written over.
+
+## A clear that keeps files
+
+Clear Cache in Settings and Delete Book Cache (answered Keep) keep the reading state, and the reader's Delete Book
+Cache keeps the covers either way (`BookCache::clear`). The kept files are enciphered under the marker's salt, so the
+marker stays with them; with nothing else kept it goes with the folder. The first version removed it: the folder then
+read as plain, and the next open took the kept files' ciphertext for an older cache's reading state and enciphered it
+once more under a new salt, so the position and the bookmarks were lost for good.
 
 ## What stays plain
 

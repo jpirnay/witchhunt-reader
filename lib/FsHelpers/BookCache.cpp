@@ -1,5 +1,6 @@
 #include "BookCache.h"
 
+#include <CacheCipherFile.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <Logging.h>
@@ -48,6 +49,11 @@ bool clear(const std::string& cacheDir, const Keep keep, const bool keepCovers) 
       anyKept = true;
       continue;
     }
+    // A protected book's folder is enciphered under its marker's salt, and so is every file kept here. Without the
+    // marker they read as noise, which the book's next open takes for an older cache's reading state and enciphers
+    // once more under a new salt (book_protection::encipherCache): the position and the bookmarks lost for good. It
+    // stays while anything else does; with nothing else kept it goes with the folder below.
+    if (std::string_view(name) == cache_cipher::kMarkerName) continue;
     // A subdirectory (spines/, img/, fonts/) goes as a whole: a plain file remove refuses one.
     const std::string path = cacheDir + "/" + name;
     if (!(isDir ? Storage.removeDir(path.c_str()) : Storage.remove(path.c_str()))) {

@@ -163,7 +163,8 @@ class HalStorage {
   void noteContentChange(const char* path);
   void persistChangeMarker();
   // Attaches the cipher to `file`, just opened at `path`, when its folder is enciphered; closes it and fails the
-  // open when the folder cannot be read or the file is not one of its own. Under the storage lock.
+  // open when the folder cannot be read, the file is not one of its own (then removes it), or the heap or the card
+  // refuses the cipher (then keeps it). Under the storage lock.
   void attachCacheCipher(HalFile& file, const char* path, bool mayWrite);
   // A book cache folder's state, under the storage lock.
   cache_cipher::FolderState cacheFolderState(const char* path, size_t folderLen,

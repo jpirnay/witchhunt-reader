@@ -2,6 +2,7 @@
 // other pipeline tests link: the index build (OPF, NCX or nav, book.bin), every section, the images,
 // all read through ZipFile's decryption. A protected copy lays out exactly as the plain book does.
 // And the books that must not open: no key, a damaged key, an ended loan, no clock.
+#include <BookCache.h>
 #include <BookKey.h>
 #include <BookSession.h>
 #include <CacheAtRest.h>
@@ -63,6 +64,14 @@ class ProtectedBookPipelineTest : public testing::Test {
       if (bytes.find(text) != std::string::npos) return true;
     }
     return false;
+  }
+
+  // `text` at `path` through Storage, as the reader writes its own files: enciphered when the folder is.
+  static void writeThroughStorage(const fs::path& path, const std::string& text) {
+    HalFile file;
+    ASSERT_TRUE(Storage.openFileForWrite("TEST", path.string(), file));
+    ASSERT_EQ(file.write(text.data(), text.size()), text.size());
+    ASSERT_TRUE(file.close());
   }
 
   // The protected copy of `source` at book_, its key stored for it with `expires`.
@@ -150,6 +159,51 @@ TEST_F(ProtectedBookPipelineTest, AnOlderCacheIsEncipheredAndKeepsTheReadingStat
   std::string kept;
   ASSERT_TRUE(Storage.readFileToString("TEST", (folder / "progress.bin").string(), 4096, kept));
   EXPECT_EQ(kept, progress) << "the reading state did not survive";
+}
+
+// A clear that keeps the reading state (Clear Cache in Settings, Delete Book Cache in the file browser, both answered
+// Keep) or the covers (the reader's Delete Book Cache, which leaves them either way) keeps the folder's marker too:
+// what it keeps is enciphered under the marker's salt. Without the marker the folder read as plain, and the next open
+// enciphered the kept files' ciphertext once more under a new salt: the place in the book and the bookmarks were lost.
+TEST_F(ProtectedBookPipelineTest, AClearThatKeepsTheReadingStateLeavesItReadable) {
+  protect(FIXTURE_EPUB);
+  const std::string cacheRoot = (work_ / "cache").string();
+  const fs::path folder = Epub::cachePathFor(book_, cacheRoot);
+  const std::string progress = "\x01\x02\x03 where the reader was";
+  const std::string bookmarks = "\x04\x05 the reader's bookmarks";
+  for (const bool fromTheReader : {false, true}) {
+    SCOPED_TRACE(fromTheReader ? "the reader's Delete Book Cache" : "Clear Cache in Settings");
+    {
+      Epub epub(book_, cacheRoot);
+      ASSERT_TRUE(epub.load(true));
+      ASSERT_TRUE(Storage.cacheFolderEnciphered(folder.string().c_str()));
+      writeThroughStorage(folder / "progress.bin", progress);
+      writeThroughStorage(folder / "bookmarks.bin", bookmarks);
+      if (fromTheReader) {
+        ASSERT_TRUE(epub.clearCache(BookCache::Keep::ReadingState, /*preserveThumbs=*/true));
+      } else {
+        book_protection::closeBook(book_);  // as clearBookCacheIfNeeded() does: the protection holds the manifest
+        ASSERT_TRUE(BookCache::clear(folder.string(), BookCache::Keep::ReadingState));
+      }
+    }
+    EXPECT_TRUE(fs::exists(folder / cache_cipher::kMarkerName)) << "the clear took the marker of the files it kept";
+    EXPECT_FALSE(fs::exists(folder / "book.bin"));
+    EXPECT_FALSE(fs::exists(folder / "protect.bin"));
+
+    // The book's next open, which enciphers its folder again when it finds it plain.
+    Epub epub(book_, cacheRoot);
+    ASSERT_TRUE(epub.load(true));
+    EXPECT_EQ(epub.protectionResult(), book_protection::OpenResult::Protected);
+    std::string kept;
+    ASSERT_TRUE(Storage.readFileToString("TEST", (folder / "progress.bin").string(), 4096, kept));
+    EXPECT_EQ(kept, progress) << "where the reader was did not survive the clear";
+    ASSERT_TRUE(Storage.readFileToString("TEST", (folder / "bookmarks.bin").string(), 4096, kept));
+    EXPECT_EQ(kept, bookmarks) << "the bookmarks did not survive the clear";
+    for (const auto& [path, bytes] : filesOnCard(folder)) {
+      if (!bytes.empty()) EXPECT_EQ(bytes.compare(0, 4, "WCC1"), 0) << path << " is on the card in the clear";
+    }
+    ZipFile::unprotect(book_);
+  }
 }
 
 // Another device's card, or a marker whose key cannot be had: nothing in the folder opens, so nothing of it is read

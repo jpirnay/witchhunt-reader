@@ -33,6 +33,7 @@ time_t now() { return 0; }
 // throwing new that fails aborts the device (-fno-exceptions), so the HAL must not rely on one.
 namespace {
 bool refuseNothrowNew = false;
+size_t refuseNothrowSize = 0;  // not 0: only the nothrow ones of this size are refused
 size_t heapNews = 0;
 size_t heapDeletes = 0;
 }  // namespace
@@ -43,7 +44,7 @@ void* operator new(const std::size_t size) {
   throw std::bad_alloc();
 }
 void* operator new(const std::size_t size, const std::nothrow_t&) noexcept {
-  if (refuseNothrowNew) return nullptr;
+  if (refuseNothrowNew || (refuseNothrowSize != 0 && size == refuseNothrowSize)) return nullptr;
   ++heapNews;
   return std::malloc(size != 0 ? size : 1);
 }
@@ -109,11 +110,13 @@ class HalStorageTest : public ::testing::Test {
     SDCardManager::getInstance().vol = &vol_;
     ASSERT_TRUE(Storage.begin());
     refuseNothrowNew = false;
+    refuseNothrowSize = 0;
     heapNews = 0;
     heapDeletes = 0;
   }
   void TearDown() override {
     refuseNothrowNew = false;
+    refuseNothrowSize = 0;
     EXPECT_EQ(hostSemaphoreDepth(), 0) << "a StorageLock was not given back";
     SDCardManager::getInstance().vol = nullptr;
   }
@@ -464,6 +467,24 @@ TEST_F(CacheCipherStorageTest, AFileWithoutAHeaderIsRemovedAndMadeAgain) {
   file.close();
   EXPECT_EQ(contents(kFile), "<none>");
   write(kFile, kText);
+  EXPECT_EQ(read(kFile), kText);
+}
+
+// An open whose cipher cannot be had (about 120 B, which a fragmented X3 heap can refuse) fails like any open the heap
+// refuses, and the file stays for the next one. Taken for damaged cache, it was removed: a valid progress.bin lost.
+TEST_F(CacheCipherStorageTest, AnOpenWithoutMemoryForItsCipherKeepsTheFile) {
+  write(kFile, kText);
+  const std::string before = contents(kFile);
+  put("/book.txt", "plain");
+  refuseNothrowSize = sizeof(cache_cipher::CipherStream);
+  HalFile file;
+  EXPECT_FALSE(Storage.openFileForRead("TEST", kFile, file));
+  file.close();
+  HalFile plain;
+  EXPECT_TRUE(Storage.openFileForRead("TEST", "/book.txt", plain)) << "the refusal took the handle, not the cipher";
+  plain.close();
+  refuseNothrowSize = 0;
+  EXPECT_EQ(contents(kFile), before) << "a valid file was removed for want of memory";
   EXPECT_EQ(read(kFile), kText);
 }
 

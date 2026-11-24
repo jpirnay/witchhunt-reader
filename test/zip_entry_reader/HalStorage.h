@@ -315,14 +315,13 @@ class HalFile : public Print {
   size_t write(uint8_t c) override { return write(static_cast<const void*>(&c), 1); }
 
   // HalStorage's at-rest cipher, as the device's HalStorage::attachCacheCipher does it: for a file just opened in an
-  // enciphered cache folder. False closes it, and the open fails.
-  bool attachCacheCipher(const bool mayWrite, const uint8_t (&key)[cache_cipher::kKeyBytes]) {
-    if (!fp_ || isDir_) return true;
+  // enciphered cache folder. Damaged or Failed closes it, and the open fails.
+  cache_cipher::Attach attachCacheCipher(const bool mayWrite, const uint8_t (&key)[cache_cipher::kKeyBytes]) {
+    if (!fp_ || isDir_) return cache_cipher::Attach::Plain;
     RawStdio raw{fp_};
     const auto attached = cache_cipher::attach(raw, mayWrite, key, fillRandom, cipher_);
-    if (attached != cache_cipher::Attach::Refused) return true;
-    closeQuiet();
-    return false;
+    if (attached == cache_cipher::Attach::Damaged || attached == cache_cipher::Attach::Failed) closeQuiet();
+    return attached;
   }
   bool enciphered() const { return cipher_ != nullptr; }
   // A failed open, as the device leaves one: closed, and still closeable.
@@ -617,8 +616,16 @@ class HalStorage {
       case cache_cipher::FolderState::Plain:
         return true;
       case cache_cipher::FolderState::Enciphered:
-        if (f.attachCacheCipher(mayWrite, key)) return true;
-        remove(path);  // HalStorage::attachCacheCipher: damaged cache, closed and removed
+        switch (f.attachCacheCipher(mayWrite, key)) {
+          case cache_cipher::Attach::Plain:
+          case cache_cipher::Attach::Enciphered:
+            return true;
+          case cache_cipher::Attach::Damaged:
+            remove(path);  // HalStorage::attachCacheCipher: damaged cache, closed and removed
+            return false;
+          case cache_cipher::Attach::Failed:
+            return false;  // the heap or the card refused, not the file: closed and kept
+        }
         return false;
       case cache_cipher::FolderState::Unreadable:
         break;
