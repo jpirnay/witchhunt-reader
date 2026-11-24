@@ -1,0 +1,42 @@
+#pragma once
+
+#include <cstddef>
+#include <string>
+#include <string_view>
+
+// Which hosts a plugin may reach through the device: the relay and fetch-to-SD (CrossPointWebServer) ask here. Pure,
+// so the host tests check it without a card or a network; PluginReach.h fills a Reach from the card.
+namespace PluginHosts {
+
+// The host a URL connects to, in lower case: what an allowlist judges. "" for a URL the HTTP client would not connect
+// for (crosspoint::splitUrl(): not http or https, no host, user info, an odd byte in the host, a bad port). The client
+// reads the URL with the same splitUrl(), so the host judged here is the one it connects to.
+std::string urlHost(std::string_view url);
+
+// Whether `host` (lower case, as urlHost() gives it) matches an allowedHosts entry: exactly, or, for an entry starting
+// with a dot, as a subdomain of it (".example.org" matches "covers.example.org" but not "example.org"). The entry
+// compares without case.
+bool hostMatches(std::string_view host, std::string_view pattern);
+
+// What one plugin may reach: the allowedHosts entries of its manifest, and the hosts the user approved for it, exact
+// hosts only. Filled once (PluginReach::load()), then asked per URL without touching the card, so a redirect is judged
+// in the middle of a transfer at no cost.
+class Reach {
+ public:
+  // Room for this many bytes of entries (each entry's length plus one), so the adds that follow do not reallocate;
+  // the caller asks HeapFit first.
+  void reservePatterns(size_t bytes) { patterns_.reserve(bytes); }
+  void reserveApproved(size_t bytes) { approved_.reserve(bytes); }
+  void allow(std::string_view pattern);  // an allowedHosts entry
+  void approve(std::string_view host);   // a host the user approved
+  bool allowsHost(std::string_view host) const;
+  // False also for a URL whose host urlHost() cannot judge.
+  bool allows(std::string_view url) const { return allowsHost(urlHost(url)); }
+
+ private:
+  // Lower case, each entry followed by '\n' (no host holds one: urlHost() refuses it).
+  std::string patterns_;
+  std::string approved_;
+};
+
+}  // namespace PluginHosts

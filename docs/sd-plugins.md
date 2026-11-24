@@ -165,7 +165,12 @@ certificate needs Settings' "Skip HTTPS validation".
 }
 ```
 
-No list and no approval means no access. `relay(url)` and `fetchToSd` follow a
+No list and no approval means no access. Hosts compare without case. The device
+judges a URL with its HTTP client's own reading of it, so the host judged is the
+host reached: a URL with user info (`https://user@host/`), or a host it cannot
+read (an IPv6 literal, a `\`), is refused outright.
+
+`relay(url)` and `fetchToSd` follow a
 redirect only to a host the plugin may reach too. One to any other host is
 refused like a first request, naming the host, so the page asks for it as well
 (a GitHub release file redirects to GitHub's CDN); list the hosts a service
