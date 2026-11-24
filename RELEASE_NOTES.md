@@ -62,6 +62,7 @@ Read the upgrade notes at the end of this section before you update.
   **Take screenshot** (on every screen), **Toggle Touch Lock** and, on a device with a light, **Open Light Panel**.
 - **Touch Lock** (Settings → Controls, touch devices): touch off everywhere, books included, for reading by the keys
   alone with a hand on the glass. On the BOOX Picco the slide switch can work it (**Slide Switch** → **Touch**).
+- **In the light drawer, Up and Down change the brightness** on every device with a light, held to keep stepping.
 
 ### Pictures, sleep and power
 
@@ -86,7 +87,9 @@ Read the upgrade notes at the end of this section before you update.
 - **The reader asks before a plugin reaches a new site.** The sites you allowed are listed with each plugin, and
   removing a plugin removes them.
 - **Plugins that act while you read** can send your progress when a book opens or closes, or fetch a picture as the
-  reader goes to sleep. At sleep the reader joins your last Wi-Fi network for them (not under 20 % battery).
+  reader goes to sleep. At sleep the reader joins your last Wi-Fi network for them (not under 20 % battery). They
+  reach only the sites their files name, listed under **Reaches** on the Plugins page, and the ones you allowed, and
+  never read the reader's saved passwords.
 
 ### Updates and the web interface
 
@@ -119,6 +122,8 @@ Read the upgrade notes at the end of this section before you update.
   **InsiderPhD** (the Picco's calibrated gray levels, Free-Ink #223) and **Mikalai Kryvusha** (ids inside a paragraph,
   crosspoint-reader #4328).
 - **Marcin Marczyk**, whose Month Wallpaper server draws the month calendar for Home.
+- **aurimasrim** (Lithuanian, crosspoint-reader #4579), **KymAndriy** (Ukrainian, #4501), **winst0niuss** (Russian,
+  #4427) and **Phạm Bình An** (Vietnamese, #4582), whose revised wording we took.
 
 Source-level credits remain in the relevant files.
 
