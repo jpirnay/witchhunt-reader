@@ -123,6 +123,9 @@ void WeatherActivity::onExit() {
 
   // Weather screen is always landscape; restore app UI to portrait on exit.
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  // The temperature is scaled text, which takes the reader's scaled-glyph cache on first use;
+  // given back here as a reader gives it back, so it does not stay under the next screen.
+  renderer.releaseScaledGlyphCache();
 
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
