@@ -9,6 +9,7 @@
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <ImageToBmp.h>
 #include <InflateReader.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
@@ -1675,30 +1676,15 @@ bool Epub::generateCoverBmp(bool cropped) const {
     return false;
   }
 
-  FsFile coverBmp;
-  if (!Storage.openFileForWrite("EBP", getCoverBmpPath(cropped), coverBmp)) {
-    coverImage.close();
-    return false;
-  }
-
   // 8-bit: this cover is drawn only by the sleep screen, which dithers at draw time
   // and can apply the adaptive tone filter. Quantizing to 4 levels here would throw
   // away the tonal range that filter needs. Thumbnails stay 1-bit -- they are drawn
   // on the home screen's BW-plane path and are a different artifact entirely.
-  bool success = false;
-  if (detectedFormat == ImageFormatDetector::Format::Jpeg) {
-    success = JpegToBmpConverter::jpegFileToBmpStream(coverImage, coverBmp, cropped, /*grayscale8Bit=*/true);
-  } else {
-    success = PngToBmpConverter::pngFileToBmpStream(coverImage, coverBmp, cropped, /*grayscale8Bit=*/true);
-  }
-
-  coverImage.close();
-  coverBmp.close();
-
-  if (!success) {
-    LOG_ERR("EBP", "Failed to generate BMP from cover image");
-    Storage.remove(getCoverBmpPath(cropped).c_str());
-  }
+  const bool success = ImageToBmp::convert(
+      "EBP", coverImage,
+      detectedFormat == ImageFormatDetector::Format::Jpeg ? ImageToBmp::Format::Jpeg : ImageToBmp::Format::Png,
+      getCoverBmpPath(cropped), ImageToBmp::Target{.crop = cropped});
+  if (!success) LOG_ERR("EBP", "Failed to generate BMP from cover image");
 
   LOG_DBG("EBP", "Generated BMP from cover image, success: %s", success ? "yes" : "no");
   return success;
@@ -1819,29 +1805,13 @@ ThumbResult Epub::generateThumbAt(const std::string& thumbPath, const int width,
     return ThumbResult::StructurallyAbsent;
   }
 
-  FsFile thumbBmp;
-  if (!Storage.openFileForWrite("EBP", thumbPath, thumbBmp)) {
-    coverImage.close();
-    return ThumbResult::TransientFail;
-  }
-
-  bool success = false;
-  if (detectedFormat == ImageFormatDetector::Format::Jpeg) {
-    LOG_DBG("EBP", "Generating %dx%d thumb BMP from JPEG cover image", width, height);
-    success = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(coverImage, thumbBmp, width, height, scratch, crop);
-  } else {
-    LOG_DBG("EBP", "Generating %dx%d thumb BMP from PNG cover image", width, height);
-    success = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(coverImage, thumbBmp, width, height, crop);
-  }
-
-  coverImage.close();
-  thumbBmp.close();
-
-  if (!success) {
-    // Whether aborted for input or a plain decode failure, this is transient: drop the partial
-    // thumb (never leave it as a false sentinel) and let the caller retry / count it.
-    LOG_DBG("EBP", "Thumb decode for %dx%d did not complete — removing partial, transient", width, height);
-    Storage.remove(thumbPath.c_str());
+  const bool jpeg = detectedFormat == ImageFormatDetector::Format::Jpeg;
+  LOG_DBG("EBP", "Generating %dx%d thumb BMP from %s cover image", width, height, jpeg ? "JPEG" : "PNG");
+  if (!ImageToBmp::convert("EBP", coverImage, jpeg ? ImageToBmp::Format::Jpeg : ImageToBmp::Format::Png, thumbPath,
+                           ImageToBmp::Target{.width = width, .height = height, .crop = crop, .scratch = scratch})) {
+    // Aborted for input, a plain decode failure or a thumb that would not open: transient. The partial
+    // thumb is gone (never left as a false sentinel); the caller retries / counts it.
+    LOG_DBG("EBP", "Thumb decode for %dx%d did not complete — removed, transient", width, height);
     return ThumbResult::TransientFail;
   }
   LOG_DBG("EBP", "Generated %dx%d thumb BMP from cover image", width, height);
