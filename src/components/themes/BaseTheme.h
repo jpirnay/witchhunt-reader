@@ -197,6 +197,9 @@ struct HomePictureJob {
   int width = 0;
   int height = 0;
 };
+// The most jobs homePictureJobs() lists: one a widget, and Lyra Tiles places at most six rows of two
+// (LyraTilesTheme asserts it). With four, a fifth size said Loading for the whole visit.
+inline constexpr int kMaxHomePictureJobs = 12;
 
 class BaseTheme {
  public:
@@ -301,7 +304,8 @@ class BaseTheme {
   // panel is not shown, so More offers it.
   virtual uint32_t homeShownDestinations(const GfxRenderer& /*renderer*/, Rect /*content*/) const { return 0; }
   // The pictures Home's widgets show, as files Home's cover pass makes (it has the scratch for a
-  // decode): up to `max`, whether made already or not; Home checks.
+  // decode): up to `max` (kMaxHomePictureJobs), one a file, whether made already or not; Home checks.
+  // Not those with nothing to make from (a source not on the card) or given up on this start.
   virtual int homePictureJobs(const GfxRenderer& /*renderer*/, Rect /*content*/, HomePictureJob* /*out*/,
                               int /*max*/) const {
     return 0;

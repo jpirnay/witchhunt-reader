@@ -43,6 +43,11 @@ The rules Home lays the rows out by:
   kept in `/.crosspoint/home`, named by the picture's path and size and the place's size. A picture
   replaced by one of another size is converted again, and the file the old one left is removed. A BMP
   is drawn as it is: make one at its place's size.
+- The widget says Loading while its picture is being converted. A press puts the conversion off, and it
+  goes on once the press is served. A file not on the card (a picture from the web before its first
+  fetch) or one that cannot be converted (damaged, or a PNG over 960,000 pixels) shows "Could not render
+  image" and its name. One that could not be converted is tried again at the next visit, twice in all,
+  then not until the next start or until the file changes.
 
 What the firmware does not know (a widget or a place a later version adds) is left out, not refused.
 The geometry is `src/components/themes/lyra/HomeTilesLayout.h`, the parser

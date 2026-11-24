@@ -338,9 +338,15 @@ void HomeActivity::loadRecentCovers(const int coverHeight, const std::pair<int, 
 
   // Every cover is resolved. The pictures Home's widgets show come next, one a call, while the
   // scratch is still lent: a JPEG needs the decoder's buffers as a cover does.
-  if (makeNextHomePicture()) {
-    yieldAfterDecode();
-    return;
+  switch (makeNextHomePicture()) {
+    case PictureStep::Made:
+      yieldAfterDecode();
+      return;
+    case PictureStep::Paused:
+      recentsLoading = false;  // the press is served first; the next pass takes the picture up again
+      return;
+    case PictureStep::Done:
+      break;
   }
 
   recentsLoaded = true;
@@ -348,39 +354,66 @@ void HomeActivity::loadRecentCovers(const int coverHeight, const std::pair<int, 
   if (!keepRegionAsFrameCache()) restoreSecondaryBuffer();
 }
 
-bool HomeActivity::makeNextHomePicture() {
+bool HomeActivity::nextHomePictureJob(HomePictureJob& out) const {
   HomePictureJob jobs[kMaxPictureJobs];
   const int count =
       GUI.homePictureJobs(renderer, UITheme::getContentRect(renderer, true, false), jobs, kMaxPictureJobs);
   for (int i = 0; i < count; ++i) {
-    const HomePictureJob& job = jobs[i];
-    const auto bit = static_cast<uint8_t>(1u << i);
-    if ((pictureAttempts_ & bit) != 0) continue;
-    if (ReaderActivity::isCoverThumbComplete(job.target, job.width, job.height)) continue;
-    // Once a visit, made or not: a picture the decoders refuse is not tried on every tick.
-    pictureAttempts_ |= bit;
-    const std::string dir = job.target.substr(0, job.target.rfind('/'));
-    if (!Storage.exists(dir.c_str())) Storage.mkdir(dir.c_str());
-    // Written under another name and renamed when whole: the theme draws the target on the render
-    // task meanwhile, and must not find half a picture.
-    const std::string part = job.target + ".part";
-    bool ok = ImageToBmp::convertFile(
-        "HOME", job.source, part,
-        ImageToBmp::Target{.width = job.width, .height = job.height, .crop = true, .scratch = coverScratch_.get()});
-    if (ok) {
-      Storage.remove(job.target.c_str());
-      ok = Storage.rename(part.c_str(), job.target.c_str());
-    }
-    if (!ok) {
-      Storage.remove(part.c_str());
-      LOG_ERR("HOME", "Picture not made: %s (%dx%d)", job.source.c_str(), job.width, job.height);
-    } else {
-      LOG_INF("HOME", "Picture made: %s -> %s", job.source.c_str(), job.target.c_str());
-      removeReplacedHomePictures(job.target);
-    }
+    const uint32_t key = homePictureKey(jobs[i].target);
+    const uint32_t* const tried = pictureAttempts_ + pictureAttemptCount_;
+    if (std::find(pictureAttempts_, tried, key) != tried) continue;
+    if (ReaderActivity::isCoverThumbComplete(jobs[i].target, jobs[i].width, jobs[i].height)) continue;
+    out = std::move(jobs[i]);
     return true;
   }
   return false;
+}
+
+HomeActivity::PictureStep HomeActivity::makeNextHomePicture() {
+  HomePictureJob job;
+  if (!nextHomePictureJob(job)) return PictureStep::Done;
+  // Button input first, as for a cover: never start a decode while a press is queued or its frame is
+  // being drawn.
+  if (mappedInput.hasPendingInput() || renderer.isComposingFrame()) return PictureStep::Paused;
+  // Once a visit, made or not: a picture that comes out other than asked is not made on every tick.
+  // The list holds as many as a placement has jobs (kMaxPictureJobs).
+  const bool noted = pictureAttemptCount_ < kMaxPictureJobs;
+  if (noted) pictureAttempts_[pictureAttemptCount_++] = homePictureKey(job.target);
+  const std::string dir = job.target.substr(0, job.target.rfind('/'));
+  if (!Storage.exists(dir.c_str())) Storage.mkdir(dir.c_str());
+  // Written under another name and renamed when whole: the theme draws the target on the render
+  // task meanwhile, and must not find half a picture.
+  const std::string part = job.target + ".part";
+  // The one-shot decode gives way to a press (CooperativeAbort). That is no failure: the picture
+  // stayed on Loading for the rest of the visit when it was taken for one.
+  CooperativeAbort::clearAborted();
+  bool ok = ImageToBmp::convertFile(
+      "HOME", job.source, part,
+      ImageToBmp::Target{.width = job.width, .height = job.height, .crop = true, .scratch = coverScratch_.get()});
+  const bool aborted = CooperativeAbort::consumeAborted();
+  if (ok) {
+    Storage.remove(job.target.c_str());
+    ok = Storage.rename(part.c_str(), job.target.c_str());
+  }
+  if (ok) {
+    LOG_INF("HOME", "Picture made: %s -> %s", job.source.c_str(), job.target.c_str());
+    removeReplacedHomePictures(job.target);
+    return PictureStep::Made;
+  }
+  Storage.remove(part.c_str());
+  if (aborted) {
+    if (noted) --pictureAttemptCount_;  // the key just added: tried again on the next pass
+    LOG_DBG("HOME", "Picture paused for input: %s", job.source.c_str());
+    return PictureStep::Paused;
+  }
+  LOG_ERR("HOME", "Picture not made: %s (%dx%d)", job.source.c_str(), job.width, job.height);
+  {
+    // Drawn as not made rather than as Loading, and decoded again on a later visit only up to
+    // HomePictureFailures::kTries times this start.
+    RenderLock lock;
+    homePictureFailures().add(job.target);
+  }
+  return PictureStep::Made;
 }
 
 bool HomeActivity::keepRegionAsFrameCache() {
@@ -497,7 +530,7 @@ void HomeActivity::onEnter() {
   recentDocIds.reserve(recentBooks.size());
   for (const auto& book : recentBooks) recentDocIds.push_back(KOReaderDocumentId::calculateFromFilename(book.path));
   READING_STATS.prefetchRecent(recentDocIds);
-  pictureAttempts_ = 0;
+  pictureAttemptCount_ = 0;
   // The day before the theme reads its widgets for it (prepareHome, in the rebuild below): one that
   // turns in between is then caught at the next minute (onClockMinute) rather than missed.
   shownDay_ = currentLocalDayIndex();

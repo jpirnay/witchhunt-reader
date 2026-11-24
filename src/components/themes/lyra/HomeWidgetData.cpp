@@ -100,7 +100,12 @@ std::string pickFrom(const std::string& folder) {
   return path += chosen;
 }
 
+// Constant-initialised: no constructor at boot and no guard on first use, as a function-local static has.
+HomePictureFailures gPictureFailures;
+
 }  // namespace
+
+HomePictureFailures& homePictureFailures() { return gPictureFailures; }
 
 std::string homePictureTarget(const std::string& source, const uint32_t sourceBytes, const int width,
                               const int height) {

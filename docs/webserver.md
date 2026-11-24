@@ -337,7 +337,10 @@ A **Picture** widget shows one of these:
 
 The reader cuts a JPEG or PNG to the widget's place and converts it to black and white once, the first
 time Home shows it (it says **Loading** meanwhile). A BMP is drawn as it is, so make one at the size of
-its place. A layout shows at most two different pictures.
+its place. A layout shows at most two different pictures. A picture that is not on the card (a picture
+from the web before its first fetch) or that the reader cannot convert (a damaged file, or a PNG over
+960,000 pixels, such as 800 × 1200) shows **Could not render image** and its name; uploading through this
+page keeps pictures small enough.
 
 ### Pictures from the web
 

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+#include "components/themes/lyra/HomePictureName.h"
 #include "components/themes/lyra/HomeTilesLayout.h"
 
 // What Home's widgets show that is not the book list: the week's and the month's reading, the last
@@ -59,3 +60,8 @@ std::string homePictureTarget(const std::string& source, uint32_t sourceBytes, i
 
 // Removes the files `target` replaces: those made from earlier copies of its source at its size.
 void removeReplacedHomePictures(const std::string& target);
+
+// The pictures Home could not make since the start. Module-wide rather than the theme's, which is made
+// again when Settings closes. Written on the loop task under the render lock (HomeActivity's cover
+// pass), read by the theme's draw on the render task.
+HomePictureFailures& homePictureFailures();
