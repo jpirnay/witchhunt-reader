@@ -1,6 +1,7 @@
 // BookCache::clear(): what a clear of a book's cache folder removes and what it leaves. Runs over a
 // real folder through the stdio storage shim.
 #include <BookCache.h>
+#include <CacheCipherFile.h>
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -88,6 +89,40 @@ TEST_F(BookCacheTest, KeepCoversLeavesTheImagesAndNothingElse) {
   EXPECT_FALSE(has("koreader_syncmethod.txt"));
   EXPECT_FALSE(has("overrides.bin"));
   EXPECT_FALSE(has("spines"));
+}
+
+// A protected book's folder is enciphered under its marker's salt (lib/CacheCipher/CacheCipherFile.h). Without the
+// marker a kept progress.bin reads as noise, and the book's next open enciphers that noise again under a new salt.
+TEST_F(BookCacheTest, TheCipherMarkerStaysWithTheReadingState) {
+  fillLikeAReadBook();
+  file(cache_cipher::kMarkerName, "WCF1 and its salt");
+  EXPECT_TRUE(BookCache::clear(dir_, BookCache::Keep::ReadingState));
+
+  EXPECT_EQ("WCF1 and its salt", read(cache_cipher::kMarkerName));
+  EXPECT_EQ("position", read("progress.bin"));
+  EXPECT_EQ("marks", read("bookmarks.bin"));
+  EXPECT_FALSE(has("book.bin"));
+  EXPECT_FALSE(has("spines"));
+}
+
+// The reader's Delete Book Cache leaves the covers either way, enciphered as the rest of the folder was.
+TEST_F(BookCacheTest, TheCipherMarkerStaysWithTheCovers) {
+  fillLikeAReadBook();
+  file(cache_cipher::kMarkerName, "WCF1 and its salt");
+  EXPECT_TRUE(BookCache::clear(dir_, BookCache::Keep::Nothing, /*keepCovers=*/true));
+
+  EXPECT_TRUE(has(cache_cipher::kMarkerName));
+  EXPECT_TRUE(has("thumb_400.bmp"));
+  EXPECT_FALSE(has("progress.bin"));
+}
+
+// The marker is kept for the files it reads, not for itself: with nothing else kept the folder goes, marker and all.
+TEST_F(BookCacheTest, AMarkerWithNothingElseToKeepGoesWithTheFolder) {
+  file("book.bin");
+  file("spines/0/0_00000000.bin");
+  file(cache_cipher::kMarkerName, "WCF1 and its salt");
+  EXPECT_TRUE(BookCache::clear(dir_, BookCache::Keep::ReadingState));
+  EXPECT_FALSE(fs::exists(dir_));
 }
 
 // A book never opened, or opened on a firmware that kept no reading state, leaves no empty folder.

@@ -138,6 +138,8 @@ design record [design/cache-cipher.md](design/cache-cipher.md)):
   the reader, Home, the library, the sleep screen. Without the key (a marker another reader made, a damaged one)
   nothing in it opens, for reading or writing. A file in it without a valid header (copied in, damaged, an older
   layout) is damaged cache: removed when it is opened, and made again like a missing one.
+- A clear that keeps some of the directory's files (the reading state, the covers: `BookCache::clear`) keeps
+  `cipher.bin` with them, since they are enciphered under its salt. With nothing else kept it goes with the directory.
 - What hands a file to the outside (the web server's download, the serial transfers) reads it raw
   (`HalStorage::openRaw`), enciphered as on the card. A directory listing's entries are raw handles too: their size
   includes the header.

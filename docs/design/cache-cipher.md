@@ -98,6 +98,14 @@ library looks at it (`book_protection::encipherCache`). The reader's state (`Boo
 manifest `protect.bin`, which takes an Adobe book seconds to build again, are written back enciphered; everything else
 is made again by the next open. Freed sectors keep what they held until they are written over.
 
+## A clear that keeps files
+
+Clear Cache in Settings and Delete Book Cache (answered Keep) keep the reading state, and the reader's Delete Book
+Cache keeps the covers either way (`BookCache::clear`). The kept files are enciphered under the marker's salt, so the
+marker stays with them; with nothing else kept it goes with the folder. The first version removed it: the folder then
+read as plain, and the next open took the kept files' ciphertext for an older cache's reading state and enciphered it
+once more under a new salt, so the position and the bookmarks were lost for good.
+
 ## What stays plain
 
 - Screenshots and Quick Resume's `sleep_frame.bin` (owner's decision).
