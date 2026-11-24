@@ -120,6 +120,86 @@ TEST_F(HomeMenuTest, OneLibraryEntryLabelledLibrary) {
   EXPECT_EQ(entries.front().icon, Folder);
 }
 
+std::vector<A> actionsWithRoomFor(const int capacity, const HomeMenuPlacement placement,
+                                  const HomeMenuAvailability& availability) {
+  std::vector<HomeMenuEntry> entries;
+  collectHomeMenuEntries(placement, availability, entries, capacity);
+  std::vector<A> actions;
+  for (const HomeMenuEntry& entry : entries) actions.push_back(entry.action);
+  return actions;
+}
+
+// A theme with room for four (the tiles theme) sends the fifth entry behind More, and More then
+// lists exactly that one: the two screens split the entries between them, none twice, none lost.
+TEST_F(HomeMenuTest, EntriesPastTheThemesRoomGoBehindMore) {
+  EXPECT_EQ(actionsWithRoomFor(4, HomeMenuPlacement::Home, everything),
+            (std::vector<A>{A::Library, A::ReadingStats, A::GlobalBookmarks, A::FileTransfer, A::More, A::Settings}));
+  EXPECT_EQ(actionsWithRoomFor(4, HomeMenuPlacement::More, everything), (std::vector<A>{A::Weather}));
+}
+
+// A hidden entry frees its place: the room is counted over the entries placed on Home, in order.
+TEST_F(HomeMenuTest, AHiddenEntryLeavesItsPlaceToTheNextOne) {
+  SETTINGS.showReadingStatsOnHome = 0;
+
+  EXPECT_EQ(actionsWithRoomFor(4, HomeMenuPlacement::Home, everything),
+            (std::vector<A>{A::Library, A::GlobalBookmarks, A::FileTransfer, A::Weather, A::More, A::Settings}));
+  EXPECT_EQ(actionsWithRoomFor(4, HomeMenuPlacement::More, everything), (std::vector<A>{A::ReadingStats}));
+}
+
+TEST_F(HomeMenuTest, RoomToSpareAddsNoMore) {
+  EXPECT_EQ(actionsWithRoomFor(4, HomeMenuPlacement::Home, nothingOptional),
+            (std::vector<A>{A::Library, A::ReadingStats, A::FileTransfer, A::Weather, A::Settings}));
+  EXPECT_TRUE(actionsWithRoomFor(4, HomeMenuPlacement::More, nothingOptional).empty());
+}
+
+// A theme with four places and two entries switched on: the free places take switched-off entries
+// in table order, after the switched-on ones, so the grid keeps its two rows. More keeps the rest.
+// A theme without a limit (Lyra's list) leaves the switches as they are.
+TEST_F(HomeMenuTest, FreePlacesFillFromMoreAfterTheSwitchedOnEntries) {
+  SETTINGS.showReadingStatsOnHome = 0;
+  SETTINGS.showBookmarksOnHome = 0;
+  SETTINGS.showWeatherOnHome = 0;
+
+  EXPECT_EQ(actionsWithRoomFor(4, HomeMenuPlacement::Home, everything),
+            (std::vector<A>{A::Library, A::FileTransfer, A::ReadingStats, A::GlobalBookmarks, A::More, A::Settings}));
+  EXPECT_EQ(actionsWithRoomFor(4, HomeMenuPlacement::More, everything), (std::vector<A>{A::Weather}));
+
+  EXPECT_EQ(actionsAt(HomeMenuPlacement::Home, everything),
+            (std::vector<A>{A::Library, A::FileTransfer, A::More, A::Settings}));
+  EXPECT_EQ(actionsAt(HomeMenuPlacement::More, everything),
+            (std::vector<A>{A::ReadingStats, A::GlobalBookmarks, A::Weather}));
+}
+
+// Filling never shows an entry twice, and with nothing left behind More there is no More.
+TEST_F(HomeMenuTest, FillingThatEmptiesMoreDropsIt) {
+  SETTINGS.showReadingStatsOnHome = 0;
+  SETTINGS.useWeather = 0;
+
+  EXPECT_EQ(actionsWithRoomFor(4, HomeMenuPlacement::Home, nothingOptional),
+            (std::vector<A>{A::Library, A::FileTransfer, A::ReadingStats, A::Settings}));
+  EXPECT_TRUE(actionsWithRoomFor(4, HomeMenuPlacement::More, nothingOptional).empty());
+}
+
+// Settings needs no room and never moves, so even a theme with none keeps the way back.
+TEST_F(HomeMenuTest, SettingsStaysWithNoRoomAtAll) {
+  EXPECT_EQ(actionsWithRoomFor(0, HomeMenuPlacement::Home, everything), (std::vector<A>{A::More, A::Settings}));
+  EXPECT_EQ(actionsWithRoomFor(0, HomeMenuPlacement::More, everything),
+            (std::vector<A>{A::Library, A::ReadingStats, A::GlobalBookmarks, A::FileTransfer, A::Weather}));
+}
+
+// The tiles theme sets More and Settings apart from the destinations by counting them off the end.
+TEST_F(HomeMenuTest, TheTrailingEntriesAreMoreAndSettings) {
+  std::vector<HomeMenuEntry> entries;
+  collectHomeMenuEntries(HomeMenuPlacement::Home, everything, entries);
+  EXPECT_EQ(homeMenuTrailingCount(entries), 1);  // Settings
+
+  entries.clear();
+  collectHomeMenuEntries(HomeMenuPlacement::Home, everything, entries, 4);
+  EXPECT_EQ(homeMenuTrailingCount(entries), 2);  // More, Settings
+
+  EXPECT_EQ(homeMenuTrailingCount({}), 0);
+}
+
 // Browse Files and Recent Books had a home entry each; the Library is shown where either was.
 TEST(HomeMenuMigration, LibraryShownWhereEitherOldEntryWas) {
   EXPECT_EQ(libraryOnHomeFromLegacy(1, 1), 1);

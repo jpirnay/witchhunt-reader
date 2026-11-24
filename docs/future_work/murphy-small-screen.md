@@ -85,14 +85,12 @@ and every `show*OnHome` default to 1 (`CrossPointSettings.h`). Simulated from `c
 | Theme | Entries | Tile | Menu height | Row height |
 |---|---|---|---|---|
 | Lyra | 4 / 5 / 6 | 170 | 146 | 36 / 29 / 24 |
-| Lyra 3 Covers | 4 / 5 / 6 | 200 | 116 | 29 / 23 / 19 |
 | Classic | 4 / 5 / 6 | 280 | 54 | 13 / 10 / 9 |
 
 | Sev | Where | Constant / expression | What happens at 240x416 | Fix |
 |---|---|---|---|---|
 | S2 | `LyraTheme::drawRecentBookCover` | `coverWidth = coverHeight * 3 / 5` = 92, `textWidth = 200-16-16-92` = 76 | Text column is x=136..212, 76 px: about 7 title chars a line. The status line is truncated since 7db7d086d. | Below a column minimum put the status and history under the cover or shrink the cover. R6 |
 | S1 | `CLASSIC_MIN_RECENT_TILE_HEIGHT` in `HomeActivity.cpp`, `BaseTheme::drawRecentBookCover` | `= 280` | Menu gets 54 px, rows 9-13 px with 20 px text: labels overprint each other and are unreadable. | Lower floor. R6 |
-| S3 | `historyRowHeight` in `Lyra3CoversTheme.h` | `= 23` "FIT_SMALL_FONT_ID line height" | On Murphy that face is 17 px: 6 px wasted, and the comment is wrong here. | Local: read the ladder |
 
 ## FreeInkUI widgets as the firmware calls them
 

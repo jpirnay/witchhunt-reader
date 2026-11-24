@@ -60,6 +60,7 @@ class HomeActivity final : public Activity {
   // first), and it removes partial thumbnails of work it does not finish.
   CoverThumbLoader coverLoader;
   int coverLoaderHeight_ = -1;  // the cover height the loader is configured for
+  std::string coverBookPath_;   // the book the loader is working on, which a cycle may have moved
 
   // Session-scoped transient-failure counter, keyed by book path. A cover can fail to load for
   // transient reasons (OOM under heap pressure, an interrupted write, an extraction that could not
@@ -87,24 +88,43 @@ class HomeActivity final : public Activity {
   // back to the list (updateBook).
   std::vector<RecentBook> recentBooks;
   std::vector<HomeMenuEntry> menuEntries;
+  // The first shownBooks_ of recentBooks are on screen and selectable; the selector runs over them,
+  // then the menu. All of them except on a theme that keeps more books than it shows, to cycle
+  // through (HomeLayout::bookSlots). Set in onEnter() before the first render, read by both tasks.
+  int shownBooks_ = 0;
+  // How many of menuEntries, at the end, are More and Settings (homeMenuTrailingCount). Set with the
+  // entries, in onEnter().
+  int menuTrailing_ = 0;
+  // The theme's rows (BaseTheme::homeGrid), and whether the buttons move by them: only where the board
+  // has a key for each direction. Otherwise Up and Down step through the screen as a list. Set in onEnter().
+  HomeGridNav::Grid grid_;
+  bool gridNav_ = false;
 
   std::string focusBookPath;
   int focusSelectorIndex = -1;
 
   void onSelectBook(const std::string& path);
+  // A horizontal swipe on a theme that asks for it (BaseTheme::homeSwipeCyclesBooks): the next
+  // (step 1) or previous (step -1) recent book moves to the front, where the theme shows it.
+  void cycleRecentBooks(int step);
   // Tap on a cover or a menu entry: opens it. Returns true when the touch was consumed.
   // Inert on non-touch boards. Reads the targets the active theme published.
   bool handleHomeTouch();
   void dispatchMenuAction(HomeMenuAction action);
 
   void rebuildMenuEntries();
+  // The theme's layout of this screen for the current entries. One call for the draw and the cover
+  // pass, so the cover height that names the thumbnails is the same on both sides.
+  HomeLayout homeLayout() const;
   bool keepRegionAsFrameCache();
   bool storeCoverBuffer();
   bool restoreCoverBuffer();
   void freeCoverBuffer();
   void restoreSecondaryBuffer(bool callerHoldsRenderLock = false);
   void loadRecentBooks(int maxBooks);
-  void loadRecentCovers(int coverHeight);
+  // The cover pass for the books Home shows. `thumbSizes` are the theme's exact boxes (HomeLayout);
+  // with none, every cover is made at `coverHeight` on the single-height path.
+  void loadRecentCovers(int coverHeight, const std::pair<int, int>* thumbSizes, int thumbSizeCount);
   // One thumbnail slot to placeholder on a permanent give-up: the exact on-disk path the cover
   // loader checks, plus the (w,h) the placeholder BMP should be written at.
   struct ThumbSlot {

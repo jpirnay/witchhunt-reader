@@ -18,9 +18,9 @@
 #include "CrossPointSettings.h"
 #include "UiFontScale.h"
 #include "components/themes/BaseTheme.h"
-#include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
+#include "components/themes/lyra/LyraTilesTheme.h"
 
 namespace {
 
@@ -33,7 +33,7 @@ std::vector<NamedTheme> allThemes() {
   return {
       {"Classic", BaseMetrics::values},
       {"Lyra", LyraMetrics::values},
-      {"Lyra3Covers", Lyra3CoversMetrics::values},
+      {"LyraTiles", LyraTilesMetrics::values},
       {"LyraCarousel", LyraCarouselMetrics::values},
   };
 }

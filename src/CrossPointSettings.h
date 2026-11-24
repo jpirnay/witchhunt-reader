@@ -316,8 +316,10 @@ class CrossPointSettings {
   // Hide battery percentage
   enum HIDE_BATTERY_PERCENTAGE { HIDE_NEVER = 0, HIDE_READER = 1, HIDE_ALWAYS = 2, HIDE_BATTERY_PERCENTAGE_COUNT };
 
-  // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, LYRA_CAROUSEL = 3 };
+  // UI Theme. Lyra Tiles took over 2 from Lyra Extended (three books on Home), which it replaced:
+  // a stored 2 opens Lyra Tiles. 4 was Lyra Tiles on test builds only; out of range, it loads as
+  // the default.
+  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_TILES = 2, LYRA_CAROUSEL = 3 };
 
   // Size of the menu/chrome text. Each step rebinds the three logical UI font IDs one rung up
   // the device's UI font ladder (applyUiFontScale() in main.cpp) and adds the matching pixels to
@@ -578,7 +580,7 @@ class CrossPointSettings {
   // Hide battery percentage
   uint8_t hideBatteryPercentage = HIDE_NEVER;
   // UI Theme
-  uint8_t uiTheme = LYRA;
+  uint8_t uiTheme = LYRA_TILES;
   // Acknowledge a press that starts a slow screen change. See ActivityManager::showBusyIndicator().
   uint8_t showBusyIndicator = 1;
   // NOT a preference: the measured cost of a FAST refresh on this panel, carried across boots so

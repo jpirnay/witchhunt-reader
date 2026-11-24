@@ -100,10 +100,11 @@ struct RowSink {
   void operator()(SettingInfo&& row) const { take(visitor, row); }
 };
 
-// Carousel's fixed 340x540 centre tile is bigger than a compact panel. A stored choice is out of
-// range here, so loading turns it into the field's default.
+// Carousel's fixed 340x540 centre tile is bigger than a compact panel. A stored Carousel is out of
+// range there, so loading turns it into the field's default. The list is positional: Carousel
+// stays last, in UI_THEME order.
 inline std::vector<StrId> uiThemeChoices() {
-  std::vector<StrId> themes = {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED};
+  std::vector<StrId> themes = {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_TILES};
   if (!PanelMetrics::COMPACT) themes.push_back(StrId::STR_THEME_LYRA_CAROUSEL);
   return themes;
 }
