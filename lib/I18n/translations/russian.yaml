@@ -338,6 +338,7 @@ STR_REMAP_FRONT_BUTTONS: "Переназначить передние кнопк
 STR_OPDS_BROWSER: "OPDS браузер"
 STR_FOOTNOTES: "Примечания"
 STR_NOTE: "Сноска"
+STR_NOTE_TITLE: "Сноска %s"
 STR_GO_TO_NOTE: "К сноске"
 STR_NOTE_POSITION: "%d из %d"
 STR_NO_FOOTNOTES: "На странице нет примечаний"

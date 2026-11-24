@@ -184,8 +184,9 @@ void FootnoteSheet::draw() const {
   renderer.fillRect(sheet.x, ruleY, sheet.width, kRule, true);
 
   // The title: which note this is, and where it stands among the page's notes; on a long note, right, which page of it.
+  // One format, so each language puts the marker where it goes ("Note 12", "12. lábjegyzet").
   char title[96];
-  const int used = snprintf(title, sizeof(title), "%s %s", tr(STR_NOTE), marker);
+  const int used = snprintf(title, sizeof(title), tr(STR_NOTE_TITLE), marker);
   if (place.count > 1 && used > 0 && static_cast<size_t>(used) < sizeof(title)) {
     char position[32];
     snprintf(position, sizeof(position), tr(STR_NOTE_POSITION), place.position + 1, static_cast<int>(place.count));
