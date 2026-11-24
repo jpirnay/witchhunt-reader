@@ -9,6 +9,7 @@
 #include "ClearCacheActivity.h"
 #include "ClockSettingsActivity.h"
 #include "DetectTimezoneActivity.h"
+#include "DiagnosticScreens.h"
 #include "DictionarySelectionActivity.h"
 #include "EnumSelectionActivity.h"
 #include "FontDownloadActivity.h"
@@ -77,10 +78,19 @@ std::unique_ptr<Activity> createActivityForAction(SettingAction action, GfxRende
       return std::make_unique<WeatherSettingsActivity>(renderer, mappedInput);
     case SettingAction::SystemInfo:
       return std::make_unique<SystemInformationActivity>(renderer, mappedInput);
+    // Developer screens (DiagnosticScreens.h). A build without them offers no row that asks.
     case SettingAction::BootDiagnostics:
+#if ENABLE_BOOT_DIAGNOSTICS_SCREEN
       return std::make_unique<BootDiagnosticsActivity>(renderer, mappedInput);
+#else
+      return nullptr;
+#endif
     case SettingAction::FontScalingTest:
+#if ENABLE_FONT_SCALING_TEST
       return std::make_unique<FontScalingTestActivity>(renderer, mappedInput);
+#else
+      return nullptr;
+#endif
     case SettingAction::SyncTime:
       return std::make_unique<SyncTimeActivity>(renderer, mappedInput);
     case SettingAction::DetectTimezone:

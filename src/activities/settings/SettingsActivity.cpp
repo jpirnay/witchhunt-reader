@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "CrossPointSettings.h"
+#include "DiagnosticScreens.h"
 #include "MappedInputManager.h"
 #include "SdCardFontGlobals.h"
 #include "SettingActionDispatch.h"
@@ -229,14 +230,18 @@ void SettingsActivity::buildRows() {
   //                          .withSubmenu(StrId::STR_SYSTEM_UPDATE)));
   addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_SYSTEM_INFO, SettingAction::SystemInfo)
                                            .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
+#if ENABLE_BOOT_DIAGNOSTICS_SCREEN
   // Next to System Information, which is where anyone chasing a "the power button did
   // nothing" report already looks.
   addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_BOOT_DIAGNOSTICS, SettingAction::BootDiagnostics)
                                            .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
+#endif  // ENABLE_BOOT_DIAGNOSTICS_SCREEN
+#if ENABLE_FONT_SCALING_TEST
   // A comparison screen, not a setting: it decides whether the size ladder can ship fewer real
   // faces and scale the rest, which the coverage metrics in bench/font_main.cpp cannot settle.
   addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_FONT_SCALING_TEST, SettingAction::FontScalingTest)
                                            .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
+#endif  // ENABLE_FONT_SCALING_TEST
 
   // Each tab ends up holding exactly the rows it will show, grouped under its headings; the same
   // goes for each submenu's own rows.
