@@ -26,6 +26,18 @@ bool uses(const HomeTilesLayout::Config& config, const Widget widget) {
   return false;
 }
 
+// Whether a Picture widget of `config` shows picture `slot`. A slot no widget shows is not looked
+// up: every layout names a source for both, and each costs SD opens on every return to Home.
+bool showsPicture(const HomeTilesLayout::Config& config, const int slot) {
+  for (int r = 0; r < config.rowCount; ++r) {
+    for (int c = 0; c < config.rows[r].count; ++c) {
+      const HomeTilesLayout::Cell& cell = config.rows[r].cells[c];
+      if (cell.widget == Widget::Picture && cell.option == slot) return true;
+    }
+  }
+  return false;
+}
+
 // The weekday (tm_wday) the setting starts the week on.
 int weekStart() {
   switch (SETTINGS.firstDayOfWeek) {
@@ -160,7 +172,8 @@ void HomeWidgetData::load(const HomeTilesLayout::Config& config, const std::stri
 
   for (int i = 0; i < HomeTilesLayout::kMaxPictures; ++i) {
     const std::string& source = pictureSources[i];
-    if (source.empty()) {
+    pictureSizes[i] = 0;
+    if (source.empty() || !showsPicture(config, i)) {
       pictures[i].clear();
       continue;
     }
@@ -175,7 +188,6 @@ void HomeWidgetData::load(const HomeTilesLayout::Config& config, const std::stri
       }
       pictures[i] = pickedFiles[i];
     }
-    pictureSizes[i] = 0;
     if (!pictures[i].empty()) {
       auto file = Storage.open(pictures[i].c_str());
       if (file) {
