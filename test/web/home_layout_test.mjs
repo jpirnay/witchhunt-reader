@@ -82,4 +82,37 @@ const unshown = HomeLayout.webPicturePlugin(1, { url: 'https://x.org/{width}.jpg
 check(unshown.url === 'https://x.org/{width}.jpg', 'a picture not shown keeps {width} unfilled');
 check('sleep.enter' in JSON.parse(unshown.files['device.json']).events, 'an unknown event is fetched at sleep');
 
+// The ready-made sources (WEB_PICTURE_PRESETS): what each fetches for a 218 x 170 widget.
+const tile = { w: 218, h: 170 };
+check(HomeLayout.webSourceUrl({ preset: 'photo' }, tile) === 'https://picsum.photos/218/170?grayscale', 'a photo at the widget\'s size');
+check(HomeLayout.webSourceUrl({ preset: 'calendar', country: 'de', weekStart: 'sunday' }, tile) ===
+      'https://crosspoint-calendar.marczyk.ovh/current.bmp?w=218&h=170&country=DE&week_start=sunday',
+      'the calendar takes the country in capitals and the week start');
+check(HomeLayout.webSourceUrl({ preset: 'calendar', country: 'Germany' }, null).includes('country=none&week_start=monday'),
+      'a country that is not two letters is none, and weeks start on Monday unless Sunday');
+check(HomeLayout.webSourceUrl({ preset: 'note', text: ' Read more \n\n books ' }, tile) ===
+      'https://placehold.co/218x170/FFFFFF/000000/png?text=Read%20more%5Cnbooks&font=roboto',
+      'a note: its lines trimmed, empty ones left out, joined by \\n');
+const qr = new URL(HomeLayout.webSourceUrl({ preset: 'qr', data: 'https://example.org/a b' }, tile));
+check(qr.searchParams.get('size') === '218x218' && qr.searchParams.get('margin') === '32' &&
+      qr.searchParams.get('data') === 'https://example.org/a b',
+      'a QR code is square, with a margin that keeps it whole when Home cuts it to the box');
+check(HomeLayout.webSourceUrl({ preset: 'note', text: 'x' }, null) === '' && HomeLayout.webSourceUrl({ preset: 'qr', data: 'x' }, null) === '',
+      'a once preset has no address without the widget\'s size');
+check(['photo', 'calendar', 'sun', 'earth', 'note', 'qr'].map((preset) => HomeLayout.webPictureDest(1, { preset })).join() ===
+      '/home/web/web-1.jpg,/home/web/web-1.bmp,/home/web/web-1.jpg,/home/web/web-1.jpg,/home/web/web-1.png,/home/web/web-1.png',
+      'each preset keeps the type its service answers with');
+check(HomeLayout.WEB_PICTURE_PRESETS.filter((p) => p.once).map((p) => p.id).join() === 'note,qr',
+      'the note and the QR code are made once; the rest change and are fetched by the reader');
+check(HomeLayout.webSourceProblem({ preset: 'note', text: '  ' }) !== '' && HomeLayout.webSourceProblem({ preset: 'qr' }) !== '' &&
+      HomeLayout.webSourceProblem({ url: 'ftp://x' }) !== '' && HomeLayout.webSourceProblem({ preset: 'sun' }) === '',
+      'a note without text, a QR code without content and a non-http address cannot be saved');
+const calendar = HomeLayout.webPicturePlugin(2, { preset: 'calendar', country: 'PL', event: 'sleep.enter' }, tile);
+const calendarManifest = JSON.parse(calendar.files['manifest.json']);
+check(calendar.dest === '/home/web/web-2.bmp' && calendar.url.startsWith('https://crosspoint-calendar.marczyk.ovh/current.bmp?w=218&h=170&country=PL'),
+      'a preset\'s plugin fetches its address to its type');
+check(calendarManifest.homeScreen.preset === 'calendar' && calendarManifest.homeScreen.url.includes('{width}') &&
+      JSON.stringify(calendarManifest.allowedHosts) === '["crosspoint-calendar.marczyk.ovh",".crosspoint-calendar.marczyk.ovh"]',
+      'and keeps the preset, the address with {width} and {height}, and its host');
+
 process.exit(failures ? 1 : 0);

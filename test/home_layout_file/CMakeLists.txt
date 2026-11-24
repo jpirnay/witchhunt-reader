@@ -3,6 +3,7 @@
 add_executable(HomeLayoutFileTest
   HomeLayoutFileTest.cpp
   HomeLayoutPlacementsTest.cpp
+  HomePictureNameTest.cpp
   ${REPO_ROOT}/src/components/themes/lyra/HomeLayoutFile.cpp
   ${REPO_ROOT}/lib/Serialization/JsonText.cpp
 )

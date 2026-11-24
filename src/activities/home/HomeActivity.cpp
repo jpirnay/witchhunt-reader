@@ -38,6 +38,7 @@
 #include "activities/reader/ReaderActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/TapTargets.h"
+#include "components/themes/lyra/HomeWidgetData.h"
 #include "fontIds.h"
 #include "util/SerialCommandGrammar.h"
 
@@ -363,6 +364,7 @@ bool HomeActivity::makeNextHomePicture() {
       LOG_ERR("HOME", "Picture not made: %s (%dx%d)", job.source.c_str(), job.width, job.height);
     } else {
       LOG_INF("HOME", "Picture made: %s -> %s", job.source.c_str(), job.target.c_str());
+      removeReplacedHomePictures(job.target);
     }
     return true;
   }

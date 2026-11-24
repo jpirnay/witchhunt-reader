@@ -51,5 +51,8 @@ inline constexpr const char* kHomePicturesFolder = "/home";
 inline constexpr const char* kHomePictureCache = "/.crosspoint/home";
 
 // The file a picture is made into for a `width` x `height` widget: named by the source's path and
-// size, so a replaced picture is made again and two widget sizes keep a file each.
+// size, so a replaced picture is made again and two widget sizes keep a file each (HomePictureName.h).
 std::string homePictureTarget(const std::string& source, uint32_t sourceBytes, int width, int height);
+
+// Removes the files `target` replaces: those made from earlier copies of its source at its size.
+void removeReplacedHomePictures(const std::string& target);
