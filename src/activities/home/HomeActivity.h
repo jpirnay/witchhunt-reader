@@ -102,9 +102,10 @@ class HomeActivity final : public Activity {
   static constexpr int kMaxWidgetActions = 12;
   HomeDestination widgetActions_[kMaxWidgetActions]{};
   int widgetActionCount_ = 0;
-  // The pictures the widgets show that this visit has tried to make (makeNextHomePicture).
+  // The pictures the widgets show that this visit has tried to make (makeNextHomePicture): bit i
+  // for the theme's job i. The jobs stay the same for a visit, as the layout is chosen in onEnter.
   static constexpr int kMaxPictureJobs = 4;
-  std::vector<std::string> pictureAttempts_;
+  uint8_t pictureAttempts_ = 0;
   // Makes one picture a widget shows that is not on the card yet; false when none is left.
   bool makeNextHomePicture();
   bool gridNav_ = false;

@@ -342,10 +342,11 @@ bool HomeActivity::makeNextHomePicture() {
       GUI.homePictureJobs(renderer, UITheme::getContentRect(renderer, true, false), jobs, kMaxPictureJobs);
   for (int i = 0; i < count; ++i) {
     const HomePictureJob& job = jobs[i];
-    if (std::find(pictureAttempts_.begin(), pictureAttempts_.end(), job.target) != pictureAttempts_.end()) continue;
+    const auto bit = static_cast<uint8_t>(1u << i);
+    if ((pictureAttempts_ & bit) != 0) continue;
     if (ReaderActivity::isCoverThumbComplete(job.target, job.width, job.height)) continue;
     // Once a visit, made or not: a picture the decoders refuse is not tried on every tick.
-    pictureAttempts_.push_back(job.target);
+    pictureAttempts_ |= bit;
     const std::string dir = job.target.substr(0, job.target.rfind('/'));
     if (!Storage.exists(dir.c_str())) Storage.mkdir(dir.c_str());
     // Written under another name and renamed when whole: the theme draws the target on the render
@@ -493,7 +494,7 @@ void HomeActivity::onEnter() {
   recentDocIds.reserve(recentBooks.size());
   for (const auto& book : recentBooks) recentDocIds.push_back(KOReaderDocumentId::calculateFromFilename(book.path));
   READING_STATS.prefetchRecent(recentDocIds);
-  pictureAttempts_.clear();
+  pictureAttempts_ = 0;
   // Built here, once per entry, before the first render is requested. render() runs on the render
   // task and loop() on this one; when both rebuilt the list on a dirty flag, they could run at once,
   // each clearing and then appending, and Home showed every entry twice. The rebuild also reads the
