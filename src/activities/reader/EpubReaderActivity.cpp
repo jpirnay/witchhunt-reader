@@ -6354,6 +6354,17 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     return;
   }
 
+  // A Dark Mode change since the last pass (ActivityManager::applyOutputPolarity() sets it just before this one) owes
+  // the page under the live bars or the footnote sheet, and the overlay over it. A pass with no page due paints only
+  // the overlay, and only when its input marked it stale, so Toggle Dark Mode with either open changed nothing on the
+  // panel. The page is drawn again rather than its frame inverted: its pictures keep their polarity by being drawn
+  // inverted (GfxRenderer::keepsImagePolarity()).
+  const bool inverted = renderer.isOutputInverted();
+  if (inverted != renderedInverted_) {
+    renderedInverted_ = inverted;
+    if (liveOverlayOpen()) liveOverlayPageOwed_ = true;
+  }
+
   // Every render pass redraws the status bar, so a refresh held back for Background-B is paid by
   // this one (cleared before recoverSecondaryBufferIfNeeded, which may end B's borrow).
   statusRefreshDeferred_ = false;
