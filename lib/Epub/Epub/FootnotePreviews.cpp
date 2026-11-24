@@ -323,8 +323,8 @@ class NoteCapturer {
   size_t closeBytes_ = 0;
 
   // The elements a note keeps in markup mode: what the reader sees of its structure and emphasis. Anything else -- a
-  // span, a table, a link's text is chrome anyway -- passes its text through without its tags, so no attribute or
-  // class reaches the fragment and nothing in it needs the book's stylesheet. "br" is the one void element.
+  // span, a table, a link (isChrome() drops a back-link) -- passes its text through without its tags, so no attribute
+  // or class reaches the fragment and nothing in it needs the book's stylesheet. "br" is the one void element.
   static constexpr const char* const kKeptTags[] = {"p",   "div",   "br", "i",          "em",   "b",  "strong", "sup",
                                                     "sub", "small", "u",  "blockquote", "cite", "ol", "ul",     "li"};
   static constexpr uint8_t kBreakTag = 2;
@@ -392,9 +392,18 @@ class NoteCapturer {
   // "1 Or, if you are a believer in Omnianism, the Pole. note_1" (Small Gods, device-observed)
   // spends a third of its width saying nothing. The capture root itself is never skipped: in the
   // Calibre pattern the anchor IS an <a>.
-  static bool isChrome(const char* name) {
-    if (strcmp(name, "a") == 0) return true;
-    return name[0] == 'h' && name[1] >= '1' && name[1] <= '6' && name[2] == '\0';
+  //
+  // A preview, one line cut short, drops every link. A popup note (markup mode) is read whole, and a
+  // link in its text is its words: "See <a>Chapter 4</a> or <a>www.example.org</a>." came out as
+  // "See or .". There a link is chrome only as the note's back-link: the one before any of its text,
+  // or one that says it is a back-link (EPUB 3's "backlink", ARIA's "doc-backlink", which Pandoc
+  // puts on the arrow at a note's end).
+  bool isChrome(const char* name, const char** atts) const {
+    if (name[0] == 'h' && name[1] >= '1' && name[1] <= '6' && name[2] == '\0') return true;
+    if (strcmp(name, "a") != 0) return false;
+    if (!markup_ || plainLen_ == 0) return true;
+    return FootnoteShape::hasAttributeToken(getAttribute(atts, "epub:type"), "backlink") ||
+           FootnoteShape::hasAttributeToken(getAttribute(atts, "role"), "doc-backlink");
   }
 
   // True when the element carrying the wanted id is itself a LINK — an <a> with an href.
@@ -489,7 +498,7 @@ class NoteCapturer {
       if (!isCallerAnchor(name, atts)) {
         self->beginCapture(static_cast<size_t>(wantedIdx), self->depth_);
       }
-    } else if (self->captureDepth_ >= 0 && self->skipDepth_ < 0 && isChrome(name)) {
+    } else if (self->captureDepth_ >= 0 && self->skipDepth_ < 0 && self->isChrome(name, atts)) {
       // A LINK as the very first thing in a tail capture means the id we are standing on is a
       // caller, not a note -- the other half of isCallerAnchor, for converters that put the id
       // on a separate empty element instead of on the link itself:
