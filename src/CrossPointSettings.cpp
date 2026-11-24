@@ -14,6 +14,7 @@
 #include "DarkMode.h"
 #include "DarkModeNow.h"
 #include "SdCardFontGlobals.h"
+#include "TouchGate.h"
 #include "fontIds.h"
 
 // Font ID 0 is reserved as the SD card font "not found" sentinel
@@ -44,6 +45,18 @@ static_assert(SMALL_FONT_ID != 0, "Font ID collision with sentinel");
 // Initialize the static instance
 CrossPointSettings CrossPointSettings::instance;
 
+namespace {
+
+// No Back key and no Home key to carry Back and Confirm (BOOX Picco: Power, Up, Down and touch): Power is the remaining
+// key, so a press of it is Confirm and a double press Back, by default only. Murphy is left out by the dedicated Power
+// key: its Power is its Confirm.
+bool powerStandsInForBackAndConfirm(const BoardConfig::InputPins& input) {
+  const bool hasDedicatedPowerKey = input.power >= 0 && input.power != input.confirm;
+  return input.back < 0 && !BoardConfig::hasHomeKey() && hasDedicatedPowerKey;
+}
+
+}  // namespace
+
 void CrossPointSettings::applyDeviceButtonDefaults() {
   btnDoubleConfirm = BTN_DEFAULT;
   btnLongConfirm = BTN_DEFAULT;
@@ -51,12 +64,9 @@ void CrossPointSettings::applyDeviceButtonDefaults() {
   btnDoublePower = BTN_LIGHT_TOGGLE;
 
   const auto& input = BoardConfig::ACTIVE.input;
-  // No Back key and no Home key to carry Back and Confirm (BOOX Picco: Power, Up, Down and touch): Power is the
-  // remaining key, so a press of it is Confirm and a double press Back, and both are a key away, not only a box to
-  // tap. The light that double press toggles elsewhere is the slide switch's on that board. Murphy is left out by the
-  // dedicated Power key: its Power is its Confirm.
-  const bool hasDedicatedPowerKey = input.power >= 0 && input.power != input.confirm;
-  if (input.back < 0 && !BoardConfig::hasHomeKey() && hasDedicatedPowerKey) {
+  // Both a key away, not only a box to tap. The light that double press toggles elsewhere is the slide switch's on that
+  // board.
+  if (powerStandsInForBackAndConfirm(input)) {
     btnShortPower = BTN_CONFIRM;
     btnDoublePower = BTN_BACK;
   }
@@ -82,6 +92,42 @@ void CrossPointSettings::normalizeDependentSettings(CrossPointSettings& settings
   if (settings.sleepScreen == SLEEP_SCREEN_MODE::QUICK_RESUME) {
     settings.quickResumeSleepScreen = QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT;
   }
+  // Touch Lock with nothing left to switch it off but touch locked the device for good, the lock being saved and
+  // restored at boot: a BOOX Picco whose short Power was bound to something else, with Touch Lock switched on by a tap
+  // and the slide switch on the light. Refused, and lifted when the last way out goes. Runs on every load as well, so a
+  // card that comes with such a lock boots without it.
+  if (settings.touchLock != 0 && !settings.touchLockCanBeLifted()) {
+    LOG_INF("CPS", "Touch Lock off: no key or switch could switch it off again");
+    settings.touchLock = 0;
+  }
+}
+
+bool CrossPointSettings::touchLockCanBeLifted() const {
+  const auto& input = BoardConfig::ACTIVE.input;
+  TouchGate::LockEscapes escapes;
+  escapes.fixedConfirmKey = !powerStandsInForBackAndConfirm(input);
+  escapes.slideSwitchIsTouch = input.toggleSwitch >= 0 && slideSwitchAction == SLIDE_SWITCH_TOUCH;
+  // Where Power stands in, the keys are Power and the direction keys the profile wires; a Confirm pin it may carry is
+  // no key the firmware counts on (the Picco's GPIO5: what drives it is not known). Power has no long press to bind.
+  uint8_t actions[2 + 4 * 3];
+  size_t count = 0;
+  actions[count++] = btnShortPower;
+  actions[count++] = btnDoublePower;
+  const auto addKey = [&](const int8_t pin, const uint8_t shortPress, const uint8_t doublePress,
+                          const uint8_t longPress) {
+    if (pin < 0) return;
+    actions[count++] = shortPress;
+    actions[count++] = doublePress;
+    actions[count++] = longPress;
+  };
+  addKey(input.left, btnShortLeft, btnDoubleLeft, btnLongLeft);
+  addKey(input.right, btnShortRight, btnDoubleRight, btnLongRight);
+  // Up and Down carry the Page Back and Page Forward rows (ButtonEventManager::pairedAlias()).
+  addKey(input.up, btnShortPageBack, btnDoublePageBack, btnLongPageBack);
+  addKey(input.down, btnShortPageForward, btnDoublePageForward, btnLongPageForward);
+  escapes.keyActions = actions;
+  escapes.keyActionCount = count;
+  return TouchGate::lockCanBeLifted(escapes, BTN_CONFIRM, BTN_TOGGLE_TOUCH_LOCK);
 }
 
 bool CrossPointSettings::isReaderScopedAction(const uint8_t action) {

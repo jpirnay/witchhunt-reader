@@ -374,7 +374,10 @@ initialisers in `CrossPointSettings.h`. Why they are what they are:
   (`TouchGate::eventsEnabled()`, tested in `test/touch_gate`). Keys undo it: one bound to
   `BTN_TOGGLE_TOUCH_LOCK`, the settings row reached by the keys, or the Picco's slide switch set to
   Touch. The Home key's presses arrive below the gate and keep working. While it is on, a contact
-  does not count as activity for the sleep timer.
+  does not count as activity for the sleep timer. A lock none of these could undo is refused and
+  lifted (`CrossPointSettings::touchLockCanBeLifted()`, `TouchGate::lockCanBeLifted()`, applied by
+  `normalizeDependentSettings()` on every load and change): only a board whose Power stands in for
+  Confirm by default, the Picco, can get there, by binding its short Power to something else.
 
 ## Debugging touch
 

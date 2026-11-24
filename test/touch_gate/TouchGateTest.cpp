@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <initializer_list>
+
 #include "TouchGate.h"
 
 namespace {
@@ -61,6 +64,50 @@ TEST(TouchGate, TheReadersOwnScreensAreNotItsOverlays) {
   const bool readerOnTop = readerOwnsScreen(/*topIsReader=*/false, /*topIsOverlay=*/false, /*belowIsReader=*/true);
   EXPECT_FALSE(readerOnTop);
   EXPECT_FALSE(eventsEnabled(false, /*touchNavigationOn=*/false, readerOnTop));
+}
+
+// --- What can switch Touch Lock off again
+// ------------------------------------------------------------------------------
+
+// Stand-ins for the BUTTON_ACTION values: the gate is handed them, so any distinct numbers do.
+constexpr uint8_t kConfirm = 40;
+constexpr uint8_t kToggleLock = 41;
+constexpr uint8_t kPageForward = 1;
+constexpr uint8_t kBack = 39;
+
+bool liftable(const bool fixedConfirmKey, std::initializer_list<uint8_t> keyActions, const bool slideSwitchIsTouch) {
+  TouchGate::LockEscapes escapes;
+  escapes.fixedConfirmKey = fixedConfirmKey;
+  escapes.keyActions = keyActions.begin();
+  escapes.keyActionCount = keyActions.size();
+  escapes.slideSwitchIsTouch = slideSwitchIsTouch;
+  return TouchGate::lockCanBeLifted(escapes, kConfirm, kToggleLock);
+}
+
+// A Confirm key, or a Home key in its place (X3, X4, X4 Pro, T5S3, Murphy): the Touch Lock row in Settings is always
+// a key away, whatever the keys are bound to.
+TEST(TouchLockEscape, AFixedConfirmKeyIsAlwaysAWayOut) {
+  EXPECT_TRUE(liftable(/*fixedConfirmKey=*/true, {kPageForward, kBack}, /*slideSwitchIsTouch=*/false));
+}
+
+// The BOOX Picco: Power, Up and Down, and a short Power is Confirm only by default.
+TEST(TouchLockEscape, AKeyBoundToConfirmIsAWayOut) {
+  EXPECT_TRUE(liftable(false, {kConfirm, kBack, kPageForward}, false));
+}
+
+TEST(TouchLockEscape, AKeyBoundToToggleTouchLockIsAWayOut) {
+  EXPECT_TRUE(liftable(false, {kPageForward, kBack, kToggleLock}, false));
+}
+
+TEST(TouchLockEscape, TheSlideSwitchSetToTouchIsAWayOut) {
+  EXPECT_TRUE(liftable(false, {kPageForward, kBack}, /*slideSwitchIsTouch=*/true));
+}
+
+// Short Power bound to something else, no key on Toggle Touch Lock, the switch on the light: once touch is off, nothing
+// could switch it on again, and the lock was saved and came back at every boot.
+TEST(TouchLockEscape, NoWayOutWithoutAKeyOrTheSwitch) {
+  EXPECT_FALSE(liftable(false, {kPageForward, kBack, kPageForward}, false));
+  EXPECT_FALSE(liftable(false, {}, false));
 }
 
 }  // namespace

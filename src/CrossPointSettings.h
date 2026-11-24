@@ -1141,8 +1141,16 @@ class CrossPointSettings {
   }
 
   // Enforce settings whose values depend on others (e.g. sleepScreen=QUICK_RESUME implies
-  // quickResumeSleepScreen=ON). Call after any setting mutation that could invalidate the pair.
+  // quickResumeSleepScreen=ON, Touch Lock needs a way off by the keys). Call after any setting
+  // mutation that could invalidate the pair.
   static void normalizeDependentSettings(CrossPointSettings& settings);
+
+  // Whether Touch Lock, once on, could be switched off again without touch: a key that gives Confirm
+  // whatever these settings say (a Confirm key, or a Home key in its place), a key the board has bound
+  // to Confirm or to Toggle Touch Lock, or the slide switch set to Touch (TouchGate::lockCanBeLifted()).
+  // Only a board whose Power stands in for Confirm by default can answer no: the BOOX Picco, with
+  // its short Power bound to something else.
+  bool touchLockCanBeLifted() const;
 
   TextScale getReaderLineCompression() const;
   unsigned long getSleepTimeoutMs() const;

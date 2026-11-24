@@ -21,6 +21,8 @@ class SettingsSubmenuActivity final : public MenuListActivity {
   void onActionSelected(int index) override;
   void onSettingToggled(int index) override;
   std::string getItemValueString(int index) const override;
+  // A row changed: the settings that depend on it follow, and the file is saved (when this submenu saves at all).
+  void persistChange();
 
  public:
   explicit SettingsSubmenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, StrId titleId,

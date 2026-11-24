@@ -2371,6 +2371,9 @@ void loop() {
           break;
         case BA::BTN_TOGGLE_TOUCH_LOCK:
           SETTINGS.touchLock = SETTINGS.touchLock ? 0 : 1;
+          // Refused where nothing but touch could switch it off again: a gesture bound to this, and no key that could.
+          // The message then says it is off.
+          CrossPointSettings::normalizeDependentSettings(SETTINGS);
           SETTINGS.saveToFile();
           // Applied by the touch gate at the top of the next tick, like Toggle Touch Navigation.
           LOG_INF("MAIN", "Touch lock %s", SETTINGS.touchLock ? "on" : "off");
