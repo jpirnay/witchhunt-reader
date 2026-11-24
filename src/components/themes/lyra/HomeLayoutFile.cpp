@@ -1,6 +1,7 @@
 #include "HomeLayoutFile.h"
 
 #include <ArduinoJson.h>
+#include <JsonText.h>
 
 #include <cstring>
 
@@ -80,9 +81,7 @@ Parsed parse(const std::string& json) {
   Parsed parsed;
   if (json.empty() || json.size() > kMaxBytes) return parsed;
   JsonDocument doc;
-  // From the string, not (pointer, length): that form instantiates ArduinoJson's BoundedReader, whose
-  // helpers nothing else in the firmware carries (X3, measured: 1.1 KB of flash more).
-  if (deserializeJson(doc, json)) return parsed;
+  if (JsonText::parse(doc, json)) return parsed;
   if (doc["version"].as<int>() != 1) return parsed;
   for (JsonArrayConst row : doc["rows"].as<JsonArrayConst>()) {
     if (parsed.config.rowCount >= HomeTilesLayout::kMaxRows) break;

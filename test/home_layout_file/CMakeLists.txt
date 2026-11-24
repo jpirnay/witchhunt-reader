@@ -3,10 +3,12 @@
 add_executable(HomeLayoutFileTest
   HomeLayoutFileTest.cpp
   ${REPO_ROOT}/src/components/themes/lyra/HomeLayoutFile.cpp
+  ${REPO_ROOT}/lib/Serialization/JsonText.cpp
 )
 
 target_include_directories(HomeLayoutFileTest PRIVATE
   ${REPO_ROOT}/src
+  ${REPO_ROOT}/lib/Serialization
 )
 
 target_link_libraries(HomeLayoutFileTest PRIVATE
