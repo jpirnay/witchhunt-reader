@@ -12,6 +12,165 @@
 
 #include "components/themes/lyra/HomeTilesLayout.h"
 
+// Lyra Tiles' layout before widgets, kept as the reference the Reader layout is held to.
+namespace legacy {
+using namespace HomeTilesLayout;
+constexpr int kMaxTiles = 4;
+
+struct Regions {
+  Box books;  // the card, and the Also reading row under it when it fits
+  Box menu;   // the tiles, then the bottom row
+};
+
+// `content` is the screen above the button hints; `top` is the first line under the status line.
+// `tileCount` is the destinations shown as tiles (at most kMaxTiles); the bottom row always exists.
+constexpr Regions regions(const Box& content, const int top, const int tileCount, const Dimensions& d = kRegular) {
+  const int tiles = tileCount < 0 ? 0 : (tileCount > kMaxTiles ? kMaxTiles : tileCount);
+  const int bottom = content.y + content.h - d.bottomPadding;
+  Regions r{};
+  if (!sideways(content)) {
+    const int x = content.x + d.sidePadding;
+    const int w = content.w - 2 * d.sidePadding;
+    const int rows = (tiles + 1) / 2;
+    int tileH = (content.h * 16 + 50) / 100;
+    tileH = tileH < d.minTileHeight ? d.minTileHeight : (tileH > d.maxTileHeight ? d.maxTileHeight : tileH);
+    // Each row of tiles brings the gap under it, down to the bottom row.
+    const int menuH = rows * (tileH + d.gap) + d.bottomRowHeight;
+    r.menu = Box{x, bottom - menuH, w, menuH};
+    const int booksH = r.menu.y - d.gap - top;
+    r.books = Box{x, top, w, booksH > 0 ? booksH : 0};
+    return r;
+  }
+  const int leftW = (content.w * 56 + 50) / 100 - d.sidePadding;
+  r.books = Box{content.x + d.sidePadding, top, leftW, bottom - top};
+  const int menuX = r.books.x + leftW + d.gap;
+  r.menu = Box{menuX, top, content.x + content.w - d.sidePadding - menuX, bottom - top};
+  return r;
+}
+
+// Whether the panel has room for the Also reading row: the card keeps minCardHeight with two full
+// rows of tiles and the bottom row under it. Fewer tiles give the card more room, not the row.
+constexpr bool stripFits(const Box& content, const int top, const Dimensions& d = kRegular) {
+  return regions(content, top, kMaxTiles, d).books.h - d.stripHeight - d.gap >= d.minCardHeight;
+}
+
+struct Books {
+  Box card;
+  Box cover;  // 6:10, the thumbnail's exact box
+  Box text;   // title, author, series, history
+  Box foot;   // progress line and bar, across the card
+  bool hasStrip = false;
+  Box strip;  // the Also reading row, label line included
+  Box slots[kStripBooks];
+  Box slotCovers[kStripBooks];
+};
+
+// `withStrip` from stripFits(); the row then takes the foot of `area`.
+constexpr Books books(const Box& area, const bool withStrip, const Dimensions& d = kRegular) {
+  Books b{};
+  b.card = area;
+  if (withStrip && area.h - d.stripHeight - d.gap >= d.minCardHeight) {
+    b.hasStrip = true;
+    b.card.h = area.h - d.stripHeight - d.gap;
+    b.strip = Box{area.x, area.y + area.h - d.stripHeight, area.w, d.stripHeight};
+    const int slotW = (b.strip.w - (kStripBooks - 1) * d.gap) / kStripBooks;
+    const int slotH = d.stripHeight - d.stripLabelHeight;
+    for (int i = 0; i < kStripBooks; ++i) {
+      b.slots[i] = Box{b.strip.x + i * (slotW + d.gap), b.strip.y + d.stripLabelHeight, slotW, slotH};
+      b.slotCovers[i] = Box{b.slots[i].x, b.slots[i].y, slotH * 3 / 5, slotH};
+    }
+  }
+
+  const int innerW = b.card.w - 2 * d.cardPadding;
+  int coverAreaH = b.card.h - 2 * d.cardPadding - d.cardFootHeight - d.coverToFoot;
+  if (coverAreaH < 0) coverAreaH = 0;
+  // Thumbnails are 6:10. A wide card (sideways) would make the cover take the text's room, so the
+  // cover keeps to 45 % of the card's width and gives up height instead.
+  int coverH = coverAreaH;
+  int coverW = coverH * 3 / 5;
+  const int maxCoverW = innerW * 9 / 20;
+  if (coverW > maxCoverW) {
+    coverW = maxCoverW;
+    coverH = coverW * 5 / 3;
+  }
+  b.cover = Box{b.card.x + d.cardPadding, b.card.y + d.cardPadding, coverW, coverH};
+  const int textX = b.cover.x + coverW + d.coverToText;
+  const int textW = b.card.x + b.card.w - d.cardPadding - textX;
+  b.text = Box{textX, b.card.y + d.cardPadding, textW > 0 ? textW : 0, coverAreaH};
+  b.foot = Box{b.card.x + d.cardPadding, b.card.y + b.card.h - d.cardPadding - d.cardFootHeight,
+               innerW > 0 ? innerW : 0, d.cardFootHeight};
+  return b;
+}
+
+struct Menu {
+  int tileCount = 0;
+  Box tiles[kMaxTiles];
+  int bottomCount = 0;
+  Box bottom[2];
+};
+
+// `tileCount` destinations as tiles, two to a row, an odd first one across the whole row; then
+// `bottomCount` (1: Settings, 2: More and Settings) along the foot of `area`.
+constexpr Menu menu(const Box& area, const int tileCount, const int bottomCount, const Dimensions& d = kRegular) {
+  Menu m{};
+  m.tileCount = tileCount < 0 ? 0 : (tileCount > kMaxTiles ? kMaxTiles : tileCount);
+  m.bottomCount = bottomCount < 1 ? 1 : (bottomCount > 2 ? 2 : bottomCount);
+
+  const int bottomY = area.y + area.h - d.bottomRowHeight;
+  const int halfW = (area.w - d.gap) / 2;
+  if (m.bottomCount == 1) {
+    m.bottom[0] = Box{area.x, bottomY, area.w, d.bottomRowHeight};
+  } else {
+    m.bottom[0] = Box{area.x, bottomY, halfW, d.bottomRowHeight};
+    m.bottom[1] = Box{area.x + area.w - halfW, bottomY, halfW, d.bottomRowHeight};
+  }
+
+  const int rows = (m.tileCount + 1) / 2;
+  if (rows == 0) return m;
+  int tileH = (bottomY - d.gap - area.y - (rows - 1) * d.gap) / rows;
+  if (tileH > d.maxSidewaysTileHeight) tileH = d.maxSidewaysTileHeight;
+  if (tileH < 0) tileH = 0;
+  const bool firstSpans = (m.tileCount % 2) == 1;
+  for (int i = 0; i < m.tileCount; ++i) {
+    // With an odd count the first tile spans the row, and the rest pair up after it.
+    const int slot = firstSpans ? i + 1 : i;
+    const int row = slot / 2;
+    const int y = area.y + row * (tileH + d.gap);
+    if (firstSpans && i == 0) {
+      m.tiles[i] = Box{area.x, y, area.w, tileH};
+    } else {
+      m.tiles[i] = Box{slot % 2 == 0 ? area.x : area.x + area.w - halfW, y, halfW, tileH};
+    }
+  }
+  return m;
+}
+
+// The screen's rows for HomeGridNav, in the order of Home's selector: the card, the Also reading
+// books, the tiles as menu() places them, then the bottom row. `shownBooks` counts the card.
+constexpr HomeGridNav::Grid grid(const int shownBooks, const int tileCount, const int bottomCount) {
+  HomeGridNav::Grid g{};
+  int next = 0;
+  if (shownBooks > 0) {
+    g.addRow(next, 1);
+    g.markCycleRow();
+    next += 1;
+    g.addRow(next, shownBooks - 1);
+    next += shownBooks - 1;
+  }
+  const int tiles = tileCount < 0 ? 0 : (tileCount > kMaxTiles ? kMaxTiles : tileCount);
+  int placed = 0;
+  if (tiles % 2 == 1) {
+    g.addRow(next, 1);  // the first tile spans its row
+    placed = 1;
+  }
+  for (; placed < tiles; placed += 2) g.addRow(next + placed, 2);
+  next += tiles;
+  g.addRow(next, bottomCount);
+  return g;
+}
+
+}  // namespace legacy
+
 namespace {
 
 using HomeTilesLayout::Box;
@@ -44,9 +203,8 @@ bool overlap(const Box& a, const Box& b) {
 
 // The books' part of Home as the theme lays it out: the card, and the Also reading row where the
 // panel has room for it beside a full grid.
-HomeTilesLayout::Books booksFor(const Box& content, const int tiles) {
-  return HomeTilesLayout::books(HomeTilesLayout::regions(content, kTop, tiles).books,
-                                HomeTilesLayout::stripFits(content, kTop));
+legacy::Books booksFor(const Box& content, const int tiles) {
+  return legacy::books(legacy::regions(content, kTop, tiles).books, legacy::stripFits(content, kTop));
 }
 
 std::string describe(const Box& b) {
@@ -58,13 +216,13 @@ std::string describe(const Box& b) {
 
 TEST(HomeTilesLayout, EveryPartIsOnScreenApartAndBigEnoughToHit) {
   for (const Panel& panel : kPanels) {
-    for (int tiles = 0; tiles <= HomeTilesLayout::kMaxTiles; ++tiles) {
+    for (int tiles = 0; tiles <= legacy::kMaxTiles; ++tiles) {
       for (int bottom = 1; bottom <= 2; ++bottom) {
         SCOPED_TRACE(std::string(panel.name) + ", " + std::to_string(tiles) + " tiles, " + std::to_string(bottom) +
                      " in the bottom row");
-        const auto regions = HomeTilesLayout::regions(panel.content, kTop, tiles);
+        const auto regions = legacy::regions(panel.content, kTop, tiles);
         const auto books = booksFor(panel.content, tiles);
-        const auto menu = HomeTilesLayout::menu(regions.menu, tiles, bottom);
+        const auto menu = legacy::menu(regions.menu, tiles, bottom);
         const Box screen{panel.content.x, kTop, panel.content.w, panel.content.h - kTop};
 
         std::vector<Box> targets{books.card};
@@ -93,7 +251,7 @@ TEST(HomeTilesLayout, EveryPartIsOnScreenApartAndBigEnoughToHit) {
 
 TEST(HomeTilesLayout, TheCardHoldsItsCoverTextAndFootApart) {
   for (const Panel& panel : kPanels) {
-    for (int tiles = 0; tiles <= HomeTilesLayout::kMaxTiles; ++tiles) {
+    for (int tiles = 0; tiles <= legacy::kMaxTiles; ++tiles) {
       SCOPED_TRACE(std::string(panel.name) + ", " + std::to_string(tiles) + " tiles");
       const auto books = booksFor(panel.content, tiles);
       EXPECT_TRUE(inside(books.cover, books.card)) << describe(books.cover);
@@ -113,9 +271,9 @@ TEST(HomeTilesLayout, TheCardHoldsItsCoverTextAndFootApart) {
 // The X4 upright with four tiles, as the proposal drew it: a 372 px card with a 178x298 cover,
 // two rows of 218x122 tiles, and no room for the Also reading row.
 TEST(HomeTilesLayout, X4UprightWithFourTiles) {
-  const auto regions = HomeTilesLayout::regions({0, 0, 480, 760}, kTop, 4);
+  const auto regions = legacy::regions({0, 0, 480, 760}, kTop, 4);
   const auto books = booksFor({0, 0, 480, 760}, 4);
-  const auto menu = HomeTilesLayout::menu(regions.menu, 4, 2);
+  const auto menu = legacy::menu(regions.menu, 4, 2);
   EXPECT_FALSE(books.hasStrip);
   EXPECT_EQ(books.card.h, 372);
   EXPECT_EQ(books.cover.w, 178);
@@ -131,7 +289,7 @@ TEST(HomeTilesLayout, X4UprightWithFourTiles) {
 // tall T5S3 has it and the X4 and X3 do not, whatever the number of entries. Fewer tiles give the
 // card the room instead.
 TEST(HomeTilesLayout, AlsoReadingAppearsOnlyBesideAFullGrid) {
-  for (int tiles = 0; tiles <= HomeTilesLayout::kMaxTiles; ++tiles) {
+  for (int tiles = 0; tiles <= legacy::kMaxTiles; ++tiles) {
     SCOPED_TRACE(std::to_string(tiles) + " tiles");
     EXPECT_TRUE(booksFor({0, 0, 540, 920}, tiles).hasStrip);
     EXPECT_FALSE(booksFor({0, 0, 480, 760}, tiles).hasStrip);
@@ -139,7 +297,7 @@ TEST(HomeTilesLayout, AlsoReadingAppearsOnlyBesideAFullGrid) {
   }
   EXPECT_GT(booksFor({0, 0, 480, 760}, 2).card.h, booksFor({0, 0, 480, 760}, 4).card.h);
   for (const Panel& panel : kPanels) {
-    for (int tiles = 0; tiles <= HomeTilesLayout::kMaxTiles; ++tiles) {
+    for (int tiles = 0; tiles <= legacy::kMaxTiles; ++tiles) {
       const auto books = booksFor(panel.content, tiles);
       if (books.hasStrip) {
         EXPECT_GE(books.card.h, HomeTilesLayout::kRegular.minCardHeight) << panel.name;
@@ -150,8 +308,8 @@ TEST(HomeTilesLayout, AlsoReadingAppearsOnlyBesideAFullGrid) {
 
 // An odd count gives the first tile, Library, the whole row rather than leaving a hole.
 TEST(HomeTilesLayout, AnOddFirstTileSpansTheRow) {
-  const auto regions = HomeTilesLayout::regions({0, 0, 480, 760}, kTop, 3);
-  const auto menu = HomeTilesLayout::menu(regions.menu, 3, 1);
+  const auto regions = legacy::regions({0, 0, 480, 760}, kTop, 3);
+  const auto menu = legacy::menu(regions.menu, 3, 1);
   EXPECT_EQ(menu.tiles[0].w, regions.menu.w);
   EXPECT_EQ(menu.tiles[1].y, menu.tiles[2].y);
   EXPECT_LT(menu.tiles[1].x, menu.tiles[2].x);
@@ -162,8 +320,8 @@ TEST(HomeTilesLayout, AnOddFirstTileSpansTheRow) {
 
 // More is the left half, Settings the right: the order the entries come in.
 TEST(HomeTilesLayout, MoreSitsLeftOfSettings) {
-  const auto regions = HomeTilesLayout::regions({0, 0, 480, 760}, kTop, 4);
-  const auto menu = HomeTilesLayout::menu(regions.menu, 4, 2);
+  const auto regions = legacy::regions({0, 0, 480, 760}, kTop, 4);
+  const auto menu = legacy::menu(regions.menu, 4, 2);
   EXPECT_EQ(menu.bottom[0].y, menu.bottom[1].y);
   EXPECT_LT(menu.bottom[0].x + menu.bottom[0].w, menu.bottom[1].x);
   EXPECT_EQ(menu.bottom[1].x + menu.bottom[1].w, regions.menu.x + regions.menu.w);
@@ -171,7 +329,7 @@ TEST(HomeTilesLayout, MoreSitsLeftOfSettings) {
 
 // Sideways the card takes the left column and the tiles the right one, both the full height.
 TEST(HomeTilesLayout, SidewaysTheCardAndTheTilesShareTheWidth) {
-  const auto regions = HomeTilesLayout::regions({0, 0, 800, 440}, kTop, 4);
+  const auto regions = legacy::regions({0, 0, 800, 440}, kTop, 4);
   EXPECT_LT(regions.books.x + regions.books.w, regions.menu.x);
   EXPECT_EQ(regions.books.y, regions.menu.y);
   EXPECT_EQ(regions.books.h, regions.menu.h);
@@ -197,14 +355,13 @@ TEST(HomeTilesLayout, TheCompactPanelFitsTheCardAndTwoRowsOfTiles) {
   constexpr int kCompactTop = 28;
   const Box murphyPanels[] = {{0, 0, 240, 386}, {0, 0, 416, 210}};
   for (const Box& content : murphyPanels) {
-    for (int tiles = 0; tiles <= HomeTilesLayout::kMaxTiles; ++tiles) {
+    for (int tiles = 0; tiles <= legacy::kMaxTiles; ++tiles) {
       for (int bottom = 1; bottom <= 2; ++bottom) {
         SCOPED_TRACE(describe(content) + ", " + std::to_string(tiles) + " tiles, " + std::to_string(bottom));
         const auto& d = HomeTilesLayout::kCompact;
-        const auto regions = HomeTilesLayout::regions(content, kCompactTop, tiles, d);
-        const auto books =
-            HomeTilesLayout::books(regions.books, HomeTilesLayout::stripFits(content, kCompactTop, d), d);
-        const auto menu = HomeTilesLayout::menu(regions.menu, tiles, bottom, d);
+        const auto regions = legacy::regions(content, kCompactTop, tiles, d);
+        const auto books = legacy::books(regions.books, legacy::stripFits(content, kCompactTop, d), d);
+        const auto menu = legacy::menu(regions.menu, tiles, bottom, d);
         const Box screen{content.x, kCompactTop, content.w, content.h - kCompactTop};
         EXPECT_FALSE(books.hasStrip);
         std::vector<Box> targets{books.card};
@@ -239,7 +396,7 @@ int go(const HomeGridNav::Grid& grid, const int from, const Move move) {
 // The X3's Home: the card, Library and File Transfer, More and Settings. Selector positions: card 0,
 // tiles 1-2, More 3, Settings 4.
 TEST(HomeGridNav, UpAndDownGoBetweenRowsLeftAndRightAlongOne) {
-  const auto grid = HomeTilesLayout::grid(/*shownBooks=*/1, /*tiles=*/2, /*bottom=*/2);
+  const auto grid = legacy::grid(/*shownBooks=*/1, /*tiles=*/2, /*bottom=*/2);
   ASSERT_EQ(grid.rowCount, 3);
   EXPECT_EQ(go(grid, 0, Move::Down), 1);  // card -> the first tile
   EXPECT_EQ(go(grid, 1, Move::Right), 2);
@@ -252,7 +409,7 @@ TEST(HomeGridNav, UpAndDownGoBetweenRowsLeftAndRightAlongOne) {
 }
 
 TEST(HomeGridNav, LeftAndRightOnTheCardCycleTheBooks) {
-  const auto grid = HomeTilesLayout::grid(1, 4, 2);
+  const auto grid = legacy::grid(1, 4, 2);
   EXPECT_EQ(HomeGridNav::step(grid, 0, Move::Right).cycle, 1);
   EXPECT_EQ(HomeGridNav::step(grid, 0, Move::Left).cycle, -1);
   EXPECT_EQ(HomeGridNav::step(grid, 0, Move::Right).index, 0);  // the selection stays on the card
@@ -261,7 +418,7 @@ TEST(HomeGridNav, LeftAndRightOnTheCardCycleTheBooks) {
 
 // The T5S3: the card, three Also reading books (1-3), four tiles (4-7), More 8, Settings 9.
 TEST(HomeGridNav, TheAlsoReadingRowIsARowOfThree) {
-  const auto grid = HomeTilesLayout::grid(4, 4, 2);
+  const auto grid = legacy::grid(4, 4, 2);
   ASSERT_EQ(grid.rowCount, 5);
   EXPECT_EQ(go(grid, 0, Move::Down), 1);
   EXPECT_EQ(go(grid, 1, Move::Right), 2);
@@ -295,7 +452,7 @@ TEST(HomeGridNav, NextFollowsTheScreenOrder) {
 
 // Three tiles: Library spans its row, so it is a row of one.
 TEST(HomeGridNav, ASpanningTileIsARowOfOne) {
-  const auto grid = HomeTilesLayout::grid(1, 3, 1);
+  const auto grid = legacy::grid(1, 3, 1);
   ASSERT_EQ(grid.rowCount, 4);
   EXPECT_EQ(go(grid, 0, Move::Down), 1);
   EXPECT_EQ(go(grid, 1, Move::Right), 1);  // nothing beside it
@@ -307,9 +464,197 @@ TEST(HomeGridNav, ASpanningTileIsARowOfOne) {
 
 // No recent book: no card row, and the first row is a row of tiles that does not cycle anything.
 TEST(HomeGridNav, WithoutBooksTheTilesComeFirst) {
-  const auto grid = HomeTilesLayout::grid(0, 2, 2);
+  const auto grid = legacy::grid(0, 2, 2);
   ASSERT_EQ(grid.rowCount, 2);
   EXPECT_EQ(grid.cycleRow, -1);
   EXPECT_EQ(go(grid, 0, Move::Right), 1);
   EXPECT_EQ(HomeGridNav::step(grid, 0, Move::Right).cycle, 0);
+}
+
+// --- Widgets -------------------------------------------------------------------------------------
+
+namespace {
+
+bool same(const Box& a, const Box& b) { return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h; }
+
+struct Screen {
+  const char* name;
+  Box content;
+  int top;
+  const HomeTilesLayout::Dimensions* d;
+};
+const Screen kScreens[] = {
+    {"X4 upright", {0, 0, 480, 760}, kTop, &HomeTilesLayout::kRegular},
+    {"X3 upright", {0, 0, 528, 752}, kTop, &HomeTilesLayout::kRegular},
+    {"T5S3 upright", {0, 0, 540, 920}, kTop, &HomeTilesLayout::kRegular},
+    {"X4 sideways", {0, 0, 800, 440}, kTop, &HomeTilesLayout::kRegular},
+    {"X3 sideways", {0, 0, 792, 488}, kTop, &HomeTilesLayout::kRegular},
+    {"T5S3 sideways", {0, 0, 960, 500}, kTop, &HomeTilesLayout::kRegular},
+    {"X4 sideways, side hints", {30, 0, 740, 480}, kTop, &HomeTilesLayout::kRegular},
+    {"Murphy upright", {0, 0, 240, 386}, 28, &HomeTilesLayout::kCompact},
+    {"Murphy sideways", {0, 0, 416, 210}, 28, &HomeTilesLayout::kCompact},
+};
+
+}  // namespace
+
+// The Reader layout is Lyra Tiles as it was: every box where the old layout put it, on every panel
+// and with every number of tiles, so switching Tiles to widgets moves no pixel.
+TEST(HomeWidgets, TheReaderLayoutIsLyraTilesAsItWas) {
+  const auto reader = HomeTilesLayout::presets::reader();
+  for (const Screen& s : kScreens) {
+    for (int tiles = 0; tiles <= legacy::kMaxTiles; ++tiles) {
+      for (int bottom = 1; bottom <= 2; ++bottom) {
+        SCOPED_TRACE(std::string(s.name) + ", " + std::to_string(tiles) + " tiles, " + std::to_string(bottom));
+        const auto& d = *s.d;
+        const auto regions = legacy::regions(s.content, s.top, tiles, d);
+        const auto books = legacy::books(regions.books, legacy::stripFits(s.content, s.top, d), d);
+        const auto menu = legacy::menu(regions.menu, tiles, bottom, d);
+        const auto p = HomeTilesLayout::place(s.content, s.top, reader, tiles, bottom, d);
+
+        const auto* book = p.find(HomeTilesLayout::Widget::Book);
+        ASSERT_NE(book, nullptr);
+        EXPECT_TRUE(same(book->box, books.card)) << describe(book->box) << " vs " << describe(books.card);
+        const auto card = HomeTilesLayout::card(book->box, d);
+        EXPECT_TRUE(same(card.cover, books.cover)) << describe(card.cover);
+        EXPECT_TRUE(same(card.text, books.text)) << describe(card.text);
+        EXPECT_TRUE(same(card.foot, books.foot)) << describe(card.foot);
+
+        const auto* also = p.find(HomeTilesLayout::Widget::AlsoReading);
+        EXPECT_EQ(also != nullptr, books.hasStrip);
+        if (also != nullptr && books.hasStrip) {
+          EXPECT_TRUE(same(also->box, books.strip)) << describe(also->box);
+          const auto strip = HomeTilesLayout::strip(also->box, d);
+          for (int i = 0; i < HomeTilesLayout::kStripBooks; ++i) {
+            EXPECT_TRUE(same(strip.slots[i], books.slots[i]));
+            EXPECT_TRUE(same(strip.slotCovers[i], books.slotCovers[i]));
+          }
+        }
+
+        ASSERT_EQ(p.tileCount, menu.tileCount);
+        for (int i = 0; i < p.tileCount; ++i) {
+          EXPECT_TRUE(same(p.tiles[i], menu.tiles[i]))
+              << i << ": " << describe(p.tiles[i]) << " vs " << describe(menu.tiles[i]);
+        }
+        ASSERT_EQ(p.bottomCount, menu.bottomCount);
+        for (int i = 0; i < p.bottomCount; ++i) EXPECT_TRUE(same(p.bottom[i], menu.bottom[i])) << describe(p.bottom[i]);
+        EXPECT_EQ(p.dropped, 0);
+
+        // And it is navigated as it was.
+        const int shown = books.hasStrip ? 4 : 1;
+        const auto oldGrid = legacy::grid(shown, tiles, bottom);
+        const auto newGrid = HomeTilesLayout::grid(p, shown, tiles + bottom);
+        ASSERT_EQ(newGrid.rowCount, oldGrid.rowCount);
+        ASSERT_EQ(newGrid.cellCount, oldGrid.cellCount);
+        for (int c = 0; c < newGrid.cellCount; ++c) EXPECT_EQ(newGrid.cells[c], oldGrid.cells[c]);
+        EXPECT_EQ(newGrid.cycleRow, oldGrid.cycleRow);
+      }
+    }
+  }
+}
+
+// Every ready-made layout on every panel: each widget on screen, inside the body and apart from the
+// others, and the bottom row below them all.
+TEST(HomeWidgets, EveryLayoutKeepsItsWidgetsOnScreenAndApart) {
+  using HomeTilesLayout::Config;
+  const std::pair<const char*, Config> layouts[] = {{"reader", HomeTilesLayout::presets::reader()},
+                                                    {"dashboard", HomeTilesLayout::presets::dashboard()},
+                                                    {"gallery", HomeTilesLayout::presets::gallery()}};
+  for (const auto& [name, cfg] : layouts) {
+    for (const Screen& s : kScreens) {
+      SCOPED_TRACE(std::string(name) + " on " + s.name);
+      const int tiles = cfg.tileRows() * 2;
+      const int bottom = tiles > 0 ? 2 : 3;
+      const auto p = HomeTilesLayout::place(s.content, s.top, cfg, tiles, bottom, *s.d);
+      const Box body{s.content.x, s.top, s.content.w, s.content.h - s.top};
+      std::vector<Box> boxes;
+      for (int i = 0; i < p.count; ++i) {
+        if (p.items[i].cell.widget != HomeTilesLayout::Widget::Shortcuts) boxes.push_back(p.items[i].box);
+      }
+      for (int i = 0; i < p.tileCount; ++i) boxes.push_back(p.tiles[i]);
+      for (int i = 0; i < p.bottomCount; ++i) boxes.push_back(p.bottom[i]);
+      for (size_t i = 0; i < boxes.size(); ++i) {
+        EXPECT_TRUE(inside(boxes[i], body)) << describe(boxes[i]);
+        EXPECT_GT(boxes[i].h, 0) << describe(boxes[i]);
+        for (size_t j = i + 1; j < boxes.size(); ++j) {
+          EXPECT_FALSE(overlap(boxes[i], boxes[j])) << describe(boxes[i]) << " / " << describe(boxes[j]);
+        }
+      }
+      const auto* book = p.find(HomeTilesLayout::Widget::Book);
+      ASSERT_NE(book, nullptr);  // the book card is never the row left out
+    }
+  }
+}
+
+// Dashboard on the X3: the card takes what the clock and picture row and the summary leave. On the
+// Murphy the summary does not fit beside a readable card and is left out, and only it.
+TEST(HomeWidgets, ARowThatDoesNotFitIsLeftOutFromTheBottom) {
+  const auto dash = HomeTilesLayout::presets::dashboard();
+  const auto x3 = HomeTilesLayout::place({0, 0, 528, 752}, kTop, dash, 0, 3);
+  EXPECT_EQ(x3.dropped, 0);
+  ASSERT_NE(x3.find(HomeTilesLayout::Widget::Book), nullptr);
+  EXPECT_GE(x3.find(HomeTilesLayout::Widget::Book)->box.h, HomeTilesLayout::kRegular.bookMinHeight);
+  const auto* clock = x3.find(HomeTilesLayout::Widget::Clock);
+  const auto* picture = x3.find(HomeTilesLayout::Widget::Picture);
+  ASSERT_NE(clock, nullptr);
+  ASSERT_NE(picture, nullptr);
+  EXPECT_FALSE(clock->full);
+  EXPECT_EQ(clock->box.y, picture->box.y);
+  EXPECT_LT(clock->box.x, picture->box.x);
+  EXPECT_EQ(x3.bottomCount, 3);  // Library joins More and Settings
+
+  const auto murphy = HomeTilesLayout::place({0, 0, 240, 386}, 28, dash, 0, 3, HomeTilesLayout::kCompact);
+  EXPECT_EQ(murphy.dropped, 1 << 2);
+  EXPECT_EQ(murphy.find(HomeTilesLayout::Widget::Summary), nullptr);
+  EXPECT_NE(murphy.find(HomeTilesLayout::Widget::Clock), nullptr);
+}
+
+// A picture across the screen takes the room left, like the large card; the compact card keeps its
+// own height.
+TEST(HomeWidgets, GalleryGivesThePictureTheRoomLeft) {
+  const auto p = HomeTilesLayout::place({0, 0, 480, 760}, kTop, HomeTilesLayout::presets::gallery(), 2, 2);
+  const auto* picture = p.find(HomeTilesLayout::Widget::Picture);
+  const auto* book = p.find(HomeTilesLayout::Widget::Book);
+  ASSERT_NE(picture, nullptr);
+  ASSERT_NE(book, nullptr);
+  EXPECT_EQ(book->box.h, HomeTilesLayout::kRegular.bookCompactHeight);
+  EXPECT_GE(picture->box.h, HomeTilesLayout::kRegular.pictureMinHeight);
+  EXPECT_LT(picture->box.y, book->box.y);
+  EXPECT_EQ(p.tileCount, 2);
+  // The rows end one gap above the bottom row.
+  EXPECT_EQ(p.tiles[0].y + p.tiles[0].h + HomeTilesLayout::kRegular.gap, p.bottom[0].y);
+}
+
+// Widgets that open something are numbered after the menu, in reading order, and the grid visits
+// them where they are drawn.
+TEST(HomeWidgets, WidgetsThatOpenSomethingFollowTheMenuInNumberAndTheScreenInOrder) {
+  HomeTilesLayout::Config cfg;
+  cfg.add({HomeTilesLayout::Widget::Book})
+      .add({HomeTilesLayout::Widget::Weather}, {HomeTilesLayout::Widget::Summary})
+      .add({HomeTilesLayout::Widget::Shortcuts, 1});
+  const auto p = HomeTilesLayout::place({0, 0, 480, 760}, kTop, cfg, 2, 2);
+  HomeTilesLayout::Widget acts[4]{};
+  ASSERT_EQ(HomeTilesLayout::actions(p, acts, 4), 2);
+  EXPECT_EQ(acts[0], HomeTilesLayout::Widget::Weather);
+  EXPECT_EQ(acts[1], HomeTilesLayout::Widget::Summary);
+  // Selector: card 0, tiles 1-2, More 3, Settings 4, weather 5, summary 6.
+  const auto g = HomeTilesLayout::grid(p, 1, 4);
+  ASSERT_EQ(g.rowCount, 4);
+  EXPECT_EQ(HomeGridNav::next(g, 0, 1), 5);
+  EXPECT_EQ(HomeGridNav::next(g, 5, 1), 6);
+  EXPECT_EQ(HomeGridNav::next(g, 6, 1), 1);
+  EXPECT_EQ(HomeGridNav::step(g, 6, HomeGridNav::Move::Down).index, 2);
+}
+
+// Sideways the book card keeps the left column and the other widgets share the right one with the
+// bottom row.
+TEST(HomeWidgets, SidewaysTheCardTakesTheLeftColumn) {
+  const auto p = HomeTilesLayout::place({0, 0, 800, 440}, kTop, HomeTilesLayout::presets::dashboard(), 0, 3);
+  const auto* book = p.find(HomeTilesLayout::Widget::Book);
+  const auto* clock = p.find(HomeTilesLayout::Widget::Clock);
+  ASSERT_NE(book, nullptr);
+  ASSERT_NE(clock, nullptr);
+  EXPECT_TRUE(p.sideways);
+  EXPECT_LT(book->box.x + book->box.w, clock->box.x);
+  EXPECT_EQ(book->box.y, clock->box.y);
+  EXPECT_LT(clock->box.x, p.bottom[0].x + 1);
 }

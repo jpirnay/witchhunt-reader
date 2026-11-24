@@ -57,15 +57,6 @@ const HomeTilesLayout::Dimensions& dims() {
 Box toBox(const Rect& r) { return Box{r.x, r.y, r.width, r.height}; }
 Rect toRect(const Box& b) { return Rect{b.x, b.y, b.w, b.h}; }
 
-// Whether Home has the Also reading row. homeLayout() decides it from the content HomeActivity
-// passes, which is this rect; the card's draw gets only the books' rect, which a short menu makes
-// taller, so it asks the panel again rather than judging by that height.
-bool stripFitsHome(const GfxRenderer& renderer) {
-  const Rect content = UITheme::getContentRect(renderer, true, false);
-  return HomeTilesLayout::stripFits(toBox(content), content.y + UITheme::getInstance().getMetrics().homeTopPadding,
-                                    dims());
-}
-
 // A book's thumbnail at `box`'s exact size, which the cover pass writes cropped to it
 // (HomeLayout::thumbSizes).
 BaseTheme::CoverThumb drawCoverThumb(const GfxRenderer& renderer, const RecentBook& book, const Box& box) {
@@ -159,63 +150,120 @@ void drawLines(const GfxRenderer& renderer, const int fontId, const int x, int y
 
 }  // namespace
 
+using HomeTilesLayout::Widget;
+
+HomeTilesLayout::Placement LyraTilesTheme::placement(const Rect content, const int menuCount,
+                                                     const int menuTrailing) const {
+  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
+  const int tiles = tileCountFor(menuCount, menuTrailing);
+  return HomeTilesLayout::place(toBox(content), content.y + metrics.homeTopPadding, config_, tiles,
+                                std::max(1, menuCount - tiles), dims());
+}
+
+HomeTilesLayout::Placement LyraTilesTheme::placement(const GfxRenderer& renderer) const {
+  return placement(UITheme::getContentRect(renderer, true, false), menuCount_, menuTrailing_);
+}
+
+int LyraTilesTheme::tileCountFor(const int menuCount, const int menuTrailing) const {
+  // With tiles, every entry but More and Settings is a tile; without, they all share the bottom row.
+  return config_.tileRows() > 0 ? std::max(0, menuCount - menuTrailing) : 0;
+}
+
+void LyraTilesTheme::prepareHome() {}
+
+void LyraTilesTheme::setHomeMenu(const int menuCount, const int menuTrailing) {
+  menuCount_ = menuCount;
+  menuTrailing_ = menuTrailing;
+}
+
 HomeLayout LyraTilesTheme::homeLayout(const GfxRenderer& /*renderer*/, const Rect content, const int menuCount,
                                       const int menuTrailing) const {
-  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
-  const int top = content.y + metrics.homeTopPadding;
-  const auto regions = HomeTilesLayout::regions(toBox(content), top, menuCount - menuTrailing, dims());
-  const auto books =
-      HomeTilesLayout::books(regions.books, HomeTilesLayout::stripFits(toBox(content), top, dims()), dims());
-
+  const HomeTilesLayout::Placement p = placement(content, menuCount, menuTrailing);
   HomeLayout layout;
-  layout.books = toRect(regions.books);
-  layout.menu = toRect(regions.menu);
-  // Only the card's cover is kept between renders. The text and frames are cheap to draw again,
-  // and the whole card would cost the X3 three times the heap.
-  layout.coverSnapshot = toRect(books.cover);
-  layout.coverHeight = books.cover.h;
-  layout.thumbSizes[0] = {books.cover.w, books.cover.h};
-  layout.thumbSizeCount = 1;
-  layout.bookSlots = 1;
-  if (books.hasStrip) {
-    layout.thumbSizes[1] = {books.slotCovers[0].w, books.slotCovers[0].h};
-    layout.thumbSizeCount = 2;
-    layout.bookSlots += HomeTilesLayout::kStripBooks;
+  // Both draw calls place the widgets from the content again, with the same inputs.
+  layout.books = content;
+  layout.menu = content;
+  layout.bookSlots = 0;
+  if (const HomeTilesLayout::Placed* book = p.find(Widget::Book)) {
+    const HomeTilesLayout::Card card = HomeTilesLayout::card(book->box, dims());
+    // Only the card's cover is kept between renders. The text and frames are cheap to draw again,
+    // and the whole card would cost the X3 three times the heap.
+    layout.coverSnapshot = toRect(card.cover);
+    layout.coverHeight = card.cover.h;
+    layout.thumbSizes[0] = {card.cover.w, card.cover.h};
+    layout.thumbSizeCount = 1;
+    layout.bookSlots = 1;
+    if (const HomeTilesLayout::Placed* also = p.find(Widget::AlsoReading)) {
+      const HomeTilesLayout::Strip strip = HomeTilesLayout::strip(also->box, dims());
+      layout.thumbSizes[1] = {strip.slotCovers[0].w, strip.slotCovers[0].h};
+      layout.thumbSizeCount = 2;
+      layout.bookSlots += HomeTilesLayout::kStripBooks;
+    }
   }
   return layout;
 }
 
-int LyraTilesTheme::homeMenuCapacity() const { return HomeTilesLayout::kMaxTiles; }
-
-HomeGridNav::Grid LyraTilesTheme::homeGrid(const int shownBooks, const int menuCount, const int menuTrailing) const {
-  return HomeTilesLayout::grid(shownBooks, menuCount - menuTrailing, menuTrailing);
+int LyraTilesTheme::homeMenuCapacity() const {
+  // Without tiles the one place is in the bottom row, beside More and Settings.
+  const int rows = config_.tileRows();
+  return rows > 0 ? rows * 2 : 1;
 }
 
-void LyraTilesTheme::drawRecentBookCover(GfxRenderer& renderer, const Rect rect,
+int LyraTilesTheme::homeWidgetActions(const GfxRenderer& /*renderer*/, const Rect content, HomeWidgetAction* out,
+                                      const int max) const {
+  Widget widgets[HomeTilesLayout::kMaxRows * 2]{};
+  const int count =
+      HomeTilesLayout::actions(placement(content, menuCount_, menuTrailing_), widgets, HomeTilesLayout::kMaxRows * 2);
+  int n = 0;
+  for (int i = 0; i < count && n < max; ++i) {
+    out[n++] = widgets[i] == Widget::Weather ? HomeWidgetAction::Weather : HomeWidgetAction::ReadingStats;
+  }
+  return n;
+}
+
+HomeGridNav::Grid LyraTilesTheme::homeGrid(const GfxRenderer& /*renderer*/, const Rect content, const int shownBooks,
+                                           const int menuCount, const int menuTrailing) const {
+  return HomeTilesLayout::grid(placement(content, menuCount, menuTrailing), shownBooks, menuCount);
+}
+
+void LyraTilesTheme::drawRecentBookCover(GfxRenderer& renderer, const Rect /*rect*/,
                                          const std::vector<RecentBook>& recentBooks, const int selectorIndex,
                                          bool& coverRendered, bool& coverBufferStored, bool& /*bufferRestored*/,
                                          std::function<bool()> storeCoverBuffer) const {
-  const HomeTilesLayout::Books layout = HomeTilesLayout::books(toBox(rect), stripFitsHome(renderer), dims());
+  const HomeTilesLayout::Placement p = placement(renderer);
+  const HomeTilesLayout::Placed* book = p.find(Widget::Book);
+  const HomeTilesLayout::Placed* also = book ? p.find(Widget::AlsoReading) : nullptr;
   const int bookCount = static_cast<int>(recentBooks.size());
-  const int stripBooks = layout.hasStrip ? std::min(HomeTilesLayout::kStripBooks, std::max(0, bookCount - 1)) : 0;
-  const Box& card = layout.card;
+  const int stripBooks = also ? std::min(HomeTilesLayout::kStripBooks, std::max(0, bookCount - 1)) : 0;
 
   // Published ahead of the draw, so a repaint from the stored cover records them too. Book values
   // are positions in recentBooks: the card is 0, the Also reading books follow it.
   {
     TapTargets::Recorder::Builder targets;
-    if (bookCount > 0) targets.add(card.x, card.y, card.w, card.h, 0);
-    for (int i = 0; i < stripBooks; ++i) {
-      targets.add(layout.slots[i].x, layout.slots[i].y, layout.slots[i].w, layout.slots[i].h, i + 1);
+    if (book && bookCount > 0) targets.add(book->box.x, book->box.y, book->box.w, book->box.h, 0);
+    if (also) {
+      const HomeTilesLayout::Strip strip = HomeTilesLayout::strip(also->box, dims());
+      for (int i = 0; i < stripBooks; ++i) {
+        targets.add(strip.slots[i].x, strip.slots[i].y, strip.slots[i].w, strip.slots[i].h, i + 1);
+      }
     }
     TapTargets::homeCovers().record(targets);
   }
 
-  if (bookCount == 0) {
+  if (book)
+    drawBookCard(renderer, book->box, recentBooks, selectorIndex, coverRendered, coverBufferStored, storeCoverBuffer);
+  if (also && stripBooks > 0) drawAlsoReading(renderer, also->box, recentBooks, stripBooks, selectorIndex);
+}
+
+void LyraTilesTheme::drawBookCard(GfxRenderer& renderer, const Box& card, const std::vector<RecentBook>& recentBooks,
+                                  const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
+                                  const std::function<bool()>& storeCoverBuffer) const {
+  if (recentBooks.empty()) {
     renderer.drawRoundedRect(card.x, card.y, card.w, card.h, kCardFrameWidth, kCornerRadius, true);
     drawEmptyRecents(renderer, toRect(card));
     return;
   }
+  const HomeTilesLayout::Card layout = HomeTilesLayout::card(card, dims());
 
   const bool cardSelected = selectorIndex == 0;
   renderer.drawRoundedRect(card.x, card.y, card.w, card.h, cardSelected ? kSelectedFrameWidth : kCardFrameWidth,
@@ -275,15 +323,16 @@ void LyraTilesTheme::drawRecentBookCover(GfxRenderer& renderer, const Rect rect,
       renderer.fillRect(foot.x, barY, filled, kBarHeight, true);
     }
   }
+}
 
-  // --- Also reading: the books after the one on the card ---
-  if (stripBooks == 0) return;
+void LyraTilesTheme::drawAlsoReading(GfxRenderer& renderer, const Box& row, const std::vector<RecentBook>& recentBooks,
+                                     const int stripBooks, const int selectorIndex) const {
+  const HomeTilesLayout::Strip layout = HomeTilesLayout::strip(row, dims());
   // Set on the covers' top rather than on the row's, so it clears them at any UI font size.
   const int smallLine = renderer.getLineHeight(SMALL_FONT_ID);
-  renderer.drawText(
-      SMALL_FONT_ID, layout.strip.x, layout.slots[0].y - kStripLabelToCovers - smallLine,
-      renderer.truncatedText(SMALL_FONT_ID, tr(STR_ALSO_READING), layout.strip.w, EpdFontFamily::BOLD).c_str(), true,
-      EpdFontFamily::BOLD);
+  renderer.drawText(SMALL_FONT_ID, row.x, layout.slots[0].y - kStripLabelToCovers - smallLine,
+                    renderer.truncatedText(SMALL_FONT_ID, tr(STR_ALSO_READING), row.w, EpdFontFamily::BOLD).c_str(),
+                    true, EpdFontFamily::BOLD);
   for (int i = 0; i < stripBooks; ++i) {
     const RecentBook& other = recentBooks[i + 1];
     const Box& slot = layout.slots[i];
@@ -316,15 +365,14 @@ void LyraTilesTheme::drawHomeMenu(GfxRenderer& renderer, const Rect rect, const 
                                   const int trailingCount, const int selectedIndex,
                                   const std::function<std::string(int index)>& buttonLabel,
                                   const std::function<UIIcon(int index)>& rowIcon) const {
-  const int tileCount = std::max(0, buttonCount - trailingCount);
-  const HomeTilesLayout::Menu menu = HomeTilesLayout::menu(toBox(rect), tileCount, trailingCount, dims());
+  const HomeTilesLayout::Placement p = placement(rect, buttonCount, trailingCount);
 
   // Targets carry MENU-LOCAL indices, as every theme's menu does: tiles first, then the bottom row.
   TapTargets::Recorder::Builder targets;
   const auto iconFor = [&](const int index) { return rowIcon ? iconForName(rowIcon(index), kIconSize) : nullptr; };
 
-  for (int i = 0; i < menu.tileCount; ++i) {
-    const Box& tile = menu.tiles[i];
+  for (int i = 0; i < p.tileCount && i < buttonCount; ++i) {
+    const Box& tile = p.tiles[i];
     targets.add(tile.x, tile.y, tile.w, tile.h, i);
     const bool selected = i == selectedIndex;
     if (selected) {
@@ -336,10 +384,10 @@ void LyraTilesTheme::drawHomeMenu(GfxRenderer& renderer, const Rect rect, const 
   }
 
   // More and Settings: as easy to hit as the rows they replace, lighter to look at.
-  const int bottomCount = std::min(menu.bottomCount, std::max(0, buttonCount - tileCount));
+  const int bottomCount = std::min(p.bottomCount, std::max(0, buttonCount - p.tileCount));
   for (int j = 0; j < bottomCount; ++j) {
-    const int index = tileCount + j;
-    const Box& box = menu.bottom[j];
+    const int index = p.tileCount + j;
+    const Box& box = p.bottom[j];
     targets.add(box.x, box.y, box.w, box.h, index);
     const bool selected = index == selectedIndex;
     if (selected) {

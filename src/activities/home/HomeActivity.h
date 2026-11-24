@@ -98,6 +98,10 @@ class HomeActivity final : public Activity {
   // The theme's rows (BaseTheme::homeGrid), and whether the buttons move by them: only where the board
   // has a key for each direction. Otherwise Up and Down step through the screen as a list. Set in onEnter().
   HomeGridNav::Grid grid_;
+  // The widgets that open something, numbered after the menu (BaseTheme::homeWidgetActions).
+  static constexpr int kMaxWidgetActions = 8;
+  HomeWidgetAction widgetActions_[kMaxWidgetActions]{};
+  int widgetActionCount_ = 0;
   bool gridNav_ = false;
 
   std::string focusBookPath;
@@ -111,6 +115,10 @@ class HomeActivity final : public Activity {
   // Inert on non-touch boards. Reads the targets the active theme published.
   bool handleHomeTouch();
   void dispatchMenuAction(HomeMenuAction action);
+  // Opens what the selector's position past the books stands for: a menu entry, or a widget after them.
+  void dispatchSelection(int menuIndex);
+  // Books, menu entries and the widgets that open something.
+  int selectableCount() const;
 
   void rebuildMenuEntries();
   // The theme's layout of this screen for the current entries. One call for the draw and the cover

@@ -183,6 +183,9 @@ constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
 
 enum class SyncIndicator : uint8_t { None, Active, Failed };
 
+// What a widget on Home opens when it is chosen (BaseTheme::homeWidgetActions).
+enum class HomeWidgetAction : uint8_t { ReadingStats, Weather };
+
 class BaseTheme {
  public:
   virtual ~BaseTheme() = default;
@@ -275,9 +278,27 @@ class BaseTheme {
   // scrolls its own row instead). Same direction as a page turn: a swipe to the left is "next".
   virtual bool homeSwipeCyclesBooks() const { return false; }
 
-  // Home's rows for a board with a key for each direction (HomeGridNav). None (rowCount 0) for a
-  // theme laid out as a list, which Up and Down step through in order.
-  virtual HomeGridNav::Grid homeGrid(int shownBooks, int menuCount, int menuTrailing) const {
+  // Home is about to be built. A theme whose Home the reader arranges reads the arrangement now,
+  // before Home builds its menu: homeMenuCapacity() follows it. Called from HomeActivity::onEnter
+  // with the render lock held.
+  virtual void prepareHome() {}
+  // The menu Home built: a theme that lays its widgets out around it needs the counts in every draw,
+  // and drawRecentBookCover() is not given them. Same caller and lock as prepareHome(), afterwards.
+  virtual void setHomeMenu(int /*menuCount*/, int /*menuTrailing*/) {}
+  // The widgets on Home that open something, numbered after Home's menu in reading order: what each
+  // opens. None for a theme without such widgets.
+  virtual int homeWidgetActions(const GfxRenderer& /*renderer*/, Rect /*content*/, HomeWidgetAction* /*out*/,
+                                int /*max*/) const {
+    return 0;
+  }
+
+  // Home's rows in screen order (HomeGridNav): Up and Down between rows and Left and Right along one
+  // on a board with a key for each direction, and the order Up and Down alone step through. None
+  // (rowCount 0) for a theme laid out as a list, which Up and Down step through in Home's order.
+  virtual HomeGridNav::Grid homeGrid(const GfxRenderer& renderer, Rect content, int shownBooks, int menuCount,
+                                     int menuTrailing) const {
+    (void)renderer;
+    (void)content;
     (void)shownBooks;
     (void)menuCount;
     (void)menuTrailing;

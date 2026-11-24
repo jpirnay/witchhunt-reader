@@ -443,9 +443,20 @@ void HomeActivity::onEnter() {
   // task and loop() on this one; when both rebuilt the list on a dirty flag, they could run at once,
   // each clearing and then appending, and Home showed every entry twice. The rebuild also reads the
   // bookmark index off the card.
+  {
+    // Before the menu: the theme's arrangement decides how many entries Home has places for.
+    RenderLock lock;
+    UITheme::getInstance().getMutableTheme().prepareHome();
+  }
   rebuildMenuEntries();
+  {
+    RenderLock lock;
+    UITheme::getInstance().getMutableTheme().setHomeMenu(static_cast<int>(menuEntries.size()), menuTrailing_);
+  }
   shownBooks_ = std::min(static_cast<int>(recentBooks.size()), homeLayout().bookSlots);
-  grid_ = GUI.homeGrid(shownBooks_, static_cast<int>(menuEntries.size()), menuTrailing_);
+  const Rect content = UITheme::getContentRect(renderer, true, false);
+  grid_ = GUI.homeGrid(renderer, content, shownBooks_, static_cast<int>(menuEntries.size()), menuTrailing_);
+  widgetActionCount_ = GUI.homeWidgetActions(renderer, content, widgetActions_, kMaxWidgetActions);
   gridNav_ = grid_.rowCount > 0 && HalCapabilities::hasFourDirectionKeys();
 
   // Apply focus: book path takes priority, else combined selector index (covers
@@ -462,7 +473,7 @@ void HomeActivity::onEnter() {
     focusBookPath.clear();
   }
   if (!focused && focusSelectorIndex >= 0) {
-    const int combinedSize = shownBooks_ + static_cast<int>(menuEntries.size());
+    const int combinedSize = selectableCount();
     if (combinedSize > 0) {
       selectorIndex = std::min(focusSelectorIndex, combinedSize - 1);
     }
@@ -621,7 +632,7 @@ void HomeActivity::loop() {
       requestUpdate();
     }
   } else {
-    const int totalItems = shownBooks_ + static_cast<int>(menuEntries.size());
+    const int totalItems = selectableCount();
 
     // Ahead of the cover pass, which would otherwise take this tick and let the swipe go by. The
     // direction is the reader's (and the carousel's): a swipe to the left brings the next book.
@@ -697,10 +708,7 @@ void HomeActivity::loop() {
     if (selectorIndex < recentsCount) {
       onSelectBook(recentBooks[selectorIndex].path);
     } else {
-      const int menuIdx = selectorIndex - recentsCount;
-      if (menuIdx < static_cast<int>(menuEntries.size())) {
-        dispatchMenuAction(menuEntries[menuIdx].action);
-      }
+      dispatchSelection(selectorIndex - recentsCount);
     }
   }
 }
@@ -828,7 +836,8 @@ bool HomeActivity::handleHomeTouch() {
   if (!TapTargets::homeCovers().hasTargets() && !TapTargets::homeMenu().hasTargets()) return false;
 
   const int recentsCount = shownBooks_;
-  const int menuCount = static_cast<int>(menuEntries.size());
+  // The menu's targets go on after its entries with the widgets that open something.
+  const int menuCount = static_cast<int>(menuEntries.size()) + widgetActionCount_;
 
   // Covers first: in the carousel theme the side covers slide behind the centre one, and the
   // recorder orders them so the visible one wins. The two sets never overlap each other.
@@ -873,7 +882,7 @@ bool HomeActivity::handleHomeTouch() {
       if (isBook) {
         onSelectBook(recentBooks[selector].path);
       } else {
-        dispatchMenuAction(menuEntries[selector - recentsCount].action);
+        dispatchSelection(selector - recentsCount);
       }
       return true;
   }
@@ -907,6 +916,28 @@ void HomeActivity::cycleRecentBooks(const int step) {
   // over and skips the books that are complete. The one in hand, if any, it finds by path.
   nextRecentCoverIndex = 0;
   requestUpdate();
+}
+
+int HomeActivity::selectableCount() const {
+  return shownBooks_ + static_cast<int>(menuEntries.size()) + widgetActionCount_;
+}
+
+void HomeActivity::dispatchSelection(const int menuIndex) {
+  const int menuCount = static_cast<int>(menuEntries.size());
+  if (menuIndex >= 0 && menuIndex < menuCount) {
+    dispatchMenuAction(menuEntries[menuIndex].action);
+    return;
+  }
+  const int widget = menuIndex - menuCount;
+  if (widget < 0 || widget >= widgetActionCount_) return;
+  switch (widgetActions_[widget]) {
+    case HomeWidgetAction::ReadingStats:
+      dispatchMenuAction(HomeMenuAction::ReadingStats);
+      break;
+    case HomeWidgetAction::Weather:
+      dispatchMenuAction(HomeMenuAction::Weather);
+      break;
+  }
 }
 
 void HomeActivity::dispatchMenuAction(HomeMenuAction action) {

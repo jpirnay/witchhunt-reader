@@ -16,10 +16,11 @@ namespace HomeGridNav {
 struct Grid {
   static constexpr int kMaxRows = 12;
   static constexpr int kMaxCells = 32;
-  int rowCount = 0;       // 0: no grid, Home steps through its items as a list
-  int first[kMaxRows]{};  // a row's first cell in `cells`
-  int count[kMaxRows]{};
-  int cells[kMaxCells]{};  // selector positions, row by row
+  int rowCount = 0;  // 0: no grid, Home steps through its items as a list
+  // Small types: Home keeps a grid for as long as it is open, on the X3's heap.
+  uint8_t first[kMaxRows]{};  // a row's first cell in `cells`
+  uint8_t count[kMaxRows]{};
+  int16_t cells[kMaxCells]{};  // selector positions, row by row
   int cellCount = 0;
   // The row of the book card, where Left and Right cycle the recent books; -1 for none.
   int cycleRow = -1;
@@ -27,17 +28,17 @@ struct Grid {
   // A row of `items` consecutive selector positions from `firstIndex`.
   constexpr void addRow(const int firstIndex, const int items) {
     if (items <= 0 || rowCount >= kMaxRows || cellCount + items > kMaxCells) return;
-    first[rowCount] = cellCount;
-    count[rowCount] = items;
-    for (int i = 0; i < items; ++i) cells[cellCount++] = firstIndex + i;
+    first[rowCount] = static_cast<uint8_t>(cellCount);
+    count[rowCount] = static_cast<uint8_t>(items);
+    for (int i = 0; i < items; ++i) cells[cellCount++] = static_cast<int16_t>(firstIndex + i);
     ++rowCount;
   }
   // A row of the `items` selector positions in `indices`, left to right.
   constexpr void addCells(const int* indices, const int items) {
     if (items <= 0 || rowCount >= kMaxRows || cellCount + items > kMaxCells) return;
-    first[rowCount] = cellCount;
-    count[rowCount] = items;
-    for (int i = 0; i < items; ++i) cells[cellCount++] = indices[i];
+    first[rowCount] = static_cast<uint8_t>(cellCount);
+    count[rowCount] = static_cast<uint8_t>(items);
+    for (int i = 0; i < items; ++i) cells[cellCount++] = static_cast<int16_t>(indices[i]);
     ++rowCount;
   }
   // The row just added is the book card.
