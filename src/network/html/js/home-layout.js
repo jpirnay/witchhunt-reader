@@ -410,8 +410,64 @@
     return { ok: parsed.ok, rows, pictures: parsed.pictures, placement, dimensions: d };
   }
 
+  // ---- Pictures from the web ------------------------------------------------------------------------
+  //
+  // A picture a server renders: the reader downloads it from a URL when an event happens, through a small
+  // plugin the page installs (docs/sd-plugins.md, "Events"), and Home shows the file. Kept in a folder of
+  // its own, so a widget that takes a picture from /home does not pick it.
+
+  const WEB_PICTURE_FOLDER = '/home/web';
+  const WEB_PICTURE_PLUGIN = 'home-picture-';
+  // The events a picture can be fetched on: going to sleep (the reader joins Wi-Fi for it), or after a book
+  // is closed (sent at the next sleep or Wi-Fi connection).
+  const WEB_PICTURE_EVENTS = ['sleep.enter', 'reader.exit'];
+
+  // The file the n-th picture from the web goes to: its type as the URL's path names it, else JPEG.
+  function webPictureDest(n, url) {
+    let path = '';
+    try {
+      path = new URL(url).pathname.toLowerCase();
+    } catch {
+      path = '';
+    }
+    const ext = /\.png$/.test(path) ? '.png' : /\.bmp$/.test(path) ? '.bmp' : '.jpg';
+    return `${WEB_PICTURE_FOLDER}/web-${n}${ext}`;
+  }
+
+  // The URL with {width} and {height} set to the widget's size, so a server can render the picture to fit.
+  const fillSize = (url, width, height) => url.replaceAll('{width}', String(width)).replaceAll('{height}', String(height));
+
+  // The plugin that fetches the n-th picture from the web: {name, dest, url, files: {'device.json', 'manifest.json'}}.
+  // `source` is {url, event} as the user gave them; `size` the widget's {w, h}, or null when it is not shown.
+  function webPicturePlugin(n, source, size) {
+    const name = `${WEB_PICTURE_PLUGIN}${n}`;
+    const dest = webPictureDest(n, source.url);
+    const url = size ? fillSize(source.url, size.w, size.h) : source.url;
+    let host = '';
+    try {
+      host = new URL(url).hostname;
+    } catch {
+      host = '';
+    }
+    const event = WEB_PICTURE_EVENTS.includes(source.event) ? source.event : WEB_PICTURE_EVENTS[0];
+    const handler = { download: { url, dest } };
+    if (event !== 'sleep.enter') handler.connect = true;  // sleep.enter joins Wi-Fi on its own
+    const device = { events: { [event]: handler } };
+    const manifest = {
+      title: `Home screen picture ${n}`,
+      description: `Fetches ${source.url} to ${dest} for the Home screen. Made by the Home Screen page, which replaces or removes it.`,
+      version: '1',
+      catalog: false,
+      // The host and its subdomains: picture services often redirect to a CDN under their own name.
+      allowedHosts: host ? [host, `.${host}`] : [],
+      homeScreen: { url: source.url, event, dest },
+    };
+    return { name, dest, url, host, files: { 'device.json': JSON.stringify(device), 'manifest.json': JSON.stringify(manifest) } };
+  }
+
   window.HomeLayout = {
     DIMENSIONS, PRESETS, DESTINATIONS, MENU_DESTINATIONS, PAIRS, OPENS, MAX_ROWS, MAX_PICTURES, MAX_BYTES,
-    PICTURE_FOLDER, parse, withAvailable, place, card, strip, bottomCount, layOut,
+    PICTURE_FOLDER, WEB_PICTURE_FOLDER, WEB_PICTURE_PLUGIN, WEB_PICTURE_EVENTS, parse, withAvailable, place, card, strip,
+    bottomCount, layOut, webPictureDest, fillSize, webPicturePlugin,
   };
 })();

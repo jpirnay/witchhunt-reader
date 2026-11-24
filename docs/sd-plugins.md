@@ -395,6 +395,12 @@ delivery, never headers or bodies.
 **Limits.** 8 subscribing plugins; a `device.json` up to 8 KB; token, config and
 `<book>.meta.json` files up to 2 KB.
 
+**Made by the Home Screen page.** A picture from the web on Home is a plugin of
+this kind that the Home Screen page writes, `home-picture-<n>`: one download into
+`/home/web` on `sleep.enter` or `reader.exit`
+([home-layout.md](home-layout.md#pictures-from-the-web)). The page replaces and
+removes them; the Plugins page lists them like any other.
+
 ## Installing and managing plugins: the Plugins page
 
 `/plugins` in the web interface (linked from every page) lists every installed

@@ -19,4 +19,9 @@ target_link_libraries(PluginEventsTest PRIVATE
   GTest::gtest_main
 )
 
+# The plugins the web Home Screen page makes; test/web/home_layout_test.mjs checks the page makes these.
+target_compile_definitions(PluginEventsTest PRIVATE
+  HOME_PICTURE_PLUGINS="${CMAKE_CURRENT_SOURCE_DIR}/home_picture_plugins.json"
+)
+
 gtest_discover_tests(PluginEventsTest)

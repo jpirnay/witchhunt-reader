@@ -127,13 +127,19 @@
         library: 'Library', recent: 'Recent books', stats: 'Reading Stats', bookmarks: 'Bookmarks',
         transfer: 'File Transfer', weather: 'Weather',
       };
+      const WEB_EVENTS = [
+        ['sleep.enter', 'Each time the reader goes to sleep'],
+        ['reader.exit', 'After you close a book (fetched at the next sleep)'],
+      ];
+      const enc = encodeURIComponent;
       const UNAVAILABLE = {
         bookmarks: 'Left out until you make a bookmark.',
         weather: 'Left out while Weather is off in the reader’s settings.',
       };
 
       const $ = (id) => document.getElementById(id);
-      const state = { rows: [], device: null, settings: {}, pictures: [], fileText: '', dirty: false };
+      const state = { rows: [], device: null, settings: {}, pictures: [], webFiles: new Set(), webPlugins: {}, fileText: '',
+        dirty: false };
 
       // ---- Loading ----------------------------------------------------------------------------------
 
@@ -143,13 +149,45 @@
         return response.json();
       }
 
-      async function loadPictures() {
+      async function listPictures(folder) {
         try {
-          const list = await getJson(`/api/files?path=${encodeURIComponent(PICTURE_FOLDER)}`);
-          state.pictures = list.filter((f) => !f.isDirectory && /\.(jpe?g|png|bmp)$/i.test(f.name))
-            .map((f) => `${PICTURE_FOLDER}/${f.name}`).sort();
+          const list = await getJson(`/api/files?path=${enc(folder)}`);
+          return list.filter((f) => !f.isDirectory && /\.(jpe?g|png|bmp)$/i.test(f.name)).map((f) => `${folder}/${f.name}`).sort();
         } catch {
-          state.pictures = [];
+          return [];
+        }
+      }
+
+      async function loadPictures() {
+        state.pictures = await listPictures(PICTURE_FOLDER);
+        state.webFiles = new Set(await listPictures(L.WEB_PICTURE_FOLDER));
+      }
+
+      // The plugins this page made for pictures from the web, by name: {root, url, event, dest}.
+      async function loadWebPlugins() {
+        state.webPlugins = {};
+        let plugins = [];
+        try {
+          plugins = await getJson('/api/plugins');
+        } catch {
+          return;
+        }
+        for (const plugin of plugins.filter((p) => p.name.startsWith(L.WEB_PICTURE_PLUGIN))) {
+          try {
+            const manifest = await getJson(`/download?path=${enc(`${plugin.root}/${plugin.name}/manifest.json`)}`);
+            if (manifest.homeScreen) state.webPlugins[plugin.name] = { root: plugin.root, ...manifest.homeScreen };
+          } catch {
+            state.webPlugins[plugin.name] = { root: plugin.root };
+          }
+        }
+      }
+
+      // The picture cells whose file a web plugin fetches get their source back.
+      function markWebPictures() {
+        const byDest = Object.values(state.webPlugins).filter((w) => w.dest && w.url);
+        for (const cell of state.rows.flat()) {
+          const web = cell.widget === 'picture' && byDest.find((w) => w.dest === cell.path);
+          if (web) cell.web = { url: web.url, event: web.event };
         }
       }
 
@@ -158,7 +196,7 @@
           const [device, settings] = await Promise.all([getJson('/api/home-layout'), getJson('/api/settings')]);
           state.device = device;
           for (const s of settings) state.settings[s.key] = s;
-          await loadPictures();
+          await Promise.all([loadPictures(), loadWebPlugins()]);
         } catch (error) {
           $('previewHint').textContent = `Could not ask the reader for its layout (${error.message}). Reload to try again.`;
           return;
@@ -173,6 +211,7 @@
           $('start').value = preset;
           useLayout(L.PRESETS[preset]);
         }
+        markWebPictures();
         state.dirty = false;
         showNotice(saved);
         $('save').disabled = false;
@@ -212,7 +251,12 @@
         state.dirty = true;
       }
 
+      // The pictures from the web, in reading order: the n-th is fetched by home-picture-n.
+      const webCells = () => state.rows.flat().filter((cell) => cell.widget === 'picture' && cell.web);
+      const validUrl = (url) => /^https?:\/\/[^/\s]+/i.test(url || '');
+
       function layoutJson() {
+        webCells().forEach((cell, i) => { cell.path = L.webPictureDest(i + 1, cell.web.url); });
         const rows = state.rows.map((row) => row.map((cell) => {
           const out = { widget: cell.widget };
           if (cell.widget === 'book' && cell.size === 'compact') out.size = 'compact';
@@ -271,18 +315,34 @@
         const path = cell.path || PICTURE_FOLDER;
         if (!options.some(([value]) => value === path)) options.push([path, path]);
         options.push(['__other', 'Another file or folder…']);
+        options.push(['__web', 'From the web…']);
         const wrap = element('div', { class: 'slot' });
-        wrap.append(select(options, path, (value) => {
-          if (value === '__other') {
+        wrap.append(select(options, cell.web ? '__web' : path, (value) => {
+          if (value === '__web') {
+            cell.web = cell.web || { url: '', event: L.WEB_PICTURE_EVENTS[0] };
+          } else if (value === '__other') {
+            delete cell.web;
             const typed = prompt('A JPEG, PNG or BMP on the card, or a folder of them:', path);
             if (typed && typed.startsWith('/')) cell.path = typed.replace(/\/+$/, '') || '/';
           } else {
+            delete cell.web;
             cell.path = value;
           }
           changed();
         }, `Row ${r + 1} picture`));
-        wrap.append(element('button', { type: 'button', class: 'btn btn-small add-beside',
-          onclick: () => uploadPicture(cell) }, 'Upload a picture…'));
+        if (cell.web) {
+          wrap.append(element('input', { type: 'text', inputmode: 'url', value: cell.web.url,
+            placeholder: 'https://example.org/today.jpg', 'aria-label': `Row ${r + 1} picture address`,
+            onchange: (e) => { cell.web.url = e.target.value.trim(); changed(); } }));
+          wrap.append(select(WEB_EVENTS, cell.web.event, (value) => { cell.web.event = value; changed(); },
+            `Row ${r + 1} when to fetch it`));
+          wrap.append(element('span', { class: 'slot-note' + (cell.web.url && !validUrl(cell.web.url) ? ' warn' : '') },
+            'A JPEG, PNG or BMP the reader fetches over Wi-Fi; {width} and {height} in the address become the ' +
+            'picture’s size, so a server can render it to fit. Saving fetches it once now.'));
+        } else {
+          wrap.append(element('button', { type: 'button', class: 'btn btn-small add-beside',
+            onclick: () => uploadPicture(cell) }, 'Upload a picture…'));
+        }
         return wrap;
       }
 
@@ -400,6 +460,7 @@
 
       function picturePath(cellOption, pictures) {
         const source = pictures[cellOption] || PICTURE_FOLDER;
+        if (source.startsWith(`${L.WEB_PICTURE_FOLDER}/`)) return state.webFiles.has(source) ? source : '';
         if (/\.(jpe?g|png|bmp)$/i.test(source)) return source;
         const inFolder = state.pictures.filter((p) => p.startsWith(source.replace(/\/$/, '') + '/'));
         return inFolder[0] || '';
@@ -486,7 +547,9 @@
                 preserveAspectRatio: 'xMidYMid slice', 'clip-path': `url(#${id})`, filter: 'grayscale(1)' }));
             } else {
               g.append(rect(b, { rx: 8, fill: '#ddd' }));
-              g.append(centred(b, `Add pictures to ${PICTURE_FOLDER}`, small, { fill: '#333' }));
+              const fromWeb = (result.pictures[item.cell.option] || '').startsWith(`${L.WEB_PICTURE_FOLDER}/`);
+              g.append(centred(b, fromWeb ? 'From the web, once fetched' : `Add pictures to ${PICTURE_FOLDER}`, small,
+                { fill: '#333' }));
             }
             g.append(frame(b, { fill: 'none', 'stroke-width': 1 }));
             break;
@@ -551,6 +614,9 @@
         const paths = new Set(state.rows.flat().filter((c) => c.widget === 'picture').map((c) => c.path || PICTURE_FOLDER));
         if (paths.size > L.MAX_PICTURES) add(`At most ${L.MAX_PICTURES} different pictures: the others are left out.`);
         if (new TextEncoder().encode(layoutJson()).length > L.MAX_BYTES) add('The layout is too long to save (4 KB at most).');
+        webCells().forEach((cell) => {
+          if (!validUrl(cell.web.url)) add('A picture from the web needs an address starting with https:// (or http://).');
+        });
       }
 
       function render() {
@@ -598,10 +664,7 @@
           try {
             const blob = await shrink(file);
             const name = freeName(file.name);
-            if (!(await fetch(`/api/files?path=${encodeURIComponent(PICTURE_FOLDER)}`)).ok) {
-              const body = new URLSearchParams({ name: PICTURE_FOLDER.slice(1), path: '/' });
-              await fetch('/mkdir', { method: 'POST', body });
-            }
+            await ensureFolder(PICTURE_FOLDER);
             const form = new FormData();
             form.append('file', blob, name);
             const response = await fetch(`/upload?path=${encodeURIComponent(PICTURE_FOLDER)}`, { method: 'POST', body: form });
@@ -619,8 +682,85 @@
 
       // ---- Save -------------------------------------------------------------------------------------
 
+      async function post(url, body, headers) {
+        const response = await fetch(url, { method: 'POST', body, headers });
+        if (!response.ok) throw new Error(`${url.split('?')[0]}: ${(await response.text()) || response.status}`);
+        return response;
+      }
+
+      // /api/files answers an empty list for a folder that is not there, so the folder is looked for in its
+      // parent's listing (FAT names match whatever their case).
+      async function ensureFolder(path) {
+        const at = path.lastIndexOf('/');
+        const parent = path.slice(0, at) || '/';
+        const name = path.slice(at + 1);
+        const list = await getJson(`/api/files?path=${enc(parent)}`).catch(() => []);
+        if (list.some((f) => f.isDirectory && f.name.toLowerCase() === name.toLowerCase())) return;
+        await post('/mkdir', new URLSearchParams({ name, path: parent }));
+      }
+
+      async function installPlugin(plugin) {
+        await post(`/api/plugins/begin?name=${enc(plugin.name)}`);
+        for (const [file, text] of Object.entries(plugin.files)) {
+          const form = new FormData();
+          form.append('file', new Blob([text], { type: 'application/json' }), file);
+          await post(`/api/plugins/file?name=${enc(plugin.name)}&file=${enc(file)}`, form);
+        }
+        await post(`/api/plugins/commit?name=${enc(plugin.name)}`);
+      }
+
+      // Each picture from the web gets its plugin (made again, as its address, event or size may have
+      // changed) and is fetched once now; the plugins of pictures no longer in the layout go. Answers what
+      // happened, a line a picture.
+      async function syncWebPictures() {
+        const result = L.layOut(layoutJson(), state.device);
+        const plugins = webCells().map((cell, i) => {
+          const dest = L.webPictureDest(i + 1, cell.web.url);
+          const item = result.placement.items.find((it) => it.cell.widget === 'picture' && result.pictures[it.cell.option] === dest);
+          return L.webPicturePlugin(i + 1, cell.web, item ? item.box : null);
+        });
+        const lines = [];
+        if (plugins.length) {
+          await ensureFolder(PICTURE_FOLDER);
+          await ensureFolder(L.WEB_PICTURE_FOLDER);
+        }
+        for (const plugin of plugins) {
+          await installPlugin(plugin);
+          if (/\{(width|height)\}/.test(plugin.url)) {
+            lines.push(`${plugin.dest} is fetched once its row is shown on this reader.`);
+            continue;
+          }
+          const fetchNow = () => fetch(`/api/fetch?plugin=${enc(plugin.name)}&url=${enc(plugin.url)}&dest=${enc(plugin.dest)}`,
+            { method: 'POST' });
+          let response = await fetchNow();
+          let answer = await response.json().catch(() => ({}));
+          // A redirect to another host is refused until that host is approved for the plugin, as plugins ask.
+          if (response.status === 403 && answer.host &&
+              confirm(`The picture's server sends the reader on to ${answer.host}. Allow the reader to fetch from it?`)) {
+            await post('/api/plugins/hosts', JSON.stringify({ plugin: plugin.name, host: answer.host, allow: true }),
+              { 'Content-Type': 'application/json' });
+            response = await fetchNow();
+            answer = await response.json().catch(() => ({}));
+          }
+          lines.push(response.ok && answer.ok && answer.complete
+            ? `Fetched ${plugin.dest} (${Math.round((answer.bytes || 0) / 1024)} KB).`
+            : `${plugin.dest} was not fetched now (${answer.error || answer.status || response.status}); the reader tries again ` +
+              'when it fetches it next.');
+        }
+        for (const name of Object.keys(state.webPlugins)) {
+          if (!plugins.some((p) => p.name === name)) await post(`/api/plugins/remove?name=${enc(name)}`);
+        }
+        state.webPlugins = Object.fromEntries(plugins.map((p) => [p.name, JSON.parse(p.files['manifest.json']).homeScreen]));
+        await loadPictures();
+        return lines;
+      }
+
       async function save() {
         const button = $('save');
+        if (webCells().some((cell) => !validUrl(cell.web.url))) {
+          $('saveState').textContent = 'Not saved: a picture from the web needs an address starting with https://.';
+          return;
+        }
         button.disabled = true;
         $('saveState').textContent = 'Saving...';
         try {
@@ -633,9 +773,11 @@
           state.fileText = layoutJson();
           if (state.settings.uiTheme) state.settings.uiTheme.value = THEME_TILES;
           if (state.settings.homeLayout) state.settings.homeLayout.value = LAYOUT_CUSTOM;
+          const fetched = await syncWebPictures();
           state.dirty = false;
           showNotice(L.parse(state.fileText));
-          $('saveState').textContent = 'Saved. The reader shows it on Home once you leave File Transfer.';
+          $('saveState').textContent = ['Saved. The reader shows it on Home once you leave File Transfer.', ...fetched].join(' ');
+          render();
         } catch (error) {
           $('saveState').textContent = `Not saved: ${error.message}`;
         } finally {
