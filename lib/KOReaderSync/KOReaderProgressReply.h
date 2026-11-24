@@ -42,7 +42,7 @@ inline KOReaderSyncClient::Error parseProgressReply(const std::string& body, con
   const bool hasPercentage = doc["percentage"].is<float>();
   if (!doc.is<JsonObject>() || (progress[0] == '\0' && !hasPercentage)) {
     std::string jsonDump;
-    serializeJson(doc, jsonDump);
+    JsonText::write(doc, jsonDump);
     LOG_INF("KOSync", "Empty progress payload — treating as not found | payload=%s", jsonDump.c_str());
     return KOReaderSyncClient::NOT_FOUND;
   }

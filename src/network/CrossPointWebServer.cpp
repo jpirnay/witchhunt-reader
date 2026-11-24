@@ -878,14 +878,14 @@ static void sendSetupPage(WebServer* server) {
 // WDT is reset before and after sendContent so the write can't outlast the watchdog.
 // On malloc failure, sends a 500.
 static void sendJson(WebServer* server, int code, const JsonDocument& doc) {
-  const size_t payloadSize = measureJson(doc);
+  const size_t payloadSize = JsonText::measure(doc);
   char* buf = static_cast<char*>(malloc(payloadSize + 1));
   if (!buf) {
     LOG_DBG("WEB", "sendJson: malloc(%zu) failed", payloadSize + 1);
     server->send(500, "application/json", "{\"error\":\"OOM\"}");
     return;
   }
-  serializeJson(doc, buf, payloadSize + 1);
+  JsonText::write(doc, buf, payloadSize + 1);
   server->setContentLength(payloadSize);
   server->send(code, "application/json", "");
   HalSystem::feedWatchdog();
@@ -1331,19 +1331,19 @@ void CrossPointWebServer::handleBootDiagnostics() const {
   JsonDocument doc;
   out.print("{\"hardware\":");
   fillBootHardware(doc);
-  serializeJson(doc, out);
+  JsonText::write(doc, out);
 
   doc.clear();
   out.print(",\"thisBoot\":");
   fillThisBoot(doc, records.get(), count);
-  serializeJson(doc, out);
+  JsonText::write(doc, out);
 
   out.print(",\"history\":[");
   for (uint8_t i = 0; i < count; i++) {
     doc.clear();
     fillBootRecord(doc, records[i]);
     if (i > 0) out.print(',');
-    serializeJson(doc, out);
+    JsonText::write(doc, out);
   }
   out.print("]}");
   response.finish();
@@ -1456,7 +1456,7 @@ void CrossPointWebServer::handleFileListData() const {
         (*ctx.doc)["isEpub"] = info.isEpub;
         // Straight into the reply: through a buffer, a name of ~150 CJK characters did not fit and
         // was left out of the list. Found by Arthur Tazhitdinov (crosspoint-reader #4285).
-        serializeJson(*ctx.doc, ctx.out->nextEntry());
+        JsonText::write(*ctx.doc, ctx.out->nextEntry());
       },
       &context);
 
@@ -2199,7 +2199,7 @@ void CrossPointWebServer::handleGetSettings() const {
   // Straight into the response, without a buffer of its own: an entry can be any size. The
   // timezone row's 86 city names make about 2 KB, more than the 1 KB buffer this used to be
   // formatted into, so the row was dropped and the web page had no Timezone setting.
-  auto sendEntry = [&]() { serializeJson(doc, out.nextEntry()); };
+  auto sendEntry = [&]() { JsonText::write(doc, out.nextEntry()); };
 
   // Rows are visited one at a time (forEachSetting()), never held as a list: the whole list is
   // one 11.5 KB block, and this runs while Wi-Fi holds most of the heap.
@@ -2712,7 +2712,7 @@ void CrossPointWebServer::handleFontList() {
         fileObj["size"] = 0;
       }
     }
-    serializeJson(doc, out.nextEntry());
+    JsonText::write(doc, out.nextEntry());
   }
   LOG_WEB_MEM("font_list_exit");
   out.finish("}");
@@ -2779,7 +2779,7 @@ void CrossPointWebServer::handleFontManifest() {
     if (one.installed(0) && UiLanguagePacks::usedByInterface(one, 0)) doc["inUse"] = true;
     doc["totalSize"] = static_cast<unsigned long>(one.totalSize(0));
     doc["fileCount"] = static_cast<unsigned>(one.fileCount(0));
-    serializeJson(doc, s.out->nextEntry());
+    JsonText::write(doc, s.out->nextEntry());
   };
   FontManifestReader reader = manifestReader();
   std::string baseUrl;
@@ -3210,7 +3210,7 @@ void CrossPointWebServer::handleGetWifiNetworks() const {
     doc["hasPassword"] = !credentials[i].password.empty();
     doc["isLastConnected"] = credentials[i].ssid == lastConnectedSsid;
 
-    const size_t written = serializeJson(doc, output, outputSize);
+    const size_t written = JsonText::write(doc, output, outputSize);
     if (written >= outputSize) continue;
 
     out.addEntry(output, written);
@@ -3349,7 +3349,7 @@ void CrossPointWebServer::handleGetOpdsServers() const {
     // Never expose passwords over the API — only indicate whether one is set
     doc["hasPassword"] = !servers[i].password.empty();
 
-    const size_t written = serializeJson(doc, output, outputSize);
+    const size_t written = JsonText::write(doc, output, outputSize);
     if (written >= outputSize) continue;
 
     out.addEntry(output, written);
@@ -3539,7 +3539,7 @@ void CrossPointWebServer::handlePluginList() const {
       }
     }
 
-    const size_t written = serializeJson(doc, output.get(), kEntryBytes);
+    const size_t written = JsonText::write(doc, output.get(), kEntryBytes);
     if (written >= kEntryBytes) {
       LOG_DBG("WEB", "Plugin %s: entry too long, skipped", e.name.c_str());
       continue;

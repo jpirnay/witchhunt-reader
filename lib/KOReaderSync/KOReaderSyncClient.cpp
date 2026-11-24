@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <CrossPointRoots.h>
 #include <HalClock.h>
+#include <JsonText.h>
 #include <Logging.h>
 #include <SecureHttpClient.h>
 #include <TlsPolicy.h>
@@ -479,7 +480,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::registerUser() {
   doc["username"] = KOREADER_STORE.getUsername();
   doc["password"] = KOREADER_STORE.getMd5Password();
   std::string body;
-  serializeJson(doc, body);
+  JsonText::write(doc, body);
 
   LOG_DBG("KOSync", "Register request body: <redacted credentials>");
 
@@ -690,7 +691,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   }
 
   std::string body;
-  serializeJson(doc, body);
+  JsonText::write(doc, body);
 
   LOG_INF("KOSync", "Request body: %s", body.c_str());
 

@@ -180,10 +180,10 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   // Streamed rather than serialised into a String first, to keep the heap out of it (it runs on the way to sleep).
   // ArduinoJson writes the punctuation a character at a time, so a small buffer on the stack gathers the ~900 bytes
   // into a handful of writes instead of several hundred, each taking the storage lock.
-  const size_t expected = measureJson(doc);
+  const size_t expected = JsonText::measure(doc);
   uint8_t streamBuffer[256];
   BufferedPrint out(file, streamBuffer, sizeof(streamBuffer));
-  const size_t written = serializeJson(doc, out);
+  const size_t written = JsonText::write(doc, out);
   const bool flushed = out.flushBuffer();
   file.flush();
   if (!file.close()) {

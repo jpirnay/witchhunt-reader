@@ -81,7 +81,7 @@ std::string eventLine(const Event e, const Var* vars, const size_t count, const 
   JsonObject obj = doc["vars"].to<JsonObject>();
   for (size_t i = 0; i < count; i++) obj[vars[i].key] = vars[i].value;
   std::string line;
-  serializeJson(doc, line);
+  JsonText::write(doc, line);
   line += '\n';
   if (doc.overflowed() || line.size() > kMaxEventLine) return "";
   return line;
