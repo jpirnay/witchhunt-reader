@@ -43,8 +43,26 @@ bool FootnoteSheet::layOut(std::string markup, const Page& page, const int pageY
   const int lineHeight = renderer.getLineHeight(fontId);
   // The rule, a gap, the title line, half a gap, the note, a gap; the rule on the edge that faces the page.
   const int chrome = kRule + gap + renderer.getLineHeight(UI_10_FONT_ID) + gap / 2 + gap;
-  // At most half the screen, so the page the note belongs to stays readable beside it; a longer note pages.
-  const int bodyMax = std::max(lineHeight, area.height / 2 - chrome);
+  // The half of this area the marker is not in, so the sentence that calls the note stays in view. Halved against the
+  // screen, as it was, a marker just above the screen's middle got a bottom sheet over it wherever the hint strip
+  // shortens the area. A marker the reader found no box for leaves the sheet at the bottom.
+  sheetAtTop = place.markerY >= 0 && place.markerY >= area.y + area.height / 2;
+  // At most half the area, so the page the note belongs to stays readable beside it; a longer note pages. Nor over the
+  // marker's line: an edge that cut it would cover it whole (below).
+  int room = area.height / 2;
+  if (place.markerY >= 0 && !page.isVertical()) {
+    const auto holdsMarker = [&](const auto& element) {
+      if (!element || element->getTag() != TAG_PageLine) return false;
+      const int top = pageY + element->yPos;
+      return place.markerY >= top && place.markerY < top + lineHeight;
+    };
+    const auto line = std::find_if(page.elements.begin(), page.elements.end(), holdsMarker);
+    if (line != page.elements.end()) {
+      const int top = pageY + (*line)->yPos;
+      room = std::min(room, sheetAtTop ? top - area.y : area.y + area.height - (top + lineHeight));
+    }
+  }
+  const int bodyMax = std::max(lineHeight, room - chrome);
   const int bodyWidth = area.width - 2 * inset;
   if (!body.layOut(renderer, std::move(markup), /*html=*/true, FootnotePreviews::MAX_NOTE_MARKUP_BYTES, fontId,
                    bodyWidth, bodyMax, hyphenator)) {
@@ -53,7 +71,7 @@ bool FootnoteSheet::layOut(std::string markup, const Page& page, const int pageY
   }
   const int bodyHeight = body.pageCount() > 1 ? bodyMax : std::max(lineHeight, body.usedHeight(renderer, 0));
   const int sheetHeight = chrome + bodyHeight;
-  if (place.sheetAtTop) {
+  if (sheetAtTop) {
     sheet = Rect{area.x, area.y, area.width, sheetHeight};
     ruleY = sheet.y + sheet.height - kRule;
     headerY = sheet.y + gap;
@@ -111,7 +129,7 @@ FootnoteSheet::Event FootnoteSheet::handleTap() {
   if (!mappedInput.wasScreenTapped(x, y)) return Event::None;
   // On the page beside the sheet: closed, as a tap beside a drawer closes it.
   const bool inArea = x >= area.x && x < area.x + area.width && y >= area.y && y < area.y + area.height;
-  if (inArea && (place.sheetAtTop ? y >= sheet.y + sheet.height : y < sheet.y)) return Event::Close;
+  if (inArea && (sheetAtTop ? y >= sheet.y + sheet.height : y < sheet.y)) return Event::Close;
   // The note's halves page it, as a book page's do, and go on to the next or previous note; at the page's first or last
   // note a tap there does nothing (the page beside the sheet closes it).
   switch (TapZones::halfOfBand(x, y, bodyBox.x, bodyBox.y, bodyBox.width, bodyBox.height)) {
@@ -205,6 +223,6 @@ void FootnoteSheet::appendDebugState(std::string& out) const {
   SerialCommandGrammar::appendField(out, "note", value);
   snprintf(value, sizeof(value), "%d/%d", currentPage + 1, body.pageCount());
   SerialCommandGrammar::appendField(out, "note_page", value);
-  SerialCommandGrammar::appendField(out, "note_at", place.sheetAtTop ? "top" : "bottom");
+  SerialCommandGrammar::appendField(out, "note_at", sheetAtTop ? "top" : "bottom");
 }
 #endif  // SERIAL_TEST_API
