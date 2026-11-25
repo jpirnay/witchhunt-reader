@@ -110,6 +110,13 @@ inline std::vector<StrId> uiThemeChoices() {
   return themes;
 }
 
+// The Home screen switches choose where the other themes put their menu entries. Lyra Tiles has no
+// places for entries (LyraTilesTheme::homeMenuCapacity() is 0): its layout's shortcuts are widgets and
+// More holds the rest, so there the switches changed nothing while saying they did. Hidden on the
+// device then; its Layout row is what applies. Asked of the setting, not of the theme in use, which
+// follows the setting only once Settings closes.
+inline bool homeSwitchesApply() { return SETTINGS.uiTheme != CrossPointSettings::LYRA_TILES; }
+
 // Every settings row in order, built one at a time and handed to `emit`. Nothing here holds the
 // list: see forEachSetting().
 inline void buildSettings(const RowSink& emit) {
@@ -256,22 +263,27 @@ inline void buildSettings(const RowSink& emit) {
                           StrId::STR_HOME_LAYOUT_GALLERY, StrId::STR_HOME_LAYOUT_CUSTOM},
                          "homeLayout", StrId::STR_CAT_DISPLAY)
            .withSubmenu(StrId::STR_MENU_DISP_HOME));
-  // Home screen entries: on = on the home screen, off = behind its "More" entry.
+  // Home screen entries: on = on the home screen, off = behind its "More" entry. Not Lyra Tiles'.
   emit(SettingInfo::Toggle(StrId::STR_LIBRARY, &CrossPointSettings::showLibraryOnHome, "showLibraryOnHome",
                            StrId::STR_CAT_DISPLAY)
-           .withSubmenu(StrId::STR_MENU_DISP_HOME));
+           .withSubmenu(StrId::STR_MENU_DISP_HOME)
+           .shownOnlyWhen(&homeSwitchesApply));
   emit(SettingInfo::Toggle(StrId::STR_READING_STATS, &CrossPointSettings::showReadingStatsOnHome,
                            "showReadingStatsOnHome", StrId::STR_CAT_DISPLAY)
-           .withSubmenu(StrId::STR_MENU_DISP_HOME));
+           .withSubmenu(StrId::STR_MENU_DISP_HOME)
+           .shownOnlyWhen(&homeSwitchesApply));
   emit(SettingInfo::Toggle(StrId::STR_GLOBAL_BOOKMARKS, &CrossPointSettings::showBookmarksOnHome, "showBookmarksOnHome",
                            StrId::STR_CAT_DISPLAY)
-           .withSubmenu(StrId::STR_MENU_DISP_HOME));
+           .withSubmenu(StrId::STR_MENU_DISP_HOME)
+           .shownOnlyWhen(&homeSwitchesApply));
   emit(SettingInfo::Toggle(StrId::STR_FILE_TRANSFER, &CrossPointSettings::showFileTransferOnHome,
                            "showFileTransferOnHome", StrId::STR_CAT_DISPLAY)
-           .withSubmenu(StrId::STR_MENU_DISP_HOME));
+           .withSubmenu(StrId::STR_MENU_DISP_HOME)
+           .shownOnlyWhen(&homeSwitchesApply));
   emit(SettingInfo::Toggle(StrId::STR_WEATHER, &CrossPointSettings::showWeatherOnHome, "showWeatherOnHome",
                            StrId::STR_CAT_DISPLAY)
-           .withSubmenu(StrId::STR_MENU_DISP_HOME));
+           .withSubmenu(StrId::STR_MENU_DISP_HOME)
+           .shownOnlyWhen(&homeSwitchesApply));
   emit(SettingInfo::Toggle(StrId::STR_SHOW_BUSY_INDICATOR, &CrossPointSettings::showBusyIndicator, "showBusyIndicator",
                            StrId::STR_CAT_DISPLAY));
   emit(SettingInfo::Action(StrId::STR_REFRESH_FREQ, SettingAction::RefreshFrequencyPicker)

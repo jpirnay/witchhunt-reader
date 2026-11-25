@@ -43,3 +43,30 @@ TEST(HomePictureName, KeepsEverythingElse) {
   EXPECT_FALSE(replacesHomePicture("", made));
   EXPECT_FALSE(replacesHomePicture("not_a_picture_name_of_the_right_len", made));
 }
+
+// A picture Home could not make is drawn as such, not as Loading, and tried again on a later visit
+// until it has failed kTries times.
+TEST(HomePictureFailures, CountsUpToTheTriesAndTellsPicturesApart) {
+  HomePictureFailures failures;
+  const std::string a = "/.crosspoint/home/" + homePictureName("/home/web/web-1.jpg", 0, 218, 170);
+  const std::string b = "/.crosspoint/home/" + homePictureName("/home/web/web-1.jpg", 9001, 218, 170);
+  EXPECT_FALSE(failures.failed(a));
+  failures.add(a);
+  EXPECT_TRUE(failures.failed(a));
+  EXPECT_FALSE(failures.givenUp(a));
+  // The source replaced (another size in the name) is another picture.
+  EXPECT_FALSE(failures.failed(b));
+  for (int i = 1; i < HomePictureFailures::kTries; ++i) failures.add(a);
+  EXPECT_TRUE(failures.givenUp(a));
+  failures.add(a);  // past the tries: still given up, the count does not wrap
+  EXPECT_TRUE(failures.givenUp(a));
+}
+
+// Bounded: past kMax pictures the oldest is forgotten, and at worst tried again.
+TEST(HomePictureFailures, ForgetsTheOldestPastItsRoom) {
+  HomePictureFailures failures;
+  for (int i = 0; i <= HomePictureFailures::kMax; ++i) failures.add("/p" + std::to_string(i));
+  EXPECT_FALSE(failures.failed("/p0"));
+  EXPECT_TRUE(failures.failed("/p1"));
+  EXPECT_TRUE(failures.failed("/p" + std::to_string(HomePictureFailures::kMax)));
+}

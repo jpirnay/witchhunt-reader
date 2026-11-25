@@ -302,20 +302,23 @@ to this one), or that its Home already shows this layout.
    is now. Click a part of the preview to find its row in the list. A row the screen has no room for
    is marked **does not fit on this reader**, and the list under the preview says why a widget is left
    out.
-4. Click **Save and use on the reader**. The line beside the button says what was saved and fetched.
-   The reader shows the new Home when you leave File Transfer.
+4. Click **Save and use on the reader**. The line beside the button says what was saved and fetched,
+   and what was not: **Not saved** only when the layout itself could not be written. When the layout
+   was written but the reader could not be switched to it, or a picture from the web could not be set
+   up, it says that, and saving again tries once more. The reader shows the new Home when you leave
+   File Transfer.
 
 The widgets:
 
 | Widget | Shows | Choices |
 |---|---|---|
-| **Book card** | The book you read last: its cover, title, author, reading history and progress. Choose it on the reader to read on. Takes a row alone. | **Large** takes the height the other rows leave; **Compact** is a smaller card of a fixed height |
-| **Also reading** | The three books you read before it. Takes a row alone, and is shown only where the book card keeps enough room beside it (never on the Murphy M3) | |
+| **Book card** | The book you read last: its cover, title, author, reading history and progress. Choose it on the reader to read on. Takes a row alone; a layout has one, so the page offers it only until a row holds it. | **Large** takes the height the other rows leave; **Compact** is a smaller card of a fixed height |
+| **Also reading** | The three books you read before it. Takes a row alone, one a layout, and is shown only where the book card keeps enough room beside it (never on the Murphy M3) | |
 | **Shortcut** | A tile that opens one place | **Library**, **Recent books**, **Reading Stats**, **Bookmarks**, **File Transfer** or **Weather**. Bookmarks is left out until you make a bookmark, Weather while Weather is off in the reader's settings |
 | **Clock** | The time and the date, once the reader knows the time | |
 | **Calendar** | This month, each day shaded by the time you read on it. Opens Reading Stats | |
 | **This week** | The time you read on each day of this week, the books you finished and are reading, and your streak. Opens Reading Stats | The week starts on the reader's **First Day of Week** (Settings → System → Clock Settings) |
-| **Weather** | The last forecast the reader's Weather screen fetched. Opens Weather | |
+| **Weather** | The last forecast the reader's Weather screen fetched. Opens Weather. Left out while Weather is off in the reader's settings | |
 | **Picture** | A picture from the card or from the web (below) | |
 
 **More** and **Settings** always close the screen in a row of their own, and **More** holds every place
@@ -337,7 +340,10 @@ A **Picture** widget shows one of these:
 
 The reader cuts a JPEG or PNG to the widget's place and converts it to black and white once, the first
 time Home shows it (it says **Loading** meanwhile). A BMP is drawn as it is, so make one at the size of
-its place. A layout shows at most two different pictures.
+its place. A layout shows at most two different pictures. A picture that is not on the card (a picture
+from the web before its first fetch) or that the reader cannot convert (a damaged file, or a PNG over
+960,000 pixels, such as 800 × 1200) shows **Could not render image** and its name; uploading through this
+page keeps pictures small enough.
 
 ### Pictures from the web
 
@@ -359,7 +365,13 @@ picture's site. For each one, choose when the reader fetches it: **Each time the
 or **After you close a book** (fetched at the next sleep). The reader then joins your last Wi-Fi network
 as it goes to sleep, as for any [plugin that acts while you read](#11-plugins), so going to sleep takes
 a few seconds longer. Saving fetches each picture once straight away. If a picture's server sends the
-reader on to another site, the page asks whether to allow that site. When you remove a picture from the
+reader on to another site, the page asks whether to allow that site; that permission belongs to the
+picture's slot and is dropped when the slot changes to a source on another site. A picture plugin you
+switch off on the Plugins page stays off when you save again here: the reader does not fetch that
+picture until you switch it on there. A source drawn at the picture's
+size (the random photo, the month calendar, an address of your own with `{width}` or `{height}`) is set
+up only while its row fits on this reader: otherwise the preview and the save say so, and it gets no
+plugin until you save again with the row in place. When you remove a picture from the
 web from the layout, saving removes its plugin as well.
 
 **A note and a QR code never change.** Your browser asks the service for them once when you save (a

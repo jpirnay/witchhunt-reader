@@ -71,6 +71,36 @@ TEST(HomeLayoutFile, ABookCannotShareARow) {
   EXPECT_EQ(p.config.rows[0].cells[0].widget, Widget::Book);
 }
 
+// Home selects, cycles and draws one book card: a second one drew a blank card, and Down from the tiles
+// went back to the first. The first of each is kept; a later one goes as an unknown widget does.
+TEST(HomeLayoutFile, OneBookCardAndOneAlsoReading) {
+  const auto p = parse(R"({"version":1,"rows":[
+    [{"widget":"book"}],
+    [{"widget":"also"}],
+    [{"widget":"shortcut","to":"library"},{"widget":"shortcut","to":"stats"}],
+    [{"widget":"book","size":"compact"}],
+    [{"widget":"also"}],
+    [{"widget":"book"},{"widget":"clock"}]]})");
+  ASSERT_TRUE(p.ok);
+  ASSERT_EQ(p.config.rowCount, 4);
+  EXPECT_EQ(p.config.rows[0].cells[0].widget, Widget::Book);
+  EXPECT_EQ(p.config.rows[0].cells[0].option, 0);  // the first card, large
+  EXPECT_EQ(p.config.rows[1].cells[0].widget, Widget::AlsoReading);
+  EXPECT_EQ(p.config.rows[2].count, 2);
+  // The book beside the clock is a second one: the clock takes the row.
+  EXPECT_EQ(p.config.rows[3].count, 1);
+  EXPECT_EQ(p.config.rows[3].cells[0].widget, Widget::Clock);
+}
+
+// A book the parser leaves out for sharing a row is not the layout's book: a later one is kept.
+TEST(HomeLayoutFile, ABookLeftOutBesideAnotherWidgetIsNotTheFirst) {
+  const auto p = parse(R"({"version":1,"rows":[[{"widget":"clock"},{"widget":"book"}],[{"widget":"book"}]]})");
+  ASSERT_TRUE(p.ok);
+  ASSERT_EQ(p.config.rowCount, 2);
+  EXPECT_EQ(p.config.rows[0].cells[0].widget, Widget::Clock);
+  EXPECT_EQ(p.config.rows[1].cells[0].widget, Widget::Book);
+}
+
 TEST(HomeLayoutFile, AtMostSixRows) {
   std::string rows;
   for (int i = 0; i < 9; ++i) rows += std::string(i ? "," : "") + R"([{"widget":"clock"}])";

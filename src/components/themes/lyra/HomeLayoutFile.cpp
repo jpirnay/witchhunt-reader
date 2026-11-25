@@ -88,18 +88,28 @@ Parsed parse(const std::string& json) {
   JsonDocument doc;
   if (JsonText::parse(doc, json)) return parsed;
   if (doc["version"].as<int>() != 1) return parsed;
+  // Home has one book card and one Also reading row: the selector, the cover pass and the drawing
+  // each know one. A second is left out as an unknown widget is, its partner taking the row.
+  bool hasBook = false;
+  bool hasStrip = false;
   for (JsonArrayConst row : doc["rows"].as<JsonArrayConst>()) {
     if (parsed.config.rowCount >= HomeTilesLayout::kMaxRows) break;
     Cell cells[2]{};
     int count = 0;
     for (JsonObjectConst object : row) {
       Cell cell;
-      if (count < 2 && cellFrom(object, cell, parsed.pictures)) cells[count++] = cell;
+      if (count >= 2 || !cellFrom(object, cell, parsed.pictures)) continue;
+      if ((cell.widget == Widget::Book && hasBook) || (cell.widget == Widget::AlsoReading && hasStrip)) continue;
+      cells[count++] = cell;
     }
     // Two side by side only where both may share a row; otherwise the first takes it alone.
     if (count == 2 && !(HomeTilesLayout::pairs(cells[0].widget) && HomeTilesLayout::pairs(cells[1].widget))) count = 1;
     if (count == 1) parsed.config.add(cells[0]);
     if (count == 2) parsed.config.add(cells[0], cells[1]);
+    for (int c = 0; c < count; ++c) {
+      hasBook = hasBook || cells[c].widget == Widget::Book;
+      hasStrip = hasStrip || cells[c].widget == Widget::AlsoReading;
+    }
   }
   parsed.ok = parsed.config.rowCount > 0;
   return parsed;

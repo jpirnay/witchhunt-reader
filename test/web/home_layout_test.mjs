@@ -56,6 +56,15 @@ check(!HomeLayout.parse('{"version":1,"rows":[]}').ok, 'no rows is no layout');
 check(!HomeLayout.parse(' '.repeat(HomeLayout.MAX_BYTES + 1)).ok, 'more than 4 KB is no layout');
 const fromObject = HomeLayout.parse(HomeLayout.PRESETS.dashboard);
 check(fromObject.ok && fromObject.pictures[0] === '/home', 'a picture without a path is /home');
+// Weather off takes the Weather widget off as it does Weather's shortcut, its neighbour taking the row.
+const weatherOff = HomeLayout.withAvailable([{ cells: [{ widget: 'weather', option: 0 }, { widget: 'clock', option: 0 }], source: 0 },
+  { cells: [{ widget: 'weather', option: 0 }], source: 1 }], ['library', 'stats', 'transfer', 'recent']);
+check(JSON.stringify(weatherOff.map((r) => r.cells.map((c) => c.widget))) === '[["clock"]]', 'Weather off leaves the Weather widget out');
+// One book card and one Also reading row (the second-card cases above lay it out; here the rows themselves).
+const twice = HomeLayout.parse({ version: 1, rows: [[{ widget: 'book' }], [{ widget: 'also' }], [{ widget: 'book', size: 'compact' }],
+  [{ widget: 'also' }], [{ widget: 'book' }, { widget: 'clock' }]] });
+check(JSON.stringify(twice.rows.map((r) => [r.source, r.cells.map((c) => c.widget).join('+')])) ===
+      '[[0,"book"],[1,"also"],[4,"clock"]]', 'only the first book card and Also reading row are kept');
 
 // Pictures from the web: the file, the size in the address, and the plugin that fetches it. The device.json
 // files must be test/plugin_events/home_picture_plugins.json, which the device's event code is tested on
@@ -78,8 +87,14 @@ check(sleep.name === 'home-picture-1' && manifest.catalog === false, 'the plugin
 check(JSON.stringify(manifest.allowedHosts) === '["img.example",".img.example"]', 'it may reach the host and its subdomains');
 check(manifest.homeScreen.url === 'https://img.example/render?w={width}&h={height}' && manifest.homeScreen.event === 'sleep.enter',
       'it keeps the address as written, for the page to show again');
-const unshown = HomeLayout.webPicturePlugin(1, { url: 'https://x.org/{width}.jpg', event: 'nonsense' }, null);
-check(unshown.url === 'https://x.org/{width}.jpg', 'a picture not shown keeps {width} unfilled');
+// The reader fills no {width}: a plugin made without the size would ask for it as written on every sleep.
+check(HomeLayout.webPicturePlugin(1, { url: 'https://x.org/{width}.jpg', event: 'sleep.enter' }, null) === null &&
+      HomeLayout.webPicturePlugin(1, { preset: 'photo', event: 'sleep.enter' }, null) === null,
+      'no plugin for a picture not shown whose address takes its size');
+check(HomeLayout.webSourceNeedsSize({ preset: 'calendar' }) && !HomeLayout.webSourceNeedsSize({ preset: 'sun' }) &&
+      !HomeLayout.webSourceNeedsSize({ url: 'https://x.org/today.jpg' }), 'which addresses take the size');
+const unshown = HomeLayout.webPicturePlugin(1, { url: 'https://x.org/today.jpg', event: 'nonsense' }, null);
+check(unshown.url === 'https://x.org/today.jpg', 'a picture not shown with a fixed address keeps its plugin');
 check('sleep.enter' in JSON.parse(unshown.files['device.json']).events, 'an unknown event is fetched at sleep');
 
 // The ready-made sources (WEB_PICTURE_PRESETS): what each fetches for a 218 x 170 widget.

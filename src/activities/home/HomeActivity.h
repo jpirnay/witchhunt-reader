@@ -102,12 +102,22 @@ class HomeActivity final : public Activity {
   static constexpr int kMaxWidgetActions = 12;
   HomeDestination widgetActions_[kMaxWidgetActions]{};
   int widgetActionCount_ = 0;
-  // The pictures the widgets show that this visit has tried to make (makeNextHomePicture): bit i
-  // for the theme's job i. The jobs stay the same for a visit, as the layout is chosen in onEnter.
-  static constexpr int kMaxPictureJobs = 4;
-  uint8_t pictureAttempts_ = 0;
-  // Makes one picture a widget shows that is not on the card yet; false when none is left.
-  bool makeNextHomePicture();
+  // The pictures the widgets show that this visit has tried to make (makeNextHomePicture), by their
+  // file (homePictureKey): one try a visit, so a picture that comes out other than asked is not made
+  // on every tick. By file rather than by job: the list leaves out what has been given up on.
+  static constexpr int kMaxPictureJobs = kMaxHomePictureJobs;
+  uint32_t pictureAttempts_[kMaxPictureJobs]{};
+  int pictureAttemptCount_ = 0;
+  enum class PictureStep : uint8_t {
+    Done,    // nothing left to make this visit
+    Made,    // one picture made or given up on: redraw
+    Paused,  // input came first; the same picture is taken up on the next pass
+  };
+  // Makes one picture a widget shows that is not on the card yet.
+  PictureStep makeNextHomePicture();
+  // The next picture to make: one this visit has not tried and the card lacks. Not inlined, so the
+  // job list is off the loop task's stack before the decode runs.
+  [[gnu::noinline]] bool nextHomePictureJob(HomePictureJob& out) const;
   bool gridNav_ = false;
   // Whether the theme shows a clock among its widgets (BaseTheme::homeShowsClock): Home then takes
   // the minute tick whatever Use Clock says. Set in onEnter().

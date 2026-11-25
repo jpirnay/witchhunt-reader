@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "RecentBooksStore.h"
@@ -209,6 +210,8 @@ void LyraTilesTheme::prepareHome(const uint32_t available) {
   data_.load(config_, pictureSources_);
 }
 
+static_assert(kMaxHomePictureJobs >= HomeTilesLayout::kMaxRows * 2, "a job for every widget a placement holds");
+
 int LyraTilesTheme::homePictureJobs(const GfxRenderer& /*renderer*/, const Rect content, HomePictureJob* out,
                                     const int max) const {
   const HomeTilesLayout::Placement p = placement(content, menuCount_);
@@ -217,10 +220,14 @@ int LyraTilesTheme::homePictureJobs(const GfxRenderer& /*renderer*/, const Rect 
     const HomeTilesLayout::Placed& item = p.items[i];
     if (item.cell.widget != Widget::Picture || item.cell.option >= HomeTilesLayout::kMaxPictures) continue;
     const std::string& source = data_.pictures[item.cell.option];
-    if (source.empty() || FsHelpers::hasBmpExtension(source)) continue;
-    out[n++] =
-        HomePictureJob{source, homePictureTarget(source, data_.pictureSizes[item.cell.option], item.box.w, item.box.h),
-                       item.box.w, item.box.h};
+    // A size of 0: the file is not on the card (a picture from the web not fetched yet), or empty.
+    if (source.empty() || FsHelpers::hasBmpExtension(source) || data_.pictureSizes[item.cell.option] == 0) continue;
+    std::string target = homePictureTarget(source, data_.pictureSizes[item.cell.option], item.box.w, item.box.h);
+    if (homePictureFailures().givenUp(target)) continue;
+    // Two widgets of one size showing one picture share its file.
+    bool listed = false;
+    for (int j = 0; j < n && !listed; ++j) listed = out[j].target == target;
+    if (!listed) out[n++] = HomePictureJob{source, std::move(target), item.box.w, item.box.h};
   }
   return n;
 }
@@ -651,14 +658,26 @@ void LyraTilesTheme::drawPicture(GfxRenderer& renderer, const Box& box, const in
     });
   } else if (!source.empty()) {
     // A JPEG or PNG Home's cover pass has made at this size, cut and dithered (homePictureJobs).
-    drawn = drawThumbFile(renderer, homePictureTarget(source, data_.pictureSizes[index], box.w, box.h), box);
+    const std::string target = homePictureTarget(source, data_.pictureSizes[index], box.w, box.h);
+    drawn = drawThumbFile(renderer, target, box);
+    // Not made yet. Loading only while the pass will make it: not for a source that is not on the card
+    // (size 0) or one the pass could not make, which said Loading for the whole visit.
+    if (drawn == CoverThumb::Pending && (data_.pictureSizes[index] == 0 || homePictureFailures().failed(target))) {
+      drawn = CoverThumb::Absent;
+    }
   }
   if (drawn == CoverThumb::Pending && !FsHelpers::hasBmpExtension(source)) {
     drawCoverLoading(renderer, toRect(box));
   } else if (drawn != CoverThumb::Drawn) {
-    // Nothing to show: where the pictures go.
-    char hint[96];
-    snprintf(hint, sizeof(hint), tr(STR_HOME_PICTURES_HINT), kHomePicturesFolder);
+    // Nothing to show: where the pictures go, or which picture could not be shown.
+    char hint[128];
+    if (source.empty()) {
+      snprintf(hint, sizeof(hint), tr(STR_HOME_PICTURES_HINT), kHomePicturesFolder);
+    } else {
+      const size_t slash = source.rfind('/');
+      snprintf(hint, sizeof(hint), "%s (%s)", tr(STR_COULD_NOT_RENDER_IMAGE),
+               source.c_str() + (slash == std::string::npos ? 0 : slash + 1));
+    }
     const int lineHeight = renderer.getLineHeight(SMALL_FONT_ID);
     const auto lines = renderer.wrappedText(SMALL_FONT_ID, hint, box.w - 2 * kWidgetPadding,
                                             std::max(1, (box.h - 2 * kWidgetPadding) / lineHeight));

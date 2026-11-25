@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+#include "components/themes/lyra/HomePictureName.h"
 #include "components/themes/lyra/HomeTilesLayout.h"
 
 // What Home's widgets show that is not the book list: the week's and the month's reading, the last
@@ -37,12 +38,13 @@ struct HomeWidgetData {
   int weatherCode = 0;
   bool isDay = true;
 
-  // ---- The pictures: the file each Picture widget shows; a folder's choice is kept here between visits ----
+  // ---- The pictures: the file each Picture widget shows ----
   std::string pictures[HomeTilesLayout::kMaxPictures];
   uint32_t pictureSizes[HomeTilesLayout::kMaxPictures]{};  // bytes, so a replaced file is made again
 
   // Reads what `config` uses. `pictureSources` names each picture's file or folder; a folder's
-  // choice stays in `pictures` while it is on the card, so a return to Home does not change it.
+  // choice is kept for the start (HomeWidgetData.cpp) while it is on the card, so neither a return
+  // to Home nor the theme made again when Settings closes changes it.
   void load(const HomeTilesLayout::Config& config, const std::string* pictureSources);
   // The part of load() a new day changes: the date, and the reading by day where `config` shows it.
   void loadDay(const HomeTilesLayout::Config& config);
@@ -59,3 +61,8 @@ std::string homePictureTarget(const std::string& source, uint32_t sourceBytes, i
 
 // Removes the files `target` replaces: those made from earlier copies of its source at its size.
 void removeReplacedHomePictures(const std::string& target);
+
+// The pictures Home could not make since the start. Module-wide rather than the theme's, which is made
+// again when Settings closes. Written on the loop task under the render lock (HomeActivity's cover
+// pass), read by the theme's draw on the render task.
+HomePictureFailures& homePictureFailures();

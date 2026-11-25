@@ -16,7 +16,7 @@
 // card), also, shortcut ("to": library, stats, bookmarks, transfer, weather, recent), clock,
 // calendar, week, weather, picture ("path": a JPEG, PNG or BMP, or a folder of them; /home when
 // left out). What the parser does not know it leaves out, rather than refusing the file: a later
-// editor may know more widgets than this firmware.
+// editor may know more widgets than this firmware. Only the first book and the first also are kept.
 namespace HomeLayoutFile {
 
 inline constexpr const char* kPath = "/.crosspoint/home.json";

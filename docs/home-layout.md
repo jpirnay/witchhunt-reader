@@ -15,7 +15,8 @@ be written by hand. A missing or unreadable file gives the **Reader** layout, an
 
 - `version` is 1. A file of another version is not read.
 - `rows`: up to six, top to bottom. A row holds one widget across the screen or two side by side;
-  `book` and `also` take a row alone. A third widget in a row is left out.
+  `book` and `also` take a row alone. A third widget in a row is left out, and so is a second `book`
+  or a second `also`: Home has one book card and one Also reading row, the first ones in the file.
 - At most 4 KB.
 
 | `widget` | Shows | Options |
@@ -33,8 +34,9 @@ The rules Home lays the rows out by:
 
 - More and Settings always close Home in a row of their own. More holds every place the layout's
   shortcuts do not open.
-- A shortcut to a place with nothing behind it (Bookmarks before the first bookmark, Weather before it
-  is set up) is left out; its neighbour then takes the row.
+- A shortcut to a place with nothing behind it (Bookmarks before the first bookmark, Weather while it
+  is off) is left out; its neighbour then takes the row. The `weather` widget goes with Weather's
+  shortcut.
 - Where the screen cannot hold every row with the book card at its smallest readable size, rows are
   left out from the bottom up; the book card's row never is.
 - Held sideways, the rows with the book card take the left column and the others the right one.
@@ -42,6 +44,11 @@ The rules Home lays the rows out by:
   kept in `/.crosspoint/home`, named by the picture's path and size and the place's size. A picture
   replaced by one of another size is converted again, and the file the old one left is removed. A BMP
   is drawn as it is: make one at its place's size.
+- The widget says Loading while its picture is being converted. A press puts the conversion off, and it
+  goes on once the press is served. A file not on the card (a picture from the web before its first
+  fetch) or one that cannot be converted (damaged, or a PNG over 960,000 pixels) shows "Could not render
+  image" and its name. One that could not be converted is tried again at the next visit, twice in all,
+  then not until the next start or until the file changes.
 
 What the firmware does not know (a widget or a place a later version adds) is left out, not refused.
 The geometry is `src/components/themes/lyra/HomeTilesLayout.h`, the parser
@@ -68,9 +75,12 @@ whose one event handler downloads the address to the file
 ([plugin events](sd-plugins.md#events-the-reader-sends-a-plugins-requests)), and a `manifest.json` that
 may reach the address's host and its subdomains and keeps the address and the preset under
 `homeScreen`. `{width}` and `{height}` are filled with the widget's size when the page saves, and the
-page fetches the picture once through `/api/fetch` as it saves. A note and a QR code never change: the
+page fetches the picture once through `/api/fetch` as it saves. The reader fills neither, so an address
+with them gets no plugin while its row does not fit (the page removes the one it had and says so). A note and a QR code never change: the
 browser fetches them once from their service (which allows it) and uploads the file, and no plugin
 fetches them again. The page replaces the plugins when the layout changes and removes those of
-pictures it no longer shows. The firmware has no code of its own for any of this: what such a picture
+pictures it no longer shows. A plugin switched off on the Plugins page is switched off again after the
+replacement, and one whose host changed is removed first, so the hosts approved for the old address
+(kept by the plugin's name) do not carry over. The firmware has no code of its own for any of this: what such a picture
 shows is the business of the service behind the address ([SCOPE.md](../SCOPE.md)). Every source was
 checked on 2026-11-24; a service may change or stop.

@@ -100,7 +100,17 @@ std::string pickFrom(const std::string& folder) {
   return path += chosen;
 }
 
+// Constant-initialised: no constructor at boot and no guard on first use, as a function-local static has.
+HomePictureFailures gPictureFailures;
+
+// The picture each slot took from its folder this start. Kept here rather than in the theme's data: the
+// theme is made again when Settings closes (UITheme::reload), and a folder's picture changed with it,
+// though the layout promises a new one each start.
+std::string gFolderPicks[HomeTilesLayout::kMaxPictures];
+
 }  // namespace
+
+HomePictureFailures& homePictureFailures() { return gPictureFailures; }
 
 std::string homePictureTarget(const std::string& source, const uint32_t sourceBytes, const int width,
                               const int height) {
@@ -222,11 +232,14 @@ void HomeWidgetData::load(const HomeTilesLayout::Config& config, const std::stri
     if (source.empty() || !showsPicture(config, i)) continue;
     if (isPicture(source)) {
       pictures[i] = source;
-    } else if (!inFolder(pictures[i], source) || !Storage.exists(pictures[i].c_str())) {
-      // A folder: one of its pictures, kept while it is on the card, so Home does not change it on
-      // every return. Chosen again when the layout names another folder or the file has gone; an
-      // empty folder is looked at again on each return, so a picture added to it shows.
-      pictures[i] = pickFrom(source);
+    } else {
+      // A folder: one of its pictures, kept for this start while it is on the card, so neither a return
+      // to Home nor a theme made again changes it. Chosen again when the layout names another folder or
+      // the file has gone; an empty folder is looked at again on each return, so a picture added to it
+      // shows.
+      std::string& pick = gFolderPicks[i];
+      if (!inFolder(pick, source) || !Storage.exists(pick.c_str())) pick = pickFrom(source);
+      pictures[i] = pick;
     }
     if (!pictures[i].empty()) {
       auto file = Storage.open(pictures[i].c_str());

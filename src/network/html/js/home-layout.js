@@ -45,6 +45,8 @@
   const PLAIN = ['also', 'clock', 'calendar', 'week', 'weather'];
   // The widgets that may share a row; book and also take the row across.
   const PAIRS = new Set(['shortcut', 'clock', 'calendar', 'week', 'weather', 'picture']);
+  // The widgets a layout holds once: the first is kept, a later one left out.
+  const SINGLE = ['book', 'also'];
   // The widgets that open something when chosen.
   const OPENS = new Set(['shortcut', 'week', 'calendar', 'weather']);
 
@@ -107,28 +109,33 @@
     }
     if (!doc || typeof doc !== 'object' || doc.version !== 1) return result;
     const rows = Array.isArray(doc.rows) ? doc.rows : [];
+    // One book card and one Also reading row: a second is left out as an unknown widget is.
+    const kept = new Set();
     for (let source = 0; source < rows.length; source++) {
       if (result.rows.length >= MAX_ROWS) break;
       const cells = [];
       for (const object of Array.isArray(rows[source]) ? rows[source] : []) {
         if (cells.length < 2) {
           const cell = cellFrom(object, result.pictures);
-          if (cell) cells.push(cell);
+          if (cell && !(SINGLE.includes(cell.widget) && kept.has(cell.widget))) cells.push(cell);
         }
       }
       if (cells.length === 2 && !(PAIRS.has(cells[0].widget) && PAIRS.has(cells[1].widget))) cells.length = 1;
       if (cells.length > 0) result.rows.push({ cells, source });
+      for (const cell of cells) kept.add(cell.widget);
     }
     result.ok = result.rows.length > 0;
     return result;
   }
 
-  // HomeTilesLayout::withAvailable: the shortcuts to destinations not in `available` (names) left out.
+  // HomeTilesLayout::withAvailable: the shortcuts to destinations not in `available` (names) left out, and the
+  // Weather widget with Weather's.
   function withAvailable(rows, available) {
     const has = new Set(available);
     const shown = [];
     for (const row of rows) {
-      const cells = row.cells.filter((c) => c.widget !== 'shortcut' || has.has(DESTINATIONS[c.option]));
+      const cells = row.cells.filter((c) => (c.widget !== 'shortcut' || has.has(DESTINATIONS[c.option])) &&
+        (c.widget !== 'weather' || has.has('weather')));
       if (cells.length > 0) shown.push({ cells, source: row.source });
     }
     return shown;
@@ -493,10 +500,16 @@
     return `${WEB_PICTURE_FOLDER}/web-${n}${webSourceExt(typeof source === 'string' ? { url: source } : source)}`;
   }
 
-  // The plugin that fetches the n-th picture from the web: {name, dest, url, files: {'device.json', 'manifest.json'}}.
-  // `source` is {url, event} or a preset's {preset, ..., event}; `size` the widget's {w, h}, or null when it is not
-  // shown. Not for a once preset, which no plugin fetches.
+  // Whether a source's address takes the widget's size ({width}, {height}): it cannot be fetched before its row is
+  // shown on the reader. The reader fills no placeholder, so it would ask for "{width}" on every sleep.
+  const webSourceNeedsSize = (source) => /\{(width|height)\}/.test(webSourceUrl(source, null));
+
+  // The plugin that fetches the n-th picture from the web: {name, dest, url, host, files: {'device.json',
+  // 'manifest.json'}}. `source` is {url, event} or a preset's {preset, ..., event}; `size` the widget's {w, h}, or
+  // null when it is not shown: then null for an address that needs the size. Not for a once preset, which no plugin
+  // fetches.
   function webPicturePlugin(n, source, size) {
+    if (!size && webSourceNeedsSize(source)) return null;
     const name = `${WEB_PICTURE_PLUGIN}${n}`;
     const dest = webPictureDest(n, source);
     const template = webSourceUrl(source, null);
@@ -526,9 +539,9 @@
   }
 
   window.HomeLayout = {
-    DIMENSIONS, PRESETS, DESTINATIONS, MENU_DESTINATIONS, PAIRS, OPENS, MAX_ROWS, MAX_PICTURES, MAX_BYTES,
+    DIMENSIONS, PRESETS, DESTINATIONS, MENU_DESTINATIONS, PAIRS, SINGLE, OPENS, MAX_ROWS, MAX_PICTURES, MAX_BYTES,
     PICTURE_FOLDER, WEB_PICTURE_FOLDER, WEB_PICTURE_PLUGIN, WEB_PICTURE_EVENTS, WEB_PICTURE_PRESETS, parse, withAvailable,
     place, card, strip, bottomCount, layOut, webPictureDest, fillSize, webSourceUrl, webSourceExt, webSourceProblem,
-    webPicturePlugin,
+    webSourceNeedsSize, webPicturePlugin,
   };
 })();
