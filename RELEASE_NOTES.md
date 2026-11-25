@@ -2,7 +2,7 @@
 
 User-facing changes only. Full commit history is in git log.
 
-## 2.54 — 2026-11-24
+## 2.54 — 2026-11-25
 
 **A Home screen you arrange yourself, footnotes over the page, and library loans.** Lyra Tiles, the new default theme,
 puts the book you read in front, with ready-made layouts and a web page to build your own from widgets and pictures.
@@ -46,7 +46,8 @@ Read the upgrade notes at the end of this section before you update.
 - **Links and footnotes to a word inside a paragraph** open the page that holds the word, not the paragraph's first
   page.
 - **A rule drawn under a heading as an empty bordered block** shows again with Extra Paragraph Spacing on.
-- **Screenshots taken in a book** go into a folder named after it, with the chapter, page and progress in the name.
+- **Screenshots taken in a book** go into a folder named after it, with the chapter, page and progress in the name,
+  and every screenshot is saved the way you hold the reader: one taken in landscape is no longer sideways.
 - **Less memory while a chapter is laid out**, and a chapter that runs out of memory now stops where it got to instead
   of restarting the reader: deeply nested markup, large tables, pages with very many elements and one-file books with
   long contents lists.
@@ -55,6 +56,7 @@ Read the upgrade notes at the end of this section before you update.
 - A progressive JPEG is shrunk faster for a small picture, a picture that cannot be decoded draws its placeholder
   instead of a blank, and the Indexing message no longer holds up the work it announces.
 - Fix: an interrupted chapter build could write into a file already deleted from the card.
+- Fix: a list inside a table cell put its bullets or numbers outside the cell.
 
 ### Controls
 
@@ -63,6 +65,11 @@ Read the upgrade notes at the end of this section before you update.
 - **Touch Lock** (Settings → Controls, touch devices): touch off everywhere, books included, for reading by the keys
   alone with a hand on the glass. On the BOOX Picco the slide switch can work it (**Slide Switch** → **Touch**).
 - **In the light drawer, Up and Down change the brightness** on every device with a light, held to keep stepping.
+- **A key or gesture that switches something on or off says so** in a short message: Dark Mode, Bionic Reading,
+  Auto Page Turn, Touch Navigation, Touch Lock and the reading light.
+- Fix: the BOOX Picco forgot, at every start, the keys and gestures given a light action, and the light's
+  brightness, warmth and Restore on Wake.
+- Fix: on the BOOX Picco, touch could stay dead after a restart.
 
 ### Pictures, sleep and power
 
@@ -75,13 +82,18 @@ Read the upgrade notes at the end of this section before you update.
 - **Murphy M3:** much less battery used while it sits on a screen. A Murphy left on Home with its light off had lost
   about 40 % in 10 hours. Fix: it could restart after a long idle spell.
 - **X3:** the panel's booster switches off after two idle minutes, and each page turn sends less to the panel.
+- Fix: a PNG sleep picture replaced by another of the same size at the same place kept showing the old one.
+- Fix: a long download, such as a book from an OPDS catalog, sent the reader to sleep the moment it ended.
+- Fix: the X4's clock lost a fraction of a second at every sleep and correction, and slowly fell behind.
+- Fix: the LilyGo T5 S3 Pro showed about 60 % with a full battery.
 
 ### Plugins and library loans
 
 - **Books with Adobe DRM** (most library loans, such as Onleihe or Libby, and shops' "Adobe DRM" titles) open once the
   community plugin **Protected Content** has stored their key on the reader. A loan stops opening when it ends. When a
   book does not open, the reader says why. What the reader keeps of such a book on the card is enciphered with a key
-  of this reader's own. See [Protected books](USER_GUIDE.md#protected-books).
+  of this reader's own. The book's key and licence go with it however you move it: on the reader, over USB, WebDAV
+  or the web File Manager. See [Protected books](USER_GUIDE.md#protected-books).
 - **The Plugins page** lists CrossPoint's community plugins, each marked by how much of it runs here, and opens a
   plugin's own catalog to browse, search, sign in to, and download to the card from.
 - **The reader asks before a plugin reaches a new site.** The sites you allowed are listed with each plugin, and
@@ -89,7 +101,8 @@ Read the upgrade notes at the end of this section before you update.
 - **Plugins that act while you read** can send your progress when a book opens or closes, or fetch a picture as the
   reader goes to sleep. At sleep the reader joins your last Wi-Fi network for them (not under 20 % battery). They
   reach only the sites their files name, listed under **Reaches** on the Plugins page, and the ones you allowed, and
-  never read the reader's saved passwords.
+  never read the reader's saved passwords. When a plugin's event was turned away from a site, its card on the
+  Plugins page names the site with **Allow** and **Dismiss**.
 
 ### Updates and the web interface
 
@@ -98,6 +111,9 @@ Read the upgrade notes at the end of this section before you update.
   and newer pre-releases.
 - The web File Manager lists a hidden folder you type the path of, and the EPUB optimizer keeps a picture's name when
   it cannot convert it.
+- **Renaming a file in the web File Manager** selects the name without its extension, so typing keeps `.epub`.
+- **A dictionary folder may have a name up to 127 bytes long**; a longer name copied to the card by hand no longer
+  stops the dictionary opening.
 
 ### Upgrade notes
 
@@ -108,7 +124,10 @@ Read the upgrade notes at the end of this section before you update.
   never saved its settings starts on Lyra Tiles.
 - **Button and gesture actions are now saved by name.** Your assignments carry over. **Going back to 2.53 or older
   resets them** to the defaults.
-- **The weather is fetched once more**: the old forecast is not read. Your places are kept.
+- **The weather is fetched once more**: the old forecast is not read. Your places are kept. PNG sleep pictures are
+  converted once more the first time each shows.
+- **A plugin that sends to a site taken from its own settings**, such as the community Weather plugin, stops until
+  you press **Allow** for that site on the Plugins page.
 - **The web interface installs its pages again** on your first visit; for hotspot mode, have `web-….bin` ready.
 - **Languages:** the new labels exist in every language and arrive with the language-pack update Check for updates
   offers; until then they show in English.
@@ -116,11 +135,16 @@ Read the upgrade notes at the end of this section before you update.
 
 ### With thanks to
 
-- **Justin Mitchell** (plugin device events, on-device crypto and book keys), **Arthur Tazhitdinov** and
+- **Justin Mitchell** (plugin device events, on-device crypto and book keys; the sleep picture cache,
+  crosspoint-reader #4542; display guards, Free-Ink #212), **Arthur Tazhitdinov** and
   **Jadehawk** (plugin events and catalogs), **franssjz** (dictionary suggestions, book keys, the optimizer fix),
   **Jon Stieglitz** (screenshot names, crosspoint-reader #1589), **zuyan9** (the X3's idle power-off, Free-Ink #220),
   **InsiderPhD** (the Picco's calibrated gray levels, Free-Ink #223) and **Mikalai Kryvusha** (ids inside a paragraph,
   crosspoint-reader #4328).
+- **John Stader** (sleep after a long download, crosspoint-reader #4538), **kanavnet** (long dictionary folder
+  names, #4507), **Uri Tauber** (renaming in the web File Manager, #4547; landscape screenshots, #4457), **Julia
+  Nguyen** (the Picco's touch after a restart, Free-Ink) and **Roman Fordinal** (the T5 S3 Pro's battery, Free-Ink
+  #227).
 - **Marcin Marczyk**, whose Month Wallpaper server draws the month calendar for Home.
 - **aurimasrim** (Lithuanian, crosspoint-reader #4579), **KymAndriy** (Ukrainian, #4501), **winst0niuss** (Russian,
   #4427) and **Phạm Bình An** (Vietnamese, #4582), whose revised wording we took.
