@@ -552,11 +552,13 @@ int SecureHttpClient::request(const char* method, const std::string& url, const 
   return request(method, url, body, sink);
 }
 
-int SecureHttpClient::request(const char* method, const std::string& url, const std::string& body,
+int SecureHttpClient::request(const char* method, const std::string& url, const std::string_view body,
                               const BodySink& sink) {
   std::string current = url;
   std::string activeMethod = method;
-  std::string activeBody = body;
+  // A view, not a copy: the plugin relay's body can be tens of KB, and a second block of its size from the throwing
+  // operator new aborts the C3 (-fno-exceptions) when it does not fit.
+  std::string_view activeBody = body;
   Url scope;  // see get()
   bool credentials = true;
   for (int hop = 0; hop <= _maxRedirects; ++hop) {
@@ -589,7 +591,7 @@ int SecureHttpClient::request(const char* method, const std::string& url, const 
       // HEAD stays HEAD (RFC 9110 §15.4): it asks for no body, wherever it lands.
       if (activeMethod != "HEAD" && (meta.status == 303 || meta.status == 301 || meta.status == 302)) {
         activeMethod = "GET";
-        activeBody.clear();
+        activeBody = {};
       }
       if (hop == _maxRedirects) return ERR_TOO_MANY_REDIRECTS;
       continue;

@@ -17,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "CrossPointSettings.h"
@@ -415,8 +416,9 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   return finishFileDownload(result, destPath, file, sink.downloaded);
 }
 
-int HttpDownloader::request(const char* method, const std::string& url, const Headers& headers, const std::string& body,
-                            const HeaderCallback& onHeader, const ResponseCallback& onData, const TlsPolicy tls) {
+int HttpDownloader::request(const char* method, const std::string& url, const Headers& headers,
+                            const std::string_view body, const HeaderCallback& onHeader, const ResponseCallback& onData,
+                            const TlsPolicy tls) {
   const WifiPowerSaveGuard psGuard;
   logPreCallContext(url);
   crosspoint::SecureHttpClient http;

@@ -9,6 +9,7 @@
 
 #include <initializer_list>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -133,6 +134,22 @@ TEST_F(CredentialRedirect, ARedirectedPutKeepsItsBodyAndDropsThem) {
   EXPECT_EQ(FakeNet::requests()[1].rfind("PUT /syncs/progress ", 0), 0u);
   EXPECT_TRUE(hasHeader(1, "Content-Length"));
   EXPECT_TRUE(noCredentialsSent(1));
+}
+
+// The plugin relay hands its body over as a view into its parsed request rather than a copy (a copy of a large body
+// could abort the C3): exactly the view's bytes go out, not up to a NUL, and a 307 sends them again.
+TEST_F(CredentialRedirect, AStreamedBodyIsSentFromTheCallersView) {
+  const std::string buffer = "{\"progress\":\"1\"}and bytes past the body";
+  const std::string_view body(buffer.data(), 16);
+  FakeNet::replies().push_back(fakeRedirectTo("https://elsewhere.example/syncs/progress", 307));
+  FakeNet::replies().push_back(fakeOk());
+  EXPECT_EQ(
+      http.request("PUT", "https://sync.example/syncs/progress", body, [](const uint8_t*, size_t) { return true; }),
+      200);
+  ASSERT_EQ(FakeNet::requests().size(), 2u);
+  for (size_t i = 0; i < 2; ++i) {
+    EXPECT_NE(FakeNet::requests()[i].find("\r\nContent-Length: 16\r\n"), std::string::npos) << FakeNet::requests()[i];
+  }
 }
 
 TEST_F(CredentialRedirect, APinnedScopeHoldsForARequestThatStartsElsewhere) {
