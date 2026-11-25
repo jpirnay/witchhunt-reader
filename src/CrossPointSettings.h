@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "components/themes/PanelMetrics.h"
+#include "util/DictionaryRegistry.h"
 
 class CrossPointSettings {
  private:
@@ -316,8 +317,21 @@ class CrossPointSettings {
   // Hide battery percentage
   enum HIDE_BATTERY_PERCENTAGE { HIDE_NEVER = 0, HIDE_READER = 1, HIDE_ALWAYS = 2, HIDE_BATTERY_PERCENTAGE_COUNT };
 
-  // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, LYRA_CAROUSEL = 3 };
+  // Lyra Tiles' Home: one of its ready-made layouts. Positional: append, never reorder.
+  enum HOME_LAYOUT {
+    HOME_LAYOUT_READER = 0,
+    HOME_LAYOUT_DASHBOARD = 1,
+    HOME_LAYOUT_GALLERY = 2,
+    HOME_LAYOUT_CUSTOM = 3
+  };
+
+  // First day of the week. Saturday is where Persian and much of the Arabic-speaking world start it.
+  enum FIRST_DAY_OF_WEEK { WEEK_STARTS_MONDAY = 0, WEEK_STARTS_SUNDAY = 1, WEEK_STARTS_SATURDAY = 2 };
+
+  // UI Theme. Lyra Tiles took over 2 from Lyra Extended (three books on Home), which it replaced:
+  // a stored 2 opens Lyra Tiles. 4 was Lyra Tiles on test builds only; out of range, it loads as
+  // the default.
+  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_TILES = 2, LYRA_CAROUSEL = 3 };
 
   // Size of the menu/chrome text. Each step rebinds the three logical UI font IDs one rung up
   // the device's UI font ladder (applyUiFontScale() in main.cpp) and adds the matching pixels to
@@ -499,7 +513,8 @@ class CrossPointSettings {
   // dictionary used for word lookup; empty means no dictionary is selected.
   // A folder NAME, not a path: DictionaryRegistry::resolveBasePath rejects
   // separators and dot prefixes so a hand-edited value cannot escape the roots.
-  char dictionaryName[32] = "";
+  // As long as any name the registry lists, which it reads in MAX_NAME_BYTES.
+  char dictionaryName[DictionaryRegistry::MAX_NAME_BYTES] = "";
   // Point size of the EPUB reader font, persisted as "fontSize". Shown and drawn snapped to the
   // sizes the active family offers (ReaderSizeList), never rewritten to them.
   uint8_t fontPointSize = DEFAULT_FONT_POINT_SIZE;
@@ -578,7 +593,7 @@ class CrossPointSettings {
   // Hide battery percentage
   uint8_t hideBatteryPercentage = HIDE_NEVER;
   // UI Theme
-  uint8_t uiTheme = LYRA;
+  uint8_t uiTheme = LYRA_TILES;
   // Acknowledge a press that starts a slow screen change. See ActivityManager::showBusyIndicator().
   uint8_t showBusyIndicator = 1;
   // NOT a preference: the measured cost of a FAST refresh on this panel, carried across boots so
@@ -614,6 +629,7 @@ class CrossPointSettings {
     SLIDE_SWITCH_READING_LIGHT = 0,
     SLIDE_SWITCH_DARK_MODE = 1,
     SLIDE_SWITCH_NOTHING = 2,
+    SLIDE_SWITCH_TOUCH = 3,  // on: touch on; off: Touch Lock
     SLIDE_SWITCH_ACTION_COUNT
   };
   uint8_t slideSwitchAction = SLIDE_SWITCH_READING_LIGHT;
@@ -657,6 +673,12 @@ class CrossPointSettings {
   // with this off: HalGPIO synthesises them as BUTTON edges below this layer, so
   // turning touch navigation off cannot strand anyone in a menu.
   uint8_t touchUiControls = TOUCH_UI_ON;
+  // Touch Lock: no touch anywhere, the reading page included, until it is switched off. Touch Navigation and Touch Page
+  // Turn each leave part of the glass live by design (the reader; its bars, gestures and the light panel), so this is
+  // the one way to read by the keys alone with a hand on the glass. The keys keep working, the capacitive Home key
+  // among them (HalGPIO feeds it in as button edges, below the touch gate), and so does a key bound to
+  // BTN_TOGGLE_TOUCH_LOCK. A finger on the glass does not keep the device awake while it is on. See TouchGate.h.
+  uint8_t touchLock = 0;
   uint8_t touchListActivation = TOUCH_LIST_SELECT_THEN_ACTIVATE;
 
   // Bumped whenever the SHIPPED gesture defaults change. A stored value below
@@ -686,14 +708,20 @@ class CrossPointSettings {
   static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 3;
   uint8_t gestureDefaultsVersion = GESTURE_DEFAULTS_VERSION;
 
-  // Tracks button-action enum ordering and board-specific keymap defaults.
+  // Tracks how settings.json stores the button and gesture actions, and board-specific keymap defaults. Up to 5 the
+  // file held the enum's number, and every insertion before the board-gated block needed a version:
   // 1: BTN_BACK inserted before the board-gated block. Older settings keep
   //    explicit custom actions, while old built-in Confirm double/long entries
   //    inherit Murphy's Back/Sleep defaults.
   // 2: BTN_READER_BARS inserted after BTN_BACK.
   // 3: BTN_CONFIRM inserted after BTN_READER_BARS. A stored built-in short Power takes the board's
   //    default, Confirm on a board with no Back or Home key (BOOX Picco), in place of nothing.
-  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 3;
+  // 4: BTN_TOGGLE_DARK_MODE, BTN_AUTO_PAGE_TURN and BTN_SCREENSHOT inserted after BTN_CONFIRM, and
+  //    BTN_LIGHT_PANEL at the end of the light block, before the warm pair.
+  // 5: BTN_TOGGLE_TOUCH_LOCK inserted after BTN_SCREENSHOT.
+  // 6: stored by name (ButtonActionNames.h), so the enum's order no longer reaches the file. An older file's numbers
+  //    are read once through ButtonActionNames::fromLegacyNumber() and written back as names.
+  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 6;
 
   // --- Gesture actions (touch boards) ---------------------------------------
   // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
@@ -827,6 +855,10 @@ class CrossPointSettings {
   uint8_t statusBarClockPosition = STATUS_BAR_CLOCK_LEFT;
   // Clock format: 0 = 24h (14:00), 1 = 12h (2:00pm)
   uint8_t clockFormat12h = 0;
+  // The day a week starts on, for the calendar and the week's reading on Home (FIRST_DAY_OF_WEEK).
+  uint8_t firstDayOfWeek = WEEK_STARTS_MONDAY;
+  // Lyra Tiles' Home layout (HOME_LAYOUT).
+  uint8_t homeLayout = HOME_LAYOUT_READER;
   // LEGACY timezone selection, a LEGACY_TIMEZONE value. Still READ from the settings file -- it
   // is the only record of what a device chose before clockTimezone existed, and
   // timezones::activeIndex() migrates it -- but no longer written: it left the settings list, so
@@ -877,8 +909,8 @@ class CrossPointSettings {
   // fixed action into the defaults. BTN_IGNORE is the opposite: explicitly do
   // nothing and suppress the built-in behaviour for that press.
   //
-  // New values MUST be appended before BUTTON_ACTION_COUNT — the settings option
-  // list (SettingsList.h btnActionOptions) and persisted JSON map by numeric value.
+  // settings.json stores these by name (ButtonActionNames.h), so a new value can go anywhere above the board-gated
+  // block, given a name there and its label at the same place in SettingsList.h's option list.
   enum BUTTON_ACTION {
     BTN_DEFAULT = 0,
     BTN_PAGE_FORWARD,
@@ -929,12 +961,23 @@ class CrossPointSettings {
     // Send a normal Confirm press to the current activity, as BTN_BACK sends Back. On a board with no
     // Back or Home key (BOOX Picco) a short press of Power carries it by default.
     BTN_CONFIRM,
+    // Dark Mode on or off, as the light drawer's switch and the Picco's slide switch do (DarkModeNow::flip): under
+    // Scheduled, until the night hours next begin or end. Global, and on every board: an unlit X3 or X4 has no drawer,
+    // so without this the setting is a Settings trip away.
+    BTN_TOGGLE_DARK_MODE,
+    // Start the automatic page turn at the remembered interval (autoTurnSeconds), or stop it. EPUB reader only.
+    BTN_AUTO_PAGE_TURN,
+    // A screenshot to the card, as POWER+DOWN takes one: for a board with no Down key (BOOX Picco), and for a screen
+    // other than the reader, whose menu is the other way to one.
+    BTN_SCREENSHOT,
+    // Touch Lock on or off (touchLock). Global. Bind it to a key: a gesture can switch the lock on, but no gesture
+    // reaches the device while it is on.
+    BTN_TOGGLE_TOUCH_LOCK,
     // --- Board-gated actions MUST stay at the end of this enum ---------------
     // SettingsList builds each button's option list positionally: index i in the
     // list is action value i. Actions it drops on boards that cannot perform them
-    // therefore have to be the LAST entries, or dropping them renumbers every
-    // action after them and a settings file written on one board is misread on
-    // another. Add unconditional actions above this line.
+    // therefore have to be the LAST entries, or dropping them would shift every
+    // option after them off its value. Add unconditional actions above this line.
     //
     // Frontlight/backlight control. Global rather than reader-scoped: the light
     // is as wanted on the home screen as it is mid-page.
@@ -947,6 +990,8 @@ class CrossPointSettings {
     BTN_LIGHT_TOGGLE,
     BTN_LIGHT_BRIGHTER,
     BTN_LIGHT_DIMMER,
+    // Open the light drawer that a swipe down from the top edge opens (ActivityManager::requestLightPanel).
+    BTN_LIGHT_PANEL,
     // Colour temperature, on a warm/cool board only (X4 Pro). Brightness is the
     // TOTAL light and warmth splits it between the two strings, so these shift
     // the mix without changing how bright the page looks.
@@ -1093,17 +1138,6 @@ class CrossPointSettings {
       default:
         return action;
     }
-  }
-
-  // A stored action from a settings file written at BUTTON_ACTIONS_VERSION `fromVersion`, in today's numbering. Each
-  // version that inserted an action before the board-gated block moved every action from its place up by one. The
-  // insertions run in order and each lands after the one before, so today's value of an inserted action is also where
-  // it went in. Past the end is left for the loader's range check.
-  static constexpr uint8_t upgradeStoredAction(uint8_t action, const int fromVersion) {
-    if (fromVersion < 1 && action >= BTN_BACK) ++action;
-    if (fromVersion < 2 && action >= BTN_READER_BARS) ++action;
-    if (fromVersion < 3 && action >= BTN_CONFIRM) ++action;
-    return action;
   }
 
   // Enforce settings whose values depend on others (e.g. sleepScreen=QUICK_RESUME implies

@@ -61,6 +61,16 @@ struct DictPrefixMatch {
   uint16_t reads = 0;    // file reads made: scan-buffer refills plus sidecar sample reads
 };
 
+// What Dictionary::suggest() found: "Did you mean" for a word the dictionary does not have. Best first. ~400 bytes on
+// the ESP32; a member or stack local, never on the heap.
+struct DictSuggestions {
+  static constexpr uint8_t MAX = 8;
+  static constexpr size_t WORD_BYTES = 48;  // a longer headword is not offered
+  char words[MAX][WORD_BYTES] = {};
+  uint8_t count = 0;
+  uint16_t scanned = 0;  // headwords looked at
+};
+
 // Slim StarDict reader: exact-match lookup with a synonym and mini stemming
 // fallback.
 //
@@ -207,6 +217,30 @@ class Dictionary {
   // ESP.getMaxAllocHeap() < total + 8 KB; a .dict.dz takes its inflate window first.
   bool readPrefixDefinitions(const DictPrefixMatch& match, std::string& definitionOut,
                              LookupResult* outResult = nullptr);
+
+  // "Did you mean": headwords near a word lookup() did not find. Reads the sampled window the word sorts into and the
+  // windows on either side of it -- at most 3 * SAMPLE_INTERVAL headwords, in .idx order, so a few buffered reads --
+  // and keeps
+  //   - a headword the word starts with that is at least 3 characters and half the word long: its stem, for an
+  //     inflection the stemmer does not know ("fished" -> "fish");
+  //   - a headword within a few edits of the word (1 up to 4 characters, 2 up to 8, 3 beyond; an edit is a letter
+  //     added, dropped, changed or two swapped): a misprint, or a spelling the dictionary lists another way;
+  //   - the word with its first two or its second and third letters swapped ("teh" -> "the"), looked up directly:
+  //     such a swap sorts far from the word, outside the windows read.
+  // Stems first, the longest first; then by edits; then the word's own letters rearranged before other letters, and a
+  // headword with the word's first letter before one without ("the" before "eth" for "teh"); then by how near the
+  // lengths are, then in index order. Letter case does not count, non-ASCII letters' included.
+  // Headwords that cleanWord() would change other than in case are left out, since looking them up again would miss.
+  //
+  // Only alphabetical neighbours are seen: a stem whose spelling changes ("Häuser" -> "Haus") sorts too far away.
+  // Needs the .qidx sidecar (buildIndex()): without one there are no suggestions rather than a scan of the whole
+  // index. A word that cleans to nothing, or of more than 32 characters, gets none.
+  // outResult: Found when there is at least one, NotFound when there are none, LowMemory (no scan buffers), ReadError
+  // (.idx or .qidx not opened or read).
+  //
+  // The idea comes from cpr-vcodex's DictionaryStore (franssjz), which ranks by edit distance over checkpoints it
+  // holds in RAM; here the windows are read from the card, and the stem rule is added.
+  bool suggest(const char* word, DictSuggestions& out, LookupResult* outResult = nullptr);
 
   static std::string cleanWord(const char* word);
 

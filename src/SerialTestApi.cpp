@@ -21,6 +21,7 @@
 #include "activities/RenderLock.h"
 #include "activities/home/LibraryTab.h"
 #include "network/WebAssets.h"
+#include "util/AsciiParse.h"
 #include "util/ButtonPressQueue.h"
 #include "util/PopupProbe.h"
 #include "util/ScreenshotUtil.h"
@@ -477,6 +478,9 @@ void lookUpWord(const std::string_view wordView) {
   DictPrefixMatch match;
   long searchMs = 0;
   long exactMs = -1;  // -1: no exact baseline ran
+  // A Latin miss: "Did you mean", as the word screen offers it.
+  DictSuggestions suggestions;
+  long suggestMs = -1;  // -1: none were asked for
   if (dictionaryName[0] != '\0') {
     // The object carries scan buffers and an inflate window between lookups; on the heap for the
     // length of this command only, and makeUniqueNoThrow so a fragmented heap is an answer, not
@@ -507,6 +511,11 @@ void lookUpWord(const std::string_view wordView) {
         }
       } else {
         found = dict->lookup(text.c_str(), definition, headword, &result);
+        if (!found && result == Dictionary::LookupResult::NotFound) {
+          const unsigned long suggestStart = millis();
+          dict->suggest(text.c_str(), suggestions);
+          suggestMs = static_cast<long>(millis() - suggestStart);
+        }
       }
       outcome = Dictionary::resultName(result);
     }
@@ -545,6 +554,16 @@ void lookUpWord(const std::string_view wordView) {
     appendField(line, "reads", static_cast<long>(match.reads));
     appendField(line, "ms", searchMs);
     if (exactMs >= 0) appendField(line, "exact_ms", exactMs);
+  }
+  if (suggestMs >= 0) {
+    std::string list;
+    for (uint8_t i = 0; i < suggestions.count; ++i) {
+      if (i > 0) list += ',';
+      list += suggestions.words[i];
+    }
+    appendField(line, "suggestions", list);
+    appendField(line, "scanned", static_cast<long>(suggestions.scanned));
+    appendField(line, "suggest_ms", suggestMs);
   }
   reply(line);
 }
@@ -1649,7 +1668,9 @@ void fsGet(const std::string_view arg) {
     reply("FS_ERROR:protected ", path);
     return;
   }
-  HalFile file = Storage.open(path.c_str());
+  // The card's bytes, as for every way a file leaves the device (HalStorage::openRaw): a protected book's cache files
+  // stay enciphered.
+  HalFile file = Storage.openRaw(path.c_str());
   if (!file) {
     reply("FS_ERROR:not found ", path);
     return;
@@ -1722,7 +1743,9 @@ void fsHash(const std::string_view arg) {
     reply("FS_ERROR:protected ", path);
     return;
   }
-  HalFile file = Storage.open(path.c_str());
+  // The card's bytes, as for every way a file leaves the device (HalStorage::openRaw): a protected book's cache files
+  // stay enciphered.
+  HalFile file = Storage.openRaw(path.c_str());
   if (!file) {
     reply("FS_ERROR:not found ", path);
     return;
@@ -1921,13 +1944,6 @@ constexpr size_t kLutCapacity = 540;
 std::unique_ptr<uint8_t[]> lut;
 size_t lutLength = 0;
 
-int hexDigit(const char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-  return -1;
-}
-
 // The next number up to `separator` (or the end), consumed from `text`.
 bool takeNumber(std::string_view& text, const char separator, long& out) {
   const size_t end = std::min(text.find(separator), text.size());
@@ -1985,11 +2001,8 @@ void cmdLab(std::string_view arg) {
       return static_cast<void>(reply("LAB_ERROR:bad lut"));
     if (!lab::lut) lab::lut = makeUniqueNoThrow<uint8_t[]>(lab::kLutCapacity);
     if (!lab::lut) return static_cast<void>(reply("LAB_ERROR:no memory for the lut"));
-    for (size_t i = 0; i < hex.size() / 2; ++i) {
-      const int high = lab::hexDigit(hex[2 * i]), low = lab::hexDigit(hex[2 * i + 1]);
-      if (high < 0 || low < 0) return static_cast<void>(reply("LAB_ERROR:bad lut"));
-      lab::lut[i] = static_cast<uint8_t>(high << 4 | low);
-    }
+    if (!ascii_parse::hexBytes(hex.data(), lab::lut.get(), hex.size() / 2))
+      return static_cast<void>(reply("LAB_ERROR:bad lut"));
     lab::lutLength = hex.size() / 2;
     return static_cast<void>(replyf("LAB_OK:lut %u", static_cast<unsigned>(lab::lutLength)));
   }
@@ -1997,11 +2010,8 @@ void cmdLab(std::string_view arg) {
     const std::string_view hex = arg.substr(4);
     uint8_t records[64];
     if (hex.size() % 2 != 0 || hex.size() / 2 > sizeof(records)) return static_cast<void>(reply("LAB_ERROR:bad reg"));
-    for (size_t i = 0; i < hex.size() / 2; ++i) {
-      const int high = lab::hexDigit(hex[2 * i]), low = lab::hexDigit(hex[2 * i + 1]);
-      if (high < 0 || low < 0) return static_cast<void>(reply("LAB_ERROR:bad reg"));
-      records[i] = static_cast<uint8_t>(high << 4 | low);
-    }
+    if (!ascii_parse::hexBytes(hex.data(), records, hex.size() / 2))
+      return static_cast<void>(reply("LAB_ERROR:bad reg"));
     if (!display.setLabRegisters(hex.empty() ? nullptr : records, hex.size() / 2))
       return static_cast<void>(reply("LAB_ERROR:registers not taken"));
     return static_cast<void>(replyf("LAB_OK:reg %u", static_cast<unsigned>(hex.size() / 2)));

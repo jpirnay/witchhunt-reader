@@ -121,4 +121,67 @@ TEST(FrameRegion, TheDigestTellsOneBitApart) {
   EXPECT_NE(frameregion::digest(frame.data(), frame.size()), white);
 }
 
+// A screenshot is written in the orientation the reader is held (crosspoint-reader PR #4457): a pixel drawn at logical
+// (x, y) comes back at x in logical row y, in every orientation, and nothing else in the row is dark.
+TEST(FrameRegion, ALogicalRowReadsBackWhatWasDrawnThere) {
+  constexpr int kWidth = 792;  // X3: 99 bytes a panel row
+  constexpr int kHeight = 528;
+  constexpr int kStride = kWidth / 8;
+  for (const int o : kOrientations) {
+    const int screenW = portrait(o) ? kHeight : kWidth;
+    const int screenH = portrait(o) ? kWidth : kHeight;
+    const std::pair<int, int> dark[] = {{0, 0},   {screenW - 1, 0}, {0, screenH - 1}, {screenW - 1, screenH - 1},
+                                        {13, 17}, {14, 17}};
+    std::vector<uint8_t> frame(static_cast<size_t>(kStride) * kHeight, 0xFF);  // a set bit is white
+    for (const auto& p : dark) {
+      int px = 0;
+      int py = 0;
+      frameregion::toPanel(o, p.first, p.second, kWidth, kHeight, &px, &py);
+      frame[static_cast<size_t>(py) * kStride + px / 8] &= static_cast<uint8_t>(~(0x80 >> (px % 8)));
+    }
+    std::vector<uint8_t> row(static_cast<size_t>(screenW + 7) / 8);
+    for (const int y : {0, 17, screenH - 1}) {
+      SCOPED_TRACE(::testing::Message() << "orientation " << o << " row " << y);
+      frameregion::copyLogicalRow(frame.data(), kStride, o, kWidth, kHeight, y, screenW, row.data());
+      for (int x = 0; x < screenW; x++) {
+        const bool isDark = ((row[x / 8] >> (7 - x % 8)) & 1) == 0;
+        const bool drawn = std::find(std::begin(dark), std::end(dark), std::make_pair(x, y)) != std::end(dark);
+        EXPECT_EQ(isDark, drawn) << "x " << x;
+      }
+    }
+  }
+}
+
+// Portrait is the form the sleep images written through the screenshot writer keep (WeatherActivity's forecast,
+// BmpViewerActivity's "set as sleep image"): byte for byte the rotation that writer always used, whose BMP row r
+// (bottom-up) read panel pixel (panelWidth - 1 - r, panelHeight - 1 - x).
+TEST(FrameRegion, APortraitRowIsTheRotationSleepImagesAreWrittenIn) {
+  constexpr int kWidth = 800;
+  constexpr int kHeight = 480;
+  constexpr int kStride = kWidth / 8;
+  std::vector<uint8_t> frame(static_cast<size_t>(kStride) * kHeight);
+  uint32_t seed = 2463534242u;
+  for (uint8_t& b : frame) {
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    b = static_cast<uint8_t>(seed);
+  }
+  const int screenW = kHeight;
+  const int screenH = kWidth;
+  std::vector<uint8_t> row(static_cast<size_t>(screenW) / 8);
+  for (const int bmpRow : {0, 1, 399, screenH - 1}) {
+    frameregion::copyLogicalRow(frame.data(), kStride, frameregion::Portrait, kWidth, kHeight, screenH - 1 - bmpRow,
+                                screenW, row.data());
+    std::vector<uint8_t> old(row.size(), 0);
+    for (int x = 0; x < screenW; x++) {
+      const int srcX = kWidth - 1 - bmpRow;
+      const int srcY = kHeight - 1 - x;
+      const uint8_t pixel = (frame[static_cast<size_t>(srcY) * kStride + srcX / 8] >> (7 - srcX % 8)) & 0x01;
+      old[x / 8] |= static_cast<uint8_t>(pixel << (7 - x % 8));
+    }
+    EXPECT_EQ(row, old) << "BMP row " << bmpRow;
+  }
+}
+
 }  // namespace

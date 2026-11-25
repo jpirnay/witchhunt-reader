@@ -15,6 +15,8 @@
 #include "MappedInputManager.h"
 #include "RenderLock.h"
 #include "SerialTestApi.h"  // SERIAL_TEST_API
+#include "TouchUi.h"        // CP_TOUCH_UI
+#include "util/ScreenshotInfo.h"
 
 class Activity {
   friend class ActivityManager;
@@ -37,9 +39,11 @@ class Activity {
  public:
   enum class ListPageDirection : uint8_t { Back, Forward };
 
-  explicit Activity(std::string name, GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : name(std::move(name)), renderer(renderer), mappedInput(mappedInput), buttonEvents(globalButtonEvents()) {}
-  virtual ~Activity() = default;
+  // Out of line, with the destructor: every activity's constructor and destructor would otherwise carry the member
+  // set-up and tear-down below inline (a name, a result handler, a result variant), twice over, as the complete- and
+  // base-object variants.
+  explicit Activity(std::string name, GfxRenderer& renderer, MappedInputManager& mappedInput);
+  virtual ~Activity();
   const std::string& getName() const { return name; }
   virtual void onEnter();
   virtual void onExit();
@@ -78,6 +82,14 @@ class Activity {
   // gestures come here (ActivityManager::currentIsReaderActivity()). The EPUB reader answers false while its bars are
   // open over the page and it draws them itself: they take the keys and the touch, as a screen pushed over it would.
   virtual bool takesReaderControls() const { return isReaderActivity(); }
+#if CP_TOUCH_UI
+  // A sheet over the screen it was opened from, which it leaves standing: part of that screen rather than a screen of
+  // its own. Over the reader it takes touch as the reader does, with Touch Navigation off too
+  // (ActivityManager::readerOrItsOverlayOnTop(), TouchGate::readerOwnsScreen()). The light drawer. Compiled out with
+  // the touch layer: it only steers the touch gate, and a virtual is a slot in every activity's vtable (~380 B on the
+  // C3).
+  virtual bool overlaysScreenBelow() const { return false; }
+#endif
   // The panel's polarity this screen goes out in under Dark Mode (DarkMode::invertsOutput): inverted with the setting,
   // unless it shows a picture of its own or the frame already on screen. ActivityManager sets the panel from it before
   // the screen's onEnter() and at every render pass.
@@ -122,6 +134,11 @@ class Activity {
   // the frame buffer (e.g. the reader's pre-rendered next page) must redraw the visible page
   // here so the capture matches the display. Default is a no-op.
   virtual void prepareFramebufferForCapture() {}
+
+  // What a card screenshot of this screen is named after: the readers give the open book's title, chapter, page and
+  // progress (screenshot_name::build); every other screen keeps the plain screenshot-<millis>.bmp. Called on the loop
+  // task under the render lock. Ported from crosspoint-reader PR #1589 (Jon Stieglitz).
+  virtual ScreenshotInfo screenshotInfo() const { return {}; }
 
   // Appends what a test script needs to know about this activity's state to `out`, as
   // space-separated key=value pairs, for the serial CMD:STATE. Called under the render lock.
@@ -169,6 +186,14 @@ class Activity {
   // status-bar-relevant has changed since the last render. Skipping avoids a no-op page render
   // followed by a no-diff e-ink refresh, which on X3 panels accumulates visible speckle.
   virtual bool shouldSkipPeriodicUpdate() const { return false; }
+
+  // The clock's minute turned: ActivityManager::loop() asks once a minute while the clock is set, on
+  // the loop task with no lock held. True when this screen shows the time apart from the header and
+  // status-bar clocks Use Clock switches (Home's Clock widget), or shows something the minute just
+  // changed (the day Home's calendar shows): the tick then redraws it whatever Use Clock says, still
+  // through shouldSkipPeriodicUpdate() (MinuteTick). A screen may bring that state up to date here,
+  // under RenderLock. Default: nothing of its own, so only Use Clock asks for the tick.
+  virtual bool onClockMinute() { return false; }
 
   // Called by ActivityManager when a globally-configured button action targets the
   // current activity. Override in reader activities to handle reader-specific actions.

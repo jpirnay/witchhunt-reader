@@ -91,8 +91,11 @@ struct NetworkModeResult {
   NetworkMode mode;
 };
 
+// A link of the page the footnote list picked: its index among the page's links (-1 for none) and its href, to be
+// followed or opened as a note.
 struct FootnoteResult {
   std::string href;
+  int16_t link = -1;
 };
 
 struct FilePathResult {
@@ -125,6 +128,11 @@ struct BookSearchResult {
 // A word chosen on the page to search the book for (DictionaryWordSelectActivity, a long Confirm).
 struct WordSearchResult {
   std::string word;
+};
+
+// A headword chosen from "Did you mean" (DictionarySuggestionsActivity), for DictionaryWordSelectActivity to look up.
+struct DictionarySuggestionResult {
+  std::string headword;
 };
 
 // What the reader does once its bars (ReaderBarsController) close: the control that closed them, and whether the page's
@@ -161,10 +169,10 @@ struct ReaderBarsResult {
   ReaderLayoutValues layout{};
 };
 
-using ResultVariant =
-    std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult, PageResult,
-                 SyncResult, NetworkModeResult, FootnoteResult, FilePathResult, StarredPageResult, PrintedPageResult,
-                 DictionarySwitchResult, ConfirmResult, ReaderBarsResult, BookSearchResult, WordSearchResult>;
+using ResultVariant = std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult,
+                                   PageResult, SyncResult, NetworkModeResult, FootnoteResult, FilePathResult,
+                                   StarredPageResult, PrintedPageResult, DictionarySwitchResult, ConfirmResult,
+                                   ReaderBarsResult, BookSearchResult, WordSearchResult, DictionarySuggestionResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

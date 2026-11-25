@@ -69,6 +69,7 @@
 #include "EpubReaderPercentSelectionActivity.h"
 #include "EpubReaderPrintedPageInputActivity.h"
 #include "FinishedBookActivity.h"
+#include "FootnoteSheet.h"
 #include "GlobalBookmarkIndex.h"
 #include "HyphenationPacks.h"
 #include "ImageOnlyPage.h"
@@ -892,8 +893,10 @@ void EpubReaderActivity::onEnter() {
 
 void EpubReaderActivity::onExit() {
   Activity::onExit();
-  // The live bars go with the reader, their result unused. ActivityManager holds the render lock here.
+  // The live bars and the footnote sheet go with the reader, their result unused. ActivityManager holds the render lock
+  // here.
   dismissLiveBars();
+  dismissLiveNote();
   // A book's own darkness stays with the book: every other screen draws with the setting.
   renderer.setTextDarkness(SETTINGS.textDarkness);
   logReaderMemSnapshot("onExit_before_release");
@@ -1121,6 +1124,10 @@ void EpubReaderActivity::loop() {
   // The live bars take the input, ahead of the automatic page turn, which waits under them.
   if (liveBarsOpen()) {
     serviceLiveBars();
+    return;
+  }
+  if (liveNote_) {
+    serviceLiveNote();
     return;
   }
 
@@ -1432,7 +1439,7 @@ InputFirst::Press EpubReaderActivity::pressInFlight() const {
 
 bool EpubReaderActivity::lookAheadMayRun() const {
   // Not under the live bars: the next change on their Layout tab would throw the work away.
-  return epub && section && readerPhase_ == ReaderPhase::READING && !backgroundWorkSuspended_ && !liveBarsOpen() &&
+  return epub && section && readerPhase_ == ReaderPhase::READING && !backgroundWorkSuspended_ && !liveOverlayOpen() &&
          !pendingPreRender && !usePreRenderedBuffer && !renderer.isRefreshPending() && !imageProcessingActive_;
 }
 
@@ -1727,6 +1734,7 @@ void EpubReaderActivity::startActivityForResult(std::unique_ptr<Activity>&& acti
     // Another screen opens over the live bars (a global action, the light drawer): they come down without their result,
     // and the page is drawn afresh when that screen closes.
     dismissLiveBars();
+    dismissLiveNote();
     prepareForOverlay(activity ? activity->getName().c_str() : "<null>");
   }
   Activity::startActivityForResult(std::move(activity), std::move(resultHandler));
@@ -2588,12 +2596,12 @@ bool EpubReaderActivity::warmPageForImageLane(const Page& page, const int spine,
     pendingPreRender = true;
     markStagedForCurrentPage();
   }
-  const char* note = !complete                  ? (preempted  ? " -- preempted by input, retries after the next settle"
-                                                   : building ? " -- left for the lane after the build"
-                                                   : imageWarmGaveUp(spine, pageIndex) ? " -- incomplete, giving up on this page"
-                                                                                       : " -- incomplete, will retry once")
-                     : redraw                   ? " -- on screen, redrawing"
-                     : shownNowCached           ? " -- on screen, input waiting (the next render shows it)"
+  const char* note = !complete        ? (preempted  ? " -- preempted by input, retries after the next settle"
+                                         : building ? " -- left for the lane after the build"
+                                         : imageWarmGaveUp(spine, pageIndex) ? " -- incomplete, giving up on this page"
+                                                                             : " -- incomplete, will retry once")
+                     : redraw         ? " -- on screen, redrawing"
+                     : shownNowCached ? " -- on screen, input waiting (the next render shows it)"
                      : nextPageNowPreRenderable ? " -- next page, pre-rendering it"
                                                 : "";
   LOG_INF("ERS", "Image lane: spine %d page %d warmed in %lums%s (free=%lu contig=%lu)", spine, pageIndex,
@@ -3051,7 +3059,7 @@ bool EpubReaderActivity::keepBuildPageOnScreen() {
   const BuildPageOnScreen shown = buildPageOnScreen_;
   buildPageOnScreen_ = {};
   if (!section || shown.spine != currentSpineIndex || shown.page != section->currentPage || shown.hasImages ||
-      uiOverPage() || liveBarsOpen()) {
+      uiOverPage() || liveOverlayOpen()) {
     return false;
   }
   // What the render would have done first: the build is over, so its borrowed buffer goes back (the AA pass needs it).
@@ -3398,7 +3406,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           [this](const ActivityResult& result) {
             if (!result.isCancelled) {
               const auto& footnoteResult = std::get<FootnoteResult>(result.data);
-              navigateToHref(footnoteResult.href, true);
+              followListedLink(footnoteResult);
             }
             requestUpdate();
           });
@@ -4084,7 +4092,7 @@ bool EpubReaderActivity::displayPageOnGrayCanvas(const Page& page, const int mar
                                                  const bool picturesAreBoxes, const bool forceLoadLargeImages) {
   if constexpr (!HalDisplay::kMayLendGray8Canvas) return false;  // a build without such a panel carries none of this
   // Under the live bars the page goes out with them, in the frame drawn: the canvas holds the page alone.
-  if (liveBarsOpen()) return false;
+  if (liveOverlayOpen()) return false;
   const bool pageHasPictures =
       page.hasImages() && !page.allImagesArePlaceholders(forceLoadLargeImages, /*monochromeOutput=*/true);
   if (!ReaderGrayCanvas::pageGoesOutOnCanvas(renderer.getGrayLevels(), pageHasPictures, picturesAreBoxes,
@@ -4661,16 +4669,8 @@ bool EpubReaderActivity::reallocSecondaryEvictingCaches() {
   return false;
 }
 
-EpubReaderActivity::PageLinkInfo EpubReaderActivity::pageLinkInfoForCurrentPage() {
+EpubReaderActivity::PageLinkInfo EpubReaderActivity::pageLinkInfoForCurrentPage(const bool withPreviews) {
   PageLinkInfo info;
-  info.previews.resize(currentPageFootnotes.size());
-  // Everything is a note until the store says otherwise: a book with no store must look exactly
-  // as it did before any of this. The distinction only groups the list -- following a link always
-  // saves a return position either way (see navigateToHref).
-  info.isNote.assign(currentPageFootnotes.size(), 1);
-  if (!epub) {
-    return info;
-  }
   // Under the render lock because resolving a cross-file note href walks the spine through
   // BookMetadataCache, which seeks and reads a book.bin handle whose position is SHARED with
   // renderStatusBar() on the render task (calculateProgress -> getSpineItem -> getSpineEntry).
@@ -4679,26 +4679,32 @@ EpubReaderActivity::PageLinkInfo EpubReaderActivity::pageLinkInfoForCurrentPage(
   // entry comes back as whatever the other task had seeked to. Cheap to hold: Lookup memoises
   // the path, so a page's notes cost one spine walk, not one per note.
   //
-  // Taken here rather than by the callers because both of them (the menu item and the
-  // BTN_FOOTNOTES button action) reach this on the loop task with no lock held.
+  // Taken here rather than by the callers because all of them (the menu item, the BTN_FOOTNOTES
+  // button action, the footnote sheet) reach this on the loop task with no lock held.
   RenderLock lock(*this);
+  const size_t count = currentPageFootnotes.size();
+  info.isNote.resize(count);
+  if (withPreviews) info.previews.resize(count);
+  if (!epub) return info;
   // Purely a read. Whatever the reader has walked through has already resolved its notes at
   // build time, so the entries for this page are in the store; a link the store does not know
-  // renders as its plain marker and stays navigable.
+  // renders as its plain marker and stays navigable. cacheExists() first: it asks without
+  // opening, so a book with no store logs no failed open.
   //
   // The same lookup answers both questions, because they are the same question: the store holds
   // a note's text keyed by its caller's href, so a hit IS "this is a note" and the text is the
   // preview. A miss on a spine the store HAS scanned means the link is navigation -- a contents
   // link, a cross-reference -- and the list groups it separately.
-  if (!FootnotePreviews::spineResolved(epub->getCachePath(), currentSpineIndex)) {
-    return info;
-  }
-  FootnotePreviews::Lookup previewLookup;
-  if (!previewLookup.open(epub->getCachePath(), epub.get(), currentSpineIndex)) {
-    return info;
-  }
-  for (size_t i = 0; i < currentPageFootnotes.size(); ++i) {
-    info.isNote[i] = previewLookup.find(currentPageFootnotes[i].href, info.previews[i]) ? 1 : 0;
+  FootnotePreviews::Lookup lookup;
+  const bool storeDecides = FootnotePreviews::cacheExists(epub->getCachePath()) &&
+                            FootnotePreviews::spineResolved(epub->getCachePath(), currentSpineIndex) &&
+                            lookup.open(epub->getCachePath(), epub.get(), currentSpineIndex);
+  std::string text;
+  for (size_t i = 0; i < count; ++i) {
+    const FootnoteEntry& entry = currentPageFootnotes[i];
+    const bool note = storeDecides ? lookup.find(entry.href, withPreviews ? info.previews[i] : text)
+                                   : FootnoteShape::isMarkerText(entry.number, strlen(entry.number));
+    info.isNote[i] = note ? 1 : 0;
   }
   return info;
 }
@@ -6275,8 +6281,9 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
   const int built = static_cast<int>(section->activeBuildPageCount());
   if (navTarget.kind == NavigationTarget::Kind::Page && target >= 0 && target < built) {
     if (target == buildDisplayedPage_) {
-      if (liveBarsOpen()) paintLiveBars(lock);  // a pass for the bars, or a page owed that the build has not redrawn
-      return;  // already handled this target (drawn, or an image page we're waiting out)
+      if (liveOverlayOpen())
+        paintLiveOverlay(lock);  // a pass for the bars, or a page owed that the build has not redrawn
+      return;                    // already handled this target (drawn, or an image page we're waiting out)
     }
     // Text-only pages render cleanly without the image decode / secondary-buffer dance that the
     // lock-light build path avoids; an image target waits for the final Normal render but is
@@ -6312,8 +6319,8 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
 
   // Under the live bars the page they cover stays until the build reaches the text: the popup would land on them, and
   // the Layout tab already shows the change.
-  if (liveBarsOpen()) {
-    paintLiveBars(lock);
+  if (liveOverlayOpen()) {
+    paintLiveOverlay(lock);
     return;
   }
 
@@ -6374,8 +6381,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   }
 
   // Under the live bars a pass with no page to draw would draw the page on the panel again: it paints only the bars.
-  if (liveBarsOpen() && !liveBarsPageDue()) {
-    paintLiveBars(lock);
+  if (liveOverlayOpen() && !liveOverlayPageDue()) {
+    paintLiveOverlay(lock);
     return;
   }
 
@@ -7039,7 +7046,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     renderer.drawText(UI_10_FONT_ID, hintX, hintY2, line2.c_str(), true);
   }
   drawBookSearchOverlay(*page, orientedMarginLeft, contentTop);
-  drawLiveBarsOverPage(/*redrawWhenBuilt=*/false);
+  drawLiveOverlayOverPage(/*redrawWhenBuilt=*/false);
   // Everything the capture was meant to see is drawn. The status bar is inside
   // the window on purpose and costs nothing: UI chrome is 1-bit, so it produces
   // no anti-aliased pixels for the capture to record.
@@ -7374,7 +7381,7 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, std::unique_ptr<Page
     renderStatusBar();
     drawBookSearchOverlay(page, layout.marginLeft, contentTop);
     // A page with pictures is drawn again once the build is done, with them; a page of text would come out the same.
-    drawLiveBarsOverPage(/*redrawWhenBuilt=*/page.hasImages());
+    drawLiveOverlayOverPage(/*redrawWhenBuilt=*/page.hasImages());
     if (capLsb) renderer.endGrayCapture();
     buildPageOnScreen_ = {currentSpineIndex, section->currentPage, page.hasImages(), layout.marginLeft, contentTop};
     if (capLsb) buildPageOnScreen_.gray = BuildPageGray::Gray::Shown;
@@ -7701,6 +7708,9 @@ void EpubReaderActivity::appendDebugState(std::string& out) const {
     liveBars_->appendDebugState(out);
   }
 #if SERIAL_TEST_API
+  if (liveNote_) liveNote_->appendDebugState(out);
+#endif
+#if SERIAL_TEST_API
   std::string family;
   resolveReaderFont(&family);
   appendField(out, "font", family);
@@ -7753,7 +7763,7 @@ bool EpubReaderActivity::hasPendingBackgroundWork() {
   if (section && section->hasActiveBuild()) return true;
   if (backgroundBuildState_ == BackgroundBuildState::Building) return true;
   // The look-ahead and the glyph store's room wait while the live bars are open (lookAheadMayRun).
-  if (!epub || !section || readerPhase_ != ReaderPhase::READING || backgroundWorkSuspended_ || liveBarsOpen())
+  if (!epub || !section || readerPhase_ != ReaderPhase::READING || backgroundWorkSuspended_ || liveOverlayOpen())
     return false;
   if (sdFontSystem.ttfNeedsIdleRoom()) return true;  // a glyph-store step is due in idle time (room, or use counts)
   // Work that has not started yet but will on its own. Background-B waits out its quiet period
@@ -7832,6 +7842,20 @@ void EpubReaderActivity::restoreCurrentPageToBufferIfPreRendered() {
   preRenderedPlanesStaged_ = false;
   pendingPreRender = false;
   usePreRenderedBuffer = false;
+}
+
+ScreenshotInfo EpubReaderActivity::screenshotInfo() const {
+  ScreenshotInfo info;
+  if (!epub) return info;
+  info.title = epub->getTitle();
+  // The spine item, as upstream names it: a book's chapters and its spine items differ only where the TOC is coarser.
+  info.chapter = currentSpineIndex + 1;
+  if (section) {
+    info.page = section->currentPage + 1;
+    // The percent the status bar shows, so the name agrees with the capture.
+    info.percent = ReaderUtils::fractionProgressPercentByte(statusBarBookProgress());
+  }
+  return info;
 }
 
 ProgressPpb EpubReaderActivity::statusBarBookProgress() const {
@@ -8107,7 +8131,7 @@ bool EpubReaderActivity::skipLoopDelay() {
 
 bool EpubReaderActivity::shouldSkipPeriodicUpdate() const {
   // The status bar is under the live bars. Loop task, which alone opens and closes them.
-  if (liveBarsOpen()) return true;
+  if (liveOverlayOpen()) return true;
   // Polled once a minute by ActivityManager::loop() on the loop task with no lock held, so it
   // had the same unlocked read of `section` as the hints above (and raced render() on
   // statusRefreshDeferred_). A pass holding the lock means "cannot tell" -- and it is usually a
@@ -8168,39 +8192,64 @@ constexpr int kLinkTargetMin = 30;
 }  // namespace
 
 void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marginLeft, const int contentTop) const {
+#if !CP_TOUCH_UI
+  // Without a digitiser the recorder is a stub that keeps nothing: walking the page for it cost a page walk a render
+  // and the code to do it. The walk itself stays, for the footnote sheet's placement.
+  (void)page;
+  (void)marginLeft;
+  (void)contentTop;
+#else
   TapTargets::Recorder::Builder targets;
   if (currentPageFootnotes.empty()) {
     TapTargets::readerLinks().record(targets);
     return;
   }
+  const GfxRenderer::Orientation held = renderer.getHeldOrientation();
+  struct Publish {
+    TapTargets::Recorder::Builder* targets;
+    int screenW;
+    int screenH;
+  } publish{&targets, renderer.getScreenWidth(held), renderer.getScreenHeight(held)};
+  // A link's target over [left, right) x [top, bottom) in the reader's frame: grown by the pad, floored, kept on the
+  // panel.
+  visitPageLinkBoxes(
+      page, marginLeft, contentTop,
+      [](void* ctx, const int left, const int top, const int right, const int bottom, const size_t link) {
+        const auto& p = *static_cast<Publish*>(ctx);
+        int x = left - kLinkTargetPad;
+        int y = top - kLinkTargetPad;
+        int w = std::max(right - left + 2 * kLinkTargetPad, kLinkTargetMin);
+        int h = std::max(bottom - top + 2 * kLinkTargetPad, kLinkTargetMin);
+        // Centre the floor on the glyphs rather than growing right/down only, and keep the rect on
+        // the panel so a marker in a margin is still reachable.
+        x -= std::max(0, (w - (right - left + 2 * kLinkTargetPad)) / 2);
+        y -= std::max(0, (h - (bottom - top + 2 * kLinkTargetPad)) / 2);
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x + w > p.screenW) w = p.screenW - x;
+        if (y + h > p.screenH) h = p.screenH - y;
+        if (w > 0 && h > 0) p.targets->add(x, y, w, h, static_cast<int>(link));
+      },
+      &publish);
+  TapTargets::readerLinks().record(targets);
+#endif  // CP_TOUCH_UI
+}
 
+void EpubReaderActivity::visitPageLinkBoxes(const Page& page, const int marginLeft, const int contentTop,
+                                            const LinkBoxVisitor visit, void* ctx) const {
+  if (currentPageFootnotes.empty()) return;
   const int fontId = getEffectiveReaderFontId();
   // The reader's frame: a vertical page draws in the turned one, and this runs while it does.
   const GfxRenderer::Orientation held = renderer.getHeldOrientation();
   const int screenW = renderer.getScreenWidth(held);
-  const int screenH = renderer.getScreenHeight(held);
   // A vertical page's words are boxed where it draws them, in the turned frame; the targets are recorded in the
   // reader's.
   const bool vertical = page.isVertical();
   const turnedframe::Offsets origin =
       vertical ? turnedframe::contentOffsets(screenW, marginLeft, contentTop, page.verticalBlockExtent)
                : turnedframe::Offsets{marginLeft, contentTop};
-  // A link's target over [left, right) x [top, bottom) in the reader's frame: grown by the pad, floored, kept on the
-  // panel.
   const auto addTarget = [&](const int left, const int top, const int right, const int bottom, const size_t link) {
-    int x = left - kLinkTargetPad;
-    int y = top - kLinkTargetPad;
-    int w = std::max(right - left + 2 * kLinkTargetPad, kLinkTargetMin);
-    int h = std::max(bottom - top + 2 * kLinkTargetPad, kLinkTargetMin);
-    // Centre the floor on the glyphs rather than growing right/down only, and keep the rect on
-    // the panel so a marker in a margin is still reachable.
-    x -= std::max(0, (w - (right - left + 2 * kLinkTargetPad)) / 2);
-    y -= std::max(0, (h - (bottom - top + 2 * kLinkTargetPad)) / 2);
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (x + w > screenW) w = screenW - x;
-    if (y + h > screenH) h = screenH - y;
-    if (w > 0 && h > 0) targets.add(x, y, w, h, static_cast<int>(link));
+    visit(ctx, left, top, right, bottom, link);
   };
 
   // The links arrive in page order, so one forward walk resolves them all: whichever word first
@@ -8311,7 +8360,6 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
       break;
     }
   }
-  TapTargets::readerLinks().record(targets);
 }
 
 // A tap on a footnote marker or cross-reference follows it, exactly as picking it out of the
@@ -8342,9 +8390,204 @@ bool EpubReaderActivity::handleLinkTouch() {
 
   mappedInput.suppressTouchContact();
   LOG_DBG("ERS", "Link tap at (%d,%d) -> %s", x, y, currentPageFootnotes[link].href);
-  navigateToHref(currentPageFootnotes[link].href, true);
+  followLink(static_cast<size_t>(link));
   return true;
 #endif  // CP_TOUCH_UI
+}
+
+void EpubReaderActivity::followLink(const size_t link, const bool pageOnPanel) {
+  if (!openFootnoteSheet(link, /*atLastPage=*/false, pageOnPanel)) followLinkDirectly(link);
+}
+
+void EpubReaderActivity::followLinkDirectly(const size_t link) {
+  std::string href;
+  {
+    RenderLock lock(*this);
+    if (link >= currentPageFootnotes.size()) return;
+    href = currentPageFootnotes[link].href;
+  }
+  navigateToHref(href, true);
+}
+
+void EpubReaderActivity::followListedLink(const FootnoteResult& picked) {
+  if (picked.link >= 0) {
+    followLink(static_cast<size_t>(picked.link), /*pageOnPanel=*/false);
+  } else {
+    navigateToHref(picked.href, true);
+  }
+}
+
+EpubReaderActivity::PageNotes EpubReaderActivity::pageNotes() {
+  static_assert(PageNotes::kMaxLinks == Page::MAX_FOOTNOTES_PER_PAGE,
+                "PageNotes holds one entry for each link a page can carry");
+  static_assert(Page::MAX_FOOTNOTES_PER_PAGE <= 256, "PageNotes indexes links in a uint8_t");
+  PageNotes notes;
+  const PageLinkInfo info = pageLinkInfoForCurrentPage(/*withPreviews=*/false);
+  for (size_t i = 0; i < info.isNote.size() && notes.count < PageNotes::kMaxLinks; ++i) {
+    if (info.isNote[i]) notes.link[notes.count++] = static_cast<uint8_t>(i);
+  }
+  return notes;
+}
+
+bool EpubReaderActivity::openFootnoteSheet(const size_t link, const bool atLastPage, const bool pageOnPanel) {
+  if (!epub) return false;
+  FootnoteEntry entry;
+  FootnoteSheet::Place place;
+  const PageNotes notes = pageNotes();
+  {
+    RenderLock lock(*this);
+    if (!section || link >= currentPageFootnotes.size()) return false;
+    entry = currentPageFootnotes[link];
+    int position = -1;
+    for (uint8_t i = 0; i < notes.count; ++i) {
+      if (notes.link[i] == link) position = i;
+    }
+    if (position < 0) return false;
+    place.position = static_cast<uint8_t>(position);
+    place.count = notes.count;
+    place.startAtLastPage = atLastPage;
+  }
+
+  // Before the note is read: a look-ahead build holds the heap and the frame buffer the capture and the layout want.
+  // Back on once the sheet is laid out: the look-ahead and the pre-render wait for the overlay anyway
+  // (lookAheadMayRun).
+  suspendBackgroundWork();
+  std::string markup;
+  std::unique_ptr<Page> page;
+  bool captured = false;
+  {
+    // Under the lock: resolving a cross-file href reads book.bin through a handle the status bar shares.
+    RenderLock lock(*this);
+    if (section) {
+      // A note in a chapter not yet opened comes out of the archive, through a 32 KB inflate ring: more than a C3's
+      // reading heap has in one block (X3, The Anarchy's 163 KB notes chapter: OOM, and the link was followed instead).
+      // So the secondary framebuffer is lent for it, as for a build. The staged page work goes first and the displayed
+      // frame is put in the write buffer, which seeds the buffer when it comes back: the sheet is painted over it.
+      prepareForOverlay("FootnoteSheet");
+      renderer.syncWriteBufferFromDisplayed();
+      LentSecondary lend(renderer, arenaOfBuildHoldingBuffer());
+      captured = FootnotePreviews::captureNote(*epub, currentSpineIndex, entry.href, markup, lend.arena());
+      lend.giveBack();
+      // The page under the sheet, for where its marker stands and which of its lines an edge would cut. During an
+      // active build the on-disk LUT is not written yet, so it comes from the in-memory one, as the dictionary's does.
+      if (captured) {
+        page = section->hasActiveBuild() ? section->loadPageFromActiveBuild(static_cast<uint16_t>(section->currentPage))
+                                         : section->loadPageFromSectionFile();
+      }
+    }
+  }
+  if (!captured || !page) {
+    if (captured) LOG_ERR("ERS", "Footnote sheet: could not load the current page");
+    resumeBackgroundWork();
+    return false;
+  }
+
+  const RenderLayout layout = computeRenderLayout();
+  const int contentTop = layout.marginTop + ReaderPageLayout::imageOnlyPageYOffset(*page, layout.viewportHeight);
+  std::unique_ptr<FootnoteSheet> sheet;
+  bool laidOut = false;
+  {
+    RenderLock lock(*this);
+    // The sheet takes the half of the screen the marker is not in, so the sentence that calls the note stays in view.
+    // A marker the walk does not find (one the page has no word for) leaves it at the bottom.
+    struct Find {
+      size_t link;
+      int centre;
+    } find{link, -1};
+    visitPageLinkBoxes(
+        *page, layout.marginLeft, contentTop,
+        [](void* ctx, int, const int top, int, const int bottom, const size_t found) {
+          auto& f = *static_cast<Find*>(ctx);
+          if (found == f.link && f.centre < 0) f.centre = (top + bottom) / 2;
+        },
+        &find);
+    place.sheetAtTop = find.centre >= renderer.getScreenHeight(renderer.getHeldOrientation()) / 2;
+    sheet = makeUniqueNoThrow<FootnoteSheet>(renderer, mappedInput, getEffectiveReaderFontId(), entry.number,
+                                             TypographyProfile::forLanguage(epub->getLanguage()).hyphenator, place);
+    // The reader's font may be a TrueType face, measured only under the lock.
+    laidOut = sheet && sheet->layOut(std::move(markup), *page, contentTop);
+  }
+  resumeBackgroundWork();
+  if (!laidOut) return false;
+  LOG_DBG("ERS", "Footnote sheet for %s: note %u of %u, at the %s", entry.href, place.position + 1u,
+          static_cast<unsigned>(place.count), place.sheetAtTop ? "top" : "bottom");
+  {
+    RenderLock lock(*this);
+    // Painted over the frame on the panel when that is the page, or an earlier sheet this one covers all of; the page
+    // is drawn again under it otherwise (the footnote list on the panel, a sheet that moved or shrank).
+    const bool paintOver = pageOnPanel && (!liveNote_ || sheet->covers(*liveNote_));
+    liveNote_ = std::move(sheet);
+    liveNoteLink_ = link;
+    liveOverlayStale_ = true;
+    liveOverlayPageOwed_ = !paintOver;
+    liveOverlayRedrawWhenBuilt_ = false;
+  }
+  requestUpdate();
+  return true;
+}
+
+void EpubReaderActivity::stepFootnoteSheet(const size_t link, const int delta) {
+  const PageNotes notes = pageNotes();
+  int at = -1;
+  for (uint8_t i = 0; i < notes.count; ++i) {
+    if (notes.link[i] == link) at = i;
+  }
+  // A note that cannot be read is stepped over, not followed: the reader is going through the notes, not leaving.
+  for (int i = at + delta; at >= 0 && delta != 0 && i >= 0 && i < notes.count; i += delta) {
+    if (openFootnoteSheet(notes.link[i], /*atLastPage=*/delta < 0)) return;
+    LOG_INF("ERS", "Footnote sheet: note %d of %u could not be shown; stepping past it", i + 1,
+            static_cast<unsigned>(notes.count));
+  }
+  closeLiveNote();
+}
+
+void EpubReaderActivity::serviceLiveNote() {
+  const FootnoteSheet::Event event = liveNote_->loop(buttonEvents);
+  switch (event) {
+    case FootnoteSheet::Event::None:
+      return;
+    case FootnoteSheet::Event::Redraw: {
+      // Another page of the same note: the same rectangle, painted over the frame on the panel.
+      RenderLock lock(*this);
+      liveOverlayStale_ = true;
+    }
+      requestUpdate();
+      return;
+    case FootnoteSheet::Event::Next:
+    case FootnoteSheet::Event::Previous:
+      stepFootnoteSheet(liveNoteLink_, event == FootnoteSheet::Event::Next ? 1 : -1);
+      return;
+    case FootnoteSheet::Event::Follow: {
+      const size_t link = liveNoteLink_;
+      closeLiveNote();
+      followLinkDirectly(link);
+      return;
+    }
+    case FootnoteSheet::Event::Close:
+      closeLiveNote();
+      return;
+  }
+}
+
+void EpubReaderActivity::closeLiveNote() {
+  {
+    RenderLock lock(*this);
+    dismissLiveNote();
+    // Anything staged under the sheet: the pass that takes it off is a Normal one, and draws the page again.
+    dropStagedPageWork("Footnote sheet closing");
+  }
+  // The key or the tap that closed it is not the page's, and its hint strip is gone with it.
+  buttonEvents.drain();
+  ButtonHintStrip::invalidate();
+  requestUpdate();
+}
+
+void EpubReaderActivity::dismissLiveNote() {
+  if (!liveNote_) return;
+  liveNote_.reset();
+  liveOverlayPageOwed_ = false;
+  liveOverlayRedrawWhenBuilt_ = false;
+  liveOverlayStale_ = false;
 }
 
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {
@@ -8834,7 +9077,7 @@ void EpubReaderActivity::openReaderBars() {
   }
 
   // Drawn by the reader, which keeps running under them. The first pass paints them over the frame on the panel
-  // (paintLiveBars): the page under them stays as it is until a change asks for it again.
+  // (paintLiveOverlay): the page under them stays as it is until a change asks for it again.
   auto bars = makeUniqueNoThrow<ReaderBarsController>(renderer, std::move(info));
   if (!bars) {
     LOG_ERR("ERS", "Reader bars: no memory for them");
@@ -8845,9 +9088,9 @@ void EpubReaderActivity::openReaderBars() {
     RenderLock lock(*this);
     prepareForOverlay("ReaderBars");
     liveBars_ = std::move(bars);
-    liveBarsPageOwed_ = false;
-    liveBarsRedrawWhenBuilt_ = section && section->hasActiveBuild();
-    liveBarsStale_ = true;
+    liveOverlayPageOwed_ = false;
+    liveOverlayRedrawWhenBuilt_ = section && section->hasActiveBuild();
+    liveOverlayStale_ = true;
     noteLiveLayoutBuilt();
   }
   requestUpdate();
@@ -8871,7 +9114,7 @@ void EpubReaderActivity::serviceLiveBars() {
         bool painted = false;
         {
           RenderLock lock(*this);
-          painted = !liveBarsStale_;
+          painted = !liveOverlayStale_;
         }
         if (painted) {
           liveLayoutOwed_ = false;
@@ -8894,7 +9137,7 @@ void EpubReaderActivity::serviceLiveBars() {
         return;
       }
       RenderLock lock(*this);
-      liveBarsStale_ = true;
+      liveOverlayStale_ = true;
     }
       // A change is applied after the bars showing it are painted: the new value is on the panel at once, and the
       // rebuild follows. Presses in between go in as one change.
@@ -8909,9 +9152,9 @@ void EpubReaderActivity::serviceLiveBars() {
 
 void EpubReaderActivity::applyLiveLayout() {
   // No page owed for it here. Every value but the darkness lays the chapter out again, and that pass draws the page
-  // (liveBarsPageDue); the darkness only picks the gray levels, which the black and white page under the bars does not
-  // draw (GfxRenderer's drawMaskFor2BitMode): it shows once they close.
-  // True when the book opens again: this reader is on its way out, the bars with it (onExit).
+  // (liveOverlayPageDue); the darkness only picks the gray levels, which the black and white page under the bars does
+  // not draw (GfxRenderer's drawMaskFor2BitMode): it shows once they close. True when the book opens again: this reader
+  // is on its way out, the bars with it (onExit).
   if (applyReaderLayout(liveBars_->liveLayoutValues(), liveBars_->layoutIsThisBooks())) return;
   liveBars_->resync(effectiveLayoutValues(), globalLayoutValues(), layoutSheetSizes());
 }
@@ -8943,9 +9186,9 @@ void EpubReaderActivity::dismissLiveBars() {
   if (!liveBarsOpen()) return;
   liveBars_->end();
   liveBars_.reset();
-  liveBarsPageOwed_ = false;
-  liveBarsRedrawWhenBuilt_ = false;
-  liveBarsStale_ = false;
+  liveOverlayPageOwed_ = false;
+  liveOverlayRedrawWhenBuilt_ = false;
+  liveOverlayStale_ = false;
   liveLayoutOwed_ = false;
   builtLiveLayouts_ = {};
   builtLiveLayoutsNext_ = 0;
@@ -8974,10 +9217,20 @@ bool EpubReaderActivity::liveLayoutChangeIsBuilt() {
 
 bool EpubReaderActivity::liveBarsOpen() const { return liveBars_ != nullptr; }
 
-bool EpubReaderActivity::takesReaderControls() const { return !liveBarsOpen(); }
+bool EpubReaderActivity::liveOverlayOpen() const { return liveBarsOpen() || liveNote_ != nullptr; }
 
-bool EpubReaderActivity::liveBarsPageDue() const {
-  if (liveBarsPageOwed_) return true;
+void EpubReaderActivity::drawLiveOverlay() {
+  if (liveBarsOpen()) {
+    liveBars_->draw();
+  } else if (liveNote_) {
+    liveNote_->draw();
+  }
+}
+
+bool EpubReaderActivity::takesReaderControls() const { return !liveOverlayOpen(); }
+
+bool EpubReaderActivity::liveOverlayPageDue() const {
+  if (liveOverlayPageOwed_) return true;
   switch (classifyRenderPass()) {
     case RenderPass::BuildSection:
       return true;
@@ -8988,7 +9241,7 @@ bool EpubReaderActivity::liveBarsPageDue() const {
              target < static_cast<int>(section->activeBuildPageCount()) && target != buildDisplayedPage_;
     }
     case RenderPass::Normal:
-      return liveBarsRedrawWhenBuilt_;
+      return liveOverlayRedrawWhenBuilt_;
     case RenderPass::FinishedBook:
     case RenderPass::PreRender:
     case RenderPass::BufferDisplay:
@@ -8998,14 +9251,14 @@ bool EpubReaderActivity::liveBarsPageDue() const {
   return false;
 }
 
-void EpubReaderActivity::paintLiveBars(RenderLock& lock) {
+void EpubReaderActivity::paintLiveOverlay(RenderLock& lock) {
   // Nothing new to show: the pass came for the page (the build's end, a picture landing) and found none to draw.
-  if (!liveBarsStale_) return;
-  liveBarsStale_ = false;
+  if (!liveOverlayStale_) return;
+  liveOverlayStale_ = false;
   // The frame on the panel under them: displayBuffer() ends in a swap, so the write buffer is two frames behind. The
   // bars only grow over the page while they are open (a panel closing closes them), so the rest of it is the page.
   renderer.syncWriteBufferFromDisplayed();
-  liveBars_->draw();
+  drawLiveOverlay();
   // Started, then waited for without the lock, as a page is (renderContents): the loop task takes the bars' input and
   // applies the change they show (serviceLiveBars), and the build slices on where it can run through a refresh
   // (stepCurrentSectionBuild). Held through it, the lock kept the loop out for the whole refresh: 0.95 s on the X4 Pro.
@@ -9014,12 +9267,12 @@ void EpubReaderActivity::paintLiveBars(RenderLock& lock) {
   renderer.completeDisplay();
 }
 
-void EpubReaderActivity::drawLiveBarsOverPage(const bool redrawWhenBuilt) {
-  if (!liveBarsOpen()) return;
-  liveBars_->draw();
-  liveBarsStale_ = false;
-  liveBarsPageOwed_ = false;
-  liveBarsRedrawWhenBuilt_ = redrawWhenBuilt;
+void EpubReaderActivity::drawLiveOverlayOverPage(const bool redrawWhenBuilt) {
+  if (!liveOverlayOpen()) return;
+  drawLiveOverlay();
+  liveOverlayStale_ = false;
+  liveOverlayPageOwed_ = false;
+  liveOverlayRedrawWhenBuilt_ = redrawWhenBuilt;
   noteLiveLayoutBuilt();
 }
 
@@ -9094,7 +9347,7 @@ void EpubReaderActivity::onReaderBarsClosed(const ActivityResult& result) {
       return;
     case ReaderBarsResult::Action::Light:
 #if CP_TOUCH_UI
-      activityManager.openLightPanel();
+      activityManager.requestLightPanel();
 #endif
       return;
   }
@@ -9439,7 +9692,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
     case BA::BTN_FOOTNOTES:
       if (!currentPageFootnotes.empty()) {
         if (currentPageFootnotes.size() == 1) {
-          navigateToHref(currentPageFootnotes[0].href, true);
+          followLink(0);
         } else {
           auto linkInfo = pageLinkInfoForCurrentPage();
           startActivityForResult(
@@ -9448,7 +9701,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
               [this](const ActivityResult& result) {
                 if (!result.isCancelled) {
                   const auto& footnoteResult = std::get<FootnoteResult>(result.data);
-                  navigateToHref(footnoteResult.href, true);
+                  followListedLink(footnoteResult);
                 }
               });
         }
@@ -9619,6 +9872,16 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
         openQuickOverrides();
       }
       break;
+    case BA::BTN_AUTO_PAGE_TURN:
+      // At the interval the reader menu last set; Confirm or Back stops it as well (loop()).
+      if (automaticPageTurnActive) {
+        stopAutomaticPageTurn();
+      } else {
+        toggleAutoPageTurn(SETTINGS.autoTurnSeconds);
+      }
+      // The status bar shows the turn while it runs, and its band may lay the page out again.
+      requestUpdate();
+      break;
     default:
       break;
   }
@@ -9637,7 +9900,7 @@ bool EpubReaderActivity::handleForcedRefresh(const HalDisplay::RefreshMode mode)
     preRenderedPlanesStaged_ = false;
     forceRefreshModeNextRender_ = static_cast<int8_t>(mode);
     // Under the live bars too: the page and the bars over it.
-    if (liveBarsOpen()) liveBarsPageOwed_ = true;
+    if (liveOverlayOpen()) liveOverlayPageOwed_ = true;
   }
   requestUpdate();
   return true;

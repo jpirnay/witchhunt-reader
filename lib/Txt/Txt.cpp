@@ -3,9 +3,8 @@
 #include <Bitmap.h>
 #include <BitmapHelpers.h>
 #include <FsHelpers.h>
-#include <JpegToBmpConverter.h>
+#include <ImageToBmp.h>
 #include <Logging.h>
-#include <PngToBmpConverter.h>
 
 Txt::Txt(std::string path, std::string cacheBasePath)
     : filepath(std::move(path)), cacheBasePath(std::move(cacheBasePath)) {
@@ -143,50 +142,14 @@ bool Txt::generateCoverBmp() const {
     }
     LOG_DBG("TXT", "Copied BMP cover to cache");
     return true;
-  } else if (FsHelpers::hasJpgExtension(coverImagePath)) {
-    // Convert JPG/JPEG to BMP (same approach as Epub)
-    LOG_DBG("TXT", "Generating BMP from JPG cover image");
-    FsFile coverJpg, coverBmp;
-    if (!Storage.openFileForRead("TXT", coverImagePath, coverJpg)) {
-      return false;
-    }
-    if (!Storage.openFileForWrite("TXT", getCoverBmpPath(), coverBmp)) {
-      coverJpg.close();
-      return false;
-    }
+  } else if (FsHelpers::hasJpgExtension(coverImagePath) || FsHelpers::hasPngExtension(coverImagePath)) {
     // 8-bit, dithered when it is drawn, with the drawing panel's table (coverBmpReady()).
-    const bool success =
-        JpegToBmpConverter::jpegFileToBmpStream(coverJpg, coverBmp, /*crop=*/true, /*grayscale8Bit=*/true);
-    coverJpg.close();
-    coverBmp.close();
-
+    LOG_DBG("TXT", "Generating BMP from cover image %s", coverImagePath.c_str());
+    const bool success = ImageToBmp::convertFile("TXT", coverImagePath, getCoverBmpPath(), ImageToBmp::Target{});
     if (!success) {
-      LOG_ERR("TXT", "Failed to generate BMP from JPG cover image");
-      Storage.remove(getCoverBmpPath().c_str());
+      LOG_ERR("TXT", "Failed to generate BMP from cover image");
     } else {
-      LOG_DBG("TXT", "Generated BMP from JPG cover image");
-    }
-    return success;
-  } else if (FsHelpers::hasPngExtension(coverImagePath)) {
-    LOG_DBG("TXT", "Generating BMP from PNG cover image");
-    FsFile coverPng, coverBmp;
-    if (!Storage.openFileForRead("TXT", coverImagePath, coverPng)) {
-      return false;
-    }
-    if (!Storage.openFileForWrite("TXT", getCoverBmpPath(), coverBmp)) {
-      coverPng.close();
-      return false;
-    }
-    const bool success =
-        PngToBmpConverter::pngFileToBmpStream(coverPng, coverBmp, /*crop=*/true, /*grayscale8Bit=*/true);
-    coverPng.close();
-    coverBmp.close();
-
-    if (!success) {
-      LOG_ERR("TXT", "Failed to generate BMP from PNG cover image");
-      Storage.remove(getCoverBmpPath().c_str());
-    } else {
-      LOG_DBG("TXT", "Generated BMP from PNG cover image");
+      LOG_DBG("TXT", "Generated BMP from cover image");
     }
     return success;
   }

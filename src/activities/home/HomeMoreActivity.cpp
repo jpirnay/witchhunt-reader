@@ -13,7 +13,9 @@ HomeMoreActivity::HomeMoreActivity(GfxRenderer& renderer, MappedInputManager& ma
   const HomeMenuAvailability availability{.hasBookmarks = GLOBAL_BOOKMARKS.hasAny()};
   std::vector<HomeMenuEntry> entries;
   entries.reserve(5);
-  collectHomeMenuEntries(HomeMenuPlacement::More, availability, entries);
+  // What the theme shows on Home itself is not offered here again.
+  collectHomeMenuEntries(HomeMenuPlacement::More, availability, entries, GUI.homeMenuCapacity(),
+                         GUI.homeShownDestinations(renderer, UITheme::getContentRect(renderer, true, false)));
 
   menuItems.reserve(entries.size());
   actions.reserve(entries.size());

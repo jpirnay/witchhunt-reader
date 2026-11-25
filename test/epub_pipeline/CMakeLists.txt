@@ -61,6 +61,7 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
   ${REPO_ROOT}/lib/GfxRenderer/Bitmap.cpp
   ${REPO_ROOT}/lib/GfxRenderer/BitmapHelpers.cpp
+  ${REPO_ROOT}/lib/ImageToBmp/ImageToBmp.cpp
   ${REPO_ROOT}/lib/JpegToBmpConverter/JpegToBmpConverter.cpp
   ${REPO_ROOT}/lib/ProgressiveJpeg/ProgressiveJpeg.cpp
   ${REPO_ROOT}/lib/PngToBmpConverter/PngToBmpConverter.cpp
@@ -95,6 +96,7 @@ set(PIPELINE_INCLUDES
   ${REPO_ROOT}/lib/uzlib/src
   ${REPO_ROOT}/lib/FsHelpers
   ${REPO_ROOT}/lib/CooperativeAbort
+  ${REPO_ROOT}/lib/ImageToBmp
   ${REPO_ROOT}/lib/JpegToBmpConverter
   ${REPO_ROOT}/lib/PngToBmpConverter
   ${REPO_ROOT}/lib/PngDecoder
@@ -125,6 +127,7 @@ add_executable(EpubPipelineTest
   StreamedParseTest.cpp
   FootnotePreviewStoreTest.cpp
   FootnoteResolveSliceTest.cpp
+  FootnoteNoteCaptureTest.cpp
   ParagraphAnchorTest.cpp
   SavedPositionRestoreTest.cpp
   KeptReadingStateTest.cpp
@@ -214,6 +217,7 @@ add_executable(EpubPipelineTest
   BoxLayoutTest.cpp
   LentBuildTeardownTest.cpp
   LentTableLayoutTest.cpp
+  GridTablePageFlowTest.cpp
   PageLineArenaTest.cpp
   # A book's embedded body font (Publisher Fonts): the probe and the extraction. Its SHA-1 comes from
   # test/shims/wolfssl, standing in for wolfCrypt.
@@ -360,6 +364,7 @@ if(OPENSSL_FOUND)
     ${REPO_ROOT}/lib/BookProtection/AesCbcCipher.cpp
     ${REPO_ROOT}/lib/BookProtection/BookKey.cpp
     ${REPO_ROOT}/lib/BookProtection/BookSession.cpp
+    ${REPO_ROOT}/lib/BookProtection/CacheAtRest.cpp
     ${REPO_ROOT}/lib/BookProtection/EncryptionXmlParser.cpp
     ${REPO_ROOT}/lib/BookProtection/ProtectionManifest.cpp
     ${REPO_ROOT}/lib/DeviceSecret/DeviceSecret.cpp

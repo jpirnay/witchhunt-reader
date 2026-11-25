@@ -15,9 +15,9 @@
 #include "components/themes/BaseTheme.h"
 #include "components/themes/ButtonGeometry.h"
 #include "components/themes/HeaderLayout.h"
-#include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
+#include "components/themes/lyra/LyraTilesTheme.h"
 
 namespace {
 constexpr int SKIP_PAGE_MS = 700;
@@ -81,15 +81,15 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       currentTheme = std::make_unique<LyraTheme>();
       currentMetrics = LyraMetrics::values;
       break;
-    case CrossPointSettings::UI_THEME::LYRA_3_COVERS:
-      LOG_DBG("UI", "Using Lyra 3 Covers theme");
-      currentTheme = std::make_unique<Lyra3CoversTheme>();
-      currentMetrics = Lyra3CoversMetrics::values;
-      break;
     case CrossPointSettings::UI_THEME::LYRA_CAROUSEL:
       LOG_DBG("UI", "Using Lyra Carousel theme");
       currentTheme = std::make_unique<LyraCarouselTheme>();
       currentMetrics = LyraCarouselMetrics::values;
+      break;
+    case CrossPointSettings::UI_THEME::LYRA_TILES:
+      LOG_DBG("UI", "Using Lyra Tiles theme");
+      currentTheme = std::make_unique<LyraTilesTheme>();
+      currentMetrics = LyraTilesMetrics::values;
       break;
     default:
       LOG_ERR("UI", "Unknown theme %d, falling back to Classic", static_cast<int>(type));
@@ -111,9 +111,7 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
     case CrossPointSettings::UI_THEME::LYRA:
       currentMetrics.homeCoverTileHeight = 406;
       break;
-    case CrossPointSettings::UI_THEME::LYRA_3_COVERS:
-      currentMetrics.homeCoverTileHeight = 448;
-      break;
+    case CrossPointSettings::UI_THEME::LYRA_TILES:
     case CrossPointSettings::UI_THEME::LYRA_CAROUSEL:
       break;
     default:
@@ -166,7 +164,11 @@ int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader
 }
 
 Rect UITheme::getContentRect(const GfxRenderer& renderer, bool hasBottomHints, bool hasSideHints) {
-  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
+  return getContentRect(renderer, UITheme::getInstance().getMetrics(), hasBottomHints, hasSideHints);
+}
+
+Rect UITheme::getContentRect(const GfxRenderer& renderer, const ThemeMetrics& metrics, const bool hasBottomHints,
+                             const bool hasSideHints) {
   const int bh = hasBottomHints ? metrics.buttonHintsHeight : 0;
   const int sw = hasSideHints ? metrics.sideButtonHintsWidth : 0;
 

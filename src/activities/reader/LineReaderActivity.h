@@ -112,6 +112,7 @@ class LineReaderActivity : public Activity {
   void onExit() override;
   void loop() override;
   bool isReaderActivity() const override { return true; }
+  ScreenshotInfo screenshotInfo() const override;
   bool shouldSkipPeriodicUpdate() const override;
   // A configured action arriving from a button or a bound gesture. Without this the TXT and MD
   // readers reported themselves as readers -- so main.cpp routed every reader-scoped action to

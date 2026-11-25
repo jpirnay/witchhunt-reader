@@ -174,7 +174,8 @@ The reading page has no widgets, so readers read touch directly through the help
 opens the reader's menu or, in the readers without one, their own navigation. The menu edge is
 the bottom edge on a board with a light and the top edge otherwise (`wasMenuGesture()`). In the EPUB
 reader a tap on a link (footnote marker or cross-reference) is tested first, because a marker can
-sit inside a page-turn zone; the markers are located during the render by matching the page's
+sit inside a page-turn zone; a note's marker opens the footnote sheet, which the reader draws over its page as it does the reader bars, and any other link is followed
+(`EpubReaderActivity::followLink`); the markers are located during the render by matching the page's
 words (`LinkMarkerMatch`), a word at a time, so a link of CJK text, stored one page word per
 character, matches its characters one by one: a page word may consume the front of the current marker token where
 the parser could have split it, at a CJK break (Hangul is kept whole) or where the next page word is glued to it
@@ -358,16 +359,27 @@ initialisers in `CrossPointSettings.h`. Why they are what they are:
 - `FREEINK_CAP_TOUCH` 0 compiles `HalGPIO`'s touch event rings, their snapshot and the sampler's
   latching out of the same builds. The queries stay declared and report no event.
 - `touchUiControls` silences touch outside the reader. `main.cpp` sets the gate every tick from
-  the setting and the activity on top, and the reader is always enabled, because
-  `touchReaderControls` governs it there. `hasTouch()` is not gated: screens use it for layout.
+  the setting and the activity on top, and the reader on top is always enabled
+  (`ActivityManager::readerOrItsOverlayOnTop()`; the screens it opens, such as its menu, contents
+  and dictionary, are gated with the rest), because
+  `touchReaderControls` governs it there. An overlay over the page counts as the reader
+  (`Activity::overlaysScreenBelow()`, `TouchGate::readerOwnsScreen()`): the light drawer, which the
+  top-edge swipe pulls over the page and which would otherwise open with no touch at all.
+  `hasTouch()` is not gated: screens use it for layout.
   Nobody is stranded with the gate off: the Home key's Back and Confirm arrive as button presses
   below this layer, and `BTN_TOGGLE_TOUCH_UI` can be bound to a reader gesture.
 - `touchReaderControls` (off, tap, swipe, inverted tap) governs the reading surface, link taps
   included. Off leaves the page inert, so a thumb resting on the glass cannot turn a page.
+- `touchLock` (Touch Lock) closes the gate on every screen, the reader on top included
+  (`TouchGate::eventsEnabled()`, tested in `test/touch_gate`). Keys undo it: one bound to
+  `BTN_TOGGLE_TOUCH_LOCK`, the settings row reached by the keys, or the Picco's slide switch set to
+  Touch. The Home key's presses arrive below the gate and keep working. While it is on, a contact
+  does not count as activity for the sleep timer.
 
 ## Debugging touch
 
-Build with `-DBUTTON_TRACE=1` (commented out in `[lilygo_board]`) to trace both ends of the path:
+Build with `-DBUTTON_TRACE=1` (commented out in `[lilygo_board]`, on in `[env:murphy]`) to trace both ends of the
+path:
 
 - `[TCH] release: held=... tap=... swipe=... travel=...` from the sampler task at the release edge,
   while the SDK's one-shot flags are fresh. The trace measures travel itself, in panel-native

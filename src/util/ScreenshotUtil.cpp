@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <BitmapHelpers.h>
+#include <FrameRegion.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -9,6 +10,7 @@
 #include <string>
 
 #include "Bitmap.h"  // Required for BmpHeader struct definition
+#include "ScreenshotName.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/RenderLock.h"
@@ -68,14 +70,16 @@ void ScreenshotUtil::service(GfxRenderer& renderer, void (*sendToHost)(const uin
 void ScreenshotUtil::takeScreenshot(GfxRenderer& renderer) {
   const uint8_t* fb = renderer.getFrameBuffer();
   if (fb) {
-    String filename_str = "/screenshots/screenshot-" + String(millis()) + ".bmp";
+    // A reader names the book, chapter, page and progress; any other screen gets screenshot-<millis>.bmp.
+    char filename[256];
+    screenshot_name::build(activityManager.screenshotInfo(), millis(), filename, sizeof(filename));
     const bool inverted = renderer.isOutputInverted();  // as for the host capture in service()
     if (inverted) renderer.invertScreen();
-    const bool saved = ScreenshotUtil::saveFramebufferAsBmp(filename_str.c_str(), fb, renderer.getDisplayWidth(),
-                                                            renderer.getDisplayHeight());
+    // Upright as the reader is held: the held orientation, not the live one a hint strip flips to Portrait mid-draw.
+    const bool saved = ScreenshotUtil::saveFramebufferAsBmp(filename, renderer, renderer.getHeldOrientation());
     if (inverted) renderer.invertScreen();
     if (saved) {
-      LOG_DBG("SCR", "Screenshot saved to %s", filename_str.c_str());
+      LOG_DBG("SCR", "Screenshot saved to %s", filename);
     } else {
       LOG_ERR("SCR", "Failed to save screenshot");
     }
@@ -85,7 +89,7 @@ void ScreenshotUtil::takeScreenshot(GfxRenderer& renderer) {
 
   // Display a border around the screen to indicate a screenshot was taken
   if (renderer.storeBwBuffer()) {
-    renderer.drawRect(6, 6, renderer.getDisplayHeight() - 12, renderer.getDisplayWidth() - 12, 2, true);
+    renderer.drawRect(6, 6, renderer.getScreenWidth() - 12, renderer.getScreenHeight() - 12, 2, true);
     renderer.displayBuffer();
     delay(1000);
     renderer.restoreBwBuffer();
@@ -93,14 +97,24 @@ void ScreenshotUtil::takeScreenshot(GfxRenderer& renderer) {
   }
 }
 
-bool ScreenshotUtil::saveFramebufferAsBmp(const char* filename, const uint8_t* framebuffer, int width, int height) {
+// Ported from crosspoint-reader PR #4457 (Uri Tauber, @Uri-Tauber): the BMP used to be the portrait rotation whatever
+// the orientation, so a landscape screenshot came out sideways.
+bool ScreenshotUtil::saveFramebufferAsBmp(const char* filename, const GfxRenderer& renderer,
+                                          const GfxRenderer::Orientation orientation) {
+  const uint8_t* framebuffer = renderer.getFrameBuffer();
   if (!framebuffer) {
     return false;
   }
 
-  // Note: the width and height, we rotate the image 90d counter-clockwise to match the default display orientation
-  int phyWidth = height;
-  int phyHeight = width;
+  const int width = renderer.getScreenWidth(orientation);
+  const int height = renderer.getScreenHeight(orientation);
+  const uint32_t rowSizePadded = (width + 31) / 32 * 4;
+  // A fixed buffer, not a VLA: the widest row is the T5S3's 960 pixels in landscape, 120 bytes.
+  constexpr size_t kMaxRowSize = 128;
+  if (rowSizePadded > kMaxRowSize) {
+    LOG_ERR("SCR", "Row size %u exceeds buffer capacity", static_cast<unsigned>(rowSizePadded));
+    return false;
+  }
 
   std::string path(filename);
   size_t last_slash = path.find_last_of('/');
@@ -121,7 +135,7 @@ bool ScreenshotUtil::saveFramebufferAsBmp(const char* filename, const uint8_t* f
 
   BmpHeader header;
 
-  createBmpHeader(&header, phyWidth, phyHeight, BmpRowOrder::BottomUp);
+  createBmpHeader(&header, width, height, BmpRowOrder::BottomUp);
 
   bool write_error = false;
   if (file.write(reinterpret_cast<uint8_t*>(&header), sizeof(header)) != sizeof(header)) {
@@ -134,35 +148,18 @@ bool ScreenshotUtil::saveFramebufferAsBmp(const char* filename, const uint8_t* f
     return false;
   }
 
-  const uint32_t rowSizePadded = (phyWidth + 31) / 32 * 4;
-  // Max row size for 528px height (X3) after rotation = 68 bytes; use fixed buffer to avoid VLA
-  constexpr size_t kMaxRowSize = 68;
-  if (rowSizePadded > kMaxRowSize) {
-    LOG_ERR("SCR", "Row size %u exceeds buffer capacity", rowSizePadded);
-    file.close();
-    Storage.remove(filename);
-    return false;
-  }
-
-  // rotate the image 90d counter-clockwise on-the-fly while writing to save memory
+  // One row at a time, read back through the renderer's own logical-to-panel mapping. copyLogicalRow() fills the row's
+  // (width + 7) / 8 bytes; the padding after them stays zero from here.
   uint8_t rowBuffer[kMaxRowSize];
   memset(rowBuffer, 0, rowSizePadded);
-
-  for (int outY = 0; outY < phyHeight; outY++) {
-    for (int outX = 0; outX < phyWidth; outX++) {
-      // 90d counter-clockwise: source (srcX, srcY)
-      // BMP rows are bottom-to-top, so outY=0 is the bottom of the displayed image
-      int srcX = width - 1 - outY;     // phyHeight == width
-      int srcY = phyWidth - 1 - outX;  // phyWidth == height
-      int fbIndex = srcY * (width / 8) + (srcX / 8);
-      uint8_t pixel = (framebuffer[fbIndex] >> (7 - (srcX % 8))) & 0x01;
-      rowBuffer[outX / 8] |= pixel << (7 - (outX % 8));
-    }
+  for (int outY = 0; outY < height; outY++) {
+    // BMP rows run bottom to top.
+    frameregion::copyLogicalRow(framebuffer, renderer.getDisplayWidthBytes(), orientation, renderer.getDisplayWidth(),
+                                renderer.getDisplayHeight(), height - 1 - outY, width, rowBuffer);
     if (file.write(rowBuffer, rowSizePadded) != rowSizePadded) {
       write_error = true;
       break;
     }
-    memset(rowBuffer, 0, rowSizePadded);  // Clear the buffer for the next row
   }
 
   file.close();

@@ -1,17 +1,17 @@
 # Library
 
-Status: open items as of 2026-10-09, from the Library work (PR #426; design in
-`docs/design/library-index.md`). The screen and the index ship without these. Each change must end
-flash-negative (the `default` build for the X3 and X4 is at 96.6 % of the app partition, about 224 KB
-free on 2026-11-09) or name what it buys.
+Status: open items from the Library work (#426; design in `docs/design/library-index.md`). The screen and
+the index ship without these. Each change must end flash-negative or name what it buys. Re-measure the
+`default` build (X3, X4) before relying on a budget: #868's body gives 6,178,901 B of the 6,553,600 B app
+slot on 2026-11-21.
 
 ## Measure a large card
 
 A 25-book card was measured first (X4: first build 2.5 s, free heap at least 22.4 KB during the build).
 The design was budgeted for 2,000 books. On a 3,692-book card an X4 Pro's index walk reached that limit
-in 32 s, in the background (#606, 2026-11-04). The rest of that first build is not measured: its total
-time on a card of a few hundred never-opened EPUBs (~300 ms of OPF parse each), the author lookups,
-publish at 2,000 and the heap.
+in 32 s, in the background (#606). The rest of that first build is not measured: its total time on a
+card of a few hundred never-opened EPUBs (~300 ms of OPF parse each), the author lookups, publish at
+2,000 and the heap.
 
 - Where: the `[LIB]` log lines from `FileBrowserActivity::stepLibraryBuild` (start, walk, each publish,
   done with heap); `scripts/script_profile_mem.sh` for the heap.
@@ -26,7 +26,8 @@ publish at 2,000 and the heap.
 
 The index's partial flag (`library::FLAG_PARTIAL`, more than 2,000 books) is set and tested, but nothing
 on screen uses it: past 2,000 books, the books the walk did not reach never appear in New, and nothing
-says so.
+says so. `LibraryIndexReader::partial()` exists and has no caller in `src/`; only
+`LibraryFreshness::checkListedEntry` reads the flag.
 
 - Next step: a notice on Authors when the header is partial ("Library too large").
 
@@ -62,8 +63,8 @@ of a large card, leaving before the last author is read leaves Authors that way.
 - Where: `FileBrowserActivity::onExit` (its comment says the next visit walks again),
   `stepLibraryBuild`, `LibraryFreshness::stale`, `LibraryStaleness::Facts`.
 - Next step: make unresolved authors a reason to build. Pending authors file last, so the index's
-  last author record having `library::AUTHOR_PENDING` says so in one read; add a
-  `LibraryStalenessTest` case for it.
+  last author record having `library::AUTHOR_PENDING` says so in one read; add a case for it to
+  `test/library_index/LibraryStalenessTest.cpp`.
 
 ## New's covers wait for every author
 
@@ -79,48 +80,47 @@ not depend on authors.
 
 - **An author with more than 200 books** -- and on a large first build the *Unknown author* and *Not
   yet indexed* groups -- keeps the index's order, which is identity-hash order and looks random
-  (`FileBrowserModel::orderAuthorBooks`). Cheap fallback: order by `pathOff`, which groups by folder.
+  (`FileBrowserModel::orderAuthorBooks`, `MAX_ORDERED`). Cheap fallback: order by `pathOff`, which
+  groups by folder.
 - **Remove inside an opened author** deletes the book, but its row stays until the rebuild the removal
   starts finishes (`FileBrowserModel::openAuthor` does not check each book exists). Mark as read's
   move to `/COMPLETED` marks the card changed, so the next visit to New or Authors rebuilds, but the
   Stay branch of `FileBrowserActivity::doMarkAsRead` starts no build: the opened author keeps the
   book's old path until then.
-- **Move to folder and New folder** are not offered on New and Authors: `moveToFolder` appends the
+- **Move to folder and New folder** are not offered on New and Authors
+  (`FileContextMenuActivity`: a fixed-order list returns before them): `moveToFolder` appends the
   row's entry, which is a path on those lists. Offer them once it appends the file's name.
 - **A corrupt author record**: `FileBrowserModel::openAuthor` reserves `author.count` slots unchecked;
   clamp it to `bookCount - firstBook` first.
 - **A frame drawn mid-publish** can show Authors empty: the index is released before the publish and
-  reopened by the reload after it.
+  reopened by the reload after it (read in `stepLibraryBuild`, not seen on a device).
 
 ## Sidecar matching is case-sensitive in the walk
 
 The walk pairs a book with its `.opf` by an exact stem hash and accepts `.opf` / `.OPF` only, while
-`SidecarFiles` finds a sidecar case-insensitively. A `Book.opf` beside `book.epub` gets no signature,
-so editing it does not send the book's author back through `details.bin` until something else changes.
+`SidecarFiles` finds a sidecar through the card's case-insensitive lookup. A `Book.opf` beside
+`book.epub` gets no signature, so editing it does not send the book's author back through `details.bin`
+until something else changes. `docs/sidecar-files.md` ("When changes take effect") describes this for
+readers.
 
-- Where: `LibraryBuilder` (sidecar table, `sidecarFor`).
+- Where: `LibraryBuilder` (`stemHash`, `isMetadataSidecar`, `sidecarFor`).
 - Next step: fold the stem before hashing, as `SidecarFiles` matches.
-
-## Tabs on button-only boards
-
-There is no tab-bar focus (see the design record, "The screen"): a long Up/Down switches tab, and the
-side hints say so. Settings and the reader menu also offer Confirm on a focused bar. If readers on
-button-only boards still miss the tabs, give the browser a bar focus position, which means moving its
-input onto `ListController` (see `list-input-harmonization.md`, the file browser item).
 
 ## Cover thumbnails' midtones (matcha-reader #487): decide
 
-1-bit cover thumbnails are dithered (Atkinson) with gamma off and contrast 1.15
-(`lib/GfxRenderer/BitmapHelpers.cpp:11-14`). matcha lifts the midtones (gamma 0.75) before dithering, which makes dark
-covers lighter in the 1-bit thumbs. A taste choice: here it would need a thumb-only flag, since the same
-`Atkinson1BitDitherer` also dithers page images (`JpegToFramebufferConverter.cpp`); old thumbs stay until they are made
-again; a 256-byte flash table. matcha-reader #487, Eszter
-Schuffert (eszter007).
+1-bit cover thumbnails are dithered (Atkinson) with gamma off and contrast 1.15 (`GAMMA_CORRECTION` and
+`CONTRAST_FACTOR` in `lib/GfxRenderer/BitmapHelpers.cpp`). matcha lifts the midtones (gamma 0.75) before
+dithering, which makes dark covers lighter in the 1-bit thumbs. A taste choice: here it would need a
+thumb-only flag, since the same `Atkinson1BitDitherer` also dithers page images
+(`JpegToFramebufferConverter.cpp`); old thumbs stay until they are made again; a 256-byte flash table.
+matcha-reader #487, Eszter Schuffert (eszter007).
 
 ## Tests
 
 - The Home-entry migration in `JsonSettingsIO::loadSettings` (old `showBrowseFilesOnHome` /
-  `showRecentBooksOnHome` keys) has no host test; only `libraryOnHomeFromLegacy` has.
-- `test/file_browser_model` covers `FileBrowserModel`'s folder listing and search only. Its Authors
-  side has no host test and no host harness links `FileBrowserActivity`: tab switching, the Authors
-  drill-in, return hints and the selection kept across a republish were checked on a device only.
+  `showRecentBooksOnHome` keys) has no host test; only `libraryOnHomeFromLegacy` has. No host target
+  links `JsonSettingsIO.cpp`.
+- `test/file_browser_model` covers `FileBrowserModel`'s folder listing, search and the streamed Recents
+  only. Its Authors side has no host test and no host harness links `FileBrowserActivity`: tab
+  switching, the Authors drill-in, return hints and the selection kept across a republish were checked
+  on a device only.

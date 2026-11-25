@@ -18,7 +18,8 @@ or changing a plugin never needs a firmware build.
 > `relay(method, url, headers, body)` answering `{status, headers, body}`, a
 > base64 `writeFile`, and `fetchToSd(url, dest, headers, {method, body})`. Unlike
 > upstream, the device reaches only the hosts a plugin may reach: those its
-> manifest lists, or that you approved when it asked. Upstream's on-device catalog
+> manifest lists, those its device events' URLs write out, or that you approved
+> when it asked. Upstream's on-device catalog
 > screens (`device.json`) run in the browser here, on the Plugins page. Its crypto
 > endpoint (`api.crypto`) and its device events are here, the events from
 > #3114 and #4200 (Arthur Tazhitdinov) without `book.downloaded` so far (see
@@ -165,7 +166,12 @@ certificate needs Settings' "Skip HTTPS validation".
 }
 ```
 
-No list and no approval means no access. `relay(url)` and `fetchToSd` follow a
+No list and no approval means no access. Hosts compare without case. The device
+judges a URL with its HTTP client's own reading of it, so the host judged is the
+host reached: a URL with user info (`https://user@host/`), or a host it cannot
+read (an IPv6 literal, a `\`), is refused outright.
+
+`relay(url)` and `fetchToSd` follow a
 redirect only to a host the plugin may reach too. One to any other host is
 refused like a first request, naming the host, so the page asks for it as well
 (a GitHub release file redirects to GitHub's CDN); list the hosts a service
@@ -310,7 +316,10 @@ Differences from upstream:
   web server lets the plugin read that exact file with `/download` and write it
   with `writeFile` (`PluginLocations::deviceJsonNames()`). A name with `..` in
   it names nothing. A credential store, a system folder and a path spelled by its
-  8.3 alias stay refused, as for every request.
+  8.3 alias stay refused, as for every request. The reader reads a `token.file`
+  and `config.file` for the plugin's [events](#events-the-reader-sends-a-plugins-requests)
+  by the same rules (`PluginLocations::namedFilePath()`, `isProtectedPluginFile()`),
+  so a `device.json` naming `/.crosspoint/wifi.json` gets no `{token}` from it.
 - Not yet: Details pages, the `sidecar` file, and sign-in types upstream does
   not define (`refresh`). A `device.json`'s `events` are the reader's business:
   [Events](#events-the-reader-sends-a-plugins-requests).
@@ -355,7 +364,36 @@ usual uses.
   `token.file` (at `token.path`), `{meta.KEY}` from the book's
   `<book>.meta.json`, and `{event.ts}`, `{event.id}` and `{event.NAME}`. Strings
   and whole numbers go in as text; a key that is missing stays as written. One
-  pass: a filled-in value is not read for placeholders again.
+  pass: a filled-in value is not read for placeholders again. The token and
+  config files are read as the web server lets the plugin read them: a name with
+  `..` names nothing, and a credential store or a system folder is refused.
+- **Hosts**: a request or a download goes only to a host the plugin may reach:
+  one its `manifest.json` lists in `allowedHosts`, one you approved for it
+  ([Reaching the internet](#reaching-the-internet-allowedhosts-and-approvals)),
+  or one an event URL in its `device.json` writes out. A host is written out
+  when no placeholder sits between `://` and the path, so no filled-in value can
+  move it: `https://crosspoint-calendar.marczyk.ovh/current.bmp?w={cfg.width}`
+  declares its host, as an `allowedHosts` entry would (that host exactly, not its
+  subdomains); `{cfg.server}/syncs/progress` and `https://{cfg.host}/` declare
+  nothing. The Plugins page lists these hosts under **Reaches**, beside
+  `allowedHosts`. The URL is judged as filled in, and a download's redirects stay
+  within the same hosts. A line that fails this leaves the queue unsent, and the
+  log (`[PEVT]`) names the plugin and the event, not the URL. The reader cannot
+  ask you about a host a template fills in: a plugin written for upstream reaches
+  it once its card has asked for it through the relay (KOSync Auto-push's login
+  test asks for its server); otherwise the Plugins page asks for it, below. A
+  token or config value can go to a declared host only from a file the plugin
+  may read itself (above).
+- **Refused hosts**: the reader notes the host of a line it refused, or of a
+  download's refused redirect, in `wanted-hosts` in the plugin's folder (at most
+  four, the oldest dropped first; a host over 128 characters is not noted). The
+  Plugins page shows each as "Wants to reach ..." with **Allow**, which approves
+  it as an approval asked by the plugin's card would, and **Dismiss**, after
+  which the reader drops lines to that host without asking again (until the
+  plugin is installed anew). The refused line itself leaves the queue: kept, it
+  would make the reader join Wi-Fi at every sleep until you answer (on the X3 and
+  X4 with two restarts). A progress push or a sleep picture after **Allow** goes
+  as usual. Removing the plugin removes its requests with its folder.
 
 **The queue.** Each subscribing plugin has its own, `events.jsonl` in its folder,
 one line per event (`{"e", "id", "ts", "vars"}`). A line is at most 512 bytes;
@@ -390,16 +428,25 @@ public read does. A download goes to an absolute path outside the plugin
 folders, the credential stores and the system folders, through a `.part` file
 that replaces the target only after a clean answer. A request's answer is read
 to 8 KB and dropped. The serial log (`[PEVT]`) names the URL and status of each
-delivery, never headers or bodies.
+delivery, never headers or bodies; a line refused for its host is named by its
+plugin and event alone.
 
 **Limits.** 8 subscribing plugins; a `device.json` up to 8 KB; token, config and
 `<book>.meta.json` files up to 2 KB.
+
+**Made by the Home Screen page.** A picture from the web on Home is a plugin of
+this kind that the Home Screen page writes, `home-picture-<n>`: one download into
+`/home/web` on `sleep.enter` or `reader.exit`
+([home-layout.md](home-layout.md#pictures-from-the-web)). The page replaces and
+removes them; the Plugins page lists them like any other.
 
 ## Installing and managing plugins: the Plugins page
 
 `/plugins` in the web interface (linked from every page) lists every installed
 plugin with its description, the page it adds itself to and the hosts it may
-reach (`allowedHosts`), and offers **Switch off** / **Switch on** and **Remove**.
+reach (`allowedHosts`, and the hosts its event URLs write out, see
+[Events](#events-the-reader-sends-a-plugins-requests)), and offers **Switch off** /
+**Switch on** and **Remove**.
 Plugin management lives here and nowhere on the reader: it is only ever useful
 while a browser is connected.
 

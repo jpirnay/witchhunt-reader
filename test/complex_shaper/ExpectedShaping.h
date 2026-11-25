@@ -139,6 +139,22 @@ constexpr ExpectedGlyph kDevanagariGlyphs12[] = {{380, 373, 0, 0}, {86, 382, 0, 
 constexpr ExpectedGlyph kDevanagariGlyphs13[] = {{60, 403, 0, 0}, {27, 138, 0, 0}, {64, 285, 0, 0}};
 constexpr ExpectedGlyph kDevanagariGlyphs14[] = {{95, 493, 0, 0}, {27, 138, 0, 0}, {64, 285, 0, 0}};
 constexpr ExpectedGlyph kDevanagariGlyphs15[] = {{118, 277, 0, 0}, {120, 277, 0, 0}, {119, 277, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs16[] = {{447, 138, 0, 0}, {52, 410, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs17[] = {{447, 138, 0, 0}, {73, 411, 0, 0}, {78, 218, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs18[] = {{446, 138, 0, 0}, {69, 283, 0, 0}, {53, 436, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs19[] = {{451, 138, 0, 0}, {79, 362, 0, 0}, {77, 309, 0, 0}, {27, 138, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs20[] = {{52, 410, 0, 0}, {536, 138, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs21[] = {{214, 304, 0, 0}, {83, 361, 0, 0}, {27, 138, 0, 0}, {69, 283, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs22[] = {{6, 292, 0, 0}, {150, 160, 0, 0}, {84, 283, 0, 0}, {27, 138, 0, 0},
+                                                 {414, 0, 0, 0}, {71, 296, 0, 0},  {36, 0, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs23[] = {{137, 285, 0, 0}, {77, 309, 0, 0}, {27, 138, 0, 0}, {414, 0, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs24[] = {{393, 283, 0, 0}, {78, 218, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs25[] = {{76, 319, 0, 0}, {414, 0, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs26[] = {{84, 283, 0, 0}, {419, 0, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs27[] = {{71, 296, 0, 0}, {84, 283, 0, 0}, {537, 138, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs28[] = {{72, 303, 0, 0}, {31, 0, 0, 0},   {58, 374, 0, 0},
+                                                 {414, 0, -3, 0}, {54, 300, 0, 0}, {36, 0, 0, 0}};
+constexpr ExpectedGlyph kDevanagariGlyphs29[] = {{628, 272, 0, 0}, {39, 138, 0, 0}};
 
 constexpr ExpectedShaping kDevanagariShaping[] = {
     {"\xE0\xA4\xB9\xE0\xA4\xBF\xE0\xA4\xA8\xE0\xA5\x8D\xE0\xA4\xA6\xE0\xA5\x80", "", kDevanagariGlyphs0, 5},  // हिन्दी
@@ -160,6 +176,22 @@ constexpr ExpectedShaping kDevanagariShaping[] = {
     {"\xE0\xA4\x9D\xE0\xA4\xBE\xE0\xA4\xA1", "", kDevanagariGlyphs13, 3},                // झाड
     {"\xE0\xA4\x9D\xE0\xA4\xBE\xE0\xA4\xA1", "ne", kDevanagariGlyphs14, 3},              // झाड (ne)
     {"\xE0\xA5\xAF\xE0\xA5\xAE\xE0\xA5\xAB", "ne", kDevanagariGlyphs15, 3},              // ९८५ (ne)
+    {"\xE0\xA4\x95\xE0\xA4\xBF", "", kDevanagariGlyphs16, 2},                            // कि
+    {"\xE0\xA4\xAB\xE0\xA4\xBF\xE0\xA4\xB0", "", kDevanagariGlyphs17, 3},                // फिर
+    {"\xE0\xA4\xA6\xE0\xA4\xBF\xE0\xA4\x96", "", kDevanagariGlyphs18, 3},                // दिख
+    {"\xE0\xA4\xB2\xE0\xA4\xBF\xE0\xA4\xAF\xE0\xA4\xBE", "", kDevanagariGlyphs19, 4},    // लिया
+    {"\xE0\xA4\x95\xE0\xA5\x80", "", kDevanagariGlyphs20, 2},                            // की
+    {"\xE0\xA4\xAA\xE0\xA5\x8D\xE0\xA4\xB0\xE0\xA4\xB8\xE0\xA4\xBE\xE0\xA4\xA6", "", kDevanagariGlyphs21, 4},  // प्रसाद
+    {"\xE0\xA4\x89\xE0\xA4\xA8\xE0\xA5\x8D\xE0\xA4\xB9\xE0\xA5\x8B\xE0\xA4\x82\xE0\xA4\xA8\xE0\xA5\x87", "",
+     kDevanagariGlyphs22, 7},                                                                      // उन्होंने
+    {"\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xAF\xE0\xA5\x8B\xE0\xA4\x82", "", kDevanagariGlyphs23, 4},  // क्यों
+    {"\xE0\xA4\xA6\xE0\xA5\x82\xE0\xA4\xB0", "", kDevanagariGlyphs24, 2},                          // दूर
+    {"\xE0\xA4\xAE\xE0\xA5\x87\xE0\xA4\x82", "", kDevanagariGlyphs25, 2},                          // में
+    {"\xE0\xA4\xB9\xE0\xA5\x88\xE0\xA4\x82", "", kDevanagariGlyphs26, 2},                          // हैं
+    {"\xE0\xA4\xA8\xE0\xA4\xB9\xE0\xA5\x80\xE0\xA4\x82", "", kDevanagariGlyphs27, 3},              // नहीं
+    {"\xE0\xA4\xAA\xE0\xA5\x82\xE0\xA4\x9B\xE0\xA5\x87\xE0\xA4\x82\xE0\xA4\x97\xE0\xA5\x87", "", kDevanagariGlyphs28,
+     6},                                           // पूछेंगे
+    {"\xE0\xA5\x8C", "", kDevanagariGlyphs29, 2},  // ौ
 };
 
 constexpr ExpectedGlyph kTamilGlyphs0[] = {{23, 440, 0, 0}, {27, 458, 0, 0}, {40, 140, 0, 0}, {92, 458, 0, 0}};

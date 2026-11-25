@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <BitmapHelpers.h>
 #include <BoardConfig.h>
+#include <CacheAtRest.h>
 #include <CooperativeAbort.h>
 #include <Epub.h>
 #include <Epub/BookFonts.h>
@@ -21,6 +22,7 @@
 #include <HalI2cBus.h>
 #if defined(FREEINK_DEVICE_METALIO_EINK4_PLUS) && FREEINK_DEVICE_METALIO_EINK4_PLUS
 #include <HapticManager.h>
+#include <I2cBusLock.h>
 #endif
 #include <HalPowerManager.h>
 #include <HalSpiBus.h>
@@ -44,7 +46,6 @@
 #include <algorithm>
 #include <cstring>
 #include <iterator>
-#include <vector>
 
 #include "BootDiagnostics.h"
 #include "ButtonEventManager.h"
@@ -67,6 +68,7 @@
 #include "SerialBuffers.h"
 #include "SerialTestApi.h"
 #include "SilentRestart.h"
+#include "TouchGate.h"
 #include "UiFontScale.h"
 #include "WeatherSettingsStore.h"
 #include "WifiCredentialStore.h"
@@ -997,12 +999,12 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   renderer.insertFont(NOTOSANS_18_FONT_ID, notosans18FontFamily);
 #if FREEINK_DEVICE_METALIO_EINK4_PLUS
   // Two bitmap masters fit alongside CloudZao's app in its 5 MiB OTA layout.
-  renderer.insertScaledFont(SERIF_10_FONT_ID, serif14FontFamily, 10.0f / 14.0f);
-  renderer.insertScaledFont(SERIF_12_FONT_ID, serif14FontFamily, 12.0f / 14.0f);
-  renderer.insertScaledFont(SERIF_16_FONT_ID, serif18FontFamily, 16.0f / 18.0f);
-  renderer.insertScaledFont(NOTOSANS_10_FONT_ID, notosans14FontFamily, 10.0f / 14.0f);
-  renderer.insertScaledFont(NOTOSANS_12_FONT_ID, notosans14FontFamily, 12.0f / 14.0f);
-  renderer.insertScaledFont(NOTOSANS_16_FONT_ID, notosans18FontFamily, 16.0f / 18.0f);
+  renderer.insertScaledFont(SERIF_10_FONT_ID, serif14FontFamily, TextScale::ratio(10, 14));
+  renderer.insertScaledFont(SERIF_12_FONT_ID, serif14FontFamily, TextScale::ratio(12, 14));
+  renderer.insertScaledFont(SERIF_16_FONT_ID, serif18FontFamily, TextScale::ratio(16, 18));
+  renderer.insertScaledFont(NOTOSANS_10_FONT_ID, notosans14FontFamily, TextScale::ratio(10, 14));
+  renderer.insertScaledFont(NOTOSANS_12_FONT_ID, notosans14FontFamily, TextScale::ratio(12, 14));
+  renderer.insertScaledFont(NOTOSANS_16_FONT_ID, notosans18FontFamily, TextScale::ratio(16, 18));
 #else
   renderer.insertFont(SERIF_10_FONT_ID, serif10FontFamily);
   renderer.insertFont(SERIF_12_FONT_ID, serif12FontFamily);
@@ -1351,12 +1353,12 @@ void setup() {
   // re-runs holdPowerRails() with the resolved profile. It stays ahead of the serial
   // bring-up below because that one spends 250 ms in delay(): on a non-self-latching
   // unit the rail must already be held before anything blocks for that long.
-  BoardConfig::holdPowerRails();
-
 #if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // Check the expander power key before holdPowerRails() runs ensureBooted() and its 300 ms touch reset.
   powerManager.rejectNonPowerMetalioWake();
   WiFi.persistent(false);
 #endif
+  BoardConfig::holdPowerRails();
 
   // On a power-on reset the RTC timer started with the rail, so it minus millis() is what ran before the app: the ROM
   // and the second-stage bootloader. Read before anything below can block. The raw counter, not esp_rtc_get_time_us():
@@ -1532,6 +1534,12 @@ void setup() {
   // knows which board it is; the HAL takes a handle and asks no questions.
   HalI2cBus::adoptMutex(BoardT5S3::i2cMutexHandle());
 #endif
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // Share one recursive I2C mutex across HalI2cBus (touch/RTC/gauge) and the SDK's
+  // freeink::I2cBusLock (TPS65185 PMIC, TCA9555 expander, and haptic motor).
+  freeink::enableI2cBusLock();
+  HalI2cBus::adoptMutex(freeink::i2cBusMutex());
+#endif
   gpio.begin();
 #if FREEINK_DEVICE_METALIO_EINK4_PLUS
   LOG_INF("MAIN", "FT6336U input ready: %d", gpio.hasTouch());
@@ -1706,6 +1714,9 @@ void setup() {
     return;
   }
   BootDiag::markPhase(BootPhase::SdMount);
+  // Before anything opens a book's cache: a protected book's folder is enciphered under a key from this device's
+  // secret (lib/BookProtection/CacheAtRest.h), and opens nothing without it.
+  Storage.setCacheKeySource(book_protection::cacheFolderKey);
   // First point at which the card is writable. Files this boot's record and amends the
   // previous sleep's, so the pair "how the last sleep ended" / "how this boot started"
   // is on the card before anything later in setup() can hang or panic.
@@ -2007,6 +2018,12 @@ void setup() {
   logStartupMemory("setup_complete");
 }
 
+// Dark Mode the other way, from the slide switch or a key or gesture bound to it (BTN_TOGGLE_DARK_MODE).
+static void flipDarkMode() {
+  DarkModeNow::flip();  // saves; the next frame takes the new polarity with a full refresh
+  activityManager.requestUpdate();
+}
+
 // A board's slide switch (BOOX Picco) sets what it is bound to (SETTINGS.slideSwitchAction): at the first pass, when
 // it moves, and when the binding changes. The position is compared, not a change edge, because the input loops of the
 // transfer screens drain the edge before this runs. In between, the bound setting is free to change from the UI.
@@ -2028,9 +2045,16 @@ static void applySlideSwitch() {
       break;
     case CrossPointSettings::SLIDE_SWITCH_DARK_MODE:
       if (DarkModeNow::isDark() == on) return;
-      DarkModeNow::flip();  // saves; the next frame takes the new polarity with a full refresh
-      activityManager.requestUpdate();
+      flipDarkMode();
       break;
+    case CrossPointSettings::SLIDE_SWITCH_TOUCH: {
+      // On is touch on, as on is the light on: off is Touch Lock.
+      const uint8_t lock = on ? 0 : 1;
+      if (SETTINGS.touchLock == lock) return;
+      SETTINGS.touchLock = lock;
+      SETTINGS.saveToFile();
+      break;
+    }
     case CrossPointSettings::SLIDE_SWITCH_NOTHING:
     case CrossPointSettings::SLIDE_SWITCH_ACTION_COUNT:
       return;
@@ -2070,13 +2094,18 @@ void loop() {
   // After the exclusive-storage return: it saves settings to the card.
   applySlideSwitch();
 
-  // The UI touch gate, refreshed every tick from the setting and the activity on
-  // top. The reader keeps touch whatever this says — touchReaderControls governs
-  // it there, and giving one behaviour two switches only creates a way for a
-  // device to look broken. Reader SUB-screens (contents, dictionary, the menu)
-  // are UI screens and are gated with the rest.
-  mappedInputManager.setTouchEventsEnabled(SETTINGS.touchUiControls != CrossPointSettings::TOUCH_UI_OFF ||
-                                           activityManager.isReaderActivity());
+  // The UI touch gate, refreshed every tick from the settings and the activity on
+  // top (TouchGate.h). Touch Lock silences everything. Otherwise the reader keeps
+  // touch whatever Touch Navigation says — touchReaderControls governs it there,
+  // and giving one behaviour two switches only creates a way for a device to look
+  // broken. Reader SUB-screens (contents, dictionary, the menu) are UI screens and
+  // are gated with the rest: hence the reader ON TOP, not isReaderActivity(),
+  // which also answers true under them and left them live. An overlay pulled
+  // over the page (the light drawer) is the reader's, not a screen of its own:
+  // gated as the page, or a swipe on the page opens a drawer touch cannot use.
+  mappedInputManager.setTouchEventsEnabled(
+      TouchGate::eventsEnabled(SETTINGS.touchLock != 0, SETTINGS.touchUiControls != CrossPointSettings::TOUCH_UI_OFF,
+                               activityManager.readerOrItsOverlayOnTop()));
   // Must follow the drain above and precede every power consumer below.
   serviceBootPowerRelease();
   HalClock::updatePeriodic();
@@ -2203,7 +2232,7 @@ void loop() {
   // being followed to its frame): a device driven only over USB used to auto-sleep mid-test, and
   // to answer at 10 MHz, where the USB link can drop reply bytes unseen.
   if (serialCommandRan || SerialTestApi::commandPending() || gpio.wasAnyPressed() || gpio.wasAnyReleased() ||
-      gpio.isAnyPressed() || gpio.wasTouchActivity() || halTiltSensor.hadActivity() ||
+      gpio.isAnyPressed() || (gpio.wasTouchActivity() && SETTINGS.touchLock == 0) || halTiltSensor.hadActivity() ||
       activityManager.preventAutoSleep()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
@@ -2301,93 +2330,9 @@ void loop() {
     // nothing swaps twice.
     const bool mirrorLeftRight = activityManager.currentMirrorsLeftRight();
     auto actionFor = [&](const ButtonEventManager::ButtonEvent& ev) -> uint8_t {
-      const auto mirrored = [&](const uint8_t a) {
-        return mirrorLeftRight ? CrossPointSettings::mirroredDirection(a) : a;
-      };
-      switch (ev.button) {
-        case B::Back:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortBack;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoubleBack;
-            case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongBack;
-          }
-          break;
-        case B::Confirm:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortConfirm;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoubleConfirm;
-            case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongConfirm;
-          }
-          break;
-        case B::Left:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return mirrored(SETTINGS.btnShortLeft);
-            case ButtonEventManager::PressType::Double:
-              return mirrored(SETTINGS.btnDoubleLeft);
-            case ButtonEventManager::PressType::Long:
-              return mirrored(SETTINGS.btnLongLeft);
-          }
-          break;
-        case B::Right:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return mirrored(SETTINGS.btnShortRight);
-            case ButtonEventManager::PressType::Double:
-              return mirrored(SETTINGS.btnDoubleRight);
-            case ButtonEventManager::PressType::Long:
-              return mirrored(SETTINGS.btnLongRight);
-          }
-          break;
-        case B::PageBack:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortPageBack;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoublePageBack;
-            case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongPageBack;
-          }
-          break;
-        case B::PageForward:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortPageForward;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoublePageForward;
-            case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongPageForward;
-          }
-          break;
-        case B::Power:
-          switch (ev.type) {
-            case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortPower;
-            case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoublePower;
-            case ButtonEventManager::PressType::Long:
-              // Unreachable, and left that way on purpose. The power-hold timer above
-              // sleeps the device at getPowerButtonDuration() (400 ms), so the press is
-              // long gone before ButtonEventManager's LONG_PRESS_MS (1000 ms) could emit a
-              // Long for Power. btnLongPower survives only as the settings screen's way of
-              // stating "Long press: Sleep" (SettingsList.h gives it that single option and
-              // no selector); dispatching it here would imply it were configurable.
-              break;
-          }
-          break;
-        default:
-          break;  // Up/Down are the PageBack/PageForward buttons under their list-navigation
-                  // names. The FSM emits both names for one press, and the PageBack/PageForward
-                  // event above already carries the configured action — so these fall through
-                  // to the activity, which is what list-style activities match on.
-      }
-      return BA::BTN_DEFAULT;
+      const uint8_t action = ButtonEventManager::configuredAction(ev.button, ev.type);
+      const bool sideways = ev.button == B::Left || ev.button == B::Right;
+      return sideways && mirrorLeftRight ? CrossPointSettings::mirroredDirection(action) : action;
     };
     // Reader-scoped actions are only meaningful inside the reader (they funnel through
     // dispatchButtonAction(), a no-op elsewhere). When such an action is configured on a
@@ -2413,19 +2358,14 @@ void loop() {
     // ladder would not stay that way. Returns false only when the device is on
     // its way into deep sleep and the caller must stop.
     auto runAction = [&](const BA action) -> bool {
+      // A reader action is the screen's to carry out (Activity::onButtonAction()). Whether it reaches the screen at
+      // all is decided before this is called: the button loop below lets it fall through outside the reader, and
+      // the gesture path does not claim the contact.
+      if (isReaderScopedAction(action)) {
+        activityManager.dispatchButtonAction(action);
+        return true;
+      }
       switch (action) {
-        case BA::BTN_PAGE_FORWARD:
-          activityManager.dispatchButtonAction(BA::BTN_PAGE_FORWARD);
-          break;
-        case BA::BTN_PAGE_BACK:
-          activityManager.dispatchButtonAction(BA::BTN_PAGE_BACK);
-          break;
-        case BA::BTN_PAGE_FORWARD_10:
-          activityManager.dispatchButtonAction(BA::BTN_PAGE_FORWARD_10);
-          break;
-        case BA::BTN_PAGE_BACK_10:
-          activityManager.dispatchButtonAction(BA::BTN_PAGE_BACK_10);
-          break;
         case BA::BTN_GO_HOME:
           activityManager.goHome();
           break;
@@ -2457,52 +2397,13 @@ void loop() {
           }
           break;
         }
-        case BA::BTN_OPEN_TOC:
-          activityManager.dispatchButtonAction(BA::BTN_OPEN_TOC);
-          break;
         case BA::BTN_OPEN_BOOKMARKS:
           activityManager.goToGlobalBookmarks();
-          break;
-        case BA::BTN_STAR_PAGE:
-          activityManager.dispatchButtonAction(BA::BTN_STAR_PAGE);
-          break;
-        case BA::BTN_FOOTNOTES:
-          activityManager.dispatchButtonAction(BA::BTN_FOOTNOTES);
-          break;
-        case BA::BTN_NEXT_SECTION:
-          activityManager.dispatchButtonAction(BA::BTN_NEXT_SECTION);
-          break;
-        case BA::BTN_PREV_SECTION:
-          activityManager.dispatchButtonAction(BA::BTN_PREV_SECTION);
-          break;
-        case BA::BTN_EXIT_READER:
-          activityManager.dispatchButtonAction(BA::BTN_EXIT_READER);
-          break;
-        case BA::BTN_READER_MENU:
-          activityManager.dispatchButtonAction(BA::BTN_READER_MENU);
-          break;
-        case BA::BTN_READER_BARS:
-          activityManager.dispatchButtonAction(BA::BTN_READER_BARS);
           break;
         case BA::BTN_CONFIRM:
           mappedInputManager.injectLogicalPress(B::Confirm);
           buttonEventManager.pushEventFront(
               {B::Confirm, ButtonEventManager::PressType::Short, millis(), /*bypassActionMapping=*/true});
-          break;
-        case BA::BTN_KOREADER_SYNC:
-          activityManager.dispatchButtonAction(BA::BTN_KOREADER_SYNC);
-          break;
-        case BA::BTN_TOGGLE_BIONIC_READING:
-          activityManager.dispatchButtonAction(BA::BTN_TOGGLE_BIONIC_READING);
-          break;
-        case BA::BTN_CYCLE_FONT_SIZE:
-          activityManager.dispatchButtonAction(BA::BTN_CYCLE_FONT_SIZE);
-          break;
-        case BA::BTN_FONT_SIZE_SMALLER:
-          activityManager.dispatchButtonAction(BA::BTN_FONT_SIZE_SMALLER);
-          break;
-        case BA::BTN_FONT_SIZE_LARGER:
-          activityManager.dispatchButtonAction(BA::BTN_FONT_SIZE_LARGER);
           break;
         case BA::BTN_TOGGLE_TOUCH_UI: {
           const bool enabled = SETTINGS.touchUiControls == CrossPointSettings::TOUCH_UI_OFF;
@@ -2513,17 +2414,19 @@ void loop() {
           LOG_INF("MAIN", "Touch navigation %s", enabled ? "on" : "off");
           break;
         }
-        case BA::BTN_CYCLE_ORIENTATION:
-          activityManager.dispatchButtonAction(BA::BTN_CYCLE_ORIENTATION);
+        case BA::BTN_TOGGLE_DARK_MODE:
+          flipDarkMode();
+          LOG_INF("MAIN", "Dark Mode %s", DarkModeNow::isDark() ? "on" : "off");
           break;
-        case BA::BTN_CYCLE_ORIENTATION_BACK:
-          activityManager.dispatchButtonAction(BA::BTN_CYCLE_ORIENTATION_BACK);
+        case BA::BTN_TOGGLE_TOUCH_LOCK:
+          SETTINGS.touchLock = SETTINGS.touchLock ? 0 : 1;
+          SETTINGS.saveToFile();
+          // Applied by the touch gate at the top of the next tick, like Toggle Touch Navigation.
+          LOG_INF("MAIN", "Touch lock %s", SETTINGS.touchLock ? "on" : "off");
           break;
-        case BA::BTN_QUICK_OVERRIDES:
-          activityManager.dispatchButtonAction(BA::BTN_QUICK_OVERRIDES);
-          break;
-        case BA::BTN_DICTIONARY:
-          activityManager.dispatchButtonAction(BA::BTN_DICTIONARY);
+        case BA::BTN_SCREENSHOT:
+          // Taken by ScreenshotUtil::service() on the next pass, or a few passes on if a render holds the buffers.
+          ScreenshotUtil::request(ScreenshotUtil::Target::Card);
           break;
         // Frontlight control is global — handled here rather than through
         // dispatchButtonAction() because it is not the activity's business, and
@@ -2549,6 +2452,11 @@ void loop() {
           SETTINGS.saveToFile();
           break;
         }
+        case BA::BTN_LIGHT_PANEL:
+#if CP_TOUCH_UI
+          activityManager.requestLightPanel();
+#endif
+          break;
         case BA::BTN_LIGHT_WARMER:
         case BA::BTN_LIGHT_COOLER: {
           const int delta =
@@ -2567,6 +2475,8 @@ void loop() {
           // leak through as a page turn.
           break;
         default:
+          // The reader actions, handed to the screen above, and BTN_DEFAULT, which never gets here: the callers
+          // leave the press to the screen.
           break;
       }
       return true;
@@ -2577,11 +2487,18 @@ void loop() {
     mappedInputManager.setConfirmWaitsForGesture(confirmWaits);
 
     ButtonEventManager::ButtonEvent ev;
-    std::vector<ButtonEventManager::ButtonEvent> defaultEvents;
-    defaultEvents.reserve(8);
+    // The events left to the screen, put back at the front of the queue in their order after this pass. An array, not
+    // a vector: this runs on every loop pass, and a vector reserved here allocated on every one of them, events or
+    // not. Each event taken off the queue leaves at most one here (itself, or the Back or Confirm press its action
+    // puts back in its place), so the queue's capacity bounds it.
+    ButtonEventManager::ButtonEvent defaultEvents[ButtonEventManager::MAX_QUEUED_EVENTS];
+    int defaultCount = 0;
+    const auto leaveToScreen = [&](const ButtonEventManager::ButtonEvent& event) {
+      if (defaultCount < ButtonEventManager::MAX_QUEUED_EVENTS) defaultEvents[defaultCount++] = event;
+    };
     while (buttonEventManager.consumeEvent(ev)) {
       if (ev.bypassActionMapping) {
-        defaultEvents.push_back(ev);
+        leaveToScreen(ev);
         continue;
       }
       const uint8_t action = actionFor(ev);
@@ -2593,18 +2510,19 @@ void loop() {
       if (keptByScreen || action == BA::BTN_DEFAULT ||
           (isReaderScopedAction(action) &&
            !activityManager.currentTakesButtonAction(static_cast<BA>(action), ev.button))) {
-        defaultEvents.push_back(ev);
+        leaveToScreen(ev);
         continue;
       }
       if (!runAction(static_cast<BA>(action))) return;
     }
 
-    for (auto it = defaultEvents.rbegin(); it != defaultEvents.rend(); ++it) {
-      if (confirmWaits && it->button == B::Confirm && !it->offeredToPolling) {
+    for (int i = defaultCount - 1; i >= 0; --i) {
+      ButtonEventManager::ButtonEvent& held = defaultEvents[i];
+      if (confirmWaits && held.button == B::Confirm && !held.offeredToPolling) {
         mappedInputManager.injectLogicalPress(B::Confirm);
-        it->offeredToPolling = true;
+        held.offeredToPolling = true;
       }
-      buttonEventManager.pushEventFront(*it);
+      buttonEventManager.pushEventFront(held);
     }
 
     // Gestures. In the reader every gesture is live; elsewhere only swipes and
@@ -2634,6 +2552,13 @@ void loop() {
   const unsigned long activityStartTime = millis();
   activityManager.loop();
   const unsigned long activityDuration = millis() - activityStartTime;
+  // Time spent inside the activity's loop() is work, not idle time. The OPDS browser downloads a book whole inside one
+  // call, and turns DOWNLOADING (which holds off auto-sleep) only inside it, after the sleep check above: a download
+  // longer than the sleep timeout put the device to sleep the moment it returned. Both clocks move, as the idle
+  // governor below reads lastActivityTime and would light-sleep straight after the download. Both were stamped before
+  // the call, so neither passes millis(). Ported from crosspoint-reader PR #4538 (John Stader, @jstader).
+  lastActivityTime += activityDuration;
+  sleepTimerStart += activityDuration;
 
   // After the activity's pass, so a pending CMD:IDLE sees what it queued.
   SerialTestApi::service();

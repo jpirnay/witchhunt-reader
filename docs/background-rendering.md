@@ -8,7 +8,10 @@ For the memory model these mechanisms operate under — the borrow-vs-release di
 particular, which is what shapes B's and C's gates — see
 [memory-allocation-strategy.md](memory-allocation-strategy.md). For what the borrowed buffer holds
 and what lending it does to the display, see
-[secondary-buffer-management.md](secondary-buffer-management.md).
+[secondary-buffer-management.md](secondary-buffer-management.md). For the priority order all of
+this follows (the complete page, then its pictures, then the rest), its rules and what each panel
+controller needs from the framebuffers, see
+[design/reader-priority-scheme.md](design/reader-priority-scheme.md).
 
 ## Task model
 
@@ -96,8 +99,15 @@ before the anchors), the first time its chapter is shown complete, its page take
 the KOReader sync's mappers, which cannot be aborted: the step waits for what the glyph-store step waits for (the
 look-ahead gates and `BG_BUILD_BORROW_QUIET_MS` since the last page landed) and for no gesture in flight, parses at
 most once a tick, and does it in the lent secondary framebuffer, never on the heap. A star-marker change found while
-input waits is redrawn only once input is idle and the page is still on screen. A jump goes by the offset; without one
-it resolves the XPath on the spot. Each parse logs `STAR` at INF with its time.
+input waits is redrawn only once input is idle and the page is still on screen (`starMarkerRedraw_`). A jump goes by
+the offset; without one it resolves the XPath on the spot. Each parse logs `STAR` at INF with its time.
+
+Accepted: one slower page turn per relayout. When a star settles onto the page on screen, or off it, the reader redraws
+that page for the status bar's star. If that redraw has already started when a turn is pressed, the turn waits for its
+refresh: +0.4-0.5 s on the Picco (2 of 4 trials), once per relayout and only when a bookmark lands on the page on
+screen. It is one of the two redraws that break rule R7 of
+[design/reader-priority-scheme.md](design/reader-priority-scheme.md) (a complete page is not drawn again for class 3
+reasons).
 
 ---
 
@@ -207,7 +217,9 @@ before B; one page per tick.
   image is never a placeholder (`ImageBlock::wouldShowPlaceholder()` checks the cache with a stat
   before it probes the image's size).
 - **Preemption and misses:** input aborts the decode (`CooperativeAbort`); the page is retried after
-  the next settle. A page that comes back incomplete without input (an unsupported or corrupt
+  the next settle. A JPEG parks instead: its caches keep their finished rows in `.part` files, a checkpoint
+  (`ImageBlock::checkpointPath()`) holds the decoder's state, and a resume decodes one band (progressive) or
+  `kResumeMinRows` (4) MCU rows (baseline) before it polls again, so a resume always makes progress (#837). A page that comes back incomplete without input (an unsupported or corrupt
   image, a decode refused for heap) gets `kImageWarmMaxTries` (2) attempts per session.
 - **After a warm:** if the page on screen showed those images as placeholders, it is redrawn from
   the cache unless input is waiting. If the warmed page is the one after the page on screen, the
@@ -274,18 +286,25 @@ cache hit, not a blocking parse. `stepBackgroundSectionBuild()`, one bounded sli
     leaves a truncated section, CSS lookups degrade, an image header that does not fit is refused),
     and B discards every such result. 1.5 s is sized against a cheap retry (setup + parse ~950 ms on
     an X3).
-  - **Cost:** while B holds the block the reader has no AA (`secondaryBufferDegraded_`). B seeds
-    nothing and opts into no single-buffer fast differential: every render takes the block back
-    first (`recoverSecondaryBufferIfNeeded()`), so no refresh happens while B holds it. For that
+  - **Cost:** while B holds the block the reader has no AA (`secondaryBufferDegraded_`). On the X4
+    the borrow first seeds RED from the block while it still holds the frame on screen
+    (`beginBackgroundBorrow()`, `BuildThroughGate::seedsRed()`, #805); elsewhere it seeds nothing.
+    B opts into no single-buffer fast differential: every render takes the block back
+    first (`recoverSecondaryBufferIfNeeded()`), so no refresh happens while B holds it. On the C3s,
+    where the block is the secondary framebuffer, the turn after a borrow loses its one-pass
+    refresh: the block held the frame on screen (open work in
+    [future_work/reader-priority-scheme.md](future_work/reader-priority-scheme.md)). For that
     reason a clock-minute status-bar tick waits while B holds the block (`shouldSkipPeriodicUpdate()`
     sets `statusRefreshDeferred_`, and `endBackgroundBorrow()` requests the refresh when the block
     comes back); a page turn still renders at once.
-  - **Build-through (X3 only):** on the last `BG_BUILD_THROUGH_PAGES` (3) pages of a chapter, B's
+  - **Build-through (X3, X4):** on the last `BG_BUILD_THROUGH_PAGES` (3) pages of a chapter, B's
     build of the next chapter starts without the quiet period and keeps the block across page turns.
     Those pages draw in B/W with the normal refresh, without AA or a pre-render. If the reader gets
-    to the next chapter first, C adopts the live build. X3 only, because its controller keeps the
-    displayed frame as its own baseline; elsewhere the SSD1677's RED would first need seeding from a
-    frame the lent buffer may no longer hold.
+    to the next chapter first, C adopts the live build. The X3's controller keeps the displayed
+    frame as its own baseline. The X4 diffs against RED, so its build-through starts only while RED
+    is still the frame B's borrow seeded, and keeps its pages FAST in single-buffer fast
+    differential (`BuildThroughGate`, #805). Not where B lends a PSRAM arena: there the display
+    loses no buffer, and a build-through would only give up AA and the pre-render.
   - **No decode beside the build:** a page render that finds an image to decode while B keeps the
     buffer (`renderContents()`) has B yield it first, and renders as if B had never held it. It
     used to decode on the heap beside the build (X3, 2026-10-19, anti-aliasing off: a JPEG at

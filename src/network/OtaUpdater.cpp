@@ -18,6 +18,7 @@
 #include "FirmwareFlasher.h"
 #include "HttpDownloader.h"
 #include "OtaBootSwitch.h"
+#include "ReleaseVersion.h"
 #include <bootloader_common.h>
 #include <esp_flash_partitions.h>
 #include <esp_heap_caps.h>
@@ -158,70 +159,7 @@ bool OtaUpdater::isUpdateNewer() const {
   if (!updateAvailable || latestVersion.empty() || latestVersion == CROSSPOINT_VERSION) {
     return false;
   }
-
-  int currentMajor = 0, currentMinor = 0, currentPatch = 0, currentBetaRelease = 0, currentBetaBuild = 0;
-  int latestMajor = 0, latestMinor = 0, latestPatch = 0, latestBetaRelease = 0, latestBetaBuild = 0;
-
-  const auto currentVersion = CROSSPOINT_VERSION;
-  const bool currentIsBeta = strstr(currentVersion, "-rc.") != nullptr;
-  const bool latestIsBeta = latestVersion.find("-rc.") != std::string::npos;
-
-  // Semantic version check with optional RC suffix. `sscanf()` will stop when
-  // it reaches part of the input string that doesn't match the format, so this
-  // format string works for versions like "1.31", "1.34.2", "1.35.0-rc.1", and
-  // "1.36.0-rc.2.5".
-  // This does not handle versions using the old "rc.<hash>" format, but
-  // considering that people will need to manually install this release or later
-  // to get this functionality anyway that should be fine.
-  sscanf(latestVersion.c_str(), "%d.%d.%d-rc.%d.%d", &latestMajor, &latestMinor, &latestPatch, &latestBetaRelease,
-         &latestBetaBuild);
-  sscanf(currentVersion, "%d.%d.%d-rc.%d.%d", &currentMajor, &currentMinor, &currentPatch, &currentBetaRelease,
-         &currentBetaBuild);
-
-  /*
-   * Compare major versions.
-   * If they differ, return true if latest major version greater than current major version
-   * otherwise return false.
-   */
-  if (latestMajor != currentMajor) return latestMajor > currentMajor;
-
-  /*
-   * Compare minor versions.
-   * If they differ, return true if latest minor version greater than current minor version
-   * otherwise return false.
-   */
-  if (latestMinor != currentMinor) return latestMinor > currentMinor;
-
-  /*
-   * Check patch versions.
-   */
-  if (latestPatch != currentPatch) return latestPatch > currentPatch;
-
-  /*
-   * If we reach here, the stable version segments are equal. A stable release
-   * is newer than an RC with the same version.
-   */
-  if (!latestIsBeta && currentIsBeta) {
-    return true;
-  }
-
-  if (latestIsBeta && !currentIsBeta) {
-    return false;
-  }
-
-  /*
-   * If both versions are RCs, compare their RC release and build numbers.
-   */
-  if (latestIsBeta && currentIsBeta) {
-    if (latestBetaRelease != currentBetaRelease) {
-      return latestBetaRelease > currentBetaRelease;
-    }
-    if (latestBetaBuild != currentBetaBuild) {
-      return latestBetaBuild > currentBetaBuild;
-    }
-  }
-
-  return false;
+  return isNewerRelease(parseReleaseVersion(latestVersion.c_str()), parseReleaseVersion(CROSSPOINT_VERSION));
 }
 
 const std::string& OtaUpdater::getLatestVersion() const { return latestVersion; }
@@ -256,6 +194,13 @@ void OtaUpdater::cancelUpdate() {
 OtaUpdater::OtaUpdaterError OtaUpdater::beginInstallUpdate() {
   if (!isUpdateNewer()) {
     return UPDATE_OLDER_ERROR;
+  }
+  // The digest is the only check of the whole image: esp_ota_end()'s own validation is bypassed for
+  // unsigned builds (see the boot switch below). Without one, the size would be the only test, so
+  // refuse here, before the download. Every release since 2.40 lists a digest for every board asset.
+  if (!otaHasSha256) {
+    LOG_ERR("OTA", "the release lists no SHA-256 for %s; refusing to install it", otaUrl.c_str());
+    return NO_CHECKSUM_ERROR;
   }
 
   cleanupUpdate();
@@ -514,17 +459,21 @@ OtaUpdater::OtaUpdaterError OtaUpdater::performInstallUpdateStep() {
     installResult = CHECKSUM_ERROR;
     return installResult;
   }
-  if (otaHasSha256) {
-    if (memcmp(digest, otaSha256, sizeof(digest)) != 0) {
-      LOG_ERR("OTA", "image SHA-256 differs from the release's digest");
-      cleanupUpdate();
-      installResult = CHECKSUM_ERROR;
-      return installResult;
-    }
-    LOG_INF("OTA", "image SHA-256 matches the release's digest");
-  } else {
-    LOG_INF("OTA", "the release lists no SHA-256 for this asset; size checked only");
+  // beginInstallUpdate() refused a release without a digest. Checked again here so that no path
+  // reaches the boot switch with an image nothing has verified.
+  if (!otaHasSha256) {
+    LOG_ERR("OTA", "no SHA-256 to check the image against");
+    cleanupUpdate();
+    installResult = NO_CHECKSUM_ERROR;
+    return installResult;
   }
+  if (memcmp(digest, otaSha256, sizeof(digest)) != 0) {
+    LOG_ERR("OTA", "image SHA-256 differs from the release's digest");
+    cleanupUpdate();
+    installResult = CHECKSUM_ERROR;
+    return installResult;
+  }
+  LOG_INF("OTA", "image SHA-256 matches the release's digest");
 
   esp_err_t finish_err = esp_ota_end(handle);
   otaWriteHandle = nullptr;

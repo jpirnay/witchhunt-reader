@@ -356,6 +356,20 @@ void XtcReaderActivity::renderPage() {
   LOG_DBG("XTR", "Rendered page %lu/%lu (%u-bit)", currentPage + 1, xtc->getPageCount(), bitDepth);
 }
 
+ScreenshotInfo XtcReaderActivity::screenshotInfo() const {
+  ScreenshotInfo info;
+  if (!xtc) return info;
+  info.title = xtc->getTitle();
+  const uint32_t pageCount = xtc->getPageCount();
+  if (pageCount > 0) {
+    // currentPage == pageCount is the end-of-book screen: name the last page.
+    const uint32_t page = currentPage < pageCount ? currentPage : pageCount - 1;
+    info.page = static_cast<int>(page) + 1;
+    info.percent = xtc->calculateProgress(page);
+  }
+  return info;
+}
+
 void XtcReaderActivity::saveProgress() const {
   FsFile f;
   if (Storage.openFileForWrite("XTR", xtc->getCachePath() + "/progress.bin", f)) {

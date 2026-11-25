@@ -20,6 +20,9 @@ This document describes all HTTP, WebDAV and WebSocket endpoints available on th
   - [Settings](#settings)
     - [GET `/api/settings` - List Settings](#get-apisettings---list-settings)
     - [POST `/api/settings` - Change Settings](#post-apisettings---change-settings)
+  - [Home Screen](#home-screen)
+    - [GET `/api/home-layout` - The Layout and the Screen](#get-apihome-layout---the-layout-and-the-screen)
+    - [POST `/api/home-layout` - Save the Layout](#post-apihome-layout---save-the-layout)
   - [Reading Stats](#reading-stats)
     - [GET `/api/stats` - Dashboard Data](#get-apistats---dashboard-data)
     - [GET `/api/stats/export` - Download a Backup](#get-apistatsexport---download-a-backup)
@@ -68,6 +71,7 @@ the setup page and every other page redirects (`302`) to `/setup`.
 | `/setup`      | Setup page: installs the web interface, and uploads books without it |
 | `/files`      | File Manager                               |
 | `/settings`   | Settings                                   |
+| `/home-screen`| Home Screen: the Lyra Tiles Home's rows, with a preview, picture upload and save |
 | `/stats`      | Reading Stats                              |
 | `/fonts`      | Font Manager                               |
 | `/dictionary` | Dictionaries: lists, installs and removes StarDict dictionaries |
@@ -243,10 +247,11 @@ curl http://crosspoint.local/api/status/fast
 
 ### GET `/api/diagnostics/boot` - Boot and Sleep History
 
-What the device's **Settings → System → Boot Diagnostics** screen shows: the
-hardware variant, how this boot started, and the last 16 sleep and boot events
-kept on the card (`/.crosspoint/bootdiag.bin`). Values are the same short English
-tokens the screen prints, untranslated, so reports from different devices compare.
+The boot and sleep history the device records: the hardware variant, how this
+boot started, and the last 16 sleep and boot events kept on the card
+(`/.crosspoint/bootdiag.bin`). Builds with `ENABLE_BOOT_DIAGNOSTICS_SCREEN` also
+show it on the device under **Settings → System → Boot Diagnostics**. Values are
+short English tokens, untranslated, so reports from different devices compare.
 The Diagnostics page reads it and saves it, with `/api/status`, as a bug report.
 Streamed; no parameters.
 
@@ -685,6 +690,59 @@ value, so the page sends it only when the user typed something.
 
 ---
 
+## Home Screen
+
+The Home Screen page edits `/.crosspoint/home.json`, Lyra Tiles' **Custom** layout
+([home-layout.md](home-layout.md)). The device cannot draw Home while it serves the page, so the page
+lays the rows out itself (`js/home-layout.js`: the same parser, filter and placement as
+`HomeTilesLayout`, checked against the device's own code by `test/web/home_layout_test.mjs`).
+Pictures go through `/upload` into `/home`, scaled down in the browser first (longest side
+1200 px, JPEG).
+
+### GET `/api/home-layout` - The Layout and the Screen
+
+```bash
+curl http://crosspoint.local/api/home-layout
+```
+
+```json
+{"file": "{\"version\":1,\"rows\":[[{\"widget\":\"book\"}]]}",
+ "screen": {"w": 480, "h": 800}, "content": [0, 0, 480, 760], "top": 40, "compact": false,
+ "available": ["library", "stats", "transfer", "weather", "recent"]}
+```
+
+| Field       | Description |
+| ----------- | ----------- |
+| `file`      | `home.json` as it is on the card; absent when there is none (or it is over 4 KB) |
+| `screen`    | The panel as it is held now, in pixels |
+| `content`   | `[x, y, w, h]`: where Lyra Tiles lays Home out, above the button hints, with Lyra Tiles' metrics whatever theme is in use |
+| `top`       | The first line under the status line |
+| `compact`   | The compact panel's sizes (Murphy M3) |
+| `available` | The destinations with something behind them now; a shortcut to another is left out on Home |
+
+### POST `/api/home-layout` - Save the Layout
+
+Saves the body as `/.crosspoint/home.json`, written whole through a temporary file, once the
+device's own parser reads it as a layout (version 1, at least one widget it knows). The page then
+sets `uiTheme` and `homeLayout` through `POST /api/settings`.
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"version":1,"rows":[[{"widget":"book"}],[{"widget":"clock"},{"widget":"picture"}]]}' \
+  http://crosspoint.local/api/home-layout
+```
+
+**Response (200 OK):** `Saved`
+
+| Status | Body                                   | Cause |
+| ------ | -------------------------------------- | ----- |
+| 400    | `Missing JSON body`                    | No body |
+| 400    | `Layout too large`                     | Over 4 KB |
+| 400    | `Not a layout this reader can show`    | Another version, no rows, or no widget it knows |
+| 500    | `The layout file could not be written` | SD card error; the file on the card is as it was |
+
+---
+
 ## Reading Stats
 
 The numbers behind the Reading Stats screens. The history is read one book at a
@@ -885,6 +943,7 @@ curl http://crosspoint.local/api/plugins
 | `web`          | It has a `plugin.js`, which the Settings or File Manager page loads      |
 | `device`       | It has a `device.json`, a catalog the Plugins page opens                 |
 | `description`, `version`, `requires`, `allowedHosts` | From `manifest.json`, when present |
+| `wants`        | Hosts its device events were refused for and the user has not answered (at most 4), when there are any |
 
 Always 200 with an array; an unreadable or absent plugins folder yields `[]`.
 
@@ -978,8 +1037,14 @@ forwarded, so the caller infers the type from what it asked for.
 
 - **GET only.** A plugin cannot make the device POST anywhere.
 - **Allowlisted per plugin.** The host must appear in that plugin's
-  `manifest.json` `allowedHosts`. A bare entry matches exactly; one starting
-  with a dot matches that suffix. No list, no access.
+  `manifest.json` `allowedHosts`, or be one the user approved
+  (`/api/plugins/hosts`). A bare entry matches exactly; one starting
+  with a dot matches that suffix. Hosts compare without case. No list, no access.
+- **The host judged is the host reached.** The allowlist reads the URL with the
+  HTTP client's own parser (`crosspoint::splitUrl()`). A URL with user info
+  (`https://user@host/`, `https://a.com:443@b.com/`), a host with a byte other
+  than a letter, digit, `-`, `.` or `_` (an IPv6 literal among them), or a port
+  outside 1-65535 has no host to judge and is refused with `400`.
 - **Redirects stay inside the allowlist.** A redirect is followed only to a host
   the same `allowedHosts` list allows, or that the user approved. One to any
   other host fails the request with the same `403` and `host` as a refused first
@@ -994,8 +1059,8 @@ forwarded, so the caller infers the type from what it asked for.
 
 | Status | Cause                                                        |
 | ------ | ------------------------------------------------------------ |
-| 400    | Missing `plugin`/`url`, or a non-http(s) URL                  |
-| 403    | Host not listed in the plugin's `allowedHosts`                |
+| 400    | Missing `plugin`/`url`, a non-http(s) URL, or one with no host to judge |
+| 403    | Host not listed in the plugin's `allowedHosts`, nor approved  |
 | 502    | The fetch failed before any data arrived                      |
 | 503    | Heap too low to serve the request                             |
 
@@ -1027,8 +1092,12 @@ The relay plugins written for upstream crosspoint-reader use. Body (`application
 
 `GET` answers `{"<plugin>": ["host", ...]}`. `POST` (`application/json`) with
 `{"plugin": "<name>", "host": "<host>", "allow": true}` approves a host for that plugin (at most 16 a plugin),
-`"allow": false` takes the approval back. Stored in `/.crosspoint/plugin-hosts.json`; removing a plugin drops its
-approvals.
+`"allow": false` takes the approval back. The host is stored in lower case, and only one a URL can name (no port,
+user info or path) is approved. Stored in `/.crosspoint/plugin-hosts.json`; removing a plugin drops its
+approvals. An approval also answers the plugin's request for that host (`wants` in `/api/plugins`);
+`{"plugin": "<name>", "host": "<host>", "dismiss": true}` drops the request instead, and the plugin is not asked
+about that host again until it is installed anew. The requests live in the plugin's folder (`wanted-hosts`), so
+removing the plugin removes them.
 
 ### POST `/api/fetch` - Download to the SD Card
 

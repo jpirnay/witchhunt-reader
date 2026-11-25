@@ -18,7 +18,8 @@ class OtaUpdater {
   std::string otaUrl;
   size_t otaSize = 0;
   // The asset's SHA-256 from the release metadata (GitHub's "digest"), checked against the image
-  // before it may boot. Releases from before GitHub listed digests have none.
+  // before it may boot. A release without one is refused: beginInstallUpdate() returns
+  // NO_CHECKSUM_ERROR before anything is downloaded.
   uint8_t otaSha256[32] = {};
   bool otaHasSha256 = false;
   size_t processedSize = 0;
@@ -44,6 +45,8 @@ class OtaUpdater {
     WRONG_DEVICE_ERROR,
     // The downloaded image's SHA-256 is not the one the release metadata lists.
     CHECKSUM_ERROR,
+    // The release metadata lists no SHA-256 for the asset, so the image could not be checked.
+    NO_CHECKSUM_ERROR,
   };
 
   size_t getOtaSize() const { return otaSize; }

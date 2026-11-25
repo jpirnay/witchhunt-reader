@@ -468,6 +468,25 @@ check(sent.run.join() === 'reader.session,sleep.enter' && sent.wait.join() === '
       'the reader sends a request or a download with a destination; not require_meta, a download with nowhere to go, ' +
       'or book.downloaded (' + JSON.stringify(sent) + ')');
 
+// The hosts event URLs write out count as the plugin's own (plugin_events::literalHost() on the reader), and the
+// Plugins page names them under Reaches.
+check(P.literalHost('https://crosspoint-calendar.marczyk.ovh/current.bmp?w={cfg.width}') === 'crosspoint-calendar.marczyk.ovh' &&
+      P.literalHost('https://Img.Example:8443/{event.book}') === 'img.example' &&
+      P.literalHost('https://good.example?u={token}') === 'good.example', 'an event URL that writes its host out declares it');
+check(['{cfg.server}/x', 'https://{cfg.host}/x', 'https://good.example{cfg.x}/p', 'https://good.example:{cfg.port}/',
+       'https://evil.example:443@good.example/', 'https://{cfg.user}@good.example/', 'https://a\\.b/',
+       'https://h.example:70000/', 'ftp://good.example/', '', null].every((u) => P.literalHost(u) === ''),
+      'a host a template fills in, user info, an odd byte or a bad port declares nothing');
+const hostsOf = D({ events: {
+  'sleep.enter': { download: { url: 'https://Pics.example/a.bmp?w={cfg.w}', dest: '/sleep.bmp' } },
+  'reader.session': { request: { url: '{cfg.server}/syncs' } },
+  'reader.exit': { require_meta: 'id', request: { url: 'https://pics.example/b/{meta.id}' } },
+  'reader.open': { download: { url: 'https://nowhere.example/x' } },
+  book_finished: { request: { url: 'https://unknown.example/' } } } }).eventHosts;
+check(hostsOf.join() === 'pics.example',
+      'eventHosts: each written-out host once, of the handlers the reader can run (' + hostsOf.join() + ')');
+check(D({ browse: { url: 'u' } }).eventHosts.length === 0, 'a catalog without events names no hosts');
+
 // ---- Offset paging, lists, search and a download --------------------------------------------------------------------
 
 button(installedRow('News'), 'Open catalog').click();

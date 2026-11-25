@@ -9,10 +9,9 @@
 #include <HalStorage.h>
 #include <HalSystem.h>  // feedWatchdog()
 #include <I18n.h>
-#include <JpegToBmpConverter.h>
+#include <ImageToBmp.h>
 #include <Logging.h>
 #include <Memory.h>
-#include <PngToBmpConverter.h>
 #include <SeriesIndex.h>
 #include <SidecarFiles.h>
 #include <Txt.h>
@@ -89,31 +88,9 @@ std::string convertSidecarToBmp(const std::string& cacheDir, const std::string& 
     return Storage.copyFile("FIN", sidecarPath, bmpPath.c_str()) ? bmpPath : "";
   }
 
-  FsFile src;
-  if (!Storage.openFileForRead("FIN", sidecarPath, src)) {
-    return "";
-  }
-  FsFile dst;
-  if (!Storage.openFileForWrite("FIN", bmpPath, dst)) {
-    src.close();
-    return "";
-  }
-
-  bool ok = false;
-  if (FsHelpers::hasJpgExtension(sidecarPath)) {
-    ok = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(src, dst, width, height, scratch,
-                                                             CoverGridLayout::kThumbCrop);
-  } else if (FsHelpers::hasPngExtension(sidecarPath)) {
-    ok = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(src, dst, width, height, CoverGridLayout::kThumbCrop);
-  }
-
-  src.close();
-  dst.close();
-  if (!ok) {
-    Storage.remove(bmpPath.c_str());
-    return "";
-  }
-  return bmpPath;
+  const ImageToBmp::Target thumb{
+      .width = width, .height = height, .crop = CoverGridLayout::kThumbCrop, .scratch = scratch};
+  return ImageToBmp::convertFile("FIN", sidecarPath, bmpPath, thumb) ? bmpPath : "";
 }
 
 std::string getSidecarCoverBmpPath(const std::string& bookPath, int width, int height, BuildArena* scratch) {

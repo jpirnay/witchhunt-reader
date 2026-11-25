@@ -24,7 +24,7 @@ Not supported: dictionaries with 64-bit index offsets (`idxoffsetbits=64` in the
 2. Open **Settings → Reader → Dictionary** on the device.
 3. Select a dictionary from the list, or **None** to disable lookups.
 
-Keep the folder name to 31 characters or fewer: the reader remembers the chosen dictionary by its folder name and keeps no more than that, so a longer one cannot be selected.
+Keep the folder name to 127 bytes or fewer: 127 characters of plain English letters, fewer in a script whose letters take two or three bytes each. The reader lists no folder with a longer name.
 
 Folders containing more than one dictionary (multiple `.idx` stems) are skipped as ambiguous, as are folders holding an `.idx` with no matching `.dict`/`.dict.dz` next to it -- a dictionary that would only fail once you tried to use it.
 
@@ -36,7 +36,7 @@ Start **File Transfer** on the device, open its address in a browser and go to *
 
 - Choose the archive you downloaded (`.zip`, `.tar.gz`, `.tgz`, `.tar.bz2` or `.tar`) or the dictionary's own files (`.ifo`, `.idx` or `.idx.gz`, `.dict` or `.dict.dz`, optional `.syn`), or drop them on the page. Other archive formats (`.tar.xz`, `.7z`, `.rar`) are refused: repack them as `.zip`.
 - Your browser unpacks `.idx.gz` and `.syn.gz`, and offers to unpack `.dict.dz` to `.dict` (on by default, showing the size it will have). A dictionary with `idxoffsetbits=64`, or without an index or data file, is refused with the reason.
-- Each dictionary goes into its own folder under `/dictionaries`, named after the title in its `.ifo` (or the archive), shortened to 31 characters — you can change the name before installing. An archive holding several dictionaries is split into one folder each. A folder that already exists is replaced only after you confirm.
+- Each dictionary goes into its own folder under `/dictionaries`, named after the title in its `.ifo` (or the archive), shortened to 127 characters — you can change the name before installing. An archive holding several dictionaries is split into one folder each. A folder that already exists is replaced only after you confirm.
 - The list of installed dictionaries shows each one's title, word count, files and whether the reader can use it, and **Remove** deletes a dictionary's folder.
 
 Then choose the dictionary on the device as usual (**Settings → Reader → Dictionary**). Unpacking happens in the browser, so a large dictionary needs a current Chrome, Edge, Firefox or Safari and some patience while it uploads; a `.tar.bz2` is decoded more slowly than the other formats.
@@ -69,7 +69,12 @@ On the very first lookup with a dictionary (and again whenever the `.idx` or `.s
 2. **Synonyms** — on a miss, if the dictionary ships a `.syn` file, alternate spellings and irregular forms recorded there are resolved to their headword (e.g. `oxen` → `ox`, `colour` → `color`). This step is skipped if the `.sidx` sidecar could not be built (e.g. transient low memory during indexing); the dictionary otherwise stays usable, and the build is retried the next time it is opened.
 3. **Stemming** — still no match: common English word forms are retried automatically: possessives and plurals (`dogs` → `dog`, `stories` → `story`) and verb endings (`walked` → `walk`, `running` → `run`, `making` → `make`). A French elision with no entry of its own is looked up by the word after its apostrophe (`l’histoire` → `histoire`, `qu’après` → `après`); one the dictionary carries (`d'accord`) is found as it is.
 4. **Without vowel marks** — pointed Hebrew (niqqud and cantillation) and vowelled Arabic (harakat) that found nothing as written are looked up again, synonyms and all, without their vowel marks (`שָׁלוֹם` → `שלום`, `كَتَبَ` → `كتب`). A dictionary that lists pointed headwords keeps its exact hit. Arabic shaddah, maddah and hamza change the word and are kept.
-5. **Not found** — a short popup appears and you return to word selection.
+5. **Did you mean** — still nothing, but the dictionary has headwords close to the word: a list of up to eight opens under the word, best first. **Confirm** looks the chosen one up and shows its definition; **Back** returns to the page. Two kinds are offered:
+   - a headword the word starts with, at least three letters and half the word, longest first: the stem of a form the stemming above does not know (`fished` → `fish`, `kindness` → `kind`);
+   - a headword a few edits away: one letter added, dropped, changed, or two swapped; one edit for words up to four letters, two up to eight, three beyond (`quixotik` → `quixotic`, `recieve` → `receive`).
+
+   Stems come first, then the fewest edits; among equals the word's own letters in another order (`recieve` → `receive`) before other letters, and a headword that keeps the word's first letter before one that does not. Only headwords near the word in the index's alphabetical order are read: the window of the index it falls in and the windows either side, at most 768 headwords in a few blocks. The exception is a swap of the first two or the second and third letters (`teh` → `the`), which moves a word far away in that order: those two spellings are looked up directly. A stem whose spelling changes (`Häuser` → `Haus`) is too far away to be found. Case does not count, and a headword that differs only in case from one already listed is left out. A dictionary without its `.qidx` sidecar offers none.
+6. **Not found** — nothing close either: a short popup appears and you return to word selection.
 
 A word the dictionary lists more than once, one entry per part of speech for example, shows all of them, up to eight, each under its own word. Only the spelling that matched counts: `polish` does not bring in `Polish`. A synonym that names several headwords shows them all the same way, and a headword's own entries come with it.
 
@@ -91,7 +96,7 @@ What it does not do:
 - **No deinflection.** 食べた has no entry of its own and finds 食; 먹었습니다 finds nothing in CC-KEDICT. Each entry is headed by the word it is for, so you can see what was matched.
 - **The other script only where the dictionary has it.** The search covers the dictionary's word index and its `.syn`, and none of the Latin fallbacks above (no stemming, no lowercase retry). CC-CEDICT lists every traditional form as a synonym of its simplified headword, so 學校 finds 学校; a dictionary without them finds nothing for text in the other script.
 - **Characters your reading font lacks.** CC-CEDICT writes each word in both scripts (大学生 / 大學生). A font made for one region (Simplified Chinese, Japanese) lacks some characters of the other and draws them as a box; a font that carries both draws them all. The NotoSansCJK `.cpfont` family carries both scripts but not pinyin's ē, ǎ and ū, which drop out of the reading (dàxuéshēng shows as dàxuéshng); a TrueType family has them.
-- **Greedy matches.** The longest word is not always the one the sentence means: 研究生命 starts with 研究生 (graduate student), not 研究 (research). The shorter matches follow it in the definition.
+- **Greedy matches.** The longest word is not always the one the sentence means: 研究生命 starts with 研究生 (graduate student), not 研究 (research). The shorter matches follow it in the definition. Against a segmenter on the same text (word boundaries, F1), the longest match scores 0.74 on Hong Lou Meng with CC-CEDICT against `jieba` (0.88 without its HMM, 0.90 without it on the text mapped to simplified), and 0.77 on Soseki with JMdict against `fugashi` and UniDic; JMdict's long entries (吾輩は猫である, これと言う) and kana synonyms (はま from はまだ) make most of the Japanese misses.
 
 **Where to get them.** None of these ship as StarDict; [PyGlossary](https://github.com/ilius/pyglossary) converts them on a computer. Convert to a plain `.dict` (`dictzip=False`): it needs no 32 KB inflate window, which is hardest to find on a dense CJK page when the framebuffer cannot be lent.
 
@@ -116,6 +121,22 @@ Run the `pyglossary` command (`python -m pyglossary` does not start the converte
 | CC-CEDICT | 125,331 | 77,970 | 2.1 MB | 1.1 MB | 56.5 MB | 1.5 s (`.idx` 0.97 s, `.syn` 0.49 s) |
 | JMdict_e | 218,975 | 550,503 | 4.7 MB | 15.8 MB | 62.0 MB | 9.2 s (`.idx` 2.1 s, `.syn` 7.1 s) |
 | CC-KEDICT | 13,669 | none | 0.2 MB | none | 1.8 MB | 0.1 s |
+
+### How the CJK search is built
+
+For developers. Shipped in #574, with the heap fix of #569 beside it; the plan is `docs/superpowers/plans/2026-10-23-cjk-dictionary.md`. Open
+follow-ups are in [future_work/cjk.md](future_work/cjk.md#dictionary-on-cjk-pages).
+
+- **The run** (`CjkLookupRun`). From the cursor's character: up to 12 code points across words and line ends, stopping at the first one that is not unspaced CJK or that `cleanWord` strips as punctuation; 々, 〆, ー and kana are kept. On Hangul, the token itself. Each code point remembers its word, so a match length maps back to a span of words.
+- **The search** (`Dictionary::resolvePrefixes`). Up to three headwords that are prefixes of the run, longest first, from the `.idx` and the `.syn` (a tie goes to the `.idx`), each with its run of same-headword entries (at most 8). None of the Latin fallbacks. It gives up between probes when a button press is waiting, which only the speculative search does.
+  - One descent per index file; a later, shorter target steps back from the window it left (`gallopSamples`).
+  - Sidecar samples are read in 512-byte blocks through whichever scan buffer is idle. A probe reads its window's first headword from its own scan, no `.syn` probe runs whose every hit the merge would drop, and a followed synonym finds its run in its own window (`followSynonym`).
+- **Definitions** (`readPrefixDefinitions`). Every entry of the longest match, then the shorter matches, in one buffer sized once within `MAX_DEFINITION_BYTES`, each entry under its headword. Drawn in the reader's font (`DictionaryWordSelectActivity::definitionFontId`).
+- **The word screen.** The highlight grows over the match with no extra press (speculation), Confirm looks it up, and the span is drawn on the differential path (2 runs, 2,048 bytes) or by the full repaint. A tap inside the span looks it up.
+- **Heap.** While a definition is open, the word screen's word arrays and snapshot are freed and rebuilt on return (8 ms for 232 words): +9.2 KB free heap when the definition opens, on the X4 with 12 KB of ballast (#569).
+- **Speed.** The maintainer's gate is the median of `ms / exact_ms` over 50 words per book, at most 1.5. #574's five speed-ups brought Hong Lou Meng with CC-CEDICT from 2.69 to 1.46; Soseki with JMdict went from 3.66 to 1.95, accepted with JMdict as best effort.
+- **Cost.** No cache or sidecar version changed; `gh_release` flash +9,044 B, static RAM +0 B.
+- **Tests.** `test/dictionary/DictionaryTest.cpp` (the prefix search and its read counts, the definitions) and `test/dictionary/CjkLookupRunTest.cpp`. `CMD:ACT:DICT` reports the run, the hits, their entries, probes, reads and both timings (`docs/serial-test-api.md`).
 
 ## The Definition Screen
 

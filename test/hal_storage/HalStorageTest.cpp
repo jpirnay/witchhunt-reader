@@ -33,6 +33,7 @@ time_t now() { return 0; }
 // throwing new that fails aborts the device (-fno-exceptions), so the HAL must not rely on one.
 namespace {
 bool refuseNothrowNew = false;
+size_t refuseNothrowSize = 0;  // not 0: only the nothrow ones of this size are refused
 size_t heapNews = 0;
 size_t heapDeletes = 0;
 }  // namespace
@@ -43,7 +44,7 @@ void* operator new(const std::size_t size) {
   throw std::bad_alloc();
 }
 void* operator new(const std::size_t size, const std::nothrow_t&) noexcept {
-  if (refuseNothrowNew) return nullptr;
+  if (refuseNothrowNew || (refuseNothrowSize != 0 && size == refuseNothrowSize)) return nullptr;
   ++heapNews;
   return std::malloc(size != 0 ? size : 1);
 }
@@ -109,11 +110,13 @@ class HalStorageTest : public ::testing::Test {
     SDCardManager::getInstance().vol = &vol_;
     ASSERT_TRUE(Storage.begin());
     refuseNothrowNew = false;
+    refuseNothrowSize = 0;
     heapNews = 0;
     heapDeletes = 0;
   }
   void TearDown() override {
     refuseNothrowNew = false;
+    refuseNothrowSize = 0;
     EXPECT_EQ(hostSemaphoreDepth(), 0) << "a StorageLock was not given back";
     SDCardManager::getInstance().vol = nullptr;
   }
@@ -327,6 +330,182 @@ TEST_F(HalStorageTest, ARemoveLeavesAFolderAsItWas) {
   EXPECT_FALSE(Storage.remove("/Kept"));
   EXPECT_TRUE(vol_.exists("/Kept"));
   EXPECT_EQ(attributes("/Kept") & FS_ATTRIB_READ_ONLY, FS_ATTRIB_READ_ONLY);
+}
+
+// --- The at-rest cipher of a book cache folder (lib/CacheCipher/CacheCipherFile.h, D2) -------------------------------
+
+bool testFolderKey(const uint8_t (&salt)[cache_cipher::kSaltBytes], uint8_t (&key)[cache_cipher::kKeyBytes]) {
+  for (size_t i = 0; i < sizeof(key); ++i) key[i] = static_cast<uint8_t>(0x3C ^ (i * 7) ^ salt[i % sizeof(salt)]);
+  return true;
+}
+
+class CacheCipherStorageTest : public HalStorageTest {
+ protected:
+  static constexpr const char* kFolder = "/.crosspoint/epub_7";
+  static constexpr const char* kFile = "/.crosspoint/epub_7/spines/0/html_1.bin";
+  static constexpr const char* kText = "Call me Ishmael. Some years ago - never mind how long precisely";
+
+  void SetUp() override {
+    HalStorageTest::SetUp();
+    Storage.setCacheKeySource(testFolderKey);  // also forgets the folders of the last test's card
+    ASSERT_TRUE(vol_.mkdir("/.crosspoint/epub_7/spines/0"));
+    ASSERT_TRUE(Storage.markCacheFolderEnciphered(kFolder));
+  }
+  void TearDown() override {
+    Storage.setCacheKeySource(nullptr);
+    HalStorageTest::TearDown();
+  }
+
+  void write(const char* path, const std::string& text) {
+    HalFile file;
+    ASSERT_TRUE(Storage.openFileForWrite("TEST", path, file));
+    ASSERT_EQ(file.write(text.data(), text.size()), text.size());
+    ASSERT_TRUE(file.close());
+  }
+  std::string read(const char* path) {
+    HalFile file;
+    if (!Storage.openFileForRead("TEST", path, file)) return "<none>";
+    std::string text(file.fileSize(), '\0');
+    EXPECT_EQ(file.read(text.data(), text.size()), static_cast<int>(text.size()));
+    file.close();
+    return text;
+  }
+};
+
+TEST_F(CacheCipherStorageTest, AFileIsPlainThroughItsHandleAndEncipheredOnTheCard) {
+  write(kFile, kText);
+  const std::string onCard = contents(kFile);
+  ASSERT_EQ(onCard.size(), strlen(kText) + cache_cipher::kHeaderBytes);
+  EXPECT_EQ(onCard.compare(0, 4, "WCC1"), 0);
+  EXPECT_EQ(onCard.find("Ishmael"), std::string::npos) << "the text is on the card in the clear";
+  EXPECT_TRUE(Storage.cacheFolderEnciphered(kFolder));
+
+  HalFile file;
+  ASSERT_TRUE(Storage.openFileForRead("TEST", kFile, file));
+  EXPECT_EQ(file.fileSize(), strlen(kText));
+  EXPECT_EQ(file.position(), 0u);
+  ASSERT_TRUE(file.seek(8));
+  EXPECT_EQ(file.position(), 8u);
+  EXPECT_EQ(file.available(), static_cast<int>(strlen(kText) - 8));
+  char word[8] = {};
+  ASSERT_EQ(file.read(word, 7), 7);
+  EXPECT_STREQ(word, "Ishmael");
+  EXPECT_EQ(file.read(), '.');
+  ASSERT_TRUE(file.seekCur(-8));
+  EXPECT_EQ(file.read(), 'I');
+  file.close();
+  EXPECT_EQ(read(kFile), kText);
+}
+
+// A patch in place (a section header's offsets) and a rename (every .part file put in place) keep the file readable.
+TEST_F(CacheCipherStorageTest, APatchInPlaceAndARenameKeepTheFile) {
+  const std::string part = std::string(kFile) + ".part";
+  write(part.c_str(), kText);
+  ASSERT_TRUE(Storage.rename(part.c_str(), kFile));
+  HalFile file;
+  ASSERT_TRUE(Storage.openFileForUpdate("TEST", kFile, file));
+  ASSERT_TRUE(file.seek(0));
+  ASSERT_EQ(file.write("CALL", 4), 4u);
+  ASSERT_TRUE(file.close());
+  EXPECT_EQ(read(kFile), "CALL" + std::string(kText).substr(4));
+}
+
+// The same text written twice is two different files on the card: no keystream serves two writes.
+TEST_F(CacheCipherStorageTest, EveryFileWrittenGetsItsOwnKeystream) {
+  write(kFile, kText);
+  const std::string first = contents(kFile);
+  write(kFile, kText);
+  const std::string second = contents(kFile);
+  EXPECT_NE(first.substr(4, 12), second.substr(4, 12)) << "the nonce was reused";
+  EXPECT_NE(first.substr(cache_cipher::kHeaderBytes), second.substr(cache_cipher::kHeaderBytes));
+  EXPECT_EQ(read(kFile), kText);
+}
+
+// What hands a file to the outside (the web download, the serial transfers) gets the card's bytes.
+TEST_F(CacheCipherStorageTest, ARawOpenGivesTheCardsBytes) {
+  write(kFile, kText);
+  HalFile raw = Storage.openRaw(kFile);
+  ASSERT_TRUE(raw);
+  std::string bytes(raw.fileSize(), '\0');
+  ASSERT_EQ(raw.read(bytes.data(), bytes.size()), static_cast<int>(bytes.size()));
+  raw.close();
+  EXPECT_EQ(bytes, contents(kFile));
+}
+
+TEST_F(CacheCipherStorageTest, TheWholeFileHelpersGoThroughTheCipher) {
+  const char* path = "/.crosspoint/epub_7/koreader_docid.txt";
+  ASSERT_TRUE(Storage.writeFile(path, String("0123456789abcdef")));
+  EXPECT_EQ(contents(path).find("0123456789"), std::string::npos);
+  EXPECT_STREQ(Storage.readFile(path).c_str(), "0123456789abcdef");
+  char buffer[8];
+  EXPECT_EQ(Storage.readFileToBuffer(path, buffer, sizeof(buffer)), 7u);
+  EXPECT_STREQ(buffer, "0123456");
+}
+
+// Without the folder's key nothing in it opens: not read as if plain, and not emptied by an open for writing.
+TEST_F(CacheCipherStorageTest, AFolderWithoutItsKeyOpensNothing) {
+  write(kFile, kText);
+  const std::string before = contents(kFile);
+  Storage.setCacheKeySource(nullptr);
+  HalFile file;
+  EXPECT_FALSE(Storage.openFileForRead("TEST", kFile, file));
+  EXPECT_FALSE(Storage.openFileForWrite("TEST", kFile, file));
+  EXPECT_FALSE(Storage.openFileForUpdate("TEST", kFile, file));
+  EXPECT_FALSE(Storage.open(kFile, O_RDWR | O_CREAT | O_TRUNC));
+  EXPECT_FALSE(Storage.open("/.crosspoint/epub_7/new.bin", O_RDWR | O_CREAT | O_TRUNC));
+  EXPECT_EQ(contents(kFile), before) << "a refused open changed the file";
+  EXPECT_EQ(contents("/.crosspoint/epub_7/new.bin"), "<none>");
+  file.close();
+}
+
+// A file in a marked folder that the cipher did not write (copied in from a computer, damaged, an older layout) is
+// never read as the book's: it is damaged cache, removed, and made again like a missing one.
+TEST_F(CacheCipherStorageTest, AFileWithoutAHeaderIsRemovedAndMadeAgain) {
+  put(kFile, kText);
+  HalFile file;
+  EXPECT_FALSE(Storage.openFileForRead("TEST", kFile, file));
+  file.close();
+  EXPECT_EQ(contents(kFile), "<none>");
+  write(kFile, kText);
+  EXPECT_EQ(read(kFile), kText);
+}
+
+// An open whose cipher cannot be had (about 120 B, which a fragmented X3 heap can refuse) fails like any open the heap
+// refuses, and the file stays for the next one. Taken for damaged cache, it was removed: a valid progress.bin lost.
+TEST_F(CacheCipherStorageTest, AnOpenWithoutMemoryForItsCipherKeepsTheFile) {
+  write(kFile, kText);
+  const std::string before = contents(kFile);
+  put("/book.txt", "plain");
+  refuseNothrowSize = sizeof(cache_cipher::CipherStream);
+  HalFile file;
+  EXPECT_FALSE(Storage.openFileForRead("TEST", kFile, file));
+  file.close();
+  HalFile plain;
+  EXPECT_TRUE(Storage.openFileForRead("TEST", "/book.txt", plain)) << "the refusal took the handle, not the cipher";
+  plain.close();
+  refuseNothrowSize = 0;
+  EXPECT_EQ(contents(kFile), before) << "a valid file was removed for want of memory";
+  EXPECT_EQ(read(kFile), kText);
+}
+
+// A folder without the marker, and any other folder, are not touched.
+TEST_F(CacheCipherStorageTest, APlainFolderStaysPlain) {
+  ASSERT_TRUE(vol_.mkdir("/.crosspoint/epub_8"));
+  write("/.crosspoint/epub_8/book.bin", kText);
+  EXPECT_EQ(contents("/.crosspoint/epub_8/book.bin"), kText);
+  EXPECT_FALSE(Storage.cacheFolderEnciphered("/.crosspoint/epub_8"));
+}
+
+// A remove through Storage forgets what it knew of the folder (this stub's removeDir() does nothing, so the folder is
+// emptied file by file, as BookCache::clear() empties one): without its marker, the same folder is plain again.
+TEST_F(CacheCipherStorageTest, ARemovedMarkerIsForgotten) {
+  write(kFile, kText);
+  EXPECT_TRUE(Storage.cacheFolderEnciphered(kFolder));
+  ASSERT_TRUE(Storage.remove(kFile));
+  ASSERT_TRUE(Storage.remove("/.crosspoint/epub_7/cipher.bin"));
+  EXPECT_FALSE(Storage.cacheFolderEnciphered(kFolder));
+  write("/.crosspoint/epub_7/book.bin", kText);
+  EXPECT_EQ(contents("/.crosspoint/epub_7/book.bin"), kText);
 }
 
 }  // namespace

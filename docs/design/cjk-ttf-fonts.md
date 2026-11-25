@@ -5,8 +5,9 @@ CFF outlines (section 9), the CJK families as CFF (`.otf`), a glyph store that m
 emptied whole (section 8), and the serial test API first in the order of work (section 13, PR #531). Synthetic
 italic (section 7.4) was added on 2026-10-22.
 
-Design record: shipped in #531, #532, #542, #544, synthetic bold (#548) and the CJK families (#550). The code is the
-authority on what it does now.
+Design record: shipped in #531, #532, #542, #544, synthetic bold (#548), the CJK families (#550) and synthetic italic
+(#551). The code is the authority on what it does now. Sections 14 and 15 record the page glyph arena (#500) and how
+the CJK work is tested on a device; open follow-ups are in [../future_work/cjk.md](../future_work/cjk.md).
 
 ## 1. Why
 
@@ -315,11 +316,22 @@ manager and was installed and listed in 23 s.
 
 - **Uploading a `.ttf` or `.otf` through the web page.** Today the upload accepts `.cpfont` only. The Convert
   card turns a font into a `.cpfont` in the browser. Installing one as-is needs its own choice in that card, so it
-  is a follow-up.
+  is a follow-up. Shipped later (#726): the upload takes `.ttf`, `.otf` and `.cpfont`, a TrueType or OpenType file
+  goes in as it is, for the engine to draw at every size (`FontDownloadRules::uploadKindOf`), and a family folder
+  holds one kind only, since a `.cpfont` beside outline files would hide them (`FontDownloadRules::joinsFolder`).
 - **A screen that goes back by itself.** "Font installed!" waits for Back. The maintainer wants a timed return,
   shared by the screens that end on a message: one mechanism, not one per screen. Future work.
 - **The `txtSdFontFamilyName` setting.** `deleteFamily` does not clear it; this was found while mapping the
   path and is unrelated to this work. It goes to future work.
+
+### 6.6 Accepted limits of the update rule
+
+A download is an update of what the card holds when one of the manifest's files is on the card at another size (a
+pack's also at its size with another CRC), or when some are missing and others match (`FontDownloadRules::isUpdate`). A
+folder holding none of them is someone else's family of that name. Two limits follow, both accepted:
+- a reader's own file under a manifest file name but with other bytes counts as an update, and is replaced;
+- a hosted family whose files are all renamed is never offered an update. So hosted files are never renamed: a renamed
+  set ships as a new family.
 
 ## 7. Synthetic bold
 
@@ -626,6 +638,17 @@ the X4:
 - a reclaim;
 - a full CJK chapter at 12 and 26 pt: how many glyphs were drawn again because a reclaim dropped them.
 
+### 8.5 As built
+
+- **Shipped in #532** as format 4. A full log reclaims its oldest segment, keeping the glyphs drawn most, and a worn
+  index is rebuilt, in the reader's idle time (`EpubReaderActivity::stepGlyphStoreRoom`) and at a chapter or book open,
+  instead of wiping the store.
+- **Format 5 since #624:** a shaping font's style block ends with its `CPac`
+  ([file-formats.md](../file-formats.md#the-ttf-glyph-store-cptt)).
+- **Measured on the X4** (Noto Sans TC, 12 pt): a reclaim takes about 150 ms, an index rebuild about 1.8 s (about 9,400
+  records, 16,384 slots). With CJK at 12 pt the index fills before the log, so a rebuild comes about every five
+  reclaims. A faster rebuild is open work ([../future_work/cjk.md](../future_work/cjk.md)).
+
 ## 9. CFF outlines
 
 ### 9.1 What the engine reads
@@ -717,6 +740,18 @@ Decoding a charstring is the new work per store miss. The device bench gains CFF
 against the same characters as TrueType, at 12 pt, regular and bold. Recorded, not a pass mark; what blocks
 shipping is section 10's list.
 
+### 9.7 As built
+
+- **Shipped in #542, sped up byte-exactly in #544.** The parser and charstring interpreter are in `lib/EpdFont/ttf/`,
+  in flash mode and in SD mode (the charstring data read from the card).
+- **Discovery** lists `.otf` files and reads the content: a file with an `OTTO` header is a CFF face whatever its name.
+  Publisher Fonts copies a book's embedded CFF faces as it copies TrueType ones, under the same `.ttf` names.
+- **Measured on the X4** at 12 pt, Traditional Chinese in SD mode (`test_cjk_zh_honglou`): a cold chapter lays out in
+  1,114 ms as TrueType and 1,159 ms as CFF; with its glyphs stored, in 315 ms either way.
+- **Tested** with CJK `.otf` subsets and a desubroutinized NotoSansTC (3.45 MB), in SD mode on the X4. Full stock files
+  (NotoSansCJKjp-Regular.otf, which would need an SD-mode block of about 2.2 MB) are untested.
+- **Still refused:** variable CFF2 fonts and font collections (9.1, 6.3).
+
 ## 10. Validation
 
 **Host.**
@@ -782,8 +817,8 @@ shipping is section 10's list.
 
 ## 13. Order of work
 
-Each is its own plan and PR; the device runs use the serial test API. State on 2026-10-22: 1 to 4 have shipped
-(synthetic bold moved behind CFF, so that it covered CFF outlines from its first version). 5 is next, then 6.
+Each is its own plan and PR; the device runs use the serial test API. All six have shipped. Synthetic bold moved
+behind CFF, so that it covered CFF outlines from its first version.
 1. **The serial test API** (branch `feat/serial-api-ttf-fs`): `CMD:TTF` (the store's state), `CMD:TTF:FULL` (act
    as if it filled up), `CMD:FS:LS` and `CMD:FS:RM` (the card, without the USB Transfer screen), events for a full
    store, a wipe and a finished font install, and `devctl.py`'s `select:` step (Down until a row is selected).
@@ -799,6 +834,71 @@ Each is its own plan and PR; the device runs use the serial test API. State on 2
    `lib/EpdFont/scripts/cjk_subset.py` and listed in `sd-fonts.yaml` and `assets/sd-fonts/fonts-v3.json` (manifest
    version 3); "Download all" leaves them out.
 6. **Synthetic italic** (section 7.4), after 5: step 5b of the roadmap. **Shipped: #551.**
+
+**The rest of the CJK roadmap.** These six were steps 1-5b of the roadmap the CJK work followed. Its later steps:
+- step 6, CJK book titles, authors and TOC in the UI, from the reader's font behind the UI faces (#563;
+  [../i18n.md](../i18n.md#book-text-in-the-ui));
+- step 7, push-in and the CJK–Latin gap (#575; [cjk-typography.md](cjk-typography.md), 11.4);
+- step 8, ruby (#554, review fixes #556) and emphasis dots (#566; cjk-typography.md, 11.5 and 11.6);
+- step 9, the dictionary on CJK pages (#574, with #569;
+  [../dictionary.md](../dictionary.md#how-the-cjk-search-is-built));
+- step 10, line spacing, on master directly (cjk-typography.md, 11.8).
+
+## 14. The page glyph arena on dense CJK pages (#500)
+
+**The problem.** An SD-card font copies the bitmaps of the page being drawn into one heap block, the page arena
+(`SdCardFont::prewarm`). On a Latin page it is 3-10 KB; on a dense CJK page 25-31 KB (160-180 distinct 2-bit glyphs of
+about 180 B). A CJK `.cpfont` too large for the flash font partition takes this path. On the X3 the arena stayed
+allocated for as long as the page was read (15-21 KB free, no block over 4-7 KB), and the pre-render of the next page
+was refused on every CJK page.
+
+**What #500 built.**
+- **The arena is freed once its page is complete.** The reader frees an arena of 12 KB or more
+  (`EpubReaderActivity::releasePageGlyphArena`, `SdCardFont::releasePageArenaIfAtLeast`) after the deferred AA pass,
+  after a pre-render, after the AA replay of a pre-rendered page, and after a render that owes no AA. Every prewarm
+  clears the cache first, so this adds no card reads. A pre-render after a release allocates a whole arena, so its
+  floor counts the arena it will allocate (`EpubReaderActivity::preRenderMinFreeHeap`).
+- **The pre-render draws from 1-bit ink masks** (`SdCardFont::setInkOnlyPrewarm`): the pre-render draws black and
+  white only, and a 2-bit glyph's black-and-white image is its ink mask, so half the bytes give the same pixels. The
+  AA replay at display warms the 2-bit glyphs again. It applies only where the pixels are provably the same: not on a
+  panel that captures the grey planes in its pre-render, a native-size SD font with 2-bit bitmaps, and a page of plain
+  text lines at scale 1 (`EpubReaderActivity::pageDrawsUnscaled`). Ring entries carry their depth, so a 1-bit mask
+  never serves a 2-bit draw.
+
+**Measured on the X3** (NotoSansCJK 14 pt, justified): a dense Chinese page (Hong Lou Meng) is visible 503 ms after the
+press instead of 678 ms, with 5 of 5 pages pre-rendered instead of none; reading leaves 52.6 KB free (30.7 KB largest
+block) instead of 15-21 KB (4-7 KB).
+
+Open follow-ups are in [../future_work/cjk.md](../future_work/cjk.md), "Page glyph arena follow-ups".
+
+## 15. Testing on a device
+
+Reference for the CJK work on the X3 and X4; the commands are in `docs/serial-test-api.md`, the driver is
+`tools/devctl.py`.
+
+**Fonts.** Install a CJK family from the Font Manager. For a branch that is not merged, use the scratch-manifest
+recipe of Task 10, Step 1 in `docs/superpowers/plans/2026-10-21-cjk-fonts-font-manager.md`. On Windows, set the build
+flag from PowerShell: Git Bash rewrites the `http://...:8000/...` value as a path list. The working form is
+`$env:PLATFORMIO_BUILD_FLAGS = '-DFONT_MANIFEST_URL=\"http://<PC address>:8000/fonts-v3.json\"'`, then
+`pio run -e default -t upload --upload-port <port>` from the same PowerShell. Rebuilding the families needs
+`pip install fonttools==4.63.0`.
+
+**Driving the board.**
+- **Choose the font:** `CMD:SET:fontFamily=<index or name>`. On the boot straight into USB Transfer the family keys are
+  refused; leave that screen first.
+- **Open a page:** `CMD:ACT:READER:/books/test_cjk_zh_honglou.epub@1:1`, then `CMD:IDLE`, `CMD:BTN:RIGHT`.
+- **Measure:** `CMD:STATE` reports the heap and the largest block.
+
+**Page-turn timing,** from the log:
+- **the turn starts:** `PageTurn stats`;
+- **the panel update starts:** `triggerDisplay`, or for a pre-rendered page `displayBuffer ... took` (subtract the time
+  it took);
+- **the page is complete:** `Deferred AA`, or `AA replay` for a pre-rendered page;
+- **pre-render outcome:** "Pre-rendered page ... lowest" gives the pre-render's heap low point; "PreRender skipped:
+  free=... < floor=..." says why one did not run.
+
+**Who reviews.** The maintainer does not read CJK. Screenshots (`CMD:SCREENSHOT`) are checked against the kinsoku and
+spacing rules, and the host rule checker (`test/epub_pipeline/CjkRulesTest.cpp`) is the gate.
 
 ## Appendix A. Spike measurements (X4, 2026-10-19/20)
 

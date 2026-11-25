@@ -33,9 +33,10 @@ bool isReadingState(std::string_view name);
 // image conversion), so a clear can leave them for a book that Home is about to show.
 bool isCoverImage(std::string_view name);
 
-// Clears `cacheDir` as `keep` says, and also leaves the covers when `keepCovers` is set. The folder
-// itself goes when nothing is left in it. True when it is clear: there was no folder, or every
-// removal succeeded.
+// Clears `cacheDir` as `keep` says, and also leaves the covers when `keepCovers` is set. An
+// enciphered folder's marker (cipher.bin) stays with whatever is left, which is enciphered under
+// it. The folder itself goes when nothing is left in it. True when it is clear: there was no
+// folder, or every removal succeeded.
 bool clear(const std::string& cacheDir, Keep keep, bool keepCovers = false);
 
 }  // namespace BookCache

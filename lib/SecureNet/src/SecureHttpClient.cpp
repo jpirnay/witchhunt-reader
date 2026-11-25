@@ -1,6 +1,7 @@
 #include "SecureHttpClient.h"
 
 #include <Logging.h>
+#include <UrlTarget.h>
 #include <WiFi.h>
 #include <base64.h>
 
@@ -75,29 +76,19 @@ std::string escapedForRequestLine(const std::string& path) {
 
 }  // namespace
 
+// splitUrl() reads the URL, as the plugin allowlists do, so this connects to the host they judged.
+// It takes only the bytes of a host name into the host, which goes on the Host line as it stands
+// (no escape exists for a host).
 bool SecureHttpClient::parseUrl(const std::string& in, Url& out) {
-  const size_t schemeEnd = in.find("://");
-  if (schemeEnd == std::string::npos) return false;
-  out.scheme = toLowerAscii(in.substr(0, schemeEnd));
-  const size_t hostStart = schemeEnd + 3;
-  const size_t pathStart = in.find('/', hostStart);
-  const std::string hostPort =
-      pathStart == std::string::npos ? in.substr(hostStart) : in.substr(hostStart, pathStart - hostStart);
-  out.path = pathStart == std::string::npos ? "/" : in.substr(pathStart);
-  const size_t portSep = hostPort.rfind(':');
-  if (portSep != std::string::npos && hostPort.find(']') == std::string::npos) {
-    out.host = hostPort.substr(0, portSep);
-    out.port = static_cast<uint16_t>(atoi(hostPort.substr(portSep + 1).c_str()));
-  } else {
-    out.host = hostPort;
-    out.port = out.scheme == "https" ? 443 : 80;
-  }
-  // No escape exists for a host, and it goes on the Host line as it stands.
-  const bool hostIsClean = std::none_of(out.host.begin(), out.host.end(), [](const char c) {
-    const auto byte = static_cast<unsigned char>(c);
-    return byte <= 0x20 || byte >= 0x7F;
-  });
-  return !out.host.empty() && hostIsClean && (out.scheme == "http" || out.scheme == "https");
+  UrlTarget target;
+  if (!splitUrl(in, target)) return false;
+  out.scheme = toLowerAscii(std::string(target.scheme));
+  out.host = std::string(target.host);
+  out.port = target.port;
+  // A query or fragment straight after the host ("https://example.org?q=1") still asks for "/".
+  out.path =
+      target.rest.empty() || target.rest.front() != '/' ? "/" + std::string(target.rest) : std::string(target.rest);
+  return true;
 }
 
 bool SecureHttpClient::isHttps(const std::string& url) {

@@ -18,10 +18,12 @@
 #include "DarkMode.h"
 #include "DarkModeNow.h"
 #include "FlashLayoutNotice.h"
+#include "MinuteTick.h"
 #include "OpdsServerStore.h"
 #include "SdCardFontGlobals.h"
 #include "SettingsList.h"
 #include "SilentRestart.h"
+#include "TouchGate.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -322,14 +324,20 @@ void ActivityManager::loop() {
 #endif
   }
 
-  if (SETTINGS.useClock && HalClock::isSynced()) {
-    time_t now = HalClock::now();
+  // The clock's minute tick: Use Clock asks it of every screen, a screen with a clock of its own asks
+  // for it itself (MinuteTick). The minute is followed whenever the clock is set, not only while one
+  // of them asks: Home with a Clock widget would otherwise be redrawn just after its first frame, for
+  // a minute that turned before it opened.
+  if (HalClock::isSynced()) {
+    const time_t now = HalClock::now();
     if (now > 0) {
       static time_t lastMinute = -1;
-      time_t minute = now / 60;
+      const time_t minute = now / 60;
       if (minute != lastMinute) {
         lastMinute = minute;
-        if (!currentActivity || !currentActivity->shouldSkipPeriodicUpdate()) {
+        const bool screenShowsTime = currentActivity && currentActivity->onClockMinute();
+        if (MinuteTick::redraws(SETTINGS.useClock, screenShowsTime,
+                                [this] { return currentActivity && currentActivity->shouldSkipPeriodicUpdate(); })) {
           requestUpdate();
         }
       }
@@ -725,9 +733,6 @@ void ActivityManager::goToHomeMenuAction(const HomeMenuAction action) {
     case HomeMenuAction::Library:
       goToLibrary(libraryTabFrom(APP_STATE.libraryTab));
       break;
-    case HomeMenuAction::Recent:
-      goToLibrary(LibraryTab::Recent);
-      break;
     case HomeMenuAction::ReadingStats:
       goToReadingStats();
       break;
@@ -745,6 +750,9 @@ void ActivityManager::goToHomeMenuAction(const HomeMenuAction action) {
       break;
     case HomeMenuAction::Settings:
       goToSettings();
+      break;
+    case HomeMenuAction::RecentBooks:
+      goToLibrary(LibraryTab::Recent);
       break;
   }
 }
@@ -807,6 +815,19 @@ bool ActivityManager::isReaderActivity() const {
                      [](const auto& activity) { return activity->isReaderActivity(); });
 }
 
+bool ActivityManager::readerOrItsOverlayOnTop() const {
+  if (currentActivity == nullptr) return false;
+#if CP_TOUCH_UI
+  // The top of the stack is the screen the current one was opened from.
+  const bool belowIsReader = !stackActivities.empty() && stackActivities.back()->isReaderActivity();
+  return TouchGate::readerOwnsScreen(currentActivity->isReaderActivity(), currentActivity->overlaysScreenBelow(),
+                                     belowIsReader);
+#else
+  // No digitiser, so no overlay to ask about (Activity::overlaysScreenBelow() is compiled out with the touch layer).
+  return currentActivity->isReaderActivity();
+#endif
+}
+
 bool ActivityManager::currentIsReaderActivity() const {
   return currentActivity && currentActivity->takesReaderControls();
 }
@@ -821,6 +842,10 @@ void ActivityManager::prepareFramebufferForCapture() {
   if (currentActivity) {
     currentActivity->prepareFramebufferForCapture();
   }
+}
+
+ScreenshotInfo ActivityManager::screenshotInfo() const {
+  return currentActivity ? currentActivity->screenshotInfo() : ScreenshotInfo{};
 }
 
 void ActivityManager::describeState(std::string& out) const {
@@ -899,14 +924,14 @@ bool ActivityManager::handleForcedRefresh(const HalDisplay::RefreshMode mode) {
 #if CP_TOUCH_UI
 
 void ActivityManager::dispatchLightPanelGesture() {
-  if (!mappedInput.hasTouch()) return;
+  // A request needs no digitiser: the drawer works from the keys too (Back closes it, Confirm switches the light,
+  // Up/Down step the brightness), and a key is how a reader with touch switched off reaches it.
+  const bool requested = lightPanelRequested;
+  lightPanelRequested = false;
   // Inert on an unlit board: wasLightPanelGesture() already answers false there, because
   // the top edge is the reader menu on those and the two must not compete.
-  if (!mappedInput.wasLightPanelGesture()) return;
-  openLightPanel();
-}
-
-void ActivityManager::openLightPanel() {
+  const bool swiped = mappedInput.hasTouch() && mappedInput.wasLightPanelGesture();
+  if (!requested && !swiped) return;
   if (currentActivity == nullptr) return;
 
   // Don't stack a panel on top of itself, or on a screen that owns the whole surface for
@@ -961,10 +986,10 @@ void ActivityManager::openLightPanel() {
   // again would undo prepareFramebufferForCapture() above and hand the drawer the wrong page.
   framebufferPreparedThisTick = true;
 
-  mappedInput.suppressTouchContact();
+  if (swiped) mappedInput.suppressTouchContact();
   currentActivity->startActivityForResult(std::make_unique<FrontlightPanelActivity>(renderer, mappedInput),
                                           [](const ActivityResult&) {});
-  LOG_DBG("TCH", "Opened reading light");
+  LOG_DBG("TCH", "%s -> reading light", swiped ? "Top-edge swipe" : "Light panel action");
 }
 
 void ActivityManager::dispatchListTap() {

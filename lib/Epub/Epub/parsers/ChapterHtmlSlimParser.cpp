@@ -1814,6 +1814,19 @@ bool ChapterHtmlSlimParser::lookupVisibleOffsetInActiveBuild(const uint32_t offs
 // Callers must ensure currentPage is non-null and carries content; the helper resets
 // currentPage to a fresh Page and zeroes currentPageNextY so the caller can keep building.
 void ChapterHtmlSlimParser::emitPage() {
+  // Rows packed for a table fragment were laid out for this page, in its arena block, which this emit rewinds: carried
+  // over to the next page they would be written and destroyed from overwritten bytes, their lines' arena flags read
+  // back as heap pointers to free. A table keeps what it holds out of the page's flow while they wait (the TOC page
+  // break, the <hr> branch of startElement); markup that still gets here drops them while their bytes are live and
+  // stops the build, its pages kept. A heap build places them on the next page.
+  if (buildArena_ != nullptr && tableRowsWait()) {
+    currentTable->packer.reset();
+    LOG_ERR("EHP", "On page %d, the page is emitted under a table's packed rows; dropped, stopping the parse",
+            completedPageCount);
+    streamFailed = true;
+    layoutFailed = true;
+    saxParser_.stop();
+  }
   carriedTop_ = false;
   if (!boxScopes_.empty() && currentPage) sliceBoxesAtPageEnd();
   // A page with no noted element (nothing but spacing) starts where the next element does, which
@@ -2333,6 +2346,16 @@ bool ChapterHtmlSlimParser::isTocAnchor(const std::string_view id) const {
   return false;
 }
 
+// Not while a table's rows wait for their fragment: a block in a cell of a later row brings that row's anchor here (its
+// <tr>'s or <td>'s id, or the block's own), and the emit would rewind the arena block the rows above it were laid out
+// in, the next row then laid out over their bytes. A table is placed by its rows, and no CSS page break is taken inside
+// one either; the anchor names the page its row is placed on (commitPendingRow). Before the first packed row the break
+// stands, and the table starts the fresh page.
+void ChapterHtmlSlimParser::breakPageBeforeTocAnchor() {
+  if (!currentPage || currentPage->elements.empty() || tableRowsWait()) return;
+  emitPage();
+}
+
 void ChapterHtmlSlimParser::addExternalPageBreakAnchor(const std::string& id, const std::string& label) {
   if (id.empty()) {
     // NCX pageTarget with no fragment (e.g. "OEBPS/c9_split_000.xhtml") — applies to the
@@ -2843,11 +2866,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
       // Whatever came before is laid out already: the block is empty.
       applyPendingPageBreak();
       if (!pendingAnchorId.empty()) {
-        if (isTocAnchor(pendingAnchorId)) {
-          if (currentPage && !currentPage->elements.empty()) {
-            emitPage();
-          }
-        }
+        if (isTocAnchor(pendingAnchorId)) breakPageBeforeTocAnchor();
         queueAnchorForNextLine(std::move(pendingAnchorId));
         pendingAnchorId.clear();
       }
@@ -2886,11 +2905,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   applyPendingPageBreak();
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
   // block is flushed so the chapter starts on a fresh page.
-  if (!pendingAnchorId.empty() && isTocAnchor(pendingAnchorId)) {
-    if (currentPage && !currentPage->elements.empty()) {
-      emitPage();
-    }
-  }
+  if (!pendingAnchorId.empty() && isTocAnchor(pendingAnchorId)) breakPageBeforeTocAnchor();
   // Queue the deferred anchor now that the previous block is flushed (and any TOC page break has
   // happened); its PAGE is settled by addLineToPage, once this block's first line is placed.
   if (!pendingAnchorId.empty()) {
@@ -4312,6 +4327,13 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         }
       }
     }
+  } else if (strcmp(name, "hr") == 0 && self->currentTable) {
+    // A rule inside a table is not drawn: a grid cell holds lines and a picture, and while the table is open the page's
+    // flow is its rows'. Drawn there, the rule moved the page down under the rows packed for it, which then no longer
+    // fitted where they were packed (an arena build stopped there, the chapter cut at the table), or it emitted the
+    // page from under them. It ends the word before it, as a <br> in a cell does.
+    if (self->partWordBufferIndex > 0 && !self->flushPartWordBuffer()) return;
+    self->nextWordContinues = false;
   } else if (strcmp(name, "hr") == 0) {
     if (self->partWordBufferIndex > 0) {
       if (!self->flushPartWordBuffer()) return;
@@ -7350,10 +7372,7 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
   if (currentPageNextY + fragTotalHeight > viewportHeight && pageHasContent) {
     if (buildArena_ != nullptr) {
       // The rows were laid out in this page's block, which emitPage() rewinds: the packer's test said they fit.
-      packer.rows.clear();
-      packer.height = 0;
-      packer.cols = 0;
-      packer.firstVisibleOffset = UINT32_MAX;
+      packer.reset();
       stopOnLinesPastTheirPage("a table fragment");
       return;
     }
@@ -7381,10 +7400,7 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
   if (!addPageElement(std::move(fragment))) return;
   currentPageNextY += fragTotalHeight;
   noteBoxContent(currentPageNextY);
-  packer.rows.clear();
-  packer.height = 0;
-  packer.cols = 0;
-  packer.firstVisibleOffset = UINT32_MAX;
+  packer.reset();
 }
 
 // Greedily pack laid-out rows into fragments, page-breaking between fragments. A row whose

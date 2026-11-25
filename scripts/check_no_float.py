@@ -1,8 +1,8 @@
 """Fails the firmware build when a source listed in FLOAT_FREE uses floating point.
 
 The C3 has no FPU: float or double maths pulls in libgcc's slow soft-float routines. The TTF engine was
-designed without them (spec 5.2), and the integer-maths work moves the rest of the firmware off them one
-area at a time (docs/future_work/integer-math/): each finished area adds its sources to FLOAT_FREE, so the
+designed without them (spec 5.2), and the integer-maths work moved the rest of the firmware off them one
+area at a time (docs/design/integer-math.md): each finished area added its sources to FLOAT_FREE, so the
 float cannot come back unnoticed.
 
 The linker map cannot show this. It names only the first object that pulled in each archive member, and
@@ -48,9 +48,10 @@ FLOAT_FREE = [
     "lib/Xtc/",
     "src/activities/home/FileBrowserActivity.cpp",
     "src/activities/util/BmpViewerActivity.cpp",
-    "src/components/themes/lyra/Lyra3CoversTheme.cpp",
     "src/components/themes/lyra/LyraCarouselTheme.cpp",
     "src/components/themes/lyra/LyraTheme.cpp",
+    "src/components/themes/lyra/HomeWidgetData.cpp",
+    "src/components/themes/lyra/LyraTilesTheme.cpp",
     # Progress and sync (integer-maths area 4): progress in billionths (lib/Epub/Epub/ProgressPpb.h).
     # KOReaderSyncClient.cpp and KOReaderAutoSync.cpp stay out: ArduinoJson's float parsing and writing is inlined
     # into them.

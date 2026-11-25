@@ -60,6 +60,7 @@ class HomeActivity final : public Activity {
   // first), and it removes partial thumbnails of work it does not finish.
   CoverThumbLoader coverLoader;
   int coverLoaderHeight_ = -1;  // the cover height the loader is configured for
+  std::string coverBookPath_;   // the book the loader is working on, which a cycle may have moved
 
   // Session-scoped transient-failure counter, keyed by book path. A cover can fail to load for
   // transient reasons (OOM under heap pressure, an interrupted write, an extraction that could not
@@ -87,37 +88,69 @@ class HomeActivity final : public Activity {
   // back to the list (updateBook).
   std::vector<RecentBook> recentBooks;
   std::vector<HomeMenuEntry> menuEntries;
+  // The first shownBooks_ of recentBooks are on screen and selectable; the selector runs over them,
+  // then the menu. All of them except on a theme that keeps more books than it shows, to cycle
+  // through (HomeLayout::bookSlots). Set in onEnter() before the first render, read by both tasks.
+  int shownBooks_ = 0;
+  // How many of menuEntries, at the end, are More and Settings (homeMenuTrailingCount). Set with the
+  // entries, in onEnter().
+  int menuTrailing_ = 0;
+  // The theme's rows (BaseTheme::homeGrid), and whether the buttons move by them: only where the board
+  // has a key for each direction. Otherwise Up and Down step through the screen as a list. Set in onEnter().
+  HomeGridNav::Grid grid_;
+  // The widgets that open something, numbered after the menu (BaseTheme::homeWidgetActions).
+  static constexpr int kMaxWidgetActions = 12;
+  HomeDestination widgetActions_[kMaxWidgetActions]{};
+  int widgetActionCount_ = 0;
+  // The pictures the widgets show that this visit has tried to make (makeNextHomePicture): bit i
+  // for the theme's job i. The jobs stay the same for a visit, as the layout is chosen in onEnter.
+  static constexpr int kMaxPictureJobs = 4;
+  uint8_t pictureAttempts_ = 0;
+  // Makes one picture a widget shows that is not on the card yet; false when none is left.
+  bool makeNextHomePicture();
+  bool gridNav_ = false;
+  // Whether the theme shows a clock among its widgets (BaseTheme::homeShowsClock): Home then takes
+  // the minute tick whatever Use Clock says. Set in onEnter().
+  bool showsClock_ = false;
+  // The day the theme read its widgets for (currentLocalDayIndex(), 0 while the clock is not set).
+  // Loop task only.
+  uint16_t shownDay_ = 0;
 
   std::string focusBookPath;
   int focusSelectorIndex = -1;
 
   void onSelectBook(const std::string& path);
+  // A horizontal swipe on a theme that asks for it (BaseTheme::homeSwipeCyclesBooks): the next
+  // (step 1) or previous (step -1) recent book moves to the front, where the theme shows it.
+  void cycleRecentBooks(int step);
   // Tap on a cover or a menu entry: opens it. Returns true when the touch was consumed.
   // Inert on non-touch boards. Reads the targets the active theme published.
   bool handleHomeTouch();
   void dispatchMenuAction(HomeMenuAction action);
+  // Opens what the selector's position past the books stands for: a menu entry, or a widget after them.
+  void dispatchSelection(int menuIndex);
+  // Books, menu entries and the widgets that open something.
+  int selectableCount() const;
 
   void rebuildMenuEntries();
+  // The theme's layout of this screen for the current entries. One call for the draw and the cover
+  // pass, so the cover height that names the thumbnails is the same on both sides.
+  HomeLayout homeLayout() const;
   bool keepRegionAsFrameCache();
   bool storeCoverBuffer();
   bool restoreCoverBuffer();
   void freeCoverBuffer();
   void restoreSecondaryBuffer(bool callerHoldsRenderLock = false);
   void loadRecentBooks(int maxBooks);
-  void loadRecentCovers(int coverHeight);
-  // One thumbnail slot to placeholder on a permanent give-up: the exact on-disk path the cover
-  // loader checks, plus the (w,h) the placeholder BMP should be written at.
-  struct ThumbSlot {
-    std::string path;
-    int width;
-    int height;
-  };
+  // The cover pass for the books Home shows. `thumbSizes` are the theme's exact boxes (HomeLayout);
+  // with none, every cover is made at `coverHeight` on the single-height path.
+  void loadRecentCovers(int coverHeight, const std::pair<int, int>* thumbSizes, int thumbSizeCount);
   // Give up on a book's cover for this pass. Bumps the session retry counter for a transient
   // failure. When the failure is permanent — structurally absent, or transient but past the
-  // session retry budget — writes a valid placeholder BMP at each slot (as CoverThumbLoader does)
-  // so the book reads as resolved on disk and is not re-decoded on the next boot; otherwise just
-  // records an empty cover so it retries next session. Shared by both cover paths.
-  void giveUpCover(RecentBook& book, ThumbResult res, const std::vector<ThumbSlot>& slots);
+  // session retry budget — writes the no-cover placeholder at every size the cover loader makes
+  // (CoverThumbLoader::writeNoCoverPlaceholders) so the book reads as resolved on disk and is not
+  // re-decoded on the next boot; otherwise just records an empty cover so it retries next session.
+  void giveUpCover(RecentBook& book, ThumbResult res);
   // True once a book has burned COVER_MAX_TRANSIENT_ATTEMPTS transient failures this session.
   bool coverAttemptsExhausted(const std::string& path) const;
 
@@ -145,6 +178,9 @@ class HomeActivity final : public Activity {
   // The clock's minute tick redraws Home every minute while it is in use and every ten once it has
   // been left alone for ten (HomeClockCadence).
   bool shouldSkipPeriodicUpdate() const override;
+  // The minute turned: the widgets that show the day read it again when it has changed, and a Clock
+  // widget asks for the redraw whatever Use Clock says.
+  bool onClockMinute() override;
 #if SERIAL_TEST_API
   // The covers still to load are the work CMD:IDLE waits for: the same answer as above.
   bool hasPendingBackgroundWork() override { return skipLoopDelay(); }

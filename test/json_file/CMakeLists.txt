@@ -5,6 +5,7 @@ add_executable(JsonFileTest
   JsonFileTest.cpp
   ${REPO_ROOT}/lib/Serialization/FixedDecimal.cpp
   ${REPO_ROOT}/lib/Serialization/JsonFile.cpp
+  ${REPO_ROOT}/lib/Serialization/JsonText.cpp
   ${REPO_ROOT}/lib/Weather/WeatherSettingsStore.cpp
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
 )
@@ -18,7 +19,7 @@ target_include_directories(JsonFileTest PRIVATE
   ${REPO_ROOT}/lib/Weather
 )
 
-target_compile_definitions(JsonFileTest PRIVATE ARDUINOJSON_ENABLE_ARDUINO_STRING=1)
+target_compile_definitions(JsonFileTest PRIVATE ARDUINOJSON_ENABLE_ARDUINO_STRING=1 ARDUINOJSON_ENABLE_ARDUINO_PRINT=1)
 
 target_link_libraries(JsonFileTest PRIVATE
   crosspoint_test_common

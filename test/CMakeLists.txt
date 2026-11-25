@@ -100,7 +100,20 @@ target_include_directories(crosspoint_test_common INTERFACE
   # For <TextScale.h>, which the settings, CSS and layout headers include; no other header there shares a name with a
   # test's own or a shim.
   ${REPO_ROOT}/lib/EpdFont
+  # The cache cipher (lib/CacheCipher, test/cache_cipher).
+  ${REPO_ROOT}/lib/CacheCipher
 )
+# ... and its sources, as a STATIC library: an OBJECT library's objects do not propagate
+# through an INTERFACE target here, and the failure is a bare linker error with no undefined
+# symbol named. One library rather than a copy per target, so the derivation pinned by
+# test/cache_cipher is the same code every other suite links.
+add_library(cache_cipher_host STATIC
+  ${REPO_ROOT}/lib/CacheCipher/CacheCipher.cpp
+  ${REPO_ROOT}/lib/CacheCipher/CacheKeys.cpp
+  ${REPO_ROOT}/lib/CacheCipher/CacheCipherFile.cpp
+)
+target_include_directories(cache_cipher_host PUBLIC ${REPO_ROOT}/lib/CacheCipher)
+target_link_libraries(crosspoint_test_common INTERFACE cache_cipher_host)
 target_compile_options(crosspoint_test_common INTERFACE
   -Wall
   -Wextra
@@ -184,6 +197,7 @@ add_custom_target(i18n_generated DEPENDS ${I18N_GENERATED_KEYS} ${I18N_GENERATED
 add_subdirectory(${REPO_ROOT}/lib/SaxParser ${CMAKE_CURRENT_BINARY_DIR}/SaxParser)
 
 add_subdirectory(buffered_io)
+add_subdirectory(cache_cipher)
 add_subdirectory(natural_sort)
 add_subdirectory(home_clock_cadence)
 add_subdirectory(sidecar_files)
@@ -200,6 +214,7 @@ add_subdirectory(firmware_board_tag)
 add_subdirectory(upload_buffer)
 add_subdirectory(cover_grid_layout)
 add_subdirectory(carousel_cover_layout)
+add_subdirectory(home_tiles_layout)
 add_subdirectory(card_text_fit)
 add_subdirectory(list_grammar)
 add_subdirectory(double_action_wait)
@@ -234,6 +249,9 @@ add_subdirectory(image_dimensions_guard)
 add_subdirectory(image_scale)
 add_subdirectory(text_scale)
 add_subdirectory(byte_size)
+add_subdirectory(ascii_parse)
+add_subdirectory(release_version)
+add_subdirectory(idf_printf_shim)
 add_subdirectory(fixed_decimal)
 add_subdirectory(progress_ppb)
 add_subdirectory(word_size_layout)
@@ -265,6 +283,7 @@ add_subdirectory(button_press_queue)
 add_subdirectory(input_first)
 add_subdirectory(devctl)
 add_subdirectory(screenshot_request)
+add_subdirectory(screenshot_name)
 add_subdirectory(receive_queue_growth)
 add_subdirectory(indexing_progress_gate)
 add_subdirectory(opds_filename)
@@ -283,6 +302,7 @@ add_subdirectory(list_touch_band)
 add_subdirectory(tap_targets)
 add_subdirectory(tap_zones)
 add_subdirectory(button_action_mirror)
+add_subdirectory(touch_gate)
 add_subdirectory(font_size_ladder)
 add_subdirectory(reader_margins)
 add_subdirectory(scaled_glyph)
@@ -368,10 +388,12 @@ add_subdirectory(folder_walk)
 add_subdirectory(file_browser_model)
 add_subdirectory(bitmap_rows)
 add_subdirectory(sleep_image_placement)
+add_subdirectory(sleep_pixel_cache_stamp)
 add_subdirectory(progress_comparison)
 add_subdirectory(kosync_progress_reply)
 # After kosync_progress_reply: links the ArduinoJson target it fetches.
 add_subdirectory(json_file)
+add_subdirectory(home_layout_file)
 add_subdirectory(weather_units)
 add_subdirectory(library_index)
 add_subdirectory(xtc_parser)

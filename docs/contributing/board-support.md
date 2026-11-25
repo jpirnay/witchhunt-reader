@@ -65,8 +65,9 @@ Rules:
   numbers. A test that reads them as pins, for presence or against a GPIO number, answers a
   different question there. Check `inputStyle()` first; `upKeyIsBootStrap()` shows the pattern.
 
-The remaining board-name checks are listed in
-[future work](../future_work/boards-and-touch.md#board-name-checks-still-to-convert).
+Feature code no longer asks by board name (242f14ced); the Murphy's button defaults still do
+(`BoardConfig::isMurphyM3()` in `CrossPointSettings.cpp` and `JsonSettingsIO.cpp`). What still decides by board in the
+SDK, `FreeInkDisplay::PanelSel`, is in [future work](../future_work/display-and-refresh.md).
 
 ## Build environments
 
@@ -135,6 +136,11 @@ The C3 is single-core RISC-V and the S3 dual-core Xtensa. Code that only held be
   (`SOC_PM_SUPPORT_EXT1_WAKEUP` or `SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP`, in `HalPowerManager`), and
   the panic backtrace in `HalSystem.cpp` on `__riscv` or `__XTENSA__`. Both have an `#error`
   default. Branch on capability, not on the chip name.
+- Light-sleep ticks. IDF's dual-core FreeRTOS winds pended ticks down only on core 0, and the idle loop
+  light-sleeps on core 1, so `xTaskCatchUpTicks()` there only queued them. The next flash operation
+  (`spi_flash_op_block_func()`) then wound every tick since in one critical section: an interrupt watchdog on CPU0,
+  on the Murphy at the first flash read after light sleep. `HalPowerManager::lightSleep()` hands each slice's ticks
+  to core 0 (`catchUpTicksOnCore0()`, #812).
 
 ## PSRAM
 
@@ -256,7 +262,7 @@ Its panel is an SE0400NQW47 on an SSD2677 (the driver's probe, boot log).
   defaults to Confirm and a double press to Back (`CrossPointSettings::applyDeviceButtonDefaults()`, actions
   `BTN_CONFIRM` and `BTN_BACK`); touch and the hint boxes do the rest.
 - Slide switch on GPIO6, read and debounced by the SDK (`InputManager::isToggleSwitchOn()`). The **Slide Switch**
-  setting binds it to the reading light (default), Dark Mode or nothing; `applySlideSwitch()` in `main.cpp` sets the
+  setting binds it to the reading light (default), Dark Mode, touch (off is Touch Lock, #877) or nothing; `applySlideSwitch()` in `main.cpp` sets the
   bound function at the first loop pass, when the switch moves and when the binding changes.
 - I2C bus SDA7/SCL8, shared: TMA525C touch (0x24), the warm/cool LED driver of the light (0x38), PCF8563-class RTC
   (0x51), QMI8658 IMU (0x6A) and the SGM41562 charger (0x03). The light is the SDK's `PiccoDualLed` backend: it is
@@ -294,6 +300,13 @@ install (`esptool --no-stub read-flash 0 ALL`, then `verify-flash` against it); 
 
 ## Gotchas
 
+- Idle light sleep and touch. `HalPowerManager::lightSleep()` declines on a board with a PWM frontlight while the
+  light is lit, or while its touch cannot wake the chip (`rejFrontlight`). The Murphy's CHSC6x pulses its data-ready
+  line; it is armed as a low-level wake (`armTouchPulseWake()`), with the pin's edge interrupt off while the level
+  type is set. Without it a test build missed about every second tap. With the light off the Murphy light-sleeps:
+  96 % of 27 minutes on Home, on battery (#812). The X4 Pro and the T5S3 poll a GT911 that keeps only its latest
+  frame, so they still decline.
+
 - A `platformio.local.ini` (gitignored, loaded through `extra_configs`) whose env builds on
   `${base.build_flags}` selects no device. `BoardConfig.h` then reports "no device selected" and
   "all selected devices must share one MCU family" together, which looks like a submodule or
@@ -325,6 +338,22 @@ install (`esptool --no-stub read-flash 0 ALL`, then `verify-flash` against it); 
   sizes come from the profile (`MAX_FRAMEBUFFER_BYTES`), and no static array in `src/` or `lib/` is sized by a panel
   constant. The image caps in `PngToBmpConverter` and `JpegToBmpConverter` count source pixels, and the 480x800 in
   `XtcTypes.h` are parser defaults only.
+- A compact panel (the Murphy M3's 240x416) is a build-time switch, `PanelMetrics::COMPACT`
+  (`src/components/themes/PanelMetrics.h`): `forPanel()` in `BaseTheme.h` caps every theme's metric table, and a
+  layout sized outside the tables asks `PanelMetrics::capped()` or `isShort()`. A runtime scale would miss the places
+  that read the tables as constexpr; `BoardProfile.uiScale` has no consumer (nothing calls `HalCapabilities::uiScale()`).
+  The layouts still wrong there are in [future work](../future_work/murphy-small-screen.md).
+- On the Murphy these layouts stay as they are, by choice: Gesture Actions Overview scales its zones, but a cell label
+  gets about a third of a roughly 150 px frame and is clipped; a Markdown table of 7 or more columns flattens at 230 px
+  (`MdReaderActivity::MIN_COL_INNER_WIDTH`), and a third-level list indent takes 60 of 230 px (`LIST_INDENT`); the
+  reader's truncated-section hint (in `EpubReaderActivity::renderContents`) fits, though its numbers were tuned for a
+  larger line height; a user's sleep BMP made for 480x800 is scaled, so a dithered 1-bit picture is resampled
+  (`SleepActivity::renderCustomSleepScreen`). `GfxRenderer::drawIcon` transforms for portrait only, so an icon drawn
+  in landscape lands off the panel and is dropped, on every board; no landscape screen draws one today.
+- FreeInkUI sizes list rows by its target's `hasTouch`, which `makeUiTarget` (`src/components/UiAppHelpers.h`) leaves
+  false on every board, touch or not: 28 px rows with no gap, about 8 rows of Settings on the Murphy. Passing true
+  applies `listTouchMinRowHeight` (56) and `listTouchRowGap` (6) from the SDK's `FreeInkUICore.h`, which leaves 3 rows;
+  `uiThemeTokens()` would then have to override those tokens.
 - On a board far from the one the code was written for, a fix that changes nothing visible may
   have uncovered the next fault. The T5S3's anti-aliasing problems came in three layers, each
   visible only once the one above was fixed.

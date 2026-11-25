@@ -5,13 +5,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "components/themes/HintLayout.h"
+#include "components/themes/HomeGridNav.h"
 #include "components/themes/PanelMetrics.h"
 
+class Bitmap;
 class GfxRenderer;
 class Epub;
 class Txt;
@@ -32,9 +35,10 @@ enum class PopupShip : uint8_t {
   Blocking,  // displayBuffer(): return once the panel has finished painting the box.
   Async,     // triggerDisplayAsync(): return while the panel is still painting, so the caller can
              // start the slow work the popup is announcing. The caller then owes the panel a
-             // GfxRenderer::finishDisplayAsync() before it next writes the framebuffer, touches
-             // the display, or frees a framebuffer — releaseSecondaryBuffer() in particular does
-             // NOT drain a refresh in flight, and X3 re-reads the frame after the waveform.
+             // GfxRenderer::finishDisplayAsync() before it next writes the framebuffer: the X3 can
+             // read the frame again after the waveform (asyncRefreshHoldsFrameBuffer). Display
+             // calls, and a borrow or release of the secondary buffer, drain a refresh in flight
+             // themselves, so the wait then lands there.
   Caller,    // Not shipped: the box is only drawn into the write buffer, and the caller's own
              // displayBuffer() ships it with the rest of the frame. For a popup drawn inside a
              // render that ships itself, such as UiListActivity::render() via drawFooter(): a ship
@@ -121,6 +125,24 @@ enum UIIcon { Folder, Text, Image, Book, File, Recent, Settings, Transfer, Libra
 
 enum class HomeNavigation { Linear, Carousel };
 
+// Where the home screen's parts go, as the theme lays them out. HomeActivity asks once when it
+// draws and once when it loads covers, and both must get the same answer: the cover height and
+// the thumbnail boxes name the files the cover pass writes and the draw reads.
+struct HomeLayout {
+  static constexpr int kMaxThumbSizes = 2;
+
+  Rect books;           // drawRecentBookCover() draws the recent books here
+  Rect menu;            // drawButtonMenu() draws the entries here
+  Rect coverSnapshot;   // the part of `books` Home copies once its covers are drawn, and restores after
+  int coverHeight = 0;  // the thumbnail height on the single-height path (thumbSizeCount == 0)
+  // Exact thumbnail boxes, cropped to fit, for a theme that draws covers at fixed sizes.
+  int thumbSizeCount = 0;
+  std::pair<int, int> thumbSizes[kMaxThumbSizes]{};
+  // How many recent books the screen has places for. Home selects and opens only those; a theme
+  // that cycles through more (homeSwipeCyclesBooks) loads them all and shows the front ones.
+  int bookSlots = std::numeric_limits<int>::max();
+};
+
 // Default theme implementation (Classic Theme)
 // Additional themes can inherit from this and override methods as needed
 
@@ -167,6 +189,21 @@ constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
 
 enum class SyncIndicator : uint8_t { None, Active, Failed };
 
+// The places Home leads to, as a theme that draws its own shortcuts to them names them
+// (BaseTheme::homeWidgetActions, homeShownDestinations). A set of them is a bit mask, 1 << value.
+enum class HomeDestination : uint8_t { Library, ReadingStats, Bookmarks, FileTransfer, Weather, Recent, Count };
+constexpr uint32_t destinationBit(const HomeDestination d) { return 1u << static_cast<uint8_t>(d); }
+
+// A picture a widget on Home shows, to be made from `source` (JPEG or PNG) at the widget's size into
+// `target`, cut to fill and dithered, as the cover pass makes a cover thumbnail
+// (BaseTheme::homePictureJobs).
+struct HomePictureJob {
+  std::string source;
+  std::string target;
+  int width = 0;
+  int height = 0;
+};
+
 class BaseTheme {
  public:
   virtual ~BaseTheme() = default;
@@ -200,6 +237,14 @@ class BaseTheme {
   virtual void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                               const std::function<std::string(int index)>& buttonLabel,
                               const std::function<UIIcon(int index)>& rowIcon) const;
+  // Home's menu, in HomeLayout::menu. The last `trailingCount` entries are More and Settings, which
+  // a theme may set apart from the destinations; the default draws every entry alike.
+  virtual void drawHomeMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int trailingCount, int selectedIndex,
+                            const std::function<std::string(int index)>& buttonLabel,
+                            const std::function<UIIcon(int index)>& rowIcon) const {
+    (void)trailingCount;
+    drawButtonMenu(renderer, rect, buttonCount, selectedIndex, buttonLabel, rowIcon);
+  }
   // Draws a centered message box and ships it. By default the box is overlaid on the frame that is
   // currently on screen: displayBuffer() ends in a buffer swap, so the write buffer holds the frame
   // from two refreshes ago, and a bare overlay would diff stale content around the box (ghosting).
@@ -234,6 +279,69 @@ class BaseTheme {
 
   // Return Carousel to opt in to left/right book navigation and tryFastHomeRender().
   virtual HomeNavigation getHomeNavigation() const { return HomeNavigation::Linear; }
+
+  // Where the recent books and the menu go inside `content` (HomeLayout). `menuTrailing` of the
+  // `menuCount` entries are More and Settings, at the end of the list (homeMenuTrailingCount). The
+  // default stacks the recent-book tile over the menu rows: it keeps the theme's tile height while
+  // the rows fit, and otherwise gives up the gap, then tile height down to
+  // stackedHomeRules().minTileHeight.
+  virtual HomeLayout homeLayout(const GfxRenderer& renderer, Rect content, int menuCount, int menuTrailing) const;
+
+  // How many places besides Settings Home has for entries (collectHomeMenuEntries): the rest go
+  // behind More, and a theme with a fixed number fills the free ones with switched-off entries. A
+  // theme whose menu grows with the list has no limit (kHomeMenuNoLimit, this value).
+  virtual int homeMenuCapacity() const { return std::numeric_limits<int>::max(); }
+
+  // A horizontal swipe on Home brings the next or previous recent book to the front (the carousel
+  // scrolls its own row instead). Same direction as a page turn: a swipe to the left is "next".
+  virtual bool homeSwipeCyclesBooks() const { return false; }
+
+  // Home is about to be built. A theme whose Home the reader arranges reads the arrangement now,
+  // before Home builds its menu: homeMenuCapacity() and homeShownDestinations() follow it.
+  // `available` is the destinations with something behind them (bit mask over HomeDestination): a
+  // shortcut to one without is left out, as its menu entry would be. Called from
+  // HomeActivity::onEnter with the render lock held.
+  virtual void prepareHome(uint32_t /*available*/) {}
+  // The destinations the theme shows on Home itself, as widgets (bit mask over HomeDestination):
+  // they are neither Home's menu entries nor behind More. A shortcut whose row does not fit the
+  // panel is not shown, so More offers it.
+  virtual uint32_t homeShownDestinations(const GfxRenderer& /*renderer*/, Rect /*content*/) const { return 0; }
+  // The pictures Home's widgets show, as files Home's cover pass makes (it has the scratch for a
+  // decode): up to `max`, whether made already or not; Home checks.
+  virtual int homePictureJobs(const GfxRenderer& /*renderer*/, Rect /*content*/, HomePictureJob* /*out*/,
+                              int /*max*/) const {
+    return 0;
+  }
+  // The menu Home built: a theme that lays its widgets out around it needs the counts in every draw,
+  // and drawRecentBookCover() is not given them. Same caller and lock as prepareHome(), afterwards.
+  virtual void setHomeMenu(int /*menuCount*/, int /*menuTrailing*/) {}
+  // The widgets on Home that open something, numbered after Home's menu in reading order: what each
+  // opens. None for a theme without such widgets.
+  virtual int homeWidgetActions(const GfxRenderer& /*renderer*/, Rect /*content*/, HomeDestination* /*out*/,
+                                int /*max*/) const {
+    return 0;
+  }
+  // Whether Home shows the time in a widget of its own, apart from the header's clock that Use Clock
+  // switches. Home then asks for the clock's minute tick whatever Use Clock says, at its idle pace
+  // (HomeClockCadence). Asked when Home opens, after setHomeMenu().
+  virtual bool homeShowsClock(const GfxRenderer& /*renderer*/, Rect /*content*/) const { return false; }
+  // The day turned while Home is up, or the clock was set: a theme whose widgets show the day (a
+  // calendar, the week's reading) reads what they show for it again, and returns true so Home
+  // redraws. Called by HomeActivity on the loop task with the render lock held.
+  virtual bool refreshHomeDay(const GfxRenderer& /*renderer*/, Rect /*content*/) { return false; }
+
+  // Home's rows in screen order (HomeGridNav): Up and Down between rows and Left and Right along one
+  // on a board with a key for each direction, and the order Up and Down alone step through. None
+  // (rowCount 0) for a theme laid out as a list, which Up and Down step through in Home's order.
+  virtual HomeGridNav::Grid homeGrid(const GfxRenderer& renderer, Rect content, int shownBooks, int menuCount,
+                                     int menuTrailing) const {
+    (void)renderer;
+    (void)content;
+    (void)shownBooks;
+    (void)menuCount;
+    (void)menuTrailing;
+    return {};
+  }
 
   // Return the cover thumbnail sizes this theme needs for its home screen.
   // HomeActivity calls generateThumbBmp() for each pair. Empty = use height-only path.
@@ -285,7 +393,32 @@ class BaseTheme {
   // how the clock ended up drawn on top of the battery percentage (issue #214).
   static int statusBarBatteryWidth(const GfxRenderer& renderer, const ThemeMetrics& metrics, bool showPercentage);
 
+  // ---- A book's cover thumbnail, as every Home theme draws it ----
+  // What became of it: drawn, not on the card yet (the Home cover pass has not written it), or
+  // nothing to draw (no cover recorded, an unreadable file, or the no-cover marker).
+  enum class CoverThumb : uint8_t { Drawn, Pending, Absent };
+  // Opens the thumbnail at `thumbPath` (UITheme::getCoverThumbPath()) and hands it to `draw`. An
+  // empty path, a book with no cover recorded, is Absent. The 1x1 no-cover marker is never handed
+  // over: scaled into a slot it paints a solid block, so it is Absent and the theme draws its own
+  // no-cover tile instead.
+  static CoverThumb withCoverThumb(const std::string& thumbPath, const std::function<void(Bitmap&)>& draw);
+  // "Loading" centred in `box`, where a cover the pass is still making will go.
+  static void drawCoverLoading(const GfxRenderer& renderer, Rect box);
+
  protected:
+  // The floors the default homeLayout() shrinks to before the menu rows lose height.
+  struct StackedHomeRules {
+    int minTileHeight;
+    int minGap;
+  };
+  virtual StackedHomeRules stackedHomeRules() const { return {280, 2}; }
+  // The cover thumbnail height for a stacked tile this tall. It goes into the thumbnail's
+  // filename, so the theme that draws the cover and the cover pass must agree on it.
+  virtual int stackedCoverHeight(const int tileHeight) const {
+    const int coverHeight = tileHeight - BaseMetrics::homeBookDetailsHeight;
+    return coverHeight > 120 ? coverHeight : 120;
+  }
+
   // Up/down triangles marking that the list continues past the visible rows. Used by themes
   // without a scroll bar.
   static void drawListOverflowArrows(const GfxRenderer& renderer, Rect rect);

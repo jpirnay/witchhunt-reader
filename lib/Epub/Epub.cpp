@@ -4,10 +4,12 @@
 #include <BookCache.h>
 #include <BookSession.h>
 #include <BufferedFileIO.h>
+#include <CacheAtRest.h>
 #include <CooperativeAbort.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <ImageToBmp.h>
 #include <InflateReader.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
@@ -606,13 +608,9 @@ bool Epub::openProtection(const bool build) {
   uint64_t fingerprint = 0;
   if (!hasEncryptionManifest() || !computeZipFingerprint(&fingerprint)) return true;
   setupCacheDir();
-  if (build && !Storage.exists(book_protection::manifestPath(cachePath).c_str()) &&
-      BookMetadataCache::cacheExists(cachePath) &&
-      book_protection::probeManifest(filepath).status == book_protection::ManifestStatus::Protected) {
-    // A cache made before the book's protection was known is a cache of its ciphertext.
-    LOG_INF("EBP", "Protected book with a cache from before: rebuilding it");
-    clearCache();
-    setupCacheDir();
+  if (!encipherCacheIfProtected(build)) {
+    protection_ = static_cast<uint8_t>(book_protection::OpenResult::Unreadable);
+    return false;
   }
   const auto result = book_protection::openBook(filepath, cachePath, fingerprint, build, loadScratch_);
   protection_ = static_cast<uint8_t>(result);
@@ -628,9 +626,31 @@ void Epub::attachKnownProtection() {
   // No manifest: never opened with a key, or plain. Its cover then reads as ciphertext and fails to
   // decode, which shows the placeholder.
   if (!Storage.exists(book_protection::manifestPath(cachePath).c_str())) return;
+  // A book opened before its cache was enciphered: the next look at it (Home, the library) enciphers it, rather than
+  // the next time it is read, which may be never.
+  if (!encipherCacheIfProtected(false)) {
+    protection_ = static_cast<uint8_t>(book_protection::OpenResult::Unreadable);
+    return;
+  }
   uint64_t fingerprint = 0;
   if (!computeZipFingerprint(&fingerprint)) return;
   protection_ = static_cast<uint8_t>(book_protection::openBook(filepath, cachePath, fingerprint, false, nullptr));
+}
+
+bool Epub::encipherCacheIfProtected(const bool probe) {
+  if (Storage.cacheFolderEnciphered(cachePath.c_str())) return true;
+  // Known protected by its manifest, or by its encryption.xml when the caller may read it (an open that builds). A
+  // book that has neither is plain here; nothing of its text can reach the folder before openBook() knows better.
+  const bool known = Storage.exists(book_protection::manifestPath(cachePath).c_str());
+  if (!known &&
+      !(probe && book_protection::probeManifest(filepath).status == book_protection::ManifestStatus::Protected)) {
+    return true;
+  }
+  // The folder of a protected book holds its derived text, pictures and fonts, so it is enciphered (D2). One made
+  // before holds them in the clear, or is a cache of the book's ciphertext: emptied first, the reading state kept.
+  if (book_protection::encipherCache(filepath, cachePath)) return true;
+  LOG_ERR("EBP", "Could not encipher the cache of %s: not opened", filepath.c_str());
+  return false;
 }
 
 book_protection::OpenResult Epub::protectionResult() const {
@@ -1656,30 +1676,15 @@ bool Epub::generateCoverBmp(bool cropped) const {
     return false;
   }
 
-  FsFile coverBmp;
-  if (!Storage.openFileForWrite("EBP", getCoverBmpPath(cropped), coverBmp)) {
-    coverImage.close();
-    return false;
-  }
-
   // 8-bit: this cover is drawn only by the sleep screen, which dithers at draw time
   // and can apply the adaptive tone filter. Quantizing to 4 levels here would throw
   // away the tonal range that filter needs. Thumbnails stay 1-bit -- they are drawn
   // on the home screen's BW-plane path and are a different artifact entirely.
-  bool success = false;
-  if (detectedFormat == ImageFormatDetector::Format::Jpeg) {
-    success = JpegToBmpConverter::jpegFileToBmpStream(coverImage, coverBmp, cropped, /*grayscale8Bit=*/true);
-  } else {
-    success = PngToBmpConverter::pngFileToBmpStream(coverImage, coverBmp, cropped, /*grayscale8Bit=*/true);
-  }
-
-  coverImage.close();
-  coverBmp.close();
-
-  if (!success) {
-    LOG_ERR("EBP", "Failed to generate BMP from cover image");
-    Storage.remove(getCoverBmpPath(cropped).c_str());
-  }
+  const bool success = ImageToBmp::convert(
+      "EBP", coverImage,
+      detectedFormat == ImageFormatDetector::Format::Jpeg ? ImageToBmp::Format::Jpeg : ImageToBmp::Format::Png,
+      getCoverBmpPath(cropped), ImageToBmp::Target{.crop = cropped});
+  if (!success) LOG_ERR("EBP", "Failed to generate BMP from cover image");
 
   LOG_DBG("EBP", "Generated BMP from cover image, success: %s", success ? "yes" : "no");
   return success;
@@ -1728,100 +1733,20 @@ bool Epub::openStoredCoverInPlace(FsFile& out, uint32_t* offset) const {
 }
 
 ThumbResult Epub::generateThumbBmp(int height, bool allowExtract, BuildArena* scratch) const {
-  {
-    FsFile existing;
-    if (Storage.openFileForRead("EBP", getThumbBmpPath(height), existing)) {
-      const uint32_t sz = existing.size();
-      existing.close();
-      if (sz == 0) {  // 0-byte sentinel — a prior pass proved this cover structurally absent.
-        LOG_DBG("EBP", "Sentinel found for h=%d thumb, skipping retry", height);
-        return ThumbResult::StructurallyAbsent;
-      }
-      // size>0 is not "done": a thumb truncated by an interrupted write must be regenerated, not
-      // returned as valid (the caller's completeness check would otherwise reject it forever and
-      // loop). Reuse only a complete BMP; else fall through (openFileForWrite below truncates it).
-      if (thumbBmpComplete(getThumbBmpPath(height), height * 6 / 10, height)) return ThumbResult::Ok;
-      LOG_DBG("EBP", "Existing h=%d thumb is truncated — regenerating", height);
-    }
-  }
-
-  // No cover item at all is structural — record a sentinel now regardless of allowExtract,
-  // since no amount of extraction or retry can conjure a cover that the OPF doesn't declare.
-  if (getCoverItemHref().empty()) {
-    LOG_DBG("EBP", "No cover item for h=%d — writing structural sentinel", height);
-    writeThumbSentinel(getThumbBmpPath(height));
-    return ThumbResult::StructurallyAbsent;
-  }
-
-  // An extracted-but-undecodable cover is structural, and must be answered BEFORE the
-  // transient bail below: coverImageCachedAndValid() reports false for it exactly as it does
-  // for a not-yet-extracted cover, so without this the caller re-runs the extractor, gets the
-  // same bytes, and defers again — forever (observed: a .png that is really an AVIF, re-inflated
-  // from the ZIP every ~1.3 s). The unsupported-format branch further down never sees it.
-  if (coverImageCachedButUnsupported()) {
-    LOG_ERR("EBP", "Cached cover.img is not a supported format for h=%d — writing structural sentinel", height);
-    writeThumbSentinel(getThumbBmpPath(height));
-    return ThumbResult::StructurallyAbsent;
-  }
-
-  // Same in-place shortcut as the (width, height) overload above: a stored cover needs no
-  // extraction at all.
-  FsFile coverImage;
-  uint32_t coverBase = 0;
-  if (coverImageCachedAndValid(allowExtract)) {
-    if (!Storage.openFileForRead("EBP", getCoverImageCachePath(), coverImage)) return ThumbResult::TransientFail;
-  } else if (!openStoredCoverInPlace(coverImage, &coverBase)) {
-    // Neither cached nor stored. No sentinel — let the sliced extractor produce it, or retry
-    // next pass/boot. The caller counts these.
-    LOG_DBG("EBP", "cover.img not cached/valid for h=%d — transient, deferring", height);
-    return ThumbResult::TransientFail;
-  }
-
-  const auto detectedFormat = ImageFormatDetector::detect(coverImage, coverBase);
-  if (detectedFormat == ImageFormatDetector::Format::Unknown) {
-    // Cover extracted but its format is unsupported — structural, re-extraction yields the same
-    // bytes. Sentinel so we stop trying.
-    LOG_ERR("EBP", "Cached cover image is not a supported format — writing structural sentinel");
-    coverImage.close();
-    writeThumbSentinel(getThumbBmpPath(height));
-    return ThumbResult::StructurallyAbsent;
-  }
-
-  FsFile thumbBmp;
-  if (!Storage.openFileForWrite("EBP", getThumbBmpPath(height), thumbBmp)) {
-    coverImage.close();
-    return ThumbResult::TransientFail;
-  }
-
-  const int thumbW = height * 3 / 5;  // thumbnails are 6:10
-  bool success = false;
-  if (detectedFormat == ImageFormatDetector::Format::Jpeg) {
-    LOG_DBG("EBP", "Generating thumb BMP from JPEG cover image");
-    success = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(coverImage, thumbBmp, thumbW, height, scratch);
-  } else {
-    LOG_DBG("EBP", "Generating thumb BMP from PNG cover image");
-    success = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(coverImage, thumbBmp, thumbW, height);
-  }
-
-  coverImage.close();
-  thumbBmp.close();
-
-  if (!success) {
-    // Whether aborted for input or a plain decode failure, this is transient: drop the partial
-    // thumb (never leave it as a false sentinel) and let the caller retry / count it.
-    LOG_DBG("EBP", "Thumb decode for h=%d did not complete — removing partial, transient", height);
-    Storage.remove(getThumbBmpPath(height).c_str());
-    return ThumbResult::TransientFail;
-  }
-  LOG_DBG("EBP", "Generated thumb BMP from cover image (h=%d)", height);
-  return ThumbResult::Ok;
+  // By height alone: 6:10, filled and cut.
+  return generateThumbAt(getThumbBmpPath(height), height * 3 / 5, height, allowExtract, scratch, /*crop=*/true);
 }
 
 ThumbResult Epub::generateThumbBmp(int width, int height, bool allowExtract, BuildArena* scratch,
                                    const bool crop) const {
+  return generateThumbAt(getThumbBmpPath(width, height), width, height, allowExtract, scratch, crop);
+}
+
+ThumbResult Epub::generateThumbAt(const std::string& thumbPath, const int width, const int height,
+                                  const bool allowExtract, BuildArena* scratch, const bool crop) const {
   {
     FsFile existing;
-    if (Storage.openFileForRead("EBP", getThumbBmpPath(width, height), existing)) {
+    if (Storage.openFileForRead("EBP", thumbPath, existing)) {
       const uint32_t sz = existing.size();
       existing.close();
       if (sz == 0) {  // 0-byte sentinel — a prior pass proved this cover structurally absent.
@@ -1831,7 +1756,7 @@ ThumbResult Epub::generateThumbBmp(int width, int height, bool allowExtract, Bui
       // size>0 is not "done": a thumb truncated by an interrupted write must be regenerated, not
       // returned as valid (the caller's completeness check would otherwise reject it forever and
       // loop). Reuse only a complete BMP; else fall through (openFileForWrite below truncates it).
-      if (thumbBmpComplete(getThumbBmpPath(width, height), width, height)) return ThumbResult::Ok;
+      if (thumbBmpComplete(thumbPath, width, height)) return ThumbResult::Ok;
       LOG_DBG("EBP", "Existing %dx%d thumb is truncated — regenerating", width, height);
     }
   }
@@ -1840,15 +1765,18 @@ ThumbResult Epub::generateThumbBmp(int width, int height, bool allowExtract, Bui
   // since no amount of extraction or retry can conjure a cover that the OPF doesn't declare.
   if (getCoverItemHref().empty()) {
     LOG_DBG("EBP", "No cover item for %dx%d — writing structural sentinel", width, height);
-    writeThumbSentinel(getThumbBmpPath(width, height));
+    writeThumbSentinel(thumbPath);
     return ThumbResult::StructurallyAbsent;
   }
 
-  // See the h= overload above: extracted-but-undecodable must be answered before the transient
-  // bail, or the extractor is re-run forever on bytes that can never decode.
+  // An extracted-but-undecodable cover is structural, and must be answered BEFORE the
+  // transient bail below: coverImageCachedAndValid() reports false for it exactly as it does
+  // for a not-yet-extracted cover, so without this the caller re-runs the extractor, gets the
+  // same bytes, and defers again — forever (observed: a .png that is really an AVIF, re-inflated
+  // from the ZIP every ~1.3 s). The unsupported-format branch further down never sees it.
   if (coverImageCachedButUnsupported()) {
     LOG_ERR("EBP", "Cached cover.img is not a supported format for %dx%d — writing structural sentinel", width, height);
-    writeThumbSentinel(getThumbBmpPath(width, height));
+    writeThumbSentinel(thumbPath);
     return ThumbResult::StructurallyAbsent;
   }
 
@@ -1873,33 +1801,17 @@ ThumbResult Epub::generateThumbBmp(int width, int height, bool allowExtract, Bui
     // bytes. Sentinel so we stop trying.
     LOG_ERR("EBP", "Cached cover image is not a supported format — writing structural sentinel");
     coverImage.close();
-    writeThumbSentinel(getThumbBmpPath(width, height));
+    writeThumbSentinel(thumbPath);
     return ThumbResult::StructurallyAbsent;
   }
 
-  FsFile thumbBmp;
-  if (!Storage.openFileForWrite("EBP", getThumbBmpPath(width, height), thumbBmp)) {
-    coverImage.close();
-    return ThumbResult::TransientFail;
-  }
-
-  bool success = false;
-  if (detectedFormat == ImageFormatDetector::Format::Jpeg) {
-    LOG_DBG("EBP", "Generating %dx%d thumb BMP from JPEG cover image", width, height);
-    success = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(coverImage, thumbBmp, width, height, scratch, crop);
-  } else {
-    LOG_DBG("EBP", "Generating %dx%d thumb BMP from PNG cover image", width, height);
-    success = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(coverImage, thumbBmp, width, height, crop);
-  }
-
-  coverImage.close();
-  thumbBmp.close();
-
-  if (!success) {
-    // Whether aborted for input or a plain decode failure, this is transient: drop the partial
-    // thumb (never leave it as a false sentinel) and let the caller retry / count it.
-    LOG_DBG("EBP", "Thumb decode for %dx%d did not complete — removing partial, transient", width, height);
-    Storage.remove(getThumbBmpPath(width, height).c_str());
+  const bool jpeg = detectedFormat == ImageFormatDetector::Format::Jpeg;
+  LOG_DBG("EBP", "Generating %dx%d thumb BMP from %s cover image", width, height, jpeg ? "JPEG" : "PNG");
+  if (!ImageToBmp::convert("EBP", coverImage, jpeg ? ImageToBmp::Format::Jpeg : ImageToBmp::Format::Png, thumbPath,
+                           ImageToBmp::Target{.width = width, .height = height, .crop = crop, .scratch = scratch})) {
+    // Aborted for input, a plain decode failure or a thumb that would not open: transient. The partial
+    // thumb is gone (never left as a false sentinel); the caller retries / counts it.
+    LOG_DBG("EBP", "Thumb decode for %dx%d did not complete — removed, transient", width, height);
     return ThumbResult::TransientFail;
   }
   LOG_DBG("EBP", "Generated %dx%d thumb BMP from cover image", width, height);

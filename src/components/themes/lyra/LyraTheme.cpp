@@ -4,12 +4,12 @@
 #include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
-#include <HalStorage.h>
 #include <I18n.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -56,12 +56,8 @@ constexpr int minAdaptiveMenuRowHeight = 40;
 // follow the UI font size. The title stops at the last face every board has in bold: below that it
 // would sit under the author in thin type, hard to read on the selection's dither. Its smaller face
 // gets a fourth line instead, at about the height of three lines of the larger one.
-struct CardFace {
-  int fontId;
-  int maxLines;
-};
-constexpr CardFace kTitleFaces[] = {{UI_12_FONT_ID, 3}, {UI_10_FONT_ID, 4}};
-constexpr CardFace kAuthorFaces[] = {{UI_10_FONT_ID, 2}, {SMALL_FONT_ID, 2}};
+constexpr CardTextFit::Face kTitleFaces[] = {{UI_12_FONT_ID, 3}, {UI_10_FONT_ID, 4}};
+constexpr CardTextFit::Face kAuthorFaces[] = {{UI_10_FONT_ID, 2}, {SMALL_FONT_ID, 2}};
 
 int coverWidth = 0;
 
@@ -263,6 +259,7 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<std::string(int index)>& rowValue, bool highlightValue) const {
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
   const UiFontLadder::Step growth = UITheme::fontGrowth();
+  const bool inverted = invertsListSelection();
   int rowHeight = (rowSubtitle != nullptr) ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
   int pageItems = rect.height / rowHeight;
   // Never paint more rows than the touch band can register: a painted row past the cap is drawn
@@ -300,9 +297,10 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       rect.width -
       (totalPages > 1 ? (LyraMetrics::values.scrollBarWidth + LyraMetrics::values.scrollBarRightOffset) : 1);
   if (selectedIndex >= 0 && !selectedIsSeparator) {
-    renderer.fillRoundedRect(
-        rect.x + LyraMetrics::values.contentSidePadding, rect.y + selectedIndex % pageItems * rowHeight,
-        contentWidth - LyraMetrics::values.contentSidePadding * 2, rowHeight, cornerRadius, Color::LightGray);
+    renderer.fillRoundedRect(rect.x + LyraMetrics::values.contentSidePadding,
+                             rect.y + selectedIndex % pageItems * rowHeight,
+                             contentWidth - LyraMetrics::values.contentSidePadding * 2, rowHeight, cornerRadius,
+                             inverted ? Color::Black : Color::LightGray);
   }
 
   int textX = rect.x + LyraMetrics::values.contentSidePadding + hPaddingInSelection;
@@ -326,6 +324,9 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
+    const bool selected = i == selectedIndex;
+    // White on the black bar of an inverted selection, black everywhere else.
+    const bool ink = !(inverted && selected);
     int rowTextWidth = textWidth;
 
     // Draw name
@@ -352,7 +353,7 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     }
 
     auto item = renderer.truncatedText(UI_10_FONT_ID, itemName.c_str(), rowTextWidth);
-    renderer.drawText(UI_10_FONT_ID, textX, itemY + 7, item.c_str(), true);
+    renderer.drawText(UI_10_FONT_ID, textX, itemY + 7, item.c_str(), ink);
 
     if (rowIcon != nullptr) {
       UIIcon icon = rowIcon(i);
@@ -363,8 +364,12 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
         iconBitmap = iconForName(icon, renderSize);
       }
       if (iconBitmap != nullptr) {
-        renderer.drawIcon(iconBitmap, rect.x + LyraMetrics::values.contentSidePadding + hPaddingInSelection,
-                          itemY + iconY, renderSize, renderSize);
+        const int iconX = rect.x + LyraMetrics::values.contentSidePadding + hPaddingInSelection;
+        if (ink) {
+          renderer.drawIcon(iconBitmap, iconX, itemY + iconY, renderSize, renderSize);
+        } else {
+          renderer.drawIconInverted(iconBitmap, iconX, itemY + iconY, renderSize, renderSize);
+        }
       }
     }
 
@@ -377,25 +382,25 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       if (nl != std::string::npos) {
         // Two-line subtitle: first line (author) at +24, second line (series) at +40
         auto line1 = renderer.truncatedText(SMALL_FONT_ID, subtitleText.substr(0, nl).c_str(), rowTextWidth);
-        renderer.drawText(SMALL_FONT_ID, textX, itemY + 24 + growth.body, line1.c_str(), true);
+        renderer.drawText(SMALL_FONT_ID, textX, itemY + 24 + growth.body, line1.c_str(), ink);
         auto line2 = renderer.truncatedText(SMALL_FONT_ID, subtitleText.substr(nl + 1).c_str(), rowTextWidth);
-        renderer.drawText(SMALL_FONT_ID, textX, itemY + 40 + growth.body + growth.small, line2.c_str(), true);
+        renderer.drawText(SMALL_FONT_ID, textX, itemY + 40 + growth.body + growth.small, line2.c_str(), ink);
       } else {
         auto subtitle = renderer.truncatedText(SMALL_FONT_ID, subtitleText.c_str(), rowTextWidth);
-        renderer.drawText(SMALL_FONT_ID, textX, itemY + 30 + growth.body, subtitle.c_str(), true);
+        renderer.drawText(SMALL_FONT_ID, textX, itemY + 30 + growth.body, subtitle.c_str(), ink);
       }
     }
 
     // Draw value
     if (!valueText.empty()) {
-      if (i == selectedIndex && highlightValue) {
+      if (selected && highlightValue) {
         renderer.fillRoundedRect(
             rect.x + contentWidth - LyraMetrics::values.contentSidePadding - hPaddingInSelection - valueWidth, itemY,
             valueWidth + hPaddingInSelection, rowHeight, cornerRadius, Color::Black);
       }
 
       renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - LyraMetrics::values.contentSidePadding - valueWidth,
-                        itemY + 6, valueText.c_str(), !(i == selectedIndex && highlightValue));
+                        itemY + 6, valueText.c_str(), ink && !(selected && highlightValue));
     }
   }
 
@@ -603,7 +608,7 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   const int coverGap = BoardConfig::isMetalioEInk4Plus() ? 24 : LyraMetrics::values.verticalSpacing;
   const int tileHeight = rect.height;
   const int tileY = rect.y;
-  const int coverHeight = std::max(120, tileHeight - 2 * hPaddingInSelection);
+  const int coverHeight = stackedCoverHeight(tileHeight);
   const bool hasContinueReading = !recentBooks.empty();
   if (coverWidth == 0) {
     coverWidth = coverHeight * 3 / 5;  // thumbnails are 6:10
@@ -626,58 +631,21 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     RecentBook book = recentBooks[0];
     const int progressPercent = getRecentBookProgressPercent(book);
     if (!coverRendered) {
-      std::string coverPath = book.coverBmpPath;
-      bool hasCover = true;
-      bool coverPending = false;
-      if (coverPath.empty()) {
-        hasCover = false;
-      } else {
-        const std::string coverBmpPath = UITheme::getCoverThumbPath(coverPath, coverHeight);
-
-        // First time: load cover from SD and render
-        FsFile file;
-        if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
-          Bitmap bitmap(file);
-          // Never draw the no-cover marker: scaling a 1x1 BMP into the slot paints a solid block.
-          // Falling through to the existing no-cover branch shows the theme's own tile instead.
-          if (bitmap.parseHeaders() == BmpReaderError::Ok &&
-              !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
+      // First time: load the cover from SD and draw it; later renders restore the stored buffer.
+      const int coverX = tileX + hPaddingInSelection;
+      const int coverY = tileY + hPaddingInSelection;
+      const CoverThumb thumb =
+          withCoverThumb(UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight), [&](Bitmap& bitmap) {
             coverWidth = bitmap.getWidth();
-            renderer.fillRect(tileX + hPaddingInSelection, tileY + hPaddingInSelection, coverWidth, coverHeight, false);
-            renderer.drawBitmap(bitmap, tileX + hPaddingInSelection, tileY + hPaddingInSelection, coverWidth,
-                                coverHeight);
-          } else {
-            hasCover = false;
-          }
-          file.close();
-        } else {
-          hasCover = false;
-          coverPending = true;  // path exists but BMP not ready yet
-        }
-      }
-
-      // Draw either way
-      renderer.drawRect(tileX + hPaddingInSelection, tileY + hPaddingInSelection, coverWidth, coverHeight, true);
-
-      if (!hasCover) {
-        if (coverPending) {
-          // Cover is being generated — show a loading label centred in the cover area
-          const char* loadingText = tr(STR_LOADING);
-          const int textW = renderer.getTextWidth(SMALL_FONT_ID, loadingText);
-          const int textH = renderer.getLineHeight(SMALL_FONT_ID);
-          renderer.drawText(SMALL_FONT_ID, tileX + hPaddingInSelection + (coverWidth - textW) / 2,
-                            tileY + hPaddingInSelection + (coverHeight - textH) / 2, loadingText, true);
-        } else {
-          // No cover at all — render empty cover placeholder
-          renderer.fillRect(tileX + hPaddingInSelection, tileY + hPaddingInSelection + (coverHeight / 3), coverWidth,
-                            2 * coverHeight / 3, true);
-          renderer.drawIcon(CoverIcon, tileX + hPaddingInSelection + 24, tileY + hPaddingInSelection + 24, 32, 32);
-        }
-      }
+            renderer.fillRect(coverX, coverY, coverWidth, coverHeight, false);
+            renderer.drawBitmap(bitmap, coverX, coverY, coverWidth, coverHeight);
+          });
+      renderer.drawRect(coverX, coverY, coverWidth, coverHeight, true);
+      drawCoverStandIn(renderer, Rect{coverX, coverY, coverWidth, coverHeight}, thumb);
 
       // Only cache the frame buffer once the cover is definitively resolved (loaded or confirmed absent).
       // If a cover is still being generated we keep coverRendered=false so the next render will retry.
-      if (!coverPending) {
+      if (thumb != CoverThumb::Pending) {
         coverBufferStored = storeCoverBuffer();
         coverRendered = coverBufferStored;
       }
@@ -705,97 +673,125 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     // Progress + pace-based ETA, e.g. "62% · ~45m". Replaces the old top-right
     // percent badge on this layout — the percentage now lives in the text line.
     const std::string statusLine = BookProgressPresentation::formatStatus(book, progressPercent);
-
-    auto authorLines = renderer.wrappedText(UI_10_FONT_ID, book.author.c_str(), textWidth, 2);
-    auto seriesLines = renderer.wrappedText(UI_10_FONT_ID, book.series.c_str(), textWidth, 2);
-
-    const int smallLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-
-    // What you have put into the book, under what is left of it. This column is only the part of
-    // the tile the cover does not use, so the sentence usually needs two lines; it is set in the
-    // non-scaling small face so a larger UI font cannot make the row itself any taller.
-    const std::string history = BookProgressPresentation::historyLine(book);
-    const int historyLineHeight = renderer.getLineHeight(FIT_SMALL_FONT_ID);
-    auto historyLines = history.empty() ? std::vector<std::string>{}
-                                        : renderer.wrappedText(FIT_SMALL_FONT_ID, history.c_str(), textWidth, 2);
-
-    // Each part wrapped to its own cap can sum to more than the tile: a long title, a list of
-    // co-authors and a long series name did (#375). CardTextFit decides what gives way, gaps first.
-    const int gap = smallLineHeight / 2;
-    constexpr int tightGap = 4;
-    CardTextFit::Parts parts{};
-    parts[CardTextFit::Author] = {smallLineHeight, static_cast<int>(authorLines.size()), gap};
-    // Author and series are one group under one gap.
-    parts[CardTextFit::Series] = {smallLineHeight, static_cast<int>(seriesLines.size()), authorLines.empty() ? gap : 0};
-    parts[CardTextFit::Status] = {smallLineHeight, statusLine.empty() ? 0 : 1, gap};
-    parts[CardTextFit::History] = {historyLineHeight, static_cast<int>(historyLines.size()), gap};
-
-    // A title or author that loses words steps down a face, whether its own lines ran out or the
-    // tile took some of them. A narrow column needs this: three lines of the largest face cut "The
-    // Book That Wouldn't Burn" at its last word in Murphy's 110 px. With no face to hold it whole
-    // the smallest stands, because that one cuts the least.
-    CardTextFit::Result fit;
-    const auto settleFace = [&](const CardTextFit::PartId part, const auto& faces, const std::string& text,
-                                const EpdFontFamily::Style style, std::vector<std::string>& lines) {
-      int font = 0;
-      for (const CardFace& face : faces) {
-        bool whole = false;
-        font = face.fontId;
-        lines = renderer.wrappedText(font, text.c_str(), textWidth, face.maxLines, style, &whole);
-        parts[part].lineHeight = renderer.getLineHeight(font);
-        parts[part].lines = static_cast<int>(lines.size());
-        fit = CardTextFit::fit(parts, tileHeight - 2 * hPaddingInSelection, tightGap);
-        if (whole && fit.lines[part] == parts[part].lines) break;
-      }
-      return font;
-    };
-    std::vector<std::string> titleLines;
-    const int titleFont = settleFace(CardTextFit::Title, kTitleFaces, book.title, EpdFontFamily::BOLD, titleLines);
-    // The title goes first: a smaller author can only leave it more room, never less.
-    const int authorFont =
-        settleFace(CardTextFit::Author, kAuthorFaces, book.author, EpdFontFamily::REGULAR, authorLines);
-
-    const auto rewrap = [&](std::vector<std::string>& lines, const CardTextFit::PartId part, const int fontId,
-                            const std::string& text, const EpdFontFamily::Style style) {
-      if (fit.lines[part] < static_cast<int>(lines.size())) {
-        lines = renderer.wrappedText(fontId, text.c_str(), textWidth, fit.lines[part], style);
-      }
-    };
-    rewrap(titleLines, CardTextFit::Title, titleFont, book.title, EpdFontFamily::BOLD);
-    rewrap(authorLines, CardTextFit::Author, authorFont, book.author, EpdFontFamily::REGULAR);
-    rewrap(seriesLines, CardTextFit::Series, UI_10_FONT_ID, book.series, EpdFontFamily::REGULAR);
-    if (fit.lines[CardTextFit::History] < static_cast<int>(historyLines.size())) {
-      historyLines.clear();
-      if (fit.lines[CardTextFit::History] > 0) {
-        const std::string compact = BookProgressPresentation::historyLineCompact(book);
-        historyLines.push_back(renderer.truncatedText(FIT_SMALL_FONT_ID, compact.c_str(), textWidth));
-      }
-    }
+    const CardText text = fitCardText(renderer, book, statusLine, textWidth, tileHeight - 2 * hPaddingInSelection,
+                                      kTitleFaces, static_cast<int>(std::size(kTitleFaces)));
 
     // Centred in the tile. A block too tall even at its leanest is held to the top of the
     // selection, so what overflows is the bottom rather than the title.
-    const int blockY = std::max(tileY + hPaddingInSelection, tileY + tileHeight / 2 - fit.height / 2);
+    const int blockY = std::max(tileY + hPaddingInSelection, tileY + tileHeight / 2 - text.fit.height / 2);
     const int textX = tileX + hPaddingInSelection + coverWidth + coverGap;
-    const auto drawPart = [&](const std::vector<std::string>& lines, const CardTextFit::PartId part, const int fontId,
-                              const EpdFontFamily::Style style) {
-      int y = blockY + fit.tops[part];
-      for (const auto& line : lines) {
-        renderer.drawText(fontId, textX, y, line.c_str(), true, style);
-        y += parts[part].lineHeight;
-      }
-    };
-    drawPart(titleLines, CardTextFit::Title, titleFont, EpdFontFamily::BOLD);
-    drawPart(authorLines, CardTextFit::Author, authorFont, EpdFontFamily::REGULAR);
-    drawPart(seriesLines, CardTextFit::Series, UI_10_FONT_ID, EpdFontFamily::REGULAR);
-    if (!statusLine.empty()) {
-      renderer.drawText(
-          UI_10_FONT_ID, textX, blockY + fit.tops[CardTextFit::Status],
-          renderer.truncatedText(UI_10_FONT_ID, statusLine.c_str(), textWidth, EpdFontFamily::BOLD).c_str(), true,
-          EpdFontFamily::BOLD);
+    for (const CardTextFit::PartId part :
+         {CardTextFit::Title, CardTextFit::Author, CardTextFit::Series, CardTextFit::Status, CardTextFit::History}) {
+      drawCardTextPart(renderer, text, part, textX, blockY + text.fit.tops[part], textWidth);
     }
-    drawPart(historyLines, CardTextFit::History, FIT_SMALL_FONT_ID, EpdFontFamily::REGULAR);
   } else {
     drawEmptyRecents(renderer, rect);
+  }
+}
+
+LyraTheme::CardText LyraTheme::fitCardText(const GfxRenderer& renderer, const RecentBook& book,
+                                           const std::string& statusLine, const int textWidth, const int height,
+                                           const CardTextFit::Face* titleFaces, const int titleFaceCount) {
+  CardText text;
+  auto& lines = text.lines;
+  auto& parts = text.parts;
+  auto& fit = text.fit;
+
+  lines[CardTextFit::Author] = renderer.wrappedText(UI_10_FONT_ID, book.author.c_str(), textWidth, 2);
+  lines[CardTextFit::Series] = renderer.wrappedText(UI_10_FONT_ID, book.series.c_str(), textWidth, 2);
+  if (!statusLine.empty()) lines[CardTextFit::Status].push_back(statusLine);
+
+  // What you have put into the book, under what is left of it. A card's text column is only the
+  // part of it the cover does not use, so the sentence usually needs two lines; it is set in the
+  // non-scaling small face so a larger UI font cannot make the card itself any taller.
+  const std::string history = BookProgressPresentation::historyLine(book);
+  if (!history.empty()) {
+    lines[CardTextFit::History] = renderer.wrappedText(FIT_SMALL_FONT_ID, history.c_str(), textWidth, 2);
+  }
+
+  const int smallLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  text.fontIds = {UI_12_FONT_ID, UI_10_FONT_ID, UI_10_FONT_ID, UI_10_FONT_ID, FIT_SMALL_FONT_ID};
+
+  // Each part wrapped to its own cap can sum to more than the card: a long title, a list of
+  // co-authors and a long series name did (#375). CardTextFit decides what gives way, gaps first.
+  const int gap = smallLineHeight / 2;
+  constexpr int tightGap = 4;
+  const auto count = [&](const CardTextFit::PartId part) { return static_cast<int>(lines[part].size()); };
+  parts[CardTextFit::Author] = {smallLineHeight, count(CardTextFit::Author), gap};
+  // Author and series are one group under one gap.
+  parts[CardTextFit::Series] = {smallLineHeight, count(CardTextFit::Series),
+                                lines[CardTextFit::Author].empty() ? gap : 0};
+  parts[CardTextFit::Status] = {smallLineHeight, statusLine.empty() ? 0 : 1, gap};
+  parts[CardTextFit::History] = {renderer.getLineHeight(FIT_SMALL_FONT_ID), count(CardTextFit::History), gap};
+
+  // A title or author that loses words steps down a face, whether its own lines ran out or the
+  // card took some of them. A narrow column needs this: three lines of the largest face cut "The
+  // Book That Wouldn't Burn" at its last word in Murphy's 110 px. With no face to hold it whole
+  // the smallest stands, because that one cuts the least.
+  const auto settleFace = [&](const CardTextFit::PartId part, const CardTextFit::Face* faces, const int faceCount,
+                              const std::string& s, const EpdFontFamily::Style style) {
+    for (int i = 0; i < faceCount; ++i) {
+      bool whole = false;
+      text.fontIds[part] = faces[i].fontId;
+      lines[part] = renderer.wrappedText(faces[i].fontId, s.c_str(), textWidth, faces[i].maxLines, style, &whole);
+      parts[part].lineHeight = renderer.getLineHeight(faces[i].fontId);
+      parts[part].lines = count(part);
+      fit = CardTextFit::fit(parts, height, tightGap);
+      if (whole && fit.lines[part] == parts[part].lines) break;
+    }
+  };
+  settleFace(CardTextFit::Title, titleFaces, titleFaceCount, book.title, EpdFontFamily::BOLD);
+  // The title goes first: a smaller author can only leave it more room, never less.
+  settleFace(CardTextFit::Author, kAuthorFaces, static_cast<int>(std::size(kAuthorFaces)), book.author,
+             EpdFontFamily::REGULAR);
+
+  const auto rewrap = [&](const CardTextFit::PartId part, const std::string& s, const EpdFontFamily::Style style) {
+    if (fit.lines[part] < count(part)) {
+      lines[part] = renderer.wrappedText(text.fontIds[part], s.c_str(), textWidth, fit.lines[part], style);
+    }
+  };
+  rewrap(CardTextFit::Title, book.title, EpdFontFamily::BOLD);
+  rewrap(CardTextFit::Author, book.author, EpdFontFamily::REGULAR);
+  rewrap(CardTextFit::Series, book.series, EpdFontFamily::REGULAR);
+  if (fit.lines[CardTextFit::History] < count(CardTextFit::History)) {
+    lines[CardTextFit::History].clear();
+    if (fit.lines[CardTextFit::History] > 0) {
+      const std::string compact = BookProgressPresentation::historyLineCompact(book);
+      lines[CardTextFit::History].push_back(renderer.truncatedText(FIT_SMALL_FONT_ID, compact.c_str(), textWidth));
+    }
+  }
+  return text;
+}
+
+void LyraTheme::drawCardTextPart(const GfxRenderer& renderer, const CardText& text, const CardTextFit::PartId part,
+                                 const int x, int y, const int width) {
+  const int fontId = text.fontIds[part];
+  if (part == CardTextFit::Status) {
+    if (text.lines[part].empty()) return;
+    renderer.drawText(
+        fontId, x, y,
+        renderer.truncatedText(fontId, text.lines[part].front().c_str(), width, EpdFontFamily::BOLD).c_str(), true,
+        EpdFontFamily::BOLD);
+    return;
+  }
+  const EpdFontFamily::Style style = part == CardTextFit::Title ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
+  for (const auto& line : text.lines[part]) {
+    renderer.drawText(fontId, x, y, line.c_str(), true, style);
+    y += text.parts[part].lineHeight;
+  }
+}
+
+void LyraTheme::drawCoverStandIn(const GfxRenderer& renderer, const Rect box, const CoverThumb state) {
+  switch (state) {
+    case CoverThumb::Drawn:
+      return;
+    case CoverThumb::Pending:
+      drawCoverLoading(renderer, box);
+      return;
+    case CoverThumb::Absent:
+      renderer.fillRect(box.x, box.y + box.height / 3, box.width, 2 * box.height / 3, true);
+      renderer.drawIcon(CoverIcon, box.x + 24, box.y + 24, 32, 32);
+      return;
   }
 }
 

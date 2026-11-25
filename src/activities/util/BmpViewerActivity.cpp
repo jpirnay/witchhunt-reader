@@ -420,8 +420,7 @@ void BmpViewerActivity::setAsSleepScreen() {
     const bool renderedForCapture = renderDecodedImage(false);
     if (renderedForCapture) {
       Storage.remove(SLEEP_BMP_TMP_PATH);
-      if (ScreenshotUtil::saveFramebufferAsBmp(SLEEP_BMP_TMP_PATH, renderer.getFrameBuffer(), display.getDisplayWidth(),
-                                               display.getDisplayHeight())) {
+      if (ScreenshotUtil::saveFramebufferAsBmp(SLEEP_BMP_TMP_PATH, renderer, GfxRenderer::Portrait)) {
         success = replaceSleepBmpFromTemp();
       }
     }

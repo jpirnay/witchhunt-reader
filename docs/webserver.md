@@ -7,6 +7,8 @@ tablet on the same network can open its pages in a browser. From there you can:
 - prepare EPUBs for the reader: shrink their pictures and split overlong chapters;
 - correct a book's title, author, series and cover;
 - change every setting of the reader, and manage its saved Wi-Fi networks and OPDS catalogs;
+- arrange the Home screen: its rows, shortcuts, clock, calendar, weather and pictures, from the card or
+  from the web;
 - install fonts from the catalog, upload or convert your own, and install language packs;
 - install dictionaries for looking words up;
 - see your reading statistics;
@@ -28,15 +30,16 @@ the internet (noted below).
 4. [Finding your way around](#4-finding-your-way-around)
 5. [File Manager](#5-file-manager)
 6. [Settings](#6-settings)
-7. [Font Manager](#7-font-manager)
-8. [Dictionaries](#8-dictionaries)
-9. [Reading Stats](#9-reading-stats)
-10. [Plugins](#10-plugins)
-11. [System Info and Diagnostics](#11-system-info-and-diagnostics)
-12. [Other ways to reach the card](#12-other-ways-to-reach-the-card)
-13. [Leaving File Transfer](#13-leaving-file-transfer)
-14. [Troubleshooting](#14-troubleshooting)
-15. [Security](#15-security)
+7. [Home Screen](#7-home-screen)
+8. [Font Manager](#8-font-manager)
+9. [Dictionaries](#9-dictionaries)
+10. [Reading Stats](#10-reading-stats)
+11. [Plugins](#11-plugins)
+12. [System Info and Diagnostics](#12-system-info-and-diagnostics)
+13. [Other ways to reach the card](#13-other-ways-to-reach-the-card)
+14. [Leaving File Transfer](#14-leaving-file-transfer)
+15. [Troubleshooting](#15-troubleshooting)
+16. [Security](#16-security)
 
 ---
 
@@ -117,7 +120,7 @@ can always add books, even before the web interface is installed. It stays avail
 ![The Welcome page](images/web/welcome.png)
 
 The Welcome page has a button for each part of the web interface. Every other page shows the same
-entries along its top: **File Manager**, **Settings**, **Font Manager**, **Dictionaries**, **Reading
+entries along its top: **File Manager**, **Settings**, **Home Screen**, **Font Manager**, **Dictionaries**, **Reading
 Stats**, **Plugins**, **System Info** and **Diagnostics**. On a phone this bar scrolls sideways.
 
 The round button at the right end of the bar switches between automatic colours (following your
@@ -139,7 +142,7 @@ Each book has a label with its format (EPUB, XTC, TXT, MD). At the right of each
 | ------ | ---- |
 | ℹ️ **Details** (books only) | Edit the book's title, author, series and cover (below) |
 | 📂 **Move** | Move it to another folder |
-| ✏️ **Rename** | Rename it |
+| ✏️ **Rename** | Rename it. A file's name opens selected up to its extension, so what you type keeps the `.epub` |
 | 🗑️ **Delete** | Delete it, after asking |
 
 Tick the boxes in front of several items (or the box in the header for all of them) to **Move**,
@@ -228,7 +231,7 @@ Click ℹ️ beside a book to correct what the reader shows for it:
   pick one of the covers found. Searching needs the reader to be online. **Remove cover** goes back to
   the cover inside the book.
 - For an EPUB, **Convert its fonts** opens the Font Manager with the fonts the book embeds (see
-  [Font Manager](#7-font-manager)).
+  [Font Manager](#8-font-manager)).
 
 The book file itself is never changed: the details are saved in a `.opf` file beside the book (and
 the cover in a picture file beside it), which the reader prefers to the book's own. Clear a field to
@@ -241,7 +244,7 @@ Click **New folder**, type a name and confirm. Names cannot contain `" * : < > ?
 ### Plugin cards
 
 Installed plugins can add cards below the file list, such as **Find Duplicates** and **Organize by
-Author**. See [Plugins](#10-plugins).
+Author**. See [Plugins](#11-plugins).
 
 ## 6. Settings
 
@@ -275,7 +278,108 @@ password**.
 
 **Plugins** under Connections holds the cards of plugins that add themselves to the Settings page.
 
-## 7. Font Manager
+## 7. Home Screen
+
+The **Home Screen** page arranges the Home screen of the **Lyra Tiles** theme: which rows it has and
+what each row shows. What you build here is Lyra Tiles' **Custom** layout. Saving it also switches the
+reader to Lyra Tiles with that layout, so you do not have to change anything on the reader. The three
+ready-made layouts (Reader, Dashboard, Gallery) need no web page: choose them under **Settings →
+Display → Home screen → Layout** on the reader (see [Home Screen](../USER_GUIDE.md#31-home-screen) in
+the User Guide).
+
+A line at the top says what the reader shows now: another theme or another layout (saving switches it
+to this one), or that its Home already shows this layout.
+
+### Building a layout
+
+1. **Start from** picks the rows to begin with: **This reader's layout** (the Custom layout saved on
+   the reader; without one, the ready-made layout the reader shows now), or the **Reader**,
+   **Dashboard** or **Gallery** layout.
+2. Change the rows. A row holds one widget across the screen, or two side by side (**Add a widget
+   beside it**; **✕** next to the second one removes it). **Add a row** adds one at the bottom, the
+   arrows move a row up or down, and **✕** on the row removes it. A layout has up to six rows.
+3. Check the **Preview**: it shows Home as this reader lays it out, at its own screen size and held as it
+   is now. Click a part of the preview to find its row in the list. A row the screen has no room for
+   is marked **does not fit on this reader**, and the list under the preview says why a widget is left
+   out.
+4. Click **Save and use on the reader**. The line beside the button says what was saved and fetched.
+   The reader shows the new Home when you leave File Transfer.
+
+The widgets:
+
+| Widget | Shows | Choices |
+|---|---|---|
+| **Book card** | The book you read last: its cover, title, author, reading history and progress. Choose it on the reader to read on. Takes a row alone. | **Large** takes the height the other rows leave; **Compact** is a smaller card of a fixed height |
+| **Also reading** | The three books you read before it. Takes a row alone, and is shown only where the book card keeps enough room beside it (never on the Murphy M3) | |
+| **Shortcut** | A tile that opens one place | **Library**, **Recent books**, **Reading Stats**, **Bookmarks**, **File Transfer** or **Weather**. Bookmarks is left out until you make a bookmark, Weather while Weather is off in the reader's settings |
+| **Clock** | The time and the date, once the reader knows the time | |
+| **Calendar** | This month, each day shaded by the time you read on it. Opens Reading Stats | |
+| **This week** | The time you read on each day of this week, the books you finished and are reading, and your streak. Opens Reading Stats | The week starts on the reader's **First Day of Week** (Settings → System → Clock Settings) |
+| **Weather** | The last forecast the reader's Weather screen fetched. Opens Weather | |
+| **Picture** | A picture from the card or from the web (below) | |
+
+**More** and **Settings** always close the screen in a row of their own, and **More** holds every place
+your shortcuts leave out, so nothing is ever out of reach. Where the screen cannot hold every row with
+a readable book card, the reader leaves rows out from the bottom; the preview shows which. Held
+sideways, the rows with the book card take the left half of the screen and the others the right half.
+
+### Pictures
+
+A **Picture** widget shows one of these:
+
+- **A picture from /home, a new one each start** (the default): a different picture from the card's
+  `/home` folder each time the reader starts.
+- One picture already in `/home`, chosen by name.
+- **Another file or folder…**: a JPEG, PNG or BMP anywhere on the card, or a folder of them.
+- **Upload a picture…**: a JPEG or PNG from your computer or phone. The page makes it smaller first (at
+  most 1200 pixels on its longer side) and puts it into `/home`, so the reader converts it quickly.
+- **From the web…**: a picture a service draws, fetched again and again (below).
+
+The reader cuts a JPEG or PNG to the widget's place and converts it to black and white once, the first
+time Home shows it (it says **Loading** meanwhile). A BMP is drawn as it is, so make one at the size of
+its place. A layout shows at most two different pictures.
+
+### Pictures from the web
+
+**From the web…** offers these sources:
+
+| Source | What it shows | Fetched |
+|---|---|---|
+| **A random photo (Lorem Picsum)** | A different photo each time, from the free photos on Unsplash | Again and again |
+| **Month calendar** | This month and its public holidays, drawn for e-ink. Type the **country** in two letters (DE, US, PL…); it sets the holidays and the language. Choose whether weeks start on Monday or Sunday | Again and again |
+| **The Sun now (NASA SDO)** | The Sun in visible light, with its sunspots; updated about every 15 minutes | Again and again |
+| **The Earth now (NOAA GOES-19)** | The whole Earth as the GOES-19 satellite sees it; updated every 10 minutes, 126 KB a fetch | Again and again |
+| **A note** | Your text, black on white | Once, when you save |
+| **A QR code** | A link or a text as a QR code | Once, when you save |
+| **My own address…** | A JPEG, PNG or BMP from an address you give. `{width}` and `{height}` in the address become the picture's size on this reader, so a server can draw it to fit | Again and again |
+
+**A picture fetched again and again** gets a small plugin of its own, which the page installs when you
+save: **Home screen picture 1** (or 2) on the [Plugins](#11-plugins) page, allowed to reach only that
+picture's site. For each one, choose when the reader fetches it: **Each time the reader goes to sleep**,
+or **After you close a book** (fetched at the next sleep). The reader then joins your last Wi-Fi network
+as it goes to sleep, as for any [plugin that acts while you read](#11-plugins), so going to sleep takes
+a few seconds longer. Saving fetches each picture once straight away. If a picture's server sends the
+reader on to another site, the page asks whether to allow that site. When you remove a picture from the
+web from the layout, saving removes its plugin as well.
+
+**A note and a QR code never change.** Your browser asks the service for them once when you save (a
+note from placehold.co, a QR code from goqr.me) and puts the picture on the card; the reader never asks
+a service for them. Whatever you type for one goes to that service, so never put a password in a note
+or a QR code.
+
+Pictures from the web are kept in `/home/web` on the card.
+
+### Going back
+
+The Custom layout stays saved when you switch to another one. To return to a ready-made layout, choose
+it under **Settings → Display → Home screen → Layout** on the reader, or on the [Settings](#6-settings)
+page. If the layout saved on the reader cannot be read, the page says so: Home shows the Reader layout
+until you save a new one here.
+
+The layout is the file `/.crosspoint/home.json`, which you can also write by hand:
+[Lyra Tiles' Home layout file](home-layout.md).
+
+## 8. Font Manager
 
 Fonts for reading live on the SD card. The menu on the left switches between five parts: the fonts on
 the reader, three ways to add one, and the language packs, which are no fonts and have a group of
@@ -357,7 +461,7 @@ does; it first says what that changes. Without the interface language's own pack
 the reader's next start; without a hyphenation pack its language's books are no longer hyphenated; without a
 title pack, CJK book titles outside a book show boxes for the characters the menu fonts lack.
 
-## 8. Dictionaries
+## 9. Dictionaries
 
 The reader looks words up in StarDict dictionaries in the card's `/dictionaries` folder. This page
 installs, checks and removes them:
@@ -374,7 +478,7 @@ Each installed dictionary is marked **Ready**, **Works** (usable, with a note on
 better) or **Not usable** (with the reason). Choose the dictionary you want on the reader, under
 **Settings → Reader → Dictionary**. See [Dictionary](./dictionary.md) for where to find dictionaries.
 
-## 9. Reading Stats
+## 10. Reading Stats
 
 ![Reading Stats](images/web/stats.png)
 
@@ -386,7 +490,7 @@ takes it out of the totals.
 **Download backup** saves your whole history as `reading-stats.json`. Keep it before you go back to an
 older firmware.
 
-## 10. Plugins
+## 11. Plugins
 
 Plugins add tools to the File Manager and Settings pages. They run in your browser, not on the reader; some also
 have the reader send their requests (see below).
@@ -402,15 +506,20 @@ have the reader send their requests (see below).
 - **Install from a file** takes a plugin as a `.zip` file.
 
 Each plugin says which page it adds itself to and which internet sites it may reach through the reader
-(**Reaches**). Only install plugins you trust: a plugin can read, change and delete anything on the
-card that this web interface can. For writing your own, see [SD-card web plugins](./sd-plugins.md).
+(**Reaches**: those its manifest lists, and those written out in the addresses its reading and sleep events use).
+When the reader refused a site such a plugin wanted to send to (one its settings name, say), the plugin shows
+"Wants to reach" that site: **Allow** lets it, and the site joins those **Approved by you**, where **Take back**
+withdraws it again; **Dismiss** drops the question, and the reader does not ask about that site again.
+Only install plugins you trust: a plugin can read, change and delete anything on the card that this web interface
+can. For writing your own, see [SD-card web plugins](./sd-plugins.md).
 
 **Plugins that act while you read.** Some community plugins have the reader send something when you read or put it
 to sleep: **KOSync Auto-push** sends your reading progress to a KOSync server, **Month Wallpaper** fetches a new sleep
-picture. The reader keeps what they want to send on the card and sends it whenever it joins Wi-Fi; at sleep it joins
-your last network for it (not under 20 % battery), so going to sleep takes a few seconds longer. On the X3 and X4 it
-shows the sleep screen first and restarts twice while it sends. Such a plugin's settings (a server, an account) are
-made on its card in the web interface. See [Events](./sd-plugins.md#events-the-reader-sends-a-plugins-requests).
+picture. The reader sends only to the sites such a plugin may reach: those it lists (**Reaches**) and those you
+approved when its card asked. It keeps what they want to send on the card and sends it whenever it joins Wi-Fi; at
+sleep it joins your last network for it (not under 20 % battery), so going to sleep takes a few seconds longer. On the
+X3 and X4 it shows the sleep screen first and restarts twice while it sends. Such a plugin's settings (a server, an
+account) are made on its card in the web interface. See [Events](./sd-plugins.md#events-the-reader-sends-a-plugins-requests).
 
 **Books with Adobe DRM** (library loans and shops' "Adobe DRM" titles) come in through the community
 plugin **Protected Content**: it adds itself to the File Manager, signs in with your Adobe ID, turns the
@@ -418,7 +527,7 @@ plugin **Protected Content**: it adds itself to the File Manager, signs in with 
 reader does the plugin's cryptography for it, since the browser cannot on this page. See
 [Protected books](../USER_GUIDE.md#protected-books) for what the reader then does.
 
-## 11. System Info and Diagnostics
+## 12. System Info and Diagnostics
 
 **System Info** shows the firmware version, the model, the network and IP address, the battery, the
 memory, and (after **Load SD info**, which takes a moment on a large card) the card's size and free
@@ -427,14 +536,13 @@ space.
 ![System Info](images/web/systeminfo.png)
 
 **Diagnostics** is for bug reports. It shows how the reader last went to sleep and started up, and the
-history of the last sleeps and starts, the same as **Settings → System → Boot Diagnostics** on the
-reader but in plain words. **Download report** saves all of it, with the firmware version and device
-status, as one file to attach to an issue. The report leaves out the IP and MAC address and holds no
-passwords.
+history of the last sleeps and starts, in plain words. **Download report** saves all of it, with the
+firmware version and device status, as one file to attach to an issue. The report leaves out the IP
+and MAC address and holds no passwords.
 
 ![Diagnostics](images/web/diagnostics.png)
 
-## 12. Other ways to reach the card
+## 13. Other ways to reach the card
 
 - **WebDAV.** While File Transfer runs, the card is also served over WebDAV at the same address, so
   you can connect to `http://<reader address>/` as a network drive in Windows Explorer, macOS Finder or
@@ -445,7 +553,7 @@ passwords.
 - **Scripts.** Every page uses a small HTTP API that `curl` or a script can use too; see
   [Webserver Endpoints](./webserver-endpoints.md).
 
-## 13. Leaving File Transfer
+## 14. Leaving File Transfer
 
 Press **Back** on the reader (or tap **Exit** on a touch screen). The web server stops, Wi-Fi is
 switched off to save battery, and the reader restarts quietly into the Home screen. Books you uploaded
@@ -456,7 +564,7 @@ you open those tabs.
 is cancelled and the part that arrived is deleted, so send that file again later. A file being copied
 over WebDAV finishes arriving first.
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 **The page does not open.**
 - Check that your computer or phone is on the same network as the reader (in hotspot mode, joined
@@ -484,7 +592,7 @@ EPUB optimizer work without internet.
 computer. Avoid having the web interface open in several browser tabs at once, and wait for one large
 job (an upload, a font install) to finish before starting the next.
 
-## 15. Security
+## 16. Security
 
 - The web interface has **no password**: anyone on the same network can use it while File Transfer
   runs. Use it on networks you trust, or in hotspot mode.

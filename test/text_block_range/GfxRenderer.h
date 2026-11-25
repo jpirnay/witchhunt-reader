@@ -174,8 +174,9 @@ class GfxRenderer {
     return shapingFaceSource != nullptr ? shapingFaceSource(fontId, style, ppem26_6, refused) : nullptr;
   }
   TextScale fontBaseScale(int /*fontId*/) const { return TextScale(); }
-  // The glyph-ID prefetch of a build's warm step: counted, one per run.
+  // The glyph-ID prefetch of a build's warm step: counted per run / batch.
   mutable int prefetchedRuns = 0;
+  void prefetchGlyphs(int, const uint16_t*, size_t, EpdFontFamily::Style) const {}
   void prefetchGlyphRun(int /*fontId*/, const GlyphRun& /*run*/, EpdFontFamily::Style /*style*/) const {
     ++prefetchedRuns;
   }

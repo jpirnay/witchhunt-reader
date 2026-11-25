@@ -1,6 +1,11 @@
 #pragma once
 
+#include <array>
+#include <string>
+#include <vector>
+
 #include "components/themes/BaseTheme.h"
+#include "components/themes/CardTextFit.h"
 
 class GfxRenderer;
 
@@ -71,6 +76,34 @@ class LyraTheme : public BaseTheme {
   bool showsFileIcons() const override { return true; }
 
  protected:
+  StackedHomeRules stackedHomeRules() const override { return {170, 4}; }
+  // The cover sits inside the selection's 8 px padding, above and below.
+  int stackedCoverHeight(const int tileHeight) const override { return tileHeight - 16 > 120 ? tileHeight - 16 : 120; }
+
+  // drawList's selected row: Lyra's light grey bar under black text, or, where this is true, a
+  // solid black bar with the text and icon knocked out of it (Carousel).
+  virtual bool invertsListSelection() const { return false; }
+
   static int getRecentBookProgressPercent(const RecentBook& book);
+
+  // A book's details as a home card shows them: title, author, series, the status line (progress
+  // and pace) and the reading history, each wrapped to the card's text column, then fitted to its
+  // height by CardTextFit, which decides what gives way.
+  struct CardText {
+    std::array<std::vector<std::string>, CardTextFit::kPartCount> lines;
+    std::array<int, CardTextFit::kPartCount> fontIds{};
+    CardTextFit::Parts parts{};
+    CardTextFit::Result fit;
+  };
+  // `titleFaces` largest first; an empty `statusLine` leaves the status out.
+  static CardText fitCardText(const GfxRenderer& renderer, const RecentBook& book, const std::string& statusLine,
+                              int textWidth, int height, const CardTextFit::Face* titleFaces, int titleFaceCount);
+  // One part of `text`, its first line at `y`. The status line is cut to `width`; the rest were
+  // wrapped to it.
+  static void drawCardTextPart(const GfxRenderer& renderer, const CardText& text, CardTextFit::PartId part, int x,
+                               int y, int width);
   static const uint8_t* iconForName(UIIcon icon, int size);
+  // Where a cover thumbnail did not draw: "Loading" while the cover pass is still making it, else
+  // the no-cover tile, the cover icon over a black lower two thirds. Nothing for a drawn one.
+  static void drawCoverStandIn(const GfxRenderer& renderer, Rect box, CoverThumb state);
 };

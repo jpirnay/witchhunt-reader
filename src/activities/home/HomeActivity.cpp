@@ -5,13 +5,13 @@
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalCapabilities.h>
 #include <HalDisplay.h>
 #include <HalStorage.h>
 #include <I18n.h>
-#include <JpegToBmpConverter.h>
+#include <ImageToBmp.h>
 #include <Logging.h>
 #include <Memory.h>
-#include <PngToBmpConverter.h>
 #include <Txt.h>
 #include <Utf8.h>
 #include <Xtc.h>
@@ -21,7 +21,6 @@
 #include <algorithm>
 #include <cstring>
 #include <ctime>
-#include <iterator>
 #include <string>
 #include <vector>
 
@@ -39,94 +38,9 @@
 #include "activities/reader/ReaderActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/TapTargets.h"
-#include "components/themes/lyra/Lyra3CoversTheme.h"
+#include "components/themes/lyra/HomeWidgetData.h"
 #include "fontIds.h"
 #include "util/SerialCommandGrammar.h"
-
-namespace {
-constexpr int CLASSIC_MIN_RECENT_TILE_HEIGHT = 280;
-constexpr int LYRA_MIN_RECENT_TILE_HEIGHT = 170;
-constexpr int LYRA_3_COVERS_MIN_RECENT_TILE_HEIGHT = 200;
-constexpr int CLASSIC_MIN_RECENT_TO_MENU_GAP = 2;
-constexpr int LYRA_MIN_RECENT_TO_MENU_GAP = 4;
-
-struct HomeScreenLayout {
-  int recentTileHeight;
-  int recentToMenuGap;
-  int menuHeight;
-};
-
-bool isLyraFamilyTheme() {
-  const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
-  return theme == CrossPointSettings::UI_THEME::LYRA || theme == CrossPointSettings::UI_THEME::LYRA_3_COVERS;
-}
-
-bool isLyraExtendedTheme() {
-  return static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_3_COVERS;
-}
-
-int getMinRecentTileHeight() {
-  if (isLyraExtendedTheme()) {
-    return LYRA_3_COVERS_MIN_RECENT_TILE_HEIGHT;
-  }
-  if (isLyraFamilyTheme()) {
-    return LYRA_MIN_RECENT_TILE_HEIGHT;
-  }
-  return CLASSIC_MIN_RECENT_TILE_HEIGHT;
-}
-
-int getMinRecentToMenuGap() {
-  return isLyraFamilyTheme() ? LYRA_MIN_RECENT_TO_MENU_GAP : CLASSIC_MIN_RECENT_TO_MENU_GAP;
-}
-
-HomeScreenLayout computeHomeScreenLayout(const ThemeMetrics& metrics, int contentHeight, int menuItemCount) {
-#if FREEINK_DEVICE_METALIO_EINK4_PLUS
-  contentHeight -= metrics.verticalSpacing;
-#endif
-  HomeScreenLayout layout{metrics.homeCoverTileHeight, metrics.verticalSpacing, 0};
-
-  const int menuRequiredHeight =
-      menuItemCount * metrics.menuRowHeight + std::max(0, menuItemCount - 1) * metrics.menuSpacing;
-
-  auto computeMenuHeight = [&]() {
-    return contentHeight - (metrics.homeTopPadding + layout.recentTileHeight + layout.recentToMenuGap);
-  };
-
-  layout.menuHeight = computeMenuHeight();
-  if (layout.menuHeight >= menuRequiredHeight) {
-    return layout;
-  }
-
-  const int gapReduction =
-      std::min(layout.recentToMenuGap - getMinRecentToMenuGap(), menuRequiredHeight - layout.menuHeight);
-  if (gapReduction > 0) {
-    layout.recentToMenuGap -= gapReduction;
-    layout.menuHeight = computeMenuHeight();
-  }
-
-  if (layout.menuHeight >= menuRequiredHeight) {
-    return layout;
-  }
-
-  const int tileReduction =
-      std::min(layout.recentTileHeight - getMinRecentTileHeight(), menuRequiredHeight - layout.menuHeight);
-  if (tileReduction > 0) {
-    layout.recentTileHeight -= tileReduction;
-    layout.menuHeight = computeMenuHeight();
-  }
-
-  layout.menuHeight = std::max(0, layout.menuHeight);
-  return layout;
-}
-
-int getHomeCoverRenderHeight(const HomeScreenLayout& layout) {
-  // Lyra Extended's split between cover and text lives with the theme that draws it: the height
-  // chosen here goes into the thumbnail's filename, so the theme has to ask for the same one.
-  return isLyraExtendedTheme()
-             ? Lyra3CoversMetrics::coverRenderHeight(layout.recentTileHeight)
-             : std::max(120, layout.recentTileHeight - (isLyraFamilyTheme() ? 16 : BaseMetrics::homeBookDetailsHeight));
-}
-}  // namespace
 
 // Builds the menu entry list in display order. Single source of truth for both loop() (which
 // dispatches Confirm based on action) and render() (which draws labels/icons).
@@ -134,7 +48,21 @@ void HomeActivity::rebuildMenuEntries() {
   menuEntries.clear();
   menuEntries.reserve(6);  // all six shown, or five plus More
   const HomeMenuAvailability availability{.hasBookmarks = GLOBAL_BOOKMARKS.hasAny()};
-  collectHomeMenuEntries(HomeMenuPlacement::Home, availability, menuEntries);
+  {
+    // Before the menu: the theme's arrangement decides how many entries Home has places for, and
+    // which destinations it shows itself.
+    RenderLock lock;
+    UITheme::getInstance().getMutableTheme().prepareHome(availableDestinations(availability));
+  }
+  const uint32_t shownByTheme =
+      GUI.homeShownDestinations(renderer, UITheme::getContentRect(renderer, UITheme::showsHomeButtonHints(), false));
+  collectHomeMenuEntries(HomeMenuPlacement::Home, availability, menuEntries, GUI.homeMenuCapacity(), shownByTheme);
+  menuTrailing_ = homeMenuTrailingCount(menuEntries);
+}
+
+HomeLayout HomeActivity::homeLayout() const {
+  return GUI.homeLayout(renderer, UITheme::getContentRect(renderer, UITheme::showsHomeButtonHints(), false),
+                        static_cast<int>(menuEntries.size()), menuTrailing_);
 }
 
 void HomeActivity::loadRecentBooks(int maxBooks) {
@@ -168,12 +96,24 @@ bool HomeActivity::shouldSkipPeriodicUpdate() const {
   return !HomeClockCadence::redraws(millis() - activityManager.lastUserActivityMs(), shown.tm_min);
 }
 
+bool HomeActivity::onClockMinute() {
+  // The theme reads the calendar and the week's reading when Home opens. Left up through midnight,
+  // or with the clock set meanwhile, they are read again for the new day. Local midnight is a
+  // multiple of ten minutes, so the idle pace never skips that redraw.
+  const uint16_t day = currentLocalDayIndex();
+  if (day == shownDay_) return showsClock_;
+  shownDay_ = day;
+  const Rect content = UITheme::getContentRect(renderer, true, false);
+  RenderLock lock;
+  return UITheme::getInstance().getMutableTheme().refreshHomeDay(renderer, content) || showsClock_;
+}
+
 bool HomeActivity::coverAttemptsExhausted(const std::string& path) const {
   const auto it = coverTransientAttempts.find(path);
   return it != coverTransientAttempts.end() && it->second >= COVER_MAX_TRANSIENT_ATTEMPTS;
 }
 
-void HomeActivity::giveUpCover(RecentBook& book, ThumbResult res, const std::vector<ThumbSlot>& slots) {
+void HomeActivity::giveUpCover(RecentBook& book, ThumbResult res) {
   // Only transient failures count toward the session budget; a structural absence is already
   // permanent (generateThumbBmp wrote a sentinel) and needs no retry accounting.
   if (res == ThumbResult::TransientFail) {
@@ -182,21 +122,14 @@ void HomeActivity::giveUpCover(RecentBook& book, ThumbResult res, const std::vec
   }
 
   // Permanent give-up = structurally absent, or transient failures past this session's budget
-  // (e.g. an embedded cover the decoder rejects every time — oversize PNG, corrupt image). As
-  // CoverThumbLoader does: write a valid placeholder BMP at each thumb slot so isCoverThumbComplete()
-  // treats the book as resolved on disk and it is never re-decoded on the next boot. A still-retryable
-  // transient failure records an empty cover instead, so it gets a fresh attempt next session.
+  // (e.g. an embedded cover the decoder rejects every time — oversize PNG, corrupt image). The loader
+  // writes a valid placeholder BMP at each size it makes, so isCoverThumbComplete() treats the book
+  // as resolved on disk and it is never re-decoded on the next boot. A still-retryable transient
+  // failure records an empty cover instead, so it gets a fresh attempt next session.
   const bool permanent = (res == ThumbResult::StructurallyAbsent) || coverAttemptsExhausted(book.path);
 
   if (permanent) {
-    bool allWritten = !slots.empty();
-    for (const auto& slot : slots) {
-      if (!ReaderActivity::isCoverThumbComplete(slot.path, slot.width, slot.height) &&
-          !ReaderActivity::writeCoverPlaceholderBmp(slot.path)) {
-        allWritten = false;
-      }
-    }
-    if (allWritten) {
+    if (coverLoader.writeNoCoverPlaceholders(book.path)) {
       const std::string placeholder = ReaderActivity::coverThumbPlaceholder(book.path);
       LOG_DBG("HOME", "Wrote cover placeholder(s) for %s — resolved, will not re-decode", book.path.c_str());
       RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
@@ -211,7 +144,8 @@ void HomeActivity::giveUpCover(RecentBook& book, ThumbResult res, const std::vec
   book.coverBmpPath = "";
 }
 
-void HomeActivity::loadRecentCovers(int coverHeight) {
+void HomeActivity::loadRecentCovers(const int coverHeight, const std::pair<int, int>* thumbSizes,
+                                    const int thumbSizeCount) {
   recentsLoading = true;
 
   // Cold-cache cover loading runs the JPEG/PNG decoders, the sliced ZIP inflate and
@@ -280,24 +214,6 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
     return;
   }
 
-  const auto thumbSizes = GUI.getCoverThumbSizes(coverHeight);
-
-  // Build the placeholder slots for a book on give-up. Multi-size themes placeholder every
-  // WxH thumb; the single-height path placeholders its one thumb_<h>.bmp (width = h*0.6, matching
-  // the decode). Each slot's path is exactly what the loader's isCoverThumbComplete() checks.
-  const auto slotsForBook = [&](const std::string& placeholder) {
-    std::vector<ThumbSlot> slots;
-    if (!thumbSizes.empty()) {
-      slots.reserve(thumbSizes.size());
-      std::transform(thumbSizes.begin(), thumbSizes.end(), std::back_inserter(slots), [&](const auto& sz) {
-        return ThumbSlot{UITheme::getCoverThumbPath(placeholder, sz.first, sz.second), sz.first, sz.second};
-      });
-    } else {
-      slots.push_back({UITheme::getCoverThumbPath(placeholder, coverHeight), coverHeight * 6 / 10, coverHeight});
-    }
-    return slots;
-  };
-
   // HomeActivity::loop runs on the main task while rendering runs on the render task.
   // Invalidate the Lyra frame cache under the render lock to avoid freeing cached
   // frames while tryFastHomeRender is copying from them.
@@ -329,10 +245,10 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
   // The pass's thumbnails: the carousel's two boxes, cropped, or the single-height form the other
   // themes draw. Set once per height, not per call: configure() abandons the book in hand.
   if (coverLoaderHeight_ != coverHeight) {
-    if (thumbSizes.empty()) {
+    if (thumbSizeCount == 0) {
       coverLoader.configureSingleHeight(coverHeight);
     } else {
-      coverLoader.configure(thumbSizes.data(), static_cast<int>(thumbSizes.size()), /*crop=*/true);
+      coverLoader.configure(thumbSizes, thumbSizeCount, /*crop=*/true);
     }
     coverLoaderHeight_ = coverHeight;
   }
@@ -371,14 +287,14 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       // reboot resets the counter and tries again) so it cannot starve the others.
       if (coverAttemptsExhausted(book.path)) {
         LOG_DBG("HOME", "Cover attempts exhausted for %s this session -- writing placeholder", book.path.c_str());
-        giveUpCover(book, ThumbResult::StructurallyAbsent,
-                    slotsForBook(ReaderActivity::coverThumbPlaceholder(book.path)));
+        giveUpCover(book, ThumbResult::StructurallyAbsent);
         nextRecentCoverIndex++;
         yieldAfterDecode();
         return;
       }
       // Cover decode needs ~42 KB contiguous heap -- free the frame cache first.
       invalidateFrameCacheSafely();
+      coverBookPath_ = book.path;
       coverLoader.begin(book.path, coverScratch_.get());
     }
 
@@ -392,7 +308,15 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
         return;
       }
     }
-    RecentBook& book = recentBooks[nextRecentCoverIndex];
+    // Found by path: a swipe that cycled the books while this one was in hand moved it
+    // (cycleRecentBooks), and the position the pass started from now holds another book.
+    const auto inHand = std::find_if(recentBooks.begin(), recentBooks.end(),
+                                     [this](const RecentBook& b) { return b.path == coverBookPath_; });
+    if (inHand == recentBooks.end()) {
+      recentsLoading = false;
+      return;
+    }
+    RecentBook& book = *inHand;
     const std::string placeholder = ReaderActivity::coverThumbPlaceholder(book.path);
     if (step == CoverThumbLoader::Step::Done) {
       // A cover written, or the placeholder of a book that has none: the stored path is canonical.
@@ -402,9 +326,20 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       }
     } else {
       // Counts the transient; writes a durable placeholder once the budget is spent.
-      giveUpCover(book, ThumbResult::TransientFail, slotsForBook(placeholder));
+      giveUpCover(book, ThumbResult::TransientFail);
     }
-    nextRecentCoverIndex++;
+    // Past the book in hand when it is where the pass left off. After a cycle the pass starts over
+    // from the front instead, and skips whatever is complete by then.
+    if (nextRecentCoverIndex < recentBooks.size() && &recentBooks[nextRecentCoverIndex] == &book) {
+      nextRecentCoverIndex++;
+    }
+    yieldAfterDecode();
+    return;
+  }
+
+  // Every cover is resolved. The pictures Home's widgets show come next, one a call, while the
+  // scratch is still lent: a JPEG needs the decoder's buffers as a cover does.
+  if (makeNextHomePicture()) {
     yieldAfterDecode();
     return;
   }
@@ -412,6 +347,41 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
   recentsLoaded = true;
   recentsLoading = false;
   if (!keepRegionAsFrameCache()) restoreSecondaryBuffer();
+}
+
+bool HomeActivity::makeNextHomePicture() {
+  HomePictureJob jobs[kMaxPictureJobs];
+  const int count =
+      GUI.homePictureJobs(renderer, UITheme::getContentRect(renderer, true, false), jobs, kMaxPictureJobs);
+  for (int i = 0; i < count; ++i) {
+    const HomePictureJob& job = jobs[i];
+    const auto bit = static_cast<uint8_t>(1u << i);
+    if ((pictureAttempts_ & bit) != 0) continue;
+    if (ReaderActivity::isCoverThumbComplete(job.target, job.width, job.height)) continue;
+    // Once a visit, made or not: a picture the decoders refuse is not tried on every tick.
+    pictureAttempts_ |= bit;
+    const std::string dir = job.target.substr(0, job.target.rfind('/'));
+    if (!Storage.exists(dir.c_str())) Storage.mkdir(dir.c_str());
+    // Written under another name and renamed when whole: the theme draws the target on the render
+    // task meanwhile, and must not find half a picture.
+    const std::string part = job.target + ".part";
+    bool ok = ImageToBmp::convertFile(
+        "HOME", job.source, part,
+        ImageToBmp::Target{.width = job.width, .height = job.height, .crop = true, .scratch = coverScratch_.get()});
+    if (ok) {
+      Storage.remove(job.target.c_str());
+      ok = Storage.rename(part.c_str(), job.target.c_str());
+    }
+    if (!ok) {
+      Storage.remove(part.c_str());
+      LOG_ERR("HOME", "Picture not made: %s (%dx%d)", job.source.c_str(), job.width, job.height);
+    } else {
+      LOG_INF("HOME", "Picture made: %s -> %s", job.source.c_str(), job.target.c_str());
+      removeReplacedHomePictures(job.target);
+    }
+    return true;
+  }
+  return false;
 }
 
 bool HomeActivity::keepRegionAsFrameCache() {
@@ -528,22 +498,38 @@ void HomeActivity::onEnter() {
   recentDocIds.reserve(recentBooks.size());
   for (const auto& book : recentBooks) recentDocIds.push_back(KOReaderDocumentId::calculateFromFilename(book.path));
   READING_STATS.prefetchRecent(recentDocIds);
-  if (recentBooks.empty()) {
-    recentsLoaded = true;
-  }
+  pictureAttempts_ = 0;
+  // The day before the theme reads its widgets for it (prepareHome, in the rebuild below): one that
+  // turns in between is then caught at the next minute (onClockMinute) rather than missed.
+  shownDay_ = currentLocalDayIndex();
   // Built here, once per entry, before the first render is requested. render() runs on the render
   // task and loop() on this one; when both rebuilt the list on a dirty flag, they could run at once,
   // each clearing and then appending, and Home showed every entry twice. The rebuild also reads the
   // bookmark index off the card.
   rebuildMenuEntries();
+  {
+    RenderLock lock;
+    UITheme::getInstance().getMutableTheme().setHomeMenu(static_cast<int>(menuEntries.size()), menuTrailing_);
+  }
+  shownBooks_ = std::min(static_cast<int>(recentBooks.size()), homeLayout().bookSlots);
+  const Rect content = UITheme::getContentRect(renderer, true, false);
+  grid_ = GUI.homeGrid(renderer, content, shownBooks_, static_cast<int>(menuEntries.size()), menuTrailing_);
+  widgetActionCount_ = GUI.homeWidgetActions(renderer, content, widgetActions_, kMaxWidgetActions);
+  showsClock_ = GUI.homeShowsClock(renderer, content);
+  // Nothing for the cover pass to make: no book, and no picture a widget shows.
+  if (recentBooks.empty()) {
+    HomePictureJob jobs[kMaxPictureJobs];
+    recentsLoaded = GUI.homePictureJobs(renderer, content, jobs, kMaxPictureJobs) == 0;
+  }
+  gridNav_ = grid_.rowCount > 0 && HalCapabilities::hasFourDirectionKeys();
 
   // Apply focus: book path takes priority, else combined selector index (covers
   // "return to the menu entry I was on").
   bool focused = false;
   if (!focusBookPath.empty()) {
-    for (size_t i = 0; i < recentBooks.size(); ++i) {
+    for (int i = 0; i < shownBooks_; ++i) {
       if (recentBooks[i].path == focusBookPath) {
-        selectorIndex = static_cast<int>(i);
+        selectorIndex = i;
         focused = true;
         break;
       }
@@ -551,7 +537,7 @@ void HomeActivity::onEnter() {
     focusBookPath.clear();
   }
   if (!focused && focusSelectorIndex >= 0) {
-    const int combinedSize = static_cast<int>(recentBooks.size() + menuEntries.size());
+    const int combinedSize = selectableCount();
     if (combinedSize > 0) {
       selectorIndex = std::min(focusSelectorIndex, combinedSize - 1);
     }
@@ -567,6 +553,10 @@ void HomeActivity::onExit() {
   Epub::clearCoverMetadataMemo();
   Activity::onExit();
   freeCoverBuffer();
+  // The clock and weather widgets draw scaled text, which takes the reader's scaled-glyph cache
+  // (4.75 KB) on first use. Given back as a reader gives it back, so it does not stay under the
+  // next screen: X3, kept, it cost Home 5 KB of free heap and the next reader its stable placement.
+  renderer.releaseScaledGlyphCache();
   UITheme::getInstance().getMutableTheme().invalidateFrameCache();
   // Never hand the next activity a degraded display: if we exit mid-load (e.g. the
   // user opened a book before covers finished), put the secondary framebuffer back.
@@ -643,7 +633,8 @@ void HomeActivity::loop() {
 
   if (isCarousel) {
     if (firstRenderDone && !recentsLoaded && !recentsLoading && !inputWaiting) {
-      loadRecentCovers(UITheme::getInstance().getMetrics().homeCoverHeight);
+      const HomeLayout layout = homeLayout();
+      loadRecentCovers(layout.coverHeight, layout.thumbSizes, layout.thumbSizeCount);
       return;
     }
 
@@ -709,37 +700,83 @@ void HomeActivity::loop() {
       requestUpdate();
     }
   } else {
-    const int totalItems = static_cast<int>(recentBooks.size() + menuEntries.size());
+    const int totalItems = selectableCount();
+
+    // Ahead of the cover pass, which would otherwise take this tick and let the swipe go by. The
+    // direction is the reader's (and the carousel's): a swipe to the left brings the next book.
+    // wasSwipe() is silent on boards without touch and while Touch Navigation is off.
+    if (GUI.homeSwipeCyclesBooks()) {
+      const auto swipe = mappedInput.wasSwipe();
+      if (swipe == MappedInputManager::SwipeDir::Left || swipe == MappedInputManager::SwipeDir::Right) {
+        cycleRecentBooks(swipe == MappedInputManager::SwipeDir::Left ? 1 : -1);
+        return;
+      }
+    }
 
     if (firstRenderDone && !recentsLoaded && !recentsLoading && !inputWaiting) {
-      const auto& metrics = UITheme::getInstance().getMetrics();
-      const Rect contentRect = UITheme::getContentRect(renderer, UITheme::showsHomeButtonHints(), false);
-      const HomeScreenLayout layout =
-          computeHomeScreenLayout(metrics, contentRect.height, static_cast<int>(menuEntries.size()));
-      loadRecentCovers(getHomeCoverRenderHeight(layout));
+      const HomeLayout layout = homeLayout();
+      loadRecentCovers(layout.coverHeight, layout.thumbSizes, layout.thumbSizeCount);
       return;
     }
 
-    buttonNavigator.onNext([this, totalItems] {
-      selectorIndex = ButtonNavigator::nextIndex(selectorIndex, totalItems);
-      requestUpdate();
-    });
+    if (gridNav_) {
+      // Rows and columns (HomeGridNav): Up and Down between rows, Left and Right along one, and on
+      // the book card Left and Right bring the previous or next book. One direction per tick, as
+      // the carousel does, so two edges drained in one batch cannot both act on a stale position.
+      using Move = HomeGridNav::Move;
+      using Direction = MappedInputManager::Direction;
+      bool pressed = true;
+      Move move = Move::Down;
+      if (mappedInput.wasLogicalPressed(Direction::Up)) {
+        move = Move::Up;
+      } else if (mappedInput.wasLogicalPressed(Direction::Down)) {
+        move = Move::Down;
+      } else if (mappedInput.wasLogicalPressed(Direction::Left)) {
+        move = Move::Left;
+      } else if (mappedInput.wasLogicalPressed(Direction::Right)) {
+        move = Move::Right;
+      } else {
+        pressed = false;
+      }
+      if (pressed) {
+        const HomeGridNav::Step step = HomeGridNav::step(grid_, selectorIndex, move);
+        if (step.cycle != 0) {
+          cycleRecentBooks(step.cycle);
+        } else if (step.index != selectorIndex) {
+          selectorIndex = step.index;
+          requestUpdate();
+        }
+      }
+    } else if (grid_.cellCount > 0) {
+      // Up and Down only: through the theme's cells in screen order, which need not be the
+      // selector's order (HomeGridNav::next).
+      buttonNavigator.onNext([this] {
+        selectorIndex = HomeGridNav::next(grid_, selectorIndex, 1);
+        requestUpdate();
+      });
+      buttonNavigator.onPrevious([this] {
+        selectorIndex = HomeGridNav::next(grid_, selectorIndex, -1);
+        requestUpdate();
+      });
+    } else {
+      buttonNavigator.onNext([this, totalItems] {
+        selectorIndex = ButtonNavigator::nextIndex(selectorIndex, totalItems);
+        requestUpdate();
+      });
 
-    buttonNavigator.onPrevious([this, totalItems] {
-      selectorIndex = ButtonNavigator::previousIndex(selectorIndex, totalItems);
-      requestUpdate();
-    });
+      buttonNavigator.onPrevious([this, totalItems] {
+        selectorIndex = ButtonNavigator::previousIndex(selectorIndex, totalItems);
+        requestUpdate();
+      });
+    }
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    const int recentsCount = static_cast<int>(recentBooks.size());
+    const int recentsCount = shownBooks_;
     if (selectorIndex < recentsCount) {
       onSelectBook(recentBooks[selectorIndex].path);
     } else {
-      const int menuIdx = selectorIndex - recentsCount;
-      if (menuIdx < static_cast<int>(menuEntries.size())) {
-        dispatchMenuAction(menuEntries[menuIdx].action);
-      }
+      dispatchSelection(selectorIndex - recentsCount);
     }
   }
 }
@@ -795,41 +832,39 @@ void HomeActivity::render(RenderLock&&) {
   theme.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.homeTopPadding},
                    nullptr);
 
-  const int totalItems = static_cast<int>(recentBooks.size() + menuEntries.size());
+  // Books, menu, and the widgets numbered after it: clamping to the first two pulled a step onto a
+  // widget back to the last menu entry.
+  const int totalItems = selectableCount();
   if (selectorIndex >= totalItems) {
     selectorIndex = std::max(0, totalItems - 1);
   }
 
-  const HomeScreenLayout layout = computeHomeScreenLayout(metrics, contentRect.height, menuCount);
+  const HomeLayout layout = homeLayout();
 
-  coverRectX = contentRect.x;
-  coverRectY = metrics.homeTopPadding;
-  coverRectW = contentRect.width;
-  coverRectH = layout.recentTileHeight;
+  coverRectX = layout.coverSnapshot.x;
+  coverRectY = layout.coverSnapshot.y;
+  coverRectW = layout.coverSnapshot.width;
+  coverRectH = layout.coverSnapshot.height;
 
   // The carousel stores nothing: this draw is its fallback for a render its frame cache could not serve, and every
   // carousel render is either served by that cache or clears coverRendered (above) before it could restore, so the
   // copy was never read. It was a malloc of the tile region with no heap floor, which the X3 logged as "OOM: cover
   // buffer (20592 bytes)".
-  theme.drawRecentBookCover(renderer,
-                            Rect{contentRect.x, metrics.homeTopPadding, contentRect.width, layout.recentTileHeight},
-                            recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
-                            [this, isCarousel] { return !isCarousel && storeCoverBuffer(); });
+  theme.drawRecentBookCover(renderer, layout.books, recentBooks, selectorIndex, coverRendered, coverBufferStored,
+                            bufferRestored, [this, isCarousel] { return !isCarousel && storeCoverBuffer(); });
 
-  theme.drawButtonMenu(
-      renderer,
-      Rect{contentRect.x, metrics.homeTopPadding + layout.recentTileHeight + layout.recentToMenuGap, contentRect.width,
-           layout.menuHeight},
-      menuCount, selectorIndex - static_cast<int>(recentBooks.size()),
+  theme.drawHomeMenu(
+      renderer, layout.menu, menuCount, menuTrailing_, selectorIndex - shownBooks_,
       [this](int index) { return std::string(I18N.get(menuEntries[index].label)); },
       [this](int index) { return menuEntries[index].icon; });
 
   if (showButtonHints) {
-    const auto labels = isCarousel ? mappedInput
-                                         .mapHints("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT),
-                                                   tr(STR_DIR_UP), tr(STR_DIR_DOWN))
-                                         .front
-                                   : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    const auto labels =
+        (isCarousel || gridNav_)
+            ? mappedInput
+                  .mapHints("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+                  .front
+            : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     theme.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 
@@ -859,9 +894,9 @@ void HomeActivity::render(RenderLock&&) {
 
 // A tap on a cover or a menu entry. Both sets of targets were published by whichever theme
 // painted them, so this knows nothing about where a cover or a row physically sits -- which is
-// the point, given four themes that lay the home screen out four different ways (one cover,
-// three covers, a carousel, and a menu that is a vertical row list in two themes and a
-// horizontal icon strip in the carousel).
+// the point, given four themes that lay the home screen out four different ways (one cover, a
+// card with tiles, a carousel, and a menu that is a vertical row list in two themes, a grid of
+// tiles in one and a horizontal icon strip in the carousel).
 //
 // Apply the same configurable selection/activation policy as other selectable touch surfaces.
 // This includes the carousel's horizontal icon row as well as covers and vertical menu rows.
@@ -875,8 +910,9 @@ bool HomeActivity::handleHomeTouch() {
   if (!mappedInput.hasTouch()) return false;
   if (!TapTargets::homeCovers().hasTargets() && !TapTargets::homeMenu().hasTargets()) return false;
 
-  const int recentsCount = static_cast<int>(recentBooks.size());
-  const int menuCount = static_cast<int>(menuEntries.size());
+  const int recentsCount = shownBooks_;
+  // The menu's targets go on after its entries with the widgets that open something.
+  const int menuCount = static_cast<int>(menuEntries.size()) + widgetActionCount_;
 
   // Covers first: in the carousel theme the side covers slide behind the centre one, and the
   // recorder orders them so the visible one wins. The two sets never overlap each other.
@@ -927,7 +963,7 @@ bool HomeActivity::handleHomeTouch() {
       if (isBook) {
         onSelectBook(recentBooks[selector].path);
       } else {
-        dispatchMenuAction(menuEntries[selector - recentsCount].action);
+        dispatchSelection(selector - recentsCount);
       }
       return true;
   }
@@ -942,6 +978,41 @@ void HomeActivity::onSelectBook(const std::string& path) {
   hint.target = ReturnTo::Home;
   hint.selectName = path;  // used to re-focus the book in the recents strip after return
   activityManager.replaceWithReader(path, std::move(hint));
+}
+
+void HomeActivity::cycleRecentBooks(const int step) {
+  if (recentBooks.size() < 2) return;
+  {
+    // render() reads the list, and the theme's cover flags with it.
+    RenderLock lock;
+    if (step > 0) {
+      std::rotate(recentBooks.begin(), recentBooks.begin() + 1, recentBooks.end());
+    } else {
+      std::rotate(recentBooks.rbegin(), recentBooks.rbegin() + 1, recentBooks.rend());
+    }
+    // A different cover goes to the front, so the stored copy no longer matches.
+    coverRendered = false;
+  }
+  // The cover pass walks the list by position, and the rotation moved what it had done: it starts
+  // over and skips the books that are complete. The one in hand, if any, it finds by path.
+  nextRecentCoverIndex = 0;
+  requestUpdate();
+}
+
+int HomeActivity::selectableCount() const {
+  return shownBooks_ + static_cast<int>(menuEntries.size()) + widgetActionCount_;
+}
+
+void HomeActivity::dispatchSelection(const int menuIndex) {
+  if (menuIndex < 0) return;
+  const int menuCount = static_cast<int>(menuEntries.size());
+  if (menuIndex < menuCount) {
+    dispatchMenuAction(menuEntries[menuIndex].action);
+    return;
+  }
+  const int widget = menuIndex - menuCount;
+  if (widget >= widgetActionCount_) return;
+  dispatchMenuAction(actionFor(widgetActions_[widget]));
 }
 
 void HomeActivity::dispatchMenuAction(HomeMenuAction action) {
@@ -967,12 +1038,18 @@ void HomeActivity::appendDebugState(std::string& out) const {
   using SerialCommandGrammar::appendField;
   appendField(out, "sel", static_cast<long>(selectorIndex));
   if (selectorIndex < 0) return;
-  const int books = static_cast<int>(recentBooks.size());
+  const int books = shownBooks_;
   const int menuIndex = selectorIndex - books;
   if (menuIndex < 0) {
     appendField(out, "label", recentBooks[selectorIndex].title);
   } else if (menuIndex < static_cast<int>(menuEntries.size())) {
     appendField(out, "label", I18N.get(menuEntries[menuIndex].label));
+  } else if (menuIndex - static_cast<int>(menuEntries.size()) < widgetActionCount_) {
+    // A widget that opens something: named by where it leads.
+    static constexpr const char* kNames[] = {"widget:Library",      "widget:ReadingStats", "widget:Bookmarks",
+                                             "widget:FileTransfer", "widget:Weather",      "widget:Recent"};
+    const auto d = static_cast<size_t>(widgetActions_[menuIndex - static_cast<int>(menuEntries.size())]);
+    if (d < std::size(kNames)) appendField(out, "label", kNames[d]);
   }
 }
 #endif  // SERIAL_TEST_API

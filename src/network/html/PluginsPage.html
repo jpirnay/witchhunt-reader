@@ -121,6 +121,9 @@
       let installed = [];
       // {"<plugin>": ["host", ...]}: the hosts the user approved when a plugin asked (POST /api/plugins/hosts).
       let approvals = {};
+      // {"<plugin>": [host, ...]}: the hosts an installed plugin's events write out in their URLs, which the reader counts
+      // as the plugin's own (PluginCatalog.describe().eventHosts), read from each device.json after the list.
+      let eventReach = {};
       let repo = 'jpirnay/witchhunt-reader';
 
       function setStatus(text, kind) {
@@ -145,9 +148,14 @@
         return 'Adds ' + parts.join(' and ');
       }
 
-      function describeReach(hosts) {
-        return hosts && hosts.length ? 'Reaches: ' + hosts.join(', ')
-                                     : 'Reaches no site unless you approve one when it asks';
+      // hosts: the manifest's allowedHosts; events: the hosts its device.json's events write out, which count as well.
+      function describeReach(hosts, events) {
+        const listed = Array.isArray(hosts) ? hosts : [];
+        const named = (Array.isArray(events) ? events : []).filter((h) => !listed.includes(h));
+        const parts = [];
+        if (listed.length) parts.push(listed.join(', '));
+        if (named.length) parts.push(named.join(', ') + ' (named by its events)');
+        return parts.length ? 'Reaches: ' + parts.join('; ') : 'Reaches no site unless you approve one when it asks';
       }
 
       async function post(url) {
@@ -178,6 +186,28 @@
         }
         renderInstalled();
         renderCatalogButtons();
+        await loadEventReach();
+      }
+
+      // Each installed device.json's event hosts, for its Reaches line. One file at a time, after the list: the device
+      // serves one connection at a time.
+      async function loadEventReach() {
+        const withDevice = installed.filter((p) => p.device);
+        if (!withDevice.length) return;
+        try {
+          await loadScript('/js/plugin-catalog.js', 'PluginCatalog');
+        } catch (e) {
+          return;
+        }
+        const found = {};
+        for (const p of withDevice) {
+          try {
+            const r = await fetch('/plugin?name=' + encodeURIComponent(p.name) + '&file=device.json');
+            if (r.ok) found[p.name] = PluginCatalog.describe(await r.json()).eventHosts;
+          } catch (e) { /* its line shows allowedHosts alone */ }
+        }
+        eventReach = found;
+        renderInstalled();
       }
 
       function renderInstalled() {
@@ -193,9 +223,12 @@
           const title = el('strong', { textContent: p.title || p.name });
           if (p.version) title.append(el('span', { className: 'badge badge-muted', textContent: 'v' + p.version }));
           if (p.disabled) title.append(el('span', { className: 'badge badge-warn', textContent: 'switched off' }));
-          const meta = [describeParts(p.web !== false, !!p.device, p.mount), describeReach(p.allowedHosts)];
+          const meta = [describeParts(p.web !== false, !!p.device, p.mount), describeReach(p.allowedHosts, eventReach[p.name])];
           if (p.root && p.root !== INSTALL_ROOT) meta.push('Copied by hand into ' + p.root + '/' + p.name);
           const approved = (approvals && approvals[p.name]) || [];
+          const label = p.title || p.name;
+          // Hosts its device events were refused for (/api/plugins "wants"): the reader cannot ask, so this page does.
+          const wants = (Array.isArray(p.wants) ? p.wants : []).filter((h) => !approved.includes(h));
           const info = el('div', { className: 'plugin-info' }, [
             title,
             p.description ? el('div', { textContent: p.description }) : '',
@@ -205,11 +238,25 @@
               ...approved.map((h) => el('span', { className: 'badge badge-muted' }, [
                 h + ' ',
                 el('button', {
-                  className: 'btn btn-small', textContent: 'Take back', title: 'Stop ' + (p.title || p.name) + ' reaching ' + h,
-                  onclick: () => revokeHost(p, h)
+                  className: 'btn btn-small', textContent: 'Take back', title: 'Stop ' + label + ' reaching ' + h,
+                  onclick: () => decideHost(p, h, { allow: false }, label + ' no longer reaches ' + h + '.')
                 })
               ]))
-            ]) : ''
+            ]) : '',
+            ...wants.map((h) => el('div', { className: 'plugin-meta plugin-wants' }, [
+              el('span', { className: 'badge badge-warn', textContent: 'Wants to reach ' + h }),
+              ' ',
+              el('button', {
+                className: 'btn btn-small btn-primary', textContent: 'Allow',
+                title: 'Let ' + label + ' reach ' + h + ' for its events',
+                onclick: () => decideHost(p, h, { allow: true }, label + ' may now reach ' + h + '.')
+              }),
+              ' ',
+              el('button', {
+                className: 'btn btn-small', textContent: 'Dismiss', title: 'Do not ask about ' + h + ' again',
+                onclick: () => decideHost(p, h, { dismiss: true }, label + ' will not ask about ' + h + ' again.')
+              })
+            ]))
           ]);
           const toggle = el('button', {
             className: 'btn btn-small',
@@ -237,16 +284,18 @@
         loadInstalled();
       }
 
-      async function revokeHost(p, host) {
+      // One answer about a plugin's host (POST /api/plugins/hosts): {allow: true} approves it, {allow: false} takes the
+      // approval back, {dismiss: true} drops the request its events made. done: the status line on success.
+      async function decideHost(p, host, decision, done) {
         try {
           const r = await fetch('/api/plugins/hosts', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ plugin: p.name, host, allow: false })
+            body: JSON.stringify(Object.assign({ plugin: p.name, host }, decision))
           });
           if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
-          setStatus((p.title || p.name) + ' no longer reaches ' + host + '.', 'ok');
+          setStatus(done, 'ok');
         } catch (e) {
-          setStatus('Could not take back ' + host + ': ' + e.message, 'err');
+          setStatus('Could not change ' + host + ' for ' + (p.title || p.name) + ': ' + e.message, 'err');
         }
         loadInstalled();
       }
@@ -403,13 +452,22 @@
             throw new Error('manifest.json is not valid JSON');
           }
         }
+        // The hosts its events write out count as its own: they are named with the rest of its reach.
+        let events = [];
+        const deviceFile = files.find((f) => f.name === 'device.json');
+        if (deviceFile) {
+          try {
+            await loadScript('/js/plugin-catalog.js', 'PluginCatalog');
+            events = PluginCatalog.describe(JSON.parse(new TextDecoder().decode(deviceFile.data))).eventHosts;
+          } catch (e) { /* named without them */ }
+        }
         const name = safeName(top || file.name.replace(/\.zip$/i, ''));
         if (!name) throw new Error('could not make a folder name from the zip');
         const title = manifest.title || name;
         const question = 'Install ' + title + (manifest.version ? ' ' + manifest.version : '') + '?\n\n' +
           (manifest.description ? manifest.description + '\n\n' : '') +
           describeParts(web, device, manifest.mount) + '\n' +
-          describeReach(manifest.allowedHosts) +
+          describeReach(manifest.allowedHosts, events) +
           (installed.some((p) => p.name === name) ? '\n\nThis replaces the installed ' + name + '.' : '');
         if (!confirm(question)) return;
         await installFiles(name, title, files);
@@ -659,7 +717,7 @@
             c.author ? 'By ' + c.author : '',
             from,
             status ? status.text : 'Adds itself to: ' + (MOUNT_LABELS[c.mount] || c.mount),
-            describeReach(c.allowedHosts),
+            describeReach(c.allowedHosts, community && communityDevice[c.name] ? communityDevice[c.name].eventHosts : null),
             ownTwin ? 'Shares its folder name with Witch Reader\'s ' + (ownTwin.title || ownTwin.name) +
               ': installing one replaces the other' : ''
           ].filter(Boolean);

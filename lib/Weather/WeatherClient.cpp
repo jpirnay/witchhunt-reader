@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <HalStorage.h>
 #include <JsonFile.h>
+#include <JsonText.h>
 #include <Logging.h>
 #include <TlsPolicy.h>  // for HttpDownloader.h below: names lib/SecureNet to PlatformIO's LDF
 
@@ -155,7 +156,7 @@ WeatherData WeatherClient::fetchFromApi(const WeatherSettingsStore& settings) {
 
 bool WeatherClient::parseWeatherJson(const std::string& json, WeatherData& data) {
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     data.errorMessage = "JSON parse error";
     LOG_ERR("WEA", "JSON parse error: %s", error.c_str());
@@ -305,7 +306,7 @@ bool WeatherClient::loadCache(WeatherData& data) {
   }
 
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     LOG_ERR("WEA", "Cache parse error: %s", error.c_str());
     return false;
@@ -378,7 +379,7 @@ std::vector<GeocodingResult> WeatherClient::searchCity(const std::string& query)
   }
 
   JsonDocument doc;
-  auto error = deserializeJson(doc, response);
+  auto error = JsonText::parse(doc, response);
   if (error) {
     LOG_ERR("WEA", "Geocoding parse error: %s", error.c_str());
     return results;

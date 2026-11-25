@@ -19,3 +19,15 @@
 #else
 #define OT_HOT
 #endif
+
+// OT_HOT for a header function the compiler emits out of line in several files, a template member such as
+// FixedVector::push_back. Each copy is a COMDAT function. On the S3 its literal pool goes into a .literal.<name>
+// section, which the IDF links into flash after the IRAM code that reads it, and the link fails ("dangerous relocation:
+// l32r: literal placed after use"). It linked while -fipa-sra turned every copy into a local .isra clone; the build
+// turns that off (-fno-ipa-sra, platformio.ini). The C3 has no literal pools and keeps such a function in IRAM; the S3
+// runs it from flash.
+#if defined(ESP_PLATFORM) && defined(CONFIG_IDF_TARGET_ESP32C3)
+#define OT_HOT_HEADER IRAM_ATTR
+#else
+#define OT_HOT_HEADER
+#endif

@@ -1,6 +1,6 @@
 # Metalio E-Ink4 Plus port
 
-The `metalio_eink4_plus` target combines WitchHunt 2.53 with the Metalio S31
+The `metalio_eink4_plus` target combines WitchHunt 2.54 with the Metalio S31
 board and EPDiy driver from FreeInk SDK. The hardware reference is CrossPoint
 `feat-metalio-eink4plus` at `ea534874bd60074058b8862c0f57bf59def1f0ee`.
 The SDK integration combines `ef99c6c8bd48fb357bf034b303e307acd1a0fe25`
@@ -64,13 +64,18 @@ Once the dual image is installed and verified on the hardware, use
 `--slot 1 --image <WitchHunt app.bin>` to select WitchHunt from the PC.
 
 WitchHunt uses the optional `witch_nvs` partition for startup preferences
-and leaves the other firmware's NVS alone. When that partition is absent,
-startup preferences in NVS are unavailable. Normal reader state stays on
-microSD. Sleep / Screen Off parks the panel, card and light, then enters
-deep sleep with the expander's wake interrupt armed. If wake cannot be
-armed, firmware waits for Power and restarts. Light sleep is disabled on
-the S31 RC toolchain because the FreeInk bring-up reported PSRAM corruption
-after wake.
+and leaves the other firmware's NVS alone (automatically erasing and
+re-initializing `witch_nvs` only if it becomes full or incompatible). When
+that partition is absent, startup preferences in NVS are unavailable. Normal
+reader state stays on microSD. Sleep / Screen Off parks the panel, card and
+light, then enters deep sleep with the expander's wake interrupt armed. On
+deep-sleep wake, firmware probes the expander's Power key early (before
+running the 300 ms touch reset) so spurious wakes return to sleep immediately
+without swallowing short Power presses. If wake cannot be armed, firmware waits
+for Power and restarts. Light sleep is disabled on the S31 RC toolchain
+because the FreeInk bring-up reported PSRAM corruption after wake. Shared I2C
+access between `HalI2cBus` and the SDK's board/PMIC/haptic helpers is
+serialized through one adopted recursive mutex.
 
 ## Implementation Notes
 
@@ -78,16 +83,19 @@ after wake.
   book's reading direction on Metalio. Edge taps still turn pages in tap mode,
   and disabling touch page controls disables swipes as well.
 - **Home & touch-first navigation**: Home applies the selected theme immediately
-  with direct touch targets. Lyra Carousel uses a two-row menu grid with labels
-  below the icons. Settings provides a header Back button, and swiping in from
-  the left edge returns from menus and sub-screens.
+  with direct touch targets across Classic, Lyra, Lyra Tiles, and Lyra Carousel.
+  Lyra Carousel uses a responsive multi-row menu grid with labels below the
+  icons. Settings provides a header Back button, live UI font reload, and
+  left-edge inward swipe to return from menus and sub-screens.
 - **Power key & sleep/wake**: Short-pressing Power defaults to Go Home (restored
   from saved settings on boot) while holding Power enters Sleep. Deep sleep
   keeps the wake interrupt circuit powered so a short press of Power wakes the
   device back to Home.
-- **Frontlight drawer**: Opens at the bottom of the screen via a top-edge swipe
-  or the sun icon on the EPUB reader bar. Dragging brightness or warmth updates
-  the light live and saves on finger release, with a Back button to dismiss.
+- **Frontlight drawer**: Driven at 2 kHz / 14-bit PWM with constant-luminance
+  CCT mixing and a 10% duty cap. Opens at the bottom of the screen via a
+  top-edge swipe or the sun icon on the EPUB reader bar. Dragging brightness or
+  warmth updates the light live and saves on finger release, with a Back button
+  to dismiss.
 - **Haptic feedback**: The Metalio vibration motor pulses on screen touches and
   capacitive bezel-key actions.
 - **TJpgDec ROM symbol collision fix**: Boot loops when decoding JPEG covers

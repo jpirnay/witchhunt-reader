@@ -32,6 +32,8 @@ The T5S3 panel has its own reference: [lilygo-t5s3-display-stack.md](../lilygo-t
 | X4, newer units | same | same | UC8179 or UC8279 | `Uc8179Driver`, `Uc8279X4Driver` |
 | X4 Pro | `x4pro` (ESP32-S3) | 800×480 | SSD1677, UC8179 or UC8279 | the same three |
 | LilyGo T5S3 | `lilygo_t5s3` (ESP32-S3) | ED047TC2, 960×540, 16 grey levels | none: LovyanGFX's `Panel_EPD` drives the parallel panel through the S3 LCD peripheral | `LgfxEpdDriver` |
+| Murphy M3 | `murphy` (ESP32-S3) | 416×240 | UC8253 | `Uc8253MurphyDriver` |
+| BOOX Picco | `picco` (ESP32-S3) | 800×480 | SSD2677 with the SE0400NQW47 panel, SSD1677 with the others (the driver probes the panel ID) | `Ssd2677Driver`, `Ssd1677Driver` |
 
 The `default` binary serves both the X3 and the X4. At boot `HalGPIO::begin()` tells the two apart,
 then `freeink::applyXteinkDisplayController()` probes the display bus (a register readback the
@@ -44,7 +46,7 @@ waits in the serial log name it: `X3_DRF…` (UC8253), `8279_…` (UC8279d), `re
 `8179_…` (UC8179), `8279x4_…` (UC8279 X4).
 
 The SDK has more drivers (`Ed2208M5Driver`, `M5OfficialDriver`, `It8951Driver`, `PaperMonoDriver`,
-`Uc8253MurphyDriver`, `Uc8279cA4Driver`) for boards this firmware does not build for.
+`Uc8279cA4Driver`) for boards this firmware does not build for.
 
 ---
 
@@ -66,17 +68,22 @@ The SDK has more drivers (`Ed2208M5Driver`, `M5OfficialDriver`, `It8951Driver`, 
 ### UltraChip UC81xx (UC8253, UC8279d, UC8179, UC8279)
 
 - Two RAM planes, DTM1 (`0x10`, "old") and DTM2 (`0x13`, "new"), one framebuffer each.
-- **The controller keeps its own baseline:** after every refresh the driver writes the displayed
-  frame back into DTM1 (in `displayFinish()`). The host's `prev` is ignored.
+- **The controller keeps its own baseline:** after every refresh DTM1 holds the displayed frame. The
+  driver writes it back in `displayFinish()`; the X3's UC8253 does so only after a full sync, because
+  after a FAST, HALF or one-pass refresh the controller has already put the frame there (#860, from
+  Free-Ink/freeink-sdk#220). The host's `prev` is ignored, except by the Murphy's
+  `Uc8253MurphyDriver`, which writes `prev` into DTM1 for a FAST and takes a full refresh without it.
 - CDI (`0x50`) chooses whether a bank selects per pixel on (old, new) or ignores the old plane.
 - Waveforms: UC8253 loads five LUT registers per bank (VCOM, WW, BW, WB, BB at `0x20`-`0x24`).
   UC8179 runs the OTP waveforms but needs an explicit PLL, booster and VCOM bring-up, without which
   it develops no image. The UC8279 drivers load raw OEM banks for grayscale (XTF_AA and
   XTF_PRE_BW_MID, plus XTH4 on the UC8279d).
 - Partial-window commands PTL (`0x90`), PTIN (`0x91`) and PTOUT (`0x92`) exist. The drivers use them
-  for whole-panel partial refreshes and windowed grayscale preconditioning, not for
-  `displayWindow()`. Of the drivers our builds link, only the SSD1677 driver implements a real
-  window; the others inherit the base, which refreshes the whole panel with FAST.
+  for whole-panel partial refreshes and windowed grayscale preconditioning. Of the drivers our
+  builds link, the SSD1677 and the UC8279 X4 drivers implement a real `displayWindow()` (the UC8279
+  one is Free-Ink/freeink-sdk#91); the others inherit the base, which refreshes the whole panel with
+  FAST. A windowed refresh saved little on either: see
+  [future_work/display-and-refresh.md](../future_work/display-and-refresh.md#windowed-refresh-capability-query-alignment-baseline).
 - BUSY is low while busy.
 
 The four UltraChip drivers are separate because their bring-up and their banks differ, and so does

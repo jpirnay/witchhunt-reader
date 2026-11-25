@@ -20,6 +20,7 @@
 #include "activities/browser/OpdsBackTo.h"
 #include "activities/home/LibraryTab.h"
 #include "activities/network/NetworkMode.h"
+#include "util/ScreenshotInfo.h"
 
 class Activity;                       // forward declaration
 class RenderLock;                     // forward declaration
@@ -134,6 +135,10 @@ class ActivityManager {
   // write framebuffer, so a later partial paint must not sync over it. Cleared at the top of
   // every tick. See the "Re-syncing the write buffer" pitfall in docs/activity-manager.md.
   bool framebufferPreparedThisTick = false;
+#if CP_TOUCH_UI
+  // requestLightPanel() was called; served, or dropped, by the next dispatchLightPanelGesture().
+  bool lightPanelRequested = false;
+#endif
 
   // Paints the "working on it" banner before a queued transition runs. See the .cpp.
   void showBusyIndicator();
@@ -262,6 +267,10 @@ class ActivityManager {
   bool requiresExclusiveStorageLoop() const;
   // True while a reader is anywhere on the stack -- including under its own menu or TOC.
   bool isReaderActivity() const;
+  // True while a reader is the activity on top, its bars open or not, or an overlay pulled over it is
+  // (Activity::overlaysScreenBelow(): the light drawer); false under its menu, TOC or dictionary. What the touch gate
+  // counts as the reader (TouchGate.h).
+  bool readerOrItsOverlayOnTop() const;
   // True only while the reader itself is on top: the one case every configured reader action is
   // delivered (see currentTakesButtonAction()). A list opened from the reader answers false here
   // but true above. witchling-reader commit babb8050 (syfq91, isCurrentReaderActivity()) made the
@@ -280,6 +289,9 @@ class ActivityManager {
   // Forward to the current activity so it can redraw the visible screen into the frame
   // buffer before a raw capture (e.g. a screenshot). See Activity::prepareFramebufferForCapture().
   void prepareFramebufferForCapture();
+
+  // The current activity's ScreenshotInfo (Activity::screenshotInfo); empty with no activity.
+  ScreenshotInfo screenshotInfo() const;
 
   // For the serial CMD:STATE: "activity=<name> stack=<bottom>,...,<top>" plus the current
   // activity's own key=value pairs (Activity::appendDebugState). Call under the render lock.
@@ -327,9 +339,12 @@ class ActivityManager {
   // Pull the reading-light submenu down from the top edge, from whatever screen is up.
   // Global rather than reader-only on purpose: reaching the light from the home screen in
   // the dark is most of what a quick route to it is for, and taps/long taps are reader-only
-  // so a swipe is the only gesture that can serve both.
+  // so a swipe is the only gesture that can serve both. Also serves requestLightPanel().
   void dispatchLightPanelGesture();
-  void openLightPanel();
+  // Open the light drawer as the swipe does, for a key or gesture bound to it (BTN_LIGHT_PANEL). main.cpp runs actions
+  // before this tick's activity loop, so this only asks: dispatchLightPanelGesture() opens it after that loop, where
+  // nothing the activity draws can land in the frame it prepares for the drawer.
+  void requestLightPanel() { lightPanelRequested = true; }
   // Turn a tap on the on-screen button-hint strip into the button press it depicts, so the
   // four labels at the bottom work as touch targets on every screen that draws them. Runs
   // after the current activity's loop() so screens that handle touch themselves win; see

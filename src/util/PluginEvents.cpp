@@ -5,6 +5,7 @@
 #include <HalClock.h>
 #include <HalStorage.h>
 #include <HeapFit.h>
+#include <JsonText.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <esp_random.h>
@@ -17,6 +18,8 @@
 #include "PluginLocations.h"
 #include "components/UITheme.h"
 #include "network/HttpDownloader.h"
+#include "network/PluginHosts.h"
+#include "network/PluginReach.h"
 #include "network/WebPathGuard.h"
 
 // Upstream CrossPoint's plugin events, PR #3114 (Justin Mitchell) and PR #4200 (Arthur Tazhitdinov), on this
@@ -176,17 +179,39 @@ void emit(const Event e, const Var* vars, const size_t count) {
 
 namespace {
 
-// What a drain needs from one plugin: its manifest and config as parsed, its token.
+// What a drain needs from one plugin: its name, its manifest and config as parsed, its token, and the hosts it may
+// reach.
 struct DrainContext {
+  const char* name = "";
+  const char* dir = "";
   JsonDocument manifest;
   JsonDocument config;
   std::string token;
+  PluginHosts::Reach reach;
 };
+
+bool refusedPluginFile(const std::string& path) { return isProtectedPluginFile(String(path.c_str())); }
+
+// The host of a refused URL, recorded for the Plugins page to offer (PluginReach::recordWanted()). A failed write names
+// the host: the page would have shown it anyway.
+void askForHost(const DrainContext& dc, const std::string& host) {
+  if (host.empty()) return;
+  if (!PluginReach::recordWanted(dc.dir, host))
+    LOG_ERR("PEVT", "%s: could not record its request for %s", dc.name, host.c_str());
+}
+
+// A token or config file the device.json names, or "" for none and for one the web server would not let the plugin
+// read either (pluginFile()). A refused one is logged by its name.
+std::string ownFile(const Subscriber& s, const char* name) {
+  const std::string path = pluginFile(s.dir, name, refusedPluginFile);
+  if (path.empty() && name[0] != '\0') LOG_ERR("PEVT", "%s: refused to read %s", s.name, name);
+  return path;
+}
 
 // A small JSON file (token, config, <book>.meta.json) parsed into `doc`; false when absent or not JSON.
 bool readSmallJson(const std::string& path, JsonDocument& doc) {
   std::string raw;
-  return readSmallFile(path, raw) && deserializeJson(doc, raw) == DeserializationError::Ok;
+  return readSmallFile(path, raw) && JsonText::parse(doc, raw) == DeserializationError::Ok;
 }
 
 // What became of one queued line.
@@ -200,7 +225,7 @@ enum class LineOutcome : uint8_t {
 // Sends one queued line.
 LineOutcome deliverLine(const DrainContext& dc, const std::string& line, GfxRenderer* renderer) {
   JsonDocument doc;
-  if (deserializeJson(doc, line) != DeserializationError::Ok) return LineOutcome::Dropped;
+  if (JsonText::parse(doc, line) != DeserializationError::Ok) return LineOutcome::Dropped;
   const int e = eventFromName(doc["e"] | "");
   if (e < 0) return LineOutcome::Dropped;
   const JsonVariantConst handler = handlerFor(dc.manifest.as<JsonVariantConst>(), static_cast<Event>(e));
@@ -220,11 +245,23 @@ LineOutcome deliverLine(const DrainContext& dc, const std::string& line, GfxRend
   ctx.ts = doc["ts"].as<long long>();
   ctx.id = doc["id"] | "";
 
+  const std::string url = handlerUrl(handler, ctx);
+  // Only to a host the plugin may reach: its manifest's allowedHosts, one the user approved, or one its event URLs
+  // write out (declareLiteralHosts()). Judged on the URL as filled in, since a template can put any host there
+  // ({cfg.server}). It could never go, so it leaves the queue. Not logged with the URL, which may carry the token.
+  // The Plugins page then offers the host with Allow and Dismiss. The line is dropped rather than held for the answer:
+  // a held line keeps the queue wanting a connection (wantsConnectAny()), which costs a Wi-Fi join, and on the X3 and
+  // X4 two restarts, at every sleep until the user answers. The next event after an Allow goes.
+  if (!dc.reach.allows(url)) {
+    LOG_ERR("PEVT", "%s: %s dropped, its host is not one the plugin may reach", dc.name,
+            eventName(static_cast<Event>(e)));
+    askForHost(dc, PluginHosts::urlHost(url));
+    return LineOutcome::Dropped;
+  }
   HttpDownloader::Headers headers;
   for (JsonPairConst h : req["headers"].as<JsonObjectConst>()) {
     headers.emplace_back(h.key().c_str(), expand(h.value() | "", ctx));
   }
-  const std::string url = escapeUrl(expand(req["url"] | "", ctx));
   const char* method = req["method"] | (download ? "GET" : "POST");
   // A request carries the user's data (a progress, a key): its server's certificate must verify. A plain download
   // may fall back like any public read.
@@ -245,9 +282,25 @@ LineOutcome deliverLine(const DrainContext& dc, const std::string& line, GfxRend
       LOG_ERR("PEVT", "download by %s is not supported: %s", method, url.c_str());
       return LineOutcome::Dropped;
     }
+    // Redirects stay within the hosts the plugin may reach, as the relay's do; one leaving them could not go on a
+    // later try either, so the line leaves the queue.
+    bool leftReach = false;
+    std::string refusedHost;
+    const HttpDownloader::RedirectFilter withinReach = [&dc, &leftReach, &refusedHost](const std::string& next) {
+      leftReach = !dc.reach.allows(next);
+      if (leftReach) refusedHost = PluginHosts::urlHost(next);
+      return !leftReach;
+    };
     // Into a sibling first, and in only on a clean answer, so an error page never replaces the file (a sleep image).
     const std::string part = dest + ".part";
-    const auto result = HttpDownloader::downloadToFile(url, part, nullptr, "", "", tls, {}, headers, &status);
+    const auto result = HttpDownloader::downloadToFile(url, part, nullptr, "", "", tls, withinReach, headers, &status);
+    if (leftReach) {
+      Storage.remove(part.c_str());
+      LOG_ERR("PEVT", "%s: %s dropped, redirected to a host the plugin may not reach", dc.name,
+              eventName(static_cast<Event>(e)));
+      askForHost(dc, refusedHost);
+      return LineOutcome::Dropped;
+    }
     if (result != HttpDownloader::OK || status < 200 || status >= 300 ||
         !FileReplace::replace(part.c_str(), dest.c_str())) {
       Storage.remove(part.c_str());
@@ -255,6 +308,7 @@ LineOutcome deliverLine(const DrainContext& dc, const std::string& line, GfxRend
       return LineOutcome::Kept;
     }
   } else {
+    // request() follows no redirect: a 3xx comes back as the answer.
     size_t received = 0;
     status = HttpDownloader::request(
         method, url, headers, expand(req["body"] | "", ctx), nullptr,
@@ -291,11 +345,13 @@ DrainResult drain(GfxRenderer* renderer, const size_t maxEvents) {
     if (!Storage.readFileToString("PEVT", path, kMaxOutboxBytes + kMaxEventLine, raw)) continue;
 
     DrainContext dc;
+    dc.name = s.name;
+    dc.dir = s.dir;
     {
       std::string text;
       // Unreadable now (a card fault, a manifest being replaced): the queue waits for the next drain.
       if (!Storage.readFileToString("PEVT", std::string(s.dir) + "/device.json", kMaxManifestBytes, text) ||
-          deserializeJson(dc.manifest, text) != DeserializationError::Ok) {
+          JsonText::parse(dc.manifest, text) != DeserializationError::Ok) {
         continue;
       }
     }
@@ -308,13 +364,20 @@ DrainResult drain(GfxRenderer* renderer, const size_t maxEvents) {
       Storage.remove(path.c_str());
       continue;
     }
+    if (PluginReach::load(dc.reach, s.name, s.dir) == PluginReach::Load::NoRoom) return result;
+    // The hosts its event URLs write out count as declared, as allowedHosts entries do (literalHost()).
+    if (!heapHasBlockFor(literalHostBytes(dc.manifest.as<JsonVariantConst>()))) {
+      LOG_ERR("PEVT", "no room to drain %s", s.name);
+      return result;
+    }
+    declareLiteralHosts(dc.manifest.as<JsonVariantConst>(), dc.reach);
     {
       JsonDocument token;
       const char* tokenPath = dc.manifest["token"]["path"] | "token";
-      if (readSmallJson(pluginFile(s.dir, dc.manifest["token"]["file"] | ""), token)) {
+      if (readSmallJson(ownFile(s, dc.manifest["token"]["file"] | ""), token)) {
         dc.token = valueAt(token.as<JsonVariantConst>(), tokenPath);
       }
-      readSmallJson(pluginFile(s.dir, dc.manifest["config"]["file"] | ""), dc.config);
+      readSmallJson(ownFile(s, dc.manifest["config"]["file"] | ""), dc.config);
     }
 
     // In order; the first failure stops this plugin's queue, so no later event overtakes it.

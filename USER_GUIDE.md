@@ -188,8 +188,9 @@ edge, the slide switch in the lower part of the left edge, and the USB-C port in
 | **Up** / **Down** | In a book: previous / next page. In a list: move up / down | | In a book: previous / next chapter. In a list: jump to the first / last row |
 
 The **slide switch** turns the reading light on and off. **Settings → Controls → Slide Switch** makes it switch
-Dark Mode instead, or nothing. Wherever it is set, the switch's position counts at start-up and each time it moves;
-in between, the light and Dark Mode can still be changed on the screen.
+Dark Mode instead, or touch (off is **Touch Lock**: no touch anywhere, for reading by the keys alone), or nothing.
+Wherever it is set, the switch's position counts at start-up and each time it moves; in between, the light, Dark Mode
+and Touch Lock can still be changed on the screen.
 
 A press of Power takes effect after a short pause, because the device waits to see if a second press follows.
 Single and double Power can be changed under **Settings → Controls → Button Actions**.
@@ -306,9 +307,9 @@ other. **Back** answers **Cancel** and carries its hint, and the two front butto
 two.
 
 ### Taking a Screenshot
-When the Power Button and Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`.
+When the Power Button and Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`. A screenshot taken in a book goes into a folder named after the book, and its name says where in the book it was taken: `screenshots/<title>/<title>_ch5_p42_4pct_<number>.bmp` (an EPUB's chapter, page and progress; TXT, Markdown and XTC books have no chapter part). Screenshots of every other screen are `screenshots/screenshot-<number>.bmp`. The picture is upright in the orientation you are holding the reader in, landscape included.
 
-Alternatively, while reading a book, press **Confirm**, then **More**, to open the reader menu and select **Take screenshot**.
+Alternatively, while reading a book, press **Confirm**, then **More**, to open the reader menu and select **Take screenshot**. Or bind **Take screenshot** to a key or gesture under **[Controls](#373-controls)**: it works on every screen, and is the way on the BOOX Picco, which has no Down key.
 
 ---
 
@@ -342,7 +343,20 @@ The Home screen is the main entry point to the firmware. It shows the most recen
 
 Under each book's cover is a line of its reading history, such as *Read 3h 18m over 5 days - last 6m ago*. It counts the days you opened the book on, not the number of times you opened it. Each theme shows as much of it as it has room for: where the full line would not fit, as on the X3's Lyra Carousel or at the Large UI font size, a short form such as *3h 18m · 5d* sits in the cover's badge instead. The day count is left out until the device's clock has been set.
 
-**Choosing what is on the Home screen:** **Settings → Display → Home screen** has one switch each for Library, Reading stats, Bookmarks, File transfer and Weather. Everything is on by default. Anything you switch off moves behind a **More** row above Settings, so it is still one step away. More only appears when something has been moved there. Settings itself cannot be switched off, because it is where you undo the choice.
+**Lyra Tiles** (the theme a new reader starts with)**:** the book you read last fills a card at the top of the screen: its cover, title, author, series, reading history, and its progress as a percentage, the time left at your pace and a bar. Tap the card, or press **Confirm** while it is selected, to go on reading. On a touch screen, swipe left across the Home screen to bring the next of your recent books onto the card, or right for the previous one. Where the screen has room for it beside a full set of tiles, as on the LilyGo T5 S3 held upright, an **Also reading** row under the card shows the three books after it. Under the card are four big tiles, each with a large icon and its name: Library, Reading Stats, File Transfer and Bookmarks (Bookmarks once you have one; until then File Transfer takes its row). **More**, beside **Settings** in the row along the bottom, holds every place the tiles do not show. In Lyra Tiles the **Home screen** switches below do not apply: the tiles are part of the layout. Held sideways, the card takes the left half of the screen and the tiles the right.
+
+**Lyra Tiles layouts:** **Settings → Display → Home screen → Layout** picks one of three ready-made layouts, or **Custom**, a layout of your own saved as `/.crosspoint/home.json` ([the file](./docs/home-layout.md)). **Reader** is the one above. **Dashboard** shows the book card, a clock beside a picture, and the week's reading beside a Library tile: the time read each day since the first day of the week (**First Day of Week** under **Clock Settings** in [System](#374-system)), the books finished and in progress, and your streak; choose it to open Reading Stats. **Gallery** puts a picture across the top, over a smaller book card and two tiles. Where a screen cannot hold every row with the book card at a readable size, rows are left out from the bottom, so the Murphy M3 shows Dashboard without the week's reading. The clock shows the time once the device knows it (on the X4, after a time sync), whether **Use Clock** is on or off: it moves every minute while you use the device, and every ten minutes once Home has been left alone for ten. Left on Home past midnight, the week's reading and the calendar move to the new day.
+
+**Your own layout:** the web interface's **Home Screen** page builds the **Custom** layout, with a preview of Home as this reader lays it out. The [Web Interface Guide](./docs/webserver.md#7-home-screen) walks through it; in short:
+
+1. Start **[File Transfer](#36-file-transfer-screen)**, open the address the reader shows in a browser, and choose **Home Screen**.
+2. **Start from** this reader's layout or a ready-made one, then add, remove and reorder up to six rows. Each row holds one widget across the screen or two side by side: the book card, Also reading, a shortcut to one place (Library, Recent books, Reading Stats, Bookmarks, File Transfer or Weather), the clock, the calendar, this week, the weather or a picture.
+3. For a picture, take one from **/home**, **Upload a picture…** from your computer, or choose **From the web…**: a random photo, a month calendar with your country's public holidays, the Sun or the Earth now, a note, a QR code, or an address of your own. A picture that changes is fetched again each time the reader goes to sleep, so going to sleep then takes a few seconds longer. A note or a QR code is made once, when you save; what you type for one goes to the service that draws it, so never put a password in one.
+4. **Save and use on the reader** saves the layout and switches Home to Lyra Tiles with Layout **Custom**. Home shows it when you leave File Transfer.
+
+**Pictures on Home:** the layouts with a picture take one from the folder **/home** on the SD card, a different one each time the device starts. JPEG and PNG pictures are cut to the picture's place and converted to black and white once, the first time Home shows them (it says **Loading** meanwhile), and kept in `/.crosspoint/home`; a BMP is drawn as it is, so make one at the size of its place. Until the folder holds a picture, the place says where to put one. On a device with a key for each direction, such as the X3 and X4, **Up** and **Down** move between the rows and **Left** and **Right** along a row; on the card, **Left** and **Right** bring the previous or next recent book. Elsewhere **Up** and **Down** step through everything in turn.
+
+**Choosing what is on the Home screen:** **Settings → Display → Home screen** has one switch each for Library, Reading stats, Bookmarks, File transfer and Weather. Everything is on by default. Anything you switch off moves behind **More**, a row above Settings, so it is still one step away. Lyra Tiles does not use these switches: its tiles are part of its layout, and More holds the rest (see above). More only appears when something has been moved there. Settings itself cannot be switched off, because it is where you undo the choice.
 
 **Correcting a book's title or author:** a metadata file next to a book with the same name (`Some Book.opf` beside `Some Book.epub`) takes precedence over the details inside the book. It works for every format the reader opens: EPUB, XTC, and TXT and Markdown, which have no details of their own. The **Details** button beside a book in the web interface's File Manager writes one for you, including the name the author is sorted under in the Library's **Authors** tab (**Sort author as**). When that file is added, changed or removed, over USB or from the web interface, the Library's Details and Covers views show the new details without the book having to be opened first, and so does the Home screen, for a book in its recent list.
 
@@ -435,7 +449,7 @@ The web interface's pages are kept on the SD card, not in the firmware. The firs
 
 The **Dictionaries** page installs dictionaries for looking up words while you read. Choose the StarDict dictionary you downloaded, as an archive (`.zip`, `.tar.gz`, `.tar.bz2`) or as its files; your browser unpacks the parts the reader cannot use compressed, checks them and puts each dictionary into its own folder under `/dictionaries`. Then choose it on the device under **Settings → Reader → Dictionary**. The page also shows whether each installed dictionary is usable, and removes one. See [Dictionary](./docs/dictionary.md).
 
-The **Diagnostics** page shows what **Boot Diagnostics** (under **Settings → System**) shows, in plain words: how the device last slept and started. **Download report** saves it, with the firmware version and device status, as one file to attach to a bug report, instead of a photo of the screen.
+The **Diagnostics** page shows, in plain words, how the device last slept and started, and the history of its last sleeps and starts. **Download report** saves it, with the firmware version and device status, as one file to attach to a bug report.
 
 The web server has no password, so it keeps away from what it should not touch: the files holding your saved Wi-Fi, OPDS and KOReader passwords can never be downloaded or changed, and folders whose names start with a dot, such as the reader's own `/.crosspoint`, can be opened only when **Show Hidden Files** is on. **Back** leaves the screen even while the web page is uploading a book or a font; the upload is cancelled.
 
@@ -538,11 +552,11 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 - **UI Theme**: Visual theme for the device UI:
   - "Classic" - The original theme
   - "Lyra" - Rounded elements and menu icons
-  - "Lyra Extended" - Lyra with 3 books on the Home Screen
   - "Lyra Carousel" - Lyra with a full cover carousel on the Home Screen
+  - "Lyra Tiles" (default) - Lyra with a large card for the book you are reading and big labelled tiles for the screens you open most
 - **UI Font Size**: Text size for menus, headers and lists: "Normal" (default) / "Large". The reader's own status bar is not affected.
-- **Dark Mode**: White text on black, in the reader and every menu. Pictures, covers and QR codes keep their own colours; sleep screens and the image viewer show as usual. Text anti-aliasing and the gray shades of pictures are off while it is on (except anti-aliased text in the EPUB reader on the LilyGo T5 S3), and the screen clears its ghosting twice as often as **Refresh Frequency** says. "OFF" (default) / "ON". On a device with a reading light the choices are "Off" / "On" / "Scheduled": **Dark From** and **Dark Until** (in half-hour steps, shown under Scheduled) set the hours, which may run past midnight. The switch happens with the next page turn or screen change after the hour, never in the middle of one, and the device does not wake for it. On the BOOX Picco the slide switch can turn Dark Mode on and off instead of the light (**Slide Switch** under **[Controls](#373-controls)**).
-- **Home screen** (submenu): Which entries sit on the Home screen; the rest move behind **More**. See **[Home Screen](#31-home-screen)**.
+- **Dark Mode**: White text on black, in the reader and every menu. Pictures, covers and QR codes keep their own colours; sleep screens and the image viewer show as usual. Text anti-aliasing and the gray shades of pictures are off while it is on (except anti-aliased text in the EPUB reader on the LilyGo T5 S3), and the screen clears its ghosting twice as often as **Refresh Frequency** says. "OFF" (default) / "ON". On a device with a reading light the choices are "Off" / "On" / "Scheduled": **Dark From** and **Dark Until** (in half-hour steps, shown under Scheduled) set the hours, which may run past midnight. The switch happens with the next page turn or screen change after the hour, never in the middle of one, and the device does not wake for it. On the BOOX Picco the slide switch can turn Dark Mode on and off instead of the light (**Slide Switch** under **[Controls](#373-controls)**). On any device a key or gesture bound to **Toggle Dark Mode** does it from any screen; under Scheduled that holds until the dark hours next start or end.
+- **Home screen** (submenu): **Layout** picks Lyra Tiles' Home: "Reader" (default), "Dashboard", "Gallery" or "Custom". The other themes use the switches below it: which entries sit on the Home screen; the rest move behind **More**. See **[Home Screen](#31-home-screen)**.
 - **Show Busy Indicator**: Shows a small hourglass in the middle of the screen when a button press starts a screen change that takes a second or more, such as opening or leaving a book, so you can tell the press was received. It only appears on devices whose screen refreshes fast enough for it to help, so never on the LilyGo T5 S3. "ON" (default) / "OFF".
 
 #### 3.7.2 Reader
@@ -552,7 +566,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 - **Auto-Rotate** *(X3 and BOOX Picco)*: The reader turns to the way you hold the device. Turn it a quarter round, or upside down, and hold it there for a moment: the page follows. Lying flat or held near a diagonal, it keeps its orientation, and the quick flick of **Tilt Page Turn** does not turn it. An orientation you choose by hand stays until you hold the device a new way. Turning between upright and sideways lays the chapter out again; a layout the book has had before comes back at once. EPUB, TXT and Markdown books turn; XTC books are made for one orientation and do not. Also on the reader bars' **Orientation** tab. "OFF" (default) / "ON"
 
 **EPUB Font** (submenu):
-- **Font Family**: Font used for EPUB reading. Includes built-in fonts (Serif, made from Adobe's Source Serif 4, and Noto Sans) plus any TrueType (`.ttf`) or OpenType (`.otf`) fonts and `.cpfont` fonts installed on the SD card. To add a TrueType or OpenType font of your own, use **Upload a font** in the web interface's Font Manager (see the [Web Interface Guide](./docs/webserver.md#7-font-manager)): the reader draws it at every size. A TrueType or OpenType font without a bold file draws bold text emboldened, and without an italic file draws italic text slanted.
+- **Font Family**: Font used for EPUB reading. Includes built-in fonts (Serif, made from Adobe's Source Serif 4, and Noto Sans) plus any TrueType (`.ttf`) or OpenType (`.otf`) fonts and `.cpfont` fonts installed on the SD card. To add a TrueType or OpenType font of your own, use **Upload a font** in the web interface's Font Manager (see the [Web Interface Guide](./docs/webserver.md#8-font-manager)): the reader draws it at every size. A TrueType or OpenType font without a bold file draws bold text emboldened, and without an italic file draws italic text slanted.
 - **Font Size**: For Serif and Noto Sans, 10pt to 26pt: 10pt to 18pt are typefaces designed at that size; 20, 22, 24 and 26pt are the 18pt face enlarged. For a font on the SD card, the sizes its files were built at (the number in each file name: `MyFont_8.cpfont` is 8pt), then the standard sizes above its largest file, drawn from that file enlarged. A size the selected font does not offer, such as 8pt after switching from an SD font to Serif, is shown and drawn as the nearest size it does offer, and comes back when you switch back.
 - **Normalize Font Size**: Shows text the book sets only slightly larger or smaller than its body text (within 10%) at your font size. It also treats the size of the book's running text as your font size, so a book that shrinks or enlarges all its text reads at your size, with headings and small print in proportion. That size is measured from the first chapter laid out with enough text; a book whose size differs is laid out once more at that moment, keeping your place. It needs **Embedded Style** on. "ON" (default) / "OFF"
 - **Font Manager**: downloads font families over Wi-Fi and deletes the ones you no longer use. Each row shows the family, what it is for, and, until it is installed, its download size. **Download All** installs every missing family but the eight CJK ones (Japanese, Simplified Chinese, Traditional Chinese and Korean, each sans serif and serif, 1.6–7.0 MB), the twenty Indic ones (Noto Sans and Noto Serif for each of the ten scripts below), the two Arabic ones (NotoNaskhArabic and NotoSansArabic), the two Hebrew ones (NotoSansHebrew and NotoSerifHebrew) and the two Myanmar ones (NotoSansMyanmar and NotoSerifMyanmar), 34 families in all: install your language's from its own row. Download All leaves out the **[language packs](#language-packs)** too: the interface packs (ChineseUI, ChineseTradUI, JapaneseUI, KoreanUI), which draw book titles in those scripts outside a book, the **Language-** rows after the fonts, one per interface language (10–15 KB), and the **Hyphenation-** rows at the end of the list, one per language (0.2–206 KB): install your interface language's and the ones for your books from their rows. Deleting a hyphenation pack stops hyphenating that language's books. A CJK family is one file (Regular only) and an Indic, Arabic, Hebrew or Myanmar family a Regular and a Bold file, each drawn at every size. The reader restarts when you leave the Font Manager.
@@ -599,15 +613,16 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 #### 3.7.3 Controls
 
 - **Remap Front Buttons**: Reassign the physical function of each bottom-edge button.
-- **Button Actions** (submenus — one per logical button: Back, Confirm, Left, Right, Up/Page Back, Down/Page Forward, Power): For each button, independently configure the **Short Press**, **Double Press**, and **Long Press** action. Available actions include: page forward/back, skip 10 pages, go home, sleep, force refresh, force fast refresh, open TOC, open bookmarks, toggle bookmark, footnotes, next/previous chapter, exit reader, open reader menu, open the reader bars (what a short **Confirm** opens in a book), toggle bionic reading, KOReader sync, cycle font size, larger/smaller text, cycle orientation (either direction), quick overrides, toggle touch navigation, back, confirm, ignore, and — on devices with a light — toggle reading light, light brighter and light dimmer — plus light warmer and light cooler on a device with a warm/cool light.
+- **Button Actions** (submenus — one per logical button: Back, Confirm, Left, Right, Up/Page Back, Down/Page Forward, Power): For each button, independently configure the **Short Press**, **Double Press**, and **Long Press** action. Available actions include: page forward/back, skip 10 pages, go home, sleep, force refresh, force fast refresh, open TOC, open bookmarks, toggle bookmark, footnotes, next/previous chapter, exit reader, open reader menu, open the reader bars (what a short **Confirm** opens in a book), toggle bionic reading, KOReader sync, cycle font size, larger/smaller text, cycle orientation (either direction), quick overrides, toggle touch navigation, toggle touch lock, back, confirm, toggle Dark Mode, toggle auto page turn (an EPUB book turns its pages by itself every **Auto Turn (Seconds)**, set in the reader menu; the same action, **Confirm** or **Back** stops it), take screenshot, ignore, and — on devices with a light — toggle reading light, light brighter, light dimmer and open the light panel — plus light warmer and light cooler on a device with a warm/cool light.
 - **Page Turn Buttons**: "Follow Book" (default) or "Fixed". In a book whose pages turn right to left (a vertical book, or a Hebrew, Arabic, Persian or Urdu book), Follow Book makes the **Left** and **Right** buttons follow the page: Left shows the next page and Right the previous one. Every direction-bound action you gave to Left or Right (short, double and long press: page back or forward, 10 pages back or forward, previous or next chapter) swaps the same way, and so do the actions of the left and right swipe zones on a touch device. Other actions, and the Up and Down buttons, never change. "Fixed" keeps Left as back and Right as forward in every book. The setting does not touch the taps, page swipes and progress bars below, which follow the page.
 - **Button Actions Overview**: A read-only overview screen showing the current short/double/long press mapping for every button at a glance.
-- **Touch Navigation** *(touch devices only)*: Whether touch does anything outside the reader — list rows, covers, the home menu, the settings tabs, the on-screen button hints. "ON" / "OFF". See **[Touch Controls](#5-touch-controls)**.
+- **Touch Lock** *(touch devices only)*: Touch off everywhere, books included: page turns, the reader bars, gestures and the light panel. Read and navigate by the keys alone, with a hand resting on the glass. The keys keep working, the Home key of the X4 Pro and the LilyGo T5 S3 among them, and touching the glass does not keep the device awake. Switch it off here, with a key bound to **Toggle Touch Lock**, or on the BOOX Picco with the slide switch set to "Touch". "OFF" (default) / "ON".
+- **Touch Navigation** *(touch devices only)*: Whether touch does anything outside the reader — list rows, covers, the home menu, the settings tabs, the on-screen button hints. The light panel pulled down over a book counts as the book and keeps touch. "ON" / "OFF". See **[Touch Controls](#5-touch-controls)**.
 - **Touch Page Turn** *(touch devices only)*: How the reading page turns pages by touch — "Off", "Tap Zones", "Swipe", "Tap Zones (Inverted)". It governs page turns only; the reader menu and the reading light stay reachable either way.
 - **Tap Action** *(touch devices only)*: Whether tapping a list row selects it — "Select, then activate" (default) — or opens it straight away, "Activate immediately".
 - **Gesture actions** *(touch devices only)*: One entry per gesture — the sideways swipes, the four edge swipes (left and right edge columns, up and down), the two ten-page zone swipes, the five tap zones, the same five as long taps, the four corner holds, pinch and rotation — each assigned an action from the same list the buttons offer. See **[Touch Controls](#5-touch-controls)**.
 - **Gesture overview** *(touch devices only)*: A read-only screen drawing the tap, hold and swipe zones with your current assignments in them. Generated from live settings, so it is the authority if the documentation disagrees.
-- **Slide Switch** *(BOOX Picco only)*: What the slide switch turns on and off: "Reading Light" (default), "Dark Mode" or "Nothing". Its position counts at start-up and each time it moves; in between, the light and Dark Mode can still be changed on the screen.
+- **Slide Switch** *(BOOX Picco only)*: What the slide switch turns on and off: "Reading Light" (default), "Dark Mode", "Nothing" or "Touch" (off is **Touch Lock**). Its position counts at start-up and each time it moves; in between, the light, Dark Mode and Touch Lock can still be changed on the screen.
 - **Tilt Page Turn** *(X3 and BOOX Picco)*: Turn pages with a quick flick of the device: tilt it and bring it back. Sub-settings:
   - **Tilt Page Turn**: "ON" / "OFF"
   - **Tilt Direction**: "Left / Right" (default), a twist that moves the right or the left edge away from you; or "Forward / Back", the top edge tipped away from you (forward) or toward you (back). Both follow the reading orientation.
@@ -640,6 +655,7 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 - **Clock Settings** (submenu):
   - **Use Clock**: Enable the software clock. "ON" / "OFF"
   - **Clock Format**: "24h" / "12h"
+  - **First Day of Week**: The day the calendar and the week's reading on the Home screen start on. "Monday" (default) / "Sunday" / "Saturday"
   - **Timezone**: Pick your timezone from a full-screen list of 86: named places and regions that follow their own daylight-saving rules, fixed UTC offsets for anywhere the list misses, and plain UTC.
   - **Detect Timezone**: Auto-detect timezone via IP geolocation (requires WiFi).
   - **Sync Time**: Sync the clock via NTP (requires WiFi). Afterwards the device restarts quickly and returns to Clock Settings, like every other screen that uses WiFi.
@@ -650,7 +666,6 @@ A small image inside a paragraph, at most about two lines of its text tall (an i
 - **Clear Reading Cache**: Clear every book's cache on the SD card: its index, laid-out chapters, images and covers, which the reader builds again the next time the book is opened. It asks **Keep bookmarks and reading progress?** **Keep** leaves each book's reading position, bookmarks, link **Back** history and its own settings (those set with **This book only** or in the reader menu), so a book opens again where you left it, as you left it. **Reset** deletes those too, and the books' entries leave **Bookmarks**. **Cancel** (or **Back**) clears nothing. **Delete Book Cache**, in the Library's options and in the reader menu, does the same for one book and asks the same question.
 - **Repair Screen**: Clears ghosting left behind by fast page refreshes, by driving every pixel hard between black and white several times. Takes about 20 seconds and deletes nothing. A maintenance action, not a fix for ghosting while you read.
 - **System Information**: Display device info (firmware version, hardware, memory, SD card). When it runs to more than one page, the header shows the page ("1 / 2") and the page buttons move between pages, wrapping round at the ends. How many pages there are depends on the orientation.
-- **Boot Diagnostics**: How this boot started, where the last sleep stopped, and the history pairing each sleep with the boot that followed it. One screenful, meant to be photographed into a bug report when the device fails to sleep or fails to wake.
 - **Reading Statistics**: View reading stats (streaks, time read, pages/min, per-book ETA, sparkline history). Also on the Home screen as **Reading Stats**. To forget one book, open it under **All books** and press **Confirm** (**Remove**); its reading time comes out of the totals and the book file itself is untouched. Not offered for the book you currently have open. The web dashboard's **Stats** page has the same **Remove from stats** button in each book's expanded row.
 
 **Firmware Update**:
@@ -835,7 +850,7 @@ To use custom sleep images, set the sleep screen mode to **Custom** or **Cover +
 - **Multiple Images (recommended):** Create a `.sleep` directory in the root of the SD card and place any number of `.bmp` or `.png` images inside. (A directory named `sleep` is also accepted as a fallback.)
 - **Single Image:** Place a file named `sleep.bmp` or `sleep.png` in the root directory. While it is there, it is shown instead of the images in the `.sleep`/`sleep` directory.
 - **Weather forecast:** Each time the **Weather** screen fetches a forecast, it saves the screen, without its button hints, as `sleep/weather.bmp`, so it joins the custom images. It shows sideways, as the Weather screen does. Deleting the file only lasts until the next fetch.
-- **From a plugin:** a community plugin such as **Month Wallpaper** fetches a new `sleep.bmp` each time the reader goes to sleep, joining your last Wi-Fi network for it (not under 20 % battery). Sleep then takes as long as the download. On the X3 and X4 the reader shows the sleep screen first, restarts twice while it fetches, and shows the new picture after; a book's cover stays as it is. See [Plugins](./docs/webserver.md#10-plugins).
+- **From a plugin:** a community plugin such as **Month Wallpaper** fetches a new `sleep.bmp` each time the reader goes to sleep, joining your last Wi-Fi network for it (not under 20 % battery). Sleep then takes as long as the download. On the X3 and X4 the reader shows the sleep screen first, restarts twice while it fetches, and shows the new picture after; a book's cover stays as it is. See [Plugins](./docs/webserver.md#11-plugins).
 
 A BMP image is placed by **Sleep Screen Cover Mode** as a cover is. **Fit** shows it whole, centred, scaled down if it is larger than the screen. **Crop** fills the screen with an image that is larger than it both ways. An image larger than the screen one way and smaller the other (an X4-sized picture on the X3) is cut only where it runs over the edge and centred the other way, since images are never scaled up.
 
@@ -895,6 +910,7 @@ This feature can be disabled in the **[Controls Settings](#373-controls)** to he
 
 ### System Navigation
 * **Leave the book:** Press **Back** to close the book and return to where you opened it: the **[Home](#31-home-screen)** screen, or the **[Library](#33-library-screen)** at the tab, the folder or author, and the row you opened it from. Holding **Back** does the same, unless you give the long press an action of its own under **[Controls](#373-controls)**.
+* **Footnotes:** A tap on a note's mark (a number, `*`, `†`), the footnote button when the page has one link, or a note picked in **Footnotes** opens the note in a sheet over the page, in the book's font: along the bottom when the mark is in the upper half of the screen, along the top when it is in the lower half, so the sentence that calls the note stays in view. The sheet's title names the note and, on a page with several, where it stands among them ("Note 2 · 2 of 3"). A note longer than half the screen has pages. The page keys (on a touch screen, a tap on either half of the note) turn them, go on past a note's last page to the page's next note and back past its first page to the previous one, and close the sheet past the page's last note or before its first. **Go to note** (**Confirm**) shows the note where it stands in the book; **Back**, or a tap on the page, closes the sheet. A long note is cut after about 4 KB, with "..." where it stops: **Go to note** shows the rest. A link that is not a note, such as a contents entry or a cross-reference, is followed as before, and so is a note whose text cannot be read.
 * **Back after a link:** After you follow a link in the book, such as a footnote, **Back** first returns to the page you followed it from, step by step for the last three links. These steps are kept when the device sleeps or you close the book there.
 * **Reader bars:** Press **Confirm** (on a touch screen: tap the middle of the page or the status bar) for two bars over the page, which stays in view between them. The top one leaves the book (**<**), shows the book's details (a tap on its title) and adds or removes a **[bookmark](#bookmarks)** on the page (the star, filled while the page has one). The bottom one has five tabs, an icon each:
   - **Navigation** (a list): **Select Chapter** opens the **[Table of Contents](#6-chapter-selection-screen)**, **Bookmarks** the pages you bookmarked, **Go to printed page** a page of the book's print edition (where the book numbers them), **Search** searches the book (**[below](#searching-the-book)**), and **Go Home** closes the book.
@@ -933,7 +949,7 @@ DRM" titles) open once their key is on the reader. Books with only a watermark n
 EPUB.
 
 - The key comes from the community plugin **Protected Content** in the web interface (see
-  [Plugins](./docs/webserver.md#10-plugins)). Sign in with your Adobe ID, upload the `.acsm` file the library or shop
+  [Plugins](./docs/webserver.md#11-plugins)). Sign in with your Adobe ID, upload the `.acsm` file the library or shop
   gives you, and fetch the book. The plugin puts the book beside its key (`Book.epub.key`) and its licence
   (`Book.epub.rights`). The plugin has been tried against a test Adobe service, not yet with a real account.
 - The key belongs to this reader: the same card does not open the book in another reader.
@@ -942,6 +958,10 @@ EPUB.
 - When a protected book does not open, the reader says why (no key, another reader's key, the loan has ended, no
   date, a book it cannot read) and goes back.
 - Moving or deleting the book on the reader moves or deletes its key and licence with it.
+- What the reader keeps of a protected book on the card (its laid-out pages, pictures and fonts) is enciphered with a
+  key that belongs to this reader: copied off the card, it cannot be read. A protected book first opened by an older
+  firmware has that cache made again the next time you open it or see it on Home; where you were, your bookmarks and
+  the book's own settings stay.
 
 ### Supported Languages
 
@@ -1070,7 +1090,8 @@ Two things are worth knowing before the tables:
 
 ### 5.1 The two master switches
 
-Both live under **[Settings → Controls](#373-controls)**:
+Both live under **[Settings → Controls](#373-controls)**, beside **Touch Lock**, which turns all touch off, books
+included (see **[5.8](#58-turning-it-off)**):
 
 | Setting | Governs | Default |
 | --- | --- | --- |
@@ -1280,7 +1301,10 @@ Adjusting brightness while the light is off turns it on — a brightness gesture
 you can find a book in the dark.
 
 The same actions are bindable to any button or gesture: **Toggle Reading Light**, **Light
-Brighter**, **Light Dimmer**, and on a warm/cool device **Light Warmer** and **Light Cooler**.
+Brighter**, **Light Dimmer**, **Open Light Panel**, and on a warm/cool device **Light Warmer** and
+**Light Cooler**. The light panel also works from the keys, with touch off or locked: **Back** closes
+it, **Confirm** switches the light, and **Up** / **Down** brighten and dim it in 5% steps (hold to keep
+going). The LilyGo T5 S3 has no Up key, so there the keys only dim it. Warmth is set by touch.
 
 ### 5.7 Per-device differences
 
@@ -1299,9 +1323,14 @@ Home.
 
 ### 5.8 Turning it off
 
+- **Settings → Controls → Touch Lock** → *On* turns touch off everywhere, the reading page included:
+  read by the keys alone. Bind **Toggle Touch Lock** to a key to switch it with one press (not to a gesture:
+  no gesture reaches the device while it is on), or on the BOOX Picco set the slide switch to "Touch".
 - **Settings → Controls → Touch Page Turn** → *Off* stops touch turning pages, and nothing
   else.
-- **Settings → Controls → Touch Navigation** → *Off* silences touch outside the reader.
+- **Settings → Controls → Touch Navigation** → *Off* silences touch outside the reading page,
+  the reader menu, table of contents and dictionary included. The light panel pulled down over
+  the page is part of it and keeps touch.
 - **Settings → Controls → Tap Action** switches list rows between select-then-open and
   open-on-first-tap.
 - Any single gesture can be set to **Ignore (do nothing)** in *Gesture actions* to switch just
@@ -1309,7 +1338,7 @@ Home.
   each row names what Built-in will actually do, so "Swipe left" reads *Next Page* while you
   are in Swipe mode and *Nothing* when you are not.
 - The action **Toggle Touch Navigation** can be bound to a button, if you want to silence
-  touch without going into Settings.
+  touch outside books without going into Settings.
 
 ### 5.9 If a gesture does nothing
 

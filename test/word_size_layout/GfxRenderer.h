@@ -242,8 +242,20 @@ class GfxRenderer {
     return shapingFaceSource != nullptr ? shapingFaceSource(fontId, style, ppem26_6, refused) : nullptr;
   }
   TextScale fontBaseScale(int /*fontId*/) const { return TextScale(); }
-  // The glyph-ID prefetch of a build's warm step: counted, one per run.
+  // The glyph-ID prefetch of a build's warm step: counted per batch and per run, with batch payloads recorded.
   mutable int prefetchedRuns = 0;
+  mutable int prefetchBatches = 0;
+  struct PrefetchBatchCall {
+    int fontId;
+    EpdFontFamily::Style style;
+    std::vector<uint16_t> glyphs;
+  };
+  mutable std::vector<PrefetchBatchCall> prefetchBatchCalls;
+  void prefetchGlyphs(const int fontId, const uint16_t* glyphs, const size_t count,
+                      const EpdFontFamily::Style style) const {
+    ++prefetchBatches;
+    prefetchBatchCalls.push_back({fontId, style, std::vector<uint16_t>(glyphs, glyphs + count)});
+  }
   void prefetchGlyphRun(int /*fontId*/, const GlyphRun& /*run*/, EpdFontFamily::Style /*style*/) const {
     ++prefetchedRuns;
   }

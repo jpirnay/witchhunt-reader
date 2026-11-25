@@ -66,6 +66,7 @@ If you'd like to add your name to this list, please open a PR adding yourself an
 
 ## Lithuanian
 - [nieko-nera](https://github.com/nieko-nera)
+- [aurimasrim](https://github.com/aurimasrim)
 
 ## Polish
 - [th0m4sek](https://github.com/th0m4sek)

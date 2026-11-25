@@ -1135,29 +1135,36 @@ void updatePeriodic() {
   // Raw elapsed time (what the kernel clock already counted).
   const uint64_t rawElapsedUs = lpNow - rtcLpTimeUs;
 
-  // Re-baseline LP timer and temperature for the next interval.
+  // Re-baseline the snapshot for the next interval: the LP timer, its calibration and the temperature, and the wall
+  // clock they belong to. The epoch moves with them even when there is no nudge, or a restore() from this snapshot
+  // would add the time since now to the epoch of the previous baseline.
   rtcLpTimeUs = lpNow;
   rtcSlowCal = esp_clk_slowclk_cal_get();
   rtcTempCenti = tempNowCenti;
+  rtcEpoch = time(nullptr);
 
-  if (!corrected) {
-    return;
-  }
-  // The drift delta is the difference between what really elapsed
-  // (temperature-corrected) and what the kernel counted (raw). Both are under
-  // clock_drift::kMaxElapsedUs, so the difference fits.
-  const int64_t driftDeltaUs = static_cast<int64_t>(correctedUs) - static_cast<int64_t>(rawElapsedUs);
+  if (corrected) {
+    // The drift delta is the difference between what really elapsed
+    // (temperature-corrected) and what the kernel counted (raw). Both are under
+    // clock_drift::kMaxElapsedUs, so the difference fits.
+    const int64_t driftDeltaUs = static_cast<int64_t>(correctedUs) - static_cast<int64_t>(rawElapsedUs);
 
-  // Only nudge the system clock if the drift delta is meaningful (>50 ms).
-  // This avoids unnecessary settimeofday calls for negligible corrections.
-  // The whole seconds of it, truncated toward zero.
-  if (driftDeltaUs > 50000 || driftDeltaUs < -50000) {
-    rtcEpoch = time(nullptr) + static_cast<time_t>(driftDeltaUs / 1000000);
-    setSystemClock(rtcEpoch);
-    LOG_DBG("CLK", "Periodic drift nudge: raw=%lluus corr=%lluus delta=%lldus scale=%ld/1000000",
-            static_cast<unsigned long long>(rawElapsedUs), static_cast<unsigned long long>(correctedUs),
-            static_cast<long long>(driftDeltaUs), static_cast<long>(rtcDriftScaleMicro));
+    // Only nudge the system clock if the drift delta is meaningful (>50 ms).
+    // This avoids unnecessary settimeofday calls for negligible corrections.
+    // The whole seconds of it, truncated toward zero.
+    if (driftDeltaUs > 50000 || driftDeltaUs < -50000) {
+      rtcEpoch += static_cast<time_t>(driftDeltaUs / 1000000);
+      setSystemClock(rtcEpoch);
+      LOG_DBG("CLK", "Periodic drift nudge: raw=%lluus corr=%lluus delta=%lldus scale=%ld/1000000",
+              static_cast<unsigned long long>(rawElapsedUs), static_cast<unsigned long long>(correctedUs),
+              static_cast<long long>(driftDeltaUs), static_cast<long>(rtcDriftScaleMicro));
+    }
   }
+
+  // Sealed as capture() seals it. A silent restart restores from this snapshot, and rtcValid() refuses one whose fields
+  // changed after their checksum: every restart more than one interval after a sync took the uncorrected NVS path and
+  // stepped the clock back to the last capture.
+  rtcStateChecksum = computeRtcStateChecksum();
 }
 
 int64_t loanNow() {

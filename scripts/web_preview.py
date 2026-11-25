@@ -45,6 +45,7 @@ PAGES = {
     "/setup": "WebSetupPage.html",
     "/files": "FilesPage.html",
     "/settings": "SettingsPage.html",
+    "/home-screen": "HomeScreenPage.html",
     "/fonts": "FontsPage.html",
     "/stats": "StatsPage.html",
     "/systeminfo": "HomePage.html",

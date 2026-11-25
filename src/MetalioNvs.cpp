@@ -33,11 +33,13 @@ void deriveWpaKey(void* argument) {
 }  // namespace
 
 extern "C" esp_err_t __wrap_nvs_flash_init() {
-  const esp_err_t result = nvs_flash_init_partition(kWitchNvs);
-  // Arduino handles these two errors by erasing the first NVS partition.
-  // Always leave the other firmware's default partition alone.
+  esp_err_t result = nvs_flash_init_partition(kWitchNvs);
+  // Arduino handles these two errors by erasing the default "nvs" partition.
+  // Erase only our private partition so the other firmware's NVS stays untouched.
   if (result == ESP_ERR_NVS_NO_FREE_PAGES || result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    return ESP_FAIL;
+    if (nvs_flash_erase_partition(kWitchNvs) == ESP_OK) {
+      result = nvs_flash_init_partition(kWitchNvs);
+    }
   }
   return result;
 }

@@ -26,6 +26,13 @@ struct Part {
 };
 
 using Parts = std::array<Part, kPartCount>;
+
+// A face a part may take and the lines it may wrap to there. A card lists the title's and the
+// author's faces largest first and steps down while the part loses words.
+struct Face {
+  int fontId;
+  int maxLines;
+};
 using Lines = std::array<int, kPartCount>;
 
 struct Shed {

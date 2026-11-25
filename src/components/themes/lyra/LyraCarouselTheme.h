@@ -59,6 +59,7 @@ class LyraCarouselTheme : public LyraTheme {
 
   static void setPreRenderIndex(int idx);
 
+  void setHomeMenu(int menuCount, int menuTrailing) override;
   HomeNavigation getHomeNavigation() const override { return HomeNavigation::Carousel; }
   std::vector<std::pair<int, int>> getCoverThumbSizes(int /*coverHeight*/) const override {
     return {{kCenterCoverW, kCenterCoverH}, {kSideCoverW, kSideCoverH}};
@@ -79,15 +80,13 @@ class LyraCarouselTheme : public LyraTheme {
   void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                       const std::function<std::string(int index)>& buttonLabel,
                       const std::function<UIIcon(int index)>& rowIcon) const override;
-  void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
-                const std::function<std::string(int index)>& rowTitle,
-                const std::function<std::string(int index)>& rowSubtitle,
-                const std::function<UIIcon(int index)>& rowIcon, const std::function<std::string(int index)>& rowValue,
-                bool highlightValue) const override;
 
  protected:
-  // Same geometry as Lyra, but the carousel's selected row is a solid black bar with the text and
-  // icon knocked out of it.
+  // Classic's floors, not Lyra's: the carousel was always laid out by them, and only its fallback
+  // draw reads the result (its covers and icon row sit at fixed places).
+  StackedHomeRules stackedHomeRules() const override { return BaseTheme::stackedHomeRules(); }
+  int stackedCoverHeight(const int tileHeight) const override { return BaseTheme::stackedCoverHeight(tileHeight); }
 
- public:
+  // Lyra's lists, with the selected row a solid black bar.
+  bool invertsListSelection() const override { return true; }
 };

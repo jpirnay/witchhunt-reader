@@ -102,6 +102,10 @@ const deviceJson = {
   'https://example.org/l/': { browse: { format: 'xml', url: 'https://example.org/l/dav/', item: 'response' } }
 };
 
+// An installed plugin whose device events were refused a host (GET /api/plugins "wants"), and one it was approved for.
+const installedPlugins = [
+  { name: 'weather', title: 'Weather', mount: 'settings', web: true, device: false, wants: ['w.example', 'old.example'] }
+];
 const requests = [];
 const reply = (status, body) => ({
   ok: status >= 200 && status < 300, status,
@@ -122,9 +126,9 @@ const dom = new JSDOM(html, {
     w.confirm = (m) => { confirmed.push(m); return confirmAnswer; };
     w.fetch = async (url, options) => {
       const u = String(url);
-      requests.push({ url: u, method: (options && options.method) || 'GET' });
-      if (u === '/api/plugins') return reply(200, []);
-      if (u === '/api/plugins/hosts') return reply(200, {});
+      requests.push({ url: u, method: (options && options.method) || 'GET', body: options && options.body });
+      if (u === '/api/plugins') return reply(200, installedPlugins);
+      if (u === '/api/plugins/hosts') return reply(200, { weather: ['old.example'] });
       if (u === '/api/web/status') return reply(200, { repo: 'jpirnay/witchhunt-reader' });
       if (u === OWN) return reply(200, ownCatalog);
       if (u === COMMUNITY) return reply(200, communityCatalog);
@@ -179,6 +183,10 @@ check(/runs here/.test(text(row('Session push'))) && !/partly|does not/.test(tex
 check(text(row('Meta filter')).includes('partly runs here') && text(row('Meta filter')).includes('(sleep.enter)') &&
       text(row('Meta filter')).includes('reader.exit are not sent yet') && hasButton(row('Meta filter')),
       'a require_meta handler waits; the sleep download runs');
+check(text(row('Meta filter')).includes('Reaches: example.org (named by its events)'),
+      'the host its event URLs write out is named under Reaches (' + text(row('Meta filter')) + ')');
+check(text(row('Session push')).includes('Reaches no site unless you approve one when it asks'),
+      'a host its events fill in from the config is not');
 check(/runs here/.test(text(row('XML catalog'))) && !/partly|does not/.test(text(row('XML catalog'))) &&
       text(row('XML catalog')).includes('a card, and a catalog you open on this page'), 'an XML catalog runs here');
 check(text(row('Unreadable')).includes('could not be checked') && !hasButton(row('Unreadable')),
@@ -191,6 +199,27 @@ check(text(row('Protected')).includes('partly runs here') && text(row('Protected
       hasButton(row('Protected')), 'the DRM plugin is offered, saying how far it was checked');
 check(text(row('Organize by Author (CrossPoint)')).includes("Witch Reader's Organize by Author"),
       'a shared folder name with one of ours is flagged');
+
+// A host the plugin's events were refused for is offered with Allow and Dismiss; one already approved is not.
+const weatherRow = () => [...doc.querySelectorAll('#installed .plugin')].find((r) => r.textContent.includes('Weather'));
+check(!!weatherRow() && weatherRow().textContent.includes('Wants to reach w.example') &&
+      !weatherRow().textContent.includes('Wants to reach old.example') &&
+      weatherRow().textContent.includes('Approved by you: old.example'),
+      'a refused host is offered, an approved one is listed with the approvals (' + (weatherRow() ? weatherRow().textContent : '') + ')');
+const hostAnswer = (label) => {
+  requests.length = 0;
+  [...weatherRow().querySelectorAll('.plugin-wants button')].find((b) => b.textContent === label).click();
+};
+hostAnswer('Allow');
+await settle();
+const allowed = requests.find((r) => r.url === '/api/plugins/hosts' && r.method === 'POST');
+check(!!allowed && JSON.stringify(JSON.parse(allowed.body)) === '{"plugin":"weather","host":"w.example","allow":true}',
+      'Allow approves the host for that plugin (' + (allowed && allowed.body) + ')');
+hostAnswer('Dismiss');
+await settle();
+const dismissed = requests.find((r) => r.url === '/api/plugins/hosts' && r.method === 'POST');
+check(!!dismissed && JSON.stringify(JSON.parse(dismissed.body)) === '{"plugin":"weather","host":"w.example","dismiss":true}',
+      'Dismiss drops the request (' + (dismissed && dismissed.body) + ')');
 
 // Install the web-only plugin: a confirmation, the files from its own base, then the device's install endpoints.
 requests.length = 0;

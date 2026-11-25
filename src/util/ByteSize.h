@@ -4,7 +4,7 @@
 #include <cstdint>
 
 // Byte counts as the screens and the web pages print them, in units of 1024: "12.3 MB". In integers (the C3 has no
-// FPU, docs/future_work/integer-math.md), rounded the way printf rounded the quotient they were printed from before: to
+// FPU, docs/design/integer-math.md), rounded the way printf rounded the quotient they were printed from before: to
 // nearest, a tie to even ("%.1f" of 0.25 is "0.2"). bytes / 1024.0 is exact in a double, so printf saw the exact value
 // and these give the same text; test/byte_size compares the two over a wide range.
 namespace byte_size {

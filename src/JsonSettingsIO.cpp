@@ -7,6 +7,7 @@
 #include <HalStorage.h>
 #include <HeapFit.h>
 #include <JsonFile.h>
+#include <JsonText.h>
 #include <Logging.h>
 #include <ObfuscationUtils.h>
 
@@ -16,6 +17,7 @@
 #include <iterator>
 #include <string>
 
+#include "ButtonActionNames.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "KOReaderCredentialStore.h"
@@ -27,9 +29,17 @@
 #include "WifiCredentialStore.h"
 #include "activities/home/HomeMenu.h"
 #include "activities/home/LibraryTab.h"
+#include "util/AsciiParse.h"
 #include "util/UrlUtils.h"
 
 namespace {
+// The rows that hold a button or gesture action (CrossPointSettings::BUTTON_ACTION), stored by name.
+bool isButtonActionKey(const char* key) {
+  if (key == nullptr) return false;
+  return std::strncmp(key, "btnShort", 8) == 0 || std::strncmp(key, "btnDouble", 9) == 0 ||
+         std::strncmp(key, "btnLong", 7) == 0 || std::strncmp(key, "gest", 4) == 0;
+}
+
 // Upper bound on any stored credential we will decode from JSON. A WPA passphrase
 // tops out at 63 characters (or a 64-hex-char PSK); server passwords get the same
 // generous cap. Anything longer is corrupt or hand-edited, and decoding it would
@@ -74,7 +84,7 @@ obfuscation::CardHint cardHintFromWifiJson() {
   // The whole small file, parsed as loadWifi() parses it: a filter for the two fields costs ~3 KB
   // of flash in ArduinoJson template code to save a few hundred bytes of heap, once.
   JsonDocument doc;
-  if (json.isEmpty() || deserializeJson(doc, json.c_str())) return obfuscation::CardHint::None;
+  if (json.isEmpty() || JsonText::parse(doc, json.c_str())) return obfuscation::CardHint::None;
   return obfuscation::cardHint(doc["lastKnownMacAddress"] | std::string(""), doc["arrivedFrom"] | std::string(""));
 }
 
@@ -171,10 +181,10 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   // Streamed rather than serialised into a String first, to keep the heap out of it (it runs on the way to sleep).
   // ArduinoJson writes the punctuation a character at a time, so a small buffer on the stack gathers the ~900 bytes
   // into a handful of writes instead of several hundred, each taking the storage lock.
-  const size_t expected = measureJson(doc);
+  const size_t expected = JsonText::measure(doc);
   uint8_t streamBuffer[256];
   BufferedPrint out(file, streamBuffer, sizeof(streamBuffer));
-  const size_t written = serializeJson(doc, out);
+  const size_t written = JsonText::write(doc, out);
   const bool flushed = out.flushBuffer();
   file.flush();
   if (!file.close()) {
@@ -185,7 +195,7 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
 
 bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     LOG_ERR("CPS", "JSON parse error: %s", error.c_str());
     return false;
@@ -276,6 +286,14 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
       } else {
         doc[info.key] = strPtr;
       }
+    } else if (isButtonActionKey(info.key)) {
+      // By name (ButtonActionNames.h). The name stays in flash: a static JsonString is stored by pointer, not copied.
+      const uint8_t action = s.*field;
+      const char* name = action < CrossPointSettings::BUTTON_ACTION_COUNT
+                             ? ButtonActionNames::name(static_cast<ButtonActionNames::Action>(action))
+                             : nullptr;
+      doc[info.key] = JsonString(name != nullptr ? name : ButtonActionNames::name(CrossPointSettings::BTN_DEFAULT),
+                                 /*isStatic=*/true);
     } else {
       doc[info.key] = s.*field;
     }
@@ -328,7 +346,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
 bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool* needsResave) {
   if (needsResave) *needsResave = false;
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     LOG_ERR("CPS", "JSON parse error: %s", error.c_str());
     return false;
@@ -359,11 +377,6 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
     (void)key;
 #endif
     return false;
-  };
-  const auto isButtonActionKey = [](const char* key) {
-    if (key == nullptr) return false;
-    return std::strncmp(key, "btnShort", 8) == 0 || std::strncmp(key, "btnDouble", 9) == 0 ||
-           std::strncmp(key, "btnLong", 7) == 0 || std::strncmp(key, "gest", 4) == 0;
   };
 
   forEachPersistedSetting([&](const SettingInfo& info) {
@@ -416,7 +429,16 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
         return;
       }
       uint8_t v = doc[info.key] | fieldDefault;
-      if (staleButtonActions && isButtonActionKey(info.key) && !doc[info.key].isNull()) {
+      const JsonVariantConst stored = doc[info.key];
+      if (isButtonActionKey(info.key) && stored.is<const char*>()) {
+        // A name this build does not know was written by a newer one: the row's default.
+        if (!ButtonActionNames::fromName(stored.as<const char*>(), v)) {
+          LOG_INF("CPS", "Unknown action '%s' for '%s': default", stored.as<const char*>(), info.key);
+          v = fieldDefault;
+        }
+      } else if (isButtonActionKey(info.key) && stored.is<uint8_t>()) {
+        // A number: a file from before names (BUTTON_ACTIONS_VERSION 5 or older), saved again with names
+        // (staleButtonActions above).
         const bool isConfirmDoubleOrLong =
             std::strcmp(info.key, "btnDoubleConfirm") == 0 || std::strcmp(info.key, "btnLongConfirm") == 0;
         if (storedButtonActions < 1 && BoardConfig::isMurphyM3() && isConfirmDoubleOrLong &&
@@ -435,9 +457,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
           return;
         }
 
-        // Actions inserted before the board-gated light actions since the file was written: shift what it stored
-        // after them so it keeps its meaning.
-        v = CrossPointSettings::upgradeStoredAction(v, storedButtonActions);
+        // In the numbering of the version that wrote it; a number past that version's last action falls back.
+        if (!ButtonActionNames::fromLegacyNumber(v, std::min(storedButtonActions, 5), v)) v = fieldDefault;
       }
       if (info.persistPtr) {
         // A slider's range is its own; anything past it falls back rather than driving the
@@ -587,7 +608,7 @@ bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const ch
 bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* json, bool* needsResave) {
   if (needsResave) *needsResave = false;
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     LOG_ERR("KRS", "JSON parse error: %s", error.c_str());
     return false;
@@ -694,7 +715,7 @@ bool JsonSettingsIO::saveWifi(const WifiCredentialStore& store, const char* path
 bool JsonSettingsIO::loadWifi(WifiCredentialStore& store, const char* json, bool* needsResave) {
   if (needsResave) *needsResave = false;
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     LOG_ERR("WCS", "JSON parse error: %s", error.c_str());
     return false;
@@ -776,37 +797,14 @@ bool JsonSettingsIO::loadWifi(WifiCredentialStore& store, const char* json, bool
     }
     const std::string bssidHex = obj["bssid"] | std::string("");
     const int channel = obj["channel"].as<int>();
-    if (bssidHex.size() == 12 && channel > 0 && channel <= 14) {
-      bool parseOk = true;
-      uint8_t parsed[6] = {0};
-      for (int i = 0; i < 6 && parseOk; i++) {
-        unsigned int byte = 0;
-        if (sscanf(bssidHex.c_str() + i * 2, "%2x", &byte) != 1) {
-          parseOk = false;
-        } else {
-          parsed[i] = static_cast<uint8_t>(byte);
-        }
-      }
-      if (parseOk) {
-        std::memcpy(cred.bssid, parsed, 6);
-        cred.channel = static_cast<uint8_t>(channel);
-      }
+    if (bssidHex.size() == 12 && channel > 0 && channel <= 14 &&
+        ascii_parse::hexBytes(bssidHex.c_str(), cred.bssid, 6)) {
+      cred.channel = static_cast<uint8_t>(channel);
     }
     const int aps = obj["aps"].as<int>();  // 0 when absent: files from before the count
     cred.apCount = static_cast<uint8_t>(aps < 0 ? 0 : (aps > 255 ? 255 : aps));
-    const auto parseQuad = [](const std::string& s, uint8_t out[4]) -> bool {
-      unsigned int a = 0, b = 0, c = 0, d = 0;
-      int consumed = 0;
-      // %n stores characters consumed; require it to equal full string length so we
-      // reject inputs with trailing garbage like "192.168.1.10xyz".
-      if (sscanf(s.c_str(), "%u.%u.%u.%u%n", &a, &b, &c, &d, &consumed) != 4) return false;
-      if (consumed < 0 || static_cast<size_t>(consumed) != s.size()) return false;
-      if (a > 255 || b > 255 || c > 255 || d > 255) return false;
-      out[0] = a;
-      out[1] = b;
-      out[2] = c;
-      out[3] = d;
-      return true;
+    const auto parseQuad = [](const std::string& text, uint8_t out[4]) {
+      return ascii_parse::ipv4(text.data(), text.size(), out);
     };
     const std::string ipStr = obj["ip"] | std::string("");
     const std::string gwStr = obj["gw"] | std::string("");
@@ -861,7 +859,7 @@ static_assert(std::size(kRecentBookOverrideKeys) == BookReaderOverrides::kLegacy
 
 RecentBooksLoad JsonSettingsIO::loadRecentBooks(std::vector<LegacyRecentBook>& out, const char* json) {
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error == DeserializationError::NoMemory) {
     LOG_ERR("RBS", "No memory to read the recent books");
     return RecentBooksLoad::ShortOfMemory;
@@ -945,7 +943,7 @@ bool JsonSettingsIO::saveOpds(const OpdsServerStore& store, const char* path) {
 bool JsonSettingsIO::loadOpds(OpdsServerStore& store, const char* json, bool* needsResave) {
   if (needsResave) *needsResave = false;
   JsonDocument doc;
-  auto error = deserializeJson(doc, json);
+  auto error = JsonText::parse(doc, json);
   if (error) {
     LOG_ERR("OPS", "JSON parse error: %s", error.c_str());
     return false;

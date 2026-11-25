@@ -443,8 +443,9 @@ RTC_NOINIT_ATTR uint32_t metalioRejectedWakes;
 void HalPowerManager::rejectNonPowerMetalioWake() const {
   if (esp_reset_reason() != ESP_RST_DEEPSLEEP) return;
   // GPIO2 only identifies the expander. Read the actual key before drawing the
-  // boot screen, otherwise Volume or another input clears the sleep wallpaper.
-  if (freeink::metalioplus::powerKeyHeld()) return;
+  // boot screen or pulsing touch reset, otherwise Volume or another input clears
+  // the sleep wallpaper and a brief tap is lost behind the 300 ms reset wait.
+  if (freeink::metalioplus::probePowerKeyHeldEarly()) return;
   ++metalioRejectedWakes;
   sleepOnExpanderKey();
 }

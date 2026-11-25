@@ -5,7 +5,8 @@
 #include <cstring>
 #include <utility>
 
-// The bytes of the frame buffer a logical rectangle covers, their copy out and back, and a digest of a whole frame.
+// The bytes of the frame buffer a logical rectangle covers, their copy out and back, a logical row read back, and a
+// digest of a whole frame.
 // GfxRenderer's region helpers (getRegionByteSize, copyRegionToBuffer, copyBufferToRegion) are thin wrappers over this
 // header, kept free of Arduino so the host can test it (test/frame_region).
 namespace frameregion {
@@ -40,6 +41,22 @@ inline void toPanel(const int orientation, const int x, const int y, const int p
       *panelX = x;
       *panelY = y;
       break;
+  }
+}
+
+// Logical row y of the frame (rows of `stride` bytes) in `orientation`, pixels [0, width), packed one bit a pixel, MSB
+// first, as the frame keeps them (a set bit is white): one row of a picture of the screen as it is held, which is what
+// a screenshot writes (ScreenshotUtil, crosspoint-reader PR #4457 by Uri Tauber). `out` takes (width + 7) / 8 bytes;
+// bits past `width` in the last one stay clear.
+inline void copyLogicalRow(const uint8_t* frame, const int stride, const int orientation, const int panelWidth,
+                           const int panelHeight, const int y, const int width, uint8_t* out) {
+  memset(out, 0, static_cast<size_t>(width + 7) / 8);
+  for (int x = 0; x < width; x++) {
+    int panelX = 0;
+    int panelY = 0;
+    toPanel(orientation, x, y, panelWidth, panelHeight, &panelX, &panelY);
+    const uint8_t pixel = (frame[static_cast<size_t>(panelY) * stride + panelX / 8] >> (7 - panelX % 8)) & 0x01;
+    out[x / 8] |= static_cast<uint8_t>(pixel << (7 - x % 8));
   }
 }
 

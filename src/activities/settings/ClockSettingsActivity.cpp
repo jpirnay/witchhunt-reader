@@ -13,18 +13,20 @@
 #include "DetectTimezoneActivity.h"
 #include "SyncTimeActivity.h"
 #include "TimezoneOptions.h"
+#include "WeekStartOption.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/Timezones.h"
 
 void ClockSettingsActivity::buildMenuItems() {
-  menuItems.reserve(6);
+  menuItems.reserve(7);
   menuItems.push_back(SettingInfo::Separator(StrId::STR_SETTINGS_TITLE));
   menuItems.push_back(
       SettingInfo::Toggle(StrId::STR_USE_CLOCK, &CrossPointSettings::useClock, "useClock", StrId::STR_CAT_SYSTEM));
   menuItems.push_back(SettingInfo::Enum(StrId::STR_CLOCK_FORMAT, &CrossPointSettings::clockFormat12h,
                                         {StrId::STR_24H, StrId::STR_12H}, "clockFormat12h", StrId::STR_CAT_SYSTEM));
+  menuItems.push_back(WeekStartOption::make(StrId::STR_CAT_SYSTEM));
   // Shared with the settings list the web UI and persistence read, so the two cannot list
   // different numbers of zones again. Opens a full-screen picker rather than cycling. See
   // TimezoneOptions.h.
@@ -80,7 +82,7 @@ void ClockSettingsActivity::onSettingToggled(int index) {
   } else if (item.nameId == StrId::STR_TIMEZONE) {
     timezones::applyToClock();
     SETTINGS.saveToFile();
-  } else if (item.nameId == StrId::STR_CLOCK_FORMAT) {
+  } else if (item.nameId == StrId::STR_CLOCK_FORMAT || item.nameId == StrId::STR_FIRST_DAY_OF_WEEK) {
     SETTINGS.saveToFile();
   }
 }

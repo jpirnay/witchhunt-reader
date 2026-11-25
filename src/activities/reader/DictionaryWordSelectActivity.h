@@ -8,6 +8,7 @@
 #include <I18n.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "activities/Activity.h"
@@ -208,7 +209,10 @@ class DictionaryWordSelectActivity final : public Activity {
     Activate,  // the tap landed on the word already selected, or inside the match lit from it
   };
   WordTouch consumeWordTouch();
-  void performLookup();
+  // Looks up the selected word and shows its definition. A miss opens "Did you mean"
+  // (DictionarySuggestionsActivity) when the dictionary has headwords near it, else the Not found popup.
+  // `chosenHeadword`: one picked there, looked up as it is and never offered suggestions again.
+  void performLookup(const char* chosenHeadword = nullptr);
   // Gives the three arrays and the highlight snapshot back to the heap while a definition is
   // shown; extractWords() builds them again, identically, when the page is drawn on return.
   // `selected` and the speculation fields stay, so the cursor comes back where it was.
@@ -249,6 +253,8 @@ class DictionaryWordSelectActivity final : public Activity {
   // handler itself: the handler runs while the activity stack is being popped,
   // and starting another activity from inside that is asking for trouble.
   int8_t pendingDictionarySwitch = 0;
+  // A headword picked in "Did you mean", looked up from loop() for the same reason.
+  std::string pendingSuggestion;
   bool dictOpenAttempted = false;
   bool dictOpenOk = false;
   bool dictNeedsIndex = false;

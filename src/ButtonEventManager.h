@@ -37,6 +37,9 @@ class ButtonEventManager {
  public:
   using Button = MappedInputManager::Button;
 
+  // The most events the queue holds at once: its ring keeps one slot free to tell full from empty.
+  static constexpr int MAX_QUEUED_EVENTS = 15;
+
   enum class PressType { Short, Double, Long };
 
   struct ButtonEvent {
@@ -101,6 +104,13 @@ class ButtonEventManager {
   // pushEventFront() note in main.cpp) -- the serial CMD:IDLE would otherwise wait on them forever.
   bool isMidGesture() const;
 
+  // The action the settings give this press of this button (a CrossPointSettings::BUTTON_ACTION), before main.cpp
+  // mirrors Left and Right for a right-to-left page. BTN_DEFAULT for Up and Down: they are PageBack and PageForward
+  // under their list names, the FSM emits both names for one press, and the PageBack/PageForward event carries the
+  // action, so these fall through to the screen, which is what list screens match on. BTN_DEFAULT for a long Power
+  // too (see the table).
+  static uint8_t configuredAction(Button button, PressType type);
+
   // Returns true if a double-click action is configured for this button.
   // ButtonEventManager queries CrossPointSettings internally. Answers identically for
   // both names of an aliased pair, so one physical button always has one wait policy.
@@ -157,7 +167,7 @@ class ButtonEventManager {
   PerButton buttons[NUM_BUTTONS];
 
   // Pending events ring buffer (small — at most one event per button per tick)
-  static constexpr int EVENT_BUF = 16;
+  static constexpr int EVENT_BUF = MAX_QUEUED_EVENTS + 1;
   ButtonEvent eventBuf[EVENT_BUF] = {};
   int eventHead = 0;
   int eventTail = 0;

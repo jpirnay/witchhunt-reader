@@ -1,5 +1,6 @@
 add_executable(HomeClockCadenceTest
   HomeClockCadenceTest.cpp
+  MinuteTickTest.cpp
 )
 
 target_include_directories(HomeClockCadenceTest PRIVATE

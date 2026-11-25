@@ -1,9 +1,14 @@
 #include "PluginEventCore.h"
 
+#include <JsonText.h>
+
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#include "PluginLocations.h"
+#include "network/PluginHosts.h"
 
 // Upstream CrossPoint's plugin events (PR #3114, Justin Mitchell; require_meta from PR #4200, Arthur Tazhitdinov):
 // the event table, the queue line and the templates follow its src/util/PluginEvents.cpp and PluginHttp.cpp.
@@ -52,7 +57,7 @@ bool parseSubscription(const std::string& json, Subscription& out) {
   out = Subscription{};
   // Whole, from a std::string: the parser the firmware already has (a filtered one would be new code).
   JsonDocument doc;
-  if (deserializeJson(doc, json) != DeserializationError::Ok) return false;
+  if (JsonText::parse(doc, json) != DeserializationError::Ok) return false;
   for (JsonPairConst kv : doc["events"].as<JsonObjectConst>()) {
     const int e = eventFromName(kv.key().c_str());
     if (e < 0) continue;
@@ -79,7 +84,7 @@ std::string eventLine(const Event e, const Var* vars, const size_t count, const 
   JsonObject obj = doc["vars"].to<JsonObject>();
   for (size_t i = 0; i < count; i++) obj[vars[i].key] = vars[i].value;
   std::string line;
-  serializeJson(doc, line);
+  JsonText::write(doc, line);
   line += '\n';
   if (doc.overflowed() || line.size() > kMaxEventLine) return "";
   return line;
@@ -92,7 +97,7 @@ const char* eventBook(JsonVariantConst vars) {
 
 bool metaMatches(const std::string& json, const uint32_t wanted) {
   JsonDocument doc;
-  if (deserializeJson(doc, json) != DeserializationError::Ok) return false;
+  if (JsonText::parse(doc, json) != DeserializationError::Ok) return false;
   for (JsonPairConst kv : doc.as<JsonObjectConst>()) {
     if (metaKeyHash(kv.key().c_str()) == wanted && !variantToString(kv.value()).empty()) return true;
   }
@@ -118,9 +123,11 @@ JsonVariantConst handlerFor(JsonVariantConst manifest, const Event e) {
   return handler["request"]["url"].is<const char*>() ? handler : JsonVariantConst();
 }
 
-std::string pluginFile(const std::string& pluginDir, const char* name) {
-  if (name == nullptr || name[0] == '\0') return "";
-  return name[0] == '/' ? std::string(name) : pluginDir + "/" + name;
+std::string pluginFile(const std::string& pluginDir, const char* name, const PathCheck isProtected) {
+  if (name == nullptr) return "";
+  std::string path = PluginLocations::namedFilePath(name, pluginDir);
+  if (path.empty() || isProtected(path)) return "";
+  return path;
 }
 
 std::string valueAt(JsonVariantConst node, const char* dottedPath) {
@@ -182,6 +189,29 @@ std::string expand(const char* tpl, const TemplateContext& ctx) {
     p = close + 1;
   }
   return out;
+}
+
+std::string handlerUrl(JsonVariantConst handler, const TemplateContext& ctx) {
+  return escapeUrl(expand(requestOf(handler)["url"] | "", ctx));
+}
+
+std::string literalHost(const char* urlTemplate) { return PluginHosts::urlHost(urlTemplate ? urlTemplate : ""); }
+
+namespace {
+std::string literalHostOf(JsonVariantConst manifest, const size_t event) {
+  return literalHost(requestOf(handlerFor(manifest, static_cast<Event>(event)))["url"] | "");
+}
+}  // namespace
+
+size_t literalHostBytes(JsonVariantConst manifest) {
+  size_t bytes = 0;
+  for (size_t e = 0; e < kEventCount; e++) bytes += literalHostOf(manifest, e).size() + 1;
+  return bytes;
+}
+
+void declareLiteralHosts(JsonVariantConst manifest, PluginHosts::Reach& reach) {
+  reach.reserveDeclared(literalHostBytes(manifest));
+  for (size_t e = 0; e < kEventCount; e++) reach.declare(literalHostOf(manifest, e));
 }
 
 std::string escapeUrl(const std::string& url) {

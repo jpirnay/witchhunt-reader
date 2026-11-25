@@ -14,6 +14,8 @@
 #include <HalStorage.h>
 #include <HalSystem.h>  // feedWatchdog()
 #include <HeapFit.h>
+#include <JsonFile.h>
+#include <JsonText.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <Txt.h>
@@ -46,6 +48,7 @@
 #include "HttpFileStreamer.h"
 #include "MultipartRoute.h"
 #include "OpdsServerStore.h"
+#include "PluginReach.h"
 #include "PluginRelay.h"
 #include "ReadingStats.h"
 #include "SdCardFontGlobals.h"
@@ -60,6 +63,11 @@
 #include "WebDAVHandler.h"
 #include "WebPathGuard.h"
 #include "WifiCredentialStore.h"
+#include "activities/home/HomeMenu.h"
+#include "components/UITheme.h"
+#include "components/themes/PanelMetrics.h"
+#include "components/themes/lyra/HomeLayoutFile.h"
+#include "components/themes/lyra/LyraTilesTheme.h"
 #include "html/WebSetupPageHtml.generated.h"
 #include "network/HttpDownloader.h"
 #include "util/ByteSize.h"
@@ -67,6 +75,8 @@
 #include "util/FontManifestReader.h"
 #include "util/PluginLocations.h"
 #include "util/UrlUtils.h"
+
+extern GfxRenderer renderer;  // main.cpp: the Home Screen API reads the panel's size and orientation
 
 // Log free heap + max contiguous block at a named point.
 #define LOG_WEB_MEM(tag)                                                                                              \
@@ -250,31 +260,6 @@ constexpr size_t PLUGIN_DEVICE_JSON_MAX_BYTES = 8192;
 // which streams instead of buffering the whole body in the request.
 constexpr size_t PLUGIN_FS_MAX_BYTES = 64u * 1024u;
 
-// Host of a URL: between "://" and the next "/", minus any port, and minus any
-// userinfo. Dropping everything before an "@" matters - "https://ok.com@evil.com/"
-// connects to evil.com, so that is the host the allowlist must judge.
-std::string urlHost(const std::string& url) {
-  const size_t schemeEnd = url.find("://");
-  if (schemeEnd == std::string::npos) return {};
-  const size_t start = schemeEnd + 3;
-  size_t end = url.find('/', start);
-  if (end == std::string::npos) end = url.size();
-
-  std::string host = url.substr(start, end - start);
-  const size_t at = host.rfind('@');
-  if (at != std::string::npos) host = host.substr(at + 1);
-  const size_t colon = host.find(':');
-  if (colon != std::string::npos) host.resize(colon);
-  return host;
-}
-
-// True when the URL's host appears in the calling plugin's manifest
-// "allowedHosts". A bare entry must match exactly; one starting with a dot
-// matches that suffix (".example.org" allows "covers.example.org"). Absent or
-// empty list means nothing is allowed - the relay is opt-in per plugin, and a
-// plugin's reach is readable in its own folder before it is installed.
-bool relayHostAllowed(const String& plugin, const std::string& url);
-
 // Whether the device.json in pluginDir names `path` (normalised) as one of its files: token.file,
 // token.refresh_file, config.file (PluginLocations::namesPath()). Upstream lets a plugin keep its token and config at
 // any path but the credential stores (lingoblend: /.crosspoint/lingoblend.json); here a plugin otherwise reaches only
@@ -290,7 +275,7 @@ bool deviceJsonNames(const std::string& pluginDir, const std::string& path) {
   std::string text;
   if (!Storage.readFileToString("WEB", pluginDir + "/device.json", PLUGIN_DEVICE_JSON_MAX_BYTES, text)) return false;
   JsonDocument doc;
-  if (deserializeJson(doc, text) != DeserializationError::Ok) return false;
+  if (JsonText::parse(doc, text) != DeserializationError::Ok) return false;
   const char* named[] = {doc["token"]["file"] | "", doc["token"]["refresh_file"] | "", doc["config"]["file"] | ""};
   return std::any_of(std::begin(named), std::end(named),
                      [&](const char* n) { return PluginLocations::namesPath(n, pluginDir, path); });
@@ -306,94 +291,20 @@ bool anyDeviceJsonNames(const std::string& path) {
 }
 
 // The redirect check for the relay and fetch-to-SD: a redirect is followed only to a host the
-// plugin's manifest allows as well, so the allowlist decides where the device actually connects
+// plugin may reach as well, so the allowlist decides where the device actually connects
 // and not merely where the first request went. A refused host goes to *refused, so the answer can
 // name it and the page ask for it, as for the first request: a GitHub release file redirects to
-// its CDN.
-HttpDownloader::RedirectFilter redirectsWithinAllowlist(const String& plugin, std::string* refused) {
-  return [plugin, refused](const std::string& next) {
-    if (relayHostAllowed(plugin, next)) return true;
-    LOG_DBG("WEB", "Redirect refused for %s: %s not in allowedHosts", plugin.c_str(), urlHost(next).c_str());
-    if (refused) *refused = urlHost(next);
+// its CDN. A redirect to a URL without a host to judge (user info, say) fails the transfer and
+// names nothing: no approval could make it go. `reach` must outlive the transfer.
+HttpDownloader::RedirectFilter redirectsWithinAllowlist(const String& plugin, const PluginHosts::Reach& reach,
+                                                        std::string* refused) {
+  return [plugin, &reach, refused](const std::string& next) {
+    if (reach.allows(next)) return true;
+    const std::string host = PluginHosts::urlHost(next);
+    LOG_DBG("WEB", "Redirect refused for %s: %s not allowed", plugin.c_str(), host.c_str());
+    if (refused && !host.empty()) *refused = host;
     return false;
   };
-}
-
-// A host matches an allowlist entry exactly, or ends with one that starts with a dot.
-bool hostMatches(const std::string& host, const std::string& pattern) {
-  if (pattern.empty()) return false;
-  if (pattern[0] == '.') {
-    return host.size() > pattern.size() && host.compare(host.size() - pattern.size(), pattern.size(), pattern) == 0;
-  }
-  return host == pattern;
-}
-
-// The File Manager's Details dialog is part of the web interface, not a plugin, but its cover search
-// reads Goodreads and Google Books covers through the relay like the plugin it grew from. Its scope
-// carries a ':', which no FAT folder name can, so no plugin can claim this list.
-constexpr char DETAILS_RELAY_SCOPE[] = ":details";
-constexpr const char* DETAILS_RELAY_HOSTS[] = {"www.goodreads.com", ".gr-assets.com", "books.google.com"};
-
-// Hosts the user approved for a plugin on a plugin's request (the Plugins page and the plugin host ask), kept apart
-// from the plugin's folder so an update keeps them and a removal drops them: {"<plugin>": ["host", ...]}. Exact
-// hosts only. Plugins written for upstream declare no allowedHosts, so this is how they reach anything.
-constexpr char PLUGIN_HOSTS_PATH[] = "/.crosspoint/plugin-hosts.json";
-constexpr size_t PLUGIN_HOSTS_MAX_BYTES = 8192;
-constexpr size_t PLUGIN_HOSTS_MAX_PER_PLUGIN = 16;
-
-// The approvals, or an empty object when there are none yet or the file is unreadable.
-void loadPluginHosts(JsonDocument& doc) {
-  std::string text;
-  if (Storage.exists(PLUGIN_HOSTS_PATH) &&
-      Storage.readFileToString("WEB", PLUGIN_HOSTS_PATH, PLUGIN_HOSTS_MAX_BYTES, text) &&
-      deserializeJson(doc, text) == DeserializationError::Ok && doc.is<JsonObject>()) {
-    return;
-  }
-  doc.clear();
-  doc.to<JsonObject>();
-}
-
-bool savePluginHosts(const JsonDocument& doc) {
-  String text;
-  serializeJson(doc, text);
-  if (text.length() > PLUGIN_HOSTS_MAX_BYTES) return false;
-  const std::string temp = std::string(PLUGIN_HOSTS_PATH) + ".tmp";
-  return Storage.writeFile(temp.c_str(), text) && FileReplace::replace(temp.c_str(), PLUGIN_HOSTS_PATH);
-}
-
-bool hostApprovedFor(const String& plugin, const std::string& host) {
-  JsonDocument doc;
-  loadPluginHosts(doc);
-  for (JsonVariantConst entry : doc[plugin.c_str()].as<JsonArrayConst>()) {
-    const char* approved = entry.as<const char*>();
-    if (approved && host == approved) return true;
-  }
-  return false;
-}
-
-bool relayHostAllowed(const String& plugin, const std::string& url) {
-  const std::string host = urlHost(url);
-  if (host.empty()) return false;
-  if (plugin == DETAILS_RELAY_SCOPE) {
-    return std::any_of(std::begin(DETAILS_RELAY_HOSTS), std::end(DETAILS_RELAY_HOSTS),
-                       [&host](const char* pattern) { return hostMatches(host, pattern); });
-  }
-  if (!isSafePathComponent(plugin)) return false;
-
-  const std::string dir = PluginLocations::findPluginDir(plugin.c_str());
-  if (dir.empty()) return false;
-
-  std::string manifest;
-  if (Storage.readFileToString("WEB", dir + "/manifest.json", PLUGIN_MANIFEST_MAX_BYTES, manifest)) {
-    JsonDocument m;
-    if (deserializeJson(m, manifest) == DeserializationError::Ok && m["allowedHosts"].is<JsonArray>()) {
-      for (JsonVariant entry : m["allowedHosts"].as<JsonArray>()) {
-        const char* pattern = entry.as<const char*>();
-        if (pattern && hostMatches(host, pattern)) return true;
-      }
-    }
-  }
-  return hostApprovedFor(plugin, host);
 }
 
 // A refused host, named so the page can ask the user to approve it (POST /api/plugins/hosts).
@@ -404,7 +315,33 @@ void sendRefusedHost(WebServer* server, const std::string& host) {
   server->send(403, "application/json", body.c_str());
 }
 
-void sendHostRefused(WebServer* server, const std::string& url) { sendRefusedHost(server, urlHost(url)); }
+// A refused URL: 403 naming its host, or 400 when it has no host the device would connect to (user info, a port out
+// of range), which no approval can change.
+void sendHostRefused(WebServer* server, const std::string& url) {
+  const std::string host = PluginHosts::urlHost(url);
+  if (host.empty()) {
+    server->send(400, "application/json", "{\"error\":\"invalid url\"}");
+    return;
+  }
+  sendRefusedHost(server, host);
+}
+
+// The host check of the relay and fetch-to-SD: whether `url` goes to a host `plugin` may reach (PluginReach::load():
+// its manifest's allowedHosts and the user's approvals, or the built-in hosts of the ":details" scope). Absent or
+// empty means nothing: the relay is opt-in per plugin, and a plugin's reach is readable in its own folder before it is
+// installed. False after answering: 503 without the room to read the lists, else sendHostRefused(). `reach` is left
+// filled for the transfer's redirect check.
+bool requireReachable(WebServer* server, const char* what, const String& plugin, const std::string& url,
+                      PluginHosts::Reach& reach) {
+  if (PluginReach::load(reach, plugin.c_str()) == PluginReach::Load::NoRoom) {
+    sendLowMemory(server);
+    return false;
+  }
+  if (reach.allows(url)) return true;
+  LOG_DBG("WEB", "%s refused for %s: %s not allowed", what, plugin.c_str(), PluginHosts::urlHost(url).c_str());
+  sendHostRefused(server, url);
+  return false;
+}
 
 // A plugin's request headers, as upstream passes them (an object) or as a list of [name, value] pairs (for a header
 // named twice). False when one is not allowed (PluginRelay::requestHeaderAllowed()).
@@ -620,6 +557,9 @@ void CrossPointWebServer::begin() {
 
   // Font management endpoints
   server->on("/stats", HTTP_GET, [this] { handleStatsPage(); });
+  server->on("/home-screen", HTTP_GET, [this] { handleHomeScreenPage(); });
+  server->on("/api/home-layout", HTTP_GET, [this] { handleGetHomeLayout(); });
+  server->on("/api/home-layout", HTTP_POST, [this] { handlePostHomeLayout(); });
   server->on("/api/stats", HTTP_GET, [this] { handleStatsApi(); });
   server->on("/api/stats/export", HTTP_GET, [this] { handleStatsExport(); });
   server->on("/api/stats/remove", HTTP_POST, [this] { handleStatsRemove(); });
@@ -877,14 +817,14 @@ static void sendSetupPage(WebServer* server) {
 // WDT is reset before and after sendContent so the write can't outlast the watchdog.
 // On malloc failure, sends a 500.
 static void sendJson(WebServer* server, int code, const JsonDocument& doc) {
-  const size_t payloadSize = measureJson(doc);
+  const size_t payloadSize = JsonText::measure(doc);
   char* buf = static_cast<char*>(malloc(payloadSize + 1));
   if (!buf) {
     LOG_DBG("WEB", "sendJson: malloc(%zu) failed", payloadSize + 1);
     server->send(500, "application/json", "{\"error\":\"OOM\"}");
     return;
   }
-  serializeJson(doc, buf, payloadSize + 1);
+  JsonText::write(doc, buf, payloadSize + 1);
   server->setContentLength(payloadSize);
   server->send(code, "application/json", "");
   HalSystem::feedWatchdog();
@@ -1019,13 +959,74 @@ void CrossPointWebServer::handleStatsApi() const {
   LOG_WEB_MEM("stats_api_exit");
 }
 
+void CrossPointWebServer::handleHomeScreenPage() const { serveBundlePage(web_bundle::HomeScreenPageHtml); }
+
+// What the Home Screen page needs to edit and preview Lyra Tiles' layout: the file as it is on the
+// card, the place Home lays out in on this panel as it is held now, and the destinations a shortcut
+// can open now. The page lays the rows out itself (js/home-layout.js, the same rules as
+// HomeTilesLayout::place); the device answers this while it shows the transfer screen, not Home.
+void CrossPointWebServer::handleGetHomeLayout() const {
+  JsonDocument doc;
+  std::string file;
+  if (Storage.readFileToString("WEB", HomeLayoutFile::kPath, HomeLayoutFile::kMaxBytes, file)) doc["file"] = file;
+
+  // Lyra Tiles' own metrics, whatever theme is in use: the layout is that theme's.
+  ThemeMetrics metrics = LyraTilesMetrics::values;
+  UiFontLadder::applyTo(metrics, UITheme::fontGrowth());
+  const Rect content = UITheme::getContentRect(renderer, metrics, /*hasBottomHints=*/true, /*hasSideHints=*/false);
+  JsonObject screen = doc["screen"].to<JsonObject>();
+  screen["w"] = renderer.getScreenWidth();
+  screen["h"] = renderer.getScreenHeight();
+  JsonArray box = doc["content"].to<JsonArray>();
+  box.add(content.x);
+  box.add(content.y);
+  box.add(content.width);
+  box.add(content.height);
+  doc["top"] = content.y + metrics.homeTopPadding;
+  doc["compact"] = PanelMetrics::COMPACT;
+
+  // A shortcut to a destination with nothing behind it is left out on Home, its neighbour taking the row.
+  const uint32_t available = availableDestinations(HomeMenuAvailability{.hasBookmarks = GLOBAL_BOOKMARKS.hasAny()});
+  JsonArray destinations = doc["available"].to<JsonArray>();
+  for (uint8_t d = 0; d < HomeTilesLayout::destination::Count; ++d) {
+    if ((available & (1u << d)) != 0) destinations.add(HomeLayoutFile::destinationName(d));
+  }
+  sendJson(server.get(), 200, doc);
+}
+
+// Saves the page's layout as /.crosspoint/home.json, whole or not at all, once the device's own parser
+// takes it. The page then switches Layout to Custom through POST /api/settings.
+void CrossPointWebServer::handlePostHomeLayout() const {
+  if (!server->hasArg("plain")) {
+    server->send(400, "text/plain", "Missing JSON body");
+    return;
+  }
+  const String& body = server->arg("plain");
+  if (body.length() > HomeLayoutFile::kMaxBytes) {
+    server->send(400, "text/plain", "Layout too large");
+    return;
+  }
+  if (!HomeLayoutFile::parse(std::string(body.c_str(), body.length())).ok) {
+    server->send(400, "text/plain", "Not a layout this reader can show");
+    return;
+  }
+  const std::string temp = std::string(HomeLayoutFile::kPath) + ".tmp";
+  if (!Storage.writeFile(temp.c_str(), body) || !FileReplace::replace(temp.c_str(), HomeLayoutFile::kPath)) {
+    LOG_ERR("WEB", "Home layout not saved");
+    server->send(500, "text/plain", "The layout file could not be written");
+    return;
+  }
+  LOG_INF("WEB", "Home layout saved (%u bytes)", static_cast<unsigned>(body.length()));
+  server->send(200, "text/plain", "Saved");
+}
+
 // Body: {"docId": "..."}. Same removal as the device's per-book stats screen: the book's entry goes
 // and its time comes back out of the totals: the store frees its directory entry and rewrites the
 // global figures, copy-on-write.
 void CrossPointWebServer::handleStatsRemove() const {
   if (rejectIfLowMemory(server.get())) return;
   JsonDocument req;
-  if (deserializeJson(req, server->arg("plain")) || !req["docId"].is<const char*>()) {
+  if (JsonText::parse(req, server->arg("plain")) || !req["docId"].is<const char*>()) {
     server->send(400, "application/json", "{\"error\":\"Invalid request\"}");
     return;
   }
@@ -1330,19 +1331,19 @@ void CrossPointWebServer::handleBootDiagnostics() const {
   JsonDocument doc;
   out.print("{\"hardware\":");
   fillBootHardware(doc);
-  serializeJson(doc, out);
+  JsonText::write(doc, out);
 
   doc.clear();
   out.print(",\"thisBoot\":");
   fillThisBoot(doc, records.get(), count);
-  serializeJson(doc, out);
+  JsonText::write(doc, out);
 
   out.print(",\"history\":[");
   for (uint8_t i = 0; i < count; i++) {
     doc.clear();
     fillBootRecord(doc, records[i]);
     if (i > 0) out.print(',');
-    serializeJson(doc, out);
+    JsonText::write(doc, out);
   }
   out.print("]}");
   response.finish();
@@ -1455,7 +1456,7 @@ void CrossPointWebServer::handleFileListData() const {
         (*ctx.doc)["isEpub"] = info.isEpub;
         // Straight into the reply: through a buffer, a name of ~150 CJK characters did not fit and
         // was left out of the list. Found by Arthur Tazhitdinov (crosspoint-reader #4285).
-        serializeJson(*ctx.doc, ctx.out->nextEntry());
+        JsonText::write(*ctx.doc, ctx.out->nextEntry());
       },
       &context);
 
@@ -1493,7 +1494,8 @@ void CrossPointWebServer::handleDownload() const {
     return;
   }
 
-  FsFile file = Storage.open(itemPath.c_str());
+  // The card's bytes: a protected book's cache files leave enciphered, as they are on the card (HalStorage::openRaw).
+  FsFile file = Storage.openRaw(itemPath.c_str());
   if (!file) {
     server->send(500, "text/plain", "Failed to open file");
     return;
@@ -1918,7 +1920,8 @@ void CrossPointWebServer::handleRename() const {
     return;
   }
 
-  FsFile file = Storage.open(itemPath.c_str());
+  // The card's bytes: a protected book's cache files leave enciphered, as they are on the card (HalStorage::openRaw).
+  FsFile file = Storage.openRaw(itemPath.c_str());
   if (!file) {
     server->send(500, "text/plain", "Failed to open file");
     return;
@@ -2005,7 +2008,8 @@ void CrossPointWebServer::handleMove() const {
     return;
   }
 
-  FsFile file = Storage.open(itemPath.c_str());
+  // The card's bytes: a protected book's cache files leave enciphered, as they are on the card (HalStorage::openRaw).
+  FsFile file = Storage.openRaw(itemPath.c_str());
   if (!file) {
     server->send(500, "text/plain", "Failed to open file");
     return;
@@ -2089,7 +2093,7 @@ void CrossPointWebServer::handleDelete() const {
   DeserializationError error = DeserializationError(DeserializationError::Code::Ok);
   if (hasPathsArg) {
     pathsArg = server->arg("paths");
-    error = deserializeJson(doc, pathsArg);
+    error = JsonText::parse(doc, pathsArg);
   } else {
     pathsArg = server->arg("path");
     doc.add(pathsArg);
@@ -2114,7 +2118,9 @@ void CrossPointWebServer::handleDelete() const {
   for (const auto& p : paths) {
     // Resolved before the protection check below -- see handleFileListData.
     // crosspoint-reader PR #3353.
-    auto itemPath = normalizeWebPath(p.as<String>());
+    // `| ""`, not as<String>(): an entry that is not a string is refused as an empty path, where
+    // as<String>() turned it into its JSON (5 -> "/5") and kept ArduinoJson's String writer in the image.
+    auto itemPath = normalizeWebPath(p | "");
 
     // Validate path
     if (itemPath.isEmpty() || itemPath == "/") {
@@ -2195,7 +2201,7 @@ void CrossPointWebServer::handleGetSettings() const {
   // Straight into the response, without a buffer of its own: an entry can be any size. The
   // timezone row's 86 city names make about 2 KB, more than the 1 KB buffer this used to be
   // formatted into, so the row was dropped and the web page had no Timezone setting.
-  auto sendEntry = [&]() { serializeJson(doc, out.nextEntry()); };
+  auto sendEntry = [&]() { JsonText::write(doc, out.nextEntry()); };
 
   // Rows are visited one at a time (forEachSetting()), never held as a list: the whole list is
   // one 11.5 KB block, and this runs while Wi-Fi holds most of the heap.
@@ -2326,7 +2332,7 @@ void CrossPointWebServer::handlePostSettings() {
 
   const String body = server->arg("plain");
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, body);
+  const DeserializationError err = JsonText::parse(doc, body);
   if (err) {
     server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
     return;
@@ -2708,7 +2714,7 @@ void CrossPointWebServer::handleFontList() {
         fileObj["size"] = 0;
       }
     }
-    serializeJson(doc, out.nextEntry());
+    JsonText::write(doc, out.nextEntry());
   }
   LOG_WEB_MEM("font_list_exit");
   out.finish("}");
@@ -2775,7 +2781,7 @@ void CrossPointWebServer::handleFontManifest() {
     if (one.installed(0) && UiLanguagePacks::usedByInterface(one, 0)) doc["inUse"] = true;
     doc["totalSize"] = static_cast<unsigned long>(one.totalSize(0));
     doc["fileCount"] = static_cast<unsigned>(one.fileCount(0));
-    serializeJson(doc, s.out->nextEntry());
+    JsonText::write(doc, s.out->nextEntry());
   };
   FontManifestReader reader = manifestReader();
   std::string baseUrl;
@@ -2795,7 +2801,7 @@ void CrossPointWebServer::handleFontManifest() {
 void CrossPointWebServer::handleFontDownload() {
   String body = server->arg("plain");
   JsonDocument req;
-  if (deserializeJson(req, body)) {
+  if (JsonText::parse(req, body)) {
     server->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid request\"}");
     return;
   }
@@ -3137,7 +3143,7 @@ void CrossPointWebServer::handleFontUpload() {
 void CrossPointWebServer::handleFontDelete() {
   String body = server->arg("plain");
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, body);
+  DeserializationError err = JsonText::parse(doc, body);
 
   if (err || !doc["family"].is<const char*>()) {
     server->send(400, "application/json", "{\"error\":\"Invalid request\"}");
@@ -3206,7 +3212,7 @@ void CrossPointWebServer::handleGetWifiNetworks() const {
     doc["hasPassword"] = !credentials[i].password.empty();
     doc["isLastConnected"] = credentials[i].ssid == lastConnectedSsid;
 
-    const size_t written = serializeJson(doc, output, outputSize);
+    const size_t written = JsonText::write(doc, output, outputSize);
     if (written >= outputSize) continue;
 
     out.addEntry(output, written);
@@ -3224,7 +3230,7 @@ void CrossPointWebServer::handlePostWifiNetwork() {
 
   const String body = server->arg("plain");
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, body);
+  const DeserializationError err = JsonText::parse(doc, body);
   if (err) {
     server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
     return;
@@ -3294,7 +3300,7 @@ void CrossPointWebServer::handleDeleteWifiNetwork() {
 
   const String body = server->arg("plain");
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, body);
+  const DeserializationError err = JsonText::parse(doc, body);
   if (err) {
     server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
     return;
@@ -3345,7 +3351,7 @@ void CrossPointWebServer::handleGetOpdsServers() const {
     // Never expose passwords over the API — only indicate whether one is set
     doc["hasPassword"] = !servers[i].password.empty();
 
-    const size_t written = serializeJson(doc, output, outputSize);
+    const size_t written = JsonText::write(doc, output, outputSize);
     if (written >= outputSize) continue;
 
     out.addEntry(output, written);
@@ -3363,7 +3369,7 @@ void CrossPointWebServer::handlePostOpdsServer() {
 
   const String body = server->arg("plain");
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, body);
+  const DeserializationError err = JsonText::parse(doc, body);
   if (err) {
     server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
     return;
@@ -3452,7 +3458,7 @@ void CrossPointWebServer::handleDeleteOpdsServer() {
 
   const String body = server->arg("plain");
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, body);
+  const DeserializationError err = JsonText::parse(doc, body);
   if (err) {
     server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
     return;
@@ -3520,7 +3526,7 @@ void CrossPointWebServer::handlePluginList() const {
     if (e.hasManifest &&
         Storage.readFileToString("WEB", e.dir + "/manifest.json", PLUGIN_MANIFEST_MAX_BYTES, manifest)) {
       JsonDocument m;
-      if (deserializeJson(m, manifest) == DeserializationError::Ok) {
+      if (JsonText::parse(m, manifest) == DeserializationError::Ok) {
         if (m["title"].is<const char*>()) doc["title"] = m["title"];
         if (m["mount"].is<const char*>()) doc["mount"] = m["mount"];
         if (m["description"].is<const char*>()) doc["description"] = m["description"];
@@ -3535,7 +3541,21 @@ void CrossPointWebServer::handlePluginList() const {
       }
     }
 
-    const size_t written = serializeJson(doc, output.get(), kEntryBytes);
+    // The hosts its device events were refused for, which the Plugins page offers to Allow or Dismiss.
+    const std::string wanted = e.hasDeviceJson ? PluginReach::loadWanted(e.dir) : std::string();
+    std::string_view wants[PluginHosts::kMaxWanted];
+    const size_t wantCount = PluginHosts::wantedHosts(wanted, wants);
+    if (wantCount > 0) {
+      JsonArray list = doc["wants"].to<JsonArray>();
+      for (size_t i = 0; i < wantCount; i++) list.add(std::string(wants[i]));
+    }
+
+    size_t written = JsonText::write(doc, output.get(), kEntryBytes);
+    if (written >= kEntryBytes && wantCount > 0) {
+      // Listed without its requests rather than not at all.
+      doc.remove("wants");
+      written = JsonText::write(doc, output.get(), kEntryBytes);
+    }
     if (written >= kEntryBytes) {
       LOG_DBG("WEB", "Plugin %s: entry too long, skipped", e.name.c_str());
       continue;
@@ -3628,11 +3648,8 @@ void CrossPointWebServer::handleRelay() {
     server->send(400, "application/json", "{\"error\":\"only http(s) urls\"}");
     return;
   }
-  if (!relayHostAllowed(plugin, url)) {
-    LOG_DBG("WEB", "Relay refused for %s: %s not allowed", plugin.c_str(), urlHost(url).c_str());
-    sendHostRefused(server.get(), url);
-    return;
-  }
+  PluginHosts::Reach reach;
+  if (!requireReachable(server.get(), "Relay", plugin, url, reach)) return;
 
   LOG_DBG("WEB", "Relay %s -> %s", plugin.c_str(), url.c_str());
 
@@ -3660,7 +3677,7 @@ void CrossPointWebServer::handleRelay() {
         total += len;
         return true;
       },
-      false, "", "", redirectsWithinAllowlist(plugin, &refusedHost));
+      false, "", "", redirectsWithinAllowlist(plugin, reach, &refusedHost));
 
   // cppcheck-suppress knownConditionTrueFalse ; the redirect filter sets refusedHost through its pointer
   if (!headerSent && !refusedHost.empty()) {
@@ -3689,14 +3706,14 @@ void CrossPointWebServer::handleRelay() {
 // by Arthur Tazhitdinov), so plugins written for upstream run: any method PluginRelay allows, the caller's headers
 // and body, and the answer's status in X-Relay-Status, its headers in X-Relay-Headers (a JSON list of [name, value]
 // pairs) and its body streamed. A 3xx comes back as it is, not followed. Unlike upstream, the host must still be one
-// the plugin may reach (relayHostAllowed: its manifest, or the user's approval), a request carrying headers is a
+// the plugin may reach (requireReachable(): its manifest, or the user's approval), a request carrying headers is a
 // credentialed one (TLS verified, no fallback), and only an application/json POST is taken (requireJsonBody()).
 void CrossPointWebServer::handleRelayPost() {
   if (rejectIfLowMemory(server.get())) return;
   if (!requireJsonBody(server.get())) return;
 
   JsonDocument req;
-  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+  if (JsonText::parse(req, server->arg("plain")) != DeserializationError::Ok) {
     server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
     return;
   }
@@ -3722,11 +3739,8 @@ void CrossPointWebServer::handleRelayPost() {
     server->send(400, "application/json", "{\"error\":\"header not allowed\"}");
     return;
   }
-  if (!relayHostAllowed(plugin, url)) {
-    LOG_DBG("WEB", "Relay refused for %s: %s not allowed", plugin.c_str(), urlHost(url).c_str());
-    sendHostRefused(server.get(), url);
-    return;
-  }
+  PluginHosts::Reach reach;
+  if (!requireReachable(server.get(), "Relay", plugin, url, reach)) return;
   req.clear();  // the request's JSON is no longer needed while the answer streams
   LOG_DBG("WEB", "Relay %s %s -> %s", plugin.c_str(), method.c_str(), url.c_str());
 
@@ -3798,7 +3812,7 @@ void CrossPointWebServer::handleBookKey() {
   if (rejectIfLowMemory(server.get())) return;
   if (!requireJsonBody(server.get())) return;
   JsonDocument req;
-  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+  if (JsonText::parse(req, server->arg("plain")) != DeserializationError::Ok) {
     server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
     return;
   }
@@ -3886,7 +3900,7 @@ void CrossPointWebServer::handleCrypto() {
   if (rejectIfLowMemory(server.get(), MIN_HEAP_FOR_CRYPTO)) return;
   if (!requireJsonBody(server.get())) return;
   JsonDocument req;
-  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+  if (JsonText::parse(req, server->arg("plain")) != DeserializationError::Ok) {
     server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
     return;
   }
@@ -4042,7 +4056,7 @@ void CrossPointWebServer::handleFetchToSd() {
   // browser-side segments (offset, maxBytes) only work around mobile browsers dropping long requests: the plugin
   // host here makes one call, and the answer reports the whole file.
   JsonDocument req;
-  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+  if (JsonText::parse(req, server->arg("plain")) != DeserializationError::Ok) {
     server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
     return;
   }
@@ -4082,11 +4096,8 @@ void CrossPointWebServer::fetchToSd(const String& plugin, const std::string& url
     server->send(400, "application/json", "{\"error\":\"method not allowed\"}");
     return;
   }
-  if (!relayHostAllowed(plugin, url)) {
-    LOG_DBG("WEB", "Fetch refused for %s: %s not allowed", plugin.c_str(), urlHost(url).c_str());
-    sendHostRefused(server.get(), url);
-    return;
-  }
+  PluginHosts::Reach reach;
+  if (!requireReachable(server.get(), "Fetch", plugin, url, reach)) return;
 
   LOG_DBG("WEB", "Fetch %s %s -> %s", method.c_str(), url.c_str(), dest.c_str());
   // The status of the server's answer, 0 or less when none came. A failure reports it (describeFetchFailure).
@@ -4097,7 +4108,7 @@ void CrossPointWebServer::fetchToSd(const String& plugin, const std::string& url
   if (method == "GET" && body.empty()) {
     const HttpDownloader::DownloadError result = HttpDownloader::downloadToFile(
         url, dest.c_str(), nullptr, "", "", HttpDownloader::TlsPolicy::VerifiedThenUnverified,
-        redirectsWithinAllowlist(plugin, &refusedHost), headers, &status);
+        redirectsWithinAllowlist(plugin, reach, &refusedHost), headers, &status);
     ok = result == HttpDownloader::OK;
     if (ok) {
       HalFile f = Storage.open(dest.c_str());
@@ -4155,16 +4166,18 @@ void CrossPointWebServer::fetchToSd(const String& plugin, const std::string& url
 // GET /api/plugins/hosts -> {"<plugin>": ["host", ...]}: the hosts the user approved.
 void CrossPointWebServer::handlePluginHostsList() const {
   JsonDocument doc;
-  loadPluginHosts(doc);
+  PluginReach::loadApprovals(doc);
   sendJson(server.get(), 200, doc);
 }
 
 // POST /api/plugins/hosts  {plugin, host, allow}  (application/json): approve a host for a plugin, or take the
-// approval back. The page asks the user first; the plugin itself never calls this.
+// approval back. {plugin, host, dismiss: true} drops a request its device events made (PluginReach::recordWanted())
+// and keeps it from being asked again; an approval answers one. The page asks the user first; the plugin itself never
+// calls this.
 void CrossPointWebServer::handlePluginHostsSet() const {
   if (!requireJsonBody(server.get())) return;
   JsonDocument req;
-  if (deserializeJson(req, server->arg("plain")) != DeserializationError::Ok) {
+  if (JsonText::parse(req, server->arg("plain")) != DeserializationError::Ok) {
     server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
     return;
   }
@@ -4174,29 +4187,51 @@ void CrossPointWebServer::handlePluginHostsSet() const {
   // Absent means approve. Spelled out: cppcheck takes ArduinoJson's `| true` default for a bitwise or
   // (badBitmaskCheck).
   const bool allow = !req["allow"].is<bool>() || req["allow"].as<bool>();
+  const bool dismiss = req["dismiss"].is<bool>() && req["dismiss"].as<bool>();
+  // An approval holds a host as PluginHosts::urlHost() judges one, or it could never match. One stored by an older
+  // firmware may not be, and can still be taken back.
+  const bool judgeable = PluginHosts::urlHost("https://" + std::string(host.c_str()) + "/") == host.c_str();
   if (!isSafePathComponent(plugin) || host.isEmpty() || host.length() > 253 || host.indexOf('/') >= 0 ||
-      host.indexOf(':') >= 0 || host.indexOf('@') >= 0 || PluginLocations::findPluginDir(plugin.c_str()).empty()) {
+      host.indexOf(':') >= 0 || host.indexOf('@') >= 0 || (allow && !dismiss && !judgeable)) {
     server->send(400, "application/json", "{\"error\":\"invalid plugin or host\"}");
     return;
   }
+  const std::string dir = PluginLocations::findPluginDir(plugin.c_str());
+  if (dir.empty()) {
+    server->send(400, "application/json", "{\"error\":\"invalid plugin or host\"}");
+    return;
+  }
+  if (dismiss) {
+    if (!PluginReach::settleWanted(dir, host.c_str(), true)) {
+      server->send(500, "application/json", "{\"error\":\"could not save\"}");
+      return;
+    }
+    LOG_INF("WEB", "Plugin %s: request for %s dismissed", plugin.c_str(), host.c_str());
+    server->send(200, "application/json", "{\"ok\":true}");
+    return;
+  }
   JsonDocument doc;
-  loadPluginHosts(doc);
+  PluginReach::loadApprovals(doc);
   JsonArray hosts =
       doc[plugin.c_str()].is<JsonArray>() ? doc[plugin.c_str()].as<JsonArray>() : doc[plugin.c_str()].to<JsonArray>();
   for (size_t i = hosts.size(); i-- > 0;) {
     if (host == hosts[i].as<const char*>()) hosts.remove(i);
   }
   if (allow) {
-    if (hosts.size() >= PLUGIN_HOSTS_MAX_PER_PLUGIN) {
+    if (hosts.size() >= PluginReach::kMaxApprovalsPerPlugin) {
       server->send(400, "application/json", "{\"error\":\"too many hosts for this plugin\"}");
       return;
     }
     hosts.add(host.c_str());
   }
   if (hosts.size() == 0) doc.remove(plugin.c_str());
-  if (!savePluginHosts(doc)) {
+  if (!PluginReach::saveApprovals(doc)) {
     server->send(500, "application/json", "{\"error\":\"could not save\"}");
     return;
+  }
+  // An approval answers the plugin's request for that host, if it made one.
+  if (allow && !PluginReach::settleWanted(dir, host.c_str(), false)) {
+    LOG_ERR("WEB", "Plugin %s: could not clear its request for %s", plugin.c_str(), host.c_str());
   }
   LOG_INF("WEB", "Plugin %s: host %s %s", plugin.c_str(), host.c_str(), allow ? "approved" : "revoked");
   server->send(200, "application/json", "{\"ok\":true}");
@@ -4525,10 +4560,10 @@ void CrossPointWebServer::handlePluginRemove() const {
   }
   // Its approvals go with it: a later plugin of the same name starts without them.
   JsonDocument hosts;
-  loadPluginHosts(hosts);
+  PluginReach::loadApprovals(hosts);
   if (hosts[name.c_str()].is<JsonArray>()) {
     hosts.remove(name.c_str());
-    if (!savePluginHosts(hosts)) LOG_ERR("WEB", "Could not drop the approved hosts of %s", name.c_str());
+    if (!PluginReach::saveApprovals(hosts)) LOG_ERR("WEB", "Could not drop the approved hosts of %s", name.c_str());
   }
   LOG_INF("WEB", "Plugin %s removed", name.c_str());
   server->send(200, "application/json", "{\"ok\":true}");

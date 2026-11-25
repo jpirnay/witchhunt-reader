@@ -15,6 +15,10 @@
 #include <cstdint>
 #include <string>
 
+namespace PluginHosts {
+class Reach;
+}
+
 namespace plugin_events {
 
 // Names are a compatibility promise with upstream's manifests: semantic, never activity names. Append only.
@@ -80,8 +84,13 @@ inline JsonVariantConst requestOf(JsonVariantConst handler) {
 }
 inline bool isDownload(JsonVariantConst handler) { return handler["download"]["url"].is<const char*>(); }
 
-// A token or config file a device.json names: a relative name is in the plugin's folder. "" for none.
-std::string pluginFile(const std::string& pluginDir, const char* name);
+// A token or config file a device.json names, by the rules the web server reads the same names with, so the reader
+// reads no file the plugin could not read over the web: PluginLocations::namedFilePath() (a relative name is in the
+// plugin's folder, an absolute one as written, a name with ".." names nothing), then `isProtected` on the result, which
+// the device answers with isProtectedPluginFile() (a credential store, a system folder, an 8.3 alias spelling). "" for
+// none and for a refused name.
+using PathCheck = bool (*)(const std::string& path);
+std::string pluginFile(const std::string& pluginDir, const char* name, PathCheck isProtected);
 // The value at a dotted path ("access_token", "data.token", "list.0") of a parsed token file, as text.
 std::string valueAt(JsonVariantConst root, const char* dottedPath);
 
@@ -98,7 +107,22 @@ struct TemplateContext {
   const char* id = "";
 };
 std::string expand(const char* tpl, const TemplateContext& ctx);
+// The URL a handler's request or download goes to: its "url" filled in (expand()) and escaped (escapeUrl()). What the
+// HTTP client is handed, so it is what the drain's host check judges.
+std::string handlerUrl(JsonVariantConst handler, const TemplateContext& ctx);
 // Spaces, control characters and non-ASCII bytes of a URL percent-encoded; '&', '?', '#', '+' and '/' left alone.
 std::string escapeUrl(const std::string& url);
+
+// The host an event URL template writes out, lower-cased: its authority holds no placeholder, so no filled-in value can
+// move it. Read as every URL is judged (PluginHosts::urlHost()), so "" when a placeholder, user info or anything else
+// urlHost() refuses sits in the authority ("{cfg.server}/x", "https://{cfg.host}/", "https://a.org{cfg.x}/"). Such a
+// host counts as declared by the plugin, as an allowedHosts entry does: it is written in its device.json, readable
+// before the plugin is installed, and the Plugins page lists it under Reaches (js/plugin-catalog.js, literalHost()).
+std::string literalHost(const char* urlTemplate);
+// The bytes declareLiteralHosts() adds: each literal host's length plus one.
+size_t literalHostBytes(JsonVariantConst manifest);
+// Declares in `reach` the literal host of every handler this firmware can run (handlerFor()). The caller asks HeapFit
+// for literalHostBytes() first.
+void declareLiteralHosts(JsonVariantConst manifest, PluginHosts::Reach& reach);
 
 }  // namespace plugin_events

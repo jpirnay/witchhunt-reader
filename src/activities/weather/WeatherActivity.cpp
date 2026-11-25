@@ -22,7 +22,9 @@
 #include "WeatherSettingsActivity.h"
 #include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "components/DateNames.h"
 #include "components/UITheme.h"
+#include "components/WeatherDraw.h"
 #include "components/themes/PanelMetrics.h"
 #include "components/themes/TapTargets.h"
 #include "fontIds.h"
@@ -37,14 +39,7 @@ constexpr int LABEL_FONT_ID = FIT_BODY_FONT_ID;
 constexpr int HEADING_FONT_ID = FIT_TITLE_FONT_ID;
 constexpr int FOOTNOTE_FONT_ID = FIT_SMALL_FONT_ID;
 
-// U+00B0, in every face above. Split from a following letter: "\xB0C" would be one hex escape.
-constexpr char DEGREE[] = "\xC2\xB0";
-constexpr char CELSIUS_LABEL[] =
-    "\xC2\xB0"
-    "C";
-constexpr char FAHRENHEIT_LABEL[] =
-    "\xC2\xB0"
-    "F";
+constexpr const char* DEGREE = WeatherDraw::kDegree;
 
 constexpr int EDGE = 12;         // to the panel's edges, and to the button hints
 constexpr int GRAPH_HOURS = 24;  // the days after are the forecast strip's
@@ -54,28 +49,11 @@ enum LocationAction { OpenSettings, GoBack };
 int heroTextScale() { return PanelMetrics::COMPACT ? 2 : 3; }
 int heroIconScale() { return PanelMetrics::COMPACT ? 1 : 2; }
 
-constexpr StrId DAY_NAME_IDS[] = {StrId::STR_WEATHER_DAY_SUN, StrId::STR_WEATHER_DAY_MON, StrId::STR_WEATHER_DAY_TUE,
-                                  StrId::STR_WEATHER_DAY_WED, StrId::STR_WEATHER_DAY_THU, StrId::STR_WEATHER_DAY_FRI,
-                                  StrId::STR_WEATHER_DAY_SAT};
-constexpr StrId MONTH_NAME_IDS[] = {
-    StrId::STR_WEATHER_MONTH_JAN, StrId::STR_WEATHER_MONTH_FEB, StrId::STR_WEATHER_MONTH_MAR,
-    StrId::STR_WEATHER_MONTH_APR, StrId::STR_WEATHER_MONTH_MAY, StrId::STR_WEATHER_MONTH_JUN,
-    StrId::STR_WEATHER_MONTH_JUL, StrId::STR_WEATHER_MONTH_AUG, StrId::STR_WEATHER_MONTH_SEP,
-    StrId::STR_WEATHER_MONTH_OCT, StrId::STR_WEATHER_MONTH_NOV, StrId::STR_WEATHER_MONTH_DEC};
+constexpr const StrId* DAY_NAME_IDS = DateNames::kShortDays;
+constexpr const StrId* MONTH_NAME_IDS = DateNames::kShortMonths;
 
 void drawWeatherIcon(const GfxRenderer& renderer, const uint8_t* icon, const int x, const int y, const int scale) {
-  constexpr int ROW_BYTES = WEATHER_ICON_SIZE / 8;
-  for (int srcY = 0; srcY < WEATHER_ICON_SIZE; srcY++) {
-    for (int srcX = 0; srcX < WEATHER_ICON_SIZE; srcX++) {
-      // 0 bits are black (drawn) in these icon bitmaps.
-      if (icon[srcY * ROW_BYTES + srcX / 8] & static_cast<uint8_t>(0x80 >> (srcX % 8))) continue;
-      if (scale == 1) {
-        renderer.drawPixel(x + srcX, y + srcY);
-      } else {
-        renderer.fillRect(x + srcX * scale, y + srcY * scale, scale, scale);
-      }
-    }
-  }
+  WeatherDraw::drawIcon(renderer, icon, x, y, scale);
 }
 
 // The forecast's times are the location's, as the API reports them (timezone=auto), not the device's.
@@ -96,9 +74,7 @@ void formatClockTime(char* buf, const size_t bufSize, const time_t epoch, const 
   snprintf(buf, bufSize, "%d:%02d%s", hour, t.tm_min, t.tm_hour < 12 ? "AM" : "PM");
 }
 
-const char* tempUnitLabel() {
-  return WEATHER_SETTINGS.getTempUnit() == WeatherTempUnit::CELSIUS ? CELSIUS_LABEL : FAHRENHEIT_LABEL;
-}
+const char* tempUnitLabel() { return WeatherDraw::tempUnitLabel(); }
 
 // The API's unit parameters ("kmh", "ms") are not what a reader expects to see.
 const char* windUnitLabel() {
@@ -149,6 +125,9 @@ void WeatherActivity::onExit() {
 
   // Weather screen is always landscape; restore app UI to portrait on exit.
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  // The temperature is scaled text, which takes the reader's scaled-glyph cache on first use;
+  // given back here as a reader gives it back, so it does not stay under the next screen.
+  renderer.releaseScaledGlyphCache();
 
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
@@ -274,8 +253,7 @@ void WeatherActivity::saveSleepImage() {
   RenderLock lock(*this);
   renderer.clearScreen();
   drawForecast(EDGE);  // without the button hints: there are no buttons to press on a sleep screen
-  if (!ScreenshotUtil::saveFramebufferAsBmp(kTmpPath, renderer.getFrameBuffer(), renderer.getDisplayWidth(),
-                                            renderer.getDisplayHeight())) {
+  if (!ScreenshotUtil::saveFramebufferAsBmp(kTmpPath, renderer, GfxRenderer::Portrait)) {
     LOG_ERR("WEA", "Could not write %s", kTmpPath);
     return;
   }
