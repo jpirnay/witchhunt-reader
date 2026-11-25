@@ -10,7 +10,8 @@
 // the last open book in state.json. Reading stats are keyed by a hash of the file NAME
 // (KOReaderDocumentId::calculateFromFilename), so they follow a move by themselves and are carried
 // over only when the name changes. Without this a moved book reopened at its first page with no
-// bookmarks, and its cache stayed behind under the old path.
+// bookmarks, and its cache stayed behind under the old path. A protected book's key and licence,
+// keyed by its name beside it, move too (SidecarFiles::moveProtection()), whoever moved the book.
 //
 // Call after the rename itself has succeeded. Files that are not books are ignored.
 namespace BookRelocation {

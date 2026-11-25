@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "UploadBuffer.h"
@@ -236,7 +237,7 @@ class CrossPointWebServer {
   // The request headers are HttpDownloader::Headers, spelled out to keep that header out of this one.
   void fetchToSd(const String& plugin, const std::string& url, const String& dest,
                  const std::vector<std::pair<std::string, std::string>>& headers, const std::string& method,
-                 const std::string& body);
+                 std::string_view body);
   // GET/POST /api/plugins/hosts -> the hosts the user approved for each plugin.
   void handlePluginHostsList() const;
   void handlePluginHostsSet() const;

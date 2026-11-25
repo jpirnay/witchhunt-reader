@@ -16,7 +16,8 @@ so you can correct a cover or a title without rewriting the EPUB.
 A content key is not an override: it is what a protected EPUB opens with, wrapped to the device by
 `POST /api/book-key` (see [webserver-endpoints.md](webserver-endpoints.md)). The licence is the one the
 `protected-content` plugin fetched with the book (Adobe's rights document); the plugin derives the key from it again
-when the reader has lost its device secret, after a flash erase say. Both move and go with their book like the others.
+when the reader has lost its device secret, after a flash erase say. Both move and go with their book like the others,
+and they also follow a book moved where the others do not (see [Moving books](#moving-books)).
 
 
 The rule is the same for both: **a sidecar wins over what is inside the book.**
@@ -159,11 +160,21 @@ Who does this today:
   book (Books, New and Authors tabs) removes them too
   (`SidecarFiles::removeAll`); on the Recent tab Remove only takes the book off
   the list. **All Files** (Settings → System) lists sidecars as ordinary files
-  and moves or removes exactly the file selected.
+  and moves or removes exactly the file selected, but for a protected book's key
+  and licence (below).
 - **The `organize-by-author` plugin** moves sidecars with the book — see
   [sd-plugins.md](sd-plugins.md).
-- **Manual moves** through the web File Manager or a script are your own
-  responsibility: move `book.epub`, `book.jpg`, `book.opf`, `book.epub.key` and `book.epub.rights` together.
+- **A protected book's key and licence** follow every move or rename of the
+  book the firmware makes or sees: the above, All Files, the web File Manager,
+  WebDAV `MOVE` and the serial transfer (`BookRelocation::bookMoved()` through
+  `SidecarFiles::moveProtection()`). Without its key the book no longer opens. One
+  already at the new name belonged to a book no longer there and is replaced. The
+  web File Manager leaves a selected `book.epub.key` or `book.epub.rights` out of a
+  move that takes `book.epub` along.
+- **Other manual moves** through the web File Manager, WebDAV or a script are your own
+  responsibility for the cover and metadata: move `book.epub`, `book.jpg` and `book.opf`
+  together. A move over USB is not seen by the firmware at all, so move the key and
+  licence there too.
 
 The firmware's sidecar tables are in `lib/FsHelpers/SidecarFiles.h`. Cover
 resolution, metadata resolution and the move, remove and stamp paths all read
@@ -184,4 +195,5 @@ Deleting a book on the device (the Library, Remove) removes its sidecars too
 (`SidecarFiles::removeAll`). Deleting in All Files removes only the file
 selected. Deleting through the web File Manager (`POST /delete`) or WebDAV
 removes the book and its layout cache only; its sidecars stay behind as harmless
-orphans, so delete `book.jpg` and `book.opf` yourself.
+orphans, so delete `book.jpg` and `book.opf` (and a protected book's
+`book.epub.key` and `book.epub.rights`) yourself.

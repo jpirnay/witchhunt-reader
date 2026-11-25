@@ -6,10 +6,16 @@
 #include <JsonFile.h>
 #include <JsonText.h>
 #include <Logging.h>
+#include <ProtectedPaths.h>
 
 #include <cstring>
+#include <string_view>
 
 #include "util/PluginLocations.h"
+
+// The approvals are what a plugin may never name as a file of its own (isProtectedPluginFile()).
+static_assert(std::string_view(PluginReach::kApprovalsPath) == ProtectedPaths::PLUGIN_FENCE_FILES[0],
+              "the approvals must stay a plugin fence file");
 
 namespace PluginReach {
 

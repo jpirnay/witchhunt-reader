@@ -3,8 +3,9 @@
 #include <cstdint>
 #include <ctime>
 
-/// Whether the wall clock may be held against a server's certificate dates, and when a network session asks NTP
-/// first. Pure, so the rules are host-tested (test/clock_authority); HalClock feeds them its state.
+/// Whether the wall clock may be held against a server's certificate dates, when a network session asks NTP first, and
+/// what a loan's due date is held against. Pure, so the rules are host-tested (test/clock_authority); HalClock feeds
+/// them its state.
 namespace clock_authority {
 
 /// Where the wall clock's value came from: the last of HalClock's restore(), syncNtp() and applyClientTime().
@@ -61,6 +62,56 @@ constexpr bool knownFresh(const Source source, const time_t now, const time_t st
   if (!datesAuthoritative(source, now) || stampedAt <= 0) return false;
   const time_t age = now - stampedAt;
   return age >= 0 && age < maxAge;
+}
+
+// ---- The loan clock (HalClock::loanNow()) ----
+// A loan's due date is held against the latest time the device has seen, its floor (NVS), so a clock set back cannot
+// reopen an ended loan. The floor rises only from a clock that came from NTP or the hardware RTC, or was saved from one
+// (a sleep estimate, an NVS restore): a hotspot client's browser sets the clock from any machine on the network, and a
+// floor raised to its wrong year expired every loan until NVS was erased. A client's time also reaches the RTC and
+// every epoch saved after it, so `clientTimeSinceNtp` (a client set the clock since the last NTP sync) keeps those out
+// too. An NTP sync sets the floor to its own time, lowering one a wrong clock left in the future.
+
+constexpr int64_t kLoanFloorMin = 1735689600;  // 2025-01-01: below it the clock was never set
+constexpr int64_t kLoanFloorMax = 4102444800;  // 2100-01-01: past it a clock is a fault, not a date
+
+constexpr bool loanTimePlausible(const int64_t t) { return t >= kLoanFloorMin && t <= kLoanFloorMax; }
+
+/// Whether a clock from `source` may raise the loan floor.
+constexpr bool raisesLoanFloor(const Source source, const bool clientTimeSinceNtp) {
+  switch (source) {
+    case Source::Ntp:
+      return true;
+    case Source::HardwareRtc:
+    case Source::SleepEstimate:
+    case Source::NvsRestore:
+    case Source::NvsStaleRestore:
+      return !clientTimeSinceNtp;
+    case Source::Client:
+    case Source::Unset:
+      return false;
+  }
+  return false;
+}
+
+/// The floor after the clock read `now` from `source`: `now` when that source may raise the floor and `now` is a
+/// plausible time past it.
+constexpr int64_t raisedLoanFloor(const int64_t floor, const Source source, const int64_t now,
+                                  const bool clientTimeSinceNtp) {
+  return raisesLoanFloor(source, clientTimeSinceNtp) && loanTimePlausible(now) && now > floor ? now : floor;
+}
+
+/// The floor after an NTP sync to `ntpNow`: that time, above or below the floor; unchanged when it is implausible.
+constexpr int64_t loanFloorAfterNtp(const int64_t floor, const int64_t ntpNow) {
+  return loanTimePlausible(ntpNow) ? ntpNow : floor;
+}
+
+/// The time a loan is judged at: the clock, never earlier than the floor. A clock that is wrong now judges by itself
+/// while it runs and leaves nothing behind. 0 when neither is a plausible time: the loan's date cannot be judged.
+constexpr int64_t loanTime(const int64_t floor, const int64_t now) {
+  const int64_t clock = loanTimePlausible(now) ? now : 0;
+  const int64_t kept = loanTimePlausible(floor) ? floor : 0;
+  return clock > kept ? clock : kept;
 }
 
 /// For the log: "restored from NVS".

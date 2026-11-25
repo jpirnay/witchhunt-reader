@@ -955,9 +955,15 @@ EPUB.
 - The key belongs to this reader: the same card does not open the book in another reader.
 - A loan stops opening when it ends. A reader that has not had the date since it was reset asks for one Wi-Fi
   connection before it opens a loan.
+- Setting the clock back does not reopen an ended loan: the reader remembers the latest date it had from the internet
+  or its clock chip. A date a browser gives it in hotspot mode is used only while it is set and is not remembered, so a
+  computer with the wrong year cannot end your loans for good; if one did on an older firmware, the next Wi-Fi
+  connection puts it right.
 - When a protected book does not open, the reader says why (no key, another reader's key, the loan has ended, no
   date, a book it cannot read) and goes back.
-- Moving or deleting the book on the reader moves or deletes its key and licence with it.
+- Moving or deleting the book on the reader moves or deletes its key and licence with it. Moving or renaming it in
+  the web File Manager, over WebDAV or with the serial transfer takes them along too; a move over USB does not, so
+  move `Book.epub.key` and `Book.epub.rights` with the book there.
 - What the reader keeps of a protected book on the card (its laid-out pages, pictures and fonts) is enciphered with a
   key that belongs to this reader: copied off the card, it cannot be read. A protected book first opened by an older
   firmware has that cache made again the next time you open it or see it on Home; where you were, your bookmarks and

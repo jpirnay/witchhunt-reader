@@ -603,7 +603,8 @@ endpoints and WebDAV. The rules are in
   The same holds for the exact files an installed plugin's `device.json` names as its token
   or config (`token.file`, `token.refresh_file`, `config.file`), wherever they are, as upstream
   allows: `/download` reads them and the calling plugin's writes reach them. A credential store,
-  a system folder or an 8.3 alias spelling is refused even then.
+  the host approvals (`/.crosspoint/plugin-hosts.json`, which only `/api/plugins/hosts` reads
+  and changes for a plugin), a system folder or an 8.3 alias spelling is refused even then.
 - Names are judged as the SD library opens them: leading spaces and trailing dots
   and spaces are dropped, so `/ .crosspoint` and `/.crosspoint.` are
   `/.crosspoint`. Matching ignores case.
@@ -1086,7 +1087,10 @@ The relay plugins written for upstream crosspoint-reader use. Body (`application
 - Answer: `200`, the upstream status in `X-Relay-Status`, its headers in `X-Relay-Headers` (a JSON list of
   `[name, value]` pairs, UTF-8, at most 3 KB: headers past that are left out), the body streamed (at most
   4 MB). A 3xx is returned as it is, not followed. `502` when the request failed before an answer.
-- With headers the request is a credentialed one: the certificate must verify.
+- With headers, a body, or a method other than GET and HEAD the request is a credentialed one: the certificate must
+  verify.
+- The request's JSON is at most 64 KB, body included (`413` beyond; files go up through `/upload`), and `503` with
+  `Retry-After` answers one the heap has no room to parse now. The body goes out from the parsed request, not a copy.
 
 ### GET/POST `/api/plugins/hosts` - Hosts Approved for Plugins
 
@@ -1112,8 +1116,9 @@ curl -X POST "http://crosspoint.local/api/fetch?plugin=my-plugin&url=https%3A%2F
 
 Upstream's form takes the same fields as an `application/json` body, with optional `headers` (an object),
 `method` and `body`: `{"plugin": ..., "url": ..., "dest": ..., "headers": {"Authorization": "Bearer ..."}}`.
-Headers make the download a credentialed one (the certificate must verify). A GET goes through the same chunked
-download as the query form; another method, or a body, is sent once and its answer written to the file.
+Headers, a body or a method other than GET make the download a credentialed one (the certificate must verify). A
+GET goes through the same chunked download as the query form; another method, or a body, is sent once and its answer
+written to the file. The JSON is held to the relay's 64 KB.
 
 Same host rules as `/api/relay`. `dest` is normalised, so `..`
 cannot climb above the card root, must name a file (not `/` and no trailing `/`), and is
@@ -1125,6 +1130,8 @@ layout cache is invalidated on success.
 | ------ | ---------------------------------------------- |
 | 400    | Missing `plugin`/`url`/`dest`, bad scheme, or a refused destination |
 | 403    | Host not in the plugin's `allowedHosts` (`host` names it)          |
+| 413    | The JSON form's request over 64 KB                                  |
+| 503    | No room on the heap to parse the JSON form's request (`Retry-After`) |
 | 502    | Download failed. `status` holds the file server's answer (0 or less when none came) and `error` names it (`"the server answered 404"`); `"unauthorized": true` when it answered 401 or 403 |
 
 ### POST `/api/book-key` - Store a Protected Book's Content Key

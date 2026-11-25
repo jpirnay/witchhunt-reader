@@ -76,10 +76,13 @@ time_t now();
 bool isSynced();
 
 /// Epoch seconds to hold a loan's due date against (lib/BookProtection): the clock, but never
-/// earlier than the latest plausible time this device has seen, which NVS keeps across power-off
-/// and which only the NTP sync, the sleep entry and this call raise. A clock set back (an upload's
-/// browser time in hotspot mode) cannot reopen an ended loan; the floor can lag while the device
-/// is off. 0 when no plausible time has ever been seen: a loan's date cannot be judged.
+/// earlier than the latest trusted time this device has seen (its floor), which NVS keeps across
+/// power-off and which the NTP sync, the sleep entry and this call raise. A clock set back (an
+/// upload's browser time in hotspot mode) cannot reopen an ended loan; the floor can lag while the
+/// device is off. Only a clock from NTP or the hardware RTC, or saved from one, raises the floor,
+/// never a hotspot client's time, and an NTP sync sets it to its own time, lowering one left in
+/// the future (clock_authority, "The loan clock"). 0 when no plausible time has ever been seen: a
+/// loan's date cannot be judged.
 int64_t loanNow();
 
 /// Periodic callback (called from main loop) to compensate temperature-induced

@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -158,9 +159,11 @@ class HttpDownloader {
    * response's headers reach onHeader and then its body onData, in chunks. No redirect is followed:
    * a 3xx comes back to the caller with its Location, as a browser's fetch(redirect: "manual") would.
    * No Range chunking either, so a large body on the C3's tight heap may not fit a TLS record; files
-   * belong to downloadToFile(). Returns the HTTP status, or a negative SecureHttpClient error.
+   * belong to downloadToFile(). Headers, a body or a method other than GET and HEAD make it a
+   * credentialed request (crosspoint::requestCarriesCredentials()): VerifiedThenUnverified does not
+   * fall back for it. Returns the HTTP status, or a negative SecureHttpClient error.
    */
-  static int request(const char* method, const std::string& url, const Headers& headers, const std::string& body,
+  static int request(const char* method, const std::string& url, const Headers& headers, std::string_view body,
                      const HeaderCallback& onHeader, const ResponseCallback& onData, TlsPolicy tls);
 
   /**

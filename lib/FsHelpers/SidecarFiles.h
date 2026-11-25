@@ -67,6 +67,15 @@ bool anyTargetTaken(const std::string& bookPath, const std::string& targetBookPa
 // already ruled out a clash; false when any one of them failed to move.
 bool moveAll(const std::string& bookPath, const std::string& targetBookPath);
 
+// Rename a protected book's key and licence (kKeyExtensions, kLicenseExtensions) to sit beside
+// targetBookPath, for a move that did not take the sidecars along: the web File Manager, WebDAV and
+// the serial transfer move the book alone, and without its key it no longer opens
+// (BookRelocation::bookMoved() calls this for every move). One already at the target belonged to a
+// book no longer at that path and is replaced (FileReplace, which never leaves neither copy). One
+// not at the old path (moveAll() took it, or a moved folder held it) is no failure. Covers and
+// metadata stay where they are. False when any one of them failed to move.
+bool moveProtection(const std::string& bookPath, const std::string& targetBookPath);
+
 // Delete every sidecar of bookPath. For a book being deleted from a view that
 // hides its sidecars: left behind, they would be invisible there and linger on
 // the card for good. False when any one of them failed.

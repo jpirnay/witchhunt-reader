@@ -7507,7 +7507,14 @@
     }
 
     function confirmMove() {
-      const paths = JSON.parse(document.getElementById('moveItemPath').value);
+      const chosen = JSON.parse(document.getElementById('moveItemPath').value);
+      // A protected book's key and licence ("Book.epub.key", "Book.epub.rights") go with the book on the device's
+      // side, so when the book is moved too they are not moved again: their own move would find nothing there.
+      const lower = new Set(chosen.map(p => p.toLowerCase()));
+      const paths = chosen.filter(p => {
+        const m = /^(.*\.epub)\.(key|rights)$/i.exec(p);
+        return !m || !lower.has(m[1].toLowerCase());
+      });
       const destPath = normalizePath(document.getElementById('moveDestPath').value);
 
       if (!destPath) {

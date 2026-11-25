@@ -484,6 +484,28 @@ static void setSystemClock(time_t epoch) {
   settimeofday(&tv, nullptr);
 }
 
+// The wall clock in microseconds, and setting it so: the LP-timer paths below keep the fraction a whole-second
+// setSystemClock() drops (clock_drift, "The wall clock to the microsecond"). `epochUs` is 0 or more.
+static int64_t wallClockUs() {
+  struct timeval tv = {};
+  gettimeofday(&tv, nullptr);
+  return static_cast<int64_t>(tv.tv_sec) * clock_drift::kUsPerSecond + tv.tv_usec;
+}
+
+static void setSystemClockUs(const int64_t epochUs) {
+  struct timeval tv = {};
+  tv.tv_sec = static_cast<time_t>(epochUs / clock_drift::kUsPerSecond);
+  tv.tv_usec = static_cast<suseconds_t>(epochUs % clock_drift::kUsPerSecond);
+  settimeofday(&tv, nullptr);
+}
+
+// The snapshot's epoch and LP time, as clock_drift::anchorAt() pairs them.
+static void anchorSnapshot(const int64_t epochUs, const uint64_t lpUs) {
+  const clock_drift::Anchor anchor = clock_drift::anchorAt(epochUs, lpUs);
+  rtcEpoch = static_cast<time_t>(anchor.epochSec);
+  rtcLpTimeUs = anchor.lpUs;
+}
+
 static uint32_t fnv1a32Append(uint32_t hash, const void* data, size_t len) {
   const auto* bytes = static_cast<const uint8_t*>(data);
   for (size_t i = 0; i < len; ++i) {
@@ -591,8 +613,8 @@ static bool computeCorrectedElapsedUs(uint64_t lpNow, int32_t tempNowCenti, uint
 /// Capture current time + LP timer into RTC memory, and epoch into NVS.
 /// `lpContinuous`: will the LP timer keep running until the next restore()? See the flag.
 static void capture(bool lpContinuous) {
-  rtcEpoch = time(nullptr);
-  rtcLpTimeUs = esp_clk_rtc_time();
+  const int64_t nowUs = wallClockUs();
+  anchorSnapshot(nowUs, esp_clk_rtc_time());
   rtcSlowCal = esp_clk_slowclk_cal_get();
   rtcTempCenti = readChipTemperatureCenti();
   rtcClockMagic = CLOCK_RTC_MAGIC;
@@ -607,35 +629,85 @@ static void capture(bool lpContinuous) {
 // ---- The loan clock (loanNow()) ----
 // The latest plausible time the device has seen, kept in NVS where crosspoint-reader's TrustedTime
 // keeps its floor (lib/TrustedTime, PR #3114, Justin Mitchell), so a device that ran it keeps its
-// floor here. The same idea in our clock; not a port. Loop task only: the reader's open, the NTP
-// sync, the sleep entry.
+// floor here. The same idea in our clock; not a port. Which clocks may move it: clock_authority, "The loan clock".
+// Loop task only: the reader's open, the NTP sync, the sleep entry, a hotspot client's time.
 static constexpr const char* LOAN_FLOOR_NAMESPACE = "cptime";
 static constexpr const char* LOAN_FLOOR_KEY = "floor";
-static constexpr int64_t LOAN_FLOOR_MIN = 1735689600LL;  // 2025-01-01: below it the clock was never set
-static constexpr int64_t LOAN_FLOOR_MAX = 4102444800LL;  // 2100-01-01: past it a clock is a fault, not a date
+// Set (to the client's epoch) when applyClientTime() sets the clock, cleared by the next NTP sync: until then the
+// hardware RTC and every epoch saved at a sleep descend from the client's time, and none of them raises the floor.
+static constexpr char NVS_CLIENT_TIME_KEY[] = "clienttime";
 // A move of less than this is not written: NVS wear.
 static constexpr int64_t LOAN_FLOOR_WRITE_STEP = 60;
 static int64_t loanFloor = 0;
-static bool loanFloorRead = false;
+static int64_t loanFloorStored = 0;  // what NVS holds
+static bool clientTimeSinceNtp = false;
+static bool loanStateRead = false;
 
-// Raises the floor to the clock when the clock is plausible and past it.
-static void raiseLoanFloor() {
+static void readLoanState() {
+  if (loanStateRead) return;
+  loanStateRead = true;
   Preferences prefs;
-  if (!loanFloorRead) {
-    if (prefs.begin(LOAN_FLOOR_NAMESPACE, true)) {
-      loanFloor = prefs.getLong64(LOAN_FLOOR_KEY, 0);
-      prefs.end();
-    }
-    loanFloorRead = true;
-  }
-  const auto now = static_cast<int64_t>(time(nullptr));
-  if (now < LOAN_FLOOR_MIN || now > LOAN_FLOOR_MAX || now <= loanFloor) return;
-  const bool write = now - loanFloor >= LOAN_FLOOR_WRITE_STEP;
-  loanFloor = now;
-  if (write && prefs.begin(LOAN_FLOOR_NAMESPACE, false)) {
-    prefs.putLong64(LOAN_FLOOR_KEY, now);
+  if (prefs.begin(LOAN_FLOOR_NAMESPACE, true)) {
+    loanFloor = loanFloorStored = prefs.getLong64(LOAN_FLOOR_KEY, 0);
     prefs.end();
   }
+  if (prefs.begin(NVS_NAMESPACE, true)) {
+    clientTimeSinceNtp = prefs.getLong64(NVS_CLIENT_TIME_KEY, 0) != 0;
+    prefs.end();
+  }
+}
+
+// Written when it moved a step from what NVS holds, either way: a floor only ever compared with the last value in RAM
+// was never written by calls less than a step apart.
+static void setLoanFloor(const int64_t floor) {
+  loanFloor = floor;
+  const int64_t moved = floor > loanFloorStored ? floor - loanFloorStored : loanFloorStored - floor;
+  if (moved < LOAN_FLOOR_WRITE_STEP) return;
+  Preferences prefs;
+  if (prefs.begin(LOAN_FLOOR_NAMESPACE, false)) {
+    prefs.putLong64(LOAN_FLOOR_KEY, floor);
+    prefs.end();
+    loanFloorStored = floor;
+  }
+}
+
+static void writeClientTimeMark(const int64_t epoch) {
+  Preferences prefs;
+  if (prefs.begin(NVS_NAMESPACE, false)) {
+    prefs.putLong64(NVS_CLIENT_TIME_KEY, epoch);
+    prefs.end();
+  }
+}
+
+// Raises the floor to the clock when the clock may raise it (clock_authority::raisedLoanFloor()).
+static void raiseLoanFloor() {
+  readLoanState();
+  setLoanFloor(clock_authority::raisedLoanFloor(loanFloor, clockSource, static_cast<int64_t>(time(nullptr)),
+                                                clientTimeSinceNtp));
+}
+
+// NTP has just set the clock to `ntpNow`: the floor follows it either way, and the clock is no client's any more.
+static void loanFloorFromNtp(const time_t ntpNow) {
+  readLoanState();
+  if (clientTimeSinceNtp) {
+    clientTimeSinceNtp = false;
+    writeClientTimeMark(0);
+  }
+  const int64_t floor = clock_authority::loanFloorAfterNtp(loanFloor, static_cast<int64_t>(ntpNow));
+  if (floor < loanFloor) {
+    LOG_INF("CLK", "Loan floor %lld was ahead of NTP; set back to %lld", static_cast<long long>(loanFloor),
+            static_cast<long long>(floor));
+  }
+  setLoanFloor(floor);
+}
+
+// A hotspot client has set the clock to `epoch` (past 2020, never 0): nothing that descends from it may raise the floor
+// until NTP is back.
+static void loanFloorAfterClientTime(const time_t epoch) {
+  readLoanState();
+  if (clientTimeSinceNtp) return;
+  clientTimeSinceNtp = true;
+  writeClientTimeMark(static_cast<int64_t>(epoch));
 }
 
 namespace HalClock {
@@ -697,7 +769,7 @@ constexpr uint32_t QUICK_SNTP_TIMEOUT_MS = 1000;
 
 bool isUnsetAddress(const IPAddress& addr) { return static_cast<uint32_t>(addr) == 0; }
 
-bool quickSntpQuery(const IPAddress* targets, size_t targetCount, time_t& outEpoch, IPAddress& outSource) {
+bool quickSntpQuery(const IPAddress* targets, size_t targetCount, int64_t& outEpochUs, IPAddress& outSource) {
   WiFiUDP udp;
   if (udp.begin(0) == 0) {
     LOG_DBG("CLK", "Quick SNTP: could not open a UDP socket");
@@ -761,7 +833,10 @@ bool quickSntpQuery(const IPAddress* targets, size_t targetCount, time_t& outEpo
       continue;
     }
 
-    outEpoch = epoch;
+    // And its fraction, bytes 44..47: setting the second alone put the clock up to a second behind.
+    const uint32_t ntpFraction = (static_cast<uint32_t>(reply[44]) << 24) | (static_cast<uint32_t>(reply[45]) << 16) |
+                                 (static_cast<uint32_t>(reply[46]) << 8) | static_cast<uint32_t>(reply[47]);
+    outEpochUs = static_cast<int64_t>(epoch) * clock_drift::kUsPerSecond + clock_drift::ntpFractionUs(ntpFraction);
     outSource = udp.remoteIP();
     udp.stop();
     return true;
@@ -823,10 +898,10 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
       quickTargets[quickCount++] = IPAddress(162, 159, 200, 1);
     }
 
-    time_t quickEpoch = 0;
+    int64_t quickEpochUs = 0;
     IPAddress quickSource;
-    if (quickCount > 0 && quickSntpQuery(quickTargets, quickCount, quickEpoch, quickSource)) {
-      setSystemClock(quickEpoch);
+    if (quickCount > 0 && quickSntpQuery(quickTargets, quickCount, quickEpochUs, quickSource)) {
+      setSystemClockUs(quickEpochUs);
       LOG_INF("CLK", "Quick SNTP: %s answered in %lu ms", quickSource.toString().c_str(), millis() - syncStartMs);
       synced = true;
     } else {
@@ -908,7 +983,7 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
     writeExternalRTC(rtcEpoch);
   }
   nvsWriteSyncTime(rtcEpoch);
-  raiseLoanFloor();
+  loanFloorFromNtp(rtcEpoch);
 
   const int32_t currentTempCenti = rtcTempCenti;
   if (currentTempCenti != 0) {
@@ -1004,17 +1079,19 @@ void restore() {
     // 1) Read current LP timer and slow-clock calibration.
     // 2) Compute raw elapsed LP ticks, on the same calibration basis used
     //    when capture() was called.
-    // 3) Convert elapsed ticks to seconds.
+    // 3) Keep it in microseconds.
     // 4) Apply temperature drift correction based on measured RTC memory
     //    capture temperature and current chip temp.
-    // 5) Set system time to rtcEpoch + corrected elapsed seconds.
+    // 5) Set system time to rtcEpoch + corrected elapsed microseconds: the
+    //    snapshot's epoch is the second that began at its LP time
+    //    (anchorSnapshot()), so nothing is floored on the way.
     //
     // This is an approximation: we use the average of start/end measured
     // temperature as a simple integral proxy. More advanced models could
     // sample temperature continuously, but this is a good tradeoff for low
     // cost and better accuracy vs no temperature compensation.
     uint64_t lpNow = esp_clk_rtc_time();
-    time_t estimated = rtcEpoch;
+    int64_t estimatedUs = static_cast<int64_t>(rtcEpoch) * clock_drift::kUsPerSecond;
     if (lpNow > rtcLpTimeUs) {
       const int32_t tempNowCenti = readChipTemperatureCenti();
       uint64_t correctedUs = 0;
@@ -1022,11 +1099,10 @@ void restore() {
       // 157680000 s = 5 years.
       constexpr uint64_t MAX_CORRECTED_US = 157680000ULL * 1000000ULL;
       if (computeCorrectedElapsedUs(lpNow, tempNowCenti, correctedUs) && correctedUs <= MAX_CORRECTED_US) {
-        const uint64_t correctedSec = correctedUs / 1000000;
-        estimated += static_cast<time_t>(correctedSec);
+        estimatedUs += static_cast<int64_t>(correctedUs);
         // The LP timer ran through the sleep, so this correction IS its duration.
         if (correctedUs < static_cast<uint64_t>(MAX_PLAUSIBLE_SLEEP_S) * 1000000ULL) {
-          lastSleepSec = static_cast<uint32_t>(correctedSec);
+          lastSleepSec = static_cast<uint32_t>(correctedUs / 1000000);
         }
       } else {
         LOG_ERR("CLK", "Discarding implausible LP elapsed time: %lluus (temperature %ld/100 C)",
@@ -1037,16 +1113,16 @@ void restore() {
               static_cast<unsigned long long>(lpNow), static_cast<unsigned long long>(rtcLpTimeUs));
     }
 
-    setSystemClock(estimated);
+    // The estimate is the wall clock at lpNow; the temperature read since took a few milliseconds of its own.
+    setSystemClockUs(estimatedUs + static_cast<int64_t>(esp_clk_rtc_time() - lpNow));
     // Re-baseline LP timer and temperature for next interval.
-    rtcEpoch = estimated;
-    rtcLpTimeUs = esp_clk_rtc_time();
+    anchorSnapshot(estimatedUs, lpNow);
     rtcSlowCal = esp_clk_slowclk_cal_get();
     rtcTempCenti = readChipTemperatureCenti();
     rtcStateChecksum = computeRtcStateChecksum();
     clockApproximate = true;
     clockSource = clock_authority::Source::SleepEstimate;
-    LOG_INF("CLK", "Restored from RTC + LP timer, epoch %lld", (long long)estimated);
+    LOG_INF("CLK", "Restored from RTC + LP timer, epoch %lld", static_cast<long long>(rtcEpoch));
     return;
   }
 
@@ -1127,6 +1203,8 @@ void updatePeriodic() {
   if (lpNow <= rtcLpTimeUs) {
     return;
   }
+  // The wall clock at lpNow, read with it: the snapshot pairs the two.
+  int64_t wallAtLpUs = wallClockUs();
 
   const int32_t tempNowCenti = readChipTemperatureCenti();
   uint64_t correctedUs = 0;
@@ -1135,31 +1213,33 @@ void updatePeriodic() {
   // Raw elapsed time (what the kernel clock already counted).
   const uint64_t rawElapsedUs = lpNow - rtcLpTimeUs;
 
-  // Re-baseline the snapshot for the next interval: the LP timer, its calibration and the temperature, and the wall
-  // clock they belong to. The epoch moves with them even when there is no nudge, or a restore() from this snapshot
-  // would add the time since now to the epoch of the previous baseline.
-  rtcLpTimeUs = lpNow;
-  rtcSlowCal = esp_clk_slowclk_cal_get();
-  rtcTempCenti = tempNowCenti;
-  rtcEpoch = time(nullptr);
-
   if (corrected) {
     // The drift delta is the difference between what really elapsed
     // (temperature-corrected) and what the kernel counted (raw). Both are under
     // clock_drift::kMaxElapsedUs, so the difference fits.
     const int64_t driftDeltaUs = static_cast<int64_t>(correctedUs) - static_cast<int64_t>(rawElapsedUs);
 
-    // Only nudge the system clock if the drift delta is meaningful (>50 ms).
-    // This avoids unnecessary settimeofday calls for negligible corrections.
-    // The whole seconds of it, truncated toward zero.
-    if (driftDeltaUs > 50000 || driftDeltaUs < -50000) {
-      rtcEpoch += static_cast<time_t>(driftDeltaUs / 1000000);
-      setSystemClock(rtcEpoch);
-      LOG_DBG("CLK", "Periodic drift nudge: raw=%lluus corr=%lluus delta=%lldus scale=%ld/1000000",
-              static_cast<unsigned long long>(rawElapsedUs), static_cast<unsigned long long>(correctedUs),
-              static_cast<long long>(driftDeltaUs), static_cast<long>(rtcDriftScaleMicro));
+    // All of it, to the microsecond: the baseline moves on below, so what is not applied now is lost. The clock used
+    // to be set in whole seconds, from the truncated seconds of the delta: one under a second applied nothing, and the
+    // set stepped the clock back by its fraction (half a second on average) and still dropped the drift.
+    if (driftDeltaUs != 0) {
+      // Onto the clock as it reads now: the temperature read since lpNow took milliseconds.
+      setSystemClockUs(wallClockUs() + driftDeltaUs);
+      wallAtLpUs += driftDeltaUs;
+      if (driftDeltaUs > 50000 || driftDeltaUs < -50000) {
+        LOG_DBG("CLK", "Periodic drift nudge: raw=%lluus corr=%lluus delta=%lldus scale=%ld/1000000",
+                static_cast<unsigned long long>(rawElapsedUs), static_cast<unsigned long long>(correctedUs),
+                static_cast<long long>(driftDeltaUs), static_cast<long>(rtcDriftScaleMicro));
+      }
     }
   }
+
+  // Re-baseline the snapshot for the next interval: the LP timer, its calibration and the temperature, and the wall
+  // clock they belong to. The epoch moves with them even when there is no nudge, or a restore() from this snapshot
+  // would add the time since now to the epoch of the previous baseline.
+  anchorSnapshot(wallAtLpUs, lpNow);
+  rtcSlowCal = esp_clk_slowclk_cal_get();
+  rtcTempCenti = tempNowCenti;
 
   // Sealed as capture() seals it. A silent restart restores from this snapshot, and rtcValid() refuses one whose fields
   // changed after their checksum: every restart more than one interval after a sync took the uncorrected NVS path and
@@ -1169,7 +1249,7 @@ void updatePeriodic() {
 
 int64_t loanNow() {
   raiseLoanFloor();
-  return loanFloor >= LOAN_FLOOR_MIN ? loanFloor : 0;
+  return clock_authority::loanTime(loanFloor, static_cast<int64_t>(time(nullptr)));
 }
 
 bool isSynced() {
@@ -1338,6 +1418,9 @@ bool applyClientTime(time_t timestamp) {
   clockSource = clock_authority::Source::Client;
   rtcEpoch = timestamp;
   LOG_INF("CLK", "Applied client time: %lld", (long long)timestamp);
+  // Any machine on the hotspot sends this, with whatever year its own clock has: it reaches the RTC and the NVS epoch
+  // below, but never the loan floor.
+  loanFloorAfterClientTime(timestamp);
 
   // Persist to RTC if available (X3 only)
   if (initExternalRTC()) {

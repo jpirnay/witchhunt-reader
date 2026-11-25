@@ -414,6 +414,40 @@ String pluginWriteTarget(const String& plugin, const String& rawPath) {
 // only bounds how long one request may occupy the single-connection server.
 constexpr size_t MAX_RELAY_BYTES = 4u * 1024u * 1024u;
 
+// Ceiling on the JSON request of the relay's POST form and of /api/fetch's JSON form, body included: what a plugin
+// sends a service (a sign-in, an Adobe request, a small WebDAV PUT) is a few KB, and files go up through /upload. The
+// same as writeFile's cap (/api/plugin-fs).
+constexpr size_t MAX_RELAY_REQUEST_BYTES = 64u * 1024u;
+
+// Parses a plugin's JSON request (requireJsonBody() already passed). Its text is held three times while the parse
+// runs: the server's own copy, the String arg() hands out, and the document's strings. The last two fail softly (an
+// Arduino String, ArduinoJson's allocator), so a request the heap cannot take is answered 503, not taken for bad JSON;
+// past MAX_RELAY_REQUEST_BYTES it is refused before any copy. False after answering.
+bool parsePluginRequest(WebServer* server, JsonDocument& req) {
+  if (server->clientContentLength() > static_cast<int>(MAX_RELAY_REQUEST_BYTES)) {
+    server->send(413, "application/json", "{\"error\":\"request too large\"}");
+    return false;
+  }
+  const String text = server->arg("plain");
+  // requireJsonBody() saw a body, and the server keeps one only when it has bytes: an empty copy is a failed one.
+  if (text.isEmpty()) {
+    LOG_ERR("WEB", "No room to copy a %d-byte plugin request", server->clientContentLength());
+    sendLowMemory(server);
+    return false;
+  }
+  const DeserializationError error = JsonText::parse(req, text);
+  if (error == DeserializationError::NoMemory) {
+    LOG_ERR("WEB", "No room to parse a %u-byte plugin request", static_cast<unsigned>(text.length()));
+    sendLowMemory(server);
+    return false;
+  }
+  if (error != DeserializationError::Ok) {
+    server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 namespace {
@@ -3706,21 +3740,22 @@ void CrossPointWebServer::handleRelay() {
 // by Arthur Tazhitdinov), so plugins written for upstream run: any method PluginRelay allows, the caller's headers
 // and body, and the answer's status in X-Relay-Status, its headers in X-Relay-Headers (a JSON list of [name, value]
 // pairs) and its body streamed. A 3xx comes back as it is, not followed. Unlike upstream, the host must still be one
-// the plugin may reach (requireReachable(): its manifest, or the user's approval), a request carrying headers is a
-// credentialed one (TLS verified, no fallback), and only an application/json POST is taken (requireJsonBody()).
+// the plugin may reach (requireReachable(): its manifest, or the user's approval), a request carrying headers or a
+// body, or one that is not a GET or HEAD, is a credentialed one (TLS verified, no fallback:
+// crosspoint::requestCarriesCredentials()), and only an application/json POST is taken (requireJsonBody()).
 void CrossPointWebServer::handleRelayPost() {
   if (rejectIfLowMemory(server.get())) return;
   if (!requireJsonBody(server.get())) return;
 
   JsonDocument req;
-  if (JsonText::parse(req, server->arg("plain")) != DeserializationError::Ok) {
-    server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
-    return;
-  }
+  if (!parsePluginRequest(server.get(), req)) return;
   const String plugin = req["plugin"] | "";
   const std::string url = req["url"] | "";
   const std::string method = upperAscii(req["method"] | "GET");
-  const std::string body = req["body"] | "";
+  // Sent from the document's own copy, which is therefore kept until the answer has streamed: a std::string of it was
+  // a third block of the body's size beside the server's copy and the document, from the throwing operator new, which
+  // aborts when it does not fit (-fno-exceptions); a 20-30 KB WebDAV PUT through the relay asks that of the X3's heap.
+  const std::string_view body = req["body"] | "";
 
   if (!isSafePathComponent(plugin) || url.empty()) {
     server->send(400, "application/json", "{\"error\":\"missing plugin or url\"}");
@@ -3741,7 +3776,6 @@ void CrossPointWebServer::handleRelayPost() {
   }
   PluginHosts::Reach reach;
   if (!requireReachable(server.get(), "Relay", plugin, url, reach)) return;
-  req.clear();  // the request's JSON is no longer needed while the answer streams
   LOG_DBG("WEB", "Relay %s %s -> %s", plugin.c_str(), method.c_str(), url.c_str());
 
   // Bounded: the list rides in one header of this response.
@@ -4056,10 +4090,7 @@ void CrossPointWebServer::handleFetchToSd() {
   // browser-side segments (offset, maxBytes) only work around mobile browsers dropping long requests: the plugin
   // host here makes one call, and the answer reports the whole file.
   JsonDocument req;
-  if (JsonText::parse(req, server->arg("plain")) != DeserializationError::Ok) {
-    server->send(400, "application/json", "{\"error\":\"invalid JSON\"}");
-    return;
-  }
+  if (!parsePluginRequest(server.get(), req)) return;
   HttpDownloader::Headers headers;
   if (!parseRelayHeaders(req["headers"], headers)) {
     server->send(400, "application/json", "{\"error\":\"header not allowed\"}");
@@ -4069,21 +4100,20 @@ void CrossPointWebServer::handleFetchToSd() {
   const String dest = pluginWriteTarget(plugin, String(req["dest"] | ""));
   const std::string url = req["url"] | "";
   const std::string method = upperAscii(req["method"] | "GET");
-  const std::string body = req["body"] | "";
-  req.clear();
-  fetchToSd(plugin, url, dest, headers, method, body);
+  // From the document's own copy, kept until the transfer is done, as the relay sends its body (handleRelayPost()).
+  fetchToSd(plugin, url, dest, headers, method, req["body"] | "");
 }
 
 // Downloads straight to the card. Doing this through /api/relay plus /upload would move the file twice over WiFi and
 // hold all of it in browser memory; for a cover that is merely wasteful, for a book it is prohibitive.
 //
 // Same fence as the relay - the plugin's allowed hosts, redirects only within them - plus the write target must pass
-// pluginWriteTarget(). Headers make the download a credentialed one (TLS verified, no fallback). A GET goes through
-// downloadToFile(), Range chunks on a tight heap included; another method, or a body, is sent once and its answer
-// streamed to the file.
+// pluginWriteTarget(). Headers, a body or a method other than GET make the download a credentialed one (TLS verified,
+// no fallback). A GET goes through downloadToFile(), Range chunks on a tight heap included; another method, or a body,
+// is sent once and its answer streamed to the file.
 void CrossPointWebServer::fetchToSd(const String& plugin, const std::string& url, const String& dest,
                                     const HttpDownloader::Headers& headers, const std::string& method,
-                                    const std::string& body) {
+                                    const std::string_view body) {
   if (!isSafePathComponent(plugin) || url.empty() || dest.isEmpty()) {
     server->send(400, "application/json", "{\"error\":\"missing plugin, url or dest\"}");
     return;

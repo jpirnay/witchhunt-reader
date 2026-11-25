@@ -254,3 +254,64 @@ TEST(FloatBits, SpecialValues) {
   EXPECT_FALSE(fixedFromFloatBits(bitsOf(3e7f), 100, out));  // past int32
   EXPECT_FALSE(fixedFromFloatBits(bitsOf(-3e38f), 100, out));
 }
+
+// ---- The wall clock to the microsecond (HalClock's snapshot and its nudges) ----
+
+namespace {
+using clock_drift::Anchor;
+using clock_drift::anchorAt;
+using clock_drift::kUsPerSecond;
+using clock_drift::ntpFractionUs;
+
+constexpr int64_t kNov2026Us = int64_t{1794700000} * kUsPerSecond;
+}  // namespace
+
+// The snapshot holds a whole second and the LP time it began at, so a wall clock 0.75 s into its second keeps the 0.75
+// s. Before, the epoch was floored and the LP time kept as read: every capture lost the fraction.
+TEST(ClockAnchor, KeepsTheFractionInTheLpTime) {
+  const Anchor a = anchorAt(kNov2026Us + 750000, 9 * kSecondUs);
+  EXPECT_EQ(a.epochSec, 1794700000);
+  EXPECT_EQ(a.lpUs, 9 * kSecondUs - 750000);
+  // Read back at the same LP time: the clock as it was, to the microsecond.
+  EXPECT_EQ(a.epochSec * kUsPerSecond + static_cast<int64_t>(9 * kSecondUs - a.lpUs), kNov2026Us + 750000);
+
+  const Anchor whole = anchorAt(kNov2026Us, 9 * kSecondUs);  // on the second: nothing to carry
+  EXPECT_EQ(whole.epochSec, 1794700000);
+  EXPECT_EQ(whole.lpUs, 9 * kSecondUs);
+}
+
+// Inside the LP timer's first second there is no earlier LP time to carry the fraction in (and 0 would read as no
+// snapshot): the fraction is dropped there, as it always was.
+TEST(ClockAnchor, TheLpTimersFirstSecondDropsTheFraction) {
+  const Anchor a = anchorAt(kNov2026Us + 750000, 500000);
+  EXPECT_EQ(a.epochSec, 1794700000);
+  EXPECT_EQ(a.lpUs, 500000u);
+  const Anchor exact = anchorAt(kNov2026Us + 750000, 750000);
+  EXPECT_EQ(exact.lpUs, 750000u);  // not 0
+}
+
+// A thousand sleeps and wakes with an exact LP timer: the restored clock is the true one each time. Flooring the epoch
+// at the capture and the elapsed seconds at the wake lost about a second per cycle, which the NTP learner then took for
+// temperature drift.
+TEST(ClockAnchor, SleepAndWakeLoseNothing) {
+  int64_t truthUs = kNov2026Us + 123456;
+  uint64_t lpUs = 42 * kSecondUs + 987;
+  int64_t clockUs = truthUs;
+  for (int cycle = 0; cycle < 1000; ++cycle) {
+    const Anchor a = anchorAt(clockUs, lpUs);  // capture() before the sleep
+    const uint64_t sleptUs = 3 * kSecondUs + static_cast<uint64_t>(cycle) * 7919;
+    lpUs += sleptUs;
+    truthUs += static_cast<int64_t>(sleptUs);
+    clockUs = a.epochSec * kUsPerSecond + static_cast<int64_t>(lpUs - a.lpUs);  // restore() after it
+    ASSERT_EQ(clockUs, truthUs) << "cycle " << cycle;
+  }
+}
+
+// The quick SNTP reply's transmit fraction (bytes 44..47, 2^-32 s), in microseconds, rounded down.
+TEST(ClockAnchor, NtpFractionInMicroseconds) {
+  EXPECT_EQ(ntpFractionUs(0), 0u);
+  EXPECT_EQ(ntpFractionUs(0x80000000u), 500000u);
+  EXPECT_EQ(ntpFractionUs(0x40000000u), 250000u);
+  EXPECT_EQ(ntpFractionUs(0xFFFFFFFFu), 999999u);
+  EXPECT_EQ(ntpFractionUs(4295u), 1u);  // 4295 / 2^32 s = 1.00000761 us
+}

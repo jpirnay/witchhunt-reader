@@ -173,3 +173,29 @@ TEST(ProtectedPaths, RealAliasShapedNamesStayReachable) {
   EXPECT_FALSE(ProtectedPaths::isProtectedPath("/books/novel.epub", Target::Item, false, realName));
   EXPECT_EQ(lookups, 1);
 }
+
+// A file a plugin names as its own (a device.json's token.file or config.file): every rule but the two about dot
+// names, which a token at /.crosspoint/.readest-token.json would fail, and never the host approvals that fence the
+// plugins in, which a plugin naming them could read and rewrite to approve its own hosts.
+TEST(ProtectedPaths, PluginsCannotNameTheHostApprovals) {
+  const auto pluginRefused = [](std::string_view path) {
+    return ProtectedPaths::isProtectedPluginPath(path, noAliases);
+  };
+  EXPECT_FALSE(pluginRefused("/.crosspoint/lingoblend.json"));
+  EXPECT_FALSE(pluginRefused("/.crosspoint/.readest-token.json"));
+  EXPECT_FALSE(pluginRefused("/.crosspoint/plugins/readeck/token.json"));
+  EXPECT_FALSE(pluginRefused("/.cp-orbit/config.json"));
+
+  EXPECT_TRUE(pluginRefused("/.crosspoint/plugin-hosts.json"));
+  EXPECT_TRUE(pluginRefused("/.CrossPoint/Plugin-Hosts.JSON"));
+  EXPECT_TRUE(pluginRefused("/.crosspoint./plugin-hosts.json."));    // as SdFat opens it
+  EXPECT_TRUE(pluginRefused("/.crosspoint/plugin-hosts.json.tmp"));  // the copies its save leaves in passing
+  EXPECT_TRUE(pluginRefused("/.crosspoint/plugin-hosts.json.old"));
+  // What no request reaches stays refused here too.
+  EXPECT_TRUE(pluginRefused("/.crosspoint/wifi.json"));
+  EXPECT_TRUE(pluginRefused("/System Volume Information/x.json"));
+
+  // The user's own requests reach the approvals as any file in /.crosspoint: with hidden files shown.
+  EXPECT_FALSE(refused("/.crosspoint/plugin-hosts.json", Target::Item, true));
+  EXPECT_TRUE(refused("/.crosspoint/plugin-hosts.json", Target::Item, false));
+}

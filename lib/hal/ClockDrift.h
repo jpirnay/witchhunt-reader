@@ -103,4 +103,32 @@ inline int32_t learnedScale(const int32_t scaleMicro, const int64_t intervalSec,
   return static_cast<int32_t>(blended);
 }
 
+// ---- The wall clock to the microsecond ----
+// An RTC-less board (the X4) keeps its clock through sleeps and restarts as a snapshot: an epoch and the LP timer's
+// reading at it. Set and read in whole seconds, it lost the fraction at every capture and again at every wake (about a
+// second per sleep, which the NTP learner then took for temperature drift), and a drift nudge stepped the clock back by
+// its fraction and dropped any correction under a second.
+
+constexpr int64_t kUsPerSecond = 1000000;
+
+// The snapshot's pair: at LP time `lpUs` the wall clock read `epochSec` exactly.
+struct Anchor {
+  int64_t epochSec = 0;
+  uint64_t lpUs = 0;
+};
+
+// The anchor for a wall clock of `epochUs` (0 or more) read at LP time `lpUs`: its second, at the LP time that second
+// began. So the snapshot carries the fraction in the fields it always had, and firmware that reads them as before still
+// reads a consistent pair. Within the LP timer's first second there is no earlier LP time to carry it in (0 reads as no
+// snapshot), and the fraction is dropped as it always was.
+inline Anchor anchorAt(const int64_t epochUs, const uint64_t lpUs) {
+  const auto fraction = static_cast<uint64_t>(epochUs % kUsPerSecond);
+  return {epochUs / kUsPerSecond, lpUs > fraction ? lpUs - fraction : lpUs};
+}
+
+// An NTP timestamp's fraction (2^-32 s) in microseconds, rounded down.
+inline uint32_t ntpFractionUs(const uint32_t fraction) {
+  return static_cast<uint32_t>((static_cast<uint64_t>(fraction) * kUsPerSecond) >> 32);
+}
+
 }  // namespace clock_drift

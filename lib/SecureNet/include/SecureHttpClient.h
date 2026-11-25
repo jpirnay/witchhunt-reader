@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "HttpRange.h"
@@ -124,8 +125,9 @@ class SecureHttpClient {
   int request(const char* method, const std::string& url, const std::string& body = "");
   // Streaming request with any method: the body (if any) is sent with the request, the response
   // body is delivered to sink in chunks. Redirects as in the buffered request(): 303, and 301/302
-  // for anything but HEAD, continue as GET without the body.
-  int request(const char* method, const std::string& url, const std::string& body, const BodySink& sink);
+  // for anything but HEAD, continue as GET without the body. The body is sent from the caller's
+  // memory, not copied: it must outlive the call (the relay's sits in its parsed request).
+  int request(const char* method, const std::string& url, std::string_view body, const BodySink& sink);
   int GET(const std::string& url) { return request("GET", url); }
   int POST(const std::string& url, const std::string& body) { return request("POST", url, body); }
   int PUT(const std::string& url, const std::string& body) { return request("PUT", url, body); }

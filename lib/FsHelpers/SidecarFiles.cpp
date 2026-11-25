@@ -1,5 +1,6 @@
 #include "SidecarFiles.h"
 
+#include <FileReplace.h>
 #include <HalStorage.h>
 
 #include <cctype>
@@ -8,8 +9,9 @@ namespace SidecarFiles {
 namespace {
 
 // Local rather than strcasecmp/_stricmp, which differ by platform and would
-// need a portability shim for a four-character comparison.
-bool sameExtensionIgnoringCase(const char* a, const char* b) {
+// need a portability shim for a four-character comparison. Extensions, and the
+// two base paths of a rename.
+bool sameIgnoringCase(const char* a, const char* b) {
   while (*a && *b) {
     if (std::tolower(static_cast<unsigned char>(*a)) != std::tolower(static_cast<unsigned char>(*b))) return false;
     ++a;
@@ -103,7 +105,7 @@ std::vector<const char*> existingExtensions(const std::string& bookPath) {
   // filesystem nothing is skipped that did not genuinely match first.
   const auto alreadyMatched = [&found](const char* ext) {
     for (const char* seen : found) {
-      if (sameExtensionIgnoringCase(seen, ext)) return true;
+      if (sameIgnoringCase(seen, ext)) return true;
     }
     return false;
   };
@@ -135,6 +137,27 @@ bool moveAll(const std::string& bookPath, const std::string& targetBookPath) {
   for (const char* ext : existingExtensions(bookPath)) {
     if (!Storage.rename((srcBase + ext).c_str(), (dstBase + ext).c_str())) success = false;
   }
+  return success;
+}
+
+bool moveProtection(const std::string& bookPath, const std::string& targetBookPath) {
+  const std::string srcBase = basePath(bookPath);
+  const std::string dstBase = basePath(targetBookPath);
+  // A change of case alone: FAT finds the sidecars under either spelling, and a replace would set the file itself
+  // aside as the old copy of its new name.
+  if (srcBase.empty() || dstBase.empty() || sameIgnoringCase(srcBase.c_str(), dstBase.c_str())) return true;
+
+  bool success = true;
+  const auto moveFirst = [&](const char* const* exts, const size_t count) {
+    for (size_t i = 0; i < count; i++) {
+      const std::string from = srcBase + exts[i];
+      if (!Storage.exists(from.c_str())) continue;
+      if (!FileReplace::replace(from.c_str(), (dstBase + exts[i]).c_str())) success = false;
+      return;  // its other spelling is this same file on FAT
+    }
+  };
+  moveFirst(kKeyExtensions, sizeof(kKeyExtensions) / sizeof(kKeyExtensions[0]));
+  moveFirst(kLicenseExtensions, sizeof(kLicenseExtensions) / sizeof(kLicenseExtensions[0]));
   return success;
 }
 

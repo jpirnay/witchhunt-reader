@@ -6,6 +6,7 @@
 #include <HalStorage.h>
 #include <KOReaderDocumentId.h>
 #include <Logging.h>
+#include <SidecarFiles.h>
 #include <Txt.h>
 #include <Xtc.h>
 #include <ZipFile.h>
@@ -59,6 +60,12 @@ void bookMoved(const std::string& oldPath, const std::string& newPath) {
     return;
   }
 
+  // A protected book opens only with its key beside it. The device's own moves take every sidecar along before they get
+  // here; the web File Manager, WebDAV and the serial transfer move the book alone, and it reported "no key".
+  if (!SidecarFiles::moveProtection(oldPath, newPath)) {
+    LOG_ERR("BKR", "The key or licence of %s did not follow it to %s", oldPath.c_str(), newPath.c_str());
+  }
+
   if (Storage.exists(oldCache.c_str())) {
     // Whatever sits under the new path's key belonged to a book deleted from that path.
     if (Storage.exists(newCache.c_str())) Storage.removeDir(newCache.c_str());
@@ -90,7 +97,8 @@ void folderMoved(const std::string& oldDir, const std::string& newDir) {
   // Not a queue of the folders still to visit: that held every folder of a level at once, so a
   // library of thousands of folders could take the heap. FolderWalk holds one position per level
   // and still reaches every book. bookMoved() writes only under /.crosspoint, never in the tree
-  // being walked, as the walk needs.
+  // being walked, as the walk needs: the key and licence it would carry moved with the folder, so
+  // there is nothing at their old paths to rename.
   struct Move {
     const std::string& oldDir;
     const std::string& newDir;
