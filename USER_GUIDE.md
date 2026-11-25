@@ -545,7 +545,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
   - "Never" (default), "In Reader", "Always"
 - **Refresh Frequency** (submenu): Settings for screen refresh behaviour while reading:
   - **Refresh Frequency** - Slider (0 = Never, up to 60) for how often a full refresh runs to clear ghosting. On the Murphy M3 and the LilyGo T5 S3 every change of screen is a full refresh too, and the menus follow the same count as the pages
-  - **Refresh After Image Pages** - Whether to do an extra refresh after pages containing images. Not after images shown in Black & White (see **Images**)
+  - **Refresh After Image Pages** - Whether to do an extra refresh after pages containing images. Not after images shown in Black & White (see **Images**). Off by default on the BOOX Picco, where that refresh takes the whole page through black, so an illustrated book would flash on every turn; the Picco clears a picture's gray on the next page without it
 - **Sunlight Fading Fix**: Software fix for white X4 models that may fade in direct sunlight. "OFF" (default) / "ON".
 
 **User interface**:

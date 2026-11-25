@@ -53,7 +53,7 @@ const SETTINGS_HELP = {
     "showWeatherOnHome": "Classic, Lyra and Lyra Carousel: shows the weather panel on the Home screen; when off, it moves behind More. Lyra Tiles uses its Layout instead.",
     "showBusyIndicator": "Shows an hourglass when a press starts a slow screen change, like opening a book. Not on the T5 S3.",
     "refreshFrequencyPages": "Pages between full refreshes, which clear ghosting from the screen; 0 means never.",
-    "halfRefreshAfterImagePage": "Does an extra refresh after a page with pictures, to clear the shadow they leave. Not after pictures shown in Black & White.",
+    "halfRefreshAfterImagePage": "Does an extra refresh after a page with pictures, to clear the shadow they leave. Not after pictures shown in Black & White. Off by default on the BOOX Picco, whose refresh flashes the page black.",
     "fadingFix": "Stops the page fading in direct sunlight on white X4 models.",
     "frontlightOn": "Switches the reading light on or off; brightness and warmth are set on the device.",
     "frontlightRestoreOnWake": "Whether waking turns the light back on; brightness and warmth are always remembered.",
