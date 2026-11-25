@@ -4573,6 +4573,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     sessionPagesAdvanced++;
     globalReadingSessionTracker().onPageTurn();
     lastPageTurnTime = millis();
+    ReaderUtils::powerPanelForTurn();
     requestUpdate();
     return;
   }
@@ -4600,6 +4601,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   preRenderedPage.ready = false;
   preRenderedPlanesStaged_ = false;
   pendingPreRender = false;
+  ReaderUtils::powerPanelForTurn();
   requestUpdate();
 }
 
@@ -4625,6 +4627,7 @@ void EpubReaderActivity::jumpPages(const bool isForwardTurn, const int count) {
   preRenderedPage.ready = false;
   preRenderedPlanesStaged_ = false;
   pendingPreRender = false;
+  ReaderUtils::powerPanelForTurn();
   requestUpdate();
 }
 

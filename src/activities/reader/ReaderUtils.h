@@ -73,6 +73,11 @@ inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {
   }
 }
 
+// A page turn is certain and its refresh will follow: the panel starts powering up now, while the page is drawn. With
+// the sunlight fading fix the panel is powered down after every refresh, and its power-on (127 ms on the X3) was the
+// largest wait before the refresh started. A no-op while the panel is powered.
+inline void powerPanelForTurn() { display.beginPanelPowerOn(); }
+
 // Suppresses input processing on activity entry until the user has released all buttons and a
 // clean frame (no pending press/release events) has been observed. Without this, the power-button
 // hold used to wake the device leaks into the reader's page-turn handling and triggers a page turn

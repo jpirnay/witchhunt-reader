@@ -11,6 +11,7 @@
 #include "FinishedBookActivity.h"
 #include "KOReaderDocumentId.h"
 #include "ReaderActivity.h"
+#include "ReaderUtils.h"
 #include "ReadingSessionTracker.h"
 #include "RecentBooksStore.h"
 #include "SerialTestApi.h"
@@ -219,6 +220,7 @@ void LineReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
         currentPage = target;
         onPageChanged();
         globalReadingSessionTracker().onPageTurn();
+        ReaderUtils::powerPanelForTurn();
         requestUpdate();
       }
       break;
@@ -229,6 +231,7 @@ void LineReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
         currentPage = target;
         onPageChanged();
         globalReadingSessionTracker().onPageTurn();
+        ReaderUtils::powerPanelForTurn();
         requestUpdate();
       }
       break;
@@ -265,6 +268,7 @@ void LineReaderActivity::goToPreviousPage() {
     currentPage--;
     onPageChanged();
     globalReadingSessionTracker().onPageTurn();
+    ReaderUtils::powerPanelForTurn();
     requestUpdate();
   }
 }
@@ -274,6 +278,7 @@ void LineReaderActivity::goToNextPage() {
     currentPage++;
     onPageChanged();
     globalReadingSessionTracker().onPageTurn();
+    ReaderUtils::powerPanelForTurn();
     requestUpdate();
   } else {
     launchFinishedBookFlow();

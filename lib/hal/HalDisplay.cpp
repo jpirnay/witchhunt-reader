@@ -323,6 +323,11 @@ void HalDisplay::deepSleep() {
   einkDisplay.deepSleep();
 }
 
+void HalDisplay::beginPanelPowerOn() {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.beginPowerOn();
+}
+
 uint8_t* HalDisplay::getFrameBuffer() const { return einkDisplay.getFrameBuffer(); }
 
 void HalDisplay::syncWriteBufferFromActive() const { einkDisplay.syncWriteBufferFromActive(); }

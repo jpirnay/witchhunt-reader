@@ -114,6 +114,9 @@ class HalDisplay {
   // the render lock held and no render pass in flight.
   void powerOffPanelBetweenFrames();
   void deepSleep();
+  // A page turn's refresh is coming: start the panel's power-on now, so it runs while the page is drawn (the sunlight
+  // fading fix powers the panel down after every refresh). Nothing when the rails are up.
+  void beginPanelPowerOn();
 
   // Access to frame buffer
   uint8_t* getFrameBuffer() const;

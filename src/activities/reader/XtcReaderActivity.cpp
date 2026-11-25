@@ -215,11 +215,13 @@ void XtcReaderActivity::loop() {
     if (currentPage > 0) {
       currentPage--;
       globalReadingSessionTracker().onPageTurn();
+      ReaderUtils::powerPanelForTurn();
       requestUpdate();
     }
   } else if (nextTriggered) {
     currentPage++;
     globalReadingSessionTracker().onPageTurn();
+    ReaderUtils::powerPanelForTurn();
     requestUpdate();
   }
 }
@@ -474,6 +476,7 @@ void XtcReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
       if (currentPage + 1 < pageCount) {
         currentPage++;
         globalReadingSessionTracker().onPageTurn();
+        ReaderUtils::powerPanelForTurn();
         requestUpdate();
       }
       break;
@@ -481,6 +484,7 @@ void XtcReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
       if (currentPage > 0) {
         currentPage--;
         globalReadingSessionTracker().onPageTurn();
+        ReaderUtils::powerPanelForTurn();
         requestUpdate();
       }
       break;
@@ -489,6 +493,7 @@ void XtcReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
       currentPage = (currentPage + 10 < pageCount) ? currentPage + 10 : pageCount - 1;
       if (currentPage != prevPage) {
         globalReadingSessionTracker().onPageTurn();
+        ReaderUtils::powerPanelForTurn();
       }
       requestUpdate();
       break;
@@ -498,6 +503,7 @@ void XtcReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
       currentPage = (currentPage >= 10) ? currentPage - 10 : 0;
       if (currentPage != prevPage) {
         globalReadingSessionTracker().onPageTurn();
+        ReaderUtils::powerPanelForTurn();
       }
       requestUpdate();
       break;
@@ -510,6 +516,7 @@ void XtcReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
         if (it != chapters.end()) {
           currentPage = it->startPage;
           globalReadingSessionTracker().onPageTurn();
+          ReaderUtils::powerPanelForTurn();
           requestUpdate();
         }
       }
@@ -523,6 +530,7 @@ void XtcReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
         if (prevChapter != chapters.rend()) {
           currentPage = prevChapter->startPage;
           globalReadingSessionTracker().onPageTurn();
+          ReaderUtils::powerPanelForTurn();
           requestUpdate();
         }
       }
