@@ -5465,6 +5465,11 @@ void ChapterHtmlSlimParser::flushAnchorsInRange(const int firstIndex, const int 
 // word it follows. An id inside a word (the partial word is counted) waits for that word's line.
 int ChapterHtmlSlimParser::inlineAnchorWordIndex() const {
   if (currentTable || census_) return 0;
+  // A block that holds no token yet waits for its first line: the next one placed, whichever block it opens. Counted
+  // on, the id took the count of the block laid out last, which a grid table, an <hr>, a box's close and a background
+  // picture lay out without starting a block (makePages); the next block's start reset the count and not the id, which
+  // then waited for as many tokens more of that block, a page or more into a long one (#846).
+  if ((!currentTextBlock || currentTextBlock->sourceTokenCount() == 0) && !partWordHasText()) return 0;
   const int soFar = lineTokensSoFar();
   return soFar > 0 ? soFar + (partWordHasText() ? 0 : 1) : 0;
 }

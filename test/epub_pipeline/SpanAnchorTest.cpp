@@ -178,3 +178,41 @@ TEST_F(SpanAnchorTest, SpanIdsHaveABudgetOfTheirOwn) {
   EXPECT_TRUE(section->getPageForAnchor("b1").has_value());
   EXPECT_TRUE(section->getPageForAnchor("b" + std::to_string(kBlocks)).has_value());
 }
+
+// An id between two blocks, after a grid table, a rule or a bordered box (#846). Each lays the paragraph before it out
+// without starting a block, so that paragraph's count of tokens stood when the id was queued: the id waited for as
+// many tokens more of the next paragraph, a page or more into a long one. It names the page that paragraph starts on.
+TEST_F(SpanAnchorTest, AnIdBetweenBlocksAfterATableARuleOrABoxNamesTheNextParagraphsPage) {
+  // 600 tokens, more than a page of 480x800 holds: an id counted on from them lands at least a page late.
+  const auto paragraph = [](const std::string& marker, const int words) {
+    std::string out = "<p>" + marker;
+    for (int w = 1; w < words; ++w) out += " word";
+    return out + "</p>\n";
+  };
+  const std::string body = paragraph("LEADA", 600) +
+                           "<table><tr><td>cell</td><td>cell</td></tr></table><span id=\"after-table\"></span>" +
+                           paragraph("NEXTA", 900) + paragraph("LEADB", 600) + "<hr/><span id=\"after-rule\"></span>" +
+                           paragraph("NEXTB", 900) + "<div class=\"box\">" + paragraph("LEADC", 600) +
+                           "</div><span id=\"after-box\"></span>" + paragraph("NEXTC", 900);
+  const std::string xhtml =
+      "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>C"
+      "</title><link rel=\"stylesheet\" type=\"text/css\" href=\"style.css\"/></head><body>\n" +
+      body + "\n</body></html>\n";
+  auto epub = syntheticBookFromDocument(work, 0, xhtml,
+                                        {{"style.css", "text/css", ".box { border: 2px solid; padding: 6px; }\n"}});
+  Section::BuildParams p = params();
+  p.embeddedStyle = true;  // the box is the book's CSS
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.createSectionFile(p, {}, /*skipEviction=*/true));
+  ASSERT_TRUE(section.loadSectionFile(p));
+  const auto pages = markerPages(section, "NEXT");
+  const std::vector<std::pair<std::string, std::string>> idBeforeMarker = {
+      {"after-table", "NEXTA"}, {"after-rule", "NEXTB"}, {"after-box", "NEXTC"}};
+  for (const auto& [id, marker] : idBeforeMarker) {
+    const auto seen = pages.find(marker);
+    ASSERT_NE(seen, pages.end()) << marker << " not laid out";
+    const auto anchored = section.getPageForAnchor(id);
+    ASSERT_TRUE(anchored.has_value()) << id << " missing from the anchor map";
+    EXPECT_EQ(static_cast<int>(*anchored), seen->second) << id;
+  }
+}
