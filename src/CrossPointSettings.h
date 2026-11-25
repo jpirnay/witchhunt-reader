@@ -20,6 +20,7 @@ class CrossPointSettings {
   static CrossPointSettings instance;
 
   void applyDeviceButtonDefaults();
+  void applyDeviceDisplayDefaults();
 
  public:
   // Delete copy constructor and assignment

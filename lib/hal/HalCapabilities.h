@@ -243,6 +243,13 @@ inline bool clearsGhostsOnEveryScreen() {
   return BoardConfig::isMurphyM3() || BoardConfig::ACTIVE.board == BoardConfig::Board::LilyGoT5S3;
 }
 
+// A HALF refresh takes the whole page through black. The Picco's driver draws every refresh that is not FAST with
+// Onyx's full waveform (Ssd2677Driver::display), so the extra refresh after a page with pictures blanks the page to
+// black on every turn of an illustrated book; the X3's HALF bank, by contrast, only drives toward white. The Picco's
+// FAST re-drives the pixels a gray pass left (Ssd2677Driver::displayStart, _grayPending), so a page after a picture
+// is clean without it. Per board: the Picco's profile names its controller SSD1677, and the driver is chosen by board.
+inline bool halfRefreshFlashesBlack() { return BoardConfig::ACTIVE.board == BoardConfig::Board::Picco; }
+
 // The panel's booster is powered down once the device is idle, and again after each frame drawn
 // while it stays idle (main.cpp's idle loop, HalDisplay::powerOffPanelBetweenFrames). Both drivers
 // keep the booster up after a refresh unless the Sunlight Fading Fix asks for POF. Murphy's next

@@ -3,6 +3,7 @@
 #include <BoardConfig.h>
 #include <Epub/LineSpacing.h>
 #include <Epub/ParagraphIndent.h>
+#include <HalCapabilities.h>
 #include <HalStorage.h>
 #include <JsonSettingsIO.h>
 #include <Logging.h>
@@ -76,6 +77,13 @@ void CrossPointSettings::applyDeviceButtonDefaults() {
   if (input.back < 0) btnDoubleConfirm = BTN_BACK;
   const bool hasDedicatedPower = input.power >= 0 && input.power != input.confirm;
   if (!hasDedicatedPower) btnLongConfirm = BTN_SLEEP;
+}
+
+// Defaults that depend on the panel, applied as the button ones are: before settings.json is read, so a saved value
+// still wins and only a key the file lacks (a new setup) takes them.
+void CrossPointSettings::applyDeviceDisplayDefaults() {
+  // Where that refresh blanks the page to black, an illustrated book would flash on every turn.
+  halfRefreshAfterImagePage = HalCapabilities::halfRefreshFlashesBlack() ? 0 : 1;
 }
 
 namespace {
@@ -281,6 +289,7 @@ bool CrossPointSettings::loadFromFile() {
   // Board-specific keymap defaults must be applied after hardware profile
   // selection and before JSON is read, so missing/legacy values inherit them.
   applyDeviceButtonDefaults();
+  applyDeviceDisplayDefaults();
 
   // Try JSON first
   if (Storage.exists(SETTINGS_FILE_JSON)) {

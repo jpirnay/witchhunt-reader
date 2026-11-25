@@ -74,7 +74,9 @@ Read the upgrade notes at the end of this section before you update.
 ### Pictures, sleep and power
 
 - **X4 Pro:** book covers and BMP pictures on the sleep screen in 16 shades of gray (PNG pictures keep 4).
-- **BOOX Picco:** its 16 gray levels spread evenly, measured against a reference card.
+- **BOOX Picco:** its 16 gray levels spread evenly, measured against a reference card. **Refresh After Image Pages**
+  is off by default there: its refresh takes the page through black, so an illustrated book flashed on every turn.
+  A Picco set up before keeps its choice; turn it off under Settings → Display if pages with pictures flash.
 - **X3, X4 and Murphy M3:** sleep pictures and the picture viewer dither with each panel's own measured gray levels.
 - **Picco and Murphy M3:** a chapter opened for the first time is laid out sooner, as the reader works on while the
   panel refreshes: *The Odyssey*'s Book IV in 2.3 s instead of 3.4 s on the Picco, 4.7 s instead of 6.2 s on the
