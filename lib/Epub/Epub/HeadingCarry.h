@@ -116,7 +116,8 @@ bool splitSiblings(std::string_view first, std::string_view second);
 enum class Verdict : uint8_t { No, Yes, Unknown };
 
 // The rules above for spine item `spine` of `epub`. Unknown when a file it had to read could not be read (no memory
-// for the inflate, a card error): the caller treats it as No and asks again later. `scratch`: as for scanSpine.
+// for the inflate, a card error): Epub::isCarriedSpine answers No and asks again later; a layout's question
+// (Epub::carriedSpineForLayout) keeps No for the session. `scratch`: as for scanSpine.
 Verdict decide(const Epub& epub, int spine, BuildArena* scratch = nullptr);
 
 // Feeds spine item `spine`'s XHTML into `scanner`: from its banked copy (Section::sectionHtmlCachePath) when that is

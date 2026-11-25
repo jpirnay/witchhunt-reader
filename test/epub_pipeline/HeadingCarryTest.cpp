@@ -14,6 +14,7 @@
 #include "Epub.h"
 #include "Epub/HeadingCarry.h"
 #include "Epub/Section.h"
+#include "GfxRenderer.h"
 #include "StoredZipWriter.h"
 
 namespace fs = std::filesystem;
@@ -296,4 +297,43 @@ TEST_F(HeadingCarryBookTest, TheNearMissesAreNotCarried) {
   for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
     EXPECT_FALSE(epub->isCarriedSpine(spine)) << "spine " << spine;
   }
+}
+
+// The answer a layout takes stands for the session (#822). A heading file that cannot be read when its own layout is
+// decided is laid out on a page of its own; the next file's layout, asked once the heap is back, must not take it in
+// too, which showed the heading twice. The section keeps the answer its layout took, which the reader reads (a star on
+// the heading file is the next file's first page) instead of asking again from the render task. A new session asks
+// again.
+TEST_F(HeadingCarryBookTest, AnAnswerALayoutTookStandsWhenTheHeapComesBack) {
+  const auto epub = book({{"c00.xhtml", "<h1>1</h1>", "One"}, {"c01.xhtml", text("ONE"), ""}});
+  {
+    const AllocationRefusal refusal(512);  // no block for the scan: the file cannot be read
+    EXPECT_FALSE(Section::carriedAwayOf(*epub, 0, VerticalText::Off));
+  }
+  EXPECT_FALSE(Section::carriesPreviousOf(*epub, 1, VerticalText::Off)) << "the heading would show twice";
+  EXPECT_FALSE(Section::carriedAwayOf(*epub, 0, VerticalText::Off));
+
+  Section::BuildParams p;
+  p.viewportWidth = 480;
+  p.viewportHeight = 800;
+  p.lineCompression = TextScale();
+  GfxRenderer renderer;
+  {
+    Section next(epub, 1, renderer);
+    ASSERT_TRUE(next.createSectionFile(p, {}, /*skipEviction=*/true));
+    ASSERT_TRUE(next.loadSectionFile(p));
+    EXPECT_FALSE(next.carriesHeadingFile());
+  }
+
+  const auto again = std::make_shared<Epub>(epub->getPath(), (work / "cache").string());
+  ASSERT_TRUE(again->load(true));
+  EXPECT_TRUE(Section::carriesPreviousOf(*again, 1, VerticalText::Off));
+  EXPECT_TRUE(Section::carriedAwayOf(*again, 0, VerticalText::Off));
+  Section next(again, 1, renderer);
+  ASSERT_TRUE(next.createSectionFile(p, {}, /*skipEviction=*/true));
+  ASSERT_TRUE(next.loadSectionFile(p));
+  EXPECT_TRUE(next.carriesHeadingFile());
+  // What the section settled is read without asking: no block for a scan changes nothing.
+  const AllocationRefusal refusal(512);
+  EXPECT_TRUE(next.carriesHeadingFile());
 }

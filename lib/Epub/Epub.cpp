@@ -2464,15 +2464,39 @@ bool Epub::hasReliableToc() const {
 }
 
 bool Epub::isCarriedSpine(const int spine, BuildArena* scratch) const {
+  return carryVerdict(spine, scratch, /*forLayout=*/false);
+}
+
+bool Epub::carriedSpineForLayout(const int spine, BuildArena* scratch) const {
+  return carryVerdict(spine, scratch, /*forLayout=*/true);
+}
+
+bool Epub::carryVerdict(const int spine, BuildArena* scratch, const bool forLayout) const {
   if (spine < 0) return false;
   for (const CarryMemo& memo : carryMemo_) {
     if (memo.spine == spine) return memo.carried;
   }
   const HeadingCarry::Verdict verdict = HeadingCarry::decide(*this, spine, scratch);
-  if (verdict == HeadingCarry::Verdict::Unknown) return false;
+  const bool unknown = verdict == HeadingCarry::Verdict::Unknown;
+  if (unknown && !forLayout) return false;
+  if (unknown) {
+    LOG_ERR("EBP",
+            "Spine %d: whether its heading is carried cannot be told (a file not read); laid out as not, "
+            "for this session",
+            spine);
+  }
   const bool carried = verdict == HeadingCarry::Verdict::Yes;
-  carryMemo_[carryMemoNext_] = {spine, carried};
-  carryMemoNext_ = static_cast<uint8_t>((carryMemoNext_ + 1) % std::size(carryMemo_));
+  // The oldest slot no settled answer holds; every slot settled, the oldest.
+  size_t slot = carryMemoNext_;
+  for (size_t i = 0; i < std::size(carryMemo_); ++i) {
+    const size_t at = (carryMemoNext_ + i) % std::size(carryMemo_);
+    if (!carryMemo_[at].settled) {
+      slot = at;
+      break;
+    }
+  }
+  carryMemo_[slot] = {spine, carried, unknown};
+  carryMemoNext_ = static_cast<uint8_t>((slot + 1) % std::size(carryMemo_));
   return carried;
 }
 

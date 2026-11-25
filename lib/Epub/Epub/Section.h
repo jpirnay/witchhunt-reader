@@ -141,6 +141,9 @@ class Section {
   // set it vertical-rl (kStatusVertical): what flowContext() is made of. Here, in the padding before buildState_.
   VerticalText request_ = VerticalText::Off;
   bool vertical_ = false;
+  // The answer this section's load or build took to whether its layout takes in the heading file before it
+  // (carriesPrevious; carriesHeadingFile). In the same padding.
+  bool carriesHeading_ = false;
 
   void buildTocBoundariesFromFile(FsFile& f);
   void buildPageBreakLabelsFromFile(FsFile& f) const;
@@ -443,6 +446,10 @@ class Section {
   // missing from the cached pages), or when the loaded cache was written by such a build.
   // Also when the heap refused the build the book's stylesheet table, which left it unscoped.
   bool isCssLowHeapDegraded() const { return cssLowHeapDegraded_; }
+  // True when this section's layout takes in the heading file before it at the top of its first page (HeadingCarry):
+  // the answer its load or build took. The reader reads it (a star on that file is this first page's) rather than ask
+  // again from the render task, where the question may inflate the file on the heap.
+  bool carriesHeadingFile() const { return carriesHeading_; }
   // True when the last build demoted a table row to paragraphs, or the loaded cache was written
   // by such a build. The reader rebuilds such a chapter once per session when it is entered.
   bool isTableRowDegraded() const { return tableRowDegraded_; }

@@ -138,9 +138,14 @@ class Epub {
   struct CarryMemo {
     int spine = -1;
     bool carried = false;
+    // A layout took it while the file could not be read (carriedSpineForLayout): it stands for the session, and a
+    // later answer takes another slot while one is free.
+    bool settled = false;
   };
   mutable CarryMemo carryMemo_[4];
   mutable uint8_t carryMemoNext_ = 0;
+  // isCarriedSpine and carriedSpineForLayout: the memo's answer, or HeadingCarry::decide's, remembered.
+  bool carryVerdict(int spine, BuildArena* scratch, bool forLayout) const;
   void forgetMetadataMemos() const;
   // The stat of the entry at the normalised `path`, from the memo or one lookup.
   bool lookupItemStat(ZipFile& zip, const std::string& path, ZipFile::FileStatSlim* out) const;
@@ -448,6 +453,11 @@ class Epub {
   // file it must read could not be): the answer is not remembered then, and the next call asks again.
   // `scratch`: a region the scan may take its inflate ring from (a build's lent one), else the heap (HeadingCarry).
   bool isCarriedSpine(int spine, BuildArena* scratch = nullptr) const;
+  // The answer a layout takes (Section::carriedAwayOf, carriesPreviousOf): isCarriedSpine's, except that one that
+  // cannot be told is remembered as not carried for the rest of the session. The heading file's own layout and the next
+  // file's then agree whatever the heap does between the two questions: asked again once the heap was back, a heading
+  // file laid out on a page of its own was taken into the next file's first page too, and showed twice (#822).
+  bool carriedSpineForLayout(int spine, BuildArena* scratch = nullptr) const;
   bool hasReliableToc() const;
   void setSyntheticTocFallbackEnabled(bool enabled) { syntheticTocFallbackEnabled = enabled; }
   size_t getCumulativeSpineItemSize(int spineIndex) const;

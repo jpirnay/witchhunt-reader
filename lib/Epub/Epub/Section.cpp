@@ -503,7 +503,7 @@ uint32_t Section::layoutFingerprintFor(const BuildParams& p) { return layoutFing
 uint8_t Section::formatVersion() { return SECTION_FILE_VERSION; }
 
 bool Section::carriedAwayOf(const Epub& epub, const int spineIndex, const VerticalText request, BuildArena* scratch) {
-  return request == VerticalText::Off && epub.isCarriedSpine(spineIndex, scratch);
+  return request == VerticalText::Off && epub.carriedSpineForLayout(spineIndex, scratch);
 }
 
 bool Section::carriesPreviousOf(const Epub& epub, const int spineIndex, const VerticalText request,
@@ -533,6 +533,7 @@ void Section::becomeCarried(const BuildParams& p) {
   currentPage = 0;
   request_ = p.verticalText;
   vertical_ = false;
+  carriesHeading_ = false;
   const uint32_t propertyHash = calculatePropertyHash(p);
   layoutFingerprint_ = layoutFingerprintOf(propertyHash);
   SpinePageIndex::recordCarried(epub->getCachePath(), {propertyHash, SECTION_FILE_VERSION}, epub->getSpineItemsCount(),
@@ -887,6 +888,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
   // carries the heading file before it.
   const uint32_t propertyHash = calculatePropertyHash(p);
   const bool carries = carriesPrevious(p);
+  carriesHeading_ = carries;  // a load that fails clears it (clearCache)
   const auto fileKey = [carries](const uint32_t hash) { return carries ? carryingHash(hash) : hash; };
   filePath = getSectionFilePath(fileKey(propertyHash));
   // The variant actually opened: the requested one, or the no-CSS one it falls back to.
@@ -1075,6 +1077,7 @@ bool Section::clearCache() {
   simplified_ = false;
   request_ = VerticalText::Off;  // a fresh section's, until a load or a build names one
   vertical_ = false;
+  carriesHeading_ = false;
 
   if (!Storage.exists(filePath.c_str())) {
     LOG_DBG("SCT", "Cache does not exist, no action needed");
@@ -1523,6 +1526,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   const uint32_t fileHash = st.carry.spine >= 0 ? carryingHash(st.propertyHash) : st.propertyHash;
   filePath = getSectionFilePath(fileHash);
   layoutFingerprint_ = layoutFingerprintOf(fileHash);
+  carriesHeading_ = st.carry.spine >= 0;
 
   st.localPath = epub->getSpineItem(spineIndex).href;
   SCT_TRACE_HEAP(spineIndex, "build_start");
