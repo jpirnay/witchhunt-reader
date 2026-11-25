@@ -41,8 +41,10 @@ a filter on `order`. The rule records do not change, and neither does the index.
   winning declaration is the same for every book; each cross-sheet redeclaration costs one more record against
   `MAX_RULES` (1,500).
 - **Limits.** `MAX_SHEETS` (64): a book with more folds its 64th sheet and every later one into one last range with no
-  path, which applies to every chapter. Past `MAX_SHEET_IMPORTS` (128) imports, when the orders run out, or when the
-  compile has no heap for the table, the table is written empty, and every sheet applies to every chapter.
+  path, which applies to every chapter. Past `MAX_SHEET_IMPORTS` (128) imports, or when the orders run out, the table
+  is written empty, and every sheet applies to every chapter. A compile whose heap refuses the table's growth keeps no
+  cache (`CssParser::sheetTableLostToHeap`, `Epub::parseCssFiles`), as one that skipped a stylesheet on low heap does:
+  written empty, the book was unscoped for good; the next open compiles it again.
 
 ## A chapter's scope (#843)
 
@@ -59,7 +61,11 @@ a filter on `order`. The rule records do not change, and neither does the index.
   takes no test per rule, and its layout is byte-identical.
 - **Memory.** The table is loaded with the index, on the heap (16 B to 1.5 KB). A C3 build's lent region has no room
   for a block that lives the whole build ([Memory Allocation Strategy
-  §8.2](../memory-allocation-strategy.md#82-the-arena-by-moment)).
+  §8.2](../memory-allocation-strategy.md#82-the-arena-by-moment)). A table of two sheets or more that the heap refuses
+  at a load (`CssParser::sheetTableRefused`) leaves the build resolving against every sheet: the section is cached
+  CSS-degraded (`Section::scopeStylesheets`), which the reader rebuilds as it does a skipped rule lookup, and a
+  background build stops at once. Heap mode keeps the index from build to build, so `CssParser::loadFromCache` asks for
+  the table again at each build's setup.
 - **The log.** A build logs how many of the book's sheets it resolves against
   (`spine=N resolves against X of Y stylesheets`), so a report of a chapter that lost its styling can be read from its
   log.
@@ -76,7 +82,7 @@ A chapter resolves against every sheet, as before, when nothing tells which shee
 - a `rel` or `href` not quoted, or past 256 B;
 - a link to a sheet past the 64th (its range is the fold, which has no path);
 - a carried heading file that links no sheet;
-- an empty, folded or missing sheet table.
+- an empty, folded or missing sheet table (one the heap refused at a load is cached CSS-degraded, above).
 
 `BookFonts` and the body-size measurement (`BodySize`) resolve against every sheet by design.
 

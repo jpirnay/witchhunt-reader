@@ -81,8 +81,9 @@ struct FirstLine {
 
 // The first line of each paragraph of the chapter at `spine`, by its second word, built as the reader builds it under
 // Justified, the default: a book's centre and right stand (BookAlignmentLayoutTest). A paragraph takes its own rules'
-// text-align, not its body's.
-std::map<std::string, FirstLine> firstLines(const std::shared_ptr<Epub>& epub, const int spine) {
+// text-align, not its body's. `cssDegraded`, when given, takes whether the section was cached CSS-degraded.
+std::map<std::string, FirstLine> firstLines(const std::shared_ptr<Epub>& epub, const int spine,
+                                            bool* cssDegraded = nullptr) {
   Section::BuildParams params;
   params.viewportWidth = 480;
   params.viewportHeight = 800;
@@ -93,6 +94,7 @@ std::map<std::string, FirstLine> firstLines(const std::shared_ptr<Epub>& epub, c
   Section section(epub, spine, renderer);
   EXPECT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
   EXPECT_TRUE(section.loadSectionFile(params));
+  if (cssDegraded != nullptr) *cssDegraded = section.isCssLowHeapDegraded();
   std::map<std::string, FirstLine> lines;
   for (uint16_t p = 0; p < section.pageCount; ++p) {
     section.currentPage = p;
@@ -118,8 +120,10 @@ struct CssSheetRangesTest : testing::Test {
            (std::string("css_sheet_ranges_") + testing::UnitTest::GetInstance()->current_test_info()->name());
     fs::remove_all(work);
     fs::create_directories(work);
+    cssSheetTableFaults() = CssSheetTableFaults{};
   }
   void TearDown() override {
+    cssSheetTableFaults() = CssSheetTableFaults{};
     std::error_code ec;
     fs::remove_all(work, ec);
   }
@@ -372,6 +376,78 @@ TEST_F(CssSheetRangesTest, ARulesCacheWithoutAValidSheetTableIsCompiledAgain) {
     EXPECT_TRUE(readFile(cacheFile) == compiled) << "compiled again";
     EXPECT_EQ(firstLines(reopened, 0).at("0.").align, CssTextAlign::Justify);
   }
+}
+
+namespace {
+
+// The sheets of ASheetNoChapterLinksStylesNoChapter: a chapter that links main.css is not centred, unless every sheet
+// applies (vertical.css).
+const std::vector<std::pair<std::string, std::string>> kCentringSheets = {
+    {"main.css", "@import \"base.css\";\n.note { font-style: italic; }\n"},
+    {"base.css", ".note { font-weight: bold; }\n"},
+    {"vertical.css", "p { text-align: center; }\n"}};
+
+}  // namespace
+
+// A later open whose heap refuses the sheet table its block (#843): the chapter resolves against every sheet, and its
+// section is cached CSS-degraded, which the reader rebuilds. Heap mode keeps the index from build to build, the
+// refused table with it: the next build asks for the table again, and is scoped and clean once the heap allows.
+TEST_F(CssSheetRangesTest, ASheetTableTheHeapRefusesDegradesTheChapterUntilItLoads) {
+  const auto compiled =
+      bookOf(kCentringSheets, {{"c00.xhtml", linkTo("main.css"), "<p class=\"note\">NOTE text.</p>", "One"}});
+  ASSERT_TRUE(CssParser(compiled->getCachePath()).hasCache());
+
+  cssSheetTableFaults().refuseLoads = -1;  // every load of the table
+  auto epub = std::make_shared<Epub>(compiled->getPath(), (work / "cache").string());
+  ASSERT_TRUE(epub->load(true));
+  ASSERT_NE(epub->getCssParser(), nullptr);
+  bool degraded = false;
+  auto lines = firstLines(epub, 0, &degraded);
+  ASSERT_EQ(lines.count("text."), 1u);
+  EXPECT_EQ(lines.at("text.").align, CssTextAlign::Center) << "every sheet applies";
+  EXPECT_TRUE(degraded) << "cached as if scoped: never rebuilt";
+
+  cssSheetTableFaults().refuseLoads = 0;
+  lines = firstLines(epub, 0, &degraded);
+  ASSERT_EQ(lines.count("text."), 1u);
+  EXPECT_EQ(lines.at("text.").align, CssTextAlign::Justify);
+  EXPECT_TRUE(lines.at("text.").bold) << "base.css, through main.css's @import";
+  EXPECT_FALSE(degraded);
+  EXPECT_FALSE(epub->getCssParser()->sheetTableRefused());
+}
+
+// A book with one stylesheet resolves alike whatever the table: a refused one degrades nothing.
+TEST_F(CssSheetRangesTest, ARefusedTableOfOneSheetDegradesNothing) {
+  const auto compiled = bookOf({{"main.css", ".note { font-style: italic; }\n"}},
+                               {{"c00.xhtml", linkTo("main.css"), "<p class=\"note\">NOTE text.</p>", "One"}});
+  cssSheetTableFaults().refuseLoads = -1;
+  auto epub = std::make_shared<Epub>(compiled->getPath(), (work / "cache").string());
+  ASSERT_TRUE(epub->load(true));
+  bool degraded = true;
+  const auto lines = firstLines(epub, 0, &degraded);
+  ASSERT_EQ(lines.count("text."), 1u);
+  EXPECT_TRUE(lines.at("text.").italic);
+  EXPECT_FALSE(degraded);
+}
+
+// A compile whose heap refuses the sheet table its growth keeps no rules cache, as one that skipped a stylesheet on low
+// heap does: written without its table, the book loaded as valid on every later open and resolved every chapter
+// against every sheet for good. The next open compiles it again, with its table.
+TEST_F(CssSheetRangesTest, ASheetTableTheCompileLosesToTheHeapKeepsNoCache) {
+  cssSheetTableFaults().refuseCompile = true;
+  const auto epub =
+      bookOf(kCentringSheets, {{"c00.xhtml", linkTo("main.css"), "<p class=\"note\">NOTE text.</p>", "One"}});
+  EXPECT_FALSE(CssParser(epub->getCachePath()).hasCache());
+
+  cssSheetTableFaults().refuseCompile = false;
+  auto reopened = std::make_shared<Epub>(epub->getPath(), (work / "cache").string());
+  ASSERT_TRUE(reopened->load(true));
+  CssParser parser(reopened->getCachePath());
+  ASSERT_TRUE(parser.loadFromCache());
+  EXPECT_EQ(parser.sheetRanges().size(), 3u);
+  const auto lines = firstLines(reopened, 0);
+  ASSERT_EQ(lines.count("text."), 1u);
+  EXPECT_EQ(lines.at("text.").align, CssTextAlign::Justify);
 }
 
 // --- The head, read by the heading carry's scanner (HeadingCarry::Scanner's link hook, HeadingCarry::scanHead) ---

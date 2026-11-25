@@ -269,6 +269,9 @@ target_compile_definitions(EpubPipelineTest PRIVATE
   ELEMENT_FAULT_INJECTION
   # StackHeapTest refuses the n-th push onto a per-element stack (ChapterHtmlSlimParser::pushOrStop). Inert otherwise.
   STACK_FAULT_INJECTION
+  # CssSheetRangesTest refuses the stylesheet table its heap block, at a load or in the compile (CssParser.h). Inert
+  # otherwise.
+  CSS_SHEET_TABLE_FAULT_INJECTION
   # Central-directory walk counters (ZipFile.h), for the tests that bound them. Inert otherwise.
   ZIP_FILE_SCAN_STATS
   # A rewound build-arena block is filled (BuildArena.h), so a line or page used or destroyed after its block was given

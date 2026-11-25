@@ -441,6 +441,7 @@ class Section {
   bool isEmbeddedStyleFallback() const { return embeddedStyleFallback; }
   // True when the last build's CSS resolution hit low-heap skips (styles silently
   // missing from the cached pages), or when the loaded cache was written by such a build.
+  // Also when the heap refused the build the book's stylesheet table, which left it unscoped.
   bool isCssLowHeapDegraded() const { return cssLowHeapDegraded_; }
   // True when the last build demoted a table row to paragraphs, or the loaded cache was written
   // by such a build. The reader rebuilds such a chapter once per session when it is entered.

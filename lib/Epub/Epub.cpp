@@ -902,9 +902,12 @@ void Epub::parseCssFiles() const {
   // re-parse — so one low-heap open would permanently strip the book's styles (observed
   // on-device). Abort instead; with no cache on disk the next open re-parses, and that
   // missing-cache path also invalidates the section caches built unstyled this session.
-  if (skippedForLowHeap) {
+  // So does a sheet table the heap refused its growth: written empty, it loaded as valid too, and
+  // every chapter resolved against every stylesheet for as long as the cache lasted (#843).
+  if (skippedForLowHeap || cssParser->sheetTableLostToHeap()) {
     cssParser->abortCacheCompile();
-    LOG_ERR("EBP", "CSS cache not persisted (stylesheet skipped on low heap); will re-parse on next open");
+    LOG_ERR("EBP", "CSS cache not persisted (%s on low heap); will re-parse on next open",
+            skippedForLowHeap ? "stylesheet skipped" : "sheet table lost");
     cssParser->clear();
     return;
   }

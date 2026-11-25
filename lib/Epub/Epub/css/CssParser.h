@@ -22,6 +22,19 @@ class BufferedFileWriter;
 
 class BuildArena;  // lib/Memory — optional backing store for the disk index (Phase 2)
 
+#ifdef CSS_SHEET_TABLE_FAULT_INJECTION
+// Host tests only (firmware never defines it): the stylesheet table refused its heap block, as a fragmented heap would.
+// Inert until a test sets a field.
+struct CssSheetTableFaults {
+  int refuseLoads = 0;         // loads of the table refused (CssParser::loadSheetTable), counted down; -1: every one
+  bool refuseCompile = false;  // the compile's growth of the staged table refused (beginSheetRange, noteImport)
+};
+inline CssSheetTableFaults& cssSheetTableFaults() {
+  static CssSheetTableFaults faults;
+  return faults;
+}
+#endif
+
 /**
  * Lightweight CSS parser for EPUB stylesheets
  *
@@ -440,6 +453,15 @@ class CssParser {
   // The table, loaded with the index (or staged by a compile); empty when there is none.
   [[nodiscard]] std::span<const SheetRange> sheetRanges() const { return {sheetRanges_.get(), sheetCount_}; }
   [[nodiscard]] std::span<const SheetImport> sheetImports() const { return {sheetImports_.get(), importCount_}; }
+  // The rules cache holds a table of two sheets or more that the heap had no block for when it was loaded: every sheet
+  // applies until it is loaded, which is not the scope of a chapter that links only some of them. A build then is
+  // CSS-degraded (Section::scopeStylesheets), to be rebuilt; loadFromCache asks for the table again when it keeps the
+  // index, as heap mode does from build to build.
+  [[nodiscard]] bool sheetTableRefused() const { return sheetTableRefused_; }
+  // This compile lost its table to the heap (the staged table's growth refused): Epub::parseCssFiles keeps no cache,
+  // as for a stylesheet skipped on low heap, so that the next open compiles the book again. Written empty, the table
+  // loaded as valid, and every chapter resolved against every sheet for as long as the cache lasted.
+  [[nodiscard]] bool sheetTableLostToHeap() const { return sheetTableLostToHeap_; }
 
   // A chapter resolves against the stylesheets it links, and the sheets those import, as a browser does: a sheet only
   // some chapters link (an omnibus edition's part sheets) leaves the others alone. The links of a chapter's head, as a
@@ -505,7 +527,9 @@ class CssParser {
   mutable uint8_t sheetCapacity_ = 0;
   mutable uint8_t importCount_ = 0;
   mutable uint8_t importCapacity_ = 0;
-  bool sheetTableDropped_ = false;  // a cap or the heap refused it: the compile writes an empty table
+  bool sheetTableDropped_ = false;          // a cap or the heap refused it: the compile writes an empty table
+  bool sheetTableLostToHeap_ = false;       // see sheetTableLostToHeap()
+  mutable bool sheetTableRefused_ = false;  // see sheetTableRefused(); freeSheetTable clears it
   // Where the sheet being read starts in the rule order. A redeclaration merges only into a rule of its own sheet, so
   // that a record's order tells the sheet every one of its declarations came from.
   uint16_t sheetFirstOrder_ = 0;
@@ -517,7 +541,11 @@ class CssParser {
   // at-rule a browser does not know, which it drops.
   bool noteImport(std::string_view prelude);
   void dropSheetTable(const char* why);
+  // dropSheetTable for a growth the heap refused, which the compile must not persist (sheetTableLostToHeap).
+  void loseSheetTableToHeap();
   void freeSheetTable() const;
+  // loadSheetTable again for the index loaded already, after a refusal (sheetTableRefused).
+  void retrySheetTable() const;
   // The table as the rules cache ends (v36), after the rule records; false when a write failed.
   bool writeSheetTable(serialization::BufferedFileWriter& out) const;
   // Reads the table at the end of the open rules cache, which must not reach below `floor` (the end of the index), into

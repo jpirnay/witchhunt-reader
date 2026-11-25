@@ -2426,6 +2426,7 @@ void CssParser::clear() {
   std::vector<uint32_t>().swap(compileRetiredOffsets_);
   nextRuleOrder_ = 0;
   sheetTableDropped_ = false;  // the table itself went with the index
+  sheetTableLostToHeap_ = false;
   sheetFirstOrder_ = 0;
   scopedSheets_ = 0;
   totalSelectorCandidates_ = 0;
@@ -3026,7 +3027,8 @@ bool CssParser::ensureCacheIndexLoaded() const {
 
   // The sheet table, from the file's end, on the heap. A v36 file always ends in one, written last: one that does not
   // is damaged (a write cut off), not old, and goes, so that the open compiles the stylesheets again (Epub::load)
-  // rather than resolve every chapter against every sheet. No memory for it: every sheet applies.
+  // rather than resolve every chapter against every sheet. No memory for it: every sheet applies, and
+  // sheetTableRefused() says so, for the build to be cached CSS-degraded and asked again (loadFromCache).
   const size_t indexEnd =
       CSS_CACHE_HEADER_BYTES + complexBytes + static_cast<size_t>(ruleCount) * sizeof(SelectorEntry);
   if (loadSheetTable(file, indexEnd) == SheetTableLoad::Damaged) {
@@ -4004,7 +4006,11 @@ template <typename T>
 bool growSheetArray(std::unique_ptr<T[]>& array, uint8_t& capacity, const uint8_t count, const size_t max) {
   if (count < capacity) return true;
   const size_t grown = std::min<size_t>(max, capacity > 0 ? capacity * 2u : 4u);
+#ifdef CSS_SHEET_TABLE_FAULT_INJECTION
+  std::unique_ptr<T[]> bigger = cssSheetTableFaults().refuseCompile ? nullptr : makeUniqueNoThrow<T[]>(grown);
+#else
   auto bigger = makeUniqueNoThrow<T[]>(grown);
+#endif
   if (!bigger) {
     LOG_ERR("CSS", "No heap for %u bytes of the sheet table", static_cast<unsigned>(grown * sizeof(T)));
     return false;
@@ -4057,7 +4063,7 @@ void CssParser::beginSheetRange(const uint32_t pathHash) {
     return;
   }
   if (!growSheetArray(sheetRanges_, sheetCapacity_, sheetCount_, MAX_SHEETS)) {
-    dropSheetTable("no heap");
+    loseSheetTableToHeap();
     return;
   }
   sheetRanges_[sheetCount_++] = SheetRange{pathHash, nextRuleOrder_, nextRuleOrder_};
@@ -4098,7 +4104,7 @@ bool CssParser::noteImport(const std::string_view prelude) {
     return true;
   }
   if (!growSheetArray(sheetImports_, importCapacity_, importCount_, MAX_SHEET_IMPORTS)) {
-    dropSheetTable("no heap");
+    loseSheetTableToHeap();
     return true;
   }
   sheetImports_[importCount_++] = edge;
@@ -4111,6 +4117,13 @@ void CssParser::dropSheetTable([[maybe_unused]] const char* const why) {
   sheetTableDropped_ = true;
 }
 
+void CssParser::loseSheetTableToHeap() {
+  // Not written empty: an empty table loads as valid, and the book would resolve every chapter against every sheet
+  // for as long as its cache lasts. Epub::parseCssFiles keeps no cache instead (sheetTableLostToHeap).
+  sheetTableLostToHeap_ = true;
+  dropSheetTable("no heap");
+}
+
 void CssParser::freeSheetTable() const {
   sheetRanges_.reset();
   sheetImports_.reset();
@@ -4118,6 +4131,7 @@ void CssParser::freeSheetTable() const {
   sheetCapacity_ = 0;
   importCount_ = 0;
   importCapacity_ = 0;
+  sheetTableRefused_ = false;  // a load sets it again
 }
 
 bool CssParser::writeSheetTable(serialization::BufferedFileWriter& out) const {
@@ -4163,13 +4177,23 @@ CssParser::SheetTableLoad CssParser::loadSheetTable(FsFile& file, const size_t f
   if (!found) return SheetTableLoad::Damaged;
   // 8 B a sheet and an import, 16 B to 1.5 KB, on the heap: a build's lent region has no room to spare for a block that
   // lives the whole build (see sheetRanges_).
-  if (counts[0] > 0) sheetRanges_ = makeUniqueNoThrow<SheetRange[]>(counts[0]);
-  if (counts[1] > 0) sheetImports_ = makeUniqueNoThrow<SheetImport[]>(counts[1]);
+  bool refused = false;
+#ifdef CSS_SHEET_TABLE_FAULT_INJECTION
+  if (CssSheetTableFaults& faults = cssSheetTableFaults();
+      faults.refuseLoads != 0 && (counts[0] > 0 || counts[1] > 0)) {
+    if (faults.refuseLoads > 0) --faults.refuseLoads;
+    refused = true;
+  }
+#endif
+  if (!refused && counts[0] > 0) sheetRanges_ = makeUniqueNoThrow<SheetRange[]>(counts[0]);
+  if (!refused && counts[1] > 0) sheetImports_ = makeUniqueNoThrow<SheetImport[]>(counts[1]);
   SheetRange* const ranges = sheetRanges_.get();
   SheetImport* const imports = sheetImports_.get();
-  if ((counts[0] > 0 && ranges == nullptr) || (counts[1] > 0 && imports == nullptr)) {
+  if (refused || (counts[0] > 0 && ranges == nullptr) || (counts[1] > 0 && imports == nullptr)) {
     LOG_ERR("CSS", "No heap for %u bytes of the sheet table", static_cast<unsigned>(tableBytes));
     freeSheetTable();
+    // With one sheet or none every chapter resolves alike (Section::scopeStylesheets): nothing is lost then.
+    sheetTableRefused_ = counts[0] >= 2;
     return SheetTableLoad::NoMemory;
   }
   // The ranges in one read, as they are stored (writeSheetTable: the struct's own layout); the imports, which a book
@@ -4195,6 +4219,7 @@ CssParser::SheetTableLoad CssParser::loadSheetTable(FsFile& file, const size_t f
   }
   sheetCount_ = sheetCapacity_ = counts[0];
   importCount_ = importCapacity_ = counts[1];
+  sheetTableRefused_ = false;  // loaded on a retry (retrySheetTable)
   return SheetTableLoad::Loaded;
 }
 
@@ -4460,11 +4485,31 @@ bool CssParser::loadFromCache() {
     cacheRuleOffsets_.clear();
     cachedRuleCount_ = 0;
   }
+  const bool indexKept = cacheIndexLoaded_;
 
   if (!ensureCacheIndexLoaded()) {
     return false;
   }
+  // The kept index keeps a sheet table the heap refused with it: asked for again, so the build is scoped once the heap
+  // has room. A fresh load has just asked.
+  if (indexKept && sheetTableRefused_) retrySheetTable();
 
   LOG_DBG("CSS", "Loaded %u rules from cache index", static_cast<unsigned>(cachedRuleCount_));
   return true;
+}
+
+void CssParser::retrySheetTable() const {
+  FsFile file;
+  if (!Storage.openFileForRead("CSS", cachePath + rulesCache, file)) return;
+  // Where the index loaded with it ends (ensureCacheIndexLoaded), which the table must not reach below.
+  const size_t indexEnd = CSS_CACHE_HEADER_BYTES + complexBytes_ + cachedRuleCount_ * sizeof(SelectorEntry);
+  const SheetTableLoad load = loadSheetTable(file, indexEnd);
+  file.close();
+  if (load == SheetTableLoad::Loaded) {
+    LOG_INF("CSS", "Sheet table loaded on a retry: chapters are scoped again");
+  } else if (load == SheetTableLoad::Damaged) {
+    // It read as whole a moment ago. Unscoped, the build is not to be cached as if it were scoped.
+    LOG_ERR("CSS", "Sheet table damaged on a retry");
+    sheetTableRefused_ = true;
+  }
 }
