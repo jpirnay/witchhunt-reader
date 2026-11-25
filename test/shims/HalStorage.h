@@ -101,6 +101,7 @@ class HalFile : public Print {
   size_t write(uint8_t b) override { return write(static_cast<const void*>(&b), 1); }
   bool rename(const char*) { return false; }
   bool getModifyDateTime(uint16_t*, uint16_t*) { return false; }
+  uint32_t firstCluster() { return 0; }
   bool isDirectory() const { return false; }
   void rewindDirectory() {}
   // Device parity, deliberately fatal: HalFile::close() asserts on a handle that was never opened

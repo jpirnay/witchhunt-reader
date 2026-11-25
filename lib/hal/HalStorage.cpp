@@ -868,6 +868,7 @@ bool HalFile::rename(const char* newPath) {
 bool HalFile::getModifyDateTime(uint16_t* pdate, uint16_t* ptime) {
   HAL_FILE_WRAPPED_CALL(getModifyDateTime, pdate, ptime);
 }
+uint32_t HalFile::firstCluster() { HAL_FILE_WRAPPED_CALL(firstCluster, ); }
 bool HalFile::getCreateDateTime(uint16_t* pdate, uint16_t* ptime) {
   HAL_FILE_WRAPPED_CALL(getCreateDateTime, pdate, ptime);
 }

@@ -346,6 +346,8 @@ class HalFile : public Print {
   }
   // std::filesystem keeps no creation time: the write time stands in for it.
   bool getCreateDateTime(uint16_t* pdate, uint16_t* ptime) { return getModifyDateTime(pdate, ptime); }
+  // A host file has no clusters: tests tell a replaced file from the old one by its content.
+  uint32_t firstCluster() { return 0; }
   bool isDirectory() const { return isDir_; }
   void rewindDirectory() { next_ = 0; }
   // One entry per call, exhausted-directory returns a falsy handle. A folder's
