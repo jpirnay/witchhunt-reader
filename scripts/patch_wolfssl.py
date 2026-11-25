@@ -168,6 +168,13 @@ OVERRIDES = """
 #ifndef NO_PSK
 #define NO_PSK
 #endif
+#if defined(FREEINK_DEVICE_METALIO_EINK4_PLUS) && FREEINK_DEVICE_METALIO_EINK4_PLUS
+/* The S31 WPA supplicant uses wolfCrypt's software PBKDF2. */
+#undef NO_PWDBASED
+#ifndef NO_WOLFSSL_ESP32_CRYPT_HASH
+#define NO_WOLFSSL_ESP32_CRYPT_HASH
+#endif
+#endif
 #ifndef NO_WOLFSSL_MEMORY
 /* keep wolfSSL memory hooks so heap stats work */
 #endif

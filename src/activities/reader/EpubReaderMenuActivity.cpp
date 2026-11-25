@@ -120,16 +120,16 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
                                             bool verticalAllowed) {
   auto& navigationItems = tabMenuItems[static_cast<size_t>(MenuTab::Navigation)];
   auto& settingsItems = tabMenuItems[static_cast<size_t>(MenuTab::Settings)];
-  auto& syncItems = tabMenuItems[static_cast<size_t>(MenuTab::Sync)];
   auto& toolsItems = tabMenuItems[static_cast<size_t>(MenuTab::Tools)];
   navigationItems.reserve(8);
   settingsItems.reserve(13);
-  syncItems.reserve(3);
   toolsItems.reserve(8);
 
   visibleTabs[visibleTabCount++] = MenuTab::Navigation;
   visibleTabs[visibleTabCount++] = MenuTab::Settings;
-  if (KOREADER_STORE.hasCredentials()) visibleTabs[visibleTabCount++] = MenuTab::Sync;
+  if (BoardConfig::isMetalioEInk4Plus() || KOREADER_STORE.hasCredentials()) {
+    visibleTabs[visibleTabCount++] = MenuTab::Sync;
+  }
   visibleTabs[visibleTabCount++] = MenuTab::Tools;
 
   navigationItems.push_back(SettingInfo::Action(StrId::STR_SELECT_CHAPTER, SettingAction::None));
@@ -409,13 +409,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
             threeStateOverrideFromSlot(v);
       }));
 
-  if (KOREADER_STORE.hasCredentials()) {
-    syncItems.push_back(SettingInfo::Action(StrId::STR_PULL_PROGRESS_FROM_OTHER_DEVICES, SettingAction::None));
-    syncItems.push_back(SettingInfo::Action(StrId::STR_PUSH_PROGRESS_FROM_THIS_DEVICE, SettingAction::None));
-    // The same comparison a long Confirm press in the reader starts: show which side is further and
-    // let the user choose, instead of forcing one direction.
-    syncItems.push_back(SettingInfo::Action(StrId::STR_COMPARE_PROGRESS_WITH_OTHER_DEVICES, SettingAction::None));
-  }
+  rebuildSyncItems();
 
   toolsItems.push_back(SettingInfo::Action(StrId::STR_BOOK_INFO, SettingAction::None));
   toolsItems.push_back(SettingInfo::Action(StrId::STR_READING_STATS_FOR_THIS_BOOK, SettingAction::None));
@@ -427,6 +421,18 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
 #if ENABLE_BENCHMARKS
   toolsItems.push_back(SettingInfo::Action(StrId::STR_RENDER_BENCHMARK, SettingAction::None));
 #endif  // ENABLE_BENCHMARKS
+}
+
+void EpubReaderMenuActivity::rebuildSyncItems() {
+  auto& items = tabMenuItems[static_cast<size_t>(MenuTab::Sync)];
+  items.clear();
+  if (KOREADER_STORE.hasCredentials()) {
+    items.push_back(SettingInfo::Action(StrId::STR_PULL_PROGRESS_FROM_OTHER_DEVICES, SettingAction::None));
+    items.push_back(SettingInfo::Action(StrId::STR_PUSH_PROGRESS_FROM_THIS_DEVICE, SettingAction::None));
+    items.push_back(SettingInfo::Action(StrId::STR_COMPARE_PROGRESS_WITH_OTHER_DEVICES, SettingAction::None));
+  } else if (BoardConfig::isMetalioEInk4Plus()) {
+    items.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
+  }
 }
 
 EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForNameId(StrId nameId) {
@@ -538,6 +544,19 @@ void EpubReaderMenuActivity::openAutoTurnPicker() {
 
 void EpubReaderMenuActivity::onActionSelected(int index) {
   const auto& item = activeMenuItems()[index];
+
+  if (item.nameId == StrId::STR_KOREADER_SYNC) {
+    auto setup = createActivityForAction(SettingAction::KOReaderSync, renderer, mappedInput);
+    if (setup) {
+      startActivityForResult(std::move(setup), [this](const ActivityResult&) {
+        RenderLock lock(*this);
+        rebuildSyncItems();
+        resetPublishedWindow();
+        focusTabs();
+      });
+    }
+    return;
+  }
 
   // Auto page turn stays in the menu: the reader starts it when the menu closes.
   if (item.nameId == StrId::STR_AUTO_TURN_SECONDS) {

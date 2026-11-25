@@ -147,6 +147,12 @@ struct HomeLayout {
 // Additional themes can inherit from this and override methods as needed
 
 namespace BaseMetrics {
+inline constexpr int homeBookDetailsHeight =
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    124;
+#else
+    0;
+#endif
 constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
                                           .batteryHeight = 12,
                                           .topPadding = 5,
@@ -179,7 +185,7 @@ constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
                                           .keyboardVerticalOffset = -13,
                                           .keyboardTextFieldWidthPercent = 85,
                                           .headerSubtitleLine = 23});
-}
+}  // namespace BaseMetrics
 
 enum class SyncIndicator : uint8_t { None, Active, Failed };
 
@@ -412,7 +418,10 @@ class BaseTheme {
   virtual StackedHomeRules stackedHomeRules() const { return {280, 2}; }
   // The cover thumbnail height for a stacked tile this tall. It goes into the thumbnail's
   // filename, so the theme that draws the cover and the cover pass must agree on it.
-  virtual int stackedCoverHeight(const int tileHeight) const { return tileHeight > 120 ? tileHeight : 120; }
+  virtual int stackedCoverHeight(const int tileHeight) const {
+    const int coverHeight = tileHeight - BaseMetrics::homeBookDetailsHeight;
+    return coverHeight > 120 ? coverHeight : 120;
+  }
 
   // Up/down triangles marking that the list continues past the visible rows. Used by themes
   // without a scroll bar.

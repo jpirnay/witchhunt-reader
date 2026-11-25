@@ -235,6 +235,11 @@ bool CrossPointSettings::loadFromFile() {
   // Board-specific keymap defaults must be applied after hardware profile
   // selection and before JSON is read, so missing/legacy values inherit them.
   applyDeviceButtonDefaults();
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  touchListActivation = TOUCH_LIST_ACTIVATE_IMMEDIATELY;
+  btnLongBack = BTN_GO_HOME;
+  btnShortPower = BTN_GO_HOME;
+#endif
 
   // Try JSON first
   if (Storage.exists(SETTINGS_FILE_JSON)) {
@@ -243,6 +248,9 @@ bool CrossPointSettings::loadFromFile() {
       bool resave = false;
       bool result = JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
       if (result) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+        if (btnShortPower == BTN_DEFAULT) btnShortPower = BTN_GO_HOME;
+#endif
         enforceFixedShortActions(*this);
         saveStartupToNvs();  // Ensure NVS is in sync on boot
         if (resave) {

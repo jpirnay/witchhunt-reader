@@ -1,0 +1,14 @@
+# CloudZao Metalio E-Ink4-Plus v2.0.80, partitions/v1/16m.csv.
+# Build layout with private WitchHunt NVS in the originally unused flash tail.
+# Use for build sizing. Preserve the partition table already on the device.
+# Name,    Type, SubType,   Offset,   Size, Flags
+nvs,       data, nvs,       0x9000,   16K,
+otadata,   data, ota,       0xd000,   8K,
+phy_init,  data, phy,       0xf000,   4K,
+model,     data, spiffs,    0x10000,  400K,
+ota_0,     app,  ota_0,     0x80000,  5M,
+ota_1,     app,  ota_1,     0x580000, 5M,
+resources, data, spiffs,    0xa80000, 400K,
+font_data, data, 0x40,      0xae4000, 5M,
+coredump,  data, coredump,  0xfe4000, 64K,
+witch_nvs, data, nvs,      0xff4000, 48K,

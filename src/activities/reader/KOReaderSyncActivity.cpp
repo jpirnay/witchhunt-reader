@@ -25,6 +25,7 @@
 #include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/ConfirmationActivity.h"
+#include "components/TouchExitButton.h"
 #include "components/UITheme.h"
 #include "components/themes/ListTouchBand.h"
 #include "components/themes/PanelMetrics.h"
@@ -700,8 +701,8 @@ void KOReaderSyncActivity::onEnter() {
   // buffer, and a finished-book sync reached them with 3.4 KB contiguous free.
   //
   // Deliberately below the NO_CREDENTIALS return above: that path goes back to the reader without
-  // a silent reboot, and the helper has no realloc pairing, so releasing there would leave the
-  // reader in single-buffer mode with nothing to restore it. Every path from here does reboot.
+  // a silent reboot. Boards that release a secondary buffer still use the reboot to restore it;
+  // Metalio's PSRAM buffers are retained by HalDisplay.
   trimMemoryForNetworkSession(renderer, "KOSync");
   logSyncMemSnapshot("after_trim_before_wifi");
 
@@ -757,6 +758,12 @@ void KOReaderSyncActivity::onExit() {
   logSyncMemSnapshot("onExit_after_cleanup");
 
   if (wifiActivated) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    // HalDisplay retains the secondary buffer on Metalio. Shut down the radio and let
+    // the queued navigation reopen the book and apply the saved outcome in this boot.
+    if (WiFi.getMode() != WIFI_MODE_NULL) HalClock::wifiOff(/*skipNtpSync=*/true);
+    return;
+#endif
     WiFi.disconnect(false);
     delay(30);
     // The reboot stays, and it is now a measured decision rather than an inherited one.
@@ -889,6 +896,11 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, PanelMetrics::capped(280, messageY - 20), tr(STR_NO_CREDENTIALS_MSG), true,
                               EpdFontFamily::BOLD);
     renderer.drawCenteredText(UI_10_FONT_ID, PanelMetrics::capped(320, messageY + 20), tr(STR_KOREADER_SETUP_HINT));
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    TouchExitButton::draw(renderer, mappedInput, contentRect.x + contentRect.width / 4,
+                          PanelMetrics::capped(320, messageY + 20) + renderer.getLineHeight(UI_10_FONT_ID) + 24,
+                          contentRect.width / 2);
+#endif
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -1045,6 +1057,9 @@ void KOReaderSyncActivity::render(RenderLock&&) {
       renderer.drawCenteredText(UI_10_FONT_ID, y, line.c_str());
       y += lineHeight;
     }
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    TouchExitButton::draw(renderer, mappedInput, contentRect.x + contentRect.width / 4, y + 24, contentRect.width / 2);
+#endif
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -1114,7 +1129,7 @@ void KOReaderSyncActivity::dropRadioForRemoteMapping() {
   }
   // The same full teardown the settings' network screens use: SNTP off, disconnect, WIFI_OFF
   // (esp_wifi_stop + deinit + netif). No NTP here: the clock was settled before the GET.
-  // wifiActivated stays set, so onExit still reboots as after any network session.
+  // wifiActivated stays set so onExit can complete the board's network-session cleanup.
   KOReaderSyncClient::endPersistentSession();
   HalClock::wifiOff(/*skipNtpSync=*/true);
   radioDroppedForMapping = true;
@@ -1306,7 +1321,9 @@ void KOReaderSyncActivity::computeRemoteChapter() {
 void KOReaderSyncActivity::loop() {
   if (state == NO_CREDENTIALS || state == SYNC_FAILED || state == UPLOAD_COMPLETE || state == APPLY_COMPLETE ||
       state == SYNC_COMPLETE) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    const bool tappedExit = BoardConfig::isMetalioEInk4Plus() && (state == NO_CREDENTIALS || state == SYNC_FAILED) &&
+                            TouchExitButton::tapped(mappedInput);
+    if (tappedExit || mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       if (state == APPLY_COMPLETE) {
         resumeReader(KOReaderSyncOutcomeState::APPLIED_REMOTE);
       } else if (state == UPLOAD_COMPLETE) {

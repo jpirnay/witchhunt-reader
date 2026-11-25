@@ -59,6 +59,7 @@ class LyraCarouselTheme : public LyraTheme {
 
   static void setPreRenderIndex(int idx);
 
+  void setHomeMenu(int menuCount, int menuTrailing) override;
   HomeNavigation getHomeNavigation() const override { return HomeNavigation::Carousel; }
   std::vector<std::pair<int, int>> getCoverThumbSizes(int /*coverHeight*/) const override {
     return {{kCenterCoverW, kCenterCoverH}, {kSideCoverW, kSideCoverH}};

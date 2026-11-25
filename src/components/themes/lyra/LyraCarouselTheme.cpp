@@ -82,14 +82,39 @@ constexpr int kMenuIconPad = 14;   // symmetric vertical padding → tile height
 constexpr int kHighlightPad = 12;  // horizontal padding around the icon on each side
 // Row is anchored to the bottom of the screen, just above button hints. Read live rather than
 // from the constexpr table: the strip grows with the UI font size.
-int buttonHintsHeight() { return UITheme::getInstance().getMetrics().buttonHintsHeight; }
+int bottomReservedHeight(const GfxRenderer& renderer) {
+  if (UITheme::showsHomeButtonHints()) return UITheme::getInstance().getMetrics().buttonHintsHeight;
+  const Rect content = UITheme::getContentRect(renderer, false, false);
+  return renderer.getScreenHeight() - content.y - content.height;
+}
 constexpr int kMenuTileH = kMenuIconPad + kMenuIconSize + kMenuIconPad;
 constexpr int kMenuHighlightSize = kMenuIconSize + 2 * kHighlightPad;
-int menuRowY(const GfxRenderer& renderer) { return renderer.getScreenHeight() - buttonHintsHeight() - kMenuTileH; }
+int menuRowY(const GfxRenderer& renderer) {
+  return renderer.getScreenHeight() - bottomReservedHeight(renderer) - kMenuTileH;
+}
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+constexpr int kTouchMenuColumns = 3;
+constexpr int kTouchMenuTileHeight = 112;
+constexpr int kTouchMenuGap = 12;
+constexpr int kTouchMenuBottomPadding = 24;
+int gLastMenuCount = 6;
+
+int touchMenuRowCount(const int buttonCount) {
+  return std::max(1, (buttonCount + kTouchMenuColumns - 1) / kTouchMenuColumns);
+}
+#endif
 // The highest pixel the icon row ever paints: the selected icon's highlight square, which stands
 // taller than the icons themselves. Text above the row has to end here, not at the icons, or a
 // selected icon covers it.
-int menuInkTop(const GfxRenderer& renderer) { return menuRowY(renderer) + (kMenuTileH - kMenuHighlightSize) / 2; }
+int menuInkTop(const GfxRenderer& renderer) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  const int rows = touchMenuRowCount(gLastMenuCount);
+  return renderer.getScreenHeight() - kTouchMenuBottomPadding - rows * kTouchMenuTileHeight -
+         (rows - 1) * kTouchMenuGap;
+#else
+  return menuRowY(renderer) + (kMenuTileH - kMenuHighlightSize) / 2;
+#endif
+}
 
 // Vertical gaps of the text under the centre cover: dots, author, title, and the history line.
 // The history line comes last and is the one that runs out of room -- the X3 panel is 8 px
@@ -216,6 +241,14 @@ void freeFrameCache() {
 // ---------------------------------------------------------------------------
 void LyraCarouselTheme::setPreRenderIndex(int idx) { lastCarouselSelectorIndex = idx; }
 
+void LyraCarouselTheme::setHomeMenu(const int menuCount, const int /*menuTrailing*/) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  gLastMenuCount = std::max(1, menuCount);
+#else
+  (void)menuCount;
+#endif
+}
+
 void LyraCarouselTheme::invalidateFrameCache() {
   freeFrameCache();
   gAllocFailedKey.clear();  // conditions may have changed; allow one more attempt
@@ -303,6 +336,9 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
                                           const std::function<std::string(int)>& menuLabel,
                                           const std::function<UIIcon(int)>& menuIcon, const char* hintBtn1,
                                           const char* hintBtn2, const char* hintBtn3, const char* hintBtn4) const {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  gLastMenuCount = std::max(1, menuCount);
+#endif
   const int bookCount = static_cast<int>(recentBooks.size());
   if (bookCount == 0) return false;
 
@@ -415,11 +451,13 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
       renderer,
       Rect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing, pageWidth,
            pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing * 2 +
-                         metrics.buttonHintsHeight)},
+                         bottomReservedHeight(renderer))},
       menuCount, menuIdx, menuLabel, menuIcon);
 
   // Button hints
-  UITheme::getInstance().getTheme().drawButtonHints(renderer, hintBtn1, hintBtn2, hintBtn3, hintBtn4);
+  if (UITheme::showsHomeButtonHints()) {
+    UITheme::getInstance().getTheme().drawButtonHints(renderer, hintBtn1, hintBtn2, hintBtn3, hintBtn4);
+  }
 
   renderer.displayBuffer();
   updateSlidingWindow(renderer, recentBooks, centerIdx, metrics);
@@ -675,6 +713,40 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
   if (buttonCount <= 0) return;
 
   const int screenW = renderer.getScreenWidth();
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  const int side = UITheme::getInstance().getMetrics().contentSidePadding;
+  const int tileW = (screenW - 2 * side - (kTouchMenuColumns - 1) * kTouchMenuGap) / kTouchMenuColumns;
+  const int rowCount = (buttonCount + kTouchMenuColumns - 1) / kTouchMenuColumns;
+  const int menuHeight = rowCount * kTouchMenuTileHeight + (rowCount - 1) * kTouchMenuGap;
+  const int top = renderer.getScreenHeight() - kTouchMenuBottomPadding - menuHeight;
+  const int labelHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  TapTargets::Recorder::Builder targets;
+  for (int i = 0; i < buttonCount; ++i) {
+    const int x = side + (i % kTouchMenuColumns) * (tileW + kTouchMenuGap);
+    const int y = top + (i / kTouchMenuColumns) * (kTouchMenuTileHeight + kTouchMenuGap);
+    const bool selected = i == selectedIndex;
+    const int iconX = x + (tileW - kMenuIconSize) / 2;
+    const int iconY = y + (kTouchMenuTileHeight - kMenuIconSize - labelHeight - 6) / 2;
+
+    if (selected) {
+      renderer.fillRoundedRect(x, y, tileW, kTouchMenuTileHeight, 8, Color::Black);
+    } else {
+      renderer.drawRoundedRect(x, y, tileW, kTouchMenuTileHeight, 1, 8, true);
+    }
+    if (const auto* bitmap = rowIcon ? iconForName(rowIcon(i), kMenuIconSize) : nullptr) {
+      if (selected) {
+        renderer.drawIconInverted(bitmap, iconX, iconY, kMenuIconSize, kMenuIconSize);
+      } else {
+        renderer.drawIcon(bitmap, iconX, iconY, kMenuIconSize, kMenuIconSize);
+      }
+    }
+    const auto label = renderer.truncatedText(UI_10_FONT_ID, buttonLabel(i).c_str(), tileW - 12);
+    const int labelX = x + (tileW - renderer.getTextWidth(UI_10_FONT_ID, label.c_str())) / 2;
+    renderer.drawText(UI_10_FONT_ID, labelX, iconY + kMenuIconSize + 6, label.c_str(), !selected);
+    targets.add(x, y, tileW, kTouchMenuTileHeight, i);
+  }
+  TapTargets::homeMenu().record(targets);
+#else
   const int tileH = kMenuTileH;
   // Anchor row just above button hints, ignoring rect.y which may be off-screen for large cover tiles
   const int rowY = menuRowY(renderer);
@@ -747,4 +819,5 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
   }
 
   TapTargets::homeMenu().record(menuTargets);
+#endif
 }

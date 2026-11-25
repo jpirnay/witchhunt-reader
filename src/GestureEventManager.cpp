@@ -168,11 +168,13 @@ bool GestureEventManager::consumeAction(BA& action, const bool inReader, const b
     // swipe and keep the one-page TAP. In the shipped default (TOUCH_READER_ON, i.e. taps)
     // horizontal swipes are unused, so there is no cost at all.
     case MappedInputManager::SwipeDir::Left:
+      if (BoardConfig::isMetalioEInk4Plus()) break;
       swipe = startZone == TapZones::Zone::Left    ? Gesture::SwipeInLeftZone
               : startZone == TapZones::Zone::Right ? Gesture::SwipeInRightZone
                                                    : Gesture::SwipeLeft;
       break;
     case MappedInputManager::SwipeDir::Right:
+      if (BoardConfig::isMetalioEInk4Plus()) break;
       swipe = startZone == TapZones::Zone::Right  ? Gesture::SwipeInRightZone
               : startZone == TapZones::Zone::Left ? Gesture::SwipeInLeftZone
                                                   : Gesture::SwipeRight;

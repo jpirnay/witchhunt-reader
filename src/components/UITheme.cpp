@@ -67,6 +67,8 @@ static_assert(UiFontLadder::STEP_COUNT == CrossPointSettings::UI_FONT_SIZE_COUNT
 
 UiFontLadder::Step UITheme::fontGrowth() { return UiFontLadder::growthAt(SETTINGS.uiFontSize); }
 
+bool UITheme::showsHomeButtonHints() { return !BoardConfig::isMetalioEInk4Plus(); }
+
 void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
   switch (type) {
     case CrossPointSettings::UI_THEME::CLASSIC:
@@ -95,7 +97,32 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       currentMetrics = BaseMetrics::values;
       break;
   }
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // 84–96 px is about 7–8 mm on the 4.7-inch panel.
+  currentMetrics.contentSidePadding = 28;
+  currentMetrics.listRowHeight = 78;
+  currentMetrics.listWithSubtitleRowHeight = 98;
+  currentMetrics.menuRowHeight = 84;
+  currentMetrics.menuSpacing = 12;
+  currentMetrics.tabBarHeight = 84;
+  currentMetrics.sideButtonHintsWidth = 0;
+  currentMetrics.homeTopPadding = 72;
+  switch (type) {
+    case CrossPointSettings::UI_THEME::LYRA:
+      currentMetrics.homeCoverTileHeight = 406;
+      break;
+    case CrossPointSettings::UI_THEME::LYRA_TILES:
+    case CrossPointSettings::UI_THEME::LYRA_CAROUSEL:
+      break;
+    default:
+      currentMetrics.homeCoverTileHeight = 520;
+      break;
+  }
+#endif
   UiFontLadder::applyTo(currentMetrics, fontGrowth());
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  currentMetrics.buttonHintsHeight = 0;
+#endif
 }
 
 Rect UITheme::getHeaderRect(const GfxRenderer& renderer, const bool hasBottomHints, const bool hasSideHints) {

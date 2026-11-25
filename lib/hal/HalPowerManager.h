@@ -99,6 +99,12 @@ class HalPowerManager {
   using SleepStepHook = void (*)(SleepStep step, unsigned long waitedMs, bool timedOut, bool storageLive);
   void setSleepStepHook(SleepStepHook hook) { sleepStepHook_ = hook; }
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  void sleepOnExpanderKey() const;
+  void rejectNonPowerMetalioWake() const;
+  void logMetalioWake() const;
+#endif
+
  private:
   LightSleepStats lightSleepStats_;
   SleepStepHook sleepStepHook_ = nullptr;

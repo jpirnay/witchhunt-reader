@@ -14,5 +14,8 @@ inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarg
   tokens.listSidePadding = static_cast<int16_t>(metrics.contentSidePadding);
   tokens.listScrollWidth = static_cast<int16_t>(metrics.scrollBarWidth);
   tokens.listScrollInset = static_cast<int16_t>(metrics.scrollBarRightOffset);
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  tokens.listTouchMinRowHeight = static_cast<int16_t>(metrics.listRowHeight);
+#endif
   return tokens;
 }

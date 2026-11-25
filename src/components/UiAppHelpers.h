@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BoardConfig.h>
 #include <FreeInkApp.h>
 #include <FreeInkUIGfxRenderer.h>
 
@@ -10,7 +11,7 @@
 #include "fontIds.h"
 
 inline freeink::ui::GfxRendererTarget makeUiTarget(const GfxRenderer& renderer) {
-  freeink::ui::GfxRendererTarget target(renderer);
+  freeink::ui::GfxRendererTarget target(renderer, BoardConfig::isMetalioEInk4Plus() && BoardConfig::hasTouch());
   target.setFont(freeink::ui::GfxRendererTarget::FONT_SMALL, SMALL_FONT_ID);
   target.setFont(freeink::ui::GfxRendererTarget::FONT_BODY, UI_10_FONT_ID);
   target.setFont(freeink::ui::GfxRendererTarget::FONT_TITLE, UI_12_FONT_ID);

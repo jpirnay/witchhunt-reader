@@ -39,6 +39,7 @@ struct Model {
   bool hasWarmth = false;
   const char* brightnessLabel = nullptr;
   const char* warmthLabel = nullptr;
+  const char* backLabel = nullptr;
 };
 
 struct Metrics {
@@ -48,6 +49,7 @@ struct Metrics {
   int16_t sideInset = 0;
   // Height of each [-] [capsule] [+] band, and the side of every square button in it.
   int16_t controlHeight = 0;
+  bool bottom = false;
 };
 
 // `compact` is PanelMetrics::COMPACT, passed in rather than included so the host test can lay out every board.
@@ -82,6 +84,7 @@ inline int16_t sheetHeight(const fui::DrawTarget& target, const fui::ThemeTokens
   height += row + theme.spaceMd;
   // The warmth row, or the line of switches; Screen::sliderRow() and takeTop() below both leave spaceMd after it.
   height += (model.hasWarmth ? row : metrics.controlHeight) + theme.spaceMd;
+  if (model.backLabel) height += metrics.controlHeight + theme.spaceMd;
   height += theme.spaceLg;
   // Screen::sheet() takes the grabber band out of the height it is given (sheetContentRect), so it is added back
   // here. Read from a default SheetProps rather than restated, so the two cannot drift if the SDK retunes the pill.
@@ -98,7 +101,7 @@ void build(ScreenT& screen, const Model& model, const Metrics& metrics, const in
   const fui::ThemeTokens& theme = screen.theme();
 
   fui::SheetProps chrome;
-  chrome.anchor = fui::SheetEdge::Top;
+  chrome.anchor = metrics.bottom ? fui::SheetEdge::Bottom : fui::SheetEdge::Top;
   // The customary way to close a drawer. Registered by the component over the screen below the sheet, so nothing
   // here has to hit-test the page.
   chrome.dismissAction = ACTION_DISMISS;
@@ -136,22 +139,30 @@ void build(ScreenT& screen, const Model& model, const Metrics& metrics, const in
     warm.toggleAction = ACTION_DARK_MODE;
     warm.toggleIcon = moonIcon(model.dark);
     screen.sliderRow(warm, metrics.controlHeight);
-    return;
+  } else {
+    // The switches without a warmth row share one band.
+    const fui::Rect line = screen.takeTop(metrics.controlHeight, theme.spaceMd);
+    const int16_t half = static_cast<int16_t>((line.width - theme.spaceMd) / 2);
+    fui::ButtonProps toggle;
+    toggle.styles = fui::sliderRowStepStyles(fui::resolveRadius(theme.controlRadius, 18));
+    toggle.inputMask = fui::InputTouch;
+    toggle.action = ACTION_LIGHT;
+    toggle.icon = sunIcon(model.lightOn);
+    screen.button(toggle, fui::Rect{line.x, line.y, half, line.height});
+    toggle.action = ACTION_DARK_MODE;
+    toggle.icon = moonIcon(model.dark);
+    screen.button(toggle, fui::Rect{static_cast<int16_t>(line.right() - half), line.y, half, line.height});
   }
-
-  // The switches without a warmth row to close: as tall as the slider band, styled as its buttons are, and wide
-  // enough to hit without looking.
-  const fui::Rect line = screen.takeTop(metrics.controlHeight, theme.spaceMd);
-  const int16_t half = static_cast<int16_t>((line.width - theme.spaceMd) / 2);
-  fui::ButtonProps toggle;
-  toggle.styles = fui::sliderRowStepStyles(fui::resolveRadius(theme.controlRadius, 18));
-  toggle.inputMask = fui::InputTouch;
-  toggle.action = ACTION_LIGHT;
-  toggle.icon = sunIcon(model.lightOn);
-  screen.button(toggle, fui::Rect{line.x, line.y, half, line.height});
-  toggle.action = ACTION_DARK_MODE;
-  toggle.icon = moonIcon(model.dark);
-  screen.button(toggle, fui::Rect{static_cast<int16_t>(line.right() - half), line.y, half, line.height});
+  if (model.backLabel) {
+    fui::ButtonProps back;
+    back.styles = fui::sliderRowStepStyles(fui::resolveRadius(theme.controlRadius, 18));
+    back.inputMask = fui::InputTouch;
+    back.action = ACTION_DISMISS;
+    back.label = model.backLabel;
+    back.text = theme.bodyText;
+    back.text.bold = true;
+    screen.button(back, screen.takeTop(metrics.controlHeight, theme.spaceMd));
+  }
 }
 
 }  // namespace LightDrawerLayout

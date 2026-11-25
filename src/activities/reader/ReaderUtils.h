@@ -185,7 +185,8 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     return result;
   }
 
-  if (SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_SWIPE) {
+  const bool swipeOnly = SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_SWIPE;
+  if (swipeOnly || BoardConfig::isMetalioEInk4Plus()) {
     // Horizontal swipes turn pages; taps stay free for the centred reader-menu
     // zone. A slow swipe never becomes a long-press chapter skip.
     const auto dir = input.wasSwipe();
@@ -193,8 +194,9 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
       const TapZones::Turn turn = TapZones::turnForSwipe(dir == MappedInputManager::SwipeDir::Left, rightToLeft);
       result.prev = turn == TapZones::Turn::Back;
       result.next = turn == TapZones::Turn::Forward;
+      return result;
     }
-    return result;
+    if (swipeOnly) return result;
   }
 
   int x = 0;

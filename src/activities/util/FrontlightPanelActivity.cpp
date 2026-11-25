@@ -66,14 +66,13 @@ void FrontlightPanelActivity::onEnter() {
   requestUpdate();
 }
 
-void FrontlightPanelActivity::onExit() {
+void FrontlightPanelActivity::saveLightSettings() {
   // brightness/warmth are always restored unconditionally on boot (see main.cpp), so they never
   // diverge from SETTINGS at onEnter() -- comparing against SETTINGS here only fires on a genuine
   // user change. lightOn has no such guarantee (see lightOnChanged's declaration), so it's gated
   // on the user actually having touched it this session instead.
   //
-  // One write for the whole visit either way: a drag names a new level on every routed frame, and
-  // SPIFFS sectors have a finite erase budget.
+  // A drag changes the hardware as it moves. Persist only a completed interaction.
   const bool changed = SETTINGS.frontlightBrightness != brightness || SETTINGS.frontlightWarmth != warmth ||
                        (lightOnChanged && SETTINGS.frontlightOn != (lightOn ? 1 : 0));
   if (changed) {
@@ -82,6 +81,10 @@ void FrontlightPanelActivity::onExit() {
     if (lightOnChanged) SETTINGS.frontlightOn = lightOn ? 1 : 0;
     SETTINGS.saveToFile();
   }
+}
+
+void FrontlightPanelActivity::onExit() {
+  saveLightSettings();
   closeRouting();
   Activity::onExit();
 }
@@ -171,7 +174,14 @@ void FrontlightPanelActivity::loop() {
   // ends over the page cannot reach the sheet's dismiss zone.
   const auto touch = routeTouch(mappedInput, /*routeHeld=*/true);
   if (touch.routed) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    if (touch.snap.touchReleased) {
+      saveLightSettings();
+      if (app.invalidated()) requestUpdate();
+    }
+#else
     if (app.invalidated()) requestUpdate();
+#endif
     // A handled event may have been the dismiss, which has already called finish().
     if (touch) return;
   }
@@ -221,6 +231,9 @@ LightDrawerLayout::Model FrontlightPanelActivity::layoutModel() const {
   model.hasWarmth = Frontlight.hasColorTemperature();
   model.brightnessLabel = tr(STR_LIGHT_BRIGHTNESS);
   model.warmthLabel = tr(STR_LIGHT_WARMTH);
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  model.backLabel = tr(STR_BACK);
+#endif
   return model;
 }
 
@@ -256,13 +269,22 @@ void FrontlightPanelActivity::render(RenderLock&&) {
   const auto tokens = uiThemeTokens(uiTarget);
   layoutMetrics = LightDrawerLayout::metricsFor(tokens, static_cast<int16_t>(metrics.topPadding + metrics.headerHeight),
                                                 PanelMetrics::COMPACT);
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  layoutMetrics.bottom = true;
+  layoutMetrics.sideInset = 28;
+  layoutMetrics.controlHeight = 88;
+#endif
   panelHeight = LightDrawerLayout::sheetHeight(uiTarget, tokens, layoutModel(), layoutMetrics);
   renderUi();
 
   // After renderUi(), not before: the sheet paints its own body, which would otherwise erase the
   // header drawn onto it.
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight},
-                 tr(STR_MENU_DISP_LIGHT));
+  const fui::SheetProps sheet;
+  const int headerY = layoutMetrics.bottom
+                          ? renderer.getScreenHeight() - panelHeight - uiTarget.deviceContext().safeArea.bottom +
+                                sheet.grabberMargin + sheet.grabberHeight + sheet.grabberInset + metrics.topPadding
+                          : metrics.topPadding;
+  GUI.drawHeader(renderer, Rect{0, headerY, renderer.getScreenWidth(), metrics.headerHeight}, tr(STR_MENU_DISP_LIGHT));
 
   // Plain FAST throughout. The opening pass was briefly forced to HALF while the stale-frame bug
   // was still open; the device log showed HALF did not fix it (the content was wrong, not the

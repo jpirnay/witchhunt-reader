@@ -40,7 +40,10 @@ int inputTop(const Rect& content, const ThemeMetrics& metrics) {
 }
 
 int keyboardKeysHeight(const ThemeMetrics& metrics, const int rows, const bool hasTouch, const bool shortPanel) {
-  const int keyHeight = shortPanel ? SHORT_PANEL_KEY_HEIGHT : hasTouch ? metrics.keyboardKeyHeight : BUTTON_KEY_HEIGHT;
+  int keyHeight = shortPanel ? SHORT_PANEL_KEY_HEIGHT : hasTouch ? metrics.keyboardKeyHeight : BUTTON_KEY_HEIGHT;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  if (hasTouch && !shortPanel) keyHeight = 76;
+#endif
   return rows * keyHeight + (rows > 1 ? (rows - 1) * keyboardGap(metrics) : 0) + KEYBOARD_PANEL_PADDING * 2;
 }
 
@@ -1029,9 +1032,14 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   interactions.beginPublishCycle();
   fui::GfxRendererTarget target(renderer);
   target.setFont(fui::GfxRendererTarget::FONT_SMALL, SMALL_FONT_ID);
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  target.setFont(fui::GfxRendererTarget::FONT_BODY, NOTOSANS_18_FONT_ID);
+  target.setFont(fui::GfxRendererTarget::FONT_TITLE, UI_12_FONT_ID);
+#else
   // Ten keys share a compact panel's 240 px: at the usual size a wide letter does not fit its key
   // and the widget shows an ellipsis in its place.
   target.setFont(fui::GfxRendererTarget::FONT_BODY, PanelMetrics::COMPACT ? UI_10_FONT_ID : UI_12_FONT_ID);
+#endif
   const fui::DeviceContext device = target.deviceContext();
   const fui::InputSnapshot noInput{};
   fui::Frame<56> frame(target, device, noInput, interactions);
@@ -1049,6 +1057,9 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   props.labelText.font = fui::GfxRendererTarget::FONT_BODY;
   props.altText.font = fui::GfxRendererTarget::FONT_SMALL;
   props.gap = props.rowGap = static_cast<int16_t>(keyboardGap(metrics));
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  props.controlText.font = fui::GfxRendererTarget::FONT_TITLE;
+#endif
   if (PanelMetrics::COMPACT) {
     // Every default here is sized for keys twice this wide. The digit offset alone left a digit 5 px.
     props.keyPadding = fui::Insets{2, 1, 2, 1};

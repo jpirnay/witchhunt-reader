@@ -2,6 +2,7 @@
 
 #include <GfxRenderer.h>
 #include <HalClock.h>
+#include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -288,6 +289,7 @@ int BaseTheme::sideHintNeededLength(const GfxRenderer& renderer, const int fontI
 
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
+  if (UITheme::getInstance().getMetrics().buttonHintsHeight == 0) return;
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
   // The strip is laid out in panel coordinates so each box lands beside the button it names. In
   // PortraitInverted the panel is simply turned 180°, so drawing it inverted instead of upright
@@ -352,7 +354,8 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 }
 
 void BaseTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, const char* downBtn) const {
-  if (BaseMetrics::values.sideButtonHintsWidth == 0) return;  // no side column on this panel
+  const int buttonWidth = UITheme::getInstance().getMetrics().sideButtonHintsWidth;
+  if (buttonWidth == 0) return;
   // Like drawButtonHints: the geometry below is written in PANEL coordinates, so each box stays
   // beside the button it names whichever way the device is held. The side buttons sit on the
   // panel's right edge (BTN_UP nearest the top) — which is the edge getContentRect() reserves in
@@ -374,7 +377,6 @@ void BaseTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, co
 
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
-  constexpr int buttonWidth = BaseMetrics::values.sideButtonHintsWidth;  // Width on screen (height when rotated)
   constexpr int buttonHeight = 80;  // Tuned height on screen (width when rotated); a longer label grows it
   constexpr int buttonMargin = HeaderLayout::BASE_SIDE_BOX_INSET;
   const bool hasUp = upBtn != nullptr && upBtn[0] != '\0';
@@ -691,9 +693,13 @@ HomeLayout BaseTheme::homeLayout(const GfxRenderer& /*renderer*/, const Rect con
   const StackedHomeRules rules = stackedHomeRules();
   int tileHeight = metrics.homeCoverTileHeight;
   int gap = metrics.verticalSpacing;
+  int usableHeight = content.height;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  usableHeight -= metrics.verticalSpacing;
+#endif
 
   const int menuRequired = menuCount * metrics.menuRowHeight + std::max(0, menuCount - 1) * metrics.menuSpacing;
-  const auto menuHeightLeft = [&] { return content.height - (metrics.homeTopPadding + tileHeight + gap); };
+  const auto menuHeightLeft = [&] { return usableHeight - (metrics.homeTopPadding + tileHeight + gap); };
 
   // The tile keeps its height while the rows fit; the gap gives way first, then the tile.
   int menuHeight = menuHeightLeft();
@@ -731,10 +737,7 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   const bool hasContinueReading = !recentBooks.empty();
   const bool bookSelected = hasContinueReading && selectorIndex == 0;
 
-  // --- Top "book" card for the current title (selectorIndex == 0) ---
-  // When there's no cover image, use fixed size (half screen)
-  // When there's cover image, adapt width to image aspect ratio, keep height fixed at 400px
-  const int baseHeight = rect.height;  // The tile height the layout settled on, not the metric
+  const int baseHeight = hasContinueReading ? rect.height - BaseMetrics::homeBookDetailsHeight : rect.height;
 
   // The cover thumbnail's height is part of its filename, and HomeActivity generates the file
   // from this same rect (homeLayout() -> stackedCoverHeight()). Asking for BaseMetrics::homeCoverHeight
@@ -742,7 +745,6 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   // as the menu needs the room, at which point this side asks the card for a file the other side
   // never wrote and the cover reads "Loading..." for ever.
   const int coverThumbHeight = stackedCoverHeight(rect.height);
-
   int bookWidth, bookX;
   bool hasCoverImage = false;
 
@@ -783,7 +785,10 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   // only the most recent book, and HomeActivity's selector numbers the covers from 0.
   {
     TapTargets::Recorder::Builder coverTargets;
-    if (hasContinueReading) coverTargets.add(bookX, bookY, bookWidth, bookHeight, 0);
+    if (hasContinueReading) {
+      const int hitWidth = BoardConfig::isMetalioEInk4Plus() ? std::max(bookWidth, rect.width / 2) : bookWidth;
+      coverTargets.add(rect.x + (rect.width - hitWidth) / 2, bookY, hitWidth, rect.height, 0);
+    }
     TapTargets::homeCovers().record(coverTargets);
   }
 
@@ -867,6 +872,29 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     }
   }
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  if (hasContinueReading) {
+    const auto& book = recentBooks[0];
+    const int textWidth = rect.width - UITheme::getInstance().getMetrics().contentSidePadding * 2;
+    const int textY = bookY + bookHeight + 8;
+    const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
+    const int bodyHeight = renderer.getLineHeight(UI_10_FONT_ID);
+    const auto title = renderer.truncatedText(UI_12_FONT_ID, book.title.c_str(), textWidth, EpdFontFamily::BOLD);
+    const auto status = BookProgressPresentation::formatStatus(book, BookProgressPresentation::readPercent(book));
+    const auto action = renderer.truncatedText(UI_10_FONT_ID, tr(STR_CONTINUE_READING), textWidth);
+    renderer.drawCenteredText(UI_12_FONT_ID, textY, title.c_str(), true, EpdFontFamily::BOLD);
+    if (!status.empty()) {
+      renderer.drawCenteredText(UI_10_FONT_ID, textY + titleHeight,
+                                renderer.truncatedText(UI_10_FONT_ID, status.c_str(), textWidth).c_str());
+    }
+    const int actionY = textY + titleHeight + bodyHeight + 4;
+    const int actionWidth = renderer.getTextWidth(UI_10_FONT_ID, action.c_str(), EpdFontFamily::BOLD) + 24;
+    renderer.drawRoundedRect(rect.x + (rect.width - actionWidth) / 2, actionY - 3, actionWidth, bodyHeight + 6, 1, 8,
+                             true);
+    renderer.drawCenteredText(UI_10_FONT_ID, actionY, action.c_str(), true, EpdFontFamily::BOLD);
+    return;
+  }
+#endif
   if (hasContinueReading) {
     const std::string& lastBookTitle = recentBooks[0].title;
     const std::string& lastBookAuthor = recentBooks[0].author;
@@ -1058,6 +1086,20 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
 
   for (int i = 0; i < buttonCount; ++i) {
     const int tileY = rect.y + static_cast<int>(i) * (rowHeight + rowSpacing);
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    const int inset = UITheme::getInstance().getMetrics().contentSidePadding;
+    const int width = rect.width - 2 * inset;
+    const bool selected = selectedIndex == i;
+    if (selected) {
+      renderer.fillRoundedRect(rect.x + inset, tileY, width, rowHeight, 8, Color::Black);
+    } else {
+      renderer.drawRoundedRect(rect.x + inset, tileY, width, rowHeight, 2, 8, true);
+    }
+    const auto label = renderer.truncatedText(UI_12_FONT_ID, buttonLabel(i).c_str(), width - 24);
+    renderer.drawCenteredText(UI_12_FONT_ID, tileY + (rowHeight - renderer.getLineHeight(UI_12_FONT_ID)) / 2,
+                              label.c_str(), !selected);
+    menuTargets.add(rect.x + inset, tileY, width, rowHeight, i);
+#else
     menuTargets.add(rect.x + BaseMetrics::values.contentSidePadding, tileY,
                     rect.width - BaseMetrics::values.contentSidePadding * 2, rowHeight, i);
 
@@ -1079,6 +1121,7 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     const int textY = tileY + (rowHeight - lineHeight) / 2;  // vertically centered assuming y is top of text
     // Invert text when the tile is selected, to contrast with the filled background
     renderer.drawText(UI_10_FONT_ID, textX, textY, label, selectedIndex != i);
+#endif
   }
 
   TapTargets::homeMenu().record(menuTargets);

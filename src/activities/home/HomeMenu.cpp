@@ -1,5 +1,7 @@
 #include "HomeMenu.h"
 
+#include <BoardConfig.h>
+
 #include <array>
 #include <iterator>
 
@@ -26,6 +28,11 @@ struct HomeMenuRow {
 // screen already says so plainly when there is nothing to show.
 constexpr HomeMenuRow kRows[] = {
     {{HomeMenuAction::Library, StrId::STR_LIBRARY, Folder}, Requires::Nothing, &CrossPointSettings::showLibraryOnHome},
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    {{HomeMenuAction::RecentBooks, StrId::STR_MENU_RECENT_BOOKS, Recent},
+     Requires::Nothing,
+     &CrossPointSettings::showLibraryOnHome},
+#endif
     {{HomeMenuAction::ReadingStats, StrId::STR_READING_STATS, Stats},
      Requires::Nothing,
      &CrossPointSettings::showReadingStatsOnHome},

@@ -2,6 +2,7 @@
 
 #include <Epub/LineSpacing.h>
 #include <GfxRenderer.h>
+#include <HalFrontlight.h>
 #include <I18n.h>
 #include <Logging.h>
 
@@ -100,6 +101,9 @@ ReaderBarsLayout::Model ReaderBarsController::model() const {
   ReaderBarsLayout::Model model;
   model.title = info.title.c_str();
   model.starred = starred;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  model.showLight = Frontlight.present();
+#endif
   model.panel = panel;
   model.focus = focus;
   model.focusedTab = focusedTab;
@@ -363,6 +367,9 @@ void ReaderBarsController::pressButton(const Button button) {
       return;
     case Button::Star:
       toggleStar();
+      return;
+    case Button::Light:
+      close(ReaderBarsResult::Action::Light);
       return;
     case Button::PrevChapter:
       close(ReaderBarsResult::Action::PrevChapter);

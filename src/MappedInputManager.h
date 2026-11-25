@@ -215,6 +215,7 @@ class MappedInputManager {
   // question a phone asks to tell the notification shade from quick settings —
   // and TouchGestures splits the vertical swipes on it.
   SwipeDir wasSwipeIn(touchtransform::Orientation orientation, int& startX, int& startY) const;
+  bool wasLeftEdgeRightSwipe() const;
 
   // --- Multi-touch ------------------------------------------------------------
   // A completed two-finger gesture, already resolved to what it means ON SCREEN,
