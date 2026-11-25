@@ -299,17 +299,35 @@ inline constexpr ImageGray4Levels kX3Uc8253ImageGray4 = {{4, 68, 152}, {0, 28, 6
 inline constexpr ImageGray4Levels kX4ImageGray4 = {{24, 68, 172}, {0, 36, 192, 255}};
 static_assert(wellFormed(kUnmeasuredImageGray4) && wellFormed(kMurphyImageGray4) && wellFormed(kX3Uc8253ImageGray4) &&
               wellFormed(kX4ImageGray4));
-inline ImageGray4Levels imageGray4Levels() {
-  switch (BoardConfig::ACTIVE.board) {
+// A table is its panel controller's, measured on one. An X4 stays Board::XteinkX4 whichever controller its batch has
+// (HalGPIO::begin() resolves the SSD1677, UC8179 or UC8279 after choosing the board), so its table also asks for the
+// SSD1677 it was measured on; an X3 with the UC8279 is a board of its own (Board::XteinkX3Uc8279).
+constexpr const ImageGray4Levels& imageGray4LevelsFor(const BoardConfig::Board board,
+                                                      const BoardConfig::DisplayController controller) {
+  switch (board) {
     case BoardConfig::Board::MurphyM3:
       return kMurphyImageGray4;
     case BoardConfig::Board::XteinkX3:
       return kX3Uc8253ImageGray4;
     case BoardConfig::Board::XteinkX4:
-      return kX4ImageGray4;
+      return controller == BoardConfig::DisplayController::SSD1677 ? kX4ImageGray4 : kUnmeasuredImageGray4;
     default:
       return kUnmeasuredImageGray4;
   }
+}
+static_assert(&imageGray4LevelsFor(BoardConfig::Board::XteinkX4, BoardConfig::DisplayController::SSD1677) ==
+              &kX4ImageGray4);
+// An X4 with another controller has not been measured.
+static_assert(&imageGray4LevelsFor(BoardConfig::Board::XteinkX4, BoardConfig::DisplayController::UC8179) ==
+              &kUnmeasuredImageGray4);
+static_assert(&imageGray4LevelsFor(BoardConfig::Board::XteinkX4, BoardConfig::DisplayController::UC8279) ==
+              &kUnmeasuredImageGray4);
+static_assert(&imageGray4LevelsFor(BoardConfig::Board::XteinkX3, BoardConfig::DisplayController::UC8253) ==
+              &kX3Uc8253ImageGray4);
+static_assert(&imageGray4LevelsFor(BoardConfig::Board::XteinkX3Uc8279, BoardConfig::DisplayController::UC8279) ==
+              &kUnmeasuredImageGray4);
+inline ImageGray4Levels imageGray4Levels() {
+  return imageGray4LevelsFor(BoardConfig::ACTIVE.board, BoardConfig::ACTIVE.displayController);
 }
 
 // The panel can show gray at all. Murphy's only can in a build with -DFREEINK_MURPHY_GRAY: without

@@ -485,9 +485,11 @@ levels (`quantizeGray4()`, `lib/GfxRenderer/BitmapHelpers.h`). Atkinson carries 
 settles on a pure level wherever `4*gray - 3*feedback` falls in that level's band. When a panel's levels do not sit at
 0/85/170/255, thresholds alone cannot fix the tone: the feedback has to say where the levels really are.
 `HalCapabilities::imageGray4Levels()` holds each panel's thresholds and feedback, and `setupDisplayAndFonts()` seeds
-`quantizeGray4()` with them. A board not measured keeps the old table (thresholds 30/50/140 over even feedback), and
-pictures in books keep the untuned midpoints (`quantizeGray4Level()`). Measured on the gray-lab stand through a
-reference card, error against an even lightness ramp between the panel's own black and white, mean / worst L*:
+`quantizeGray4()` with them. A panel not measured keeps the old table (thresholds 30/50/140 over even feedback),
+an X4 with a UC8179 or UC8279 among them: a table goes by the controller as well as the board
+(`imageGray4LevelsFor()`). Pictures in books keep the untuned midpoints (`quantizeGray4Level()`). Measured on the
+gray-lab stand through a reference card, error against an even lightness ramp between the panel's own black and white,
+mean / worst L*:
 
 | Panel | Old table | Own table |
 |---|---|---|
