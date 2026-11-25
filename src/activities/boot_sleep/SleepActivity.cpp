@@ -4,6 +4,7 @@
 #include <Epub/Section.h>
 #include <Epub/converters/DirectPixelWriter.h>
 #include <Epub/converters/PixelCache.h>
+#include <Epub/converters/PixelCacheReplay.h>
 #include <Epub/converters/PngToFramebufferConverter.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -138,57 +139,9 @@ bool renderSleepImageFromCache(GfxRenderer& renderer, const std::string& cachePa
     return false;
   }
 
-  const int bytesPerRow = (cachedWidth + 3) / 4;  // 2 bits per pixel, MSB first
-  int rowsPerRead = 4096 / bytesPerRow;
-  if (rowsPerRead < 1) rowsPerRead = 1;
-  if (rowsPerRead > cachedHeight) rowsPerRead = cachedHeight;
-
-  auto readBuffer = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(rowsPerRead) * bytesPerRow);
-  if (!readBuffer) {
-    rowsPerRead = 1;
-    readBuffer = makeUniqueNoThrow<uint8_t[]>(bytesPerRow);
-  }
-  if (!readBuffer) {
-    cacheFile.close();
-    return false;
-  }
-
-  DirectPixelWriter pw;
-  pw.init(renderer);
-
-  int rowsInBuffer = 0;
-  int bufferRow = 0;
-  for (int row = 0; row < cachedHeight; row++) {
-    if (bufferRow >= rowsInBuffer) {
-      const int toRead = (cachedHeight - row < rowsPerRead) ? (cachedHeight - row) : rowsPerRead;
-      const size_t bytes = static_cast<size_t>(toRead) * bytesPerRow;
-      const int bytesRead = cacheFile.read(readBuffer.get(), bytes);
-      if (bytesRead < 0 || static_cast<size_t>(bytesRead) != bytes) {
-        LOG_ERR("SLP", "Sleep pixel cache read error at row %d", row);
-        cacheFile.close();
-        return false;
-      }
-      rowsInBuffer = toRead;
-      bufferRow = 0;
-    }
-
-    // cppcheck-suppress arithOperationsOnVoidPointer ; get() is uint8_t*, cppcheck
-    // mis-deduces the concept-constrained makeUniqueNoThrow<uint8_t[]> return type
-    const uint8_t* rowBuffer = readBuffer.get() + static_cast<size_t>(bufferRow) * bytesPerRow;
-    bufferRow++;
-
-    pw.beginRow(y + row);
-    int colStart, colEnd;
-    pw.bandColRange(x, cachedWidth, colStart, colEnd);
-    for (int col = colStart; col < colEnd; col++) {
-      const uint8_t packed = rowBuffer[col >> 2];
-      const uint8_t value = (packed >> (6 - (col & 3) * 2)) & 0x03;
-      pw.writePixel(x + col, value);
-    }
-  }
-
+  const bool ok = pixel_cache::replayRows(cacheFile, renderer, cachedWidth, cachedHeight, x, y);
   cacheFile.close();
-  return true;
+  return ok;
 }
 
 // Adaptive tone mapping applies to user-supplied sleep images only. The overlay
