@@ -7,6 +7,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 
+#include <cstring>
 #include <string>
 
 #include "Bitmap.h"  // Required for BmpHeader struct definition
@@ -17,6 +18,18 @@
 
 namespace {
 ScreenshotRequest requests;
+
+// Whether the card takes a new file at `path`, its folder made first. A name SdFat refuses (not UTF-8) or a folder it
+// cannot make fails here, before the screenshot is written to it. The file is left, empty, for the save to write.
+bool cardTakesName(const char* path) {
+  const char* slash = strrchr(path, '/');
+  if (slash != nullptr && slash != path) {
+    const std::string dir(path, static_cast<size_t>(slash - path));
+    if (!Storage.exists(dir.c_str()) && !Storage.mkdir(dir.c_str())) return false;
+  }
+  FsFile file;
+  return Storage.openFileForWrite("SCR", path, file);
+}
 }  // namespace
 
 bool ScreenshotUtil::request(const Target target) {
@@ -73,6 +86,11 @@ void ScreenshotUtil::takeScreenshot(GfxRenderer& renderer) {
     // A reader names the book, chapter, page and progress; any other screen gets screenshot-<millis>.bmp.
     char filename[256];
     screenshot_name::build(activityManager.screenshotInfo(), millis(), filename, sizeof(filename));
+    // A name the card refuses lost the screenshot, with the "saved" border shown all the same: the plain name instead.
+    if (!cardTakesName(filename)) {
+      LOG_ERR("SCR", "The card refused %s; saving as screenshot-<millis>.bmp", filename);
+      screenshot_name::build(ScreenshotInfo{}, millis(), filename, sizeof(filename));
+    }
     const bool inverted = renderer.isOutputInverted();  // as for the host capture in service()
     if (inverted) renderer.invertScreen();
     // Upright as the reader is held: the held orientation, not the live one a hint strip flips to Portrait mid-draw.
@@ -82,9 +100,11 @@ void ScreenshotUtil::takeScreenshot(GfxRenderer& renderer) {
       LOG_DBG("SCR", "Screenshot saved to %s", filename);
     } else {
       LOG_ERR("SCR", "Failed to save screenshot");
+      return;  // no border: it says the screenshot was saved
     }
   } else {
     LOG_ERR("SCR", "Framebuffer not available");
+    return;
   }
 
   // Display a border around the screen to indicate a screenshot was taken

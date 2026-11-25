@@ -19,9 +19,14 @@ std::string sanitizeFilename(const std::string& name, size_t maxBytes) {
   while (*text != 0) {
     const auto* cpStart = text;
     uint32_t cp = utf8NextCodepoint(&text);
+    // A byte that is not part of a character (a title in Latin-1, as an XTC header can carry): utf8NextCodepoint()
+    // reads it as U+FFFD and steps over it. Copied in, it made a long name that is not UTF-8, which SdFat refuses: a
+    // screenshot named after such a book was lost. A U+FFFD written as one (EF BF BD) stays.
+    const bool notUtf8 = cp == REPLACEMENT_GLYPH &&
+                         !(text - cpStart == 3 && cpStart[0] == 0xEF && cpStart[1] == 0xBF && cpStart[2] == 0xBD);
 
-    if (cp == '/' || cp == '\\' || cp == ':' || cp == '*' || cp == '?' || cp == '"' || cp == '<' || cp == '>' ||
-        cp == '|') {
+    if (notUtf8 || cp == '/' || cp == '\\' || cp == ':' || cp == '*' || cp == '?' || cp == '"' || cp == '<' ||
+        cp == '>' || cp == '|') {
       // Replace illegal and control characters with '_'
       if (result.length() + 1 > maxBytes) break;
       result += '_';

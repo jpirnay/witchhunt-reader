@@ -112,6 +112,7 @@
 #include "util/PluginReaderEvents.h"
 #include "util/ScreenshotUtil.h"
 #include "util/SerialCommandGrammar.h"
+#include "util/ToggleNotice.h"
 #include "util/WakeTrace.h"
 
 // Defined further down (near the other font helpers); declared here because
@@ -6352,6 +6353,17 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     return;
   }
 
+  // A Dark Mode change since the last pass (ActivityManager::applyOutputPolarity() sets it just before this one) owes
+  // the page under the live bars or the footnote sheet, and the overlay over it. A pass with no page due paints only
+  // the overlay, and only when its input marked it stale, so Toggle Dark Mode with either open changed nothing on the
+  // panel. The page is drawn again rather than its frame inverted: its pictures keep their polarity by being drawn
+  // inverted (GfxRenderer::keepsImagePolarity()).
+  const bool inverted = renderer.isOutputInverted();
+  if (inverted != renderedInverted_) {
+    renderedInverted_ = inverted;
+    if (liveOverlayOpen()) liveOverlayPageOwed_ = true;
+  }
+
   // Every render pass redraws the status bar, so a refresh held back for Background-B is paid by
   // this one (cleared before recoverSecondaryBufferIfNeeded, which may end B's borrow).
   statusRefreshDeferred_ = false;
@@ -8487,8 +8499,8 @@ bool EpubReaderActivity::openFootnoteSheet(const size_t link, const bool atLastP
   bool laidOut = false;
   {
     RenderLock lock(*this);
-    // The sheet takes the half of the screen the marker is not in, so the sentence that calls the note stays in view.
-    // A marker the walk does not find (one the page has no word for) leaves it at the bottom.
+    // Where the marker stands, for the sheet to take the other half of the area it is laid out in
+    // (FootnoteSheet::layOut). A marker the walk does not find (one the page has no word for) leaves it at the bottom.
     struct Find {
       size_t link;
       int centre;
@@ -8500,7 +8512,7 @@ bool EpubReaderActivity::openFootnoteSheet(const size_t link, const bool atLastP
           if (found == f.link && f.centre < 0) f.centre = (top + bottom) / 2;
         },
         &find);
-    place.sheetAtTop = find.centre >= renderer.getScreenHeight(renderer.getHeldOrientation()) / 2;
+    place.markerY = find.centre;
     sheet = makeUniqueNoThrow<FootnoteSheet>(renderer, mappedInput, getEffectiveReaderFontId(), entry.number,
                                              TypographyProfile::forLanguage(epub->getLanguage()).hyphenator, place);
     // The reader's font may be a TrueType face, measured only under the lock.
@@ -8509,7 +8521,7 @@ bool EpubReaderActivity::openFootnoteSheet(const size_t link, const bool atLastP
   resumeBackgroundWork();
   if (!laidOut) return false;
   LOG_DBG("ERS", "Footnote sheet for %s: note %u of %u, at the %s", entry.href, place.position + 1u,
-          static_cast<unsigned>(place.count), place.sheetAtTop ? "top" : "bottom");
+          static_cast<unsigned>(place.count), sheet->atTop() ? "top" : "bottom");
   {
     RenderLock lock(*this);
     // Painted over the frame on the panel when that is the page, or an earlier sheet this one covers all of; the page
@@ -9812,6 +9824,8 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
                                  static_cast<int8_t>(getEffectiveBionicReading() ? 0 : 1),
                                  bookParagraphAlignmentOverride);
         requestUpdate();
+        // Over the page laid out again.
+        ToggleNotice::show(StrId::STR_BIONIC_READING, getEffectiveBionicReading(), /*afterFrame=*/true);
       }
       break;
     case BA::BTN_CYCLE_FONT_SIZE:
@@ -9875,6 +9889,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       }
       // The status bar shows the turn while it runs, and its band may lay the page out again.
       requestUpdate();
+      ToggleNotice::show(StrId::STR_AUTO_PAGE_TURN, automaticPageTurnActive, /*afterFrame=*/true);
       break;
     default:
       break;

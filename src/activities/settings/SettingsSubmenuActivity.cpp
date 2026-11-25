@@ -70,7 +70,7 @@ void SettingsSubmenuActivity::toggleCurrentItem() {
     auto selector = createSelectorActivity(setting, renderer, mappedInput);
     if (selector) {
       startActivityForResult(std::move(selector), [this](const ActivityResult&) {
-        if (persistSettingsOnChange) SETTINGS.saveToFile();
+        persistChange();
         needsHalfRefresh = true;
         requestUpdate();
       });
@@ -81,8 +81,14 @@ void SettingsSubmenuActivity::toggleCurrentItem() {
   MenuListActivity::toggleCurrentItem();
 }
 
-void SettingsSubmenuActivity::onSettingToggled(int /*index*/) {
-  if (persistSettingsOnChange) SETTINGS.saveToFile();
+void SettingsSubmenuActivity::onSettingToggled(int /*index*/) { persistChange(); }
+
+void SettingsSubmenuActivity::persistChange() {
+  if (!persistSettingsOnChange) return;
+  // As the Settings screen does: the button and gesture rows live in these submenus, and taking the last key off
+  // Confirm can end Touch Lock (normalizeDependentSettings()).
+  CrossPointSettings::normalizeDependentSettings(SETTINGS);
+  SETTINGS.saveToFile();
 }
 
 void SettingsSubmenuActivity::render(RenderLock&&) {

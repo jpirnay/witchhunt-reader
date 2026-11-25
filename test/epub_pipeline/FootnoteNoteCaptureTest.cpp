@@ -97,6 +97,25 @@ TEST(FootnoteNoteCapture, EscapesWhatXmlReserves) {
   EXPECT_EQ(capture(book, "notes.xhtml#n1"), "Fish &amp; chips &lt;b&gt; are &gt; nothing.");
 }
 
+// A link in the note's own text is its words: only the back-link before them is chrome. Every link used to be, and
+// "See Chapter 4 or www.example.org." showed as "See or .".
+TEST(FootnoteNoteCapture, KeepsTheTextOfALinkInTheNote) {
+  const Book book = openBook("links",
+                             "<p id=\"n1\"><a href=\"chapter.xhtml#r1\">1</a> See <a href=\"chapter.xhtml\">Chapter "
+                             "4</a> or <a href=\"http://www.example.org/\">www.example.org</a>.</p>");
+  EXPECT_EQ(capture(book, "notes.xhtml#n1"), "See Chapter 4 or www.example.org.");
+}
+
+// A back-link at the note's end is chrome when it says what it is (EPUB 3's backlink, ARIA's doc-backlink).
+TEST(FootnoteNoteCapture, DropsABackLinkMarkedAsOne) {
+  const Book book =
+      openBook("backlink",
+               "<p id=\"n1\">The first note. <a href=\"chapter.xhtml#r1\" role=\"doc-backlink\">↩</a></p>"
+               "<p id=\"n2\">The second note. <a href=\"chapter.xhtml#r2\" epub:type=\"backlink\">back</a></p>");
+  EXPECT_EQ(capture(book, "notes.xhtml#n1"), "The first note.");
+  EXPECT_EQ(capture(book, "notes.xhtml#n2"), "The second note.");
+}
+
 TEST(FootnoteNoteCapture, KeepsLineBreaks) {
   const Book book = openBook("breaks", "<p id=\"n1\">Line one<br/>line two</p>");
   EXPECT_EQ(capture(book, "notes.xhtml#n1"), "Line one<br/>line two");

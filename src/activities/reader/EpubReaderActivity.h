@@ -1318,9 +1318,11 @@ class EpubReaderActivity final : public Activity {
   void closeLiveNote();
   // The sheet down, the reader leaving or another screen opening over it. Under RenderLock.
   void dismissLiveNote();
-  // A page is owed under the live bars: a forced refresh asked for one. Cleared by the pass that draws a page
-  // (drawLiveOverlayOverPage). Under RenderLock.
+  // A page is owed under the live bars: a forced refresh asked for one, or a Dark Mode change. Cleared by the pass that
+  // draws a page (drawLiveOverlayOverPage). Under RenderLock.
   bool liveOverlayPageOwed_ = false;
+  // The panel's polarity at the last render pass, to tell a Dark Mode change in the next one (render()). Render task.
+  bool renderedInverted_ = false;
   // The page under the live bars is drawn again once the chapter's build is done: a build still running drew it, its
   // pictures as placeholders, or it was on the panel when the bars opened. Under RenderLock.
   bool liveOverlayRedrawWhenBuilt_ = false;
