@@ -816,6 +816,11 @@ pages kept; one at setup keeps the build from starting:
   their text; refused again, the build stops), a laid-out row's cells (refused, the row's paragraph exit), and a
   fragment's packed rows, asked for the exact count the next push needs (refused, the fragment is flushed and the
   heap asked once more). A lost fragment allocation, which used to drop the packed rows silently, stops the build.
+- A cell laid out as the page's paragraphs (a nested table's cell, a cell's rest after one, a degraded row's cell):
+  no row budget bounds it, as nothing waits for it. It goes out in parts at the main block's split threshold, its last
+  line kept for the words to come (`ChapterHtmlSlimParser::layOutParagraphCell`, as `splitLongBlock`), and each block
+  in it ends its paragraph. A layout table that nests a chapter built the whole chapter up in one cell text, until the
+  C3 refused it a word growth and the build stopped there, everything after the table lost (#832).
 
 Each has a fault-injection host test that walks a refusal over a fixture and checks that nothing aborts and that a
 stopped build keeps its pages, marked truncated, or a refused setup leaves no section file

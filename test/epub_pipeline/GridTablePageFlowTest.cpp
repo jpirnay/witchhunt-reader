@@ -8,6 +8,7 @@
 //    flags read back from them freed an arena address on the heap);
 //  - an <hr> in a cell was drawn in the page's flow, which moved the page down under the packed rows: their fragment
 //    no longer fitted where it had been packed, and an arena build stopped there, the chapter cut at the table.
+// A nested table's cell is laid out as the page's paragraphs instead: in parts, and a paragraph per block in it.
 // Each book is built on the heap and in a lent region of the X3's framebuffer size, at several page heights so that
 // page ends fall across the table. This binary fills a rewound block (BUILD_ARENA_TRACE), so a line used or destroyed
 // after its block was given back aborts it. Both builds must complete, keep every row's words, and lay out alike.
@@ -16,6 +17,7 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -24,6 +26,7 @@
 #include <system_error>
 #include <vector>
 
+#include "../book_metadata_cache/AllocationRefusal.h"
 #include "Epub.h"
 #include "Epub/Page.h"
 #include "Epub/Section.h"
@@ -38,10 +41,21 @@ constexpr size_t kLentFramebufferBytes = 52272;  // the X3's secondary framebuff
 constexpr int kViewportHeights[] = {300, 360, 420, 480, 540, 600, 700, 800};
 
 struct PageText {
-  std::vector<std::string> words;  // the page's lines' and table cells' words, in element order
-  int rules = 0;                   // its PageHR elements
-  bool operator==(const PageText& other) const { return words == other.words && rules == other.rules; }
+  std::vector<std::string> words;       // the page's lines' and table cells' words, in element order
+  std::vector<std::string> lineStarts;  // the first word of each of the page's own lines (a table's are not)
+  int lineMarkers = 0;                  // list markers on the page's own lines
+  int rules = 0;                        // its PageHR elements
+  bool operator==(const PageText& other) const {
+    return words == other.words && lineStarts == other.lineStarts && lineMarkers == other.lineMarkers &&
+           rules == other.rules;
+  }
 };
+
+// A list item's marker as the parser writes it: a bullet, or the item's number and a full stop.
+bool isListMarker(const std::string& word) {
+  return word == "\xe2\x80\xa2" ||
+         (word.size() >= 2 && word.back() == '.' && word.front() >= '0' && word.front() <= '9');
+}
 
 void collectWords(const TextBlock* block, std::vector<std::string>& out) {
   if (!block || !block->valid()) return;
@@ -52,9 +66,13 @@ PageText textOf(const Page& page) {
   PageText text;
   for (const auto& el : page.elements) {
     switch (el->getTag()) {
-      case TAG_PageLine:
+      case TAG_PageLine: {
+        const size_t before = text.words.size();
         collectWords(static_cast<const PageLine&>(*el).getBlock(), text.words);
+        if (text.words.size() > before) text.lineStarts.push_back(text.words[before]);
+        for (size_t w = before; w < text.words.size(); ++w) text.lineMarkers += isListMarker(text.words[w]) ? 1 : 0;
         break;
+      }
       case TAG_PageTable:
         for (const auto& row : static_cast<const PageTableFragment&>(*el).getRows()) {
           for (const auto& cell : row.cells) {
@@ -96,6 +114,27 @@ struct Built {
     int n = 0;
     for (const auto& page : pages) n += page.rules;
     return n;
+  }
+
+  // How often `word` is laid out, in lines and cells.
+  int count(const std::string& word) const {
+    int n = 0;
+    for (const auto& page : pages) n += static_cast<int>(std::count(page.words.begin(), page.words.end(), word));
+    return n;
+  }
+
+  int lineMarkers() const {
+    int n = 0;
+    for (const auto& page : pages) n += page.lineMarkers;
+    return n;
+  }
+
+  // Whether `word` is the first word of one of the pages' own lines.
+  bool startsALine(const std::string& word) const {
+    for (const auto& page : pages) {
+      if (std::find(page.lineStarts.begin(), page.lineStarts.end(), word) != page.lineStarts.end()) return true;
+    }
+    return false;
   }
 };
 
@@ -159,7 +198,7 @@ Built buildAndRead(const std::string& bookPath, const fs::path& cacheDir, const 
   for (int pg = 0; pg < section.pageCount; ++pg) {
     section.currentPage = pg;
     const auto page = section.loadPageFromSectionFile();
-    out.pages.push_back(page ? textOf(*page) : PageText{{"<unreadable>"}, 0});
+    out.pages.push_back(page ? textOf(*page) : PageText{{"<unreadable>"}});
   }
   for (const auto& id : anchors) {
     const auto page = section.getPageForAnchor(id);
@@ -315,6 +354,117 @@ TEST(GridTablePageFlow, AnHrInACellEndsItsWordAndLeavesThePageFlowAlone) {
     EXPECT_EQ(both.arena.rules(), 2);
     // A row's cells stay together: the word after the rule is in its row's fragment.
     for (int r = 0; r < 40; ++r) EXPECT_EQ(both.heap.pageOf(mark(r, 'a')), both.heap.pageOf(mark(r, 'c'))) << r;
+  }
+  std::error_code ec;
+  fs::remove_all(work, ec);
+}
+
+namespace {
+
+// A layout table that nests the chapter: an outer table whose one cell holds an inner table whose one cell holds
+// `inner`. A nested table's cells are never a grid: each is laid out as the page's paragraphs.
+std::string nestedChapter(const std::string& inner) {
+  return "<p>INTRO comes before the table.</p><table><tr><td><table><tr><td>" + inner +
+         "</td></tr></table></td></tr></table><p>OUTRO follows the table.</p>";
+}
+
+// `count` words of running text, a marker word (mark(i, 'w')) opening every tenth.
+std::string runningText(const int count) {
+  std::string out;
+  for (int i = 0; i < count; ++i) out += (i % 10 == 0 ? mark(i / 10, 'w') : std::string("word")) + " ";
+  return out;
+}
+
+// The heap a heap build of the book's chapter peaks at over what was live when it started.
+size_t heapBuildPeak(const std::string& bookPath, const fs::path& cacheDir) {
+  fs::create_directories(cacheDir);
+  auto epub = std::make_shared<Epub>(bookPath, cacheDir.string());
+  EXPECT_TRUE(epub->load(true));
+  epub->setupCacheDir();
+  GfxRenderer renderer;
+  Section::BuildParams p;
+  p.fontId = 0;
+  p.lineCompression = TextScale();
+  p.viewportWidth = 480;
+  p.viewportHeight = 800;
+  p.fontSizeNormalization = false;
+  p.embeddedStyle = false;
+  Section section(epub, 0, renderer);
+  resetHeapPeak();
+  const size_t before = heapLiveBytes();
+  EXPECT_TRUE(section.createSectionFile(p, {}, /*skipEviction=*/true));
+  const size_t peak = heapPeakBytes();
+  return peak > before ? peak - before : 0;
+}
+
+}  // namespace
+
+// A nested cell that holds a chapter's running text goes out in parts as a long paragraph does (the main block's split
+// threshold, its last line kept for the words to come): it never holds the chapter's words at once. It used to build
+// up in one cell text until </td>, until the C3's heap refused it the next word growth and the build stopped there,
+// everything after the table lost.
+TEST(GridTablePageFlow, ANestedCellHoldingAChapterIsLaidOutInParts) {
+  const fs::path work = freshWorkDir("nested_running_text");
+  constexpr int kShortWords = 600;
+  constexpr int kLongWords = 6000;
+  std::string shortBook;
+  std::string longBook;
+  {
+    const auto epub = syntheticBook(work, 0, nestedChapter(runningText(kShortWords)));
+    ASSERT_TRUE(epub);
+    shortBook = epub->getPath();
+  }
+  {
+    const auto epub = syntheticBook(work, 1, nestedChapter(runningText(kLongWords)));
+    ASSERT_TRUE(epub);
+    longBook = epub->getPath();
+  }
+  const size_t shortPeak = heapBuildPeak(shortBook, work / "peak_short");
+  const size_t longPeak = heapBuildPeak(longBook, work / "peak_long");
+  // Ten times the words: in one cell text, ~40 B a token on the host before the layout's own tables.
+  EXPECT_LT(longPeak, shortPeak + 32 * 1024) << "short " << shortPeak << " B, long " << longPeak << " B";
+
+  std::vector<std::string> markers = {"INTRO", "OUTRO"};
+  for (int i = 0; i < kLongWords / 10; ++i) markers.push_back(mark(i, 'w'));
+  for (const int viewportHeight : {360, 800}) {
+    SCOPED_TRACE("viewport " + std::to_string(viewportHeight));
+    const HeapAndArena both = buildBothWays(work, longBook, viewportHeight, {}, markers);
+    for (const Built* built : {&both.heap, &both.arena}) {
+      EXPECT_EQ(built->count("word"), kLongWords - kLongWords / 10) << "every word, once";
+    }
+  }
+  std::error_code ec;
+  fs::remove_all(work, ec);
+}
+
+// The paragraphs of a nested cell stay paragraphs: each starts a line of its own, as it would outside the table. They
+// were one paragraph, run together, the cell's text having no block break in it.
+TEST(GridTablePageFlow, ANestedCellsParagraphsEachStartALine) {
+  const fs::path work = freshWorkDir("nested_paragraphs");
+  constexpr int kParagraphs = 30;
+  std::string inner;
+  std::vector<std::string> markers = {"INTRO", "OUTRO"};
+  for (int i = 0; i < kParagraphs; ++i) {
+    const std::string m = mark(i, 'p');
+    markers.push_back(m);
+    // Short ones end mid-line, where the next one's first word ran on.
+    inner += (i % 2 == 0 ? "<p>" + m + " is short.</p>"
+                         : "<div><p>" + m +
+                               " is a paragraph with words enough to take a few lines of the page.</p>"
+                               "</div>");
+  }
+  std::string bookPath;
+  {
+    const auto epub = syntheticBook(work, 0, nestedChapter(inner));
+    ASSERT_TRUE(epub);
+    bookPath = epub->getPath();
+  }
+  for (const int viewportHeight : kViewportHeights) {
+    SCOPED_TRACE("viewport " + std::to_string(viewportHeight));
+    const HeapAndArena both = buildBothWays(work, bookPath, viewportHeight, {}, markers);
+    for (const Built* built : {&both.heap, &both.arena}) {
+      for (int i = 0; i < kParagraphs; ++i) EXPECT_TRUE(built->startsALine(mark(i, 'p'))) << mark(i, 'p');
+    }
   }
   std::error_code ec;
   fs::remove_all(work, ec);

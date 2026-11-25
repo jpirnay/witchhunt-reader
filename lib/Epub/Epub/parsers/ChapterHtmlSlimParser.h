@@ -433,6 +433,8 @@ class ChapterHtmlSlimParser final : public Print {
   // The token count past which the block splits (flushPartWordBuffer), and the word-array capacity it implies
   // (ParsedText::setSplitCapacity), applied wherever splitKeptTokens_ changes.
   size_t splitThreshold() const;
+  // The same for a text that kept `keptTokens` after its last split (a paragraph cell's: layOutParagraphCell).
+  static size_t splitThresholdAfter(size_t keptTokens);
   void applySplitCapacity();
   static constexpr size_t kRubyGroupSlack = 32;  // tokens the 96-token split may wait for a group
   int rubyDepth_ = -1;                           // the open <ruby>'s depth
@@ -756,6 +758,8 @@ class ChapterHtmlSlimParser final : public Print {
     // Opened by openStreamedCell (a nested table's cell, or a cell's rest after one): never a grid cell, so a second
     // picture streams the cell so far instead of waiting for the one slot.
     bool streamed = false;
+    // Tokens its text kept after the last part of it went out (layOutParagraphCell): the next part's threshold.
+    uint16_t splitKept = 0;
   };
   struct BufferedTableRow {
     std::vector<BufferedTableCell> cells;
@@ -1420,6 +1424,18 @@ class ChapterHtmlSlimParser final : public Print {
   // ParsedText before returning. Shared by the row fallback and the degraded path so both
   // produce identical output. Returns false when the heap guard stopped the parse.
   bool emitCellAsParagraph(BufferedTableCell& cell, bool emitImage);
+  // Lays a cell's text out as the page's lines, all of them or all but the last (includeLastLine), the words of those
+  // leaving the text. A text's first part starts a block in the page's flow; a later one goes on in it. False when the
+  // heap guard stopped the parse.
+  bool layOutCellText(ParsedText& text, bool includeLastLine);
+  // The open cell is laid out as the page's paragraphs, not as a grid cell: a nested table's, a cell's rest after one,
+  // a degraded row's. No row waits for it, and no row budget bounds it.
+  bool paragraphCellOpen() const;
+  // The open paragraph cell's words go to the page: all of them where a block in the cell starts or ends (`whole`), its
+  // text then empty for the next paragraph; else all but its last line's, which go on with the words to come, as a
+  // long block's do (splitLongBlock), once it holds more than the split threshold. A nested table's cell could hold a
+  // chapter in one text, its paragraphs run together (#832). False when the heap guard stopped the parse.
+  bool layOutParagraphCell(bool whole);
   // The pending row's cell list and the fragment's row list grow through these: false when the heap holds no block for
   // the growth, and nothing changed.
   bool reserveRowCell(BufferedTableRow& row);
