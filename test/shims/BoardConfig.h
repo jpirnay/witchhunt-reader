@@ -41,6 +41,9 @@
 #ifndef FREEINK_DEVICE_MURPHY
 #define FREEINK_DEVICE_MURPHY 0
 #endif
+#ifndef FREEINK_DEVICE_METALIO_EINK4_PLUS
+#define FREEINK_DEVICE_METALIO_EINK4_PLUS 0
+#endif
 // Silkscreen was called "de-link" before; the old flag still selects it.
 #if !defined(FREEINK_DEVICE_SILKSCREEN) && defined(FREEINK_DEVICE_DELINK) && FREEINK_DEVICE_DELINK
 #define FREEINK_DEVICE_SILKSCREEN 1
