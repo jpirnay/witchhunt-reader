@@ -2739,6 +2739,29 @@ class PortraitRowBatch {
 
 }  // namespace
 
+namespace {
+// drawGray8Pixel() for each shown sample of a bitmap row, sample i at screen x + scale.apply(i). rotateCoordinates()
+// is affine in x, so the row's panel origin and step are found once instead of a switch and the geometry a pixel.
+void drawGray8Row(const GfxRenderer::Gray8Target& gray8, const GfxRenderer::Orientation orientation,
+                  const int displayWidth, const int displayHeight, const int screenWidth, const uint8_t* samples,
+                  const int count, const ImageScale& scale, const int x, const int screenY) {
+  int originX = 0, originY = 0, nextX = 0, nextY = 0;
+  rotateCoordinates(orientation, 0, screenY, &originX, &originY, displayWidth, displayHeight);
+  rotateCoordinates(orientation, 1, screenY, &nextX, &nextY, displayWidth, displayHeight);
+  const int stepX = nextX - originX;
+  const int stepY = nextY - originY;
+  for (int i = 0; i < count; i++) {
+    const int screenX = scale.apply(i) + x;  // the offset should not be scaled
+    if (screenX >= screenWidth) break;
+    if (screenX < 0) continue;
+    const int phyX = originX + screenX * stepX;
+    const int phyY = originY + screenX * stepY;
+    if (phyX < 0 || phyX >= displayWidth || phyY < 0 || phyY >= displayHeight) continue;
+    gray8.canvas[static_cast<uint32_t>(phyY) * gray8.stride + phyX] = samples[i];
+  }
+}
+}  // namespace
+
 void GfxRenderer::drawGray8Pixel(const Gray8Target& gray8, const int x, const int y, const uint8_t gray) const {
   int phyX = 0;
   int phyY = 0;
@@ -2834,15 +2857,16 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   // Calculate output row size (2 bits per pixel, packed into bytes)
   // IMPORTANT: Use int, not uint8_t, to avoid overflow for images > 1020 pixels wide
   const int outputRowSize = (bitmap.getWidth() + 3) / 4;
-  auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
-  auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
   // One row of 8-bit samples, only when a canvas or level planes are actually
-  // being painted. Stack allocation is not an option: a row is one image width,
+  // being painted, and then the 2-bit row is not made at all (readNextRow() below).
+  // Stack allocation is not an option: a row is one image width,
   // thousands of bytes, and the ESP32-C3 stack budget for a call frame is 256.
   const bool wantsGray8 = gray8 != nullptr || planes != nullptr;
+  auto* outputRow = wantsGray8 ? nullptr : static_cast<uint8_t*>(malloc(outputRowSize));
+  auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
   auto* gray8Row = wantsGray8 ? static_cast<uint8_t*>(malloc(bitmap.getWidth())) : nullptr;
 
-  if (!outputRow || !rowBytes || (wantsGray8 && !gray8Row)) {
+  if ((!wantsGray8 && !outputRow) || !rowBytes || (wantsGray8 && !gray8Row)) {
     LOG_ERR("GFX", "!! Failed to allocate BMP row buffers");
     free(outputRow);
     free(rowBytes);
@@ -2927,7 +2951,8 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       break;
     }
 
-    // Rows are read in file order, so one left off the screen is read all the same.
+    // Rows are read in file order, so one left off the screen is read all the same. A canvas or level planes take the
+    // 8-bit samples alone: the 2-bit row, and the dither that makes it, would go unread.
     if (bitmap.readNextRow(outputRow, rowBytes, gray8Row) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
       batch.flush();  // the rows read so far are drawn, as the per-row path had drawn them
@@ -2986,6 +3011,12 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       }
       continue;
     }
+    if (gray8) {
+      // The whole point of this path: store the sample, let the panel quantise.
+      drawGray8Row(*gray8, orientation, displayWidth, displayHeight, getScreenWidth(), gray8Row + cropPixX, shownWidth,
+                   scale, x, screenY);
+      continue;
+    }
 
     for (int bmpX = cropPixX; bmpX < cropPixX + shownWidth; bmpX++) {
       const int screenX = scale.apply(bmpX - cropPixX) + x;  // the offset should not be scaled
@@ -2996,11 +3027,6 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
         continue;
       }
 
-      if (gray8) {
-        // The whole point of this path: store the sample, let the panel quantise.
-        drawGray8Pixel(*gray8, screenX, screenY, gray8Row[bmpX]);
-        continue;
-      }
       if (planes) {
         drawLevelPlanePixel(*planes, screenX, screenY, gray8Row[bmpX]);
         continue;

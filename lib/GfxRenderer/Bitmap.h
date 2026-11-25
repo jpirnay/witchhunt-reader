@@ -91,8 +91,12 @@ class Bitmap {
   // `gray8Row`, when non-null, ALSO receives the tone-mapped 8-bit luminance of
   // every pixel -- the sample each 2-bit value is quantised from, one byte per
   // pixel, `width` bytes. Panels that resolve more than four levels consume that
-  // instead and quantise for themselves at their own depth. Purely additive: the
-  // 2-bit output and the dither state are byte-for-byte what they were without it.
+  // instead and quantise for themselves at their own depth. With `data` as well, the
+  // 2-bit output and the dither state are byte-for-byte what they are without it.
+  //
+  // `data` may be null when `gray8Row` is not: the samples alone, without the 2-bit row or the dither that makes it
+  // (a canvas or level-plane draw reads nothing else). The dither state is then left as it was; rewindToData()
+  // resets it before any 2-bit draw of the same bitmap.
   BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* gray8Row = nullptr) const;
   BmpReaderError rewindToData() const;
 

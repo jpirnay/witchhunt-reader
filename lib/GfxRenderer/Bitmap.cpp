@@ -357,6 +357,10 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* g
       const int adjusted = adjustPixel(lum);
       gray8Row[currentX] = static_cast<uint8_t>(adjusted < 0 ? 0 : (adjusted > 255 ? 255 : adjusted));
     }
+    if (!data) {  // the samples alone: no 2-bit value to quantise or dither
+      currentX++;
+      return;
+    }
     uint8_t color;
     if (atkinsonDitherer) {
       color = atkinsonDitherer->processPixel(adjustPixel(lum), currentX);
@@ -439,6 +443,7 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* g
     default:
       return BmpReaderError::UnsupportedBpp;
   }
+  if (!data) return BmpReaderError::Ok;
 
   if (atkinsonDitherer)
     atkinsonDitherer->nextRow();
