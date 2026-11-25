@@ -184,6 +184,8 @@ class AtkinsonDitherer {
   }
 
   ~AtkinsonDitherer() { delete[] errorRows; }
+  // False when the error rows could not be had: processPixel() then quantises without diffusing anything.
+  bool active() const { return errorRows != nullptr; }
   // **1. EXPLICITLY DELETE THE COPY CONSTRUCTOR**
   AtkinsonDitherer(const AtkinsonDitherer& other) = delete;
 
@@ -258,6 +260,8 @@ class FloydSteinbergDitherer {
   }
 
   ~FloydSteinbergDitherer() { delete[] errorRows; }
+  // False when the error rows could not be had: processPixel() then quantises without diffusing anything.
+  bool active() const { return errorRows != nullptr; }
 
   // **1. EXPLICITLY DELETE THE COPY CONSTRUCTOR**
   FloydSteinbergDitherer(const FloydSteinbergDitherer& other) = delete;
