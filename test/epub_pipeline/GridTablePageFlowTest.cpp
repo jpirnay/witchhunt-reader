@@ -1,13 +1,14 @@
 // What a table holds stays out of the page's flow while the table's rows wait in the fragment packer. A packed row is
 // laid out for the page in progress -- on an arena build in that page's block of the lent region, which emitting the
-// page rewinds -- and is placed only when its fragment is flushed. Two things inside a table acted on the page while
+// page rewinds -- and is placed only when its fragment is flushed. Three things inside a table acted on the page while
 // rows waited:
 //  - a TOC anchor in a later row (on its <tr> or <td>, or on a block in a cell) took its page break at the next block
 //    in the cell: the page went out without the rows, its block was rewound under them, the next row was laid out over
 //    their bytes, and the fragment was written, and its lines destroyed, from overwritten bytes (a TextBlock's arena
 //    flags read back from them freed an arena address on the heap);
 //  - an <hr> in a cell was drawn in the page's flow, which moved the page down under the packed rows: their fragment
-//    no longer fitted where it had been packed, and an arena build stopped there, the chapter cut at the table.
+//    no longer fitted where it had been packed, and an arena build stopped there, the chapter cut at the table;
+//  - a list in a cell put its markers into the page's block, which laid each out as a line of its own there.
 // A nested table's cell is laid out as the page's paragraphs instead: in parts, and a paragraph per block in it.
 // Each book is built on the heap and in a lent region of the X3's framebuffer size, at several page heights so that
 // page ends fall across the table. This binary fills a rewound block (BUILD_ARENA_TRACE), so a line used or destroyed
@@ -354,6 +355,48 @@ TEST(GridTablePageFlow, AnHrInACellEndsItsWordAndLeavesThePageFlowAlone) {
     EXPECT_EQ(both.arena.rules(), 2);
     // A row's cells stay together: the word after the rule is in its row's fragment.
     for (int r = 0; r < 40; ++r) EXPECT_EQ(both.heap.pageOf(mark(r, 'a')), both.heap.pageOf(mark(r, 'c'))) << r;
+  }
+  std::error_code ec;
+  fs::remove_all(work, ec);
+}
+
+// A list in a cell of every row of a table that spans pages: an item's marker is the cell's text, ahead of the item's
+// first word. It went into the page's block instead, and the next item laid it out as a line of its own in the page's
+// flow, under the rows packed for that page: on an arena build the rows then no longer fitted where they were packed
+// (or the page was emitted from under them), and the build stopped there, the chapter cut at the table.
+TEST(GridTablePageFlow, AListInACellKeepsItsMarkersInTheCell) {
+  const fs::path work = freshWorkDir("list_in_cell");
+  std::string body = "<p>INTRO comes before the table.</p><table>";
+  std::vector<std::string> markers = {"INTRO", "OUTRO"};
+  constexpr int kRows = 40;
+  for (int r = 0; r < kRows; ++r) {
+    const std::string a = mark(r, 'a');
+    const std::string b = mark(r, 'b');
+    const std::string c = mark(r, 'c');
+    markers.insert(markers.end(), {a, b, c});
+    body += "<tr><td><ul><li>" + a + " the first item</li><li>" + c + " the second item</li></ul></td><td><ol><li>" +
+            b + " numbered</li></ol></td></tr>";
+  }
+  body += "</table><p>OUTRO follows the table.</p>";
+  std::string bookPath;
+  {
+    const auto epub = syntheticBook(work, 0, body);
+    ASSERT_TRUE(epub);
+    bookPath = epub->getPath();
+  }
+  for (const int viewportHeight : kViewportHeights) {
+    SCOPED_TRACE("viewport " + std::to_string(viewportHeight));
+    const HeapAndArena both = buildBothWays(work, bookPath, viewportHeight, {}, markers);
+    for (const Built* built : {&both.heap, &both.arena}) {
+      EXPECT_EQ(built->lineMarkers(), 0) << "a marker on a line of the page's own";
+      EXPECT_EQ(built->count("\xe2\x80\xa2"), 2 * kRows) << "each bullet once, in its cell";
+      EXPECT_EQ(built->count("1."), kRows);
+    }
+    // A row's cells stay together, its markers in them.
+    for (int r = 0; r < kRows; ++r) {
+      EXPECT_EQ(both.heap.pageOf(mark(r, 'a')), both.heap.pageOf(mark(r, 'c'))) << r;
+      EXPECT_EQ(both.heap.pageOf(mark(r, 'a')), both.heap.pageOf(mark(r, 'b'))) << r;
+    }
   }
   std::error_code ec;
   fs::remove_all(work, ec);

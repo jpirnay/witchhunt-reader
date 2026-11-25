@@ -2747,9 +2747,16 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
 
 void ChapterHtmlSlimParser::emitPendingListMarker() {
   if (pendingListMarker_[0] == '\0') return;
-  if (currentTextBlock)
-    currentTextBlock->addWord(pendingListMarker_, EpdFontFamily::REGULAR, false, false,
-                              ParsedText::DEFAULT_WORD_SIZE_PCT, placementOffset());
+  // Where the item's words go: in a table cell, the cell's text. In the page's block, the next item laid the marker out
+  // as a line of its own in the page's flow, under the rows packed for the page (an arena build stopped there).
+  if (ParsedText* const target = wordTarget()) {
+    target->addWord(pendingListMarker_, EpdFontFamily::REGULAR, false, false, ParsedText::DEFAULT_WORD_SIZE_PCT,
+                    placementOffset());
+    // A word of a row headed for the grid, charged as flushPartWordBuffer charges one: the item's first word checks.
+    if (target != currentTextBlock.get() && currentTable && !currentTable->degraded && !currentTable->rowDegraded) {
+      currentTable->pendingRowBytes += TABLE_BUFFER_BYTES_PER_WORD;
+    }
+  }
   pendingListMarker_[0] = '\0';
 }
 
