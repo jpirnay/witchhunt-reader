@@ -29,6 +29,7 @@
 #include "Gray8Compose.h"
 #include "ImagePolarity.h"
 #include "ImageScale.h"
+#include "PackedPlaneTiles.h"
 #include "ScaledGlyphResample.h"
 #include "UiShapedText.h"
 
@@ -2517,10 +2518,9 @@ void GfxRenderer::drawIconInverted(const uint8_t bitmap[], const int x, const in
 //   Inner loop: bmpX — reads one 2-bit pixel, writes one bit to the correct physical row.
 //   This eliminates rotateCoordinates(), the bounds-check log, and redundant byte/bit
 //   recomputation from drawPixel(), giving ~2× on the inner loop.
-//   (The 8×8 transpose used for glyphs would give ~8× but requires all rows in RAM
-//   simultaneously; bitmap rows are read sequentially from the BMP file, so they
-//   cannot be buffered for transposition without a separate heap allocation.
-//   The column loop is the practical optimum for the streaming-read model.)
+//   Unscaled, drawBitmap() goes further when it can have eight rows of room (PortraitRowBatch): it keeps the rows
+//   that share a framebuffer byte column and writes them a byte at a time through an 8×8 transpose
+//   (PackedPlaneTiles.h). This column loop stays as the path without that room.
 //
 // =============================================================================
 
@@ -2676,6 +2676,67 @@ class PolarityOnReturn {
   int x_, y_, w_, h_;
 };
 
+// Portrait bitmap rows gathered per framebuffer byte column and drawn eight at a time (PackedPlaneTiles.h): the bits
+// bitmapWritePortraitColumn() (or, on absolute planes, drawPixel()) writes a pixel at a time. Rows of an unscaled draw
+// land on distinct panel columns, so the order they come in (a bottom-up BMP comes last row first) does not matter; a
+// lane met twice is flushed first, so the later row is written later, as the per-pixel paths write it.
+class PortraitRowBatch {
+ public:
+  // Source columns [first, end) are drawn; column `first` lands on physical row phyYFirst, the next phyYStep further.
+  // A row for a physical column outside [0, phyXLimit) draws nothing.
+  PortraitRowBatch(uint8_t* frameBuffer, const int widthBytes, const int phyXLimit, const int rowBytes, uint8_t* lanes,
+                   const packed_plane::Op op, const int first, const int end, const int phyYFirst, const int phyYStep)
+      : frameBuffer_(frameBuffer),
+        widthBytes_(widthBytes),
+        phyXLimit_(phyXLimit),
+        rowBytes_(rowBytes),
+        lanes_(lanes),
+        op_(op),
+        first_(first),
+        end_(end),
+        phyYFirst_(phyYFirst),
+        phyYStep_(phyYStep) {}
+  PortraitRowBatch(const PortraitRowBatch&) = delete;
+  PortraitRowBatch& operator=(const PortraitRowBatch&) = delete;
+
+  // A row whose pixels go to physical column phyX; outside the frame it draws nothing, as the per-pixel path.
+  void add(const uint8_t* row, const int phyX) {
+    if (phyX < 0 || phyX >= phyXLimit_ || first_ >= end_) return;
+    const int byteCol = phyX >> 3;
+    const uint8_t laneBit = static_cast<uint8_t>(0x80u >> (phyX & 7));
+    if (filled_ && (byteCol != byteCol_ || (filled_ & laneBit))) flush();
+    byteCol_ = byteCol;
+    memcpy(lanes_ + static_cast<size_t>(phyX & 7) * rowBytes_, row, rowBytes_);
+    filled_ |= laneBit;
+  }
+
+  void flush() {
+    if (!filled_) return;
+    const uint8_t* rows[8];
+    for (int lane = 0; lane < 8; lane++) {
+      rows[lane] = (filled_ & (0x80u >> lane)) ? lanes_ + static_cast<size_t>(lane) * rowBytes_ : nullptr;
+    }
+    packed_plane::drawByteColumn(rows, rowBytes_, first_, end_,
+                                 frameBuffer_ + static_cast<ptrdiff_t>(phyYFirst_) * widthBytes_ + byteCol_,
+                                 static_cast<ptrdiff_t>(phyYStep_) * widthBytes_, op_);
+    filled_ = 0;
+  }
+
+ private:
+  uint8_t* frameBuffer_;
+  int widthBytes_;
+  int phyXLimit_;
+  int rowBytes_;
+  uint8_t* lanes_;
+  packed_plane::Op op_;
+  int first_;
+  int end_;
+  int phyYFirst_;
+  int phyYStep_;
+  int byteCol_ = 0;
+  uint8_t filled_ = 0;
+};
+
 }  // namespace
 
 void GfxRenderer::drawGray8Pixel(const Gray8Target& gray8, const int x, const int y, const uint8_t gray) const {
@@ -2822,13 +2883,39 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
 
   // Absolute planes carry the whole image rather than a mask over the B/W base,
   // so a value outside this plane's set has to be written CLEAR, not skipped.
-  // The row blitter writes one polarity per call, so the fast path cannot
-  // express that in a single pass; take the per-pixel path instead of paying
-  // four more template instantiations of it in a build already within ~177 KB
-  // of filling its flash partition. Nothing is lost by it: the absolute
-  // waveform this feeds runs for about a second, so the pixel loop is not what
-  // the pass waits on.
+  // bitmapFastRow() writes one polarity per call and cannot express that; the
+  // byte-at-a-time paths below can (WriteLowBit, WriteHighBit), and the
+  // per-pixel loop takes what they do not (a scaled picture, no room for the
+  // batch). Each plane is drawn before the waveform it feeds starts, so its
+  // draw is time the sleep screen waits: an X3 cover's plane took 1.36 s a
+  // pixel at a time and 0.78 s batched, reading and dithering included
+  // (2026-11-25).
   const bool absolutePlanes = renderModeSnapshot != BW && getAbsoluteGrayPlanes();
+
+  // Unscaled rows go out a framebuffer byte at a time instead of a pixel at a time: in portrait a byte column of eight
+  // rows (without the 8 rows of room, the per-row paths below, which draw the same bits), in landscape on absolute
+  // planes eight pixels of a row (the other landscape planes already take bitmapFastRow()'s 8-pixel chunks).
+  const bool portrait = orientation == Portrait || orientation == PortraitInverted;
+  const packed_plane::Op planeOp =
+      renderModeSnapshot == BW ? packed_plane::Op::BlackUnlessWhite
+      : absolutePlanes
+          ? (renderModeSnapshot == GRAYSCALE_LSB ? packed_plane::Op::WriteLowBit : packed_plane::Op::WriteHighBit)
+      : renderModeSnapshot == GRAYSCALE_MSB ? packed_plane::Op::SetAnyGray
+                                            : packed_plane::Op::SetDarkGray;
+  uint8_t* batchLanes = nullptr;
+  if (!wantsGray8 && !isScaled && portrait && frameBuffer) {
+    batchLanes = static_cast<uint8_t*>(malloc(static_cast<size_t>(outputRowSize) * 8));
+  }
+  const bool absoluteRowSpans = !wantsGray8 && !isScaled && absolutePlanes && !portrait && frameBuffer;
+  // The source columns that land on the panel, as the per-pixel paths' bounds decide: in portrait the panel row
+  // (bitmapWritePortraitColumn()'s phyY guard), in landscape the screen width (the per-pixel loop's break).
+  const int shownFirst = std::max(0, -x);
+  const int shownLast = std::min(renderWidth - 1, (portrait ? displayHeight : displayWidth) - 1 - x);
+  // drawPixel() bounds the panel column by displayWidth, the fast path by the frame's bytes: the same on every panel.
+  PortraitRowBatch batch(frameBuffer, widthBytes, absolutePlanes ? displayWidth : widthBytes * 8, outputRowSize,
+                         batchLanes, planeOp, cropPixX + shownFirst, cropPixX + shownLast + 1,
+                         orientation == Portrait ? displayHeight - 1 - x - shownFirst : x + shownFirst,
+                         orientation == Portrait ? -1 : 1);
 
   const int screenHeight = getScreenHeight();
   for (int bmpY = 0; bmpY < bitmap.getHeight(); bmpY++) {
@@ -2843,6 +2930,8 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
     // Rows are read in file order, so one left off the screen is read all the same.
     if (bitmap.readNextRow(outputRow, rowBytes, gray8Row) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
+      batch.flush();  // the rows read so far are drawn, as the per-row path had drawn them
+      free(batchLanes);
       free(outputRow);
       free(rowBytes);
       free(gray8Row);
@@ -2854,6 +2943,23 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
     }
     const int screenY = target.screenY;
 
+    if (batchLanes) {
+      batch.add(outputRow, orientation == Portrait ? screenY : displayWidth - 1 - screenY);
+      continue;
+    }
+    if (absoluteRowSpans) {
+      // Landscape: column c lands on panel x (c - cropPixX) + x counter-clockwise, mirrored clockwise; the panel row is
+      // drawPixel()'s, inside the panel or skipped.
+      const bool ccw = orientation == LandscapeCounterClockwise;
+      const int phyY = ccw ? screenY : displayHeight - 1 - screenY;
+      if (phyY >= 0 && phyY < displayHeight) {
+        packed_plane::drawRowSpan(outputRow, outputRowSize, cropPixX + shownFirst, cropPixX + shownLast + 1,
+                                  frameBuffer + static_cast<ptrdiff_t>(phyY) * widthBytes,
+                                  ccw ? x - cropPixX : displayWidth - 1 - x + cropPixX, ccw ? 1 : -1, displayWidth,
+                                  planeOp);
+      }
+      continue;
+    }
     if (!wantsGray8 && !isScaled && !absolutePlanes && drawMask != 0x00) {
       // Fast path: write up to 8 pixels per call directly to the framebuffer.
       switch (drawMask) {
@@ -2920,6 +3026,8 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
     }
   }
 
+  batch.flush();
+  free(batchLanes);
   free(outputRow);
   free(rowBytes);
   free(gray8Row);
