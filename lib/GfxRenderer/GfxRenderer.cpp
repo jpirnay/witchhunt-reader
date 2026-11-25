@@ -3757,12 +3757,18 @@ bool GfxRenderer::displayGrayLevelPass(const uint8_t pass, const bool lastPass) 
   return display.displayGrayLevelPass(pass, lastPass && fadingFix.load(std::memory_order_relaxed));
 }
 
-void GfxRenderer::displayGray8Canvas() const {
+bool GfxRenderer::displayGray8Canvas() const {
   // A full refresh whatever was asked (the driver forces its clean bank), so it satisfies an armed override too (a
   // book open's HALF), which would otherwise wait for the next refresh and land on the page after.
-  consumeRefreshOverride(HalDisplay::FULL_REFRESH);
+  const unsigned int armed = refreshOverride.exchange(REFRESH_OVERRIDE_NONE, std::memory_order_acq_rel);
+  if (!display.displayGray8Canvas(HalDisplay::FULL_REFRESH, fadingFix)) {
+    // Nothing reached the panel: the override is the fallback refresh's, unless a newer one was armed meanwhile.
+    unsigned int none = REFRESH_OVERRIDE_NONE;
+    if (armed != REFRESH_OVERRIDE_NONE) refreshOverride.compare_exchange_strong(none, armed, std::memory_order_acq_rel);
+    return false;
+  }
   noteRefresh(HalDisplay::FULL_REFRESH);
-  display.displayGray8Canvas(HalDisplay::FULL_REFRESH, fadingFix);
+  return true;
 }
 
 // Bit clear = black is the framebuffer's own convention (see DirectPixelWriter's

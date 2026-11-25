@@ -913,7 +913,8 @@ class GfxRenderer {
   // rectangle to land or the fill is dropped and the light pixels of the text with
   // it. Both buffers are 1-bit-derived, so nothing here is dithered.
   void compositeBwRectOntoGray8Canvas(const Gray8Target& gray8, int x, int y, int width, int height) const;
-  void displayGray8Canvas() const;
+  // False when nothing reached the panel (HalDisplay::displayGray8Canvas()): draw the frame another way.
+  bool displayGray8Canvas() const;
 
   // --- gray-level plans (panels without a canvas: a B/W base, then passes of 1-bit planes) ---
   //

@@ -463,12 +463,16 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
         renderer.clearScreen();
         drawOverlay();
         renderer.stampBwOntoGray8Canvas(canvas, canvasStride);
-        renderer.displayGray8Canvas();
-        LOG_INF("SLP", "Sleep image rendered at %u levels: %s", static_cast<unsigned>(renderer.getGrayLevels()),
-                filename.c_str());
-        return true;
+        if (renderer.displayGray8Canvas()) {
+          LOG_INF("SLP", "Sleep image rendered at %u levels: %s", static_cast<unsigned>(renderer.getGrayLevels()),
+                  filename.c_str());
+          return true;
+        }
+        LOG_ERR("SLP", "The panel refused the %u-level image, drawing 4 levels: %s",
+                static_cast<unsigned>(renderer.getGrayLevels()), filename.c_str());
+      } else {
+        LOG_DBG("SLP", "Native grayscale sleep decode failed, falling back: %s", filename.c_str());
       }
-      LOG_DBG("SLP", "Native grayscale sleep decode failed, falling back: %s", filename.c_str());
     }
   }
 
@@ -1078,11 +1082,16 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
       if (overlayRectHeight > 0) {
         renderer.compositeBwRectOntoGray8Canvas(target, 0, overlayRectY, pageWidth, overlayRectHeight);
       }
-      renderer.displayGray8Canvas();
-      LOG_INF("SLP", "Sleep bitmap rendered at %u levels", static_cast<unsigned>(renderer.getGrayLevels()));
-      return;
+      if (renderer.displayGray8Canvas()) {
+        LOG_INF("SLP", "Sleep bitmap rendered at %u levels", static_cast<unsigned>(renderer.getGrayLevels()));
+        return;
+      }
+      // Nothing was drawn (the X4 Pro without PSRAM for its planes): the previous screen is still up.
+      LOG_ERR("SLP", "The panel refused the %u-level bitmap, drawing 4 levels",
+              static_cast<unsigned>(renderer.getGrayLevels()));
+    } else {
+      LOG_ERR("SLP", "No gray8 canvas, drawing 4 levels");
     }
-    LOG_ERR("SLP", "No gray8 canvas, drawing 4 levels");
     redrawTwoBit();
   }
 

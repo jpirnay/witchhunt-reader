@@ -64,7 +64,8 @@ class HalStorage {
   bool usbDriveExternalPower(bool& known) const;
 
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
-  // Read the entire file at `path` into a String. Returns empty string on failure.
+  // Read the entire file at `path` into a String. Returns an empty string on failure, which includes a file larger
+  // than 50,000 bytes: it is never returned cut short.
   String readFile(const char* path);
   // Low-memory helpers:
   // Stream the file contents to a `Print` (e.g. `Serial`, or any `Print`-derived object).
