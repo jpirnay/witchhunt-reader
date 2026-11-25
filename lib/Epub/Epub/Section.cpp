@@ -39,7 +39,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 132;  // v132: in a table, a TOC anchor breaks the page only before the
+constexpr uint8_t SECTION_FILE_VERSION = 133;  // v133: an inline id between blocks names the next block's first
+                                               // line; a nested or degraded table's cell is laid out in parts and a
+                                               // paragraph per block in it; a list marker in a cell is the cell's
+                                               // v132: in a table, a TOC anchor breaks the page only before the
                                                // first packed row, and an <hr> draws no rule: both acted on the
                                                // page under the packed rows (an arena build corrupted or cut them)
                                                // v131: the header's line compression is TextScale (2^-20ths in a
