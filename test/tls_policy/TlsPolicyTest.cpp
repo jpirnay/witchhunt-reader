@@ -100,6 +100,28 @@ TEST(TlsPolicy, OnlyACertificateFailureIsRetriedUnverified) {
       crosspoint::retryUnverified(planTls(TlsPolicy::Strict, false, false), VerifiedConnectFailure::Certificate));
 }
 
+// The plugin relay's request carries what the page gives it. A password grant sends its secret in the body with no
+// header, and a cross-origin 307 or 308 keeps the body while the page drops the headers: judged by the headers alone,
+// either went over the unverified fallback. A body, or a method that acts on the server, is a credential too.
+TEST(TlsPolicy, ABodyOrAWriteIsACredential) {
+  using crosspoint::requestCarriesCredentials;
+  EXPECT_FALSE(requestCarriesCredentials("GET", false, false));
+  EXPECT_FALSE(requestCarriesCredentials("HEAD", false, false));
+  EXPECT_FALSE(requestCarriesCredentials("get", false, false));  // methods compare without case
+  EXPECT_TRUE(requestCarriesCredentials("GET", true, false));    // an Authorization header, a cookie
+  EXPECT_TRUE(requestCarriesCredentials("POST", false, true));   // a password grant's form
+  EXPECT_TRUE(requestCarriesCredentials("GET", false, true));    // a body is a body, whatever the method
+  for (const char* method : {"POST", "PUT", "PATCH", "DELETE", "OPTIONS", "MKCOL", "PROPFIND", "MOVE", "COPY"}) {
+    EXPECT_TRUE(requestCarriesCredentials(method, false, false)) << method;
+  }
+  EXPECT_TRUE(requestCarriesCredentials("", false, false));  // no method named: not taken for a read
+  // What planTls() then makes of the relay's policy.
+  EXPECT_TRUE(same(planTls(TlsPolicy::VerifiedThenUnverified, false, requestCarriesCredentials("POST", false, true)),
+                   kVerifyOnly));
+  EXPECT_TRUE(same(planTls(TlsPolicy::VerifiedThenUnverified, false, requestCarriesCredentials("GET", false, false)),
+                   kVerifyThenFallBack));
+}
+
 // --- UnverifiableHosts ---------------------------------------------------------------------------
 
 TEST(UnverifiableHosts, RemembersHostsWithoutRegardToCase) {

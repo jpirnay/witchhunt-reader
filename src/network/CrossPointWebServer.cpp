@@ -3706,8 +3706,9 @@ void CrossPointWebServer::handleRelay() {
 // by Arthur Tazhitdinov), so plugins written for upstream run: any method PluginRelay allows, the caller's headers
 // and body, and the answer's status in X-Relay-Status, its headers in X-Relay-Headers (a JSON list of [name, value]
 // pairs) and its body streamed. A 3xx comes back as it is, not followed. Unlike upstream, the host must still be one
-// the plugin may reach (requireReachable(): its manifest, or the user's approval), a request carrying headers is a
-// credentialed one (TLS verified, no fallback), and only an application/json POST is taken (requireJsonBody()).
+// the plugin may reach (requireReachable(): its manifest, or the user's approval), a request carrying headers or a
+// body, or one that is not a GET or HEAD, is a credentialed one (TLS verified, no fallback:
+// crosspoint::requestCarriesCredentials()), and only an application/json POST is taken (requireJsonBody()).
 void CrossPointWebServer::handleRelayPost() {
   if (rejectIfLowMemory(server.get())) return;
   if (!requireJsonBody(server.get())) return;
@@ -4078,9 +4079,9 @@ void CrossPointWebServer::handleFetchToSd() {
 // hold all of it in browser memory; for a cover that is merely wasteful, for a book it is prohibitive.
 //
 // Same fence as the relay - the plugin's allowed hosts, redirects only within them - plus the write target must pass
-// pluginWriteTarget(). Headers make the download a credentialed one (TLS verified, no fallback). A GET goes through
-// downloadToFile(), Range chunks on a tight heap included; another method, or a body, is sent once and its answer
-// streamed to the file.
+// pluginWriteTarget(). Headers, a body or a method other than GET make the download a credentialed one (TLS verified,
+// no fallback). A GET goes through downloadToFile(), Range chunks on a tight heap included; another method, or a body,
+// is sent once and its answer streamed to the file.
 void CrossPointWebServer::fetchToSd(const String& plugin, const std::string& url, const String& dest,
                                     const HttpDownloader::Headers& headers, const std::string& method,
                                     const std::string& body) {

@@ -148,8 +148,8 @@ function makePluginApi(p) {
     // Fetch a URL the browser cannot reach itself, via the device, from a host this plugin may reach.
     //   relay(url): GET, redirects followed within those hosts; resolves to a Response.
     //   relay(method, url, headers, body): upstream's form; resolves to {status, headers: [[name, value]...],
-    //   body} with the body as text, and a 3xx comes back unfollowed. Headers make the request a credentialed
-    //   one: the device verifies the server's certificate.
+    //   body} with the body as text, and a 3xx comes back unfollowed. Headers, a body or a method other than
+    //   GET and HEAD make the request a credentialed one: the device verifies the server's certificate.
     relay: async (...args) => {
       if (args.length <= 1) {
         const url = args[0];

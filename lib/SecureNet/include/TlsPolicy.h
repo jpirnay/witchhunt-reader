@@ -38,8 +38,17 @@ struct TlsPlan {
 };
 
 // skipValidation: the user's "Skip HTTPS validation (risky)" setting. sendsCredentials: the request
-// carries a username or a password, or comes from a server entry that has either.
+// carries a username or a password, or comes from a server entry that has either, or
+// requestCarriesCredentials() says so.
 TlsPlan planTls(TlsPolicy policy, bool skipValidation, bool sendsCredentials);
+
+// Whether a request whose headers and body its caller passes on (the plugin relay, fetch-to-SD) is a
+// credentialed one: it has headers (an Authorization, a cookie), a body (a password grant's form, a
+// WebDAV PUT's file), or a method other than GET and HEAD, which acts on the server on the user's
+// behalf. Judged by the headers alone, a password grant with none, or a body the page sent on after
+// dropping the headers at a cross-origin 307 or 308, went over the unverified fallback. Methods
+// compare without case.
+bool requestCarriesCredentials(std::string_view method, bool hasHeaders, bool hasBody);
 
 // What one https hop of a request does: a redirect can lead to another server, so SecureHttpClient
 // decides this at each connect, for the server that connect reaches. The request's plan, except:

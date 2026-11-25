@@ -86,7 +86,7 @@ heading shows an untitled card.
 | `dir` | the plugin's own folder, e.g. `/.crosspoint/plugins/<name>`. A plugin may keep its settings and token there: `writeFile` writes inside it, and `/download?path=<dir>/<file>` reads a file back, though the folder is hidden from every listing |
 | `pluginFile(filename)` | URL for another file in this plugin's folder |
 | `relay(url)` | GET a URL the browser cannot reach itself; resolves to a `Response`, redirects followed within the hosts the plugin may reach. See below |
-| `relay(method, url, headers, body)` | upstream's form: any of GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS and the WebDAV methods; `headers` an object; resolves to `{status, headers: [[name, value], ...], body}` with the body as text. A 3xx comes back unfollowed, with its `Location`. Headers make the request a credentialed one: the server's certificate must verify |
+| `relay(method, url, headers, body)` | upstream's form: any of GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS and the WebDAV methods; `headers` an object; resolves to `{status, headers: [[name, value], ...], body}` with the body as text. A 3xx comes back unfollowed, with its `Location`. Headers, a body or a method other than GET and HEAD make the request a credentialed one: the server's certificate must verify |
 | `fetchToSd(url, dest, headers, {method, body})` | download straight to the card, one transfer instead of two; `headers`, `method` and `body` optional. Resolves to `{ok, complete, status, bytes, dest}` |
 | `writeFile(path, data)` | write one small file (≤64KB) where `/upload` may write or in the plugin's own folder; `data` is base64 when a string (upstream's API), or a Blob or ArrayBuffer |
 | `registerAction(name, fn)` | accepted and ignored with a console warning: there is no job queue here |
@@ -148,12 +148,13 @@ Plugins written for upstream crosspoint-reader declare no `allowedHosts`, so
 this is how they reach their services.
 
 The relay and `/api/fetch` check the server's certificate against the reader's
-roots. A request without headers goes on unverified when that fails, as an OPDS
-catalog without a login does, so such a response is no more trustworthy than
+roots. A GET or HEAD without headers goes on unverified when that fails, as an
+OPDS catalog without a login does, so such a response is no more trustworthy than
 plain http: treat it as untrusted input, and never put a token or other secret
-in a URL. A request with headers (an `Authorization` header, a cookie) is a
-credentialed one and fails instead; a self-hosted server with a self-signed
-certificate needs Settings' "Skip HTTPS validation".
+in a URL. A request with headers (an `Authorization` header, a cookie), a body
+(a password grant's form) or another method is a credentialed one and fails
+instead; a self-hosted server with a self-signed certificate needs Settings'
+"Skip HTTPS validation".
 
 ```jsonc
 {

@@ -89,10 +89,11 @@ crosspoint::UnverifiableHosts g_unverifiableHosts;
 // user's "skip HTTPS validation" setting -- the escape hatch for self-hosted servers with a private
 // CA or a self-signed certificate, which Strict ignores by design -- and, for
 // VerifiedThenUnverified, whether the request carries credentials (a username or a password,
-// whether or not Basic auth would send them).
+// whether or not Basic auth would send them, or what `carriesCredentials` says: headers, a body).
 crosspoint::TlsPlan tlsPlanFor(const HttpDownloader::TlsPolicy tls, const std::string& username,
-                               const std::string& password, const bool sendsHeaders = false) {
-  return crosspoint::planTls(tls, SETTINGS.skipHttpsValidation, sendsHeaders || !username.empty() || !password.empty());
+                               const std::string& password, const bool carriesCredentials = false) {
+  return crosspoint::planTls(tls, SETTINGS.skipHttpsValidation,
+                             carriesCredentials || !username.empty() || !password.empty());
 }
 
 // Modem sleep parks the radio between DTIM beacons, which costs packets on a transfer long
@@ -419,7 +420,9 @@ int HttpDownloader::request(const char* method, const std::string& url, const He
   const WifiPowerSaveGuard psGuard;
   logPreCallContext(url);
   crosspoint::SecureHttpClient http;
-  const crosspoint::TlsPlan plan = tlsPlanFor(tls, "", "", !headers.empty());
+  // A body or a write is a credential as much as a header: a password grant sends its secret in the body.
+  const crosspoint::TlsPlan plan =
+      tlsPlanFor(tls, "", "", crosspoint::requestCarriesCredentials(method, !headers.empty(), !body.empty()));
   http.setCACert(plan.verify ? CROSSPOINT_ROOTS_PEM : nullptr);
   http.setAllowInsecureFallback(plan.fallbackOnVerifyError);
   http.setUnverifiableHosts(&g_unverifiableHosts);

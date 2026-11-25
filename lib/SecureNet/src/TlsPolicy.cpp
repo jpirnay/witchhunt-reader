@@ -20,6 +20,19 @@ TlsPlan planTls(const TlsPolicy policy, const bool skipValidation, const bool se
   return {true, false};
 }
 
+bool requestCarriesCredentials(const std::string_view method, const bool hasHeaders, const bool hasBody) {
+  if (hasHeaders || hasBody) return true;
+  const auto is = [method](const std::string_view read) {
+    if (method.size() != read.size()) return false;
+    for (size_t i = 0; i < read.size(); i++) {
+      const char c = method[i];
+      if ((c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c) != read[i]) return false;
+    }
+    return true;
+  };
+  return !is("GET") && !is("HEAD");
+}
+
 TlsPlan planHop(const TlsPlan& request, const bool hopSendsCredentials, const bool peerUnverifiable) {
   if (!request.fallbackOnVerifyError) return request;
   if (hopSendsCredentials) return {request.verify, false};

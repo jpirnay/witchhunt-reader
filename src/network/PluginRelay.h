@@ -8,8 +8,8 @@
 // and request headers a plugin may send, and the response headers it gets back. Upstream crosspoint-reader's plugin
 // API (#3114, Justin Mitchell, and later PRs) defines the wire contract: a plugin calls api.relay(method, url,
 // headers, body) and receives {status, headers: [[name, value], ...], body}. Unlike upstream, the host must still be
-// one the plugin may reach (its manifest's allowedHosts, or one the user approved), and a request carrying headers is
-// a credentialed one, so TLS is verified.
+// one the plugin may reach (its manifest's allowedHosts, or one the user approved), and a request carrying headers or a
+// body, or one that is not a GET or HEAD, is a credentialed one, so TLS is verified.
 //
 // Pure, so the host tests check the rules without a network.
 namespace PluginRelay {

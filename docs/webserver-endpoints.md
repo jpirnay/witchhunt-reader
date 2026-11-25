@@ -1086,7 +1086,8 @@ The relay plugins written for upstream crosspoint-reader use. Body (`application
 - Answer: `200`, the upstream status in `X-Relay-Status`, its headers in `X-Relay-Headers` (a JSON list of
   `[name, value]` pairs, UTF-8, at most 3 KB: headers past that are left out), the body streamed (at most
   4 MB). A 3xx is returned as it is, not followed. `502` when the request failed before an answer.
-- With headers the request is a credentialed one: the certificate must verify.
+- With headers, a body, or a method other than GET and HEAD the request is a credentialed one: the certificate must
+  verify.
 
 ### GET/POST `/api/plugins/hosts` - Hosts Approved for Plugins
 
@@ -1112,8 +1113,9 @@ curl -X POST "http://crosspoint.local/api/fetch?plugin=my-plugin&url=https%3A%2F
 
 Upstream's form takes the same fields as an `application/json` body, with optional `headers` (an object),
 `method` and `body`: `{"plugin": ..., "url": ..., "dest": ..., "headers": {"Authorization": "Bearer ..."}}`.
-Headers make the download a credentialed one (the certificate must verify). A GET goes through the same chunked
-download as the query form; another method, or a body, is sent once and its answer written to the file.
+Headers, a body or a method other than GET make the download a credentialed one (the certificate must verify). A
+GET goes through the same chunked download as the query form; another method, or a body, is sent once and its answer
+written to the file.
 
 Same host rules as `/api/relay`. `dest` is normalised, so `..`
 cannot climb above the card root, must name a file (not `/` and no trailing `/`), and is
