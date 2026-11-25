@@ -29,9 +29,13 @@ struct SourceStamp {
   uint16_t time = 0;  // FAT modify time
 };
 
-// "SPS1", then size, date and time, little-endian as the chip and the host store them.
+// "SPS2", then size, date and time, little-endian as the chip and the host store them.
+//
+// The magic's digit is also the version of what a sleep cache holds, the one the .pxc header cannot carry: bump it when
+// that changes, and every cache of an earlier one is deleted on its next read and decoded again. 2: Equalize on the X4
+// Pro and the Picco had cached the 16-level curve dithered to four levels, which bands (SleepEqualizeBlend.h).
 constexpr size_t kBytes = 12;
-constexpr char kMagic[4] = {'S', 'P', 'S', '1'};
+constexpr char kMagic[4] = {'S', 'P', 'S', '2'};
 
 inline void encode(const SourceStamp& stamp, uint8_t* out) {
   memcpy(out, kMagic, sizeof(kMagic));

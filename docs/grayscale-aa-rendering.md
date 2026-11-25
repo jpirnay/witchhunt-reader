@@ -485,9 +485,11 @@ levels (`quantizeGray4()`, `lib/GfxRenderer/BitmapHelpers.h`). Atkinson carries 
 settles on a pure level wherever `4*gray - 3*feedback` falls in that level's band. When a panel's levels do not sit at
 0/85/170/255, thresholds alone cannot fix the tone: the feedback has to say where the levels really are.
 `HalCapabilities::imageGray4Levels()` holds each panel's thresholds and feedback, and `setupDisplayAndFonts()` seeds
-`quantizeGray4()` with them. A board not measured keeps the old table (thresholds 30/50/140 over even feedback), and
-pictures in books keep the untuned midpoints (`quantizeGray4Level()`). Measured on the gray-lab stand through a
-reference card, error against an even lightness ramp between the panel's own black and white, mean / worst L*:
+`quantizeGray4()` with them. A panel not measured keeps the old table (thresholds 30/50/140 over even feedback),
+an X4 with a UC8179 or UC8279 among them: a table goes by the controller as well as the board
+(`imageGray4LevelsFor()`). Pictures in books keep the untuned midpoints (`quantizeGray4Level()`). Measured on the
+gray-lab stand through a reference card, error against an even lightness ramp between the panel's own black and white,
+mean / worst L*:
 
 | Panel | Old table | Own table |
 |---|---|---|
@@ -524,8 +526,9 @@ and #223 (Katie Paxton-Fear), with each panel's own doses (`lut/Uc8179Gray16Luts
 
 **Limits.** X4 Pro units with SSD1677 or UC8279 keep four levels. PNG sleep images stay at four levels on the X4 Pro
 and the Picco: the PNG decoder paints the canvas only in builds where `HalDisplay::kMayLendGray8Canvas` (the T5S3),
-and elsewhere draws into the framebuffer, which the canvas path clears. Pictures in books do not use the canvas there
-either.
+and elsewhere draws into the framebuffer, which the canvas path clears. So their Equalize filter takes the four-level
+strength there, not the 16-level panel's (`SleepEqualizeBlend::forPng`): the deep curve bands at four levels. Pictures
+in books do not use the canvas there either.
 
 **Gray-level plans, compiled out.** A panel with no memory for a canvas (the C3 boards) is to take more than four
 levels as data: `gray_levels::Plan` (`lib/hal/GrayLevelPlan.h`), a B/W base and passes of 1-bit planes chosen by

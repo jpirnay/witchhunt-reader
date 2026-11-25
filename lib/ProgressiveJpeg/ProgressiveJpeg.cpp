@@ -611,10 +611,15 @@ Result indexStep(State<C>& st, IndexCursor& ic, const DecodeOptions& options, co
       // the first one or the last refinement (every scan it records is a luma DC scan). No later
       // scan touches luma DC, and what follows is AC data the session skips, so the index ends
       // here -- a file whose first scan completes DC is read no further than that scan.
+      // A scan that touches no luma is not recorded, so with none recorded yet there is nothing to
+      // judge: scans[0] is then a default Scan, whose Al of 0 ended the index before the luma DC scan
+      // of a file whose first scan is chroma DC alone (a jpegtran scan script can put it first).
       if constexpr (C::kDcOnly) {
-        if (st.scanCount > 0 && st.scans[st.scanCount - 1].al == 0) break;
-        // DecodeOptions::firstDcScanOnly: the first scan suffices when it lacks at most one bit.
-        if (options.firstDcScanOnly && st.scans[0].al <= 1) break;
+        if (st.scanCount > 0) {
+          if (st.scans[st.scanCount - 1].al == 0) break;
+          // DecodeOptions::firstDcScanOnly: the first scan suffices when it lacks at most one bit.
+          if (options.firstDcScanOnly && st.scans[0].al <= 1) break;
+        }
       }
       if (src.at(p) < 0) break;
       continue;
