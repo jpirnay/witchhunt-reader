@@ -526,8 +526,9 @@ and #223 (Katie Paxton-Fear), with each panel's own doses (`lut/Uc8179Gray16Luts
 
 **Limits.** X4 Pro units with SSD1677 or UC8279 keep four levels. PNG sleep images stay at four levels on the X4 Pro
 and the Picco: the PNG decoder paints the canvas only in builds where `HalDisplay::kMayLendGray8Canvas` (the T5S3),
-and elsewhere draws into the framebuffer, which the canvas path clears. Pictures in books do not use the canvas there
-either.
+and elsewhere draws into the framebuffer, which the canvas path clears. So their Equalize filter takes the four-level
+strength there, not the 16-level panel's (`SleepEqualizeBlend::forPng`): the deep curve bands at four levels. Pictures
+in books do not use the canvas there either.
 
 **Gray-level plans, compiled out.** A panel with no memory for a canvas (the C3 boards) is to take more than four
 levels as data: `gray_levels::Plan` (`lib/hal/GrayLevelPlan.h`), a B/W base and passes of 1-bit planes chosen by

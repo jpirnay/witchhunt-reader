@@ -30,6 +30,7 @@
 #include "../reader/XtcReaderActivity.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "SleepEqualizeBlend.h"
 #include "SleepImagePlacement.h"
 #include "SleepPixelCacheStamp.h"
 #include "components/UITheme.h"
@@ -204,13 +205,10 @@ BitmapToneMapping sleepImageToneMapping() {
   }
 }
 
-// Equalization strength for a sleep image, chosen by how the image will actually
-// reach the panel. The conservative default exists because a four-level target
-// breaks a flattened gradient into dither banding; a target that resolves more
-// has the range to use a stronger curve, and measurably wants one.
+// Equalization strength for a sleep BMP, chosen by how it will actually reach the
+// panel (SleepEqualizeBlend.h). A sleep PNG goes another way: SleepEqualizeBlend::forPng.
 int sleepEqualizeBlend(const GfxRenderer& renderer) {
-  const bool deep = renderer.getGrayLevels() > 4 || renderer.grayLevelPlan() != nullptr;
-  return deep ? adaptive_tone::EQ_BLEND_NUM_DEEP : adaptive_tone::EQ_BLEND_NUM;
+  return SleepEqualizeBlend::forBmp(renderer.getGrayLevels(), renderer.grayLevelPlan() != nullptr);
 }
 
 // Ships the BW base of a grey sleep image, ahead of its LSB/MSB planes.
@@ -382,8 +380,9 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   // the grey planes layered on top. Skipped entirely on a cache hit.
   const BitmapToneMapping pngToneMapping = sleepImageToneMapping();
   if (!useCache && pngToneMapping != BitmapToneMapping::None) {
-    config.adaptiveTone = PngToFramebufferConverter::analyzeAdaptiveTone(filename, toneAnalysisMode(pngToneMapping),
-                                                                         sleepEqualizeBlend(renderer));
+    config.adaptiveTone = PngToFramebufferConverter::analyzeAdaptiveTone(
+        filename, toneAnalysisMode(pngToneMapping),
+        SleepEqualizeBlend::forPng(HalDisplay::kMayLendGray8Canvas, renderer.getGrayLevels()));
   }
   // Write the cache on the decoding pass only; the filter is already part of the
   // cache filename, and the source stamp goes on once the decode has written it.

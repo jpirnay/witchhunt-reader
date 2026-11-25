@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 
 #include "SleepPixelCacheStamp.h"
@@ -76,6 +77,23 @@ TEST(SleepPixelCacheStamp, TrailingBytesOfAnotherKindAreNoStamp) {
   cache.write(junk.data(), junk.size());
   EXPECT_FALSE(sleep_pixel_cache::matches(cache, kPixelBytes, SourceStamp{}, kHeaderBytes))
       << "zero bytes are not a stamp of an empty file dated 0";
+}
+
+// A cache stamped by an earlier version holds pixels this one would not draw: "SPS1" caches from the X4 Pro and the
+// Picco took the 16-level Equalize curve into four levels. It is not replayed, whatever file it was decoded from.
+TEST(SleepPixelCacheStamp, AStampOfAnEarlierVersionNeverMatches) {
+  HalFile cache = decodedCache();
+  const SourceStamp source = stamp(48213, 0x5B37, 0x6C2A);
+  uint8_t version1[sleep_pixel_cache::kBytes] = {'S', 'P', 'S', '1'};
+  memcpy(version1 + 4, &source.size, sizeof(source.size));
+  memcpy(version1 + 8, &source.date, sizeof(source.date));
+  memcpy(version1 + 10, &source.time, sizeof(source.time));
+  cache.write(version1, sizeof(version1));
+  EXPECT_FALSE(sleep_pixel_cache::matches(cache, kPixelBytes, source, kHeaderBytes));
+
+  HalFile current = decodedCache();
+  ASSERT_TRUE(sleep_pixel_cache::append(current, kPixelBytes, source));
+  EXPECT_TRUE(sleep_pixel_cache::matches(current, kPixelBytes, source, kHeaderBytes)) << "control: the same stamp now";
 }
 
 // The stamp goes on a cache the decode has just finished, exactly once.
