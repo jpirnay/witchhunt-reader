@@ -107,3 +107,77 @@ TEST(ClockAuthority, EverySourceHasALogName) {
     EXPECT_STRNE(clock_authority::describe(source), "unknown");
   }
 }
+
+// ---- The loan floor (HalClock::loanNow()) ----
+
+namespace {
+using clock_authority::loanFloorAfterNtp;
+using clock_authority::loanTime;
+using clock_authority::raisedLoanFloor;
+using clock_authority::raisesLoanFloor;
+
+constexpr int64_t kFloor = kNov2026 - 86400;       // the latest time seen: a day ago
+constexpr int64_t k2099 = 4070908800;              // 2099-01-01, a year a browser set by mistake
+constexpr int64_t kBefore2025 = 1700000000;        // 2023: below the floor's window, a clock never set
+constexpr int64_t kPast2100 = 4102444800 + 86400;  // past the window: a fault, not a date
+constexpr bool kClientTime = true;
+}  // namespace
+
+// Only a clock from NTP or the hardware RTC, or one that descends from either, raises the floor: never a hotspot
+// client's browser time, nor anything saved or written to the RTC since one was applied.
+TEST(LoanFloor, OnlyTrustedClocksRaiseIt) {
+  EXPECT_TRUE(raisesLoanFloor(Source::Ntp, !kClientTime));
+  EXPECT_TRUE(raisesLoanFloor(Source::Ntp, kClientTime));  // NTP is the time again
+  for (const Source source :
+       {Source::HardwareRtc, Source::SleepEstimate, Source::NvsRestore, Source::NvsStaleRestore}) {
+    EXPECT_TRUE(raisesLoanFloor(source, !kClientTime));
+    EXPECT_FALSE(raisesLoanFloor(source, kClientTime));
+  }
+  EXPECT_FALSE(raisesLoanFloor(Source::Client, !kClientTime));
+  EXPECT_FALSE(raisesLoanFloor(Source::Client, kClientTime));
+  EXPECT_FALSE(raisesLoanFloor(Source::Unset, !kClientTime));
+}
+
+TEST(LoanFloor, RisesOnlyForward) {
+  EXPECT_EQ(raisedLoanFloor(kFloor, Source::Ntp, kNov2026, !kClientTime), kNov2026);
+  EXPECT_EQ(raisedLoanFloor(kFloor, Source::HardwareRtc, kNov2026, !kClientTime), kNov2026);
+  // A clock behind the floor (an NVS restore after power-off) leaves it.
+  EXPECT_EQ(raisedLoanFloor(kFloor, Source::NvsRestore, kFloor - 3600, !kClientTime), kFloor);
+  // Implausible clocks leave it: never set, or a fault.
+  EXPECT_EQ(raisedLoanFloor(kFloor, Source::HardwareRtc, kBefore2025, !kClientTime), kFloor);
+  EXPECT_EQ(raisedLoanFloor(kFloor, Source::HardwareRtc, kPast2100, !kClientTime), kFloor);
+  EXPECT_EQ(raisedLoanFloor(0, Source::Ntp, kNov2026, !kClientTime), kNov2026);  // the first time seen
+}
+
+// The incident: a browser's wrong year in hotspot mode, then a sleep, expired every loan until NVS was erased.
+TEST(LoanFloor, AClientsWrongYearDoesNotStick) {
+  // The client's time itself, and the clocks that descend from it after the sleep.
+  EXPECT_EQ(raisedLoanFloor(kFloor, Source::Client, k2099, !kClientTime), kFloor);
+  EXPECT_EQ(raisedLoanFloor(kFloor, Source::SleepEstimate, k2099, kClientTime), kFloor);
+  EXPECT_EQ(raisedLoanFloor(kFloor, Source::HardwareRtc, k2099, kClientTime), kFloor);
+  // While that clock runs, a loan is judged by it (the clock is never earlier than the floor), and once it is put
+  // right the floor is where it was.
+  EXPECT_EQ(loanTime(kFloor, k2099), k2099);
+  EXPECT_EQ(loanTime(kFloor, kNov2026), kNov2026);
+}
+
+// A floor left in the future by an older build (or a wrong RTC) is put right by the next NTP sync.
+TEST(LoanFloor, NtpSetsTheFloorEitherWay) {
+  EXPECT_EQ(loanFloorAfterNtp(k2099, kNov2026), kNov2026);   // lowered
+  EXPECT_EQ(loanFloorAfterNtp(kFloor, kNov2026), kNov2026);  // raised
+  EXPECT_EQ(loanFloorAfterNtp(0, kNov2026), kNov2026);
+  EXPECT_EQ(loanFloorAfterNtp(kFloor, kBefore2025), kFloor);  // an implausible answer changes nothing
+  EXPECT_EQ(loanFloorAfterNtp(kFloor, kPast2100), kFloor);
+}
+
+// A clock set back cannot reopen an ended loan: the floor holds. No plausible time at all: 0, the loan's date cannot be
+// judged.
+TEST(LoanFloor, LoanTimeIsTheClockNeverEarlierThanTheFloor) {
+  EXPECT_EQ(loanTime(kFloor, kFloor - 30 * 86400), kFloor);
+  EXPECT_EQ(loanTime(kFloor, kNov2026), kNov2026);
+  EXPECT_EQ(loanTime(0, kNov2026), kNov2026);
+  EXPECT_EQ(loanTime(kFloor, kBefore2025), kFloor);
+  EXPECT_EQ(loanTime(kFloor, kPast2100), kFloor);
+  EXPECT_EQ(loanTime(0, kBefore2025), 0);
+  EXPECT_EQ(loanTime(kBefore2025, 0), 0);  // a stored floor outside the window is no time either
+}

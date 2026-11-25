@@ -26,6 +26,10 @@ Background for the items below. The endpoints are in [webserver-endpoints.md](..
   `HalClock::loanNow()` (NVS `cptime/floor`), the reader's messages, `POST /api/book-key`, `deviceId`. Cost on the C3:
   +18,114 B flash, +312 B static RAM. The key and the plugin's licence (`<book>.epub.rights`, which it derives the key
   from again after a flash erase) move and go with their book (`SidecarFiles`, #858), as upstream's do.
+  The loan floor rises only from a clock that came from NTP or the hardware RTC (or was saved from one), never from a
+  hotspot client's browser time: NVS `halclock/clienttime` marks such a time until the next NTP sync, since it also
+  reaches the RTC and the epochs saved at sleep. An NTP sync sets the floor to its own time, lowering one a wrong clock
+  left in the future (`clock_authority::raisedLoanFloor()`, `loanFloorAfterNtp()`, test/clock_authority).
 - #828: `/api/files` lists a dot folder named by its path whatever **Show Hidden Files** says.
 - D3 (#857): `POST /api/crypto` (upstream's handler, #3114, on the SDK's `WolfsslCrypto`, only that file built:
   `lib/PluginCrypto`), `api.crypto` in the plugin host, wolfSSL with its RSA private-key paths, password-based

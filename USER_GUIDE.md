@@ -955,6 +955,10 @@ EPUB.
 - The key belongs to this reader: the same card does not open the book in another reader.
 - A loan stops opening when it ends. A reader that has not had the date since it was reset asks for one Wi-Fi
   connection before it opens a loan.
+- Setting the clock back does not reopen an ended loan: the reader remembers the latest date it had from the internet
+  or its clock chip. A date a browser gives it in hotspot mode is used only while it is set and is not remembered, so a
+  computer with the wrong year cannot end your loans for good; if one did on an older firmware, the next Wi-Fi
+  connection puts it right.
 - When a protected book does not open, the reader says why (no key, another reader's key, the loan has ended, no
   date, a book it cannot read) and goes back.
 - Moving or deleting the book on the reader moves or deletes its key and licence with it.
